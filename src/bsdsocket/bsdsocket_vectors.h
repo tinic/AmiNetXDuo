@@ -21,10 +21,17 @@
 #include <sys/mbuf.h>
 #include <net/route.h>
 
-/* The shared stub every unimplemented slot points at: sets errno to ENOSYS
- * and returns -1.  Never NULL -- a jump through a NULL LVO takes the machine
- * down, and Tier-3 vectors do get called by stock Roadshow tools. */
+/* The shared stubs every unimplemented slot points at: they set errno to
+ * ENOSYS and return the "failed" value for their shape.  Never NULL in the
+ * table -- a jump through a NULL LVO takes the machine down, and Tier-3
+ * vectors do get called by stock Roadshow tools.
+ *
+ * Two of them because the shapes differ: a vector documented to return a
+ * pointer must return NULL on failure, not -1.  Its callers test for NULL and
+ * then dereference, so a -1 stub turns "unimplemented" into a guru inside the
+ * application. */
 LONG bsd_enosys(register struct AmiSocketBase *SocketBase __asm("a6"));
+APTR bsd_enosys_ptr(register struct AmiSocketBase *SocketBase __asm("a6"));
 
 /* LVO -0x01e */
 LONG bsd_socket(register LONG domain __asm("d0"),

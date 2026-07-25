@@ -148,11 +148,12 @@ static ULONG    b_failures;
 static ULONG    b_started;      /* E-Clock at the first measurement */
 
 /*
- * Timings are kept in E-Clock ticks and in nanoseconds-per-operation.  The
- * handshake composition at the end adds them up, so they have to survive being
- * summed: nanoseconds in a ULONG tops out at 4.29 seconds, which an RSA-2048
- * private op on a 68020 may well exceed.  Microseconds it is -- 4295 seconds
- * of headroom, and still 1000x finer than anything measured here.
+ * Results are held in MICROSECONDS per operation, not nanoseconds.  The
+ * handshake composition at the end sums them, so they have to survive being
+ * added up: nanoseconds in a ULONG top out at 4.29 seconds, and a measured
+ * RSA-2048 private operation on the floor target is 158 of them.  Microseconds
+ * give 4295 seconds of headroom and are still 1000x finer than the E-Clock's
+ * 1.4 us tick.
  */
 #define B_MAX_RESULTS   24
 
@@ -788,10 +789,6 @@ static VOID b_bench_ecdsa(VOID)
 {
 
 UINT                        status;
-ULONG                       start;
-ULONG                       ticks;
-ULONG                       n;
-ULONG                       i;
 VOID                       *handler = NX_CRYPTO_NULL;
 NX_CRYPTO_EC               *curve = NX_CRYPTO_NULL;
 NX_CRYPTO_EC_POINT          public_point;

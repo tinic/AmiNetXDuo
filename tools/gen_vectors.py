@@ -72,6 +72,15 @@ IMPLEMENTED = {
     "gethostname", "gethostid",
 }
 
+# Return types that are pointers without saying so with a '*'.  A stub for one
+# of these has to return NULL, not -1 (see bsd_enosys_ptr in errno.c).
+POINTER_TYPEDEFS = {"STRPTR", "CONST_STRPTR", "APTR", "BPTR", "CONST_APTR"}
+
+
+def returns_pointer(ret):
+    return ret is not None and (ret.endswith("*") or ret in POINTER_TYPEDEFS)
+
+
 AMICALL_RE = re.compile(
     r"#pragma\s+amicall\s*\(\s*SocketBase\s*,\s*0x([0-9a-fA-F]+)\s*,\s*"
     r"(\w+)\s*\(([^)]*)\)\s*\)")
@@ -211,10 +220,17 @@ HEADER_PREAMBLE = """\
 #include <sys/mbuf.h>
 #include <net/route.h>
 
-/* The shared stub every unimplemented slot points at: sets errno to ENOSYS
- * and returns -1.  Never NULL -- a jump through a NULL LVO takes the machine
- * down, and Tier-3 vectors do get called by stock Roadshow tools. */
+/* The shared stubs every unimplemented slot points at: they set errno to
+ * ENOSYS and return the "failed" value for their shape.  Never NULL in the
+ * table -- a jump through a NULL LVO takes the machine down, and Tier-3
+ * vectors do get called by stock Roadshow tools.
+ *
+ * Two of them because the shapes differ: a vector documented to return a
+ * pointer must return NULL on failure, not -1.  Its callers test for NULL and
+ * then dereference, so a -1 stub turns "unimplemented" into a guru inside the
+ * application. */
 LONG bsd_enosys(register struct AmiSocketBase *SocketBase __asm("a6"));
+APTR bsd_enosys_ptr(register struct AmiSocketBase *SocketBase __asm("a6"));
 
 """
 
@@ -283,7 +299,7 @@ def emit(by_offset, outdir, check=False):
         s.append("    (APTR)%s,\n" % entry)
     s.append("\n")
 
-    implemented = stubbed = 0
+    implemented = stubbed = stubbed_ptr = 0
     for offset in range(FIRST_USER_OFFSET, last + 1, VECTOR_STRIDE):
         entry = by_offset.get(offset)
         index = offset // VECTOR_STRIDE - 1
@@ -292,10 +308,15 @@ def emit(by_offset, outdir, check=False):
                      % (" " * 20, offset, index))
             stubbed += 1
             continue
-        name = entry[0]
+        name, ret = entry[0], entry[1]
         if name in IMPLEMENTED:
             target = "bsd_%s" % name
             implemented += 1
+        elif returns_pointer(ret):
+            # Documented to return a pointer, so the stub must return NULL.
+            target = "bsd_enosys_ptr"
+            stubbed += 1
+            stubbed_ptr += 1
         else:
             target = "bsd_enosys"
             stubbed += 1
@@ -309,8 +330,9 @@ def emit(by_offset, outdir, check=False):
     named = len(by_offset)
     total = (last - FIRST_USER_OFFSET) // VECTOR_STRIDE + 1
     summary = ("%d ABI vectors (%d named, %d reserved/private), "
-               "%d implemented, %d stubbed"
-               % (total, named, total - named, implemented, stubbed))
+               "%d implemented, %d stubbed (%d of them NULL-returning)"
+               % (total, named, total - named, implemented, stubbed,
+                  stubbed_ptr))
     source = source.replace(" * SPDX-License-Identifier: MIT",
                             " * Coverage: %s.\n *\n * SPDX-License-Identifier: MIT"
                             % summary, 1)

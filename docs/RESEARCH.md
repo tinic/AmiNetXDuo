@@ -741,6 +741,53 @@ Consequences of decision 4 worth stating plainly, since it is the widest of the 
 - `ipf_*` (Roadshow's private packet filter) remains out of scope — it is undocumented
   beyond its vector offsets and nothing outside Roadshow's own tools calls it.
 
+### M9 gate result (2026-07-25): TLS is NOT viable on the 68020 floor
+
+The §9 decision made TLS conditional on a 68020 benchmark. It has been run, on-Amiga,
+with a **real TLS 1.2 handshake** completing between an `nx_secure` client and server
+(`TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256`, 38/38 checks):
+
+| | 68020 |
+|---|---|
+| **Full handshake, connect → first encrypted record** | **185.5 s** |
+| RSA-2048 private, no CRT / CRT | 158.0 s / 44.4 s |
+| RSA-2048 public | 1.98 s |
+| ECDHE P-256 shared secret | 5.18 s |
+| ECDSA P-256 verify | 6.97 s |
+| SHA-256 / AES-128-CBC, 1 KB | 23.2 ms / 21.9 ms |
+| AES-128-**GCM**, 1 KB | 344.6 ms |
+
+`nx_secure` compiles clean for m68k (361/361 files, ~208 KB linked) and works — it is
+simply too slow as a transparent socket layer. **Offload (`catalyst`, `AmiSSL-Tunnel`)
+is the realistic path for the floor target.** Note the 185 s figure has client *and*
+server on one CPU; a **client-only** handshake derives to **~13–20 s**, since a client
+never performs the private-key operation. That is inside a typical server timeout, so a
+deliberate "fetch this URL" operation is defensible where a transparent socket is not.
+
+Findings worth keeping regardless of whether TLS ships:
+
+- **`nx_secure` uses RSA CRT on only one path** — `NX_CRYPTO_SET_PRIME_P` appears solely
+  in `nx_secure_process_client_key_exchange.c`; the ECDHE_RSA ServerKeyExchange signature
+  and `send_certificate_verify` pass the full 2048-bit private exponent. A measured
+  **3.6×** penalty, on a server path we would only hit if we ever act as a server.
+- **AES-GCM is 20× slower than AES-CBC**, because `nx_crypto_gcm.c`'s GHASH is a
+  bit-serial GF(2¹²⁸) multiply. TLS 1.3 mandates AEAD, so **TLS 1.3 is impractical as
+  shipped**. A 4-bit table-driven GHASH would be ~20–30×.
+- **`nx_secure` has no ChaCha20-Poly1305** (verified: no source files, no ciphersuite
+  entries). That is the AEAD a 68k would want — ChaCha20 is pure ARX with no multiplies —
+  so making TLS 1.3 practical means *writing* it, not just tuning GHASH.
+- **ECDSA P-256 verify is 3.5× slower than RSA-2048 verify** here, inverting the usual
+  modern advice: prefer RSA certificate chains on this hardware. The industry's drift
+  toward ECDSA certificates therefore works against us.
+- **`NX_RAND` is undefined**, so `nx_api.h` falls back to newlib `rand()` — a 32-bit LCG —
+  to generate ECDHE private keys and the client random. **A shipping blocker for any real
+  TLS use**, independent of speed.
+
+Toolchain landmine found here, relevant project-wide: this toolchain ships a **zero-byte
+`libgcc.a`** and nothing exports `__udivdi3`, so any link pulling in 64-bit division
+fails. `src/tls/tls_udivdi3.c` supplies it with a 68020 `divu.l` fast path and should
+move to `src/common/` when a second component needs it.
+
 ### Still open (lower stakes, decide during implementation)
 
 - Does `usergroup.library` ship as a real user database or as the usual single-user stub

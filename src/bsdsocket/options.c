@@ -148,8 +148,13 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
                     return -1;
                 if ((sock->as_Flags & ASF_TCP) != 0 && value > 0)
+                {
+                    if (bsd_nx_enter(SocketBase) != 0)
+                        return bsd_fail(SocketBase, AMI_ENETDOWN);
                     nx_tcp_socket_receive_queue_max_set(&sock->as_Nx.tcp,
                                                         (UINT)(value / 1024 + 1));
+                    bsd_nx_leave(SocketBase);
+                }
                 return 0;
 
             case SO_SNDBUF:
@@ -195,7 +200,10 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                     return -1;
                 if ((sock->as_Flags & ASF_TCP) == 0)
                     return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+                if (bsd_nx_enter(SocketBase) != 0)
+                    return bsd_fail(SocketBase, AMI_ENETDOWN);
                 nx_tcp_socket_mss_set(&sock->as_Nx.tcp, (ULONG)value);
+                bsd_nx_leave(SocketBase);
                 return 0;
 
             default:
@@ -318,8 +326,12 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
                 return bsd_opt_get_long(SocketBase, optval, optlen, 1);
 
             case TCP_MAXSEG:
-                if ((sock->as_Flags & ASF_TCP) != 0)
+                if ((sock->as_Flags & ASF_TCP) != 0 &&
+                    bsd_nx_enter(SocketBase) == 0)
+                {
                     nx_tcp_socket_mss_get(&sock->as_Nx.tcp, &mss);
+                    bsd_nx_leave(SocketBase);
+                }
                 return bsd_opt_get_long(SocketBase, optval, optlen, (LONG)mss);
 
             default:
@@ -383,22 +395,22 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
                     available = length - sock->as_RxOffset;
             }
 
-            if ((sock->as_Flags & ASF_TCP) != 0)
+            if (bsd_nx_enter(SocketBase) != 0)
+                return bsd_fail(SocketBase, AMI_ENETDOWN);
+
             {
                 ULONG queued = 0;
+                UINT  status;
 
-                if (nx_tcp_socket_bytes_available(&sock->as_Nx.tcp, &queued)
-                        == NX_SUCCESS)
+                status = ((sock->as_Flags & ASF_TCP) != 0)
+                    ? nx_tcp_socket_bytes_available(&sock->as_Nx.tcp, &queued)
+                    : nx_udp_socket_bytes_available(&sock->as_Nx.udp, &queued);
+
+                if (status == NX_SUCCESS)
                     available += queued;
             }
-            else
-            {
-                ULONG queued = 0;
 
-                if (nx_udp_socket_bytes_available(&sock->as_Nx.udp, &queued)
-                        == NX_SUCCESS)
-                    available += queued;
-            }
+            bsd_nx_leave(SocketBase);
 
             *(LONG *)argp = (LONG)available;
             return 0;
@@ -511,7 +523,12 @@ LONG bsd_Dup2Socket(register LONG old_socket __asm("d0"),
     if (victim != NULL)
     {
         bsd_fd_free(SocketBase, new_socket);
-        bsd_socket_release(SocketBase, victim);
+
+        if (bsd_nx_enter(SocketBase) == 0)
+        {
+            bsd_socket_release(SocketBase, victim);
+            bsd_nx_leave(SocketBase);
+        }
     }
 
     SocketBase->sb_Table[new_socket] = sock;

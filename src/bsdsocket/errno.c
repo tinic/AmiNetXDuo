@@ -241,6 +241,21 @@ LONG bsd_enosys(register struct AmiSocketBase *SocketBase __asm("a6"))
     return bsd_fail(SocketBase, AMI_ENOSYS);
 }
 
+APTR bsd_enosys_ptr(register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    /*
+     * The same, for the vectors that return a pointer. -1 in d0 is not a
+     * failure there: getservbyname(), getprotobyname(), ObtainInterfaceList(),
+     * mbuf_get() and the rest are all documented to return NULL, and callers
+     * test for NULL. Handing them 0xFFFFFFFF makes the *caller* crash on the
+     * first dereference, which is precisely the failure mode a dense stub
+     * table exists to avoid.
+     */
+    (VOID)bsd_fail(SocketBase, AMI_ENOSYS);
+
+    return NULL;
+}
+
 /* -------------------------------------------------- SocketBaseTagList() ---- */
 
 #define SBT_RO  0       /* query only */

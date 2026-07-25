@@ -132,12 +132,26 @@ static AmiSocket *bsd_socket_alloc(struct AmiSocketBase *base,
     return sock;
 }
 
-/* Tear the NetX Duo socket down; safe to call more than once. */
-static VOID bsd_socket_destroy(AmiSocket *sock)
+/*
+ * Tear the NetX Duo socket down; safe to call more than once.
+ *
+ * Returns TRUE only when NetX Duo has actually let go of the control block --
+ * i.e. when the caller may hand the memory back to the allocator. This is not
+ * bookkeeping pedantry: nx_tcp_socket_delete() links every live socket into
+ * ip->nx_ip_tcp_created_sockets_ptr, and freeing a socket that is still on
+ * that list means the next nx_tcp_socket_create() walks a freed-and-reused
+ * address. It reports NX_PTR_ERROR (EFAULT) and TCP socket() is dead for the
+ * lifetime of the process.
+ */
+static BOOL bsd_socket_destroy(AmiSocket *sock)
 {
+    UINT status;
+
+    if ((sock->as_Flags & ASF_ORPHANED) != 0)
+        return FALSE;                   /* already known to be un-deletable */
+
     if ((sock->as_Flags & ASF_DELETED) != 0)
-        return;
-    sock->as_Flags |= ASF_DELETED;
+        return TRUE;
 
     if (sock->as_RxPending != NULL)
     {
@@ -154,20 +168,42 @@ static VOID bsd_socket_destroy(AmiSocket *sock)
                                            NX_IP_PERIODIC_RATE
                                          : NX_NO_WAIT);
 
-        if ((sock->as_Flags & ASF_INCOMING) != 0)
+        /*
+         * Give the port back. A socket that came off a listen port is
+         * released with unaccept() whether or not it was ever accepted --
+         * nx_tcp_client_socket_unbind() does not know about listen state, and
+         * leaving it bound makes the delete below return NX_STILL_BOUND.
+         */
+        if ((sock->as_Flags & ASF_SERVER) != 0)
             nx_tcp_server_socket_unaccept(&sock->as_Nx.tcp);
         else if ((sock->as_Flags & ASF_NXBOUND) != 0)
             nx_tcp_client_socket_unbind(&sock->as_Nx.tcp);
 
-        nx_tcp_socket_delete(&sock->as_Nx.tcp);
+        status = nx_tcp_socket_delete(&sock->as_Nx.tcp);
     }
     else
     {
         if ((sock->as_Flags & ASF_NXBOUND) != 0)
             nx_udp_socket_unbind(&sock->as_Nx.udp);
 
-        nx_udp_socket_delete(&sock->as_Nx.udp);
+        status = nx_udp_socket_delete(&sock->as_Nx.udp);
     }
+
+    /* NX_NOT_CREATED means it was never on the created list, so the memory is
+       ours either way. Anything else means NetX Duo still points at it. */
+    if (status != NX_SUCCESS && status != NX_NOT_CREATED)
+    {
+        sock->as_Flags |= ASF_ORPHANED;
+        AMI_WARN("bsdsocket: %s_socket_delete refused (%ld); leaking %ld bytes "
+                 "rather than corrupting the created list",
+                 ((sock->as_Flags & ASF_TCP) != 0) ? "nx_tcp" : "nx_udp",
+                 (long)status, (long)sizeof(AmiSocket));
+        return FALSE;
+    }
+
+    sock->as_Flags |= ASF_DELETED;
+
+    return TRUE;
 }
 
 VOID bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock)
@@ -200,13 +236,13 @@ VOID bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock)
     /* A listening socket owns the spare parked on the port. */
     if (sock->as_Incoming != NULL)
     {
-        bsd_socket_destroy(sock->as_Incoming);
-        ami_free(sock->as_Incoming);
+        if (bsd_socket_destroy(sock->as_Incoming))
+            ami_free(sock->as_Incoming);
         sock->as_Incoming = NULL;
     }
 
-    bsd_socket_destroy(sock);
-    ami_free(sock);
+    if (bsd_socket_destroy(sock))
+        ami_free(sock);
 }
 
 VOID bsd_close_all(struct AmiSocketBase *base)
@@ -215,6 +251,15 @@ VOID bsd_close_all(struct AmiSocketBase *base)
 
     if (base->sb_Table == NULL)
         return;
+
+    /* One bracket for the lot: this runs from CloseLibrary(), where the whole
+       table goes at once and adopting per socket would be pure overhead. */
+    if (bsd_nx_enter(base) != 0)
+    {
+        AMI_WARN("bsdsocket: CloseLibrary with the kernel down; "
+                 "sockets left to the stack teardown");
+        return;
+    }
 
     for (fd = 0; fd < base->sb_TableSize; fd++)
     {
@@ -226,6 +271,8 @@ VOID bsd_close_all(struct AmiSocketBase *base)
         base->sb_Table[fd] = NULL;
         bsd_socket_release(base, sock);
     }
+
+    bsd_nx_leave(base);
 }
 
 /* -------------------------------------------------------- sockaddr helpers */
@@ -303,6 +350,12 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_ENOBUFS);
 
+    if (bsd_nx_enter(SocketBase) != 0)
+    {
+        ami_free(sock);
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
+    }
+
     if (type == SOCK_STREAM)
     {
         status = nx_tcp_socket_create(ip, &sock->as_Nx.tcp, bsd_tcp_name,
@@ -319,6 +372,7 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
 
     if (status != NX_SUCCESS)
     {
+        bsd_nx_leave(SocketBase);
         ami_free(sock);
         return bsd_fail(SocketBase, bsd_errno_from_nx(status));
     }
@@ -328,10 +382,13 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
     fd = bsd_fd_alloc(SocketBase, sock);
     if (fd < 0)
     {
-        bsd_socket_destroy(sock);
-        ami_free(sock);
+        if (bsd_socket_destroy(sock))
+            ami_free(sock);
+        bsd_nx_leave(SocketBase);
         return bsd_fail(SocketBase, AMI_EMFILE);
     }
+
+    bsd_nx_leave(SocketBase);
 
     return fd;
 }
@@ -342,8 +399,8 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
               register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
-    ULONG      addr;
-    UINT       port;
+    ULONG      addr = 0;
+    UINT       port = 0;
     UINT       status;
 
     if (sock == NULL)
@@ -360,13 +417,21 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
 
     if ((sock->as_Flags & ASF_UDP) != 0)
     {
+        if (bsd_nx_enter(SocketBase) != 0)
+            return bsd_fail(SocketBase, AMI_ENETDOWN);
+
         status = nx_udp_socket_bind(&sock->as_Nx.udp,
                                     (port != 0) ? port : NX_ANY_PORT,
                                     NX_NO_WAIT);
         if (status != NX_SUCCESS)
+        {
+            bsd_nx_leave(SocketBase);
             return bsd_fail(SocketBase, bsd_errno_from_nx(status));
+        }
 
         nx_udp_socket_port_get(&sock->as_Nx.udp, &port);
+        bsd_nx_leave(SocketBase);
+
         sock->as_LocalPort = port;
         sock->as_Flags |= ASF_NXBOUND;
     }
@@ -422,17 +487,24 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
     if (incoming == NULL)
         return bsd_fail(SocketBase, AMI_ENOBUFS);
 
+    if (bsd_nx_enter(SocketBase) != 0)
+    {
+        ami_free(incoming);
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
+    }
+
     status = nx_tcp_socket_create(ip, &incoming->as_Nx.tcp, bsd_tcp_name,
                                   NX_IP_NORMAL, NX_FRAGMENT_OKAY,
                                   NX_IP_TIME_TO_LIVE, BSD_TCP_WINDOW,
                                   NX_NULL, NX_NULL);
     if (status != NX_SUCCESS)
     {
+        bsd_nx_leave(SocketBase);
         ami_free(incoming);
         return bsd_fail(SocketBase, bsd_errno_from_nx(status));
     }
 
-    incoming->as_Flags     |= ASF_INCOMING;
+    incoming->as_Flags     |= ASF_INCOMING | ASF_SERVER;
     incoming->as_Parent     = sock;
     incoming->as_LocalPort  = sock->as_LocalPort;
     bsd_events_attach(incoming);
@@ -442,10 +514,13 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
                                          (UINT)backlog, bsd_listen_callback);
     if (status != NX_SUCCESS)
     {
-        nx_tcp_socket_delete(&incoming->as_Nx.tcp);
-        ami_free(incoming);
+        if (bsd_socket_destroy(incoming))
+            ami_free(incoming);
+        bsd_nx_leave(SocketBase);
         return bsd_fail(SocketBase, bsd_errno_from_nx(status));
     }
+
+    bsd_nx_leave(SocketBase);
 
     sock->as_Incoming   = incoming;
     sock->as_ListenPort = sock->as_LocalPort;
@@ -478,21 +553,34 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
 
     incoming = sock->as_Incoming;
 
+    if (bsd_nx_enter(SocketBase) != 0)
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
+
     status = nx_tcp_server_socket_accept(
         &incoming->as_Nx.tcp,
         bsd_wait_option(sock, sock->as_RcvTimeout));
 
     if (status == NX_NOT_CONNECTED || status == NX_IN_PROGRESS ||
         status == NX_NO_PACKET)
+    {
+        bsd_nx_leave(SocketBase);
         return bsd_fail(SocketBase, AMI_EWOULDBLOCK);
+    }
 
     if (status == NX_WAIT_ABORTED)
+    {
+        bsd_nx_leave(SocketBase);
         return bsd_fail(SocketBase, AMI_EINTR);
+    }
 
     if (status != NX_SUCCESS)
+    {
+        bsd_nx_leave(SocketBase);
         return bsd_fail(SocketBase, bsd_errno_from_nx(status));
+    }
 
-    /* Promote the parked socket to a descriptor of its own. */
+    /* Promote the parked socket to a descriptor of its own. ASF_SERVER stays
+     * set: the port still has to go back through unaccept() at close. */
     incoming->as_Flags &= ~(ASF_INCOMING | ASF_ACCEPTPEND);
     incoming->as_Flags |= ASF_CONNECTED | ASF_BOUND;
     incoming->as_Parent = NULL;
@@ -516,6 +604,8 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
         incoming->as_Flags |= ASF_INCOMING;
         incoming->as_Parent = sock;
 
+        bsd_nx_leave(SocketBase);
+
         return bsd_fail(SocketBase, AMI_EMFILE);
     }
 
@@ -533,7 +623,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
                                       NX_NULL, NX_NULL);
         if (status == NX_SUCCESS)
         {
-            spare->as_Flags    |= ASF_INCOMING;
+            spare->as_Flags    |= ASF_INCOMING | ASF_SERVER;
             spare->as_Parent    = sock;
             spare->as_LocalPort = sock->as_ListenPort;
             bsd_events_attach(spare);
@@ -553,8 +643,8 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
             }
             else
             {
-                nx_tcp_socket_delete(&spare->as_Nx.tcp);
-                ami_free(spare);
+                if (bsd_socket_destroy(spare))
+                    ami_free(spare);
                 AMI_WARN("bsdsocket: relisten failed, status %ld", (LONG)status);
             }
         }
@@ -564,6 +654,8 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
         }
     }
 
+    bsd_nx_leave(SocketBase);
+
     if (addr != NULL && addrlen != NULL)
         bsd_sockaddr_out(addr, addrlen, incoming->as_PeerAddr,
                          incoming->as_PeerPort);
@@ -571,21 +663,11 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
     return fd;
 }
 
-LONG bsd_connect(register LONG sock_fd          __asm("d0"),
-                 register struct sockaddr *name __asm("a0"),
-                 register socklen_t namelen     __asm("d1"),
-                 register struct AmiSocketBase *SocketBase __asm("a6"))
+/* The body of connect(), run inside a ThreadX context bracket. */
+static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
+                               AmiSocket *sock, ULONG addr, UINT port)
 {
-    AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
-    ULONG      addr;
-    UINT       port;
-    UINT       status;
-
-    if (sock == NULL)
-        return bsd_fail(SocketBase, AMI_EBADF);
-
-    if (bsd_sockaddr_in(SocketBase, name, namelen, &addr, &port) != 0)
-        return -1;
+    UINT status;
 
     if ((sock->as_Flags & ASF_UDP) != 0)
     {
@@ -676,6 +758,32 @@ LONG bsd_connect(register LONG sock_fd          __asm("d0"),
     return bsd_fail(SocketBase, bsd_errno_from_nx(status));
 }
 
+LONG bsd_connect(register LONG sock_fd          __asm("d0"),
+                 register struct sockaddr *name __asm("a0"),
+                 register socklen_t namelen     __asm("d1"),
+                 register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
+    ULONG      addr = 0;
+    UINT       port = 0;
+    LONG       result;
+
+    if (sock == NULL)
+        return bsd_fail(SocketBase, AMI_EBADF);
+
+    if (bsd_sockaddr_in(SocketBase, name, namelen, &addr, &port) != 0)
+        return -1;
+
+    if (bsd_nx_enter(SocketBase) != 0)
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+    result = bsd_connect_locked(SocketBase, sock, addr, port);
+
+    bsd_nx_leave(SocketBase);
+
+    return result;
+}
+
 LONG bsd_shutdown(register LONG sock_fd __asm("d0"),
                   register LONG how     __asm("d1"),
                   register struct AmiSocketBase *SocketBase __asm("a6"))
@@ -702,7 +810,14 @@ LONG bsd_shutdown(register LONG sock_fd __asm("d0"),
          */
         if ((sock->as_Flags & (ASF_TCP | ASF_CONNECTED)) ==
             (ASF_TCP | ASF_CONNECTED))
+        {
+            if (bsd_nx_enter(SocketBase) != 0)
+                return bsd_fail(SocketBase, AMI_ENETDOWN);
+
             nx_tcp_socket_disconnect(&sock->as_Nx.tcp, NX_NO_WAIT);
+
+            bsd_nx_leave(SocketBase);
+        }
     }
 
     return 0;
@@ -717,7 +832,22 @@ LONG bsd_CloseSocket(register LONG sock_fd __asm("d0"),
         return bsd_fail(SocketBase, AMI_EBADF);
 
     bsd_fd_free(SocketBase, sock_fd);
-    bsd_socket_release(SocketBase, sock);
+
+    /*
+     * The descriptor is gone whatever happens next, so the caller always sees
+     * success; the teardown itself needs ThreadX context, and if the stack is
+     * already down there is nothing left to hand the socket back to.
+     */
+    if (bsd_nx_enter(SocketBase) == 0)
+    {
+        bsd_socket_release(SocketBase, sock);
+        bsd_nx_leave(SocketBase);
+    }
+    else
+    {
+        AMI_WARN("bsdsocket: CloseSocket(%ld) with the kernel down; leaking",
+                 (long)sock_fd);
+    }
 
     return 0;
 }

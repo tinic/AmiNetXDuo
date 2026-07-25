@@ -340,7 +340,26 @@ UINT        status;
 NX_PACKET  *packet_ptr;
 ULONG       actual;
 ULONG       start;
+ULONG       metadata_needed = 0;
 
+
+    /*
+     * Ask nx_secure how much crypto metadata this ciphersuite table really
+     * needs, rather than trusting the upstream sample's round number -- the
+     * memory figure in the report should be measured.
+     *
+     * This has to happen HERE and not in tx_application_define(): the nxe_
+     * error-checking wrappers apply NX_THREADS_ONLY_CALLER_CHECKING, so a call
+     * from initialization context comes back NX_CALLER_ERROR (0x11) with the
+     * output untouched.
+     */
+    status =  nx_secure_tls_metadata_size_calculate(&nx_crypto_tls_ciphers_ecc,
+                                                    &metadata_needed);
+    h_log("  crypto metadata: %lu bytes required, %lu allocated",
+          metadata_needed, (ULONG)H_METADATA_SIZE);
+    (VOID) h_check((UINT)((status == NX_SUCCESS) &&
+                          (metadata_needed <= (ULONG)H_METADATA_SIZE)),
+                   "metadata allocation is large enough", (ULONG)status);
 
     status =  nx_ip_status_check(&h_ip0, NX_IP_INITIALIZE_DONE, &actual,
                                  5UL * NX_IP_PERIODIC_RATE);
@@ -483,27 +502,11 @@ VOID tx_application_define(VOID *first_unused_memory)
 {
 
 UINT    status;
-ULONG   metadata_needed = 0;
 
 
     (VOID) first_unused_memory;
 
     nx_system_initialize();
-
-    /*
-     * Ask nx_secure how much metadata this ciphersuite table actually needs,
-     * rather than trusting the sample's round number.  Printed so the memory
-     * figure in the report is measured.
-     */
-    status =  nx_secure_tls_metadata_size_calculate(&nx_crypto_tls_ciphers_ecc,
-                                                    &metadata_needed);
-    if (status == NX_SUCCESS)
-    {
-        h_log("  crypto metadata required: %lu bytes (allocated %lu)",
-              metadata_needed, (ULONG)H_METADATA_SIZE);
-        (VOID) h_check((UINT)(metadata_needed <= (ULONG)H_METADATA_SIZE),
-                       "metadata allocation is large enough", metadata_needed);
-    }
 
     status =  nx_packet_pool_create(&h_pool, "AmiNetXDuo TLS pool",
                                     H_PACKET_PAYLOAD, (VOID *)h_pool_memory,

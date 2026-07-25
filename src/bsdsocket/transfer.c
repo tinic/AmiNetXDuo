@@ -179,6 +179,7 @@ LONG bsd_send(register LONG sock_fd __asm("d0"),
               register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
+    LONG       result;
 
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
@@ -192,14 +193,21 @@ LONG bsd_send(register LONG sock_fd __asm("d0"),
     if ((flags & MSG_OOB) != 0)
         return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
 
-    if ((sock->as_Flags & ASF_TCP) != 0)
-        return bsd_send_tcp(SocketBase, sock, buf, len, flags);
-
-    if ((sock->as_Flags & ASF_CONNECTED) == 0)
+    if ((sock->as_Flags & ASF_TCP) == 0 &&
+        (sock->as_Flags & ASF_CONNECTED) == 0)
         return bsd_fail(SocketBase, AMI_EDESTADDRREQ);
 
-    return bsd_send_udp(SocketBase, sock, buf, len, flags,
-                        sock->as_PeerAddr, sock->as_PeerPort);
+    if (bsd_nx_enter(SocketBase) != 0)
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+    result = ((sock->as_Flags & ASF_TCP) != 0)
+                 ? bsd_send_tcp(SocketBase, sock, buf, len, flags)
+                 : bsd_send_udp(SocketBase, sock, buf, len, flags,
+                                sock->as_PeerAddr, sock->as_PeerPort);
+
+    bsd_nx_leave(SocketBase);
+
+    return result;
 }
 
 LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
@@ -211,8 +219,9 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
                 register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
-    ULONG      addr;
-    UINT       port;
+    ULONG      addr = 0;
+    UINT       port = 0;
+    LONG       result;
 
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
@@ -226,26 +235,33 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
     if ((flags & MSG_OOB) != 0)
         return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
 
-    if ((sock->as_Flags & ASF_TCP) != 0)
+    /* A destination on a connected stream socket is ignored, as in BSD. */
+    if ((sock->as_Flags & ASF_TCP) == 0)
     {
-        /* A destination on a connected stream socket is ignored, as in BSD. */
-        return bsd_send_tcp(SocketBase, sock, buf, len, flags);
+        if (to == NULL)
+        {
+            if ((sock->as_Flags & ASF_CONNECTED) == 0)
+                return bsd_fail(SocketBase, AMI_EDESTADDRREQ);
+
+            addr = sock->as_PeerAddr;
+            port = sock->as_PeerPort;
+        }
+        else if (bsd_sockaddr_in(SocketBase, to, tolen, &addr, &port) != 0)
+        {
+            return -1;
+        }
     }
 
-    if (to == NULL)
-    {
-        if ((sock->as_Flags & ASF_CONNECTED) == 0)
-            return bsd_fail(SocketBase, AMI_EDESTADDRREQ);
+    if (bsd_nx_enter(SocketBase) != 0)
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
 
-        addr = sock->as_PeerAddr;
-        port = sock->as_PeerPort;
-    }
-    else if (bsd_sockaddr_in(SocketBase, to, tolen, &addr, &port) != 0)
-    {
-        return -1;
-    }
+    result = ((sock->as_Flags & ASF_TCP) != 0)
+                 ? bsd_send_tcp(SocketBase, sock, buf, len, flags)
+                 : bsd_send_udp(SocketBase, sock, buf, len, flags, addr, port);
 
-    return bsd_send_udp(SocketBase, sock, buf, len, flags, addr, port);
+    bsd_nx_leave(SocketBase);
+
+    return result;
 }
 
 /* ---------------------------------------------------------------- receive -- */
@@ -418,6 +434,7 @@ LONG bsd_recv(register LONG sock_fd __asm("d0"),
               register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
+    LONG       result;
 
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
@@ -434,10 +451,16 @@ LONG bsd_recv(register LONG sock_fd __asm("d0"),
     if (len == 0)
         return 0;
 
-    if ((sock->as_Flags & ASF_TCP) != 0)
-        return bsd_recv_tcp(SocketBase, sock, buf, len, flags);
+    if (bsd_nx_enter(SocketBase) != 0)
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
 
-    return bsd_recv_udp(SocketBase, sock, buf, len, flags, NULL, NULL);
+    result = ((sock->as_Flags & ASF_TCP) != 0)
+                 ? bsd_recv_tcp(SocketBase, sock, buf, len, flags)
+                 : bsd_recv_udp(SocketBase, sock, buf, len, flags, NULL, NULL);
+
+    bsd_nx_leave(SocketBase);
+
+    return result;
 }
 
 LONG bsd_recvfrom(register LONG sock_fd          __asm("d0"),
@@ -463,17 +486,24 @@ LONG bsd_recvfrom(register LONG sock_fd          __asm("d0"),
     if ((flags & MSG_OOB) != 0)
         return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
 
+    if ((sock->as_Flags & ASF_TCP) == 0 && len == 0)
+        return 0;
+
+    if (bsd_nx_enter(SocketBase) != 0)
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
+
     if ((sock->as_Flags & ASF_TCP) != 0)
     {
         result = bsd_recv_tcp(SocketBase, sock, buf, len, flags);
         if (result >= 0 && addr != NULL && addrlen != NULL)
             bsd_sockaddr_out(addr, addrlen, sock->as_PeerAddr, sock->as_PeerPort);
-
-        return result;
+    }
+    else
+    {
+        result = bsd_recv_udp(SocketBase, sock, buf, len, flags, addr, addrlen);
     }
 
-    if (len == 0)
-        return 0;
+    bsd_nx_leave(SocketBase);
 
-    return bsd_recv_udp(SocketBase, sock, buf, len, flags, addr, addrlen);
+    return result;
 }

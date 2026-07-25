@@ -14,6 +14,7 @@
  *   errno.c      Errno, SetErrnoPtr, SocketBaseTagList, status mapping
  *   inet.c       the inet_* address conversions
  *   resolver.c   gethostby*, gethostname, gethostid
+ *   netx_call.c  the ThreadX context bracket every NetX Duo call needs
  *
  * SPDX-License-Identifier: MIT
  */
@@ -28,6 +29,7 @@
  */
 #include "tx_api.h"
 #include "nx_api.h"
+#include "tx_amiga.h"
 
 #include <exec/types.h>
 #include <exec/execbase.h>
@@ -161,6 +163,18 @@ struct AmiSocketBase
     /* ---- per opener ----------------------------------------------------- */
     struct Task            *sb_Task;        /* the task that opened us       */
 
+    /*
+     * ThreadX context for this opener's task (netx_call.c). NetX Duo's
+     * THREADS_ONLY vectors reject a caller that is not a TX_THREAD, so every
+     * NetX-touching entry point brackets itself with bsd_nx_enter()/leave().
+     * The control block lives here rather than on the stack: it is a few
+     * hundred bytes, a base belongs to exactly one task, and that task is
+     * inside at most one vector at a time.
+     */
+    TX_THREAD               sb_NxThread;
+    LONG                    sb_NxNest;      /* bracket depth, 0 == outside   */
+    BOOL                    sb_NxAdopted;   /* we adopted; we must orphan    */
+
     struct AmiSocket      **sb_Table;       /* descriptor table              */
     LONG                    sb_TableSize;
 
@@ -226,6 +240,8 @@ struct AmiSocketBase
 #define ASF_OOBINLINE   (1UL << 15)
 #define ASF_DELETED     (1UL << 16)   /* NX socket already torn down        */
 #define ASF_NXBOUND     (1UL << 17)   /* NetX Duo holds the port            */
+#define ASF_SERVER      (1UL << 18)   /* came off a listen port: unaccept   */
+#define ASF_ORPHANED    (1UL << 19)   /* NX would not delete it; leaked     */
 
 typedef struct AmiSocket
 {
@@ -289,6 +305,12 @@ typedef struct AmiSocket
 /* library_runtime.c -- what a shared library has to supply for itself. */
 BOOL  bsd_runtime_open(VOID);
 VOID  bsd_runtime_close(VOID);
+
+/* netx_call.c -- ThreadX context. Nothing may call a NetX Duo THREADS_ONLY
+ * vector outside a successful bsd_nx_enter()/bsd_nx_leave() bracket, and
+ * nothing inside one may block on anything except ThreadX. */
+LONG  bsd_nx_enter(struct AmiSocketBase *base);
+VOID  bsd_nx_leave(struct AmiSocketBase *base);
 
 /* library.c */
 struct AmiSocketBase *bsd_lib_open(register ULONG version __asm("d0"),

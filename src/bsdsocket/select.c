@@ -288,6 +288,17 @@ typedef struct
     ULONG   except[BSD_FD_WORDS];
 } BsdFdSets;
 
+/*
+ * One readiness sweep, inside a ThreadX context bracket.
+ *
+ * WaitSelect() is the one vector that cannot simply adopt on entry and orphan
+ * on exit: it parks in Exec Wait() for as long as the caller asked for, and an
+ * adopted task holding the ThreadX baton across that would stop the IP thread,
+ * the timer and every other socket user until the wait ended. So the bracket
+ * covers only the poll -- bsd_readable() reaches nx_tcp_socket_bytes_available()
+ * and nx_udp_socket_bytes_available(), both THREADS_ONLY -- and the Wait() and
+ * the timer IO below happen as an ordinary Exec task.
+ */
 static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
                           const ULONG *in_read, const ULONG *in_write,
                           const ULONG *in_except, BsdFdSets *out)
@@ -295,6 +306,9 @@ static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
     LONG fd, count = 0;
 
     bsd_bzero(out, sizeof(*out));
+
+    if (bsd_nx_enter(base) != 0)
+        return -1;
 
     for (fd = 0; fd < nfds; fd++)
     {
@@ -330,6 +344,8 @@ static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
             count++;
         }
     }
+
+    bsd_nx_leave(base);
 
     return count;
 }
@@ -440,6 +456,18 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
 
         count = bsd_poll_sets(SocketBase, nfds, in_read, in_write, in_except,
                               &ready);
+        if (count < 0)
+        {
+            /* The kernel is not running; nothing can ever become ready. */
+            if (timer_running)
+            {
+                AbortIO((struct IORequest *)&SocketBase->sb_TimerReq);
+                WaitIO((struct IORequest *)&SocketBase->sb_TimerReq);
+            }
+
+            return bsd_fail(SocketBase, AMI_ENETDOWN);
+        }
+
         if (count > 0 || got_signals != 0)
             break;
 
