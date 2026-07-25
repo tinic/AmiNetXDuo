@@ -213,14 +213,14 @@ Practical tiering for implementation:
 - **Tier 3 (Roadshow parity, ~35)** — interface config/query, routing, DNS-server
   management, `GetNetworkStatistics`, `*RoadshowData`. Needed for `ShowNetStatus`,
   `AddNetInterface`, `netinfo`-style tools to work unchanged.
-- **Tier 4 (optional)** — `bpf_*` (needs a raw path + BPF VM), `mbuf_*` (leaks a 4.4BSD
-  mbuf model NetX Duo does not have — either emulate over `NX_PACKET` or leave stubbed),
-  `ipf_*` (Roadshow-private packet filter; lwip-amiga skips it by design).
+- **Tier 4 (out of scope)** — `ipf_*`, Roadshow's private packet filter. lwip-amiga skips
+  it by design; nothing outside Roadshow's own tools calls it.
 
-`mbuf_*` deserves a decision early: it exposes BSD mbuf chains to applications. NetX Duo's
-`NX_PACKET` is a different shape (single header + payload, chained via `nx_packet_next`).
-A faithful `mbuf_*` emulation is possible but is pure compatibility tax; almost nothing
-outside a stack's own tools uses it.
+`mbuf_*` and `bpf_*` were **promoted from Tier 4 to Tier 3** by the §9 decisions.
+`mbuf_*` exposes 4.4BSD mbuf chains to applications; NetX Duo's `NX_PACKET` is a different
+shape (single header + payload, chained via `nx_packet_next`), so this is an emulation
+layer written from scratch. `bpf_*` needs a raw packet path plus a BPF filter VM. Both are
+milestone 7 (§8) — real work, not trim.
 
 ### 3.3 Everything else a stack is expected to provide
 
@@ -453,7 +453,7 @@ preemptive priority scheduler already, so there are two options:
   (priority, preemption-threshold, `TX_DISABLE` regions all behave), and it makes ThreadX's
   internal data structures safe without touching Exec's scheduler. Cost: every stack
   operation serialises, and each ThreadX-level context switch costs a `Signal`+`Wait` pair.
-  On a 7 MHz 68000 that is measurable but bounded — this is exactly what lwip-amiga's
+  At the 14 MHz 68020 floor that is measurable but bounded — this is exactly what lwip-amiga's
   "single core semaphore" does, and it reaches 944 Mb/s on fast hardware.
 - **(B) Let Exec schedule, protect ThreadX state with `Forbid`/`Permit`.** Cheaper, but
   ThreadX's ready-list/preemption logic then models a world it does not control, and any
@@ -483,8 +483,9 @@ create. Two ways out:
   Simplest port, but a blocking socket ties up a worker, and `WaitSelect` across many
   sockets becomes an N-worker problem. Adds a round-trip per call.
 
-**Recommendation: (A)**, with (B) as the fallback if adoption proves unstable. This is the
-decision to prototype first — it determines the whole port's shape.
+**Decided (§9): prototype both in milestone 1 and pick on evidence**, with (A) as the
+preferred outcome and (B) as the documented fallback. This determines the whole port's
+shape, so no socket code is written until it is settled.
 
 ### 6.4 `bsdsocket.library` on native NetX Duo APIs, not on `nxd_bsd.c`
 
@@ -529,11 +530,12 @@ already in the local toolchain), rather than hand-writing 121 stubs.
 
 ### 6.6 Configuration, tools, and the "is it up?" contract
 
-Follow **Roadshow's** file layout rather than inventing one (this is where AmiTCP_NG is
-right and lwip-amiga is convenient-but-incompatible): `DEVS:NetInterfaces/*`,
+**Decided (§9): Roadshow's file layout**, rather than inventing one — this is where
+AmiTCP_NG is right and lwip-amiga is convenient-but-incompatible. `DEVS:NetInterfaces/*`,
 `DEVS:Internet/name_resolution`, `DEVS:Internet/default_gateway`, standard netdb files.
 Create the `AMITCP` public port. Self-start on first `OpenLibrary`. Ship `AddNetInterface`,
-`Online`, `Offline`, `ShowNetStatus`, `ping`, `netstat`, `host`.
+`Online`, `Offline`, `ShowNetStatus`, `ping`, `netstat`, `host`, plus `usergroup.library`
+alongside (§9, scope).
 
 ---
 
@@ -544,10 +546,11 @@ Create the `AMITCP` public port. Self-start on first `OpenLibrary`. Ship `AddNet
 | 1 | ThreadX Exec port + **thread adoption** (§6.3) proves fragile — races in `_tx_thread_system_suspend` against Exec's own scheduling | **High** | Prototype this *first*, before any socket code. Fall back to the worker-pool model. |
 | 2 | No memory protection: a bug anywhere corrupts the whole machine; debugging is Enforcer/Mungwall + emulator | High | Develop under WinUAE/FS-UAE with Enforcer; keep the stack's state in one allocation; assert aggressively in debug builds |
 | 3 | `WaitSelect` fidelity — the single most-used call, with subtle documented behaviour | High | `bsdsocktest` from day one; target ≥138/142 |
-| 4 | Footprint/perf on a stock 68000 with 2 MB — NetX Duo's packet pools are not tuned for this | Medium | Size pools from available RAM; make IPv6 and TLS build-time options; measure with `sockbench`-style tooling |
+| 4 | Footprint/perf at the 68020/4 MB floor — NetX Duo's packet pools are not tuned for this, and IPv6 + TLS + `bpf_*` are all in scope | Medium | Size pools from available RAM; keep IPv6, TLS and `bpf_*` behind build options so the floor build stays small; measure with `sockbench`-style tooling |
+| 4b | **Scope breadth** — v1 carries IPv6, `usergroup.library`, TLS and `mbuf_*`/`bpf_*`, none of which lwip-amiga or AmiTCP_NG attempt in full | Medium | Milestones 7–9 are strictly after a passing `bsdsocktest`; TLS ships as its own library so it can slip without blocking the stack |
 | 5 | Two fresh competitors (§2.2, §2.3) may reach "good enough" first | Medium | Differentiate on SANA-II + IPv6 + MIT + TLS; treat their public ABI notes as free validation |
 | 6 | Licence hygiene — no AmiTCP/AROSTCP/Roadshow code may be copied | Medium | Reference the freely-distributable Roadshow SDK headers/autodocs for the **ABI only**; document the clean-room posture in the README as AmiTCP_NG does |
-| 7 | `mbuf_*` / `bpf_*` / `ipf_*` have no NetX Duo analogue | Low | Tier 4; stub with `ENOSYS`-equivalents, revisit if a real client needs them |
+| 7 | `mbuf_*` / `bpf_*` have no NetX Duo analogue, and both are now in scope (§9) | Medium | Milestone 7, after the socket surface is proven. `mbuf_*` emulates 4.4BSD chains over `NX_PACKET`; `bpf_*` needs a raw path + filter VM. `ipf_*` stays stubbed |
 | 8 | Shared-library build discipline (no newlib stdio, base-relative data, per-opener bases) | Low | Solved problem; the local toolchain and NDK have the machinery |
 
 ---
@@ -556,8 +559,11 @@ Create the `AMITCP` public port. Self-start on first `OpenLibrary`. Ship `AddNet
 
 1. **Spike: ThreadX on Exec.** Port the 8 Linux port files; run ThreadX's own
    `sample_threadx.c` (two threads, a queue, a semaphore, a timer) under FS-UAE. Nothing
-   else matters until this is solid. Then prove **thread adoption** with a pre-existing
-   Exec task calling `tx_mutex_get`/`tx_thread_sleep`.
+   else matters until this is solid. Then build **both** §6.3 candidates against it —
+   thread adoption (a pre-existing Exec task calling `tx_mutex_get`/`tx_thread_sleep`
+   and being suspended/resumed by ThreadX) and a minimal worker pool — and pick on
+   evidence. Exit criterion: a soak test with 4 adopted tasks contending on a mutex and a
+   timer, clean under Enforcer.
 2. **NetX Duo on the RAM driver.** `nx_ram_network_driver.c` already exists in
    `common/src`; bring up two `NX_IP` instances talking TCP to each other in one Amiga
    process. Proves the core + packet pools + timers on 68k.
@@ -566,26 +572,54 @@ Create the `AMITCP` public port. Self-start on first `OpenLibrary`. Ship `AddNet
 4. **`bsdsocket.library` Tier 1.** Library skeleton, per-opener bases, generated LVO table,
    `WaitSelect`. Success = `bsdsocktest` loopback categories passing.
 5. **Tier 2 + DNS/DHCP integration**, then `bsdsocktest` network tier against the host helper.
-6. **Tier 3 Roadshow parity + tools.** Success = stock Roadshow-era software
-   (`AmiTCP`-linked clients, `smbfs`, a browser) running unchanged.
-7. **IPv6 as a build option**, then evaluate `nx_secure` TLS on 68030+.
+6. **Tier 3 Roadshow parity + tools + `usergroup.library`.** Success = stock Roadshow-era
+   software (`AmiTCP`-linked clients, `smbfs`, a browser) running unchanged against the
+   Roadshow config layout.
+7. **`mbuf_*` over `NX_PACKET` and the `bpf_*` raw path + filter VM.** Own milestone —
+   no upstream support to lean on. Success = a `tcpdump`-shaped tool capturing on a real
+   interface.
+8. **IPv6 build option** — third SANA-II reader for `0x86DD`, `nxd_*` socket paths,
+   DHCPv6/RA. Success = `bsdsocktest` passing with IPv6 enabled and an IPv6 `ping`.
+9. **`nx_secure` TLS**, as a separate library on the same core. Benchmark a TLS 1.2
+   handshake on a real 68020 *before* committing to an API.
 
 Adopt **`bsdsocktest` (142 tests)** as the acceptance gate throughout; lwip-amiga's
 138/142 is the public bar.
 
 ---
 
-## 9. Open questions for the next session
+## 9. Decisions (2026-07-24)
 
-1. Thread adoption vs worker pool (§6.3) — prototype decides.
-2. Do we ship `usergroup.library` too, or document it as out of scope?
-3. Roadshow-style config files (compatible, more work) vs a single `ENV:` prefs file
-   (simple, breaks existing tools)? Recommendation: Roadshow layout, with an `ENV:`
-   override for quick starts.
-4. `mbuf_*` — emulate over `NX_PACKET`, or stub?
-5. Minimum target: 68000/2 MB (OS 2.0) or 68020/OS 3.1+? This gates pool sizing, `-m68020`
-   codegen, and whether IPv6 is even offered.
-6. Is `nx_secure` TLS in scope at all, or a follow-on project (`AmiSSL` alternative)?
+| # | Question | Decision |
+|---|---|---|
+| 1 | Minimum target | **68020 + OS 3.1, 4 MB.** Build `-m68020`; size packet pools for ~4 MB Fast RAM; IPv6 is a build option, not a stretch. |
+| 2 | Thread adoption vs worker pool (§6.3) | **Prototype both in milestone 1, then decide.** Adoption is the preferred outcome; the worker pool is the documented fallback. No socket code until this is settled. |
+| 3 | Configuration model | **Roadshow layout.** `DEVS:NetInterfaces/*`, `DEVS:Internet/name_resolution`, `DEVS:Internet/default_gateway`, standard netdb files, `AMITCP` public port. No `ENV:`-only mode. |
+| 4 | Optional subsystems in scope for v1 | **All four**: IPv6 (build option), `usergroup.library`, `nx_secure` TLS, and the `mbuf_*` / `bpf_*` vectors. |
+
+Consequences of decision 4 worth stating plainly, since it is the widest of the options:
+
+- **`mbuf_*` / `bpf_*` move from Tier 4 to Tier 3** in §3.2. `mbuf_*` means emulating 4.4BSD
+  mbuf chains over `NX_PACKET` (NetX Duo has no equivalent shape); `bpf_*` means a raw
+  packet path plus a BPF filter VM. Neither has upstream support to lean on — lwip-amiga
+  skips both, AmiTCP_NG inherits `mbuf_*` from its 4.4BSD core and wrote `bpf_*` itself.
+  Budget these as their own milestone, not as trim on the socket work.
+- **`nx_secure` TLS on a 68020 is the one item where the target decision fights the scope
+  decision.** TLS 1.2 handshake RSA/ECDHE on a 14 MHz 68020 is seconds, not milliseconds.
+  Recommend it ships as a separate library (an `amissl.library`-shaped thing) built on the
+  same core, gated behind its own build option, and that it is benchmarked on 68020 before
+  any API is promised. Keeping it in the v1 *plan* is fine; keeping it on the v1 *critical
+  path* is not.
+- `ipf_*` (Roadshow's private packet filter) remains out of scope — it is undocumented
+  beyond its vector offsets and nothing outside Roadshow's own tools calls it.
+
+### Still open (lower stakes, decide during implementation)
+
+- Does `usergroup.library` ship as a real user database or as the usual single-user stub
+  (`root`/uid 0)? Most Amiga software only needs the calls to succeed.
+- `bpf_*`: full BPF VM, or the common-case filter subset (`ether proto`, host/port
+  matching) with a documented gap?
+- IPv6 default: built and off, or built and on when router advertisements appear?
 
 ---
 
