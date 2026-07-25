@@ -184,16 +184,16 @@ VOID   _tx_thread_interrupt_restore(UINT previous_posture);
                                    suspension path; this port only ever
                                    suspends threads at their own request.
    tx_thread_amiga_flags           TX_AMIGA_THREAD_* bits below
-   tx_thread_amiga_reaper /
-   tx_thread_amiga_reaper_signal   set by _tx_thread_delete_port_completion so
-                                   the dying Exec Task can hand back.        */
+
+   The teardown handshake deliberately does NOT live here: it is in the Exec
+   Task's own control block (struct _tx_amiga_ctrl, tx_amiga_internal.h), so
+   that a task the reaper had to give up on can still destroy itself after the
+   TX_THREAD has been deleted and its storage reused.                        */
 
 #define TX_THREAD_EXTENSION_0                   VOID  *tx_thread_amiga_task; \
                                                 ULONG  tx_thread_amiga_run_signal; \
                                                 UINT   tx_thread_amiga_suspension_type; \
-                                                UINT   tx_thread_amiga_flags; \
-                                                VOID  *tx_thread_amiga_reaper; \
-                                                ULONG  tx_thread_amiga_reaper_signal;
+                                                UINT   tx_thread_amiga_flags;
 
 #define TX_THREAD_EXTENSION_1                   VOID  *tx_thread_extension_ptr;
 #define TX_THREAD_EXTENSION_2
@@ -236,7 +236,6 @@ VOID   _tx_thread_interrupt_restore(UINT previous_posture);
 #define TX_TIMER_DELETE_EXTENSION(timer_ptr)
 #define TX_THREAD_CREATE_EXTENSION(thread_ptr)
 #define TX_THREAD_DELETE_EXTENSION(thread_ptr)
-#define TX_THREAD_COMPLETED_EXTENSION(thread_ptr)
 #define TX_THREAD_TERMINATED_EXTENSION(thread_ptr)
 #define TX_TIMER_INITIALIZE_EXTENSION(a)
 #define TX_BYTE_ALLOCATE_EXTENSION
@@ -262,6 +261,15 @@ void _tx_thread_delete_port_completion(struct TX_THREAD_STRUCT *thread_ptr, UINT
 
 void _tx_thread_reset_port_completion(struct TX_THREAD_STRUCT *thread_ptr, UINT tx_saved_posture);
 #define TX_THREAD_RESET_PORT_COMPLETION(thread_ptr)   _tx_thread_reset_port_completion(thread_ptr, tx_saved_posture);
+
+
+/* A thread whose entry function has just returned gets one look at whether its
+   Exec Task was abandoned by the reaper, before the generic code touches the
+   ready lists on its behalf.  See _tx_amiga_thread_completed().  */
+
+void    _tx_amiga_thread_completed(void);
+
+#define TX_THREAD_COMPLETED_EXTENSION(thread_ptr)     _tx_amiga_thread_completed();
 
 
 /* Start the periodic tick task once the kernel is initialised but before the

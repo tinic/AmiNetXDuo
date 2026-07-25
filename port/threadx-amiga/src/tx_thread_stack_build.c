@@ -48,8 +48,6 @@ CHAR        *name;
 
     thread_ptr -> tx_thread_amiga_suspension_type =  ((UINT) 0);
     thread_ptr -> tx_thread_amiga_flags           =  ((UINT) 0);
-    thread_ptr -> tx_thread_amiga_reaper          =  (VOID *) 0;
-    thread_ptr -> tx_thread_amiga_reaper_signal   =  0UL;
     thread_ptr -> tx_thread_amiga_task            =  (VOID *) 0;
     thread_ptr -> tx_thread_amiga_run_signal      =  0UL;
 
@@ -100,21 +98,41 @@ CHAR        *name;
 
 /*
  * Entry point of every Exec Task that backs a ThreadX thread.  The TX_THREAD
- * is passed through tc_UserData, which is set before AddTask() and is ours
- * alone for tasks we create.
+ * comes out of the task's own control block, which tc_UserData identifies and
+ * which is set up before AddTask().
  */
 static VOID _tx_amiga_thread_entry(VOID)
 {
 
-TX_THREAD   *thread_ptr;
+TX_THREAD               *thread_ptr;
+struct _tx_amiga_ctrl   *ctrl;
 
 
-    thread_ptr =  (TX_THREAD *) FindTask((STRPTR) 0) -> tc_UserData;
+    ctrl =  _tx_amiga_ctrl_of(FindTask((STRPTR) 0));
+    if (ctrl == (struct _tx_amiga_ctrl *) 0)
+    {
+        Wait(0UL);                                   /* cannot happen */
+    }
+    thread_ptr =  ctrl -> ctrl_thread;
+
+    TXTRACE("TXT entry task=%08lx thr=%08lx", (LONG) FindTask((STRPTR) 0), (LONG) thread_ptr);
 
     /* Do not touch a single ThreadX structure until the scheduler says so.  */
     (VOID) _tx_amiga_thread_park(thread_ptr);
 
+    TXTRACE("TXT dispatched task=%08lx", (LONG) FindTask((STRPTR) 0));
+
     _tx_thread_shell_entry();
 
-    /* _tx_thread_shell_entry() does not return.  */
+    /* _tx_thread_shell_entry() is not supposed to return: a completed thread
+       suspends itself and _tx_thread_system_return() parks it here forever.
+       It does return if _tx_thread_system_suspend() declines to switch (the
+       preempt-disable / system-state guard), and falling off the end of an
+       Exec task entry point lands in Exec's default finaliser, which removes
+       the task WITHOUT telling the port -- leaving tx_thread_amiga_task
+       pointing at freed memory.  Go through the port's own teardown instead.  */
+
+    TXTRACE("TXT shell_entry returned task=%08lx", (LONG) FindTask((STRPTR) 0));
+
+    _tx_amiga_task_destroy(ctrl);                    /* never returns */
 }

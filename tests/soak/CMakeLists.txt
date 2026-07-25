@@ -3,11 +3,14 @@
 # Produces an AmigaOS executable to be run under FS-UAE/WinUAE (or on real
 # hardware); it is not runnable on the build host.  Run it with
 #
-#   ./tools/fsuae-run.sh -t 180 build/cm/tests/soak/soak_test
+#   AMINETXDUO_RUN_TAG=soak ./tools/fsuae-run.sh -t 220 build/cm/tests/soak/soak_test
 #
 # and, for the "clean under Enforcer" half of the criterion, with
 #
-#   ./tools/enforcer-run.sh build/cm/tests/soak/soak_test
+#   ./tools/enforcer-run.sh -m -t 260 build/cm/tests/soak/soak_test
+#
+# The run takes about 100 s: a 30 s soak plus the wait-abort, suspend/resume and
+# teardown phases, which wait on real timeouts.
 
 add_executable(soak_test soak_test.c)
 

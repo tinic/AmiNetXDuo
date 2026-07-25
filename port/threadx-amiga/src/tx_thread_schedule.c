@@ -32,6 +32,8 @@
 
 #include "tx_amiga_internal.h"
 
+#include <devices/timer.h>
+
 
 VOID _tx_thread_schedule(VOID)
 {
@@ -88,23 +90,83 @@ TX_THREAD   *thread_ptr;
 /*
  * Remove the Exec Task backing a thread that ThreadX has finished with.
  *
- * The task is parked in Wait() inside _tx_thread_system_return().  Setting
- * TX_AMIGA_THREAD_DIE and poking its run signal makes it fall out of that Wait
+ * The task is normally parked in Wait() inside _tx_amiga_thread_park().
+ * Setting ctrl_die and poking its run signal makes it fall out of that Wait
  * and destroy itself.  It signals back first, under Forbid(), and only then
  * calls RemTask(NULL) -- Exec discards the forbid nesting of a task it is
  * removing, so the "signal the reaper then die" pair really is atomic and the
  * reaper cannot observe a half-removed task.
  *
+ *  *** THE WAIT IS BOUNDED, AND THAT IS NOT A WORKAROUND. ***
+ *
+ * A ThreadX thread may be blocked inside Exec rather than on its run signal --
+ * a SANA-II reader parked in WaitIO() on a device that ignores AbortIO() is
+ * the case that matters here.  Such a task cannot be woken by the port and
+ * cannot be removed by the port either: RemTask() on another task would leave
+ * that device holding a queued IORequest that it will later write into freed
+ * memory.  There is therefore no interleaving in which an unbounded Wait()
+ * terminates, and the caller -- who is very likely holding the ThreadX baton
+ * -- becomes permanently unrunnable, taking the whole stack with it.  Waiting
+ * forever is not "safer", it is the failure.
+ *
+ * The defined outcome when the task cannot be woken is a ZOMBIE:
+ *
+ *   - the task is detached from its TX_THREAD in both directions, so neither
+ *     side can ever dereference the other again;
+ *   - if it still held the baton, the baton is taken back and the scheduler
+ *     restarted, so the rest of ThreadX survives;
+ *   - the task keeps its own Task/MemList blocks and destroys itself at its
+ *     next port entry point, whenever that finally happens;
+ *   - _tx_amiga_zombies is bumped.  tx_amiga_zombie_tasks() reports it, and a
+ *     caller that sees it move MUST NOT free that thread's stack -- the zombie
+ *     is still running on it.
+ *
  * Adopted threads are never reaped: their Exec Task belongs to the application.
  */
+
+#ifndef TX_AMIGA_REAP_TIMEOUT_SECS
+#define TX_AMIGA_REAP_TIMEOUT_SECS      2UL
+#endif
+
+
+static VOID _tx_amiga_reap_cleanup(struct timerequest *tr, struct MsgPort *port, BYTE sig)
+{
+
+    if (tr != (struct timerequest *) 0)
+    {
+        CloseDevice((struct IORequest *) tr);
+        DeleteIORequest((APTR) tr);
+    }
+    if (port != (struct MsgPort *) 0)
+    {
+        DeleteMsgPort(port);
+    }
+    if (sig >= 0)
+    {
+        FreeSignal(sig);
+    }
+}
+
+
 static VOID _tx_amiga_reap(TX_THREAD *thread_ptr)
 {
 
-struct Task     *task;
-struct Task     *me;
-BYTE             sig;
-ULONG            sigmask;
+struct Task             *task;
+struct Task             *me;
+struct _tx_amiga_ctrl   *ctrl;
+struct MsgPort          *port;
+struct timerequest      *tr;
+BYTE                     sig;
+ULONG                    sigmask;
+ULONG                    portsig;
+ULONG                    signals;
+volatile ULONG           reaped;
+UINT                     wake;
 
+
+    TXTRACE("TXT reap enter thr=%08lx task=%08lx flags=%ld by=%08lx",
+            (LONG) thread_ptr, (LONG) thread_ptr -> tx_thread_amiga_task,
+            (LONG) thread_ptr -> tx_thread_amiga_flags, (LONG) FindTask((STRPTR) 0));
 
     Forbid();
     task =  (struct Task *) thread_ptr -> tx_thread_amiga_task;
@@ -119,20 +181,53 @@ ULONG            sigmask;
     }
     Permit();
 
-    me  =  FindTask((STRPTR) 0);
-    sig =  AllocSignal(-1);
+    me      =  FindTask((STRPTR) 0);
+    sig     =  AllocSignal(-1);
+    reaped  =  0UL;
+    portsig =  0UL;
+    tr      =  (struct timerequest *) 0;
+    port    =  (struct MsgPort *) 0;
+
+    /* The timeout source.  Set up before the handshake so that the window
+       between "die" and "waiting" is as short as possible.  */
+    if (sig >= 0)
+    {
+        port =  CreateMsgPort();
+        if (port != (struct MsgPort *) 0)
+        {
+            tr =  (struct timerequest *) CreateIORequest(port, (ULONG) sizeof(struct timerequest));
+            if (tr != (struct timerequest *) 0)
+            {
+                if (OpenDevice((CONST_STRPTR) "timer.device", (ULONG) UNIT_VBLANK,
+                               (struct IORequest *) tr, 0UL) != 0)
+                {
+                    DeleteIORequest((APTR) tr);
+                    tr =  (struct timerequest *) 0;
+                }
+                else
+                {
+                    portsig =  1UL << ((ULONG) port -> mp_SigBit);
+                }
+            }
+            if (tr == (struct timerequest *) 0)
+            {
+                DeleteMsgPort(port);
+                port =  (struct MsgPort *) 0;
+            }
+        }
+    }
 
     Forbid();
 
     /* Re-check: the task may have gone while we were unforbidden.  */
     task =  (struct Task *) thread_ptr -> tx_thread_amiga_task;
-    if (task == (struct Task *) 0)
+    ctrl =  (task != (struct Task *) 0) ? _tx_amiga_ctrl_of(task)
+                                        : ((struct _tx_amiga_ctrl *) 0);
+    if (ctrl == (struct _tx_amiga_ctrl *) 0)
     {
+        thread_ptr -> tx_thread_amiga_task =  (VOID *) 0;
         Permit();
-        if (sig >= 0)
-        {
-            FreeSignal(sig);
-        }
+        _tx_amiga_reap_cleanup(tr, port, sig);
         return;
     }
 
@@ -142,8 +237,9 @@ ULONG            sigmask;
     {
 
         sigmask =  1UL << ((ULONG) sig);
-        thread_ptr -> tx_thread_amiga_reaper         =  (VOID *) me;
-        thread_ptr -> tx_thread_amiga_reaper_signal  =  sigmask;
+        ctrl -> ctrl_reaper        =  me;
+        ctrl -> ctrl_reaper_signal =  sigmask;
+        ctrl -> ctrl_reaped        =  &reaped;
     }
     else
     {
@@ -151,18 +247,108 @@ ULONG            sigmask;
         /* No spare signal: fire and forget.  The task still tears itself down,
            but we cannot prove it finished before the caller frees the stack.  */
         sigmask =  0UL;
-        thread_ptr -> tx_thread_amiga_reaper         =  (VOID *) 0;
-        thread_ptr -> tx_thread_amiga_reaper_signal  =  0UL;
+        ctrl -> ctrl_reaper        =  (struct Task *) 0;
+        ctrl -> ctrl_reaper_signal =  0UL;
+        ctrl -> ctrl_reaped        =  (volatile ULONG *) 0;
     }
+
+    ctrl -> ctrl_die =  1U;
 
     Signal(task, thread_ptr -> tx_thread_amiga_run_signal);
     Permit();
 
-    if (sigmask != 0UL)
+    if (sigmask == 0UL)
     {
-        Wait(sigmask);
-        FreeSignal(sig);
+        _tx_amiga_reap_cleanup(tr, port, sig);
+        return;
     }
+
+    TXTRACE("TXT reap wait thr=%08lx", (LONG) thread_ptr);
+
+    if (tr != (struct timerequest *) 0)
+    {
+        tr -> tr_node.io_Command =  TR_ADDREQUEST;
+        tr -> tr_time.tv_secs    =  (ULONG) TX_AMIGA_REAP_TIMEOUT_SECS;
+        tr -> tr_time.tv_micro   =  0UL;
+        SendIO((struct IORequest *) tr);
+    }
+
+    for (;;)
+    {
+
+        signals =  Wait(sigmask | portsig);
+
+        if (reaped != 0UL)
+        {
+            break;
+        }
+        if ((portsig != 0UL) && ((signals & portsig) != 0UL))
+        {
+            break;                          /* timed out */
+        }
+        if (portsig == 0UL)
+        {
+
+            /* No timer could be opened.  One wait is all we can offer; the
+               handshake either completed or the task is unreachable, and
+               either way going round again would just block forever.  */
+            break;
+        }
+    }
+
+    if (tr != (struct timerequest *) 0)
+    {
+        if (CheckIO((struct IORequest *) tr) == (struct IORequest *) 0)
+        {
+            AbortIO((struct IORequest *) tr);
+        }
+        WaitIO((struct IORequest *) tr);
+    }
+
+    /* Decide the outcome under Forbid.  While reaped is still zero the dying
+       task has not reached its teardown, so its control block is necessarily
+       still allocated and safe to touch.  */
+    wake =  TX_FALSE;
+
+    Forbid();
+    if (reaped == 0UL)
+    {
+
+        ctrl =  _tx_amiga_ctrl_of(task);
+        if (ctrl != (struct _tx_amiga_ctrl *) 0)
+        {
+
+            /* Detach in both directions.  */
+            ctrl -> ctrl_thread        =  TX_NULL;
+            ctrl -> ctrl_reaper        =  (struct Task *) 0;
+            ctrl -> ctrl_reaper_signal =  0UL;
+            ctrl -> ctrl_reaped        =  (volatile ULONG *) 0;
+        }
+
+        thread_ptr -> tx_thread_amiga_task =  (VOID *) 0;
+
+        /* Take the baton back if the zombie was holding it, or nothing in
+           ThreadX will ever run again.  */
+        if (_tx_thread_current_ptr == thread_ptr)
+        {
+            _tx_thread_current_ptr =  TX_NULL;
+            _tx_timer_time_slice   =  ((ULONG) 0);
+            wake =  TX_TRUE;
+        }
+
+        _tx_amiga_zombies++;
+    }
+    Permit();
+
+    if (wake != TX_FALSE)
+    {
+        _tx_amiga_wake_scheduler();
+    }
+
+    _tx_amiga_reap_cleanup(tr, port, sig);
+
+    TXTRACE("TXT reap done thr=%08lx reaped=%ld zombies=%ld",
+            (LONG) thread_ptr, (LONG) reaped, (LONG) _tx_amiga_zombies);
 }
 
 

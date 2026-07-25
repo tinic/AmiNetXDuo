@@ -34,6 +34,104 @@
 
 
 /*
+ * Destroy the calling Exec Task, which the port created.
+ *
+ * Touches nothing but the task's own control block, so it is correct even when
+ * the reaper gave up on this task long ago and the TX_THREAD it used to back
+ * has since been deleted, reused or freed.  Never returns.
+ */
+VOID _tx_amiga_task_destroy(struct _tx_amiga_ctrl *ctrl)
+{
+
+struct Task     *reaper;
+ULONG            reaper_signal;
+volatile ULONG  *reaped;
+TX_THREAD       *owner;
+
+
+    Forbid();
+
+    owner =  ctrl -> ctrl_thread;
+    if (owner != TX_NULL)
+    {
+        owner -> tx_thread_amiga_task =  (VOID *) 0;
+    }
+
+    reaper        =  ctrl -> ctrl_reaper;
+    reaper_signal =  ctrl -> ctrl_reaper_signal;
+    reaped        =  ctrl -> ctrl_reaped;
+
+    ctrl -> ctrl_thread        =  TX_NULL;
+    ctrl -> ctrl_reaper        =  (struct Task *) 0;
+    ctrl -> ctrl_reaper_signal =  0UL;
+    ctrl -> ctrl_reaped        =  (volatile ULONG *) 0;
+    ctrl -> ctrl_magic         =  0UL;
+
+    /* The flag lives on the reaper's stack and it is blocked in Wait(), so it
+       is alive.  Set it BEFORE the Signal, so a reaper that wakes on its
+       timeout in the same instant still sees a completed handshake rather than
+       declaring a zombie.  Signalling and dying both happen inside the
+       Forbid(), and Exec discards the forbid nesting of a task it removes, so
+       the pair is atomic: the reaper cannot observe a half-removed task.  */
+    if (reaped != (volatile ULONG *) 0)
+    {
+        *reaped =  1UL;
+    }
+    if (reaper != (struct Task *) 0)
+    {
+        Signal(reaper, reaper_signal);
+    }
+
+    TXTRACE("TXT destroy task=%08lx", (LONG) FindTask((STRPTR) 0));
+
+    RemTask((struct Task *) 0);                      /* never returns */
+
+    /* Unreachable; keeps a "noreturn" analysis honest if RemTask ever does.  */
+    for (;;)
+    {
+        Wait(0UL);
+    }
+}
+
+
+/*
+ * TX_THREAD_COMPLETED_EXTENSION.
+ *
+ * _tx_thread_shell_entry() calls this the moment a thread's entry function
+ * returns, and crucially BEFORE _tx_thread_system_suspend() unlinks the thread
+ * from the ready lists.  For a thread the reaper had to abandon (see
+ * _tx_amiga_reap()) that unlinking would be done with a TX_THREAD that has
+ * already been deleted -- tx_thread_ready_next/previous still point at live
+ * threads, so it splices a dead node's stale neighbours into the live list and
+ * the next dispatch jumps through whatever that leaves behind.  Dying here
+ * instead is the difference between a tidy exit and a wild jump.
+ *
+ * shell_entry has already done _tx_thread_preempt_disable++ on the assumption
+ * that _tx_thread_system_suspend() will undo it, so undo it here instead.
+ */
+VOID _tx_amiga_thread_completed(VOID)
+{
+
+struct _tx_amiga_ctrl   *ctrl;
+
+
+    ctrl =  _tx_amiga_ctrl_of(FindTask((STRPTR) 0));
+
+    if ((ctrl != (struct _tx_amiga_ctrl *) 0) && (ctrl -> ctrl_die != 0U))
+    {
+
+        Forbid();
+        _tx_thread_preempt_disable--;
+        Permit();
+
+        TXTRACE("TXT completed-as-zombie task=%08lx", (LONG) FindTask((STRPTR) 0));
+
+        _tx_amiga_task_destroy(ctrl);                /* never returns */
+    }
+}
+
+
+/*
  * Park the calling Exec Task until it is the ThreadX baton holder.
  *
  * Never returns if the thread has been marked for teardown and it is a Task
@@ -44,13 +142,21 @@
 UINT _tx_amiga_thread_park(TX_THREAD *thread_ptr)
 {
 
-ULONG        run_signal;
-UINT         flags;
-struct Task *reaper;
-ULONG        reaper_signal;
+ULONG                    run_signal;
+UINT                     adopted;
+struct _tx_amiga_ctrl   *ctrl;
 
 
     run_signal =  thread_ptr -> tx_thread_amiga_run_signal;
+    adopted    =  thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED;
+
+    /* Cache the control block ONCE, while the TX_THREAD is certainly still
+       ours.  Everything the teardown below touches lives in it, so a task that
+       the reaper gave up on can still destroy itself safely long after the
+       TX_THREAD has been deleted and reused.  An adopted Task has no control
+       block -- its teardown is a return, not a RemTask().  */
+    ctrl =  (adopted != 0U) ? ((struct _tx_amiga_ctrl *) 0)
+                            : _tx_amiga_ctrl_of(FindTask((STRPTR) 0));
 
     for (;;)
     {
@@ -59,39 +165,27 @@ ULONG        reaper_signal;
 
         Forbid();
 
-        flags =  thread_ptr -> tx_thread_amiga_flags;
-
-        if ((flags & TX_AMIGA_THREAD_DIE) != 0U)
+        if (ctrl != (struct _tx_amiga_ctrl *) 0)
         {
 
-            if ((flags & TX_AMIGA_THREAD_ADOPTED) != 0U)
+            if (ctrl -> ctrl_die != 0U)
             {
-
-                /* The application owns this Task.  Tell the caller it is no
-                   longer a ThreadX thread and let it unwind normally.  */
-                thread_ptr -> tx_thread_amiga_flags |=  TX_AMIGA_THREAD_ORPHANED;
                 Permit();
-                return(TX_FALSE);
+                _tx_amiga_task_destroy(ctrl);        /* never returns */
             }
+        }
+        else if ((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_DIE) != 0U)
+        {
 
-            /* A Task we created.  Signal the reaper and remove ourselves.
-               Both happen inside the Forbid(), and Exec discards the forbid
-               nesting of a task it removes, so the reaper cannot run until we
-               are genuinely gone.  */
-            thread_ptr -> tx_thread_amiga_task =  (VOID *) 0;
-
-            reaper        =  (struct Task *) thread_ptr -> tx_thread_amiga_reaper;
-            reaper_signal =  thread_ptr -> tx_thread_amiga_reaper_signal;
-
-            thread_ptr -> tx_thread_amiga_reaper        =  (VOID *) 0;
-            thread_ptr -> tx_thread_amiga_reaper_signal =  0UL;
-
-            if (reaper != (struct Task *) 0)
-            {
-                Signal(reaper, reaper_signal);
-            }
-
-            RemTask((struct Task *) 0);              /* never returns */
+            /* The application owns this Task.  Tell the caller it is no longer
+               a ThreadX thread and let it unwind normally.  */
+            thread_ptr -> tx_thread_amiga_flags |=  TX_AMIGA_THREAD_ORPHANED;
+            Permit();
+            return(TX_FALSE);
+        }
+        else
+        {
+            /* Nothing to do.  */
         }
 
         if (_tx_thread_current_ptr == thread_ptr)

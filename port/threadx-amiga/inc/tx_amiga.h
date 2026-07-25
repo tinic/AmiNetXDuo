@@ -42,6 +42,23 @@ UINT    tx_amiga_kernel_start(VOID);
 /* TX_TRUE once the scheduler is running.  */
 UINT    tx_amiga_kernel_running(VOID);
 
+/*
+ * How many Exec Tasks have outlived the TX_THREAD they backed.
+ *
+ * tx_thread_delete() removes the backing Exec Task by asking it to destroy
+ * itself, and waits a bounded time for it to do so.  A thread that is blocked
+ * inside Exec rather than inside ThreadX -- parked in WaitIO() on a device
+ * that ignores AbortIO(), say -- cannot be woken and cannot safely be removed
+ * by anyone else, so the wait times out.  The thread is then detached: it can
+ * no longer touch its TX_THREAD, the ThreadX baton is recovered if it held
+ * one, and the task destroys itself whenever it finally unblocks.
+ *
+ * This counter is the only signal that it happened.  A CALLER THAT SEES IT
+ * MOVE ACROSS A tx_thread_delete() MUST NOT FREE THAT THREAD'S STACK: the
+ * zombie is still running on it.
+ */
+ULONG   tx_amiga_zombie_tasks(VOID);
+
 
 /* ------------------------------------------------------------------------ */
 /* Thread adoption                                                           */

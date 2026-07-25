@@ -43,6 +43,7 @@ ULONG           _tx_amiga_kernel_memory_size  = 0UL;
 
 volatile UINT   _tx_amiga_kernel_up           = TX_FALSE;
 volatile UINT   _tx_amiga_timer_stop          = TX_FALSE;
+volatile ULONG  _tx_amiga_zombies             = 0UL;
 
 /* Set when the port allocated the kernel memory block itself.  */
 static UINT     _tx_amiga_memory_owned        = TX_FALSE;
@@ -77,42 +78,60 @@ struct Task *_tx_amiga_task_create(CHAR *name, BYTE priority, VOID (*entry)(VOID
                                    APTR stack, ULONG stack_size, APTR user_data)
 {
 
-struct MemList  *memlist;
-struct Task     *task;
-ULONG            block_size;
-ULONG            base;
-ULONG            top;
+struct MemList          *memlist;
+struct _tx_amiga_ctrl   *ctrl;
+struct Task             *task;
+ULONG                    base;
+ULONG                    top;
 
 
-    /* One allocation holds the MemList and the Task; tc_MemEntry points at it
-       so RemTask(NULL) gives it back without any help from us.  */
     if ((stack == (APTR) 0) || (stack_size < 256UL))
     {
         return((struct Task *) 0);
     }
 
-    block_size =  (ULONG) (sizeof(struct MemList) + sizeof(struct Task));
+    /* TWO allocations, deliberately.  RemTask() walks tc_MemEntry and hands
+       each MemList to FreeEntry(), which is the exact inverse of AllocEntry():
+       it frees every me_Addr/me_Length the list describes AND THEN THE MemList
+       ITSELF.  Putting the MemList inside the block it describes therefore
+       frees that address twice -- FreeMem(block, block_size) followed by
+       FreeMem(block, sizeof(struct MemList)) -- which is Guru 01000009,
+       AN_FreeTwice, on every task that exits.  amiga.lib's CreateTask() keeps
+       them apart for the same reason.  */
 
-    memlist =  (struct MemList *) AllocMem(block_size, MEMF_PUBLIC | MEMF_CLEAR);
+    memlist =  (struct MemList *) AllocMem((ULONG) sizeof(struct MemList),
+                                           MEMF_PUBLIC | MEMF_CLEAR);
     if (memlist == (struct MemList *) 0)
     {
         return((struct Task *) 0);
     }
 
-    task =  (struct Task *) (((UBYTE *) memlist) + sizeof(struct MemList));
+    ctrl =  (struct _tx_amiga_ctrl *) AllocMem((ULONG) sizeof(struct _tx_amiga_ctrl),
+                                               MEMF_PUBLIC | MEMF_CLEAR);
+    if (ctrl == (struct _tx_amiga_ctrl *) 0)
+    {
+        FreeMem((APTR) memlist, (ULONG) sizeof(struct MemList));
+        return((struct Task *) 0);
+    }
+
+    task =  &ctrl -> ctrl_task;
 
     memlist -> ml_NumEntries      =  1;
-    memlist -> ml_ME[0].me_Addr   =  (APTR) memlist;
-    memlist -> ml_ME[0].me_Length =  block_size;
+    memlist -> ml_ME[0].me_Addr   =  (APTR) ctrl;
+    memlist -> ml_ME[0].me_Length =  (ULONG) sizeof(struct _tx_amiga_ctrl);
 
     /* Longword-align the stack window.  */
     base =  (((ULONG) stack) + 3UL) & ~3UL;
     top  =  (((ULONG) stack) + stack_size) & ~3UL;
     if (top <= base)
     {
-        FreeMem((APTR) memlist, block_size);
+        FreeMem((APTR) ctrl, (ULONG) sizeof(struct _tx_amiga_ctrl));
+        FreeMem((APTR) memlist, (ULONG) sizeof(struct MemList));
         return((struct Task *) 0);
     }
+
+    ctrl -> ctrl_magic  =  TX_AMIGA_CTRL_MAGIC;
+    ctrl -> ctrl_thread =  (TX_THREAD *) user_data;
 
     task -> tc_Node.ln_Type =  NT_TASK;
     task -> tc_Node.ln_Pri  =  priority;
@@ -120,16 +139,24 @@ ULONG            top;
     task -> tc_SPLower      =  (APTR) base;
     task -> tc_SPUpper      =  (APTR) top;
     task -> tc_SPReg        =  (APTR) top;
-    task -> tc_UserData     =  user_data;
+    /* tc_UserData points back at the Task, which is also the control block.
+       That is what makes _tx_amiga_ctrl_of() safe to call on a task the port
+       did not create: no other task has tc_UserData == itself.  The TX_THREAD
+       lives in ctrl_thread instead.  */
+    task -> tc_UserData     =  (APTR) task;
 
     _tx_amiga_newlist(&task -> tc_MemEntry);
     AddTail(&task -> tc_MemEntry, (struct Node *) memlist);
 
     if (AddTask(task, (APTR) entry, (APTR) 0) == (APTR) 0)
     {
-        FreeMem((APTR) memlist, block_size);
+        FreeMem((APTR) ctrl, (ULONG) sizeof(struct _tx_amiga_ctrl));
+        FreeMem((APTR) memlist, (ULONG) sizeof(struct MemList));
         return((struct Task *) 0);
     }
+
+    TXTRACE("TXT create task=%08lx ml=%08lx stack=%08lx..%08lx",
+            (LONG) task, (LONG) memlist, (LONG) base, (LONG) top);
 
     return(task);
 }
@@ -169,6 +196,13 @@ UINT tx_amiga_kernel_running(VOID)
 {
 
     return(_tx_amiga_kernel_up);
+}
+
+
+ULONG tx_amiga_zombie_tasks(VOID)
+{
+
+    return(_tx_amiga_zombies);
 }
 
 

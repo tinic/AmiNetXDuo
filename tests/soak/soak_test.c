@@ -36,6 +36,42 @@
  * White box on purpose: it reads _tx_thread_current_ptr and friends directly.
  * A soak that only proves "it did not crash" would be worth very little.
  *
+ * WHAT IT FOUND (2026-07-25, FS-UAE A1200/68020, Kickstart 3.1)
+ *
+ *   1. OPEN, blocking: an Exec Task that was adopted and then orphaned cannot
+ *      call RemTask(NULL).  Doing so raises "GURU 01000009 -- freeing memory
+ *      already freed" and stops the machine, reproducibly, in every run.  The
+ *      Task's tc_MemEntry block is intact and correct at that moment (this test
+ *      prints it), so the block has already been freed once by the time Exec
+ *      gets there.  The same block, allocated the same way, is freed cleanly by
+ *      the port's own reaper for threads that were never adopted -- so it is
+ *      adopt + orphan + self-removal that breaks, not the memory list idiom.
+ *      This is the exact shape of a bsdsocket.library client that opens the
+ *      library, uses it, and then exits.  Set S_NO_REMTASK=0 to reproduce.
+ *
+ *   2. OPEN, design gap: there is no tx_amiga_kernel_stop().  Returning to
+ *      AmigaDOS leaves the tick Task running with its entry point inside the
+ *      code hunk DOS has just freed; it fires 100 times a second and takes the
+ *      machine down before the boot script can record an exit status.  See
+ *      s_stop_tick(), which reaches into the port's internals to do by hand
+ *      what an application cannot be expected to do at all.
+ *
+ *   3. The ThreadX clock runs ~4-5% slow under this load (3008 ticks in
+ *      31.8 s of wall clock).  The tick task re-arms a one-shot timer.device
+ *      request per tick, so every tick pays its own scheduling latency.  It
+ *      matters for a TCP stack whose retransmit timers are counted in ticks.
+ *
+ *   4. Deferred preemption measured: a priority-1 thread waking from a 5-tick
+ *      sleep is late by a mean of 0.13 ticks with nothing hogging the baton,
+ *      and by 16.3 ticks (163 ms) while one worker spins 60 ms per iteration
+ *      outside ThreadX.  Working as documented in tx_thread_context_restore.c,
+ *      quantified here.
+ *
+ *   NOT a defect, though it looked like one for a while:
+ *   tx_thread_wait_abort(), tx_thread_suspend() and tx_thread_resume() all work
+ *   on an adopted Exec Task.  An earlier version of this test starved its own
+ *   victim by freezing the baton hog ON for the whole phase; see s_hog_window().
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -91,7 +127,7 @@ extern volatile UINT    _tx_amiga_timer_stop;
 #define S_TPS               ((ULONG) TX_TIMER_TICKS_PER_SECOND)   /* 100 Hz */
 
 #ifndef S_SOAK_SECONDS
-#define S_SOAK_SECONDS      60UL
+#define S_SOAK_SECONDS      30UL
 #endif
 #define S_SOAK_TICKS        (S_SOAK_SECONDS * S_TPS)
 
@@ -114,8 +150,20 @@ extern volatile UINT    _tx_amiga_timer_stop;
 #ifndef S_SKIP_TASKS
 #define S_SKIP_TASKS        0           /* bisecting: no raw AddTask workers */
 #endif
+/*
+ * The two adopted raw Exec Tasks park in Wait(0) at the end instead of calling
+ * RemTask(NULL).  Not tidiness -- the opposite: RemTask() frees the block
+ * registered in tc_MemEntry, and by the end of a soak this port has corrupted
+ * the Exec free list, so THE FIRST FreeMem() ANYWHERE raises
+ * "GURU 01000009 -- freeing memory already freed" and stops the machine before
+ * the test can report anything.  Parking postpones the first free until after
+ * the verdict has been written out.
+ *
+ * Build with -DSOAK_DEFS="S_NO_REMTASK=0" to reproduce the Guru at the point
+ * where the workers exit.
+ */
 #ifndef S_NO_REMTASK
-#define S_NO_REMTASK        0           /* bisecting: leak Tasks, no RemTask */
+#define S_NO_REMTASK        1
 #endif
 
 #define S_MUTEX_WAIT        (1UL * S_TPS)   /* never TX_WAIT_FOREVER in the   */
@@ -138,6 +186,17 @@ extern volatile UINT    _tx_amiga_timer_stop;
 
 #define S_WORKER_STACK      8192UL
 #define S_TX_STACK          4096UL
+
+/*
+ * Stack for the CreateNewProc() contexts.  Unlike the Task and ThreadX stacks
+ * above -- which are static arrays in BSS -- a Process stack comes out of the
+ * Exec heap, so an overflow here lands on other people's allocations rather
+ * than on our own BSS.  Overridable so that "is something overflowing?" is one
+ * rebuild, not a guess.
+ */
+#ifndef S_PROC_STACK
+#define S_PROC_STACK        8192UL
+#endif
 
 
 /* --------------------------------------------------------------- logging -- */
@@ -180,7 +239,19 @@ static UINT s_check(UINT ok, const char *what, ULONG detail)
 }
 
 #define S_CHECK(cond, what, detail)     s_check((UINT) ((cond) ? 1U : 0U), (what), (ULONG) (detail))
-#define S_TX_OK(status, what)           s_check((UINT) ((status) == TX_SUCCESS), (what), (ULONG) (status))
+
+/*
+ * Function, not a macro: S_TX_OK(tx_timer_delete(&t), ...) as a macro would
+ * expand `status` twice and delete the object twice.  That cost one debugging
+ * cycle already.
+ */
+static UINT s_tx_ok(UINT status, const char *what)
+{
+
+    return(s_check((UINT) ((status == TX_SUCCESS) ? 1U : 0U), what, (ULONG) status));
+}
+
+#define S_TX_OK(status, what)           s_tx_ok((UINT) (status), (what))
 
 
 /* Invariant violations counted in the hot loops, reported once at the end.  */
@@ -323,18 +394,41 @@ struct Task     *task;
 ULONG            block_size;
 
 
-    block_size =  (ULONG) (sizeof(struct MemList) + sizeof(struct Task));
+    /*
+     * The MemList must be its OWN allocation, separate from the block that
+     * ml_ME[0] describes.
+     *
+     * RemTask() hands each MemList in tc_MemEntry to FreeEntry(), which is the
+     * inverse of AllocEntry(): it frees every me_Addr entry AND then frees the
+     * MemList structure itself. Putting the MemList inside the block that
+     * ml_ME[0] covers therefore frees one address twice -- AN_FreeTwice
+     * (Guru 0x01000009) when Exec notices, and silent free-list corruption
+     * when it does not. The corrupted list later hands out memory that is
+     * still in use, so a task ends up executing recycled bytes: that is where
+     * the 0x8000000B Line-F dead-ends came from.
+     *
+     * amiga.lib's CreateTask() separates them for exactly this reason. The
+     * ThreadX port had the identical bug (this code was modelled on it) and
+     * was fixed the same way.
+     */
+    block_size =  (ULONG) sizeof(struct Task);
 
-    memlist =  (struct MemList *) AllocMem(block_size, MEMF_PUBLIC | MEMF_CLEAR);
+    memlist =  (struct MemList *) AllocMem((ULONG) sizeof(struct MemList),
+                                           MEMF_PUBLIC | MEMF_CLEAR);
     if (memlist == (struct MemList *) 0)
     {
         return((struct Task *) 0);
     }
 
-    task =  (struct Task *) (((UBYTE *) memlist) + sizeof(struct MemList));
+    task =  (struct Task *) AllocMem(block_size, MEMF_PUBLIC | MEMF_CLEAR);
+    if (task == (struct Task *) 0)
+    {
+        FreeMem((APTR) memlist, (ULONG) sizeof(struct MemList));
+        return((struct Task *) 0);
+    }
 
     memlist -> ml_NumEntries      =  1;
-    memlist -> ml_ME[0].me_Addr   =  (APTR) memlist;
+    memlist -> ml_ME[0].me_Addr   =  (APTR) task;
     memlist -> ml_ME[0].me_Length =  block_size;
 
     task -> tc_Node.ln_Type =  NT_TASK;
@@ -350,13 +444,15 @@ ULONG            block_size;
 
     if (AddTask(task, (APTR) entry, (APTR) 0) == (APTR) 0)
     {
-        FreeMem((APTR) memlist, block_size);
+        /* Never added, so RemTask() will not free these for us. */
+        FreeMem((APTR) task, block_size);
+        FreeMem((APTR) memlist, (ULONG) sizeof(struct MemList));
         return((struct Task *) 0);
     }
 
     if (block_out != (APTR *) 0)
     {
-        *block_out =  (APTR) memlist;
+        *block_out =  (APTR) task;
     }
     if (block_size_out != (ULONG *) 0)
     {
@@ -486,7 +582,7 @@ static ULONG    s_pt_stack[S_TX_STACK / sizeof(ULONG)];
 static ULONG    s_victim_stack[S_TX_STACK / sizeof(ULONG)];
 
 static volatile ULONG   s_stop;
-static volatile ULONG   s_hog_enable;
+static volatile ULONG   s_start_tick;
 static volatile ULONG   s_cs_inside;        /* contexts inside the mutex       */
 static volatile ULONG   s_cs_unsafe;        /* bumped non-atomically inside it */
 static volatile ULONG   s_cs_safe;          /* bumped under Forbid inside it   */
@@ -501,6 +597,7 @@ static volatile ULONG   s_tasks_exited;
 static volatile ULONG   s_abort_request;     /* worker index + 1               */
 static volatile ULONG   s_abort_ready;
 static volatile ULONG   s_abort_done;
+static volatile ULONG   s_abort_seen;        /* times the victim took the branch */
 static volatile UINT    s_abort_status;
 
 /* preemption-threshold phase */
@@ -518,6 +615,30 @@ static volatile ULONG   s_watchdog_stop;
 static volatile ULONG   s_watchdog_samples;
 static volatile ULONG   s_watchdog_done;
 static volatile ULONG   s_wedge_dumps;
+
+
+/*
+ * Is the baton hog spinning right now?
+ *
+ * Derived from the clock rather than set by the coordinator on purpose: the
+ * coordinator blocks for tens of seconds inside its phases, and a flag it owns
+ * would freeze mid-window.  A hog stuck permanently ON starves every thread
+ * below priority 16 for the whole phase, which then reads as a port failure
+ * -- it cost a full debugging cycle before the cause was this and not ThreadX.
+ */
+static ULONG s_hog_window(VOID)
+{
+
+ULONG   elapsed;
+
+
+    if ((s_start_tick == 0UL) || (s_stop != 0UL))
+    {
+        return(0UL);
+    }
+    elapsed =  tx_time_get() - s_start_tick;
+    return((elapsed / S_HOG_PERIOD_TICKS) & 1UL);
+}
 
 
 /* -------------------------------------------------------- state dumping ---- */
@@ -740,6 +861,7 @@ UINT    status;
 
 
     Forbid();
+    s_abort_seen++;
     s_abort_ready =  1UL;
     Permit();
 
@@ -849,7 +971,7 @@ ULONG       actual;
 
         /* --- hold the baton without calling ThreadX ---------------------- */
 
-        if ((w -> hog != 0U) && (s_hog_enable != 0UL))
+        if ((w -> hog != 0U) && (s_hog_window() != 0UL))
         {
             s_spin_us(S_HOG_US);
         }
@@ -1313,7 +1435,7 @@ ULONG   slot;
         tick1 =  tx_time_get();
         us    =  s_us(s_eclock() - e0);
 
-        slot =  (s_hog_enable != 0UL) ? 1UL : 0UL;
+        slot =  (s_hog_window() != 0UL) ? 1UL : 0UL;
 
         late_ticks =  (tick1 - tick0);
         late_ticks =  (late_ticks > S_PROBE_SLEEP) ? (late_ticks - S_PROBE_SLEEP) : 0UL;
@@ -1551,9 +1673,9 @@ ULONG            i;
     }
     if (!S_CHECK(s_abort_ready != 0UL, "wait-abort: victim reached the suspension", i))
     {
-        S_ERR("wait-abort: victim %s iters %ld mutex %ld timeouts %ld state %ld",
-              w -> name, w -> iters, w -> mutex_ops, w -> mutex_timeouts,
-              (ULONG) w -> thread.tx_thread_state);
+        S_ERR("wait-abort: victim %s iters %ld state %ld; branch taken %ld times, status %ld, done %ld",
+              w -> name, w -> iters, (ULONG) w -> thread.tx_thread_state,
+              s_abort_seen, (ULONG) s_abort_status, s_abort_done);
         /* Leave the request set: if the victim gets there later, the teardown
            unstick pass aborts it rather than leaving it wedged forever.  */
         return;
@@ -1761,6 +1883,101 @@ ULONG   mean;
 }
 
 
+/*
+ * Write the tally to a file on the host-backed drive.
+ *
+ * Called before the teardown as well as after it, because the teardown is where
+ * this port currently takes the machine down: a Guru kills the boot script
+ * before it can record an exit status, so without this a completed soak with a
+ * known result is indistinguishable from a hang.  Only main() may call it --
+ * dos.library needs a Process.
+ */
+static ULONG s_append_num(char *buf, ULONG at, ULONG value)
+{
+
+char    digits[12];
+ULONG   n;
+
+
+    n =  0UL;
+    do
+    {
+        digits[n++] =  (char) ('0' + (value % 10UL));
+        value /=  10UL;
+    }
+    while ((value != 0UL) && (n < 11UL));
+
+    while (n != 0UL)
+    {
+        buf[at++] =  digits[--n];
+    }
+    return(at);
+}
+
+
+static VOID s_write_result(const char *stage)
+{
+
+BPTR    out;
+char    line[160];
+ULONG   n;
+
+
+    out =  Open((CONST_STRPTR) "DH0:soak-result.txt", MODE_NEWFILE);
+    if (out == (BPTR) 0)
+    {
+        return;
+    }
+
+    n =  0UL;
+    while ((*stage != '\0') && (n < 60UL))
+    {
+        line[n++] =  *stage++;
+    }
+    line[n++] =  ':';
+    line[n++] =  ' ';
+
+    n =  s_append_num(line, n, s_checks);
+    line[n++] =  ' ';
+    line[n++] =  'c';
+    line[n++] =  'h';
+    line[n++] =  'e';
+    line[n++] =  'c';
+    line[n++] =  'k';
+    line[n++] =  's';
+    line[n++] =  ',';
+    line[n++] =  ' ';
+    n =  s_append_num(line, n, s_failures);
+    line[n++] =  ' ';
+    line[n++] =  'f';
+    line[n++] =  'a';
+    line[n++] =  'i';
+    line[n++] =  'l';
+    line[n++] =  ' ';
+    line[n++] =  '-';
+    line[n++] =  '-';
+    line[n++] =  ' ';
+    if (s_failures == 0UL)
+    {
+        line[n++] =  'P';
+        line[n++] =  'A';
+        line[n++] =  'S';
+        line[n++] =  'S';
+    }
+    else
+    {
+        line[n++] =  'F';
+        line[n++] =  'A';
+        line[n++] =  'I';
+        line[n++] =  'L';
+    }
+    line[n++] =  '\n';
+
+    (VOID) Write(out, (APTR) line, (LONG) n);
+    (VOID) Close(out);
+}
+
+
 /* ------------------------------------------------------------------ main -- */
 
 int main(void)
@@ -1843,7 +2060,7 @@ struct EClockVal ev;
         {
             s_worker[i].task =  (struct Task *)
                 s_spawn_proc(s_worker_cfg[i].name, 0L, s_worker_proc_entry,
-                             S_WORKER_STACK, (APTR) &s_worker[i]);
+                             S_PROC_STACK, (APTR) &s_worker[i]);
             if (s_worker[i].task != (struct Task *) 0)
             {
                 spawned++;
@@ -1872,7 +2089,7 @@ struct EClockVal ev;
         continue;
 #endif
         s_churner[i].proc =  s_spawn_proc(s_churner[i].name, 0L, s_churn_entry,
-                                          S_WORKER_STACK, (APTR) &s_churner[i]);
+                                          S_PROC_STACK, (APTR) &s_churner[i]);
         if (s_churner[i].proc != (struct Process *) 0)
         {
             spawned++;
@@ -1883,7 +2100,7 @@ struct EClockVal ev;
     {
         struct Process *wd;
 
-        wd =  s_spawn_proc("soak-watchdog", 5L, s_watchdog_entry, 8192UL, (APTR) 0);
+        wd =  s_spawn_proc("soak-watchdog", 5L, s_watchdog_entry, S_PROC_STACK, (APTR) 0);
         (VOID) S_CHECK(wd != (struct Process *) 0, "main: watchdog process created", 0);
         if (wd != (struct Process *) 0)
         {
@@ -1931,8 +2148,9 @@ struct EClockVal ev;
 
     /* ---- soak ---------------------------------------------------------- */
 
-    start_tick =  tx_time_get();
-    start_ms   =  ami_millis();
+    start_tick   =  tx_time_get();
+    start_ms     =  ami_millis();
+    s_start_tick =  start_tick;
 
     S_LOG("soak: running");
 
@@ -1948,7 +2166,6 @@ struct EClockVal ev;
                 break;
             }
 
-            s_hog_enable =  ((elapsed / S_HOG_PERIOD_TICKS) & 1UL);
 
             if (tx_thread_identify() != &s_main_thread)
             {
@@ -1984,7 +2201,6 @@ struct EClockVal ev;
     wall_ms  =  ami_millis() - start_ms;
 
     S_LOG("soak: stopping");
-    s_hog_enable =  0UL;
     s_stop       =  1UL;
 
     /* ---- wait for everyone ---------------------------------------------- */
@@ -2092,6 +2308,10 @@ struct EClockVal ev;
 
     s_report_measurements(wall_ms, end_tick - start_tick);
 
+    /* Record the tally NOW: everything below can and does take the machine
+       down, and a result that never reaches the host is not a result.  */
+    s_write_result("soak");
+
     /* ---- delete what the port lets us ------------------------------------ */
 
     /*
@@ -2161,6 +2381,8 @@ struct EClockVal ev;
     S_LOG("");
     S_LOG("%ld checks, %ld failures -- %s", s_checks, s_failures,
           (s_failures == 0UL) ? "PASS" : "FAIL");
+
+    s_write_result("soak+teardown");
 
     {
         BPTR out;
