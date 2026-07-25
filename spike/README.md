@@ -4,6 +4,10 @@ Minimal `tx_port.h` / `nx_port.h` / `nx_user.h` used to prove that ThreadX and N
 compile for m68k-amigaos. **Not a working port** — `TX_DISABLE`/`TX_RESTORE` are
 placeholders and no scheduler, timer or driver exists yet.
 
+Provenance: `tx_port.h` and `nx_user.h` are written from scratch; `nx_port.h` is
+`netxduo/ports/linux/gnu/inc/nx_port.h` (MIT, © Microsoft / Eclipse ThreadX
+contributors) with `NX_LITTLE_ENDIAN` removed for big-endian m68k.
+
 Reproduce (with `netxduo` and `threadx` checked out beside this repo):
 
 ```sh
