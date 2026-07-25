@@ -4,32 +4,51 @@
  * CHOICE OF VARIANT
  *
  *   Koc, Acar and Kaliski ("Analyzing and Comparing Montgomery Multiplication
- *   Algorithms", IEEE Micro 16(3), 1996) name five ways to interleave the
- *   multiplication and the reduction.  All five do the same 2s^2 + s limb
- *   multiplications; they differ in memory traffic and temporary space.
+ *   Algorithms", IEEE Micro 16(3), 1996,
+ *   https://www.microsoft.com/en-us/research/wp-content/uploads/1996/01/j37acmon.pdf)
+ *   name five ways to interleave the multiplication and the reduction.  All
+ *   five perform the same 2s^2 + s limb multiplications; they differ only in
+ *   memory traffic and temporary space.  Their measurements make CIOS the
+ *   default recommendation, and SOS a close second at twice the scratch.
  *
- *   c68k_mont_mul() is CIOS: s+2 words of temporary space, and the divide-by-
- *   radix shift falls out of writing the reduction one word lower than it
- *   reads.  On a machine with eight data registers, no data cache (68020) or
- *   256 bytes of it (68030), and a 44-cycle multiply, the variant that touches
- *   memory least and keeps its whole working set in registers is the right
- *   one.  Nothing here is Karatsuba: at 64 limbs the crossover is not reached
- *   on a CPU where a multiply is only ~6x an add.
+ *   This module uses SOS -- full product first, then reduce in place -- for a
+ *   reason specific to the 68020, and it is worth writing down because it
+ *   contradicts the paper's headline advice.
  *
- *   c68k_mont_sqr() is deliberately NOT CIOS.  A dedicated squaring pass needs
- *   the whole product at once (it computes the off-diagonal terms once and
- *   doubles them), so it uses the separated form -- SOS in the same taxonomy:
- *   full square into 2s words, then reduce in place.  That costs s(s+1)/2 + s
- *   limb multiplies for the square instead of s^2, so a Montgomery square is
- *   about 3/4 of a Montgomery multiply.  In an exponentiation nearly every
- *   operation is a squaring, so this is worth the extra s words of scratch.
+ *   The fast multiply-accumulate on this machine (see c68k_prim.S) is GMP's
+ *   two-limb loop, whose speed comes from `ADD.L Dn,(An)+`: a read-modify-
+ *   write straight into the accumulator, with the memory carry folded into the
+ *   next limb through the X flag.  That instruction only exists when the
+ *   destination IS the source.  CIOS's second inner loop writes one limb below
+ *   where it reads -- that displacement is how CIOS gets its divide-by-radix
+ *   for free -- so half of all limb products would have to use a slower
+ *   two-pointer loop.  SOS keeps every one of its 2s^2 products in the
+ *   read-modify-write form; the shift disappears because the reduction's
+ *   window into the 2s-limb product moves instead of the data.
+ *
+ *   So: CIOS wins on paper and SOS wins here, because the paper counts memory
+ *   operations and this machine cares which addressing mode they use.
+ *
+ *   Not Karatsuba.  GMP's own tuning file for this architecture puts the
+ *   crossover at 14 limbs on a 68040, but the Montgomery reduction is a chain
+ *   of scalar-by-vector products and is not Karatsuba-able at all, so only
+ *   half the work is eligible; at the 32-limb halves an RSA-2048 CRT operation
+ *   actually runs, one level buys about 5%.  Not worth the scratch or the risk.
+ *
+ * WHY SQUARING IS A SEPARATE ROUTINE
+ *
+ *   The off-diagonal products of a square each appear twice, so the product
+ *   phase costs s(s+1)/2 instead of s^2 (HAC Algorithm 14.16).  The reduction
+ *   is unchanged, so a Montgomery square is (s^2 + 3s/2) / (2s^2 + s), about
+ *   76% of a Montgomery multiply -- not half.  In a sliding-window
+ *   exponentiation almost every operation is a squaring, which is what makes
+ *   a 24% saving on it worth having.
  *
  * BIT-FOR-BIT
  *
- *   Both routines produce exactly what _nx_crypto_huge_number_mont() produces
- *   for the same inputs, including the final conditional subtraction.  That is
- *   not a claim, it is what tests/crypto68k/rsa_test checks over thousands of
- *   random operand pairs.
+ *   Both routines produce exactly what _nx_crypto_huge_number_mont() produces,
+ *   including the final conditional subtraction.  That is not a claim; it is
+ *   what tests/crypto68k/rsa_test checks over thousands of random operands.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -47,10 +66,10 @@ UINT        i;
 
 
     /*
-     * Newton iteration on inv = m0^-1 mod 2^k: each step doubles the number of
+     * Newton iteration for m0^-1 mod 2^k: each step doubles the number of
      * correct bits.  Seeding with m0 itself is correct to 3 bits for odd m0
-     * (Dusse and Kaliski), so 3 -> 6 -> 12 -> 24 -> 48 covers 32 bits in four
-     * steps; a fifth is free insurance and costs one multiply, once per
+     * (Dusse and Kaliski, EUROCRYPT'90), so 3 -> 6 -> 12 -> 24 -> 48 covers
+     * 32 bits in four steps; the fifth is free insurance, once per
      * exponentiation.
      */
     inv = m0;
@@ -59,7 +78,7 @@ UINT        i;
         inv = inv * (2u - (m0 * inv));
     }
 
-    /* The reduction wants -m0^-1, i.e. the value u for which r0 + u*m0 == 0. */
+    /* The reduction wants -m0^-1: the u for which t[0] + u*m[0] == 0 mod 2^32. */
     return((c68k_limb)(0u - inv));
 }
 
@@ -67,29 +86,77 @@ UINT        i;
 /* ------------------------------------------------------- final reduction -- */
 
 /*
- * r holds m_len+1 limbs and is known to be < 2*m.  Reduce it to m_len limbs
- * mod m and copy to out.
+ * high holds m_len+1 limbs and is known to be < 2m.  Reduce to m_len limbs and
+ * copy to out.  This is the one conditional branch on secret data that
+ * Montgomery multiplication always has.
  */
-static VOID c68k_mont_final(c68k_limb *out, c68k_limb *r,
+static VOID c68k_mont_final(c68k_limb *out, c68k_limb *high,
                             const c68k_limb *m, UINT m_len)
 {
 
 UINT    i;
 
 
-    if ((r[m_len] != 0) || (c68k_cmp(r, m, m_len) >= 0))
+    if ((high[m_len] != 0) || (c68k_cmp(high, m, m_len) >= 0))
     {
-        (VOID) c68k_sub(r, m, m_len);
+        (VOID) c68k_sub(high, m, m_len);
     }
 
     for (i = 0; i < m_len; i++)
     {
-        out[i] = r[i];
+        out[i] = high[i];
     }
 }
 
 
-/* -------------------------------------------------------------- CIOS mul -- */
+/* ------------------------------------------------------ SOS reduction ----- */
+
+/*
+ * t holds 2*m_len+1 limbs and is < m*R.  Add multiples of m until the low half
+ * is zero; the answer is then t[m_len .. 2*m_len], which is < 2m.
+ */
+static VOID c68k_mont_reduce(c68k_limb *t, const c68k_limb *m, UINT m_len,
+                             c68k_limb n0inv)
+{
+
+UINT        i;
+UINT        j;
+UINT        top;
+c68k_limb   u;
+c68k_limb   carry;
+c68k_limb   sum;
+
+
+    top = m_len << 1;
+
+    for (i = 0; i < m_len; i++)
+    {
+        /* u * m zeroes t[i] and adds a multiple of m, preserving the residue. */
+        u = (c68k_limb)(t[i] * n0inv);
+
+        carry = c68k_addmul_1(&t[i], m, m_len, u);
+
+        /*
+         * Propagate into the limbs above.  The first addition almost always
+         * absorbs it; the loop is here because "almost always" is how
+         * multi-precision bugs are born.  The bound cannot be reached -- the
+         * running value stays below 2*m*R, so t[top] is 0 or 1 -- but a bound
+         * that is never hit still beats a buffer overrun if the analysis is
+         * ever wrong.
+         */
+        j = i + m_len;
+        while ((carry != 0) && (j <= top))
+        {
+            sum   = t[j] + carry;
+            carry = (sum < carry) ? 1u : 0u;
+            t[j]  = sum;
+            j++;
+        }
+    }
+}
+
+
+/* ------------------------------------------------------------ multiply ---- */
 
 VOID c68k_mont_mul(c68k_limb *r,
                    const c68k_limb *x, const c68k_limb *y,
@@ -98,86 +165,47 @@ VOID c68k_mont_mul(c68k_limb *r,
 {
 
 UINT        i;
-c68k_limb   xi;
-c68k_limb   u;
-c68k_limb   carry;
-HN_UBASE2   product;
+UINT        total;
 c68k_limb  *t = work;
 
 
-    for (i = 0; i <= (m_len + 1); i++)
+    total = m_len << 1;
+
+    for (i = 0; i <= total; i++)
     {
         t[i] = 0;
     }
 
+    /*
+     * t = x * y, one row at a time.  The carry out of row i lands in
+     * t[i+m_len], which no earlier row has touched -- row i' writes at most
+     * t[i'+m_len] -- so storing it is the same as adding it.
+     */
     for (i = 0; i < m_len; i++)
     {
-        xi = x[i];
-
-        /* t[0..m_len-1] += xi * y, carry out into t[m_len]. */
-        carry = c68k_mul_acc(t, t, y, m_len, xi, 0);
-
-        /*
-         * t[m_len] += carry, into t[m_len+1] if it overflows.
-         *
-         * The loop invariant is t <= 2m-1 at the top of every iteration, so
-         * the value only needs m_len+1 limbs there -- but BETWEEN the product
-         * and the reduction it can reach m*(2^32+2), which needs one more.
-         * The vendored routine has only m_len+1 limbs and drops the overflow;
-         * that is unreachable unless the top limb of the modulus is
-         * 0xFFFFFFFF (probability 2^-32 for an RSA modulus), which is why it
-         * has never been seen.  Carrying the extra limb costs one add per
-         * outer iteration, so this keeps it rather than reproducing the edge.
-         */
-        product  = (HN_UBASE2)t[m_len] + (HN_UBASE2)carry;
-        t[m_len] = (c68k_limb)product;
-        t[m_len + 1] += (c68k_limb)(product >> 32);
-
-        /*
-         * u = t[0] * n0inv mod 2^32 makes t[0] + u*m[0] a multiple of the
-         * radix, so the low limb of the reduction is discarded rather than
-         * stored -- which is where the free shift comes from.
-         */
-        u = (c68k_limb)(t[0] * n0inv);
-
-        product = (HN_UBASE2)t[0] + ((HN_UBASE2)u * (HN_UBASE2)m[0]);
-        carry   = (c68k_limb)(product >> 32);
-
-        /*
-         * t[j-1] = t[j] + u*m[j] + carry, for j = 1..m_len-1.  dst is src-1:
-         * the divide by the radix, done by the store address.
-         */
-        carry = c68k_mul_acc(t, t + 1, m + 1, m_len - 1, u, carry);
-
-        /* Top limbs: no m limb left to multiply, just the carry. */
-        product      = (HN_UBASE2)t[m_len] + (HN_UBASE2)carry;
-        t[m_len - 1] = (c68k_limb)product;
-        product      = (product >> 32) + (HN_UBASE2)t[m_len + 1];
-        t[m_len]     = (c68k_limb)product;
-        t[m_len + 1] = (c68k_limb)(product >> 32);
+        t[i + m_len] = c68k_addmul_1(&t[i], y, m_len, x[i]);
     }
 
-    c68k_mont_final(r, t, m, m_len);
+    c68k_mont_reduce(t, m, m_len, n0inv);
+    c68k_mont_final(r, &t[m_len], m, m_len);
 }
 
 
-/* -------------------------------------------------------------- SOS sqr --- */
+/* -------------------------------------------------------------- square ---- */
 
 /*
  * t[0..2n-1] = x[0..n-1]^2.
  *
- * The off-diagonal products x[i]*x[j] with i < j each appear twice in the
- * square, so they are accumulated once, the whole thing is doubled, and the
- * diagonal x[i]^2 terms are added afterwards.  n(n-1)/2 + n multiplies instead
- * of n^2.  This is the same algorithm the vendored _nx_crypto_huge_number_square
- * uses, which is why the two agree limb for limb.
+ * The off-diagonal products x[i]*x[j], i < j, each appear twice, so they are
+ * accumulated once, the whole thing is doubled, and the x[i]^2 diagonal is
+ * added afterwards.  Same algorithm as the vendored
+ * _nx_crypto_huge_number_square, which is why the two agree limb for limb.
  */
 static VOID c68k_sqr(c68k_limb *t, const c68k_limb *x, UINT n)
 {
 
 UINT        i;
 UINT        total;
-c68k_limb   carry;
 HN_UBASE2   product;
 
 
@@ -188,16 +216,12 @@ HN_UBASE2   product;
         t[i] = 0;
     }
 
-    /* Upper triangle: t[i+j] += x[i]*x[j] for j > i. */
     for (i = 0; i < n; i++)
     {
-        carry = c68k_mul_acc(&t[(i << 1) + 1], &t[(i << 1) + 1],
-                             &x[i + 1], n - i - 1, x[i], 0);
-        t[i + n] = carry;
+        t[i + n] = c68k_addmul_1(&t[(i << 1) + 1], &x[i + 1], n - i - 1, x[i]);
     }
 
-    /* Double it.  The top limb of the triangle sum is always 0, so nothing
-       falls off the end. */
+    /* Double.  The top limb of the triangle sum is 0, so nothing falls off. */
     for (i = total - 1; i > 0; i--)
     {
         t[i] = (c68k_limb)((t[i] << 1) | (t[i - 1] >> 31));
@@ -224,43 +248,12 @@ VOID c68k_mont_sqr(c68k_limb *r,
                    c68k_limb *work)
 {
 
-UINT        i;
-UINT        j;
-c68k_limb   u;
-c68k_limb   carry;
-c68k_limb  *t = work;          /* 2*m_len + 1 limbs */
+c68k_limb  *t = work;
 
 
     c68k_sqr(t, x, m_len);
     t[m_len << 1] = 0;
 
-    /*
-     * Montgomery reduction in place.  For each low limb, add a multiple of m
-     * that zeroes it; after m_len rounds the low half is zero and the answer
-     * is the high half.  Unlike CIOS there is no shifting -- the window into
-     * t moves instead.
-     */
-    for (i = 0; i < m_len; i++)
-    {
-        u = (c68k_limb)(t[i] * n0inv);
-
-        carry = c68k_mul_acc(&t[i], &t[i], m, m_len, u, 0);
-
-        /*
-         * Propagate into the limbs above.  The first addition almost always
-         * absorbs it; the loop is here because "almost always" is how
-         * multi-precision bugs are born.
-         */
-        j = i + m_len;
-        while ((carry != 0) && (j <= (m_len << 1)))
-        {
-            c68k_limb   sum = t[j] + carry;
-
-            carry = (sum < carry) ? 1u : 0u;
-            t[j]  = sum;
-            j++;
-        }
-    }
-
+    c68k_mont_reduce(t, m, m_len, n0inv);
     c68k_mont_final(r, &t[m_len], m, m_len);
 }

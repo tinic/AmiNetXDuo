@@ -134,6 +134,9 @@
 /* NetX Duo's listen queue depth for a bound port. */
 #define BSD_MAX_BACKLOG          8
 
+/* TCP receive window, sized for the 68020/4 MB floor. */
+#define BSD_TCP_WINDOW        8192
+
 /* Room for one dotted quad plus terminator, used by Inet_NtoA(). */
 #define BSD_NTOA_BUFLEN         16
 
@@ -279,6 +282,8 @@ typedef struct AmiSocket
 
     ULONG                   as_RcvTimeout;  /* ticks; 0 == block forever     */
     ULONG                   as_SndTimeout;
+    LONG                    as_RcvBuf;      /* SO_RCVBUF, as the caller set  */
+    LONG                    as_SndBuf;      /* SO_SNDBUF, as the caller set  */
     LONG                    as_LingerOn;
     LONG                    as_LingerTime;
     LONG                    as_Ttl;
@@ -347,7 +352,9 @@ VOID  bsd_sockaddr_out(struct sockaddr *sa, socklen_t *len,
  */
 VOID  bsd_events_attach(AmiSocket *sock);
 VOID  bsd_event_post(AmiSocket *sock, ULONG events);
+VOID  bsd_event_refresh(AmiSocket *sock);
 VOID  bsd_listen_callback(NX_TCP_SOCKET *socket_ptr, UINT port);
+VOID  bsd_tcp_disconnect_callback(NX_TCP_SOCKET *socket_ptr);
 BOOL  bsd_readable(AmiSocket *sock);
 BOOL  bsd_writable(AmiSocket *sock);
 BOOL  bsd_exception(AmiSocket *sock);

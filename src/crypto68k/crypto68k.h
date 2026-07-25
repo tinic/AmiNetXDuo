@@ -32,8 +32,23 @@
  *
  *   4. The limb multiply-accumulate loop is hand-written 68020 assembly.  GCC
  *      does emit MULU.L for the portable C (verified -- see the header comment
- *      in c68k_prim.S), but wraps it in ~9 instructions of register shuffling
- *      it does not need.
+ *      in c68k_prim.S), so this is the SMALLEST of the four levers, not the
+ *      largest: it is worth 1.4x, and MULU.L's 44 cycles are the floor.
+ *
+ * MEASURED, emulated 68020, tests/crypto68k/crypto68k_bench, every timed
+ * result checked against the vendored code in the same run:
+ *
+ *     limb multiply-accumulate, 64 limbs   373 us  ->    264 us    1.4x
+ *     Montgomery multiply, 2048 bit      52.17 ms  ->  34.36 ms    1.5x
+ *     Montgomery square,   2048 bit      52.17 ms  ->  26.90 ms    1.9x
+ *     RSA-2048 public, e=65537            2.011 s  ->  0.681 s     2.9x
+ *     RSA-2048 private, CRT              44.75 s   -> 20.05 s      2.2x
+ *     RSA-2048 private, plain           160.83 s   -> 66.40 s      2.4x
+ *
+ * Ratios, not absolutes, are the trustworthy figures -- FS-UAE's 68020 is not
+ * a 14 MHz A1200 and its 68030 model is not a timing model at all (the same
+ * binary on the same input produced 597 ms and 337 ms for the same CRT
+ * measurement on consecutive runs).
  *
  * CONSTANT TIME: NO.  See the note above c68k_mont_power_modulus().
  *
@@ -78,6 +93,14 @@ typedef HN_UBASE    c68k_limb;
 c68k_limb c68k_addmul_1(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a);
 
 /*
+ * The portable C version, always present under its own name whichever build
+ * option is in force.  The benchmark times the two against each other in one
+ * run, because a ratio measured back to back is the only figure an inexact
+ * emulator does not distort.
+ */
+c68k_limb c68k_addmul_1_c(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a);
+
+/*
  * dst[j] = src[j] + carry, for j in 0..n-1.  Returns the final carry (0 or 1
  * after the first limb).  dst may alias src.
  */
@@ -111,14 +134,13 @@ c68k_limb c68k_mont_n0inv(c68k_limb m0);
 /*
  * r = x * y * R^-1 mod m, where R = 2^(32*m_len).
  *
- * x and y must both be < m and exactly m_len limbs (zero padded).  r is
- * m_len limbs.  work is scratch of at least (m_len + 2) limbs and must not
- * alias anything else.
+ * y must be < m; x need only be m_len limbs.  r is m_len limbs and MAY alias
+ * x or y (both are fully consumed before r is written).  work is scratch of at
+ * least (2 * m_len + 2) limbs and must not alias anything.
  *
- * This is CIOS (Koc/Acar/Kaliski's Coarsely Integrated Operand Scanning): the
- * variant with the fewest memory operations and only s+2 words of temporary
- * space, which is what a machine with eight data registers and no data cache
- * wants.
+ * Separated form (SOS in Koc/Acar/Kaliski's taxonomy) rather than the usually
+ * recommended CIOS -- see the header comment in c68k_mont.c for why the 68020
+ * inverts that advice.
  */
 VOID c68k_mont_mul(c68k_limb *r,
                    const c68k_limb *x, const c68k_limb *y,
@@ -126,9 +148,8 @@ VOID c68k_mont_mul(c68k_limb *r,
                    c68k_limb *work);
 
 /*
- * r = x * x * R^-1 mod m.  Same contract as c68k_mont_mul, except that work
- * must be at least (2 * m_len + 2) limbs: this is the separated (SOS) form,
- * because a dedicated squaring pass is only possible on a full product.
+ * r = x * x * R^-1 mod m.  Same contract as c68k_mont_mul; ~76% of its cost,
+ * because the off-diagonal products of a square are computed once and doubled.
  */
 VOID c68k_mont_sqr(c68k_limb *r,
                    const c68k_limb *x,
@@ -204,6 +225,26 @@ VOID c68k_huge_number_mont_power_modulus(NX_CRYPTO_HUGE_NUMBER *x,
                                          NX_CRYPTO_HUGE_NUMBER *result,
                                          HN_UBASE *scratch,
                                          UINT scratch_limbs);
+
+/*
+ * RSA private operation via the Chinese Remainder Theorem: the vendored
+ * _nx_crypto_huge_number_crt_power_modulus() with the two exponentiations
+ * replaced.  `scratch` is the huge-number bump area the vendored routine
+ * wants; powm_scratch is this module's, kept separate so the two allocators
+ * cannot overlap.
+ *
+ * CRT is worth ~3.6x on its own, measured, and multiplies with everything
+ * else here.  See the header comment in c68k_crt.c for where nx_secure is
+ * currently leaving that on the table.
+ */
+VOID c68k_crt_power_modulus(NX_CRYPTO_HUGE_NUMBER *x,
+                            NX_CRYPTO_HUGE_NUMBER *e,
+                            NX_CRYPTO_HUGE_NUMBER *p,
+                            NX_CRYPTO_HUGE_NUMBER *q,
+                            NX_CRYPTO_HUGE_NUMBER *m,
+                            NX_CRYPTO_HUGE_NUMBER *result,
+                            HN_UBASE *scratch,
+                            HN_UBASE *powm_scratch, UINT powm_scratch_limbs);
 
 #ifdef __cplusplus
 }

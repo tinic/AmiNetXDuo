@@ -17,9 +17,12 @@
 
 #include "crypto68k.h"
 
-#ifndef C68K_ASM
-
-c68k_limb c68k_addmul_1(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a)
+/*
+ * Always compiled, under its own name, even in an assembly build: the
+ * benchmark measures the two against each other in the same run, which is the
+ * only comparison the emulator does not distort.
+ */
+c68k_limb c68k_addmul_1_c(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a)
 {
 
 UINT        j;
@@ -46,6 +49,15 @@ HN_UBASE2   product;
     }
 
     return((c68k_limb)(product >> 32));
+}
+
+
+#ifndef C68K_ASM
+
+c68k_limb c68k_addmul_1(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a)
+{
+
+    return(c68k_addmul_1_c(r, b, n, a));
 }
 
 

@@ -25,31 +25,54 @@
 |       1b10:  b1cc       cmpal a4,a0
 |       1b12:  66d6       bnes 1aea
 |
-|   (Note for anyone repeating this: the default objdump architecture is plain
-|   68000, which cannot decode MULU.L and prints it as `.short 0x4c06`.  Pass
+|   (If you repeat this: objdump's default architecture is plain 68000, which
+|   cannot decode MULU.L and prints it as `.short 0x4c06`.  Pass
 |   `-m m68k:68020` or you will conclude there is no multiply at all.)
 |
-|   So there is no __muldi3 helper call to eliminate -- the ISA-level question
-|   has a good answer.  What is left is nineteen instructions where ten will
-|   do: xi is reloaded from the stack every iteration, a zero register is
-|   rematerialised inside the loop, and the carry is folded into the high half
-|   with a NEGX/NEG pair instead of by choosing the right register in the first
-|   place.  Roughly 101 cycles per limb against 75 for the loop below, on a
-|   68020 where MULU.L itself is 44 of them.
+|   So there is NO __muldi3 helper call to eliminate.  That matters for
+|   calibration against the prior art: when Howard Chu measured his 68k bignum
+|   assembly at "over 4x faster than gcc -O3" in 2002 (openssl-dev, "M68020
+|   bn_asm", https://marc.info/?l=openssl-dev&m=101407286200398&w=2 -- the code
+|   that lives on in AmiSSL as crypto/bn/asm/bn_m68k.s), he was measuring
+|   against GCC 2.95, which called a helper.  Against a compiler that emits the
+|   instruction, the headroom is far smaller.  Nineteen instructions per limb
+|   above (seventeen when the same C is compiled standalone, where `a` survives
+|   in a register instead of being spilled) against five and a half below, on a
+|   CPU where MULU.L alone is 44 of the ~101 cycles.  Measured on the emulated
+|   68020, this file is 1.4x the portable C for a 64-limb multiply-accumulate.
+|   Not 4x, and no instruction selection will make it 4x: at 44 cycles of a
+|   ~67 cycle loop, the multiply is the floor and everything else is rounding.
 |
-| WHY THE GAIN IS ONLY ~1.3x
+| WHY THIS LOOP LOOKS THE WAY IT DOES
 |
-|   Because MULU.L dominates.  On a 68020/68030 the 32x32 -> 64 multiply is
-|   ~44 clocks; everything else in the loop together is ~31.  No amount of
-|   instruction selection moves the 44.  That is also why the real wins in this
-|   module are algorithmic (see crypto68k.h) and why Karatsuba is not worth it
-|   here: it trades multiplies for additions at a ratio that only pays off far
-|   above 64 limbs.
+|   The two-limb unroll with the carry ping-ponged between d0 and d1 is GMP's
+|   design, from mpn/m68k/mc68020/aorsmul_1.asm (25 cycles/limb on a 68040);
+|   libgcrypt's mpi/m68k/mc68020/mpih-mul1.S is the same code.  It is better
+|   than the obvious formulation for two reasons:
+|
+|     - alternating the carry register removes a MOVE.L per limb;
+|     - ADDX.L folds the previous limb's memory carry (X) into this limb's
+|       carry add, so one instruction does two jobs.
+|
+|   Nothing between the ADDX chain may disturb the condition codes, which is
+|   why the loop counter is DBRA: it is the only decrement-and-branch on this
+|   machine that leaves CCR alone.  MULU.L and MOVE do not affect X, which is
+|   what makes the fold legal across the multiply.
+|
+| CYCLE COUNTS (MC68020UM section 8.2.8 / MC68030UM section 11.6.8)
+|
+|   MULU.L <ea>,Dh:Dl is 41 best / 43 cached / 44 worst on 68020, and 44 max on
+|   68030.  It is 20 on a 68040.  On a 68060 the 64-bit form is NOT IMPLEMENTED
+|   -- it traps to vector 61 and is emulated in software -- so this file is a
+|   pessimisation there and must not be enabled for a 68060 build.  That is not
+|   a guess: AmiSSL shipped the same discovery in 4.4 ("disabled m68k asm
+|   replacement as it's slower"), and Roberto Ragusa's 1998 PGP 68060 patch got
+|   2x by removing MULU.L.  This project's floor is 68020 (docs/RESEARCH.md 9).
 |
 | REGISTER RULES (m68k-amigaos, stack calling convention)
 |
-|   Arguments on the stack, 4(sp) upward.  Return value in d0.  d0/d1/a0/a1
-|   are scratch; d2-d7 and a2-a6 must be preserved.
+|   Arguments on the stack from 4(sp) upward; return value in d0; d0/d1/a0/a1
+|   are scratch and d2-d7/a2-a6 must be preserved.
 |
 | SPDX-License-Identifier: MIT
 
@@ -59,46 +82,70 @@
         .align  2
 
 | ---------------------------------------------------------------------------
-| c68k_limb c68k_mul_acc(c68k_limb *dst, const c68k_limb *src,
-|                        const c68k_limb *b, UINT n,
-|                        c68k_limb a, c68k_limb carry)
+| c68k_limb c68k_addmul_1(c68k_limb *r, const c68k_limb *b, UINT n,
+|                         c68k_limb a)
 |
-|   for j in 0..n-1:  t = src[j] + a*b[j] + carry
-|                     dst[j] = low(t); carry = high(t)
-|   returns carry
+|   r[0..n-1] += a * b[0..n-1]; returns the carry out.
 |
-| The 64-bit intermediate cannot overflow -- (2^32-1)^2 + 2*(2^32-1) is exactly
-| 2^64-1 -- so the two ADDX.L instructions below can never carry out of d3.
+| The running carry is split across a register (d0 or d1) and the X flag.  The
+| pair is always worth at most 2^32-1 together, so
+|
+|     a*b[j] + (carry_reg + X) + r[j]  <=  (2^32-1)^2 + 2*(2^32-1)  =  2^64-1
+|
+| and neither ADDX can carry out of the high half.
 | ---------------------------------------------------------------------------
 
-        .globl  _c68k_mul_acc
-_c68k_mul_acc:
-        movem.l d2-d5/a2,-(sp)          | 5 longs
-        move.l  24(sp),a0               | dst
-        move.l  28(sp),a1               | src
-        move.l  32(sp),a2               | b
-        move.l  36(sp),d4               | n
-        move.l  40(sp),d0               | a
-        move.l  44(sp),d1               | carry
-        moveq   #0,d5                   | the zero ADDX needs
+        .globl  _c68k_addmul_1
+_c68k_addmul_1:
+        movem.l d2-d5,-(sp)             | 4 longs
+        move.l  20(sp),a0               | r
+        move.l  24(sp),a1               | b
+        move.l  28(sp),d4               | n
+        move.l  32(sp),d2               | a
+        moveq   #0,d0                   | carry, phase A
+        moveq   #0,d1                   | carry, phase B
+        moveq   #0,d5                   | a hard zero for the ADDX sinks
         tst.l   d4
-        beq.s   Lmac_done
+        beq.s   Lam_zero
 
-Lmac_loop:
-        move.l  (a2)+,d2                | b[j]
-        mulu.l  d0,d3:d2                | d3:d2 = a * b[j]
-        add.l   d1,d2                   | + carry in
-        addx.l  d5,d3
-        add.l   (a1)+,d2                | + src[j]
-        addx.l  d5,d3
-        move.l  d2,(a0)+                | dst[j] = low
-        move.l  d3,d1                   | carry = high
-        subq.l  #1,d4
-        bne.s   Lmac_loop
+        move.l  d4,d3
+        lsr.l   #1,d4                   | d4 = n/2   (LSR sets X, cleared below)
+        andi.l  #1,d3                   | d3 = n odd?
+        bne.s   Lam_odd
 
-Lmac_done:
-        move.l  d1,d0
-        movem.l (sp)+,d2-d5/a2
+        subq.l  #1,d4                   | even: n/2 - 1 full passes for DBRA
+        move.l  d5,d3
+        add.l   d5,d3                   | X = 0, and nothing else touches it
+        bra.s   Lam_loop
+
+Lam_odd:
+        move.l  d5,d3
+        add.l   d5,d3                   | X = 0
+        bra.s   Lam_half                | one limb, then n/2 full passes
+
+Lam_loop:
+        move.l  (a1)+,d3                | b[j]        -- MOVE leaves X alone
+        mulu.l  d2,d1:d3                | d1:d3 = a * b[j]   -- as does MULU
+        addx.l  d0,d3                   | + carry + X
+        addx.l  d5,d1
+        add.l   d3,(a0)+                | r[j] += ; X = carry out
+
+Lam_half:
+        move.l  (a1)+,d3
+        mulu.l  d2,d0:d3                | carry now lands in d0
+        addx.l  d1,d3
+        addx.l  d5,d0
+        add.l   d3,(a0)+
+        dbra    d4,Lam_loop             | DBRA leaves CCR alone
+
+        moveq   #0,d3                   | MOVEQ leaves X alone
+        addx.l  d3,d0                   | fold the last memory carry in
+        movem.l (sp)+,d2-d5
+        rts
+
+Lam_zero:
+        moveq   #0,d0
+        movem.l (sp)+,d2-d5
         rts
 
 
@@ -107,7 +154,7 @@ Lmac_done:
 |                          c68k_limb carry)
 |
 | X is consumed by the ADDX immediately after the ADD that sets it, so the
-| SUBQ/BNE loop control below is free to clobber it.
+| SUBQ/BNE loop control here is free to clobber it.
 | ---------------------------------------------------------------------------
 
         .globl  _c68k_add_carry
@@ -137,12 +184,7 @@ Lac_done:
 | ---------------------------------------------------------------------------
 | c68k_limb c68k_sub(c68k_limb *r, const c68k_limb *b, UINT n)
 |
-|   r -= b, returns the borrow out.
-|
-| SUBX chains through X, so nothing between the SUBX instructions may touch
-| the condition codes.  DBRA is the only decrement-and-branch on this machine
-| that leaves them alone, which is why the counter is 16-bit here; n is a limb
-| count of at most a few hundred, so that is not a limitation in practice.
+|   r -= b, returns the borrow out.  DBRA again, for the same CCR reason.
 | ---------------------------------------------------------------------------
 
         .globl  _c68k_sub
@@ -153,18 +195,18 @@ _c68k_sub:
         move.l  20(sp),d0               | n
         tst.l   d0
         beq.s   Lsub_zero
-        subq.l  #1,d0                   | DBRA counts to -1
+        subq.l  #1,d0                   | DBRA counts down to -1
         moveq   #0,d2
         sub.l   d2,d2                   | X = 0
 
 Lsub_loop:
-        move.l  (a1)+,d2                | MOVE leaves X alone
+        move.l  (a1)+,d2
         move.l  (a0),d3
         subx.l  d2,d3
         move.l  d3,(a0)+
         dbra    d0,Lsub_loop
 
-        moveq   #0,d0                   | MOVEQ leaves X alone
+        moveq   #0,d0
         addx.l  d0,d0                   | d0 = borrow
         movem.l (sp)+,d2-d3
         rts
@@ -196,8 +238,8 @@ _c68k_cmp:
         moveq   #0,d0
 
 Lcmp_loop:
-        move.l  -(a1),d0
-        cmp.l   -(a0),d0                | sets flags for a[j] - b[j]
+        move.l  -(a1),d0                | d0 = b[j]
+        cmp.l   -(a0),d0                | d0 - a[j]
         bne.s   Lcmp_diff
         subq.l  #1,d1
         bne.s   Lcmp_loop
@@ -205,7 +247,7 @@ Lcmp_loop:
         rts
 
 Lcmp_diff:
-        bcs.s   Lcmp_greater            | b < a  ->  a is greater
+        bcs.s   Lcmp_greater            | borrow means b[j] < a[j]
         moveq   #-1,d0
         rts
 

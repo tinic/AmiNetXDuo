@@ -19,7 +19,6 @@
 
 #include <proto/exec.h>
 
-#define BSD_TCP_WINDOW      8192        /* receive window, 68020/4 MB floor */
 #define BSD_UDP_QUEUE_MAX   8           /* datagrams queued per socket      */
 
 static char bsd_tcp_name[] = "AmiNetXDuo TCP";
@@ -222,10 +221,20 @@ VOID bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock)
     /*
      * Drop the listen request BEFORE tearing down the socket parked on it,
      * or NetX Duo is left holding a pointer to freed memory.
+     *
+     * The parked socket sits in SYN_RECEIVED, not LISTEN -- bsd_listen() posts
+     * the accept up front so NetX Duo answers a SYN without the application
+     * having called accept(). nx_tcp_server_socket_unlisten() refuses a socket
+     * that is not in LISTEN state, and disconnect() is what winds a *server*
+     * socket back there (nx_tcp_socket_disconnect.c: "Server socket, return to
+     * LISTEN state").
      */
     if ((sock->as_Flags & ASF_LISTENING) != 0)
     {
         NX_IP *ip = netstack_ip();
+
+        if (sock->as_Incoming != NULL)
+            nx_tcp_socket_disconnect(&sock->as_Incoming->as_Nx.tcp, NX_NO_WAIT);
 
         if (ip != NULL)
             nx_tcp_server_socket_unlisten(ip, sock->as_ListenPort);
@@ -361,7 +370,7 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
         status = nx_tcp_socket_create(ip, &sock->as_Nx.tcp, bsd_tcp_name,
                                       NX_IP_NORMAL, NX_FRAGMENT_OKAY,
                                       NX_IP_TIME_TO_LIVE, BSD_TCP_WINDOW,
-                                      NX_NULL, NX_NULL);
+                                      NX_NULL, bsd_tcp_disconnect_callback);
     }
     else
     {
@@ -435,11 +444,44 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
         sock->as_LocalPort = port;
         sock->as_Flags |= ASF_NXBOUND;
     }
-    /*
-     * TCP binds lazily: NetX Duo takes the port at nx_tcp_client_socket_bind
-     * (outbound) or nx_tcp_server_socket_listen (inbound) time, and doing it
-     * here would make the two mutually exclusive.
-     */
+    else
+    {
+        /*
+         * TCP takes the port here too, rather than deferring to connect() or
+         * listen(). BSD binds at bind() time and two things depend on it:
+         * getsockname() after bind(port 0) must report the ephemeral port the
+         * stack picked, and a second bind() to a port already in use must fail
+         * with EADDRINUSE. Neither is observable if the port is only claimed
+         * later.
+         *
+         * The listening descriptor's own NX socket is never used for a
+         * connection -- listen() parks a separate socket on the port -- so
+         * holding the port here does not collide with
+         * nx_tcp_server_socket_listen(), which registers a listen request and
+         * does not touch the bound-port table.
+         */
+        if (bsd_nx_enter(SocketBase) != 0)
+            return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+        status = nx_tcp_client_socket_bind(&sock->as_Nx.tcp,
+                                           (port != 0) ? port : NX_ANY_PORT,
+                                           NX_NO_WAIT);
+        if (status != NX_SUCCESS)
+        {
+            bsd_nx_leave(SocketBase);
+            return bsd_fail(SocketBase,
+                            (status == NX_PORT_UNAVAILABLE ||
+                             status == NX_ALREADY_BOUND)
+                                ? AMI_EADDRINUSE
+                                : bsd_errno_from_nx(status));
+        }
+
+        nx_tcp_client_socket_port_get(&sock->as_Nx.tcp, &port);
+        bsd_nx_leave(SocketBase);
+
+        sock->as_LocalPort = port;
+        sock->as_Flags |= ASF_NXBOUND;
+    }
 
     sock->as_Flags |= ASF_BOUND;
 
@@ -496,7 +538,7 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
     status = nx_tcp_socket_create(ip, &incoming->as_Nx.tcp, bsd_tcp_name,
                                   NX_IP_NORMAL, NX_FRAGMENT_OKAY,
                                   NX_IP_TIME_TO_LIVE, BSD_TCP_WINDOW,
-                                  NX_NULL, NX_NULL);
+                                  NX_NULL, bsd_tcp_disconnect_callback);
     if (status != NX_SUCCESS)
     {
         bsd_nx_leave(SocketBase);
@@ -519,6 +561,29 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
         bsd_nx_leave(SocketBase);
         return bsd_fail(SocketBase, bsd_errno_from_nx(status));
     }
+
+    /*
+     * Arm the parked socket NOW, before anyone calls accept().
+     *
+     * BSD completes the three-way handshake in the stack and queues the
+     * finished connection for accept(); NetX Duo does not. Its SYN handler
+     * only sends the SYN+ACK "if an accept call with suspension has already
+     * been made for this socket" -- i.e. if the socket is already in
+     * SYN_RECEIVED (nx_tcp_packet_process.c). A socket left in LISTEN state
+     * silently ignores the SYN, so a client that connect()s before the server
+     * happens to be inside accept() retransmits until it gives up. That is not
+     * a corner case: it is what every listen/connect/accept sequence in one
+     * task does, and it is why loopback connect() failed with ECONNREFUSED.
+     *
+     * nx_tcp_server_socket_accept() with NX_NO_WAIT moves LISTEN ->
+     * SYN_RECEIVED and returns NX_IN_PROGRESS without blocking, which is
+     * exactly the arming step. The real accept() below then either finds the
+     * socket ESTABLISHED already or suspends on it.
+     */
+    status = nx_tcp_server_socket_accept(&incoming->as_Nx.tcp, NX_NO_WAIT);
+    if (status != NX_IN_PROGRESS && status != NX_SUCCESS)
+        AMI_WARN("bsdsocket: arming accept on port %ld failed (%ld)",
+                 (long)sock->as_LocalPort, (long)status);
 
     bsd_nx_leave(SocketBase);
 
@@ -599,6 +664,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
         nx_tcp_server_socket_unaccept(&incoming->as_Nx.tcp);
         nx_tcp_server_socket_relisten(ip, sock->as_ListenPort,
                                       &incoming->as_Nx.tcp);
+        (VOID)nx_tcp_server_socket_accept(&incoming->as_Nx.tcp, NX_NO_WAIT);
 
         incoming->as_Flags &= ~ASF_CONNECTED;
         incoming->as_Flags |= ASF_INCOMING;
@@ -620,7 +686,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
         status = nx_tcp_socket_create(ip, &spare->as_Nx.tcp, bsd_tcp_name,
                                       NX_IP_NORMAL, NX_FRAGMENT_OKAY,
                                       NX_IP_TIME_TO_LIVE, BSD_TCP_WINDOW,
-                                      NX_NULL, NX_NULL);
+                                      NX_NULL, bsd_tcp_disconnect_callback);
         if (status == NX_SUCCESS)
         {
             spare->as_Flags    |= ASF_INCOMING | ASF_SERVER;
@@ -637,6 +703,11 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
              */
             if (status == NX_SUCCESS || status == NX_CONNECTION_PENDING)
             {
+                /* Arm it, exactly as bsd_listen() does -- see the comment
+                   there. Without this the next client's SYN goes unanswered. */
+                (VOID)nx_tcp_server_socket_accept(&spare->as_Nx.tcp,
+                                                  NX_NO_WAIT);
+
                 sock->as_Incoming = spare;
                 if (status == NX_CONNECTION_PENDING)
                     sock->as_Flags |= ASF_ACCEPTPEND;
@@ -752,10 +823,13 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
     if (status == NX_WAIT_ABORTED)
         return bsd_fail(SocketBase, AMI_EINTR);
 
-    if (status == NX_NOT_CONNECTED)
-        return bsd_fail(SocketBase, AMI_ECONNREFUSED);
+    /* A failed connect leaves the reason behind for getsockopt(SO_ERROR),
+       which is how a non-blocking caller finds out what went wrong. */
+    sock->as_SoError = (status == NX_NOT_CONNECTED)
+                           ? AMI_ECONNREFUSED
+                           : bsd_errno_from_nx(status);
 
-    return bsd_fail(SocketBase, bsd_errno_from_nx(status));
+    return bsd_fail(SocketBase, sock->as_SoError);
 }
 
 LONG bsd_connect(register LONG sock_fd          __asm("d0"),

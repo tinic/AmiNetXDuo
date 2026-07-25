@@ -788,6 +788,64 @@ Toolchain landmine found here, relevant project-wide: this toolchain ships a **z
 fails. `src/tls/tls_udivdi3.c` supplies it with a 68020 `divu.l` fast path and should
 move to `src/common/` when a second component needs it.
 
+#### Update: `src/crypto68k/` makes RSA 8× faster — the blocker moves to EC
+
+A follow-on optimised the bignum arithmetic (`src/crypto68k/`, behind
+`AMINETXDUO_CRYPTO68K_ASM`). Measured on the emulated 68020, pairs run back-to-back:
+
+| | reference | crypto68k | ratio |
+|---|---|---|---|
+| RSA-2048 public, e=65537 | 2.011 s | **0.681 s** | 2.9× |
+| RSA-2048 private, CRT | 44.75 s | **20.05 s** | 2.2× |
+| RSA-2048 private, plain | 160.83 s | 66.40 s | 2.4× |
+| Montgomery square, 2048-bit | 52.17 ms | 26.90 ms | 1.9× |
+
+**Stacked with enabling CRT (3.6×, which is orthogonal): 160.83 s → 20.05 s = 8.0×** on
+an RSA private operation. Correctness: 4964 checks, 0 failures, against Python-derived
+known answers *and* differentially against the unmodified vendored code.
+
+**The biggest single lever was not assembly.** The vendored exponentiation walks all 32
+bits of the top exponent limb, so `e = 65537` (`0x00010001`) costs 32 squarings where 16
+are needed; sliding-window plus leading-zero skipping nearly doubles every RSA *public*
+operation on its own. Karatsuba was costed and **rejected** (~5% — Montgomery reduction
+is not Karatsuba-able, so only half the work is eligible). SOS was chosen over the
+textbook CIOS recommendation because this machine's fast path is `ADD.L Dn,(An)+`, which
+requires destination == source — an addressing-mode argument, not an operation count.
+
+**Consequence for viability: RSA is no longer the blocker for a TLS client.** Three
+RSA-2048 public operations per handshake go from 5.95 s to **2.04 s**. What now dominates
+is elliptic-curve arithmetic, untouched by that work: ECDHE P-256 shared secret 5.18 s
+and ECDSA P-256 verify 6.97 s, so an ECDHE_ECDSA handshake is still ~30 s. The next step
+is the same lever — `nx_crypto_ec.c` calls `_nx_crypto_huge_number_multiply`/`_square` in
+the same inner loops, so the ~1.4× limb-loop win should carry over (though P-256's fast
+reduction means the windowing and squaring wins do not).
+
+Prior art, worth knowing before anyone re-treads it:
+
+- **Howard Chu wrote a complete 68020 OpenSSL bignum assembly in 2002** (`bn_m68k.s`,
+  1604 lines, all ten BN primitives with unrolled Comba kernels). It was never merged
+  upstream — OpenSSL has no m68k bignum asm at any tag — but **it survives in AmiSSL** and
+  is built for `amiga-os3-68020`. GMP, libgcrypt and mbedTLS all ship m68k `MULADDC`
+  variants; libtommath, wolfSSL and nettle have nothing.
+- **Chu's "over 4× faster than gcc" does not transfer.** It was measured against GCC 2.95,
+  which called a helper. **GCC 15.2 already emits `MULU.L`** — verified in the
+  disassembly — so the realistic ceiling is ~1.4× on the limb loop, and expecting 4×
+  would be chasing a number that no longer exists.
+- **`MULU.L` 32×32→64 is NOT implemented on the 68060** — it traps to vector 61 and is
+  emulated. AmiSSL disabled Chu's assembly for 68060 for exactly this reason. Our floor
+  is 68020 so this is fine, but `AMINETXDUO_CRYPTO68K_ASM` must never be enabled for a
+  68060 target.
+- **Real-world yardstick:** AmiSSL issue #67 instruments a TLS 1.3 `SSL_connect` on an
+  **A3000 68030@25 MHz at 2.99 s** (AmiSSL 4.12) / 5.21 s (5.4), and issue #11 records a
+  68060@50 taking 18.8 s against a 60 s server timeout. Our figures sit in the same
+  universe, which is the best cross-check available without real hardware.
+
+> **objdump trap, cost someone an afternoon's worth of wrong conclusions if unnoticed:**
+> the toolchain's default objdump architecture is plain 68000, which cannot decode
+> `MULU.L` and prints it as `.short 0x4c06`. Without `-m m68k:68020` you conclude the
+> compiler emits no 32×32 multiply at all. Verified here: `.short 0x4c06` becomes
+> `mulul d6,d2,d3` with the right `-m`.
+
 ### Still open (lower stakes, decide during implementation)
 
 - Does `usergroup.library` ship as a real user database or as the usual single-user stub

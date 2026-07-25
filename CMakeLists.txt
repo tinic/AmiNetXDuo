@@ -106,6 +106,8 @@ add_subdirectory(src/usergroup)
 if(AMINETXDUO_TLS)
     add_subdirectory(src/tls)
 endif()
+# After src/tls: crypto68k reuses aminetxduo_m68k_rt when that target exists.
+add_subdirectory(src/crypto68k)
 add_subdirectory(src/tools)
 
 if(AMINETXDUO_TESTS)

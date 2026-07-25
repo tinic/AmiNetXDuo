@@ -1,0 +1,117 @@
+import random, sys
+random.seed(20260725)
+
+def is_probable_prime(n, k=40):
+    if n < 2: return False
+    for p in [2,3,5,7,11,13,17,19,23,29,31,37]:
+        if n % p == 0: return n == p
+    d, r = n-1, 0
+    while d % 2 == 0: d //= 2; r += 1
+    for _ in range(k):
+        a = random.randrange(2, n-1)
+        x = pow(a, d, n)
+        if x in (1, n-1): continue
+        for _ in range(r-1):
+            x = x*x % n
+            if x == n-1: break
+        else: return False
+    return True
+
+def gen_prime(bits):
+    while True:
+        c = random.getrandbits(bits) | (1 << (bits-1)) | 1
+        if is_probable_prime(c): return c
+
+e = 65537
+while True:
+    p = gen_prime(1024); q = gen_prime(1024)
+    if p == q: continue
+    n = p*q
+    if n.bit_length() != 2048: continue
+    phi = (p-1)*(q-1)
+    if phi % e == 0: continue
+    d = pow(e, -1, phi)
+    break
+
+def limbs(v, nlimbs):
+    return [(v >> (32*i)) & 0xFFFFFFFF for i in range(nlimbs)]
+
+def emit_limbs(name, v, nlimbs):
+    L = limbs(v, nlimbs)
+    out = ["static const c68k_limb %s[%d] = {" % (name, nlimbs)]
+    for i in range(0, nlimbs, 6):
+        out.append("    " + " ".join("0x%08XUL," % x for x in L[i:i+6]))
+    out.append("};")
+    return "\n".join(out)
+
+body = []
+body.append(emit_limbs("t_n", n, 64))
+body.append(emit_limbs("t_d", d, 64))
+body.append(emit_limbs("t_p", p, 32))
+body.append(emit_limbs("t_q", q, 32))
+body.append(emit_limbs("t_e", e, 1))
+
+msg = random.getrandbits(2040) % n
+body.append(emit_limbs("t_msg", msg, 64))
+body.append(emit_limbs("t_msg_pub",  pow(msg, e, n), 64))
+body.append(emit_limbs("t_msg_priv", pow(msg, d, n), 64))
+
+kat = []
+for i in range(8):
+    mm = gen_prime(128)
+    xx = random.randrange(1, mm)
+    ee = random.getrandbits(random.choice([7, 31, 32, 33, 64, 128]))
+    if ee == 0: ee = 1
+    kat.append((mm, xx, ee, pow(xx, ee, mm)))
+
+for i, t in enumerate(kat):
+    mm, xx, ee, rr = t
+    elimbs = max(1, (ee.bit_length()+31)//32)
+    body.append(emit_limbs("t_kat%d_m" % i, mm, 4))
+    body.append(emit_limbs("t_kat%d_x" % i, xx, 4))
+    body.append(emit_limbs("t_kat%d_e" % i, ee, elimbs))
+    body.append(emit_limbs("t_kat%d_r" % i, rr, 4))
+
+tbl = ["static const C68K_KAT t_kats[%d] = {" % len(kat)]
+for i, t in enumerate(kat):
+    ee = t[2]
+    elimbs = max(1, (ee.bit_length()+31)//32)
+    tbl.append("    { t_kat%d_m, 4u, t_kat%d_x, 4u, t_kat%d_e, %du, t_kat%d_r },"
+               % (i, i, i, elimbs, i))
+tbl.append("};")
+body.append("\n".join(tbl))
+
+hdr = '''/*
+ * AmiNetXDuo -- crypto68k test vectors.
+ *
+ * GENERATED, do not hand edit.  Produced by tests/crypto68k/gen_vectors.py: a
+ * throwaway RSA-2048 key plus small modular exponentiations whose answers come
+ * from Python's arbitrary precision integers -- an implementation with no
+ * shared ancestry with either nx_crypto or crypto68k, which is the point.
+ * Agreeing with the vendored code proves the two match; agreeing with these
+ * proves both are right.
+ *
+ * The key is PUBLIC -- it is in a git repository.  Never use it for anything.
+ *
+ * Limbs are little-endian (limb 0 least significant), matching HN_UBASE order.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#ifndef AMINETXDUO_CRYPTO68K_VECTORS_H
+#define AMINETXDUO_CRYPTO68K_VECTORS_H
+
+typedef struct
+{
+    const c68k_limb *m;
+    UINT             m_len;
+    const c68k_limb *x;
+    UINT             x_len;
+    const c68k_limb *e;
+    UINT             e_len;
+    const c68k_limb *expected;
+} C68K_KAT;
+
+'''
+open("tests/crypto68k/c68k_vectors.h","w").write(hdr + "\n\n".join(body) + "\n\n#endif /* AMINETXDUO_CRYPTO68K_VECTORS_H */\n")
+sys.stderr.write("ok\n")

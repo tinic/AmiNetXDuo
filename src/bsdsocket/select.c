@@ -70,28 +70,61 @@ static VOID bsd_tcp_receive_notify(NX_TCP_SOCKET *socket_ptr)
     bsd_event_post((AmiSocket *)socket_ptr->nx_tcp_socket_reserved_ptr, FD_READ);
 }
 
-static VOID bsd_tcp_establish_notify(NX_TCP_SOCKET *socket_ptr)
+/*
+ * The peer closed, or the connection was reset.
+ *
+ * This is the callback handed to nx_tcp_socket_create(), NOT one of the
+ * nx_tcp_socket_*_notify() setters: those are all behind
+ * NX_ENABLE_EXTENDED_NOTIFY_SUPPORT, which this port does not define, so
+ * nx_tcp_socket_establish_notify() and nx_tcp_socket_disconnect_complete_
+ * notify() compile to a stub that returns NX_NOT_SUPPORTED. The create-time
+ * disconnect callback and nx_tcp_socket_receive_notify() are the two TCP
+ * callbacks that actually fire in this build; everything else has to be
+ * derived from socket state (bsd_event_refresh below).
+ */
+VOID bsd_tcp_disconnect_callback(NX_TCP_SOCKET *socket_ptr)
 {
     AmiSocket *sock = (AmiSocket *)socket_ptr->nx_tcp_socket_reserved_ptr;
 
-    if (sock != NULL && (sock->as_Flags & ASF_CONNECTING) != 0)
-    {
-        sock->as_Flags &= ~ASF_CONNECTING;
-        sock->as_Flags |= ASF_CONNECTED;
-    }
+    if (sock == NULL)
+        return;
 
-    bsd_event_post(sock, FD_CONNECT | FD_WRITE);
-}
-
-static VOID bsd_tcp_disconnect_notify(NX_TCP_SOCKET *socket_ptr)
-{
-    AmiSocket *sock = (AmiSocket *)socket_ptr->nx_tcp_socket_reserved_ptr;
-
-    if (sock != NULL)
-        sock->as_Flags |= ASF_EOF;
+    sock->as_Flags |= ASF_EOF;
 
     /* A closed connection is readable (it returns 0) and writable (EPIPE). */
     bsd_event_post(sock, FD_CLOSE | FD_READ | FD_WRITE);
+}
+
+/*
+ * Edge events NetX Duo cannot report to us in this build.
+ *
+ * Without the extended notify set there is no "connection established"
+ * callback, so a non-blocking connect() has to be noticed by looking at the
+ * socket state. Every path that reports readiness or events calls this first.
+ */
+VOID bsd_event_refresh(AmiSocket *sock)
+{
+    UINT state;
+
+    if (sock == NULL ||
+        (sock->as_Flags & (ASF_TCP | ASF_CONNECTING)) !=
+            (ASF_TCP | ASF_CONNECTING))
+        return;
+
+    state = sock->as_Nx.tcp.nx_tcp_socket_state;
+
+    if (state == NX_TCP_ESTABLISHED)
+    {
+        sock->as_Flags &= ~ASF_CONNECTING;
+        sock->as_Flags |= ASF_CONNECTED;
+        bsd_event_post(sock, FD_CONNECT | FD_WRITE);
+    }
+    else if (state == NX_TCP_CLOSED)
+    {
+        sock->as_Flags &= ~ASF_CONNECTING;
+        sock->as_SoError = AMI_ECONNREFUSED;
+        bsd_event_post(sock, FD_CONNECT | FD_ERROR | FD_WRITE);
+    }
 }
 
 static VOID bsd_tcp_window_notify(NX_TCP_SOCKET *socket_ptr)
@@ -133,10 +166,10 @@ VOID bsd_events_attach(AmiSocket *sock)
     {
         sock->as_Nx.tcp.nx_tcp_socket_reserved_ptr = sock;
 
+        /* The disconnect callback is installed at nx_tcp_socket_create() time
+           (socket.c); the *_notify() setters below are the ones that work
+           without NX_ENABLE_EXTENDED_NOTIFY_SUPPORT. */
         nx_tcp_socket_receive_notify(&sock->as_Nx.tcp, bsd_tcp_receive_notify);
-        nx_tcp_socket_establish_notify(&sock->as_Nx.tcp, bsd_tcp_establish_notify);
-        nx_tcp_socket_disconnect_complete_notify(&sock->as_Nx.tcp,
-                                                 bsd_tcp_disconnect_notify);
         nx_tcp_socket_window_update_notify_set(&sock->as_Nx.tcp,
                                                bsd_tcp_window_notify);
     }
@@ -174,16 +207,27 @@ BOOL bsd_readable(AmiSocket *sock)
     {
         if ((sock->as_Flags & ASF_LISTENING) != 0)
         {
-            if ((sock->as_Flags & ASF_ACCEPTPEND) != 0)
-                return TRUE;
-
+            /*
+             * "Readable" on a listener means accept() will not block, so the
+             * test is ESTABLISHED and nothing weaker. The parked socket sits
+             * in SYN_RECEIVED from the moment bsd_listen() arms it (see
+             * socket.c), and ASF_ACCEPTPEND is set by the listen callback when
+             * the SYN lands -- both are true well before the handshake
+             * finishes, so neither can stand in for readiness.
+             */
             return (sock->as_Incoming != NULL &&
-                    sock->as_Incoming->as_Nx.tcp.nx_tcp_socket_state >=
-                        NX_TCP_SYN_RECEIVED);
+                    sock->as_Incoming->as_Nx.tcp.nx_tcp_socket_state ==
+                        NX_TCP_ESTABLISHED);
         }
 
         /* A closed or half-closed connection reads as end-of-file. */
         if ((sock->as_Flags & (ASF_EOF | ASF_RDSHUT)) != 0)
+            return TRUE;
+
+        /* Same thing seen from the state machine, in case the peer's FIN
+           landed before the socket had a disconnect callback attached. */
+        if ((sock->as_Flags & ASF_CONNECTED) != 0 &&
+            sock->as_Nx.tcp.nx_tcp_socket_state >= NX_TCP_CLOSE_WAIT)
             return TRUE;
 
         if (sock->as_Nx.tcp.nx_tcp_socket_receive_queue_count > 0)
@@ -325,6 +369,8 @@ static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
         sock = bsd_lookup(base, fd);
         if (sock == NULL)
             continue;
+
+        bsd_event_refresh(sock);
 
         if (want_read && bsd_readable(sock))
         {
@@ -554,6 +600,8 @@ LONG bsd_GetSocketEvents(register ULONG *event_ptr __asm("a0"),
 
         if (sock == NULL)
             continue;
+
+        bsd_event_refresh(sock);
 
         events = sock->as_Events & sock->as_EventMask;
         if (events == 0)

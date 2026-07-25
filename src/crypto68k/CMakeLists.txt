@@ -60,7 +60,8 @@ endif()
 set(CRYPTO68K_SOURCES
     c68k_prim.c
     c68k_mont.c
-    c68k_powm.c)
+    c68k_powm.c
+    c68k_crt.c)
 
 if(AMINETXDUO_CRYPTO68K_ASM)
     list(APPEND CRYPTO68K_SOURCES c68k_prim.S)
@@ -73,8 +74,19 @@ target_link_libraries(crypto68k PUBLIC crypto68k_ref)
 if(AMINETXDUO_CRYPTO68K_ASM)
     # The .S needs the define too -- it is #ifdef'd end to end so that an
     # accidental host build assembles to nothing instead of failing.
+    #
+    # It also needs the arch flag explicitly.  CMAKE_C_FLAGS_INIT in the
+    # toolchain file does not reach the assembler, and without -m68020 the
+    # assembler is a plain 68000 and rejects MULU.L outright:
+    #   "invalid instruction for this architecture ... statement
+    #    `mulu.l d2,d1:d3' ignored"
+    # which is a loud failure, but only because the instruction does not exist
+    # on a 68000 at all.  Set here rather than in the shared toolchain file so
+    # nothing else in the tree changes behaviour.
     target_compile_definitions(crypto68k PRIVATE C68K_ASM=1)
-    set_source_files_properties(c68k_prim.S PROPERTIES COMPILE_DEFINITIONS C68K_ASM=1)
+    set_source_files_properties(c68k_prim.S PROPERTIES
+        COMPILE_DEFINITIONS C68K_ASM=1
+        COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
 endif()
 
 message(STATUS "  crypto68k asm . ${AMINETXDUO_CRYPTO68K_ASM}")

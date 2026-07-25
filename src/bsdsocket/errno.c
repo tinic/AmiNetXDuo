@@ -396,6 +396,30 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
             bsd_tag_store(item, by_ref, (ULONG)"AmiNetXDuo");
             return TRUE;
 
+        /*
+         * The errno-mirror pointers read back as well as write. The width tags
+         * are three views of one pointer, so each reports it only when the
+         * caller's chosen width matches.
+         */
+        case SBTC_ERRNOBYTEPTR:
+            bsd_tag_store(item, by_ref,
+                          (base->sb_ErrnoSize == 1) ? (ULONG)base->sb_ErrnoPtr : 0);
+            return TRUE;
+
+        case SBTC_ERRNOWORDPTR:
+            bsd_tag_store(item, by_ref,
+                          (base->sb_ErrnoSize == 2) ? (ULONG)base->sb_ErrnoPtr : 0);
+            return TRUE;
+
+        case SBTC_ERRNOLONGPTR:
+            bsd_tag_store(item, by_ref,
+                          (base->sb_ErrnoSize == 4) ? (ULONG)base->sb_ErrnoPtr : 0);
+            return TRUE;
+
+        case SBTC_HERRNOLONGPTR:
+            bsd_tag_store(item, by_ref, (ULONG)base->sb_HErrnoPtr);
+            return TRUE;
+
         case SBTC_SYSTEM_STATUS:
             bsd_tag_store(item, by_ref,
                           (netstack_get() != NULL) ? SBSYSSTAT_Interfaces : 0);
