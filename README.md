@@ -6,8 +6,8 @@ An AmiTCP/Roadshow-compatible `bsdsocket.library` for classic AmigaOS, built on
 > **Status: it works, and it is not finished.** The stack gets a DHCP lease,
 > answers ARP, pings its gateway, resolves DNS and moves TCP in both directions
 > on an emulated 68020/68030 under Kickstart 3.1. `bsdsocket.library` scores
-> **114/142** on the [`bsdsocktest`](https://github.com/tbdye/bsdsocktest)
-> conformance suite (122/142 on the network tier). Not yet run on real hardware,
+> **125/142** on the [`bsdsocktest`](https://github.com/tbdye/bsdsocktest)
+> conformance suite (133/142 on the network tier). Not yet run on real hardware,
 > and not yet something to trust with your data.
 
 ## Why
@@ -111,17 +111,16 @@ tests/conformance/run-fsuae.sh -a "LOOPBACK NOPAGE"
 
 | | |
 |---|---|
-| conformance, loopback tier | **114/142** (3 fail, 25 skip) |
-| conformance, network tier | **122/142** |
+| conformance, loopback tier | **125/142** (1 fail, 16 skip) |
+| conformance, network tier | **133/142** |
 | ThreadX-on-Exec soak | 98 checks, 4+ adopted tasks, Enforcer-clean on 68030 |
 | TCP throughput | 262 KB/s loopback, 310 KB/s to a host over SLIRP |
 | IPv6 (`-DAMINETXDUO_IPV6=ON`) | ICMPv6 + TCP + UDP between two `NX_IP` instances (78 checks); `AF_INET6` sockets over `::1` through the library ABI; ICMPv6 to the host across an emulated A2065, with a router advertisement and stateless autoconfiguration |
 
-Verified on 68020 and 68030. The remaining conformance failures are
-`sendmsg`/`recvmsg` (unimplemented) and one deliberate disagreement: the suite
-skips `SOCK_RAW` only on `EACCES`, but `EACCES` means "you lack privilege",
-which is untrue on an OS with no privilege model — `ESOCKTNOSUPPORT` is the
-honest answer, so that test stays red.
+Verified on 68020 and 68030. The single remaining loopback failure is a
+deliberate disagreement: the suite skips `SOCK_RAW` only on `EACCES`, but
+`EACCES` means "you lack privilege", which is untrue on an OS with no privilege
+model — `ESOCKTNOSUPPORT` is the honest answer, so that test stays red.
 
 ### Debugging
 
