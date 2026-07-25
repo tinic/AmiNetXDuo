@@ -33,12 +33,14 @@
  *   and refuses to follow one that steps down from https: to http:, because
  *   silently dropping the encryption a user asked for is worse than stopping.
  *
- *   And there is one it cannot do anything about: at the time of writing,
- *   tls.library takes the machine down on a certificate chain of three or more
- *   when the handshake is slow enough -- which is most Cloudflare-fronted
- *   sites at 14 MHz.  See docs/RESEARCH.md 9; it is a library defect, not a
- *   limit of this command, and it is why AMINETXDUO_TLS is still not on by
- *   default.
+ *   And there is one it cannot do anything about, though it is not the one an
+ *   earlier version of this comment claimed: on a certificate chain of three
+ *   or more, a 14 MHz 68020 spends longer verifying than a busy front end is
+ *   willing to wait for a ClientKeyExchange, and the peer closes.  This
+ *   command says "the connection is closed" and returns 10, which is the
+ *   right answer; there is no third-party fix for it short of a faster
+ *   handshake.  See docs/RESEARCH.md.  (The crash that used to be described
+ *   here was the EMULATOR dying of SIGPIPE on the host, not the Amiga.)
  *
  * SPDX-License-Identifier: MIT
  */

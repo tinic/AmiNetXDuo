@@ -208,11 +208,20 @@ cleanup_emulator() {
 trap cleanup_emulator EXIT INT TERM HUP
 
 
-"$FSUAE" "$CFG" >"$ROOT/build/fsuae-$TAG.log" 2>&1 &
+# SIGPIPE ignored, inherited across execve() -- see the long note in
+# tools/fsuae-run.sh.  Without it a guest that writes to a peer which has
+# already hung up kills the EMULATOR, which under -n is exactly the situation
+# this script exists to look at.
+( trap '' PIPE; exec "$FSUAE" "$CFG" ) >"$ROOT/build/fsuae-$TAG.log" 2>&1 &
 FSUAE_PID=$!
+
+# cleanup_emulator() clears FSUAE_PID, so keep a copy for the wait below --
+# otherwise the exit status is the shell complaining about an empty pid.
+EMU_PID=$FSUAE_PID
 
 status=124
 elapsed=0
+EARLY_EXIT=0
 while [ "$elapsed" -lt "$TIMEOUT" ]; do
     if [ -f "$HD/.done" ]; then
         status=$(tr -dc '0-9' < "$HD/.done" | head -c 4)
@@ -221,6 +230,7 @@ while [ "$elapsed" -lt "$TIMEOUT" ]; do
     fi
     if ! kill -0 "$FSUAE_PID" 2>/dev/null; then
         echo "!! fs-uae exited early after ${elapsed}s; see build/fsuae-$TAG.log" >&2
+        EARLY_EXIT=1
         break
     fi
     sleep 1
@@ -228,7 +238,12 @@ while [ "$elapsed" -lt "$TIMEOUT" ]; do
 done
 
 cleanup_emulator
-wait "$FSUAE_PID" 2>/dev/null || true
+FSUAE_RC=0
+wait "$EMU_PID" 2>/dev/null || FSUAE_RC=$?
+
+if [ "$EARLY_EXIT" = "1" ] && [ "$FSUAE_RC" -gt 128 ]; then
+    echo "!! fs-uae was KILLED BY SIGNAL $((FSUAE_RC - 128)) -- host-side, not a guru." >&2
+fi
 
 # ------------------------------------------------------------------- output --
 

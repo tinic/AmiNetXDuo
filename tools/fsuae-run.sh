@@ -428,8 +428,29 @@ trap cleanup_all EXIT INT TERM HUP
 # and one that reports 0.2 seconds inside the same 40 was not.
 WALL_START=$(date +%s)
 
-"$FSUAE" "$CFG" >"$ROOT/build/fsuae$TAG.log" 2>&1 &
+# SIGPIPE MUST BE IGNORED, AND IT IS NOT DECORATION
+#
+#   fs-uae's SLIRP writes the guest's TCP payload to a real host socket with
+#   plain send()/write().  When the far end has hung up, that returns EPIPE
+#   AND raises SIGPIPE, whose default disposition kills the process -- so any
+#   guest that keeps talking to a peer which closed first takes the EMULATOR
+#   down, mid-instruction, with no guru, no DH0:.done and a log file truncated
+#   on a 4 KB boundary because stdio never flushed.  It reads exactly like the
+#   Amiga crashed.  It is not the Amiga; on real hardware there is no such
+#   signal.  A socket is spared only by SO_NOSIGPIPE or by sending with
+#   MSG_NOSIGNAL, and the fs-uae measured here (3.2.35 on macOS) demonstrably
+#   does neither: without this line it exits 141 every time.
+#
+#   Ignoring it here is inherited across execve() -- SIG_IGN is, a handler is
+#   not -- so fs-uae starts with SIGPIPE ignored and send() merely returns
+#   EPIPE, which its own error path already handles.  The subshell keeps the
+#   disposition off this script, whose own pipelines want the default.
+( trap '' PIPE; exec "$FSUAE" "$CFG" ) >"$ROOT/build/fsuae$TAG.log" 2>&1 &
 FSUAE_PID=$!
+
+# cleanup_emulator() clears FSUAE_PID, so keep a copy for the wait below --
+# otherwise the exit status is the shell complaining about an empty pid.
+EMU_PID=$FSUAE_PID
 
 status=124
 elapsed=0
@@ -450,7 +471,18 @@ while [ "$elapsed" -lt "$TIMEOUT" ]; do
 done
 
 cleanup_emulator
-wait "$FSUAE_PID" 2>/dev/null || true
+FSUAE_RC=0
+wait "$EMU_PID" 2>/dev/null || FSUAE_RC=$?
+
+# Say WHY the emulator went, not just that it did.  A death by signal is a
+# host-side event and never the program under test failing; reporting it as
+# "exited early" is what sent one investigation after an Amiga bug that was
+# not there.
+if [ "$EARLY_EXIT" = "1" ] && [ "$FSUAE_RC" -gt 128 ]; then
+    echo "!! fs-uae was KILLED BY SIGNAL $((FSUAE_RC - 128)) -- a host-side" >&2
+    echo "!! death, not a guru.  Nothing about the emulated machine follows" >&2
+    echo "!! from it." >&2
+fi
 
 # ------------------------------------------------------------------- output --
 

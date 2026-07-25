@@ -1448,6 +1448,10 @@ The two things the section above said stood between this and "TLS on by default"
 both done. A third thing turned up while proving the first one works, and it is worse
 than either of them: **a certificate chain of three or more takes the machine down.**
 
+**→ Wrong, and corrected below.** Nothing took the machine down. The emulator was being
+killed by SIGPIPE on the host, and everything in this section that reads as a library
+defect is that. See "The three-certificate 'crash' was the emulator dying of SIGPIPE".
+
 ##### 1. `fetch`, the traveller
 
 `src/tools/fetch.c`, one more Roadshow-shaped Shell command beside `ping` and `host`:
@@ -1637,9 +1641,22 @@ nginx. Whatever the mechanism, the shape of it is the part that matters: **a pee
 crash this machine by being slow to be verified**, and there is no application-side
 defence — `fetch` cannot decline to be verified against a three-deep chain.
 
+**→ Answered, and the answer is no.** The peer did send a FIN, and the library handled it
+exactly as it should — `TLS_ERR_CLOSED`, "the connection is closed", return code 10. What
+died was `fs-uae` itself, on SIGPIPE, when SLIRP wrote the guest's ChangeCipherSpec to a
+host socket the far end had already closed. The serial trace above stops where it does
+because the emulator stops there, not because the record layer does. See "The
+three-certificate 'crash' was the emulator dying of SIGPIPE" below; the two Enforcer hits
+in `SYS:fetch` are real and still worth chasing, but they are not this.
+
 ##### 4. The answer on the default, and what it would take to change it
 
 **Still OFF, and now for a reason that is a bug rather than a gap.**
+
+**→ Still off, but not for that reason: there was no bug.** The paragraphs below argue
+from a crash that does not exist. The real limit is that a 14 MHz 68020 takes longer over
+a three-certificate chain than a busy front end will wait, which is a slowness gap and
+not a hole anyone can shoot through. Re-argued at the end of the section named above.
 
 The three arguments that used to be made against it are all gone. Speed: a public
 handshake is 6.8 s. Size: the pair is 523,164 bytes, unchanged (`bsdsocket.library`
@@ -2588,6 +2605,161 @@ entropy pool documented under the M9 gate above.
   `dns` stays 15/15. **No defect found** — the parser handled tab/space mixtures, trailing
   `#` comments, multi-alias rows and the truncated dotted network numbers (`10.0.2`,
   `169.254`) exactly as the host test said it would.
+
+### The three-certificate "crash" was the emulator dying of SIGPIPE (2026-07-25)
+
+`fetch https://www.iana.org/` at the A1200's 14 MHz took FS-UAE down: no output, no
+`DH0:.done`, the harness reporting `fs-uae exited early after 57s`, and the UAE core log
+offering `B-Trap F201 at 00F80CA0 -> 00F80CC0` by way of explanation. The same binary
+against the same host at `-k 28` was clean. A chain of two certificates was fine, three
+died at 14 MHz, four died at 28 MHz as well. That looked like a threshold in elapsed
+time, and the standing theory was that a slow handshake ran out the far end's patience
+and `nx_secure` then walked into reused or freed state on the close.
+
+**It was none of that. `fs-uae` was being killed by SIGPIPE.** Run in the foreground the
+emulator exits **141**, and 141 is 128 + 13. Set the disposition to `SIG_IGN` in the
+parent — which, unlike a handler, survives `execve()` — and the identical run at the
+identical clock finishes: `fetch: www.iana.org: the connection is closed`, return code
+10, `DH0:.done` written, and the commands after it still run.
+
+The chain from cause to symptom, read off FS-UAE's own A2065 packet dump:
+
+1. The client sends its ClientHello. The server answers with a 2,732-byte flight:
+   ServerHello, three certificates (883 + 675 + 894 bytes), ServerKeyExchange,
+   ServerHelloDone.
+2. The client disappears into the verification arithmetic for tens of seconds and
+   **acknowledges nothing at all** while it is in there — SLIRP retransmits the same
+   segment three and four times over. The stack cannot answer, because the calling task
+   is holding the ThreadX baton across the whole of `_nx_secure_tls_session_start()`.
+3. The far end gives up waiting for a ClientKeyExchange and closes. Its FIN sits behind
+   the unacknowledged data in SLIRP's send queue, so it reaches the guest only *after*
+   the client finally speaks — which is why the FIN's sequence number is exactly the end
+   of the certificate flight.
+4. The client, which has meanwhile finished and knows nothing of any of this, sends
+   ClientKeyExchange, ChangeCipherSpec and Finished.
+5. SLIRP writes those to a host socket whose peer is gone. A socket is spared SIGPIPE
+   only by `SO_NOSIGPIPE` or by sending with `MSG_NOSIGNAL`, and fs-uae 3.2.35 on macOS
+   demonstrably uses neither. The emulator dies mid-instruction.
+
+Everything that made this look like a guru follows from step 5. No `.done`, because there
+is no emulator left to write one. Nothing on the serial port, for the same reason. And a
+core log whose size is always an exact multiple of 4,096 because stdio's buffer was never
+flushed — four older runs in `build/` carry that same fingerprint.
+
+**`B-Trap F201 at 00F80CA0` is Kickstart's own FPU probe and is unrelated.** It is the
+UAE core's `op_illg()` reporting a line-F opcode; it sits at line 910 of the log, some
+120 lines before the TCP connection is even opened, and it is there in every run,
+including the ones that pass. The harness only prints the core log when the emulator dies
+early, which is the whole reason it had never been seen next to a success. Treat that
+section of the output as evidence about the host, not about the Amiga.
+
+**Proved, not inferred:** the exit status, the disappearance of the failure under
+`SIG_IGN` (repeated for both the three- and the four-certificate host), the packet
+sequence above, the position of the `B-Trap` line, and the four-kilobyte log truncation.
+**Inferred:** that the EPIPE is on SLIRP's host socket specifically. Nothing else in the
+configuration is a pipe or a socket — stdout, the emulator log and the serial port are
+all plain files — and there is a control for it: `run-hangup.sh`, where the peer closes
+*before* the guest writes again, does **not** kill the emulator even with SIGPIPE left at
+its default. The death needs a guest write into a closed connection, which is what SLIRP
+turns into a host `write()`. What was not done is attaching a debugger to catch the
+`write()` itself; `lldb` on the Homebrew fs-uae ran the emulation far too slowly to reach
+the handshake and was abandoned.
+
+The fix is in `tools/fsuae-run.sh` and `tools/enforcer-run.sh`: launch the emulator from
+a subshell that has ignored SIGPIPE, and report a death by signal *as* a death by signal
+instead of as "exited early". Both scripts now say so in as many words, because the next
+person to meet this needs to be told at the top of the output that what died was the
+emulator.
+
+#### The library was already right, and now there is a test that says so
+
+`tests/tls/run-hangup.sh` (with `tests/tls/hangup-server.py`) is the direct version of
+the experiment that waiting for `www.iana.org` was the indirect one of. Four listeners on
+the host, reached through SLIRP's `10.0.2.2` gateway alias, each of which reads the
+ClientHello and then misbehaves in one specific way. On the 14 MHz A1200:
+
+| the peer | `fetch` says | rc |
+|---|---|---|
+| resets (`SO_LINGER 0`) | the connection is closed | 10 |
+| closes tidily (FIN) | the connection is closed | 10 |
+| answers nothing, ever | the server stopped responding | 10 |
+| answers bytes that are not TLS | the connection is closed | 10 |
+
+Four legible errors, and the machine carries on to the next command every time. **A peer
+cannot take this machine down by hanging up, and could not before this change either** —
+the fault was never in `tls.library`. Unlike `run-fetch.sh` and `run-api.sh` this one *is*
+a baseline: the rude peer is a script in this tree, on loopback, so there is no internet,
+no third party and no certificate that can rotate underneath it.
+
+#### What is actually left: the far end's patience
+
+With the emulator no longer dying, the three- and four-certificate hosts fail honestly.
+Measured through `fetch`, `TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256` throughout:
+
+| host | front end | certificates | 14 MHz | `-k 28` | `-k 56` |
+|---|---|---|---|---|---|
+| `ecc256.badssl.com` | GCP | 2 | **23.3 s** verified | **11.7 s** verified | — |
+| `www.iana.org` | Cloudflare | 3 (883 + 675 + 894 B) | closed on us | **11.3 s** verified | — |
+| `example.com` | Cloudflare | 4 (1003 + 742 + 824 + 1090 B) | closed on us | closed on us | **9.8 s** verified |
+
+Every one of those that completes reports `chain verified, validity dates checked`, so
+nothing about three- or four-deep chains is wrong: **the only variable is elapsed time
+against how long a given front end will wait for a ClientKeyExchange**, and that differs
+between operators by more than a factor of two. The two Cloudflare hosts bracket their
+own timeout — `www.iana.org` succeeds at 11.3 s, and `example.com`, which by its 56 MHz
+figure costs about 19.6 s at 28 MHz, does not. So Cloudflare's patience is somewhere
+between 11.3 and roughly 20 seconds, which a **15-second handshake timeout** would fit.
+badssl.com's, on Google Cloud, is over 23.3 s, which is why the two-certificate hosts in
+`run-fetch.sh` have never shown any of this.
+
+The practical reading: at the 14 MHz floor, only a two-certificate chain finishes inside
+a mainstream CDN's patience, and two-certificate chains are the minority of the web.
+
+Two things follow that are worth keeping.
+
+- **The obvious cheap win is not there, and it was worth checking.** The suspicion was
+  that a server which helpfully includes the cross-signing root in its own chain makes us
+  verify a certificate we already trust, because the vendored store lookup would find the
+  server's copy before ours. It does not:
+  `_nx_secure_x509_store_certificate_find()` searches **trusted first**, local second,
+  remote third, and `_nx_secure_x509_certificate_chain_verify()` returns the moment an
+  issuer comes back from the trusted store. A four-certificate chain therefore already
+  costs only as many signature checks as it takes to reach a root we hold. There is no
+  redundant verification to remove.
+- **The stack stops while the arithmetic runs, and the wire shows it.** Three and four
+  SLIRP retransmissions of the same segment, with not one ACK from the guest, is the
+  ThreadX baton being held by the adopted task across the whole handshake
+  (`port/threadx-amiga/src/tx_amiga_adopt.c` documents the hazard; this is it happening).
+  Under SLIRP it is cosmetic, because SLIRP terminates TCP and has already acknowledged
+  the real server on our behalf — what the real server is waiting for is a
+  ClientKeyExchange, not an ACK. On real hardware it will not be cosmetic: the server
+  sees the silence directly. `tls_store_fetch()` already shows the shape of the fix,
+  releasing and reacquiring the baton around a blocking call, and the certificate
+  verification is pure arithmetic that touches no ThreadX object, so the same bracket
+  would fit around it. Costed, not done: it is a separate unit of work and its benefit
+  cannot be measured on this harness.
+
+#### TLS by default: still no, and now for a different reason
+
+The blocker is no longer a crash — there was no crash, and the argument in §4 above that
+rested on one is void. Nothing can be taken down by a peer that is slow, rude or absent;
+that is four measured cases and a baseline test that keeps them measured.
+
+It stays off anyway, and the honest reason is worse for being ordinary: **at 14 MHz this
+finishes a three-certificate handshake in about 23 seconds and Cloudflare waits about
+fifteen.** A `LIBS:tls.library` that fails on a large fraction of the web through no
+fault of the caller is not a default; it is a footgun with good error messages. The
+two-certificate case works today and works well, `-DAMINETXDUO_TLS=ON` stays a supported,
+CI-covered configuration, and `fetch` says something true and actionable when it cannot
+connect.
+
+What would change the answer is roughly a **2× on the client half of the handshake** —
+enough to bring 23 s under 15 — and it is arithmetic, which is the one thing on this
+machine that has repeatedly turned out to be possible to make faster. Specifically not
+the error paths, which are now known good, and specifically not the certificate store or
+the chain walk, both of which were checked here and are already doing the minimum.
+The first place to look is what the 14 MHz column is actually spent on, which nothing has
+yet measured: `TLSInfo()` reports only the total.
 
 ### Still open (lower stakes, decide during implementation)
 

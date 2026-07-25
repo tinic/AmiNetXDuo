@@ -2,7 +2,7 @@
 #
 # Run the `fetch` command against real URLs, under FS-UAE on SLIRP.
 #
-#   tests/tls/run-fetch.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
+#   tests/tls/run-fetch.sh [-m MODEL] [-t SECONDS] [-c CPU] [-k MHZ] [-b BUILDDIR]
 #
 # tools/fsuae-run.sh starts ONE executable with no arguments, and `fetch` is a
 # command that takes arguments, so ToolsSmoke stands in the middle: it reads
@@ -31,15 +31,17 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 MODEL=A1200
 TIMEOUT=420
 CPU=""
+CLOCK=""
 BUILD="${AMINETXDUO_BUILD:-build/tls}"
 
-while getopts "m:t:c:b:" opt; do
+while getopts "m:t:c:k:b:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
+        k) CLOCK="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-b builddir]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-k MHz] [-b builddir]" >&2; exit 2 ;;
     esac
 done
 
@@ -112,9 +114,11 @@ fi
 #
 # DELIBERATELY ABSENT: https://example.com/, https://www.iana.org/ and every
 # other Cloudflare-fronted host.  They send three- and four-certificate chains,
-# and tls.library takes the machine down partway through verifying one at
-# 14 MHz -- a library defect, bisected in docs/RESEARCH.md 9.  Including one
-# here would only kill the rest of the run; put them back when it is fixed.
+# which at 14 MHz take longer to verify than their front end is willing to wait
+# for a ClientKeyExchange, so they fail with "the connection is closed" through
+# no fault of ours and would make this run look broken.  Not a crash and not a
+# library defect -- that was the harness losing the EMULATOR to SIGPIPE; see
+# docs/RESEARCH.md.  www.iana.org completes in 11.3 s at -k 28.
 if [ -n "${AMINETXDUO_FETCH_COMMANDS:-}" ]; then
     cp "$AMINETXDUO_FETCH_COMMANDS" "$STAGE/commands.txt"
     echo "==> command list: $AMINETXDUO_FETCH_COMMANDS"
@@ -136,7 +140,8 @@ fi
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-fetch}"
 
 CPUARG=()
-[ -z "$CPU" ] || CPUARG=(-c "$CPU")
+[ -z "$CPU" ]   || CPUARG+=(-c "$CPU")
+[ -z "$CLOCK" ] || CPUARG+=(-k "$CLOCK")
 
 exec "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
      "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/fetch" \
