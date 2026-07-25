@@ -1,0 +1,59 @@
+#
+# DEVS:Internet/protocols -- standard /etc format, staged onto the test drive
+# by tests/conformance/run-fsuae.sh and tools/fsuae-run.sh.
+#
+#   <name>  <number>  [alias...]
+#
+# This file exists so the on-Amiga netdb tests exercise src/config/netdb.c's
+# FILE PARSER.  Without it netdb_load_one() falls back to the built-in table
+# compiled into the library and the parser never runs on the target at all.
+# It is deliberately not a copy of that table: the aliases, the tab/space mix,
+# the trailing comments and the blank lines below are the shapes the parser
+# has to survive, and they are what a real Roadshow /etc file looks like.
+#
+# getprotobyname("tcp") must give 6 and getprotobynumber(6) must give "tcp"
+# (bsdsocktest 95/97); getprotobyname("udp") must give 17 (96).
+#
+
+ip		0	IP		# internet protocol, pseudo protocol number
+icmp		1	ICMP
+igmp		2	IGMP
+ggp		3	GGP
+ipencap		4	IP-ENCAP
+st		5	ST
+tcp		6	TCP
+egp		8	EGP
+pup		12	PUP
+udp		17	UDP
+hmp		20	HMP
+xns-idp		22	XNS-IDP
+rdp		27	RDP
+iso-tp4		29	ISO-TP4
+xtp		36	XTP
+ddp		37	DDP
+idpr-cmtp	38	IDPR-CMTP
+ipv6		41	IPV6
+ipv6-route	43	IPv6-Route
+ipv6-frag	44	IPv6-Frag
+idrp		45	IDRP
+rsvp		46	RSVP
+gre		47	GRE
+esp		50	IPSEC-ESP
+ah		51	IPSEC-AH
+skip		57	SKIP
+ipv6-icmp	58	IPv6-ICMP	icmpv6	ICMPV6
+ipv6-nonxt	59	IPv6-NoNxt
+ipv6-opts	60	IPv6-Opts
+rspf		73	RSPF	CPHB
+vmtp		81	VMTP
+eigrp		88	EIGRP
+ospf		89	OSPFIGP
+ax.25		93	AX.25
+ipip		94	IPIP
+etherip		97	ETHERIP
+encap		98	ENCAP
+pim		103	PIM
+ipcomp		108	IPCOMP
+vrrp		112	VRRP
+l2tp		115	L2TP
+sctp		132	SCTP

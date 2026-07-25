@@ -8,14 +8,15 @@
  *   DOSBase   the crt normally defines and opens it; src/config talks to
  *             dos.library, so the library opens it in its own init.
  *
- *   rand()    NetX Duo takes NX_RAND from <stdlib.h> by default (nx_api.h),
- *             and newlib's rand() reaches through _impure_ptr -- which nothing
- *             has initialised. Pulling it in also drags lib_a-open.o, which
- *             wants _exit and takes the whole link down. A self-contained
- *             generator is both smaller and correct here. It is only used for
- *             TCP initial sequence numbers, IP IDs and the DHCP transaction
- *             id, so an xorshift seeded from the E-Clock is ample; nothing in
- *             AmiNetXDuo uses rand() for anything that needs to be secure.
+ *   rand()    NetX Duo used to take NX_RAND from <stdlib.h> (nx_api.h's
+ *             default), and newlib's rand() reaches through _impure_ptr --
+ *             which nothing has initialised. Pulling it in also drags
+ *             lib_a-open.o, which wants _exit and takes the whole link down.
+ *             NX_RAND now points at src/common/ami_random.c instead
+ *             (port/netxduo-amiga/inc/nx_port.h), so nothing in the stack
+ *             calls rand() at all; these definitions stay only so that a
+ *             third party calling rand() inside the library gets the pool
+ *             rather than an uninitialised newlib.
  *
  *   weak      every definition is weak so that a build which *does* have a crt
  *             (the test executables) keeps the crt's DOSBase and libc's rand.
@@ -25,6 +26,8 @@
 
 #include "bsdsocket_internal.h"
 
+#include "aminetxduo/random.h"
+
 #include <dos/dosextens.h>
 #include <proto/exec.h>
 
@@ -32,26 +35,14 @@ __attribute__((weak)) struct DosLibrary *DOSBase;
 
 /* --------------------------------------------------------------- rand() -- */
 
-static ULONG bsd_rand_state = 0x2545F491UL;
-
 __attribute__((weak)) void srand(unsigned int seed)
 {
-    bsd_rand_state = (ULONG)seed | 1UL;
+    ami_random_srand(seed);
 }
 
 __attribute__((weak)) int rand(void)
 {
-    ULONG x = bsd_rand_state;
-
-    /* Marsaglia xorshift32. */
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-
-    bsd_rand_state = x;
-
-    /* rand() is specified to return 0..RAND_MAX, and RAND_MAX is 0x7FFFFFFF. */
-    return (int)(x & 0x7FFFFFFFUL);
+    return ami_random_rand();
 }
 
 /* ------------------------------------------------------------- lifecycle -- */
@@ -65,7 +56,13 @@ BOOL bsd_runtime_open(VOID)
     if (DOSBase == NULL)
         DOSBase = (struct DosLibrary *)OpenLibrary((STRPTR)"dos.library", 37);
 
-    srand((unsigned int)(ami_millis() ^ (ULONG)(APTR)FindTask(NULL)));
+    /*
+     * Seed here rather than lazily on the first NX_RAND call: the collection
+     * costs a measured 21-22 ms sampling E-Clock jitter, and the first
+     * NX_RAND call is on the outgoing-packet path. This is a normal task
+     * context at InitResident() time, so 22 ms is free.
+     */
+    ami_random_init();
 
     return (DOSBase != NULL) ? TRUE : FALSE;
 }

@@ -93,8 +93,9 @@ fi
 FSUAE="${FSUAE:-$(command -v fs-uae || true)}"
 [ -n "$FSUAE" ] || { echo "fs-uae not found; set FSUAE=<path>" >&2; exit 2; }
 
-GCC="${AMIGA_GCC:-$HOME/amigaos/tools/m68k-amigaos-gcc/bin/m68k-amigaos-gcc}"
-NDK="${AMIGA_NDK:-$HOME/amigaos/tools/m68k-amigaos-gcc/m68k-amigaos/ndk-include}"
+AMIGA_TOOLCHAIN_QUIET=1 . "$ROOT/tools/amiga-toolchain.sh"
+GCC="$AMIGA_GCC"
+NDK="$AMIGA_NDK"
 
 # ------------------------------------------------------------------ staging --
 

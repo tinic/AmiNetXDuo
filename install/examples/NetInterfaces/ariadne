@@ -1,0 +1,25 @@
+;
+; DEVS:NetInterfaces/eth0 -- Village Tronic Ariadne, Zorro II Ethernet
+;
+; Copy this into DEVS:NetInterfaces and call the copy "eth0", then
+; either reboot or type
+;
+;     C:AddNetInterface DEVS:NetInterfaces/eth0
+;
+; The file name is the interface name; there is no NAME= keyword.
+; See the file "eth0" in this drawer for every keyword there is.
+;
+; The Ariadne also has two parallel ports; only the Ethernet side is
+; any concern of the TCP/IP stack.
+;
+
+DEVICE=ariadne.device
+UNIT=0
+
+; Ask the network for an address.  Change to STATIC and fill in
+; ADDRESS/NETMASK below if nothing on your network hands out
+; addresses -- and see "eth0-static" for a worked example.
+CONFIGURE=DHCP
+
+;ADDRESS=192.168.1.10
+;NETMASK=255.255.255.0

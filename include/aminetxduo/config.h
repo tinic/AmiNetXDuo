@@ -112,6 +112,36 @@ LONG ami_config_load(AmiConfig *cfg);
 /* Parse one interface file by name (DEVS:NetInterfaces/<name>). */
 LONG ami_config_load_interface(const char *name, AmiIfConfig *out);
 
+/* ------------------------------------------------------------- diagnostics
+ *
+ * Everything wrong with a configuration file is reported twice: once to
+ * ami_log() for whoever is reading the serial port, and once through this
+ * hook, which is how a Shell command puts the same fact on the user's screen
+ * with a file name, a line number and a suggestion.
+ *
+ * The hook is optional and global. src/netstack never installs one -- a
+ * program that opens bsdsocket.library must not have configuration warnings
+ * appear in its output -- so the only reporters are the tools, which install
+ * one for the duration of a load and remove it afterwards.
+ *
+ * The AmiCfgProblem and every string in it are valid only for the duration of
+ * the call; copy anything you need to keep.
+ */
+#define AMI_CFG_PROBLEM_ERROR   0   /* the file cannot be used as written  */
+#define AMI_CFG_PROBLEM_WARN    1   /* usable, but something was ignored   */
+
+typedef struct AmiCfgProblem {
+    const char *file;       /* "DEVS:NetInterfaces/eth0", never NULL       */
+    ULONG       line;       /* 1-based; 0 when it is about the whole file  */
+    UWORD       severity;   /* AMI_CFG_PROBLEM_*                           */
+    const char *text;       /* what is wrong: one sentence, no full stop   */
+    const char *hint;       /* what to do about it, or NULL                */
+} AmiCfgProblem;
+
+typedef VOID (*AmiCfgReporter)(const AmiCfgProblem *problem, APTR user);
+
+VOID ami_config_set_reporter(AmiCfgReporter reporter, APTR user);
+
 /* Dotted-quad <-> ULONG (host byte order). Returns FALSE on malformed input. */
 BOOL  ami_config_parse_ip(const char *text, ULONG *out);
 VOID  ami_config_format_ip(ULONG addr, char *buf, ULONG buflen);

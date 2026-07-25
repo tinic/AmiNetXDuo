@@ -236,8 +236,39 @@ int main(int argc, char **argv)
         }
         else
         {
-            tool_error("send failed for icmp_seq=%lu (NetX Duo status %ld)",
-                       i, (LONG)status);
+            /*
+             * Everything else is a local failure -- the packet never left. A
+             * NetX Duo status number is no use to the person who typed the
+             * command, so the two that actually happen get named: an
+             * interface that is down (status 33, NX_IP_ADDRESS_ERROR: there is
+             * no address to send from) and an exhausted packet pool.
+             */
+            tool_error("could not send the request");
+
+            if (status == NX_IP_ADDRESS_ERROR || status == NX_NOT_SUCCESSFUL)
+            {
+                tool_advise_blank();
+                tool_advise("This machine has no address on the network that");
+                tool_advise("would reach that host, so the request never left.");
+                tool_advise_blank();
+                tool_advise("ShowNetStatus  says what the interfaces have; the");
+                tool_advise("usual causes are an interface that is offline and");
+                tool_advise("a DHCP server that never answered.");
+            }
+            else if (status == NX_NO_PACKET || status == NX_UNDERFLOW ||
+                     status == NX_OVERFLOW)
+            {
+                tool_advise_blank();
+                tool_advise("The stack ran out of packet buffers. Something");
+                tool_advise("else on this machine is using the network hard,");
+                tool_advise("or memory is very short.");
+            }
+            else
+            {
+                tool_printf("  (NetX Duo status %ld -- the serial debug log has "
+                            "the detail)\n", (LONG)status);
+            }
+
             rc = RETURN_ERROR;
             break;
         }

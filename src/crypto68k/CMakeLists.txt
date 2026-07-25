@@ -33,15 +33,12 @@ set(CRYPTO68K_INCLUDES
 # --------------------------------------------------- vendored reference ---
 
 # nx_crypto_huge_number.c divides 64-bit values, and this toolchain ships a
-# zero-byte libgcc.a.  src/tls/tls_udivdi3.c already solves that, but src/tls
-# is only configured when AMINETXDUO_TLS is ON -- so reuse its target when it
-# exists and build our own copy of the same file when it does not.  Never both
-# in one link: the definitions are identical and would collide.
+# zero-byte libgcc.a.  src/common/ami_udivdi3.c is the single copy of the
+# helpers for the whole tree; src/common is configured unconditionally and
+# before this directory, so the target is simply there on a cross build.  On a
+# host build libgcc supplies the real ones.
 if(TARGET aminetxduo_m68k_rt)
     set(CRYPTO68K_RT aminetxduo_m68k_rt)
-elseif(CMAKE_CROSSCOMPILING)
-    add_library(crypto68k_rt STATIC "${CMAKE_CURRENT_SOURCE_DIR}/../tls/tls_udivdi3.c")
-    set(CRYPTO68K_RT crypto68k_rt)
 else()
     set(CRYPTO68K_RT "")
 endif()

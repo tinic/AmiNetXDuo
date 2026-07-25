@@ -67,6 +67,52 @@ int main(int argc, char **argv)
     /* netstack_resolve takes ThreadX ticks. */
     ticks = timeout * TX_TIMER_TICKS_PER_SECOND;
 
+    /*
+     * The usual case is a stack running inside bsdsocket.library, which this
+     * command cannot reach through netstack_resolve() -- but gethostbyname()
+     * is a published vector and answers from the same resolver, DHCP-supplied
+     * name servers included. Ask that first, and only fall back to the
+     * in-process stack (which exists in a build that links one) after.
+     */
+    if (netstack_get() == NULL && tool_stack_library_running())
+    {
+        BOOL ok;
+
+        if (ami_config_parse_ip(name, &addr))
+        {
+            ok = tool_stack_lookup_addr(addr, text, sizeof(text));
+            if (ok)
+                tool_printf("%s is %s\n", (LONG)name, (LONG)text);
+            else
+                tool_error("no name for %s", (LONG)name);
+        }
+        else
+        {
+            ok = tool_stack_lookup(name, &addr);
+            if (ok)
+            {
+                ami_config_format_ip(addr, text, sizeof(text));
+                tool_printf("%s has address %s\n", (LONG)name, (LONG)text);
+            }
+            else
+            {
+                tool_error("cannot resolve \"%s\"", (LONG)name);
+            }
+        }
+
+        if (!ok)
+        {
+            /*
+             * gethostbyname() reports failure without a reason a command can
+             * read, and "not known" is much the likeliest one.
+             */
+            tool_explain_resolve(name, AMI_NET_ERR_NONAME);
+        }
+
+        FreeArgs(rda);
+        return ok ? RETURN_OK : RETURN_ERROR;
+    }
+
     if (tool_require_stack() == NULL)
     {
         FreeArgs(rda);
@@ -80,6 +126,7 @@ int main(int argc, char **argv)
         {
             tool_error("no name for %s: %s", (LONG)name,
                        (LONG)tool_net_error(err));
+            tool_explain_resolve(name, err);
             FreeArgs(rda);
             return RETURN_ERROR;
         }
@@ -93,6 +140,7 @@ int main(int argc, char **argv)
         {
             tool_error("cannot resolve \"%s\": %s", (LONG)name,
                        (LONG)tool_net_error(err));
+            tool_explain_resolve(name, err);
             FreeArgs(rda);
             return RETURN_ERROR;
         }

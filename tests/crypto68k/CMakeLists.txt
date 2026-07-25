@@ -17,6 +17,13 @@
 #
 # SPDX-License-Identifier: MIT
 
+# The on-Amiga executables below are cross-only: c68k_support.c and
+# c68k_timer.c are RawDoFmt and timer.device, and they link aminetxduo_common,
+# which does not compile on a host.  Guarded so that a host configure -- the
+# one CI uses for the parser/VM/vector tests -- has a buildable `all`.
+# The host tier of the same vectors is at the bottom of this file.
+if(CMAKE_CROSSCOMPILING)
+
 add_library(crypto68k_testsupport STATIC
     c68k_support.c
     c68k_timer.c)
@@ -52,3 +59,62 @@ foreach(prog crypto68k_test crypto68k_bench crypto68k_ec_test crypto68k_ec_bench
             COMMENT "${prog} size")
     endif()
 endforeach()
+
+endif() # CMAKE_CROSSCOMPILING
+
+
+# ---------------------------------------------------------------- host tier --
+#
+# The same two correctness programs, built for the host and registered with
+# ctest.  c68k_test.c and c68k_ec_test.c are ordinary C; what ties them to the
+# Amiga is the support layer (RawDoFmt logging, timer.device, the crash guard),
+# and host/ replaces exactly that -- see host/c68k_host.c.
+#
+# This is worth having because it is where the vectors actually get run in CI:
+# the Amiga tier needs an emulator and a Kickstart ROM, neither of which exists
+# in a public runner, so without this the RSA-2048 known answers and the
+# differential comparison against the vendored huge-number code would be tested
+# on no push at all.
+#
+# What the host tier does NOT cover: the hand-written 68020 assembly.  It
+# cannot be assembled here, so the host always exercises the portable C path
+# (AMINETXDUO_CRYPTO68K_ASM is OFF by default off-target for that reason).  The
+# assembly remains an emulator-tier test.
+#
+# The sources are compiled in directly rather than linked from the crypto68k
+# target, because that target's dependency chain reaches aminetxduo_common and
+# therefore the NDK.  Same pattern as src/config, src/mbuf and src/bpf.
+
+# NX_CRYPTO_STANDALONE_ENABLE is nx_crypto's own switch for building the
+# crypto library with no NetX Duo underneath it -- nx_crypto.h then takes its
+# types from nx_crypto_port.h, and host/shim/ supplies one whose LONG/ULONG are
+# fixed-width 32 bit.  That is not a host liberty, it is the m68k widths: the
+# huge-number code needs HN_UBASE2 to be exactly twice HN_UBASE, and every
+# stock port spells HN_UBASE as `unsigned long`, which is 64 bits here.  See
+# the header comment in host/shim/nx_crypto_port.h.
+if(NOT CMAKE_CROSSCOMPILING)
+
+    add_executable(test_crypto68k
+        host/test_c68k_host.c
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_prim.c"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_mont.c"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_powm.c"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_crt.c"
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_huge_number.c"
+        # Defines _NX_CRYPTO_INITIALIZE_, which is what gives the library its
+        # one definition of _nx_crypto_memset_ptr / _nx_crypto_memcpy_ptr.
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_initialize.c")
+
+    target_include_directories(test_crypto68k PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"     # nx_crypto_port.h, first
+        "${CMAKE_CURRENT_SOURCE_DIR}"               # c68k_vectors.h
+        "${CMAKE_SOURCE_DIR}/src/crypto68k"
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
+
+    target_compile_definitions(test_crypto68k PRIVATE
+        NX_CRYPTO_STANDALONE_ENABLE)
+
+    include(CTest)
+    add_test(NAME crypto68k_vectors COMMAND test_crypto68k)
+
+endif()

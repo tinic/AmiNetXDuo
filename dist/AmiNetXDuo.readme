@@ -1,0 +1,50 @@
+Short:        MIT TCP/IP stack: bsdsocket.library on NetX Duo
+Author:       aminetxduo (see the archive for contact details)
+Uploader:     aminetxduo (see the archive for contact details)
+Type:         comm/net
+Version:      @VERSION@
+Architecture: m68k-amigaos >= 2.04
+Requires:     68020 or better, 4 MB RAM, a SANA-II network driver
+Distribution: Aminet
+Replaces:     comm/net/AmiNetXDuo.lha
+
+AmiNetXDuo is a TCP/IP stack for classic AmigaOS built on Eclipse ThreadX
+NetX Duo.  It provides the bsdsocket.library API that Amiga networking
+software already speaks, over the SANA-II driver interface that Amiga network
+cards already implement, and it is MIT licensed throughout -- no 4.4BSD and
+no GPL lineage anywhere in the tree.
+
+Included:
+
+  bsdsocket.library     the socket API, self-starting on first OpenLibrary()
+  usergroup.library     the companion library ported Unix tools link against
+  AddNetInterface       bring an interface up from its description file
+  Online / Offline      take one interface up or down
+  ShowNetStatus         is it up, and what address did it get
+  ping, netstat, host   the usual diagnostics
+  an Installer script   asks two questions and writes a working config
+
+Configuration follows Roadshow's layout -- DEVS:NetInterfaces/<name>,
+DEVS:Internet/routes, DEVS:Internet/name_resolution and the standard
+/etc-style netdb files -- so existing documentation and habits carry over.
+
+What is in it that no classic Amiga stack has had:
+
+  * IPv6.  The dual stack build does ICMPv6, neighbour discovery, duplicate
+    address detection, stateless autoconfiguration from router
+    advertisements, and AF_INET6 sockets through bsdsocket.library.  As far
+    as we can establish this is an Amiga first.  It is a build option, off by
+    default, so the floor build stays small.
+  * An MIT licence with no strings.
+
+Requires a 68020 or better and AmigaOS 2.04 or newer; developed and tested
+on 3.1.  You supply your card's SANA-II driver -- a2065.device,
+ariadne.device, ariadne2.device, amiganet.device, xsurf.device,
+xsurf100.device, cnet.device and the PCMCIA drivers are all offered by name
+in the installer, and anything else can be typed in.
+
+Status, honestly: it gets a DHCP lease, answers ARP, pings its gateway,
+resolves DNS and moves TCP in both directions, and bsdsocket.library scores
+125 of 142 on the bsdsocktest conformance suite.  It has not been run on real
+hardware -- everything measured so far was on an emulated 68020 and 68030
+under Kickstart 3.1.  It is not yet something to trust with your data.

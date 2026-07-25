@@ -88,6 +88,61 @@ static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
     }
 }
 
+/*
+ * -s used to be a synonym for -i, which meant the switch existed and did
+ * nothing. These are the SANA-II counters the driver keeps, which is what
+ * anybody asking for statistics on an Amiga is after -- and the numbers that
+ * say whether a card is seeing traffic at all.
+ */
+static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
+{
+    UWORD i;
+    UWORD shown = 0;
+
+    tool_printf("Interface statistics\n");
+
+    for (i = 0; i < snap->iface_count; i++)
+    {
+        const ToolIfInfo   *info = &snap->iface[i];
+        const AmiSana2Stats *st  = &info->stats;
+
+        if (!info->attached)
+            continue;
+
+        if (!info->have_sana2)
+        {
+            tool_printf("\n%s: no driver attached, so it has no counters\n",
+                        (LONG)iface_name(cfg, i));
+            shown++;
+            continue;
+        }
+
+        tool_printf("\n%s (%s)\n", (LONG)iface_name(cfg, i),
+                    (LONG)(info->sana2_online ? "online" : "offline"));
+        tool_printf("  packets received  %10lu    packets sent      %10lu\n",
+                    st->packets_received, st->packets_sent);
+        tool_printf("  receive errors    %10lu    transmit errors   %10lu\n",
+                    st->rx_errors, st->tx_errors);
+        tool_printf("  bad data          %10lu    overruns          %10lu\n",
+                    st->bad_data, st->overruns);
+        tool_printf("  unknown types     %10lu    reconfigurations  %10lu\n",
+                    st->unknown_types, st->reconfigurations);
+        tool_printf("  buffer failures   %10lu\n", st->alloc_failures);
+
+        if (st->packets_received == 0 && st->packets_sent == 0)
+        {
+            tool_printf("  Nothing has gone in or out of this interface at all.\n");
+            tool_printf("  If it should have, check the cable and that the\n");
+            tool_printf("  interface is online (ShowNetStatus says).\n");
+        }
+
+        shown++;
+    }
+
+    if (shown == 0)
+        tool_printf("  no interfaces are attached\n");
+}
+
 static VOID show_routes(const AmiConfig *cfg, const ToolSnapshot *snap)
 {
     char  dest[16];
@@ -193,6 +248,7 @@ int main(int argc, char **argv)
     BOOL             want_if;
     BOOL             want_routes;
     BOOL             want_conn;
+    BOOL             want_stats;
 
     (VOID)argv;
 
@@ -213,11 +269,12 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    want_if     = (args[ARG_INTERFACES] != 0 || args[ARG_STATS] != 0) ? TRUE : FALSE;
+    want_if     = (args[ARG_INTERFACES] != 0) ? TRUE : FALSE;
     want_routes = (args[ARG_ROUTES] != 0) ? TRUE : FALSE;
     want_conn   = (args[ARG_ALL] != 0) ? TRUE : FALSE;
+    want_stats  = (args[ARG_STATS] != 0) ? TRUE : FALSE;
 
-    if (!want_if && !want_routes && !want_conn)
+    if (!want_if && !want_routes && !want_conn && !want_stats)
         want_if = want_routes = want_conn = TRUE;
 
     if (tool_require_stack() == NULL)
@@ -244,6 +301,8 @@ int main(int argc, char **argv)
 
     if (want_if)
         show_interfaces(cfg, &snap);
+    if (want_stats)
+        show_stats(cfg, &snap);
     if (want_routes)
         show_routes(cfg, &snap);
     if (want_conn)

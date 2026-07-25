@@ -65,6 +65,7 @@
 
 #include "tls.h"
 #include "aminetxduo/crashguard.h"
+#include "aminetxduo/random.h"
 
 #include <exec/types.h>
 #include <exec/execbase.h>
@@ -1216,8 +1217,11 @@ ULONG   hz;
           (hz != 0) ? (1000000000UL / hz) : 0UL);
 
     seed = ami_tls_seed_rng();
-    b_log("  rand() seed %lu -- NOT an entropy source, see src/tls/tls.h",
-          seed);
+    b_log("  entropy pool credits itself %lu bits -- see "
+          "include/aminetxduo/random.h", seed);
+    b_log("  ami_random_is_seeded() = %s; a real handshake must refuse or be "
+          "given a seed",
+          (LONG)(ami_random_is_seeded() ? "TRUE" : "FALSE"));
 
     b_fill_payload();
 

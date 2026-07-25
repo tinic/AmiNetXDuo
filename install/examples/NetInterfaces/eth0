@@ -1,0 +1,106 @@
+;
+; DEVS:NetInterfaces/eth0
+;
+; The reference example.  Every keyword AmiNetXDuo understands is here, most
+; of them commented out.  The other files in this drawer are the short
+; version of the same thing, one per card.
+;
+; To use one: copy it into DEVS:NetInterfaces, name the copy whatever you
+; want the interface to be called -- "eth0" is the usual answer -- and then
+; either reboot or type
+;
+;     C:AddNetInterface DEVS:NetInterfaces/eth0
+;
+; THE FILE NAME IS THE INTERFACE NAME.  There is no NAME= keyword.  A name
+; longer than 15 characters is truncated to 15.
+;
+; Syntax: one KEYWORD=value per line.  Spaces around the '=' are ignored, the
+; keywords are not case sensitive, ';' and '#' start a comment, and a value
+; with spaces in it goes in "double quotes".  KEYWORD value (no '=') works
+; too.
+;
+
+; ---------------------------------------------------------------- the card
+
+; DEVICE -- the SANA-II driver for your network card.  Required; an interface
+; file without it is ignored.
+;
+; A bare name is looked up in DEVS:.  If your driver lives in DEVS:Networks,
+; which is where AmiTCP-era packages put theirs, give the whole path:
+;
+;     DEVICE=DEVS:Networks/ariadne.device
+;
+DEVICE=a2065.device
+
+; UNIT -- which card, when one driver drives several.  Almost always 0.
+UNIT=0
+
+; ------------------------------------------------------------- the address
+
+; CONFIGURE -- how this interface gets its Internet address.
+;
+;   DHCP      ask the network.  What you want on any network with a router.
+;             The address, the netmask, the default route and the name
+;             servers all arrive in the lease.
+;   AUTO      try DHCP, and if nothing answers pick a link-local 169.254.x.x
+;             address so that at least the local network works.  FASTAUTO and
+;             ZEROCONF mean the same thing.
+;   STATIC    use the ADDRESS and NETMASK below.  MANUAL means the same.
+;
+; This keyword is CONFIGURE.  It is *not* IPTYPE -- IPTYPE is a number, the
+; SANA-II packet type, and it defaults to 2048.  Documentation that tells you
+; to write IPTYPE=DHCP is repeating an AmiTCP/Genesis-era mistake.  (For what
+; it is worth, AmiNetXDuo accepts an alphabetic IPTYPE as an address mode
+; anyway, so such a file still works here.  It will not work on Roadshow.)
+;
+CONFIGURE=DHCP
+
+; With CONFIGURE=STATIC, these two are what the interface uses.  ADDRESS=DHCP
+; and NETMASK=DHCP are also legal and mean the same as CONFIGURE=DHCP.
+;
+;ADDRESS=192.168.1.10
+;NETMASK=255.255.255.0
+
+; GATEWAY here is accepted, but the default route really belongs in
+; DEVS:Internet/routes -- see the routes example in this drawer.
+;
+;GATEWAY=192.168.1.1
+
+; ------------------------------------------------------------------- IPv6
+;
+; No other classic Amiga TCP/IP stack has had IPv6, so these keywords are
+; AmiNetXDuo's own: the IPv4 keyword with a "6" on the end.  A build without
+; IPv6 recognises and ignores them, so they are safe to leave in place.
+;
+;   CONFIGURE6=OFF          no IPv6 at all
+;   CONFIGURE6=LINKLOCAL    fe80:: address only
+;   CONFIGURE6=AUTO         link-local, plus whatever a router advertises.
+;                           This is the default.
+;   CONFIGURE6=STATIC       use ADDRESS6 below
+;
+;CONFIGURE6=AUTO
+;ADDRESS6=2001:db8::10/64
+;GATEWAY6=fe80::1
+
+; ------------------------------------------------------------------- other
+
+; STATE -- whether the interface comes up when the stack starts.  UP (the
+; default) or DOWN.  A DOWN interface is configured but idle until you type
+; "Online eth0".
+;
+;STATE=UP
+
+; MTU -- the largest packet this interface will send.  Leave it alone unless
+; something on the path is telling you to lower it; 1500 is the Ethernet
+; answer and the driver supplies it.
+;
+;MTU=1500
+
+; These are real Roadshow keywords.  AmiNetXDuo parses them so that a
+; Roadshow interface file produces no complaints, but they belong to the
+; SANA-II layer and are not acted on yet.
+;
+;IPREQUESTS=64
+;WRITEREQUESTS=64
+;COPYMODE=fast
+;IPTYPE=2048

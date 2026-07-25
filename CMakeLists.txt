@@ -125,6 +125,9 @@ add_subdirectory(src/tools)
 
 if(AMINETXDUO_TESTS)
     add_subdirectory(tests)
+    # Diagnostic probes -- built, never auto-run.  Two of them crash on
+    # purpose; see tools/smoke/CMakeLists.txt.
+    add_subdirectory(tools/smoke)
 endif()
 
 # ------------------------------------------------------------------ report --

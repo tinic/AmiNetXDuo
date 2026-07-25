@@ -1,0 +1,113 @@
+#
+# DEVS:Internet/services -- standard /etc format, staged onto the test drive
+# by tests/conformance/run-fsuae.sh and tools/fsuae-run.sh.
+#
+#   <name>  <port>/<proto>  [alias...]
+#
+# Present so the on-Amiga netdb tests parse a real file instead of falling
+# back to the table compiled into src/config/netdb.c.  Longer than that table
+# on purpose -- a lookup that scans 90 entries rather than 30 is the one that
+# would show up a bad terminator or an alias pool overrun.
+#
+# bsdsocktest requires: getservbyname("http","tcp") -> 80 (test 92),
+# getservbyname("nonexistent_service_xyz","tcp") -> NULL (93),
+# getservbyport(21,"tcp") -> "ftp" (94).
+#
+# Note the ordering constraint test 94 imposes: ami_netdb_serv_by_port()
+# returns the FIRST entry whose port and protocol both match, so ftp-data must
+# not be given port 21 and the tcp entry for a name must precede its udp twin
+# wherever a reverse lookup is expected to name the tcp service.
+#
+
+tcpmux		1/tcp
+echo		7/tcp
+echo		7/udp
+discard		9/tcp		sink	null
+discard		9/udp		sink	null
+systat		11/tcp		users
+daytime		13/tcp
+daytime		13/udp
+netstat		15/tcp
+qotd		17/tcp		quote
+chargen		19/tcp		ttytst	source
+chargen		19/udp		ttytst	source
+ftp-data	20/tcp
+ftp		21/tcp
+ssh		22/tcp
+ssh		22/udp
+telnet		23/tcp
+smtp		25/tcp		mail
+time		37/tcp		timserver
+time		37/udp		timserver
+rlp		39/udp		resource
+nameserver	42/tcp		name
+whois		43/tcp		nicname
+tacacs		49/tcp
+tacacs		49/udp
+domain		53/tcp
+domain		53/udp
+bootps		67/udp
+bootpc		68/udp
+tftp		69/udp
+gopher		70/tcp
+finger		79/tcp
+http		80/tcp		www	www-http
+kerberos	88/tcp		kerberos5	krb5
+kerberos	88/udp		kerberos5	krb5
+pop2		109/tcp		postoffice	pop-2
+pop3		110/tcp		pop-3
+sunrpc		111/tcp		portmapper	rpcbind
+sunrpc		111/udp		portmapper	rpcbind
+auth		113/tcp		authentication	tap	ident
+sftp		115/tcp
+nntp		119/tcp		readnews	untp
+ntp		123/udp
+netbios-ns	137/tcp
+netbios-ns	137/udp
+netbios-dgm	138/udp
+netbios-ssn	139/tcp
+imap		143/tcp		imap2
+snmp		161/udp
+snmp-trap	162/udp		snmptrap
+bgp		179/tcp
+irc		194/tcp
+ipx		213/udp
+imap3		220/tcp
+ldap		389/tcp
+ldap		389/udp
+https		443/tcp
+https		443/udp
+snpp		444/tcp
+microsoft-ds	445/tcp
+kpasswd		464/tcp
+isakmp		500/udp
+exec		512/tcp
+biff		512/udp		comsat
+login		513/tcp
+who		513/udp		whod
+shell		514/tcp		cmd	rsh
+syslog		514/udp
+printer		515/tcp		spooler	lpr
+talk		517/udp
+ntalk		518/udp
+route		520/udp		router	routed
+timed		525/udp		timeserver
+uucp		540/tcp		uucpd
+klogin		543/tcp
+kshell		544/tcp		krcmd
+submission	587/tcp		msa
+ipp		631/tcp
+ldaps		636/tcp
+rsync		873/tcp
+imaps		993/tcp
+pop3s		995/tcp
+socks		1080/tcp
+openvpn		1194/udp
+nfs		2049/tcp
+nfs		2049/udp
+mysql		3306/tcp
+rdp		3389/tcp
+sip		5060/tcp
+sip		5060/udp
+postgresql	5432/tcp
+x11		6000/tcp	x-server

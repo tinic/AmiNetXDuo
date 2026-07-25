@@ -54,6 +54,34 @@ extern "C" {
  */
 APTR ami_cfg_read_file(const char *path, ULONG *size_out);
 
+/* ------------------------------------------------------------ diagnostics */
+
+/*
+ * Name the file that subsequent ami_cfg_problem() calls are about. The
+ * configuration is loaded from one file at a time on one task, so a single
+ * "current file" is enough and it keeps the parsers' signatures unchanged.
+ * Passing NULL restores "the configuration".
+ */
+VOID ami_cfg_problem_file(const char *path);
+
+/*
+ * Hand one problem to whatever reporter is installed (usually none). `text`
+ * says what is wrong, `hint` -- which may be NULL -- says what to do about it.
+ * Both are copied nowhere: they may point at the caller's stack.
+ */
+VOID ami_cfg_problem(ULONG line, UWORD severity, const char *text,
+                     const char *hint);
+
+/* TRUE when a reporter is installed, so a caller can skip building a message. */
+BOOL ami_cfg_problems_wanted(VOID);
+
+/*
+ * Build "<a><b><c>" (any of which may be NULL) into dst. For the one-off
+ * message strings the parsers assemble; there is no sprintf() here.
+ */
+VOID ami_cfg_join3(char *dst, ULONG dstlen, const char *a, const char *b,
+                   const char *c);
+
 /* ----------------------------------------------------------- text handling */
 
 /*

@@ -89,12 +89,39 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
                 if (server == 0UL)
                     continue;
 
-                if (nx_dns_server_add(&ns->ns_Dns, server) == NX_SUCCESS)
-                    AMI_INFO("netstack: DHCP name server %lu.%lu.%lu.%lu",
-                             (unsigned long)((server >> 24) & 0xFFUL),
-                             (unsigned long)((server >> 16) & 0xFFUL),
-                             (unsigned long)((server >>  8) & 0xFFUL),
-                             (unsigned long)(server & 0xFFUL));
+                if (nx_dns_server_add(&ns->ns_Dns, server) != NX_SUCCESS)
+                    continue;
+
+                AMI_INFO("netstack: DHCP name server %lu.%lu.%lu.%lu",
+                         (unsigned long)((server >> 24) & 0xFFUL),
+                         (unsigned long)((server >> 16) & 0xFFUL),
+                         (unsigned long)((server >>  8) & 0xFFUL),
+                         (unsigned long)(server & 0xFFUL));
+
+                /*
+                 * Record it in the configuration as well, not just in the DNS
+                 * client. Everything that reports which name servers are in
+                 * use -- ShowNetStatus, ObtainDomainNameServerList() -- reads
+                 * the configuration, so without this a DHCP machine shows the
+                 * servers from the file (or "none configured") while resolving
+                 * happily through the ones the lease supplied. That is the
+                 * kind of disagreement that makes a working machine look
+                 * broken.
+                 */
+                {
+                    AmiResolverConfig *r     = &ns->ns_Config.resolver;
+                    BOOL               known = FALSE;
+                    UWORD              n;
+
+                    for (n = 0; n < r->nameserver_count; n++)
+                    {
+                        if (r->nameserver[n] == server)
+                            known = TRUE;
+                    }
+
+                    if (!known && r->nameserver_count < AMI_CFG_MAX_NAMESERVERS)
+                        r->nameserver[r->nameserver_count++] = server;
+                }
             }
         }
     }
@@ -109,6 +136,48 @@ VOID ami_netstack_dns_stop(AmiNetStack *ns)
 
     (VOID)nx_dns_delete(&ns->ns_Dns);
     ns->ns_DnsCreated = FALSE;
+}
+
+/*
+ * A NetX Duo DNS status, turned into something a person can act on.
+ *
+ * The distinction that matters is between "your machine is not set up to look
+ * names up" (no server, no answer) and "that name does not exist" (a typo).
+ * Reporting the second as a device failure -- which this used to do, for
+ * every failure alike -- sends the reader to check cables over a mistyped
+ * host name.
+ */
+static LONG ami_ns_dns_error(UINT status)
+{
+    switch (status)
+    {
+        case NX_DNS_NO_SERVER:
+        case NX_DNS_EMPTY_DNS_SERVER_LIST:
+        case NX_DNS_SERVER_NOT_FOUND:
+            return AMI_NET_ERR_NOSERVER;
+
+        case NX_DNS_TIMEOUT:
+            return AMI_NET_ERR_TIMEOUT;
+
+        case NX_DNS_QUERY_FAILED:
+        case NX_DNS_MISMATCHED_RESPONSE:
+        case NX_DNS_BAD_ID_ERROR:
+        case NX_DNS_SERVER_AUTH_ERROR:
+            /*
+             * The servers were asked and none of them has the name. That is
+             * what a wrong name looks like from here, and it is much the
+             * likeliest cause.
+             */
+            return AMI_NET_ERR_NONAME;
+
+        case NX_DNS_PARAM_ERROR:
+        case NX_DNS_BAD_ADDRESS_ERROR:
+        case NX_DNS_SIZE_ERROR:
+            return AMI_NET_ERR_CONFIG;
+
+        default:
+            return AMI_NET_ERR_NONAME;
+    }
 }
 
 /* -------------------------------------------------------------- public API */
@@ -144,7 +213,11 @@ LONG netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks)
     ami_netstack_leave(&caller);
 
     if (status != NX_SUCCESS)
-        return AMI_NET_ERR_NODEV;
+    {
+        AMI_INFO("netstack: '%s' not resolved (DNS status %ld)", name,
+                 (long)status);
+        return ami_ns_dns_error(status);
+    }
 
     *addr_out = address;
 
@@ -180,7 +253,7 @@ LONG netstack_resolve_reverse(ULONG addr, char *name_out, ULONG name_len,
 
     ami_netstack_leave(&caller);
 
-    return (status == NX_SUCCESS) ? AMI_NET_OK : AMI_NET_ERR_NODEV;
+    return (status == NX_SUCCESS) ? AMI_NET_OK : ami_ns_dns_error(status);
 }
 
 #ifdef AMINETXDUO_IPV6
@@ -219,8 +292,10 @@ LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)
 
     ami_netstack_leave(&caller);
 
-    if (status != NX_SUCCESS || count == 0)
-        return AMI_NET_ERR_NODEV;
+    if (status != NX_SUCCESS)
+        return ami_ns_dns_error(status);
+    if (count == 0)
+        return AMI_NET_ERR_NONAME;
 
     addr_out[0] = answer[0].ipv6_address[0];
     addr_out[1] = answer[0].ipv6_address[1];

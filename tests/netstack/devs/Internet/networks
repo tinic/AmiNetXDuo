@@ -1,0 +1,26 @@
+#
+# DEVS:Internet/networks -- standard /etc format, staged onto the test drive
+# by tests/conformance/run-fsuae.sh and tools/fsuae-run.sh.
+#
+#   <name>  <net>  [alias...]
+#
+# Present so the on-Amiga netdb tests parse a real file instead of falling
+# back to the table compiled into src/config/netdb.c.
+#
+# bsdsocktest requires getnetbyname("loopback") -> n_net == 127 (test 101) and
+# getnetbyaddr(127, AF_INET) -> a non-empty name (102).  loopback is first so
+# the reverse lookup, which returns the first entry with a matching value,
+# names it rather than the localnet alias line.
+#
+# The <net> column is a NETWORK number, not an address: ami_cfg_parse_net_number()
+# accepts the truncated dotted forms the /etc format allows, so "10", "172.16"
+# and "192.168.1" are one, two and three byte network numbers respectively.
+#
+
+loopback	127		localhost
+slirp		10.0.2			# FS-UAE user-mode NAT, tests/netstack
+private-a	10
+private-b	172.16
+private-c	192.168
+link-local	169.254		zeroconf	autoip
+test-net-1	192.0.2		documentation

@@ -135,7 +135,15 @@ LONG ami_config_load_interface(const char *name, AmiIfConfig *out)
         return AMI_CFG_ERR_IO;
     }
 
+    /*
+     * `path` is on this stack frame and the reporter is handed it by pointer,
+     * so the name has to be taken back before we return -- hence the explicit
+     * clear rather than letting the next caller overwrite it.
+     */
+    ami_cfg_problem_file(path);
     result = ami_cfg_parse_interface(name, buf, out);
+    ami_cfg_problem_file(NULL);
+
     ami_free(buf);
 
     return result;
@@ -181,6 +189,14 @@ static VOID load_interfaces(AmiConfig *cfg)
     if (lock == 0)
     {
         AMI_WARN("config: no " AMI_CFG_DIR_NETINTERFACES " drawer");
+
+        ami_cfg_problem_file(AMI_CFG_DIR_NETINTERFACES);
+        ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR,
+                        "there is no DEVS:NetInterfaces drawer, so nothing "
+                        "describes a network card",
+                        "Run NetSetup: it asks which card you have and writes "
+                        "the drawer and the file for you.");
+        ami_cfg_problem_file(NULL);
         return;
     }
 
@@ -205,7 +221,19 @@ static VOID load_interfaces(AmiConfig *cfg)
                 continue;
 
             if (ami_config_load_interface(entry_name, &iface) != AMI_CFG_OK)
+            {
+                char text[AMI_CFG_NAME_LEN + 64];
+
+                ami_cfg_problem_file(AMI_CFG_DIR_NETINTERFACES);
+                ami_cfg_join3(text, sizeof(text), "the file '", entry_name,
+                              "' could not be used, so that interface does "
+                              "not exist");
+                ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR, text,
+                                "The problems listed above it say why.  "
+                                "NetSetup can rewrite the file from scratch.");
+                ami_cfg_problem_file(NULL);
                 continue;
+            }
 
             AMI_INFO("config: interface %s: %s unit %lu",
                      iface.name, iface.device, (unsigned long)iface.unit);
@@ -216,6 +244,18 @@ static VOID load_interfaces(AmiConfig *cfg)
 
     ami_free(fib);
     UnLock(lock);
+
+    if (cfg->interface_count == 0)
+    {
+        ami_cfg_problem_file(AMI_CFG_DIR_NETINTERFACES);
+        ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR,
+                        "the DEVS:NetInterfaces drawer holds no usable "
+                        "interface file",
+                        "One file per network card goes in there, named "
+                        "however you want to refer to the card -- eth0 is the "
+                        "usual choice.  NetSetup writes one for you.");
+        ami_cfg_problem_file(NULL);
+    }
 }
 
 /* ----------------------------------------------------------------- pieces */

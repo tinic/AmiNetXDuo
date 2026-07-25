@@ -48,6 +48,36 @@
 /* Big-endian target: NX_LITTLE_ENDIAN deliberately left undefined.  */
 
 
+/*
+ * Random numbers.
+ *
+ * Left undefined, nx_api.h falls back to NX_RAND == rand(), which on this
+ * toolchain is newlib's 32-bit LCG -- and NX_RAND is what generates ECDHE
+ * private keys and the TLS client random in nx_secure, as well as TCP initial
+ * sequence numbers, IP identification fields, ephemeral ports and the DHCP
+ * transaction id in the core.  An LCG is fully recoverable from one output.
+ *
+ * src/common/ami_random.c replaces it with a SHA-256 hash DRBG over an
+ * entropy pool.  Read include/aminetxduo/random.h before believing the pool
+ * is any good: the expansion is sound, the collection is not audited, and the
+ * module reports its own weakness through ami_random_is_seeded() rather than
+ * pretending.  Anything generating a real key is expected to check that.
+ *
+ * Declared by hand rather than by including the header: nx_port.h is pulled
+ * into every vendored translation unit, and aminetxduo/random.h drags in
+ * exec/types.h, whose `#define VOID void` collides with tx_port.h.
+ */
+#ifndef NX_RAND
+extern int ami_random_rand(void);
+#define NX_RAND                     ami_random_rand
+#endif
+
+#ifndef NX_SRAND
+extern void ami_random_srand(unsigned int seed);
+#define NX_SRAND                    ami_random_srand
+#endif
+
+
 /* Define various constants for the port.  */
 
 #ifndef NX_IP_PERIODIC_RATE

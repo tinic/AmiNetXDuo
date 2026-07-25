@@ -1,0 +1,18 @@
+#
+# DEVS:Internet/networks -- names for whole networks.
+#
+# Read by getnetbyname() and getnetbyaddr() in bsdsocket.library.
+#
+#     <name>  <network number>  [alias ...]
+#
+# The network number is written in the shorthand /etc/networks has always
+# used: between one and four dot-separated parts, left-aligned into the
+# address.  "127" means 127.0.0.0, "192.168.1" means 192.168.1.0.
+#
+loopback	127
+link-local	169.254
+
+# Your own networks, if you find it useful to have names for them:
+#
+#home		192.168.1
+#lab		10.0.0

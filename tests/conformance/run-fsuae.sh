@@ -55,7 +55,13 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 MODEL=A1200
 TIMEOUT=600
 CPU=""
-TAG=conformance
+# -T wins, then AMINETXDUO_RUN_TAG from the environment, then the default. The
+# environment has to be honoured here: this script exports AMINETXDUO_RUN_TAG
+# to tools/fsuae-run.sh, so taking the default unconditionally used to
+# OVERWRITE a caller's tag -- two runs started with different
+# AMINETXDUO_RUN_TAG values would silently share build/testhd-conformance and
+# clobber each other's results.
+TAG="${AMINETXDUO_RUN_TAG:-conformance}"
 ARGS="NOPAGE"
 PROBE=0
 

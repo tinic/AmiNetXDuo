@@ -14,6 +14,7 @@
 
 set(TOOLS_COMMON_SOURCES
     tool_util.c
+    tool_diag.c
     netstack_weak.c)
 
 set(TOOLS_WARNINGS -Wall -Wextra)
@@ -25,9 +26,14 @@ function(aminetxduo_add_tool target output)
 
     add_executable(${target} ${TOOL_SOURCES} ${TOOLS_COMMON_SOURCES})
 
+    # src/sana2 is on the path for its device header alone: the NDK ships no
+    # <devices/sana2.h>, and tool_diag.c opens a SANA-II device to find out
+    # whether the user's card really is there.  No tool links the shim unless
+    # it asks for NX.
     target_include_directories(${target} PRIVATE
         ${AMINETXDUO_CORE_INCLUDES}
-        "${CMAKE_CURRENT_SOURCE_DIR}")
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/sana2")
 
     if(AMIGA_NDK_INCLUDE)
         target_include_directories(${target} PRIVATE "${AMIGA_NDK_INCLUDE}")
@@ -60,6 +66,10 @@ endfunction()
 
 aminetxduo_add_tool(tool_addnetinterface AddNetInterface
     SOURCES addnetinterface.c)
+
+# The interactive configurator.  Config-only: it writes the files the parser
+# reads and then runs AddNetInterface, rather than starting a stack itself.
+aminetxduo_add_tool(tool_netsetup NetSetup SOURCES netsetup.c)
 
 aminetxduo_add_tool(tool_online  Online   SOURCES onoff.c)
 aminetxduo_add_tool(tool_offline Offline  SOURCES onoff.c DEFINES TOOL_OFFLINE)
@@ -94,5 +104,5 @@ set_target_properties(tool_smoke PROPERTIES OUTPUT_NAME "ToolsSmoke")
 
 add_custom_target(tools ALL)
 add_dependencies(tools
-    tool_addnetinterface tool_online tool_offline tool_host
+    tool_addnetinterface tool_netsetup tool_online tool_offline tool_host
     tool_shownetstatus tool_netstat tool_ping tool_smoke)

@@ -32,20 +32,18 @@
  *       refusal leaves the kernel usable, that it is idempotent, and that
  *       start -> stop -> start -> stop works.
  *
- * Build (tools/smoke/ has no CMake integration, same as its neighbours):
+ * Build:
  *
- *   AGCC=~/amigaos/tools/m68k-amigaos-gcc/bin/m68k-amigaos-gcc
- *   $AGCC -m68020 -O2 -fomit-frame-pointer -fno-strict-aliasing \
- *       -I port/threadx-amiga/inc -I port/netxduo-amiga/inc \
- *       -I third_party/threadx/common/inc -I include \
- *       -o build/KernelStop tools/smoke/kernelstop.c \
- *       build/cm/port/threadx-amiga/libthreadx_port.a \
- *       build/cm/libthreadx.a build/cm/port/threadx-amiga/libthreadx_port.a \
- *       build/cm/src/common/libaminetxduo_common.a
+ *   cmake --build build/cm --parallel --target smoke_KernelStop
+ *
+ * The output name is load-bearing: the parent runs "SYS:KernelStop child",
+ * so the binary has to be called KernelStop whatever the CMake target is
+ * named.
  *
  * Run:
  *
- *   AMINETXDUO_RUN_TAG=kstop ./tools/fsuae-run.sh -t 120 build/KernelStop
+ *   AMINETXDUO_RUN_TAG=kstop ./tools/fsuae-run.sh -t 120 \
+ *       build/cm/tools/smoke/KernelStop
  *
  * SPDX-License-Identifier: MIT
  */

@@ -38,8 +38,23 @@ static const char version_tag[] __attribute__((used)) =
  * appending stderr redirection and passes it through as an argument -- and
  * there is no need, because a child of System() has no separate error stream,
  * so tool_error() and PrintFault() both land on stdout anyway.
+ *
+ * A command that brings its own "<" -- NetSetup reading a file of answers --
+ * keeps it, and only the output half is added.
  */
 #define REDIRECT    " <NIL: >>DH0:tools.txt"
+#define REDIRECT_OUT " >>DH0:tools.txt"
+
+/*
+ * The command list can be staged as DH0:commands.txt, one command per line,
+ * '#' and blank lines ignored. That is what lets one harness run -- which can
+ * only start a single executable with no arguments -- exercise a machine with
+ * no configuration, a machine with a broken one, and a machine whose config
+ * names a device that is not there, simply by staging different directories.
+ */
+#define COMMANDS    "DH0:commands.txt"
+#define MAX_COMMANDS    40
+#define MAX_LINE        160
 
 static const char *const commands[] =
 {
@@ -64,6 +79,48 @@ static const char *const commands[] =
     "SYS:host 1.2.3.4",
     NULL
 };
+
+/* Storage for a staged command list; static, because a Shell command's stack
+   is 4K and this is 6K of it. */
+static char  script[MAX_COMMANDS][MAX_LINE];
+static ULONG script_count;
+
+/*
+ * Read DH0:commands.txt into `script`. Returns 0 when there is no such file,
+ * in which case the built-in list above is used.
+ */
+static ULONG load_script(void)
+{
+    BPTR  fh = Open((CONST_STRPTR)COMMANDS, MODE_OLDFILE);
+    char  line[MAX_LINE];
+
+    if (fh == (BPTR)0)
+        return 0;
+
+    while (script_count < (ULONG)MAX_COMMANDS &&
+           FGets(fh, (STRPTR)line, (ULONG)MAX_LINE) != NULL)
+    {
+        int n = 0;
+        int i;
+
+        while (line[n] != '\0')
+            n++;
+        while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r' ||
+                         line[n - 1] == ' '))
+            line[--n] = '\0';
+
+        if (line[0] == '\0' || line[0] == '#')
+            continue;
+
+        for (i = 0; i <= n; i++)
+            script[script_count][i] = line[i];
+        script_count++;
+    }
+
+    Close(fh);
+
+    return script_count;
+}
 
 /* Append a line to the report, opening and closing around every write so the
    Shell's own >> redirection never fights us for the file position. */
@@ -112,19 +169,45 @@ int main(int argc, char **argv)
                             "(no network stack linked in)\n");
     Close(fh);
 
-    for (i = 0; commands[i] != NULL; i++)
+    (void)load_script();
+
+    for (i = 0; ; i++)
     {
-        char line[160];
-        LONG rc;
-        int  n = 0;
-        int  k;
+        char        line[MAX_LINE + 40];
+        const char *command;
+        const char *tail;
+        LONG        rc;
+        int         n = 0;
+        int         k;
+        int         has_input = 0;
 
-        report((const char *)"\n===== %s =====\n", (LONG)commands[i], 0);
+        if (script_count > 0)
+        {
+            if ((ULONG)i >= script_count)
+                break;
+            command = script[i];
+        }
+        else
+        {
+            if (commands[i] == NULL)
+                break;
+            command = commands[i];
+        }
 
-        for (k = 0; commands[i][k] != '\0' && n < (int)sizeof(line) - 64; k++)
-            line[n++] = commands[i][k];
-        for (k = 0; REDIRECT[k] != '\0' && n < (int)sizeof(line) - 1; k++)
-            line[n++] = REDIRECT[k];
+        report((const char *)"\n===== %s =====\n", (LONG)command, 0);
+
+        for (k = 0; command[k] != '\0'; k++)
+        {
+            if (command[k] == '<')
+                has_input = 1;
+        }
+
+        tail = has_input ? (const char *)REDIRECT_OUT : (const char *)REDIRECT;
+
+        for (k = 0; command[k] != '\0' && n < (int)sizeof(line) - 32; k++)
+            line[n++] = command[k];
+        for (k = 0; tail[k] != '\0' && n < (int)sizeof(line) - 1; k++)
+            line[n++] = tail[k];
         line[n] = '\0';
 
         rc = SystemTagList((CONST_STRPTR)line, NULL);

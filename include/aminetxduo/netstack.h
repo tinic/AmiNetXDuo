@@ -35,6 +35,20 @@ typedef struct AmiNetStack AmiNetStack;
 #define AMI_NET_ERR_STATE      (-5)
 
 /*
+ * Resolver failures, which are separate because they are the ones an ordinary
+ * user meets: a mistyped host name is not a hardware fault and must not be
+ * reported as one. netstack_resolve() used to answer every failure with
+ * AMI_NET_ERR_NODEV, so a typo read as "the SANA-II device would not open"
+ * and sent people to look at their Ethernet card.
+ *
+ * bsdsocket.library's h_errno mapping treats everything except
+ * AMI_NET_ERR_STATE as HOST_NOT_FOUND, which stays correct for all three.
+ */
+#define AMI_NET_ERR_NONAME     (-6)   /* the name does not exist              */
+#define AMI_NET_ERR_NOSERVER   (-7)   /* no name server is configured         */
+#define AMI_NET_ERR_TIMEOUT    (-8)   /* the name server did not answer       */
+
+/*
  * Bring the stack up (idempotent, reference-counted). Reads the config, starts
  * ThreadX, creates the packet pool and NX_IP, attaches interfaces, runs DHCP
  * where configured. Blocks until the first interface has an address or the

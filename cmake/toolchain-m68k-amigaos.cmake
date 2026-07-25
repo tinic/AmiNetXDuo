@@ -9,12 +9,65 @@
 set(CMAKE_SYSTEM_NAME Generic)
 set(CMAKE_SYSTEM_PROCESSOR m68k)
 
+# Search order, first hit wins.  Kept identical to tools/amiga-toolchain.sh so
+# that a shell script and a CMake configure never pick different compilers:
+#
+#   1. -DAMIGA_TOOLCHAIN_ROOT / $AMIGA_TOOLCHAIN_ROOT   -- explicit
+#   2. the tools/fetch-toolchain.sh cache               -- what CI uses
+#   3. m68k-amigaos-gcc on $PATH                        -- container, module
+#   4. /opt/m68k-amigaos                                -- crosstools layout
+#   5. $HOME/amigaos/tools/m68k-amigaos-gcc             -- local default
+#
+# Before this list existed there was only entry 5, which meant a clean checkout
+# on any machine but one configured a compiler that was not there and failed
+# with a CMake internal error rather than an explanation.
 if(NOT AMIGA_TOOLCHAIN_ROOT)
     if(DEFINED ENV{AMIGA_TOOLCHAIN_ROOT})
         set(AMIGA_TOOLCHAIN_ROOT "$ENV{AMIGA_TOOLCHAIN_ROOT}")
     else()
-        set(AMIGA_TOOLCHAIN_ROOT "$ENV{HOME}/amigaos/tools/m68k-amigaos-gcc")
+        if(DEFINED ENV{AMINETXDUO_TOOLCHAIN_CACHE})
+            set(_amiga_cache "$ENV{AMINETXDUO_TOOLCHAIN_CACHE}")
+        elseif(DEFINED ENV{XDG_CACHE_HOME})
+            set(_amiga_cache "$ENV{XDG_CACHE_HOME}/aminetxduo/toolchain")
+        else()
+            set(_amiga_cache "$ENV{HOME}/.cache/aminetxduo/toolchain")
+        endif()
+
+        set(_amiga_candidates "${_amiga_cache}/current")
+
+        find_program(_amiga_gcc_on_path m68k-amigaos-gcc)
+        if(_amiga_gcc_on_path)
+            get_filename_component(_amiga_bin "${_amiga_gcc_on_path}" DIRECTORY)
+            get_filename_component(_amiga_from_path "${_amiga_bin}" DIRECTORY)
+            list(APPEND _amiga_candidates "${_amiga_from_path}")
+        endif()
+
+        list(APPEND _amiga_candidates
+             "/opt/m68k-amigaos"
+             "$ENV{HOME}/amigaos/tools/m68k-amigaos-gcc")
+
+        foreach(_c IN LISTS _amiga_candidates)
+            if(EXISTS "${_c}/bin/m68k-amigaos-gcc")
+                set(AMIGA_TOOLCHAIN_ROOT "${_c}")
+                break()
+            endif()
+        endforeach()
+
+        if(NOT AMIGA_TOOLCHAIN_ROOT)
+            message(FATAL_ERROR
+                "No m68k-amigaos cross toolchain found.\n"
+                "Looked in: ${_amiga_candidates}\n"
+                "Fix it with tools/fetch-toolchain.sh, or configure with "
+                "-DAMIGA_TOOLCHAIN_ROOT=<path to the dir holding "
+                "bin/m68k-amigaos-gcc>.")
+        endif()
     endif()
+endif()
+
+if(NOT EXISTS "${AMIGA_TOOLCHAIN_ROOT}/bin/m68k-amigaos-gcc")
+    message(FATAL_ERROR
+        "AMIGA_TOOLCHAIN_ROOT=${AMIGA_TOOLCHAIN_ROOT} has no "
+        "bin/m68k-amigaos-gcc.")
 endif()
 
 set(AMIGA_TOOLCHAIN_BIN "${AMIGA_TOOLCHAIN_ROOT}/bin")
@@ -34,6 +87,15 @@ set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 
 set(AMIGA_NDK_INCLUDE "${AMIGA_TOOLCHAIN_ROOT}/m68k-amigaos/ndk-include"
     CACHE PATH "NDK include directory (Roadshow bsdsocket + SANA-II headers live here)")
+
+# The NDK headers ship WITH the toolchain, so a root without them is a broken
+# or partial install rather than something to work around.  Say so here: the
+# alternative is a hundred "exec/types.h: No such file" errors at build time.
+if(NOT EXISTS "${AMIGA_NDK_INCLUDE}/exec/types.h")
+    message(FATAL_ERROR
+        "No NDK headers at ${AMIGA_NDK_INCLUDE}. They come with the toolchain; "
+        "if yours keeps them elsewhere, pass -DAMIGA_NDK_INCLUDE=<path>.")
+endif()
 
 # -noixemul is NOT usable with this newlib-based toolchain: it breaks sys/reent.h.
 # See docs/RESEARCH.md §5.4.

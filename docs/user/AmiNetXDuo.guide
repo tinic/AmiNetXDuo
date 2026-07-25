@@ -1,0 +1,1959 @@
+@database AmiNetXDuo.guide
+@$VER: AmiNetXDuo.guide 1.0 (25.7.2026)
+@author "The AmiNetXDuo project"
+@(c) "MIT licence"
+@width 76
+@remark ---------------------------------------------------------------------
+@remark  User documentation for AmiNetXDuo.  Every command example in this
+@remark  guide was captured from the real commands running under Kickstart
+@remark  3.1; nothing here is invented.
+@remark ---------------------------------------------------------------------
+
+@node MAIN "AmiNetXDuo"
+
+               @{b}AmiNetXDuo -- TCP/IP for AmigaOS@{ub}
+
+  A bsdsocket.library for classic AmigaOS, so that Amiga network
+  software -- browsers, FTP clients, telnet, file sharing -- can talk
+  to the network through your existing SANA-II network card driver.
+
+
+  @{b}Getting started@{ub}
+
+    @{"What AmiNetXDuo is        " link ABOUT}
+    @{"What you need             " link REQUIRE}
+    @{"Installing                " link INSTALL}
+    @{"Setting up your network   " link CONFIG}
+    @{"Starting the stack        " link STARTING}
+    @{"Is it working?            " link CHECK}
+
+  @{b}Reference@{ub}
+
+    @{"The commands              " link COMMANDS}
+    @{"Configuration files       " link CONFIG}
+    @{"Running network software  " link SOFTWARE}
+    @{"Where everything lives    " link FILES}
+
+  @{b}When it goes wrong@{ub}
+
+    @{"Troubleshooting           " link TROUBLE}
+    @{"Reading the debug log     " link LOGGING}
+    @{"Known limitations         " link LIMITS}
+
+  @{b}Legal@{ub}
+
+    @{"Licence and credits       " link LICENCE}
+
+
+  AmiNetXDuo works, and it is not finished. Please read
+  @{"What AmiNetXDuo is" link ABOUT} before trusting it with anything
+  that matters.
+
+@endnode
+
+
+@node ABOUT "What AmiNetXDuo is"
+@toc MAIN
+@next REQUIRE
+
+                      @{b}What AmiNetXDuo is@{ub}
+
+  AmigaOS has never had TCP/IP in the operating system. Networking has
+  always been a third-party shared library called bsdsocket.library,
+  which every Amiga network program opens and calls. AmiNetXDuo is a
+  new implementation of that library.
+
+  It gives you:
+
+    o  IPv4 with TCP, UDP, ICMP and ARP
+    o  A DHCP client, so your router can configure the machine
+    o  A DNS resolver, so names work
+    o  RFC 3927 link-local addressing (169.254.x.x) when you ask for it
+    o  usergroup.library, which many ported Unix programs also need
+    o  The Roadshow configuration files and commands, so existing
+       instructions and install scripts still make sense
+    o  IPv6, in builds made with that option turned on
+
+  It talks to your network card through SANA-II, the standard AmigaOS
+  network driver interface, so any card with a SANA-II driver should
+  work: A2065, Ariadne, X-Surf, CNet, PCMCIA cards, uaenet under an
+  emulator, and so on. AmiNetXDuo does not contain any drivers -- you
+  use the driver that came with your card.
+
+
+  @{b}Status: honest version@{ub}
+
+  This is young software. It gets a DHCP lease, answers ARP, pings its
+  gateway, resolves names and moves TCP in both directions, and it
+  scores 125 of 142 on the bsdsocktest conformance suite for
+  bsdsocket.library implementations. It has been tested under emulation
+  on Kickstart 3.1 with a 68020 and a 68030.
+
+  It has @{b}not@{ub} been run on real hardware, and it is not yet something to
+  trust with data you care about. There is no memory protection on
+  classic AmigaOS: if a network stack goes wrong, the machine goes with
+  it. Save your work before experimenting.
+
+  See @{"Known limitations" link LIMITS} for the specific things that
+  are missing or do not work yet.
+
+@endnode
+
+
+@node REQUIRE "What you need"
+@toc MAIN
+@prev ABOUT
+@next INSTALL
+
+                         @{b}What you need@{ub}
+
+  @{b}A machine@{ub}
+
+    o  68020 processor or better
+    o  AmigaOS 3.0 or 3.1 (Kickstart 40 is what has been tested)
+    o  About 4 MB of Fast RAM
+
+  Memory matters more than processor speed. At startup AmiNetXDuo
+  claims one sixteenth of the free memory for its packet buffers, at
+  least 16 buffers and at most 256, each 1568 bytes. On a machine with
+  8 MB free that is the full 256 buffers, about 400 KB. On a 4 MB
+  machine it takes proportionally less and still works.
+
+  @{b}A network card and its driver@{ub}
+
+  You need a SANA-II driver for your card, installed in DEVS:, and you
+  need to know two things about it:
+
+    o  its @{b}name@{ub}, for example a2065.device or x-surf.device
+    o  the @{b}unit number@{ub}, which is 0 unless you have more than one card
+
+  The driver comes from your card's manufacturer or from Aminet.
+  AmiNetXDuo does not ship one and cannot invent one. If you are
+  running under an emulator, uaenet.device or an emulated A2065 is the
+  usual choice.
+
+  @{b}A network@{ub}
+
+  Anything with a DHCP server -- which means any ordinary home router --
+  needs no addressing decisions from you at all. A network without one
+  needs an address, a netmask and a gateway address that you choose;
+  see @{"DHCP or a fixed address" link ADDRESSING}.
+
+@endnode
+
+
+@node INSTALL "Installing"
+@toc MAIN
+@prev REQUIRE
+@next CONFIG
+
+                           @{b}Installing@{ub}
+
+  If the archive came with an Installer script, run it and skip this
+  node. To install by hand, copy the pieces to these places:
+
+    @{b}bsdsocket.library@{ub}       to LIBS:
+    @{b}usergroup.library@{ub}       to LIBS:
+    @{b}AddNetInterface@{ub}         to C:
+    @{b}Online@{ub}                  to C:
+    @{b}Offline@{ub}                 to C:
+    @{b}ShowNetStatus@{ub}           to C:
+    @{b}netstat@{ub}                 to C:
+    @{b}ping@{ub}                    to C:
+    @{b}host@{ub}                    to C:
+
+  Then make the two configuration drawers, if they are not there
+  already:
+
+    makedir DEVS:NetInterfaces
+    makedir DEVS:Internet
+
+  Nothing is installed into the system's own files, and nothing is
+  patched. To remove AmiNetXDuo again, delete those files and drawers.
+
+  @{b}If you already have another TCP/IP stack@{ub}
+
+  Do not run two at once. AmiTCP, Miami, Roadshow and AmiNetXDuo all
+  provide LIBS:bsdsocket.library and only one of them can be the one
+  that opens. If you are switching, rename the old library rather than
+  overwriting it, so you can go back:
+
+    rename LIBS:bsdsocket.library LIBS:bsdsocket.library.old
+
+  Also make sure the old stack is not started from S:User-Startup, or
+  it will open its own copy at boot.
+
+  Next: @{"Setting up your network" link CONFIG}.
+
+@endnode
+
+
+@node CONFIG "Setting up your network"
+@toc MAIN
+@prev INSTALL
+@next IFACE
+
+                     @{b}Setting up your network@{ub}
+
+  AmiNetXDuo reads plain text files. You can edit them with any text
+  editor -- Ed, CygnusEd, anything -- and they take effect the next
+  time the stack starts.
+
+  There are only two you are likely to need:
+
+    @{"DEVS:NetInterfaces/<name>     " link IFACE} which card, and how it gets an address
+    @{"DEVS:Internet/name_resolution " link RESOLVER} which name servers to ask
+
+  and three more that some networks want:
+
+    @{"DEVS:Internet/routes          " link ROUTES} the default gateway
+    @{"DEVS:Internet/hosts           " link NETDB} names you want to work without DNS
+    @{"DEVS:Internet/services        " link NETDB} port numbers by name
+
+  All of these share the same simple rules:
+
+    o  One setting per line, written as KEYWORD=value or KEYWORD value
+    o  Spaces around the = are ignored
+    o  Keywords are not case sensitive: DEVICE, device and Device are
+       the same thing
+    o  A line starting with # or ; is a comment, and so is the rest of
+       a line after a # or ;
+    o  A value with spaces in it can be put in "double quotes"
+
+  Related nodes:
+
+    @{"The interface file" link IFACE}
+    @{"DHCP or a fixed address" link ADDRESSING}
+    @{"Name servers" link RESOLVER}
+    @{"The default gateway" link ROUTES}
+    @{"hosts, services, protocols, networks" link NETDB}
+    @{"Your machine's name" link HOSTNAME}
+    @{"IPv6" link IPV6}
+
+@endnode
+
+
+@node IFACE "The interface file"
+@toc CONFIG
+@prev CONFIG
+@next ADDRESSING
+
+                       @{b}The interface file@{ub}
+
+  Each network card gets one file in DEVS:NetInterfaces. @{b}The name of the
+  file is the name of the interface@{ub} -- if you call the file eth0, then
+  eth0 is what you type at the commands and what ShowNetStatus prints.
+  Any name will do; eth0 is only a habit.
+
+  The smallest useful file, for a card on a network with a router:
+
+    @{b}DEVS:NetInterfaces/eth0@{ub}
+      DEVICE    = a2065.device
+      UNIT      = 0
+      CONFIGURE = DHCP
+
+  The same card on a network with no DHCP server:
+
+    @{b}DEVS:NetInterfaces/eth0@{ub}
+      DEVICE    = a2065.device
+      UNIT      = 0
+      CONFIGURE = STATIC
+      ADDRESS   = 192.168.1.10
+      NETMASK   = 255.255.255.0
+
+  @{b}The keywords@{ub}
+
+  @{b}DEVICE@{ub}     The SANA-II driver, for example a2065.device. This is
+             the only keyword that is compulsory; without it the file
+             is not an interface file and is ignored.
+
+  @{b}UNIT@{ub}       Which card the driver should use. 0 unless you have more
+             than one of the same card. Default 0.
+
+  @{b}CONFIGURE@{ub}  How the interface gets its address: DHCP, STATIC, or
+             AUTO. See @{"DHCP or a fixed address" link ADDRESSING}.
+             Default STATIC.
+
+  @{b}ADDRESS@{ub}    The IP address, when CONFIGURE=STATIC. May also be
+             spelled IPADDRESS. Writing ADDRESS=DHCP is another way of
+             saying CONFIGURE=DHCP.
+
+  @{b}NETMASK@{ub}    The subnet mask, when CONFIGURE=STATIC. May also be
+             spelled SUBNETMASK. For a home network this is almost
+             always 255.255.255.0.
+
+  @{b}GATEWAY@{ub}    A default gateway for this interface. The usual place
+             for this is DEVS:Internet/routes -- see
+             @{"The default gateway" link ROUTES} -- but it is accepted
+             here and used if the routes file does not supply one.
+
+  @{b}STATE@{ub}      UP or DOWN (ONLINE and OFFLINE mean the same). DOWN
+             means the interface is configured but not brought online
+             at startup; you bring it up later with
+             @{"Online" link ONLINE}. Default UP.
+
+  @{b}IPTYPE@{ub}     A @{b}number@{ub} here is the SANA-II packet type, which is
+             what Roadshow means by IPTYPE, and AmiNetXDuo ignores it.
+             A @{b}word@{ub} here (IPTYPE=DHCP) is the AmiTCP way of writing
+             CONFIGURE, and is accepted. If you are writing a new file,
+             use CONFIGURE and avoid the confusion.
+
+  @{b}MTU@{ub}        Accepted but not used. The packet size comes from the
+             driver, which is asked for it when the interface opens.
+
+  Interface files written for Roadshow usually carry other keywords --
+  IPREQUESTS, WRITEREQUESTS, COPYMODE, ALIAS, HARDWAREADDRESS, FILTER,
+  ID, METRIC, PRIORITY and so on. AmiNetXDuo recognises them and
+  ignores them, so an existing Roadshow file can be used unchanged and
+  will not produce complaints. Anything it does @{b}not@{ub} recognise is
+  reported as an unknown keyword in the debug log
+  (@{"Reading the debug log" link LOGGING}).
+
+  @{b}More than one card@{ub}
+
+  Put one file in DEVS:NetInterfaces per card. They are read in
+  alphabetical order, and the first one is the one whose gateway
+  becomes the default route. At most @{b}two@{ub} interfaces are actually
+  attached to the stack; further files are parsed and then dropped with
+  a warning in the debug log.
+
+  Two details worth knowing: interface names are cut off at 15
+  characters, and Workbench icon files (anything ending in .info) in
+  the drawer are skipped, so you may safely give your interface files
+  icons.
+
+@endnode
+
+
+@node ADDRESSING "DHCP or a fixed address"
+@toc CONFIG
+@prev IFACE
+@next RESOLVER
+
+                    @{b}DHCP or a fixed address@{ub}
+
+  @{b}CONFIGURE=DHCP -- let the router decide@{ub}
+
+  This is what you want on any network with a router, which is nearly
+  all of them. The address, the netmask, the gateway and the name
+  servers all arrive from the DHCP server, and there is nothing else to
+  configure.
+
+  When the stack starts it waits up to @{b}30 seconds@{ub} for a lease. If none
+  arrives it carries on with no address, and everything else will fail
+  until one does. See
+  @{"Nothing happens and there is no address" link T_NOLEASE}.
+
+  @{b}CONFIGURE=STATIC -- you decide@{ub}
+
+  Use this when there is no DHCP server, or when this machine has to
+  keep the same address. You must supply ADDRESS and NETMASK in the
+  interface file, and you will almost certainly also want to set the
+  @{"default gateway" link ROUTES} and at least one
+  @{"name server" link RESOLVER}, because with a static address nothing
+  is supplied for you.
+
+  Pick an address on the same network as the rest of your machines and
+  outside whatever range the router hands out by DHCP, or two machines
+  will end up with the same address.
+
+  MANUAL and NONE are accepted as other spellings of STATIC.
+
+  @{b}CONFIGURE=AUTO -- link-local, no server needed@{ub}
+
+  AUTO selects RFC 3927 link-local addressing: the machine picks an
+  address in 169.254.x.x, checks that nothing else on the wire is using
+  it, and uses it. That is enough to talk to other machines on the same
+  cable and nothing else -- there is no gateway and no DNS.
+
+  It is useful for a direct cable between two machines. It is @{b}not@{ub} a
+  fallback for DHCP.
+
+  @{b}Note for people coming from Roadshow:@{ub} in AmiNetXDuo the words AUTO,
+  FASTAUTO, ZEROCONF and LINKLOCAL all mean link-local addressing. If
+  you copy a configuration from a Roadshow machine and it says
+  CONFIGURE=AUTO but you expected a DHCP lease, change it to
+  CONFIGURE=DHCP.
+
+  BOOTP is accepted and does the same thing as DHCP.
+
+@endnode
+
+
+@node RESOLVER "Name servers"
+@toc CONFIG
+@prev ADDRESSING
+@next ROUTES
+
+                          @{b}Name servers@{ub}
+
+  Turning www.aminet.net into an address is done by a name server. With
+  @{b}CONFIGURE=DHCP you do not have to configure one@{ub}: the servers come
+  with the lease and are used automatically.
+
+  With a static address, or to override what DHCP supplies, create
+  DEVS:Internet/name_resolution:
+
+    @{b}DEVS:Internet/name_resolution@{ub}
+      # The router usually forwards DNS.
+      nameserver 192.168.1.1
+      domain     localdomain
+
+  @{b}The keywords@{ub}
+
+  @{b}nameserver@{ub}  The address of a name server. Repeat the line for more
+              than one; up to four are kept.
+
+  @{b}domain@{ub}      Your local domain name, used to complete short names.
+
+  @{b}search@{ub}      A list of domains to try, on one line, separated by
+              spaces. Up to six.
+
+  @{b}hostname@{ub}    This machine's own name; see
+              @{"Your machine's name" link HOSTNAME}.
+
+  @{b}prefer@{ub}      Accepted for compatibility and ignored.
+
+  Both keyword=value and keyword value are accepted, so lines copied
+  from a Unix resolv.conf work as they stand.
+
+  @{b}One thing that will confuse you if you do not know it@{ub}
+
+  ShowNetStatus lists the name servers from @{b}this file only@{ub}. It does not
+  list the ones that arrived with a DHCP lease. On a DHCP machine with
+  no name_resolution file, ShowNetStatus prints
+
+    Name servers:   none configured
+
+  and name lookups still work perfectly. Test with @{"host" link HOST},
+  not with ShowNetStatus.
+
+@endnode
+
+
+@node ROUTES "The default gateway"
+@toc CONFIG
+@prev RESOLVER
+@next NETDB
+
+                       @{b}The default gateway@{ub}
+
+  The default gateway is the machine on your network -- normally your
+  router -- that everything not on your own network is sent to. Without
+  one you can reach your own network and nothing else.
+
+  With @{b}CONFIGURE=DHCP the gateway arrives with the lease@{ub} and you do not
+  configure it.
+
+  With a static address, put it in DEVS:Internet/routes:
+
+    @{b}DEVS:Internet/routes@{ub}
+      # Everything else goes to the router.
+      DEFAULT = 192.168.1.1
+
+  DEFAULTGATEWAY is accepted as another spelling of DEFAULT, and a
+  plain GATEWAY= or VIA= line is also read as the default gateway.
+
+  If a file called DEVS:Internet/default_gateway exists it is read
+  first, in the form
+
+      GATEWAY = 192.168.1.1
+
+  and if neither file supplies a gateway, a GATEWAY= line in the
+  @{"interface file" link IFACE} is used.
+
+  @{b}Only the default route is supported.@{ub} Lines in the routes file that
+  describe a specific route -- the ones carrying DST, HOSTDST or NETDST
+  -- are parsed and skipped. There is no way to add a route to one
+  particular network through a second router, and no route command.
+
+@endnode
+
+
+@node NETDB "hosts, services, protocols, networks"
+@toc CONFIG
+@prev ROUTES
+@next HOSTNAME
+
+                @{b}hosts, services, protocols, networks@{ub}
+
+  These four optional files in DEVS:Internet are the standard Unix
+  network database, in the standard format. AmiNetXDuo has sensible
+  built-in defaults for all four, so you only need a file when you want
+  to add something.
+
+  @{b}DEVS:Internet/hosts@{ub} -- names without DNS
+
+      127.0.0.1       localhost loopback
+      192.168.1.1     router
+      192.168.1.20    bigbox bigbox.localdomain
+
+  Address first, then the name, then any number of aliases. This file
+  is consulted @{b}before@{ub} DNS, by every program on the machine and by the
+  @{"host" link HOST} and @{"ping" link PING} commands, so it works even
+  when the network does not. It is the quickest way to give a machine
+  on your own network a name.
+
+  Built in already: 127.0.0.1 as localhost.
+
+  @{b}DEVS:Internet/services@{ub} -- port numbers by name
+
+      http            80/tcp   www
+      myserver        7777/tcp
+
+  Built in already: echo, discard, daytime, ftp-data, ftp, ssh, telnet,
+  smtp, time, domain, bootps, bootpc, tftp, finger, http, pop3, sunrpc,
+  nntp, ntp, imap, snmp, https, syslog and printer.
+
+  @{b}DEVS:Internet/protocols@{ub} -- protocol numbers by name
+
+  Built in already: ip, icmp, igmp, tcp, udp, ipv6 and icmpv6. You will
+  probably never need this file.
+
+  @{b}DEVS:Internet/networks@{ub} -- names for whole networks
+
+  Built in already: loopback as 127. Rarely used.
+
+  Note: an entry in the hosts file must be an IPv4 address. IPv6
+  addresses in this file are not understood, and an IPv6-only name has
+  to be resolvable by DNS.
+
+@endnode
+
+
+@node HOSTNAME "Your machine's name"
+@toc CONFIG
+@prev NETDB
+@next IPV6
+
+                      @{b}Your machine's name@{ub}
+
+  ShowNetStatus prints a host name, and some network software asks the
+  library for one. AmiNetXDuo works it out in this order, and stops at
+  the first answer it finds:
+
+    1.  a HOSTNAME line in DEVS:Internet/name_resolution
+    2.  a HOST line in that file, in AmiTCP style, whose address is not
+        a loopback address
+    3.  the environment variable HOSTNAME
+    4.  the first non-loopback name in DEVS:Internet/hosts
+    5.  the name "amiga"
+
+  The simplest way to set it is the resolver file:
+
+    @{b}DEVS:Internet/name_resolution@{ub}
+      hostname   bigbox
+      nameserver 192.168.1.1
+
+  or, from the Shell, in a way that survives a reboot:
+
+    setenv HOSTNAME bigbox
+    copy ENV:HOSTNAME ENVARC:
+
+@endnode
+
+
+@node IPV6 "IPv6"
+@toc CONFIG
+@prev HOSTNAME
+@next STARTING
+
+                              @{b}IPv6@{ub}
+
+  IPv6 is a build option. Ordinary builds of AmiNetXDuo are IPv4 only,
+  and in those builds everything in this node is read, recognised and
+  then ignored -- so an interface file with IPv6 keywords in it is safe
+  to use on either build.
+
+  In a build made with IPv6 turned on, the interface file takes three
+  extra keywords, each the IPv4 keyword with a 6 on the end:
+
+    @{b}DEVS:NetInterfaces/eth0@{ub}
+      DEVICE     = a2065.device
+      UNIT       = 0
+      CONFIGURE  = DHCP
+      CONFIGURE6 = AUTO
+      ADDRESS6   = 2001:db8::10/64
+      GATEWAY6   = fe80::1
+
+  @{b}CONFIGURE6@{ub}  OFF, LINKLOCAL, AUTO or STATIC. Default AUTO, which
+              means: always configure the link-local address, and take
+              a global address from a router advertisement if one
+              arrives. On a network with no IPv6 router that costs
+              three packets and behaves exactly like LINKLOCAL.
+              IPTYPE6 is accepted as another spelling.
+
+  @{b}ADDRESS6@{ub}    A static address with an optional prefix length; /64 is
+              assumed if you leave it off. Giving ADDRESS6 without
+              CONFIGURE6 means CONFIGURE6=STATIC.
+
+  @{b}GATEWAY6@{ub}    The IPv6 default router.
+
+  What works: ICMPv6, neighbour discovery, duplicate address detection,
+  stateless autoconfiguration from router advertisements, TCP and UDP
+  over IPv6, and AF_INET6 sockets through bsdsocket.library.
+
+  What does not: @{b}the commands in this guide are IPv4 only@{ub}. ping,
+  netstat and ShowNetStatus will not show you an IPv6 address or ping
+  an IPv6 host, whichever build you are running. IPv6 multicast group
+  membership is not available to programs, and the scope-id suffix form
+  (fe80::1%eth0) is not understood.
+
+@endnode
+
+
+@node STARTING "Starting the stack"
+@toc MAIN
+@prev IPV6
+@next CHECK
+
+                        @{b}Starting the stack@{ub}
+
+  There are two ways the stack comes up, and you want the first one.
+
+  @{b}At boot, from S:User-Startup@{ub}
+
+  Add this line to S:User-Startup:
+
+    C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET
+
+  replacing eth0 with the name of your interface file. That reads the
+  configuration, starts the stack, brings the interface online, and
+  keeps it up until you reboot. QUIET stops it printing anything during
+  the boot; leave QUIET off while you are still setting things up so
+  you can see what it says.
+
+  @{b}By itself, when a program asks for it@{ub}
+
+  If no one has run AddNetInterface, the stack starts automatically the
+  first time any program opens bsdsocket.library, and stops again when
+  the last program closes it.
+
+  That sounds convenient and mostly is not: every program then pays the
+  startup cost, up to 30 seconds if it is waiting for a DHCP lease, and
+  the lease is thrown away and re-acquired each time. Run
+  AddNetInterface at boot and the stack is up once, waiting.
+
+  @{b}Stopping@{ub}
+
+  There is no command that shuts the stack down. @{"Offline" link OFFLINE}
+  takes an interface off the network, which stops all traffic, and
+  @{"Online" link ONLINE} puts it back. To unload the stack entirely,
+  reboot.
+
+@endnode
+
+
+@node CHECK "Is it working?"
+@toc MAIN
+@prev STARTING
+@next COMMANDS
+
+                          @{b}Is it working?@{ub}
+
+  Four commands, in this order. Each one tests more than the last, so
+  the first one that fails tells you where the problem is.
+
+  @{b}1. Has it got an address?@{ub}
+
+    ShowNetStatus
+
+  You are looking for "Network stack: running" and an address on your
+  interface that is not 0.0.0.0:
+
+      Network stack:  running
+      Host name:      amiga
+      Default route:  10.0.2.2
+
+      Interface eth0 (a2065.device unit 0)
+        state       online          link up
+        address     10.0.2.15       netmask 255.255.255.0 (/24)
+        broadcast   10.0.2.255
+        hardware    00:80:10:32:33:34
+        mtu         1500 bytes        10000000 bits/s
+        configured  DHCP
+
+      Name servers:   10.0.2.2
+      Domain:         localdomain
+
+  (These examples come from a test machine on the 10.0.2.0 network.
+  Yours will show your own addresses.)
+
+  If this fails, go to @{"Troubleshooting" link TROUBLE}.
+
+  @{b}2. Can it reach the gateway?@{ub}
+
+  Take the "Default route" address from above and ping it:
+
+      1> ping 10.0.2.2
+      PING 10.0.2.2 (10.0.2.2): 56 data bytes
+      56 bytes from 10.0.2.2: icmp_seq=0 time=4 ms
+      56 bytes from 10.0.2.2: icmp_seq=1 time=1 ms
+      56 bytes from 10.0.2.2: icmp_seq=2 time=2 ms
+
+      --- 10.0.2.2 ping statistics ---
+      3 packets transmitted, 3 received, 0% packet loss
+      round-trip min/avg/max = 1/2/4 ms
+
+  Replies mean the card, the cable, the driver, ARP and IP are all
+  working.
+
+  @{b}3. Does DNS work?@{ub}
+
+      1> host www.example.com
+      www.example.com has address 172.66.147.243
+
+  @{b}4. Can a program use it?@{ub}
+
+  Run whatever network program you installed AmiNetXDuo for. If the
+  first three steps pass and a program still cannot connect, the
+  problem is much more likely to be in the program's own configuration
+  than in the stack.
+
+@endnode
+
+
+@node COMMANDS "The commands"
+@toc MAIN
+@prev CHECK
+@next ADDNETINTERFACE
+
+                           @{b}The commands@{ub}
+
+  Seven Shell commands are installed in C:. All of them are ordinary
+  AmigaDOS commands: they take arguments the AmigaDOS way, they answer
+  a "?" with their argument template, and they can be stopped with
+  Ctrl-C.
+
+    @{"AddNetInterface " link ADDNETINTERFACE}  start the stack and bring an interface up
+    @{"Online          " link ONLINE}  put an interface back on the network
+    @{"Offline         " link OFFLINE}  take an interface off the network
+    @{"ShowNetStatus   " link SHOWNETSTATUS}  what the stack thinks the network looks like
+    @{"netstat         " link NETSTAT}  interfaces, routes and connections
+    @{"ping            " link PING}  is that machine there?
+    @{"host            " link HOST}  look a name up, or an address back
+
+  @{b}Return codes@{ub}
+
+  Scripts can test what happened with the usual AmigaDOS levels:
+
+      0   OK
+      5   WARN     -- ping got no reply, or you pressed Ctrl-C
+     10   ERROR    -- the stack is not running, or a lookup failed
+     20   FAIL     -- the configuration or the driver is wrong
+
+  @{b}A note on "?"@{ub}
+
+  Typing a command followed by ? prints its template and waits for you
+  to type the arguments, exactly as with any AmigaDOS command:
+
+      1> netstat ?
+      INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S:
+
+  These are Shell commands. Started from Workbench they will only tell
+  you so.
+
+@endnode
+
+
+@node ADDNETINTERFACE "AddNetInterface"
+@toc COMMANDS
+@prev COMMANDS
+@next ONLINE
+
+                          @{b}AddNetInterface@{ub}
+
+      AddNetInterface NAME/A,QUIET/S
+
+  Reads DEVS:NetInterfaces/<NAME>, starts the network stack if it is
+  not running already, and brings that interface online. This is the
+  command that starts everything, and the one to put in S:User-Startup.
+
+  @{b}NAME@{ub}    The interface, which is the name of its file in
+          DEVS:NetInterfaces. Required. The full path is accepted too,
+          so both of these do the same thing:
+
+              AddNetInterface eth0
+              AddNetInterface DEVS:NetInterfaces/eth0
+
+  @{b}QUIET@{ub}   Print nothing. For S:User-Startup.
+
+  @{b}Example@{ub}
+
+      1> AddNetInterface eth0
+      eth0: a2065.device unit 0
+      eth0: 0.0.0.0 netmask 0.0.0.0 (DHCP)
+
+  The first line confirms which driver the file names. The second line
+  is printed @{b}from the configuration file@{ub}, not from the running
+  interface: with CONFIGURE=DHCP it shows 0.0.0.0 even when a lease has
+  just been obtained successfully. With a static address it shows what
+  you configured:
+
+      1> AddNetInterface eth0
+      eth0: a2065.device unit 0
+      eth0: 10.0.2.15 netmask 255.255.255.0 (static)
+
+  Either way, run @{"ShowNetStatus" link SHOWNETSTATUS} to see the
+  address actually in use.
+
+  @{b}Errors@{ub}
+
+      AddNetInterface: cannot read DEVS:NetInterfaces/nosuchinterface
+
+  There is no such file. Check the spelling and the drawer --
+  see @{"There is no such interface file" link T_NOFILE}.
+
+      AddNetInterface: DEVS:NetInterfaces/broken is not a valid
+      interface file
+
+  The file exists but has no DEVICE line.
+
+      AddNetInterface: cannot start the network stack: the SANA-II
+      device would not open
+
+  The driver named by DEVICE could not be opened --
+  see @{"The driver will not open" link T_DEVICE}.
+
+  AddNetInterface does not shut the stack down when it exits. That is
+  deliberate: the reference it takes is what keeps the stack alive
+  after the boot script has finished.
+
+@endnode
+
+
+@node ONLINE "Online"
+@toc COMMANDS
+@prev ADDNETINTERFACE
+@next OFFLINE
+
+                              @{b}Online@{ub}
+
+      Online INTERFACE/A,QUIET/S
+
+  Puts an interface back on the network after
+  @{"Offline" link OFFLINE}. Starts the stack first if it is not
+  running.
+
+  @{b}INTERFACE@{ub}   The interface name. Required.
+  @{b}QUIET@{ub}       Print nothing.
+
+  @{b}Example@{ub}
+
+      1> Online eth0
+      eth0 is online, address 0.0.0.0
+
+      1> Online eth0
+      eth0 is already online
+
+  As with @{"AddNetInterface" link ADDNETINTERFACE}, the address on that
+  line comes from the configuration file, so it reads 0.0.0.0 on a DHCP
+  interface. @{"ShowNetStatus" link SHOWNETSTATUS} shows the real one.
+
+@endnode
+
+
+@node OFFLINE "Offline"
+@toc COMMANDS
+@prev ONLINE
+@next SHOWNETSTATUS
+
+                             @{b}Offline@{ub}
+
+      Offline INTERFACE/A,QUIET/S
+
+  Takes an interface off the network. The stack keeps running and the
+  interface keeps its address, but nothing is sent or received until
+  you put it back with @{"Online" link ONLINE}.
+
+  @{b}INTERFACE@{ub}   The interface name. Required.
+  @{b}QUIET@{ub}       Print nothing.
+
+  @{b}Example@{ub}
+
+      1> Offline eth0
+      eth0 is offline
+
+      1> Offline eth0
+      eth0 is already offline
+
+  Unlike Online, Offline never starts the stack: taking an interface
+  down on a machine with no stack running is not a reason to boot the
+  whole thing, so it just says so and returns a warning:
+
+      1> Offline eth0
+      Offline: the network stack is not running, so eth0 is already
+      offline
+
+  While an interface is offline, ping fails in a way that is not
+  obvious -- see
+  @{"ping says send failed with a NetX Duo status" link T_OFFLINE}.
+
+@endnode
+
+
+@node SHOWNETSTATUS "ShowNetStatus"
+@toc COMMANDS
+@prev OFFLINE
+@next NETSTAT
+
+                           @{b}ShowNetStatus@{ub}
+
+      ShowNetStatus INTERFACE/K,STATS/S,ALL/S
+
+  The one command to reach for first. It shows what the stack thinks
+  the network looks like: the intent from your configuration files and
+  the reality from the running interface, with reality winning wherever
+  the two disagree.
+
+  @{b}INTERFACE@{ub}  Show only this interface. (A keyword: you must write
+             INTERFACE eth0, not just eth0.)
+  @{b}STATS@{ub}      Also show the SANA-II driver's own counters.
+  @{b}ALL@{ub}        The same as STATS.
+
+  @{b}Example@{ub}
+
+      1> ShowNetStatus
+      Network stack:  running
+      Host name:      amiga
+      Default route:  10.0.2.2
+
+      Interface eth0 (a2065.device unit 0)
+        state       online          link up
+        address     10.0.2.15       netmask 255.255.255.0 (/24)
+        broadcast   10.0.2.255
+        hardware    00:80:10:32:33:34
+        mtu         1500 bytes        10000000 bits/s
+        configured  DHCP
+
+      Name servers:   10.0.2.2
+      Domain:         localdomain
+
+  @{b}state@{ub}       online or offline: whether the interface has been put
+              on the network.
+  @{b}link@{ub}        up or down: whether the driver reports a working
+              connection. A cable that is not plugged in shows up here.
+  @{b}address@{ub}     The address in use right now. 0.0.0.0 means it has not
+              got one.
+  @{b}configured@{ub}  What the interface file asked for: DHCP, static or
+              link-local.
+
+  @{b}With STATS@{ub}
+
+      1> ShowNetStatus INTERFACE eth0 STATS
+      ...
+      SANA-II counters for eth0
+        packets received           2    packets sent               1
+        bad data                   0    overruns                   0
+        unknown types              0    reconfigurations           1
+        transmit errors            0    receive errors             0
+        buffer failures            0
+
+  These come from the driver, not from the stack, so they are the place
+  to look when you suspect the card or the cable rather than the
+  configuration. Steadily rising "bad data", "overruns" or "receive
+  errors" mean a hardware or cabling problem.
+
+  Remember that the "Name servers" list is read from
+  DEVS:Internet/name_resolution only, and does not include servers that
+  came with a DHCP lease -- see @{"Name servers" link RESOLVER}.
+
+  @{b}Errors@{ub}
+
+      ShowNetStatus: the network stack is not running (start it with
+      AddNetInterface)
+
+      ShowNetStatus: no interface called "nosuch"
+
+@endnode
+
+
+@node NETSTAT "netstat"
+@toc COMMANDS
+@prev SHOWNETSTATUS
+@next PING
+
+                              @{b}netstat@{ub}
+
+      netstat INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S
+
+  Interfaces, routes and connections, in the layout Unix users expect.
+  Every switch has both spellings -- the Unix one and the AmigaDOS one
+  -- so "netstat -r" and "netstat ROUTES" are the same command.
+
+  @{b}-i@{ub} or @{b}INTERFACES@{ub}   the interface table
+  @{b}-r@{ub} or @{b}ROUTES@{ub}       the routing table
+  @{b}-a@{ub} or @{b}ALL@{ub}          the open connections
+  @{b}-s@{ub} or @{b}STATS@{ub}        the interface table with its packet counters,
+                      which is the same output as -i, because the
+                      counters are always in it. For the full driver
+                      counters use
+                      @{"ShowNetStatus STATS" link SHOWNETSTATUS}.
+
+  With no switches at all, netstat prints all three.
+
+  @{b}Example@{ub}
+
+    1> netstat
+    Network interfaces
+    Name    Mtu   Address          Link   Ipkts      Ierrs  Opkts      Oerrs
+    eth0    1500  10.0.2.15        up     2          0      1          0
+            hardware 00:80:10:32:33:34
+
+    Routing table
+    Destination      Gateway          Netmask          Flags  Interface
+    default          10.0.2.2         0.0.0.0          UG     eth0
+    10.0.2.0         *                255.255.255.0    U      eth0
+    127.0.0.0        *                255.0.0.0        U      lo0
+
+    Active connections
+    Proto  Local  Foreign               State
+    udp    68     *                     0 queued
+    udp    0      *                     0 queued
+
+  @{b}Reading the routing table@{ub}
+
+  The "default" line is the route everything not on your own network
+  takes; if it is missing you have no gateway. The line for your own
+  network, and the 127.0.0.0 loopback line, are always there. Flags are
+  U for a usable route and UG for one that goes through a gateway.
+
+  @{b}Reading the connections@{ub}
+
+  Only the local port number is shown for a listening or unconnected
+  socket. UDP port 68 is the DHCP client and is normal on a DHCP
+  machine; a UDP socket with a high port number is usually a name
+  lookup in progress. TCP connections show the far end and the
+  connection state (ESTABLISHED, LISTEN, TIME_WAIT and so on).
+
+  Per-protocol statistics -- the packet and error counts Unix netstat
+  -s prints -- are not available; that counting is switched off in this
+  build to keep it small.
+
+@endnode
+
+
+@node PING "ping"
+@toc COMMANDS
+@prev NETSTAT
+@next HOST
+
+                                @{b}ping@{ub}
+
+      ping HOST/A,COUNT/N/K,SIZE/N/K,TIMEOUT/N/K,DELAY/N/K,QUIET/S
+
+  Sends ICMP echo requests and reports what comes back. The single best
+  test of whether two machines can see each other.
+
+  @{b}HOST@{ub}     An address or a name. Required. A name is looked up in
+           DEVS:Internet/hosts first and then by DNS.
+  @{b}COUNT@{ub}    How many requests to send. 0 means "until Ctrl-C".
+           Default 4.
+  @{b}SIZE@{ub}     Payload bytes, up to 1400. Default 56.
+  @{b}TIMEOUT@{ub}  Seconds to wait for each reply. Default 5.
+  @{b}DELAY@{ub}    Milliseconds between requests. Default 1000.
+  @{b}QUIET@{ub}    Print only the summary.
+
+  Ctrl-C stops the loop and still prints the summary. It is noticed
+  between requests and while waiting between them, so in the worst case
+  -- a request that gets no reply at all -- it takes one TIMEOUT to
+  take effect.
+
+  @{b}Examples@{ub}
+
+      1> ping 10.0.2.2 COUNT 3
+      PING 10.0.2.2 (10.0.2.2): 56 data bytes
+      56 bytes from 10.0.2.2: icmp_seq=0 time=4 ms
+      56 bytes from 10.0.2.2: icmp_seq=1 time=1 ms
+      56 bytes from 10.0.2.2: icmp_seq=2 time=2 ms
+
+      --- 10.0.2.2 ping statistics ---
+      3 packets transmitted, 3 received, 0% packet loss
+      round-trip min/avg/max = 1/2/4 ms
+
+      1> ping 10.0.2.99 COUNT 2 TIMEOUT 2
+      PING 10.0.2.99 (10.0.2.99): 56 data bytes
+      Request timed out for icmp_seq=0
+      Request timed out for icmp_seq=1
+
+      --- 10.0.2.99 ping statistics ---
+      2 packets transmitted, 0 received, 100% packet loss
+
+      1> ping 10.0.2.2 COUNT 3 QUIET
+
+      --- 10.0.2.2 ping statistics ---
+      3 packets transmitted, 3 received, 0% packet loss
+      round-trip min/avg/max = 1/2/3 ms
+
+  100% packet loss returns a WARN (5), so a script can test for it.
+
+  @{b}What "request timed out" means@{ub}
+
+  It means no reply arrived, which has several possible causes: the
+  machine is switched off, it is not on your network and you have no
+  gateway, or -- very commonly -- it is deliberately not answering.
+  Many machines and most firewalls ignore ICMP. A ping that fails to
+  one address on the Internet does not mean your network is broken;
+  ping your own gateway first, because that always answers.
+
+  @{b}Times are rounded to whole milliseconds@{ub}, so times of 0 ms on a fast
+  local network are normal.
+
+@endnode
+
+
+@node HOST "host"
+@toc COMMANDS
+@prev PING
+@next TROUBLE
+
+                                @{b}host@{ub}
+
+      host NAME/A,TIMEOUT/N/K
+
+  Looks a name up, or an address back. A dotted address is looked up
+  backwards; anything else forwards.
+
+  @{b}NAME@{ub}     The name or the address. Required.
+  @{b}TIMEOUT@{ub}  Seconds to wait. Default 10.
+
+  @{b}Examples@{ub}
+
+      1> host www.example.com
+      www.example.com has address 172.66.147.243
+
+      1> host localhost
+      localhost has address 127.0.0.1
+
+      1> host 127.0.0.1
+      127.0.0.1 is localhost
+
+  DEVS:Internet/hosts is consulted before the network, in both
+  directions, so entries you put there answer instantly and work with
+  the network down.
+
+  @{b}When it fails@{ub}
+
+      1> host nosuchname.invalid
+      host: cannot resolve "nosuchname.invalid": the SANA-II device
+      would not open
+
+  Read that as "the name could not be looked up". The reason printed
+  after the colon is not reliable for lookup failures in this version:
+  a name that does not exist, a name server that does not answer and a
+  reverse lookup with no answer all produce the same "SANA-II device"
+  wording, and none of them means your network card is at fault.
+
+  For what to do about it, see
+  @{"Names do not resolve" link T_DNS}.
+
+  Reverse lookups fail much more often than forward ones, because most
+  addresses have no name registered for them. That is normal and not a
+  fault.
+
+@endnode
+
+
+@node TROUBLE "Troubleshooting"
+@toc MAIN
+@prev HOST
+@next T_NOSTACK
+
+                         @{b}Troubleshooting@{ub}
+
+  Find your symptom.
+
+  @{"Every command says the network stack is not running" link T_NOSTACK}
+  @{"AddNetInterface cannot read the interface file" link T_NOFILE}
+  @{"The driver will not open" link T_DEVICE}
+  @{"Nothing happens and there is no address" link T_NOLEASE}
+  @{"The address is there but nothing can be reached" link T_CABLE}
+  @{"The local network works but the Internet does not" link T_NOGATEWAY}
+  @{"Names do not resolve" link T_DNS}
+  @{"ping says send failed with a NetX Duo status" link T_OFFLINE}
+  @{"The machine takes ages to boot, or programs pause" link T_SLOW}
+  @{"The machine crashes or hangs" link T_CRASH}
+
+  @{b}The general method@{ub}
+
+  Work outwards. Each of these depends on the one before it, so the
+  first one that fails is where the problem is:
+
+    1.  ShowNetStatus says the stack is running
+    2.  ShowNetStatus shows an address that is not 0.0.0.0
+    3.  ShowNetStatus shows link up
+    4.  ping of your own address answers
+    5.  ping of the gateway answers
+    6.  ping of an address on the Internet answers
+    7.  host of a name answers
+
+  See also @{"Reading the debug log" link LOGGING}: the stack explains
+  itself in far more detail there than it does on screen, and for
+  driver and configuration problems the log usually names the cause
+  outright.
+
+@endnode
+
+
+@node T_NOSTACK "Every command says the stack is not running"
+@toc TROUBLE
+@prev TROUBLE
+@next T_NOFILE
+
+           @{b}Every command says the stack is not running@{ub}
+
+  @{b}Symptom@{ub}
+
+      1> ShowNetStatus
+      ShowNetStatus: the network stack is not running (start it with
+      AddNetInterface)
+
+  and the same from netstat, ping and host.
+
+  @{b}What it means@{ub}
+
+  Nothing has started the stack yet. This is the state the machine is
+  in after a reboot if S:User-Startup does not run AddNetInterface.
+
+  @{b}Fix@{ub}
+
+  Start it:
+
+      AddNetInterface eth0
+
+  If that works, add the line to S:User-Startup so it happens at every
+  boot -- see @{"Starting the stack" link STARTING}.
+
+  If AddNetInterface prints a message of its own instead, that message
+  is the real problem: follow it to
+  @{"the interface file" link T_NOFILE} or
+  @{"the driver" link T_DEVICE}.
+
+  @{b}If AddNetInterface says the stack started and the other commands@{ub}
+  @{b}still say it is not running@{ub}, you have a mismatched set of files:
+  check that all seven commands and LIBS:bsdsocket.library came from
+  the same release, and that there is no older copy of a command
+  earlier in your command path.
+
+@endnode
+
+
+@node T_NOFILE "AddNetInterface cannot read the interface file"
+@toc TROUBLE
+@prev T_NOSTACK
+@next T_DEVICE
+
+          @{b}AddNetInterface cannot read the interface file@{ub}
+
+  @{b}Symptom@{ub}
+
+      1> AddNetInterface eth0
+      AddNetInterface: cannot read DEVS:NetInterfaces/eth0
+
+  or
+
+      1> AddNetInterface eth0
+      AddNetInterface: DEVS:NetInterfaces/eth0 is not a valid interface
+      file
+
+  @{b}Diagnose@{ub}
+
+      1> list DEVS:NetInterfaces
+      1> type DEVS:NetInterfaces/eth0
+
+  @{b}Causes and fixes@{ub}
+
+  @{b}The drawer does not exist.@{ub} Make it:
+
+      makedir DEVS:NetInterfaces
+
+  @{b}The file is named something else.@{ub} The name you type must be the
+  file's name exactly -- but note the name is not case sensitive, so
+  ETH0 and eth0 both find the file eth0. A file called eth0.txt is
+  @{b}not@{ub} found by "AddNetInterface eth0", because the name of the file
+  is the name of the interface, extension and all. Rename it:
+
+      rename DEVS:NetInterfaces/eth0.txt DEVS:NetInterfaces/eth0
+
+  @{b}A text editor saved it somewhere else.@{ub} Check DEVS: is where you
+  think it is with "list DEVS:NetInterfaces".
+
+  @{b}"not a valid interface file" means there is no DEVICE line.@{ub} Every
+  interface file must name a driver. Add one:
+
+      DEVICE = a2065.device
+
+  Spaces around the = are ignored, and the keyword is not case
+  sensitive, so this message really does mean that the DEVICE keyword
+  is missing or misspelled -- not that the line is laid out oddly.
+
+@endnode
+
+
+@node T_DEVICE "The driver will not open"
+@toc TROUBLE
+@prev T_NOFILE
+@next T_NOLEASE
+
+                     @{b}The driver will not open@{ub}
+
+  @{b}Symptom@{ub}
+
+      1> AddNetInterface eth0
+      eth0: nosuch.device unit 0
+      AddNetInterface: cannot start the network stack: the SANA-II
+      device would not open
+
+  Note the first line: it tells you which driver name the file asked
+  for, which is usually enough to spot the mistake on its own.
+
+  @{b}Diagnose@{ub}
+
+      1> list DEVS:#?.device
+
+  @{b}Causes and fixes@{ub}
+
+  @{b}The driver is not installed.@{ub} SANA-II drivers live in DEVS: and are
+  not part of AmiNetXDuo. Copy your card's driver there:
+
+      copy a2065.device DEVS:
+
+  @{b}The name is spelled wrong.@{ub} The DEVICE line must match the file name
+  in DEVS: exactly, including the ".device" on the end. Common
+  mistakes: writing "a2065" instead of "a2065.device", or guessing at a
+  driver name your card does not use. Check the list above and copy the
+  name from it.
+
+  @{b}The unit number is wrong.@{ub} Most machines have one card, which is
+  unit 0. If you wrote UNIT=1 with one card, the driver will refuse to
+  open. Set it back to 0.
+
+  @{b}The card is not there, or another program has it.@{ub} A SANA-II driver
+  will fail to open if it cannot find its hardware, or if some other
+  network stack already has the card. Make sure no other TCP/IP stack
+  is started from S:User-Startup, and that the card is seated.
+
+  The debug log names the exact failure --
+  see @{"Reading the debug log" link LOGGING}:
+
+      [ERR ] sana2: cannot open nosuch.device unit 0 (-1)
+      [ERR ] netstack: interface 'eth0' (nosuch.device unit 0) would
+             not open
+
+@endnode
+
+
+@node T_NOLEASE "Nothing happens and there is no address"
+@toc TROUBLE
+@prev T_DEVICE
+@next T_CABLE
+
+              @{b}Nothing happens and there is no address@{ub}
+
+  @{b}Symptom@{ub}
+
+  AddNetInterface takes about half a minute and finishes, and then:
+
+      1> ShowNetStatus
+      ...
+        state       online          link up
+        address     0.0.0.0         netmask 0.0.0.0 (/0)
+      ...
+        configured  DHCP
+
+  An address of 0.0.0.0 means the interface has no address at all.
+
+  @{b}What it means@{ub}
+
+  With CONFIGURE=DHCP the stack waits 30 seconds for a DHCP server to
+  answer and then gives up and carries on without an address. Nothing
+  will work until it has one.
+
+  @{b}Causes and fixes@{ub}
+
+  @{b}There is no DHCP server.@{ub} Some networks -- a direct cable between two
+  machines, an old office network, a switch with no router -- have
+  none. Either use a fixed address:
+
+      CONFIGURE = STATIC
+      ADDRESS   = 192.168.1.10
+      NETMASK   = 255.255.255.0
+
+  (and set the @{"default gateway" link ROUTES} and a
+  @{"name server" link RESOLVER} as well), or, if you only need to talk
+  to another machine on the same cable, use CONFIGURE=AUTO for
+  link-local addressing.
+
+  @{b}The request never reached the server.@{ub} If ShowNetStatus shows
+  @{b}link down@{ub}, it is the cable or the card, not DHCP --
+  see @{"The address is there but nothing can be reached" link T_CABLE}.
+  Check the counters too:
+
+      1> ShowNetStatus STATS
+
+  "packets sent" going up while "packets received" stays at 0 means the
+  machine is talking and nothing is answering.
+
+  @{b}The server is slow.@{ub} Thirty seconds is generous, but a network that
+  has just powered up may be slower. Try again:
+
+      Offline eth0
+      Online eth0
+
+  @{b}A static address is configured as 0.0.0.0.@{ub} If "configured" says
+  static rather than DHCP, the ADDRESS line in the interface file is
+  missing or unreadable. Check it with "type DEVS:NetInterfaces/eth0".
+
+@endnode
+
+
+@node T_CABLE "The address is there but nothing can be reached"
+@toc TROUBLE
+@prev T_NOLEASE
+@next T_NOGATEWAY
+
+         @{b}The address is there but nothing can be reached@{ub}
+
+  @{b}Symptom@{ub}
+
+  ShowNetStatus shows a sensible address, but every ping times out:
+
+      1> ping 192.168.1.1
+      PING 192.168.1.1 (192.168.1.1): 56 data bytes
+      Request timed out for icmp_seq=0
+      Request timed out for icmp_seq=1
+
+  @{b}Diagnose@{ub}
+
+      1> ShowNetStatus INTERFACE eth0 STATS
+
+  Look at three things:
+
+    o  @{b}link@{ub} -- "link down" means the driver says there is no working
+       connection. That is a cable, a switch, or a card fault, and no
+       amount of configuration will fix it.
+    o  @{b}state@{ub} -- "offline" means the interface has been taken off the
+       network. Put it back with "Online eth0".
+    o  the @{b}counters@{ub} -- if "packets sent" rises when you ping and
+       "packets received" does not move, your packets are leaving and
+       nothing is answering.
+
+  @{b}Causes and fixes@{ub}
+
+  @{b}Cable, switch or port.@{ub} Try a different cable and a different port.
+  On very old cards, check you are using the right connector -- some
+  A2065s and X-Surfs have more than one, and only one is active.
+
+  @{b}Wrong netmask.@{ub} If your address is 192.168.1.10 and the netmask is
+  255.255.255.0, then everything from 192.168.1.1 to 192.168.1.254 is
+  "local" and anything else goes via the gateway. A netmask of
+  255.255.255.255 or 0.0.0.0 will produce exactly this symptom. Check
+  the "/24" figure ShowNetStatus prints after the netmask: for a home
+  network it should be /24.
+
+  @{b}Two machines with the same address.@{ub} If you gave this machine a
+  static address that another machine is already using, both will
+  behave erratically. Switch this machine off and ping the address from
+  another: if something answers, the address is taken.
+
+  @{b}Rising error counters.@{ub} Steadily increasing "bad data", "overruns" or
+  "receive errors" in the STATS output point at the hardware or the
+  cable, not at the configuration. "buffer failures" rising means the
+  machine is short of memory.
+
+  @{b}The other machine is not answering on purpose.@{ub} Ping your own
+  gateway before concluding anything: routers always answer, most other
+  things may not.
+
+@endnode
+
+
+@node T_NOGATEWAY "The local network works but the Internet does not"
+@toc TROUBLE
+@prev T_CABLE
+@next T_DNS
+
+      @{b}The local network works but the Internet does not@{ub}
+
+  @{b}Symptom@{ub}
+
+  You can ping machines on your own network, but nothing further away.
+
+  @{b}Diagnose@{ub}
+
+      1> netstat -r
+      Routing table
+      Destination      Gateway          Netmask          Flags  Interface
+      default          10.0.2.2         0.0.0.0          UG     eth0
+      10.0.2.0         *                255.255.255.0    U      eth0
+      127.0.0.0        *                255.0.0.0        U      lo0
+
+  @{b}The "default" line is the one that matters.@{ub} If it is missing, you
+  have no route off your own network, and that is the whole problem.
+
+  @{b}Fixes@{ub}
+
+  @{b}No default line, static addressing.@{ub} You have not told AmiNetXDuo
+  about your router. Create DEVS:Internet/routes:
+
+      DEFAULT = 192.168.1.1
+
+  using your router's address, and restart the stack.
+
+  @{b}No default line, DHCP.@{ub} The lease did not carry a gateway, which is
+  unusual. Set one by hand as above; a DEVS:Internet/routes file works
+  with DHCP too.
+
+  @{b}There is a default line, and it is wrong.@{ub} Ping the gateway address
+  shown. If it does not answer, it is not your router. Look at another
+  machine on the same network to find the right address.
+
+  @{b}The gateway answers and the Internet still does not.@{ub} Try an address
+  rather than a name -- if addresses work and names do not, your
+  problem is @{"names" link T_DNS}, not routing. Otherwise the problem is
+  beyond your Amiga: check the router itself.
+
+@endnode
+
+
+@node T_DNS "Names do not resolve"
+@toc TROUBLE
+@prev T_NOGATEWAY
+@next T_OFFLINE
+
+                       @{b}Names do not resolve@{ub}
+
+  @{b}Symptom@{ub}
+
+  Addresses work, names do not:
+
+      1> ping 10.0.2.2
+      56 bytes from 10.0.2.2: icmp_seq=0 time=4 ms
+
+      1> host www.aminet.net
+      host: cannot resolve "www.aminet.net": the SANA-II device would
+      not open
+
+  Ignore the wording after the colon -- for a lookup failure it is
+  always that text, whatever the real cause, and it does not mean your
+  card is at fault.
+
+  @{b}Diagnose@{ub}
+
+      1> host localhost
+
+  If that fails too, the stack is not running or something is very
+  wrong; localhost is answered from DEVS:Internet/hosts without
+  touching the network. If it works and real names do not, the problem
+  is the name server.
+
+      1> ShowNetStatus
+
+  and look at the "Name servers" line.
+
+  @{b}Causes and fixes@{ub}
+
+  @{b}Static address, no name server configured.@{ub} ShowNetStatus says
+
+      Name servers:   none configured
+
+  and you are not using DHCP. Create DEVS:Internet/name_resolution:
+
+      nameserver 192.168.1.1
+
+  Your router is normally a name server; if it is not, any public one
+  will do. Restart the stack afterwards.
+
+  @{b}The configured name server is wrong.@{ub} Ping the address on the "Name
+  servers" line. If it does not answer, it is not a name server you can
+  reach. Replace it with your router's address.
+
+  @{b}DHCP, and "none configured" is shown.@{ub} This is normal and is @{b}not@{ub} the
+  problem: ShowNetStatus only lists servers from the
+  name_resolution file, never the ones that came with the lease. If
+  names still do not resolve on a DHCP machine, the lease did not carry
+  a name server, and the fix is to write a name_resolution file as
+  above.
+
+  @{b}Only some names fail.@{ub} A name that genuinely does not exist gives
+  exactly the same message as a broken resolver. Test with a name you
+  know is good.
+
+  @{b}Reverse lookups fail.@{ub} "host 192.168.1.5" failing is normal --
+  most addresses have no name registered. Add the machine to
+  DEVS:Internet/hosts if you want the name locally.
+
+  @{b}The lookup takes a long time and then fails.@{ub} The server address is
+  reachable but not answering DNS. Raise the timeout to see it
+  clearly -- "host www.aminet.net TIMEOUT 30" -- and then change the
+  server.
+
+@endnode
+
+
+@node T_OFFLINE "ping says send failed with a NetX Duo status"
+@toc TROUBLE
+@prev T_DNS
+@next T_SLOW
+
+         @{b}ping says send failed with a NetX Duo status@{ub}
+
+  @{b}Symptom@{ub}
+
+      1> ping 10.0.2.2
+      PING 10.0.2.2 (10.0.2.2): 56 data bytes
+      ping: send failed for icmp_seq=0 (NetX Duo status 33)
+
+      --- 10.0.2.2 ping statistics ---
+      1 packets transmitted, 0 received, 100% packet loss
+
+  @{b}What it means@{ub}
+
+  The packet could not be sent at all -- this is not a timeout, it is a
+  refusal. The usual reason is that the interface is offline, so there
+  is no route to anywhere.
+
+  @{b}Fix@{ub}
+
+      1> ShowNetStatus
+      ...
+        state       offline         link down
+
+      1> Online eth0
+      eth0 is online, address 0.0.0.0
+
+  and try again. If ShowNetStatus already says online, the interface
+  has no address; go to
+  @{"Nothing happens and there is no address" link T_NOLEASE}.
+
+  The number in brackets is an internal status from the network core
+  and is only useful for reporting a fault.
+
+@endnode
+
+
+@node T_SLOW "The machine takes ages to boot, or programs pause"
+@toc TROUBLE
+@prev T_OFFLINE
+@next T_CRASH
+
+      @{b}The machine takes ages to boot, or programs pause@{ub}
+
+  @{b}Symptom@{ub}
+
+  The boot stops for half a minute at the AddNetInterface line, or a
+  network program takes half a minute to start.
+
+  @{b}What it means@{ub}
+
+  Almost always: the stack is waiting for a DHCP lease that is not
+  coming. The wait is 30 seconds and then it gives up. See
+  @{"Nothing happens and there is no address" link T_NOLEASE}.
+
+  @{b}If it is a program that pauses, not the boot@{ub}, the likely cause is
+  that nothing started the stack at boot, so the program is starting it
+  itself -- and paying the DHCP wait -- and then shutting it down again
+  when it exits. Put
+
+      C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET
+
+  in S:User-Startup so the stack is up once and stays up.
+
+  @{b}Other things that are simply slow@{ub}
+
+  This is a 68020. Some operations are genuinely slow and are not
+  faults: TLS in particular is far too slow to be usable on classic
+  hardware, and is switched off. See
+  @{"Known limitations" link LIMITS}.
+
+@endnode
+
+
+@node T_CRASH "The machine crashes or hangs"
+@toc TROUBLE
+@prev T_SLOW
+@next LOGGING
+
+                    @{b}The machine crashes or hangs@{ub}
+
+  Classic AmigaOS has no memory protection. A fault anywhere in a
+  network stack can take the whole machine down, sometimes with no
+  message at all. AmiNetXDuo is young software and this can happen.
+
+  @{b}What to do@{ub}
+
+    o  Save your work before doing network things you have not done
+       before.
+    o  Note exactly what you were doing: which command, which program,
+       how long after boot.
+    o  Capture the debug log -- see
+       @{"Reading the debug log" link LOGGING}. The last lines before a
+       crash are the single most useful thing in a bug report.
+    o  If a Guru appears, write down the numbers.
+
+  @{b}Things that are known to cause trouble@{ub}
+
+    o  Running two TCP/IP stacks at once. Only one LIBS:bsdsocket.library
+       can be in use; make sure no other stack is started at boot.
+    o  A mismatched set of files -- commands from one release and a
+       library from another.
+    o  Very low memory. The stack sizes its buffers from free memory at
+       startup; starting it on a machine that is already nearly full
+       leaves it with the minimum.
+
+@endnode
+
+
+@node LOGGING "Reading the debug log"
+@toc MAIN
+@prev T_CRASH
+@next LIMITS
+
+                      @{b}Reading the debug log@{ub}
+
+  AmiNetXDuo explains itself in far more detail than it prints on
+  screen, and that detail goes to the @{b}serial debug port@{ub} -- the standard
+  place for AmigaOS system diagnostics. Configuration mistakes and
+  driver failures are usually named outright there.
+
+  A real boot produces lines like these:
+
+      [INFO] config: interface eth0: a2065.device unit 0
+      [INFO] config: 1 interface(s), 1 name server(s), host 'amiga'
+      [INFO] sana2: a2065.device unit 0 hw 1 mtu 1500 bps 10000000
+             addr 48 bits cooked
+      [INFO] netstack: 10105016 bytes free, pool = 256 x 1568
+      [INFO] netstack: starting ThreadX
+      [INFO] netstack: NX_IP up, configuring addresses
+      [INFO] netstack: DHCP started, waiting up to 1500 ticks
+      [INFO] netstack: address 10.0.2.15 mask 255.255.255.0
+      [INFO] netstack: starting the resolver
+      [INFO] netstack: DHCP name server 10.0.2.3
+
+  and a failure looks like this:
+
+      [WARN] config: broken: no DEVICE keyword, ignoring interface
+      [ERR ] sana2: cannot open nosuch.device unit 0 (-1)
+      [ERR ] netstack: interface 'eth0' (nosuch.device unit 0) would
+             not open
+
+  @{b}How to read it@{ub}
+
+  On a real Amiga, either attach a terminal to the serial port, or run
+  one of the debug-output catchers from Aminet -- Sashimi is the usual
+  choice -- which collects the same output into a window or a file:
+
+      run >NIL: Sashimi
+
+  Under an emulator, point the emulated serial port at a file.
+
+  Levels are ERR, WARN, INFO and, in debug builds, DEBUG and TRACE.
+  Anything at ERR level is a real failure; WARN usually names a
+  configuration line the stack did not like, including unknown
+  keywords.
+
+@endnode
+
+
+@node LIMITS "Known limitations"
+@toc MAIN
+@prev LOGGING
+@next SOFTWARE
+
+                        @{b}Known limitations@{ub}
+
+  Things AmiNetXDuo does not do, so that you do not spend an evening
+  looking for the setting.
+
+  @{b}Networking@{ub}
+
+    o  @{b}Only the default route.@{ub} There is no route command and no way to
+       add a route to a particular network through a second gateway.
+       Specific routes in DEVS:Internet/routes are read and skipped.
+    o  @{b}At most two interfaces@{ub} are attached, even though four interface
+       files are read.
+    o  @{b}Only Ethernet-style SANA-II drivers have been tested.@{ub} A
+       point-to-point driver such as ppp.device or slip.device is not
+       refused, but nothing has been tried against one, so treat a
+       modem or DSL connection as unsupported for now.
+    o  @{b}MTU= in the interface file is ignored@{ub}; the packet size comes
+       from the driver.
+    o  @{b}No per-protocol statistics@{ub} (netstat -s in the Unix sense).
+
+  @{b}For people writing or porting software@{ub}
+
+    o  @{b}Raw sockets are not supported.@{ub} socket() with SOCK_RAW fails with
+       ESOCKTNOSUPPORT. Programs that build their own IP or ICMP
+       packets will not run.
+    o  @{b}Out-of-band TCP data is not supported.@{ub} MSG_OOB is refused with
+       EOPNOTSUPP rather than quietly ignored.
+    o  @{b}bind() to a particular local address binds only the port@{ub}; the
+       address is not honoured.
+    o  @{b}The Roadshow interface, routing and statistics calls@{ub} --
+       ObtainInterfaceList, QueryInterfaceTagList, AddRoute,
+       GetNetworkStatistics, the RoadshowData calls and their
+       neighbours -- return ENOSYS. The parts whose behaviour is fully
+       documented (GetDefaultDomainName, ObtainDomainNameServerList,
+       In_LocalAddr, In_CanForward) do work.
+    o  sendmsg() and recvmsg() do work.
+
+  @{b}TLS@{ub}
+
+  There is no HTTPS support and there will not be one that runs at a
+  useful speed on classic hardware. A single TLS 1.2 handshake measured
+  185 seconds on a 68020, so encryption is switched off. Software
+  needing TLS should offload it.
+
+  @{b}IPv6@{ub}
+
+  IPv6 is a build option and is off in ordinary builds. Even in a build
+  that has it, the commands in this guide are IPv4 only. See
+  @{"IPv6" link IPV6}.
+
+  @{b}Generally@{ub}
+
+  This has not been run on real hardware. See
+  @{"What AmiNetXDuo is" link ABOUT}.
+
+@endnode
+
+
+@node SOFTWARE "Running network software"
+@toc MAIN
+@prev LIMITS
+@next FILES
+
+                     @{b}Running network software@{ub}
+
+  Amiga network programs do not need to know which TCP/IP stack is
+  installed. They open bsdsocket.library and call it, so a program
+  written for AmiTCP, Miami or Roadshow should work with AmiNetXDuo
+  unchanged.
+
+  AmiNetXDuo provides bsdsocket.library version 4, so software that
+  asks for version 3 or version 4 will open it.
+
+  @{b}usergroup.library@{ub}
+
+  Many programs ported from Unix also open usergroup.library, for
+  calls like getuid() and getpwnam(). AmiNetXDuo installs one.
+  AmigaOS has no user database, so by default it answers with a single
+  user: root, uid 0, home SYS:, shell C:Shell. That is what almost all
+  software wants.
+
+  If you need something else, it reads DEVS:Internet/passwd and
+  DEVS:Internet/group in the ordinary Unix format (AmiTCP:db/passwd and
+  AmiTCP:db/group are also read, for an existing AmiTCP installation).
+
+  @{b}If a program does not work@{ub}
+
+  Check first that the network itself is fine --
+  see @{"Is it working?" link CHECK}. If ping and host work, look at
+  the program's own settings before suspecting the stack. Then check
+  the list of things that genuinely are missing in
+  @{"Known limitations" link LIMITS}: a program that needs raw sockets
+  or TLS will not run, and that is not something you can configure
+  around.
+
+  @{b}Programs that wait for AmiTCP@{ub}
+
+  Some older install scripts contain a line like
+
+      WaitForPort AMITCP
+
+  as a way of waiting for the stack to be ready. AmiNetXDuo does not
+  create that port, so such a line will time out. Remove it, and rely
+  on AddNetInterface in S:User-Startup having finished instead --
+  AddNetInterface does not return until the stack is up.
+
+@endnode
+
+
+@node FILES "Where everything lives"
+@toc MAIN
+@prev SOFTWARE
+@next LICENCE
+
+                      @{b}Where everything lives@{ub}
+
+  @{b}Programs@{ub}
+
+      LIBS:bsdsocket.library          the TCP/IP stack itself
+      LIBS:usergroup.library          user and group calls for ported
+                                      software
+      C:AddNetInterface               start the stack, bring an
+                                      interface up
+      C:Online                        put an interface back on the
+                                      network
+      C:Offline                       take an interface off the network
+      C:ShowNetStatus                 status
+      C:netstat                       interfaces, routes, connections
+      C:ping                          reachability
+      C:host                          name lookups
+
+  @{b}Configuration you write@{ub}
+
+      DEVS:NetInterfaces/<name>       one per network card
+      DEVS:Internet/name_resolution   name servers, domain, host name
+      DEVS:Internet/routes            the default gateway
+      DEVS:Internet/hosts             local names
+      DEVS:Internet/services          local service names
+      DEVS:Internet/protocols         protocol numbers
+      DEVS:Internet/networks          network names
+      DEVS:Internet/passwd            optional, for usergroup.library
+      DEVS:Internet/group             optional, for usergroup.library
+
+  Also read if present:
+
+      DEVS:Internet/default_gateway   an older place for the gateway
+      ENV:HOSTNAME                    this machine's name
+
+  @{b}Not written to@{ub}
+
+  AmiNetXDuo does not write to any of these files, does not create a
+  drawer of its own, and does not patch the operating system. Deleting
+  the files above removes it completely.
+
+  @{b}Driver@{ub}
+
+      DEVS:<something>.device         your card's SANA-II driver,
+                                      which comes from the card's
+                                      manufacturer, not from us
+
+@endnode
+
+
+@node LICENCE "Licence and credits"
+@toc MAIN
+@prev FILES
+
+                       @{b}Licence and credits@{ub}
+
+  AmiNetXDuo is distributed under the MIT licence. You may use it,
+  copy it, change it and distribute it, including commercially, as long
+  as the copyright notice and licence text go with it. It comes with no
+  warranty of any kind.
+
+  It is built on Eclipse ThreadX NetX Duo, an industrial embedded
+  TCP/IP stack, also MIT licensed, copyright Microsoft and the Eclipse
+  ThreadX contributors. NetX Duo and ThreadX are used unmodified.
+
+  AmiNetXDuo is an independent implementation of a published
+  programming interface. No code from AmiTCP, AROSTCP, Miami or
+  Roadshow is used, copied or disassembled. Olaf Barthel's freely
+  distributable Roadshow developer headers were consulted as a
+  description of the interface only.
+
+  SANA-II is Commodore's network driver standard. Drivers for your card
+  are the work of their own authors and are not part of this
+  distribution.
+
+  @{b}Reporting problems@{ub}
+
+  A useful report says which Amiga and which Kickstart, which network
+  card and driver, what your interface file contains, what the command
+  printed, and the last lines of the
+  @{"debug log" link LOGGING}. See @{"Known limitations" link LIMITS}
+  first, in case it is something already known.
+
+@endnode

@@ -23,7 +23,7 @@
 #include <proto/exec.h>
 #include <proto/timer.h>
 
-#include <stdlib.h>
+#include "aminetxduo/random.h"
 
 #include "tls.h"
 
@@ -121,7 +121,8 @@ ULONG ami_tls_eclock_micros(ULONG ticks)
     /*
      * 64-bit intermediate: at ~709 kHz a one-second measurement is ~709,000
      * ticks, and ticks * 1,000,000 overflows 32 bits after ~4,295 ticks (6 ms).
-     * This is a report path, not a hot path, so the libgcc __udivdi3 call is
+     * This is a report path, not a hot path, so the __udivdi3 call (out of
+     * src/common/ami_udivdi3.c -- this toolchain's libgcc.a is empty) is
      * acceptable here -- it is NOT acceptable inside the timed region, which is
      * why every measurement below accumulates raw ticks and converts once.
      */
@@ -131,18 +132,18 @@ ULONG ami_tls_eclock_micros(ULONG ticks)
 
 ULONG ami_tls_seed_rng(VOID)
 {
-    ULONG seed;
+    ULONG eclock;
 
-    seed = ami_tls_eclock();
+    ami_random_init();
 
     /*
-     * XOR in the beam position: it is not entropy in any meaningful sense, but
-     * it decorrelates two runs started at the same E-Clock phase.  This whole
-     * function exists to make the benchmark reproducible-ish, NOT to make
-     * rand() safe.  See tls.h.
+     * The E-Clock and beam position are already sampled by the pool's own
+     * collection; feeding them again here credits nothing and is done only so
+     * that a caller who opened the timer earlier than the pool did
+     * contributes its phase too.
      */
-    seed ^= (ULONG)(*(volatile UWORD *)0xDFF006) << 8;
+    eclock = ami_tls_eclock();
+    ami_random_add_entropy(&eclock, sizeof(eclock), 0);
 
-    srand((unsigned int)seed);
-    return seed;
+    return ami_random_entropy_bits();
 }

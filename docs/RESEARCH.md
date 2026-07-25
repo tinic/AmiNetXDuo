@@ -785,11 +785,105 @@ Findings worth keeping regardless of whether TLS ships:
 - **`NX_RAND` is undefined**, so `nx_api.h` falls back to newlib `rand()` — a 32-bit LCG —
   to generate ECDHE private keys and the client random. **A shipping blocker for any real
   TLS use**, independent of speed.
+  **→ Half-addressed**; see "The `NX_RAND` problem" below. The generator is now a SHA-256
+  hash DRBG instead of an LCG, which fixes the expansion. The *entropy* remains the
+  blocker, and the module now says so in its own API rather than in a comment.
 
 Toolchain landmine found here, relevant project-wide: this toolchain ships a **zero-byte
 `libgcc.a`** and nothing exports `__udivdi3`, so any link pulling in 64-bit division
-fails. `src/tls/tls_udivdi3.c` supplies it with a 68020 `divu.l` fast path and should
-move to `src/common/` when a second component needs it.
+fails. `src/common/ami_udivdi3.c` supplies it with a 68020 `divu.l` fast path.
+It began life as `src/tls/tls_udivdi3.c` with a note to move it to `src/common/` when a
+second component needed it; by the time anyone looked there were three copies (the TLS
+one, `tests/conformance/compat/libgcc64.c` for newlib's `printf`, and a second CMake
+target compiling the first file again for `src/crypto68k/`). One copy now, built as
+`aminetxduo_m68k_rt`, and `tests/conformance/build.sh` compiles that same file rather
+than keeping its own.
+
+#### The `NX_RAND` problem (2026-07-25): an entropy pool that says it is not enough
+
+`NX_RAND` now points at `src/common/ami_random.c` — a SHA-256 hash DRBG over an entropy
+pool — instead of newlib's `rand()`. That closes the *expansion* hole: with an LCG, one
+32-bit output is the entire state, and a TLS client random goes on the wire in clear, so
+an observer who sees it can compute the ECDHE private key that follows. The DRBG is
+counter-mode `SHA-256(key ‖ counter)` with a forward ratchet after every 32-byte block,
+so a disclosed block reveals neither its predecessors nor the key that made it.
+
+**The entropy is still the blocker, and the module now says so in its API rather than in
+a comment.** `ami_random_is_seeded()` reports FALSE until the pool has been credited 64
+bits, and the internal collection *cannot reach that by construction* — the four sources
+credited anything at all cap at 8 + 4 + 2 + 12 = 26 bits. So the answer to "may I run a
+TLS handshake?" on an unattended Amiga is **no**, and the caller has to supply a seed
+through `ami_random_add_entropy()` to change that.
+
+What the sources are actually worth, measured by `tools/smoke/randtest.c` across three
+cold boots of an emulated 68020 (FS-UAE, identical boot image):
+
+| source | varies across cold boots? | credited |
+|---|---|---|
+| `GetSysTime()` wall clock | **yes** — `1532507776.382025` / `…783.606435` / `…798.617969` | 8, and 0 when `tv_secs == 0` (no battery clock) |
+| E-Clock interval jitter | **yes** — 22–27 distinct deltas out of 256 samples, 52–263 ticks | 7–9 measured, capped at 12 |
+| `IdleCount` / `DispCount` | **yes** — 44/66/57 and 282/276/283 | 4 |
+| task-list walk | not measurably | 2 (charity; a real Workbench would earn it) |
+| `AvailMem()` ×4 | **no** — identical to the byte, all three runs | 0 |
+| `AllocVec()` address | **no** — identical, all three runs | 0 |
+| uninitialised `MEMF_ANY` residue | **no** — identical, all three runs, *and non-zero* | 0 |
+| `AttnFlags`, `VBlankFrequency`, E-Clock rate, `FindTask(NULL)`, `LastAlert` | no | 0 |
+
+Two findings worth keeping:
+
+- **FS-UAE is not the metronome the plan assumed.** The E-Clock interval genuinely varies
+  under emulation, so the jitter source is not dead there — but the variation comes from
+  the *host's* scheduler, and how much of that an attacker can see or influence is exactly
+  what nobody has analysed. Hence the cap at 12 bits rather than the ~4.6 bits/sample that
+  24 distinct values would nominally support.
+- **"Non-zero therefore unpredictable" is a trap, and this code fell into it.** The first
+  version credited 8 bits for uninitialised `MEMF_ANY` residue whenever any byte came back
+  non-zero. It always came back non-zero — and always the same sixteen bytes, because the
+  allocator hands the same block to the same caller at the same point in the same boot
+  sequence. The credit was 31 bits before that was measured and ~21 after. Everything
+  still goes *into* the pool; it no longer goes into the accounting.
+
+**Three cold boots produced three different output streams** (`b0bfd079…`, `259ea84d…`,
+`1862a377…`), which is the good outcome and is *not* the same claim as unpredictability —
+the difference comes from the host wall clock and the E-Clock jitter, and an attacker who
+knows when the machine was switched on has most of the first of those.
+
+The SHA-256 is verified: the empty string, `"abc"`, both FIPS 180-4 Appendix B multi-block
+examples and the one-million-`a` vector, run through the implementation lifted verbatim
+into a host harness. Worth recording that the *first* harness reported all five as
+failures — it typed `ULONG` as `unsigned long`, which is 64 bits on a modern host and 32 on
+m68k-amigaos. The code was right and the test was wrong, which is the more dangerous way
+round; `src/common/ami_random.c` now carries a compile-time assertion on the width.
+
+**What an attacker-facing assessment would say:** this is a well-conditioned DRBG on a
+badly-sourced seed. Against an off-path attacker guessing a TCP initial sequence number or
+a DNS query id it is a large improvement on the LCG and is fine. Against anyone attacking a
+TLS session key it is **not adequate** — around 20 bits of credited entropy, over a source
+set that is unaudited, on a machine whose boot time an adversary on the same LAN can
+observe. **Do not enable `AMINETXDUO_TLS` for adversarial use without supplying a seed.**
+
+What would actually improve it, roughly in order of value:
+
+1. **A persisted seed file.** Read `DEVS:Internet/random_seed` at startup, mix it, write 32
+   fresh bytes back immediately. This is the single change that breaks the "every boot
+   starts from the same place" property, and it is how every Unix has solved this since
+   the 1990s. Not implemented — it needs `dos.library` in a path that is currently
+   `exec`-only, and the decision of where to put it belongs with whoever ships TLS.
+2. **User input timing.** A `Process` can sample `IECLASS_RAWKEY` / mouse timings from
+   `input.device`. Slow to accumulate, and genuinely unpredictable.
+3. **An operator seed.** A passphrase or a file the human supplies, credited by the human.
+   `ami_random_add_entropy()` already takes it; nothing calls it yet.
+4. **A proper analysis of the E-Clock jitter** on real hardware, of the kind the Linux
+   jitter RNG has had. Until that exists, the 12-bit cap is a guess dressed as a number.
+
+Cost, measured: `ami_random_init()` takes **21–22 ms** on the emulated 68020 (nearly all of
+it jitter sampling), called once from `bsd_runtime_open()`. Steady state is one SHA-256 per
+eight `NX_RAND()` calls — a 200 packet/s TCP stream spends well under 1% of the CPU there.
+`bsdsocket.library` grew **5,224 bytes** of text: `ami_random.o` is 5,328 (SHA-256 plus the
+collection), less the 104 saved by deleting the xorshift in `library_runtime.c` that it
+replaces. `Forbid()` is taken per 32-byte block rather than per request, so the longest
+uninterruptible stretch is one SHA-256 pair and not the 200 ms a 16 KB draw would
+otherwise hold the scheduler off for.
 
 #### Update: `src/crypto68k/` makes RSA 8× faster — the blocker moves to EC
 
@@ -1179,6 +1273,37 @@ changes the layout of `NX_IP`, `NX_INTERFACE`, `NX_PACKET` and `NX_TCP_SOCKET` �
 `IPV6=ON` the SANA-II shim saw a different `NX_IP` from the NetX Duo core it was driving.
 It does not fail to link; it reads the wrong offsets. The definition is now global, in the
 root `CMakeLists.txt`, with a comment saying why it must stay that way.
+
+### Loose ends closed (2026-07-25)
+
+Three tidy-ups that were left behind by the milestone work, alongside the `NX_RAND`
+entropy pool documented under the M9 gate above.
+
+- **The 64-bit division helpers are one copy again.** `__udivdi3` and friends had grown
+  to three (see the toolchain landmine note under the M9 gate). `src/common/ami_udivdi3.c`
+  is now the only one, built as `aminetxduo_m68k_rt`, keeping the 68020 `divu.l` fast path
+  and gaining `__udivmoddi4`/`__divdi3`/`__moddi3` from the conformance copy — newlib's
+  `printf` calls all five. `tests/conformance/build.sh` compiles that file out of
+  `src/common/` rather than keeping its own; `src/crypto68k/` no longer builds a second
+  copy of the TLS one. Verified by building the default tree, `-DAMINETXDUO_IPV6=ON`,
+  `-DAMINETXDUO_TLS=ON` and the conformance suite.
+- **`tools/smoke/` has CMake targets** (`smoke_probes`, or `smoke_<name>` individually).
+  Six diagnostic probes that were hand-built and referenced only from shell history, so
+  they were on their way to rotting. They build with everything else and are deliberately
+  **not** registered with `ctest`: `crashtest` jumps to `0x2` and `gurutest` double-frees,
+  both on purpose, and `KernelStop` re-execs itself and fills free memory with `ILLEGAL`.
+  `KernelStop`'s output name is load-bearing — its parent process runs
+  `SYS:KernelStop child`.
+- **The netdb file parser now runs on the Amiga.** `tests/netstack/devs/Internet/` held
+  only `hosts` and `name_resolution`, so every on-Amiga `get{serv,proto,net}by*` test was
+  hitting `src/config/netdb.c`'s built-in fallback tables — the file parser had 157/157 on
+  the host and had never executed on the target. Representative `services`, `protocols`
+  and `networks` files in the standard `/etc` format are staged now. Proof that the files
+  and not the fallbacks are in use, from a debug-logging run: **`services: 92 entries`,
+  `protocols: 42`, `networks: 7`**, against built-in tables of 30, 7 and 1. Conformance
+  `dns` stays 15/15. **No defect found** — the parser handled tab/space mixtures, trailing
+  `#` comments, multi-alias rows and the truncated dotted network numbers (`10.0.2`,
+  `169.254`) exactly as the host test said it would.
 
 ### Still open (lower stakes, decide during implementation)
 

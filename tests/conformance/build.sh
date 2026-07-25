@@ -20,8 +20,10 @@
 #     spells strcasecmp.  Both are -noixemul-isms, not suite bugs.
 #   * compat/ goes first on the include path so our regenerated
 #     inline/bsdsocket.h wins over the NDK one -- see that file for why.
-#   * compat/libgcc64.c supplies __udivdi3 and friends, which this toolchain's
-#     empty libgcc.a does not -- see that file for why.
+#   * src/common/ami_udivdi3.c supplies __udivdi3 and friends, which this
+#     toolchain's empty libgcc.a does not -- newlib's printf references them.
+#     Compiled straight out of src/common rather than copied here: it is the
+#     one copy in the tree (see the header comment in that file).
 #   * printf -> iprintf etc: newlib's float-capable printf makes the startup
 #     open mathieeedoubbas.library, which is not in ROM and not on our bare
 #     boot drive, so the program dies with "mathieeedoubbas.library failed to
@@ -59,11 +61,10 @@ elif [ "$UPDATE" = "1" ]; then
     git -C "$SRC" pull --ff-only
 fi
 
-TOOLCHAIN="${AMIGA_TOOLCHAIN_ROOT:-$HOME/amigaos/tools/m68k-amigaos-gcc}"
-NDK="${AMIGA_NDK:-$TOOLCHAIN/m68k-amigaos/ndk-include}"
-CC="$TOOLCHAIN/bin/m68k-amigaos-gcc"
-
-[ -x "$CC" ] || { echo "no m68k-amigaos-gcc at $CC" >&2; exit 2; }
+. "$ROOT/tools/amiga-toolchain.sh"
+TOOLCHAIN="$AMIGA_TOOLCHAIN_ROOT"
+NDK="$AMIGA_NDK"
+CC="$AMIGA_GCC"
 
 CFLAGS=(-O2 -Wall -m68020 -fomit-frame-pointer -fno-strict-aliasing
         -I"$HERE/compat" -I"$NDK"
@@ -76,8 +77,15 @@ OBJ="$ROOT/build/bsdsocktest/obj"
 OUT="$ROOT/build/bsdsocktest/bsdsocktest"
 mkdir -p "$OBJ"
 
+# nullglob: compat/ currently holds headers only, so compat/*.c may match
+# nothing.  Without it the unmatched pattern would be passed to the compiler
+# verbatim.
+shopt -s nullglob
+sources=("$SRC"/src/*.c "$HERE"/compat/*.c "$ROOT/src/common/ami_udivdi3.c")
+shopt -u nullglob
+
 objs=()
-for c in "$SRC"/src/*.c "$HERE"/compat/*.c; do
+for c in "${sources[@]}"; do
     o="$OBJ/$(basename "${c%.c}").o"
     if [ ! -f "$o" ] || [ "$c" -nt "$o" ]; then
         echo "  CC $(basename "$c")"

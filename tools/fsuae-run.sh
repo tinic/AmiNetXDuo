@@ -51,7 +51,15 @@ EXE_NAME=$(basename "$EXE")
 
 # ---------------------------------------------------------------- kickstart --
 
+# AMINETXDUO_KICKSTART_EXT loads a second ROM image as FS-UAE's extended ROM.
+# Kickstart 3.1 does not need one.  The AROS m68k ROM DOES: it ships as a pair
+# of 512 KB images, and booting only the first one dies in Exec Bootstrap with
+# "graphics.library could not open library hidd" before DOS ever starts.  With
+# both, FS-UAE reports "1MiB ROM detected" and everything here works exactly as
+# it does on 3.1 -- verified 2026-07-25 on the smoke, lifecycle and kernel-stop
+# probes, identical check counts.  tools/fetch-aros-rom.sh sets both variables.
 KICKSTART="${AMINETXDUO_KICKSTART:-}"
+KICKSTART_EXT="${AMINETXDUO_KICKSTART_EXT:-}"
 if [ -z "$KICKSTART" ]; then
     for candidate in \
         "$HOME/Downloads/Kickstart v3.1 rev 40.68 (1993)(Commodore)(A1200)[!].rom" \
@@ -62,7 +70,18 @@ if [ -z "$KICKSTART" ]; then
     done
 fi
 [ -n "$KICKSTART" ] && [ -f "$KICKSTART" ] || {
-    echo "No Kickstart 3.1 ROM found. Set AMINETXDUO_KICKSTART=<path>." >&2
+    cat >&2 <<'EOF'
+No boot ROM found.  This harness needs one of:
+
+  a Kickstart 3.1 ROM   -- copyrighted, not redistributable, not in CI:
+                           export AMINETXDUO_KICKSTART=<path>
+  the AROS m68k ROM     -- free (APL 1.1) and what CI uses:
+                           eval "$(tools/fetch-aros-rom.sh --export)"
+EOF
+    exit 2
+}
+[ -z "$KICKSTART_EXT" ] || [ -f "$KICKSTART_EXT" ] || {
+    echo "AMINETXDUO_KICKSTART_EXT=$KICKSTART_EXT does not exist" >&2
     exit 2
 }
 
@@ -97,8 +116,9 @@ done
 # the run and can be inspected afterwards -- and pre-seeded by staging env/.
 ENVSETUP="$ROOT/build/envsetup"
 if [ ! -x "$ENVSETUP" ] || [ "$ROOT/tools/envsetup/envsetup.c" -nt "$ENVSETUP" ]; then
-    GCC="${AMIGA_GCC:-$HOME/amigaos/tools/m68k-amigaos-gcc/bin/m68k-amigaos-gcc}"
-    NDK="${AMIGA_NDK:-$HOME/amigaos/tools/m68k-amigaos-gcc/m68k-amigaos/ndk-include}"
+    AMIGA_TOOLCHAIN_QUIET=1 . "$ROOT/tools/amiga-toolchain.sh"
+    GCC="$AMIGA_GCC"
+    NDK="$AMIGA_NDK"
     "$GCC" -O2 -m68020 -I"$NDK" -o "$ENVSETUP" "$ROOT/tools/envsetup/envsetup.c" \
         || { echo "failed to build envsetup" >&2; exit 2; }
 fi
@@ -195,6 +215,13 @@ fast_memory = 8192
 serial_port = $SERIAL
 fullscreen = 0
 EOF
+
+if [ -n "$KICKSTART_EXT" ]; then
+    cat >> "$CFG" <<EOF
+kickstart_ext_file = $KICKSTART_EXT
+EOF
+    echo "==> extended ROM: $(basename "$KICKSTART_EXT")"
+fi
 
 # -c 68030 etc. The project floor is a 68020 (A1200), but a full 68030 has an
 # MMU -- which is what Enforcer needs -- and different cache behaviour, so the

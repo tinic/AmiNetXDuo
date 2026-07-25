@@ -636,6 +636,115 @@ static void test_interface_errors(void)
     free(buf);
 }
 
+/* ---------------------------------------------------------- the reporter */
+
+/*
+ * The problem reporter is what puts a file name, a line number and a
+ * suggestion on the user's screen (src/tools/tool_diag.c installs one). The
+ * line numbers are the part worth pinning down: they are what makes the
+ * message actionable, and they are easy to break by adding a `continue`.
+ */
+#define MAX_SEEN    8
+
+static struct
+{
+    ULONG line;
+    UWORD severity;
+    char  text[160];
+    char  hint[240];
+} seen[MAX_SEEN];
+
+static UWORD seen_count;
+
+static VOID collect(const AmiCfgProblem *problem, APTR user)
+{
+    (void)user;
+
+    if (seen_count >= MAX_SEEN)
+        return;
+
+    seen[seen_count].line     = problem->line;
+    seen[seen_count].severity = problem->severity;
+    strncpy(seen[seen_count].text, problem->text,
+            sizeof(seen[0].text) - 1);
+    seen[seen_count].hint[0] = '\0';
+    if (problem->hint != NULL)
+        strncpy(seen[seen_count].hint, problem->hint, sizeof(seen[0].hint) - 1);
+
+    if (stub_verbose)
+        printf("    line %lu: %s\n", (unsigned long)problem->line,
+               problem->text);
+
+    seen_count++;
+}
+
+/* Does any reported problem mention `needle`? */
+static int seen_mentions(const char *needle)
+{
+    UWORD i;
+
+    for (i = 0; i < seen_count; i++)
+    {
+        if (strstr(seen[i].text, needle) != NULL ||
+            strstr(seen[i].hint, needle) != NULL)
+            return 1;
+    }
+
+    return 0;
+}
+
+static void test_problem_reporter(void)
+{
+    AmiIfConfig iface;
+    char       *buf;
+
+    printf("interface: problems, with line numbers\n");
+
+    seen_count = 0;
+    ami_config_set_reporter(collect, NULL);
+    ami_cfg_problem_file("DEVS:NetInterfaces/eth0");
+
+    buf = dup_text("# a comment\n"          /* line 1 */
+                   "devcie = a2065.device\n"/* line 2: typo   */
+                   "unit = zero\n"          /* line 3: not a number */
+                   "\n"                     /* line 4 */
+                   "address = 10.0.0.300\n" /* line 5: not an address */
+                   "configure = dhcpp\n");  /* line 6: not a mode */
+
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_ERR_SYNTAX);
+    free(buf);
+
+    ami_config_set_reporter(NULL, NULL);
+
+    /* One per bad line, plus the "no DEVICE at all" verdict for the file. */
+    CHECK(seen_count == 5);
+
+    CHECK(seen[0].line == 2);
+    CHECK(seen_mentions("devcie"));
+    /* The suggestion is the whole point of the typo case. */
+    CHECK(seen_mentions("DEVICE"));
+
+    CHECK(seen[1].line == 3);
+    CHECK(seen_mentions("UNIT"));
+
+    CHECK(seen[2].line == 5);
+    CHECK(seen_mentions("ADDRESS"));
+
+    CHECK(seen[3].line == 6);
+    CHECK(seen_mentions("CONFIGURE"));
+
+    /* A verdict about the file as a whole carries line 0. */
+    CHECK(seen[4].line == 0);
+    CHECK(seen[4].severity == AMI_CFG_PROBLEM_ERROR);
+
+    /* With no reporter installed nothing is collected and nothing crashes. */
+    seen_count = 0;
+    buf = dup_text("wibble=1\ndevice=a2065.device\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(seen_count == 0);
+}
+
 static void test_resolver(void)
 {
     AmiResolverConfig res;
@@ -927,6 +1036,7 @@ int main(int argc, char **argv)
     test_interface_static();
     test_interface_amitcp_flavour();
     test_interface_errors();
+    test_problem_reporter();
     test_resolver();
     test_gateway();
     test_netdb();

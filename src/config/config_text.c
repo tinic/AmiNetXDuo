@@ -65,6 +65,76 @@ VOID ami_cfg_copy_string(char *dst, ULONG dstlen, const char *src)
     dst[i] = '\0';
 }
 
+VOID ami_cfg_join3(char *dst, ULONG dstlen, const char *a, const char *b,
+                   const char *c)
+{
+    ULONG pos = 0;
+    int   i;
+
+    if (dst == NULL || dstlen == 0)
+        return;
+
+    dst[0] = '\0';
+
+    for (i = 0; i < 3; i++)
+    {
+        const char *src = (i == 0) ? a : (i == 1) ? b : c;
+
+        if (src == NULL)
+            continue;
+
+        while (*src != '\0' && pos + 1 < dstlen)
+            dst[pos++] = *src++;
+    }
+
+    dst[pos] = '\0';
+}
+
+/* ------------------------------------------------------------ diagnostics */
+
+/*
+ * One reporter, one current file. The configuration is read from one task,
+ * once, at startup -- there is nothing here to make thread-safe, and a
+ * per-parser context argument would have to be threaded through code the host
+ * test drives directly.
+ */
+static AmiCfgReporter   ami_cfg_reporter;
+static APTR             ami_cfg_reporter_user;
+static const char      *ami_cfg_current_file = "the configuration";
+
+VOID ami_config_set_reporter(AmiCfgReporter reporter, APTR user)
+{
+    ami_cfg_reporter      = reporter;
+    ami_cfg_reporter_user = user;
+}
+
+VOID ami_cfg_problem_file(const char *path)
+{
+    ami_cfg_current_file = (path != NULL) ? path : "the configuration";
+}
+
+BOOL ami_cfg_problems_wanted(VOID)
+{
+    return (ami_cfg_reporter != NULL) ? TRUE : FALSE;
+}
+
+VOID ami_cfg_problem(ULONG line, UWORD severity, const char *text,
+                     const char *hint)
+{
+    AmiCfgProblem problem;
+
+    if (ami_cfg_reporter == NULL || text == NULL)
+        return;
+
+    problem.file     = ami_cfg_current_file;
+    problem.line     = line;
+    problem.severity = severity;
+    problem.text     = text;
+    problem.hint     = hint;
+
+    ami_cfg_reporter(&problem, ami_cfg_reporter_user);
+}
+
 /* ------------------------------------------------------------ line reader */
 
 char *ami_cfg_next_line(char **cursor)

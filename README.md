@@ -91,12 +91,18 @@ Kickstart 3.1 A1200, captures `ami_log()` serial output, and propagates the
 program's exit status back to the host:
 
 ```sh
-tools/fsuae-run.sh -t 90 build/smoke
+tools/fsuae-run.sh -t 90 build/cm/tools/smoke/smoke
 ```
 
 `-c 68030` selects a full 68030 (which has an MMU, so Enforcer works there;
 the 68020 floor runs with no illegal-access checking at all). `-n` attaches an
 emulated A2065 on SLIRP for real networking.
+
+`tools/smoke/` holds six diagnostic probes, built by the `smoke_probes` target
+and deliberately not registered with `ctest`: a harness self-test, an entropy
+pool probe, a ThreadX task lifecycle probe, a kernel-stop survival test, and
+two that fault on purpose (`crashtest` jumps to `0x2`, `gurutest` double-frees)
+to prove the crash guard and the `Alert()` hook report what they should.
 
 The conformance target is [`bsdsocktest`](https://github.com/tbdye/bsdsocktest),
 a 142-test suite for `bsdsocket.library` implementations, vendored as a

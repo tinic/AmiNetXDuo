@@ -31,14 +31,19 @@ set(AMINETXDUO_TLS_INCLUDES
 # ------------------------------------------------- compiler runtime shim ---
 
 # This toolchain ships a ZERO BYTE libgcc.a, so `unsigned long long` division
-# does not link.  nx_crypto's huge-number long division needs it.  See the
-# header comment in tls_udivdi3.c for why we supply the helper rather than
-# dropping the huge-number radix to 16 bits.
+# does not link.  nx_crypto's huge-number long division needs it.  The single
+# copy lives in src/common (aminetxduo_m68k_rt); see the header comment in
+# src/common/ami_udivdi3.c for why we supply the helper rather than dropping
+# the huge-number radix to 16 bits.
 #
-# It has to be its OWN target, linked from nx_crypto: static archives resolve
-# left to right in one pass, so a definition sitting in a library that CMake
-# happens to place before libnx_crypto.a would not be found.
-add_library(aminetxduo_m68k_rt STATIC tls_udivdi3.c)
+# src/common is configured unconditionally and before this directory, so on a
+# cross build the target is simply there.  On a host build it is absent and
+# libgcc supplies the real helpers, so link nothing.
+if(TARGET aminetxduo_m68k_rt)
+    set(AMINETXDUO_TLS_RT aminetxduo_m68k_rt)
+else()
+    set(AMINETXDUO_TLS_RT "")
+endif()
 
 # ------------------------------------------------------------- nx_crypto ---
 
@@ -51,7 +56,7 @@ list(FILTER NX_CRYPTO_SOURCES EXCLUDE REGEX "self_test")
 
 add_library(nx_crypto STATIC ${NX_CRYPTO_SOURCES})
 target_include_directories(nx_crypto PUBLIC ${AMINETXDUO_TLS_INCLUDES})
-target_link_libraries(nx_crypto PUBLIC netxduo aminetxduo_m68k_rt)
+target_link_libraries(nx_crypto PUBLIC netxduo ${AMINETXDUO_TLS_RT})
 
 # ------------------------------------------------------------- nx_secure ---
 
@@ -70,7 +75,7 @@ target_link_libraries(nx_secure PUBLIC nx_crypto netxduo)
 add_library(aminetxduo_tls STATIC tls_amiga.c)
 target_include_directories(aminetxduo_tls PUBLIC
     ${AMINETXDUO_TLS_INCLUDES} "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(aminetxduo_tls PUBLIC nx_secure aminetxduo_m68k_rt)
+target_link_libraries(aminetxduo_tls PUBLIC nx_secure ${AMINETXDUO_TLS_RT})
 
 if(AMIGA_NDK_INCLUDE)
     target_include_directories(aminetxduo_tls PUBLIC "${AMIGA_NDK_INCLUDE}")

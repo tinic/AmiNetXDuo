@@ -26,6 +26,7 @@
 #include "tx_amiga.h"
 
 #include <exec/memory.h>
+#include <exec/ports.h>
 #include <exec/semaphores.h>
 #include <proto/exec.h>
 
@@ -62,6 +63,77 @@ static VOID ami_ns_lock_init(VOID)
 AmiNetStack *ami_netstack_raw(VOID)
 {
     return ami_ns;
+}
+
+/* ------------------------------------------------- the "is it up?" barrier */
+
+/*
+ * The AMITCP public message port (docs/RESEARCH.md 3.3 and 6.6).
+ *
+ * `WaitForPort AMITCP` in S:User-Startup is the conventional Amiga way of
+ * saying "wait until the network exists", and every stack since AmiTCP has
+ * created it. It is also the only cross-program way for a Shell command to
+ * find out that a stack is running: the singleton is private to whichever
+ * binary owns it, so the tools cannot see it, but they can see this.
+ *
+ * PA_IGNORE, with no signal task, on purpose. Nothing is meant to send to
+ * this port -- it is a flag, not a service -- and the alternative is worse:
+ * mp_SigTask would have to be the task that happened to bring the stack up,
+ * which is usually a Shell command that exits seconds later, leaving anything
+ * that did PutMsg() signalling a dead task.
+ */
+static char             ami_ns_port_name[] = "AMITCP";
+static struct MsgPort  *ami_ns_port;
+
+static VOID ami_ns_port_create(VOID)
+{
+    struct MsgPort *port;
+
+    if (ami_ns_port != NULL)
+        return;
+
+    Forbid();
+    port = FindPort((CONST_STRPTR)ami_ns_port_name);
+    Permit();
+
+    if (port != NULL)
+    {
+        /* Another TCP/IP stack is already on this machine. */
+        AMI_WARN("netstack: an AMITCP port already exists; not adding ours");
+        return;
+    }
+
+    port = (struct MsgPort *)ami_alloc((ULONG)sizeof(struct MsgPort));
+    if (port == NULL)
+        return;
+
+    port->mp_Node.ln_Type = NT_MSGPORT;
+    port->mp_Node.ln_Pri  = 0;
+    port->mp_Node.ln_Name = ami_ns_port_name;
+    port->mp_Flags        = PA_IGNORE;
+    port->mp_SigBit       = 0;
+    port->mp_SigTask      = NULL;
+
+    /* NewList() lives in amiga.lib, which a shared library cannot reach. */
+    port->mp_MsgList.lh_Head     = (struct Node *)&port->mp_MsgList.lh_Tail;
+    port->mp_MsgList.lh_Tail     = NULL;
+    port->mp_MsgList.lh_TailPred = (struct Node *)&port->mp_MsgList.lh_Head;
+    port->mp_MsgList.lh_Type     = NT_MESSAGE;
+
+    AddPort(port);
+    ami_ns_port = port;
+
+    AMI_INFO("netstack: AMITCP port added");
+}
+
+static VOID ami_ns_port_delete(VOID)
+{
+    if (ami_ns_port == NULL)
+        return;
+
+    RemPort(ami_ns_port);
+    ami_free(ami_ns_port);
+    ami_ns_port = NULL;
 }
 
 /* ----------------------------------------------------------- adoption glue */
@@ -237,7 +309,15 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
         ns->ns_Iface[opened] = ami_sana2_open(cfg, &status);
         if (ns->ns_Iface[opened] == NULL)
         {
-            AMI_ERROR("netstack: interface '%s' (%s unit %lu) would not open",
+            /*
+             * The serial log is a developer's view, but it is also what a
+             * user is asked to send in, so it says what to do as well as what
+             * happened. The console version of this, with a probe of the
+             * device behind it, is in src/tools/tool_diag.c.
+             */
+            AMI_ERROR("netstack: interface '%s' would not open: %s unit %lu "
+                      "did not answer -- is the driver in DEVS:Networks/ and "
+                      "is the card fitted on that unit?",
                       cfg->name, cfg->device, (unsigned long)cfg->unit);
             err = status;
             continue;
@@ -588,7 +668,9 @@ static LONG ami_ns_bring_up(VOID)
 
     if (ns->ns_Config.interface_count == 0)
     {
-        AMI_ERROR("netstack: no interfaces in DEVS:NetInterfaces");
+        AMI_ERROR("netstack: nothing to bring up -- DEVS:NetInterfaces holds "
+                  "no usable interface file. Run NetSetup to write one, or "
+                  "ShowNetStatus to see what is wrong with the one there");
         ami_free(ns);
         return AMI_NET_ERR_CONFIG;
     }
@@ -675,6 +757,12 @@ static LONG ami_ns_bring_up(VOID)
 
     ami_netstack_leave(&caller);
 
+    /*
+     * The stack exists from here on, address or not, so this is where anything
+     * waiting for `WaitForPort AMITCP` is released.
+     */
+    ami_ns_port_create();
+
     if (status != AMI_NET_OK)
     {
         /*
@@ -682,7 +770,8 @@ static LONG ami_ns_bring_up(VOID)
          * may still want loopback, and Online/AddNetInterface can fix the
          * interface later. Report the failure so bsdsocket does not pretend.
          */
-        AMI_WARN("netstack: up, but no interface has an address");
+        AMI_WARN("netstack: up, but no interface has an address -- check the "
+                 "cable, or that something on this network hands out addresses");
         return status;
     }
 
@@ -747,6 +836,9 @@ VOID netstack_shutdown(VOID)
     }
 
     ami_ns = NULL;
+
+    /* Take the barrier down before the stack behind it goes. */
+    ami_ns_port_delete();
 
     /*
      * Teardown suspends the calling thread inside NetX Duo (nx_ip_delete()

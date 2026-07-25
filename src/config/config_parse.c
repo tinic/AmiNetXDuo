@@ -146,6 +146,158 @@ static IfKey lookup_if_keyword(const char *name)
     return IF_KEY_UNKNOWN;
 }
 
+/* ------------------------------------------------ "did you mean DEVICE?" --
+ *
+ * A mistyped keyword is the commonest thing wrong with a hand-edited
+ * interface file, and "unknown keyword 'devcie'" on its own leaves the reader
+ * hunting for the difference. Levenshtein distance over the keyword table
+ * finds it: the table is 40 short words and this runs once per bad line, so
+ * the cost is irrelevant and the payoff is a message that names the fix.
+ */
+#define CFG_SUGGEST_MAX     24      /* longer than any keyword we know */
+
+static ULONG edit_distance(const char *a, const char *b)
+{
+    ULONG prev[CFG_SUGGEST_MAX + 1];
+    ULONG curr[CFG_SUGGEST_MAX + 1];
+    ULONG la = ami_cfg_strlen(a);
+    ULONG lb = ami_cfg_strlen(b);
+    ULONG i;
+    ULONG j;
+
+    if (la > CFG_SUGGEST_MAX || lb > CFG_SUGGEST_MAX)
+        return CFG_SUGGEST_MAX + 1;
+
+    for (j = 0; j <= lb; j++)
+        prev[j] = j;
+
+    for (i = 1; i <= la; i++)
+    {
+        char ca = a[i - 1];
+
+        if (ca >= 'A' && ca <= 'Z')
+            ca = (char)(ca + ('a' - 'A'));
+
+        curr[0] = i;
+
+        for (j = 1; j <= lb; j++)
+        {
+            ULONG sub = prev[j - 1] + ((ca == b[j - 1]) ? 0UL : 1UL);
+            ULONG del = prev[j] + 1UL;
+            ULONG ins = curr[j - 1] + 1UL;
+            ULONG best = sub;
+
+            if (del < best)
+                best = del;
+            if (ins < best)
+                best = ins;
+
+            curr[j] = best;
+        }
+
+        for (j = 0; j <= lb; j++)
+            prev[j] = curr[j];
+    }
+
+    return prev[lb];
+}
+
+/* Uppercase, because that is how the keywords are written in the manual. */
+static VOID upcase_into(char *dst, ULONG dstlen, const char *src)
+{
+    ULONG i;
+
+    if (dst == NULL || dstlen == 0)
+        return;
+
+    for (i = 0; i + 1 < dstlen && src != NULL && src[i] != '\0'; i++)
+    {
+        char c = src[i];
+
+        dst[i] = (c >= 'a' && c <= 'z') ? (char)(c - ('a' - 'A')) : c;
+    }
+
+    dst[i] = '\0';
+}
+
+/* The nearest keyword within two edits, or NULL when nothing is close. */
+static const char *suggest_if_keyword(const char *name)
+{
+    const struct IfKeyword *k;
+    const char             *best  = NULL;
+    ULONG                   bestd = 3;
+
+    for (k = ami_if_keywords; k->name != NULL; k++)
+    {
+        ULONG d = edit_distance(name, k->name);
+
+        if (d < bestd)
+        {
+            bestd = d;
+            best  = k->name;
+        }
+    }
+
+    return best;
+}
+
+/*
+ * "unknown keyword 'devcie'" + "Did you mean DEVICE? ...". Built here rather
+ * than at each call site because four of them want the same shape.
+ */
+static VOID report_unknown_keyword(ULONG line, const char *key,
+                                   const char *known)
+{
+    char        text[96];
+    char        hint[192];
+    const char *guess;
+
+    if (!ami_cfg_problems_wanted())
+        return;
+
+    ami_cfg_join3(text, sizeof(text), "unknown keyword '", key, "'");
+
+    guess = suggest_if_keyword(key);
+    if (guess != NULL)
+    {
+        char upper[CFG_SUGGEST_MAX + 1];
+
+        upcase_into(upper, sizeof(upper), guess);
+        ami_cfg_join3(hint, sizeof(hint), "Did you mean ", upper,
+                      "?  The line was ignored.");
+    }
+    else
+    {
+        ami_cfg_join3(hint, sizeof(hint), known, NULL, NULL);
+    }
+
+    ami_cfg_problem(line, AMI_CFG_PROBLEM_WARN, text, hint);
+}
+
+/* "bad ADDRESS '10.0.0.300'" + whatever the keyword's own advice is. */
+static VOID report_bad_value(ULONG line, UWORD severity, const char *keyword,
+                             const char *value, const char *hint)
+{
+    char text[128];
+    char quoted[96];
+
+    if (!ami_cfg_problems_wanted())
+        return;
+
+    ami_cfg_join3(quoted, sizeof(quoted), " cannot be '", value, "'");
+    ami_cfg_join3(text, sizeof(text), keyword, quoted, NULL);
+
+    ami_cfg_problem(line, severity, text, hint);
+}
+
+#define CFG_HINT_KEYWORDS \
+    "The keywords an interface file understands are DEVICE, UNIT, CONFIGURE, " \
+    "ADDRESS, NETMASK, GATEWAY and MTU.  The line was ignored."
+
+#define CFG_HINT_IPV4 \
+    "An address is four numbers from 0 to 255 with dots between them, like " \
+    "192.168.1.10."
+
 /* CONFIGURE=/IPTYPE= address-configuration modes. */
 static const struct IpTypeName
 {
@@ -230,6 +382,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
 {
     char *cursor = buf;
     char *line;
+    ULONG lineno = 0;
     BOOL  have_device = FALSE;
 #ifdef AMINETXDUO_IPV6
     BOOL  have_configure6 = FALSE;
@@ -270,7 +423,17 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
         /* Roadshow truncates the interface name to 15 characters. */
         ami_cfg_copy_string(short_name, sizeof(short_name), name);
         if (ami_cfg_strlen(name) > AMI_CFG_IFNAME_MAX)
+        {
+            char text[128];
+
             AMI_WARN("config: interface name '%s' truncated to '%s'", name, short_name);
+            ami_cfg_join3(text, sizeof(text), "the interface name is longer "
+                          "than 15 characters, so it becomes '", short_name, "'");
+            ami_cfg_problem(0, AMI_CFG_PROBLEM_WARN, text,
+                            "Rename the file in DEVS:NetInterfaces to something "
+                            "15 characters or shorter and use that name from "
+                            "now on.");
+        }
         ami_cfg_copy_string(out->name, sizeof(out->name), short_name);
     }
 
@@ -282,6 +445,8 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
         char *pos;
         char *key;
         char *value;
+
+        lineno++;
 
         ami_cfg_strip_comment(line, "#;");
         line = ami_cfg_trim(line);
@@ -300,6 +465,12 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 if (*value == '\0')
                 {
                     AMI_WARN("config: %s: empty DEVICE", out->name);
+                    ami_cfg_problem(lineno, AMI_CFG_PROBLEM_ERROR,
+                                    "DEVICE has no value",
+                                    "DEVICE names the driver for your network "
+                                    "card, for example DEVICE=a2065.device.  "
+                                    "The driver itself belongs in "
+                                    "DEVS:Networks/.");
                     break;
                 }
                 ami_cfg_copy_string(out->device, sizeof(out->device), value);
@@ -308,43 +479,91 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
 
             case IF_KEY_UNIT:
                 if (ami_cfg_parse_ulong(value, &n))
+                {
                     out->unit = n;
+                }
                 else
+                {
                     AMI_WARN("config: %s: bad UNIT '%s'", out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "UNIT",
+                                     value,
+                                     "UNIT is a plain number and is 0 on almost "
+                                     "every card.  Unit 0 was assumed.");
+                }
                 break;
 
             case IF_KEY_ADDRESS:
                 /* "address=dhcp" is legal Roadshow and means "ask the server". */
                 if (lookup_iptype(value, &type))
+                {
                     out->iptype = type;
+                }
                 else if (!ami_config_parse_ip(value, &out->address))
+                {
                     AMI_WARN("config: %s: bad ADDRESS '%s'", out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "ADDRESS",
+                                     value,
+                                     CFG_HINT_IPV4 "  Write ADDRESS=DHCP to "
+                                     "have the address handed out for you.");
+                }
                 break;
 
             case IF_KEY_NETMASK:
                 if (lookup_iptype(value, &type))
+                {
                     out->iptype = type;
+                }
                 else if (!ami_config_parse_ip(value, &out->netmask))
+                {
                     AMI_WARN("config: %s: bad NETMASK '%s'", out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "NETMASK",
+                                     value,
+                                     "A netmask looks like an address; on a "
+                                     "home network it is almost always "
+                                     "255.255.255.0.");
+                }
                 break;
 
             case IF_KEY_GATEWAY:
                 if (!ami_config_parse_ip(value, &out->gateway))
+                {
                     AMI_WARN("config: %s: bad GATEWAY '%s'", out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "GATEWAY",
+                                     value,
+                                     "The gateway is the address of your router. "
+                                     CFG_HINT_IPV4);
+                }
                 break;
 
             case IF_KEY_MTU:
                 if (ami_cfg_parse_ulong(value, &n))
+                {
                     out->mtu = n;
+                }
                 else
+                {
                     AMI_WARN("config: %s: bad MTU '%s'", out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "MTU", value,
+                                     "MTU is a plain number of bytes, normally "
+                                     "1500.  Leave it out and the driver decides.");
+                }
                 break;
 
             case IF_KEY_CONFIGURE:
                 if (lookup_iptype(value, &type))
+                {
                     out->iptype = type;
+                }
                 else
+                {
                     AMI_WARN("config: %s: bad CONFIGURE '%s'", out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "CONFIGURE",
+                                     value,
+                                     "CONFIGURE is DHCP (let the network hand "
+                                     "out an address), STATIC (use the ADDRESS "
+                                     "below) or AUTO (pick one without a "
+                                     "server).  STATIC was assumed.");
+                }
                 break;
 
             case IF_KEY_IPTYPE:
@@ -357,20 +576,38 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                     AMI_DEBUG("config: %s: SANA-II IPTYPE %lu (sana2 layer)",
                               out->name, (unsigned long)n);
                 else if (lookup_iptype(value, &type))
+                {
                     out->iptype = type;
+                }
                 else
+                {
                     AMI_WARN("config: %s: bad IPTYPE '%s'", out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "IPTYPE",
+                                     value,
+                                     "IPTYPE is either a packet type number "
+                                     "(2048 for Ethernet) or one of DHCP, "
+                                     "STATIC and AUTO.");
+                }
                 break;
 
             case IF_KEY_STATE:
                 if (ami_cfg_stricmp(value, "up") == 0 ||
                     ami_cfg_stricmp(value, "online") == 0)
+                {
                     out->up = TRUE;
+                }
                 else if (ami_cfg_stricmp(value, "down") == 0 ||
                          ami_cfg_stricmp(value, "offline") == 0)
+                {
                     out->up = FALSE;
+                }
                 else
+                {
                     AMI_WARN("config: %s: bad STATE '%s'", out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "STATE",
+                                     value,
+                                     "STATE is UP or DOWN.  UP was assumed.");
+                }
                 break;
 
 #ifdef AMINETXDUO_IPV6
@@ -429,6 +666,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
             case IF_KEY_UNKNOWN:
             default:
                 AMI_WARN("config: %s: unknown keyword '%s'", out->name, key);
+                report_unknown_keyword(lineno, key, CFG_HINT_KEYWORDS);
                 break;
             }
         }
@@ -437,11 +675,25 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
     if (!have_device)
     {
         AMI_WARN("config: %s: no DEVICE keyword, ignoring interface", out->name);
+        ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR,
+                        "there is no DEVICE line, so the file does not say "
+                        "which network card to use",
+                        "Add a line like  DEVICE = a2065.device  naming the "
+                        "driver for your card, or let NetSetup write the file "
+                        "for you.");
         return AMI_CFG_ERR_SYNTAX;
     }
 
     if (out->iptype == AMI_IPTYPE_STATIC && out->address == 0)
+    {
         AMI_WARN("config: %s: static but no ADDRESS", out->name);
+        ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR,
+                        "the interface has no address: there is no ADDRESS "
+                        "line and CONFIGURE does not say DHCP",
+                        "Add  CONFIGURE = DHCP  to have an address handed out, "
+                        "or  ADDRESS = 192.168.1.10  and  NETMASK = "
+                        "255.255.255.0  to set one yourself.");
+    }
 
 #ifdef AMINETXDUO_IPV6
     if (out->ip6type == AMI_IP6TYPE_STATIC &&
@@ -475,6 +727,7 @@ VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
 {
     char *cursor = buf;
     char *line;
+    ULONG lineno = 0;
 
     if (buf == NULL || out == NULL)
         return;
@@ -484,6 +737,8 @@ VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
         char *pos;
         char *key;
         char *value;
+
+        lineno++;
 
         ami_cfg_strip_comment(line, "#;");
         line = ami_cfg_trim(line);
@@ -501,6 +756,11 @@ VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
             if (!ami_config_parse_ip(value, &addr))
             {
                 AMI_WARN("config: name_resolution: bad NAMESERVER '%s'", value);
+                report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "NAMESERVER",
+                                 value,
+                                 "A name server is given by address, not by "
+                                 "name -- on a home network it is usually the "
+                                 "router, for example 192.168.1.1.");
             }
             else if (out->nameserver_count >= AMI_CFG_MAX_NAMESERVERS)
             {
@@ -584,7 +844,13 @@ VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
         }
         else
         {
+            char text[96];
+
             AMI_WARN("config: name_resolution: unknown keyword '%s'", key);
+            ami_cfg_join3(text, sizeof(text), "unknown keyword '", key, "'");
+            ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN, text,
+                            "This file holds NAMESERVER, DOMAIN and SEARCH "
+                            "lines.  The line was ignored.");
         }
     }
 }
@@ -595,6 +861,7 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
 {
     char *cursor = buf;
     char *line;
+    ULONG lineno = 0;
 
     if (buf == NULL || out == NULL)
         return;
@@ -609,6 +876,8 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
         BOOL  have_dst   = FALSE;
         BOOL  is_default = FALSE;
 
+        lineno++;
+
         ami_cfg_strip_comment(line, "#;");
         line = ami_cfg_trim(line);
         if (*line == '\0')
@@ -621,9 +890,18 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
                 ami_cfg_stricmp(key, "via") == 0)
             {
                 if (ami_config_parse_ip(value, &gateway))
+                {
                     have_gw = TRUE;
+                }
                 else
+                {
                     AMI_WARN("config: bad gateway address '%s'", value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "the gateway",
+                                     value,
+                                     "This is the address of your router, and it "
+                                     "must be on the same network as this "
+                                     "machine. " CFG_HINT_IPV4);
+                }
             }
             else if (ami_cfg_stricmp(key, "default") == 0 ||
                      ami_cfg_stricmp(key, "defaultgateway") == 0)
@@ -656,7 +934,14 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
             }
             else
             {
+                char text[96];
+
                 AMI_WARN("config: routes: unknown keyword '%s'", key);
+                ami_cfg_join3(text, sizeof(text), "unknown keyword '", key, "'");
+                ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN, text,
+                                "A routes file holds DEFAULT=<router address> "
+                                "for the default route, and DST=/VIA= pairs for "
+                                "anything else.  The line was ignored.");
             }
         }
 

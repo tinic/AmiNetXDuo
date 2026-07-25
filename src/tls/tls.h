@@ -19,15 +19,21 @@ extern "C" {
 #endif
 
 /*
- * Seed the C library RNG that nx_crypto reaches for.
+ * Seed the generator nx_crypto reaches for, and report how good it is not.
  *
- * NX_RAND is undefined in port/netxduo-amiga/inc/nx_port.h, so nx_api.h falls
- * back to newlib's rand().  That is fine for a benchmark and NOT fine for a
- * shipping TLS client: rand() is a 32-bit LCG, and ECDHE private keys plus the
- * TLS 1.2 client random come out of it.  Anything that ships must define
- * NX_RAND to a real entropy path -- see the note in tests/tls/tls_bench.c.
+ * NX_RAND now points at src/common/ami_random.c (see
+ * port/netxduo-amiga/inc/nx_port.h), a SHA-256 hash DRBG over an entropy
+ * pool, instead of newlib's 32-bit LCG.  That fixes the *expansion*; it does
+ * not conjure entropy onto a machine that has none.
  *
- * Returns the seed used, so a test can print it and be reproducible.
+ * Returns the pool's own credited entropy estimate in bits.  A caller about
+ * to perform a real TLS handshake must treat a value below
+ * AMI_RANDOM_MIN_BITS as a refusal to proceed -- ami_random_is_seeded() is
+ * the same test -- and either obtain a seed from the operator, a persisted
+ * seed file or user input timing and feed it to ami_random_add_entropy(), or
+ * decline to generate the key.  Generating an ECDHE private key from a pool
+ * that credits itself 6 bits is worse than not offering TLS at all, because
+ * the caller believes it worked.
  */
 ULONG ami_tls_seed_rng(VOID);
 

@@ -1,0 +1,164 @@
+AmiNetXDuo -- TCP/IP for classic AmigaOS
+========================================
+
+AmiNetXDuo is a bsdsocket.library for AmigaOS 3.x: the shared library that
+Amiga network software -- browsers, FTP clients, telnet, file sharing --
+opens in order to reach the network. It talks to your network card through
+the card's ordinary SANA-II driver, and it is configured with the same
+files and the same commands as Roadshow.
+
+It is built on Eclipse ThreadX NetX Duo and is MIT licensed throughout.
+
+
+PLEASE READ THIS FIRST
+----------------------
+
+AmiNetXDuo works, and it is not finished.
+
+It gets a DHCP lease, answers ARP, pings its gateway, resolves names and
+moves TCP in both directions, and it scores 125 of 142 on the bsdsocktest
+conformance suite. It has been tested under emulation on Kickstart 3.1
+with a 68020 and a 68030.
+
+It has NOT been run on real hardware, and it is not yet something to trust
+with data you care about. Classic AmigaOS has no memory protection, so a
+fault in a network stack takes the machine with it. Save your work before
+experimenting.
+
+
+WHAT YOU NEED
+-------------
+
+  * A 68020 or better, AmigaOS 3.0 or 3.1, about 4 MB of Fast RAM
+  * A network card with a SANA-II driver installed in DEVS:
+    (a2065.device, ariadne.device, x-surf.device, uaenet.device, ...)
+    Drivers are not part of this archive; use the one for your card.
+  * You need to know the driver's name and its unit number (usually 0).
+
+
+INSTALLING
+----------
+
+Run the Installer script if there is one. To install by hand:
+
+  copy bsdsocket.library LIBS:
+  copy usergroup.library LIBS:
+  copy AddNetInterface Online Offline ShowNetStatus netstat ping host TO C:
+  makedir DEVS:NetInterfaces
+  makedir DEVS:Internet
+
+Do not run two TCP/IP stacks at once. If you already have AmiTCP, Miami or
+Roadshow installed, rename the old LIBS:bsdsocket.library rather than
+overwriting it, and make sure the old stack is not started from
+S:User-Startup.
+
+
+SETTING IT UP
+-------------
+
+Create one file per network card in DEVS:NetInterfaces. The name of the
+file is the name of the interface. For a normal home network with a
+router:
+
+  DEVS:NetInterfaces/eth0
+    DEVICE    = a2065.device
+    UNIT      = 0
+    CONFIGURE = DHCP
+
+That is the whole configuration: the address, the netmask, the gateway and
+the name servers all arrive from the DHCP server.
+
+Note that the address mode keyword is CONFIGURE, not IPTYPE. IPTYPE with a
+number after it means something else entirely (the SANA-II packet type)
+and is ignored.
+
+Without a DHCP server, use a fixed address instead:
+
+  DEVS:NetInterfaces/eth0
+    DEVICE    = a2065.device
+    UNIT      = 0
+    CONFIGURE = STATIC
+    ADDRESS   = 192.168.1.10
+    NETMASK   = 255.255.255.0
+
+  DEVS:Internet/routes
+    DEFAULT = 192.168.1.1
+
+  DEVS:Internet/name_resolution
+    nameserver 192.168.1.1
+
+Then start the stack:
+
+  AddNetInterface eth0
+
+and, once that works, add this line to S:User-Startup so it happens at
+every boot:
+
+  C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET
+
+
+IS IT WORKING?
+--------------
+
+  ShowNetStatus              is the stack up, and has it got an address?
+  ping <your gateway>        can it reach the network?
+  host www.aminet.net        do names work?
+
+The first of those to fail is where the problem is. AmiNetXDuo.guide has a
+troubleshooting section covering the usual causes: the wrong device name,
+no DHCP server answering, a cable or driver problem, a missing interface
+file, and a stack that is up while DNS is not.
+
+
+THE COMMANDS
+------------
+
+  AddNetInterface   start the stack and bring an interface online
+  Online / Offline  put an interface on or off the network
+  ShowNetStatus     what the stack thinks the network looks like
+  netstat           interfaces, routes and connections
+  ping              is that machine there?
+  host              look a name up, or an address back
+
+All of them answer "?" with their arguments, in the usual AmigaDOS way.
+
+
+DOCUMENTATION
+-------------
+
+AmiNetXDuo.guide is the manual. Double-click it, or:
+
+  MultiView AmiNetXDuo.guide
+
+It covers installation, every configuration file and keyword, all seven
+commands with examples, and troubleshooting.
+
+
+THINGS IT DOES NOT DO
+---------------------
+
+  * Only the default route -- there is no route command, and specific
+    routes in DEVS:Internet/routes are ignored.
+  * At most two interfaces are attached.
+  * Only Ethernet-style SANA-II drivers have been tested; PPP and SLIP
+    should be treated as unsupported.
+  * No raw sockets (SOCK_RAW), and no out-of-band TCP data (MSG_OOB).
+  * No TLS, so no HTTPS: one TLS handshake measures over three minutes on
+    a 68020, so it is switched off.
+  * IPv6 is a build option, off in ordinary builds, and the commands above
+    are IPv4 only in every build.
+  * The Roadshow interface-list, routing and statistics library calls
+    return ENOSYS.
+  * There is no AMITCP public message port, so an install script
+    containing "WaitForPort AMITCP" will time out. Remove that line.
+
+The guide has the full list with explanations.
+
+
+LICENCE
+-------
+
+MIT. See the LICENCE file. AmiNetXDuo is an independent implementation of
+a published interface; no AmiTCP, AROSTCP, Miami or Roadshow code is used.
+ThreadX and NetX Duo are MIT licensed, copyright Microsoft and the Eclipse
+ThreadX contributors.

@@ -156,6 +156,9 @@ const char *tool_net_error(LONG err)
         case AMI_NET_ERR_CONFIG:    return "the configuration is not usable";
         case AMI_NET_ERR_KERNEL:    return "the network kernel would not start";
         case AMI_NET_ERR_STATE:     return "the network stack is not running";
+        case AMI_NET_ERR_NONAME:    return "there is no such name";
+        case AMI_NET_ERR_NOSERVER:  return "no name server is configured";
+        case AMI_NET_ERR_TIMEOUT:   return "the name server did not answer";
         default:                    return "unknown error";
     }
 }
@@ -166,8 +169,18 @@ AmiNetStack *tool_require_stack(VOID)
 
     if (stack == NULL)
     {
-        tool_error("the network stack is not running "
-                   "(start it with AddNetInterface)");
+        /*
+         * "not running" would be a lie when another program has the stack up
+         * inside bsdsocket.library and we simply cannot see in. Which of the
+         * two it is changes what the user should do about it, so it changes
+         * the message; tool_explain_no_stack() prints the rest.
+         */
+        if (tool_stack_library_running())
+            tool_error("the network is up, but this command cannot read it");
+        else
+            tool_error("the network has not been started");
+
+        tool_explain_no_stack();
     }
 
     return stack;
@@ -180,8 +193,12 @@ LONG tool_find_interface(const char *name)
 
     if (cfg == NULL)
     {
-        tool_error("the network stack is not running "
-                   "(start it with AddNetInterface)");
+        if (tool_stack_library_running())
+            tool_error("the network is up, but this command cannot read it");
+        else
+            tool_error("the network has not been started");
+
+        tool_explain_no_stack();
         return -1;
     }
 
@@ -207,7 +224,21 @@ LONG tool_find_interface(const char *name)
             return (LONG)i;
     }
 
-    tool_error("no interface called \"%s\"", name);
+    tool_error("there is no interface called \"%s\"", (LONG)name);
+
+    if (cfg->interface_count == 0)
+    {
+        tool_explain_no_interfaces();
+    }
+    else
+    {
+        tool_advise_blank();
+        tool_advise("The interfaces this machine has are:");
+        for (i = 0; i < cfg->interface_count; i++)
+            tool_printf("      %s\n", (LONG)cfg->interfaces[i].name);
+        tool_advise("The name is the name of the file in DEVS:NetInterfaces.");
+    }
+
     return -1;
 }
 
