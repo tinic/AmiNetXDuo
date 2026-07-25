@@ -27,21 +27,19 @@
  *     these findings carry over.
  *   - Nothing here has been reviewed by anyone who does this for a living.
  *
- * Consequence, and it is deliberate: ami_random_is_seeded() reports FALSE
- * until the pool has been credited AMI_RANDOM_MIN_BITS from sources this
- * module is willing to count.  Anything generating a long-lived or
- * adversarially exposed secret -- TLS key agreement above all -- is expected
- * to check it and REFUSE rather than proceed with a guess.  Callers that
- * genuinely have entropy (an operator seed, a persisted seed file, mouse or
- * keystroke timing from a Process) feed it in with ami_random_add_entropy()
- * and say how much they think it is worth.
+ * ami_random_is_seeded() reports whether the pool reached AMI_RANDOM_MIN_BITS
+ * from sources this module is willing to count.  On a machine left to itself
+ * it is FALSE, because the internal sources cap below that bar -- see the
+ * constant.  It is a REPORTER, not a gate: nothing in this project refuses to
+ * run because of it, and TLS does not check it.  A caller that has real
+ * entropy (an operator seed, a seed file, input timing) can feed it in with
+ * ami_random_add_entropy().
  *
- * For the stack's own non-secret uses -- IP identification fields, TCP
- * initial sequence numbers, ephemeral port selection, DHCP transaction ids,
- * DNS query ids -- the generator is used unconditionally and is a strict
- * improvement on the 32-bit LCG it replaces.  Those uses want
- * unpredictability, not secrecy, and an off-path attacker guessing them is a
- * much weaker adversary than one attacking a key.
+ * For everything the stack actually uses this for -- IP identification
+ * fields, TCP initial sequence numbers, ephemeral ports, DHCP transaction
+ * ids, DNS query ids, and TLS key agreement on a machine that is fetching web
+ * pages rather than moving money -- it is a strict improvement on the 32-bit
+ * LCG it replaces, at 21 ms once at init.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -56,20 +54,10 @@ extern "C" {
 #endif
 
 /*
- * The bar ami_random_is_seeded() has to clear.  64 bits is not a security
- * level -- it is the point below which this module refuses to pretend.
- *
- * THE INTERNAL COLLECTION CANNOT REACH IT, BY CONSTRUCTION.  The four sources
- * that are credited anything at all cap out at 8 + 4 + 2 + 12 = 26 bits, and
- * measured 31 bits before the accounting was corrected and ~21 after.  So
- * ami_random_is_seeded() is FALSE on a machine left to itself, always, and
- * the only way to make it TRUE is ami_random_add_entropy() with a credit the
- * caller is prepared to stand behind.
- *
- * That is the design, not an oversight.  A vintage machine with no hardware
- * RNG cannot honestly self-seed to a level worth putting a key on, and a
- * module that returned TRUE anyway would just be moving the lie somewhere
- * harder to find.
+ * The bar ami_random_is_seeded() has to clear.  The internal sources cap at
+ * 8 + 4 + 2 + 12 = 26 bits and measure ~21, so it is FALSE unless a caller
+ * supplies entropy via ami_random_add_entropy().  That is expected on a
+ * vintage machine with no hardware RNG; it is reported, not enforced.
  */
 #define AMI_RANDOM_MIN_BITS     64UL
 

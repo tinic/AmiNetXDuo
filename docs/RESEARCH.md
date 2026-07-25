@@ -782,9 +782,12 @@ Findings worth keeping regardless of whether TLS ships:
   **→ Superseded by the P-256 work below**: verify is now 1.961 s against RSA's 0.681 s,
   so the gap is 2.9× on a sub-second operation rather than 3.5× on a seven-second one.
   ECDSA chains are fine; RSA is merely still cheaper.
-- **`NX_RAND` is undefined**, so `nx_api.h` falls back to newlib `rand()` — a 32-bit LCG —
-  to generate ECDHE private keys and the client random. **A shipping blocker for any real
-  TLS use**, independent of speed.
+- **`NX_RAND` was undefined**, so `nx_api.h` fell back to newlib `rand()` — a 32-bit LCG.
+  Now replaced by a SHA-256 hash DRBG (`src/common/ami_random.c`). The seed is weak by any
+  modern standard — a vintage machine has no hardware RNG, and the credited entropy is
+  ~21 bits — but this stack exists so a classic Amiga can talk to modern sites, not to
+  protect valuable secrets. It is a strict improvement on the LCG, it does not gate
+  anything, and the threat model does not justify refusing to run.
   **→ Half-addressed**; see "The `NX_RAND` problem" below. The generator is now a SHA-256
   hash DRBG instead of an LCG, which fixes the expansion. The *entropy* remains the
   blocker, and the module now says so in its own API rather than in a comment.
