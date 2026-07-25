@@ -11,7 +11,7 @@ static void check(const char *what, BOOL ok)
 {
     checks++;
     if (!ok) failures++;
-    Printf("  %s %s\n", (LONG)(ok ? "ok  " : "FAIL"), (LONG)what);
+    Printf((STRPTR)"  %s %s\n", (LONG)(ok ? "ok  " : "FAIL"), (LONG)what);
 }
 
 int main(void)
@@ -37,12 +37,12 @@ int main(void)
     check("crash info recorded", info != NULL);
     if (info)
     {
-        Printf("  caught: %s (exception %ld) at PC=%08lx\n",
+        Printf((STRPTR)"  caught: %s (exception %ld) at PC=%08lx\n",
                (LONG)ami_crash_name(info->number), (LONG)info->number,
                (LONG)info->pc);
         check("exception number is a CPU fault", info->number >= 2 && info->number <= 11);
     }
 
-    Printf("\n%ld checks, %ld failure(s)\n", checks, failures);
+    Printf((STRPTR)"\n%ld checks, %ld failure(s)\n", checks, failures);
     return failures == 0 ? RETURN_OK : RETURN_ERROR;
 }

@@ -49,11 +49,19 @@ while getopts "b:t:c:l:k" opt; do
     esac
 done
 
+SKIP_BOOT=0
 case "$LEVEL" in
     NOVICE|AVERAGE|EXPERT) DRIVE_FLAGS=(-DDRIVE_LEVEL="\"$LEVEL\"") ;;
     # RERUN installs twice over itself: the second pass is the one that has
     # to notice an existing configuration and leave it alone.
     RERUN)  DRIVE_FLAGS=(-DDRIVE_LEVEL='"NOVICE"' -DDRIVE_RUNS=2) ;;
+    # STATIC answers "no" to the DHCP question, which is the only route to
+    # the four validated address prompts and to a static interface file.
+    # The address it then writes is 192.168.1.10, which is not on the
+    # emulator's 10.0.2.0/24 SLIRP network -- so this one checks the files
+    # and stops there rather than pretending a ping should work.
+    STATIC) DRIVE_FLAGS=(-DDRIVE_LEVEL='"AVERAGE"' -DDRIVE_NO_ON_YESNO=1)
+            SKIP_BOOT=1 ;;
     *) echo "unknown user level: $LEVEL" >&2; exit 2 ;;
 esac
 
@@ -198,6 +206,36 @@ if [ "$INSTALL_STATUS" != "0" ] || [ "$fail" != "0" ]; then
     echo "!! the install run did not complete cleanly"
     echo "   installdrive exit status: $INSTALL_STATUS"
     [ "$KEEP" = "1" ] || echo "   (staging left in $HD)"
+    exit 1
+fi
+
+if [ "$SKIP_BOOT" = "1" ]; then
+    echo
+    echo "============================================================"
+    echo "  static configuration check"
+    echo "============================================================"
+    bad=0
+    want() {
+        if grep -qx "$2" "$HD/$1"; then
+            printf '  ok      %-34s %s\n' "$1" "$2"
+        else
+            printf '  WRONG   %-34s expected %s\n' "$1" "$2"
+            bad=1
+        fi
+    }
+    want devs/NetInterfaces/eth0      "CONFIGURE=STATIC"
+    want devs/NetInterfaces/eth0      "ADDRESS=192.168.1.10"
+    want devs/NetInterfaces/eth0      "NETMASK=255.255.255.0"
+    want devs/Internet/routes         "DEFAULT=192.168.1.1"
+    want devs/Internet/name_resolution "nameserver 192.168.1.1"
+    want devs/Internet/name_resolution "hostname amiga"
+    if [ "$bad" = "0" ]; then
+        echo
+        echo "==> PASS: the static configuration is what was asked for"
+        exit 0
+    fi
+    echo
+    echo "==> FAIL: the static configuration is not what was asked for"
     exit 1
 fi
 

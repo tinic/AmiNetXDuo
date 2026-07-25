@@ -34,6 +34,20 @@ option(AMINETXDUO_WERROR "Fail the build on any warning in our own sources" ON)
 set(AMINETXDUO_WARNING_FLAGS "-Wall;-Wextra" CACHE STRING
     "Warning flags applied to sources outside third_party/")
 
+# Per-file escapes, as <path fragment> <extra flags> pairs.  Every entry is a
+# bug someone has to fix, so each one says what it is; this list should shrink.
+#
+#   src/config/test/test_config.c
+#       CHECK_STR(text, "...") expands to `(got) ? (got) : "(null)"` with `got`
+#       an ARRAY, so the test is always true.  GCC says so (-Waddress, part of
+#       -Wall); clang does not, which is why it went unnoticed.  Harmless as
+#       written -- an array is never null -- but it means the macro's null
+#       guard does nothing for its array callers.  The fix is one line in the
+#       macro (take a pointer, or drop the guard); it lives under src/, which
+#       the change that added this file was not allowed to touch.
+set(AMINETXDUO_WARNING_EXEMPT
+    "src/config/test/test_config.c" "-Wno-error=address")
+
 function(_aminetxduo_warnings_apply_dir dir)
 
     get_property(_targets DIRECTORY "${dir}" PROPERTY BUILDSYSTEM_TARGETS)
@@ -80,6 +94,24 @@ function(_aminetxduo_warnings_apply_dir dir)
             # would drop the -m68020 the assembler needs.
             set_property(SOURCE ${_ours} TARGET_DIRECTORY ${_t}
                          APPEND PROPERTY COMPILE_OPTIONS ${_flags})
+
+            # ... then the escapes, which have to come after to win.
+            list(LENGTH AMINETXDUO_WARNING_EXEMPT _n)
+            math(EXPR _last "${_n} / 2 - 1")
+            if(_n GREATER 0)
+                foreach(_i RANGE ${_last})
+                    math(EXPR _pi "${_i} * 2")
+                    math(EXPR _fi "${_i} * 2 + 1")
+                    list(GET AMINETXDUO_WARNING_EXEMPT ${_pi} _pat)
+                    list(GET AMINETXDUO_WARNING_EXEMPT ${_fi} _extra)
+                    foreach(_s IN LISTS _ours)
+                        if(_s MATCHES "${_pat}$")
+                            set_property(SOURCE "${_s}" TARGET_DIRECTORY ${_t}
+                                         APPEND PROPERTY COMPILE_OPTIONS ${_extra})
+                        endif()
+                    endforeach()
+                endforeach()
+            endif()
         endif()
 
     endforeach()

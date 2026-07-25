@@ -976,7 +976,7 @@ int main(void)
     if (!t_check((BOOL)(SocketBase != NULL), "OpenLibrary(bsdsocket.library, 4)",
                  0))
     {
-        Printf("bsdsocket.library not available\n");
+        Printf((STRPTR)"bsdsocket.library not available\n");
         return(20);
     }
 

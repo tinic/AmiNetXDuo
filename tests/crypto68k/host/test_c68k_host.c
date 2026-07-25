@@ -35,6 +35,16 @@
  *   an emulator-tier test, and the two are a matched pair: this one says the
  *   algorithm is right, that one says the assembly agrees with it.
  *
+ * ONE KNOWN WART
+ *
+ *   _nx_crypto_huge_number_mont_power_modulus() compares two pointers by
+ *   casting both to ULONG, which is 32 bits by definition here and 64 on the
+ *   host -- the compiler says so (-Wpointer-to-int-cast, twice).  The two
+ *   pointers are always into the same small static array, so the truncation
+ *   is consistent and the comparison is correct in practice; it would only
+ *   break for a buffer straddling a 4 GiB boundary, which a static a few
+ *   kilobytes wide does not do.  Vendored code, so it stays as it is.
+ *
  * SPDX-License-Identifier: MIT
  */
 

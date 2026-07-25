@@ -11,7 +11,7 @@ static void check(const char *what, BOOL ok)
 {
     checks++;
     if (!ok) failures++;
-    Printf("  %s %s\n", (LONG)(ok ? "ok  " : "FAIL"), (LONG)what);
+    Printf((STRPTR)"  %s %s\n", (LONG)(ok ? "ok  " : "FAIL"), (LONG)what);
 }
 
 int main(void)
@@ -28,25 +28,26 @@ int main(void)
     check("ami_millis tracks Delay(25)", (t1 - t0) >= 300 && (t1 - t0) <= 800);
 
     /* ENV: -- this is what the bare Startup-Sequence used to lack. */
-    check("SetVar ENV:", SetVar("AmiNetXDuoProbe", "hello", -1,
+    check("SetVar ENV:", SetVar((STRPTR)"AmiNetXDuoProbe", (STRPTR)"hello", -1,
                                 GVF_GLOBAL_ONLY | LV_VAR) != 0);
     buf[0] = '\0';
     check("GetVar reads it back",
-          GetVar("AmiNetXDuoProbe", buf, sizeof(buf), GVF_GLOBAL_ONLY | LV_VAR) > 0 &&
+          GetVar((STRPTR)"AmiNetXDuoProbe", (STRPTR)buf, sizeof(buf),
+                 GVF_GLOBAL_ONLY | LV_VAR) > 0 &&
           buf[0] == 'h' && buf[4] == 'o');
 
-    fh = Open("ENV:AmiNetXDuoProbe", MODE_OLDFILE);
+    fh = Open((STRPTR)"ENV:AmiNetXDuoProbe", MODE_OLDFILE);
     check("ENV: is a real assign", fh != 0);
     if (fh) Close(fh);
 
     /* T: -- scratch space. */
-    fh = Open("T:probe.tmp", MODE_NEWFILE);
+    fh = Open((STRPTR)"T:probe.tmp", MODE_NEWFILE);
     check("T: is writable", fh != 0);
-    if (fh) { FPuts(fh, "t\n"); Close(fh); }
+    if (fh) { FPuts(fh, (STRPTR)"t\n"); Close(fh); }
 
-    fh = Open("DH0:smoke.txt", MODE_NEWFILE);
-    if (fh) { FPuts(fh, failures ? "smoke FAILED\n" : "smoke ok\n"); Close(fh); }
+    fh = Open((STRPTR)"DH0:smoke.txt", MODE_NEWFILE);
+    if (fh) { FPuts(fh, (STRPTR)(failures ? "smoke FAILED\n" : "smoke ok\n")); Close(fh); }
 
-    Printf("\n%ld checks, %ld failure(s)\n", checks, failures);
+    Printf((STRPTR)"\n%ld checks, %ld failure(s)\n", checks, failures);
     return failures == 0 ? RETURN_OK : RETURN_ERROR;
 }

@@ -1,12 +1,22 @@
 Short:        MIT TCP/IP stack: bsdsocket.library on NetX Duo
-Author:       aminetxduo (see the archive for contact details)
-Uploader:     aminetxduo (see the archive for contact details)
+Author:       @AUTHOR@
+Uploader:     @AUTHOR@
 Type:         comm/net
 Version:      @VERSION@
 Architecture: m68k-amigaos >= 2.04
 Requires:     68020 or better, 4 MB RAM, a SANA-II network driver
 Distribution: Aminet
-Replaces:     comm/net/AmiNetXDuo.lha
+
+; Not part of the header, which ends at the blank line above.
+;
+; Aminet wants Author and Uploader as "Name <address@example.com>" -- pass
+; them to dist/make-dist.sh with -a, or the archive goes out with a
+; placeholder in it.  When this replaces an earlier upload, add
+;
+;     Replaces:     comm/net/AmiNetXDuo.lha
+;
+; to the header block above.  Leave it out for a first upload: it tells
+; Aminet to delete the named file.
 
 AmiNetXDuo is a TCP/IP stack for classic AmigaOS built on Eclipse ThreadX
 NetX Duo.  It provides the bsdsocket.library API that Amiga networking

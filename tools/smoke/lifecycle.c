@@ -65,7 +65,7 @@ static void check(const char *what, BOOL ok)
     checks++;
     if (!ok)
         failures++;
-    Printf("  %s %s\n", (LONG)(ok ? "ok  " : "FAIL"), (LONG)what);
+    Printf((STRPTR)"  %s %s\n", (LONG)(ok ? "ok  " : "FAIL"), (LONG)what);
     AMI_ERROR("  %s %s", (LONG)(ok ? "ok  " : "FAIL"), (LONG)what);
 }
 
@@ -190,7 +190,7 @@ int main(void)
     ULONG round;
     int   i;
 
-    Printf("AmiNetXDuo -- ThreadX task lifecycle probe\n");
+    Printf((STRPTR)"AmiNetXDuo -- ThreadX task lifecycle probe\n");
 
     ami_crash_set_reference((APTR)main, "main");
     (VOID)ami_crash_install();
@@ -206,7 +206,7 @@ int main(void)
 
     for (round = 0; round < ROUNDS; round++)
     {
-        Printf("round %ld: create/exit/delete\n", (LONG)round);
+        Printf((STRPTR)"round %ld: create/exit/delete\n", (LONG)round);
         AMI_ERROR("=== round %ld phase a (exiters)", (LONG)round);
 
         /* (a) threads that run to completion, then get deleted. */
@@ -395,7 +395,7 @@ int main(void)
     }
 
 done:
-    Printf("\n%ld checks, %ld failure(s)\n", checks, failures);
+    Printf((STRPTR)"\n%ld checks, %ld failure(s)\n", checks, failures);
     ami_crash_remove_alert_hook();
     ami_crash_remove();
     return failures == 0 ? RETURN_OK : RETURN_ERROR;

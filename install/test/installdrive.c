@@ -47,9 +47,24 @@
 #include <proto/dos.h>
 #include <proto/intuition.h>
 
-/* From the Installer's own window.h. */
+/*
+ * Gadget IDs, from the Installer's own window.h and the GadgetDef tables in
+ * window.c.  Most pages carry a Proceed button with ID 90 -- but not all:
+ * yesno_page() (which is what askbool draws) has no Proceed at all.  Its two
+ * answer buttons are IDs 2 and 1, in that order, and yesno_page returns
+ * "gadget id minus one", so ID 2 is the FIRST of the two (choices) strings.
+ * Every askbool in this script has (default 1), which is that same first
+ * choice, so clicking ID 2 is "take the default" throughout.
+ *
+ * ID 1 also appears as "Skip This Part" on the copy-confirmation page and as
+ * the only button on the About page, which is why it is the last resort and
+ * why ID 90 is always preferred when a page has one.
+ */
 #define PROCEED_ID  90
 #define ABORT_ID    91
+#define HELP_ID     100
+#define YESNO_FIRST 2
+#define SINGLE_ID   1
 
 /*
  * Where the unpacked archive is staged.  Not "DH0:AmiNetXDuo", because that
@@ -77,6 +92,18 @@
 #define DRIVE_RUNS      1
 #endif
 
+/*
+ * Which yes/no page to answer with the SECOND choice instead of the first.
+ * 0 means "always take the first", which is the default in every askbool
+ * this script has.  Set to 1 to answer "No, I will type them" to the
+ * "does your network hand out addresses automatically?" question, which is
+ * the only way to reach the static-address branch and its four validated
+ * address prompts.
+ */
+#ifndef DRIVE_NO_ON_YESNO
+#define DRIVE_NO_ON_YESNO 0
+#endif
+
 #define POLL_TICKS      50      /* Delay() counts 1/50 s, so: one second */
 #define GONE_LIMIT      6       /* windowless polls before we call it done */
 #define MAX_POLLS       150     /* hard cap: two and a half minutes */
@@ -86,6 +113,7 @@ static BPTR            report;
 
 static LONG clicks;
 static LONG saw_window;
+static LONG yesno_pages;
 
 static VOID say(const char *fmt, LONG a)
 {
@@ -106,11 +134,11 @@ static VOID say(const char *fmt, LONG a)
  * only stable under LockIBase(), so this copies out the two pointers it
  * needs and gets out again before doing anything else with them.
  */
-static struct Window *find_installer_window(struct Gadget **proceed_out)
+static struct Window *find_installer_window(struct Gadget **click_out)
 {
     struct Screen *screen;
-    struct Window *found   = NULL;
-    struct Gadget *proceed = NULL;
+    struct Window *found  = NULL;
+    struct Gadget *choice = NULL;
     ULONG          ilock;
 
     ilock = LockIBase(0);
@@ -126,34 +154,80 @@ static struct Window *find_installer_window(struct Gadget **proceed_out)
              window = window->NextWindow)
         {
             struct Gadget *gad;
-            struct Gadget *p = NULL;
-            struct Gadget *a = NULL;
+            struct Gadget *proceed = NULL;
+            struct Gadget *yes     = NULL;
+            struct Gadget *no      = NULL;
+            struct Gadget *single  = NULL;
+            BOOL           is_page = FALSE;
 
             for (gad = window->FirstGadget; gad != NULL; gad = gad->NextGadget)
             {
-                if (gad->GadgetID == PROCEED_ID)
-                    p = gad;
-                else if (gad->GadgetID == ABORT_ID)
-                    a = gad;
+                switch (gad->GadgetID)
+                {
+                case PROCEED_ID:  proceed = gad; is_page = TRUE; break;
+                case ABORT_ID:                   is_page = TRUE; break;
+                case HELP_ID:                    is_page = TRUE; break;
+                case YESNO_FIRST: yes     = gad;                 break;
+                case SINGLE_ID:   single  = gad; no = gad;       break;
+                default: break;
+                }
             }
 
-            /*
-             * Requiring both keeps some other program's gadget 90 from being
-             * mistaken for an Installer page.
-             */
-            if (p != NULL && a != NULL)
+            if (!is_page)
+                continue;
+
+            found  = window;
+            choice = proceed;
+            if (choice == NULL && yes != NULL)
             {
-                found   = window;
-                proceed = p;
-                break;
+                /* a yes/no page: ID 2 is the first (choices) string */
+                yesno_pages++;
+                choice = (yesno_pages == DRIVE_NO_ON_YESNO && no != NULL)
+                             ? no : yes;
             }
+            if (choice == NULL)
+                choice = single;
+            break;
         }
     }
 
     UnlockIBase(ilock);
 
-    *proceed_out = proceed;
+    *click_out = choice;
     return found;
+}
+
+/*
+ * Say which page we are looking at.  The Installer's buttons are
+ * struct Button { struct Gadget Gadget; char *Text; ... } (window.h), so the
+ * label is one pointer past the end of the Gadget -- which makes it possible
+ * to log what a page actually offers rather than guessing from the order
+ * things happen in.
+ */
+struct InstButton
+{
+    struct Gadget  Gadget;
+    char          *Text;
+};
+
+static VOID describe(struct Window *window)
+{
+    struct Gadget *gad;
+    LONG           n = 0;
+
+    if (window->Title != NULL)
+        say("installdrive:   window \"%s\"\n", (LONG)window->Title);
+
+    for (gad = window->FirstGadget; gad != NULL && n < 12; gad = gad->NextGadget)
+    {
+        char *text = ((struct InstButton *)gad)->Text;
+
+        if (gad->GadgetID < 87)                 /* FIRSTRESV_ID: not a button */
+            continue;
+        n++;
+        if (text != NULL && ((ULONG)text & 1) == 0)
+            say("installdrive:   button \"%s\"\n", (LONG)text);
+    }
 }
 
 static VOID drain_replies(VOID)
@@ -215,8 +289,9 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
 {
     struct TagItem tags[5];
     LONG polls;
-    LONG gone  = 0;
-    LONG seen  = 0;
+    LONG gone   = 0;
+    LONG seen   = 0;
+    LONG settle = 0;
 
     say("installdrive: run %ld: starting the Installer\n", run_number);
 
@@ -259,20 +334,47 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
 
     for (polls = 0; polls < MAX_POLLS; polls++)
     {
-        struct Gadget *proceed = NULL;
+        struct Gadget *target = NULL;
         struct Window *window;
 
         Delay(POLL_TICKS);
 
-        window = find_installer_window(&proceed);
+        window = find_installer_window(&target);
 
-        if (window != NULL && proceed != NULL)
+        /*
+         * Let the first page settle before touching it.  A window exists,
+         * with its gadgets in it, a little before the Installer is actually
+         * waiting on its message port, and a GADGETUP posted into that gap
+         * was observed once to make the whole run exit after the first page
+         * with nothing done.  One extra second at the start is cheap
+         * insurance against a flaky test.
+         */
+        if (window != NULL && seen == 0 && settle == 0)
+        {
+            settle = 1;
+            say("installdrive: poll %ld: window is up, letting it settle\n",
+                polls);
+            continue;
+        }
+
+        if (window != NULL && target != NULL)
         {
             seen++;
             saw_window++;
             gone = 0;
-            say("installdrive: poll %ld: clicking Proceed\n", polls);
-            click(window, proceed);
+            say("installdrive: poll %ld: clicking\n", polls);
+            say("installdrive:   gadget id %ld\n", (LONG)target->GadgetID);
+            describe(window);
+            click(window, target);
+        }
+        else if (window != NULL)
+        {
+            seen++;
+            saw_window++;
+            gone = 0;
+            say("installdrive: poll %ld: a page with no button I know\n",
+                polls);
+            describe(window);
         }
         else if (seen > 0)
         {

@@ -59,6 +59,14 @@
 (set H_CARD
   (cat "AmiNetXDuo talks to your network card through its SANA-II driver, "
        "which is a file whose name ends in \".device\".\n\n"
+       "The choices, in full, and the driver each one needs:\n\n"
+       "  Commodore A2065     Zorro II       a2065.device\n"
+       "  Ariadne             Zorro II       ariadne.device\n"
+       "  Ariadne II          Zorro II       ariadne2.device\n"
+       "  Hydra AmigaNet      Zorro II       amiganet.device\n"
+       "  X-Surf              Zorro II       xsurf.device\n"
+       "  X-Surf 100          Zorro II       xsurf100.device\n"
+       "  A PCMCIA card       A600/A1200     asked next\n\n"
        "Pick the card you actually have.  If the installer already found a "
        "driver in DEVS: it has pre-selected the matching entry, and that is "
        "almost certainly the right answer.\n\n"
@@ -71,6 +79,9 @@
 (set H_PCMCIA
   (cat "PCMCIA (credit-card sized) network cards for the A600 and A1200 use "
        "several different drivers.\n\n"
+       "  NE2000 or CNet    cnet.device\n"
+       "  3Com 3C589        etherlink3.device\n"
+       "  Prism2 wireless   prism2.device\n\n"
        "Most NE2000-compatible Ethernet cards -- which is most of the cheap "
        "ones -- use cnet.device.  3Com's EtherLink III / 3C589 has its own "
        "driver.  Prism2 is the usual driver for wireless cards.\n\n"
@@ -183,6 +194,48 @@
        "mind.  Answering no leaves the other stack in place and installs "
        "nothing but the commands -- which will then not work."))
 
+; --------------------------------------------------------------------------
+; Format strings.
+;
+; ("fmt" arg ...) takes the FIRST element as the format and everything after
+; it as an argument -- adjacent string literals are NOT concatenated the way
+; they are in C.  A format spelled as several literals therefore formats the
+; second literal's address through the first one's %s and throws the rest
+; away.  So any format that will not fit on one line is assembled with cat
+; and used through a variable, which the language allows in exactly the same
+; position.
+; --------------------------------------------------------------------------
+
+(set F_KEEPOLD
+  (cat "This machine already has a network interface called \"%s\".\n\n"
+       "Keep those settings, or set the network up again from scratch?"))
+
+(set F_NODEV
+  (cat "The installer cannot find \"%s\" in DEVS: or in DEVS:Networks.\n\n"
+       "The configuration will be written anyway, but the network will not "
+       "come up until that driver is in place.  It comes with the card, "
+       "usually on a floppy or in the card's own archive; copy it into DEVS: "
+       "and the network will work from the next reboot."))
+
+(set F_BADIP
+  (cat "\"%s\" is not an Internet address.\n\n"
+       "An address is four numbers, each from 0 to 255, separated by full "
+       "stops -- like 192.168.1.10.  Please try again."))
+
+(set F_OLDLIB
+  (cat "LIBS:bsdsocket.library already exists (version %ld).\n\n"
+       "AmiNetXDuo has to replace it.  The old one will be renamed to "
+       "bsdsocket.library.old, not deleted."))
+
+(set F_START_YES
+  (cat "The network will start by itself the next time you reboot.\n\n"
+       "To start it now without rebooting, type:\n\n"
+       "    C:AddNetInterface DEVS:NetInterfaces/%s\n"))
+
+(set F_START_NO
+  (cat "The network will NOT start by itself.  To start it, type:\n\n"
+       "    C:AddNetInterface DEVS:NetInterfaces/%s\n"))
+
 (set H_DOCDIR
   (cat "The documentation, the example configuration files and the "
        "installation log go into a drawer called AmiNetXDuo.\n\n"
@@ -280,10 +333,7 @@
     (P_ip_parse)
     (set ask_ok (if (= @user-level 0) 1 ip_ok))
     (if (= ask_ok 0)
-        (message ("\"%s\" is not an Internet address.\n\n"
-                  "An address is four numbers, each from 0 to 255, separated "
-                  "by full stops -- like 192.168.1.10.  Please try again."
-                  ask_result)
+        (message (F_BADIP ask_result)
                  (help ask_help))))
 )
 
@@ -417,9 +467,8 @@
 
 (set DOCPARENT
   (askdir
-    (prompt "Where should the \"AmiNetXDuo\" drawer be created?\n\n"
-            "It holds the documentation, the example configuration files and "
-            "the installation log.")
+    (prompt "Where should the \"AmiNetXDuo\" drawer go?\n\n"
+            "It holds the documentation and the examples.")
     (help H_DOCDIR)
     (default @default-dest)))
 
@@ -432,9 +481,7 @@
 (if HAVE_OLD
     (set KEEP_OLD
       (askbool
-        (prompt ("This machine already has a network interface called "
-                 "\"%s\".\n\nKeep those settings, or set the network up "
-                 "again from scratch?" OLD_IF))
+        (prompt (F_KEEPOLD OLD_IF))
         (help H_KEEPOLD)
         (choices "Keep them" "Set them up again")
         (default 1))))
@@ -451,15 +498,24 @@
       (askchoice
         (prompt "Which network card does this Amiga have?")
         (help   H_CARD)
+        ; Short labels are not a style choice.  The Installer lays a radio
+        ; page out into whatever room is left after the prompt and the
+        ; buttons, and when the choices do not fit it silently creates
+        ; fewer gadgets than there are choices -- after which
+        ; default_radio() marks a gadget that is not there, final_radio()
+        ; finds nothing selected, and the whole installation dies on
+        ; "askchoice: No choices selected".  Two columns of four fit; the
+        ; full product names do not.  Keep every label under about 20
+        ; characters and put the detail in the help text.
         (choices
-          "Commodore A2065  (Zorro II Ethernet)"
-          "Village Tronic Ariadne  (Zorro II)"
-          "Village Tronic Ariadne II  (Zorro II)"
-          "Hydra Systems AmigaNet  (Zorro II)"
-          "Individual Computers X-Surf  (Zorro II)"
-          "Individual Computers X-Surf 100  (Zorro II)"
-          "A PCMCIA card, in an A600 or A1200 card slot"
-          "My card is not in this list")
+          "Commodore A2065"
+          "Ariadne"
+          "Ariadne II"
+          "Hydra AmigaNet"
+          "X-Surf"
+          "X-Surf 100"
+          "A PCMCIA card"
+          "Not in this list")
         (default CARD_DEFAULT)))
 
     (set DEV_NAME
@@ -481,10 +537,10 @@
             (prompt "Which PCMCIA card is it?")
             (help   H_PCMCIA)
             (choices
-              "NE2000-compatible Ethernet  (cnet.device)"
-              "3Com EtherLink III / 3C589  (etherlink3.device)"
-              "Prism2 wireless card  (prism2.device)"
-              "Something else -- I will type the driver name")
+              "NE2000 or CNet"
+              "3Com 3C589"
+              "Prism2 wireless"
+              "Something else")
             (default 0)))
 
         (set DEV_NAME
@@ -501,8 +557,8 @@
         (set DEV_OK 0)
         (until DEV_OK
           (set DEV_NAME (askstring
-            (prompt "Type the file name of your card's SANA-II driver, "
-                    "including the \".device\" on the end.")
+            (prompt "Type the file name of your card's driver, ending "
+                    "in \".device\".")
             (help   H_OTHERDEV)
             (default "mycard.device")))
           (set DEV_OK (if (= @user-level 0) 1
@@ -514,14 +570,8 @@
     (set DEV_WRITE dev_write)
 
     (if (= dev_present 0)
-        (message
-          ("The installer cannot find \"%s\" in DEVS: or in DEVS:Networks.\n\n"
-           "The configuration will be written anyway, but the network will "
-           "not come up until that driver is in place.  It comes with the "
-           "card, usually on a floppy or in the card's own archive; copy it "
-           "into DEVS: and the network will work from the next reboot."
-           DEV_NAME)
-          (help H_CARD)))
+        (message (F_NODEV DEV_NAME)
+                 (help H_CARD)))
 
     ; --- unit and interface name: only an expert is asked ---------------
 
@@ -553,10 +603,9 @@
     (set USEDHCP
       (askbool
         (prompt "Does your network hand out addresses automatically?\n\n"
-                "If there is a router or a broadband box that other "
-                "computers just plug into and work, the answer is yes.")
+                "If other computers just plug in and work, it does.")
         (help    H_DHCP)
-        (choices "Yes -- use DHCP" "No -- I will type the addresses")
+        (choices "Yes, use DHCP" "No, I will type them")
         (default 1)))
   ))
 
@@ -617,9 +666,7 @@
 (if OLD_BSD
     (set REPLACE_LIB
       (askbool
-        (prompt ("LIBS:bsdsocket.library already exists (version %ld).\n\n"
-                 "AmiNetXDuo has to replace it.  The old one will be renamed "
-                 "to bsdsocket.library.old, not deleted." OLD_BSD_VER))
+        (prompt (F_OLDLIB OLD_BSD_VER))
         (help    H_REPLACELIB)
         (choices "Replace it" "Leave it alone")
         (default 1))))
@@ -633,10 +680,9 @@
 
 (set DO_STARTUP
   (askbool
-    (prompt "Should the network be started automatically every time this "
-            "Amiga boots?")
+    (prompt "Start the network automatically when this Amiga boots?")
     (help    H_STARTUP)
-    (choices "Yes, start it at boot" "No, I will start it myself")
+    (choices "Yes, at boot" "No, I will do it")
     (default 1)))
 
 (complete 10)
@@ -934,13 +980,8 @@
 ; ==========================================================================
 
 (if DO_STARTUP
-    (set FINAL_START
-      ("The network will start by itself the next time you reboot.\n\n"
-       "To start it now without rebooting, type:\n\n"
-       "    C:AddNetInterface DEVS:NetInterfaces/%s\n" START_IF))
-    (set FINAL_START
-      ("The network will NOT start by itself.  To start it, type:\n\n"
-       "    C:AddNetInterface DEVS:NetInterfaces/%s\n" START_IF)))
+    (set FINAL_START (F_START_YES START_IF))
+    (set FINAL_START (F_START_NO  START_IF)))
 
 (exit
   "AmiNetXDuo is installed.\n\n"

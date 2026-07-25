@@ -13,7 +13,18 @@ easy to get wrong and expensive to find out about on an Amiga:
     tables in compile.c actually define, or a procedure the script defines,
     or a string (the string-substitution form);
   * parameters used in statements that compile.c's param_syms mask does not
-    allow them in.
+    allow them in;
+  * format strings spelled as several adjacent literals.  ("a" "b" x) does
+    NOT concatenate: the first literal is the format and everything after it
+    is an argument, so "b" is formatted through the first %s and x is
+    dropped.  Counting % specifiers against arguments catches it;
+  * (choices) lists that will not fit on an Installer page.  This one is
+    learned the hard way: layout_box_gads() lays a radio page out into
+    whatever room is left, and when the choices do not fit it silently
+    creates fewer gadgets than there are choices.  default_radio() then
+    marks a gadget that does not exist, final_radio() finds nothing
+    selected, and the installation dies on "askchoice: No choices
+    selected" -- with no hint that the labels were the problem.
 
 Usage: checkscript.py <script> [...]
 Exit status 0 if every file passes.
@@ -24,6 +35,14 @@ SPDX-License-Identifier: MIT
 import sys
 
 MAX_STRING = 512
+
+# The Installer's window is 56 characters wide and sixteen text rows tall
+# (window.c calc_window_size), of which a radio page gets what is left after
+# the prompt and the buttons.  Two columns of four short labels fit; eight
+# long ones do not.  These limits are empirical, from watching Installer 2.17
+# fail on the real thing.
+MAX_CHOICES = 8
+MAX_CHOICE_LEN = 22
 
 # ---------------------------------------------------------------- symbols --
 #
@@ -258,6 +277,70 @@ def check(path):
         elif kind == RP:
             if stack:
                 stack.pop()
+        i += 1
+
+    # ("fmt" args...) with the wrong number of arguments
+    i = 0
+    while i < len(toks) - 1:
+        if toks[i][0] == LP and toks[i + 1][0] == STR:
+            fmt = toks[i + 1][1]
+            line = toks[i][2]
+            # count the arguments: everything up to the matching ')' at
+            # depth 0, treating a nested group as one argument
+            j = i + 2
+            depth = 0
+            nargs = 0
+            while j < len(toks):
+                kind = toks[j][0]
+                if kind == LP:
+                    if depth == 0:
+                        nargs += 1
+                    depth += 1
+                elif kind == RP:
+                    if depth == 0:
+                        break
+                    depth -= 1
+                elif depth == 0:
+                    nargs += 1
+                j += 1
+
+            specs = 0
+            k = 0
+            while k < len(fmt) - 1:
+                if fmt[k] == "%":
+                    if fmt[k + 1] == "%":
+                        k += 1
+                    else:
+                        specs += 1
+                k += 1
+
+            if nargs and specs != nargs:
+                errors.append(
+                    f"{path}:{line}: format {fmt[:40]!r} has {specs} "
+                    f"specifier(s) but {nargs} argument(s) -- adjacent "
+                    f"string literals are not concatenated here, so build "
+                    f"the format with (cat ...) and pass it as a variable")
+        i += 1
+
+    # (choices ...) that will not fit on a page
+    i = 0
+    while i < len(toks) - 1:
+        if toks[i][0] == LP and toks[i + 1][1].lower() == "choices":
+            j = i + 2
+            labels = []
+            while j < len(toks) and toks[j][0] == STR:
+                labels.append(toks[j][1])
+                j += 1
+            line = toks[i][2]
+            if len(labels) > MAX_CHOICES:
+                errors.append(f"{path}:{line}: {len(labels)} choices; more "
+                              f"than {MAX_CHOICES} will not fit on a page")
+            for lab in labels:
+                if len(lab) > MAX_CHOICE_LEN:
+                    errors.append(
+                        f"{path}:{line}: choice {lab!r} is {len(lab)} "
+                        f"characters; over {MAX_CHOICE_LEN} and the page "
+                        f"silently drops gadgets")
         i += 1
 
     # unknown bare symbols (typos in variable names)

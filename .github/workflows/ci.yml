@@ -1,0 +1,126 @@
+# Tier 1 -- everything that needs no emulator and no licensed material.
+#
+# This runs on a clean checkout of any machine: the m68k toolchain is
+# downloaded and pinned by content digest (tools/fetch-toolchain.sh), and every
+# step is `tools/ci.sh <stage>`, so what CI does and what a developer can run
+# before pushing are the same code.  Editing this file cannot change what is
+# tested -- only how it is scheduled and cached.
+#
+# The emulator tier lives in emulator.yml, deliberately separate: a green tick
+# here must never be read as "the on-Amiga tests passed".
+#
+# SPDX-License-Identifier: MIT
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Kept in step with TC_BLOB_AMD64 in tools/fetch-toolchain.sh.  It is the
+  # cache key as well as the pin, because a registry blob digest is the sha256
+  # of the bytes -- the same string cannot name two different toolchains.
+  TOOLCHAIN_PIN: c63033fd447383b09ab739299075f11d482c79182ff99b55959dd7b970f7b12d
+
+jobs:
+
+  # ------------------------------------------------------------------------
+  # Host tests + all four cross configurations + the conformance suite build.
+  # ------------------------------------------------------------------------
+  tier1:
+    name: build + host tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache the pinned m68k toolchain
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/aminetxduo/toolchain
+          key: m68k-amigaos-gcc-${{ env.TOOLCHAIN_PIN }}
+
+      - name: Fetch the toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: tools/fetch-toolchain.sh
+
+      - name: Report the toolchain
+        run: |
+          . tools/amiga-toolchain.sh
+          echo "AMIGA_TOOLCHAIN_ROOT=$AMIGA_TOOLCHAIN_ROOT" >> "$GITHUB_ENV"
+          "$AMIGA_GCC" --version | head -1
+
+      - name: tools/ci.sh
+        run: tools/ci.sh host cross conformance
+
+      # The logs are where a failure is diagnosed, and they are the only thing
+      # that survives the runner.
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            build/ci/*.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload the m68k artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aminetxduo-m68k
+          path: |
+            build/ci/default/src/bsdsocket/bsdsocket.library
+            build/ci/default/src/usergroup/usergroup.library
+            build/ci/default/src/tools/*
+            build/bsdsocktest/bsdsocktest
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ------------------------------------------------------------------------
+  # The host tier again, on macOS/clang.  Cheap (no cross toolchain, no
+  # submodule-heavy build) and it is the only thing that stops the host-side
+  # parser/VM/vector tests becoming GCC-only.
+  # ------------------------------------------------------------------------
+  host-clang:
+    name: host tests (macOS / clang)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: tools/ci.sh host
+        run: tools/ci.sh host
+
+  # ------------------------------------------------------------------------
+  # Cheap hygiene that would otherwise only be caught by a human.
+  # ------------------------------------------------------------------------
+  shellcheck:
+    name: shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          # -S warning: style and info notes are not worth a red build.
+          # -e SC1091: the sourced toolchain resolver is found at run time.
+          shellcheck -S warning -e SC1091 \
+            tools/ci.sh \
+            tools/fetch-toolchain.sh \
+            tools/fetch-aros-rom.sh \
+            tools/amiga-toolchain.sh \
+            tools/fsuae-run.sh \
+            tools/enforcer-run.sh \
+            tests/conformance/build.sh \
+            tests/conformance/run-fsuae.sh

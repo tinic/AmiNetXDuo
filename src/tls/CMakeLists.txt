@@ -72,10 +72,15 @@ target_link_libraries(nx_secure PUBLIC nx_crypto netxduo)
 
 # ------------------------------------------------------------ amiga glue ---
 
-add_library(aminetxduo_tls STATIC tls_amiga.c)
+# ami_tls_crypto.c is what connects src/crypto68k/ to a handshake: it supplies
+# our own NX_CRYPTO_METHOD entries for RSA and P-256 and the ciphersuite tables
+# that use them.  `crypto68k` is defined in src/crypto68k, which the top level
+# configures AFTER this directory -- naming a target that does not exist yet is
+# fine, CMake resolves target names at generate time.
+add_library(aminetxduo_tls STATIC tls_amiga.c ami_tls_crypto.c)
 target_include_directories(aminetxduo_tls PUBLIC
     ${AMINETXDUO_TLS_INCLUDES} "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(aminetxduo_tls PUBLIC nx_secure ${AMINETXDUO_TLS_RT})
+target_link_libraries(aminetxduo_tls PUBLIC nx_secure crypto68k ${AMINETXDUO_TLS_RT})
 
 if(AMIGA_NDK_INCLUDE)
     target_include_directories(aminetxduo_tls PUBLIC "${AMIGA_NDK_INCLUDE}")

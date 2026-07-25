@@ -3,6 +3,7 @@
 # Build the AmiNetXDuo distribution archive.
 #
 #   dist/make-dist.sh [-b BUILDDIR] [-v VERSION] [-o OUTDIR]
+#                     [-a "Name <address@example.com>"]
 #
 # Produces, in OUTDIR (default build/dist):
 #
@@ -42,13 +43,16 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 OUTDIR="$ROOT/build/dist"
 VERSION="1.0"
+AUTHOR="${AMINETXDUO_AUTHOR:-UNSET -- pass -a \"Name <you@example.com>\"}"
 
-while getopts "b:v:o:" opt; do
+while getopts "b:v:o:a:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         v) VERSION="$OPTARG" ;;
         o) OUTDIR="$OPTARG" ;;
-        *) echo "usage: $0 [-b builddir] [-v version] [-o outdir]" >&2
+        a) AUTHOR="$OPTARG" ;;
+        *) echo "usage: $0 [-b builddir] [-v version] [-o outdir]" \
+                "[-a author]" >&2
            exit 2 ;;
     esac
 done
@@ -141,8 +145,8 @@ fi
 
 # ------------------------------------------------------------- the .readme --
 
-sed "s/@VERSION@/$VERSION/g" "$ROOT/dist/AmiNetXDuo.readme" \
-    > "$OUTDIR/AmiNetXDuo.readme"
+sed -e "s/@VERSION@/$VERSION/g" -e "s|@AUTHOR@|$AUTHOR|g" \
+    "$ROOT/dist/AmiNetXDuo.readme" > "$OUTDIR/AmiNetXDuo.readme"
 cp "$OUTDIR/AmiNetXDuo.readme" "$TREE/AmiNetXDuo.readme"
 cp "$INSTALL/Document.info" "$TREE/AmiNetXDuo.readme.info"
 
@@ -156,10 +160,14 @@ done
     echo "AmiNetXDuo.readme is missing header fields:$missing" >&2
     exit 2
 }
-grep -q "^Version: *@VERSION@" "$OUTDIR/AmiNetXDuo.readme" && {
-    echo "AmiNetXDuo.readme still has @VERSION@ in it" >&2
+if grep -q "@VERSION@\|@AUTHOR@" "$OUTDIR/AmiNetXDuo.readme"; then
+    echo "AmiNetXDuo.readme still has a placeholder in it" >&2
     exit 2
-}
+fi
+if grep -q "^Author: *UNSET" "$OUTDIR/AmiNetXDuo.readme"; then
+    echo "!! Author/Uploader are unset.  Aminet wants a real name and" >&2
+    echo "!! address there; re-run with -a \"Name <you@example.com>\"." >&2
+fi
 
 # ------------------------------------------------------------ the archive --
 

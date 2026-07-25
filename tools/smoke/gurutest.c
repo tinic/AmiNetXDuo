@@ -9,10 +9,10 @@ int main(void)
 {
     APTR p;
 
-    Printf("gurutest: installing alert hook\n");
+    Printf((STRPTR)"gurutest: installing alert hook\n");
     if (!ami_crash_install_alert_hook())
     {
-        Printf("gurutest: SetFunction on Alert failed\n");
+        Printf((STRPTR)"gurutest: SetFunction on Alert failed\n");
         return RETURN_ERROR;
     }
 
@@ -21,7 +21,7 @@ int main(void)
     FreeVec(p);
     FreeVec(p);                 /* AN_FreeTwice, 0x01000009 */
 
-    Printf("gurutest: survived (exec did not alert)\n");
+    Printf((STRPTR)"gurutest: survived (exec did not alert)\n");
     ami_crash_remove_alert_hook();
     return RETURN_OK;
 }

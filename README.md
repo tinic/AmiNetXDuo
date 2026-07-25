@@ -81,10 +81,31 @@ cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake
 cmake --build build --parallel
 ```
 
-The toolchain defaults to `~/amigaos/tools/m68k-amigaos-gcc` (GCC 15.2 for
-m68k-amigaos); override with `-DAMIGA_TOOLCHAIN_ROOT=<path>`.
+If you have no m68k toolchain, `tools/fetch-toolchain.sh` downloads the pinned
+one (GCC 15.2 + NDK 3.9, 93 MB) into `~/.cache/aminetxduo/toolchain`. The build
+finds it there without being told. Otherwise the search order is
+`-DAMIGA_TOOLCHAIN_ROOT` → `$AMIGA_TOOLCHAIN_ROOT` → that cache →
+`m68k-amigaos-gcc` on `$PATH` → `/opt/m68k-amigaos` →
+`~/amigaos/tools/m68k-amigaos-gcc`.
+
+The pinned toolchain is a **Linux x86-64** build. On any other host, install or
+build one and point `AMIGA_TOOLCHAIN_ROOT` at it; the layout to match is
+`<root>/bin/m68k-amigaos-gcc` plus `<root>/m68k-amigaos/ndk-include`.
 
 ## Testing
+
+Everything CI does is `tools/ci.sh`, so it can be run before pushing:
+
+```sh
+tools/ci.sh                 # host tests, all four cross builds, conformance build
+tools/ci.sh host            # just the host tests (no cross toolchain needed)
+tools/ci.sh emulator        # the on-Amiga harnesses under FS-UAE
+```
+
+A first run with nothing installed fetches the toolchain itself; a warm run of
+the whole of tier 1 is about a minute. The workflows in `.github/` call this
+script and add nothing but caching and scheduling, so a green tick there and a
+green run here mean the same thing.
 
 `tools/fsuae-run.sh` runs an AmigaOS executable under FS-UAE on a real
 Kickstart 3.1 A1200, captures `ami_log()` serial output, and propagates the
@@ -127,6 +148,67 @@ Verified on 68020 and 68030. The single remaining loopback failure is a
 deliberate disagreement: the suite skips `SOCK_RAW` only on `EACCES`, but
 `EACCES` means "you lack privilege", which is untrue on an OS with no privilege
 model — `ESOCKTNOSUPPORT` is the honest answer, so that test stays red.
+
+### Continuous integration
+
+Two workflows, deliberately separate, because a green tick on one must never be
+read as a claim about the other.
+
+**`.github/workflows/ci.yml` — tier 1, runs on every push.** Needs nothing but
+a network connection.
+
+| | |
+|---|---|
+| toolchain | `tools/fetch-toolchain.sh` — GCC 15.2 + NDK 3.9, pinned by the sha256 of the layer it comes out of, cached |
+| cross builds | default, `-DAMINETXDUO_IPV6=ON`, `-DAMINETXDUO_TLS=ON`, `-DAMINETXDUO_CRYPTO68K_ASM=OFF` — all four, because each has broken while the others built |
+| warnings | `-Wall -Wextra -Werror` on our sources, vendored code exempt (`cmake/ci-warnings.cmake`) |
+| host tests | 4 suites through `ctest`: config parsers (157 checks), mbuf chains (206), BPF filter VM (201), crypto68k vectors (4,964 — RSA-2048 known answers plus a differential against the vendored bignum code) |
+| host compilers | GCC on Linux and clang on macOS, so neither becomes the only one that works |
+| conformance | `bsdsocktest` is compiled for m68k; running it is tier 2 |
+
+**`.github/workflows/emulator.yml` — tier 2, the on-Amiga harnesses.** These
+need a boot ROM, and there are two of them:
+
+*The AROS m68k ROM.* AROS is an open-source AmigaOS reimplementation, APL 1.1,
+freely redistributable — and it boots this project's FS-UAE harness. Measured
+2026-07-25 against Kickstart 3.1 40.68 on the same binaries, the check counts
+are identical: `smoke` 5, `lifecycle` 18, `KernelStop` 8, `ram_driver_test` 32,
+`mbuf_bpf_test` 154, `soak_test` 98 — six harnesses, 315 checks, no failures,
+one to two seconds slower to boot.
+`RemTask()` freeing `tc_MemEntry`, `Forbid()` nesting across `Wait()`,
+`timer.device`, `RawPutChar()` serial output and the `Alert()` hook all behave
+as the code expects. `tools/fetch-aros-rom.sh` downloads it, and
+`tools/fsuae-run.sh` takes the second half through `AMINETXDUO_KICKSTART_EXT`
+(AROS is a 512 KB base ROM *plus* a 512 KB extended ROM — booting the base
+alone dies in Exec Bootstrap and never reaches DOS).
+
+Two caveats. AROS publishes m68k ROMs only in nightly builds and SourceForge
+keeps about two days of them, so the pin in `tools/fetch-aros-rom.sh` rots; the
+script then falls back to the newest nightly and says so loudly. Mirror the two
+512 KB files and set `AMINETXDUO_AROS_ROM_URL` or `AMINETXDUO_AROS_ROM_DIR` to
+stop that. And `OpenLibrary("bsdsocket.library")` fails there — not an AROS
+incompatibility: bringing the stack up needs a `DEVS:NetInterfaces` entry naming
+a SANA-II device, and the only driver FS-UAE's emulated hardware has is
+`a2065.device`. (AROS ships `prm-rtl8029.device`, which may pair with FS-UAE's
+NE2000-based cards. Untried, and the obvious next thing to try.)
+
+*Kickstart 3.1 plus `a2065.device`.* Both are Commodore's, neither is
+redistributable, and neither is in this repository. This is the only tier that
+can run the SANA-II network tests and the `bsdsocktest` conformance suite. It
+runs on a self-hosted runner, gated on the repository variable
+`AMINETXDUO_KICKSTART_RUNNER`; if that is unset the job does not run and the
+workflow summary says in as many words that the network and conformance results
+are unverified for that commit. It never silently substitutes the AROS ROM.
+
+**What CI therefore does not cover:** the `bsdsocket.library` ABI end to end,
+the conformance score, SANA-II against a real driver, throughput, Enforcer on
+68030, and real hardware. Those are the numbers in the table above, and they
+still come from a machine with a Kickstart ROM.
+
+**To run the rest yourself** you need FS-UAE, a Kickstart 3.1 ROM
+(`AMINETXDUO_KICKSTART`), `a2065.device` (`AMINETXDUO_A2065`) for the network
+tier, and Enforcer/MungWall for `tools/enforcer-run.sh`. None of them can be
+distributed with the source.
 
 ### Debugging
 

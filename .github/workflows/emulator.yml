@@ -1,0 +1,214 @@
+# Tier 2 -- the on-Amiga tests, which need an emulator and a boot ROM.
+#
+# This is a SEPARATE workflow from ci.yml on purpose.  Tier 1 going green must
+# never be mistaken for "the stack still works on a 68020"; those are different
+# claims and they get different ticks.
+#
+# TWO ROMS, TWO JOBS
+#
+#   `aros`      the AROS m68k ROM -- open source (APL 1.1), downloadable, and
+#               verified 2026-07-25 to run these harnesses with the SAME check
+#               counts as Kickstart 3.1 40.68.  Runs in public CI, no secrets.
+#
+#   `kickstart` a real Kickstart 3.1 ROM plus Commodore's a2065.device.  Both
+#               are copyrighted and neither may be redistributed, so this job
+#               only runs on a self-hosted runner that already has them.  It is
+#               the only tier that can run the SANA-II network tests and the
+#               bsdsocktest conformance suite, because those need a driver.
+#
+# WHAT AROS CANNOT DO, MEASURED
+#
+#   OpenLibrary("usergroup.library") works.  OpenLibrary("bsdsocket.library")
+#   does not, and not because of AROS: bringing the stack up needs an entry in
+#   DEVS:NetInterfaces naming a SANA-II device, and the only driver FS-UAE's
+#   emulated hardware has is a2065.device.  AROS ships no a2065.device.  It
+#   does ship prm-rtl8029.device, which may pair with FS-UAE's NE2000-based
+#   cards -- untried, and the obvious next thing to try if you want the
+#   conformance suite in public CI.
+#
+# SPDX-License-Identifier: MIT
+
+name: Emulator
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_kickstart:
+        description: "Also run the Kickstart/self-hosted tier"
+        type: boolean
+        default: false
+  schedule:
+    # Nightly.  The AROS ROM is a nightly build too, so this doubles as an
+    # early warning that the pin in tools/fetch-aros-rom.sh has rotted.
+    - cron: "17 4 * * *"
+  push:
+    branches: [main, master, research]
+
+concurrency:
+  group: emulator-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TOOLCHAIN_PIN: c63033fd447383b09ab739299075f11d482c79182ff99b55959dd7b970f7b12d
+
+jobs:
+
+  # ------------------------------------------------------------------------
+  # Public tier: FS-UAE on the free AROS ROM.
+  # ------------------------------------------------------------------------
+  aros:
+    name: FS-UAE on the AROS m68k ROM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache the pinned m68k toolchain
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/aminetxduo/toolchain
+          key: m68k-amigaos-gcc-${{ env.TOOLCHAIN_PIN }}
+
+      - name: Fetch the toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: tools/fetch-toolchain.sh
+
+      # FS-UAE needs a real OpenGL context -- SDL_VIDEODRIVER=dummy makes it
+      # die with "[GLAD] Failed to initialize OpenGL context" -- so it gets a
+      # virtual X server rather than a headless SDL driver.
+      - name: Install FS-UAE
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fs-uae xvfb mesa-utils libgl1
+          fs-uae --version | head -1
+
+      # 108 MB of boot ISO for 1 MB of ROM, so it is worth caching.  The key is
+      # the ROM's own sha256, which is the pin.
+      - name: Cache the AROS ROM
+        id: aros-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/aminetxduo/aros-rom
+          key: aros-m68k-rom-b6ba153943490f813b9ff5705b54c943431d2d8ec584d4cba6f5311b95e0898e
+
+      - name: Fetch the AROS ROM
+        if: steps.aros-cache.outputs.cache-hit != 'true'
+        run: tools/fetch-aros-rom.sh
+
+      - name: Build the default configuration
+        run: AMINETXDUO_CI_CROSS=default tools/ci.sh cross
+
+      - name: Run the on-Amiga harnesses
+        run: xvfb-run -a tools/ci.sh emulator
+
+      - name: Upload emulator logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-logs-aros
+          path: |
+            build/ci/emu-*.log
+            build/serial*.log
+            build/fsuae*.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # ------------------------------------------------------------------------
+  # Kickstart tier.  Gated on a repository variable AND a self-hosted runner,
+  # because the material cannot be shipped to a hosted one.  Absent either, it
+  # does not run -- and the `gate` job below says so out loud.
+  # ------------------------------------------------------------------------
+  kickstart:
+    name: FS-UAE on Kickstart 3.1 (self-hosted)
+    if: >
+      vars.AMINETXDUO_KICKSTART_RUNNER != '' &&
+      (github.event_name != 'workflow_dispatch' || inputs.run_kickstart)
+    runs-on: ${{ vars.AMINETXDUO_KICKSTART_RUNNER }}
+    env:
+      # Set these on the runner, or as repository variables.  They are PATHS
+      # on that machine -- nothing copyrighted is ever uploaded to GitHub.
+      AMINETXDUO_KICKSTART: ${{ vars.AMINETXDUO_KICKSTART }}
+      AMINETXDUO_A2065: ${{ vars.AMINETXDUO_A2065 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Check the ROM is really there
+        run: |
+          if [ ! -f "$AMINETXDUO_KICKSTART" ]; then
+            echo "::error::AMINETXDUO_KICKSTART is set to '$AMINETXDUO_KICKSTART'," \
+                 "which does not exist on this runner. Refusing to fall back to" \
+                 "the AROS ROM -- that would report a Kickstart pass that never" \
+                 "happened."
+            exit 1
+          fi
+
+      - name: Build the default configuration
+        run: AMINETXDUO_CI_CROSS=default tools/ci.sh cross
+
+      - name: Run the on-Amiga harnesses
+        run: tools/ci.sh emulator
+
+      # a2065.device is what the network and conformance tiers need, and it
+      # exists only here.
+      - name: Conformance suite
+        if: env.AMINETXDUO_A2065 != ''
+        run: |
+          tests/conformance/build.sh
+          tests/conformance/run-fsuae.sh -b build/ci/default -a "LOOPBACK NOPAGE"
+
+      - name: Upload emulator logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-logs-kickstart
+          path: |
+            build/ci/emu-*.log
+            build/serial*.log
+            build/testhd-conformance/bsdsocktest.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # ------------------------------------------------------------------------
+  # Say, in the run summary, which tiers actually ran.  A tier that silently
+  # does not run is worse than one that fails.
+  # ------------------------------------------------------------------------
+  gate:
+    name: tier report
+    runs-on: ubuntu-latest
+    needs: [aros, kickstart]
+    if: always()
+    steps:
+      - name: Report
+        run: |
+          {
+            echo "## Emulator tiers"
+            echo
+            echo "| tier | ROM | result |"
+            echo "|---|---|---|"
+            echo "| AROS m68k | free, fetched | ${{ needs.aros.result }} |"
+            echo "| Kickstart 3.1 | self-hosted only | ${{ needs.kickstart.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${{ needs.kickstart.result }}" = "skipped" ]; then
+            echo "::warning::The Kickstart 3.1 tier did NOT run. The SANA-II" \
+                 "network tests and the bsdsocktest conformance suite are" \
+                 "therefore unverified for this commit. Set the repository" \
+                 "variable AMINETXDUO_KICKSTART_RUNNER to a self-hosted runner" \
+                 "label to enable it."
+            {
+              echo
+              echo "> **The Kickstart tier did not run.** The SANA-II network"
+              echo "> tests and the conformance suite are unverified for this"
+              echo "> commit."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # The AROS tier is not optional: if it did not pass, this fails.
+          case "${{ needs.aros.result }}" in
+            success) ;;
+            *) echo "::error::The AROS emulator tier did not pass."; exit 1 ;;
+          esac

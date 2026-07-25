@@ -43,21 +43,34 @@ else()
     set(CRYPTO68K_RT "")
 endif()
 
-add_library(crypto68k_ref STATIC
-    "${NX_CRYPTO_ROOT}/src/nx_crypto_huge_number.c"
-    "${NX_CRYPTO_ROOT}/src/nx_crypto_initialize.c"
-    "${NX_CRYPTO_ROOT}/src/nx_crypto_ec.c"
-    "${NX_CRYPTO_ROOT}/src/nx_crypto_ecdh.c"
-    "${NX_CRYPTO_ROOT}/src/nx_crypto_ecdsa.c"
-    "${NX_CRYPTO_ROOT}/src/nx_crypto_ec_secp192r1_fixed_points.c"
-    "${NX_CRYPTO_ROOT}/src/nx_crypto_ec_secp224r1_fixed_points.c"
-    "${NX_CRYPTO_ROOT}/src/nx_crypto_ec_secp256r1_fixed_points.c"
-    "${NX_CRYPTO_ROOT}/src/nx_crypto_ec_secp384r1_fixed_points.c"
-    "${NX_CRYPTO_ROOT}/src/nx_crypto_ec_secp521r1_fixed_points.c")
-target_include_directories(crypto68k_ref PUBLIC ${CRYPTO68K_INCLUDES})
-target_link_libraries(crypto68k_ref PUBLIC netxduo)
-if(CRYPTO68K_RT)
-    target_link_libraries(crypto68k_ref PUBLIC ${CRYPTO68K_RT})
+# When AMINETXDUO_TLS is ON, src/tls has ALREADY built the whole of
+# crypto_libraries/src as `nx_crypto` -- it is configured first, see the top
+# level CMakeLists.txt -- and compiling these ten files a second time here puts
+# two definitions of every huge-number and EC symbol on the link line.  Reuse
+# that target instead; it is a superset of this list.  The standalone archive is
+# only for the AMINETXDUO_TLS=OFF build, where crypto68k and its tests still
+# have to stand on their own.
+if(TARGET nx_crypto)
+    add_library(crypto68k_ref INTERFACE)
+    target_include_directories(crypto68k_ref INTERFACE ${CRYPTO68K_INCLUDES})
+    target_link_libraries(crypto68k_ref INTERFACE nx_crypto)
+else()
+    add_library(crypto68k_ref STATIC
+        "${NX_CRYPTO_ROOT}/src/nx_crypto_huge_number.c"
+        "${NX_CRYPTO_ROOT}/src/nx_crypto_initialize.c"
+        "${NX_CRYPTO_ROOT}/src/nx_crypto_ec.c"
+        "${NX_CRYPTO_ROOT}/src/nx_crypto_ecdh.c"
+        "${NX_CRYPTO_ROOT}/src/nx_crypto_ecdsa.c"
+        "${NX_CRYPTO_ROOT}/src/nx_crypto_ec_secp192r1_fixed_points.c"
+        "${NX_CRYPTO_ROOT}/src/nx_crypto_ec_secp224r1_fixed_points.c"
+        "${NX_CRYPTO_ROOT}/src/nx_crypto_ec_secp256r1_fixed_points.c"
+        "${NX_CRYPTO_ROOT}/src/nx_crypto_ec_secp384r1_fixed_points.c"
+        "${NX_CRYPTO_ROOT}/src/nx_crypto_ec_secp521r1_fixed_points.c")
+    target_include_directories(crypto68k_ref PUBLIC ${CRYPTO68K_INCLUDES})
+    target_link_libraries(crypto68k_ref PUBLIC netxduo)
+    if(CRYPTO68K_RT)
+        target_link_libraries(crypto68k_ref PUBLIC ${CRYPTO68K_RT})
+    endif()
 endif()
 
 # ------------------------------------------------------------ the module ---
