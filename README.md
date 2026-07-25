@@ -3,9 +3,12 @@
 An AmiTCP/Roadshow-compatible `bsdsocket.library` for classic AmigaOS, built on
 [Eclipse ThreadX NetX Duo](https://github.com/eclipse-threadx/netxduo).
 
-> **Status: early construction.** The research and feasibility work is complete
-> (see [docs/RESEARCH.md](docs/RESEARCH.md)); the stack does not run yet. Nothing
-> here is usable for networking.
+> **Status: it works, and it is not finished.** The stack gets a DHCP lease,
+> answers ARP, pings its gateway, resolves DNS and moves TCP in both directions
+> on an emulated 68020/68030 under Kickstart 3.1. `bsdsocket.library` scores
+> **114/142** on the [`bsdsocktest`](https://github.com/tbdye/bsdsocktest)
+> conformance suite (122/142 on the network tier). Not yet run on real hardware,
+> and not yet something to trust with your data.
 
 ## Why
 
@@ -21,10 +24,18 @@ implements.
 
 What that combination buys, none of which the classic stacks have:
 
-- **IPv4 + IPv6 dual stack** — an Amiga first.
 - **MIT licence throughout** — no 4.4BSD or GPL lineage anywhere in the tree.
-- NetX Duo's protocol catalogue for free: DHCP, DNS, PPP, PPPoE, SNTP, mDNS,
-  NAT, AutoIP, and `nx_secure` TLS.
+- **IPv6** — the dual stack is a build option and would be an Amiga first.
+  Not yet wired through `bsdsocket.library`.
+- NetX Duo's protocol catalogue: DHCP, DNS and AutoIP are in use today; PPP,
+  PPPoE, SNTP, mDNS and NAT are vendored and unused so far.
+
+On TLS, honestly: `nx_secure` compiles and completes a real TLS 1.2 handshake,
+but that handshake costs **185 s** on a 68020 — so it is off by default and
+offload (`catalyst`, `AmiSSL-Tunnel`) is the realistic path. Optimised bignum
+arithmetic in `src/crypto68k/` made RSA-2048 **8× faster**, which moves the
+bottleneck to elliptic-curve work rather than removing it. See
+[docs/RESEARCH.md §9](docs/RESEARCH.md#9-decisions-2026-07-24).
 
 ## How it fits together
 
@@ -79,8 +90,43 @@ program's exit status back to the host:
 tools/fsuae-run.sh -t 90 build/smoke
 ```
 
+`-c 68030` selects a full 68030 (which has an MMU, so Enforcer works there;
+the 68020 floor runs with no illegal-access checking at all). `-n` attaches an
+emulated A2065 on SLIRP for real networking.
+
 The conformance target is [`bsdsocktest`](https://github.com/tbdye/bsdsocktest),
-a 142-test suite for `bsdsocket.library` implementations.
+a 142-test suite for `bsdsocket.library` implementations, vendored as a
+submodule:
+
+```sh
+tests/conformance/build.sh
+tests/conformance/run-fsuae.sh -a "LOOPBACK NOPAGE"
+```
+
+### Where it stands
+
+| | |
+|---|---|
+| conformance, loopback tier | **114/142** (3 fail, 25 skip) |
+| conformance, network tier | **122/142** |
+| ThreadX-on-Exec soak | 98 checks, 4+ adopted tasks, Enforcer-clean on 68030 |
+| TCP throughput | 262 KB/s loopback, 310 KB/s to a host over SLIRP |
+
+Verified on 68020 and 68030. The remaining conformance failures are
+`sendmsg`/`recvmsg` (unimplemented) and one deliberate disagreement: the suite
+skips `SOCK_RAW` only on `EACCES`, but `EACCES` means "you lack privilege",
+which is untrue on an OS with no privilege model — `ESOCKTNOSUPPORT` is the
+honest answer, so that test stays red.
+
+### Debugging
+
+There is no memory protection, so a bad pointer takes the machine down with no
+output. `include/aminetxduo/crashguard.h` provides two things worth arming in
+any test: `ami_crash_install()` catches CPU exceptions and dumps the exception
+name, PC, SR and all registers to the serial log, and
+`ami_crash_install_alert_hook()` intercepts Exec `Alert()` so a Guru arrives
+decoded ("FREEING MEMORY ALREADY FREED") with the offending task named, rather
+than as a hex code on a dead screen.
 
 ## Compatibility posture
 
