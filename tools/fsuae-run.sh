@@ -134,6 +134,8 @@ mkdir -p "$FSUAE_BASE"
 CFG="$ROOT/build/test$TAG.fs-uae"
 cat > "$CFG" <<EOF
 [fs-uae]
+floppy_drive_volume = 0
+floppy_drive_volume_empty = 0
 base_dir = $FSUAE_BASE
 amiga_model = $MODEL
 kickstart_file = $KICKSTART

@@ -111,6 +111,8 @@ BASEDIR="$ROOT/build/fsuae-base-$TAG"
 mkdir -p "$BASEDIR/Configurations"
 cat > "$BASEDIR/Configurations/Host.fs-uae" <<'EOF'
 [fs-uae]
+floppy_drive_volume = 0
+floppy_drive_volume_empty = 0
 bsdsocket_library = 0
 EOF
 

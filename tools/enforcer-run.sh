@@ -153,6 +153,8 @@ fi
 
 {
     echo "[fs-uae]"
+    echo "floppy_drive_volume = 0"
+    echo "floppy_drive_volume_empty = 0"
     echo "base_dir = $BASE"
     echo "amiga_model = A1200"
     echo "kickstart_file = $KICKSTART"
