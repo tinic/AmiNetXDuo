@@ -75,6 +75,3 @@ build/fsuae.log
 build/test.fs-uae
 build/cm/
 
-# Conformance suite: vendored by the conformance workstream; submodule-vs-vendor
-# decision pending its report. Files stay on disk.
-third_party/bsdsocktest/
