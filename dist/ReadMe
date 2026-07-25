@@ -76,7 +76,7 @@ It puts
 
      bsdsocket.library, usergroup.library      into LIBS:
      AddNetInterface, Online, Offline,
-     ShowNetStatus, ping, netstat, host        into C:
+     ShowNetStatus, ping, netstat, host, fetch into C:
      the interface description                 into DEVS:NetInterfaces
      the routing and name server settings      into DEVS:Internet
      this file, the documentation, examples    into a drawer you choose
@@ -137,7 +137,7 @@ UNINSTALLING
 
      Delete LIBS:bsdsocket.library LIBS:usergroup.library
      Delete C:AddNetInterface C:Online C:Offline C:ShowNetStatus
-     Delete C:ping C:netstat C:host
+     Delete C:ping C:netstat C:host C:fetch
      Delete DEVS:NetInterfaces/eth0
 
 and take the ";BEGIN AmiNetXDuo" .. ";END AmiNetXDuo" block out of
@@ -161,6 +161,15 @@ LICENCE
 
 MIT.  ThreadX and NetX Duo are MIT as well (Microsoft / Eclipse ThreadX
 contributors) and are used unmodified.
+
+One file is not MIT.  DEVS:Internet/certificates -- present only in an archive
+that also carries tls.library -- is the Mozilla root certificate set, which is
+covered by the Mozilla Public License 2.0.  It is built, unmodified in
+substance, from the dated snapshot at third_party/cacert/cacert.pem in the
+source tree, itself a verbatim copy of https://curl.se/ca/cacert.pem; the
+converter is tools/mkcertstore.py.  MPL 2.0 is file-scoped, so nothing else
+here is affected, and third_party/cacert/README.md sets the reasoning out in
+full.
 
 No AmiTCP, AROSTCP, Miami or Roadshow code is used, copied or disassembled.
 Olaf Barthel's freely distributable Roadshow SDK headers and autodocs were

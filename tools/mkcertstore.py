@@ -44,6 +44,19 @@ UPDATING
     tls.library re-reads the index when the file's size or datestamp changes,
     so the replacement takes effect on the next connection.
 
+REPRODUCIBILITY
+
+    The output is a pure function of the certificates in the input: the index
+    is sorted by key, nothing is timestamped, and nothing is read from the
+    host.  --expect-sha256 turns that into a checked claim, and the release
+    build passes it (third_party/cacert/certificates.sha256).  --min-roots is
+    the weaker floor for somebody building against their own bundle.
+
+    A root that cannot be parsed, or that is too big for the buffer that would
+    read it back, is a HARD ERROR: a store missing roots refuses connections
+    the caller expected to work, and finding that out on the Amiga is much
+    worse than finding it out here.
+
 This script has no dependencies beyond the standard library on purpose -- it
 has to run in CI, on a developer's machine and on whatever a packager has.
 The DER walking below is about sixty lines and is the entire reason no
@@ -54,6 +67,7 @@ SPDX-License-Identifier: MIT
 
 import argparse
 import base64
+import hashlib
 import re
 import struct
 import sys
@@ -174,6 +188,10 @@ def main():
     ap.add_argument("bundle", nargs="+", help="PEM file(s)")
     ap.add_argument("--output", "-o", default="certificates")
     ap.add_argument("--quiet", "-q", action="store_true")
+    ap.add_argument("--min-roots", type=int, default=1, metavar="N",
+                    help="fail unless the store ends up with at least N roots")
+    ap.add_argument("--expect-sha256", metavar="HEX",
+                    help="fail unless the output has exactly this SHA-256")
     args = ap.parse_args()
 
     ders = []
@@ -191,13 +209,14 @@ def main():
 
     for der in ders:
         if len(der) > MAX_DER:
+            print("a root is %d bytes, over TLS_ROOT_DER_MAX (%d)"
+                  % (len(der), MAX_DER), file=sys.stderr)
             skipped_big += 1
             continue
         try:
             key = fnv1a(subject_name_der(der))
         except ValueError as exc:
-            if not args.quiet:
-                print("skipping a certificate: %s" % exc, file=sys.stderr)
+            print("unparseable certificate: %s" % exc, file=sys.stderr)
             skipped_bad += 1
             continue
 
@@ -212,6 +231,14 @@ def main():
         print("nothing to write", file=sys.stderr)
         return 2
 
+    # A partial store is the failure mode worth refusing: it produces a machine
+    # that reaches most sites and mysteriously refuses the rest.
+    if skipped_big or skipped_bad:
+        print("%s: REFUSING to write a partial store -- %d oversized, "
+              "%d unparseable" % (args.output, skipped_big, skipped_bad),
+              file=sys.stderr)
+        return 2
+
     keys = sorted(entries)
     data_offset = HEADER_SIZE + len(keys) * ENTRY_SIZE
 
@@ -224,24 +251,36 @@ def main():
         blobs += der
         offset += len(der)
 
-    with open(args.output, "wb") as fh:
-        fh.write(MAGIC)
-        fh.write(struct.pack(">III", len(keys), HEADER_SIZE, data_offset))
-        fh.write(index)
-        fh.write(blobs)
+    store = MAGIC + struct.pack(">III", len(keys), HEADER_SIZE,
+                                data_offset) + bytes(index) + bytes(blobs)
+    digest = hashlib.sha256(store).hexdigest()
 
-    total = data_offset + len(blobs)
+    # Checked before the file is written, so a failing build leaves no store
+    # behind for the next step to pick up and ship.
+    if len(keys) < args.min_roots:
+        print("%s: %d roots, fewer than the %d required"
+              % (args.output, len(keys), args.min_roots), file=sys.stderr)
+        return 2
+
+    if args.expect_sha256 and digest != args.expect_sha256.lower():
+        print("%s: the store is not the pinned one.\n"
+              "  expected %s\n  got      %s\n"
+              "The input bundle, or mkcertstore.py, is not what the pin was\n"
+              "recorded from -- see third_party/cacert/README.md."
+              % (args.output, args.expect_sha256.lower(), digest),
+              file=sys.stderr)
+        return 2
+
+    with open(args.output, "wb") as fh:
+        fh.write(store)
+
     if not args.quiet:
         print("%s: %d roots, %d bytes (%d index, %d certificates)"
-              % (args.output, len(keys), total, len(index), len(blobs)))
-        if skipped_big:
-            print("  %d skipped: larger than TLS_ROOT_DER_MAX (%d bytes)"
-                  % (skipped_big, MAX_DER), file=sys.stderr)
+              % (args.output, len(keys), len(store), len(index), len(blobs)))
+        print("  sha256 %s" % digest)
         if skipped_dup:
             print("  %d skipped: duplicate subject name" % skipped_dup,
                   file=sys.stderr)
-        if skipped_bad:
-            print("  %d skipped: unparseable" % skipped_bad, file=sys.stderr)
 
     return 0
 

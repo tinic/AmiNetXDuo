@@ -10,6 +10,7 @@
 #         base directory, exactly like AMINETXDUO_RUN_TAG in fsuae-run.sh
 #     -m  also install MungWall (AllocMem/FreeMem guard bands)
 #     -M  install MungWall only, no Enforcer (works on a plain 68020)
+#     -n  attach the emulated A2065 on SLIRP, exactly as fsuae-run.sh -n does
 #
 # WHY THIS IS NOT JUST fsuae-run.sh WITH ONE MORE FILE
 #
@@ -43,12 +44,14 @@ TIMEOUT=240
 TAG="${AMINETXDUO_RUN_TAG:-enforcer}"
 WANT_ENFORCER=1
 WANT_MUNGWALL=0
+NETWORK=0
 
-while getopts "t:T:mM" opt; do
+while getopts "t:T:mMn" opt; do
     case "$opt" in
         t) TIMEOUT="$OPTARG" ;;
         T) TAG="$OPTARG" ;;
         m) WANT_MUNGWALL=1 ;;
+        n) NETWORK=1 ;;
         M) WANT_MUNGWALL=1; WANT_ENFORCER=0 ;;
         *) echo "usage: $0 [-t seconds] [-T tag] [-m|-M] <executable> [files...]" >&2; exit 2 ;;
     esac
@@ -168,6 +171,10 @@ fi
         # 68030 => FS-UAE sets mmu_model=68030 and cachesize=0, which is what
         # Enforcer needs. Do NOT add jit_compiler=1: it silences Enforcer.
         echo "cpu = 68030"
+    fi
+    if [ "$NETWORK" = "1" ]; then
+        echo "network_card = a2065"
+        echo "uae_a2065 = slirp"
     fi
 } > "$CFG"
 

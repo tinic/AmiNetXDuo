@@ -76,6 +76,13 @@ aminetxduo_add_tool(tool_offline Offline  SOURCES onoff.c DEFINES TOOL_OFFLINE)
 
 aminetxduo_add_tool(tool_host    host     SOURCES host.c)
 
+# fetch is config-only in the same sense: it never touches NetX Duo directly.
+# It reaches bsdsocket.library and tls.library through their published vectors
+# at run time, so ONE binary serves both -DAMINETXDUO_TLS=ON and OFF builds --
+# the https: path opens LIBS:tls.library and says something legible when there
+# is none.  Nothing here is conditional on the build option, deliberately.
+aminetxduo_add_tool(tool_fetch   fetch    SOURCES fetch.c)
+
 aminetxduo_add_tool(tool_shownetstatus ShowNetStatus NX
     SOURCES shownetstatus.c)
 aminetxduo_add_tool(tool_netstat       netstat       NX SOURCES netstat.c)
@@ -105,4 +112,4 @@ set_target_properties(tool_smoke PROPERTIES OUTPUT_NAME "ToolsSmoke")
 add_custom_target(tools ALL)
 add_dependencies(tools
     tool_addnetinterface tool_netsetup tool_online tool_offline tool_host
-    tool_shownetstatus tool_netstat tool_ping tool_smoke)
+    tool_fetch tool_shownetstatus tool_netstat tool_ping tool_smoke)

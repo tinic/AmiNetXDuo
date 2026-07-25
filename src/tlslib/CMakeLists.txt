@@ -82,44 +82,96 @@ endif()
 
 # ---------------------------------------------------------- trust store ---
 #
-# tools/mkcertstore.py turns a PEM bundle into DEVS:Internet/certificates.  The
-# bundle is not vendored: it changes every few weeks, it is 186 KB of somebody
-# else's data, and a stale copy in git is worse than none.  Point
-# AMINETXDUO_CA_BUNDLE at one, or let this find the host's.
-set(AMINETXDUO_CA_BUNDLE "" CACHE FILEPATH
-    "PEM CA bundle to build DEVS:Internet/certificates from")
+# tools/mkcertstore.py turns a PEM bundle into DEVS:Internet/certificates.
+#
+# The bundle is a VENDORED, DATED, HASH-PINNED snapshot -- third_party/cacert/,
+# which carries the provenance and the licence reasoning.  It used to be
+# scavenged from the host (/etc/ssl/cert.pem and friends), and that was wrong
+# in both directions: a release carried whatever roots the release engineer's
+# laptop had, and a build on a machine with none shipped a tls.library that
+# refused every connection with TLS_ERR_TRUSTSTORE while only warning about it.
+#
+# Two hashes are checked, and BOTH failures are fatal:
+#
+#   * the input bundle, against curl.se's published checksum, so a corrupted
+#     or swapped snapshot cannot be built from;
+#   * the generated store, against a pin recorded in the tree.  That second one
+#     is what makes "any host produces the same bytes" a checked claim: if a
+#     host CA file, a different bundle or an edited mkcertstore.py leaked into
+#     the result, the digest moves and the build stops.
+#
+# -DAMINETXDUO_CA_BUNDLE=<file> still works, for a machine with its own set.
+# It skips the output pin -- there is nothing to pin it to -- says so, and
+# keeps a floor on the root count so a truncated bundle cannot pass.
 
-if(NOT AMINETXDUO_CA_BUNDLE)
-    foreach(candidate
-            "${CMAKE_SOURCE_DIR}/dist/cacert.pem"
-            "/etc/ssl/cert.pem"
-            "/etc/ssl/certs/ca-certificates.crt"
-            "/etc/pki/tls/certs/ca-bundle.crt")
-        if(EXISTS "${candidate}")
-            set(AMINETXDUO_CA_BUNDLE "${candidate}")
-            break()
-        endif()
-    endforeach()
-endif()
+set(AMINETXDUO_CA_BUNDLE "" CACHE FILEPATH
+    "PEM CA bundle for DEVS:Internet/certificates (empty: the pinned snapshot)")
+
+set(AMINETXDUO_CA_DIR "${CMAKE_SOURCE_DIR}/third_party/cacert")
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
-
-if(Python3_FOUND AND AMINETXDUO_CA_BUNDLE AND EXISTS "${AMINETXDUO_CA_BUNDLE}")
-    add_custom_command(
-        OUTPUT "${CMAKE_BINARY_DIR}/certificates"
-        COMMAND ${Python3_EXECUTABLE}
-                "${CMAKE_SOURCE_DIR}/tools/mkcertstore.py"
-                --output "${CMAKE_BINARY_DIR}/certificates"
-                "${AMINETXDUO_CA_BUNDLE}"
-        DEPENDS "${AMINETXDUO_CA_BUNDLE}"
-                "${CMAKE_SOURCE_DIR}/tools/mkcertstore.py"
-        COMMENT "Building the trust store from ${AMINETXDUO_CA_BUNDLE}"
-        VERBATIM)
-    add_custom_target(certstore ALL DEPENDS "${CMAKE_BINARY_DIR}/certificates")
-    message(STATUS "  trust store .. ${AMINETXDUO_CA_BUNDLE}")
-else()
-    add_custom_target(certstore
-        COMMAND ${CMAKE_COMMAND} -E echo
-                "No CA bundle found. Set -DAMINETXDUO_CA_BUNDLE=<cacert.pem>.")
-    message(STATUS "  trust store .. NOT BUILT (no CA bundle; set AMINETXDUO_CA_BUNDLE)")
+if(NOT Python3_FOUND)
+    message(FATAL_ERROR
+        "AMINETXDUO_TLS is ON and there is no python3.\n"
+        "tools/mkcertstore.py builds DEVS:Internet/certificates, and a TLS "
+        "build without a trust store refuses every connection.  Install "
+        "python3, or configure with -DAMINETXDUO_TLS=OFF.")
 endif()
+
+# The pin on the generated store, and the number of roots below which the
+# result is not a usable public trust store whatever its provenance.
+set(CERTSTORE_MIN_ROOTS 40)
+set(CERTSTORE_PIN "")
+
+if(AMINETXDUO_CA_BUNDLE)
+    if(NOT EXISTS "${AMINETXDUO_CA_BUNDLE}")
+        message(FATAL_ERROR
+            "-DAMINETXDUO_CA_BUNDLE=${AMINETXDUO_CA_BUNDLE} does not exist.")
+    endif()
+    message(STATUS "  trust store .. ${AMINETXDUO_CA_BUNDLE} (NOT the pinned snapshot)")
+else()
+    set(AMINETXDUO_CA_BUNDLE "${AMINETXDUO_CA_DIR}/cacert.pem")
+
+    if(NOT EXISTS "${AMINETXDUO_CA_BUNDLE}")
+        message(FATAL_ERROR
+            "The vendored CA bundle is missing: ${AMINETXDUO_CA_BUNDLE}\n"
+            "See third_party/cacert/README.md, or point "
+            "-DAMINETXDUO_CA_BUNDLE at a PEM bundle of your own.")
+    endif()
+
+    # curl.se's published "<sha256>  cacert.pem" line, copied verbatim.
+    file(READ "${AMINETXDUO_CA_DIR}/cacert.pem.sha256" CERTSTORE_BUNDLE_SUM)
+    string(REGEX MATCH "[0-9a-fA-F]+" CERTSTORE_BUNDLE_SUM "${CERTSTORE_BUNDLE_SUM}")
+    file(SHA256 "${AMINETXDUO_CA_BUNDLE}" CERTSTORE_BUNDLE_ACTUAL)
+    if(NOT CERTSTORE_BUNDLE_ACTUAL STREQUAL CERTSTORE_BUNDLE_SUM)
+        message(FATAL_ERROR
+            "third_party/cacert/cacert.pem is not the pinned snapshot.\n"
+            "  expected ${CERTSTORE_BUNDLE_SUM}\n"
+            "  got      ${CERTSTORE_BUNDLE_ACTUAL}\n"
+            "Restore it, or record a new pin -- third_party/cacert/README.md.")
+    endif()
+
+    file(READ "${AMINETXDUO_CA_DIR}/certificates.sha256" CERTSTORE_PIN)
+    string(REGEX MATCH "[0-9a-fA-F]+" CERTSTORE_PIN "${CERTSTORE_PIN}")
+
+    message(STATUS "  trust store .. third_party/cacert/cacert.pem (pinned)")
+endif()
+
+set(CERTSTORE_PIN_ARG "")
+if(CERTSTORE_PIN)
+    set(CERTSTORE_PIN_ARG --expect-sha256 "${CERTSTORE_PIN}")
+endif()
+
+add_custom_command(
+    OUTPUT "${CMAKE_BINARY_DIR}/certificates"
+    COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/mkcertstore.py"
+            --output "${CMAKE_BINARY_DIR}/certificates"
+            --min-roots ${CERTSTORE_MIN_ROOTS}
+            ${CERTSTORE_PIN_ARG}
+            "${AMINETXDUO_CA_BUNDLE}"
+    DEPENDS "${AMINETXDUO_CA_BUNDLE}"
+            "${CMAKE_SOURCE_DIR}/tools/mkcertstore.py"
+    COMMENT "Building the trust store from ${AMINETXDUO_CA_BUNDLE}"
+    VERBATIM)
+add_custom_target(certstore ALL DEPENDS "${CMAKE_BINARY_DIR}/certificates")

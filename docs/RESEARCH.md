@@ -1442,6 +1442,234 @@ file up to the copy correctly installed — which reads exactly like an Installe
 aborted mid-way, and is not one. `GONE_LIMIT` is now 20; `MAX_POLLS` still bounds the run,
 and a genuinely stuck Installer keeps its window up, so it fails on the cap instead.
 
+#### Update (2026-07-25, later): the traveller and a reproducible store landed — the default still does not
+
+The two things the section above said stood between this and "TLS on by default" are
+both done. A third thing turned up while proving the first one works, and it is worse
+than either of them: **a certificate chain of three or more takes the machine down.**
+
+##### 1. `fetch`, the traveller
+
+`src/tools/fetch.c`, one more Roadshow-shaped Shell command beside `ping` and `host`:
+
+```
+fetch URL/A,TO/K,HEADERS/S,QUIET/S,NOVERIFY/S,TIMEOUT/N/K
+```
+
+It resolves, connects, and — if the URL says `https:` — opens `LIBS:tls.library` and
+runs the transfer through `TLSRead()`/`TLSWrite()`. **One binary serves both build
+options**: nothing in it is conditional on `AMINETXDUO_TLS`, because the decision is an
+`OpenLibrary()` at run time, so a default build ships a `fetch` that does `http:` and
+says something legible when asked for `https:`. That is also why it is not in
+`src/tlslib/`: it is a network command that happens to know about TLS, not a TLS demo.
+
+Deliberately small: HTTP/1.0 with `Connection: close`, so the body is "everything until
+the far end hangs up" and there is no chunked framing to get wrong. Up to five
+redirects, and it **refuses one that steps down from `https:` to `http:`** rather than
+quietly dropping the encryption that was asked for. Without `TO` the body goes to
+standard output and nothing else does, so `fetch URL >file` is not corrupted by a
+progress line; with `TO` there is a free channel and the summary is worth having.
+
+Verified by running it, not by asserting it — `tests/tls/run-fetch.sh`, which stages the
+two libraries, the trust store and an A2065 on SLIRP and drives the command through
+`ToolsSmoke`'s staged command list (the harness starts one executable with no
+arguments, and `fetch` takes arguments):
+
+| | |
+|---|---|
+| `fetch ?` | prints the template, then the usage line, `rc 10` |
+| `http://example.com/` | 559 bytes of HTML on stdout, `rc 0` |
+| `http://example.com/ TO DH0:plain.txt` | `HTTP/1.1 200 OK`, `559 bytes -> DH0:plain.txt` |
+| `https://tls-v1-2.badssl.com/ TO …` | 0xC027, chain verified, **6.8 s**; follows the 301 to `…:1012/` — a second handshake at 0x3D, 5.0 s — then 200 OK, 502 bytes |
+| `https://ecc256.badssl.com/ TO …` | 0xC023 (ECDHE_ECDSA), chain verified, **23.3 s**, 200 OK, 684 bytes |
+| `https://wrong.host.badssl.com/` | `fetch: wrong.host.badssl.com: the certificate is issued to another host`, `rc 10` |
+| `ftp://example.com/` | `"ftp://example.com/" is not an http: or https: URL` |
+| `http://example.invalid/` | `cannot resolve "example.invalid"` plus `tool_explain_resolve()`'s block |
+
+That redirect line is the one worth keeping: two full handshakes, an absolute `Location`
+on a **non-default port**, and the URL parser's `:1012` all in one command.
+
+**A finding that belongs to anyone writing an Amiga TLS program, not just to this one.**
+The first `https:` run took the machine down, and the reason was not the reason it
+looked like. A command started by the Kickstart 3.1 Shell gets **4,096 bytes** of stack
+(`tc_SPUpper - tc_SPLower`, measured on the machine), of which **2,736 were still free**
+by the time `TLSOpen()` was reached. And `tls.library` brackets its caller into ThreadX
+to reach the stack, which — `port/threadx-amiga/src/tx_amiga_adopt.c` — hands
+`_tx_thread_create()` **the caller's own stack region** as the ThreadX thread stack. So
+those 2,736 bytes are not the command's: NetX Duo, `nx_secure` and the bignum code all
+run on them. `fetch` therefore allocates 64 KB and runs the transfer on it through
+`StackSwap()` (exec V36, so it is on the 3.1 floor), rather than expecting a user to
+type `stack 65536` first.
+
+`StackSwap()` has one trap and it is worth writing down: **the function that calls it
+must not touch a stack-based local of its own between the two calls**, because between
+them the stack pointer belongs to the other stack. `fetch_trampoline()` therefore has no
+locals, no arguments, only file-static state, and is `noinline` — GCC inlined the first
+version straight into `main()`, which is exactly the hazard. The generated code was read
+rather than hoped at: one `move.l a6,-(sp)` before the first swap and its matching
+`move.l (sp)+,a6` after the second, which balances because `StackSwap()` restores the
+pointer exactly.
+
+(That was not, in the end, what was crashing — see §3 — but 2.7 KB for a handshake is
+not something to ship either way.)
+
+##### 2. A trust store that is the same bytes on every machine
+
+`src/tlslib/CMakeLists.txt` used to scavenge the *host's* CA bundle
+(`/etc/ssl/cert.pem` and friends) and `dist/make-dist.sh` warned if it found none. Two
+failure modes, and the release engineer sees neither: a release carries whatever roots
+that laptop happened to have, and a build on a machine with none ships a `tls.library`
+that refuses every connection with `TLS_ERR_TRUSTSTORE`. On the machine this was
+developed on the scavenged bundle was **Apple's 128 roots, 142,693 bytes** — which is a
+perfectly good root set and is not the one anyone thought they were shipping.
+
+**Now: a vendored, dated, hash-pinned snapshot.** `third_party/cacert/cacert.pem`, a
+verbatim copy of `https://curl.se/ca/cacert.pem` ("Certificate data from Mozilla as of:
+Thu Jul 16 03:12:01 2026 GMT", 119 roots), with curl.se's own published checksum file
+beside it. The alternatives were considered rather than skipped: fetching a pinned URL
+at release time makes the build depend on a third party's web server being up, which is
+the opposite of reproducible; vendoring the generated binary store puts 126 KB of
+unreviewable data in git and hides the input the licence attaches to.
+
+**Two hashes are pinned and both failures are fatal.**
+
+* the input, against `cacert.pem.sha256`, so a corrupted or swapped snapshot cannot be
+  built from;
+* **the generated store**, `certificates.sha256`, checked by `tools/mkcertstore.py`
+  *before it writes the file*. That second pin is what turns "any host produces the same
+  bytes" into a checked claim rather than an intention: if a host CA file, a different
+  bundle or an edited generator leaked into the result, the digest moves and the build
+  stops with both hashes printed.
+
+`mkcertstore.py` also grew `--min-roots` and now treats an oversized or unparseable
+certificate as a **hard error** instead of a warning — a store missing roots produces a
+machine that reaches most sites and mysteriously refuses the rest, and finding that out
+on the Amiga is much worse than finding it out in CI.
+
+Proved rather than asserted, four ways:
+
+| | |
+|---|---|
+| two build trees, same machine | byte-identical, `35a1d1c9…` |
+| **a different host** — playhouse2, Linux 6.17 x86-64, Python 3.13.5, whose own `/etc/ssl/certs/ca-certificates.crt` is a *different* 224,449-byte bundle | byte-identical, `35a1d1c9…` |
+| the vendored snapshot removed (a host with no CA bundle at all) | configure **fails**: "The vendored CA bundle is missing"; no store written |
+| one byte appended to the snapshot | configure **fails**, printing expected and actual |
+| `-DAMINETXDUO_CA_BUNDLE=/etc/ssl/cert.pem` | builds, is labelled `(NOT the pinned snapshot)`, keeps only the `--min-roots` floor — and `dist/make-dist.sh` then **refuses to pack it**, exit 2 |
+
+`dist/make-dist.sh`'s warning is now a hard failure in both directions: no store beside a
+packed `tls.library` is exit 2, and a store whose digest is not the pin is exit 2.
+
+**The licence, since MPL 2.0 in an MIT tree deserves an answer.** MPL 2.0 is file-scoped
+copyleft: §1.10 defines a Modification as a change to a Covered File's contents, and §3.3
+permits distributing a Larger Work under other terms provided the covered files keep the
+MPL and their notices. MIT source beside an MPL data file is the case §3.3 is written
+for, and it is what `certifi` (MPL 2.0) inside MIT/BSD Python applications and
+`webpki-roots` (MPL 2.0) inside Rust applications have done for a decade. We do not
+modify the file, so there is nothing to relicense; we treat the *generated*
+`DEVS:Internet/certificates` as covered too, because a re-encoding of the same
+certificate set is the conservative reading of "Modification" and a change of container
+should not be argued to launder a licence. §3.2's "tell recipients how to get the Source
+Code Form" is discharged in `dist/ReadMe`, which names the file, its upstream URL and
+`tools/mkcertstore.py`. Nothing else in the project is affected. The full argument,
+including why there is no permissively-licensed root bundle to use instead, is in
+`third_party/cacert/README.md`.
+
+##### 3. What replaced them: three certificates take the machine down
+
+The first `https://example.com/` fetch killed the emulator. So did the second, and the
+tenth. The bisect, all on the A1200 profile at 14 MHz unless stated:
+
+| host | chain | ciphersuite | result |
+|---|---|---|---|
+| `tls-v1-2.badssl.com` | 2, RSA | 0xC027 | **OK**, 6.8 s |
+| `ecc256.badssl.com` | 2, ECDSA | 0xC023 | **OK**, 23.3 s |
+| `www.iana.org` | 3, ECDSA | 0xC023 | **crash** |
+| `www.iana.org`, `NOVERIFY` | 3 | 0xC023 | **OK**, 4.5 s, 6,253 bytes |
+| `www.iana.org`, **`-k 28`** (28 MHz, same cycle-exact profile) | 3 | 0xC023 | **OK** |
+| `www.iana.org`, 68030 under Enforcer (no cycle accounting) | 3 | — | **OK** |
+| `example.com` | 4, ECDSA | — | **crash** |
+| `example.com`, `-k 28` | 4 | — | **crash** |
+
+Four things that pin it down:
+
+1. **It is not `fetch`.** `tests/tls/tls_api` — linked against nothing of ours, run
+   directly from the Startup-Sequence with its own stack — dies at the same place when
+   its `A_HOST` is changed to `www.iana.org`. One line, reproducible by anyone.
+2. **It is not the stack.** It survives the 64 KB `StackSwap()` unchanged, and it kills a
+   program that never swapped.
+3. **It is time, not structure.** The *same* host, the *same* binary, the *same* chain:
+   dead at 14 MHz, alive at 28 MHz. Four certificates are still dead at 28 MHz, which is
+   what you would expect if the threshold is wall-clock and each extra certificate costs
+   one public-key verification.
+4. **It is verification that costs the time.** `NOVERIFY` on the same host is 4.5 s and
+   fine; verifying is three more signature checks and tens of seconds.
+
+Where it dies, from a serial trace through `_nx_secure_tls_client_handshake` (removed
+again afterwards; `third_party/` is clean):
+
+```
+session_start begin
+msg type 2 len 87            ServerHello
+msg type 11 len 2464         Certificate, three of them
+  verify hook: cert 1 issuer 6A6A82DB -> miss
+               cert 2 issuer F95413DF -> 525 bytes read from the store, parsed, trusted
+               cert 3 issuer 7560C1C5 -> miss
+  vendored chain verify -> 0
+  host-name check -> 0
+msg type 12 len 144          ServerKeyExchange, ECDSA signature verified
+msg type 14 len 0            ServerHelloDone
+premaster -> 0 ; client key exchange -> 0 ; record sent -> 0 ; generate_keys -> 0
+mutex put -> packet allocate -> 0 -> mutex get
+ChangeCipherSpec being built ...        <- and never anything again
+```
+
+So the handshake gets to within two records of finishing and stops. Under Enforcer on a
+68030 the same run **completes** and reports exactly two hits, both
+`LONG-READ from 00000000` at `PC 00290E46` inside `SYS:fetch` — a null dereference that
+is survivable on a machine with real memory at address 0 and is not, on its own, the
+crash. (`tools/enforcer-run.sh` gained a `-n` so this could be run at all; it had no way
+to attach the A2065.)
+
+The most likely story, unproven: the far end gives up on a handshake that has taken half
+a minute, and the library walks into freed or reused state instead of returning
+`TLS_ERR_IO`. Both failing hosts are Cloudflare-fronted; both passing ones are badssl's
+nginx. Whatever the mechanism, the shape of it is the part that matters: **a peer can
+crash this machine by being slow to be verified**, and there is no application-side
+defence — `fetch` cannot decline to be verified against a three-deep chain.
+
+##### 4. The answer on the default, and what it would take to change it
+
+**Still OFF, and now for a reason that is a bug rather than a gap.**
+
+The three arguments that used to be made against it are all gone. Speed: a public
+handshake is 6.8 s. Size: the pair is 523,164 bytes, unchanged (`bsdsocket.library`
+250,084 with the private vector, `tls.library` 273,080), which is still 1,124 bytes
+inside 512 KiB. A traveller: `fetch` ships. A trust store: 119 roots, 128,928 bytes,
+byte-reproducible on any host.
+
+What is left is that turning it on would put a `tls.library` in `LIBS:` that any program
+can open and that a large share of the public web — everything behind Cloudflare and
+Google Trust Services — can use to take the machine down. That is not a default. It is
+also not a reason to hide the work: `-DAMINETXDUO_TLS=ON` remains a supported,
+CI-covered configuration, `fetch` works over `https:` to two-deep chains today, and the
+CI matrix still builds all four configurations with the TLS one among them.
+
+**The one thing to fix, in order:** find why the record layer walks off after a long
+verification. Start from the trace above with `-k 14` and a packet capture, and the first
+question to answer is whether the peer sent a FIN or an RST while the 68020 was still
+doing arithmetic — because if it did, the fix is a mid-handshake disconnect being
+handled, and every other TLS user of this stack needs it too. After that, the remaining
+work is arithmetic, and arithmetic is the one thing on this machine that has always been
+possible to make faster.
+
+The default-build artefacts are **byte-identical** to the pre-change build — every one of
+`bsdsocket.library`, `usergroup.library` and the eight existing commands compares equal
+against a build of the tree before this work — so the whole of the change to the shipping
+floor is one new 45,632-byte command. Baselines re-run on it: conformance **125/142**
+(loopback, 1 failed, 16 skipped), soak 98/0, libraries 8/0, ram_driver 32/0,
+`tls_handshake` 44/0 on the TLS build, `tools/ci.sh host cross conformance` all green
+across all four configurations.
+
 ### M8 result (2026-07-25): the IPv6 dual stack works, over a real wire
 
 `-DAMINETXDUO_IPV6=ON` builds a dual stack that has been run on an emulated 68020 and

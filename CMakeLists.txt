@@ -25,7 +25,17 @@ option(AMINETXDUO_IPV6 "Build the IPv6 dual stack"                    OFF)
 if(AMINETXDUO_IPV6)
     add_compile_definitions(AMINETXDUO_IPV6)
 endif()
-option(AMINETXDUO_TLS  "Build the nx_secure TLS library (68030+)"     OFF)
+# TLS: tls.library, the nx_secure/nx_crypto stack under it, and the trust store.
+#
+# STILL OFF BY DEFAULT, and the reason has changed twice.  It is no longer
+# speed (a public handshake is ~7 s at 14 MHz), no longer size (the pair is
+# 523 KB), and no longer that nothing uses it -- `fetch` does.  It is that a
+# certificate chain of three or more takes the machine down partway through
+# verification at 14 MHz: reproduced by `fetch` and independently by
+# tests/tls/tls_api, survives at 28 MHz on the same profile, and covers most
+# Cloudflare-fronted sites.  A peer that can crash the machine is not a
+# default.  Bisected in docs/RESEARCH.md 9; turn this ON to work on it.
+option(AMINETXDUO_TLS  "Build tls.library and its trust store"        OFF)
 option(AMINETXDUO_BPF  "Build the bpf_* raw path and filter VM"       ON)
 option(AMINETXDUO_TESTS "Build the on-Amiga test harnesses"           ON)
 

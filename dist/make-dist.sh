@@ -93,7 +93,7 @@ need() {
 }
 
 LIBS=(bsdsocket usergroup)
-CMDS=(AddNetInterface Online Offline ShowNetStatus ping netstat host)
+CMDS=(AddNetInterface Online Offline ShowNetStatus ping netstat host fetch)
 
 for lib in "${LIBS[@]}"; do need "$BUILD/src/$lib/$lib.library"; done
 for cmd in "${CMDS[@]}"; do need "$BUILD/src/tools/$cmd"; done
@@ -124,13 +124,35 @@ if [ -f "$BUILD/src/tlslib/tls.library" ]; then
     chmod 755 "$TREE/Libs/tls.library"
     echo "==> including tls.library"
 
-    if [ -f "$BUILD/certificates" ]; then
-        cp "$BUILD/certificates" "$TREE/Devs/Internet/certificates"
-        echo "==> including the trust store ($(wc -c < "$BUILD/certificates" | tr -d ' ') bytes)"
-    else
-        echo "!! tls.library is packed but there is no trust store." >&2
-        echo "!! Build one:  tools/mkcertstore.py -o $BUILD/certificates cacert.pem" >&2
+    # A trust store is not optional when tls.library is packed: without one the
+    # library refuses every connection with TLS_ERR_TRUSTSTORE, and a release
+    # that ships that is worse than a release that does not build.  This used
+    # to be a warning; it is a hard failure now.
+    [ -f "$BUILD/certificates" ] || {
+        echo "!! tls.library is packed and there is no $BUILD/certificates." >&2
+        echo "!! The build should have made one -- see src/tlslib/CMakeLists.txt" >&2
+        echo "!! and third_party/cacert/README.md." >&2
+        exit 2
+    }
+
+    # And it has to be the store this source tree describes.  The build already
+    # checks this; checking it again here is what stops a stale or hand-made
+    # file in an old build directory reaching an archive.
+    PIN=$(sed -n 's/^\([0-9a-fA-F]\{64\}\).*/\1/p' \
+              "$ROOT/third_party/cacert/certificates.sha256")
+    GOT=$( (shasum -a 256 "$BUILD/certificates" 2>/dev/null || \
+            sha256sum "$BUILD/certificates") | cut -d" " -f1 )
+    if [ -n "$PIN" ] && [ "$PIN" != "$GOT" ]; then
+        echo "!! $BUILD/certificates is not the pinned trust store." >&2
+        echo "!!   expected $PIN" >&2
+        echo "!!   got      $GOT" >&2
+        echo "!! Rebuild, or -- if this build used -DAMINETXDUO_CA_BUNDLE --" >&2
+        echo "!! pack it from a build that did not." >&2
+        exit 2
     fi
+
+    cp "$BUILD/certificates" "$TREE/Devs/Internet/certificates"
+    echo "==> including the trust store ($(wc -c < "$BUILD/certificates" | tr -d " ") bytes, $GOT)"
 fi
 for cmd in "${CMDS[@]}"; do
     cp "$BUILD/src/tools/$cmd" "$TREE/C/"

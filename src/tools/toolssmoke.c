@@ -75,6 +75,8 @@ static const char *const commands[] =
     "SYS:ping ?",
     "SYS:ping 127.0.0.1 COUNT 1",
     "SYS:host ?",
+    "SYS:fetch ?",
+    "SYS:fetch not-a-url:///",
     "SYS:host www.example.com",
     "SYS:host 1.2.3.4",
     NULL

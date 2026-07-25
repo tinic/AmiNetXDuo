@@ -786,7 +786,7 @@
   (source S_C)
   (dest   "C:")
   (choices "AddNetInterface" "Online" "Offline" "ShowNetStatus"
-           "ping" "netstat" "host")
+           "ping" "netstat" "host" "fetch")
   (confirm)
   (optional "force"))
 
