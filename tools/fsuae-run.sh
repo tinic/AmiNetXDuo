@@ -30,13 +30,15 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 TIMEOUT=60
 MODEL=A1200
 NETWORK=0
+CPU=""
 
-while getopts "t:m:n" opt; do
+while getopts "t:m:c:n" opt; do
     case "$opt" in
         t) TIMEOUT="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
+        c) CPU="$OPTARG" ;;
         n) NETWORK=1 ;;
-        *) echo "usage: $0 [-t seconds] [-m model] [-n] <executable> [files...]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-t seconds] [-m model] [-c cpu] [-n] <executable> [files...]" >&2; exit 2 ;;
     esac
 done
 shift $((OPTIND - 1))
@@ -141,6 +143,16 @@ fast_memory = 8192
 serial_port = $SERIAL
 fullscreen = 0
 EOF
+
+# -c 68030 etc. The project floor is a 68020 (A1200), but a full 68030 has an
+# MMU -- which is what Enforcer needs -- and different cache behaviour, so the
+# same binaries must be exercised on both.
+if [ -n "$CPU" ]; then
+    cat >> "$CFG" <<EOF
+cpu = $CPU
+EOF
+    echo "==> CPU override: $CPU"
+fi
 
 if [ "$NETWORK" = "1" ]; then
     cat >> "$CFG" <<EOF

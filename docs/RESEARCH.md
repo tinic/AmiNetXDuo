@@ -493,7 +493,38 @@ non-bare-metal precedent:
 | `tx_thread_system_return.c` | current thread yields back to the scheduler |
 | `tx_thread_context_save/restore.c` | no-ops in a hosted port (Exec does the real switching) |
 | `tx_thread_stack_build.c` | trivial — stacks belong to Exec tasks |
-| `tx_timer_interrupt.c` | driven by a dedicated tick task on `timer.device` (or a VBlank server) at `TX_TIMER_TICKS_PER_SECOND` = 100; `NX_IP_PERIODIC_RATE` follows it |
+| `tx_timer_interrupt.c` | driven by a dedicated tick task on `timer.device` (or a VBlank server); `NX_IP_PERIODIC_RATE` must equal `TX_TIMER_TICKS_PER_SECOND`. **See the tick-rate finding below — 100 Hz on `UNIT_MICROHZ` is the wrong choice for this platform.** |
+
+#### Tick rate: 100 Hz on `UNIT_MICROHZ` is wrong for AmigaOS
+
+The port currently runs `TX_TIMER_TICKS_PER_SECOND` = 100 off `timer.device`
+`UNIT_MICROHZ`, re-arming a one-shot request every tick. Measured under load in the
+soak test: **the clock runs 4–5% slow** (3008 ticks in 31.8 s wall), because each tick
+pays the scheduling latency of a fresh IORequest round trip through a Task.
+
+What the incumbent stack does, from the AmiTCP-derived AROSTCP sources:
+
+- `bsdsocket/sys/kernel.h`: **`#define hz (50)`** — a 50 Hz computational clock.
+- `bsdsocket/kern/amiga_time.c:111`: `OpenDevice(TIMERNAME, **UNIT_VBLANK**, …)` — the
+  tick comes from the vertical-blank interrupt, not the microsecond timer.
+- `bsdsocket/kern/uipc_domain.c`: `timeout(pfslowtimo, 0, **hz / 2**)` and
+  `timeout(pffasttimo, 0, **hz / 5**)` — the classic 4.4BSD protocol timers at
+  **2 Hz (500 ms)** and **5 Hz (200 ms)**.
+
+So TCP itself needs nothing finer than 200 ms. A 50 Hz tick gives 20 ms granularity —
+an order of magnitude more than the protocol timers require — at half our current
+wakeup rate, from a hardware interrupt rather than a device round trip. `UNIT_VBLANK`
+is also documented as having "very low overhead" and being *more* accurate than
+`UNIT_MICROHZ` over long periods.
+
+Recommended change: **50 Hz on `UNIT_VBLANK`** (or a VBlank interrupt server, cheaper
+still), with `NX_IP_PERIODIC_RATE` following `TX_TIMER_TICKS_PER_SECOND`.
+
+One catch to handle rather than inherit: VBlank is 50 Hz PAL but **60 Hz NTSC**, and
+AROSTCP simply hardcodes 50 — which makes its clock run 20% fast on an NTSC machine.
+`SysBase->VBlankFrequency` reports the real rate, so the port can set the tick rate
+from it at startup instead of guessing. NetX Duo needs the two rates to agree, so
+whatever is chosen must be applied to both constants.
 | `tx_initialize_low_level.c` | create the tick task, the scheduler lock, adopt the caller |
 
 ### 6.2 ThreadX-on-Exec: the central problem
