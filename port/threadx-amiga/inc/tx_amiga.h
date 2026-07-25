@@ -61,6 +61,48 @@ ULONG   tx_amiga_zombie_tasks(VOID);
 
 
 /* ------------------------------------------------------------------------ */
+/* The periodic tick                                                         */
+/* ------------------------------------------------------------------------ */
+
+/*
+ * What the tick task has actually been doing.
+ *
+ * The tick wakes from a cheap source (timer.device UNIT_VBLANK by preference)
+ * but takes its TIME from ReadEClock(), so wakeups and delivered ticks are two
+ * different numbers and both are worth seeing:
+ *
+ *   * delivered / uptime is the real clock rate, and it should be
+ *     TX_TIMER_TICKS_PER_SECOND however badly the source misbehaves.  Both
+ *     numbers come from the same E-Clock, so this is the drift measurement
+ *     with nothing else in the way.
+ *   * wakeups / (wall seconds) is what the tick costs the machine.
+ *   * clipped > 0 means something stalled the tick task for longer than
+ *     TX_AMIGA_TIMER_MAX_CATCHUP ticks and the arrears were dropped.
+ *
+ * Every field is a snapshot; the counters are cumulative from kernel start and
+ * are allowed to wrap.  Safe to call from any Task.
+ */
+
+typedef struct TX_AMIGA_TICK_STATS_STRUCT
+{
+    ULONG   tx_amiga_tick_unit;             /* timer.device unit in use       */
+    ULONG   tx_amiga_tick_fallback;         /* TX_TRUE if VBlank was rejected */
+    ULONG   tx_amiga_tick_eclock_hz;        /* E-Clock rate ReadEClock gave   */
+    ULONG   tx_amiga_tick_source_chz;       /* measured source rate, Hz * 100 */
+    ULONG   tx_amiga_tick_wakeups;          /* times the task ran             */
+    ULONG   tx_amiga_tick_delivered;        /* _tx_timer_interrupt() calls    */
+    ULONG   tx_amiga_tick_empty;            /* wakeups that delivered nothing */
+    ULONG   tx_amiga_tick_catchups;         /* wakeups that delivered >1      */
+    ULONG   tx_amiga_tick_clipped;          /* catch-ups that hit the cap     */
+    ULONG   tx_amiga_tick_lost;             /* ticks dropped by those clips   */
+    ULONG   tx_amiga_tick_service_us;       /* total time IN the task, us     */
+    ULONG   tx_amiga_tick_uptime_ms;        /* E-Clock ms since the tick began*/
+} TX_AMIGA_TICK_STATS;
+
+VOID    tx_amiga_tick_stats(TX_AMIGA_TICK_STATS *stats);
+
+
+/* ------------------------------------------------------------------------ */
 /* Thread adoption                                                           */
 /* ------------------------------------------------------------------------ */
 

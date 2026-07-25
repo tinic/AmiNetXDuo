@@ -517,14 +517,45 @@ wakeup rate, from a hardware interrupt rather than a device round trip. `UNIT_VB
 is also documented as having "very low overhead" and being *more* accurate than
 `UNIT_MICROHZ` over long periods.
 
-Recommended change: **50 Hz on `UNIT_VBLANK`** (or a VBlank interrupt server, cheaper
-still), with `NX_IP_PERIODIC_RATE` following `TX_TIMER_TICKS_PER_SECOND`.
+#### What was implemented, and why it is not simply "use VBlank"
 
-One catch to handle rather than inherit: VBlank is 50 Hz PAL but **60 Hz NTSC**, and
-AROSTCP simply hardcodes 50 — which makes its clock run 20% fast on an NTSC machine.
-`SysBase->VBlankFrequency` reports the real rate, so the port can set the tick rate
-from it at startup instead of guessing. NetX Duo needs the two rates to agree, so
-whatever is chosen must be applied to both constants.
+**Superseding the recommendation above.** An earlier draft suggested 50 Hz on
+`UNIT_VBLANK` with the rate taken from `SysBase->VBlankFrequency`. That is not what
+shipped, because the tick source cannot be trusted as the *time base*:
+
+- VBlank is 50 Hz PAL but **60 Hz NTSC**. AROSTCP hardcodes 50, so its clock runs 20%
+  fast on an NTSC machine — a bug to avoid inheriting, not a precedent.
+- Under **RTG** (Picasso96/CyberGraphX) and on PiStorm/Emu68-class systems, the rate,
+  the regularity, and in exotic configurations the existence of a well-behaved chipset
+  VERTB are all outside our control.
+
+So the port **separates the two concerns: the tick source provides *wakeups*, `ReadEClock()`
+provides *time*.** Each wakeup computes how many 50 Hz periods have actually elapsed and
+delivers exactly that many `_tx_timer_interrupt()` calls — catching up after a late or
+coalesced wakeup, delivering none after an early one. E-Clock is CIA-derived, independent
+of the display, and reports its own frequency, so this is correct on PAL, NTSC, RTG and
+accelerated systems alike. Catch-up is capped (8 ticks) and resyncs beyond that rather
+than firing a burst under the core lock. The source is validated against E-Clock at
+startup and falls back to `UNIT_MICROHZ` if it is missing or out of band.
+
+Measured on the emulated 68020 floor, before → after:
+
+| | 100 Hz `UNIT_MICROHZ` | 50 Hz VBlank + E-Clock |
+|---|---|---|
+| clock drift | **−5.40%** | **−0.04%** (self-measured 49.98 Hz) |
+| wakeups/s actually delivered | 94.7 (5% silently lost) | 49.5 |
+| µs per wakeup | 463 | 390 |
+| **CPU spent on the tick** | **4.38%** | **1.93%** |
+
+Two controls isolate the cause: the same code at 100 Hz on `UNIT_MICROHZ` gives 3000
+ticks and at 50 Hz gives 1507 — **the drift fix is the E-Clock catch-up, not the unit
+change**. The unit change is what buys the CPU saving.
+
+Caveats that emulation cannot settle: RTG itself is untestable under FS-UAE (native PAL
+chipset only), NTSC is untested, and the per-wakeup cost deserves confirmation on real
+iron. Also found on the way: **a `timer.device` request that has been `AbortIO`'d does
+not complete again when re-armed** — recycling one silently killed the ThreadX clock.
+The port no longer aborts and reuses a request.
 | `tx_initialize_low_level.c` | create the tick task, the scheduler lock, adopt the caller |
 
 ### 6.2 ThreadX-on-Exec: the central problem

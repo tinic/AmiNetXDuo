@@ -19,11 +19,21 @@
 
 /* ---------------------------------------------------------------- timing -- */
 
-/* One tick is 10 ms: TX_TIMER_TICKS_PER_SECOND is 100 in tx_port.h and the
-   tick task drives it from timer.device UNIT_MICROHZ.  NetX Duo expresses
-   every one of its own rates as a divisor of this, so it must agree.  */
+/*
+ * One tick is 20 ms.  THIS MUST EQUAL TX_TIMER_TICKS_PER_SECOND in
+ * port/threadx-amiga/inc/tx_port.h: NetX Duo expresses every one of its own
+ * rates as a divisor of this, so a disagreement does not fail -- it silently
+ * scales every TCP timer by the ratio.
+ *
+ * 50 Hz rather than 100 because that is what the platform has always run
+ * (AmiTCP and its descendants: `#define hz (50)`) and an order of magnitude
+ * more than the BSD protocol timers above us consume -- pfslowtimo at hz/2
+ * (500 ms) and pffasttimo at hz/5 (200 ms).  The tick task takes its wakeups
+ * from timer.device UNIT_VBLANK and its TIME from ReadEClock(), so the rate is
+ * honest on PAL, NTSC, RTG and accelerated systems alike.
+ */
 
-#define NX_IP_PERIODIC_RATE                     100
+#define NX_IP_PERIODIC_RATE                     50
 
 
 /* --------------------------------------------------------------- packets -- */

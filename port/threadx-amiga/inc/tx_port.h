@@ -307,11 +307,70 @@ void    _tx_amiga_start_interrupts(void);
 #define TX_AMIGA_TIMER_PRIORITY                 20
 #endif
 
-/* timer.device unit.  UNIT_MICROHZ (0) is required for the 100 Hz default;
-   UNIT_VBLANK (1) cannot resolve finer than a display frame.  */
+/* ----------------------------------------------------------- the tick ---- */
+
+/*
+ * 50 Hz, and the wakeup source is NOT the time base.
+ *
+ * Rate: the AmiTCP-derived stacks have run a 50 Hz computational clock since
+ * 1993 (`#define hz (50)`), and 4.4BSD's protocol timers -- which is what a TCP
+ * stack actually consumes ticks for -- are hz/2 (500 ms) and hz/5 (200 ms).
+ * 20 ms of granularity is an order of magnitude finer than anything above us
+ * asks for, at half the wakeups the previous 100 Hz cost.
+ *
+ * NX_IP_PERIODIC_RATE in port/netxduo-amiga/inc/nx_user.h MUST equal this.
+ * NetX Duo derives every one of its own timeouts from it, so a disagreement
+ * scales every TCP timer by the ratio rather than failing loudly.
+ *
+ * Source vs. time base: the tick task wakes on timer.device UNIT_VBLANK, but
+ * it does not COUNT those wakeups -- it reads ReadEClock() and works out how
+ * many 20 ms periods have really elapsed.  VBlank is 50 Hz PAL and 60 Hz NTSC,
+ * and under RTG (Picasso96/CyberGraphX), on PiStorm/Emu68 and inside emulators
+ * its relationship to real time is not ours to rely on.  The E-Clock is
+ * CIA-derived, is independent of the display, and reports its own frequency,
+ * so it is correct on all of them.  A wakeup that is late or coalesced
+ * delivers the arrears; one that is early delivers nothing.
+ */
+
+#ifndef TX_TIMER_TICKS_PER_SECOND
+#define TX_TIMER_TICKS_PER_SECOND               (50UL)
+#endif
+
+/* timer.device unit for the wakeup source.  UNIT_VBLANK (1) rides the vertical
+   blank interrupt the machine is already taking, so a request costs a list
+   insertion rather than a CIA timer reload; UNIT_MICROHZ (0) is the fallback
+   the port selects at run time if VBlank wakeups turn out not to arrive.  */
 
 #ifndef TX_AMIGA_TIMER_UNIT
-#define TX_AMIGA_TIMER_UNIT                     0
+#define TX_AMIGA_TIMER_UNIT                     1
+#endif
+
+/* Most ticks one wakeup may deliver.  A Forbid()-heavy section, a disk access
+   or an emulator host hiccup can stall the tick task for a long time; without
+   a cap the catch-up would then fire thousands of timer callbacks back to back
+   with the core lock held, which is far worse than the lost time.  8 ticks is
+   160 ms -- comfortably more than any stall the port causes itself, and still
+   below BSD's 200 ms fast timer.  Beyond the cap the port RESYNCS (it drops
+   the arrears rather than paying them off over the following seconds) and
+   counts the event; tx_amiga_tick_stats() reports it.  */
+
+#ifndef TX_AMIGA_TIMER_MAX_CATCHUP
+#define TX_AMIGA_TIMER_MAX_CATCHUP              8UL
+#endif
+
+/* Startup validation window for the wakeup source, in milliseconds, and the
+   rate band a usable source must fall in.  50 Hz PAL and 60 Hz NTSC both sit
+   inside 30..120; a source that answers instantly (a spin) or not at all
+   fails and gets us onto UNIT_MICROHZ instead.  */
+
+#ifndef TX_AMIGA_TIMER_PROBE_MS
+#define TX_AMIGA_TIMER_PROBE_MS                 250UL
+#endif
+#ifndef TX_AMIGA_TIMER_PROBE_MIN_HZ
+#define TX_AMIGA_TIMER_PROBE_MIN_HZ             30UL
+#endif
+#ifndef TX_AMIGA_TIMER_PROBE_MAX_HZ
+#define TX_AMIGA_TIMER_PROBE_MAX_HZ             120UL
 #endif
 
 

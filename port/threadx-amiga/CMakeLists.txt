@@ -19,13 +19,20 @@ add_library(threadx_port STATIC
 
 target_include_directories(threadx_port
     PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/inc"
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+            "${CMAKE_SOURCE_DIR}/include")
 
 if(AMIGA_NDK_INCLUDE)
     target_include_directories(threadx_port PRIVATE "${AMIGA_NDK_INCLUDE}")
 endif()
 
 target_link_libraries(threadx_port PUBLIC threadx)
+
+# The tick task reports its wakeup source, its fallback and its stalls through
+# ami_log().  That is a real dependency on aminetxduo_common, and declaring it
+# is what makes CMake repeat the archive after threadx_port on the link line --
+# several targets list aminetxduo_common first, where ld would never find it.
+target_link_libraries(threadx_port PRIVATE aminetxduo_common)
 
 # threadx and threadx_port genuinely depend on each other (the core calls the
 # port, the port calls the core).  Declaring the cycle makes CMake repeat both

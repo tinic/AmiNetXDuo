@@ -124,7 +124,7 @@ extern volatile UINT    _tx_amiga_timer_stop;
 
 /* ---------------------------------------------------------------- tuning -- */
 
-#define S_TPS               ((ULONG) TX_TIMER_TICKS_PER_SECOND)   /* 100 Hz */
+#define S_TPS               ((ULONG) TX_TIMER_TICKS_PER_SECOND)
 
 #ifndef S_SOAK_SECONDS
 #define S_SOAK_SECONDS      30UL
@@ -2298,7 +2298,9 @@ struct EClockVal ev;
         ULONG actual;
         ULONG drift;
 
-        expected =  (wall_ms / 10UL);
+        /* Derive from S_TPS -- hardcoding 10 ms per tick silently breaks the
+           moment TX_TIMER_TICKS_PER_SECOND changes (it did: 100 -> 50). */
+        expected =  (wall_ms / (1000UL / S_TPS));
         actual   =  end_tick - start_tick;
         drift    =  (actual > expected) ? (actual - expected) : (expected - actual);
         (VOID) S_CHECK((expected == 0UL) || ((drift * 100UL) <= (expected * 10UL)),
