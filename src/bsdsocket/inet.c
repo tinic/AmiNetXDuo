@@ -10,6 +10,22 @@
 
 #include "bsdsocket_vectors.h"
 
+#ifdef AMINETXDUO_IPV6
+/*
+ * The IPv6 text conversions are src/config/config_text.c's -- the same
+ * routines the DEVS:NetInterfaces parser uses for ADDRESS6.  That is
+ * deliberate rather than convenient: an address that the config file accepts
+ * and inet_pton() rejects (or that inet_ntop() prints in a form the config
+ * file will not read back) is a bug that only shows up on someone else's
+ * machine, and the one way to be sure it cannot happen is to have one parser.
+ *
+ * The dialect difference between the two callers -- the config file takes a
+ * "/prefixlen" suffix and inet_pton() must not -- is expressed by passing NULL
+ * for the prefix output, not by having two parsers.
+ */
+#include "aminetxduo/config.h"
+#endif
+
 #ifndef INADDR_NONE
 #  define INADDR_NONE   0xffffffffUL
 #endif
@@ -294,6 +310,31 @@ STRPTR bsd_inet_ntop(register LONG af      __asm("d0"),
         return NULL;
     }
 
+#ifdef AMINETXDUO_IPV6
+    if (af == AF_INET6)
+    {
+        char  text[AMI_INET6_ADDRSTRLEN];
+        ULONG words[4];
+        ULONG n;
+
+        bsd_in6_to_words((const UBYTE *)src, words);
+        ami_config_format_ip6(words, text, sizeof(text));
+
+        for (n = 0; text[n] != '\0'; n++)
+            ;
+
+        if (size <= (LONG)n)
+        {
+            bsd_set_errno(SocketBase, AMI_ENOSPC);
+            return NULL;
+        }
+
+        bsd_bcopy(text, dst, n + 1);
+
+        return dst;
+    }
+#endif
+
     if (af != AF_INET)
     {
         bsd_set_errno(SocketBase, AMI_EAFNOSUPPORT);
@@ -320,6 +361,29 @@ LONG bsd_inet_pton(register LONG af    __asm("d0"),
 {
     ULONG addr;
     LONG  parts = 0;
+
+#ifdef AMINETXDUO_IPV6
+    if (af == AF_INET6)
+    {
+        ULONG words[4];
+
+        if (src == NULL || dst == NULL)
+        {
+            bsd_set_errno(SocketBase, AMI_EFAULT);
+            return -1;
+        }
+
+        /* NULL prefix output == strict mode: "fe80::1/64" is not an address.
+           A malformed address is 0, not -1: -1 is reserved for a family this
+           function does not know, which is what POSIX specifies. */
+        if (!ami_config_parse_ip6((const char *)src, words, NULL))
+            return 0;
+
+        bsd_words_to_in6(words, (UBYTE *)dst);
+
+        return 1;
+    }
+#endif
 
     if (af != AF_INET)
     {

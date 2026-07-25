@@ -11,7 +11,7 @@
  * the two after gethostbyaddr_r) and every vector we have not implemented
  * yet point at bsd_enosys() rather than NULL.
  *
- * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 66 implemented, 73 stubbed (10 of them NULL-returning, 1 FALSE-returning).
+ * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 70 implemented, 69 stubbed (9 of them NULL-returning, 1 FALSE-returning).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -159,10 +159,10 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_enosys,             /* -0x312 [130] ipf_log_data_waiting */
     (APTR)bsd_enosys,             /* -0x318 [131] ipf_set_notify_mask */
     (APTR)bsd_enosys,             /* -0x31e [132] ipf_set_interrupt_mask */
-    (APTR)bsd_enosys,             /* -0x324 [133] freeaddrinfo */
-    (APTR)bsd_enosys,             /* -0x32a [134] getaddrinfo */
-    (APTR)bsd_enosys_ptr,         /* -0x330 [135] gai_strerror */
-    (APTR)bsd_enosys,             /* -0x336 [136] getnameinfo */
+    (APTR)bsd_freeaddrinfo,       /* -0x324 [133] freeaddrinfo */
+    (APTR)bsd_getaddrinfo,        /* -0x32a [134] getaddrinfo */
+    (APTR)bsd_gai_strerror,       /* -0x330 [135] gai_strerror */
+    (APTR)bsd_getnameinfo,        /* -0x336 [136] getnameinfo */
     (APTR)bsd_enosys,                    /* -0x33c [137] reserved */
     (APTR)bsd_enosys,                    /* -0x342 [138] reserved */
     (APTR)bsd_enosys,                    /* -0x348 [139] reserved */

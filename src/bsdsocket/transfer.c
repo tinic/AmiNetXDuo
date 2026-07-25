@@ -299,7 +299,7 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
 
 static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags,
-                         ULONG addr, UINT port)
+                         const NXD_ADDRESS *addr, UINT port)
 {
     NX_PACKET_POOL *pool   = netstack_pool();
     NX_PACKET      *packet = NX_NULL;
@@ -342,7 +342,9 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_ENOBUFS);
     }
 
-    status = nx_udp_socket_send(&sock->as_Nx.udp, packet, addr, port);
+    /* nxd_, not nx_: the v4 wrapper wraps the address and calls this. */
+    status = nxd_udp_socket_send(&sock->as_Nx.udp, packet,
+                                 (NXD_ADDRESS *)addr, port);
     if (status != NX_SUCCESS)
     {
         nx_packet_release(packet);
@@ -478,11 +480,12 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
                          struct sockaddr *from, socklen_t *fromlen,
                          BOOL *truncated)
 {
-    NX_PACKET *packet = NX_NULL;
-    ULONG      src_ip = 0, length, taken = 0;
-    UINT       src_port = 0;
-    UINT       status;
-    BOOL       peek = ((flags & MSG_PEEK) != 0);
+    NX_PACKET  *packet = NX_NULL;
+    NXD_ADDRESS src_ip;
+    ULONG       length, taken = 0;
+    UINT        src_port = 0;
+    UINT        status;
+    BOOL        peek = ((flags & MSG_PEEK) != 0);
 
     if (truncated != NULL)
         *truncated = FALSE;
@@ -506,7 +509,9 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
         }
     }
 
-    nx_udp_source_extract(packet, &src_ip, &src_port);
+    /* nxd_, not nx_: nx_udp_source_extract() reports 0.0.0.0 for a datagram
+       that arrived over IPv6. */
+    nxd_udp_source_extract(packet, &src_ip, &src_port);
 
     length = bsd_packet_len(packet);
 
@@ -537,7 +542,7 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
         *truncated = TRUE;
 
     if (from != NULL && fromlen != NULL)
-        bsd_sockaddr_out(from, fromlen, src_ip, src_port);
+        bsd_sockaddr_put(sock, from, fromlen, &src_ip, src_port);
 
     if (peek)
     {
@@ -564,7 +569,7 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
  */
 static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
                          const struct iovec *iov, LONG iovcnt, LONG len,
-                         LONG flags, ULONG addr, UINT port)
+                         LONG flags, const NXD_ADDRESS *addr, UINT port)
 {
     BsdIovCursor cur;
     LONG         result;
@@ -600,7 +605,7 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
     {
         result = bsd_recv_tcp(base, sock, &cur, len, flags);
         if (result >= 0 && from != NULL && fromlen != NULL)
-            bsd_sockaddr_out(from, fromlen, sock->as_PeerAddr,
+            bsd_sockaddr_put(sock, from, fromlen, &sock->as_PeerAddr,
                              sock->as_PeerPort);
         if (truncated != NULL)
             *truncated = FALSE;         /* a stream never truncates */
@@ -614,6 +619,41 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
     bsd_nx_leave(base);
 
     return result;
+}
+
+/*
+ * The destination a sendto()/sendmsg() supplied has to belong to the same
+ * family as the socket. 0 = ok, -1 = errno set.
+ *
+ * The one interesting case is a v4-mapped destination on a dual-stack socket:
+ * bsd_addr_normalise() turns ::ffff:a.b.c.d into a plain IPv4 address, because
+ * NetX Duo would otherwise put the mapped form in an IPv6 header and send it
+ * to a host that has no IPv6 at all.
+ */
+static LONG bsd_dest_check(struct AmiSocketBase *base, AmiSocket *sock,
+                           NXD_ADDRESS *addr)
+{
+#ifdef AMINETXDUO_IPV6
+    if ((sock->as_Flags & ASF_INET6) != 0)
+    {
+        if (addr->nxd_ip_version != NX_IP_VERSION_V6)
+            return bsd_fail(base, AMI_EAFNOSUPPORT);
+
+        if (!bsd_addr_normalise(sock, addr))
+            return bsd_fail(base, AMI_ENETUNREACH);
+
+        return 0;
+    }
+
+    if (addr->nxd_ip_version == NX_IP_VERSION_V6)
+        return bsd_fail(base, AMI_EAFNOSUPPORT);
+#else
+    (VOID)base;
+    (VOID)sock;
+    (VOID)addr;
+#endif
+
+    return 0;
 }
 
 /* Common argument checks for every send/recv shape. 0 = ok, -1 = errno set. */
@@ -664,7 +704,7 @@ LONG bsd_send(register LONG sock_fd __asm("d0"),
     iov.iov_len  = (size_t)len;
 
     return bsd_send_iov(SocketBase, sock, &iov, 1, len, flags,
-                        sock->as_PeerAddr, sock->as_PeerPort);
+                        &sock->as_PeerAddr, sock->as_PeerPort);
 }
 
 LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
@@ -677,7 +717,7 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
 {
     AmiSocket    *sock = bsd_lookup(SocketBase, sock_fd);
     struct iovec  iov;
-    ULONG         addr = 0;
+    NXD_ADDRESS   addr;
     UINT          port = 0;
 
     if (bsd_transfer_check(SocketBase, sock, len, flags) != 0)
@@ -685,6 +725,8 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
 
     if (buf == NULL && len > 0)
         return bsd_fail(SocketBase, AMI_EFAULT);
+
+    bsd_addr_from_v4(&addr, 0UL);
 
     /* A destination on a connected stream socket is ignored, as in BSD. */
     if ((sock->as_Flags & ASF_TCP) == 0)
@@ -697,7 +739,12 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
             addr = sock->as_PeerAddr;
             port = sock->as_PeerPort;
         }
-        else if (bsd_sockaddr_in(SocketBase, to, tolen, &addr, &port) != 0)
+        else if (bsd_sockaddr_get(SocketBase, to, tolen, &addr, &port,
+                                  NULL) != 0)
+        {
+            return -1;
+        }
+        else if (bsd_dest_check(SocketBase, sock, &addr) != 0)
         {
             return -1;
         }
@@ -706,7 +753,7 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
     iov.iov_base = buf;
     iov.iov_len  = (size_t)len;
 
-    return bsd_send_iov(SocketBase, sock, &iov, 1, len, flags, addr, port);
+    return bsd_send_iov(SocketBase, sock, &iov, 1, len, flags, &addr, port);
 }
 
 LONG bsd_recv(register LONG sock_fd __asm("d0"),
@@ -779,10 +826,10 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
                  register LONG flags          __asm("d1"),
                  register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
-    ULONG      addr = 0;
-    UINT       port = 0;
-    LONG       total;
+    AmiSocket  *sock = bsd_lookup(SocketBase, sock_fd);
+    NXD_ADDRESS addr;
+    UINT        port = 0;
+    LONG        total;
 
     if (bsd_transfer_check(SocketBase, sock, 0, flags) != 0)
         return -1;
@@ -794,6 +841,8 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
     if (total < 0)
         return bsd_fail(SocketBase, AMI_EINVAL);
 
+    bsd_addr_from_v4(&addr, 0UL);
+
     if ((sock->as_Flags & ASF_TCP) == 0)
     {
         if (msg->msg_name == NULL)
@@ -804,17 +853,21 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
             addr = sock->as_PeerAddr;
             port = sock->as_PeerPort;
         }
-        else if (bsd_sockaddr_in(SocketBase,
-                                 (const struct sockaddr *)msg->msg_name,
-                                 (socklen_t)msg->msg_namelen,
-                                 &addr, &port) != 0)
+        else if (bsd_sockaddr_get(SocketBase,
+                                  (const struct sockaddr *)msg->msg_name,
+                                  (socklen_t)msg->msg_namelen,
+                                  &addr, &port, NULL) != 0)
+        {
+            return -1;
+        }
+        else if (bsd_dest_check(SocketBase, sock, &addr) != 0)
         {
             return -1;
         }
     }
 
     return bsd_send_iov(SocketBase, sock, msg->msg_iov,
-                        (LONG)msg->msg_iovlen, total, flags, addr, port);
+                        (LONG)msg->msg_iovlen, total, flags, &addr, port);
 }
 
 LONG bsd_recvmsg(register LONG sock_fd        __asm("d0"),

@@ -4,6 +4,19 @@ project(AmiNetXDuo C ASM)
 # ---------------------------------------------------------------- options ---
 
 option(AMINETXDUO_IPV6 "Build the IPv6 dual stack"                    OFF)
+
+# AMINETXDUO_IPV6 is GLOBAL, deliberately, and must stay that way.
+#
+# nx_user.h turns it into NX_DISABLE_IPV6 (or not), and NX_DISABLE_IPV6 decides
+# FEATURE_NX_IPV6, which changes the layout of NX_IP, NX_INTERFACE, NX_PACKET
+# and NX_TCP_SOCKET. A single translation unit compiled with a different answer
+# from the rest of the tree does not fail to link -- it reads the wrong offsets
+# out of a shared struct. It used to be set per-target on aminetxduo_sana2
+# only, which meant the SANA-II shim saw a different NX_IP from the NetX Duo
+# core it was driving.
+if(AMINETXDUO_IPV6)
+    add_compile_definitions(AMINETXDUO_IPV6)
+endif()
 option(AMINETXDUO_TLS  "Build the nx_secure TLS library (68030+)"     OFF)
 option(AMINETXDUO_BPF  "Build the bpf_* raw path and filter VM"       ON)
 option(AMINETXDUO_TESTS "Build the on-Amiga test harnesses"           ON)

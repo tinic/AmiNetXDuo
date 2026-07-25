@@ -144,7 +144,112 @@
  */
 #ifndef AMINETXDUO_IPV6
 #define NX_DISABLE_IPV6
-#endif
+#else
+
+/*
+ * The dual stack, sized for the same 68020/4 MB floor as everything else.
+ * NetX Duo's IPv6 defaults assume an embedded target that has nothing else to
+ * spend RAM on; every table below is a fixed array inside the single NX_IP, so
+ * these are the difference between an NX_IP that costs ~3 KB extra and one
+ * that costs ~9 KB.  Measured with sizeof(NX_IP) at build time.
+ */
+
+/*
+ * Neighbour cache (default 16).  This is the IPv6 equivalent of the ARP cache,
+ * and it is sized by the same argument: an Amiga on a home LAN talks to a
+ * router and a handful of hosts.  Each ND_CACHE_ENTRY carries a 16-byte
+ * address, a MAC, timers and a queued-packet pointer.
+ */
+#define NX_IPV6_NEIGHBOR_CACHE_SIZE             8
+
+/*
+ * Destination cache (default 8).  One entry per off-link destination in use;
+ * four matches NX_IP_ROUTING_TABLE_SIZE above, which is the IPv4 equivalent
+ * decision.
+ */
+#define NX_IPV6_DESTINATION_TABLE_SIZE          4
+
+/*
+ * Default router list (default 8).  RFC 4861 requires at least one; a home
+ * link with two advertising routers is already unusual.
+ */
+#define NX_IPV6_DEFAULT_ROUTER_TABLE_SIZE       2
+
+/* On-link prefix list (default 8).  One RA typically advertises one prefix. */
+#define NX_IPV6_PREFIX_LIST_TABLE_SIZE          4
+
+/*
+ * Addresses per NX_IP.  The default is NX_MAX_PHYSICAL_INTERFACES * 3, which
+ * with two interfaces is 6: link-local + one autoconfigured global + one
+ * static per interface.  That is exactly the budget AmiNetXDuo needs, so the
+ * default stands and is spelled out rather than redefined.
+ *
+ *   NX_MAX_IPV6_ADDRESSES  == NX_MAX_PHYSICAL_INTERFACES * 3 == 6
+ *
+ * ::1 lives in a slot of its own (NX_LOOPBACK_IPV6_ENABLED) and is not
+ * counted here; nxd_ipv6_enable() configures it unconditionally, which is why
+ * loopback IPv6 works with no interface at all.
+ */
+
+/*
+ * Duplicate Address Detection stays ON (NX_DISABLE_IPV6_DAD is NOT defined).
+ *
+ * It costs three neighbour solicitations and roughly one second per address
+ * before that address becomes usable, which is a real delay at startup.  It is
+ * kept because the alternative is silently sharing an address with another
+ * host on the link -- and because it is the one part of neighbour discovery
+ * that exercises solicited-node multicast on every boot, so turning it off
+ * would also remove the only routine test of the S2_ADDMULTICASTADDRESS path
+ * in src/sana2/.
+ */
+
+/*
+ * Router solicitation stays ON (NX_DISABLE_ICMPV6_ROUTER_SOLICITATION is NOT
+ * defined): stateless autoconfiguration is the configuration mode this port
+ * expects to be used on a real network, and it starts with an RS.
+ */
+
+/*
+ * Make stateless autoconfiguration switchable per interface.
+ *
+ * Without this, SLAAC is UNCONDITIONAL: nx_icmpv6_process_ra.c forms a global
+ * address from any advertised prefix and does not consult a status flag, and
+ * nxd_ipv6_stateless_address_autoconfig_{enable,disable}() compile to stubs
+ * returning NX_NOT_SUPPORTED.  CONFIGURE6=LINKLOCAL and CONFIGURE6=STATIC
+ * would then be lies -- an interface configured either way would still take a
+ * global address off the wire the moment a router advertised one.
+ *
+ * Cost: one ULONG per NX_INTERFACE (8 bytes across the two we allow) and one
+ * comparison per prefix option in a received router advertisement.  The
+ * default when the field is zeroed is ENABLED (0), which is why AUTO works
+ * without calling enable() at all -- but src/netstack/netstack_ipv6.c calls it
+ * anyway, so the intent is in the code rather than in the initialisation.
+ */
+#define NX_IPV6_STATELESS_AUTOCONFIG_CONTROL
+
+/*
+ * Deliberately NOT set, and why:
+ *
+ *   NX_ENABLE_IPV6_MULTICAST     -- the application-level
+ *                                   nxd_ipv6_multicast_interface_join() API.
+ *                                   Neighbour discovery does not need it:
+ *                                   solicited-node group joins go through
+ *                                   _nx_ipv6_multicast_join() from
+ *                                   nxd_ipv6_address_set(), which reaches the
+ *                                   driver as NX_LINK_MULTICAST_JOIN either
+ *                                   way.  Nothing in bsdsocket.library exposes
+ *                                   IPv6 multicast membership yet, so this
+ *                                   would be code with no caller.
+ *   NX_ENABLE_IPV6_PATH_MTU_DISCOVERY -- adds a periodic sweep of the
+ *                                   destination table for a benefit that only
+ *                                   shows up on paths with a smaller MTU than
+ *                                   the 1500 a SANA-II Ethernet device
+ *                                   reports.
+ *   NX_IPSEC_ENABLE              -- out of scope; §9 decision 4 lists the four
+ *                                   optional subsystems and this is not one.
+ */
+
+#endif /* AMINETXDUO_IPV6 */
 
 
 /*

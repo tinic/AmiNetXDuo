@@ -282,6 +282,228 @@ static void test_ip(void)
     CHECK(!ami_cfg_parse_net_number("cheese", &addr));
 }
 
+
+#ifdef AMINETXDUO_IPV6
+
+/* Four host-order ULONGs from eight groups, for the expectations below. */
+#define IP6(a, b, c, d, e, f, g, h)                                          \
+    { ((ULONG)(a) << 16) | (ULONG)(b), ((ULONG)(c) << 16) | (ULONG)(d),      \
+      ((ULONG)(e) << 16) | (ULONG)(f), ((ULONG)(g) << 16) | (ULONG)(h) }
+
+static int ip6_equal(const ULONG got[4], const ULONG want[4])
+{
+    return got[0] == want[0] && got[1] == want[1] &&
+           got[2] == want[2] && got[3] == want[3];
+}
+
+static void test_ip6(void)
+{
+    ULONG addr[4];
+    ULONG prefix;
+    char  text[AMI_CFG_IP6_STRLEN];
+
+    printf("ipv6 addresses\n");
+
+    /* ---- the grammar, accepted ---------------------------------------- */
+    {
+        static const ULONG full[4] =
+            IP6(0x2001, 0x0db8, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0001);
+
+        CHECK(ami_config_parse_ip6("2001:db8:0:0:0:0:0:1", addr, NULL));
+        CHECK(ip6_equal(addr, full));
+
+        CHECK(ami_config_parse_ip6("2001:0db8:0000:0000:0000:0000:0000:0001",
+                                   addr, NULL));
+        CHECK(ip6_equal(addr, full));
+
+        CHECK(ami_config_parse_ip6("2001:db8::1", addr, NULL));
+        CHECK(ip6_equal(addr, full));
+
+        CHECK(ami_config_parse_ip6("2001:DB8::1", addr, NULL));
+        CHECK(ip6_equal(addr, full));
+    }
+
+    {
+        static const ULONG loop[4] = IP6(0, 0, 0, 0, 0, 0, 0, 1);
+        static const ULONG any[4]  = IP6(0, 0, 0, 0, 0, 0, 0, 0);
+        static const ULONG lead[4] = IP6(0, 0, 0, 0, 0, 0, 0, 0x1234);
+        static const ULONG trail[4] =
+            IP6(0xfe80, 0, 0, 0, 0, 0, 0, 0);
+
+        CHECK(ami_config_parse_ip6("::1", addr, NULL));
+        CHECK(ip6_equal(addr, loop));
+
+        CHECK(ami_config_parse_ip6("::", addr, NULL));
+        CHECK(ip6_equal(addr, any));
+
+        CHECK(ami_config_parse_ip6("::1234", addr, NULL));
+        CHECK(ip6_equal(addr, lead));
+
+        CHECK(ami_config_parse_ip6("fe80::", addr, NULL));
+        CHECK(ip6_equal(addr, trail));
+    }
+
+    /* A trailing dotted quad, which is what makes v4-mapped writable. */
+    {
+        static const ULONG mapped[4] =
+            IP6(0, 0, 0, 0, 0, 0xffff, 0xc0a8, 0x0101);
+
+        CHECK(ami_config_parse_ip6("::ffff:192.168.1.1", addr, NULL));
+        CHECK(ip6_equal(addr, mapped));
+    }
+
+    /* A link-local address as the RAM-driver test produces it. */
+    {
+        static const ULONG ll[4] =
+            IP6(0xfe80, 0, 0, 0, 0x0211, 0x22ff, 0xfe33, 0x4456);
+
+        CHECK(ami_config_parse_ip6("fe80::211:22ff:fe33:4456", addr, NULL));
+        CHECK(ip6_equal(addr, ll));
+    }
+
+    /* ---- the grammar, rejected ---------------------------------------- */
+
+    CHECK(!ami_config_parse_ip6("", addr, NULL));
+    CHECK(!ami_config_parse_ip6(":", addr, NULL));
+    CHECK(!ami_config_parse_ip6(":::", addr, NULL));
+    CHECK(!ami_config_parse_ip6("1:2:3:4:5:6:7", addr, NULL));   /* too short */
+    CHECK(!ami_config_parse_ip6("1:2:3:4:5:6:7:8:9", addr, NULL)); /* too long */
+    CHECK(!ami_config_parse_ip6("1::2::3", addr, NULL));         /* two runs */
+    CHECK(!ami_config_parse_ip6("1:2:3:4:5:6:7::8", addr, NULL));/* empty run */
+    CHECK(!ami_config_parse_ip6("12345::1", addr, NULL));        /* 5 digits */
+    CHECK(!ami_config_parse_ip6("::g", addr, NULL));
+    CHECK(!ami_config_parse_ip6("2001:db8::1:", addr, NULL));
+    CHECK(!ami_config_parse_ip6("192.168.1.1", addr, NULL));
+    CHECK(!ami_config_parse_ip6("::ffff:192.168.1.256", addr, NULL));
+
+    /* ---- the two dialects --------------------------------------------- */
+
+    /* inet_pton() must not accept a prefix; the config file must. */
+    CHECK(!ami_config_parse_ip6("2001:db8::1/64", addr, NULL));
+
+    prefix = 64;
+    CHECK(ami_config_parse_ip6("2001:db8::1/48", addr, &prefix));
+    CHECK(prefix == 48);
+
+    prefix = 64;
+    CHECK(ami_config_parse_ip6("2001:db8::1", addr, &prefix));
+    CHECK(prefix == 64);                    /* untouched, so the default holds */
+
+    prefix = 64;
+    CHECK(!ami_config_parse_ip6("2001:db8::1/129", addr, &prefix));
+    CHECK(!ami_config_parse_ip6("2001:db8::1/", addr, &prefix));
+
+    /* ---- RFC 5952 output ----------------------------------------------- */
+    {
+        static const ULONG cases[][4] = {
+            IP6(0, 0, 0, 0, 0, 0, 0, 0),
+            IP6(0, 0, 0, 0, 0, 0, 0, 1),
+            IP6(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1),
+            IP6(0xfe80, 0, 0, 0, 0x0211, 0x22ff, 0xfe33, 0x4456),
+            IP6(0x2001, 0x0db8, 0, 1, 0, 0, 0, 1),
+            IP6(0x2001, 0, 0, 1, 0, 0, 0, 0),
+            IP6(0, 0, 0, 0, 0, 0xffff, 0xc0a8, 0x0101),
+            IP6(1, 2, 3, 4, 5, 6, 7, 8),
+        };
+        static const char *want[] = {
+            "::",
+            "::1",
+            "2001:db8::1",
+            "fe80::211:22ff:fe33:4456",
+            "2001:db8:0:1::1",
+            "2001:0:0:1::",
+            "::ffff:192.168.1.1",
+            "1:2:3:4:5:6:7:8",
+        };
+        size_t i;
+
+        for (i = 0; i < sizeof(want) / sizeof(want[0]); i++)
+        {
+            ami_config_format_ip6(cases[i], text, sizeof(text));
+            CHECK_STR(text, want[i]);
+        }
+    }
+
+    /* Round trip: everything the formatter writes, the parser must read. */
+    {
+        static const ULONG probe[4] =
+            IP6(0x2001, 0x0db8, 0, 1, 0, 0, 0, 1);
+        ULONG back[4];
+
+        ami_config_format_ip6(probe, text, sizeof(text));
+        CHECK(ami_config_parse_ip6(text, back, NULL));
+        CHECK(ip6_equal(back, probe));
+    }
+
+    /* A buffer that cannot hold the longest form yields "", never a
+       truncated address that would parse back as something else. */
+    ami_config_format_ip6(addr, text, 8);
+    CHECK_STR(text, "");
+}
+
+/* ---- CONFIGURE6 / ADDRESS6 / GATEWAY6 in an interface file ------------- */
+
+static const char dual_stack_net[] =
+    "device     = a2065.device\n"
+    "unit       = 0\n"
+    "configure  = dhcp\n"
+    "configure6 = static\n"
+    "address6   = 2001:db8::10/48\n"
+    "gateway6   = fe80::1\n";
+
+static void test_interface_ipv6(void)
+{
+    AmiIfConfig cfg;
+    char        buf[512];
+
+    printf("interface file: dual stack\n");
+
+    strcpy(buf, dual_stack_net);
+    CHECK(ami_cfg_parse_interface("eth0", buf, &cfg) == AMI_CFG_OK);
+    CHECK(cfg.iptype == AMI_IPTYPE_DHCP);
+    CHECK(cfg.ip6type == AMI_IP6TYPE_STATIC);
+    CHECK(cfg.prefix6 == 48);
+    CHECK(cfg.address6[0] == 0x20010db8UL && cfg.address6[3] == 0x10UL);
+    CHECK(cfg.have_gateway6);
+    CHECK(cfg.gateway6[0] == 0xfe800000UL && cfg.gateway6[3] == 1UL);
+
+    /* No IPv6 keyword at all: AUTO, prefix 64, no address, no router. */
+    printf("interface file: ipv6 defaults\n");
+    strcpy(buf, "device=a2065.device\nconfigure=dhcp\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &cfg) == AMI_CFG_OK);
+    CHECK(cfg.ip6type == AMI_IP6TYPE_AUTO);
+    CHECK(cfg.prefix6 == 64);
+    CHECK(!cfg.have_gateway6);
+
+    /* ADDRESS6 with no CONFIGURE6 implies STATIC, as ADDRESS implies a
+       static IPv4 interface. */
+    printf("interface file: address6 implies static\n");
+    strcpy(buf, "device=a2065.device\naddress6=2001:db8::5\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &cfg) == AMI_CFG_OK);
+    CHECK(cfg.ip6type == AMI_IP6TYPE_STATIC);
+    CHECK(cfg.prefix6 == 64);
+
+    /* CONFIGURE6 wins over the implication, whichever order they appear in. */
+    printf("interface file: configure6 wins\n");
+    strcpy(buf, "device=a2065.device\nconfigure6=auto\naddress6=2001:db8::5\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &cfg) == AMI_CFG_OK);
+    CHECK(cfg.ip6type == AMI_IP6TYPE_AUTO);
+
+    /* OFF means off. */
+    printf("interface file: configure6 off\n");
+    strcpy(buf, "device=a2065.device\nconfigure6=off\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &cfg) == AMI_CFG_OK);
+    CHECK(cfg.ip6type == AMI_IP6TYPE_OFF);
+
+    /* STATIC with no address degrades to link-local rather than failing. */
+    printf("interface file: static6 with no address6\n");
+    strcpy(buf, "device=a2065.device\nconfigure6=static\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &cfg) == AMI_CFG_OK);
+    CHECK(cfg.ip6type == AMI_IP6TYPE_LINKLOCAL);
+}
+
+#endif /* AMINETXDUO_IPV6 */
+
 /* A real Roadshow interface file (BlitterStudio/zz9000-drivers). */
 static const char zz9000_net[] =
     "# $VER: ZZ9000Net 1.0 (30.07.2019)\n"
@@ -697,6 +919,10 @@ int main(int argc, char **argv)
 
     test_text_helpers();
     test_ip();
+#ifdef AMINETXDUO_IPV6
+    test_ip6();
+    test_interface_ipv6();
+#endif
     test_interface_roadshow();
     test_interface_static();
     test_interface_amitcp_flavour();

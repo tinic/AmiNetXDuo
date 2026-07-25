@@ -4,10 +4,18 @@
 # kernel, the packet pool, the NX_IP instance, the SANA-II interfaces, the DHCP
 # and AutoIP clients and the DNS resolver.
 
-add_library(aminetxduo_netstack STATIC
+set(NETSTACK_SOURCES
     netstack.c
     netstack_baton.c
     netstack_dns.c)
+
+# The floor build never compiles this file, so IPv6 costs it nothing at all --
+# not even a branch on a "is IPv6 on" flag.
+if(AMINETXDUO_IPV6)
+    list(APPEND NETSTACK_SOURCES netstack_ipv6.c)
+endif()
+
+add_library(aminetxduo_netstack STATIC ${NETSTACK_SOURCES})
 
 target_include_directories(aminetxduo_netstack
     PUBLIC  ${AMINETXDUO_CORE_INCLUDES}

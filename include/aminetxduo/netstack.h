@@ -101,6 +101,51 @@ LONG    netstack_interface_up(UWORD index);
 LONG    netstack_interface_down(UWORD index);
 BOOL    netstack_interface_is_up(UWORD index);
 
+/* ------------------------------------------------------------------ IPv6 --
+ *
+ * Present only in an AMINETXDUO_IPV6 build. The floor build has no IPv6 at
+ * all, so callers ask with #ifdef rather than at run time -- there is no
+ * "IPv6 is compiled in but turned off" state to represent.
+ *
+ * See docs/RESEARCH.md §9 for the configuration model: an interface always
+ * gets its fe80::/64 link-local address (no router, no server, no config
+ * needed), and CONFIGURE6 in DEVS:NetInterfaces/<name> decides whether it also
+ * gets a stateless-autoconfigured or a static global one.
+ */
+#ifdef AMINETXDUO_IPV6
+
+/* TRUE once nxd_ipv6_enable() has succeeded on the singleton's NX_IP. */
+BOOL netstack_ipv6_enabled(VOID);
+
+/*
+ * The interface's addresses, in NetX Duo's four-host-order-ULONG form.
+ * `slot` walks this interface's addresses from 0; returns FALSE when there
+ * are no more. *prefix_out and *state_out may be NULL.
+ *
+ * State is one of NX_IPV6_ADDR_STATE_* -- an address that is still TENTATIVE
+ * is undergoing duplicate address detection and must not be used as a source.
+ */
+BOOL netstack_ipv6_address_get(UWORD interface_index, UWORD slot,
+                               ULONG addr_out[4], ULONG *prefix_out,
+                               ULONG *state_out);
+
+/*
+ * The best source address for talking to `dest`, which is what an AF_INET6
+ * socket bound to in6addr_any reports from getsockname(). Returns FALSE when
+ * the interface has no usable (non-tentative) address of the right scope.
+ */
+BOOL netstack_ipv6_source_for(const ULONG dest[4], ULONG addr_out[4]);
+
+/*
+ * AAAA lookup. Same contract as netstack_resolve(), with one difference worth
+ * knowing: DEVS:Internet/hosts is not consulted, because the netdb store has
+ * no way to hold an IPv6 address. See the comment in netstack_dns.c.
+ */
+LONG netstack_resolve6(const char *name, ULONG addr_out[4],
+                       ULONG timeout_ticks);
+
+#endif /* AMINETXDUO_IPV6 */
+
 /*
  * Resolver. Implemented over NetX Duo addons/dns; used by gethostbyname and
  * friends in bsdsocket.library. Blocking, with the timeout in ticks.

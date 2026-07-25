@@ -79,7 +79,18 @@ struct AmiNetStack
 
     NX_DNS              ns_Dns;
     BOOL                ns_DnsCreated;
+
+#ifdef AMINETXDUO_IPV6
+    BOOL                ns_Ipv6Enabled;
+#endif
 };
+
+#ifdef AMINETXDUO_IPV6
+/* netstack_ipv6.c -- run from ami_ns_create_ip()/ami_ns_configure_addresses()
+   at the points marked there, and from nowhere else. */
+LONG ami_netstack_ipv6_enable(AmiNetStack *ns);
+VOID ami_netstack_ipv6_configure(AmiNetStack *ns);
+#endif
 
 /* ------------------------------------------------------------- baton hooks */
 

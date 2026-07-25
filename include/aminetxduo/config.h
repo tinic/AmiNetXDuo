@@ -31,6 +31,31 @@ typedef enum {
     AMI_IPTYPE_LINKLOCAL        /* RFC 3927, used as DHCP fallback */
 } AmiIpType;
 
+/*
+ * How an interface gets its IPv6 addresses. Every mode except OFF configures
+ * the fe80::/64 link-local address derived from the MAC (RFC 4291 modified
+ * EUI-64) -- that one needs no router, no server and no configuration, and is
+ * the only mode guaranteed to work on an isolated Amiga.
+ */
+typedef enum {
+    AMI_IP6TYPE_OFF = 0,        /* no IPv6 on this interface                  */
+    AMI_IP6TYPE_LINKLOCAL,      /* fe80::/64 from the MAC, nothing else       */
+    AMI_IP6TYPE_AUTO,           /* link-local + RFC 4862 SLAAC from RAs       */
+    AMI_IP6TYPE_STATIC          /* link-local + the configured global address */
+} AmiIp6Type;
+
+/*
+ * An IPv6 address as four ULONGs in HOST byte order, [0] most significant.
+ * This is NetX Duo's own representation (NXD_ADDRESS.nxd_ip_address.v6), and
+ * matching it means no conversion anywhere between the config file and the
+ * stack. It is NOT the byte order of struct in6_addr -- src/bsdsocket/ has the
+ * conversion, which on m68k is a straight copy but is spelled out anyway.
+ */
+#define AMI_CFG_IP6_WORDS           4
+
+/* Longest RFC 5952 text form plus NUL: "0:0:0:0:0:ffff:255.255.255.255". */
+#define AMI_CFG_IP6_STRLEN          46
+
 typedef struct AmiIfConfig {
     char        name[AMI_CFG_NAME_LEN];      /* interface name, e.g. "eth0"      */
     char        device[AMI_CFG_PATH_LEN];    /* SANA-II device, e.g. "a2065.device" */
@@ -42,6 +67,18 @@ typedef struct AmiIfConfig {
     ULONG       mtu;                         /* 0 = ask the driver               */
     BOOL        up;                          /* bring online at startup          */
     BOOL        configured;                  /* slot in use                      */
+
+    /*
+     * IPv6. These fields exist in both build configurations so that one config
+     * file, and one AmiConfig, work whether or not the stack was built with
+     * AMINETXDUO_IPV6 -- only the parser and the netstack act on them. In the
+     * floor build ip6type is always AMI_IP6TYPE_OFF.
+     */
+    AmiIp6Type  ip6type;
+    ULONG       address6[AMI_CFG_IP6_WORDS]; /* static global address            */
+    ULONG       prefix6;                     /* its prefix length, default 64    */
+    ULONG       gateway6[AMI_CFG_IP6_WORDS]; /* static default router            */
+    BOOL        have_gateway6;
 } AmiIfConfig;
 
 typedef struct AmiResolverConfig {
@@ -78,6 +115,30 @@ LONG ami_config_load_interface(const char *name, AmiIfConfig *out);
 /* Dotted-quad <-> ULONG (host byte order). Returns FALSE on malformed input. */
 BOOL  ami_config_parse_ip(const char *text, ULONG *out);
 VOID  ami_config_format_ip(ULONG addr, char *buf, ULONG buflen);
+
+/*
+ * RFC 4291 text form <-> four host-order ULONGs.
+ *
+ * ami_config_parse_ip6() accepts the full grammar: eight groups, "::" run
+ * compression (at most one), and a trailing dotted quad ("::ffff:10.0.0.1").
+ * Leading zeroes inside a group are allowed, more than four hex digits is not.
+ *
+ * `prefix_out` selects the dialect, which is the whole reason the two callers
+ * can share one parser:
+ *   - non-NULL: a "/N" suffix is accepted and written there (N in 0..128).
+ *     Without a suffix the value is left untouched, so the caller pre-seeds
+ *     its default. This is the config-file dialect.
+ *   - NULL: a '/' is a syntax error. This is inet_pton()'s dialect.
+ *
+ * ami_config_format_ip6() writes the RFC 5952 canonical form: lower-case hex,
+ * no leading zeroes, "::" over the longest run of two or more zero groups
+ * (leftmost wins a tie), and the IPv4 dotted form for v4-mapped addresses.
+ * `buflen` must be at least AMI_CFG_IP6_STRLEN; anything shorter yields "".
+ */
+BOOL  ami_config_parse_ip6(const char *text, ULONG out[AMI_CFG_IP6_WORDS],
+                           ULONG *prefix_out);
+VOID  ami_config_format_ip6(const ULONG addr[AMI_CFG_IP6_WORDS],
+                            char *buf, ULONG buflen);
 
 /* ------------------------------------------------------------------ netdb */
 

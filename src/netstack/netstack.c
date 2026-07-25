@@ -326,9 +326,24 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
     if (status != NX_SUCCESS)
         AMI_WARN("netstack: nx_udp_enable failed (%ld)", (long)status);
 
+#ifdef AMINETXDUO_IPV6
+    /*
+     * The dual stack. nxd_icmp_enable() covers ICMPv4 as well, so it replaces
+     * the nx_icmp_enable() below rather than adding to it -- calling both
+     * would return NX_ALREADY_ENABLED from the second, harmlessly, but the
+     * intent would be unclear.
+     *
+     * This must happen before the interfaces are attached below: address
+     * configuration in ami_netstack_ipv6_configure() joins solicited-node
+     * multicast groups, and those joins reach a driver that has to be there.
+     */
+    if (ami_netstack_ipv6_enable(ns) != AMI_NET_OK)
+        AMI_WARN("netstack: continuing with IPv4 only");
+#else
     status = nx_icmp_enable(&ns->ns_Ip);
     if (status != NX_SUCCESS)
         AMI_WARN("netstack: nx_icmp_enable failed (%ld)", (long)status);
+#endif
 
     /* Secondary interfaces. nx_ip_interface_attach() drives the driver from
        this context, so the binding must exist first here too. */
@@ -506,6 +521,25 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
             resolved = (status == NX_SUCCESS) ? TRUE : FALSE;
         }
     }
+
+#ifdef AMINETXDUO_IPV6
+    /*
+     * IPv6 addressing runs after the IPv4 block and is never waited for.
+     *
+     * The link-local address is up before this returns (DAD is waited on
+     * inside), which is enough for every IPv6 socket call to have a source
+     * address. A global address from a router advertisement may take a second
+     * or two more to arrive, and blocking startup on a router that may not
+     * exist would make every IPv6 build slower to boot than the floor one for
+     * no benefit. netstack_ipv6_address_get() reports what has arrived.
+     *
+     * Consequently `resolved` -- which is about IPv4 and gates the
+     * AMI_NET_ERR_CONFIG return -- is deliberately not touched here. A machine
+     * with IPv6 and no IPv4 address still reports "no interface has an
+     * address", because that is what every IPv4 caller will find.
+     */
+    ami_netstack_ipv6_configure(ns);
+#endif
 
     {
         ULONG addr = 0UL;

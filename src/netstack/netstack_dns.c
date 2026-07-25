@@ -182,3 +182,51 @@ LONG netstack_resolve_reverse(ULONG addr, char *name_out, ULONG name_len,
 
     return (status == NX_SUCCESS) ? AMI_NET_OK : AMI_NET_ERR_NODEV;
 }
+
+#ifdef AMINETXDUO_IPV6
+LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)
+{
+    AmiNetStack        *ns = ami_netstack_raw();
+    AmiNetCaller        caller;
+    NX_DNS_IPV6_ADDRESS answer[1];
+    UINT                count = 0;
+    UINT                status;
+
+    if (name == NULL || *name == '\0' || addr_out == NULL)
+        return AMI_NET_ERR_CONFIG;
+
+    /*
+     * DEVS:Internet/hosts is NOT consulted here, and that is a real gap rather
+     * than an oversight: src/config/netdb.c parses a hosts entry's address
+     * with ami_config_parse_ip(), which only understands dotted quads, so the
+     * store cannot hold an IPv6 address to find. Making it able to is a change
+     * to the netdb schema (a second value field, or a family tag on every
+     * entry) that touches get{host,net}by* as well, and it belongs with that
+     * work rather than being smuggled in here.
+     *
+     * The practical consequence: an IPv6 literal in DEVS:Internet/hosts is
+     * ignored, and an IPv6-only name has to be resolvable by DNS.
+     */
+    if (ns == NULL || !ns->ns_DnsCreated)
+        return AMI_NET_ERR_STATE;
+
+    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+        return AMI_NET_ERR_KERNEL;
+
+    status = nxd_dns_ipv6_address_by_name_get(&ns->ns_Dns, (UCHAR *)name,
+                                              answer, (UINT)sizeof(answer),
+                                              &count, timeout_ticks);
+
+    ami_netstack_leave(&caller);
+
+    if (status != NX_SUCCESS || count == 0)
+        return AMI_NET_ERR_NODEV;
+
+    addr_out[0] = answer[0].ipv6_address[0];
+    addr_out[1] = answer[0].ipv6_address[1];
+    addr_out[2] = answer[0].ipv6_address[2];
+    addr_out[3] = answer[0].ipv6_address[3];
+
+    return AMI_NET_OK;
+}
+#endif /* AMINETXDUO_IPV6 */

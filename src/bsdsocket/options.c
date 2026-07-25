@@ -241,6 +241,11 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
         }
     }
 
+#ifdef AMINETXDUO_IPV6
+    if (level == AMI_IPPROTO_IPV6)
+        return bsd_setsockopt_ipv6(SocketBase, sock, optname, optval, optlen);
+#endif
+
     return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
 }
 
@@ -375,6 +380,11 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
         }
     }
 
+#ifdef AMINETXDUO_IPV6
+    if (level == AMI_IPPROTO_IPV6)
+        return bsd_getsockopt_ipv6(SocketBase, sock, optname, optval, optlen);
+#endif
+
     return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
 }
 
@@ -459,8 +469,8 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
                      register socklen_t *namelen    __asm("a1"),
                      register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
-    ULONG      addr;
+    AmiSocket  *sock = bsd_lookup(SocketBase, sock_fd);
+    NXD_ADDRESS addr;
 
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
@@ -469,16 +479,46 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
         return bsd_fail(SocketBase, AMI_EFAULT);
 
     addr = sock->as_LocalAddr;
-    if (addr == 0)
+
+#ifdef AMINETXDUO_IPV6
+    if (addr.nxd_ip_version == NX_IP_VERSION_V6 &&
+        (addr.nxd_ip_address.v6[0] | addr.nxd_ip_address.v6[1] |
+         addr.nxd_ip_address.v6[2] | addr.nxd_ip_address.v6[3]) == 0)
+    {
+        /*
+         * Bound to in6addr_any. Report the source address the stack would
+         * actually put on a packet to this socket's peer -- asking NetX Duo's
+         * own RFC 6724 selection rather than guessing means the answer matches
+         * what the peer will see, which for link-local vs global is not a
+         * detail an application can work out for itself.
+         */
+        ULONG chosen[4];
+
+        if ((sock->as_Flags & ASF_CONNECTED) != 0 &&
+            sock->as_PeerAddr.nxd_ip_version == NX_IP_VERSION_V6 &&
+            netstack_ipv6_source_for(sock->as_PeerAddr.nxd_ip_address.v6,
+                                     chosen))
+        {
+            addr.nxd_ip_address.v6[0] = chosen[0];
+            addr.nxd_ip_address.v6[1] = chosen[1];
+            addr.nxd_ip_address.v6[2] = chosen[2];
+            addr.nxd_ip_address.v6[3] = chosen[3];
+        }
+    }
+    else
+#endif
+    if (addr.nxd_ip_version == NX_IP_VERSION_V4 &&
+        addr.nxd_ip_address.v4 == 0)
     {
         NX_IP *ip = netstack_ip();
 
         /* An unbound-to-INADDR_ANY socket reports the interface address. */
         if (ip != NULL && (sock->as_Flags & ASF_CONNECTED) != 0)
-            addr = ip->nx_ip_interface[0].nx_interface_ip_address;
+            bsd_addr_from_v4(&addr,
+                             ip->nx_ip_interface[0].nx_interface_ip_address);
     }
 
-    bsd_sockaddr_out(name, namelen, addr, sock->as_LocalPort);
+    bsd_sockaddr_put(sock, name, namelen, &addr, sock->as_LocalPort);
 
     return 0;
 }
@@ -499,7 +539,8 @@ LONG bsd_getpeername(register LONG sock_fd          __asm("d0"),
     if ((sock->as_Flags & ASF_CONNECTED) == 0)
         return bsd_fail(SocketBase, AMI_ENOTCONN);
 
-    bsd_sockaddr_out(name, namelen, sock->as_PeerAddr, sock->as_PeerPort);
+    bsd_sockaddr_put(sock, name, namelen, &sock->as_PeerAddr,
+                     sock->as_PeerPort);
 
     return 0;
 }

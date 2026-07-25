@@ -371,6 +371,31 @@ struct hostent *bsd_gethostbyaddr_r(register STRPTR addr __asm("a0"),
                                     register LONG *he __asm("a3"),
                                     register struct AmiSocketBase *SocketBase __asm("a6"));
 
+/* LVO -0x324 */
+VOID bsd_freeaddrinfo(register struct addrinfo *ai __asm("a0"),
+                      register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x32a */
+LONG bsd_getaddrinfo(register STRPTR hostname __asm("a0"),
+                     register STRPTR servname __asm("a1"),
+                     register struct addrinfo *hints __asm("a2"),
+                     register struct addrinfo **res __asm("a3"),
+                     register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x330 */
+STRPTR bsd_gai_strerror(register LONG errnum __asm("a0"),
+                        register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x336 */
+LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
+                     register ULONG salen __asm("d0"),
+                     register STRPTR host __asm("a1"),
+                     register ULONG hostlen __asm("d1"),
+                     register STRPTR serv __asm("a2"),
+                     register ULONG servlen __asm("d2"),
+                     register ULONG flags __asm("d3"),
+                     register struct AmiSocketBase *SocketBase __asm("a6"));
+
 
 /* The vector table itself, terminated by (APTR)-1, as MakeLibrary wants it. */
 extern const APTR BsdVectorTable[];

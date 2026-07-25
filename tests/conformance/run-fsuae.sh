@@ -3,7 +3,10 @@
 # Run the bsdsocktest conformance suite against our bsdsocket.library.
 #
 #   tests/conformance/run-fsuae.sh [-m MODEL] [-c CPU] [-t SECONDS]
-#                                  [-T TAG] [-a "SUITE ARGS"] [-p]
+#                                  [-T TAG] [-a "SUITE ARGS"] [-p] [-b BUILDDIR]
+#
+# -b (or AMINETXDUO_BUILD) picks the build tree the library comes from, so the
+# floor build and an -DAMINETXDUO_IPV6=ON build can both be measured.
 #
 # -p runs conf_probe instead of the suite: the hand-written triage walk that
 # prints rc and errno for every call, which is how you find out *why* a
@@ -56,23 +59,26 @@ TAG=conformance
 ARGS="NOPAGE"
 PROBE=0
 
-while getopts "m:c:t:T:a:p" opt; do
+while getopts "m:c:t:T:a:b:p" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         T) TAG="$OPTARG" ;;
         a) ARGS="$OPTARG" ;;
+        b) AMINETXDUO_BUILD="$OPTARG" ;;
         p) PROBE=1 ;;
-        *) echo "usage: $0 [-m model] [-c cpu] [-t secs] [-T tag] [-a args] [-p]" >&2
+        *) echo "usage: $0 [-m model] [-c cpu] [-t secs] [-T tag] [-a args]" \
+                "[-b builddir] [-p]" >&2
            exit 2 ;;
     esac
 done
 
 SUITE="$ROOT/build/bsdsocktest/bsdsocktest"
 LAUNCHER="$ROOT/build/bsdsocktest/conf_launcher"
-BSD="$ROOT/build/cm/src/bsdsocket/bsdsocket.library"
-UG="$ROOT/build/cm/src/usergroup/usergroup.library"
+BUILD="${AMINETXDUO_BUILD:-build/cm}"
+BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
+UG="$ROOT/$BUILD/src/usergroup/usergroup.library"
 
 for f in "$SUITE" "$LAUNCHER"; do
     [ -f "$f" ] || { echo "missing $f -- run tests/conformance/build.sh" >&2; exit 2; }

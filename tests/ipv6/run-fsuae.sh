@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
 #
-# Run the netstack bring-up test under FS-UAE with an emulated A2065 on SLIRP.
+# Run the IPv6 link test under FS-UAE with an emulated A2065 on SLIRP.
 #
-#   tests/netstack/run-fsuae.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
+#   tests/ipv6/run-fsuae.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
 #
-# -b (or AMINETXDUO_BUILD) picks the build tree to take the binaries from, so
-# the same script can run the floor build and an -DAMINETXDUO_IPV6=ON build
-# without either of them having to be called "cm".
-#
-# Stages DEVS:NetInterfaces/eth0, DEVS:Internet/* and a SANA-II a2065.device
-# onto the test hard drive, then hands off to tools/fsuae-run.sh -n.
+# Stages the same DEVS: tree tests/netstack uses -- its DEVS:NetInterfaces/eth0
+# names no IPv6 keyword at all, which is the point: the default (CONFIGURE6
+# absent == AUTO) is what almost every real installation will run.
 #
 # The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
 # or drop a copy in build/a2065.device.
@@ -19,11 +16,10 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-HERE="$ROOT/tests/netstack"
 MODEL=A1200
-TIMEOUT=180
+TIMEOUT=240
 CPU=""
-BUILD="${AMINETXDUO_BUILD:-build/cm}"
+BUILD="${AMINETXDUO_BUILD:-build/v6}"
 
 while getopts "m:t:c:b:" opt; do
     case "$opt" in
@@ -31,12 +27,16 @@ while getopts "m:t:c:b:" opt; do
         t) TIMEOUT="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-b builddir]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-b builddir]" >&2
+           exit 2 ;;
     esac
 done
 
-EXE="$ROOT/$BUILD/tests/netstack/netstack_test"
-[ -f "$EXE" ] || { echo "build $BUILD/tests/netstack/netstack_test first" >&2; exit 2; }
+EXE="$ROOT/$BUILD/tests/ipv6/ipv6_link_test"
+[ -f "$EXE" ] || {
+    echo "build $BUILD/tests/ipv6/ipv6_link_test first (-DAMINETXDUO_IPV6=ON)" >&2
+    exit 2
+}
 
 A2065="${AMINETXDUO_A2065:-}"
 if [ -z "$A2065" ]; then
@@ -52,15 +52,13 @@ fi
     exit 2
 }
 
-STAGE="$ROOT/build/netstack-stage"
+STAGE="$ROOT/build/ipv6-link-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
-cp -R "$HERE/devs" "$STAGE/devs"
+cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
 
-# Keep the staging drive, serial log and emulator config clear of any other
-# run happening at the same time.
-export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-netstack}"
+export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-v6link}"
 
 CPUARG=()
 [ -z "$CPU" ] || CPUARG=(-c "$CPU")

@@ -935,13 +935,261 @@ Prior art, worth knowing before anyone re-treads it:
 > compiler emits no 32×32 multiply at all. Verified here: `.short 0x4c06` becomes
 > `mulul d6,d2,d3` with the right `-m`.
 
+### M8 result (2026-07-25): the IPv6 dual stack works, over a real wire
+
+`-DAMINETXDUO_IPV6=ON` builds a dual stack that has been run on an emulated 68020 and
+68030 and does, as far as can be established, something no classic Amiga TCP/IP stack
+has done before: **it speaks IPv6.**
+
+**FS-UAE's SLIRP DOES carry IPv6** — the assumption that it would not is wrong, and
+finding that out changed what "verified" means for this milestone. FS-UAE 3.2.35's
+`qemu-uae` plugin links a libslirp with the v6 half compiled in (`ip6_input`,
+`ip6_output`, `icmp6_input`, `ndp_send_ra`, `ndp_send_ns` are all in the binary), and it
+is *enabled*. Measured, not inferred, by `tests/ipv6/ipv6_link_test`:
+
+```
+interface 0 IPv6 addresses:
+    addr fd00::280:10ff:fe32:3334      prefix /64  state 1 (TENTATIVE, DAD running)
+    addr fe80::280:10ff:fe32:3334      prefix /10  state 4 (VALID)
+  ok   ICMPv6 echo to ::1
+  ok   ICMPv6 echo to our own link-local address
+  ---> an IPv6 router advertised itself: YES     default router fe80::2
+  ping6 default router: reply, 10 bytes
+  ---> SLIRP answered fe80::2: YES
+```
+
+So the highest-value test route in the plan was available after all: **real ICMPv6
+packets, EtherType 0x86DD, across an emulated Commodore A2065 through the SANA-II shim
+to the host** — plus a router advertisement, stateless autoconfiguration of the global
+`fd00::/64` address, duplicate address detection, and neighbour discovery resolving the
+router's MAC. `ff02::2` (all-routers) and `fec0::2` are not answered; SLIRP's IPv6 router
+lives at `fe80::2` and its prefix is `fd00::/64`, not libslirp's stock `fec0::`.
+
+All three test routes in the plan were taken, and they prove different things:
+
+| | `ipv6_test` (RAM driver) | `ipv6_socket_test` (`::1` via the LVOs) | `ipv6_link_test` (A2065 + SLIRP) |
+|---|---|---|---|
+| ICMPv6 echo | ✅ `::1` and peer link-local | — | ✅ `::1`, self, and the router |
+| TCP over IPv6 | ✅ handshake + data both ways | ✅ `bind`/`listen`/`connect`/`accept` over `::1` | — |
+| UDP over IPv6 | ✅ + `nxd_udp_source_extract` | ✅ `sendto`/`recvfrom` over `::1` | — |
+| `sockaddr_in6` in and out | — | ✅ `getsockname`/`getpeername`/`accept`/`recvfrom` | — |
+| `IPV6_V6ONLY`, `inet_ntop`/`pton`, `getaddrinfo` | — | ✅ | — |
+| Duplicate address detection | ✅ between two real peers | — | ✅ against whatever is on the wire |
+| Router advertisement / SLAAC | — (no router on a two-node wire) | — | ✅ |
+| SANA-II `0x86DD` reader | — | — | ✅ |
+| Goes through `bsdsocket.library`'s ABI | no | **yes**, linked against none of our code | no |
+| Result, 68020 and 68030 | **78 checks, 0 failures** | **54 checks, 0 failures** | **6 checks, 0 failures** + findings |
+
+```sh
+cmake -S . -B build/v6 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
+      -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_IPV6=ON
+cmake --build build/v6 --parallel
+
+AMINETXDUO_RUN_TAG=v6a ./tools/fsuae-run.sh -t 300 build/v6/tests/ipv6/ipv6_test
+AMINETXDUO_RUN_TAG=v6b ./tests/ipv6/run-fsuae.sh        -b build/v6   # link/SLIRP
+AMINETXDUO_RUN_TAG=v6c ./tests/ipv6/run-socket-fsuae.sh -b build/v6   # AF_INET6 LVOs
+```
+
+What is **not** proven: nothing has been run on real Amiga hardware with a real Ethernet
+card, so the `0x86DD` `CMD_READ` path is verified against `a2065.device` under emulation
+only. And no IPv6 traffic has crossed SLIRP's NAT to the outside world — SLIRP answers
+for itself, but whether the host had global IPv6 to forward to was not tested.
+
+#### The ABI, verified rather than assumed
+
+The Roadshow NDK already defines the IPv6 socket ABI. Two things in it are traps, and
+both are pinned with `_Static_assert` in `src/bsdsocket/in6.c`:
+
+1. **`struct sockaddr_in6` has no `sin6_len`.** `netinet/in.h:170` gives `sockaddr_in`
+   the 4.4BSD shape (`sin_len` at offset 0, `sin_family` at offset 1); `netinet/in.h:182`
+   right below it is the **Linux** `sockaddr_in6`, pasted in verbatim, with `sin6_family`
+   at offset **0** and a compiler pad at offset 1. The two are therefore *not*
+   interchangeable through `struct sockaddr *`: reading `sa->sa_family` from a
+   `sockaddr_in6` reads the pad. `bsd_sa_family()` decides the family from the bytes plus
+   the caller's declared length instead of from a struct member, and nothing writes a
+   length byte into a `sockaddr_in6` — on this NDK that byte *is* the family.
+   Confirmed layout: 28 bytes, offsets 0 / 2 / 4 / 8 / 24, `sa_family_t` 1 byte,
+   `in_port_t` 2.
+2. **`gai_strerror()` takes its argument in `a0`, not `d0`** —
+   `pragmas/bsdsocket_pragmas.h:141` says `gai_strerror(a0)` and the `libcall` form on
+   line 264 agrees. Same class of surprise as `bpf_set_notify_mask` taking `(d1,d0)`.
+   Caught because every prototype is generated from the pragma table by
+   `tools/gen_vectors.py` rather than written by hand.
+
+`AF_INET6` is 23 (`sys/socket.h:196`) and collides with `AF_IPX`, which nothing here uses.
+
+**Not in the NDK, so chosen and documented here:** `IPPROTO_IPV6` (41),
+`INET6_ADDRSTRLEN` (46), every `IPV6_*` socket option, `in6addr_any`, `IN6_IS_ADDR_*`,
+`sockaddr_storage`, `PF_INET6`. `IPV6_V6ONLY` is 27 in the BSDs and 26 in Linux and the
+NDK picks neither, so **both are accepted** — 26 is `IPV6_CHECKSUM` in BSD and 27 is
+`IPV6_JOIN_ANYCAST` in Linux, both raw-socket/multicast options this library does not
+offer, so the collision risk is nil. `IPV6_UNICAST_HOPS` (4 / 16) is treated the same way
+and maps onto the same per-socket hop limit as `IP_TTL`.
+
+**`IPV6_V6ONLY` defaults to OFF (dual-stack).** Not copied from anyone — it follows from
+NetX Duo. Its port tables are family-agnostic: `nx_tcp_server_socket_listen()` registers a
+listen against a *port*, and the SYN that arrives may be v4 or v6. There is no
+arrangement under which an `AF_INET6` and an `AF_INET` socket both hold port 80 here, so
+the usual argument for defaulting it *on* does not apply. Setting it to 1 is honoured:
+`connect()`/`sendto()` refuse a v4-mapped destination, and `accept()` disconnects an IPv4
+peer and returns `EWOULDBLOCK` — enforcement has to happen at accept time because by then
+NetX Duo's TCP state machine has already completed the handshake.
+
+#### `getaddrinfo(AF_UNSPEC)`: what it returns and why
+
+`netdb.h:176` defines `AI_MASK` as only `AI_PASSIVE|AI_CANONNAME|AI_NUMERICHOST|
+AI_NUMERICSERV` — there is **no `AI_V4MAPPED` and no `AI_ADDRCONFIG`**, so a caller
+compiled against this header cannot express either hint. The behaviour is therefore fixed
+and documented rather than selectable:
+
+- **IPv6 results first, then IPv4.** A caller that walks the list and takes the first
+  address that connects prefers IPv6 for free.
+- **`AI_ADDRCONFIG` is implied and cannot be turned off.** AAAA is queried only when the
+  stack has IPv6 running; A only when it has IPv4. Returning a family the machine cannot
+  use has no honest purpose and the caller cannot ask for it.
+- **`AI_V4MAPPED` is not implied and not available.** An `AF_INET6` query returns AAAA
+  records only and never synthesises `::ffff:a.b.c.d` from an A record; a dotted quad with
+  an `AF_INET6` hint is `EAI_ADDRFAMILY`. A caller that wants both asks for `AF_UNSPEC`.
+- **At most one address per family.** NetX Duo's DNS client answers with a single address,
+  not an RRset; presenting one as if it were the whole set would be a lie about
+  round-robin DNS.
+
+`getaddrinfo`/`getnameinfo`/`freeaddrinfo`/`gai_strerror` ship in **both** build
+configurations (66 → 70 implemented vectors); only their `AF_INET6` answers depend on the
+option. `getnameinfo()` has no reverse lookup for IPv6: it would be an `ip6.arpa` PTR
+query, and a name that is wrong is worse than no name, so `NI_NAMEREQD` gets `EAI_NONAME`
+and everyone else gets the numeric form.
+
+#### Address configuration
+
+Three modes, all of which configure the `fe80::/64` link-local address first — that one
+needs no router, no server and no configuration file, and RFC 4291 requires it anyway.
+Selected by a new `CONFIGURE6` keyword in `DEVS:NetInterfaces/<name>`, named by appending
+`6` to the IPv4 keyword it mirrors (Roadshow has no keyword ending in a digit, so nothing
+can collide):
+
+```
+DEVICE     = a2065.device
+UNIT       = 0
+CONFIGURE  = DHCP              ; IPv4, unchanged
+CONFIGURE6 = AUTO              ; OFF | LINKLOCAL | AUTO | STATIC
+ADDRESS6   = 2001:db8::10/64   ; STATIC only; /64 if the length is omitted
+GATEWAY6   = fe80::1
+```
+
+**This settles the last open question in §9: the default is `AUTO`** — link-local always,
+plus RFC 4862 stateless autoconfiguration from router advertisements. On a link with no
+IPv6 router that is indistinguishable from `LINKLOCAL`: one router solicitation goes out
+and nothing answers, so the cost of defaulting to it is three ICMPv6 packets. On a link
+that has one, IPv6 works with nobody editing a file — which is what happened above.
+`ADDRESS6` with no `CONFIGURE6` implies `STATIC`, exactly as `ADDRESS` implies a static
+IPv4 interface. In the floor build the three keywords are recognised and ignored, so one
+config file works in both builds without "unknown keyword" warnings.
+
+`LINKLOCAL` and `STATIC` genuinely suppress autoconfiguration, which took
+`NX_IPV6_STATELESS_AUTOCONFIG_CONTROL` in `nx_user.h`. Without it,
+`nx_icmpv6_process_ra.c` forms a global address from any advertised prefix and consults no
+flag, and `nxd_ipv6_stateless_address_autoconfig_{enable,disable}()` are stubs returning
+`NX_NOT_SUPPORTED` — so both modes would have been lies, and the first `netstack_test` run
+of the IPv6 build said so out loud (`stateless autoconfiguration failed (75)` = 0x4B =
+`NX_NOT_SUPPORTED`). Cost: one `ULONG` per `NX_INTERFACE` and one comparison per prefix
+option received.
+
+**DHCPv6 is deliberately not used.** NetX Duo ships a client
+(`addons/dhcp/nxd_dhcpv6_client.c`), but it is ~40 KB before its own IANA/IAID option
+handling, needs its own thread and UDP socket, and answers a question SLAAC has already
+answered on every network an Amiga is likely to be on. The floor target is a 68020 with
+4 MB. If a stateful-only network turns up, the addon is there.
+
+#### Code size
+
+Measured with `m68k-amigaos-size` on `-m68020 -O2` Release builds, `.text` only:
+
+| | before M8 | `IPV6=OFF` | `IPV6=ON` | IPv6 delta |
+|---|---|---|---|---|
+| `bsdsocket.library` | 190,208 | 193,636 | 237,252 | **+43,616** |
+| `netstack_test` | 162,936 | 162,964 | 201,840 | +38,876 |
+| `ram_driver_test` (no bsdsocket/netstack) | 80,244 | 80,244 | 95,968 | +15,724 |
+| `soak_test`, `usergroup.library`, `ping`(v4) | — | byte-identical | — | 0 |
+| `sizeof(NX_IP)` | 2,128 | 2,128 | 3,164 | +1,036 |
+
+The **floor build is unchanged by IPv6**: +28 bytes in `netstack_test` for five extra
+entries in the interface-keyword table, and nothing at all elsewhere. The +3,428 in
+`bsdsocket.library` is the four new `getaddrinfo` vectors, which are a feature the floor
+build gained, not IPv6 it does not use. (An earlier revision leaked 3.4 KB of IPv6 text
+conversion into the floor build because `config_text.c` is one object and the linker pulls
+it whole — caught by measuring rather than reasoning, and now `#ifdef`-guarded.)
+
+The ~44 KB full-stack delta is larger than §5.4's ~30 KB estimate for the `nxd*`/
+`nx_icmpv6`/`nx_ipv6`/`nx_nd` objects, and the difference is not those files: it is
+`FEATURE_NX_IPV6` widening the *IPv4* objects (`nx_ip`, `nx_tcp*`, `nx_udp*`,
+`nx_packet`, `nx_icmp` all grow dual-stack paths) plus this project's own
+`src/bsdsocket/in6.c`, `src/netstack/netstack_ipv6.c` and the IPv6 text conversions.
+The IPv6 tables in `NX_IP` are tuned down from NetX Duo's defaults in
+`port/netxduo-amiga/inc/nx_user.h` (neighbour cache 16 → 8, destination table 8 → 4,
+default routers 8 → 2, prefix list 8 → 4).
+
+#### Gaps recorded honestly
+
+- **`sin6_scope_id` is preserved but not honoured.** `bind()`/`connect()` record it and
+  `getsockname()`/`getpeername()` report it back, but it does not select an outgoing
+  interface: NetX Duo's dual-stack `connect` and `send` entry points take no interface
+  parameter and pick the source themselves through `_nxd_ipv6_interface_find()`. With one
+  Ethernet interface the two answers are identical. The `fe80::1%eth0` text form is not
+  parsed at all.
+- **`bind()` to a specific local address still only binds a port**, for IPv6 exactly as
+  for IPv4 — NetX Duo has no `nx_*_socket_bind` that takes an address.
+- **`DEVS:Internet/hosts` cannot hold an IPv6 address.** `src/config/netdb.c` parses an
+  entry's address with `ami_config_parse_ip()`, which understands dotted quads only, so
+  `netstack_resolve6()` goes straight to DNS. Fixing it is a netdb schema change that
+  touches `get{host,net}by*` and belongs with that work.
+- **IPv6 multicast membership is not exposed.** `IPV6_JOIN_GROUP`/`LEAVE_GROUP` return
+  `ENOPROTOOPT` because `NX_ENABLE_IPV6_MULTICAST` is off in the floor-target tuning.
+  Neighbour discovery does not need it — solicited-node joins go through
+  `_nx_ipv6_multicast_join()` and reach the driver as `NX_LINK_MULTICAST_JOIN` either way.
+- **A link-local address reports `prefix /64` as `/10`.** That is NetX Duo's own
+  convention (`nxd_ipv6_address_set()` takes 10 to mean "derive `fe80::/64` from the
+  MAC" and stores the 10), and it is harmless — `fe80::/10` and `fe80::/64` both make
+  every other link-local address on-link.
+- **`sana2: reader N did not stop` at shutdown is pre-existing**, not an IPv6 regression:
+  the floor build logs it for readers 0 and 1, and the IPv6 build logs the same thing for
+  the third reader as well.
+- **The tools do not report IPv6.** `netstat`, `ping` and `ShowNetStatus` in `src/tools/`
+  are IPv4-only and were out of this milestone's scope; they build and behave identically
+  in both configurations.
+
+#### A trap worth writing down, found in this milestone's own test code
+
+`tests/ipv6/ipv6_socket_test.c` calls the LVOs through hand-written `asm` stubs, and the
+first version listed `d1`/`a0`/`a1` only as *inputs*. On AmigaOS those are **scratch**:
+the callee may destroy them and need not say so. GCC believed they survived and reused
+the "still valid" copies, so `send()` returned 18 and `rc == sizeof(message)` compared
+false on the next line — three checks failing with the correct number printed beside
+them, which is about as misleading as a bug gets. The NDK's own `inline/bsdsocket.h`
+solves it by declaring `register int _d1 __asm("d1")` (and `_a0`, `_a1`) as `"=r"`
+outputs; adopting that idiom took the test from 46/49 to **54/54**. Nothing in the
+library was wrong — but anyone writing a bare-metal LVO caller against this stack will
+meet the same thing.
+
+#### One latent bug found and fixed on the way
+
+`AMINETXDUO_IPV6` was set as a **`PUBLIC` compile definition on `aminetxduo_sana2` only**.
+`nx_user.h` turns it into `NX_DISABLE_IPV6`, which decides `FEATURE_NX_IPV6`, which
+changes the layout of `NX_IP`, `NX_INTERFACE`, `NX_PACKET` and `NX_TCP_SOCKET` — so with
+`IPV6=ON` the SANA-II shim saw a different `NX_IP` from the NetX Duo core it was driving.
+It does not fail to link; it reads the wrong offsets. The definition is now global, in the
+root `CMakeLists.txt`, with a comment saying why it must stay that way.
+
 ### Still open (lower stakes, decide during implementation)
 
 - Does `usergroup.library` ship as a real user database or as the usual single-user stub
   (`root`/uid 0)? Most Amiga software only needs the calls to succeed.
 - `bpf_*`: full BPF VM, or the common-case filter subset (`ether proto`, host/port
   matching) with a documented gap?
-- IPv6 default: built and off, or built and on when router advertisements appear?
+- ~~IPv6 default: built and off, or built and on when router advertisements appear?~~
+  **Settled by M8**: built off (`AMINETXDUO_IPV6=OFF` is the shipping floor), and when
+  built, on by default with `CONFIGURE6=AUTO` — link-local always, SLAAC when a router
+  advertises.
 
 ---
 

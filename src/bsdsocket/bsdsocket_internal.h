@@ -121,6 +121,67 @@
 #define AMI_EHOSTUNREACH       65
 #define AMI_ENOSYS             78
 
+/* ------------------------------------------------------------------ IPv6 --
+ *
+ * WHAT THE ROADSHOW NDK ALREADY DEFINES, verified against
+ * amigaos/tools/m68k-amigaos-gcc/m68k-amigaos/ndk-include:
+ *
+ *   sys/socket.h:196   AF_INET6 23          -- and note it collides with
+ *                                              AF_IPX 23 three lines above.
+ *                                              Nothing here uses AF_IPX.
+ *   netinet/in.h:178   struct in6_addr      -- unsigned char s6_addr[16]
+ *   netinet/in.h:182   struct sockaddr_in6  -- sin6_family, sin6_port,
+ *                                              sin6_flowinfo, sin6_addr,
+ *                                              sin6_scope_id
+ *
+ * WHAT IT DOES NOT DEFINE, and therefore what is defined here: IPPROTO_IPV6,
+ * every IPV6_* socket option, INET6_ADDRSTRLEN, in6addr_any, IN6ADDR_*_INIT,
+ * the IN6_IS_ADDR_* macros, sockaddr_storage, PF_INET6, AI_V4MAPPED and
+ * AI_ADDRCONFIG. An application built against this NDK cannot name any of
+ * them, so every one of the numbers below is something the application will
+ * have spelled out itself -- which is exactly why they have to be the numbers
+ * everyone else uses.
+ *
+ * THE TRAP IN struct sockaddr_in6, and it is a real one:
+ *
+ * `struct sockaddr_in` in this header is 4.4BSD's, with sin_len at offset 0
+ * and sin_family at offset 1. `struct sockaddr_in6` right below it is the
+ * LINUX one -- pasted in verbatim, comment about "Scope ID (new in 2.4)" and
+ * all -- with sin6_family at offset 0 and NO sin6_len. The two are therefore
+ * NOT interchangeable through `struct sockaddr *`: reading sa->sa_family out
+ * of a sockaddr_in6 reads its padding byte.
+ *
+ * That is the same class of hazard as ndk-include/pwd.h turning out to be
+ * newlib's 10-field struct passwd rather than the Amiga's 7-field one, so it
+ * gets the same treatment: bsd_sa_family() below decides the family from the
+ * bytes and the length rather than from a struct member, and in6.c pins every
+ * offset with _Static_assert.
+ */
+
+/* IPPROTO_IPV6. The IANA number; the NDK stops at IPPROTO_RAW 255. */
+#define AMI_IPPROTO_IPV6            41
+
+/*
+ * IPV6_V6ONLY has two numberings in the wild and the NDK picks neither:
+ * 27 in KAME and the BSDs (netinet6/in6.h), 26 in Linux. This header set is 4.4BSD
+ * everywhere except the pasted-in sockaddr_in6, which is Linux -- so there is
+ * no lineage to defer to, and guessing wrong means silently ignoring the one
+ * option a dual-stack application is most likely to set.
+ *
+ * Both are accepted, and getsockopt answers to both. The collision risk is
+ * nil: 26 is IPV6_CHECKSUM in BSD (raw sockets, which this library does not
+ * offer) and 27 is IPV6_JOIN_ANYCAST in Linux (likewise).
+ */
+#define AMI_IPV6_V6ONLY_BSD         27
+#define AMI_IPV6_V6ONLY_LINUX       26
+
+/* IPV6_UNICAST_HOPS: 4 in BSD, 16 in Linux. Same argument, same treatment. */
+#define AMI_IPV6_UNICAST_HOPS_BSD    4
+#define AMI_IPV6_UNICAST_HOPS_LINUX 16
+
+/* INET6_ADDRSTRLEN: "0:0:0:0:0:ffff:255.255.255.255" plus NUL. */
+#define AMI_INET6_ADDRSTRLEN        46
+
 /* --------------------------------------------------------------- library -- */
 
 #define BSD_LIB_NAME        "bsdsocket.library"
@@ -258,6 +319,8 @@ struct AmiSocketBase
 #define ASF_NXBOUND     (1UL << 17)   /* NetX Duo holds the port            */
 #define ASF_SERVER      (1UL << 18)   /* came off a listen port: unaccept   */
 #define ASF_ORPHANED    (1UL << 19)   /* NX would not delete it; leaked     */
+#define ASF_INET6       (1UL << 20)   /* created with domain AF_INET6       */
+#define ASF_V6ONLY      (1UL << 21)   /* IPV6_V6ONLY; see options.c         */
 
 typedef struct AmiSocket
 {
@@ -284,10 +347,33 @@ typedef struct AmiSocket
     ULONG                   as_EventMask;   /* SO_EVENTMASK                  */
     LONG                    as_SoError;     /* SO_ERROR, cleared when read   */
 
-    ULONG                   as_LocalAddr;
+    /*
+     * Addresses are NXD_ADDRESS, not ULONG, in BOTH build configurations.
+     *
+     * NetX Duo's own IPv4 entry points are thin wrappers that build one of
+     * these and call the nxd_* function underneath (nx_tcp_client_socket_
+     * connect.c is three lines and a delegation), so carrying the version tag
+     * here costs the floor build four bytes per address and no code at all --
+     * while removing every "which family is this" branch from the call sites.
+     *
+     * nxd_ip_address.v6 only exists when FEATURE_NX_IPV6 is on, so anything
+     * touching it is still under #ifdef AMINETXDUO_IPV6.
+     */
+    NXD_ADDRESS             as_LocalAddr;
     UINT                    as_LocalPort;
-    ULONG                   as_PeerAddr;
+    NXD_ADDRESS             as_PeerAddr;
     UINT                    as_PeerPort;
+
+    /*
+     * sin6_scope_id, kept so that getsockname()/getpeername() report back what
+     * bind()/connect() were given. It is NOT used to select an outgoing
+     * interface: NetX Duo's dual-stack connect and send entry points take no
+     * interface parameter, and pick the source themselves through
+     * _nxd_ipv6_interface_find(). On a machine with one Ethernet interface --
+     * which is every machine this runs on today -- the two answers are the
+     * same. See the milestone report for the honest version.
+     */
+    ULONG                   as_ScopeId;
 
     /* Partially consumed receive packet (a stream read need not drain one). */
     NX_PACKET              *as_RxPending;
@@ -357,11 +443,59 @@ VOID       bsd_close_all(struct AmiSocketBase *base);
 VOID  bsd_handoff_init(struct AmiSocketBase *master);
 VOID  bsd_handoff_flush(struct AmiSocketBase *base);
 
-/* socket.c -- sockaddr helpers */
-LONG  bsd_sockaddr_in(struct AmiSocketBase *base, const struct sockaddr *sa,
-                      socklen_t len, ULONG *addr, UINT *port);
-VOID  bsd_sockaddr_out(struct sockaddr *sa, socklen_t *len,
-                       ULONG addr, UINT port);
+/* socket.c -- sockaddr helpers.
+ *
+ * bsd_sa_family() is the single place that decides what a caller's
+ * `struct sockaddr *` actually is; see the sockaddr_in6 note above for why
+ * that cannot be a struct member read. It returns AF_INET, AF_INET6,
+ * AF_UNSPEC, or -1 for something it will not touch.
+ *
+ * bsd_sockaddr_get() parses one into an NXD_ADDRESS + port (+ scope id, which
+ * may be NULL); bsd_sockaddr_put() writes one back in the shape the SOCKET's
+ * family calls for, which is not always the shape of the address -- an
+ * AF_INET6 socket reports a v4 peer as ::ffff:a.b.c.d.
+ */
+LONG  bsd_sa_family(const struct sockaddr *sa, socklen_t len);
+LONG  bsd_sockaddr_get(struct AmiSocketBase *base, const struct sockaddr *sa,
+                       socklen_t len, NXD_ADDRESS *addr, UINT *port,
+                       ULONG *scope_id);
+VOID  bsd_sockaddr_put(const AmiSocket *sock, struct sockaddr *sa,
+                       socklen_t *len, const NXD_ADDRESS *addr, UINT port);
+
+/* An NXD_ADDRESS holding an IPv4 address, for the many call sites that have
+   nothing but a ULONG (nx_udp_source_extract, the peer of an accepted v4
+   connection, ...). */
+VOID  bsd_addr_from_v4(NXD_ADDRESS *addr, ULONG v4);
+
+#ifdef AMINETXDUO_IPV6
+/* in6.c -- everything that only exists in the dual-stack build. */
+
+/* TRUE when `addr` is ::ffff:a.b.c.d; *v4 receives a.b.c.d. */
+BOOL  bsd_addr_is_v4mapped(const NXD_ADDRESS *addr, ULONG *v4);
+
+/* ::ffff:a.b.c.d from a.b.c.d. */
+VOID  bsd_addr_to_v4mapped(NXD_ADDRESS *addr, ULONG v4);
+
+/*
+ * Reduce an address to what the socket can actually use: on a socket that is
+ * not V6ONLY, a v4-mapped destination becomes a plain IPv4 address, because
+ * NetX Duo has no v4-mapped transmit path -- it would put ::ffff:10.0.0.1 in
+ * an IPv6 header and send it to a host that has no IPv6. Returns FALSE when
+ * the address cannot be used on this socket at all.
+ */
+BOOL  bsd_addr_normalise(const AmiSocket *sock, NXD_ADDRESS *addr);
+
+/* struct in6_addr <-> NetX Duo's four host-order ULONGs. */
+VOID  bsd_in6_to_words(const UBYTE bytes[16], ULONG words[4]);
+VOID  bsd_words_to_in6(const ULONG words[4], UBYTE bytes[16]);
+
+/* setsockopt/getsockopt for level IPPROTO_IPV6. Returns 0, or -1 with errno
+   set; ENOPROTOOPT for an option this library does not implement. */
+LONG  bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
+                          LONG optname, APTR optval, socklen_t optlen);
+LONG  bsd_getsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
+                          LONG optname, APTR optval, socklen_t *optlen);
+#endif /* AMINETXDUO_IPV6 */
 
 /* select.c -- event plumbing.
  *

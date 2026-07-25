@@ -46,7 +46,10 @@ typedef enum
     IF_KEY_MTU,
     IF_KEY_CONFIGURE,
     IF_KEY_IPTYPE,
-    IF_KEY_STATE
+    IF_KEY_STATE,
+    IF_KEY_ADDRESS6,
+    IF_KEY_GATEWAY6,
+    IF_KEY_CONFIGURE6
 } IfKey;
 
 static const struct IfKeyword
@@ -68,6 +71,31 @@ ami_if_keywords[] =
     { "configure",          IF_KEY_CONFIGURE },
     { "iptype",             IF_KEY_IPTYPE    },
     { "state",              IF_KEY_STATE     },
+
+    /*
+     * IPv6. Roadshow has no IPv6 keywords -- no Amiga stack has ever had IPv6
+     * -- so these are ours, named by appending "6" to the IPv4 keyword they
+     * mirror. That is the one naming rule that needs no documentation to
+     * guess, it cannot collide with a real Roadshow keyword (the manual has
+     * none ending in a digit), and it keeps one interface file describing both
+     * families:
+     *
+     *     DEVICE     = a2065.device
+     *     UNIT       = 0
+     *     CONFIGURE  = DHCP              ; IPv4
+     *     CONFIGURE6 = AUTO              ; IPv6: OFF|LINKLOCAL|AUTO|STATIC
+     *     ADDRESS6   = 2001:db8::10/64   ; STATIC only; /64 if the length is
+     *     GATEWAY6   = fe80::1           ; omitted
+     *
+     * In the floor build (no AMINETXDUO_IPV6) these are parsed as far as being
+     * recognised and are then ignored, so the same file works in both builds
+     * without producing "unknown keyword" warnings.
+     */
+    { "address6",           IF_KEY_ADDRESS6  },
+    { "ipaddress6",         IF_KEY_ADDRESS6  },
+    { "gateway6",           IF_KEY_GATEWAY6  },
+    { "configure6",         IF_KEY_CONFIGURE6},
+    { "iptype6",            IF_KEY_CONFIGURE6},
 
     /*
      * Roadshow keywords we parse but have nowhere to put: they belong to the
@@ -138,6 +166,50 @@ ami_iptype_names[] =
     { NULL,       AMI_IPTYPE_STATIC    }
 };
 
+#ifdef AMINETXDUO_IPV6
+
+/* CONFIGURE6=/IPTYPE6= address-configuration modes. */
+static const struct Ip6TypeName
+{
+    const char *name;
+    AmiIp6Type  type;
+}
+ami_ip6type_names[] =
+{
+    { "off",        AMI_IP6TYPE_OFF       },
+    { "no",         AMI_IP6TYPE_OFF       },
+    { "none",       AMI_IP6TYPE_OFF       },
+    { "disabled",   AMI_IP6TYPE_OFF       },
+    { "linklocal",  AMI_IP6TYPE_LINKLOCAL },
+    { "link-local", AMI_IP6TYPE_LINKLOCAL },
+    { "local",      AMI_IP6TYPE_LINKLOCAL },
+    { "auto",       AMI_IP6TYPE_AUTO      },
+    { "slaac",      AMI_IP6TYPE_AUTO      },
+    { "stateless",  AMI_IP6TYPE_AUTO      },
+    { "ra",         AMI_IP6TYPE_AUTO      },
+    { "static",     AMI_IP6TYPE_STATIC    },
+    { "manual",     AMI_IP6TYPE_STATIC    },
+    { NULL,         AMI_IP6TYPE_OFF       }
+};
+
+static BOOL lookup_ip6type(const char *value, AmiIp6Type *out)
+{
+    const struct Ip6TypeName *n;
+
+    for (n = ami_ip6type_names; n->name != NULL; n++)
+    {
+        if (ami_cfg_stricmp(value, n->name) == 0)
+        {
+            *out = n->type;
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+#endif /* AMINETXDUO_IPV6 */
+
 static BOOL lookup_iptype(const char *value, AmiIpType *out)
 {
     const struct IpTypeName *n;
@@ -159,6 +231,9 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
     char *cursor = buf;
     char *line;
     BOOL  have_device = FALSE;
+#ifdef AMINETXDUO_IPV6
+    BOOL  have_configure6 = FALSE;
+#endif
 
     if (out == NULL)
         return AMI_CFG_ERR_SYNTAX;
@@ -166,6 +241,27 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
     ami_cfg_zero(out, sizeof(*out));
     out->up     = TRUE;                 /* Roadshow's STATE default is "up" */
     out->iptype = AMI_IPTYPE_STATIC;
+
+#ifdef AMINETXDUO_IPV6
+    /*
+     * The IPv6 default is AUTO, which settles the last open question in
+     * docs/RESEARCH.md §9 ("built and off, or built and on when router
+     * advertisements appear?").
+     *
+     * AUTO means: always configure the link-local address, and take a global
+     * one from a router advertisement if one arrives. On a link with no IPv6
+     * router that is indistinguishable from LINKLOCAL -- one router
+     * solicitation goes out and nothing answers -- so the cost of defaulting
+     * to it is three ICMPv6 packets, and the benefit is that IPv6 works on a
+     * network that has it without anyone editing a file. It is also what every
+     * other operating system on the same wire is already doing.
+     *
+     * A machine that wants no IPv6 at all sets CONFIGURE6=OFF, or builds the
+     * floor configuration, where none of this exists.
+     */
+    out->ip6type = AMI_IP6TYPE_AUTO;
+    out->prefix6 = 64;
+#endif
 
     if (name != NULL)
     {
@@ -277,6 +373,55 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                     AMI_WARN("config: %s: bad STATE '%s'", out->name, value);
                 break;
 
+#ifdef AMINETXDUO_IPV6
+            case IF_KEY_ADDRESS6:
+                /*
+                 * An ADDRESS6 with no CONFIGURE6 implies STATIC, the same way
+                 * a Roadshow ADDRESS implies a static IPv4 interface.
+                 */
+                if (!ami_config_parse_ip6(value, out->address6, &out->prefix6))
+                {
+                    AMI_WARN("config: %s: bad ADDRESS6 '%s'", out->name, value);
+                }
+                else if (!have_configure6)
+                {
+                    out->ip6type = AMI_IP6TYPE_STATIC;
+                }
+                break;
+
+            case IF_KEY_GATEWAY6:
+                if (ami_config_parse_ip6(value, out->gateway6, NULL))
+                    out->have_gateway6 = TRUE;
+                else
+                    AMI_WARN("config: %s: bad GATEWAY6 '%s'", out->name, value);
+                break;
+
+            case IF_KEY_CONFIGURE6:
+            {
+                AmiIp6Type t6;
+
+                if (lookup_ip6type(value, &t6))
+                {
+                    out->ip6type    = t6;
+                    have_configure6 = TRUE;
+                }
+                else
+                {
+                    AMI_WARN("config: %s: bad CONFIGURE6 '%s'", out->name, value);
+                }
+                break;
+            }
+#else
+            case IF_KEY_ADDRESS6:
+            case IF_KEY_GATEWAY6:
+            case IF_KEY_CONFIGURE6:
+                /* Recognised, so the file is portable; acted on only in the
+                   IPv6 build. */
+                AMI_DEBUG("config: %s: %s=%s needs an IPv6 build",
+                          out->name, key, value);
+                break;
+#endif /* AMINETXDUO_IPV6 */
+
             case IF_KEY_IGNORED:
                 AMI_DEBUG("config: %s: ignoring %s=%s", out->name, key, value);
                 break;
@@ -297,6 +442,20 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
 
     if (out->iptype == AMI_IPTYPE_STATIC && out->address == 0)
         AMI_WARN("config: %s: static but no ADDRESS", out->name);
+
+#ifdef AMINETXDUO_IPV6
+    if (out->ip6type == AMI_IP6TYPE_STATIC &&
+        (out->address6[0] | out->address6[1] |
+         out->address6[2] | out->address6[3]) == 0)
+    {
+        /* Degrade rather than refuse: link-local always works, and an
+           interface with no usable IPv6 address at all is worse than one with
+           the address every IPv6 interface is required to have anyway. */
+        AMI_WARN("config: %s: CONFIGURE6=STATIC with no ADDRESS6, using "
+                 "link-local only", out->name);
+        out->ip6type = AMI_IP6TYPE_LINKLOCAL;
+    }
+#endif
 
     out->configured = TRUE;
 

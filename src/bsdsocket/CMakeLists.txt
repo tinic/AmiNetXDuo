@@ -18,10 +18,18 @@ set(BSDSOCKET_SOURCES
     inet.c
     resolver.c
     netdb.c                 # get{serv,proto,net}by* over src/config/netdb.c
+    addrinfo.c              # getaddrinfo/getnameinfo/freeaddrinfo/gai_strerror
     handoff.c               # ObtainSocket/ReleaseSocket cross-base transfer
     roadshow.c              # the Tier 3 extensions whose ABI is pinned down
     netx_call.c             # ThreadX context bracket for NetX Duo calls
     library_runtime.c)      # DOSBase, rand(): no crt0 in a shared library
+
+# in6.c is the AF_INET6 ABI: the _Static_asserts that pin sockaddr_in6, the
+# address conversions and the IPPROTO_IPV6 options. It has no IPv4 content at
+# all, so the floor build simply does not compile it.
+if(AMINETXDUO_IPV6)
+    list(APPEND BSDSOCKET_SOURCES in6.c)
+endif()
 
 add_library(aminetxduo_bsdsocket STATIC ${BSDSOCKET_SOURCES})
 

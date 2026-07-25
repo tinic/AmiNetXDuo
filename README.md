@@ -25,8 +25,12 @@ implements.
 What that combination buys, none of which the classic stacks have:
 
 - **MIT licence throughout** — no 4.4BSD or GPL lineage anywhere in the tree.
-- **IPv6** — the dual stack is a build option and would be an Amiga first.
-  Not yet wired through `bsdsocket.library`.
+- **IPv6** — the dual stack builds with `-DAMINETXDUO_IPV6=ON` and works: ICMPv6,
+  neighbour discovery, duplicate address detection, stateless autoconfiguration
+  from router advertisements, TCP and UDP over IPv6, and `AF_INET6` sockets
+  through `bsdsocket.library`. As far as we can establish, an Amiga first — no
+  classic Amiga TCP/IP stack has had IPv6. Off by default so the floor build
+  stays small.
 - NetX Duo's protocol catalogue: DHCP, DNS and AutoIP are in use today; PPP,
   PPPoE, SNTP, mDNS and NAT are vendored and unused so far.
 
@@ -111,6 +115,7 @@ tests/conformance/run-fsuae.sh -a "LOOPBACK NOPAGE"
 | conformance, network tier | **122/142** |
 | ThreadX-on-Exec soak | 98 checks, 4+ adopted tasks, Enforcer-clean on 68030 |
 | TCP throughput | 262 KB/s loopback, 310 KB/s to a host over SLIRP |
+| IPv6 (`-DAMINETXDUO_IPV6=ON`) | ICMPv6 + TCP + UDP between two `NX_IP` instances (78 checks); `AF_INET6` sockets over `::1` through the library ABI; ICMPv6 to the host across an emulated A2065, with a router advertisement and stateless autoconfiguration |
 
 Verified on 68020 and 68030. The remaining conformance failures are
 `sendmsg`/`recvmsg` (unimplemented) and one deliberate disagreement: the suite

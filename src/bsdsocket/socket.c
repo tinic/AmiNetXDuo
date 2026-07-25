@@ -171,6 +171,44 @@ static AmiSocket *bsd_socket_alloc(struct AmiSocketBase *base,
     sock->as_Flags    = (type == SOCK_STREAM) ? ASF_TCP : ASF_UDP;
     sock->as_Ttl      = (LONG)NX_IP_TIME_TO_LIVE;
 
+    /*
+     * The version tag has to be set even though ami_alloc() cleared the block:
+     * a cleared NXD_ADDRESS reads as version 0, not NX_IP_VERSION_V4 (4), and
+     * every "is this address unset" test in options.c and transfer.c asks the
+     * version first. A zero there is not "IPv4 0.0.0.0", it is "no family",
+     * and getsockname() on a connected socket bound to INADDR_ANY would stop
+     * reporting the interface address.
+     */
+    bsd_addr_from_v4(&sock->as_LocalAddr, 0UL);
+    bsd_addr_from_v4(&sock->as_PeerAddr, 0UL);
+
+#ifdef AMINETXDUO_IPV6
+    if (domain == AF_INET6)
+    {
+        sock->as_Flags |= ASF_INET6;
+
+        sock->as_LocalAddr.nxd_ip_version = NX_IP_VERSION_V6;
+        sock->as_PeerAddr.nxd_ip_version  = NX_IP_VERSION_V6;
+
+        /*
+         * IPV6_V6ONLY DEFAULTS TO OFF, i.e. an AF_INET6 socket is dual-stack.
+         *
+         * This is not a copy of anyone's default -- Linux says off, modern
+         * BSD says on -- it follows from what NetX Duo is. Its port tables are
+         * family-agnostic: nx_tcp_server_socket_listen() registers a listen on
+         * a PORT, and the SYN that arrives for it may be v4 or v6. There is no
+         * arrangement under which an AF_INET6 socket and an AF_INET socket can
+         * both hold port 80 here, so the "V6ONLY on lets you run separate v4
+         * and v6 servers" argument for defaulting it on does not apply, while
+         * the "one socket serves both" behaviour it would block is the only
+         * one available.
+         *
+         * Setting it to 1 is still honoured -- see options.c -- and then a v4
+         * peer is refused rather than reported as ::ffff:a.b.c.d.
+         */
+    }
+#endif
+
     return sock;
 }
 
@@ -343,48 +381,174 @@ VOID bsd_close_all(struct AmiSocketBase *base)
 
 /* -------------------------------------------------------- sockaddr helpers */
 
-LONG bsd_sockaddr_in(struct AmiSocketBase *base, const struct sockaddr *sa,
-                     socklen_t len, ULONG *addr, UINT *port)
+VOID bsd_addr_from_v4(NXD_ADDRESS *addr, ULONG v4)
 {
-    const struct sockaddr_in *sin = (const struct sockaddr_in *)sa;
+    addr->nxd_ip_version       = NX_IP_VERSION_V4;
+    addr->nxd_ip_address.v4    = v4;
+}
+
+/*
+ * Which family is this sockaddr?
+ *
+ * It cannot be answered by reading a struct member, because the two structs
+ * this NDK offers do not agree on where the family lives:
+ *
+ *   sockaddr_in    [0] = sin_len (16, or 0 from a memset), [1] = sin_family
+ *   sockaddr_in6   [0] = sin6_family, [1] = padding
+ *
+ * So the answer comes from the bytes plus the length the caller declared,
+ * longest and most specific first. The AF_INET6 test requires BOTH a 23 in
+ * byte 0 and a length that could hold a sockaddr_in6, which no sockaddr_in
+ * can satisfy (a sin_len of 23 with a namelen of 28 is not something any
+ * caller produces).
+ */
+LONG bsd_sa_family(const struct sockaddr *sa, socklen_t len)
+{
+    const UBYTE *b = (const UBYTE *)sa;
+
+    if (sa == NULL)
+        return -1;
+
+#ifdef AMINETXDUO_IPV6
+    if (len >= (socklen_t)sizeof(struct sockaddr_in6) && b[0] == AF_INET6)
+        return AF_INET6;
+#endif
+
+    if (len < (socklen_t)sizeof(struct sockaddr_in))
+        return -1;
+
+    if (b[1] == AF_INET)
+        return AF_INET;
+
+    /*
+     * AF_UNSPEC is legal on connect() (BSD's "dissolve the association") and
+     * on the destination of a sendto() to a connected socket. A zeroed
+     * sockaddr reaches here.
+     */
+    if (b[1] == AF_UNSPEC && b[0] <= (UBYTE)sizeof(struct sockaddr_in))
+        return AF_UNSPEC;
+
+    return -1;
+}
+
+LONG bsd_sockaddr_get(struct AmiSocketBase *base, const struct sockaddr *sa,
+                      socklen_t len, NXD_ADDRESS *addr, UINT *port,
+                      ULONG *scope_id)
+{
+    LONG family;
+
+    if (scope_id != NULL)
+        *scope_id = 0;
 
     if (sa == NULL)
         return bsd_fail(base, AMI_EFAULT);
 
-    if (len < (socklen_t)sizeof(struct sockaddr_in))
-        return bsd_fail(base, AMI_EINVAL);
+    family = bsd_sa_family(sa, len);
 
-    if (sin->sin_family != AF_INET && sin->sin_family != AF_UNSPEC)
-        return bsd_fail(base, AMI_EAFNOSUPPORT);
+    if (family == -1)
+    {
+        /* Too short to be anything is EINVAL; the right size but the wrong
+           family is EAFNOSUPPORT, which is what BSD reports and what the
+           conformance suite checks. */
+        return bsd_fail(base,
+                        (len < (socklen_t)sizeof(struct sockaddr_in))
+                            ? AMI_EINVAL : AMI_EAFNOSUPPORT);
+    }
 
-    /* m68k is the wire order, so the ntoh* below are documentation. */
-    *addr = BSD_NTOHL(sin->sin_addr.s_addr);
-    *port = (UINT)BSD_NTOHS(sin->sin_port);
+#ifdef AMINETXDUO_IPV6
+    if (family == AF_INET6)
+    {
+        const struct sockaddr_in6 *sin6 = (const struct sockaddr_in6 *)sa;
+
+        addr->nxd_ip_version = NX_IP_VERSION_V6;
+        bsd_in6_to_words(sin6->sin6_addr.s6_addr, addr->nxd_ip_address.v6);
+
+        *port = (UINT)BSD_NTOHS(sin6->sin6_port);
+
+        if (scope_id != NULL)
+            *scope_id = (ULONG)sin6->sin6_scope_id;
+
+        return 0;
+    }
+#endif
+
+    {
+        const struct sockaddr_in *sin = (const struct sockaddr_in *)sa;
+
+        /* m68k is the wire order, so the ntoh* below are documentation. */
+        bsd_addr_from_v4(addr, BSD_NTOHL(sin->sin_addr.s_addr));
+        *port = (UINT)BSD_NTOHS(sin->sin_port);
+    }
 
     return 0;
 }
 
-VOID bsd_sockaddr_out(struct sockaddr *sa, socklen_t *len,
-                      ULONG addr, UINT port)
+VOID bsd_sockaddr_put(const AmiSocket *sock, struct sockaddr *sa,
+                      socklen_t *len, const NXD_ADDRESS *addr, UINT port)
 {
-    struct sockaddr_in sin;
-    socklen_t          copy;
+    socklen_t copy;
 
     if (sa == NULL || len == NULL)
         return;
 
-    bsd_bzero(&sin, sizeof(sin));
-    sin.sin_len         = (UBYTE)sizeof(struct sockaddr_in);
-    sin.sin_family      = AF_INET;
-    sin.sin_port        = (in_port_t)BSD_HTONS((UWORD)port);
-    sin.sin_addr.s_addr = BSD_HTONL(addr);
+#ifdef AMINETXDUO_IPV6
+    /*
+     * The SHAPE follows the socket, not the address. An AF_INET6 socket that
+     * accepted an IPv4 connection must report the peer as a sockaddr_in6
+     * holding ::ffff:a.b.c.d -- an application that called accept() on an
+     * AF_INET6 socket has a sockaddr_in6 on its stack and nothing else.
+     */
+    if (sock != NULL && (sock->as_Flags & ASF_INET6) != 0)
+    {
+        struct sockaddr_in6 sin6;
+        NXD_ADDRESS         mapped;
+        const NXD_ADDRESS  *use = addr;
 
-    copy = *len;
-    if (copy > (socklen_t)sizeof(sin))
-        copy = (socklen_t)sizeof(sin);
+        if (addr->nxd_ip_version == NX_IP_VERSION_V4)
+        {
+            bsd_addr_to_v4mapped(&mapped, addr->nxd_ip_address.v4);
+            use = &mapped;
+        }
 
-    bsd_bcopy(&sin, sa, (ULONG)copy);
-    *len = (socklen_t)sizeof(struct sockaddr_in);
+        bsd_bzero(&sin6, sizeof(sin6));
+        /* No sin6_len field in this NDK's sockaddr_in6 -- see the note in
+           bsdsocket_internal.h. Setting one would corrupt sin6_family. */
+        sin6.sin6_family = AF_INET6;
+        sin6.sin6_port   = (in_port_t)BSD_HTONS((UWORD)port);
+        bsd_words_to_in6(use->nxd_ip_address.v6, sin6.sin6_addr.s6_addr);
+        sin6.sin6_scope_id = sock->as_ScopeId;
+
+        copy = *len;
+        if (copy > (socklen_t)sizeof(sin6))
+            copy = (socklen_t)sizeof(sin6);
+
+        bsd_bcopy(&sin6, sa, (ULONG)copy);
+        *len = (socklen_t)sizeof(struct sockaddr_in6);
+
+        return;
+    }
+#else
+    (VOID)sock;
+#endif
+
+    {
+        struct sockaddr_in sin;
+
+        bsd_bzero(&sin, sizeof(sin));
+        sin.sin_len    = (UBYTE)sizeof(struct sockaddr_in);
+        sin.sin_family = AF_INET;
+        sin.sin_port   = (in_port_t)BSD_HTONS((UWORD)port);
+        sin.sin_addr.s_addr =
+            BSD_HTONL((addr->nxd_ip_version == NX_IP_VERSION_V4)
+                          ? addr->nxd_ip_address.v4 : 0UL);
+
+        copy = *len;
+        if (copy > (socklen_t)sizeof(sin))
+            copy = (socklen_t)sizeof(sin);
+
+        bsd_bcopy(&sin, sa, (ULONG)copy);
+        *len = (socklen_t)sizeof(struct sockaddr_in);
+    }
 }
 
 /* ---------------------------------------------------------------- vectors */
@@ -402,8 +566,21 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
     if (ip == NULL)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 
+#ifdef AMINETXDUO_IPV6
+    if (domain != AF_INET && domain != AF_INET6)
+        return bsd_fail(SocketBase, AMI_EAFNOSUPPORT);
+
+    /*
+     * An AF_INET6 socket on a stack whose IPv6 half failed to come up would
+     * be a socket that can never send anything; EAFNOSUPPORT now is better
+     * than ENETUNREACH on every later call.
+     */
+    if (domain == AF_INET6 && !netstack_ipv6_enabled())
+        return bsd_fail(SocketBase, AMI_EAFNOSUPPORT);
+#else
     if (domain != AF_INET)
         return bsd_fail(SocketBase, AMI_EAFNOSUPPORT);
+#endif
 
     if (type != SOCK_STREAM && type != SOCK_DGRAM)
         return bsd_fail(SocketBase, AMI_ESOCKTNOSUPPORT);
@@ -465,10 +642,11 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
               register socklen_t namelen       __asm("d1"),
               register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
-    ULONG      addr = 0;
-    UINT       port = 0;
-    UINT       status;
+    AmiSocket  *sock = bsd_lookup(SocketBase, sock_fd);
+    NXD_ADDRESS addr;
+    ULONG       scope = 0;
+    UINT        port = 0;
+    UINT        status;
 
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
@@ -476,9 +654,37 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
     if ((sock->as_Flags & ASF_BOUND) != 0)
         return bsd_fail(SocketBase, AMI_EINVAL);
 
-    if (bsd_sockaddr_in(SocketBase, name, namelen, &addr, &port) != 0)
+    if (bsd_sockaddr_get(SocketBase, name, namelen, &addr, &port, &scope) != 0)
         return -1;
 
+#ifdef AMINETXDUO_IPV6
+    /*
+     * The families have to agree. An AF_INET socket handed a sockaddr_in6
+     * (or the reverse) is a programming error, not something to interpret --
+     * except for the v4-mapped case on a dual-stack socket, which is a
+     * legitimate way of saying "bind the v4 side of this port".
+     */
+    if ((sock->as_Flags & ASF_INET6) != 0)
+    {
+        if (addr.nxd_ip_version == NX_IP_VERSION_V4)
+            return bsd_fail(SocketBase, AMI_EAFNOSUPPORT);
+        if (!bsd_addr_normalise(sock, &addr))
+            return bsd_fail(SocketBase, AMI_EINVAL);
+        sock->as_ScopeId = scope;
+    }
+    else if (addr.nxd_ip_version == NX_IP_VERSION_V6)
+    {
+        return bsd_fail(SocketBase, AMI_EAFNOSUPPORT);
+    }
+#endif
+
+    /*
+     * NetX Duo binds a socket to a PORT, not to an address: there is no
+     * nx_*_socket_bind that takes one. A bind to a specific local address is
+     * therefore recorded (so getsockname reports it) but does not restrict
+     * what the socket receives. That is a real gap, and it is the same one
+     * the IPv4 path has always had.
+     */
     sock->as_LocalAddr = addr;
     sock->as_LocalPort = port;
 
@@ -658,12 +864,13 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
                 register socklen_t *addrlen    __asm("a1"),
                 register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
-    AmiSocket *incoming, *spare;
-    NX_IP     *ip = netstack_ip();
-    ULONG      peer_ip = 0, peer_port = 0;
-    UINT       status;
-    LONG       fd;
+    AmiSocket  *sock = bsd_lookup(SocketBase, sock_fd);
+    AmiSocket  *incoming, *spare;
+    NX_IP      *ip = netstack_ip();
+    NXD_ADDRESS peer;
+    ULONG       peer_port = 0;
+    UINT        status;
+    LONG        fd;
 
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
@@ -702,6 +909,49 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
         return bsd_fail(SocketBase, bsd_errno_from_nx(status));
     }
 
+    /*
+     * nxd_ (not nx_) peer info: the v4-only entry point reports 0 for a peer
+     * that connected over IPv6, so a dual-stack listener would hand accept()
+     * a sockaddr full of zeroes.
+     */
+    nxd_tcp_socket_peer_info_get(&incoming->as_Nx.tcp, &peer, &peer_port);
+
+#ifdef AMINETXDUO_IPV6
+    /*
+     * IPV6_V6ONLY enforcement lives here and can live nowhere else.
+     *
+     * NetX Duo's listen is registered against a port, not an address family,
+     * so a V6ONLY socket still has an IPv4 SYN answered for it down in the TCP
+     * state machine -- by the time this code runs the handshake is complete.
+     * The only honest thing left is to close that connection and go back to
+     * waiting, which is what a V6ONLY listener on any other stack looks like
+     * from the client's side (a connection that is accepted and immediately
+     * reset, rather than a SYN that goes unanswered).
+     *
+     * Reported as EWOULDBLOCK rather than looping internally: a blocking
+     * accept() that silently swallowed connections would hide the fact that
+     * something is knocking on the v4 side, and a non-blocking one must return
+     * anyway. The caller retries, exactly as it would after any spurious
+     * wakeup.
+     */
+    if ((sock->as_Flags & ASF_V6ONLY) != 0 &&
+        peer.nxd_ip_version == NX_IP_VERSION_V4)
+    {
+        AMI_DEBUG("bsdsocket: V6ONLY listener on port %ld refused an IPv4 peer",
+                  (long)sock->as_ListenPort);
+
+        nx_tcp_socket_disconnect(&incoming->as_Nx.tcp, NX_NO_WAIT);
+        nx_tcp_server_socket_unaccept(&incoming->as_Nx.tcp);
+        nx_tcp_server_socket_relisten(ip, sock->as_ListenPort,
+                                      &incoming->as_Nx.tcp);
+        (VOID)nx_tcp_server_socket_accept(&incoming->as_Nx.tcp, NX_NO_WAIT);
+
+        bsd_nx_leave(SocketBase);
+
+        return bsd_fail(SocketBase, AMI_EWOULDBLOCK);
+    }
+#endif
+
     /* Promote the parked socket to a descriptor of its own. ASF_SERVER stays
      * set: the port still has to go back through unaccept() at close. */
     incoming->as_Flags &= ~(ASF_INCOMING | ASF_ACCEPTPEND);
@@ -709,9 +959,8 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
     incoming->as_Parent = NULL;
     incoming->as_Owner  = SocketBase;
 
-    nx_tcp_socket_peer_info_get(&incoming->as_Nx.tcp, &peer_ip, &peer_port);
-    incoming->as_PeerAddr = peer_ip;
-    incoming->as_PeerPort = (UINT)peer_port;
+    incoming->as_PeerAddr  = peer;
+    incoming->as_PeerPort  = (UINT)peer_port;
     incoming->as_LocalPort = sock->as_ListenPort;
 
     fd = bsd_fd_alloc(SocketBase, incoming);
@@ -786,7 +1035,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
     bsd_nx_leave(SocketBase);
 
     if (addr != NULL && addrlen != NULL)
-        bsd_sockaddr_out(addr, addrlen, incoming->as_PeerAddr,
+        bsd_sockaddr_put(incoming, addr, addrlen, &incoming->as_PeerAddr,
                          incoming->as_PeerPort);
 
     return fd;
@@ -794,7 +1043,8 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
 
 /* The body of connect(), run inside a ThreadX context bracket. */
 static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
-                               AmiSocket *sock, ULONG addr, UINT port)
+                               AmiSocket *sock, const NXD_ADDRESS *addr,
+                               UINT port)
 {
     UINT status;
 
@@ -815,7 +1065,7 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
             sock->as_Flags |= ASF_NXBOUND | ASF_BOUND;
         }
 
-        sock->as_PeerAddr = addr;
+        sock->as_PeerAddr = *addr;
         sock->as_PeerPort = port;
         sock->as_Flags   |= ASF_CONNECTED;
 
@@ -870,12 +1120,17 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
      * zero. Setting it first makes the callback authoritative and this code
      * merely read its answer.
      */
-    sock->as_PeerAddr = addr;
+    sock->as_PeerAddr = *addr;
     sock->as_PeerPort = port;
     sock->as_Flags   |= ASF_CONNECTING;
 
-    status = nx_tcp_client_socket_connect(
-        &sock->as_Nx.tcp, addr, port,
+    /*
+     * nxd_, not nx_: the v4-only wrapper builds an NXD_ADDRESS tagged
+     * NX_IP_VERSION_V4 and calls exactly this, so going straight to it costs
+     * nothing in the floor build and is the only way to reach an IPv6 peer.
+     */
+    status = nxd_tcp_client_socket_connect(
+        &sock->as_Nx.tcp, (NXD_ADDRESS *)addr, port,
         bsd_wait_option(sock, sock->as_SndTimeout));
 
     if (status == NX_SUCCESS)
@@ -927,21 +1182,41 @@ LONG bsd_connect(register LONG sock_fd          __asm("d0"),
                  register socklen_t namelen     __asm("d1"),
                  register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
-    ULONG      addr = 0;
-    UINT       port = 0;
-    LONG       result;
+    AmiSocket  *sock = bsd_lookup(SocketBase, sock_fd);
+    NXD_ADDRESS addr;
+    ULONG       scope = 0;
+    UINT        port = 0;
+    LONG        result;
 
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
 
-    if (bsd_sockaddr_in(SocketBase, name, namelen, &addr, &port) != 0)
+    if (bsd_sockaddr_get(SocketBase, name, namelen, &addr, &port, &scope) != 0)
         return -1;
+
+#ifdef AMINETXDUO_IPV6
+    if ((sock->as_Flags & ASF_INET6) != 0)
+    {
+        if (addr.nxd_ip_version != NX_IP_VERSION_V6)
+            return bsd_fail(SocketBase, AMI_EAFNOSUPPORT);
+
+        /* ::ffff:a.b.c.d on a dual-stack socket becomes a real IPv4 connect;
+           on a V6ONLY socket it is refused. */
+        if (!bsd_addr_normalise(sock, &addr))
+            return bsd_fail(SocketBase, AMI_ENETUNREACH);
+
+        sock->as_ScopeId = scope;
+    }
+    else if (addr.nxd_ip_version == NX_IP_VERSION_V6)
+    {
+        return bsd_fail(SocketBase, AMI_EAFNOSUPPORT);
+    }
+#endif
 
     if (bsd_nx_enter(SocketBase) != 0)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 
-    result = bsd_connect_locked(SocketBase, sock, addr, port);
+    result = bsd_connect_locked(SocketBase, sock, &addr, port);
 
     bsd_nx_leave(SocketBase);
 

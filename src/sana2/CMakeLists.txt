@@ -11,7 +11,6 @@ target_include_directories(aminetxduo_sana2
 
 target_link_libraries(aminetxduo_sana2 PUBLIC netxduo aminetxduo_common)
 
-if(AMINETXDUO_IPV6)
-    # Adds the 0x86DD reader; must agree with the rest of the tree.
-    target_compile_definitions(aminetxduo_sana2 PUBLIC AMINETXDUO_IPV6)
-endif()
+# AMINETXDUO_IPV6 (which adds the 0x86DD reader here) is set globally by the
+# root CMakeLists, not per-target: it changes the NetX Duo struct layout, so
+# every translation unit in the tree has to agree. See the comment there.
