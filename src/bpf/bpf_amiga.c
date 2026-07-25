@@ -68,7 +68,11 @@ extern struct Device *TimerBase;
 
 VOID ami_bpf_now(ULONG *sec, ULONG *usec)
 {
-    TimeVal_Type tv;
+    /* `struct timeval`, not `TimeVal_Type`: the typedef is NDK 3.2's, and NDK
+       3.9 has no such name.  Both NDKs declare GetSysTime() as taking the
+       Amiga timeval -- 3.2 spells that parameter TimeVal_Type, which is a
+       typedef for exactly this struct -- and both give it tv_secs/tv_micro. */
+    struct timeval tv;
 
     (VOID)ami_millis();
 

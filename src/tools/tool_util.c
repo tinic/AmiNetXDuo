@@ -13,13 +13,21 @@
  * On m68k every C vararg is already pushed 32-bit-aligned in that exact
  * order, so a va_list is that stream. src/common/compat.c relies on the same
  * property for RawDoFmt().
+ *
+ * The argarray cast is (APTR), not (CONST_APTR), and that is deliberate. The
+ * two NDKs disagree about the parameter: NDK 3.2 declares it CONST_APTR
+ * (`const void *`), while NDK 3.9's <inline/dos.h> writes `const APTR`
+ * (`void *const` -- a const POINTER, not a pointer to const). Handing the
+ * latter a CONST_APTR is "initialization discards const qualifier", which
+ * -Werror turns into a build failure. A plain APTR converts cleanly to either,
+ * and the stream is a local va_list that nothing is promising not to touch.
  */
 VOID tool_printf(const char *fmt, ...)
 {
     va_list args;
 
     va_start(args, fmt);
-    VPrintf((CONST_STRPTR)fmt, (CONST_APTR)args);
+    VPrintf((CONST_STRPTR)fmt, (APTR)args);
     va_end(args);
 }
 
@@ -55,7 +63,7 @@ VOID tool_error(const char *fmt, ...)
     FPuts(err, (CONST_STRPTR)": ");
 
     va_start(args, fmt);
-    VFPrintf(err, (CONST_STRPTR)fmt, (CONST_APTR)args);
+    VFPrintf(err, (CONST_STRPTR)fmt, (APTR)args);   /* (APTR): see tool_printf */
     va_end(args);
 
     FPutC(err, '\n');

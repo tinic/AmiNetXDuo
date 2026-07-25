@@ -45,6 +45,37 @@ VECTOR_STRIDE = 6
 TRAILING_RESERVED = 6
 
 # ---------------------------------------------------------------------------
+# Vectors that are OURS, past the end of everything the published ABI names.
+#
+# (offset, C symbol, guard macro).  Each is emitted inside `#ifdef <guard>`, in
+# both the table and the header, so a build without the guard has neither the
+# slot nor the code -- which is what lets the default bsdsocket.library stay
+# byte-identical to a build of a tree that has no TLS in it at all.
+#
+# 0x360 is the first slot after the six reserved ones clib/bsdsocket_protos.h
+# documents following getnameinfo(), i.e. after every offset any published
+# bsdsocket ABI assigns.  Callers must still present a magic and a version
+# (include/aminetxduo/nxcontext.h) so that a program aiming at some future
+# vendor's vector at the same offset gets a clean failure rather than a
+# pointer.
+# ---------------------------------------------------------------------------
+PRIVATE_VECTORS = [
+    (0x360, "bsd_ObtainNetXDuoContext", "AMINETXDUO_TLS_CONTEXT",
+     "hands tls.library the NetX Duo singleton -- nxcontext.h"),
+]
+
+# Hand-written because these have no NDK pragma to read a register assignment
+# out of -- they are ours, so the assignment is ours to state.
+PRIVATE_DECLARATIONS = {
+    "bsd_ObtainNetXDuoContext": """\
+LONG bsd_ObtainNetXDuoContext(
+        register ULONG                    magic       __asm("d0"),
+        register ULONG                    version     __asm("d1"),
+        register const AmiNetXDuoContext **ctx        __asm("a0"),
+        register struct AmiSocketBase    *SocketBase  __asm("a6"));""",
+}
+
+# ---------------------------------------------------------------------------
 # What is actually implemented.  Everything else gets bsd_enosys().
 #
 # Tier 1 per docs/RESEARCH.md S3.2: socket core, data transfer, WaitSelect,
@@ -257,6 +288,11 @@ HEADER_PREAMBLE = """\
 #include <sys/mbuf.h>
 #include <net/route.h>
 
+/* The private vector below traffics in one of these. */
+#ifdef AMINETXDUO_TLS_CONTEXT
+#include "aminetxduo/nxcontext.h"
+#endif
+
 /* The shared stubs every unimplemented slot points at: they set errno to
  * ENOSYS and return the "failed" value for their shape.  Never NULL in the
  * table -- a jump through a NULL LVO takes the machine down, and Tier-3
@@ -328,6 +364,9 @@ def emit(by_offset, outdir, check=False):
             continue
         h.append("/* LVO -0x%03x */\n%s\n\n"
                  % (offset, declaration(name, ret, args, regs)))
+    for offset, symbol, guard, what in PRIVATE_VECTORS:
+        h.append("/* LVO -0x%03x -- PRIVATE: %s */\n#ifdef %s\n%s\n#endif\n\n"
+                 % (offset, what, guard, PRIVATE_DECLARATIONS[symbol]))
     h.append(HEADER_EPILOGUE)
     header = "".join(h)
 
@@ -368,6 +407,14 @@ def emit(by_offset, outdir, check=False):
         pad = max(1, 34 - len("    (APTR)%s," % target))
         s.append("    (APTR)%s,%s/* -0x%03x [%3d] %s */\n"
                  % (target, " " * pad, offset, index, name))
+
+    for offset, symbol, guard, what in PRIVATE_VECTORS:
+        index = offset // VECTOR_STRIDE - 1
+        s.append("\n#ifdef %s\n" % guard)
+        s.append("    /* -0x%03x [%3d] %s -- PRIVATE: %s */\n"
+                 % (offset, index, symbol, what))
+        s.append("    (APTR)%s,\n" % symbol)
+        s.append("#endif\n")
 
     s.append("\n    (APTR)-1\n};\n")
     source = "".join(s)

@@ -37,6 +37,11 @@
 
 #include <exec/types.h>
 #include <exec/memory.h>
+/* <exec/execbase.h> explicitly, for the struct ExecBase that dump_sources()
+   reads IdleCount/DispCount/LastAlert out of.  NDK 3.2's <proto/exec.h> drags
+   it in and NDK 3.9's does not, so relying on that is the difference between
+   building and "invalid use of undefined type 'struct ExecBase'". */
+#include <exec/execbase.h>
 #include <devices/timer.h>
 #include <proto/exec.h>
 #include <proto/dos.h>

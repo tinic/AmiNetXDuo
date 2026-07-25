@@ -61,6 +61,15 @@
 
 #include <devices/timer.h>
 
+/* `struct timerequest`, not `struct timerequest`.  NDK 3.2 renamed the timer
+   types to TimeVal/TimeRequest to stop `struct timeval` colliding with the
+   POSIX one, and kept the old lowercase names as aliases; NDK 3.9 and earlier
+   only ever had the lowercase ones.  The lowercase spelling therefore compiles
+   against both NDKs and the CamelCase one does not, and the member names
+   (tr_node, tr_time, tv_secs, tv_micro) are identical either way.  The rest of
+   this tree already spells it lowercase -- including _tx_amiga_stop_wait()
+   further down this same file.  */
+
 /* ReadEClock() is an inline that resolves the timer.device base through the
    symbol named by TIMER_BASE_NAME.  Point it at a base of our own rather than
    the global TimerBase: src/common/compat.c defines that one for ami_millis(),
@@ -448,7 +457,7 @@ static VOID _tx_amiga_timer_exit(VOID)
 
 
 /* Arm one wakeup.  */
-static VOID _tx_amiga_timer_arm(struct TimeRequest *tr, ULONG secs, ULONG micro)
+static VOID _tx_amiga_timer_arm(struct timerequest *tr, ULONG secs, ULONG micro)
 {
 
     tr -> tr_node.io_Command =  TR_ADDREQUEST;
@@ -477,8 +486,8 @@ static VOID _tx_amiga_timer_arm(struct TimeRequest *tr, ULONG secs, ULONG micro)
  *
  * On return `tr` HAS A REQUEST OUTSTANDING.
  */
-static ULONG _tx_amiga_timer_probe(struct TimeRequest *tr, ULONG sig,
-                                   struct TimeRequest *guard, ULONG guard_sig,
+static ULONG _tx_amiga_timer_probe(struct timerequest *tr, ULONG sig,
+                                   struct timerequest *guard, ULONG guard_sig,
                                    ULONG eclock_per_ms)
 {
 
@@ -541,7 +550,7 @@ ULONG               elapsed_ms;
 /* Close and destroy a request/port pair the port is done with.  The request
    may still be outstanding, which is the only place AbortIO() is used: the
    pair is destroyed immediately afterwards and never re-armed.  */
-static VOID _tx_amiga_timer_discard(struct TimeRequest *tr, struct MsgPort *port)
+static VOID _tx_amiga_timer_discard(struct timerequest *tr, struct MsgPort *port)
 {
 
     if (CheckIO((struct IORequest *) tr) == (struct IORequest *) 0)
@@ -561,8 +570,8 @@ static VOID _tx_amiga_timer_task_entry(VOID)
 
 struct MsgPort      *port;
 struct MsgPort      *guard_port;
-struct TimeRequest  *tr;
-struct TimeRequest  *guard;
+struct timerequest  *tr;
+struct timerequest  *guard;
 struct EClockVal     now;
 ULONG                port_sig;
 ULONG                guard_sig;
@@ -613,8 +622,8 @@ UINT                 armed;
         _tx_amiga_timer_exit();
     }
 
-    tr =  (struct TimeRequest *) CreateIORequest(port, (ULONG) sizeof(struct TimeRequest));
-    if (tr == (struct TimeRequest *) 0)
+    tr =  (struct timerequest *) CreateIORequest(port, (ULONG) sizeof(struct timerequest));
+    if (tr == (struct timerequest *) 0)
     {
         DeleteMsgPort(port);
         _tx_amiga_timer_park();
@@ -637,29 +646,29 @@ UINT                 armed;
      * thrown away.  A machine where even this will not open has no usable
      * timer at all, and the probe simply runs unguarded.
      */
-    guard      =  (struct TimeRequest *) 0;
+    guard      =  (struct timerequest *) 0;
     guard_port =  (struct MsgPort *) 0;
     guard_sig  =  0UL;
 
     guard_port =  CreateMsgPort();
     if (guard_port != (struct MsgPort *) 0)
     {
-        guard =  (struct TimeRequest *) CreateIORequest(guard_port,
-                                                        (ULONG) sizeof(struct TimeRequest));
-        if (guard != (struct TimeRequest *) 0)
+        guard =  (struct timerequest *) CreateIORequest(guard_port,
+                                                        (ULONG) sizeof(struct timerequest));
+        if (guard != (struct timerequest *) 0)
         {
             if (OpenDevice((CONST_STRPTR) "timer.device", (ULONG) UNIT_MICROHZ,
                            (struct IORequest *) guard, 0UL) != 0)
             {
                 DeleteIORequest((APTR) guard);
-                guard =  (struct TimeRequest *) 0;
+                guard =  (struct timerequest *) 0;
             }
             else
             {
                 guard_sig =  1UL << ((ULONG) guard_port -> mp_SigBit);
             }
         }
-        if (guard == (struct TimeRequest *) 0)
+        if (guard == (struct timerequest *) 0)
         {
             DeleteMsgPort(guard_port);
             guard_port =  (struct MsgPort *) 0;
@@ -675,7 +684,7 @@ UINT                 armed;
         ami_log(AMI_LOG_WARN, "tick: timer.device unit %ld would not open; using UNIT_MICROHZ",
                 (LONG) unit);
 
-        if (guard != (struct TimeRequest *) 0)
+        if (guard != (struct timerequest *) 0)
         {
             /* Hand the tick over to the guard's request, which is already
                open on UNIT_MICROHZ; see the fallback below for why the
@@ -685,7 +694,7 @@ UINT                 armed;
             tr         =  guard;
             port       =  guard_port;
             port_sig   =  guard_sig;
-            guard      =  (struct TimeRequest *) 0;
+            guard      =  (struct timerequest *) 0;
             guard_port =  (struct MsgPort *) 0;
             guard_sig  =  0UL;
         }
@@ -736,7 +745,7 @@ UINT                 armed;
 
     /* ---- validate the wakeup source ------------------------------------- */
 
-    if ((unit != (ULONG) UNIT_MICROHZ) && (guard != (struct TimeRequest *) 0))
+    if ((unit != (ULONG) UNIT_MICROHZ) && (guard != (struct timerequest *) 0))
     {
 
         /*
@@ -767,7 +776,7 @@ UINT                 armed;
             tr         =  guard;
             port       =  guard_port;
             port_sig   =  guard_sig;
-            guard      =  (struct TimeRequest *) 0;
+            guard      =  (struct timerequest *) 0;
             guard_port =  (struct MsgPort *) 0;
             guard_sig  =  0UL;
 
@@ -785,7 +794,7 @@ UINT                 armed;
             CloseDevice((struct IORequest *) guard);
             DeleteIORequest((APTR) guard);
             DeleteMsgPort(guard_port);
-            guard      =  (struct TimeRequest *) 0;
+            guard      =  (struct timerequest *) 0;
             guard_port =  (struct MsgPort *) 0;
             guard_sig  =  0UL;
         }
@@ -990,7 +999,7 @@ UINT                 armed;
         DeleteMsgPort(port);
     }
 
-    if (guard != (struct TimeRequest *) 0)
+    if (guard != (struct timerequest *) 0)
     {
         CloseDevice((struct IORequest *) guard);
         DeleteIORequest((APTR) guard);

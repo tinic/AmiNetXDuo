@@ -31,6 +31,14 @@ if(AMINETXDUO_IPV6)
     list(APPEND BSDSOCKET_SOURCES in6.c)
 endif()
 
+# nxcontext.c is the ONE private LVO tls.library needs (see
+# include/aminetxduo/nxcontext.h). It exists only in an AMINETXDUO_TLS build,
+# both as an object and as a vector-table slot, so that a default build of
+# bsdsocket.library is byte-identical to a build of a tree without any of this.
+if(AMINETXDUO_TLS)
+    list(APPEND BSDSOCKET_SOURCES nxcontext.c)
+endif()
+
 add_library(aminetxduo_bsdsocket STATIC ${BSDSOCKET_SOURCES})
 
 target_include_directories(aminetxduo_bsdsocket PUBLIC
@@ -42,6 +50,10 @@ target_link_libraries(aminetxduo_bsdsocket PUBLIC
 
 # A shared library has no startup code and must not drag in newlib's stdio.
 target_compile_options(aminetxduo_bsdsocket PRIVATE -Wall -Wextra)
+
+if(AMINETXDUO_TLS)
+    target_compile_definitions(aminetxduo_bsdsocket PUBLIC AMINETXDUO_TLS_CONTEXT=1)
+endif()
 
 # ---------------------------------------------------------------- generator --
 #
@@ -78,6 +90,11 @@ if(AMINETXDUO_BSDSOCKET_LINK)
     target_link_libraries(bsdsocket_library PRIVATE
         aminetxduo_netstack aminetxduo_sana2 aminetxduo_config
         aminetxduo_common netxduo_addons netxduo threadx threadx_port)
+
+    if(AMINETXDUO_TLS)
+        target_compile_definitions(bsdsocket_library PRIVATE
+                                   AMINETXDUO_TLS_CONTEXT=1)
+    endif()
 
     # -nostartfiles, not -nostdlib: there is no crt0 in a shared library, but
     # ThreadX and NetX Duo do want memset/memcpy/memcmp and gcc wants its

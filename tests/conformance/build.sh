@@ -66,7 +66,16 @@ TOOLCHAIN="$AMIGA_TOOLCHAIN_ROOT"
 NDK="$AMIGA_NDK"
 CC="$AMIGA_GCC"
 
-CFLAGS=(-O2 -Wall -m68020 -fomit-frame-pointer -fno-strict-aliasing
+# -Wno-error=incompatible-pointer-types, because none of this is our code and
+# the mismatch is between two NDKs, not a bug.  bsdsocktest's main.c declares
+# its ToolTypes array CONST_STRPTR*, which is exactly what NDK 3.2's
+# FindToolType() takes; NDK 3.9's <inline/icon.h> writes the parameter `const
+# STRPTR *` (a const array of non-const strings) instead, so the same call is a
+# pointer mismatch there -- and GCC 14 promoted that from a warning to an error
+# by default.  We cannot fix a submodule we do not own, and we want the suite
+# to build against either NDK, so the diagnostic goes back to being a warning.
+CFLAGS=(-O2 -Wall -Wno-error=incompatible-pointer-types
+        -m68020 -fomit-frame-pointer -fno-strict-aliasing
         -I"$HERE/compat" -I"$NDK"
         -include sys/types.h -include strings.h -include stdio.h
         -Dstricmp=strcasecmp

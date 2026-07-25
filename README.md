@@ -94,8 +94,11 @@ cmake --build build --parallel
 ```
 
 If you have no m68k toolchain, `tools/fetch-toolchain.sh` downloads the pinned
-one (GCC 15.2 + NDK 3.9, 93 MB) into `~/.cache/aminetxduo/toolchain`. The build
-finds it there without being told. Otherwise the search order is
+one (GCC 15.2 + NDK 3.9, a 35 MB `.tar.xz` pinned by its own sha256, 265 MB
+unpacked) into `~/.cache/aminetxduo/toolchain`. It comes from a release asset on
+this repository, falling back to the upstream Docker layer — pinned by that
+layer's content digest — if the release cannot be reached. The build finds the
+result without being told. Otherwise the search order is
 `-DAMIGA_TOOLCHAIN_ROOT` → `$AMIGA_TOOLCHAIN_ROOT` → that cache →
 `m68k-amigaos-gcc` on `$PATH` → `/opt/m68k-amigaos` →
 `~/amigaos/tools/m68k-amigaos-gcc`.
@@ -103,6 +106,10 @@ finds it there without being told. Otherwise the search order is
 The pinned toolchain is a **Linux x86-64** build. On any other host, install or
 build one and point `AMIGA_TOOLCHAIN_ROOT` at it; the layout to match is
 `<root>/bin/m68k-amigaos-gcc` plus `<root>/m68k-amigaos/ndk-include`.
+
+Either NDK works. The sources are written to the spellings NDK 3.2 and NDK 3.9
+agree on — `struct timerequest` rather than 3.2's `struct TimeRequest`, and so
+on — so a toolchain carrying either one builds the tree.
 
 ### Versioning
 
@@ -197,7 +204,7 @@ a network connection.
 
 | | |
 |---|---|
-| toolchain | `tools/fetch-toolchain.sh` — GCC 15.2 + NDK 3.9, pinned by the sha256 of the layer it comes out of, cached |
+| toolchain | `tools/fetch-toolchain.sh` — GCC 15.2 + NDK 3.9 from this repository's toolchain mirror release, pinned by the asset's sha256, with the upstream Docker layer (pinned by its content digest) as the fallback; cached between runs |
 | cross builds | default, `-DAMINETXDUO_IPV6=ON`, `-DAMINETXDUO_TLS=ON`, `-DAMINETXDUO_CRYPTO68K_ASM=OFF` — all four, because each has broken while the others built |
 | warnings | `-Wall -Wextra -Werror` on our sources, vendored code exempt (`cmake/ci-warnings.cmake`) |
 | host tests | 5 suites through `ctest`: config parsers (157 checks), mbuf chains (206), BPF filter VM (201), crypto68k vectors (4,964 — RSA-2048 known answers plus a differential against the vendored bignum code), net68k checksum (10,030 — a differential against the vendored checksum over every length, alignment and packet chain) |

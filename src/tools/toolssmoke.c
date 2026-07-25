@@ -123,7 +123,11 @@ static ULONG load_script(void)
 }
 
 /* Append a line to the report, opening and closing around every write so the
-   Shell's own >> redirection never fights us for the file position. */
+   Shell's own >> redirection never fights us for the file position.
+
+   The argarray is cast to (APTR), not (CONST_APTR): NDK 3.2 and NDK 3.9 spell
+   VFPrintf's third parameter differently and only APTR converts to both.  See
+   the long note in src/tools/tool_util.c. */
 static void report(const char *fmt, LONG a, LONG b)
 {
     BPTR fh = Open((CONST_STRPTR)REPORT, MODE_READWRITE);
@@ -137,7 +141,7 @@ static void report(const char *fmt, LONG a, LONG b)
 
         args[0] = a;
         args[1] = b;
-        VFPrintf(fh, (CONST_STRPTR)fmt, (CONST_APTR)args);
+        VFPrintf(fh, (CONST_STRPTR)fmt, (APTR)args);
     }
     Close(fh);
 }

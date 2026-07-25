@@ -10,9 +10,8 @@
 #
 # WHAT IS PINNED, AND WHY THIS PARTICULAR THING
 #
-#   The toolchain is GCC 15.2.0 for m68k-amigaos with the NDK 3.9 headers --
-#   the same build the project is developed against.  Upstream publishes it
-#   only as a Docker image, by AmigaPorts, as
+#   The toolchain is GCC 15.2.0 for m68k-amigaos with the NDK 3.9 headers.
+#   Upstream publishes it only as a Docker image, by AmigaPorts, as
 #
 #       docker.io/amigadev/crosstools:m68k-amigaos-gcc10
 #
@@ -28,6 +27,15 @@
 #   AmigaPorts remotes survive).  Building from source works but takes the
 #   better part of an hour and pulls NDK 3.9 from a single unmirrored
 #   third-party host, which is a worse dependency than either of these.
+#
+#   NDK 3.9, NOT NDK 3.2.  Confusingly, 3.2 is the NEWER of the two: it is
+#   Hyperion's 2021 SDK, and it renamed some long-standing types (`struct
+#   timerequest` -> `struct TimeRequest`, and so on) while keeping the old
+#   names as aliases.  Neither published amigadev/crosstools m68k tag carries
+#   it -- the build selects the NDK with `make NDK=3.9` -- so pinning a 3.2
+#   toolchain would mean building and hosting one ourselves.  The sources are
+#   written to the spellings both NDKs accept instead, which costs nothing and
+#   lets anyone build the tree with whichever NDK their toolchain shipped.
 #
 # TWO SOURCES, IN ORDER
 #
@@ -131,7 +139,7 @@ while [ $# -gt 0 ]; do
         --print-root) MODE="print" ;;
         --print-sha)  MODE="printsha" ;;
         --force)      FORCE=1 ;;
-        -h|--help)    sed -n '2,89p' "$0"; exit 0 ;;
+        -h|--help)    sed -n '2,97p' "$0"; exit 0 ;;
         *) echo "usage: $0 [--export|--print-root|--print-sha] [--force]" >&2; exit 2 ;;
     esac
     shift

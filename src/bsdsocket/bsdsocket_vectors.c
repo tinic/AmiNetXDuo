@@ -170,5 +170,10 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_enosys,                    /* -0x354 [141] reserved */
     (APTR)bsd_enosys,                    /* -0x35a [142] reserved */
 
+#ifdef AMINETXDUO_TLS_CONTEXT
+    /* -0x360 [143] bsd_ObtainNetXDuoContext -- PRIVATE: hands tls.library the NetX Duo singleton -- nxcontext.h */
+    (APTR)bsd_ObtainNetXDuoContext,
+#endif
+
     (APTR)-1
 };

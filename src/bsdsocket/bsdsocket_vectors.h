@@ -21,6 +21,11 @@
 #include <sys/mbuf.h>
 #include <net/route.h>
 
+/* The private vector below traffics in one of these. */
+#ifdef AMINETXDUO_TLS_CONTEXT
+#include "aminetxduo/nxcontext.h"
+#endif
+
 /* The shared stubs every unimplemented slot points at: they set errno to
  * ENOSYS and return the "failed" value for their shape.  Never NULL in the
  * table -- a jump through a NULL LVO takes the machine down, and Tier-3
@@ -395,6 +400,15 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
                      register ULONG servlen __asm("d2"),
                      register ULONG flags __asm("d3"),
                      register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x360 -- PRIVATE: hands tls.library the NetX Duo singleton -- nxcontext.h */
+#ifdef AMINETXDUO_TLS_CONTEXT
+LONG bsd_ObtainNetXDuoContext(
+        register ULONG                    magic       __asm("d0"),
+        register ULONG                    version     __asm("d1"),
+        register const AmiNetXDuoContext **ctx        __asm("a0"),
+        register struct AmiSocketBase    *SocketBase  __asm("a6"));
+#endif
 
 
 /* The vector table itself, terminated by (APTR)-1, as MakeLibrary wants it. */
