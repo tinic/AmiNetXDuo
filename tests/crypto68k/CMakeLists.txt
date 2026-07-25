@@ -31,7 +31,18 @@ endif()
 add_executable(crypto68k_test  c68k_test.c)
 add_executable(crypto68k_bench c68k_bench.c)
 
-foreach(prog crypto68k_test crypto68k_bench)
+# The P-256 pair.  Split from the RSA pair for the same reason those two are
+# split from each other: a correctness regression should be catchable in a
+# short run, and the benchmark has to run REFERENCE elliptic curve operations
+# that take seconds each on the floor target.
+#
+#   AMINETXDUO_RUN_TAG=ec20  ./tools/fsuae-run.sh        -t 400 build/cm/tests/crypto68k/crypto68k_ec_test
+#   AMINETXDUO_RUN_TAG=ecb20 ./tools/fsuae-run.sh        -t 400 build/cm/tests/crypto68k/crypto68k_ec_bench
+#   AMINETXDUO_RUN_TAG=ecb30 ./tools/fsuae-run.sh -c 68030 -t 400 build/cm/tests/crypto68k/crypto68k_ec_bench
+add_executable(crypto68k_ec_test  c68k_ec_test.c)
+add_executable(crypto68k_ec_bench c68k_ec_bench.c)
+
+foreach(prog crypto68k_test crypto68k_bench crypto68k_ec_test crypto68k_ec_bench)
     target_link_libraries(${prog} PRIVATE
         crypto68k_testsupport crypto68k aminetxduo_common)
     set_target_properties(${prog} PROPERTIES OUTPUT_NAME "${prog}")

@@ -56,10 +56,13 @@ IMPLEMENTED = {
     # socket core
     "socket", "bind", "listen", "accept", "connect", "shutdown", "CloseSocket",
     # data transfer
-    "send", "sendto", "recv", "recvfrom",
+    "send", "sendto", "recv", "recvfrom", "sendmsg", "recvmsg",
     # options / ioctl / names
     "setsockopt", "getsockopt", "getsockname", "getpeername", "IoctlSocket",
     "getdtablesize", "Dup2Socket",
+    # descriptor hand-off between tasks (handoff.c)
+    "ObtainSocket", "ReleaseSocket", "ReleaseCopyOfSocket",
+    "ObtainServerSocket", "ProcessIsServer",
     # multiplexing and the event API
     "WaitSelect", "SetSocketSignals", "GetSocketEvents",
     # errno / tags
@@ -67,9 +70,29 @@ IMPLEMENTED = {
     # address conversion
     "inet_addr", "inet_aton", "inet_network", "inet_ntop", "inet_pton",
     "Inet_NtoA", "Inet_LnaOf", "Inet_NetOf", "Inet_MakeAddr",
+    "In_LocalAddr", "In_CanForward",
     # resolver
     "gethostbyname", "gethostbyaddr", "gethostbyname_r", "gethostbyaddr_r",
     "gethostname", "gethostid",
+    # the DEVS:Internet netdb (netdb.c)
+    "getnetbyname", "getnetbyaddr", "getservbyname", "getservbyport",
+    "getprotobyname", "getprotobynumber",
+    "setnetent", "endnetent", "getnetent",
+    "setprotoent", "endprotoent", "getprotoent",
+    "setservent", "endservent", "getservent",
+    # Tier 3, read-only query side (roadshow.c).
+    #
+    # Only the calls whose contract is FULLY specified by the headers that
+    # ship with the toolchain.  There is no bsdsocket.doc autodoc anywhere on
+    # this machine (docs/RESEARCH.md S3.2), so for the rest of Tier 3 -- the
+    # interface list, QueryInterfaceTagList, GetNetworkStatistics, the routing
+    # calls, ObtainRoadshowData -- the *data structures* are either undefined
+    # in the NDK or defined without the naming/return conventions that make
+    # them usable.  Handing a stock Roadshow tool a list of the wrong node
+    # shape is worse than ENOSYS: it gurus inside the application.  Those stay
+    # stubbed until a primary source turns up.
+    "ObtainDomainNameServerList", "ReleaseDomainNameServerList",
+    "GetDefaultDomainName",
 }
 
 # Return types that are pointers without saying so with a '*'.  A stub for one
@@ -79,6 +102,17 @@ POINTER_TYPEDEFS = {"STRPTR", "CONST_STRPTR", "APTR", "BPTR", "CONST_APTR"}
 
 def returns_pointer(ret):
     return ret is not None and (ret.endswith("*") or ret in POINTER_TYPEDEFS)
+
+
+def returns_bool(ret):
+    """A stub for one of these must return FALSE, not -1.
+
+    -1 is all-bits-set, which every BOOL test in the world reads as TRUE.  A
+    -1 stub for ProcessIsServer(), GetDefaultDomainName() or
+    ChangeRoadshowData() therefore tells the caller the operation SUCCEEDED,
+    which is the one thing an unimplemented vector must never do.
+    """
+    return ret == "BOOL"
 
 
 AMICALL_RE = re.compile(
@@ -225,12 +259,15 @@ HEADER_PREAMBLE = """\
  * table -- a jump through a NULL LVO takes the machine down, and Tier-3
  * vectors do get called by stock Roadshow tools.
  *
- * Two of them because the shapes differ: a vector documented to return a
- * pointer must return NULL on failure, not -1.  Its callers test for NULL and
+ * Three of them because the shapes differ.  A vector documented to return a
+ * pointer must return NULL on failure, not -1: its callers test for NULL and
  * then dereference, so a -1 stub turns "unimplemented" into a guru inside the
- * application. */
+ * application.  A vector documented to return BOOL must return FALSE, because
+ * -1 is all-bits-set and every BOOL test reads that as TRUE -- a -1 stub for
+ * ProcessIsServer() or ChangeRoadshowData() reports SUCCESS. */
 LONG bsd_enosys(register struct AmiSocketBase *SocketBase __asm("a6"));
 APTR bsd_enosys_ptr(register struct AmiSocketBase *SocketBase __asm("a6"));
+BOOL bsd_enosys_bool(register struct AmiSocketBase *SocketBase __asm("a6"));
 
 """
 
@@ -299,7 +336,7 @@ def emit(by_offset, outdir, check=False):
         s.append("    (APTR)%s,\n" % entry)
     s.append("\n")
 
-    implemented = stubbed = stubbed_ptr = 0
+    implemented = stubbed = stubbed_ptr = stubbed_bool = 0
     for offset in range(FIRST_USER_OFFSET, last + 1, VECTOR_STRIDE):
         entry = by_offset.get(offset)
         index = offset // VECTOR_STRIDE - 1
@@ -317,6 +354,11 @@ def emit(by_offset, outdir, check=False):
             target = "bsd_enosys_ptr"
             stubbed += 1
             stubbed_ptr += 1
+        elif returns_bool(ret):
+            # Documented to return BOOL, so the stub must return FALSE.
+            target = "bsd_enosys_bool"
+            stubbed += 1
+            stubbed_bool += 1
         else:
             target = "bsd_enosys"
             stubbed += 1
@@ -330,9 +372,10 @@ def emit(by_offset, outdir, check=False):
     named = len(by_offset)
     total = (last - FIRST_USER_OFFSET) // VECTOR_STRIDE + 1
     summary = ("%d ABI vectors (%d named, %d reserved/private), "
-               "%d implemented, %d stubbed (%d of them NULL-returning)"
+               "%d implemented, %d stubbed "
+               "(%d of them NULL-returning, %d FALSE-returning)"
                % (total, named, total - named, implemented, stubbed,
-                  stubbed_ptr))
+                  stubbed_ptr, stubbed_bool))
     source = source.replace(" * SPDX-License-Identifier: MIT",
                             " * Coverage: %s.\n *\n * SPDX-License-Identifier: MIT"
                             % summary, 1)

@@ -11,7 +11,7 @@
  * the two after gethostbyaddr_r) and every vector we have not implemented
  * yet point at bsd_enosys() rather than NULL.
  *
- * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 39 implemented, 100 stubbed (20 of them NULL-returning).
+ * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 66 implemented, 73 stubbed (10 of them NULL-returning, 1 FALSE-returning).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -49,9 +49,9 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_WaitSelect,         /* -0x07e [ 20] WaitSelect */
     (APTR)bsd_SetSocketSignals,   /* -0x084 [ 21] SetSocketSignals */
     (APTR)bsd_getdtablesize,      /* -0x08a [ 22] getdtablesize */
-    (APTR)bsd_enosys,             /* -0x090 [ 23] ObtainSocket */
-    (APTR)bsd_enosys,             /* -0x096 [ 24] ReleaseSocket */
-    (APTR)bsd_enosys,             /* -0x09c [ 25] ReleaseCopyOfSocket */
+    (APTR)bsd_ObtainSocket,       /* -0x090 [ 23] ObtainSocket */
+    (APTR)bsd_ReleaseSocket,      /* -0x096 [ 24] ReleaseSocket */
+    (APTR)bsd_ReleaseCopyOfSocket, /* -0x09c [ 25] ReleaseCopyOfSocket */
     (APTR)bsd_Errno,              /* -0x0a2 [ 26] Errno */
     (APTR)bsd_SetErrnoPtr,        /* -0x0a8 [ 27] SetErrnoPtr */
     (APTR)bsd_Inet_NtoA,          /* -0x0ae [ 28] Inet_NtoA */
@@ -62,16 +62,16 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_inet_network,       /* -0x0cc [ 33] inet_network */
     (APTR)bsd_gethostbyname,      /* -0x0d2 [ 34] gethostbyname */
     (APTR)bsd_gethostbyaddr,      /* -0x0d8 [ 35] gethostbyaddr */
-    (APTR)bsd_enosys_ptr,         /* -0x0de [ 36] getnetbyname */
-    (APTR)bsd_enosys_ptr,         /* -0x0e4 [ 37] getnetbyaddr */
-    (APTR)bsd_enosys_ptr,         /* -0x0ea [ 38] getservbyname */
-    (APTR)bsd_enosys_ptr,         /* -0x0f0 [ 39] getservbyport */
-    (APTR)bsd_enosys_ptr,         /* -0x0f6 [ 40] getprotobyname */
-    (APTR)bsd_enosys_ptr,         /* -0x0fc [ 41] getprotobynumber */
+    (APTR)bsd_getnetbyname,       /* -0x0de [ 36] getnetbyname */
+    (APTR)bsd_getnetbyaddr,       /* -0x0e4 [ 37] getnetbyaddr */
+    (APTR)bsd_getservbyname,      /* -0x0ea [ 38] getservbyname */
+    (APTR)bsd_getservbyport,      /* -0x0f0 [ 39] getservbyport */
+    (APTR)bsd_getprotobyname,     /* -0x0f6 [ 40] getprotobyname */
+    (APTR)bsd_getprotobynumber,   /* -0x0fc [ 41] getprotobynumber */
     (APTR)bsd_enosys,             /* -0x102 [ 42] vsyslog */
     (APTR)bsd_Dup2Socket,         /* -0x108 [ 43] Dup2Socket */
-    (APTR)bsd_enosys,             /* -0x10e [ 44] sendmsg */
-    (APTR)bsd_enosys,             /* -0x114 [ 45] recvmsg */
+    (APTR)bsd_sendmsg,            /* -0x10e [ 44] sendmsg */
+    (APTR)bsd_recvmsg,            /* -0x114 [ 45] recvmsg */
     (APTR)bsd_gethostname,        /* -0x11a [ 46] gethostname */
     (APTR)bsd_gethostid,          /* -0x120 [ 47] gethostid */
     (APTR)bsd_SocketBaseTagList,  /* -0x126 [ 48] SocketBaseTagList */
@@ -113,22 +113,22 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_enosys,             /* -0x1fe [ 84] GetNetworkStatistics */
     (APTR)bsd_enosys,             /* -0x204 [ 85] AddDomainNameServer */
     (APTR)bsd_enosys,             /* -0x20a [ 86] RemoveDomainNameServer */
-    (APTR)bsd_enosys,             /* -0x210 [ 87] ReleaseDomainNameServerList */
-    (APTR)bsd_enosys_ptr,         /* -0x216 [ 88] ObtainDomainNameServerList */
-    (APTR)bsd_enosys,             /* -0x21c [ 89] setnetent */
-    (APTR)bsd_enosys,             /* -0x222 [ 90] endnetent */
-    (APTR)bsd_enosys_ptr,         /* -0x228 [ 91] getnetent */
-    (APTR)bsd_enosys,             /* -0x22e [ 92] setprotoent */
-    (APTR)bsd_enosys,             /* -0x234 [ 93] endprotoent */
-    (APTR)bsd_enosys_ptr,         /* -0x23a [ 94] getprotoent */
-    (APTR)bsd_enosys,             /* -0x240 [ 95] setservent */
-    (APTR)bsd_enosys,             /* -0x246 [ 96] endservent */
-    (APTR)bsd_enosys_ptr,         /* -0x24c [ 97] getservent */
+    (APTR)bsd_ReleaseDomainNameServerList, /* -0x210 [ 87] ReleaseDomainNameServerList */
+    (APTR)bsd_ObtainDomainNameServerList, /* -0x216 [ 88] ObtainDomainNameServerList */
+    (APTR)bsd_setnetent,          /* -0x21c [ 89] setnetent */
+    (APTR)bsd_endnetent,          /* -0x222 [ 90] endnetent */
+    (APTR)bsd_getnetent,          /* -0x228 [ 91] getnetent */
+    (APTR)bsd_setprotoent,        /* -0x22e [ 92] setprotoent */
+    (APTR)bsd_endprotoent,        /* -0x234 [ 93] endprotoent */
+    (APTR)bsd_getprotoent,        /* -0x23a [ 94] getprotoent */
+    (APTR)bsd_setservent,         /* -0x240 [ 95] setservent */
+    (APTR)bsd_endservent,         /* -0x246 [ 96] endservent */
+    (APTR)bsd_getservent,         /* -0x24c [ 97] getservent */
     (APTR)bsd_inet_aton,          /* -0x252 [ 98] inet_aton */
     (APTR)bsd_inet_ntop,          /* -0x258 [ 99] inet_ntop */
     (APTR)bsd_inet_pton,          /* -0x25e [100] inet_pton */
-    (APTR)bsd_enosys,             /* -0x264 [101] In_LocalAddr */
-    (APTR)bsd_enosys,             /* -0x26a [102] In_CanForward */
+    (APTR)bsd_In_LocalAddr,       /* -0x264 [101] In_LocalAddr */
+    (APTR)bsd_In_CanForward,      /* -0x26a [102] In_CanForward */
     (APTR)bsd_enosys_ptr,         /* -0x270 [103] mbuf_copym */
     (APTR)bsd_enosys,             /* -0x276 [104] mbuf_copyback */
     (APTR)bsd_enosys,             /* -0x27c [105] mbuf_copydata */
@@ -140,13 +140,13 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_enosys,             /* -0x2a0 [111] mbuf_cat */
     (APTR)bsd_enosys,             /* -0x2a6 [112] mbuf_adj */
     (APTR)bsd_enosys_ptr,         /* -0x2ac [113] mbuf_pullup */
-    (APTR)bsd_enosys,             /* -0x2b2 [114] ProcessIsServer */
-    (APTR)bsd_enosys,             /* -0x2b8 [115] ObtainServerSocket */
-    (APTR)bsd_enosys,             /* -0x2be [116] GetDefaultDomainName */
+    (APTR)bsd_ProcessIsServer,    /* -0x2b2 [114] ProcessIsServer */
+    (APTR)bsd_ObtainServerSocket, /* -0x2b8 [115] ObtainServerSocket */
+    (APTR)bsd_GetDefaultDomainName, /* -0x2be [116] GetDefaultDomainName */
     (APTR)bsd_enosys,             /* -0x2c4 [117] SetDefaultDomainName */
     (APTR)bsd_enosys_ptr,         /* -0x2ca [118] ObtainRoadshowData */
     (APTR)bsd_enosys,             /* -0x2d0 [119] ReleaseRoadshowData */
-    (APTR)bsd_enosys,             /* -0x2d6 [120] ChangeRoadshowData */
+    (APTR)bsd_enosys_bool,        /* -0x2d6 [120] ChangeRoadshowData */
     (APTR)bsd_enosys,             /* -0x2dc [121] RemoveInterface */
     (APTR)bsd_gethostbyname_r,    /* -0x2e2 [122] gethostbyname_r */
     (APTR)bsd_gethostbyaddr_r,    /* -0x2e8 [123] gethostbyaddr_r */

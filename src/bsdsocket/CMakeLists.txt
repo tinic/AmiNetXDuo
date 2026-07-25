@@ -17,6 +17,9 @@ set(BSDSOCKET_SOURCES
     errno.c
     inet.c
     resolver.c
+    netdb.c                 # get{serv,proto,net}by* over src/config/netdb.c
+    handoff.c               # ObtainSocket/ReleaseSocket cross-base transfer
+    roadshow.c              # the Tier 3 extensions whose ABI is pinned down
     netx_call.c             # ThreadX context bracket for NetX Duo calls
     library_runtime.c)      # DOSBase, rand(): no crt0 in a shared library
 
@@ -27,7 +30,7 @@ target_include_directories(aminetxduo_bsdsocket PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}")
 
 target_link_libraries(aminetxduo_bsdsocket PUBLIC
-    aminetxduo_common netxduo aminetxduo_netstack)
+    aminetxduo_common netxduo aminetxduo_netstack aminetxduo_config)
 
 # A shared library has no startup code and must not drag in newlib's stdio.
 target_compile_options(aminetxduo_bsdsocket PRIVATE -Wall -Wextra)

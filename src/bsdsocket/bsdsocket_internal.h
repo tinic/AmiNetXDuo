@@ -29,7 +29,6 @@
  */
 #include "tx_api.h"
 #include "nx_api.h"
-#include "tx_amiga.h"
 
 #include <exec/types.h>
 #include <exec/execbase.h>
@@ -163,20 +162,25 @@ struct AmiSocketBase
     struct MinList          sb_Children;
     ULONG                   sb_StackRefs;   /* netstack_startup() references */
 
+    /* Cross-base descriptor hand-off (handoff.c). The one place two tasks'
+     * sockets can meet, so it lives in the master and nowhere else. */
+    struct MinList          sb_Handoffs;
+    LONG                    sb_NextHandoffId;
+
     /* ---- per opener ----------------------------------------------------- */
     struct Task            *sb_Task;        /* the task that opened us       */
 
     /*
      * ThreadX context for this opener's task (netx_call.c). NetX Duo's
      * THREADS_ONLY vectors reject a caller that is not a TX_THREAD, so every
-     * NetX-touching entry point brackets itself with bsd_nx_enter()/leave().
-     * The control block lives here rather than on the stack: it is a few
-     * hundred bytes, a base belongs to exactly one task, and that task is
+     * NetX-touching entry point brackets itself with bsd_nx_enter()/leave(),
+     * which is the shared ami_netstack_enter()/leave() bracket plus a nesting
+     * counter. The control block lives here rather than on the stack: it is a
+     * few hundred bytes, a base belongs to exactly one task, and that task is
      * inside at most one vector at a time.
      */
-    TX_THREAD               sb_NxThread;
+    AmiNetCaller            sb_NxCaller;
     LONG                    sb_NxNest;      /* bracket depth, 0 == outside   */
-    BOOL                    sb_NxAdopted;   /* we adopted; we must orphan    */
 
     struct AmiSocket      **sb_Table;       /* descriptor table              */
     LONG                    sb_TableSize;
@@ -214,8 +218,17 @@ struct AmiSocketBase
     BYTE                    sb_TimerSignal;
     ULONG                   sb_TimerSigMask;
 
-    /* Scratch returned to callers by the non-reentrant entry points. */
+    /* Scratch returned to callers by the non-reentrant entry points. Per
+     * opener, never file statics: two tasks have two bases, and a shared
+     * static means one task's lookup overwrites the struct the other is
+     * still holding. */
     char                    sb_NtoABuf[BSD_NTOA_BUFLEN];
+    struct servent          sb_ServEnt;
+    struct protoent         sb_ProtoEnt;
+    struct netent           sb_NetEnt;
+    ULONG                   sb_ServCursor;  /* get{serv,proto,net}ent()      */
+    ULONG                   sb_ProtoCursor;
+    ULONG                   sb_NetCursor;
     struct hostent          sb_HostEnt;
     char                   *sb_HostAddrList[2];
     char                   *sb_HostAliases[1];
@@ -338,6 +351,12 @@ VOID       bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock);
 LONG       bsd_table_resize(struct AmiSocketBase *base, LONG size);
 VOID       bsd_close_all(struct AmiSocketBase *base);
 
+/* handoff.c -- cross-base descriptor transfer. The registry lives in the
+ * master base; bsd_handoff_flush() runs from bsd_lib_close() when the last
+ * opener goes, because nothing can obtain a parked socket after that. */
+VOID  bsd_handoff_init(struct AmiSocketBase *master);
+VOID  bsd_handoff_flush(struct AmiSocketBase *base);
+
 /* socket.c -- sockaddr helpers */
 LONG  bsd_sockaddr_in(struct AmiSocketBase *base, const struct sockaddr *sa,
                       socklen_t len, ULONG *addr, UINT *port);
@@ -352,7 +371,6 @@ VOID  bsd_sockaddr_out(struct sockaddr *sa, socklen_t *len,
  */
 VOID  bsd_events_attach(AmiSocket *sock);
 VOID  bsd_event_post(AmiSocket *sock, ULONG events);
-VOID  bsd_event_refresh(AmiSocket *sock);
 VOID  bsd_listen_callback(NX_TCP_SOCKET *socket_ptr, UINT port);
 VOID  bsd_tcp_disconnect_callback(NX_TCP_SOCKET *socket_ptr);
 BOOL  bsd_readable(AmiSocket *sock);

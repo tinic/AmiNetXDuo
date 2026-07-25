@@ -26,12 +26,15 @@
  * table -- a jump through a NULL LVO takes the machine down, and Tier-3
  * vectors do get called by stock Roadshow tools.
  *
- * Two of them because the shapes differ: a vector documented to return a
- * pointer must return NULL on failure, not -1.  Its callers test for NULL and
+ * Three of them because the shapes differ.  A vector documented to return a
+ * pointer must return NULL on failure, not -1: its callers test for NULL and
  * then dereference, so a -1 stub turns "unimplemented" into a guru inside the
- * application. */
+ * application.  A vector documented to return BOOL must return FALSE, because
+ * -1 is all-bits-set and every BOOL test reads that as TRUE -- a -1 stub for
+ * ProcessIsServer() or ChangeRoadshowData() reports SUCCESS. */
 LONG bsd_enosys(register struct AmiSocketBase *SocketBase __asm("a6"));
 APTR bsd_enosys_ptr(register struct AmiSocketBase *SocketBase __asm("a6"));
+BOOL bsd_enosys_bool(register struct AmiSocketBase *SocketBase __asm("a6"));
 
 /* LVO -0x01e */
 LONG bsd_socket(register LONG domain __asm("d0"),
@@ -155,6 +158,23 @@ VOID bsd_SetSocketSignals(register ULONG int_mask __asm("d0"),
 /* LVO -0x08a */
 int bsd_getdtablesize(register struct AmiSocketBase *SocketBase __asm("a6"));
 
+/* LVO -0x090 */
+LONG bsd_ObtainSocket(register LONG id __asm("d0"),
+                      register LONG domain __asm("d1"),
+                      register LONG type __asm("d2"),
+                      register LONG protocol __asm("d3"),
+                      register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x096 */
+LONG bsd_ReleaseSocket(register LONG sock __asm("d0"),
+                       register LONG id __asm("d1"),
+                       register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x09c */
+LONG bsd_ReleaseCopyOfSocket(register LONG sock __asm("d0"),
+                             register LONG id __asm("d1"),
+                             register struct AmiSocketBase *SocketBase __asm("a6"));
+
 /* LVO -0x0a2 */
 LONG bsd_Errno(register struct AmiSocketBase *SocketBase __asm("a6"));
 
@@ -198,10 +218,49 @@ struct hostent *bsd_gethostbyaddr(register STRPTR addr __asm("a0"),
                                   register LONG type __asm("d1"),
                                   register struct AmiSocketBase *SocketBase __asm("a6"));
 
+/* LVO -0x0de */
+struct netent *bsd_getnetbyname(register STRPTR name __asm("a0"),
+                                register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x0e4 */
+struct netent *bsd_getnetbyaddr(register in_addr_t net __asm("d0"),
+                                register LONG type __asm("d1"),
+                                register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x0ea */
+struct servent *bsd_getservbyname(register STRPTR name __asm("a0"),
+                                  register STRPTR proto __asm("a1"),
+                                  register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x0f0 */
+struct servent *bsd_getservbyport(register LONG port __asm("d0"),
+                                  register STRPTR proto __asm("a0"),
+                                  register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x0f6 */
+struct protoent *bsd_getprotobyname(register STRPTR name __asm("a0"),
+                                    register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x0fc */
+struct protoent *bsd_getprotobynumber(register LONG proto __asm("d0"),
+                                      register struct AmiSocketBase *SocketBase __asm("a6"));
+
 /* LVO -0x108 */
 LONG bsd_Dup2Socket(register LONG old_socket __asm("d0"),
                     register LONG new_socket __asm("d1"),
                     register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x10e */
+LONG bsd_sendmsg(register LONG sock __asm("d0"),
+                 register struct msghdr *msg __asm("a0"),
+                 register LONG flags __asm("d1"),
+                 register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x114 */
+LONG bsd_recvmsg(register LONG sock __asm("d0"),
+                 register struct msghdr *msg __asm("a0"),
+                 register LONG flags __asm("d1"),
+                 register struct AmiSocketBase *SocketBase __asm("a6"));
 
 /* LVO -0x11a */
 int bsd_gethostname(register char *name __asm("a0"),
@@ -218,6 +277,43 @@ LONG bsd_SocketBaseTagList(register struct TagItem *tags __asm("a0"),
 /* LVO -0x12c */
 LONG bsd_GetSocketEvents(register ULONG *event_ptr __asm("a0"),
                          register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x210 */
+VOID bsd_ReleaseDomainNameServerList(register struct List *list __asm("a0"),
+                                     register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x216 */
+struct List *bsd_ObtainDomainNameServerList(register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x21c */
+VOID bsd_setnetent(register LONG stay_open __asm("d0"),
+                   register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x222 */
+VOID bsd_endnetent(register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x228 */
+struct netent *bsd_getnetent(register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x22e */
+VOID bsd_setprotoent(register LONG stay_open __asm("d0"),
+                     register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x234 */
+VOID bsd_endprotoent(register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x23a */
+struct protoent *bsd_getprotoent(register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x240 */
+VOID bsd_setservent(register LONG stay_open __asm("d0"),
+                    register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x246 */
+VOID bsd_endservent(register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x24c */
+struct servent *bsd_getservent(register struct AmiSocketBase *SocketBase __asm("a6"));
 
 /* LVO -0x252 */
 LONG bsd_inet_aton(register STRPTR cp __asm("a0"),
@@ -236,6 +332,26 @@ LONG bsd_inet_pton(register LONG af __asm("d0"),
                    register STRPTR src __asm("a0"),
                    register APTR dst __asm("a1"),
                    register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x264 */
+LONG bsd_In_LocalAddr(register in_addr_t address __asm("d0"),
+                      register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x26a */
+LONG bsd_In_CanForward(register in_addr_t address __asm("d0"),
+                       register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x2b2 */
+BOOL bsd_ProcessIsServer(register struct Process *pr __asm("a0"),
+                         register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x2b8 */
+LONG bsd_ObtainServerSocket(register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x2be */
+BOOL bsd_GetDefaultDomainName(register STRPTR buffer __asm("a0"),
+                              register LONG buffer_size __asm("d0"),
+                              register struct AmiSocketBase *SocketBase __asm("a6"));
 
 /* LVO -0x2e2 */
 struct hostent *bsd_gethostbyname_r(register STRPTR name __asm("a0"),

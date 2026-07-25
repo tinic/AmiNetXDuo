@@ -1,11 +1,20 @@
 /*
- * bsdsocket.library -- send/sendto/recv/recvfrom.
+ * bsdsocket.library -- send/sendto/sendmsg and recv/recvfrom/recvmsg.
  *
  * NetX Duo is packet-oriented: a send allocates an NX_PACKET from the stack
  * pool, appends the caller's bytes to it and hands it over; a receive returns
  * a packet the caller has to drain. A BSD stream read need not consume a
  * whole packet, so a partially drained one is parked on the socket
  * (as_RxPending/as_RxOffset) until it runs out.
+ *
+ * SCATTER/GATHER
+ *
+ * Every path here works on an iovec list, and the flat-buffer calls hand it a
+ * one-element list on the stack. That is not gold plating: it is what makes
+ * sendmsg()/recvmsg() the same code as send()/recv() rather than a second
+ * implementation, and NetX Duo takes to it without a bounce buffer --
+ * nx_packet_data_append() called once per iovec builds one packet, and
+ * nx_packet_data_extract_offset() scatters straight into each destination.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -16,6 +25,142 @@
 
 /* Fallback segment size if the socket has not negotiated an MSS yet. */
 #define BSD_DEFAULT_MSS     536
+
+/*
+ * struct msghdr / struct iovec are ABI, not ours to guess.
+ *
+ * The definitions we compile against come from the Roadshow netinclude
+ * headers in the toolchain's ndk-include (sys/socket.h, sys/uio.h) -- the
+ * only <sys/socket.h> and <sys/uio.h> on the include path; this toolchain's
+ * newlib tree has neither, so there is no chance of picking up the wrong
+ * lineage the way ndk-include/pwd.h shadows the usergroup struct passwd.
+ *
+ * That header carries the POSIX / 4.4BSD-Lite msghdr with ancillary data
+ * (msg_control / msg_controllen / msg_flags), NOT the older 4.3BSD form with
+ * msg_accrights. Pinned below so a header swap is a build error rather than a
+ * silent 8-byte shift from msg_control onwards.
+ */
+_Static_assert(sizeof(struct iovec) == 8, "iovec is not 8 bytes");
+_Static_assert(offsetof(struct iovec, iov_base) == 0, "iov_base moved");
+_Static_assert(offsetof(struct iovec, iov_len)  == 4, "iov_len moved");
+
+_Static_assert(sizeof(struct msghdr) == 28, "msghdr is not the 4.4BSD shape");
+_Static_assert(offsetof(struct msghdr, msg_name)       ==  0, "msg_name moved");
+_Static_assert(offsetof(struct msghdr, msg_namelen)    ==  4, "msg_namelen moved");
+_Static_assert(offsetof(struct msghdr, msg_iov)        ==  8, "msg_iov moved");
+_Static_assert(offsetof(struct msghdr, msg_iovlen)     == 12, "msg_iovlen moved");
+_Static_assert(offsetof(struct msghdr, msg_control)    == 16, "msg_control moved");
+_Static_assert(offsetof(struct msghdr, msg_controllen) == 20, "msg_controllen moved");
+_Static_assert(offsetof(struct msghdr, msg_flags)      == 24, "msg_flags moved");
+
+/* ------------------------------------------------------------- iovec ------ */
+
+/*
+ * A position in a scatter/gather list: which entry, and how far into it.
+ * Empty entries are skipped, so bsd_iov_chunk() never reports a zero-length
+ * run except at the end of the list.
+ */
+typedef struct BsdIovCursor
+{
+    const struct iovec *ic_Vec;
+    LONG                ic_Count;
+    LONG                ic_Index;
+    ULONG               ic_Offset;
+} BsdIovCursor;
+
+static VOID bsd_iov_init(BsdIovCursor *cur, const struct iovec *iov, LONG count)
+{
+    cur->ic_Vec    = iov;
+    cur->ic_Count  = count;
+    cur->ic_Index  = 0;
+    cur->ic_Offset = 0;
+}
+
+/*
+ * Total byte count, or -1 if the list is malformed. LONG is the ABI's return
+ * type for send()/recv(), so a list whose total does not fit in a positive
+ * LONG cannot be reported and is rejected rather than truncated.
+ */
+static LONG bsd_iov_total(const struct iovec *iov, LONG count)
+{
+    ULONG total = 0;
+    LONG  i;
+
+    if (count < 0)
+        return -1;
+
+    if (count > 0 && iov == NULL)
+        return -1;
+
+    for (i = 0; i < count; i++)
+    {
+        ULONG len = (ULONG)iov[i].iov_len;
+
+        if (len == 0)
+            continue;
+
+        if (iov[i].iov_base == NULL)
+            return -1;
+
+        if (len > 0x7FFFFFFFUL || total > 0x7FFFFFFFUL - len)
+            return -1;
+
+        total += len;
+    }
+
+    return (LONG)total;
+}
+
+/* The contiguous run at the cursor. Returns 0 when the list is exhausted. */
+static ULONG bsd_iov_chunk(BsdIovCursor *cur, UBYTE **ptr)
+{
+    while (cur->ic_Index < cur->ic_Count)
+    {
+        const struct iovec *v   = &cur->ic_Vec[cur->ic_Index];
+        ULONG               len = (ULONG)v->iov_len;
+
+        if (cur->ic_Offset < len)
+        {
+            *ptr = (UBYTE *)v->iov_base + cur->ic_Offset;
+            return len - cur->ic_Offset;
+        }
+
+        cur->ic_Index++;
+        cur->ic_Offset = 0;
+    }
+
+    *ptr = NULL;
+
+    return 0;
+}
+
+static VOID bsd_iov_advance(BsdIovCursor *cur, ULONG bytes)
+{
+    while (bytes > 0 && cur->ic_Index < cur->ic_Count)
+    {
+        ULONG len   = (ULONG)cur->ic_Vec[cur->ic_Index].iov_len;
+        ULONG avail = (cur->ic_Offset < len) ? len - cur->ic_Offset : 0;
+
+        if (avail == 0)
+        {
+            cur->ic_Index++;
+            cur->ic_Offset = 0;
+            continue;
+        }
+
+        if (bytes < avail)
+        {
+            cur->ic_Offset += bytes;
+            return;
+        }
+
+        bytes -= avail;
+        cur->ic_Index++;
+        cur->ic_Offset = 0;
+    }
+}
+
+/* ---------------------------------------------------------------- packet -- */
 
 static ULONG bsd_packet_len(NX_PACKET *packet)
 {
@@ -37,10 +182,42 @@ static VOID bsd_drop_pending(AmiSocket *sock)
     sock->as_RxOffset = 0;
 }
 
+/*
+ * Append up to `want` bytes from the cursor onto `packet`, coalescing across
+ * iovec boundaries. Returns the number appended, or -1 on failure.
+ */
+static LONG bsd_packet_append_iov(NX_PACKET *packet, BsdIovCursor *cur,
+                                  ULONG want, NX_PACKET_POOL *pool, ULONG wait)
+{
+    ULONG done = 0;
+
+    while (done < want)
+    {
+        UBYTE *src   = NULL;
+        ULONG  chunk = bsd_iov_chunk(cur, &src);
+        UINT   status;
+
+        if (chunk == 0)
+            break;
+
+        if (chunk > want - done)
+            chunk = want - done;
+
+        status = nx_packet_data_append(packet, src, chunk, pool, wait);
+        if (status != NX_SUCCESS)
+            return (done > 0) ? (LONG)done : -1;
+
+        bsd_iov_advance(cur, chunk);
+        done += chunk;
+    }
+
+    return (LONG)done;
+}
+
 /* ------------------------------------------------------------------- send -- */
 
 static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
-                         APTR buf, LONG len, LONG flags)
+                         BsdIovCursor *cur, LONG len, LONG flags)
 {
     NX_PACKET_POOL *pool = netstack_pool();
     ULONG           mss  = 0;
@@ -68,6 +245,7 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
     {
         NX_PACKET *packet = NX_NULL;
         ULONG      chunk  = (ULONG)(len - sent);
+        LONG       filled;
         UINT       status;
 
         if (chunk > mss)
@@ -77,9 +255,8 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
         if (status != NX_SUCCESS)
             break;
 
-        status = nx_packet_data_append(packet, (UBYTE *)buf + sent, chunk,
-                                       pool, wait);
-        if (status != NX_SUCCESS)
+        filled = bsd_packet_append_iov(packet, cur, chunk, pool, wait);
+        if (filled <= 0)
         {
             nx_packet_release(packet);
             break;
@@ -107,7 +284,7 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
             return bsd_fail(base, bsd_errno_from_nx(status));
         }
 
-        sent += (LONG)chunk;
+        sent += filled;
 
         /* A non-blocking socket takes what fits and reports the rest short. */
         if ((sock->as_Flags & ASF_NONBLOCK) != 0)
@@ -121,12 +298,13 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
 }
 
 static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
-                         APTR buf, LONG len, LONG flags,
+                         BsdIovCursor *cur, LONG len, LONG flags,
                          ULONG addr, UINT port)
 {
     NX_PACKET_POOL *pool   = netstack_pool();
     NX_PACKET      *packet = NX_NULL;
     ULONG           wait;
+    LONG            filled;
     UINT            status;
 
     (VOID)flags;
@@ -154,12 +332,14 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, (status == NX_NO_PACKET) ? AMI_EWOULDBLOCK
                                                        : bsd_errno_from_nx(status));
 
-    status = nx_packet_data_append(packet, buf, (ULONG)len, pool, wait);
-    if (status != NX_SUCCESS)
+    /* A zero-length datagram is legal and is sent as an empty packet. */
+    filled = (len > 0)
+                 ? bsd_packet_append_iov(packet, cur, (ULONG)len, pool, wait)
+                 : 0;
+    if (filled < len)
     {
         nx_packet_release(packet);
-        return bsd_fail(base, (status == NX_NO_PACKET) ? AMI_EWOULDBLOCK
-                                                       : bsd_errno_from_nx(status));
+        return bsd_fail(base, AMI_ENOBUFS);
     }
 
     status = nx_udp_socket_send(&sock->as_Nx.udp, packet, addr, port);
@@ -172,120 +352,39 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     return len;
 }
 
-LONG bsd_send(register LONG sock_fd __asm("d0"),
-              register APTR buf     __asm("a0"),
-              register LONG len     __asm("d1"),
-              register LONG flags   __asm("d2"),
-              register struct AmiSocketBase *SocketBase __asm("a6"))
-{
-    AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
-    LONG       result;
-
-    if (sock == NULL)
-        return bsd_fail(SocketBase, AMI_EBADF);
-
-    if (buf == NULL && len > 0)
-        return bsd_fail(SocketBase, AMI_EFAULT);
-
-    if (len < 0)
-        return bsd_fail(SocketBase, AMI_EINVAL);
-
-    if ((flags & MSG_OOB) != 0)
-        return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
-
-    if ((sock->as_Flags & ASF_TCP) == 0 &&
-        (sock->as_Flags & ASF_CONNECTED) == 0)
-        return bsd_fail(SocketBase, AMI_EDESTADDRREQ);
-
-    if (bsd_nx_enter(SocketBase) != 0)
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
-
-    result = ((sock->as_Flags & ASF_TCP) != 0)
-                 ? bsd_send_tcp(SocketBase, sock, buf, len, flags)
-                 : bsd_send_udp(SocketBase, sock, buf, len, flags,
-                                sock->as_PeerAddr, sock->as_PeerPort);
-
-    bsd_nx_leave(SocketBase);
-
-    return result;
-}
-
-LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
-                register APTR buf            __asm("a0"),
-                register LONG len            __asm("d1"),
-                register LONG flags          __asm("d2"),
-                register struct sockaddr *to __asm("a1"),
-                register socklen_t tolen     __asm("d3"),
-                register struct AmiSocketBase *SocketBase __asm("a6"))
-{
-    AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
-    ULONG      addr = 0;
-    UINT       port = 0;
-    LONG       result;
-
-    if (sock == NULL)
-        return bsd_fail(SocketBase, AMI_EBADF);
-
-    if (buf == NULL && len > 0)
-        return bsd_fail(SocketBase, AMI_EFAULT);
-
-    if (len < 0)
-        return bsd_fail(SocketBase, AMI_EINVAL);
-
-    if ((flags & MSG_OOB) != 0)
-        return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
-
-    /* A destination on a connected stream socket is ignored, as in BSD. */
-    if ((sock->as_Flags & ASF_TCP) == 0)
-    {
-        if (to == NULL)
-        {
-            if ((sock->as_Flags & ASF_CONNECTED) == 0)
-                return bsd_fail(SocketBase, AMI_EDESTADDRREQ);
-
-            addr = sock->as_PeerAddr;
-            port = sock->as_PeerPort;
-        }
-        else if (bsd_sockaddr_in(SocketBase, to, tolen, &addr, &port) != 0)
-        {
-            return -1;
-        }
-    }
-
-    if (bsd_nx_enter(SocketBase) != 0)
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
-
-    result = ((sock->as_Flags & ASF_TCP) != 0)
-                 ? bsd_send_tcp(SocketBase, sock, buf, len, flags)
-                 : bsd_send_udp(SocketBase, sock, buf, len, flags, addr, port);
-
-    bsd_nx_leave(SocketBase);
-
-    return result;
-}
-
 /* ---------------------------------------------------------------- receive -- */
 
 static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
-                         APTR buf, LONG len, LONG flags)
+                         BsdIovCursor *cur, LONG len, LONG flags)
 {
     LONG  copied = 0;
     ULONG wait   = bsd_wait_option(sock, sock->as_RcvTimeout);
     BOOL  peek   = ((flags & MSG_PEEK) != 0);
+    BOOL  first  = TRUE;
 
     if ((sock->as_Flags & ASF_RDSHUT) != 0)
         return 0;
 
     while (copied < len)
     {
-        ULONG length, avail, want, moved;
-        UINT  status;
+        ULONG  length, avail, want, moved, chunk;
+        UBYTE *dst = NULL;
+        UINT   status;
 
         if (sock->as_RxPending == NULL)
         {
             NX_PACKET *packet = NX_NULL;
 
-            status = nx_tcp_socket_receive(&sock->as_Nx.tcp, &packet, wait);
+            /*
+             * Only the FIRST read of a call may block: after that, a stream
+             * receive returns whatever the socket buffer holds. MSG_WAITALL
+             * asks for the opposite -- keep waiting until the caller's
+             * buffers are full or the connection ends.
+             */
+            ULONG now = (first || (flags & MSG_WAITALL) != 0) ? wait
+                                                              : NX_NO_WAIT;
+
+            status = nx_tcp_socket_receive(&sock->as_Nx.tcp, &packet, now);
 
             if (status == NX_SUCCESS)
             {
@@ -329,16 +428,21 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
             continue;
         }
 
+        chunk = bsd_iov_chunk(cur, &dst);
+        if (chunk == 0)
+            break;                              /* caller's buffers are full */
+
         avail = length - sock->as_RxOffset;
         want  = (ULONG)(len - copied);
         if (want > avail)
             want = avail;
+        if (want > chunk)
+            want = chunk;
 
         moved  = 0;
         status = nx_packet_data_extract_offset(sock->as_RxPending,
                                                sock->as_RxOffset,
-                                               (UBYTE *)buf + copied,
-                                               want, &moved);
+                                               dst, want, &moved);
         if (status != NX_SUCCESS || moved == 0)
         {
             if (copied > 0)
@@ -347,6 +451,7 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
         }
 
         copied += (LONG)moved;
+        bsd_iov_advance(cur, moved);
 
         if (peek)
             break;                      /* leave the packet where it is */
@@ -355,28 +460,32 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
         if (sock->as_RxOffset >= length)
             bsd_drop_pending(sock);
 
-        /*
-         * A stream read returns as soon as it has anything, unless the caller
-         * asked for the lot.
-         */
-        if ((flags & MSG_WAITALL) == 0)
-            break;
-
-        wait = NX_NO_WAIT;
+        first = FALSE;
     }
 
     return copied;
 }
 
+/*
+ * One datagram, scattered across the caller's buffers.
+ *
+ * `truncated` reports whether the datagram was longer than the buffers, which
+ * is what recvmsg() turns into MSG_TRUNC. The excess is discarded, as BSD
+ * does.
+ */
 static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
-                         APTR buf, LONG len, LONG flags,
-                         struct sockaddr *from, socklen_t *fromlen)
+                         BsdIovCursor *cur, LONG len, LONG flags,
+                         struct sockaddr *from, socklen_t *fromlen,
+                         BOOL *truncated)
 {
     NX_PACKET *packet = NX_NULL;
-    ULONG      src_ip = 0, length, want, moved = 0;
+    ULONG      src_ip = 0, length, taken = 0;
     UINT       src_port = 0;
     UINT       status;
     BOOL       peek = ((flags & MSG_PEEK) != 0);
+
+    if (truncated != NULL)
+        *truncated = FALSE;
 
     if (sock->as_RxPending != NULL)
     {
@@ -400,12 +509,32 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
     nx_udp_source_extract(packet, &src_ip, &src_port);
 
     length = bsd_packet_len(packet);
-    want   = (ULONG)len;
-    if (want > length)
-        want = length;
 
-    if (want > 0)
-        nx_packet_data_extract_offset(packet, 0, buf, want, &moved);
+    while (taken < length && (LONG)taken < len)
+    {
+        UBYTE *dst   = NULL;
+        ULONG  chunk = bsd_iov_chunk(cur, &dst);
+        ULONG  want, moved = 0;
+
+        if (chunk == 0)
+            break;
+
+        want = length - taken;
+        if (want > chunk)
+            want = chunk;
+        if (want > (ULONG)len - taken)
+            want = (ULONG)len - taken;
+
+        if (nx_packet_data_extract_offset(packet, taken, dst, want, &moved)
+                != NX_SUCCESS || moved == 0)
+            break;
+
+        bsd_iov_advance(cur, moved);
+        taken += moved;
+    }
+
+    if (truncated != NULL && taken < length)
+        *truncated = TRUE;
 
     if (from != NULL && fromlen != NULL)
         bsd_sockaddr_out(from, fromlen, src_ip, src_port);
@@ -424,7 +553,160 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
     }
 
     /* Datagram sockets discard whatever did not fit, as BSD does. */
-    return (LONG)moved;
+    return (LONG)taken;
+}
+
+/* --------------------------------------------------- the shared entry paths */
+
+/*
+ * Everything below funnels into these two so that send/sendto/sendmsg and
+ * recv/recvfrom/recvmsg cannot drift apart.
+ */
+static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
+                         const struct iovec *iov, LONG iovcnt, LONG len,
+                         LONG flags, ULONG addr, UINT port)
+{
+    BsdIovCursor cur;
+    LONG         result;
+
+    bsd_iov_init(&cur, iov, iovcnt);
+
+    if (bsd_nx_enter(base) != 0)
+        return bsd_fail(base, AMI_ENETDOWN);
+
+    result = ((sock->as_Flags & ASF_TCP) != 0)
+                 ? bsd_send_tcp(base, sock, &cur, len, flags)
+                 : bsd_send_udp(base, sock, &cur, len, flags, addr, port);
+
+    bsd_nx_leave(base);
+
+    return result;
+}
+
+static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
+                         const struct iovec *iov, LONG iovcnt, LONG len,
+                         LONG flags, struct sockaddr *from,
+                         socklen_t *fromlen, BOOL *truncated)
+{
+    BsdIovCursor cur;
+    LONG         result;
+
+    bsd_iov_init(&cur, iov, iovcnt);
+
+    if (bsd_nx_enter(base) != 0)
+        return bsd_fail(base, AMI_ENETDOWN);
+
+    if ((sock->as_Flags & ASF_TCP) != 0)
+    {
+        result = bsd_recv_tcp(base, sock, &cur, len, flags);
+        if (result >= 0 && from != NULL && fromlen != NULL)
+            bsd_sockaddr_out(from, fromlen, sock->as_PeerAddr,
+                             sock->as_PeerPort);
+        if (truncated != NULL)
+            *truncated = FALSE;         /* a stream never truncates */
+    }
+    else
+    {
+        result = bsd_recv_udp(base, sock, &cur, len, flags, from, fromlen,
+                              truncated);
+    }
+
+    bsd_nx_leave(base);
+
+    return result;
+}
+
+/* Common argument checks for every send/recv shape. 0 = ok, -1 = errno set. */
+static LONG bsd_transfer_check(struct AmiSocketBase *base, AmiSocket *sock,
+                               LONG len, LONG flags)
+{
+    if (sock == NULL)
+        return bsd_fail(base, AMI_EBADF);
+
+    if (len < 0)
+        return bsd_fail(base, AMI_EINVAL);
+
+    /*
+     * MSG_OOB is refused, not faked. NetX Duo has no transmit path for TCP
+     * urgent data at all -- NX_TCP_URG_BIT is never set anywhere in the tree
+     * -- and on receive it only reports "the URG bit was set" through a
+     * callback, without separating the urgent byte from the stream. There is
+     * nothing here to build on, so EOPNOTSUPP is the honest answer.
+     */
+    if ((flags & MSG_OOB) != 0)
+        return bsd_fail(base, AMI_EOPNOTSUPP);
+
+    return 0;
+}
+
+/* ---------------------------------------------------------------- vectors -- */
+
+LONG bsd_send(register LONG sock_fd __asm("d0"),
+              register APTR buf     __asm("a0"),
+              register LONG len     __asm("d1"),
+              register LONG flags   __asm("d2"),
+              register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    AmiSocket    *sock = bsd_lookup(SocketBase, sock_fd);
+    struct iovec  iov;
+
+    if (bsd_transfer_check(SocketBase, sock, len, flags) != 0)
+        return -1;
+
+    if (buf == NULL && len > 0)
+        return bsd_fail(SocketBase, AMI_EFAULT);
+
+    if ((sock->as_Flags & ASF_TCP) == 0 &&
+        (sock->as_Flags & ASF_CONNECTED) == 0)
+        return bsd_fail(SocketBase, AMI_EDESTADDRREQ);
+
+    iov.iov_base = buf;
+    iov.iov_len  = (size_t)len;
+
+    return bsd_send_iov(SocketBase, sock, &iov, 1, len, flags,
+                        sock->as_PeerAddr, sock->as_PeerPort);
+}
+
+LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
+                register APTR buf            __asm("a0"),
+                register LONG len            __asm("d1"),
+                register LONG flags          __asm("d2"),
+                register struct sockaddr *to __asm("a1"),
+                register socklen_t tolen     __asm("d3"),
+                register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    AmiSocket    *sock = bsd_lookup(SocketBase, sock_fd);
+    struct iovec  iov;
+    ULONG         addr = 0;
+    UINT          port = 0;
+
+    if (bsd_transfer_check(SocketBase, sock, len, flags) != 0)
+        return -1;
+
+    if (buf == NULL && len > 0)
+        return bsd_fail(SocketBase, AMI_EFAULT);
+
+    /* A destination on a connected stream socket is ignored, as in BSD. */
+    if ((sock->as_Flags & ASF_TCP) == 0)
+    {
+        if (to == NULL)
+        {
+            if ((sock->as_Flags & ASF_CONNECTED) == 0)
+                return bsd_fail(SocketBase, AMI_EDESTADDRREQ);
+
+            addr = sock->as_PeerAddr;
+            port = sock->as_PeerPort;
+        }
+        else if (bsd_sockaddr_in(SocketBase, to, tolen, &addr, &port) != 0)
+        {
+            return -1;
+        }
+    }
+
+    iov.iov_base = buf;
+    iov.iov_len  = (size_t)len;
+
+    return bsd_send_iov(SocketBase, sock, &iov, 1, len, flags, addr, port);
 }
 
 LONG bsd_recv(register LONG sock_fd __asm("d0"),
@@ -433,34 +715,23 @@ LONG bsd_recv(register LONG sock_fd __asm("d0"),
               register LONG flags   __asm("d2"),
               register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
-    LONG       result;
+    AmiSocket    *sock = bsd_lookup(SocketBase, sock_fd);
+    struct iovec  iov;
 
-    if (sock == NULL)
-        return bsd_fail(SocketBase, AMI_EBADF);
+    if (bsd_transfer_check(SocketBase, sock, len, flags) != 0)
+        return -1;
 
     if (buf == NULL && len > 0)
         return bsd_fail(SocketBase, AMI_EFAULT);
 
-    if (len < 0)
-        return bsd_fail(SocketBase, AMI_EINVAL);
-
-    if ((flags & MSG_OOB) != 0)
-        return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
-
     if (len == 0)
         return 0;
 
-    if (bsd_nx_enter(SocketBase) != 0)
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
+    iov.iov_base = buf;
+    iov.iov_len  = (size_t)len;
 
-    result = ((sock->as_Flags & ASF_TCP) != 0)
-                 ? bsd_recv_tcp(SocketBase, sock, buf, len, flags)
-                 : bsd_recv_udp(SocketBase, sock, buf, len, flags, NULL, NULL);
-
-    bsd_nx_leave(SocketBase);
-
-    return result;
+    return bsd_recv_iov(SocketBase, sock, &iov, 1, len, flags, NULL, NULL,
+                        NULL);
 }
 
 LONG bsd_recvfrom(register LONG sock_fd          __asm("d0"),
@@ -471,39 +742,129 @@ LONG bsd_recvfrom(register LONG sock_fd          __asm("d0"),
                   register socklen_t *addrlen    __asm("a2"),
                   register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
-    LONG       result;
+    AmiSocket    *sock = bsd_lookup(SocketBase, sock_fd);
+    struct iovec  iov;
 
-    if (sock == NULL)
-        return bsd_fail(SocketBase, AMI_EBADF);
+    if (bsd_transfer_check(SocketBase, sock, len, flags) != 0)
+        return -1;
 
     if (buf == NULL && len > 0)
         return bsd_fail(SocketBase, AMI_EFAULT);
 
-    if (len < 0)
-        return bsd_fail(SocketBase, AMI_EINVAL);
-
-    if ((flags & MSG_OOB) != 0)
-        return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
-
     if ((sock->as_Flags & ASF_TCP) == 0 && len == 0)
         return 0;
 
-    if (bsd_nx_enter(SocketBase) != 0)
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
+    iov.iov_base = buf;
+    iov.iov_len  = (size_t)len;
 
-    if ((sock->as_Flags & ASF_TCP) != 0)
+    return bsd_recv_iov(SocketBase, sock, &iov, 1, len, flags, addr, addrlen,
+                        NULL);
+}
+
+/* ------------------------------------------------------ sendmsg / recvmsg -- */
+
+/*
+ * ANCILLARY DATA
+ *
+ * msg_control is ignored on send and reported as empty on receive. That is
+ * not a shortcut: the only thing a BSD stack passes through SCM_RIGHTS is a
+ * file descriptor, and AmigaOS has no descriptor passing over a socket at all
+ * -- handing a socket to another task is ObtainSocket()/ReleaseSocket()
+ * (handoff.c), a completely different mechanism. There is therefore nothing
+ * that could legitimately arrive in msg_control, so MSG_CTRUNC is never set:
+ * no ancillary data is ever dropped, because none can ever exist.
+ */
+LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
+                 register struct msghdr *msg  __asm("a0"),
+                 register LONG flags          __asm("d1"),
+                 register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
+    ULONG      addr = 0;
+    UINT       port = 0;
+    LONG       total;
+
+    if (bsd_transfer_check(SocketBase, sock, 0, flags) != 0)
+        return -1;
+
+    if (msg == NULL)
+        return bsd_fail(SocketBase, AMI_EFAULT);
+
+    total = bsd_iov_total(msg->msg_iov, (LONG)msg->msg_iovlen);
+    if (total < 0)
+        return bsd_fail(SocketBase, AMI_EINVAL);
+
+    if ((sock->as_Flags & ASF_TCP) == 0)
     {
-        result = bsd_recv_tcp(SocketBase, sock, buf, len, flags);
-        if (result >= 0 && addr != NULL && addrlen != NULL)
-            bsd_sockaddr_out(addr, addrlen, sock->as_PeerAddr, sock->as_PeerPort);
-    }
-    else
-    {
-        result = bsd_recv_udp(SocketBase, sock, buf, len, flags, addr, addrlen);
+        if (msg->msg_name == NULL)
+        {
+            if ((sock->as_Flags & ASF_CONNECTED) == 0)
+                return bsd_fail(SocketBase, AMI_EDESTADDRREQ);
+
+            addr = sock->as_PeerAddr;
+            port = sock->as_PeerPort;
+        }
+        else if (bsd_sockaddr_in(SocketBase,
+                                 (const struct sockaddr *)msg->msg_name,
+                                 (socklen_t)msg->msg_namelen,
+                                 &addr, &port) != 0)
+        {
+            return -1;
+        }
     }
 
-    bsd_nx_leave(SocketBase);
+    return bsd_send_iov(SocketBase, sock, msg->msg_iov,
+                        (LONG)msg->msg_iovlen, total, flags, addr, port);
+}
+
+LONG bsd_recvmsg(register LONG sock_fd        __asm("d0"),
+                 register struct msghdr *msg  __asm("a0"),
+                 register LONG flags          __asm("d1"),
+                 register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    AmiSocket       *sock = bsd_lookup(SocketBase, sock_fd);
+    struct sockaddr *from = NULL;
+    socklen_t        fromlen = 0;
+    BOOL             truncated = FALSE;
+    LONG             total;
+    LONG             result;
+
+    if (bsd_transfer_check(SocketBase, sock, 0, flags) != 0)
+        return -1;
+
+    if (msg == NULL)
+        return bsd_fail(SocketBase, AMI_EFAULT);
+
+    total = bsd_iov_total(msg->msg_iov, (LONG)msg->msg_iovlen);
+    if (total < 0)
+        return bsd_fail(SocketBase, AMI_EINVAL);
+
+    if (msg->msg_name != NULL && msg->msg_namelen > 0)
+    {
+        from    = (struct sockaddr *)msg->msg_name;
+        fromlen = (socklen_t)msg->msg_namelen;
+    }
+
+    /* msg_flags is an out parameter; whatever the caller left there is not
+       an input and must not survive. */
+    msg->msg_flags = 0;
+
+    result = bsd_recv_iov(SocketBase, sock, msg->msg_iov,
+                          (LONG)msg->msg_iovlen, total, flags,
+                          from, (from != NULL) ? &fromlen : NULL,
+                          &truncated);
+
+    if (result < 0)
+        return result;
+
+    if (from != NULL)
+        msg->msg_namelen = (socklen_t)fromlen;
+
+    /* No ancillary data exists on this platform -- see the note above. */
+    msg->msg_controllen = 0;
+
+    if (truncated)
+        msg->msg_flags |= MSG_TRUNC;
 
     return result;
 }

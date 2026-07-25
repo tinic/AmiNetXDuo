@@ -48,6 +48,36 @@ VOID netstack_shutdown(VOID);
 /* The singleton, or NULL if the stack is not up. */
 AmiNetStack   *netstack_get(VOID);
 
+/* ------------------------------------------------------ the ThreadX bracket
+ *
+ * NetX Duo checks who is calling: roughly forty of its entry points are
+ * wrapped in NX_THREADS_ONLY_CALLER_CHECKING and return NX_CALLER_ERROR
+ * unless tx_thread_identify() is non-NULL. An Exec Task that ThreadX has
+ * never adopted fails every one of them, so *everything* that touches a NetX
+ * Duo API -- the netstack itself, bsdsocket.library, the tools -- has to
+ * bracket the call.
+ *
+ * This is public rather than private to src/netstack/ precisely so there is
+ * exactly one bracket: bsdsocket.library used to carry a second, equivalent
+ * implementation on the port's tx_amiga.h because it could not reach this one.
+ *
+ * `caller` is caller-owned storage that must stay valid until
+ * ami_netstack_leave(). Brackets nest: a nested enter() finds the task is
+ * already a ThreadX thread, borrows the context and leaves it alone.
+ *
+ * Nothing inside a bracket may block on anything except ThreadX -- an adopted
+ * task holds the ThreadX baton, so an exec Wait() inside one stops the IP
+ * thread and every other stack user until it returns.
+ */
+typedef struct AmiNetCaller
+{
+    TX_THREAD   nc_Thread;
+    BOOL        nc_Adopted;
+} AmiNetCaller;
+
+LONG ami_netstack_enter(AmiNetCaller *caller);
+VOID ami_netstack_leave(AmiNetCaller *caller);
+
 /* Accessors -- all return NULL when the stack is down. */
 NX_IP          *netstack_ip(VOID);
 NX_PACKET_POOL *netstack_pool(VOID);

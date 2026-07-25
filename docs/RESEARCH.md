@@ -820,6 +820,90 @@ is the same lever — `nx_crypto_ec.c` calls `_nx_crypto_huge_number_multiply`/`
 the same inner loops, so the ~1.4× limb-loop win should carry over (though P-256's fast
 reduction means the windowing and squaring wins do not).
 
+#### Update: `src/crypto68k/c68k_p256.*` makes P-256 3.7× faster — EC is no longer the blocker either
+
+The follow-on to the follow-on. Measured on the emulated 68020,
+`tests/crypto68k/crypto68k_ec_bench`, every pair run back to back in one process
+with **nothing changed but one function pointer** in a copy of the curve struct
+(`nx_crypto_ec_multiple`), so the ratios are what a handshake would actually see:
+
+| | reference | crypto68k | ratio |
+|---|---|---|---|
+| **ECDSA P-256 verify** | 7.028 s | **1.961 s** | 3.6× |
+| **ECDHE P-256 shared secret** | 5.245 s | **1.368 s** | 3.8× |
+| **ECDHE P-256 keygen** | 1.475 s | **0.381 s** | 3.9× |
+| generic scalar multiply `k·Q` | 5.184 s | 1.334 s | 3.9× |
+| fixed-base scalar multiply `k·G` | 1.475 s | 0.380 s | 3.9× |
+| Jacobian point doubling | 14.97 ms | 3.88 ms | 3.9× |
+| Jacobian + affine addition | 16.62 ms | 5.19 ms | 3.2× |
+| field multiply + reduce | 1.466 ms | 0.449 ms | 3.3× |
+| **P-256 Solinas reduction alone** | 1.019 ms | **0.084 ms** | **12.1×** |
+
+The three vendored absolutes reproduce the M9 gate figures above (1.52 / 5.18 /
+6.97 s) to within 1%, which is the cross-check that the benchmark is measuring
+the same computation.
+
+**Only the 68020 column is meaningful.** The same binary under FS-UAE's 68030
+model reports 4.5–5.0× — and an ECDSA verify of 196 ms against the 68020 model's
+7028 ms, which is 36× and is not a clock ratio. The 68030 model does not charge
+for `MULU.L`, so it flatters exactly the work this change moves *out* of the
+multiply and into carry chains. Quoted here so nobody re-measures it and
+believes it.
+
+**None of the textbook algorithmic levers were missing, and that is the finding.**
+`nx_crypto_ec.c` already has NAF point multiplication, Solinas reduction rather
+than Barrett or Montgomery, a real Yang squaring, Jacobian coordinates with a
+single final inversion, and a fixed-base comb table for `G` — and the comb **is**
+reached on the paths that matter (verified: `_nx_crypto_ec_fp_projective_multiple`
+dispatches on pointer identity with `curve->nx_crypto_ec_g`, and both ECDSA
+verify's `u1·G` half and ECDH key generation pass exactly that pointer; the
+measured 1.48 s keygen against 5.18 s shared secret *is* the comb working).
+
+What was slow was the layer underneath. **`_nx_crypto_ec_secp256r1_reduce()` is
+67% of a field multiply** — measured, not estimated — because it does not work on
+limbs at all: it serialises the value into a 64-byte big-endian byte stream one
+byte at a time, memmoves it, parses 32 bytes back into limbs one byte at a time,
+then builds nine 8-limb terms with 64 more per-word byte swaps and adds them as
+sign-carrying variable-length huge numbers. Collapsing that to one pass over
+eight limb positions with a signed carry — the same mathematics, no byte touched
+— is **12.1×** on the reduction and most of the 3.8× overall.
+
+**Hand-written assembly was worth 1.13×, and only for the carry chains.**
+`c68k_p256.S` covers the eight-limb add and subtract and the reduction's 63-term
+pass, because C has no carry flag and GCC therefore spends five instructions and
+a branch where `ADD.L`/`ADDX.L` needs two (both plausible C spellings were
+compiled and disassembled first; the 64-bit-accumulator form emits a `CLR.L` per
+term instead of hoisting one zero register). The **multiply is deliberately left
+to the compiler** — it is already within ~25% of the 68020's `MULU.L` floor, which
+is the same conclusion the RSA work reached.
+
+**Shamir's trick for ECDSA verify was costed and rejected.** The usual argument —
+verify is `u1·G + u2·Q`, two scalar multiplications, interleave them and halve the
+doublings — does not apply here, because `u1·G` is not a generic scalar
+multiplication. It is a comb, and a comb needs 26 doublings, not 256; interleaving
+would drag the `G` half up to 256 shared doublings to save the 26 it already needs.
+Priced at the measured point-operation costs: 284 doublings + 100 additions
+(separate) against 258 + 93 (Shamir) = 1.62 s against 1.48 s, about **8%** of a
+verify, for a second scalar routine and a second static table. Available if
+anyone needs it; not free, and not the 1.5–1.8× the textbook promises.
+
+Correctness: **1730 checks, 0 failures** (`tests/crypto68k/crypto68k_ec_test`) —
+RFC 6979 A.2.5 published signatures verified through the real
+`_nx_crypto_ecdsa_verify`, 1600 field operations and 70 scalar multiplications
+differentially against the unmodified vendored code including k = 0, 1, 2, n−1,
+n, n+1, 2²⁵⁶−1 and the small scalars where the accumulator meets a table entry,
+a known-answer ECDH secret computed from both sides, and **ten invalid
+signatures that must be and are rejected** — because an "optimisation" that made
+verify always succeed would pass every positive test in the file.
+
+**Consequence for viability: a client ECDHE_ECDSA handshake's asymmetric
+arithmetic goes from 13.7 s to 3.7 s.** Combined with the RSA work, that
+removes the last of the "tens of seconds" from a TLS client's public-key cost;
+what remains is one keygen, one ECDH and one verify per certificate. ECDHE_RSA
+is no longer obviously preferable — an RSA-2048 verify is 0.681 s against
+1.961 s for ECDSA, so an RSA chain is still cheaper per certificate, but the gap
+is now 3× on a sub-second operation rather than 3.5× on a seven-second one.
+
 Prior art, worth knowing before anyone re-treads it:
 
 - **Howard Chu wrote a complete 68020 OpenSSL bignum assembly in 2002** (`bn_m68k.s`,

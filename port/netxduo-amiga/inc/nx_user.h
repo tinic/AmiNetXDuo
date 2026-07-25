@@ -98,6 +98,32 @@
  */
 #define NX_TCP_MAXIMUM_TX_QUEUE                 8
 
+/*
+ * Turn on the extended notify callbacks.
+ *
+ * Without this, NX_DISABLE_EXTENDED_NOTIFY_SUPPORT is what nx_api.h defines
+ * for us, and nx_tcp_socket_establish_notify() /
+ * nx_tcp_socket_disconnect_complete_notify() compile to a stub returning
+ * NX_NOT_SUPPORTED.  bsdsocket.library then has no way to be told that a
+ * non-blocking connect() completed or that a disconnect finished, and has to
+ * derive both by reading nx_tcp_socket_state on every readiness poll --
+ * i.e. WaitSelect() polls where it should be sleeping.
+ *
+ * With it, four call sites in the TCP state machine reach us directly:
+ *   nx_tcp_socket_state_syn_sent.c      establish  (client connect complete)
+ *   nx_tcp_socket_state_syn_received.c  establish  (server handshake done)
+ *   nx_tcp_socket_connection_reset.c    disconnect (RST -- connect refused)
+ *   nx_tcp_socket_state_fin_wait{1,2}/closing/last_ack.c
+ *                                       disconnect (orderly close complete)
+ *
+ * Cost: four function pointers (16 bytes) per NX_TCP_SOCKET, and the two
+ * extra branches per received segment that guard them.  It also changes the
+ * NX_TCP_SOCKET layout, so it is an ABI break for anything compiled against
+ * the old header -- everything here is built from one tree, but that is why
+ * this is not a per-file define.
+ */
+#define NX_ENABLE_EXTENDED_NOTIFY_SUPPORT
+
 
 /* ------------------------------------------------------------- routing --- */
 

@@ -15,6 +15,8 @@
 
 #include "bsdsocket_vectors.h"
 
+#include "aminetxduo/config.h"
+
 #include <proto/exec.h>
 
 /*
@@ -136,6 +138,7 @@ static struct AmiSocketBase *bsd_lib_init(
     InitSemaphore(&base->sb_Lock);
     bsd_new_list(&base->sb_Children);
     base->sb_StackRefs = 0;
+    bsd_handoff_init(base);
 
     return base;
 }
@@ -172,7 +175,15 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
      */
     bsd_bzero(&child->sb_Lock, sizeof(child->sb_Lock));
     bsd_bzero(&child->sb_Children, sizeof(child->sb_Children));
-    child->sb_StackRefs = 0;
+    bsd_bzero(&child->sb_Handoffs, sizeof(child->sb_Handoffs));
+    child->sb_StackRefs      = 0;
+    child->sb_NextHandoffId  = 0;
+
+    /* The clone inherits the master's (idle) ThreadX bracket state; make the
+       inheritance explicit rather than depending on the master never having
+       been inside one. */
+    bsd_bzero(&child->sb_NxCaller, sizeof(child->sb_NxCaller));
+    child->sb_NxNest = 0;
 
     child->sb_Table     = NULL;
     child->sb_TableSize = 0;
@@ -195,6 +206,11 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     child->sb_FDCallback  = NULL;
 
     child->sb_TimerOpen = FALSE;
+
+    /* The netdb iterators (netdb.c) start at the top of each table. */
+    child->sb_ServCursor  = 0;
+    child->sb_ProtoCursor = 0;
+    child->sb_NetCursor   = 0;
 
     /*
      * The wakeup signal belongs to the opening task, which is exactly the
@@ -273,6 +289,16 @@ struct AmiSocketBase *bsd_lib_open(
 
     ObtainSemaphore(&master->sb_Lock);
 
+    /*
+     * The DEVS:Internet netdb backs get{serv,proto,net}by*() (netdb.c).
+     * ami_netdb_load() is idempotent but NOT re-entrant, so it happens here,
+     * inside the master semaphore and on a Process (it reads files), and
+     * never from a lookup. netstack_startup() below reaches it too, via
+     * ami_config_load(); calling it explicitly means the netdb is up even if
+     * that path ever changes.
+     */
+    (VOID)ami_netdb_load();
+
     if (master->sb_StackRefs == 0)
     {
         if (netstack_startup() != AMI_NET_OK)
@@ -310,6 +336,19 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
     if (base->sb_Master != NULL)
     {
         master = base->sb_Master;
+
+        /*
+         * If this is the last opener, nothing will ever be able to
+         * ObtainSocket() again, so anything still parked in the hand-off
+         * registry is released here rather than leaked. It has to happen
+         * before the child base goes: bsd_handoff_flush() needs a live base
+         * for the ThreadX bracket the teardown runs in.
+         */
+        ObtainSemaphore(&master->sb_Lock);
+        if (master->sb_StackRefs <= 1)
+            bsd_handoff_flush(base);
+        ReleaseSemaphore(&master->sb_Lock);
+
         bsd_child_destroy(base);
 
         ObtainSemaphore(&master->sb_Lock);

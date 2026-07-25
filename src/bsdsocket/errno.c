@@ -256,6 +256,20 @@ APTR bsd_enosys_ptr(register struct AmiSocketBase *SocketBase __asm("a6"))
     return NULL;
 }
 
+BOOL bsd_enosys_bool(register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    /*
+     * And again for the vectors that return BOOL, where -1 is the worst
+     * possible answer: it is all-bits-set, so every `if (ChangeRoadshowData(
+     * ...))` in the world reads it as TRUE and concludes the operation
+     * succeeded. An unimplemented vector may fail, but it must never claim
+     * to have worked.
+     */
+    (VOID)bsd_fail(SocketBase, AMI_ENOSYS);
+
+    return FALSE;
+}
+
 /* -------------------------------------------------- SocketBaseTagList() ---- */
 
 #define SBT_RO  0       /* query only */

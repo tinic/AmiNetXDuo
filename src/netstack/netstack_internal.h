@@ -91,21 +91,12 @@ struct AmiNetStack
 VOID ami_netstack_baton_release(VOID);
 VOID ami_netstack_baton_acquire(VOID);
 
-/* ---------------------------------------------------------- adoption glue */
-
-/*
- * Make the calling Exec Task a ThreadX thread for the duration of a stack
- * call, if it is not one already. `thread` is caller-owned storage that must
- * stay valid until ami_netstack_leave().
+/* ---------------------------------------------------------- adoption glue --
+ *
+ * AmiNetCaller / ami_netstack_enter() / ami_netstack_leave() are PUBLIC --
+ * they live in include/aminetxduo/netstack.h so bsdsocket.library and the
+ * tools share this bracket rather than growing their own.
  */
-typedef struct AmiNetCaller
-{
-    TX_THREAD   nc_Thread;
-    BOOL        nc_Adopted;
-} AmiNetCaller;
-
-LONG ami_netstack_enter(AmiNetCaller *caller);
-VOID ami_netstack_leave(AmiNetCaller *caller);
 
 /* ---------------------------------------------------------------- resolver */
 

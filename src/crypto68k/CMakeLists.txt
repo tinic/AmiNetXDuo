@@ -48,7 +48,15 @@ endif()
 
 add_library(crypto68k_ref STATIC
     "${NX_CRYPTO_ROOT}/src/nx_crypto_huge_number.c"
-    "${NX_CRYPTO_ROOT}/src/nx_crypto_initialize.c")
+    "${NX_CRYPTO_ROOT}/src/nx_crypto_initialize.c"
+    "${NX_CRYPTO_ROOT}/src/nx_crypto_ec.c"
+    "${NX_CRYPTO_ROOT}/src/nx_crypto_ecdh.c"
+    "${NX_CRYPTO_ROOT}/src/nx_crypto_ecdsa.c"
+    "${NX_CRYPTO_ROOT}/src/nx_crypto_ec_secp192r1_fixed_points.c"
+    "${NX_CRYPTO_ROOT}/src/nx_crypto_ec_secp224r1_fixed_points.c"
+    "${NX_CRYPTO_ROOT}/src/nx_crypto_ec_secp256r1_fixed_points.c"
+    "${NX_CRYPTO_ROOT}/src/nx_crypto_ec_secp384r1_fixed_points.c"
+    "${NX_CRYPTO_ROOT}/src/nx_crypto_ec_secp521r1_fixed_points.c")
 target_include_directories(crypto68k_ref PUBLIC ${CRYPTO68K_INCLUDES})
 target_link_libraries(crypto68k_ref PUBLIC netxduo)
 if(CRYPTO68K_RT)
@@ -61,10 +69,12 @@ set(CRYPTO68K_SOURCES
     c68k_prim.c
     c68k_mont.c
     c68k_powm.c
-    c68k_crt.c)
+    c68k_crt.c
+    c68k_p256.c
+    c68k_p256_table.c)
 
 if(AMINETXDUO_CRYPTO68K_ASM)
-    list(APPEND CRYPTO68K_SOURCES c68k_prim.S)
+    list(APPEND CRYPTO68K_SOURCES c68k_prim.S c68k_p256.S)
 endif()
 
 add_library(crypto68k STATIC ${CRYPTO68K_SOURCES})
@@ -84,7 +94,7 @@ if(AMINETXDUO_CRYPTO68K_ASM)
     # on a 68000 at all.  Set here rather than in the shared toolchain file so
     # nothing else in the tree changes behaviour.
     target_compile_definitions(crypto68k PRIVATE C68K_ASM=1)
-    set_source_files_properties(c68k_prim.S PROPERTIES
+    set_source_files_properties(c68k_prim.S c68k_p256.S PROPERTIES
         COMPILE_DEFINITIONS C68K_ASM=1
         COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
 endif()

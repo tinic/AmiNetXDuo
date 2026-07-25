@@ -17,6 +17,14 @@
  * nx_packet_* helpers (no check at all) tolerate a plain Task -- which is
  * exactly why socket() used to be the one thing that worked.
  *
+ * ONE BRACKET
+ *
+ * The adopt/orphan itself is ami_netstack_enter()/ami_netstack_leave() from
+ * include/aminetxduo/netstack.h -- the same bracket src/netstack/ and the
+ * tools use. This file adds only the two things that are specific to a
+ * library base: where the TX_THREAD control block lives, and the nesting
+ * counter.
+ *
  * GRANULARITY: PER CALL
  *
  * The port's adoption model (port/threadx-amiga/src/tx_amiga_adopt.c) makes
@@ -49,19 +57,8 @@
 
 #include <proto/exec.h>
 
-/*
- * Adopted application tasks run below the IP thread (1) and the SANA-II
- * readers (2), so a caller inside the stack never starves the stack. Same
- * value as AMI_CALLER_PRIORITY in src/netstack/netstack_internal.h.
- */
-#define BSD_CALLER_PRIORITY     16
-
-static char bsd_caller_name[] = "bsdsocket caller";
-
 LONG bsd_nx_enter(struct AmiSocketBase *base)
 {
-    UINT status;
-
     if (base == NULL)
         return -1;
 
@@ -71,31 +68,8 @@ LONG bsd_nx_enter(struct AmiSocketBase *base)
         return 0;
     }
 
-    if (tx_amiga_kernel_running() != TX_TRUE)
+    if (ami_netstack_enter(&base->sb_NxCaller) != AMI_NET_OK)
         return -1;
-
-    if (tx_thread_identify() != TX_NULL)
-    {
-        /*
-         * Already a ThreadX thread -- either a task adopted further up the
-         * call chain (netstack_startup() brackets itself) or, in principle, a
-         * thread ThreadX created. Borrow the context; do not orphan it.
-         */
-        base->sb_NxAdopted = FALSE;
-    }
-    else
-    {
-        status = tx_amiga_adopt_thread(&base->sb_NxThread, bsd_caller_name,
-                                       BSD_CALLER_PRIORITY);
-        if (status != TX_SUCCESS)
-        {
-            AMI_ERROR("bsdsocket: cannot adopt calling task (%ld)",
-                      (long)status);
-            return -1;
-        }
-
-        base->sb_NxAdopted = TRUE;
-    }
 
     base->sb_NxNest = 1;
 
@@ -110,9 +84,5 @@ VOID bsd_nx_leave(struct AmiSocketBase *base)
     if (--base->sb_NxNest > 0)
         return;
 
-    if (base->sb_NxAdopted)
-    {
-        base->sb_NxAdopted = FALSE;
-        (VOID)tx_amiga_orphan_thread(&base->sb_NxThread);
-    }
+    ami_netstack_leave(&base->sb_NxCaller);
 }

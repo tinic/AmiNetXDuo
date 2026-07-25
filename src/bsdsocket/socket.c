@@ -19,10 +19,53 @@
 
 #include <proto/exec.h>
 
-#define BSD_UDP_QUEUE_MAX   8           /* datagrams queued per socket      */
+/*
+ * How many datagrams a UDP socket may hold un-read.
+ *
+ * This is a pool-budget decision, not a tuning knob. A queued datagram is a
+ * whole NX_PACKET out of the shared pool for as long as the application does
+ * not read it, and the pool is the stack's only buffer: 16..256 packets of
+ * 1568 bytes, sized from AvailMem() at startup (netstack.h). Everything else
+ * that can pin packets is already budgeted the same way -- the SANA-II
+ * readers keep up to 8 outstanding CMD_READs, and NX_TCP_MAXIMUM_TX_QUEUE
+ * caps a TCP socket at 8 in flight.
+ *
+ * A flat 8 was the old value, and it is far too tight on anything but the
+ * floor: a sender that bursts 200 datagrams into loopback before the receiver
+ * runs loses 192 of them. A flat large value is worse -- one socket nobody is
+ * reading would drain the pool and the IP thread could not allocate to
+ * receive or transmit anything at all, which is a machine-wide failure caused
+ * by one careless application.
+ *
+ * So: a quarter of the pool, never fewer than the 8 we had, never more than
+ * 64. On the 4 MB floor (16 packets) that is 8, exactly as before; on a
+ * full 256-packet pool it is 64. Three sockets asleep on full queues still
+ * leave a quarter of the pool for the stack.
+ */
+#define BSD_UDP_QUEUE_MIN       8
+#define BSD_UDP_QUEUE_CEILING   64
+#define BSD_UDP_POOL_SHARE      4       /* 1/N of the pool per socket       */
 
 static char bsd_tcp_name[] = "AmiNetXDuo TCP";
 static char bsd_udp_name[] = "AmiNetXDuo UDP";
+
+static ULONG bsd_udp_queue_max(VOID)
+{
+    NX_PACKET_POOL *pool = netstack_pool();
+    ULONG           queue;
+
+    if (pool == NULL)
+        return BSD_UDP_QUEUE_MIN;
+
+    queue = pool->nx_packet_pool_total / BSD_UDP_POOL_SHARE;
+
+    if (queue < BSD_UDP_QUEUE_MIN)
+        queue = BSD_UDP_QUEUE_MIN;
+    if (queue > BSD_UDP_QUEUE_CEILING)
+        queue = BSD_UDP_QUEUE_CEILING;
+
+    return queue;
+}
 
 /* --------------------------------------------------------- descriptor table */
 
@@ -390,7 +433,8 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
     {
         status = nx_udp_socket_create(ip, &sock->as_Nx.udp, bsd_udp_name,
                                       NX_IP_NORMAL, NX_FRAGMENT_OKAY,
-                                      NX_IP_TIME_TO_LIVE, BSD_UDP_QUEUE_MAX);
+                                      NX_IP_TIME_TO_LIVE,
+                                      bsd_udp_queue_max());
     }
 
     if (status != NX_SUCCESS)
@@ -813,26 +857,58 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
         sock->as_Flags |= ASF_NXBOUND | ASF_BOUND;
     }
 
+    /*
+     * ASF_CONNECTING goes on BEFORE the call, not after.
+     *
+     * The establish / disconnect-complete callbacks (select.c) can fire from
+     * *inside* nx_tcp_client_socket_connect(): a loopback SYN is queued to the
+     * IP thread, which outranks us, and tx_mutex_put() inside the connect is a
+     * scheduling point -- so on loopback the entire SYN -> RST -> reset
+     * sequence can finish before the connect returns NX_IN_PROGRESS to us.
+     * Setting the flag afterwards meant the callback saw a socket that was not
+     * yet "connecting", filed the RST as an ordinary EOF, and left SO_ERROR at
+     * zero. Setting it first makes the callback authoritative and this code
+     * merely read its answer.
+     */
+    sock->as_PeerAddr = addr;
+    sock->as_PeerPort = port;
+    sock->as_Flags   |= ASF_CONNECTING;
+
     status = nx_tcp_client_socket_connect(
         &sock->as_Nx.tcp, addr, port,
         bsd_wait_option(sock, sock->as_SndTimeout));
 
     if (status == NX_SUCCESS)
     {
-        sock->as_PeerAddr = addr;
-        sock->as_PeerPort = port;
-        sock->as_Flags   |= ASF_CONNECTED;
-        sock->as_Flags   &= ~ASF_CONNECTING;
+        sock->as_Flags |= ASF_CONNECTED;
+        sock->as_Flags &= ~ASF_CONNECTING;
         return 0;
     }
 
     if (status == NX_IN_PROGRESS)
     {
-        sock->as_PeerAddr = addr;
-        sock->as_PeerPort = port;
-        sock->as_Flags   |= ASF_CONNECTING;
+        /* Already established inside the call? Then the connect is done, and
+           BSD says a non-blocking connect that completes at once returns 0. */
+        if ((sock->as_Flags & ASF_CONNECTED) != 0)
+        {
+            sock->as_Flags &= ~ASF_CONNECTING;
+            return 0;
+        }
+
+        /* Already failed inside the call? The callback cleared the flag and
+           left the reason in as_SoError. */
+        if ((sock->as_Flags & ASF_CONNECTING) == 0)
+        {
+            if (sock->as_SoError == 0)
+                sock->as_SoError = AMI_ECONNREFUSED;
+
+            return bsd_fail(SocketBase, sock->as_SoError);
+        }
+
         return bsd_fail(SocketBase, AMI_EINPROGRESS);
     }
+
+    sock->as_Flags &= ~ASF_CONNECTING;
 
     if (status == NX_WAIT_ABORTED)
         return bsd_fail(SocketBase, AMI_EINTR);

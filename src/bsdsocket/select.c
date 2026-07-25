@@ -73,14 +73,9 @@ static VOID bsd_tcp_receive_notify(NX_TCP_SOCKET *socket_ptr)
 /*
  * The peer closed, or the connection was reset.
  *
- * This is the callback handed to nx_tcp_socket_create(), NOT one of the
- * nx_tcp_socket_*_notify() setters: those are all behind
- * NX_ENABLE_EXTENDED_NOTIFY_SUPPORT, which this port does not define, so
- * nx_tcp_socket_establish_notify() and nx_tcp_socket_disconnect_complete_
- * notify() compile to a stub that returns NX_NOT_SUPPORTED. The create-time
- * disconnect callback and nx_tcp_socket_receive_notify() are the two TCP
- * callbacks that actually fire in this build; everything else has to be
- * derived from socket state (bsd_event_refresh below).
+ * This is the callback handed to nx_tcp_socket_create(). It fires from
+ * _nx_tcp_socket_connection_reset() and from the FIN handling in the state
+ * machine, but only while the socket still counts as connected.
  */
 VOID bsd_tcp_disconnect_callback(NX_TCP_SOCKET *socket_ptr)
 {
@@ -96,35 +91,72 @@ VOID bsd_tcp_disconnect_callback(NX_TCP_SOCKET *socket_ptr)
 }
 
 /*
- * Edge events NetX Duo cannot report to us in this build.
+ * The three-way handshake finished.
  *
- * Without the extended notify set there is no "connection established"
- * callback, so a non-blocking connect() has to be noticed by looking at the
- * socket state. Every path that reports readiness or events calls this first.
+ * NX_ENABLE_EXTENDED_NOTIFY_SUPPORT (port/netxduo-amiga/inc/nx_user.h) is what
+ * makes this reachable; without it nx_tcp_socket_establish_notify() returns
+ * NX_NOT_SUPPORTED and completion has to be polled out of
+ * nx_tcp_socket_state. It fires from two places:
+ *
+ *   nx_tcp_socket_state_syn_sent.c      -- our connect() got its SYN+ACK
+ *   nx_tcp_socket_state_syn_received.c  -- a client's handshake with a socket
+ *                                          we parked on a listen port
+ *
+ * The second case is why this matters for more than non-blocking connect:
+ * bsd_listen_callback() fires when the SYN *arrives*, but a listener is not
+ * accept()-ready until the handshake completes, so without this callback a
+ * WaitSelect() on a listening descriptor could sleep through the ACK and only
+ * wake on the next unrelated event.
  */
-VOID bsd_event_refresh(AmiSocket *sock)
+static VOID bsd_tcp_establish_notify(NX_TCP_SOCKET *socket_ptr)
 {
-    UINT state;
+    AmiSocket *sock = (AmiSocket *)socket_ptr->nx_tcp_socket_reserved_ptr;
 
-    if (sock == NULL ||
-        (sock->as_Flags & (ASF_TCP | ASF_CONNECTING)) !=
-            (ASF_TCP | ASF_CONNECTING))
+    if (sock == NULL)
         return;
 
-    state = sock->as_Nx.tcp.nx_tcp_socket_state;
+    sock->as_Flags &= ~ASF_CONNECTING;
+    sock->as_Flags |= ASF_CONNECTED;
 
-    if (state == NX_TCP_ESTABLISHED)
+    /* A socket still parked on a listen port belongs to its listener; the
+       application selects on the listener, not on the parked socket. */
+    if ((sock->as_Flags & ASF_INCOMING) != 0 && sock->as_Parent != NULL)
     {
-        sock->as_Flags &= ~ASF_CONNECTING;
-        sock->as_Flags |= ASF_CONNECTED;
-        bsd_event_post(sock, FD_CONNECT | FD_WRITE);
+        sock->as_Parent->as_Flags |= ASF_ACCEPTPEND;
+        bsd_event_post(sock->as_Parent, FD_ACCEPT | FD_READ);
+        return;
     }
-    else if (state == NX_TCP_CLOSED)
+
+    bsd_event_post(sock, FD_CONNECT | FD_WRITE);
+}
+
+/*
+ * The connection is completely gone: an RST arrived, or the SYN/data retries
+ * ran out (_nx_tcp_socket_connection_reset), or an orderly close finished.
+ *
+ * This is the other half of the extended notify set, and the only thing that
+ * can tell a *pending* connect() it has failed -- the create-time disconnect
+ * callback above is not invoked for a socket that never reached ESTABLISHED.
+ */
+static VOID bsd_tcp_disconnect_complete_notify(NX_TCP_SOCKET *socket_ptr)
+{
+    AmiSocket *sock = (AmiSocket *)socket_ptr->nx_tcp_socket_reserved_ptr;
+
+    if (sock == NULL)
+        return;
+
+    if ((sock->as_Flags & ASF_CONNECTING) != 0)
     {
+        /* The connect attempt died. Leave the reason for SO_ERROR, which is
+           how a non-blocking caller finds out what went wrong. */
         sock->as_Flags &= ~ASF_CONNECTING;
         sock->as_SoError = AMI_ECONNREFUSED;
         bsd_event_post(sock, FD_CONNECT | FD_ERROR | FD_WRITE);
+        return;
     }
+
+    sock->as_Flags |= ASF_EOF;
+    bsd_event_post(sock, FD_CLOSE | FD_READ | FD_WRITE);
 }
 
 static VOID bsd_tcp_window_notify(NX_TCP_SOCKET *socket_ptr)
@@ -167,11 +199,16 @@ VOID bsd_events_attach(AmiSocket *sock)
         sock->as_Nx.tcp.nx_tcp_socket_reserved_ptr = sock;
 
         /* The disconnect callback is installed at nx_tcp_socket_create() time
-           (socket.c); the *_notify() setters below are the ones that work
-           without NX_ENABLE_EXTENDED_NOTIFY_SUPPORT. */
+           (socket.c); everything else is a *_notify() setter. The last two
+           need NX_ENABLE_EXTENDED_NOTIFY_SUPPORT and would silently return
+           NX_NOT_SUPPORTED without it -- see port/netxduo-amiga/inc/nx_user.h. */
         nx_tcp_socket_receive_notify(&sock->as_Nx.tcp, bsd_tcp_receive_notify);
         nx_tcp_socket_window_update_notify_set(&sock->as_Nx.tcp,
                                                bsd_tcp_window_notify);
+        nx_tcp_socket_establish_notify(&sock->as_Nx.tcp,
+                                       bsd_tcp_establish_notify);
+        nx_tcp_socket_disconnect_complete_notify(&sock->as_Nx.tcp,
+                                                 bsd_tcp_disconnect_complete_notify);
     }
     else
     {
@@ -263,6 +300,14 @@ BOOL bsd_writable(AmiSocket *sock)
 
     if ((sock->as_Flags & (ASF_EOF | ASF_WRSHUT)) != 0)
         return TRUE;                    /* the write will fail immediately */
+
+    /*
+     * A pending error makes a socket writable in BSD -- that is how a caller
+     * waiting on a non-blocking connect is told to go and read SO_ERROR
+     * rather than waiting out its whole timeout.
+     */
+    if (sock->as_SoError != 0)
+        return TRUE;
 
     if (sock->as_Nx.tcp.nx_tcp_socket_state != NX_TCP_ESTABLISHED)
         return FALSE;
@@ -369,8 +414,6 @@ static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
         sock = bsd_lookup(base, fd);
         if (sock == NULL)
             continue;
-
-        bsd_event_refresh(sock);
 
         if (want_read && bsd_readable(sock))
         {
@@ -600,8 +643,6 @@ LONG bsd_GetSocketEvents(register ULONG *event_ptr __asm("a0"),
 
         if (sock == NULL)
             continue;
-
-        bsd_event_refresh(sock);
 
         events = sock->as_Events & sock->as_EventMask;
         if (events == 0)
