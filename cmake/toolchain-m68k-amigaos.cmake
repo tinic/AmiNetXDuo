@@ -21,6 +21,11 @@ set(CMAKE_SYSTEM_PROCESSOR m68k)
 # Before this list existed there was only entry 5, which meant a clean checkout
 # on any machine but one configured a compiler that was not there and failed
 # with a CMake internal error rather than an explanation.
+#
+# 2 through 5 must also RUN here, not merely exist.  The fetch cache holds a
+# linux/amd64 tree and can be populated on a host that cannot execute it (a
+# Mac, say, where the headers and the pin are still worth having), and an
+# existence test alone would rank that ahead of a working native install.
 if(NOT AMIGA_TOOLCHAIN_ROOT)
     if(DEFINED ENV{AMIGA_TOOLCHAIN_ROOT})
         set(AMIGA_TOOLCHAIN_ROOT "$ENV{AMIGA_TOOLCHAIN_ROOT}")
@@ -48,14 +53,20 @@ if(NOT AMIGA_TOOLCHAIN_ROOT)
 
         foreach(_c IN LISTS _amiga_candidates)
             if(EXISTS "${_c}/bin/m68k-amigaos-gcc")
-                set(AMIGA_TOOLCHAIN_ROOT "${_c}")
-                break()
+                execute_process(
+                    COMMAND "${_c}/bin/m68k-amigaos-gcc" -dumpversion
+                    RESULT_VARIABLE _amiga_runs
+                    OUTPUT_QUIET ERROR_QUIET)
+                if(_amiga_runs EQUAL 0)
+                    set(AMIGA_TOOLCHAIN_ROOT "${_c}")
+                    break()
+                endif()
             endif()
         endforeach()
 
         if(NOT AMIGA_TOOLCHAIN_ROOT)
             message(FATAL_ERROR
-                "No m68k-amigaos cross toolchain found.\n"
+                "No m68k-amigaos cross toolchain that runs on this host.\n"
                 "Looked in: ${_amiga_candidates}\n"
                 "Fix it with tools/fetch-toolchain.sh, or configure with "
                 "-DAMIGA_TOOLCHAIN_ROOT=<path to the dir holding "

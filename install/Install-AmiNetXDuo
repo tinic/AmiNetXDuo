@@ -31,7 +31,12 @@
 ; ==========================================================================
 
 (set APPNAME     "AmiNetXDuo")
-(set VERSION_STR "1.0")
+
+; dist/make-dist.sh rewrites this line as it copies the script into the
+; archive, from tools/version.sh -- so what the installer tells the user and
+; what the .lha is called cannot disagree.  The value here is only what you
+; see running the script straight out of the source tree.
+(set VERSION_STR "0.1.0")
 
 ; --------------------------------------------------------------------------
 ; Where we are reading from.

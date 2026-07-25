@@ -74,6 +74,12 @@ BOOL ami_tls_timer_open(VOID)
     return TRUE;
 }
 
+BOOL ami_tls_timer_is_open(VOID)
+{
+
+    return((BOOL)(ami_tls_timer_base != NULL));
+}
+
 VOID ami_tls_timer_close(VOID)
 {
 

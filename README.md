@@ -33,12 +33,24 @@ What that combination buys, none of which the classic stacks have:
   stays small.
 - NetX Duo's protocol catalogue: DHCP, DNS and AutoIP are in use today; PPP,
   PPPoE, SNTP, mDNS and NAT are vendored and unused so far.
+- **A data path written for the 68020.** `src/net68k/` replaces NetX Duo's IP
+  checksum with the `add.l`/`addx.l` carry chain the machine actually has
+  (3.11× on the primitive) and `memcpy` with a `movem.l` loop (1.23×), which is
+  most of the 261 → 356 KB/s the throughput row below records. The vendored
+  files are untouched: the symbols are simply resolved from our archive
+  instead. Same arrangement as `src/crypto68k/`.
 
-On TLS, honestly: `nx_secure` compiles and completes a real TLS 1.2 handshake,
-but that handshake costs **185 s** on a 68020 — so it is off by default and
-offload (`catalyst`, `AmiSSL-Tunnel`) is the realistic path. Optimised bignum
-arithmetic in `src/crypto68k/` made RSA-2048 **8× faster**, which moves the
-bottleneck to elliptic-curve work rather than removing it. See
+On TLS, honestly: `nx_secure` completes a real TLS 1.2 handshake, and with the
+optimised arithmetic in `src/crypto68k/` wired into it the client-side cost on a
+68020 is **3.2 s** of public-key work — a handshake against a real public HTTPS
+server, chain verification and all, measured at **6.8 s**. The gate figure of
+185 s was a loopback total dominated by the *server* half, which a client never
+performs; that same measurement is now 26.7 s.
+
+It is still off by default, for a reason that is no longer speed: **nothing can
+open a TLS connection yet.** `-DAMINETXDUO_TLS=ON` builds the libraries and the
+tests but links nothing into `bsdsocket.library`, and a client that is to reach
+arbitrary sites needs a trust store nobody has built. See
 [docs/RESEARCH.md §9](docs/RESEARCH.md#9-decisions-2026-07-24).
 
 ## How it fits together
@@ -92,6 +104,32 @@ The pinned toolchain is a **Linux x86-64** build. On any other host, install or
 build one and point `AMIGA_TOOLCHAIN_ROOT` at it; the layout to match is
 `<root>/bin/m68k-amigaos-gcc` plus `<root>/m68k-amigaos/ndk-include`.
 
+### Versioning
+
+The version is **compound**: ours, plus the stack we are built on. An `.lha` on
+Aminet and a CI artefact both have to say exactly what they are, and "AmiNetXDuo
+0.1.0" alone does not answer "on which NetX Duo?".
+
+```
+0.1.0+nx6.5.1                                        artefact and archive names
+AmiNetXDuo 0.1.0 (NetX Duo 6.5.1, ThreadX 6.5.1)     what a person reads
+```
+
+`project(AmiNetXDuo VERSION ...)` in `CMakeLists.txt` is the only place our
+version is written down. The NetX Duo and ThreadX versions are **read** from
+`third_party/*/common/inc/*_api.h`, never typed in: `cmake/AmiNetXDuoVersion.cmake`
+checks them against the pins it records and refuses to configure if a submodule
+bump has left them stale, because an artefact that misnames its own contents is
+worse than one with no version at all. It generates
+`<aminetxduo/version.h>` into the build tree.
+
+`tools/version.sh` answers the same questions from a shell — CI has to be able
+to name an artefact before it has built anything, and cannot run an m68k binary
+to ask. The `version_scheme` host test keeps the two implementations honest.
+
+Release tags are plain `vX.Y.Z`. The commit count belongs in a binary's version
+output and nowhere else — not in a tag, a release name or an archive filename.
+
 ## Testing
 
 Everything CI does is `tools/ci.sh`, so it can be run before pushing:
@@ -141,7 +179,7 @@ tests/conformance/run-fsuae.sh -a "LOOPBACK NOPAGE"
 | conformance, loopback tier | **125/142** (1 fail, 16 skip) |
 | conformance, network tier | **133/142** |
 | ThreadX-on-Exec soak | 98 checks, 4+ adopted tasks, Enforcer-clean on 68030 |
-| TCP throughput | 262 KB/s loopback, 310 KB/s to a host over SLIRP |
+| TCP throughput | **356 KB/s** loopback, **368 KB/s** to a host over SLIRP (was 261 / 312 before `src/net68k/`) |
 | IPv6 (`-DAMINETXDUO_IPV6=ON`) | ICMPv6 + TCP + UDP between two `NX_IP` instances (78 checks); `AF_INET6` sockets over `::1` through the library ABI; ICMPv6 to the host across an emulated A2065, with a router advertisement and stateless autoconfiguration |
 
 Verified on 68020 and 68030. The single remaining loopback failure is a
@@ -162,7 +200,7 @@ a network connection.
 | toolchain | `tools/fetch-toolchain.sh` — GCC 15.2 + NDK 3.9, pinned by the sha256 of the layer it comes out of, cached |
 | cross builds | default, `-DAMINETXDUO_IPV6=ON`, `-DAMINETXDUO_TLS=ON`, `-DAMINETXDUO_CRYPTO68K_ASM=OFF` — all four, because each has broken while the others built |
 | warnings | `-Wall -Wextra -Werror` on our sources, vendored code exempt (`cmake/ci-warnings.cmake`) |
-| host tests | 4 suites through `ctest`: config parsers (157 checks), mbuf chains (206), BPF filter VM (201), crypto68k vectors (4,964 — RSA-2048 known answers plus a differential against the vendored bignum code) |
+| host tests | 5 suites through `ctest`: config parsers (157 checks), mbuf chains (206), BPF filter VM (201), crypto68k vectors (4,964 — RSA-2048 known answers plus a differential against the vendored bignum code), net68k checksum (10,030 — a differential against the vendored checksum over every length, alignment and packet chain) |
 | host compilers | GCC on Linux and clang on macOS, so neither becomes the only one that works |
 | conformance | `bsdsocktest` is compiled for m68k; running it is tier 2 |
 

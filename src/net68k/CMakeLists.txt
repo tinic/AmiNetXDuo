@@ -15,16 +15,37 @@
 #
 # SPDX-License-Identifier: MIT
 
+include(CMakeDependentOption)
+
 option(AMINETXDUO_NET68K_ASM
        "Use the hand-written 68020 inner loops in net68k"
        ${CMAKE_CROSSCOMPILING})
 
+# Replacing the C library's memcpy() is a separate decision from replacing
+# NetX Duo's checksum, so it is a separate switch.  Default follows the
+# measurement in docs/RESEARCH.md; build both and compare before changing it.
+#
+# CROSS BUILDS ONLY, and not merely because the movem.l loop is m68k.  A host
+# build links a host libc, and defining memcpy() there would replace the C
+# library's own -- in a test binary, for the whole process.  It also does not
+# compile: on macOS <string.h> may define memcpy as a macro, so the definition
+# is a syntax error rather than an override.  Neither is a thing to work
+# around; the hook has no business existing off target.
+cmake_dependent_option(AMINETXDUO_NET68K_MEMCPY
+       "Resolve memcpy() to net68k's movem.l copy" ON
+       "CMAKE_CROSSCOMPILING" OFF)
+
 set(NET68K_SOURCES
     n68k_checksum.c
-    n68k_checksum_hook.c)
+    n68k_checksum_hook.c
+    n68k_copy.c)
+
+if(AMINETXDUO_NET68K_MEMCPY)
+    list(APPEND NET68K_SOURCES n68k_memcpy_hook.c)
+endif()
 
 if(AMINETXDUO_NET68K_ASM)
-    list(APPEND NET68K_SOURCES n68k_checksum.S)
+    list(APPEND NET68K_SOURCES n68k_checksum.S n68k_copy.S)
 endif()
 
 add_library(aminetxduo_net68k STATIC ${NET68K_SOURCES})
@@ -44,7 +65,7 @@ if(AMINETXDUO_NET68K_ASM)
     # toolchain file does not reach the assembler.  Same arrangement as
     # src/crypto68k/CMakeLists.txt, and for the same reasons.
     target_compile_definitions(aminetxduo_net68k PRIVATE AMINETXDUO_NET68K_ASM=1)
-    set_source_files_properties(n68k_checksum.S PROPERTIES
+    set_source_files_properties(n68k_checksum.S n68k_copy.S PROPERTIES
         COMPILE_DEFINITIONS AMINETXDUO_NET68K_ASM=1
         COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
 endif()

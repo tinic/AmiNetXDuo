@@ -17,49 +17,41 @@
 
 #include "sana2_internal.h"
 
+#include "net68k.h"
+
 /*
- * Longword copy loop. Deliberately local rather than newlib's memcpy: this is
- * called from an interrupt, and a shared library should not be relying on the
- * C library's choice of implementation there. The 68020 handles misaligned
- * longword access, but it costs an extra bus cycle, so align the destination
- * first and fall back to bytes when source and destination disagree.
+ * The copy loop, still deliberately not newlib's memcpy: this runs at
+ * interrupt level and a shared library should not depend on the C library's
+ * choice of implementation there.
+ *
+ * It used to be a local longword loop guarded by
+ *
+ *     if (((ULONG)to & 1UL) == ((ULONG)from & 1UL))
+ *
+ * -- i.e. it took its fast path only when source and destination agreed mod 2,
+ * and copied ONE BYTE PER ITERATION when they did not.  Measured on the
+ * emulated 68020 over 1460 bytes (tests/perf/perf_test.c):
+ *
+ *     parities agree     240.3 ns/B
+ *     parities differ   1203.4 ns/B      -- a 5.0x cliff
+ *
+ * sitting on every frame whose driver buffer happened to land on the wrong
+ * parity.  Nothing in SANA-II promises anything about a device's buffer
+ * parity, so avoiding that was luck rather than design.  Worth recording
+ * because the cliff was expected to be in newlib's memcpy and is not: the
+ * libm020 memcpy this toolchain links costs 216 ns/B aligned and 252-260
+ * misaligned, an 18% penalty with no cliff at all.
+ *
+ * n68k_copy_bytes() has no such condition either: it brings the DESTINATION
+ * to a longword boundary and then moves longwords whatever the source is
+ * doing, which is what the 68020 supports.  179.5 ns/B when the parities
+ * agree (1.34x on what used to be the fast path) and 228.7 when they differ
+ * (5.3x on what used to be the slow one), because movem.l moves eight
+ * longwords per instruction pair.  See src/net68k/n68k_copy.S.
  */
 VOID ami_sana2_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
 {
-    if (((ULONG)to & 1UL) == ((ULONG)from & 1UL))
-    {
-        /* Bring both onto an even address, then onto a longword boundary. */
-        while (len != 0 && (((ULONG)to & 3UL) != 0))
-        {
-            *to++ = *from++;
-            len--;
-        }
-
-        while (len >= 16)
-        {
-            *(ULONG *)to       = *(const ULONG *)from;
-            *(ULONG *)(to + 4) = *(const ULONG *)(from + 4);
-            *(ULONG *)(to + 8) = *(const ULONG *)(from + 8);
-            *(ULONG *)(to + 12) = *(const ULONG *)(from + 12);
-            to   += 16;
-            from += 16;
-            len  -= 16;
-        }
-
-        while (len >= 4)
-        {
-            *(ULONG *)to = *(const ULONG *)from;
-            to   += 4;
-            from += 4;
-            len  -= 4;
-        }
-    }
-
-    while (len != 0)
-    {
-        *to++ = *from++;
-        len--;
-    }
+    n68k_copy_bytes(to, from, len);
 }
 
 /*

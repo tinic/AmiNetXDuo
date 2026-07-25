@@ -56,3 +56,16 @@ endforeach()
 
 target_compile_definitions(tls_decompose PRIVATE H_ROUNDS_DECOMPOSE=1)
 target_compile_definitions(tls_interop   PRIVATE H_ROUNDS_INTEROP=1)
+
+# A handshake against a real public HTTPS server, over SLIRP.  Built, never a
+# baseline: it depends on the internet, on a third party's server and on a
+# certificate that rotates.  See the header comment.
+#
+#   tests/tls/run-https.sh -b build/tls
+add_executable(tls_https tls_https.c)
+target_link_libraries(tls_https PRIVATE
+    aminetxduo_tls aminetxduo_netstack aminetxduo_common netxduo_port)
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(tls_https PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+set_target_properties(tls_https PROPERTIES OUTPUT_NAME "tls_https")

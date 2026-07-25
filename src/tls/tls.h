@@ -50,6 +50,15 @@ ULONG ami_tls_seed_rng(VOID);
  */
 BOOL  ami_tls_timer_open(VOID);
 VOID  ami_tls_timer_close(VOID);
+
+/*
+ * TRUE once ami_tls_timer_open() has succeeded.  ami_tls_crypto.c's
+ * instrumentation asks this rather than calling ami_tls_timer_open() itself:
+ * a crypto method has no business doing an OpenDevice() in the middle of a
+ * handshake, so an application that never opened the timer gets counts with no
+ * microseconds instead of a surprise.
+ */
+BOOL  ami_tls_timer_is_open(VOID);
 ULONG ami_tls_eclock(VOID);
 ULONG ami_tls_eclock_hz(VOID);
 

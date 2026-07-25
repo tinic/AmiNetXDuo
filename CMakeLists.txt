@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
-project(AmiNetXDuo C ASM)
+
+# The single source of truth for the product version.  Nothing else in the
+# tree spells one out: cmake/AmiNetXDuoVersion.cmake takes this number,
+# compounds it with the NetX Duo and ThreadX versions it reads out of
+# third_party/, and generates include/aminetxduo/version.h.  Release tags are
+# plain vX.Y.Z.
+#
+# 0.x on purpose: nothing has run on real hardware yet.
+project(AmiNetXDuo VERSION 0.1.0 LANGUAGES C ASM)
 
 # ---------------------------------------------------------------- options ---
 
@@ -45,6 +53,13 @@ if(NOT EXISTS "${AMINETXDUO_THREADX}/common/inc/tx_api.h")
     message(FATAL_ERROR "Submodules missing. Run: git submodule update --init --recursive")
 endif()
 
+# ---------------------------------------------------------------- version --
+#
+# Must come after the submodule paths above: it reads nx_api.h and tx_api.h,
+# checks them against the pins it records, and generates
+# ${CMAKE_BINARY_DIR}/include/aminetxduo/version.h.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/AmiNetXDuoVersion.cmake")
+
 # ------------------------------------------------------------ include sets --
 
 # The port headers (tx_port.h, nx_port.h, nx_user.h) must come FIRST on the
@@ -57,7 +72,10 @@ set(AMINETXDUO_CORE_INCLUDES
     ${AMINETXDUO_PORT_INCLUDES}
     "${AMINETXDUO_THREADX}/common/inc"
     "${AMINETXDUO_NETXDUO}/common/inc"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    # Generated <aminetxduo/version.h> lives here, alongside the hand-written
+    # headers of the same prefix.
+    "${CMAKE_BINARY_DIR}/include")
 
 if(AMIGA_NDK_INCLUDE)
     list(APPEND AMINETXDUO_CORE_INCLUDES "${AMIGA_NDK_INCLUDE}")
@@ -78,7 +96,17 @@ endif()
 # editing third_party/: drop the file from the glob and every internal caller
 # resolves to ours instead.  See src/net68k/n68k_checksum.c for what changes
 # (the loop) and what deliberately does not (everything else).
-list(FILTER NETXDUO_SOURCES EXCLUDE REGEX "/nx_ip_checksum_compute\\.c$")
+#
+# Turning the option OFF restores the vendored object and drops net68k's hook.
+# That is how the before/after measurements in docs/RESEARCH.md were taken --
+# two libraries built from one tree, differing in this one file -- and it is
+# the way to bisect a suspected checksum bug from the outside.
+option(AMINETXDUO_NET68K_CHECKSUM
+       "Replace NetX Duo's IP checksum with src/net68k's" ON)
+
+if(AMINETXDUO_NET68K_CHECKSUM)
+    list(FILTER NETXDUO_SOURCES EXCLUDE REGEX "/nx_ip_checksum_compute\\.c$")
+endif()
 
 add_library(threadx STATIC ${THREADX_SOURCES})
 target_include_directories(threadx PUBLIC
@@ -109,6 +137,16 @@ target_link_libraries(netxduo_addons PUBLIC netxduo)
 # reports "No tests were found" even though each subdirectory has some.
 if(NOT CMAKE_CROSSCOMPILING)
     enable_testing()
+
+    # tools/version.sh answers the same questions as the generated header, by
+    # its own parse of the same files, because CI has to be able to name an
+    # artefact without configuring a build. Two implementations means they can
+    # drift; this is what stops that, and it needs no build step.
+    if(UNIX)
+        add_test(NAME version_scheme
+                 COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tools/version.sh"
+                         --check "${CMAKE_BINARY_DIR}/include/aminetxduo/version.h")
+    endif()
 endif()
 
 add_subdirectory(port/threadx-amiga)
@@ -118,7 +156,9 @@ add_subdirectory(port/netxduo-amiga)
 # core now leaves undefined, so netxduo carries it as a PUBLIC dependency and
 # every consumer picks it up without listing it.
 add_subdirectory(src/net68k)
-target_link_libraries(netxduo PUBLIC aminetxduo_net68k)
+if(AMINETXDUO_NET68K_CHECKSUM)
+    target_link_libraries(netxduo PUBLIC aminetxduo_net68k)
+endif()
 
 add_subdirectory(src/common)
 add_subdirectory(src/config)
@@ -147,6 +187,8 @@ endif()
 # ------------------------------------------------------------------ report --
 
 message(STATUS "AmiNetXDuo configuration:")
+message(STATUS "  version ....... ${AMINETXDUO_VERSION_COMPOUND}")
+message(STATUS "  built on ...... NetX Duo ${AMINETXDUO_NETXDUO_VERSION}, ThreadX ${AMINETXDUO_THREADX_VERSION}")
 message(STATUS "  arch flags .... ${AMIGA_ARCH_FLAGS}")
 message(STATUS "  IPv6 .......... ${AMINETXDUO_IPV6}")
 message(STATUS "  TLS ........... ${AMINETXDUO_TLS}")

@@ -18,6 +18,10 @@
 #   4. /opt/m68k-amigaos                  -- the amigadev/crosstools layout
 #   5. $HOME/amigaos/tools/m68k-amigaos-gcc -- the historical local default
 #
+# 2 through 5 have to RUN on this host to be chosen, not merely exist: the
+# fetch cache is a linux/amd64 tree and can be populated on a machine that
+# cannot execute it.
+#
 # Set AMIGA_TOOLCHAIN_QUIET=1 to suppress the "==> toolchain:" line.
 #
 # SPDX-License-Identifier: MIT
@@ -26,17 +30,32 @@ _ami_tc_ok() {
     [ -n "$1" ] && [ -x "$1/bin/m68k-amigaos-gcc" ]
 }
 
+# For a SEARCHED candidate, being executable is not enough -- it has to be
+# executable HERE.  tools/fetch-toolchain.sh caches a linux/amd64 tree, and it
+# will happily do so on a Mac (the headers and the pin are still useful), which
+# left the cache outranking a perfectly good native install and every cross
+# build failing on a compiler that cannot start.  The +x bit does not mean what
+# it looks like it means across architectures; asking the thing for its version
+# does.
+_ami_tc_runnable() {
+    _ami_tc_ok "$1" && "$1/bin/m68k-amigaos-gcc" -dumpversion >/dev/null 2>&1
+}
+
 _ami_tc_resolve() {
 
     local cache candidate onpath
 
+    # An explicit AMIGA_TOOLCHAIN_ROOT is an instruction, not a suggestion: it
+    # is taken as given and never silently swapped for something else.  If it
+    # is the wrong architecture the build says so, which is the right kind of
+    # failure for a setting someone typed on purpose.
     if _ami_tc_ok "${AMIGA_TOOLCHAIN_ROOT:-}"; then
         printf '%s\n' "$AMIGA_TOOLCHAIN_ROOT"
         return 0
     fi
 
     cache="${AMINETXDUO_TOOLCHAIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/aminetxduo/toolchain}"
-    if _ami_tc_ok "$cache/current"; then
+    if _ami_tc_runnable "$cache/current"; then
         printf '%s\n' "$cache/current"
         return 0
     fi
@@ -45,14 +64,14 @@ _ami_tc_resolve() {
     if [ -n "$onpath" ]; then
         # <root>/bin/m68k-amigaos-gcc -> <root>
         candidate=$(cd "$(dirname "$onpath")/.." && pwd)
-        if _ami_tc_ok "$candidate"; then
+        if _ami_tc_runnable "$candidate"; then
             printf '%s\n' "$candidate"
             return 0
         fi
     fi
 
     for candidate in "/opt/m68k-amigaos" "$HOME/amigaos/tools/m68k-amigaos-gcc"; do
-        if _ami_tc_ok "$candidate"; then
+        if _ami_tc_runnable "$candidate"; then
             printf '%s\n' "$candidate"
             return 0
         fi

@@ -11,11 +11,19 @@ Distribution: Aminet
 ;
 ; Aminet wants Author and Uploader as "Name <address@example.com>" -- pass
 ; them to dist/make-dist.sh with -a, or the archive goes out with a
-; placeholder in it.  When this replaces an earlier upload, add
+; placeholder in it.
 ;
-;     Replaces:     comm/net/AmiNetXDuo.lha
+; Version: is filled in by dist/make-dist.sh from tools/version.sh -- our own
+; version, then the NetX Duo and ThreadX versions the archive was actually
+; built against.  Do not type a version in here; it would be the second place
+; claiming to know one.
 ;
-; to the header block above.  Leave it out for a first upload: it tells
+; Archive filenames carry the version (AmiNetXDuo-0.1.0.lha), so when this
+; replaces an earlier upload, name that upload's file:
+;
+;     Replaces:     comm/net/AmiNetXDuo-0.1.0.lha
+;
+; in the header block above.  Leave it out for a first upload: it tells
 ; Aminet to delete the named file.
 
 AmiNetXDuo is a TCP/IP stack for classic AmigaOS built on Eclipse ThreadX

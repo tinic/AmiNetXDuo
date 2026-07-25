@@ -7,9 +7,17 @@
 #
 # Produces, in OUTDIR (default build/dist):
 #
-#   AmiNetXDuo.lha        the archive, laid out the way Aminet expects
-#   AmiNetXDuo.readme     the upload description, with its header fields
-#   AmiNetXDuo/           the same tree unpacked, for inspection
+#   AmiNetXDuo-<version>.lha   the archive, laid out the way Aminet expects
+#   AmiNetXDuo.readme          the upload description, with its header fields
+#   AmiNetXDuo/                the same tree unpacked, for inspection
+#
+# The version comes from tools/version.sh, i.e. from project(AmiNetXDuo
+# VERSION ...) compounded with the NetX Duo version read out of the submodule.
+# -v overrides the product part for a test build; there is deliberately no way
+# to override the NetX Duo part, because it describes what is in the archive.
+# The archive filename carries our version alone -- an Aminet filename is read
+# by people -- and the full compound goes in the .readme header, where the
+# question "built on what?" is actually asked.
 #
 # The Aminet convention is that an archive extracts into the directory it is
 # unpacked in as one drawer plus that drawer's icon, so that dropping it on a
@@ -42,7 +50,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 OUTDIR="$ROOT/build/dist"
-VERSION="1.0"
+VERSION="$("$ROOT/tools/version.sh" --product)"
 AUTHOR="${AMINETXDUO_AUTHOR:-UNSET -- pass -a \"Name <you@example.com>\"}"
 
 while getopts "b:v:o:a:" opt; do
@@ -64,6 +72,15 @@ esac
 
 INSTALL="$ROOT/install"
 TREE="$OUTDIR/AmiNetXDuo"
+
+# What the .readme's Version: field says.  Aminet shows that field verbatim,
+# so it is the one place a user sees the compound version without unpacking
+# anything.  tools/version.sh checks the recorded NetX Duo version against the
+# submodule and exits nonzero if they have drifted, so a stale label cannot be
+# packed.
+NETXDUO_VERSION=$("$ROOT/tools/version.sh" --netxduo)
+THREADX_VERSION=$("$ROOT/tools/version.sh" --threadx)
+VERSION_FIELD="$VERSION (NetX Duo $NETXDUO_VERSION, ThreadX $THREADX_VERSION)"
 
 # ------------------------------------------------------------- ingredients --
 
@@ -102,7 +119,16 @@ for cmd in "${CMDS[@]}"; do
 done
 chmod 755 "$TREE"/C/* "$TREE"/Libs/*
 
-cp "$INSTALL/Install-AmiNetXDuo"       "$TREE/"
+# The installer prints its version in the about text; stamp it from the same
+# source as everything else rather than shipping whatever the source tree last
+# had in it.
+sed -e "s/^(set VERSION_STR \".*\")/(set VERSION_STR \"$VERSION\")/" \
+    "$INSTALL/Install-AmiNetXDuo" > "$TREE/Install-AmiNetXDuo"
+grep -q "(set VERSION_STR \"$VERSION\")" "$TREE/Install-AmiNetXDuo" || {
+    echo "the Installer script has no VERSION_STR line to stamp" >&2
+    exit 2
+}
+
 cp "$INSTALL/Install-AmiNetXDuo.info"  "$TREE/"
 cp "$INSTALL/AmiNetXDuo.info"          "$TREE/"
 cp "$INSTALL/AmiNetXDuo.info"          "$OUTDIR/"
@@ -145,7 +171,7 @@ fi
 
 # ------------------------------------------------------------- the .readme --
 
-sed -e "s/@VERSION@/$VERSION/g" -e "s|@AUTHOR@|$AUTHOR|g" \
+sed -e "s|@VERSION@|$VERSION_FIELD|g" -e "s|@AUTHOR@|$AUTHOR|g" \
     "$ROOT/dist/AmiNetXDuo.readme" > "$OUTDIR/AmiNetXDuo.readme"
 cp "$OUTDIR/AmiNetXDuo.readme" "$TREE/AmiNetXDuo.readme"
 cp "$INSTALL/Document.info" "$TREE/AmiNetXDuo.readme.info"
@@ -171,7 +197,11 @@ fi
 
 # ------------------------------------------------------------ the archive --
 
-ARCHIVE="$OUTDIR/AmiNetXDuo.lha"
+# Versioned filename, unversioned drawer: the .lha says which release it is,
+# and unpacking it still leaves one drawer called AmiNetXDuo the way Aminet
+# and Workbench expect.
+ARCHIVE_NAME="AmiNetXDuo-$VERSION.lha"
+ARCHIVE="$OUTDIR/$ARCHIVE_NAME"
 rm -f "$ARCHIVE"
 
 # Lhasa answers to `lha` and cannot create archives; detect that rather than
@@ -188,7 +218,7 @@ done
 
 if [ "$CAN_CREATE" = "1" ]; then
     echo "==> packing with $ARCHIVER (compressed)"
-    (cd "$OUTDIR" && "$ARCHIVER" a AmiNetXDuo.lha AmiNetXDuo.info AmiNetXDuo)
+    (cd "$OUTDIR" && "$ARCHIVER" a "$ARCHIVE_NAME" AmiNetXDuo.info AmiNetXDuo)
 else
     echo "==> no archiver that can create found; using dist/lhapack.py"
     echo "    (valid LHA, but stored rather than compressed)"
@@ -224,6 +254,7 @@ python3 "$INSTALL/tools/checkscript.py" "$TREE/Install-AmiNetXDuo"
 python3 "$INSTALL/tools/showicon.py" "$TREE"/*.info >/dev/null
 
 echo
+echo "==> version $VERSION_FIELD"
 echo "==> $ARCHIVE"
 echo "==> $OUTDIR/AmiNetXDuo.readme"
 du -sh "$ARCHIVE" | sed 's/^/    /'

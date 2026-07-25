@@ -1032,6 +1032,171 @@ Prior art, worth knowing before anyone re-treads it:
 > compiler emits no 32×32 multiply at all. Verified here: `.short 0x4c06` becomes
 > `mulul d6,d2,d3` with the right `-m`.
 
+#### Update: the fast crypto is now IN the handshake — 185.5 s → 26.7 s, and a real site answers
+
+Both optimisation workstreams above measured their speedups **standalone**. Neither was
+connected: `src/crypto68k/` was not referenced by `src/tls/CMakeLists.txt`, and `nm` on
+`tls_handshake` found zero `c68k` symbols. The handshake they were meant to improve still
+ran entirely on the vendored arithmetic. That is now fixed.
+
+**The mechanism: our own `NX_CRYPTO_METHOD` entries, no vendored source touched.**
+`nx_secure_tls_session_create()` takes an application-supplied `NX_SECURE_TLS_CRYPTO *`
+and `nx_secure_tls_ecc_initialize()` takes an application-supplied curve-method array —
+both are the vendor's own extension points, and every path that reaches a big-number
+operation goes through one of them. `src/tls/ami_tls_crypto.c` supplies:
+
+- `ami_crypto_method_rsa`, the vendored dispatch with `_nx_crypto_rsa_operation()`
+  replaced by one that calls `c68k_crt_power_modulus()` /
+  `c68k_huge_number_mont_power_modulus()`;
+- `ami_crypto_method_ec_secp256`, a curve method that returns a **private, mutable copy**
+  of `_nx_crypto_ec_secp256r1` with `nx_crypto_ec_multiple` swapped for
+  `c68k_p256_ec_multiple`.
+
+The copy matters. The vendored curve is `const` and is aliased by every ECDH and ECDSA
+context in the process; casting the `const` away and writing to it is undefined, is
+process-global, and would silently defeat the differential tests that check us *against*
+the vendored path. Verified first: ECDH and ECDSA obtain their curve **only** by calling
+`NX_CRYPTO_EC_CURVE_GET` on whichever curve method they were handed, and they store the
+pointer rather than copying the struct — so one function pointer in a private copy is the
+whole integration.
+
+**RSA CRT, on the two paths that skip it.** `NX_CRYPTO_SET_PRIME_P` appears exactly once
+in all of `nx_secure/src`. The ECDHE_RSA ServerKeyExchange signature
+(`nx_secure_tls_ecc_generate_keys.c:773`) and `nx_secure_tls_send_certificate_verify.c:670`
+both hand over the full 2048-bit private exponent with `p` and `q` NULL. We cannot add the
+two missing calls without editing vendored sources, so the primes arrive from the other
+end instead: `ami_tls_rsa_key_register()` records `(modulus, p, q)` from a parsed
+certificate, and the RSA method looks the modulus up when asked for a private-key
+exponentiation with no primes set. The pairing comes from one certificate object, so it
+cannot be mismatched any more than the vendored CRT path's can.
+
+**Measured, emulated 68020, `tests/tls/tls_decompose` — four rounds in ONE process with
+identical instrumentation, so this is a measurement and not a composition:**
+
+| round | connect → first record | client arithmetic | server arithmetic | RSA private op |
+|---|---|---|---|---|
+| reference, no CRT (**the M9 gate**) | **185.8 s** | 11.2 s | 173.6 s | 166.7 s |
+| reference, CRT — *the CRT lever alone* | 64.4 s | 11.2 s | 52.5 s | 45.4 s |
+| crypto68k, no CRT — *the module alone* | 77.8 s | **3.2 s** | 73.9 s | 72.1 s |
+| **crypto68k + CRT — shipping** | **26.7 s** | **3.2 s** | 22.6 s | **20.8 s** |
+
+Round 1 reproduces the M9 gate's independently measured 185.5 s to within 0.3 s, which is
+the check that this is timing the same computation. Every predicted ratio landed: CRT
+alone 3.67× on the private operation (predicted 3.6), crypto68k alone 2.31× (predicted
+2.4), **both together 8.0× exactly as predicted**, and 6.9× on the whole loopback
+handshake.
+
+**The number that matters is the client one, and it is 3.2 s.** A client fetching a page
+never performs the private-key operation; the 185 s figure was always dominated by the
+server half, which one Amiga was also running. Per operation, client side:
+
+| | reference | crypto68k | ratio |
+|---|---|---|---|
+| RSA-2048 verify ×2 | 4.1 s | 1.4 s | 2.9× |
+| P-256 `k·P` ×2 (keygen + ECDH) | 7.0 s | 1.8 s | 3.9× |
+| **client public-key arithmetic** | **11.2 s** | **3.2 s** | **3.5×** |
+
+**A real public HTTPS server answers.** `tests/tls/tls_https` brings the whole stack up
+through `netstack_startup()` over SLIRP, resolves `tls-v1-2.badssl.com` by DNS, connects,
+sends SNI, verifies a chain it did not issue against ISRG Root X1 compiled into the test,
+and gets `HTTP/1.1 301 Moved Permanently` back. **Handshake, connect to Finished: 6.8 s**,
+`TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256`, TLS 1.2, 23 checks and 0 failures. That is a
+server that has never heard of us, and it is the strongest interop evidence available.
+
+Of that 6.8 s, **5.9 s is public-key arithmetic**: three RSA-2048-style verifications at
+4.1 s and two P-256 `k·P` at 1.7 s, leaving 0.9 s for DNS, TCP, DER parsing, key
+derivation and the record layer. The 4.1 s is worth explaining rather than averaging,
+because it is not 3 × 0.68 s: **ISRG Root X1 is a 4096-bit key**, so verifying the
+intermediate's signature is a 4096-bit modular exponentiation and costs ~4× a 2048-bit
+one. Root key size is a real term in a client's handshake cost on this machine, and it is
+not something the client gets to choose.
+
+**Cross-implementation interop, both directions** (`tests/tls/tls_interop`, 96 checks, 0
+failures). If both ends change together a mutual arithmetic error is invisible, so each
+round changes one side only:
+
+| | connect → first record |
+|---|---|
+| crypto68k **client** vs stock `nx_secure` **server** | 177.9 s (our client verifies signatures the vendored code produced) |
+| stock `nx_secure` **client** vs crypto68k **server** | 34.6 s (the vendored code verifies signatures our CRT path produced) |
+| stock on both sides (control) | 185.7 s |
+
+Correctness, all still passing: `crypto68k_test` 4964/0, `crypto68k_ec_test` 1730/0 with
+all ten invalid signatures still rejected, `tls_handshake` 44/0 on **both** 68020 and
+68030 (the original 38 checks unchanged, plus six new ones: the comb-table self check, the
+curve build, and per-round assertions that the server really took CRT and the client
+really went through crypto68k). The default build is **byte-identical** — every artifact,
+`bsdsocket.library` included, compared against a build of the tree without these changes.
+
+Only the 68020 column is a timing. The same binary under FS-UAE's 68030 model reports
+**0.8 s** for the whole loopback handshake, which is not a clock ratio; the 68030 model
+does not charge for `MULU.L`. It is run as a correctness check and nothing else.
+
+**Size, measured from the link map of `tls_handshake`** (68020, `-O3`):
+
+| component | text | data | bss |
+|---|---|---|---|
+| `nx_crypto` | 147,644 | 2,020 | 980 |
+| `nx_secure` | 52,720 | 872 | 4,752 |
+| `crypto68k` | 22,916 | 0 | 1,284 |
+| `aminetxduo_tls` (glue + tables) | 4,000 | 292 | 428 |
+| **TLS total** | **227,280** | **3,184** | **7,444** |
+
+`bsdsocket.library` is 249,892 bytes today, so a TLS-carrying build lands at **≈ 480 KB —
+inside the 512 KB budget with ~32 KB of headroom**, and that is before any trimming (the
+147 KB of `nx_crypto` still includes DES/3DES, MD5, the CCM and GCM modes and ECJPAKE).
+
+Per connection, measured rather than estimated: crypto metadata **16,272 bytes** (against
+10,128 with the vendored tables — the delta is exactly one 6 KB sliding-window scratch,
+because the public-cipher slot is already sized by `NX_CRYPTO_ECDH` and only the
+public-auth slot grows), plus `sizeof(NX_SECURE_TLS_SESSION)` = 1,700, plus an
+application-chosen reassembly buffer (8 KB holds a two-certificate RSA-2048 chain, 12 KB a
+public three-deep one), plus one 252-byte `NX_SECURE_X509_CERT` and a DER buffer per
+certificate in the chain. **≈ 28 KB for a client connection.**
+
+##### What still stands between this and "TLS on by default"
+
+Two things, and neither is speed.
+
+1. **No application can open a TLS connection.** `AMINETXDUO_TLS=ON` builds static
+   libraries and tests. It links nothing into `bsdsocket.library` — proved, the library is
+   byte-identical either way — and `dist/make-dist.sh` ships only `bsdsocket.library`,
+   `usergroup.library` and the tools. Flipping the default today changes build time and
+   nothing a user can observe.
+
+   Of the three routes: an **AmiSSL-shaped library** is rejected — `nx_secure` has no
+   `BIO`, no `SSL_CTX`, no `EVP`, certificates are caller-allocated fixed buffers and
+   ciphersuites are a static table, so a faithful emulation is a rewrite of OpenSSL's API
+   on a library without its concepts, and a *partial* one is worse than nothing because
+   software links, opens, and then fails somewhere unpredictable. A **`bsdsocket.library`
+   socket option or new LVO** is rejected as the primary route: `SOL_SOCKET` option numbers
+   are not ours to allocate (AmiTCP, Roadshow and the tunnel implementations each have
+   their own), it puts 227 KB and ~28 KB/connection inside the resident library for every
+   program including the ones that will never use it, and — decisively — a TLS record
+   boundary is not a byte-stream boundary, so `WaitSelect()` readability would stop
+   meaning "`recv()` will return data".
+
+   **Recommended: a small `tls_*` API in its own library**, opened only by programs that
+   want it, plus **one private LVO** on `bsdsocket.library` handing out the
+   `NX_TCP_SOCKET *` behind an fd. That last part is forced, not chosen: `nx_secure` binds
+   a session to `NX_TCP_SOCKET *` (`nx_secure_tls_session_start()`, and
+   `nx_secure_tls_tcp_socket` in the session struct) and has no transport abstraction. The
+   public 121-LVO contract is untouched. It needs its own task — the I/O currency is
+   `NX_PACKET *`, so a byte-oriented `TLSRead()` has to buffer partial records, and the
+   library scaffolding, docs and installer integration are all new.
+
+2. **There is no trust store, and that is the bigger problem.** `tls_https` works because
+   ONE root CA is compiled into it. A usable client needs ~140 roots: where they live on
+   disk, in what format, parsed lazily by issuer match (parsing all of them up front is not
+   viable on 4 MB), how they are updated, and what "expired" means on a machine whose
+   battery clock reports `tv_secs == 0` — the same machines the `NX_RAND` work already
+   found. That is a design task of comparable size to this one, and until it exists an
+   application can only reach servers whose root it was compiled with.
+
+**Recommendation: leave `AMINETXDUO_TLS` OFF until those two land.** Speed no longer
+argues against TLS and size no longer argues against it; the only thing default-on would
+currently produce is 227 KB of code with no route to it.
+
 ### M8 result (2026-07-25): the IPv6 dual stack works, over a real wire
 
 `-DAMINETXDUO_IPV6=ON` builds a dual stack that has been run on an emulated 68020 and
@@ -1276,6 +1441,284 @@ changes the layout of `NX_IP`, `NX_INTERFACE`, `NX_PACKET` and `NX_TCP_SOCKET` �
 `IPV6=ON` the SANA-II shim saw a different `NX_IP` from the NetX Duo core it was driving.
 It does not fail to link; it reads the wrong offsets. The definition is now global, in the
 root `CMakeLists.txt`, with a comment saying why it must stay that way.
+
+### Data-path performance (2026-07-25): 261 KB/s → 356 KB/s, and the checksum was the reason
+
+TCP throughput measured **261 KB/s loopback / 312 KB/s to a host over SLIRP** and nobody
+had profiled the stack. It now measures **356 KB/s loopback / 368 KB/s over SLIRP** —
+**+36%** and **+18%** — from two changes in `src/net68k/` plus one in `src/sana2/`. There
+is no profiler on this platform, so the method is the one §5.4 and the crypto68k work
+use: measure each primitive, count how often the data path runs it, multiply, and check
+the model against an end-to-end run.
+
+| | before | after | |
+|---|---:|---:|---:|
+| TCP loopback, 1 MB sustained | 261 KB/s | **356 KB/s** | +36.4% |
+| TCP to a host over SLIRP, 1 MB sustained | 312 KB/s | **368 KB/s** | +17.9% |
+
+Both rows are the conformance suite's throughput category against two
+`bsdsocket.library` builds from one tree, differing only in
+`AMINETXDUO_NET68K_CHECKSUM` and `AMINETXDUO_NET68K_MEMCPY`. The SANA-II change of §3
+below is present in *both* arms, so the SLIRP row is attributable to the other two
+changes alone.
+
+The wire gains less than loopback because it gains less *per byte*: a loopback megabyte
+is checksummed twice and copied three times, while over the wire there is one fewer
+full-payload copy and 180 MSS-sized segments per megabyte instead of 128 8 KB ones, so
+the per-packet costs the changes do not touch weigh more heavily.
+
+**Only the 68020 column is meaningful.** Every figure below is FS-UAE's A1200 model
+(68020, Kickstart 3.1 40.68), timed with `ReadEClock()` and the bracket's own cost
+(29 ticks, 41 µs) calibrated over 256 pairs and subtracted. The 68030 model is used as a
+correctness check and nothing else, for the same reason the P-256 work records — and
+this harness makes the point unusually plainly, because it measures a copy loop rather
+than arithmetic:
+
+| same binary, same input | 68020 model | 68030 model |
+|---|---:|---:|
+| `memcpy`, 1460 B aligned | 184.3 ns/B | 1.93 ns/B |
+| checksum, vendored | 629.2 ns/B | 16.4 ns/B |
+| TCP loopback, end to end | 512 KB/s | 16,000 KB/s |
+
+95× on a memory-to-memory copy is not a clock ratio; it is a model that does not charge
+for the bus. The 68030 runs are quoted here **only** as evidence that they must not be
+quoted anywhere else.
+
+The harness is `tests/perf/perf_test.c`, run with
+`AMINETXDUO_RUN_TAG=perf tools/fsuae-run.sh -t 900 build/cm/tests/perf/perf_test`.
+
+#### Where a megabyte of TCP goes
+
+Loopback, through `bsdsocket.library`, 8 KB application writes — the shape the
+conformance suite's throughput category measures. Cost centres are per-primitive
+measurements multiplied by the invocation counts the harness reports; the subtotals are
+independently measured, and they agree.
+
+| cost centre | ms/MB before | ms/MB after | share before |
+|---|---:|---:|---:|
+| TCP checksum, transmit | 651 | 199 | 16.6% |
+| TCP checksum, receive | 651 | 199 | 16.6% |
+| `nx_packet_data_append` — the `send()` copy, plus the chain it allocates | 295 | 254 | 7.5% |
+| `nx_packet_copy` — the loopback hand-over | 321 | 280 | 8.2% |
+| `nx_packet_data_extract_offset` — the `recv()` copy | 234 | 193 | 6.0% |
+| **data path, subtotal** | **2152** | **1125** | **54.9%** |
+| NetX Duo protocol + ThreadX scheduling | 758 | 750 | 19.3% |
+| `bsdsocket.library` — per-call adopt/orphan, `WaitSelect`, descriptor lookup | 1007 | 1011 | 25.7% |
+| **total** | **3922** | **2869** | |
+
+Provenance, because a table like this is only worth having if it says which numbers were
+measured and which were derived. Every per-byte figure in the "before" column is a
+measured primitive multiplied by the invocation count the harness reports; the data-path
+subtotal is *also* measured directly and independently, by a benchmark that runs exactly
+those operations in order with no protocol — 2057 ns/B, i.e. 2157 ms/MB, against the
+2152 the parts add up to (0.2%). In the "after" column the two checksum rows and their
+subtotal are likewise measured directly (1190 ns/B, 1248 ms/MB); the three copy rows are
+the same measurement minus the 39 ns/B the `movem.l` copy saves, and the end-to-end
+figure is the check on that: parts 2886 ms against 2869 measured, 0.6% out.
+
+The three layers were separated by measuring the same transfer three ways in the same
+session: a pipeline benchmark that performs exactly the operations a loopback segment
+pays for with no protocol at all (474 → 820 KB/s), the same transfer through raw NetX Duo
+sockets (351 → 512 KB/s), and the conformance suite through the library (261 → 356 KB/s).
+The differences are stable across the checksum change — the protocol layer costs
+~755 ms/MB and the library ~1010 ms/MB whatever the copies underneath are doing — which
+is what makes the subtraction trustworthy.
+
+**The library layer is a quarter of a megabyte's cost and is the biggest thing left.**
+It is not touched here.
+
+#### 1. The IP checksum: 3.11× (the whole of the loopback win, and then some)
+
+`third_party/netxduo/common/src/nx_ip_checksum_compute.c` reads a longword and splits it
+into two 16-bit halves by hand:
+
+```c
+checksum += (*long_ptr & NX_LOWER_16_MASK);
+checksum += (*long_ptr >> NX_SHIFT_BY_16);
+```
+
+GCC 15.2 `-O2 -m68020` compiles that to **seven instructions per longword** —
+`move.l (a1)+,d1 / move.l d1,d0 / andi.l #65535,d0 / clr.w d1 / swap d1 / add.l d0,d1 /
+adda.l d1,a0` — plus the `dbf`. It is the price of expressing a carry in a language that
+has none.
+
+`src/net68k/n68k_checksum.S` does it in **two**: `add.l (a0)+,d0` then `addx.l d2,d0`
+with `d2` zero, unrolled eight times. Measured on a 1460-byte payload:
+
+| | ns/byte | cycles/byte @14.19 MHz |
+|---|---:|---:|
+| vendored | 626.3 | 8.9 |
+| net68k | 200.7 | 2.8 |
+| **ratio** | **3.11×** | |
+
+Two other C spellings were compiled and disassembled first, because the RSA and P-256
+work both found the compiler had already done the obvious thing:
+
+- a 64-bit accumulator gives five instructions and a `dbf`, and **rebuilds the zero
+  register on every iteration** (`suba.l a0,a0 / move.l a0,d1`) rather than hoisting it —
+  the same failure the P-256 notes record;
+- an explicit carry test (`acc += w; if (acc < w) acc++;`) gives four and a branch. That
+  one is the portable fallback in `n68k_checksum.c`, so the C path is within ~2× and the
+  assembly is worth about that much and no more.
+
+**The vendored checksum was the most expensive per-byte operation in the stack — three
+times the cost of copying the same bytes.** A loopback byte is checksummed twice
+(transmit and receive), so at 626 ns/B the two passes alone were a third of the entire
+per-byte budget.
+
+Predicted saving from the micro-benchmark: 2 × (621 − 190) ns/B × 1 MB = **908 ms**.
+Measured on the conformance suite's 1 MB sustained loopback transfer: 3922 ms → 3009 ms =
+**913 ms**, i.e. 261 → **340 KB/s**. The cost model is right to within 0.5%.
+
+*Correctness.* A faster checksum that is wrong corrupts silently — every packet still goes
+out and the peer quietly drops some. So `n68k_ip_checksum_compute()` is not "a correct
+internet checksum", it is *exactly what NetX Duo returns*: the pseudo-header arithmetic,
+the chain walk, the end-pointer rounding, the two-byte carry across a packet boundary
+whose append pointer is 2 mod 4, and the trailing 1/2/3-byte case including its zero-write
+into the pad byte are all structurally identical. Only the inner loop changed.
+`tests/perf/host/` compiles the vendored function under a renamed symbol
+(`-D_nx_ip_checksum_compute=n68k_checksum_reference`, no vendored file edited) and checks
+the two differentially: **10,030 comparisons, 0 failures**, over every length 0–96 at
+every prepend alignment 0–7, lengths to 8 KB, chains of 2–5 packets with append pointers
+on all four residues mod 4, `data_length` shorter than the packet and longer, and
+all-zero / all-ones payloads — the inputs where a one's-complement sum can disagree with a
+16-bit accumulation over 0x0000 against 0xFFFF. That tier runs under `ctest` on every
+push. The assembly cannot be assembled on a host, so the on-Amiga harness repeats the
+comparison for the 1460-byte, chained and 0–40-byte cases.
+
+#### 2. `memcpy`: no cliff, but 23% was available anyway
+
+The misaligned-`memcpy` hypothesis is **wrong for this toolchain, and the measurement
+that kills it is worth keeping**.
+
+`-m68020` selects the `libm020` multilib — verified in the link map, not assumed — and
+that `memcpy` is not the one in the base `libc.a`. The base (68000) version does require
+length ≥ 8 **and both pointers 4-byte aligned**, falling back to `moveb a1@+,a0@+`
+otherwise. The `libm020` version aligns **only the destination** and then moves longwords
+whatever the source is doing. Measured over 1460 bytes, all sixteen alignment
+combinations:
+
+| | ns/byte |
+|---|---:|
+| `memcpy`, both aligned | 216 – 224 |
+| `memcpy`, any misalignment | 252 – 260 |
+
+**An 18% penalty, not a cliff** — and the alignment census says it never fires anyway:
+application buffers, `nx_packet_data_start`, `nx_packet_prepend_ptr` and
+`nx_packet_append_ptr` are all 0 mod 4, and **0 of the 272 checksum calls in a 256 KB
+transfer saw a misaligned prepend pointer**. The 16-byte `NX_PHYSICAL_HEADER` that
+`nx_user.h` deliberately leaves at its default is doing exactly the job its comment claims.
+
+What *was* available is `movem.l`, which moves eight longwords per instruction pair and
+has no C spelling at all — the compiler cannot emit a memory-to-memory move, let alone a
+multi-register one. `src/net68k/n68k_copy.S`:
+
+| | ns/byte |
+|---|---:|
+| `libm020 memcpy`, aligned | 216 – 224 |
+| `n68k_copy_bytes`, aligned | 176.6 – 179.5 |
+| `n68k_copy_bytes`, misaligned | 225.8 – 228.7 |
+
+**1.23× on the primitive.** `AMINETXDUO_NET68K_MEMCPY` resolves `memcpy()` to it for the
+whole library by the same mechanism the checksum uses — define the symbol, and the linker
+never pulls libm020's member. The loopback data path spends three copies on every byte,
+so this was predicted to be worth 123 ms/MB; measured **140 ms/MB**, 340 → **356 KB/s**.
+
+*Correctness.* 1,552 cases on the target — every length 0–96 × every one of the sixteen
+alignment combinations, checking the copied bytes, the byte before the destination and
+the byte after it — plus one 8,184-byte misaligned copy that exercises the `movem` block.
+
+#### 3. The cliff that does exist is in our own code
+
+`ami_sana2_copy_bytes()` — the loop the SANA-II shim runs at interrupt level on every
+frame in both directions — took its longword path only when source and destination agreed
+mod 2:
+
+```c
+if (((ULONG)to & 1UL) == ((ULONG)from & 1UL))
+```
+
+and copied **one byte per iteration** when they did not. Measured over 1460 bytes:
+
+| | ns/byte |
+|---|---:|
+| parities agree | 240.3 |
+| parities differ | **1203.4** |
+
+**A 5.0× cliff**, avoided only because the driver buffers happen to land on the right
+parity — nothing in SANA-II promises anything about a device's buffer alignment, so that
+was luck. It is now `n68k_copy_bytes()`, which has no such condition: 179.5 ns/B when the
+parities agree (1.34× on what used to be the fast path) and 228.7 when they differ (5.3×
+on what used to be the slow one).
+
+This one is **not isolated end to end**, and that is stated rather than glossed: loopback
+never touches SANA-II, and separating it from the other two changes on the wire path
+would mean keeping the old loop behind a switch, which this project does not do. The
+micro-benchmark is the evidence for it.
+
+#### Measured and rejected
+
+- **NetX Duo's `_nxe_` error-checking wrappers cost 3%.** `nx_user.h` leaves
+  `NX_DISABLE_ERROR_CHECKING` unset with a note to "revisit for the release build". On
+  the hottest call in the stack, `nx_packet_allocate` + `nx_packet_release` is 90 µs
+  through the wrappers and 87 µs through `_nx_packet_allocate` / `_nx_packet_release`
+  directly. **Not a performance reason to turn error checking off.**
+- **A packet allocation costs 88–90 µs, and roughly half of it is `Forbid()`/`Permit()`.**
+  One pair measures **9.9 µs** on this port, and `TX_DISABLE`/`TX_RESTORE` expand to a
+  `_tx_amiga_forbidden()` plus a `Forbid()`, and a `Permit()`. At twelve packets per 8 KB
+  loopback segment that is ~135 ms/MB, about 3.5% — real, but behind the library layer
+  and the remaining copies, and changing the port's interrupt-lockout model is not a
+  performance decision (§6.2). Recorded, not acted on.
+- **`ami_sana2_copy_bytes()`'s own C longword loop is 11% *slower* than `memcpy`**
+  (240 against 216 ns/B) for the reason the crypto68k work keeps running into: C forces
+  the value through a register, so GCC emits a load and a store where the machine has one
+  memory-to-memory move.
+
+#### What is left, in order
+
+1. **`bsdsocket.library` itself: ~1010 ms/MB, now 35% of a loopback megabyte** and
+   completely untouched here. It is a per-call `tx_amiga_adopt_thread()` /
+   `tx_amiga_orphan_thread()` bracket (§6.3), a `WaitSelect()` poll loop, and a
+   descriptor lookup, on every `send()` and `recv()`. The per-call bracket is a
+   correctness requirement, not an oversight — an adopted Task holds the ThreadX baton,
+   so it may not be held across application code — but "per call" is not the only
+   granularity that satisfies that.
+2. **The copies that remain: ~727 ms/MB** across `nx_packet_data_append`,
+   `nx_packet_copy` and `nx_packet_data_extract_offset`. Two of the three are real work.
+   The third is not: `nx_packet_copy()` exists because `_nx_ip_driver_packet_send()`
+   duplicates every loopback packet so the receive path can enqueue it, which is 280
+   ms/MB of pure API tax on loopback and nothing at all on a real interface. Removing it
+   means changing vendored code, so it stays.
+3. **`Forbid()`/`Permit()` at 9.9 µs a pair**, below.
+
+#### A mistake worth recording, because its shape is easy to repeat
+
+The first end-to-end pass reported ~45 KB/s for every configuration, and a 3.11× checksum
+moved it by 4%. The harness was stopping its clock after `nx_tcp_socket_disconnect()`,
+and because the server closed first while the client was still waiting to be told the
+transfer had finished, that call burned its full five-second timeout on every run. A flat
+constant added to both arms of an A/B **does not cancel** — it flattens the ratio and
+makes a real 1.55× look like 1.04×. The phase accounting that found it (bracket every
+call, and check that the parts add up to the whole) is still in `p_transfer()`; the
+symptom was that sender-busy plus receiver-busy came to 1.25 s of a 5.65 s "transfer".
+
+#### Baselines
+
+Re-measured on the final build, not assumed:
+
+| | 68020 | 68030 |
+|---|---|---|
+| ThreadX-on-Exec `soak` | 98 checks, 0 fail | 98 checks, 0 fail |
+| `ram_driver` | 32/32 | 32/32 |
+| `netstack` (real SANA-II device) | 14/14 | — |
+| `libraries` (the ABI, through `OpenLibrary`) | 8/8 | — |
+| conformance, loopback tier | 125 passed, 1 failed, 16 skipped | 125 passed, 1 failed, 16 skipped |
+| conformance, network tier | 6/6 throughput, 0 skipped | — |
+| `perf_test` self-checks (checksum differential + copy exactness) | 28/28 | 28/28 |
+| host `ctest` | 6 suites, 0 fail (was 5; `net68k_checksum` is the new one) | |
+
+The one conformance failure is the pre-existing `SOCK_RAW`/`EACCES` disagreement
+documented in the README, unchanged.
 
 ### Loose ends closed (2026-07-25)
 

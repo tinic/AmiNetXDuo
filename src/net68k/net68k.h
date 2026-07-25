@@ -44,6 +44,13 @@ USHORT n68k_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
                                 UINT data_length, ULONG *src_ip_addr,
                                 ULONG *dest_ip_addr);
 
+/*
+ * Bulk copy.  On the assembly path this is movem.l based -- see n68k_copy.S
+ * for what it is measured against and why C cannot reach it.  Off that path it
+ * is a plain loop, present so the API is total and a host build links.
+ */
+VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len);
+
 #ifdef __cplusplus
 }
 #endif

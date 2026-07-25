@@ -55,6 +55,20 @@ VOID ami_tls_crypto_set_client_thread(VOID *thread)
     ami_client_thread =  thread;
 }
 
+/* Zero unless the application opened the E-Clock; see ami_tls_timer_is_open(). */
+static ULONG ami_now(VOID)
+{
+
+    return(ami_tls_timer_is_open() ? ami_tls_eclock() : 0UL);
+}
+
+static ULONG ami_since(ULONG start)
+{
+
+    return(ami_tls_timer_is_open() ?
+           ami_tls_eclock_micros(ami_tls_eclock() - start) : 0UL);
+}
+
 static UINT ami_bank(VOID)
 {
 
@@ -119,7 +133,7 @@ ULONG                       start;
 
 
     bank  =  &ami_counters[ami_bank()];
-    start =  ami_tls_eclock();
+    start =  ami_now();
 
     if (ami_arithmetic == AMI_TLS_ARITH_REFERENCE)
     {
@@ -131,7 +145,7 @@ ULONG                       start;
     }
 
     bank -> ami_ec_multiple_count++;
-    bank -> ami_ec_multiple_us += ami_tls_eclock_micros(ami_tls_eclock() - start);
+    bank -> ami_ec_multiple_us += ami_since(start);
 }
 
 UINT ami_tls_crypto_initialize(VOID)
@@ -394,10 +408,13 @@ UINT    i;
  *     full-width 2048-bit        (m_len 64)   w = 4   ~4% off w = 6
  *     full-width 4096-bit        (m_len 128)  w = 1   plain square-and-multiply
  *
- * and the w = 4 line only runs when a private key's primes are unknown.  6 KB
- * per RSA context, and a TLS session carries two (public cipher and public
- * auth), so this is 12 KB of the per-session metadata -- measured and reported
- * by tests/tls/tls_handshake rather than estimated.
+ * and the w = 4 line only runs when a private key's primes are unknown.
+ *
+ * 6 KB per RSA context.  Measured effect on a session, not estimated:
+ * nx_secure_tls_metadata_size_calculate() goes from 10,128 bytes with the
+ * vendored table to 16,272 with ours -- exactly one scratch area, because the
+ * public-cipher slot is already sized by NX_CRYPTO_ECDH and only the
+ * public-auth slot grows.
  *
  * Undersizing is safe rather than wrong: c68k_huge_number_mont_power_modulus()
  * falls back to the vendored routine when the window will not fit at all.
@@ -647,7 +664,7 @@ ULONG                       elapsed;
     }
 
     bank  =  &ami_counters[ami_bank()];
-    start =  ami_tls_eclock();
+    start =  ami_now();
 
     status =  ami_rsa_exponentiate(key, exponent_length,
                                    base -> nx_crypto_rsa_modulus,
@@ -659,7 +676,7 @@ ULONG                       elapsed;
                                    ctx -> ami_rsa_powm_scratch,
                                    AMI_TLS_POWM_SCRATCH_LIMBS);
 
-    elapsed =  ami_tls_eclock_micros(ami_tls_eclock() - start);
+    elapsed =  ami_since(start);
 
     if (exponent_length <= AMI_TLS_RSA_PUBLIC_EXPONENT_MAX)
     {

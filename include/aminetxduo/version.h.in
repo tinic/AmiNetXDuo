@@ -1,0 +1,46 @@
+/*
+ * AmiNetXDuo version -- GENERATED.  Edit include/aminetxduo/version.h.in.
+ *
+ * The one product version lives in project(AmiNetXDuo VERSION ...) in the
+ * root CMakeLists.txt; the NetX Duo and ThreadX versions are read out of the
+ * submodule headers by cmake/AmiNetXDuoVersion.cmake, which refuses to
+ * configure if they no longer match the pins recorded there.
+ *
+ * NOT AN ABI VERSION.  bsdsocket.library reports lib_Version 4 and
+ * usergroup.library reports 4 because 4 is the AmiTCP/Roadshow API level
+ * applications pass to OpenLibrary(); Exec will not open a library older than
+ * the version asked for, so those numbers are fixed by compatibility and have
+ * nothing to do with the strings below.  Never assign anything from this
+ * header to lib_Version.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#ifndef AMINETXDUO_VERSION_H
+#define AMINETXDUO_VERSION_H
+
+/* Our product version. */
+#define AMINETXDUO_VERSION_MAJOR    @PROJECT_VERSION_MAJOR@
+#define AMINETXDUO_VERSION_MINOR    @PROJECT_VERSION_MINOR@
+#define AMINETXDUO_VERSION_PATCH    @PROJECT_VERSION_PATCH@
+#define AMINETXDUO_VERSION          "@AMINETXDUO_VERSION@"
+
+/* What we are built on, read from third_party/, never typed in twice. */
+#define AMINETXDUO_NETXDUO_VERSION  "@AMINETXDUO_NETXDUO_VERSION@"
+#define AMINETXDUO_THREADX_VERSION  "@AMINETXDUO_THREADX_VERSION@"
+
+/*
+ * The compound version.  _COMPOUND is the machine-facing form and is what
+ * names an .lha or a CI artefact; _LONG is the sentence a person reads.
+ */
+#define AMINETXDUO_VERSION_COMPOUND "@AMINETXDUO_VERSION_COMPOUND@"
+#define AMINETXDUO_VERSION_LONG     "@AMINETXDUO_VERSION_LONG@"
+
+/*
+ * Commit count at configure time, or "" outside a git checkout.  By project
+ * convention this may appear in a binary's version output and nowhere else --
+ * not in a tag, not in a release name, not in an archive filename.
+ */
+#define AMINETXDUO_VERSION_BUILD    "@AMINETXDUO_VERSION_BUILD@"
+
+#endif /* AMINETXDUO_VERSION_H */

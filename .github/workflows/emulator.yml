@@ -48,9 +48,6 @@ concurrency:
   group: emulator-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  TOOLCHAIN_PIN: c63033fd447383b09ab739299075f11d482c79182ff99b55959dd7b970f7b12d
-
 jobs:
 
   # ------------------------------------------------------------------------
@@ -64,12 +61,18 @@ jobs:
         with:
           submodules: recursive
 
+      # Same key as ci.yml, and read from the same place, so the two workflows
+      # share one cache entry instead of racing to fill two.
+      - name: Toolchain pin
+        id: pin
+        run: echo "sha=$(tools/fetch-toolchain.sh --print-sha)" >> "$GITHUB_OUTPUT"
+
       - name: Cache the pinned m68k toolchain
         id: toolchain-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/aminetxduo/toolchain
-          key: m68k-amigaos-gcc-${{ env.TOOLCHAIN_PIN }}
+          key: m68k-amigaos-gcc-15.2.0-${{ steps.pin.outputs.sha }}
 
       - name: Fetch the toolchain
         if: steps.toolchain-cache.outputs.cache-hit != 'true'
