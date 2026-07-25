@@ -10,10 +10,14 @@
 # with -DAMINETXDUO_NET68K_MEMCPY=OFF: with the hook on, memcpy() resolves to
 # n68k_copy_bytes() and the "memcpy" rows measure it under a second name.
 #
-# Only the 68020 run is meaningful.  FS-UAE's 68030 model does not charge for
-# everything the 68020 model does (docs/RESEARCH.md, the P-256 result records
-# the same caveat), so run it there as a correctness check and do not quote the
-# numbers.
+# Only the 68020 profiles are meaningful.  FS-UAE switches cycle accounting off
+# for every CPU above a 68020, so the 68030 charges nothing for anything; the
+# cpucal target below measures that rather than asserting it, and
+# docs/RESEARCH.md writes it up.  To ask what a faster machine would do, move
+# the 68020 model's clock instead:
+#
+#   AMINETXDUO_RUN_TAG=perf25 ./tools/fsuae-run.sh -t 1200 -k 25 \
+#       build/cm/tests/perf/perf_test
 #
 # SPDX-License-Identifier: MIT
 
@@ -56,6 +60,39 @@ if(AMIGA_SIZE)
 endif()
 
 endif() # CMAKE_CROSSCOMPILING
+
+
+# ------------------------------------------------------- calibration probe --
+#
+# cpucal answers the question every other number in this directory depends on:
+# what does the emulator actually charge for an instruction?  It has no
+# dependency on NetX Duo at all, so it builds whatever the net68k options say
+# -- including on a profile where perf_test above is switched off.
+#
+#   cmake --build build/cm --parallel --target cpucal
+#   AMINETXDUO_RUN_TAG=cal ./tools/fsuae-run.sh -t 300 -m A1200 build/cm/tests/perf/cpucal
+#   AMINETXDUO_RUN_TAG=cal ./tools/fsuae-run.sh -t 300 -m A3000 build/cm/tests/perf/cpucal
+#
+# Read the header of cpucal.c before quoting anything it prints.
+
+if(CMAKE_CROSSCOMPILING)
+
+    add_executable(cpucal cpucal.c cpucal.S)
+    target_link_libraries(cpucal PRIVATE aminetxduo_common)
+    set_target_properties(cpucal PROPERTIES OUTPUT_NAME "cpucal")
+
+    # The assembler defaults to a plain 68000 and rejects MULU.L outright --
+    # the same default that made objdump print `.short 0x4c06` in the crypto
+    # work.  src/net68k/ and src/crypto68k/ pass the arch flags to their .S
+    # files for the same reason.
+    set_source_files_properties(cpucal.S PROPERTIES
+        COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
+
+    if(AMIGA_NDK_INCLUDE)
+        target_include_directories(cpucal PRIVATE "${AMIGA_NDK_INCLUDE}")
+    endif()
+
+endif()
 
 
 # ---------------------------------------------------------------- host tier --

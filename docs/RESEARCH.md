@@ -1727,7 +1727,10 @@ than arithmetic:
 
 95× on a memory-to-memory copy is not a clock ratio; it is a model that does not charge
 for the bus. The 68030 runs are quoted here **only** as evidence that they must not be
-quoted anywhere else.
+quoted anywhere else. *(Since resolved into a mechanism rather than a suspicion: FS-UAE
+switches cycle accounting off for every CPU above a 68020, and there is now a probe that
+measures it — see "Machine profiles, and calibrating the emulator before believing it"
+below.)*
 
 The harness is `tests/perf/perf_test.c`, run with
 `AMINETXDUO_RUN_TAG=perf tools/fsuae-run.sh -t 900 build/cm/tests/perf/perf_test`.
@@ -1964,6 +1967,368 @@ Re-measured on the final build, not assumed:
 
 The one conformance failure is the pre-existing `SOCK_RAW`/`EACCES` disagreement
 documented in the README, unchanged.
+
+### Machine profiles, and calibrating the emulator before believing it (2026-07-25)
+
+Every performance figure above is an A1200: 68EC020 at 14 MHz, 16-bit path to memory.
+An A3000 — 68030 at 25 MHz, 32-bit Fast RAM on a 32-bit bus, and a data cache the 020
+does not have at all — is a materially different machine, and for a stack dominated by
+copying and checksumming the memory width plausibly matters more than the clock. So
+`tools/fsuae-run.sh` grew an A3000 profile.
+
+It also grew the thing that had to come first. This project has concluded three separate
+times, from three unrelated symptoms, that FS-UAE's 68030 model cannot be trusted for
+timing — 1.93 ns/byte for a memory copy against the 68020's 184, a `MULU.L` that appears
+to cost nothing, and one RSA measurement that came out 1.7×, then 3.0×, then 3.1× on
+three runs of one binary. Nobody had measured *what* it gets wrong, so nobody could say
+what an A3000 profile would be good for. **`tests/perf/cpucal.c` measures it**, and the
+answer turns out to be a single mechanism that explains all three symptoms at once.
+
+#### The probe, and why its primary results need no clock
+
+`cpucal` runs instruction sequences whose cost on real silicon is published (`cpucal.S`),
+times them with `ReadEClock()`, and reports what the emulator charged. An absolute
+nanoseconds-per-instruction is worth nothing on its own — it conflates the model's cycle
+accounting with whatever clock the emulator thinks it is running at, and one figure
+cannot separate them. So the primary results are **ratios between kernels measured in
+the same run**, which are clock-independent by construction:
+
+- `MULU.L` against `ADD.L` is 44/2 = **22.0** on a real 68030 (43/2 = 21.5 on a 68020);
+- a 32 KB read window against a 64-byte one is ~1.0 on a part with **no** data cache, and
+  well above 1.0 on one with 256 bytes of it;
+- Chip RAM against Fast RAM is ~2× on an A1200's 16-bit path and much more on an A3000's.
+
+Only after those does it quote an implied clock, from `ADD.L` at its published two
+cycles. The published costs are from the MC68020UM and MC68030UM timing appendices
+(`MUL.L EA,Dn` 43 and 44 respectively — checked in the manuals, not recalled).
+
+#### What the A1200 profile reproduces: essentially everything
+
+| | measured | real 68020 | |
+|---|---:|---:|---|
+| `ADD.L Dn,Dm` | 143.30 ns | 2 cycles | the yardstick |
+| `MOVE.L Dn,Dm` | 144.05 ns | 2 | **2.00** implied |
+| `ADDX.L Dn,Dm` | 143.13 ns | 2 | **1.98** implied |
+| `MULU.L Dn,Dm` | 2302.90 ns | 43 | **32.12** implied |
+| `MULU.L Dn,Dh:Dl` | 2303.71 ns | 45 | **32.14** implied |
+| implied clock | **13.95 MHz** | 14.187 MHz | **1.7% low** |
+
+Three runs of the binary gave `ADD.L` at 143.304, 143.317 and 143.317 ns — a spread of
+one part in ten thousand. The memory rows repeat to 1.4%.
+
+**Two-cycle integer work is faithful to under 2%. `MULU.L` is not: the model charges 32
+cycles where the part charges 43, so it is 25% cheap even here.** That is a new caveat on
+the crypto68k figures, and a mild one — it flatters assembly that moves work out of the
+multiplier by at most a quarter, where the 68030 model flatters it by a factor of ten.
+
+The memory model is internally coherent, which is the check that matters more than any
+single row. Per longword, Fast RAM: read 6.75 cycles, write 3.64, and memory-to-memory
+10.47 — against 6.75 + 3.64 = 10.39 for the parts, i.e. 0.8% out. Chip RAM comes out
+1.88× slower than Fast, which is the right shape for a machine whose Chip bus is shared
+with the DMA. And the 32 KB / 64 B read ratio is 0.89, correctly saying that a 68020 has
+no data cache.
+
+| A1200, 32 KB window, ns/byte | Fast RAM | Chip RAM |
+|---|---:|---:|
+| `MOVE.L (An)+,Dn` | 121.07 | 227.29 |
+| `MOVE.L Dn,(An)+` | 65.31 | 148.66 |
+| `MOVE.L (An)+,(Am)+` | 187.83 | 364.31 |
+| `MOVEM.L`, 8 registers | 152.97 | 321.21 |
+
+These agree with `perf_test`'s independent measurements of the same primitives, in the
+directions the code says they should: 187.83 for a bare `MOVE.L (An)+,(Am)+` against
+libm020 `memcpy`'s 216–224, which is the same instruction with a fourfold rather than a
+sixteenfold unroll; and 152.97 for a bare `MOVEM.L` burst against `n68k_copy_bytes`'s
+184.7, which pays head alignment, tail longwords and a tail byte loop that this kernel
+does not. Two harnesses written months apart, one answer.
+
+#### What the A3000 profile reproduces: not enough to quote
+
+| | A1200 model | A3000 model | real 68030 |
+|---|---:|---:|---:|
+| implied clock | 13.95 MHz | **323.9 MHz** | 25 MHz |
+| `MULU.L` implied cycles | 32.1 | **3.2** | 44 |
+| Fast RAM read, ns/B | 121.07 | 2.31 | — |
+| Chip RAM read, ns/B | 227.29 | 2.60 | — |
+| Chip / Fast | 1.88× | **1.12×** | should be several × |
+| 32 KB / 64 B read | 0.89× | 0.82× | above 1 — the 030 has a data cache |
+| forcing `CACRF_EnableD` on | n/a | **no effect at all** | should be large |
+
+**The root cause is one line in FS-UAE's own log, and it explains all three of this
+project's earlier observations at once.** The emulator's A3000 quickstart runs *after* it
+has read the configuration file and overwrites what it finds there:
+
+```
+set option "cpu_speed" to "max" (result: 1)
+set option "cpu_compatible" to "false" (result: 1)
+set option "cpu_cycle_exact" to "false" (result: 1)
+currprefs.m68k_speed is -1, not allowing full sync
+```
+
+The A1200 model, in the same build, gets `cpu_speed = real` and `cpu_cycle_exact = true`.
+**FS-UAE 3.2.35 switches cycle accounting off for every CPU above a 68020**, and that is
+why `-c 68030` has always produced nonsense too: the A1200 model with `cpu = 68030` gets
+the same `max` / `false` pair. With no cycle accounting the CPU runs as fast as the host
+allows, so the E-Clock — which advances with emulated chipset time — sees the work
+complete almost instantly. A 95× memory copy, a free `MULU.L` and an RSA ratio that
+wanders between 1.7× and 3.1× are three faces of one thing.
+
+#### Everything that was tried to fix it
+
+Swept with `cpucal`, one variable at a time, through `AMINETXDUO_FSUAE_EXTRA`:
+
+| | effect |
+|---|---|
+| `accuracy = 1` | none — it is already the A3000 model's default (`accuracy=1` in the log) |
+| `cpu_speed = real` | none — overwritten by the quickstart |
+| `cpu_cycle_exact = 1`, `blitter_cycle_exact = 1` | none — overwritten |
+| `cpu_frequency = 25000000` | none — not an FS-UAE option at all, silently ignored |
+| `cpu_multiplier = 4`, `uae_cpu_frequency` | none |
+| `cpu_model = 68020` on the A3000 model | none — the log still reports `CPU=68030` |
+| **`uae_cpu_cycle_exact = true`** | **works** — the `uae_` passthrough is applied last |
+
+So cycle accounting *can* be forced back on (`CPU=68030 … ~cycle-exact fast` in the log),
+and the result is deterministic to the picosecond across runs. It is still not an A3000:
+
+- the clock lands at an implied **3.38 MHz** and `uae_cpu_multiplier` does not move it
+  (3.36 at ×2, 3.29 at ×4) — seven times too slow;
+- `MULU.L` is charged **4.1 cycles against 44**, so the crypto caveat is unaffected;
+- Chip RAM and 32-bit motherboard RAM measure **479.0 and 480.0 ns/B** — the model does
+  not distinguish them, which is exactly the distinction an A3000 profile exists to make;
+- `MOVEM.L` comes out **5.4× cheaper per byte** than `MOVE.L (An)+,(Am)+`, against about
+  1.3× on the real part — so it is wrong in the one place `src/net68k/` is optimised.
+
+**It is not more faithful, it is differently unfaithful, and three times slower to run.**
+It is therefore not in the profile; the recipe is in the comment in `tools/fsuae-run.sh`
+for anyone who wants to reproduce the finding.
+
+#### What the A3000 profile IS for
+
+`-m A3000` gives a 68030 with an MMU, both caches, 32-bit addressing and 8 MB of
+motherboard RAM rather than Zorro II. That is a genuine second target for **correctness**
+— it is where Enforcer can run, and where a DMA-coherency bug against the 030 data cache
+would show — and the profile is built and kept for that. It prints
+`(NOT a timing profile)` when it starts, because the failure mode being guarded against
+is somebody quoting it in six months.
+
+Deliberately *not* in the profile: `cpu_model`, `cpu_frequency`, `cpu_cycle_exact` and
+`blitter_cycle_exact`. All four were in the first version, all four were swept, and all
+four are inert. Configuration that looks like it pins the machine down and does not is
+worse than none.
+
+#### The measurement that survives: `-k`, a clock that moves without breaking anything
+
+The 68030 model cannot be made faithful. The 68020 model already is — and
+`uae_cpu_multiplier` *does* get through on it, because the A1200 quickstart leaves
+cycle-exact on. `tools/fsuae-run.sh -k MHZ` uses that:
+
+| `-k` | nominal | implied clock, measured | `ADD.L` | `MULU.L` |
+|---|---:|---:|---:|---:|
+| (none) | 14.0 MHz | 13.95 MHz | 2.00 cycles | 32.12 |
+| `-k 7` | 7.0 MHz | 6.80 MHz | 2.00 | 32.1 |
+| `-k 25` | 24.5 MHz | **24.48 MHz** | 2.00 | 31.98 |
+| `-k 28` | 28.0 MHz | 28.01 MHz | 2.00 | 31.98 |
+
+The instruction accounting is unchanged at every clock — only the rate moves. The
+multiplier's unit is half the 7.09 MHz PAL chipset clock, ~3.5 MHz per step, measured
+because the emulator documents it nowhere.
+
+**And the memory model does the right thing under it, which is what makes the option
+worth having.** Doubling the clock from 13.95 to 28.01 MHz buys **2.03×** on Fast RAM
+and only **1.49×** on Chip RAM, and `MOVEM.L` from Chip RAM barely moves at all
+(**1.07×**) — because Chip RAM is chipset-bound and the model knows it. A knob that made
+everything uniformly faster would be measuring nothing.
+
+So `-m A1200 -k 25` is a **clock-matched, cycle-accurate 68020 at 24.5 MHz**. It is not
+an A3000, and it differs in exactly two known ways: it is a 68020, so there is no data
+cache; and its memory is the A1200's, which the model charges 6.75 cycles per longword
+read where a 32-bit port costs the 68020's published 4. **It is therefore a defensible
+lower bound on an A3000, not an estimate of one** — a real A3000 has the same clock and a
+wider path to memory, so it can only be faster.
+
+Three clocks make a slope rather than a ratio, and the slope is the interesting part:
+
+| Fast RAM read, `MOVE.L (An)+,Dn` | 6.80 MHz | 13.95 MHz | 24.48 MHz | 28.01 MHz |
+|---|---:|---:|---:|---:|
+| ns/byte | 243.97 | 120.00 | 67.55 | 58.90 |
+| **ns/byte × MHz** | **1659** | **1674** | **1653** | **1650** |
+
+Constant to 1.4% — Fast RAM costs a fixed number of *CPU cycles* in this model, as
+CPU-synchronous memory should. Chip RAM does not: the same product goes 1667 → 3171 →
+3737 → 4269, i.e. it is CPU-bound below ~7 MHz and bus-bound above it. **The model has a
+memory wall in it and puts it in the right place**, which is the licence to use `-k` for
+the question below.
+
+#### The measurements, with the caveat attached to each row
+
+Every figure from `tests/perf/perf_test.c`, 256 KB per transfer, raw NetX Duo sockets
+with `src/net68k/`'s checksum and copy, 28/28 self-checks passing on every profile.
+
+| | 6.80 MHz | **13.95 MHz** | **24.48 MHz** | A3000 model |
+|---|---:|---:|---:|---:|
+| | trustworthy | trustworthy | trustworthy | **fiction** |
+| TCP loopback, drain only | 286 KB/s | 610 KB/s | **1080 KB/s** | 28,444 KB/s |
+| TCP loopback, `+extract` | 251 KB/s | 541 KB/s | **966 KB/s** | 25,600 KB/s |
+| TCP over the RAM driver | 105 KB/s | 174 KB/s | **239 KB/s** | 412 KB/s |
+| pipeline ceiling, no protocol | 426 KB/s | 900 KB/s | **1611 KB/s** | 45,976 KB/s |
+| IP checksum, ns/B | 426.8 | 203.8 | 112.6 | 5.3 |
+| `n68k_copy_bytes`, ns/B | 383.7 | 184.7 | 99.5 | 2.6 |
+| `nx_packet_copy`, ns/B | 578.3 | 276.6 | 153.1 | 4.7 |
+| `Forbid()`/`Permit()` pair | 18.9 µs | 10.5 µs | 5.4 µs | 0.13 µs |
+| TLS 1.2 handshake, loopback | — | **26.7 s** | **15.0 s** | 0.8 s |
+| … client-only public-key arithmetic | — | **3.2 s** | **1.8 s** | 0.0 s |
+| ECDSA P-256 verify, `crypto68k` | — | **1966 ms** | **1113 ms** | 44 ms |
+| ECDHE P-256 shared secret | — | **1372 ms** | **776 ms** | 29 ms |
+
+And the figure the README quotes, which is the same transfer one layer further up —
+`bsdsocktest`'s throughput category through `bsdsocket.library`, 1 MB sustained:
+
+| | **13.95 MHz** | **24.48 MHz** | A3000 model |
+|---|---:|---:|---:|
+| TCP sustained loopback, 1 MB, through the library | **357 KB/s** | **636 KB/s** | 17,066 KB/s |
+| TCP loopback, 512 KB | 358 KB/s | 638 KB/s | 12,800 KB/s |
+| conformance score | 125/1/16 | 125/1/16 | 125/1/16 |
+
+357 KB/s against the 356 recorded above, and **636 KB/s at 24.48 MHz — 1.78× for a 1.76×
+clock**, the same linear scaling the raw-socket figure shows. The library layer is as
+CPU-bound as everything under it.
+
+**The A3000 column is printed to be argued with, not quoted.** A 2.6 ns/byte copy is
+faster than the 68030's bus can physically move a byte at any clock; it is what "no cycle
+accounting" looks like.
+
+And one row that shows the distortion directly rather than by argument. The `crypto68k`
+speedups are *ratios* measured back to back in one process, so they should not depend on
+the clock at all — and on the profiles that charge cycles, they do not:
+
+| `crypto68k` against vendored | 13.95 MHz | 24.48 MHz | A3000 model |
+|---|---:|---:|---:|
+| ECDSA P-256 verify | 3.5× | **3.5×** | **4.5×** |
+| ECDHE P-256 shared secret | 3.8× | **3.8×** | **4.9×** |
+| ECDHE P-256 keygen | 3.8× | **3.8×** | **5.1×** |
+| RSA-2048 public | 2.9× | **2.9×** | **4.1×** |
+| RSA-2048 private, CRT | 2.2× | **2.2×** | **3.0×** |
+| RSA-2048 private, plain | 2.4× | **2.4×** | **3.7×** |
+
+Identical across a 1.76× clock change, inflated by 25–54% on the A3000 model — which is
+exactly the failure the P-256 notes predicted from first principles ("the 68030 model
+does not charge for `MULU.L`, so it flatters exactly the work this change moves *out* of
+the multiply"). It is pleasant to have it confirmed by an experiment designed
+independently of the prediction, and **it retires the last unexplained symptom**: the RSA
+ratio that came out 1.7×, 3.0× and 3.1× on three runs was not a flaky measurement, it was
+a ratio with no fixed value to converge on.
+
+Repeatability, since that was the third symptom. Three runs of one binary:
+
+| `ADD.L` | run a | run b | run c | spread |
+|---|---:|---:|---:|---:|
+| A1200 | 143.304 ns | 143.317 ns | 143.317 ns | **0.01%** |
+| A3000 model | 324.35 MHz | 325.30 MHz | 317.91 MHz | 2.3% |
+
+The A3000 model is more repeatable than the RSA episode suggested *for a short kernel*,
+because `cpucal` auto-scales each measurement to about a tenth of a second. Over the
+minutes an RSA benchmark takes, the same unthrottled CPU is measuring the host's
+scheduler, and that is where 1.7× against 3.1× comes from.
+
+The 13.95 MHz column reproduces what this section recorded before the profiles existed —
+203.8 against 200.7 ns/B for the checksum, 541 against 512 KB/s for loopback, 26.7 s
+against 26.7 s for the handshake, and RSA-2048 public at 681.1 ms against 681 — which is
+the check that nothing about the new profiles disturbed the old ones.
+
+**A defect in `perf_test` that the new `-k` option exposed, and what it does and does not
+change.** `p_report()` computed a per-primitive ns/byte from `ticks / reps` — an integer
+count of 1.409 µs E-Clock ticks. That is harmless at 14 MHz, where a 1460-byte copy is
+~190 ticks and the truncation is bounded by 0.5%; at 24.48 MHz it is ~105 ticks, and
+three copy routines that differ by 4% all printed *the same* 102.29 ns/B. It now divides
+once, by the total byte count, at the end.
+
+Fixing it moved the 13.95 MHz `n68k_copy_bytes` row from the 176.6 ns/B recorded above to
+**184.7**, and the arithmetic says that is mostly *not* the fix: truncation can only
+account for 0.5% of a 4.6% move. The rest is run-to-run variation, which the copy rows
+have and the others do not — the same binary reported 257 µs and 269 µs per repetition in
+two sessions, while the checksum repeated to 0.6% and every end-to-end throughput figure
+repeated exactly. **Read a 3% difference between two copy rows as noise.** The
+1.23×-over-`libm020` conclusion stands regardless: that comparison was two arms of one
+session, truncated identically, and the gap is far larger than either effect.
+
+The per-cycle cost falls slightly as the clock rises — checksum ns/B × MHz goes 2902 →
+2843 → 2756 across the three columns, about 5%. That is not a modelling error: interrupts
+arrive at a fixed *wall* rate and cost a fixed number of *cycles*, so a benchmark that
+finishes in half the time absorbs half of them. Real hardware does the same.
+
+#### What it implies for what to optimise next
+
+**Loopback TCP is instruction-bound, not bus-bound, and the evidence is the slope.**
+Throughput against clock: 251 → 541 → 966 KB/s for 6.80 → 13.95 → 24.48 MHz, i.e. 2.16×
+for a 2.05× clock and 1.79× for a 1.76× clock. **Linear, slightly better than linear.**
+Every primitive underneath behaves the same way: the checksum, the copy and
+`nx_packet_copy` all hold their ns/byte × MHz product to within a few percent.
+
+So the answer to "does an A3000 change what to optimise?" is **no, and the reason is
+worth having**: nothing on the loopback path is waiting for memory that a faster CPU
+would not fix. The ranking recorded above — `bsdsocket.library`'s per-call overhead
+first at ~1010 ms/MB, the remaining copies second — survives the clock change unaltered,
+because both scale with it. A 25 MHz machine runs the same profile 1.8× faster.
+
+**The wire path is the exception, and it is the finding the A3000 profile earned its
+keep with.** Over the RAM driver, throughput goes 105 → 174 → 239 KB/s: 1.66× for a
+2.05× clock, then 1.37× for a 1.76×. Sub-linear, and flattening. The unfaithful A3000
+profile is what identifies the wall — with the CPU effectively free it still manages only
+**412 KB/s**, so 412 KB/s is the ceiling imposed by everything that is *not* the CPU.
+Fitting the three trustworthy points against a fixed ceiling in series:
+
+| | 6.80 MHz | 13.95 MHz | 24.48 MHz |
+|---|---:|---:|---:|
+| measured | 105 KB/s | 174 KB/s | 239 KB/s |
+| implied CPU-bound component | 141 KB/s | 301 KB/s | 569 KB/s |
+| scaling of that component | — | 2.14× | 1.89× |
+
+The CPU-bound part is linear in the clock to within 7%, and the model fits all three
+points. **So on a real interface, above about 15 MHz, roughly half of what is left is
+not CPU at all** — it is the 50 Hz IP periodic tick and the round trips paced by it, and
+no amount of assembly in `src/net68k/` will touch it. That is a different optimisation
+(window sizes, delayed-ACK behaviour, tick rate) from anything this section has done so
+far, and it is the one that matters for the machine most likely to have an Ethernet card.
+
+**TLS is entirely CPU-bound**, as arithmetic should be: 26.7 s → 15.0 s for a 1.76×
+clock is 1.78×. An A3000 owner sees a ~15 s handshake and a ~1.8 s client-side
+public-key cost. That is the same shape of answer AmiSSL's own A3000 datapoint gives
+(issue #67, `SSL_connect` in 2.99 s on a 68030 at 25 MHz — TLS 1.3, a different
+handshake and a heavily optimised bignum library, but the same universe).
+
+#### Baselines, on both profiles
+
+The A3000 profile is a correctness vehicle, so it was checked as one. Nothing regressed,
+and nothing about the harness change disturbed the A1200 path:
+
+| | A1200 | A1200 `-k 25` | A3000 profile |
+|---|---|---|---|
+| ThreadX-on-Exec `soak` | 98/0 | 98/0 | 98/0 |
+| `ram_driver` | 32/0 | — | 32/0 |
+| `libraries` (the ABI through `OpenLibrary`) | 8/0 | — | 8/0 |
+| conformance, loopback tier | 125 passed, 1 failed, 16 skipped | same | same |
+| `perf_test` self-checks | 28/0 | 28/0 | 28/0 |
+| `tls_handshake` | 44/0 | 44/0 | 44/0 |
+| `crypto68k_ec_bench` / `crypto68k_bench` | 0 failures | 0 failures | 0 failures |
+| host `ctest` | 6/6 | | |
+
+The one conformance failure is the pre-existing `SOCK_RAW`/`EACCES` disagreement.
+
+#### What would settle it on real hardware
+
+Three measurements, in order of what they would change:
+
+1. **`cpucal` on an A3000.** It is 300 lines and needs nothing but `timer.device`. It
+   would give the one number this whole section had to work around: what a 68030 at 25
+   MHz actually charges for a longword read from 32-bit motherboard RAM. Everything
+   above is bounded rather than known because of that single unknown.
+2. **`perf_test` and the conformance suite on an A3000**, for the loopback figures — the
+   predictions being **≥966 KB/s** raw and **≥636 KB/s** through the library, those being
+   the `-k 25` lower bounds, with the excess over them being what the 32-bit path and the
+   data cache are worth.
+3. **The conformance suite's throughput category over a real Ethernet card**, because the
+   412 KB/s non-CPU ceiling above is the RAM driver's, and a real interface's will be a
+   different number for different reasons.
 
 ### Loose ends closed (2026-07-25)
 

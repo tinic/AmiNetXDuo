@@ -32,8 +32,17 @@
  * conformance suite's throughput category IS the library layer, and that is
  * how the library's cost is priced.
  *
- * ONLY THE 68020 NUMBERS MEAN ANYTHING.  FS-UAE's 68030 model is not
- * cycle-exact; run it there as a correctness check and do not quote it.
+ * ONLY THE 68020 PROFILES MEAN ANYTHING, and that is now measured rather than
+ * suspected: tests/perf/cpucal.c times instructions with published cycle costs
+ * and finds FS-UAE's A1200 model faithful to under 2% for two-cycle integer
+ * work, while its 68030 -- any 68030, including `-c 68030` on the A1200 model
+ * -- charges no cycles at all, because FS-UAE turns cycle accounting off above
+ * a 68020.  Run this under `-m A3000` as a correctness check and do not quote
+ * the numbers.
+ *
+ * `tools/fsuae-run.sh -k MHZ` moves the 68020 model's clock WITHOUT losing the
+ * cycle accounting, so "what would this do at 25 MHz?" does have an answer
+ * here even though "what would this do on an A3000?" does not.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -183,22 +192,29 @@ static ULONG p_ms(ULONG ticks)
 }
 
 /*
- * Nanoseconds per byte, x100 so a fraction survives an integer print.
- * Guards the multiply: ticks is bounded by the callers below.
+ * Nanoseconds per byte, x100 so a fraction survives an integer print, taken
+ * over the WHOLE loop rather than a per-iteration mean.
+ *
+ * That distinction is not pedantry.  The per-iteration form quantises to one
+ * E-Clock tick per rep -- 1.409 us -- and at 14 MHz a 1460-byte copy is ~180
+ * ticks, so the granularity is half a percent and invisible.  Run the same
+ * binary at 24.5 MHz with `fsuae-run.sh -k 25` and it is ~105 ticks, and
+ * three copy routines that differ by 4% all printed the SAME 102.29 ns/B.
+ * Dividing once, at the end, by the total byte count removes it.
+ *
+ * `total_bytes` is reps * bytes and is large, so the scaling is done by
+ * dividing it by 100 rather than multiplying the ticks by it: the pipeline
+ * benchmark's 105,000 ticks * 1409 is already 1.5e8, and another 100 would
+ * not fit in a longword.
  */
-static ULONG p_ns_per_byte_x100(ULONG ticks, ULONG bytes)
+static ULONG p_ns_per_byte_x100(ULONG ticks, ULONG total_bytes)
 {
-    if (bytes == 0UL)
+    if (total_bytes < 100UL)
     {
         return(0UL);
     }
 
-    /*
-     * ticks here is always a per-iteration mean of a loop over at least a
-     * kilobyte, so it is in the hundreds or low thousands and the multiply
-     * cannot overflow: 4000 * 1409 * 100 is 5.6e8.
-     */
-    return((ticks * p_tick_ns * 100UL) / bytes);
+    return((ticks * p_tick_ns) / (total_bytes / 100UL));
 }
 
 static VOID p_timer_init(VOID)
@@ -348,13 +364,14 @@ static UCHAR            p_dst_buf[P_APP_CHUNK + 8] __attribute__((aligned(4)));
 
 static VOID p_report(const char *what, ULONG ticks, ULONG reps, ULONG bytes)
 {
-ULONG   each = (reps != 0UL) ? (ticks / reps) : 0UL;
+ULONG   each  = (reps != 0UL) ? (ticks / reps) : 0UL;
+ULONG   nspb  = p_ns_per_byte_x100(ticks, reps * bytes);
 
     p_log("  %-34s %6ld us  %4ld.%02ld ns/B  (%ld x %ld B)",
           (LONG)what,
           (LONG)p_us(each),
-          (LONG)(p_ns_per_byte_x100(each, bytes) / 100UL),
-          (LONG)(p_ns_per_byte_x100(each, bytes) % 100UL),
+          (LONG)(nspb / 100UL),
+          (LONG)(nspb % 100UL),
           (LONG)reps, (LONG)bytes);
 }
 

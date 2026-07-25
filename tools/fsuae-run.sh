@@ -2,7 +2,22 @@
 #
 # Run an AmigaOS executable under FS-UAE and capture its output.
 #
-#   tools/fsuae-run.sh [-t SECONDS] [-m MODEL] [-n] <executable> [extra files...]
+#   tools/fsuae-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-k MHZ] [-n]
+#                      <executable> [extra files...]
+#
+# -m selects the machine profile. A1200 (the default) is the project floor:
+# 68EC020 at 14 MHz with a 16-bit path to memory, and it is the ONLY profile
+# whose timings mean anything -- FS-UAE turns cycle accounting off for every
+# CPU above a 68020. A3000 gives a 68030 with 32-bit motherboard RAM, for
+# exercising the code on that processor; it is not a timing profile and says
+# so when it starts. Anything else is passed straight to FS-UAE.
+#
+# -k moves the CPU clock on a cycle-exact profile without disturbing the cycle
+# accounting, so "what would this do at 25 MHz?" has a defensible answer even
+# though "what would this do on an A3000?" does not. See the block below it.
+#
+# tests/perf/cpucal measures all of the above rather than assuming it; the
+# calibration section of docs/RESEARCH.md is the write-up.
 #
 # -n attaches an emulated Commodore A2065 Ethernet card wired to FS-UAE's
 # SLIRP user-mode NAT (10.0.2.0/24, gateway and DHCP/DNS server 10.0.2.2).
@@ -31,16 +46,35 @@ TIMEOUT=60
 MODEL=A1200
 NETWORK=0
 CPU=""
+CLOCK=""
 
-while getopts "t:m:c:n" opt; do
+while getopts "t:m:c:k:n" opt; do
     case "$opt" in
         t) TIMEOUT="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
+        k) CLOCK="$OPTARG" ;;
         n) NETWORK=1 ;;
-        *) echo "usage: $0 [-t seconds] [-m model] [-c cpu] [-n] <executable> [files...]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-t seconds] [-m model] [-c cpu] [-k MHz] [-n] <executable> [files...]" >&2; exit 2 ;;
     esac
 done
+
+# -m A3000 is a profile, not just a model string: FS-UAE's stock A3000 puts its
+# 8 MB of expansion RAM on Zorro II, and a 32-bit path to memory is the whole
+# reason an A3000 is interesting.  See the config block below.
+#
+# IT IS NOT A TIMING PROFILE.  Measured, not assumed -- tests/perf/cpucal on
+# this profile reports MULU.L at 3.2 cycles against a real 68030's 44, Chip RAM
+# and 32-bit Fast RAM at the same speed, and an implied 323 MHz clock.  FS-UAE
+# switches cycle accounting OFF for every CPU above a 68020 (its own log says
+# `cpu_speed = max`, `cpu_cycle_exact = false`), and none of accuracy,
+# cpu_speed, cpu_frequency or cpu_multiplier turns it back on.  Use this
+# profile to exercise the code on a 68030 -- MMU, caches, 32-bit addressing --
+# and take timings from -m A1200, with -k if you want a different clock.
+A3000_PROFILE=0
+if [ "$MODEL" = "A3000" ]; then
+    A3000_PROFILE=1
+fi
 shift $((OPTIND - 1))
 
 [ $# -ge 1 ] || { echo "usage: $0 [-t seconds] [-m model] <executable> [files...]" >&2; exit 2; }
@@ -60,12 +94,31 @@ EXE_NAME=$(basename "$EXE")
 # probes, identical check counts.  tools/fetch-aros-rom.sh sets both variables.
 KICKSTART="${AMINETXDUO_KICKSTART:-}"
 KICKSTART_EXT="${AMINETXDUO_KICKSTART_EXT:-}"
+
+# The A3000 wants its own 3.1 image.  Not because the machine cannot run the
+# A1200 one -- both are 40.68 and the difference is machine-specific -- but
+# because a profile that silently boots the wrong ROM is the kind of detail
+# that invalidates a measurement three weeks later.  The A1200 image is still
+# the fallback, announced, so the profile keeps working where only one ROM is
+# present.  Copyrighted either way: located, never committed.
+KICKSTART_CANDIDATES=(
+    "$HOME/Downloads/Kickstart v3.1 rev 40.68 (1993)(Commodore)(A1200)[!].rom"
+    "$HOME/Downloads/Kickstart v3.1 r40.68 (1993)(Commodore)(A1200)[!].rom"
+    "$HOME/png2amiga_testing/kick31.rom"
+)
+if [ "$A3000_PROFILE" = "1" ]; then
+    KICKSTART_CANDIDATES=(
+        "${AMINETXDUO_KICKSTART_A3000:-}"
+        "$HOME/Downloads/Kickstart v3.1 r40.68 (1993)(Commodore)(A3000).rom"
+        "$HOME/Downloads/Kickstart v3.1 rev 40.68 (1993)(Commodore)(A3000).rom"
+        "$HOME/Downloads/Kickstart v3.1 r40.68 (1993)(Commodore)(A4000).rom"
+        "${KICKSTART_CANDIDATES[@]}"
+    )
+fi
+
 if [ -z "$KICKSTART" ]; then
-    for candidate in \
-        "$HOME/Downloads/Kickstart v3.1 rev 40.68 (1993)(Commodore)(A1200)[!].rom" \
-        "$HOME/Downloads/Kickstart v3.1 r40.68 (1993)(Commodore)(A1200)[!].rom" \
-        "$HOME/png2amiga_testing/kick31.rom"
-    do
+    for candidate in "${KICKSTART_CANDIDATES[@]}"; do
+        [ -n "$candidate" ] || continue
         [ -f "$candidate" ] && { KICKSTART="$candidate"; break; }
     done
 fi
@@ -84,6 +137,13 @@ EOF
     echo "AMINETXDUO_KICKSTART_EXT=$KICKSTART_EXT does not exist" >&2
     exit 2
 }
+
+# Say so rather than quietly booting a different machine's ROM: a profile that
+# silently substitutes one is still a working profile, but it is not the one
+# the caller asked for and a measurement taken from it should say which.
+if [ "$A3000_PROFILE" = "1" ] && [ "${KICKSTART#*A3000}" = "$KICKSTART" ]; then
+    echo "==> no A3000 Kickstart found; falling back to $(basename "$KICKSTART")"
+fi
 
 FSUAE="${FSUAE:-$(command -v fs-uae || true)}"
 [ -n "$FSUAE" ] || { echo "fs-uae not found; set FSUAE=<path>" >&2; exit 2; }
@@ -211,10 +271,93 @@ amiga_model = $MODEL
 kickstart_file = $KICKSTART
 hard_drive_0 = $HD
 hard_drive_0_label = DH0
-fast_memory = 8192
 serial_port = $SERIAL
 fullscreen = 0
 EOF
+
+# -------------------------------------------------------------- A3000 tune --
+#
+# WHICH FAST RAM, and why it is not the same knob on both profiles.
+#
+#   fast_memory   is Zorro II: 8 MB at 0x200000, and on a machine whose
+#                 expansion bus is 16 bits wide that is a 16-bit path.  It is
+#                 the right answer for the A1200, which has no other option.
+#   motherboard_ram is the A3000's own 32-bit RAM on the CPU bus.  It is the
+#                 entire reason for having an A3000 profile: the interesting
+#                 difference between these two machines is not 14 MHz against
+#                 25, it is a 16-bit path to memory against a 32-bit one, and
+#                 a profile that put the working set in Zorro II would measure
+#                 the 68030 while throwing that away.
+#
+# WHAT IS DELIBERATELY NOT HERE.  An earlier version of this block also set
+# cpu_model, cpu_frequency = 25000000, cpu_cycle_exact and blitter_cycle_exact.
+# Every one of them was swept with tests/perf/cpucal and every one of them
+# turned out to be inert: FS-UAE's A3000 quickstart runs AFTER the config file
+# and overwrites all four (its log prints `set option "cpu_cycle_exact" to
+# "false"` immediately after reading ours), and cpu_model is redundant anyway
+# because the model supplies 68030 itself.  Four lines that look like they pin
+# the machine down and do nothing are worse than none, so they are gone.
+#
+# uae_cpu_cycle_exact = true DOES get through -- the uae_ passthrough is
+# applied last -- and it does re-enable cycle accounting.  It is still not
+# here, because what it buys is not fidelity: the clock lands at an implied
+# 3.3 MHz that no multiplier moves, MULU.L is charged 4 cycles against a real
+# 68030's 44, and Chip RAM and 32-bit Fast RAM come out identical.  It is
+# three times slower to run and wrong in different places.  Set it by hand
+# through AMINETXDUO_FSUAE_EXTRA if you want to see that for yourself.
+if [ "$A3000_PROFILE" = "1" ]; then
+    cat >> "$CFG" <<EOF
+motherboard_ram = 8192
+EOF
+    echo "==> A3000 profile: 68030, 8 MB 32-bit motherboard RAM (NOT a timing profile)"
+else
+    cat >> "$CFG" <<EOF
+fast_memory = 8192
+EOF
+fi
+
+# ------------------------------------------------------------- -k CLOCK MHz --
+#
+# Move the CPU clock while keeping the cycle accounting.  This is the only way
+# in this emulator to ask "what would this code do on a faster Amiga?" and get
+# an answer worth having: the A1200 model is cycle-exact (verified against
+# published 68020 timings, docs/RESEARCH.md), and uae_cpu_multiplier scales its
+# clock without disturbing that -- ADD.L stays at its published two cycles and
+# MULU.L at the same 32 the model charges at 14 MHz, so nothing about the
+# instruction accounting changes, only the rate.
+#
+# The unit is half the 7.09 MHz PAL chipset clock, i.e. ~3.5 MHz per step;
+# measured, because the emulator documents it nowhere: 4 -> 13.95 MHz,
+# 7 -> 24.5, 8 -> 28.01.
+#
+# Chip RAM deliberately does NOT scale with it -- it is chipset-bound, and the
+# model has that right (a 2x clock buys 2.03x on Fast RAM and 1.49x on Chip).
+# That is what makes the option useful rather than merely fast: the difference
+# between the two is the part of the workload the bus owns.
+#
+# -k has no effect on -m A3000, because that model has no cycle accounting to
+# preserve; the script says so rather than pretending.
+if [ -n "$CLOCK" ]; then
+    if [ "$A3000_PROFILE" = "1" ]; then
+        echo "!! -k $CLOCK ignored: the A3000 profile has no cycle accounting to scale" >&2
+    else
+        MULT=$(( (CLOCK * 10 + 17) / 35 ))
+        [ "$MULT" -ge 1 ] || MULT=1
+        cat >> "$CFG" <<EOF
+uae_cpu_multiplier = $MULT
+EOF
+        echo "==> CPU clock: multiplier $MULT, nominally $((MULT * 35 / 10)).$((MULT * 35 % 10)) MHz"
+    fi
+fi
+
+# AMINETXDUO_FSUAE_EXTRA appends raw `key = value` lines, semicolon separated.
+# It exists so the knobs above can be swept without editing this file: the
+# A3000 profile's settings were chosen by sweeping them, and the next person
+# to doubt them should be able to repeat that in one line.
+if [ -n "${AMINETXDUO_FSUAE_EXTRA:-}" ]; then
+    printf '%s\n' "${AMINETXDUO_FSUAE_EXTRA}" | tr ';' '\n' >> "$CFG"
+    echo "==> extra config: ${AMINETXDUO_FSUAE_EXTRA}"
+fi
 
 if [ -n "$KICKSTART_EXT" ]; then
     cat >> "$CFG" <<EOF
@@ -278,6 +421,13 @@ cleanup_all() { cleanup_emulator; release_lock; }
 trap cleanup_all EXIT INT TERM HUP
 
 
+# Host wall clock across the emulator's whole life.  This is the only figure
+# the harness produces that the emulator cannot fake, and it is what catches a
+# model running the CPU unthrottled: a probe that reports 4 seconds of
+# EMULATED time inside a run that took 40 seconds of HOST time was throttled,
+# and one that reports 0.2 seconds inside the same 40 was not.
+WALL_START=$(date +%s)
+
 "$FSUAE" "$CFG" >"$ROOT/build/fsuae$TAG.log" 2>&1 &
 FSUAE_PID=$!
 
@@ -339,6 +489,6 @@ fi
 if [ "$status" = "124" ]; then
     echo "==> TIMEOUT after ${TIMEOUT}s (no DH0:.done)"
 else
-    echo "==> exit status $status"
+    echo "==> exit status $status after $(( $(date +%s) - WALL_START ))s of host wall clock"
 fi
 exit "$status"
