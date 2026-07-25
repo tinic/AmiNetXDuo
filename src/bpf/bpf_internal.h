@@ -27,10 +27,6 @@
 #define AMI_BPF_ETH_HDR_LEN     14
 #define AMI_BPF_ETH_ADDR_LEN    6
 
-/* Seconds between the Unix epoch (1970-01-01) and the Amiga one (1978-01-01):
-   8 years, of which 1972 and 1976 were leap. 2922 * 86400. */
-#define AMI_BPF_AMIGA_EPOCH     252460800UL
-
 /* ------------------------------------------------------------- interfaces */
 
 typedef struct AmiBpfIf

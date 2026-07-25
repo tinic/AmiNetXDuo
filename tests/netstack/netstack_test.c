@@ -27,6 +27,7 @@
 
 #include "aminetxduo/netstack.h"
 #include "aminetxduo/config.h"
+#include "aminetxduo/crashguard.h"
 
 #include <exec/types.h>
 #include <exec/execbase.h>
@@ -437,6 +438,17 @@ LONG    status;
           (ULONG) TX_TIMER_TICKS_PER_SECOND, (ULONG) AMI_POOL_PAYLOAD,
           (ULONG) AMI_POOL_MIN_PACKETS, (ULONG) AMI_POOL_MAX_PACKETS);
 
+    ami_crash_set_reference((APTR) main, "netstack_test");
+    if (!ami_crash_install())
+    {
+
+        /* Resuming after a caught crash is documented as unreliable, so this
+           is a report-and-die path, not a recovery path. */
+        t_log("FATAL: caught a CPU exception -- see the dump above");
+        t_flush();
+        return(20);
+    }
+
     t_watchdog_start();
 
     status =  netstack_startup();
@@ -476,6 +488,7 @@ LONG    status;
           t_checks, t_failures, (t_failures == 0UL) ? "PASS" : "FAIL");
 
     t_flush();
+    ami_crash_remove();
 
     return((t_failures == 0UL) ? 0 : 20);
 }

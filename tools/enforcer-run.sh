@@ -132,6 +132,10 @@ fi
 [ "$WANT_ENFORCER" = "1" ] && cp "$ENFORCER" "$HD/c/enforcer"
 
 {
+    # AmigaDOS aborts a script the moment a command returns at or above the
+    # fail level (10 by default), so without this a test that returns 20 never
+    # reaches the "echo >DH0:.done" line and a plain failure looks like a hang.
+    echo "failat 9999"
     [ -f "$HD/c/envsetup" ] && echo "c:envsetup"
     if [ "$WANT_MUNGWALL" = "1" ]; then
         echo "run >NIL: <NIL: c:mungwall NAMETAG SHOWHUNK"

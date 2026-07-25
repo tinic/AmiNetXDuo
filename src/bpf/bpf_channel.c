@@ -341,8 +341,6 @@ VOID ami_bpf_capture(AmiBpfIf *ifp, const AmiBpfView *view)
         if (!ch->open || ch->iface != ifp || ch->store == NULL)
             continue;
 
-        ami_bpf_now(&sec, &usec);
-
         ami_bpf_lock();
 
         /* Re-check under the lock: BIOCSETIF or bpf_close may have run. */
@@ -361,6 +359,11 @@ VOID ami_bpf_capture(AmiBpfIf *ifp, const AmiBpfView *view)
             ami_bpf_unlock();
             continue;
         }
+
+        /* Only now, once the packet is known to be wanted: a filter that
+           rejects most traffic should not pay for a timer read per frame.
+           GetSysTime() is a short library call and is safe under Forbid(). */
+        ami_bpf_now(&sec, &usec);
 
         caplen = (slen < view->wirelen) ? slen : view->wirelen;
         if (caplen > view->caplen)

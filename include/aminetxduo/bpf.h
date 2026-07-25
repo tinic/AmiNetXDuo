@@ -305,6 +305,14 @@ struct bpf_insn {
 #define AMI_BPF_HDR_BYTES       18                          /* sizeof on 68k */
 #define AMI_BPF_HDRLEN          20                          /* == BPF_WORDALIGN(18) */
 
+/*
+ * bh_tstamp is seconds and microseconds since the UNIX epoch, not the Amiga
+ * one, because that is what every capture consumer expects. GetSysTime()
+ * reports seconds since 1978-01-01, so this is added on top: 8 years, of which
+ * 1972 and 1976 were leap, so 2922 days.
+ */
+#define AMI_BPF_AMIGA_EPOCH     252460800UL     /* 2922 * 86400 */
+
 AMI_STATIC_ASSERT(AMI_BPF_HDRLEN == BPF_WORDALIGN(AMI_BPF_HDR_BYTES),
                   "bh_hdrlen must be the word-aligned header size");
 AMI_STATIC_ASSERT(BPF_MEMWORDS == 16, "BPF_MEMWORDS");

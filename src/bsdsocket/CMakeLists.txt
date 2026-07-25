@@ -4,11 +4,6 @@
 # the ThreadX Exec port, the SANA-II shim and the netstack singleton exist
 # (docs/RESEARCH.md S8, milestones 1-3). See AMINETXDUO_BSDSOCKET_LINK below.
 
-# src/netstack now provides the real netstack_* implementation; the weak stubs
-# in netstack_weak.c only exist for a bsdsocket-only build.
-option(AMINETXDUO_BSDSOCKET_WEAK_NETSTACK
-       "Provide weak netstack_* stubs so bsdsocket links standalone" OFF)
-
 option(AMINETXDUO_BSDSOCKET_LINK
        "Link LIBS:bsdsocket.library as an AmigaOS shared library" ON)
 
@@ -23,10 +18,6 @@ set(BSDSOCKET_SOURCES
     inet.c
     resolver.c
     library_runtime.c)      # DOSBase, rand(): no crt0 in a shared library
-
-if(AMINETXDUO_BSDSOCKET_WEAK_NETSTACK)
-    list(APPEND BSDSOCKET_SOURCES netstack_weak.c)
-endif()
 
 add_library(aminetxduo_bsdsocket STATIC ${BSDSOCKET_SOURCES})
 

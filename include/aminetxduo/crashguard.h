@@ -78,6 +78,19 @@ VOID ami_crash_set_reference(APTR code_address, const char *label);
 /* The exception name for a trap number, e.g. 4 -> "illegal instruction". */
 const char *ami_crash_name(ULONG number);
 
+/*
+ * Exec Alert (Guru) interception. A Guru is NOT a CPU exception -- Exec calls
+ * its own Alert() when it detects corruption, so the trap handler never sees
+ * it. These hook exec's Alert vector so a double free, corrupt memory list or
+ * reused IORequest gets logged with a decoded reason before the Guru appears.
+ *
+ * This patches Exec machine-wide: use it in tests and tools under the
+ * emulator, and ALWAYS remove it before exiting.
+ */
+BOOL ami_crash_install_alert_hook(VOID);
+VOID ami_crash_remove_alert_hook(VOID);
+const char *ami_crash_alert_name(ULONG num);
+
 /* One-line summary of the last crash, e.g. "illegal instruction at PC=00216e64". */
 VOID ami_crash_format(char *buf, ULONG len);
 

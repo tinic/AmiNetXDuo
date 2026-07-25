@@ -234,3 +234,109 @@ const AmiCrashInfo *ami_crash_info(VOID)
 {
     return ami_crash.valid ? &ami_crash : NULL;
 }
+
+/* ------------------------------------------------------- exec Alert hook -- */
+
+/*
+ * A Guru is NOT a CPU exception. When Exec detects corruption it calls its own
+ * Alert() -- LVO -108, with the alert number in d7 -- which never goes near
+ * tc_TrapCode. So the trap handler above cannot see a double free, a corrupt
+ * memory list or a reused IORequest, which are exactly the failures a stack
+ * with no memory protection produces.
+ *
+ * SetFunction() on exec's Alert vector catches them. The trampoline logs and
+ * then tail-jumps to the original, so normal Guru behaviour is unchanged.
+ *
+ * This patches Exec machine-wide, so it is a debugging aid: install it in tests
+ * and tools under the emulator, and always remove it before exiting.
+ */
+
+static APTR ami_alert_old;
+
+VOID ami_alert_report(ULONG num);
+VOID ami_alert_trampoline(VOID);
+
+__asm__(
+"       .text                                   \n"
+"       .globl  _ami_alert_trampoline           \n"
+"_ami_alert_trampoline:                         \n"
+"       movem.l %d0-%d1/%a0-%a1,-(%sp)          \n"  /* scratch regs only    */
+"       move.l  %d7,-(%sp)                      \n"  /* alert number as arg  */
+"       jsr     _ami_alert_report               \n"
+"       addq.l  #4,%sp                          \n"
+"       movem.l (%sp)+,%d0-%d1/%a0-%a1          \n"
+"       move.l  _ami_alert_old,-(%sp)           \n"  /* tail-jump to the     */
+"       rts                                     \n"  /* original Alert()     */
+);
+
+const char *ami_crash_alert_name(ULONG num)
+{
+    switch (num & 0x7FFFFFFFUL)
+    {
+        case 0x01000001: return "68000 exception vector checksum";
+        case 0x01000002: return "ExecBase checksum";
+        case 0x01000003: return "library checksum failure";
+        case 0x01000005: return "corrupt memory list detected in FreeMem";
+        case 0x01000006: return "no memory for interrupt servers";
+        case 0x01000007: return "InitStruct() of an APTR source";
+        case 0x01000008: return "semaphore in an illegal state";
+        case 0x01000009: return "FREEING MEMORY ALREADY FREED (double free)";
+        case 0x0100000A: return "illegal 68k exception taken";
+        case 0x0100000B: return "attempt to reuse an active IORequest";
+        case 0x0100000C: return "sanity check on memory list failed";
+        case 0x0100000D: return "IO attempted on a closed IORequest";
+        case 0x0100000E: return "stack appears to extend out of range";
+        case 0x0100000F: return "memory header not found (bad FreeMem address)";
+        case 0x01000010: return "illegal Remove() of a node";
+        default:         break;
+    }
+    if ((num & 0x00FF0000UL) == 0x00010000UL)
+        return "out of memory";
+    return "see exec/alerts.h";
+}
+
+VOID ami_alert_report(ULONG num)
+{
+    struct Task *task = FindTask(NULL);
+
+    AMI_ERROR("*** GURU %08lx: %s", (LONG)num, (LONG)ami_crash_alert_name(num));
+    AMI_ERROR("    task %08lx \"%s\"", (LONG)task,
+              (LONG)((task != NULL && task->tc_Node.ln_Name != NULL)
+                         ? (const char *)task->tc_Node.ln_Name : "?"));
+
+    {
+        BPTR fh = Open((STRPTR)"DH0:crash.txt", MODE_NEWFILE);
+
+        if (fh != 0)
+        {
+            FPuts(fh, (STRPTR)"GURU: ");
+            FPuts(fh, (STRPTR)ami_crash_alert_name(num));
+            FPuts(fh, (STRPTR)"\n");
+            Close(fh);
+        }
+    }
+}
+
+BOOL ami_crash_install_alert_hook(VOID)
+{
+    if (ami_alert_old != NULL)
+        return TRUE;
+
+    Forbid();
+    ami_alert_old = SetFunction((struct Library *)SysBase, -108,
+                                (APTR)ami_alert_trampoline);
+    Permit();
+
+    return ami_alert_old != NULL;
+}
+
+VOID ami_crash_remove_alert_hook(VOID)
+{
+    if (ami_alert_old == NULL)
+        return;
+
+    Forbid();
+    (VOID)SetFunction((struct Library *)SysBase, -108, ami_alert_old);
+    Permit();
+    ami_alert_old = NULL;
+}

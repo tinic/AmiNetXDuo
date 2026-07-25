@@ -83,11 +83,23 @@ target_link_libraries(netxduo_addons PUBLIC netxduo)
 
 # --------------------------------------------------------- our components ---
 
+# Host builds register their parser/VM tests with add_test() in the component
+# directories. enable_testing() has to be called HERE as well, or the build
+# root's CTestTestfile.cmake never descends into them and `ctest` from the top
+# reports "No tests were found" even though each subdirectory has some.
+if(NOT CMAKE_CROSSCOMPILING)
+    enable_testing()
+endif()
+
 add_subdirectory(port/threadx-amiga)
 add_subdirectory(port/netxduo-amiga)
 add_subdirectory(src/common)
 add_subdirectory(src/config)
 add_subdirectory(src/sana2)
+add_subdirectory(src/mbuf)
+if(AMINETXDUO_BPF)
+    add_subdirectory(src/bpf)
+endif()
 add_subdirectory(src/netstack)
 add_subdirectory(src/bsdsocket)
 add_subdirectory(src/usergroup)

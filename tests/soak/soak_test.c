@@ -70,6 +70,17 @@ extern volatile ULONG   _tx_thread_system_state;
 extern TX_THREAD       *_tx_thread_created_ptr;
 extern ULONG            _tx_thread_created_count;
 
+/*
+ * The port has no tx_amiga_kernel_stop().  A program that links it and then
+ * RETURNS to AmigaDOS leaves the periodic tick Task running with its entry
+ * point inside the code hunk DOS has just freed -- it fires 100 times a second
+ * and takes the machine down within milliseconds, before the boot script can
+ * even record the exit status.  These two are the port's own tick controls
+ * (port/threadx-amiga/src/tx_initialize_low_level.c); the teardown below uses
+ * them to shut the tick down by hand.  See s_stop_tick().
+ */
+extern volatile UINT    _tx_amiga_timer_stop;
+
 #define S_CURRENT   (*(TX_THREAD * volatile *) &_tx_thread_current_ptr)
 #define S_EXECUTE   (*(TX_THREAD * volatile *) &_tx_thread_execute_ptr)
 
@@ -744,6 +755,17 @@ ULONG       actual;
 
         w -> iters++;
 
+        /* --- coordinator-driven phase ------------------------------------ */
+
+        /* First thing in the iteration: a worker at the bottom of the priority
+           order can be starved for a long time by the higher-priority threads,
+           and answering the coordinator late looks like a port failure when it
+           is only queueing.  */
+        if (s_abort_request == (w -> index + 1UL))
+        {
+            s_wait_abort_victim(w);
+        }
+
         /* --- identity and baton ------------------------------------------ */
 
         me =  tx_thread_identify();
@@ -818,12 +840,6 @@ ULONG       actual;
             s_viol_hit(V_SLEEP_STATUS);
         }
 
-        /* --- coordinator-driven phase ------------------------------------ */
-
-        if (s_abort_request == (w -> index + 1UL))
-        {
-            s_wait_abort_victim(w);
-        }
     }
 }
 
@@ -1322,7 +1338,13 @@ UINT    old_threshold;
     s_pt_done =  1UL;
     Permit();
 
-    /* Now be the high-priority mutex user.  */
+    /*
+     * Now be the high-priority mutex user, so the low-priority workers really
+     * do suffer inversion and the inheritance path runs.  The sleep is 5 ticks
+     * rather than 1 deliberately: at priority 10 with no time slicing, a tighter
+     * loop starves the priority 16-22 workers badly enough that the soak stops
+     * measuring the port and starts measuring this thread.
+     */
     while (s_stop == 0UL)
     {
         if (tx_mutex_get(&s_mutex, S_MUTEX_WAIT) == TX_SUCCESS)
@@ -1330,7 +1352,7 @@ UINT    old_threshold;
             s_spin_us(200UL);
             (VOID) tx_mutex_put(&s_mutex);
         }
-        (VOID) tx_thread_sleep(1UL);
+        (VOID) tx_thread_sleep(5UL);
     }
 }
 
@@ -1465,12 +1487,15 @@ ULONG            i;
     /* Generous: a worker iteration can spend a full S_MUTEX_WAIT timing out on
        the contended mutex before it looks at the request.  A tight window here
        would produce a "failure" that is really this test's impatience.  */
-    for (i = 0UL; (i < 1000UL) && (s_abort_ready == 0UL); i++)
+    for (i = 0UL; (i < 200UL) && (s_abort_ready == 0UL); i++)
     {
-        (VOID) tx_thread_sleep(2UL);
+        (VOID) tx_thread_sleep(10UL);           /* up to 20 s */
     }
     if (!S_CHECK(s_abort_ready != 0UL, "wait-abort: victim reached the suspension", i))
     {
+        S_ERR("wait-abort: victim %s iters %ld mutex %ld timeouts %ld state %ld",
+              w -> name, w -> iters, w -> mutex_ops, w -> mutex_timeouts,
+              (ULONG) w -> thread.tx_thread_state);
         /* Leave the request set: if the victim gets there later, the teardown
            unstick pass aborts it rather than leaving it wedged forever.  */
         return;
@@ -1498,9 +1523,9 @@ ULONG            i;
     status =  tx_thread_wait_abort(&w -> thread);
     (VOID) S_TX_OK(status, "wait-abort: tx_thread_wait_abort accepted");
 
-    for (i = 0UL; (i < 500UL) && (s_abort_done == 0UL); i++)
+    for (i = 0UL; (i < 200UL) && (s_abort_done == 0UL); i++)
     {
-        (VOID) tx_thread_sleep(2UL);
+        (VOID) tx_thread_sleep(5UL);            /* up to 10 s */
     }
     (VOID) S_CHECK(s_abort_done != 0UL, "wait-abort: adopted thread woke up", i);
     (VOID) S_CHECK(s_abort_status == TX_WAIT_ABORTED,
@@ -1546,6 +1571,44 @@ ULONG            i;
 
     (VOID) S_CHECK(w -> iters > b, "suspend: it ran again after the resume",
                    w -> iters - b);
+}
+
+
+/*
+ * Stop the ThreadX periodic tick by hand.
+ *
+ * MUST be called after this Process has orphaned itself and before main()
+ * returns.  The tick Task's entry point lives in this program's code hunk; the
+ * moment AmigaDOS unloads the hunk, the next tick executes freed memory and the
+ * machine is gone inside 10 ms -- fast enough that the boot script never gets
+ * to record the exit status, so a perfectly good FAIL looks like a hang.
+ *
+ * There is no public API for this.  _tx_amiga_timer_stop and
+ * _tx_amiga_timer_task are the port's own internals; a real application cannot
+ * be expected to reach into them, which is exactly the gap being reported.
+ */
+static VOID s_stop_tick(VOID)
+{
+
+ULONG   i;
+
+
+    _tx_amiga_timer_stop =  TX_TRUE;
+
+    if (_tx_amiga_timer_task != (VOID *) 0)
+    {
+        /* The tick task waits on its timer request OR SIGF_SINGLE, so this
+           makes it notice the stop flag now instead of one tick from now.  */
+        Signal((struct Task *) _tx_amiga_timer_task, SIGF_SINGLE);
+    }
+
+    for (i = 0UL; (i < 250UL) && (_tx_amiga_timer_task != (VOID *) 0); i++)
+    {
+        Delay(1L);                              /* up to ~5 s */
+    }
+
+    (VOID) S_CHECK(_tx_amiga_timer_task == (VOID *) 0,
+                   "teardown: the ThreadX tick task exited", i);
 }
 
 
@@ -1991,6 +2054,8 @@ struct EClockVal ev;
         Delay(2L);
     }
     (VOID) S_CHECK(s_watchdog_done != 0UL, "teardown: the watchdog exited", i);
+
+    s_stop_tick();
 
     /* Raw Exec Tasks RemTask() themselves; wait before their stacks (static
        here, but the pattern matters) are considered dead.  */

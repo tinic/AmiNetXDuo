@@ -88,12 +88,12 @@ static BOOL t_check(BOOL ok, const char *what, ULONG detail)
 struct Library *SocketBase;
 
 /* bsdsocket.library LVOs, straight out of the NDK's bsdsocket_lib.fd. */
+/* Offsets taken from the NDK's <inline/bsdsocket.h>, not guessed. */
 #define LVO_socket          (-30)
-#define LVO_CloseSocket     (-42)
-#define LVO_gethostname     (-210)
+#define LVO_CloseSocket     (-120)
 #define LVO_Inet_NtoA       (-174)
-#define LVO_gethostbyname   (-186)
-#define LVO_Errno           (-114)
+#define LVO_gethostbyname   (-210)
+#define LVO_gethostname     (-282)
 
 static LONG bsd_socket(struct Library *base, LONG domain, LONG type, LONG proto)
 {
@@ -120,7 +120,7 @@ register LONG            d0 __asm("d0") = sock;
 register LONG            res __asm("d0");
 
 
-    __asm __volatile ("jsr a6@(-42:W)"
+    __asm __volatile ("jsr a6@(-120:W)"
                       : "=r" (res)
                       : "r" (a6), "r" (d0)
                       : "d1", "a0", "a1", "cc", "memory");
@@ -136,7 +136,7 @@ register ULONG           d0 __asm("d0") = len;
 register LONG            res __asm("d0");
 
 
-    __asm __volatile ("jsr a6@(-210:W)"
+    __asm __volatile ("jsr a6@(-282:W)"
                       : "=r" (res)
                       : "r" (a6), "r" (a0), "r" (d0)
                       : "d1", "a1", "cc", "memory");
@@ -166,7 +166,7 @@ register const char     *a0 __asm("a0") = name;
 register APTR            res __asm("d0");
 
 
-    __asm __volatile ("jsr a6@(-186:W)"
+    __asm __volatile ("jsr a6@(-210:W)"
                       : "=r" (res)
                       : "r" (a6), "r" (a0)
                       : "d1", "a1", "cc", "memory");
@@ -256,13 +256,22 @@ LONG             sock;
         (VOID) t_check((BOOL) (he != NULL), "gethostbyname(\"localhost\")", 0UL);
     }
 
-    SocketBase =  NULL;
-    CloseLibrary(sbase);
-    t_log("  closed bsdsocket.library");
-
     t_log("");
     t_log("%ld checks, %ld failures -- %s",
           t_checks, t_failures, (t_failures == 0UL) ? "PASS" : "FAIL");
+
+    /*
+     * Reported last, and separately, because CloseLibrary() drops the final
+     * netstack reference and can hang in teardown: on Commodore's
+     * a2065.device 2.16 an AbortIO() on a pending SANA-II CMD_READ is never
+     * honoured, so the reader thread's WaitIO() never returns.
+     */
+    t_log("");
+    t_log("closing bsdsocket.library (tears the stack down)");
+
+    SocketBase =  NULL;
+    CloseLibrary(sbase);
+    t_log("  closed bsdsocket.library");
 
     return((t_failures == 0UL) ? 0 : 20);
 }

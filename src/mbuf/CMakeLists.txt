@@ -18,6 +18,8 @@ target_include_directories(aminetxduo_mbuf
 # netxduo for mbuf_packet.c's NX_PACKET bridge.
 target_link_libraries(aminetxduo_mbuf PUBLIC netxduo aminetxduo_common)
 
+target_compile_options(aminetxduo_mbuf PRIVATE -Wall -Wextra)
+
 # ---------------------------------------------------------------- host test --
 #
 # Host only: links stdio and the stub <exec/types.h> from src/config/test/shim,

@@ -21,6 +21,8 @@ target_include_directories(aminetxduo_bpf
 # netxduo for bpf_tap_tx.c, which walks an NX_PACKET chain.
 target_link_libraries(aminetxduo_bpf PUBLIC netxduo aminetxduo_common)
 
+target_compile_options(aminetxduo_bpf PRIVATE -Wall -Wextra)
+
 # ---------------------------------------------------------------- host test --
 #
 #   cc -std=c11 -Wall -Wextra -DAMI_BPF_REPLICA -Iinclude \
