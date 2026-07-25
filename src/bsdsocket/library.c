@@ -117,6 +117,11 @@ static struct AmiSocketBase *bsd_lib_init(
 {
     SysBase = sysbase;
 
+    /* A shared library gets no C startup: dos.library and the random number
+       generator are ours to set up (library_runtime.c). */
+    if (!bsd_runtime_open())
+        return NULL;
+
     base->sb_SegList = seglist;
     base->sb_SysBase = sysbase;
     base->sb_Master  = NULL;
@@ -341,6 +346,8 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
     seglist = base->sb_SegList;
     neg     = base->sb_Lib.lib_NegSize;
     pos     = base->sb_Lib.lib_PosSize;
+
+    bsd_runtime_close();
 
     Remove((struct Node *)base);
     FreeMem((UBYTE *)base - neg, neg + pos);

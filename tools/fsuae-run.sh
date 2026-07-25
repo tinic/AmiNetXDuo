@@ -162,6 +162,30 @@ else
     export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
 fi
 
+
+# ---------------------------------------------------------------- cleanup ---
+#
+# Without this, two things leak emulator processes:
+#   * fs-uae ignoring SIGTERM (it can wedge in SDL/GL teardown), and
+#   * this script being killed -- an interrupted run orphans its child, which
+#     then sits forever holding a window and a CPU.
+# Escalate TERM -> KILL, and run it from a trap so it happens even when the
+# script does not reach its own exit path.
+FSUAE_PID=""
+cleanup_emulator() {
+    [ -n "$FSUAE_PID" ] || return 0
+    kill -TERM "$FSUAE_PID" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        kill -0 "$FSUAE_PID" 2>/dev/null || { FSUAE_PID=""; return 0; }
+        sleep 0.5
+    done
+    echo "!! fs-uae $FSUAE_PID ignored SIGTERM; sending SIGKILL" >&2
+    kill -KILL "$FSUAE_PID" 2>/dev/null || true
+    FSUAE_PID=""
+}
+trap cleanup_emulator EXIT INT TERM HUP
+
+
 "$FSUAE" "$CFG" >"$ROOT/build/fsuae$TAG.log" 2>&1 &
 FSUAE_PID=$!
 
@@ -183,7 +207,7 @@ while [ "$elapsed" -lt "$TIMEOUT" ]; do
     elapsed=$((elapsed + 1))
 done
 
-kill "$FSUAE_PID" 2>/dev/null || true
+cleanup_emulator
 wait "$FSUAE_PID" 2>/dev/null || true
 
 # ------------------------------------------------------------------- output --

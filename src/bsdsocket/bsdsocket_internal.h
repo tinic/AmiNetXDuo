@@ -286,6 +286,10 @@ typedef struct AmiSocket
  * bsdsocket_vectors.h.
  */
 
+/* library_runtime.c -- what a shared library has to supply for itself. */
+BOOL  bsd_runtime_open(VOID);
+VOID  bsd_runtime_close(VOID);
+
 /* library.c */
 struct AmiSocketBase *bsd_lib_open(register ULONG version __asm("d0"),
                                    register struct AmiSocketBase *SocketBase __asm("a6"));

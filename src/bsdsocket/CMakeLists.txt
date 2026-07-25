@@ -21,7 +21,8 @@ set(BSDSOCKET_SOURCES
     select.c
     errno.c
     inet.c
-    resolver.c)
+    resolver.c
+    library_runtime.c)      # DOSBase, rand(): no crt0 in a shared library
 
 if(AMINETXDUO_BSDSOCKET_WEAK_NETSTACK)
     list(APPEND BSDSOCKET_SOURCES netstack_weak.c)
