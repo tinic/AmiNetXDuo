@@ -39,19 +39,30 @@ VOID ami_sana2_set_block_hooks(AmiSana2BlockHook before_wait,
 }
 
 /*
- * Guarded on tx_thread_identify(): ami_sana2_open() runs on a plain Exec task
- * before ThreadX has anything to say about it, and handing back a baton that
- * was never held would be worse than holding one for the length of a DoIO.
+ * Both hooks are called unconditionally, and the pairing is the hook's problem
+ * rather than ours.
+ *
+ * They used to be guarded on tx_thread_identify() != TX_NULL, on the reasoning
+ * that ami_sana2_open() runs on a plain Exec task and must not hand back a
+ * baton it never held. That guard is unusable: a real "before wait" hook
+ * releases the baton, which clears _tx_thread_current_ptr, which makes
+ * tx_thread_identify() return TX_NULL -- so the matching "after wait" hook was
+ * silently skipped and the thread ran on without the baton. Verified under
+ * FS-UAE, 2026-07-25: the NX_IP thread came back from S2_ONLINE unbatoned and
+ * every ThreadX service it called afterwards returned garbage.
+ *
+ * src/netstack/netstack_baton.c keeps a per-Exec-Task record of whether the
+ * enter hook actually did anything, which is the only place that can know.
  */
 VOID ami_sana2_block_enter(VOID)
 {
-    if (ami_block_enter != NULL && tx_thread_identify() != TX_NULL)
+    if (ami_block_enter != NULL)
         ami_block_enter();
 }
 
 VOID ami_sana2_block_leave(VOID)
 {
-    if (ami_block_leave != NULL && tx_thread_identify() != TX_NULL)
+    if (ami_block_leave != NULL)
         ami_block_leave();
 }
 

@@ -4,11 +4,13 @@
 # the ThreadX Exec port, the SANA-II shim and the netstack singleton exist
 # (docs/RESEARCH.md S8, milestones 1-3). See AMINETXDUO_BSDSOCKET_LINK below.
 
+# src/netstack now provides the real netstack_* implementation; the weak stubs
+# in netstack_weak.c only exist for a bsdsocket-only build.
 option(AMINETXDUO_BSDSOCKET_WEAK_NETSTACK
-       "Provide weak netstack_* stubs so bsdsocket links standalone" ON)
+       "Provide weak netstack_* stubs so bsdsocket links standalone" OFF)
 
 option(AMINETXDUO_BSDSOCKET_LINK
-       "Link LIBS:bsdsocket.library (needs the port + netstack workstreams)" OFF)
+       "Link LIBS:bsdsocket.library as an AmigaOS shared library" ON)
 
 set(BSDSOCKET_SOURCES
     library.c               # romtag, Open/Close/Expunge, child bases
@@ -31,7 +33,8 @@ target_include_directories(aminetxduo_bsdsocket PUBLIC
     ${AMINETXDUO_CORE_INCLUDES}
     "${CMAKE_CURRENT_SOURCE_DIR}")
 
-target_link_libraries(aminetxduo_bsdsocket PUBLIC aminetxduo_common netxduo)
+target_link_libraries(aminetxduo_bsdsocket PUBLIC
+    aminetxduo_common netxduo aminetxduo_netstack)
 
 # A shared library has no startup code and must not drag in newlib's stdio.
 target_compile_options(aminetxduo_bsdsocket PRIVATE -Wall -Wextra)
@@ -60,12 +63,21 @@ endif()
 # NOT usable with this newlib toolchain (docs/RESEARCH.md S5.4).
 
 if(AMINETXDUO_BSDSOCKET_LINK)
+    # The sources are listed directly rather than linked from the archive: an
+    # archive member is only pulled in when something references it, and NOTHING
+    # references the romtag -- it is found by Exec scanning the loaded segment.
     add_executable(bsdsocket_library ${BSDSOCKET_SOURCES})
     set_target_properties(bsdsocket_library PROPERTIES
         OUTPUT_NAME "bsdsocket.library")
     target_include_directories(bsdsocket_library PRIVATE
         ${AMINETXDUO_CORE_INCLUDES} "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(bsdsocket_library PRIVATE
-        aminetxduo_common netxduo netxduo_addons threadx)
-    target_link_options(bsdsocket_library PRIVATE -nostartfiles -nostdlib)
+        aminetxduo_netstack aminetxduo_sana2 aminetxduo_config
+        aminetxduo_common netxduo_addons netxduo threadx threadx_port)
+
+    # -nostartfiles, not -nostdlib: there is no crt0 in a shared library, but
+    # ThreadX and NetX Duo do want memset/memcpy/memcmp and gcc wants its
+    # integer-divide helpers, and the linker only pulls the archive members that
+    # are actually referenced -- no stdio comes along for the ride.
+    target_link_options(bsdsocket_library PRIVATE -nostartfiles)
 endif()

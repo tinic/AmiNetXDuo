@@ -1,0 +1,3 @@
+# FS-UAE SLIRP: gateway and DNS forwarder both live at 10.0.2.2.
+nameserver 10.0.2.2
+domain localdomain

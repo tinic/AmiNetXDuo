@@ -109,7 +109,12 @@ mkdir -p "$HD/env" "$HD/envarc" "$HD/t" "$HD/clips"
 # stdout is redirected to a file on the host so Printf() output from a test is
 # visible after the run -- otherwise it only ever reaches the emulator's console
 # window and is lost.
+# failat is essential: AmigaDOS aborts a script as soon as a command returns a
+# code at or above the fail level (10 by default), so without it any test that
+# exits nonzero never reaches the line that records its status -- the run just
+# times out and the failure looks like a hang.
 cat > "$HD/s/Startup-Sequence" <<EOF
+failat 9999
 c:envsetup
 $EXE_NAME >DH0:stdout.txt
 echo >DH0:.done "\$RC"
@@ -117,9 +122,17 @@ EOF
 
 # ------------------------------------------------------------------ running --
 
+# Every fs-uae instance otherwise shares ~/FS-UAE for its cache, logs, save
+# states and floppy overlays, so two concurrent runs fight over those files and
+# one of them quits early -- which looks exactly like a crash in the code under
+# test. Give each run a private base directory.
+FSUAE_BASE="$ROOT/build/fsuae-base$TAG"
+mkdir -p "$FSUAE_BASE"
+
 CFG="$ROOT/build/test$TAG.fs-uae"
 cat > "$CFG" <<EOF
 [fs-uae]
+base_dir = $FSUAE_BASE
 amiga_model = $MODEL
 kickstart_file = $KICKSTART
 hard_drive_0 = $HD
@@ -154,6 +167,7 @@ FSUAE_PID=$!
 
 status=124
 elapsed=0
+EARLY_EXIT=0
 while [ "$elapsed" -lt "$TIMEOUT" ]; do
     if [ -f "$HD/.done" ]; then
         status=$(tr -dc '0-9' < "$HD/.done" | head -c 4)
@@ -161,7 +175,8 @@ while [ "$elapsed" -lt "$TIMEOUT" ]; do
         break
     fi
     if ! kill -0 "$FSUAE_PID" 2>/dev/null; then
-        echo "!! fs-uae exited early; see build/fsuae$TAG.log" >&2
+        echo "!! fs-uae exited early after ${elapsed}s" >&2
+        EARLY_EXIT=1
         break
     fi
     sleep 1
@@ -185,6 +200,25 @@ for produced in "$HD"/*.txt "$HD"/*.log; do
     echo "---- $(basename "$produced") ----"
     cat "$produced"
 done
+
+# A crash the guard caught leaves this behind even when nothing else survives.
+if [ -f "$HD/crash.txt" ]; then
+    echo "---- CRASH ----"
+    cat "$HD/crash.txt"
+fi
+
+# When the emulator dies rather than the program exiting, the emulator log is
+# the only evidence left -- show it rather than making the caller go find it.
+if [ "$EARLY_EXIT" = "1" ]; then
+    echo "---- fs-uae log (tail) ----"
+    tail -15 "$ROOT/build/fsuae$TAG.log" 2>/dev/null
+    UAELOG="$FSUAE_BASE/Cache/Logs/fs-uae.log.txt"
+    if [ -f "$UAELOG" ]; then
+        echo "---- UAE core log: faults and warnings ----"
+        grep -iE "illegal|exception|guru|trap|bus error|address error|unknown" \
+            "$UAELOG" 2>/dev/null | tail -15 || echo "(none logged)"
+    fi
+fi
 
 if [ "$status" = "124" ]; then
     echo "==> TIMEOUT after ${TIMEOUT}s (no DH0:.done)"

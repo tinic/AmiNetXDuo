@@ -44,6 +44,15 @@ ULONG ami_alloc_count(VOID);          /* debug: outstanding allocations */
 /*
  * Serial/console debug output. Compiled out entirely in release builds except
  * for AMI_LOG_ERROR. Never call from an interrupt.
+ *
+ * FORMATTING: this goes through exec's RawDoFmt, which is NOT printf.
+ *   * Use %ld / %lu / %lx / %s only -- all longword-sized. Cast every argument
+ *     to LONG, including pointers and strings: ami_log(..., "%s", (LONG)str).
+ *   * Do NOT use %c or bare %d/%u/%x: RawDoFmt consumes a *word* for those,
+ *     while the C caller pushes a longword, so every argument after one is
+ *     misaligned and prints garbage. This bites silently -- the first few
+ *     values look right and the rest are nonsense.
+ *   * No %p, no %f, no field-width-from-argument.
  */
 VOID ami_log(int level, const char *fmt, ...);
 

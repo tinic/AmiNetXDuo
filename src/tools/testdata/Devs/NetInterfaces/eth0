@@ -1,0 +1,13 @@
+# AmiNetXDuo tools smoke test -- a plausible Roadshow interface file.
+# Staged as DH0:Devs/NetInterfaces/eth0 by tools/fsuae-run.sh so that
+# AddNetInterface has something real to parse before it discovers that no
+# stack is running.
+
+device        = a2065.device
+unit          = 0
+configure     = dhcp
+address       = 192.168.1.10
+netmask       = 255.255.255.0
+iprequests    = 64
+writerequests = 64
+copymode      = fast
