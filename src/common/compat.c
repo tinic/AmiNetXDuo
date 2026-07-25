@@ -132,17 +132,20 @@ VOID ami_signal_free(BYTE sig)
  * EClock-based millisecond counter. The EClock rate is machine dependent
  * (~709379 Hz PAL, ~715909 Hz NTSC), so read it once and scale.
  */
-static struct Device      *ami_timer_base;
+/* The inline ReadEClock() macro resolves the library base through TimerBase. */
+struct Device             *TimerBase;
+
 static struct timerequest  ami_timer_req;
 static struct MsgPort      ami_timer_port;
-static ULONG               ami_eclock_rate;
+static ULONG               ami_eclock_per_ms;
 static struct EClockVal    ami_eclock_base;
 
 static BOOL ami_timer_init(VOID)
 {
     struct EClockVal ev;
+    ULONG            rate;
 
-    if (ami_timer_base != NULL)
+    if (TimerBase != NULL)
         return TRUE;
 
     ami_timer_port.mp_Node.ln_Type = NT_MSGPORT;
@@ -164,8 +167,18 @@ static BOOL ami_timer_init(VOID)
                    (struct IORequest *)&ami_timer_req, 0) != 0)
         return FALSE;
 
-    ami_timer_base  = ami_timer_req.tr_node.io_Device;
-    ami_eclock_rate = ReadEClock(&ev);
+    TimerBase = ami_timer_req.tr_node.io_Device;
+
+    /*
+     * Scale to ticks-per-millisecond up front: a 64-bit divide would pull
+     * __udivdi3 out of libgcc, which a shared library should not need.
+     * ~709 ticks/ms PAL, ~716 NTSC -- a ~0.1% rounding error, which is well
+     * inside what anything here cares about.
+     */
+    rate = ReadEClock(&ev);
+    ami_eclock_per_ms = rate / 1000UL;
+    if (ami_eclock_per_ms == 0)
+        ami_eclock_per_ms = 1;
     ami_eclock_base = ev;
 
     return TRUE;
@@ -187,7 +200,5 @@ ULONG ami_millis(VOID)
      */
     ticks = ev.ev_lo - ami_eclock_base.ev_lo;
 
-    /* ticks * 1000 / rate, staying inside 32 bits for sane elapsed times. */
-    return (ULONG)(((unsigned long long)ticks * 1000ULL) /
-                   (unsigned long long)ami_eclock_rate);
+    return ticks / ami_eclock_per_ms;
 }

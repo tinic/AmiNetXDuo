@@ -67,3 +67,9 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# FS-UAE test harness artefacts
+build/testhd/
+build/serial.log
+build/fsuae.log
+build/test.fs-uae
