@@ -43,6 +43,7 @@
 #include "tx_amiga.h"
 
 #include "aminetxduo/compat.h"
+#include "aminetxduo/crashguard.h"
 
 #include <exec/types.h>
 #include <exec/tasks.h>
@@ -106,6 +107,15 @@ extern volatile UINT    _tx_amiga_timer_stop;
 #endif
 #ifndef S_SKIP_DELETE
 #define S_SKIP_DELETE       0
+#endif
+#ifndef S_SKIP_CHURN
+#define S_SKIP_CHURN        0           /* bisecting: no adopt/orphan churn  */
+#endif
+#ifndef S_SKIP_TASKS
+#define S_SKIP_TASKS        0           /* bisecting: no raw AddTask workers */
+#endif
+#ifndef S_NO_REMTASK
+#define S_NO_REMTASK        0           /* bisecting: leak Tasks, no RemTask */
 #endif
 
 #define S_MUTEX_WAIT        (1UL * S_TPS)   /* never TX_WAIT_FOREVER in the   */
@@ -304,7 +314,8 @@ static VOID s_newlist(struct List *list)
  * arbitrary bsdsocket.library client would be, and only then adopted.
  */
 static struct Task *s_spawn_task(const char *name, BYTE pri, VOID (*entry)(VOID),
-                                 APTR stack, ULONG stack_size, APTR user)
+                                 APTR stack, ULONG stack_size, APTR user,
+                                 APTR *block_out, ULONG *block_size_out)
 {
 
 struct MemList  *memlist;
@@ -341,6 +352,15 @@ ULONG            block_size;
     {
         FreeMem((APTR) memlist, block_size);
         return((struct Task *) 0);
+    }
+
+    if (block_out != (APTR *) 0)
+    {
+        *block_out =  (APTR) memlist;
+    }
+    if (block_size_out != (ULONG *) 0)
+    {
+        *block_size_out =  block_size;
     }
 
     return(task);
@@ -405,6 +425,8 @@ struct s_worker
     volatile ULONG  flag_gets;
     ULONG           last_tick;
     struct Task    *task;
+    APTR            memblock;       /* what s_spawn_task() AllocMem'd        */
+    ULONG           memblock_size;
 };
 
 struct s_churner
@@ -910,9 +932,45 @@ struct s_worker *w;
 
     s_worker_run(w);
 
+    /*
+     * Before RemTask() frees the block registered in tc_MemEntry, print what
+     * Exec is about to free and what we actually allocated.  A mismatch means
+     * the memory list was corrupted; a match means the block really was freed
+     * by somebody else first.  This is the difference between "the port
+     * scribbled on a task structure" and "the port freed a task twice".
+     */
+    {
+        struct Task    *me;
+        struct MemList *ml;
+
+        me =  FindTask((STRPTR) 0);
+        ml =  (struct MemList *) me -> tc_MemEntry.lh_Head;
+
+        S_LOG("%s: exiting, task 0x%lx block 0x%lx/%ld memlist 0x%lx",
+              w -> name, (ULONG) me, (ULONG) w -> memblock, w -> memblock_size,
+              (ULONG) ml);
+
+        if ((ml != (struct MemList *) 0) && (ml -> ml_Node.ln_Succ != (struct Node *) 0))
+        {
+            S_LOG("%s: memlist entries %ld addr 0x%lx len %ld",
+                  w -> name, (ULONG) ml -> ml_NumEntries,
+                  (ULONG) ml -> ml_ME[0].me_Addr, ml -> ml_ME[0].me_Length);
+        }
+        else
+        {
+            S_ERR("%s: tc_MemEntry is EMPTY or corrupt before RemTask", w -> name);
+        }
+    }
+
     Forbid();
     s_tasks_exited++;
+#if !S_NO_REMTASK
     RemTask((struct Task *) 0);
+#else
+    /* Bisecting: leak the Task rather than let Exec free tc_MemEntry.  */
+    Permit();
+    Wait(0UL);
+#endif
 }
 
 
@@ -1724,6 +1782,15 @@ struct EClockVal ev;
     S_LOG("  %ld s, %ld Hz tick, %ld workers (%ld adopted), %ld churners",
           S_SOAK_SECONDS, S_TPS, (ULONG) S_WORKERS, 4UL, (ULONG) S_CHURNERS);
 
+    /*
+     * A Guru is not a CPU exception -- Exec raises it itself when it detects
+     * corruption (a double free, a mangled memory list), so nothing but this
+     * hook will name the task responsible before the machine stops.  It patches
+     * Exec machine-wide and is removed before we return.
+     */
+    (VOID) S_CHECK(ami_crash_install_alert_hook() != FALSE,
+                   "main: Exec Alert hook installed", 0);
+
     /* ami_millis() opens timer.device and sets the shared TimerBase; after
        that ReadEClock() is ours to use for sub-tick timing.  */
     (VOID) ami_millis();
@@ -1754,10 +1821,19 @@ struct EClockVal ev;
 
         if (s_worker_cfg[i].kind == S_KIND_TASK)
         {
+#if S_SKIP_TASKS
+            s_worker[i].finished =  1UL;
+            s_worker[i].started  =  1UL;
+            s_worker[i].iters    =  S_MIN_ITERS;
+            s_worker[i].mutex_ops =  1UL;
+            continue;
+#endif
             s_worker[i].task =  s_spawn_task(s_worker_cfg[i].name, 0,
                                              s_worker_task_entry,
                                              (APTR) s_worker_stack[i], S_WORKER_STACK,
-                                             (APTR) &s_worker[i]);
+                                             (APTR) &s_worker[i],
+                                             &s_worker[i].memblock,
+                                             &s_worker[i].memblock_size);
             if (s_worker[i].task != (struct Task *) 0)
             {
                 spawned++;
@@ -1787,6 +1863,14 @@ struct EClockVal ev;
     spawned =  0UL;
     for (i = 0UL; i < (ULONG) S_CHURNERS; i++)
     {
+#if S_SKIP_CHURN
+        s_churner[i].finished  =  1UL;
+        s_churner[i].cycles    =  S_MIN_CHURN;
+        s_churner[i].fast_path =  1UL;
+        s_churner[i].slow_path =  1UL;
+        spawned++;
+        continue;
+#endif
         s_churner[i].proc =  s_spawn_proc(s_churner[i].name, 0L, s_churn_entry,
                                           S_WORKER_STACK, (APTR) &s_churner[i]);
         if (s_churner[i].proc != (struct Process *) 0)
@@ -2060,6 +2144,8 @@ struct EClockVal ev;
     /* Raw Exec Tasks RemTask() themselves; wait before their stacks (static
        here, but the pattern matters) are considered dead.  */
     Delay(10L);
+
+    ami_crash_remove_alert_hook();
 
     /*
      * The port has no shutdown path: the scheduler Task, the tick Task and the
