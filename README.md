@@ -73,11 +73,41 @@ checks. The full contract is documented in
 [`include/aminetxduo/tlslib.h`](include/aminetxduo/tlslib.h), including what
 `WaitSelect()` does and does not tell you once TLS sits in the middle.
 
-TLS is nevertheless still disabled by default, and the reason is now neither
-speed nor capability: nothing in the distribution *uses* it yet, and a release
-built on a machine without a CA bundle would ship a trust store that refuses
-every connection. Both are small pieces of work; see
+The `fetch` command uses it, retrieving an `http://` or `https://` URL to a file
+or to standard output:
+
+```
+fetch URL/A,TO/K,HEADERS/S,QUIET/S,NOVERIFY/S,TIMEOUT/N/K
+```
+
+It ships in every build, since the `https:` path is an `OpenLibrary` at run time
+rather than a link-time dependency; only a `-DAMINETXDUO_TLS=ON` build ships the
+`LIBS:tls.library` that path needs. The trust store shipped with a release is
+reproducible: 119 Mozilla roots, 128,928 bytes, built from a hash-pinned
+snapshot in `third_party/cacert/` rather than scavenged from whatever the build
+machine happened to have. Both the input bundle and the generated store are
+pinned, and both are fatal, so host-independence is a checked claim rather than
+an intention; it has been verified byte-identical across macOS/arm64 and
+Linux/x86-64. This is the one exception to the MIT licence: Mozilla's root set
+is MPL 2.0, which is file-scoped and affects nothing else in the tree. See
+[`third_party/cacert/README.md`](third_party/cacert/README.md).
+
+TLS is nevertheless still disabled by default, and the reason is now speed after
+all, though not in the way the earlier figures suggested. A handshake is not too
+slow in the abstract; it is too slow for the patience of the CDN at the other
+end. At 13.9 MHz a two-certificate chain completes in 6.8 s and a three-deep
+chain takes around 23 s, and Cloudflare closes the connection at somewhere
+between 11.3 and roughly 20 s. `fetch` then reports "the connection is closed"
+and returns 10, which is correct behaviour and not a useful default. Raise the
+clock and the same chains complete: `www.iana.org` in 11.3 s at 24.5 MHz, and
+`example.com`, at four certificates, in 9.8 s at 56 MHz. Roughly a 2× on the
+client half would change the answer. See
 [docs/RESEARCH.md §9](docs/RESEARCH.md#9-decisions-2026-07-24).
+
+Nothing here can be taken down by a peer that is slow, rude or absent:
+`tests/tls/run-hangup.sh` stands four badly-behaved servers on the host — reset,
+FIN, silence, and non-TLS bytes — and each produces a legible error and `rc 10`
+with the machine carrying on.
 
 ## How it fits together
 
