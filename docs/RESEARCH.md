@@ -779,6 +779,9 @@ Findings worth keeping regardless of whether TLS ships:
 - **ECDSA P-256 verify is 3.5× slower than RSA-2048 verify** here, inverting the usual
   modern advice: prefer RSA certificate chains on this hardware. The industry's drift
   toward ECDSA certificates therefore works against us.
+  **→ Superseded by the P-256 work below**: verify is now 1.961 s against RSA's 0.681 s,
+  so the gap is 2.9× on a sub-second operation rather than 3.5× on a seven-second one.
+  ECDSA chains are fine; RSA is merely still cheaper.
 - **`NX_RAND` is undefined**, so `nx_api.h` falls back to newlib `rand()` — a 32-bit LCG —
   to generate ECDHE private keys and the client random. **A shipping blocker for any real
   TLS use**, independent of speed.
@@ -815,10 +818,12 @@ requires destination == source — an addressing-mode argument, not an operation
 **Consequence for viability: RSA is no longer the blocker for a TLS client.** Three
 RSA-2048 public operations per handshake go from 5.95 s to **2.04 s**. What now dominates
 is elliptic-curve arithmetic, untouched by that work: ECDHE P-256 shared secret 5.18 s
-and ECDSA P-256 verify 6.97 s, so an ECDHE_ECDSA handshake is still ~30 s. The next step
-is the same lever — `nx_crypto_ec.c` calls `_nx_crypto_huge_number_multiply`/`_square` in
-the same inner loops, so the ~1.4× limb-loop win should carry over (though P-256's fast
-reduction means the windowing and squaring wins do not).
+and ECDSA P-256 verify 6.97 s, so an ECDHE_ECDSA handshake is still ~30 s.
+
+**→ Also superseded.** The follow-on took the EC arithmetic 3.6–3.9× (table below), so
+that ~30 s of asymmetric work is now **3.71 s**. The expectation stated here — that the
+~1.4× limb-loop win would carry over — turned out to be the *wrong* prediction: the limb
+loop was not the bottleneck, the field *representation* was. See below.
 
 #### Update: `src/crypto68k/c68k_p256.*` makes P-256 3.7× faster — EC is no longer the blocker either
 
