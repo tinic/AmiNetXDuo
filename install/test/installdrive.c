@@ -105,7 +105,23 @@
 #endif
 
 #define POLL_TICKS      50      /* Delay() counts 1/50 s, so: one second */
-#define GONE_LIMIT      6       /* windowless polls before we call it done */
+
+/*
+ * Windowless polls before we call the run finished.
+ *
+ * The Installer takes its window DOWN while it copies, and puts it back for
+ * the next page, so a gap here is normal and its length is however long the
+ * copy takes on an emulated 68020.  Six was enough for the four-file payload
+ * this started with; adding tls.library (273 KB) and the certificate store
+ * (140 KB) pushed the gap past it, and the run was reported as "did not
+ * complete cleanly" with everything up to the copy correctly installed --
+ * which reads exactly like a script that aborted, and is not.
+ *
+ * Twenty is not a licence to hang: MAX_POLLS still bounds the whole run, and a
+ * genuinely stuck Installer keeps its window up, so it fails on the cap
+ * instead.
+ */
+#define GONE_LIMIT      20
 #define MAX_POLLS       150     /* hard cap: two and a half minutes */
 
 static struct MsgPort *reply_port;

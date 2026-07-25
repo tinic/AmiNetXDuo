@@ -77,6 +77,28 @@
  *   removable without a non-blocking record layer, and it is bounded: the rest
  *   of a record is already on its way.  TLSA_Timeout puts a ceiling on it.
  *
+ * THE TRUST STORE
+ *
+ *   DEVS:Internet/certificates, a file of certificate authorities the machine
+ *   trusts.  Without it TLSOpen() fails with TLS_ERR_TRUSTSTORE rather than
+ *   connecting to something it cannot vouch for.  It is read fresh on every
+ *   connection, so replacing the file is the whole of the update story: no
+ *   reboot, no flushing the library.  tools/mkcertstore.py turns any PEM
+ *   bundle into one.
+ *
+ * THE CLOCK
+ *
+ *   Certificates carry validity dates and a great many Amigas have no working
+ *   clock, in which case AmigaOS reports 1978 -- earlier than every certificate
+ *   on the internet.  Rather than refuse every connection on such a machine,
+ *   this library SKIPS the validity dates when the clock is obviously unset and
+ *   checks them when it is not.  TLSInfo()'s ti_ExpiryChecked says which
+ *   happened, so a program that wants to tell the user can.
+ *
+ *   The chain signature and the host name are checked either way, so an
+ *   impostor is still refused; what is given up is the guarantee that a
+ *   long-since-revoked certificate has stopped working.  Set your clock.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -259,9 +281,23 @@ TLSOpenA(struct Library *base, APTR socket_base, LONG sock,
     return res;
 }
 
-#define TLSOpen(base, sockbase, sock, ...) \
-    ({ const struct TagItem _tlstags[] = { __VA_ARGS__ }; \
-       TLSOpenA((base), (sockbase), (sock), _tlstags); })
+/*
+ * The varargs spelling.  Tags are written flat, as pairs, and the terminator
+ * is appended for you:
+ *
+ *     tls = TLSOpen(TLSBase, SocketBase, s,
+ *                   TLSA_HostName, (ULONG)"example.com",
+ *                   TLSA_Error,    (ULONG)&why);
+ *
+ * At least one tag is required -- call TLSOpenA(base, sockbase, sock, NULL) if
+ * you want the defaults and nothing else.  A statement expression rather than a
+ * true varargs stub because a shared library's ABI is register-based and this
+ * header has no .fd to generate a stack-to-register shim from.
+ */
+#define TLSOpen(base, sockbase, sock, ...)                                  \
+    ({ const ULONG _tlstags[] = { __VA_ARGS__, TAG_END, 0 };                \
+       TLSOpenA((base), (sockbase), (sock),                                 \
+                (const struct TagItem *)_tlstags); })
 
 static __inline VOID TLSClose(struct Library *base, struct TLSConnection *conn)
 {

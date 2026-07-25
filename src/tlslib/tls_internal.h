@@ -22,16 +22,23 @@
 #ifndef AMINETXDUO_TLSLIB_INTERNAL_H
 #define AMINETXDUO_TLSLIB_INTERNAL_H
 
+/*
+ * tx_api.h FIRST, and this is not a style choice: port/threadx-amiga/inc/
+ * tx_port.h typedefs VOID, and so does <exec/types.h>.  Whichever comes second
+ * loses, and the error ("two or more data types in declaration specifiers") is
+ * a hundred lines away from the include that caused it.  tests/tls/tls_https.c
+ * has the same ordering for the same reason.
+ */
+#include "tx_api.h"
+#include "nx_api.h"
+#include "nx_secure_tls.h"
+#include "nx_secure_x509.h"
+
 #include <exec/types.h>
 #include <exec/libraries.h>
 #include <exec/lists.h>
 #include <exec/semaphores.h>
 #include <dos/dos.h>
-
-#include "tx_api.h"
-#include "nx_api.h"
-#include "nx_secure_tls.h"
-#include "nx_secure_x509.h"
 
 #include "aminetxduo/netstack.h"
 #include "aminetxduo/nxcontext.h"
@@ -85,18 +92,27 @@ typedef struct TLSStoreEntry
     ULONG   se_Length;
 } TLSStoreEntry;
 
+/*
+ * The index lives in the CONNECTION, not in the library base, and is read
+ * fresh at every TLSOpen().
+ *
+ * Caching it in the base was the obvious design and was wrong twice over.  It
+ * needs reload detection, because "replace the file" is the whole update story
+ * and a resident library would otherwise keep serving the old roots.  And it
+ * puts a pointer that one task can free -- a second TLSOpen() with a different
+ * TLSA_TrustStore, or after the file changed -- under a pointer another task is
+ * reading from inside a handshake, on a machine with no memory protection.
+ *
+ * A per-connection index costs 1,428 bytes for the Mozilla set, against the
+ * ~40 KB the connection already needs, and one 1.4 KB read against a handshake
+ * that spends seconds on arithmetic.  In exchange the reload question does not
+ * exist (every connection reads the current file) and neither does the sharing.
+ */
 typedef struct TLSStore
 {
     char            ts_Path[TLS_STORE_PATH_MAX];
     TLSStoreEntry  *ts_Index;
     ULONG           ts_Count;
-
-    /* What the file looked like when the index was read, so that replacing
-       the file is picked up without unloading the library. */
-    LONG            ts_FileSize;
-    LONG            ts_FileDays;
-    LONG            ts_FileMins;
-    LONG            ts_FileTicks;
 } TLSStore;
 
 /* ---------------------------------------------------------------- base --- */
@@ -108,12 +124,9 @@ struct TLSLibBase
     APTR                    tb_SegList;
     struct ExecBase        *tb_SysBase;
 
+    /* Guards the one-time crypto-table build below, and nothing else: every
+       other piece of state this library has belongs to a connection. */
     struct SignalSemaphore  tb_Lock;
-
-    /* One cached trust-store index per path, and only the last path used.
-       A program that pins its own store and one that uses the system store in
-       the same session simply reload; neither is on a hot path. */
-    TLSStore                tb_Store;
 
     BOOL                    tb_CryptoReady;   /* ami_tls_crypto_initialize() */
 };
@@ -165,7 +178,8 @@ struct TLSConnection
     NX_PACKET                  *tc_Pending;
     ULONG                       tc_PendingOffset;
 
-    TLSStore                   *tc_Store;
+    TLSStore                    tc_StoreIndex;
+    TLSStore                   *tc_Store;      /* == &tc_StoreIndex */
     char                        tc_StorePath[TLS_STORE_PATH_MAX];
 
     ULONG                       tc_HandshakeMillis;
@@ -207,8 +221,14 @@ ULONG tls_store_fetch(TLSStore *store, ULONG key, UCHAR *buffer, ULONG size);
 ULONG tls_cert_issuer_key(const NX_SECURE_X509_CERT *cert);
 
 /* Install the lazy-loading verifier on a session.  Must be called after
-   _nx_secure_tls_session_create(). */
+   _nx_secure_tls_session_create(); tls_store_detach() before the session is
+   deleted. */
 VOID  tls_store_attach(TLSConnection *conn);
+VOID  tls_store_detach(TLSConnection *conn);
+
+/* The connection behind a session, for the callbacks nx_secure hands only a
+   session pointer to. */
+TLSConnection *tls_conn_for_session(const NX_SECURE_TLS_SESSION *session);
 
 /* ----------------------------------------------------------- tls_time.c -- */
 

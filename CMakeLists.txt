@@ -175,6 +175,13 @@ if(AMINETXDUO_TLS)
 endif()
 # After src/tls: crypto68k reuses aminetxduo_m68k_rt when that target exists.
 add_subdirectory(src/crypto68k)
+
+# tls.library. After src/crypto68k, because it names that target directly: the
+# archives go on the link line as FILES rather than as CMake targets, so that
+# nothing pulls `netxduo` in transitively (see src/tlslib/CMakeLists.txt).
+if(AMINETXDUO_TLS)
+    add_subdirectory(src/tlslib)
+endif()
 add_subdirectory(src/tools)
 
 if(AMINETXDUO_TESTS)

@@ -114,6 +114,24 @@ mkdir -p "$TREE/C" "$TREE/Libs" "$TREE/Devs/Internet" "$TREE/Docs" \
 for lib in "${LIBS[@]}"; do
     cp "$BUILD/src/$lib/$lib.library" "$TREE/Libs/"
 done
+
+# tls.library and its trust store, when the build has them (AMINETXDUO_TLS=ON).
+# They ship as a pair with the bsdsocket.library from the SAME build: the two
+# share struct layouts and a private context ABI, so mixing versions is not
+# supported (include/aminetxduo/nxcontext.h).
+if [ -f "$BUILD/src/tlslib/tls.library" ]; then
+    cp "$BUILD/src/tlslib/tls.library" "$TREE/Libs/"
+    chmod 755 "$TREE/Libs/tls.library"
+    echo "==> including tls.library"
+
+    if [ -f "$BUILD/certificates" ]; then
+        cp "$BUILD/certificates" "$TREE/Devs/Internet/certificates"
+        echo "==> including the trust store ($(wc -c < "$BUILD/certificates" | tr -d ' ') bytes)"
+    else
+        echo "!! tls.library is packed but there is no trust store." >&2
+        echo "!! Build one:  tools/mkcertstore.py -o $BUILD/certificates cacert.pem" >&2
+    fi
+fi
 for cmd in "${CMDS[@]}"; do
     cp "$BUILD/src/tools/$cmd" "$TREE/C/"
 done

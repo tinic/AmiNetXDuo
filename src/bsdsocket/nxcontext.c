@@ -20,6 +20,12 @@
 #include "nx_packet.h"
 #include "nx_tcp.h"
 
+/* The baton hooks are src/netstack internals rather than public API -- they are
+   not something an application should ever reach for -- so the declarations
+   come from there rather than from include/aminetxduo/netstack.h. */
+VOID ami_netstack_baton_release(VOID);
+VOID ami_netstack_baton_acquire(VOID);
+
 /*
  * The table is `const` and static, and every entry is a function this library
  * already contains.  Nothing here is per opener, so one copy serves every
@@ -66,6 +72,8 @@ static const AmiNetXDuoContext bsd_nxd_context =
     bsd_nxc_tcp_socket,
     ami_netstack_enter,
     ami_netstack_leave,
+    ami_netstack_baton_release,
+    ami_netstack_baton_acquire,
 
     _nx_packet_allocate,
     _nx_packet_data_append,

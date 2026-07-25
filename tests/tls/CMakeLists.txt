@@ -62,6 +62,32 @@ target_compile_definitions(tls_interop   PRIVATE H_ROUNDS_INTEROP=1)
 # certificate that rotates.  See the header comment.
 #
 #   tests/tls/run-https.sh -b build/tls
+# The decisive test for the API and the trust store: a program linked against
+# NOTHING of ours, opening LIBS:bsdsocket.library and LIBS:tls.library by name
+# and fetching a real HTTPS URL verified against DEVS:Internet/certificates.
+#
+#   tests/tls/run-api.sh -b build/tls
+#
+# Deliberately no target_link_libraries: if this ever needs one, the API has
+# failed at the thing it exists to do.
+add_executable(tls_api tls_api.c)
+target_include_directories(tls_api PRIVATE "${CMAKE_SOURCE_DIR}/include")
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(tls_api PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+set_target_properties(tls_api PROPERTIES OUTPUT_NAME "tls_api")
+if(TARGET tls_library)
+    add_dependencies(tls_api tls_library)
+endif()
+if(TARGET bsdsocket_library)
+    add_dependencies(tls_api bsdsocket_library)
+endif()
+if(AMIGA_SIZE)
+    add_custom_command(TARGET tls_api POST_BUILD
+        COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:tls_api>"
+        COMMENT "tls_api size")
+endif()
+
 add_executable(tls_https tls_https.c)
 target_link_libraries(tls_https PRIVATE
     aminetxduo_tls aminetxduo_netstack aminetxduo_common netxduo_port)

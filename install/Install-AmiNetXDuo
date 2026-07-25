@@ -751,6 +751,27 @@
   (confirm)
   (optional "force"))
 
+; --- tls.library, if this archive has one --------------------------------
+;
+; Only a build made with -DAMINETXDUO_TLS=ON carries it, so its absence is
+; normal rather than an error.  It ships as a PAIR with the bsdsocket.library
+; beside it: the two share a private interface, so installing one without the
+; other, or mixing versions from different archives, is not supported.
+
+(if (exists (tackon S_LIBS "tls.library") (noreq))
+  (
+    (copylib
+      (prompt (cat "Installing tls.library into LIBS:\n\n"
+                   "This lets programs make encrypted (https:) connections.  "
+                   "It is used only by programs that ask for it, so it costs "
+                   "nothing until something opens it."))
+      (help   @copylib-help)
+      (source (tackon S_LIBS "tls.library"))
+      (dest   "LIBS:")
+      (confirm)
+      (optional "force"))
+  ))
+
 (set @special-msg "")
 
 (complete 35)
@@ -909,6 +930,26 @@
           (optional "nofail")))
     (set NDB_N (+ NDB_N 1))
   ))
+
+; --- the certificate store, if this archive has one ----------------------
+;
+; tls.library verifies a server's certificate chain against this file, and
+; refuses to connect without it.  It is ALWAYS overwritten, unlike the netdb
+; files above: this is not a file anybody edits by hand, and an old one means
+; sites signed by newer certificate authorities stop working.  Replacing it is
+; also the whole of the update story -- the library re-reads it when its
+; datestamp changes, so no reboot is needed.
+
+(if (exists (tackon (tackon S_DEVS "Internet") "certificates") (noreq))
+    (copyfiles
+      (prompt (cat "Installing DEVS:Internet/certificates\n\n"
+                   "The list of certificate authorities tls.library trusts.  "
+                   "Replace this file with a newer one when you want to "
+                   "update them; nothing else has to change."))
+      (help   @copyfiles-help)
+      (source (tackon (tackon S_DEVS "Internet") "certificates"))
+      (dest   "DEVS:Internet")
+      (optional "nofail")))
 
 (complete 75)
 

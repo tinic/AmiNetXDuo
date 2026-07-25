@@ -1197,6 +1197,251 @@ Two things, and neither is speed.
 argues against TLS and size no longer argues against it; the only thing default-on would
 currently produce is 227 KB of code with no route to it.
 
+#### Update (2026-07-25): both of those landed — `tls.library` and a real trust store
+
+A program that is linked against **nothing of ours** now opens two shared libraries by
+name, fetches `https://tls-v1-2.badssl.com/` over SLIRP, and verifies the chain against
+**119 Mozilla roots on disk** rather than one compiled in. `tests/tls/tls_api` — 26
+checks, 0 failures, 6.8 s handshake, `HTTP/1.1 301`, `TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256`.
+
+##### 1. `tls.library`, and the one private LVO under it
+
+The route taken is the one recommended above, and the reason it is a separate library
+rather than a corner of `bsdsocket.library` is unchanged: 227 KB and ~40 KB per connection
+should not be resident on a machine that never makes a TLS connection, and **a TLS record
+boundary is not a byte-stream boundary**, so putting TLS behind `recv()` would break what
+`WaitSelect()` readability means.
+
+The API is eight vectors. `include/aminetxduo/tlslib.h` is the contract and carries the
+example program; the shape is:
+
+```c
+LONG s   = socket(AF_INET, SOCK_STREAM, 0);   connect(s, ...);
+struct TLSConnection *tls = TLSOpen(TLSBase, SocketBase, s,
+                                    TLSA_HostName, (ULONG)"example.com",
+                                    TLSA_Error,    (ULONG)&why);
+TLSWrite(TLSBase, tls, request, len);
+while ((n = TLSRead(TLSBase, tls, buf, sizeof buf)) > 0) { ... }
+TLSClose(TLSBase, tls);        /* the descriptor is the caller's again */
+```
+
+Chain verification and host-name checking are **on by default**; `TLSA_NoVerify` has to be
+asked for in those words. Worth recording: `nx_secure` verifies the chain but does **not**
+check who the certificate is *for* — `_nx_secure_x509_common_name_dns_check()` exists and
+nothing calls it unless the application installs a certificate callback. `tests/tls/tls_https`
+never did, so until now nothing in this tree checked the host name at all.
+
+**How a second library borrows a singleton.** NetX Duo and ThreadX have file-scope state
+and there is exactly one copy, inside `bsdsocket.library`. `tls.library` therefore links
+`nx_secure`, `nx_crypto` and `crypto68k` — which have no such state — and links **no NetX
+Duo object at all**. The coupling surface was measured, not guessed: `nm` over
+`libnx_secure.a + libnx_crypto.a + libcrypto68k.a + libaminetxduo_tls.a`, minus everything
+they define themselves, leaves 25 externals, of which **twelve** are NetX Duo/ThreadX:
+
+| | |
+|---|---|
+| packets | `_nx_packet_allocate`, `_nx_packet_data_append`, `_nx_packet_data_extract_offset`, `_nx_packet_release` |
+| TCP | `_nx_tcp_socket_receive`, `_nx_tcp_socket_send` |
+| ThreadX | `_tx_mutex_create/delete/get/put`, `_tx_thread_identify`, `_tx_thread_sleep` |
+
+The rest are `memcpy`/`memset`/`memcmp`/`memmove`, `__udivdi3`, `SysBase`, and the four
+`ami_random_*` entry points. `src/tlslib/tls_netx.c` **defines those twelve names** as
+one-line forwarders through a table obtained from `bsdsocket.library`, so the linker
+resolves `nx_secure`'s references to us and no vendored source is touched. The
+`ami_random_*` forwarders matter for a second reason: they mean a TLS handshake draws from
+the entropy pool `bsdsocket.library` already seeded, rather than starting a colder second
+one.
+
+The table arrives through **one private LVO at -0x360** — the first slot past the six
+reserved ones `clib/bsdsocket_protos.h` documents after `getnameinfo()`, i.e. past every
+offset any published bsdsocket ABI assigns. It takes a magic (`'ANXD'`) and a version and
+writes nothing unless both match, so a program aiming at some future vendor's vector at the
+same offset gets a clean failure instead of a pointer. The version carries
+`AMINETXDUO_IPV6` in its low half, because that option changes the layout of `NX_IP`,
+`NX_PACKET` and `NX_TCP_SOCKET` — all of which cross this interface — so a mismatched pair
+of libraries is refused at `TLSOpen()` rather than reading each other's structs at the wrong
+offsets. It exists **only in an
+`AMINETXDUO_TLS` build**: `src/bsdsocket/nxcontext.c` is not compiled and the table slot is
+not emitted otherwise, which is what keeps the default build byte-identical (verified —
+`bsdsocket.library`, `usergroup.library` and all six commands compare identical against a
+tree with the vector removed).
+
+Three ThreadX **data** symbols (`_tx_thread_current_ptr`, `_tx_thread_system_state`,
+`_tx_timer_thread`) cannot be forwarded through a table — a copy would be a copy, not an
+alias. They are referenced only by `nx_secure`'s `nxe_*` argument-checking wrappers, and
+`tls.library` calls the `_nx_secure_*` entry points directly, so those archive members are
+never pulled in. One exception had to be handled by hand:
+`ami_tls_local_certificate_add()` spells its call `nx_secure_tls_local_certificate_add`,
+which the vendored header maps to the wrapper, so `tls_netx.c` supplies
+`_nxe_secure_tls_local_certificate_add()` itself. `nm tls.library` shows zero undefined
+symbols after the link.
+
+##### 2. What `WaitSelect()` means for a TLS socket, and what was done about it
+
+Two ways it lies, and they are not symmetric:
+
+- **Not readable while `TLSRead()` would return immediately.** The library reads a whole
+  record off the socket and hands out plaintext from it a piece at a time; the socket is
+  drained and `WaitSelect()` sees nothing. A program that waits on the descriptor alone
+  **hangs with its answer already in memory**. This is the dangerous one.
+- **Readable while `TLSRead()` must block**, because what arrived is half a record.
+
+`TLSWaitSelect()` takes the same arguments as `WaitSelect()` plus the list of TLS
+connections involved. If any of them already holds plaintext it reports that descriptor
+readable and **returns without waiting**; otherwise it delegates to `bsdsocket.library`'s
+`WaitSelect()` through the caller's own `SocketBase`. `TLSPending()` is the same test on
+its own for a caller who would rather write the loop.
+
+The second lie is not removable without a non-blocking record layer and is bounded — the
+rest of a record is already in flight — so it is documented and `TLSA_Timeout` caps it.
+Reporting *fewer* ready descriptors than exist is a spurious-wakeup shape every `select()`
+caller already tolerates; claiming a TLS socket is not readable is a hang. The test proves
+the fix rather than asserting it: it reads **one byte**, then calls `TLSWaitSelect()` with a
+**zero timeout** — a poll that plain `WaitSelect()` must answer 0 — and gets 1 with the
+right descriptor set.
+
+##### 3. The trust store: ~120 roots, 126 KB on disk, 1.4 KB resident
+
+`DEVS:Internet/certificates`, in the Roadshow configuration drawer the rest of the stack
+already uses. Indexed binary, big-endian (the machine's own order, so nothing is swapped):
+
+```
+ 0   'A' 'C' 'S' '1'
+ 4   ULONG count          8  ULONG index_offset      12  ULONG data_offset
+16   count x { ULONG key, ULONG offset, ULONG length }   sorted by key
+...  the DER blobs, concatenated
+```
+
+**Only the index is ever resident** — 12 bytes per root, 1,428 bytes for the Mozilla set —
+and the one root a chain actually needs is read from the file *during* the handshake.
+Parsing all 119 eagerly was never viable: an `NX_SECURE_X509_CERT` is 252 bytes, so the
+parsed set alone is 30 KB before the DER it points into, on a 4 MB machine.
+
+**The key is the whole encoded Name, not the common name.** FNV-1a 32 over the
+certificate's subject `Name` SEQUENCE including its tag and length bytes; `tls.library`
+computes the same hash over a received certificate's **issuer** `Name`. That is exactly RFC
+5280's rule, and neither side parses attributes, so the generator and the Amiga cannot
+disagree about what a Name means. This is not fussiness: `nx_secure`'s own store lookup
+compares distinguished names by **common name only** unless
+`NX_SECURE_X509_STRICT_NAME_COMPARE` is defined, and in the current Mozilla set **four roots
+share the common name "GlobalSign" and four more have no common name at all**. Handing
+`nx_secure` a store with all four GlobalSign roots in it would let it take the first and
+fail the signature check. Matching on the full Name means exactly one root is added, so the
+name `nx_secure` then looks up is unambiguous by construction.
+
+**Where the laziness is hooked.** `NX_SECURE_TLS_SESSION` carries a
+`nx_secure_remote_certificate_verify` function pointer, set by
+`nx_secure_tls_session_create_ext()` and never consulted before. `tls.library` replaces it:
+its version asks every certificate the server sent "who issued you?", looks the answer up in
+the index, and adds a root only on a hit — then calls the vendored verifier. A two-deep
+public chain costs one index miss (the leaf's issuer is the intermediate), one hit, and one
+2 KB read. Measured: `TLSInfo()` reports `128 roots on disk, 1 parsed for this chain`.
+
+**Updates: replace the file.** There is no package manager and there is not going to be
+one. `tools/mkcertstore.py` turns any PEM bundle into the file (no dependencies beyond the
+standard library — the DER walk is sixty lines, which is the entire reason no `cryptography`
+package is needed), so the story is `curl -o cacert.pem https://curl.se/ca/cacert.pem` and
+re-run it, or copy a prebuilt `certificates` over the old one. **The index is read fresh at
+every `TLSOpen()` and belongs to that connection**, so a replacement takes effect on the very
+next connection — no reboot, no `avail flush`, and no cache to invalidate. Caching it in the
+library base was the first design and was wrong twice: it needs reload detection, and it puts
+a pointer one task can free (a second `TLSOpen()` with a different `TLSA_TrustStore`) under a
+pointer another task is reading from inside a handshake, on a machine with no memory
+protection. A per-connection index costs 1,428 bytes against the ~40 KB the connection
+already needs, and one 1.4 KB read against a handshake that spends seconds on arithmetic.
+
+The bundle is deliberately *not* vendored: it changes every few weeks and a stale copy in git would be
+worse than none. CMake and `tests/tls/run-api.sh` find the host's (`/etc/ssl/cert.pem` and
+friends) or take `AMINETXDUO_CA_BUNDLE`.
+
+##### 4. The clock, on a machine that does not have one
+
+`tls_https` observed `tv_secs == 0`. An Amiga with a dead RTC battery reports 1 January
+1978, which is before every certificate on the internet was issued, so a library that checks
+validity dates unconditionally **cannot reach a single HTTPS site** from such a machine.
+
+**Decision: skip the validity dates when the clock is obviously unset, check them when it is
+not, and report which happened.** "Obviously unset" is anything outside a fifty-year window
+starting at 2026-01-01 — the floor catches 1978 and every partially-set clock, and the
+ceiling catches the machine whose date was typed in wrong and now reads 2145, which would
+otherwise reject every valid certificate as expired and look identical to a real failure.
+The floor is a constant, not `__DATE__`: a build-date check would make the binary
+non-reproducible and make an old build behave differently from a new one on the same
+machine.
+
+No vendored change was needed. `nx_secure_x509_certificate_chain_verify.c` already reads
+`if (current_time != 0)`, so returning 0 from the session's time function **is** its own
+"do not check" encoding.
+
+What this gives up, precisely: expiry does not stop impersonation — the signature chain to a
+trusted root and the host-name check do that, and **both still run**. What expiry adds is a
+bound on how long a certificate whose private key has leaked stays useful. An attacker who
+has stolen a key *and* can get between this Amiga and the site can use it indefinitely
+against a clockless machine. That is a real weakening; it is also the same weakening every
+device with a dead RTC has, and this stack has no revocation checking of any kind, so the
+stolen-key case was never covered. The alternative on offer is a machine that reaches
+nothing. `TLSInfo()`'s `ti_ExpiryChecked` is FALSE when it happened, so a program that cares
+can say so.
+
+**Demonstrated, not asserted.** FS-UAE hands the guest the host's clock, so the branch would
+never run by accident. `tests/tls/tls_api` sets the emulated machine's clock to the AmigaOS
+epoch through `timer.device`'s `TR_SETSYSTIME`, fetches the same page again, and puts the
+clock back: *"a machine with no clock still reaches the site"*, *"TLSInfo() reports the dates
+were NOT checked"*, *"while the chain and the host name still were"*.
+
+##### 5. Size, and the answer on the default
+
+| | bytes |
+|---|---|
+| `bsdsocket.library`, default build | 249,636 |
+| `bsdsocket.library`, `AMINETXDUO_TLS=ON` | 250,084 (**+448**, the private vector) |
+| `tls.library` | 273,080 |
+| **the pair** | **523,164 = 510.9 KiB** |
+| `DEVS:Internet/certificates` | 128,928 (119 Mozilla roots) / 142,693 (128 Apple roots) — on disk only |
+
+**1,124 bytes inside the 512 KiB budget.** That is not headroom, it is a coincidence, and it
+should be said plainly rather than rounded off. The estimate this replaces (≈480 KB) counted
+227 KB of *text* from a link map; a hunk file on disk also carries data, bss headers and
+relocations, which is ~31 KB on `tls.library` alone. The trimming lever is untouched and
+large: `src/tls/CMakeLists.txt` globs **all** of `crypto_libraries/src`, so `nx_crypto`
+still contains DES, 3DES, MD5, CCM, GCM and ECJPAKE, none of which any shipping ciphersuite
+reaches. Anyone who needs room should start there.
+
+Per connection, allocated at `TLSOpen()` and freed at `TLSClose()`: crypto metadata sized by
+`_nx_secure_tls_metadata_size_calculate()` rather than guessed (16 KB), a 10 KB record
+buffer, four remote-certificate slots and two root slots at 2.5 KB of DER each — **about
+40 KB**, and none of it resident when no connection is open.
+
+**Recommendation: not yet, and for one reason that is not technical.** Both stated blockers
+are gone and the pieces work. What is missing is a *traveller*: no command in the
+distribution opens `tls.library`, so default-on would ship 273 KB that only third-party
+software could use, and no third-party software exists because the library has never
+shipped. Two things would settle it, and both are small:
+
+1. **A shipped command that uses it** — a `fetch`/`urlget` alongside `ping` and `host`.
+   `tests/tls/tls_api.c` is already the worked example; it needs a URL parser and an
+   argument line.
+2. **A deterministic trust store at release time.** Today `dist/make-dist.sh` packs whatever
+   `tools/mkcertstore.py` could build from the host's CA bundle, and warns if there was
+   none. A release built on a machine without one would ship a `tls.library` that refuses
+   every connection with `TLS_ERR_TRUSTSTORE`. Pin a bundle hash and fetch it in the release
+   job, or vendor a dated snapshot.
+
+Neither is a research question. Until they land, `AMINETXDUO_TLS=ON` is a supported build
+that is worth running — `tests/tls/run-api.sh` is the proof it works end to end — and the
+default stays OFF.
+
+`dist/make-dist.sh` and the Installer script already handle both files when the build has
+them, and one trap surfaced doing it, worth recording because its symptom points at the
+wrong thing entirely. **The Installer takes its window down while it copies**, and
+`install/test/installdrive.c` treated six consecutive windowless polls as "the run has
+finished". Adding `tls.library` (273 KB) and the certificate store (140 KB) to the archive
+pushed that copy past six seconds, so the driver stopped clicking, `S:User-Startup` was never
+written, and the harness reported *"the install run did not complete cleanly"* with every
+file up to the copy correctly installed — which reads exactly like an Installer script that
+aborted mid-way, and is not one. `GONE_LIMIT` is now 20; `MAX_POLLS` still bounds the run,
+and a genuinely stuck Installer keeps its window up, so it fails on the cap instead.
+
 ### M8 result (2026-07-25): the IPv6 dual stack works, over a real wire
 
 `-DAMINETXDUO_IPV6=ON` builds a dual stack that has been run on an emulated 68020 and

@@ -76,7 +76,25 @@ extern "C" {
 #define AMI_NXD_CONTEXT_LVO         (-0x360)
 
 #define AMI_NXD_CONTEXT_MAGIC       0x414E5844UL    /* 'ANXD' */
-#define AMI_NXD_CONTEXT_VERSION     1UL
+
+/*
+ * The version carries the build option that changes struct layout.
+ *
+ * AMINETXDUO_IPV6 decides FEATURE_NX_IPV6, which changes the layout of NX_IP,
+ * NX_INTERFACE, NX_PACKET and NX_TCP_SOCKET -- all of which cross this
+ * interface.  Two libraries built from the same source with different answers
+ * would pass a plain version check and then read each other's structs at the
+ * wrong offsets, on a machine with no memory protection, which is the worst
+ * possible failure to debug.  Folding the flag into the version number turns it
+ * into a refusal at TLSOpen() instead.
+ *
+ * Bump the high half whenever this header changes.
+ */
+#ifdef AMINETXDUO_IPV6
+#define AMI_NXD_CONTEXT_VERSION     0x00010001UL
+#else
+#define AMI_NXD_CONTEXT_VERSION     0x00010000UL
+#endif
 
 /*
  * Everything tls.library needs from the stack, in one table.
@@ -121,6 +139,25 @@ typedef struct AmiNetXDuoContext
      */
     LONG                (*nxc_Enter)(AmiNetCaller *caller);
     VOID                (*nxc_Leave)(AmiNetCaller *caller);
+
+    /*
+     * Hand the ThreadX baton back around a blocking Exec call, and take it
+     * again afterwards.  These are the hooks the SANA-II readers use to make it
+     * legal for a ThreadX thread to sit in Wait() for an IORequest.
+     *
+     * tls.library needs them for one thing: reading a CA root out of
+     * DEVS:Internet/certificates happens INSIDE the handshake -- the issuer is
+     * not known until the server sends its chain -- and dos.library's Read()
+     * blocks in Exec.  Doing that while holding the baton would stop the IP
+     * thread and both SANA-II readers for the duration of a disk access, which
+     * on a floppy is long enough to lose packets.  Bracketing the file I/O with
+     * these means the rest of the stack keeps running while the head moves.
+     *
+     * Nesting is handled inside; a caller that does not hold the baton gets a
+     * pair of no-ops.
+     */
+    VOID                (*nxc_BatonRelease)(VOID);
+    VOID                (*nxc_BatonAcquire)(VOID);
 
     /* ---- what nx_secure links against ---------------------------------- */
 

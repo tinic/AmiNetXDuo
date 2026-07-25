@@ -89,7 +89,6 @@ static struct TLSLibBase *tls_lib_init(
 
     InitSemaphore(&base->tb_Lock);
 
-    tls_bzero(&base->tb_Store, sizeof(base->tb_Store));
     base->tb_CryptoReady = FALSE;
 
     /* Silence the unused warning without pretending the list is used: the
@@ -118,16 +117,8 @@ APTR tls_lib_close(register struct TLSLibBase *TLSBase __asm("a6"))
 
     if (TLSBase->tb_Lib.lib_OpenCnt == 0)
     {
-        /*
-         * Nothing can look a certificate up any more, so give the trust-store
-         * index back.  It is 1.4 KB for the Mozilla set -- not much, but this
-         * library may be resident on a machine with four megabytes and no
-         * further interest in TLS.
-         */
-        ObtainSemaphore(&TLSBase->tb_Lock);
-        tls_store_close(&TLSBase->tb_Store);
-        ReleaseSemaphore(&TLSBase->tb_Lock);
-
+        /* Nothing to release: the trust-store index belongs to a connection,
+           and TLSClose() gave it back. */
         if ((TLSBase->tb_Lib.lib_Flags & LIBF_DELEXP) != 0)
             return tls_lib_expunge(TLSBase);
     }
@@ -150,7 +141,6 @@ APTR tls_lib_expunge(register struct TLSLibBase *TLSBase __asm("a6"))
     neg     = TLSBase->tb_Lib.lib_NegSize;
     pos     = TLSBase->tb_Lib.lib_PosSize;
 
-    tls_store_close(&TLSBase->tb_Store);
     tls_runtime_close();
 
     Remove((struct Node *)TLSBase);
