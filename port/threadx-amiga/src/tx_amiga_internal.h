@@ -67,6 +67,7 @@ struct _tx_amiga_ctrl
     struct Task     *ctrl_reaper;
     ULONG            ctrl_reaper_signal;
     volatile ULONG  *ctrl_reaped;                   /* flag on reaper's stack */
+    volatile UINT    ctrl_zombie;                   /* reaper gave up on it   */
 };
 
 
@@ -156,6 +157,29 @@ VOID _tx_amiga_thread_completed(VOID);
 extern volatile UINT    _tx_amiga_kernel_up;
 extern volatile UINT    _tx_amiga_timer_stop;
 extern volatile ULONG   _tx_amiga_zombies;
+
+/*
+ * Set by tx_amiga_kernel_stop() once its preconditions are met, and cleared
+ * only when the kernel is fully down again.
+ *
+ *   - _tx_thread_schedule() returns instead of dispatching, which is the only
+ *     way the master Task ever leaves tx_kernel_enter();
+ *   - tx_amiga_adopt_thread() refuses, so nothing new joins a kernel that is
+ *     on its way out.
+ */
+extern volatile UINT    _tx_amiga_kernel_stopping;
+
+/*
+ * Zombies that have NOT yet unblocked and destroyed themselves.
+ *
+ * _tx_amiga_zombies counts every zombie ever declared and never goes down; it
+ * is a "this happened" signal for the caller of tx_thread_delete().  This one
+ * goes back down when the zombie finally reaches _tx_amiga_task_destroy(), and
+ * is what tx_amiga_kernel_stop() consults: a program may exit safely once its
+ * zombies are gone, but not while one is still parked in Exec with its entry
+ * point in a code hunk that is about to be unloaded.
+ */
+extern volatile ULONG   _tx_amiga_zombies_live;
 
 
 /* Temporary lifecycle tracing.  Define TX_AMIGA_TRACE to route to ami_log().  */

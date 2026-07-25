@@ -26,6 +26,14 @@
 /*    posts; making the check explicit costs one compare and removes a     */
 /*    whole class of double-dispatch race.                                 */
 /*                                                                        */
+/*    "Runs forever" has exactly one exception:                            */
+/*    tx_amiga_kernel_stop() sets _tx_amiga_kernel_stopping and pokes the  */
+/*    scheduler signal, and this function then RETURNS -- through          */
+/*    _tx_initialize_kernel_enter() and back into                          */
+/*    _tx_amiga_kernel_task_entry(), which destroys the master Task.  By   */
+/*    then stop has already reaped every thread, so the loop below is      */
+/*    necessarily sitting in its idle wait when the flag arrives.          */
+/*                                                                        */
 /**************************************************************************/
 
 #define TX_SOURCE_CODE
@@ -55,14 +63,24 @@ TX_THREAD   *thread_ptr;
         /* Wait for a thread to execute, with the baton free and no
            "interrupt" (tick) in progress.  */
         Forbid();
-        while ((_tx_thread_execute_ptr == TX_NULL) ||
-               (_tx_thread_current_ptr != TX_NULL) ||
-               (_tx_thread_system_state != ((ULONG) 0)))
+        while ((_tx_amiga_kernel_stopping == TX_FALSE) &&
+               ((_tx_thread_execute_ptr == TX_NULL) ||
+                (_tx_thread_current_ptr != TX_NULL) ||
+                (_tx_thread_system_state != ((ULONG) 0))))
         {
 
             Permit();
             Wait(_tx_amiga_scheduler_signal);
             Forbid();
+        }
+
+        if (_tx_amiga_kernel_stopping != TX_FALSE)
+        {
+
+            /* Leave the loop with the baton free and nothing dispatched.  The
+               caller (_tx_amiga_kernel_task_entry) removes this Task.  */
+            Permit();
+            break;
         }
 
         thread_ptr =  _tx_thread_execute_ptr;
@@ -323,6 +341,13 @@ UINT                     wake;
             ctrl -> ctrl_reaper        =  (struct Task *) 0;
             ctrl -> ctrl_reaper_signal =  0UL;
             ctrl -> ctrl_reaped        =  (volatile ULONG *) 0;
+
+            /* Mark it, so that _tx_amiga_task_destroy() can take it back off
+               the live-zombie count when it eventually unblocks.  Without the
+               mark nothing would ever clear that count, and
+               tx_amiga_kernel_stop() would refuse forever after one zombie.  */
+            ctrl -> ctrl_zombie        =  1U;
+            _tx_amiga_zombies_live++;
         }
 
         thread_ptr -> tx_thread_amiga_task =  (VOID *) 0;

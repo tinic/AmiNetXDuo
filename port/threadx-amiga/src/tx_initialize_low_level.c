@@ -24,6 +24,35 @@
 /*    then validates its wakeup source, which takes about 250 ms, before   */
 /*    the first tick is delivered.                                         */
 /*                                                                        */
+/*    This file also holds the two ends of the kernel's LIFETIME:          */
+/*    tx_amiga_kernel_start(), which puts the above on a private Task and  */
+/*    returns once the scheduler is live, and tx_amiga_kernel_stop(),      */
+/*    which takes it all back down and returns only when nothing the port  */
+/*    owns will execute again.  The contract stop imposes on the caller    */
+/*    -- and the reasoning behind refusing rather than reaping outstanding */
+/*    threads -- is written out in inc/tx_amiga.h; the mechanism is here.  */
+/*                                                                        */
+/*    The three Tasks that have to die, and how each is reached:           */
+/*                                                                        */
+/*      tick      _tx_amiga_timer_stop plus SIGF_SINGLE.  Every place the  */
+/*                tick task can park now waits on that signal -- it used   */
+/*                to Wait(0) forever when it had no usable timer, which is */
+/*                fine for a kernel that never stops and unreapable for    */
+/*                one that does.                                           */
+/*      system    ThreadX's own timer thread, on a stack in ThreadX's BSS. */
+/*      timer     Ordinary tx_thread_terminate() + tx_thread_delete(),     */
+/*                after the tick is quiet.                                 */
+/*      master    _tx_amiga_kernel_stopping makes _tx_thread_schedule()    */
+/*                return, which unwinds through tx_kernel_enter() back     */
+/*                into _tx_amiga_kernel_task_entry().                      */
+/*                                                                        */
+/*    Each publishes its "gone" flag and pokes the stopper inside the same */
+/*    Forbid() as its RemTask().  Exec discards the forbid nesting of a    */
+/*    Task it removes, so the pair is atomic and seeing the flag means the */
+/*    Task is off the ready list and finished with its stack -- which is   */
+/*    what makes freeing that stack safe.  Same argument, same shape, as   */
+/*    _tx_amiga_task_destroy().                                            */
+/*                                                                        */
 /**************************************************************************/
 
 #define TX_SOURCE_CODE
@@ -57,8 +86,10 @@ VOID           *_tx_amiga_kernel_memory       = (VOID *) 0;
 ULONG           _tx_amiga_kernel_memory_size  = 0UL;
 
 volatile UINT   _tx_amiga_kernel_up           = TX_FALSE;
+volatile UINT   _tx_amiga_kernel_stopping     = TX_FALSE;
 volatile UINT   _tx_amiga_timer_stop          = TX_FALSE;
 volatile ULONG  _tx_amiga_zombies             = 0UL;
+volatile ULONG  _tx_amiga_zombies_live        = 0UL;
 
 /* Set when the port allocated the kernel memory block itself.  */
 static UINT     _tx_amiga_memory_owned        = TX_FALSE;
@@ -67,10 +98,28 @@ static UINT     _tx_amiga_memory_owned        = TX_FALSE;
 static APTR     _tx_amiga_timer_stack         = (APTR) 0;
 static ULONG    _tx_amiga_timer_stack_size    = 4096UL;
 
+/* Stack of the master (scheduler) task; owned by the port.  */
+static APTR     _tx_amiga_master_stack        = (APTR) 0;
+static ULONG    _tx_amiga_master_stack_size   = 0UL;
+
 /* Handshake for tx_amiga_kernel_start().  */
 static struct Task *_tx_amiga_starter_task    = (struct Task *) 0;
 static ULONG        _tx_amiga_starter_signal  = 0UL;
 static UINT         _tx_amiga_start_status    = TX_NOT_DONE;
+
+/*
+ * Handshake for tx_amiga_kernel_stop().
+ *
+ * Each of the two Tasks the port owns sets its flag and pokes the stopper in
+ * the SAME Forbid() as its RemTask(), which Exec discards the forbid nesting
+ * of.  The pair is therefore atomic: seeing the flag means the Task is off the
+ * ready list and done with its stack, which is what makes the stack safe to
+ * free.  Same reasoning, and the same shape, as _tx_amiga_task_destroy().
+ */
+static struct Task    *_tx_amiga_stop_task    = (struct Task *) 0;
+static ULONG           _tx_amiga_stop_signal  = 0UL;
+static volatile ULONG  _tx_amiga_timer_gone   = 0UL;
+static volatile ULONG  _tx_amiga_master_gone  = 0UL;
 
 /* timer.device base for ReadEClock(); see the TIMER_BASE_NAME note above.  */
 struct Device      *_tx_amiga_timer_base      = (struct Device *) 0;
@@ -188,10 +237,16 @@ ULONG                    top;
 VOID _tx_amiga_wake_scheduler(VOID)
 {
 
+    /* Forbid() because the master Task NULLs the pointer inside its own final
+       Forbid() and then RemTask()s itself, which frees the struct Task.  Read
+       and Signal have to be one atom, or a poke that arrives in that window
+       writes signal bits into freed memory.  */
+    Forbid();
     if (_tx_amiga_scheduler_task != (VOID *) 0)
     {
         Signal((struct Task *) _tx_amiga_scheduler_task, _tx_amiga_scheduler_signal);
     }
+    Permit();
 }
 
 
@@ -224,6 +279,13 @@ ULONG tx_amiga_zombie_tasks(VOID)
 {
 
     return(_tx_amiga_zombies);
+}
+
+
+ULONG tx_amiga_zombie_tasks_live(VOID)
+{
+
+    return(_tx_amiga_zombies_live);
 }
 
 
@@ -331,6 +393,59 @@ VOID _tx_amiga_start_interrupts(void)
  * under soak load, because every re-arm paid its own scheduling latency and
  * nothing ever noticed the shortfall.
  */
+
+/*
+ * Tell a waiting tx_amiga_kernel_stop() that this Task has finished with its
+ * stack.  Call INSIDE the Forbid() that ends in RemTask(), never outside it.
+ */
+static VOID _tx_amiga_stop_notify(volatile ULONG *flag)
+{
+
+    *flag =  1UL;
+
+    if (_tx_amiga_stop_task != (struct Task *) 0)
+    {
+        Signal(_tx_amiga_stop_task, _tx_amiga_stop_signal);
+    }
+}
+
+
+/*
+ * Park a tick task that has no usable wakeup source, so that it is still
+ * reapable.
+ *
+ * This used to be Wait(0UL) -- "park forever" -- which is correct for a kernel
+ * that never comes down and fatal for one that does: the Task would keep its
+ * entry point inside a code hunk that AmigaDOS is about to unload, and nothing
+ * could ever wake it to say so.  Waiting on SIGF_SINGLE instead costs nothing
+ * and leaves tx_amiga_kernel_stop() a way in.
+ */
+static VOID _tx_amiga_timer_park(VOID)
+{
+
+    while (_tx_amiga_timer_stop == TX_FALSE)
+    {
+        (VOID) Wait(SIGF_SINGLE);
+    }
+}
+
+
+/* The tick task's last act.  Never returns.  */
+static VOID _tx_amiga_timer_exit(VOID)
+{
+
+    Forbid();
+    _tx_amiga_timer_task =  (VOID *) 0;
+    _tx_amiga_stop_notify(&_tx_amiga_timer_gone);
+    RemTask((struct Task *) 0);
+
+    /* Unreachable.  */
+    for (;;)
+    {
+        Wait(0UL);
+    }
+}
+
 
 /* Arm one wakeup.  */
 static VOID _tx_amiga_timer_arm(struct TimeRequest *tr, ULONG secs, ULONG micro)
@@ -485,17 +600,25 @@ UINT                 armed;
     armed    =  TX_FALSE;
     rate_chz =  0UL;
 
+    if (_tx_amiga_timer_stop != TX_FALSE)
+    {
+        /* Stopped before we ever ticked.  Nothing to tear down.  */
+        _tx_amiga_timer_exit();
+    }
+
     port =  CreateMsgPort();
     if (port == (struct MsgPort *) 0)
     {
-        Wait(0UL);                       /* park forever; kernel has no tick */
+        _tx_amiga_timer_park();          /* kernel has no tick */
+        _tx_amiga_timer_exit();
     }
 
     tr =  (struct TimeRequest *) CreateIORequest(port, (ULONG) sizeof(struct TimeRequest));
     if (tr == (struct TimeRequest *) 0)
     {
         DeleteMsgPort(port);
-        Wait(0UL);
+        _tx_amiga_timer_park();
+        _tx_amiga_timer_exit();
     }
 
     port_sig =  1UL << ((ULONG) port -> mp_SigBit);
@@ -572,7 +695,8 @@ UINT                 armed;
             ami_log(AMI_LOG_ERROR, "tick: no timer.device at all; ThreadX has no clock");
             DeleteIORequest((APTR) tr);
             DeleteMsgPort(port);
-            Wait(0UL);
+            _tx_amiga_timer_park();
+            _tx_amiga_timer_exit();
         }
 
         unit =  (ULONG) UNIT_MICROHZ;
@@ -873,9 +997,7 @@ UINT                 armed;
         DeleteMsgPort(guard_port);
     }
 
-    Forbid();
-    _tx_amiga_timer_task =  (VOID *) 0;
-    RemTask((struct Task *) 0);
+    _tx_amiga_timer_exit();
 }
 
 
@@ -899,7 +1021,24 @@ VOID tx_amiga_tick_stats(TX_AMIGA_TICK_STATS *stats)
 static VOID _tx_amiga_kernel_task_entry(VOID)
 {
 
-    _tx_initialize_kernel_enter();       /* tx_kernel_enter(); never returns */
+    /* _tx_initialize_kernel_enter() is tx_kernel_enter(); it ends in
+       _tx_thread_schedule(), which returns only when tx_amiga_kernel_stop()
+       has asked it to.  */
+    _tx_initialize_kernel_enter();
+
+    TXTRACE("TXT master exiting task=%08lx", (LONG) FindTask((STRPTR) 0));
+
+    Forbid();
+    _tx_amiga_scheduler_task   =  (VOID *) 0;
+    _tx_amiga_scheduler_signal =  0UL;
+    _tx_amiga_stop_notify(&_tx_amiga_master_gone);
+    RemTask((struct Task *) 0);
+
+    /* Unreachable.  */
+    for (;;)
+    {
+        Wait(0UL);
+    }
 }
 
 
@@ -915,6 +1054,14 @@ ULONG        stack_size =  8192UL;
     if (_tx_amiga_kernel_up != TX_FALSE)
     {
         return(TX_SUCCESS);
+    }
+    if (_tx_amiga_kernel_stopping != TX_FALSE)
+    {
+
+        /* A stop is in flight, or one failed and left the kernel wedged.
+           Starting a second one on top would race the first for every global
+           in this file.  */
+        return(TX_NOT_DONE);
     }
 
     sig =  AllocSignal(-1);
@@ -934,6 +1081,9 @@ ULONG        stack_size =  8192UL;
     _tx_amiga_starter_signal  =  1UL << ((ULONG) sig);
     _tx_amiga_start_status    =  TX_NOT_DONE;
 
+    _tx_amiga_timer_gone      =  0UL;
+    _tx_amiga_master_gone     =  0UL;
+
     task =  _tx_amiga_task_create("ThreadX", (BYTE) TX_AMIGA_TASK_PRIORITY,
                                   _tx_amiga_kernel_task_entry, stack, stack_size, (APTR) 0);
     if (task == (struct Task *) 0)
@@ -944,10 +1094,459 @@ ULONG        stack_size =  8192UL;
         return(TX_NO_MEMORY);
     }
 
+    /* Remembered so that tx_amiga_kernel_stop() can give it back; the master
+       Task cannot free the stack it is standing on.  */
+    _tx_amiga_master_stack      =  stack;
+    _tx_amiga_master_stack_size =  stack_size;
+
     Wait(_tx_amiga_starter_signal);
 
     _tx_amiga_starter_task =  (struct Task *) 0;
     FreeSignal(sig);
 
     return(_tx_amiga_start_status);
+}
+
+
+/* --------------------------------------------------- library-style stop --- */
+
+/*
+ * Wait, with a timeout, for one of the teardown flags above.
+ *
+ * A fresh timer.device request per call, deliberately: an AbortIO()d
+ * timer.device request does not complete again when it is re-armed (see
+ * _tx_amiga_timer_probe), so a request that may have to be aborted can never be
+ * reused.  Two waits therefore cost two OpenDevice()s, which on a shutdown path
+ * is not worth a cleverer scheme.  Mirrors _tx_amiga_reap()'s structure.
+ *
+ * Returns TX_TRUE if the flag came up, TX_FALSE on timeout.
+ */
+static UINT _tx_amiga_stop_wait(volatile ULONG *flag, ULONG sigmask, ULONG secs)
+{
+
+struct MsgPort      *port;
+struct timerequest  *tr;
+ULONG                portsig;
+ULONG                signals;
+UINT                 got;
+
+
+    if (*flag != 0UL)
+    {
+        return(TX_TRUE);
+    }
+
+    portsig =  0UL;
+    tr      =  (struct timerequest *) 0;
+
+    port =  CreateMsgPort();
+    if (port != (struct MsgPort *) 0)
+    {
+        tr =  (struct timerequest *) CreateIORequest(port, (ULONG) sizeof(struct timerequest));
+        if (tr != (struct timerequest *) 0)
+        {
+            if (OpenDevice((CONST_STRPTR) "timer.device", (ULONG) UNIT_VBLANK,
+                           (struct IORequest *) tr, 0UL) != 0)
+            {
+                DeleteIORequest((APTR) tr);
+                tr =  (struct timerequest *) 0;
+            }
+            else
+            {
+                portsig =  1UL << ((ULONG) port -> mp_SigBit);
+            }
+        }
+        if (tr == (struct timerequest *) 0)
+        {
+            DeleteMsgPort(port);
+            port =  (struct MsgPort *) 0;
+        }
+    }
+
+    if (tr != (struct timerequest *) 0)
+    {
+        tr -> tr_node.io_Command =  TR_ADDREQUEST;
+        tr -> tr_time.tv_secs    =  secs;
+        tr -> tr_time.tv_micro   =  0UL;
+        SendIO((struct IORequest *) tr);
+    }
+
+    for (;;)
+    {
+
+        signals =  Wait(sigmask | portsig);
+
+        if (*flag != 0UL)
+        {
+            break;
+        }
+        if ((portsig != 0UL) && ((signals & portsig) != 0UL))
+        {
+            break;                              /* timed out */
+        }
+        if (portsig == 0UL)
+        {
+
+            /* No timer could be opened, so there is no timeout to be had.  One
+               wait is all we can offer -- going round again would block for
+               ever, which on the path whose whole job is making exit safe is
+               worse than reporting failure.  */
+            break;
+        }
+    }
+
+    got =  (*flag != 0UL) ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
+
+    if (tr != (struct timerequest *) 0)
+    {
+        if (CheckIO((struct IORequest *) tr) == (struct IORequest *) 0)
+        {
+            AbortIO((struct IORequest *) tr);
+        }
+        WaitIO((struct IORequest *) tr);
+        CloseDevice((struct IORequest *) tr);
+        DeleteIORequest((APTR) tr);
+    }
+    if (port != (struct MsgPort *) 0)
+    {
+        DeleteMsgPort(port);
+    }
+
+    return(got);
+}
+
+
+/*
+ * ThreadX threads that belong to the APPLICATION and would still be there
+ * after the stop.
+ *
+ * Two are discounted: the system timer thread, which ThreadX creates for
+ * itself and stop reaps, and `mine` -- the caller's own adopted thread, which
+ * stop orphans.  Discounting `mine` here rather than orphaning first is what
+ * lets a refusal leave the caller exactly as it found it.
+ */
+static ULONG _tx_amiga_application_threads(TX_THREAD *mine)
+{
+
+TX_THREAD   *thread_ptr;
+ULONG        count;
+ULONG        i;
+
+
+    count =  0UL;
+
+    Forbid();
+
+    thread_ptr =  _tx_thread_created_ptr;
+    for (i = 0UL; (i < _tx_thread_created_count) && (thread_ptr != TX_NULL); i++)
+    {
+
+        if (thread_ptr != mine)
+        {
+#if !defined(TX_NO_TIMER) && !defined(TX_TIMER_PROCESS_IN_ISR)
+            if (thread_ptr != &_tx_timer_thread)
+#endif
+            {
+                count++;
+            }
+        }
+        thread_ptr =  thread_ptr -> tx_thread_created_next;
+    }
+
+    Permit();
+
+    return(count);
+}
+
+
+UINT tx_amiga_kernel_stop(VOID)
+{
+
+struct Task *me;
+TX_THREAD   *adopted;
+BYTE         sig;
+ULONG        sigmask;
+ULONG        remaining;
+UINT         status;
+
+
+    me =  FindTask((STRPTR) 0);
+
+    /* ---- who may call this ----------------------------------------------- */
+
+    if (_tx_amiga_ctrl_of(me) != (struct _tx_amiga_ctrl *) 0)
+    {
+
+        /* A Task the port created: the master, the tick, or a ThreadX thread.
+           Every one of them is something this function reaps, so it would be
+           waiting for itself.  */
+        ami_log(AMI_LOG_ERROR, "kernel stop: called from a Task the port owns");
+        return(TX_CALLER_ERROR);
+    }
+
+    if ((_tx_amiga_kernel_up == TX_FALSE) && (_tx_amiga_kernel_stopping == TX_FALSE))
+    {
+        /* Never started, or already stopped.  Idempotent by design: a shutdown
+           path may run twice and must not turn the second run into an error.  */
+        return(TX_SUCCESS);
+    }
+
+    /* ---- preconditions --------------------------------------------------- */
+
+    /*
+     * The caller may be adopted -- netstack_shutdown() calls from exactly that
+     * position -- so its own TX_THREAD does not count against it.  Nothing is
+     * orphaned yet: every refusal below has to leave the caller as it found it.
+     */
+    adopted =  tx_amiga_adopted_thread();
+
+    /* Taken before the Forbid() below, because a refusal has to give it back
+       and AllocSignal() inside a critical section buys nothing.  */
+    sig =  AllocSignal(-1);
+    if (sig < 0)
+    {
+        ami_log(AMI_LOG_ERROR, "kernel stop: no free Exec signal for the handshake");
+        return(TX_NO_MEMORY);
+    }
+    sigmask =  1UL << ((ULONG) sig);
+
+    /*
+     * Check and commit as one atom.
+     *
+     * Not fastidiousness: tx_amiga_adopt_thread() runs on some other
+     * application Task and only refuses once _tx_amiga_kernel_up is clear.  Do
+     * the counting and the clearing in separate critical sections and there is
+     * a window in which a Task counts as absent, then adopts, then holds the
+     * baton of a kernel that is being dismantled underneath it.
+     */
+    status =  TX_SUCCESS;
+
+    Forbid();
+
+    remaining =  _tx_amiga_application_threads(adopted);
+
+    if ((_tx_amiga_stop_task != (struct Task *) 0) && (_tx_amiga_stop_task != me))
+    {
+
+        /* Another Task is already inside this function.  */
+        status =  TX_NOT_DONE;
+    }
+    else if (remaining != 0UL)
+    {
+
+        /*
+         * Refuse.  The port cannot terminate these safely on the caller's
+         * behalf: tx_thread_delete() of a thread that is blocked in Exec
+         * produces a zombie (see _tx_amiga_reap), and a zombie is by definition
+         * a Task still running on memory somebody else owns.  Turning "you
+         * still have threads" into "here are some zombies" would convert a
+         * clear refusal into an unreportable hazard.
+         */
+        status =  TX_THREAD_ERROR;
+    }
+    else if (_tx_amiga_zombies_live != 0UL)
+    {
+
+        /*
+         * Refuse.  A zombie cannot be reclaimed on demand -- that is what makes
+         * it a zombie -- and it will run port and application code again when
+         * it finally unblocks.  Only the caller knows how to unstick it.
+         */
+        status =  TX_THREAD_ERROR;
+    }
+    else if ((_tx_amiga_master_gone == 0UL) &&
+             ((_tx_amiga_scheduler_task == (VOID *) 0) ||
+              (_tx_amiga_scheduler_signal == 0UL)))
+    {
+
+        /* No master Task to bring down -- _tx_initialize_low_level() could not
+           allocate its signal, so the scheduler is parked in Wait(0) and will
+           never leave.  Say so rather than pretending.  */
+        status =  TX_NOT_DONE;
+    }
+    else
+    {
+
+        /* Committed.  Nothing may adopt from here on.  */
+        _tx_amiga_kernel_up       =  TX_FALSE;
+        _tx_amiga_kernel_stopping =  TX_TRUE;
+        _tx_amiga_stop_task       =  me;
+        _tx_amiga_stop_signal     =  sigmask;
+    }
+
+    Permit();
+
+    if (status != TX_SUCCESS)
+    {
+
+        FreeSignal(sig);
+
+        if (status == TX_THREAD_ERROR)
+        {
+            ami_log(AMI_LOG_ERROR,
+                    "kernel stop: refused, %ld application thread(s) and %ld live zombie(s)",
+                    (LONG) remaining, (LONG) _tx_amiga_zombies_live);
+        }
+        else
+        {
+            ami_log(AMI_LOG_ERROR,
+                    "kernel stop: cannot proceed -- a stop is already running, or "
+                    "the scheduler Task cannot be reached");
+        }
+        return(status);
+    }
+
+    /* ---- past this point the kernel is coming down ------------------------ */
+
+    /* The caller stops being a ThreadX thread here, and not before: everything
+       above this line is allowed to refuse and leave it adopted.  */
+    if (adopted != TX_NULL)
+    {
+        (VOID) tx_amiga_orphan_thread(adopted);
+    }
+
+    /* ---- 1. the tick ----------------------------------------------------- */
+
+    /*
+     * First, because everything after this is quieter without it, and because
+     * the tick Task is the one whose entry point is most obviously inside the
+     * caller's code hunk.  It waits on its timer request OR SIGF_SINGLE, so the
+     * Signal() makes it notice now rather than one tick from now; the tick's
+     * own teardown retires the outstanding timer request (it aborts it and
+     * destroys it, never re-arms it).
+     */
+    if (_tx_amiga_timer_task != (VOID *) 0)
+    {
+
+        _tx_amiga_timer_stop =  TX_TRUE;
+        Signal((struct Task *) _tx_amiga_timer_task, SIGF_SINGLE);
+
+        if (_tx_amiga_stop_wait(&_tx_amiga_timer_gone, sigmask,
+                                (ULONG) TX_AMIGA_STOP_TIMEOUT_SECS) == TX_FALSE)
+        {
+            ami_log(AMI_LOG_ERROR, "kernel stop: the tick Task did not exit");
+            status =  TX_NOT_DONE;
+        }
+    }
+    else
+    {
+        _tx_amiga_timer_stop =  TX_TRUE;
+        _tx_amiga_timer_gone =  1UL;
+    }
+
+    /* ---- 2. ThreadX's own system timer thread ----------------------------- */
+
+#if !defined(TX_NO_TIMER) && !defined(TX_TIMER_PROCESS_IN_ISR)
+    if (status == TX_SUCCESS)
+    {
+
+        /*
+         * ThreadX creates this one itself, on a stack that lives in ThreadX's
+         * BSS -- i.e. in the caller's data hunk.  It is not the application's
+         * to delete and it is not optional to leave: reaping it is the whole
+         * difference between "the program exited" and "the program exited and
+         * something is still running in its BSS".
+         *
+         * The tick is already stopped, so it is parked on its run signal and
+         * the ordinary reaper wakes it.
+         */
+        ULONG zombies_before =  _tx_amiga_zombies_live;
+
+        (VOID) _tx_thread_terminate(&_tx_timer_thread);
+        (VOID) _tx_thread_delete(&_tx_timer_thread);
+
+        if (_tx_amiga_zombies_live != zombies_before)
+        {
+            ami_log(AMI_LOG_ERROR,
+                    "kernel stop: the system timer thread became a zombie");
+            status =  TX_NOT_DONE;
+        }
+    }
+#endif
+
+    /* ---- 3. the master (scheduler) Task ----------------------------------- */
+
+    if (status == TX_SUCCESS)
+    {
+
+        _tx_amiga_wake_scheduler();
+
+        if (_tx_amiga_stop_wait(&_tx_amiga_master_gone, sigmask,
+                                (ULONG) TX_AMIGA_STOP_TIMEOUT_SECS) == TX_FALSE)
+        {
+            ami_log(AMI_LOG_ERROR, "kernel stop: the scheduler Task did not exit");
+            status =  TX_NOT_DONE;
+        }
+    }
+
+    /* ---- 4. give the memory back ----------------------------------------- */
+
+    Forbid();
+    _tx_amiga_stop_task   =  (struct Task *) 0;
+    _tx_amiga_stop_signal =  0UL;
+    Permit();
+
+    SetSignal(0UL, sigmask);
+    FreeSignal(sig);
+
+    if (status != TX_SUCCESS)
+    {
+
+        /*
+         * Something the port owns is still alive and cannot be reached.  Leave
+         * every allocation exactly where it is -- the survivor is standing on
+         * some of it -- and tell the caller that exiting is not safe.  The
+         * stopping flag stays set, so nothing will start a second kernel on top
+         * of the wreckage.
+         */
+        ami_log(AMI_LOG_ERROR,
+                "kernel stop: FAILED -- it is NOT safe to unload this program");
+        return(status);
+    }
+
+    /* The two Tasks published their flags inside the same Forbid() as their
+       RemTask(), so they are off the ready list and done with these stacks. */
+    if (_tx_amiga_master_stack != (APTR) 0)
+    {
+        FreeMem(_tx_amiga_master_stack, _tx_amiga_master_stack_size);
+        _tx_amiga_master_stack      =  (APTR) 0;
+        _tx_amiga_master_stack_size =  0UL;
+    }
+
+    if (_tx_amiga_timer_stack != (APTR) 0)
+    {
+        FreeMem(_tx_amiga_timer_stack, _tx_amiga_timer_stack_size);
+        _tx_amiga_timer_stack =  (APTR) 0;
+    }
+
+    if (_tx_amiga_memory_owned != TX_FALSE)
+    {
+        FreeMem(_tx_amiga_kernel_memory, _tx_amiga_kernel_memory_size);
+        _tx_amiga_kernel_memory      =  (VOID *) 0;
+        _tx_amiga_kernel_memory_size =  0UL;
+        _tx_amiga_memory_owned       =  TX_FALSE;
+    }
+
+    /* ---- 5. back to the state tx_amiga_kernel_start() expects ------------- */
+
+    _tx_amiga_timer_base =  (struct Device *) 0;
+    _tx_amiga_timer_stop =  TX_FALSE;
+    _tx_amiga_adopt_task   =  (VOID *) 0;
+    _tx_amiga_adopt_signal =  0UL;
+
+    {
+        UBYTE  *p =  (UBYTE *) &_tx_amiga_tick;
+        ULONG   n;
+
+        for (n = 0UL; n < (ULONG) sizeof(_tx_amiga_tick); n++)
+        {
+            p[n] =  0;
+        }
+    }
+
+    _tx_amiga_kernel_stopping =  TX_FALSE;
+
+    ami_log(AMI_LOG_INFO, "kernel stop: ThreadX is down; nothing of the port is running");
+
+    return(TX_SUCCESS);
 }

@@ -728,12 +728,32 @@ VOID netstack_shutdown(VOID)
         ami_ns_destroy(ns);
     }
 
-    /*
-     * ThreadX itself stays up. tx_kernel_enter() has no counterpart and the
-     * scheduler task owns state that several components still point at; the
-     * kernel costs one idle Exec task and the 100 Hz tick.
-     */
     ami_sana2_set_block_hooks(NULL, NULL);
+
+    /*
+     * Stop ThreadX last. We are a plain Exec Task at this point
+     * (ami_netstack_leave() orphaned us), which is the position
+     * tx_amiga_kernel_stop() documents for its caller.
+     *
+     * Only TX_SUCCESS means it is safe for this program to exit or for the
+     * library to be expunged: the tick and scheduler Tasks run on stacks in
+     * our own hunk, so leaving them alive past an unload means they execute
+     * freed memory. Anything else and the caller must stay resident -- stop
+     * refuses (leaving the kernel usable) if any application thread or a live
+     * zombie remains, which is a legible failure rather than a silent hazard.
+     *
+     * This can block for up to ~5 s in the pathological case, with
+     * ami_ns_lock held.
+     */
+    {
+        UINT txstatus = tx_amiga_kernel_stop();
+
+        if (txstatus != TX_SUCCESS)
+        {
+            AMI_ERROR("netstack: tx_amiga_kernel_stop failed (%ld) -- ThreadX "
+                      "Tasks are still running; do not unload", (LONG)txstatus);
+        }
+    }
 
     ReleaseSemaphore(&ami_ns_lock);
 }

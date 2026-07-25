@@ -43,6 +43,80 @@ UINT    tx_amiga_kernel_start(VOID);
 UINT    tx_amiga_kernel_running(VOID);
 
 /*
+ * Bring the kernel down and return only when NOTHING THE PORT OWNS WILL EVER
+ * EXECUTE AGAIN -- no tick, no scheduler, no ThreadX thread.
+ *
+ * This is what makes it safe for a PROGRAM to exit.  tx_amiga_kernel_start()
+ * leaves two Exec Tasks running with their entry points inside the caller's
+ * code hunk, and the tick fires 50 times a second; AmigaDOS unloads that hunk
+ * the moment main() returns, so without this call the next tick executes freed
+ * memory and takes the machine with it.  A resident shared library that never
+ * goes away does not need to call this; anything that can be unloaded does.
+ *
+ * WHAT IT BRINGS DOWN
+ *
+ *   1. the periodic tick Task, including its timer.device request;
+ *   2. ThreadX's own system timer thread -- ThreadX creates it, on a stack in
+ *      ThreadX's BSS, so it is neither the application's to delete nor safe to
+ *      leave behind;
+ *   3. the master Task that has been sitting in tx_kernel_enter() since start;
+ *   4. everything tx_amiga_kernel_start() allocated: both Task stacks, and the
+ *      kernel memory block if the port allocated it rather than the caller.
+ *
+ * THE CONTRACT ON OUTSTANDING THREADS -- IT REFUSES, IT DOES NOT REAP
+ *
+ * If any application TX_THREAD still exists, stop REFUSES and changes nothing.
+ * It does not terminate them for you.  tx_thread_delete() of a thread that is
+ * blocked in Exec rather than in ThreadX cannot reclaim it and produces a
+ * zombie (see tx_amiga_zombie_tasks() below), so a stop that "helpfully" tore
+ * down the caller's threads would convert a clear refusal into a hazard the
+ * caller cannot even see.  Delete your own threads, then call this.
+ *
+ * Likewise it refuses while any zombie has not yet unblocked
+ * (tx_amiga_zombie_tasks_live() != 0).  A zombie cannot be reclaimed on demand
+ * -- that is what makes it one -- and it will run code in the program's hunk
+ * when it finally wakes.  Only the caller knows how to unstick the device that
+ * is holding it.
+ *
+ * CALLING IT
+ *
+ * Callable from any Exec Task the port did not create, including one that is
+ * currently ADOPTED: the caller's own thread does not count against it, and is
+ * orphaned on its behalf -- but only once the stop is going ahead, so a refusal
+ * leaves the caller adopted and the kernel exactly as it found them.
+ * Calling it from a Task the port created (a ThreadX thread, the tick, the
+ * master) returns TX_CALLER_ERROR -- it would be waiting for itself.
+ * Idempotent: calling it on a kernel that is already down returns TX_SUCCESS.
+ *
+ * RETURNS -- ONLY TX_SUCCESS MEANS "SAFE TO EXIT"
+ *
+ *   TX_SUCCESS       Down.  Nothing of the port's is running.  Safe to return
+ *                    to AmigaDOS, or to expunge the library.
+ *   TX_THREAD_ERROR  Refused; the kernel is untouched AND STILL USABLE.
+ *                    Application threads or live zombies remain.  NOT safe to
+ *                    exit.
+ *   TX_NO_MEMORY     Refused for want of an Exec signal; kernel untouched and
+ *                    still usable.  NOT safe to exit.
+ *   TX_CALLER_ERROR  Wrong caller; kernel untouched.  NOT safe to exit.
+ *   TX_NOT_DONE      Teardown began and did not finish -- something the port
+ *                    owns could not be woken.  The kernel is now unusable AND
+ *                    something is still running in the program's hunk.  DO NOT
+ *                    EXIT.  Every failure is logged through ami_log().
+ *
+ * RESTART
+ *
+ * start -> stop -> start works, and is covered by tools/smoke/kernelstop.c.
+ * ThreadX's own initialisation is re-run from scratch, which re-clears the
+ * thread and timer components -- but NOT the semaphore, queue, mutex, event
+ * flag or pool created-lists (TX_INLINE_INITIALIZATION).  Objects that outlive
+ * a stop therefore stay linked into lists whose threads have been wiped, so:
+ * delete every ThreadX object you created before stopping, exactly as if the
+ * program were exiting.  That is the same precondition stop already imposes on
+ * threads, extended to the rest.
+ */
+UINT    tx_amiga_kernel_stop(VOID);
+
+/*
  * How many Exec Tasks have outlived the TX_THREAD they backed.
  *
  * tx_thread_delete() removes the backing Exec Task by asking it to destroy
@@ -58,6 +132,17 @@ UINT    tx_amiga_kernel_running(VOID);
  * zombie is still running on it.
  */
 ULONG   tx_amiga_zombie_tasks(VOID);
+
+/*
+ * How many of those have not unblocked yet.
+ *
+ * tx_amiga_zombie_tasks() only ever goes up: it answers "did this happen?".
+ * This one goes back down as each zombie finally unblocks and destroys itself,
+ * so it answers the question that matters at exit -- "is one still out there?".
+ * Zero is a precondition of tx_amiga_kernel_stop(), and a program with a
+ * non-zero count here cannot safely be unloaded whatever else it does.
+ */
+ULONG   tx_amiga_zombie_tasks_live(VOID);
 
 
 /* ------------------------------------------------------------------------ */

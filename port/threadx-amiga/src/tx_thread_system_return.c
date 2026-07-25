@@ -67,6 +67,18 @@ TX_THREAD       *owner;
     ctrl -> ctrl_reaped        =  (volatile ULONG *) 0;
     ctrl -> ctrl_magic         =  0UL;
 
+    /* A zombie stops being one here: this is the moment it can no longer touch
+       the application's code or data.  tx_amiga_kernel_stop() waits for this
+       count to reach zero before it will call an exit safe.  */
+    if (ctrl -> ctrl_zombie != 0U)
+    {
+        ctrl -> ctrl_zombie =  0U;
+        if (_tx_amiga_zombies_live != 0UL)
+        {
+            _tx_amiga_zombies_live--;
+        }
+    }
+
     /* The flag lives on the reaper's stack and it is blocked in Wait(), so it
        is alive.  Set it BEFORE the Signal, so a reaper that wakes on its
        timeout in the same instant still sees a completed handshake rather than

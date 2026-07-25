@@ -374,6 +374,17 @@ void    _tx_amiga_start_interrupts(void);
 #endif
 
 
+/* How long tx_amiga_kernel_stop() waits for each of the two Tasks the port
+   owns to remove itself before declaring the shutdown failed.  Both are
+   parked on a signal and answer within milliseconds; the only way to spend
+   this budget is a Task that cannot be woken at all, and then the answer is
+   "not safe to exit" however long we wait.  */
+
+#ifndef TX_AMIGA_STOP_TIMEOUT_SECS
+#define TX_AMIGA_STOP_TIMEOUT_SECS              5UL
+#endif
+
+
 /* Port globals.  Declared with VOID * rather than struct Task * so that this
    header stays independent of the Exec headers.  */
 
