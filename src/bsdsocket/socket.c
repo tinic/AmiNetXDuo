@@ -192,11 +192,25 @@ static BOOL bsd_socket_destroy(AmiSocket *sock)
        ours either way. Anything else means NetX Duo still points at it. */
     if (status != NX_SUCCESS && status != NX_NOT_CREATED)
     {
-        sock->as_Flags |= ASF_ORPHANED;
         AMI_WARN("bsdsocket: %s_socket_delete refused (%ld); leaking %ld bytes "
                  "rather than corrupting the created list",
                  ((sock->as_Flags & ASF_TCP) != 0) ? "nx_tcp" : "nx_udp",
                  (long)status, (long)sizeof(AmiSocket));
+
+        sock->as_Flags |= ASF_ORPHANED;
+
+        /*
+         * The block stays alive for NetX Duo's benefit, but it must stop
+         * pointing at ours: the owning base is about to be freed, and a late
+         * receive or disconnect callback would signal a dead task.
+         */
+        if ((sock->as_Flags & ASF_TCP) != 0)
+            sock->as_Nx.tcp.nx_tcp_socket_reserved_ptr = NX_NULL;
+        else
+            sock->as_Nx.udp.nx_udp_socket_reserved_ptr = NX_NULL;
+
+        sock->as_Owner = NULL;
+
         return FALSE;
     }
 
