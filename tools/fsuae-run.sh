@@ -128,6 +128,56 @@ EOF
 # states and floppy overlays, so two concurrent runs fight over those files and
 # one of them quits early -- which looks exactly like a crash in the code under
 # test. Give each run a private base directory.
+# --------------------------------------------------------------- serialise --
+#
+# Concurrent fs-uae instances interfere even with per-run base_dir isolation:
+# three separate workstreams independently reported runs dying with a premature
+# uae_quit, and in every case the run that died shared the machine with another.
+# The symptom is indistinguishable from a crash in the code under test, which
+# makes it expensive -- an agent chases a phantom bug instead of its own work.
+#
+# Runs therefore queue on an exclusive lock. A directory is the lock, because
+# mkdir is atomic everywhere and macOS ships no flock(1). The owning PID is
+# recorded so a lock left by a killed run can be reclaimed rather than wedging
+# the queue forever.
+#
+# AMINETXDUO_NO_LOCK=1 opts out; AMINETXDUO_LOCK_WAIT caps the wait (default
+# 2400s -- a conformance run plus boot approaches five minutes and several may
+# be queued ahead).
+LOCKDIR="$ROOT/build/.fsuae.lock"
+LOCK_WAIT="${AMINETXDUO_LOCK_WAIT:-2400}"
+LOCK_HELD=0
+
+release_lock() {
+    [ "$LOCK_HELD" = "1" ] || return 0
+    rm -rf "$LOCKDIR" 2>/dev/null || true
+    LOCK_HELD=0
+}
+
+if [ "${AMINETXDUO_NO_LOCK:-0}" != "1" ]; then
+    mkdir -p "$ROOT/build"
+    waited=0
+    while ! mkdir "$LOCKDIR" 2>/dev/null; do
+        owner=$(cat "$LOCKDIR/pid" 2>/dev/null || echo "")
+        if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
+            echo "==> reclaiming lock from dead pid $owner" >&2
+            rm -rf "$LOCKDIR" 2>/dev/null || true
+            continue
+        fi
+        if [ "$waited" -ge "$LOCK_WAIT" ]; then
+            echo "!! waited ${waited}s for the emulator lock; proceeding anyway" >&2
+            break
+        fi
+        [ "$waited" = 0 ] && echo "==> another run holds the emulator; queueing"
+        sleep 5
+        waited=$((waited + 5))
+    done
+    if [ -d "$LOCKDIR" ]; then
+        echo $$ > "$LOCKDIR/pid" 2>/dev/null || true
+        LOCK_HELD=1
+    fi
+fi
+
 FSUAE_BASE="$ROOT/build/fsuae-base$TAG"
 mkdir -p "$FSUAE_BASE"
 
@@ -197,7 +247,8 @@ cleanup_emulator() {
     kill -KILL "$FSUAE_PID" 2>/dev/null || true
     FSUAE_PID=""
 }
-trap cleanup_emulator EXIT INT TERM HUP
+cleanup_all() { cleanup_emulator; release_lock; }
+trap cleanup_all EXIT INT TERM HUP
 
 
 "$FSUAE" "$CFG" >"$ROOT/build/fsuae$TAG.log" 2>&1 &
