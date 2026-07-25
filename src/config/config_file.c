@@ -1,0 +1,372 @@
+/*
+ * AmiNetXDuo -- dos.library file access for the configuration layer.
+ *
+ * This is the only file in src/config that talks to AmigaDOS. Everything else
+ * works on memory buffers, which is what lets the host test drive the same
+ * parsers. No newlib stdio anywhere: this code lives in a shared library.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "config_internal.h"
+#include "aminetxduo/compat.h"
+
+#include <dos/dos.h>
+#include <dos/dosextens.h>
+#include <proto/dos.h>
+
+/* -------------------------------------------------------------- file read */
+
+APTR ami_cfg_read_file(const char *path, ULONG *size_out)
+{
+    BPTR  file;
+    LONG  size;
+    LONG  got;
+    char *buf;
+
+    if (size_out != NULL)
+        *size_out = 0;
+
+    if (path == NULL)
+        return NULL;
+
+    file = Open((STRPTR)path, MODE_OLDFILE);
+    if (file == 0)
+    {
+        /* A missing configuration file is normal, not an error. */
+        AMI_DEBUG("config: %s not present (%ld)", path, (long)IoErr());
+        return NULL;
+    }
+
+    /* Seek() returns the *previous* position, so this yields the file size. */
+    if (Seek(file, 0, OFFSET_END) < 0)
+    {
+        Close(file);
+        return NULL;
+    }
+    size = Seek(file, 0, OFFSET_BEGINNING);
+
+    if (size < 0)
+    {
+        AMI_WARN("config: %s: cannot determine size", path);
+        Close(file);
+        return NULL;
+    }
+
+    if ((ULONG)size > AMI_CFG_FILE_MAX)
+    {
+        AMI_WARN("config: %s: %ld bytes is too large, ignoring", path, (long)size);
+        Close(file);
+        return NULL;
+    }
+
+    buf = (char *)ami_alloc((ULONG)size + 1);
+    if (buf == NULL)
+    {
+        AMI_ERROR("config: %s: out of memory (%ld bytes)", path, (long)size);
+        Close(file);
+        return NULL;
+    }
+
+    got = (size > 0) ? Read(file, buf, size) : 0;
+    Close(file);
+
+    if (got < 0)
+    {
+        AMI_WARN("config: %s: read failed (%ld)", path, (long)IoErr());
+        ami_free(buf);
+        return NULL;
+    }
+
+    buf[got] = '\0';
+
+    if (size_out != NULL)
+        *size_out = (ULONG)got;
+
+    return buf;
+}
+
+/* -------------------------------------------------------------- utilities */
+
+static VOID join_path(char *dst, ULONG dstlen, const char *dir, const char *name)
+{
+    ULONG pos;
+
+    ami_cfg_copy_string(dst, dstlen, dir);
+    pos = ami_cfg_strlen(dst);
+
+    if (pos > 0 && dst[pos - 1] != '/' && dst[pos - 1] != ':' && pos + 1 < dstlen)
+    {
+        dst[pos++] = '/';
+        dst[pos]   = '\0';
+    }
+
+    ami_cfg_copy_string(dst + pos, dstlen - pos, name);
+}
+
+/* Workbench icons sit next to the config files; they are not config files. */
+static BOOL is_icon(const char *name)
+{
+    ULONG len = ami_cfg_strlen(name);
+
+    if (len < 5)
+        return FALSE;
+
+    return (BOOL)(ami_cfg_stricmp(name + len - 5, ".info") == 0);
+}
+
+/* ------------------------------------------------------------- interfaces */
+
+LONG ami_config_load_interface(const char *name, AmiIfConfig *out)
+{
+    char  path[AMI_CFG_PATH_LEN + AMI_CFG_NAME_LEN + 8];
+    char *buf;
+    LONG  result;
+
+    if (name == NULL || out == NULL)
+        return AMI_CFG_ERR_SYNTAX;
+
+    join_path(path, sizeof(path), AMI_CFG_DIR_NETINTERFACES, name);
+
+    buf = (char *)ami_cfg_read_file(path, NULL);
+    if (buf == NULL)
+    {
+        ami_cfg_zero(out, sizeof(*out));
+        return AMI_CFG_ERR_IO;
+    }
+
+    result = ami_cfg_parse_interface(name, buf, out);
+    ami_free(buf);
+
+    return result;
+}
+
+/*
+ * Roadshow processes the interface files in alphabetical order (a PRI tooltype
+ * can override that; we do not read icons). Keeping the array sorted makes the
+ * first interface deterministic, which matters because it is the one whose
+ * gateway becomes the default route when no routes file exists.
+ */
+static VOID insert_interface(AmiConfig *cfg, const AmiIfConfig *iface)
+{
+    UWORD pos;
+    UWORD i;
+
+    if (cfg->interface_count >= AMI_CFG_MAX_INTERFACES)
+    {
+        AMI_WARN("config: more than %ld interfaces, ignoring '%s'",
+                 (long)AMI_CFG_MAX_INTERFACES, iface->name);
+        return;
+    }
+
+    for (pos = 0; pos < cfg->interface_count; pos++)
+    {
+        if (ami_cfg_stricmp(iface->name, cfg->interfaces[pos].name) < 0)
+            break;
+    }
+
+    for (i = cfg->interface_count; i > pos; i--)
+        cfg->interfaces[i] = cfg->interfaces[i - 1];
+
+    cfg->interfaces[pos] = *iface;
+    cfg->interface_count++;
+}
+
+static VOID load_interfaces(AmiConfig *cfg)
+{
+    struct FileInfoBlock *fib;
+    BPTR                  lock;
+
+    lock = Lock((STRPTR)AMI_CFG_DIR_NETINTERFACES, ACCESS_READ);
+    if (lock == 0)
+    {
+        AMI_WARN("config: no " AMI_CFG_DIR_NETINTERFACES " drawer");
+        return;
+    }
+
+    fib = (struct FileInfoBlock *)ami_alloc(sizeof(struct FileInfoBlock));
+    if (fib == NULL)
+    {
+        UnLock(lock);
+        return;
+    }
+
+    if (Examine(lock, fib))
+    {
+        while (ExNext(lock, fib))
+        {
+            AmiIfConfig iface;
+            /* fib_FileName is TEXT[] (unsigned char), our strings are char. */
+            const char *entry_name = (const char *)fib->fib_FileName;
+
+            if (fib->fib_DirEntryType > 0)      /* a drawer */
+                continue;
+            if (is_icon(entry_name))
+                continue;
+
+            if (ami_config_load_interface(entry_name, &iface) != AMI_CFG_OK)
+                continue;
+
+            AMI_INFO("config: interface %s: %s unit %lu",
+                     iface.name, iface.device, (unsigned long)iface.unit);
+
+            insert_interface(cfg, &iface);
+        }
+    }
+
+    ami_free(fib);
+    UnLock(lock);
+}
+
+/* ----------------------------------------------------------------- pieces */
+
+static VOID load_resolver(AmiConfig *cfg)
+{
+    char *buf;
+
+    buf = (char *)ami_cfg_read_file(AMI_CFG_FILE_NAMERES, NULL);
+    if (buf != NULL)
+    {
+        ami_cfg_parse_resolver(buf, &cfg->resolver,
+                               cfg->hostname, sizeof(cfg->hostname));
+        ami_free(buf);
+    }
+
+    /*
+     * AmiTCP installations keep NAMESERVER/DOMAIN/HOST lines in the netdb
+     * file itself. Read them too, but only to fill gaps: a real
+     * name_resolution file always wins.
+     */
+    if (cfg->resolver.nameserver_count == 0 || cfg->hostname[0] == '\0')
+    {
+        buf = (char *)ami_cfg_read_file(AMI_CFG_FILE_HOSTS, NULL);
+        if (buf != NULL)
+        {
+            AmiResolverConfig extra;
+
+            ami_cfg_zero(&extra, sizeof(extra));
+            ami_cfg_parse_resolver(buf, &extra,
+                                   cfg->hostname, sizeof(cfg->hostname));
+
+            if (cfg->resolver.nameserver_count == 0)
+            {
+                cfg->resolver.nameserver_count = extra.nameserver_count;
+                {
+                    UWORD i;
+                    for (i = 0; i < extra.nameserver_count; i++)
+                        cfg->resolver.nameserver[i] = extra.nameserver[i];
+                }
+            }
+            if (cfg->resolver.domain[0] == '\0')
+                ami_cfg_copy_string(cfg->resolver.domain,
+                                    sizeof(cfg->resolver.domain), extra.domain);
+
+            ami_free(buf);
+        }
+    }
+}
+
+static VOID load_gateway(AmiConfig *cfg)
+{
+    static const char *const files[] =
+    {
+        AMI_CFG_FILE_GATEWAY,   /* docs/RESEARCH.md §6.6 and the config.h contract */
+        AMI_CFG_FILE_ROUTES,    /* where Roadshow 1.15 really keeps it */
+        NULL
+    };
+    int i;
+
+    for (i = 0; files[i] != NULL && cfg->default_gateway == 0; i++)
+    {
+        char *buf = (char *)ami_cfg_read_file(files[i], NULL);
+
+        if (buf == NULL)
+            continue;
+
+        ami_cfg_parse_gateway(buf, &cfg->default_gateway);
+        ami_free(buf);
+    }
+
+    /* Fall back to a GATEWAY= given in an interface file. */
+    if (cfg->default_gateway == 0)
+    {
+        UWORD i2;
+
+        for (i2 = 0; i2 < cfg->interface_count; i2++)
+        {
+            if (cfg->interfaces[i2].gateway != 0)
+            {
+                cfg->default_gateway = cfg->interfaces[i2].gateway;
+                break;
+            }
+        }
+    }
+}
+
+static VOID load_hostname(AmiConfig *cfg)
+{
+    ULONG index;
+
+    if (cfg->hostname[0] == '\0')
+    {
+        char *buf = (char *)ami_cfg_read_file("ENV:HOSTNAME", NULL);
+
+        if (buf != NULL)
+        {
+            char *cursor = buf;
+            char *line   = ami_cfg_next_line(&cursor);
+
+            if (line != NULL)
+            {
+                line = ami_cfg_trim(line);
+                if (*line != '\0')
+                    ami_cfg_copy_string(cfg->hostname, sizeof(cfg->hostname), line);
+            }
+            ami_free(buf);
+        }
+    }
+
+    if (cfg->hostname[0] != '\0')
+        return;
+
+    /* Last resort: the first non-loopback name in the hosts file. */
+    for (index = 0; ; index++)
+    {
+        const AmiNetdbEntry *entry = ami_netdb_host_entry(index);
+
+        if (entry == NULL)
+            break;
+        if ((entry->value >> 24) == 127UL || entry->value == 0)
+            continue;
+
+        ami_cfg_copy_string(cfg->hostname, sizeof(cfg->hostname), entry->name);
+        break;
+    }
+
+    if (cfg->hostname[0] == '\0')
+        ami_cfg_copy_string(cfg->hostname, sizeof(cfg->hostname), "amiga");
+}
+
+/* -------------------------------------------------------------------- API */
+
+LONG ami_config_load(AmiConfig *cfg)
+{
+    if (cfg == NULL)
+        return AMI_CFG_ERR_SYNTAX;
+
+    ami_cfg_zero(cfg, sizeof(*cfg));
+
+    load_interfaces(cfg);
+    load_resolver(cfg);
+    load_gateway(cfg);
+
+    ami_netdb_load();
+    load_hostname(cfg);
+
+    AMI_INFO("config: %lu interface(s), %lu name server(s), host '%s'",
+             (unsigned long)cfg->interface_count,
+             (unsigned long)cfg->resolver.nameserver_count,
+             cfg->hostname);
+
+    return AMI_CFG_OK;
+}

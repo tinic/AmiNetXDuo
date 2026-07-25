@@ -18,11 +18,21 @@
 #ifndef AMINETXDUO_SANA2_H
 #define AMINETXDUO_SANA2_H
 
-#include <exec/types.h>
-#include "aminetxduo/config.h"
-
+/*
+ * tx_api.h first, and deliberately: exec/types.h turns VOID into a macro,
+ * which breaks tx_port.h's `typedef void VOID`. The undef/restore pair makes
+ * this header safe to include after an exec header too -- whichever of the two
+ * spellings of VOID survives, it still means `void`.
+ */
+#undef VOID
 #include "tx_api.h"
 #include "nx_api.h"
+#ifndef VOID
+#define VOID void
+#endif
+
+#include <exec/types.h>
+#include "aminetxduo/config.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -77,11 +87,28 @@ typedef struct AmiSana2Stats {
 VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out);
 
 /*
- * Raw-frame fast path. Probed at open time: when the device supports
- * S2_RAWREAD/S2_RAWWRITE the shim moves whole frames and skips header
- * synthesis. Reported here so tools and tests can tell which path is live.
+ * Raw-frame fast path. SANA-II expresses it as SANA2IOF_RAW in io_Flags on
+ * CMD_READ/CMD_WRITE rather than as separate commands, and offers no way to
+ * ask a device whether it implements the flag. The shim probes at open time
+ * (post a raw read, take it straight back) and reports the answer here, but a
+ * device that accepts the flag and then ignores it is indistinguishable from
+ * one that honours it -- and would silently mis-frame every packet. So raw is
+ * only *used* when the caller has opted in with ami_sana2_set_raw_allowed();
+ * the default is cooked.
  */
 BOOL ami_sana2_raw_mode(const AmiSana2If *iface);
+VOID ami_sana2_set_raw_allowed(BOOL allowed);
+
+/*
+ * The SANA-II readers block in exec Wait() for IORequest completion, which is
+ * outside ThreadX's view of the world. Under the baton scheduling model
+ * (docs/RESEARCH.md §6.2) a ThreadX thread must hand the baton back before
+ * blocking that way; the ThreadX port registers the pair here. Both default to
+ * no-ops, which is the correct behaviour when Exec does the scheduling.
+ */
+typedef VOID (*AmiSana2BlockHook)(VOID);
+VOID ami_sana2_set_block_hooks(AmiSana2BlockHook before_wait,
+                               AmiSana2BlockHook after_wait);
 
 #ifdef __cplusplus
 }

@@ -1,0 +1,236 @@
+/*
+ * AmiNetXDuo -- SANA-II shim internals.
+ *
+ * Not part of the public surface: everything here is private to src/sana2/.
+ * Include "tx_api.h" and "nx_api.h" BEFORE any exec header -- exec/types.h
+ * turns VOID into a macro, which breaks tx_port.h's `typedef void VOID`.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#ifndef AMINETXDUO_SANA2_INTERNAL_H
+#define AMINETXDUO_SANA2_INTERNAL_H
+
+#include "tx_api.h"
+#include "nx_api.h"
+
+#include "aminetxduo/sana2.h"
+#include "aminetxduo/config.h"
+#include "aminetxduo/compat.h"
+
+#include "sana2_device.h"
+
+/* --------------------------------------------------------------- tunables */
+
+/*
+ * CMD_READ is per packet type and the device has no buffers of its own: every
+ * frame that arrives with no matching read outstanding is dropped on the
+ * floor. Each outstanding read therefore pins one NX_PACKET for its whole
+ * life, so depth trades pool occupancy against loss under burst.
+ *
+ * The 4 MB / 68020 floor (docs/RESEARCH.md §9) gives a pool as small as
+ * AMI_POOL_MIN_PACKETS (16), so the defaults below pin 6 packets (8 with
+ * IPv6). ARP and IPv6 ND are low-rate and get shallower queues than IPv4.
+ */
+#ifndef AMI_SANA2_RX_DEPTH_IPV4
+#define AMI_SANA2_RX_DEPTH_IPV4     4
+#endif
+#ifndef AMI_SANA2_RX_DEPTH_ARP
+#define AMI_SANA2_RX_DEPTH_ARP      2
+#endif
+#ifndef AMI_SANA2_RX_DEPTH_IPV6
+#define AMI_SANA2_RX_DEPTH_IPV6     2
+#endif
+
+#define AMI_SANA2_RX_MAX_DEPTH      8
+
+#ifndef AMI_SANA2_TX_SLOTS
+#define AMI_SANA2_TX_SLOTS          8
+#endif
+
+/* Reader threads run above the IP thread so the read queue drains promptly. */
+#ifndef AMI_SANA2_RX_PRIORITY
+#define AMI_SANA2_RX_PRIORITY       2
+#endif
+#ifndef AMI_SANA2_RX_STACK_SIZE
+#define AMI_SANA2_RX_STACK_SIZE     4096
+#endif
+
+/* Ticks to spin on a full TX ring before dropping the frame. */
+#ifndef AMI_SANA2_TX_WAIT_TICKS
+#define AMI_SANA2_TX_WAIT_TICKS     4
+#endif
+
+/* Probe for raw-frame support at open time (see ami_sana2_probe_raw). */
+#ifndef AMI_SANA2_PROBE_RAW
+#define AMI_SANA2_PROBE_RAW         1
+#endif
+
+/* Use raw framing when the probe says it is available. Off: see sana2_device.c. */
+#ifndef AMI_SANA2_RAW_DEFAULT
+#define AMI_SANA2_RAW_DEFAULT       0
+#endif
+
+/* Offer the 16-bit buffer-management tags. Off: the tag numbers could not be
+   verified against any header on this toolchain -- see sana2_device.h. */
+#ifndef AMI_SANA2_OFFER_COPY16
+#define AMI_SANA2_OFFER_COPY16      0
+#endif
+
+#ifdef AMINETXDUO_IPV6
+#define AMI_SANA2_RX_READERS        3
+#else
+#define AMI_SANA2_RX_READERS        2
+#endif
+
+/*
+ * Two bytes of slack in front of the synthesised Ethernet header so the IP
+ * header lands on a 4-byte boundary -- NetX Duo's NX_PHYSICAL_HEADER is 16 for
+ * exactly this reason, and the 68020 pays for misaligned longword reads.
+ */
+#define AMI_SANA2_RX_PAD            2
+
+#define AMI_ETHERTYPE_RARP          0x8035
+
+/* --------------------------------------------------------------- RX slots */
+
+struct AmiSana2Rx;
+
+/*
+ * One outstanding CMD_READ. `req` MUST stay first: completed requests come
+ * back as struct Message * from GetMsg() and are cast straight back to the
+ * slot.
+ */
+typedef struct AmiRxSlot
+{
+    struct IOSana2Req   req;
+    struct AmiSana2Rx  *owner;
+    NX_PACKET          *packet;     /* pinned for the life of the request  */
+    UCHAR              *dst;        /* where S2_CopyToBuff must write      */
+    ULONG               capacity;   /* bytes available at dst              */
+    ULONG               copied;     /* set by the copy hook                */
+    BOOL                posted;
+} AmiRxSlot;
+
+typedef struct AmiSana2Rx
+{
+    AmiSana2If         *iface;
+    ULONG               packet_type;
+    UWORD               depth;
+
+    TX_THREAD           thread;
+    TX_SEMAPHORE        ready;
+    TX_SEMAPHORE        exited;
+    APTR                stack;
+
+    struct Task        *task;
+    struct MsgPort     *port;
+    ULONG               wake_mask;
+
+    volatile BOOL       started;    /* tx_thread_create succeeded          */
+    volatile BOOL       running;
+    volatile BOOL       stop;
+    volatile BOOL       failed;
+
+    AmiRxSlot           slot[AMI_SANA2_RX_MAX_DEPTH];
+} AmiSana2Rx;
+
+/* --------------------------------------------------------------- TX slots */
+
+/* `req` MUST stay first -- same GetMsg() cast as AmiRxSlot. */
+typedef struct AmiTxSlot
+{
+    struct IOSana2Req   req;
+    AmiSana2If         *iface;
+
+    NX_PACKET          *packet;     /* released when the write completes   */
+    NX_PACKET          *cursor;     /* chain walk state for S2_CopyFromBuff*/
+    ULONG               cursor_off;
+    ULONG               consumed;
+    ULONG               total;
+    UWORD               hdr_len;    /* Ethernet bytes prepended in raw mode*/
+    volatile BOOL       busy;
+} AmiTxSlot;
+
+/* ------------------------------------------------------------- interface */
+
+struct AmiSana2If
+{
+    /* Device. The opened request doubles as the template every cloned
+       request is copied from -- it carries io_Device, io_Unit and the
+       device-side ios2_BufferManagement cookie. */
+    struct IOSana2Req   templ;
+    BOOL                device_open;
+    char                device[AMI_CFG_PATH_LEN];
+    ULONG               unit;
+    struct TagItem      buffer_tags[8];
+
+    /* Hardware facts from S2_DEVICEQUERY / S2_GETSTATIONADDRESS. */
+    UCHAR               mac[AMI_ETH_ADDR_SIZE];
+    ULONG               mtu;
+    ULONG               bps;
+    ULONG               hw_type;
+    UWORD               addr_bits;
+    UWORD               addr_bytes;     /* 6 for Ethernet, 0 for PPP/SLIP  */
+
+    BOOL                online;
+    BOOL                raw_supported;
+    BOOL                raw_mode;
+
+    /* NetX Duo binding. */
+    NX_IP              *ip;
+    UINT                index;
+    NX_INTERFACE       *interface_ptr;
+    NX_PACKET_POOL     *pool;
+
+    /* TX ring. The reply port is PA_IGNORE: completions are reaped by
+       polling, never by blocking the sending thread. */
+    struct MsgPort      tx_port;
+    AmiTxSlot           tx[AMI_SANA2_TX_SLOTS];
+
+    /* RX readers, one per packet type. */
+    AmiSana2Rx          rx[AMI_SANA2_RX_READERS];
+    BOOL                rx_running;
+
+    AmiSana2Stats       stats;
+};
+
+/* ------------------------------------------------------------- internals */
+
+/* sana2_copy.c -- called by the device in m68k register convention. */
+BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
+                            register APTR from  __asm("a1"),
+                            register ULONG len  __asm("d0"));
+BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
+                              register APTR from __asm("a1"),
+                              register ULONG len __asm("d0"));
+VOID ami_sana2_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len);
+
+/* sana2_device.c */
+VOID ami_sana2_block_enter(VOID);
+VOID ami_sana2_block_leave(VOID);
+VOID ami_sana2_port_init(struct MsgPort *port, struct Task *task, BYTE sigbit,
+                         UBYTE flags);
+LONG ami_sana2_command(AmiSana2If *iface, struct IOSana2Req *req, UWORD command);
+LONG ami_sana2_online(AmiSana2If *iface);
+LONG ami_sana2_offline(AmiSana2If *iface);
+LONG ami_sana2_multicast(AmiSana2If *iface, UWORD command,
+                         ULONG addr_msw, ULONG addr_lsw);
+VOID ami_sana2_refresh_stats(AmiSana2If *iface);
+
+/* sana2_driver.c */
+VOID ami_sana2_unbind(AmiSana2If *iface);
+
+/* sana2_rx.c */
+LONG ami_sana2_rx_start(AmiSana2If *iface);
+VOID ami_sana2_rx_stop(AmiSana2If *iface);
+VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet);
+
+/* sana2_tx.c */
+VOID ami_sana2_tx_init(AmiSana2If *iface);
+VOID ami_sana2_tx_reap(AmiSana2If *iface);
+VOID ami_sana2_tx_drain(AmiSana2If *iface);
+UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
+                       ULONG dst_msw, ULONG dst_lsw);
+
+#endif /* AMINETXDUO_SANA2_INTERNAL_H */

@@ -228,12 +228,46 @@ milestone 7 (§8) — real work, not trim.
 
 - **`usergroup.library`** — `getuid`/`getpwent`/`getgrent` etc.; AmiTCP's companion, shipped
   by Roadshow too. Many ported Unix tools link it.
+
+  ABI **confirmed 2026-07-24** from two primary sources that agree function-for-function
+  and register-for-register: AmiTCP's `fd/usergroup_lib.fd` (© 1993 AmiTCP/IP Group, HUT)
+  and Roadshow's `sfd/usergroup_lib.sfd` (v1.4, 2004, Barthel). Both give
+  `##base _UserGroupBase`, `##bias 30`, **39 public vectors, LVO −30 … −258** — which the
+  toolchain's own `pragmas/usergroup_pragmas.h` corroborates exactly (0x01e … 0x102).
+  No `usergroup.doc` autodoc could be found anywhere, so the vector *table* is settled but
+  documented per-call *semantics* are not; the AmiTCP 4.x SDK would close that gap.
+
+  > **Trap, found the hard way.** The local toolchain's `ndk-include/pwd.h` is **not** the
+  > usergroup ABI — it is newlib's 10-field 4.4BSD `struct passwd` (with `pw_change`,
+  > `pw_class`, `pw_expire`) substituted over Roadshow's. The real usergroup `struct passwd`
+  > has **7 fields**. Anything returning a `struct passwd` built from that header is wrong
+  > by 12 bytes and misaligned from `pw_gecos` onward. This is why bebbo's AmiTCP inline
+  > header calls the type `struct TCP_passwd`. Use private tag names and pin the layout
+  > with `_Static_assert`.
 - **The `AMITCP` public message port** — `WaitForPort AMITCP` in `S:User-Startup` is the
   canonical "is the stack up" barrier. Cheap to honour, and worth honouring.
 - **Config files** — Roadshow's `DEVS:NetInterfaces/<name>`, `DEVS:Internet/name_resolution`,
-  `.../default_gateway`; AmiTCP's `AmiTCP:db/{interfaces,netdb-myhost,static-routes}`;
+  `DEVS:Internet/routes`; AmiTCP's `AmiTCP:db/{interfaces,netdb-myhost,static-routes}`;
   the standard `/etc`-style netdb (`services`, `protocols`, `hosts`, `networks`).
   lwip-amiga instead uses a single `ENV:netstack.prefs` — simpler, but breaks tools.
+
+  > **Corrected 2026-07-24**, against the Roadshow 1.15 manual and real in-the-wild
+  > interface files. Two errors in the earlier draft, both inherited from secondary
+  > sources:
+  > - The address mode keyword is **`CONFIGURE=DHCP|AUTO|FASTAUTO`** (plus the literal
+  >   `ADDRESS=DHCP`/`NETMASK=DHCP`), *not* `IPTYPE=DHCP`. In real Roadshow `IPTYPE` is
+  >   numeric and means the **SANA-II packet type** (default 2048). `IPTYPE=DHCP` is
+  >   AmiTCP/Genesis-era vocabulary. A confirmed real file reads:
+  >   `device=ariadne.device`, `unit=0`, `configure=dhcp`, `address=…`, `netmask=…`,
+  >   `iprequests=64`, `writerequests=64`, `copymode=fast`, `alias=…`,
+  >   `hardwareaddress=…`, `id=…`, `filter=…`.
+  > - **There is no `DEVS:Internet/default_gateway` in Roadshow 1.15.** The default route
+  >   lives in `DEVS:Internet/routes` as `DEFAULT=`/`DEFAULTGATEWAY=`, alongside
+  >   `DST`/`HOSTDST`/`NETDST` + `VIA` for specific routes.
+  >
+  > The parser in `src/config/` accepts both spellings (numeric `IPTYPE` = packet type,
+  > alphabetic = address mode) and reads both `routes` and a `default_gateway` file if
+  > present, so nothing is lost either way.
 - **The command set** — `AddNetInterface`, `Online`, `Offline`, `ShowNetStatus`, `ping`,
   `netstat`, `route`, `nslookup`/`host`, `traceroute`.
 - **Self-starting** — modern practice (both AmiTCP_NG and lwip-amiga) is that the library
@@ -258,17 +292,37 @@ Shape of the interface:
 | 14/15 | `S2_ONLINE` / `S2_OFFLINE` | link up/down |
 | 16/17 | `S2_ADDMULTICASTADDRESS` / `S2_DELMULTICASTADDRESS` | multicast |
 | 21/22 | `S2_GETGLOBALSTATS` / `S2_GETSPECIALSTATS` | counters |
-| — | `S2_RAWREAD` / `S2_RAWWRITE` | full frames including link header (optional, not universally reliable) |
+| — | `SANA2IOF_RAW` in `io_Flags` | full frames including link header (optional, not universally reliable) |
+
+> **Corrected 2026-07-24.** Raw mode is a **flag on `CMD_READ`/`CMD_WRITE`**, not a pair of
+> `S2_RAWREAD`/`S2_RAWWRITE` commands — those names appear in no version of the spec or any
+> header on this machine. It also cannot be capability-probed: SANA-II offers no way to ask
+> whether a device implements the flag, and a device that *accepts* it and then ignores it
+> is indistinguishable from one that honours it — while silently mis-framing every packet.
+> The shim therefore ships with raw **off**, requiring an explicit opt-in.
 
 Two properties drive the port layer:
 
 1. **Cooked framing.** In normal mode the driver owns the link-layer header. On TX the
    stack supplies `ios2_PacketType` (EtherType) + `ios2_DstAddr` + *payload*; on RX the
    driver hands back `ios2_PacketType`, `ios2_SrcAddr`, `ios2_DstAddr` + *payload*.
-   NetX Duo, by contrast, expects its driver to consume packets with a 14-byte Ethernet
-   header already prepended by `nx_ip` (and to prepend one on RX before calling
-   `_nx_ip_packet_receive`). The shim therefore **strips the Ethernet header on TX and
-   synthesises one on RX** — mechanical, but it must be exactly right for ARP.
+
+   > **Corrected 2026-07-24.** An earlier draft of this section claimed NetX Duo prepends
+   > the Ethernet header itself and that the shim must strip it on TX. That is wrong.
+   > NetX Duo reserves `NX_PHYSICAL_HEADER` (16) bytes of headroom and leaves the link
+   > header entirely to the driver: `nx_ram_network_driver.c:388` moves `prepend_ptr`
+   > back by `NX_ETHERNET_SIZE` and writes all 14 bytes itself, taking the destination
+   > from `nx_ip_driver_physical_address_msw/lsw`. So in cooked mode the shim **never
+   > builds an Ethernet header at all** — payload goes straight from `prepend_ptr`, and
+   > retransmitting the same `NX_PACKET` works for free. Only RX needs synthesis, and
+   > only so the receive path can demux EtherType.
+
+   RX still **synthesises** a header from `ios2_SrcAddr`/`ios2_DstAddr`/`ios2_PacketType`
+   — mechanical, but it must be exactly right for ARP. Note that delivery must go through
+   `_nx_ip_packet_deferred_receive` / `_nx_arp_packet_deferred_receive` /
+   `_nx_rarp_packet_deferred_receive` rather than `_nx_ip_packet_receive`: the reader is
+   not the IP thread, and `_nx_ip_packet_receive` does not demux EtherType, so handing it
+   an ARP frame silently breaks ARP.
 2. **Buffer-management hooks.** `OpenDevice` is passed `ios2_BufferManagement` tags
    `S2_CopyToBuff` / `S2_CopyFromBuff` (plus optional `S2_PacketFilter`,
    `S2_CopyToBuff16`/`S2_CopyFromBuff16`). The driver calls *our* hooks in m68k register
@@ -515,12 +569,24 @@ already in the local toolchain), rather than hand-writing 121 stubs.
   `PACKET_SEND`, `PACKET_BROADCAST`, `ARP_SEND`, `ARP_RESPONSE_SEND`, `MULTICAST_JOIN/LEAVE`,
   `GET_STATUS/SPEED/DUPLEX/ERROR_COUNT`, `SET_PHYSICAL_ADDRESS`, `INTERFACE_ATTACH/DETACH`,
   `UNINITIALIZE`, `DEFERRED_PROCESSING`.
-- TX: strip the 14-byte Ethernet header NetX Duo prepended → `ios2_PacketType` +
-  `ios2_DstAddr` + payload → `CMD_WRITE`. A pool of write requests, `SendIO`, not `DoIO`.
+- TX: no header construction at all in cooked mode (see the correction in §3.4) —
+  `ios2_PacketType` from the driver command or `nx_packet_ip_version`, `ios2_DstAddr` from
+  `nx_ip_driver_physical_address_msw/lsw`, payload straight from `prepend_ptr` →
+  `CMD_WRITE`. A pool of write requests, `SendIO`, never `DoIO`: the driver entry is
+  reachable from arbitrary threads inside `nx_tcp_socket_send`, so it must never block on
+  the wire.
 - RX: reader task per packet type (`0x0800`, `0x0806`, optionally `0x86DD`) with N
   outstanding `CMD_READ`s; `S2_CopyToBuff` writes **straight into the `NX_PACKET`
-  payload** at offset 14; synthesise the Ethernet header from `ios2_SrcAddr`/`ios2_DstAddr`/
-  `ios2_PacketType`; hand to `_nx_ip_packet_receive` (or queue for deferred processing).
+  payload**; synthesise an Ethernet header from `ios2_SrcAddr`/`ios2_DstAddr`/
+  `ios2_PacketType` so the receive path can demux; deliver via
+  `_nx_ip_packet_deferred_receive`/`_nx_arp_packet_deferred_receive`.
+
+  **Consequence discovered during implementation:** `S2_CopyToBuff` is called at
+  interrupt level, so `nx_packet_allocate` cannot happen inside it. Every outstanding
+  `CMD_READ` must therefore **pin its `NX_PACKET` in advance**. That fixes the pipeline
+  depth as a hard packet-pool cost (currently 4 IPv4 + 2 ARP + 2 IPv6 = up to 8 packets
+  permanently pinned, against an `AMI_POOL_MIN_PACKETS` floor of 16) and is what the
+  `alloc_failures` counter tracks.
 - `S2_DEVICEQUERY` → MTU/BPS/`AddrFieldSize`; `S2_GETSTATIONADDRESS` → MAC;
   `S2_ONLINE`/`S2_OFFLINE` → link enable/disable; `S2_GETGLOBALSTATS` →
   `GetNetworkStatistics`/`netstat`.

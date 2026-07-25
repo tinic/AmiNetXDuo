@@ -1,0 +1,521 @@
+/*
+ * bsdsocket.library -- socket options, ioctls and names.
+ *
+ * setsockopt/getsockopt/IoctlSocket/getsockname/getpeername/getdtablesize
+ * plus Dup2Socket, which is nearly free once descriptors are reference
+ * counted.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "bsdsocket_vectors.h"
+
+#include <proto/exec.h>
+#include <netinet/tcp.h>
+
+static LONG bsd_opt_get_long(struct AmiSocketBase *base, APTR optval,
+                             socklen_t *optlen, LONG value)
+{
+    socklen_t len;
+
+    if (optval == NULL || optlen == NULL)
+        return bsd_fail(base, AMI_EFAULT);
+
+    len = *optlen;
+    if (len >= (socklen_t)sizeof(LONG))
+    {
+        *(LONG *)optval = value;
+        *optlen = (socklen_t)sizeof(LONG);
+    }
+    else if (len >= (socklen_t)sizeof(WORD))
+    {
+        *(WORD *)optval = (WORD)value;
+        *optlen = (socklen_t)sizeof(WORD);
+    }
+    else
+    {
+        return bsd_fail(base, AMI_EINVAL);
+    }
+
+    return 0;
+}
+
+static LONG bsd_opt_set_long(struct AmiSocketBase *base, APTR optval,
+                             socklen_t optlen, LONG *value)
+{
+    if (optval == NULL)
+        return bsd_fail(base, AMI_EFAULT);
+
+    if (optlen >= (socklen_t)sizeof(LONG))
+        *value = *(LONG *)optval;
+    else if (optlen >= (socklen_t)sizeof(WORD))
+        *value = *(WORD *)optval;
+    else
+        return bsd_fail(base, AMI_EINVAL);
+
+    return 0;
+}
+
+/* struct timeval -> ThreadX ticks, rounded up so a tiny timeout still waits. */
+static ULONG bsd_timeval_ticks(const struct timeval *tv)
+{
+    ULONG ticks;
+
+    if (tv == NULL)
+        return 0;
+
+    ticks = (ULONG)tv->tv_secs * (ULONG)NX_IP_PERIODIC_RATE;
+    ticks += ((ULONG)tv->tv_micro * (ULONG)NX_IP_PERIODIC_RATE + 999999UL) / 1000000UL;
+
+    if (ticks == 0 && ((ULONG)tv->tv_secs != 0 || (ULONG)tv->tv_micro != 0))
+        ticks = 1;
+
+    return ticks;
+}
+
+static VOID bsd_ticks_timeval(ULONG ticks, struct timeval *tv)
+{
+    tv->tv_secs  = ticks / (ULONG)NX_IP_PERIODIC_RATE;
+    tv->tv_micro = (ticks % (ULONG)NX_IP_PERIODIC_RATE) *
+                   (1000000UL / (ULONG)NX_IP_PERIODIC_RATE);
+}
+
+/* ------------------------------------------------------------ setsockopt -- */
+
+LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
+                    register LONG level      __asm("d1"),
+                    register LONG optname    __asm("d2"),
+                    register APTR optval     __asm("a0"),
+                    register socklen_t optlen __asm("d3"),
+                    register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
+    LONG       value = 0;
+
+    if (sock == NULL)
+        return bsd_fail(SocketBase, AMI_EBADF);
+
+    if (level == SOL_SOCKET)
+    {
+        switch (optname)
+        {
+            case SO_REUSEADDR:
+            case SO_REUSEPORT:
+                if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
+                    return -1;
+                if (value != 0)
+                    sock->as_Flags |= ASF_REUSEADDR;
+                else
+                    sock->as_Flags &= ~ASF_REUSEADDR;
+                return 0;
+
+            case SO_BROADCAST:
+                if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
+                    return -1;
+                if (value != 0)
+                    sock->as_Flags |= ASF_BROADCAST;
+                else
+                    sock->as_Flags &= ~ASF_BROADCAST;
+                return 0;
+
+            case SO_KEEPALIVE:
+                if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
+                    return -1;
+                if (value != 0)
+                    sock->as_Flags |= ASF_KEEPALIVE;
+                else
+                    sock->as_Flags &= ~ASF_KEEPALIVE;
+                return 0;
+
+            case SO_OOBINLINE:
+                if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
+                    return -1;
+                if (value != 0)
+                    sock->as_Flags |= ASF_OOBINLINE;
+                else
+                    sock->as_Flags &= ~ASF_OOBINLINE;
+                return 0;
+
+            case SO_LINGER:
+                if (optval == NULL ||
+                    optlen < (socklen_t)sizeof(struct linger))
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                sock->as_LingerOn   = ((struct linger *)optval)->l_onoff;
+                sock->as_LingerTime = ((struct linger *)optval)->l_linger;
+                return 0;
+
+            case SO_RCVBUF:
+                if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
+                    return -1;
+                if ((sock->as_Flags & ASF_TCP) != 0 && value > 0)
+                    nx_tcp_socket_receive_queue_max_set(&sock->as_Nx.tcp,
+                                                        (UINT)(value / 1024 + 1));
+                return 0;
+
+            case SO_SNDBUF:
+                /* Accepted and remembered by NetX Duo's own queue limits. */
+                return bsd_opt_set_long(SocketBase, optval, optlen, &value);
+
+            case SO_RCVTIMEO:
+                if (optval == NULL ||
+                    optlen < (socklen_t)sizeof(struct timeval))
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                sock->as_RcvTimeout = bsd_timeval_ticks((struct timeval *)optval);
+                return 0;
+
+            case SO_SNDTIMEO:
+                if (optval == NULL ||
+                    optlen < (socklen_t)sizeof(struct timeval))
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                sock->as_SndTimeout = bsd_timeval_ticks((struct timeval *)optval);
+                return 0;
+
+            case SO_EVENTMASK:
+                /* The AmiTCP V4 async event API: which FD_* bits to report. */
+                if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
+                    return -1;
+                sock->as_EventMask = (ULONG)value;
+                return 0;
+
+            default:
+                return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+        }
+    }
+
+    if (level == IPPROTO_TCP)
+    {
+        switch (optname)
+        {
+            case TCP_NODELAY:
+                /* NetX Duo does not implement Nagle, so this is always on. */
+                return 0;
+
+            case TCP_MAXSEG:
+                if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
+                    return -1;
+                if ((sock->as_Flags & ASF_TCP) == 0)
+                    return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+                nx_tcp_socket_mss_set(&sock->as_Nx.tcp, (ULONG)value);
+                return 0;
+
+            default:
+                return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+        }
+    }
+
+    if (level == IPPROTO_IP)
+    {
+        switch (optname)
+        {
+            case IP_TTL:
+                if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
+                    return -1;
+                sock->as_Ttl = value;
+                return 0;
+
+            case IP_TOS:
+                if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
+                    return -1;
+                sock->as_Tos = value;
+                return 0;
+
+            default:
+                return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+        }
+    }
+
+    return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+}
+
+/* ------------------------------------------------------------ getsockopt -- */
+
+LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
+                    register LONG level       __asm("d1"),
+                    register LONG optname     __asm("d2"),
+                    register APTR optval      __asm("a0"),
+                    register socklen_t *optlen __asm("a1"),
+                    register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
+
+    if (sock == NULL)
+        return bsd_fail(SocketBase, AMI_EBADF);
+
+    if (level == SOL_SOCKET)
+    {
+        switch (optname)
+        {
+            case SO_ERROR:
+            {
+                LONG err = sock->as_SoError;
+
+                sock->as_SoError = 0;       /* SO_ERROR clears on read */
+                return bsd_opt_get_long(SocketBase, optval, optlen, err);
+            }
+
+            case SO_TYPE:
+                return bsd_opt_get_long(SocketBase, optval, optlen,
+                                        (LONG)sock->as_Type);
+
+            case SO_ACCEPTCONN:
+                return bsd_opt_get_long(SocketBase, optval, optlen,
+                    ((sock->as_Flags & ASF_LISTENING) != 0) ? 1 : 0);
+
+            case SO_REUSEADDR:
+            case SO_REUSEPORT:
+                return bsd_opt_get_long(SocketBase, optval, optlen,
+                    ((sock->as_Flags & ASF_REUSEADDR) != 0) ? 1 : 0);
+
+            case SO_BROADCAST:
+                return bsd_opt_get_long(SocketBase, optval, optlen,
+                    ((sock->as_Flags & ASF_BROADCAST) != 0) ? 1 : 0);
+
+            case SO_KEEPALIVE:
+                return bsd_opt_get_long(SocketBase, optval, optlen,
+                    ((sock->as_Flags & ASF_KEEPALIVE) != 0) ? 1 : 0);
+
+            case SO_OOBINLINE:
+                return bsd_opt_get_long(SocketBase, optval, optlen,
+                    ((sock->as_Flags & ASF_OOBINLINE) != 0) ? 1 : 0);
+
+            case SO_EVENTMASK:
+                return bsd_opt_get_long(SocketBase, optval, optlen,
+                                        (LONG)sock->as_EventMask);
+
+            case SO_LINGER:
+                if (optval == NULL || optlen == NULL ||
+                    *optlen < (socklen_t)sizeof(struct linger))
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                ((struct linger *)optval)->l_onoff  = sock->as_LingerOn;
+                ((struct linger *)optval)->l_linger = sock->as_LingerTime;
+                *optlen = (socklen_t)sizeof(struct linger);
+                return 0;
+
+            case SO_RCVTIMEO:
+            case SO_SNDTIMEO:
+                if (optval == NULL || optlen == NULL ||
+                    *optlen < (socklen_t)sizeof(struct timeval))
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                bsd_ticks_timeval((optname == SO_RCVTIMEO)
+                                      ? sock->as_RcvTimeout
+                                      : sock->as_SndTimeout,
+                                  (struct timeval *)optval);
+                *optlen = (socklen_t)sizeof(struct timeval);
+                return 0;
+
+            default:
+                return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+        }
+    }
+
+    if (level == IPPROTO_TCP)
+    {
+        ULONG mss = 0;
+
+        switch (optname)
+        {
+            case TCP_NODELAY:
+                return bsd_opt_get_long(SocketBase, optval, optlen, 1);
+
+            case TCP_MAXSEG:
+                if ((sock->as_Flags & ASF_TCP) != 0)
+                    nx_tcp_socket_mss_get(&sock->as_Nx.tcp, &mss);
+                return bsd_opt_get_long(SocketBase, optval, optlen, (LONG)mss);
+
+            default:
+                return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+        }
+    }
+
+    if (level == IPPROTO_IP)
+    {
+        switch (optname)
+        {
+            case IP_TTL:
+                return bsd_opt_get_long(SocketBase, optval, optlen, sock->as_Ttl);
+
+            case IP_TOS:
+                return bsd_opt_get_long(SocketBase, optval, optlen, sock->as_Tos);
+
+            default:
+                return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+        }
+    }
+
+    return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+}
+
+/* ----------------------------------------------------------- IoctlSocket -- */
+
+LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
+                     register ULONG req    __asm("d1"),
+                     register APTR argp    __asm("a0"),
+                     register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
+    ULONG      available = 0;
+
+    if (sock == NULL)
+        return bsd_fail(SocketBase, AMI_EBADF);
+
+    switch (req)
+    {
+        case FIONBIO:
+            if (argp == NULL)
+                return bsd_fail(SocketBase, AMI_EFAULT);
+
+            if (*(LONG *)argp != 0)
+                sock->as_Flags |= ASF_NONBLOCK;
+            else
+                sock->as_Flags &= ~ASF_NONBLOCK;
+            return 0;
+
+        case FIONREAD:
+            if (argp == NULL)
+                return bsd_fail(SocketBase, AMI_EFAULT);
+
+            if (sock->as_RxPending != NULL)
+            {
+                ULONG length = 0;
+
+                nx_packet_length_get(sock->as_RxPending, &length);
+                if (length > sock->as_RxOffset)
+                    available = length - sock->as_RxOffset;
+            }
+
+            if ((sock->as_Flags & ASF_TCP) != 0)
+            {
+                ULONG queued = 0;
+
+                if (nx_tcp_socket_bytes_available(&sock->as_Nx.tcp, &queued)
+                        == NX_SUCCESS)
+                    available += queued;
+            }
+            else
+            {
+                ULONG queued = 0;
+
+                if (nx_udp_socket_bytes_available(&sock->as_Nx.udp, &queued)
+                        == NX_SUCCESS)
+                    available += queued;
+            }
+
+            *(LONG *)argp = (LONG)available;
+            return 0;
+
+        case FIOASYNC:
+            if (argp == NULL)
+                return bsd_fail(SocketBase, AMI_EFAULT);
+
+            /* Asynchronous notification is the SO_EVENTMASK/SIGIO path. */
+            sock->as_EventMask = (*(LONG *)argp != 0)
+                                     ? (FD_READ | FD_WRITE | FD_ACCEPT |
+                                        FD_CONNECT | FD_CLOSE | FD_ERROR)
+                                     : 0;
+            return 0;
+
+        default:
+            return bsd_fail(SocketBase, AMI_ENOSYS);
+    }
+}
+
+/* ------------------------------------------------------------------ names -- */
+
+LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
+                     register struct sockaddr *name __asm("a0"),
+                     register socklen_t *namelen    __asm("a1"),
+                     register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
+    ULONG      addr;
+
+    if (sock == NULL)
+        return bsd_fail(SocketBase, AMI_EBADF);
+
+    if (name == NULL || namelen == NULL)
+        return bsd_fail(SocketBase, AMI_EFAULT);
+
+    addr = sock->as_LocalAddr;
+    if (addr == 0)
+    {
+        NX_IP *ip = netstack_ip();
+
+        /* An unbound-to-INADDR_ANY socket reports the interface address. */
+        if (ip != NULL && (sock->as_Flags & ASF_CONNECTED) != 0)
+            addr = ip->nx_ip_interface[0].nx_interface_ip_address;
+    }
+
+    bsd_sockaddr_out(name, namelen, addr, sock->as_LocalPort);
+
+    return 0;
+}
+
+LONG bsd_getpeername(register LONG sock_fd          __asm("d0"),
+                     register struct sockaddr *name __asm("a0"),
+                     register socklen_t *namelen    __asm("a1"),
+                     register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
+
+    if (sock == NULL)
+        return bsd_fail(SocketBase, AMI_EBADF);
+
+    if (name == NULL || namelen == NULL)
+        return bsd_fail(SocketBase, AMI_EFAULT);
+
+    if ((sock->as_Flags & ASF_CONNECTED) == 0)
+        return bsd_fail(SocketBase, AMI_ENOTCONN);
+
+    bsd_sockaddr_out(name, namelen, sock->as_PeerAddr, sock->as_PeerPort);
+
+    return 0;
+}
+
+int bsd_getdtablesize(register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    if (SocketBase->sb_TableSize == 0)
+        return BSD_DEFAULT_DTABLESIZE;
+
+    return (int)SocketBase->sb_TableSize;
+}
+
+LONG bsd_Dup2Socket(register LONG old_socket __asm("d0"),
+                    register LONG new_socket __asm("d1"),
+                    register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    AmiSocket *sock = bsd_lookup(SocketBase, old_socket);
+    AmiSocket *victim;
+
+    if (sock == NULL)
+        return bsd_fail(SocketBase, AMI_EBADF);
+
+    if (new_socket < 0)
+    {
+        LONG fd = bsd_fd_alloc(SocketBase, sock);
+
+        if (fd < 0)
+            return bsd_fail(SocketBase, AMI_EMFILE);
+
+        sock->as_RefCount++;
+
+        return fd;
+    }
+
+    if (new_socket >= SocketBase->sb_TableSize)
+        return bsd_fail(SocketBase, AMI_EBADF);
+
+    if (new_socket == old_socket)
+        return new_socket;
+
+    victim = bsd_lookup(SocketBase, new_socket);
+    if (victim != NULL)
+    {
+        bsd_fd_free(SocketBase, new_socket);
+        bsd_socket_release(SocketBase, victim);
+    }
+
+    SocketBase->sb_Table[new_socket] = sock;
+    sock->as_RefCount++;
+
+    return new_socket;
+}
