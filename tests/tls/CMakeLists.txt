@@ -26,19 +26,33 @@ endif()
 
 # A real TLS 1.2 handshake, client and server both on the Amiga, over the
 # in-tree RAM driver.  Needs ThreadX and NetX Duo up, unlike tls_bench.
-add_executable(tls_handshake tls_handshake.c)
+#
+# Three executables from one source; see the header comment in tls_handshake.c.
+# They are split rather than looped in one binary because their run times differ
+# by an order of magnitude, and a correctness regression should be catchable in
+# a short run:
+#
+#   AMINETXDUO_RUN_TAG=hs   ./tools/fsuae-run.sh -t 300 build/tls/tests/tls/tls_handshake
+#   AMINETXDUO_RUN_TAG=hsd  ./tools/fsuae-run.sh -t 900 build/tls/tests/tls/tls_decompose
+#   AMINETXDUO_RUN_TAG=hsi  ./tools/fsuae-run.sh -t 900 build/tls/tests/tls/tls_interop
+foreach(prog tls_handshake tls_decompose tls_interop)
+    add_executable(${prog} tls_handshake.c)
 
-target_link_libraries(tls_handshake PRIVATE
-    aminetxduo_tls aminetxduo_common netxduo_port)
+    target_link_libraries(${prog} PRIVATE
+        aminetxduo_tls aminetxduo_common netxduo_port)
 
-if(AMIGA_NDK_INCLUDE)
-    target_include_directories(tls_handshake PRIVATE "${AMIGA_NDK_INCLUDE}")
-endif()
+    if(AMIGA_NDK_INCLUDE)
+        target_include_directories(${prog} PRIVATE "${AMIGA_NDK_INCLUDE}")
+    endif()
 
-set_target_properties(tls_handshake PROPERTIES OUTPUT_NAME "tls_handshake")
+    set_target_properties(${prog} PROPERTIES OUTPUT_NAME "${prog}")
 
-if(AMIGA_SIZE)
-    add_custom_command(TARGET tls_handshake POST_BUILD
-        COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:tls_handshake>"
-        COMMENT "tls_handshake size")
-endif()
+    if(AMIGA_SIZE)
+        add_custom_command(TARGET ${prog} POST_BUILD
+            COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:${prog}>"
+            COMMENT "${prog} size")
+    endif()
+endforeach()
+
+target_compile_definitions(tls_decompose PRIVATE H_ROUNDS_DECOMPOSE=1)
+target_compile_definitions(tls_interop   PRIVATE H_ROUNDS_INTEROP=1)

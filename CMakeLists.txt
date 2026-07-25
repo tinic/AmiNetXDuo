@@ -73,6 +73,13 @@ if(NOT AMINETXDUO_IPV6)
     list(FILTER NETXDUO_SOURCES EXCLUDE REGEX "/(nx_icmpv6|nx_ipv6|nx_nd)_")
 endif()
 
+# src/net68k/ supplies _nx_ip_checksum_compute(), so the vendored object must
+# not.  This is the mechanism for replacing a NetX Duo inner loop without
+# editing third_party/: drop the file from the glob and every internal caller
+# resolves to ours instead.  See src/net68k/n68k_checksum.c for what changes
+# (the loop) and what deliberately does not (everything else).
+list(FILTER NETXDUO_SOURCES EXCLUDE REGEX "/nx_ip_checksum_compute\\.c$")
+
 add_library(threadx STATIC ${THREADX_SOURCES})
 target_include_directories(threadx PUBLIC
     ${AMINETXDUO_PORT_INCLUDES} "${AMINETXDUO_THREADX}/common/inc")
@@ -106,6 +113,13 @@ endif()
 
 add_subdirectory(port/threadx-amiga)
 add_subdirectory(port/netxduo-amiga)
+
+# net68k before anything that links netxduo: it supplies a symbol the vendored
+# core now leaves undefined, so netxduo carries it as a PUBLIC dependency and
+# every consumer picks it up without listing it.
+add_subdirectory(src/net68k)
+target_link_libraries(netxduo PUBLIC aminetxduo_net68k)
+
 add_subdirectory(src/common)
 add_subdirectory(src/config)
 add_subdirectory(src/sana2)

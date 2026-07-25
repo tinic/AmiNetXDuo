@@ -8,26 +8,48 @@
  * chain verification against a trust store, key derivation, Finished hashing
  * and the record layer.
  *
+ * THREE EXECUTABLES, ONE SOURCE
+ *
+ *   tls_handshake   one round in the shipping configuration: crypto68k
+ *                   arithmetic, CRT on every private-key path.  This is the
+ *                   correctness gate and the headline number.
+ *
+ *   tls_decompose   four rounds -- {reference, crypto68k} x {no CRT, CRT} --
+ *                   so the before number, the after number and the two levers
+ *                   in between are measured through IDENTICAL instrumentation
+ *                   in one process.  Composing a decomposition out of separate
+ *                   runs on an inexact emulator is how you get a total that
+ *                   does not add up.
+ *
+ *   tls_interop     the same handshake with our fast crypto on ONE side and
+ *                   the unmodified vendored ciphersuite table on the other,
+ *                   both ways round, plus vendored-on-both.  If both ends
+ *                   change together a mutual arithmetic error is invisible;
+ *                   this is the test that makes it visible.
+ *
  * WHY LOOPBACK AND NOT A PUBLIC HOST
  *
  *   Reaching a real HTTPS server from the emulator is possible in principle
  *   (SLIRP gives outbound internet, and tests/netstack proves DNS and routing
  *   work), but it makes the measurement depend on a certificate chain we do
- *   not control, a trust store we would have to ship, and a server's patience:
- *   the client-side arithmetic alone is over ten seconds on the floor target
- *   (see the tls_bench figures), which is inside most servers' handshake
- *   timeout but not comfortably so.  Running both halves locally measures the
- *   same arithmetic with none of that variance, and it is the arithmetic that
- *   decides the question.  The cost is that ONE Amiga does BOTH sides' work --
- *   so the wall time here is a client handshake plus a server handshake, and
- *   the two are reported separately where possible.
+ *   not control, a trust store we would have to ship, and a server's patience.
+ *   Running both halves locally measures the same arithmetic with none of that
+ *   variance.  The cost is that ONE Amiga does BOTH sides' work -- so the wall
+ *   time here is a client handshake plus a server handshake, and the two are
+ *   reported separately.
+ *
+ *   That separation matters more than it used to.  A client fetching a page
+ *   never performs the private-key operation, and after this work the server's
+ *   private-key operation is most of the loopback total.  The per-role
+ *   arithmetic breakdown below is the number that answers "can this machine
+ *   talk to modern sites"; the wall time answers a question nobody asked.
  *
  * SHAPE
  *
  *   Same fabric as tests/ram_driver: ThreadX on Exec, two NX_IP instances
  *   talking over the in-tree simulated RAM driver, the server on a
  *   ThreadX-created thread and the client on this process's own adopted Exec
- *   Task.  On top of that, one NX_SECURE_TLS_SESSION each.
+ *   Task.  On top of that, one NX_SECURE_TLS_SESSION each, per round.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -38,6 +60,8 @@
 #include "nx_secure_tls_api.h"
 
 #include "tls.h"
+#include "ami_tls_crypto.h"
+#include "c68k_p256.h"
 #include "aminetxduo/crashguard.h"
 
 #include <exec/types.h>
@@ -58,7 +82,7 @@
       LP1NR(0x204, RawPutChar, UBYTE, (c), d0, , EXEC_BASE_NAME)
 #endif
 
-#define H_LOG_SIZE      6144
+#define H_LOG_SIZE      12288
 
 static char     h_log_buffer[H_LOG_SIZE];
 static ULONG    h_log_used;
@@ -140,6 +164,73 @@ static UINT h_check(UINT ok, const char *what, ULONG detail)
 #define H_OK(status, what)      h_check((UINT)((status) == NX_SUCCESS), (what), (ULONG)(status))
 #define H_TX_OK(status, what)   h_check((UINT)((status) == TX_SUCCESS), (what), (ULONG)(status))
 
+/* Seconds and one decimal, from microseconds, without floating point. */
+#define H_SEC(us)       ((ULONG)(us) / 1000000UL)
+#define H_TENTH(us)     (((ULONG)(us) % 1000000UL) / 100000UL)
+
+
+/* ------------------------------------------------------------- the rounds -- */
+
+/*
+ * The vendored tables, still exported by nx_crypto even though we no longer
+ * use them by default.  They are what "unmodified nx_secure" means in the
+ * interop rounds.
+ */
+extern const NX_SECURE_TLS_CRYPTO       nx_crypto_tls_ciphers_ecc;
+extern const USHORT                     nx_crypto_ecc_supported_groups[];
+extern const NX_CRYPTO_METHOD          *nx_crypto_ecc_curves[];
+extern const UINT                       nx_crypto_ecc_supported_groups_size;
+
+typedef struct H_ROUND_STRUCT
+{
+    const char *h_label;
+    UINT        h_client_fast;      /* TX_TRUE: our tables; else vendored   */
+    UINT        h_server_fast;
+    UINT        h_arithmetic;       /* AMI_TLS_ARITH_*                      */
+    UINT        h_crt;              /* recover primes on the paths that skip */
+    UINT        h_expect_crt;       /* assert the server really used CRT     */
+} H_ROUND;
+
+#if defined(H_ROUNDS_DECOMPOSE)
+
+static const H_ROUND h_rounds[] =
+{
+    {"reference arithmetic, no CRT  (the M9 gate baseline)",
+     TX_TRUE, TX_TRUE, AMI_TLS_ARITH_REFERENCE, TX_FALSE, TX_FALSE},
+    {"reference arithmetic, CRT     (the CRT lever alone)",
+     TX_TRUE, TX_TRUE, AMI_TLS_ARITH_REFERENCE, TX_TRUE,  TX_TRUE},
+    {"crypto68k arithmetic, no CRT  (the module lever alone)",
+     TX_TRUE, TX_TRUE, AMI_TLS_ARITH_C68K,      TX_FALSE, TX_FALSE},
+    {"crypto68k arithmetic, CRT     (the shipping configuration)",
+     TX_TRUE, TX_TRUE, AMI_TLS_ARITH_C68K,      TX_TRUE,  TX_TRUE},
+};
+
+#elif defined(H_ROUNDS_INTEROP)
+
+static const H_ROUND h_rounds[] =
+{
+    {"crypto68k CLIENT against a stock nx_secure SERVER",
+     TX_TRUE,  TX_FALSE, AMI_TLS_ARITH_C68K, TX_TRUE, TX_FALSE},
+    {"stock nx_secure CLIENT against a crypto68k SERVER",
+     TX_FALSE, TX_TRUE,  AMI_TLS_ARITH_C68K, TX_TRUE, TX_TRUE},
+    {"stock nx_secure on BOTH sides (the control)",
+     TX_FALSE, TX_FALSE, AMI_TLS_ARITH_C68K, TX_TRUE, TX_FALSE},
+};
+
+#else
+
+static const H_ROUND h_rounds[] =
+{
+    {"crypto68k arithmetic, CRT     (the shipping configuration)",
+     TX_TRUE, TX_TRUE, AMI_TLS_ARITH_C68K, TX_TRUE, TX_TRUE},
+};
+
+#endif
+
+#define H_ROUND_COUNT   (sizeof(h_rounds) / sizeof(H_ROUND))
+
+static volatile UINT    h_round;
+
 
 /* ---------------------------------------------------------- test fabric -- */
 
@@ -158,33 +249,23 @@ static UINT h_check(UINT ok, const char *what, ULONG detail)
 /*
  * TLS working memory, per session.
  *
- * The crypto metadata block is where nx_secure keeps every algorithm's context
- * for the session; nx_secure_tls_metadata_size_calculate() computes the exact
- * requirement from the ciphersuite table, and the value is printed at run time
- * so the memory estimate in the report is measured rather than assumed.  16 KB
- * is the upstream sample's figure rounded up.
+ * nx_secure_tls_metadata_size_calculate() computes the exact requirement from
+ * the ciphersuite table, and the value is printed at run time so the memory
+ * figure in the report is measured rather than assumed.
+ *
+ * It grew when src/tls/ami_tls_crypto.c was wired in: our RSA method carries
+ * 6 KB of sliding-window scratch on top of the vendored NX_CRYPTO_RSA, and a
+ * session allocates a public-cipher slot AND a public-auth slot at the largest
+ * size in the table, so that is ~12 KB.  The printed figure is the truth.
  *
  * The packet reassembly buffer must hold the largest single handshake message,
- * which here is the Certificate message carrying the chain.  The upstream
- * sample uses 40 KB; that is sized for 16 KB application records, not for a
- * handshake, and on a 4 MB machine it is not a defensible default.  8 KB holds
- * a two-certificate RSA-2048 chain with room to spare.
+ * which here is the Certificate message carrying the chain.  8 KB holds a
+ * two-certificate RSA-2048 chain with room to spare.
  */
-#define H_METADATA_SIZE         16384
+#define H_METADATA_SIZE         32768
 #define H_PACKET_BUFFER_SIZE    8192
 
 extern VOID _nx_ram_network_driver(NX_IP_DRIVER *driver_req_ptr);
-
-/*
- * The ECC-capable ciphersuite table.  It carries the ECDHE_RSA and
- * ECDHE_ECDSA suites as well as the plain RSA ones, so what actually gets
- * negotiated is decided by the two ends and reported below rather than
- * assumed here.
- */
-extern const NX_SECURE_TLS_CRYPTO       nx_crypto_tls_ciphers_ecc;
-extern const USHORT                     nx_crypto_ecc_supported_groups[];
-extern const NX_CRYPTO_METHOD          *nx_crypto_ecc_curves[];
-extern const UINT                       nx_crypto_ecc_supported_groups_size;
 
 static NX_PACKET_POOL           h_pool;
 static NX_IP                    h_ip0;
@@ -207,6 +288,15 @@ static TX_THREAD                h_server_thread;
 static TX_THREAD                h_main_thread;
 static TX_SEMAPHORE             h_server_done;
 
+/*
+ * The server is listening and the client may connect.  Without this the two
+ * halves race: the client used to win because the server's setup happened once
+ * at thread start, and once the rounds became a loop it stopped winning --
+ * nx_tcp_client_socket_connect() against a port with no listener does not wait,
+ * it comes straight back NX_NOT_CONNECTED.
+ */
+static TX_SEMAPHORE             h_server_ready;
+
 static ULONG    h_pool_memory[(H_PACKET_COUNT * (H_PACKET_PAYLOAD + H_PACKET_OVERHEAD)) / sizeof(ULONG)];
 static ULONG    h_ip0_stack[H_IP_STACK_SIZE / sizeof(ULONG)];
 static ULONG    h_ip1_stack[H_IP_STACK_SIZE / sizeof(ULONG)];
@@ -220,29 +310,35 @@ static ULONG    h_server_metadata[H_METADATA_SIZE / sizeof(ULONG)];
 static ULONG    h_client_packet_buffer[H_PACKET_BUFFER_SIZE / sizeof(ULONG)];
 static ULONG    h_server_packet_buffer[H_PACKET_BUFFER_SIZE / sizeof(ULONG)];
 
-/* Timings, filled in by whichever half measured them. */
-static ULONG    h_server_handshake_us;
-static ULONG    h_client_handshake_us;
+/* Per-round results, filled in by whichever half measured them. */
+static ULONG    h_server_handshake_us[H_ROUND_COUNT];
+static ULONG    h_client_handshake_us[H_ROUND_COUNT];
+static ULONG    h_whole_us[H_ROUND_COUNT];
+static ULONG    h_client_arith_us[H_ROUND_COUNT];
+static ULONG    h_server_arith_us[H_ROUND_COUNT];
+static AMI_TLS_CRYPTO_COUNTERS  h_client_ops[H_ROUND_COUNT];
+static AMI_TLS_CRYPTO_COUNTERS  h_server_ops[H_ROUND_COUNT];
+static USHORT   h_negotiated[H_ROUND_COUNT];
 
 static const char h_message[] = "AmiNetXDuo TLS 1.2 loopback";
+
+static ULONG h_arith_total(const AMI_TLS_CRYPTO_COUNTERS *c)
+{
+
+    return(c -> ami_rsa_public_us + c -> ami_rsa_private_crt_us +
+           c -> ami_rsa_private_plain_us + c -> ami_ec_multiple_us);
+}
 
 
 /* --------------------------------------------------------- server half --- */
 
-static VOID h_server_entry(ULONG id)
+static VOID h_server_round(const H_ROUND *round)
 {
 
 UINT        status;
 NX_PACKET  *packet_ptr;
-ULONG       actual;
 ULONG       start;
 
-
-    (VOID) id;
-
-    status =  nx_ip_status_check(&h_ip1, NX_IP_INITIALIZE_DONE, &actual,
-                                 5UL * NX_IP_PERIODIC_RATE);
-    (VOID) H_OK(status, "server: ip1 initialised");
 
     status =  nx_tcp_socket_create(&h_ip1, &h_server_socket, "tls server",
                                    NX_IP_NORMAL, NX_FRAGMENT_OKAY,
@@ -250,19 +346,32 @@ ULONG       start;
     (VOID) H_OK(status, "server: tcp socket create");
 
     status =  nx_secure_tls_session_create(&h_server_session,
-                                           &nx_crypto_tls_ciphers_ecc,
+                                           round -> h_server_fast ?
+                                               &ami_crypto_tls_ciphers_ecc :
+                                               &nx_crypto_tls_ciphers_ecc,
                                            (VOID *)h_server_metadata,
                                            (ULONG)sizeof(h_server_metadata));
     if (!H_OK(status, "server: tls session create"))
     {
+        (VOID) tx_semaphore_put(&h_server_ready);
         (VOID) tx_semaphore_put(&h_server_done);
         return;
     }
 
-    status =  nx_secure_tls_ecc_initialize(&h_server_session,
-                                           nx_crypto_ecc_supported_groups,
-                                           nx_crypto_ecc_supported_groups_size,
-                                           nx_crypto_ecc_curves);
+    if (round -> h_server_fast)
+    {
+        status = nx_secure_tls_ecc_initialize(&h_server_session,
+                                              ami_crypto_ecc_supported_groups,
+                                              ami_crypto_ecc_supported_groups_size,
+                                              ami_crypto_ecc_curves);
+    }
+    else
+    {
+        status = nx_secure_tls_ecc_initialize(&h_server_session,
+                                              nx_crypto_ecc_supported_groups,
+                                              nx_crypto_ecc_supported_groups_size,
+                                              nx_crypto_ecc_curves);
+    }
     (VOID) H_OK(status, "server: ecc curves registered");
 
     status =  nx_secure_tls_session_packet_buffer_set(&h_server_session,
@@ -279,38 +388,49 @@ ULONG       start;
                                                     NX_SECURE_X509_KEY_TYPE_RSA_PKCS1_DER);
     (VOID) H_OK(status, "server: leaf certificate + RSA key parsed");
 
-    status =  nx_secure_tls_local_certificate_add(&h_server_session,
-                                                  &h_server_certificate);
+    /*
+     * ami_tls_local_certificate_add() is nx_secure_tls_local_certificate_add()
+     * plus ami_tls_rsa_key_register().  The registration is what lets the
+     * ECDHE_RSA ServerKeyExchange signature use CRT: nx_secure only ever calls
+     * NX_CRYPTO_SET_PRIME_P from nx_secure_process_client_key_exchange.c, so
+     * on this path the primes have to arrive from the certificate instead.
+     */
+    status =  ami_tls_local_certificate_add(&h_server_session,
+                                            &h_server_certificate);
     (VOID) H_OK(status, "server: local certificate added");
 
     status =  nx_tcp_server_socket_listen(&h_ip1, H_PORT, &h_server_socket, 5,
                                           NX_NULL);
     (VOID) H_OK(status, "server: listen");
 
+    (VOID) tx_semaphore_put(&h_server_ready);
+
     status =  nx_tcp_server_socket_accept(&h_server_socket,
-                                          20UL * NX_IP_PERIODIC_RATE);
+                                          30UL * NX_IP_PERIODIC_RATE);
     if (!H_OK(status, "server: tcp accept"))
     {
+        (VOID) nx_secure_tls_session_delete(&h_server_session);
+        (VOID) nx_tcp_server_socket_unlisten(&h_ip1, H_PORT);
+        (VOID) nx_tcp_socket_delete(&h_server_socket);
         (VOID) tx_semaphore_put(&h_server_done);
         return;
     }
 
     /*
      * The handshake.  On this side it costs one RSA-2048 private operation
-     * (the ServerKeyExchange signature under an ECDHE_RSA suite, or the
-     * premaster decryption under a plain RSA suite) plus an ECDHE key pair --
-     * the expensive half, per tls_bench.
+     * (the ServerKeyExchange signature under an ECDHE_RSA suite) plus an ECDHE
+     * key pair -- the expensive half.
      */
     start =  ami_tls_eclock();
     status = nx_secure_tls_session_start(&h_server_session, &h_server_socket,
-                                         120UL * NX_IP_PERIODIC_RATE);
-    h_server_handshake_us = ami_tls_eclock_micros(ami_tls_eclock() - start);
+                                         600UL * NX_IP_PERIODIC_RATE);
+    h_server_handshake_us[h_round] = ami_tls_eclock_micros(ami_tls_eclock() - start);
 
     if (H_OK(status, "server: TLS handshake completed"))
     {
         packet_ptr = NX_NULL;
         status = nx_secure_tls_session_receive(&h_server_session, &packet_ptr,
-                                               20UL * NX_IP_PERIODIC_RATE);
+                                               30UL * NX_IP_PERIODIC_RATE);
         if (H_OK(status, "server: encrypted record received"))
         {
             (VOID) nx_packet_release(packet_ptr);
@@ -330,40 +450,41 @@ ULONG       start;
     (VOID) tx_semaphore_put(&h_server_done);
 }
 
+static VOID h_server_entry(ULONG id)
+{
+
+UINT    status;
+ULONG   actual;
+UINT    i;
+
+
+    (VOID) id;
+
+    status =  nx_ip_status_check(&h_ip1, NX_IP_INITIALIZE_DONE, &actual,
+                                 5UL * NX_IP_PERIODIC_RATE);
+    (VOID) H_OK(status, "server: ip1 initialised");
+
+    for (i = 0; i < (UINT)H_ROUND_COUNT; i++)
+    {
+        while (h_round != i)
+        {
+            (VOID) tx_thread_sleep(1);
+        }
+
+        h_server_round(&h_rounds[i]);
+    }
+}
+
 
 /* --------------------------------------------------------- client half --- */
 
-static UINT h_client_run(VOID)
+static UINT h_client_round(const H_ROUND *round)
 {
 
 UINT        status;
 NX_PACKET  *packet_ptr;
-ULONG       actual;
 ULONG       start;
-ULONG       metadata_needed = 0;
 
-
-    /*
-     * Ask nx_secure how much crypto metadata this ciphersuite table really
-     * needs, rather than trusting the upstream sample's round number -- the
-     * memory figure in the report should be measured.
-     *
-     * This has to happen HERE and not in tx_application_define(): the nxe_
-     * error-checking wrappers apply NX_THREADS_ONLY_CALLER_CHECKING, so a call
-     * from initialization context comes back NX_CALLER_ERROR (0x11) with the
-     * output untouched.
-     */
-    status =  nx_secure_tls_metadata_size_calculate(&nx_crypto_tls_ciphers_ecc,
-                                                    &metadata_needed);
-    h_log("  crypto metadata: %lu bytes required, %lu allocated",
-          metadata_needed, (ULONG)H_METADATA_SIZE);
-    (VOID) h_check((UINT)((status == NX_SUCCESS) &&
-                          (metadata_needed <= (ULONG)H_METADATA_SIZE)),
-                   "metadata allocation is large enough", (ULONG)status);
-
-    status =  nx_ip_status_check(&h_ip0, NX_IP_INITIALIZE_DONE, &actual,
-                                 5UL * NX_IP_PERIODIC_RATE);
-    (VOID) H_OK(status, "client: ip0 initialised");
 
     status =  nx_tcp_socket_create(&h_ip0, &h_client_socket, "tls client",
                                    NX_IP_NORMAL, NX_FRAGMENT_OKAY,
@@ -371,7 +492,9 @@ ULONG       metadata_needed = 0;
     (VOID) H_OK(status, "client: tcp socket create");
 
     status =  nx_secure_tls_session_create(&h_client_session,
-                                           &nx_crypto_tls_ciphers_ecc,
+                                           round -> h_client_fast ?
+                                               &ami_crypto_tls_ciphers_ecc :
+                                               &nx_crypto_tls_ciphers_ecc,
                                            (VOID *)h_client_metadata,
                                            (ULONG)sizeof(h_client_metadata));
     if (!H_OK(status, "client: tls session create"))
@@ -379,10 +502,20 @@ ULONG       metadata_needed = 0;
         return(TX_FALSE);
     }
 
-    status =  nx_secure_tls_ecc_initialize(&h_client_session,
-                                           nx_crypto_ecc_supported_groups,
-                                           nx_crypto_ecc_supported_groups_size,
-                                           nx_crypto_ecc_curves);
+    if (round -> h_client_fast)
+    {
+        status = nx_secure_tls_ecc_initialize(&h_client_session,
+                                              ami_crypto_ecc_supported_groups,
+                                              ami_crypto_ecc_supported_groups_size,
+                                              ami_crypto_ecc_curves);
+    }
+    else
+    {
+        status = nx_secure_tls_ecc_initialize(&h_client_session,
+                                              nx_crypto_ecc_supported_groups,
+                                              nx_crypto_ecc_supported_groups_size,
+                                              nx_crypto_ecc_curves);
+    }
     (VOID) H_OK(status, "client: ecc curves registered");
 
     status =  nx_secure_tls_session_packet_buffer_set(&h_client_session,
@@ -424,8 +557,11 @@ ULONG       metadata_needed = 0;
                                         5UL * NX_IP_PERIODIC_RATE);
     (VOID) H_OK(status, "client: bind");
 
+    status =  tx_semaphore_get(&h_server_ready, 60UL * NX_IP_PERIODIC_RATE);
+    (VOID) H_TX_OK(status, "client: server is listening");
+
     status =  nx_tcp_client_socket_connect(&h_client_socket, H_IP1_ADDRESS,
-                                           H_PORT, 20UL * NX_IP_PERIODIC_RATE);
+                                           H_PORT, 30UL * NX_IP_PERIODIC_RATE);
     if (!H_OK(status, "client: tcp connect"))
     {
         return(TX_FALSE);
@@ -438,13 +574,13 @@ ULONG       metadata_needed = 0;
      *
      * Note that this wall time INCLUDES the server's own arithmetic, because
      * the server is another thread on the same 68k and the client is blocked
-     * waiting for it.  It is a whole-machine figure, and the server's own
-     * measurement is reported alongside so the two can be separated.
+     * waiting for it.  It is a whole-machine figure; the per-role arithmetic
+     * totals below are what separate the two.
      */
     start =  ami_tls_eclock();
     status = nx_secure_tls_session_start(&h_client_session, &h_client_socket,
-                                         120UL * NX_IP_PERIODIC_RATE);
-    h_client_handshake_us = ami_tls_eclock_micros(ami_tls_eclock() - start);
+                                         600UL * NX_IP_PERIODIC_RATE);
+    h_client_handshake_us[h_round] = ami_tls_eclock_micros(ami_tls_eclock() - start);
 
     if (!H_OK(status, "client: TLS handshake completed"))
     {
@@ -456,9 +592,11 @@ ULONG       metadata_needed = 0;
         return(TX_FALSE);
     }
 
+    h_negotiated[h_round] = h_client_session.nx_secure_tls_session_ciphersuite ->
+                                nx_secure_tls_ciphersuite;
+
     h_log("  negotiated ciphersuite 0x%lx, TLS version 0x%lx",
-          (ULONG)h_client_session.nx_secure_tls_session_ciphersuite ->
-              nx_secure_tls_ciphersuite,
+          (ULONG)h_negotiated[h_round],
           (ULONG)h_client_session.nx_secure_tls_protocol_version);
 
     /* One application record, to prove the session actually carries data. */
@@ -473,7 +611,7 @@ ULONG       metadata_needed = 0;
         (VOID) H_OK(status, "client: data append");
 
         status = nx_secure_tls_session_send(&h_client_session, packet_ptr,
-                                            10UL * NX_IP_PERIODIC_RATE);
+                                            30UL * NX_IP_PERIODIC_RATE);
         if (!H_OK(status, "client: encrypted record sent"))
         {
             (VOID) nx_packet_release(packet_ptr);
@@ -489,10 +627,88 @@ ULONG       metadata_needed = 0;
     (VOID) nx_tcp_client_socket_unbind(&h_client_socket);
     (VOID) nx_tcp_socket_delete(&h_client_socket);
 
-    status =  tx_semaphore_get(&h_server_done, 200UL * NX_IP_PERIODIC_RATE);
+    status =  tx_semaphore_get(&h_server_done, 600UL * NX_IP_PERIODIC_RATE);
     (VOID) H_TX_OK(status, "client: server half completed");
 
     return(TX_TRUE);
+}
+
+static UINT h_client_run(VOID)
+{
+
+UINT    status;
+UINT    ok = TX_TRUE;
+UINT    i;
+ULONG   actual;
+ULONG   metadata_needed = 0;
+ULONG   start;
+
+
+    /*
+     * Ask nx_secure how much crypto metadata this ciphersuite table really
+     * needs, rather than trusting a round number -- the memory figure in the
+     * report should be measured.
+     *
+     * This has to happen HERE and not in tx_application_define(): the nxe_
+     * error-checking wrappers apply NX_THREADS_ONLY_CALLER_CHECKING, so a call
+     * from initialization context comes back NX_CALLER_ERROR (0x11) with the
+     * output untouched.
+     */
+    status =  nx_secure_tls_metadata_size_calculate(&ami_crypto_tls_ciphers_ecc,
+                                                    &metadata_needed);
+    h_log("  crypto metadata, crypto68k table: %lu bytes required, %lu allocated",
+          metadata_needed, (ULONG)H_METADATA_SIZE);
+    (VOID) h_check((UINT)((status == NX_SUCCESS) &&
+                          (metadata_needed <= (ULONG)H_METADATA_SIZE)),
+                   "metadata allocation is large enough", (ULONG)status);
+
+    status =  nx_secure_tls_metadata_size_calculate(&nx_crypto_tls_ciphers_ecc,
+                                                    &metadata_needed);
+    h_log("  crypto metadata, vendored table:  %lu bytes required", metadata_needed);
+
+    status =  nx_ip_status_check(&h_ip0, NX_IP_INITIALIZE_DONE, &actual,
+                                 5UL * NX_IP_PERIODIC_RATE);
+    (VOID) H_OK(status, "client: ip0 initialised");
+
+    for (i = 0; i < (UINT)H_ROUND_COUNT; i++)
+    {
+        h_log("");
+        h_log("---- round %lu: %s", (ULONG)(i + 1), (LONG)h_rounds[i].h_label);
+
+        ami_tls_crypto_set_arithmetic(h_rounds[i].h_arithmetic);
+        ami_tls_crypto_set_crt(h_rounds[i].h_crt);
+        ami_tls_crypto_counters_reset();
+
+        h_round = i;
+
+        start = ami_tls_eclock();
+        if (!h_client_round(&h_rounds[i]))
+        {
+            ok = TX_FALSE;
+        }
+        h_whole_us[i] = ami_tls_eclock_micros(ami_tls_eclock() - start);
+
+        ami_tls_crypto_counters_get(&h_client_ops[i], &h_server_ops[i]);
+        h_client_arith_us[i] = h_arith_total(&h_client_ops[i]);
+        h_server_arith_us[i] = h_arith_total(&h_server_ops[i]);
+
+        if (h_rounds[i].h_expect_crt)
+        {
+            (VOID) h_check((UINT)((h_server_ops[i].ami_rsa_private_crt_count > 0UL) &&
+                                  (h_server_ops[i].ami_rsa_private_plain_count == 0UL)),
+                           "server: RSA private key operation used CRT",
+                           h_server_ops[i].ami_rsa_private_plain_count);
+        }
+
+        if (h_rounds[i].h_client_fast && (h_rounds[i].h_arithmetic == AMI_TLS_ARITH_C68K))
+        {
+            (VOID) h_check((UINT)(h_client_ops[i].ami_ec_multiple_count > 0UL),
+                           "client: P-256 went through crypto68k",
+                           h_client_ops[i].ami_ec_multiple_count);
+        }
+    }
+
+    return(ok);
 }
 
 
@@ -541,11 +757,75 @@ UINT    status;
     status =  tx_semaphore_create(&h_server_done, "server done", 0);
     (VOID) H_TX_OK(status, "define: semaphore");
 
+    status =  tx_semaphore_create(&h_server_ready, "server ready", 0);
+    (VOID) H_TX_OK(status, "define: ready semaphore");
+
+    h_round = (UINT)~0u;    /* the server thread waits for round 0 */
+
     status =  tx_thread_create(&h_server_thread, "tls server", h_server_entry,
                                0UL, (VOID *)h_server_stack,
                                (ULONG)sizeof(h_server_stack), 16, 16,
                                TX_NO_TIME_SLICE, TX_AUTO_START);
     (VOID) H_TX_OK(status, "define: server thread");
+}
+
+
+/* --------------------------------------------------------- the report ----- */
+
+static VOID h_report_ops(const char *who, const AMI_TLS_CRYPTO_COUNTERS *c)
+{
+
+    h_log("    %s RSA public   x%lu  %lu.%lu s", (LONG)who,
+          c -> ami_rsa_public_count,
+          H_SEC(c -> ami_rsa_public_us), H_TENTH(c -> ami_rsa_public_us));
+    h_log("    %s RSA priv CRT x%lu  %lu.%lu s", (LONG)who,
+          c -> ami_rsa_private_crt_count,
+          H_SEC(c -> ami_rsa_private_crt_us), H_TENTH(c -> ami_rsa_private_crt_us));
+    h_log("    %s RSA priv full x%lu %lu.%lu s", (LONG)who,
+          c -> ami_rsa_private_plain_count,
+          H_SEC(c -> ami_rsa_private_plain_us), H_TENTH(c -> ami_rsa_private_plain_us));
+    h_log("    %s P-256 k*P    x%lu  %lu.%lu s", (LONG)who,
+          c -> ami_ec_multiple_count,
+          H_SEC(c -> ami_ec_multiple_us), H_TENTH(c -> ami_ec_multiple_us));
+}
+
+static VOID h_report(VOID)
+{
+
+UINT    i;
+
+
+    h_log("");
+    h_log("Handshake cost, measured, emulated 68020:");
+
+    for (i = 0; i < (UINT)H_ROUND_COUNT; i++)
+    {
+        h_log("");
+        h_log("  round %lu: %s", (ULONG)(i + 1), (LONG)h_rounds[i].h_label);
+        h_log("    negotiated ciphersuite             : 0x%lx",
+              (ULONG)h_negotiated[i]);
+        h_log("    connect through first record       : %lu.%lu s",
+              H_SEC(h_whole_us[i]), H_TENTH(h_whole_us[i]));
+        h_log("    client nx_secure_tls_session_start : %lu.%lu s",
+              H_SEC(h_client_handshake_us[i]), H_TENTH(h_client_handshake_us[i]));
+        h_log("    server nx_secure_tls_session_start : %lu.%lu s",
+              H_SEC(h_server_handshake_us[i]), H_TENTH(h_server_handshake_us[i]));
+        h_log("    CLIENT-ONLY public-key arithmetic  : %lu.%lu s",
+              H_SEC(h_client_arith_us[i]), H_TENTH(h_client_arith_us[i]));
+        h_log("    server public-key arithmetic       : %lu.%lu s",
+              H_SEC(h_server_arith_us[i]), H_TENTH(h_server_arith_us[i]));
+
+        h_report_ops("client", &h_client_ops[i]);
+        h_report_ops("server", &h_server_ops[i]);
+    }
+
+    h_log("");
+    h_log("  Both halves ran on this one CPU, so the wall figures contain each");
+    h_log("  other's arithmetic.  The CLIENT-ONLY line is what a machine");
+    h_log("  fetching a page actually pays -- a client never performs the");
+    h_log("  private-key operation.  Rounds where either side used the stock");
+    h_log("  nx_secure tables report zero for that side: the counters live in");
+    h_log("  our crypto methods, and the stock ones are not instrumented.");
 }
 
 
@@ -555,8 +835,6 @@ int main(VOID)
 {
 
 UINT    status;
-ULONG   whole_start;
-ULONG   whole_us;
 
 
     ami_crash_set_reference((APTR)main, "tls_handshake");
@@ -578,6 +856,21 @@ ULONG   whole_us;
         return(20);
     }
 
+    status =  ami_tls_crypto_initialize();
+    (VOID) H_OK(status, "main: crypto68k tables built");
+
+    /*
+     * The comb table in c68k_p256_table.c is generated, so a table built for
+     * the wrong curve would produce points that are self-consistent and wrong.
+     * Two generic scalar multiplications settle it -- and unlike everything
+     * else here, a failure would still complete a handshake against a peer
+     * that had the same table.
+     */
+    status =  c68k_p256_self_check();
+    (VOID) h_check((UINT)(status == NX_CRYPTO_SUCCESS),
+                   "main: P-256 comb table belongs to this curve",
+                   (ULONG)status);
+
     status =  tx_amiga_kernel_start();
     if (status != TX_SUCCESS)
     {
@@ -595,24 +888,14 @@ ULONG   whole_us;
         return(20);
     }
 
-    whole_start = ami_tls_eclock();
+    /* Everything this thread does goes in the client counter bank. */
+    ami_tls_crypto_set_client_thread(&h_main_thread);
+
     (VOID) h_client_run();
-    whole_us = ami_tls_eclock_micros(ami_tls_eclock() - whole_start);
 
     (VOID) tx_amiga_orphan_thread(&h_main_thread);
 
-    h_log("");
-    h_log("Handshake cost (measured, not composed):");
-    h_log("  client nx_secure_tls_session_start : %lu.%lu s",
-          h_client_handshake_us / 1000000UL,
-          (h_client_handshake_us % 1000000UL) / 100000UL);
-    h_log("  server nx_secure_tls_session_start : %lu.%lu s",
-          h_server_handshake_us / 1000000UL,
-          (h_server_handshake_us % 1000000UL) / 100000UL);
-    h_log("  connect through first record       : %lu.%lu s",
-          whole_us / 1000000UL, (whole_us % 1000000UL) / 100000UL);
-    h_log("  (both halves ran on this one CPU, so the client figure contains");
-    h_log("   the server's arithmetic and vice versa -- see the file header)");
+    h_report();
 
     h_log("");
     h_log("%lu checks, %lu failures -- %s", h_checks, h_failures,
