@@ -34,11 +34,14 @@
  *   readable 0|1           WaitSelect() with a zero timeout, read set
  *   writable 0|1           the same, write set
  *   shutdown rd|wr|both
- *   close                  CloseSocket()
+ *   close [within=MS]      CloseSocket(), optionally bounded: the call must
+ *                          not wait for a peer that has stopped answering
  *   idle MS                let MS pass; frames that arrive are queued
  *
  *   tx FLAGS [key=value]   the next frame the stack sends must be this
  *   notx MS                the stack must send nothing for MS
+ *   txcount MIN MAX        discard everything queued, and assert how much of
+ *                          it there was -- a retransmission series is a count
  *   rx FLAGS [key=value]   inject this frame into the stack
  *
  * FLAGS is a string from FSRPAUEC, or `-` for none.  Keys:
@@ -100,6 +103,7 @@ static const UBYTE peer_mac[6]  = { 0x02, 0x00, 0x44, 0x52, 0x4C, 0x02 };
 
 #define SOL_SOCKET_     0xFFFF
 #define SO_REUSEADDR_   0x0004
+#define SO_KEEPALIVE_   0x0008
 #define SO_LINGER_      0x0080
 #define SO_OOBINLINE_   0x0100
 #define SO_SNDBUF_      0x1001
@@ -507,6 +511,13 @@ typedef struct Seg
     LONG    mss;                /* -1 when the option is absent */
     BOOL    ip_ok;              /* IP header checksum verified  */
     BOOL    tcp_ok;             /* TCP checksum verified        */
+
+    /* Enough of the frame to say what a frame the decoder rejected actually
+       was.  "non-TCP frame ether=0x0800" is not a diagnosis, and the first
+       time one appeared it cost an emulator boot to find out that it was an
+       ICMP echo reply. */
+    ULONG   frame_len;
+    UBYTE   head[34];
 } Seg;
 
 static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
@@ -521,6 +532,15 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
     s->stamp = stamp;
     s->ether = rd16(&f[12]);
     s->mss   = -1;
+
+    s->frame_len = len;
+    {
+        ULONG n = (len < (ULONG)sizeof(s->head)) ? len : (ULONG)sizeof(s->head);
+        ULONG i;
+
+        for (i = 0; i < n; i++)
+            s->head[i] = f[i];
+    }
 
     if (s->ether != ETYPE_IP || len < ETH_HDR + 20)
         return FALSE;
@@ -677,6 +697,8 @@ static VOID arp_reply(const UBYTE *req)
  * any script, it happens whenever the stack has to resolve the peer, and a
  * test that had to spell it out would be a test of ARP.
  */
+static ULONG n_background;      /* frames dropped by the filter in pump() */
+
 static VOID pump(VOID)
 {
     ULONG stamp;
@@ -693,6 +715,29 @@ static VOID pump(VOID)
             {
                 arp_reply(scratch);
             }
+            continue;
+        }
+
+        /*
+         * TRAFFIC THAT IS NOT PART OF ANY CASE.
+         *
+         * The stack under test is a whole stack: it answers ARP (above), and
+         * anything else in the tree that opens a UDP socket -- mDNS, a DHCP
+         * renewal, an IGMP report -- puts frames on this wire that no script
+         * mentions.  They used to be queued like everything else, so the next
+         * `tx` in whatever case happened to be running failed with
+         * "non-TCP frame ether=0x0800" and every assertion after it was one
+         * frame out of step.  That is how c04, c05 and a01 came to fail in one
+         * run of an unchanged stack and pass in the next.
+         *
+         * Anything that is IPv4 and is NOT TCP TO THE PEER is therefore
+         * counted and dropped.  A malformed TCP segment, or one aimed at the
+         * peer, still reaches the queue -- those are results.
+         */
+        if (ether == ETYPE_IP && len >= ETH_HDR + 20 &&
+            (scratch[ETH_HDR + 9] != 6 || rd32(&scratch[ETH_HDR + 16]) != PEER_IP))
+        {
+            n_background++;
             continue;
         }
 
@@ -960,8 +1005,35 @@ static VOID describe(const Seg *s, char *out, ULONG max)
     if (!s->is_tcp)
     {
         const char *t = "non-TCP frame ether=0x";
+        ULONG       n;
+        ULONG       i;
+
         while (*t != '\0') *o++ = *t++;
         fmt_num(&o, s->ether, 16, 4, FALSE);
+
+        t = " framelen="; while (*t != '\0') *o++ = *t++;
+        fmt_num(&o, s->frame_len, 10, 0, FALSE);
+
+        if (s->ether == ETYPE_IP && s->frame_len >= ETH_HDR + 20)
+        {
+            t = " ipproto="; while (*t != '\0') *o++ = *t++;
+            fmt_num(&o, s->head[ETH_HDR + 9], 10, 0, FALSE);
+            t = " iplen="; while (*t != '\0') *o++ = *t++;
+            fmt_num(&o, ((ULONG)s->head[ETH_HDR + 2] << 8) |
+                        (ULONG)s->head[ETH_HDR + 3], 10, 0, FALSE);
+        }
+
+        t = " ["; while (*t != '\0') *o++ = *t++;
+        n = (s->frame_len < (ULONG)sizeof(s->head)) ? s->frame_len
+                                                    : (ULONG)sizeof(s->head);
+        for (i = 0; i < n; i++)
+        {
+            fmt_num(&o, s->head[i], 16, 2, FALSE);
+            if (i + 1 < n)
+                *o++ = ' ';
+        }
+        *o++ = ']';
+
         *o = '\0';
         return;
     }
@@ -1019,8 +1091,8 @@ static VOID do_tx(const char *args, const char *raw)
     Expect  e;
     Seg     got;
     ULONG   limit;
-    char    desc[200];
-    char    why[200];
+    char    desc[280];
+    char    why[280];
     char   *w;
 
     zero((UBYTE *)&e, (ULONG)sizeof(e));
@@ -1138,7 +1210,7 @@ static VOID do_notx(const char *args, const char *raw)
     char  tok[24];
     ULONG ms;
     Seg   got;
-    char  desc[200];
+    char  desc[280];
 
     (VOID)token(args, tok, sizeof(tok));
     ms = (ULONG)to_num(tok);
@@ -1274,7 +1346,14 @@ static VOID do_listen(const char *raw)
 
     if (s_bind(cs.lsock, &a) != 0)
     {
-        fail(raw, "bind() failed");
+        char  why[64];
+        char *w = why;
+        const char *t = "bind() failed, errno ";
+
+        while (*t) *w++ = *t++;
+        fmt_num(&w, (ULONG)s_errno(), 10, 0, TRUE);
+        *w = '\0';
+        fail(raw, why);
         return;
     }
     if (s_listen(cs.lsock, 4) != 0)
@@ -1530,6 +1609,8 @@ static VOID do_opt(const char *args, const char *raw)
         rc = s_setsockopt(cs.sock, SOL_SOCKET_, SO_OOBINLINE_, &v, (LONG)sizeof(v));
     else if (streq(tok, "reuseaddr"))
         rc = s_setsockopt(cs.sock, SOL_SOCKET_, SO_REUSEADDR_, &v, (LONG)sizeof(v));
+    else if (streq(tok, "keepalive"))
+        rc = s_setsockopt(cs.sock, SOL_SOCKET_, SO_KEEPALIVE_, &v, (LONG)sizeof(v));
     else if (streq(tok, "linger"))
     {
         LONG lin[2];
@@ -1551,16 +1632,106 @@ static VOID do_opt(const char *args, const char *raw)
     pass(raw);
 }
 
-static VOID do_close(const char *raw)
+/*
+ * `close [within=MS]`.
+ *
+ * The bound is the point of the option.  CloseSocket() sends a FIN and the
+ * connection outlives the descriptor, so the one thing that must never happen
+ * is the call waiting for a peer that has stopped answering -- a program that
+ * closes and exits would hang on the way out.  A case that cares says so, and
+ * the number in the transcript is the whole CloseSocket(), measured across the
+ * call rather than off the frame it produced.
+ */
+static VOID do_close(const char *args, const char *raw)
 {
-    cs.t_last = tap_eclock_now();
+    Expect e;
+    ULONG  before;
+    ULONG  after;
+    ULONG  ms;
+
+    zero((UBYTE *)&e, (ULONG)sizeof(e));
+    (VOID)parse_keys(args, &e);
+
+    before    = tap_eclock_now();
+    cs.t_last = before;
 
     if (cs.sock >= 0)
     {
         (VOID)s_close(cs.sock);
         cs.sock = -1;
     }
-    pass(raw);
+
+    after = tap_eclock_now();
+    ms    = ticks_to_ms(before, after);
+
+    if (e.have_within && (LONG)ms > e.within)
+    {
+        char  why[96];
+        char *w = why;
+        const char *t = "CloseSocket() took too long, ms: wanted ";
+
+        while (*t) *w++ = *t++;
+        fmt_num(&w, (ULONG)e.within, 10, 0, TRUE);
+        t = ", got ";
+        while (*t) *w++ = *t++;
+        fmt_num(&w, ms, 10, 0, FALSE);
+        *w = '\0';
+        fail(raw, why);
+        return;
+    }
+
+    n_pass++;
+    say("  ok   %s   [%ums]", raw, ms);
+}
+
+/*
+ * `txcount MIN MAX` -- how many frames the stack sent while we were not
+ * looking, discarded.
+ *
+ * A retransmission series is a count, not a sequence: asserting ten separate
+ * `tx` lines would be asserting the interval as well, and the interval is
+ * another workstream's. This says "it kept trying, and then it stopped
+ * trying", which is the part that belongs to whether retransmission works at
+ * all.
+ */
+static VOID do_txcount(const char *args, const char *raw)
+{
+    char  tok[24];
+    LONG  lo;
+    LONG  hi;
+    ULONG n = 0;
+    Seg   junk;
+    char  why[96];
+    char *w = why;
+
+    args = token(args, tok, sizeof(tok));
+    lo   = to_num(tok);
+    (VOID)token(args, tok, sizeof(tok));
+    hi   = to_num(tok);
+
+    pump();
+    while (pend_pop(&junk))
+        n++;
+
+    if ((LONG)n < lo || (LONG)n > hi)
+    {
+        const char *t = "frames sent: wanted ";
+        while (*t) *w++ = *t++;
+        fmt_num(&w, (ULONG)lo, 10, 0, TRUE);
+        t = "..";
+        while (*t) *w++ = *t++;
+        fmt_num(&w, (ULONG)hi, 10, 0, TRUE);
+        t = ", got ";
+        while (*t) *w++ = *t++;
+        fmt_num(&w, n, 10, 0, FALSE);
+        *w = '\0';
+        fail(raw, why);
+        return;
+    }
+
+    cs.t_last = tap_eclock_now();
+    n_pass++;
+    say("  ok   %s   [%u frame(s)]", raw, n);
 }
 
 static VOID do_idle(const char *args, const char *raw)
@@ -1584,21 +1755,40 @@ static VOID do_idle(const char *args, const char *raw)
 
 /* ----------------------------------------------------------- case control - */
 
+/*
+ * Tear a case's socket down so that NOTHING of it appears in the next case.
+ *
+ * SO_LINGER {on, 0} is not decoration. Once CloseSocket() started sending a
+ * FIN -- which is what RFC 793 3.5 asks for and what this harness asserts in
+ * c03 -- a plain close left a connection retransmitting that FIN into a peer
+ * that had stopped listening, once a second, for ten seconds. Those frames
+ * turned up in the next four cases, and every case that leaves unacknowledged
+ * data behind (x02, x03, x04, z01) does the same with the data. The abortive
+ * close is the documented way to say "this connection is over now", and a
+ * harness whose cases share one stack has to say it.
+ */
+static VOID case_abort(LONG s)
+{
+    LONG lin[2];
+
+    if (s < 0)
+        return;
+
+    lin[0] = 1;
+    lin[1] = 0;
+    (VOID)s_setsockopt(s, SOL_SOCKET_, SO_LINGER_, lin, (LONG)sizeof(lin));
+    (VOID)s_close(s);
+}
+
 static VOID case_end(VOID)
 {
     if (cs.name[0] == '\0')
         return;
 
-    if (cs.sock >= 0)
-    {
-        (VOID)s_close(cs.sock);
-        cs.sock = -1;
-    }
-    if (cs.lsock >= 0)
-    {
-        (VOID)s_close(cs.lsock);
-        cs.lsock = -1;
-    }
+    case_abort(cs.sock);
+    cs.sock = -1;
+    case_abort(cs.lsock);
+    cs.lsock = -1;
 
     /* Give the close its RST/FIN and swallow whatever comes of it, so the
        next case starts on an empty queue. */
@@ -1701,10 +1891,11 @@ static VOID run_line(char *line)
     else if (streq(verb, "writable")) do_select(args, raw, TRUE);
     else if (streq(verb, "shutdown")) do_shutdown(args, raw);
     else if (streq(verb, "opt"))      do_opt(args, raw);
-    else if (streq(verb, "close"))    do_close(raw);
+    else if (streq(verb, "close"))    do_close(args, raw);
     else if (streq(verb, "idle"))     do_idle(args, raw);
     else if (streq(verb, "tx"))       do_tx(args, raw);
     else if (streq(verb, "notx"))     do_notx(args, raw);
+    else if (streq(verb, "txcount")) do_txcount(args, raw);
     else if (streq(verb, "rx"))       do_rx(args, raw);
     else
         say("!! unknown directive: %s", raw);
@@ -1801,6 +1992,9 @@ int main(void)
     say("tap: tx %u  rx delivered %u  rx no-reader %u  copy-failed %u  "
         "tx-overrun %u", st.tx_frames, st.rx_delivered, st.rx_no_reader,
         st.rx_copy_failed, st.tx_overrun);
+    /* Reported rather than hidden: these are frames the stack sent that no
+       case is about (see pump()), and a number that moves is worth noticing. */
+    say("background frames ignored: %u", n_background);
     say("%u case(s), %u failed; %u check(s) passed, %u failed",
         n_cases, n_cases_failed, n_pass, n_fail);
 
