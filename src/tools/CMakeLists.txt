@@ -83,6 +83,15 @@ aminetxduo_add_tool(tool_host    host     SOURCES host.c)
 # is none.  Nothing here is conditional on the build option, deliberately.
 aminetxduo_add_tool(tool_fetch   fetch    SOURCES fetch.c)
 
+# nc, telnet and ftp are config-only in the same sense as fetch, and share
+# toolsock.c: bsdsocket.library through its published vectors, including the
+# bind/listen/accept half that no client-only command reaches.  None of them
+# needs TLS, and none of them needs a libc porting shim -- which is what makes
+# them the three that can be written natively rather than ported.
+aminetxduo_add_tool(tool_nc      nc       SOURCES nc.c     toolsock.c)
+aminetxduo_add_tool(tool_telnet  telnet   SOURCES telnet.c toolsock.c)
+aminetxduo_add_tool(tool_ftp     ftp      SOURCES ftp.c    toolsock.c)
+
 aminetxduo_add_tool(tool_shownetstatus ShowNetStatus NX
     SOURCES shownetstatus.c)
 aminetxduo_add_tool(tool_netstat       netstat       NX SOURCES netstat.c)
@@ -112,4 +121,5 @@ set_target_properties(tool_smoke PROPERTIES OUTPUT_NAME "ToolsSmoke")
 add_custom_target(tools ALL)
 add_dependencies(tools
     tool_addnetinterface tool_netsetup tool_online tool_offline tool_host
-    tool_fetch tool_shownetstatus tool_netstat tool_ping tool_smoke)
+    tool_fetch tool_nc tool_telnet tool_ftp
+    tool_shownetstatus tool_netstat tool_ping tool_smoke)
