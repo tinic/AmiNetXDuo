@@ -73,11 +73,23 @@ typedef struct ToolTimeval
 #define TOOL_AF_INET        2
 #define TOOL_SOCK_STREAM    1
 #define TOOL_SOCK_DGRAM     2
+#define TOOL_SOCK_RAW       3
 
 #define TOOL_SOL_SOCKET     0xffff
 #define TOOL_SO_REUSEADDR   0x0004
 #define TOOL_SO_BROADCAST   0x0020
 #define TOOL_SO_ERROR       0x1007
+
+/*
+ * <netinet/in.h>'s and <sys/socket.h>'s -- 4.4BSD's, and Roadshow's -- and NOT
+ * NetX Duo's addons/BSD layer, which numbers IPPROTO_IP 2 and IP_TTL 26 and is
+ * not what this library speaks.  Shared because `ping` and `traceroute` both
+ * want them and each had grown its own copy.
+ */
+#define TOOL_IPPROTO_IP     0
+#define TOOL_IPPROTO_ICMP   1
+#define TOOL_IP_TOS         3
+#define TOOL_IP_TTL         4
 
 #define TOOL_SHUT_RD        0
 #define TOOL_SHUT_WR        1
@@ -98,6 +110,12 @@ typedef struct ToolTimeval
 #define TOOL_ETIMEDOUT      60
 #define TOOL_ECONNREFUSED   61
 #define TOOL_EHOSTUNREACH   65
+
+/* What a stack without SOCK_RAW answers socket(AF_INET, SOCK_RAW, ...) with. */
+#define TOOL_EPROTONOSUPPORT 43
+#define TOOL_ESOCKTNOSUPPORT 44
+#define TOOL_EOPNOTSUPP      45
+#define TOOL_EAFNOSUPPORT    47
 
 /* ------------------------------------------------------------- fd_set ---- */
 

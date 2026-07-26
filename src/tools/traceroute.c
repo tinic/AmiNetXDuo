@@ -92,27 +92,6 @@ enum
     ARG_COUNT
 };
 
-/*
- * The ABI numbers this command needs beyond toolsock.h's.
- *
- * Local rather than shared: toolsock is common ground for several commands
- * being written at once, and a raw socket is this one's business alone. These
- * are <netinet/in.h>'s and <sys/socket.h>'s values -- 4.4BSD's, and Roadshow's
- * -- NOT NetX Duo's addons/BSD layer, which numbers IPPROTO_IP 2 and IP_TTL 26
- * and is not what this library speaks.
- */
-#define TR_SOCK_RAW         3
-#define TR_IPPROTO_IP       0
-#define TR_IPPROTO_ICMP     1
-#define TR_IP_TOS           3
-#define TR_IP_TTL           4
-
-/* What a stack without SOCK_RAW answers socket(AF_INET, SOCK_RAW, ...) with. */
-#define TR_EPROTONOSUPPORT  43
-#define TR_ESOCKTNOSUPPORT  44
-#define TR_EOPNOTSUPP       45
-#define TR_EAFNOSUPPORT     47
-
 #define TR_DEFAULT_MAXTTL   30UL
 #define TR_DEFAULT_QUERIES  3UL
 #define TR_DEFAULT_WAIT     5UL         /* seconds                          */
@@ -304,7 +283,7 @@ static LONG tr_classify(const UBYTE *buf, ULONG len, UWORD ident, UWORD seq,
         if (orig_hlen < 20 || (ULONG)(8 + orig_hlen + 8) > icmp_len)
             return TR_OTHER;
 
-        if (orig[9] != TR_IPPROTO_ICMP)
+        if (orig[9] != TOOL_IPPROTO_ICMP)
             return TR_OTHER;
 
         if (orig[orig_hlen] != ICMP_ECHO ||
@@ -508,8 +487,8 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    sock = tool_sock_socket(sb, TOOL_AF_INET, TR_SOCK_RAW,
-                            TR_IPPROTO_ICMP);
+    sock = tool_sock_socket(sb, TOOL_AF_INET, TOOL_SOCK_RAW,
+                            TOOL_IPPROTO_ICMP);
     if (sock < 0)
     {
         LONG err = tool_sock_errno(sb);
@@ -517,8 +496,8 @@ int main(int argc, char **argv)
         tool_error("cannot open a raw socket: %s",
                    (LONG)tool_sock_errstr(err));
 
-        if (err == TR_EPROTONOSUPPORT || err == TR_ESOCKTNOSUPPORT ||
-            err == TR_EOPNOTSUPP || err == TR_EAFNOSUPPORT)
+        if (err == TOOL_EPROTONOSUPPORT || err == TOOL_ESOCKTNOSUPPORT ||
+            err == TOOL_EOPNOTSUPP || err == TOOL_EAFNOSUPPORT)
         {
             tool_advise_blank();
             tool_advise("This command needs SOCK_RAW, and the TCP/IP stack on");
@@ -537,7 +516,7 @@ int main(int argc, char **argv)
      * path hands it to nxd_ip_raw_packet_send() alongside the TTL.
      */
     if (tos != 0 &&
-        tool_sock_setsockopt(sb, sock, TR_IPPROTO_IP, TR_IP_TOS, &tos,
+        tool_sock_setsockopt(sb, sock, TOOL_IPPROTO_IP, TOOL_IP_TOS, &tos,
                              (LONG)sizeof(tos)) != 0)
     {
         tool_error("this stack will not set the type of service: %s",
@@ -589,7 +568,7 @@ int main(int argc, char **argv)
 
         tool_printf("%2ld ", (LONG)ttl);
 
-        if (tool_sock_setsockopt(sb, sock, TR_IPPROTO_IP, TR_IP_TTL,
+        if (tool_sock_setsockopt(sb, sock, TOOL_IPPROTO_IP, TOOL_IP_TTL,
                                  &ttlval, (LONG)sizeof(ttlval)) != 0)
         {
             tool_printf("\n");
