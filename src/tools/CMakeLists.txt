@@ -108,6 +108,14 @@ aminetxduo_add_tool(tool_nettrace NetTrace SOURCES nettrace.c toolsock.c)
 aminetxduo_add_tool(tool_telnet  telnet   SOURCES telnet.c toolsock.c)
 aminetxduo_add_tool(tool_ftp     ftp      SOURCES ftp.c    toolsock.c)
 
+# sntp is config-only in the same sense as fetch: it reaches bsdsocket.library
+# through its published vectors and sets the machine's clock through
+# timer.device and battclock.resource.  It does NOT link the vendored NetX Duo
+# SNTP add-on, and the comment at the top of sntp.c says why -- the short
+# version is that the add-on wants a running ThreadX, and a Shell command's
+# copy of ThreadX is not the one the stack is using.
+aminetxduo_add_tool(tool_sntp    sntp     SOURCES sntp.c)
+
 aminetxduo_add_tool(tool_shownetstatus ShowNetStatus NX
     SOURCES shownetstatus.c)
 aminetxduo_add_tool(tool_netstat       netstat       NX SOURCES netstat.c)
@@ -138,4 +146,5 @@ add_custom_target(tools ALL)
 add_dependencies(tools
     tool_addnetinterface tool_netsetup tool_online tool_offline tool_host
     tool_fetch tool_nc tool_telnet tool_ftp tool_nettrace
+    tool_sntp
     tool_shownetstatus tool_netstat tool_ping tool_smoke)

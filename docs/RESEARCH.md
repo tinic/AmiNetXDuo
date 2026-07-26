@@ -6407,3 +6407,255 @@ plain port) all refused for the right reason. The seven that did not pass are
 all `no result line -- the run did not reach this case`: three emulators were
 contending for `build/.fsuae.lock` and the run spent most of its budget
 queueing. Nothing failed; the tail was not reached.
+
+## 19. `sntp`, and the clock that turns certificate checking back on (2026-07-26)
+
+`sntp` looks like a convenience and is not one. §13 and §14 built a TLS stack that
+verifies a chain and checks a host name; what it does **not** do, on most of the machines
+it will run on, is check whether the certificate has expired. This section is what it took
+to change that, and what the attempt found out about the command set on the way.
+
+### 19.1 The thing a clock is actually worth
+
+`src/tlslib/tls_time.c` returns 0 — NetX Duo's "do not check" sentinel — whenever
+`DateStamp()` lands outside a fifty-year window starting 2026-01-01. The reasoning is in
+the file and it is right: an Amiga with a dead battery starts at 1978, every certificate
+on the internet was issued after 1978, and a library that refused them all would be a
+library nobody could use. The price is exact, and is paid silently:
+
+> **an expired certificate is accepted.**
+
+Measured under FS-UAE, one command apart, against the same expired leaf:
+
+```
+    ClockSet 0
+    fetch https://expired.test:7206/bytes/16
+      expired.test: TLS 0x303, ciphersuite 0xC027, 2 certificate(s)
+        chain verified, validity dates NOT checked (the clock is unset)
+      HTTP/1.1 200 OK                                     <-- ACCEPTED
+
+    sntp time.apple.com
+      time.apple.com (17.253.4.45): stratum 1
+      This machine's clock was 17738 days 10 hours slow.
+      Clock set to Sunday 26-Jul-26 10:22:49, UTC.
+      The battery-backed clock was set too, so this survives a reboot.
+
+    fetch https://expired.test:7206/bytes/16
+      fetch: expired.test: the certificate is expired or not yet valid
+                                                          <-- REFUSED
+```
+
+and the host end saw the refusal independently, as an alert rather than a dropped
+connection:
+
+```
+    [141.01] https-expired TLS handshake from 127.0.0.1:57552 failed:
+             [SSL: SSLV3_ALERT_CERTIFICATE_EXPIRED]
+```
+
+A certificate that is genuinely valid (`rsa2.test`) was fetched on **both** sides of the
+same run and succeeded on both, reporting `validity dates NOT checked` before and
+`validity dates checked` after. So the refusal is demonstrably about the expiry date, and
+not about the clock having broken TLS in general.
+
+One further thing fell out of that run, and it is §13's design working rather than luck.
+The *after* fetches did **not** resume the sessions the *before* fetches cached: they
+presented two certificates again and re-verified from scratch. `tls_resume_flags()` folds
+`tc_ExpiryChecked` into the resumption trust key, so a ticket cached while the clock was
+unset cannot be reused once the clock is set. Without that, setting the clock would have
+changed nothing until the cache aged out — the second `fetch` would have resumed, no
+certificate would have been sent, and nothing would have been checked.
+
+### 19.2 Three epochs, and the subtraction that spans two of them
+
+NTP counts seconds from 1900-01-01. UNIX counts from 1970-01-01. AmigaOS —
+`DateStamp()`, `timer.device` and `battclock.resource` alike — counts from 1978-01-01.
+Only the first and the last matter, and the gap is
+
+```
+  2208988800    1900 -> 1970   the number everyone knows
++  252460800    1970 -> 1978   the one tls_time.c already carries
+= 2461449600
+```
+
+NTP's seconds field is 32 bits and wraps in February 2036, which is usually a special case
+and here is not one. A plain 32-bit **unsigned** subtraction of that constant gets the next
+era right by itself, because the wrap in the server's field and the wrap in our arithmetic
+are the same wrap: `(t + 2^32) - K ≡ t - K  (mod 2^32)`. The AmigaOS epoch itself runs out
+in 2114, which is when this stops being true.
+
+The fraction field is converted without 64-bit arithmetic. The exact answer is
+`frac * 1000000 / 2^32`; dropping the bottom sixteen bits first leaves
+`(frac >> 16) * 15625 / 1024`, which is exact in 32 bits, resolves to about 15 µs, and is
+four orders of magnitude finer than the round trip it is added to.
+
+The offset is **not** computed with RFC 4330's four-timestamp formula. That formula is for
+disciplining a clock that is already close, and it overflows 32 bits outright when the
+local clock is 48 years out — which is precisely the machine this command exists for. The
+server's transmit timestamp plus half the locally-measured round trip is the answer, and
+both ends of that measurement are read from `timer.device` before anything is changed, so
+however wrong the clock is it cancels exactly.
+
+### 19.3 AmigaOS keeps local time, and the offset is not ours to invent
+
+NTP is UTC. The Amiga clock is local: `DateStamp()` has no timezone concept at all, and
+neither has the battery clock. `tests/curl/mkpki.sh` already had to pin certificate dates
+because of exactly this (host 04:09 UTC, guest 21:09, every leaf refused as "not yet
+valid"). So writing the clock needs an offset, and the only real question is where it
+comes from.
+
+**Not from a new configuration file.** Nothing in `DEVS:Internet` or `DEVS:NetInterfaces`
+has ever known about time, and `NetSetup` has never asked. Adding an eleventh place to
+configure the machine, to serve one command, would be the wrong answer when the machine
+already knows: `locale.library` has carried `loc_GMTOffset` — minutes west of Greenwich —
+since AmigaOS 2.1, the Locale preferences editor is where a user sets it, and every other
+program that cares reads it there. So `sntp` reads it there.
+
+Two consequences, both stated in the command's own output rather than buried:
+
+* when `locale.library` is absent — a bare 3.1 install may well not have it — the clock is
+  set to **UTC** and the command says *"This machine has no locale.library, so nothing here
+  knows its timezone"*, because a machine three hours out is worth mentioning;
+* AmigaOS has no daylight-saving rules of any kind. The offset in the preferences is the
+  whole answer, summer and winter alike. Doing better would mean shipping a timezone
+  database, which is a much larger thing than this command.
+
+The emulator cannot exercise the non-zero case, and that is a real gap rather than a
+choice: `tools/fsuae-run.sh` stages no `LIBS:` beyond what the test puts there,
+`locale.library` is disk-based rather than in ROM, and there is no copy of it in the tree
+to stage. The UTC path is what the run proves.
+
+`locale.library` and `battclock.resource` are both reached through the NDK's own inlines
+rather than hand-coded LVOs, and the first draft is why that is written down: it called
+`OpenLocale` at -60 and `CloseLocale` at -66, which are `ConvToLower` and `ConvToUpper`.
+The real offsets are -156 and -42. Nothing caught it, because the harness has no
+`locale.library` for `OpenLibrary()` to find and the bad call was never made. Hand-coded
+offsets belong to `bsdsocket.library`'s vectors and our own private ones, where there is no
+header; everywhere else the NDK has one and it should be used.
+
+### 19.4 Both clocks, because one of them is the one that survives
+
+`timer.device`'s `TR_SETSYSTIME` sets the running system, and that is all it sets.
+`SetClock SAVE` exists because AmigaOS keeps the durable copy somewhere else, and on a
+machine that has just been given a correct clock for the first time, losing it at the next
+reboot is the one outcome that must not happen. So `sntp` writes both: `TR_SETSYSTIME`,
+and then `battclock.resource`'s `WriteBattClock()`.
+
+A machine with no real-time chip — a bare A500, a bare A1200 — has no `battclock.resource`
+at all; `OpenResource()` returns NULL, and the command says the time will be lost at the
+next reboot rather than pretending it saved it.
+
+### 19.5 Unicast, and why broadcast was never a candidate
+
+RFC 4330 has both. Broadcast means waiting for a server on the LAN to announce the time
+whenever it feels like it — NetX Duo's own client allows two hours between announcements —
+which is not something a command you type can do; and it means believing whatever on the
+LAN claims to be a time server, which is a security decision the user did not make.
+Unicast asks a server the user named, and gets an answer or a timeout.
+
+The client checks RFC 4330 §5's list and nothing beyond it: mode 4, `LI != 3`, stratum
+1–15, a non-zero transmit timestamp, and an originate timestamp equal to the one sent. The
+source address needs no check of its own, because the socket is `connect()`ed and the stack
+has already dropped every datagram that did not come from the server.
+
+### 19.6 The vendored SNTP add-on cannot be used from a Shell command — and neither can most of the command set
+
+NetX Duo vendors an SNTP client at `third_party/netxduo/addons/sntp` and it is the obvious
+thing to build this on. It cannot be used, for a reason that has nothing to do with SNTP,
+and the reason rules out considerably more than SNTP.
+
+**A Shell command links its own copy of ThreadX and NetX Duo, and that copy's kernel is not
+running.** The one that is running lives inside `bsdsocket.library`, in that library's own
+copy of the same archives, with its own scheduler globals. `nx_sntp_client_create()` calls
+`tx_thread_create()`, `tx_timer_create()` and `tx_mutex_create()`;
+`nx_sntp_client_run_unicast()` calls `nx_udp_socket_bind()`, which suspends the calling
+thread. Every one of those reaches for ThreadX's scheduler state, and in a Shell command
+that state belongs to a kernel that was never entered.
+
+The same fact is already visible in three other places in the tree, and they are worth
+naming together because they are one fact and not three:
+
+* `src/tools/netstack_weak.c` supplies **weak** `netstack_get()` / `netstack_ip()` /
+  `netstack_pool()` that return NULL, and no tool links `aminetxduo_netstack` — check any
+  tool's `link.txt`. In a shipped build the weak stubs *are* the implementation, so
+  `netstat`, `ping` and `ShowNetStatus`'s live path reach `tool_require_stack()`, get NULL,
+  and say so. Measured in the same run, with the stack up and an address leased:
+
+  ```
+      netstat -r
+        netstat: the network is up, but this command cannot read it
+        ...
+        The stack lives inside bsdsocket.library and there is no
+        call yet that lets a separate command look inside it
+  ```
+
+  The `build/testhd-doclive/` capture that shows those commands printing live interface
+  counters was produced by a purpose-built `LiveTools` binary that links the netstack and
+  runs each command's `main()` in-process; the shipped executables cannot do it.
+* `src/tools/onoff.c` says it outright: *"Individual interfaces cannot be taken up and down
+  while the stack runs; that needs a call the library does not have yet."*
+* `src/tools/nettrace.c` is the one command that solved it, and how it solved it is the
+  shape of the answer: it reaches the capture engine through the eight published `bpf_*`
+  LVOs, *"because a tool that linked the archive would get its OWN copy of the channel
+  table and capture nothing at all."*
+
+**What this cost.** `arp`, `AddNetRoute` and `DeleteNetRoute` were to be written in the
+same batch as `sntp`. All three are behind this wall and none was shipped:
+
+| Command | What it needs | Where that is |
+|---|---|---|
+| `arp` list | read `ip->nx_ip_arp_table[]` | inside `bsdsocket.library`'s `NX_IP` — unreachable |
+| `arp` delete / flush | `nx_arp_static_entry_delete()`, `nx_arp_dynamic_entries_invalidate()` | ditto, and they suspend the caller |
+| `AddNetRoute DEFAULT=` | `nx_ip_gateway_address_set()` | ditto |
+| `AddNetRoute DST=/VIA=` | `nx_ip_static_route_add()` | ditto — **and** `NX_ENABLE_IP_STATIC_ROUTING` is not defined in `port/netxduo-amiga/inc/nx_user.h`, so the routing table is not in the build at all. `NX_IP_ROUTING_TABLE_SIZE` *is* set there, which reads as though it were, and is inert without the enable. |
+
+`ObtainNetXDuoContext` (LVO -0x360, `src/bsdsocket/nxcontext.c`) is the nearest thing to a
+way in: it hands out `netstack_ip()`, `netstack_pool()` and the stack's own adopt/orphan
+hooks, which between them would be enough to *read* the ARP and routing tables — those are
+plain memory reads once the caller holds the ThreadX baton. It is not the answer as it
+stands, for two reasons. It is compiled only under `AMINETXDUO_TLS_CONTEXT`, so it does not
+exist in the `-DAMINETXDUO_TLS=OFF` configuration at all, and a network command that works
+only in a TLS build is not a command; and its function table carries the six NetX Duo entry
+points `tls.library` needs and no UDP, no ARP and no routing, so it could not back the
+modifying half of either command however the reading half were done.
+
+**The shape of the fix**, if these commands are wanted: a small set of published LVOs on
+`bsdsocket.library`, in exactly the idiom `bpf_*` already established — the vector table
+has reserved slots at [124], [125] and [137]–[142]. `Online`/`Offline` against a running
+stack, `netstat`, `ping`, `arp`, `AddNetRoute` and `DeleteNetRoute` all land on the same
+handful of calls, so it is one piece of work rather than six. It belongs in
+`src/bsdsocket/`, which is why it is written down here rather than done.
+
+### 19.7 What the run does, and the one thing it borrows from the internet
+
+`tests/tools/run-sntp.sh`, on an A1200 with the A2065 on SLIRP:
+
+1. `ClockSet 0` — `tests/tools/clockset.c`, a test-only helper that puts the guest where a
+   real Amiga with a dead battery is. It exists because FS-UAE hands its guest the host's
+   wall clock, so under the emulator every run would otherwise start with the clock already
+   right and the interesting half would never execute; and because the harness disk has no
+   `C:Date` to do it with. `tests/tls/tls_api.c` does the same thing inline, for the same
+   reason.
+2. `AddNetInterface eth0`, DHCP, and the two `fetch`es *before*.
+3. `sntp 10.0.2.2 TIMEOUT 5` against something that is not a time server, which must fail
+   legibly; then `sntp <server> SHOW`, which asks and changes nothing; then `sntp <server>`.
+4. The same two `fetch`es *after*.
+
+**The time server is a real one on the internet, and that is a considered choice rather
+than laziness.** SLIRP is a NAT and forwards outbound UDP perfectly well, so a real server
+is reachable — measured: `time.apple.com` answers stratum 1 through it, from the guest. A
+local one is not possible, because SNTP is UDP port 123 and ports below 1024 need root on
+macOS and on Linux alike, and this suite does not ask for root. Giving `sntp` a `PORT`
+argument would have made the run hermetic at the cost of a knob that exists only for the
+test, which is the wrong trade. Everything else in the run is hermetic, against
+`tests/curl/curlpeer.py`, and the script asks the time server **from the host, before
+starting the emulator**, so that an unreachable one fails in ten seconds and looks like
+what it is rather than like a bug in `sntp`.
+
+One bug was found this way and is worth recording, because the symptom named the wrong
+thing. The resolver can return a `hostent` it could not fill: the pointers are all
+non-NULL, `h_length` is not 4, and the address is four bytes of nothing. `sntp` accepted
+it, `connect()` recorded 0.0.0.0 quite happily — a connected UDP socket is only a stored
+destination — and the failure surfaced two calls later as *"could not send the request"*,
+which is an error about the wrong subsystem entirely. `fetch.c` already checked
+`h_length != 4`; `sntp` now does too.
