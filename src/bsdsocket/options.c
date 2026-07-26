@@ -452,6 +452,24 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
             *(LONG *)argp = (LONG)available;
             return 0;
 
+        case SIOCATMARK:
+            if (argp == NULL)
+                return bsd_fail(SocketBase, AMI_EFAULT);
+
+            /*
+             * "Is the next byte the urgent one?"
+             *
+             * This implementation is always OOBINLINE (see oob.c), so the
+             * urgent byte is in the stream and the mark is simply "one has
+             * arrived and recv(MSG_OOB) has not taken it yet". A caller that
+             * uses SIOCATMARK to decide when to stop discarding -- which is
+             * what telnet does -- gets the right answer at the right moment;
+             * a caller that expects the byte to be missing from the stream
+             * does not, and that is the divergence oob.c documents.
+             */
+            *(LONG *)argp = ((sock->as_Flags & ASF_OOBHAVE) != 0) ? 1 : 0;
+            return 0;
+
         case FIOASYNC:
             if (argp == NULL)
                 return bsd_fail(SocketBase, AMI_EFAULT);

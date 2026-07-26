@@ -803,16 +803,82 @@ static LONG bsd_transfer_check(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_EINVAL);
 
     /*
-     * MSG_OOB is refused, not faked. NetX Duo has no transmit path for TCP
-     * urgent data at all -- NX_TCP_URG_BIT is never set anywhere in the tree
-     * -- and on receive it only reports "the URG bit was set" through a
-     * callback, without separating the urgent byte from the stream. There is
-     * nothing here to build on, so EOPNOTSUPP is the honest answer.
+     * MSG_OOB is TCP's, and only TCP's: there is no urgent data on a datagram
+     * or a raw socket to send or to wait for. oob.c has the rest.
      */
-    if ((flags & MSG_OOB) != 0)
+    if ((flags & MSG_OOB) != 0 && (sock->as_Flags & ASF_TCP) == 0)
         return bsd_fail(base, AMI_EOPNOTSUPP);
 
     return 0;
+}
+
+/*
+ * send(..., MSG_OOB): every byte goes, and the LAST one is the urgent one.
+ *
+ * That is 4.4BSD's rule, and the one telnet and ftp rely on -- they write a
+ * short command whose final byte is the signal. The leading bytes take the
+ * ordinary path; only the last needs oob.c.
+ */
+static LONG bsd_send_oob(struct AmiSocketBase *base, AmiSocket *sock,
+                         const UBYTE *buf, LONG len)
+{
+    LONG sent = 0;
+    LONG rc;
+
+    if (len < 1)
+        return bsd_fail(base, AMI_EINVAL);
+
+    if (bsd_nx_enter(base) != 0)
+        return bsd_fail(base, AMI_ENETDOWN);
+
+    if (len > 1)
+    {
+        BsdIovCursor cur;
+        struct iovec iov;
+
+        iov.iov_base = (APTR)buf;
+        iov.iov_len  = (size_t)(len - 1);
+        bsd_iov_init(&cur, &iov, 1);
+
+        sent = bsd_send_tcp(base, sock, &cur, len - 1, 0);
+        if (sent < len - 1)
+        {
+            bsd_nx_leave(base);
+            return sent;                /* short write, or -1 with errno set */
+        }
+    }
+
+    rc = bsd_oob_send(base, sock, buf[len - 1]);
+
+    bsd_nx_leave(base);
+
+    if (rc < 0)
+        return (sent > 0) ? sent : -1;
+
+    return sent + 1;
+}
+
+/*
+ * recv(..., MSG_OOB): the byte the peer marked urgent, once.
+ *
+ * EINVAL when there is none is what 4.4BSD answers, and there is no waiting
+ * variant: a caller that wants to be told when one arrives selects on
+ * exceptfds or takes SIGURG.
+ */
+static LONG bsd_recv_oob(struct AmiSocketBase *base, AmiSocket *sock,
+                         UBYTE *buf, LONG len)
+{
+    UBYTE byte = 0;
+
+    if (len < 1)
+        return bsd_fail(base, AMI_EINVAL);
+
+    if (!bsd_oob_take(sock, &byte))
+        return bsd_fail(base, AMI_EINVAL);
+
+    buf[0] = byte;
+
+    return 1;
 }
 
 /* ---------------------------------------------------------------- vectors -- */
@@ -835,6 +901,9 @@ LONG bsd_send(register LONG sock_fd __asm("d0"),
     if ((sock->as_Flags & ASF_TCP) == 0 &&
         (sock->as_Flags & ASF_CONNECTED) == 0)
         return bsd_fail(SocketBase, AMI_EDESTADDRREQ);
+
+    if ((flags & MSG_OOB) != 0)
+        return bsd_send_oob(SocketBase, sock, (const UBYTE *)buf, len);
 
     iov.iov_base = buf;
     iov.iov_len  = (size_t)len;
@@ -863,6 +932,9 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
         return bsd_fail(SocketBase, AMI_EFAULT);
 
     bsd_addr_from_v4(&addr, 0UL);
+
+    if ((flags & MSG_OOB) != 0)
+        return bsd_send_oob(SocketBase, sock, (const UBYTE *)buf, len);
 
     /* A destination on a connected stream socket is ignored, as in BSD. */
     if ((sock->as_Flags & ASF_TCP) == 0)
@@ -910,6 +982,9 @@ LONG bsd_recv(register LONG sock_fd __asm("d0"),
     if (len == 0)
         return 0;
 
+    if ((flags & MSG_OOB) != 0)
+        return bsd_recv_oob(SocketBase, sock, (UBYTE *)buf, len);
+
     iov.iov_base = buf;
     iov.iov_len  = (size_t)len;
 
@@ -936,6 +1011,9 @@ LONG bsd_recvfrom(register LONG sock_fd          __asm("d0"),
 
     if ((sock->as_Flags & ASF_TCP) == 0 && len == 0)
         return 0;
+
+    if ((flags & MSG_OOB) != 0)
+        return bsd_recv_oob(SocketBase, sock, (UBYTE *)buf, len);
 
     iov.iov_base = buf;
     iov.iov_len  = (size_t)len;
@@ -969,6 +1047,12 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
 
     if (bsd_transfer_check(SocketBase, sock, 0, flags) != 0)
         return -1;
+
+    /* MSG_OOB is a send()/sendto() shape here: the urgent byte is the last
+       one written, and finding it in a scatter list buys nothing that a
+       caller cannot do with one more send(). */
+    if ((flags & MSG_OOB) != 0)
+        return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
 
     if (msg == NULL)
         return bsd_fail(SocketBase, AMI_EFAULT);
@@ -1020,6 +1104,9 @@ LONG bsd_recvmsg(register LONG sock_fd        __asm("d0"),
 
     if (bsd_transfer_check(SocketBase, sock, 0, flags) != 0)
         return -1;
+
+    if ((flags & MSG_OOB) != 0)
+        return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
 
     if (msg == NULL)
         return bsd_fail(SocketBase, AMI_EFAULT);

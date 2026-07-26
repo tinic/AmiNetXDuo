@@ -336,6 +336,7 @@ struct AmiSocketBase
 #define ASF_INET6       (1UL << 20)   /* created with domain AF_INET6       */
 #define ASF_V6ONLY      (1UL << 21)   /* IPV6_V6ONLY; see options.c         */
 #define ASF_RAW         (1UL << 22)   /* SOCK_RAW; see raw.c                */
+#define ASF_OOBHAVE     (1UL << 23)   /* an urgent byte is waiting; oob.c   */
 
 typedef struct AmiSocket
 {
@@ -427,6 +428,9 @@ typedef struct AmiSocket
      * suspension is the correct way to wait (it is what nx_tcp_socket_receive
      * does). bsd_event_post() still fires as well, so WaitSelect() sees it.
      */
+    /* The urgent byte a peer sent us, held for recv(MSG_OOB) -- see oob.c. */
+    UBYTE                   as_OobData;
+
     struct AmiSocket       *as_RawNext;     /* raw.c's registry link          */
     NX_PACKET              *as_RawHead;
     NX_PACKET              *as_RawTail;
@@ -532,6 +536,21 @@ LONG  bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
 LONG  bsd_getsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
                           LONG optname, APTR optval, socklen_t *optlen);
 #endif /* AMINETXDUO_IPV6 */
+
+/* oob.c -- TCP urgent data (MSG_OOB, SIOCATMARK, SIGURG).
+ *
+ * bsd_oob_send() sends one byte with the URG bit set; it must be called
+ * inside a bsd_nx_enter() bracket and returns 1, or -1 with errno set.
+ *
+ * bsd_tcp_urgent_notify() is what nx_tcp_socket_create() is handed as its
+ * urgent-data callback, and runs on the NetX Duo IP thread.
+ *
+ * bsd_oob_take() hands the stored byte to recv(MSG_OOB) and clears the mark;
+ * TRUE means there was one.
+ */
+LONG  bsd_oob_send(struct AmiSocketBase *base, AmiSocket *sock, UBYTE byte);
+VOID  bsd_tcp_urgent_notify(NX_TCP_SOCKET *socket_ptr);
+BOOL  bsd_oob_take(AmiSocket *sock, UBYTE *out);
 
 /* raw.c -- SOCK_RAW.
  *

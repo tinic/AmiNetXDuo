@@ -725,7 +725,8 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
         status = nx_tcp_socket_create(ip, &sock->as_Nx.tcp, bsd_tcp_name,
                                       NX_IP_NORMAL, NX_FRAGMENT_OKAY,
                                       NX_IP_TIME_TO_LIVE, BSD_TCP_WINDOW,
-                                      NX_NULL, bsd_tcp_disconnect_callback);
+                                      bsd_tcp_urgent_notify,
+                                      bsd_tcp_disconnect_callback);
     }
     else
     {
@@ -933,7 +934,8 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
     status = nx_tcp_socket_create(ip, &incoming->as_Nx.tcp, bsd_tcp_name,
                                   NX_IP_NORMAL, NX_FRAGMENT_OKAY,
                                   NX_IP_TIME_TO_LIVE, BSD_TCP_WINDOW,
-                                  NX_NULL, bsd_tcp_disconnect_callback);
+                                  bsd_tcp_urgent_notify,
+                                  bsd_tcp_disconnect_callback);
     if (status != NX_SUCCESS)
     {
         bsd_nx_leave(SocketBase);
@@ -1124,7 +1126,8 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
         status = nx_tcp_socket_create(ip, &spare->as_Nx.tcp, bsd_tcp_name,
                                       NX_IP_NORMAL, NX_FRAGMENT_OKAY,
                                       NX_IP_TIME_TO_LIVE, BSD_TCP_WINDOW,
-                                      NX_NULL, bsd_tcp_disconnect_callback);
+                                      bsd_tcp_urgent_notify,
+                                      bsd_tcp_disconnect_callback);
         if (status == NX_SUCCESS)
         {
             spare->as_Flags    |= ASF_INCOMING | ASF_SERVER;
