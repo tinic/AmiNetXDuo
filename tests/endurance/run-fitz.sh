@@ -1,0 +1,237 @@
+#!/usr/bin/env bash
+#
+# Hours of Fitz traffic, with the packet pool on a timeline.
+#
+#   tests/endurance/run-fitz.sh [-t SECONDS] [-k MHZ] [-m MODEL] [-T TAG]
+#                               [-b BUILDDIR] [-f FILERS] [-s SAMPLE] [-r]
+#
+# WHAT THIS RUNS
+#
+#   host   fitz-serve <scratch> PORT 17711        -- no FUSE needed
+#   guest  fitz mount 10.0.2.2:17711 FITZ:        -- Fitz's AmigaDOS handler
+#   guest  Endurance (mode fitz)                  -- files in and out, for hours
+#
+# The Amiga is the CLIENT and the host is the SERVER, and that is not
+# arbitrary: mounting on the host would need FUSE, which neither this Mac nor
+# the Linux build host has, whereas Fitz's server half is plain POSIX and its
+# own Makefile ships it as a separate binary for exactly this case.  Both
+# directions are still exercised -- Endurance writes files to the share and
+# reads every one of them back, byte for byte.
+#
+# WHY FITZ
+#
+#   The EAB report this whole exercise comes from (thread 122501) says weeks
+#   of testing with Fitz made both AmiTCP 4 and Roadshow return EAGAIN on a
+#   BLOCKING socket, after which the connection was finished.  Fitz is
+#   "(almost) synchronous on blocking sockets" by its author's description, so
+#   it does not paper over stack misbehaviour -- and where it does
+#   (checkretry() retries EAGAIN ten times, 20 ms apart) the debug build says
+#   so on the serial port.
+#
+# WHAT COMES BACK
+#
+#   build/testhd-<tag>/end-timeline.csv   pool free, AvailMem, retransmits, ...
+#   build/testhd-<tag>/end-events.txt     every error, with the time
+#   build/testhd-<tag>/end-summary.txt    totals
+#   build/serial-<tag>.log                Fitz's own "* EAGAIN" lines
+#   build/endurance-<tag>-peer.log        what the host server saw
+#
+# A RUN OF HOURS HOLDS AN EMULATOR SLOT FOR HOURS.  Two things follow, and
+# both have bitten:
+#
+#   * tools/fsuae-reap.sh kills any fs-uae older than 15 minutes by default
+#     and cannot tell a long tenant from an orphan.  Anyone running it during
+#     this takes it down.  This script prints the reap-safe invocation.
+#   * AMINETXDUO_SLOTS defaults to 3; a multi-hour tenant leaves the others
+#     sharing.  Set it deliberately rather than by accident.
+#
+# SPDX-License-Identifier: MIT
+
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+
+SECONDS_RUN=1800
+MODEL=A1200
+CLOCK=""
+TAG="${AMINETXDUO_RUN_TAG:-fitz}"
+BUILD="${AMINETXDUO_BUILD:-build/cm}"
+FILERS=2
+SAMPLE=15
+RELEASED=0
+PORT="${AMINETXDUO_FITZ_PORT:-17711}"
+MAXXFER=262144
+MAXIO=32768
+
+while getopts "t:k:m:T:b:f:s:p:x:r" opt; do
+    case "$opt" in
+        t) SECONDS_RUN="$OPTARG" ;;
+        k) CLOCK="$OPTARG" ;;
+        m) MODEL="$OPTARG" ;;
+        T) TAG="$OPTARG" ;;
+        b) BUILD="$OPTARG" ;;
+        f) FILERS="$OPTARG" ;;
+        s) SAMPLE="$OPTARG" ;;
+        p) PORT="$OPTARG" ;;
+        x) MAXXFER="$OPTARG" ;;
+        r) RELEASED=1 ;;
+        *) echo "usage: $0 [-t secs] [-k MHz] [-m model] [-T tag] [-b build]" \
+                "[-f filers] [-s sample] [-p port] [-x maxxfer] [-r]" >&2
+           exit 2 ;;
+    esac
+done
+
+OUT="$ROOT/build/endurance"
+BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
+UG="$ROOT/$BUILD/src/usergroup/usergroup.library"
+SMOKE="$ROOT/$BUILD/src/tools/ToolsSmoke"
+ADDIF="$ROOT/$BUILD/src/tools/AddNetInterface"
+
+for f in "$OUT/Endurance" "$OUT/fitz-serve" "$BSD" "$SMOKE" "$ADDIF"; do
+    [ -f "$f" ] || { echo "missing $f -- build the tree and run " \
+                          "tests/endurance/build.sh" >&2; exit 2; }
+done
+
+if [ "$RELEASED" = "1" ]; then
+    AMIGA_FITZ="$OUT/fitz-release"
+else
+    AMIGA_FITZ="$OUT/fitz-debug"
+fi
+[ -f "$AMIGA_FITZ" ] || { echo "missing $AMIGA_FITZ" >&2; exit 2; }
+
+# ---- a2065.device --------------------------------------------------------
+
+A2065="${AMINETXDUO_A2065:-}"
+if [ -z "$A2065" ]; then
+    for candidate in \
+        "$ROOT/build/a2065.device" \
+        "$HOME/amiga-os-src/os-source/other_networking/sana2/bin/devs/a2065.device"
+    do
+        [ -f "$candidate" ] && { A2065="$candidate"; break; }
+    done
+fi
+[ -n "$A2065" ] && [ -f "$A2065" ] || {
+    echo "No a2065.device found. Set AMINETXDUO_A2065=<path>." >&2
+    exit 2
+}
+
+# ---- the host server -----------------------------------------------------
+
+SHARE="$ROOT/build/endurance-share-$TAG"
+rm -rf "$SHARE"
+mkdir -p "$SHARE"
+
+PEERLOG="$ROOT/build/endurance-$TAG-peer.log"
+: > "$PEERLOG"
+
+"$OUT/fitz-serve" "$SHARE" PORT "$PORT" > "$PEERLOG" 2>&1 &
+PEER_PID=$!
+
+cleanup_peer() { kill -TERM "$PEER_PID" 2>/dev/null || true; }
+trap cleanup_peer EXIT INT TERM HUP
+
+sleep 1
+kill -0 "$PEER_PID" 2>/dev/null || {
+    echo "fitz-serve did not start:" >&2
+    cat "$PEERLOG" >&2
+    exit 2
+}
+echo "==> fitz-serve on port $PORT sharing $SHARE (pid $PEER_PID)"
+
+# ---- stage the guest -----------------------------------------------------
+
+STAGE="$ROOT/build/endurance-stage-$TAG"
+rm -rf "$STAGE"
+mkdir -p "$STAGE/libs"
+cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
+cp "$A2065" "$STAGE/devs/a2065.device"
+cp "$BSD" "$STAGE/libs/bsdsocket.library"
+[ -f "$UG" ] && cp "$UG" "$STAGE/libs/usergroup.library"
+cp "$AMIGA_FITZ" "$STAGE/fitz"
+cp "$OUT/Endurance" "$STAGE/Endurance"
+cp "$ADDIF" "$STAGE/AddNetInterface"
+
+cat > "$STAGE/endurance.cfg" <<EOF
+# generated by tests/endurance/run-fitz.sh
+mode fitz
+path FITZ:
+seconds $SECONDS_RUN
+sample $SAMPLE
+filers $FILERS
+maxio $MAXIO
+maxxfer $MAXXFER
+probes 0
+seed 20260726
+EOF
+
+# ToolsSmoke is how a command gets ARGUMENTS: fsuae-run.sh starts exactly one
+# executable and passes it nothing.  '&' is SYS_Asynch, which is what a mount
+# needs -- Fitz's mount stays resident as a DOS handler and never returns.
+{
+    echo "# generated by tests/endurance/run-fitz.sh"
+    echo "SYS:AddNetInterface eth0"
+    echo "wait 4"
+    echo "&SYS:fitz mount 10.0.2.2:$PORT FITZ:"
+    echo "wait 10"
+    echo "SYS:Endurance"
+} > "$STAGE/commands.txt"
+
+export AMINETXDUO_RUN_TAG="$TAG"
+
+# The emulator has to outlive the workload by enough to write the last CSV row
+# and unwind; -t is a deadline on DH0:.done, not on the test.
+DEADLINE=$((SECONDS_RUN + 300))
+
+echo "==> run:  $SECONDS_RUN s workload, $DEADLINE s emulator deadline"
+echo "==> fitz: $(basename "$AMIGA_FITZ")"
+echo "==> if anyone needs to reap while this runs: tools/fsuae-reap.sh -a $((DEADLINE / 60 + 30))"
+
+CLOCKARG=()
+[ -z "$CLOCK" ] || CLOCKARG=(-k "$CLOCK")
+
+set +e
+"$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$DEADLINE" "${CLOCKARG[@]}" \
+    "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/fitz" "$STAGE/Endurance" \
+    "$STAGE/AddNetInterface" "$STAGE/commands.txt" "$STAGE/endurance.cfg"
+RUN_RC=$?
+set -e
+
+# ---- what came back ------------------------------------------------------
+
+HD="$ROOT/build/testhd-$TAG"
+
+echo
+echo "=== summary ==="
+[ -f "$HD/end-summary.txt" ] && cat "$HD/end-summary.txt" || echo "(none written)"
+
+echo
+echo "=== errors and events ==="
+if [ -s "$HD/end-events.txt" ]; then
+    wc -l < "$HD/end-events.txt" | tr -d ' ' | sed 's/^/  lines: /'
+    head -40 "$HD/end-events.txt"
+else
+    echo "  (none)"
+fi
+
+echo
+echo "=== Fitz's own diagnostics (serial) ==="
+SER="$ROOT/build/serial-$TAG.log"
+if [ -f "$SER" ]; then
+    EAGAIN=$(grep -c "EAGAIN" "$SER" || true)
+    SERR=$(grep -c "send error\|recv error\|recv maxretry" "$SER" || true)
+    echo "  EAGAIN on a blocking socket: $EAGAIN"
+    echo "  send/recv failures:          $SERR"
+    grep -n "EAGAIN\|send error\|recv error\|recv maxretry" "$SER" | head -20 || true
+else
+    echo "  (no serial log)"
+fi
+
+echo
+echo "=== pool timeline ==="
+if [ -f "$HD/end-timeline.csv" ]; then
+    python3 "$ROOT/tests/endurance/endreport.py" "$HD/end-timeline.csv" || true
+else
+    echo "  (none written)"
+fi
+
+exit "$RUN_RC"
