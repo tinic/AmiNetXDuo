@@ -2,9 +2,15 @@
 
 *An AmiTCP/Roadshow-compatible `bsdsocket.library` for AmigaOS built on Eclipse ThreadX NetX Duo.*
 
-Status: research only. No implementation decisions are final. Empirical results in
-[§5.4](#54-empirical-build-spike-m68k) were produced on 2026-07-24 with the local
-`m68k-amigaos-gcc 15.2.0` toolchain.
+Status: no longer research only — this began as a feasibility study and the thing now
+builds, runs, passes 125/142 of an independent conformance suite and carries upstream
+curl. The early sections are kept as they were written, because how a conclusion was
+reached matters when a later section overturns it, and several have been overturned.
+Where that has happened the later section says so.
+
+Empirical results in [§5.4](#54-empirical-build-spike-m68k) were produced on 2026-07-24
+with the local `m68k-amigaos-gcc 15.2.0` toolchain, against throwaway port headers that
+no longer exist; the real port is in `port/threadx-amiga/` and `port/netxduo-amiga/`.
 
 ---
 
