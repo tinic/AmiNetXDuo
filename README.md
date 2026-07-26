@@ -239,7 +239,7 @@ first.
 ### The curl verification suite
 
 `tests/curl/` uses curl as an adversary against `bsdsocket.library` rather than
-as something to be tested: 146 hermetic cases over HTTP mechanics, connection
+as something to be tested: 149 hermetic cases over HTTP mechanics, connection
 reuse, byte-exactness, failure paths, resource behaviour under repetition, TLS
 and FTP, with host-side servers including four deliberately rude ones, a local
 PKI covering chain depths 2/3/4 and expired, self-signed and untrusted roots,
@@ -272,6 +272,13 @@ evidence our own build cannot supply, since ours was written by the same people
 as the library. Its HTTPS did not complete a case in nine minutes, sixteen
 handshake attempts in — OpenSSL 3.6.2's bignum arithmetic on a 14 MHz 68020,
 with our sockets carrying all sixteen attempts without incident.
+
+Running it is `tests/curl/run-curlverify.sh`, hermetic by default, with `-g G`
+for the internet group. Two things any ported clib2 client needs on the target,
+both of which cost several failed runs to discover: `mathieeedoubbas.library`
+and `mathieeedoubtrans.library` staged as a **matched pair** from the same
+source, since a mixed pair does not work; and anything linked against AmiSSL
+needs an `AmiSSL:` assign, or AmigaDOS puts up a requester and waits forever.
 
 ## Target
 
@@ -420,7 +427,7 @@ tests/conformance/run-fsuae.sh -a "LOOPBACK NOPAGE"
 | conformance, loopback tier | **125/142** (1 fail, 16 skip) |
 | conformance, network tier | **133/142** (2 fail, 7 skip) |
 | client access patterns | **94/94** (`tests/clients`) — the call sequences curl, wget, nc, ftp and telnet actually issue, each group named for the program and file it came from |
-| curl verification suite | **122/124** on the hermetic groups (`tests/curl`), and a third-party curl built by somebody else scores the same 122/124 |
+| curl verification suite | **122/124** on the HTTP groups and **28/28** on the TLS group (`tests/curl`); a third-party curl built by somebody else scores the same 122/124, failing on the same two cases |
 | ThreadX-on-Exec soak | 98 checks, 4+ adopted tasks, Enforcer-clean on 68030 |
 | TCP throughput, 13.9 MHz 68020 | **356 KB/s** loopback, **368 KB/s** to a host over SLIRP (was 261 / 312 before `src/net68k/`) |
 | TCP throughput, 24.5 MHz 68020 | **636 KB/s** through the library, 1.78× for a 1.76× clock; conformance unchanged |
