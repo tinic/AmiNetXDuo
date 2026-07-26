@@ -61,12 +61,28 @@
  *   an interactive attempt fails with Dropbear's own message rather than
  *   silently sending a terminal mode nobody set.
  *
- *   pipe() returns two descriptors that are never readable.  Its one use in
- *   the client is ses.signal_pipe, whose entire job is to wake select() from
- *   a signal handler -- and signal() here installs nothing, because AmigaOS
- *   delivers no asynchronous signals to a C handler.  A pipe that never
- *   fires is therefore not a stub, it is the correct implementation of a
- *   wakeup that can never be needed.
+ *   pipe() is real, in the small way a program with no second process needs:
+ *   a byte written to one end can be read from the other, and a read end may
+ *   instead be pointed at a DOS file.  That second form is what carries a
+ *   command's output back to an SSH channel; see THE SERVER RUNS A COMMAND
+ *   below.
+ *
+ * THE SERVER RUNS A COMMAND, AND spawn_command() IS WHERE THAT IS DECIDED
+ *
+ *   dbutil.c's spawn_command() is three pipe()s and a fork(), and the child
+ *   branch redirects the pipes onto 0/1/2 and calls execv().  There is no
+ *   fork() here and there will not be one, so the whole function is replaced
+ *   with __wrap_spawn_command() below -- the same -Wl,--wrap mechanism the
+ *   file already uses for read/write/close, and for the same reason: it
+ *   leaves third_party/dropbear unpatched.
+ *
+ *   The command line itself is not guessed and not parsed out of a log.  The
+ *   wrapper calls Dropbear's own exec_fn (execchild), which does the whole
+ *   real job -- forced commands, the environment, the chdir to the home
+ *   directory -- and ends in execv(shell, {"sh", "-c", cmd}).  execv() then
+ *   longjmp()s back into the wrapper with that command in hand.  The jump is
+ *   ordinary: the wrapper's frame is live, because exec_fn was called from
+ *   it.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -74,6 +90,7 @@
 #include <exec/types.h>
 #include <dos/dos.h>
 #include <dos/dosextens.h>
+#include <dos/dostags.h>        /* SystemTagList() tags */
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/bsdsocket.h>
@@ -82,8 +99,10 @@
 #include <sys/time.h>
 #include <errno.h>
 #include <string.h>
+#include <stdio.h>              /* snprintf() */
 #include <stdlib.h>
 #include <stdarg.h>
+#include <setjmp.h>             /* the execv() -> spawn_command() jump */
 #include <signal.h>
 #include <sys/stat.h>           /* chmod() */
 #include <sys/wait.h>           /* waitpid() */
@@ -173,11 +192,159 @@ static LONG nx_socketbasetaglist(APTR tags)            { return SocketBaseTagLis
 #define IS_PIPE(fd)     ((fd) >= DB_PIPE_BASE && (fd) < DB_PIPE_LIMIT)
 #define IS_RAND(fd)     ((fd) == DB_RAND_FD)
 
-/* The pipe table.  Declared here rather than beside pipe() because close()
-   comes first in the file and has to release entries. */
-static unsigned pipe_taken;    /* one bit per PAIR */
-static unsigned pipe_closed;   /* one bit per END */
 #define SOCKOF(fd)      ((LONG)((fd) - DB_SOCK_BASE))
+
+/* Set while __wrap_spawn_command() is running Dropbear's own child path in
+   THIS process -- see THE SERVER RUNS A COMMAND at the top of the file, and
+   the two places below that have to know: close() and execv(). */
+static int exec_capturing;
+
+/*
+ * THE PIPE TABLE.  Declared here rather than beside pipe(), because read(),
+ * write(), close() and select() all come first in the file and all four have
+ * to see it.
+ *
+ * Three kinds of pipe are needed and they are the same object with different
+ * fields set:
+ *
+ *   a wakeup pipe   ses.signal_pipe: one byte in, one byte out.  `buf` is it.
+ *                   It never has more than a couple of bytes in flight, so
+ *                   the buffer is a compacting queue rather than a ring.
+ *   a file source   the read end drains `src` and reports end of file when
+ *                   the file does.  This is how a command's output reaches an
+ *                   SSH channel; the file is deleted when the read end closes.
+ *   a sink          everything written to it is discarded.  This is the
+ *                   command's stdin, which is NIL:.  It has to SUCCEED rather
+ *                   than fill up: a full pipe leaves data pending on the
+ *                   channel forever and the channel then never closes.
+ */
+#define DB_PIPE_BUF     128
+
+struct db_pipe
+{
+    unsigned      taken   : 1;
+    unsigned      rclosed : 1;      /* the read end has been close()d */
+    unsigned      wclosed : 1;      /* the write end has been close()d */
+    unsigned      sink    : 1;      /* writes are discarded, never buffered */
+    BPTR          src;              /* the read end drains this file, or 0 */
+    char          srcname[64];      /* deleted with the read end, if set */
+    int           len;
+    int           pos;
+    unsigned char buf[DB_PIPE_BUF];
+};
+
+static struct db_pipe db_pipes[DB_PIPE_PAIRS];
+
+#define PIPE_PAIR(fd)       (&db_pipes[((fd) - DB_PIPE_BASE) / 2])
+#define PIPE_IS_READ(fd)    ((((fd) - DB_PIPE_BASE) & 1) == 0)
+
+static int pipe_readable(int fd)
+{
+    const struct db_pipe *p = PIPE_PAIR(fd);
+
+    if (!PIPE_IS_READ(fd))
+        return 0;
+
+    /* A file is always readable: Read() returns data or zero, and zero is end
+       of file, which is progress.  A pipe whose write end is closed is
+       readable for the same reason. */
+    return p->pos < p->len || p->src != (BPTR)0 || p->wclosed;
+}
+
+static int pipe_read(int fd, void *buf, size_t len)
+{
+    struct db_pipe *p = PIPE_PAIR(fd);
+
+    if (!PIPE_IS_READ(fd)) { errno = EBADF; return -1; }
+
+    if (p->pos < p->len)
+    {
+        int n = p->len - p->pos;
+
+        if ((size_t)n > len)
+            n = (int)len;
+        memcpy(buf, p->buf + p->pos, (size_t)n);
+        p->pos += n;
+        if (p->pos == p->len)
+            p->pos = p->len = 0;
+        return n;
+    }
+
+    if (p->src != (BPTR)0)
+    {
+        LONG n = Read(p->src, (APTR)buf, (LONG)len);
+
+        if (n < 0) { errno = EIO; return -1; }
+        return (int)n;                  /* 0 is end of file */
+    }
+
+    if (p->wclosed)
+        return 0;
+
+    errno = EAGAIN;
+    return -1;
+}
+
+static int pipe_write(int fd, const void *buf, size_t len)
+{
+    struct db_pipe *p = PIPE_PAIR(fd);
+    int space;
+
+    if (PIPE_IS_READ(fd)) { errno = EBADF; return -1; }
+
+    if (p->sink)
+        return (int)len;
+
+    if (p->pos > 0)
+    {
+        memmove(p->buf, p->buf + p->pos, (size_t)(p->len - p->pos));
+        p->len -= p->pos;
+        p->pos = 0;
+    }
+
+    /* What does not fit is dropped rather than refused.  The only buffered
+       pipe here is the wakeup one, where a second byte says nothing the first
+       did not, and refusing would stall the writer instead. */
+    space = DB_PIPE_BUF - p->len;
+    if (space > 0)
+    {
+        int n = ((size_t)space < len) ? space : (int)len;
+
+        memcpy(p->buf + p->len, buf, (size_t)n);
+        p->len += n;
+    }
+
+    return (int)len;
+}
+
+static int pipe_close(int fd)
+{
+    struct db_pipe *p = PIPE_PAIR(fd);
+
+    if (PIPE_IS_READ(fd))
+    {
+        p->rclosed = 1;
+        if (p->src != (BPTR)0)
+        {
+            Close(p->src);
+            p->src = (BPTR)0;
+            if (p->srcname[0] != '\0')
+                DeleteFile((CONST_STRPTR)p->srcname);
+        }
+    }
+    else
+    {
+        p->wclosed = 1;
+    }
+
+    /* Released only once BOTH ends are closed.  Dropbear closes one end and
+       keeps the other, so freeing on the first close would hand the live end
+       to the next caller. */
+    if (p->rclosed && p->wclosed)
+        memset(p, 0, sizeof(*p));
+
+    return 0;
+}
 
 extern int __real_read(int fd, void *buf, size_t len);
 extern int __real_write(int fd, const void *buf, size_t len);
@@ -517,11 +684,7 @@ int __wrap_read(int fd, void *buf, size_t len)
         return rand_fill(buf, len);
 
     if (IS_PIPE(fd))
-    {
-        /* Never has anything in it; see the header comment. */
-        errno = EAGAIN;
-        return -1;
-    }
+        return pipe_read(fd, buf, len);
 
     return __real_read(fd, buf, len);
 }
@@ -531,8 +694,11 @@ int __wrap_write(int fd, const void *buf, size_t len)
     if (IS_SOCK(fd))
         return (int)nx_send(SOCKOF(fd), (APTR)buf, (LONG)len, 0);
 
-    if (IS_RAND(fd) || IS_PIPE(fd))
-        return (int)len;                /* swallowed, and nothing is waiting */
+    if (IS_PIPE(fd))
+        return pipe_write(fd, buf, len);
+
+    if (IS_RAND(fd))
+        return (int)len;                /* swallowed: see rand_fill() */
 
     return __real_write(fd, buf, len);
 }
@@ -569,6 +735,19 @@ int __wrap_close(int fd)
     if (fd == 0 || fd == 1 || fd == 2)
         return 0;
 
+    /*
+     * AND NEITHER IS ANYTHING ELSE, WHILE A COMMAND IS BEING CAPTURED.
+     *
+     * dbutil.c's run_command() closes every descriptor from 3 to ses.maxfd
+     * before it execs, so that a child cannot inherit a file the server opened
+     * as root.  In a forked child that is right.  Here it is running in the
+     * SERVER's process, and that range is the session socket, the listener's
+     * pipes and the pipes the command's own output is about to arrive on --
+     * closing them ends the session in the middle of setting it up.
+     */
+    if (exec_capturing)
+        return 0;
+
     if (IS_SOCK(fd))
         return (int)nx_closesocket(SOCKOF(fd));
 
@@ -579,24 +758,7 @@ int __wrap_close(int fd)
     }
 
     if (IS_PIPE(fd))
-    {
-        /* Release the pair once BOTH ends are closed.  Dropbear closes one end
-           and keeps the other, so freeing on the first close would hand the
-           live end to the next caller. */
-        int pair = (fd - DB_PIPE_BASE) / 2;
-        int other = (fd - DB_PIPE_BASE) % 2 ? fd - 1 : fd + 1;
-
-        if (pipe_closed & (1u << (unsigned)(other - DB_PIPE_BASE)))
-        {
-            pipe_taken  &= ~(1u << (unsigned)pair);
-            pipe_closed &= ~(3u << (unsigned)(2 * pair));
-        }
-        else
-        {
-            pipe_closed |= 1u << (unsigned)(fd - DB_PIPE_BASE);
-        }
-        return 0;
-    }
+        return pipe_close(fd);
 
     return __real_close(fd);
 }
@@ -724,8 +886,8 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
 
         if (IS_PIPE(fd))
         {
-            /* readable: never.  writable: always, and nobody asks. */
-            if (want_w) { FD_SET(fd, &out_w); other_ready++; }
+            if (want_r && pipe_readable(fd)) { FD_SET(fd, &out_r); other_ready++; }
+            if (want_w)                      { FD_SET(fd, &out_w); other_ready++; }
             continue;
         }
 
@@ -787,15 +949,19 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
 /* ---------------------------------------------------------------- pipe --- */
 
 /*
- * One bit per pair.  There was one pair, which was enough for dbclient and is
- * not enough for the server: svr-main.c makes a childpipe per connection and
+ * Eight pairs.  There was one, which was enough for dbclient and is not enough
+ * for the server: svr-main.c makes a childpipe per connection and
  * common-session.c then makes ses.signal_pipe, so the second call failed and
- * the session died with "Signal pipe failed" after a successful accept.
+ * the session died with "Signal pipe failed" after a successful accept.  A
+ * command adds three more.
  *
- * Freed on close, so a server that handled connections in a loop would not
- * run out.  This one cannot -- DEBUG_NOFORK means it handles one and exits --
- * but a pipe table that leaks only because nothing loops is a trap for
- * whatever changes that.
+ * Freed on close, so a server that handled connections in a loop would not run
+ * out.  This one cannot -- DEBUG_NOFORK means it handles one and exits -- but a
+ * pipe table that leaks only because nothing loops is a trap for whatever
+ * changes that.
+ *
+ * fds[0] is the read end and fds[1] the write end, and PIPE_IS_READ() depends
+ * on that being the even one.
  */
 int pipe(int fds[2])
 {
@@ -803,9 +969,10 @@ int pipe(int fds[2])
 
     for (i = 0; i < DB_PIPE_PAIRS; i++)
     {
-        if ((pipe_taken & (1u << i)) == 0)
+        if (!db_pipes[i].taken)
         {
-            pipe_taken |= 1u << i;
+            memset(&db_pipes[i], 0, sizeof(db_pipes[i]));
+            db_pipes[i].taken = 1;
             fds[0] = DB_PIPE_BASE + 2 * i;
             fds[1] = DB_PIPE_BASE + 2 * i + 1;
             return 0;
@@ -852,10 +1019,80 @@ pid_t fork(void)   { errno = ENOSYS; return -1; }
 pid_t vfork(void)  { errno = ENOSYS; return -1; }
 pid_t setsid(void) { errno = ENOSYS; return -1; }
 
+/* ----------------------------------------------- running a command ------- */
+
+/*
+ * WHAT THE SERVER NEEDS AND WHY IT IS NOT A fork().
+ *
+ * dbutil.c's spawn_command() is the only place Dropbear starts a program: three
+ * pipe()s, a fork(), and a child branch that dup2()s the pipes onto 0/1/2 and
+ * calls execv().  Every one of those is a thing this machine does not have, and
+ * the failure is not graceful -- fork() returns -1, spawn_command() reports
+ * DROPBEAR_FAILURE, and the client gets an authenticated session that runs
+ * nothing and exits 0 with empty output.
+ *
+ * __wrap_spawn_command() below replaces the whole function.  On AmigaOS the
+ * equivalent of "run this and give me its output" is SystemTagList(), which
+ * starts a Shell, and the honest shape of that is:
+ *
+ *   the command line   comes from Dropbear, via execv() -- see exec_capturing
+ *   stdin              NIL:.  A synchronous Shell cannot be fed by a channel
+ *                      that is only read while the session loop runs.
+ *   stdout and stderr  one file, because AmigaOS 3.x has one: a process's
+ *                      pr_CES is NULL by default and errors go to its output.
+ *   the exit status    System()'s return code, which IS the command's rc
+ *
+ * IT RUNS SYNCHRONOUSLY, AND THAT IS A LIMITATION AND NOT A DETAIL.  The
+ * session loop is stopped for as long as the command takes, so nothing is
+ * echoed back while it runs and a command that never exits never returns.  The
+ * alternative is SYS_Asynch plus a wakeup through WaitSelect()'s signal mask,
+ * which is a real design and not a small one; this is the piece that makes
+ * `ssh amiga "command"` return its output, and it stops there deliberately.
+ */
+
+#define DB_CMD_MAX      512
+
+/* 256 KB.  A Shell gives a command 4,096 bytes and every ported program on this
+   machine needs far more than that (clients/curl/clientrun.c allocates 512 KB
+   for the same reason).  A command arriving over SSH is exactly as likely to be
+   a ported program as one typed at a Shell prompt. */
+#define DB_CMD_STACK    (256UL * 1024UL)
+
+static jmp_buf exec_jump;
+static int     exec_have_cmd;
+static char    exec_cmd[DB_CMD_MAX];
+
+/*
+ * ENOSYS is still the answer for anybody who really means "replace this
+ * process", and there is no such caller: the one execv() in a linked server is
+ * run_command()'s, at the end of the child path __wrap_spawn_command() calls
+ * deliberately.  While that is running, execv() is a hand-back rather than a
+ * call -- it takes the argv apart and jumps to the wrapper, whose frame is
+ * live because it is the frame that called into here.
+ *
+ * run_shell_command() builds argv as {shell, "-c", command} for a command and
+ * {"-shell"} for a login shell.  The second has no answer here: an interactive
+ * AmigaOS Shell needs a console handle and there is no pty to give it one.
+ */
 int execv(const char *path, char *const argv[])
 {
     (void)path;
-    (void)argv;
+
+    if (exec_capturing)
+    {
+        exec_have_cmd = 0;
+        exec_cmd[0] = '\0';
+
+        if (argv != NULL && argv[1] != NULL && strcmp(argv[1], "-c") == 0
+            && argv[2] != NULL && strlen(argv[2]) < sizeof(exec_cmd))
+        {
+            strcpy(exec_cmd, argv[2]);
+            exec_have_cmd = 1;
+        }
+
+        longjmp(exec_jump, 1);
+    }
+
     errno = ENOSYS;
     return -1;
 }
@@ -938,40 +1175,260 @@ int chown(const char *path, uid_t uid, gid_t gid)
 }
 
 /*
- * ECHILD is not a stub, it is the answer.  fork() and vfork() above always
- * fail, so this process has never had a child and never can -- "no children
- * to wait for" is exactly what happened.
+ * There IS a child now -- SystemTagList()'s, already finished by the time
+ * anybody asks -- so this reports it once and ECHILD after that.
+ *
+ * The status word is newlib's: WIFEXITED() reads the low byte and
+ * WEXITSTATUS() the next one up, so an AmigaDOS return code (0, 5, 10, 20)
+ * shifted left by eight is a normal exit with that code.  No AmigaOS command
+ * is ever killed by a signal, so WIFSIGNALED() is never true and the client
+ * always sees an exit status rather than an exit signal.
  */
+static pid_t child_pid;                 /* 0 when there is nothing to report */
+static int   child_status;
+
 pid_t waitpid(pid_t pid, int *status, int options)
 {
-    (void)pid; (void)status; (void)options;
+    (void)pid; (void)options;
+
+    if (child_pid != 0)
+    {
+        pid_t done = child_pid;
+
+        if (status != NULL)
+            *status = child_status;
+        child_pid = 0;
+        return done;
+    }
+
     errno = ECHILD;
     return -1;
 }
 
 /*
- * Succeeds and installs nothing, for the same reason signal() above does:
- * AmigaOS delivers no asynchronous signals to a C handler, so there is no
- * mechanism a handler could be attached to.
+ * Installs nothing and remembers ONE thing: SIGCHLD's handler.
  *
- * Reporting failure would be worse than reporting success.  The server calls
- * this from commonsetup() for SIGCHLD, SIGINT and SIGPIPE and treats an error
- * as fatal, so a -1 would refuse to start over handlers that could not fire
- * anyway: SIGCHLD needs a child, which fork() never produces, and bsdsocket
- * raises no SIGPIPE.
+ * AmigaOS delivers no asynchronous signals to a C handler, so there is no
+ * mechanism to attach one to and reporting failure would be worse than
+ * reporting success -- commonsetup() treats an error as fatal, so a -1 would
+ * refuse to start the server over handlers that cannot fire.
+ *
+ * But sesssigchild_handler() is not only reachable asynchronously.  Its whole
+ * job is to write a byte to ses.signal_pipe so the session loop wakes and calls
+ * svr_chansess_checksignal(), which reaps with waitpid() and hands the exit
+ * status to the channel.  __wrap_spawn_command() knows exactly when the child
+ * exited, so it calls the handler itself at that moment -- which is the same
+ * sequence a real SIGCHLD would produce, minus the asynchrony, and it is the
+ * only route by which a client ever learns a command's return code.
  *
  * oldact is zeroed rather than left alone, so a caller that saves and later
  * restores gets a defined value instead of stack contents.
  */
+static void (*sigchld_handler)(int);
+
 int sigaction(int sig, const struct sigaction *act, struct sigaction *oldact)
 {
-    (void)sig;
-    (void)act;
-
     if (oldact != NULL)
         memset(oldact, 0, sizeof(*oldact));
 
+    if (sig == SIGCHLD && act != NULL)
+        sigchld_handler = act->sa_handler;
+
     return 0;
+}
+
+/* ------------------------------------------------- __wrap_spawn_command --- */
+
+/*
+ * Dropbear's, declared rather than included: this file includes none of
+ * Dropbear's headers, and a prototype plus two return codes is the whole ABI
+ * it needs.  <syslog.h> is not included either -- proto/bsdsocket.h makes
+ * syslog() a macro and the NDK header then does not compile -- so the two
+ * priorities are spelled out.  This build has no syslog anyway
+ * (--disable-syslog), so svr_dropbear_log() ignores the value and writes to
+ * stderr; the numbers are the syslog ones so that a build which did have one
+ * would file them correctly.
+ */
+extern void dropbear_log(int priority, const char *format, ...);
+
+#define DB_LOG_WARNING  4
+#define DB_LOG_INFO     6
+
+#define DB_SUCCESS      0
+#define DB_FAILURE      (-1)
+
+/*
+ * Where a command's output is parked between the Shell writing it and the
+ * channel reading it.  T: is the AmigaOS scratch assign; a machine without one
+ * gets the current directory, which execchild() has just made the user's home.
+ */
+static int spawn_outfile(char *name, size_t namelen)
+{
+    static ULONG serial;
+    static const char *const dirs[] = { "T:", "" };
+    unsigned i;
+
+    for (i = 0; i < sizeof(dirs) / sizeof(dirs[0]); i++)
+    {
+        BPTR fh;
+
+        snprintf(name, namelen, "%sdbssh-%lx-%lu.out", dirs[i],
+                 (unsigned long)(ULONG)FindTask(NULL), (unsigned long)serial);
+
+        /* Created here rather than left to the Shell's ">" so that a directory
+           that cannot be written to is found NOW, with a name to print, and
+           not as an empty transfer later. */
+        fh = Open((CONST_STRPTR)name, MODE_NEWFILE);
+        if (fh != (BPTR)0)
+        {
+            Close(fh);
+            serial++;
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
+                         const void *exec_data,
+                         int *ret_writefd, int *ret_readfd, int *ret_errfd,
+                         pid_t *ret_pid)
+{
+    static struct TagItem cmd_tags[] =
+    {
+        { NP_StackSize, DB_CMD_STACK },
+        { TAG_END,      0            }
+    };
+
+    static pid_t next_pid = 1000;       /* not 0: chansess->pid == 0 means
+                                           "no command has run on this
+                                           channel" */
+
+    char  outname[64];
+    char  line[DB_CMD_MAX + sizeof(outname) + 16];
+    int   in[2], out[2], err[2];
+    LONG  rc;
+    BPTR  fh;
+
+    /*
+     * Dropbear's own child path, run in this process to the point where it
+     * would have called execv().  It is not a formality: it applies the forced
+     * command, sets the environment, and chdir()s to the home directory, and
+     * doing any of that here instead would be a second implementation of it.
+     */
+    exec_have_cmd  = 0;
+    exec_capturing = 1;
+    if (setjmp(exec_jump) == 0)
+    {
+        exec_fn(exec_data);
+
+        /* Only reachable if execv() was never called, which means Dropbear
+           gave up before it got there. */
+        exec_capturing = 0;
+        dropbear_log(DB_LOG_WARNING, "amiga: no command to run");
+        return DB_FAILURE;
+    }
+    exec_capturing = 0;
+
+    if (!exec_have_cmd)
+    {
+        dropbear_log(DB_LOG_WARNING,
+                     "amiga: no interactive shell on this machine -- "
+                     "give ssh a command to run");
+        return DB_FAILURE;
+    }
+
+    if (!spawn_outfile(outname, sizeof(outname)))
+    {
+        dropbear_log(DB_LOG_WARNING, "amiga: cannot create an output file");
+        return DB_FAILURE;
+    }
+
+    if (pipe(in) != 0)
+        return DB_FAILURE;
+    if (pipe(out) != 0)
+    {
+        (void)__wrap_close(in[0]); (void)__wrap_close(in[1]);
+        return DB_FAILURE;
+    }
+    if (pipe(err) != 0)
+    {
+        (void)__wrap_close(in[0]);  (void)__wrap_close(in[1]);
+        (void)__wrap_close(out[0]); (void)__wrap_close(out[1]);
+        return DB_FAILURE;
+    }
+
+    /* Only one end of each pair is ever handed out; closing the other is what
+       upstream's parent branch does too, and here it is also what makes the
+       output and stderr pipes report end of file. */
+    (void)__wrap_close(in[0]);
+    (void)__wrap_close(out[1]);
+    (void)__wrap_close(err[1]);
+
+    PIPE_PAIR(in[1])->sink = 1;         /* the command's stdin is NIL: */
+
+    /*
+     * The redirection is written into the command line rather than passed as
+     * SYS_Input/SYS_Output, because the Shell then opens and closes the file
+     * itself -- so it is flushed and complete before System() returns.  A
+     * handle passed in through the tags is closed by System() on some paths and
+     * by the caller on others, and "on some paths" is not good enough for the
+     * file the answer is in.
+     */
+    snprintf(line, sizeof(line), "%s <NIL: >%s", exec_cmd, outname);
+
+    dropbear_log(DB_LOG_INFO, "amiga: running '%s'", exec_cmd);
+    rc = SystemTagList((CONST_STRPTR)line, cmd_tags);
+
+    if (rc == -1)
+    {
+        /* System() could not start a Shell at all -- not the command failing,
+           which comes back as that command's rc with its complaint in the
+           output file.  127 is what a Unix shell reports for the same thing,
+           and it is the only number a client can act on. */
+        dropbear_log(DB_LOG_WARNING, "amiga: could not run a shell (IoErr %ld)",
+                     (long)IoErr());
+        rc = 127;
+    }
+
+    fh = Open((CONST_STRPTR)outname, MODE_OLDFILE);
+    if (fh != (BPTR)0)
+    {
+        struct db_pipe *p = PIPE_PAIR(out[0]);
+
+        p->src = fh;
+        snprintf(p->srcname, sizeof(p->srcname), "%s", outname);
+    }
+    else
+    {
+        /* wclosed above already makes this end of file, so the channel closes
+           cleanly with no output rather than hanging. */
+        dropbear_log(DB_LOG_WARNING, "amiga: cannot read back %s", outname);
+    }
+
+    child_pid    = next_pid++;
+    child_status = (int)((rc & 0xFF) << 8);
+
+    *ret_writefd = in[1];
+    *ret_readfd  = out[0];
+    if (ret_errfd != NULL)
+        *ret_errfd = err[0];
+    if (ret_pid != NULL)
+        *ret_pid = child_pid;
+
+    /*
+     * The child has already exited, so raise SIGCHLD's handler now.  It writes
+     * to ses.signal_pipe, the session loop notices on its next pass and calls
+     * svr_chansess_checksignal(), and waitpid() above hands over the status --
+     * the same sequence a real signal would have produced.  noptycommand() has
+     * not yet called addchildpid(), so the reap lands in svr_ses.lastexit,
+     * which is precisely the race upstream already handles two lines later.
+     */
+    if (sigchld_handler != NULL)
+        sigchld_handler(SIGCHLD);
+
+    return DB_SUCCESS;
 }
 
 /*

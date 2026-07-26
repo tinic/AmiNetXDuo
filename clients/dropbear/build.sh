@@ -85,6 +85,18 @@
 #       clients/dropbear/amiga_dropbear.c answers from src/common/ami_random.c.
 #       Read the entropy note in that file before trusting any of it.
 #
+#   -Wl,--wrap=spawn_command
+#       dbutil.c's spawn_command() is three pipes and a fork(), and it is the
+#       only place Dropbear starts a program.  The AmigaOS answer is
+#       SystemTagList(), which is a different shape entirely, so the whole
+#       function is replaced rather than propped up -- see THE SERVER RUNS A
+#       COMMAND in clients/dropbear/amiga_dropbear.c.
+#
+#       It is wrapped for both programs because there is one link line, and
+#       that is harmless: the client's only caller is -J proxycmd, which
+#       localoptions.h compiles out, so dbclient does not reference the symbol
+#       at all.
+#
 #   --disable-{syslog,shadow,lastlog,utmp,utmpx,wtmp,loginfunc,pututline,pututxline}
 #       There is no system logger and no account database on AmigaOS 3.x.  Left
 #       enabled, configure finds <utmp.h> in the Roadshow NDK -- it is there for
@@ -375,7 +387,7 @@ done
 echo "==> building $PROGRAMS"
 make -C "$OUT" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" \
      PROGRAMS="$PROGRAMS" \
-     LDFLAGS="$AMIGA_CLIENT_LDFLAGS -Wl,--wrap=open,--wrap=read,--wrap=write,--wrap=close$FAST_WRAPS$PROF_WRAPS" \
+     LDFLAGS="$AMIGA_CLIENT_LDFLAGS -Wl,--wrap=open,--wrap=read,--wrap=write,--wrap=close,--wrap=spawn_command$FAST_WRAPS$PROF_WRAPS" \
      LIBS="${SHIM_OBJS[*]} $PROF_LIBS -Wl,--start-group -lamigaclient -lc -Wl,--end-group"
 
 echo
