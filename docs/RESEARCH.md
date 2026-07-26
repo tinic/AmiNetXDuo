@@ -4894,9 +4894,9 @@ multiplies than we do and is still slower, because a fixed window with no zero-s
 reads the whole 64-entry table before every one of its 171 multiplies — 2,048 volatile
 `BN_ULONG` loads a time, about 350,000 per 1024-bit half — where our sliding window
 indexes straight into it. And that is before blinding, which is OpenSSL's default and
-which the benchmark priced separately: **1.59 s, 32% of the operation.** Against the
-default configuration we are 1.38× faster; against the arithmetic alone, 1.07× measured
-and 1.22× corrected.
+which the benchmark priced separately: **1.59 s, 30% of AmiSSL's unblinded operation.**
+Against the default configuration we are 1.38× faster; against the arithmetic alone,
+1.07× measured and 1.22× corrected.
 
 **We win the elliptic curve, and constant time is why again — but much harder.**
 `ossl_ec_wNAF_mul` forces a Montgomery ladder for any scalar that could be secret, and
@@ -4904,9 +4904,10 @@ the benchmark proves the source reading rather than citing it: **setting
 `BN_FLG_CONSTTIME` on the scalar changed `k·G` from 1,047,399 µs to 1,046,628 µs, 0.07%.**
 The flag is ignored because the ladder was already running. 256 steps, one per bit of the
 group order, 13 field multiplies and 7 squarings each, 5,120 field operations whatever the
-scalar — against our comb's 26 doublings and 50 additions. Eleven times. `EC_GROUP_
-have_precompute_mult()` answers **no**, as the source said it would, and it would not help
-if it were yes: the generator case is routed to the ladder before `pre_comp` is consulted.
+scalar — against our comb's 26 doublings and 50 additions. Eleven times.
+`EC_GROUP_have_precompute_mult()` answers **no**, as the source said it would, and it
+would not help if it were yes: the generator case is routed to the ladder before
+`pre_comp` is ever consulted.
 
 ECDSA verify is the honest middle. Both sides run a variable-time wNAF because both
 scalars are public, we issue 12% *fewer* multiplies, and we are 1.69× faster — so about
@@ -4922,11 +4923,12 @@ assembly. HMAC-SHA256 is 183 KB/s against 143, ours ahead by 28%. Encrypting and
 one 16 KiB TLS record costs 172 ms our way and 195 ms AmiSSL's: **92 KB/s against
 81 KB/s** of application data, 13% in our favour.
 
-That row is where §11's `https` figure comes from. 16,464 B/s against `http`'s 114,598 —
-and at 92 KB/s of record processing at 56 MHz, i.e. ~23 KB/s at 14 MHz, the record path
-*is* the https ceiling on this machine. Swapping our bulk crypto for AmiSSL's would move
-it by about a tenth, in the wrong direction. **Nothing in AmiSSL rescues the bulk path,
-because nobody has written AES or SHA-256 assembly for m68k in either tree** — and the
+That row is where §11's `https` figure comes from. `https` measured 16,464 B/s against
+`http`'s 114,598 — and 92 KB/s of record processing at 56 MHz is about 23 KB/s at 14 MHz,
+so the record path accounts for most of that ceiling and everything else in the stack
+shares what is left. Swapping our bulk crypto for AmiSSL's would move it about a tenth,
+in the wrong direction. **Nothing in AmiSSL rescues the bulk path, because nobody has
+written AES or SHA-256 assembly for m68k in either tree** — and the
 1.28× on HMAC says the plainest thing in this whole section: the largest single lever
 available to `https://` on a classic Amiga is still an unwritten 68020 SHA-256.
 
@@ -4970,3 +4972,34 @@ constant-time on the private and ephemeral paths and that is most of what it cos
 ladder, the fixed window, the full-table gather, the blinding. For a vintage machine on a
 LAN (§9's threat model) that is a defence with no attacker, and we already say so in the
 headers of both modules. It is a trade, and it is the trade this project made on purpose.
+
+### 15.9 Sources, and how to run it again
+
+- [jens-maus/amissl](https://github.com/jens-maus/amissl) — tag `5.27`; the OS3 runtime
+  and the SDK are separate release assets, and `crypto/bn/asm/bn_m68k.s` exists only in
+  the source tree, not in either archive.
+- Howard Chu, *M68020 bn_asm*, openssl-dev, 2002 —
+  [marc.info/?l=openssl-dev&m=101407286200398](https://marc.info/?l=openssl-dev&m=101407286200398).
+  The same 1604 lines AmiSSL builds today.
+- MC68020UM / MC68030UM instruction-timing appendices, for the 43/45-cycle `MUL.L` the
+  correction is anchored to.
+
+Reproducing it, from a clean tree:
+
+```
+curl -LO https://github.com/jens-maus/amissl/releases/download/5.27/AmiSSL-5.27-SDK.lha
+curl -LO https://github.com/jens-maus/amissl/releases/download/5.27/AmiSSL-5.27-OS3.lha
+lha x AmiSSL-5.27-SDK.lha ; lha x AmiSSL-5.27-OS3.lha
+bsdtar xf aros-amiga-m68k.iso Libs/mathieeedoub{bas,trans}.library   # into build/amissl-mathlibs/
+
+cmake -S . -B build/cm-tls -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
+      -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_TLS=ON \
+      -DAMINETXDUO_AMISSL_SDK=<where>/AmiSSL/Developer
+cmake --build build/cm-tls --parallel --target crypto68k_amissl
+
+AMINETXDUO_AMISSL_OS3=<where>/AmiSSL ./tools/amissl-run.sh -t 2400 -k 56
+```
+
+`-k 56` is a shakedown clock; the ratios are clock-independent and the corrected column
+is derived from a `t_mulu` measured in the same run, so it holds at 14 MHz too. Drop the
+`-k` for A1200 absolutes and budget roughly four times the wall clock.
