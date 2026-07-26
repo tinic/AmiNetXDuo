@@ -670,8 +670,17 @@ static LONG fetch_run(VOID)
 
         if (u.secure && tbase == NULL)
         {
-            tbase = OpenLibrary((CONST_STRPTR)TLS_LIB_NAME,
-                                (ULONG)TLS_LIB_VERSION);
+            /*
+             * VERSION 1, not TLS_LIB_VERSION, because 1 is what this command
+             * uses: TLSOpen, TLSWrite, TLSRead, TLSClose, TLSInfo and
+             * TLSErrorString are all original vectors.  Asking for the
+             * constant would mean a recompile silently demanded a newer
+             * library than the transfer needs, and a user with a working
+             * older pair would lose https: for nothing.  ti_Resumed is a
+             * version-2 TLSInfo field and is handled by zeroing the structure
+             * below, which is what makes asking for 1 safe rather than lucky.
+             */
+            tbase = OpenLibrary((CONST_STRPTR)TLS_LIB_NAME, 1UL);
             if (tbase == NULL)
             {
                 tool_error("https: needs LIBS:tls.library, and there is none");
@@ -787,6 +796,20 @@ static LONG fetch_run(VOID)
             if (!st.quiet)
             {
                 struct TLSInfo info;
+                UBYTE         *info_bytes = (UBYTE *)&info;
+                ULONG          i;
+
+                /*
+                 * Zeroed first, and that is load-bearing rather than tidy.
+                 * This command opens tls.library with version 1, so it can be
+                 * talking to a library that predates ti_Resumed -- which will
+                 * fill the fields it knows about and leave the rest untouched.
+                 * Uninitialised stack would then decide whether this prints
+                 * "(resumed session)".  Zeroed, an older library simply says
+                 * no, which is the truth: it cannot resume.
+                 */
+                for (i = 0; i < (ULONG)sizeof(info); i++)
+                    info_bytes[i] = 0;
 
                 info.ti_Size = (ULONG)sizeof(info);
                 if (TLSInfo(tbase, io.tls, &info) == 0)

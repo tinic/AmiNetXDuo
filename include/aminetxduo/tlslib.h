@@ -132,8 +132,66 @@ extern "C" {
 #endif
 
 #define TLS_LIB_NAME        "tls.library"
-#define TLS_LIB_VERSION     1
+
+/*
+ * THE VERSION IS THE VECTOR LEVEL, AND THE RULE IS ABSOLUTE
+ *
+ *   ADDING A VECTOR MEANS BUMPING TLS_LIB_VERSION.  Full stop, no exceptions,
+ *   not even for "nobody will call it yet".
+ *
+ *   Exec opens a library when lib_Version >= the version asked for and does
+ *   not look at anything else.  So a library that grew a vector without
+ *   growing its version still answers OpenLibrary(TLS_LIB_NAME, 1) -- and the
+ *   caller, compiled against the newer header, jumps to an offset that library
+ *   never had.  MakeLibrary() stopped at the (APTR)-1 terminator, so the jump
+ *   table simply is not that long: the jump goes into whatever happens to be
+ *   in front of the base, on a machine with no memory protection.  Version 2
+ *   shipped one call away from exactly that.
+ *
+ *   Get it right and the standard mechanism does the work.  A program that
+ *   needs TLSBuffered() asks for 2 and is refused by an older library, which
+ *   is a legible failure at OpenLibrary() rather than a wild jump later.  A
+ *   program that only needs the original eight keeps asking for 1 and keeps
+ *   working against every version since.
+ *
+ *   ASK FOR WHAT YOU USE, not for TLS_LIB_VERSION.  Passing the constant means
+ *   recompiling makes your program demand a library it does not need.
+ *
+ * REVISION
+ *
+ *   Zero, and it stays zero.  bsdsocket.library and usergroup.library report
+ *   revision 0 for the same reason: nothing in this project reads a revision,
+ *   and a number nobody reads is a number that goes stale.
+ *
+ * VERSION HISTORY
+ *
+ *   1   TLSOpenA TLSClose TLSRead TLSWrite TLSPending TLSInfo
+ *       TLSErrorString TLSWaitSelect
+ *   2   + TLSRandom, TLSBuffered.  Also the version at which TLSInfo() began
+ *       filling ti_Resumed, ti_Resumable and ti_SessionsCached -- see the note
+ *       on ti_Size, which is what makes asking version 1 for those fields
+ *       safe rather than merely unlucky.
+ */
+#define TLS_LIB_VERSION     2
 #define TLS_LIB_REVISION    0
+
+/*
+ * How many user vectors each version has, and the ONE place that fact is
+ * written down.  TLS_LIB_VECTORS is DERIVED from TLS_LIB_VERSION rather than
+ * maintained beside it, and src/tlslib/tls_vectors.c asserts the real table
+ * against it at build time.
+ *
+ * That is what turns the rule above from a comment into a mechanism: add a
+ * vector to the table and the build fails, and the only way to make it pass is
+ * to declare a TLS_LIB_VECTORS_V<n> and point TLS_LIB_VERSION at it.  You
+ * cannot get a new vector into a shipped library without the version moving.
+ */
+#define TLS_LIB_VECTORS_V1  8
+#define TLS_LIB_VECTORS_V2  10
+
+#define TLS_LIB_VECTORS_FOR_(v) TLS_LIB_VECTORS_V##v
+#define TLS_LIB_VECTORS_FOR(v)  TLS_LIB_VECTORS_FOR_(v)
+#define TLS_LIB_VECTORS         TLS_LIB_VECTORS_FOR(TLS_LIB_VERSION)
 
 /* Opaque.  One per connection, allocated by TLSOpen and freed by TLSClose. */
 struct TLSConnection;
@@ -237,7 +295,18 @@ struct TLSConnection;
 
 struct TLSInfo
 {
-    ULONG   ti_Size;            /* set to sizeof(struct TLSInfo) before the call */
+    /*
+     * Set to sizeof(struct TLSInfo) before the call.
+     *
+     * ZERO THE WHOLE STRUCTURE FIRST if you opened the library with a version
+     * older than the one you compiled against.  ti_Size lets an OLD caller
+     * talk to a new library; the other direction -- a new caller talking to an
+     * old library -- is you asking for fields it has never heard of, and it
+     * will fill what it knows and leave the rest of your stack alone.  Zeroed,
+     * an older library's silence reads as FALSE and 0, which is the truth.
+     * Uninitialised, it reads as whatever was on the stack.
+     */
+    ULONG   ti_Size;
 
     ULONG   ti_Version;         /* 0x0303 == TLS 1.2                          */
     ULONG   ti_CipherSuite;     /* the negotiated suite, IANA number          */
@@ -259,9 +328,14 @@ struct TLSInfo
     ULONG   ti_RootsLoaded;     /* roots this connection actually parsed      */
 
     /*
-     * Added after the fields above.  Set ti_Size to sizeof(struct TLSInfo) and
+     * Added in library version 2.  Set ti_Size to sizeof(struct TLSInfo) and
      * you get them; a program compiled against the older header passes the
      * older size, gets everything above, and is not broken by this.
+     *
+     * Reading these from a library you opened with version 1 is allowed and is
+     * why the note on ti_Size says to zero the structure: a version-1 library
+     * leaves them untouched, so zero means "this library cannot resume" rather
+     * than whatever the stack happened to hold.
      */
 
     /*
@@ -318,6 +392,7 @@ struct TLSSelect
 
 /* --------------------------------------------------------------- vectors --- */
 
+/* Since version 1. */
 #define TLS_LVO_TLSOpenA        (-30)
 #define TLS_LVO_TLSClose        (-36)
 #define TLS_LVO_TLSRead         (-42)
@@ -326,8 +401,16 @@ struct TLSSelect
 #define TLS_LVO_TLSInfo         (-60)
 #define TLS_LVO_TLSErrorString  (-66)
 #define TLS_LVO_TLSWaitSelect   (-72)
+
+/* Since version 2.  A program calling either of these must open the library
+   with 2, or it will jump past the end of an older library's jump table. */
 #define TLS_LVO_TLSRandom       (-78)
 #define TLS_LVO_TLSBuffered     (-84)
+
+/* The last vector, so a caller that wants to check rather than trust can
+   compare against lib_NegSize.  Opening with the right version is the right
+   answer and this is the belt to its braces. */
+#define TLS_LVO_LAST            TLS_LVO_TLSBuffered
 
 /*
  * Inline stubs.  Hand-written rather than generated from an .fd because there
