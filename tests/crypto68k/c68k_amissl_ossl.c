@@ -204,6 +204,20 @@ void a_ossl_close(void)
 }
 
 
+void a_ossl_touch(void)
+{
+
+BIGNUM *b;
+
+
+    b = BN_new();
+    if (b != NULL)
+    {
+        BN_free(b);
+    }
+}
+
+
 const char *a_ossl_version(void)
 {
 

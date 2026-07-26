@@ -1010,59 +1010,143 @@ UINT    i;
 
 /* =============================================================== summary == */
 
-static VOID a_summary(VOID)
+/*
+ * Row indices, so the composition below names what it adds instead of
+ * summing whatever happened to be flagged.  A handshake is a specific
+ * combination of these and getting it wrong is how a summary drifts away
+ * from the measurements it claims to be made of.
+ */
+static const A_ROW *a_find(const char *prefix)
 {
 
 UINT    i;
-ULONG   ours   = 0UL;
-ULONG   theirs = 0UL;
+UINT    j;
+
+
+    for (i = 0; i < a_row_count; i++)
+    {
+        for (j = 0; prefix[j] != '\0'; j++)
+        {
+            if (a_rows[i].name[j] != prefix[j])
+            {
+                break;
+            }
+        }
+        if (prefix[j] == '\0')
+        {
+            return(&a_rows[i]);
+        }
+    }
+
+    return(NX_CRYPTO_NULL);
+}
+
+static VOID a_compose(const char *what,
+                      const A_ROW *chain, ULONG chain_n,
+                      const A_ROW *kg, const A_ROW *dh)
+{
+
+ULONG   ours;
+ULONG   theirs;
+ULONG   ours_c;
+ULONG   theirs_c;
 ULONG   ratio;
+
+
+    if ((chain == NX_CRYPTO_NULL) || (kg == NX_CRYPTO_NULL) ||
+        (dh == NX_CRYPTO_NULL))
+    {
+        return;
+    }
+
+    ours   = (chain_n * chain -> ours_us)   + kg -> ours_us   + dh -> ours_us;
+    theirs = (chain_n * chain -> theirs_us) + kg -> theirs_us + dh -> theirs_us;
+
+    ours_c = (chain_n * a_corrected(chain -> ours_us, chain -> ours_mulu)) +
+             a_corrected(kg -> ours_us, kg -> ours_mulu) +
+             a_corrected(dh -> ours_us, dh -> ours_mulu);
+    theirs_c = (chain_n * a_corrected(chain -> theirs_us, chain -> theirs_mulu)) +
+               a_corrected(kg -> theirs_us, kg -> theirs_mulu) +
+               a_corrected(dh -> theirs_us, dh -> theirs_mulu);
+
+    if (ours == 0UL || theirs == 0UL)
+    {
+        return;
+    }
+
+    ratio = (theirs >= ours) ? ((theirs * 10UL) / ours)
+                             : ((ours * 10UL) / theirs);
+
+    c68k_log("    %s: ours %lu ms  AmiSSL %lu ms   %s %lu.%lux",
+             (LONG)what, ours / 1000UL, theirs / 1000UL,
+             (LONG)((theirs >= ours) ? "OURS" : "AMISSL"),
+             ratio / 10UL, ratio % 10UL);
+
+    ratio = (theirs_c >= ours_c) ? ((theirs_c * 10UL) / ours_c)
+                                 : ((ours_c * 10UL) / theirs_c);
+
+    c68k_log("      MULU.L-corrected:  ours %lu ms  AmiSSL %lu ms   %s %lu.%lux",
+             ours_c / 1000UL, theirs_c / 1000UL,
+             (LONG)((theirs_c >= ours_c) ? "OURS" : "AMISSL"),
+             ratio / 10UL, ratio % 10UL);
+}
+
+static VOID a_summary(VOID)
+{
+
+const A_ROW    *rsapub;
+const A_ROW    *ecdsa;
+const A_ROW    *ecdh;
+const A_ROW    *kg;
+const A_ROW    *aes;
+const A_ROW    *mac;
+ULONG           ours;
+ULONG           theirs;
 
 
     c68k_log("");
     c68k_log("5. What a client actually pays");
 
+    rsapub = a_find("BN_mod_exp_mont");
+    ecdsa  = a_find("ECDSA P-256 verify");
+    ecdh   = a_find("ECDH P-256 shared");
+    kg     = a_find("k*G");
+    aes    = a_find("AES-128-CBC");
+    mac    = a_find("HMAC-SHA256");
+
     /*
-     * An ECDHE_ECDSA handshake against a two-certificate chain: two ECDSA
-     * verifies for the chain, one for the ServerKeyExchange signature, one
-     * key generation and one shared secret.  Composed from the rows above
-     * rather than from memory, so it cannot drift from what was measured.
+     * The asymmetric half of a TLS 1.2 client handshake against a
+     * two-certificate chain, which is what docs/RESEARCH.md 11.6 costed:
+     * three public-key verifications (leaf, intermediate, ServerKeyExchange
+     * signature), one ephemeral key generation, one shared secret.  Composed
+     * from the rows above rather than from memory.
      */
-    for (i = 0; i < a_row_count; i++)
+    c68k_log("  the asymmetric half of a TLS 1.2 handshake, 2-cert chain:");
+    a_compose("ECDHE_RSA   (3 x RSA-2048 verify + keygen + ECDH)",
+              rsapub, 3UL, kg, ecdh);
+    a_compose("ECDHE_ECDSA (3 x P-256 verify  + keygen + ECDH)",
+              ecdsa, 3UL, kg, ecdh);
+    c68k_log("    (arithmetic only -- no network, no parsing, no framing)");
+
+    /*
+     * And the half that matters for a large transfer.  RESEARCH.md 11 measured
+     * https at 16,464 B/s against http at 114,598 B/s on this machine, so the
+     * record path is worth more per megabyte than the handshake is per
+     * connection.
+     */
+    if ((aes != NX_CRYPTO_NULL) && (mac != NX_CRYPTO_NULL))
     {
-        if (a_rows[i].counted != 1u)
-        {
-            continue;
-        }
+        ours   = aes -> ours_us   + mac -> ours_us;
+        theirs = aes -> theirs_us + mac -> theirs_us;
 
-        c68k_log("    %-36s ours %8lu us  AmiSSL %8lu us",
-                 (LONG)a_rows[i].name, a_rows[i].ours_us,
-                 a_rows[i].theirs_us);
-
-        ours   += a_rows[i].ours_us;
-        theirs += a_rows[i].theirs_us;
-    }
-
-    if ((ours != 0UL) && (theirs != 0UL))
-    {
-        if (theirs >= ours)
+        c68k_log("");
+        c68k_log("  the record path, one 16 KiB TLS record encrypted and MACed:");
+        c68k_log("    ours %lu us, AmiSSL %lu us", ours, theirs);
+        if ((ours != 0UL) && (theirs != 0UL))
         {
-            ratio = (theirs * 10UL) / ours;
-            c68k_log("    handshake-shaped total: ours %lu ms, "
-                     "AmiSSL %lu ms  = OURS %lu.%lux",
-                     ours / 1000UL, theirs / 1000UL,
-                     ratio / 10UL, ratio % 10UL);
+            c68k_log("    = ours %lu KB/s, AmiSSL %lu KB/s of application data",
+                     a_kbs(ours), a_kbs(theirs));
         }
-        else
-        {
-            ratio = (ours * 10UL) / theirs;
-            c68k_log("    handshake-shaped total: ours %lu ms, "
-                     "AmiSSL %lu ms  = AMISSL %lu.%lux",
-                     ours / 1000UL, theirs / 1000UL,
-                     ratio / 10UL, ratio % 10UL);
-        }
-        c68k_log("    (one of each primitive, NOT a whole handshake -- "
-                 "no network, no parsing, no framing)");
     }
 }
 
@@ -1174,6 +1258,11 @@ ULONG   start;
         return(20);
     }
     c68k_log("  InitAmiSSL (per-process OpenSSL 3.x init): %lu ms",
+             c68k_eclock_millis(c68k_eclock() - start));
+
+    start = c68k_eclock();
+    a_ossl_touch();
+    c68k_log("  first OpenSSL call (its lazy provider/DRBG init): %lu ms",
              c68k_eclock_millis(c68k_eclock() - start));
 
     c68k_log("  AmiSSL: %s", (LONG)a_ossl_version());

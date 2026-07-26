@@ -94,28 +94,55 @@ for f in "$STAGE/libs/amisslmaster.library" "$STAGE/libs/AmiSSL"/*.library; do
 done
 echo "    CPU build: 68020-40 (the one with bn_m68k.s; the 68060 build has none)"
 
-# AmiSSL is built against clib2, whose startup initialises the IEEE math
-# libraries, and Kickstart 3.1's ROM contains mathieeesingbas and nothing else
-# (verified against the 40.68 A1200 image, docs/RESEARCH.md 11.2).  Every
-# Workbench install has mathieeedoubbas.library in LIBS: and a bare directory
-# hard drive does not, so stage one if we can find it.  Same search as
-# clients/curl/run-fsuae.sh.
-MATH="${AMINETXDUO_MATHIEEEDOUBBAS:-}"
-if [ -z "$MATH" ]; then
+# ------------------------------------------------------- the math libraries --
+#
+# AmiSSL is built against clib2, whose startup opens the IEEE math libraries,
+# and Kickstart 3.1's ROM contains mathieeesingbas and NOTHING ELSE (verified
+# against the 40.68 A1200 image, docs/RESEARCH.md 11.2).  A bare directory hard
+# drive has none of the others.
+#
+# Two are needed, not one, and the second one cost an afternoon: AmiSSL's own
+# `OpenSSL` command staged with only mathieeedoubbas.library prints
+# "mathieeedoubtrans.library could not be opened." and exits 20.  That is the
+# loud version of the failure.  The quiet version is what
+# amissl_v362.library's own LibInit does with the same missing library, which
+# is to sit there -- the benchmark looked hung for a quarter of an hour before
+# this probe was run.
+#
+# They must be a MATCHED PAIR.  Measured, with AmiSSL's own `OpenSSL` command
+# as the probe: a stock mathieeedoubbas.library beside the AROS
+# mathieeedoubtrans.library still reports "mathieeedoubtrans.library could not
+# be opened"; both from the AROS m68k boot ISO and the command gets all the way
+# to its own "Couldn't open bsdsocket.library v4!", which is that command's
+# requirement and not AmiSSL's.  So build/amissl-mathlibs/ holds the AROS pair
+# and is searched first.
+#
+# Getting them: the AROS m68k boot ISO carries all four in Libs/, and
+# `bsdtar xf aros-amiga-m68k.iso Libs/mathieeedoub*.library` extracts them.
+# Not vendored here -- they are somebody else's binaries.
+MATH_MISSING=0
+for lib in mathieeedoubbas mathieeedoubtrans; do
+    src=""
     for candidate in \
-        "$ROOT/build/mathieeedoubbas.library" \
-        "$HOME/amigaos/libs/mathieeedoubbas.library"
+        "${AMINETXDUO_MATHLIBS:-}/$lib.library" \
+        "$ROOT/build/amissl-mathlibs/$lib.library" \
+        "$ROOT/build/$lib.library" \
+        "$HOME/amigaos/libs/$lib.library"
     do
-        [ -f "$candidate" ] && { MATH="$candidate"; break; }
+        case "$candidate" in /*.library) ;; *) continue ;; esac
+        [ -f "$candidate" ] && { src="$candidate"; break; }
     done
-fi
-if [ -n "$MATH" ]; then
-    cp "$MATH" "$STAGE/libs/"
-    echo "    mathieeedoubbas.library staged from $MATH"
-else
-    echo "    WARNING: no mathieeedoubbas.library staged; clib2's math init"
-    echo "             may fail inside AmiSSL.  Set AMINETXDUO_MATHIEEEDOUBBAS."
-fi
+    if [ -n "$src" ]; then
+        cp "$src" "$STAGE/libs/"
+        printf '    %-28s %8d bytes (from %s)\n' \
+            "$lib.library" "$(wc -c < "$src")" "$src"
+    else
+        echo "    WARNING: no $lib.library found -- AmiSSL's clib2 startup"
+        echo "             will not complete.  Set AMINETXDUO_MATHLIBS."
+        MATH_MISSING=1
+    fi
+done
+[ "$MATH_MISSING" = "0" ] || echo "    (the run will hang rather than fail; see the comment in this script)"
 
 # C68K_AMISSL is read with GetVar(), which reads ENV:.  The harness backs ENV:
 # with a staged env/ directory.

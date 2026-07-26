@@ -34,6 +34,16 @@ int         a_ossl_open_ssl(char *err, unsigned long err_len);
 int         a_ossl_init_ssl(char *err, unsigned long err_len);
 void        a_ossl_close(void);
 
+/*
+ * One trivial OpenSSL call -- BN_new() and BN_free().
+ *
+ * OpenSSL 3.x initialises itself lazily, on first use, not at InitAmiSSL: the
+ * default provider, the property cache and the DRBG chain are all built behind
+ * the first API call anyone makes.  Timing that call on its own keeps a
+ * one-off cost out of whichever benchmark happened to be first.
+ */
+void        a_ossl_touch(void);
+
 /* "OpenSSL 3.6.2 ..." from the library itself, never from a header constant --
    the point is to record what actually ran. */
 const char *a_ossl_version(void);
