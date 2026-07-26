@@ -194,8 +194,22 @@
 /* NetX Duo's listen queue depth for a bound port. */
 #define BSD_MAX_BACKLOG          8
 
-/* TCP receive window, sized for the 68020/4 MB floor. */
+/*
+ * TCP receive window.
+ *
+ * This is the number a bulk transfer is actually limited by, and it was
+ * measured rather than reasoned about -- see tests/trace/. On loopback the
+ * sender held exactly one 4096-byte segment in flight against a 4096-byte
+ * advertised window, 100% of it, and waited 14.9 ms (median) between
+ * segments; over the wire it reached 7200 bytes against 8192, 88%. In neither
+ * case was the CPU, the link or the periodic tick the thing in the way.
+ *
+ * -D it to experiment; ami_bsd_tcp_window() is what sockets actually get, and
+ * it takes this as the FLOOR rather than the answer.
+ */
+#ifndef BSD_TCP_WINDOW
 #define BSD_TCP_WINDOW        8192
+#endif
 
 /* Room for one dotted quad plus terminator, used by Inet_NtoA(). */
 #define BSD_NTOA_BUFLEN         16

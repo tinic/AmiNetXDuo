@@ -140,6 +140,46 @@
  */
 #define NX_ENABLE_EXTENDED_NOTIFY_SUPPORT
 
+/*
+ * ACK EVERY SECOND FULL-SIZED SEGMENT (RFC 1122, 4.2.3.2).
+ *
+ * NetX Duo does not do this by default -- NX_TCP_ACK_EVERY_N_PACKETS is not
+ * defined anywhere in the vendored tree, so the whole `need_ack` block in
+ * nx_tcp_socket_state_data_check.c is compiled out and the rule is simply
+ * absent.  What is left is two triggers, and NEITHER of them is per-segment:
+ *
+ *   1. a window-update ACK, sent only once the receive window has re-opened
+ *      by HALF OF nx_tcp_socket_rx_window_default
+ *      (nx_tcp_socket_state_data_check.c:1135, nx_tcp_socket_receive.c:212);
+ *   2. the 200 ms delayed-ACK timer.
+ *
+ * So the interval between acknowledgements is PROPORTIONAL TO THE WINDOW, and
+ * when the application cannot consume half a window inside 200 ms the timer
+ * becomes the pacer.  That makes the obvious tuning knob actively harmful:
+ * measured in tests/trace/ on the A1200 profile, 524288 bytes over the wire,
+ * raising the receive window from 8 KB to 32 KB and changing nothing else
+ *
+ *      161 KB/s -> 89 KB/s,        ACK delay p50 6.7 ms -> 71.4 ms
+ *                                  p90 8.7 ms -> 187.4 ms
+ *                                  26 of 59 ACKs in the 200 ms delayed bucket
+ *                                  a 14-deep run of duplicate ACKs
+ *                                  one 1361 ms gap between data segments
+ *
+ * with ZERO retransmissions throughout -- nothing was lost, the sender was
+ * simply waiting.  With this defined the same 32 KB build returns to
+ * 179 KB/s and ACK delay p50 2.0 ms, 148 of 208 ACKs inside 2 ms.
+ *
+ * At the current 8 KB window it changes throughput by ~0% -- half of 8192 is
+ * already about three segments -- but it cuts ACK latency from a 6.7 ms
+ * median to 2.0 ms, which is what every request/response exchange pays
+ * (HTTP, DNS, and each leg of a TLS handshake), and it removes the trap.
+ *
+ * Cost: one ULONG per NX_TCP_SOCKET (already in the struct, already
+ * initialised by nx_tcp_socket_create.c:154) and one comparison per received
+ * data segment.
+ */
+#define NX_TCP_ACK_EVERY_N_PACKETS              2
+
 
 /* ------------------------------------------------------------- SOCK_RAW -- */
 

@@ -56,6 +56,16 @@ if(NOT AMINETXDUO_SANA2_PROBE_RAW)
     add_compile_definitions(AMI_SANA2_PROBE_RAW=0)
 endif()
 
+# The TCP receive window floor, in bytes.  Exists so that "is the window the
+# limiter?" can be answered by building two libraries out of one tree and
+# measuring, which is how tests/trace/ settled it -- see the note on
+# BSD_TCP_WINDOW in src/bsdsocket/bsdsocket_internal.h.  Empty keeps the
+# built-in floor.
+set(AMINETXDUO_TCP_WINDOW "" CACHE STRING "TCP receive window floor in bytes")
+if(NOT AMINETXDUO_TCP_WINDOW STREQUAL "")
+    add_compile_definitions(BSD_TCP_WINDOW=${AMINETXDUO_TCP_WINDOW})
+endif()
+
 # ami_log() verbosity: 0 = errors only ... 4 = trace. Empty keeps compat.c's
 # own default (WARN in release, DEBUG when AMINETXDUO_DEBUG is set).
 set(AMINETXDUO_LOG_LEVEL "" CACHE STRING "Override ami_log() verbosity (0..4)")

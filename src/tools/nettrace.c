@@ -34,6 +34,8 @@
 
 #include "toolsock.h"
 
+#include <stdarg.h>
+
 const char *const tool_name = "NetTrace";
 
 static const char version_tag[] __attribute__((used)) =
@@ -190,6 +192,26 @@ static LONG nt_bpf_data_waiting(struct Library *base, LONG channel)
     return res;
 }
 
+/*
+ * Every line is flushed as it is written.
+ *
+ * VPrintf() goes through dos.library's buffer, and a diagnostic tool that
+ * loses its last twenty lines because the machine had to be killed is not a
+ * diagnostic tool.  This is also the only progress indicator there is: a
+ * megabyte at 14 MHz takes seconds, and a run that has stopped and a run that
+ * is working look identical without it.
+ */
+static VOID nt_say(const char *fmt, ...)
+{
+    va_list args;
+
+    va_start(args, fmt);
+    VPrintf((CONST_STRPTR)fmt, (APTR)args);
+    va_end(args);
+
+    Flush(Output());
+}
+
 /* ------------------------------------------------------------ pcap output */
 
 /*
@@ -321,6 +343,18 @@ static UWORD nt_get16(const UBYTE *p)
     return (UWORD)(((UWORD)p[0] << 8) | (UWORD)p[1]);
 }
 
+/*
+ * STATIC, and it has to be.
+ *
+ * NtCap embeds NtOut, which embeds a 16 KB write buffer, and an AmigaDOS
+ * Shell command runs on a 4 KB stack by default -- a SystemTagList() child
+ * gets whatever the parent had and nobody here calls SetStackSize().  As a
+ * local in main() this overran the stack into whatever was below it and the
+ * machine took an F-line trap (#8000000B) and reset, three commands into a
+ * run, with no message: the crash was in code that had nothing to do with the
+ * overwrite.  There is one of these per process and the process is
+ * single-threaded, so static costs nothing and removes the class of bug.
+ */
 typedef struct NtCap
 {
     struct Library *base;
@@ -482,6 +516,9 @@ static BOOL nt_cap_start(NtCap *cap, struct Library *base, const char *iface,
 
     (VOID)nt_bpf_ioctl(base, cap->channel, BIOCFLUSH_, NULL);
 
+    nt_say("capture: channel 0 on %s, %lu byte buffers, snaplen %lu\n",
+           (LONG)iface, (LONG)cap->buflen, (LONG)snaplen);
+
     return TRUE;
 }
 
@@ -505,7 +542,7 @@ static VOID nt_cap_stop(NtCap *cap)
 
     nt_out_close(&cap->out);
 
-    tool_printf("capture: %lu records written, %lu bytes, "
+    nt_say("capture: %lu records written, %lu bytes, "
                 "%lu seen, %lu dropped by the channel, %lu short reads\n",
                 (LONG)cap->out.records, (LONG)cap->out.bytes,
                 (LONG)st.bs_recv, (LONG)st.bs_drop, (LONG)cap->short_reads);
@@ -536,6 +573,9 @@ static VOID nt_cap_stop(NtCap *cap)
 #define NT_CHUNK    4096
 
 static UBYTE nt_buf[NT_CHUNK];
+
+/* See the note on NtCap: 16 KB of write buffer cannot live on a 4 KB stack. */
+static NtCap nt_cap;
 
 typedef struct NtResult
 {
@@ -845,8 +885,8 @@ static VOID nt_report(const char *what, const NtResult *r)
 
     if (r->ticks == 0)
     {
-        tool_printf("%s: %lu bytes in under a millisecond\n", (LONG)what,
-                    (LONG)r->bytes);
+        nt_say("%s: %lu bytes in under a millisecond\n", (LONG)what,
+               (LONG)r->bytes);
         return;
     }
 
@@ -855,7 +895,7 @@ static VOID nt_report(const char *what, const NtResult *r)
     rate = (r->bytes / r->ticks) * 1000UL +
            ((r->bytes % r->ticks) * 1000UL) / r->ticks;
 
-    tool_printf("%s: %lu bytes in %lu ms = %lu bytes/s (%lu KB/s)%s\n",
+    nt_say("%s: %lu bytes in %lu ms = %lu bytes/s (%lu KB/s)%s\n",
                 (LONG)what, (LONG)r->bytes, (LONG)r->ticks, (LONG)rate,
                 (LONG)(rate / 1024UL), (LONG)(r->ok ? "" : "  INCOMPLETE"));
 }
@@ -865,7 +905,6 @@ int main(int argc, char **argv)
     LONG            args[ARG_COUNT];
     struct RDArgs  *rda;
     struct Library *base;
-    NtCap           cap;
     NtResult        result;
     const char     *out;
     const char     *iface;
@@ -914,6 +953,8 @@ int main(int argc, char **argv)
     if (args[ARG_PORT] != 0)
         port = (UWORD)(*(LONG *)args[ARG_PORT]);
 
+    nt_say("NetTrace: opening bsdsocket.library\n");
+
     base = tool_socket_open();
     if (base == NULL)
     {
@@ -934,12 +975,12 @@ int main(int argc, char **argv)
         }
     }
 
-    cap.open = FALSE;
-    cap.out.fh = 0;
+    nt_cap.open = FALSE;
+    nt_cap.out.fh = 0;
 
-    if (capture && !nt_cap_start(&cap, base, iface, out, snaplen, blen))
+    if (capture && !nt_cap_start(&nt_cap, base, iface, out, snaplen, blen))
     {
-        nt_cap_stop(&cap);
+        nt_cap_stop(&nt_cap);
         CloseLibrary(base);
         FreeArgs(rda);
         return RETURN_ERROR;
@@ -947,19 +988,19 @@ int main(int argc, char **argv)
 
     if (wire)
     {
-        tool_printf("NetTrace: GET %s from %lu.%lu.%lu.%lu port %lu, "
+        nt_say("NetTrace: GET %s from %lu.%lu.%lu.%lu port %lu, "
                     "capturing %s\n", (LONG)path,
                     (LONG)((address >> 24) & 0xFF), (LONG)((address >> 16) & 0xFF),
                     (LONG)((address >> 8) & 0xFF), (LONG)(address & 0xFF),
                     (LONG)port, (LONG)(capture ? iface : "nothing"));
-        nt_wire(base, &cap, address, port, path, &result);
+        nt_wire(base, &nt_cap, address, port, path, &result);
         nt_report("wire", &result);
     }
     else
     {
-        tool_printf("NetTrace: %lu bytes over 127.0.0.1, capturing %s\n",
-                    (LONG)bytes, (LONG)(capture ? iface : "nothing"));
-        nt_loopback(base, &cap, bytes, &result);
+        nt_say("NetTrace: %lu bytes over 127.0.0.1, capturing %s\n",
+               (LONG)bytes, (LONG)(capture ? iface : "nothing"));
+        nt_loopback(base, &nt_cap, bytes, &result);
         nt_report("loopback", &result);
     }
 
@@ -967,7 +1008,7 @@ int main(int argc, char **argv)
         rc = RETURN_WARN;
 
     if (capture)
-        nt_cap_stop(&cap);
+        nt_cap_stop(&nt_cap);
 
     CloseLibrary(base);
     FreeArgs(rda);

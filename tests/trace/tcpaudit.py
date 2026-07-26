@@ -137,6 +137,7 @@ class Side:
         self.max_dupack_run = 0
         self.win_min = None
         self.win_max = 0
+        self.win_last = 0
         self.zero_windows = 0
         self.mss = None
         self.sizes = defaultdict(int)
@@ -146,6 +147,10 @@ class Side:
         self.ack_run = 0
         self.pure_acks = 0
         self.ack_delays = []
+        self.max_inflight = 0
+        self.inflight_at_win = 0        # peer's advertised window at that moment
+        self.gaps = []                  # idle time before each data segment
+        self.last_data_ts = None
         self.syn = 0
         self.fin = 0
         self.rst = 0
@@ -193,12 +198,26 @@ def audit(path, top=6):
         if flags & FLAG_RST:
             side.rst += 1
 
+        side.win_last = win
         side.win_max = max(side.win_max, win)
         side.win_min = win if side.win_min is None else min(side.win_min, win)
         if win == 0 and not (flags & FLAG_RST):
             side.zero_windows += 1
 
         if paylen > 0:
+            # Unacknowledged bytes at the moment this segment left, against
+            # the window the OTHER side had advertised. When these two are
+            # equal the sender is stalled ON THE WINDOW and nothing else --
+            # not the CPU, not the link, not the tick.
+            if other.last_ack is not None:
+                flight = (seq + paylen - other.last_ack) & 0xFFFFFFFF
+                if flight < (1 << 31) and flight > side.max_inflight:
+                    side.max_inflight = flight
+                    side.inflight_at_win = other.win_last
+            if side.last_data_ts is not None:
+                side.gaps.append(ts - side.last_data_ts)
+            side.last_data_ts = ts
+
             side.segments += 1
             side.bytes += paylen
             side.sizes[paylen] += 1
@@ -211,7 +230,8 @@ def audit(path, top=6):
             flow["data_at"][a].append((seq + paylen, ts))
             if side.highest is None or seq + paylen > side.highest:
                 side.highest = seq + paylen
-        elif flags & FLAG_ACK and not (flags & (FLAG_SYN | FLAG_FIN | FLAG_RST)):
+        if (flags & FLAG_ACK) and paylen == 0 and \
+                not (flags & (FLAG_SYN | FLAG_FIN | FLAG_RST)):
             side.pure_acks += 1
             if side.last_ack is not None and ack == side.last_ack:
                 side.dupacks += 1
@@ -269,6 +289,17 @@ def audit(path, top=6):
             flag = "  <-- LOSS" if side.retrans else ""
             print("      retransmitted %d segments, %d bytes%s"
                   % (side.retrans, side.retrans_bytes, flag))
+            if side.max_inflight:
+                pct = (100.0 * side.max_inflight / side.inflight_at_win
+                       if side.inflight_at_win else 0.0)
+                note = "  <-- WINDOW-LIMITED" if pct >= 95.0 else ""
+                print("      max bytes in flight %d against a %d window (%.0f%%)%s"
+                      % (side.max_inflight, side.inflight_at_win, pct, note))
+            if side.gaps and not synthetic:
+                g = sorted(side.gaps)
+                n = len(g)
+                print("      gap before a data segment ms: p50 %.1f  p90 %.1f  max %.1f"
+                      % (g[n // 2] * 1000, g[int(n * 0.9)] * 1000, g[-1] * 1000))
             print("      pure ACKs %d, duplicate %d, longest run %d"
                   % (side.pure_acks, side.dupacks, side.max_dupack_run))
             if side.ack_delays and not synthetic:
