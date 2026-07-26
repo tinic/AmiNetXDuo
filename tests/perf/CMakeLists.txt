@@ -62,6 +62,38 @@ endif()
 endif() # CMAKE_CROSSCOMPILING
 
 
+# ------------------------------------------------------- the bracket probe --
+#
+# What one tx_amiga_adopt_thread()/tx_amiga_orphan_thread() pair costs, and
+# what a recv() costs with and without one.  Unlike perf_test above it needs
+# nothing of net68k's checksum hook, so it builds on every profile.
+#
+#   cmake --build build/cm --parallel --target bracket_test
+#   AMINETXDUO_RUN_TAG=brk ./tools/fsuae-run.sh -x -t 900 -m A1200 \
+#       build/cm/tests/perf/bracket_test
+#
+# Read the header of bracket_test.c before quoting anything it prints -- and
+# only the 68020 profiles mean anything, for the reason cpucal.c measures.
+
+if(CMAKE_CROSSCOMPILING)
+
+    add_executable(bracket_test bracket_test.c)
+    target_link_libraries(bracket_test PRIVATE netxduo_port aminetxduo_common)
+    set_target_properties(bracket_test PROPERTIES OUTPUT_NAME "bracket_test")
+
+    if(AMIGA_NDK_INCLUDE)
+        target_include_directories(bracket_test PRIVATE "${AMIGA_NDK_INCLUDE}")
+    endif()
+
+    if(AMIGA_SIZE)
+        add_custom_command(TARGET bracket_test POST_BUILD
+            COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:bracket_test>"
+            COMMENT "bracket_test size")
+    endif()
+
+endif()
+
+
 # ------------------------------------------------------- calibration probe --
 #
 # cpucal answers the question every other number in this directory depends on:
