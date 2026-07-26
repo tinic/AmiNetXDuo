@@ -161,6 +161,47 @@ for cmd in "${CMDS[@]}"; do
 done
 chmod 755 "$TREE"/C/* "$TREE"/Libs/*
 
+# The ported Unix clients, when they have been built. Optional, because they
+# come from clients/ rather than the CMake tree and a plain `cmake --build`
+# produces neither. They go in their own drawer rather than into C:, because
+# each needs something a user has to provide -- mathieeedoubbas.library, which
+# is Commodore's and not ours to ship, and a far larger stack than a Shell
+# gives a command -- and a `curl` in C: that fails on both would be worse than
+# one that is clearly a separate thing.
+CLIENT_CURL="$ROOT/build/curl-tls/src/curl"
+CLIENT_SSH="$ROOT/build/dropbear/dbclient"
+if [ -x "$CLIENT_CURL" ] || [ -x "$CLIENT_SSH" ]; then
+    mkdir -p "$TREE/Clients"
+    [ -x "$CLIENT_CURL" ] && { cp "$CLIENT_CURL" "$TREE/Clients/curl"; \
+        echo "==> including curl ($(wc -c < "$CLIENT_CURL" | tr -d ' ') bytes)"; }
+    [ -x "$CLIENT_SSH" ]  && { cp "$CLIENT_SSH" "$TREE/Clients/ssh"; \
+        echo "==> including ssh ($(wc -c < "$CLIENT_SSH" | tr -d ' ') bytes)"; }
+    chmod 755 "$TREE"/Clients/*
+    cat > "$TREE/Clients/ReadMe" <<'CLIENTEOF'
+These are ports of ordinary Unix programs, not commands we wrote. They are
+here rather than in C: because each needs something this archive cannot
+provide for you.
+
+  curl   fetches http:// and https:// URLs.
+  ssh    connects to an SSH server. It is Dropbear's dbclient under another
+         name. Public-key and password authentication both work; a connection
+         takes roughly ten seconds while the machine does the cryptography.
+
+Both need:
+
+  * mathieeedoubbas.library in LIBS:. It is Commodore's, so it is not in this
+    archive, but every Workbench installation has it.
+
+  * a much bigger stack than a Shell gives a command. Type
+
+        stack 200000
+
+    once in the Shell you are going to run them from.
+
+Copy them into C: yourself if you would like them on your path.
+CLIENTEOF
+fi
+
 # The installer prints its version in the about text; stamp it from the same
 # source as everything else rather than shipping whatever the source tree last
 # had in it.
