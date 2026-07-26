@@ -4001,10 +4001,15 @@ loaded once, and the second ran on whatever the first left behind. `TLSRead()` w
 dereferencing a stale pointer and taking its own `conn == NULL` branch.
 
 `tls_api` escaped it by accident — different register pressure, so GCC reloaded anyway.
-**Every caller of this header had the bug**, including the curl vtls backend, and it is the
-leading candidate for the one-off `ecc256.badssl.com` resumption failure reported against
-`f535728` (see §13.8). Fixed by marking them `"+r"`; the reload appears in the
-disassembly, and `tls_api` went from 24 checks/1 failure back to **26/0**.
+Fixed by marking them `"+r"`; the reload appears in the disassembly, and `tls_api` went
+from 24 checks/1 failure back to **26/0**.
+
+**It looked like the explanation for the curl backend's one-off `ecc256` failure and it is
+not.** That agent rebuilt with and without the `"+r"` constraints and got **byte-identical
+object files**, because its stub callers reload the connection pointer from memory every
+time, so there was no load for the compiler to eliminate. The fix is still right — that
+code was correct by the accident of its shape rather than by the constraint that should
+have guaranteed it — but it explains nothing about the 61.6 s. See §13.8.
 
 Two things this says beyond the fix. A hand-written inline stub is ABI-critical code and
 should be read as such — the register assignment appears in exactly two places
@@ -4063,14 +4068,16 @@ Three additions, all optional:
 |---|---|
 | `TLSA_NoResume` (BOOL) | do not offer a cached session and do not remember this one |
 | `TLSA_SessionFile` (STRPTR) | mirror somewhere other than `DEVS:Internet/tlssessions`; an empty string means RAM only |
-| `TLSInfo()` | gains `ti_Resumed`, `ti_Resumable`, `ti_SessionsCached` |
+| `TLSInfo()` | gains `ti_Resumed`, `ti_Resumable`, `ti_SessionsCached` (library version 2) |
 
 `struct TLSInfo` grew, and `ti_Size` is what makes that safe: a caller compiled against the
 older header passes the older size and gets every field it knows about. `TLS_INFO_SIZE_V1`
 is 40 — **not 44, because `BOOL` on classic AmigaOS is a SHORT** — and the library asserts
 that number against the real offset at build time rather than trusting the arithmetic.
 
-Two more vectors were added for the curl backend, neither related to resumption:
+Two more vectors were added for the curl backend, neither related to resumption. **Both
+are library version 2**, and a program calling either must open with 2 — see the version
+note below, which is where that nearly went wrong:
 
 - **`LONG TLSRandom(struct Library *base, APTR buffer, LONG length)`**, LVO **-78**,
   `a0` = buffer, `d0` = length, `a6` = base, returns bytes written or -1. Puts the
@@ -4091,6 +4098,44 @@ Two more vectors were added for the curl backend, neither related to resumption:
   is the same bound `TLSA_Timeout` already caps. Kept separate from `TLSPending()` rather
   than folded in, because the two answers mean different things and a caller that conflates
   them will call `TLSRead()` and block where it meant to poll.
+
+#### The version bump those two vectors needed, and did not get until it was pointed out
+
+`TLSRandom` and `TLSBuffered` went into the vector table while `TLS_LIB_VERSION` stayed at
+1. **Exec opens a library when `lib_Version >= the version asked for` and looks at nothing
+else**, so `OpenLibrary("tls.library", 1)` would have handed an older library to a caller
+compiled against the newer header — and `MakeLibrary()` stopped at the `(APTR)-1`
+terminator, so the jump table is not that long. The jump lands in whatever is in front of
+the base, on a machine with no memory protection. Caught by the curl backend agent, which
+had already defended itself with a `lib_NegSize` check.
+
+**Version 2, revision 0.** The revision convention is the one `bsdsocket.library` and
+`usergroup.library` already follow and it is worth stating because it looks like laziness
+and is not: nothing in this project reads a revision, and a number nobody reads goes
+stale. Those two report *version* 4 because 4 is the AmiTCP/Roadshow level applications
+pass to `OpenLibrary()` — fixed by an external compatibility contract, as
+`include/aminetxduo/version.h.in` says in as many words. `tls.library`'s ABI is ours, so
+its version is simply its vector level and moves when the table does.
+
+**The rule is now a build failure rather than a comment**, which is the part worth
+copying elsewhere. `TLS_LIB_VECTORS` is *derived* from `TLS_LIB_VERSION` by token
+pasting — `TLS_LIB_VECTORS_V1` is 8, `TLS_LIB_VECTORS_V2` is 10 — and
+`src/tlslib/tls_vectors.c` asserts the real table length against it. Add a vector and the
+build stops; the only way to make it pass is to declare a `TLS_LIB_VECTORS_V<n>` and point
+`TLS_LIB_VERSION` at it, which puts the version constant under your cursor at the moment
+you need to change it. A second assertion ties `TLS_LVO_LAST` to the same table so a
+caller checking `lib_NegSize` checks the right offset. **Both were verified to fire**, by
+setting the version back to 1 and watching the build stop — a guard that has never been
+seen to fail is not a guard.
+
+**`fetch` asks for 1, not `TLS_LIB_VERSION`**, because 1 is what it uses: every vector it
+calls is original. Asking for the constant would mean a recompile silently demanded a
+newer library than the transfer needs, and a user with a working older pair would lose
+`https:` for nothing. It zeroes its `TLSInfo` before the call so `ti_Resumed` — a
+version-2 field — reads FALSE against a version-1 library instead of reading the stack.
+That is the general rule and the header now states it: **`ti_Size` lets an old caller talk
+to a new library; a new caller talking to an old one has to zero the structure**, because
+the old library will fill what it knows and leave the rest of your stack alone.
 
 ### 13.8 What was measured, and what was not
 
@@ -4119,12 +4164,17 @@ replaced rather than left to fail forever.
 
 **`TLSA_NoResume`, proved.** Full handshake with a valid session sitting in the cache.
 
-**The one-off `ecc256.badssl.com` failure reported against `f535728` did not reproduce.**
-Two cross-process attempts against that host resumed in 0.5 s, and the in-process test
-resumes it every run. The leading candidate is §13.5 — the curl backend compiles the same
-inline stubs, and a call made with a stale `a0`/`a1` is exactly the shape of a failure that
-takes *longer* than not trying. That is a hypothesis, not a diagnosis; it is worth
-re-measuring on a backend rebuilt against the fixed header before anyone hunts further.
+**The one-off `ecc256.badssl.com` failure reported against `f535728` is closed, and it was
+never a library bug.** It did not reproduce here — two cross-process attempts resumed in
+0.5 s and the in-process test resumes it every run — and the register bug in §13.5 turned
+out not to explain it either, because the backend compiles byte-identically with and
+without the fix. It is now believed to have been a `tls.library` built from an uncommitted
+working tree. Against `e42db07` that host gives 23.27 s cold and then 0.58 s and 0.58 s
+resumed over three separate processes, all HTTP 200.
+
+Worth keeping as a process note rather than a technical one: **a measurement taken against
+an unbuilt-from-a-commit binary is not a measurement**, and two agents chased it for a
+while on the strength of a plausible mechanism that happened to be in the right area.
 
 **Not measured, and worth saying:** how long a Cloudflare ticket actually stays good on
 this path (the hint is 64,800 s and nothing here has waited that long); whether an
