@@ -7411,45 +7411,78 @@ Every one of those numbers came out of the running `NX_IP` through `NetStackQuer
 Before this work each of those five commands printed *"the network is up, but this
 command cannot read it"* and exited 5. **`netstat` and `ShowNetStatus` are verified.**
 
-**`ping` is not.** In both runs it hung: the command produced no output at all and the
-emulator run hit its timeout with `ping`'s section of the transcript containing only the
-header `ToolsSmoke` prints before starting it. Two things are known and worth separating
-from what is not:
+**`ping` is not.** It does not merely fail — **it takes the machine down, and the machine
+comes back up and does it again.** That is the finding, and it took three runs and a
+correction to see it.
 
-* The ICMP loop is **not** where it hangs. Both the inner receive loop and the outer
-  probe loop are bounded — the first by a deadline computed before the first
-  `WaitSelect`, the second by `COUNT` — so neither can be the thing that never returns.
-* The first run's shape was consistent with the reverse lookup that turns a typed
-  address into a name: `gethostbyaddr()` reaches `netstack_resolve_reverse()` with
-  `BSD_RESOLVE_TIMEOUT`, **thirty seconds** (`src/bsdsocket/resolver.c:18`), retried per
-  configured name server, against a server that need not answer a PTR query at all — and
-  FS-UAE's SLIRP does not answer them.
+The symptom in the transcript is a command that produces no output and a run that ends on
+its timeout. That reads as a hang, and it was recorded as one twice before the boot
+counter was looked at:
 
-That second point led to a change that is right on its own merits and was made for its
-own reasons: **a lookup that can cost thirty seconds must not run before the first packet
-leaves**, which is the one place a ping cannot be slow, and the reward is a cosmetic
-change to one line of output. `ping` now reads `DEVS:Internet/hosts` and nothing else —
-instant, correct with no name server at all, and where the names on a small network
-actually are.
+| run | commands in the list | `netstack: starting ThreadX` in the serial log |
+|---|---|---|
+| `pingtrace` | `AddNetInterface`, one `ping` | **6** |
+| `livetools` | the full list | **10** |
+| `livecheck` | the full list plus `host` | **14** |
 
-**It did not fix the hang.** The second run, with the DNS query gone, hung in the same
-place. So the thirty-second reverse lookup is a real defect of the stack — *any* command
-that reverse-resolves an address can block that long per name server, and
-`ShowNetStatus NAMES` and `host` both do — but it is **not** the cause of this one, and
-saying otherwise would be exactly the mistake this section exists to stop being made.
+One boot starts the stack once. The guest is restarting, `ToolsSmoke` opens
+`DH0:tools.txt` afresh each time it starts, and the file therefore truncates and refills
+to exactly the same point on every pass — which is why watching its length shows it
+shrink from 184 lines to 75 and climb back, and why the instrumented `ping` printed its
+trace three times for a list that contains one `ping`.
 
-What is left, by elimination, is the code between opening the library and the first
-`WaitSelect`: `tool_socket_open()`, `tool_sock_resolve()` on a dotted quad, the host-table
-lookup, `socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)`, and `ami_millis()`. `traceroute`
-reaches the wire through the same helpers and completes (§20.3), which narrows it further
-— the two commands differ in the host-table lookup, and in nothing else that runs before
-the loop. **This is not yet measured.** A build carrying `AMI_INFO` traces at each of
-those points, which write to the serial port unbuffered and so survive a command that
-never exits, is the next step and is the way to find it; the transcript cannot help,
-because the Shell buffers a command's output until it exits and a command that never
-exits therefore prints nothing wherever it stopped.
+**Where it stops is measured.** `AMI_INFO` writes to the serial port unbuffered, which is
+the only way to see inside a command that never exits — the Shell holds a command's stdout
+until it terminates, so a command that dies prints nothing wherever it got to:
 
-Until that measurement exists, **`ping` must not be described as working.**
+```
+    pingtrace: opening the library
+    pingtrace: library open, resolving
+    pingtrace: resolved 0A000202, opening a raw socket
+    pingtrace: raw socket 0
+    pingtrace: entering the loop
+    pingtrace: send 64 seq 0
+    pingtrace: sendto returned 64
+    pingtrace: select left=200
+    pingtrace: select returned 1
+    pingtrace: recvfrom
+    <the machine restarts>
+```
+
+Every stage before the read is fine: the library opens, the raw socket opens, the echo
+request is built and `sendto()` returns the full 64 bytes. `WaitSelect()` then reports the
+descriptor readable, and **the `recvfrom()` that follows never returns**. In the blocking
+build it went into `bsd_raw_receive()`'s `tx_semaphore_get(TX_WAIT_FOREVER)` with
+`as_RawHead` empty — so `select()` and the queue disagreed. Making the descriptor
+non-blocking (`FIONBIO`) so the read cannot suspend **did not fix it**, which rules the
+blocking wait out as the whole story and puts the fault inside the raw receive path
+itself.
+
+That path is `src/bsdsocket/raw.c` and `src/bsdsocket/transfer.c`. `bsd_recv_raw()` does
+check its packet for `NX_NULL` and answers `EWOULDBLOCK`, so the obvious null dereference
+is not it. Finding the rest belongs with whoever owns those files, and the two facts to
+hand over are: `select()` reports a raw descriptor readable when `bsd_raw_receive()` will
+find nothing queued, and the read that follows takes the machine down.
+
+`traceroute` reaches the wire through the same helpers and completes (§20.3), so this is
+not "raw sockets do not work" — it is something narrower, and the difference between the
+two commands is the place to start.
+
+**Until that is fixed, `ping` must not be described as working, and should not be shipped
+at all**: a command that reboots the machine is worse than the one that printed "the
+network is up, but this command cannot read it".
+
+**The `NUMERIC` change stands on its own** and is not part of this. A reverse lookup
+through `gethostbyaddr()` costs `BSD_RESOLVE_TIMEOUT` — thirty seconds
+(`src/bsdsocket/resolver.c:18`), retried per name server, against a server that need not
+answer a PTR query, and FS-UAE's SLIRP does not. That is spent *before the first packet
+leaves*, which is the one place a ping cannot be slow, for a cosmetic change to one line
+of output; `ping` reads `DEVS:Internet/hosts` instead. It was the first explanation
+offered for the hang and it was **wrong** — the run with the DNS query already gone
+behaved identically — and that is recorded here rather than quietly dropped, because a
+wrong cause in this document is worse than an open question. The thirty seconds remain a
+real property of the stack that any command reverse-resolving an address will pay, and
+`ShowNetStatus NAMES` and `host` both do.
 
 ### 22.9 The check that stops a new command guruing on an old library
 

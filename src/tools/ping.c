@@ -399,6 +399,51 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
+    /*
+     * NON-BLOCKING, and this is not belt-and-braces -- it is the only correct
+     * way to use a descriptor that has been through select().
+     *
+     * MEASURED, on an A1200 with the A2065 on SLIRP, with AMI_INFO traces on
+     * the serial port because a command that never exits never flushes its
+     * stdout:
+     *
+     *     pingtrace: send 64 seq 0
+     *     pingtrace: sendto returned 64
+     *     pingtrace: select left=200
+     *     pingtrace: select returned 1
+     *     pingtrace: recvfrom
+     *     <nothing, for the rest of the run>
+     *
+     * WaitSelect() said the socket was readable and the recvfrom() that
+     * followed suspended forever: bsd_raw_receive() found as_RawHead empty
+     * and went into tx_semaphore_get(TX_WAIT_FOREVER). Three emulator runs,
+     * every one identical, and the command never returned -- so ping hung and
+     * took the whole test run's timeout with it.
+     *
+     * Whatever makes those two disagree lives in src/bsdsocket/raw.c and
+     * select.c and is not this command's to fix. But select() readiness is
+     * advisory in every stack there has ever been -- the packet can be taken
+     * by another reader, or dropped by a checksum test, between the poll and
+     * the read -- so a program that blocks on the strength of it is relying
+     * on a guarantee no socket API offers. FIONBIO makes the read return
+     * EWOULDBLOCK instead, the deadline below does its job, and a stack that
+     * loses a reply costs one "Request timed out" line rather than the
+     * command.
+     */
+    {
+        LONG nonblock = 1;
+
+        if (tool_sock_ioctl(sb, sock, TOOL_FIONBIO, &nonblock) != 0)
+        {
+            tool_error("this stack will not set non-blocking mode: %s",
+                       (LONG)tool_sock_errstr(tool_sock_errno(sb)));
+            (VOID)tool_sock_close(sb, sock);
+            CloseLibrary(sb);
+            FreeArgs(rda);
+            return RETURN_FAIL;
+        }
+    }
+
     tool_sock_addr(&to, target, 0);
 
     /*
