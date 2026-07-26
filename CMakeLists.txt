@@ -80,6 +80,21 @@ if(NOT AMINETXDUO_TCP_WINDOW STREQUAL "")
                             BSD_TCP_WINDOW_CEILING=${AMINETXDUO_TCP_WINDOW})
 endif()
 
+# RFC 1323 window scaling.  OFF, and measured rather than assumed -- the note
+# in port/netxduo-amiga/inc/nx_user.h says what it changes (nothing this stack
+# can reach) and what it costs (NetX Duo's own guard against a window larger
+# than this machine can carry).  docs/RESEARCH.md 28.2.
+#
+# It is an option for the same reason AMINETXDUO_TCP_WINDOW above is: "what
+# does it cost and what does it buy?" is answerable only by building libraries
+# out of ONE tree that differ in this alone, and this is how those arms were
+# taken.  It changes the layout of NX_TCP_SOCKET, so it cannot be a per-target
+# define.
+option(AMINETXDUO_TCP_WINDOW_SCALING "Offer the RFC 1323 window scale option" OFF)
+if(AMINETXDUO_TCP_WINDOW_SCALING)
+    add_compile_definitions(AMINETXDUO_TCP_WINDOW_SCALING)
+endif()
+
 # ami_log() verbosity: 0 = errors only ... 4 = trace. Empty keeps compat.c's
 # own default (WARN in release, DEBUG when AMINETXDUO_DEBUG is set).
 set(AMINETXDUO_LOG_LEVEL "" CACHE STRING "Override ami_log() verbosity (0..4)")
