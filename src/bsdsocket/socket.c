@@ -239,8 +239,14 @@ static AmiSocket *bsd_socket_alloc(struct AmiSocketBase *base,
     sock->as_Domain   = domain;
     sock->as_Type     = type;
     sock->as_Protocol = protocol;
-    sock->as_Flags    = (type == SOCK_STREAM) ? ASF_TCP : ASF_UDP;
     sock->as_Ttl      = (LONG)NX_IP_TIME_TO_LIVE;
+
+    switch (type)
+    {
+        case SOCK_STREAM: sock->as_Flags = ASF_TCP; break;
+        case SOCK_RAW:    sock->as_Flags = ASF_RAW; break;
+        default:          sock->as_Flags = ASF_UDP; break;
+    }
 
     /*
      * The version tag has to be set even though ami_alloc() cleared the block:
@@ -308,6 +314,16 @@ static BOOL bsd_socket_destroy(AmiSocket *sock)
     {
         nx_packet_release(sock->as_RxPending);
         sock->as_RxPending = NULL;
+    }
+
+    if ((sock->as_Flags & ASF_RAW) != 0)
+    {
+        /* No NetX Duo object to delete: raw.c owns the queue and the filter
+           registration, and both go here. */
+        bsd_raw_close(sock);
+        sock->as_Flags |= ASF_DELETED;
+
+        return TRUE;
     }
 
     if ((sock->as_Flags & ASF_TCP) != 0)
@@ -653,12 +669,35 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
         return bsd_fail(SocketBase, AMI_EAFNOSUPPORT);
 #endif
 
-    if (type != SOCK_STREAM && type != SOCK_DGRAM)
+    if (type != SOCK_STREAM && type != SOCK_DGRAM && type != SOCK_RAW)
         return bsd_fail(SocketBase, AMI_ESOCKTNOSUPPORT);
 
-    if (protocol != 0 &&
-        protocol != ((type == SOCK_STREAM) ? IPPROTO_TCP : IPPROTO_UDP))
+    if (type == SOCK_RAW)
+    {
+        /*
+         * IPv4 only, and the protocol number is mandatory.
+         *
+         * Mandatory because it is the demultiplex key: raw.c matches an
+         * inbound datagram's IP protocol byte against it, and it is also what
+         * goes into the header of everything the socket sends. BSD reports
+         * EPROTONOSUPPORT for socket(AF_INET, SOCK_RAW, 0) for the same
+         * reason.
+         *
+         * NOT EACCES. bsdsocktest skips this test when it sees EACCES, which
+         * on an OS with no privilege model would be a lie -- and there is
+         * nothing to skip now that it works.
+         */
+        if (domain != AF_INET)
+            return bsd_fail(SocketBase, AMI_EAFNOSUPPORT);
+
+        if (protocol <= 0 || protocol > 255)
+            return bsd_fail(SocketBase, AMI_EPROTONOSUPPORT);
+    }
+    else if (protocol != 0 &&
+             protocol != ((type == SOCK_STREAM) ? IPPROTO_TCP : IPPROTO_UDP))
+    {
         return bsd_fail(SocketBase, AMI_EPROTONOSUPPORT);
+    }
 
     sock = bsd_socket_alloc(SocketBase, (UWORD)domain, (UWORD)type, protocol);
     if (sock == NULL)
@@ -670,7 +709,18 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
         return bsd_fail(SocketBase, AMI_ENETDOWN);
     }
 
-    if (type == SOCK_STREAM)
+    if (type == SOCK_RAW)
+    {
+        if (bsd_raw_open(SocketBase, sock) != 0)
+        {
+            bsd_nx_leave(SocketBase);
+            ami_free(sock);
+            return -1;                  /* bsd_raw_open set errno */
+        }
+
+        status = NX_SUCCESS;
+    }
+    else if (type == SOCK_STREAM)
     {
         status = nx_tcp_socket_create(ip, &sock->as_Nx.tcp, bsd_tcp_name,
                                       NX_IP_NORMAL, NX_FRAGMENT_OKAY,
@@ -758,6 +808,16 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
      */
     sock->as_LocalAddr = addr;
     sock->as_LocalPort = port;
+
+    if ((sock->as_Flags & ASF_RAW) != 0)
+    {
+        /* A raw socket has no port and NetX Duo has nothing to bind it to.
+           The address is recorded so getsockname() answers, exactly as the
+           IPv4 note above describes for the transport sockets. */
+        sock->as_Flags |= ASF_BOUND;
+
+        return 0;
+    }
 
     if ((sock->as_Flags & ASF_UDP) != 0)
     {
@@ -1118,6 +1178,16 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
                                UINT port)
 {
     UINT status;
+
+    if ((sock->as_Flags & ASF_RAW) != 0)
+    {
+        /* Same meaning as on a datagram socket: a default destination. */
+        sock->as_PeerAddr = *addr;
+        sock->as_PeerPort = port;
+        sock->as_Flags   |= ASF_CONNECTED;
+
+        return 0;
+    }
 
     if ((sock->as_Flags & ASF_UDP) != 0)
     {

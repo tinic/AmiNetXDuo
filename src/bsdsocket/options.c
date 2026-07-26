@@ -429,6 +429,12 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
             if (bsd_nx_enter(SocketBase) != 0)
                 return bsd_fail(SocketBase, AMI_ENETDOWN);
 
+            if ((sock->as_Flags & ASF_RAW) != 0)
+            {
+                /* One datagram, as on any message socket. */
+                available += bsd_raw_available(sock);
+            }
+            else
             {
                 ULONG queued = 0;
                 UINT  status;

@@ -321,6 +321,7 @@ struct AmiSocketBase
 #define ASF_ORPHANED    (1UL << 19)   /* NX would not delete it; leaked     */
 #define ASF_INET6       (1UL << 20)   /* created with domain AF_INET6       */
 #define ASF_V6ONLY      (1UL << 21)   /* IPV6_V6ONLY; see options.c         */
+#define ASF_RAW         (1UL << 22)   /* SOCK_RAW; see raw.c                */
 
 typedef struct AmiSocket
 {
@@ -398,6 +399,27 @@ typedef struct AmiSocket
     struct AmiSocket       *as_Parent;
     UINT                    as_ListenPort;
     UINT                    as_Backlog;
+
+    /*
+     * SOCK_RAW state (raw.c). A raw socket has no NX_TCP_SOCKET and no
+     * NX_UDP_SOCKET -- as_Nx is unused -- because NetX Duo has no raw socket
+     * object at all: raw reception is an IP-level filter callback shared by
+     * the whole stack, so the queue, the demultiplex and the wakeup are ours.
+     *
+     * as_RawSem is what a blocking recv() suspends on. It cannot be the Exec
+     * signal the rest of the library wakes on: the filter runs on the NetX Duo
+     * IP thread, which is a ThreadX thread and must not touch Exec, and the
+     * receiver is already inside a bsd_nx_enter() bracket where ThreadX
+     * suspension is the correct way to wait (it is what nx_tcp_socket_receive
+     * does). bsd_event_post() still fires as well, so WaitSelect() sees it.
+     */
+    struct AmiSocket       *as_RawNext;     /* raw.c's registry link          */
+    NX_PACKET              *as_RawHead;
+    NX_PACKET              *as_RawTail;
+    ULONG                   as_RawCount;
+    ULONG                   as_RawMax;
+    TX_SEMAPHORE            as_RawSem;
+    BOOL                    as_RawSemOk;
 } AmiSocket;
 
 /* ------------------------------------------------------------- prototypes --
@@ -496,6 +518,31 @@ LONG  bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
 LONG  bsd_getsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
                           LONG optname, APTR optval, socklen_t *optlen);
 #endif /* AMINETXDUO_IPV6 */
+
+/* raw.c -- SOCK_RAW.
+ *
+ * Every one of these must be called inside a bsd_nx_enter() bracket, except
+ * bsd_raw_available() and bsd_raw_source(), which only read.
+ *
+ * bsd_raw_open() registers the socket with the IP-level filter (installing it
+ * on the first raw socket); bsd_raw_close() unregisters it, drains its queue
+ * and removes the filter again when the last one goes.
+ *
+ * bsd_raw_send_packet() hands a packet the caller has already filled to
+ * nxd_ip_raw_packet_send(), which prepends the IP header. The packet is
+ * consumed either way -- released here on failure -- so the caller must not
+ * touch it again.
+ *
+ * bsd_raw_receive() dequeues one whole IP datagram, header included, or NULL.
+ * The caller owns it and must nx_packet_release() it.
+ */
+LONG       bsd_raw_open(struct AmiSocketBase *base, AmiSocket *sock);
+VOID       bsd_raw_close(AmiSocket *sock);
+LONG       bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
+                               NX_PACKET *packet, const NXD_ADDRESS *addr);
+NX_PACKET *bsd_raw_receive(AmiSocket *sock, ULONG wait);
+VOID       bsd_raw_source(NX_PACKET *packet, NXD_ADDRESS *addr);
+ULONG      bsd_raw_available(AmiSocket *sock);
 
 /* select.c -- event plumbing.
  *

@@ -194,6 +194,12 @@ VOID bsd_listen_callback(NX_TCP_SOCKET *socket_ptr, UINT port)
 
 VOID bsd_events_attach(AmiSocket *sock)
 {
+    /* A raw socket has no NetX Duo control block to hang callbacks on: its
+       wakeups come from raw.c's IP-level filter, which calls bsd_event_post()
+       directly. */
+    if ((sock->as_Flags & ASF_RAW) != 0)
+        return;
+
     if ((sock->as_Flags & ASF_TCP) != 0)
     {
         sock->as_Nx.tcp.nx_tcp_socket_reserved_ptr = sock;
@@ -239,6 +245,9 @@ BOOL bsd_readable(AmiSocket *sock)
 
     if (sock->as_RxPending != NULL)
         return TRUE;
+
+    if ((sock->as_Flags & ASF_RAW) != 0)
+        return (sock->as_RawHead != NX_NULL);
 
     if ((sock->as_Flags & ASF_TCP) != 0)
     {
@@ -309,8 +318,8 @@ BOOL bsd_writable(AmiSocket *sock)
     if (sock == NULL)
         return FALSE;
 
-    if ((sock->as_Flags & ASF_TCP) == 0)
-        return TRUE;                    /* a bound UDP socket always takes */
+    if ((sock->as_Flags & (ASF_TCP | ASF_RAW)) != ASF_TCP)
+        return TRUE;                    /* UDP and raw always take a write */
 
     /* A pending non-blocking connect reports completion (or failure) as
      * writability, which is how BSD applications wait for connect(). */

@@ -141,6 +141,39 @@
 #define NX_ENABLE_EXTENDED_NOTIFY_SUPPORT
 
 
+/* ------------------------------------------------------------- SOCK_RAW -- */
+
+/*
+ * What bsdsocket.library's SOCK_RAW is built on (src/bsdsocket/raw.c).
+ *
+ * NX_ENABLE_IP_RAW_PACKET_FILTER adds the `nx_ip_raw_packet_filter` hook to
+ * NX_IP and makes nx_ip_raw_packet_filter_set() something other than a stub
+ * returning NX_NOT_SUPPORTED.
+ *
+ * NX_ENABLE_IP_RAW_PACKET_ALL_STACK is the one that matters, and it is not
+ * documented in nx_user_sample.h -- it appears only in
+ * nx_ip_dispatch_process.c.  Without it the raw hook is consulted ONLY in the
+ * "protocol I do not recognise" branch, after TCP, UDP, ICMP and IGMP have all
+ * been dispatched, so a raw ICMP socket could never see an echo reply and
+ * `ping`, `traceroute` and bsdsocktest tests 3 and 132-136 would be
+ * unreachable by construction.  With it, the filter is called first for every
+ * inbound IP packet, and normal dispatch continues unless the filter claims
+ * the packet.
+ *
+ * Our filter never claims one -- it copies what a raw socket asked for and
+ * declines -- so ICMP echo replies still reach nx_icmp_ping(), echo requests
+ * are still answered, and TCP and UDP are untouched.  It is installed only
+ * while at least one SOCK_RAW descriptor is open, so the per-packet cost on a
+ * machine that has none is a NULL pointer test.
+ *
+ * NX_ENABLE_IP_RAW_PACKET_FILTER changes the layout of NX_IP, so like
+ * NX_ENABLE_IP_PACKET_FILTER below it has to be seen by every translation
+ * unit and therefore lives here rather than on a target.
+ */
+#define NX_ENABLE_IP_RAW_PACKET_FILTER
+#define NX_ENABLE_IP_RAW_PACKET_ALL_STACK
+
+
 /* ---------------------------------------------------------- capture ------ */
 
 /*

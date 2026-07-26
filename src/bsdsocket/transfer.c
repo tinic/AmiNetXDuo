@@ -354,6 +354,54 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     return len;
 }
 
+/*
+ * One raw datagram out.
+ *
+ * The caller writes the protocol payload -- an ICMP message, say -- and
+ * nxd_ip_raw_packet_send() prepends the IP header from the socket's protocol,
+ * TTL and TOS. There is no partial send: a datagram either goes whole or not
+ * at all.
+ */
+static LONG bsd_send_raw(struct AmiSocketBase *base, AmiSocket *sock,
+                         BsdIovCursor *cur, LONG len, const NXD_ADDRESS *addr)
+{
+    NX_PACKET_POOL *pool   = netstack_pool();
+    NX_PACKET      *packet = NX_NULL;
+    ULONG           wait;
+    LONG            filled;
+    UINT            status;
+
+    if (pool == NULL)
+        return bsd_fail(base, AMI_ENETDOWN);
+
+    if (addr->nxd_ip_version != NX_IP_VERSION_V4 ||
+        addr->nxd_ip_address.v4 == 0)
+        return bsd_fail(base, AMI_EDESTADDRREQ);
+
+    wait = bsd_wait_option(sock, sock->as_SndTimeout);
+
+    status = nx_packet_allocate(pool, &packet, NX_IP_PACKET, wait);
+    if (status != NX_SUCCESS)
+        return bsd_fail(base, (status == NX_NO_PACKET)
+                                  ? AMI_EWOULDBLOCK
+                                  : bsd_errno_from_nx(status));
+
+    filled = (len > 0)
+                 ? bsd_packet_append_iov(packet, cur, (ULONG)len, pool, wait)
+                 : 0;
+    if (filled < len)
+    {
+        nx_packet_release(packet);
+        return bsd_fail(base, AMI_EMSGSIZE);
+    }
+
+    /* Consumes the packet either way. */
+    if (bsd_raw_send_packet(base, sock, packet, addr) != 0)
+        return -1;
+
+    return len;
+}
+
 /* ---------------------------------------------------------------- receive -- */
 
 static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
@@ -561,6 +609,86 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
     return (LONG)taken;
 }
 
+/*
+ * One raw datagram in, whole IP header included.
+ *
+ * That is what 4.4BSD delivers on a raw read and what every ping and
+ * traceroute parses; see the header of raw.c. As with UDP, whatever does not
+ * fit the caller's buffers is discarded.
+ */
+static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
+                         BsdIovCursor *cur, LONG len, LONG flags,
+                         struct sockaddr *from, socklen_t *fromlen,
+                         BOOL *truncated)
+{
+    NX_PACKET  *packet;
+    NXD_ADDRESS src;
+    ULONG       length, taken = 0;
+    BOOL        peek = ((flags & MSG_PEEK) != 0);
+
+    if (truncated != NULL)
+        *truncated = FALSE;
+
+    if (sock->as_RxPending != NULL)
+    {
+        packet = sock->as_RxPending;
+    }
+    else
+    {
+        packet = bsd_raw_receive(sock, bsd_wait_option(sock,
+                                                       sock->as_RcvTimeout));
+        if (packet == NX_NULL)
+            return bsd_fail(base, AMI_EWOULDBLOCK);
+    }
+
+    bsd_raw_source(packet, &src);
+
+    length = bsd_packet_len(packet);
+
+    while (taken < length && (LONG)taken < len)
+    {
+        UBYTE *dst   = NULL;
+        ULONG  chunk = bsd_iov_chunk(cur, &dst);
+        ULONG  want, moved = 0;
+
+        if (chunk == 0)
+            break;
+
+        want = length - taken;
+        if (want > chunk)
+            want = chunk;
+        if (want > (ULONG)len - taken)
+            want = (ULONG)len - taken;
+
+        if (nx_packet_data_extract_offset(packet, taken, dst, want, &moved)
+                != NX_SUCCESS || moved == 0)
+            break;
+
+        bsd_iov_advance(cur, moved);
+        taken += moved;
+    }
+
+    if (truncated != NULL && taken < length)
+        *truncated = TRUE;
+
+    if (from != NULL && fromlen != NULL)
+        bsd_sockaddr_put(sock, from, fromlen, &src, 0);
+
+    if (peek)
+    {
+        sock->as_RxPending = packet;
+        sock->as_RxOffset  = 0;
+    }
+    else
+    {
+        sock->as_RxPending = NULL;
+        sock->as_RxOffset  = 0;
+        nx_packet_release(packet);
+    }
+
+    return (LONG)taken;
+}
+
 /* --------------------------------------------------- the shared entry paths */
 
 /*
@@ -579,9 +707,12 @@ static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
     if (bsd_nx_enter(base) != 0)
         return bsd_fail(base, AMI_ENETDOWN);
 
-    result = ((sock->as_Flags & ASF_TCP) != 0)
-                 ? bsd_send_tcp(base, sock, &cur, len, flags)
-                 : bsd_send_udp(base, sock, &cur, len, flags, addr, port);
+    if ((sock->as_Flags & ASF_RAW) != 0)
+        result = bsd_send_raw(base, sock, &cur, len, addr);
+    else if ((sock->as_Flags & ASF_TCP) != 0)
+        result = bsd_send_tcp(base, sock, &cur, len, flags);
+    else
+        result = bsd_send_udp(base, sock, &cur, len, flags, addr, port);
 
     bsd_nx_leave(base);
 
@@ -601,7 +732,12 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
     if (bsd_nx_enter(base) != 0)
         return bsd_fail(base, AMI_ENETDOWN);
 
-    if ((sock->as_Flags & ASF_TCP) != 0)
+    if ((sock->as_Flags & ASF_RAW) != 0)
+    {
+        result = bsd_recv_raw(base, sock, &cur, len, flags, from, fromlen,
+                              truncated);
+    }
+    else if ((sock->as_Flags & ASF_TCP) != 0)
     {
         result = bsd_recv_tcp(base, sock, &cur, len, flags);
         if (result >= 0 && from != NULL && fromlen != NULL)
