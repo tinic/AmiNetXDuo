@@ -12242,11 +12242,11 @@ Traced rather than assumed, and none of them is the pool:
 |---|---|
 | **`transfer.c:294`** `if (sent == 0 && len > 0) return bsd_fail(base, AMI_EWOULDBLOCK);` | **the NetX Duo status is discarded before the decision is made.** Every first-iteration failure of `nx_packet_allocate()` or `nx_packet_data_append()` `break`s out of the loop and lands here, whatever it was. With `NX_WAIT_FOREVER` the reachable ones are `NX_WAIT_ABORTED` (should be `EINTR`) and `NX_POOL_DELETED` (should be `ENOBUFS`) |
 | **`socket.c:1521`** `accept()` maps `NX_NOT_CONNECTED` to `EWOULDBLOCK` | `_nx_tcp_connect_cleanup` sets `NX_NOT_CONNECTED` on a suspended accept whose listener is torn down by another task. A blocking `accept()` then reports `EAGAIN` for a socket that is gone |
-| **`transfer.c:641`** `bsd_recv_raw`: `if (packet == NX_NULL) return bsd_fail(base, AMI_EWOULDBLOCK);` | `bsd_raw_receive()` returns `NX_NULL` when `tx_semaphore_get(wait)` fails for **any** reason, `TX_WAIT_ABORTED` included, and the caller cannot tell which |
+| **`transfer.c:640`** `bsd_recv_raw`: `if (packet == NX_NULL) return bsd_fail(base, AMI_EWOULDBLOCK);` | `bsd_raw_receive()` returns `NX_NULL` when `tx_semaphore_get(wait)` fails for **any** reason, `TX_WAIT_ABORTED` included, and the caller cannot tell which |
 
-`transfer.c:277`, `:332`, `:386` and `oob.c:238`, `:272` carry the same
-unconditional mapping and are unreachable on a blocking socket **only** because
-of §37.1's invariant. None of the eight consults `ASF_NONBLOCK` before
+`transfer.c:277`, `:332`, `:386`, `:452`, `:553` and `oob.c:238`, `:272` carry
+the same unconditional mapping and are unreachable on a blocking socket **only**
+because of §37.1's invariant. None of the ten consults `ASF_NONBLOCK` before
 answering.
 
 The measured control is in the harness: `tests/endurance/` records every errno
