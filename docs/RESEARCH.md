@@ -4235,8 +4235,13 @@ implementation in commercial use for twenty-five years, so its transfers are a
 far better probe than anything written here on purpose — and every failure the
 suite finds is a bug in `bsdsocket.library` until somebody proves otherwise.
 
-**It found one, and it is not a small one:** the SANA-II receive queue was four
-frames deep, and sixteen simultaneous connections lost six of them.
+**It found three.** The SANA-II receive queue was four frames deep and sixteen
+simultaneous connections lost six of them; every last close of the library cost
+fifteen seconds and left a reader thread running on freed memory; and a resumed
+TLS handshake accepts a certificate chain that the trust store it was handed
+would have refused. The first two are fixed here. The third is in
+`src/tlslib/`, which this work does not own, and is reported rather than
+touched.
 
 ### 14.1 What is in the tree
 
@@ -4277,7 +4282,7 @@ its own run would report nothing at all in exactly that case.
 Each result line also carries `AvailMem(MEMF_ANY)`, which is how a leak of a
 few kilobytes per socket becomes a trend somebody can see.
 
-### 14.2 The finding: the SANA-II receive queue was four frames deep
+### 14.2 The first finding: the SANA-II receive queue was four frames deep
 
 `d03_parallel_40` — forty concurrent transfers through curl's multi interface —
 came back `curl: (7) Could not connect` for thirteen of the forty, each after
@@ -4371,7 +4376,7 @@ and `nc`, `ftp` and `fetch` open one connection. A burst of sixteen
 simultaneous connects is what a multi-handle client does on its first line, and
 until curl ran there was no such client here.
 
-### 14.3 Fifteen of the sixteen seconds were the SHUTDOWN
+### 14.3 The second finding: fifteen of the sixteen seconds were the SHUTDOWN
 
 The suite runs `curl --version` twice, once either side of `AddNetInterface`,
 because the first one took sixteen seconds and the reason is not what it looks
@@ -4467,7 +4472,50 @@ command that prints a version string — consistent with the 1.46 s
 were a driver's refusal to honour `AbortIO()`, waited out twice, on every
 command a user typed.
 
-### 14.4 What curl could not break
+### 14.4 The third finding: TLS
+
+#### A resumed handshake ignores the trust store, and the cache is keyed on the host name
+
+Two TLS cases went green when they should have gone red, and the pair of them
+is a security defect rather than a test bug:
+
+| case | trust store offered | expected | got |
+|---|---|---|---|
+| `--cacert DH0:otherstore` | a valid store holding a root that signed **nothing** in the chain | refused (60) | **HTTP 200** |
+| no `--cacert` at all | `DEVS:Internet/certificates`, the real Mozilla set, which has never heard of our test root | refused (60) | **HTTP 200** |
+
+`%{time_appconnect}` says why, and says it unambiguously:
+
+```
+rsa2.test, correct store, cold      5.68 s     full handshake
+rsa2.test, WRONG store              1.64 s     resumed
+rsa2.test, no store at all          0.72 s     resumed
+```
+
+A full RSA handshake on this machine is 5.7 s and a resumed one is under two.
+Both of those connections **resumed a session cached from an earlier case in
+the same group** and therefore verified no certificate at all — which is what
+resumption is for, and exactly the problem: `tls.library` keys its cache on
+`TLSA_HostName` alone, so the trust decision is cached with the session and
+silently reused under a different `--cacert`, or under none.
+
+Cold verification is fine, and the suite proves that separately: an expired
+leaf, a self-signed leaf and a certificate issued to another host are all
+refused with curl's own exit 60 on a cold handshake. It is only the second
+connection that stops checking.
+
+Two things make it worth taking seriously rather than filing as a curiosity.
+The cache is **mirrored to `DEVS:Internet/tlssessions`**, so it survives a
+reboot — §13's headline is that a session seeded once carries across one. And
+`--cacert` is the switch a user reaches for precisely when they do not trust
+the default store, which is the case where being ignored matters most.
+
+**This is not fixed here: `src/tlslib/` is not this work's to change.** The
+suite now asks the question in both orders — `e01`/`e02` before anything has
+talked to that host, `e23`/`e24` after everything has — so a fix can be
+checked without having to remember which case ran first.
+
+### 14.5 What curl could not break
 
 Everything below passed with the body checked byte for byte against the host's
 copy. It is worth listing because a suite that finds one bug and reports
@@ -4508,15 +4556,43 @@ nothing else is not saying much:
   1.9 MB download after three seconds with the connection full — the
   Ctrl-C-equivalent. An ordinary transfer immediately after all of them
   succeeds, which is the case that would have caught a stack left damaged.
-- **Memory.** `AvailMem(MEMF_ANY)` was **9,569,272 bytes at the start of the
-  HTTP group and 9,569,272 at the end of it**, across ~110 transfers, 20
-  separate curl processes and every failure path above. Not "roughly stable":
-  the same number.
+- **Memory.** `AvailMem(MEMF_ANY)` was **9,563,984 bytes at the first case and
+  9,563,776 at the last**, across 124 cases, ~250 transfers, 20 separate curl
+  processes and every failure path above — a drift of 208 bytes. Not "roughly
+  stable": the same number.
 
-### 14.5 Regression cover for the fix
+The score, on the A1200 profile with both fixes in:
 
-The fix is in `src/sana2/`, so both existing tiers were re-run against the
-rebuilt library:
+```
+groups A-D and F (hermetic)      122 passed, 2 failed, 124 cases
+group E (TLS, hermetic)           23 passed, 2 failed,  25 cases
+```
+
+**All four of those failures are real and none of them is a false alarm**, so
+they are listed rather than explained away:
+
+- `e01`/`e02` (or `e23`/`e24` depending on order) — the trust-store defect of
+  §14.4, which is `src/tlslib/`'s to fix.
+- `a44_cookies_send` — **curl does not write its cookie jar on AmigaOS**, and
+  this one is neither ours nor the stack's. `-c DH0:cj.txt` leaves a zero-byte
+  file with no temporary beside it: `Curl_fopen()` truncates the target, fstats
+  it, and then fails somewhere in the write-to-temp-and-rename path. The
+  attribution is settled by the third-party binary of §14.7, which **fails
+  identically** — two curls built independently, one newlib and one clib2,
+  sharing no libc between them, so what they share is curl's own code and an
+  AmigaOS path. `dirslash("DH0:cj.txt")` finds no `/` and yields an empty
+  directory, so the temporary is created relative to a current directory a
+  `System()` child does not usefully have. `open()` and `rename()` both link
+  and are real implementations here, so it is not the §11.2 missing-wrapper
+  problem. It costs the cookie jar, the alt-svc cache and the HSTS cache, all
+  three of which go through that one function.
+- `f07_ftp_active` — see §14.8; the guest listens correctly and the host cannot
+  reach it, because FS-UAE never opens the forward.
+
+### 14.6 Regression cover for the fixes
+
+Both fixes are in `src/sana2/`, so both existing tiers were re-run against the
+library carrying both:
 
 ```
 tests/conformance  LOOPBACK   125 passed, 1 failed, 16 skipped   (unchanged)
@@ -4532,7 +4608,7 @@ the sweep that produced the table above. Note that it only fails on a machine
 whose pool is large enough for the fix to raise the depth — on the 4 MB floor
 the depth stays at 4 and so does the loss.
 
-### 14.6 Somebody else's curl, on our stack
+### 14.7 Somebody else's curl, on our stack
 
 The strongest ABI evidence available is a binary nobody here built, because it
 cannot have been shaped around our quirks. There is one, and it is newer than
@@ -4580,7 +4656,80 @@ opens the library and installs the errno pointer instead, and it also opens
 required" for anything over HTTPS: `util/libs/AmiSSL-v5-OS3.lha` (v5.27) ships
 only `os3-68020` and `os3-68060` copies of `amissl_v362.library`.
 
-### 14.7 What the suite cannot see, said plainly
+#### What it took to get it to the starting line, and what that says
+
+Nothing that stopped it was ours, and both blockers are worth writing down
+because the next ported binary will hit the same two.
+
+**`mathieeedoubtrans.library`.** clib2's startup opens it before `main()` and
+prints `mathieeedoubtrans.library could not be opened.` if it cannot; there is
+no partial mode. Kickstart 3.1's ROM has `mathieeesingbas` and nothing else,
+and this harness boots a bare directory hard drive, so the pair has to be
+staged. They must also be a MATCHED pair — the `.ld.strip` builds out of the
+AmigaOS source tree work together; a `doubbas` from one build and a `doubtrans`
+from another do not. Our own curl is newlib and never asks for `doubtrans`,
+which is exactly why nothing in this tree had needed it until somebody else's
+binary was run.
+
+**A requester with nobody at the keyboard.** AmiSSL is configured
+`OPENSSLDIR=AmiSSL:`, so a binary linked against it asks AmigaDOS for a volume
+that a test rig does not have, and AmigaDOS puts up "Please insert volume
+AmiSSL:" and waits for ever. `CurlCheck` now sets `pr_WindowPtr = -1` on itself
+and passes `NP_WindowPtr` to every command it starts, so a missing assign fails
+instead of hanging. It also makes the `AmiSSL:` assign itself when the
+directory is staged, since a bare boot has no `C:assign` to type it with.
+
+#### What a different entry into the ABI proved
+
+The reason a foreign binary is worth the trouble is that it does not reach our
+library the way ours does. `lib/amigaos.c`'s `Curl_amiga_init()` — the
+`OpenLibrary("bsdsocket.library", 4)` plus `SocketBaseTags(SBTC_ERRNOPTR)` that
+§12.1 calls "the one call that gates the port" — is compiled `#elif
+!defined(USE_AMISSL)`, and their build defines `USE_AMISSL`. **So that function
+is not in their binary at all.** clib2's own networking startup opens the
+library and installs the errno pointer instead, and it opens
+`usergroup.library` besides, which nothing of ours has ever called at runtime.
+Everything above that is identical — `select()` is still `WaitSelect()`,
+`HAVE_FCNTL` is still off, sockets still close with `CloseSocket()` — so this
+is the same ABI entered through a different door, by code neither written nor
+tuned here.
+
+#### And it scores exactly what ours does
+
+```
+curl 8.22.0-DEV (m68k-unknown-amigaos) libcurl/8.22.0-DEV OpenSSL/3.6.2 zlib/1.3.1
+Protocols: dict file ftp ftps gopher gophers http https imap imaps ipfs ipns
+           mqtt mqtts pop3 pop3s rtsp smtp smtps telnet tftp ws wss
+Features: alt-svc HSTS HTTPS-proxy libz SSL threadsafe
+```
+
+| groups A–D and F, 124 cases | passed | failed |
+|---|---|---|
+| our curl 8.21.0 + `amitls` (newlib) | **122** | 2 |
+| Aminet curl 8.22.0-DEV (clib2, AmiSSL) | **122** | 2 |
+
+**The same two, and neither of them is the stack**: `a44_cookies_send`, which
+fails identically on both and is therefore curl's own AmigaOS path handling
+rather than anybody's libc; and `f07_ftp_active`, which FS-UAE cannot deliver
+(§14.8). Every other case — 1,200,000-byte bodies checked byte for byte,
+4,096 one-byte chunked writes, a 60 KB header line, 40-way concurrency through
+the multi interface, twenty separate processes, a peer that RESETs mid-body,
+another that accepts and never speaks, an FTP upload read back and compared —
+passes on a binary nobody here built.
+
+`AvailMem` over the 124 cases went 6,114,048 → 6,062,448. That is not a trend:
+it is two steps of about 25 KB in the first two dozen cases and then a flat
+line for the remaining hundred, which is AmiSSL's 3.5 MB library and its
+allocations settling, not a leak. (Ours drifts 208 bytes over the same run,
+because it has no AmiSSL to load.)
+
+**So the "crashes most of the time with Roadshow TCP" report is not reproduced
+and its diagnosis was wrong.** Nothing crashed. The version it referred to is
+three releases old, the port's own changelog attributes those crashes to a
+16 KB default stack that it raised to 32 KB, and both readmes of the era
+already claimed Roadshow worked.
+
+### 14.8 What the suite cannot see, said plainly
 
 - **It cannot distinguish our stack from FS-UAE's SLIRP** except by inference.
   The 40-way finding was pinned down because the host's accept count and the
@@ -4596,10 +4745,18 @@ only `os3-68020` and `os3-68060` copies of `amissl_v362.library`.
   is a documentation case, not a pass/fail one.
 - **Nothing here tests IPv6**, because `AMINETXDUO_IPV6` is off in the shipping
   stack and curl is built with `ENABLE_IPV6=OFF` to match.
-- **The FTP active-mode case depends on `uae_slirp_redir`**, so it is testing
-  our `bind`/`listen`/`accept` through a NAT hole rather than on an open
-  network. That is the same accommodation `tests/tools/run-nettools.sh` makes
-  and it is documented there.
+- **Active-mode FTP cannot pass under FS-UAE 3.2.35, and it is the emulator
+  rather than us.** `f07_ftp_active` fails with curl's exit 10 and the server's
+  425. The Amiga does its half correctly — the peer log records
+  `PORT 10,0,2,15,27,249`, so the guest bound port 7161, listened, and
+  advertised its own address — and the host then cannot reach it. Checked from
+  the side rather than inferred: with the emulator running and
+  `uae_slirp_redir = tcp:7260:7260` through `tcp:7263:7263` all accepted by the
+  config parser (`set option "slirp_redir" ... (result: 1)`, four times, in
+  FS-UAE's own log), **`lsof` shows nothing listening on any of those ports**.
+  This is the same wall §12 hit with `uae_slirp_ports` and conformance test 41:
+  SLIRP is a NAT and this build of FS-UAE opens no inbound path. The capability
+  itself is covered on loopback by `tests/clients` groups D, E, I and M.
 
 ## 15. crypto68k against AmiSSL, on the same machine (2026-07-25)
 

@@ -80,6 +80,15 @@ HOST = "10.0.2.2"
 GUEST = "10.0.2.15"
 
 
+# NOTHING HERE ASSERTS ON curl's STDERR TEXT, AND THAT IS DELIBERATE.
+#
+#   AmigaDOS `>>file` redirects standard output only.  Our curl is newlib,
+#   whose stderr lands on the same handle, so its `curl: (7) ...` lines are
+#   captured; a clib2-built curl keeps stderr separate and its diagnostics go
+#   to the console instead, where nothing can read them.  Two assertions on
+#   that text were the only cases a third-party binary failed for a reason
+#   that was neither its fault nor the stack's.  The exit code already says
+#   exactly the same thing and says it for every build.
 class Case:
     def __init__(self, name, group, cmd, rc=0, w=None, body=None,
                  contains=None, absent=None, note=None, internet=False):
@@ -375,14 +384,13 @@ def build(base, curl, cacert="--cacert DH0:teststore"):
 
     add("c01_refused", "C",
         '%s -sS -o DH0:d/c01.bin -w "%s" "http://%s:%d/hello"'
-        % (curl, WFMT, HOST, base + 99), rc=7,
-        contains="curl: (7)")
+        % (curl, WFMT, HOST, base + 99), rc=7)
     add("c02_refused_loopback", "C",
         '%s -sS -o DH0:d/c02.bin -w "%s" "http://127.0.0.1:%d/hello"'
         % (curl, WFMT, base + 99), rc=7)
     add("c03_dns_nxdomain", "C",
         '%s -sS -o DH0:d/c03.bin -w "%s" "http://no.such.host.invalid/"'
-        % (curl, WFMT), rc=6, contains="curl: (6)",
+        % (curl, WFMT), rc=6,
         note="needs a resolver that answers; without one it still fails with "
              "(6), just slowly")
     add("c04_truncated_body", "C",
