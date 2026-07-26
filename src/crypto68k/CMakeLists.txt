@@ -65,6 +65,13 @@ else()
         "${NX_CRYPTO_ROOT}/src/nx_crypto_cbc.c"
         "${NX_CRYPTO_ROOT}/src/nx_crypto_sha2.c"
         "${NX_CRYPTO_ROOT}/src/nx_crypto_hmac.c"
+        # nx_crypto_aes.c's method dispatch reaches CCM, GCM and XCBC even
+        # when nothing calls them, so a standalone archive that omits them
+        # does not link.  Compiling vendored sources is not modifying them.
+        "${NX_CRYPTO_ROOT}/src/nx_crypto_ccm.c"
+        "${NX_CRYPTO_ROOT}/src/nx_crypto_gcm.c"
+        "${NX_CRYPTO_ROOT}/src/nx_crypto_xcbc_mac.c"
+        "${NX_CRYPTO_ROOT}/src/nx_crypto_ctr.c"
         "${NX_CRYPTO_ROOT}/src/nx_crypto_ec.c"
         "${NX_CRYPTO_ROOT}/src/nx_crypto_ecdh.c"
         "${NX_CRYPTO_ROOT}/src/nx_crypto_ecdsa.c"
