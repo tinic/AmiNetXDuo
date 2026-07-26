@@ -9843,3 +9843,414 @@ no-password case something the user has to write down explicitly, and the fact t
 listening reported by `ShowNetStatus` so a machine cannot be left open by accident. None of
 that is expensive, and all of it is much cheaper before the handler exists than after.
 
+
+## 31. `ssh` from an Amiga (2026-07-26)
+
+Upstream Dropbear, unpatched, cross-built for m68k AmigaOS 3.x, opening an
+outbound SSH connection through our `bsdsocket.library` and running a command on
+a real server. Read from the emulated 14 MHz A1200, `clients/dropbear/
+run-fsuae.sh`:
+
+```
+--- SYS:dbclient -V
+Dropbear v2026.94
+--- rc 0, 0.22 s
+
+--- SYS:dbclient -T -y -y -i DH0:id_amiga -p 2222 turo@10.0.2.2 "echo AMIGA-SSH-OK; uname -a; date"
+SYS:dbclient: Caution, skipping hostkey check for 10.0.2.2
+AMIGA-SSH-OK
+Darwin Mac.local 25.5.0 Darwin Kernel Version 25.5.0: … arm64
+Sun Jul 26 13:30:35 PDT 2026
+--- rc 0, 96.06 s
+```
+
+`curve25519-sha256`, host key `ssh-ed25519`, `chacha20-poly1305@openssh.com`
+both directions, public-key authentication with an ed25519 key — the modern
+default suite, negotiated with a **stock OpenSSH 10.2** that knows nothing about
+this client and was given no compatibility settings. The binary is 331,220 bytes
+(278 KB text), against curl's 899,048.
+
+**Nothing in `third_party/dropbear` is patched.** There is no counterpart to
+`clients/curl/curl-amitls.patch`; the whole port is one C file, two shim
+headers, a `localoptions.h` and the flags in `clients/dropbear/build.sh`.
+Dropbear is MIT (with public-domain libtomcrypt/libtommath and two 2-clause BSD
+files from OpenSSH), which suits this tree's licensing throughout.
+
+### 31.1 What Dropbear needed that curl did not
+
+curl was easy for a reason that is easy to miss: **curl already knows this
+platform.** `lib/curl_setup.h` knows a socket is not a file descriptor here,
+that `close()` is `CloseSocket()`, that `fcntl()` must not touch a socket and
+that `select()` is `WaitSelect()`. §11.7 predicted wget would be harder because
+it knows none of that. Dropbear is in wget's position — `grep -ril amiga src/`
+finds nothing — and this is what that costs.
+
+Everything **compiled**. The whole gap arrived as one link error list, 36
+symbols:
+
+```
+bind chdir connect dup dup2 execv fcntl fork fsync getgroups gethostbyaddr
+gethostbyname getpass getpeername getpid getpwnam getpwuid getrlimit
+getservbyname getsockname getsockopt getuid inet_aton inet_ntoa kill listen
+pipe select setrlimit setsid setsockopt shutdown signal socket tcgetattr
+tcsetattr vfork
+```
+
+`socket` and `connect` being in that list is the finding. The Roadshow NDK's
+`<proto/bsdsocket.h>` defines them as inline macros with the plain BSD names, so
+a client that includes it gets them free — and Dropbear includes
+`<sys/socket.h>`, which **declares** them and links against nothing.
+
+### 31.2 The one real problem: two descriptor spaces that both start at zero
+
+`bsdsocket.library` allocates socket descriptors from its own table starting at
+0 (`src/bsdsocket/socket.c`, `bsd_fd_alloc()`). newlib allocates file
+descriptors starting at 0 as well, and 0/1/2 are the Shell's standard streams.
+So `socket()` returns 0 while `stdin` is also 0 — and an SSH client is precisely
+a program that holds both at once and copies between them.
+
+`clients/dropbear/amiga_dropbear.c` merges the two spaces by **offset**:
+
+| range | what it is |
+|---|---|
+| 0 – 63 | newlib: `stdin`, `stdout`, `stderr`, files |
+| 64 – 191 | `bsdsocket`, biased by `DB_SOCK_BASE` |
+| 192 – 193 | the wakeup "pipe" |
+| 194 | the entropy device |
+
+Every call that takes a descriptor dispatches on the range. Three details were
+decisions rather than details:
+
+- **`read`, `write`, `close` and `open` are taken with `-Wl,--wrap`.** All four
+  live in ONE object in newlib's `libc.a` (`lib_a-open.o`), so referencing any
+  of them drags in all four and none can be redefined. `--wrap` is also the only
+  route that survives `atomicio(read, …)`, which passes `read` as a **function
+  pointer** — a macro would not have.
+- **`FD_SETSIZE` is 256.** newlib's default is 64 and 192 has to fit.
+  `dbutil.c`'s `dropbear_fd_set()` checks the bound itself, so an overflow is a
+  legible error rather than a smashed stack.
+- **`select()` is ours, not `WaitSelect()`.** `WaitSelect()` understands sockets
+  and nothing else, and Dropbear's `session_loop()` selects over the socket AND
+  the channel's `stdin`/`stdout`/`stderr` in one call. The shim splits the set,
+  answers the DOS handles without blocking (`IsInteractive()` then
+  `WaitForChar(h, 0)`; a non-interactive handle is always readable, because a
+  read returns data or end-of-file and either is progress), and calls
+  `WaitSelect()` with a zero timeout when anything off-socket is already ready.
+
+### 31.3 Two AmigaOS bugs that both looked like something else
+
+Neither is a Dropbear bug, and neither would have been found by reading.
+
+**A requester nobody could click.** `dbrandom.c`'s `write_urandom()` feeds the
+pool back with `fopen(DROPBEAR_URANDOM_DEV, "w")` and calls the result
+opportunistic — *"don't worry about failure"*. On Unix it is. Our device is
+named `RANDOM:`, which to dos.library is a **volume name**, and its answer to an
+unmounted volume is not an error code:
+
+```
+Please insert volume RANDOM: in any drive
+```
+
+On a headless run there is nobody to press Cancel, so the process waits forever.
+The symptom was `dbclient -V` — *print the version and exit* — hanging until the
+run timed out, because `seedrandom()` happens before option parsing.
+`pr_WindowPtr = -1` is dos.library's documented "fail the call instead of
+asking"; it is set in a constructor so it is in place before `main()`, and it is
+right for **any** ported client, all of which assume a failed `open()` returns.
+`dbclient -V` went from a 420-second timeout to 0.22 s. It would have bitten a
+real user at a real Shell too, not only the emulator.
+
+**Closing `stdout` rebooted the machine.** With the requester gone, the run did
+this, over and over:
+
+```
+--- SYS:dbclient -T -y -y -i DH0:id_amiga -p 2222 turo@10.0.2.2 "echo AMIGA-SSH-OK; uname -a; date"
+AMIGA-SSH-OK
+Darwin Mac.local 25.5.0 … arm64
+Sun Jul 26 13:25:07 PDT 2026
+     <machine reboots; ClientRun restarts and the command list begins again>
+```
+
+A complete, correct transcript, and then nothing — no return code, because the
+machine did not survive to write one.
+
+On Unix a process owns its descriptor table and `close(1)` at exit is free. On
+AmigaOS a Shell command does **not** own `Input()` and `Output()`: they are the
+parent's DOS `FileHandle`s, lent for the duration. newlib's `close()` `Close()`s
+the BPTR, and then `SystemTagList()` in the parent closes the same freed handle
+again. On a machine with no memory protection a double `Close()` is not an error
+return.
+
+Dropbear does exactly this and is right to: `common-channel.c`'s
+`close_chan_fd()` calls `m_close()` on the session channel's
+`readfd`/`writefd`/`errfd`, and for `dbclient -T host command` those three are
+0, 1 and 2. The shim's `close()` refuses them. **This is the most transferable
+line in the port**: every future client will do it, and it fails as a reboot
+several seconds after a run that looked successful.
+
+### 31.4 The three questions that decided whether this was possible
+
+**1. `fork()` — the client needs none, and that is a property of the client
+rather than a workaround.** Dropbear calls `fork()` in eight places. Six are
+server-only or `scp`. The two a client can reach are `-J proxycmd` / `-B netcat`
+(`spawn_command()`) and the `SSH_ASKPASS` helper, and all three are switched off
+in `clients/dropbear/localoptions.h`. A linked `dbclient` contains the `ENOSYS`
+stubs and calls none of them. Nothing was worked around, and `getpass()` over
+`dos.library` is a better answer than the forked helper anyway.
+
+**2. The pty — sidestepped, and it is the exact boundary of what works.**
+`tcgetattr()`/`tcsetattr()` fail with `ENOTTY`, deliberately: AmigaOS has no
+termios, a console is a DOS handle and raw mode is `SetMode()`. Dropbear calls
+them only on the pty path, so `dbclient -T user@host command` never does. The
+consequence is precise: **`dbclient host` without `-T` fails at Dropbear's own
+"Failed to set raw TTY mode"**, and an interactive session needs the same
+mechanism a telnet server needs — a DOS handler that makes a Shell look like a
+socket. Roadshow solves it with `tcp-handler`. That is being scoped separately
+and there should not be two.
+
+A second, quieter limit sits in the same place: the shim's `select()` can only
+notice an interactive `stdin` when `WaitSelect()` next returns, so a keystroke
+can wait as long as `select_timeout()`. Non-interactive input (a file, `NIL:`)
+is unaffected, which is why the supported shape is the one that works.
+
+**3. Entropy — survivable for a client, disqualifying for a server.**
+`dbrandom.c`'s `seedrandom()` opens `DROPBEAR_URANDOM_DEV`, reads 32 bytes and
+`dropbear_exit()`s if it cannot. There is no build without one. So the device is
+renamed `RANDOM:` — shaped like an AmigaOS device, because nothing here should
+pretend to be Unix — and the shim answers `open()` for that one string from
+**`src/common/ami_random.c`**, the same generator `bsdsocket.library` uses for
+TCP initial sequence numbers and `nx_secure` uses for TLS key agreement. One
+entropy story per machine, and one place to fix it.
+
+**What that is worth, plainly.** The conditioning is textbook. The collection is
+guesswork: it credits itself about **21 bits** against its own 64-bit bar, so
+`ami_random_is_seeded()` returns FALSE by construction and
+`include/aminetxduo/random.h` says so in its opening paragraph. Several of its
+sources were measured byte-identical across three cold boots and are credited
+nothing.
+
+For the client, what comes out of that pool is the ephemeral curve25519 private
+key and the session cookie — per-connection, forward-secret, never written down.
+An attacker who can predict them reads *that* session.
+
+For a server it is disqualifying, and this is the finding to carry forward: a
+host key generated from a 21-bit pool is a key an attacker can enumerate, it
+persists on disk, and clients pin it. That does not weaken the protocol, it
+defeats it. `clients/dropbear/sshd-testserver.sh` therefore generates even the
+*test client* key on the host, with a natively built `dropbearkey` from the same
+pinned source, and says why in its header.
+
+### 31.5 What a handshake costs
+
+Timed by the guest's own clock, through `ClientRun`. Every row is a real
+connection to a real OpenSSH, authenticated with a real key, running a real
+command:
+
+| connection | negotiated | wall clock |
+|---|---|---|
+| 1st, `echo; uname -a; date` | curve25519 / ed25519 / chacha20-poly1305 | **96.06 s** |
+| 2nd, same command line | same | **95.88 s** |
+| 3rd, `-c aes128-ctr` | curve25519 / ed25519 / **aes128-ctr + hmac-sha2-256** | **96.06 s** |
+| 4th, `-c chacha20-poly1305@openssh.com` | as 1st, named explicitly | **95.92 s** |
+
+Two things fall out of that table before any analysis.
+
+**The cipher does not matter and the key exchange is everything.** Rows 3 and 4
+differ only in the record path, and they differ by 0.14 s out of 96. The
+payload is about 3 KB; at this size the symmetric cost is invisible and the
+entire wall clock is public-key arithmetic. §18's per-byte work would show up on
+a transfer, not on a login.
+
+**SSH has no session resumption.** Row 2 costs what row 1 costs. There is no
+counterpart to §13's 5.10 s → 0.62 s, and there cannot be: the protocol has no
+such mechanism. Every connection pays the full key exchange, forever, which
+makes the per-handshake number matter more here than it does for HTTPS.
+
+#### The optimistic guess a modern OpenSSH always rejects
+
+Dropbear sets `first_kex_follows` and sends a `KEXDH_INIT` for its own
+first-preference key exchange before it has seen the server's `KEXINIT`,
+betting the server prefers the same one. Against OpenSSH 10.2 that bet is not a
+gamble, it is a guaranteed loss — OpenSSH prefers an ML-KEM hybrid we do not
+offer:
+
+```
+debug2: proposal mismatch: my mlkem768x25519-sha256 peer curve25519-sha256
+debug2: skipped packet (type 30)
+```
+
+`cli-kex.c`'s `send_msg_kexdh_init()` then runs again, beginning with
+`cli_kex_free_param()` and a **fresh** `gen_kexcurve25519_param()`. Measured,
+same binary otherwise, same server:
+
+| | wall clock |
+|---|---|
+| `DROPBEAR_KEX_FIRST_FOLLOWS 1` (upstream default) | 96.06 95.88 96.06 95.92 s — mean **95.98** |
+| `DROPBEAR_KEX_FIRST_FOLLOWS 0` | 84.18 83.96 s — mean **84.07** |
+
+**About twelve seconds, which is one curve25519 scalar multiplication on this
+part.** What the guess buys in exchange is one round trip. It is off in
+`clients/dropbear/localoptions.h`.
+
+#### `LoginGraceTime`, and why the test server is ours
+
+**OpenSSH's default `LoginGraceTime` is 120 seconds** from TCP connect to
+completed authentication, and 96 seconds of arithmetic does not leave much of
+it — a slower machine, a deeper `-v`, or one retry and the server hangs up
+first. This is the wall §11.8 hit with Cloudflare, arriving from a different
+direction. `clients/dropbear/sshd-testserver.sh` sets `LoginGraceTime 600` so
+that a run measures the Amiga rather than the server's patience, and that
+setting is a statement about the client, not a convenience.
+
+**One methodological note, because it cost time.** The server's log was
+timestamped host-side to try to split the handshake into keygen / shared secret
+/ verify. Under the load this build host actually carries the host-side
+timestamps drift by tens of seconds and the split came out contradicting itself.
+The guest's own `DateStamp()` clock, which is what `ClientRun` reports, stayed
+consistent to 0.2 s across four connections. Trust the in-guest timer; a
+host-side log timestamp is not a measurement of the guest.
+
+### 31.6 None of `src/crypto68k/` applies to this, and that is fixable
+
+`src/crypto68k/` accelerates RSA-2048, P-256, SHA-256 and AES-128-CBC — 1.25×
+AmiSSL on AES, 1.62× on HMAC-SHA256, 10.8× on a P-256 scalar multiply (§15,
+§18). The suite this handshake negotiated is **curve25519, ed25519 and
+chacha20-poly1305**, and `crypto68k` accelerates none of them. Wiring it in
+would buy exactly nothing against a modern OpenSSH.
+
+That is not the end of it, because Dropbear offers the other half as well, and
+this binary already contains it:
+
+```
+kex     curve25519-sha256  ecdh-sha2-nistp256/384/521  diffie-hellman-group14-sha256
+hostkey ssh-ed25519  ecdsa-sha2-nistp256  rsa-sha2-256
+cipher  chacha20-poly1305@openssh.com  aes128-ctr  aes256-ctr
+mac     hmac-sha2-256
+```
+
+The second column of each row is `crypto68k`'s territory. `ecdh-sha2-nistp256`
+is the P-256 scalar multiply that is 10.8× faster in our code than in AmiSSL's;
+`rsa-sha2-256` is RSA-2048; `aes128-ctr` + `hmac-sha2-256` is the record path
+§18 rewrote — and row 3 of the table above proves the client negotiates it on
+request. So the question is not "does `crypto68k` apply to SSH" but **"is P-256
+with our assembly faster on this machine than curve25519 in portable C"**, and
+nobody has measured it. `-c` and `-m` select the cipher and MAC at runtime; the
+key exchange list is compile-time, so the experiment is one more build with
+`DROPBEAR_CURVE25519 0` and the harness that is now in the tree.
+
+Two things bias the answer in opposite directions and neither is obvious. Our
+P-256 is hand-written 68020 assembly with a limb-domain Solinas reduction;
+Dropbear's curve25519 is portable C over 64-bit arithmetic, which on m68k means
+software 64-bit multiplies — that favours us. Against it, **chacha20 is
+add-rotate-xor with nothing to look up**, and §18 established that this part has
+no data cache and charges 159.8 ns for a table read regardless of table size, so
+AES pays full memory latency on all sixteen lookups per round and chacha20 pays
+none. It is entirely possible we win the key exchange with P-256 and lose the
+record path with AES, and that the right answer is a mixture.
+
+### 31.7 The harness, and what a second tenant actually cost
+
+| | |
+|---|---|
+| `third_party/dropbear` | submodule pinned to `DROPBEAR_2026.94`, **unpatched** |
+| `clients/dropbear/build.sh` | cross-configure and build |
+| `clients/dropbear/localoptions.h` | what is compiled in, and why each thing is off |
+| `clients/dropbear/amiga_dropbear.c` | the port: the descriptor map, `select()`, the stubs |
+| `clients/dropbear/include/` | `dirent.h` and `termios.h` |
+| `clients/dropbear/run-fsuae.sh` | the run |
+| `clients/dropbear/sshd-testserver.sh` | a rootless OpenSSH on port 2222 for it to talk to |
+
+`clients/compat/` and `clients/amiga-client.sh` were reused **unchanged** — the
+`stat`/`fstat`/`mkdir`/`unlink`/`isatty`/`gettimeofday` shims, the libgcc
+helpers, the `crt0.o` `argv` repair and the three NDK flags all carried over with
+no edit at all. `clients/curl/clientrun.c` was reused as the driver as well; it
+is a general "run these command lines with a real stack" program, and `dbclient`
+needs the 512 KB for the same reason curl does. **The harness took a second
+tenant without being touched**, which is what §11.5 claimed it would do.
+
+**`./configure` rather than a hand-written `config.h`.** §11.7 recommended the
+hand-written route for wget because wget needs `./bootstrap` and therefore
+autoconf, automake, libtool, gettext and a gnulib checkout on the build host.
+Dropbear ships a **generated** `configure`, so a cross-configure is one command
+with no build-host autotools — and it is worth more than a hand-written header,
+because it finds the gaps by **linking** rather than by somebody remembering to
+list them.
+
+One thing it must not see: `amiga_dropbear.o`. That object defines `fork()`,
+`getpass()`, `select()` and `getpwnam()`, so a `configure` run with it in `LIBS`
+would answer `HAVE_FORK=1` and Dropbear would compile the `fork()` paths for a
+`fork()` that always fails. It is added at **make** time, so `config.h`
+describes the toolchain honestly.
+
+`--disable-harden` is not cosmetic. Dropbear's configure probes for `-fPIE`,
+`-fstack-protector-strong` and `-D_FORTIFY_SOURCE=2` and keeps whatever
+compiles. All three "compile", and the third is fatal several tests later:
+`_FORTIFY_SOURCE` pulls in newlib's `<ssp/*.h>`, whose `__ssp_redirect0` macros
+do not expand under this GCC, so **every subsequent configure test fails for a
+reason unrelated to what it was testing** — which is how `netinet/in.h` and
+`netdb.h` get reported missing when both are present. None of the three means
+anything on a machine with no MMU, no ASLR and no guard page. `build.sh` fails
+loudly if `HAVE_NETINET_IN_H` is not set, because that is the symptom rather
+than the cause.
+
+### 31.8 The server: Dropbear or TinySSH
+
+One premise needs correcting first. **Dropbear's server does not have to fork
+per connection.** `INETD_MODE` is a supported build (`svr-main.c`,
+`main_inetd()`): it takes the connection on descriptor 0, runs one session and
+exits, and `NON_INETD_MODE` — the accept loop with the `fork()` at
+`svr-main.c:313` — can be compiled out entirely. On the *connection* axis
+Dropbear and TinySSH are therefore the same shape: both need an external
+supervisor to accept and spawn.
+
+**The fork neither of them avoids is the other one.** Dropbear forks at
+`svr-chansession.c:835` to run the user's shell or command; TinySSH forks at
+`channel_fork.c:34` and `channel_forkpty.c` for the same reason. That is not a
+process-model quirk, it is what an SSH server *is* — and on AmigaOS it is the
+pty question in disguise, because the child has to be a Shell attached to
+something the parent can read and write. **Blocker 1 and blocker 2 are the same
+blocker**, and it is the one already being scoped for telnet.
+
+With that established:
+
+| | Dropbear server | TinySSH |
+|---|---|---|
+| licence | MIT (+ PD libtom, + 2-clause BSD in `loginrec.c`/`sshpty.c`) | CC0-1.0 OR 0BSD OR MIT-0 OR MIT |
+| connection model | `-i` inetd mode, no fork | inetd only, no fork |
+| session model | `fork()` + pty | `fork()` + `forkpty()` |
+| auth | pubkey only here — password auth is `#error … requires crypt()` and this toolchain has none | pubkey only by design |
+| crypto | curve25519 / P-256 / RSA / ed25519 / AES-CTR / chacha20 — includes everything `crypto68k` accelerates | curve25519 / sntrup761 / ed25519 / chacha20-poly1305 — includes **none** of it |
+| entropy | `open()` on a device, `dropbear_exit()` on failure | `open("/dev/urandom")` in a **constructor**, inside `for(;;) { …; sleep(1); }` — a port that does not intercept it hangs forever with no message |
+| the AmigaOS port | **already written**, and shared with `dbclient` | a second port of the same shape: descriptor map, `poll()` rather than `select()`, entropy, `openpty` |
+
+**Recommendation: Dropbear's server, and the deciding argument is reuse rather
+than merit.** `dropbear -i` is `clients/dropbear/build.sh -P dropbear` against
+the shim that already exists — the same descriptor map, the same `select()`, the
+same entropy device, the same requester fix, the same `close(1)` fix. TinySSH is
+a second port of every one of those, and its `randombytes()` constructor fails
+by *hanging* rather than by exiting, which is the failure mode that costs the
+most to diagnose; §31.3 has a worked example of exactly that costing a run.
+
+TinySSH's genuine advantages are real and should be recorded rather than
+dismissed. The licence is cleaner, the code is far smaller, there is no password
+path to disable, and its algorithm set is precisely the one that needs no tables
+on a machine with no data cache — if the chacha20-versus-AES question in §31.6
+resolves the way §18's instruction timings hint, its crypto choice is the right
+one for this hardware. What it does **not** do is avoid the blocker it was
+proposed for, and it would cost a second port to establish that.
+
+Against either candidate the same three things bind:
+
+1. **A supervisor.** A small AmigaOS program: `socket`, `bind`, `listen`,
+   `accept`, then `CreateNewProc()` with the accepted socket handed across —
+   `ObtainSocket()`/`ReleaseSocket()` are published vectors and exist for
+   precisely this. Shared between the two candidates, and reusable for telnet.
+2. **A Shell on a socket.** The same DOS handler telnet needs. Not to be built
+   twice.
+3. **A host key.** Blocking, and not an engineering problem anywhere else in the
+   stack can solve. Twenty-one bits of credited entropy is not a host key. The
+   options are to generate it off-machine and install it — which is what
+   `sshd-testserver.sh` does for the client key today, and what a shipping
+   server could reasonably require — or to feed `ami_random_add_entropy()` a
+   real seed, for which operator keystroke timing at first boot is the classic
+   answer and this machine does have a keyboard. Either is fine. Neither is not.
