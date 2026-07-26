@@ -77,7 +77,22 @@ target_link_libraries(nx_secure PUBLIC nx_crypto netxduo)
 # that use them.  `crypto68k` is defined in src/crypto68k, which the top level
 # configures AFTER this directory -- naming a target that does not exist yet is
 # fine, CMake resolves target names at generate time.
+# The record path's A/B switch.  ON puts the VENDORED AES and SHA-256 back in
+# the ciphersuite table and leaves everything else alone, so that "did the
+# record path get faster on the wire" can be answered by two tls.library
+# binaries built from one commit rather than by comparing against a figure
+# from before the TCP layer moved.  See the block above the tables in
+# ami_tls_crypto.c.  Not a supported configuration; it is a measuring stick.
+option(AMINETXDUO_TLS_STOCK_BULK
+       "Use nx_crypto's AES and SHA-256 instead of crypto68k's, for A/B" OFF)
+
 add_library(aminetxduo_tls STATIC tls_amiga.c ami_tls_crypto.c)
+if(AMINETXDUO_TLS_STOCK_BULK)
+    target_compile_definitions(aminetxduo_tls PRIVATE AMINETXDUO_TLS_STOCK_BULK=1)
+    message(STATUS "  TLS bulk path . nx_crypto (A/B baseline)")
+else()
+    message(STATUS "  TLS bulk path . crypto68k")
+endif()
 target_include_directories(aminetxduo_tls PUBLIC
     ${AMINETXDUO_TLS_INCLUDES} "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(aminetxduo_tls PUBLIC nx_secure crypto68k ${AMINETXDUO_TLS_RT})

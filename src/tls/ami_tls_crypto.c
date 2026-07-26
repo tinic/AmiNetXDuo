@@ -1233,6 +1233,36 @@ NX_CRYPTO_METHOD ami_crypto_method_hmac_sha256 =
 };
 
 
+/*
+ * AMINETXDUO_TLS_STOCK_BULK selects the VENDORED AES and SHA-256 in the tables
+ * below, with everything else -- RSA, P-256, the suites, their order --
+ * unchanged.
+ *
+ * It exists for one purpose and it is a measurement one.  "Did the record
+ * path get faster on the wire" cannot be answered by comparing against a
+ * number from last week: the TCP layer moved underneath it (delayed ACKs,
+ * 78b4ed9) and so did the input path (SOCK_RAW's per-packet filter, 026c348).
+ * Two tls.library binaries built from the SAME commit, differing only in this
+ * define, run through tests/curl/run-curlverify.sh give a before and an after
+ * that cannot contain anybody else's work.
+ *
+ * It is not a fallback and not a supported configuration; the fallback for a
+ * suspected bug in the assembly is AMINETXDUO_CRYPTO68K_ASM=OFF, which keeps
+ * our methods and swaps the primitives underneath them.
+ */
+#ifdef AMINETXDUO_TLS_STOCK_BULK
+#define AMI_BULK_AES128     crypto_method_aes_cbc_128
+#define AMI_BULK_AES256     crypto_method_aes_cbc_256
+#define AMI_BULK_SHA256     crypto_method_sha256
+#define AMI_BULK_HMAC256    crypto_method_hmac_sha256
+#else
+#define AMI_BULK_AES128     ami_crypto_method_aes_cbc_128
+#define AMI_BULK_AES256     ami_crypto_method_aes_cbc_256
+#define AMI_BULK_SHA256     ami_crypto_method_sha256
+#define AMI_BULK_HMAC256    ami_crypto_method_hmac_sha256
+#endif
+
+
 /* ------------------------------------------------------------- the tables -- */
 
 /* Everything we do not touch comes straight from nx_crypto_methods.c. */
@@ -1270,10 +1300,10 @@ extern NX_CRYPTO_METHOD crypto_method_hmac;
 static NX_SECURE_X509_CRYPTO ami_x509_cipher_table[] =
 {
     /* OID identifier,                       public cipher,             hash method */
-    {NX_SECURE_TLS_X509_TYPE_ECDSA_SHA_256,  &crypto_method_ecdsa,      &ami_crypto_method_sha256},
+    {NX_SECURE_TLS_X509_TYPE_ECDSA_SHA_256,  &crypto_method_ecdsa,      &AMI_BULK_SHA256},
     {NX_SECURE_TLS_X509_TYPE_ECDSA_SHA_384,  &crypto_method_ecdsa,      &crypto_method_sha384},
     {NX_SECURE_TLS_X509_TYPE_ECDSA_SHA_512,  &crypto_method_ecdsa,      &crypto_method_sha512},
-    {NX_SECURE_TLS_X509_TYPE_RSA_SHA_256,    &ami_crypto_method_rsa,    &ami_crypto_method_sha256},
+    {NX_SECURE_TLS_X509_TYPE_RSA_SHA_256,    &ami_crypto_method_rsa,    &AMI_BULK_SHA256},
     {NX_SECURE_TLS_X509_TYPE_RSA_SHA_384,    &ami_crypto_method_rsa,    &crypto_method_sha384},
     {NX_SECURE_TLS_X509_TYPE_RSA_SHA_512,    &ami_crypto_method_rsa,    &crypto_method_sha512},
     {NX_SECURE_TLS_X509_TYPE_ECDSA_SHA_224,  &crypto_method_ecdsa,      &crypto_method_sha224},
@@ -1291,9 +1321,9 @@ static NX_SECURE_TLS_CIPHERSUITE_INFO ami_ciphersuite_table[] =
 {
     /* Ciphersuite,                           public cipher,            public_auth,              session cipher & mode,          iv, key, hash method,                hash size, TLS PRF */
 #if (NX_SECURE_TLS_TLS_1_3_ENABLED)
-    {TLS_AES_128_GCM_SHA256,                  &crypto_method_ecdhe,     &crypto_method_ecdsa,     &crypto_method_aes_128_gcm_16,  96, 16,  &ami_crypto_method_sha256,  32,        &crypto_method_hkdf},
-    {TLS_AES_128_CCM_SHA256,                  &crypto_method_ecdhe,     &crypto_method_ecdsa,     &crypto_method_aes_ccm_16,      96, 16,  &ami_crypto_method_sha256,  32,        &crypto_method_hkdf},
-    {TLS_AES_128_CCM_8_SHA256,                &crypto_method_ecdhe,     &crypto_method_ecdsa,     &crypto_method_aes_ccm_8,       96, 16,  &ami_crypto_method_sha256,  32,        &crypto_method_hkdf},
+    {TLS_AES_128_GCM_SHA256,                  &crypto_method_ecdhe,     &crypto_method_ecdsa,     &crypto_method_aes_128_gcm_16,  96, 16,  &AMI_BULK_SHA256,          32,        &crypto_method_hkdf},
+    {TLS_AES_128_CCM_SHA256,                  &crypto_method_ecdhe,     &crypto_method_ecdsa,     &crypto_method_aes_ccm_16,      96, 16,  &AMI_BULK_SHA256,          32,        &crypto_method_hkdf},
+    {TLS_AES_128_CCM_8_SHA256,                &crypto_method_ecdhe,     &crypto_method_ecdsa,     &crypto_method_aes_ccm_8,       96, 16,  &AMI_BULK_SHA256,          32,        &crypto_method_hkdf},
 #endif
 
 #ifdef NX_SECURE_ENABLE_AEAD_CIPHER
@@ -1301,15 +1331,15 @@ static NX_SECURE_TLS_CIPHERSUITE_INFO ami_ciphersuite_table[] =
     {TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,   &crypto_method_ecdhe,     &ami_crypto_method_rsa,   &crypto_method_aes_128_gcm_16,  16, 16,  &crypto_method_null,         0,        &crypto_method_tls_prf_sha256},
 #endif
 
-    {TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, &crypto_method_ecdhe,     &crypto_method_ecdsa,     &ami_crypto_method_aes_cbc_128,     16, 16,  &ami_crypto_method_hmac_sha256, 32,        &crypto_method_tls_prf_sha256},
-    {TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,   &crypto_method_ecdhe,     &ami_crypto_method_rsa,   &ami_crypto_method_aes_cbc_128,     16, 16,  &ami_crypto_method_hmac_sha256, 32,        &crypto_method_tls_prf_sha256},
+    {TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, &crypto_method_ecdhe,     &crypto_method_ecdsa,     &AMI_BULK_AES128,     16, 16,  &AMI_BULK_HMAC256, 32,        &crypto_method_tls_prf_sha256},
+    {TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,   &crypto_method_ecdhe,     &ami_crypto_method_rsa,   &AMI_BULK_AES128,     16, 16,  &AMI_BULK_HMAC256, 32,        &crypto_method_tls_prf_sha256},
 
 #ifdef NX_SECURE_ENABLE_AEAD_CIPHER
     {TLS_RSA_WITH_AES_128_GCM_SHA256,         &ami_crypto_method_rsa,   &ami_crypto_method_rsa,   &crypto_method_aes_128_gcm_16,  16, 16,  &crypto_method_null,         0,        &crypto_method_tls_prf_sha256},
 #endif
 
-    {TLS_RSA_WITH_AES_256_CBC_SHA256,         &ami_crypto_method_rsa,   &ami_crypto_method_rsa,   &ami_crypto_method_aes_cbc_256,     16, 32,  &ami_crypto_method_hmac_sha256, 32,        &crypto_method_tls_prf_sha256},
-    {TLS_RSA_WITH_AES_128_CBC_SHA256,         &ami_crypto_method_rsa,   &ami_crypto_method_rsa,   &ami_crypto_method_aes_cbc_128,     16, 16,  &ami_crypto_method_hmac_sha256, 32,        &crypto_method_tls_prf_sha256},
+    {TLS_RSA_WITH_AES_256_CBC_SHA256,         &ami_crypto_method_rsa,   &ami_crypto_method_rsa,   &AMI_BULK_AES256,     16, 32,  &AMI_BULK_HMAC256, 32,        &crypto_method_tls_prf_sha256},
+    {TLS_RSA_WITH_AES_128_CBC_SHA256,         &ami_crypto_method_rsa,   &ami_crypto_method_rsa,   &AMI_BULK_AES128,     16, 16,  &AMI_BULK_HMAC256, 32,        &crypto_method_tls_prf_sha256},
 };
 
 const NX_SECURE_TLS_CRYPTO ami_crypto_tls_ciphers_ecc =
@@ -1329,7 +1359,7 @@ const NX_SECURE_TLS_CRYPTO ami_crypto_tls_ciphers_ecc =
 #endif
 
 #if (NX_SECURE_TLS_TLS_1_2_ENABLED)
-    &ami_crypto_method_sha256,
+    &AMI_BULK_SHA256,
     &crypto_method_tls_prf_sha256,
 #endif
 
