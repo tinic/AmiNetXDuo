@@ -9044,3 +9044,436 @@ Not covered, and named rather than left to be discovered:
 - **Congestion control.** Slow start and the cwnd after a loss are visible in
   this format — segment counts per RTT — and nothing here asserts on them.
 
+
+## 28. Three macros AmiTCP_NG has and we did not, and what each was actually worth (2026-07-26)
+
+Three capabilities this stack lacked were, in every case, code NetX Duo already
+ships behind a `#define` nobody here had written. That is a pleasant kind of gap
+and a dangerous one: the work looks like typing, so the temptation is to type it
+and move on. **A `#define` that changes no packet is not a feature**, so each one
+below was taken to the wire — two of them are now proven there, and the third is
+switched off with the measurement that says why.
+
+A fourth item, randomised initial sequence numbers, turned out to be a claim
+about NetX Duo that is wrong in the direction nobody checks: it *does*
+randomise. What it does badly is combine two draws with `|` instead of `+`, and
+that is worth nine bits.
+
+| | | |
+|---|---|---|
+| `NX_ENABLE_IP_STATIC_ROUTING` | **on** | the table is real, and a routed packet takes a next hop nothing else in the run ever names |
+| `NX_DNS_CACHE_ENABLE` | **on** | six lookups, two queries on the wire |
+| `NX_ENABLE_TCP_WINDOW_SCALING` | **off** | measured: the negotiated scale is structurally always zero, and turning it on removes NetX Duo's guard against a window this machine cannot carry |
+| RFC 6528-style ISN | n/a | NetX Duo randomises; the bias in *how* is fixed without touching `third_party/` |
+
+### 28.1 Static routing: the enable that `NX_IP_ROUTING_TABLE_SIZE` looked like
+
+`port/netxduo-amiga/inc/nx_user.h` set `NX_IP_ROUTING_TABLE_SIZE 4`, with a
+comment about Roadshow-era configurations, and did not set
+`NX_ENABLE_IP_STATIC_ROUTING`. The first is inert without the second, and the
+pair reads exactly as though routing were compiled in. It was not:
+
+* `NX_IP` carries no `nx_ip_routing_table[]` and no
+  `nx_ip_routing_table_entry_count` (`nx_api.h:2972`);
+* `nx_ip_static_route_add()` and `..._delete()` are stubs returning
+  `NX_NOT_SUPPORTED`;
+* `_nx_ip_route_find()` skips the table lookup entirely
+  (`nx_ip_route_find.c:150`), so the only next hops that exist are each
+  interface's own prefix and the single default gateway.
+
+One gateway is enough for a machine on one Ethernet, which is why nobody
+noticed. It is not enough for a second interface reachable only through its own
+next hop — the configuration `NX_MAX_PHYSICAL_INTERFACES 2` exists for — or for
+a subnet behind a router that is not the default one. §22.5 and §26 both record
+this as the thing blocking `AddNetRoute`; it is now on, and §26 covers the two
+commands that became writable because of it.
+
+**What the vendored implementation actually does, checked rather than assumed,
+because three of these are surprising:**
+
+* **The next hop must be on one of this machine's own subnets.** NetX Duo
+  derives the outgoing interface from it and refuses the entry with
+  `NX_IP_ADDRESS_ERROR` when nothing matches (`nx_ip_static_route_add.c:88`).
+* **First match is longest prefix**, but only because `add` keeps the table
+  sorted by netmask descending on insertion. `_nx_ip_route_find()` itself walks
+  it in order and takes the first hit.
+* **The table is consulted after the on-link check and before the gateway**, so
+  a route can override the default for part of the address space — which is the
+  whole reason to have one rather than a second name for the gateway.
+* **Deleting from an EMPTY table returns `NX_SUCCESS`** (`nx_ip_static_route_delete.c:97`).
+  Deleting an absent entry from a non-empty one returns failure. A test that
+  checks "deleting a route that is not there fails" has to make sure the table
+  is not empty, or it is testing nothing.
+
+`NX_OVERFLOW` — the four-entry table full — now maps to `ENOBUFS` rather than
+falling through to `EINVAL`, because with the table compiled in that outcome is
+reachable by a user rather than only by a bug.
+
+#### The reports had to change too, and they had drifted apart already
+
+`netstat -r` and `ShowNetStatus ROUTES` did not read `NETSTATUS_ROUTES`. Each
+**synthesised** a routing table from the interface list and the default gateway,
+in its own copy of the loop. That was correct exactly while there was no routing
+table, and stopped being correct the moment there was one: a route added by hand
+would have been in the stack and in neither report.
+
+Both now render the live table, through one function (`tool_print_routes()` in
+`src/tools/tool_nx.c`) so they cannot disagree again, in the order
+`_nx_ip_route_find()` matches: connected prefixes, then the static table longest
+prefix first, then the gateway. `ShowNetStatus` keeps its `NAMES` behaviour by
+passing its own address formatter in, rather than by keeping its own copy of the
+renderer. Loopback is printed as a row and is not in the table, deliberately:
+NetX Duo's loopback interface is not one of the `nx_ip_interface[]` slots and
+`_nx_ip_driver_packet_send()` shortcuts 127/8 without consulting a route at all,
+so the row is a true description of where the packet goes and its absence would
+read as "there is no loopback".
+
+#### On the wire
+
+`tests/tools/routeprobe.c` adds a route through `NETCTRL_ROUTE_ADD` and sends
+one datagram to a destination only that route can reach.
+`tests/tools/run-routes.sh` runs it and reads the answer out of the emulated
+A2065's own frame log, which is written inside the emulated hardware below every
+line of this stack.
+
+The experiment is built so that the answer cannot come from anywhere else:
+
+| | |
+|---|---|
+| destination | `192.168.77.5` — on none of the guest's subnets |
+| next hop | `10.0.2.99` — on the guest's subnet, so NetX Duo will accept it, and answered by nothing, because SLIRP is `10.0.2.2` and `10.0.2.3` |
+
+*With* the route, `_nx_ip_route_find()` matches, the next hop becomes
+`10.0.2.99`, and the stack has to resolve an address it has never seen.
+*Without* it, the default gateway `10.0.2.2` is used, whose ARP entry the DHCP
+exchange already resolved, so the frame goes straight out and there is **no ARP
+at all**. So `ARP who-has 10.0.2.99` on the wire happens if and only if the
+routing table was consulted.
+
+```
+  ok: NX_ENABLE_IP_STATIC_ROUTING is in the running stack
+  ok: NETCTRL_ROUTE_ADD accepted 192.168.77.0/24 via 10.0.2.99
+  ok: the route is in the 'with' listing and in neither of the other two
+  ok: it is flagged S (added by hand) with 10.0.2.99 as its next hop
+  ok: a next hop on no local subnet was refused
+  ok: deleting a route that is not in a non-empty table failed
+  ok: NETCTRL_ROUTE_DELETE removed the route
+  ok: netstat -r printed the table from NETSTATUS_ROUTES
+  ok: the wire shows 1 ARP request(s) for 10.0.2.99 -- the route was used
+  ok: nothing for 192.168.77.5 went out via the default gateway
+```
+
+**And the negative control ran by accident, which is the best kind.** An earlier
+pass of this test had a wrong constant in the probe — `0x0A020263` is 10.2.2.99,
+not 10.0.2.99 — so every `ROUTE_ADD` was refused, correctly, for a next hop on
+no local subnet. That run shows exactly what the paragraph above predicts for a
+stack with no route: no ARP for anything, and **one packet for 192.168.77.5 out
+through the default gateway**. The two runs differ in one 32-bit constant and
+produce the two opposite wire behaviours.
+
+The probe drives `NetStackControl()` rather than `AddNetRoute`, on purpose: what
+is under test is the stack, and a test written against a command's ReadArgs
+template fails whenever the template changes, which is the wrong thing to be
+sensitive to.
+
+### 28.2 Window scaling: measured, and left off
+
+`NX_ENABLE_TCP_WINDOW_SCALING` exists in the vendored tree, §16.7 recorded its
+absence as a documented limitation — "a hard 64 KB ceiling, and it is bilateral,
+so it also caps the peer" — and §24.6 named it as one of the two things bounding
+where the pool-derived window can go. It is a one-line change. **It is still off,
+and this is the measurement that says why.**
+
+Three arms, built back to back out of one tree, differing only in the flags
+named; `tests/trace/run-trace.sh`, A1200 profile, 524,288 bytes per workload,
+each workload run twice (once captured, once not) as always.
+
+| | loopback, no capture | loopback, capturing | wire, no capture | wire, capturing |
+|---|---:|---:|---:|---:|
+| **A** no scaling (ships) | 351 KB/s | 309 KB/s | 164 KB/s* | **172 KB/s** |
+| **B** scaling on | 351 KB/s | 309 KB/s | 164 KB/s | **172 KB/s** |
+| **C** scaling on, window pinned 65536 | 352 KB/s | 309 KB/s | 31 KB/s | **31 KB/s** |
+
+\* Arm A's uncaptured wire pass is quoted from arm B's re-run: arm A's own
+uncaptured pass hit a host peer that had expired while the run queued for the
+emulator lock, and 115 KB/s from a connection that had to be re-established is
+not a measurement. The captured passes — the ones the traces come from — were
+taken cleanly in both arms and are **identical to the millisecond**, 2963 ms
+each.
+
+**A and B agree to within run-to-run noise everywhere, and on loopback they do
+not merely agree, they match segment for segment:**
+
+| loopback | A, no scaling | B, scaling on |
+|---|---|---|
+| segments / bytes | 128 / 524288 | 128 / 524288 |
+| advertised window, sender / receiver | 25088 / 16725 | 25088 / 16725 |
+| max bytes in flight | 8192 of 8533 (96%) | 8192 of 8533 (96%) |
+| gap before a data segment, p50 / p90 | 13.0 / 14.4 ms | 13.0 / 14.5 ms |
+| ACK delay, p50 / max | 4.0 / 5.6 ms | 4.0 / 5.6 ms |
+| retransmitted | 0 | 0 |
+| bytes/s | 315,838 | 315,873 |
+
+#### The option is on the wire, and the scale factor is zero
+
+`tcpdump -r` on the guest's own capture, the outbound SYN in each arm:
+
+```
+A   10.0.2.15.62412 > 10.0.2.2.7440: Flags [S], win 32768,
+        options [mss 1460,nop,nop,nop,eol]
+B   10.0.2.15.58950 > 10.0.2.2.7440: Flags [S], win 32768,
+        options [mss 1460,wscale 0,eol]
+C   10.0.2.15.54758 > 10.0.2.2.7440: Flags [S], win 65535,
+        options [mss 1460,wscale 1,eol]
+```
+
+Two things to read off that. First, **the option costs nothing**: NetX Duo
+builds a fixed eight-byte option area, and the window scale replaces the
+`nop,nop,nop,eol` padding that is otherwise there, so the SYN is 24 bytes in
+both A and B and no other segment carries options at all. Second, **arm B's
+scale factor is 0** — and that is not a property of this workload.
+
+#### Why the scale is *structurally* always zero here
+
+NetX Duo picks the smallest shift that brings the receive window under 65536
+(`nx_tcp_packet_send_syn.c:292`). §24.3's `ami_bsd_tcp_window()` draws every
+window from one eighth of the packet pool, and the pool is bounded by
+`AMI_POOL_MAX_PACKETS` (256), so the **largest window any socket can ever be
+offered is 256/8 × 1568 = 50,176 bytes** — and that is with the 32768 ceiling
+removed entirely. 50,176 < 65,536, so the shift is zero on every socket this
+stack can create.
+
+The trace confirms the budget rather than taking it from the source: loopback's
+two sockets advertise 25,088 and 16,725, which are 50,176/2 and 50,176/3, and
+the wire's single socket advertises 32,768, which is the ceiling clamping
+50,176/1.
+
+The other half of §16.7's argument — that not offering the option also stops the
+*peer* scaling — is true and does not help either. The peer's scale governs
+**our send window**, and §16.5 measured the peer holding at most 2,880 bytes
+outstanding against the window it is already offered. There is nothing there for
+a larger send window to collect.
+
+#### And turning it on removes a guard that is doing real work
+
+`nxe_tcp_socket_create.c:170` rejects a window above 65535 with
+`NX_OPTION_ERROR` while scaling is off, and accepts anything below 2^30 while it
+is on. Arm C is what that permits: `AMINETXDUO_TCP_WINDOW=65536`, the smallest
+value that makes the scale non-zero, and the arm that proves the mechanism works
+end to end.
+
+| wire, 524288 B | A/B (32768 window) | C (65536 window) |
+|---|---:|---:|
+| throughput | 172 KB/s | **31 KB/s** |
+| **retransmitted** | **0 segments** | **15 segments, 21,600 bytes** |
+| longest duplicate-ACK run | 0 | **9** |
+| our ACK delay p90 / max | 2.1 / 2.1 ms | 68.8 / **266.2 ms** |
+| longest gap before a data segment | 48.5 ms | **1343.9 ms** |
+| our advertised window, min | 32768 | **13695** |
+| peer bytes in flight | 2880 of 32768 (9%) | 27360 of 49695 (55%) |
+
+A 5.5× regression, reproduced across two passes (15,856 / 15,767 ms, then
+16,228 / 16,085 ms), with real loss where the shipped configuration has none.
+There is no SACK in the vendored tree (§16.7), so a burst loss inside a larger
+window costs a full go-back-N — §24.6 said that was why the ceiling is the
+largest window that has been *measured*, and this is the measurement that would
+have been taken if anyone had tried.
+
+**So the trade is: 12 bytes per `NX_TCP_SOCKET` and a shift on every segment
+sent, retransmitted and acknowledged, for a factor that is always zero, in
+exchange for losing the compile-time check that stops a window this machine
+cannot carry.** With scaling off, `AMINETXDUO_TCP_WINDOW=65536` fails at
+`socket()`. With it on, it runs, and runs five times slower.
+
+`AMINETXDUO_TCP_WINDOW_SCALING` is a CMake option, default OFF, for the same
+reason `AMINETXDUO_TCP_WINDOW` and `AMINETXDUO_NET68K_CHECKSUM` are: the arms
+above are two libraries out of one tree differing in one flag, and that is the
+only way this question can be answered again when something changes. Two things
+would change it: SACK, or a pool budget that can offer one socket more than
+64 KB. Neither is close.
+
+### 28.3 DNS caching: six lookups, two queries
+
+`addons/dns` has had a cache all along. `nxd_dns.h` ships the define commented
+out, nothing here uncommented it, and so **every lookup went to the wire** —
+including the second lookup of a name resolved a moment earlier, which is what a
+shell session, an FTP transfer and a redirect-following `fetch` all do.
+
+Two changes, and both are needed: `NX_DNS_CACHE_ENABLE` in `nx_user.h` compiles
+the code in, and a call to `nx_dns_cache_initialize()` from
+`src/netstack/netstack_dns.c` gives it a buffer. Without the second the feature
+is present and inert — `nx_dns_create()` leaves `nx_dns_cache` NULL and every
+path checks for it — which is the same shape of trap as
+`NX_IP_ROUTING_TABLE_SIZE` above.
+
+**Sizing, and how the number was chosen.** The cache is one buffer with resource
+records growing up from the bottom and the strings they name growing down from
+the top. Measured on this toolchain rather than estimated: `sizeof(NX_DNS_RR)`
+is **20 bytes**, and a string costs `((len & ~3) + 8)`, so a cached A record for
+`www.example.com` is 20 + 20 = 40 bytes and two end pointers cost 8.
+
+**2048 bytes ≈ fifty cached names.** Fifty against what? A shell session
+resolves one host and then talks to it; `fetch` following redirects resolves two
+or three; the whole `tests/curl` suite names one peer. The largest real consumer
+is not forward lookups at all but the reverse ones `ShowNetStatus NAMES` and
+`netstat` perform, one per peer address on screen, bounded by `TOOL_MAX_SOCK`
+(32). Fifty covers both at once.
+
+Being wrong is cheap in one direction only, which is why the number leans small:
+too small costs a DNS query — exactly the behaviour being replaced, since NetX
+Duo evicts the least recently used record rather than failing — while too large
+costs resident memory on a 4 MB machine forever. For scale, 2048 bytes is 0.05%
+of the floor target's RAM and a fifth of the **9,792-byte packet pool the DNS
+client already carries inside the same `NX_DNS`** (10,112 bytes) for its own
+queries. The buffer is inline in `AmiNetStack` rather than separately allocated:
+same lifetime, and an allocation that can fail would need a "no cache" path for
+no benefit.
+
+Forward (A, AAAA) and reverse (PTR) lookups share it — everything funnels
+through `_nx_dns_host_resource_data_by_name_get()` and
+`_nx_dns_host_by_address_get_internal()`, and both consult the cache before
+binding a socket. TTLs are the server's own, aged from `tx_time_get()` against
+`NX_IP_PERIODIC_RATE`. `DEVS:Internet/hosts` still wins over all of it, because
+`netstack_resolve()` consults the file first and never reaches NetX Duo for a
+name that is in it — so a hosts entry cannot be shadowed by a cached answer.
+
+#### On the wire
+
+`tests/tools/run-dnscache.sh`: two names, three lookups each, **alternating**,
+from six separate invocations of `host`. Six processes, one `NX_DNS`, because
+`AddNetInterface`'s deliberately-leaked library reference keeps the stack up
+between commands. Two names rather than one so that the count is the assertion
+by itself — a stack that never queried and one that queried every time both
+fail, and no separately built control arm is needed to tell them apart.
+
+```
+  DNS queries seen on the wire: 2
+       IP 10.0.2.15.65013 > 10.0.2.3.53: 7600+ A? example.com. (29)
+       IP 10.0.2.15.61697 > 10.0.2.3.53: 6669+ A? example.org. (29)
+  ok: example.com was asked for exactly ONCE in three lookups
+  ok: example.org was asked for exactly ONCE in three lookups
+  ok: example.com/.org resolved on all three lookups, same answer every time
+```
+
+Six lookups, two queries. The "same answer every time" half is not decoration:
+a cache that returned nothing, or something else, on the hit would show up as a
+pass on the query count alone, because there would be no query either way.
+
+The one external dependency is stated rather than hidden: SLIRP's server at
+`10.0.2.3` forwards to the host's resolver, so this test needs the host to be
+able to resolve two public names, and it fails rather than passing on an empty
+wire if it cannot.
+
+### 28.4 Initial sequence numbers: NetX Duo does randomise, and the bias is worth nine bits
+
+The starting claim was that `nx_tcp_socket_connect.c` contains no randomisation.
+It does — in `nxd_tcp_client_socket_connect.c:411` and
+`nx_tcp_server_socket_accept.c:106`, both of which read:
+
+```c
+if (socket -> nx_tcp_socket_tx_sequence == 0)
+{
+    socket -> nx_tcp_socket_tx_sequence  = ((ULONG)NX_RAND()) << 16;
+    socket -> nx_tcp_socket_tx_sequence |=  (ULONG)NX_RAND();
+}
+else
+    socket -> nx_tcp_socket_tx_sequence += 0x10000 + (ULONG)NX_RAND();
+```
+
+`NX_RAND()` is `ami_random_rand()` on this port — a SHA-256 hash DRBG over an
+entropy pool (`src/common/ami_random.c`, and `nx_port.h` says why) — so the
+generator is not the problem.
+
+**A first reading of this file missed the second line and concluded the ISN had
+16 bits of entropy and always ended in four zero nibbles. That was wrong, and
+the trace said so before anything was written**: the ISNs in the captures had
+non-zero low halves. Recording it because the failure mode is the one this
+document keeps finding — a confident claim about code from a grep rather than a
+read, when an instrument that could settle it was already running.
+
+**What is actually wrong is `|`.** It is a bitwise OR of two independent draws,
+and `rand()` returns `0..0x7FFFFFFF`, so:
+
+| bits | source | P(1) |
+|---|---|---|
+| 0–15 | second draw alone | 1/2 |
+| 16–30 | first draw **OR** second draw | **3/4** |
+| 31 | first draw's bit 15 alone (the second draw's bit 31 is always 0) | 1/2 |
+
+Fifteen of thirty-two bits are three-quarters ones. That is **29.2 bits of
+Shannon entropy**, and — the number that matters for guessing — a **min-entropy
+of 23.2 bits**: the single likeliest ISN comes up **438 times** more often than
+it would under a uniform distribution, and an attacker who tries the dense
+upper-half values first faces 2^23 rather than 2^32.
+
+**Confirmed in the captures rather than argued from the expression.** Counting
+how often bits 16–30 are set across the SYNs in the traces above:
+
+| | bits 16–30 set | predicted |
+|---|---|---|
+| before | 35 of 45 = **0.78** | 0.75 |
+| after | 69 of 135 = **0.51** | 0.50 |
+
+#### The fix, without patching `third_party/`
+
+The `else` branch is a supported path rather than a fallback: it is what every
+**reused** socket takes, and it **adds** where the other **ors**. Seeding
+`nx_tcp_socket_tx_sequence` from `ami_random_ulong()` at create time makes a
+fresh socket take the branch a reused one takes, and a full 32-bit seed plus
+`0x10000 + NX_RAND()` is uniform over the whole space. Three call sites in
+`src/bsdsocket/socket.c`, one DRBG draw per TCP socket at create time, no
+vendored file changed, no symbol override and no `--wrap`. Zero is special-cased
+back to 1 because it is the value that means "not seeded" to the code above.
+
+#### What this is not
+
+**It is not RFC 6528**, and the difference is not cosmetic. 6528 computes
+`M + F(local addr, local port, remote addr, remote port, secret)`; the
+four-tuple hash exists so that a new connection on a *recently used* four-tuple
+gets an ISN above the old one, which is what makes TIME-WAIT recycling safe.
+What ships here is a purely random ISN — RFC 793 / RFC 1948 against prediction,
+and silent about recycling, which the 2 MSL timer already answers. 6528 proper
+is not reachable from this seam in any case: NetX Duo picks `tx_sequence` inside
+`connect()`, and at socket-create time there is no peer to hash. Doing it
+properly would mean patching the vendored connect path, and prediction — which
+is the attack — is fixed without that.
+
+### 28.5 Regression cover
+
+Everything §24.9 measured, re-measured on the shipping configuration.
+
+| | §24.9 | here |
+|---|---|---|
+| conformance, loopback tier | 130 passed, 0 failed, 12 skipped | **130 passed, 0 failed, 12 skipped** |
+| conformance, network tier | 141 passed, 1 failed, 0 skipped | **141 passed, 1 failed, 0 skipped** |
+| `tests/clients` | 94 checks, 0 failures | **94 checks, 0 failures** |
+| `tests/curl` groups A–F | 147 passed, 2 failed, 149 cases | **147 passed, 2 failed, 149 cases** |
+| `tests/curl` concurrency sweep | 9 passed, 0 failed | **9 passed, 0 failed**, `AvailMem` delta +0 |
+| `tests/tools/run-livetools.sh` | — | every functional check passes; see below |
+| `tools/ci.sh` | all green | **all green** on macOS (host, four cross configs, conformance build) |
+
+The two curl failures are the two §14 already names and neither is ours:
+`a44_cookies_send` (curl does not write its cookie jar on AmigaOS, §14.7) and
+`f07_ftp_active` (FS-UAE 3.2.35's SLIRP opens no inbound path, §12).
+
+**`run-livetools.sh` reports FAILED on this host for a reason that is not the
+stack and is worth recording so the next person does not chase it.** Its first
+assertion counts `netstack: starting ThreadX` in the serial log to tell a reboot
+from a hang (§25), and FS-UAE writes **nothing at all** to the serial port on
+this machine — `build/serial-*.log` is zero bytes for every run in this section,
+including runs that demonstrably worked. Every functional assertion in that
+script passes. `tests/tools/run-routes.sh` counts the first command's banner in
+the transcript instead, which works here because `ToolsSmoke` reopens
+`DH0:tools.txt` from the top after a reset; the same fallback would make
+`run-livetools.sh` green again on this host.
+
+### 28.6 What is still not there
+
+* **SACK.** Not implemented in the vendored tree at all, and it is now the thing
+  standing between §24's pool-derived window and anything larger — arm C above
+  is what a bigger window costs without it.
+* **RFC 6528 proper**, for the TIME-WAIT recycling property rather than for
+  prediction. It needs the four-tuple, which does not exist where the ISN is
+  chosen, so it means patching `third_party/`.
+* **`NX_ENABLE_LOW_WATERMARK`**, still. §24.7 found it and reported it rather
+  than switching it on; nothing here changed that argument.
