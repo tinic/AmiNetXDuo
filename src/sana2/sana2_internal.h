@@ -67,6 +67,16 @@
 #define AMI_SANA2_RX_MAX_DEPTH      32
 #endif
 
+/*
+ * How long a reader waits for the device to give its queued CMD_READs back
+ * once it has asked. 25 x 2 ticks is one second, which is generous for a
+ * driver that honours AbortIO() and irrelevant for one that does not -- the
+ * point is that it is BOUNDED. It used to be WaitIO(), with no bound at all.
+ */
+#ifndef AMI_SANA2_RX_REAP_TRIES
+#define AMI_SANA2_RX_REAP_TRIES     25
+#endif
+
 #ifndef AMI_SANA2_TX_SLOTS
 #define AMI_SANA2_TX_SLOTS          8
 #endif
@@ -155,6 +165,12 @@ typedef struct AmiSana2Rx
     volatile BOOL       stop;
     volatile BOOL       failed;
 
+    /* Reads the device would not give back at teardown. Nonzero means this
+       reader's slots, its pinned packets and its reply port are all still
+       reachable by the device, so none of them may be freed -- see
+       ami_sana2_rx_teardown(). */
+    volatile UWORD      orphans;
+
     AmiRxSlot           slot[AMI_SANA2_RX_MAX_DEPTH];
 } AmiSana2Rx;
 
@@ -214,6 +230,11 @@ struct AmiSana2If
     /* RX readers, one per packet type. */
     AmiSana2Rx          rx[AMI_SANA2_RX_READERS];
     BOOL                rx_running;
+
+    /* Set when a reader could not be reclaimed -- either it never exited or
+       the device kept its CMD_READs. The whole interface is then unfreeable
+       and unrestartable, because the device holds pointers into it. */
+    BOOL                rx_orphaned;
 
     AmiSana2Stats       stats;
 };

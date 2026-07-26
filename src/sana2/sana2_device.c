@@ -576,6 +576,10 @@ VOID ami_sana2_close(AmiSana2If *iface)
     if (iface == NULL)
         return;
 
+    /* ami_sana2_rx_stop() takes the wire offline itself, and it does it
+       FIRST -- S2_OFFLINE is what returns the readers' queued CMD_READs on a
+       device that ignores AbortIO(). This used to offline after the stop, and
+       paid ten seconds of reader timeouts for the privilege. */
     ami_sana2_rx_stop(iface);
     ami_sana2_tx_drain(iface);
 
@@ -583,9 +587,30 @@ VOID ami_sana2_close(AmiSana2If *iface)
     {
         ami_sana2_offline(iface);
 
+        /*
+         * A device that still owns one of our read requests must not be
+         * closed and its memory must not be freed: the request points into
+         * this allocation and into a reply port inside it, and the next frame
+         * that matches would be written into whatever took their place. On a
+         * machine with no memory protection that is the difference between a
+         * leak and a crash three commands later.
+         */
+        if (iface->rx_orphaned)
+        {
+            AMI_ERROR("sana2: leaking the interface -- the device still holds "
+                      "read requests inside it");
+            return;
+        }
+
         iface->templ.ios2_Req.io_Message.mn_ReplyPort = NULL;
         CloseDevice((struct IORequest *)&iface->templ);
         iface->device_open = FALSE;
+    }
+
+    if (iface->rx_orphaned)
+    {
+        AMI_ERROR("sana2: leaking the interface -- readers unreclaimed");
+        return;
     }
 
     if (iface->interface_ptr != NULL)

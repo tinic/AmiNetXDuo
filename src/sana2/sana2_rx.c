@@ -273,8 +273,115 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
 
 /* --------------------------------------------------------------- shutdown */
 
+/*
+ * CMD_FLUSH: "abort and return all queued I/O requests for this unit."
+ *
+ * Unit-wide rather than per-request, so it is the second thing tried and not
+ * the first -- it takes the other reader's queued reads with it, which costs
+ * a few frames during a shutdown that was going to lose them anyway. It is
+ * the command exec defines for precisely the case where AbortIO() is a no-op,
+ * and several SANA-II drivers implement it when they do not implement abort.
+ */
+static VOID ami_sana2_rx_flush(AmiSana2Rx *rx)
+{
+    struct MsgPort   *port;
+    struct IOSana2Req req;
+
+    port = CreateMsgPort();
+    if (port == NULL)
+        return;
+
+    req = rx->iface->templ;
+    req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+    req.ios2_Req.io_Message.mn_ReplyPort    = port;
+    req.ios2_Req.io_Message.mn_Length       = (UWORD)sizeof(struct IOSana2Req);
+    req.ios2_Req.io_Command                 = CMD_FLUSH;
+    req.ios2_Req.io_Error                   = 0;
+    req.ios2_WireError                      = 0;
+
+    /* DoIO() blocks in exec Wait(); nothing inside the bracket may touch
+       ThreadX or NetX Duo state. */
+    ami_sana2_block_enter();
+    (VOID)DoIO((struct IORequest *)&req);
+    ami_sana2_block_leave();
+
+    DeleteMsgPort(port);
+}
+
+/*
+ * Collect whatever the device has given back, waiting up to `tries` ticks of
+ * 40 ms, and answer how many requests it still owns.
+ *
+ * WHY THIS IS NOT WaitIO()
+ *
+ *   It used to be, and WaitIO() has no deadline. Commodore's a2065.device
+ *   2.16 does not honour AbortIO() on a queued CMD_READ -- the top of
+ *   CMakeLists.txt records the same discovery from the other end of the
+ *   lifecycle, where the raw-framing probe posted a read, aborted it, and hung
+ *   ami_sana2_open() for ever -- so the abort above is a request, not a
+ *   guarantee, and a reader that trusted it never came back. That is what put
+ *   the two `reader did not stop` warnings in every shutdown, and ten of the
+ *   sixteen seconds a lone `curl --version` was costing.
+ *
+ *   GetMsg() does not block, so no ami_sana2_block_enter() bracket is needed
+ *   here; tx_thread_sleep() must be outside one, which is the other half of
+ *   why the loop is shaped this way.
+ */
+static UWORD ami_sana2_rx_reap(AmiSana2Rx *rx, UWORD tries)
+{
+    UWORD outstanding;
+    UWORD i;
+    UWORD t = 0;
+
+    for (;;)
+    {
+        struct Message *msg;
+
+        while ((msg = GetMsg(rx->port)) != NULL)
+            ((AmiRxSlot *)msg)->posted = FALSE;
+
+        outstanding = 0;
+        for (i = 0; i < rx->depth; i++)
+        {
+            if (rx->slot[i].posted)
+                outstanding++;
+        }
+
+        if (outstanding == 0 || t >= tries)
+            break;
+
+        t++;
+        tx_thread_sleep(2);
+    }
+
+    return outstanding;
+}
+
+/*
+ * Return every outstanding read, or say how many are still gone.
+ *
+ * Three steps, most polite first, because no one of them works on every
+ * driver:
+ *
+ *   1. AbortIO() on each. Correct, cheap, and what a well-behaved device
+ *      answers immediately; a2065.device 2.16 ignores it.
+ *   2. CMD_FLUSH, which exec defines as "abort all queued requests for this
+ *      unit" and which SANA-II carries forward. Unit-wide rather than
+ *      per-request, which is why it is second.
+ *   3. Give up and SAY SO, having freed nothing the device can still write
+ *      into. That is the part that matters: the old code freed the reply
+ *      port, released the pinned packets and let ami_sana2_close() free the
+ *      whole interface while the device still held pointers into all three.
+ *      On a machine with no memory protection that is not a leak, it is a
+ *      corruption waiting for the next frame to arrive.
+ *
+ * In practice none of this fires any more, because ami_sana2_rx_stop() now
+ * takes the wire offline BEFORE stopping the readers and S2_OFFLINE returns
+ * every queued read by itself. This is the belt to that pair of braces.
+ */
 static VOID ami_sana2_rx_teardown(AmiSana2Rx *rx)
 {
+    UWORD outstanding;
     UWORD i;
 
     for (i = 0; i < rx->depth; i++)
@@ -283,18 +390,26 @@ static VOID ami_sana2_rx_teardown(AmiSana2Rx *rx)
             AbortIO((struct IORequest *)&rx->slot[i].req);
     }
 
-    /* WaitIO() blocks in exec Wait(); nothing inside this bracket may touch
-       ThreadX or NetX Duo state. */
-    ami_sana2_block_enter();
-    for (i = 0; i < rx->depth; i++)
+    outstanding = ami_sana2_rx_reap(rx, AMI_SANA2_RX_REAP_TRIES);
+
+    if (outstanding != 0)
     {
-        if (rx->slot[i].posted)
-        {
-            WaitIO((struct IORequest *)&rx->slot[i].req);
-            rx->slot[i].posted = FALSE;
-        }
+        AMI_WARN("sana2: %ld read(s) survived AbortIO; trying CMD_FLUSH",
+                 (long)outstanding);
+        ami_sana2_rx_flush(rx);
+        outstanding = ami_sana2_rx_reap(rx, AMI_SANA2_RX_REAP_TRIES);
     }
-    ami_sana2_block_leave();
+
+    rx->orphans = outstanding;
+
+    if (outstanding != 0)
+    {
+        /* Nothing below this line may run: every one of those is a pointer
+           the device still holds. */
+        AMI_ERROR("sana2: %ld read(s) still owned by the device; leaking the "
+                  "reader rather than corrupting memory", (long)outstanding);
+        return;
+    }
 
     for (i = 0; i < rx->depth; i++)
     {
@@ -445,6 +560,13 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
     if (iface->rx_running)
         return 0;
 
+    /* A reader the device still owns cannot be re-created on top of. */
+    if (iface->rx_orphaned)
+    {
+        AMI_ERROR("sana2: interface has orphaned readers; not restarting");
+        return -1;
+    }
+
     if (iface->pool == NULL || iface->ip == NULL)
         return -1;
 
@@ -516,6 +638,32 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
 {
     UWORD i;
 
+    /*
+     * OFFLINE FIRST, AND THE ORDER IS THE WHOLE FIX.
+     *
+     * S2_OFFLINE returns every queued CMD_READ with S2ERR_OUTOFSERVICE --
+     * ami_sana2_rx_drain() has said so in a comment since the day it was
+     * written -- and it is the only mechanism that works on a device which
+     * ignores AbortIO(), which Commodore's a2065.device 2.16 does.
+     *
+     * Every caller took the interface offline ALREADY, and every one of them
+     * did it AFTER stopping the readers: ami_sana2_close(), NX_LINK_DISABLE
+     * and NX_LINK_UNINITIALIZE all read `rx_stop(); tx_drain(); offline();`.
+     * So the one command that would have freed the readers was issued ten
+     * seconds after they had given up waiting, and the readers were torn down
+     * -- threads terminated, stacks freed -- with reads still queued.
+     *
+     * Measured, A1200 profile: `curl --version` took 16.22 s when nothing
+     * else held bsdsocket.library open and 0.32 s when AddNetInterface did.
+     * The difference was two five-second `reader did not stop` timeouts, one
+     * per reader, on every last close.
+     *
+     * Doing it here rather than at each call site means the next caller
+     * cannot get it wrong. ami_sana2_offline() is idempotent, so the
+     * offline() the callers still do afterwards costs nothing.
+     */
+    (VOID)ami_sana2_offline(iface);
+
     for (i = 0; i < AMI_SANA2_RX_READERS; i++)
     {
         AmiSana2Rx *rx = &iface->rx[i];
@@ -534,7 +682,20 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
             Signal(rx->task, rx->wake_mask);
 
         if (tx_semaphore_get(&rx->exited, 5 * NX_IP_PERIODIC_RATE) != TX_SUCCESS)
-            AMI_WARN("sana2: reader %ld did not stop", (long)i);
+        {
+            /*
+             * The reader is still somewhere inside its own teardown, which
+             * now has a deadline of its own, so this should not happen. If it
+             * does, the thread is running on `rx->stack` and the ThreadX
+             * control block is live -- so neither may be freed. Say so and
+             * leave them: an interface that leaks 32 KB is recoverable and a
+             * thread executing freed memory is not.
+             */
+            AMI_ERROR("sana2: reader %ld did not stop; leaking its stack "
+                      "rather than freeing memory it is running on", (long)i);
+            iface->rx_orphaned = TRUE;
+            continue;
+        }
 
         /*
          * Give the thread time to run off the end of its entry function before
@@ -547,6 +708,12 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
         tx_thread_delete(&rx->thread);
         tx_semaphore_delete(&rx->ready);
         tx_semaphore_delete(&rx->exited);
+
+        /* The reader exited, but it may have exited leaving reads the device
+           would not give back. Its slots, its packets and its reply port are
+           inside this interface, so the interface itself cannot be freed. */
+        if (rx->orphans != 0)
+            iface->rx_orphaned = TRUE;
 
         if (rx->stack != NULL)
         {
