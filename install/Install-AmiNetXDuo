@@ -780,35 +780,18 @@
 
 (working "Installing the network commands")
 
-; Two blocks, not one list of eleven: Installer sizes its choice gadgets
-; against whatever room is left on the page, and when they do not fit it
-; silently creates fewer gadgets than there are choices -- which ends as
-; "askchoice: No choices selected" partway through an install rather than as
-; anything the author would see.  install/tools/checkscript.py fails the build
-; on more than eight, which is how this was caught.  The split is also the
-; more useful one to be offered: bringing the interface up, then the clients
-; that use it.
-
 (copyfiles
   (prompt "Installing the network commands into C:")
-  (help   @copyfiles-help)
+  (help   "AddNetInterface, Online and Offline bring an interface up and "
+          "take it down.  ShowNetStatus and netstat report what it is "
+          "doing.  ping and host are the usual diagnostics.  fetch "
+          "retrieves an http:// or https:// URL, and nc, telnet and ftp "
+          "are netcat and the usual clients.\n\nAll of them are installed: "
+          "they are small, and a stack missing the command you happen to "
+          "want is worse than a drawer with eleven files in it.")
   (source S_C)
   (dest   "C:")
-  (choices "AddNetInterface" "Online" "Offline" "ShowNetStatus"
-           "ping" "netstat" "host")
-  (confirm)
-  (optional "force"))
-
-(copyfiles
-  (prompt "Installing the network clients into C:")
-  (help   "fetch retrieves an http:// or https:// URL.  nc is netcat: it "
-          "connects to a port, or listens on one.  telnet and ftp are the "
-          "usual clients.\n\nNone of them is needed to bring the network "
-          "up -- they are what you use once it is up.")
-  (source S_C)
-  (dest   "C:")
-  (choices "fetch" "nc" "telnet" "ftp")
-  (confirm)
+  (all)
   (optional "force"))
 
 (complete 55)
