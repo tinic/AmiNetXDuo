@@ -1,0 +1,157 @@
+# Cut a release: build the .lha and attach it to a GitHub Release.
+#
+# Triggered by pushing a plain vX.Y.Z tag, which is the only release tag form
+# this project uses -- the commit count belongs in a binary's version output
+# and nowhere else (tools/version.sh, docs/RESEARCH.md).
+#
+# The tag is CHECKED against the tree rather than trusted: pushing v0.2.0 at a
+# commit whose project() line still says 0.1.0 fails the job instead of
+# publishing an archive that misnames itself.  Same reasoning as
+# cmake/AmiNetXDuoVersion.cmake refusing to configure when a submodule bump has
+# left the recorded NetX Duo version stale.
+#
+# workflow_dispatch builds the archive and uploads it as a workflow artefact
+# WITHOUT creating a release, so the packaging can be exercised without
+# publishing anything.
+#
+# This does not run the emulator tiers -- it cannot, they need a Kickstart ROM.
+# A release therefore carries exactly the assurance tier 1 gives it, and the
+# release notes say so rather than leaving the reader to assume otherwise.
+#
+# SPDX-License-Identifier: MIT
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write          # creating a release and uploading assets
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+
+  release:
+    name: build the distribution archive
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          # The .readme and the release body quote a commit count, and
+          # tools/version.sh --build derives it from history.
+          fetch-depth: 0
+
+      - name: Derive the version
+        run: |
+          tools/version.sh --env >> "$GITHUB_ENV"
+          echo "### $(tools/version.sh --long)" >> "$GITHUB_STEP_SUMMARY"
+
+      # A tag that disagrees with the tree is a release that lies about its own
+      # contents, which is worse than no release.
+      - name: Check the tag against the tree
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          want=$(tools/version.sh --tag)
+          got=${GITHUB_REF#refs/tags/}
+          if [ "$want" != "$got" ]; then
+              echo "::error::tag $got does not match the tree, which says $want."
+              echo "Bump project(AmiNetXDuo VERSION ...) in CMakeLists.txt, or retag."
+              exit 1
+          fi
+          echo "tag $got matches the tree"
+
+      - name: Toolchain pin
+        id: pin
+        run: echo "sha=$(tools/fetch-toolchain.sh --print-sha)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the pinned m68k toolchain
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/aminetxduo/toolchain
+          key: m68k-amigaos-gcc-15.2.0-${{ steps.pin.outputs.sha }}
+
+      - name: Fetch the toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: tools/fetch-toolchain.sh
+
+      - name: Report the toolchain
+        run: |
+          . tools/amiga-toolchain.sh
+          echo "AMIGA_TOOLCHAIN_ROOT=$AMIGA_TOOLCHAIN_ROOT" >> "$GITHUB_ENV"
+          "$AMIGA_GCC" --version | head -1
+
+      # Tier 1 in full before packaging anything.  A release that was never
+      # built clean is not a release, and this is the same script a developer
+      # runs locally.
+      - name: tools/ci.sh
+        run: tools/ci.sh host cross conformance
+
+      # TLS on, because the archive ships tls.library and the trust store.
+      # make-dist.sh refuses to pack a missing or host-scavenged store, so a
+      # release cannot silently ship one that trusts nothing.
+      - name: Build the shipping configuration
+        run: |
+          cmake -S . -B build/release \
+                -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DAMINETXDUO_TLS=ON
+          cmake --build build/release --parallel
+
+      - name: Build the distribution archive
+        run: dist/make-dist.sh -b build/release
+
+      - name: Describe what is in it
+        run: |
+          {
+            echo "### $(tools/version.sh --long)"
+            echo
+            echo '```'
+            ls -l build/dist/*.lha build/dist/*.readme
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Always uploaded, tag or not, so workflow_dispatch exercises packaging
+      # without publishing.
+      - name: Upload the archive as a workflow artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AmiNetXDuo-${{ env.AMINETXDUO_VERSION_COMPOUND }}
+          path: |
+            build/dist/*.lha
+            build/dist/*.readme
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes=$(mktemp)
+          {
+            echo "$(tools/version.sh --long)"
+            echo
+            echo "\`AmiNetXDuo-$(tools/version.sh --product).lha\` is the Aminet-layout"
+            echo "archive: drop it on a Workbench window and run \`Install-AmiNetXDuo\`."
+            echo
+            echo "**What this build was tested with.** Tier 1 only -- host tests, all"
+            echo "four cross configurations and the conformance suite build. The"
+            echo "on-Amiga tiers need a Kickstart ROM and \`a2065.device\`, neither of"
+            echo "which is redistributable, so they do not run here. The conformance"
+            echo "score, throughput and anything measured under emulation come from a"
+            echo "machine that has them; see the README."
+            echo
+            echo "Nothing in this project has yet run on real hardware."
+          } > "$notes"
+
+          gh release create "${GITHUB_REF#refs/tags/}" \
+             --title "$(tools/version.sh --long)" \
+             --notes-file "$notes" \
+             build/dist/*.lha build/dist/*.readme
