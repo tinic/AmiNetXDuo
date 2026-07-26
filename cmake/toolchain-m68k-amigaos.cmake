@@ -113,7 +113,18 @@ endif()
 set(AMIGA_ARCH_FLAGS "-m68020" CACHE STRING "Target CPU flags (68020 floor, see docs/RESEARCH.md §9)")
 
 set(CMAKE_C_FLAGS_INIT "${AMIGA_ARCH_FLAGS} -fomit-frame-pointer -fno-strict-aliasing")
-set(CMAKE_C_FLAGS_RELEASE_INIT "-O2 -DNDEBUG")
+# -O3, stated rather than inherited.  This used to say -O2 and had never once
+# produced an -O2 build: CMake's Compiler/GNU module APPENDS its own
+# "-O3 -DNDEBUG" after CMAKE_C_FLAGS_RELEASE_INIT, and the last -O on the
+# command line wins.  Every figure this project has published -- the checksum
+# and copy primitives, the crypto, the throughput numbers -- was measured on an
+# -O3 build while the file claimed -O2.
+#
+# Left at -O3 deliberately rather than "fixed" to -O2: -O3 is what everything
+# was measured at, and forcing -O2 would invalidate those numbers to honour a
+# comment.  src/tools appends -Os after this, which is why the commands are the
+# one thing that really is built for size.
+set(CMAKE_C_FLAGS_RELEASE_INIT "-O3 -DNDEBUG")
 set(CMAKE_C_FLAGS_DEBUG_INIT "-O1 -g -DAMINETXDUO_DEBUG=1")
 
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM BEFORE)
