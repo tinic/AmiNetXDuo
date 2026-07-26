@@ -69,7 +69,10 @@ function(aminetxduo_add_tool target output)
     # targets are reached through a romtag that Exec finds by scanning the
     # loaded segment, with no relocation pointing at it, so collecting one
     # throws the library away (measured: 60 KB off tls.library).
-    target_compile_options(${target} PRIVATE -ffunction-sections)
+    # -fno-optimize-sibling-calls is not a tuning choice; see the block above
+    # and docs/RESEARCH.md §25.  It travels with -ffunction-sections.
+    target_compile_options(${target} PRIVATE
+        -ffunction-sections -fno-optimize-sibling-calls)
     target_link_options(${target} PRIVATE -Wl,--gc-sections)
 
     if(TOOL_DEFINES)
@@ -96,6 +99,8 @@ function(aminetxduo_add_tool target output)
                 "-DTOOL_BINARY=$<TARGET_FILE:${target}>"
                 -P "${CMAKE_SOURCE_DIR}/cmake/check-version-tag.cmake"
         VERBATIM)
+
+    aminetxduo_check_pcrel(${target})
 
     if(AMIGA_SIZE)
         add_custom_command(TARGET ${target} POST_BUILD

@@ -190,6 +190,24 @@ if(NOT CMAKE_CROSSCOMPILING)
     endif()
 endif()
 
+# Every linked AmigaOS image is checked for the mis-resolved 32-bit PC-relative
+# branch this toolchain emits from a cross-section tail call.  It is a POST_BUILD
+# check because the wrong address exists only in the linked image -- the object
+# file's relocation is well formed.  `ping` rebooted the machine on one of these.
+# See cmake/check-pcrel-branches.cmake and docs/RESEARCH.md §25.
+function(aminetxduo_check_pcrel target)
+    if(NOT CMAKE_CROSSCOMPILING)
+        return()
+    endif()
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+                "-DBINARY=$<TARGET_FILE:${target}>"
+                "-DOBJDUMP=${CMAKE_OBJDUMP}"
+                "-DNM=${CMAKE_NM}"
+                -P "${CMAKE_SOURCE_DIR}/cmake/check-pcrel-branches.cmake"
+        VERBATIM)
+endfunction()
+
 add_subdirectory(port/threadx-amiga)
 add_subdirectory(port/netxduo-amiga)
 

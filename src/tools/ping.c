@@ -99,24 +99,6 @@ enum
 #define PING_DEFAULT_INTERVAL   1UL         /* seconds                        */
 #define PING_REPLY_WAIT         5UL         /* seconds to wait for one reply  */
 
-/*
- * The ABI numbers this command needs beyond toolsock.h's, and the four errnos
- * a stack without SOCK_RAW answers with.
- *
- * Local rather than shared, for the reason traceroute.c states at the same
- * spot: toolsock is common ground for several commands being written at once.
- * These are <netinet/in.h>'s and <sys/socket.h>'s values -- 4.4BSD's, and
- * Roadshow's -- NOT NetX Duo's addons/BSD layer, which numbers IPPROTO_IP 2
- * and is not what this library speaks. Worth folding into toolsock.h once it
- * settles; there are now two commands that want them.
- */
-#define PING_SOCK_RAW           3
-#define PING_IPPROTO_ICMP       1
-#define PING_EPROTONOSUPPORT    43
-#define PING_ESOCKTNOSUPPORT    44
-#define PING_EOPNOTSUPP         45
-#define PING_EAFNOSUPPORT       47
-
 /* ICMP, the two types this command reads. */
 #define ICMP_ECHOREPLY          0
 #define ICMP_ECHO               8
@@ -378,16 +360,16 @@ int main(int argc, char **argv)
 
     ami_config_format_ip(target, addrtext, sizeof(addrtext));
 
-    sock = tool_sock_socket(sb, TOOL_AF_INET, PING_SOCK_RAW,
-                            PING_IPPROTO_ICMP);
+    sock = tool_sock_socket(sb, TOOL_AF_INET, TOOL_SOCK_RAW,
+                            TOOL_IPPROTO_ICMP);
     if (sock < 0)
     {
         LONG err = tool_sock_errno(sb);
 
         tool_error("cannot open a raw socket: %s", (LONG)tool_sock_errstr(err));
 
-        if (err == PING_EPROTONOSUPPORT || err == PING_ESOCKTNOSUPPORT ||
-            err == PING_EOPNOTSUPP || err == PING_EAFNOSUPPORT)
+        if (err == TOOL_EPROTONOSUPPORT || err == TOOL_ESOCKTNOSUPPORT ||
+            err == TOOL_EOPNOTSUPP || err == TOOL_EAFNOSUPPORT)
         {
             tool_advise_blank();
             tool_advise("An ICMP echo needs SOCK_RAW, and the TCP/IP stack on");
@@ -403,32 +385,24 @@ int main(int argc, char **argv)
      * NON-BLOCKING, and this is not belt-and-braces -- it is the only correct
      * way to use a descriptor that has been through select().
      *
-     * MEASURED, on an A1200 with the A2065 on SLIRP, with AMI_INFO traces on
-     * the serial port because a command that never exits never flushes its
-     * stdout:
+     * select() readiness is advisory in every stack there has ever been: the
+     * datagram can be taken by another reader, or dropped by a checksum test,
+     * between the poll and the read. A program that blocks on the strength of
+     * it is relying on a guarantee no socket API offers. FIONBIO makes the
+     * read return EWOULDBLOCK instead, the deadline below does its job, and a
+     * stack that loses a reply costs one "Request timed out" line rather than
+     * the command.
      *
-     *     pingtrace: send 64 seq 0
-     *     pingtrace: sendto returned 64
-     *     pingtrace: select left=200
-     *     pingtrace: select returned 1
-     *     pingtrace: recvfrom
-     *     <nothing, for the rest of the run>
-     *
-     * WaitSelect() said the socket was readable and the recvfrom() that
-     * followed suspended forever: bsd_raw_receive() found as_RawHead empty
-     * and went into tx_semaphore_get(TX_WAIT_FOREVER). Three emulator runs,
-     * every one identical, and the command never returned -- so ping hung and
-     * took the whole test run's timeout with it.
-     *
-     * Whatever makes those two disagree lives in src/bsdsocket/raw.c and
-     * select.c and is not this command's to fix. But select() readiness is
-     * advisory in every stack there has ever been -- the packet can be taken
-     * by another reader, or dropped by a checksum test, between the poll and
-     * the read -- so a program that blocks on the strength of it is relying
-     * on a guarantee no socket API offers. FIONBIO makes the read return
-     * EWOULDBLOCK instead, the deadline below does its job, and a stack that
-     * loses a reply costs one "Request timed out" line rather than the
-     * command.
+     * AN EARLIER VERSION OF THIS COMMENT BLAMED THE STACK, AND WAS WRONG.
+     * It read a serial trace that stopped at `recvfrom` as proof that
+     * WaitSelect() and bsd_raw_receive() disagreed about the queue. They never
+     * did. The command was jumping into the middle of another function on the
+     * way out of tool_delay_ticks() -- a mis-resolved 32-bit PC-relative
+     * branch, docs/RESEARCH.md 25 -- and the trace stopped where it did
+     * because the MACHINE stopped, not because a read blocked. Adding FIONBIO
+     * changed nothing, which should have been the clue. The raw receive path
+     * was innocent throughout and is not to be "fixed" on the strength of that
+     * old note.
      */
     {
         LONG nonblock = 1;

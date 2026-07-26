@@ -43,6 +43,8 @@ if(AMINETXDUO_USERGROUP_LINK)
     add_executable(usergroup_library ${USERGROUP_SOURCES})
     set_target_properties(usergroup_library PROPERTIES
         OUTPUT_NAME "usergroup.library")
+
+    aminetxduo_check_pcrel(usergroup_library)
     target_include_directories(usergroup_library PRIVATE
         ${AMINETXDUO_CORE_INCLUDES} "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(usergroup_library PRIVATE aminetxduo_common)

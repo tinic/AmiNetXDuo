@@ -6,6 +6,19 @@ target_link_libraries(aminetxduo_common PUBLIC threadx)
 # uses two or three functions out of compat.c, and --gc-sections can only drop
 # what has a section to drop.  See docs/RESEARCH.md §21.
 target_compile_options(aminetxduo_common PRIVATE -ffunction-sections)
+# -fno-optimize-sibling-calls TRAVELS WITH -ffunction-sections, ALWAYS.
+#
+# A tail call to a function in ANOTHER SECTION of the SAME object is the one
+# construct that makes this toolchain emit a 32-bit PC-relative branch against
+# a local section symbol, and the linker resolves that relocation TWELVE BYTES
+# SHORT -- into the middle of the preceding function.  `ping` rebooted the
+# machine on exactly this: `return tool_break();` at the end of
+# tool_delay_ticks() landed inside tool_break_arm()'s `move.l #4096,d1`.
+#
+# -ffunction-sections is what creates the cross-section reference, so the two
+# flags are one decision and must not be separated.  cmake/check-pcrel-branches
+# .cmake fails the build if one gets through anyway.  docs/RESEARCH.md §25.
+target_compile_options(aminetxduo_common PRIVATE -fno-optimize-sibling-calls)
 
 # ------------------------------------------------------------- NX_RAND ---
 #

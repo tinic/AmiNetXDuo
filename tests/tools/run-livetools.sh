@@ -157,6 +157,7 @@ set +e
 RUN_RC=$?
 set -e
 
+SERIAL="$ROOT/build/serial-$AMINETXDUO_RUN_TAG.log"
 REPORT="$HD/tools.txt"
 [ -f "$REPORT" ] || { echo "FAIL: the guest wrote no $REPORT (run rc=$RUN_RC)" >&2; exit 1; }
 
@@ -172,6 +173,38 @@ FAILED=0
 
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
+
+# ---- did the machine stay up? --------------------------------------------
+#
+# THIS ASSERTION EXISTS BECAUSE A REBOOT WAS TWICE RECORDED AS A HANG.
+#
+# `ping` used to jump into the middle of another function and take the machine
+# down (docs/RESEARCH.md §25).  The guest restarted, ToolsSmoke reopened
+# DH0:tools.txt from the top, and the transcript that came back was a short,
+# well-formed file that simply stopped -- indistinguishable from a command that
+# was still running when the timeout fired.  Two separate investigations wrote
+# it up as a hang before anyone counted the boots.
+#
+# One boot starts the netstack once, so `netstack: starting ThreadX` in the
+# serial log is a boot counter, and it is the only thing in the whole run that
+# can tell the two apart.  A crash that reboots is a DIFFERENT and much worse
+# defect than a command that blocks, and a test that cannot say which it saw
+# sends the next person looking in the wrong place.
+if [ ! -s "$SERIAL" ]; then
+    fail "no serial log at $SERIAL -- cannot tell a reboot from a hang"
+else
+    BOOTS=$(grep -c "netstack: starting ThreadX" "$SERIAL" || true)
+    if [ "$BOOTS" -gt 1 ]; then
+        fail "THE MACHINE REBOOTED: the netstack started $BOOTS times in one run"
+        echo "       A command crashed hard enough to reset the Amiga. This is" >&2
+        echo "       not a hang, whatever the transcript looks like -- see" >&2
+        echo "       docs/RESEARCH.md 25." >&2
+    elif [ "$BOOTS" -eq 1 ]; then
+        pass "the machine booted exactly once (no reset)"
+    else
+        fail "the netstack never started -- the run did not get far enough to judge"
+    fi
+fi
 
 # ---- the negative half: the sentences that mean "I cannot see the stack" ----
 #
