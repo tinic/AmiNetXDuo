@@ -2,7 +2,7 @@
 #
 # Run an AmigaOS executable under FS-UAE and capture its output.
 #
-#   tools/fsuae-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-k MHZ] [-n]
+#   tools/fsuae-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-k MHZ] [-n] [-x]
 #                      <executable> [extra files...]
 #
 # -m selects the machine profile. A1200 (the default) is the project floor:
@@ -47,13 +47,15 @@ MODEL=A1200
 NETWORK=0
 CPU=""
 CLOCK=""
+PERF_RUN="${AMINETXDUO_PERF:-0}"
 
-while getopts "t:m:c:k:n" opt; do
+while getopts "xt:m:c:k:n" opt; do
     case "$opt" in
         t) TIMEOUT="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
         k) CLOCK="$OPTARG" ;;
+        x) PERF_RUN=1 ;;
         n) NETWORK=1 ;;
         *) echo "usage: $0 [-t seconds] [-m model] [-c cpu] [-k MHz] [-n] <executable> [files...]" >&2; exit 2 ;;
     esac
@@ -208,7 +210,7 @@ EOF
 # states and floppy overlays, so two concurrent runs fight over those files and
 # one of them quits early -- which looks exactly like a crash in the code under
 # test. Give each run a private base directory.
-# --------------------------------------------------------------- serialise --
+# ------------------------------------------------------------ two queues --
 #
 # Concurrent fs-uae instances interfere even with per-run base_dir isolation:
 # three separate workstreams independently reported runs dying with a premature
@@ -216,45 +218,130 @@ EOF
 # The symptom is indistinguishable from a crash in the code under test, which
 # makes it expensive -- an agent chases a phantom bug instead of its own work.
 #
-# Runs therefore queue on an exclusive lock. A directory is the lock, because
-# mkdir is atomic everywhere and macOS ships no flock(1). The owning PID is
-# recorded so a lock left by a killed run can be reclaimed rather than wedging
-# the queue forever.
+# But one exclusive lock across every run does not scale: with several
+# workstreams active, a correctness check waits behind somebody else's
+# forty-minute measurement, and the measurement waits behind a queue of
+# ten-second checks.
 #
-# AMINETXDUO_NO_LOCK=1 opts out; AMINETXDUO_LOCK_WAIT caps the wait (default
-# 2400s -- a conformance run plus boot approaches five minutes and several may
-# be queued ahead).
-LOCKDIR="$ROOT/build/.fsuae.lock"
+# So there are two lanes, and they are a reader/writer lock:
+#
+#   correctness runs (default)  share the machine, up to AMINETXDUO_SLOTS of
+#                               them, and yield to any queued measurement
+#   measurement runs (-x)       take the machine alone: they announce
+#                               themselves, block new sharers, wait for the
+#                               current ones to drain, then hold it exclusively
+#
+# A timing taken while anything else runs is fiction -- a contended host has
+# already corrupted one set of figures in this project -- so anything whose
+# output is a number must pass -x or set AMINETXDUO_PERF=1.
+#
+# The residual risk is that sharing reintroduces the premature-exit failure.
+# That is not silently tolerated: a shared run which dies early or never writes
+# DH0:.done prints shared_run_warning() telling the reader to re-run with -x
+# before concluding anything. A slower answer is cheaper than a wrong one.
+#
+# A directory is the lock, because mkdir is atomic everywhere and macOS ships
+# no flock(1). Every lock and slot records its owner's pid, so anything left by
+# a killed run is reclaimed rather than wedging the queue.
+#
+# AMINETXDUO_NO_LOCK=1 opts out entirely; AMINETXDUO_LOCK_WAIT caps the wait.
+LOCKDIR="$ROOT/build/.fsuae.lock"          # exclusive: a measurement holds this
+SLOTDIR="$ROOT/build/.fsuae.slots"         # shared: one subdirectory per correctness run
+PERFWAIT="$ROOT/build/.fsuae.perfwait"     # set while a measurement is queued
 LOCK_WAIT="${AMINETXDUO_LOCK_WAIT:-2400}"
 LOCK_HELD=0
+SLOT_HELD=""
+
+# How many correctness runs may share the machine. fs-uae is essentially one
+# thread per instance, so this is bounded by cores rather than by memory; three
+# leaves room for the compiles that run alongside.
+SLOTS="${AMINETXDUO_SLOTS:-3}"
 
 release_lock() {
-    [ "$LOCK_HELD" = "1" ] || return 0
-    rm -rf "$LOCKDIR" 2>/dev/null || true
-    LOCK_HELD=0
+    [ -n "$SLOT_HELD" ] && { rm -rf "$SLOT_HELD" 2>/dev/null || true; SLOT_HELD=""; }
+    [ "$LOCK_HELD" = "1" ] && { rm -rf "$LOCKDIR" "$PERFWAIT" 2>/dev/null || true; LOCK_HELD=0; }
+    return 0
 }
 
-if [ "${AMINETXDUO_NO_LOCK:-0}" != "1" ]; then
-    mkdir -p "$ROOT/build"
-    waited=0
-    while ! mkdir "$LOCKDIR" 2>/dev/null; do
-        owner=$(cat "$LOCKDIR/pid" 2>/dev/null || echo "")
+# A shared run that dies early or never writes DH0:.done is the one failure
+# mode concurrency is known to cause, and it is indistinguishable from a bug in
+# the code under test -- which is exactly what cost three earlier workstreams
+# their time. Say so, loudly, before anyone starts bisecting.
+shared_run_warning() {
+    [ -n "$SLOT_HELD" ] || return 0
+    echo "!!" >&2
+    echo "!! This run SHARED the machine with up to $((SLOTS - 1)) other run(s)." >&2
+    echo "!! Sharing is the known cause of a premature exit with no DH0:.done," >&2
+    echo "!! and it looks identical to a crash in the code under test." >&2
+    echo "!! Re-run with -x (or AMINETXDUO_PERF=1) to take the machine alone" >&2
+    echo "!! BEFORE concluding anything from this failure." >&2
+    echo "!!" >&2
+}
+
+# Reclaim anything whose owner is gone, so a killed run cannot wedge the queue.
+reap_stale() {
+    local d owner
+    for d in "$LOCKDIR" "$PERFWAIT" "$SLOTDIR"/*; do
+        [ -d "$d" ] || continue
+        owner=$(cat "$d/pid" 2>/dev/null || echo "")
         if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
-            echo "==> reclaiming lock from dead pid $owner" >&2
-            rm -rf "$LOCKDIR" 2>/dev/null || true
-            continue
+            echo "==> reclaiming $(basename "$d") from dead pid $owner" >&2
+            rm -rf "$d" 2>/dev/null || true
         fi
-        if [ "$waited" -ge "$LOCK_WAIT" ]; then
-            echo "!! waited ${waited}s for the emulator lock; proceeding anyway" >&2
-            break
-        fi
-        [ "$waited" = 0 ] && echo "==> another run holds the emulator; queueing"
-        sleep 5
-        waited=$((waited + 5))
     done
-    if [ -d "$LOCKDIR" ]; then
+}
+
+slots_busy() { set -- "$SLOTDIR"/*/; [ -d "$1" ] && ls -d "$SLOTDIR"/*/ 2>/dev/null | wc -l || echo 0; }
+
+if [ "${AMINETXDUO_NO_LOCK:-0}" != "1" ]; then
+    mkdir -p "$ROOT/build" "$SLOTDIR"
+    waited=0
+
+    if [ "$PERF_RUN" = "1" ]; then
+        # A measurement needs the machine to itself, or the number is fiction.
+        # Announce first so no further shared runs start, then drain.
+        while ! mkdir "$PERFWAIT" 2>/dev/null; do
+            reap_stale
+            [ "$waited" -ge "$LOCK_WAIT" ] && break
+            [ "$waited" = 0 ] && echo "==> another measurement is queued; waiting"
+            sleep 5; waited=$((waited + 5))
+        done
+        echo $$ > "$PERFWAIT/pid" 2>/dev/null || true
+
+        while [ "$(slots_busy)" -gt 0 ] || ! mkdir "$LOCKDIR" 2>/dev/null; do
+            reap_stale
+            if [ "$waited" -ge "$LOCK_WAIT" ]; then
+                echo "!! waited ${waited}s for the machine to go quiet; measuring anyway" >&2
+                mkdir -p "$LOCKDIR"; break
+            fi
+            [ "$waited" = 0 ] && echo "==> measurement run: waiting for $(slots_busy) run(s) to finish"
+            sleep 5; waited=$((waited + 5))
+        done
         echo $$ > "$LOCKDIR/pid" 2>/dev/null || true
         LOCK_HELD=1
+        echo "==> measurement run: the machine is quiet"
+    else
+        # A correctness run shares. It yields to a queued measurement so that
+        # measurements are not starved by a stream of short jobs.
+        while :; do
+            reap_stale
+            if [ ! -d "$LOCKDIR" ] && [ ! -d "$PERFWAIT" ]; then
+                for i in $(seq 1 "$SLOTS"); do
+                    if mkdir "$SLOTDIR/$i" 2>/dev/null; then
+                        SLOT_HELD="$SLOTDIR/$i"
+                        echo $$ > "$SLOT_HELD/pid" 2>/dev/null || true
+                        break
+                    fi
+                done
+                [ -n "$SLOT_HELD" ] && break
+            fi
+            if [ "$waited" -ge "$LOCK_WAIT" ]; then
+                echo "!! waited ${waited}s for an emulator slot; proceeding anyway" >&2
+                break
+            fi
+            [ "$waited" = 0 ] && echo "==> emulator busy; queueing"
+            sleep 5; waited=$((waited + 5))
+        done
     fi
 fi
 
@@ -473,6 +560,7 @@ while [ "$elapsed" -lt "$TIMEOUT" ]; do
     fi
     if ! kill -0 "$FSUAE_PID" 2>/dev/null; then
         echo "!! fs-uae exited early after ${elapsed}s" >&2
+        shared_run_warning
         EARLY_EXIT=1
         break
     fi
@@ -530,6 +618,7 @@ fi
 
 if [ "$status" = "124" ]; then
     echo "==> TIMEOUT after ${TIMEOUT}s (no DH0:.done)"
+    shared_run_warning
 else
     echo "==> exit status $status after $(( $(date +%s) - WALL_START ))s of host wall clock"
 fi
