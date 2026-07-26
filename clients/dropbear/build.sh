@@ -144,6 +144,23 @@ SHIM_INC="$ROOT/clients/dropbear/include"
 DB_CFLAGS="-I$SHIM_INC $AMIGA_CLIENT_CFLAGS -I$AMIGA_NDK -I$ROOT/include -DFD_SETSIZE=256"
 [ "$TRACE" = "1" ] && DB_CFLAGS="$DB_CFLAGS -DDEBUG_TRACE=1"
 
+# The server, if one is being built, does not fork.
+#
+# svr-main.c forks a child per accepted connection.  fork() on AmigaOS fails
+# and always will (clients/dropbear/amiga_dropbear.c says why), and svr-main
+# treats that as "log a warning, drop the connection" -- so an unmodified
+# build would accept every connection and immediately hang up on it.
+#
+# DEBUG_NOFORK sets fork_ret to 0 instead of calling fork(), which takes the
+# child branch in the SAME process: it closes the listening sockets and runs
+# the session inline.  That is one connection per invocation and then exit,
+# which is the only shape a machine without fork can offer, and it is a real
+# server rather than a broken one.  The DEBUG_ prefix is upstream's name for
+# the switch; there is nothing debug-only about what it does here.
+case " $PROGRAMS " in
+    *" dropbear "*) DB_CFLAGS="$DB_CFLAGS -DDEBUG_NOFORK=1" ;;
+esac
+
 # The shim, built with exactly the flags Dropbear's own objects get, so there
 # is one fd_set and one struct timeval across the whole program.
 SHIM_O="$ROOT/build/clients/obj/db-amiga_dropbear.o"

@@ -85,6 +85,9 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <signal.h>
+#include <sys/stat.h>           /* chmod() */
+#include <sys/wait.h>           /* waitpid() */
+#include <grp.h>                /* getgrnam() */
 
 #include "aminetxduo/random.h"
 
@@ -856,6 +859,98 @@ int fsync(int fd)
 }
 
 /*
+ * SetProtection().  The RWED bits are ACTIVE LOW -- a SET bit forbids the
+ * operation -- which is the opposite of every POSIX mode, so the conversion
+ * is inverted deliberately and not by accident.  The other AmigaOS bits
+ * (archive, script, pure) are cleared, which is what a chmod means: the
+ * caller is stating the whole mode, not adjusting part of it.
+ *
+ * The three POSIX classes collapse into one: AmigaOS has no owner, group or
+ * other, so the mode is read as the OWNER bits and the rest is dropped.
+ */
+int chmod(const char *path, mode_t mode)
+{
+    ULONG prot = 0;
+
+    if (path == NULL) { errno = EFAULT; return -1; }
+
+    if ((mode & S_IRUSR) == 0) prot |= FIBF_READ;
+    if ((mode & S_IWUSR) == 0) prot |= FIBF_WRITE | FIBF_DELETE;
+    if ((mode & S_IXUSR) == 0) prot |= FIBF_EXECUTE;
+
+    if (!SetProtection((CONST_STRPTR)path, prot))
+    {
+        errno = (IoErr() == ERROR_OBJECT_NOT_FOUND) ? ENOENT : EACCES;
+        return -1;
+    }
+    return 0;
+}
+
+/*
+ * There is no ownership to change.  ENOSYS rather than a silent 0: a caller
+ * that gave a file away and was told it worked would be worse off than one
+ * told the platform cannot.
+ */
+int chown(const char *path, uid_t uid, gid_t gid)
+{
+    (void)path; (void)uid; (void)gid;
+    errno = ENOSYS;
+    return -1;
+}
+
+/*
+ * ECHILD is not a stub, it is the answer.  fork() and vfork() above always
+ * fail, so this process has never had a child and never can -- "no children
+ * to wait for" is exactly what happened.
+ */
+pid_t waitpid(pid_t pid, int *status, int options)
+{
+    (void)pid; (void)status; (void)options;
+    errno = ECHILD;
+    return -1;
+}
+
+/*
+ * Succeeds and installs nothing, for the same reason signal() above does:
+ * AmigaOS delivers no asynchronous signals to a C handler, so there is no
+ * mechanism a handler could be attached to.
+ *
+ * Reporting failure would be worse than reporting success.  The server calls
+ * this from commonsetup() for SIGCHLD, SIGINT and SIGPIPE and treats an error
+ * as fatal, so a -1 would refuse to start over handlers that could not fire
+ * anyway: SIGCHLD needs a child, which fork() never produces, and bsdsocket
+ * raises no SIGPIPE.
+ *
+ * oldact is zeroed rather than left alone, so a caller that saves and later
+ * restores gets a defined value instead of stack contents.
+ */
+int sigaction(int sig, const struct sigaction *act, struct sigaction *oldact)
+{
+    (void)sig;
+    (void)act;
+
+    if (oldact != NULL)
+        memset(oldact, 0, sizeof(*oldact));
+
+    return 0;
+}
+
+/*
+ * <unistd.h> defines environ as (*environ_ptr), and environ_ptr is declared
+ * by that header but defined nowhere in the toolchain -- so any client that
+ * touches environ fails to link rather than failing at runtime.
+ *
+ * An empty, correctly terminated environment is the accurate answer.  AmigaOS
+ * keeps its environment in ENV:, which is a directory and not a char ** the
+ * process owns; the code that wants a named variable already goes through
+ * GetVar() (see amiga_pw_fill above).  The one caller of environ here is
+ * execchild(), which is unreachable because execv() fails.
+ */
+static char  *amiga_environ_empty[1] = { NULL };
+static char **amiga_environ          = amiga_environ_empty;
+char        ***environ_ptr           = &amiga_environ;
+
+/*
  * A Process address is unique for as long as the process exists, which is
  * what dbrandom.c and gensignkey.c want it for -- a per-run distinguisher
  * hashed into the pool, not an identity.
@@ -869,6 +964,53 @@ uid_t getuid(void)  { return 0; }
 uid_t geteuid(void) { return 0; }
 gid_t getgid(void)  { return 0; }
 gid_t getegid(void) { return 0; }
+
+/*
+ * The server calls svr_switch_user() after authentication, and reaches these
+ * because getuid() above says 0 and getpwnam() fills pw_uid/pw_gid with 0 too.
+ * Switching from 0 to 0 is not a privilege change, it is a no-op, and POSIX
+ * setuid(0) as root succeeds -- so returning success is the true answer and
+ * not a convenient one.
+ *
+ * Any OTHER id fails with EPERM, which is also true: there is nothing on this
+ * machine to switch to.  Spelled as a comparison rather than an unconditional
+ * `return 0` so that a future getpwnam() handing out a nonzero uid gets a
+ * refusal instead of silently appearing to work.
+ */
+int setuid(uid_t uid)
+{
+    if (uid == 0) return 0;
+    errno = EPERM;
+    return -1;
+}
+
+int setgid(gid_t gid)
+{
+    if (gid == 0) return 0;
+    errno = EPERM;
+    return -1;
+}
+
+int initgroups(const char *user, gid_t group)
+{
+    (void)user;
+    if (group == 0) return 0;
+    errno = EPERM;
+    return -1;
+}
+
+/*
+ * NULL, always.  There is no group database on AmigaOS 3.x, and unlike
+ * getpwnam() -- which has one honest answer, the user running the program --
+ * there is no group that could be meant.  sshpty.c uses it to find "tty" so
+ * it can chown a pty node, which is a thing this machine does not have.
+ */
+struct group *getgrnam(const char *name)
+{
+    (void)name;
+    errno = ENOENT;
+    return NULL;
+}
 
 /*
  * ENOSYS, and it has to be exactly that.  common-session.c:71 checks
