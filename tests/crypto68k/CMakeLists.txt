@@ -60,6 +60,65 @@ foreach(prog crypto68k_test crypto68k_bench crypto68k_ec_test crypto68k_ec_bench
     endif()
 endforeach()
 
+# ------------------------------------------------------ crypto68k vs AmiSSL --
+#
+# AmiSSL is the AmigaOS OpenSSL port and is what every other TLS client on this
+# machine already uses, so it is the baseline that decides whether src/crypto68k
+# is worth having.  This program runs both on identical inputs in one process.
+#
+# It is OFF unless AMINETXDUO_AMISSL_SDK names an unpacked AmiSSL SDK, because
+# the SDK is a 2.5 MB third-party download that this repository does not vendor:
+#
+#   curl -LO https://github.com/jens-maus/amissl/releases/download/5.27/AmiSSL-5.27-SDK.lha
+#   curl -LO https://github.com/jens-maus/amissl/releases/download/5.27/AmiSSL-5.27-OS3.lha
+#   lha x AmiSSL-5.27-SDK.lha ; lha x AmiSSL-5.27-OS3.lha
+#   cmake ... -DAMINETXDUO_AMISSL_SDK=<where>/AmiSSL/Developer
+#
+# Nothing of AmiSSL's is LINKED.  Every OpenSSL call is an inline macro from
+# <inline/amissl.h> that jumps through a library base, so no archive built by
+# another compiler has to be ABI-compatible with this one, and every measured
+# cycle ran inside amissl_v362.library.  See c68k_amissl_ossl.c.
+#
+# The run needs the library staged as well as built:
+#
+#   mkdir -p build/amissl-libs/AmiSSL
+#   cp <os3>/AmiSSL/Libs/AmigaOS3/amisslmaster.library            build/amissl-libs/
+#   cp <os3>/AmiSSL/Libs/AmigaOS3/AmiSSL/68020-40/amissl_v362.library build/amissl-libs/AmiSSL/
+#   AMINETXDUO_RUN_TAG=am ./tools/fsuae-run.sh -t 900 \
+#       build/cm-tls/tests/crypto68k/crypto68k_amissl build/amissl-libs
+#
+# ...with build/amissl-libs renamed to `libs` on the way in, because the
+# emulated machine resolves the library through LIBS:.  tools/amissl-run.sh
+# does all of that.
+set(AMINETXDUO_AMISSL_SDK "" CACHE PATH
+    "Unpacked AmiSSL SDK (the directory holding include/ and Autodocs/)")
+
+if(AMINETXDUO_AMISSL_SDK AND TARGET nx_crypto)
+    if(NOT EXISTS "${AMINETXDUO_AMISSL_SDK}/include/proto/amissl.h")
+        message(FATAL_ERROR
+            "AMINETXDUO_AMISSL_SDK=${AMINETXDUO_AMISSL_SDK} has no "
+            "include/proto/amissl.h -- point it at AmiSSL/Developer.")
+    endif()
+
+    add_executable(crypto68k_amissl c68k_amissl_bench.c c68k_amissl_ossl.c)
+    target_link_libraries(crypto68k_amissl PRIVATE
+        crypto68k_testsupport crypto68k nx_crypto aminetxduo_common)
+    target_include_directories(crypto68k_amissl PRIVATE
+        "${AMINETXDUO_AMISSL_SDK}/include")
+    # AmiSSL's headers switch on this to pick the m68k inline stubs over the
+    # AmigaOS 4 interfaces.
+    target_compile_definitions(crypto68k_amissl PRIVATE __amigaos3__=1)
+    if(AMIGA_SIZE)
+        add_custom_command(TARGET crypto68k_amissl POST_BUILD
+            COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:crypto68k_amissl>"
+            COMMENT "crypto68k_amissl size")
+    endif()
+    message(STATUS "  crypto68k vs AmiSSL . ${AMINETXDUO_AMISSL_SDK}")
+elseif(AMINETXDUO_AMISSL_SDK)
+    message(STATUS "  crypto68k vs AmiSSL . SKIPPED (needs AMINETXDUO_TLS=ON "
+                   "for nx_crypto's AES and SHA-256)")
+endif()
+
 endif() # CMAKE_CROSSCOMPILING
 
 
