@@ -4545,44 +4545,39 @@ command a user typed.
 
 #### A resumed handshake ignores the trust store, and the cache is keyed on the host name
 
-Two TLS cases went green when they should have gone red, and the pair of them
-is a security defect rather than a test bug:
+The suite asks the same question twice, once before anything has spoken to the
+host and once after everything has, and the two answers differ:
 
-| case | trust store offered | expected | got |
-|---|---|---|---|
-| `--cacert DH0:otherstore` | a valid store holding a root that signed **nothing** in the chain | refused (60) | **HTTP 200** |
-| no `--cacert` at all | `DEVS:Internet/certificates`, the real Mozilla set, which has never heard of our test root | refused (60) | **HTTP 200** |
+| case | trust store offered | order | rc | `time_appconnect` |
+|---|---|---|---|---|
+| `e01` | a valid store holding a root that signed **nothing** in the chain | cold | **60 refused** | — |
+| `e02` | none at all — `DEVS:Internet/certificates`, the real Mozilla set | cold | **60 refused** | — |
+| `rsa2.test` | the correct store | cold | 0 | **5.68 s** |
+| `e23` | the same wrong store as `e01`, byte for byte | warm | **0, HTTP 200** | **0.70 s** |
+| `e24` | the same absence as `e02` | warm | **0, HTTP 200** | **0.70 s** |
 
-`%{time_appconnect}` says why, and says it unambiguously:
+**Identical commands. Opposite outcomes. One variable: whether a session was
+already in the cache.** A full RSA handshake here is 5.68 s and a resumed one
+is 0.70 s, so `e23` and `e24` did no public-key work and verified no
+certificate — which is what resumption is *for*, and precisely the problem.
+`tls.library` keys its cache on `TLSA_HostName` alone, so the trust decision
+is cached alongside the session and reused under a different `--cacert`, or
+under none.
 
-```
-rsa2.test, correct store, cold      5.68 s     full handshake
-rsa2.test, WRONG store              1.64 s     resumed
-rsa2.test, no store at all          0.72 s     resumed
-```
+Cold verification is in good order and the same run proves it: an expired leaf,
+a self-signed leaf, a certificate issued to another host, a store with the
+wrong root and no store at all are all refused with curl's own exit 60. It is
+only the second connection that stops looking.
 
-A full RSA handshake on this machine is 5.7 s and a resumed one is under two.
-Both of those connections **resumed a session cached from an earlier case in
-the same group** and therefore verified no certificate at all — which is what
-resumption is for, and exactly the problem: `tls.library` keys its cache on
-`TLSA_HostName` alone, so the trust decision is cached with the session and
-silently reused under a different `--cacert`, or under none.
+Two things make it worth more than a curiosity. The cache is **mirrored to
+`DEVS:Internet/tlssessions`**, so it survives a reboot — §13's headline result
+depends on exactly that. And `--cacert` is the switch a user reaches for when
+they do *not* trust the default store, which is the case where being ignored
+matters most.
 
-Cold verification is fine, and the suite proves that separately: an expired
-leaf, a self-signed leaf and a certificate issued to another host are all
-refused with curl's own exit 60 on a cold handshake. It is only the second
-connection that stops checking.
-
-Two things make it worth taking seriously rather than filing as a curiosity.
-The cache is **mirrored to `DEVS:Internet/tlssessions`**, so it survives a
-reboot — §13's headline is that a session seeded once carries across one. And
-`--cacert` is the switch a user reaches for precisely when they do not trust
-the default store, which is the case where being ignored matters most.
-
-**This is not fixed here: `src/tlslib/` is not this work's to change.** The
-suite now asks the question in both orders — `e01`/`e02` before anything has
-talked to that host, `e23`/`e24` after everything has — so a fix can be
-checked without having to remember which case ran first.
+**Not fixed here: `src/tlslib/` is not this work's to change.** The suite now
+asks in both orders, so whoever fixes it can see the difference without having
+to remember which case ran first.
 
 ### 14.5 What curl could not break
 
@@ -4634,14 +4629,15 @@ The score, on the A1200 profile with both fixes in:
 
 ```
 groups A-D and F (hermetic)      122 passed, 2 failed, 124 cases
-group E (TLS, hermetic)           23 passed, 2 failed,  25 cases
+group E (TLS, hermetic)           25 passed, 2 failed,  27 cases
 ```
 
 **All four of those failures are real and none of them is a false alarm**, so
 they are listed rather than explained away:
 
-- `e01`/`e02` (or `e23`/`e24` depending on order) — the trust-store defect of
-  §14.4, which is `src/tlslib/`'s to fix.
+- `e23`/`e24` — the trust-store defect of §14.4, which is `src/tlslib/`'s to
+  fix. Their cold twins `e01`/`e02` pass, which is what makes the diagnosis a
+  diagnosis rather than a suspicion.
 - `a44_cookies_send` — **curl does not write its cookie jar on AmigaOS**, and
   this one is neither ours nor the stack's. `-c DH0:cj.txt` leaves a zero-byte
   file with no temporary beside it: `Curl_fopen()` truncates the target, fstats
@@ -4937,7 +4933,8 @@ operands.
 | 32 (1024-bit) | 2s²+s = **2,080** | 1.5s²+1.5s = **1,584** | 576+1,056 = **1,632** | 324+1,056 = **1,380** |
 | 64 (2048-bit) | **8,256** | **6,240** | 1,728+4,160 = **5,888** | 972+4,160 = **5,132** |
 
-Ours is SOS with a schoolbook product; Karatsuba was costed and rejected at ~5% (§9).
+Ours is SOS, with the product split by Karatsuba at 64 limbs and schoolbook below —
+§15.9 is how that threshold was arrived at, and why it is one level and not three.
 AmiSSL's differs in a way that matters: because `OPENSSL_BN_ASM_MONT` is **not** defined
 for this target, `bn_mul_mont` does not exist, and `bn_mul_mont_fixed_top()` falls through
 to `bn_mul_fixed_top()`/`bn_sqr_fixed_top()` plus `bn_from_montgomery_word()`. Two
@@ -4949,7 +4946,7 @@ runs, OpenSSL issues about 22% fewer multiplies per Montgomery step than we do.
 
 | operation | ours | AmiSSL | ours ÷ theirs |
 |---|---:|---:|---:|
-| RSA-2048 public, e = 65537 | 126,688 | 103,936 | 1.22 |
+| RSA-2048 public, e = 65537 | 115,680 | 103,936 | 1.11 |
 | RSA-2048 private, CRT | 3,978,832 | 3,688,408 | 1.08 |
 | ECDSA P-256 verify | 164,476 | 186,280 | 0.88 |
 | ECDH P-256 shared secret | 125,204 | **277,504** | 0.45 |
@@ -5104,7 +5101,7 @@ ECDH against 1,368, 381 for `k·G` against 381, and 20,150 for the CRT private a
 
 | operation | ours | AmiSSL | measured | corrected |
 |---|---:|---:|---|---|
-| RSA-2048 public, e=65537 | 168.5 ms | 142.7 ms | **AmiSSL 1.18×** | **AmiSSL 1.19×** |
+| RSA-2048 public, e=65537 | 163.9 ms | 142.8 ms | **AmiSSL 1.15×** | **AmiSSL 1.13×** |
 | RSA-2048 private CRT, blinding off | 4.97 s | 5.30 s | ours 1.07× | **ours 1.22×** |
 | RSA-2048 private CRT, OpenSSL's default | 4.97 s | 6.88 s | **ours 1.38×** | ours 1.54× |
 | ECDSA P-256 verify | 484.9 ms | 840.2 ms | ours 1.73× | **ours 1.69×** |
@@ -5115,21 +5112,28 @@ ECDH against 1,368, 381 for `k·G` against 381, and 20,150 for the CRT private a
 
 **It is mixed, and the split is exactly where the code said it would be.**
 
-**AmiSSL wins the RSA public operation, and Karatsuba is why.** Same algorithm on both
-sides — no constant-time flag, window 1, sixteen squarings and two multiplies, leading
-zeros skipped — and the only difference in the arithmetic is that `bn_mul_recursive` and
-`bn_sqr_recursive` turn 126,688 limb multiplies into 103,936. That is 18% fewer multiplies
-for 16% less time, which is about as clean an attribution as this kind of measurement
-gets. §9 costed Karatsuba for `crypto68k` at ~5% *at the 32 limbs a CRT half runs* and
-rejected it; at the 64 limbs a public operation runs, OpenSSL's own numbers say it is
-worth about a fifth of the multiplies. **That is the actionable finding for us**, and it
-is worth more than it looks: three RSA public operations is what a client does per
-handshake.
+**AmiSSL wins the RSA public operation, and it is NOT the multiplies — it is the setup.**
+That was this section's first conclusion and it was wrong; §15.9 records adopting
+Karatsuba on the strength of it and then measuring what it actually bought. The
+decomposition, all of it measured in the same run:
 
-A second, smaller one from the same row: OpenSSL caches its `BN_MONT_CTX` and we rebuild
-R² mod m on every call. With the context cached AmiSSL drops from 142.7 ms to 126.7 ms —
-**16.0 ms of setup per operation** — and ours pays a comparable amount inside its 168.5.
-Caching it is cheap and nobody has.
+| | ours | AmiSSL |
+|---|---:|---:|
+| exponentiation, 16 squarings + 3 multiplies | **127.3 ms** | **126.9 ms** |
+| setup — R² mod m, built per call by both | **36.6 ms** | **15.9 ms** |
+| total | 163.9 ms | 142.8 ms |
+
+**Our exponentiation is level with OpenSSL's — 0.997× — and 98% of the remaining 21.2 ms
+gap is the setup.** Both sides rebuild R² mod m on every call here, so this is like for
+like; OpenSSL's own cached-context figure (126.9 ms) is what isolates it.
+
+The setup is one line of the vendored code. `c68k_setup_rr()` reduces through
+`_nx_crypto_huge_number_modulus()`, whose comments and locals say
+`/* In number of USHORT words. */` and which estimates quotient digits from
+`>> (HN_SHIFT >> 1)` — **it does long division in 16-bit half-limbs**, so it takes twice
+the quotient-digit iterations of a 32-bit Knuth-D. OpenSSL's `bn_div_words` is one
+`divu.l` per digit, out of `bn_m68k.s`. That is the whole 2.3× and it is the thing to
+fix; it would also speed up the CRT path, which calls the same divider six times.
 
 **We win the private operation, and constant time is why.** OpenSSL issues 7% *fewer*
 multiplies than we do and is still slower, because a fixed window with no zero-skipping
@@ -5203,11 +5207,12 @@ the measurement, in order of value:
 1. **A 68020 SHA-256.** The bulk path is 92 KB/s and neither implementation has any
    assembly in it at all. This is the only lever in the section that moves `https://`
    throughput rather than handshake latency.
-2. **Karatsuba at 64 limbs.** OpenSSL's own numbers say ~18% of the multiplies on an RSA
-   public operation, three of which happen per handshake. §9's rejection was measured at
-   32 limbs and does not carry.
-3. **Cache R² mod m.** 16 ms per RSA operation on AmiSSL's side of the same fence; ours
-   rebuilds it every call.
+2. **A 32-bit long division.** The vendored `_nx_crypto_huge_number_modulus()` works in
+   16-bit half-limbs; replacing it with a Knuth-D over 32-bit limbs and a `divu.l` is
+   worth ~20 ms of a 164 ms RSA public operation, is 98% of what still separates us from
+   AmiSSL there, and pays again on every CRT private operation.
+3. **Karatsuba — done, and worth 2.7%.** See §15.9. Kept, but it is not the lever the
+   multiply count made it look like.
 
 And one thing that should *not* change: `crypto68k` stays variable-time. AmiSSL is
 constant-time on the private and ephemeral paths and that is most of what it costs — the
@@ -5245,3 +5250,72 @@ AMINETXDUO_AMISSL_OS3=<where>/AmiSSL ./tools/amissl-run.sh -t 2400 -k 56
 `-k 56` is a shakedown clock; the ratios are clock-independent and the corrected column
 is derived from a `t_mulu` measured in the same run, so it holds at 14 MHz too. Drop the
 `-k` for A1200 absolutes and budget roughly four times the wall clock.
+
+### 15.9 Adopting Karatsuba, and what it was actually worth
+
+§15.7 originally blamed the RSA public gap on OpenSSL's Karatsuba, so `src/crypto68k/`
+grew one. It works, it is correct, and it is worth **2.7%** — an order of magnitude less
+than the limb-product count predicts. Both halves of that are worth writing down.
+
+**The prize was smaller than it looked before a line was written.** `c68k_sqr()` has
+always been a dedicated symmetric squarer — n(n−1)/2 off-diagonal products accumulated
+once, doubled, plus n diagonal squares — so the free ~2× that a naive "squaring by
+calling multiply" would have left on the table was already banked. And a Montgomery step
+is a product *and* a reduction, where the reduction is a chain of scalar-by-vector
+`c68k_addmul_1` calls that Karatsuba cannot touch at all. So 2.14× on the raw squaring of
+64 limbs dilutes to 1.22× on the Montgomery square before any code runs.
+
+**The crossover had to be measured, and it is shallow.** The benchmark makes the
+threshold a runtime variable and sweeps it, because a number copied from another project
+would have been wrong in both directions here (T means: split while the operand is ≥ T
+limbs, so T = n is one level and T = 8 is four):
+
+| 64 limbs | schoolbook | T=64 | T=32 | T=16 | T=8 |
+|---|---:|---:|---:|---:|---:|
+| Montgomery square | 6,651 µs | **6,506 (1.02×)** | 6,714 (0.99×) | 7,416 (0.89×) | 9,144 (0.72×) |
+| Montgomery multiply | 8,456 µs | 7,733 (1.09×) | **7,444 (1.13×)** | 7,745 (1.09×) | 9,057 (0.93×) |
+
+| 32 limbs | schoolbook | T=32 | T=16 | T=8 |
+|---|---:|---:|---:|---:|
+| Montgomery square | 1,852 µs | 1,912 (0.96×) | 2,157 (0.85×) | 2,733 (0.67×) |
+| Montgomery multiply | 2,256 µs | **2,160 (1.04×)** | 2,245 (1.00×) | 2,670 (0.84×) |
+
+**One level, and only at 64 limbs.** Every level past the first costs more than it saves,
+and at four levels the split is 28% *slower* than schoolbook — the recombination is O(n)
+per level with a real constant, and by the time the operands are 8 limbs it dwarfs the
+products it removes. §9's rejection at 32 limbs was right and remains right: the square
+loses there and the multiply gains 4%. OpenSSL reaches 103,936 limb products by recursing
+three levels to `bn_sqr_comba8`; we stop at one and reach 115,680, and stopping is the
+faster choice on this machine.
+
+The multiply's arithmetic is worth the whole of its theoretical saving and the square's is
+worth about half: at 64 limbs two levels removes 1,792 limb products from a multiply, which
+at the emulator's 32.14 cycles is 1.02 ms, and the measured saving is 1.01 ms. One level
+removes 496 from a square, predicting 0.28 ms, and the measured saving is 0.145 ms.
+
+**Correctness.** The vendored `_nx_crypto_huge_number_mont()` could not be the oracle for
+this, and finding that out was most of the work. It is **wrong** for operands within a
+whisker of the modulus — with m = 2⁶⁴−1 and x = m−1, `mont(x,x)` must be 1 and it returns
+0; at 32 limbs with m nearly all ones it gets the top limb one too low. Both checked
+against an independently computed answer, not against either implementation. Random
+operands never come that close to m, which is why a 400-trial sweep never caught it and
+why no RSA or EC path can reach it — but those are exactly the operands Karatsuba's carry
+and borrow handling most needs testing on. So `c68k_karatsuba_limbs` doubles as the test
+hook: the suite computes each result twice in the same process, once schoolbook and once
+with the split forced down to 2-limb leaves, and compares. Six widths including odd ones,
+eight operand shapes chosen to drive the carries (m−1, x1 == x0, either half zero,
+alternating limbs, 0 and 1), multiply and square: **0 mismatches**, and 400 random trials
+at 1..64 limbs additionally agree with the vendored routine. On target, 0 mismatches
+against AmiSSL across the whole suite.
+
+One thing fixed on the way past: the host test's own `addmul` section swept n to 70 while
+writing into 64-limb arrays, and had been reporting 316 of its own 4,000 trials as
+failures — 7.9%, against the 6/71 = 8.45% of draws that overrun. `ctest` had been red for
+this reason and not for a real one.
+
+**The shape of the answer, which is the point.** Karatsuba took our exponentiation from
+131.6 ms to 127.3 ms and put it level with OpenSSL's 126.9. It did not move the headline,
+because the headline was never the multiplies: 98% of what remains is a 16-bit long
+division in the setup. Adopting it was right — it is 2.7% and it is now the reason our
+exponentiation is not behind — but the instruction to reverse the RSA public gap is
+answered by `_nx_crypto_huge_number_modulus()`, not by this.

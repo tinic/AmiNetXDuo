@@ -4,7 +4,8 @@
 #
 #   tests/curl/run-curlverify.sh [-m MODEL] [-t SECS] [-c CPU] [-k MHZ]
 #                                [-b STACKBUILD] [-C CURLBUILD] [-g GROUPS]
-#                                [-x CURLBINARY] [-T TAG] [-P BASEPORT]
+#                                [-x CURLBINARY] [-A AMISSLDIR] [-T TAG]
+#                                [-P BASEPORT] [-p SWEEP] [-n SUBSTRING]
 #
 #   -g   which groups to run.  Default ABCDEF, all hermetic.
 #          A HTTP mechanics   B connections/multi   C failure paths
