@@ -112,6 +112,13 @@ endfunction()
 aminetxduo_add_tool(tool_addnetinterface AddNetInterface
     SOURCES addnetinterface.c)
 
+# CheckNetConfig is config-only in the strictest sense there is: it never opens
+# bsdsocket.library at all.  That is not an omission -- the machine that needs
+# checking is the one where the stack did not come up, so a checker that needed
+# a running stack would be unavailable in precisely the state it is for.
+aminetxduo_add_tool(tool_checknetconfig CheckNetConfig
+    SOURCES checknetconfig.c)
+
 # The interactive configurator.  Config-only: it writes the files the parser
 # reads and then runs AddNetInterface, rather than starting a stack itself.
 aminetxduo_add_tool(tool_netsetup NetSetup SOURCES netsetup.c)
@@ -194,7 +201,8 @@ set_target_properties(tool_smoke PROPERTIES OUTPUT_NAME "ToolsSmoke")
 
 add_custom_target(tools ALL)
 add_dependencies(tools
-    tool_addnetinterface tool_netsetup tool_online tool_offline tool_host
+    tool_addnetinterface tool_checknetconfig
+    tool_netsetup tool_online tool_offline tool_host
     tool_fetch tool_nc tool_telnet tool_ftp tool_nettrace tool_traceroute
     tool_tftp tool_whois
     tool_sntp
