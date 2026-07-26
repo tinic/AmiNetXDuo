@@ -156,7 +156,9 @@ tx S seq=0 after=1500 within=3000
 # ONLY THE FIRST INTERVAL IS ASSERTED, and only loosely.  What the intervals
 # are -- flat, doubling, and how many there are before the socket gives up --
 # is the retransmission timer's business and x01 is where it is stated; this
-# case is about whether anything comes back at all, so the rest is a count.
+# case is about whether anything comes back at all, so the rest is a count --
+# and a wide one: four seconds of a doubling interval is one retransmission and
+# four seconds of a flat one is eight, both measured.
 case x02_data_is_retransmitted
 socket
 connect
@@ -167,7 +169,7 @@ send 100
 tx PA seq=1 ack=1 len=100 within=200
 tx PA seq=1 ack=1 len=100 after=700 within=1600
 idle 4000
-txcount 1 4
+txcount 1 12
 
 # RFC 793 3.7 / RFC 1122 4.2.2.17: a zero window stops the sender, and the
 # sender must probe it rather than wait for ever.
