@@ -19,6 +19,12 @@
 
 #include "tls_vectors.h"
 
+/* Explicitly, not transitively.  NDK 3.2 reaches <exec/resident.h> through
+   another header and NDK 3.9 does not, so leaving it out builds here and fails
+   on a machine with the other NDK -- which is exactly how it reached CI.
+   src/bsdsocket/bsdsocket_internal.h and src/usergroup/ug_library.c both name
+   it for the same reason. */
+#include <exec/resident.h>
 #include <proto/exec.h>
 
 struct ExecBase *SysBase;
