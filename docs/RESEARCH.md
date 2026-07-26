@@ -12402,6 +12402,15 @@ inherited. `tests/curl`'s `d03_parallel_40` and `tests/clients` group M both
 pass, so whatever the trigger is, it is not simply "accept twice" —
 `tests/endurance/run-endurance.sh` is the reproduction.
 
+**Where the honesty line is.** The `relisten failed` warning and the permanent
+`EINVAL` after it are library behaviour and a plain reading of the code: the
+warning is the library's own, and `as_Incoming` has exactly one assignment.
+What provoked the *first* accept to hand back an unbound socket is not settled
+— it could be an ordering mistake in the harness, which spawns its responder
+and its driver as separate Processes half a second apart. Those two are worth
+separating deliberately rather than assumed to be one bug, and only the second
+is claimed here.
+
 ### 37.5 1009 bytes a second, and 830 sockets NetX Duo will not let go of
 
 The two-connection run then spent 400 seconds in the failure state above, and
