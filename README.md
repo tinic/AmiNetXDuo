@@ -74,9 +74,9 @@ and a change of program — so sites that fail on the first attempt often work o
 the second. Certificates are verified against 119 Mozilla roots, and the host
 name is checked, unless you ask otherwise.
 
-TLS is a build option and is **off by default** for that reason. A build with
-`-DAMINETXDUO_TLS=ON` ships `tls.library` and the trust store; releases include
-them.
+TLS is on by default, so a normal build ships `tls.library` and the trust
+store. `-DAMINETXDUO_TLS=OFF` leaves both out if you want a smaller stack, and
+`fetch` still works over `http://` without them.
 
 ## What is not there yet
 

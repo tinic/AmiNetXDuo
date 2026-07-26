@@ -47,10 +47,14 @@ JOBS="${AMINETXDUO_CI_JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl 
 # NX_TCP_SOCKET across the whole tree, AMINETXDUO_TLS pulls in nx_secure and
 # nx_crypto, and AMINETXDUO_CRYPTO68K_ASM=OFF swaps the hand-written 68020
 # limb primitives for the portable C.  Each has broken while the others built.
+#
+# TLS is ON by default now, so `default` covers the TLS build and the entry
+# here is the OFF one -- the configuration a user gets by asking for a smaller
+# stack, and the one that would otherwise stop being compiled at all.
 CROSS_CONFIGS=(
     "default:"
     "ipv6:-DAMINETXDUO_IPV6=ON"
-    "tls:-DAMINETXDUO_TLS=ON"
+    "notls:-DAMINETXDUO_TLS=OFF"
     "noasm:-DAMINETXDUO_CRYPTO68K_ASM=OFF"
 )
 

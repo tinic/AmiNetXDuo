@@ -27,15 +27,26 @@ if(AMINETXDUO_IPV6)
 endif()
 # TLS: tls.library, the nx_secure/nx_crypto stack under it, and the trust store.
 #
-# STILL OFF BY DEFAULT, and the reason has changed twice.  It is no longer
-# speed (a public handshake is ~7 s at 14 MHz), no longer size (the pair is
-# 523 KB), and no longer that nothing uses it -- `fetch` does.  It is that a
-# certificate chain of three or more takes the machine down partway through
-# verification at 14 MHz: reproduced by `fetch` and independently by
-# tests/tls/tls_api, survives at 28 MHz on the same profile, and covers most
-# Cloudflare-fronted sites.  A peer that can crash the machine is not a
-# default.  Bisected in docs/RESEARCH.md 9; turn this ON to work on it.
-option(AMINETXDUO_TLS  "Build tls.library and its trust store"        OFF)
+# ON by default.  It was off for a long time and the stated reason changed
+# four times, which is itself the interesting part of the history:
+#
+#   * too slow -- a handshake was 185 s.  That figure was a loopback total
+#     dominated by the SERVER half, which a client never performs; the client
+#     cost is ~7 s and resumption makes a repeat connection ~0.6 s.
+#   * too big -- the pair is ~520 KB.  Not a constraint on a 4 MB machine.
+#   * nothing uses it -- `fetch` does, and so does curl through the vtls
+#     backend in clients/curl.
+#   * a chain of three or more crashes the machine.  THIS WAS WRONG and is
+#     the one worth remembering: fs-uae was being killed by SIGPIPE on the
+#     HOST when a slow handshake outlasted the peer's patience, and every
+#     symptom of that read like a guru.  Withdrawn in docs/RESEARCH.md.
+#
+# What remains is a property of the machine rather than a defect: a FIRST
+# handshake to a CDN-fronted host may not finish inside the far end's timeout
+# at 14 MHz.  The connection fails cleanly, says so, and usually succeeds on
+# the next attempt because the session is cached.  That is not a reason to
+# ship without encryption.
+option(AMINETXDUO_TLS  "Build tls.library and its trust store"        ON)
 option(AMINETXDUO_BPF  "Build the bpf_* raw path and filter VM"       ON)
 if(AMINETXDUO_BPF)
     # Global, because the two SANA-II taps and the netstack's capture
