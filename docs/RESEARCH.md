@@ -2790,176 +2790,6 @@ headers, `pragmas/bsdsocket_pragmas.h` LVO table), `amigaos/reference/amiga-boot
 - [Aros/Developer/Docs/Libraries/BSDsocket](https://en.wikibooks.org/wiki/Aros/Developer/Docs/Libraries/BSDsocket)
 - [WinUAE features (uaenet.device / SLIRP / A2065)](https://www.winuae.net/features/) · [EAB: SANA2 / SLIRP / A2065](https://eab.abime.net/showthread.php?p=969044)
 
-### The 17 non-green conformance results, named — and what curl actually calls (2026-07-25)
-
-The loopback tier reads **125 passed, 1 failed, 16 skipped**. A count is not a work list,
-so here is every one of the 17 with its name, its cause, and a classification that does
-not flatter us:
-
-- **(a)** a real gap a client could hit
-- **(b)** a divergence we stand behind
-- **(c)** an artefact of the suite or the environment
-- **(d)** out of scope
-
-| # | Name | Class | Why |
-|---|---|---|---|
-| 3 | `socket(): create SOCK_RAW (ICMP)` — **failed** | **(a)** + (b) | We do not implement `SOCK_RAW` at all. The *red* is (b): `test_socket.c:52` skips only on `EACCES`, and `EACCES` means "you lack privilege" on an OS with no privilege model, so we answer `ESOCKTNOSUPPORT` and the test stays red. The *absence* is (a). |
-| 27 | `recv(MSG_OOB): urgent data delivery` | **(a)** | NetX Duo's TCP has no urgent pointer: no `URG` on transmit, none parsed on receive. `ftp`'s `ABOR` and `telnet`'s interrupt both send `IAC IP` as urgent data. |
-| 64 | `WaitSelect(): exceptfds detects OOB data` | **(a)** | Same root as 27. Skipped because the `send(MSG_OOB)` that sets it up already fails. |
-| 39–42 | `tcp_network_64k`, `udp_network_datagram`, `accept_external`, `tcp_network_large` | **(c)** | `helper_is_connected()` is false on the loopback tier by construction. 39, 40 and 42 pass on the network tier. |
-| 103–104 | `gethostbyname_external`, `gethostbyaddr_external` | **(c)** | Same gate; both pass on the network tier. |
-| 132–136 | `icmp_loopback`, `icmp_network`, `icmp_large_payload`, `icmp_multi_ping`, `icmp_timeout` | **(a)** | All five skip on the same `socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)` that fails as test 3. |
-| 138, 140, 142 | `tp_tcp_network`, `tp_udp_network`, `tp_tcp_sustained_network` | **(c)** | Helper gate; all three pass on the network tier. |
-
-Nothing here is (d). The `ipf_*` family that §3.2 calls Tier 4 is not tested by this suite
-at all, so it never appears in the 17.
-
-**The network tier** is **133 passed, 2 failed, 7 skipped**. It differs from the loopback
-tier by exactly the nine helper-gated tests: eight of them turn green, and the ninth,
-**41 `accept(): incoming connection from remote host`**, turns *red* rather than green.
-That one is **(c)**, and the evidence is on the host side rather than the Amiga side: the
-suite asks the helper to connect back to the Amiga on port 7861, and the helper log says
-`CONNECT to 127.0.0.1:7861 failed: [Errno 61] Connection refused`. Under FS-UAE's SLIRP
-the guest has no inbound path unless one is opened explicitly, and the obvious lever does
-not work — `uae_slirp_ports = 7861` reaches the config (it is in the FS-UAE log) and
-changes nothing; FS-UAE 3.2.35's inbound mode appears to be the fixed `21-23,80` set, and
-7861 cannot be moved into it because the suite derives that port as `base + 161`.
-The capability itself is verified elsewhere, on loopback, by `tests/clients` groups D, E,
-I and M — see below.
-
-#### What curl actually calls
-
-Read from curl 8.22.0-DEV (`lib/curl_setup.h`, `lib/amigaos.c`, `lib/cf-socket.c`,
-`lib/select.c`, `lib/socketpair.c`, `lib/curlx/nonblock.c`, `CMakeLists.txt`). curl's
-AmigaOS awareness is real but thinner than it looks: most of `lib/amigaos.c` is OS4-only,
-and the OS3 path is one `OpenLibrary` plus one `SocketBaseTags`.
-
-- `OpenLibrary("bsdsocket.library", 4)`, then
-  `SocketBaseTags(SBTM_SETVAL(SBTC_ERRNOPTR(sizeof(errno))), &errno,
-  SBTM_SETVAL(SBTC_LOGTAGPTR), "curl", TAG_DONE)`. **Any nonzero return is fatal** —
-  curl reports "SocketBaseTags ERROR" and refuses to run. This one call gates the port.
-- `select()` is `#define`d to `WaitSelect(a, b, c, d, e, 0)` (`curl_setup.h:461`).
-  `HAVE_POLL` is off, so every wait in curl goes through it, with `FD_SETSIZE` = 64 from
-  this toolchain's `sys/select.h` — which happens to equal our `BSD_DEFAULT_DTABLESIZE`.
-- `HAVE_FCNTL` is explicitly undefined for the bsdsocket build, so non-blocking mode is
-  `IoctlSocket(sockfd, FIONBIO, (char *)&flags)` with a `long`.
-- Non-blocking connect, then writable, then `getsockopt(SOL_SOCKET, SO_ERROR)`
-  (`verifyconnect()`, `cf-socket.c:913`), treating `0` and `EISCONN` as success.
-- `setsockopt`: `TCP_NODELAY` (default on), `SO_KEEPALIVE` and the `TCP_KEEP*` family
-  (all `#ifdef`-guarded, and the `TCP_KEEP*` names do not exist in this NDK), `SO_SNDBUF`,
-  `SO_REUSEADDR`. `SO_NOSIGPIPE` and `SO_BINDTODEVICE` are guarded out.
-- `HAVE_GETADDRINFO` is forced to 0 for Amiga by curl's own CMake, so **curl resolves with
-  `gethostbyname`**, not `getaddrinfo`.
-- **The one that is not obvious**: `lib/socketpair.c`. With no `AF_UNIX`, curl builds its
-  multi-handle wakeup pair out of `socket` + `setsockopt(SO_REUSEADDR)` +
-  `bind(127.0.0.1, 0)` + `getsockname` + `listen(1)` + `connect` + non-blocking
-  `accept(listener, NULL, NULL)` + a nonce round trip. So **curl exercises the server side
-  of the ABI on every multi handle**, `accept()` with two NULLs included. If `HAVE_PIPE`
-  is detected instead, curl uses `pipe()` — and a newlib pipe descriptor is not a
-  bsdsocket descriptor, so it would end up inside a `WaitSelect()` fd set and nothing
-  would ever wake. Checked rather than assumed: this toolchain **declares** `pipe()` in
-  `sys-include/sys/unistd.h:182` but does not **link** it (`undefined reference to
-  'pipe'`), and curl detects it with `check_function_exists`, which links — so
-  `HAVE_PIPE` comes out 0 and `wakeup_inet` is chosen. That is luck, not design: a port
-  that pre-fills the feature cache or sets `HAVE_PIPE` by hand breaks curl's multi
-  interface in a way that looks like a hang rather than an error.
-
-`wget` 1.25.0 (`src/connect.c`) demands a slightly different set, and in one respect a
-harder one: `connect_with_timeout()` bounds a **blocking** connect with
-`run_with_timeout()`, which needs `sigsetjmp` + `alarm` and therefore does nothing on
-AmigaOS. wget has no non-blocking connect path at all, so a blocking `connect()` to a
-dead port must fail promptly by itself or wget hangs with no timeout of its own to save
-it. wget also uses `bind_local()` + `accept_connection()` for FTP active mode — the same
-`socket`/`SO_REUSEADDR`/`bind`/`getsockname`/`listen`/`select`/`accept` sequence, this
-time with a real `sockaddr` out of `accept()` — and `getaddrinfo` when built with IPv6.
-
-#### `tests/clients` — the sequences, not the vectors
-
-`tests/clients/client_patterns.c` replays those sequences: an ordinary AmigaOS program,
-linked against none of our code, with sixteen groups each named after the program and file
-it came from. It found three defects that 142 per-vector conformance tests did not,
-because none of them is reachable one vector at a time.
-
-- **`shutdown(SHUT_WR)` was sending a RESET.** `nx_tcp_socket_disconnect()` cannot express
-  a half-close in either mode: with `NX_NO_WAIT` it resets
-  (`nx_tcp_socket_disconnect.c`, the `!NX_DISABLE_RESET_DISCONNECT` branch), and with a
-  wait option it sends a FIN and then calls `_nx_tcp_socket_block_cleanup()` when the peer
-  does not also close. Either way the direction the caller asked to *keep* died: after the
-  half-close the peer's `send()` failed with `EPIPE` and its queued data went in the bin.
-  The state machine itself is fine with it — `nx_tcp_socket_packet_process.c` runs
-  `_nx_tcp_socket_state_data_check()` in both `FIN_WAIT_1` and `FIN_WAIT_2` — so
-  `bsd_tcp_send_fin()` open-codes the graceful branch and stops before the suspension and
-  the cleanup. This is `nc -N`, it is `telnet`, and it is every ftp data connection.
-- **Ten simultaneous listeners, and the eleventh failed with `ENOBUFS`.**
-  `NX_MAX_LISTEN_REQUESTS` was NetX Duo's default of 10 and is a hard ceiling on
-  `listen()`: `nx_tcp_server_socket_listen()` returns `NX_MAX_LISTEN` and closing other
-  kinds of socket does not help. `ssh -L` wants one listener per forward and an ftp client
-  one per active-mode transfer. Now 32, which costs under a kilobyte inside the single
-  `NX_IP`.
-- **A half-closed socket then reported itself readable**, forever, with nothing to read —
-  a defect the half-close fix created and the same test caught in the next run.
-  `bsd_readable()` tested `nx_tcp_socket_state >= NX_TCP_CLOSE_WAIT` to mean "the peer's
-  FIN arrived before the disconnect callback was attached", and NetX Duo numbers the
-  states `CLOSE_WAIT` 6, `FIN_WAIT_1` 7, `FIN_WAIT_2` 8 — so `>=` also caught the two
-  that mean *we* sent the FIN. `nc -N` half-closes and then selects for the rest of the
-  answer, and would have spun at full speed on a `select()` that returned at once and a
-  `recv()` that returned `EWOULDBLOCK`. The states are named individually now, and the
-  fix was confirmed in both directions: the new check fails against the old `>=` and
-  passes against the named list.
-
-Everything else curl and wget need was already right, and is now pinned: the
-`SocketBaseTags` init gate, errno mirrored into the caller's own `int` at the caller's own
-width, non-blocking connect to both a live and a dead port with `SO_ERROR` read once and
-cleared, curl's `wakeup_inet` socketpair step for step, a control connection surviving
-three rounds of active-mode data connections, `WaitSelect()` over a wide sparse set
-returning exactly the right count and exactly the right bits, 64 rounds of
-connect/accept/transfer/close with descriptors recycling rather than accumulating,
-`send()` after the peer has gone failing rather than hanging, wget's blocking connect
-failing with `ECONNREFUSED` rather than a timeout, a descriptor table raised to 128 with
-`WaitSelect()` past the old 64, `FIONREAD` before and after a partial read, and four
-listen/accept/close cycles on one port.
-
-It also covers `getaddrinfo`, `getnameinfo`, `freeaddrinfo` and `gai_strerror`, which
-**nothing in the tree called in the default build**: they live at `0x324`–`0x336`, in the
-Roadshow tail past where the FD that generated
-`tests/conformance/compat/inline/bsdsocket.h` stops, so bsdsocktest cannot reach them and
-the only other coverage was the IPv6-only socket test. All twelve of those checks passed
-as they stood — coverage, not a fix.
-
-The whole file is **94 checks, 0 failures** on A1200/68020, and both conformance tiers are
-unchanged by the three fixes: **125/1/16** on loopback, **133/2/7** on the network tier,
-with the same names in each list as before.
-
-#### What is left, in the order it matters
-
-1. **`SOCK_RAW`** (test 3 plus skips 132–136 — six results, and the only red on the
-   loopback tier). NetX Duo can do it: `nx_ip_raw_packet_enable()`,
-   `nx_ip_raw_packet_send()` and `nx_ip_raw_packet_filter_set()` are all there. Two things
-   make it more than a wrapper. `ICMP` is dispatched to `nx_ip_icmp_packet_receive` before
-   the raw path is consulted, so reaching it needs `NX_ENABLE_IP_RAW_PACKET_ALL_STACK` —
-   which puts our filter callback on **every** inbound IP packet, TCP included. And when a
-   filter is installed, `_nx_ip_raw_packet_processing()` stops queueing entirely
-   (`nx_ip_raw_packet_processing.c`) and expects the filter to consume the packet, so
-   `nx_ip_raw_packet_receive()` becomes unusable and bsdsocket has to own the queue,
-   the per-protocol demux and the wakeup. Nothing on the target tool list needs it —
-   `ping` already works through `nx_icmp_ping()` — but `traceroute` and any third-party
-   `ping` port do.
-2. **`MSG_OOB`** (skips 27 and 64), plus `SIOCATMARK`, which `IoctlSocket()` currently
-   answers with `ENOSYS`. This is not a bsdsocket change: NetX Duo's TCP neither sets the
-   `URG` bit nor parses it, so the work is in the TCP core and on the hot receive path.
-   `ftp`'s `ABOR` and `telnet`'s interrupt are the callers; both degrade to the inline
-   copy of the command that the protocols send anyway, which is why this is second and
-   not first.
-3. **`CloseSocket()` on a connected TCP socket also resets** rather than finishing the
-   connection, for a reason the half-close fix does not remove: `nx_tcp_socket_delete()`
-   requires `CLOSED`, and a graceful close leaves the socket in `FIN_WAIT_1`, so going
-   graceful here needs a deferred-reap list or it leaks an `AmiSocket` per connection.
-   Group N of `tests/clients` writes a whole response and closes without the peer having
-   read a byte, and every byte still arrives — but that is loopback, where everything is
-   acknowledged before the close, so **this is a risk that has not been reproduced, not a
-   defect that has been ruled out**. On a slow link with a large final write it would
-   truncate.
-
 ### `nc`, `telnet` and `ftp`: the server half of the ABI, and what SLIRP will not do (2026-07-25)
 
 Three more Roadshow-era commands, written against `bsdsocket.library`'s published
@@ -3512,3 +3342,174 @@ not built. Four differences that matter, in the order they will bite:
 
 So the order stands: curl first because it already knows this platform, wget
 second because it does not.
+
+
+## 12. Conformance, named — and the client access patterns behind it (2026-07-25)
+
+The loopback tier reads **125 passed, 1 failed, 16 skipped**. A count is not a work list,
+so here is every one of the 17 with its name, its cause, and a classification that does
+not flatter us:
+
+- **(a)** a real gap a client could hit
+- **(b)** a divergence we stand behind
+- **(c)** an artefact of the suite or the environment
+- **(d)** out of scope
+
+| # | Name | Class | Why |
+|---|---|---|---|
+| 3 | `socket(): create SOCK_RAW (ICMP)` — **failed** | **(a)** + (b) | We do not implement `SOCK_RAW` at all. The *red* is (b): `test_socket.c:52` skips only on `EACCES`, and `EACCES` means "you lack privilege" on an OS with no privilege model, so we answer `ESOCKTNOSUPPORT` and the test stays red. The *absence* is (a). |
+| 27 | `recv(MSG_OOB): urgent data delivery` | **(a)** | NetX Duo's TCP has no urgent pointer: no `URG` on transmit, none parsed on receive. `ftp`'s `ABOR` and `telnet`'s interrupt both send `IAC IP` as urgent data. |
+| 64 | `WaitSelect(): exceptfds detects OOB data` | **(a)** | Same root as 27. Skipped because the `send(MSG_OOB)` that sets it up already fails. |
+| 39–42 | `tcp_network_64k`, `udp_network_datagram`, `accept_external`, `tcp_network_large` | **(c)** | `helper_is_connected()` is false on the loopback tier by construction. 39, 40 and 42 pass on the network tier. |
+| 103–104 | `gethostbyname_external`, `gethostbyaddr_external` | **(c)** | Same gate; both pass on the network tier. |
+| 132–136 | `icmp_loopback`, `icmp_network`, `icmp_large_payload`, `icmp_multi_ping`, `icmp_timeout` | **(a)** | All five skip on the same `socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)` that fails as test 3. |
+| 138, 140, 142 | `tp_tcp_network`, `tp_udp_network`, `tp_tcp_sustained_network` | **(c)** | Helper gate; all three pass on the network tier. |
+
+Nothing here is (d). The `ipf_*` family that §3.2 calls Tier 4 is not tested by this suite
+at all, so it never appears in the 17.
+
+**The network tier** is **133 passed, 2 failed, 7 skipped**. It differs from the loopback
+tier by exactly the nine helper-gated tests: eight of them turn green, and the ninth,
+**41 `accept(): incoming connection from remote host`**, turns *red* rather than green.
+That one is **(c)**, and the evidence is on the host side rather than the Amiga side: the
+suite asks the helper to connect back to the Amiga on port 7861, and the helper log says
+`CONNECT to 127.0.0.1:7861 failed: [Errno 61] Connection refused`. Under FS-UAE's SLIRP
+the guest has no inbound path unless one is opened explicitly, and the obvious lever does
+not work — `uae_slirp_ports = 7861` reaches the config (it is in the FS-UAE log) and
+changes nothing; FS-UAE 3.2.35's inbound mode appears to be the fixed `21-23,80` set, and
+7861 cannot be moved into it because the suite derives that port as `base + 161`.
+The capability itself is verified elsewhere, on loopback, by `tests/clients` groups D, E,
+I and M — see below.
+
+### 12.1 What curl actually calls
+
+Read from curl 8.22.0-DEV (`lib/curl_setup.h`, `lib/amigaos.c`, `lib/cf-socket.c`,
+`lib/select.c`, `lib/socketpair.c`, `lib/curlx/nonblock.c`, `CMakeLists.txt`). curl's
+AmigaOS awareness is real but thinner than it looks: most of `lib/amigaos.c` is OS4-only,
+and the OS3 path is one `OpenLibrary` plus one `SocketBaseTags`.
+
+- `OpenLibrary("bsdsocket.library", 4)`, then
+  `SocketBaseTags(SBTM_SETVAL(SBTC_ERRNOPTR(sizeof(errno))), &errno,
+  SBTM_SETVAL(SBTC_LOGTAGPTR), "curl", TAG_DONE)`. **Any nonzero return is fatal** —
+  curl reports "SocketBaseTags ERROR" and refuses to run. This one call gates the port.
+- `select()` is `#define`d to `WaitSelect(a, b, c, d, e, 0)` (`curl_setup.h:461`).
+  `HAVE_POLL` is off, so every wait in curl goes through it, with `FD_SETSIZE` = 64 from
+  this toolchain's `sys/select.h` — which happens to equal our `BSD_DEFAULT_DTABLESIZE`.
+- `HAVE_FCNTL` is explicitly undefined for the bsdsocket build, so non-blocking mode is
+  `IoctlSocket(sockfd, FIONBIO, (char *)&flags)` with a `long`.
+- Non-blocking connect, then writable, then `getsockopt(SOL_SOCKET, SO_ERROR)`
+  (`verifyconnect()`, `cf-socket.c:913`), treating `0` and `EISCONN` as success.
+- `setsockopt`: `TCP_NODELAY` (default on), `SO_KEEPALIVE` and the `TCP_KEEP*` family
+  (all `#ifdef`-guarded, and the `TCP_KEEP*` names do not exist in this NDK), `SO_SNDBUF`,
+  `SO_REUSEADDR`. `SO_NOSIGPIPE` and `SO_BINDTODEVICE` are guarded out.
+- `HAVE_GETADDRINFO` is forced to 0 for Amiga by curl's own CMake, so **curl resolves with
+  `gethostbyname`**, not `getaddrinfo`.
+- **The one that is not obvious**: `lib/socketpair.c`. With no `AF_UNIX`, curl builds its
+  multi-handle wakeup pair out of `socket` + `setsockopt(SO_REUSEADDR)` +
+  `bind(127.0.0.1, 0)` + `getsockname` + `listen(1)` + `connect` + non-blocking
+  `accept(listener, NULL, NULL)` + a nonce round trip. So **curl exercises the server side
+  of the ABI on every multi handle**, `accept()` with two NULLs included. If `HAVE_PIPE`
+  is detected instead, curl uses `pipe()` — and a newlib pipe descriptor is not a
+  bsdsocket descriptor, so it would end up inside a `WaitSelect()` fd set and nothing
+  would ever wake. Checked rather than assumed: this toolchain **declares** `pipe()` in
+  `sys-include/sys/unistd.h:182` but does not **link** it (`undefined reference to
+  'pipe'`), and curl detects it with `check_function_exists`, which links — so
+  `HAVE_PIPE` comes out 0 and `wakeup_inet` is chosen. That is luck, not design: a port
+  that pre-fills the feature cache or sets `HAVE_PIPE` by hand breaks curl's multi
+  interface in a way that looks like a hang rather than an error.
+
+`wget` 1.25.0 (`src/connect.c`) demands a slightly different set, and in one respect a
+harder one: `connect_with_timeout()` bounds a **blocking** connect with
+`run_with_timeout()`, which needs `sigsetjmp` + `alarm` and therefore does nothing on
+AmigaOS. wget has no non-blocking connect path at all, so a blocking `connect()` to a
+dead port must fail promptly by itself or wget hangs with no timeout of its own to save
+it. wget also uses `bind_local()` + `accept_connection()` for FTP active mode — the same
+`socket`/`SO_REUSEADDR`/`bind`/`getsockname`/`listen`/`select`/`accept` sequence, this
+time with a real `sockaddr` out of `accept()` — and `getaddrinfo` when built with IPv6.
+
+### 12.2 `tests/clients` — the sequences, not the vectors
+
+`tests/clients/client_patterns.c` replays those sequences: an ordinary AmigaOS program,
+linked against none of our code, with sixteen groups each named after the program and file
+it came from. It found three defects that 142 per-vector conformance tests did not,
+because none of them is reachable one vector at a time.
+
+- **`shutdown(SHUT_WR)` was sending a RESET.** `nx_tcp_socket_disconnect()` cannot express
+  a half-close in either mode: with `NX_NO_WAIT` it resets
+  (`nx_tcp_socket_disconnect.c`, the `!NX_DISABLE_RESET_DISCONNECT` branch), and with a
+  wait option it sends a FIN and then calls `_nx_tcp_socket_block_cleanup()` when the peer
+  does not also close. Either way the direction the caller asked to *keep* died: after the
+  half-close the peer's `send()` failed with `EPIPE` and its queued data went in the bin.
+  The state machine itself is fine with it — `nx_tcp_socket_packet_process.c` runs
+  `_nx_tcp_socket_state_data_check()` in both `FIN_WAIT_1` and `FIN_WAIT_2` — so
+  `bsd_tcp_send_fin()` open-codes the graceful branch and stops before the suspension and
+  the cleanup. This is `nc -N`, it is `telnet`, and it is every ftp data connection.
+- **Ten simultaneous listeners, and the eleventh failed with `ENOBUFS`.**
+  `NX_MAX_LISTEN_REQUESTS` was NetX Duo's default of 10 and is a hard ceiling on
+  `listen()`: `nx_tcp_server_socket_listen()` returns `NX_MAX_LISTEN` and closing other
+  kinds of socket does not help. `ssh -L` wants one listener per forward and an ftp client
+  one per active-mode transfer. Now 32, which costs under a kilobyte inside the single
+  `NX_IP`.
+- **A half-closed socket then reported itself readable**, forever, with nothing to read —
+  a defect the half-close fix created and the same test caught in the next run.
+  `bsd_readable()` tested `nx_tcp_socket_state >= NX_TCP_CLOSE_WAIT` to mean "the peer's
+  FIN arrived before the disconnect callback was attached", and NetX Duo numbers the
+  states `CLOSE_WAIT` 6, `FIN_WAIT_1` 7, `FIN_WAIT_2` 8 — so `>=` also caught the two
+  that mean *we* sent the FIN. `nc -N` half-closes and then selects for the rest of the
+  answer, and would have spun at full speed on a `select()` that returned at once and a
+  `recv()` that returned `EWOULDBLOCK`. The states are named individually now, and the
+  fix was confirmed in both directions: the new check fails against the old `>=` and
+  passes against the named list.
+
+Everything else curl and wget need was already right, and is now pinned: the
+`SocketBaseTags` init gate, errno mirrored into the caller's own `int` at the caller's own
+width, non-blocking connect to both a live and a dead port with `SO_ERROR` read once and
+cleared, curl's `wakeup_inet` socketpair step for step, a control connection surviving
+three rounds of active-mode data connections, `WaitSelect()` over a wide sparse set
+returning exactly the right count and exactly the right bits, 64 rounds of
+connect/accept/transfer/close with descriptors recycling rather than accumulating,
+`send()` after the peer has gone failing rather than hanging, wget's blocking connect
+failing with `ECONNREFUSED` rather than a timeout, a descriptor table raised to 128 with
+`WaitSelect()` past the old 64, `FIONREAD` before and after a partial read, and four
+listen/accept/close cycles on one port.
+
+It also covers `getaddrinfo`, `getnameinfo`, `freeaddrinfo` and `gai_strerror`, which
+**nothing in the tree called in the default build**: they live at `0x324`–`0x336`, in the
+Roadshow tail past where the FD that generated
+`tests/conformance/compat/inline/bsdsocket.h` stops, so bsdsocktest cannot reach them and
+the only other coverage was the IPv6-only socket test. All twelve of those checks passed
+as they stood — coverage, not a fix.
+
+The whole file is **94 checks, 0 failures** on A1200/68020, and both conformance tiers are
+unchanged by the three fixes: **125/1/16** on loopback, **133/2/7** on the network tier,
+with the same names in each list as before.
+
+### 12.3 What is left, in the order it matters
+
+1. **`SOCK_RAW`** (test 3 plus skips 132–136 — six results, and the only red on the
+   loopback tier). NetX Duo can do it: `nx_ip_raw_packet_enable()`,
+   `nx_ip_raw_packet_send()` and `nx_ip_raw_packet_filter_set()` are all there. Two things
+   make it more than a wrapper. `ICMP` is dispatched to `nx_ip_icmp_packet_receive` before
+   the raw path is consulted, so reaching it needs `NX_ENABLE_IP_RAW_PACKET_ALL_STACK` —
+   which puts our filter callback on **every** inbound IP packet, TCP included. And when a
+   filter is installed, `_nx_ip_raw_packet_processing()` stops queueing entirely
+   (`nx_ip_raw_packet_processing.c`) and expects the filter to consume the packet, so
+   `nx_ip_raw_packet_receive()` becomes unusable and bsdsocket has to own the queue,
+   the per-protocol demux and the wakeup. Nothing on the target tool list needs it —
+   `ping` already works through `nx_icmp_ping()` — but `traceroute` and any third-party
+   `ping` port do.
+2. **`MSG_OOB`** (skips 27 and 64), plus `SIOCATMARK`, which `IoctlSocket()` currently
+   answers with `ENOSYS`. This is not a bsdsocket change: NetX Duo's TCP neither sets the
+   `URG` bit nor parses it, so the work is in the TCP core and on the hot receive path.
+   `ftp`'s `ABOR` and `telnet`'s interrupt are the callers; both degrade to the inline
+   copy of the command that the protocols send anyway, which is why this is second and
+   not first.
+3. **`CloseSocket()` on a connected TCP socket also resets** rather than finishing the
+   connection, for a reason the half-close fix does not remove: `nx_tcp_socket_delete()`
+   requires `CLOSED`, and a graceful close leaves the socket in `FIN_WAIT_1`, so going
+   graceful here needs a deferred-reap list or it leaks an `AmiSocket` per connection.
+   Group N of `tests/clients` writes a whole response and closes without the peer having
+   read a byte, and every byte still arrives — but that is loopback, where everything is
+   acknowledged before the close, so **this is a risk that has not been reproduced, not a
+   defect that has been ruled out**. On a slow link with a large final write it would
+   truncate.
