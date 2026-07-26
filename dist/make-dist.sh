@@ -197,8 +197,9 @@ provide for you.
 
   curl   fetches http:// and https:// URLs.
   ssh    connects to an SSH server. It is Dropbear's dbclient under another
-         name. Public-key and password authentication both work; a connection
-         takes roughly ten seconds while the machine does the cryptography.
+         name. Use a key: -i <keyfile>. A connection takes roughly ten seconds
+         while the machine does the cryptography. Password logins are built in
+         but have not been tried against a real server.
 
 Both need:
 
