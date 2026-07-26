@@ -20,6 +20,8 @@
 /* For _nx_tcp_packet_send_fin() -- see bsd_tcp_send_fin() below. */
 #include "nx_tcp.h"
 
+#include "aminetxduo/random.h"
+
 #include <proto/exec.h>
 
 /*
@@ -226,6 +228,86 @@ ULONG ami_bsd_tcp_window(VOID)
         window = (ULONG)BSD_TCP_WINDOW;
 
     return window;
+}
+
+/* ------------------------------------------------- initial sequence number */
+
+/*
+ * NetX Duo'S ISN IS BIASED, NOT ABSENT -- AND THE BIAS IS WORTH 9 BITS.
+ *
+ * It does randomise, and the claim that it does not is wrong.  The code is
+ * nxd_tcp_client_socket_connect.c:411 and nx_tcp_server_socket_accept.c:106,
+ * and both read:
+ *
+ *     if (socket -> nx_tcp_socket_tx_sequence == 0)
+ *     {
+ *         socket -> nx_tcp_socket_tx_sequence  = ((ULONG)NX_RAND()) << 16;
+ *         socket -> nx_tcp_socket_tx_sequence |=  (ULONG)NX_RAND();
+ *     }
+ *     else
+ *         socket -> nx_tcp_socket_tx_sequence += 0x10000 + (ULONG)NX_RAND();
+ *
+ * NX_RAND() is ami_random_rand() here -- a SHA-256 hash DRBG over an entropy
+ * pool (src/common/ami_random.c) -- so the generator is not the problem.  The
+ * COMBINING STEP is.  `|` is a bitwise OR of two independent draws, and
+ * rand() is specified to return 0..0x7FFFFFFF, so:
+ *
+ *   bits  0..15   come from the second draw alone           -- uniform
+ *   bits 16..30   are (first draw) OR (second draw)         -- 1 with
+ *                                                              probability 3/4
+ *   bit     31    is the first draw's bit 15 alone (the second draw's bit 31
+ *                 is always zero)                           -- uniform
+ *
+ * Fifteen of the thirty-two bits are therefore three-quarters ones.  That is
+ * 29.2 bits of Shannon entropy, and -- the number that matters for guessing --
+ * a MIN-ENTROPY OF 23.2 BITS: the single likeliest ISN comes up 438 times more
+ * often than it would under a uniform distribution, and an attacker who tries
+ * the dense-upper-half values first faces 2^23 rather than 2^32.
+ *
+ * It is visible in a packet trace, which is how it was confirmed rather than
+ * argued: across the SYNs captured in docs/RESEARCH.md 28.4, bits 16..30 were
+ * set in 35 of 45 places before this function existed (0.78, against the 0.75
+ * the expression predicts) and 69 of 135 after it (0.51, against 0.50).
+ *
+ * WHY IT MATTERS.  Blind injection into an established connection needs a
+ * sequence number inside the receive window; off-path, it also needs the
+ * ephemeral port.  Nine bits off the sequence space is not by itself a break,
+ * but it is nine bits an attacker gets for free, and predictable sequence
+ * numbers are the ingredient every off-path TCP attack since Morris has
+ * needed.
+ *
+ * THE FIX WITHOUT PATCHING third_party/.  The `else` branch above is a
+ * supported path rather than a fallback: it is what every REUSED socket takes.
+ * Seeding tx_sequence at create time makes a fresh socket take the branch a
+ * reused one takes, and that branch ADDS rather than ORs, so with a full
+ * 32-bit seed the result is uniform over the whole space.  No vendored file
+ * changes, no symbol override, no linker wrapper.
+ *
+ * WHAT THIS IS NOT.  It is not RFC 6528.  6528 computes
+ * M + F(local addr, local port, remote addr, remote port, secret); the
+ * four-tuple hash is there so a new connection on a RECENTLY USED four-tuple
+ * gets an ISN above the old one, which is what makes TIME-WAIT recycling safe.
+ * What this produces is a purely random ISN -- RFC 793 / RFC 1948 against
+ * prediction, and silent about recycling, which the 2 MSL timer already
+ * answers.  6528 proper is not reachable from here in any case: NetX Duo picks
+ * tx_sequence inside connect(), and at create time there is no peer to hash.
+ *
+ * Cost: one DRBG draw per TCP socket created, at create time, off every hot
+ * path.
+ */
+static VOID bsd_tcp_seed_isn(NX_TCP_SOCKET *tcp)
+{
+    ULONG seed = ami_random_ulong();
+
+    /*
+     * Zero is the one value that means "not seeded" to the code above, so it
+     * must not be handed back: a zero draw would silently restore the biased
+     * branch.  One draw in 2^32, and it costs a comparison.
+     */
+    if (seed == 0)
+        seed = 1;
+
+    tcp->nx_tcp_socket_tx_sequence = seed;
 }
 
 /* --------------------------------------------------------- descriptor table */
@@ -817,6 +899,8 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
                                       NX_IP_TIME_TO_LIVE, ami_bsd_tcp_window(),
                                       bsd_tcp_urgent_notify,
                                       bsd_tcp_disconnect_callback);
+        if (status == NX_SUCCESS)
+            bsd_tcp_seed_isn(&sock->as_Nx.tcp);
     }
     else
     {
@@ -1026,6 +1110,8 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
                                   NX_IP_TIME_TO_LIVE, ami_bsd_tcp_window(),
                                   bsd_tcp_urgent_notify,
                                   bsd_tcp_disconnect_callback);
+    if (status == NX_SUCCESS)
+        bsd_tcp_seed_isn(&incoming->as_Nx.tcp);
     if (status != NX_SUCCESS)
     {
         bsd_nx_leave(SocketBase);
@@ -1220,6 +1306,8 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
                                       bsd_tcp_disconnect_callback);
         if (status == NX_SUCCESS)
         {
+            bsd_tcp_seed_isn(&spare->as_Nx.tcp);
+
             spare->as_Flags    |= ASF_INCOMING | ASF_SERVER;
             spare->as_Parent    = sock;
             spare->as_LocalPort = sock->as_ListenPort;
