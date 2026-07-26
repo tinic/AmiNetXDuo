@@ -481,6 +481,8 @@ int __wrap_open(const char *path, int flags, ...)
     va_list ap;
     int mode = 0;
 
+    path = amiga_fix_path(path);
+
     if (path != NULL && strcmp(path, AMIGA_URANDOM_DEV) == 0)
     {
         /* Read-only, and only one at a time; nothing here opens two. */
@@ -878,7 +880,7 @@ int chmod(const char *path, mode_t mode)
     if ((mode & S_IWUSR) == 0) prot |= FIBF_WRITE | FIBF_DELETE;
     if ((mode & S_IXUSR) == 0) prot |= FIBF_EXECUTE;
 
-    if (!SetProtection((CONST_STRPTR)path, prot))
+    if (!SetProtection((CONST_STRPTR)amiga_fix_path(path), prot))
     {
         errno = (IoErr() == ERROR_OBJECT_NOT_FOUND) ? ENOENT : EACCES;
         return -1;

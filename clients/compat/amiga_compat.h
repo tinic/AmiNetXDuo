@@ -35,6 +35,11 @@ extern "C" {
    to the parameter list. */
 struct timespec;
 
+/* Collapse ":/" to ":" -- see amiga_posix.c.  Returns its argument unchanged
+   when there is nothing to fix, and otherwise a pointer to a static buffer,
+   so the result is only valid until the next call. */
+const char *amiga_fix_path(const char *path);
+
 /* Delay().  One tick of resolution, rounds up, never returns EINTR. */
 int nanosleep(const struct timespec *req, struct timespec *rem);
 

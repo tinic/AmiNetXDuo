@@ -32,6 +32,26 @@
  *   each through SystemTagList() with output appended to DH0:client.txt, and
  *   writes the return code after each.  The host prints DH0:client.txt back.
  *
+ *   Two lines are not commands:
+ *
+ *       &<command>   start it and do NOT wait.  Its output goes to
+ *                    DH0:server.txt rather than the shared report, so a
+ *                    long-running process writing while the next command
+ *                    writes does not interleave two streams into one file.
+ *       wait <n>     Delay(n seconds).
+ *
+ *   Both exist for one case: running a SERVER and a client in the same guest.
+ *   FS-UAE's SLIRP has no inbound path, so a server on the Amiga cannot be
+ *   reached from the host at all, and the only way to make it accept a
+ *   connection is to make the connection from inside -- dropbear listening on
+ *   127.0.0.1 and dbclient connecting to it.  That needs one command running
+ *   while another starts, which is the one thing a list of synchronous
+ *   SystemTagList() calls cannot express.
+ *
+ *   SYS_Asynch means the child, not us, closes SYS_Input and SYS_Output, so
+ *   they are opened fresh for each async command and never handed the same
+ *   handle twice.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -45,6 +65,10 @@ static const char version_tag[] __attribute__((used)) =
     "$VER: ClientRun 1.0 (25.7.2026)";
 
 #define REPORT      "DH0:client.txt"
+
+/* A separate file for async output.  Sharing REPORT would interleave a
+   server's log with the client's, in a file both have open for append. */
+#define ASYNC_REPORT "DH0:server.txt"
 #define COMMANDS    "DH0:commands.txt"
 #define REDIRECT    " <NIL: >>DH0:client.txt"
 
@@ -72,6 +96,18 @@ static const char version_tag[] __attribute__((used)) =
    of a 4 KB Shell gets a stack a ported program can survive on. */
 static struct TagItem client_tags[] =
 {
+    { NP_StackSize, CLIENT_STACK },
+    { TAG_END,      0            }
+};
+
+/* SYS_Input and SYS_Output are filled in per command: with SYS_Asynch the
+   child closes them when it exits, so the same handle must never be given
+   to two commands. */
+static struct TagItem async_tags[] =
+{
+    { SYS_Asynch,   DOSTRUE      },
+    { SYS_Input,    0            },
+    { SYS_Output,   0            },
     { NP_StackSize, CLIENT_STACK },
     { TAG_END,      0            }
 };
@@ -173,8 +209,14 @@ int main(int argc, char **argv)
     (VOID)argc;
     (VOID)argv;
 
-    /* Truncate the report once, so a rerun does not append to the last run. */
+    /* Truncate both reports once, so a rerun does not append to the last run.
+       The async one is truncated even when nothing async runs -- otherwise a
+       run with no server would print the PREVIOUS run's server log. */
     out = Open((CONST_STRPTR)REPORT, MODE_NEWFILE);
+    if (out != (BPTR)0)
+        Close(out);
+
+    out = Open((CONST_STRPTR)ASYNC_REPORT, MODE_NEWFILE);
     if (out != (BPTR)0)
         Close(out);
 
@@ -191,6 +233,51 @@ int main(int argc, char **argv)
         ULONG used;
         LONG  t0;
         LONG  elapsed;
+
+        /* wait <n> -- seconds, so an async server has time to bind and listen
+           before the client that is going to connect to it starts. */
+        if (lines[i][0] == 'w' && lines[i][1] == 'a' && lines[i][2] == 'i'
+            && lines[i][3] == 't' && lines[i][4] == ' ')
+        {
+            LONG secs = 0;
+            const char *p = &lines[i][5];
+
+            while (*p >= '0' && *p <= '9')
+                secs = secs * 10 + (*p++ - '0');
+
+            report("\n--- wait %ld s\n", secs);
+            if (secs > 0)
+                Delay((ULONG)secs * TICKS_PER_SECOND);
+            continue;
+        }
+
+        /* &<command> -- start it and carry on.  There is no return code to
+           report, because the point is that we did not wait for one. */
+        if (lines[i][0] == '&')
+        {
+            BPTR in  = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+            BPTR aout = Open((CONST_STRPTR)ASYNC_REPORT, MODE_READWRITE);
+
+            if (aout != (BPTR)0)
+                Seek(aout, 0, OFFSET_END);
+
+            report("\n--- (async) %s\n", (LONG)&lines[i][1]);
+
+            async_tags[1].ti_Data = (ULONG)in;
+            async_tags[2].ti_Data = (ULONG)aout;
+
+            rc = SystemTagList((CONST_STRPTR)&lines[i][1], async_tags);
+
+            /* SYS_Asynch only takes ownership of the handles once the child
+               exists.  If it never did, they are still ours to close. */
+            if (rc != 0)
+            {
+                report("--- could not start it: rc %ld\n", rc);
+                if (in   != (BPTR)0) Close(in);
+                if (aout != (BPTR)0) Close(aout);
+            }
+            continue;
+        }
 
         report("\n--- %s\n", (LONG)lines[i]);
 

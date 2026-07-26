@@ -75,6 +75,52 @@ extern long _lseek(int fd, long offset, int whence);
 #define AMIGA_EPOCH_OFFSET  (2922L * 86400L)
 
 
+/* --------------------------------------------------------------- path --- */
+
+/*
+ * Every ported program builds a path by writing "%s/.ssh/..." after whatever
+ * getpwnam() gave it as a home directory.  On AmigaOS the home is a device or
+ * assign name ending in a colon, so that produces
+ *
+ *     SYS:/.ssh/authorized_keys
+ *
+ * and a colon followed by a slash means the PARENT of the root -- which does
+ * not exist, so the Lock() fails and the program reports that the file is
+ * missing.  The correct spelling is SYS:.ssh/authorized_keys.
+ *
+ * Collapsing ":/" to ":" is safe because the sequence has no other valid
+ * meaning in an AmigaOS path: a device name is always followed directly by
+ * the thing inside it.  Done once, in the one place paths enter, rather than
+ * asked of every caller.
+ *
+ * The buffer is static and this is not re-entrant, for the same reason
+ * clients/compat/amiga_posix.c's FileInfoBlock is: a Shell command's stack is
+ * 4 KB and nothing here opens two files at once.
+ */
+static char amiga_path_buf[512];
+
+const char *amiga_fix_path(const char *path)
+{
+    const char *colon;
+    size_t      head;
+
+    if (path == NULL)
+        return path;
+
+    colon = strchr(path, ':');
+    if (colon == NULL || colon[1] != '/')
+        return path;
+
+    head = (size_t)(colon - path) + 1;           /* through the colon */
+    if (head + strlen(colon + 2) + 1 > sizeof(amiga_path_buf))
+        return path;                             /* too long to fix; leave it */
+
+    memcpy(amiga_path_buf, path, head);
+    strcpy(amiga_path_buf + head, colon + 2);    /* skip the '/' */
+    return amiga_path_buf;
+}
+
+
 /* --------------------------------------------------------------- stat --- */
 
 /*
@@ -125,7 +171,7 @@ int stat(const char *path, struct stat *st)
         return -1;
     }
 
-    lock = Lock((CONST_STRPTR)path, SHARED_LOCK);
+    lock = Lock((CONST_STRPTR)amiga_fix_path(path), SHARED_LOCK);
     if (lock == (BPTR)0)
     {
         errno = ENOENT;
@@ -202,7 +248,7 @@ int isatty(int fd)
 
 int unlink(const char *path)
 {
-    return _unlink(path);
+    return _unlink(amiga_fix_path(path));
 }
 
 int mkdir(const char *path, mode_t mode)
@@ -217,7 +263,7 @@ int mkdir(const char *path, mode_t mode)
         return -1;
     }
 
-    lock = CreateDir((CONST_STRPTR)path);
+    lock = CreateDir((CONST_STRPTR)amiga_fix_path(path));
     if (lock == (BPTR)0)
     {
         errno = (IoErr() == ERROR_OBJECT_EXISTS) ? EEXIST : EACCES;
