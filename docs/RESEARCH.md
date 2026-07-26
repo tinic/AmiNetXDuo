@@ -4575,9 +4575,36 @@ depends on exactly that. And `--cacert` is the switch a user reaches for when
 they do *not* trust the default store, which is the case where being ignored
 matters most.
 
-**Not fixed here: `src/tlslib/` is not this work's to change.** The suite now
-asks in both orders, so whoever fixes it can see the difference without having
-to remember which case ran first.
+**Fixed while this was being written**, in `src/tlslib/` rather than here
+(292f391): the cache key now covers the identity of the trust store's root set,
+whether the chain and host name were verified, whether validity dates were
+checked, and the accepted chain depth. Re-run against it, the both-orders
+design is the acceptance test and it passes:
+
+| case | before | after |
+|---|---|---|
+| `e01` wrong store, cold | 60 | **60** |
+| `e02` no store, cold | 60 | **60** |
+| `e23` wrong store, warm | **0, HTTP 200** | **60** |
+| `e24` no store, warm | **0, HTTP 200** | **60** |
+| `e25` `-k` cached, then without `-k` | — | **60**, `appconnect` 0.0 — not resumed at all |
+
+**One of those expectations needed settling rather than assuming, and it is
+worth recording which way it went.** `e24` passes no `--cacert`, and if that
+resolved to the same store which cached the session then resuming would be
+*correct* and 200 would be the right answer. Read from the source rather than
+guessed: `amitls.c:391` passes `TLSA_TrustStore` only when `CAfile` is set, and
+`tls_conn.c:392` falls back to `TLS_DEFAULT_STORE` when it is not — and the
+build bakes `CURL_CA_BUNDLE` with that same path, so both routes name
+`DEVS:Internet/certificates`. Every earlier case to that host passed
+`--cacert DH0:teststore`. **Different root sets, so 60 is right**, and the case
+now says so in a comment. A suite that encodes a wrong expectation is worse
+than one case short, because the next person to touch resumption would "fix" a
+non-bug to make it pass.
+
+`e25` is the same question for a different bit of the key: `e08` reaches
+`wrong.test` with `-k` and caches a session nothing verified, and coming back
+without `-k` must not resume into acceptance. It does not.
 
 ### 14.5 What curl could not break
 
@@ -4629,15 +4656,13 @@ The score, on the A1200 profile with both fixes in:
 
 ```
 groups A-D and F (hermetic)      122 passed, 2 failed, 124 cases
-group E (TLS, hermetic)           25 passed, 2 failed,  27 cases
+group E (TLS, hermetic)           28 passed, 0 failed,  28 cases
 ```
 
-**All four of those failures are real and none of them is a false alarm**, so
-they are listed rather than explained away:
+**Both of those failures are real and neither is a false alarm**, so they are
+listed rather than explained away (group E's two are gone: the trust-store
+defect of §14.4 was fixed and the cases now pass):
 
-- `e23`/`e24` — the trust-store defect of §14.4, which is `src/tlslib/`'s to
-  fix. Their cold twins `e01`/`e02` pass, which is what makes the diagnosis a
-  diagnosis rather than a suspicion.
 - `a44_cookies_send` — **curl does not write its cookie jar on AmigaOS**, and
   this one is neither ours nor the stack's. `-c DH0:cj.txt` leaves a zero-byte
   file with no temporary beside it: `Curl_fopen()` truncates the target, fstats

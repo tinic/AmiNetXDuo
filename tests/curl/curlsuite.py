@@ -301,7 +301,12 @@ def build(base, curl, cacert="--cacert DH0:teststore"):
         '%s -sS -b DH0:cj.txt -o DH0:d/a44.bin -w "%s" "%s/needbigrequest?min=2000"'
         % (curl, WFMT, http), w={"code": "200"},
         note="60 cookies come back as one ~3 KB Cookie header; the endpoint "
-             "answers 400 if the request header was under 2 KB")
+             "answers 400 if the request header was under 2 KB.  KNOWN RED, "
+             "AND NOT OURS: curl does not write its cookie jar on AmigaOS -- "
+             "-c leaves a zero-byte file with no temporary beside it.  It "
+             "reproduces identically on the Aminet binary, which is clib2 and "
+             "shares no libc with our newlib build, so the common factor is "
+             "curl's own path handling.  Do not re-diagnose it as a stack bug")
 
     add("a45_local_port", "A",
         '%s -sS --local-port 7300-7310 -o DH0:d/a45_local_port.bin -w "%s" '
@@ -509,7 +514,11 @@ def build(base, curl, cacert="--cacert DH0:teststore"):
         '"https://rsa2.test:%d/bytes/1024"' % (curl, base + 1, HOST, WFMT,
                                                base + 1), rc=60,
         note="no --cacert, so DEVS:Internet/certificates -- the real Mozilla "
-             "set, which has never heard of our root")
+             "set, which has never heard of our root.  Verified rather than "
+             "assumed: amitls.c passes TLSA_TrustStore only when CAfile is "
+             "set, and tls_conn.c falls back to TLS_DEFAULT_STORE when it is "
+             "not -- and the build bakes in CURL_CA_BUNDLE with the same "
+             "path, so BOTH routes name the same file")
 
     https("rsa2.test", 1, body=("master", 0, 1024),
           w={"code": "200", "size": "1024"},
@@ -606,16 +615,30 @@ def build(base, curl, cacert="--cacert DH0:teststore"):
         '%s -sS --cacert DH0:otherstore --resolve rsa2.test:%d:%s '
         '-o DH0:d/e23.bin -w "%s" "https://rsa2.test:%d/bytes/1024"'
         % (curl, base + 1, HOST, WFMT, base + 1), rc=60,
-        note="the same wrong trust store as e01, after the cache is warm.  "
-             "A resumed handshake sends no certificate and verifies nothing, "
-             "and tls.library keys its cache on the host name alone -- so "
-             "this is where a trust decision made under one --cacert gets "
-             "reused under another")
+        note="the same wrong trust store as e01, after the cache is warm.  A "
+             "resumed handshake sends no certificate and verifies nothing, so "
+             "this is where a trust decision made under one --cacert would "
+             "get reused under another")
     add("e24_default_store_warm", "E",
         '%s -sS --resolve rsa2.test:%d:%s -o DH0:d/e24.bin -w "%s" '
         '"https://rsa2.test:%d/bytes/1024"' % (curl, base + 1, HOST, WFMT,
                                                base + 1), rc=60,
-        note="and with no --cacert at all")
+        note="and with no --cacert at all.  60 rather than 200 IS the right "
+             "answer here, and it is worth saying why because the opposite is "
+             "arguable: resuming under the same store that cached the session "
+             "would be correct, but every earlier case to this host passed "
+             "--cacert DH0:teststore and this one resolves to "
+             "DEVS:Internet/certificates.  Different root sets, so the "
+             "session must not be reused")
+    add("e25_insecure_then_secure", "E",
+        '%s -sS %s --resolve wrong.test:%d:%s -o DH0:d/e25.bin -w "%s" '
+        '"https://wrong.test:%d/bytes/1024"'
+        % (curl, cacert, base + 1, HOST, WFMT, base + 1), rc=60,
+        note="e08 reached this host with -k, which caches a session nothing "
+             "verified.  Coming back WITHOUT -k must not resume into it: the "
+             "certificate is still issued to another name and the answer is "
+             "still 60")
+
     add("e22_after_tls", "E",
         '%s -sS -o DH0:d/e22_after_tls.bin -w "%s" "%s/bytes/16384"'
         % (curl, WFMT, http), body=("master", 0, 16384),
