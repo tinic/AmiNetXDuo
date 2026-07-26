@@ -230,6 +230,54 @@ UINT    tx_amiga_adopt_thread(TX_THREAD *thread_ptr, CHAR *name, UINT priority);
  */
 UINT    tx_amiga_orphan_thread(TX_THREAD *thread_ptr);
 
+/*
+ * KEEPING AN ADOPTION BETWEEN CALLS
+ *
+ * A task that makes one stack call makes thousands.  Measured on a 14 MHz
+ * 68020 (tests/perf/bracket_test.c), one adopt/orphan pair costs ~800 us, of
+ * which the AllocSignal()/FreeSignal() is 17 us and everything else is
+ * _tx_thread_create(), _tx_thread_terminate(), _tx_thread_delete() and the
+ * scheduler poke.  That work is repeatable rather than per-call: the same task
+ * gets the same TX_THREAD every time.
+ *
+ * So a caller that owns persistent storage may adopt ONCE and then use this
+ * pair as its bracket.  Between them the thread is TX_SUSPENDED -- it is not
+ * on any ready list, the scheduler will never dispatch it, and the baton is
+ * free -- so the "never block outside ThreadX while adopted" contract is
+ * unchanged: it applies between resume and suspend, exactly as it applies
+ * between adopt and orphan.
+ *
+ *   tx_amiga_adopt_thread(&t, ...);           once
+ *       tx_amiga_adopt_resume(&t);  ... work ...  tx_amiga_adopt_suspend(&t);
+ *       tx_amiga_adopt_resume(&t);  ... work ...  tx_amiga_adopt_suspend(&t);
+ *   tx_amiga_orphan_thread(&t);               once, on the same Task
+ *
+ * Both must be called by the Task that adopted, and both refuse anything else
+ * with TX_CALLER_ERROR -- a caller that gets that should fall back to a fresh
+ * tx_amiga_adopt_thread(), which is always correct and merely slower.
+ *
+ * THE LIFETIME THIS DOES NOT CLOSE, stated because it is the reason to think
+ * twice: a Task that exits without orphaning leaves a TX_SUSPENDED TX_THREAD
+ * in the created list whose tx_thread_amiga_task points at freed memory.
+ * Nothing dispatches a suspended thread and nothing else resumes one, so it is
+ * inert -- but it is inert only for as long as that stays true.  Storage for
+ * the TX_THREAD must outlive the Task or be freed by it.
+ */
+UINT    tx_amiga_adopt_resume(TX_THREAD *thread_ptr);
+UINT    tx_amiga_adopt_suspend(TX_THREAD *thread_ptr);
+
+/*
+ * Deregister a thread adopted by SOME OTHER Task -- the teardown path for a
+ * cached adoption whose owner is gone or is not the one closing.  The Exec
+ * signal is NOT recovered, because only its owner may FreeSignal() it; if the
+ * owner is alive it keeps a bit it will never use again, and if it is dead the
+ * bit died with it.  Prefer tx_amiga_orphan_thread() whenever the caller is
+ * the owner: it is the same work plus the signal.
+ *
+ * Returns TX_SUCCESS, TX_PTR_ERROR or TX_THREAD_ERROR.
+ */
+UINT    tx_amiga_discard_thread(TX_THREAD *thread_ptr);
+
 /* The TX_THREAD the calling Exec Task was adopted as, or TX_NULL.  */
 TX_THREAD *tx_amiga_adopted_thread(VOID);
 

@@ -276,12 +276,212 @@ VOID        *stack_start;
 }
 
 
+/*
+ * Give the baton back and go dormant, keeping the TX_THREAD.
+ *
+ * The order is the point.  The baton is dropped FIRST, so that by the time
+ * _tx_thread_suspend() runs the thread is an ordinary ready thread rather than
+ * the running one and _tx_thread_system_suspend() has nothing to switch away
+ * from.  _tx_thread_system_state is raised across it for the same reason
+ * tx_amiga_orphan_thread() raises it: a suspend that decides to switch would
+ * do so on behalf of a Task that is no longer a ThreadX thread.
+ */
+UINT tx_amiga_adopt_suspend(TX_THREAD *thread_ptr)
+{
+
+struct Task *me;
+ULONG        sigmask;
+UINT         wake;
+
+
+    if (thread_ptr == TX_NULL)
+    {
+        return(TX_PTR_ERROR);
+    }
+
+    me =  FindTask((STRPTR) 0);
+
+    Forbid();
+
+    if (((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED) == 0U) ||
+        (thread_ptr -> tx_thread_amiga_task != (VOID *) me) ||
+        (thread_ptr -> tx_thread_id != TX_THREAD_ID))
+    {
+        Permit();
+        return(TX_CALLER_ERROR);
+    }
+
+    sigmask =  thread_ptr -> tx_thread_amiga_run_signal;
+
+    /* Drop the baton before we stop being runnable.  */
+    if (_tx_thread_current_ptr == thread_ptr)
+    {
+        _tx_thread_current_ptr =  TX_NULL;
+        _tx_timer_time_slice   =  ((ULONG) 0);
+    }
+
+    _tx_thread_system_state++;
+
+    Permit();
+
+    (VOID) _tx_thread_suspend(thread_ptr);
+
+    Forbid();
+    _tx_thread_system_state--;
+
+    /*
+     * Wake the scheduler only if there is something for it to dispatch.
+     *
+     * _tx_thread_execute_ptr == TX_NULL means no ThreadX thread is ready, so
+     * the poke would wake the scheduler Task, have it find nothing and put it
+     * back to sleep -- two Exec context switches, measured at 202 us on a
+     * 14 MHz 68020, which is a quarter of what this whole bracket used to
+     * cost.  Skipping it cannot lose a dispatch: every path that makes a
+     * thread ready afterwards wakes the scheduler itself, from an interrupt
+     * (tx_thread_context_restore.c) or from whoever holds the baton
+     * (_tx_thread_system_return).  Read inside the Forbid() that lowers the
+     * system state so the answer cannot be stale by the time it is used.
+     */
+    wake =  (_tx_thread_execute_ptr != TX_NULL) ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
+
+    Permit();
+
+    if (wake == (UINT) TX_TRUE)
+    {
+        _tx_amiga_wake_scheduler();
+    }
+
+    /* Anything that latched on the run signal while we were dispatched is
+       spent; leaving it set would turn the next park into a spin.  */
+    SetSignal(0UL, sigmask);
+
+    return(TX_SUCCESS);
+}
+
+
+/*
+ * Come back out of dormancy and take the baton.  The tail of this is the same
+ * fast-path-or-park as tx_amiga_adopt_thread(); only the registration is
+ * skipped, because the thread is still registered.
+ */
+UINT tx_amiga_adopt_resume(TX_THREAD *thread_ptr)
+{
+
+struct Task *me;
+
+
+    if (thread_ptr == TX_NULL)
+    {
+        return(TX_PTR_ERROR);
+    }
+    if (_tx_amiga_kernel_up == TX_FALSE)
+    {
+        return(TX_NOT_DONE);
+    }
+
+    me =  FindTask((STRPTR) 0);
+
+    Forbid();
+
+    if (((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED) == 0U) ||
+        (thread_ptr -> tx_thread_amiga_task != (VOID *) me) ||
+        (thread_ptr -> tx_thread_id != TX_THREAD_ID) ||
+        (thread_ptr -> tx_thread_state != TX_SUSPENDED) ||
+        ((thread_ptr -> tx_thread_amiga_flags &
+          (TX_AMIGA_THREAD_DIE | TX_AMIGA_THREAD_ORPHANED)) != 0U))
+    {
+        Permit();
+        return(TX_CALLER_ERROR);
+    }
+
+    _tx_thread_system_state++;
+
+    Permit();
+
+    (VOID) _tx_thread_resume(thread_ptr);
+
+    Forbid();
+    _tx_thread_system_state--;
+
+    /* The same free-baton fast path tx_amiga_adopt_thread() takes.  */
+    if ((_tx_thread_current_ptr == TX_NULL) &&
+        (_tx_thread_execute_ptr == thread_ptr) &&
+        (_tx_thread_system_state == ((ULONG) 0)))
+    {
+
+        _tx_thread_current_ptr =  thread_ptr;
+        thread_ptr -> tx_thread_run_count++;
+        _tx_timer_time_slice =  thread_ptr -> tx_thread_time_slice;
+        Permit();
+        return(TX_SUCCESS);
+    }
+
+    Permit();
+
+    _tx_amiga_wake_scheduler();
+
+    if (_tx_amiga_thread_park(thread_ptr) != TX_TRUE)
+    {
+
+        /* Torn down under us while we waited.  Tell the caller to start over
+           with a fresh adoption rather than pretend it holds the baton.  */
+        return(TX_CALLER_ERROR);
+    }
+
+    return(TX_SUCCESS);
+}
+
+
+UINT tx_amiga_discard_thread(TX_THREAD *thread_ptr)
+{
+
+    if (thread_ptr == TX_NULL)
+    {
+        return(TX_PTR_ERROR);
+    }
+
+    Forbid();
+
+    if ((thread_ptr -> tx_thread_id != TX_THREAD_ID) ||
+        ((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED) == 0U))
+    {
+        Permit();
+        return(TX_THREAD_ERROR);
+    }
+
+    /* Somebody else's Task must not be left as the baton holder.  This should
+       be unreachable -- a dormant cached thread never is -- but a stale baton
+       stops the whole stack and costs nothing to rule out.  */
+    if (_tx_thread_current_ptr == thread_ptr)
+    {
+        _tx_thread_current_ptr =  TX_NULL;
+        _tx_timer_time_slice   =  ((ULONG) 0);
+    }
+
+    _tx_thread_system_state++;
+
+    Permit();
+
+    (VOID) _tx_thread_terminate(thread_ptr);
+    (VOID) _tx_thread_delete(thread_ptr);
+
+    Forbid();
+    _tx_thread_system_state--;
+    Permit();
+
+    _tx_amiga_wake_scheduler();
+
+    return(TX_SUCCESS);
+}
+
+
 UINT tx_amiga_orphan_thread(TX_THREAD *thread_ptr)
 {
 
 struct Task *me;
 ULONG        sigmask;
 BYTE         sig;
+UINT         wake;
 
 
     if (thread_ptr == TX_NULL)
@@ -338,10 +538,16 @@ BYTE         sig;
 
     Forbid();
     _tx_thread_system_state--;
+    wake =  (_tx_thread_execute_ptr != TX_NULL) ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
     Permit();
 
-    /* Whoever is next may run now.  */
-    _tx_amiga_wake_scheduler();
+    /* Whoever is next may run now -- if there is anybody.  See the note in
+       tx_amiga_adopt_suspend() for why an empty execute pointer means the
+       poke can be skipped, and what makes that safe.  */
+    if (wake == (UINT) TX_TRUE)
+    {
+        _tx_amiga_wake_scheduler();
+    }
 
     /* Drop anything that latched on the run signal, then give the bit back.  */
     SetSignal(0UL, sigmask);
