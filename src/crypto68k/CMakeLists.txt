@@ -102,7 +102,7 @@ set(CRYPTO68K_SOURCES
 
 if(AMINETXDUO_CRYPTO68K_ASM)
     list(APPEND CRYPTO68K_SOURCES
-         c68k_prim.S c68k_p256.S c68k_aes.S c68k_sha256.S)
+         c68k_prim.S c68k_p256.S c68k_aes.S)
 endif()
 
 add_library(crypto68k STATIC ${CRYPTO68K_SOURCES})
@@ -123,7 +123,7 @@ if(AMINETXDUO_CRYPTO68K_ASM)
     # nothing else in the tree changes behaviour.
     target_compile_definitions(crypto68k PRIVATE C68K_ASM=1)
     set_source_files_properties(
-        c68k_prim.S c68k_p256.S c68k_aes.S c68k_sha256.S PROPERTIES
+        c68k_prim.S c68k_p256.S c68k_aes.S PROPERTIES
         COMPILE_DEFINITIONS C68K_ASM=1
         COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
 endif()

@@ -713,11 +713,6 @@ C68K_SHA256 ctx;
     {
         c68k_sha256_variant = v;
 
-        if ((v == C68K_SHA256_V_ASM) && (c68k_sha256_variant_is_asm(v) == 0u))
-        {
-            continue;
-        }
-
         b_sha_check_vectors();
 
         start = c68k_eclock();
@@ -807,10 +802,6 @@ UINT    saved;
     for (v = 0; v < C68K_SHA256_V_COUNT; v++)
     {
         c68k_sha256_variant = v;
-        if ((v == C68K_SHA256_V_ASM) && (c68k_sha256_variant_is_asm(v) == 0u))
-        {
-            continue;
-        }
 
         start = c68k_eclock();
         (VOID)_nx_crypto_hmac(&b_our_hmac, b_plain, (UINT)B_BULK_BYTES,

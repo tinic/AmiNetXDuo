@@ -1047,10 +1047,6 @@ static VOID t_bulk(VOID)
 
     for (v = 0; v < C68K_SHA256_V_COUNT; v++)
     {
-        if (c68k_sha256_variant_is_asm(v))
-        {
-            continue;
-        }
         t_bulk_sha(v);
     }
     c68k_sha256_variant = C68K_SHA256_V_BEST;

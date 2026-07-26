@@ -25,8 +25,6 @@
 
 #include "c68k_sha256.h"
 
-#include <stddef.h>
-
 
 /* ------------------------------------------------------------- variant --- */
 
@@ -34,8 +32,7 @@ UINT    c68k_sha256_variant = C68K_SHA256_V_BEST;
 
 static const char *const c68k_sha256_names[C68K_SHA256_V_COUNT] =
 {
-    "portable C",
-    "68020 assembly"
+    "portable C"
 };
 
 const char *c68k_sha256_variant_name(UINT variant)
@@ -52,12 +49,11 @@ const char *c68k_sha256_variant_name(UINT variant)
 UINT c68k_sha256_variant_is_asm(UINT variant)
 {
 
-#ifdef C68K_ASM
-    return((variant == C68K_SHA256_V_ASM) ? NX_CRYPTO_TRUE : NX_CRYPTO_FALSE);
-#else
+    /* None of it is.  See docs/RESEARCH.md 18: the 68020 assembly was
+       written, measured and removed. */
     (VOID)variant;
+
     return(NX_CRYPTO_FALSE);
-#endif
 }
 
 
@@ -106,6 +102,42 @@ const ULONG c68k_sha256_k[64] =
     (d) = (d) + t1;                                                     \
     (h) = t1 + t2;
 
+/*
+ * A big-endian longword at an arbitrary address.
+ *
+ * On the 68020 this is ONE MOVE.L, written as inline assembly because C
+ * cannot say "this pointer is not aligned and I want the load anyway": the
+ * part does misaligned data accesses in hardware, and a TLS record's payload
+ * starts 21 bytes into the packet buffer, so misaligned is the normal case
+ * here and not the exceptional one.
+ *
+ * nx_crypto_sha2.c's W0() macro builds each of the sixteen message words from
+ * four byte loads, three shifts and three ORs.  That is 128 instructions a
+ * block that need not exist on a big-endian machine, and it is most of why
+ * the C below is 1.29x the vendored implementation before any assembly is
+ * written at all.
+ *
+ * Everything else takes the portable form, which is also the only CORRECT
+ * form anywhere else: reading the longword directly is right on a big-endian
+ * machine and wrong on the build host, and the host tier of the vectors is
+ * what catches getting that backwards.  It did.
+ */
+static ULONG c68k_sha256_load_be(const UCHAR *p)
+{
+
+#ifdef __mc68020__
+ULONG   v;
+
+    __asm__ ("move.l %1,%0" : "=d" (v) : "m" (*p));
+
+    return(v);
+#else
+    return((((ULONG)p[0]) << 24) | (((ULONG)p[1]) << 16) |
+           (((ULONG)p[2]) << 8) | ((ULONG)p[3]));
+#endif
+}
+
+
 static VOID c68k_sha256_blocks_c(ULONG *state, const UCHAR *data, ULONG blocks)
 {
 
@@ -113,22 +145,6 @@ ULONG   w[64];
 ULONG   a, b, c, d, e, f, g, h;
 ULONG   t1, t2;
 UINT    t;
-UINT    direct;
-
-
-    /*
-     * W[t] for t < 16 is the longword at data + 4t -- on a BIG-ENDIAN machine,
-     * which is what this module is for and what the host tier is not.  The
-     * byte path below is not a slow fallback for an unaligned pointer, it is
-     * the only correct one anywhere else, and the host build of the vectors is
-     * what catches getting that backwards.
-     */
-#if !defined(NX_CRYPTO_LITTLE_ENDIAN)
-    direct = ((((size_t)(const VOID *)data) & (size_t)3) == (size_t)0) ?
-             1u : 0u;
-#else
-    direct = 0u;
-#endif
 
     a = state[0];
     b = state[1];
@@ -141,24 +157,9 @@ UINT    direct;
 
     while (blocks != 0uL)
     {
-        if (direct != 0u)
+        for (t = 0; t < 16u; t++)
         {
-            const ULONG   *lp = (const ULONG *)(const VOID *)data;
-
-            for (t = 0; t < 16u; t++)
-            {
-                w[t] = lp[t];
-            }
-        }
-        else
-        {
-            for (t = 0; t < 16u; t++)
-            {
-                w[t] = (((ULONG)data[t << 2]) << 24) |
-                       (((ULONG)data[(t << 2) + 1u]) << 16) |
-                       (((ULONG)data[(t << 2) + 2u]) << 8) |
-                       ((ULONG)data[(t << 2) + 3u]);
-            }
+            w[t] = c68k_sha256_load_be(&data[t << 2]);
         }
 
         for (t = 16u; t < 64u; t++)
@@ -202,21 +203,8 @@ UINT    direct;
     }
 }
 
-#ifdef C68K_ASM
-extern VOID c68k_sha256_blocks_asm(ULONG *state, const UCHAR *data,
-                                   ULONG blocks);
-#endif
-
 VOID c68k_sha256_blocks(ULONG *state, const UCHAR *data, ULONG blocks)
 {
-
-#ifdef C68K_ASM
-    if (c68k_sha256_variant == C68K_SHA256_V_ASM)
-    {
-        c68k_sha256_blocks_asm(state, data, blocks);
-        return;
-    }
-#endif
 
     c68k_sha256_blocks_c(state, data, blocks);
 }

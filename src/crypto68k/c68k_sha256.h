@@ -10,22 +10,30 @@
  *   AmiSSL on HMAC-SHA256 and both sides were portable C, so the 1.28x was a
  *   statement about two C implementations and not about the machine.
  *
- * WHY SHA-256 IS THE BETTER TARGET OF THE TWO
+ * WHAT IT COST, AND WHAT DID NOT WORK
  *
- *   AES on this machine is 160 table reads a block against roughly 4,700
- *   cycles, so a quarter of it is bus and three quarters instruction issue.
- *   SHA-256 touches memory only for the message schedule and is otherwise
- *   pure ALU -- and the ALU work is rotates, which is exactly what the 68020
- *   is good at and what most 32-bit architectures have to synthesise from two
- *   shifts and an OR.  ROR.L and ROL.L take an immediate count of 1 to 8;
- *   SWAP is a 16-bit rotate for 4 cycles; every rotation SHA-256 asks for is
- *   one or two of those.  The compiler does not know that -- for a count
- *   above 8 it loads the count into a data register first, on a machine that
- *   has eight of them and eight live state variables.
+ *   The C below is 1.29x the vendored implementation on the same buffer --
+ *   85,952 us to 66,687 for 16 KiB -- and none of that came from assembly.
+ *   Two changes did it:
  *
- *   ROTR(x,13) = SWAP then ROL.L #3.  ROTR(x,22) = SWAP then ROR.L #6.
- *   ROTR(x,17) = SWAP then ROR.L #1.  ROTR(x,25) = SWAP then ROL.L #7.
- *   That is the whole argument for writing this in assembly.
+ *     1. The sixteen message words are LOADED.  This is a big-endian machine,
+ *        so W[t] for t < 16 is the longword at data + 4t, and on a 68020 that
+ *        is one MOVE.L at any alignment.  nx_crypto_sha2.c builds each one
+ *        from four byte loads, three shifts and three ORs.
+ *     2. The message schedule is computed up front rather than interleaved
+ *        with the rounds, which stops the round loop's two scratch registers
+ *        from having to serve both.
+ *
+ *   A hand-written 68020 compression function WAS written, checked and timed
+ *   against this, on the argument that SHA-256's rotations map onto ROR.L,
+ *   ROL.L and SWAP and that a compiler cannot use a count above eight without
+ *   burning a data register.  It did not win: 67,656 us against 66,687.  The
+ *   measured instruction costs say why -- on this part ROR.L #n is 5.94
+ *   cycles and ROR.L Dm,Dn is 7.91, so SWAP-then-rotate (9.89) and
+ *   MOVEQ-then-rotate (9.91) are the same price.  The SWAP idiom is a 68000
+ *   habit, where a rotate cost 8+2n and the trick was worth a great deal; a
+ *   68020's shifter is flat and it is worth nothing.  docs/RESEARCH.md 18 has
+ *   the table.
  *
  * THE INTERFACE IS nx_crypto's, DELIBERATELY
  *
@@ -84,15 +92,21 @@ VOID c68k_sha256_blocks(ULONG *state, const UCHAR *data, ULONG blocks);
 
 /* ---------------------------------------------------------- the variants -- */
 
+/*
+ * There is only one, and that is the result.  A 68020 assembly compression
+ * function was written, checked against the vectors and measured against this
+ * C in the same process: 67,656 us against 66,687 for 16 KiB on an aligned
+ * buffer, 67,653 against 70,241 on a misaligned one.  Once the misaligned
+ * MOVE.L -- the assembly's only real advantage -- moved into the C as three
+ * lines of inline assembly, the C was ahead on both and 230 lines of hand
+ * written rounds had nothing left to earn.  See docs/RESEARCH.md 18 for the
+ * instruction costs that explain why, and for the 68000-era SWAP idiom that
+ * a 68020's flat shifter makes pointless.
+ */
 #define C68K_SHA256_V_C     0u  /* portable C, schedule computed up front  */
-#define C68K_SHA256_V_ASM   1u  /* 68020 assembly                          */
-#define C68K_SHA256_V_COUNT 2u
+#define C68K_SHA256_V_COUNT 1u
 
-#ifdef C68K_ASM
-#define C68K_SHA256_V_BEST  C68K_SHA256_V_ASM
-#else
 #define C68K_SHA256_V_BEST  C68K_SHA256_V_C
-#endif
 
 extern UINT c68k_sha256_variant;
 
