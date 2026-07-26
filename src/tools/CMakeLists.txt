@@ -19,6 +19,16 @@ set(TOOLS_COMMON_SOURCES
 
 set(TOOLS_WARNINGS -Wall -Wextra)
 
+# The commands are built for size, the libraries for speed.
+#
+# Nothing here is a hot path: ping waits on the wire, ShowNetStatus prints a
+# table once.  -Os buys 14-17% off every command against -O2, measured on the
+# pinned toolchain, and there is no throughput number it can move -- the
+# libraries that actually move bytes keep -O2 from the toolchain file.
+#
+# Appended after CMAKE_C_FLAGS_RELEASE so it wins the duplicate -O.
+set(TOOLS_OPTIMISE $<$<CONFIG:Release>:-Os>)
+
 # Everything the tools include lives behind the core include set; the port
 # headers must stay first (tx_port.h / nx_port.h / nx_user.h).
 function(aminetxduo_add_tool target output)
@@ -39,7 +49,7 @@ function(aminetxduo_add_tool target output)
         target_include_directories(${target} PRIVATE "${AMIGA_NDK_INCLUDE}")
     endif()
 
-    target_compile_options(${target} PRIVATE ${TOOLS_WARNINGS})
+    target_compile_options(${target} PRIVATE ${TOOLS_WARNINGS} ${TOOLS_OPTIMISE})
 
     if(TOOL_DEFINES)
         target_compile_definitions(${target} PRIVATE ${TOOL_DEFINES})
@@ -98,6 +108,25 @@ aminetxduo_add_tool(tool_nettrace NetTrace SOURCES nettrace.c toolsock.c)
 aminetxduo_add_tool(tool_telnet  telnet   SOURCES telnet.c toolsock.c)
 aminetxduo_add_tool(tool_ftp     ftp      SOURCES ftp.c    toolsock.c)
 
+# traceroute is config-only too, and is the first command here to open a
+# SOCK_RAW descriptor -- so it reaches the raw half of the ABI the same way it
+# reaches every other part of it, through the published vectors.
+aminetxduo_add_tool(tool_traceroute traceroute SOURCES traceroute.c toolsock.c)
+
+# tftp and whois are clients and nothing more, so they are config-only in the
+# plainest sense: one datagram socket and one stream socket respectively,
+# through the published vectors, and no part of the stack linked in.
+aminetxduo_add_tool(tool_tftp    tftp     SOURCES tftp.c  toolsock.c)
+aminetxduo_add_tool(tool_whois   whois    SOURCES whois.c toolsock.c)
+
+# sntp is config-only in the same sense as fetch: it reaches bsdsocket.library
+# through its published vectors and sets the machine's clock through
+# timer.device and battclock.resource.  It does NOT link the vendored NetX Duo
+# SNTP add-on, and the comment at the top of sntp.c says why -- the short
+# version is that the add-on wants a running ThreadX, and a Shell command's
+# copy of ThreadX is not the one the stack is using.
+aminetxduo_add_tool(tool_sntp    sntp     SOURCES sntp.c)
+
 aminetxduo_add_tool(tool_shownetstatus ShowNetStatus NX
     SOURCES shownetstatus.c)
 aminetxduo_add_tool(tool_netstat       netstat       NX SOURCES netstat.c)
@@ -121,11 +150,13 @@ target_include_directories(tool_smoke PRIVATE ${AMINETXDUO_CORE_INCLUDES})
 if(AMIGA_NDK_INCLUDE)
     target_include_directories(tool_smoke PRIVATE "${AMIGA_NDK_INCLUDE}")
 endif()
-target_compile_options(tool_smoke PRIVATE ${TOOLS_WARNINGS})
+target_compile_options(tool_smoke PRIVATE ${TOOLS_WARNINGS} ${TOOLS_OPTIMISE})
 set_target_properties(tool_smoke PROPERTIES OUTPUT_NAME "ToolsSmoke")
 
 add_custom_target(tools ALL)
 add_dependencies(tools
     tool_addnetinterface tool_netsetup tool_online tool_offline tool_host
-    tool_fetch tool_nc tool_telnet tool_ftp tool_nettrace
+    tool_fetch tool_nc tool_telnet tool_ftp tool_nettrace tool_traceroute
+    tool_tftp tool_whois
+    tool_sntp
     tool_shownetstatus tool_netstat tool_ping tool_smoke)
