@@ -12546,17 +12546,27 @@ clamp(packets, AMI_POOL_MIN_PACKETS /* 16 */, AMI_POOL_MAX_PACKETS /* 256 */);
 
 So: **yes between the floor and the ceiling, and not at all above it.** One
 sixteenth of free public memory, in packets of 1568 bytes plus header, floored
-at 16 and capped at **256**. The cap binds at roughly 6.5 MB of free public
-memory — every machine measured here reports
+at 16 and capped at **256**.
+
+The stride is 1628 bytes — `sizeof(NX_PACKET)` is 56 in the default build,
+measured with a `_Static_assert` bisect rather than counted off the header —
+so the arithmetic puts the two bounds at
+
+| | free public memory | pool |
+|---|---:|---:|
+| floor binds below | 416,768 B (407 KB) | 16 packets, 26,048 B |
+| ceiling binds above | **6,668,288 B (6.4 MB)** | 256 packets, **416,768 B** |
+
+and every machine measured in this document is above the ceiling:
 
 ```
 [INFO] netstack: 10009928 bytes free, pool = 256 x 1568
 ```
 
-— so an A1200 with 8 MB of Fast RAM and an A4000 with 128 MB get **the same
-401,408-byte pool**, and it is sampled **once, at stack start**, and never
+So an A1200 with 8 MB of Fast RAM and an A4000 with 128 MB get **the same
+416,768-byte pool**, it is sampled **once, at stack start**, and it is never
 revisited. A machine that frees 100 MB after the stack comes up gets nothing
-for it.
+for it, and neither does one that is given a 256 MB Zorro III card.
 
 That is a defensible design for the floor — §24.3 makes the same argument about
 the 4 MB machine — and an undefended one for the ceiling. 256 is the number
