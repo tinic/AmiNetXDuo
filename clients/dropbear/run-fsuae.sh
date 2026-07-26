@@ -4,6 +4,21 @@
 #
 #   clients/dropbear/run-fsuae.sh [-m MODEL] [-t SECONDS] [-c CPU] [-k MHZ]
 #                                 [-b STACKBUILD] [-D DBBUILD] [-i KEYFILE]
+#                                 [-x] [-C COMMANDS]
+#
+#   -x  take the emulator alone (tools/fsuae-run.sh's measurement lane).  EVERY
+#       timing here needs it: a handshake measured while two other FS-UAE
+#       instances share the host is fiction, and this project has already had
+#       one set of figures corrupted that way.
+#   -C  a command list to stage instead of the default four connections
+#   -E  a SECOND dbclient build, staged as SYS:dbclient2.
+#
+#       This exists because of the emulator queue, and it makes the comparison
+#       better rather than merely cheaper: an A/B taken inside ONE run shares
+#       the host's load, the SLIRP scheduling and the server process, so the
+#       only thing that differs between the two rows is the binary.  Two runs
+#       minutes apart do not have that property, and docs/RESEARCH.md 18.6
+#       records what host contention does to a wire figure.
 #
 # WHAT IT NEEDS ON THE OTHER END
 #
@@ -58,9 +73,13 @@ CPU=""
 CLOCK=""
 STACK_BUILD="${AMINETXDUO_BUILD:-build/tls}"
 DB_BUILD="build/dropbear"
+DB_BUILD2=""
 KEYFILE="${AMINETXDUO_DBCLIENT_KEY:-$ROOT/build/sshd-test/id_amiga}"
 
-while getopts "m:t:c:k:b:D:i:" opt; do
+PERF=0
+COMMANDS="${AMINETXDUO_DB_COMMANDS:-}"
+
+while getopts "m:t:c:k:b:D:E:i:xC:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
@@ -68,8 +87,11 @@ while getopts "m:t:c:k:b:D:i:" opt; do
         k) CLOCK="$OPTARG" ;;
         b) STACK_BUILD="$OPTARG" ;;
         D) DB_BUILD="$OPTARG" ;;
+        E) DB_BUILD2="$OPTARG" ;;
         i) KEYFILE="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-k MHz] [-b stackbuild] [-D dbbuild] [-i key]" >&2; exit 2 ;;
+        x) PERF=1 ;;
+        C) COMMANDS="$OPTARG" ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-k MHz] [-b stackbuild] [-D dbbuild] [-i key] [-x] [-C commands] [-E dbbuild2]" >&2; exit 2 ;;
     esac
 done
 
@@ -136,6 +158,12 @@ cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065"    "$STAGE/devs/a2065.device"
 cp "$BSD"      "$STAGE/libs/bsdsocket.library"
 cp "$DBCLIENT" "$STAGE/dbclient"
+if [ -n "$DB_BUILD2" ]; then
+    DBCLIENT2="$ROOT/$DB_BUILD2/dbclient"
+    [ -f "$DBCLIENT2" ] || { echo "missing $DBCLIENT2 -- build it first" >&2; exit 2; }
+    cp "$DBCLIENT2" "$STAGE/dbclient2"
+    echo "==> second client staged as SYS:dbclient2: $DB_BUILD2"
+fi
 cp "$ADDIF"    "$STAGE/AddNetInterface"
 
 if [ -f "$KEYFILE" ]; then
@@ -144,6 +172,17 @@ if [ -f "$KEYFILE" ]; then
 else
     echo "!! no client key at $KEYFILE -- public-key auth will fail." >&2
     echo "   clients/dropbear/sshd-testserver.sh start makes one." >&2
+fi
+
+# The ECDSA client key rides along whenever it exists.  A build made from
+# clients/dropbear/localoptions-p256.h has no ed25519 at all and cannot present
+# id_amiga; staging both means one run can compare algorithm families without a
+# second staging directory.
+ECDSAKEY=""
+if [ -f "$(dirname "$KEYFILE")/id_amiga_ecdsa" ]; then
+    ECDSAKEY="$(dirname "$KEYFILE")/id_amiga_ecdsa"
+    cp "$ECDSAKEY" "$STAGE/id_amiga_ecdsa"
+    echo "==> ECDSA client key staged as DH0:id_amiga_ecdsa"
 fi
 
 if [ -n "$MATH" ] && [ -f "$MATH" ]; then
@@ -159,9 +198,9 @@ DBUSER="${AMINETXDUO_SSH_USER:-$(id -un)}"
 DBHOST="${AMINETXDUO_SSH_HOST:-10.0.2.2}"
 DBPORT="${AMINETXDUO_SSH_PORT:-2222}"
 
-if [ -n "${AMINETXDUO_DB_COMMANDS:-}" ]; then
-    cp "$AMINETXDUO_DB_COMMANDS" "$STAGE/commands.txt"
-    echo "==> command list: $AMINETXDUO_DB_COMMANDS"
+if [ -n "$COMMANDS" ]; then
+    cp "$COMMANDS" "$STAGE/commands.txt"
+    echo "==> command list: $COMMANDS"
 else
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
@@ -180,7 +219,11 @@ export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-dropbear}"
 CPUARG=()
 [ -z "$CPU" ]   || CPUARG+=(-c "$CPU")
 [ -z "$CLOCK" ] || CPUARG+=(-k "$CLOCK")
+if [ "$PERF" = "1" ]; then CPUARG+=(-x); fi
 
 exec "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
      "$RUNNER" "$STAGE/devs" "$STAGE/libs" "$STAGE/dbclient" \
-     "$STAGE/AddNetInterface" "$STAGE/id_amiga" "$STAGE/commands.txt"
+     ${DB_BUILD2:+"$STAGE/dbclient2"} \
+     "$STAGE/AddNetInterface" "$STAGE/id_amiga" \
+     ${ECDSAKEY:+"$STAGE/id_amiga_ecdsa"} \
+     "$STAGE/commands.txt"

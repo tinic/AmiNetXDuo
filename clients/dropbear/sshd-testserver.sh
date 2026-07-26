@@ -9,7 +9,8 @@
 # one that touches nothing outside build/sshd-test/:
 #
 #   * port 2222, so the system's own sshd (if any) is untouched
-#   * its own host keys, made here
+#   * its own host keys, made here -- ed25519, ECDSA P-256 and RSA, so that a
+#     client built with any one algorithm family has something to verify
 #   * its own authorized_keys, holding one key made here
 #   * PasswordAuthentication no -- a non-root sshd cannot do it anyway, and
 #     public-key is what a machine with no keyboard should be using
@@ -74,6 +75,13 @@ start)
         ssh-keygen -t ed25519 -f "$DIR/hostkey_ed25519" -N "" -q
         ssh-keygen -t rsa -b 2048 -f "$DIR/hostkey_rsa" -N "" -q
     fi
+    # The ECDSA host key exists for one reason: clients/dropbear/
+    # localoptions-p256.h builds a client with no 25519 of any kind, and it
+    # needs a host key it can verify with P-256.  A stock OpenSSH install has
+    # one (ssh-keygen -A makes all three), so this is not a special server.
+    if [ ! -f "$DIR/hostkey_ecdsa" ]; then
+        ssh-keygen -t ecdsa -b 256 -f "$DIR/hostkey_ecdsa" -N "" -q
+    fi
 
     db_host_tools || exit 1
 
@@ -86,10 +94,23 @@ start)
         chmod 600 "$DIR/authorized_keys" "$DIR/id_amiga"
     fi
 
+    # A second client key, ECDSA P-256, for the same reason: the P-256 build
+    # cannot present an ed25519 one.  Both are authorised, so one server serves
+    # both builds and the two runs differ only in the client binary.
+    if [ ! -f "$DIR/id_amiga_ecdsa" ]; then
+        echo "==> client key, ECDSA P-256 (for the no-25519 build)"
+        "$ROOT/build/dropbear-host/dropbearkey" -t ecdsa -s 256 \
+            -f "$DIR/id_amiga_ecdsa" | sed -n 's/^Fingerprint/  fingerprint/p'
+        "$ROOT/build/dropbear-host/dropbearkey" -y -f "$DIR/id_amiga_ecdsa" \
+            | grep '^ecdsa-sha2-nistp256' >> "$DIR/authorized_keys"
+        chmod 600 "$DIR/authorized_keys" "$DIR/id_amiga_ecdsa"
+    fi
+
     cat > "$DIR/sshd_config" <<EOF
 Port $PORT
 ListenAddress 0.0.0.0
 HostKey $DIR/hostkey_ed25519
+HostKey $DIR/hostkey_ecdsa
 HostKey $DIR/hostkey_rsa
 PidFile $DIR/sshd.pid
 AuthorizedKeysFile $DIR/authorized_keys
