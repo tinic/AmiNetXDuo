@@ -527,4 +527,32 @@
 	LP0(0x2b8, LONG, ObtainServerSocket, \
 	, BSDSOCKET_BASE_NAME)
 
+/*
+ * The Roadshow tail, added by hand -- the FD this file was generated from
+ * stops at ObtainServerSocket().  Register assignment is Roadshow's, and it
+ * matches src/bsdsocket/bsdsocket_vectors.h vector for vector.
+ *
+ * Only the four getaddrinfo-family entries are here, because they are the only
+ * ones in the tail a test has needed so far.  Add the rest the same way.
+ */
+
+#define freeaddrinfo(ai) \
+	LP1NR(0x324, freeaddrinfo, struct addrinfo *, ai, a0, \
+	, BSDSOCKET_BASE_NAME)
+
+#define getaddrinfo(hostname, servname, hints, res) \
+	LP4(0x32a, LONG, getaddrinfo, STRPTR, hostname, a0, STRPTR, servname, a1, \
+	struct addrinfo *, hints, a2, struct addrinfo **, res, a3, \
+	, BSDSOCKET_BASE_NAME)
+
+#define gai_strerror(errnum) \
+	LP1(0x330, STRPTR, gai_strerror, LONG, errnum, a0, \
+	, BSDSOCKET_BASE_NAME)
+
+#define getnameinfo(sa, salen, host, hostlen, serv, servlen, flags) \
+	LP7(0x336, LONG, getnameinfo, struct sockaddr *, sa, a0, ULONG, salen, d0, \
+	STRPTR, host, a1, ULONG, hostlen, d1, STRPTR, serv, a2, \
+	ULONG, servlen, d2, ULONG, flags, d3, \
+	, BSDSOCKET_BASE_NAME)
+
 #endif /*  _INLINE_BSDSOCKET_H  */

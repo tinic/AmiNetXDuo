@@ -24,6 +24,7 @@
  *   M  nc -l, ftp                      re-listen on the same port after close
  *   N  http server, ftp data         write a whole response, then close
  *   O  nc, ssh -L                    simultaneous listening sockets
+ *   P  wget, nc, ssh                 getaddrinfo / getnameinfo
  *
  * Style follows tests/conformance/conf_probe.c: an ordinary AmigaOS program
  * that opens bsdsocket.library and calls vectors, linked against none of our
@@ -42,6 +43,7 @@
 #include <sys/filio.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <netdb.h>
 #include <libraries/bsdsocket.h>
 #include <proto/bsdsocket.h>
 
@@ -1184,6 +1186,159 @@ static VOID group_m(VOID)
 }
 
 
+/* ---- P. getaddrinfo, both directions (wget, nc, ssh) ------------------- */
+
+static VOID group_p(VOID)
+{
+    struct addrinfo  hints;
+    struct addrinfo *res = NULL;
+    LONG             rc;
+    char             hbuf[64];
+    char             sbuf[32];
+
+    t_group("P  wget / nc / ssh: getaddrinfo and getnameinfo");
+
+    /*
+     * These four vectors are in the Roadshow tail of the LVO table, past where
+     * bsdsocktest's own inline header stops -- so nothing in the conformance
+     * suite calls them and this is their only coverage in a non-IPv6 build.
+     */
+
+    /* 1. The numeric client lookup: what nc and ssh do for a dotted quad. */
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family   = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags    = AI_NUMERICHOST;
+
+    rc = getaddrinfo((STRPTR)"127.0.0.1", (STRPTR)"80", &hints, &res);
+    t_ok(rc == 0 && res != NULL, "getaddrinfo(127.0.0.1, 80, AI_NUMERICHOST)", rc);
+
+    if (rc == 0 && res != NULL)
+    {
+        struct sockaddr_in *sa = (struct sockaddr_in *)res->ai_addr;
+
+        t_ok(res->ai_family == AF_INET &&
+             res->ai_addrlen >= (socklen_t)sizeof(struct sockaddr_in) &&
+             sa != NULL && sa->sin_family == AF_INET &&
+             ntohl(sa->sin_addr.s_addr) == INADDR_LOOPBACK &&
+             ntohs(sa->sin_port) == 80,
+             "and the result is 127.0.0.1 port 80 in a sockaddr_in",
+             (LONG)(sa ? ntohs(sa->sin_port) : -1));
+
+        freeaddrinfo(res);
+        res = NULL;
+    }
+
+    /* 2. The server lookup: AI_PASSIVE, then bind and listen on the result. */
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family   = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags    = AI_PASSIVE;
+
+    rc = getaddrinfo(NULL, (STRPTR)"0", &hints, &res);
+    t_ok(rc == 0 && res != NULL, "getaddrinfo(NULL, AI_PASSIVE)", rc);
+
+    if (rc == 0 && res != NULL)
+    {
+        LONG fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+
+        t_ok(fd >= 0, "socket() from the getaddrinfo result", fd);
+
+        if (fd >= 0)
+        {
+            rc = bind(fd, res->ai_addr, res->ai_addrlen);
+            t_ok(rc == 0, "bind() to the AI_PASSIVE address", rc);
+
+            rc = listen(fd, 1);
+            t_ok(rc == 0, "listen() on it -- the nc -l path", rc);
+
+            CloseSocket(fd);
+        }
+
+        freeaddrinfo(res);
+        res = NULL;
+    }
+
+    /* 3. A name, resolved and then actually connected to. */
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family   = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+
+    rc = getaddrinfo((STRPTR)"localhost", NULL, &hints, &res);
+    t_ok(rc == 0 && res != NULL, "getaddrinfo(\"localhost\")", rc);
+
+    if (rc == 0 && res != NULL)
+    {
+        struct sockaddr_in *sa = (struct sockaddr_in *)res->ai_addr;
+        UWORD               port = 0;
+        LONG                lst, srv;
+
+        lst = make_listener(0, &port);
+        if (lst >= 0 && sa != NULL)
+        {
+            LONG fd = socket(res->ai_family, res->ai_socktype,
+                             res->ai_protocol);
+
+            sa->sin_port = htons(port);
+            rc = connect(fd, res->ai_addr, res->ai_addrlen);
+            srv = (rc == 0) ? accept(lst, NULL, NULL) : -1;
+
+            t_ok(rc == 0 && srv >= 0,
+                 "connect() straight to the getaddrinfo result", rc);
+            if (srv >= 0)
+            {
+                t_ok(echo_check(fd, srv), "and data flows over it", 0);
+                CloseSocket(srv);
+            }
+
+            if (fd >= 0) CloseSocket(fd);
+        }
+        if (lst >= 0) CloseSocket(lst);
+
+        freeaddrinfo(res);
+        res = NULL;
+    }
+
+    /* 4. getnameinfo, the reverse direction -- ftp's PORT, nc -v, ssh logs. */
+    {
+        struct sockaddr_in sa;
+
+        addr_in(&sa, INADDR_LOOPBACK, 80);
+        memset(hbuf, 0, sizeof(hbuf));
+        memset(sbuf, 0, sizeof(sbuf));
+
+        rc = getnameinfo((struct sockaddr *)&sa, sizeof(sa),
+                         (STRPTR)hbuf, sizeof(hbuf),
+                         (STRPTR)sbuf, sizeof(sbuf),
+                         NI_NUMERICHOST | NI_NUMERICSERV);
+        t_ok(rc == 0 && strcmp(hbuf, "127.0.0.1") == 0 &&
+             strcmp(sbuf, "80") == 0,
+             "getnameinfo(NI_NUMERICHOST|NI_NUMERICSERV)", rc);
+        if (rc != 0 || strcmp(hbuf, "127.0.0.1") != 0)
+            Printf((STRPTR)"    host=\"%s\" serv=\"%s\"\n",
+                   (LONG)hbuf, (LONG)sbuf);
+    }
+
+    /* 5. A name that cannot resolve must fail, not hang, and gai_strerror
+       must have something to say about why. */
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family   = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags    = AI_NUMERICHOST;     /* so this cannot go to DNS */
+
+    rc = getaddrinfo((STRPTR)"not-a-host.invalid", NULL, &hints, &res);
+    t_ok(rc != 0, "getaddrinfo() of an unresolvable name fails", rc);
+    if (rc == 0 && res != NULL)
+        freeaddrinfo(res);
+
+    {
+        STRPTR msg = gai_strerror(EAI_NONAME);
+
+        t_ok(msg != NULL && msg[0] != '\0', "gai_strerror(EAI_NONAME)", 0);
+    }
+}
+
+
 /* ------------------------------------------------------------------ main -- */
 
 int main(void)
@@ -1212,6 +1367,7 @@ int main(void)
     group_m();
     group_n();
     group_o();
+    group_p();
 
     Printf((STRPTR)"\n%ld checks, %ld failures\n",
            (LONG)t_checks, (LONG)t_failures);
