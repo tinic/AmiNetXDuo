@@ -12224,9 +12224,17 @@ So every one of those returns needs either `wait_option == 0` — a **non**-bloc
 socket, where `EWOULDBLOCK` is correct — or the calling thread to **be the IP
 thread**. And it never is. Every vector in this library brackets itself with
 `bsd_nx_enter()`, which calls `tx_amiga_adopt_thread()` to make the *calling
-Exec task* a TX_THREAD of its own (`src/netstack/netstack.c:143`); the only
-code in `src/bsdsocket/` that runs on the IP thread is the five notify
-callbacks in `select.c:68–169`, and all five do nothing but `bsd_event_post()`.
+Exec task* a TX_THREAD of its own (`src/netstack/netstack.c:143`), so an
+application's `recv()` always runs on a thread that is not the IP thread.
+
+The code in `src/bsdsocket/` that **does** run on the IP thread is the
+callbacks, and **none of them enters a vector**: the five notify hooks
+(`select.c:68–169`) do nothing but `bsd_event_post()`; `bsd_listen_callback`
+and `bsd_tcp_disconnect_callback` the same; `bsd_tcp_urgent_notify`
+(`oob.c:303`) walks the receive queue and posts; `bsd_oob_ip_filter` patches
+six bytes of a header; and `bsd_raw_filter` (`raw.c:144`) copies with
+`NX_NO_WAIT` and does a `tx_semaphore_put`. Not one of them can suspend, and
+not one of them calls `bsd_recv()`.
 
 **That invariant is load-bearing and nobody had written it down.** It is the
 only thing standing between six unconditional `EWOULDBLOCK` mappings and the
