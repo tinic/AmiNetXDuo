@@ -2903,3 +2903,384 @@ And `tool_output_write()` calls `Flush()` first. These commands print through
 which it does not; without the flush an `ftp` transcript comes out with the
 directory listing spliced into the middle of the reply that announced it.
 Observed exactly that way.
+
+
+---
+
+## 11. curl on the 68020 (2026-07-25)
+
+Upstream curl, unpatched, cross-built for m68k AmigaOS 3.x and fetching `http://` URLs
+through our `bsdsocket.library`. Read from the emulated 14 MHz A1200, `clients/curl/
+run-fsuae.sh`:
+
+```
+--- SYS:curl --version
+curl 8.21.0-DEV (m68k-unknown-amigaos) libcurl/8.21.0-DEV
+Protocols: dict file ftp gopher http imap ipfs ipns mqtt pop3 rtsp smtp telnet tftp ws
+Features: alt-svc threadsafe
+--- rc 0, 0.32 s
+
+--- SYS:curl -sS -o DH0:ex.html -w "..." http://example.com/
+example.com: HTTP 200, 559 B, dns 0.98s connect 1.48s total 2.02s
+--- rc 0, 2.40 s
+
+--- SYS:curl -sS -o DH0:sdk.lha -w "..." http://ftp.fau.de/aminet/comm/tcp/AmiTCP-SDK-4.3.lha
+AmiTCP-SDK-4.3.lha: HTTP 200, 657797 B in 5.60s (117463 B/s)
+--- rc 0, 6.00 s
+```
+
+The 657,797-byte file is **byte-identical to the host's copy** (SHA-256
+`52f664c7…`). A range request answers 206 with exactly 65,536 bytes, a chunked
+7 KB page decodes, `https://` is refused with *"Protocol \"https\" is disabled"*,
+a redirect from `http:` to `https:` is refused *in the redirect*, and an
+unresolvable host is `curl: (6) Could not resolve`. The binary is 899,048 bytes
+(781 KB text) and links nothing of ours.
+
+**Throughput in context**: 117 KB/s against the 356 KB/s the data-path work
+measured for `recv()` into a buffer. curl copies through more layers and writes
+to a directory hard drive, so the gap is expected; it is not a regression in the
+stack.
+
+### 11.1 Does curl still build for classic AmigaOS? Yes, and it is CI-covered
+
+This needed checking rather than assuming, because AmigaOS 4 / PPC support and
+AmigaOS 3.x / m68k support are different ports and neither implies the other.
+
+- `lib/amigaos.c` has **two** bodies. `#ifdef __amigaos4__` is the PPC one
+  (`GetInterface`, `SocketIFace`, `CURLRES_AMIGA`, `gethostbyname_r`); the
+  `#elif !defined(USE_AMISSL)` half, headed *"Amiga OS3 specific code"*, is the
+  classic one and is one `OpenLibrary("bsdsocket.library", 4)` plus one
+  `SocketBaseTags()`. This build uses the second.
+- `.github/workflows/non-native.yml` has an `amiga` job that cross-builds m68k on
+  **every push**, with both autotools and CMake, against bebbo's amiga-gcc 6.5.0
+  and AmiSSL 5.27. Classic AmigaOS is a live target in curl, not a historical one.
+- **8.21.0 was chosen over master**, not because master is broken — the OS3 branch
+  is identical in both — but because a build harness should pin a release. Nothing
+  older is needed: there is no "last version that worked on Amiga" cliff to find.
+
+The upstream CI recipe is `-mcrt=clib2 … -lnet -lm -latomic`. Our toolchain is
+newlib and has neither `-mcrt` nor a `libnet`, so everything below is the delta
+between that CI job and this one.
+
+### 11.2 What the toolchain does not provide, enumerated by linking
+
+`libcurl.a` builds clean. The `curl` command-line tool does not, and the whole
+gap is this list — the complete set of undefined symbols from the first link:
+
+| missing | class | answer |
+|---|---|---|
+| `stat` `fstat` `mkdir` `unlink` `isatty` `ftruncate` `link` `_gettimeofday` | newlib has no non-underscore wrappers and, for most of these, no implementation either | `clients/compat/amiga_posix.c`, over `dos.library` |
+| `__udivdi3` `__umoddi3` `__divdi3` `__moddi3` | zero-byte `libgcc.a` | `src/common/ami_udivdi3.c`, the one copy already in the tree |
+| `__ctzdi2` `__popcountdi2` `__floatdidf` `__fixdfdi` `__atomic_exchange_4` | ditto, and further than the stack ever reached | `clients/compat/amiga_libgcc.c` |
+
+Three of those deserve their own note.
+
+**`_fstat` exists and is worse than missing.** `libc.a`'s `lib_a-dummy.o` defines
+it as `moveq #0,d0 / rts` — success, with **nothing written to the caller's
+struct**. So `S_ISREG(st.st_mode)` reads whatever was on the stack. Our
+replacement zeroes the struct, asks `_isatty()` what the descriptor is, and
+measures a regular file with `_lseek()`.
+
+**`gettimeofday` is not a nicety.** Without it curl falls back to `time()`, whose
+resolution is one second, and every timeout and timer in curl then runs on whole
+seconds. Measured, same binary, same host, only this changed: a 559-byte GET of
+example.com reported **31 s** and a 404 reported **122 s**. curl's CMake cannot
+find it with `check_function_exists()` because the probe links a generated
+`main()` with no object of its own, so `CMAKE_C_STANDARD_LIBRARIES` is where our
+archive lands and the probe never gets there; `clients/curl/build.sh` sets
+`-DHAVE_GETTIMEOFDAY=1` by hand.
+
+**Doubles pull in `mathieeedoubbas.library`, and it is not in ROM.** newlib
+implements `__adddf3` and friends by calling that library (`lib_a-__adddf3.o`
+references `_MathIeeeDoubBasBase` and nothing else), and the startup opens it
+before `main()`. Checked rather than assumed: the Kickstart 3.1 40.68 A1200 image
+contains `mathieeesingbas.library` and **no other math library**. Every Workbench
+install has `mathieeedoubbas.library` in `LIBS:`, so a real machine is fine and a
+bare directory hard drive is not; `clients/curl/run-fsuae.sh` stages one and says
+so if it cannot find one. curl cannot avoid doubles — the progress meter,
+`--max-time` and `--write-out` all use them — and there is no reason to try.
+
+### 11.3 The toolchain hands `main()` the wrong `argv`
+
+`$AMIGA_TOOLCHAIN_ROOT/m68k-amigaos/lib/crt0.o` calls `main()` like this:
+
+```
+    pea      ___argv          ; 4879 xxxxxxxx  -- pushes &__argv
+    move.l   ___argc,-(sp)    ; 2f39 xxxxxxxx
+    jsr      _main            ; 4eb9 xxxxxxxx
+```
+
+`__argv` is a pointer, not an array — crt0.o's entire `.bss` is 16 bytes, holding
+`__argv` at 0 and `__savedSp` at 8 — so `pea` pushes its **address** and `main()`
+gets one level of indirection too many. Measured, `argvtest alpha beta`:
+
+| | argc | argv[0] | argv[1] | argv[2] |
+|---|---|---|---|---|
+| stock crt0 | 3 | `<>` | `NULL` | `<>` |
+| repaired | 3 | `<SYS:argvtest>` | `<alpha>` | `<beta>` |
+
+The garbage is legible once the cause is known: `argv[0]` is the real argv array,
+whose first byte is the high byte of a pointer and therefore zero, so it prints
+empty; `argv[1]` is the next `.bss` word, which is 0; `argv[2]` is `__savedSp`, a
+stack pointer, which also starts with a zero byte.
+
+**Nothing in AmiNetXDuo had ever noticed**, because every command in this tree
+takes its arguments through `ReadArgs()` and reads `argc` only, to tell a
+Workbench launch from a Shell one. A ported Unix client reads `argv` and nothing
+else, so for curl this is the difference between working and printing nothing.
+
+`clients/compat/fix-crt0.py` swaps two bytes — `pea (xxx).L` and
+`move.l (xxx).L,-(sp)` are both six bytes with the same 32-bit absolute operand,
+so no offset and no relocation moves — into a **copy in the build directory**. The
+installed toolchain is never modified: a build host is not ours to change, and the
+next person to fetch the pinned toolchain has to get the same result. The script
+matches the whole three-instruction sequence rather than a bare `pea`, patches
+both call sites (the Shell one and the Workbench one), and says so loudly if it
+finds a number other than two.
+
+### 11.4 Every DNS lookup in this tree was costing 30 seconds
+
+Found while wondering why curl's `time_namelookup` was 30 s. It was not curl.
+
+```
+nameserver 10.0.2.2    gethostbyname("example.com")   30.06 s
+nameserver 10.0.2.3    gethostbyname("example.com")    0.58 s
+```
+
+`DEVS:Internet/name_resolution` in `tests/netstack/devs/` said 10.0.2.2, with a
+comment asserting that FS-UAE's SLIRP puts the gateway and the DNS forwarder at
+the same address. **It does not.** 10.0.2.2 is the gateway and does not answer
+DNS; the forwarder is 10.0.2.3.
+
+The lookups **succeeded either way**, which is why this survived so long: DHCP
+supplies a working server as well, so the resolver waits out its failover on
+10.0.2.2 and then answers, thirty seconds late. `fetch`, `host`,
+`tests/tls/run-fetch.sh`, `tests/tls/run-api.sh` and every conformance DNS case
+were all paying it. Measured in one boot, before the fix:
+
+```
+--- SYS:fetch http://example.com/ TO DH0:f1.txt      rc 0, 31.16 s
+--- SYS:host example.com                             rc 0, 30.08 s
+--- SYS:dnsprobe example.com                         rc 0, 30.16 s
+```
+
+**No harness in this tree had ever timed a single command**, which is the actual
+finding. `ClientRun` now reports elapsed time per line, and that is what turned
+"curl is slow" into "everything is slow, and here is the line to change". A
+one-line fixture fix; `src/bsdsocket/` is untouched.
+
+What is *not* fixed, and is a stack question rather than a fixture one: **thirty
+seconds is a long time to spend deciding a nameserver is not answering.** BIND's
+own default is five seconds a try with two retries. Whatever `nx_dns`'s
+`wait_option` is set to on our resolve path, a machine whose first configured
+nameserver is dead currently stalls every lookup by half a minute — and a real
+Amiga with a hand-typed `name_resolution` is exactly where that happens.
+
+### 11.5 The harness
+
+`clients/` is a general *port a Unix network client to m68k AmigaOS* harness, not
+a curl-specific one — wget is the next tenant and should need nothing new from
+`clients/compat/`.
+
+- `clients/amiga-client.sh` — sourceable. Resolves the toolchain through
+  `tools/amiga-toolchain.sh` (so a client build and a stack build never disagree
+  about the compiler), builds the support archives, exports the flags.
+- `clients/compat/` — the libc, libgcc and crt0 gaps above.
+- `clients/curl/build.sh` — CMake, not autotools, because autotools would need
+  `autoreconf` on the build host and CMake is already a dependency of this tree.
+- `clients/curl/run-fsuae.sh`, `clients/curl/clientrun.c` — the run.
+- `third_party/curl` — a submodule pinned to `curl-8_21_0`. **Nothing in curl is
+  patched.**
+
+Three flags every such port needs, all of them Roadshow NDK facts rather than
+curl facts:
+
+- **`-D__USE_NEW_TIMEVAL__`** — the NDK's `<devices/timer.h>` and newlib both
+  define `struct timeval`, incompatibly. The NDK provides this switch itself, in
+  as many words, and it is the supported route: define it and AmigaOS uses
+  `struct TimeVal` and leaves `struct timeval` to libc.
+- **`-D_SYS_MBUF_H`** — `<proto/bsdsocket.h>` reaches `<net/if.h>`, which has
+  `struct __timeval ifi_lastchange;` as a **field**, and `struct __timeval` is
+  never defined anywhere in the NDK. It is an opaque type the inline stubs use
+  behind a pointer. Nothing in a client wants mbufs; the header is suppressed by
+  its own guard.
+- **`-include sys/types.h`** — the NDK's `<sys/socket.h>` declares
+  `recv`/`send`/`sendto` returning `ssize_t` without declaring `ssize_t`. Without
+  this, `proto/bsdsocket.h` does not compile at all — which a configure script
+  reports as *"AmigaOS bsdsocket.library not found"* and then silently builds a
+  client against a libc networking API this toolchain does not have.
+  `tests/conformance/build.sh` carries the identical line for the identical
+  reason.
+
+Two settings that are curl's own quirks:
+
+- **`-DHAVE_SELECT=1`.** `lib/select.c` is `#if !defined(HAVE_SELECT) &&
+  !defined(HAVE_POLL)` → `#error`. curl's probe cannot see `select` here because
+  Roadshow has `WaitSelect()` and no `select()` — and `lib/curl_setup.h` then
+  `#define`s `select(a,b,c,d,e)` to `WaitSelect(a,b,c,d,e,0)` itself. The function
+  is there; the probe does not include `curl_setup.h`. On the clib2 toolchain
+  upstream tests against, libc has a real `select()` and the probe passes for the
+  wrong reason.
+- **`-DENABLE_IPV6=OFF`.** The NDK has `struct sockaddr_in6`, so curl's probe turns
+  IPv6 on, and `AMINETXDUO_IPV6` is OFF in the shipping stack. Turn it back on when
+  the stack under it was built with it.
+
+**A fabricated `libnet.a` is load-bearing and not cosmetic.** curl's CMakeLists
+hardcodes `list(APPEND CURL_NETWORK_AND_TIME_LIBS "net" "m" "atomic")` for AMIGA,
+with no switch. `libm.a` is real; the other two we make. `libatomic.a` is empty on
+purpose. `libnet.a` holds **one weak `SocketBase`** — because the NDK inlines all
+dereference it, and a `check_symbol_exists("IoctlSocket", …)` probe has no
+translation unit that defines it, so the probe **links** rather than compiles and
+fails. That is how curl silently loses `HAVE_IOCTLSOCKET_CAMEL_FIONBIO`, which is
+the only way it knows to make a socket non-blocking on this platform. Fabricating
+an archive to satisfy a hardcoded `-l` beats patching a build system that would
+have to be re-patched on every version bump.
+
+**A ported client cannot run on a Shell's stack.** Kickstart 3.1 gives a command
+4,096 bytes; this toolchain's `crt0.o` exports no `__stack` hook to ask for more
+(checked). `ClientRun` starts everything with `NP_StackSize` = 256 KB, `System()`
+passing unknown tags through to `CreateNewProc()` being the documented route. A
+human at a Shell prompt needs `stack 200000` first — ordinary Amiga practice for a
+ported program, and worth putting in the README.
+
+### 11.6 The TLS question: write the backend, do not import a library
+
+**Recommendation: write a curl `vtls` backend over `tls.library`.** Not mbedTLS,
+not wolfSSL. The reason is not size — a multi-megabyte curl is explicitly
+acceptable here — it is that `src/crypto68k/` is wired into `nx_secure` and a
+third-party library would not reach it.
+
+The arithmetic, from the measured per-operation figures earlier in this document
+(14 MHz 68020, `tests/crypto68k/crypto68k_ec_bench`):
+
+| per handshake | with `crypto68k` | vendored `nx_crypto` |
+|---|---|---|
+| ECDHE_RSA, 2-cert chain: 3 × RSA-2048 public + keygen + shared | 3×0.681 + 0.381 + 1.368 = **3.79 s** | 3×2.011 + 1.475 + 5.245 = **12.75 s** |
+| ECDHE_ECDSA, 2-cert chain: 3 × P-256 verify + keygen + shared | 3×1.961 + 0.381 + 1.368 = **7.63 s** | 3×7.028 + 1.475 + 5.245 = **27.80 s** |
+
+Against the **measured whole-handshake** totals through `tls.library` — 6.8 s for
+the RSA case, 23.3 s for `ecc256.badssl.com` — losing `crypto68k` adds about
+**9 seconds** to an RSA chain and **20 seconds** to an ECDSA one. Cloudflare gives
+up somewhere between 11.3 s and roughly 20 s. So this is not "slower", it is the
+difference between a handshake that completes and one the far end abandons: the
+RSA case goes from 6.8 s (comfortable) to ~15.8 s (marginal), and the ECDSA case
+from 23.3 s (already failing on Cloudflare, fine on GCP) to ~43 s (failing
+everywhere).
+
+**Two honest caveats on those numbers.** The right-hand column is *vendored
+`nx_crypto`*, not mbedTLS or wolfSSL, and neither of those is that slow — both
+have decent portable bignum, and `crypto68k`'s win came mostly from *algorithmic*
+fixes (sliding-window plus leading-zero skipping for RSA; a limb-domain Solinas
+reduction for P-256) that a well-maintained library already has. Hand-written
+assembly was only 1.13× of it. A fair guess is that wolfSSL lands between the two
+columns, perhaps 1.5–2.5× slower than `crypto68k` rather than 3–4×. That is still
+the wrong direction across a hard timeout, and it is a guess: **nobody has
+measured wolfSSL on this hardware, and if anyone wants to overturn this
+recommendation that is the measurement to make.**
+
+**On mbedTLS's `MBEDTLS_*_ALT` hooks specifically**, since they are the obvious
+counter-argument: they do not rescue this. `crypto68k`'s P-256 code is written
+against `nx_crypto`'s `NX_CRYPTO_EC` structures and its huge-number
+representation, and the two things that made it fast — the Solinas reduction
+rewritten to work on limbs instead of a byte stream, and the eight-limb
+add/subtract carry chains in `c68k_p256.S` — are *representation-specific*.
+Retargeting them to `mbedtls_mpi` is a rewrite of the arithmetic layer, not a
+recompile, and `MBEDTLS_BIGNUM_ALT` is all-or-nothing. The work is larger than
+writing the vtls backend, and at the end of it there would be two TLS
+implementations in the tree.
+
+And there is a fourth argument that has nothing to do with speed: `tls.library`
+already has the trust store on disk with lazy per-chain root parsing, the
+host-name check, the dead-RTC clock rule, and a shipped `fetch` that proves them.
+All of that would have to be built again around an imported library.
+
+#### What the backend actually costs
+
+`struct Curl_ssl` (`lib/vtls/vtls_int.h`) is 20 slots and many are NULL-able —
+`mbedtls.c` leaves six NULL and uses the shared `Curl_ssl_adjust_pollset`. The
+mapping is close to one-to-one:
+
+| curl slot | `tls.library` |
+|---|---|
+| `do_connect` | `TLSOpen()` |
+| `recv_plain` / `send_plain` | `TLSRead()` / `TLSWrite()` |
+| `data_pending` | `TLSPending()` |
+| `shut_down` / `close` | `TLSClose()` |
+| `version` | `TLSInfo()` |
+| `adjust_pollset` | `Curl_ssl_adjust_pollset`, shared |
+| `random` | nothing exported; return `CURLE_NOT_BUILT_IN` |
+| `sha256sum` | needed only for `--pinnedpubkey`; NULL |
+| `set_engine*`, `engines_list`, `get_channel_binding`, `cert_status_request`, `close_all` | NULL |
+
+Roughly **600–900 lines**, against 1,638 for `mbedtls.c` (which also does CA
+parsing, cipher-list mapping and CRLs, all of which `tls.library` owns).
+
+Four things it is *not* free of, stated in advance:
+
+1. **`TLSOpen()` blocks and curl's SSL filter does not.** `do_connect` is meant to
+   be called repeatedly until `*done`. The milestone-1 answer is to put the socket
+   back to blocking around `TLSOpen()` (curl has set it non-blocking with
+   `IoctlSocket(FIONBIO)` by then) and accept that curl looks stalled for 7–23 s.
+   That is precisely the trade this project has already accepted. Doing it
+   properly means a state-machine handshake in `tls.library`, which is a bigger
+   piece of work than the backend.
+2. **No ALPN**, so HTTP/1.1 only. `nghttp2` is not built for m68k anyway.
+3. **curl has to be patched after all** — a new `CURLSSLBACKEND_*` value in
+   `include/curl/curl.h`, an entry in `vtls.c`'s backend table, `Makefile.inc`,
+   `CMakeLists.txt`, `curl_setup.h`. Five small patches, rebased on each pinned
+   tag. The "nothing in curl is patched" property of the `http://` build does not
+   survive TLS.
+4. **No session resumption** — see below, because it is the largest number on the
+   table and it is missing at the `nx_secure` level, not the `tls.library` level.
+
+#### Where a verified-chain cache would sit, and what it is worth
+
+It belongs **inside `tls.library`**, in the `nx_secure_remote_certificate_verify`
+replacement it already installs — the one that asks each received certificate who
+issued it and looks the answer up in the trust-store index. Add a second index,
+keyed by a hash of the intermediate's whole DER, of certificates whose signature
+has already been checked against a trusted root; on a hit, admit the intermediate
+as an issuer without the public-key operation. It wants the same on-disk shape as
+`DEVS:Internet/certificates` (`tools/mkcertstore.py` already writes that format)
+so it survives a reboot, which is the whole point.
+
+**What it buys is less than it sounds, and the estimate should be written down
+before anyone builds it.** `_nx_secure_x509_certificate_chain_verify()` already
+stops at the first issuer that comes back from the trusted store, so a public
+chain costs **three** public-key operations regardless of depth: the leaf's
+signature, the intermediate's signature, and the ServerKeyExchange signature. A
+cached intermediate removes exactly **one** of the three:
+
+| | saved | of a measured handshake | share |
+|---|---|---|---|
+| RSA-2048 chain | 0.681 s | 6.8 s | **10%** |
+| ECDSA P-256 chain | 1.961 s | 23.3 s | **8%** |
+
+Eight to ten per cent. It does **not** bring a three-deep chain under Cloudflare's
+fifteen seconds, and anyone who expects it to will be disappointed. It is cheap
+and it is worth having; it is not the answer.
+
+**The answer, if there is one, is session resumption**, because a resumed
+handshake does *no* public-key work at all — 23 s would become well under one
+second on the second and every subsequent connection to a host. curl already has
+the machinery on its side (`lib/vtls/vtls_scache.c` exists for exactly this).
+`nx_secure` does not: `nx_secure_tls_send_clienthello.c:199` sets
+`nx_secure_tls_session_id_length = 0` unconditionally, so the TLS 1.2 client
+**always offers an empty session ID and never attempts resumption**, and there is
+no `session_ticket` extension anywhere in the tree (`nx_secure_tls_process_
+newsessionticket.c` is TLS 1.3 only). The ServerHello's session ID *is* stored
+(`nx_secure_tls_process_serverhello.c:158`) and then never used. So resumption is
+a real piece of work in the vendored library — offering the stored ID, and the
+abbreviated-handshake path when the server accepts it — and it is the single
+highest-value thing anyone could do to make HTTPS practical on this machine.
+Larger than the backend; larger than the chain cache; worth more than both.
+
+#### Order
+
+1. `http://` — **done**, above.
+2. The vtls backend over `tls.library`, with a blocking handshake. Puts `https://`
+   on two-certificate hosts and on anything with a patient front end.
+3. Session resumption in `nx_secure`, then the verified-chain cache. In that
+   order, because the first is worth 20× the second.
+4. A non-blocking handshake in `tls.library`, if curl's multi interface ever
+   matters here.
