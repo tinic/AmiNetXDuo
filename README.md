@@ -119,10 +119,21 @@ the 436-byte session file carried across, and then fetched in **0.5 s at
 
 Tickets rather than session IDs, chosen on evidence: probing ten trials per host
 gave tickets 40/40 and session IDs 2/40. Session IDs still work where a server
-offers them. The cache is keyed by host, port **and whether the chain was
-verified**, so a session established with `TLSA_NoVerify` can never be resumed
-by a caller that asked for verification. A rejected ticket falls back to a full
-handshake.
+offers them. A rejected ticket falls back to a full handshake.
+
+The cache is keyed on host, port, and a fingerprint of the trust decision
+itself — which trust store, by the identity of its root set rather than merely
+its presence; whether the chain and host name were verified at all; whether the
+certificate validity dates were checked; and how deep a chain the caller was
+willing to accept. A session can therefore only be resumed by a connection whose
+trust parameters are identical to the one that established it.
+
+That key is narrower than it first shipped, and the difference was a real
+defect: the original recorded *that* verification had happened rather than *what
+against*, so a session established under one trust store was resumed by a caller
+presenting a different one, or none, and the second connection verified nothing.
+The curl suite caught it — `--cacert` pointing at a store that signed nothing in
+the chain returned HTTP 200 in 1.64 s where a cold handshake takes 5.68 s.
 
 The security trade is the ordinary one every TLS session cache has made since
 1996: master secrets and tickets sit in the clear in library memory and on disk,
@@ -224,6 +235,43 @@ Two things a person running it needs to know. curl wants
 by calling it, and it is *not* in the Kickstart 3.1 ROM, though every Workbench
 install has it. And a Shell gives a command 4 KB of stack, so **`stack 200000`**
 first.
+
+### The curl verification suite
+
+`tests/curl/` uses curl as an adversary against `bsdsocket.library` rather than
+as something to be tested: 146 hermetic cases over HTTP mechanics, connection
+reuse, byte-exactness, failure paths, resource behaviour under repetition, TLS
+and FTP, with host-side servers including four deliberately rude ones, a local
+PKI covering chain depths 2/3/4 and expired, self-signed and untrusted roots,
+and every body hashed against the server's copy.
+
+It found three defects in two days, none of which the conformance suite could
+see, and the pattern in them is worth more than the count. Two presented as
+*slowness* and were something worse underneath:
+
+- **The SANA-II receive window was 4 frames**, that constant being a window
+  rather than a queue length. A concurrency sweep lost 87 of 232 transfers. The
+  case that had never failed got 2.5× faster once fixed — TCP had been hiding
+  the loss in retransmissions, which means every throughput figure this project
+  ever measured was taken through it.
+- **Every last close of the library cost fifteen seconds**, so `curl --version`
+  took 16.22 s where it now takes 2.20 s. `S2_OFFLINE` returns queued reads
+  without needing `AbortIO()`, and was simply being issued after the readers had
+  already timed out waiting for an abort that this driver never performs.
+  Underneath the delay, the old path freed the reply port, the pinned packets
+  and the stack a reader thread was still running on.
+- **A resumed TLS handshake ignored the trust store**, described above.
+
+**A third-party curl runs on it.** Aminet's `curl-8.22.0-DEV-210726` — built by
+someone else, against AmiSSL and clib2, with no knowledge of this project —
+scores the same 122/124 as our own build, and its two failures are our two
+failures. It reaches the ABI through a different door: `USE_AMISSL` compiles
+`Curl_amiga_init()` out entirely, so it never calls `SocketBaseTags` and clib2's
+startup opens the library and installs the errno pointer instead. That is
+evidence our own build cannot supply, since ours was written by the same people
+as the library. Its HTTPS did not complete a case in nine minutes, sixteen
+handshake attempts in — OpenSSL 3.6.2's bignum arithmetic on a 14 MHz 68020,
+with our sockets carrying all sixteen attempts without incident.
 
 ## Target
 
@@ -372,6 +420,7 @@ tests/conformance/run-fsuae.sh -a "LOOPBACK NOPAGE"
 | conformance, loopback tier | **125/142** (1 fail, 16 skip) |
 | conformance, network tier | **133/142** (2 fail, 7 skip) |
 | client access patterns | **94/94** (`tests/clients`) — the call sequences curl, wget, nc, ftp and telnet actually issue, each group named for the program and file it came from |
+| curl verification suite | **122/124** on the hermetic groups (`tests/curl`), and a third-party curl built by somebody else scores the same 122/124 |
 | ThreadX-on-Exec soak | 98 checks, 4+ adopted tasks, Enforcer-clean on 68030 |
 | TCP throughput, 13.9 MHz 68020 | **356 KB/s** loopback, **368 KB/s** to a host over SLIRP (was 261 / 312 before `src/net68k/`) |
 | TCP throughput, 24.5 MHz 68020 | **636 KB/s** through the library, 1.78× for a 1.76× clock; conformance unchanged |
