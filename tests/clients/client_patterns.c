@@ -1070,6 +1070,23 @@ static VOID group_k(VOID)
     rc = recv(srv, (UBYTE *)buf, sizeof(buf), 0);
     t_ok(rc == 0, "server then sees clean EOF", rc);
 
+    /*
+     * The half-closed client now selects for read with nothing on the wire.
+     * `nc -N` sits in exactly this loop waiting for the rest of the answer, so
+     * it must SLEEP: a socket that has sent its own FIN and heard nothing back
+     * is not readable, however close FIN_WAIT_1 looks to a state comparison.
+     */
+    {
+        fd_set rfds;
+
+        FD_ZERO(&rfds);
+        FD_SET(cli, &rfds);
+        rc = wait_ms(cli + 1, &rfds, NULL, NULL, 400);
+
+        t_ok(rc == 0,
+             "half-closed socket with nothing pending is NOT readable", rc);
+    }
+
     /* And the server can still reply down the still-open direction. */
     rc = send(srv, (UBYTE *)"REPLY", 5, 0);
     t_ok(rc == 5, "server replies after the client half-closed", rc);

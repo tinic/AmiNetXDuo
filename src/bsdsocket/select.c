@@ -261,11 +261,31 @@ BOOL bsd_readable(AmiSocket *sock)
         if ((sock->as_Flags & (ASF_EOF | ASF_RDSHUT)) != 0)
             return TRUE;
 
-        /* Same thing seen from the state machine, in case the peer's FIN
-           landed before the socket had a disconnect callback attached. */
-        if ((sock->as_Flags & ASF_CONNECTED) != 0 &&
-            sock->as_Nx.tcp.nx_tcp_socket_state >= NX_TCP_CLOSE_WAIT)
-            return TRUE;
+        /*
+         * Same thing seen from the state machine, in case the peer's FIN
+         * landed before the socket had a disconnect callback attached.
+         *
+         * The states are named rather than compared with >=, and that is the
+         * whole point of this comment.  NetX Duo numbers them CLOSE_WAIT 6,
+         * FIN_WAIT_1 7, FIN_WAIT_2 8 (nx_api.h), so ">= NX_TCP_CLOSE_WAIT"
+         * also catches the two states that mean *we* sent the FIN and are
+         * still waiting to hear the peer's -- which is precisely a socket
+         * after shutdown(SHUT_WR), where nothing has arrived and nothing may
+         * ever arrive.  Reporting that readable makes `nc -N` (half-close,
+         * then select for the rest of the answer) spin at full speed on a
+         * select() that returns immediately and a recv() that returns
+         * EWOULDBLOCK.  Only the states in which the peer's FIN has actually
+         * been received belong here.
+         */
+        if ((sock->as_Flags & ASF_CONNECTED) != 0)
+        {
+            UINT state = sock->as_Nx.tcp.nx_tcp_socket_state;
+
+            if (state == NX_TCP_CLOSE_WAIT || state == NX_TCP_CLOSING ||
+                state == NX_TCP_TIMED_WAIT || state == NX_TCP_LAST_ACK ||
+                state == NX_TCP_CLOSED)
+                return TRUE;
+        }
 
         if (sock->as_Nx.tcp.nx_tcp_socket_receive_queue_count > 0)
             return TRUE;
