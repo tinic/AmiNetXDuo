@@ -28,9 +28,25 @@
  * floor. Each outstanding read therefore pins one NX_PACKET for its whole
  * life, so depth trades pool occupancy against loss under burst.
  *
+ * THE IPv4 DEPTH IS THE RECEIVE WINDOW, IN FRAMES, AND FOUR WAS TOO FEW.
+ *
+ *   Measured with tests/curl/run-curlverify.sh -p: sixteen concurrent HTTP
+ *   transfers through curl's multi interface lost six of them, twenty-four
+ *   lost seven, forty lost fifteen -- all as `curl: (7) Could not connect`
+ *   after about thirteen seconds, and all of them connections the HOST had
+ *   already accepted.  The SYN went out, the peer answered, and the SYN/ACK
+ *   arrived in a burst with no read outstanding to catch it.  With the depth
+ *   at eight, forty concurrent transfers lost none.
+ *
+ *   So the floor below is a floor and not the answer.  ami_sana2_rx_start()
+ *   sizes the IPv4 reader from the packet pool instead -- see the comment
+ *   there -- because the pool is itself sized from AvailMem(), and how many
+ *   frames a machine can afford to have in flight is a memory question.
+ *
  * The 4 MB / 68020 floor (docs/RESEARCH.md §9) gives a pool as small as
- * AMI_POOL_MIN_PACKETS (16), so the defaults below pin 6 packets (8 with
- * IPv6). ARP and IPv6 ND are low-rate and get shallower queues than IPv4.
+ * AMI_POOL_MIN_PACKETS (16), and pinning a quarter of that would starve
+ * transmit, so such a machine keeps the four and cannot absorb the burst.
+ * ARP and IPv6 ND are low-rate and stay shallow.
  */
 #ifndef AMI_SANA2_RX_DEPTH_IPV4
 #define AMI_SANA2_RX_DEPTH_IPV4     4
@@ -42,7 +58,14 @@
 #define AMI_SANA2_RX_DEPTH_IPV6     2
 #endif
 
-#define AMI_SANA2_RX_MAX_DEPTH      8
+/* One in this many pool packets may be pinned by the IPv4 reader. */
+#ifndef AMI_SANA2_RX_POOL_SHARE
+#define AMI_SANA2_RX_POOL_SHARE     8
+#endif
+
+#ifndef AMI_SANA2_RX_MAX_DEPTH
+#define AMI_SANA2_RX_MAX_DEPTH      32
+#endif
 
 #ifndef AMI_SANA2_TX_SLOTS
 #define AMI_SANA2_TX_SLOTS          8

@@ -403,9 +403,44 @@ static const CHAR *const ami_sana2_rx_names[AMI_SANA2_RX_READERS] =
 #endif
 };
 
+/*
+ * How deep the IPv4 read queue should be on THIS machine.
+ *
+ * Every frame that arrives with no CMD_READ outstanding is discarded by the
+ * device, so this number is the receive window measured in frames, and the
+ * thing that overruns it is a burst: sixteen TCP connections opening at once
+ * answer with sixteen SYN/ACKs inside a few hundred microseconds, and a
+ * 14 MHz 68020 cannot re-post a read between them.  A fixed four lost six of
+ * those sixteen -- see the note in sana2_internal.h for the measurements.
+ *
+ * It is sized from the packet pool rather than fixed because each outstanding
+ * read pins a packet for its whole life, and the pool is already sized from
+ * AvailMem().  A machine with four megabytes gets the floor and no more; one
+ * with eight gets the ceiling.  Taking a fixed share means the answer moves
+ * with the memory rather than with a constant somebody has to remember to
+ * revisit.
+ */
+static UWORD ami_sana2_rx_ipv4_depth(NX_PACKET_POOL *pool)
+{
+    ULONG depth;
+
+    if (pool == NULL)
+        return (UWORD)AMI_SANA2_RX_DEPTH_IPV4;
+
+    depth = pool->nx_packet_pool_total / (ULONG)AMI_SANA2_RX_POOL_SHARE;
+
+    if (depth < (ULONG)AMI_SANA2_RX_DEPTH_IPV4)
+        depth = (ULONG)AMI_SANA2_RX_DEPTH_IPV4;
+    if (depth > (ULONG)AMI_SANA2_RX_MAX_DEPTH)
+        depth = (ULONG)AMI_SANA2_RX_MAX_DEPTH;
+
+    return (UWORD)depth;
+}
+
 LONG ami_sana2_rx_start(AmiSana2If *iface)
 {
     UWORD i;
+    UWORD ipv4_depth;
 
     if (iface->rx_running)
         return 0;
@@ -413,13 +448,19 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
     if (iface->pool == NULL || iface->ip == NULL)
         return -1;
 
+    ipv4_depth = ami_sana2_rx_ipv4_depth(iface->pool);
+    AMI_INFO("sana2: IPv4 read queue %ld deep (pool %ld packets)",
+             (long)ipv4_depth, (long)iface->pool->nx_packet_pool_total);
+
     for (i = 0; i < AMI_SANA2_RX_READERS; i++)
     {
         AmiSana2Rx *rx = &iface->rx[i];
 
         rx->iface       = iface;
         rx->packet_type = ami_sana2_rx_types[i];
-        rx->depth       = ami_sana2_rx_depths[i];
+        rx->depth       = (ami_sana2_rx_types[i] == AMI_ETHERTYPE_IPV4)
+                              ? ipv4_depth
+                              : ami_sana2_rx_depths[i];
         rx->stop        = FALSE;
         rx->failed      = FALSE;
         rx->running     = FALSE;
