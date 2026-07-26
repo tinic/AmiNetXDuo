@@ -1,14 +1,17 @@
 # AmiNetXDuo
 
 An AmiTCP/Roadshow-compatible `bsdsocket.library` for classic AmigaOS, built on
-[Eclipse ThreadX NetX Duo](https://github.com/eclipse-threadx/netxduo).
+[Eclipse ThreadX NetX Duo](https://github.com/eclipse-threadx/netxduo), together
+with the networking commands that every other platform takes for granted.
 
 > **Status: functional but incomplete.** The stack obtains a DHCP lease, answers
 > ARP, pings its gateway, resolves DNS and moves TCP in both directions on an
 > emulated 68020/68030 under Kickstart 3.1. `bsdsocket.library` scores
 > **125/142** on the [`bsdsocktest`](https://github.com/tbdye/bsdsocktest)
-> conformance suite, and 133/142 on the network tier. It has not been run on
-> real hardware and is not yet suitable for anything you care about.
+> conformance suite, and 133/142 on the network tier. Upstream **curl 8.21.0,
+> unpatched, runs on a 14 MHz 68020** and downloads a 657,797-byte file
+> byte-identical at 117 KB/s. It has not been run on real hardware and is not
+> yet suitable for anything you care about.
 
 ## Why
 
@@ -135,6 +138,62 @@ the [SANA-II framing mismatch](docs/RESEARCH.md#34-sana-ii--the-driver-contract)
 NetX Duo reaches into ThreadX internals in order to suspend socket callers, so a
 real kernel is required rather than a compatibility shim. And NetX Duo expects
 Ethernet headers, whereas SANA-II hides them.
+
+## Commands
+
+A stack with nothing to run on it is not much use, so the goal is the set of
+networking commands every other platform takes for granted. These are ordinary
+Shell commands with `ReadArgs` templates, written against `bsdsocket.library`
+rather than ported, so none of them needs a libc shim:
+
+| | |
+|---|---|
+| `AddNetInterface`, `Online`, `Offline`, `NetSetup` | bring an interface up, and configure one interactively |
+| `ShowNetStatus`, `netstat` | interface state, routes, connections |
+| `ping`, `host` | reachability and name lookups |
+| `fetch` | retrieve an `http://` or `https://` URL |
+| `nc` | connect or listen, TCP and UDP, `-z` port ranges, `-w` timeouts |
+| `telnet` | with enough option negotiation not to confuse a real server |
+| `ftp` | passive and active mode, the standard command set |
+
+`nc`, `telnet` and `ftp` are the ones that reach the half of the socket ABI a
+client-only program never touches. curl and `fetch` never call `listen()` or
+`accept()`; `nc -l` does, and active-mode FTP has the *client* listen while the
+server connects back to it. Sizes on m68k: `fetch` 45,632 bytes, `nc` 52,064,
+`telnet` 50,704, `ftp` 58,484. `tests/tools/run-nettools.sh` drives all three
+against real servers.
+
+One limit worth stating plainly, because it is the emulator's and not ours:
+FS-UAE 3.2.35 accepts a port-redirection setting and then creates no host
+socket, so nothing outside the emulator can connect *in*. Accordingly
+`listen()`/`accept()` is proven guest-to-guest, and active-mode FTP is proven up
+to `accept()` but not through it — the client binds, listens, sends a correct
+`PORT`, takes the 200 and 150, and then reports that the server never opened the
+data connection.
+
+### Ported clients
+
+[`clients/`](clients/) is a harness for porting a Unix network client to
+AmigaOS 3.x: toolchain resolution, the NDK flags every such port needs, and the
+libc and libgcc gaps in `clients/compat/`. **curl 8.21.0 builds through it
+unpatched**, as a pinned submodule, and works:
+
+```
+curl 8.21.0-DEV (m68k-unknown-amigaos) libcurl/8.21.0-DEV
+example.com: HTTP 200, 559 B, dns 0.98s connect 1.48s total 2.02s
+AmiTCP-SDK-4.3.lha: HTTP 200, 657797 B in 5.60s (117463 B/s)
+```
+
+The 657,797-byte download is byte-identical to the host's copy. Chunked
+decoding, range requests, redirects and the failure messages all behave.
+`https://` is refused legibly and is the next milestone, since curl reaches TLS
+through `lib/vtls/` and nothing there knows about `tls.library` yet.
+
+Two things a person running it needs to know. curl wants
+**`mathieeedoubbas.library` in `LIBS:`** — newlib implements double arithmetic
+by calling it, and it is *not* in the Kickstart 3.1 ROM, though every Workbench
+install has it. And a Shell gives a command 4 KB of stack, so **`stack 200000`**
+first.
 
 ## Target
 
@@ -279,7 +338,8 @@ tests/conformance/run-fsuae.sh -a "LOOPBACK NOPAGE"
 | | |
 |---|---|
 | conformance, loopback tier | **125/142** (1 fail, 16 skip) |
-| conformance, network tier | **133/142** |
+| conformance, network tier | **133/142** (2 fail, 7 skip) |
+| client access patterns | **94/94** (`tests/clients`) — the call sequences curl, wget, nc, ftp and telnet actually issue, each group named for the program and file it came from |
 | ThreadX-on-Exec soak | 98 checks, 4+ adopted tasks, Enforcer-clean on 68030 |
 | TCP throughput, 13.9 MHz 68020 | **356 KB/s** loopback, **368 KB/s** to a host over SLIRP (was 261 / 312 before `src/net68k/`) |
 | TCP throughput, 24.5 MHz 68020 | **636 KB/s** through the library, 1.78× for a 1.76× clock; conformance unchanged |
