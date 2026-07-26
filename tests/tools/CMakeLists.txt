@@ -24,3 +24,15 @@ if(AMIGA_NDK_INCLUDE)
 endif()
 target_compile_options(test_routeprobe PRIVATE -Wall -Wextra)
 set_target_properties(test_routeprobe PROPERTIES OUTPUT_NAME "RouteProbe")
+
+# TcpHandoff runs the whole socket-to-file-handle sequence -- accept(),
+# ReleaseCopyOfSocket(), Open("TCP:OBTAIN="), SystemTagList() -- against two
+# stock AmigaDOS commands.  Linked against nothing of ours: it reaches
+# bsdsocket.library through its published LVOs, as a third-party program does.
+add_executable(test_tcphandoff tcphandoff.c)
+target_include_directories(test_tcphandoff PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_tcphandoff PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_tcphandoff PRIVATE -Wall -Wextra)
+set_target_properties(test_tcphandoff PROPERTIES OUTPUT_NAME "TcpHandoff")

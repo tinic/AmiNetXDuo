@@ -86,6 +86,28 @@ class EchoHandler(socketserver.BaseRequestHandler):
             pass
 
 
+# ----------------------------------------------------------------- daytime --
+
+DAYTIME_BODY = b"AmiNetXDuo daytime, line one\r\nand line two\r\n"
+
+
+class DaytimeHandler(socketserver.BaseRequestHandler):
+    """RFC 867 in spirit: send a fixed body and close.
+
+    The echo server above never closes, which makes it useless to a command
+    that reads until end of file -- and reading until end of file is exactly
+    what `Type TCP:...` and `Copy TCP:... TO ...` do.  This is the other end
+    of those: a finite stream with a real FIN at the end of it, so that what
+    the Amiga wrote to disk can be compared byte for byte.
+    """
+
+    def handle(self):
+        log("daytime", "connection from %s:%d" % self.client_address[:2])
+        self.request.sendall(DAYTIME_BODY)
+        self.request.shutdown(socket.SHUT_WR)
+        log("daytime", "sent %d bytes and closed" % len(DAYTIME_BODY))
+
+
 # ------------------------------------------------------------------- telnet --
 
 IAC, DONT, DO, WONT, WILL, SB, SE = 255, 254, 253, 252, 251, 250, 240
@@ -624,6 +646,9 @@ def main():
                     help="UDP port for the TFTP server; 0 leaves it off")
     ap.add_argument("--whois-port", type=int, default=0,
                     help="TCP port for the whois server; 0 leaves it off")
+    ap.add_argument("--daytime-port", type=int, default=0,
+                    help="TCP port for the daytime server -- a finite stream "
+                         "that closes; 0 leaves it off")
     ap.add_argument("--advertise", default="10.0.2.2",
                     help="address to put in the 227 PASV reply -- what the "
                          "guest must dial, not what we are bound to")
@@ -660,6 +685,10 @@ def main():
         who = Threaded((args.bind, args.whois_port), WhoisHandler)
         who.advertise = args.advertise
         servers.append(("whois", who))
+
+    if args.daytime_port:
+        day = Threaded((args.bind, args.daytime_port), DaytimeHandler)
+        servers.append(("daytime", day))
 
     for name, srv in servers:
         threading.Thread(target=srv.serve_forever, daemon=True).start()
