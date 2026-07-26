@@ -617,10 +617,12 @@ def build(base, curl, cacert="--cacert DH0:teststore"):
              "for byte without the host having to be asked")
     add("f07_ftp_active", "F",
         '%s -sS -P %s:%d-%d -o DH0:d/f07_ftp_active.bin -w "%s" '
-        '"%s/blob.bin"' % (curl, GUEST, base + 60, base + 60, WFMT, ftp),
+        '"%s/blob.bin"' % (curl, GUEST, base + 60, base + 63, WFMT, ftp),
         body=("master", 0, 131072),
         note="active mode: the Amiga binds, listens and accepts an inbound "
-             "connection.  Needs the SLIRP forward the runner sets up")
+             "connection.  A RANGE of four ports, not one, because the "
+             "previous data connection is still in TIME_WAIT and curl gives "
+             "up with (30) rather than waiting")
     add("f08_ftp_missing", "F",
         '%s -sS -o DH0:d/f08.bin -w "%s" "%s/nosuchfile.bin"'
         % (curl, WFMT, ftp), rc=78)
@@ -659,7 +661,10 @@ def build_probe(base, curl, spec):
     return cases
 
 
-def build_internet(curl):
+AMINET_URL = "http://ftp.fau.de/aminet/comm/tcp/AmiTCP-SDK-4.3.lha"
+
+
+def build_internet(curl, reference=None):
     """NOT A BASELINE.  Needs the internet and FS-UAE's SLIRP NAT."""
     cases = []
 
@@ -684,10 +689,11 @@ def build_internet(curl):
         % (curl, WFMT), rc=60)
     add("g06_aminet_lha",
         '%s -sS -o DH0:d/g06_aminet_lha.bin -w "%s" '
-        '"http://ftp.fau.de/aminet/comm/tcp/AmiTCP-SDK-4.3.lha"' % (curl, WFMT),
+        '"%s"' % (curl, WFMT, AMINET_URL),
         w={"code": "200"},
-        note="657,797 bytes over the real internet; the runner hashes it "
-             "against a host copy when one is present")
+        body=("hostfile", reference) if reference else None,
+        note="657,797 bytes over the real internet, hashed against the copy "
+             "the runner fetched here")
     add("g07_dns_nxdomain",
         '%s -sS -o DH0:d/g07.bin -w "%s" "http://no.such.host.invalid/"'
         % (curl, WFMT), rc=6)
@@ -774,6 +780,24 @@ def check_body(hd, name, spec, fail):
                  % (len(got), len(want),
                     hashlib.sha256(got).hexdigest()[:16],
                     hashlib.sha256(want).hexdigest()[:16]))
+        return
+
+    if kind == "hostfile":
+        # The internet cases have no seeded buffer to compare against, so the
+        # runner fetches the same URL here and the two are hashed.  Absent
+        # reference, say so rather than passing silently.
+        path = os.path.join(hd, "d", name + ".bin")
+        ref = spec[1]
+        if not os.path.exists(ref):
+            fail("no host reference at %s (the runner did not fetch it)" % ref)
+            return
+        if not os.path.exists(path):
+            fail("no body at DH0:d/%s.bin" % name)
+            return
+        a = hashlib.sha256(open(path, "rb").read()).hexdigest()
+        b = hashlib.sha256(open(ref, "rb").read()).hexdigest()
+        if a != b:
+            fail("sha256 %s, the host got %s" % (a[:16], b[:16]))
         return
 
     if kind == "uploadecho":
@@ -907,6 +931,9 @@ def main():
     ap.add_argument("--base-port", type=int, default=7100)
     ap.add_argument("--curl", default="SYS:curl")
     ap.add_argument("--cacert", default="--cacert DH0:teststore")
+    ap.add_argument("--reference", metavar="FILE",
+                    help="host copy of the internet suite's large download, "
+                         "for the byte-for-byte comparison")
     ap.add_argument("--only", metavar="SUBSTRING",
                     help="keep only cases whose name contains this, on top "
                          "of --groups.  For chasing one failure without "
@@ -921,7 +948,8 @@ def main():
         cases = build_setup(args.curl) + build_probe(args.base_port,
                                                      args.curl, args.probe)
     elif "G" in args.groups:
-        cases = build_setup(args.curl) + build_internet(args.curl)
+        cases = build_setup(args.curl) + build_internet(args.curl,
+                                                         args.reference)
     else:
         cases = build_setup(args.curl) + [
             c for c in build(args.base_port, args.curl, args.cacert)

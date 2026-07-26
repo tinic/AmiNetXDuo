@@ -230,6 +230,22 @@ SELECT=()
 [ -z "$PROBE" ] || SELECT+=(--probe "$PROBE")
 [ -z "$ONLY" ]  || SELECT+=(--only "$ONLY")
 
+# The internet suite has no seeded buffer to check its big download against,
+# so the reference is fetched HERE, once, and the two are hashed.  A case that
+# claims 657,797 bytes arrived and never looks at them is not a test.
+case "$SUITE_GROUPS" in
+    *G*)
+        REF="$ROOT/build/curl-internet-reference.bin"
+        if [ ! -s "$REF" ]; then
+            echo "==> fetching the internet suite's reference copy"
+            curl -sS -o "$REF" \
+                 "http://ftp.fau.de/aminet/comm/tcp/AmiTCP-SDK-4.3.lha" \
+                || echo "!! could not fetch it; that case will report so" >&2
+        fi
+        [ -s "$REF" ] && SELECT+=(--reference "$REF")
+        ;;
+esac
+
 python3 "$ROOT/tests/curl/curlsuite.py" --emit "$STAGE/checks.txt" \
         --groups "$SUITE_GROUPS" --base-port "$BASE_PORT" --cacert "$CACERT" \
         "${SELECT[@]}"
@@ -261,8 +277,15 @@ kill -0 "$PEER_PID" 2>/dev/null || {
 # Active-mode FTP is the one case where the HOST has to reach the GUEST, and
 # SLIRP is a NAT.  The forward is the same mechanism tests/tools/
 # run-nettools.sh uses, on the port curl is told to bind with -P.
-FTP_DATA=$((BASE_PORT + 60))
-export AMINETXDUO_FSUAE_EXTRA="uae_slirp_redir = tcp:$FTP_DATA:$FTP_DATA"
+# Four ports, not one: curl binds a fresh one per data connection and the
+# previous is still in TIME_WAIT, so a single-port range fails with (30).
+REDIR=""
+for p in 60 61 62 63; do
+    d=$((BASE_PORT + p))
+    [ -z "$REDIR" ] || REDIR="$REDIR;"
+    REDIR="${REDIR}uae_slirp_redir = tcp:$d:$d"
+done
+export AMINETXDUO_FSUAE_EXTRA="$REDIR"
 export AMINETXDUO_RUN_TAG="$TAG"
 
 CPUARG=()

@@ -183,6 +183,7 @@ class FtpHandler(socketserver.BaseRequestHandler):
         self.pasv_sock = None
         self.port_target = None
         self.cwd = "/"
+        self.rest = 0
 
     def reply(self, text):
         log("ftp", "--> %s" % text)
@@ -258,6 +259,16 @@ class FtpHandler(socketserver.BaseRequestHandler):
                     self.reply("550 %s: no such file." % arg)
                 else:
                     self.reply("213 %d" % len(blob))
+            elif cmd == "REST":
+                # Resume, and what curl's -r / -C - turn into on ftp://.
+                # Without it curl gives up with (31) Couldn't use REST before
+                # it has opened a data connection at all.
+                try:
+                    self.rest = max(0, int(arg))
+                except ValueError:
+                    self.reply("501 Bad REST.")
+                    continue
+                self.reply("350 Restarting at %d." % self.rest)
             elif cmd == "NOOP":
                 self.reply("200 OK.")
             elif cmd == "PASV":
@@ -305,6 +316,9 @@ class FtpHandler(socketserver.BaseRequestHandler):
                 if blob is None:
                     self.reply("550 %s: no such file." % arg)
                     continue
+                if self.rest:
+                    blob = blob[self.rest:]
+                    self.rest = 0
                 self.reply("150 Opening data connection for %s (%d bytes)."
                            % (arg, len(blob)))
                 try:
