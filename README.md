@@ -227,7 +227,7 @@ rather than ported, so none of them needs a libc shim:
 
 | | |
 |---|---|
-| `AddNetInterface`, `Online`, `Offline`, `NetSetup` | bring an interface up, and configure one interactively |
+| `AddNetInterface`, `Online`, `Offline` | bring an interface up and take it down |
 | `ShowNetStatus`, `netstat` | interface state, routes, connections |
 | `ping`, `host` | reachability and name lookups |
 | `fetch` | retrieve an `http://` or `https://` URL |
@@ -235,12 +235,16 @@ rather than ported, so none of them needs a libc shim:
 | `telnet` | with enough option negotiation not to confuse a real server |
 | `ftp` | passive and active mode, the standard command set |
 
-`nc`, `telnet` and `ftp` are the ones that reach the half of the socket ABI a
-client-only program never touches. curl and `fetch` never call `listen()` or
-`accept()`; `nc -l` does, and active-mode FTP has the *client* listen while the
-server connects back to it. Sizes on m68k: `fetch` 45,632 bytes, `nc` 52,064,
-`telnet` 50,704, `ftp` 58,484. `tests/tools/run-nettools.sh` drives all three
-against real servers.
+All eleven are in the distribution archive and the installer offers each of
+them. Sizes on m68k: `fetch` 45,816 bytes, `nc` 52,064, `telnet` 50,704, `ftp`
+58,484.
+
+The last three earn their place for a reason beyond being useful: they reach the
+half of the socket ABI that no client-only program touches. curl and `fetch`
+never call `listen()` or `accept()`. `nc -l` does, and active-mode FTP has the
+*client* listen while the server connects back to it — which is how the
+half-close RESET and the ten-listener ceiling were found.
+`tests/tools/run-nettools.sh` drives all three against real servers.
 
 One limit worth stating plainly, because it is the emulator's and not ours:
 FS-UAE 3.2.35 accepts a port-redirection setting and then creates no host

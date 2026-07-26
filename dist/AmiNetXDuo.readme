@@ -40,6 +40,8 @@ Included:
   Online / Offline      take one interface up or down
   ShowNetStatus         is it up, and what address did it get
   ping, netstat, host   the usual diagnostics
+  fetch                 retrieve an http:// or https:// URL
+  nc, telnet, ftp       netcat, a telnet client, and an FTP client
   an Installer script   asks two questions and writes a working config
 
 Configuration follows Roadshow's layout -- DEVS:NetInterfaces/<name>,
@@ -61,7 +63,7 @@ ariadne.device, ariadne2.device, amiganet.device, xsurf.device,
 xsurf100.device, cnet.device and the PCMCIA drivers are all offered by name
 in the installer, and anything else can be typed in.
 
-Status, honestly: it gets a DHCP lease, answers ARP, pings its gateway,
+Status: it gets a DHCP lease, answers ARP, pings its gateway,
 resolves DNS and moves TCP in both directions, and bsdsocket.library scores
 125 of 142 on the bsdsocktest conformance suite.  It has not been run on real
 hardware -- everything measured so far was on an emulated 68020 and 68030
