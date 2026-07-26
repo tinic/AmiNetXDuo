@@ -5643,6 +5643,45 @@ comparison per received data segment.
 | retransmissions | 0 | 0 |
 | throughput | 161–174 KB/s | 163–174 KB/s |
 
+#### Does this explain the sub-linear wire scaling? No — and that is worth as much
+
+§11 fitted a fixed ceiling against three honest clock points (105 / 174 / 239 KB/s at
+6.80 / 13.95 / 24.48 MHz) and concluded that **above about 15 MHz roughly half of what
+is left is not CPU at all**, attributing it to "the 50 Hz IP periodic tick and the
+round trips paced by it" — offered as a hypothesis and never confirmed. The obvious
+successor hypothesis, once the ACK rule above was found, is that the missing rule was
+that ceiling.
+
+**It is not.** Both are now disconfirmed by the same traces:
+
+- **The tick does not pace round trips.** With the fix, 151 of 289 acknowledgements go
+  out inside 2 ms and the median is 2.0 ms. Nothing is quantised at 20 ms, and the
+  200 ms delayed-ACK timer fires once in a 365-segment transfer, not repeatedly.
+- **The ACK rule was not the ceiling either.** Fixing it moves wire throughput by
+  **~0%** at the shipped window (161–174 KB/s before, 163–174 KB/s after, on runs
+  whose own spread is wider than the difference).
+- **And the wire is not window-limited**, which was the third candidate: with prompt
+  ACKs the peer holds 2880 bytes outstanding, 9% of a 32 KB window.
+
+What the trace says the wire ceiling actually is, arithmetically: 524,288 bytes in
+2.92 s is **8.0 ms per 1440-byte segment** at 14 MHz. Nothing in the trace is idle for
+that 8 ms — no window stall, no ACK wait, no timer — so it is the per-segment cost of
+the receive pipeline itself: the a2065 interrupt, the SANA-II copy hook, the deferred
+receive, the checksum, the TCP reassembly and the copy out through `recv()`. That is
+CPU work, and it is the same work §11 already ranked (`bsdsocket.library`'s per-call
+overhead first at ~1010 ms/MB, the copies second).
+
+So the honest position on §11's fit is that **the fixed-ceiling component is still
+unexplained**, and three named candidates have now been eliminated rather than one
+added. The next place to look is the per-segment cost above, which is measurable
+directly (segments per second against clock) rather than by fitting.
+
+Two figures should not be conflated when reading this against §11 and §14: `NetTrace`
+measures **161–179 KB/s** over the wire where curl measures ~117 KB/s on the same
+path. The difference is curl's own buffering and HTTP handling, not the stack.
+
+#### What the fix is and is not worth
+
 **Bulk throughput does not move**, and that is stated rather than buried: at an 8 KB
 window, half the window is already about three segments, so the window update was
 already firing often enough. What moves is **latency** — a 3.3× cut in the median and
@@ -5689,7 +5728,70 @@ undersized segments" was a live hypothesis:
   behaviour and not a defect, but it does mean an application that writes small
   writes small on the wire.
 
-### 16.8 Things nobody predicted
+**The SYN options are worth reading, because two things are absent.** `tcpdump -r`
+on the guest capture shows
+
+```
+10.0.2.15.56478 > 10.0.2.2.7300: Flags [S], seq ..., win 8192,
+    options [mss 1460,nop,nop,nop,eol], length 0
+```
+
+— MSS and then NetX Duo's fixed eight-byte option block padded out. **No window
+scale, and no SACK.** `NX_ENABLE_TCP_WINDOW_SCALING` exists in NetX Duo and is not
+defined here, which puts a hard **64 KB ceiling on the receive window** whatever
+§16.6's pool-derived sizing eventually decides; SACK is not implemented in the
+vendored tree at all, so a burst loss costs a full go-back-N. Neither binds today —
+the window is 8 KB and nothing is being lost — but both bound where this can go, and
+the window-scale option is bilateral, so not offering it also stops the *peer*
+scaling.
+
+Two other numbers in that transcript belong to the host and not to us, and are noted
+so nobody attributes them here later: the SYN to SYN/ACK took **353 ms** and the
+request to the first data segment **494 ms**. That is `curlpeer.py` and SLIRP; our
+own ACK of the SYN/ACK went out **1.6 ms** after it arrived.
+
+### 16.8 The regression cover, and the concurrency sweep
+
+The suite that found the four-frame receive window is the gate that matters here,
+because an ACK change can move it either way and every body it fetches is hashed
+against the server's copy — a correctness regression cannot pass quietly.
+
+| | |
+|---|---|
+| conformance, loopback tier | **128 passed, 0 failed, 14 skipped** |
+| `tests/clients` | **94 checks, 0 failures** |
+| `tests/curl` groups A–F | **147 passed, 2 failed, 149 cases** |
+| host `ctest` | **6/6** |
+
+The two curl failures are the two §14 already names and neither is ours:
+`a44_cookies_send` (curl does not write its cookie jar on AmigaOS — settled against
+a third-party binary in §14.7) and `f07_ftp_active` (FS-UAE 3.2.35's SLIRP opens no
+inbound path, §12). The loopback tier reads 128/0/14 rather than §12's 125/1/16
+because `SOCK_RAW` landed alongside this work, not because of anything here.
+
+`AvailMem` is flat at **9,541,304 bytes** across every case of groups A to D, drops
+once to 9,275,720 when `tls.library` loads, and is flat again to the last case. A
+one-time load, not a per-socket leak.
+
+**The concurrency sweep, against §14.2's own numbers on the same profile:**
+
+| `--parallel-max` | §14.2, RX depth 32 | with the ACK fix |
+|---:|---:|---:|
+| 8 | 3.52 s | **2.66 s** |
+| 16 | 4.94 s | **4.86 s** |
+| 24 | 5.38 s | **4.80 s** |
+| 32 | 6.08 s | **6.22 s** |
+| 40 | 8.04 s | **7.42 s** |
+| 48 | 8.68 s | **8.40 s** |
+
+Every transfer completes, every body byte-identical, `AvailMem` delta **+0**. Five of
+six points faster, one marginally slower, about 7% in the mean — which is the shape
+the mechanism predicts: with forty sockets sharing one packet pool each socket's
+window is small relative to what it wants, so the interval between acknowledgements
+is exactly what a concurrent client spends its time waiting on. It is a modest win,
+and it is stated as one; the point of running it was that it could have been a loss.
+
+### 16.9 Things nobody predicted
 
 - **`CloseSocket()` sending a RESET is visible in every trace.** §12.3 lists it third
   and calls it "a risk that has not been reproduced". It is now *observed*: every
