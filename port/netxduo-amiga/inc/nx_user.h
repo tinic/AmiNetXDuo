@@ -286,6 +286,39 @@
 #define NX_IP_ROUTING_TABLE_SIZE                4
 
 
+/* -------------------------------------------------------------- resolver -- */
+
+/*
+ * CACHE DNS ANSWERS.
+ *
+ * addons/dns has had this all along; nxd_dns.h ships the define commented out
+ * and nothing here uncommented it, so every lookup went to the wire -- every
+ * one, including the second lookup of a name resolved a moment earlier, which
+ * is what a shell session, an FTP transfer and a redirect-following fetch all
+ * do.
+ *
+ * With it, _nx_dns_host_resource_data_by_name_get() and
+ * _nx_dns_host_by_address_get_internal() consult the cache BEFORE binding a
+ * socket, so a hit costs a mutex and a linear walk and puts no packet on the
+ * wire at all.  It caches what the server said, honours the TTL the server
+ * sent (aged from tx_time_get() against NX_IP_PERIODIC_RATE), and replaces the
+ * least recently used record when it is full -- so a cache too small for a
+ * workload degrades to the behaviour it replaced rather than to a failure.
+ * Forward (A, AAAA) and reverse (PTR) lookups share it.
+ *
+ * Cost inside NX_DNS: a pointer, a size and three counters.  THE CACHE ITSELF
+ * IS THE CALLER'S -- src/netstack/netstack_dns.c owns the buffer and states
+ * there how big it is and why.  Without a call to nx_dns_cache_initialize()
+ * this define is inert: the code compiles in, dns_ptr->nx_dns_cache stays
+ * NULL, and every lookup goes to the wire exactly as before.
+ *
+ * This does not change what DEVS:Internet/hosts does.  netstack_resolve()
+ * still consults the file first and never reaches NetX Duo for a name that is
+ * in it, so a hosts entry cannot be shadowed by a cached answer.
+ */
+#define NX_DNS_CACHE_ENABLE
+
+
 /* ---------------------------------------------------------------- IPv6 ---- */
 
 /*

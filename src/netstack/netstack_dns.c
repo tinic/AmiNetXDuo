@@ -49,6 +49,26 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
 
     ns->ns_DnsCreated = TRUE;
 
+#ifdef NX_DNS_CACHE_ENABLE
+    /*
+     * The answer cache. NX_DNS_CACHE_ENABLE compiles the code in; this call is
+     * what makes it do anything -- nx_dns_create() leaves nx_dns_cache NULL and
+     * a NULL cache is checked for on every path, so without this the feature is
+     * present and inert. AMI_DNS_CACHE_BYTES says how the size was chosen.
+     *
+     * A failure here is not fatal and must not be: every lookup still works,
+     * it just goes to the wire, which is what this stack did until now.
+     */
+    status = nx_dns_cache_initialize(&ns->ns_Dns, ns->ns_DnsCache,
+                                     (UINT)sizeof(ns->ns_DnsCache));
+    if (status != NX_SUCCESS)
+        AMI_WARN("netstack: DNS cache not initialised (%ld) -- every lookup "
+                 "will go to the network", (long)status);
+    else
+        AMI_INFO("netstack: DNS cache %lu bytes",
+                 (unsigned long)sizeof(ns->ns_DnsCache));
+#endif
+
     for (i = 0; i < ns->ns_Config.resolver.nameserver_count; i++)
     {
         ULONG server = ns->ns_Config.resolver.nameserver[i];
