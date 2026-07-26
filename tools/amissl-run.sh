@@ -144,6 +144,21 @@ for lib in mathieeedoubbas mathieeedoubtrans; do
 done
 [ "$MATH_MISSING" = "0" ] || echo "    (the run will hang rather than fail; see the comment in this script)"
 
+# ------------------------------------------------------------- AmiSSL: ------
+#
+# AmiSSL is configured with OPENSSLDIR = AmiSSL: (its own Makefile:
+# `OPENSSLDIR=AmiSSL: ENGINESDIR=AmiSSL:engines MODULESDIR=AmiSSL:modules`), so
+# OpenSSL 3.x's configuration and provider loading opens AmiSSL:openssl.cnf on
+# the first API call.  Without the assign AmigaDOS asks for the volume rather
+# than returning an error, and on a bare boot nobody can cancel it.  The
+# benchmark makes the assign itself from DH0:AmiSSL; this stages what it points
+# at.  Certs/ is not staged -- 290 PEM files that no arithmetic benchmark reads.
+mkdir -p "$STAGE/AmiSSL"
+if [ -f "$OS3/C/openssl.cnf" ]; then
+    cp "$OS3/C/openssl.cnf" "$STAGE/AmiSSL/"
+    echo "    AmiSSL:openssl.cnf staged"
+fi
+
 # C68K_AMISSL is read with GetVar(), which reads ENV:.  The harness backs ENV:
 # with a staged env/ directory.
 mkdir -p "$STAGE/env"
@@ -162,4 +177,4 @@ ARGS=(-t "$TIMEOUT")
 
 AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-amissl}" \
     "$ROOT/tools/fsuae-run.sh" "${ARGS[@]}" "$EXE" \
-        "$STAGE/libs" "$STAGE/env"
+        "$STAGE/libs" "$STAGE/env" "$STAGE/AmiSSL"

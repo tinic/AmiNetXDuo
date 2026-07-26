@@ -4221,3 +4221,752 @@ something that happens once is worth much less than it was.
 **Nothing here helps TLS 1.3**, which is where the web is going. `nx_secure`'s TLS 1.3 is
 impractical on this hardware for an unrelated reason (a bit-serial GHASH), and its
 resumption is a different mechanism — PSK, not tickets — so none of this code carries over.
+
+
+## 14. curl as an adversary: a verification suite for bsdsocket.library (2026-07-25)
+
+§11 established that curl runs on the 68020 and fetches pages. This is the
+other half of the question: **what does curl do to the stack that our own
+tools do not**, and does the stack survive it.
+
+The framing matters, because it decides what a red result means. curl is not
+the thing under test. It is a client that has been driven against every TCP
+implementation in commercial use for twenty-five years, so its transfers are a
+far better probe than anything written here on purpose — and every failure the
+suite finds is a bug in `bsdsocket.library` until somebody proves otherwise.
+
+**It found one, and it is not a small one:** the SANA-II receive queue was four
+frames deep, and sixteen simultaneous connections lost six of them.
+
+### 14.1 What is in the tree
+
+| | |
+|---|---|
+| `tests/curl/curlpeer.py` | the host end: HTTP/1.1 with keep-alive, ranges, chunking and drip-feeding; seven HTTPS servers on seven certificate chains; FTP (borrowed from `tests/tools/netpeer.py` rather than rewritten); and four deliberately rude listeners |
+| `tests/curl/mkpki.sh` | a whole test PKI — RSA and ECDSA roots, three levels of intermediates, expired, self-signed, and a root nobody trusts |
+| `tests/curl/curlsuite.py` | the cases and the scoring, in one file |
+| `tests/curl/curlcheck.c` | the Amiga-side driver |
+| `tests/curl/run-curlverify.sh` | stage, serve, run, score |
+
+**Hermetic by default.** Groups A–F talk to this host and to nothing else: no
+DNS beyond one deliberate NXDOMAIN, no internet, no public CA. `-g G` is the
+internet suite and is **NOT A BASELINE**, kept separate for that reason.
+
+Three decisions are worth writing down.
+
+**The servers are hand-rolled and `http.server` is not used**, because the half
+of the suite that matters cannot be built on a framework that guarantees a
+well-formed response. The suite needs a server that promises a
+`Content-Length` and then closes at a quarter of it, one that answers with a
+RESET, one that accepts and says nothing for ever, and one that answers with
+bytes that are not HTTP. Those are the cases where a stack crashes instead of
+returning an error.
+
+**Every body is checked byte for byte, on the host.** `DH0:` is a host
+directory, so what the Amiga wrote is already here; the server's bodies are
+slices of one seeded 2 MiB buffer, so `/bytes/1200000` and `/bytes/1` are
+checked the same way and no manifest has to travel. Nothing is taken on trust
+from a status line.
+
+**The scoring is on the host, not on the Amiga**, because a run that dies has
+to be scored too. `CurlCheck` appends one line per case as it goes and flushes
+it by closing the file; every case with no line is a failure, and the first
+missing one names the command that took the machine down. A driver that scored
+its own run would report nothing at all in exactly that case.
+
+Each result line also carries `AvailMem(MEMF_ANY)`, which is how a leak of a
+few kilobytes per socket becomes a trend somebody can see.
+
+### 14.2 The finding: the SANA-II receive queue was four frames deep
+
+`d03_parallel_40` — forty concurrent transfers through curl's multi interface —
+came back `curl: (7) Could not connect` for thirteen of the forty, each after
+about thirteen seconds. A sweep found the cliff between eight and sixteen:
+
+| concurrent transfers | lost |
+|---|---|
+| 8 | 0 |
+| 16 | **6** |
+| 24 | **7** |
+| 28 | **10** |
+| 32 | **11** |
+| 36 | **16** |
+| 40 | **15** |
+| 48 | **22** |
+
+**87 of 232 transfers.** The measurement that turned this from a mystery into a
+diagnosis is on the host side: `curlpeer.py` logs every connection it accepts,
+and it accepted **213** across the sweep while only **145** transfers completed
+on the Amiga. Sixty-eight connections were therefore established at the far end
+and never used — the SYN went out, the peer answered, and the answer was never
+seen. Thirteen seconds is our own connect giving up, retransmitting a SYN into
+a connection the other end already considers open.
+
+The cause is one constant, and its own header comment describes the mechanism
+without drawing the conclusion:
+
+> `CMD_READ` is per packet type and the device has no buffers of its own: every
+> frame that arrives with no matching read outstanding is dropped on the floor.
+
+`AMI_SANA2_RX_DEPTH_IPV4` was **4**. That is not a queue length, it is the
+receive window measured in frames — and sixteen sockets opening at once produce
+sixteen SYN/ACKs inside a few hundred microseconds, which a 14 MHz 68020 cannot
+re-post a read between. Twelve of them hit a device with nothing outstanding
+and were discarded by `a2065.device` before any of our code ran.
+
+Rebuilt with the depth at 8 and nothing else changed — same build directory,
+same flags, one `-D` — the same sweep loses **nothing** up to forty.
+
+**And the eight-way case, which never failed, was 2.5× slower than it had to
+be.** That is the part worth noticing: loss was not a cliff that only appeared
+at sixteen, it was there all along and TCP was papering over it with
+retransmissions.
+
+| concurrent | depth 4 | depth 32 |
+|---|---|---|
+| 8 | 8.66 s | **3.52 s** |
+| 16 | failed | **4.94 s** |
+| 24 | failed | **5.38 s** |
+| 32 | failed | **6.08 s** |
+| 40 | failed | **8.04 s** |
+| 48 | failed | **8.68 s** |
+
+**The fix is not "8".** A fixed number here is what caused the problem, and the
+right bound is memory: each outstanding read pins an `NX_PACKET` for its whole
+life, and the pool is already sized from `AvailMem()`.
+`ami_sana2_rx_ipv4_depth()` therefore takes a fixed share of the pool —
+`AMI_SANA2_RX_POOL_SHARE`, one in eight — with the old 4 as the floor and 32 as
+the ceiling. On the 8 MB profile the pool is 256 packets and the depth comes
+out at the ceiling; on the 4 MB / 68020 floor the pool is
+`AMI_POOL_MIN_PACKETS` (16), one eighth of which is 2 — below the old floor —
+so such a machine keeps its four and **cannot** absorb the burst. That limit is
+real and is stated rather than hidden. ARP and IPv6 ND are low-rate and stay
+shallow.
+
+It costs about 4 KB of new memory (24 more `AmiRxSlot` in each of two readers)
+and holds up to 28 more of the 256 packets already in the pool.
+
+#### And where the new ceiling is
+
+Raising the depth moved the limit rather than removing it, and a user who hits
+the new one should get an explanation instead of a mystery.
+
+| `--parallel-max` | result |
+|---|---|
+| 8, 16, 24, 32, 40, 48 | every transfer completes, every body byte-identical |
+| **56** | **stalls**: 16 of 56 complete, the host reports 40 connections open, and nothing moves again |
+
+So the ceiling is somewhere between 40 concurrent sockets and 56. Three things
+govern it and the suite cannot say which binds first: the packet pool
+(`AMI_POOL_MAX_PACKETS` is 256 and the IPv4 reader now pins 32 of them), our
+`BSD_DEFAULT_DTABLESIZE` of 64, and curl's own `FD_SETSIZE` of 64 — 56
+transfers plus the multi handle's wakeup socketpair is 58 descriptors, which is
+close enough to both 64s to be suspicious. It is **not diagnosed and not
+fixed**: nobody runs 56 simultaneous transfers on a 14 MHz 68020 in earnest,
+and `d03_parallel_40` keeps the default suite comfortably under it.
+
+**Nothing else in the tree could have found this.** The conformance suite tests
+one vector at a time, `tests/clients` replays one client sequence at a time,
+and `nc`, `ftp` and `fetch` open one connection. A burst of sixteen
+simultaneous connects is what a multi-handle client does on its first line, and
+until curl ran there was no such client here.
+
+### 14.3 Fifteen of the sixteen seconds were the SHUTDOWN
+
+The suite runs `curl --version` twice, once either side of `AddNetInterface`,
+because the first one took sixteen seconds and the reason is not what it looks
+like:
+
+```
+--- SYS:curl --version                 (nobody else holding the library)
+--- rc 0, 16.22 s
+--- SYS:AddNetInterface eth0
+--- rc 0, 1.46 s
+--- SYS:curl --version                 (afterwards)
+--- rc 0, 0.32 s
+```
+
+It is not the executable loading: a second `--version` before the interface
+also took **15.92 s**, and every curl after `AddNetInterface` loads the same
+939 KB binary in a second or two.
+
+**It is not the stack coming up either, and that is the useful part.**
+`AddNetInterface` brings the whole thing up — `NX_IP`, the ThreadX threads, the
+SANA-II device, ARP, DHCP — in **1.46 s**. What it does not do is close its
+handle again; `tool_stack_start()` says in as many words that the leaked
+reference is how the interface stays up. curl closes, and closing is what cost
+fifteen seconds.
+
+The serial log named the culprit and it can be counted:
+
+```
+[WARN] sana2: reader 0 did not stop
+[WARN] sana2: reader 1 did not stop
+```
+
+**Exactly one pair per shutdown** — one pre-interface `curl --version` logs one
+pair, two log two. `ami_sana2_rx_stop()` waited `5 * NX_IP_PERIODIC_RATE` for
+each reader's exit semaphore and gave up, so ten of the sixteen seconds were
+two five-second timeouts, on every last close of `bsdsocket.library`.
+
+#### Why the readers did not stop: the driver does not honour AbortIO()
+
+The answer was already in this tree, at the top of `CMakeLists.txt`, written by
+somebody looking at the other end of the same lifecycle:
+
+> The SANA-II raw-framing probe posts a `CMD_READ` with `SANA2IOF_RAW` and takes
+> it straight back with `AbortIO()`. Commodore's `a2065.device` 2.16 does not
+> abort it, so `ami_sana2_open()` never returns — verified under FS-UAE.
+
+That was worked around by turning the probe off, which left every other
+`AbortIO()` in the shim still assuming it works. `ami_sana2_rx_teardown()`
+aborted its queued reads and then called **`WaitIO()`, which has no deadline**,
+on requests the device was never going to return.
+
+#### And the fix is an ordering, not a workaround
+
+`S2_OFFLINE` returns every queued `CMD_READ` with `S2ERR_OUTOFSERVICE`.
+`ami_sana2_rx_drain()` has said so in a comment since it was written, and it is
+the SANA-II documented behaviour — it does not depend on `AbortIO()` at all.
+
+**It was being issued too late.** `ami_sana2_close()`, `NX_LINK_DISABLE` and
+`NX_LINK_UNINITIALIZE` all read `rx_stop(); tx_drain(); offline();`. The one
+command that would have freed the readers came ten seconds after they had given
+up waiting for something else. `ami_sana2_rx_stop()` now takes the interface
+offline **first**, and does it itself rather than at each of the four call
+sites, so the next caller cannot get the order wrong.
+
+Three further things were wrong underneath it, and each is worse than the delay:
+
+- **`WaitIO()` is gone.** `ami_sana2_rx_reap()` collects replies with a bound
+  (25 × 2 ticks, one second) and answers how many the device still owns.
+- **`CMD_FLUSH` is the escalation.** Exec defines it as "abort all queued
+  requests for this unit" and SANA-II carries it forward; it is what a driver
+  that ignores `AbortIO()` is supposed to implement. Unit-wide, so it is second
+  and not first.
+- **Nothing the device still owns is freed any more.** The old path freed the
+  reply port, released the pinned `NX_PACKET`s, terminated the reader thread,
+  freed the stack it was running on and let `ami_sana2_close()` free the whole
+  interface — with reads still queued into all of it. On a machine with no
+  memory protection that is not a leak, it is a corruption waiting for the next
+  matching frame. It now refuses to free any of it, says so at `AMI_ERROR`, and
+  marks the interface unrestartable. **A 32 KB leak is recoverable and a thread
+  executing freed memory is not.**
+
+Measured after the change, same profile, same binaries, nothing else touched:
+
+| `curl --version`, sole holder of the library | before | after |
+|---|---|---|
+| elapsed | **16.22 s** | **2.20 s** |
+| `reader did not stop` warnings | 2 | **0** |
+
+The 2.20 s that is left is a whole stack brought up and taken down again for a
+command that prints a version string — consistent with the 1.46 s
+`AddNetInterface` pays for the bring-up alone — and `curl --version` with
+`AddNetInterface` already run is unchanged at 0.30 s. Fifteen seconds of it
+were a driver's refusal to honour `AbortIO()`, waited out twice, on every
+command a user typed.
+
+### 14.4 What curl could not break
+
+Everything below passed with the body checked byte for byte against the host's
+copy. It is worth listing because a suite that finds one bug and reports
+nothing else is not saying much:
+
+- **Sizes.** 1 byte, 1 KB, 64 KB, 65,537 bytes (one past a power of two),
+  1,200,000 bytes, and an empty body — all byte-identical.
+- **Framing.** `Content-Length`, chunked, chunked with a trailer, chunked in
+  4,096 writes of ONE byte, 256 KB in 1,024 writes, and a body with no length
+  at all that ends when the peer closes.
+- **The header parser's buffers.** 62 KB of response header across 200 header
+  lines; a single 60 KB header line; a response header delivered one line at a
+  time with 400 ms between them; a 2.4 KB request line; and a ~2.5 KB `Cookie`
+  header built from 53 cookies curl stored and sent back.
+- **Ranges.** 206 from the middle, from the tail, and open-ended.
+- **Methods and status.** GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH; fifteen
+  status codes including 204 and 418; `--fail`'s exit 22.
+- **Redirects.** 1, 3, 5 and 20 deep, 301/302/307, the `--max-redirs` cap (47)
+  and a redirect loop (47).
+- **Uploads.** 4 KB and 200 KB by POST and by PUT, each verified by the server
+  hashing what it received and curl saving the answer — with a 100-continue
+  round trip in front of the large ones.
+- **Connection behaviour.** Four transfers on one connection (`conns_total=1`),
+  four with the peer closing each time (`conns_total=4`), reuse after a 404 and
+  after a HEAD, 60 transfers on one handle and one connection, and 20
+  connect/transfer/close cycles with descriptors coming back.
+- **The multi interface.** 4, 8 and 40 concurrent transfers, a slow drip
+  alongside fast ones, and chunked in parallel — which is `WaitSelect()` over
+  the whole set plus the `bind`/`listen`/`connect`/`accept` socketpair
+  `lib/socketpair.c` builds for the wakeup.
+- **Failure paths, every one of them an error rather than a crash.** Connection
+  refused (7); an unresolvable name (6); a peer that promises 400 KB and closes
+  after 100 KB (18); the same with a RESET (56); an accepted connection closed
+  with nothing sent (52); an answer that is not HTTP (1); a peer that accepts
+  and never speaks, ended by `--max-time` (28); `--max-time` firing mid-body
+  with data still arriving (28); `--connect-timeout` to a black hole (28);
+  `--max-filesize` aborting a transfer (63); and curl walking away from a
+  1.9 MB download after three seconds with the connection full — the
+  Ctrl-C-equivalent. An ordinary transfer immediately after all of them
+  succeeds, which is the case that would have caught a stack left damaged.
+- **Memory.** `AvailMem(MEMF_ANY)` was **9,569,272 bytes at the start of the
+  HTTP group and 9,569,272 at the end of it**, across ~110 transfers, 20
+  separate curl processes and every failure path above. Not "roughly stable":
+  the same number.
+
+### 14.5 Regression cover for the fix
+
+The fix is in `src/sana2/`, so both existing tiers were re-run against the
+rebuilt library:
+
+```
+tests/conformance  LOOPBACK   125 passed, 1 failed, 16 skipped   (unchanged)
+tests/clients                 94 checks, 0 failures              (unchanged)
+```
+
+TCP loopback throughput is 356 KB/s before and after, so the deeper read queue
+costs nothing on the path that was already working.
+
+The failing-before / passing-after test is in the suite itself:
+`d03_parallel_40`, and `tests/curl/run-curlverify.sh -p 8,16,24,32,40,48` is
+the sweep that produced the table above. Note that it only fails on a machine
+whose pool is large enough for the fix to raise the depth — on the 4 MB floor
+the depth stays at 4 and so does the loss.
+
+### 14.6 Somebody else's curl, on our stack
+
+The strongest ABI evidence available is a binary nobody here built, because it
+cannot have been shaped around our quirks. There is one, and it is newer than
+ours:
+
+| | |
+|---|---|
+| Aminet | `comm/tcp/curl-8.22.0-DEV-210726.lha`, 2026-07-23, 4,704,106 bytes |
+| Port | Darren Banfi (`boingball`), source at `github.com/boingball/curl` branch `amigaos`, commit `ffec7145` |
+| Upstream | curl **8.22.0-DEV**, one release newer than the 8.21.0 of §11 |
+| Built with | `m68k-amigaos-gcc 13.2.0`, **clib2**, soft-float, `-O0`, `--with-amissl --with-zlib` |
+| Ships | five executables (68000/020/030/040/060) and five matching `libcurl.a` |
+
+**The second-hand "crashes most of the time on Roadshow" report is stale and
+its diagnosis was wrong.** There is no current 8.11.1-DEV package; that was the
+first release (2024-11-24) and has been superseded three times. The port's own
+`docs/AMIGAOS.md` says the 8.18 release "increased the default stack size from
+16384 to 32768. This fixes crashes during TLS handshakes, certificate
+validation, compressed downloads, and large HTTPS transfers" — and the 8.11.2
+binary does carry a literal `$STACK:16384` cookie. So the crashes were stack
+exhaustion in the port, not an incompatibility with Roadshow, and the buggy
+release's own readme already claimed Roadshow worked. Both current readmes say
+"Roadshow TCP and WinUAE networking have been tested."
+
+**The stack cookie is worth stealing.** At file offset `0x1c3ec` their binary
+contains the plain string `$STACK:32768`, NUL-terminated, sitting in the text
+segment as a dead constant. That is the entire mechanism — no `__stack` symbol
+— and AmigaOS 3.1.4+ scans a loaded executable for it. §11.5 records that this
+toolchain's `crt0.o` exports no `__stack` hook and that ours therefore needs
+`stack 200000` typed by hand; a `$STACK:` string constant would remove that
+step on 3.1.4 and newer, and would be ignored harmlessly on 3.1. Kickstart 3.1
+is what this harness boots, so `CurlCheck` still supplies the stack itself.
+
+**What it demands of the ABI that ours does not.** `curl_setup.h` gives OS3 the
+same bsdsocket path either way — `select()` is `WaitSelect()`, `HAVE_FCNTL` is
+off, sockets close with `CloseSocket()` — but `lib/amigaos.c`'s
+`Curl_amiga_init()` is compiled `#elif !defined(USE_AMISSL)`, so **their build
+never makes the `SocketBaseTags` call at all**. clib2's own networking startup
+opens the library and installs the errno pointer instead, and it also opens
+`usergroup.library`, which ours never touches. The strings name a hard
+`bsdsocket.library v4` requirement and `amisslmaster.library v5`, plus
+`mathieeedoubbas`, `mathieeedoubtrans` and `mathieeesingbas`.
+
+**AmiSSL has no 68000 build**, which contradicts the readme's "68000 … no FPU
+required" for anything over HTTPS: `util/libs/AmiSSL-v5-OS3.lha` (v5.27) ships
+only `os3-68020` and `os3-68060` copies of `amissl_v362.library`.
+
+### 14.7 What the suite cannot see, said plainly
+
+- **It cannot distinguish our stack from FS-UAE's SLIRP** except by inference.
+  The 40-way finding was pinned down because the host's accept count and the
+  guest's completion count disagreed, which puts the loss on the inbound leg;
+  raising a constant in `src/sana2/` then fixed it, which puts it on ours. No
+  other case has that kind of corroboration.
+- **Every measurement is on a 68EC020 at 14 MHz with 8 MB of Zorro II Fast
+  RAM.** The packet pool is 256 packets there. On the 4 MB floor the pool is
+  16 and several of these numbers would be different -- the RX depth for one,
+  which is exactly why it is now computed rather than fixed.
+- **`--max-time` cannot fire inside a TLS handshake**, because `TLSOpen()`
+  blocks (§11.8). `e16_tls_silent` accepts either exit code for that reason and
+  is a documentation case, not a pass/fail one.
+- **Nothing here tests IPv6**, because `AMINETXDUO_IPV6` is off in the shipping
+  stack and curl is built with `ENABLE_IPV6=OFF` to match.
+- **The FTP active-mode case depends on `uae_slirp_redir`**, so it is testing
+  our `bind`/`listen`/`accept` through a NAT hole rather than on an open
+  network. That is the same accommodation `tests/tools/run-nettools.sh` makes
+  and it is documented there.
+
+## 15. crypto68k against AmiSSL, on the same machine (2026-07-25)
+
+Everything `src/crypto68k/` has ever been measured against is the vendored `nx_crypto`
+it replaces. That is the right baseline for *did the change work* and the wrong one for
+*is this stack worth having*, because this machine already has an OpenSSL: **AmiSSL**,
+which is what the Aminet curl links against and what every other TLS client on a classic
+Amiga uses. §11.6 guessed that a well-maintained library would land 1.5–2.5× slower than
+`crypto68k` rather than 3–4×, and said plainly that nobody had measured it.
+
+`tests/crypto68k/crypto68k_amissl` is the measurement: both implementations on identical
+inputs, back to back, **in one process**, each answer checked against the other's before
+it is timed, and a MULU.L-corrected figure beside every measured one.
+`tools/amissl-run.sh` stages the library and runs it.
+
+### 15.1 What AmiSSL is on this target, and why the CPU build decides the answer
+
+AmiSSL **5.27** is OpenSSL **3.6.2** — read from the running library, not from a header:
+`OpenSSL 3.6.2 7 Apr 2026`, `amissl_v362.library 5.27 (8.4.2026) os3-68020 version`.
+
+The OS3 release ships exactly two m68k builds and one CPU-neutral master:
+
+| file | bytes | built |
+|---|---:|---|
+| `Libs/AmigaOS3/amisslmaster.library` | 4,976 | CPU-neutral |
+| `Libs/AmigaOS3/AmiSSL/68020-40/amissl_v362.library` | 3,587,424 | `-m68020-40 -msoft-float` |
+| `Libs/AmigaOS3/AmiSSL/68060/amissl_v362.library` | 3,591,992 | `-m68060 -msoft-float` |
+
+`amisslmaster` resolves the second by a literal path — `LIBS:AmiSSL/amissl_v%ld.library`,
+visible in `strings` — so the directory layout is not negotiable. **The 68020-40 build is
+the one used here, and it is the one that gets the assembly:**
+
+- `Configurations/15-amissl.conf` gives `amiga-os3-68020` `asm_arch => 'm68k'` and
+  `bn_ops => add("BN_LLONG")`. `amiga-os3-68060` gets neither.
+- `crypto/bn/build.info:90` sets `$BNASM_m68k=asm/bn_m68k.s` and the dispatch below it
+  **overwrites** `$BNASM`, so on this target `bn_asm.c` is not compiled at all and the
+  ten bignum primitives come from **Howard Chu's 2002 68020 assembly** — 1604 lines,
+  never merged upstream, carried by AmiSSL. §9 recorded that it "survives in AmiSSL";
+  it is now confirmed that it is built and that it is what runs.
+- The 68060 build has none of it, for the reason §9 already gave: `MULU.L`'s 32×32→64
+  form is not implemented on a 68060 and traps.
+
+So this is not our assembly against OpenSSL's C. It is **our assembly against OpenSSL's
+assembly**, on a target where OpenSSL got the same idea twenty-four years earlier.
+`BN_ULONG` is `unsigned int` — 32 bits, the same limb width we use.
+
+### 15.2 The harness, and the one thing it does not link
+
+`c68k_amissl_bench.c` owns the clock, the vectors and the reporting; `c68k_amissl_ossl.c`
+is the only file that sees an OpenSSL header. Two translation units, because `nx_crypto`'s
+headers and OpenSSL's both arrive through `<exec/types.h>` and both want names like
+`SHA256_CTX`.
+
+**Nothing of AmiSSL's is linked.** Every OpenSSL call is a macro from
+`<inline/amissl.h>` that expands to a `jsr` through `AmiSSLBase` or `AmiSSLExtBase` —
+AmiSSL v5 spans two library bases because OpenSSL has more entry points than one LVO
+table holds. Verified in the disassembly: `BN_new()` is `jsr a6@(-2196)`. That sidesteps
+whether an archive built by adtools GCC 2.95.3 links against GCC 15.2 output, and it
+guarantees every measured cycle ran inside `amissl_v362.library`.
+
+The vectors are the existing `c68k_vectors.h` and `c68k_ec_vectors.h` — the same
+throwaway RSA-2048 key and the same RFC 6979 A.2.5 signatures the crypto68k tests use —
+converted from HN_UBASE limb order to big-endian bytes at the boundary.
+
+### 15.3 The measurement trap, handled rather than discovered
+
+FS-UAE's A1200 model charges `MULU.L` **32.14 cycles where an MC68020 charges 45**
+(`Dn,Dh:Dl`; 43 for the 32-bit form) — measured by `tests/perf/cpucal`, and reproduced by
+this program's own inline-assembly calibration kernel in the same run. Every other
+instruction the model charges is faithful to under 2%.
+
+That is a 29% discount on the single instruction multi-precision arithmetic is made of,
+and **it does not cancel between two implementations that issue different numbers of it.**
+So each row carries a statically derived count of 32×32→64 multiplies and the report
+prints
+
+```
+corrected = measured + count * t_mulu * (45 - 32.14) / 32.14
+```
+
+with `t_mulu` measured in-process. Working from a measured `t_mulu` rather than an assumed
+clock is what makes the correction independent of `-k`; the kernel's implied clock came
+out 56.53 MHz on a `-k 56` run, against `cpucal`'s 56 MHz, which is the check that it is
+measuring the instruction and not the compiler.
+
+The counts are derived, not sampled, because both sides are deterministic given the
+operands.
+
+**One Montgomery step, in 32×32→64 multiplies:**
+
+| limbs | ours × | ours ² | AmiSSL × | AmiSSL ² |
+|---|---:|---:|---:|---:|
+| 32 (1024-bit) | 2s²+s = **2,080** | 1.5s²+1.5s = **1,584** | 576+1,056 = **1,632** | 324+1,056 = **1,380** |
+| 64 (2048-bit) | **8,256** | **6,240** | 1,728+4,160 = **5,888** | 972+4,160 = **5,132** |
+
+Ours is SOS with a schoolbook product; Karatsuba was costed and rejected at ~5% (§9).
+AmiSSL's differs in a way that matters: because `OPENSSL_BN_ASM_MONT` is **not** defined
+for this target, `bn_mul_mont` does not exist, and `bn_mul_mont_fixed_top()` falls through
+to `bn_mul_fixed_top()`/`bn_sqr_fixed_top()` plus `bn_from_montgomery_word()`. Two
+consequences, both in OpenSSL's favour: a genuine squaring shortcut, and **Karatsuba above
+sixteen limbs** (M(8·2ᵏ) = 64·3ᵏ, S(8·2ᵏ) = 36·3ᵏ). At the 32 limbs an RSA-2048 CRT half
+runs, OpenSSL issues about 22% fewer multiplies per Montgomery step than we do.
+
+**Per operation:**
+
+| operation | ours | AmiSSL | ours ÷ theirs |
+|---|---:|---:|---:|
+| RSA-2048 public, e = 65537 | 126,688 | 103,936 | 1.22 |
+| RSA-2048 private, CRT | 3,978,832 | 3,688,408 | 1.08 |
+| ECDSA P-256 verify | 164,476 | 186,280 | 0.88 |
+| ECDH P-256 shared secret | 125,204 | **277,504** | 0.45 |
+| k·G, an ECDHE key generation | 39,272 | **277,504** | 0.14 |
+| AES-128-CBC, HMAC-SHA256 | 0 | 0 | — |
+
+Read the last two rows before any timing: they are the whole story, and §15.5 says why.
+
+### 15.4 What OpenSSL actually runs here
+
+Traced through the AmiSSL 5.27 tree, not assumed.
+
+| | what runs on `amiga-os3-68020` |
+|---|---|
+| limb primitives | `bn_m68k.s` — `bn_mul_add_words`, `bn_mul_words`, `bn_sqr_words`, `bn_mul_comba4/8`, `bn_sqr_comba4/8`, `bn_add_words`, `bn_sub_words`, `bn_div_words`. One `mulu.l` per limb, unrolled 4× |
+| Montgomery | no `bn_mul_mont`; `BN_mul`/`BN_sqr` + `bn_from_montgomery_word` |
+| big multiply | `bn_mul_comba8` at 8 limbs, `bn_mul_recursive` (Karatsuba) at 16 and above |
+| RSA public | `BN_mod_exp_mont`, **no** `BN_FLG_CONSTTIME`, window 1 for a 17-bit exponent, leading zeros skipped — the same algorithm we use |
+| RSA private | `BN_mod_exp_mont_consttime` on both CRT halves, fixed window 6, no zero skipping |
+| P-256 field | `EC_GFp_nist_method` with `BN_nist_mod_256` — a limb-domain Solinas reduction, the same idea as ours, and because `BN_LLONG` is set it takes the `NIST_INT64` path: ~200 32-bit ALU operations, no multiplies |
+| P-256 scalar | `ossl_ec_wNAF_mul` → **Montgomery ladder** for ECDH and k·G, wNAF (width 3) for ECDSA verify |
+| generator table | none — `ossl_ec_wNAF_precompute_mult` is reached only from the deprecated `EC_GROUP_precompute_mult`, which nothing in OpenSSL's own ECDSA or ECDH calls |
+| AES | no `AES_ASM`; `aes_core.c`'s table-driven `AES_encrypt`, four 1 KB T-tables, `FULL_UNROLL` off |
+| SHA-256 | no `SHA256_ASM`; generic C, with a big-endian fast path that skips the byte swap for rounds 0–15 |
+
+**The field layer is well matched and the scalar layer is not.** One P-256 field multiply
+costs 64 multiplies on both sides (ours: eight `c68k_addmul_1` rows; theirs:
+`bn_mul_comba8`), and a field square costs 36 on both. The entire difference is how many
+field operations each scalar multiplication needs.
+
+### 15.5 Constant time, and what it costs
+
+**We are not constant time and OpenSSL is.** That is the mechanism behind the two largest
+gaps, and it is a trade rather than a win.
+
+- **ECDH and k·G take a Montgomery ladder.** `ec_mult.c` routes any scalar that *could*
+  be secret to `ossl_ec_scalar_mul_ladder`, **ignoring `BN_FLG_CONSTTIME`** — the comment
+  says so in as many words. That is 256 ladder steps, one per bit of the group order with
+  no skipping, each a fused differential add-and-double costing 13 field multiplies and 7
+  field squarings: **5,120 field operations, every time, whatever the scalar.** Ours is a
+  width-5 wNAF (≈256 doublings, ≈43 additions) for a generic point and a Lim–Lee comb (26
+  doublings, ≈50 additions) for the generator — **≈2,570 and ≈760**. Both of ours leak:
+  wNAF and comb digits select table entries by value, and every conditional field
+  correction is a branch.
+- **RSA private is a fixed window with a full-table gather.** 1,021 squarings and 232
+  multiplies per 1024-bit half, exactly, and each of the 171 multiplies is preceded by a
+  constant-time read of the *whole* 64-entry table: `top × 2^window` = 2,048 volatile
+  `BN_ULONG` loads, ≈350,000 per half. There is no `bn_gather5` on m68k, so this is the
+  generic masked loop. Ours is a sliding window with leading-zero skipping and a direct
+  indexed read.
+- **Blinding is on by default** and we have none: two Montgomery squarings and two
+  multiplies mod *n* per private operation, plus a full re-derivation (including an
+  `A^e mod n`) every 32nd call. `RSA_blinding_off()` turns it off; the benchmark measures
+  both.
+- **`rsa_ossl_private_decrypt` ends with an unconditional verification** — it recomputes
+  `r₀^e mod n` and compares. That is a whole RSA public operation, about 3% of a CRT
+  private operation, and it cannot be disabled.
+- **RSA public is the one place the two agree.** OpenSSL sets no `BN_FLG_CONSTTIME` for a
+  public operation, picks window 1 for a 17-bit exponent from the same crossover table we
+  copied, and skips the leading zeros exactly as we do. Sixteen squarings and two
+  multiplies on both sides.
+
+If we win the elliptic-curve operations, that is what buys it, and it is security we are
+not paying for rather than arithmetic we do better. The threat model in §9 — a vintage
+machine on a LAN, no remote timing attacker — is what makes that acceptable here; it would
+not be acceptable for a server.
+
+### 15.6 What it costs to open AmiSSL at all, and the trap that cost a day
+
+Measured on the way in, because a program that opens AmiSSL pays this before it does any
+crypto (`-k 56`, so divide the clock into it as you like — these are I/O and setup, not
+arithmetic):
+
+| | |
+|---|---:|
+| reading all 3,587,424 bytes of `amissl_v362.library` off DH0: | **55 ms** |
+| `OpenLibrary("amisslmaster.library")` | **3 ms** |
+| `OpenAmiSSL()` — `LoadSeg` of the 3.5 MB library | **139 ms** |
+| `InitAmiSSLA()` — the per-process init | **0 ms** |
+| the first OpenSSL call — its lazy provider/DRBG setup | **0 ms** |
+
+**Opening AmiSSL is cheap — about a fifth of a second, once, and the library then stays
+resident for the next program.** That is worth stating because the first four attempts at
+this measurement looked like the opposite: the benchmark sat with the CPU busy and no
+output for between eight and twenty minutes of emulated time, four times, at three
+different clocks. Neither cause was AmiSSL and neither was the emulator.
+
+**The first was a missing math library.** AmiSSL is built against clib2, whose library
+initialisation opens `mathieeedoubbas.library` *and* `mathieeedoubtrans.library`
+(`src/amissl_libinit.c:780-782`), and Kickstart 3.1's ROM contains `mathieeesingbas` and
+nothing else — verified against the 40.68 A1200 image in §11.2. A bare directory hard
+drive has neither. With them missing, `OpenAmiSSL()` never returns; with both staged it
+returns in 139 ms. What happens inside clib2 in between was not isolated and is not
+claimed here — the observation is the one that matters to anyone staging AmiSSL.
+
+What found it was AmiSSL's *own* `OpenSSL` command, staged and run under the same harness:
+it prints `mathieeedoubtrans.library could not be opened.` and exits 20 — the loud version
+of the same fault. Two further facts fell out of that probe:
+
+- **They have to be a matched pair.** A stock `mathieeedoubbas.library` beside the AROS
+  `mathieeedoubtrans.library` still reports the trans library as unopenable. Both from the
+  AROS m68k boot ISO and it works — the `OpenSSL` command then gets all the way to its own
+  `Couldn't open bsdsocket.library v4!`, which is that command's requirement and not
+  AmiSSL's.
+- **A real machine is fine and a test rig is not**, which is the same shape of finding as
+  §11.2's `mathieeedoubbas` note about curl. Every Workbench install has all four in
+  `LIBS:`. Anyone benchmarking AmigaOS software against a bare boot needs to stage them,
+  and `tools/amissl-run.sh` now does, with the reason in a comment so the next person does
+  not spend the afternoon.
+
+OpenSSL 3.x also initialises itself lazily, on first API use rather than at
+`InitAmiSSL` — the default provider, the property cache and the DRBG chain are all built
+behind whichever call happens to be first — so the benchmark times a bare
+`BN_new()`/`BN_free()` immediately afterwards to put that where it belongs. **It is 0 ms.**
+The whole of OpenSSL 3.x's startup on a 68020 is below the E-Clock's millisecond.
+
+**And then the same trap again, one layer down, and this one is the better story.** With
+the math libraries staged the benchmark still sat inside its first OpenSSL call for
+**twenty minutes** with no output. AmiSSL is configured `OPENSSLDIR=AmiSSL:
+ENGINESDIR=AmiSSL:engines MODULESDIR=AmiSSL:modules` (its own `Makefile:492`), so OpenSSL
+3.x's configuration and provider loading opens `AmiSSL:openssl.cnf` on the first API call
+anyone makes. There was no `AmiSSL:` assign. AmigaDOS does not return an error for an
+unknown volume — **it puts up "Please insert volume AmiSSL: in any drive"**, and on a bare
+boot with no Workbench and no user there is nobody to cancel it.
+
+Two lines fix it and both belong in any AmigaOS test harness:
+
+```c
+((struct Process *)FindTask(NULL)) -> pr_WindowPtr = (APTR)-1;  /* fail, do not ask */
+AssignLock("AmiSSL", Lock("DH0:AmiSSL", SHARED_LOCK));
+```
+
+The second is what the release's own installer does. The first is what turns *the next*
+missing assign from a twenty-minute hang into an error in a second, and it is the one
+worth copying.
+
+### 15.7 The measurement
+
+`-k 56`, so the CPU is a cycle-exact 68020 at an implied **56.53 MHz** — measured
+in-process by the MULU.L kernel, against `cpucal`'s 56.0. **Every operation agreed with
+the other side and with the published vector: 0 failures, 0 mismatches.** That covers the
+RSA-2048 public and CRT private results byte for byte against Python-derived known answers
+*and* against each other, the ECDH shared secret against the published one, both sides
+accepting the RFC 6979 A.2.5 signature, the `k·G` point identical in all 65 bytes, 16 KiB
+of AES-128-CBC ciphertext identical, and the HMAC-SHA256 tag identical.
+
+**The harness reproduces §9 to under 0.5%**, which is the check that it is timing the same
+computation. Scaling our column by 56.53/13.95 = 4.052 gives 683 ms for the RSA public
+operation against §9's 681, 1,965 ms for the ECDSA verify against 1,961, 1,371 for the
+ECDH against 1,368, 381 for `k·G` against 381, and 20,150 for the CRT private against
+20,050.
+
+| operation | ours | AmiSSL | measured | corrected |
+|---|---:|---:|---|---|
+| RSA-2048 public, e=65537 | 168.5 ms | 142.7 ms | **AmiSSL 1.18×** | **AmiSSL 1.19×** |
+| RSA-2048 private CRT, blinding off | 4.97 s | 5.30 s | ours 1.07× | **ours 1.22×** |
+| RSA-2048 private CRT, OpenSSL's default | 4.97 s | 6.88 s | **ours 1.38×** | ours 1.54× |
+| ECDSA P-256 verify | 484.9 ms | 840.2 ms | ours 1.73× | **ours 1.69×** |
+| ECDH P-256 shared secret | 338.3 ms | 1,049.7 ms | ours 3.10× | **ours 3.03×** |
+| k·G, an ECDHE key generation | 94.1 ms | 1,047.4 ms | ours 11.1× | **ours 10.76×** |
+| AES-128-CBC, 16 KiB | 85.3 ms | 84.2 ms | AmiSSL 1.01× | — |
+| HMAC-SHA256, 16 KiB | 86.9 ms | 111.2 ms | **ours 1.28×** | — |
+
+**It is mixed, and the split is exactly where the code said it would be.**
+
+**AmiSSL wins the RSA public operation, and Karatsuba is why.** Same algorithm on both
+sides — no constant-time flag, window 1, sixteen squarings and two multiplies, leading
+zeros skipped — and the only difference in the arithmetic is that `bn_mul_recursive` and
+`bn_sqr_recursive` turn 126,688 limb multiplies into 103,936. That is 18% fewer multiplies
+for 16% less time, which is about as clean an attribution as this kind of measurement
+gets. §9 costed Karatsuba for `crypto68k` at ~5% *at the 32 limbs a CRT half runs* and
+rejected it; at the 64 limbs a public operation runs, OpenSSL's own numbers say it is
+worth about a fifth of the multiplies. **That is the actionable finding for us**, and it
+is worth more than it looks: three RSA public operations is what a client does per
+handshake.
+
+A second, smaller one from the same row: OpenSSL caches its `BN_MONT_CTX` and we rebuild
+R² mod m on every call. With the context cached AmiSSL drops from 142.7 ms to 126.7 ms —
+**16.0 ms of setup per operation** — and ours pays a comparable amount inside its 168.5.
+Caching it is cheap and nobody has.
+
+**We win the private operation, and constant time is why.** OpenSSL issues 7% *fewer*
+multiplies than we do and is still slower, because a fixed window with no zero-skipping
+reads the whole 64-entry table before every one of its 171 multiplies — 2,048 volatile
+`BN_ULONG` loads a time, about 350,000 per 1024-bit half — where our sliding window
+indexes straight into it. And that is before blinding, which is OpenSSL's default and
+which the benchmark priced separately: **1.59 s, 32% of the operation.** Against the
+default configuration we are 1.38× faster; against the arithmetic alone, 1.07× measured
+and 1.22× corrected.
+
+**We win the elliptic curve, and constant time is why again — but much harder.**
+`ossl_ec_wNAF_mul` forces a Montgomery ladder for any scalar that could be secret, and
+the benchmark proves the source reading rather than citing it: **setting
+`BN_FLG_CONSTTIME` on the scalar changed `k·G` from 1,047,399 µs to 1,046,628 µs, 0.07%.**
+The flag is ignored because the ladder was already running. 256 steps, one per bit of the
+group order, 13 field multiplies and 7 squarings each, 5,120 field operations whatever the
+scalar — against our comb's 26 doublings and 50 additions. Eleven times. `EC_GROUP_
+have_precompute_mult()` answers **no**, as the source said it would, and it would not help
+if it were yes: the generator case is routed to the ladder before `pre_comp` is consulted.
+
+ECDSA verify is the honest middle. Both sides run a variable-time wNAF because both
+scalars are public, we issue 12% *fewer* multiplies, and we are 1.69× faster — so about
+half of that gap is not multiplies at all. It is the same diagnosis §9 made about
+`nx_crypto`, one level less severe: OpenSSL's field elements are `BIGNUM`s with a size
+field, a sign, a `bn_correct_top()` after every operation and a `BN_CTX` allocation around
+it, where ours are eight limbs in a fixed array. `BN_nist_mod_256` is a good Solinas
+reduction and `bn_mul_comba8` is good assembly; the wrapper around them is what costs.
+
+**The bulk path is a dead heat, and that is the most consequential row.** AES-128-CBC is
+187 KB/s against 189 — both are the same table-driven C, and neither has a byte of m68k
+assembly. HMAC-SHA256 is 183 KB/s against 143, ours ahead by 28%. Encrypting and MACing
+one 16 KiB TLS record costs 172 ms our way and 195 ms AmiSSL's: **92 KB/s against
+81 KB/s** of application data, 13% in our favour.
+
+That row is where §11's `https` figure comes from. 16,464 B/s against `http`'s 114,598 —
+and at 92 KB/s of record processing at 56 MHz, i.e. ~23 KB/s at 14 MHz, the record path
+*is* the https ceiling on this machine. Swapping our bulk crypto for AmiSSL's would move
+it by about a tenth, in the wrong direction. **Nothing in AmiSSL rescues the bulk path,
+because nobody has written AES or SHA-256 assembly for m68k in either tree** — and the
+1.28× on HMAC says the plainest thing in this whole section: the largest single lever
+available to `https://` on a classic Amiga is still an unwritten 68020 SHA-256.
+
+### 15.8 What this says about the recommendation
+
+§11.6 guessed a well-maintained library would be "1.5–2.5× slower than `crypto68k` rather
+than 3–4×". For the handshake that guess was right and slightly conservative:
+
+| | ours | AmiSSL | |
+|---|---:|---:|---|
+| ECDHE_RSA, 2-cert chain (3 verify + keygen + ECDH) | 938 ms | 2,525 ms | ours 2.6× |
+| ECDHE_ECDSA, 2-cert chain (3 verify + keygen + ECDH) | 1,887 ms | 4,617 ms | ours 2.4× |
+
+corrected, 1,062 / 2,722 and 2,037 / 4,871 — 2.5× and 2.3×. At 14 MHz that is 3.8 s
+against 10.2 s of arithmetic for an RSA chain and 7.6 s against 18.7 s for an ECDSA one,
+which is the difference between a handshake Cloudflare tolerates and one it abandons
+(§11.6, §13).
+
+**So the recommendation in §11.6 stands, but for a narrower reason than it was given.**
+It was argued on the size of the gap against `nx_crypto`; the real gap against the
+ecosystem's actual TLS library is 2.4×, not 8×, and 2.4× is a difference of degree. What
+does not change is that the handshake is where a classic Amiga lives or dies against a
+front-end timeout, that 2.4× is worth several seconds there, and that `tls.library`
+already has the trust store, the host-name check and session resumption (§13) which are
+worth far more than any of this.
+
+What *should* change is the direction of the next optimisation. Three things fall out of
+the measurement, in order of value:
+
+1. **A 68020 SHA-256.** The bulk path is 92 KB/s and neither implementation has any
+   assembly in it at all. This is the only lever in the section that moves `https://`
+   throughput rather than handshake latency.
+2. **Karatsuba at 64 limbs.** OpenSSL's own numbers say ~18% of the multiplies on an RSA
+   public operation, three of which happen per handshake. §9's rejection was measured at
+   32 limbs and does not carry.
+3. **Cache R² mod m.** 16 ms per RSA operation on AmiSSL's side of the same fence; ours
+   rebuilds it every call.
+
+And one thing that should *not* change: `crypto68k` stays variable-time. AmiSSL is
+constant-time on the private and ephemeral paths and that is most of what it costs — the
+ladder, the fixed window, the full-table gather, the blinding. For a vintage machine on a
+LAN (§9's threat model) that is a defence with no attacker, and we already say so in the
+headers of both modules. It is a trade, and it is the trade this project made on purpose.

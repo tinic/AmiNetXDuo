@@ -61,6 +61,7 @@
 
 #include <exec/types.h>
 #include <dos/dos.h>
+#include <dos/dosextens.h>
 #include <dos/dostags.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -1271,8 +1272,8 @@ ULONG   start;
     c68k_log("");
     c68k_log("  Every operation is checked against the other side's answer");
     c68k_log("  before it is timed.  Timings are the emulator's 68020, whose");
-    c68k_log("  MULU.L is 32 cycles against a real part's 43 -- see the");
-    c68k_log("  write-up for the correction.");
+    c68k_log("  MULU.L is 32.14 cycles against a real part's 45 -- the");
+    c68k_log("  corrected line beside each result is what a 68020 would do.");
 
     /* ------------------------------------------------------------ RSA -- */
 
@@ -1398,6 +1399,43 @@ static int          a_child_rc = 20;
 
 static VOID a_child(VOID)
 {
+
+struct Process *me = (struct Process *)FindTask(NULL);
+BPTR            lock;
+
+
+    /*
+     * pr_WindowPtr = -1 means "fail, do not ask".
+     *
+     * That one line is worth the comment.  AmiSSL is configured with
+     * OPENSSL_DIR = AmiSSL: (its own Makefile: OPENSSLDIR=AmiSSL:
+     * ENGINESDIR=AmiSSL:engines MODULESDIR=AmiSSL:modules), so OpenSSL 3.x's
+     * configuration and provider loading opens AmiSSL:openssl.cnf on the first
+     * API call anybody makes.  On a machine with no AmiSSL: assign, AmigaDOS
+     * does not return an error -- it puts up "Please insert volume AmiSSL: in
+     * any drive", and on a bare boot with no Workbench and no user there is
+     * nobody to cancel it.  The benchmark sat there for twenty minutes looking
+     * like a slow library.
+     *
+     * The assign below is the real fix; this is the one that makes the NEXT
+     * missing assign fail in a second instead of hanging until the harness
+     * timeout, which is worth more.
+     */
+    me -> pr_WindowPtr = (APTR)-1;
+
+    /*
+     * AmiSSL: itself.  The release's installer does this (Assign AmiSSL: <dir>
+     * plus Assign LIBS: AmiSSL:Libs ADD); a staged test rig has to do it too.
+     * AssignLock takes the lock over, so it is not freed here.
+     */
+    lock = Lock((STRPTR)"DH0:AmiSSL", SHARED_LOCK);
+    if (lock != (BPTR)0)
+    {
+        if (!AssignLock((STRPTR)"AmiSSL", lock))
+        {
+            UnLock(lock);
+        }
+    }
 
     a_child_rc = a_body();
     Signal(a_parent, a_sigmask);
