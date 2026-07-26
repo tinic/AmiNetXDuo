@@ -25,6 +25,8 @@
 
 #include "tx_amiga.h"
 
+#include "aminetxduo/random.h"
+
 #include <exec/memory.h>
 #include <exec/ports.h>
 #include <exec/semaphores.h>
@@ -409,6 +411,27 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
         AMI_ERROR("netstack: IP instance did not initialise (%ld)", (long)status);
         return AMI_NET_ERR_NODEV;
     }
+
+    /*
+     * The IP identification field starts somewhere unpredictable.
+     *
+     * nx_ip_create() zeroes nx_ip_packet_id and nx_ip_header_add.c increments
+     * it once per transmitted datagram, so without this the field is a global,
+     * monotonic, boot-zeroed counter -- a fingerprint on its own, and a packet
+     * counter for the whole machine readable from any one flow.
+     *
+     * One DRBG draw, once, moves the starting point.  It is deliberately NOT
+     * NX_ENABLE_IP_ID_RANDOMIZATION, which redraws per packet and costs 5% of
+     * loopback throughput on this machine (nx_user.h, docs/RESEARCH.md 29.4);
+     * this is the half that is free.  It does not defeat RFC 6274's idle scan,
+     * which reads the DELTA between two observations rather than the value,
+     * and the note in nx_user.h says so rather than letting this look like a
+     * complete answer.
+     *
+     * The field is 16 bits wide in the header and NetX Duo shifts it up by 16,
+     * so only the low half is meaningful.
+     */
+    ns->ns_Ip.nx_ip_packet_id = (ami_random_ulong() & 0xFFFFUL);
 
     status = nx_arp_enable(&ns->ns_Ip, ns->ns_ArpCache, (ULONG)AMI_ARP_CACHE_SIZE);
     if (status != NX_SUCCESS)

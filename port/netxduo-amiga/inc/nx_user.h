@@ -394,6 +394,64 @@
 #define NX_ENABLE_IP_PACKET_FILTER
 
 
+/* ------------------------------------------------------------------- IP --- */
+
+/*
+ * THE IP IDENTIFICATION FIELD: NX_ENABLE_IP_ID_RANDOMIZATION IS OFF, AND THE
+ * FREE HALF OF IT IS DONE IN src/netstack/ INSTEAD.
+ *
+ * Without the define, nx_ip_header_add.c:151 uses `ip_ptr -> nx_ip_packet_id++`
+ * -- a global counter that nx_ip_create.c zeroes at startup and increments once
+ * per transmitted IP datagram.  Two things follow, and they are not the same
+ * size:
+ *
+ *   1. IT IS A FINGERPRINT.  A monotonic, boot-zeroed, machine-wide ID is
+ *      distinctive on its own, and the rate it climbs at is a packet counter
+ *      for the WHOLE MACHINE readable from any single flow.
+ *   2. IT IS RFC 6274 5.1's IDLE SCAN.  An off-path attacker who can send to
+ *      this machine and read the ID it answers with learns how many packets it
+ *      sent in between -- which is how a host is used as a zombie to port-scan
+ *      a third party without appearing in that party's logs.
+ *
+ * THE DEFINE FIXES BOTH AND COSTS 5% OF LOOPBACK.  Measured, two arms out of
+ * one tree (docs/RESEARCH.md 29.4), A1200, 524288 bytes:
+ *
+ *                       counter      randomised
+ *      loopback          347 KB/s     329 KB/s      -5.2%
+ *      loopback, capturing  305         290         -4.9%
+ *      wire                171          167         -2.3%
+ *
+ * The mechanism is not in doubt, because the two paths differ by exactly the
+ * ratio of datagrams they SEND: loopback puts about 130 a second on the wire
+ * and the wire path about 70, and 5.2/2.3 is that ratio.  It works out at
+ * roughly 400 us per transmitted datagram.
+ *
+ * That is NX_RAND, which nx_port.h maps to ami_random_rand() -- a SHA-256 hash
+ * DRBG with a Forbid()/Permit() pair per draw and a SHA-256 pair per 32 bytes
+ * of output, so one refill every eight calls.  It is the right generator for
+ * what it was chosen for (TLS key material, ECDHE privates, TCP sequence
+ * numbers) and much too expensive to spend on a 16-bit header field once per
+ * packet.  NetX Duo offers no way to pick a cheaper source for this one field:
+ * it is the same NX_RAND macro everywhere.
+ *
+ * WHAT SHIPS INSTEAD, and what it does and does not buy.  src/netstack/ seeds
+ * nx_ip_packet_id from the DRBG ONCE, when the NX_IP is created.  That costs a
+ * single draw at startup and nothing per packet, and it removes (1): the
+ * counter no longer starts at zero, so the absolute value says nothing about
+ * uptime or about how much this machine has sent.  It does NOT remove (2) --
+ * the DELTA between two observations is still a packet count, and idle scan
+ * works on the delta.  Being clear about that is the point of writing it down:
+ * the cheap half is done and the expensive half is a `-D` away.
+ *
+ * Build with -DAMINETXDUO_IP_ID_RANDOMIZATION to turn the define on and pay the
+ * 5%.  On a network where an idle scan is a real threat that is a good trade;
+ * on the 14 MHz floor target this stack is built for, it is not the default.
+ */
+#ifdef AMINETXDUO_IP_ID_RANDOMIZATION
+#define NX_ENABLE_IP_ID_RANDOMIZATION
+#endif
+
+
 /* ------------------------------------------------------------- routing --- */
 
 /*
@@ -608,9 +666,83 @@
  *                                  nx_ip_fragment_enable() is called.
  *   NX_ENABLE_INTERFACE_CAPABILITY -- checksum offload; no SANA-II device
  *                                  exposes it.
- *   NX_TCP_ENABLE_KEEPALIVE     -- off by default; bsdsocket's SO_KEEPALIVE
- *                                  will need it, so it turns on with the
- *                                  socket layer, not before.
+ */
+
+
+/*
+ * FIVE MORE THAT WERE SURVEYED AND REJECTED, each with the reason rather than
+ * with silence -- docs/RESEARCH.md 29.3 has the working.  Four of the five are
+ * rejected on a measurement or on a missing consumer, not on taste, and each
+ * says what would change the answer.
+ *
+ *   NX_DISABLE_ARP_AUTO_ENTRY
+ *       Today every ARP we SEE creates a cache entry (nx_arp_packet_receive.c:
+ *       490), which is the classic poisoning surface: anything on the link can
+ *       fill or steer our cache without us having asked it a question.
+ *       Disabling that looks like the safe choice and is the wrong one HERE,
+ *       for a reason specific to this machine rather than to the idea.
+ *
+ *       The auto entry is only ever created for a sender we have no entry for,
+ *       and it is created from a broadcast ARP REQUEST -- which on a home LAN
+ *       means the gateway asking for us.  Turning it off does not stop an
+ *       attacker: nx_arp_packet_receive.c updates an EXISTING entry from any
+ *       ARP it sees whether this is defined or not, which is the poisoning path
+ *       that actually matters, and this define does not touch it.  What it does
+ *       stop is the free entry for the gateway, so the next outbound packet to
+ *       an unresolved next hop costs an ARP request, a queued packet out of
+ *       AMI_ARP_MAX_QUEUE_DEPTH (2 -- deliberately small) and a round trip on
+ *       the one path this stack cares about.  Security nothing, latency
+ *       something.
+ *
+ *       What would change it: an ARP cache that distinguishes "learned from a
+ *       request addressed to us" from "learned from anything on the wire", or
+ *       NX_ENABLE_ARP_MAC_CHANGE_NOTIFICATION below growing a consumer that can
+ *       refuse a change.  Neither exists in the vendored tree.
+ *
+ *   NX_ENABLE_ARP_MAC_CHANGE_NOTIFICATION
+ *       Adds a callback when a cached entry's MAC changes -- a gateway being
+ *       replaced, or being impersonated.  It is a NOTIFICATION and nothing
+ *       else: nx_arp_packet_receive.c:418 calls it AFTER writing the new
+ *       address, so nothing it does can refuse the change, and there is no
+ *       handler anywhere in this tree that would act on it.  Turning it on
+ *       would add a function pointer to NX_IP and a branch per received ARP for
+ *       a callback that logs.  It becomes worth having the day something can
+ *       act -- a static-ARP pin for the gateway, or a warning surfaced in
+ *       ShowNetStatus -- and not before.
+ *
+ *   NX_ENABLE_PACKET_DEBUG_INFO
+ *       Records the file and line each packet was allocated at, in the
+ *       NX_PACKET itself.  Directly relevant to the packet-ownership defects
+ *       this project keeps finding, and it is NOT rejected on merit: it is
+ *       rejected as a permanent setting, because it costs two pointers in every
+ *       one of up to 256 pool packets and the pool is sized from AvailMem on a
+ *       4 MB machine.  It belongs behind a build option next to the debug log
+ *       level, turned on for the run that is chasing a leak, and that option
+ *       does not exist yet.
+ *
+ *   NX_ENABLE_DUAL_PACKET_POOL
+ *       Lets TCP allocate control packets (SYN, ACK, FIN, RST -- no payload)
+ *       from a second, smaller pool so a full data pool cannot stop the stack
+ *       acknowledging.  The premise is right and the shape is wrong for this
+ *       machine: docs/RESEARCH.md 24.8 already established that there is one
+ *       pool here on purpose, and a second one takes memory permanently away
+ *       from the 4 MB floor to protect against an exhaustion that 24.3's
+ *       arithmetic is what actually prevents.  It is also the wrong half of the
+ *       problem -- an ACK that cannot be allocated is a symptom of a data pool
+ *       already empty, and the data is what was lost.
+ *
+ *   NX_ENABLE_LOW_WATERMARK
+ *       docs/RESEARCH.md 24.7 found this, reported it rather than switching it
+ *       on, and that argument has not changed.  It needs THREE things together
+ *       -- the define, an nx_packet_pool_low_watermark_set() call from
+ *       src/netstack/ (nx_packet_pool_create() never touches the field, so a
+ *       zeroed watermark means the guard is compiled in and can never fire),
+ *       and NX_TCP_MAXIMUM_RX_QUEUE raised, because at its default of 20 and
+ *       1440-byte wire segments it binds at about 28 KB, BEFORE a 32 KB window
+ *       does, and the tail-drop it would then perform costs a retransmission
+ *       this stack has no SACK to recover cheaply.  It also changes IPv4
+ *       fragment reassembly and UDP receive, not only TCP.  That is a piece of
+ *       work with its own measurement, not a line here.
  */
 
 #endif /* NX_USER_H */

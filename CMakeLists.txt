@@ -92,6 +92,16 @@ if(NOT AMINETXDUO_TCP_WINDOW STREQUAL "")
                             BSD_TCP_WINDOW_CEILING=${AMINETXDUO_TCP_WINDOW})
 endif()
 
+# Randomise the IP identification field.  OFF, and measured rather than assumed:
+# NetX Duo draws it from NX_RAND once per transmitted datagram, NX_RAND here is
+# a SHA-256 DRBG, and that is 5% of loopback throughput on the floor target.
+# port/netxduo-amiga/inc/nx_user.h has the arms and says what ships instead.
+# docs/RESEARCH.md 29.4.
+option(AMINETXDUO_IP_ID_RANDOMIZATION "Randomise the IPv4 ID field" OFF)
+if(AMINETXDUO_IP_ID_RANDOMIZATION)
+    add_compile_definitions(AMINETXDUO_IP_ID_RANDOMIZATION)
+endif()
+
 # TCP keepalive's idle timer, in SECONDS.  Empty keeps NetX Duo's default of
 # 7200 -- two hours, which is BSD's and is what ships.  It exists because a
 # two-hour timer cannot be observed inside an emulator run: the keepalive arm
