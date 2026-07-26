@@ -47,21 +47,32 @@ TRAILING_RESERVED = 6
 # ---------------------------------------------------------------------------
 # Vectors that are OURS, past the end of everything the published ABI names.
 #
-# (offset, C symbol, guard macro).  Each is emitted inside `#ifdef <guard>`, in
-# both the table and the header, so a build without the guard has neither the
-# slot nor the code -- which is what lets the default bsdsocket.library stay
-# byte-identical to a build of a tree that has no TLS in it at all.
+# (offset, C symbol, guard macro or None, comment).
 #
 # 0x360 is the first slot after the six reserved ones clib/bsdsocket_protos.h
 # documents following getnameinfo(), i.e. after every offset any published
 # bsdsocket ABI assigns.  Callers must still present a magic and a version
-# (include/aminetxduo/nxcontext.h) so that a program aiming at some future
-# vendor's vector at the same offset gets a clean failure rather than a
-# pointer.
+# (include/aminetxduo/nxcontext.h, include/aminetxduo/netstatus.h) so that a
+# program aiming at some future vendor's vector at the same offset gets a
+# clean failure rather than a pointer.
+#
+# THE SLOT IS UNCONDITIONAL EVEN WHEN THE FUNCTION IS NOT.  A guarded vector
+# emits its real symbol under `#ifdef <guard>` and bsd_enosys() otherwise, so
+# every offset below means the same thing in every build configuration.  This
+# is the rule bpf.c already states for its own eight: "a caller gets a
+# documented failure instead of a jump into a slot that means something else
+# in the next build".  It matters here because AMINETXDUO_TLS_CONTEXT is
+# off in the -DAMINETXDUO_TLS=OFF configuration, and without this the two
+# netstatus vectors would sit six bytes higher there than in a TLS build --
+# which is precisely the class of bug that makes a private ABI unusable.
 # ---------------------------------------------------------------------------
 PRIVATE_VECTORS = [
     (0x360, "bsd_ObtainNetXDuoContext", "AMINETXDUO_TLS_CONTEXT",
      "hands tls.library the NetX Duo singleton -- nxcontext.h"),
+    (0x366, "bsd_NetStackQuery", None,
+     "a snapshot of the RUNNING stack -- netstatus.h"),
+    (0x36c, "bsd_NetStackControl", None,
+     "interfaces, routes and the ARP cache -- netstatus.h"),
 ]
 
 # Hand-written because these have no NDK pragma to read a register assignment
@@ -73,6 +84,20 @@ LONG bsd_ObtainNetXDuoContext(
         register ULONG                    version     __asm("d1"),
         register const AmiNetXDuoContext **ctx        __asm("a0"),
         register struct AmiSocketBase    *SocketBase  __asm("a6"));""",
+    "bsd_NetStackQuery": """\
+LONG bsd_NetStackQuery(
+        register ULONG                 magic      __asm("d0"),
+        register ULONG                 what       __asm("d1"),
+        register APTR                  buffer     __asm("a0"),
+        register ULONG                 size       __asm("d2"),
+        register struct AmiSocketBase *SocketBase __asm("a6"));""",
+    "bsd_NetStackControl": """\
+LONG bsd_NetStackControl(
+        register ULONG                 magic      __asm("d0"),
+        register ULONG                 op         __asm("d1"),
+        register APTR                  arg        __asm("a0"),
+        register ULONG                 size       __asm("d2"),
+        register struct AmiSocketBase *SocketBase __asm("a6"));""",
 }
 
 # ---------------------------------------------------------------------------
@@ -371,8 +396,13 @@ def emit(by_offset, outdir, check=False):
         h.append("/* LVO -0x%03x */\n%s\n\n"
                  % (offset, declaration(name, ret, args, regs)))
     for offset, symbol, guard, what in PRIVATE_VECTORS:
-        h.append("/* LVO -0x%03x -- PRIVATE: %s */\n#ifdef %s\n%s\n#endif\n\n"
-                 % (offset, what, guard, PRIVATE_DECLARATIONS[symbol]))
+        decl = PRIVATE_DECLARATIONS[symbol]
+        if guard:
+            h.append("/* LVO -0x%03x -- PRIVATE: %s */\n#ifdef %s\n%s\n#endif\n\n"
+                     % (offset, what, guard, decl))
+        else:
+            h.append("/* LVO -0x%03x -- PRIVATE: %s */\n%s\n\n"
+                     % (offset, what, decl))
     h.append(HEADER_EPILOGUE)
     header = "".join(h)
 
@@ -416,11 +446,17 @@ def emit(by_offset, outdir, check=False):
 
     for offset, symbol, guard, what in PRIVATE_VECTORS:
         index = offset // VECTOR_STRIDE - 1
-        s.append("\n#ifdef %s\n" % guard)
-        s.append("    /* -0x%03x [%3d] %s -- PRIVATE: %s */\n"
+        s.append("\n    /* -0x%03x [%3d] %s -- PRIVATE: %s */\n"
                  % (offset, index, symbol, what))
-        s.append("    (APTR)%s,\n" % symbol)
-        s.append("#endif\n")
+        if guard:
+            # The SLOT is unconditional; only the body behind it is optional.
+            s.append("#ifdef %s\n" % guard)
+            s.append("    (APTR)%s,\n" % symbol)
+            s.append("#else\n")
+            s.append("    (APTR)bsd_enosys,\n")
+            s.append("#endif\n")
+        else:
+            s.append("    (APTR)%s,\n" % symbol)
 
     s.append("\n    (APTR)-1\n};\n")
     source = "".join(s)

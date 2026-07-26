@@ -23,6 +23,8 @@ set(BSDSOCKET_SOURCES
     addrinfo.c              # getaddrinfo/getnameinfo/freeaddrinfo/gai_strerror
     handoff.c               # ObtainSocket/ReleaseSocket cross-base transfer
     bpf.c                   # the eight bpf_* LVOs over src/bpf/
+    netstatus.c             # NetStackQuery/NetStackControl: the live stack,
+                            # readable and steerable from a Shell command
     roadshow.c              # the Tier 3 extensions whose ABI is pinned down
     netx_call.c             # ThreadX context bracket for NetX Duo calls
     library_runtime.c)      # DOSBase, rand(): no crt0 in a shared library

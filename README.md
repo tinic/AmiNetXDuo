@@ -60,6 +60,8 @@ a user guide in `Docs/` inside the archive.
 | `telnet` | with enough option negotiation not to confuse a real server |
 | `ftp` | passive and active mode, the standard command set |
 | `NetTrace` | capture packets to a `.pcap` file Wireshark can open |
+| `traceroute` | trace the path to a host |
+| `tftp`, `whois` | the usual small clients |
 
 The installer copies all of them into `C:`.
 

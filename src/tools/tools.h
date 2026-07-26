@@ -32,6 +32,7 @@
 #include "aminetxduo/compat.h"
 #include "aminetxduo/config.h"
 #include "aminetxduo/netstack.h"
+#include "aminetxduo/netstatus.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -210,6 +211,65 @@ BOOL tool_stack_lookup_addr(ULONG addr, char *name_out, ULONG name_len);
  * Returns how many were written. 0 when nothing is running.
  */
 ULONG tool_stack_name_servers(char out[][16], ULONG max);
+
+/* --------------------------------------------------- the RUNNING stack --
+ *
+ * Everything above this line works with the stack down. Everything below it
+ * asks the stack that is actually running, through the two private LVOs in
+ * include/aminetxduo/netstatus.h.
+ *
+ * WHY IT HAS TO BE DONE THIS WAY. A command that links libnetxduo.a gets its
+ * own NX_IP with no interfaces in it and its own ThreadX kernel that nobody
+ * ever started; the stack that is running lives inside bsdsocket.library.
+ * netstack_ip() in a tool is src/tools/netstack_weak.c's stub and returns
+ * NULL in every shipped build, which is how `netstat`, `ping` and
+ * ShowNetStatus came to be inert in v0.2.0 while printing a message that read
+ * like a pass. docs/RESEARCH.md 21 has the whole story.
+ *
+ * The library COPIES what it is asked for. Nothing that comes back through
+ * here points into the stack, so nothing here can be left dangling by a
+ * teardown.
+ */
+
+/*
+ * Open the running library, or NULL. This never STARTS the stack: it checks
+ * tool_stack_library_running() first, because a status command that brings
+ * the network up as a side effect of being asked a question is a bug.
+ * `quiet` suppresses the explanation, for callers with their own.
+ */
+struct Library *tool_netstatus_open(BOOL quiet);
+VOID            tool_netstatus_close(struct Library *base);
+
+/*
+ * One snapshot. `what` is a NETSTATUS_* selector; `buffer` starts with a
+ * NetStatusHeader this fills in for the caller. Returns the number of entries
+ * written, or -1 after printing nothing -- the caller decides what a failure
+ * means, because "no ARP entries" and "this is not our library" want
+ * different words.
+ *
+ * A buffer that holds the header but no entries is a legitimate way to ask
+ * how many there are: nsh_Available comes back regardless of nsh_Count.
+ */
+LONG tool_netstatus_query(struct Library *base, ULONG what,
+                          APTR buffer, ULONG size, ULONG entry_size);
+
+/*
+ * The mutating half. `ctl` is filled by the caller except for the magic and
+ * version, which this sets. Returns 0, or -1 with *errno_out (if given) set
+ * to the library's errno -- ENOSYS for an operation this build cannot do.
+ */
+LONG tool_netstatus_control(struct Library *base, ULONG op,
+                            NetStatusControl *ctl, LONG *errno_out);
+
+/* Convenience: open, ask for NETSTATUS_SYSTEM, close. TRUE on success. */
+BOOL tool_netstatus_system(NetStatusSystem *out);
+
+/*
+ * The message for "the stack is running but would not answer". Distinguishes
+ * a foreign bsdsocket.library (Roadshow, AmiTCP, an emulator's own) from ours
+ * being too old for these vectors, because the two need different advice.
+ */
+VOID tool_explain_no_netstatus(struct Library *base);
 
 /* "Usage: <tool> <template>" plus one line of what it is for. */
 VOID tool_usage(const char *tmpl, const char *summary);

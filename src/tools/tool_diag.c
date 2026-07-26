@@ -1180,3 +1180,220 @@ VOID tool_usage(const char *tmpl, const char *summary)
     tool_printf("Usage: %s %s\n", (LONG)tool_name, (LONG)tmpl);
     tool_printf("  %s\n", (LONG)summary);
 }
+
+/* ------------------------------------------------- the RUNNING stack -----
+ *
+ * NetStackQuery()/NetStackControl(), from the caller's side. These are the
+ * only way a Shell command can see the stack that is actually running: its
+ * own linked copy of NetX Duo is a different, empty one, and
+ * src/tools/netstack_weak.c's netstack_ip() answers NULL. See
+ * include/aminetxduo/netstatus.h and docs/RESEARCH.md 21.
+ *
+ * Same idiom as tool_call_gethostbyaddr() above and as nettrace.c's bpf_*
+ * calls: an inline jsr through the library base, with the ABI's registers
+ * named. d2 carries the size, which is a call-saved register -- the compiler
+ * saves it around the call because it is a register variable here, exactly as
+ * it does for the published vectors that use d2 (recvfrom, sendto).
+ */
+
+static LONG tool_call_netstatus_query(struct Library *base, ULONG what,
+                                      APTR buffer, ULONG size)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register ULONG           d0  __asm("d0") = AMI_NETSTATUS_MAGIC;
+    register ULONG           d1  __asm("d1") = what;
+    register APTR            a0  __asm("a0") = buffer;
+    register ULONG           d2  __asm("d2") = size;
+    register LONG            res __asm("d0");
+
+    __asm __volatile ("jsr a6@(-870:W)"
+                      : "=r" (res)
+                      : "r" (a6), "r" (d0), "r" (d1), "r" (a0), "r" (d2)
+                      : "a1", "cc", "memory");
+    return res;
+}
+
+static LONG tool_call_netstatus_control(struct Library *base, ULONG op,
+                                        APTR arg, ULONG size)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register ULONG           d0  __asm("d0") = AMI_NETSTATUS_MAGIC;
+    register ULONG           d1  __asm("d1") = op;
+    register APTR            a0  __asm("a0") = arg;
+    register ULONG           d2  __asm("d2") = size;
+    register LONG            res __asm("d0");
+
+    __asm __volatile ("jsr a6@(-876:W)"
+                      : "=r" (res)
+                      : "r" (a6), "r" (d0), "r" (d1), "r" (a0), "r" (d2)
+                      : "a1", "cc", "memory");
+    return res;
+}
+
+/* Errno(), LVO -0x0a2. What the two above leave behind on failure. */
+static LONG tool_call_errno(struct Library *base)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register LONG            res __asm("d0");
+
+    __asm __volatile ("jsr a6@(-162:W)"
+                      : "=r" (res)
+                      : "r" (a6)
+                      : "d1", "a0", "a1", "cc", "memory");
+    return res;
+}
+
+_Static_assert(AMI_NETSTATUS_QUERY_LVO   == -870, "NetStackQuery LVO");
+_Static_assert(AMI_NETSTATUS_CONTROL_LVO == -876, "NetStackControl LVO");
+
+VOID tool_explain_no_netstatus(struct Library *base)
+{
+    if (base != NULL && !tool_stack_is_ours(base))
+    {
+        tool_explain_foreign_stack(base);
+        return;
+    }
+
+    tool_advise_blank();
+    tool_advise("The network is up, but the bsdsocket.library running on this");
+    tool_advise("machine does not answer the call that reports on it.");
+    tool_advise_blank();
+    tool_advise("That means the library in LIBS: is older than this command.");
+    tool_advise("Both come out of one build; install them together.");
+}
+
+struct Library *tool_netstatus_open(BOOL quiet)
+{
+    struct Library *base;
+
+    /*
+     * Looking before opening. OpenLibrary() on a stack that is not running
+     * would START it, and a command that reports on the network must not
+     * bring it up in order to have something to report.
+     */
+    if (!tool_stack_library_running())
+    {
+        if (!quiet)
+        {
+            tool_error("the network has not been started");
+            tool_explain_no_stack();
+        }
+        return NULL;
+    }
+
+    base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    if (base == NULL)
+    {
+        if (!quiet)
+            tool_error("bsdsocket.library would not open");
+        return NULL;
+    }
+
+    /*
+     * MANDATORY, not a nicety. These two vectors sit past everything any
+     * published bsdsocket ABI names, so on somebody else's library that slot
+     * is whatever their table happens to end with -- possibly the (APTR)-1
+     * terminator, possibly nothing at all. Jumping through it would take the
+     * machine down. The magic argument protects against a FUTURE vendor
+     * defining the same offset; only this check protects against a present
+     * one that has not defined it.
+     */
+    if (!tool_stack_is_ours(base))
+    {
+        if (!quiet)
+        {
+            tool_error("the network is up, but it is not this stack");
+            tool_explain_foreign_stack(base);
+        }
+        CloseLibrary(base);
+        return NULL;
+    }
+
+    return base;
+}
+
+VOID tool_netstatus_close(struct Library *base)
+{
+    if (base != NULL)
+        CloseLibrary(base);
+}
+
+LONG tool_netstatus_query(struct Library *base, ULONG what,
+                          APTR buffer, ULONG size, ULONG entry_size)
+{
+    NetStatusHeader *hdr = (NetStatusHeader *)buffer;
+
+    if (base == NULL || hdr == NULL || size < sizeof(NetStatusHeader))
+        return -1;
+
+    hdr->nsh_Magic   = AMI_NETSTATUS_MAGIC;
+    hdr->nsh_Version = (UWORD)AMI_NETSTATUS_VERSION;
+
+    if (tool_call_netstatus_query(base, what, buffer, size) < 0)
+        return -1;
+
+    /*
+     * The library reports the size of the struct IT was built with. If that
+     * is not the size this command was built with, every field after the
+     * first is at the wrong offset and the numbers would be plausible
+     * nonsense -- which is worse than an error. The version check inside the
+     * library catches a changed ABI; this catches one header compiled two
+     * different ways, which is what a half-installed pair looks like.
+     */
+    if (hdr->nsh_Type != (UWORD)what)
+        return -1;
+    if (hdr->nsh_Count > 0 && hdr->nsh_EntrySize != (UWORD)entry_size)
+        return -1;
+
+    return (LONG)hdr->nsh_Count;
+}
+
+LONG tool_netstatus_control(struct Library *base, ULONG op,
+                            NetStatusControl *ctl, LONG *errno_out)
+{
+    LONG rc;
+
+    if (errno_out != NULL)
+        *errno_out = 0;
+
+    if (base == NULL || ctl == NULL)
+        return -1;
+
+    ctl->nsc_Magic   = AMI_NETSTATUS_MAGIC;
+    ctl->nsc_Version = (UWORD)AMI_NETSTATUS_VERSION;
+
+    rc = tool_call_netstatus_control(base, op, ctl, sizeof(NetStatusControl));
+    if (rc < 0 && errno_out != NULL)
+        *errno_out = tool_call_errno(base);
+
+    return rc;
+}
+
+BOOL tool_netstatus_system(NetStatusSystem *out)
+{
+    struct Library *base;
+    struct
+    {
+        NetStatusHeader hdr;
+        NetStatusSystem sys;
+    } buf;
+    BOOL ok = FALSE;
+
+    if (out == NULL)
+        return FALSE;
+
+    base = tool_netstatus_open(TRUE);
+    if (base == NULL)
+        return FALSE;
+
+    if (tool_netstatus_query(base, NETSTATUS_SYSTEM, &buf, sizeof(buf),
+                             sizeof(NetStatusSystem)) > 0)
+    {
+        *out = buf.sys;
+        ok = TRUE;
+    }
+
+    tool_netstatus_close(base);
+
+    return ok;
+}

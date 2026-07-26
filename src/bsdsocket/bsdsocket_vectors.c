@@ -170,10 +170,18 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_enosys,                    /* -0x354 [141] reserved */
     (APTR)bsd_enosys,                    /* -0x35a [142] reserved */
 
-#ifdef AMINETXDUO_TLS_CONTEXT
     /* -0x360 [143] bsd_ObtainNetXDuoContext -- PRIVATE: hands tls.library the NetX Duo singleton -- nxcontext.h */
+#ifdef AMINETXDUO_TLS_CONTEXT
     (APTR)bsd_ObtainNetXDuoContext,
+#else
+    (APTR)bsd_enosys,
 #endif
+
+    /* -0x366 [144] bsd_NetStackQuery -- PRIVATE: a snapshot of the RUNNING stack -- netstatus.h */
+    (APTR)bsd_NetStackQuery,
+
+    /* -0x36c [145] bsd_NetStackControl -- PRIVATE: interfaces, routes and the ARP cache -- netstatus.h */
+    (APTR)bsd_NetStackControl,
 
     (APTR)-1
 };

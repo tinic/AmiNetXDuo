@@ -43,6 +43,9 @@ Included:
   fetch                 retrieve an http:// or https:// URL
   nc, telnet, ftp       netcat, a telnet client, and an FTP client
   NetTrace              capture packets to a .pcap Wireshark can open
+  sntp                  set the clock from a time server
+  traceroute            trace the path to a host
+  tftp, whois           the usual small clients
   an Installer script   asks two questions and writes a working config
 
 Configuration follows Roadshow's layout -- DEVS:NetInterfaces/<name>,

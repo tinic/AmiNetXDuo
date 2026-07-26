@@ -450,6 +450,22 @@ LONG bsd_ObtainNetXDuoContext(
         register struct AmiSocketBase    *SocketBase  __asm("a6"));
 #endif
 
+/* LVO -0x366 -- PRIVATE: a snapshot of the RUNNING stack -- netstatus.h */
+LONG bsd_NetStackQuery(
+        register ULONG                 magic      __asm("d0"),
+        register ULONG                 what       __asm("d1"),
+        register APTR                  buffer     __asm("a0"),
+        register ULONG                 size       __asm("d2"),
+        register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x36c -- PRIVATE: interfaces, routes and the ARP cache -- netstatus.h */
+LONG bsd_NetStackControl(
+        register ULONG                 magic      __asm("d0"),
+        register ULONG                 op         __asm("d1"),
+        register APTR                  arg        __asm("a0"),
+        register ULONG                 size       __asm("d2"),
+        register struct AmiSocketBase *SocketBase __asm("a6"));
+
 
 /* The vector table itself, terminated by (APTR)-1, as MakeLibrary wants it. */
 extern const APTR BsdVectorTable[];
