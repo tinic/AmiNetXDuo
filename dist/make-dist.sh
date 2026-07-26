@@ -93,7 +93,13 @@ need() {
 }
 
 LIBS=(bsdsocket usergroup)
-CMDS=(AddNetInterface Online Offline ShowNetStatus ping netstat host fetch
+# ping is deliberately NOT here.  Rewritten over SOCK_RAW it takes the machine
+# down -- recvfrom() never returns after WaitSelect() has called the descriptor
+# readable, and the reboot was originally misread as a hang until the serial log
+# was checked for repeated "netstack: starting ThreadX" lines.  A command that
+# reboots the machine does not ship.  It is still built, and goes back in the
+# moment the raw receive path is fixed.
+CMDS=(AddNetInterface Online Offline ShowNetStatus netstat host fetch
       nc telnet ftp NetTrace sntp traceroute tftp whois)
 
 for lib in "${LIBS[@]}"; do need "$BUILD/src/$lib/$lib.library"; done

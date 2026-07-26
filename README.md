@@ -53,7 +53,7 @@ a user guide in `Docs/` inside the archive.
 |---|---|
 | `AddNetInterface`, `Online`, `Offline` | bring an interface up and take it down |
 | `ShowNetStatus`, `netstat` | interface state, routes, connections |
-| `ping`, `host` | reachability and name lookups |
+| `host` | name lookups |
 | `sntp` | set the clock from a time server |
 | `fetch` | retrieve an `http://` or `https://` URL |
 | `nc` | connect or listen, TCP and UDP, port ranges, timeouts |
@@ -79,8 +79,9 @@ because the secure session is remembered, even across a reboot.
 ## What is not there yet
 
 - Nothing has run on **real hardware** yet.
-- **`ping` does not work yet.** It does not report a wrong answer; it simply
-  hangs. `netstat` and `ShowNetStatus`, which had the same cause, now read the
+- **`ping` is not in this release.** Rewritten over raw sockets it takes the
+  machine down, so it is held back rather than shipped. `netstat` and
+  `ShowNetStatus`, which were broken by the same underlying cause, now read the
   running network correctly.
 - IPv6 works but is not in the standard build.
 - Accepting connections *from* the internet is untested.
