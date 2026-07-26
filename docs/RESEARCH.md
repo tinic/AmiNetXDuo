@@ -12317,6 +12317,9 @@ recur:
 Nothing in Fitz's own sources is changed. The value of running somebody else's
 program is that it is somebody else's.
 
+(What it found in eleven minutes is §37.10; the run was stopped early and why
+is recorded there.)
+
 **The arrangement is Amiga-as-client.** Neither this Mac nor the Linux build
 host has FUSE, and Fitz's Makefile splits the Unix side into `fitz-serve` (no
 FUSE) and `fitz-mount` (FUSE) for precisely that case. So `fitz-serve` runs on
@@ -12833,3 +12836,85 @@ which is a real question for a server and not for a client.
 v0.4.0 carries `Clients/curl` and `Clients/ssh` and **not** the server. It
 links, it accepts, it authenticates, and it cannot yet give anybody a shell —
 which is not a thing to put in an archive labelled as an SSH server.
+
+### 37.10 The Fitz arm: eleven minutes, 224 MB, and one counter that moved
+
+**Stopped early, deliberately, and that is the first thing to say.** The run
+was two hours at `-k 56`; it was killed at eleven minutes because a timing
+measurement had been queued behind it on the exclusive lane and
+`AMINETXDUO_LOCK_WAIT` would have let that measurement start *anyway*,
+contended, at the 40-minute mark. A soak loses elapsed time when it is
+restarted; a contended timing produces a number that looks valid and is not.
+The soak is the one that yields. What follows is therefore 11 minutes, not the
+hours this section is about, and it is reported as what it is.
+
+The workload: `fitz-serve` on the host, `fitz mount 10.0.2.2:17711 FITZ:` on
+the guest, two `Endurance` filer Processes writing files of log-uniform size
+(1 byte to 512 KB) to the share and reading every one back, in chunks whose
+size is redrawn for every `Write()` and every `Read()`.
+
+| 660 s, `-k 56`, `fitz-debug` (`ADEBUG=5`) | |
+|---|---|
+| payload moved | **112 MB out, 112 MB in** |
+| transactions | 2,909 |
+| **corrupted bytes** | **0** |
+| **`* EAGAIN` on Fitz's blocking socket** | **0** |
+| Fitz `send`/`recv` failures, `recv maxretry` | **0** |
+| errno events recorded by the harness | **0** |
+| TCP connections opened, whole run | **1** |
+| live sockets | 4, constant |
+| packet pool free (of 256) | 222 → 221, range 198–222, **`pool_empty_requests` 0** |
+| `AvailMem` | 9,127,448 → 9,094,320, oscillating over a 66 KB band, **no trend** |
+| largest free block | 7,053,024 → 7,020,048, same band, **no trend** |
+| TCP retransmissions | **0** |
+| TCP checksum errors, IP receive drops, IP send drops | **0** |
+
+Twenty-three samples, and the only column with a slope is inbound segments
+dropped as out-of-window.
+
+**The one counter that moved: `nsx_TcpReceiveDropped`, 0 → 1,301, a steady
+~2.0/s.** It is worth being careful about what that is, because it is easy to
+read as loss and it is not: our own retransmission count is **zero** for the
+whole run, no checksum failed, and every one of 224 MB was verified against
+the pattern. The counter's dominant increment site is
+`nx_tcp_socket_packet_process.c:211`, which drops a segment judged outside the
+receive window **and sends an immediate ACK** (RFC 793 §3.9). Two conditions
+above it can produce that, and the one that fits a mounted file share is the
+data branch with `rx_window == 0`: Fitz reads on demand, so between a request
+going out and the application's next `Read()` the socket's advertised window
+can genuinely be zero, and the peer's data arriving in that gap is refused and
+re-sent by *the peer* — which our retransmit counter, by definition, does not
+see. That is work redone on the wire, at about half a segment per transaction.
+It is an observation with a rate attached, not a defect, and it is recorded
+because §16.4 and §24.4 both report "zero drops" from workloads that drained
+continuously and would not have produced it.
+
+**And the `-k` assumption, established rather than relied on.** The premise of
+running at a raised clock is that the failure being hunted is a function of
+bytes and packets rather than seconds. The same workload at both clocks:
+
+| A1200 profile | payload | combined rate |
+|---|---:|---:|
+| 14 MHz, stock | 12 MB in 180 s | 68 KB/s |
+| 56 MHz, `-k 56` | 224 MB in 660 s | **347 KB/s** |
+
+**5.1× for a 4× clock**, so the Fitz path is CPU-bound end to end and the clock
+buys bytes at least linearly. The figure is above 4× rather than at it because
+the 14 MHz arm is a three-minute run in which mount setup is a much larger
+share of the window; the defensible claim is "at least linear", not "5×".
+Eleven minutes at `-k 56` is worth about **an hour** of a stock A1200, which is
+what makes a soak of this shape affordable at all.
+
+**Where it got to on the questions this section asks.** 112 MB in one direction
+on one connection is 2.7% of the 4,096 MB a 32-bit sequence number covers, so
+§37.6's wrap was not approached. `AvailMem` and the packet pool are flat, and
+the socket count is constant at 4 — which is the useful negative next to
+§37.5: **the leak does not touch a workload that opens one connection and keeps
+it.** Fitz's mount is exactly that, and eleven minutes of it moved 224 MB
+without losing a byte or a packet.
+
+**Not concluded.** Eleven minutes is not hours, and the report this section
+comes from describes a failure at several hours. The run should be re-armed —
+and it is more useful re-armed *after* the `src/bsdsocket/socket.c` fixes for
+§37.4 and §37.5 land, because then it tests the stack somebody would ship
+rather than the one that was measured.
