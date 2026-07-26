@@ -40,7 +40,7 @@
 
 
 #define B_MAX_LIMBS         64u
-#define B_POWM_SCRATCH      3000u
+#define B_POWM_SCRATCH      4096u
 #define B_HN_SCRATCH        4096u
 
 static c68k_limb    b_work[C68K_MONT_WORK_LIMBS(B_MAX_LIMBS)];

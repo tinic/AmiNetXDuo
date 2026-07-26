@@ -182,6 +182,38 @@ Lac_done:
 
 
 | ---------------------------------------------------------------------------
+| c68k_limb c68k_div_2by1(c68k_limb hi, c68k_limb lo, c68k_limb d,
+|                         c68k_limb *rem)
+|
+|   (hi:lo) / d.  Quotient returned, remainder stored through rem.
+|
+| One instruction, and the reason this file grew a division at all: the
+| portable form is a 64-bit divide, which on this toolchain reaches __udivdi3
+| in src/common/ami_udivdi3.c because libgcc.a is empty here.
+|
+| THE CALLER GUARANTEES hi < d.  DIVU.L TRAPS on quotient overflow rather than
+| saturating, and Knuth's algorithm D produces exactly one case that would
+| overflow -- the partial remainder's top limb equal to the divisor's, whose
+| quotient digit is B-1.  c68k_mod() tests for it and never calls here with it.
+|
+| DIVU.L is 78 cycles on a 68020 and, like MULU.L's 32x32->64 form, is NOT
+| IMPLEMENTED on a 68060 -- it traps to vector 61 and is emulated.  Same guard,
+| same rule: AMINETXDUO_CRYPTO68K_ASM must never be enabled for a 68060 build.
+|
+| d0, d1 and a0 are scratch in this ABI, so nothing needs saving.
+| ---------------------------------------------------------------------------
+
+        .globl  _c68k_div_2by1
+_c68k_div_2by1:
+        move.l  4(sp),d1                | hi -- the remainder half
+        move.l  8(sp),d0                | lo -- the quotient half
+        divu.l  12(sp),d1:d0            | d0 = quotient, d1 = remainder
+        move.l  16(sp),a0
+        move.l  d1,(a0)
+        rts
+
+
+| ---------------------------------------------------------------------------
 | c68k_limb c68k_add(c68k_limb *r, const c68k_limb *b, UINT n)
 |
 |   r += b, returns the carry out.  The mirror of c68k_sub below, and DBRA for

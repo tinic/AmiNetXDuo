@@ -45,7 +45,7 @@
 /* ------------------------------------------------------------- buffers --- */
 
 #define T_MAX_LIMBS         64u             /* RSA-2048 */
-#define T_POWM_SCRATCH      3000u           /* > C68K_POWM_SCRATCH_LIMBS(64, 6) */
+#define T_POWM_SCRATCH      4096u           /* > C68K_POWM_SCRATCH_LIMBS(64, 6) */
 #define T_HN_SCRATCH        2048u
 
 static c68k_limb    t_m[T_MAX_LIMBS];

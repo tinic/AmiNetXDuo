@@ -4971,7 +4971,7 @@ runs, OpenSSL issues about 22% fewer multiplies per Montgomery step than we do.
 
 | operation | ours | AmiSSL | ours ÷ theirs |
 |---|---:|---:|---:|
-| RSA-2048 public, e = 65537 | 115,680 | 103,936 | 1.11 |
+| RSA-2048 public, e = 65537 | 120,104 | 103,936 | 1.16 |
 | RSA-2048 private, CRT | 3,978,832 | 3,688,408 | 1.08 |
 | ECDSA P-256 verify | 164,476 | 186,280 | 0.88 |
 | ECDH P-256 shared secret | 125,204 | **277,504** | 0.45 |
@@ -5126,7 +5126,7 @@ ECDH against 1,368, 381 for `k·G` against 381, and 20,150 for the CRT private a
 
 | operation | ours | AmiSSL | measured | corrected |
 |---|---:|---:|---|---|
-| RSA-2048 public, e=65537 | 163.9 ms | 142.8 ms | **AmiSSL 1.15×** | **AmiSSL 1.13×** |
+| RSA-2048 public, e=65537 | 139.5 ms | 142.7 ms | **ours 1.02×** | AmiSSL 1.004× |
 | RSA-2048 private CRT, blinding off | 4.97 s | 5.30 s | ours 1.07× | **ours 1.22×** |
 | RSA-2048 private CRT, OpenSSL's default | 4.97 s | 6.88 s | **ours 1.38×** | ours 1.54× |
 | ECDSA P-256 verify | 484.9 ms | 840.2 ms | ours 1.73× | **ours 1.69×** |
@@ -5144,21 +5144,19 @@ decomposition, all of it measured in the same run:
 
 | | ours | AmiSSL |
 |---|---:|---:|
-| exponentiation, 16 squarings + 3 multiplies | **127.3 ms** | **126.9 ms** |
-| setup — R² mod m, built per call by both | **36.6 ms** | **15.9 ms** |
-| total | 163.9 ms | 142.8 ms |
+| exponentiation, 16 squarings + 3 multiplies | 127.3 ms | 126.9 ms |
+| setup — R² mod m, built per call by both | **11.9 ms** | 16.0 ms |
+| total | **139.5 ms** | 142.7 ms |
 
-**Our exponentiation is level with OpenSSL's — 0.997× — and 98% of the remaining 21.2 ms
-gap is the setup.** Both sides rebuild R² mod m on every call here, so this is like for
-like; OpenSSL's own cached-context figure (126.9 ms) is what isolates it.
+Both figures moved after this section was first written, and §15.9 and §15.10 are the two
+pieces of work that moved them. The exponentiation was 131.6 ms and is level with
+OpenSSL's after Karatsuba; the setup was **36.6 ms** and is now 11.9 after the divider was
+rewritten. Both sides rebuild R² mod m on every call here, so this is like for like, and
+OpenSSL's own cached-context figure of 126.9 ms is what isolates the two halves.
 
-The setup is one line of the vendored code. `c68k_setup_rr()` reduces through
-`_nx_crypto_huge_number_modulus()`, whose comments and locals say
-`/* In number of USHORT words. */` and which estimates quotient digits from
-`>> (HN_SHIFT >> 1)` — **it does long division in 16-bit half-limbs**, so it takes twice
-the quotient-digit iterations of a 32-bit Knuth-D. OpenSSL's `bn_div_words` is one
-`divu.l` per digit, out of `bn_m68k.s`. That is the whole 2.3× and it is the thing to
-fix; it would also speed up the CRT path, which calls the same divider six times.
+**The measured result is ours by 1.02× and the corrected one is theirs by 1.004×.** That
+is a dead heat and should be read as one: on this operation the two implementations are
+now the same speed to within the correction's own uncertainty.
 
 **We win the private operation, and constant time is why.** OpenSSL issues 7% *fewer*
 multiplies than we do and is still slower, because a fixed window with no zero-skipping
@@ -5210,10 +5208,10 @@ than 3–4×". For the handshake that guess was right and slightly conservative:
 
 | | ours | AmiSSL | |
 |---|---:|---:|---|
-| ECDHE_RSA, 2-cert chain (3 verify + keygen + ECDH) | 938 ms | 2,525 ms | ours 2.6× |
+| ECDHE_RSA, 2-cert chain (3 verify + keygen + ECDH) | 850 ms | 2,525 ms | ours 2.9× |
 | ECDHE_ECDSA, 2-cert chain (3 verify + keygen + ECDH) | 1,887 ms | 4,617 ms | ours 2.4× |
 
-corrected, 1,062 / 2,722 and 2,037 / 4,871 — 2.5× and 2.3×. At 14 MHz that is 3.8 s
+corrected, 971 / 2,723 and 2,036 / 4,871 — 2.8× and 2.3×. At 14 MHz that is 3.8 s
 against 10.2 s of arithmetic for an RSA chain and 7.6 s against 18.7 s for an ECDSA one,
 which is the difference between a handshake Cloudflare tolerates and one it abandons
 (§11.6, §13).
@@ -5232,10 +5230,8 @@ the measurement, in order of value:
 1. **A 68020 SHA-256.** The bulk path is 92 KB/s and neither implementation has any
    assembly in it at all. This is the only lever in the section that moves `https://`
    throughput rather than handshake latency.
-2. **A 32-bit long division.** The vendored `_nx_crypto_huge_number_modulus()` works in
-   16-bit half-limbs; replacing it with a Knuth-D over 32-bit limbs and a `divu.l` is
-   worth ~20 ms of a 164 ms RSA public operation, is 98% of what still separates us from
-   AmiSSL there, and pays again on every CRT private operation.
+2. **A 32-bit long division — done, and it is what reversed the RSA public result.**
+   See §15.10. Worth 24.4 ms of a 164 ms operation, 3.05× on the setup itself.
 3. **Karatsuba — done, and worth 2.7%.** See §15.9. Kept, but it is not the lever the
    multiply count made it look like.
 
@@ -5344,3 +5340,72 @@ because the headline was never the multiplies: 98% of what remains is a 16-bit l
 division in the setup. Adopting it was right — it is 2.7% and it is now the reason our
 exponentiation is not behind — but the instruction to reverse the RSA public gap is
 answered by `_nx_crypto_huge_number_modulus()`, not by this.
+
+### 15.10 The R² mod m setup: a 16-bit long division, and 3.05× for fixing it
+
+§15.9 ended by saying the RSA public gap was not the multiplies but a 16-bit long
+division in the setup, and that `_nx_crypto_huge_number_modulus()` was the thing to fix.
+It was. `src/crypto68k/c68k_div.c` is the same algorithm — Knuth's algorithm D, a
+two-digit quotient estimate, normalisation, add-back — at the machine's own word size:
+
+| R² mod m | vendored, 16-bit digits | ours, 32-bit digits | |
+|---|---:|---:|---|
+| 64-limb modulus (RSA-2048 public) | 36,336 µs | **11,901 µs** | **3.05×** |
+| 32-limb modulus (a CRT half) | 9,115 µs | **3,307 µs** | 2.75× |
+
+**And that reverses the headline.** RSA-2048 public goes 163.9 → **139.5 ms** against
+AmiSSL's 142.7 — ours by 1.02× measured, theirs by 1.004× corrected, which is a dead
+heat. An ECDHE_RSA handshake's arithmetic goes 938 → **850 ms** against 2,525, ours by
+2.9×.
+
+**Why it is worth 3×, and it is not the divide instruction.** Halving the digit size
+doubles the number of quotient digits *and* doubles the length of the multiply-subtract
+pass under each one, so 16-bit digits are about four times the inner work of the same
+algorithm over 32-bit limbs. The quotient estimate itself barely matters: a 64-limb setup
+issues **67** `DIVU.L` in total, which at the emulator's 921 ns is 61 µs of an 11,901 µs
+setup — **0.5%**. Anyone reading this expecting `bn_div_words` to be the secret should
+know that it is not; the limb width is.
+
+**`DIVU.L` was calibrated before being trusted, and it is discounted harder than
+`MULU.L`.** The benchmark times it in-process with an inline-assembly kernel, the same
+way it does the multiply: **921.9 ns**, which against `MULU.L`'s 568.6 ns and its known
+32.14 cycles works out at **51.8 cycles where the MC68020UM says 78** — a 34% discount,
+larger than `MULU.L`'s 29%. It is folded into the same correction as an equivalent
+multiply count rather than given a column of its own, because at 0.5% of the setup it is
+below the noise; the calibration is reported so that the next person does not have to
+assume it.
+
+**The 68060 rule is unchanged and now covers one more instruction.** `DIVU.L` is in the
+same class as `MULU.L` 32×32→64: real on a 68020, 68030 and 68040, **not implemented on a
+68060**, where it traps to the emulator. So it lives in `c68k_prim.S` under the existing
+`AMINETXDUO_CRYPTO68K_ASM` guard with a portable C fallback beside it, and that option
+must still never be enabled for a 68060 build. `c68k_submul_1`, the multiply-subtract
+inner loop, is deliberately left to the compiler — GCC emits `MULU.L` for it, the same
+finding that kept `c68k_addmul_1_c` within 1.4× of hand-written assembly, and the
+measurement above says the estimate is not where the time goes anyway.
+
+**Caching R² was costed first and rejected.** It would have avoided the division rather
+than speeding it up, and it buys nothing for a client: the three RSA public operations in
+a handshake verify the leaf with the intermediate's key, the intermediate with the root's,
+and the ServerKeyExchange with the leaf's — **three different moduli**
+(`_nx_secure_x509_certificate_chain_verify` walks "each issuer back to" the root), so a
+cache keyed on the modulus never hits inside a handshake. Across handshakes to one host,
+session resumption (§13) does no public-key work at all, so it would never be consulted
+there either. Two other division-free routes were priced and are worse than what they
+replace: R² by repeated modular doubling from R mod m is 2,048 shift-and-subtract passes
+over 64 limbs, and by a Montgomery-squaring ladder is eleven Montgomery squares — ~42 ms
+and ~72 ms against the 36.6 being replaced.
+
+**The CRT private operation barely moves**, and the earlier guess that this would "pay
+again" there was wrong: 4,976 → 4,951 ms, about 0.5%. Two 32-limb setups are a rounding
+error next to two 1,024-bit exponentiations. The setup was 22% of the *public* operation
+because that operation is short.
+
+**Correctness.** 600 trials against the vendored divider — which, unlike the vendored
+Montgomery, has no known defect — across moduli of 1..32 limbs and dividends up to twice
+that, in six shapes chosen to reach the two paths random operands almost never do: the
+`B−1` clamp, where the partial remainder's top limb equals the divisor's and a `DIVU.L`
+would **trap** rather than saturate, so the code must test before dividing; and the
+add-back, where the estimate is one too large. Plus unnormalised divisors so the shift
+path runs, single-limb divisors, all-ones, and dividends shorter than the modulus. **0
+mismatches**, 5,660 host checks total, and 0 mismatches against AmiSSL on target.

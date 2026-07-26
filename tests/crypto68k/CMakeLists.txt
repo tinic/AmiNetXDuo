@@ -156,6 +156,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_executable(test_crypto68k
         host/test_c68k_host.c
         "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_prim.c"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_div.c"
         "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_mont.c"
         "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_powm.c"
         "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_crt.c"

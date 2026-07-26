@@ -78,7 +78,7 @@ extern NX_CRYPTO_METHOD crypto_method_hmac_sha256;
 /* --------------------------------------------------------------- state --- */
 
 #define A_MAX_LIMBS         64u
-#define A_POWM_SCRATCH      3000u
+#define A_POWM_SCRATCH      4096u
 #define A_HN_SCRATCH        4096u
 
 /* 16 KiB is one TLS record's worth of payload and then some -- RFC 5246 caps
@@ -246,7 +246,22 @@ static UINT     a_row_count;
 #define A_M_SQR64_KAR   ((3UL * 528UL) + 4160UL)        /* 5744 */
 #define A_M_MUL64_KAR   ((3UL * 1024UL) + 4160UL)       /* 7232 */
 
-#define A_MULU_RSAPUB_OURS      ((16UL * A_M_SQR64_KAR) + (3UL * A_M_MUL64_KAR)                                  + 2080UL)
+/*
+ * The setup used to contribute only its 2080-product square, because the
+ * reduction around it was the vendored divider working in 16-bit half-limbs
+ * -- different instructions entirely.  c68k_mod() does the same job in 32-bit
+ * limbs, so its multiply-subtract passes show up here now: 67 quotient digits
+ * across the two reductions, 64 limbs each, is 4,288 more MULU.L.
+ *
+ * The count therefore goes UP while the time goes DOWN, which is the whole
+ * point -- a great many 16-bit operations replaced by far fewer 32-bit ones.
+ *
+ * The 136 is those 67 DIVU.L expressed as their MULU.L equivalent, so the one
+ * correction covers both.  The emulator charges DIVU.L 51.8 cycles against the
+ * MC68020UM's 78, a 34% discount and larger than MULU.L's 29%, so it does need
+ * correcting -- it is just small: 61 us of an 11.9 ms setup.
+ */
+#define A_MULU_RSAPUB_OURS      ((16UL * A_M_SQR64_KAR) + (3UL * A_M_MUL64_KAR) + 2080UL + 4288UL + 136UL)
 #define A_MULU_RSAPUB_THEIRS    ((16UL * A_O_SQR64) + (3UL * A_O_MUL64) + 4160UL)
 
 /*
@@ -382,6 +397,120 @@ ULONG   ticks;
     ticks = c68k_eclock() - start;
 
     return(ticks);
+}
+
+static ULONG    a_divu_ps;
+
+static ULONG a_cal_divu(ULONG reps, UINT with_divu)
+{
+
+ULONG   start;
+ULONG   ticks;
+
+
+    start = c68k_eclock();
+
+#ifdef __mc68020__
+    if (with_divu)
+    {
+        register ULONG r_n __asm("d0") = reps;
+
+        /*
+         * d1:d2 / d3 with d1 < d3, so the quotient always fits and DIVU.L
+         * never traps.  Sixteen per iteration keeps the DBRA out of the
+         * answer, exactly as the MULU.L kernel above.
+         */
+        __asm__ __volatile__(
+            "       movem.l %%d2-%%d4,-(%%sp)\n"
+            "       moveq   #1,%%d1\n"
+            "       move.l  #0x55555555,%%d2\n"
+            "       move.l  #0x7FFFFFFF,%%d3\n"
+            "1:     move.l  %%d1,%%d4\n"
+            "       divu.l  %%d3,%%d4:%%d2\n"
+            "       move.l  %%d1,%%d4\n"
+            "       divu.l  %%d3,%%d4:%%d2\n"
+            "       move.l  %%d1,%%d4\n"
+            "       divu.l  %%d3,%%d4:%%d2\n"
+            "       move.l  %%d1,%%d4\n"
+            "       divu.l  %%d3,%%d4:%%d2\n"
+            "       move.l  %%d1,%%d4\n"
+            "       divu.l  %%d3,%%d4:%%d2\n"
+            "       move.l  %%d1,%%d4\n"
+            "       divu.l  %%d3,%%d4:%%d2\n"
+            "       move.l  %%d1,%%d4\n"
+            "       divu.l  %%d3,%%d4:%%d2\n"
+            "       move.l  %%d1,%%d4\n"
+            "       divu.l  %%d3,%%d4:%%d2\n"
+            "       subq.l  #1,%0\n"
+            "       bne.s   1b\n"
+            "       movem.l (%%sp)+,%%d2-%%d4\n"
+            : "+d" (r_n)
+            :
+            : "d1", "cc", "memory");
+    }
+    else
+    {
+        register ULONG r_n __asm("d0") = reps;
+
+        __asm__ __volatile__(
+            "       movem.l %%d2-%%d4,-(%%sp)\n"
+            "       moveq   #1,%%d1\n"
+            "1:     move.l  %%d1,%%d4\n"
+            "       move.l  %%d1,%%d4\n"
+            "       move.l  %%d1,%%d4\n"
+            "       move.l  %%d1,%%d4\n"
+            "       move.l  %%d1,%%d4\n"
+            "       move.l  %%d1,%%d4\n"
+            "       move.l  %%d1,%%d4\n"
+            "       move.l  %%d1,%%d4\n"
+            "       subq.l  #1,%0\n"
+            "       bne.s   1b\n"
+            "       movem.l (%%sp)+,%%d2-%%d4\n"
+            : "+d" (r_n)
+            :
+            : "d1", "cc", "memory");
+    }
+#else
+    (VOID)reps;
+    (VOID)with_divu;
+#endif
+
+    ticks = c68k_eclock() - start;
+
+    return(ticks);
+}
+
+static VOID a_calibrate_divu(VOID)
+{
+
+#define A_DCAL_REPS     8000UL
+#define A_DCAL_PER_REP  8UL
+
+ULONG   busy;
+ULONG   idle;
+ULONG   ns;
+
+
+    busy = a_cal_divu(A_DCAL_REPS, 1u);
+    idle = a_cal_divu(A_DCAL_REPS, 0u);
+
+    if (busy <= idle)
+    {
+        a_divu_ps = 0UL;
+        return;
+    }
+
+    ns = c68k_eclock_micros(busy - idle);
+    a_divu_ps = (ns * 1000UL) / ((A_DCAL_REPS * A_DCAL_PER_REP) / 1000UL);
+
+    c68k_log("  DIVU.L Dn,Dr:Dq costs %lu.%03lu ns here; the MC68020UM says 78",
+             a_divu_ps / 1000UL, a_divu_ps % 1000UL);
+    if (a_mulu_ps != 0UL)
+    {
+        c68k_log("    = %lu.%02lu MULU.L, against 78/45 = 1.73 on the part",
+                 (a_divu_ps * 100UL / a_mulu_ps) / 100UL,
+                 (a_divu_ps * 100UL / a_mulu_ps) % 100UL);
+    }
 }
 
 static VOID a_calibrate(VOID)
@@ -591,6 +720,60 @@ static VOID a_kar_mul(VOID)
 
     c68k_mont_mul(a_kr, a_kx, a_kx, a_km, a_klen, a_kn0, a_scratch);
 }
+
+/* ============================================== R^2 mod m, the setup cost ==
+ *
+ * 22% of an RSA-2048 public operation went here, in the reduction inside
+ * c68k_mont_setup_rr().  Both dividers are timed on the same modulus in the
+ * same process; c68k_fast_modulus is the only thing that differs.
+ */
+
+static c68k_limb    a_rr[64];
+static c68k_limb    a_setup_area[(7 * 64) + 8];
+
+static VOID a_setup_kernel(VOID)
+{
+
+    c68k_mont_setup_rr(a_rr, a_km, a_klen, a_setup_area);
+}
+
+static VOID a_bench_setup(VOID)
+{
+
+static const UINT   widths[] = { 32u, 64u };
+UINT                w;
+UINT                i;
+ULONG               slow, fast, ratio;
+
+
+    c68k_log("");
+    c68k_log("0c. R^2 mod m -- the vendored 16-bit divider against ours");
+
+    for (w = 0; w < 2u; w++)
+    {
+        a_klen = widths[w];
+
+        for (i = 0; i < a_klen; i++)
+        {
+            a_km[i] = t_n[i];
+        }
+        a_km[0]           |= 1u;
+        a_km[a_klen - 1u] |= 0x80000000UL;
+
+        c68k_fast_modulus = 0u;
+        slow = a_time_n(a_setup_kernel, (a_klen >= 64u) ? 8UL : 20UL);
+
+        c68k_fast_modulus = 1u;
+        fast = a_time_n(a_setup_kernel, (a_klen >= 64u) ? 8UL : 20UL);
+
+        ratio = (fast != 0UL) ? ((slow * 100UL) / fast) : 0UL;
+        c68k_log("  %lu limbs: vendored %lu us -> ours %lu us  (%lu.%02lux)",
+                 (ULONG)a_klen, slow, fast, ratio / 100UL, ratio % 100UL);
+    }
+
+    c68k_fast_modulus = 1u;
+}
+
 
 static VOID a_bench_karatsuba(VOID)
 {
@@ -1285,6 +1468,7 @@ ULONG   start;
     c68k_log("  E-Clock %lu Hz", c68k_eclock_hz());
 
     a_calibrate();
+    a_calibrate_divu();
 
     /*
      * Timed and logged in two stages.  The first version of this program sat
@@ -1385,6 +1569,7 @@ ULONG   start;
     c68k_log("  corrected line beside each result is what a 68020 would do.");
 
     a_bench_karatsuba();
+    a_bench_setup();
 
     /* ------------------------------------------------------------ RSA -- */
 

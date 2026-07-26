@@ -141,8 +141,8 @@ static UINT c68k_window_for(UINT bits)
  * Done exactly the way the vendored routine does it: reduce R, square the
  * remainder, reduce again.  setup needs 3*m_len + 4 limbs.
  */
-static VOID c68k_setup_rr(c68k_limb *rr, const c68k_limb *m, UINT m_len,
-                          c68k_limb *setup)
+VOID c68k_mont_setup_rr(c68k_limb *rr, const c68k_limb *m, UINT m_len,
+                        c68k_limb *setup)
 {
 
 NX_CRYPTO_HUGE_NUMBER   m_hn;
@@ -166,6 +166,36 @@ UINT                    i;
     temp_hn.nx_crypto_huge_number_size        = m_len + 1;
     temp_hn.nx_crypto_huge_buffer_size        = (m_len + 1) << 2;
     temp_hn.nx_crypto_huge_number_is_negative = NX_CRYPTO_FALSE;
+
+    if (c68k_fast_modulus != 0u)
+    {
+        /*
+         * R mod m and then (R mod m)^2 mod m, both through our own 32-bit
+         * divider.  This is the whole of what the fast path changes: the
+         * square in between is the vendored one either way, and it is 2080
+         * limb products against the tens of thousands of limb operations the
+         * two reductions cost.
+         */
+        c68k_mod(temp, temp, m_len + 1u, m, m_len, &setup[m_len + 1u]);
+
+        temp_hn.nx_crypto_huge_number_size = m_len;
+        _nx_crypto_huge_number_adjust_size(&temp_hn);
+
+        sq_hn.nx_crypto_huge_number_data        = sq;
+        sq_hn.nx_crypto_huge_number_size        = 0;
+        sq_hn.nx_crypto_huge_buffer_size        = ((m_len << 1) + 2) << 2;
+        sq_hn.nx_crypto_huge_number_is_negative = NX_CRYPTO_FALSE;
+        _nx_crypto_huge_number_square(&temp_hn, &sq_hn);
+
+        for (i = sq_hn.nx_crypto_huge_number_size; i < (m_len << 1); i++)
+        {
+            sq[i] = 0;
+        }
+
+        c68k_mod(rr, sq, m_len << 1, m, m_len, &setup[m_len + 1u]);
+        return;
+    }
+
     _nx_crypto_huge_number_modulus(&temp_hn, &m_hn);
 
     /* sq = temp^2, then sq = sq mod m == R^2 mod m. */
@@ -242,12 +272,12 @@ UINT        started;
     rr    = one   + m_len;
     xpad  = rr    + m_len;
     work  = xpad  + m_len;                  /* 8*m_len + 2 */
-    setup = work  + C68K_MONT_WORK_LIMBS(m_len);    /* 3*m_len + 4 */
-    table = setup + (3u * m_len) + 4u;      /* table_size * m_len */
+    setup = work  + C68K_MONT_WORK_LIMBS(m_len);    /* 7*m_len + 8 */
+    table = setup + (7u * m_len) + 8u;      /* table_size * m_len */
 
     n0inv = c68k_mont_n0inv(m[0]);
 
-    c68k_setup_rr(rr, m, m_len, setup);
+    c68k_mont_setup_rr(rr, m, m_len, setup);
 
     /* x, zero padded to the modulus width. */
     c68k_zero(xpad, m_len);

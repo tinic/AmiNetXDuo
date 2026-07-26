@@ -77,6 +77,7 @@ endif()
 
 set(CRYPTO68K_SOURCES
     c68k_prim.c
+    c68k_div.c
     c68k_mont.c
     c68k_powm.c
     c68k_crt.c

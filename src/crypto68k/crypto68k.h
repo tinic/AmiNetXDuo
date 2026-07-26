@@ -122,6 +122,72 @@ c68k_limb c68k_add(c68k_limb *r, const c68k_limb *b, UINT n);
 c68k_limb c68k_sub(c68k_limb *r, const c68k_limb *b, UINT n);
 
 /*
+ * r[0..n-1] -= a * b[0..n-1].  Returns the borrow out (a full limb).
+ *
+ * The mirror of c68k_addmul_1 and the inner loop of long division, which is
+ * the only thing it is here for.  Left to the compiler for now: GCC emits
+ * MULU.L for it, the same finding that kept c68k_addmul_1_c within 1.4x of
+ * hand-written assembly, and the division's cost turned out to sit in the
+ * quotient estimate rather than here.
+ */
+c68k_limb c68k_submul_1(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a);
+
+/*
+ * (hi:lo) / d, returning the quotient and storing the remainder.
+ *
+ * CALLER MUST GUARANTEE hi < d.  This is not politeness: on a 68020 the
+ * assembly form is a single DIVU.L, and DIVU.L TRAPS when the quotient will
+ * not fit in 32 bits.  Knuth's algorithm D produces exactly one case where it
+ * would -- the partial remainder's top limb equal to the divisor's -- and
+ * c68k_mod() below tests for it and substitutes B-1 rather than dividing.
+ *
+ * DIVU.L is in the same class as MULU.L 32x32->64: real on a 68020, 68030 and
+ * 68040, and NOT IMPLEMENTED on a 68060, where it traps to the emulator.  So
+ * it lives in c68k_prim.S under the same AMINETXDUO_CRYPTO68K_ASM guard, with
+ * the portable C fallback below it, and the same rule applies -- that option
+ * must never be enabled for a 68060 build.
+ */
+c68k_limb c68k_div_2by1(c68k_limb hi, c68k_limb lo, c68k_limb d,
+                        c68k_limb *rem);
+
+/*
+ * rem[0..m_len-1] = u[0..u_len-1] mod m[0..m_len-1], by Knuth's algorithm D
+ * over 32-bit limbs.  m[m_len-1] must be non-zero; u_len >= m_len.
+ *
+ * scratch needs C68K_MOD_SCRATCH_LIMBS(u_len, m_len) and must not alias.
+ *
+ * This exists because the vendored _nx_crypto_huge_number_modulus() does the
+ * same job in SIXTEEN-BIT half-limbs -- its own comments say "In number of
+ * USHORT words" and it estimates each quotient digit from HN_SHIFT >> 1 -- so
+ * it runs twice the outer iterations over twice as many inner limbs.  On an
+ * RSA-2048 public operation that one routine was 22% of the whole thing.
+ */
+#define C68K_MOD_SCRATCH_LIMBS(u_len, m_len) \
+    ((UINT)(u_len) + (UINT)(m_len) + 2u)
+
+VOID c68k_mod(c68k_limb *rem, const c68k_limb *u, UINT u_len,
+              const c68k_limb *m, UINT m_len, c68k_limb *scratch);
+
+/*
+ * Whether c68k_setup_rr() reduces with c68k_mod() (the default) or with the
+ * vendored 16-bit divider.  A variable for the same reason
+ * c68k_karatsuba_limbs is one: so the benchmark can time both in a single
+ * process, on the same operands, and so the test can use one as the other's
+ * oracle.
+ */
+extern UINT c68k_fast_modulus;
+
+/*
+ * rr = R^2 mod m, where R = 2^(32*m_len).  setup needs 7*m_len + 8 limbs.
+ *
+ * Public so it can be timed on its own -- it was 22% of an RSA-2048 public
+ * operation before c68k_mod() replaced the reduction inside it, and a figure
+ * that large deserves to be measured directly rather than by subtraction.
+ */
+VOID c68k_mont_setup_rr(c68k_limb *rr, const c68k_limb *m, UINT m_len,
+                        c68k_limb *setup);
+
+/*
  * Unsigned compare of two n-limb values.  -1, 0 or 1.
  */
 INT c68k_cmp(const c68k_limb *a, const c68k_limb *b, UINT n);
@@ -210,11 +276,11 @@ VOID c68k_mont_sqr(c68k_limb *r,
  *
  *   x_mont, acc, one, rr, xpad          =  5 * m_len
  *   SOS work area + Karatsuba scratch   =  8 * m_len + 2
- *   radix^2 mod m setup                 =  3 * m_len + 4
+ *   radix^2 mod m setup + c68k_mod       =  7 * m_len + 8
  *   window table, 2^(w-1) odd powers    = (1 << (w-1)) * m_len
  */
 #define C68K_POWM_SCRATCH_LIMBS(m_len, w) \
-    ((((16u + (1u << ((w) - 1u))) * (UINT)(m_len))) + 8u)
+    ((((20u + (1u << ((w) - 1u))) * (UINT)(m_len))) + 16u)
 
 /*
  * The largest window the implementation will use.  OpenSSL's threshold table

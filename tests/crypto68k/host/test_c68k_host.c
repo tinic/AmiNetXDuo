@@ -56,7 +56,7 @@
 /* ------------------------------------------------------------- buffers --- */
 
 #define T_MAX_LIMBS         64u             /* RSA-2048 */
-#define T_POWM_SCRATCH      3000u           /* > C68K_POWM_SCRATCH_LIMBS(64, 6) */
+#define T_POWM_SCRATCH      4096u           /* > C68K_POWM_SCRATCH_LIMBS(64, 6) */
 #define T_HN_SCRATCH        2048u
 
 static c68k_limb    t_m[T_MAX_LIMBS];
@@ -80,6 +80,7 @@ static c68k_limb    t_ref_result[T_MAX_LIMBS * 2 + 8];
 static c68k_limb    t_tmp[T_MAX_LIMBS * 2 + 8];
 
 static VOID t_karatsuba(VOID);
+static VOID t_division(VOID);
 
 static unsigned long    t_failures;
 static unsigned long    t_checks;
@@ -419,6 +420,7 @@ UINT                    bad = 0;
 NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
 
     t_karatsuba();
+    t_division();
 
     printf("\n4. c68k_mont_power_modulus vs "
            "_nx_crypto_huge_number_mont_power_modulus:\n");
@@ -590,6 +592,122 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
  * Checked against the vendored _nx_crypto_huge_number_mont, which knows
  * nothing about Karatsuba, at the widths where the split actually engages.
  */
+/*
+ * c68k_mod() against the vendored divider, which -- unlike the vendored
+ * Montgomery -- has no known defect and is what the rest of this suite has
+ * always been validated against.
+ *
+ * Two code paths in algorithm D are almost unreachable by chance and are
+ * driven deliberately, because both are where this kind of routine breaks:
+ *
+ *   the B-1 clamp   the partial remainder's top limb equal to the divisor's.
+ *                   The true quotient digit is B-1, and on a 68020 a DIVU.L
+ *                   would TRAP rather than saturate, so the code must test
+ *                   for it before dividing.  Driven by giving u and m the
+ *                   same top limb.
+ *   the add-back    the estimate one too large, needing the divisor added
+ *                   back.  Normalisation makes it rare -- textbooks quote
+ *                   about one in 2^31 for random operands -- so it is driven
+ *                   by the classic shape: a divisor just above a power of the
+ *                   radix, with a dividend that straddles it.
+ *
+ * Also swept: an unnormalised divisor (top bit clear, so the shift path runs
+ * with s != 0), a single-limb divisor, u shorter than m, and all ones.
+ */
+static VOID t_division(VOID)
+{
+
+static c68k_limb    d_u[T_MAX_LIMBS * 2 + 8];
+static c68k_limb    d_m[T_MAX_LIMBS];
+static c68k_limb    d_rem[T_MAX_LIMBS + 2];
+static c68k_limb    d_scratch[(T_MAX_LIMBS * 4) + 16];
+UINT                trial;
+UINT                shape;
+UINT                u_len;
+UINT                m_len;
+UINT                i;
+UINT                bad = 0;
+NX_CRYPTO_HUGE_NUMBER u_hn, m_hn;
+
+
+    printf("\n3c. c68k_mod against the vendored divider:\n");
+
+    for (trial = 0; trial < 600u; trial++)
+    {
+        shape = trial % 6u;
+
+        m_len = (UINT)(t_rand() % 32u) + 1u;
+        u_len = m_len + (UINT)(t_rand() % (m_len + 1u));
+        if (u_len > (T_MAX_LIMBS * 2u))
+        {
+            u_len = T_MAX_LIMBS * 2u;
+        }
+
+        t_rand_limbs(d_m, m_len);
+        t_rand_limbs(d_u, u_len);
+
+        switch (shape)
+        {
+        case 0:                                 /* the DIVU.L B-1 clamp */
+            d_m[m_len - 1u] |= 0x80000000UL;
+            for (i = 0; i < m_len; i++)
+            {
+                d_u[u_len - m_len + i] = d_m[i];
+            }
+            break;
+        case 1:                                 /* add-back shape */
+            for (i = 0; i < m_len; i++) { d_m[i] = 0; }
+            d_m[m_len - 1u] = 0x80000000UL;
+            d_m[0]          = 1u;
+            for (i = 0; i < u_len; i++) { d_u[i] = 0xFFFFFFFFUL; }
+            break;
+        case 2:                                 /* unnormalised divisor */
+            d_m[m_len - 1u] &= 0x0000FFFFUL;
+            d_m[m_len - 1u] |= 1u;
+            break;
+        case 3:                                 /* single limb divisor */
+            m_len = 1u;
+            d_m[0] |= 1u;
+            break;
+        case 4:                                 /* all ones both sides */
+            for (i = 0; i < m_len; i++) { d_m[i] = 0xFFFFFFFFUL; }
+            for (i = 0; i < u_len; i++) { d_u[i] = 0xFFFFFFFFUL; }
+            break;
+        default:                                /* u shorter than m */
+            u_len = m_len;
+            d_u[u_len - 1u] &= 0x7FFFFFFFUL;
+            d_m[m_len - 1u] |= 0x80000000UL;
+            break;
+        }
+
+        if (d_m[m_len - 1u] == 0u)
+        {
+            d_m[m_len - 1u] = 1u;
+        }
+
+        c68k_mod(d_rem, d_u, u_len, d_m, m_len, d_scratch);
+
+        /* the vendored divider reduces in place, so it gets its own copy */
+        t_hn_set(&u_hn, t_tmp, 0, T_MAX_LIMBS * 2);
+        for (i = 0; i < u_len; i++) { t_tmp[i] = d_u[i]; }
+        u_hn.nx_crypto_huge_number_size = u_len;
+        _nx_crypto_huge_number_adjust_size(&u_hn);
+        t_hn_set(&m_hn, d_m, m_len, m_len);
+        _nx_crypto_huge_number_modulus(&u_hn, &m_hn);
+
+        t_checks++;
+        if (!t_hn_equals(&u_hn, d_rem, m_len))
+        {
+            bad++;
+            t_fail("c68k_mod", trial, (m_len << 8) | u_len);
+        }
+    }
+
+    printf("  600 trials, m 1..32 limbs, u up to 2x, six shapes: %u mismatches\n",
+           bad);
+}
+
+
 static VOID t_karatsuba(VOID)
 {
 

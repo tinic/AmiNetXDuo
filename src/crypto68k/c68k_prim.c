@@ -52,7 +52,79 @@ HN_UBASE2   product;
 }
 
 
+/*
+ * r -= a * b, the inner loop of long division.
+ *
+ * Always compiled: unlike c68k_addmul_1 there is no assembly twin.  GCC emits
+ * MULU.L for the product here exactly as it does there, and the division's
+ * cost turned out to be dominated by the quotient estimate rather than by
+ * this pass, so hand-writing it was not the lever.
+ */
+c68k_limb c68k_submul_1(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a)
+{
+
+UINT        j;
+HN_UBASE2   product;
+c68k_limb   borrow;
+c68k_limb   lo;
+c68k_limb   old;
+
+
+    product = 0;
+    borrow  = 0;
+
+    for (j = 0; j < n; j++)
+    {
+        product = (product >> 32) + ((HN_UBASE2)a * (HN_UBASE2)b[j]);
+        lo      = (c68k_limb)product;
+
+        old  = r[j];
+        r[j] = (c68k_limb)(old - lo - borrow);
+
+        /*
+         * Two comparisons rather than a 64-bit subtract, for the same reason
+         * c68k_sub uses them: the 68020 has no 64-bit compare and GCC
+         * synthesises a poor one.
+         */
+        if (borrow != 0u)
+        {
+            borrow = (old <= lo) ? 1u : 0u;
+        }
+        else
+        {
+            borrow = (old < lo) ? 1u : 0u;
+        }
+    }
+
+    /*
+     * The high half of the last product plus any final borrow.  It cannot
+     * itself overflow a limb: a*b + carry <= (2^32-1)^2 + (2^32-1), whose high
+     * half is at most 2^32-2, and the borrow adds at most one.
+     */
+    return((c68k_limb)((product >> 32) + borrow));
+}
+
+
 #ifndef C68K_ASM
+
+/*
+ * The portable quotient estimate.  On target this is replaced by a single
+ * DIVU.L; here it is a 64-bit divide, which on m68k reaches __udivdi3 in
+ * src/common/ami_udivdi3.c because this toolchain ships an empty libgcc.
+ */
+c68k_limb c68k_div_2by1(c68k_limb hi, c68k_limb lo, c68k_limb d,
+                        c68k_limb *rem)
+{
+
+HN_UBASE2   num;
+
+
+    num  = ((HN_UBASE2)hi << 32) | (HN_UBASE2)lo;
+    *rem = (c68k_limb)(num % (HN_UBASE2)d);
+
+    return((c68k_limb)(num / (HN_UBASE2)d));
+}
+
 
 c68k_limb c68k_addmul_1(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a)
 {
