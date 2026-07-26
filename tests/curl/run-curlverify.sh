@@ -151,6 +151,23 @@ if [ -z "$MATH" ]; then
     done
 fi
 
+# mathieeedoubtrans.library is NOT optional for a clib2-built client, and the
+# failure is total rather than partial: clib2's startup opens it before main()
+# and prints "mathieeedoubtrans.library could not be opened." if it cannot.
+# Our own curl is newlib and never asks for it, which is why nothing here
+# needed it until somebody else's binary was run.  Every Workbench install has
+# it in LIBS:; a bare directory hard drive does not.
+MATHTRANS="${AMINETXDUO_MATHIEEEDOUBTRANS:-}"
+if [ -z "$MATHTRANS" ]; then
+    for candidate in \
+        "$ROOT/build/mathieeedoubtrans-os.library" \
+        "$ROOT/build/mathieeedoubtrans.library" \
+        "$HOME/amigaos/libs/mathieeedoubtrans.library"
+    do
+        [ -f "$candidate" ] && { MATHTRANS="$candidate"; break; }
+    done
+fi
+
 # ------------------------------------------------------------- staging ----
 
 STAGE="$ROOT/build/curlverify-stage-$TAG"
@@ -184,6 +201,14 @@ else
     echo "!! NO mathieeedoubbas.library staged; curl will not start." >&2
 fi
 
+if [ -n "$MATHTRANS" ] && [ -f "$MATHTRANS" ]; then
+    cp "$MATHTRANS" "$STAGE/libs/mathieeedoubtrans.library"
+elif [ -n "$FOREIGN" ]; then
+    echo "!! NO mathieeedoubtrans.library staged.  A clib2-built client opens" >&2
+    echo "   it before main() and will not start.  Set" >&2
+    echo "   AMINETXDUO_MATHIEEEDOUBTRANS=<path> or drop one in build/." >&2
+fi
+
 # AmiSSL, for a third-party curl that does its TLS through it.  The layout is
 # the one amisslmaster.library expects after AmiSSL's own installer has run:
 # LIBS:amisslmaster.library, and the versioned library for THIS cpu flattened
@@ -194,8 +219,13 @@ if [ -n "$AMISSL" ]; then
     [ -d "$A3" ] || { echo "no $A3 -- is that an extracted AmiSSL-v5-OS3?" >&2
                       exit 2; }
     cp "$A3/amisslmaster.library" "$STAGE/libs/amisslmaster.library"
-    mkdir -p "$STAGE/AmiSSL/Libs/AmiSSL"
+    # Both conventions, because the archive documents one ("usually stored
+    # inside the AmiSSL:Libs/AmiSSL directory") and AmiSSL's own installer is
+    # free to use the other.  Two copies of a 3.5 MB library on a host
+    # directory cost nothing and remove a variable.
+    mkdir -p "$STAGE/AmiSSL/Libs/AmiSSL" "$STAGE/libs/AmiSSL"
     cp "$A3"/AmiSSL/68020-40/*.library "$STAGE/AmiSSL/Libs/AmiSSL/"
+    cp "$A3"/AmiSSL/68020-40/*.library "$STAGE/libs/AmiSSL/"
     if [ -d "$AMISSL/Certs" ]; then
         cp -R "$AMISSL/Certs" "$STAGE/AmiSSL/Certs"
     fi

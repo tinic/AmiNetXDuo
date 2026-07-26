@@ -483,6 +483,26 @@ def build(base, curl, cacert="--cacert DH0:teststore"):
                h, base + port, kw.pop("path", "/bytes/1024")),
             **kw)
 
+    # THE TRUST-STORE CASES COME FIRST, AND THE ORDER IS THE TEST.
+    #
+    # A resumed handshake verifies no certificate at all -- that is the whole
+    # point of it -- so a suite that asks "is a bad trust store refused?"
+    # AFTER something else has already talked to that host is not asking about
+    # verification, it is asking about the session cache.  Both questions are
+    # worth answering, so both are asked: cold here, warm at the end of the
+    # group, with every other case to that host in between.
+    add("e01_wrong_cacert_cold", "E",
+        '%s -sS --cacert DH0:otherstore --resolve rsa2.test:%d:%s '
+        '-o DH0:d/e01.bin -w "%s" "https://rsa2.test:%d/bytes/1024"'
+        % (curl, base + 1, HOST, WFMT, base + 1), rc=60,
+        note="a valid trust store containing the wrong root")
+    add("e02_default_store_cold", "E",
+        '%s -sS --resolve rsa2.test:%d:%s -o DH0:d/e02.bin -w "%s" '
+        '"https://rsa2.test:%d/bytes/1024"' % (curl, base + 1, HOST, WFMT,
+                                               base + 1), rc=60,
+        note="no --cacert, so DEVS:Internet/certificates -- the real Mozilla "
+             "set, which has never heard of our root")
+
     https("rsa2.test", 1, body=("master", 0, 1024),
           w={"code": "200", "size": "1024"},
           note="RSA leaf under one intermediate, cold")
@@ -517,17 +537,6 @@ def build(base, curl, cacert="--cacert DH0:teststore"):
         '%s -sS %s --resolve selfsigned.test:%d:%s -o DH0:d/e10.bin -w "%s" '
         '"https://selfsigned.test:%d/bytes/1024"'
         % (curl, cacert, base + 7, HOST, WFMT, base + 7), rc=60)
-    add("e11_wrong_cacert", "E",
-        '%s -sS --cacert DH0:otherstore --resolve rsa2.test:%d:%s '
-        '-o DH0:d/e11.bin -w "%s" "https://rsa2.test:%d/bytes/1024"'
-        % (curl, base + 1, HOST, WFMT, base + 1), rc=60,
-        note="a valid trust store containing the wrong root")
-    add("e12_default_store", "E",
-        '%s -sS --resolve rsa2.test:%d:%s -o DH0:d/e12.bin -w "%s" '
-        '"https://rsa2.test:%d/bytes/1024"' % (curl, base + 1, HOST, WFMT,
-                                               base + 1), rc=60,
-        note="no --cacert, so DEVS:Internet/certificates -- the real Mozilla "
-             "set, which has never heard of our root")
     add("e13_tls_on_plain_port", "E",
         '%s -sS %s --resolve rsa2.test:%d:%s -o DH0:d/e13.bin -w "%s" '
         '"https://rsa2.test:%d/bytes/1024"'
@@ -585,6 +594,20 @@ def build(base, curl, cacert="--cacert DH0:teststore"):
                         for i in range(3)]),
         note="three concurrent TLS transfers.  The handshake is blocking, so "
              "this is the case that says what that costs the multi loop")
+    add("e23_wrong_cacert_warm", "E",
+        '%s -sS --cacert DH0:otherstore --resolve rsa2.test:%d:%s '
+        '-o DH0:d/e23.bin -w "%s" "https://rsa2.test:%d/bytes/1024"'
+        % (curl, base + 1, HOST, WFMT, base + 1), rc=60,
+        note="the same wrong trust store as e01, after the cache is warm.  "
+             "A resumed handshake sends no certificate and verifies nothing, "
+             "and tls.library keys its cache on the host name alone -- so "
+             "this is where a trust decision made under one --cacert gets "
+             "reused under another")
+    add("e24_default_store_warm", "E",
+        '%s -sS --resolve rsa2.test:%d:%s -o DH0:d/e24.bin -w "%s" '
+        '"https://rsa2.test:%d/bytes/1024"' % (curl, base + 1, HOST, WFMT,
+                                               base + 1), rc=60,
+        note="and with no --cacert at all")
     add("e22_after_tls", "E",
         '%s -sS -o DH0:d/e22_after_tls.bin -w "%s" "%s/bytes/16384"'
         % (curl, WFMT, http), body=("master", 0, 16384),

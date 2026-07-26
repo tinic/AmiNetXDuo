@@ -52,6 +52,7 @@
 
 #include <exec/types.h>
 #include <exec/memory.h>
+#include <dos/dosextens.h>
 #include <dos/dos.h>
 #include <dos/dostags.h>
 #include <proto/exec.h>
@@ -67,9 +68,20 @@ static const char version_tag[] __attribute__((used)) =
 #define MAX_LINE    640
 #define CLIENT_STACK    (512UL * 1024UL)
 
+/*
+ * NP_WindowPtr = -1 turns "Please insert volume Foo:" into a failed call.
+ *
+ * Not a nicety.  A client that names a path on a volume or assign which does
+ * not exist -- AmiSSL is configured OPENSSLDIR=AmiSSL:, so any AmiSSL-linked
+ * binary does exactly this if the assign is missing -- otherwise puts up a
+ * requester on a machine with nobody at the keyboard, and the whole run sits
+ * there until the harness times out.  A missing file should fail, loudly and
+ * immediately, in a test rig.
+ */
 static struct TagItem client_tags[] =
 {
     { NP_StackSize, CLIENT_STACK },
+    { NP_WindowPtr, (ULONG)-1    },
     { TAG_END,      0            }
 };
 
@@ -144,6 +156,14 @@ int main(int argc, char **argv)
 
     (VOID)argc;
     (VOID)argv;
+
+    /* Our own process too: Lock() below would otherwise be able to ask. */
+    {
+        struct Process *self = (struct Process *)FindTask(NULL);
+
+        if (self->pr_Task.tc_Node.ln_Type == NT_PROCESS)
+            self->pr_WindowPtr = (APTR)-1;
+    }
 
     truncate_file(RESULTS);
     truncate_file(REPORT);
