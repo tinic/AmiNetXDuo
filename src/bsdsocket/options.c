@@ -304,11 +304,27 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
                 return bsd_opt_get_long(SocketBase, optval, optlen,
                                         (LONG)sock->as_EventMask);
 
+            /*
+             * Unasked-for, report the window this socket ACTUALLY got.  A TCP
+             * socket's is sized from the packet pool and the live socket count
+             * when it is created (ami_bsd_tcp_window()), so BSD_TCP_WINDOW is
+             * only the floor and answering with it would be answering with a
+             * number no socket necessarily has.
+             */
             case SO_RCVBUF:
-                return bsd_opt_get_long(SocketBase, optval, optlen,
-                                        (sock->as_RcvBuf != 0)
-                                            ? sock->as_RcvBuf
-                                            : BSD_TCP_WINDOW);
+            {
+                LONG rcvbuf = sock->as_RcvBuf;
+
+                if (rcvbuf == 0)
+                {
+                    rcvbuf = ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) ==
+                              ASF_TCP)
+                        ? (LONG)sock->as_Nx.tcp.nx_tcp_socket_rx_window_default
+                        : (LONG)BSD_TCP_WINDOW;
+                }
+
+                return bsd_opt_get_long(SocketBase, optval, optlen, rcvbuf);
+            }
 
             case SO_SNDBUF:
                 return bsd_opt_get_long(SocketBase, optval, optlen,

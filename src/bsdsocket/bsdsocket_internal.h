@@ -213,11 +213,38 @@
  * segments; over the wire it reached 7200 bytes against 8192, 88%. In neither
  * case was the CPU, the link or the periodic tick the thing in the way.
  *
- * -D it to experiment; ami_bsd_tcp_window() is what sockets actually get, and
- * it takes this as the FLOOR rather than the answer.
+ * ami_bsd_tcp_window() is what sockets actually get and this is only its
+ * FLOOR: the floor is what shipped before it, and it is what forty concurrent
+ * transfers were measured passing on, so no socket ever comes out of there
+x * sets this and the ceiling together, which pins the window and is how a fixed
+ * one is measured against the derived one.
  */
 #ifndef BSD_TCP_WINDOW
 #define BSD_TCP_WINDOW        8192
+#endif
+
+/*
+ * The ceiling, and why it is 32768 rather than 65535.
+ *
+ * 65535 is the architectural cap: NX_ENABLE_TCP_WINDOW_SCALING is not defined
+ * here, so the window is whatever fits in the 16-bit header field and nothing
+ * negotiates past it -- in either direction, because not offering the option
+ * also stops the peer scaling. 32768 is the largest value that has been
+ * MEASURED (docs/RESEARCH.md S16.5, S24), and there are two reasons not to go
+ * to the cap on argument alone: there is no SACK in the vendored tree, so a
+ * burst loss inside a larger window costs a full go-back-N, and every byte of
+ * window is a byte of packet pool somebody else cannot have.
+ */
+#ifndef BSD_TCP_WINDOW_CEILING
+#define BSD_TCP_WINDOW_CEILING  32768
+#endif
+
+/*
+ * One in this many pool packets is the budget the whole stack's TCP receive
+ * windows may claim ABOVE the floor. See ami_bsd_tcp_window().
+ */
+#ifndef BSD_TCP_WINDOW_POOL_SHARE
+#define BSD_TCP_WINDOW_POOL_SHARE   8
 #endif
 
 /* Room for one dotted quad plus terminator, used by Inet_NtoA(). */
@@ -485,6 +512,9 @@ VOID       bsd_fd_free(struct AmiSocketBase *base, LONG fd);
 VOID       bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock);
 LONG       bsd_table_resize(struct AmiSocketBase *base, LONG size);
 VOID       bsd_close_all(struct AmiSocketBase *base);
+
+/* socket.c -- the receive window this machine can afford right now. */
+ULONG      ami_bsd_tcp_window(VOID);
 
 /* handoff.c -- cross-base descriptor transfer. The registry lives in the
  * master base; bsd_handoff_flush() runs from bsd_lib_close() when the last

@@ -67,15 +67,17 @@ if(NOT AMINETXDUO_SANA2_PROBE_RAW)
     add_compile_definitions(AMI_SANA2_PROBE_RAW=0)
 endif()
 
-# The TCP receive window floor, in bytes.  Exists so that "is the window the
-# limiter?" can be answered by building two libraries out of one tree and
-# measuring, which is how tests/trace/ settled it -- see the note on
-# BSD_TCP_WINDOW in src/bsdsocket/bsdsocket_internal.h.  Empty keeps the
-# built-in floor.  Setting it at or above the ceiling pins every socket at it,
-# which is how a FIXED window is measured against the pool-derived one.
-set(AMINETXDUO_TCP_WINDOW "" CACHE STRING "TCP receive window floor in bytes")
+# PIN the TCP receive window at this many bytes, floor and ceiling together,
+# instead of letting ami_bsd_tcp_window() size it from the packet pool and the
+# live socket count.  Exists so that "is the window the limiter?" can be
+# answered by building two libraries out of one tree and measuring, which is
+# how tests/trace/ settled it -- see the note on BSD_TCP_WINDOW in
+# src/bsdsocket/bsdsocket_internal.h.  Empty means pool-derived, which is what
+# ships; 8192 reproduces the fixed window that shipped before it.
+set(AMINETXDUO_TCP_WINDOW "" CACHE STRING "Pin the TCP receive window, bytes")
 if(NOT AMINETXDUO_TCP_WINDOW STREQUAL "")
-    add_compile_definitions(BSD_TCP_WINDOW=${AMINETXDUO_TCP_WINDOW})
+    add_compile_definitions(BSD_TCP_WINDOW=${AMINETXDUO_TCP_WINDOW}
+                            BSD_TCP_WINDOW_CEILING=${AMINETXDUO_TCP_WINDOW})
 endif()
 
 # ami_log() verbosity: 0 = errors only ... 4 = trace. Empty keeps compat.c's

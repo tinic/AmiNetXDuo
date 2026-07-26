@@ -138,6 +138,96 @@ static ULONG bsd_udp_queue_max(VOID)
     return queue;
 }
 
+/*
+ * How large a receive window THIS machine can afford to advertise right now.
+ *
+ * WHY IT CANNOT BE A CONSTANT.  The window is what a bulk transfer is limited
+ * by: on loopback the sender held exactly one segment in flight against the
+ * whole advertised window, advertised a zero window 64 times in a 128-segment
+ * transfer, and waited 22 ms (median) between segments with nothing it was
+ * allowed to do.  Sizing the window here instead moves that path 230 -> 283
+ * KB/s with nothing else changed.  It also cannot simply BE the ceiling,
+ * because a TCP socket's receive queue is packets off the same pool
+ * the SANA-II readers pin an eighth of, and forty concurrent sockets each
+ * promising 32 KB promise several times the whole pool.  Exhausting it drops
+ * frames stack-wide, which is a functional failure and not a slowdown.
+ *
+ * WHY THE SOCKET COUNT AND NOT JUST THE POOL.  AMI_SANA2_RX_DEPTH_IPV4 could
+ * be settled from the pool alone because the number of things drawing on it
+ * -- two or three reader threads -- is fixed and known when the stack starts.
+ * Here it is not: the consumer count is one socket for a bulk transfer and
+ * forty for `tests/curl` d03_parallel_40, and a number chosen at stack start
+ * would have to assume the worst.  Assuming forty gives every socket the
+ * floor and throws the whole gain away.  So the pool sets a BUDGET and the
+ * live socket count divides it.
+ *
+ * THE FLOOR IS THE STATUS QUO, deliberately.  8192 is what every socket got
+ * before this function existed, and forty concurrent transfers were measured
+ * passing on it.  So a socket can never come out of here with less than a
+ * configuration that is known to work, and everything above the floor is an
+ * over-commitment that the budget bounds: granting budget/n to the n'th
+ * socket, clamped, the excess over the floor summed across every socket comes
+ * to about 1.1x the budget -- 56,370 bytes, 36 of 256 packets, on the 8 MB
+ * profile.  That is the same order as the eighth the SANA-II readers take,
+ * and it is why the share here is also an eighth.
+ *
+ * WHY AT CREATE TIME AND NOT CONTINUOUSLY.  A window that tracked the socket
+ * count would have to shrink an established socket's advertised window, and
+ * NetX Duo has no supported way to do that: nx_tcp_socket_rx_window_current
+ * is unsigned and derived from the default by subtraction, so lowering the
+ * default under a socket with data queued underflows it, and retracting the
+ * right edge of a window the peer is already filling is the one thing RFC 793
+ * says not to do.  Create time is the only safe point, and it is enough,
+ * because the two workloads that matter are distinguishable there: a bulk
+ * transfer opens one or two sockets and a concurrent client opens forty.
+ *
+ * The pool's FREE count was considered instead of the socket count and is
+ * worse: curl's multi interface opens all forty sockets before any of them
+ * carries data, so the pool is still full at the moment every one of them
+ * would be sized.
+ *
+ * The counter is NetX Duo's own, maintained by nx_tcp_socket_create/delete,
+ * so there is none here to leak -- and a leaked one would pin every future
+ * socket at the floor while looking like nothing at all.  It counts listeners
+ * and parked spares, which never carry a connection: that over-counts
+ * consumers, which is the direction to be wrong in.  The socket being created
+ * is not on the list yet, hence the +1.
+ */
+ULONG ami_bsd_tcp_window(VOID)
+{
+    static ULONG    last_budget = 0;
+    NX_PACKET_POOL *pool = netstack_pool();
+    NX_IP          *ip   = netstack_ip();
+    ULONG           budget;
+    ULONG           window;
+
+    if (pool == NULL || ip == NULL)
+        return (ULONG)BSD_TCP_WINDOW;
+
+    budget = (pool->nx_packet_pool_total / (ULONG)BSD_TCP_WINDOW_POOL_SHARE) *
+             pool->nx_packet_pool_payload_size;
+
+    if (budget != last_budget)
+    {
+        last_budget = budget;
+        AMI_INFO("bsdsocket: TCP window budget %ld bytes (pool %ld packets), "
+                 "%ld..%ld per socket",
+                 (long)budget, (long)pool->nx_packet_pool_total,
+                 (long)BSD_TCP_WINDOW, (long)BSD_TCP_WINDOW_CEILING);
+    }
+
+    window = budget / (ip->nx_ip_tcp_created_sockets_count + 1UL);
+
+    /* Floor last, so AMINETXDUO_TCP_WINDOW -- which sets both -- pins every
+       socket at it whichever side of the built-in pair it falls. */
+    if (window > (ULONG)BSD_TCP_WINDOW_CEILING)
+        window = (ULONG)BSD_TCP_WINDOW_CEILING;
+    if (window < (ULONG)BSD_TCP_WINDOW)
+        window = (ULONG)BSD_TCP_WINDOW;
+
+    return window;
+}
+
 /* --------------------------------------------------------- descriptor table */
 
 static LONG bsd_table_ensure(struct AmiSocketBase *base)
@@ -724,7 +814,7 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
     {
         status = nx_tcp_socket_create(ip, &sock->as_Nx.tcp, bsd_tcp_name,
                                       NX_IP_NORMAL, NX_FRAGMENT_OKAY,
-                                      NX_IP_TIME_TO_LIVE, BSD_TCP_WINDOW,
+                                      NX_IP_TIME_TO_LIVE, ami_bsd_tcp_window(),
                                       bsd_tcp_urgent_notify,
                                       bsd_tcp_disconnect_callback);
     }
@@ -933,7 +1023,7 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
 
     status = nx_tcp_socket_create(ip, &incoming->as_Nx.tcp, bsd_tcp_name,
                                   NX_IP_NORMAL, NX_FRAGMENT_OKAY,
-                                  NX_IP_TIME_TO_LIVE, BSD_TCP_WINDOW,
+                                  NX_IP_TIME_TO_LIVE, ami_bsd_tcp_window(),
                                   bsd_tcp_urgent_notify,
                                   bsd_tcp_disconnect_callback);
     if (status != NX_SUCCESS)
@@ -1125,7 +1215,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
     {
         status = nx_tcp_socket_create(ip, &spare->as_Nx.tcp, bsd_tcp_name,
                                       NX_IP_NORMAL, NX_FRAGMENT_OKAY,
-                                      NX_IP_TIME_TO_LIVE, BSD_TCP_WINDOW,
+                                      NX_IP_TIME_TO_LIVE, ami_bsd_tcp_window(),
                                       bsd_tcp_urgent_notify,
                                       bsd_tcp_disconnect_callback);
         if (status == NX_SUCCESS)

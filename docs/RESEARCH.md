@@ -7529,3 +7529,308 @@ unit, a bad name in either position of a list), and `REPEAT` started in the
 background so it could be seen looping. The emulator is serialised across
 workstreams by `build/.fsuae.lock`, which is the argument for one boot that
 checks fifty things rather than fifty boots that check one.
+
+## 24. The loopback window, sized from the packet pool (2026-07-26)
+
+§16.5 found the one path in this stack that is limited by the advertised window
+rather than by the machine: on loopback the sender held **100% of the window in
+flight** and waited a **14.9 ms median** between segments with nothing it was
+allowed to do. §16.6 measured what raising the window is worth and then did not
+ship it, for a stated reason: a TCP socket's receive queue is packets off the
+same `NX_PACKET` pool the SANA-II readers pin an eighth of, and 32 KB of window
+times forty concurrent sockets is several times the whole pool. Exhausting it
+drops frames stack-wide, which is a **functional** failure and not a slowdown —
+so the trade on offer was a loopback gain against a stack that falls over at
+forty sockets, and that is not a trade.
+
+This section makes the window pool-derived, so the gain does not have to be paid
+for. **Loopback goes from 230 to 283 KB/s (+23%), the wire from 152 to 159 KB/s,
+and curl's own `http://` figure from 145 to 182 KB/s (+25%), with zero
+retransmissions on either path and `d03_parallel_40` green.**
+
+### 24.1 First: the case against a bigger window was measured before the fix that removes it
+
+§16.6's warning is the reason nobody raised this window earlier, and it was
+real. Before commit `78b4ed9`, RFC 1122's "acknowledge at least every second
+full-sized segment" was absent, the ACK interval was therefore proportional to
+the window, and 8 KB → 32 KB took the **wire** from 161 to 89 KB/s with
+**zero retransmissions in both columns** — the sender waiting, nothing lost, and
+no instrument in the tree able to tell those two apart.
+
+`78b4ed9` has landed, so that measurement is stale, and everything below is
+retaken with delayed ACK in. **The direction reverses completely**: with the
+ACK rule present, raising the window costs the wire nothing and pays loopback
+more than §16.5's headline. §16.5's "+18%" compared a 32 KB number that had the
+ACK fix against a 297 KB/s baseline that did not; like for like it is +23%.
+
+### 24.2 Why the answer cannot be a constant, and why the RX-depth pattern does not transfer unchanged
+
+`AMI_SANA2_RX_DEPTH_IPV4` is the precedent, and it is worth being precise about
+where the analogy stops. That fix could be settled from the pool alone because
+the number of things drawing on the pool is **fixed and known when the stack
+starts**: two reader threads, three with IPv6. One in eight of the pool, floor
+4, ceiling 32, decided once, done.
+
+Here the consumer count is neither known at start-up nor small. It is one socket
+for a bulk transfer and **forty** for `tests/curl` `d03_parallel_40`, and a
+single number chosen at stack start would have to assume the worst. Assuming
+forty gives every socket `(256/8 × 1568) / 40 = 1254` bytes — below the floor,
+so every socket back at 8192 and the entire gain thrown away.
+
+**So the variable that matters is sockets, not interfaces, and the pool cannot
+be the only input.**
+
+### 24.3 What ships
+
+`ami_bsd_tcp_window()` (`src/bsdsocket/socket.c`), called at all three
+`nx_tcp_socket_create()` sites:
+
+```
+budget = (pool_total / 8) * pool_payload      /* 1 in 8 of the pool, in bytes */
+window = clamp(budget / (live_tcp_sockets + 1), 8192, 32768)
+```
+
+**The pool sets a budget; the live socket count divides it.**
+
+| sockets open | 1 | 2 | 3 | 4 | 5 | 6 | 7+ |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| window, 8 MB profile | 32768 | 25088 | 16725 | 12544 | 10035 | 8362 | 8192 |
+
+- **The floor is the status quo, deliberately.** 8192 is what every socket got
+  before this function existed, and it is what §16.8 measured forty concurrent
+  transfers passing on. No socket can come out of here with less than a
+  configuration that is known to work, so the change has no downside case to
+  argue about — only an upside case to bound.
+- **The budget bounds the upside.** Only the first six sockets get more than the
+  floor at all, and the excess over the floor summed across every socket comes
+  to **56,370 bytes = 36 of 256 packets**, about 1.1× the budget. That is the
+  same order as the eighth the SANA-II readers take, which is why the share here
+  is also an eighth rather than a number picked to make loopback look good.
+- **On the 4 MB / 68020 floor nothing changes at all.** The pool is
+  `AMI_POOL_MIN_PACKETS` (16), an eighth of which is 3136 bytes — below the
+  floor — so every socket gets 8192 exactly as before. Same outcome, and the
+  same reason, as the RX depth's on that machine.
+
+**Why at create time rather than continuously.** A window that tracked the
+socket count would have to shrink an *established* socket's advertised window,
+and NetX Duo has no supported way to do that: `nx_tcp_socket_rx_window_current`
+is unsigned and derived from the default by subtraction, so lowering the default
+under a socket with data queued underflows it, and retracting the right edge of
+a window the peer is already filling is the one thing RFC 793 tells you not to
+do. Create time is the only safe point, and it is sufficient, because the two
+workloads that matter are distinguishable exactly there: a bulk transfer opens
+one or two sockets, a concurrent client opens forty in a burst.
+
+**The pool's free count was considered instead of the socket count and is
+worse.** curl's multi interface opens all forty sockets *before* any of them
+carries data, so `nx_packet_pool_available` is still at its maximum at the
+moment every one of them would be sized. It would hand out forty large windows
+and then discover the problem.
+
+**The counter is NetX Duo's own.** `ip->nx_ip_tcp_created_sockets_count` is
+maintained by `nx_tcp_socket_create/delete`, so there is none here to leak —
+which matters, because a leaked one would pin every future socket at the floor
+and look like nothing at all. It counts listeners and parked spares, neither of
+which ever carries a connection; that over-counts consumers, which is the
+direction to be wrong in.
+
+`AMINETXDUO_TCP_WINDOW` now **pins** the window, floor and ceiling together,
+rather than setting a floor, so a fixed window is still one `-D` out of one
+tree — which is how every A/B below was taken. `getsockopt(SO_RCVBUF)` reports
+what the socket actually got rather than the compile-time floor, because the
+floor is now a number no particular socket necessarily has.
+
+### 24.4 The traces
+
+Two libraries out of one tree, differing only in `AMINETXDUO_TCP_WINDOW`; same
+`NetTrace`, same toolchain, same 524,288-byte workload, `tests/trace/run-trace.sh`.
+**Each arm was run twice and the two passes agree to the millisecond** — FS-UAE
+measures the guest's own `GetSysTime()`, so these are emulated-time figures and
+host contention does not enter them.
+
+| A1200, 14 MHz, 524288 B | pinned 8192 | pool-derived | |
+|---|---:|---:|---:|
+| **loopback**, no capture | 230 KB/s | **283 KB/s** | **+23.1%** |
+| loopback, capturing | 178 KB/s | 229 KB/s | +28.6% |
+| **wire**, no capture | 152 KB/s | **159 KB/s** | +4.5% |
+| wire, capturing | 119 KB/s | 127 KB/s | +6.5% |
+
+And the mechanism, which is the point — a throughput number alone could not
+distinguish any of this:
+
+| loopback | pinned 8192 | pool-derived |
+|---|---|---|
+| advertised window | 8192 | **16725** |
+| max bytes in flight | 4096 of 4096 — **100%** | 8192 of 8533 |
+| **zero-window advertisements** | **64** in 128 segments | **0** |
+| gap before a data segment, p50 | 22.4 ms | **17.8 ms** |
+| ACK delay, p50 | 8.0 ms | 5.5 ms |
+| **retransmitted** | **0** | **0** |
+
+| wire | pinned 8192 | pool-derived |
+|---|---|---|
+| advertised window | 8192 | **32768** |
+| peer bytes in flight | 2880 of 8192 (35%) | 2880 of 32768 (9%) |
+| gap before a data segment, p90 | 23.7 ms | **6.6 ms** |
+| **retransmitted** | **0** | **0** |
+
+Three things are worth reading off these rather than only the throughput:
+
+- **The zero windows §16.6 introduced are gone.** That section reported one
+  thing getting worse when the ACK rule landed: two 4096-byte writes fill an
+  8192-byte window exactly, so acknowledging on the second advertises zero, 64
+  times in a 128-segment transfer. A 16,725-byte window is not an exact multiple
+  of the application's write, and the count is zero.
+- **The window did not have to reach 32 KB to collect the gain.** Loopback's
+  receiver is the third socket created (listener, client, the socket `listen()`
+  parks) so it gets 16,725 — half the ceiling — and lands on the same throughput
+  a pinned 32 KB reached in §16.6 relative to its own control. What the path
+  needed was a window larger than the delayed-ACK quantum of two application
+  writes, not a large window.
+- **The wire moved a little, and the trace says why it is not the window.** The
+  peer still holds only 2880 bytes outstanding, 9% of what it is now offered, so
+  the wire is not window-limited before or after — exactly as §16.5 said. What
+  changed is the p90 gap between data segments, 23.7 → 6.6 ms, i.e. our own
+  acknowledgements are no longer occasionally waiting on a window edge. A 4.5%
+  wire gain from a change aimed at loopback is a small side effect and is
+  reported as one rather than claimed.
+
+**No retransmissions anywhere.** Four arms across two passes, both capture
+points, `bs_drop` 0 on every channel. This was checked deliberately rather than
+assumed: there is no SACK in the vendored tree, so a bigger window means more in
+flight to lose, and the trace is the only thing that can tell a stall from a
+loss. One earlier, uncontrolled run — taken before the arms were rebuilt against
+one another — did show a single 1440-byte retransmission and a ten-deep
+duplicate-ACK run on the wire; it did not reproduce in either controlled pass
+and is recorded here rather than swept up.
+
+### 24.5 The concurrency case, which is what this was guarded against
+
+`tests/curl/run-curlverify.sh -p`, both builds, back to back on the same host,
+every body hashed against the server's copy:
+
+| `--parallel-max` | pinned 8192 | pool-derived |
+|---:|---:|---:|
+| 8 | 2.66 s | 3.38 s |
+| 16 | 4.88 s | **3.42 s** |
+| 24 | 5.58 s | 5.48 s |
+| 32 | 6.94 s | 6.34 s |
+| 40 | 7.96 s | **7.34 s** |
+| 48 | 9.12 s | **7.30 s** |
+| mean | 6.19 s | **5.54 s** |
+
+**Nothing is lost at any point on either build, every body is byte-identical,
+and `AvailMem` delta is +0 on both.** Five of six points are faster and one (the
+eight-way) is slower; the mean is 10% better. The direction is what the
+mechanism predicts — the sockets that get a window above the floor are the ones
+opened while few others are — but the honest reading of a single sweep with this
+spread is **no regression**, not a 10% win.
+
+The named acceptance test and curl's own throughput, groups A–D on both builds:
+
+| | pinned 8192 | pool-derived |
+|---|---:|---:|
+| `d03_parallel_40` | 7.02 s | **6.90 s** |
+| `a04_get_1m2` — 1,200,000 B over `http://` | 8.06 s = **145 KB/s** | 6.44 s = **182 KB/s** |
+| groups A–D | 112 passed, 1 failed | 112 passed, 1 failed |
+
+The single failure is `a44_cookies_send` on both arms — the pre-existing one
+§14.7 settled against a third-party binary, not ours. Note that curl's ~117 KB/s
+in §11 is a **public-internet** fetch and is not this number; against the
+hermetic peer on the same wire `NetTrace` measures 159 KB/s, curl 182 KB/s of
+payload, and the two are not in conflict because curl's figure excludes the
+request round trip that `NetTrace`'s includes.
+
+### 24.6 The ceiling is 32768 and not 65535, and the reasons are structural
+
+Both bounds §16.7 named still bind where this can go, and neither has moved:
+
+- **No window scaling.** `NX_ENABLE_TCP_WINDOW_SCALING` is not defined, so 65535
+  is a hard architectural cap; and because the option is bilateral, not offering
+  it also stops the *peer* scaling.
+- **No SACK.** Not implemented in the vendored tree at all, so a burst loss
+  inside a larger window costs a full go-back-N. That is why the ceiling is the
+  largest window that has been **measured** rather than the largest that is
+  representable — and, per §24.4, loopback collects its whole gain at 16,725
+  bytes, so the ceiling is not where the value is anyway.
+
+### 24.7 Two guards NetX Duo ships for exactly this, and both are compiled out
+
+This is the most useful thing found while sizing the window, and it is reported
+rather than switched on.
+
+`NX_ENABLE_LOW_WATERMARK` is not defined anywhere outside `third_party/`. With
+it, two mechanisms that are currently dead code become live:
+
+1. **`nx_packet_pool_low_watermark`.** When the pool falls below it, a TCP
+   socket sets `nx_tcp_socket_rx_window_current = 0` and drops the **tail of its
+   own receive queue** rather than the stack dropping frames, and
+   `nx_tcp_socket_packet_process.c:137` reopens the window when the pool
+   recovers. That converts pool exhaustion from a stack-wide functional failure
+   into a per-socket stall — precisely the failure this section guards against
+   by arithmetic instead.
+2. **`nx_tcp_socket_receive_queue_maximum`.** `NX_TCP_MAXIMUM_RX_QUEUE` defaults
+   to 20 and `nx_tcp_socket_create.c:136` only assigns it under the same
+   `#ifdef`, so today a socket's receive queue has **no packet-count cap at
+   all** — the advertised window is its only bound.
+
+It is not switched on here because it is a second behaviour change, touching
+IPv4 fragment reassembly and UDP receive as well as TCP, and because the
+measurements above say the arithmetic guard holds. Three things would have to
+land together rather than one, which is why it is separate work:
+
+- `NX_ENABLE_LOW_WATERMARK` in `nx_user.h`;
+- a call to `nx_packet_pool_low_watermark_set()` from `src/netstack/`, because
+  `nx_packet_pool_create()` never touches the field and a zeroed watermark means
+  the guard is compiled in but can never fire;
+- `NX_TCP_MAXIMUM_RX_QUEUE` raised, because at 20 packets and 1440-byte wire
+  segments it binds at about 28 KB — **before** a 32 KB window does — and the
+  tail-drop it would then perform costs a retransmission this stack has no SACK
+  to recover cheaply.
+
+### 24.8 What was considered and rejected: giving loopback its own pool
+
+The alternative the framing invites is that loopback should not draw on the same
+pool at all. It is the wrong fix, for a reason that has nothing to do with how
+hard it would be:
+
+**the forty sockets that could exhaust the pool are wire sockets.**
+`d03_parallel_40` is forty HTTP transfers over `eth0`. A separate loopback pool
+would take memory permanently away from the path that is at risk in order to
+protect the path that is not, and would leave the concurrency case exactly where
+it started.
+
+Two supporting facts, checked rather than assumed. There is one pool in the
+whole stack — `netstack_pool()`, which is also the IP instance's default — and
+`_nx_tcp_socket_send_internal()` allocates each segment from
+`packet_ptr -> nx_packet_pool_owner` *before* anything knows the destination is
+loopback; `_nx_ip_driver_packet_send()` only shortcuts into
+`_nx_ip_packet_deferred_receive()` afterwards. So there is no point at which a
+per-destination pool could be chosen without patching the vendored tree, and
+nothing in `third_party/` is patched (§17.3).
+
+### 24.9 Regression cover
+
+| | |
+|---|---|
+| conformance, loopback tier | **130 passed, 0 failed, 12 skipped** |
+| conformance, network tier | **141 passed, 1 failed, 0 skipped** |
+| `tests/clients` | **94 checks, 0 failures** |
+| `tests/curl` groups A–D, both builds | **112 passed, 1 failed, 113 cases** |
+| `tests/curl` concurrency sweep, both builds | **9 passed, 0 failed**, `AvailMem` delta +0 |
+| host `ctest` | **6/6** |
+| `tools/ci.sh` | all green on macOS and on the Linux host with the pinned toolchain |
+
+Both conformance tiers are unchanged from §17.4's numbers, which is the result
+that matters: this touches the size of a window and nothing about what the
+socket API does.
+
+One measurement hazard is worth recording because it cost two runs. The absolute
+throughputs here are **lower than §16's** — 230 KB/s on loopback at a pinned
+8192 where §16.6 reports 287 — and the reason is not this change. `NetTrace` is
+a command in `src/tools/`, that directory has been under active change, and the
+instrument moved under the measurement. Both arms were therefore rebuilt from
+one tree into private build directories and taken back to back; a comparison
+against a number archived from an earlier tree would have been measuring the
+tool. `build/` directory names are shared, so a measurement arm that points at
+one another piece of work also builds is not a controlled arm.
