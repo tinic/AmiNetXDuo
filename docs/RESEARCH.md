@@ -3423,9 +3423,13 @@ Nobody had measured this. Same machine, same run, `-k 28`:
 ```
 http  ftp.fau.de   657,797 B in  5.74 s = 114,598 B/s
 https www.iana.org 998,733 B in 60.68 s =  16,464 B/s   ECDHE-ECDSA-AES128-SHA256
+
+  and the same pair again, later, with the non-blocking read in place:
+http  ftp.fau.de   657,797 B in  5.58 s = 117,884 B/s
+https www.iana.org 998,733 B in 63.90 s =  15,634 B/s
 ```
 
-**7.0×**, and it is all symmetric: AES-128-CBC plus HMAC-SHA256 over every byte,
+**7.0× to 7.5×**, and it is all symmetric: AES-128-CBC plus HMAC-SHA256 over every byte,
 twice (decrypt and authenticate). That is a `crypto68k` question and not a
 backend one — the handshake is a fixed cost per connection and this is a cost
 per byte, so it is the number that decides whether a 5 MB download over HTTPS is
@@ -3437,7 +3441,7 @@ without it the backend would have been declared working on three pages of under
 
 | | |
 |---|---|
-| `clients/curl/amitls.c` | the backend, 619 lines — 100 of preamble and ~380 of code, against the 600–900 estimated |
+| `clients/curl/amitls.c` | the backend, 703 lines — ~300 of preamble and 405 of code, against the 600–900 estimated |
 | `clients/curl/amitls.h` | the one `extern` |
 | `clients/curl/curl-amitls.patch` | **31 added lines over six files** |
 
@@ -3484,8 +3488,8 @@ returning `TLS_PENDING` and a `TLSHandshake()` to pump — which is a larger pie
 of work than this whole backend and is worth doing only if curl's multi
 interface ever matters here.
 
-**2. Reading has to block too, and the tempting alternative deadlocks.** The
-obvious `recv_plain` polls the socket with a zero timeout and answers
+**2. Reading needs three questions answered, and asking one of them deadlocks.**
+The obvious `recv_plain` polls the socket with a zero timeout and answers
 `CURLE_AGAIN` when nothing is readable. It hangs, and the reason is a layer
 nobody had looked at: `nx_secure` keeps *undecrypted* bytes of its own in
 `nx_secure_record_queue_header` (`nx_secure_tls_session_receive_records.c:106`)
@@ -3495,10 +3499,19 @@ is not readable, `TLSPending()` is 0 because no plaintext exists yet, and a
 complete record is sitting there ready to decrypt. A backend that answered
 `CURLE_AGAIN` would wait on a descriptor that will never become readable again.
 
-So `TLSRead()` is called and allowed to block. `TLSPending()` still feeds
-curl's `data_pending`, which is what keeps the already-decrypted case from
-waiting on the socket at all. Answering the question properly needs one more
-vector; see below.
+`TLSBuffered()` now answers that half, so `amitls_recv()` asks all three —
+plaintext ready, ciphertext held, bytes on the socket — and only answers
+`CURLE_AGAIN` when all three say no. **Reads are therefore non-blocking**:
+`--max-time` fires during a transfer, the progress meter moves and Ctrl-C is
+read. The handshake is the one place that still stops the world. What is not
+removed is a bounded block inside `TLSRead()` when what is buffered turns out
+to be half a record, which is the residual `tls.library`'s own documentation
+already names for `TLSWaitSelect()`.
+
+The 998 KB transfer measured 16,464 B/s blocking and 15,634 B/s asking, one run
+each, against a `http://` control that moved 114,598 → 117,884 B/s between the
+same two runs. That is the network, not the extra library call: a few hundred
+`TLSBuffered()` calls do not register against sixty seconds of AES.
 
 **3. No ALPN, and curl says so out loud.** `Curl_alpn_set_negotiated(…, NULL, 0)`
 prints *"ALPN: server did not agree on a protocol. Uses default."* and curl
@@ -3508,28 +3521,33 @@ Connection reuse across requests works and is tested: two URLs on the same host
 in one command line report `1 connects` then `0 connects`, the second answering
 1,506 bytes over the kept-alive TLS connection with no second handshake.
 
-#### Two vectors this backend asked tls.library for and did not get
+#### Two vectors this backend asked for, and got
 
-Neither blocks the milestone. Both are small, and both are in `src/tlslib/`,
-which this work does not own.
+Both landed in `src/tlslib/` while this was being written, and both are wired.
 
-**`TLSRandom(base, buffer, length)`.** `Curl_rand()` has no other source on this
-platform. The handshake's own randomness is fine — `nx_secure` draws from the
-entropy pool `bsdsocket.library` seeds — but no *published* vector exposes that
-pool, and `nxc_random_rand` lives behind the private context LVO that only
-tls.library is supposed to call. `amitls_random()` is therefore a time-seeded
-LCG, and it is labelled as one in the source: it feeds multipart boundaries, a
-Digest `cnonce` and curl's session-cache key salt, none of which are TLS
-secrets, but "unpredictable" is the honest requirement and an LCG does not meet
-it. Three lines in `tls_conn.c` would.
+**`TLSRandom(base, buffer, length)`** is the machine's one entropy pool — the
+SHA-256 DRBG the session keys come from — and it is what `amitls_random()` asks
+now. It answers -1 until a connection has been opened in the calling program,
+because the pool lives in `bsdsocket.library` and `tls.library` reaches it
+through the link `TLSOpen()` makes; curl calls `Curl_rand()` well before its
+first `https://` URL, so a fallback is still there and is still a time-seeded
+LCG. What keeps that from mattering: an `http://`-only run never reaches TLS at
+all, and once anything has, the real pool is answering. Opening `tls.library`
+merely to seed a boundary string would make every `http://` fetch depend on a
+library it does not use.
 
-**A "bytes buffered below the plaintext layer" answer.** `TLSPending()` reports
-decrypted plaintext only, which is right for what it documents. What a
-non-blocking reader needs in addition is whether `nx_secure_record_queue_header`
-holds anything — either a second vector or a second return value. With it,
-`recv_plain` becomes genuinely non-blocking and curl's multi interface works
-properly for reads even while the handshake stays blocking. That is the cheaper
-half of item 4 in §11.6's order, and it can land before the handshake half.
+**`TLSBuffered(base, conn)`** is what makes the non-blocking read above
+possible. It is deliberately not folded into `TLSPending()` and should not be:
+`TLSPending()` promises `TLSRead()` will not block and this one does not.
+
+**One hazard they arrived with.** `TLS_LIB_VERSION` is still 1 and
+`TLS_LIB_REVISION` still 0, so `OpenLibrary("tls.library", 1)` happily returns a
+library that predates both vectors — and calling one would jump past the
+`(APTR)-1` terminator `MakeLibrary()` stopped at, on a machine with no memory
+protection. `amitls_open_library()` compares `lib_NegSize` against the LVO and
+falls back to the blocking read and the LCG when they are missing, which is what
+`src/tlslib/tls_netx.c` already does against `bsdsocket.library`'s private
+vector. A revision bump would let a caller say `OpenLibrary(…, 1)` and mean it.
 
 #### Session resumption: nothing to do, and it works
 
@@ -3569,19 +3587,43 @@ twice.
 that means it — `--no-sessionid` turns off *curl's* cache, not the library's —
 and inventing one would be a patch to curl for something nobody asked for.
 
-**One thing that did not resume, reported rather than diagnosed**, because
-`src/tlslib/` is not this work's to fix: in one run a second connection to
-`ecc256.badssl.com` (ECDSA, port 443) did not resume and instead failed with
-`(35) the connection is closed` after **61.6 s**, against 24.9 s for the full
-handshake that preceded it. First connections to that host succeed every time
-(24.42 s in the run above) and `tls-v1-2.badssl.com:1012` (RSA, nginx) resumes
-every time, so this is either the ECDSA resumption path or what badssl's 443
-front end does with a rapid repeat, and it was seen once. Worth a look before
-anyone calls resumption finished.
+**The one thing that did not resume, chased down.** During development a
+second connection to `ecc256.badssl.com` failed with `(35) the connection is
+closed` after **61.6 s**, against 24.9 s for the full handshake before it. The
+standing hypothesis was the header bug that `1ceb741` fixed — `a0`/`a1` were
+listed as inputs only in the inline stubs, so the compiler assumed they survived
+a call and a second call could be made on a stale pointer.
 
-**All the numbers in the tables above predate that work** and were measured
-against the `tls.library` at `f535728`. They are the full-handshake costs, which
-is what a first connection to a host still pays.
+**It is not that, and the way to know is cheap.** Build the backend twice
+against the same `tls.library`, once with the fixed header and once with only
+the `"+r"` constraints reverted, and compare the objects:
+
+```
+build/curl-tls/…/vtls/amitls.c.obj      6216 bytes
+build/curl-oldabi/…/vtls/amitls.c.obj   6216 bytes   IDENTICAL
+```
+
+Byte for byte, at `-O2`. The bug needs two stub calls close enough together for
+the compiler to keep the register live across both, which is what
+`src/tools/fetch.c` does — `io_write()` then `io_read()` through one small
+struct in one function. This backend loads `backend->conn` from memory in each
+of `amitls_recv`, `amitls_send`, `amitls_close` and `amitls_data_pending`, so
+there was never a load to eliminate. The generated code was correct by accident
+of shape, not by the constraint being right.
+
+So the 61.6 s remains unexplained, and the most likely answer is the dullest:
+it ran against a `tls.library` built from an uncommitted working tree, mid
+development, which has never existed as a commit. Against `e42db07` the case is
+clean — `ecc256.badssl.com` three times in three separate processes, 14 MHz:
+**23.27 s, then 0.58 s, then 0.58 s**, all three HTTP 200 with the same 684
+bytes.
+
+**The tables above are first connections**, which is what a host still costs
+before it is in the cache. They were first measured against the `tls.library` at
+`f535728` and re-measured against `e42db07` with the non-blocking read in place;
+nothing moved by more than a tick — `tls-v1-2` 6.18 → 5.78 s, `ecc256` 24.42 →
+24.38 s, `www.iana.org` and `example.com` still closed on by the CDN at 23.5 and
+39.5 s, `wrong.host.badssl.com` still refused.
 
 
 ## 12. Conformance, named — and the client access patterns behind it (2026-07-25)

@@ -43,24 +43,30 @@
  *      reads.  So there is no flipping back and forth to do, and no window in
  *      which the descriptor is in the wrong mode.
  *
- *   2. RECEIVING BLOCKS TOO, AND THAT IS THE CORRECT CHOICE HERE.  The obvious
- *      design -- poll the socket with a zero timeout, return CURLE_AGAIN when
- *      it is not readable -- DEADLOCKS, and it is worth writing down why so
- *      nobody re-derives it.  nx_secure keeps undecrypted bytes of its own in
- *      `nx_secure_record_queue_header` when a TCP segment carried more than
- *      one TLS record, which is the ordinary case for a server that writes
- *      headers and body separately.  In that state the socket is NOT readable,
- *      TLSPending() is 0 because no plaintext has been produced yet, and a
- *      whole record is nevertheless sitting there ready to decrypt.  A backend
- *      that answered CURLE_AGAIN would wait on a descriptor that will never
- *      become readable again.
+ *   2. RECEIVING NEEDS THREE QUESTIONS ANSWERED, NOT ONE.  The obvious design
+ *      -- poll the socket with a zero timeout, return CURLE_AGAIN when it is
+ *      not readable -- DEADLOCKS, and it is worth writing down why so nobody
+ *      re-derives it.  nx_secure keeps undecrypted bytes of its own when a TCP
+ *      segment carried more than one TLS record, which is the ordinary case
+ *      for a server that writes headers and body separately.  In that state
+ *      the socket is NOT readable, TLSPending() is 0 because no plaintext has
+ *      been produced yet, and a whole record is nevertheless sitting there
+ *      ready to decrypt.  A backend that answered CURLE_AGAIN would wait on a
+ *      descriptor that will never become readable again.
  *
- *      Answering that question properly needs a "bytes buffered below the
- *      plaintext layer" vector on tls.library, which does not exist.  Until it
- *      does, TLSRead() is called and allowed to block, bounded by
- *      TLSA_Timeout.  It returns the moment a record completes, so on a
- *      transfer that is actually moving this costs nothing; what it costs is
- *      that curl cannot interleave anything else while waiting.
+ *      TLSBuffered() is the vector that answers that half, and amitls_recv()
+ *      asks all three: plaintext ready (TLSPending), ciphertext held
+ *      (TLSBuffered), bytes on the socket (Curl_socket_check with a zero
+ *      timeout).  Only when all three say no does it answer CURLE_AGAIN, and
+ *      then curl waits on the descriptor, which is now genuinely the only
+ *      place data can come from.  So `--max-time` fires during a transfer, the
+ *      progress meter moves and Ctrl-C is read; the handshake is the one place
+ *      that still stops the world.
+ *
+ *      What is NOT removed is a bounded block inside TLSRead() when what is
+ *      buffered turns out to be half a record -- the rest is already on its
+ *      way and TLSA_Timeout is the ceiling.  tls.library's own documentation
+ *      says the same thing about TLSWaitSelect().
  *
  *   3. NO ALPN, SO HTTP/1.1.  tls.library sends no ALPN extension, so
  *      Curl_alpn_set_negotiated() is called with nothing and curl falls back
@@ -98,6 +104,7 @@
 #include "urldata.h"
 #include "cfilters.h"
 #include "connect.h"
+#include "select.h"
 #include "curl_trc.h"
 #include "vtls/vtls.h"
 #include "vtls/vtls_int.h"
@@ -145,15 +152,38 @@ struct amitls_ssl_backend_data {
  */
 static struct Library *amitls_base;
 
+/*
+ * TLSRandom() and TLSBuffered() are the last two entries in tls.library's
+ * vector table and they arrived after version 1.0, which was NOT bumped for
+ * them. So OpenLibrary("tls.library", 1) happily returns a library that does
+ * not have them, and calling one would jump past the (APTR)-1 terminator that
+ * MakeLibrary() stopped at -- on a machine with no memory protection, into
+ * whatever is there.
+ *
+ * lib_NegSize is how long the jump table actually is, and comparing it against
+ * the LVO is the whole check. src/tlslib/tls_netx.c does exactly this against
+ * bsdsocket.library's private vector, for exactly this reason.
+ */
+static bool amitls_has_v2_vectors;
+
 static struct Library *amitls_open_library(struct Curl_easy *data)
 {
   if(!amitls_base) {
     amitls_base = OpenLibrary((CONST_STRPTR)TLS_LIB_NAME,
                               (unsigned long)TLS_LIB_VERSION);
-    if(!amitls_base)
+    if(!amitls_base) {
       failf(data, "https:// needs LIBS:tls.library version %d, and there is "
             "none. It ships with the bsdsocket.library this curl talks to; "
             "the two are a pair.", TLS_LIB_VERSION);
+      return NULL;
+    }
+
+    amitls_has_v2_vectors =
+      (amitls_base->lib_NegSize >= (unsigned short)(-TLS_LVO_TLSBuffered));
+
+    if(!amitls_has_v2_vectors)
+      infof(data, "this tls.library predates TLSRandom()/TLSBuffered(); "
+            "reads will block and Curl_rand() falls back to a weak source");
   }
   return amitls_base;
 }
@@ -407,6 +437,40 @@ static CURLcode amitls_connect(struct Curl_cfilter *cf,
 
 /* ------------------------------------------------------------ transfer --- */
 
+/*
+ * Can TLSRead() make progress without another byte arriving from the network?
+ *
+ * Three places data can be, and a reader that checks fewer than all three
+ * either hangs or blocks when it did not have to:
+ *
+ *   plaintext already decrypted     TLSPending()
+ *   ciphertext held by the library  TLSBuffered()
+ *   bytes on the socket             the descriptor being readable
+ *
+ * The middle one is the one that is easy to miss and the one that hangs; see
+ * the note at the top of this file.
+ */
+static bool amitls_can_read(struct Curl_cfilter *cf, struct Curl_easy *data)
+{
+  struct ssl_connect_data *connssl = cf->ctx;
+  struct amitls_ssl_backend_data *backend = connssl->backend;
+
+  if(TLSPending(amitls_base, backend->conn) > 0)
+    return TRUE;
+
+  if(!amitls_has_v2_vectors)
+    return TRUE;              /* no way to ask: read and let it block */
+
+  if(TLSBuffered(amitls_base, backend->conn) > 0)
+    return TRUE;
+
+  if(backend->sock == CURL_SOCKET_BAD)
+    return TRUE;
+
+  (void)data;
+  return SOCKET_READABLE(backend->sock, 0) > 0;
+}
+
 static CURLcode amitls_recv(struct Curl_cfilter *cf, struct Curl_easy *data,
                             char *buf, size_t len, size_t *pnread)
 {
@@ -424,12 +488,13 @@ static CURLcode amitls_recv(struct Curl_cfilter *cf, struct Curl_easy *data,
   if(len > 0x7FFFFFFFUL)
     len = 0x7FFFFFFFUL;
 
-  /*
-   * Blocking, bounded by TLSA_Timeout. See the note at the top of this file
-   * for why the non-blocking shape deadlocks; the short version is that
-   * nx_secure can be holding a complete undecrypted record while the socket
-   * reports nothing to read.
-   */
+  if(!amitls_can_read(cf, data)) {
+    connssl->io_need = CURL_SSL_IO_NEED_RECV;
+    return CURLE_AGAIN;
+  }
+
+  /* May still block briefly if what is buffered is half a record. The rest is
+     already on its way and TLSA_Timeout is the ceiling. */
   nread = TLSRead(amitls_base, backend->conn, (APTR)buf, (LONG)len);
 
   if(nread > 0) {
@@ -489,9 +554,14 @@ static bool amitls_data_pending(struct Curl_cfilter *cf,
   if(!backend->conn || !amitls_base)
     return FALSE;
 
-  /* Plaintext already decrypted and sitting in the library -- the case the
-     tls.library documentation warns WaitSelect() callers about. */
-  return TLSPending(amitls_base, backend->conn) > 0;
+  /* Both kinds of "the answer is already in memory": plaintext the library has
+     decrypted, and ciphertext it is holding. Either means curl should call
+     recv again rather than wait on a descriptor that will stay quiet. */
+  if(TLSPending(amitls_base, backend->conn) > 0)
+    return TRUE;
+
+  return amitls_has_v2_vectors &&
+         TLSBuffered(amitls_base, backend->conn) > 0;
 }
 
 static void amitls_close(struct Curl_cfilter *cf, struct Curl_easy *data)
@@ -539,20 +609,23 @@ static size_t amitls_version(char *buffer, size_t size)
 }
 
 /*
- * Curl_rand() lands here whenever libcurl is built with TLS, and on this
- * platform there is nothing better to answer with.
+ * Curl_rand() lands here whenever libcurl is built with TLS. NOT the TLS
+ * handshake's own randomness -- that never leaves the library -- but curl's:
+ * multipart boundaries, a Digest cnonce, the salt on curl's session cache
+ * keys, the jitter in the DNS cache.
  *
- * READ THIS BEFORE ASSUMING IT IS CRYPTOGRAPHIC: it is not. The TLS
- * handshake's own randomness does NOT come from here -- nx_secure draws it
- * from the entropy pool bsdsocket.library seeds and maintains, which no
- * published vector exposes to a client. What comes from here is curl's own
- * uses: multipart boundaries, a Digest cnonce, the salt on curl's session
- * cache keys. Those want unpredictability and get a time-seeded LCG.
+ * TLSRandom() is the machine's one entropy pool, the SHA-256 DRBG the session
+ * keys come from, and it is what this asks. It answers -1 until a connection
+ * has been opened in this program, because the pool lives in
+ * bsdsocket.library and tls.library reaches it through the link TLSOpen()
+ * makes -- and curl calls Curl_rand() well before its first https:// URL. So
+ * there is a fallback and it is a time-seeded LCG.
  *
- * The fix is one more vector on tls.library -- TLSRandom(base, buf, len),
- * forwarding to the pool that is already there -- at which point this function
- * becomes three lines and the comment goes away. It is written up in
- * docs/RESEARCH.md 11.8 as the one API this backend asked for and did not get.
+ * The LCG is not cryptographic and is not pretending to be. What keeps that
+ * from mattering is that nothing which needs a secret comes from here: an
+ * http://-only run never reaches TLS at all, and once anything has, the real
+ * pool is answering. Opening tls.library merely to seed a boundary string
+ * would make every http:// fetch depend on a library it does not use.
  */
 static CURLcode amitls_random(struct Curl_easy *data,
                               unsigned char *entropy, size_t length)
@@ -561,6 +634,13 @@ static CURLcode amitls_random(struct Curl_easy *data,
   static bool seeded;
 
   (void)data;
+
+  if(amitls_base && amitls_has_v2_vectors) {
+    LONG got = TLSRandom(amitls_base, (APTR)entropy, (LONG)length);
+
+    if(got == (LONG)length)
+      return CURLE_OK;
+  }
 
   if(!seeded) {
     struct DateStamp ds;
