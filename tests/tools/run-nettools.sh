@@ -71,8 +71,9 @@ BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 NC="$ROOT/$BUILD/src/tools/nc"
 TELNET="$ROOT/$BUILD/src/tools/telnet"
 FTP="$ROOT/$BUILD/src/tools/ftp"
+TRACEROUTE="$ROOT/$BUILD/src/tools/traceroute"
 
-for f in "$SMOKE" "$ADDIF" "$BSD" "$NC" "$TELNET" "$FTP"; do
+for f in "$SMOKE" "$ADDIF" "$BSD" "$NC" "$TELNET" "$FTP" "$TRACEROUTE"; do
     [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
 done
 
@@ -104,6 +105,7 @@ cp "$ADDIF"  "$STAGE/AddNetInterface"
 cp "$NC"     "$STAGE/nc"
 cp "$TELNET" "$STAGE/telnet"
 cp "$FTP"    "$STAGE/ftp"
+cp "$TRACEROUTE" "$STAGE/traceroute"
 
 # What the scripted sessions feed to standard input.
 printf 'GET / HTTP/1.0\r\n\r\n' > "$STAGE/request.txt"
@@ -178,6 +180,24 @@ wait 4
 &SYS:nc -l 7098 -v -w 10 >DH0:nc-self.txt
 wait 4
 SYS:nc 10.0.2.15 7098 -v -w 10 <DH0:greeting.txt >DH0:nc-selfclient.txt
+# ---- traceroute -------------------------------------------------------
+SYS:traceroute ?
+# What SLIRP does with a decrementing TTL is the whole question; the answer
+# is in docs/RESEARCH.md 20, and this is one of the runs it came from.
+#
+#   10.0.2.2   SLIRP answers this one itself, so it is a complete trace.
+#   10.0.2.15  our own address, which is one hop by definition.
+#   8.8.8.8    proxied by SLIRP, which ignores the TTL and returns replies
+#              with the sequence number zeroed.  Every probe is a star, and
+#              that is the emulator rather than the command.
+#   192.0.2.1  TEST-NET-1, and 10.11.12.13 -- addresses the HOST cannot
+#              reach, so SLIRP would answer with an ICMP unreachable quoting
+#              the probe.  It does not; see 20.2.
+SYS:traceroute 10.0.2.2 -m 4 -q 2 -w 3 -n
+SYS:traceroute 10.0.2.15 -m 3 -q 1 -w 3 -n
+SYS:traceroute 8.8.8.8 -m 3 -q 1 -w 3 -n -v
+SYS:traceroute 192.0.2.1 -m 2 -q 1 -w 3 -n -v
+SYS:traceroute 10.11.12.13 -m 2 -q 1 -w 3 -n -v
 # ---- give the inbound connection time to have happened ----------------
 wait 15
 EOF
@@ -253,7 +273,8 @@ CPUARG=()
 set +e
 "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
     "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/nc" "$STAGE/telnet" \
-    "$STAGE/ftp" "$STAGE/AddNetInterface" "$STAGE/commands.txt" \
+    "$STAGE/ftp" "$STAGE/traceroute" \
+    "$STAGE/AddNetInterface" "$STAGE/commands.txt" \
     "$STAGE/request.txt" "$STAGE/greeting.txt" "$STAGE/telnetin.txt" \
     "$STAGE/ftppasv.txt" "$STAGE/ftpactive.txt"
 RC=$?

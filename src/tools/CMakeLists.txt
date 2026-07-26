@@ -108,6 +108,11 @@ aminetxduo_add_tool(tool_nettrace NetTrace SOURCES nettrace.c toolsock.c)
 aminetxduo_add_tool(tool_telnet  telnet   SOURCES telnet.c toolsock.c)
 aminetxduo_add_tool(tool_ftp     ftp      SOURCES ftp.c    toolsock.c)
 
+# traceroute is config-only too, and is the first command here to open a
+# SOCK_RAW descriptor -- so it reaches the raw half of the ABI the same way it
+# reaches every other part of it, through the published vectors.
+aminetxduo_add_tool(tool_traceroute traceroute SOURCES traceroute.c toolsock.c)
+
 # sntp is config-only in the same sense as fetch: it reaches bsdsocket.library
 # through its published vectors and sets the machine's clock through
 # timer.device and battclock.resource.  It does NOT link the vendored NetX Duo
@@ -145,6 +150,6 @@ set_target_properties(tool_smoke PROPERTIES OUTPUT_NAME "ToolsSmoke")
 add_custom_target(tools ALL)
 add_dependencies(tools
     tool_addnetinterface tool_netsetup tool_online tool_offline tool_host
-    tool_fetch tool_nc tool_telnet tool_ftp tool_nettrace
+    tool_fetch tool_nc tool_telnet tool_ftp tool_nettrace tool_traceroute
     tool_sntp
     tool_shownetstatus tool_netstat tool_ping tool_smoke)

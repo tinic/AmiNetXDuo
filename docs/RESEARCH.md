@@ -6659,3 +6659,166 @@ it, `connect()` recorded 0.0.0.0 quite happily — a connected UDP socket is onl
 destination — and the failure surfaced two calls later as *"could not send the request"*,
 which is an error about the wrong subsystem entirely. `fetch.c` already checked
 `h_length != 4`; `sntp` now does too.
+## 20. `traceroute`, `tftp` and `whois` — and what SLIRP will not let anyone test (2026-07-26)
+
+Three commands, and one measurement that decided the design of the first.
+
+### 20.1 The measurement: `IP_TTL` reaches the wire on a raw socket and not on a UDP one
+
+A traceroute is a TTL and a listener. The classic Unix tool sends UDP datagrams to
+ports nothing listens on and reads ICMP PORT_UNREACHABLE to know it has arrived; the
+Windows one sends ICMP echo the whole way and reads the echo reply. Both need
+`SOCK_RAW` to receive TIME_EXCEEDED, so §17's raw socket makes either available on
+paper, and the choice looks like a matter of taste.
+
+It is not. `setsockopt(IPPROTO_IP, IP_TTL)` at `src/bsdsocket/options.c:227` stores the
+value on the socket, and **exactly one send path reads it**: `bsd_raw_send_packet()`
+hands `sock->as_Ttl` to `nxd_ip_raw_packet_send()`. `bsd_send_udp()` calls
+`nxd_udp_socket_send()`, and a NetX Duo UDP socket carries the TTL it was created with
+— `NX_IP_TIME_TO_LIVE`, fixed at `nx_udp_socket_create()` time in `socket.c:821`.
+
+A case label that compiles is not a TTL that reaches the wire, so this was measured
+rather than read. `tests/tools/ttlprobe.c` sets `IP_TTL` on a raw socket and on a UDP
+socket, reads it back, and sends one datagram from each; the A2065 frame dump —
+`tests/trace/a2065pcap.py`, the view from inside the emulated hardware and below every
+line of this stack — says what actually left:
+
+```
+   5 TX ttl=1   10.0.2.15 -> 8.8.8.8   ICMP echo-request  id=16705 seq=1
+   7 TX ttl=5   10.0.2.15 -> 8.8.8.8   ICMP echo-request  id=16706 seq=5
+   9 TX ttl=128 10.0.2.15 -> 8.8.8.8   UDP
+  10 TX ttl=128 10.0.2.15 -> 8.8.8.8   UDP
+```
+
+The probe's own output for those same four sends:
+
+```
+raw ICMP: asked for TTL 1, getsockopt says 1, sendto returned 16 (errno 0)
+raw ICMP: asked for TTL 5, getsockopt says 5, sendto returned 16 (errno 0)
+UDP     : asked for TTL 1, getsockopt says 1, sendto returned 16 (errno 0)
+UDP     : asked for TTL 5, getsockopt says 5, sendto returned 16 (errno 0)
+```
+
+**`getsockopt` reads back 1 and 5 on both sockets and the UDP datagrams leave with 128
+anyway.** The library is not lying — it stored what it was told — but the value never
+reaches the header. Frame 45 of the same capture, an ordinary DNS query, is `ttl=128`
+as well, which is the default and confirms 128 is simply what UDP always sends.
+
+So a UDP-probe traceroute on this stack would send every probe with a TTL of 128 and
+report the destination as the first hop. `src/tools/traceroute.c` is **ICMP echo
+throughout, with no switch to select the other**, because a switch that selects a
+broken behaviour is not an option, it is a trap.
+
+**What would be needed to offer the UDP form**, if it is ever wanted: `bsd_send_udp()`
+would have to apply `sock->as_Ttl` to the datagram. NetX Duo has no per-send TTL
+argument for UDP, so it means either `nx_udp_socket_create()` taking the current value
+and being re-created when it changes, or the `nx_ip_packet_filter` trick §17.3 already
+uses for the URG bit — write the byte on the way past and repair the header checksum
+by RFC 1624. That is a `src/bsdsocket/` change and is not made here.
+
+### 20.2 What FS-UAE's SLIRP does with a TTL: nothing at all
+
+**SLIRP is a user-mode NAT, not a router. It does not decrement the TTL, and it never
+generates ICMP TIME_EXCEEDED.** That was established before anything was concluded from
+a traceroute's output, because a correct traceroute against a NAT that ignores TTL
+looks exactly like a broken one.
+
+The evidence is the same capture. Six probes to 8.8.8.8 with TTL 1, 2, 3, 4, 5 and 6:
+
+```
+  15 TX ttl=1 10.0.2.15 -> 8.8.8.8   ICMP echo-request  id=40490 seq=1
+  16 RX ttl=255 8.8.8.8 -> 10.0.2.15 ICMP echo-reply    id=40490 seq=0
+  17 TX ttl=2 10.0.2.15 -> 8.8.8.8   ICMP echo-request  id=40490 seq=2
+  18 RX ttl=255 8.8.8.8 -> 10.0.2.15 ICMP echo-reply    id=40490 seq=0
+  ...
+  25 TX ttl=6 10.0.2.15 -> 8.8.8.8   ICMP echo-request  id=40490 seq=6
+  26 RX ttl=255 8.8.8.8 -> 10.0.2.15 ICMP echo-reply    id=40490 seq=0
+```
+
+Every probe, whatever its TTL, is answered by an echo reply purporting to come from the
+destination. Not one ICMP type 11 appears anywhere in any run, and neither does a type
+3: `192.0.2.1` (TEST-NET-1) and `10.11.12.13`, addresses the *host* cannot reach, were
+tried specifically to provoke an unreachable that quotes the probe, and SLIRP answered
+one with silence and the other with a forged echo reply.
+
+**And SLIRP zeroes the ICMP sequence number on a proxied reply while preserving the
+identifier** — `seq=1..6` goes out, `seq=0` comes back every time. That is why
+`traceroute 8.8.8.8` prints stars: the replies cannot be attributed to a probe, and
+attributing them anyway would mean matching on the identifier alone, which with three
+queries per hop would credit a stale reply to the wrong probe. The command is right to
+reject them, and `-v` says so rather than leaving it looking like silence:
+
+```
+traceroute to 8.8.8.8 (8.8.8.8), 3 hops max, 60 byte packets
+ 1  (8.8.8.8 sent ICMP type 0) *
+ 2  (8.8.8.8 sent ICMP type 0) *
+ 3  (8.8.8.8 sent ICMP type 0) *
+```
+
+Frames 11–14 are the control: to `10.0.2.2`, which is SLIRP's own alias and is answered
+locally rather than proxied, **both** the identifier and the sequence survive, and the
+trace completes.
+
+### 20.3 Verified on the wire, and inferred — stated separately
+
+**Verified, from the A2065 frame dump:**
+
+| | |
+|---|---|
+| `IP_TTL` on a raw socket reaches the IP header | TTL 1, 2, 3, 4, 5, 6 sent and observed, in order |
+| `IP_TTL` on a UDP socket does **not** | asked 1 and 5, read back 1 and 5, sent 128 and 128 |
+| `IP_TOS` reaches the wire on a raw socket | `-t 16` observed in the header's TOS byte |
+| the ICMP echo requests are well formed | SLIRP and the far side both answer them, so the checksum is right |
+| a raw ICMP socket receives inbound ICMP it did not solicit | the unattributable echo replies above arrive and are reported |
+| a complete trace, end to end | `traceroute 10.0.2.2` and `traceroute 10.0.2.15` — one hop each, with timings |
+
+```
+===== SYS:traceroute 10.0.2.2 -m 4 -q 2 -w 3 -n =====
+traceroute to 10.0.2.2 (10.0.2.2), 4 hops max, 60 byte packets
+ 1  10.0.2.2  12.0 ms  11.6 ms
+```
+
+**Not verified, because FS-UAE cannot produce the input:**
+
+| | |
+|---|---|
+| attribution of an ICMP TIME_EXCEEDED to the probe that caused it | SLIRP never sends one |
+| the hop-by-hop walk past the first hop | same |
+| the `!H` / `!N` / `!X` unreachable annotations | SLIRP never sends a type 3 either |
+
+Those three are the quoted-datagram path in `tr_classify()` — parse the ICMP header,
+step over its eight bytes, parse the quoted IP header, check that the quoted payload is
+our own echo with our identifier and sequence. **It is written and it is not proven.**
+What is proven is everything either side of it: the probe leaves with the TTL asked for,
+and inbound ICMP of a type we did not solicit reaches the raw socket and is examined —
+the filter in `raw.c` keys on the IP protocol number, not on the ICMP type, so a type 11
+takes exactly the same path to the reader as the type 0s that demonstrably arrive.
+
+**This is a limitation of the emulator and not of the stack**, and the distinction is
+not rhetorical: the TTL half is the half that lives in our code, and it is the half that
+is measured on the wire. What is missing is a router between the guest and the
+destination, and FS-UAE does not contain one. Confirming the rest needs real hardware on
+a real network with at least one router in the path — the same class of gap as test 41
+in §17.5, and recorded the same way rather than papered over.
+
+### 20.4 The option set is Roadshow's, less three it cannot honestly back
+
+```
+traceroute MAXTTL=-m/N/K,NUMERIC=-n/S,QUERIES=-q/N/K,TOS=-t/N/K,WAIT=-w/N/K,
+           VERBOSE=-v/S,HOST/A,PACKETSIZE/N/K
+```
+
+Roadshow's names and short forms, so a habit carries over. Three of its options are
+**absent rather than accepted and ignored**:
+
+| | |
+|---|---|
+| `-p PORT` | the destination port of a UDP probe. There are no UDP probes here, so there is no port. |
+| `-r DONTROUTE` | `SO_DONTROUTE` is not in `bsd_setsockopt()` and NetX Duo has nothing to implement it with. |
+| `-s SOURCE` | `bind()` on a raw socket records an address and nothing more — NetX Duo binds sockets to ports, and a raw datagram's source address comes from the route (`socket.c:902`). |
+
+A traceroute that accepts `-s` and ignores it is one that lies about which interface it
+went out of, which is worse than not offering it.
+
+`PACKETSIZE` is the whole IP datagram, which is what the name has always meant, floored
+at 28 (a header and an echo header with nothing after them) and defaulting to 60.

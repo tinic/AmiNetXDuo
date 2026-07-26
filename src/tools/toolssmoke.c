@@ -66,7 +66,12 @@ static const char version_tag[] __attribute__((used)) =
  *                has had time to reach its accept().
  */
 #define COMMANDS    "DH0:commands.txt"
-#define MAX_COMMANDS    40
+/*
+ * The ceiling is a silent truncation, so it is set well above what any staged
+ * list uses: a run that quietly stops reading at line 40 looks exactly like a
+ * set of commands that were never written.
+ */
+#define MAX_COMMANDS    96
 #define MAX_LINE        160
 
 static const char *const commands[] =
