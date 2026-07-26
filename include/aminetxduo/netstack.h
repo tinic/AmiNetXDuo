@@ -163,10 +163,26 @@ LONG netstack_resolve6(const char *name, ULONG addr_out[4],
 /*
  * Resolver. Implemented over NetX Duo addons/dns; used by gethostbyname and
  * friends in bsdsocket.library. Blocking, with the timeout in ticks.
+ *
+ * In an AMINETXDUO_MDNS build a name ending in ".local" is sent to the RFC
+ * 6762 responder instead of to the unicast name servers, and never to both.
+ * Callers do not need to know: the branch is inside netstack_resolve().
  */
 LONG    netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks);
 LONG    netstack_resolve_reverse(ULONG addr, char *name_out, ULONG name_len,
                                  ULONG timeout_ticks);
+
+#ifdef AMINETXDUO_MDNS
+/*
+ * The name this machine actually answers to on the local wire, WITHOUT the
+ * ".local" -- or NULL if mDNS is not running or lost every probe.
+ *
+ * Not necessarily the configured HOSTNAME: RFC 6762 9 renames on a collision,
+ * so anything that shows this to a user must show what was claimed rather
+ * than what was asked for.
+ */
+const char *netstack_mdns_hostname(VOID);
+#endif
 
 #ifdef __cplusplus
 }

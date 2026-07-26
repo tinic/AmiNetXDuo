@@ -228,6 +228,15 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
     ami_netstack_capture_stop(ns);
 #endif
 
+#ifdef AMINETXDUO_MDNS
+    /*
+     * Before the resolver and long before nx_ip_delete(): stopping the
+     * responder sends the RFC 6762 10.1 goodbye packet, and a goodbye needs a
+     * working IP instance to leave on.
+     */
+    ami_netstack_mdns_stop(ns);
+#endif
+
     ami_netstack_dns_stop(ns);
 
     if (ns->ns_AutoIpCreated)
@@ -1011,6 +1020,33 @@ static LONG ami_ns_bring_up(VOID)
 
     AMI_INFO("netstack: starting the resolver");
     (VOID)ami_netstack_dns_start(ns);
+
+#ifdef AMINETXDUO_MDNS
+    /*
+     * ---- 9. mDNS ---------------------------------------------------------
+     *
+     * After the addresses and after the resolver, and both orderings matter.
+     *
+     * After the addresses, because the record this machine announces IS its
+     * address -- starting first would claim a name that resolves to 0.0.0.0
+     * until the lease arrived. (The module does watch for later changes, so
+     * this is about the first announcement being right, not about it being
+     * possible.)
+     *
+     * After the resolver, because netstack_resolve() sends .local here and
+     * everything else to the DNS client; the two are one lookup path and
+     * bringing half of it up first would leave a window in which a .local
+     * name went to the unicast servers, which is exactly what RFC 6762 6.7
+     * says must not happen.
+     *
+     * Failure is not fatal and is not waited for. Probing takes about a
+     * second (three probes, 250 ms apart) and it happens on the module's own
+     * thread; blocking startup on it would add that second to every boot to
+     * find out something no caller of netstack_startup() acts on.
+     */
+    AMI_INFO("netstack: starting mDNS");
+    (VOID)ami_netstack_mdns_start(ns);
+#endif
 
     ami_netstack_leave(&caller);
 

@@ -55,6 +55,18 @@ if(AMINETXDUO_BPF)
     # can disagree about whether the taps exist.
     add_compile_definitions(AMINETXDUO_BPF)
 endif()
+
+# mDNS (RFC 6762).  On by default, and it pairs with the RFC 3927 link-local
+# work: a machine that fell back to 169.254.x.x has an address nothing on the
+# network can name, which is the hole this fills.  Global for the same reason
+# AMINETXDUO_BPF is -- the netstack's mDNS attachment and the resolver's
+# ".local" branch are compiled out without it, and two objects that disagreed
+# about whether the module exists would disagree about netstack_resolve().
+option(AMINETXDUO_MDNS "Build the mDNS responder and .local resolver" ON)
+if(AMINETXDUO_MDNS)
+    add_compile_definitions(AMINETXDUO_MDNS)
+endif()
+
 option(AMINETXDUO_TESTS "Build the on-Amiga test harnesses"           ON)
 
 # The SANA-II raw-framing probe posts a CMD_READ with SANA2IOF_RAW and takes it
@@ -174,16 +186,44 @@ target_include_directories(netxduo PUBLIC
 target_link_libraries(netxduo PUBLIC threadx)
 
 # NetX Duo add-ons we actually use.
-add_library(netxduo_addons STATIC
+set(NETXDUO_ADDON_SOURCES
     "${AMINETXDUO_NETXDUO}/addons/dhcp/nxd_dhcp_client.c"
     "${AMINETXDUO_NETXDUO}/addons/dns/nxd_dns.c"
     "${AMINETXDUO_NETXDUO}/addons/auto_ip/nx_auto_ip.c")
-target_include_directories(netxduo_addons PUBLIC
-    ${AMINETXDUO_CORE_INCLUDES}
+set(NETXDUO_ADDON_INCLUDES
     "${AMINETXDUO_NETXDUO}/addons/dhcp"
     "${AMINETXDUO_NETXDUO}/addons/dns"
     "${AMINETXDUO_NETXDUO}/addons/auto_ip")
+
+if(AMINETXDUO_MDNS)
+    list(APPEND NETXDUO_ADDON_SOURCES "${AMINETXDUO_NETXDUO}/addons/mdns/nxd_mdns.c")
+    list(APPEND NETXDUO_ADDON_INCLUDES "${AMINETXDUO_NETXDUO}/addons/mdns")
+endif()
+
+add_library(netxduo_addons STATIC ${NETXDUO_ADDON_SOURCES})
+target_include_directories(netxduo_addons PUBLIC
+    ${AMINETXDUO_CORE_INCLUDES}
+    ${NETXDUO_ADDON_INCLUDES})
 target_link_libraries(netxduo_addons PUBLIC netxduo)
+
+if(AMINETXDUO_MDNS)
+    # The mDNS module's tunables, set HERE and PUBLIC rather than in
+    # port/netxduo-amiga/inc/nx_user.h, because they are the add-on's knobs and
+    # not the core's -- nx_user.h changes the layout of NX_IP and NX_PACKET for
+    # the whole tree, and nothing about mDNS should reach that far.  PUBLIC so
+    # nxd_mdns.c and src/netstack/netstack_mdns.c cannot disagree about the
+    # size of an NX_MDNS.
+    #
+    # NX_MDNS_ENABLE_IPV6 is deliberately NOT set even in the IPv6 build: the
+    # v6 half wants MLD group membership this stack does not run, and the whole
+    # point of the module here is that a machine is reachable by name over the
+    # network it actually has.
+    target_compile_definitions(netxduo_addons PUBLIC
+        # RFC 6762 §9 renaming stops after this many collisions and reports
+        # failure.  Four is plenty: past "amiga (4)" the answer is to set
+        # HOSTNAME, not to keep counting.
+        NX_MDNS_CONFLICT_COUNT=4)
+endif()
 
 # --------------------------------------------------------- our components ---
 
@@ -274,3 +314,4 @@ message(STATUS "  arch flags .... ${AMIGA_ARCH_FLAGS}")
 message(STATUS "  IPv6 .......... ${AMINETXDUO_IPV6}")
 message(STATUS "  TLS ........... ${AMINETXDUO_TLS}")
 message(STATUS "  BPF ........... ${AMINETXDUO_BPF}")
+message(STATUS "  mDNS .......... ${AMINETXDUO_MDNS}")

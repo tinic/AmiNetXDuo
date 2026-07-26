@@ -89,10 +89,39 @@ extern void ami_random_srand(unsigned int seed);
 #endif
 
 
-/* Endian conversion.  All no-ops on m68k.  */
+/* Endian conversion.  All no-ops on m68k -- but SPELLED as a no-op assignment
+ * rather than as nothing at all, and that is load-bearing.
+ *
+ * Every little-endian port defines these as `a = ((a >> 8) | (a << 8))` and so
+ * on: an ASSIGNMENT EXPRESSION, which is legal in statement position AND in
+ * the middle of a larger expression, and which requires `a` to be an lvalue.
+ * The empty definition this used to carry is legal only in the first of those,
+ * and the difference is invisible until a caller uses the second form.  One
+ * does:
+ *
+ *     addons/mdns/nxd_mdns.c:8489
+ *       *(USHORT *)(... + NX_MDNS_FLAGS_OFFSET) |= NX_CHANGE_USHORT_ENDIAN(tc_bit);
+ *
+ * which expanded to `x |= ;` and would not compile.  It is the only such use
+ * in the whole vendored tree -- six others exist, all in nx_icmpv6_*, all in
+ * statement position -- so it is a defect in the add-on that no big-endian
+ * NetX Duo port has ever run into, because as far as we can tell nobody has
+ * ever built the mDNS add-on on one.  Fixing it HERE rather than in
+ * third_party/ keeps the standing rule that vendored source is not modified,
+ * and it is a correction rather than a workaround: this now evaluates to the
+ * value, and requires an lvalue, exactly as the little-endian definition does.
+ *
+ * `((a) = (a))` and not the shorter `(a)`, for one measured reason.  The plain
+ * form makes every statement use a bare expression with no effect, and two of
+ * those are in OUR code (src/net68k/n68k_checksum.c), which unlike anything in
+ * third_party/ is compiled with -Wall -Wextra -Werror by cmake/ci-warnings
+ * .cmake.  All four cross configurations failed on -Werror=unused-value.  A
+ * self-assignment has an effect as far as the front end is concerned, compiles
+ * to nothing, and keeps both call positions legal.
+ */
 
-#define NX_CHANGE_ULONG_ENDIAN(a)
-#define NX_CHANGE_USHORT_ENDIAN(a)
+#define NX_CHANGE_ULONG_ENDIAN(a)   ((a) = (a))
+#define NX_CHANGE_USHORT_ENDIAN(a)  ((a) = (a))
 
 #ifndef htons
 #define htons(val) (val)

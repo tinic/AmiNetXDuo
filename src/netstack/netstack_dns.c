@@ -227,6 +227,47 @@ LONG netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks)
     if (ami_netstack_enter(&caller) != AMI_NET_OK)
         return AMI_NET_ERR_KERNEL;
 
+#ifdef AMINETXDUO_MDNS
+    /*
+     * ".local" IS mDNS, and it is not a fallback.
+     *
+     * RFC 6762 6.7 is explicit that a name ending in ".local" must be sent to
+     * 224.0.0.251 and NEVER to a unicast DNS server -- and it is not merely a
+     * matter of taste. A great many home routers answer any name at all with
+     * their own NXDOMAIN-substitute search page, and a few forward .local to
+     * the internet, where somebody else's server answers. So the branch is
+     * exclusive on purpose: no mDNS answer means the name does not exist,
+     * which is the truth, and asking the unicast servers afterwards could only
+     * produce a wrong one.
+     *
+     * Doing it HERE rather than in a new command is what makes this reach the
+     * whole tree. Every name any AmigaOS program looks up arrives at this
+     * function -- gethostbyname() and getaddrinfo() in src/bsdsocket/ both
+     * route through it -- so `host amiga.local`, `ping amiga.local` and
+     * `fetch http://amiga.local/` all work with no change to any of them, and
+     * so does somebody else's program that was written for Roadshow.
+     *
+     * The hosts file above still wins, deliberately: a name pinned in
+     * DEVS:Internet/hosts is an instruction from the machine's owner and
+     * outranks anything the network claims, .local included.
+     */
+    if (ami_netstack_mdns_is_local(name))
+    {
+        LONG err = ami_netstack_mdns_resolve(name, &address, timeout_ticks);
+
+        ami_netstack_leave(&caller);
+
+        if (err != AMI_NET_OK)
+        {
+            AMI_INFO("netstack: nothing on this network answers to '%s'", name);
+            return AMI_NET_ERR_NONAME;
+        }
+
+        *addr_out = address;
+        return AMI_NET_OK;
+    }
+#endif
+
     status = nx_dns_host_by_name_get(&ns->ns_Dns, (UCHAR *)name, &address,
                                      timeout_ticks);
 

@@ -17,6 +17,9 @@
 #include "nxd_dhcp_client.h"
 #include "nxd_dns.h"
 #include "nx_auto_ip.h"
+#ifdef AMINETXDUO_MDNS
+#include "nxd_mdns.h"
+#endif
 
 #include <exec/types.h>
 
@@ -234,6 +237,16 @@ VOID ami_netstack_capture_stop(AmiNetStack *ns);
 
 LONG ami_netstack_dns_start(AmiNetStack *ns);
 VOID ami_netstack_dns_stop(AmiNetStack *ns);
+
+#ifdef AMINETXDUO_MDNS
+/* netstack_mdns.c -- the RFC 6762 responder, and the ".local" branch
+   netstack_resolve() takes before it reaches the unicast DNS client. */
+LONG ami_netstack_mdns_start(AmiNetStack *ns);
+VOID ami_netstack_mdns_stop(AmiNetStack *ns);
+BOOL ami_netstack_mdns_is_local(const char *name);
+LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
+                               ULONG timeout_ticks);
+#endif
 
 /* The singleton, without the "is it up" filtering the public accessor does. */
 AmiNetStack *ami_netstack_raw(VOID);

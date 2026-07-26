@@ -22,6 +22,13 @@ if(AMINETXDUO_BPF)
     list(APPEND NETSTACK_SOURCES netstack_capture.c)
 endif()
 
+# mDNS: the RFC 6762 responder and the ".local" branch in netstack_resolve().
+# Same arrangement as IPv6 above -- a build without it does not compile the
+# file, so the floor build pays nothing, not even a test on a flag.
+if(AMINETXDUO_MDNS)
+    list(APPEND NETSTACK_SOURCES netstack_mdns.c)
+endif()
+
 add_library(aminetxduo_netstack STATIC ${NETSTACK_SOURCES})
 
 target_include_directories(aminetxduo_netstack
