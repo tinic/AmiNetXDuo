@@ -84,6 +84,8 @@ BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/ShowNetStatus" \
          "$TOOLS/netstat" "$TOOLS/ping" "$TOOLS/Online" "$TOOLS/Offline" \
+         "$TOOLS/CheckNetConfig" "$TOOLS/GetNetStatus" "$TOOLS/AddNetRoute" \
+         "$TOOLS/DeleteNetRoute" "$TOOLS/NetShutdown" \
          "$BSD"; do
     [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
 done
@@ -110,7 +112,8 @@ mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
-for t in AddNetInterface ShowNetStatus netstat ping Online Offline; do
+for t in AddNetInterface ShowNetStatus netstat ping Online Offline \
+         CheckNetConfig GetNetStatus AddNetRoute DeleteNetRoute NetShutdown; do
     cp "$TOOLS/$t" "$STAGE/$t"
 done
 
@@ -141,6 +144,16 @@ SYS:Offline eth0
 SYS:ShowNetStatus
 SYS:Online eth0
 SYS:ShowNetStatus
+SYS:CheckNetConfig
+SYS:GetNetStatus
+SYS:GetNetStatus CHECK=INTERFACES,BCASTINTERFACES,RESOLVER,ROUTES,DEFAULTROUTE
+SYS:AddNetRoute NETDESTINATION=192.168.77.0 GATEWAY=10.0.2.2
+SYS:netstat -r
+SYS:DeleteNetRoute DESTINATION=192.168.77.0
+SYS:DeleteNetRoute DEFAULTGATEWAY=10.0.2.2
+SYS:AddNetRoute DEFAULTGATEWAY=10.0.2.2
+SYS:NetShutdown
+SYS:GetNetStatus CHECK=INTERFACES
 EOF
 
 # ------------------------------------------------------------------ run ---
@@ -153,7 +166,9 @@ set +e
 "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
     "$STAGE/AddNetInterface" "$STAGE/ShowNetStatus" "$STAGE/netstat" \
-    "$STAGE/ping" "$STAGE/Online" "$STAGE/Offline"
+    "$STAGE/ping" "$STAGE/Online" "$STAGE/Offline" \
+    "$STAGE/CheckNetConfig" "$STAGE/GetNetStatus" "$STAGE/AddNetRoute" \
+    "$STAGE/DeleteNetRoute" "$STAGE/NetShutdown"
 RUN_RC=$?
 set -e
 
@@ -276,6 +291,79 @@ if grep -Eq '0% packet loss|[1-9][0-9]* received' "$REPORT"; then
 else
     fail "ping reported no packets received at all"
 fi
+
+# ---- the lifecycle commands, against the stack that is up -----------------
+#
+# These five were written after the two halves above and are asserted the same
+# way, because they can fail the same way: a route command that prints a
+# success line while adding nothing, or a GetNetStatus that answers "not ready"
+# because it cannot see in, would both pass a test written against exit status
+# alone.  So each one is checked on what it PRINTED and on the number it
+# RETURNED, and the two have to agree.
+
+# The return code of one command in the transcript, by its command line.
+rc_of() {
+    awk -v want="===== $1 =====" '
+        $0 == want { on = 1; next }
+        on && /^----- rc / { print $3; exit }
+    ' "$REPORT"
+}
+
+check_rc() {
+    local want="$1" cmd="$2" why="$3"
+    local got
+    got=$(rc_of "$cmd")
+    if [ "$got" = "$want" ]; then
+        pass "$why (rc $got)"
+    else
+        fail "$why -- '$cmd' returned '$got', not $want"
+    fi
+}
+
+# CheckNetConfig must find nothing wrong with a configuration that demonstrably
+# works.  This is the false-positive half: a checker that complains about the
+# machine it is running on correctly is worse than no checker.
+check_rc 0 "SYS:CheckNetConfig" \
+    "CheckNetConfig passes a configuration that works"
+
+# GetNetStatus, on a machine that has a lease, a gateway and a name server from
+# SLIRP: every one of the five must be satisfied.
+check_rc 0 \
+    "SYS:GetNetStatus CHECK=INTERFACES,BCASTINTERFACES,RESOLVER,ROUTES,DEFAULTROUTE" \
+    "GetNetStatus finds the network ready"
+
+# A route really added, and really visible afterwards.  netstat -r reads the
+# same table through a different command, so the second line is the one that
+# rules out AddNetRoute having printed a success it did not achieve.
+check_rc 0 "SYS:AddNetRoute NETDESTINATION=192.168.77.0 GATEWAY=10.0.2.2" \
+    "AddNetRoute added a route"
+
+# Two blocks carry this header -- one before the route was added and one
+# after -- so the scan must cover both rather than stopping at the first.
+if awk '$0 == "===== SYS:netstat -r =====" { on = 1; next }
+        on && /^----- / { on = 0 }
+        on && /192\.168\.77\.0/ { found = 1 }
+        END { exit !found }' "$REPORT"; then
+    pass "netstat -r shows the route that was added"
+else
+    fail "netstat -r does not show 192.168.77.0 -- AddNetRoute added nothing"
+fi
+
+check_rc 0 "SYS:DeleteNetRoute DESTINATION=192.168.77.0" \
+    "DeleteNetRoute removed it again"
+
+# The default route, cleared and set again.  Both halves go through
+# NETCTRL_GATEWAY_CLEAR/SET, which exist in every build of this stack.
+check_rc 0 "SYS:DeleteNetRoute DEFAULTGATEWAY=10.0.2.2" \
+    "DeleteNetRoute cleared the default route"
+check_rc 0 "SYS:AddNetRoute DEFAULTGATEWAY=10.0.2.2" \
+    "AddNetRoute set it back"
+
+# NetShutdown, and the proof that it did something: the same question that
+# answered 0 above must answer 5 afterwards.
+check_rc 0 "SYS:NetShutdown" "NetShutdown stopped the interfaces"
+check_rc 5 "SYS:GetNetStatus CHECK=INTERFACES" \
+    "and the network is no longer ready"
 
 echo
 if [ "$FAILED" -ne 0 ]; then

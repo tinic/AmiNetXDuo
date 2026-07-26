@@ -1,0 +1,2 @@
+# A router on a network this machine is not on.
+GATEWAY = 10.99.0.1

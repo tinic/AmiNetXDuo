@@ -1,0 +1,5 @@
+# A correct interface, so the checker has something to be quiet about.
+DEVICE  = a2065.device
+UNIT    = 0
+ADDRESS = 192.168.1.10
+NETMASK = 255.255.255.0

@@ -1,0 +1,7 @@
+# The driver does not exist on this machine.  Nothing about this file is
+# malformed, which is the point: only a checker that looks at the machine can
+# find it.
+DEVICE  = nosuchcard.device
+UNIT    = 0
+ADDRESS = 192.168.1.20
+NETMASK = 255.255.255.0

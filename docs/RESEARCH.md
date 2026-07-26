@@ -8223,3 +8223,203 @@ answer to be that none of the suspects were involved. The stale account in
 `src/tools/ping.c` has been rewritten in place rather than deleted, because the
 next person to read a serial trace that stops mid-command needs to know that a
 trace stopping is not evidence about the last line in it.
+
+
+## 26. Six Roadshow commands, five of them written (2026-07-26)
+
+§22 gave a Shell command a way to reach the running stack. This is what that made
+writable: the part of Roadshow's command set we had never shipped. Roadshow 1.15 and
+AmiTCP_NG both have all six; we had none of them, and the reason was never taste — a
+command that cannot reach the stack cannot start one, stop one, or route through one.
+
+**The provenance rule, restated because it is the whole basis for doing this at all.**
+Roadshow's documentation was read for one thing: the argument templates. Those are
+interface facts — a script written against `AddNetRoute VIA=…` has to keep working — and
+matching them is the point. Nothing else was taken. Every description, every diagnostic
+and every comment in `src/tools/` here is written from scratch, and AmiTCP_NG was not
+opened at all: it is GPL, this project is MIT throughout, and that is one of its few
+genuine advantages over both of them.
+
+One name was deliberately **not** matched. Roadshow's checker is `CheckRoadshowConfig`;
+ours is `CheckNetConfig`, because we are not Roadshow and a command name should not claim
+to be.
+
+### 26.1 What shipped, and what did not
+
+| | template | state |
+|---|---|---|
+| `CheckNetConfig` | `QUIET/S,VERBOSE/S` | ships |
+| `GetNetStatus` | `CHECK/K,QUIET/S` | ships |
+| `NetShutdown` | `TIMEOUT/N,QUIET/S` | ships |
+| `AddNetRoute` | `QUIET/S,DST=DESTINATION/K,HOSTDST=HOSTDESTINATION/K,NETDST=NETDESTINATION/K,VIA=GATEWAY/K,DEFAULT=DEFAULTGATEWAY/K` | ships |
+| `DeleteNetRoute` | `QUIET/S,DST=DESTINATION/K,DEFAULT=DEFAULTGATEWAY/K` | ships |
+| `RemoveNetInterface` | `INTERFACE/K,QUIET/S,FORCE/S` | **not written** |
+| `ConfigureNetInterface` | `INTERFACE/A,…` | **not written** |
+
+The last two are not deferred for time. They are blocked on capabilities the stack does
+not have, and §26.5 says which — a command that took the arguments and could not act on
+them would be exactly the class of defect §22 exists to stop.
+
+### 26.2 `CheckNetConfig`, and the checks a parser cannot make
+
+This is the one worth having. A wrong configuration does not announce itself: the stack
+comes up, every field it prints is individually correct, and nothing works. The installer
+only helps at install time, and after that nothing reads the files and says *line 3 names
+a driver you do not have*.
+
+`src/config` already reports bad syntax, unknown keywords, a missing `DEVICE` line and a
+static interface with no `ADDRESS`, each with a file and a line number, through the
+`AmiCfgReporter` hook that `tool_config_watch()` installs. All of that is **forwarded**
+rather than reimplemented — `cnc_report()` is four lines and hands the parser's own
+`AmiCfgProblem` straight to the same formatter everything else here uses. What the command
+adds is the set of checks that need more than the line in front of them:
+
+* the driver named is on this machine, and the **unit** named opens — asked of the
+  hardware through `tool_device_probe()`, not guessed at;
+* the netmask is a mask at all (a contiguous run of ones), and the address is a host on
+  it rather than the network address or the broadcast address;
+* the router is on a network one of the interfaces is on;
+* no two interface files claim the same card, or the same address;
+* a name server is reachable, either directly or through a default route that exists;
+* the netdb files parse as the columns they are meant to be.
+
+**It works with the network down**, which is the whole point: the machine that needs
+checking is the one where the stack did not come up. It never opens `bsdsocket.library`.
+
+Three decisions in it are worth recording because each was a bug first.
+
+**The probe is skipped while the network is running.** The stack holds the card's driver
+open, and a second `OpenDevice()` of a unit already in use fails — so probing would report
+a working interface as broken on precisely the machine where it is demonstrably working.
+Whether the card opens is answered by the network being up.
+
+**The duplicate-card finding names the drawer, not a file.** The first version attributed
+it to whichever of the two interfaces sorted later, which on the test configuration was
+`eth0` — the *correct* one. Nothing here can tell which of two files is the mistake, so
+both are named and neither is accused.
+
+**One assertion in the test is the reverse of all the others.** `DEVS:Internet/name_resolution`
+in the broken fixture names `8.8.8.8`, which is not on this machine's network — and is
+reachable, because a default route exists. It must produce no finding. A checker that
+fires on correct configuration gets ignored, and then it protects nothing; the same
+reasoning `tests/tools/run-livetools.sh` already records for its forbidden-phrase list.
+
+`DEVS:Internet/networks` is deliberately **not** checked for the same reason: its second
+column may be written short (`10`, `192.168.1`), and a checker that flagged those would
+fire on correct files.
+
+### 26.3 `GetNetStatus`: the return code is the interface
+
+`ShowNetStatus` prints a table for a person. This returns a number for a script, and that
+is the entire difference. A startup script that has to wait for the network cannot parse
+a table.
+
+```
+    0   every condition asked about is satisfied
+    5   at least one is not          <- what IF WARN tests
+   10   the command could not find out
+```
+
+The third is not decoration. A `bsdsocket.library` that is somebody else's cannot be
+asked, and answering "not ready" would send the reader to fix a network that is fine.
+That is a failure to find out, not a verdict.
+
+Two of Roadshow's six conditions mean something specific here and are documented in the
+command rather than left to be inferred. `PTPINTERFACES` is **never** satisfied: a
+point-to-point interface is SLIP or PPP, and every interface this stack attaches is a
+SANA-II Ethernet device with a hardware address, so the honest answer is "none" rather
+than "none found". `ROUTES` is satisfied by the routes that exist rather than by a routing
+table, because the directly-attached prefix of an interface is a real route.
+
+It answers from the **same** `ToolSnapshot` that `ShowNetStatus` and `netstat` print from.
+Three commands that disagreed about whether the network was up would be worse than having
+only two.
+
+### 26.4 `AddNetRoute` / `DeleteNetRoute`, and the netmask that is not in the template
+
+Roadshow's templates have nowhere to write a netmask, so one has to be inferred, and the
+rule is stated in the source rather than left to be discovered: `HOSTDESTINATION` is /32,
+`NETDESTINATION` takes the mask covering the octets that are not zero, and `DESTINATION`
+is whichever of the two the address looks like. A prefix length written into the address
+(`10.1.2.0/24`) overrides all of it — that is a superset of `<IP>`, not a new keyword, so
+the template is still Roadshow's.
+
+`DeleteNetRoute` infers nothing. It reads the live table and deletes the entry the
+destination falls in, with the netmask **that entry really has** — which is the only way
+to implement a template with no netmask in it, and means a route added with any idea of
+the mask can be removed by naming where it goes. It matches **static entries only**: a
+directly-attached prefix is a real route that `netstat -r` prints, but it belongs to the
+interface's address and `nx_ip_static_route_delete()` cannot remove it, so matching one
+would turn *that is not yours to delete* into an unexplained failure from the stack.
+
+**The bug the emulator caught, and no unit test would have.** `dest &= mask` sat at the
+end of the shared parse block. On the add path `mask` is set by then; on the delete path
+it is still zero, because the mask has not been read out of the table yet. So every
+`DeleteNetRoute DESTINATION=192.168.77.0` asked for `0.0.0.0` and was told, correctly and
+uselessly, that there was no route to it. The command compiled, linked, printed a
+well-formed diagnostic and exited with a defensible code. Only running it against a route
+that was demonstrably there found it.
+
+**And the harness caught a second thing that was not in the commands at all.** The first
+live run refused both route commands with *this stack has no routing table* — correctly,
+because `NETSTATUS_SYS_ROUTING` was clear in the `bsdsocket.library` that had been staged.
+`NX_ENABLE_IP_STATIC_ROUTING` had just been turned on in `port/netxduo-amiga/inc/nx_user.h`
+and only `--target tools` had been rebuilt. The refusal is the design working: the flag is
+read **before** anything is attempted, so a stale library produces a command that says why
+rather than one that silently does nothing.
+
+### 26.5 `NetShutdown` stops the traffic, and says what it cannot stop
+
+Roadshow's own documentation for this command says, in its FUNCTION section, that it stops
+all running interfaces. That is exactly what ours does, and the honest part is what it says
+afterwards.
+
+The stack is a singleton inside `bsdsocket.library`; it comes up on that library's first
+`OpenLibrary()` and goes down when the last opener closes (`src/bsdsocket/library.c`).
+`AddNetInterface` starts the network *by* opening the library and never closing it, and
+that deliberately leaked reference is what keeps the interface up after the command exits.
+No other command holds that reference, so no other command can drop it. The library stays
+in memory with its ThreadX kernel running until a reboot.
+
+What is stoppable is the traffic. Every interface goes down through
+`NETCTRL_INTERFACE_DOWN` — the same call `Offline` makes — and afterwards nothing is sent
+and nothing is received. The command says that in those words. A command that claimed to
+have shut the stack down and left it running would be worse than one that explains the
+distinction.
+
+**`RemoveNetInterface` is blocked on this same seam and was not written.** Its documented
+purpose is to make the stack forget an interface *so that it may be added again with
+different parameters*. There is no detach: `include/aminetxduo/netstack.h` has
+`netstack_interface_up/down` and nothing else, `NetStatusControl` has no operation for it,
+and interfaces are read once at startup — `AddNetInterface` already tells a user who adds
+a file to a running stack to reboot. The command would take its arguments and be unable to
+do the one thing its name promises. It needs a `netstack_interface_detach()` and a
+`NETCTRL_` selector to reach it, both outside `src/tools/`.
+
+**`ConfigureNetInterface` was not written for a different reason.** The part of its
+template this stack can act on — `ONLINE`, `OFFLINE`, `UP`, `DOWN` — is exactly what
+`Online` and `Offline` already do, and the part that would justify a separate command
+(`ADDRESS`, `NETMASK`, `CONFIGURE=DHCP`, `LEASE`, `ALIASADDR`) needs a control operation
+that can change a live interface's addressing, which does not exist. What is left is a
+command that mostly refuses.
+
+### 26.6 What the tests assert, and why there are two of them
+
+`tests/tools/run-livetools.sh` was extended rather than duplicated: it already boots once,
+brings the stack up with `AddNetInterface eth0` and runs the shipped executables from a
+staged directory. The new half checks each command on **what it printed and on what it
+returned**, and requires the two to agree — a route command that printed a success line
+while adding nothing, or a `GetNetStatus` that answered "not ready" because it could not
+see in, would both pass a test written against exit status alone. So `AddNetRoute` is
+followed by `netstat -r`, which reads the same table through a different command, and
+`NetShutdown` is followed by the same `GetNetStatus CHECK=INTERFACES` that answered 0
+before it and must answer 5 after.
+
+`tests/tools/run-checkconfig.sh` is a second boot and needs to be, because its whole
+subject is a **broken** `DEVS:`, which the live test cannot have and still be live. The
+fixture in `tests/tools/checkconfig/devs` is wrong in seven ways a parser cannot see, and
+right in one way that must not be complained about. The same boot runs the other four
+commands with no stack at all, which is the state their argument handling has to survive.
+
+Two boots, and the second earns its place: between them they cover the working machine and
+the broken one, which are the two a user is ever on.

@@ -1,0 +1,3 @@
+# Off-network, but there is a default route, so this must NOT be reported.
+nameserver 8.8.8.8
+domain localdomain
