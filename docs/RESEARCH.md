@@ -11134,3 +11134,328 @@ shipping build **and** against one built from the same tree with
 `#ifndef`-guarded so that arm can be built again in one command the next time
 somebody needs to ask.
 
+## 34. `TCP:` — a socket that AmigaDOS commands can open (2026-07-26)
+
+§30.7 scoped a telnet server and stopped at the wall in front of it: AmigaOS has no
+socket-as-file-handle, so a descriptor cannot be handed to `SystemTagList()`, `Open()` or
+`Read()`. The mechanism that gets through that wall is a DOS handler, and the half of it
+this project already had was the other one — `ObtainSocket()`, `ReleaseSocket()` and
+`ReleaseCopyOfSocket()` in `src/bsdsocket/handoff.c` at LVOs −0x090/−0x096/−0x09c.
+
+The handler is now built: `src/bsdsocket/tcp_handler.c`, published as `TCP:` from the first
+`OpenLibrary("bsdsocket.library")` onwards. Everything below is from a run.
+
+(Numbered 34 because §27 appears twice in this document and 28-33 are all taken; this
+document is written by several hands at once and the numbers are claimed, not sorted.)
+
+### 34.1 What it is worth, in the only currency that counts
+
+The claim is that a socket becomes an *ordinary* file handle. The only way to show that is
+to give one to a program that has never heard of a network, so the run uses **Commodore's
+own `Type` and `Copy`** — the 1496- and 5580-byte binaries out of the AmigaOS 3.1 `C:`
+drawer, unmodified — and the Shell's own `>` redirection, which is `dos.library` and
+nothing else. `tests/tools/run-tcphandler.sh`, on an A1200 with the A2065 on SLIRP:
+
+```
+===== SYS:Type TCP:10.0.2.2/amitest =====
+AmiNetXDuo daytime, line one
+and line two
+----- rc 0 -----
+
+===== SYS:Copy TCP:10.0.2.2/amitest TO DH0:copied.txt =====
+----- rc 0 -----
+
+===== SYS:Type DH0:copied.txt =====
+AmiNetXDuo daytime, line one
+and line two
+----- rc 0 -----
+
+===== Echo >TCP:10.0.2.2/7001 "AmigaDOS redirection reached the socket" =====
+----- rc 0 -----
+```
+
+`DH0:copied.txt` is compared byte for byte against what the server sent, CRLFs and all, and
+matches. What `Echo` wrote is read out of the **host's** log rather than ours:
+
+```
+[ 131.23] echo   connection from 127.0.0.1:62164
+[ 131.59] echo   got 40 bytes: b'AmigaDOS redirection reached the socket\n'
+```
+
+`amitest` is a *service name*, resolved out of `DEVS:Internet/services`, so the name path
+is in the picture too — deliberately not a well-known one, because a run that passed
+because port 13 happened to be open somewhere would prove nothing about `getservbyname()`.
+
+The other half of the syntax — no host, meaning "wait for somebody" — needs no host at all,
+because both ends can be `TCP:` handles held by stock commands:
+
+```
+===== &SYS:Type TCP:2400 >DH0:listened.txt =====
+===== Echo >TCP:localhost/2400 "a listening TCP: handle received this" =====
+----- rc 0 -----
+
+===== SYS:Type DH0:listened.txt =====
+a listening TCP: handle received this
+----- rc 0 -----
+```
+
+which the handler's own log shows as two sessions and two sockets:
+
+```
+[INFO] TCP: open 'TCP:2400'
+[INFO] TCP: open 'TCP:localhost/2400'
+[INFO] TCP: 'TCP:2400' is socket 1
+[INFO] TCP: 'TCP:localhost/2400' is socket 0
+```
+
+And the sequence §30.7 actually wanted, run end to end by `tests/tools/tcphandoff.c`:
+
+```
+listening on 2300
+the peer command is running
+WaitSelect on the listener returned 1
+accepted a connection
+parked under id 65536
+TCP:OBTAIN= opened
+the handed-over command returned 0
+the file handle is closed
+the accepted socket is closed
+```
+
+That is `accept()` → `ReleaseCopyOfSocket(fd, UNIQUE_ID)` → `Open("TCP:OBTAIN=65536")` →
+`SystemTagList("Echo …", SYS_Output = that handle)`, with `Copy TCP:localhost/2300 TO
+DH0:handoff.txt` at the far end. Two stock AmigaDOS commands end up talking to each other
+over a socket that neither of them opened, and `DH0:handoff.txt` holds what the handed-over
+command wrote. Nothing in `TcpHandoff` is linked against our code; it reaches the library
+through its published LVOs.
+
+### 34.2 The syntax is Roadshow's, and the parse is not quite its template
+
+`Documentation/Reference/tcp-handler.doc` in the Roadshow demo gives:
+
+```
+Open("TCP:[HOST]=<name or address>]/[PORT=<port number>]",...)
+Open("TCP:OBTAIN=<number>",...)
+TEMPLATE  H=HOST,P=PORT=S=SERVICE/K,O=OBTAIN/K/N
+```
+
+with two examples that its own template cannot both satisfy: `Type TCP:localhost/daytime`
+puts a bare word where `PORT/K` says a keyword is required, and `TCP:<service name>` is
+documented as equivalent to `TCP:service=<service name>` even though `HOST` is the first
+positional. So the template is not what the handler really does, and the parse implemented
+here is the one that satisfies both examples: components are split on `/`, a component
+containing `=` is a keyword (`H`/`HOST`, `P`/`PORT`/`S`/`SERVICE`, `O`/`OBTAIN`), and bare
+components go **service first, host second** — one bare word is a service (a listener), two
+are host then service (a connection). Case-insensitive. Everything else is a name error.
+
+`OBTAIN` ignores every other parameter, as documented.
+
+### 34.3 One process per connection, and why not one process with `WaitSelect()`
+
+A handler answers a `DOSPACKET` when it can and not before, and the sender is asleep in
+`DoPkt()` meanwhile. A single-process handler therefore queues every packet it cannot
+answer yet and drives them all from one `WaitSelect()`. That works — for the packets. It
+does nothing for the two things that genuinely block and are not sockets:
+`gethostbyname()` and `connect()`. One name lookup would stall every other file handle the
+handler owns, and there is no way to make a DNS query selectable here.
+
+So `TCP:` is shaped like `con-handler`: a **control process** owns the device node and
+answers `FINDINPUT`/`FINDOUTPUT`/`FINDUPDATE` by starting a **session process**, handing it
+the packet, and forgetting about it. The session opens its own `bsdsocket.library` — the
+only correct way to get a descriptor table, because every opener gets its own child base
+(§3.1) — connects, points the `FileHandle`'s `fh_Type` at its own port, and replies. Every
+later packet for that handle goes straight to the session, which may block for as long as
+it likes because nobody else is behind it.
+
+**Moving `fh_Type` is legal and load-bearing.** `dos.library` sets it to the device's port
+just before sending the packet and re-initialises the whole file handle on every retry "in
+case handler played with it" (v40 `dos/bcplio.c`, `findstream`). One port per open file is
+also the *only* way to implement `ACTION_WAIT_CHAR`, which is on Roadshow's packet list:
+Commodore's own source says so in a comment above the implementation —
+
+```
+/* DOESN'T pass fh_Arg1! - no error reporting! */
+waitforchar (REG(d1) BPTR scb, REG(d2) LONG timeout)
+{
+        port = ((struct FileHandle *) BADDR(scb))->fh_Type;
+        return sendpkt1(port,ACTION_WAIT_CHAR,timeout);
+}
+```
+
+— the packet carries a timeout and nothing else. A handler serving many files from one port
+literally cannot tell which file `WaitForChar()` is asking about. With a port per file the
+question is unambiguous, and the answer is one `WaitSelect()` on one descriptor with one
+timeout, which is what `WaitSelect()` is for.
+
+**Neither process uses `pr_MsgPort` for DOS packets.** Both make their own DOS calls —
+`CreateNewProc()` duplicates the parent's current directory, the resolver reads
+`DEVS:Internet` — and `dos.library`'s `DoPkt()` replies land on `pr_MsgPort`. Sharing the
+two would put a reply and an incoming packet in the same queue and require a `pr_PktWait`
+hook to tell them apart. A second `MsgPort` costs nothing and deletes the problem. The one
+exception is deliberate: the control process forwards the `FIND` packet to the new session
+by `PutMsg`-ing it to the session's `pr_MsgPort`, and that is the only message that port
+ever receives — the session takes it before it makes any DOS call of its own.
+
+### 34.4 The packet list, established rather than assumed
+
+§30.7 guessed nine from the Roadshow document. The handler logs every packet type it does
+not recognise, and the run says the real list, for `Type`, `Copy`, the Shell and
+`SystemTagList()`, is:
+
+| packet | who sends it | answer |
+|---|---|---|
+| `ACTION_FINDINPUT` / `FINDOUTPUT` / `FINDUPDATE` | `Open()` | start a session |
+| `ACTION_READ` / `ACTION_WRITE` | `Read()`, `Write()`, `FGetC()` | the socket |
+| `ACTION_END` | `Close()` | close and exit |
+| `ACTION_IS_FILESYSTEM` | `MatchFirst()`, `Copy` | `DOSFALSE`, **`dp_Res2 = 0`** |
+| `ACTION_LOCATE_OBJECT` | `Copy`, locking its source | refuse |
+| `ACTION_WAIT_CHAR` | `WaitForChar()` | `WaitSelect()` |
+| `ACTION_SEEK` | anything that measures a file | fail, `ERROR_SEEK_ERROR` |
+| `ACTION_DISK_INFO` | `Info()` | a large, valid, imaginary disk |
+| `ACTION_FLUSH`, `ACTION_CHANGE_SIGNAL` | DOS housekeeping | `DOSTRUE` |
+| `ACTION_DIE` | whoever wants `TCP:` gone | remove the node and exit |
+
+`ACTION_STACK`, which the Roadshow document lists, has no constant in the NDK, is not in
+`dos/dosextens.h` at all, and nothing sent it in any run. It is not implemented.
+
+**`ACTION_IS_FILESYSTEM` returning `DOSFALSE` with `dp_Res2` set to zero is the single
+answer that makes `Type TCP:…` work**, and it took reading `dos.library` to see why.
+`MatchFirst()` goes through `FunkyMatchFirst()` (v40 `dos/patternhack.c`):
+
+```
+if (mystricmp(pat,"*") == SAME || … ||
+    (strchr(pat,':') && !isfilesystem(pat)))
+{
+        res = getresult2();
+        if (res && res != ERROR_ACTION_NOT_KNOWN)
+                return res;
+        …
+        strcpy(anchor->ap_Info.fib_FileName,pat);
+```
+
+A path with a colon on a device that is not a filesystem is returned *verbatim*, with no
+`Lock()` and no `Examine()`. That is why a handler with no directory structure at all can
+be the argument to a command whose template is `FROM/A/M`. Answer `IS_FILESYSTEM` with an
+error in `dp_Res2` and `Type` reports that error instead of opening anything. `Copy` reaches
+the same conclusion by a different route — it calls `IsFileSystem()` on both its source and
+its destination explicitly (v40 `copy.c`) — which is why `Copy TCP:… TO …` also works, and
+why the `Lock()` it does on its source can simply be refused.
+
+### 34.5 What a program that only knows `Read()` sees
+
+| what happened | what `Read()` does |
+|---|---|
+| peer closed, all data delivered | returns 0 — ordinary EOF |
+| connection reset | returns −1, `IoErr()` set |
+| nothing to read yet | blocks; there is no idle timeout |
+| name lookup or `connect()` failed | never happens — `Open()` failed |
+
+A reset is **not** reported as EOF on purpose. EOF would turn a truncated transfer into a
+successful `Copy` with a short file and a return code of 0, which is the one outcome nobody
+can act on. AmigaDOS has no error code for "connection reset by peer", so the mapping table
+in `tcp_handler.c` says what each errno is being reported *as* rather than pretending to be
+a translation, and the real errno goes to the serial log next to it.
+
+Two of those choices were made by reading `Fault()`'s own table (v40 `dos/fault.c`).
+`ERROR_BAD_STREAM_NAME` (206) is semantically exactly right for a malformed `TCP:` name —
+and its text is **"invalid window description"**, because 206 is what `CON:` returns for a
+bad window spec. `Type TCP:` printed that, and it is useless. Name errors are therefore
+reported as `ERROR_OBJECT_NOT_FOUND` (205), whose text is "object not found":
+
+```
+===== SYS:Type TCP:10.0.2.2/nosuchservice =====
+TYPE can't open TCP:10.0.2.2/nosuchservice
+object not found
+----- rc 10 -----
+```
+
+The reason is on the serial line for whoever is debugging rather than using:
+
+```
+[WARN] TCP: no service 'nosuchservice'
+[WARN] TCP: cannot parse 'TCP:'
+```
+
+### 34.6 Two defects this turned up in code that was already here
+
+**A base can be freed while a socket it owns is still referenced.** `ObtainSocket()` sets
+`as_Owner` to the obtaining base, which is right — that is the task NetX Duo's callbacks
+must signal. But a socket taken through `TCP:OBTAIN=` outlives the session that took it:
+the program that released a *copy* still holds the original descriptor. When the session
+closes its library, the base is freed and `as_Owner` is left pointing into freed memory, so
+the next receive or disconnect callback does `Signal()` on a task read out of it. The first
+run of the hand-off hung exactly there, after `Copy` had already been fed and had written
+its file.
+
+The local half of the fix is in `tcp_handler.c`: the session reads the reference count
+*before* the close (after it, the block may be gone), and if the socket survives with
+`as_Owner` still pointing at the base about to be freed, it clears it — which is precisely
+what `handoff.c` already does to a *parked* socket, and `bsd_event_post()` already treats a
+NULL owner as "there is no task to wake". **The general fix belongs in
+`bsd_socket_release()`** and is not made here: `src/bsdsocket/socket.c` is under active
+change for the retransmission work. Any inetd-style handoff has this hazard, not just
+`TCP:`.
+
+**A blocking `accept()` was observed not to return.** In the second of four runs, `accept()`
+on a listening descriptor never woke although the peer's `Open()` had plainly succeeded —
+the connection was established and `Copy` was sitting on it, and the first run had gone all
+the way through the same code. Replacing the blocking wait with `WaitSelect()` on the
+listener followed by an `accept()` that cannot block made it reproducible-good;
+`WaitSelect` returned 1 promptly in both runs since, and the listener half of §34.1 passes
+through the same path. This is not
+something the handler introduced; it is the `bsd_accept()` path, and it is written down
+here because "wait for readiness, then take it in a call that cannot block" is now the
+shape used in both `tcp_handler.c` and `tests/tools/tcphandoff.c`, and the underlying
+wakeup should be looked at on its own.
+
+### 34.7 Lifetime, and the one thing the library will not do any more
+
+`TCP:` is published from the first `OpenLibrary()` rather than from `bsd_lib_init()`,
+because that runs in the opener's own Process (`CreateNewProc()` wants one) — and it has to
+be at open time rather than at first use, because DOS must find the device node before it
+can route an `Open("TCP:…")` and `Type` does not open `bsdsocket.library`. Roadshow states
+the same rule: the device appears when the library is initialised. In practice the library
+is already resident and referenced by then, because `AddNetInterface` deliberately leaks an
+`OpenLibrary()` reference to keep the stack up (§22).
+
+A session holds an `OpenLibrary()` reference only while a file handle is open, so an idle
+handler does not pin the netstack. The consequence is an invariant worth stating: **open
+count zero implies the handler is idle**, which is why `ACTION_DIE` can never arrive while a
+session is running.
+
+`bsd_lib_expunge()` now **declines** while the handler process exists. Its code lives in the
+segment expunge is about to hand back for `UnLoadSeg()`, it holds no open count, and there
+is no way to prove it is not executing. `ACTION_DIE` is the supported way to take `TCP:`
+down — it removes the DOS entry, replies inside `Forbid()` so the caller cannot free the
+segment out from under the last few instructions, and exits — and after it, expunge
+succeeds normally.
+
+### 34.8 What is not there
+
+* **No `UDP:`.** Roadshow has none either; a datagram is not a stream and `Read()` has no
+  way to say where one ended.
+* **Name resolution is synchronous inside the session.** A slow DNS server delays that one
+  `Open()` and nothing else, which is the whole point of a process per connection, but it
+  is still a blocking call and there is no timeout keyword to shorten it. Roadshow's
+  template has none either, so none was invented.
+* **A blocked `Read()` cannot be interrupted.** Ctrl-C goes to the Shell, which is asleep
+  in `DoPkt()`; the handler cannot see it. `PIPE:` behaves the same way.
+* **One connection per listening handle.** `TCP:<service>` accepts one and closes the
+  listener. A file handle is one stream and there is nowhere to put a second.
+* **No IPv6 literal syntax.** `TCP:host/service` resolves through `gethostbyname()`, which
+  is v4; a `[::1]`-style literal has no place in a name whose separator is `/`.
+
+### 34.9 Where this leaves the two things that wanted it
+
+The telnet server from §30.7 is now the small half of itself: `accept()`, a password, and
+`SystemTagList("", SYS_Input, fh1, SYS_Output, fh2, SYS_Asynch, TRUE)` with handles made by
+`TCP:OBTAIN=`. The security recommendations in §30.7 are unchanged and none of them got
+cheaper. Note the one wrinkle a shell will hit that `Echo` did not: `SYS_Input` and
+`SYS_Output` must be *different* file handles (`dos.library` says so explicitly), so a
+server needs **two** `ReleaseCopyOfSocket()` ids for the one connection — and the second
+`ObtainSocket()` will move `as_Owner` to the second session, which is the same ownership
+question §34.6 is about and should be settled before, not during.
+
+Dropbear needs the identical bridge and should use this one. Nothing about it is
+telnet-specific and nothing about it is ours-only: it is `Open()`, `Read()`, `Write()`,
+`Close()`.
