@@ -125,7 +125,17 @@ VOID c68k_aes_cbc_decrypt(const C68K_AES *aes, UCHAR *iv,
 #define C68K_AES_V_T1_ASM   4u  /* one 1 KB table + rotates, 68020 assembly  */
 #define C68K_AES_V_COUNT    5u
 
+/*
+ * The default.  It resolves to the C form in a build without the assembly --
+ * AMINETXDUO_CRYPTO68K_ASM=OFF, which CI builds as one of its four
+ * configurations -- so that the reported variant is never a name for code
+ * that is not there.
+ */
+#ifdef C68K_ASM
 #define C68K_AES_V_BEST     C68K_AES_V_T4_ASM
+#else
+#define C68K_AES_V_BEST     C68K_AES_V_T4_C
+#endif
 
 extern UINT c68k_aes_variant;
 

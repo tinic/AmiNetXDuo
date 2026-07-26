@@ -46,6 +46,8 @@
 #include "c68k_support.h"
 #include "c68k_timer.h"
 #include "c68k_p256.h"
+#include "c68k_aes.h"
+#include "c68k_sha256.h"
 #include "c68k_amissl.h"
 
 #include "aminetxduo/crashguard.h"
@@ -145,9 +147,11 @@ static UCHAR                a_aes_iv[16];
 static UCHAR                a_mac_key[32];
 static UCHAR                a_mac_ours[32];
 static UCHAR                a_mac_theirs[32];
-static NX_CRYPTO_AES        a_aes;
-static NX_CRYPTO_CBC        a_cbc;
-static NX_CRYPTO_SHA256_HMAC a_hmac_meta;
+static C68K_AES             a_aes;
+static UCHAR                a_iv_work[16];
+static NX_CRYPTO_HMAC       a_hmac_meta;
+static C68K_SHA256          a_hmac_ctx;
+static UCHAR                a_bulk_plain[A_BULK_BYTES];
 
 /* The running comparison, so the summary can be assembled from measurements
    rather than retyped. */
@@ -1183,11 +1187,46 @@ HN_UBASE  *sp;
 static VOID a_ours_aes(VOID)
 {
 
-    (VOID) _nx_crypto_cbc_encrypt_init(&a_cbc, a_aes_iv, 16u);
-    (VOID) _nx_crypto_cbc_encrypt(&a_aes, &a_cbc,
-                                  (UINT (*)(VOID *, UCHAR *, UCHAR *, UINT))
-                                      _nx_crypto_aes_encrypt,
-                                  a_bulk_in, a_bulk_ours, A_BULK_BYTES, 16u);
+UINT    i;
+
+
+    for (i = 0; i < 16u; i++)
+    {
+        a_iv_work[i] = a_aes_iv[i];
+    }
+
+    c68k_aes_cbc_encrypt(&a_aes, a_iv_work, a_bulk_in, a_bulk_ours,
+                         A_BULK_BYTES / 16UL);
+}
+
+/*
+ * And the other direction, which is the one a DOWNLOAD spends its time in and
+ * which section 15 did not measure at all.  A client that fetches a megabyte
+ * decrypts a megabyte and encrypts a request header.
+ */
+static VOID a_ours_aes_dec(VOID)
+{
+
+UINT    i;
+
+
+    for (i = 0; i < 16u; i++)
+    {
+        a_iv_work[i] = a_aes_iv[i];
+    }
+
+    c68k_aes_cbc_decrypt(&a_aes, a_iv_work, a_bulk_ours, a_bulk_plain,
+                         A_BULK_BYTES / 16UL);
+}
+
+static VOID a_theirs_aes_dec(VOID)
+{
+
+    if (a_ossl_aes128_cbc_dec(a_aes_key, a_aes_iv, a_bulk_theirs,
+                              a_bulk_plain, A_BULK_BYTES) != 0)
+    {
+        a_failures++;
+    }
 }
 
 static VOID a_theirs_aes(VOID)
@@ -1203,14 +1242,8 @@ static VOID a_theirs_aes(VOID)
 static VOID a_ours_hmac(VOID)
 {
 
-    (VOID) crypto_method_hmac_sha256.nx_crypto_operation(
-                NX_CRYPTO_AUTHENTICATE, NX_CRYPTO_NULL,
-                &crypto_method_hmac_sha256,
-                a_mac_key, 256u,
-                a_bulk_in, A_BULK_BYTES, NX_CRYPTO_NULL,
-                a_mac_ours, 32UL,
-                &a_hmac_meta, sizeof(a_hmac_meta),
-                NX_CRYPTO_NULL, NX_CRYPTO_NULL);
+    (VOID) _nx_crypto_hmac(&a_hmac_meta, a_bulk_in, (UINT)A_BULK_BYTES,
+                           a_mac_key, 32u, a_mac_ours, 32u);
 }
 
 static VOID a_theirs_hmac(VOID)
@@ -1261,14 +1294,16 @@ UINT    i;
         a_mac_key[i] = (UCHAR)(0x40u + i);
     }
 
-    if (_nx_crypto_aes_key_set(&a_aes, a_aes_key,
-                               NX_CRYPTO_AES_KEY_SIZE_128_BITS) !=
-        NX_CRYPTO_SUCCESS)
+    if (c68k_aes_key_set(&a_aes, a_aes_key, 128u) != NX_CRYPTO_SUCCESS)
     {
         c68k_log("  FATAL: our AES key schedule failed");
         a_failures++;
         return;
     }
+
+    c68k_log("  our AES: %s", (LONG)c68k_aes_variant_name(c68k_aes_variant));
+    c68k_log("  our SHA-256: %s",
+             (LONG)c68k_sha256_variant_name(c68k_sha256_variant));
 
     ours   = a_time_n(a_ours_aes,   4UL);
     theirs = a_time_n(a_theirs_aes, 4UL);
@@ -1279,17 +1314,34 @@ UINT    i;
     c68k_log("    ours %lu KB/s, AmiSSL %lu KB/s",
              a_kbs(ours), a_kbs(theirs));
 
-    if (crypto_method_hmac_sha256.nx_crypto_init(&crypto_method_hmac_sha256,
-                                                 a_mac_key, 256u,
-                                                 NX_CRYPTO_NULL,
-                                                 &a_hmac_meta,
-                                                 sizeof(a_hmac_meta)) !=
-        NX_CRYPTO_SUCCESS)
-    {
-        c68k_log("  FATAL: our HMAC-SHA256 init failed");
-        a_failures++;
-        return;
-    }
+    /* Decryption, which section 15 did not measure and which is the direction
+       a download runs in.  Both sides decrypt the ciphertext they agreed on
+       above, and the answer is checked against the plaintext. */
+    ours = a_time_n(a_ours_aes_dec, 4UL);
+    a_check("AES-128-CBC plaintext, ours", a_bulk_plain, a_bulk_in,
+            (UINT)A_BULK_BYTES);
+    theirs = a_time_n(a_theirs_aes_dec, 4UL);
+    a_check("AES-128-CBC plaintext, AmiSSL", a_bulk_plain, a_bulk_in,
+            (UINT)A_BULK_BYTES);
+    a_report("AES-128-CBC decrypt                ", ours, theirs,
+             A_MULU_NONE, A_MULU_NONE, 2u);
+    c68k_log("    ours %lu KB/s, AmiSSL %lu KB/s",
+             a_kbs(ours), a_kbs(theirs));
+
+    /*
+     * HMAC is nx_crypto's framing with our compression function underneath,
+     * which is exactly what src/tls/ami_tls_crypto.c wires -- so this measures
+     * what the TLS stack runs rather than a standalone hash.
+     */
+    _nx_crypto_hmac_metadata_set(&a_hmac_meta, &a_hmac_ctx,
+                                 NX_CRYPTO_AUTHENTICATION_HMAC_SHA2_256,
+                                 64u, 32u,
+                                 (UINT (*)(VOID *, UINT))
+                                     c68k_sha256_initialize,
+                                 (UINT (*)(VOID *, UCHAR *, UINT))
+                                     c68k_sha256_update,
+                                 (UINT (*)(VOID *, UCHAR *, UINT))
+                                     c68k_sha256_digest_calculate);
 
     ours   = a_time_n(a_ours_hmac,   4UL);
     theirs = a_time_n(a_theirs_hmac, 4UL);

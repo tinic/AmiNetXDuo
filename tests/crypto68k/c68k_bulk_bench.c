@@ -156,34 +156,54 @@ static APTR     b_table;                /* 4 KB of Fast RAM                */
 typedef VOID (*B_REG_KERNEL)(ULONG);
 typedef VOID (*B_MEM_KERNEL)(APTR, ULONG);
 
+/*
+ * Picoseconds per body slot.
+ *
+ * THE ARITHMETIC IS THE WHOLE OF THIS FUNCTION and the first version of it
+ * was wrong in the way this project has now been bitten by twice (see the
+ * note above c_measure_ps() in tests/perf/cpucal.c): ULONG is 32 bits, a
+ * 23 ms kernel is 23,000,000 nanoseconds, and multiplying THAT by the further
+ * thousand picoseconds want overflows and prints a rotate as costing nothing.
+ * So the scaling is done by dividing the SLOT COUNT by a thousand instead,
+ * and the rep count is a round 40,000 to keep that exact.
+ */
+static ULONG b_scale(ULONG micros, ULONG slots)
+{
+
+    if (slots < 1000uL)
+    {
+        return(0uL);
+    }
+
+    return((micros * 1000uL) / (slots / 1000uL));
+}
+
 static ULONG b_time_reg(B_REG_KERNEL fn, ULONG reps)
 {
 
 ULONG   start;
-ULONG   ns;
+ULONG   us;
 
 
     start = c68k_eclock();
     fn(reps);
-    ns = c68k_eclock_micros(c68k_eclock() - start) * 1000uL;
+    us = c68k_eclock_micros(c68k_eclock() - start);
 
-    /* Picoseconds per body slot.  reps * 16 / 1000 keeps the multiply in 32
-       bits, which is why the rep count is a round 40,000. */
-    return((ns * 1000uL) / ((reps * B_KERNEL_SLOTS) / 1000uL));
+    return(b_scale(us, reps * B_KERNEL_SLOTS));
 }
 
 static ULONG b_time_mem(B_MEM_KERNEL fn, ULONG reps)
 {
 
 ULONG   start;
-ULONG   ns;
+ULONG   us;
 
 
     start = c68k_eclock();
     fn(b_table, reps);
-    ns = c68k_eclock_micros(c68k_eclock() - start) * 1000uL;
+    us = c68k_eclock_micros(c68k_eclock() - start);
 
-    return((ns * 1000uL) / ((reps * B_KERNEL_SLOTS) / 1000uL));
+    return(b_scale(us, reps * B_KERNEL_SLOTS));
 }
 
 static VOID b_report_ps(const char *what, ULONG raw)
@@ -216,7 +236,7 @@ static VOID b_report_ic(const char *what, B_REG_KERNEL fn, ULONG body_bytes)
 {
 
 ULONG   start;
-ULONG   ns;
+ULONG   us;
 ULONG   reps;
 ULONG   slots;
 ULONG   ps;
@@ -227,9 +247,9 @@ ULONG   ps;
 
     start = c68k_eclock();
     fn(reps);
-    ns = c68k_eclock_micros(c68k_eclock() - start) * 1000uL;
+    us = c68k_eclock_micros(c68k_eclock() - start);
 
-    ps = (ns * 1000uL) / ((reps * slots) / 1000uL);
+    ps = b_scale(us, reps * slots);
 
     c68k_log("  %s %lu.%03lu ns per ADD.L", (LONG)what, ps / 1000uL,
              ps % 1000uL);

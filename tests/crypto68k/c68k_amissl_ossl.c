@@ -757,6 +757,48 @@ out:
 }
 
 
+/*
+ * The direction a download actually spends its time in.  Section 15 measured
+ * encryption only, which is the direction a client uses for request headers.
+ */
+int a_ossl_aes128_cbc_dec(const unsigned char *key16, const unsigned char *iv16,
+                          const unsigned char *in, unsigned char *out,
+                          unsigned long len)
+{
+
+EVP_CIPHER_CTX *ctx;
+int             outl = 0;
+int             rc   = 1;
+
+
+    ctx = EVP_CIPHER_CTX_new();
+    if (ctx == NULL)
+    {
+        return(1);
+    }
+
+    if (!EVP_DecryptInit_ex(ctx, EVP_aes_128_cbc(), NULL,
+                            (unsigned char *)key16, (unsigned char *)iv16))
+    {
+        goto out;
+    }
+
+    (void)EVP_CIPHER_CTX_set_padding(ctx, 0);
+
+    if (!EVP_DecryptUpdate(ctx, out, &outl, (unsigned char *)in, (int)len))
+    {
+        goto out;
+    }
+
+    rc = ((unsigned long)outl == len) ? 0 : 1;
+
+out:
+    EVP_CIPHER_CTX_free(ctx);
+
+    return(rc);
+}
+
+
 int a_ossl_hmac_sha256(const unsigned char *key, int key_len,
                        const unsigned char *in, unsigned long len,
                        unsigned char *out32)

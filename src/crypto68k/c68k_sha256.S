@@ -14,14 +14,18 @@
 |   holding live state.  So the portable C spills, and the spills are the
 |   difference this file is trying to collect.
 |
-|   The rotations are also FACTORED, which halves nothing but saves one rotate
-|   in each of the two big sigmas.  Rotation distributes over exclusive or:
+|   The rotations are also FACTORED, because rotation distributes over
+|   exclusive or:
 |
 |       Sigma0(x) = ROTR2(x ^ ROTR11(x) ^ ROTR20(x))
 |       Sigma1(x) = ROTR6(x ^ ROTR5(x)  ^ ROTR19(x))
 |
-|   which is three rotates and two SWAPs where the written-out form is four
-|   rotates and one SWAP, on a part where a rotate is twice a SWAP.
+|   Written out, Sigma0 is ROTR2 ^ ROTR13 ^ ROTR22, and the cheapest chaining
+|   of those is four rotates and one SWAP; factored it is three rotates and
+|   two SWAPs, and a SWAP is half a rotate on this part.  It is worth a few
+|   cycles a round and no more -- see docs/RESEARCH.md 16 for what the whole
+|   file is worth against what GCC 15.2 emits, which is less than it looks
+|   like it should be.
 |
 | THE REGISTER PROBLEM, AND WHAT SOLVES IT
 |

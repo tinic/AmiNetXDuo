@@ -80,10 +80,14 @@ static c68k_limb    t_ref_result[T_MAX_LIMBS * 2 + 8];
 static c68k_limb    t_tmp[T_MAX_LIMBS * 2 + 8];
 
 static VOID t_karatsuba(VOID);
+static VOID t_bulk(VOID);
 static VOID t_division(VOID);
 
 static unsigned long    t_failures;
 static unsigned long    t_checks;
+
+#include "c68k_aes.h"
+#include "c68k_sha256.h"
 
 #include "c68k_vectors.h"
 
@@ -839,6 +843,222 @@ c68k_limb           n0inv;
 }
 
 
+
+/* ============================================================ the bulk path ==
+ *
+ * AES-128/256 and SHA-256, against the published vectors, for every PORTABLE
+ * variant in src/crypto68k/.  The assembly cannot be assembled here and stays
+ * an emulator-tier test (tests/crypto68k/crypto68k_bulk), which is the same
+ * split the limb primitives have.
+ *
+ * This tier is where the vectors actually get run on every push, and it is
+ * also the only place the ENDIANNESS of the message-word load is tested: the
+ * SHA-256 fast path loads W[0..15] as longwords, which is correct on the
+ * m68k and wrong here, and the guard around it is what this catches.  It did
+ * catch it.
+ */
+
+static void t_bytes(const char *what, const unsigned char *got,
+                    const unsigned char *want, unsigned n)
+{
+    unsigned i;
+
+    t_checks++;
+    for (i = 0; i < n; i++)
+    {
+        if (got[i] != want[i])
+        {
+            t_failures++;
+            printf("  FAIL %s at byte %u: %02x vs %02x\n",
+                   what, i, got[i], want[i]);
+            return;
+        }
+    }
+}
+
+static const unsigned char t_aes_k128[16] =
+{ 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 };
+static const unsigned char t_aes_k256[32] =
+{ 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
+  16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31 };
+static const unsigned char t_aes_pt[16] =
+{ 0x00,0x11,0x22,0x33,0x44,0x55,0x66,0x77,
+  0x88,0x99,0xAA,0xBB,0xCC,0xDD,0xEE,0xFF };
+static const unsigned char t_aes_c128[16] =
+{ 0x69,0xC4,0xE0,0xD8,0x6A,0x7B,0x04,0x30,
+  0xD8,0xCD,0xB7,0x80,0x70,0xB4,0xC5,0x5A };
+static const unsigned char t_aes_c256[16] =
+{ 0x8E,0xA2,0xB7,0xCA,0x51,0x67,0x45,0xBF,
+  0xEA,0xFC,0x49,0x90,0x4B,0x49,0x60,0x89 };
+
+static const unsigned char t_sha_abc[32] =
+{ 0xBA,0x78,0x16,0xBF,0x8F,0x01,0xCF,0xEA,0x41,0x41,0x40,0xDE,0x5D,0xAE,0x22,0x23,
+  0xB0,0x03,0x61,0xA3,0x96,0x17,0x7A,0x9C,0xB4,0x10,0xFF,0x61,0xF2,0x00,0x15,0xAD };
+static const unsigned char t_sha_empty[32] =
+{ 0xE3,0xB0,0xC4,0x42,0x98,0xFC,0x1C,0x14,0x9A,0xFB,0xF4,0xC8,0x99,0x6F,0xB9,0x24,
+  0x27,0xAE,0x41,0xE4,0x64,0x9B,0x93,0x4C,0xA4,0x95,0x99,0x1B,0x78,0x52,0xB8,0x55 };
+static const unsigned char t_sha_448[32] =
+{ 0x24,0x8D,0x6A,0x61,0xD2,0x06,0x38,0xB8,0xE5,0xC0,0x26,0x93,0x0C,0x3E,0x60,0x39,
+  0xA3,0x3C,0xE4,0x59,0x64,0xFF,0x21,0x67,0xF6,0xEC,0xED,0xD4,0x19,0xDB,0x06,0xC1 };
+static const unsigned char t_sha_million[32] =
+{ 0xCD,0xC7,0x6E,0x5C,0x99,0x14,0xFB,0x92,0x81,0xA1,0xC7,0xE2,0x84,0xD7,0x3E,0x67,
+  0xF1,0x80,0x9A,0x48,0xA4,0x97,0x20,0x0E,0x04,0x6D,0x39,0xCC,0xC7,0x11,0x2C,0xD0 };
+
+static void t_bulk_aes(unsigned variant)
+{
+    C68K_AES        aes;
+    unsigned char   out[16];
+    unsigned char   back[16];
+    unsigned char   iv_a[16], iv_b[16];
+    unsigned char   in[64], ref[64], got[64];
+    unsigned        i;
+
+    c68k_aes_variant = variant;
+
+    (void)c68k_aes_key_set(&aes, t_aes_k128, 128u);
+    c68k_aes_encrypt_block(&aes, t_aes_pt, out);
+    t_bytes("FIPS-197 AES-128 ciphertext", out, t_aes_c128, 16u);
+    c68k_aes_decrypt_block(&aes, t_aes_c128, back);
+    t_bytes("FIPS-197 AES-128 plaintext", back, t_aes_pt, 16u);
+
+    (void)c68k_aes_key_set(&aes, t_aes_k256, 256u);
+    c68k_aes_encrypt_block(&aes, t_aes_pt, out);
+    t_bytes("FIPS-197 AES-256 ciphertext", out, t_aes_c256, 16u);
+    c68k_aes_decrypt_block(&aes, t_aes_c256, back);
+    t_bytes("FIPS-197 AES-256 plaintext", back, t_aes_pt, 16u);
+
+    /* The awkward shapes: a chaining value carried across calls, a decrypt
+       in place, and zero blocks -- each of which has been somebody's CBC
+       bug. */
+    (void)c68k_aes_key_set(&aes, t_aes_k128, 128u);
+    for (i = 0; i < 16u; i++)
+    {
+        iv_a[i] = iv_b[i] = (unsigned char)(0xA0u + i);
+    }
+    for (i = 0; i < 64u; i++)
+    {
+        in[i] = (unsigned char)((i * 7u) + 1u);
+    }
+
+    c68k_aes_cbc_encrypt(&aes, iv_a, in, ref, 4uL);
+    for (i = 0; i < 4u; i++)
+    {
+        c68k_aes_cbc_encrypt(&aes, iv_b, in + (i * 16u), got + (i * 16u), 1uL);
+    }
+    t_bytes("CBC chaining across calls", got, ref, 64u);
+    t_bytes("CBC leaves the same IV", iv_a, iv_b, 16u);
+
+    got[0] = 0x5Au;
+    c68k_aes_cbc_encrypt(&aes, iv_a, in, got, 0uL);
+    t_checks++;
+    if (got[0] != 0x5Au)
+    {
+        t_failures++;
+        printf("  FAIL CBC with zero blocks wrote to the output\n");
+    }
+
+    for (i = 0; i < 16u; i++)
+    {
+        iv_a[i] = (unsigned char)(0xA0u + i);
+    }
+    memcpy(got, ref, 64u);
+    c68k_aes_cbc_decrypt(&aes, iv_a, got, got, 4uL);
+    t_bytes("CBC decrypt in place", got, in, 64u);
+}
+
+static void t_bulk_sha(unsigned variant)
+{
+    C68K_SHA256     ctx;
+    unsigned char   d[32];
+    unsigned char   m[64];
+    unsigned long   left;
+    unsigned        i;
+
+    c68k_sha256_variant = variant;
+
+    (void)c68k_sha256_initialize(&ctx, 0u);
+    (void)c68k_sha256_update(&ctx, (unsigned char *)"abc", 3u);
+    (void)c68k_sha256_digest_calculate(&ctx, d, 0u);
+    t_bytes("SHA-256(\"abc\")", d, t_sha_abc, 32u);
+
+    (void)c68k_sha256_initialize(&ctx, 0u);
+    (void)c68k_sha256_digest_calculate(&ctx, d, 0u);
+    t_bytes("SHA-256(\"\")", d, t_sha_empty, 32u);
+
+    memcpy(m, "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", 56);
+    (void)c68k_sha256_initialize(&ctx, 0u);
+    (void)c68k_sha256_update(&ctx, m, 56u);
+    (void)c68k_sha256_digest_calculate(&ctx, d, 0u);
+    t_bytes("SHA-256(56 bytes)", d, t_sha_448, 32u);
+
+    /* Split at 1, 54 and 1, which crosses the internal buffer boundary in
+       the middle rather than on it. */
+    (void)c68k_sha256_initialize(&ctx, 0u);
+    (void)c68k_sha256_update(&ctx, m, 1u);
+    (void)c68k_sha256_update(&ctx, m + 1, 54u);
+    (void)c68k_sha256_update(&ctx, m + 55, 1u);
+    (void)c68k_sha256_digest_calculate(&ctx, d, 0u);
+    t_bytes("SHA-256 across three updates", d, t_sha_448, 32u);
+
+    /* Every odd offset into the buffer, which is what a TLS record gives us
+       and what the longword message load has to survive. */
+    for (i = 1u; i < 8u; i++)
+    {
+        (void)c68k_sha256_initialize(&ctx, 0u);
+        (void)c68k_sha256_update(&ctx, m, i);
+        (void)c68k_sha256_update(&ctx, m + i, 56u - i);
+        (void)c68k_sha256_digest_calculate(&ctx, d, 0u);
+        t_bytes("SHA-256 split on an odd boundary", d, t_sha_448, 32u);
+    }
+
+    for (i = 0; i < 56u; i++)
+    {
+        m[i] = (unsigned char)'a';
+    }
+    (void)c68k_sha256_initialize(&ctx, 0u);
+    left = 1000000uL;
+    while (left != 0uL)
+    {
+        unsigned chunk = (left > 56uL) ? 56u : (unsigned)left;
+
+        (void)c68k_sha256_update(&ctx, m, chunk);
+        left -= (unsigned long)chunk;
+    }
+    (void)c68k_sha256_digest_calculate(&ctx, d, 0u);
+    t_bytes("SHA-256 of one million 'a'", d, t_sha_million, 32u);
+}
+
+static VOID t_bulk(VOID)
+{
+    unsigned v;
+
+    printf("\nthe bulk path -- AES and SHA-256 against the published "
+           "vectors\n");
+
+    for (v = 0; v < C68K_AES_V_COUNT; v++)
+    {
+        if (c68k_aes_variant_is_asm(v))
+        {
+            continue;                   /* emulator tier */
+        }
+        t_bulk_aes(v);
+    }
+    c68k_aes_variant = C68K_AES_V_BEST;
+
+    for (v = 0; v < C68K_SHA256_V_COUNT; v++)
+    {
+        if (c68k_sha256_variant_is_asm(v))
+        {
+            continue;
+        }
+        t_bulk_sha(v);
+    }
+    c68k_sha256_variant = C68K_SHA256_V_BEST;
+
+    printf("  every portable AES and SHA-256 variant checked\n");
+}
+
+
 int main(void)
 {
     printf("AmiNetXDuo -- crypto68k correctness gate (host tier)\n");
@@ -852,6 +1072,7 @@ int main(void)
     t_mont_differential(400u);
     t_powm_differential(150u);
     t_edge_cases();
+    t_bulk();
 
     if (t_failures == 0)
     {

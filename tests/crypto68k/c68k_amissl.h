@@ -104,6 +104,9 @@ int  a_ossl_ec_have_precompute(void);
 int a_ossl_aes128_cbc(const unsigned char *key16, const unsigned char *iv16,
                       const unsigned char *in, unsigned char *out,
                       unsigned long len);
+int a_ossl_aes128_cbc_dec(const unsigned char *key16, const unsigned char *iv16,
+                          const unsigned char *in, unsigned char *out,
+                          unsigned long len);
 int a_ossl_hmac_sha256(const unsigned char *key, int key_len,
                        const unsigned char *in, unsigned long len,
                        unsigned char *out32);

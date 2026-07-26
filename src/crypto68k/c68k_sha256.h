@@ -88,7 +88,11 @@ VOID c68k_sha256_blocks(ULONG *state, const UCHAR *data, ULONG blocks);
 #define C68K_SHA256_V_ASM   1u  /* 68020 assembly                          */
 #define C68K_SHA256_V_COUNT 2u
 
+#ifdef C68K_ASM
 #define C68K_SHA256_V_BEST  C68K_SHA256_V_ASM
+#else
+#define C68K_SHA256_V_BEST  C68K_SHA256_V_C
+#endif
 
 extern UINT c68k_sha256_variant;
 
