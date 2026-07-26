@@ -235,6 +235,7 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
         (VOID)nx_auto_ip_stop(&ns->ns_AutoIp);
         (VOID)nx_auto_ip_delete(&ns->ns_AutoIp);
         ns->ns_AutoIpCreated = FALSE;
+        ns->ns_AutoIpRunning = FALSE;
     }
 
     if (ns->ns_DhcpCreated)
@@ -486,8 +487,32 @@ static VOID ami_ns_start_autoip(AmiNetStack *ns)
     UINT  status;
     UWORD i;
 
+    /*
+     * Already built. nx_auto_ip_stop() only SUSPENDS the module's thread, so
+     * coming back is a start rather than a create -- and nx_auto_ip_start()
+     * with a starting address of zero is what makes it draw a fresh candidate
+     * instead of re-probing whichever one it had before.
+     *
+     * Guarded on ns_AutoIpRunning because a start while it is already running
+     * resets its conflict count and throws away the address it is holding.
+     */
     if (ns->ns_AutoIpCreated)
+    {
+        if (!ns->ns_AutoIpRunning)
+        {
+            status = nx_auto_ip_start(&ns->ns_AutoIp, 0UL);
+            if (status == NX_SUCCESS)
+            {
+                ns->ns_AutoIpRunning = TRUE;
+                AMI_INFO("netstack: RFC 3927 link-local configuration restarted");
+            }
+            else
+            {
+                AMI_WARN("netstack: nx_auto_ip_start failed (%ld)", (long)status);
+            }
+        }
         return;
+    }
 
     ns->ns_AutoIpStack = ami_alloc_flags((ULONG)AMI_AUTOIP_STACK_SIZE, MEMF_PUBLIC);
     if (ns->ns_AutoIpStack == NULL)
@@ -520,17 +545,215 @@ static VOID ami_ns_start_autoip(AmiNetStack *ns)
 
     status = nx_auto_ip_start(&ns->ns_AutoIp, 0UL);
     if (status != NX_SUCCESS)
+    {
         AMI_WARN("netstack: nx_auto_ip_start failed (%ld)", (long)status);
+    }
     else
+    {
+        ns->ns_AutoIpRunning = TRUE;
         AMI_INFO("netstack: RFC 3927 link-local configuration started");
+    }
+}
+
+/* ------------------------------------------------- what actually happened --
+ *
+ * NetX Duo's DHCP client and its AutoIP module both change the interface
+ * address from their own threads and announce NOTHING unless somebody
+ * registers for it. Before these two existed the machine could lose its lease
+ * -- address removed, gateway cleared, every socket dead -- and the only
+ * record anywhere was that `netstat` started answering differently.
+ *
+ * Both run on a NetX Duo thread. AMI_INFO()/AMI_WARN() are RawPutChar() and
+ * RawDoFmt(), which is Exec-only and legal from any Task, and nothing here
+ * blocks.
+ */
+
+static BOOL ami_ns_is_linklocal(ULONG addr)
+{
+    return (addr >= IP_ADDRESS(169, 254, 0, 0) &&
+            addr <= IP_ADDRESS(169, 254, 255, 255)) ? TRUE : FALSE;
+}
+
+static VOID ami_ns_log_address(const char *what, UWORD index, ULONG addr)
+{
+    AMI_INFO("netstack: interface %ld %s %lu.%lu.%lu.%lu",
+             (long)index, what,
+             (unsigned long)((addr >> 24) & 0xFFUL),
+             (unsigned long)((addr >> 16) & 0xFFUL),
+             (unsigned long)((addr >>  8) & 0xFFUL),
+             (unsigned long)(addr & 0xFFUL));
+}
+
+/*
+ * Called by NetX Duo whenever any interface's address or mask changes -- from
+ * the DHCP thread on a lease, from the AutoIP thread on a link-local claim,
+ * and from ami_ns_configure_addresses() for a static one.
+ */
+static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
+{
+    AmiNetStack *ns = ami_ns;
+    UWORD        i;
+
+    (VOID)info;
+
+    if (ns == NULL || ip_ptr != &ns->ns_Ip)
+        return;
+
+    for (i = 0; i < ns->ns_IfaceCount; i++)
+    {
+        ULONG addr = 0UL;
+        ULONG mask = 0UL;
+
+        if (nx_ip_interface_address_get(&ns->ns_Ip, (UINT)i, &addr, &mask)
+                != NX_SUCCESS)
+            continue;
+
+        if (addr == ns->ns_LastAddress[i])
+            continue;
+
+        ns->ns_LastAddress[i] = addr;
+
+        if (addr == 0UL)
+            AMI_WARN("netstack: interface %ld no longer has an address",
+                     (long)i);
+        else if (ami_ns_is_linklocal(addr))
+            ami_ns_log_address("has the link-local address", i, addr);
+        else
+            ami_ns_log_address("address is now", i, addr);
+
+        /*
+         * RFC 3927 1.9: a routable address supersedes a link-local one. The
+         * AutoIP thread does not watch for this itself -- it sits in an
+         * indefinite wait for a conflict -- so it is stopped here, which
+         * leaves it able to be restarted if the lease is later lost.
+         *
+         * Never from the AutoIP thread itself: nx_auto_ip_stop() is
+         * tx_thread_suspend(), and calling it on the running thread would
+         * suspend it in the middle of its own announcement.
+         */
+        if (ns->ns_AutoIpRunning && addr != 0UL && !ami_ns_is_linklocal(addr) &&
+            tx_thread_identify() != &ns->ns_AutoIp.nx_auto_ip_thread)
+        {
+            (VOID)nx_auto_ip_stop(&ns->ns_AutoIp);
+            ns->ns_AutoIpRunning = FALSE;
+            AMI_INFO("netstack: link-local configuration stopped -- interface "
+                     "%ld has a routable address now", (long)i);
+        }
+    }
+}
+
+/*
+ * Called by NetX Duo's DHCP client on every state transition, per interface.
+ *
+ * The transition that matters is the one INTO INIT from a state that held an
+ * address: that is a NAK, or a lease that ran out with nothing answering, and
+ * _nx_dhcp_interface_reinitialize() has just taken the address and the gateway
+ * off the interface. RFC 3927 1.7 is the answer to it, and it is the same
+ * answer this file already gives when DHCP never answers at all.
+ */
+static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
+                                      UCHAR new_state)
+{
+    AmiNetStack *ns = ami_ns;
+    UBYTE        previous;
+
+    if (ns == NULL || dhcp_ptr != &ns->ns_Dhcp ||
+        iface_index >= (UINT)AMI_CFG_MAX_INTERFACES)
+        return;
+
+    previous = ns->ns_DhcpState[iface_index];
+    ns->ns_DhcpState[iface_index] = (UBYTE)new_state;
+
+    switch (new_state)
+    {
+    case NX_DHCP_STATE_BOUND:
+        AMI_INFO("netstack: interface %ld has a DHCP lease",
+                 (long)iface_index);
+        break;
+
+    case NX_DHCP_STATE_RENEWING:
+        AMI_INFO("netstack: interface %ld is renewing its DHCP lease",
+                 (long)iface_index);
+        break;
+
+    case NX_DHCP_STATE_REBINDING:
+        AMI_WARN("netstack: interface %ld -- the DHCP server that issued the "
+                 "lease is not answering; asking any server on this network",
+                 (long)iface_index);
+        break;
+
+    case NX_DHCP_STATE_INIT:
+        /*
+         * Only from a state that HELD a lease. A NAK in REQUESTING is an
+         * ordinary part of acquiring one -- the server saying "not that
+         * address, ask again" -- and reporting a first boot as a lost lease
+         * would be a false alarm on the one message that has to be believed.
+         */
+        if (previous == (UBYTE)NX_DHCP_STATE_BOUND ||
+            previous == (UBYTE)NX_DHCP_STATE_RENEWING ||
+            previous == (UBYTE)NX_DHCP_STATE_REBINDING)
+        {
+            AMI_WARN("netstack: interface %ld has LOST its DHCP lease -- the "
+                     "address and the gateway have been taken off it, and "
+                     "every open connection through it is dead",
+                     (long)iface_index);
+
+            /* RFC 3927 1.7: keep the machine reachable on the local wire
+               while the DHCP client tries again. */
+            ami_ns_start_autoip(ns);
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
+/*
+ * Wait for ANY configured interface to have an address.
+ *
+ * nx_ip_status_check() is nx_ip_interface_status_check() on INTERFACE 0 -- it
+ * says so in one line at the bottom of nx_ip_status_check.c -- so the wait
+ * this replaced could not see an address arrive on interface 1. A machine
+ * whose Ethernet is static and whose PPP link is the DHCP one waited out the
+ * full timeout and then reported that nothing had an address.
+ */
+static BOOL ami_ns_wait_for_address(AmiNetStack *ns, ULONG timeout_ticks)
+{
+    ULONG waited = 0UL;
+
+    for (;;)
+    {
+        UWORD i;
+
+        for (i = 0; i < ns->ns_IfaceCount; i++)
+        {
+            ULONG addr = 0UL;
+            ULONG mask = 0UL;
+
+            if (nx_ip_interface_address_get(&ns->ns_Ip, (UINT)i, &addr, &mask)
+                    == NX_SUCCESS && addr != 0UL)
+                return TRUE;
+        }
+
+        if (waited >= timeout_ticks)
+            return FALSE;
+
+        tx_thread_sleep((ULONG)AMI_ADDRESS_POLL_TICKS);
+        waited += (ULONG)AMI_ADDRESS_POLL_TICKS;
+    }
 }
 
 static LONG ami_ns_configure_addresses(AmiNetStack *ns)
 {
     UINT  status;
-    ULONG actual;
     UWORD i;
     BOOL  resolved = FALSE;
+
+    /* Before anything can change an address, so the first one is announced
+       too. */
+    (VOID)nx_ip_address_change_notify(&ns->ns_Ip, ami_ns_address_changed,
+                                      NX_NULL);
 
     /* Static interfaces are already addressed by nx_ip_create()/attach; make
        sure a static interface 0 really has what the config asked for. */
@@ -549,7 +772,21 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
 
     if (ami_ns_wants(ns, AMI_IPTYPE_DHCP))
     {
-        status = nx_dhcp_create(&ns->ns_Dhcp, &ns->ns_Ip, (CHAR *)"amiga");
+        /*
+         * The name here is DHCP option 12, the host name the client announces
+         * -- it is what the router's client list shows and what many of them
+         * put in their local DNS. It was the string "amiga" for everybody,
+         * which made two AmiNetXDuo machines on one network indistinguishable
+         * and quietly discarded the HOSTNAME the user configured.
+         *
+         * NetX Duo keeps the POINTER rather than a copy, so this has to be
+         * storage that outlives the NX_DHCP: ns_Config is inside the same
+         * AmiNetStack and is not written again after ami_config_load().
+         */
+        status = nx_dhcp_create(&ns->ns_Dhcp, &ns->ns_Ip,
+                                (ns->ns_Config.hostname[0] != '\0')
+                                    ? (CHAR *)ns->ns_Config.hostname
+                                    : (CHAR *)"amiga");
         if (status != NX_SUCCESS)
         {
             AMI_ERROR("netstack: nx_dhcp_create failed (%ld)", (long)status);
@@ -557,6 +794,11 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
         else
         {
             ns->ns_DhcpCreated = TRUE;
+
+            /* Registered before the client starts, so the first BOUND is
+               reported as well as everything after it. */
+            (VOID)nx_dhcp_interface_state_change_notify(
+                      &ns->ns_Dhcp, ami_ns_dhcp_state_changed);
 
             for (i = 0; i < ns->ns_IfaceCount; i++)
             {
@@ -587,24 +829,23 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
 
     if (!resolved)
     {
-        /* Block until the first interface has an address, or DHCP gives up. */
-        status = nx_ip_status_check(&ns->ns_Ip, NX_IP_ADDRESS_RESOLVED, &actual,
-                                    AMI_DHCP_TIMEOUT_TICKS);
-        if (status == NX_SUCCESS)
+        /* Block until some interface has an address, or DHCP gives up. */
+        resolved = ami_ns_wait_for_address(ns, AMI_DHCP_TIMEOUT_TICKS);
+
+        if (!resolved && ns->ns_DhcpStarted)
         {
-            resolved = TRUE;
-        }
-        else if (ns->ns_DhcpStarted)
-        {
-            AMI_WARN("netstack: DHCP timed out after %lu ticks",
-                     (unsigned long)AMI_DHCP_TIMEOUT_TICKS);
+            AMI_WARN("netstack: no DHCP server answered in %lu seconds",
+                     (unsigned long)(AMI_DHCP_TIMEOUT_TICKS /
+                                     (ULONG)NX_IP_PERIODIC_RATE));
 
             /* RFC 3927: fall back to a link-local address. */
             ami_ns_start_autoip(ns);
 
-            status = nx_ip_status_check(&ns->ns_Ip, NX_IP_ADDRESS_RESOLVED,
-                                        &actual, AMI_DHCP_TIMEOUT_TICKS);
-            resolved = (status == NX_SUCCESS) ? TRUE : FALSE;
+            resolved = ami_ns_wait_for_address(ns, AMI_AUTOIP_TIMEOUT_TICKS);
+
+            if (!resolved)
+                AMI_WARN("netstack: link-local configuration did not settle "
+                         "either -- is the cable in?");
         }
     }
 

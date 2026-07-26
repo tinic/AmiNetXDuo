@@ -8423,3 +8423,292 @@ commands with no stack at all, which is the state their argument handling has to
 
 Two boots, and the second earns its place: between them they cover the working machine and
 the broken one, which are the two a user is ever on.
+
+## 27. The rest of the DHCP lease, and the first time RFC 3927 ever ran (2026-07-26)
+
+Every emulator run in this tree takes a DHCP lease. `DISCOVER`, `OFFER`, `REQUEST`, `ACK`
+is therefore the best-tested path in the stack, and **nothing else in the lease's life had
+ever executed once**: not renewal at T1, not rebinding at T2, not a lease running out, not
+a NAK. FS-UAE's SLIRP grants a lease and never takes it away, so there was no way for any
+of it to happen by accident.
+
+Behind that, `nx_auto_ip_create/start/stop/delete` had been wired into `netstack.c` since
+the interface work — two triggers, an explicit `CONFIGURE=AUTO` and a DHCP-timeout
+fallback commented *"RFC 3927: fall back to a link-local address"* — with no test anywhere
+and no `169.254` in the tree outside a config fixture. This project has a recent record of
+wired-and-broken (§16's capture subsystem with 201 green checks and no caller; §22's three
+commands that could never read the running stack), so "it is wired" was treated as no
+evidence at all.
+
+`tests/netstack/dhcp3927_test.c` and `tests/netstack/run-dhcp3927.sh` are what came of it.
+Nine phases, and every claim below is from a run, not from reading the source.
+
+### 27.1 A DHCP server on the host is not reachable, and here is the proof
+
+The obvious rig is a Python DHCP server in the style of `tests/tools/netpeer.py`. It cannot
+work, and the reason is not "SLIRP intercepts broadcasts" — that would leave unicast
+renewals as a way in. **FS-UAE 3.2.35 embeds libslirp** (`slirp/src/bootp.c`,
+`slirp/src/udp.c` and thirteen more are in the binary's string table) and it answers UDP
+port 67 at *both* the addresses a DHCP client can ever send to.
+
+From the A2065 frame dump of a real run — `tests/trace/a2065pcap.py` over the emulator's
+own log, which is produced inside the emulated hardware and below every line of this stack:
+
+```
+  1 DHCP DISCOVER  0.0.0.0   -> 255.255.255.255  udp 68->67
+  2 DHCP OFFER     10.0.2.2  -> 255.255.255.255  udp 67->68
+  ...
+  8 ARP  req sender=10.0.2.15 target=10.0.2.2
+  9 ARP  rep sender=10.0.2.2  target=10.0.2.15
+ 10 DHCP REQUEST   10.0.2.15 -> 10.0.2.2         udp 68->67     <- the T1 renewal
+ 11 DHCP ACK       10.0.2.2  -> 255.255.255.255  udp 67->68
+```
+
+Frame 10 is the renewal RFC 2131 4.4.5 requires to be **unicast to the server**
+(`nxd_dhcp_client.c:6377` picks `nx_dhcp_server_ip` for exactly this case), and frame 11 is
+an answer to it. `lsof -nP -iUDP:67` on the host at the time: nothing. No process on the
+host was listening on port 67, and the datagram was answered anyway — it never left the
+emulator. Broadcast is eaten the same way, so both halves are closed.
+
+There is no second way round it either. `otool -L` on the fs-uae binary shows no libpcap;
+the only ethernet backends its string table offers are `slirp` and `SLIRP + Open ports
+(21-23,80)`, and the one winpcap path in there is a Windows-only failure message
+(`A2065: failed to initialize winpcap driver`).
+
+**So the rig is three other things**, and each is chosen so the code under test never
+knows the difference:
+
+* **A clock that moves.** SLIRP's lease is 24 hours (`lease 4320000 s, T1 2160000 s`,
+  measured off the live record — the fields are in ticks, `_nx_dhcp_extract_information()`
+  multiplies the server's seconds by `NX_IP_PERIODIC_RATE` on the way in). The test writes
+  `nx_dhcp_renewal_time`, `nx_dhcp_rebind_time` and `nx_dhcp_lease_time` in the live
+  `NX_DHCP_INTERFACE_RECORD` and leaves everything else alone: the state machine, the
+  packets and the server are real, only the countdown is not.
+* **A wire that goes away.** `netstack_interface_down(0)` is what an unplugged cable looks
+  like to the client, and it is the only way to stop SLIRP answering.
+* **A peer that is not there.** SLIRP answers ARP inside 10.0.2.0/24 and nowhere else, so
+  it can produce exactly ONE probe conflict before AutoIP redraws inside 169.254/16.
+  Rate limiting needs ten in a row and defence needs a host that stays quiet through the
+  probes and then claims the address anyway. Those two are synthesised: a correctly formed
+  ARP frame handed to `_nx_arp_packet_deferred_receive()`, which is the same function the
+  SANA-II reader calls for every ARP frame off the card (`sana2_rx.c:95`). Everything
+  downstream of that — `nx_arp_packet_receive.c`'s conflict detection, the defence it
+  sends, the AutoIP thread's response — is the real thing.
+
+One new knob makes the fourth case possible. `AMINETXDUO_FSUAE_A2065` in
+`tools/fsuae-run.sh` picks the card's backend, and `none` fits the A2065 and wires it to
+nothing: the card opens, the driver links up, and no answer ever comes. That is the only
+way to make a DHCP timeout happen with the link genuinely up, which is what the RFC 3927
+fallback needs.
+
+### 27.2 The lease lifecycle: it works, and it always did
+
+| | verdict | evidence |
+|---|---|---|
+| renewal at T1 | **works** | `BOUND -> RENEWING -> BOUND`, acks 1 -> 2, address unchanged; frames 10/11 above |
+| rebinding at T2 | **works** | `RENEWING -> REBINDING` with the wire down |
+| the lease running out | **works** | `REBINDING -> INIT`, and `_nx_dhcp_interface_reinitialize()` takes the address AND the gateway off the interface |
+| recovery afterwards | **works** | wire back, `SELECTING -> REQUESTING -> BOUND`, 10.0.2.15 again |
+| a NAK | **works** | asked for 10.0.2.231, `DHCP NAK` from 10.0.2.2 on the wire, naks 0 -> 1, `REQUESTING -> INIT`, re-DISCOVER, lease recovered |
+| **DECLINE** | **cannot happen** | see 27.5 |
+
+**What did NOT work was telling anybody.** The DHCP client changes the interface address
+from its own thread and announces nothing unless somebody registers for it, and nothing
+did. A machine could go `BOUND -> RENEWING -> REBINDING -> INIT` at three in the morning,
+lose its address and its gateway, and the only trace anywhere was that `netstat` started
+answering differently. That is fixed in 27.4.
+
+### 27.3 RFC 3927 had never run. It does now, and it is right
+
+First execution ever, `CONFIGURE=DHCP` with `AMINETXDUO_FSUAE_A2065=none`:
+
+```
+[WARN] netstack: no DHCP server answered in 30 seconds
+[INFO] netstack: RFC 3927 link-local configuration started
+[INFO] netstack: address 169.254.44.97 mask 255.255.0.0
+```
+
+**The timing, sampled off the guest's own 50 Hz clock** on a clean cycle (`CONFIGURE=AUTO`,
+nothing on the wire). This is the part that cannot be checked from counters:
+
+| event | at | RFC 3927 |
+|---|---|---|
+| probe 1 | 360 ms | 2.2.1: random 0..PROBE_WAIT (1 s) |
+| probe 2 | 1360 ms | +1.00 s, inside PROBE_MIN..PROBE_MAX (1..2 s) |
+| probe 3 | 2360 ms | +1.00 s |
+| address claimed | 4000 ms | after PROBE_NUM = 3 probes with no answer |
+| announce 1 | 6000 ms | 2.4: +2.00 s = ANNOUNCE_WAIT |
+| announce 2 | 8000 ms | +2.00 s = ANNOUNCE_INTERVAL, ANNOUNCE_NUM = 2 |
+
+and the same sequence read off the wire rather than off the counters — three probes with a
+zero sender, then two announcements with the sender filled in, which is precisely what
+RFC 3927 2.2.1 and 2.4 ask for:
+
+```
+  1 ARP req sender=0.0.0.0        target=169.254.67.40
+  2 ARP req sender=0.0.0.0        target=169.254.67.40
+  3 ARP req sender=0.0.0.0        target=169.254.67.40
+  4 ARP req sender=169.254.67.40  target=169.254.67.40
+  5 ARP req sender=169.254.67.40  target=169.254.67.40
+```
+
+**Conflict at probe time** (SLIRP as the other host: probe 10.0.2.2, which it answers).
+Frames 20/21 of the same capture are the probe and SLIRP's reply; the conflict is counted,
+the candidate is thrown away and a fresh one is drawn from 169.254.1.0-169.254.254.255.
+
+**Rate limiting.** Eleven conflicts in a row, one per candidate, using the synthetic peer.
+Past `NX_AUTO_IP_MAX_CONFLICTS` (10) the next probe came **61 seconds** later against a
+`NX_AUTO_IP_RATE_LIMIT_INTERVAL` of 60 — timed, not assumed, and reproduced at 60 s and
+61 s on separate runs.
+
+**Conflict after the address is in use.** Another host announces the address we are using:
+`nx_ip_arp_requests_sent` goes up by one — that is the defence leaving on the wire, from
+`nx_arp_packet_receive.c`'s `nx_interface_arp_defend_timeout` path — and
+`nx_auto_ip_defend_count` goes up by one. See 27.5 for what happens next, which is where
+this implementation stops being conformant.
+
+**DHCP arriving later.** With the wire back, the still-running DHCP client takes a lease
+and writes over the link-local address, which is what RFC 3927 1.9 wants. Nothing in the
+stack arbitrated that before — it happened only because the DHCP client wrote last — and
+nothing stopped the AutoIP module, which then sat holding an address the interface no
+longer had. Fixed in 27.4.
+
+### 27.4 Six defects in `src/netstack/`, and what each one cost
+
+1. **Nothing was ever reported.** `nx_dhcp_interface_state_change_notify()` and
+   `nx_ip_address_change_notify()` were both unregistered. `ami_ns_dhcp_state_changed()`
+   and `ami_ns_address_changed()` now log every transition, and the one that matters says
+   so plainly:
+
+   ```
+   [WARN] netstack: interface 0 has LOST its DHCP lease -- the address and the gateway
+          have been taken off it, and every open connection through it is dead
+   ```
+
+   Both callbacks run on a NetX Duo thread. `AMI_INFO`/`AMI_WARN` are `RawPutChar()` and
+   `RawDoFmt()`, which is Exec-only and legal from any Task, and neither blocks.
+
+2. **Losing the lease did not start the RFC 3927 fallback.** `netstack.c` fell back to
+   link-local when DHCP never answered at startup and did nothing at all when a lease was
+   lost afterwards — the same machine, the same absence of a server, two different
+   answers. The state-change callback now calls `ami_ns_start_autoip()` on
+   `BOUND|RENEWING|REBINDING -> INIT`. Deliberately **not** on `REQUESTING -> INIT`: a NAK
+   there is an ordinary part of acquiring a lease, and a first boot reporting a lost lease
+   would be a false alarm on the one message that has to be believed.
+
+3. **`nx_ip_status_check()` is interface 0 only.** It is one line at the bottom of
+   `nx_ip_status_check.c` — `return(_nx_ip_interface_status_check(ip_ptr, 0, ...))` — and
+   the startup wait was built on it. A machine whose Ethernet is static and whose second
+   interface is the DHCP one waited out the full thirty seconds and then reported that
+   nothing had an address. `ami_ns_wait_for_address()` polls every configured interface.
+
+4. **The host name every AmiNetXDuo machine announced was `"amiga"`.** DHCP option 12 is
+   what a router's client list shows and what many of them put in local DNS, and
+   `nx_dhcp_create()` was passed a string literal, silently discarding the `HOSTNAME` the
+   user configured. Two of these machines on one network were indistinguishable. It now
+   passes `ns_Config.hostname` — NetX Duo keeps the pointer rather than a copy, so it has
+   to be storage with the lifetime of the `NX_DHCP`, and `ns_Config` is inside the same
+   `AmiNetStack`.
+
+5. **Thirty seconds of nothing after thirty seconds of nothing.** The fallback path waited
+   another `AMI_DHCP_TIMEOUT_TICKS` for AutoIP after the DHCP wait had already failed. The
+   whole probe/announce sequence is eight seconds; `AMI_AUTOIP_TIMEOUT_TICKS` is fifteen,
+   and failing it now says why:
+   `link-local configuration did not settle either -- is the cable in?`
+
+6. **AutoIP was left running once DHCP won.** Its thread waits indefinitely for a conflict
+   and never re-reads the address, so it sat defending one the interface no longer had.
+   `ami_ns_address_changed()` stops it when a routable address appears — never from the
+   AutoIP thread itself, because `nx_auto_ip_stop()` is `tx_thread_suspend()` and calling
+   it on the running thread would suspend it in the middle of its own announcement. Stop
+   is a suspend, so 2 above can start it again:
+
+   ```
+   [INFO] netstack: link-local configuration stopped -- interface 0 has a routable address now
+   ...
+   [WARN] netstack: interface 0 has LOST its DHCP lease -- ...
+   [INFO] netstack: RFC 3927 link-local configuration restarted
+   ```
+
+   The `ns_AutoIpRunning` guard is not decoration. `nx_auto_ip_start()` writes
+   `nx_auto_ip_current_local_address` from the caller's thread with no synchronisation
+   against the AutoIP thread reading it, and starting an instance that is already running
+   loses a race: frame 25 of one capture is
+   `ARP req sender=0.0.0.0 target=0.0.0.0` — a probe for the null address, sent because
+   `start` cleared the candidate between the module deriving one and probing for it. The
+   test provokes that on purpose; the stack now cannot.
+
+### 27.5 Two things that are still wrong, and both are vendored
+
+`third_party/netxduo` is consumed unmodified, so these are stated rather than patched.
+
+**AutoIP gives the address up on the first late conflict.** RFC 3927 2.5 describes a host
+that has already announced an address defending it once — a single ARP announcement, and
+only if a *second* conflict arrives inside DEFEND_INTERVAL does it give the address up.
+`nx_auto_ip.c:1083` says what it does instead, in its own words: *"No defense currently,
+just clear the IP address once a late collision is detected and start over."* Measured:
+the ARP layer underneath it does send the defensive announcement (`nx_ip_arp_requests_sent`
++1, from `nx_arp_packet_receive.c`'s `NX_ARP_DEFEND_INTERVAL` path), and then AutoIP zeroes
+the interface and re-probes anyway. So the wire behaviour is half right and the outcome is
+wrong: a single stray ARP from a misconfigured host costs this machine its address.
+
+**`DHCPDECLINE` cannot be sent at all.** RFC 2131 4.4.1 says a client SHOULD ARP-probe the
+address the server offered and DECLINE if something answers. NetX Duo compiles the whole of
+that — the `ADDRESS_PROBING` state, `_nx_dhcp_ip_conflict()` and
+`_nx_dhcp_interface_decline()` — behind `NX_DHCP_CLIENT_SEND_ARP_PROBE`, which this port
+does not define, so **no DHCP probe and no DECLINE has ever been possible**.
+
+It works when it is switched on. A measurement build with the define, answering the
+client's own probe with the synthetic peer:
+
+```
+[dhcp] -> REQUESTING
+[dhcp] -> ADDRESS_PROBING
+  client is probing 10.0.2.15
+[dhcp] -> INIT
+  ok   the conflict sent the client back to INIT (a DECLINE)
+  ok   the disputed address was not put on the interface
+```
+
+and frame 67 of that run's capture is `DHCP DECLINE 0.0.0.0 -> 255.255.255.255 udp 68->67`.
+
+**It is left off, and the number is why.** Measured on the A1200 profile, ThreadX ticks
+from `tx_amiga_kernel_start()` to `netstack_startup()` returning, same SLIRP, same lease:
+
+| | ticks | seconds |
+|---|---|---|
+| as shipped | 56 | 1.12 |
+| with `NX_DHCP_CLIENT_SEND_ARP_PROBE` | 250 | 5.00 |
+
+Three ARP probes at `NX_DHCP_ARP_PROBE_MIN`..`MAX` apiece, on every bring-up, for a
+conflict that a home network with one DHCP server cannot produce — **3.9 seconds added to
+every boot**, and this stack is brought up and torn down by `bsdsocket.library` on the
+first `OpenLibrary()`, so it is 3.9 seconds added to the first network command in a Shell
+session as well. The line to change is one `#define` in
+`port/netxduo-amiga/inc/nx_user.h`; `tests/netstack/dhcp3927_test.c` grows phase I as soon
+as it is there.
+
+### 27.6 What could not be tested here at all
+
+* **A DHCP server that behaves differently from SLIRP** — a different lease length, options
+  SLIRP does not send, a server that offers an address already in use. 27.1 is the
+  evidence; it needs an emulator with a bridged or tap backend, or real hardware.
+* **Two DHCP servers on one wire**, which is the case `SELECTING` exists to arbitrate. Same
+  reason.
+* **The AutoIP defend counter reaching a second conflict inside DEFEND_INTERVAL**, which is
+  the branch RFC 3927 2.5 turns on — moot while the module abandons the address on the
+  first one.
+
+### 27.7 Running it
+
+```
+tests/netstack/run-dhcp3927.sh                       # lease lifecycle, B-H
+tests/netstack/run-dhcp3927.sh -M killlink           # the fallback, then DHCP taking over
+AMINETXDUO_FSUAE_A2065=none \
+    tests/netstack/run-dhcp3927.sh -C AUTO           # RFC 3927 on its own, no server
+```
+
+The first two are the ones to keep an eye on -- **35 checks, 0 failures** and **40 checks,
+0 failures** on the runs this section is written from. The third is situational: with no
+server on the wire its DHCP phases have nothing to work with and say so rather than
+failing.

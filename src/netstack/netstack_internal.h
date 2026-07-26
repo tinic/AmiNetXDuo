@@ -48,6 +48,18 @@
 #define AMI_DHCP_TIMEOUT_TICKS      (30UL * (ULONG)NX_IP_PERIODIC_RATE)
 #define AMI_LINK_TIMEOUT_TICKS      (10UL * (ULONG)NX_IP_PERIODIC_RATE)
 
+/*
+ * And how long after the RFC 3927 fallback fires. The whole probe/announce
+ * sequence is PROBE_WAIT (0-1 s) + PROBE_NUM probes (1-2 s each) + a claim,
+ * so 15 s is generous; the previous code waited another AMI_DHCP_TIMEOUT_TICKS
+ * here, which is thirty seconds of nothing after a thirty-second wait that
+ * had already failed.
+ */
+#define AMI_AUTOIP_TIMEOUT_TICKS    (15UL * (ULONG)NX_IP_PERIODIC_RATE)
+
+/* Granularity of the "has anything got an address yet?" poll. */
+#define AMI_ADDRESS_POLL_TICKS      ((ULONG)NX_IP_PERIODIC_RATE / 10UL)
+
 /* --------------------------------------------------------------- the state */
 
 struct AmiNetStack
@@ -73,9 +85,19 @@ struct AmiNetStack
     BOOL                ns_DhcpCreated;
     BOOL                ns_DhcpStarted;
 
+    /*
+     * The last DHCP state seen per interface, and the last address seen on
+     * it. Both exist so the notification callbacks can say what CHANGED --
+     * "the lease was lost" is a transition, not a state, and NetX Duo's
+     * callbacks report only the new value.
+     */
+    UBYTE               ns_DhcpState[AMI_CFG_MAX_INTERFACES];
+    ULONG               ns_LastAddress[AMI_CFG_MAX_INTERFACES];
+
     NX_AUTO_IP          ns_AutoIp;
     APTR                ns_AutoIpStack;
     BOOL                ns_AutoIpCreated;
+    BOOL                ns_AutoIpRunning;
 
     NX_DNS              ns_Dns;
     BOOL                ns_DnsCreated;

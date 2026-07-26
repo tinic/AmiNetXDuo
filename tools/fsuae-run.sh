@@ -377,11 +377,21 @@ EOF
 fi
 
 if [ "$NETWORK" = "1" ]; then
+    # AMINETXDUO_FSUAE_A2065 picks the card's backend.  `slirp` is the user-mode
+    # NAT everything else in the tree runs on; `none` fits the card and leaves
+    # it wired to nothing, which is the only way to give the guest an Ethernet
+    # interface that opens, links up and never hears an answer -- what a DHCP
+    # timeout and the RFC 3927 fallback need (tests/netstack/run-dhcp3927.sh).
+    A2065_BACKEND="${AMINETXDUO_FSUAE_A2065:-slirp}"
     cat >> "$CFG" <<EOF
 network_card = a2065
-uae_a2065 = slirp
+uae_a2065 = $A2065_BACKEND
 EOF
-    echo "==> A2065 + SLIRP attached (10.0.2.0/24, gateway 10.0.2.2)"
+    if [ "$A2065_BACKEND" = "slirp" ]; then
+        echo "==> A2065 + SLIRP attached (10.0.2.0/24, gateway 10.0.2.2)"
+    else
+        echo "==> A2065 attached with backend '$A2065_BACKEND' (no host network)"
+    fi
 fi
 
 echo "==> $EXE_NAME under $MODEL (timeout ${TIMEOUT}s)"
