@@ -12530,7 +12530,34 @@ one connection.** The harness reports how far it got (`endreport.py` prints it
 against the 4096 MB figure) so the question stays open with a number on it
 rather than as a worry.
 
-### 37.7 Does the pool scale with memory?
+### 37.7 "mbuf fragmentation" is not a thing that can happen here
+
+The report's first suspicion, and it is worth answering literally rather than
+translating it into the nearest thing we do have.
+
+**There are no mbufs in the shipped `bsdsocket.library` at all.** All eleven
+`mbuf_*` LVOs — `-0x270` through `-0x2ac` — are `bsd_enosys`/`bsd_enosys_ptr`
+stubs in `src/bsdsocket/bsdsocket_vectors.c:132-142`, unconditionally, and
+`src/mbuf/` is not linked into the library. The emulation exists (and
+`tests/mbuf_bpf` exercises it), but nothing in this stack's data path has ever
+allocated one: `src/mbuf/`'s own header says so in its first paragraph — an
+mbuf here does not own, wrap or reference an `NX_PACKET`, it comes out of a
+**private slab allocator** with its own storage, and conversion is an explicit
+copy at the API boundary. An application that never calls `mbuf_get()` cannot
+fragment a pool it never touches, and in this build it cannot call it anyway.
+
+**The resource that plays mbuf's part is the `NX_PACKET` pool**, and it cannot
+fragment either: it is a fixed count of fixed-size blocks on a free list, so
+it is either exhausted or it is not. That is why the timeline records
+`nss_PoolFree` and `nss_PoolEmptyRequests` rather than anything shaped like a
+fragmentation metric — and why §37.5's answer to "does the pool run out" is a
+straight line to 1 rather than a distribution.
+
+So the phenomenon the report names cannot occur here, and the phenomenon it is
+standing in for — a stack that runs out of buffers and never gets them back —
+**does**, by an entirely different route.
+
+### 37.8 Does the pool scale with memory?
 
 AmiTCP_NG claims to scale with available memory; §24 sizes the receive *window*
 from the pool and the live socket count, but whether the **pool itself** adapts
@@ -12572,7 +12599,7 @@ That is a defensible design for the floor — §24.3 makes the same argument abo
 the 4 MB machine — and an undefended one for the ceiling. 256 is the number
 `AMI_POOL_MAX_PACKETS` has always had; nothing in this document measured it.
 
-### 37.8 What is in the tree
+### 37.9 What is in the tree
 
 | | |
 |---|---|
