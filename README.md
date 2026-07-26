@@ -237,13 +237,10 @@ bytes for a default `bsdsocket.library`, 250,248 with `-DAMINETXDUO_TLS=ON`, and
 282,516 for `tls.library`, so the TLS pair comes to 532,764 bytes. Session
 resumption added about 9.4 KiB of that.
 
-There is no size budget for the libraries beyond fitting comfortably in the
-4 MB the target assumes, and none at all for the commands — a multi-megabyte
-ported client is fine. Worth recording anyway: `src/tls/CMakeLists.txt` globs
-the whole of `crypto_libraries/src`, so `nx_crypto` still carries DES, 3DES,
-MD5, CCM, GCM and ECJPAKE, none of which any ciphersuite we negotiate can
-reach. Trimming that is a change with its own correctness argument rather than
-something to do as a side effect.
+One fact worth recording, for what it says about the build rather than about
+the size: `src/tls/CMakeLists.txt` globs the whole of `crypto_libraries/src`,
+so `nx_crypto` still carries DES, 3DES, MD5, CCM, GCM and ECJPAKE, none of
+which any ciphersuite we negotiate can reach.
 
 ## Building
 
