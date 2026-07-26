@@ -12615,6 +12615,18 @@ Modes: `fitz` (files over a mounted share), `loop` (synthetic, both ends here),
 `wire` (synthetic, a host peer), `leak` (one socket lifecycle, repeated) and
 `watch` (sample only, while somebody else makes the traffic).
 
+**What it deliberately does not capture, and why.** Retransmissions come from
+`nsx_TcpRetransmits`, which the library already counts. **Duplicate ACKs do
+not, and cannot**: they exist only in a packet trace, and `NetTrace` cannot
+supply one for a run of hours — it owns its own workload and exits with it, it
+drains the capture channel from inside that workload's loop, and the channel is
+two buffers of at most `BPF_MAXBUFSIZE` = 32 KB which do not wrap but **drop**
+(`src/bpf/bpf_channel.c:391`). At `SNAP=96` that is a few hundred records. A
+long run's dup-ACK count would have to come from FS-UAE's own A2065 frame log
+through `tests/trace/a2065pcap.py` and `tcpaudit.py`, which is hours of traffic
+in hex on the host's disk. Named here rather than left as a gap somebody
+rediscovers.
+
 Two notes for whoever runs it next, both learned the expensive way:
 
 - **`tools/fsuae-reap.sh` kills any `fs-uae` older than 15 minutes** and cannot
