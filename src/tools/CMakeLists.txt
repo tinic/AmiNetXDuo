@@ -123,6 +123,12 @@ aminetxduo_add_tool(tool_checknetconfig CheckNetConfig
 # reads and then runs AddNetInterface, rather than starting a stack itself.
 aminetxduo_add_tool(tool_netsetup NetSetup SOURCES netsetup.c)
 
+# GetNetStatus is the scriptable counterpart of ShowNetStatus: it answers with
+# a return code rather than a table.  NX, because it answers from the SAME two
+# snapshots ShowNetStatus and netstat print from -- three commands that disagree
+# about whether the network is up would be worse than not having the third.
+aminetxduo_add_tool(tool_getnetstatus GetNetStatus NX SOURCES getnetstatus.c)
+
 aminetxduo_add_tool(tool_online  Online   SOURCES onoff.c)
 aminetxduo_add_tool(tool_offline Offline  SOURCES onoff.c DEFINES TOOL_OFFLINE)
 
@@ -202,6 +208,7 @@ set_target_properties(tool_smoke PROPERTIES OUTPUT_NAME "ToolsSmoke")
 add_custom_target(tools ALL)
 add_dependencies(tools
     tool_addnetinterface tool_checknetconfig
+    tool_getnetstatus
     tool_netsetup tool_online tool_offline tool_host
     tool_fetch tool_nc tool_telnet tool_ftp tool_nettrace tool_traceroute
     tool_tftp tool_whois
