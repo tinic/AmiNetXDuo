@@ -100,6 +100,7 @@
 static LONG nx_socket(LONG d, LONG t, LONG p)          { return socket(d, t, p); }
 static LONG nx_bind(LONG s, APTR n, LONG l)            { return bind(s, n, l); }
 static LONG nx_listen(LONG s, LONG b)                  { return listen(s, b); }
+static LONG nx_accept(LONG s, APTR n, APTR l)          { return accept(s, n, l); }
 static LONG nx_connect(LONG s, APTR n, LONG l)         { return connect(s, n, l); }
 static LONG nx_send(LONG s, APTR b, LONG l, LONG f)    { return send(s, b, l, f); }
 static LONG nx_recv(LONG s, APTR b, LONG l, LONG f)    { return recv(s, b, l, f); }
@@ -294,6 +295,37 @@ int listen(int fd, int backlog)
 {
     if (!IS_SOCK(fd)) { errno = EBADF; return -1; }
     return (int)nx_listen(SOCKOF(fd), backlog);
+}
+
+/*
+ * The one call in here no client needed: dbclient only ever connects.  It is
+ * written the same way as socket(), including the out-of-window refusal --
+ * an accepted socket comes from the same bsdsocket descriptor space as one
+ * from socket(), so it can land outside the window just as easily, and on a
+ * busy listener it is MORE likely to.
+ *
+ * Refusing by closing the accepted socket drops that one connection rather
+ * than aliasing a file descriptor, which is the trade this window scheme
+ * exists to make.
+ */
+int accept(int fd, struct sockaddr *addr, socklen_t *len)
+{
+    LONG s;
+
+    if (!IS_SOCK(fd)) { errno = EBADF; return -1; }
+
+    s = nx_accept(SOCKOF(fd), (APTR)addr, (APTR)len);
+    if (s < 0)
+        return -1;
+
+    if (s >= (LONG)(DB_SOCK_LIMIT - DB_SOCK_BASE))
+    {
+        (void)nx_closesocket(s);
+        errno = EMFILE;
+        return -1;
+    }
+
+    return (int)s + DB_SOCK_BASE;
 }
 
 int connect(int fd, const struct sockaddr *addr, socklen_t len)

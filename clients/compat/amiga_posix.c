@@ -41,6 +41,12 @@
  *                    is 2,922 days after 1970-01-01.  A machine with a dead
  *                    RTC battery therefore reports 1978 here, exactly as
  *                    tls.library's clock check already assumes.
+ *   nanosleep()      Delay(), so the resolution is one tick -- 20 ms -- and a
+ *                    request is rounded UP to the next whole tick.  A caller
+ *                    asking for less than a tick still loses one.  It never
+ *                    returns EINTR, so the standard
+ *                    while (nanosleep(...) == -1 && errno == EINTR) loop runs
+ *                    once.  rem is zeroed rather than left alone.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -54,6 +60,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <time.h>               /* struct timespec, for nanosleep() */
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
@@ -279,3 +286,46 @@ int gettimeofday(struct timeval *__restrict tv, struct timezone *__restrict tz)
 {
     return _gettimeofday(tv, (void *)tz);
 }
+
+
+/* ------------------------------------------------------------- sleep --- */
+
+/*
+ * dropbear's server sleeps here for 250-350 ms after a failed password, so
+ * that a rejected user and a rejected password take the same time.  One tick
+ * of granularity leaves five or six distinct outcomes across that range
+ * instead of a continuum, which is coarse -- but it is far finer than the
+ * variance a 14 MHz machine's scheduler and an Ethernet round trip already
+ * add, so it does not weaken what the delay is there for.
+ *
+ * Delay(0) is documented as not doing what you would hope, so a request that
+ * rounds down to nothing is given a single tick.
+ */
+int nanosleep(const struct timespec *req, struct timespec *rem)
+{
+    long ticks;
+
+    if (req == NULL || req->tv_nsec < 0 || req->tv_nsec >= 1000000000L
+        || req->tv_sec < 0)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (rem != NULL)
+    {
+        rem->tv_sec  = 0;
+        rem->tv_nsec = 0;
+    }
+
+    /* Round up: 1 tick is 20 ms, so 1 tick is 20,000,000 ns. */
+    ticks = (long)req->tv_sec * TICKS_PER_SECOND
+          + (long)((req->tv_nsec + 19999999L) / 20000000L);
+
+    if (ticks <= 0)
+        ticks = 1;
+
+    Delay((ULONG)ticks);
+    return 0;
+}
+

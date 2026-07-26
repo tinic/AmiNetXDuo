@@ -91,7 +91,10 @@ AMIGA_CLIENT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 AMIGA_CLIENT_ARCH="${AMIGA_CLIENT_ARCH:--m68020}"
 AMIGA_CLIENT_OPT="${AMIGA_CLIENT_OPT:--O2}"
 
-AMIGA_CLIENT_CFLAGS="$AMIGA_CLIENT_ARCH $AMIGA_CLIENT_OPT -fomit-frame-pointer -fno-strict-aliasing -D__USE_NEW_TIMEVAL__ -D_SYS_MBUF_H -include sys/types.h"
+# -include amiga_compat.h so the shims in clients/compat that newlib has no
+# header for -- nanosleep(), clearenv() -- are declared everywhere.  See that
+# file for why it is a forced include and not a patch or a shadowed <time.h>.
+AMIGA_CLIENT_CFLAGS="$AMIGA_CLIENT_ARCH $AMIGA_CLIENT_OPT -fomit-frame-pointer -fno-strict-aliasing -D__USE_NEW_TIMEVAL__ -D_SYS_MBUF_H -include sys/types.h -I$AMIGA_CLIENT_ROOT/clients/compat -include amiga_compat.h"
 
 export AMIGA_CLIENT_ROOT AMIGA_CLIENT_ARCH AMIGA_CLIENT_OPT AMIGA_CLIENT_CFLAGS
 

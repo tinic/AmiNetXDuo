@@ -375,8 +375,15 @@ echo "  kex/cipher set (localoptions.h wins over default_options.h):"
 # and the default only fills what it does not mention.
 for m in CURVE25519 ECDH DH_GROUP14_SHA256 CHACHA20POLY1305 AES128 AES256 \
          ED25519 ECDSA RSA; do
-    v=$(grep -E "^#define DROPBEAR_$m " "$OUT/localoptions.h" 2>/dev/null | awk '{print $3}')
+    # || true on both: under set -e a grep that matches nothing is fatal, and
+    # matching nothing is the NORMAL case here -- localoptions.h only names the
+    # options it overrides.  Without this the loop dies on its first iteration,
+    # which is exactly what it did, silently, for as long as every caller piped
+    # this script's output somewhere and lost the exit status.
+    v=$(grep -E "^#define DROPBEAR_$m " "$OUT/localoptions.h" 2>/dev/null | awk '{print $3}' || true)
     [ -n "$v" ] || v=$(grep -E "^#define DROPBEAR_$m " \
-                       "$ROOT/third_party/dropbear/src/default_options.h" | awk '{print $3}')
+                       "$ROOT/third_party/dropbear/src/default_options.h" \
+                       2>/dev/null | awk '{print $3}' || true)
+    [ -n "$v" ] || v="(unset)"
     printf '    %-28s %s\n' "DROPBEAR_$m" "$v"
 done
