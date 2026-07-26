@@ -54,6 +54,7 @@ a user guide in `Docs/` inside the archive.
 | `AddNetInterface`, `Online`, `Offline` | bring an interface up and take it down |
 | `ShowNetStatus`, `netstat` | interface state, routes, connections |
 | `ping`, `host` | reachability and name lookups |
+| `sntp` | set the clock from a time server |
 | `fetch` | retrieve an `http://` or `https://` URL |
 | `nc` | connect or listen, TCP and UDP, port ranges, timeouts |
 | `telnet` | with enough option negotiation not to confuse a real server |
@@ -76,6 +77,9 @@ because the secure session is remembered, even across a reboot.
 ## What is not there yet
 
 - Nothing has run on **real hardware** yet.
+- **`ping`, `netstat` and `ShowNetStatus` cannot read the running network yet.**
+  They report that they cannot rather than printing anything wrong, but they do
+  not do what their names promise. A fix is in progress.
 - IPv6 works but is not in the standard build.
 - Accepting connections *from* the internet is untested.
 
