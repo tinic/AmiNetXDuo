@@ -79,9 +79,9 @@ because the secure session is remembered, even across a reboot.
 ## What is not there yet
 
 - Nothing has run on **real hardware** yet.
-- **`ping`, `netstat` and `ShowNetStatus` cannot read the running network yet.**
-  They report that they cannot rather than printing anything wrong, but they do
-  not do what their names promise. A fix is in progress.
+- **`ping` does not work yet.** It does not report a wrong answer; it simply
+  hangs. `netstat` and `ShowNetStatus`, which had the same cause, now read the
+  running network correctly.
 - IPv6 works but is not in the standard build.
 - Accepting connections *from* the internet is untested.
 
