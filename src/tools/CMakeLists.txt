@@ -113,6 +113,11 @@ aminetxduo_add_tool(tool_ftp     ftp      SOURCES ftp.c    toolsock.c)
 # reaches every other part of it, through the published vectors.
 aminetxduo_add_tool(tool_traceroute traceroute SOURCES traceroute.c toolsock.c)
 
+# tftp is a client and nothing more, so it is config-only in the plainest
+# sense: one datagram socket through the published vectors, and no part of the
+# stack linked in.
+aminetxduo_add_tool(tool_tftp    tftp     SOURCES tftp.c  toolsock.c)
+
 # sntp is config-only in the same sense as fetch: it reaches bsdsocket.library
 # through its published vectors and sets the machine's clock through
 # timer.device and battclock.resource.  It does NOT link the vendored NetX Duo
@@ -151,5 +156,6 @@ add_custom_target(tools ALL)
 add_dependencies(tools
     tool_addnetinterface tool_netsetup tool_online tool_offline tool_host
     tool_fetch tool_nc tool_telnet tool_ftp tool_nettrace tool_traceroute
+    tool_tftp
     tool_sntp
     tool_shownetstatus tool_netstat tool_ping tool_smoke)

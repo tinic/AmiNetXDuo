@@ -362,6 +362,153 @@ class FtpHandler(socketserver.BaseRequestHandler):
         log("ftp", "session ended")
 
 
+# --------------------------------------------------------------------- tftp --
+#
+# RFC 1350, octet mode, both directions.
+#
+# Port 69 needs root on this host, so the port is an argument and the guest is
+# told to use it.  That costs nothing: TFTP's interesting property is not the
+# well-known port, it is the TRANSFER IDENTIFIER -- the answer comes from a
+# port the server picks, and every later packet belongs to that port.  Each
+# session below therefore gets its own socket, exactly as a real server does,
+# which is what makes the client's TID handling something this test can prove
+# rather than assume.
+
+TFTP_FILES = dict(FILES)
+TFTP_FILES["big.bin"] = bytes((i * 7 + (i >> 8)) & 0xFF for i in range(100000))
+# Exactly four blocks: the case that needs a trailing EMPTY data block, and the
+# one a client that stops at "short block" gets wrong.
+TFTP_FILES["exact.bin"] = bytes(range(256)) * 8
+
+TFTP_BLOCK = 512
+
+
+def tftp_request_parts(data):
+    """opcode, filename, mode -- or (None, None, None) if it is not a request."""
+    if len(data) < 4:
+        return None, None, None
+    opcode = int.from_bytes(data[:2], "big")
+    fields = data[2:].split(b"\x00")
+    if len(fields) < 2:
+        return opcode, None, None
+    return opcode, fields[0].decode("latin-1"), fields[1].decode("latin-1")
+
+
+def tftp_error(sock, addr, code, text):
+    sock.sendto(b"\x00\x05" + code.to_bytes(2, "big")
+                + text.encode("latin-1") + b"\x00", addr)
+
+
+def tftp_session(request, client, log_tag):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("0.0.0.0", 0))
+    sock.settimeout(10)
+
+    opcode, name, mode = tftp_request_parts(request)
+    log(log_tag, "%s %r mode %r from %s:%d (my TID is %d)"
+        % ({1: "RRQ", 2: "WRQ"}.get(opcode, "op %s" % opcode), name, mode,
+           client[0], client[1], sock.getsockname()[1]))
+
+    try:
+        if opcode == 1:
+            tftp_send_file(sock, client, name, log_tag)
+        elif opcode == 2:
+            tftp_receive_file(sock, client, name, log_tag)
+        else:
+            tftp_error(sock, client, 4, "not a request")
+    except socket.timeout:
+        log(log_tag, "the client stopped answering")
+    except OSError as exc:
+        log(log_tag, "session failed: %s" % exc)
+    finally:
+        sock.close()
+
+
+def tftp_send_file(sock, client, name, log_tag):
+    blob = TFTP_FILES.get(name)
+    if blob is None:
+        log(log_tag, "no such file: %r" % name)
+        tftp_error(sock, client, 1, "no such file")
+        return
+
+    block = 1
+    offset = 0
+    while True:
+        chunk = blob[offset:offset + TFTP_BLOCK]
+        packet = b"\x00\x03" + (block & 0xFFFF).to_bytes(2, "big") + chunk
+
+        for attempt in range(5):
+            sock.sendto(packet, client)
+            try:
+                reply, who = sock.recvfrom(1024)
+            except socket.timeout:
+                continue
+            if who != client:
+                tftp_error(sock, who, 5, "unknown transfer ID")
+                continue
+            if len(reply) >= 4 and reply[:2] == b"\x00\x04" \
+                    and int.from_bytes(reply[2:4], "big") == (block & 0xFFFF):
+                break
+        else:
+            log(log_tag, "gave up on block %d" % block)
+            return
+
+        offset += len(chunk)
+        block += 1
+        if len(chunk) < TFTP_BLOCK:
+            break
+
+    log(log_tag, "sent %r, %d bytes in %d blocks" % (name, len(blob), block - 1))
+
+
+def tftp_receive_file(sock, client, name, log_tag):
+    sock.sendto(b"\x00\x04\x00\x00", client)          # ACK of the WRQ
+
+    got = bytearray()
+    expect = 1
+    while True:
+        try:
+            packet, who = sock.recvfrom(TFTP_BLOCK + 64)
+        except socket.timeout:
+            log(log_tag, "the client stopped sending after %d bytes" % len(got))
+            return
+        if who != client:
+            tftp_error(sock, who, 5, "unknown transfer ID")
+            continue
+        if len(packet) < 4 or packet[:2] != b"\x00\x03":
+            continue
+
+        block = int.from_bytes(packet[2:4], "big")
+        if block != (expect & 0xFFFF):
+            # A duplicate: acknowledge it again and wait for the one we want.
+            sock.sendto(b"\x00\x04" + packet[2:4], client)
+            continue
+
+        got += packet[4:]
+        sock.sendto(b"\x00\x04" + packet[2:4], client)
+        expect += 1
+
+        if len(packet) - 4 < TFTP_BLOCK:
+            break
+
+    UPLOADS[name] = bytes(got)
+    log(log_tag, "received %r, %d bytes; first 16 = %r"
+        % (name, len(got), bytes(got[:16])))
+
+
+def tftp_server(bind, port):
+    srv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind((bind, port))
+    while True:
+        try:
+            data, addr = srv.recvfrom(1024)
+        except OSError:
+            return
+        threading.Thread(target=tftp_session, args=(data, addr, "tftp"),
+                         daemon=True).start()
+
+
 # ------------------------------------------------------------------- dial --
 
 def dialer(target, message, deadline):
@@ -422,6 +569,8 @@ def main():
     ap.add_argument("--echo-port", type=int, default=7001)
     ap.add_argument("--telnet-port", type=int, default=7023)
     ap.add_argument("--ftp-port", type=int, default=7021)
+    ap.add_argument("--tftp-port", type=int, default=0,
+                    help="UDP port for the TFTP server; 0 leaves it off")
     ap.add_argument("--advertise", default="10.0.2.2",
                     help="address to put in the 227 PASV reply -- what the "
                          "guest must dial, not what we are bound to")
@@ -458,6 +607,12 @@ def main():
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         log("start", "%s on %s:%d" % (name, args.bind,
                                       srv.server_address[1]))
+
+    if args.tftp_port:
+        threading.Thread(target=tftp_server,
+                         args=(args.bind, args.tftp_port), daemon=True).start()
+        log("start", "tftp on %s:%d (UDP), serving %s"
+            % (args.bind, args.tftp_port, ", ".join(sorted(TFTP_FILES))))
 
     if args.dial:
         threading.Thread(

@@ -6822,3 +6822,42 @@ went out of, which is worse than not offering it.
 
 `PACKETSIZE` is the whole IP datagram, which is what the name has always meant, floored
 at 28 (a header and an echo header with nothing after them) and defaulting to 60.
+
+### 20.5 `tftp`: a client, octet only, and the transfer identifier
+
+`docs/RESEARCH.md` 5.4 recorded that NetX Duo's TFTP add-on compiles except for the
+server, which wants FileX. The client is not used either: the protocol is a couple of
+hundred lines over the socket API, and written that way the command runs on Roadshow and
+AmiTCP as well.
+
+**Octet only, deliberately.** RFC 1350's other mode rewrites line endings in transit,
+which destroys every binary anybody actually moves with this protocol; a switch offering
+it would be a switch whose only use is to corrupt a ROM image.
+
+The part worth testing is the **transfer identifier**: the request goes to port 69, the
+answer comes from a different port the server picked, and every later packet belongs to
+that port alone. `tests/tools/netpeer.py` grew a TFTP server that gives each session its
+own socket exactly as a real one does, and logs the TID it chose, so the client's
+handling of it is demonstrated rather than assumed. Four transfers, against it:
+
+```
+===== SYS:tftp 10.0.2.2 PORT 7069 GET hello.txt AS DH0:tftp-hello.txt =====
+49 bytes
+===== SYS:tftp 10.0.2.2 PORT 7069 GET big.bin AS DH0:tftp-big.bin =====
+100000 bytes in 2.8 seconds (50000 bytes/s)
+===== SYS:tftp 10.0.2.2 PORT 7069 GET exact.bin AS DH0:tftp-exact.bin =====
+2048 bytes
+===== SYS:tftp 10.0.2.2 PORT 7069 PUT DH0:greeting.txt AS from-amiga.txt =====
+21 bytes
+===== SYS:tftp 10.0.2.2 PORT 7069 GET no.such.file =====
+tftp: there is no such file on the server (no such file)
+```
+
+`exact.bin` is 2048 bytes, an exact multiple of the block size, which is the case a
+client that stops at the first short block gets wrong: the transfer ends with an *empty*
+data block and both directions have to expect it. The host log confirms the shape from
+the other side — `sent 'exact.bin', 2048 bytes in 5 blocks`, four full and one empty.
+
+The duplicate-block path is the sorcerer's-apprentice one: a data block that arrives
+twice is acknowledged again *without* advancing, because advancing doubles every packet
+on the wire for the rest of the transfer.

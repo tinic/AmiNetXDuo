@@ -64,6 +64,10 @@ TELNET_PORT="${AMINETXDUO_TELNET_PORT:-7023}"
 FTP_PORT="${AMINETXDUO_FTP_PORT:-7021}"
 NC_INBOUND_PORT="${AMINETXDUO_NC_PORT:-7042}"
 FTP_DATA_PORT="${AMINETXDUO_FTP_DATA_PORT:-7060}"
+# TFTP's own port is 69, and binding it needs root on this host -- a test that
+# asks for a password is a test nobody runs.  The command takes the port as an
+# argument, so the rig uses a high one.
+TFTP_PORT="${AMINETXDUO_TFTP_PORT:-7069}"
 
 SMOKE="$ROOT/$BUILD/src/tools/ToolsSmoke"
 ADDIF="$ROOT/$BUILD/src/tools/AddNetInterface"
@@ -72,8 +76,10 @@ NC="$ROOT/$BUILD/src/tools/nc"
 TELNET="$ROOT/$BUILD/src/tools/telnet"
 FTP="$ROOT/$BUILD/src/tools/ftp"
 TRACEROUTE="$ROOT/$BUILD/src/tools/traceroute"
+TFTP="$ROOT/$BUILD/src/tools/tftp"
 
-for f in "$SMOKE" "$ADDIF" "$BSD" "$NC" "$TELNET" "$FTP" "$TRACEROUTE"; do
+for f in "$SMOKE" "$ADDIF" "$BSD" "$NC" "$TELNET" "$FTP" "$TRACEROUTE" \
+         "$TFTP"; do
     [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
 done
 
@@ -106,6 +112,7 @@ cp "$NC"     "$STAGE/nc"
 cp "$TELNET" "$STAGE/telnet"
 cp "$FTP"    "$STAGE/ftp"
 cp "$TRACEROUTE" "$STAGE/traceroute"
+cp "$TFTP"       "$STAGE/tftp"
 
 # What the scripted sessions feed to standard input.
 printf 'GET / HTTP/1.0\r\n\r\n' > "$STAGE/request.txt"
@@ -180,8 +187,9 @@ wait 4
 &SYS:nc -l 7098 -v -w 10 >DH0:nc-self.txt
 wait 4
 SYS:nc 10.0.2.15 7098 -v -w 10 <DH0:greeting.txt >DH0:nc-selfclient.txt
-# ---- traceroute -------------------------------------------------------
+# ---- traceroute and tftp ----------------------------------------------
 SYS:traceroute ?
+SYS:tftp ?
 # What SLIRP does with a decrementing TTL is the whole question; the answer
 # is in docs/RESEARCH.md 20, and this is one of the runs it came from.
 #
@@ -198,6 +206,14 @@ SYS:traceroute 10.0.2.15 -m 3 -q 1 -w 3 -n
 SYS:traceroute 8.8.8.8 -m 3 -q 1 -w 3 -n -v
 SYS:traceroute 192.0.2.1 -m 2 -q 1 -w 3 -n -v
 SYS:traceroute 10.11.12.13 -m 2 -q 1 -w 3 -n -v
+# tftp against netpeer.py's server: a small file, a big one, one that is an
+# exact multiple of the block size -- which ends with an EMPTY data block --
+# one going the other way, and one that is not there.
+SYS:tftp 10.0.2.2 PORT $TFTP_PORT GET hello.txt AS DH0:tftp-hello.txt
+SYS:tftp 10.0.2.2 PORT $TFTP_PORT GET big.bin AS DH0:tftp-big.bin
+SYS:tftp 10.0.2.2 PORT $TFTP_PORT GET exact.bin AS DH0:tftp-exact.bin
+SYS:tftp 10.0.2.2 PORT $TFTP_PORT PUT DH0:greeting.txt AS from-amiga.txt
+SYS:tftp 10.0.2.2 PORT $TFTP_PORT GET no.such.file
 # ---- give the inbound connection time to have happened ----------------
 wait 15
 EOF
@@ -214,7 +230,8 @@ fi
 PEERLOG="$ROOT/build/netpeer.log"
 python3 "$ROOT/tests/tools/netpeer.py" \
     --echo-port "$ECHO_PORT" --telnet-port "$TELNET_PORT" \
-    --ftp-port "$FTP_PORT" --advertise 10.0.2.2 --active-via-loopback \
+    --ftp-port "$FTP_PORT" --tftp-port "$TFTP_PORT" \
+    --advertise 10.0.2.2 --active-via-loopback \
     --dial "127.0.0.1:$NC_INBOUND_PORT" --dial-for "$TIMEOUT" \
     --log "$PEERLOG" --seconds "$((TIMEOUT + 120))" \
     > "$ROOT/build/netpeer.out" 2>&1 &
@@ -231,7 +248,8 @@ kill -0 "$PEER_PID" 2>/dev/null || {
     cat "$ROOT/build/netpeer.out" >&2
     exit 2
 }
-echo "==> netpeer.py: echo $ECHO_PORT, telnet $TELNET_PORT, ftp $FTP_PORT"
+echo "==> netpeer.py: echo $ECHO_PORT, telnet $TELNET_PORT, ftp $FTP_PORT," \
+     "tftp $TFTP_PORT"
 
 # --------------------------------------------------------------- slirp ---
 #
@@ -273,7 +291,7 @@ CPUARG=()
 set +e
 "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
     "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/nc" "$STAGE/telnet" \
-    "$STAGE/ftp" "$STAGE/traceroute" \
+    "$STAGE/ftp" "$STAGE/traceroute" "$STAGE/tftp" \
     "$STAGE/AddNetInterface" "$STAGE/commands.txt" \
     "$STAGE/request.txt" "$STAGE/greeting.txt" "$STAGE/telnetin.txt" \
     "$STAGE/ftppasv.txt" "$STAGE/ftpactive.txt"
