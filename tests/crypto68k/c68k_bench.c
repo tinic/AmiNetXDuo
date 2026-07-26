@@ -43,7 +43,7 @@
 #define B_POWM_SCRATCH      3000u
 #define B_HN_SCRATCH        4096u
 
-static c68k_limb    b_work[B_MAX_LIMBS * 2 + 8];
+static c68k_limb    b_work[C68K_MONT_WORK_LIMBS(B_MAX_LIMBS)];
 static c68k_limb    b_scratch[B_POWM_SCRATCH];
 static c68k_limb    b_hn_scratch[B_HN_SCRATCH];
 static c68k_limb    b_result[B_MAX_LIMBS * 2 + 8];

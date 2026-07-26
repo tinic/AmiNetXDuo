@@ -108,6 +108,15 @@ c68k_limb c68k_add_carry(c68k_limb *dst, const c68k_limb *src, UINT n,
                          c68k_limb carry);
 
 /*
+ * r[0..n-1] += b[0..n-1].  Returns the carry out (0 or 1).
+ *
+ * Added for Karatsuba: the recombination is four passes of add and subtract
+ * over half-width operands and nothing else, so this is the only primitive
+ * the split needed that the module did not already have.
+ */
+c68k_limb c68k_add(c68k_limb *r, const c68k_limb *b, UINT n);
+
+/*
  * r[0..n-1] -= b[0..n-1].  Returns the borrow out (0 or 1).
  */
 c68k_limb c68k_sub(c68k_limb *r, const c68k_limb *b, UINT n);
@@ -132,16 +141,52 @@ UINT c68k_using_assembly(VOID);
 c68k_limb c68k_mont_n0inv(c68k_limb m0);
 
 /*
+ * Operand width, in limbs, at or above which the product inside a Montgomery
+ * step is split with Karatsuba.  Below it, schoolbook.
+ *
+ * A variable and not a #define, for two reasons that both turned out to
+ * matter more than the one memory load it costs against a 64-limb multiply.
+ * The crossover is a property of THIS machine and is measured by sweeping it
+ * at run time rather than by rebuilding once per candidate.  And it lets the
+ * test diff the split against schoolbook inside our own module, which is a
+ * far better oracle than the vendored Montgomery -- that one is demonstrably
+ * wrong for operands within a whisker of the modulus (see the comment in
+ * tests/crypto68k/host/test_c68k_host.c), so it cannot check the very
+ * operands Karatsuba's carry paths most need checking on.
+ *
+ * Default C68K_KARATSUBA_DEFAULT.  Setting it to 0 or 1 disables the split.
+ */
+extern UINT c68k_karatsuba_limbs;
+
+#define C68K_KARATSUBA_DEFAULT  64u
+
+/*
  * r = x * y * R^-1 mod m, where R = 2^(32*m_len).
  *
  * y must be < m; x need only be m_len limbs.  r is m_len limbs and MAY alias
- * x or y (both are fully consumed before r is written).  work is scratch of at
- * least (2 * m_len + 2) limbs and must not alias anything.
+ * x or y (both are fully consumed before r is written).  work is scratch of
+ * C68K_MONT_WORK_LIMBS(m_len) limbs, below, and must not alias anything.
  *
  * Separated form (SOS in Koc/Acar/Kaliski's taxonomy) rather than the usually
  * recommended CIOS -- see the header comment in c68k_mont.c for why the 68020
- * inverts that advice.
+ * inverts that advice.  The PRODUCT is Karatsuba above a threshold and
+ * schoolbook below it; the REDUCTION is a chain of scalar-by-vector products
+ * and is schoolbook always, because Karatsuba cannot apply to it at all.
  */
+
+/*
+ * Scratch, in limbs, that c68k_mont_mul() and c68k_mont_sqr() need for a
+ * modulus of m_len limbs.
+ *
+ *   the 2*m_len+1 limb product                       2*m_len + 1
+ *   Karatsuba recombination, T(n) = 2.5n+1 + T(n/2)  <= 6*m_len
+ *
+ * It grew from 2*m_len+2 when Karatsuba arrived.  Undersizing it is not a
+ * subtle failure -- the recombination writes past the end -- so every caller
+ * uses this macro rather than open-coding the arithmetic.
+ */
+#define C68K_MONT_WORK_LIMBS(m_len)     ((8u * (UINT)(m_len)) + 2u)
+
 VOID c68k_mont_mul(c68k_limb *r,
                    const c68k_limb *x, const c68k_limb *y,
                    const c68k_limb *m, UINT m_len, c68k_limb n0inv,
@@ -164,12 +209,12 @@ VOID c68k_mont_sqr(c68k_limb *r,
  * m_len limbs and a window of w bits.  A window of w keeps 2^(w-1) odd powers.
  *
  *   x_mont, acc, one, rr, xpad          =  5 * m_len
- *   CIOS/SOS work area                  =  2 * m_len + 2
+ *   SOS work area + Karatsuba scratch   =  8 * m_len + 2
  *   radix^2 mod m setup                 =  3 * m_len + 4
  *   window table, 2^(w-1) odd powers    = (1 << (w-1)) * m_len
  */
 #define C68K_POWM_SCRATCH_LIMBS(m_len, w) \
-    ((((10u + (1u << ((w) - 1u))) * (UINT)(m_len))) + 8u)
+    ((((16u + (1u << ((w) - 1u))) * (UINT)(m_len))) + 8u)
 
 /*
  * The largest window the implementation will use.  OpenSSL's threshold table

@@ -419,7 +419,7 @@ UINT    i;
  * Undersizing is safe rather than wrong: c68k_huge_number_mont_power_modulus()
  * falls back to the vendored routine when the window will not fit at all.
  */
-#define AMI_TLS_POWM_SCRATCH_LIMBS  1536u
+#define AMI_TLS_POWM_SCRATCH_LIMBS  2048u
 
 typedef struct AMI_CRYPTO_RSA_STRUCT
 {

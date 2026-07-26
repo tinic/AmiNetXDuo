@@ -241,8 +241,8 @@ UINT        started;
     one   = acc   + m_len;
     rr    = one   + m_len;
     xpad  = rr    + m_len;
-    work  = xpad  + m_len;                  /* 2*m_len + 2 */
-    setup = work  + ((m_len << 1) + 2);     /* 3*m_len + 4 */
+    work  = xpad  + m_len;                  /* 8*m_len + 2 */
+    setup = work  + C68K_MONT_WORK_LIMBS(m_len);    /* 3*m_len + 4 */
     table = setup + (3u * m_len) + 4u;      /* table_size * m_len */
 
     n0inv = c68k_mont_n0inv(m[0]);

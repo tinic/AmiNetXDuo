@@ -53,7 +53,7 @@ static c68k_limb    t_x[T_MAX_LIMBS];
 static c68k_limb    t_y[T_MAX_LIMBS];
 static c68k_limb    t_exp[T_MAX_LIMBS];
 static c68k_limb    t_mine[T_MAX_LIMBS * 2 + 8];
-static c68k_limb    t_work[T_MAX_LIMBS * 2 + 8];
+static c68k_limb    t_work[C68K_MONT_WORK_LIMBS(T_MAX_LIMBS)];
 static c68k_limb    t_scratch[T_POWM_SCRATCH];
 static c68k_limb    t_hn_scratch[T_HN_SCRATCH];
 static c68k_limb    t_ref_result[T_MAX_LIMBS * 2 + 8];

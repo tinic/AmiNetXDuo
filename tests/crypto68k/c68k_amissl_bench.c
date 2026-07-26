@@ -101,6 +101,13 @@ static c68k_limb    a_e_copy[A_MAX_LIMBS];
 
 static NX_CRYPTO_HUGE_NUMBER a_x_hn, a_e_hn, a_m_hn, a_p_hn, a_q_hn, a_r_hn;
 
+/* Karatsuba crossover sweep */
+static c68k_limb    a_kx[64];
+static c68k_limb    a_km[64];
+static c68k_limb    a_kr[(64 * 2) + 8];
+static UINT         a_klen;
+static c68k_limb    a_kn0;
+
 /* Big-endian byte forms of the same vectors, which is what OpenSSL wants. */
 static UCHAR        a_be_n[256];
 static UCHAR        a_be_d[256];
@@ -224,7 +231,22 @@ static UINT     a_row_count;
  *          r free), 1 M for bn_to_mont_fixed_top and one bare
  *          BN_from_montgomery = N^2 + N.
  */
-#define A_MULU_RSAPUB_OURS      ((16UL * A_M_SQR64) + (3UL * A_M_MUL64) + 2080UL)
+/*
+ * With Karatsuba at the default threshold of 64 limbs a 2048-bit operand
+ * splits ONCE, into 32-limb schoolbook halves, so the product costs 3x what a
+ * 32-limb one does: a square 3*528 = 1584 instead of 2080, a multiply
+ * 3*1024 = 3072 instead of 4096.  The reduction is untouched at 4160 either
+ * way, because Karatsuba cannot apply to it.  The setup's square goes through
+ * the vendored code and is schoolbook.
+ *
+ * AmiSSL reaches 103,936 by recursing three levels, to bn_sqr_comba8.  We stop
+ * at one because the measurement says deeper loses -- see the crossover sweep
+ * this program prints before the RSA rows.
+ */
+#define A_M_SQR64_KAR   ((3UL * 528UL) + 4160UL)        /* 5744 */
+#define A_M_MUL64_KAR   ((3UL * 1024UL) + 4160UL)       /* 7232 */
+
+#define A_MULU_RSAPUB_OURS      ((16UL * A_M_SQR64_KAR) + (3UL * A_M_MUL64_KAR)                                  + 2080UL)
 #define A_MULU_RSAPUB_THEIRS    ((16UL * A_O_SQR64) + (3UL * A_O_MUL64) + 4160UL)
 
 /*
@@ -541,6 +563,93 @@ c68k_limb   w;
         out[j + 2] = (UCHAR)(w >> 8);
         out[j + 3] = (UCHAR)(w);
     }
+}
+
+
+/* ====================================================== Karatsuba crossover ==
+ *
+ * docs/RESEARCH.md 9 measured Karatsuba at ~5% and rejected it -- AT 32 LIMBS,
+ * which is what an RSA-2048 CRT half runs and where that conclusion still
+ * holds.  An RSA-2048 *public* operation is 64 limbs, where the split removes
+ * more than twice as many limb products.  So the threshold is the design, and
+ * this measures it here rather than inheriting a number from another project.
+ *
+ * The reduction half of a Montgomery step is a chain of scalar-by-vector
+ * products that Karatsuba cannot touch, so the ratios below are always much
+ * smaller than the ratio of the products alone -- that dilution is the point,
+ * and it is why the crossover has to be measured on the whole step.
+ */
+
+static VOID a_kar_sqr(VOID)
+{
+
+    c68k_mont_sqr(a_kr, a_kx, a_km, a_klen, a_kn0, a_scratch);
+}
+
+static VOID a_kar_mul(VOID)
+{
+
+    c68k_mont_mul(a_kr, a_kx, a_kx, a_km, a_klen, a_kn0, a_scratch);
+}
+
+static VOID a_bench_karatsuba(VOID)
+{
+
+static const UINT   widths[] = { 32u, 64u };
+UINT                w;
+UINT                i;
+UINT                thr;
+ULONG               base_s, base_m, on_s, on_m;
+ULONG               reps;
+
+
+    c68k_log("");
+    c68k_log("0b. Karatsuba crossover, one Montgomery step (product + reduction)");
+    c68k_log("   threshold T means: split while the operand is >= T limbs, so");
+    c68k_log("   T = n is one level and T = 2 recurses to 2-limb leaves.");
+
+    for (w = 0; w < 2u; w++)
+    {
+        a_klen = widths[w];
+
+        for (i = 0; i < a_klen; i++)
+        {
+            a_km[i] = t_n[i];
+            a_kx[i] = t_msg[i];
+        }
+        a_km[0]            |= 1u;               /* Montgomery needs it odd  */
+        a_km[a_klen - 1u]  |= 0x80000000UL;     /* and x < m below          */
+        a_kx[a_klen - 1u]  &= 0x7FFFFFFFUL;
+        a_kn0 = c68k_mont_n0inv(a_km[0]);
+
+        reps = (a_klen >= 64u) ? 20UL : 60UL;
+
+        c68k_karatsuba_limbs = 0xFFFFu;         /* schoolbook, the baseline */
+        base_s = a_time_n(a_kar_sqr, reps);
+        base_m = a_time_n(a_kar_mul, reps);
+
+        c68k_log("  %lu limbs, schoolbook: square %lu us, multiply %lu us",
+                 (ULONG)a_klen, base_s, base_m);
+
+        for (thr = a_klen; thr >= 8u; thr >>= 1)
+        {
+            c68k_karatsuba_limbs = thr;
+            on_s = a_time_n(a_kar_sqr, reps);
+            on_m = a_time_n(a_kar_mul, reps);
+
+            c68k_log("    T=%2lu: square %6lu us (%lu.%02lux)   "
+                     "multiply %6lu us (%lu.%02lux)",
+                     (ULONG)thr,
+                     on_s, (on_s != 0UL) ? ((base_s * 100UL) / on_s) / 100UL : 0UL,
+                           (on_s != 0UL) ? ((base_s * 100UL) / on_s) % 100UL : 0UL,
+                     on_m, (on_m != 0UL) ? ((base_m * 100UL) / on_m) / 100UL : 0UL,
+                           (on_m != 0UL) ? ((base_m * 100UL) / on_m) % 100UL : 0UL);
+        }
+    }
+
+    c68k_karatsuba_limbs = C68K_KARATSUBA_DEFAULT;
+    c68k_log("  threshold in force for everything below: %lu limbs",
+             (ULONG)c68k_karatsuba_limbs);
 }
 
 
@@ -1274,6 +1383,8 @@ ULONG   start;
     c68k_log("  before it is timed.  Timings are the emulator's 68020, whose");
     c68k_log("  MULU.L is 32.14 cycles against a real part's 45 -- the");
     c68k_log("  corrected line beside each result is what a 68020 would do.");
+
+    a_bench_karatsuba();
 
     /* ------------------------------------------------------------ RSA -- */
 

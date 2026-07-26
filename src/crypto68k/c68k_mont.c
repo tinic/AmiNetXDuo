@@ -29,11 +29,15 @@
  *   So: CIOS wins on paper and SOS wins here, because the paper counts memory
  *   operations and this machine cares which addressing mode they use.
  *
- *   Not Karatsuba.  GMP's own tuning file for this architecture puts the
- *   crossover at 14 limbs on a 68040, but the Montgomery reduction is a chain
- *   of scalar-by-vector products and is not Karatsuba-able at all, so only
- *   half the work is eligible; at the 32-limb halves an RSA-2048 CRT operation
- *   actually runs, one level buys about 5%.  Not worth the scratch or the risk.
+ *   Karatsuba, above a measured threshold -- see the block further down.  The
+ *   original judgement here was "not Karatsuba", on the grounds that the
+ *   reduction is not Karatsuba-able and that one level buys about 5% at the
+ *   32-limb halves an RSA-2048 CRT operation runs.  Both halves of that are
+ *   still true.  What it missed is that an RSA-2048 PUBLIC operation is 64
+ *   limbs, not 32, and the split removes more than twice as many limb products
+ *   there -- and a TLS client does three public operations per handshake and
+ *   one private one only if it holds a certificate.  So the threshold, not the
+ *   technique, was the thing to get right.
  *
  * WHY SQUARING IS A SEPARATE ROUTINE
  *
@@ -44,11 +48,23 @@
  *   exponentiation almost every operation is a squaring, which is what makes
  *   a 24% saving on it worth having.
  *
- * BIT-FOR-BIT
+ * BIT-FOR-BIT, AND ONE PLACE WHERE THAT IS THE WRONG BAR
  *
- *   Both routines produce exactly what _nx_crypto_huge_number_mont() produces,
- *   including the final conditional subtraction.  That is not a claim; it is
- *   what tests/crypto68k/rsa_test checks over thousands of random operands.
+ *   Both routines produce exactly what _nx_crypto_huge_number_mont() produces
+ *   over thousands of random operands, including the final conditional
+ *   subtraction, and tests/crypto68k checks it.
+ *
+ *   They do NOT agree with it for operands within a whisker of the modulus,
+ *   and there we are right and it is wrong.  Two cases, both checked against
+ *   an independent answer rather than against either implementation: with
+ *   m = 2^64 - 1 and x = m-1, mont(x,x) must be 1 and the vendored routine
+ *   returns 0; at 32 limbs with m nearly all ones and x = m-1, its top limb is
+ *   one less than the true value.  Random operands never come that close to m
+ *   -- which is why a 400-trial sweep never caught it, and why no RSA or EC
+ *   path can reach it -- but it does mean the vendored routine cannot be used
+ *   as the oracle for exactly the extreme operands Karatsuba's carry handling
+ *   most needs checking on.  So that test diffs the split against our own
+ *   schoolbook instead, which is what c68k_karatsuba_limbs exists for.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -156,6 +172,242 @@ c68k_limb   sum;
 }
 
 
+/* ----------------------------------------------------------- Karatsuba ---- */
+
+/*
+ * WHY THIS IS HERE NOW WHEN docs/RESEARCH.md 9 REJECTED IT
+ *
+ *   It rejected it AT 32 LIMBS, where it measured ~5%, and that measurement
+ *   stands.  An RSA-2048 CRT half is 32 limbs; an RSA-2048 *public* operation
+ *   is 64, and the split is worth much more there:
+ *
+ *       limbs      8      16      32      64
+ *       squaring   1.00x  1.26x   1.63x   2.14x     (fewer limb products)
+ *       multiply   1.00x  1.33x   1.78x   2.37x
+ *
+ *   So the threshold is the whole design, and it is set from measurement on
+ *   this machine rather than copied out of another project.  Below it,
+ *   schoolbook -- which at 8 limbs is exactly as good (36 products either way).
+ *
+ * WHAT IT IS ACTUALLY WORTH, WHICH IS LESS THAN THAT TABLE SUGGESTS
+ *
+ *   A Montgomery step is a product AND a reduction, and the reduction is a
+ *   chain of scalar-by-vector c68k_addmul_1 calls that Karatsuba cannot touch
+ *   at all.  It costs s^2 + s whatever we do.  So 2.14x on the squaring of 64
+ *   limbs dilutes to 6240 -> 5132 on the Montgomery square, 1.22x, and the
+ *   whole e=65537 exponentiation goes 124,608 -> 99,776 limb products.
+ *
+ * WHY SUBTRACTIVE FOR THE SQUARE AND ADDITIVE FOR THE MULTIPLY
+ *
+ *   Squaring:  x^2 = x1^2*B^2h + (x0^2 + x1^2 - (x1-x0)^2)*B^h + x0^2.
+ *   The middle is 2*x0*x1, so it is never negative, and |x1-x0| fits in h
+ *   limbs with no carry out.  Nothing to sign-track and nothing to carry.
+ *
+ *   Multiplying:  the matching subtractive form is (x1-x0)*(y0-y1), whose SIGN
+ *   depends on the operands -- that is the term OpenSSL's bn_mul_recursive
+ *   carries a `neg` flag for, and it is where this kind of code goes wrong.
+ *   The additive form (x0+x1)*(y0+y1) has no sign, at the price of two h-limb
+ *   sums that can carry out.  Those carries are handled explicitly below as
+ *   two conditional adds and one conditional increment, which is a bounded
+ *   amount of obviously-correct code where the sign version is a subtle one.
+ */
+
+UINT c68k_karatsuba_limbs = C68K_KARATSUBA_DEFAULT;
+
+static VOID c68k_zero_n(c68k_limb *p, UINT n)
+{
+
+UINT    i;
+
+
+    for (i = 0; i < n; i++)
+    {
+        p[i] = 0;
+    }
+}
+
+static VOID c68k_copy_n(c68k_limb *dst, const c68k_limb *src, UINT n)
+{
+
+UINT    i;
+
+
+    for (i = 0; i < n; i++)
+    {
+        dst[i] = src[i];
+    }
+}
+
+/* Schoolbook product, the base case and the below-threshold path. */
+static VOID c68k_mul_school(c68k_limb *t, const c68k_limb *x,
+                            const c68k_limb *y, UINT n)
+{
+
+UINT    i;
+
+
+    c68k_zero_n(t, n);
+
+    /*
+     * The carry out of row i lands in t[i+n], which no earlier row has
+     * touched -- row i' writes at most t[i'+n] -- so storing it is the same as
+     * adding it.  That is why this is a store and not an accumulate.
+     */
+    for (i = 0; i < n; i++)
+    {
+        t[i + n] = c68k_addmul_1(&t[i], y, n, x[i]);
+    }
+}
+
+/* The symmetric schoolbook squarer, further down: the base case of the split,
+   and already optimal at 8 limbs (36 products, exactly what a Comba square
+   costs).  Declared here because the recursion reaches it. */
+static VOID c68k_sqr(c68k_limb *t, const c68k_limb *x, UINT n);
+
+static VOID c68k_sqr_n(c68k_limb *t, const c68k_limb *x, UINT n, c68k_limb *s);
+static VOID c68k_mul_n(c68k_limb *t, const c68k_limb *x, const c68k_limb *y,
+                       UINT n, c68k_limb *s);
+
+/*
+ * t[0..2n-1] = x[0..n-1]^2.
+ *
+ * s is scratch, C68K_KAR_SCRATCH(n) limbs, and must not alias t or x.
+ */
+static VOID c68k_sqr_n(c68k_limb *t, const c68k_limb *x, UINT n, c68k_limb *s)
+{
+
+UINT        h;
+c68k_limb  *d;
+c68k_limb  *u;
+c68k_limb  *mid;
+c68k_limb  *sub;
+c68k_limb   carry;
+c68k_limb   borrow;
+
+
+    /* Odd sizes fall back rather than growing a special case for a shape no
+       RSA or EC size in this tree ever takes. */
+    if ((n < c68k_karatsuba_limbs) || (n < 2u) || ((n & 1u) != 0u))
+    {
+        c68k_sqr(t, x, n);
+        return;
+    }
+
+    h   = n >> 1;
+    d   = s;                            /* h      */
+    u   = d + h;                        /* 2h     */
+    mid = u + n;                        /* 2h + 1 */
+    sub = mid + n + 1u;
+
+    /* d = |x1 - x0|, h limbs, no carry out either way. */
+    if (c68k_cmp(&x[h], x, h) >= 0)
+    {
+        c68k_copy_n(d, &x[h], h);
+        (VOID) c68k_sub(d, x, h);
+    }
+    else
+    {
+        c68k_copy_n(d, x, h);
+        (VOID) c68k_sub(d, &x[h], h);
+    }
+
+    c68k_sqr_n(t,      x,     h, sub);          /* L = x0^2 -> t[0 .. n-1]   */
+    c68k_sqr_n(&t[n],  &x[h], h, sub);          /* H = x1^2 -> t[n .. 2n-1]  */
+    c68k_sqr_n(u,      d,     h, sub);          /* u = |x1-x0|^2             */
+
+    /*
+     * mid = L + H - u, which is 2*x0*x1 and therefore never negative.  It
+     * needs n+1 limbs because L + H can carry out of n.
+     */
+    c68k_copy_n(mid, t, n);
+    mid[n] = c68k_add(mid, &t[n], n);
+    borrow = c68k_sub(mid, u, n);
+    mid[n] = (c68k_limb)(mid[n] - borrow);
+
+    /* t += mid * B^h.  mid is n+1 limbs, so it reaches t[h .. h+n], which is
+       t[h .. 3h] -- inside the 4h limbs of t.  The carry goes above that. */
+    carry = c68k_add(&t[h], mid, n + 1u);
+    if (carry != 0u)
+    {
+        (VOID) c68k_add_carry(&t[h + n + 1u], &t[h + n + 1u],
+                              (n << 1) - (h + n + 1u), carry);
+    }
+}
+
+/*
+ * t[0..2n-1] = x[0..n-1] * y[0..n-1].
+ */
+static VOID c68k_mul_n(c68k_limb *t, const c68k_limb *x, const c68k_limb *y,
+                       UINT n, c68k_limb *s)
+{
+
+UINT        h;
+c68k_limb  *a;
+c68k_limb  *b;
+c68k_limb  *p;
+c68k_limb  *sub;
+c68k_limb   cx;
+c68k_limb   cy;
+c68k_limb   carry;
+c68k_limb   borrow;
+
+
+    if ((n < c68k_karatsuba_limbs) || (n < 2u) || ((n & 1u) != 0u))
+    {
+        c68k_mul_school(t, x, y, n);
+        return;
+    }
+
+    h   = n >> 1;
+    a   = s;                            /* h      */
+    b   = a + h;                        /* h      */
+    p   = b + h;                        /* 2h + 1 */
+    sub = p + n + 1u;
+
+    /* a = x0 + x1 and b = y0 + y1, each h limbs plus a carry bit. */
+    c68k_copy_n(a, x, h);
+    cx = c68k_add(a, &x[h], h);
+    c68k_copy_n(b, y, h);
+    cy = c68k_add(b, &y[h], h);
+
+    c68k_mul_n(t,     x,     y,     h, sub);    /* z0 = x0*y0 -> t[0..n-1]  */
+    c68k_mul_n(&t[n], &x[h], &y[h], h, sub);    /* z2 = x1*y1 -> t[n..2n-1] */
+    c68k_mul_n(p,     a,     b,     h, sub);    /* a*b, low n limbs         */
+    p[n] = 0;
+
+    /*
+     * (cx*B^h + a) * (cy*B^h + b) = cx*cy*B^n + (cx*b + cy*a)*B^h + a*b.
+     * The two conditional adds land at limb offset h and cannot carry past
+     * p[n], because the whole product is bounded by (2*B^h)^2 = 4*B^n.
+     */
+    if (cx != 0u)
+    {
+        p[n] = (c68k_limb)(p[n] + c68k_add(&p[h], b, h));
+    }
+    if (cy != 0u)
+    {
+        p[n] = (c68k_limb)(p[n] + c68k_add(&p[h], a, h));
+    }
+    if ((cx != 0u) && (cy != 0u))
+    {
+        p[n] = (c68k_limb)(p[n] + 1u);
+    }
+
+    /* p -= z0 + z2, leaving the middle term, which is never negative. */
+    borrow = c68k_sub(p, t, n);
+    p[n]   = (c68k_limb)(p[n] - borrow);
+    borrow = c68k_sub(p, &t[n], n);
+    p[n]   = (c68k_limb)(p[n] - borrow);
+
+    carry = c68k_add(&t[h], p, n + 1u);
+    if (carry != 0u)
+    {
+        (VOID) c68k_add_carry(&t[h + n + 1u], &t[h + n + 1u],
+                              (n << 1) - (h + n + 1u), carry);
+    }
+}
+
+
 /* ------------------------------------------------------------ multiply ---- */
 
 VOID c68k_mont_mul(c68k_limb *r,
@@ -164,27 +416,14 @@ VOID c68k_mont_mul(c68k_limb *r,
                    c68k_limb *work)
 {
 
-UINT        i;
 UINT        total;
 c68k_limb  *t = work;
 
 
     total = m_len << 1;
 
-    for (i = 0; i <= total; i++)
-    {
-        t[i] = 0;
-    }
-
-    /*
-     * t = x * y, one row at a time.  The carry out of row i lands in
-     * t[i+m_len], which no earlier row has touched -- row i' writes at most
-     * t[i'+m_len] -- so storing it is the same as adding it.
-     */
-    for (i = 0; i < m_len; i++)
-    {
-        t[i + m_len] = c68k_addmul_1(&t[i], y, m_len, x[i]);
-    }
+    c68k_mul_n(t, x, y, m_len, work + total + 1u);
+    t[total] = 0;
 
     c68k_mont_reduce(t, m, m_len, n0inv);
     c68k_mont_final(r, &t[m_len], m, m_len);
@@ -251,7 +490,7 @@ VOID c68k_mont_sqr(c68k_limb *r,
 c68k_limb  *t = work;
 
 
-    c68k_sqr(t, x, m_len);
+    c68k_sqr_n(t, x, m_len, work + (m_len << 1) + 1u);
     t[m_len << 1] = 0;
 
     c68k_mont_reduce(t, m, m_len, n0inv);

@@ -182,6 +182,50 @@ Lac_done:
 
 
 | ---------------------------------------------------------------------------
+| c68k_limb c68k_add(c68k_limb *r, const c68k_limb *b, UINT n)
+|
+|   r += b, returns the carry out.  The mirror of c68k_sub below, and DBRA for
+|   the same reason: it is the only decrement-and-branch that leaves the CCR
+|   alone, so the X flag survives from one limb's ADDX to the next.
+|
+|   Karatsuba is what wanted this.  The recombination is four passes of add and
+|   subtract over half-width operands and nothing else, so on the 64-limb
+|   squaring it runs about 320 limbs per call -- small against the 1,108 limb
+|   products the split removes, but not small enough to leave to the compiler,
+|   which spends five instructions and a branch where this needs two.
+| ---------------------------------------------------------------------------
+
+        .globl  _c68k_add
+_c68k_add:
+        movem.l d2-d3,-(sp)
+        move.l  12(sp),a0               | r
+        move.l  16(sp),a1               | b
+        move.l  20(sp),d0               | n
+        tst.l   d0
+        beq.s   Ladd_zero
+        subq.l  #1,d0                   | DBRA counts down to -1
+        moveq   #0,d2
+        add.l   d2,d2                   | X = 0
+
+Ladd_loop:
+        move.l  (a1)+,d2                | MOVE does not disturb X
+        move.l  (a0),d3
+        addx.l  d2,d3
+        move.l  d3,(a0)+
+        dbra    d0,Ladd_loop
+
+        moveq   #0,d0
+        addx.l  d0,d0                   | d0 = 0 + 0 + X = the carry out
+        movem.l (sp)+,d2-d3
+        rts
+
+Ladd_zero:
+        moveq   #0,d0
+        movem.l (sp)+,d2-d3
+        rts
+
+
+| ---------------------------------------------------------------------------
 | c68k_limb c68k_sub(c68k_limb *r, const c68k_limb *b, UINT n)
 |
 |   r -= b, returns the borrow out.  DBRA again, for the same CCR reason.

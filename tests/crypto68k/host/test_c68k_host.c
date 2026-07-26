@@ -60,15 +60,26 @@
 #define T_HN_SCRATCH        2048u
 
 static c68k_limb    t_m[T_MAX_LIMBS];
-static c68k_limb    t_x[T_MAX_LIMBS];
-static c68k_limb    t_y[T_MAX_LIMBS];
+
+/*
+ * t_x and t_y are +8 because section 2 sweeps n up to 70 to catch the loop
+ * tails, and T_MAX_LIMBS is 64.  Without the slack the test wrote past t_y
+ * for n in 65..70 and reported ~8% of its own trials as addmul mismatches --
+ * 316 of 4000, against the 6/71 = 8.45% of draws that overrun.  The author
+ * saw half of it: t_x below carried a "% T_MAX_LIMBS" comment reading "keep
+ * the arrays in range" and t_y did not.
+ */
+static c68k_limb    t_x[T_MAX_LIMBS + 8u];
+static c68k_limb    t_y[T_MAX_LIMBS + 8u];
 static c68k_limb    t_exp[T_MAX_LIMBS];
 static c68k_limb    t_mine[T_MAX_LIMBS * 2 + 8];
-static c68k_limb    t_work[T_MAX_LIMBS * 2 + 8];
+static c68k_limb    t_work[C68K_MONT_WORK_LIMBS(T_MAX_LIMBS)];
 static c68k_limb    t_scratch[T_POWM_SCRATCH];
 static c68k_limb    t_hn_scratch[T_HN_SCRATCH];
 static c68k_limb    t_ref_result[T_MAX_LIMBS * 2 + 8];
 static c68k_limb    t_tmp[T_MAX_LIMBS * 2 + 8];
+
+static VOID t_karatsuba(VOID);
 
 static unsigned long    t_failures;
 static unsigned long    t_checks;
@@ -282,7 +293,7 @@ UINT        mismatch = 0;
 
         for (i = 0; i < n; i++)
         {
-            t_x[i % T_MAX_LIMBS] = 0;            /* keep the arrays in range */
+            t_x[i] = 0;
         }
         for (i = 0; i < n; i++)
         {
@@ -333,7 +344,13 @@ UINT                    bad_sqr = 0;
 
     for (trial = 0; trial < trials; trial++)
     {
-        m_len = (UINT)(t_rand() % 32u) + 1u;            /* 1..32 limbs */
+        m_len = (UINT)(t_rand() % 64u) + 1u;            /* 1..64 limbs */
+
+        /* Forced low so that every even width here goes through Karatsuba and
+           is checked against the VENDORED routine, not just against our own
+           schoolbook.  Random operands, so the reference is trustworthy --
+           unlike the near-maximal ones in 3b. */
+        c68k_karatsuba_limbs = 2u;
 
         t_rand_limbs(t_m, m_len);
         t_m[0] |= 1u;                                   /* Montgomery needs odd */
@@ -400,6 +417,8 @@ UINT                    i;
 UINT                    status;
 UINT                    bad = 0;
 NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
+
+    t_karatsuba();
 
     printf("\n4. c68k_mont_power_modulus vs "
            "_nx_crypto_huge_number_mont_power_modulus:\n");
@@ -549,6 +568,158 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
 
 
 /* ------------------------------------------------------------------ main -- */
+
+/*
+ * Karatsuba, deliberately at the sizes and shapes the random sweep will not
+ * produce often enough to trust.
+ *
+ * The split's carry and borrow handling is where this kind of code goes wrong,
+ * and all of it lives in the recombination: L + H can carry out of n limbs,
+ * L + H - u must not borrow (it is 2*x0*x1, so it cannot, and the test is
+ * whether the code agrees), and the (x0+x1)*(y0+y1) form of the multiply has
+ * two carry bits out of the half-width sums plus their product term.  So the
+ * operands below are chosen to drive those to their extremes rather than to
+ * be random:
+ *
+ *   all ones      every add carries, every subtract borrows
+ *   x1 == x0      |x1 - x0| == 0, so the middle term is a square of zero
+ *   x1 == 0       the high half vanishes; L + H == L
+ *   x0 == 0       the low half vanishes
+ *   1 and 0       the degenerate values every bignum bug survives
+ *
+ * Checked against the vendored _nx_crypto_huge_number_mont, which knows
+ * nothing about Karatsuba, at the widths where the split actually engages.
+ */
+static VOID t_karatsuba(VOID)
+{
+
+static const UINT   widths[] = { 16u, 31u, 32u, 48u, 63u, 64u };
+UINT                w;
+UINT                shape;
+UINT                m_len;
+UINT                i;
+UINT                bad = 0;
+c68k_limb           n0inv;
+
+
+    printf("\n3b. Karatsuba against schoolbook, same module, same operands:\n");
+
+    for (w = 0; w < (sizeof(widths) / sizeof(widths[0])); w++)
+    {
+        m_len = widths[w];
+
+        /* All ones: the largest modulus of this width, so the operands below
+           can reach their maximum and drive every carry and every borrow. */
+        for (i = 0; i < m_len; i++)
+        {
+            t_m[i] = 0xFFFFFFFFu;
+        }
+        n0inv = c68k_mont_n0inv(t_m[0]);
+
+        for (shape = 0; shape < 8u; shape++)
+        {
+            for (i = 0; i < m_len; i++)
+            {
+                t_x[i] = 0;
+                t_y[i] = 0;
+            }
+
+            switch (shape)
+            {
+            case 0:                             /* x = y = m - 1, the maximum */
+                for (i = 0; i < m_len; i++) { t_x[i] = t_m[i]; t_y[i] = t_m[i]; }
+                t_x[0]--;                       /* m is odd, so no borrow */
+                t_y[0]--;
+                break;
+            case 1:                             /* x1 == x0: |x1-x0| is zero */
+                for (i = 0; i < (m_len >> 1); i++)
+                {
+                    t_x[i] = 0xDEADBEEFu ^ (c68k_limb)i;
+                    t_x[i + (m_len >> 1)] = t_x[i];
+                    t_y[i] = 0x12345678u ^ (c68k_limb)i;
+                    t_y[i + (m_len >> 1)] = t_y[i];
+                }
+                break;
+            case 2:                             /* high half zero */
+                for (i = 0; i < (m_len >> 1); i++)
+                {
+                    t_x[i] = 0xFFFFFFFFu;
+                    t_y[i] = 0xFFFFFFFFu;
+                }
+                break;
+            case 3:                             /* low half zero */
+                for (i = (m_len >> 1); i < m_len; i++)
+                {
+                    t_x[i] = 0xFFFFFFFFu;
+                    t_y[i] = 0xFFFFFFFFu;
+                }
+                break;
+            case 4:                             /* x = 1 */
+                t_x[0] = 1u;
+                for (i = 0; i < m_len; i++) { t_y[i] = t_m[i]; }
+                t_y[0]--;
+                break;
+            case 5:                             /* x = 0 */
+                for (i = 0; i < m_len; i++) { t_y[i] = t_m[i]; }
+                t_y[0]--;
+                break;
+            case 6:                             /* alternating limbs */
+                for (i = 0; i < m_len; i++)
+                {
+                    t_x[i] = ((i & 1u) != 0u) ? 0xFFFFFFFFu : 0u;
+                    t_y[i] = ((i & 1u) != 0u) ? 0u : 0xFFFFFFFFu;
+                }
+                break;
+            default:                            /* random at this width */
+                t_rand_limbs(t_x, m_len);
+                t_rand_limbs(t_y, m_len);
+                t_x[m_len - 1u] &= 0x7FFFFFFFu;
+                t_y[m_len - 1u] &= 0x7FFFFFFFu;
+                break;
+            }
+
+            /* multiply: schoolbook, then maximum recursion, then compare */
+            c68k_karatsuba_limbs = 0xFFFFu;
+            c68k_mont_mul(t_ref_result, t_x, t_y, t_m, m_len, n0inv, t_work);
+            c68k_karatsuba_limbs = 2u;
+            c68k_mont_mul(t_mine, t_x, t_y, t_m, m_len, n0inv, t_work);
+
+            t_checks++;
+            for (i = 0; i < m_len; i++)
+            {
+                if (t_mine[i] != t_ref_result[i])
+                {
+                    bad++;
+                    t_fail("kar mont_mul", m_len, shape);
+                    break;
+                }
+            }
+
+            /* square */
+            c68k_karatsuba_limbs = 0xFFFFu;
+            c68k_mont_sqr(t_ref_result, t_x, t_m, m_len, n0inv, t_work);
+            c68k_karatsuba_limbs = 2u;
+            c68k_mont_sqr(t_mine, t_x, t_m, m_len, n0inv, t_work);
+
+            t_checks++;
+            for (i = 0; i < m_len; i++)
+            {
+                if (t_mine[i] != t_ref_result[i])
+                {
+                    bad++;
+                    t_fail("kar mont_sqr", m_len, shape);
+                    break;
+                }
+            }
+        }
+    }
+
+    c68k_karatsuba_limbs = C68K_KARATSUBA_DEFAULT;
+
+    printf("  widths 16/31/32/48/63/64 x 8 operand shapes, mul and sqr: "
+           "%u mismatches\n", bad);
+}
+
 
 int main(void)
 {

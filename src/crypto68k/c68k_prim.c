@@ -81,6 +81,32 @@ HN_UBASE2   sum;
 }
 
 
+c68k_limb c68k_add(c68k_limb *r, const c68k_limb *b, UINT n)
+{
+
+UINT        j;
+HN_UBASE2   sum;
+
+
+    /*
+     * The 64-bit running accumulator, exactly as c68k_add_carry and
+     * c68k_addmul_1_c above: its high half IS the carry, so there is no
+     * separate carry bookkeeping to get wrong.  (c68k_sub below cannot use
+     * the same shape because a borrow needs a 64-bit compare, which this
+     * machine does not have.)
+     */
+    sum = 0;
+
+    for (j = 0; j < n; j++)
+    {
+        sum  = (sum >> 32) + (HN_UBASE2)r[j] + (HN_UBASE2)b[j];
+        r[j] = (c68k_limb)sum;
+    }
+
+    return((c68k_limb)(sum >> 32));
+}
+
+
 c68k_limb c68k_sub(c68k_limb *r, const c68k_limb *b, UINT n)
 {
 
