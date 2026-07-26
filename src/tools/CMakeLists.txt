@@ -123,6 +123,14 @@ aminetxduo_add_tool(tool_checknetconfig CheckNetConfig
 # reads and then runs AddNetInterface, rather than starting a stack itself.
 aminetxduo_add_tool(tool_netsetup NetSetup SOURCES netsetup.c)
 
+# AddNetRoute and DeleteNetRoute are one source, the same way Online and
+# Offline are: they parse the same destination and differ in one library call.
+# Config-only -- they reach the live routing table through NetStackControl()
+# and never link NetX Duo.
+aminetxduo_add_tool(tool_addnetroute    AddNetRoute    SOURCES addnetroute.c)
+aminetxduo_add_tool(tool_deletenetroute DeleteNetRoute SOURCES addnetroute.c
+    DEFINES TOOL_DELETE)
+
 # GetNetStatus is the scriptable counterpart of ShowNetStatus: it answers with
 # a return code rather than a table.  NX, because it answers from the SAME two
 # snapshots ShowNetStatus and netstat print from -- three commands that disagree
@@ -212,6 +220,7 @@ set_target_properties(tool_smoke PROPERTIES OUTPUT_NAME "ToolsSmoke")
 add_custom_target(tools ALL)
 add_dependencies(tools
     tool_addnetinterface tool_checknetconfig
+    tool_addnetroute tool_deletenetroute
     tool_getnetstatus tool_netshutdown
     tool_netsetup tool_online tool_offline tool_host
     tool_fetch tool_nc tool_telnet tool_ftp tool_nettrace tool_traceroute
