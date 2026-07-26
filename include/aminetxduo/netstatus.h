@@ -78,6 +78,26 @@ extern "C" {
 #define AMI_NETSTATUS_MAGIC         0x414E5351UL    /* 'ANSQ' */
 #define AMI_NETSTATUS_VERSION       1
 
+/*
+ * THE LIBRARY REVISION THAT FIRST HAD THESE SLOTS, and the one check a caller
+ * cannot skip.
+ *
+ * lib_Version stays 4 forever -- it is the AmiTCP V4 ABI number every caller
+ * passes to OpenLibrary(), and moving it would lock out every program that
+ * asks for 4. lib_Revision is ours, so it is what says which of OUR libraries
+ * this is.
+ *
+ * It matters because the identity check is not enough on its own. A caller
+ * that finds a bsdsocket.library whose lib_IdString says AmiNetXDuo will
+ * happily jump to -0x366 -- and in the v0.2.0 library, which is published,
+ * that offset is past the end of the vector table, where MakeLibrary() put
+ * the (APTR)-1 terminator. That is a guru, and a guru is a worse answer than
+ * the message this whole interface exists to stop being printed.
+ *
+ * Bump this and BSD_LIB_REVISION together whenever a slot is added.
+ */
+#define AMI_NETSTATUS_MIN_REVISION  1
+
 /* ------------------------------------------------------------ selectors --
  *
  * One selector per table. Adding a table later costs a selector, not an LVO,

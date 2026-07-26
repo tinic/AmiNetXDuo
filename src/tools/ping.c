@@ -12,7 +12,9 @@
  *   INTERVAL  seconds to wait between requests. Default 1.
  *   LOAD      send this many requests back to back before the interval
  *             starts being honoured.
- *   NUMERIC   do not try to put a name to the address that was given.
+ *   NUMERIC   do not try to put a name to an address that was given as a
+ *             number. That lookup is the local host table only -- see the
+ *             note where it happens for why it is not a DNS query.
  *   ONEREPLY  stop as soon as one reply has come back.
  *   QUIET     only the summary.
  *   SIZE      payload bytes. Default 56, which is what everyone else uses.
@@ -346,13 +348,32 @@ int main(int argc, char **argv)
     {
         /*
          * The address was typed as a number, so the only name that can be put
-         * to it is one the resolver has to be asked for backwards. That lookup
-         * is exactly what NUMERIC is for, and it is skipped when a name server
-         * cannot be reached rather than being allowed to hold the command up.
+         * to it has to be looked up backwards -- and that lookup is
+         * DEVS:Internet/hosts and nothing else, which is a decision rather
+         * than a shortcut.
+         *
+         * The other route is gethostbyaddr(), and on this stack it costs
+         * BSD_RESOLVE_TIMEOUT: thirty seconds (src/bsdsocket/resolver.c:18),
+         * per name server, against a server that may simply never answer a
+         * PTR query -- FS-UAE's SLIRP does not answer them. Measured: `ping
+         * 10.0.2.2` spent an entire 240-second emulator run inside that
+         * lookup and never sent one echo request. Every second of it is spent
+         * BEFORE the first packet leaves, which is the one place a ping must
+         * not be slow, and the reward is a cosmetic change to one line of
+         * output.
+         *
+         * The host table is instant, needs no name server at all, and is
+         * where the names on a small network actually live. NUMERIC still
+         * means something: it skips even that.
          */
-        if (tool_stack_lookup_addr(target, hostname, sizeof(hostname)) &&
-            hostname[0] != '\0')
+        const AmiNetdbEntry *local;
+
+        (VOID)ami_netdb_load();
+
+        local = ami_netdb_host_by_addr(target);
+        if (local != NULL && local->name != NULL && local->name[0] != '\0')
         {
+            tool_copy_string(hostname, sizeof(hostname), local->name);
             shown = hostname;
         }
     }

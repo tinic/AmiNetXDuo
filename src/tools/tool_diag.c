@@ -1254,12 +1254,19 @@ VOID tool_explain_no_netstatus(struct Library *base)
         return;
     }
 
+    /*
+     * Not "your library is too old" -- tool_netstatus_open() checks
+     * lib_Revision and says that in its own words before any call is made. By
+     * the time this is reached the library IS new enough and answered no, so
+     * the interesting states are the ones below.
+     */
     tool_advise_blank();
-    tool_advise("The network is up, but the bsdsocket.library running on this");
-    tool_advise("machine does not answer the call that reports on it.");
+    tool_advise("The network is up and the library is the right one, but it");
+    tool_advise("would not report on itself.");
     tool_advise_blank();
-    tool_advise("That means the library in LIBS: is older than this command.");
-    tool_advise("Both come out of one build; install them together.");
+    tool_advise("That happens when the stack is starting or stopping and there");
+    tool_advise("is no IP instance for a moment. Try again; if it persists the");
+    tool_advise("serial debug log has what the stack said.");
 }
 
 struct Library *tool_netstatus_open(BOOL quiet)
@@ -1304,6 +1311,34 @@ struct Library *tool_netstatus_open(BOOL quiet)
         {
             tool_error("the network is up, but it is not this stack");
             tool_explain_foreign_stack(base);
+        }
+        CloseLibrary(base);
+        return NULL;
+    }
+
+    /*
+     * And ours has to be new enough. lib_IdString says whose library it is;
+     * lib_Revision says which one. In the v0.2.0 library -- which is published
+     * -- offset -0x366 is past the end of the vector table, on MakeLibrary()'s
+     * (APTR)-1 terminator, and jumping there takes the machine down. A command
+     * that gurus against last release's library is a worse answer than the
+     * message this whole interface exists to stop printing.
+     */
+    if (base->lib_Revision < (UWORD)AMI_NETSTATUS_MIN_REVISION)
+    {
+        if (!quiet)
+        {
+            tool_error("the network is up, but the library running it is "
+                       "older than this command");
+            tool_advise_blank();
+            tool_printf("  LIBS:bsdsocket.library is revision %ld; this "
+                        "command needs %ld.\n",
+                        (LONG)base->lib_Revision,
+                        (LONG)AMI_NETSTATUS_MIN_REVISION);
+            tool_advise_blank();
+            tool_advise("The library and the commands come out of one build.");
+            tool_advise("Install them together, and reboot so the new library");
+            tool_advise("is the one in memory.");
         }
         CloseLibrary(base);
         return NULL;

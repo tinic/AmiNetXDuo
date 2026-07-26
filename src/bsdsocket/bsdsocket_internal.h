@@ -186,7 +186,16 @@
 
 #define BSD_LIB_NAME        "bsdsocket.library"
 #define BSD_LIB_VERSION     4
-#define BSD_LIB_REVISION    0
+/*
+ * lib_Version is the ABI number callers pass to OpenLibrary() and never
+ * changes. lib_Revision is ours, and it says which of OUR libraries this is --
+ * which is how a command tells a library that has the netstatus vectors from
+ * one that does not. include/aminetxduo/netstatus.h has the other half.
+ *
+ *   0  v0.2.0 and earlier
+ *   1  NetStackQuery/NetStackControl at -0x366/-0x36c
+ */
+#define BSD_LIB_REVISION    1
 
 #define BSD_DEFAULT_DTABLESIZE  64
 #define BSD_MAX_DTABLESIZE     256
