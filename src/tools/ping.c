@@ -355,12 +355,10 @@ int main(int argc, char **argv)
          * The other route is gethostbyaddr(), and on this stack it costs
          * BSD_RESOLVE_TIMEOUT: thirty seconds (src/bsdsocket/resolver.c:18),
          * per name server, against a server that may simply never answer a
-         * PTR query -- FS-UAE's SLIRP does not answer them. Measured: `ping
-         * 10.0.2.2` spent an entire 240-second emulator run inside that
-         * lookup and never sent one echo request. Every second of it is spent
-         * BEFORE the first packet leaves, which is the one place a ping must
-         * not be slow, and the reward is a cosmetic change to one line of
-         * output.
+         * PTR query -- FS-UAE's SLIRP does not answer them. Every second of
+         * that is spent BEFORE the first packet leaves, which is the one
+         * place a ping must not be slow, and the reward is a cosmetic change
+         * to one line of output.
          *
          * The host table is instant, needs no name server at all, and is
          * where the names on a small network actually live. NUMERIC still
