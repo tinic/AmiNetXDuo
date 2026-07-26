@@ -10506,3 +10506,631 @@ Two implementation notes worth keeping:
   taken with `-b` pointing at a private build directory for the reason §24.9
   gives, and one run was lost outright when `tools/fsuae-run.sh` was edited by
   another workstream while bash was reading it.
+
+## 32. Unacknowledged data was never retransmitted, and `close()` was a RESET (2026-07-26)
+
+§27 built tcpdrill and, on its first run, found three defects. Two of them are
+`src/`'s and this section is those two.
+
+**The first is the most serious thing this project has found.** One 100-byte
+segment left unacknowledged produced **eleven seconds of total silence** — no
+retransmission, and not even the reset that ten expired retries should produce.
+The failure is not in TCP and it is not in the timer: it is a lifecycle bug in
+the SANA-II transmit ring, and it means that until now this stack could not
+recover from losing a single packet.
+
+**Result: tcpdrill goes from 200 checks passed and 10 failed to 209 and 1, with
+the one remaining failure belonging to the retransmission timer's workstream.
+Loopback and wire throughput are unchanged inside the noise, and the concurrency
+sweep, both conformance tiers, the client patterns and curl A–F are unchanged
+against a clean-`HEAD` control run on the same machine.**
+
+### 32.1 Defect 1: a packet the driver never gave back is a packet TCP will not resend
+
+`_nx_tcp_socket_retransmit()` walks the transmit queue with
+
+```c
+while (packet_ptr && (packet_ptr -> nx_packet_queue_next == (NX_PACKET *)NX_DRIVER_TX_DONE))
+```
+
+and `NX_DRIVER_TX_DONE` is written by `_nx_packet_transmit_release()`. So **only
+a packet the driver has handed back can be retransmitted**, and that is the
+whole mechanism. Every NetX Duo reference driver hands it back inside
+`NX_LINK_PACKET_SEND`, because their sends are synchronous — `nx_ram_network_
+driver.c` copies the frame and releases before it returns.
+
+Ours cannot. A SANA-II `CMD_WRITE` is an exec `IORequest` that completes long
+after `BeginIO()` returns, and the packet must stay intact until the device's
+`S2_CopyFromBuff` has read every byte of it. So `src/sana2/sana2_tx.c` releases
+in `ami_sana2_tx_reap()` instead — and reap had three callers, every one of them
+reactive:
+
+| `sana2_tx.c` | the start of the **next** transmit, and the spin when the ring is full |
+| `sana2_driver.c` | `NX_LINK_GET_TX_COUNT` |
+| `sana2_driver.c` | `NX_LINK_DEFERRED_PROCESSING`, which nothing ever asked for |
+
+**A packet was therefore released by the next packet.** On a link that goes
+quiet there is no next packet, the last segment sent stays un-reaped for ever,
+TCP believes the driver still has it, and it is never resent. tcpdrill pinned it
+exactly: a *later* `send()` on the same socket released the stranded segment,
+which then went out 917 ms afterwards.
+
+The failure is precisely the shape of a request/response protocol whose single
+request segment is lost — an HTTP GET, a DNS query over TCP, a TLS ClientHello.
+A bulk transfer self-heals, because the next segment reaps the previous one.
+
+**Nothing in this tree could have found it by accident.** SLIRP does not drop,
+loopback does not drop, and §16.4 and §24.4 both report zero retransmissions
+across every trace ever taken here, in both directions, on both paths. The
+retransmission path had never once executed.
+
+### 32.2 The fix is two hops, and the second one is the point
+
+Completions have to be noticed when they complete. There is exactly one place in
+this shim that can notice: the SANA-II reader threads are the only threads that
+block in exec `Wait()` rather than on a ThreadX object, so they are the only
+ones a device's `ReplyMsg()` can wake. The `NX_IP` thread waits on ThreadX event
+flags, which `Signal()` cannot break.
+
+So the TX reply port stops being `PA_IGNORE` and raises a signal on one reader
+(the IPv4 one, because it is the reader that always exists). **That thread does
+not touch the packet.** It calls `_nx_ip_driver_deferred_processing()`, the IP
+thread comes back into `ami_sana2_driver_entry()` with
+`NX_LINK_DEFERRED_PROCESSING`, and the reap happens there.
+
+The second hop is not ceremony. Releasing a packet mutates NetX Duo's transmit
+queue *and* the packet's own prepend pointer — `_nx_packet_transmit_release()`
+strips the IP header back off, which is what makes a retransmission's
+`_nx_ip_packet_send()` balance. Doing that from a reader thread would interleave
+it with whatever the IP thread was in the middle of. On the IP thread it runs
+where every other send runs, under `nx_ip_protection`. §27.4 noted that this
+shim never asked for `NX_LINK_DEFERRED_PROCESSING`; this is what the command is
+for.
+
+**The transmit path pays almost nothing, and that is by construction rather than
+by hope.** The reader asks for deferred processing only when the reply port is
+**not already empty** — one pointer compare — and during a bulk transfer the
+next `ami_sana2_tx_send()` has already drained it. So the IP thread is never
+disturbed while data is flowing, and the extra hop happens only when the link
+goes quiet, which is the case that was broken. The emptiness test cannot be
+wrong in the dangerous direction: exec's `PutMsg()` links the message and raises
+the signal inside one `Disable()`d region, so a reader that has been woken
+always sees a non-empty list.
+
+Two smaller things fell out of it.
+
+- **`NX_LINK_DEFERRED_PROCESSING` no longer refreshes the SANA-II statistics.**
+  That is a synchronous `DoIO()` to the device. It was free while nothing ever
+  invoked the command; it would have been one blocking device round trip per
+  transmitted frame now that something does.
+- **The reap is still called at the top of `ami_sana2_tx_send()`**, and that is
+  not redundancy for its own sake: it is the only reaping there is when no
+  reader is bound, which is the state an interface is in during open-time
+  probing, before it is enabled, and if a reader could not get a signal bit.
+
+### 32.3 Defect 2: `CloseSocket()` sent a RESET where RFC 793 §3.5 wants a FIN
+
+Observed as `R seq=1 ack=0 win=32768`. §12.3 listed it as a risk that had not
+been reproduced, §16.9 promoted it to an observation having seen `RST 1` at the
+end of every flow in every capture, and §27.6 put the packet next to it.
+
+What makes it a defect rather than a preference is that **the orderly-close path
+was already there and already asserted**: tcpdrill `c04` has always shown
+`shutdown(SHUT_WR)` on the same connection sending a correct `FIN|ACK` and
+taking the ACK back. `close()` simply did not use it.
+
+It did not use it because `nx_tcp_socket_disconnect()` offers two behaviours and
+neither of them is `close()`:
+
+| `NX_NO_WAIT` | sends a RESET and returns |
+| any wait | sends a FIN and then **suspends the caller** until the peer answers or the wait expires, then tears the connection down anyway |
+
+A blocking `CloseSocket()` is not acceptable — the descriptor is gone the
+instant the call is made, and a program that closes and exits must not be made
+to wait on a host that has gone away. The RESET was what was left.
+
+**The connection now outlives the descriptor.** The FIN goes out through the
+same open-coded path `shutdown(SHUT_WR)` uses, `CloseSocket()` returns, and the
+`AmiSocket` is parked on a list until TCP has finished. NetX Duo's fast periodic
+does the rest by itself: FIN_WAIT_1 → FIN_WAIT_2 → TIMED_WAIT and LAST_ACK →
+CLOSED, retransmitting the FIN and giving up after `NX_TCP_MAXIMUM_RETRIES`. The
+state machine needs nothing from us except that the control block stay alive —
+`nx_tcp_socket_delete()` refuses anything that is not CLOSED, and deleting
+nothing is the `AmiSocket`-per-connection leak §12.5 predicted.
+
+The list is **global rather than per base**, because the next thing a program
+does after `close()` is very often exit; a per-base list would be freed with the
+base while NetX Duo still pointed into it. It is swept from `socket()`,
+`CloseSocket()` and `CloseLibrary()`, each inside a bracket the caller already
+holds, and it needs no lock of its own because that bracket is the ThreadX baton
+— one holder at a time across every base. A socket that has not finished after
+60 s is reset and reclaimed.
+
+Two cases are still a RESET, and both are the rule rather than an escape hatch:
+
+- **data arrived that the application never read.** RFC 1122 4.2.2.13 is
+  explicit that the peer must not be told its data was delivered when it is
+  about to be discarded. Every BSD aborts here.
+- **`SO_LINGER` on with a zero timeout**, which is the documented way to ask for
+  an abortive close and what the option is mostly used for.
+
+And `SO_LINGER` on with a *nonzero* timeout now blocks, which is the documented
+way to ask for that. The option previously chose between two flavours of reset;
+it now does what its name says.
+
+### 32.4 The follow-on nobody would have predicted, and it is the interesting half
+
+Making `close()` send a FIN broke `tests/clients`' *"send() to a closed peer
+eventually fails"* and the conformance suite's `send(): error after peer closes
+connection [BSD 4.4]` — sixteen sends in a row, all of them succeeding.
+
+They were right and the change was incomplete. With a RESET, a peer's `close()`
+destroyed our socket and the next `send()` failed. With a FIN, the peer's socket
+sits in FIN_WAIT_2 **and goes on acknowledging**, because a FIN closes one
+direction and NetX Duo's `_nx_tcp_socket_state_data_check()` is called in
+FIN_WAIT_1 and FIN_WAIT_2 exactly so that it can. Nobody will ever read that
+data. 4.4BSD's `tcp_input` has the rule:
+
+```c
+if (so->so_state & SS_NOFDREF && tp->t_state > TCPS_CLOSE_WAIT && tlen)
+        tp = tcp_drop(tp, ECONNRESET);
+```
+
+which is RFC 1122 4.2.2.13's rule one segment later: unreadable data is a reset.
+A parked socket now installs a receive-notify callback that does exactly that.
+
+**The teardown deliberately does not happen in the callback.** It runs from
+inside `_nx_tcp_socket_state_data_check()`, which has more to do with both the
+socket and the packet after it returns, and tearing the control block down
+underneath it for a corner case is not a trade worth making. Sending the RST is
+safe — it only builds and transmits a packet — so the callback sends it and then
+gives the socket an expired timeout, and NetX Duo's own fast periodic reaches
+`_nx_tcp_socket_connection_reset()` on the next 20 ms tick, from the top of the
+IP thread with nothing in flight. The sweep collects the block after that.
+
+### 32.5 TIME_WAIT, stated rather than implied
+
+A socket that closes first reaches TIMED_WAIT, and NetX Duo would hold it there
+for `2 * NX_TCP_MAXIMUM_SEGMENT_LIFETIME` = **240 seconds**. This does not wait
+that long: the sweep reclaims a socket as soon as it *reaches* TIMED_WAIT.
+
+That is a deliberate divergence and it is worth being plain about. Four minutes
+of an `AmiSocket` and an ephemeral port per closed connection is not affordable
+on the 4 MB floor. It is also what NetX Duo itself does — `nx_tcp_client_socket_
+unbind()` collapses TIMED_WAIT to CLOSED whenever an application unbinds — and
+what this library has always done. What it costs is the protection TIME_WAIT
+exists for, an old duplicate landing on a reused four-tuple; what bounds that is
+NetX Duo allocating ephemeral ports in ascending order rather than reusing the
+one just released.
+
+### 32.6 What tcpdrill says now, in three arms
+
+Same harness, same 26-case script, three libraries, on the same machine:
+
+| library | cases | checks |
+|---|---|---|
+| clean `HEAD` | 26, **7 failed** | 200 passed, **10 failed** |
+| `HEAD` + these two fixes | 26, **1 failed** | 209 passed, **1 failed** |
+| the whole working tree | 26, **0 failed** | **210 passed, 0 failed** |
+
+The one remaining failure in the middle arm is `x01_syn_retransmission_backs_
+off`, which is `NX_TCP_RETRY_SHIFT` and belongs to the retransmission timer's
+workstream; the third arm has that change in it, which is why it is green there
+and not here.
+
+The nine checks that these two commits turn green:
+
+| | |
+|---|---|
+| `c03` | a close is a `FIN`, and the four-way close completes |
+| `x02` | unacknowledged data **is** retransmitted |
+| `x03` | and it needs no later `send()` to release it |
+| `x04` | eleven seconds of **trying**, where the case used to assert eleven seconds of silence and pass |
+| `c11` | a close in CLOSE_WAIT is LAST_ACK |
+| `c12` | `CloseSocket()` returns in 3 ms against a peer that never answers, and the FIN retransmits on the stack's own time |
+
+Five new cases cover the close corners: `c08` (one FIN per connection, not a
+second one after `shutdown(SHUT_WR)`), `c09` (unread data is an abort), `c10`
+(`SO_LINGER {on,0}`), `c11`, `c12`.
+
+**Only the first retransmission interval is asserted, and loosely.** What the
+intervals are — flat, doubling, and how many before the socket gives up —
+belongs to the timer and to `scripts/retransmit.drill`, so the rest of `x02` and
+`x04` is a frame count with a wide bound. Four seconds of a doubling interval is
+one retransmission and four seconds of a flat one is eight; both were measured,
+and both pass.
+
+### 32.7 Three harness defects, and the one that had been lying
+
+Working on this turned up three things wrong with tcpdrill itself. The second is
+the one that matters, because it means some of §27's numbers were luck.
+
+1. **Cases were not isolated once `close()` sent a FIN.** `case_end()` closed
+   the socket and gave it 40 ms; a FIN into a peer that has stopped listening
+   retransmits for as long as the timer allows, so those frames turned up
+   several cases later as *"wanted PA, got FA"* with a sequence number from
+   another socket. Every case that leaves unacknowledged data behind (`x02`,
+   `x03`, `x04`, `z01`) did the same with the data.
+   `scripts/retransmit.drill` describes this problem in its own header and works
+   around it per case with an injected RESET; `case_end()` now sets
+   `SO_LINGER {on, 0}` before closing, which fixes it centrally and for every
+   script.
+
+2. **The harness queued traffic that no case is about.** The stack under test is
+   a whole stack: anything in the tree that opens a UDP socket — mDNS, a DHCP
+   renewal — puts frames on this wire, and they were queued like everything
+   else. The next expectation then failed with `non-TCP frame ether=0x0800` and
+   **every assertion after it was one frame out of step**. That is how `c04`,
+   `c05` and `a01` failed against an unchanged stack in one run and passed in
+   the next, and it is why `c07_passive_open` was failing at `bind()` in some
+   runs and not others. `pump()` now drops IPv4 traffic that is not TCP to the
+   peer, and counts it in the summary. A malformed segment, or one aimed at the
+   peer, still reaches the queue — those are results.
+
+3. **`non-TCP frame ether=0x0800` is not a diagnosis.** It cost an emulator boot
+   to find out that the frame was mDNS. A rejected frame now reports its length,
+   its IP protocol and its first 34 bytes, and a failing `bind()` reports errno.
+
+Two directives were added for these cases. `txcount MIN MAX` discards what is
+queued and asserts how much of it there was, because a retransmission series is
+a count rather than a sequence and asserting ten `tx` lines would be asserting
+the interval as well. `close within=MS` bounds `CloseSocket()` itself, measured
+across the call rather than off the frame it produced — the one thing that must
+never wait for a peer.
+
+### 32.8 What it cost, measured on both paths
+
+§24's figures are the ones at risk, because the fix is on the transmit path.
+Clean `HEAD` against `HEAD` + these two fixes, same machine, back to back,
+`tests/trace/run-trace.sh`, 1,048,576 bytes:
+
+| | clean `HEAD` | + these fixes |
+|---|---:|---:|
+| loopback, not capturing | 351 KB/s | 349 KB/s |
+| loopback, capturing | 308 KB/s | 306 KB/s |
+| wire, not capturing | 167 KB/s | 187 KB/s |
+| wire, capturing | 210 KB/s | 200 KB/s |
+
+**Loopback is -0.6% on both arms, which is what the mechanism predicts** —
+`lo0` does not go through SANA-II at all, so the only thing that could move it
+is the close path, and it does not. The wire numbers straddle zero and are
+noisier than the effect being looked for: the two baseline arms differ from each
+other by 26% on the same library in the same boot, so the honest reading of a
+single pass is **no change**, not +12% and not -5%. `retransmitted 0 segments`
+in our own direction on every flow in every arm, unchanged.
+
+The concurrency sweep, `tests/curl/run-curlverify.sh -p`: 9 passed, 0 failed,
+`AvailMem` delta +0, `p04_parallel_40` green — which is the case §24.5 named as
+the one this class of change is guarded against.
+
+### 32.9 Two things noticed in the receive path, not changed
+
+§29's Roadshow comparison reports the disagreement between our own `NetTrace`
+(55% faster than Roadshow) and the stack-agnostic Aminet curl (12% slower), and
+names the receive call pattern as the difference. Two things stand out in
+`src/bsdsocket/` while reading it for this work, both reported rather than
+touched:
+
+- **Every call adopts and orphans a ThreadX thread.** `bsd_nx_enter()` /
+  `bsd_nx_leave()` brackets each `recv()`, each `send()`, and *each poll pass
+  inside `WaitSelect()`* — `netx_call.c` describes the cost as an
+  `AllocSignal()`, a `_tx_thread_create()`, a baton acquire and their inverses.
+  curl's pattern is many small `recv()` calls with a `select()` between them, so
+  it pays the bracket twice per chunk where `NetTrace` pays it about once per
+  4,096 bytes. That is a per-call constant that scales with the number of calls
+  and not with the bytes, which fits "we win `time_connect` and lose everything
+  after the first byte".
+- **`bsd_poll_sets()` re-enters that bracket on every wakeup**, and walks
+  `0..nfds` each time; a `WaitSelect()` that times out runs it twice.
+
+Nothing in the copy path looks wasteful: `nx_packet_data_extract_offset()`
+scatters straight into the caller's buffers, a partially drained packet is
+parked on the socket rather than copied, and there is no bounce buffer anywhere.
+§29.3's next experiment — a bpf capture of both clients comparing `recv()`
+counts — would say directly whether the call count is the whole of it.
+
+
+## 33. Nine more NetX Duo flags, weighed one at a time (2026-07-26)
+
+§28 turned on three macros that had never been written down. This is the rest of
+the survey: forty-six `NX_ENABLE_*` / `NX_DISABLE_*` symbols exist in the
+vendored tree, sixteen were set, and these nine were the ones worth an
+afternoon. **Four ship, four are rejected with the reason rather than with
+silence, and one ships as half of what was asked for because the other half was
+measured at 5% of loopback throughput.**
+
+| | | |
+|---|---|---|
+| `NX_ENABLE_TCP_KEEPALIVE` | **on** | `setsockopt(SO_KEEPALIVE)` was answering yes and doing nothing |
+| `NX_TCP_RETRY_SHIFT` / `NX_TCP_MAXIMUM_RETRIES` | **1 / 6** | the retransmit timer neither backed off nor had a ceiling |
+| `NX_ENABLE_TCP_MSS_CHECK` | **on** | one comparison per incoming SYN |
+| `NX_ENABLE_IP_ID_RANDOMIZATION` | **off**, seeded instead | measured: 5.2% of loopback, ~400 µs per datagram |
+| `NX_ENABLE_LOW_WATERMARK` | off | §24.7's argument, unchanged; three changes must land together |
+| `NX_DISABLE_ARP_AUTO_ENTRY` | off | it does not close the poisoning path it looks like it closes |
+| `NX_ENABLE_ARP_MAC_CHANGE_NOTIFICATION` | off | a notification with nothing that could act on it |
+| `NX_ENABLE_PACKET_DEBUG_INFO` | off | right idea, wrong lifetime — belongs behind a debug option |
+| `NX_ENABLE_DUAL_PACKET_POOL` | off | §24.8 settled the one-pool question already |
+
+### 33.1 Keepalive: the option that was already saying yes
+
+`src/bsdsocket/options.c` accepted `SO_KEEPALIVE`, stored it in a socket flag
+and reported it back through `getsockopt()`. Nothing acted on it, because
+`NX_ENABLE_TCP_KEEPALIVE` was not defined and the whole of
+`nx_tcp_periodic_processing.c`'s keepalive block was compiled out.
+
+**An API that answers correctly with no implementation behind it is worse than
+one that returns `ENOPROTOOPT`**, and it is the fourth defect of that exact
+shape found in this tree in a week. A program that asks for keepalive and is
+told yes has no way to discover that its half-open connections will never be
+reaped.
+
+**One thing had to change in our code, and it is not optional.**
+`nx_tcp_socket_create.c:166` sets `nx_tcp_socket_keepalive_enabled = NX_TRUE`
+**unconditionally** under this define. Turning it on alone would have put every
+socket in the machine on a two-hour keepalive timer whether anything asked or
+not — which is not what `SO_KEEPALIVE` means and not what 4.4BSD, POSIX or any
+other stack does. `src/bsdsocket/socket.c` now clears it at create, next to the
+ISN seed, and `options.c` is the only thing that sets it.
+
+The NetX Duo defaults are BSD's and are left alone: 7200 s idle, 75 s retry, ten
+retries.
+
+#### Proved on the wire
+
+A two-hour idle timer cannot be observed inside an emulator run, so
+`AMINETXDUO_TCP_KEEPALIVE_INITIAL` exists to build an arm with a five-second one
+— `nx_tcp.h` guards the macro with `#ifndef`, so it reaches it without
+`nx_user.h` holding a number nobody ships. `tests/tcpdrill/scripts/keepalive.drill`
+is four cases against that arm, and a keepalive probe is unmistakable on the
+wire: it is an ACK carrying `tx_sequence - 1`, a deliberately backward sequence
+number the peer is obliged to answer (RFC 1122 4.2.3.6).
+
+```
+---- k01_keepalive_off_by_default
+  ok   notx 10000                                   twice the idle timer, silent
+---- k02_keepalive_probes_when_asked
+  ok   opt keepalive 1
+  ok   tx A seq=0 ack=1 after=4000 within=8000   [+5005ms]
+---- k03_probe_answered_restarts_the_timer
+  ok   tx A seq=0 ack=1 after=4000 within=8000   [+4870ms]
+  ok   rx A seq=1 ack=1
+  ok   tx A seq=0 ack=1 after=4000 within=8000   [+4987ms]
+---- k04_keepalive_can_be_turned_off
+  ok   opt keepalive 0
+  ok   notx 10000
+4 case(s), 0 failed; 34 check(s) passed, 0 failed
+```
+
+k01 is the case that matters most and is the one that would not have been
+written if the vendored default had not been read: it asserts that a socket
+which never asked stays silent for twice the idle timer.
+
+### 33.2 The retransmission timer: backoff, and the ceiling NetX Duo does not have
+
+§27 measured SYN retransmissions at **890 ms and then 1002 ms** — flat, forever.
+`NX_TCP_RETRY_SHIFT` defaults to 0, so the shift in
+
+```c
+timeout = nx_tcp_socket_timeout_rate << (timeout_retries * timeout_shift);
+```
+
+is a no-op and the interval is `NX_IP_PERIODIC_RATE / NX_TCP_TRANSMIT_TIMER_RATE`
+— one second. There is no RTT estimator anywhere in the vendored tree either, so
+the interval was not merely constant but constant at a number nobody chose for
+this path.
+
+**`NX_TCP_RETRY_SHIFT 1` on its own is a trap, and the trap is that NetX Duo has
+no maximum RTO.** The expression above is a plain shift with no clamp;
+`NX_TCP_MAXIMUM_RETRIES` is the only thing bounding it. At its default of ten,
+doubling gives intervals of 1, 2, 4 … 1024 seconds and the socket does not give
+up for 2^11 − 1 = **2047 seconds**. A one-second stall would have become a
+thirty-four-minute one.
+
+So the two are set together. Six retries with a shift of one gives
+
+```
+1  2  4  8  16  32  64 seconds        abandon at 127 s
+```
+
+and each of those three numbers is defensible rather than round:
+
+* the largest single interval is **64 s**, against RFC 6298 §2.5's rule that a
+  maximum RTO "MAY be placed provided it is at least 60 seconds";
+* the connection is abandoned at **127 s**, against RFC 1122 §4.2.3.5's R2 of
+  "at least 100 seconds" for data;
+* and it is **12.7× the 10 s** this stack gave up after before, not 200×.
+
+The last is the one that would otherwise bite: the same counter bounds SYN
+retransmission, so a `connect()` to a host that is not answering now blocks for
+127 s rather than 10 before the stack resets the socket. That is what TCP is
+supposed to do and what every other stack does, but it is a visible behaviour
+change and it is why the number is 6 and not 8.
+
+#### Proved on the wire
+
+`tests/tcpdrill/scripts/retransmit.drill`, against the shipping flags:
+
+| | measured |
+|---|---|
+| SYN, four retransmissions | **1185, 1984, 4008, 7997 ms** |
+| data, three retransmissions | **915, 2004, 4008 ms** |
+| first interval, on its own | **988 ms** |
+
+Doubling, from one second, on both paths. Three cases, twenty-four checks, none
+failed. What it was before this change is in §27's own transcript: 890 then 1002.
+
+#### The side effect, which cost two runs to understand
+
+**Backoff makes sockets live longer, and that broke twelve of tcpdrill's
+twenty-one cases.** `case_end()` closes the socket without completing the
+exchange, so the FIN it sends is never acknowledged and is retransmitted for as
+long as the timer allows. With a flat one-second timer and ten retries that was
+ten seconds of noise which mostly fell between cases. With 1-2-4-8-16-32-64 it
+is 127 seconds, and every later case saw an earlier one's FIN arrive in the
+middle of its own expectation — `wanted PA, got FA`, with a sequence number from
+another socket entirely.
+
+That is a harness isolation problem rather than a stack defect, and it is not
+fixed here. The two scripts written for this section end **every** case with a
+RESET from the peer, which tears the socket down in any state and leaves nothing
+retransmitting, so each case measures the timer without depending on how the
+previous one finished.
+
+**And a second source of noise, from the same afternoon, is worth recording
+because it looked identical.** The mDNS responder (§30) landed while these
+measurements were being taken, and its multicast announcements are non-TCP IPv4
+frames that tcpdrill's strict matcher fails on — `non-TCP frame ether=0x0800`,
+six of twenty-one cases, in a run that had nothing to do with mDNS. The arms
+here are built with `-DAMINETXDUO_MDNS=OFF` for that reason. Both of these are
+worth a look from whoever owns the harness: strict "nothing else was on the
+wire" is the right default for a conformance test and needs a way to say "except
+this".
+
+### 33.3 The MSS check: one comparison, and a peer that cannot lie
+
+Without `NX_ENABLE_TCP_MSS_CHECK`, `nx_tcp_packet_process.c` takes whatever MSS a
+peer's SYN carries. A peer advertising 1 makes every segment we send one byte of
+payload behind forty bytes of header, from a socket the application believes is
+working; `NX_TCP_MAXIMUM_TX_QUEUE` (8) then bounds the connection at eight bytes
+in flight. **That is a denial of service that costs the other end one packet, and
+nothing in a trace would look like an error.**
+
+With it, a SYN whose MSS is below `NX_TCP_MSS_MINIMUM` (128, the default, kept)
+is answered with a RESET and counted in `nx_ip_tcp_invalid_packets`. A peer that
+offers **no** MSS option is unaffected — the code substitutes the
+interface-derived default before this check runs — so nothing conformant is
+refused.
+
+**It is not demonstrated on the wire here, and that is stated rather than
+implied.** The check is on the passive-open path only (the branch that handles a
+connection request), and tcpdrill's `c07_passive_open` fails in the current tree
+for an unrelated reason — `bind()` on the listen port — so there is no case that
+can drive a SYN into it yet. What is shipped is a compiled-in comparison whose
+effect is legible in ten lines of vendored source; when passive open works, one
+case with `mss=1` will settle it.
+
+### 33.4 The IP identification field: 5% of loopback, and the free half
+
+Without `NX_ENABLE_IP_ID_RANDOMIZATION`, `nx_ip_header_add.c:151` uses
+`ip_ptr -> nx_ip_packet_id++`: a global counter that `nx_ip_create()` zeroes and
+that increments once per transmitted datagram. Two consequences, of very
+different sizes:
+
+1. **it is a fingerprint** — monotonic, boot-zeroed, machine-wide, and the rate
+   it climbs at is a packet counter for the whole machine readable from any one
+   flow;
+2. **it is RFC 6274 §5.1's idle scan** — an off-path attacker who can send to
+   this machine and read the ID it answers with learns how many packets it sent
+   in between, which is how a host is used as a zombie to scan a third party.
+
+The define fixes both. Two arms out of one tree, A1200, 524,288 bytes:
+
+| | counter | randomised | |
+|---|---:|---:|---:|
+| **loopback**, no capture | 347 KB/s | 329 KB/s | **−5.2%** |
+| loopback, capturing | 305 KB/s | 290 KB/s | −4.9% |
+| **wire**, capturing | 171 KB/s | 167 KB/s | −2.3% |
+
+**The mechanism is not in doubt, because the two paths differ by exactly the
+ratio of datagrams they send.** Loopback puts about 130 datagrams a second on
+the wire and the wire path about 70 — we are the receiver there and send mostly
+ACKs — and 5.2/2.3 is that ratio. It works out at roughly **400 µs per
+transmitted datagram**.
+
+That is `NX_RAND`, which `nx_port.h` maps to `ami_random_rand()`: a SHA-256 hash
+DRBG with a `Forbid()`/`Permit()` pair per draw and a SHA-256 pair per 32 bytes
+of output, so one refill every eight calls. It is the right generator for what
+it was chosen for — TLS key material, ECDHE privates, TCP sequence numbers — and
+much too expensive to spend on a 16-bit header field once per packet. NetX Duo
+offers no way to pick a cheaper source for this one field: it is the same
+`NX_RAND` macro everywhere.
+
+**What ships instead is the half that is free.** `src/netstack/` seeds
+`nx_ip_packet_id` from the DRBG **once**, when the `NX_IP` is created. One draw
+at startup, nothing per packet, and it removes (1): the counter no longer starts
+at zero, so the absolute value says nothing about uptime or about how much this
+machine has sent. **It does not remove (2)** — idle scan reads the delta between
+two observations, not the value — and saying so is the point, because the cheap
+half looks like a complete answer and is not.
+
+`-DAMINETXDUO_IP_ID_RANDOMIZATION=ON` pays the 5% and closes the second one. On
+a network where an idle scan is a real threat that is a good trade; on the
+14 MHz floor target this stack is built for, it is not the default.
+
+### 33.5 The four that were rejected, and what would change each answer
+
+The full reasoning is in `port/netxduo-amiga/inc/nx_user.h`, where it will be
+read by whoever wonders why the flag is not set. In brief:
+
+**`NX_DISABLE_ARP_AUTO_ENTRY`** looks like the safe choice and is not, for a
+reason specific to the mechanism rather than to the idea. Today any ARP we see
+for a sender we have **no entry for** creates one. Disabling that does **not**
+close the poisoning path that matters: `nx_arp_packet_receive.c` updates an
+**existing** entry from any ARP on the wire whether this is defined or not, and
+this define does not touch that code. What it does remove is the free entry for
+the gateway, so the next packet to an unresolved next hop costs an ARP request,
+a packet out of `NX_ARP_MAX_QUEUE_DEPTH` (2, deliberately small) and a round
+trip. Security nothing, latency something. What would change it: an ARP cache
+that distinguishes "learned from a request addressed to us" from "learned from
+anything on the wire".
+
+**`NX_ENABLE_ARP_MAC_CHANGE_NOTIFICATION`** is a notification and nothing else:
+`nx_arp_packet_receive.c:418` calls it **after** writing the new address, so
+nothing it does can refuse the change, and there is no handler in this tree that
+would act on it. It becomes worth having the day something can act — a static
+ARP pin for the gateway, or a warning surfaced in `ShowNetStatus` — and not
+before.
+
+**`NX_ENABLE_PACKET_DEBUG_INFO`** is not rejected on merit. It records the file
+and line each packet was allocated at, which is directly aimed at the
+packet-ownership defects this project keeps finding. It is rejected as a
+**permanent** setting: two pointers in every one of up to 256 pool packets, on a
+machine whose pool is sized from `AvailMem()`. It belongs behind a build option
+next to the debug log level, and that option does not exist yet.
+
+**`NX_ENABLE_DUAL_PACKET_POOL`** has the right premise and the wrong shape for
+this machine. §24.8 already settled that there is one pool here on purpose: a
+second pool takes memory permanently away from the 4 MB floor to guard against
+an exhaustion that §24.3's arithmetic is what actually prevents. It is also the
+wrong half of the problem — an ACK that cannot be allocated is a symptom of a
+data pool already empty, and the data is what was lost.
+
+**`NX_ENABLE_LOW_WATERMARK`** is unchanged from §24.7, which found it and
+reported it rather than switching it on. It still needs three things together:
+the define, an `nx_packet_pool_low_watermark_set()` call from `src/netstack/`
+(because `nx_packet_pool_create()` never touches the field, so a zeroed
+watermark means the guard is compiled in and can never fire), and
+`NX_TCP_MAXIMUM_RX_QUEUE` raised, because at its default of 20 and 1440-byte
+segments it binds at about 28 KB — **before** a 32 KB window does — and the
+tail-drop it would then perform costs a retransmission this stack has no SACK to
+recover cheaply. It also changes IPv4 fragment reassembly and UDP receive. That
+is a piece of work with its own measurement.
+
+### 33.6 Regression cover
+
+Everything §28.5 measured, re-measured with all four changes in.
+
+| | §28.5 | here |
+|---|---|---|
+| conformance, loopback tier | 130 passed, 0 failed, 12 skipped | **130 passed, 0 failed, 12 skipped** |
+| conformance, network tier | 141 passed, 1 failed, 0 skipped | **141 passed, 1 failed, 0 skipped** |
+| `tests/clients` | 94 checks, 0 failures | **94 checks, 0 failures** |
+| `tests/curl` groups A–F | 147 passed, 2 failed, 149 cases | **147 passed, 2 failed, 149 cases** |
+| `tests/curl` concurrency sweep | 9 passed, 0 failed | **9 passed, 0 failed**, `AvailMem` delta +0 |
+| `tests/tools/run-routes.sh` | PASSED | **PASSED** |
+| `tests/tools/run-dnscache.sh` | PASSED | **PASSED** |
+| `tests/tcpdrill` retransmit / keepalive | — | **3/3 and 4/4, 58 checks, 0 failed** |
+| `tools/ci.sh` | all green | **all green** |
+
+**One scare, chased down rather than explained away.** An intermediate run of
+`tests/clients` reported 94 checks with **2 failures** — `send() to a closed peer
+eventually fails`, sixteen sends and none of them refused. That is exactly the
+shape a longer retransmission timer would produce, and exactly the shape the
+`CloseSocket()`-sends-a-FIN change landing the same hour would produce, so it
+was worth an arm rather than an argument: `tests/clients` was re-run against the
+shipping build **and** against one built from the same tree with
+`-DNX_TCP_RETRY_SHIFT=0 -DNX_TCP_MAXIMUM_RETRIES=10`. Both came back **94 checks,
+0 failures**. It was transient, it was not the timer, and the two macros are
+`#ifndef`-guarded so that arm can be built again in one command the next time
+somebody needs to ask.
+
