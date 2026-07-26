@@ -205,20 +205,38 @@ pass() { echo "  ok: $*"; }
 # can tell the two apart.  A crash that reboots is a DIFFERENT and much worse
 # defect than a command that blocks, and a test that cannot say which it saw
 # sends the next person looking in the wrong place.
-if [ ! -s "$SERIAL" ]; then
-    fail "no serial log at $SERIAL -- cannot tell a reboot from a hang"
-else
+#
+# FS-UAE writes nothing to the serial port on some hosts -- build/serial-*.log
+# is zero bytes for every run on this Mac, INCLUDING runs that demonstrably
+# worked.  Failing there reported a broken stack on a host where nothing was
+# broken, and it did so for long enough to be recorded twice as a known false
+# red, which is exactly how a test stops being read.
+#
+# So the serial log is preferred and not required.  When it is empty the
+# transcript answers the same question, the way tests/tools/run-routes.sh
+# already does it: ToolsSmoke reopens DH0:tools.txt from the top after a reset,
+# so the FIRST command's banner appearing twice IS a reboot.  Same signal,
+# different instrument.
+#
+# What is NOT done here is passing quietly when neither source can answer. A
+# check that cannot tell a reboot from a hang has to say so.
+if [ -s "$SERIAL" ]; then
     BOOTS=$(grep -c "netstack: starting ThreadX" "$SERIAL" || true)
-    if [ "$BOOTS" -gt 1 ]; then
-        fail "THE MACHINE REBOOTED: the netstack started $BOOTS times in one run"
-        echo "       A command crashed hard enough to reset the Amiga. This is" >&2
-        echo "       not a hang, whatever the transcript looks like -- see" >&2
-        echo "       docs/RESEARCH.md 25." >&2
-    elif [ "$BOOTS" -eq 1 ]; then
-        pass "the machine booted exactly once (no reset)"
-    else
-        fail "the netstack never started -- the run did not get far enough to judge"
-    fi
+    BOOT_SRC="the serial log"
+else
+    BOOTS=$(grep -c "^===== SYS:AddNetInterface eth0 =====" "$REPORT" || true)
+    BOOT_SRC="the transcript (no serial output on this host)"
+fi
+
+if [ "$BOOTS" -gt 1 ]; then
+    fail "THE MACHINE REBOOTED: $BOOT_SRC shows $BOOTS starts in one run"
+    echo "       A command crashed hard enough to reset the Amiga. This is" >&2
+    echo "       not a hang, whatever the transcript looks like -- see" >&2
+    echo "       docs/RESEARCH.md 25." >&2
+elif [ "$BOOTS" -eq 1 ]; then
+    pass "the machine booted exactly once (no reset), per $BOOT_SRC"
+else
+    fail "no start found in $BOOT_SRC -- the run did not get far enough to judge"
 fi
 
 # ---- the negative half: the sentences that mean "I cannot see the stack" ----
