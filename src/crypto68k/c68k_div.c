@@ -60,18 +60,6 @@ UINT c68k_fast_modulus = 1u;
 
 /* ------------------------------------------------------------- helpers --- */
 
-static VOID d_zero(c68k_limb *p, UINT n)
-{
-
-UINT    i;
-
-
-    for (i = 0; i < n; i++)
-    {
-        p[i] = 0;
-    }
-}
-
 /* dst[0..n-1] = src[0..n-1] << s, returning the bits shifted out of the top.
    s must be 0..31; s == 0 is a copy, because a 32-bit shift is undefined. */
 static c68k_limb d_shl(c68k_limb *dst, const c68k_limb *src, UINT n, UINT s)

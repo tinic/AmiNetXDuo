@@ -197,19 +197,6 @@ static struct r_hostent *bsd_gethostbyname(struct Library *base, const char *nam
     return res;
 }
 
-static LONG bsd_errno(struct Library *base)
-{
-    register struct Library *a6 __asm("a6") = base;
-    register LONG            res __asm("d0");
-
-    __asm __volatile ("jsr a6@(-162:W)"
-                      : "=r" (res)
-                      : "r" (a6)
-                      : "d1", "a0", "a1", "cc", "memory");
-    return res;
-}
-
-
 /* --------------------------------------------------------------- the run -- */
 
 #define R_PORT          443
