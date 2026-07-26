@@ -41,8 +41,13 @@ on:
     # Nightly.  The AROS ROM is a nightly build too, so this doubles as an
     # early warning that the pin in tools/fetch-aros-rom.sh has rotted.
     - cron: "17 4 * * *"
+  # Deliberately NOT on push. This tier boots an emulator and takes 7-20
+  # minutes, so on an active day it is cancelled by the next push before it
+  # finishes and reports nothing useful either way -- while still emailing on
+  # every failure. Nightly plus on-demand gives the same coverage without the
+  # noise, and tier 1 (ci.yml) still runs on every push.
   push:
-    branches: [main, master, research]
+    tags: ["v*"]
 
 concurrency:
   group: emulator-${{ github.ref }}

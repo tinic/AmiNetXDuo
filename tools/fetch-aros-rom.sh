@@ -37,7 +37,12 @@
 #   which one you got.
 #
 #   The durable fix is to mirror the two 512 KB files yourself -- a GitHub
-#   release asset on this repo is ideal -- and point AMINETXDUO_AROS_ROM_URL
+#   release asset on this repo is ideal, and is now what happens by default:
+#   AMINETXDUO_AROS_MIRROR holds the ROM pair of the pinned build, and the
+#   SourceForge path below is only reached if the mirror is unreachable or its
+#   checksums do not match. To refresh the pin: take a new nightly, update the
+#   two checksums, upload the pair, and move the mirror URL.
+#   You can also mirror the ROM pair yourself -- point AMINETXDUO_AROS_ROM_URL
 #   (a .zip of the boot ISO) or AMINETXDUO_AROS_ROM_DIR (a directory holding
 #   aros-rom.bin and aros-ext.bin) at it.  APL 1.1 permits redistribution
 #   provided the licence text travels with the files.
@@ -129,6 +134,34 @@ TMP=$(mktemp -d "${TMPDIR:-/tmp}/aminetxduo-aros.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
 # ---------------------------------------------------------------- source ----
+
+# The mirror comes first, and it is the reason CI is not at the mercy of a
+# nightly's two-day lifetime. It holds the two 512 KB ROMs of the pinned build
+# -- not the 108 MB ISO -- so it is also a much smaller fetch. SourceForge stays
+# as the fallback for anyone who would rather take it from upstream, and for
+# refreshing the pin.
+AROS_MIRROR="${AMINETXDUO_AROS_MIRROR:-https://github.com/tinic/AmiNetXDuo/releases/download/aros-m68k-rom-20260725/aros-m68k-20260725.tar.gz}"
+
+try_mirror() {
+    [ -n "$AROS_MIRROR" ] || return 1
+    say "==> AROS ROM pair from the mirror"
+    curl -fsSL --max-time 300 -o "$TMP/mirror.tar.gz" "$AROS_MIRROR" 2>/dev/null || return 1
+    tar xzf "$TMP/mirror.tar.gz" -C "$TMP" 2>/dev/null || return 1
+    [ -f "$TMP/aros-rom.bin" ] && [ -f "$TMP/aros-ext.bin" ] || return 1
+    got_rom=$(sha256_of "$TMP/aros-rom.bin"); got_ext=$(sha256_of "$TMP/aros-ext.bin")
+    if [ "$got_rom" != "$AROS_SHA_ROM" ] || [ "$got_ext" != "$AROS_SHA_EXT" ]; then
+        say "!! the mirror does not match the pinned checksums; ignoring it"
+        return 1
+    fi
+    mkdir -p "$DIR"
+    cp "$TMP/aros-rom.bin" "$TMP/aros-ext.bin" "$DIR/"
+    return 0
+}
+
+if [ -z "${AMINETXDUO_AROS_ROM_URL:-}" ] && try_mirror; then
+    emit "$DIR"
+    exit 0
+fi
 
 PINNED=1
 if [ -n "${AMINETXDUO_AROS_ROM_URL:-}" ]; then
