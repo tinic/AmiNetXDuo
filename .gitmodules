@@ -3,7 +3,8 @@
 	url = https://github.com/eclipse-threadx/threadx.git
 [submodule "third_party/netxduo"]
 	path = third_party/netxduo
-	url = https://github.com/eclipse-threadx/netxduo.git
+	url = https://github.com/tinic/netxduo.git
+	branch = amiga-mdns-big-endian
 [submodule "third_party/bsdsocktest"]
 	path = third_party/bsdsocktest
 	url = https://github.com/tbdye/bsdsocktest.git
