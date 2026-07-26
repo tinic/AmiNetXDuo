@@ -95,6 +95,44 @@ Linux/x86-64. This is the one exception to the MIT licence: Mozilla's root set
 is MPL 2.0, which is file-scoped and affects nothing else in the tree. See
 [`third_party/cacert/README.md`](third_party/cacert/README.md).
 
+### How the arithmetic compares
+
+`src/crypto68k/` is measured against AmiSSL, the AmigaOS OpenSSL port, both
+implementations run on identical inputs back to back in one process with every
+answer checked to agree. AmiSSL is not a soft target: its 68020-40 build
+assembles Howard Chu's `bn_m68k.s`, so this is our assembly against theirs.
+
+| operation | result |
+|---|---|
+| RSA-2048 public | dead heat, within the measurement's own uncertainty |
+| RSA-2048 private, CRT | ours 1.22× (1.54× against OpenSSL's default, which blinds) |
+| ECDSA P-256 verify | ours 1.69× |
+| ECDH P-256 | ours 3.03× |
+| k·G, the ECDHE keygen | ours 10.8× |
+| AES-128-CBC, HMAC-SHA256 | dead heat, and 1.28× |
+
+Handshake arithmetic for a two-certificate chain comes to 850 ms against 2,525.
+
+Two of those rows deserve their explanation rather than the number alone. **We
+win the elliptic-curve operations because OpenSSL is constant-time and we are
+not** — `ossl_ec_wNAF_mul` forces a Montgomery ladder for any scalar that might
+be secret, which is 5,120 field operations against our comb's ~760. That was
+demonstrated rather than assumed, by setting `BN_FLG_CONSTTIME` and watching
+`k·G` move 0.07%, because the ladder was already running. It is a trade suited
+to this machine's threat model, not an engineering victory, and it should be
+read that way.
+
+**The bulk path is a dead heat because neither tree has a byte of m68k AES or
+SHA-256 assembly**, which is the one place real leverage is still sitting: TLS
+costs about 7× plaintext on the wire, and that is where the bytes actually go.
+
+Two measurement notes, since both would otherwise flatter us. FS-UAE charges
+`MULU.L` 32 cycles where a 68020 charges 43, and `DIVU.L` 51.8 where the manual
+says 78, so every figure above carries a correction derived from per-operation
+multiply counts. And a contended host inflates *cold* handshake timings — the
+resumed column does not move, so a cold number measured while other emulators
+are running should not be quoted.
+
 ### Session resumption
 
 A handshake is not too slow in the abstract; it is too slow for the patience of
