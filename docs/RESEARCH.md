@@ -12386,8 +12386,9 @@ if ((sock->as_Flags & ASF_LISTENING) == 0 || sock->as_Incoming == NULL)
 lifetime of the socket, and there is nothing the application can do about it
 except close the listener and build another one.** Measured: 1,951 consecutive
 `EINVAL`s over 400 seconds in the two-connection run and 673 in the
-single-connection one, both starting at the second `accept()` and both with
-exactly one `relisten failed` on the serial log in front of them.
+single-connection one, both starting at the accept that followed the failed
+relisten, and both with exactly one `relisten failed` on the serial log in
+front of them.
 
 Two more observations from the same two seconds, recorded because they are
 probably the same root cause and are certainly not separate bugs to chase
