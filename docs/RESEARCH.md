@@ -12474,13 +12474,30 @@ minutes, and nothing moved**: `AvailMem` 9,325,864 → 9,360,736, live sockets
 5 → 10, pool 222 → 217, and not one `NX_STILL_BOUND`. An ordinary socket
 lifecycle is clean.
 
-So the trigger is narrower than "close", and the measured difference between
-the two runs is the destination: the sockets that leaked were dialling a port
-that **had a listen request on it** in the state §37.4 leaves behind, where the
-ones that did not leak dialled a port with nothing on it at all. That is where
-to look, and it is not proven here — the leak has been measured, its rate
-pinned to the socket size, and the ordinary path cleared, and the remaining
-step needs the file `src/bsdsocket/socket.c`, which is another workstream's.
+Nor is it the dead listener by itself. A third run put **one** client against
+**one** listener in exactly the §37.4 failure state for eight and a half
+minutes: 673 `EINVAL`s, one `relisten failed`, and **`AvailMem` 9,320,552 →
+9,359,304 — up — live sockets 5 → 3, pool 222 → 221, and no `NX_STILL_BOUND`
+at all.**
+
+| run | conns | listener state | lifecycles | `AvailMem` drift | leaked sockets |
+|---|---:|---|---:|---:|---:|
+| `mode leak` | — | live, healthy | 11,915 | **+34,872** | 0 |
+| churn, `-c 1` | 1 | dead (§37.4) | ~3 | **+38,752** | 0 |
+| soak, `-c 2` + hogs | 2 | dead (§37.4) | ~830 | **−409,728** | 776 |
+
+So the trigger is narrower than "close" and narrower than "§37.4", and the
+measured difference between the third row and the second is that in the third
+the client kept dialling — about twice a second, and getting `ECONNREFUSED`
+back — where in the second it went into `connect()` once and never came out.
+The leaking lifecycle is a **refused** `connect()` to a port that has a listen
+request on it, as opposed to one with nothing on it at all, which `mode leak`
+row 1 does 11,915 times without leaking a byte.
+
+That is where to look. It is not proven here: the leak has been measured, its
+rate pinned to `sizeof(AmiSocket)`, and both innocent explanations cleared with
+controls, and the remaining step needs `src/bsdsocket/socket.c`, which is
+another workstream's.
 
 **What it costs, if it is ever reached in the field.** 1009 bytes/s is
 3.6 MB/hour against a machine with about 9 MB free: out of memory in **under
