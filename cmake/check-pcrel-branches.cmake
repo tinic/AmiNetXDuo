@@ -31,6 +31,11 @@
 #
 # SPDX-License-Identifier: MIT
 
+# Run with `cmake -P`, which starts with no policies set: IN_LIST below is an
+# `if` OPERATOR only under CMP0057, and without this the script fails with
+# "Unknown arguments specified" on CMake 3.31 while passing on 4.x.
+cmake_minimum_required(VERSION 3.20)
+
 if(NOT EXISTS "${BINARY}")
     message(FATAL_ERROR "check-pcrel-branches: no such file: ${BINARY}")
 endif()
