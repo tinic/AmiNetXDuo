@@ -509,6 +509,57 @@ def tftp_server(bind, port):
                          daemon=True).start()
 
 
+# -------------------------------------------------------------------- whois --
+#
+# RFC 3912 in twenty lines, which is all of it: read a line, write a record,
+# hang up.  What is worth testing here is not the record -- it is the REFERRAL,
+# so `referral.test` is answered with a `refer:` line pointing back at this
+# same server.  That exercises the follow, and then the client's own guard
+# against a server that refers you to itself.
+
+WHOIS_RECORDS = {
+    "plain.test": "domain:       PLAIN.TEST\r\n"
+                  "organisation: AmiNetXDuo test rig\r\n"
+                  "created:      2026-07-26\r\n",
+    # Refers to the server it came from, which is a loop and not a referral.
+    # The client has to notice that and stop.
+    "referral.test": "domain:       REFERRAL.TEST\r\n"
+                     "refer:        %s\r\n"
+                     "organisation: AmiNetXDuo test rig\r\n",
+    # Refers somewhere else, which is the real shape: without FOLLOW the
+    # client prints the line to type next, with it the client goes there.
+    "chain.test": "domain:       CHAIN.TEST\r\n"
+                  "refer:        127.0.0.1\r\n"
+                  "organisation: AmiNetXDuo test rig\r\n",
+}
+
+
+class WhoisHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        self.request.settimeout(15)
+        query = b""
+        while b"\n" not in query and len(query) < 256:
+            chunk = self.request.recv(64)
+            if not chunk:
+                break
+            query += chunk
+
+        name = query.decode("latin-1").strip().lower()
+        log("whois", "query %r from %s:%d"
+            % (name, self.client_address[0], self.client_address[1]))
+
+        record = WHOIS_RECORDS.get(name)
+        if record is None:
+            body = "No match for \"%s\".\r\n" % name.upper()
+        elif "%s" in record:
+            body = record % self.server.advertise
+        else:
+            body = record
+
+        self.request.sendall(body.encode("latin-1"))
+        log("whois", "answered %d bytes" % len(body))
+
+
 # ------------------------------------------------------------------- dial --
 
 def dialer(target, message, deadline):
@@ -571,6 +622,8 @@ def main():
     ap.add_argument("--ftp-port", type=int, default=7021)
     ap.add_argument("--tftp-port", type=int, default=0,
                     help="UDP port for the TFTP server; 0 leaves it off")
+    ap.add_argument("--whois-port", type=int, default=0,
+                    help="TCP port for the whois server; 0 leaves it off")
     ap.add_argument("--advertise", default="10.0.2.2",
                     help="address to put in the 227 PASV reply -- what the "
                          "guest must dial, not what we are bound to")
@@ -602,6 +655,11 @@ def main():
     ftp.advertise = args.advertise
     ftp.active_via_loopback = args.active_via_loopback
     servers.append(("ftp", ftp))
+
+    if args.whois_port:
+        who = Threaded((args.bind, args.whois_port), WhoisHandler)
+        who.advertise = args.advertise
+        servers.append(("whois", who))
 
     for name, srv in servers:
         threading.Thread(target=srv.serve_forever, daemon=True).start()

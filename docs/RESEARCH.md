@@ -6861,3 +6861,44 @@ the other side — `sent 'exact.bin', 2048 bytes in 5 blocks`, four full and one
 The duplicate-block path is the sorcerer's-apprentice one: a data block that arrives
 twice is acknowledged again *without* advancing, because advancing doubles every packet
 on the wire for the rest of the transfer.
+
+### 20.6 `whois`: the default server is the one that knows where to ask
+
+Twenty lines of protocol — connect, send the query, read until the far end hangs up.
+The only decision in it is the default server, and it is `whois.iana.org` rather than
+the traditional `whois.internic.net`, which has known only `.com` and `.net` for twenty
+years. IANA's knows one thing about everything: which registry to ask. So the default
+answers usefully for any TLD, any address range and any AS number, and the answer names
+the server with the detail.
+
+That referral is handled two ways. Without `FOLLOW` the line to type next is printed
+underneath the record, which is the minimum a command owes someone it has just given a
+partial answer to. With it, the referral is chased — up to three hops, and a server that
+refers you to itself is recognised as a loop rather than followed. Four spellings are
+recognised at the start of a line, case-insensitively: `refer:` and `whois:` (IANA),
+`Registrar WHOIS Server:` (the gTLD registries) and `ReferralServer:` (the RIRs, whose
+value carries a `whois://` scheme that is stripped).
+
+Against a real registry over the real internet, through SLIRP:
+
+```
+===== SYS:whois example.com =====
+% IANA WHOIS server
+% for more information on IANA, visit http://www.iana.org
+% This query returned 1 object
+
+domain:       EXAMPLE.COM
+organisation: Internet Assigned Numbers Authority
+created:      1992-01-01
+source:       IANA
+```
+
+### 20.7 Where the harness grew
+
+`tests/tools/run-nettools.sh` and `tests/tools/netpeer.py` were extended rather than
+duplicated: the peer gained a TFTP server (UDP, per-session TID, both directions) and a
+whois server whose canned records exercise the referral, the self-referral loop and the
+no-match answer, and the command list gained the traceroute, tftp and whois cases quoted
+above. `ToolsSmoke`'s staged-command ceiling went from 40 to 96 in the same change —
+it truncates silently, and a run that quietly stops reading at line 40 looks exactly
+like a set of commands that were never written.

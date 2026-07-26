@@ -68,6 +68,8 @@ FTP_DATA_PORT="${AMINETXDUO_FTP_DATA_PORT:-7060}"
 # asks for a password is a test nobody runs.  The command takes the port as an
 # argument, so the rig uses a high one.
 TFTP_PORT="${AMINETXDUO_TFTP_PORT:-7069}"
+# Same for whois, whose own port is 43.
+WHOIS_PORT="${AMINETXDUO_WHOIS_PORT:-7043}"
 
 SMOKE="$ROOT/$BUILD/src/tools/ToolsSmoke"
 ADDIF="$ROOT/$BUILD/src/tools/AddNetInterface"
@@ -77,9 +79,10 @@ TELNET="$ROOT/$BUILD/src/tools/telnet"
 FTP="$ROOT/$BUILD/src/tools/ftp"
 TRACEROUTE="$ROOT/$BUILD/src/tools/traceroute"
 TFTP="$ROOT/$BUILD/src/tools/tftp"
+WHOIS="$ROOT/$BUILD/src/tools/whois"
 
 for f in "$SMOKE" "$ADDIF" "$BSD" "$NC" "$TELNET" "$FTP" "$TRACEROUTE" \
-         "$TFTP"; do
+         "$TFTP" "$WHOIS"; do
     [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
 done
 
@@ -113,6 +116,7 @@ cp "$TELNET" "$STAGE/telnet"
 cp "$FTP"    "$STAGE/ftp"
 cp "$TRACEROUTE" "$STAGE/traceroute"
 cp "$TFTP"       "$STAGE/tftp"
+cp "$WHOIS"      "$STAGE/whois"
 
 # What the scripted sessions feed to standard input.
 printf 'GET / HTTP/1.0\r\n\r\n' > "$STAGE/request.txt"
@@ -187,9 +191,10 @@ wait 4
 &SYS:nc -l 7098 -v -w 10 >DH0:nc-self.txt
 wait 4
 SYS:nc 10.0.2.15 7098 -v -w 10 <DH0:greeting.txt >DH0:nc-selfclient.txt
-# ---- traceroute and tftp ----------------------------------------------
+# ---- traceroute, tftp and whois ---------------------------------------
 SYS:traceroute ?
 SYS:tftp ?
+SYS:whois ?
 # What SLIRP does with a decrementing TTL is the whole question; the answer
 # is in docs/RESEARCH.md 20, and this is one of the runs it came from.
 #
@@ -214,6 +219,18 @@ SYS:tftp 10.0.2.2 PORT $TFTP_PORT GET big.bin AS DH0:tftp-big.bin
 SYS:tftp 10.0.2.2 PORT $TFTP_PORT GET exact.bin AS DH0:tftp-exact.bin
 SYS:tftp 10.0.2.2 PORT $TFTP_PORT PUT DH0:greeting.txt AS from-amiga.txt
 SYS:tftp 10.0.2.2 PORT $TFTP_PORT GET no.such.file
+# whois against netpeer.py's, whose canned records cover the three shapes.
+# referral.test refers to the server it came from, which is a loop and has to
+# be recognised as one; chain.test refers somewhere ELSE, so without FOLLOW
+# the line to type next is printed and with it the client goes there -- to
+# 127.0.0.1, where nothing is listening, so the second hop demonstrates the
+# failure being legible.
+SYS:whois plain.test SERVER 10.0.2.2 PORT $WHOIS_PORT
+SYS:whois referral.test SERVER 10.0.2.2 PORT $WHOIS_PORT FOLLOW
+SYS:whois chain.test SERVER 10.0.2.2 PORT $WHOIS_PORT
+SYS:whois chain.test SERVER 10.0.2.2 PORT $WHOIS_PORT FOLLOW
+# ... and the default server, which is a real registry over the real internet.
+SYS:whois example.com
 # ---- give the inbound connection time to have happened ----------------
 wait 15
 EOF
@@ -231,6 +248,7 @@ PEERLOG="$ROOT/build/netpeer.log"
 python3 "$ROOT/tests/tools/netpeer.py" \
     --echo-port "$ECHO_PORT" --telnet-port "$TELNET_PORT" \
     --ftp-port "$FTP_PORT" --tftp-port "$TFTP_PORT" \
+    --whois-port "$WHOIS_PORT" \
     --advertise 10.0.2.2 --active-via-loopback \
     --dial "127.0.0.1:$NC_INBOUND_PORT" --dial-for "$TIMEOUT" \
     --log "$PEERLOG" --seconds "$((TIMEOUT + 120))" \
@@ -249,7 +267,7 @@ kill -0 "$PEER_PID" 2>/dev/null || {
     exit 2
 }
 echo "==> netpeer.py: echo $ECHO_PORT, telnet $TELNET_PORT, ftp $FTP_PORT," \
-     "tftp $TFTP_PORT"
+     "tftp $TFTP_PORT, whois $WHOIS_PORT"
 
 # --------------------------------------------------------------- slirp ---
 #
@@ -291,7 +309,7 @@ CPUARG=()
 set +e
 "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
     "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/nc" "$STAGE/telnet" \
-    "$STAGE/ftp" "$STAGE/traceroute" "$STAGE/tftp" \
+    "$STAGE/ftp" "$STAGE/traceroute" "$STAGE/tftp" "$STAGE/whois" \
     "$STAGE/AddNetInterface" "$STAGE/commands.txt" \
     "$STAGE/request.txt" "$STAGE/greeting.txt" "$STAGE/telnetin.txt" \
     "$STAGE/ftppasv.txt" "$STAGE/ftpactive.txt"
