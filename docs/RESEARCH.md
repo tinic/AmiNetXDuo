@@ -10781,29 +10781,143 @@ never wait for a peer.
 ### 32.8 What it cost, measured on both paths
 
 §24's figures are the ones at risk, because the fix is on the transmit path.
-Clean `HEAD` against `HEAD` + these two fixes, same machine, back to back,
-`tests/trace/run-trace.sh`, 1,048,576 bytes:
+Clean `HEAD` against `HEAD` + these fixes, `tests/trace/run-trace.sh`, 1,048,576
+bytes, **two passes each, alternating, with `AMINETXDUO_PERF=1` so the emulator
+had the machine to itself** (the second lane commit 81b8f8d added — a throughput
+number taken while two other emulators run is fiction):
 
-| | clean `HEAD` | + these fixes |
-|---|---:|---:|
-| loopback, not capturing | 351 KB/s | 349 KB/s |
-| loopback, capturing | 308 KB/s | 306 KB/s |
-| wire, not capturing | 167 KB/s | 187 KB/s |
-| wire, capturing | 210 KB/s | 200 KB/s |
+| | `HEAD` p1 | fixes p1 | `HEAD` p2 | fixes p2 |
+|---|---:|---:|---:|---:|
+| loopback, not capturing | 351 | 349 | 351 | 350 |
+| loopback, capturing | 309 | 307 | 309 | 307 |
+| wire, capturing | 204 | 200 | 202 | 200 |
+| wire, not capturing | 186 | 146 | 120 | 186 |
 
-**Loopback is -0.6% on both arms, which is what the mechanism predicts** —
-`lo0` does not go through SANA-II at all, so the only thing that could move it
-is the close path, and it does not. The wire numbers straddle zero and are
-noisier than the effect being looked for: the two baseline arms differ from each
-other by 26% on the same library in the same boot, so the honest reading of a
-single pass is **no change**, not +12% and not -5%. `retransmitted 0 segments`
-in our own direction on every flow in every arm, unchanged.
+**Loopback is -0.6%, and it repeats to the kilobyte across four runs.** That is
+what the mechanism predicts: `lo0` does not go through SANA-II at all, so the
+only thing that could move it is the close path, and it does not. The capturing
+wire arm is -1.5% and also stable.
+
+**The non-capturing wire row is not a measurement and is printed to say so.**
+Two runs of the *same* library in the same configuration came out at 186 and
+120 KB/s — a 55% spread with nothing changed between them — so no reading of
+that row distinguishes a 1% effect from a 30% one. It is SLIRP, and §24.4 saw
+the same instability from the other side. The capturing arm is the one to read,
+because it runs the same workload behind a bpf channel that paces it.
+
+`retransmitted 0 segments` in our own direction on every flow in every arm,
+unchanged.
 
 The concurrency sweep, `tests/curl/run-curlverify.sh -p`: 9 passed, 0 failed,
 `AvailMem` delta +0, `p04_parallel_40` green — which is the case §24.5 named as
 the one this class of change is guarded against.
 
-### 32.9 Two things noticed in the receive path, not changed
+### 32.8.1 The wider cover, two arms, nothing moved
+
+Clean `HEAD` and `HEAD` + these fixes, same harnesses, same machine:
+
+| | clean `HEAD` | + these fixes |
+|---|---|---|
+| conformance, `LOOPBACK` | 130 passed, 0 failed, 12 skipped | **identical** |
+| conformance, `HOST 10.0.2.2` | 141 passed, 1 failed | **identical** |
+| `tests/clients` | 94 checks, 0 failures | **identical** |
+| `tests/curl` A–F | 147 passed, 2 failed | **identical** |
+| `tests/curl -p`, 8…48 | — | 9 passed, 0 failed |
+| `tests/tools/run-livetools.sh` | 23 ok, harness `FAIL` | **identical** |
+
+The conformance host failure is `accept(): incoming connection from remote host`
+and the two curl failures are `a44_cookies_send` (the one §14.7 settled against
+a third-party binary) and `f07_ftp_active`; all three are on both arms.
+
+`run-livetools.sh` deserves a sentence of its own, because it is a false red and
+somebody will hit it again. All 23 of its checks pass — the lease, the gateway,
+the live counters, `ping`, `CheckNetConfig`, the three route commands and
+`NetShutdown` — and the run then fails on
+
+    FAIL: no serial log at build/serial-livetools.log -- cannot tell a reboot from a hang
+
+with the serial log present and **zero bytes long**. Other runs in the same
+sweep produced empty serial logs too (`serial-cfh3.log`) and others did not, so
+it is FS-UAE not flushing the debug port rather than a guest that rebooted; a
+clean-`HEAD` control run does exactly the same thing. The check is right to
+exist — §25 is a section about a command that rebooted the machine — but "the
+file is empty" and "the machine went away" are not the same event and the script
+treats them as one.
+
+### 32.9 A third defect, routed here because it lives in the same file
+
+`ObtainSocket()` sets `as_Owner` to the base that took the socket, and
+`as_Owner` is what a NetX Duo receive or disconnect callback `Signal()`s.
+`bsd_socket_release()` decremented the reference count and **returned early when
+another reference was still held** — leaving `as_Owner` pointing at a base that
+is about to be freed. The next callback then reads a `struct Task` out of freed
+memory and signals it, which on a machine with no memory protection is a write
+into whatever now occupies the address.
+
+Every inetd-style handoff takes that path: `ReleaseCopyOfSocket()` plus
+`ObtainSocket()`, or `Dup2Socket()` across bases. §34 found it hanging the first
+socket-handoff run of the `TCP:` handler, which guards the case locally; the
+general fix is three lines in `bsd_socket_release()` and the local guard is now
+redundant rather than load-bearing.
+
+`NULL` is the right answer rather than "the other holder", because there is no
+way to know which holder that is — one NX socket has one owner and `handoff.c`
+says so. Events are still recorded in `as_Events`, so a poll sees them; only the
+asynchronous wakeup is lost, and it is lost to a base that no longer exists.
+
+### 32.10 The blocking `accept()` that did not return, diagnosed and not fixed
+
+Reported alongside the above: a blocking `accept()` on an established connection
+seen once, in one run of four, never to return. **It is not the same wakeup as
+anything in §32.1 and it is not in `src/`.** It is a time-of-check race in the
+vendored `nx_tcp_server_socket_accept.c`, and the two lines are next to each
+other:
+
+```c
+    /* Check if the socket has already made a connection ... */
+    if (socket_ptr -> nx_tcp_socket_state == NX_TCP_ESTABLISHED)
+        return(NX_SUCCESS);                     /* <- read with NO mutex held */
+    ...
+    tx_mutex_get(&(ip_ptr -> nx_ip_protection), TX_WAIT_FOREVER);
+    ...
+    _nx_tcp_socket_thread_suspend(&(socket_ptr -> nx_tcp_socket_connect_suspended_thread), ...);
+```
+
+The early-out reads the state **before** taking the protection mutex, and there
+is no second check after taking it. So:
+
+1. `accept()` reads SYN_RECEIVED and carries on;
+2. the IP thread processes the client's final ACK, moves the socket to
+   ESTABLISHED, looks for `nx_tcp_socket_connect_suspended_thread` and finds
+   nothing, because nobody has suspended yet;
+3. `accept()` takes the mutex — skipping the LISTEN block, since the state is
+   now ESTABLISHED — and suspends;
+4. nothing will ever resume it.
+
+Step 2 needs the IP thread to run between steps 1 and 3, which is exactly what
+happens when it is *already holding* `nx_ip_protection` to process that ACK: our
+thread blocks on the mutex, yields the baton, and the transition completes while
+it waits. That is why it is intermittent and why it happens under load.
+
+**Not fixed here, and the reason is the shape of the fix rather than its size.**
+The obvious repair — slice the wait and call again — is unsafe: on a timeout
+`_nx_tcp_server_socket_accept()` runs `_nx_tcp_connect_cleanup` and winds the
+socket back to `NX_TCP_LISTEN_STATE`, so the next call re-enters the LISTEN
+block and **sends a second SYN+ACK** on a half-open connection. Only two repairs
+are actually safe, and both are a change of mechanism rather than a patch:
+
+- call `nx_tcp_server_socket_accept()` with `NX_NO_WAIT` and do the waiting in
+  `bsd_accept()` — no suspension means no cleanup and no state damage, at the
+  cost of turning an event-driven accept into a polled one; or
+- wait on the establish notification `bsd_events_attach()` already installs,
+  which is event-driven but has to drop out of ThreadX context to park, the way
+  `select.c` does.
+
+The workaround both the handler and its test already use — `WaitSelect()` before
+`accept()` — is sound, because it makes the socket ESTABLISHED before the
+unlocked check runs and the suspension is never reached.
+
+### 32.11 Two things noticed in the receive path, not changed
 
 §29's Roadshow comparison reports the disagreement between our own `NetTrace`
 (55% faster than Roadshow) and the stack-agnostic Aminet curl (12% slower), and
