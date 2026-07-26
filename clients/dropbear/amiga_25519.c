@@ -4,7 +4,7 @@
  *
  * WHY
  *
- *   docs/RESEARCH.md 32 profiled a connection and found the whole of it here.
+ *   docs/RESEARCH.md 35 profiled a connection and found the whole of it here.
  *   Dropbear's curve25519.c is TweetNaCl: sixteen 16-bit limbs in an i64[16],
  *   one field multiply is 256 software 64x64 multiplies, and a handshake is
  *   21,482 of them.  src/crypto68k/c68k_25519.c is the same mathematics over

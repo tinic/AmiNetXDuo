@@ -13,11 +13,11 @@
 #       prints an E-Clock breakdown of the connection when the process exits
 #   -S  STOCK 25519: leave Dropbear's TweetNaCl in place.  The default is to
 #       --wrap the four curve25519.c entry points onto src/crypto68k's
-#       eight-limb implementation, which is where docs/RESEARCH.md 32's
+#       eight-limb implementation, which is where docs/RESEARCH.md 35's
 #       speed-up comes from.  -S is the other arm of that A/B and nothing
 #       else; it is not a fallback for a bug.
 #   -O  use a different localoptions.h (clients/dropbear/localoptions-*.h are
-#       the algorithm-set variants docs/RESEARCH.md 32 compares)
+#       the algorithm-set variants docs/RESEARCH.md 35 compares)
 #   -P  which programs to build (default "dbclient")
 #
 # WHAT IS BEING BUILT

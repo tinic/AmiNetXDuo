@@ -103,7 +103,7 @@ set(CRYPTO68K_SOURCES
     # representation (eight 32-bit limbs instead of TweetNaCl's sixteen 16-bit
     # limbs in an i64[16]), and 18.4 established that this GCC does not leave
     # instruction selection on the table for a loop like this.  See
-    # docs/RESEARCH.md 32.
+    # docs/RESEARCH.md 35.
     c68k_25519.c)
 
 if(AMINETXDUO_CRYPTO68K_ASM)

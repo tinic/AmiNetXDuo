@@ -11459,3 +11459,308 @@ question §34.6 is about and should be settled before, not during.
 Dropbear needs the identical bridge and should use this one. Nothing about it is
 telnet-specific and nothing about it is ours-only: it is `Open()`, `Read()`, `Write()`,
 `Close()`.
+
+## 35. An SSH handshake was 97% arithmetic, and 84 seconds became 12 (2026-07-26)
+
+§31 left `ssh` from a 14 MHz 68020 working and slow: **84.07 s** for one
+connection to a stock OpenSSH 10.2, with the optimistic kex guess already
+disabled, no session resumption in the protocol to soften a second connection,
+and OpenSSH's default `LoginGraceTime` of 120 s only 43% away. It also left one
+question unanswered — is P-256 with our assembly faster on this part than
+portable-C curve25519 — and one assumption unchecked: that the whole cost is
+public-key arithmetic.
+
+Both are now measured. **The same connection, same server, same command line, is
+12.28 s.** The cipher is unchanged, the protocol is unchanged, nothing in
+`third_party/dropbear` is patched, and the client still negotiates
+`curve25519-sha256` / `ssh-ed25519` / `chacha20-poly1305@openssh.com` with a
+server that was given no compatibility settings.
+
+### 35.1 The profile, taken from inside the guest
+
+§31.5 tried to split the handshake by timestamping the server's log host-side
+and got a split that contradicted itself, and drew the right conclusion from
+that: **trust the guest's own clock**. `clients/dropbear/dbprofile.c` is that
+conclusion applied one level down. It attaches with `-Wl,--wrap` — the mechanism
+`clients/dropbear/build.sh` already uses for `open`/`read`/`write`/`close`, so
+the submodule stays byte-identical to its tag — and times each primitive on
+`ReadEClock()` inside the process that is doing the handshake.
+
+One real connection, authenticated with a real key, running a real command:
+
+| primitive | calls | ms | % of wall |
+|---|---:|---:|---:|
+| curve25519 scalar multiply | 2 | 23,374 | 27% |
+| ed25519 sign (client auth) | 1 | 19,739 | 23% |
+| **ed25519 verify (host key)** | 1 | **39,402** | **46%** |
+| `sha512_process` *(nested in the two above)* | 9 | 13 | 0% |
+| `sha256_process` | 33 | 5 | 0% |
+| `chacha_crypt` | 80 | 74 | 0% |
+| `poly1305_process` | 22 | 24 | 0% |
+| `select()` — waiting for the network | 42 | 1,462 | 1.7% |
+| **public-key subtotal** | | **82,620** | **97%** |
+| whole process | | 84,517 | 100% |
+
+**Nothing unnamed is hiding in it.** §31 asserted that the entire wall clock was
+public-key arithmetic on the strength of the cipher A/B; this is that assertion
+measured, and it holds at 97%. The remaining 3% is 1.7 s of network wait and
+about 0.4 s of everything else in an SSH client.
+
+The `select()` row was not a formality. §29 has just shown that two instruments
+can disagree by 67% on the same wire because of the receive call pattern, so an
+instrument that could only see crypto would have been unable to tell "the
+arithmetic is everything" from "the arithmetic is everything the instrument can
+see". Dropbear's read pattern is neither `NetTrace`'s nor curl's, and it spends
+1.7% of a login in `select()`.
+
+**The single largest row is the one nobody would have guessed.** Not the key
+exchange — the *host key signature check*. `ed25519 verify` alone is 39.4 s,
+more than both curve25519 scalar multiplications together. That is the fourth
+wrong prediction this project has recorded, and it is wrong in a useful
+direction: verification is the one operation a client cannot avoid, cache or
+defer.
+
+### 35.2 The other half of the cost model, counted on the build host
+
+A wall clock cannot say how much work a primitive did.
+`clients/dropbear/tweetnacl-count.sh` derives a counting copy of
+`third_party/dropbear/src/curve25519.c` into `build/` — the two field routines
+renamed, counting macros of the original names inserted below them — and runs it
+natively. 2^255−19 arithmetic executes the same multiplies on any machine, so
+this needs no emulator slot, and the queue is the scarcest resource here.
+
+| primitive | mul | sqr | total field multiplies |
+|---|---:|---:|---:|
+| curve25519 keygen | 1,783 | 1,274 | **3,057** |
+| curve25519 shared secret | 1,783 | 1,274 | **3,057** |
+| ed25519 sign | 4,863 | 254 | **5,117** |
+| ed25519 verify | 9,741 | 510 | **10,251** |
+| **one handshake** | | | **21,482** |
+
+All four RFC 7748 / RFC 8032 vectors pass in the same run, so the counts are of
+code that is doing the right thing.
+
+Divide: **82,620 ms over 21,482 multiplies is 3.85 ms each, about 54,600 cycles
+at 14 MHz.** That is the number the whole section turns on, because the useful
+content of a 2^255−19 field multiply on a 32-bit machine is sixty-four
+multiplies.
+
+### 35.3 Why it costs 54,600 cycles, which is the actual finding
+
+Dropbear's 25519 is **TweetNaCl** — the smallest correct implementation in
+existence, 100 tweets, and never intended to be the fastest. Its field element
+is:
+
+```c
+typedef long long i64;
+typedef i64 gf[16];          /* sixteen 16-BIT limbs, in 64-BIT slots */
+
+sv M(gf o,const gf a,const gf b)
+{
+  i64 i,j,t[31];
+  FOR(i,31) t[i]=0;
+  FOR(i,16) FOR(j,16) t[i+j]+=a[i]*b[j];
+  ...
+```
+
+256 iterations, and every one of them is a **software 64×64 multiply** — `a[i]`
+and `b[j]` are `long long`, so GCC cannot know the operands fit in 32 bits and
+emits the full expansion — plus a 64-bit load, a 64-bit accumulate and a 64-bit
+store. 54,600 cycles over 256 iterations is 213 cycles each, which is exactly
+what that costs.
+
+The 68020 has `MULU.L Dn,Dh:Dl`: 32×32→64 in **one instruction**, measured at
+32.06 cycles by `tests/perf/cpucal`. The whole of §35.4 is the observation that
+16-bit limbs in 64-bit slots are the wrong shape for a machine with that
+instruction, and that this is a question about the **representation** and not
+about instruction selection — the same distinction §11.6 drew for the RSA limb
+loop and §18.4 drew for SHA-256.
+
+### 35.4 `src/crypto68k/c68k_25519.c`: eight 32-bit limbs
+
+The same mathematics over `uint32_t[8]`, which is the shape `c68k_p256.c`
+already uses. A field multiply is 64 `MULU.L` in the schoolbook plus 8 in the
+reduction; reduction is by folding, because 2^256 ≡ 38 (mod 2^255−19), and
+values stay below 2^256 and are only canonicalised when serialised.
+
+**No assembly.** §18.4 established that this GCC leaves nothing on the table for
+a loop whose whole content is a multiply and an add, and the loop here is
+`(uint64_t)a[i] * b[j] + t[i+j] + c`, which compiles to one `MULU.L` and an add
+chain. Assembly is a separate question and should be asked against a measurement
+of this, not instead of one.
+
+Three things beyond the representation, all of them algorithm rather than code:
+
+- **A dedicated squaring**, 36 multiplies instead of 64, because every
+  off-diagonal product appears twice.
+- **Addition-chain inversion** — ref10's, 254 squarings and **11** multiplies —
+  against TweetNaCl's square-and-multiply over every exponent bit, which costs
+  254 squarings and **251** multiplies. That is 240 field multiplies saved per
+  inversion and there are three inversions in a handshake.
+- **A dedicated Edwards doubling** (4M+4S) instead of reusing the generic
+  addition (8M+1 by a constant) for `add(p,p)`, which is what TweetNaCl does.
+
+**Not done, deliberately, and named because it is the next lever:** the Ed25519
+base point still has no precomputed table, and both scalar multiplications are
+bit-at-a-time. §35.7 prices that.
+
+#### The bug, because it survived every published vector
+
+The first `fe_fold()` ran one carry-propagation pass and dropped whatever came
+out of the top limb, on the reasoning that a value near 2^256−1 could not arise.
+It arises constantly: with lazy reduction 0 is routinely carried as 2^256−38 and
+1 as 2^256−37, adding 38 to either carries straight through all eight limbs, and
+dropping that carry loses **exactly 38**. `fe_sub` had the mirror-image defect.
+
+The symptom was an Ed25519 doubling of the identity returning 37 where it owed
+−1 — and it is 38 away, which is what named it. What is worth recording is what
+found it: not a published vector, but `fe_sqr` checked against `fe_mul` on random
+inputs. Every RFC vector exercises the same handful of values, and two routines
+that share a broken helper agree with each other. `tests/crypto68k/host/`
+therefore runs 20,003 of those, including the all-ones and 2^256−38 cases where
+the carry lives, alongside RFC 7748 §5.2/§6.1 and RFC 8032 §7.1 with every
+signature also mutated three ways and required to be **refused**.
+
+### 35.5 The measurement
+
+`clients/dropbear/amiga_25519.c` `--wrap`s the four functions `curve25519.c`
+exports onto the new implementation. The TweetNaCl bodies are still linked and
+are simply never called, so the A/B is one linker flag rather than two source
+trees, and `third_party/dropbear` remains unpatched.
+
+**Both binaries in ONE emulator run**, in the measurement lane, so the host load,
+the SLIRP scheduling and the server process are shared and the only thing that
+differs between the two rows is the binary (`run-fsuae.sh -E`). §18.6 records
+what host contention does to a figure taken minutes apart; this avoids the
+question rather than arguing about it.
+
+| | stock TweetNaCl | `crypto68k` | |
+|---|---:|---:|---:|
+| curve25519 scalar multiply (×2) | 23,374 ms | 2,626 ms | **8.90×** |
+| ed25519 sign | 19,739 ms | 2,631 ms | **7.50×** |
+| ed25519 verify | 39,402 ms | 5,124 ms | **7.69×** |
+| public-key subtotal | 82,620 ms | 10,482 ms | **7.88×** |
+| **the whole connection** | **85.10 s** | **12.28 s** | **6.93×** |
+
+Repeated back to back in the same run: 12.28 s and 12.28 s. A later run with the
+shipping binary — no profiler linked — gives **12.18 s** and **11.74 s**, running
+`echo; uname -a; date` and returning `rc 0` with the right output.
+
+**Against `LoginGraceTime`**: a connection goes from 71% of a stock server's
+120-second patience to **10%**. That is the difference between a client that
+works and a client that works on servers that have not been reconfigured.
+
+The rows that did not move are as informative as the ones that did.
+`chacha_crypt` is 74 ms out of 85,000 and 66 ms out of 12,000; §31.5's
+conclusion that the cipher is invisible at this payload size survives a sevenfold
+change in everything around it.
+
+### 35.6 P-256 instead: the question §31.6 asked, answered
+
+§31.6 proposed that the answer might be to negotiate the other half of
+Dropbear's algorithm list — `ecdh-sha2-nistp256`, `ecdsa-sha2-nistp256`,
+`rsa-sha2-256` — because `src/crypto68k/` accelerates P-256 by 10.8× over AmiSSL
+and accelerates 25519 by nothing. `clients/dropbear/localoptions-p256.h` is that
+build: `DROPBEAR_CURVE25519 0` **and** `DROPBEAR_ED25519 0`, because turning off
+only the first moves the key exchange and leaves the host key and the client
+signature on TweetNaCl. `sshd-testserver.sh` grew an ECDSA host key and an ECDSA
+client key so the arm has something to verify against.
+
+| | wall clock |
+|---|---:|
+| curve25519 / ed25519, TweetNaCl | 85.10 s |
+| **ecdh-sha2-nistp256 / ecdsa-sha2-nistp256** | **149.62 s** |
+| curve25519 / ed25519, `crypto68k` | 12.28 s |
+
+**P-256 is 1.8× WORSE than the thing it was proposed to replace, and 12× worse
+than the answer.** Its profile says why: three `ltc_ecc_mulmod` calls, 138.8 s
+between them, one of them (the ECDH) 62.8 s on its own.
+
+The reasoning in §31.6 was sound and the premise was wrong. `crypto68k`'s P-256
+is fast; **Dropbear's** P-256 is `ltc_ecc_mulmod` over libtommath, which is not
+`crypto68k` and is slower per scalar multiplication than TweetNaCl's curve25519
+by a factor of five. §31.6's own caveat — that our speed lives in the
+representation and wiring `nx_crypto`'s limb layout to libtommath's `mp_int`
+may be a rewrite rather than a shim — was the load-bearing sentence, and this
+result is what makes it decisive rather than cautionary. **Route A was never a
+cheap experiment with an expensive follow-up; it was an expensive rewrite with
+nothing in front of it.** Route B needed one new file and no bridge at all,
+because the field code and the curve code are the same file.
+
+For the record, in case anyone revisits it: §15's figures scale to about 4.2 s of
+arithmetic for a P-256 handshake **if** `crypto68k`'s assembly could be reached
+through Dropbear's `ecc_key`/`mp_int`. That is genuinely faster than 10.5 s. It
+also costs interoperability — a modern OpenSSH does not have to offer either
+`ecdh-sha2-nistp256` or an ECDSA host key, and increasingly does not — and it
+buys less than §35.7 does for less work.
+
+### 35.7 What is left, and what the floor actually is
+
+At 12.28 s the split is 10.5 s of public-key arithmetic, 1.1 s in `select()`
+and about 0.5 s of everything else. The cost model from §35.2 still applies and
+now reads **0.54 ms per field operation**, consistent to 5% across all three
+primitives — which is the check that the model is a model and not a coincidence.
+
+The remaining arithmetic, in field operations:
+
+| | now | with a base-point table and a 4-bit window |
+|---|---:|---:|
+| curve25519 (×2, Montgomery ladder — already near optimal) | ~5,120 | ~5,120 |
+| ed25519 sign (one fixed-base multiplication) | ~4,620 | ~715 |
+| ed25519 verify (one fixed-base, one variable-base) | ~9,480 | ~4,106 |
+
+A signed-window table over the base point turns Ed25519 signing from 256
+doublings and 256 additions into 64 additions, and a 4-bit window turns the
+variable-base half of verification from 256 additions into 64. **That predicts
+about 5.3 s of arithmetic and a roughly 7-second connection** — another 1.7×,
+from tables that cost nothing to look up on a part §18.1 measured as having no
+data cache. It is a contained, testable change against the same vectors and it
+is the obvious next piece of work.
+
+Below that, the honest answer starts to arrive. A curve25519 scalar
+multiplication is irreducibly about 2,500 field multiplications and a field
+multiplication is irreducibly 72 `MULU.L` at 32 cycles, which is 2,300 cycles of
+pure multiply — 0.16 ms at 14 MHz, against the 0.54 ms measured. So there is
+perhaps another 2× available in the field routine itself, in assembly, and
+essentially nothing after that. **The floor for this suite on this part is around
+two seconds of arithmetic, and a login of three to four seconds.** Not 84, and
+not zero.
+
+Which makes the conclusion the opposite of §31's. `ssh` from an Amiga is not
+"possible but unpleasant, so make the wait tolerable". At 12 seconds it is
+already usable, at 7 it would be unremarkable, and none of that needed a faster
+machine — it needed a field element that was the right shape for the one we
+have.
+
+### 35.8 The harness, and three things that cost a run each
+
+| | |
+|---|---|
+| `clients/dropbear/dbprofile.c` | the `--wrap` profiler; `build.sh -p` links it |
+| `clients/dropbear/tweetnacl-count.sh` | field-multiply counts, on the build host |
+| `clients/dropbear/amiga_25519.c` | the four `--wrap`s onto `crypto68k` |
+| `clients/dropbear/localoptions-p256.h` | the no-25519 arm; `build.sh -O` selects it |
+| `src/crypto68k/c68k_25519.c` | the implementation |
+| `tests/crypto68k/host/test_c68k_25519.c` | the vectors, in `tools/ci.sh host` |
+| `build.sh -S` | stock TweetNaCl — the other arm of the A/B, not a fallback |
+
+**`make` did not relink, and that looked exactly like the change not working.**
+Dropbear's Makefile makes `dbclient` depend on its own objects; ours arrive
+through `LIBS`, which is a variable and not a prerequisite. Editing the shim and
+re-running the build script left the old executable in place, so a profiling run
+completed and printed nothing. `build.sh` now removes the program when a shim
+object is newer than it.
+
+**A constructor runs before this `crt0` has finished setting newlib up.** An
+`atexit()` registered from one does not survive and an `fprintf()` from one goes
+nowhere — `amiga_dropbear.c`'s constructor gets away with it because it touches
+only `dos.library`. Arm on the first real call instead. The linked
+`___CTOR_LIST__` did grow by one entry, so "the constructor did not run" was the
+wrong diagnosis and cost the time it takes to check a symbol table.
+
+**`printf()` to stdout produced nothing under `ClientRun`** while Dropbear's own
+`fprintf(stderr)` came through in the same transcript. An instrument should use
+the channel that is demonstrably wired up rather than the one that ought to be.
+
+Verified on `turo@playhouse2` with the pinned Linux toolchain: `tools/ci.sh` —
+host, all four cross configurations, conformance — all green.
