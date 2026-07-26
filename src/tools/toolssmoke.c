@@ -39,10 +39,12 @@ static const char version_tag[] __attribute__((used)) =
  * there is no need, because a child of System() has no separate error stream,
  * so tool_error() and PrintFault() both land on stdout anyway.
  *
- * A command that brings its own "<" -- NetSetup reading a file of answers --
- * keeps it, and only the output half is added.
+ * Each half is added only when the command has not brought its own: NetSetup
+ * reads a file of answers with "<", and `ftp ... >DH0:session.txt` wants its
+ * transcript in a file of its own. Adding a second redirection of the same
+ * kind makes the Shell take one of them and quietly drop the other.
  */
-#define REDIRECT    " <NIL: >>DH0:tools.txt"
+#define REDIRECT_IN  " <NIL:"
 #define REDIRECT_OUT " >>DH0:tools.txt"
 
 /*
@@ -51,6 +53,17 @@ static const char version_tag[] __attribute__((used)) =
  * only start a single executable with no arguments -- exercise a machine with
  * no configuration, a machine with a broken one, and a machine whose config
  * names a device that is not there, simply by staging different directories.
+ *
+ * Two prefixes, both there for one reason: a listener and the thing that
+ * connects to it have to be running AT THE SAME TIME, and SystemTagList()
+ * waits. Without them no staged list can test `nc -l` at all.
+ *
+ *   &<command>   run it and carry straight on -- SYS_Asynch, which is what
+ *                the Shell's own `Run` does. Its output must be redirected by
+ *                the line itself; a detached process shares no console with
+ *                this one and its Output() is NIL:.
+ *   wait <secs>  Delay(), so the next line starts after the background one
+ *                has had time to reach its accept().
  */
 #define COMMANDS    "DH0:commands.txt"
 #define MAX_COMMANDS    40
@@ -181,11 +194,12 @@ int main(int argc, char **argv)
     {
         char        line[MAX_LINE + 40];
         const char *command;
-        const char *tail;
         LONG        rc;
         int         n = 0;
         int         k;
         int         has_input = 0;
+        int         has_output = 0;
+        int         async = 0;
 
         if (script_count > 0)
         {
@@ -202,27 +216,102 @@ int main(int argc, char **argv)
 
         report((const char *)"\n===== %s =====\n", (LONG)command, 0);
 
+        /* "wait <seconds>" -- for letting a background listener settle. */
+        if ((command[0] == 'w' || command[0] == 'W') &&
+            (command[1] == 'a' || command[1] == 'A') &&
+            (command[2] == 'i' || command[2] == 'I') &&
+            (command[3] == 't' || command[3] == 'T') &&
+            (command[4] == ' ' || command[4] == '\0'))
+        {
+            LONG secs = 0;
+
+            for (k = 5; command[k] >= '0' && command[k] <= '9'; k++)
+                secs = (secs * 10) + (command[k] - '0');
+
+            if (secs > 0)
+                Delay((ULONG)secs * 50UL);
+
+            report((const char *)"----- waited %ld s -----\n", secs, 0);
+            continue;
+        }
+
+        if (command[0] == '&')
+        {
+            async = 1;
+            command++;
+        }
+
         for (k = 0; command[k] != '\0'; k++)
         {
             if (command[k] == '<')
                 has_input = 1;
+            if (command[k] == '>')
+                has_output = 1;
         }
-
-        tail = has_input ? (const char *)REDIRECT_OUT : (const char *)REDIRECT;
 
         for (k = 0; command[k] != '\0' && n < (int)sizeof(line) - 32; k++)
             line[n++] = command[k];
-        for (k = 0; tail[k] != '\0' && n < (int)sizeof(line) - 1; k++)
-            line[n++] = tail[k];
+
+        if (!has_input)
+        {
+            const char *tail = (const char *)REDIRECT_IN;
+
+            for (k = 0; tail[k] != '\0' && n < (int)sizeof(line) - 1; k++)
+                line[n++] = tail[k];
+        }
+
+        if (!has_output && !async)
+        {
+            const char *tail = (const char *)REDIRECT_OUT;
+
+            for (k = 0; tail[k] != '\0' && n < (int)sizeof(line) - 1; k++)
+                line[n++] = tail[k];
+        }
+
         line[n] = '\0';
 
-        rc = SystemTagList((CONST_STRPTR)line, NULL);
+        if (async)
+        {
+            /*
+             * A detached child cannot share this process's streams: System()
+             * closes whatever it is given when the child ends, and closing
+             * the Shell's own Output() out from under it is fatal. It gets a
+             * pair of NIL: handles of its own, and anything worth keeping is
+             * redirected by the line itself.
+             */
+            BPTR in  = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+            BPTR out = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+
+            rc = SystemTags((CONST_STRPTR)line,
+                            SYS_Input,  (Tag)in,
+                            SYS_Output, (Tag)out,
+                            SYS_Asynch, (Tag)DOSTRUE,
+                            TAG_DONE);
+
+            if (rc == -1)
+            {
+                /* Nothing was started, so nothing will close them. */
+                if (in != (BPTR)0)
+                    Close(in);
+                if (out != (BPTR)0)
+                    Close(out);
+            }
+        }
+        else
+        {
+            rc = SystemTagList((CONST_STRPTR)line, NULL);
+        }
 
         if (rc == -1)
         {
             report((const char *)"----- could not run (IoErr %ld) -----\n",
                    IoErr(), 0);
             failures++;
+        }
+        else if (async)
+        {
+            report((const char *)"----- started in the background -----\n",
+                   0, 0);
         }
         else
         {

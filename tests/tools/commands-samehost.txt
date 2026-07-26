@@ -1,0 +1,34 @@
+# nc talking to itself: both ends on the Amiga, over 127.0.0.1, so nothing
+# leaves the machine and SLIRP is not involved.
+#
+#   AMINETXDUO_NETTOOLS_COMMANDS=tests/tools/commands-samehost.txt \
+#       tests/tools/run-nettools.sh -t 150
+#
+# This is the only listen/accept this emulator can drive end to end -- SLIRP
+# forwards nothing inward -- so it is what proves bind/listen/accept work
+# between two processes rather than inside one.
+#
+# Three cases, each a superset of the last:
+#
+#   A  connect, accept, exchange nothing, both ends reach TIMEOUT.
+#   B  the same, with 21 bytes carried.
+#   C  the same, with -N: end of input calls shutdown(SHUT_WR).
+#
+# C is the one that matters and the one that used to fail: shutdown(SHUT_WR)
+# on a same-machine connection wedged the caller in the library, past the
+# reach of Ctrl-C.  Fixed in bsdsocket.library (e63e5f1 + ed548df); this file
+# is what keeps it fixed.  All three cases end with both ends reporting their
+# own TIMEOUT, or -- for C -- the client seeing the peer's FIN and exiting 0.
+SYS:AddNetInterface eth0
+&SYS:nc -l 7099 -v -w 10 >DH0:a-listen.txt
+wait 4
+SYS:nc 127.0.0.1 7099 -v -w 10 >DH0:a-client.txt
+wait 14
+&SYS:nc -l 7098 -v -w 10 >DH0:b-listen.txt
+wait 4
+SYS:nc 127.0.0.1 7098 -v -w 10 <DH0:greeting.txt >DH0:b-client.txt
+wait 14
+&SYS:nc -l 7097 -v -w 10 -N >DH0:c-listen.txt
+wait 4
+SYS:nc 127.0.0.1 7097 -v -w 10 -N <DH0:greeting.txt >DH0:c-client.txt
+wait 20
