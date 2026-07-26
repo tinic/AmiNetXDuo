@@ -141,6 +141,17 @@ APTR tls_lib_expunge(register struct TLSLibBase *TLSBase __asm("a6"))
     neg     = TLSBase->tb_Lib.lib_NegSize;
     pos     = TLSBase->tb_Lib.lib_PosSize;
 
+    /* The session cache is the one thing the base owns outright -- it is
+       allocated lazily on the first handshake that has something to remember,
+       and it holds master secrets, so it is cleared and not merely freed. */
+    if (TLSBase->tb_Sessions != NULL)
+    {
+        tls_bzero(TLSBase->tb_Sessions,
+                  TLS_RESUME_SLOTS * (ULONG)sizeof(TLSResumeEntry));
+        tls_free(TLSBase->tb_Sessions);
+        TLSBase->tb_Sessions = NULL;
+    }
+
     tls_runtime_close();
 
     Remove((struct Node *)TLSBase);

@@ -50,6 +50,15 @@ set(TLSLIB_WRAP_OPTIONS
     -Wl,--wrap=_nx_secure_tls_send_clienthello
     -Wl,--wrap=_nx_secure_tls_client_handshake)
 
+# -DTLSLIB_TRACE_DEFS=-DTLS_RESUME_TRACE puts a running commentary on the
+# serial port: what went into each ClientHello, every handshake message type
+# seen, and what the ServerHello echoed back against what was offered.  Off by
+# default and worth keeping, because a resumption that silently does not happen
+# looks exactly like one the server declined -- and telling those two apart was
+# the whole of finding the empty-session-ID rule (docs/RESEARCH.md 13.4).
+set(TLSLIB_TRACE_DEFS "" CACHE STRING
+    "Extra defines for tls.library, e.g. -DTLS_RESUME_TRACE")
+
 set(TLSLIB_INCLUDES
     ${AMINETXDUO_CORE_INCLUDES}
     "${AMINETXDUO_NETXDUO}/nx_secure/inc"

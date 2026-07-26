@@ -4091,7 +4091,30 @@ zero timestamp disables ageing — but the test sets the clock rather than remov
 and anything at all about a server that rotates its ticket keys mid-session, which is the
 case the fallback path exists for and which no public host will perform on demand.
 
-### 13.9 What this does not fix
+### 13.9 Size, and a budget that is now over
+
+| | bytes |
+|---|---|
+| `tls_resume.c` object, text | 8,120 |
+| the additions to `tls_conn.c` (two vectors, three `TLSInfo` fields, the cache hooks) | ~1,300 |
+| `tls.library` | 282,516 |
+| `bsdsocket.library` (`AMINETXDUO_TLS=ON`) | 250,248 |
+| **the pair** | **532,764 = 520.3 KiB** |
+
+**That is 8.3 KiB OVER the 512 KiB budget, and it should be said plainly rather than
+rounded off.** The pair was 1,124 bytes inside it at `f535728`; roughly 9.4 KiB of the
+9.6 KiB that moved is this work and the rest is other traffic in the tree. The number was
+always a coincidence rather than headroom — §9 said so at the time — and it has now
+stopped being a coincidence in the wrong direction.
+
+The trimming lever is untouched and much larger than the overrun.
+`src/tls/CMakeLists.txt` globs **all** of `crypto_libraries/src`, so `nx_crypto` still
+carries DES, 3DES, MD5, CCM, GCM and ECJPAKE, none of which any shipping ciphersuite
+reaches. Anyone who needs the budget back should start there and will find far more than
+8 KiB. It is not done here because it is a separate change with its own correctness
+argument, and pretending otherwise would bury it.
+
+### 13.10 What this does not fix
 
 **The first connection to a host still costs what it always cost.** Resumption is a second
 connection's optimisation, so a machine that has never spoken to `www.iana.org` still
