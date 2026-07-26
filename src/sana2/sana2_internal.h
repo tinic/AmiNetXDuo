@@ -160,6 +160,15 @@ typedef struct AmiSana2Rx
     struct MsgPort     *port;
     ULONG               wake_mask;
 
+    /*
+     * TX reaping duty. Exactly one reader carries it -- see the comment on
+     * ami_sana2_tx_reap_bind() -- and only that reader has a nonzero
+     * reap_mask, which is the signal the TX reply port raises on completion.
+     */
+    BOOL                reap_tx;        /* this reader has the duty         */
+    BYTE                reap_sigbit;    /* -1 when none is held             */
+    ULONG               reap_mask;
+
     volatile BOOL       started;    /* tx_thread_create succeeded          */
     volatile BOOL       running;
     volatile BOOL       stop;
@@ -222,8 +231,9 @@ struct AmiSana2If
     NX_INTERFACE       *interface_ptr;
     NX_PACKET_POOL     *pool;
 
-    /* TX ring. The reply port is PA_IGNORE: completions are reaped by
-       polling, never by blocking the sending thread. */
+    /* TX ring. The reply port raises a signal on the reader that carries the
+       reaping duty, and falls back to PA_IGNORE when no reader holds it; the
+       sending thread never blocks on it either way. */
     struct MsgPort      tx_port;
     AmiTxSlot           tx[AMI_SANA2_TX_SLOTS];
 
@@ -273,6 +283,9 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet);
 /* sana2_tx.c */
 VOID ami_sana2_tx_init(AmiSana2If *iface);
 VOID ami_sana2_tx_reap(AmiSana2If *iface);
+VOID ami_sana2_tx_reap_bind(AmiSana2If *iface, struct Task *task, BYTE sigbit);
+VOID ami_sana2_tx_reap_unbind(AmiSana2If *iface);
+VOID ami_sana2_tx_defer(AmiSana2If *iface);
 VOID ami_sana2_tx_drain(AmiSana2If *iface);
 UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
                        ULONG dst_msw, ULONG dst_lsw);

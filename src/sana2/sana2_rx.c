@@ -17,6 +17,16 @@
  * Duo in exactly the shape an Ethernet driver would, and immediately reposts
  * the read.
  *
+ * One of these threads also NOTICES TRANSMIT COMPLETIONS, which is not where
+ * anyone would look for it. The reason is that they are the only threads in
+ * the shim that block in exec Wait() rather than on a ThreadX object, so they
+ * are the only ones a device's ReplyMsg can wake -- and without a thread that
+ * wakes on a completion, TCP never learns that the driver has finished with a
+ * segment and never retransmits it. The reader does not touch the packet: it
+ * asks NetX Duo for deferred processing and the IP thread does the work.
+ * sana2_tx.c carries the full account; the mechanism here is one extra signal
+ * bit in a Wait() the reader was making anyway.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -465,6 +475,35 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     rx->wake_mask = 1UL << rx->port->mp_SigBit;
 
     /*
+     * TX REAPING DUTY. One reader takes it, and this is where the transmit
+     * ring finally acquires a context that runs when nothing is being sent --
+     * see the header of sana2_tx.c for what the absence of one cost.
+     *
+     * A failure here is not fatal: the interface falls back to reaping on the
+     * next transmit, which is exactly the behaviour that made a lone
+     * unacknowledged segment unrecoverable, so it is worth a warning.
+     */
+    rx->reap_sigbit = -1;
+    rx->reap_mask   = 0;
+
+    if (rx->reap_tx)
+    {
+        BYTE bit = AllocSignal(-1);
+
+        if (bit >= 0)
+        {
+            rx->reap_sigbit = bit;
+            rx->reap_mask   = 1UL << (ULONG)bit;
+            ami_sana2_tx_reap_bind(iface, rx->task, bit);
+        }
+        else
+        {
+            AMI_WARN("sana2: no signal for TX reaping; retransmission will "
+                     "wait for the next send");
+        }
+    }
+
+    /*
      * Every request is a copy of the opened one: that is what carries
      * io_Device, io_Unit and the device's own ios2_BufferManagement cookie.
      * Only the reply port and the command differ.
@@ -484,6 +523,17 @@ static VOID ami_sana2_rx_thread(ULONG argument)
 
     while (!rx->stop)
     {
+        /*
+         * At the top of the loop rather than after the Wait(), because the
+         * pool-empty path below continues without ever reaching a drain --
+         * and releasing finished writes is one of the things that puts
+         * packets back in the pool it is waiting for.
+         *
+         * This does not reap. It asks the IP thread to; see sana2_tx.c.
+         */
+        if (rx->reap_mask != 0)
+            ami_sana2_tx_defer(iface);
+
         if (ami_sana2_rx_post(rx) == 0)
         {
             /* Either the pool is empty or the interface is down. Back off
@@ -493,10 +543,27 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         }
 
         ami_sana2_block_enter();
-        Wait(rx->wake_mask);
+        Wait(rx->wake_mask | rx->reap_mask);
         ami_sana2_block_leave();
 
         ami_sana2_rx_drain(rx);
+    }
+
+    /*
+     * Hand the reply port back BEFORE anything else in the teardown: after
+     * this returns, no completion can signal this task, which is what makes
+     * freeing the signal bit -- and, shortly, the Task -- safe.
+     */
+    if (rx->reap_mask != 0)
+    {
+        ami_sana2_tx_reap_unbind(iface);
+        rx->reap_mask = 0;
+    }
+
+    if (rx->reap_sigbit >= 0)
+    {
+        FreeSignal(rx->reap_sigbit);
+        rx->reap_sigbit = -1;
     }
 
     ami_sana2_rx_teardown(rx);
@@ -603,6 +670,13 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
         rx->failed      = FALSE;
         rx->running     = FALSE;
         rx->started     = FALSE;
+        rx->reap_sigbit = -1;
+        rx->reap_mask   = 0;
+
+        /* The first reader carries the TX reaping duty. It is the IPv4 one,
+           which is the reader that always exists, but nothing depends on
+           which: any thread that blocks in exec Wait() will do. */
+        rx->reap_tx     = (i == 0) ? TRUE : FALSE;
 
         if (rx->depth > AMI_SANA2_RX_MAX_DEPTH)
             rx->depth = AMI_SANA2_RX_MAX_DEPTH;

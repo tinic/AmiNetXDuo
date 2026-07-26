@@ -17,12 +17,67 @@
  *
  * Writes go out with SendIO, never DoIO: the sending thread is the IP thread
  * or an application thread inside nx_tcp_socket_send, and neither may block on
- * the wire. Completions are reaped by polling a PA_IGNORE reply port.
+ * the wire.
+ *
+ * REAPING IS A LIFECYCLE PROBLEM, NOT A BOOKKEEPING ONE, AND IT COST US
+ * RETRANSMISSION ENTIRELY.
+ *
+ * nx_packet_transmit_release() does not free a queued TCP segment -- it marks
+ * it NX_DRIVER_TX_DONE (nx_packet_transmit_release.c) -- and
+ * _nx_tcp_socket_retransmit() will only resend a packet carrying that mark.
+ * Every NetX Duo reference driver sets it inside NX_LINK_PACKET_SEND, because
+ * their sends are synchronous. Ours cannot: a SANA-II CMD_WRITE completes long
+ * after the driver entry returns, so the release happens in
+ * ami_sana2_tx_reap() instead.
+ *
+ * This used to be called only from the transmit path, which meant a packet was
+ * released by the NEXT packet. On a link that goes quiet -- a lost HTTP GET, a
+ * lost TLS ClientHello, any request/response protocol with a single request
+ * segment -- there is no next packet, so the segment stayed un-reaped for ever
+ * and TCP believed the driver still had it. docs/RESEARCH.md 27.4 measured the
+ * result: eleven seconds of total silence after one unacknowledged segment.
+ *
+ * So completions are reaped WHEN THEY COMPLETE, in two hops:
+ *
+ *   1. The reply port raises a signal on one of the SANA-II reader threads
+ *      (ami_sana2_tx_reap_bind), which is the only thread in this shim that
+ *      blocks in exec Wait() and can therefore be woken by a device at all.
+ *   2. That thread does not touch the packet. It calls
+ *      nx_ip_driver_deferred_processing(), which is the mechanism NetX Duo
+ *      provides for exactly this -- a driver saying "I have work, run me on
+ *      the IP thread" -- and the IP thread comes back into
+ *      ami_sana2_driver_entry() with NX_LINK_DEFERRED_PROCESSING and reaps.
+ *
+ * The second hop is the point. Releasing a packet is a mutation of NetX Duo's
+ * transmit queue and of the packet's own prepend pointer -- transmit_release
+ * strips the IP header back off -- and doing that from a reader thread would
+ * interleave it with whatever the IP thread was in the middle of. On the IP
+ * thread it runs where every other send runs, under nx_ip_protection, and the
+ * question does not arise. docs/RESEARCH.md 27.4 noted that this shim never
+ * asked for NX_LINK_DEFERRED_PROCESSING; this is what it is for.
+ *
+ * THE TRANSMIT PATH PAYS ALMOST NOTHING, and that is measured rather than
+ * asserted: the reader only asks for deferred processing when the reply port
+ * is NOT ALREADY EMPTY, and during a bulk transfer the next ami_sana2_tx_send()
+ * has already drained it -- so the common case costs one pointer compare in a
+ * thread that was going to wake anyway, and the IP thread is never disturbed.
+ * The hop only happens when the link goes quiet, which is the case that was
+ * broken.
+ *
+ * The GetMsg() at the top of ami_sana2_tx_send() stays, and is what keeps the
+ * shim correct with no reader bound at all -- open-time probing, an interface
+ * not yet enabled, or a reader that could not get a signal bit.
  *
  * SPDX-License-Identifier: MIT
  */
 
 #include "sana2_internal.h"
+
+/* _nx_ip_driver_deferred_processing(): the sanctioned way for a driver to ask
+   for a callback on the IP thread. Declared in nx_api.h with no nx_ alias, so
+   it is spelled with the underscore -- exactly as sana2_rx.c already spells
+   _nx_ip_packet_deferred_receive(). */
+#include "nx_ip.h"
 
 #ifdef AMINETXDUO_BPF
 #include "aminetxduo/bpf.h"
@@ -34,8 +89,9 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
 {
     UWORD i;
 
-    /* PA_IGNORE: nothing ever waits on this port, so it needs no signal bit
-       and no owning task -- which is what lets any thread post to it. */
+    /* PA_IGNORE until a reader claims the duty: an interface is opened,
+       queried and probed before any reader exists, and those writes must
+       still complete somewhere. */
     ami_sana2_port_init(&iface->tx_port, NULL, 0, PA_IGNORE);
 
     for (i = 0; i < AMI_SANA2_TX_SLOTS; i++)
@@ -56,8 +112,92 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
 }
 
 /*
+ * Hand the reply port a task to signal, so a completion wakes somebody.
+ *
+ * WHY A SIGNAL AND NOT A POLL, AND WHY THIS TASK
+ *
+ *   The two alternatives were a periodic sweep and a thread of our own. A
+ *   sweep adds latency to every retransmission in exchange for work done when
+ *   there is none to do, and a thread costs a context switch per frame on a
+ *   machine where docs/RESEARCH.md 16 budgets 8.0 ms per segment at 14 MHz.
+ *   A signal costs the reader one extra bit in a Wait() it was making anyway,
+ *   and the sender one Signal() inside exec's ReplyMsg -- which is the same
+ *   cost the receive path has always paid.
+ *
+ *   The task is one of the SANA-II readers because it is the only thread in
+ *   this shim that blocks in exec rather than in ThreadX: the NX_IP thread
+ *   waits on ThreadX event flags, which Signal() cannot break. Which reader
+ *   does not matter, so it is the first one -- see ami_sana2_rx_start().
+ *
+ * Disable() rather than Forbid(): a device may ReplyMsg from its interrupt,
+ * and exec's PutMsg reads mp_Flags, mp_SigTask and mp_SigBit as one Disabled
+ * unit. Three stores, so the region is a handful of instructions.
+ */
+VOID ami_sana2_tx_reap_bind(AmiSana2If *iface, struct Task *task, BYTE sigbit)
+{
+    if (iface == NULL || task == NULL || sigbit < 0)
+        return;
+
+    Disable();
+    iface->tx_port.mp_SigTask = task;
+    iface->tx_port.mp_SigBit  = (UBYTE)sigbit;
+    iface->tx_port.mp_Flags   = PA_SIGNAL;
+    Enable();
+}
+
+/*
+ * Give it back. MUST happen before the task exits or its signal bit is freed:
+ * after this the port is inert again and completions simply queue up for the
+ * next ami_sana2_tx_reap(), which ami_sana2_tx_drain() performs at shutdown.
+ */
+VOID ami_sana2_tx_reap_unbind(AmiSana2If *iface)
+{
+    if (iface == NULL)
+        return;
+
+    Disable();
+    iface->tx_port.mp_Flags   = PA_IGNORE;
+    iface->tx_port.mp_SigTask = NULL;
+    iface->tx_port.mp_SigBit  = 0;
+    Enable();
+}
+
+/*
+ * The reader's whole contribution: if anything has completed, ask NetX Duo to
+ * run the driver on the IP thread, which is where ami_sana2_tx_reap() is
+ * allowed to touch a packet.
+ *
+ * The emptiness test is a single pointer compare and needs no Forbid(). It can
+ * only be wrong in the safe direction: exec's PutMsg links the message and
+ * raises the signal inside one Disable()d region, so a reader that has been
+ * woken always sees a non-empty list. A reader that sees an empty one was
+ * woken by a completion somebody else has already collected -- the transmit
+ * path, almost always -- and there is nothing left to defer.
+ */
+VOID ami_sana2_tx_defer(AmiSana2If *iface)
+{
+    struct List *list;
+
+    if (iface == NULL || iface->ip == NULL)
+        return;
+
+    /* This NDK has no IsMsgPortEmpty(); an exec List is empty when its
+       TailPred points back at the header. */
+    list = &iface->tx_port.mp_MsgList;
+    if (list->lh_TailPred == (struct Node *)list)
+        return;
+
+    _nx_ip_driver_deferred_processing(iface->ip);
+}
+
+/*
  * Reap finished writes. Non-blocking by construction: GetMsg() on an empty
  * port returns NULL.
+ *
+ * Callable from any thread and from several at once: GetMsg() is atomic, so a
+ * slot belongs to exactly one caller from the moment it is dequeued, and
+ * nx_packet_transmit_release() does its own TX_DISABLE. That is what lets the
+ * reader reap concurrently with a transmit in progress on the IP thread.
  */
 VOID ami_sana2_tx_reap(AmiSana2If *iface)
 {
@@ -212,6 +352,8 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
     if (iface == NULL || packet == NULL)
         return NX_PTR_ERROR;
 
+    /* Belt to the reader's braces: cheap when the reader has already emptied
+       the port, and the only reaping there is when no reader is bound. */
     ami_sana2_tx_reap(iface);
 
     if (!iface->online)

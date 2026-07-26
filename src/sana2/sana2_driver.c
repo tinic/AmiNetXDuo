@@ -359,8 +359,23 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
     }
 
     case NX_LINK_DEFERRED_PROCESSING:
+        /*
+         * The transmit ring's completion handler, and the reason this shim
+         * finally asks for deferred processing at all: a SANA-II CMD_WRITE
+         * finishes long after the driver entry returned, and the packet cannot
+         * go back to TCP until somebody says so. A reader thread notices the
+         * completion and calls _nx_ip_driver_deferred_processing(); the reap
+         * itself happens here, on the IP thread, under nx_ip_protection, in
+         * the same context as every send. See sana2_tx.c.
+         *
+         * Nothing else belongs in this case. It used to refresh the SANA-II
+         * statistics as well, which is a synchronous DoIO() to the device --
+         * fine when nothing ever invoked this command, and one blocking device
+         * round trip per transmitted frame now that something does. The
+         * counters are refreshed by the NX_LINK_GET_*_COUNT commands, which
+         * is where a caller asks for them.
+         */
         ami_sana2_tx_reap(iface);
-        ami_sana2_refresh_stats(iface);
         break;
 
     default:
