@@ -74,12 +74,13 @@ CLOCK=""
 STACK_BUILD="${AMINETXDUO_BUILD:-build/tls}"
 DB_BUILD="build/dropbear"
 DB_BUILD2=""
+DB_SERVER=""
 KEYFILE="${AMINETXDUO_DBCLIENT_KEY:-$ROOT/build/sshd-test/id_amiga}"
 
 PERF=0
 COMMANDS="${AMINETXDUO_DB_COMMANDS:-}"
 
-while getopts "m:t:c:k:b:D:E:i:xC:" opt; do
+while getopts "m:t:c:k:b:D:E:i:xC:S:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
@@ -91,7 +92,8 @@ while getopts "m:t:c:k:b:D:E:i:xC:" opt; do
         i) KEYFILE="$OPTARG" ;;
         x) PERF=1 ;;
         C) COMMANDS="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-k MHz] [-b stackbuild] [-D dbbuild] [-i key] [-x] [-C commands] [-E dbbuild2]" >&2; exit 2 ;;
+        S) DB_SERVER="$OPTARG" ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-k MHz] [-b stackbuild] [-D dbbuild] [-i key] [-x] [-C commands] [-E dbbuild2] [-S srvbuild]" >&2; exit 2 ;;
     esac
 done
 
@@ -194,6 +196,60 @@ else
     echo "   Set AMINETXDUO_MATHIEEEDOUBBAS=<path> or drop one in build/." >&2
 fi
 
+# ------------------------------------------------------------- the server --
+#
+# -S stages the Dropbear SERVER as well and points the client at 127.0.0.1
+# instead of the host.
+#
+# It has to be loopback.  FS-UAE's SLIRP is outbound-only -- there is no way
+# for anything on this machine to open a connection INTO the guest -- so a
+# server on the Amiga cannot be reached from here at all.  Running both ends
+# inside the guest is not a workaround for that, it is the only arrangement
+# that exercises the accept() side of the stack under emulation, and it puts
+# a real key exchange over the loopback interface as a bonus.
+#
+# The host key is generated HERE, by the host build of dropbearkey, and cached.
+# Generating one in the guest is a minute of ed25519 on a 14 MHz 68020 before
+# the thing being tested even starts, and it would be a different key every
+# run.
+#
+# authorized_keys goes to DH0:.ssh/ because getpwnam() in the shim reports a
+# home of SYS: and Dropbear appends "/.ssh/authorized_keys" -- which reaches
+# the right place only because amiga_fix_path() collapses the "SYS:/" that
+# produces.  If that ever regresses, this test is what notices.
+if [ -n "$DB_SERVER" ]; then
+    DBSRV="$ROOT/$DB_SERVER/dropbear"
+    [ -f "$DBSRV" ] || {
+        echo "missing $DBSRV -- build it with:" >&2
+        echo "  clients/dropbear/build.sh -b $DB_SERVER -P \"dbclient dropbear\"" >&2
+        exit 2
+    }
+    cp "$DBSRV" "$STAGE/dropbear"
+
+    DBKEYGEN="$ROOT/build/dropbear-host/dropbearkey"
+    [ -x "$DBKEYGEN" ] || {
+        echo "missing $DBKEYGEN -- build the host tools first" >&2
+        exit 2
+    }
+
+    HOSTKEY="$ROOT/build/sshd-test/hostkey_amiga_ed25519"
+    if [ ! -f "$HOSTKEY" ]; then
+        mkdir -p "$(dirname "$HOSTKEY")"
+        echo "==> generating an Amiga host key on the host"
+        "$DBKEYGEN" -t ed25519 -f "$HOSTKEY" >/dev/null
+    fi
+    cp "$HOSTKEY" "$STAGE/hostkey"
+
+    mkdir -p "$STAGE/.ssh"
+    "$DBKEYGEN" -y -f "$KEYFILE" \
+        | sed -n 's/^Public key portion is: *//p;/^ssh-/p' > "$STAGE/.ssh/authorized_keys"
+    [ -s "$STAGE/.ssh/authorized_keys" ] || {
+        echo "could not extract a public key from $KEYFILE" >&2
+        exit 2
+    }
+    echo "==> server staged; authorized_keys is $(wc -c < "$STAGE/.ssh/authorized_keys" | tr -d ' ') bytes"
+fi
+
 DBUSER="${AMINETXDUO_SSH_USER:-$(id -un)}"
 DBHOST="${AMINETXDUO_SSH_HOST:-10.0.2.2}"
 DBPORT="${AMINETXDUO_SSH_PORT:-2222}"
@@ -201,6 +257,29 @@ DBPORT="${AMINETXDUO_SSH_PORT:-2222}"
 if [ -n "$COMMANDS" ]; then
     cp "$COMMANDS" "$STAGE/commands.txt"
     echo "==> command list: $COMMANDS"
+elif [ -n "$DB_SERVER" ]; then
+    # -F so it does not try to put itself in the background.  That is the
+    # whole flag list: this build has no syslog, so it already logs to stderr
+    # and there is no -E to ask for it, and DROPBEAR_SVR_PASSWORD_AUTH is 0 in
+    # localoptions.h, so there is no -s to disable either.  Both were tried and
+    # both are "Invalid option" -- the usage text a server prints is the list
+    # of what this configuration actually built.
+    #
+    # authorized_keys is found through the home directory rather than -D, on
+    # purpose: that path goes through amiga_fix_path() and this is what proves
+    # it.
+    #
+    # The wait is generous on purpose: the server has to open
+    # bsdsocket.library, read a host key and bind before the client arrives,
+    # and this is a 14 MHz machine.  A client that connects too early gets a
+    # refusal that looks exactly like a broken listener.
+cat > "$STAGE/commands.txt" <<EOF
+SYS:AddNetInterface eth0
+&SYS:dropbear -F -r DH0:hostkey -p 2222
+wait 10
+SYS:dbclient -T -y -y -i DH0:id_amiga -p 2222 amiga@127.0.0.1 "echo AMIGA-SSH-SERVER-OK"
+wait 5
+EOF
 else
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
@@ -212,7 +291,11 @@ SYS:dbclient -T -y -y -i DH0:id_amiga -c chacha20-poly1305@openssh.com -p $DBPOR
 EOF
 fi
 
-echo "==> target: $DBUSER@$DBHOST:$DBPORT"
+if [ -n "$DB_SERVER" ]; then
+    echo "==> target: our own dropbear on 127.0.0.1:2222, inside the guest"
+else
+    echo "==> target: $DBUSER@$DBHOST:$DBPORT"
+fi
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-dropbear}"
 
@@ -226,4 +309,5 @@ exec "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
      ${DB_BUILD2:+"$STAGE/dbclient2"} \
      "$STAGE/AddNetInterface" "$STAGE/id_amiga" \
      ${ECDSAKEY:+"$STAGE/id_amiga_ecdsa"} \
+     ${DB_SERVER:+"$STAGE/dropbear" "$STAGE/hostkey" "$STAGE/.ssh"} \
      "$STAGE/commands.txt"

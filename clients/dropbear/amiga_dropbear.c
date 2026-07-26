@@ -165,12 +165,18 @@ static LONG nx_socketbasetaglist(APTR tags)            { return SocketBaseTagLis
 #define DB_SOCK_BASE    64
 #define DB_SOCK_LIMIT   192
 #define DB_PIPE_BASE    192
-#define DB_PIPE_LIMIT   194
-#define DB_RAND_FD      194
+#define DB_PIPE_PAIRS   8
+#define DB_PIPE_LIMIT   (DB_PIPE_BASE + 2 * DB_PIPE_PAIRS)
+#define DB_RAND_FD      DB_PIPE_LIMIT
 
 #define IS_SOCK(fd)     ((fd) >= DB_SOCK_BASE && (fd) < DB_SOCK_LIMIT)
 #define IS_PIPE(fd)     ((fd) >= DB_PIPE_BASE && (fd) < DB_PIPE_LIMIT)
 #define IS_RAND(fd)     ((fd) == DB_RAND_FD)
+
+/* The pipe table.  Declared here rather than beside pipe() because close()
+   comes first in the file and has to release entries. */
+static unsigned pipe_taken;    /* one bit per PAIR */
+static unsigned pipe_closed;   /* one bit per END */
 #define SOCKOF(fd)      ((LONG)((fd) - DB_SOCK_BASE))
 
 extern int __real_read(int fd, void *buf, size_t len);
@@ -573,7 +579,24 @@ int __wrap_close(int fd)
     }
 
     if (IS_PIPE(fd))
+    {
+        /* Release the pair once BOTH ends are closed.  Dropbear closes one end
+           and keeps the other, so freeing on the first close would hand the
+           live end to the next caller. */
+        int pair = (fd - DB_PIPE_BASE) / 2;
+        int other = (fd - DB_PIPE_BASE) % 2 ? fd - 1 : fd + 1;
+
+        if (pipe_closed & (1u << (unsigned)(other - DB_PIPE_BASE)))
+        {
+            pipe_taken  &= ~(1u << (unsigned)pair);
+            pipe_closed &= ~(3u << (unsigned)(2 * pair));
+        }
+        else
+        {
+            pipe_closed |= 1u << (unsigned)(fd - DB_PIPE_BASE);
+        }
         return 0;
+    }
 
     return __real_close(fd);
 }
@@ -763,20 +786,34 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
 
 /* ---------------------------------------------------------------- pipe --- */
 
-static int pipe_taken = 0;
-
+/*
+ * One bit per pair.  There was one pair, which was enough for dbclient and is
+ * not enough for the server: svr-main.c makes a childpipe per connection and
+ * common-session.c then makes ses.signal_pipe, so the second call failed and
+ * the session died with "Signal pipe failed" after a successful accept.
+ *
+ * Freed on close, so a server that handled connections in a loop would not
+ * run out.  This one cannot -- DEBUG_NOFORK means it handles one and exits --
+ * but a pipe table that leaks only because nothing loops is a trap for
+ * whatever changes that.
+ */
 int pipe(int fds[2])
 {
-    if (pipe_taken)
+    int i;
+
+    for (i = 0; i < DB_PIPE_PAIRS; i++)
     {
-        errno = EMFILE;
-        return -1;
+        if ((pipe_taken & (1u << i)) == 0)
+        {
+            pipe_taken |= 1u << i;
+            fds[0] = DB_PIPE_BASE + 2 * i;
+            fds[1] = DB_PIPE_BASE + 2 * i + 1;
+            return 0;
+        }
     }
 
-    pipe_taken = 1;
-    fds[0] = DB_PIPE_BASE;
-    fds[1] = DB_PIPE_BASE + 1;
-    return 0;
+    errno = EMFILE;
+    return -1;
 }
 
 
