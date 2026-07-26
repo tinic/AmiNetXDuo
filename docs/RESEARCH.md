@@ -12372,9 +12372,30 @@ if (spare != NULL) {
 }
 ```
 
-`as_Incoming` is cleared before its replacement is secured, and there are three
-ways not to secure it. When any of them happens the listener is left with
-`as_Incoming == NULL`, and the very first check in `bsd_accept()` is
+`as_Incoming` is cleared before its replacement is secured, and the relisten
+**cannot succeed**, for a reason that is two lines of the vendored tree:
+
+```c
+/* nx_tcp_server_socket_relisten.c:138 -- the ONLY way it matches */
+if ((listen_ptr -> nx_tcp_listen_port == port) &&
+    (!listen_ptr -> nx_tcp_listen_socket_ptr))
+
+/* nx_tcp_server_socket_unaccept.c:185 -- the ONLY thing that clears it */
+listen_ptr -> nx_tcp_listen_socket_ptr =  NX_NULL;
+```
+
+**`relisten()` only matches a listen request whose socket designation is
+empty, and `unaccept()` is what empties it — and `bsd_accept()`'s success path
+never calls `unaccept()` on the socket it has just promoted.** The listen
+request still points at the accepted socket, so the walk finds no match and
+returns `NX_INVALID_RELISTEN`, every time, on the first accept, whatever else
+is running. The correct NetX Duo server idiom is unaccept → relisten →
+accept, and `bsd_accept()` already uses it — on its two **failure** paths (the
+`IPV6_V6ONLY` refusal and the `bsd_fd_alloc()` failure both unaccept before
+they relisten). It is only the path that works that skips it.
+
+So the listener is left with `as_Incoming == NULL`, and the very first check in
+`bsd_accept()` is
 
 ```c
 if ((sock->as_Flags & ASF_LISTENING) == 0 || sock->as_Incoming == NULL)
@@ -12404,11 +12425,21 @@ independently:
   second. Same listener state, two different answers, and one of them is an
   unbounded hang on a blocking call with no timeout.
 
+**So `accept()` works exactly once per `listen()`, and the second one on the
+same listening socket can never succeed.** That is why nothing in this tree
+has caught it: `tests/curl`'s `d03_parallel_40` is forty *client* sockets and
+never accepts at all; `tests/clients` group M is "re-listen on the same port
+after close", which closes the listener and calls `listen()` again, taking
+`bsd_listen()`'s fresh-listen-request path rather than `relisten()`; and group
+E's FTP data connection accepts once. **Not one test in this project has ever
+called `accept()` twice on one listening socket** — which is the first thing
+any server does.
+
 This is the shape the EAB report calls a permanently degraded socket. It is on
 the listening side rather than the data side, and it is ours rather than
-inherited. `tests/curl`'s `d03_parallel_40` and `tests/clients` group M both
-pass, so whatever the trigger is, it is not simply "accept twice" —
-`tests/endurance/run-endurance.sh` is the reproduction.
+inherited. `tests/endurance/run-endurance.sh` is the reproduction; the fix is
+one `nx_tcp_server_socket_unaccept(&incoming->as_Nx.tcp)` before the relisten,
+in a file another workstream owns.
 
 **Where the honesty line is.** The `relisten failed` warning and the permanent
 `EINVAL` after it are library behaviour and a plain reading of the code: the
