@@ -427,3 +427,27 @@ Two things a person running it needs to know. curl wants
 by calling it, and it is *not* in the Kickstart 3.1 ROM, though every Workbench
 install has it. And a Shell gives a command 4 KB of stack, so **`stack 200000`**
 first.
+
+## Two things left as they are, on purpose
+
+Both were found by the DHCP and RFC 3927 work, both were measured, and both
+were decided against changing. They are recorded here so that finding them
+again does not read as finding them for the first time.
+
+**AutoIP gives up its address on the first late conflict.** RFC 3927 §2.5 asks
+for one defence, keeping the address, before yielding. The vendored
+`nx_auto_ip.c` says in its own comment that there is no defence, and a trace
+confirms the shape of it: the ARP layer *does* send the defensive announcement,
+and AutoIP then zeroes the interface anyway. So a single stray ARP costs a
+link-locally addressed machine its address. Correcting it means overriding
+vendored code, and it only bites a machine that has no DHCP server at all and
+a conflicting host on the same wire. Left alone.
+
+**`DHCPDECLINE` is never sent, so a duplicate address is not detected before
+use.** The probe state, the conflict handler and the decline are all behind
+`NX_DHCP_CLIENT_SEND_ARP_PROBE`, which this port does not define. A measurement
+build confirmed it works when enabled and priced it: bring-up goes from 1.12 s
+to 5.00 s, **+3.9 s on every boot**, to guard against a server handing out an
+address somebody else already holds. Not worth it here. Enabling it is one
+`#define` in `port/netxduo-amiga/inc/nx_user.h`, and the RFC 3927 test activates
+its declined-address phase automatically if you do.
