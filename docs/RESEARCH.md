@@ -6875,23 +6875,37 @@ That referral is handled two ways. Without `FOLLOW` the line to type next is pri
 underneath the record, which is the minimum a command owes someone it has just given a
 partial answer to. With it, the referral is chased — up to three hops, and a server that
 refers you to itself is recognised as a loop rather than followed. Four spellings are
-recognised at the start of a line, case-insensitively: `refer:` and `whois:` (IANA),
-`Registrar WHOIS Server:` (the gTLD registries) and `ReferralServer:` (the RIRs, whose
-value carries a `whois://` scheme that is stripped).
+recognised, case-insensitively, at the start of a line **after any indentation**:
+`refer:` and `whois:` (IANA), `Registrar WHOIS Server:` (the gTLD registries) and
+`ReferralServer:` (the RIRs, whose value carries a `whois://` scheme that is stripped).
 
-Against a real registry over the real internet, through SLIRP:
+The indentation is not a detail, and the first version of this got it wrong. IANA writes
+its fields hard against the left margin; the gTLD registries indent every one of theirs
+by three spaces. A matcher anchored at column zero therefore finds IANA's referral and
+silently misses the registry-to-registrar one — which is the referral anybody looking up
+a domain actually needs. It was caught by running the chain rather than by reading it.
+
+Against real registries over the real internet, through SLIRP — two hops, unedited apart
+from the elision:
 
 ```
-===== SYS:whois example.com =====
+===== SYS:whois amiga.com FOLLOW =====
 % IANA WHOIS server
-% for more information on IANA, visit http://www.iana.org
-% This query returned 1 object
-
-domain:       EXAMPLE.COM
-organisation: Internet Assigned Numbers Authority
-created:      1992-01-01
-source:       IANA
+refer:        whois.verisign-grs.com
+domain:       COM
+organisation: VeriSign Global Registry Services
+...
+--- whois.verisign-grs.com ---
+   Domain Name: AMIGA.COM
+   Registrar WHOIS Server: whois.godaddy.com
+   Registrar: GoDaddy.com, LLC
+   Creation Date: 1994-06-25T04:00:00Z
 ```
+
+`refer:` is taken from IANA's answer and the later `whois:` line in the same record is
+not, because only the first referral counts — a registry answer that mentions several
+servers means the one nearest the top, and chasing the last would follow whatever
+happened to be in the legal notice at the bottom.
 
 ### 20.7 Where the harness grew
 
@@ -6902,3 +6916,12 @@ no-match answer, and the command list gained the traceroute, tftp and whois case
 above. `ToolsSmoke`'s staged-command ceiling went from 40 to 96 in the same change —
 it truncates silently, and a run that quietly stops reading at line 40 looks exactly
 like a set of commands that were never written.
+
+One harness defect worth recording because it produced a page of convincing false
+failures. `netpeer.py` was given a lifetime of the run's own timeout plus two minutes,
+and emulator runs serialise on `build/.fsuae.lock`. With three other runs ahead of it in
+the queue, the peer exited **before the guest had exchanged a single byte** — and every
+local-server case then reported `connection refused` or `the server stopped answering
+after 0 bytes`, which is indistinguishable from a broken command until the peer's own log
+is read and shows it shut down at 540 seconds. The peer now outlives the queue rather
+than the run.

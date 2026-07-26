@@ -244,6 +244,14 @@ fi
 
 # --------------------------------------------------------------- peers ---
 
+# The peer has to outlive the QUEUE, not just the run.  Emulator runs
+# serialise on build/.fsuae.lock and several may be ahead of this one, so the
+# wait before a single byte is exchanged can be half an hour -- and a peer
+# sized to the run's own timeout exits while the run is still waiting its
+# turn, whereupon every local-server case fails with "connection refused" or
+# "the server stopped answering" and looks exactly like a broken command.
+# Observed exactly that way.  The trap below kills it when the script exits,
+# so a generous lifetime costs nothing.
 PEERLOG="$ROOT/build/netpeer.log"
 python3 "$ROOT/tests/tools/netpeer.py" \
     --echo-port "$ECHO_PORT" --telnet-port "$TELNET_PORT" \
@@ -251,7 +259,7 @@ python3 "$ROOT/tests/tools/netpeer.py" \
     --whois-port "$WHOIS_PORT" \
     --advertise 10.0.2.2 --active-via-loopback \
     --dial "127.0.0.1:$NC_INBOUND_PORT" --dial-for "$TIMEOUT" \
-    --log "$PEERLOG" --seconds "$((TIMEOUT + 120))" \
+    --log "$PEERLOG" --seconds "$((TIMEOUT + 3600))" \
     > "$ROOT/build/netpeer.out" 2>&1 &
 PEER_PID=$!
 

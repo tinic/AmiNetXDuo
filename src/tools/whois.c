@@ -69,8 +69,14 @@ static char  whois_request[WHOIS_NAME_MAX + 4];
  *   Registrar WHOIS Server:  the gTLD registries, since ICANN required it
  *   ReferralServer:          the RIRs, and it carries a whois:// scheme
  *
- * Matched case-insensitively at the start of a line, which is the only place
- * any of them appears.
+ * Matched case-insensitively at the start of a line, AFTER any indentation.
+ * The indentation is not a detail: IANA writes its fields hard against the
+ * left margin and the gTLD registries indent every one of theirs by three
+ * spaces, so a matcher anchored at column zero finds IANA's referral and
+ * silently misses the registry-to-registrar one -- which is the referral
+ * anybody looking up a domain actually needs. Observed exactly that way
+ * against whois.verisign-grs.com before this line said "after any
+ * indentation".
  */
 static const char *const whois_keys[] =
 {
@@ -112,6 +118,9 @@ static BOOL whois_referral_from(const char *line, char *out, ULONG outlen)
     const char *p = NULL;
     ULONG       k;
     ULONG       o = 0;
+
+    while (*line == ' ' || *line == '\t')
+        line++;
 
     for (k = 0; whois_keys[k] != NULL; k++)
     {
