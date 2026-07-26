@@ -77,7 +77,7 @@ It puts
      bsdsocket.library, usergroup.library      into LIBS:
      AddNetInterface, Online, Offline,
      ShowNetStatus, ping, netstat, host, fetch,
-     nc, telnet, ftp                           into C:
+     nc, telnet, ftp, NetTrace                 into C:
      the interface description                 into DEVS:NetInterfaces
      the routing and name server settings      into DEVS:Internet
      this file, the documentation, examples    into a drawer you choose
@@ -139,7 +139,7 @@ UNINSTALLING
      Delete LIBS:bsdsocket.library LIBS:usergroup.library
      Delete C:AddNetInterface C:Online C:Offline C:ShowNetStatus
      Delete C:ping C:netstat C:host C:fetch
-     Delete C:nc C:telnet C:ftp
+     Delete C:nc C:telnet C:ftp C:NetTrace
      Delete DEVS:NetInterfaces/eth0
 
 and take the ";BEGIN AmiNetXDuo" .. ";END AmiNetXDuo" block out of

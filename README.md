@@ -55,6 +55,7 @@ a user guide in `Docs/` inside the archive.
 | `nc` | connect or listen, TCP and UDP, port ranges, timeouts |
 | `telnet` | with enough option negotiation not to confuse a real server |
 | `ftp` | passive and active mode, the standard command set |
+| `NetTrace` | capture packets to a `.pcap` file Wireshark can open |
 
 The installer copies all of them into `C:`.
 
@@ -80,8 +81,8 @@ them.
 ## What is not there yet
 
 - Nothing has run on **real hardware**.
-- `SOCK_RAW`, so no `traceroute`; and `MSG_OOB` urgent data.
 - IPv6 is built only with `-DAMINETXDUO_IPV6=ON`.
+- No TCP window scaling, so the window is capped at 64 KB, and no SACK.
 - Inbound connections are untested against the wider internet, because the
   emulator we develop against provides no way to reach the guest from outside.
 
@@ -93,9 +94,9 @@ Barthel's freely distributable Roadshow SDK headers and autodocs are used solely
 as an ABI reference, for function offsets, tag values, structure layouts and
 documented behaviour.
 
-`bsdsocket.library` scores **125 of 142** on
+`bsdsocket.library` scores **128 of 142** on
 [`bsdsocktest`](https://github.com/tbdye/bsdsocktest), an independent
-conformance suite, and 133 of 142 on its network tier.
+conformance suite, with nothing failing — the remainder are skipped.
 
 ## Prior art
 

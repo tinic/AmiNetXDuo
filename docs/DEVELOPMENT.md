@@ -27,7 +27,7 @@ working reference distilled out of it.
       ▼
  SANA-II device       a2065 · ariadne · xsurf · cnet · ppp · uaenet · …
 
- ThreadX + Exec port  TX_THREAD ↔ struct Task · baton scheduling · 100 Hz tick
+ ThreadX + Exec port  TX_THREAD ↔ struct Task · baton scheduling · 50 Hz tick
 ```
 
 The two most difficult parts are
@@ -164,7 +164,7 @@ tests/conformance/run-fsuae.sh -a "LOOPBACK NOPAGE"
 
 | | |
 |---|---|
-| conformance, loopback tier | **125/142** (1 fail, 16 skip) |
+| conformance, loopback tier | **128/142** (0 fail, 14 skip) |
 | conformance, network tier | **133/142** (2 fail, 7 skip) |
 | client access patterns | **94/94** (`tests/clients`) — the call sequences curl, wget, nc, ftp and telnet actually issue, each group named for the program and file it came from |
 | curl verification suite | **122/124** on the HTTP groups and **28/28** on the TLS group (`tests/curl`); a third-party curl built by somebody else scores the same 122/124, failing on the same two cases |
