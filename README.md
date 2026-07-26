@@ -95,17 +95,47 @@ Linux/x86-64. This is the one exception to the MIT licence: Mozilla's root set
 is MPL 2.0, which is file-scoped and affects nothing else in the tree. See
 [`third_party/cacert/README.md`](third_party/cacert/README.md).
 
-TLS is nevertheless still disabled by default, and the reason is now speed after
-all, though not in the way the earlier figures suggested. A handshake is not too
-slow in the abstract; it is too slow for the patience of the CDN at the other
-end. At 13.9 MHz a two-certificate chain completes in 6.8 s and a three-deep
-chain takes around 23 s, and Cloudflare closes the connection at somewhere
-between 11.3 and roughly 20 s. `fetch` then reports "the connection is closed"
-and returns 10, which is correct behaviour and not a useful default. Raise the
-clock and the same chains complete: `www.iana.org` in 11.3 s at 24.5 MHz, and
-`example.com`, at four certificates, in 9.8 s at 56 MHz. Roughly a 2× on the
-client half would change the answer. See
-[docs/RESEARCH.md §9](docs/RESEARCH.md#9-decisions-2026-07-24).
+### Session resumption
+
+A handshake is not too slow in the abstract; it is too slow for the patience of
+the CDN at the other end. At 13.9 MHz a two-certificate chain completes in 6.8 s
+and a three-deep chain takes around 23 s, while Cloudflare closes somewhere
+between 11.3 and roughly 20 s.
+
+Resumption removes the public-key work altogether, so the second connection to a
+host costs about half a second whatever the first one cost:
+
+| host | chain | cold | resumed |
+|---|---|---|---|
+| `tls-v1-2.badssl.com` | 2, RSA, `0xC027` | 6,807 ms | **596 ms** |
+| `ecc256.badssl.com` | 2, ECDSA, `0xC023` | 23,419 ms | **595 ms** |
+
+It survives both a new process and a reboot, because the cache lives in
+`DEVS:Internet/tlssessions` as well as in the library. `www.iana.org` — three
+certificates behind Cloudflare, which cannot complete a cold handshake at
+13.9 MHz at all — was seeded once at 24.5 MHz, the machine rebooted with only
+the 436-byte session file carried across, and then fetched in **0.5 s at
+13.9 MHz**, chain verified.
+
+Tickets rather than session IDs, chosen on evidence: probing ten trials per host
+gave tickets 40/40 and session IDs 2/40. Session IDs still work where a server
+offers them. The cache is keyed by host, port **and whether the chain was
+verified**, so a session established with `TLSA_NoVerify` can never be resumed
+by a caller that asked for verification. A rejected ticket falls back to a full
+handshake.
+
+The security trade is the ordinary one every TLS session cache has made since
+1996: master secrets and tickets sit in the clear in library memory and on disk,
+so forward secrecy is given up for resumed sessions and anyone taking the disk
+can decrypt captured traffic for them. On a machine with no memory protection
+the in-memory half changes little.
+
+TLS is nevertheless still disabled by default, because a *first* connection to a
+CDN-fronted host still does not complete at 13.9 MHz — resumption helps only
+once there is something to resume. Raise the clock and the cold handshakes
+complete too: `www.iana.org` in 11.3 s at 24.5 MHz, and `example.com`, at four
+certificates, in 9.8 s at 56 MHz. See
+[docs/RESEARCH.md §9](docs/RESEARCH.md#9-decisions-2026-07-24) and §13.
 
 Nothing here can be taken down by a peer that is slow, rude or absent:
 `tests/tls/run-hangup.sh` stands four badly-behaved servers on the host — reset,
@@ -203,12 +233,16 @@ ThreadX core 27.7 KB, NetX Duo IPv4 core approximately 73 KB, DHCP client
 15 KB, DNS 9.5 KB.
 
 The shipped libraries, as hunk files rather than link-map text, are 249,636
-bytes for a default `bsdsocket.library`, 250,084 with `-DAMINETXDUO_TLS=ON`, and
-273,080 for `tls.library`. The TLS pair therefore comes to 523,164 bytes, which
-is 1,124 bytes inside 512 KiB. Read that as a measurement and not as headroom.
-There is one obvious trimming lever still untouched: `src/tls/CMakeLists.txt`
-globs the whole of `crypto_libraries/src`, so `nx_crypto` still carries DES,
-3DES, MD5, CCM, GCM and ECJPAKE.
+bytes for a default `bsdsocket.library`, 250,248 with `-DAMINETXDUO_TLS=ON`, and
+282,516 for `tls.library`. The TLS pair therefore comes to 532,764 bytes, which
+is **8,476 over 512 KiB**. Session resumption accounts for about 9.4 KiB of
+that, so the pair went from just inside the figure to just outside it.
+
+The overrun is smaller than the trimming lever nobody has pulled yet:
+`src/tls/CMakeLists.txt` globs the whole of `crypto_libraries/src`, so
+`nx_crypto` still carries DES, 3DES, MD5, CCM, GCM and ECJPAKE, none of which
+any ciphersuite we negotiate can reach. That is a separate change with its own
+correctness argument, so it has not been made as a side effect of anything else.
 
 ## Building
 
