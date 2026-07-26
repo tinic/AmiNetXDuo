@@ -8180,7 +8180,34 @@ like a hang is not one. Checked both ways against real logs: the pre-fix run
     2 packets transmitted, 2 received, 0% packet loss
 ```
 
-### 25.5 The lesson, which is not about ping
+### 25.5 It is worse on the toolchain that builds the releases
+
+macOS cannot execute the pinned `m68k-amigaos-gcc`, so everything above was
+found with the local NDK and had to be confirmed against the toolchain CI
+actually ships from. It was, on `turo@playhouse2`, and the pinned toolchain is
+**not better — it is worse**:
+
+| toolchain | mis-resolved branches in `ping` |
+|---|---|
+| local NDK (`~/amigaos/tools`, 15.2.0) | 1 — `tool_delay_ticks` → `tool_break` |
+| pinned (`~/.cache/aminetxduo/toolchain/current`, 15.2.0) | **3** — the same one, plus two more |
+
+So this was never a property of one developer's machine. The `ping` in the
+v0.2.0 archive carried three of these, and the same audit found four in
+`bsdsocket.library` from `ami_random.c` under both toolchains. After the fix,
+all four cross configurations build clean on the pinned toolchain and every
+linked image passes the check.
+
+One thing about the check itself is worth recording, because it failed in the
+way checks characteristically do. `cmake -P` starts a script with **no policies
+set**, so `IN_LIST` is an `if` operator only under CMP0057 — which CMake 4.x
+turns on by default and 3.31 does not. The check therefore passed on the machine
+it was written on and failed every cross build on the Linux host with "Unknown
+arguments specified": a script error wearing a build failure's clothes, which is
+exactly the shape that gets a check disabled rather than fixed.
+`cmake_minimum_required()` in the script settles it.
+
+### 25.6 The lesson, which is not about ping
 
 §22.8 handed over a measured trace and a diagnosis, and the diagnosis was an
 inference: the trace stopped at `recvfrom`, therefore `recvfrom` blocked. The
