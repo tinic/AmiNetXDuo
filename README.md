@@ -10,7 +10,7 @@ drives the SANA-II network cards you already have.
 > ARP, pings its gateway, resolves DNS, moves TCP in both directions and does
 > HTTPS. It scores **141 of 142** on the independent
 > [`bsdsocktest`](https://github.com/tbdye/bsdsocktest) conformance suite, where
-> Roadshow scores 138. Real `curl` runs on it, unmodified.
+> Roadshow scores 138. Real `curl` runs on it unmodified, and so does `ssh`.
 >
 > It has **only ever been tested under emulation, never on a real Amiga**, so
 > treat it as something to try rather than something to depend on.
@@ -85,6 +85,10 @@ everything already uses.
 `fetch` handles `https://` URLs, and certificates are properly checked against
 the usual set of root authorities. **curl** runs on this stack too, if you want
 something with more options.
+
+**`ssh` works** — to an ordinary modern server, with no special settings at its
+end. Expect a connection to take around ten seconds before the prompt appears;
+almost all of that is the cryptography rather than the network.
 
 One thing to expect on a machine this slow: **the first connection to a site can
 take twenty seconds or more, and some sites will give up before it finishes.**

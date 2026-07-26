@@ -417,6 +417,24 @@ example.com: HTTP 200, 559 B, dns 0.98s connect 1.48s total 2.02s
 AmiTCP-SDK-4.3.lha: HTTP 200, 657797 B in 5.60s (117463 B/s)
 ```
 
+Dropbear builds through the same harness, so the Amiga can `ssh`: unpatched
+against stock OpenSSH 10.2 with no compatibility settings, negotiating
+curve25519, an ed25519 host key, chacha20-poly1305 and public-key auth.
+
+A connection was 96 s at first contact and is **12.18 s** now. Profiling put
+**97% of the handshake in public-key arithmetic and 1.7% in the network**, with
+the largest single row being host-key *verification* (46%) rather than the key
+exchange. The cause was representation, not algorithm: Dropbear's TweetNaCl
+holds a field element as 16 x 16-bit limbs in an `i64[16]`, so one field
+multiply became 256 software 64x64 multiplies on a part with a one-instruction
+32x32 to 64. Redone over `uint32_t[8]` with a dedicated squaring, an
+addition-chain inversion and a dedicated Edwards doubling, it is 6.93x faster,
+with no assembly at all.
+
+Switching to the algorithms `crypto68k` already accelerates was tried and is
+**1.8x worse** -- 149.62 s -- because Dropbear's P-256 goes through libtommath,
+which is 5x slower per scalar multiply than TweetNaCl's curve25519.
+
 The 657,797-byte download is byte-identical to the host's copy. Chunked
 decoding, range requests, redirects and the failure messages all behave.
 `https://` is refused legibly and is the next milestone, since curl reaches TLS
