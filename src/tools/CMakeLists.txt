@@ -129,6 +129,10 @@ aminetxduo_add_tool(tool_netsetup NetSetup SOURCES netsetup.c)
 # about whether the network is up would be worse than not having the third.
 aminetxduo_add_tool(tool_getnetstatus GetNetStatus NX SOURCES getnetstatus.c)
 
+# NetShutdown stops every interface at once.  Config-only: it reaches the live
+# interfaces through NetStackControl(), exactly as Offline does.
+aminetxduo_add_tool(tool_netshutdown NetShutdown SOURCES netshutdown.c)
+
 aminetxduo_add_tool(tool_online  Online   SOURCES onoff.c)
 aminetxduo_add_tool(tool_offline Offline  SOURCES onoff.c DEFINES TOOL_OFFLINE)
 
@@ -208,7 +212,7 @@ set_target_properties(tool_smoke PROPERTIES OUTPUT_NAME "ToolsSmoke")
 add_custom_target(tools ALL)
 add_dependencies(tools
     tool_addnetinterface tool_checknetconfig
-    tool_getnetstatus
+    tool_getnetstatus tool_netshutdown
     tool_netsetup tool_online tool_offline tool_host
     tool_fetch tool_nc tool_telnet tool_ftp tool_nettrace tool_traceroute
     tool_tftp tool_whois
