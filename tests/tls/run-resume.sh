@@ -110,6 +110,23 @@ cp "$STORE"  "$STAGE/devs/Internet/certificates"
 cp "$FETCH"  "$STAGE/fetch"
 cp "$ADDIF"  "$STAGE/AddNetInterface"
 
+# A SECOND trust store: valid, well-formed, and holding one root that signed
+# nothing on the public internet.  It is the acceptance test for the defect
+# where a session verified against one store was resumed by a caller
+# presenting another -- the correct answer is the same refusal a cold
+# handshake gives, and the only way to test that is to have a store that is
+# real enough to be opened and wrong enough to be useless.
+OTHER="$ROOT/build/resume-otherstore.pem"
+if [ ! -f "$OTHER" ]; then
+    openssl req -x509 -newkey rsa:2048 -keyout /dev/null -out "$OTHER" \
+        -days 3650 -nodes -subj "/CN=AmiNetXDuo Resumption Test Root" \
+        >/dev/null 2>&1 || {
+        echo "openssl could not generate the decoy root" >&2; exit 2; }
+fi
+python3 "$ROOT/tools/mkcertstore.py" --output "$STAGE/devs/Internet/otherstore" \
+    --min-roots 1 "$OTHER" >/dev/null
+echo "==> decoy trust store: $(wc -c < "$STAGE/devs/Internet/otherstore" | tr -d ' ') bytes, 1 root"
+
 CPUARG=()
 [ -z "$CPU" ]   || CPUARG+=(-c "$CPU")
 [ -z "$CLOCK" ] || CPUARG+=(-k "$CLOCK")

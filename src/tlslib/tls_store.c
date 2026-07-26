@@ -237,9 +237,10 @@ VOID tls_store_close(TLSStore *store)
         return;
 
     tls_free(store->ts_Index);
-    store->ts_Index = NULL;
-    store->ts_Count = 0;
-    store->ts_Path[0] = '\0';
+    store->ts_Index       = NULL;
+    store->ts_Count       = 0;
+    store->ts_Fingerprint = 0;
+    store->ts_Path[0]     = '\0';
 }
 
 /*
@@ -324,6 +325,35 @@ LONG tls_store_open(TLSStore *store, const char *path)
 
     store->ts_Count = count;
     tls_strncpy(store->ts_Path, path, sizeof(store->ts_Path));
+
+    /*
+     * The fingerprint of this root set, computed here because here is the one
+     * moment the whole index is in memory.  It is what
+     * src/tlslib/tls_resume.c keys a cached session on, so that a session
+     * verified against one trust store cannot be resumed by a caller
+     * presenting a different one -- a resumed handshake verifies nothing, so
+     * the trust decision has to travel with the session.
+     *
+     * Over the DECODED values rather than the raw bytes, so the fingerprint
+     * describes the root set and not the file encoding.
+     */
+    {
+        ULONG hash = TLS_FNV_OFFSET;
+
+        hash ^= count;
+        hash *= TLS_FNV_PRIME;
+
+        for (i = 0; i < count; i++)
+        {
+            hash ^= store->ts_Index[i].se_Key;    hash *= TLS_FNV_PRIME;
+            hash ^= store->ts_Index[i].se_Offset; hash *= TLS_FNV_PRIME;
+            hash ^= store->ts_Index[i].se_Length; hash *= TLS_FNV_PRIME;
+        }
+
+        /* Zero is "no store" everywhere in the resumption key, so it must not
+           be a real fingerprint. */
+        store->ts_Fingerprint = (hash == 0) ? TLS_FNV_PRIME : hash;
+    }
 
     return TLS_OK;
 }

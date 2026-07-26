@@ -228,12 +228,16 @@ static LONG bsd_errno(struct Library *base)
 #define R_HOST_ECDSA    "ecc256.badssl.com"
 
 #define R_SESSIONS      "DEVS:Internet/tlssessions"
+
+/* A valid trust store holding one unrelated self-signed root -- staged by
+   tests/tls/run-resume.sh, which builds it with tools/mkcertstore.py. */
+#define R_OTHERSTORE    "DEVS:Internet/otherstore"
 #define R_TAMPERED      "DH0:tampered.sessions"
 
 /* The session-cache record stride, from src/tlslib/tls_resume.c: 164 bytes of
    fixed fields plus TLS_RESUME_TICKET_MAX.  Spelled out rather than included
    because this program is deliberately linked against nothing of ours. */
-#define R_RECORD        420
+#define R_RECORD        424
 
 static UBYTE r_body[2048];
 
@@ -487,8 +491,8 @@ static BOOL r_tamper(const char *in, const char *out)
         UBYTE *rec = &buffer[16 + (i * R_RECORD)];
 
         rec[72]  = (UBYTE)(rec[72] ^ 0xFF);     /* session ID */
-        rec[164] = (UBYTE)(rec[164] ^ 0xFF);    /* ticket     */
-        rec[165] = (UBYTE)(rec[165] ^ 0xFF);
+        rec[168] = (UBYTE)(rec[168] ^ 0xFF);    /* ticket     */
+        rec[169] = (UBYTE)(rec[169] ^ 0xFF);
     }
 
     fh = Open((STRPTR)out, MODE_NEWFILE);
@@ -690,6 +694,81 @@ static int r_run(VOID)
                       "and the session it replaced it with resumes", 0);
 
         (VOID)DeleteFile((STRPTR)R_TAMPERED);
+    }
+
+    /* ---- a DIFFERENT trust store must not inherit the verification ------ */
+
+    /*
+     * THE ONE THAT MATTERS MOST, and the regression test for a real defect.
+     *
+     * A resumed handshake verifies nothing -- no certificate, no signature, no
+     * host name.  So a session cached after verification against one trust
+     * store must NOT be handed to a caller presenting a different store: the
+     * caller would get a connection the library says is verified, against
+     * roots it never offered and that signed nothing in the chain.
+     *
+     * The first version of the cache keyed on a BOOLEAN saying verification
+     * had happened rather than on what it happened against, and did exactly
+     * that.  DH0:otherstore is a valid, well-formed trust store holding one
+     * unrelated self-signed root; the correct answer is a REFUSAL, the same
+     * one a cold handshake gives, and anything else means resumption is
+     * laundering a trust decision.
+     */
+    r_log("");
+    r_log("--- a session must not be resumed under a different trust store");
+
+    {
+        struct TLSConnection *tls;
+        LONG                  sock;
+        LONG                  why = TLS_OK;
+
+        /* Make sure there IS a session cached for this host first, or the
+           test would pass by having nothing to wrongly resume. */
+        millis = r_handshake(sbase, tbase, R_HOST_RSA, address, NULL, FALSE,
+                             &resumed, &bytes, first, sizeof(first));
+        (VOID)r_check((BOOL)(millis != 0 && resumed),
+                      "a verified session is sitting in the cache", 0);
+
+        sock = r_connect(sbase, address);
+        if (r_check((BOOL)(sock >= 0), "connect with the wrong store", 0))
+        {
+            static struct TagItem wrong[4];
+
+            wrong[0].ti_Tag  = TLSA_HostName;   wrong[0].ti_Data = (ULONG)R_HOST_RSA;
+            wrong[1].ti_Tag  = TLSA_TrustStore; wrong[1].ti_Data = (ULONG)R_OTHERSTORE;
+            wrong[2].ti_Tag  = TLSA_Error;      wrong[2].ti_Data = (ULONG)&why;
+            wrong[3].ti_Tag  = TAG_END;         wrong[3].ti_Data = 0;
+
+            tls = TLSOpenA(tbase, (APTR)sbase, sock, wrong);
+
+            (VOID)r_check((BOOL)(tls == NULL),
+                          "a store that signed nothing in the chain is REFUSED",
+                          (ULONG)why);
+            (VOID)r_check((BOOL)(why == TLS_ERR_UNTRUSTED ||
+                                 why == TLS_ERR_HANDSHAKE),
+                          "and refused for an UNTRUSTED reason", (ULONG)why);
+
+            if (tls != NULL)
+            {
+                struct TLSInfo bad;
+
+                bad.ti_Size = (ULONG)sizeof(bad);
+                if (TLSInfo(tbase, tls, &bad) == 0)
+                    r_log("  LEAK: resumed=%ld verified=%ld",
+                          (LONG)bad.ti_Resumed, (LONG)bad.ti_Verified);
+                TLSClose(tbase, tls);
+            }
+
+            (VOID)bsd_close_socket(sbase, sock);
+        }
+
+        /* And the correct store still resumes -- a "fix" that simply stops
+           resuming is not a fix. */
+        millis = r_handshake(sbase, tbase, R_HOST_RSA, address, NULL, FALSE,
+                             &resumed, &bytes, first, sizeof(first));
+        (VOID)r_check((BOOL)(millis != 0 && resumed),
+                      "and the CORRECT store still resumes", 0);
+        (VOID)r_check(r_is_http(first), "and still transfers data", bytes);
     }
 
     /* ---- TLSA_NoResume -------------------------------------------------- */

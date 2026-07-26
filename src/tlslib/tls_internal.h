@@ -129,6 +129,8 @@ typedef struct TLSResumeEntry
     UBYTE   re_SidLength;
     UBYTE   re_Valid;
     UBYTE   re_Flags;                       /* TLSRE_*                       */
+    UBYTE   re_MaxChain;                    /* certificates this caller allowed */
+    ULONG   re_TrustKey;                    /* every trust parameter, folded */
     UBYTE   re_Sid[TLS_RESUME_SID_MAX];
     ULONG   re_Stamp;                       /* UNIX seconds, 0 = no clock    */
     ULONG   re_Lifetime;                    /* server's hint, seconds        */
@@ -139,13 +141,21 @@ typedef struct TLSResumeEntry
 } TLSResumeEntry;
 
 /*
- * In re_Flags.  A session established WITHOUT chain and host-name verification
- * must never be resumed by a connection that asked for verification -- that
- * would let a program which used TLSA_NoVerify to reach a printer poison the
- * cache for every program that comes after it.  The flag is part of the match,
- * so the two populations never mix.
+ * In re_Flags, and folded into re_TrustKey along with everything else that
+ * decides what a connection is worth.
+ *
+ * TLSRE_VERIFIED: a session established WITHOUT chain and host-name
+ * verification must never be resumed by a connection that asked for
+ * verification -- that would let a program which used TLSA_NoVerify to reach a
+ * printer poison the cache for every program after it.
+ *
+ * TLSRE_DATED: whether the certificate validity dates were actually checked.
+ * On a machine with no clock they are skipped (tls_time.c), and a session
+ * established that way must not be resumed once the clock has been set --
+ * otherwise setting your clock silently fails to start checking expiry.
  */
 #define TLSRE_VERIFIED      (1U << 0)
+#define TLSRE_DATED         (1U << 1)
 
 /* Per-connection resumption state, in tc_ResumeFlags. */
 #define TLSR_ENABLED        (1UL << 0)  /* the machinery is on for this one  */
@@ -188,6 +198,18 @@ typedef struct TLSStore
     char            ts_Path[TLS_STORE_PATH_MAX];
     TLSStoreEntry  *ts_Index;
     ULONG           ts_Count;
+
+    /*
+     * A fingerprint of WHICH ROOTS this store holds -- FNV-1a over the count
+     * and every index record.  Computed once when the index is read, which is
+     * the only moment the whole of it is in memory anyway, so it costs one
+     * pass over 1,428 bytes that were just read off the disk.
+     *
+     * It exists because a resumed handshake verifies NOTHING, so the cached
+     * session has to be keyed by the trust decision that established it and
+     * not merely by the fact that one happened.  See tls_resume.c.
+     */
+    ULONG           ts_Fingerprint;
 } TLSStore;
 
 /* ---------------------------------------------------------------- base --- */

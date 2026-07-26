@@ -136,6 +136,11 @@
 /* RFC 5077.  nx_secure has no name for it because it has no support for it. */
 #define TLS_EXT_SESSION_TICKET      0x0023
 
+/* The same FNV-1a constants tls_store.c uses; the trust key folds that file's
+   store fingerprint into a few more parameters. */
+#define TLS_R_FNV_OFFSET            2166136261UL
+#define TLS_R_FNV_PRIME             16777619UL
+
 /*
  * -DTLS_RESUME_TRACE puts a running commentary on the serial port: what went
  * into the ClientHello, every handshake message type seen, and what the
@@ -175,9 +180,17 @@ VOID tls_trace(const char *fmt, ...)
 #endif  /* TLS_RESUME_TRACE */
 
 /* The on-disk mirror.  See "THE DISK MIRROR" below. */
-#define TLS_SESSIONS_MAGIC          0x41545331UL    /* 'ATS1' */
+/*
+ * 'ATS2'.  The magic is the format version and it MOVED when the record gained
+ * the trust key -- an 'ATS1' file holds sessions keyed only on whether
+ * verification happened, which is the defect this format exists to fix, and
+ * reading one with the new layout would misread every field after the master
+ * secret.  An unrecognised magic is not an error: the file is ignored, every
+ * connection is a full handshake, and the next session written replaces it.
+ */
+#define TLS_SESSIONS_MAGIC          0x41545332UL    /* 'ATS2' */
 #define TLS_SESSIONS_HEADER         16UL
-#define TLS_SESSIONS_RECORD         420UL   /* 164 + TLS_RESUME_TICKET_MAX */
+#define TLS_SESSIONS_RECORD         424UL   /* 168 + TLS_RESUME_TICKET_MAX */
 
 /* Ceiling on how long a cached session is offered when the server gave no
    lifetime hint, and on how far a server's hint is believed.  Cloudflare says
@@ -345,13 +358,92 @@ static TLSResumeEntry *tls_resume_table(struct TLSLibBase *base)
 }
 
 /*
- * A connection's half of the verification match.  A session established with
- * TLSA_NoVerify and one established with the chain and host name checked are
- * two different populations and must not be confused for one another.
+ * THE TRUST KEY, AND WHY A BOOLEAN WAS NOT ENOUGH
+ *
+ *   A resumed handshake verifies NOTHING.  No certificate is sent, no
+ *   signature is checked, no host name is compared -- that is the entire
+ *   saving.  So every cached session carries a trust decision that was made
+ *   once and is then reused, and the cache key has to name that decision
+ *   completely or the library ends up claiming a verification it did not
+ *   perform.
+ *
+ *   The first version keyed on host, port and a BOOLEAN saying verification
+ *   had happened.  That is exactly the trap: it records THAT a chain was
+ *   checked, not WHAT it was checked against.  A session established against
+ *   one trust store was happily resumed by a caller presenting a different
+ *   one, or presenting a store that had signed nothing in the chain -- and the
+ *   caller got a 200 where it should have got a refusal.  Found by the curl
+ *   verification suite; it survived a reboot too, through the disk mirror.
+ *
+ *   So the key is now everything that changes what the connection is worth:
+ *
+ *     the trust store's IDENTITY, not its presence -- ts_Fingerprint, an
+ *     FNV-1a over the index's count and every (subject-name hash, offset,
+ *     length) record.  Zero when there is no store.
+ *
+ *     TLSA_NoVerify -- TLSRE_VERIFIED.  Two populations that must never mix.
+ *
+ *     whether the validity dates were checked -- TLSRE_DATED.  Skipped on a
+ *     machine with no clock (tls_time.c), and a session established that way
+ *     must not survive the clock being set, or setting your clock silently
+ *     fails to start checking expiry.
+ *
+ *     TLSA_MaxChain -- how deep a chain this caller was willing to accept.  A
+ *     resource bound rather than a policy, and including it is the cautious
+ *     reading: a session established under a limit of eight was verified over
+ *     a chain a caller limiting itself to two would have refused outright.
+ *
+ *   The host name is in the key already: it IS the primary key, alongside the
+ *   port, and in this library the host-name check and the chain check are the
+ *   same decision (TLSF_VERIFY covers both, and verification without a host
+ *   name is refused at TLSOpen with TLS_ERR_NOHOSTNAME).
+ *
+ *   The rest of the tags were enumerated and deliberately left out, because a
+ *   key that includes things which do not affect trust only costs resumptions:
+ *   TLSA_Error is an output pointer; TLSA_Timeout is liveness; TLSA_HostName
+ *   is the primary key; TLSA_RecordBuffer is a buffer size; TLSA_NoResume
+ *   turns the machinery off rather than parameterising it; TLSA_SessionFile
+ *   selects WHICH cache and is handled by the base reloading when it changes.
+ *
+ * WHAT THE FINGERPRINT DOES NOT PROTECT AGAINST, stated rather than implied
+ *
+ *   Two stores whose indexes agree record for record but whose certificate
+ *   DER differs -- someone rewriting a root in place, at the same offset and
+ *   length, under the same subject Name.  That is an attacker who can already
+ *   write the trust store, and an attacker who can write the trust store owns
+ *   verification outright: they would simply add a root of their own.  It is
+ *   not a new exposure, and hashing the 126 KB of DER on every connection to
+ *   close it would cost more than the resumption saves.
+ *
+ *   It also does not distinguish two different FILES holding the same roots.
+ *   That is correct rather than a gap: the same root set is the same trust,
+ *   and keying on the path would lose resumptions to an assign or a copy
+ *   without buying anything.
  */
 static UBYTE tls_resume_flags(const TLSConnection *conn)
 {
-    return (UBYTE)(((conn->tc_Flags & TLSF_VERIFY) != 0) ? TLSRE_VERIFIED : 0);
+    UBYTE flags = 0;
+
+    if ((conn->tc_Flags & TLSF_VERIFY) != 0)
+        flags = (UBYTE)(flags | TLSRE_VERIFIED);
+    if (conn->tc_ExpiryChecked)
+        flags = (UBYTE)(flags | TLSRE_DATED);
+
+    return flags;
+}
+
+static ULONG tls_resume_trust_key(const TLSConnection *conn)
+{
+    ULONG hash = TLS_R_FNV_OFFSET;
+    ULONG store = (conn->tc_Store != NULL) ? conn->tc_Store->ts_Fingerprint : 0;
+
+    hash ^= (ULONG)tls_resume_flags(conn);  hash *= TLS_R_FNV_PRIME;
+    hash ^= (ULONG)conn->tc_RemoteCount;    hash *= TLS_R_FNV_PRIME;
+    hash ^= store;                          hash *= TLS_R_FNV_PRIME;
+
+    /* Zero means "not set" in a decoded record, so it must not be a real
+       key -- a stale or truncated file would otherwise match a live one. */
+    return (hash == 0) ? TLS_R_FNV_PRIME : hash;
 }
 
 /* Has this entry aged out?  A machine with no clock cannot answer, and says
@@ -372,8 +464,18 @@ static BOOL tls_resume_expired(const TLSResumeEntry *e, ULONG now)
     return (BOOL)((age > limit) ? TRUE : FALSE);
 }
 
+/*
+ * The match.  Host and port name WHO, the trust key names UNDER WHAT -- and
+ * both have to agree, because a resumed handshake re-checks neither.
+ *
+ * re_Flags is compared as well as re_TrustKey even though the key already
+ * folds it in.  A 32-bit hash over eight entries will not collide in practice,
+ * but the flags are sitting right there and "err toward refusing to resume" is
+ * the rule: a missed resumption costs seconds, a wrong one makes the library's
+ * verification claim false.
+ */
 static TLSResumeEntry *tls_resume_find(TLSResumeEntry *table, const char *host,
-                                       UWORD port, UBYTE flags)
+                                       UWORD port, UBYTE flags, ULONG trust_key)
 {
     ULONG i;
 
@@ -383,7 +485,9 @@ static TLSResumeEntry *tls_resume_find(TLSResumeEntry *table, const char *host,
             continue;
         if (table[i].re_Port != port)
             continue;
-        if (((table[i].re_Flags ^ flags) & TLSRE_VERIFIED) != 0)
+        if (table[i].re_TrustKey != trust_key)
+            continue;
+        if (table[i].re_Flags != flags)
             continue;
         if (tls_r_host_equal(table[i].re_Host, host))
             return &table[i];
@@ -394,12 +498,12 @@ static TLSResumeEntry *tls_resume_find(TLSResumeEntry *table, const char *host,
 
 /* A free slot, the matching slot, or the least recently used one. */
 static TLSResumeEntry *tls_resume_slot(TLSResumeEntry *table, const char *host,
-                                       UWORD port, UBYTE flags)
+                                       UWORD port, UBYTE flags, ULONG trust_key)
 {
     TLSResumeEntry *victim;
     ULONG           i;
 
-    victim = tls_resume_find(table, host, port, flags);
+    victim = tls_resume_find(table, host, port, flags, trust_key);
     if (victim != NULL)
         return victim;
 
@@ -469,13 +573,15 @@ static VOID tls_resume_encode(const TLSResumeEntry *e, UBYTE *rec)
     tls_r_copy(&rec[72], e->re_Sid, TLS_RESUME_SID_MAX);
     tls_r_put32(&rec[104], e->re_Stamp);
     tls_r_put32(&rec[108], e->re_Lifetime);
-    tls_r_copy(&rec[112], e->re_Master, TLS_MASTER_SECRET_SIZE);
-    tls_r_put16(&rec[160], e->re_TicketLength);
-    tls_r_copy(&rec[164], e->re_Ticket, TLS_RESUME_TICKET_MAX);
+    tls_r_put32(&rec[112], e->re_TrustKey);
+    rec[116] = e->re_MaxChain;
+    tls_r_put16(&rec[118], e->re_TicketLength);
+    tls_r_copy(&rec[120], e->re_Master, TLS_MASTER_SECRET_SIZE);
+    tls_r_copy(&rec[168], e->re_Ticket, TLS_RESUME_TICKET_MAX);
 
     /* The record layout and the structure must not drift apart; the file is
        read back by a different build of this same library. */
-    _Static_assert((164UL + TLS_RESUME_TICKET_MAX) == TLS_SESSIONS_RECORD,
+    _Static_assert((168UL + TLS_RESUME_TICKET_MAX) == TLS_SESSIONS_RECORD,
                    "TLS_SESSIONS_RECORD must match the ticket size");
 }
 
@@ -495,9 +601,11 @@ static BOOL tls_resume_decode(TLSResumeEntry *e, const UBYTE *rec)
     tls_r_copy(e->re_Sid, &rec[72], TLS_RESUME_SID_MAX);
     e->re_Stamp        = tls_r_be32(&rec[104]);
     e->re_Lifetime     = tls_r_be32(&rec[108]);
-    tls_r_copy(e->re_Master, &rec[112], TLS_MASTER_SECRET_SIZE);
-    e->re_TicketLength = tls_r_be16(&rec[160]);
-    tls_r_copy(e->re_Ticket, &rec[164], TLS_RESUME_TICKET_MAX);
+    e->re_TrustKey     = tls_r_be32(&rec[112]);
+    e->re_MaxChain     = rec[116];
+    e->re_TicketLength = tls_r_be16(&rec[118]);
+    tls_r_copy(e->re_Master, &rec[120], TLS_MASTER_SECRET_SIZE);
+    tls_r_copy(e->re_Ticket, &rec[168], TLS_RESUME_TICKET_MAX);
 
     /* Anything the file claims that the structure cannot hold is a corrupt
        file, not a session.  Refuse the record rather than clamping it. */
@@ -507,6 +615,15 @@ static BOOL tls_resume_decode(TLSResumeEntry *e, const UBYTE *rec)
     {
         return FALSE;
     }
+
+    /*
+     * A record with no trust key cannot be matched against anything -- the
+     * live key is never zero -- so refusing it here rather than letting it sit
+     * unmatchable is only tidiness.  It is also the shape a truncated or
+     * zero-filled file takes, and those should not look like sessions.
+     */
+    if (e->re_TrustKey == 0)
+        return FALSE;
 
     if (e->re_SidLength == 0 && e->re_TicketLength == 0)
         return FALSE;
@@ -711,7 +828,8 @@ VOID tls_resume_prepare(TLSConnection *conn)
     }
 
     entry = tls_resume_find(table, (const char *)conn->tc_HostName,
-                            conn->tc_Port, tls_resume_flags(conn));
+                            conn->tc_Port, tls_resume_flags(conn),
+                            tls_resume_trust_key(conn));
 
     if (entry != NULL && tls_resume_expired(entry, now))
     {
@@ -793,7 +911,8 @@ VOID tls_resume_evict(TLSConnection *conn)
     {
         entry = tls_resume_find(base->tb_Sessions,
                                 (const char *)conn->tc_HostName, conn->tc_Port,
-                                tls_resume_flags(conn));
+                                tls_resume_flags(conn),
+                                tls_resume_trust_key(conn));
         if (entry != NULL)
         {
             tls_bzero(entry, sizeof(TLSResumeEntry));
@@ -840,7 +959,8 @@ VOID tls_resume_record(TLSConnection *conn)
          * timestamp, so a session that keeps being used keeps being offered.
          */
         entry = tls_resume_find(table, (const char *)conn->tc_HostName,
-                                conn->tc_Port, tls_resume_flags(conn));
+                                conn->tc_Port, tls_resume_flags(conn),
+                                tls_resume_trust_key(conn));
         if (entry != NULL)
         {
             entry->re_Stamp  = tls_time_now();
@@ -871,7 +991,8 @@ VOID tls_resume_record(TLSConnection *conn)
         if (have_ticket || have_sid)
         {
             entry = tls_resume_slot(table, (const char *)conn->tc_HostName,
-                                    conn->tc_Port, tls_resume_flags(conn));
+                                    conn->tc_Port, tls_resume_flags(conn),
+                                    tls_resume_trust_key(conn));
 
             tls_bzero(entry, sizeof(TLSResumeEntry));
 
@@ -884,6 +1005,8 @@ VOID tls_resume_record(TLSConnection *conn)
             entry->re_Serial      = ++base->tb_SessionSerial;
             entry->re_Valid       = 1;
             entry->re_Flags       = tls_resume_flags(conn);
+            entry->re_MaxChain    = (UBYTE)conn->tc_RemoteCount;
+            entry->re_TrustKey    = tls_resume_trust_key(conn);
 
             tls_r_copy(entry->re_Master,
                        s->nx_secure_tls_key_material.nx_secure_tls_master_secret,
