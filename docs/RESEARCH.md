@@ -3284,3 +3284,62 @@ Larger than the backend; larger than the chain cache; worth more than both.
    order, because the first is worth 20× the second.
 4. A non-blocking handshake in `tls.library`, if curl's multi interface ever
    matters here.
+
+### 11.7 What wget will need that curl did not
+
+Read from wget git (`bootstrap.conf`, `configure.ac`, `src/ssl.h`, `msdos/`),
+not built. Four differences that matter, in the order they will bite:
+
+1. **wget has no AmigaOS awareness at all.** `grep -ril amiga src/ lib/
+   configure.ac` finds nothing. curl's `lib/curl_setup.h` knows that a socket is
+   not a file descriptor on this platform, that `close()` is `CloseSocket()`,
+   that `fcntl()` must not be used on a socket and that `select()` is
+   `WaitSelect()`; **wget knows none of it**, and gnulib's `socket`, `connect`,
+   `recv`, `send`, `select` and `close` modules assume POSIX descriptors or
+   Winsock. Teaching wget the bsdsocket ABI is the port, and it is a larger job
+   than everything in §11.2 and §11.3 put together — those were toolchain gaps,
+   this is the client's own model of the world.
+
+2. **gnulib, and therefore autotools.** wget's `bootstrap.conf` lists ~110
+   modules, including `posix_spawn`, `spawn-pipe`, `pipe-posix`, `sigprocmask`,
+   `sigpipe`, `flock`, `futimens`, `symlink`, `group-member`, `getpass-gnu`,
+   `iconv`, `regex` and `unicase/u8-tolower`. A git checkout needs `./bootstrap`,
+   which needs autoconf, automake, libtool, gettext and a gnulib checkout on the
+   build host — exactly what `clients/curl/build.sh` avoids by using CMake. **Use
+   a pinned release tarball**, which ships a generated `configure` and the gnulib
+   sources in `lib/`. Note also that this toolchain has no `pipe()`, no `fork()`
+   and no `posix_spawn()`; several of those modules have gnulib replacements and
+   several do not.
+
+   The precedent to copy is in the tree already: `msdos/config.h` +
+   `msdos/Makefile.DJ` is a **hand-written config and makefile** for DJGPP that
+   skips `configure` entirely, and `vms/` is the same idea again. An
+   `amiga/config.h` in that style is very likely the right shape, and it means
+   `clients/` grows a second build style rather than reusing curl's.
+
+3. **No non-blocking connect, and no timeout that works.**
+   `connect_with_timeout()` bounds a *blocking* `connect()` with
+   `run_with_timeout()`, which is `sigsetjmp` + `alarm` — neither of which does
+   anything here. A blocking `connect()` to a dead port therefore has to fail
+   promptly by itself or wget hangs with nothing of its own to save it. Our
+   `connect()`'s own timeout becomes load-bearing in a way it is not for curl.
+
+4. **TLS is *easier* than curl's, which is the one pleasant surprise.** wget has
+   no plugin backend — `--with-ssl={gnutls,openssl,no}` and nothing else — but
+   the interface those two implement is four functions (`src/ssl.h`):
+
+   ```c
+   bool ssl_init (void);
+   void ssl_cleanup (void);
+   bool ssl_connect_wget (int fd, const char *host, int *continue_session);
+   bool ssl_check_certificate (int fd, const char *host);
+   ```
+
+   plus one `fd_register_transport()` call to route reads and writes. Against
+   `tls.library` that is on the order of 150 lines, against 600–900 for curl's
+   20-slot `Curl_ssl` vtable — and `ssl_check_certificate()` is a no-op for us,
+   because `TLSOpen()` has already verified the chain and the host name and will
+   not return a connection it could not vouch for.
+
+So the order stands: curl first because it already knows this platform, wget
+second because it does not.
