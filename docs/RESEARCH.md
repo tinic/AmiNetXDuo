@@ -12663,3 +12663,128 @@ Two notes for whoever runs it next, both learned the expensive way:
   waits `AMINETXDUO_LOCK_WAIT` (40 minutes) and then *proceeds anyway*,
   silently contended. The runs here were shortened and given `-k 56` rather
   than left to block somebody else's measurement.
+
+## 38. The Amiga answers an SSH connection (2026-07-26)
+
+Dropbear's client has run here since §35. The server had never been built.
+
+### It did not link, and the nine missing symbols were the interesting part
+
+`clients/dropbear/build.sh -P "dbclient dropbear"` failed on `clearenv` and
+`nanosleep` at compile time and then on nine symbols at link time:
+`setuid`, `setgid`, `initgroups`, `getgrnam`, `chown`, `chmod`, `waitpid`,
+`sigaction`, `environ_ptr`.
+
+Not one of them was a build flag. They are the calls a server makes that a
+single-user machine with no processes has no answer for, and each one has a
+true answer rather than a convenient one:
+
+| call | answer | why that is the truth and not a shortcut |
+|---|---|---|
+| `setuid`/`setgid`/`initgroups` | 0 for id 0, `EPERM` otherwise | `getuid()` is 0 and `getpwnam()` reports uid 0, so `svr_switch_user()` is switching from 0 to 0 — a no-op, which POSIX also reports as success. The comparison is there so a future nonzero uid gets refused rather than appearing to work. |
+| `getgrnam` | `NULL` | Unlike `getpwnam`, which has one honest answer, there is no group that could be meant. |
+| `chmod` | `SetProtection()` | Real. The RWED bits are active low, so the conversion is inverted. |
+| `chown` | `ENOSYS` | Telling a caller it gave a file away would be worse than telling it we cannot. |
+| `waitpid` | `ECHILD` | Not a stub: `fork()` always fails, so there has never been a child. |
+| `sigaction` | 0, installs nothing | Failing is worse. `commonsetup()` treats an error as fatal, so `-1` refuses to start the server over handlers that cannot fire — `SIGCHLD` needs a child, and bsdsocket raises no `SIGPIPE`. |
+| `environ_ptr` | defined, empty | `<unistd.h>` makes `environ` a macro for `(*environ_ptr)` and nothing in the toolchain defines it, so *touching* environ was a link failure. |
+
+`clearenv` was the odd one. newlib really does have one, in
+`lib_a-environ.o`; `<stdlib.h>` simply never declares it. Writing our own is a
+multiple definition, and writing it in terms of `environ` does not work either
+for the reason in the table. It needed a declaration, not an implementation.
+
+`nanosleep` is `Delay()`, rounded up to a whole 20 ms tick. The server sleeps
+250–350 ms after a failed password so that a bad user and a bad password cost
+the same; one tick of granularity is coarser than that and still far finer
+than the scheduler and round-trip variance the delay is hiding behind.
+
+### Linking was not the same as working
+
+`svr-main.c` forks per connection and treats a failed fork as *log a warning
+and drop the connection*. So the honest `ENOSYS` above would have produced a
+server that accepted every connection and instantly hung up — the exact
+failure mode this project keeps finding, a well-formed thing that never runs.
+
+`DEBUG_NOFORK` sets `fork_ret` to 0 instead of calling `fork()`, which takes
+the child branch in the same process: it closes the listening sockets and runs
+the session inline. One connection per invocation, then exit. That is the only
+shape a machine without fork can offer, and it is a real server rather than a
+broken one. Upstream's `DEBUG_` prefix is a misnomer here.
+
+### Testing it needs loopback, and that is not a compromise
+
+FS-UAE's SLIRP is outbound-only. Nothing on the host can open a connection
+*into* the guest, so a server on the Amiga is unreachable from here by
+construction. Running both ends inside the guest is not a way around that
+limitation — it is the only arrangement that exercises `accept()` under
+emulation at all, and it puts a real key exchange over the loopback interface
+as a bonus.
+
+`ClientRun` grew two directives to express it, because a list of synchronous
+`SystemTagList()` calls cannot have one command still running while the next
+starts:
+
+    &<command>   start it, do not wait; output to DH0:server.txt
+    wait <n>     Delay(n seconds)
+
+### Two defects between accept and a session
+
+**`accept()` did not exist.** `amiga_dropbear.c` wraps every bsdsocket call
+into the merged descriptor space, and `accept` was the one call dbclient never
+makes. It refuses an out-of-window descriptor the same way `socket()` does,
+which matters more on a listener — that is where high descriptors come from.
+
+**`pipe()` handed out one pair.** Enough for dbclient, not for a server:
+`svr-main.c` makes a childpipe per connection and `common-session.c` then makes
+`ses.signal_pipe`, so the second call failed and the session died with
+`Early exit: Signal pipe failed` — *after* a successful accept, which made it
+read as an accept problem. Eight pairs now, released when both ends close,
+since freeing on the first would hand a live end to the next caller.
+
+### `SYS:/.ssh/authorized_keys` is not a path
+
+Every ported program builds a path by writing `"%s/.ssh/..."` after the home
+directory `getpwnam()` gave it. On AmigaOS a home is a device or assign name
+ending in a colon, so that produces `SYS:/.ssh/authorized_keys` — and a colon
+followed by a slash means the *parent of the root*, which does not exist. The
+`Lock()` fails and the program reports the file as missing rather than as
+misspelled.
+
+`amiga_fix_path()` collapses `":/"` to `":"` once, where paths enter: `stat`,
+`lstat`, `mkdir`, `unlink`, `chmod` and Dropbear's `open` wrapper. The sequence
+has no other valid meaning in an AmigaOS path, so there is nothing to lose.
+
+This is general, not a Dropbear fix. Any ported program that joins `$HOME` to a
+subpath hit it.
+
+### The result
+
+    [2250456] Not backgrounding
+    [2250456] Child connection from 127.0.0.1:59349
+    [2250456] Pubkey auth succeeded for 'amiga' with ssh-ed25519 key
+              SHA256:6b5CjYkFkDq2vMunRKHPApC/W1sNI1S7LJWDfmB4xsU from 127.0.0.1:59349
+
+Our `dropbear` accepting from our `dbclient`, through our `bsdsocket.library`,
+on one 14 MHz 68020. 22.02 s for the exchange, which is *both* halves of the
+cryptography on one CPU — §35 measured the client half alone at about 12 s, and
+this is consistent with that.
+
+The server also found `authorized_keys` through the home directory, which means
+it resolved a path that does not exist as written. That is `amiga_fix_path()`
+being exercised rather than asserted.
+
+### What still does not happen
+
+The shell. Auth succeeds and the session opens; `execv()` fails, so the command
+never runs and the client gets a clean close with nothing on stdout. That is
+what `TCP:` (§34) was written for, and it is the next piece.
+
+Also not done: host-key entropy on a machine with no clock and no user input,
+which is a real question for a server and not for a client.
+
+### What shipped
+
+v0.4.0 carries `Clients/curl` and `Clients/ssh` and **not** the server. It
+links, it accepts, it authenticates, and it cannot yet give anybody a shell —
+which is not a thing to put in an archive labelled as an SSH server.
