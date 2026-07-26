@@ -1,188 +1,91 @@
 /*
  * AmiNetXDuo tools -- talking to the live NetX Duo instance.
  *
+ * Every function here is a NetStackQuery() call and a copy out of the answer.
+ * There is no ThreadX in this file any more, and that is the whole point: the
+ * ThreadX a command could adopt into was never the one the stack is running
+ * on. See tools_nx.h for what that cost, and include/aminetxduo/netstatus.h
+ * for the interface these go through.
+ *
+ * The library is opened and closed around each of the three calls rather than
+ * held across them. Opening it is a child-base clone and costs nothing worth
+ * saving, and holding a base open across a printing loop is how a status
+ * command ends up keeping the network alive after it exits.
+ *
  * SPDX-License-Identifier: MIT
  */
 
 #include "tools_nx.h"
-#include "tx_amiga.h"
 
-/* ThreadX priority the tools adopt at: below the IP thread, above idle. */
-#define TOOL_TX_PRIORITY    16
-
-static TX_THREAD    tool_thread;
-static BOOL         tool_adopted;
-
-LONG tool_stack_enter(VOID)
+/*
+ * Static rather than automatic: a Shell command starts with a 4 KB stack and
+ * the socket table alone is 512 bytes of answer. Each command runs one of
+ * these at a time.
+ */
+static union
 {
-    UINT status;
+    struct { NetStatusHeader hdr; NetStatusSystem    e; }      system;
+    struct { NetStatusHeader hdr; NetStatusInterface e[TOOL_MAX_IF]; } iface;
+    struct { NetStatusHeader hdr; NetStatusStats     e; }      stats;
+    struct { NetStatusHeader hdr; NetStatusArp       e[TOOL_MAX_ARP]; } arp;
+    struct { NetStatusHeader hdr; NetStatusRoute     e[TOOL_MAX_ROUTE]; } route;
+    struct { NetStatusHeader hdr; NetStatusSocket    e[TOOL_MAX_SOCK]; } sock;
+} nx_answer;
 
-    if (tool_adopted)
-        return 0;
+/*
+ * The failure message, once. Every caller here fails the same way and for the
+ * same reason, and the message has to distinguish "nothing is running" from
+ * "something is running that is not us" -- tool_netstatus_open() already
+ * does, so this only covers a library that opened and then would not answer.
+ */
+static BOOL nx_quiet;
 
-    if (tx_amiga_kernel_running() != TX_TRUE)
-    {
-        tool_error("the network kernel is not running");
-        return -1;
-    }
-
-    status = tx_amiga_adopt_thread(&tool_thread, (CHAR *)tool_name,
-                                   TOOL_TX_PRIORITY);
-    if (status != TX_SUCCESS)
-    {
-        tool_error("could not join the network kernel (ThreadX error %ld)",
-                   (LONG)status);
-        return -1;
-    }
-
-    tool_adopted = TRUE;
-    return 0;
+VOID tool_nx_quiet(BOOL quiet)
+{
+    nx_quiet = quiet;
 }
 
-VOID tool_stack_leave(VOID)
+static VOID nx_query_failed(struct Library *base)
 {
-    if (!tool_adopted)
+    if (nx_quiet)
         return;
 
-    tx_amiga_orphan_thread(&tool_thread);
-    tool_adopted = FALSE;
+    tool_error("the network is up, but it would not report on itself");
+    tool_explain_no_netstatus(base);
 }
 
-/* ------------------------------------------------------------- snapshots */
-
-static VOID tool_mac_from_words(ULONG msw, ULONG lsw, UBYTE *mac)
+static struct Library *nx_open(VOID)
 {
-    mac[0] = (UBYTE)((msw >> 8) & 0xff);
-    mac[1] = (UBYTE)(msw & 0xff);
-    mac[2] = (UBYTE)((lsw >> 24) & 0xff);
-    mac[3] = (UBYTE)((lsw >> 16) & 0xff);
-    mac[4] = (UBYTE)((lsw >> 8) & 0xff);
-    mac[5] = (UBYTE)(lsw & 0xff);
+    return tool_netstatus_open(nx_quiet);
 }
 
-static VOID tool_snapshot_interfaces(NX_IP *ip, ToolSnapshot *out)
+/* ------------------------------------------------------------ snapshots -- */
+
+LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
 {
-    UINT i;
+    struct Library *base;
+    LONG            n;
+    LONG            i;
+    LONG            j;
 
-    for (i = 0; i < (UINT)TOOL_MAX_IF; i++)
-    {
-        NX_INTERFACE *nxif = &ip->nx_ip_interface[i];
-        ToolIfInfo   *info = &out->iface[i];
-        AmiSana2If   *sana;
-
-        info->nx_index = (UWORD)i;
-        info->attached = (nxif->nx_interface_valid != 0) ? TRUE : FALSE;
-        if (!info->attached)
-            continue;
-
-        info->link_up = (nxif->nx_interface_link_up != 0) ? TRUE : FALSE;
-        info->address = nxif->nx_interface_ip_address;
-        info->netmask = nxif->nx_interface_ip_network_mask;
-        info->mtu     = nxif->nx_interface_ip_mtu_size;
-        info->nx_name = (const char *)nxif->nx_interface_name;
-
-        tool_mac_from_words(nxif->nx_interface_physical_address_msw,
-                            nxif->nx_interface_physical_address_lsw,
-                            info->mac);
-
-        /*
-         * ami_sana2_attach() parks the AmiSana2If here (aminetxduo/sana2.h),
-         * which is how the tools reach the driver's own counters without a
-         * separate registry.
-         */
-        sana = (AmiSana2If *)nxif->nx_interface_additional_link_info;
-        if (sana != NULL)
-        {
-            info->have_sana2   = TRUE;
-            info->sana2_online = ami_sana2_is_online(sana);
-            info->bps          = ami_sana2_get_bps(sana);
-            ami_sana2_get_stats(sana, &info->stats);
-        }
-    }
-
-    out->iface_count = (UWORD)TOOL_MAX_IF;
-}
-
-static VOID tool_snapshot_sockets(NX_IP *ip, ToolSnapshot *out)
-{
-    ULONG n;
-
-#ifndef NX_DISABLE_TCP_INFO
-    /* nothing extra needed; the counters live on the socket itself */
-#endif
-
-    {
-        NX_TCP_SOCKET *sock = ip->nx_ip_tcp_created_sockets_ptr;
-
-        for (n = 0; n < ip->nx_ip_tcp_created_sockets_count && sock != NULL; n++)
-        {
-            ToolSockInfo *si;
-
-            if (out->sock_count >= (UWORD)TOOL_MAX_SOCK)
-            {
-                out->sock_truncated = TRUE;
-                break;
-            }
-
-            si = &out->sock[out->sock_count++];
-            si->is_tcp       = TRUE;
-            si->local_port   = (UWORD)sock->nx_tcp_socket_port;
-            si->peer_port    = (UWORD)sock->nx_tcp_socket_connect_port;
-            si->peer_address = sock->nx_tcp_socket_connect_ip.nxd_ip_address.v4;
-            si->state        = sock->nx_tcp_socket_state;
-
-            sock = sock->nx_tcp_socket_created_next;
-        }
-    }
-
-    {
-        NX_UDP_SOCKET *sock = ip->nx_ip_udp_created_sockets_ptr;
-
-        for (n = 0; n < ip->nx_ip_udp_created_sockets_count && sock != NULL; n++)
-        {
-            ToolSockInfo *si;
-
-            if (out->sock_count >= (UWORD)TOOL_MAX_SOCK)
-            {
-                out->sock_truncated = TRUE;
-                break;
-            }
-
-            si = &out->sock[out->sock_count++];
-            si->is_tcp     = FALSE;
-            si->local_port = (UWORD)sock->nx_udp_socket_port;
-            si->queued     = sock->nx_udp_socket_receive_count;
-
-            sock = sock->nx_udp_socket_created_next;
-        }
-    }
-}
-
-LONG tool_snapshot(NX_IP *ip, ToolSnapshot *out, BOOL want_sockets)
-{
-    ULONG gateway = 0;
-    UINT  status;
-    UWORD i;
-    UWORD j;
-
-    if (ip == NULL || out == NULL)
+    if (out == NULL)
         return -1;
 
-    for (i = 0; i < (UWORD)TOOL_MAX_IF; i++)
+    for (i = 0; i < (LONG)TOOL_MAX_IF; i++)
     {
         ToolIfInfo *info = &out->iface[i];
 
-        info->nx_index     = i;
+        info->nx_index     = (UWORD)i;
         info->attached     = FALSE;
         info->link_up      = FALSE;
         info->address      = 0;
         info->netmask      = 0;
         info->mtu          = 0;
-        info->nx_name      = NULL;
+        info->nx_name[0]   = '\0';
         info->have_sana2   = FALSE;
         info->sana2_online = FALSE;
         info->bps          = 0;
-        for (j = 0; j < (UWORD)AMI_ETH_ADDR_SIZE; j++)
+        for (j = 0; j < (LONG)AMI_ETH_ADDR_SIZE; j++)
             info->mac[j] = 0;
     }
     out->iface_count    = 0;
@@ -191,26 +94,307 @@ LONG tool_snapshot(NX_IP *ip, ToolSnapshot *out, BOOL want_sockets)
     out->gateway        = 0;
     out->have_gateway   = FALSE;
 
-    if (tool_stack_enter() != 0)
+    base = nx_open();
+    if (base == NULL)
+        return -1;
+
+    n = tool_netstatus_query(base, NETSTATUS_INTERFACES, &nx_answer,
+                             sizeof(nx_answer.iface),
+                             sizeof(NetStatusInterface));
+    if (n < 0)
+    {
+        nx_query_failed(base);
+        tool_netstatus_close(base);
+        return -1;
+    }
+
+    for (i = 0; i < n && i < (LONG)TOOL_MAX_IF; i++)
+    {
+        const NetStatusInterface *src  = &nx_answer.iface.e[i];
+        ToolIfInfo               *info = &out->iface[i];
+
+        info->nx_index = src->nsi_Index;
+        info->attached = (src->nsi_Flags & NETSTATUS_IF_ATTACHED) ? TRUE : FALSE;
+        info->link_up  = (src->nsi_Flags & NETSTATUS_IF_LINKUP) ? TRUE : FALSE;
+        info->address  = src->nsi_Address;
+        info->netmask  = src->nsi_NetMask;
+        info->mtu      = src->nsi_MTU;
+
+        for (j = 0; j < (LONG)AMI_ETH_ADDR_SIZE; j++)
+            info->mac[j] = src->nsi_HwAddress[j];
+
+        tool_copy_string(info->nx_name, sizeof(info->nx_name), src->nsi_Name);
+
+        if (src->nsi_Flags & NETSTATUS_IF_SANA2)
+        {
+            info->have_sana2   = TRUE;
+            info->sana2_online = (src->nsi_Flags & NETSTATUS_IF_ONLINE)
+                                     ? TRUE : FALSE;
+            info->bps          = src->nsi_Speed;
+
+            info->stats.packets_received = src->nsi_PacketsIn;
+            info->stats.packets_sent     = src->nsi_PacketsOut;
+            info->stats.bad_data         = src->nsi_BadData;
+            info->stats.overruns         = src->nsi_Overruns;
+            info->stats.unknown_types    = src->nsi_UnknownTypes;
+            info->stats.reconfigurations = src->nsi_Reconfigurations;
+            info->stats.tx_errors        = src->nsi_TxErrors;
+            info->stats.rx_errors        = src->nsi_RxErrors;
+            info->stats.alloc_failures   = src->nsi_AllocFailures;
+        }
+    }
+    out->iface_count = (UWORD)n;
+
+    if (tool_netstatus_query(base, NETSTATUS_SYSTEM, &nx_answer,
+                             sizeof(nx_answer.system),
+                             sizeof(NetStatusSystem)) > 0)
+    {
+        if (nx_answer.system.e.nss_Flags & NETSTATUS_SYS_GATEWAY)
+        {
+            out->gateway      = nx_answer.system.e.nss_Gateway;
+            out->have_gateway = TRUE;
+        }
+    }
+
+    if (want_sockets)
+    {
+        n = tool_netstatus_query(base, NETSTATUS_SOCKETS, &nx_answer,
+                                 sizeof(nx_answer.sock),
+                                 sizeof(NetStatusSocket));
+        if (n > 0)
+        {
+            if (nx_answer.sock.hdr.nsh_Available > nx_answer.sock.hdr.nsh_Count)
+                out->sock_truncated = TRUE;
+
+            for (i = 0; i < n && i < (LONG)TOOL_MAX_SOCK; i++)
+            {
+                const NetStatusSocket *src = &nx_answer.sock.e[i];
+                ToolSockInfo          *si  = &out->sock[i];
+
+                si->is_tcp = (src->nso_Flags & NETSTATUS_SOCK_TCP)
+                                 ? TRUE : FALSE;
+                si->local_port   = src->nso_LocalPort;
+                si->peer_port    = src->nso_PeerPort;
+                si->peer_address = src->nso_PeerAddress;
+                si->state        = (UINT)src->nso_State;
+                si->queued       = src->nso_Queued;
+            }
+
+            out->sock_count = (UWORD)n;
+        }
+    }
+
+    tool_netstatus_close(base);
+
+    return 0;
+}
+
+/* ---------------------------------------------------- protocol counters -- */
+
+LONG tool_stats(ToolStats *out)
+{
+    struct Library        *base;
+    const NetStatusStats  *s;
+    LONG                   n;
+    LONG                   i;
+    LONG                   j;
+
+    if (out == NULL)
         return -1;
 
     /*
-     * Adopted from here to tool_stack_leave(): no dos.library, no Wait(),
-     * nothing but memory reads and NetX Duo calls.
+     * Zeroed field by field rather than with a memset: these tools link no
+     * libc, and a struct this size is worth being explicit about anyway.
      */
-    tool_snapshot_interfaces(ip, out);
+    out->have_ip = out->have_icmp = out->have_tcp = FALSE;
+    out->have_udp = out->have_arp = out->have_pool = FALSE;
+    out->arp_count     = 0;
+    out->arp_truncated = FALSE;
 
-    if (want_sockets)
-        tool_snapshot_sockets(ip, out);
-
-    status = nx_ip_gateway_address_get(ip, &gateway);
-    if (status == NX_SUCCESS && gateway != 0)
+    for (i = 0; i < (LONG)TOOL_MAX_ARP; i++)
     {
-        out->gateway      = gateway;
-        out->have_gateway = TRUE;
+        out->arp[i].address   = 0;
+        out->arp[i].is_static = FALSE;
+        out->arp[i].resolved  = FALSE;
+        out->arp[i].retries   = 0;
+        out->arp[i].nx_index  = 0;
+        for (j = 0; j < (LONG)AMI_ETH_ADDR_SIZE; j++)
+            out->arp[i].mac[j] = 0;
     }
 
-    tool_stack_leave();
+    base = nx_open();
+    if (base == NULL)
+        return -1;
+
+    if (tool_netstatus_query(base, NETSTATUS_STATS, &nx_answer,
+                             sizeof(nx_answer.stats),
+                             sizeof(NetStatusStats)) <= 0)
+    {
+        nx_query_failed(base);
+        tool_netstatus_close(base);
+        return -1;
+    }
+
+    s = &nx_answer.stats.e;
+
+    out->have_ip = (s->nsx_Have & NETSTATUS_HAVE_IP) ? TRUE : FALSE;
+    out->ip_packets_sent       = s->nsx_IpPacketsSent;
+    out->ip_bytes_sent         = s->nsx_IpBytesSent;
+    out->ip_packets_received   = s->nsx_IpPacketsReceived;
+    out->ip_bytes_received     = s->nsx_IpBytesReceived;
+    out->ip_invalid            = s->nsx_IpInvalid;
+    out->ip_receive_dropped    = s->nsx_IpReceiveDropped;
+    out->ip_checksum_errors    = s->nsx_IpChecksumErrors;
+    out->ip_send_dropped       = s->nsx_IpSendDropped;
+    out->ip_fragments_sent     = s->nsx_IpFragmentsSent;
+    out->ip_fragments_received = s->nsx_IpFragmentsReceived;
+
+    out->have_icmp = (s->nsx_Have & NETSTATUS_HAVE_ICMP) ? TRUE : FALSE;
+    out->icmp_pings_sent        = s->nsx_IcmpPingsSent;
+    out->icmp_ping_timeouts     = s->nsx_IcmpPingTimeouts;
+    out->icmp_threads_suspended = s->nsx_IcmpThreadsSuspended;
+    out->icmp_responses         = s->nsx_IcmpResponses;
+    out->icmp_checksum_errors   = s->nsx_IcmpChecksumErrors;
+    out->icmp_unhandled         = s->nsx_IcmpUnhandled;
+
+    out->have_tcp = (s->nsx_Have & NETSTATUS_HAVE_TCP) ? TRUE : FALSE;
+    out->tcp_packets_sent        = s->nsx_TcpPacketsSent;
+    out->tcp_bytes_sent          = s->nsx_TcpBytesSent;
+    out->tcp_packets_received    = s->nsx_TcpPacketsReceived;
+    out->tcp_bytes_received      = s->nsx_TcpBytesReceived;
+    out->tcp_invalid             = s->nsx_TcpInvalid;
+    out->tcp_receive_dropped     = s->nsx_TcpReceiveDropped;
+    out->tcp_checksum_errors     = s->nsx_TcpChecksumErrors;
+    out->tcp_connections         = s->nsx_TcpConnections;
+    out->tcp_disconnections      = s->nsx_TcpDisconnections;
+    out->tcp_connections_dropped = s->nsx_TcpConnectionsDropped;
+    out->tcp_retransmits         = s->nsx_TcpRetransmits;
+
+    out->have_udp = (s->nsx_Have & NETSTATUS_HAVE_UDP) ? TRUE : FALSE;
+    out->udp_packets_sent     = s->nsx_UdpPacketsSent;
+    out->udp_bytes_sent       = s->nsx_UdpBytesSent;
+    out->udp_packets_received = s->nsx_UdpPacketsReceived;
+    out->udp_bytes_received   = s->nsx_UdpBytesReceived;
+    out->udp_invalid          = s->nsx_UdpInvalid;
+    out->udp_receive_dropped  = s->nsx_UdpReceiveDropped;
+    out->udp_checksum_errors  = s->nsx_UdpChecksumErrors;
+
+    out->have_arp = (s->nsx_Have & NETSTATUS_HAVE_ARP) ? TRUE : FALSE;
+    out->arp_requests_sent      = s->nsx_ArpRequestsSent;
+    out->arp_requests_received  = s->nsx_ArpRequestsReceived;
+    out->arp_responses_sent     = s->nsx_ArpResponsesSent;
+    out->arp_responses_received = s->nsx_ArpResponsesReceived;
+    out->arp_dynamic_entries    = s->nsx_ArpDynamicEntries;
+    out->arp_static_entries     = s->nsx_ArpStaticEntries;
+    out->arp_aged_entries       = s->nsx_ArpAgedEntries;
+    out->arp_invalid_messages   = s->nsx_ArpInvalidMessages;
+
+    if (out->have_arp)
+    {
+        n = tool_netstatus_query(base, NETSTATUS_ARP, &nx_answer,
+                                 sizeof(nx_answer.arp), sizeof(NetStatusArp));
+        if (n > 0)
+        {
+            if (nx_answer.arp.hdr.nsh_Available > nx_answer.arp.hdr.nsh_Count)
+                out->arp_truncated = TRUE;
+
+            for (i = 0; i < n && i < (LONG)TOOL_MAX_ARP; i++)
+            {
+                const NetStatusArp *src  = &nx_answer.arp.e[i];
+                ToolArpEntry       *slot = &out->arp[i];
+
+                slot->address   = src->nsa_Address;
+                slot->retries   = src->nsa_Retries;
+                slot->nx_index  = src->nsa_Interface;
+                slot->is_static = (src->nsa_Flags & NETSTATUS_ARP_STATIC)
+                                      ? TRUE : FALSE;
+                slot->resolved  = (src->nsa_Flags & NETSTATUS_ARP_RESOLVED)
+                                      ? TRUE : FALSE;
+
+                for (j = 0; j < (LONG)AMI_ETH_ADDR_SIZE; j++)
+                    slot->mac[j] = src->nsa_HwAddress[j];
+            }
+
+            out->arp_count = (UWORD)n;
+        }
+    }
+
+    if (tool_netstatus_query(base, NETSTATUS_SYSTEM, &nx_answer,
+                             sizeof(nx_answer.system),
+                             sizeof(NetStatusSystem)) > 0)
+    {
+        const NetStatusSystem *sys = &nx_answer.system.e;
+
+        if (sys->nss_PoolTotal != 0)
+        {
+            out->have_pool               = TRUE;
+            out->pool_total              = sys->nss_PoolTotal;
+            out->pool_free               = sys->nss_PoolFree;
+            out->pool_payload            = sys->nss_PoolPayload;
+            out->pool_empty_requests     = sys->nss_PoolEmptyRequests;
+            out->pool_empty_suspensions  = sys->nss_PoolEmptySuspensions;
+            out->pool_invalid_releases   = sys->nss_PoolInvalidReleases;
+        }
+    }
+
+    tool_netstatus_close(base);
+
+    return 0;
+}
+
+/* ---------------------------------------------------------------- routes -- */
+
+LONG tool_routes(ToolRoutes *out)
+{
+    struct Library *base;
+    LONG            n;
+    LONG            i;
+
+    if (out == NULL)
+        return -1;
+
+    out->count          = 0;
+    out->truncated      = FALSE;
+    out->static_routing = FALSE;
+
+    base = nx_open();
+    if (base == NULL)
+        return -1;
+
+    if (tool_netstatus_query(base, NETSTATUS_SYSTEM, &nx_answer,
+                             sizeof(nx_answer.system),
+                             sizeof(NetStatusSystem)) > 0)
+    {
+        out->static_routing =
+            (nx_answer.system.e.nss_Flags & NETSTATUS_SYS_ROUTING)
+                ? TRUE : FALSE;
+    }
+
+    n = tool_netstatus_query(base, NETSTATUS_ROUTES, &nx_answer,
+                             sizeof(nx_answer.route), sizeof(NetStatusRoute));
+    if (n < 0)
+    {
+        nx_query_failed(base);
+        tool_netstatus_close(base);
+        return -1;
+    }
+
+    if (nx_answer.route.hdr.nsh_Available > nx_answer.route.hdr.nsh_Count)
+        out->truncated = TRUE;
+
+    for (i = 0; i < n && i < (LONG)TOOL_MAX_ROUTE; i++)
+    {
+        const NetStatusRoute *src = &nx_answer.route.e[i];
+
+        out->route[i].destination = src->nsr_Destination;
+        out->route[i].netmask     = src->nsr_NetMask;
+        out->route[i].gateway     = src->nsr_Gateway;
+        out->route[i].flags       = src->nsr_Flags;
+        out->route[i].nx_index    = src->nsr_Interface;
+    }
+    out->count = (UWORD)n;
+
+    tool_netstatus_close(base);
 
     return 0;
 }
@@ -219,17 +403,17 @@ const char *tool_tcp_state_name(UINT state)
 {
     switch (state)
     {
-        case NX_TCP_CLOSED:         return "CLOSED";
-        case NX_TCP_LISTEN_STATE:   return "LISTEN";
-        case NX_TCP_SYN_SENT:       return "SYN_SENT";
-        case NX_TCP_SYN_RECEIVED:   return "SYN_RCVD";
-        case NX_TCP_ESTABLISHED:    return "ESTABLISHED";
-        case NX_TCP_CLOSE_WAIT:     return "CLOSE_WAIT";
-        case NX_TCP_FIN_WAIT_1:     return "FIN_WAIT_1";
-        case NX_TCP_FIN_WAIT_2:     return "FIN_WAIT_2";
-        case NX_TCP_CLOSING:        return "CLOSING";
-        case NX_TCP_TIMED_WAIT:     return "TIME_WAIT";
-        case NX_TCP_LAST_ACK:       return "LAST_ACK";
-        default:                    return "UNKNOWN";
+        case NETSTATUS_TCP_CLOSED:          return "CLOSED";
+        case NETSTATUS_TCP_LISTEN:          return "LISTEN";
+        case NETSTATUS_TCP_SYN_SENT:        return "SYN_SENT";
+        case NETSTATUS_TCP_SYN_RECEIVED:    return "SYN_RCVD";
+        case NETSTATUS_TCP_ESTABLISHED:     return "ESTABLISHED";
+        case NETSTATUS_TCP_CLOSE_WAIT:      return "CLOSE_WAIT";
+        case NETSTATUS_TCP_FIN_WAIT_1:      return "FIN_WAIT_1";
+        case NETSTATUS_TCP_FIN_WAIT_2:      return "FIN_WAIT_2";
+        case NETSTATUS_TCP_CLOSING:         return "CLOSING";
+        case NETSTATUS_TCP_TIMED_WAIT:      return "TIME_WAIT";
+        case NETSTATUS_TCP_LAST_ACK:        return "LAST_ACK";
+        default:                            return "UNKNOWN";
     }
 }

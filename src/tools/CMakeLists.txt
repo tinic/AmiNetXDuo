@@ -160,7 +160,11 @@ aminetxduo_add_tool(tool_sntp    sntp     SOURCES sntp.c)
 aminetxduo_add_tool(tool_shownetstatus ShowNetStatus NX
     SOURCES shownetstatus.c)
 aminetxduo_add_tool(tool_netstat       netstat       NX SOURCES netstat.c)
-aminetxduo_add_tool(tool_ping          ping          NX SOURCES ping.c)
+# ping is config-only now, and that is the fix rather than a tidy-up: it used
+# to link its own ThreadX and NetX Duo and call nx_icmp_ping() on an NX_IP that
+# no shipped build ever had.  It sends its own ICMP echo over a SOCK_RAW
+# descriptor through the published vectors, exactly as traceroute does.
+aminetxduo_add_tool(tool_ping          ping          SOURCES ping.c toolsock.c)
 
 # ---------------------------------------------------------------- smoke ---
 #

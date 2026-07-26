@@ -1,15 +1,34 @@
 /*
- * AmiNetXDuo tools -- talking to the live NetX Duo instance.
+ * AmiNetXDuo tools -- reading the RUNNING NetX Duo instance.
  *
- * Only ShowNetStatus, netstat and ping need this; the rest of the tools stay
- * clear of ThreadX and NetX Duo entirely.
+ * Only ShowNetStatus and netstat need this; the rest of the tools stay clear
+ * of the stack's internals entirely.
  *
- * The rule that shapes everything here: NetX Duo APIs suspend "the calling
- * thread", so an Exec Process must be ADOPTED as a TX_THREAD before it calls
- * any of them (docs/RESEARCH.md 6.3). While adopted the Process holds the
- * ThreadX baton and must not block on anything else -- no dos.library, no
- * IORequest. So the tools adopt, take a snapshot into plain memory, orphan,
- * and only then print.
+ * WHAT CHANGED HERE, AND WHY IT HAD TO
+ *
+ *   This file used to hand each command an NX_IP * from netstack_ip() and let
+ *   it walk NetX Duo's tables itself, after adopting the Process as a
+ *   TX_THREAD.  That could never work in a shipped build and did not:
+ *
+ *     * A Shell command links its OWN copy of ThreadX and NetX Duo.  Its
+ *       kernel was never entered and its NX_IP owns no interfaces.  The stack
+ *       that is running lives inside bsdsocket.library, in that library's own
+ *       copy of the same archives.
+ *     * No tool links aminetxduo_netstack, so netstack_ip() resolved to
+ *       src/tools/netstack_weak.c's weak stub and returned NULL -- in every
+ *       build that was ever shipped.
+ *
+ *   So `netstat`, `ping` and ShowNetStatus's live path reached
+ *   tool_require_stack(), got NULL, and printed "the network is up, but this
+ *   command cannot read it".  Correct English, and a lie about what the
+ *   commands could do.  docs/RESEARCH.md 21.
+ *
+ *   The snapshot now comes from bsdsocket.library through NetStackQuery()
+ *   (include/aminetxduo/netstatus.h), which is the same idiom NetTrace
+ *   already used for the capture engine.  The structures below are unchanged
+ *   in shape -- they are what the two commands print from -- but they are
+ *   filled by copying scalars across a library boundary rather than by
+ *   walking another task's memory.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -24,9 +43,15 @@
 extern "C" {
 #endif
 
-/* Adopt/orphan the calling Process. 0 on success, negative on failure. */
-LONG tool_stack_enter(VOID);
-VOID tool_stack_leave(VOID);
+/*
+ * Suppress the failure messages the three calls below print by default.
+ *
+ * netstat wants them: it has nothing else to say and no report to spoil.
+ * ShowNetStatus does not: it is printing a table, it words the "up but
+ * unreadable" case itself and in its own place, and an error block halfway
+ * through a report is worse than no error block at all.
+ */
+VOID tool_nx_quiet(BOOL quiet);
 
 /* ----------------------------------------------------------- snapshots -- */
 
@@ -42,7 +67,7 @@ typedef struct ToolIfInfo
     ULONG           netmask;
     ULONG           mtu;
     UBYTE           mac[AMI_ETH_ADDR_SIZE];
-    const char     *nx_name;
+    char            nx_name[NETSTATUS_NAME_LEN];
     /* From the SANA-II shim, when the interface has one attached. */
     BOOL            have_sana2;
     BOOL            sana2_online;
@@ -72,11 +97,136 @@ typedef struct ToolSnapshot
 } ToolSnapshot;
 
 /*
- * One adopt/snapshot/orphan cycle. `want_sockets` is honoured only when the
- * caller needs the connection table, because walking it is the expensive
- * part. Returns 0, or a negative code after printing a message.
+ * One question to the running library. `want_sockets` is honoured only when
+ * the caller needs the connection table, because that is one more call across
+ * the boundary. Returns 0, or a negative code after printing a message.
  */
-LONG tool_snapshot(NX_IP *ip, ToolSnapshot *out, BOOL want_sockets);
+LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets);
+
+/* -------------------------------------------------- protocol counters -- */
+
+/*
+ * The per-protocol counters and the ARP cache, in one place so that no two
+ * commands can report different numbers for the same thing: ShowNetStatus and
+ * netstat both take this snapshot and only the layout of what they print
+ * differs.
+ *
+ * A `have_*` flag is FALSE when the protocol in question is not enabled in the
+ * running stack, which is not the same as "all its counters are zero" and must
+ * not be printed as though it were.
+ */
+
+#define TOOL_MAX_ARP    32
+
+typedef struct ToolArpEntry
+{
+    ULONG   address;                 /* host byte order                      */
+    UBYTE   mac[AMI_ETH_ADDR_SIZE];
+    BOOL    is_static;
+    BOOL    resolved;                /* a hardware address has been learnt   */
+    UWORD   retries;                 /* requests sent while unresolved       */
+    UWORD   nx_index;                /* the interface it was learnt on       */
+} ToolArpEntry;
+
+typedef struct ToolStats
+{
+    BOOL            have_ip;
+    ULONG           ip_packets_sent;
+    ULONG           ip_bytes_sent;
+    ULONG           ip_packets_received;
+    ULONG           ip_bytes_received;
+    ULONG           ip_invalid;
+    ULONG           ip_receive_dropped;
+    ULONG           ip_checksum_errors;
+    ULONG           ip_send_dropped;
+    ULONG           ip_fragments_sent;
+    ULONG           ip_fragments_received;
+
+    BOOL            have_icmp;
+    ULONG           icmp_pings_sent;
+    ULONG           icmp_ping_timeouts;
+    ULONG           icmp_threads_suspended;
+    ULONG           icmp_responses;
+    ULONG           icmp_checksum_errors;
+    ULONG           icmp_unhandled;
+
+    BOOL            have_tcp;
+    ULONG           tcp_packets_sent;
+    ULONG           tcp_bytes_sent;
+    ULONG           tcp_packets_received;
+    ULONG           tcp_bytes_received;
+    ULONG           tcp_invalid;
+    ULONG           tcp_receive_dropped;
+    ULONG           tcp_checksum_errors;
+    ULONG           tcp_connections;
+    ULONG           tcp_disconnections;
+    ULONG           tcp_connections_dropped;
+    ULONG           tcp_retransmits;
+
+    BOOL            have_udp;
+    ULONG           udp_packets_sent;
+    ULONG           udp_bytes_sent;
+    ULONG           udp_packets_received;
+    ULONG           udp_bytes_received;
+    ULONG           udp_invalid;
+    ULONG           udp_receive_dropped;
+    ULONG           udp_checksum_errors;
+
+    BOOL            have_arp;
+    ULONG           arp_requests_sent;
+    ULONG           arp_requests_received;
+    ULONG           arp_responses_sent;
+    ULONG           arp_responses_received;
+    ULONG           arp_dynamic_entries;
+    ULONG           arp_static_entries;
+    ULONG           arp_aged_entries;
+    ULONG           arp_invalid_messages;
+    ToolArpEntry    arp[TOOL_MAX_ARP];
+    UWORD           arp_count;
+    BOOL            arp_truncated;
+
+    BOOL            have_pool;
+    ULONG           pool_total;
+    ULONG           pool_free;
+    ULONG           pool_payload;
+    ULONG           pool_empty_requests;
+    ULONG           pool_empty_suspensions;
+    ULONG           pool_invalid_releases;
+} ToolStats;
+
+/*
+ * Everything above, in one round trip per table. Returns 0, or a negative
+ * code after printing a message.
+ */
+LONG tool_stats(ToolStats *out);
+
+/* ------------------------------------------------------------- routes -- */
+
+#define TOOL_MAX_ROUTE  8
+
+typedef struct ToolRoute
+{
+    ULONG   destination;
+    ULONG   netmask;
+    ULONG   gateway;                 /* 0 = directly attached                */
+    UWORD   flags;                   /* NETSTATUS_RT_*                       */
+    UWORD   nx_index;
+} ToolRoute;
+
+typedef struct ToolRoutes
+{
+    ToolRoute   route[TOOL_MAX_ROUTE];
+    UWORD       count;
+    BOOL        truncated;
+    /*
+     * FALSE when NX_ENABLE_IP_STATIC_ROUTING is not in the running stack's
+     * build -- the directly-attached prefixes and the default gateway are
+     * still reported and are still real, but there is no table to add to.
+     */
+    BOOL        static_routing;
+} ToolRoutes;
+
+LONG tool_routes(ToolRoutes *out);
 
 /* TCP state number -> the name netstat prints. */
 const char *tool_tcp_state_name(UINT state);

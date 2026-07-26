@@ -522,8 +522,8 @@ int main(int argc, char **argv)
         {
             tool_advise_blank();
             tool_advise("This command needs SOCK_RAW, and the TCP/IP stack on");
-            tool_advise("this machine does not offer it.  ping still works;");
-            tool_advise("it asks the stack to do the work instead.");
+            tool_advise("this machine does not offer it.  Neither ping nor");
+            tool_advise("traceroute can work without it.");
         }
 
         CloseLibrary(sb);

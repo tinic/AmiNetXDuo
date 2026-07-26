@@ -11,10 +11,17 @@
  * With no switches at all it prints everything, which is what someone typing
  * "netstat" on an Amiga is nearly always after.
  *
- * -s means the SANA-II per-interface counters rather than Unix's per-protocol
- * statistics: NetX Duo's protocol counters are a build option we do not turn
- * on, and the driver counters are the ones that answer "is the cable
- * plugged in".
+ * -s is per-protocol statistics, as it is everywhere else, followed by the
+ * SANA-II per-interface counters -- the driver's own numbers are the ones that
+ * answer "is the cable plugged in", and no other switch shows them.
+ *
+ * THIS COMMAND AND ShowNetStatus COVER THE SAME GROUND ON PURPOSE, and the
+ * comment at the top of shownetstatus.c says why: that one is the Amiga-shaped
+ * introspection command with named categories and a diagnosis, this one is the
+ * BSD-shaped convenience with switches and columns. What they must never do is
+ * disagree, so neither reads the stack directly -- both take the SAME two
+ * snapshots from tool_nx.c, ToolSnapshot and ToolStats, and only the layout of
+ * what they print differs.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -24,7 +31,7 @@
 const char *const tool_name = "netstat";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: netstat 1.0 (24.7.2026)";
+    "$VER: netstat 1.1 (26.7.2026)";
 
 #define TEMPLATE    "INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S"
 
@@ -36,6 +43,9 @@ enum
     ARG_STATS,
     ARG_COUNT
 };
+
+/* Static: an AmiConfig is far too big for a Shell command's 4 KB stack. */
+static AmiConfig netstat_config;
 
 static const char *iface_name(const AmiConfig *cfg, UWORD index)
 {
@@ -89,17 +99,104 @@ static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
 }
 
 /*
- * -s used to be a synonym for -i, which meant the switch existed and did
- * nothing. These are the SANA-II counters the driver keeps, which is what
- * anybody asking for statistics on an Amiga is after -- and the numbers that
- * say whether a card is seeing traffic at all.
+ * The per-protocol half of -s: the same ToolStats ShowNetStatus prints under
+ * IP, ICMP, TCP and UDP, laid out the way netstat lays things out.
+ */
+static VOID show_protocol_stats(const ToolStats *st)
+{
+    tool_printf("\nip:\n");
+    if (st->have_ip)
+    {
+        tool_printf("\t%lu packets sent (%lu bytes)\n",
+                    st->ip_packets_sent, st->ip_bytes_sent);
+        tool_printf("\t%lu packets received (%lu bytes)\n",
+                    st->ip_packets_received, st->ip_bytes_received);
+        tool_printf("\t%lu bad packets, %lu checksum errors\n",
+                    st->ip_invalid, st->ip_checksum_errors);
+        tool_printf("\t%lu dropped on receipt, %lu dropped on send\n",
+                    st->ip_receive_dropped, st->ip_send_dropped);
+        tool_printf("\t%lu fragments sent, %lu received\n",
+                    st->ip_fragments_sent, st->ip_fragments_received);
+    }
+    else
+    {
+        tool_printf("\tno counters\n");
+    }
+
+    tool_printf("\nicmp:\n");
+    if (st->have_icmp)
+    {
+        tool_printf("\t%lu echo requests sent, %lu replies received\n",
+                    st->icmp_pings_sent, st->icmp_responses);
+        tool_printf("\t%lu timed out, %lu checksum errors, %lu not handled\n",
+                    st->icmp_ping_timeouts, st->icmp_checksum_errors,
+                    st->icmp_unhandled);
+    }
+    else
+    {
+        tool_printf("\tnot enabled\n");
+    }
+
+    tool_printf("\ntcp:\n");
+    if (st->have_tcp)
+    {
+        tool_printf("\t%lu packets sent (%lu bytes)\n",
+                    st->tcp_packets_sent, st->tcp_bytes_sent);
+        tool_printf("\t%lu packets received (%lu bytes)\n",
+                    st->tcp_packets_received, st->tcp_bytes_received);
+        tool_printf("\t%lu retransmitted, %lu dropped on receipt\n",
+                    st->tcp_retransmits, st->tcp_receive_dropped);
+        tool_printf("\t%lu bad packets, %lu checksum errors\n",
+                    st->tcp_invalid, st->tcp_checksum_errors);
+        tool_printf("\t%lu connections made, %lu closed, %lu lost\n",
+                    st->tcp_connections, st->tcp_disconnections,
+                    st->tcp_connections_dropped);
+    }
+    else
+    {
+        tool_printf("\tnot enabled\n");
+    }
+
+    tool_printf("\nudp:\n");
+    if (st->have_udp)
+    {
+        tool_printf("\t%lu datagrams sent (%lu bytes)\n",
+                    st->udp_packets_sent, st->udp_bytes_sent);
+        tool_printf("\t%lu datagrams received (%lu bytes)\n",
+                    st->udp_packets_received, st->udp_bytes_received);
+        tool_printf("\t%lu bad datagrams, %lu checksum errors, %lu dropped\n",
+                    st->udp_invalid, st->udp_checksum_errors,
+                    st->udp_receive_dropped);
+    }
+    else
+    {
+        tool_printf("\tnot enabled\n");
+    }
+
+    tool_printf("\npacket pool:\n");
+    if (st->have_pool)
+    {
+        tool_printf("\t%lu packets of %lu bytes, %lu free\n",
+                    st->pool_total, st->pool_payload, st->pool_free);
+        tool_printf("\t%lu requests found it empty, %lu waited\n",
+                    st->pool_empty_requests, st->pool_empty_suspensions);
+    }
+    else
+    {
+        tool_printf("\tno packet pool\n");
+    }
+}
+
+/*
+ * And the driver half: the SANA-II counters, which no other switch shows and
+ * which are the numbers that say whether a card is seeing traffic at all.
  */
 static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
 {
     UWORD i;
     UWORD shown = 0;
 
-    tool_printf("Interface statistics\n");
+    tool_printf("\nInterface statistics\n");
 
     for (i = 0; i < snap->iface_count; i++)
     {
@@ -243,8 +340,8 @@ int main(int argc, char **argv)
     LONG             args[ARG_COUNT];
     struct RDArgs   *rda;
     const AmiConfig *cfg;
-    NX_IP           *ip;
-    ToolSnapshot     snap;
+    static ToolSnapshot snap;
+    static ToolStats    stats;
     BOOL             want_if;
     BOOL             want_routes;
     BOOL             want_conn;
@@ -277,32 +374,45 @@ int main(int argc, char **argv)
     if (!want_if && !want_routes && !want_conn && !want_stats)
         want_if = want_routes = want_conn = TRUE;
 
-    if (tool_require_stack() == NULL)
-    {
-        FreeArgs(rda);
-        return RETURN_ERROR;
-    }
-
-    ip = netstack_ip();
-    if (ip == NULL)
-    {
-        tool_error("the stack is running but has no IP instance");
-        FreeArgs(rda);
-        return RETURN_FAIL;
-    }
-
-    if (tool_snapshot(ip, &snap, want_conn) != 0)
+    /*
+     * Straight to the running library. There is no tool_require_stack() call
+     * here any more and there must not be one: it asks netstack_get(), which
+     * in a command is src/tools/netstack_weak.c's stub and is always NULL --
+     * that is what made this command inert in v0.2.0 while printing a message
+     * that read like a pass. tool_snapshot() opens bsdsocket.library, which
+     * is where the stack really is, and explains itself when it cannot.
+     */
+    if (tool_snapshot(&snap, want_conn) != 0)
     {
         FreeArgs(rda);
         return RETURN_FAIL;
     }
 
-    cfg = netstack_config();
+    if (want_stats && tool_stats(&stats) != 0)
+    {
+        FreeArgs(rda);
+        return RETURN_FAIL;
+    }
+
+    /*
+     * The interface NAMES come off the disk rather than out of the stack:
+     * netstack_config() is another of the weak stubs, and DEVS:NetInterfaces
+     * is the same file the running stack read. The live snapshot carries the
+     * name too (ToolIfInfo.nx_name), and the two agree; this keeps the
+     * printing code below unchanged.
+     */
+    tool_config_watch();
+    cfg = (ami_config_load(&netstat_config) == AMI_CFG_OK) ? &netstat_config
+                                                           : NULL;
+    tool_config_unwatch();
 
     if (want_if)
         show_interfaces(cfg, &snap);
     if (want_stats)
+    {
+        show_protocol_stats(&stats);
         show_stats(cfg, &snap);
+    }
     if (want_routes)
         show_routes(cfg, &snap);
     if (want_conn)

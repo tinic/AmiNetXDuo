@@ -202,28 +202,31 @@ static VOID ns_fill_system(NX_IP *ip, NetStatusSystem *out)
 }
 
 /*
- * The NX interface index is the config index: src/netstack attaches the
- * configured interfaces in config order from slot 0. Loopback is NX slot 0 in
- * NetX Duo's own numbering, so the config lookup is offset by one -- and when
- * it does not line up the name is simply left empty rather than guessed at,
- * which is why NETSTATUS_IF_NAMED exists.
+ * The NX physical interface index IS the config index. src/netstack attaches
+ * the configured interfaces in config order from slot 0
+ * (netstack.c:376 for the primary, :451 for the rest), and NetX Duo puts the
+ * loopback at NX_LOOPBACK_INTERFACE == NX_MAX_PHYSICAL_INTERFACES, past the
+ * physical range this walks -- so there is no off-by-one here, which is worth
+ * saying because there looks as though there should be.
+ *
+ * NULL when the slot is not configured; NETSTATUS_IF_NAMED is how the caller
+ * tells a name that came from the config from one that did not.
  */
 static const AmiIfConfig *ns_config_for(UINT nx_index)
 {
     const AmiConfig *cfg = netstack_config();
-    UWORD            want;
 
-    if (cfg == NULL || nx_index == 0)
+    if (cfg == NULL)
         return NULL;
 
-    want = (UWORD)(nx_index - 1);
-    if (want >= cfg->interface_count || want >= (UWORD)AMI_CFG_MAX_INTERFACES)
+    if (nx_index >= cfg->interface_count ||
+        nx_index >= (UINT)AMI_CFG_MAX_INTERFACES)
         return NULL;
 
-    if (!cfg->interfaces[want].configured)
+    if (!cfg->interfaces[nx_index].configured)
         return NULL;
 
-    return &cfg->interfaces[want];
+    return &cfg->interfaces[nx_index];
 }
 
 static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)

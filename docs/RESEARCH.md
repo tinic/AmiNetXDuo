@@ -7142,3 +7142,221 @@ Dead ends, recorded so they are not retried: `-noixemul` still breaks `sys/reent
 `__attribute__((retain))` is ignored by this toolchain; and tree-wide `--gc-sections`
 destroys every `.library` in the build.
 
+## 22. The commands that could not see the stack (2026-07-26)
+
+Three commands shipped in the v0.2.0 archive that cannot do what they claim, and the
+reason is one sentence long: **a Shell command links its own copy of ThreadX and NetX
+Duo, and that copy's kernel is not running.** §19.6 wrote that down and named the fix.
+This is the fix.
+
+### 22.1 What was actually broken, measured rather than reasoned
+
+`src/tools/netstack_weak.c` supplies **weak** `netstack_get()` / `netstack_ip()` /
+`netstack_config()` / `netstack_interface_is_up()` that answer NULL, NULL, NULL and
+FALSE. Its own header comment says *"Delete this file once src/netstack exists and is
+linked into the tools."* It was never deleted, and **no tool links
+`aminetxduo_netstack`** — `src/tools/CMakeLists.txt` links `aminetxduo_sana2
+aminetxduo_config threadx_port netxduo_port` and nothing else. So in every shipped
+build the weak stubs *are* the implementation.
+
+The consequences, one per call site:
+
+| Call site | What it got | What the user saw |
+|---|---|---|
+| `ping.c:167` `ip = netstack_ip()` | NULL | `ping: the network is up, but this command cannot read it`, exit 5 |
+| `netstat.c:381` `ip = netstack_ip()` | NULL | the same, for `-i`, `-r`, `-a` and `-s` alike |
+| `shownetstatus.c:835` `ip = netstack_ip()` | NULL | the configuration, and no live column at all |
+| `shownetstatus.c` `netstack_interface_is_up(i)` | FALSE | **`offline`** printed beside an interface carrying traffic |
+| `onoff.c` `netstack_startup()` | `AMI_NET_ERR_STATE` | *"Individual interfaces cannot be taken up and down while the stack runs"* |
+| `netstat.c:401` `netstack_config()` | NULL | every interface named `?` |
+
+**Why nothing caught it.** Each of those is the *graceful* branch. The commands were
+written to behave well when the network is not up, they behaved well, and a well-formed
+"the network is not up" message reads as a pass in a transcript. Worse, the one capture
+in the tree that shows these commands printing live interface counters —
+`build/testhd-doclive/` — was produced by a purpose-built `LiveTools` binary that links
+the netstack and calls each command's `main()` in-process. That binary works. The
+shipped executables never could, and nothing compared the two.
+
+### 22.2 Why linking the netstack into the tools would not have fixed it
+
+It is tempting to read "no tool links `aminetxduo_netstack`" as a missing line in a
+`CMakeLists.txt`. It is not. Adding it gives the command a *second* NetX Duo: its own
+`NX_IP`, its own packet pool, its own ThreadX scheduler globals, its own SANA-II
+attachments — none of them the ones the running stack is using. `netstack_ip()` would
+stop returning NULL and start returning a pointer to an `NX_IP` with no interfaces in
+it, and `netstat -i` would print an empty table instead of an error. That is strictly
+worse: the error was at least true.
+
+The same fact had already been met and solved twice in this tree, which is why the
+answer was not in doubt:
+
+* `src/tools/nettrace.c` reaches the capture engine through the eight published `bpf_*`
+  LVOs *"because a tool that linked the archive would get its OWN copy of the channel
+  table and capture nothing at all"*.
+* `src/tools/sntp.c` does not use the vendored NetX Duo SNTP add-on, for the same
+  reason (§19.6).
+
+### 22.3 Two LVOs, and why a snapshot rather than a pointer
+
+`include/aminetxduo/netstatus.h`:
+
+```
+    NetStackQuery(magic d0, what d1, buffer a0, size d2)     LVO -0x366
+    NetStackControl(magic d0, op   d1, arg    a0, size d2)   LVO -0x36c
+```
+
+**Two, not six.** `Query` takes a selector — `SYSTEM`, `INTERFACES`, `STATS`, `ARP`,
+`ROUTES`, `SOCKETS` — so a seventh table costs a selector rather than a vector. `Control`
+is separate from `Query` on purpose: a caller that only reads cannot get a mutation by
+mistyping a number.
+
+**A snapshot, not an `NX_IP *`.** Handing out the live pointer is the smaller change and
+the wrong one. AmigaOS has no memory protection, so a pointer into the stack's
+structures stays dereferenceable long after the stack has gone down — and this project
+has already shipped one use-after-free of exactly that shape, a teardown path that freed
+a reply port and the stack a thread was still running on. Walking those tables also
+requires holding the ThreadX baton, which a Shell command must not do while it prints.
+So the library copies scalars into the caller's own buffer under one `bsd_nx_enter()`
+bracket and hands the baton straight back. Nothing the caller holds afterwards points
+into the stack.
+
+The buffer starts with a `NetStatusHeader`. The caller writes a magic and the version it
+was built against; the library writes back the entry size **it** was built with, how many
+entries it wrote, and how many it had. A caller with a small buffer therefore learns how
+big one it needs instead of being silently truncated, and a half-installed pair —
+`bsdsocket.library` from one build, `netstat` from another — is caught at the size check
+rather than printing plausible nonsense from shifted offsets.
+
+**Where the slots are.** Both sit past every offset any published bsdsocket ABI names:
+past AmiTCP V3, past V4, past Roadshow's extension set, and past the six
+reserved-for-expansion slots `clib/bsdsocket_protos.h` documents after `getnameinfo()`.
+§19.6 suggested `[124]`, `[125]` and `[137]`–`[142]`; those were **not** used, because
+`[137]`–`[142]` are precisely Roadshow's documented expansion reservation and `[124]`/
+`[125]` sit inside the published table between `gethostbyaddr_r` and `ipf_open`.
+`tools/gen_vectors.py` already knew this and said so — `0x360` is described there as
+"the first slot after ... every offset any published bsdsocket ABI assigns" — so the new
+pair went after it, at `0x366` and `0x36c`.
+
+**One latent bug had to be fixed to put them there.** `bsd_ObtainNetXDuoContext` at
+`-0x360` was emitted inside `#ifdef AMINETXDUO_TLS_CONTEXT`, and the table is a dense
+array, so in a `-DAMINETXDUO_TLS=OFF` build the slot **vanished** and everything after it
+would have moved down six bytes. The slot is now unconditional and carries `bsd_enosys()`
+when TLS is off. That is the rule `bpf.c` had already written down for its own eight:
+*"a caller gets a documented failure instead of a jump into a slot that means something
+else in the next build."*
+
+`ObtainNetXDuoContext` was also rejected as the way in, for the reason §19.6 gives: it
+exists only in a TLS build, and a network command that works only in a TLS build is not
+a command.
+
+**The caller cannot skip the identity check.** `tool_netstatus_open()` refuses a
+`bsdsocket.library` that is not ours before it calls either vector. The magic argument
+guards against a *future* vendor defining the same offset; only the identity check guards
+against a *present* one that has not defined it, where the slot is whatever that table
+happens to end with — possibly the `(APTR)-1` terminator.
+
+### 22.4 There is no ping vector, and the measurement that decided it
+
+The obvious third LVO is "do a ping for me", and it was designed and then thrown away.
+
+`nx_icmp_ping()` matches an inbound echo reply on the **sequence number alone**.
+`nx_icmp_interface_ping.c:222` builds the request with the identifier set to the low 16
+bits of the outgoing interface's address and the sequence from a per-`NX_IP` counter, and
+stores only the sequence on the suspended thread (`:308`). `nx_icmpv4_process_echo_reply.c:124`
+then compares:
+
+```c
+    if ((USHORT)(thread_ptr -> tx_thread_suspend_info) == sequence_num)
+```
+
+and nothing else — not the identifier, not the source address. `nx_icmpv4.h:191` says so
+outright: the identifier *"is not used as a host"*.
+
+§20.2 measured, on the A2065 frame dump, that **FS-UAE's SLIRP zeroes the ICMP sequence
+number on a proxied reply and preserves the identifier**. Those two facts multiply. A
+vector wrapping `nx_icmp_ping()` would match on the one field the NAT destroys and ignore
+the one it keeps, so `ping 8.8.8.8` would time out on every probe except the very first
+of the `NX_IP`'s lifetime (the counter starts at 0, and `nx_ip_create.c:106` memsets it)
+— while the replies arrived, were counted in `nx_ip_ping_responses_received`, and were
+dropped.
+
+So `ping` was rewritten over `SOCK_RAW` instead, the same path `traceroute` already uses.
+That is not a workaround; it is better on every axis that matters here:
+
+| | `nx_icmp_ping()` via a new LVO | `SOCK_RAW` via the published ABI |
+|---|---|---|
+| reply attribution | sequence only, fixed | the command's own rule |
+| identifier | the interface address — same for every process | per-task, so two pings do not steal each other's replies |
+| Ctrl-C during the wait | suspended in ThreadX, where an Exec signal means nothing | `WaitSelect` with a 200 ms cap |
+| runs on Roadshow / AmiTCP | no | yes |
+| new ABI surface | one more vector | none |
+
+`ping` now matches on identifier **and** source address, and accepts either the expected
+sequence or zero. Accepting zero is what makes it work through SLIRP, and it is safe
+*here* and not in `traceroute`: this command has exactly one probe outstanding at a time,
+so there is no other probe a reply could be credited to. `traceroute` sends three per hop
+and is right to print stars instead.
+
+### 22.5 Routing, which had to be decided before anything could report it
+
+**`NX_ENABLE_IP_STATIC_ROUTING` is not defined in `port/netxduo-amiga/inc/nx_user.h`**, so
+`nx_ip_static_route_add()`, `nx_ip_static_route_delete()` and the `nx_ip_routing_table[]`
+they fill are not in the build at all. `NX_IP_ROUTING_TABLE_SIZE 4` **is** set there,
+which reads as though they were, and is inert without the enable.
+
+It stays off. What exists without it is exactly two kinds of route, and both are real: the
+directly-attached prefix of each interface that has an address, and the default gateway,
+which `nx_ip_gateway_address_set()` maintains in every build. That is what a machine on
+one Ethernet actually has. So `NETSTATUS_ROUTES` reports those rather than reporting an
+empty table and letting the user conclude their network is misconfigured, `NETSTATUS_SYS_ROUTING`
+tells a caller which world it is in without guessing, and `NETCTRL_ROUTE_ADD`/`DELETE`
+return `ENOSYS`. Turning the option on is a `port/` change with a rebuild of every
+`NX_IP`-sized structure behind it, and it belongs to whoever writes `AddNetRoute` rather
+than being switched on speculatively here.
+
+`arp` is not blocked on anything: `NETSTATUS_ARP` reads the cache and `NETCTRL_ARP_ADD` /
+`ARP_DELETE` / `ARP_FLUSH` are implemented over `nx_arp_static_entry_create()`,
+`nx_arp_entry_delete()` and `nx_arp_dynamic_entries_invalidate()`. Only the command
+itself is missing. `nx_arp_entry_delete()` rather than the static-only spelling, because
+the person typing `arp -d` neither knows nor should have to know which kind of entry
+answers to the address.
+
+### 22.6 The ARP cache walk that spins instead of failing
+
+Worth restating where the new code is, because it is the one loop here that punishes a
+plausible mistake with a hang rather than an error: NetX Duo's ARP table is a hash table
+of **circular** lists. `nx_arp_active_next` of the last entry in a bucket points back at
+the bucket head, not at `NX_NULL`. A walk written the obvious way never terminates — and
+it would not terminate *inside the ThreadX bracket*, with the baton held, which stops the
+IP thread and every other socket user on the machine.
+
+### 22.7 The regression test is the point
+
+`tests/tools/run-livetools.sh`. It brings the stack up with `AddNetInterface eth0` and
+then runs **the shipped executables**, from the staged directory a user would install,
+through `ToolsSmoke` in a single emulator boot — not a purpose-built binary that links
+the netstack, because that is exactly how this stayed hidden for a release.
+
+Two halves, and both are needed:
+
+* **Negative.** A list of the real sentences that mean *"I cannot see the stack"* —
+  `the network is up, but this command cannot read it`, `the network has not been
+  started`, `the stack is running but has no IP instance`, and the rest — none of which
+  may appear anywhere after the interface is up. This is the assertion a human would
+  make, and it is written against the *messages* rather than the exit codes, because the
+  failing commands exited 5 (`RETURN_ERROR`) and a `ToolsSmoke` transcript records that
+  where nobody reads it.
+* **Positive.** The leased address `10.0.2.15`, the gateway `10.0.2.2`, a receive counter
+  that is not zero, and at least one echo reply. Without these, a command could pass the
+  negative half by printing nothing at all.
+
+**It needs no host-side peer, and that is deliberate.** Every other command test starts a
+Python server on the host with a lifetime; with several agents queued on the FS-UAE lock
+that lifetime can expire before the guest has booted, and then every case fails with
+"connection refused" — which looks exactly like a broken command and is not.
+`tests/tools/netpeer.py` did precisely that. SLIRP answers DHCP itself, answers ICMP to
+its own alias `10.0.2.2` itself, and lives exactly as long as the emulator does. There is
+nothing in this test that can time out while the run waits its turn, so a failure from it
+is a failure in the commands.
+
