@@ -400,20 +400,18 @@ static VOID show_arp(const AmiConfig *cfg, const ToolStats *st)
                 st->arp_aged_entries, st->arp_invalid_messages);
 }
 
-static VOID show_routes(const AmiConfig *cfg, const ToolSnapshot *snap,
-                        BOOL have_live)
+static VOID show_routes(const AmiConfig *cfg, BOOL have_live)
 {
-    char  dest[AMI_CFG_NAME_LEN];
-    char  gw[AMI_CFG_NAME_LEN];
-    char  mask[16];
-    UWORD i;
+    static ToolRoutes routes;
+    char              gw[AMI_CFG_NAME_LEN];
 
     tool_printf("\nRoutes\n");
-    tool_printf("Destination      Gateway          "
-                "Netmask          Flags  Interface\n");
 
     if (!have_live)
     {
+        tool_printf("Destination      Gateway          "
+                    "Netmask          Flags  Interface\n");
+
         if (cfg->default_gateway != 0)
         {
             address_text(cfg->default_gateway, gw, sizeof(gw));
@@ -429,32 +427,16 @@ static VOID show_routes(const AmiConfig *cfg, const ToolSnapshot *snap,
         return;
     }
 
-    if (snap->have_gateway)
-    {
-        address_text(snap->gateway, gw, sizeof(gw));
-        tool_printf("%-16s %-16s %-16s %-6s %s\n",
-                    (LONG)"default", (LONG)gw, (LONG)"0.0.0.0",
-                    (LONG)"UG", (LONG)iface_name(cfg, 0));
-    }
+    /*
+     * The live table, from NETSTATUS_ROUTES rather than derived from the
+     * interface list: with NX_ENABLE_IP_STATIC_ROUTING in the stack there are
+     * routes that no amount of looking at interfaces would show.  netstat
+     * prints the same rows through the same function.
+     */
+    if (tool_routes(&routes) != 0)
+        return;
 
-    for (i = 0; i < snap->iface_count; i++)
-    {
-        const ToolIfInfo *info = &snap->iface[i];
-
-        if (!info->attached || info->address == 0)
-            continue;
-
-        address_text(info->address & info->netmask, dest, sizeof(dest));
-        ami_config_format_ip(info->netmask, mask, sizeof(mask));
-
-        tool_printf("%-16s %-16s %-16s %-6s %s\n",
-                    (LONG)dest, (LONG)"*", (LONG)mask,
-                    (LONG)"U", (LONG)iface_name(cfg, i));
-    }
-
-    tool_printf("%-16s %-16s %-16s %-6s %s\n",
-                (LONG)"127.0.0.0", (LONG)"*", (LONG)"255.0.0.0",
-                (LONG)"U", (LONG)"lo0");
+    tool_print_routes(&routes, cfg, address_text);
 }
 
 static VOID show_resolver(const AmiResolverConfig *r, BOOL from_files)
@@ -970,7 +952,7 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
     if (w->arp)
         show_arp(cfg, &stats);
     if (w->routes)
-        show_routes(cfg, &snap, have_live);
+        show_routes(cfg, have_live);
 
     if (w->summary || w->dns)
         have_ns = show_dns(cfg, elsewhere, from_disk);

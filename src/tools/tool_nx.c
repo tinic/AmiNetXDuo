@@ -399,6 +399,94 @@ LONG tool_routes(ToolRoutes *out)
     return 0;
 }
 
+/*
+ * The routing table, printed the same way twice.
+ *
+ * netstat and ShowNetStatus both used to build this out of the interface list
+ * and the default gateway, which was correct exactly while there was no
+ * routing table -- and it stopped being correct the moment
+ * NX_ENABLE_IP_STATIC_ROUTING landed, because a hand-added route would have
+ * been in the stack and in neither report.  It is one function so the two
+ * commands cannot drift again.
+ *
+ * Order is the order NETSTATUS_ROUTES hands them over, which is the order
+ * _nx_ip_route_find() matches in: connected prefixes, then the static table
+ * longest prefix first, then the default gateway.  Flags are the BSD letters,
+ * with S for a route somebody added by hand.
+ */
+VOID tool_print_routes(const ToolRoutes *routes, const AmiConfig *cfg,
+                       ToolAddrText fmt)
+{
+    UWORD i;
+
+    if (fmt == NULL)
+        fmt = ami_config_format_ip;
+
+    tool_printf("Destination      Gateway          "
+                "Netmask          Flags  Interface\n");
+
+    for (i = 0; i < routes->count; i++)
+    {
+        const ToolRoute *r = &routes->route[i];
+        char             dest[AMI_CFG_NAME_LEN];
+        char             gw[AMI_CFG_NAME_LEN];
+        char             mask[16];
+        char             flags[6];
+        UWORD            f = 0;
+
+        if (r->destination == 0 && r->netmask == 0)
+            tool_copy_string(dest, sizeof(dest), "default");
+        else
+            (*fmt)(r->destination, dest, sizeof(dest));
+
+        if (r->gateway != 0)
+            (*fmt)(r->gateway, gw, sizeof(gw));
+        else
+            tool_copy_string(gw, sizeof(gw), "*");
+
+        ami_config_format_ip(r->netmask, mask, sizeof(mask));
+
+        if (r->flags & NETSTATUS_RT_UP)
+            flags[f++] = 'U';
+        if (r->flags & NETSTATUS_RT_GATEWAY)
+            flags[f++] = 'G';
+        if (r->flags & NETSTATUS_RT_HOST)
+            flags[f++] = 'H';
+        if (r->flags & NETSTATUS_RT_STATIC)
+            flags[f++] = 'S';
+        flags[f] = '\0';
+
+        tool_printf("%-16s %-16s %-16s %-6s %s\n",
+                    (LONG)dest, (LONG)gw, (LONG)mask, (LONG)flags,
+                    (LONG)tool_iface_name(cfg, r->nx_index));
+    }
+
+    /*
+     * Loopback is real and is not in the table: NetX Duo's loopback interface
+     * is not one of the nx_ip_interface[] slots NETSTATUS_ROUTES walks, and
+     * _nx_ip_driver_packet_send() shortcuts 127/8 without consulting a route
+     * at all.  Printing it is the honest description of where a 127.0.0.1
+     * packet goes; leaving it out would read as though there were no loopback.
+     */
+    tool_printf("%-16s %-16s %-16s %-6s %s\n",
+                (LONG)"127.0.0.0", (LONG)"*", (LONG)"255.0.0.0",
+                (LONG)"U", (LONG)"lo0");
+
+    if (routes->truncated)
+        tool_printf("(more routes than this command can hold)\n");
+}
+
+const char *tool_iface_name(const AmiConfig *cfg, UWORD index)
+{
+    if (cfg != NULL && index < cfg->interface_count &&
+        cfg->interfaces[index].name[0] != '\0')
+    {
+        return cfg->interfaces[index].name;
+    }
+
+    return "?";
+}
+
 const char *tool_tcp_state_name(UINT state)
 {
     switch (state)

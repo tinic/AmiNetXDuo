@@ -47,17 +47,6 @@ enum
 /* Static: an AmiConfig is far too big for a Shell command's 4 KB stack. */
 static AmiConfig netstat_config;
 
-static const char *iface_name(const AmiConfig *cfg, UWORD index)
-{
-    if (cfg != NULL && index < cfg->interface_count &&
-        cfg->interfaces[index].name[0] != '\0')
-    {
-        return cfg->interfaces[index].name;
-    }
-
-    return "?";
-}
-
 static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
 {
     char  addr[16];
@@ -78,7 +67,7 @@ static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
         ami_config_format_ip(info->address, addr, sizeof(addr));
 
         tool_printf("%-7s %-5lu %-16s %-6s ",
-                    (LONG)iface_name(cfg, i), info->mtu, (LONG)addr,
+                    (LONG)tool_iface_name(cfg, i), info->mtu, (LONG)addr,
                     (LONG)(info->link_up ? "up" : "down"));
 
         if (info->have_sana2)
@@ -209,12 +198,12 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
         if (!info->have_sana2)
         {
             tool_printf("\n%s: no driver attached, so it has no counters\n",
-                        (LONG)iface_name(cfg, i));
+                        (LONG)tool_iface_name(cfg, i));
             shown++;
             continue;
         }
 
-        tool_printf("\n%s (%s)\n", (LONG)iface_name(cfg, i),
+        tool_printf("\n%s (%s)\n", (LONG)tool_iface_name(cfg, i),
                     (LONG)(info->sana2_online ? "online" : "offline"));
         tool_printf("  packets received  %10lu    packets sent      %10lu\n",
                     st->packets_received, st->packets_sent);
@@ -240,44 +229,23 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
         tool_printf("  no interfaces are attached\n");
 }
 
-static VOID show_routes(const AmiConfig *cfg, const ToolSnapshot *snap)
+/*
+ * The routing table the stack actually has, not one derived from the
+ * interface list. NETSTATUS_ROUTES answers with the connected prefixes, the
+ * static table and the default gateway together, in match order, so a route
+ * added with AddNetRoute appears here -- which the derived version could not
+ * have shown however carefully it was written.
+ */
+static VOID show_routes(const AmiConfig *cfg)
 {
-    char  dest[16];
-    char  gw[16];
-    char  mask[16];
-    UWORD i;
+    static ToolRoutes routes;
 
     tool_printf("\nRouting table\n");
-    tool_printf("Destination      Gateway          "
-                "Netmask          Flags  Interface\n");
 
-    if (snap->have_gateway)
-    {
-        ami_config_format_ip(snap->gateway, gw, sizeof(gw));
-        tool_printf("%-16s %-16s %-16s %-6s %s\n",
-                    (LONG)"default", (LONG)gw, (LONG)"0.0.0.0",
-                    (LONG)"UG", (LONG)iface_name(cfg, 0));
-    }
+    if (tool_routes(&routes) != 0)
+        return;
 
-    for (i = 0; i < snap->iface_count; i++)
-    {
-        const ToolIfInfo *info = &snap->iface[i];
-
-        if (!info->attached || info->address == 0)
-            continue;
-
-        ami_config_format_ip(info->address & info->netmask,
-                             dest, sizeof(dest));
-        ami_config_format_ip(info->netmask, mask, sizeof(mask));
-
-        tool_printf("%-16s %-16s %-16s %-6s %s\n",
-                    (LONG)dest, (LONG)"*", (LONG)mask,
-                    (LONG)"U", (LONG)iface_name(cfg, i));
-    }
-
-    tool_printf("%-16s %-16s %-16s %-6s %s\n",
-                (LONG)"127.0.0.0", (LONG)"*", (LONG)"255.0.0.0",
-                (LONG)"U", (LONG)"lo0");
+    tool_print_routes(&routes, cfg, NULL);
 }
 
 static VOID show_connections(const ToolSnapshot *snap)
@@ -414,7 +382,7 @@ int main(int argc, char **argv)
         show_stats(cfg, &snap);
     }
     if (want_routes)
-        show_routes(cfg, &snap);
+        show_routes(cfg);
     if (want_conn)
         show_connections(&snap);
 

@@ -228,6 +228,22 @@ typedef struct ToolRoutes
 
 LONG tool_routes(ToolRoutes *out);
 
+/*
+ * The table, printed. Both commands that print one call this, so they cannot
+ * disagree about what the stack's routes are.
+ *
+ * `fmt` is how an address becomes text. NULL means ami_config_format_ip(), the
+ * dotted quad; ShowNetStatus passes its own so that NAMES still turns a
+ * gateway into a host name here as it does everywhere else in that report.
+ */
+typedef VOID (*ToolAddrText)(ULONG addr, char *buf, ULONG buflen);
+
+VOID tool_print_routes(const ToolRoutes *routes, const AmiConfig *cfg,
+                       ToolAddrText fmt);
+
+/* The configured name of an nx_ip_interface[] slot, or "?". */
+const char *tool_iface_name(const AmiConfig *cfg, UWORD index);
+
 /* TCP state number -> the name netstat prints. */
 const char *tool_tcp_state_name(UINT state);
 

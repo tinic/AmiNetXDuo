@@ -415,30 +415,47 @@ static VOID ns_fill_arp(NX_IP *ip, NsWriter *w)
 }
 
 /*
- * ROUTES, and the honest answer about them.
+ * ROUTES.
  *
- * NX_ENABLE_IP_STATIC_ROUTING is NOT defined in
- * port/netxduo-amiga/inc/nx_user.h, so nx_ip_static_route_add() and the
- * nx_ip_routing_table[] it fills are not compiled into this stack at all --
- * NX_IP_ROUTING_TABLE_SIZE *is* set there, which reads as though they were.
+ * Three kinds, and they are reported in the order the stack consults them,
+ * because that order is the answer to "why did my packet go there":
  *
- * What exists without it is exactly two kinds of route, and both are real:
- * the directly-attached prefix of each interface that has an address, and the
- * default gateway (nx_ip_gateway_address, which nx_ip_gateway_address_set()
- * maintains in every build). Those are what a machine on one Ethernet
- * actually has, so this reports them and sets nsh_Count accordingly, rather
- * than reporting an empty table and letting the user conclude their network
- * is misconfigured.
+ *   1. the directly-attached prefix of each interface that has an address;
+ *   2. NetX Duo's static routing table, longest prefix first -- it keeps
+ *      nx_ip_routing_table[] sorted by netmask descending, so the order here
+ *      is the order _nx_ip_route_find() matches in;
+ *   3. the default gateway (nx_ip_gateway_address), which is consulted last
+ *      and which nx_ip_gateway_address_set() maintains in every build.
  *
- * NETSTATUS_SYS_ROUTING in the SYSTEM query is how a caller tells the two
- * worlds apart without guessing.
+ * The static table exists because port/netxduo-amiga/inc/nx_user.h defines
+ * NX_ENABLE_IP_STATIC_ROUTING; NX_IP_ROUTING_TABLE_SIZE alone would not have
+ * been enough, and for a long time was all that was there. NETSTATUS_SYS_ROUTING
+ * in the SYSTEM query is how a caller tells a build with the table from one
+ * without it, so this file still compiles and reports honestly either way.
  */
+/* Which nx_ip_interface[] slot a route points at, 0 when it points nowhere. */
+static UWORD ns_interface_index(NX_IP *ip, const NX_INTERFACE *nxif)
+{
+    UINT i;
+
+    if (nxif == NX_NULL)
+        return 0;
+
+    for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        if (nxif == &ip->nx_ip_interface[i])
+            return (UWORD)i;
+    }
+
+    return 0;
+}
+
 static VOID ns_fill_routes(NX_IP *ip, NsWriter *w)
 {
     ULONG gateway = 0;
     UINT  i;
 #ifdef NX_ENABLE_IP_STATIC_ROUTING
-    UINT  r;
+    ULONG r;
 #endif
 
     for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
@@ -465,6 +482,28 @@ static VOID ns_fill_routes(NX_IP *ip, NsWriter *w)
             out->nsr_Flags |= NETSTATUS_RT_HOST;
     }
 
+#ifdef NX_ENABLE_IP_STATIC_ROUTING
+    for (r = 0; r < ip->nx_ip_routing_table_entry_count; r++)
+    {
+        const NX_IP_ROUTING_ENTRY *e   = &ip->nx_ip_routing_table[r];
+        NetStatusRoute            *out = (NetStatusRoute *)ns_writer_next(w);
+
+        if (out == NULL)
+            continue;
+
+        out->nsr_Destination = e->nx_ip_routing_dest_ip;
+        out->nsr_NetMask     = e->nx_ip_routing_net_mask;
+        out->nsr_Gateway     = e->nx_ip_routing_next_hop_address;
+        out->nsr_Flags       = NETSTATUS_RT_UP | NETSTATUS_RT_STATIC |
+                               NETSTATUS_RT_GATEWAY;
+        out->nsr_Interface   = ns_interface_index(ip,
+                                                  e->nx_ip_routing_entry_ip_interface);
+
+        if (e->nx_ip_routing_net_mask == 0xffffffffUL)
+            out->nsr_Flags |= NETSTATUS_RT_HOST;
+    }
+#endif
+
     if (nx_ip_gateway_address_get(ip, &gateway) == NX_SUCCESS && gateway != 0)
     {
         NetStatusRoute *out = (NetStatusRoute *)ns_writer_next(w);
@@ -475,38 +514,10 @@ static VOID ns_fill_routes(NX_IP *ip, NsWriter *w)
             out->nsr_NetMask     = 0;
             out->nsr_Gateway     = gateway;
             out->nsr_Flags       = NETSTATUS_RT_UP | NETSTATUS_RT_GATEWAY;
-            out->nsr_Interface   = 0;
-
-            if (ip->nx_ip_gateway_interface != NX_NULL)
-            {
-                for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
-                {
-                    if (ip->nx_ip_gateway_interface == &ip->nx_ip_interface[i])
-                    {
-                        out->nsr_Interface = (UWORD)i;
-                        break;
-                    }
-                }
-            }
+            out->nsr_Interface   = ns_interface_index(ip,
+                                                      ip->nx_ip_gateway_interface);
         }
     }
-
-#ifdef NX_ENABLE_IP_STATIC_ROUTING
-    for (r = 0; r < ip->nx_ip_routing_table_entry_count; r++)
-    {
-        NetStatusRoute *out = (NetStatusRoute *)ns_writer_next(w);
-
-        if (out == NULL)
-            continue;
-
-        out->nsr_Destination = ip->nx_ip_routing_table[r].nx_ip_routing_dest_ip;
-        out->nsr_NetMask     = ip->nx_ip_routing_table[r].nx_ip_routing_net_mask;
-        out->nsr_Gateway     = ip->nx_ip_routing_table[r].nx_ip_routing_next_hop_address;
-        out->nsr_Flags       = NETSTATUS_RT_UP | NETSTATUS_RT_STATIC |
-                               NETSTATUS_RT_GATEWAY;
-        out->nsr_Interface   = 0;
-    }
-#endif
 }
 
 /*
@@ -693,6 +704,9 @@ static LONG ns_map_status(struct AmiSocketBase *SocketBase, UINT status)
         case NX_NO_MORE_ENTRIES:    return bsd_fail(SocketBase, AMI_ENOBUFS);
         case NX_IP_ADDRESS_ERROR:   return bsd_fail(SocketBase, AMI_EINVAL);
         case NX_INVALID_INTERFACE:  return bsd_fail(SocketBase, AMI_ENXIO);
+        /* The static routing table is full -- NX_IP_ROUTING_TABLE_SIZE is 4,
+           so this is reachable by a user rather than only by a bug. */
+        case NX_OVERFLOW:           return bsd_fail(SocketBase, AMI_ENOBUFS);
         default:                    return bsd_fail(SocketBase, AMI_EINVAL);
     }
 }

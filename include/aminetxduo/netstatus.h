@@ -137,11 +137,13 @@ typedef struct NetStatusHeader
 #define NETSTATUS_SYS_GATEWAY   0x0002UL /* nss_Gateway is meaningful        */
 #define NETSTATUS_SYS_IPV6      0x0004UL /* built with AMINETXDUO_IPV6       */
 /*
- * NX_ENABLE_IP_STATIC_ROUTING. When this is CLEAR, NETSTATUS_ROUTES answers
- * with the default gateway alone and NETCTRL_ROUTE_ADD/DELETE fail with
- * ENOSYS, because NetX Duo's routing table is not compiled into this build at
- * all -- port/netxduo-amiga/inc/nx_user.h sets NX_IP_ROUTING_TABLE_SIZE,
- * which reads as though it were enabled, and is inert without the enable.
+ * NX_ENABLE_IP_STATIC_ROUTING, which the shipped build defines. SET means
+ * NetX Duo's static routing table is compiled in: NETSTATUS_ROUTES reports it
+ * alongside the interface prefixes and the default gateway, and
+ * NETCTRL_ROUTE_ADD/DELETE work. CLEAR means the table does not exist in this
+ * build, NETSTATUS_ROUTES has only the prefixes and the gateway to report, and
+ * NETCTRL_ROUTE_ADD/DELETE fail with ENOSYS. Ask before adding a route rather
+ * than reading ENOSYS as a failure.
  */
 #define NETSTATUS_SYS_ROUTING   0x0008UL
 
@@ -338,7 +340,14 @@ typedef struct NetStatusSocket
 #define NETCTRL_INTERFACE_DOWN  2   /* nsc_Index                             */
 #define NETCTRL_GATEWAY_SET     3   /* nsc_Gateway                           */
 #define NETCTRL_GATEWAY_CLEAR   4   /* --                                    */
-#define NETCTRL_ROUTE_ADD       5   /* nsc_Destination/NetMask/Gateway/Index */
+/*
+ * ROUTE_ADD takes nsc_Destination/NetMask/Gateway and NOT nsc_Index: NetX Duo
+ * derives the interface from the next hop, which must be on an interface's own
+ * subnet or the call fails with EINVAL. An entry with the same destination and
+ * mask has its next hop replaced rather than being duplicated, and the table
+ * holds NX_IP_ROUTING_TABLE_SIZE entries -- ENOBUFS past that.
+ */
+#define NETCTRL_ROUTE_ADD       5   /* nsc_Destination/NetMask/Gateway       */
 #define NETCTRL_ROUTE_DELETE    6   /* nsc_Destination/NetMask               */
 #define NETCTRL_ARP_ADD         7   /* nsc_Destination, nsc_HwAddress, Index */
 #define NETCTRL_ARP_DELETE      8   /* nsc_Destination                       */

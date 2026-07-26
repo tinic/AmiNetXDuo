@@ -238,6 +238,48 @@
 /* ------------------------------------------------------------- routing --- */
 
 /*
+ * COMPILE THE IPv4 ROUTING TABLE IN.
+ *
+ * NX_IP_ROUTING_TABLE_SIZE below is inert on its own, and used to be set here
+ * without this -- which reads as though routes existed and is the exact shape
+ * of thing that costs an afternoon.  Without the enable:
+ *
+ *   * NX_IP has no nx_ip_routing_table[] and no
+ *     nx_ip_routing_table_entry_count (nx_api.h:2972);
+ *   * nx_ip_static_route_add()/delete() compile to stubs returning
+ *     NX_NOT_SUPPORTED (nx_ip_static_route_{add,delete}.c);
+ *   * _nx_ip_route_find() skips the table lookup entirely
+ *     (nx_ip_route_find.c:150), so the only next hops that exist are the
+ *     directly-attached prefix of each interface and the single default
+ *     gateway.
+ *
+ * One gateway is enough for a machine on one Ethernet, which is why this was
+ * never noticed.  It is not enough for the two configurations Amiga users
+ * actually build: a second interface (PPP or SLIP alongside Ethernet -- the
+ * reason NX_MAX_PHYSICAL_INTERFACES is 2 above) reachable only through its own
+ * next hop, and a VPN or a second subnet behind a router that is not the
+ * default one.  Both need "this prefix goes via that address", which is a
+ * route and cannot be expressed as a gateway.
+ *
+ * With it, _nx_ip_route_find() consults the table BEFORE falling back to the
+ * default gateway and picks the longest prefix that matches, so a route is
+ * capable of overriding the gateway for part of the address space -- which is
+ * what makes it worth having rather than a second name for one.
+ *
+ * Cost: NX_IP_ROUTING_TABLE_SIZE * sizeof(NX_IP_ROUTING_ENTRY) (16 bytes each,
+ * so 64) plus a count, inside the single NX_IP, and a walk of at most four
+ * entries per transmitted packet whose destination is not on-link.  It changes
+ * the layout of NX_IP, so like the packet filters above it must be seen by
+ * every translation unit and belongs here rather than on a target.
+ *
+ * What this switches on above it: NETSTATUS_ROUTES now reports the table as
+ * well as the interface prefixes and the gateway, NETCTRL_ROUTE_ADD/DELETE
+ * stop returning ENOSYS, NETSTATUS_SYS_ROUTING is set, and AddNetRoute /
+ * DeleteNetRoute exist at all (src/tools/).
+ */
+#define NX_ENABLE_IP_STATIC_ROUTING
+
+/*
  * Four static routes (default 8).  Roadshow-era configurations have a default
  * gateway and occasionally one or two additions.
  */
