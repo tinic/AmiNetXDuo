@@ -127,7 +127,10 @@ done
 cat > "$STAGE/commands.txt" <<'EOF'
 SYS:AddNetInterface eth0
 SYS:ShowNetStatus
-SYS:ShowNetStatus FULL
+SYS:ShowNetStatus ALL
+SYS:ShowNetStatus INTERFACES ARP ROUTES
+SYS:ShowNetStatus IP ICMP TCP UDP MEMORY
+SYS:ShowNetStatus TCPSOCKETS UDPSOCKETS
 SYS:netstat -i
 SYS:netstat -r
 SYS:netstat -s
@@ -174,6 +177,12 @@ pass() { echo "  ok: $*"; }
 #
 # Each of these is a real string from src/tools/.  If any of them reaches the
 # transcript, a shipped command has gone blind again.
+#
+# They are matched as whole phrases, not as fragments.  An earlier draft of
+# this list had a bare "there is no", which "there is no interface called
+# \"eth9\"" -- a correct answer to a mistyped name -- trips on.  A regression
+# test that fires on correct behaviour gets disabled, and then it protects
+# nothing.
 while IFS= read -r phrase; do
     [ -n "$phrase" ] || continue
     if grep -qiF -- "$phrase" "$REPORT"; then
@@ -187,7 +196,9 @@ the network is up, but this command cannot read it
 the network has not been started
 the network stack is not running
 the stack is running but has no IP instance
-there is no
+there is no call yet
+cannot be taken offline
+individual interfaces cannot be taken up and down
 the network kernel is not running
 could not join the network kernel
 EOF
