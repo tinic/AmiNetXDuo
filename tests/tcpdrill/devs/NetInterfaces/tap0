@@ -1,0 +1,17 @@
+;
+; DEVS:NetInterfaces/tap0 -- the tcpdrill harness's own interface.
+;
+; DEVICE names a device that is not on this disk and never will be: TcpDrill
+; creates it with MakeLibrary()/AddDevice() before it opens
+; bsdsocket.library, so OpenDevice() finds it in ExecBase's device list
+; without ever looking in DEVS:.  That ordering is the whole trick -- see
+; tests/tcpdrill/tapdev.h.
+;
+; STATIC, because there is nobody on this wire to answer DHCP.  10.9.9.2 is
+; the harness itself; nothing else exists on the subnet.
+;
+DEVICE=tcpdrill.device
+UNIT=0
+CONFIGURE=STATIC
+ADDRESS=10.9.9.1
+NETMASK=255.255.255.0

@@ -8712,3 +8712,335 @@ The first two are the ones to keep an eye on -- **35 checks, 0 failures** and **
 0 failures** on the runs this section is written from. The third is situational: with no
 server on the wire its DHCP phases have nothing to work with and say so rather than
 failing.
+
+## 27. tcpdrill: a packet-level conformance harness, and the three defects it found (2026-07-26)
+
+Every time anyone in this project has looked at TCP packet by packet, they have
+found a defect, and all four of them were found by accident: the delayed ACK
+that was never implemented (§16.6), the four-frame SANA-II receive window that
+TCP hid in retransmissions, `shutdown(SHUT_WR)` sending a RESET instead of a
+FIN, and `bsd_readable()` calling a half-closed socket readable with nothing to
+read. §16 built the instrument that shows what TCP is doing. This section
+builds the one that says what it *should* be doing, and then disagrees with it.
+
+**Result, on `b3b4b49`: 21 cases, 152 checks passed, 4 failed, and three
+defects — one of which means that unacknowledged data is never retransmitted at
+all.**
+
+### 27.1 packetdrill cannot run here, and neither can any host-side injector
+
+The technique is Google's packetdrill's: a script states both the socket calls
+the application makes and the exact packets that must appear on the wire, in
+order, with timing, and a failing case therefore reads as a specification of
+what should have happened. Its published scripts were read as a description of
+correct behaviour. None of its code, and none of its syntax, is used here.
+
+**The tool itself is unusable and so is its architecture.** packetdrill is a
+POSIX program that opens a TUN device and makes the system calls locally;
+neither exists on AmigaOS, and porting it would be a larger job than the stack
+under test. The obvious substitute — a host-side peer that injects raw frames
+into the emulated wire — is not available either, and this is worth stating
+with evidence because it is the first thing anyone will try:
+
+- **FS-UAE's A2065 has three backends and no more.** `slirp`, `slirp_inbound`
+  and `none` are the only values `uae_a2065` accepts on this build; there is no
+  tap, no bridge, and libpcap is not linked (the only `pcap` strings in the
+  3.2.35 binary are three Windows-only winpcap failure messages, §16.3).
+- **SLIRP is a user-mode NAT that terminates TCP and re-originates it.** The
+  guest's peer is SLIRP's own TCP stack, not anything on the host. A host peer
+  never sees the guest's sequence numbers, never sees its flags, and cannot
+  place a byte of its own choosing in the guest's receive path. That is why
+  `tests/tools/netpeer.py` and `tests/curl/curlpeer.py` are stream peers, and
+  no amount of work on them changes it.
+- **A guest-side raw socket is not a way round it either.** `src/bsdsocket/
+  raw.c` says so in its own header: NetX Duo's core has no `IP_HDRINCL`, so the
+  source address of a raw send is always the outgoing interface's. An injected
+  segment would therefore come *from* the machine it is aimed at, and the
+  stack would answer the reply with a RESET to itself.
+
+**So the peer goes below the stack instead of beside it.** `tests/tcpdrill/
+tapdev.c` is an AmigaOS Exec device — `MakeLibrary()` plus `AddDevice()`, six
+vectors, no segment list — that implements enough of SANA-II for `src/sana2/`
+to open it, query it, configure it, take it online and run its reader threads
+against it. `DEVS:NetInterfaces/tap0` names it, so the stack brings it up
+through exactly the code that brings up `a2065.device`, with no build switch
+and nothing in `src/` aware that it is being tested.
+
+The ordering is the whole trick and it is the only fragile thing in the design:
+`TcpDrill` installs the device **before** it opens `bsdsocket.library`, because
+`OpenDevice()` searches ExecBase's device list before it searches `DEVS:`, and
+the stack opens its interfaces when it starts.
+
+What that buys:
+
+| | |
+|---|---|
+| every transmitted frame | arrives complete, timestamped and in order, and is never lost — `CMD_WRITE` is a function call, not a wire |
+| every received frame | is one the harness composed byte for byte, including sequence numbers it has no business knowing |
+| the peer | is not a TCP implementation, so **nothing answers by accident** — which is what makes an RTO measurable |
+| the emulator | is not involved: no `-n`, no `a2065.device`, no SLIRP, no host networking |
+
+Two things are deliberately *not* bypassed. The buffer-management hooks are
+real: `S2_CopyToBuff` and `S2_CopyFromBuff` are called for every byte in both
+directions, so `src/sana2/sana2_copy.c` and the packet positioning in
+`sana2_rx.c` are under test rather than around it. And raw framing is refused
+with `S2ERR_NOT_SUPPORTED`, so `ami_sana2_probe_raw()` decides against it and
+the stack runs the **cooked** path — the one `a2065.device` drives and the one
+every measurement in this document was taken through.
+
+One implementation note, because it compiles cleanly and corrupts every frame.
+The two hooks are m68k register-convention functions (`a0` = to, `a1` = from,
+`d0` = length), and calling them through a `register ... __asm()` typedef
+**miscompiles** on this toolchain: GCC 15 loads the function pointer into `a0`
+and then jumps through it, destroying the first argument. Found by
+disassembling the call, not by running it. The call is written out as inline
+asm.
+
+### 27.2 The script language
+
+A failing case has to read as the specification it violates, so the format is
+one directive per line, verb first, and every sequence number in it is an
+offset:
+
+```
+case c04_shutdown_wr_sends_fin
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+shutdown wr
+tx FA seq=1 ack=1
+rx A seq=1 ack=2
+```
+
+`tx` asserts on the next frame the stack sends; `rx` injects one; `notx MS`
+asserts silence. **Our** sequence numbers count from our own ISN, which the
+harness learns from the first SYN it sees; the peer's count from the ISN the
+harness chose. So no script contains a number the stack picked, and nothing in
+`tests/tcpdrill/scripts/` is a snapshot of current behaviour.
+
+Two decisions are worth defending:
+
+- **The socket under test is non-blocking, always.** packetdrill runs the
+  application call on another thread so a blocking `connect()` can be
+  interleaved with the packets that complete it. `bsdsocket.library` is
+  per-task, so that would mean a second Process with its own library instance
+  in every case; making the socket non-blocking and driving the packet engine
+  from the one Process costs the blocking-call semantics and buys a harness
+  with no concurrency of its own. The blocking paths are already covered by
+  `tests/conformance` and `tests/clients`.
+- **Timing is taken from the frame, not from the harness.** Every transmitted
+  frame is stamped with `ReadEClock()` **inside the device's `BeginIO`** — the
+  instant the stack handed it over — so `after=` and `within=` do not measure
+  the harness's 20 ms poll interval. That mattered: `a02` asserts a 200 ms
+  delayed-ACK timer and would be untestable through a 20 ms poll otherwise.
+
+The window is asserted with `winmin`/`winmax` and never exactly. §24 makes it
+pool-derived and divided by the live socket count, so an exact number would be
+a test of how many sockets the previous case left behind.
+
+### 27.3 What passes, and it is most of it
+
+18 of 21 cases, 152 of 156 checks, on `b3b4b49` with the pinned configuration.
+Recorded as a result rather than as an absence of news, because several of
+these are the successors of defects this project has already paid for:
+
+| | |
+|---|---|
+| three-way handshake, active and passive | ISN, MSS 1460 offered and echoed, ACK carries the peer's ISN + 1 |
+| `shutdown(SHUT_WR)` | **FIN, not RESET** — the third of the four historical defects, asserted rather than assumed |
+| peer half-close | our ACK of the FIN, `recv()` = 0, socket still writable, and a 50-byte segment sent afterwards |
+| an idle established socket | **not readable**, and `recv()` = `EWOULDBLOCK` — the fourth historical defect, likewise |
+| SYN to a closed port | `RST|ACK`, seq 0, ack 1 |
+| data to a closed port | bare `RST` whose sequence number is the segment's ACK number |
+| delayed ACK | 153–213 ms after a lone segment: the 200 ms timer, on the 50 Hz tick, exactly as §16.6 predicts |
+| out-of-order | the hole holds the ACK at its left edge (dup ACK at 10 ms), the fill produces a cumulative ACK, and `recv()` returns both segments in order |
+| duplicate segment | acknowledged twice, delivered once |
+| urgent data | ACK covers the urgent byte, and `recv()` returns 4 bytes — the deliberate inline divergence §17 records, now asserted |
+| RESET on an established connection | tears it down, **answers nothing**, `recv()` = 0 |
+| zero window | `send()` correctly refused with `EWOULDBLOCK`, and a **one-byte probe follows 919 ms later** (RFC 1122 4.2.2.17) |
+| advertised window | inside §24.3's floor and ceiling, 8192–32768 |
+| TCP and IP checksums | verified on **every** frame the stack sent — 71 frames, no failures |
+
+`tap: tx 71  rx delivered 33  rx no-reader 0  copy-failed 0  tx-overrun 0`.
+Nothing was dropped in either direction, so no assertion in the run is standing
+on a frame the harness lost.
+
+### 27.4 Defect 1: unacknowledged data is never retransmitted
+
+**This is the one that matters, and it is not in TCP.**
+
+```
+case x02_data_retransmission_backs_off
+  ok   tx PA seq=1 ack=1 len=100 within=200   [+1ms]
+  FAIL tx PA seq=1 ack=1 len=100 after=700 within=1500
+       nothing was sent at all
+  FAIL tx PA seq=1 ack=1 len=100 after=1500 within=3000
+       nothing was sent at all
+```
+
+A 100-byte segment goes out on an established connection. The peer never
+acknowledges it. **Nothing is ever sent again.** `x04` extends the observation:
+
+```
+case x04_eleven_seconds_of_silence
+  ok   tx PA seq=1 ack=1 len=100 within=200   [+1ms]
+  ok   notx 11000
+```
+
+Eleven seconds of total silence — no retransmission, and not even the RESET
+that ten expired retries should produce. A green line, and it is the worst
+result in the section.
+
+**The mechanism, isolated in `x03` and confirmed on the wire:**
+
+```
+case x03_retransmission_waits_for_a_later_send
+  ok   tx PA seq=1 ack=1 len=100 within=200   [+1ms]
+  ok   notx 1500                                          <- still nothing
+  ok   send 100
+  ok   tx PA seq=101 ack=1 len=100 within=400   [+1ms]    <- the new data
+  ok   tx PA seq=1 ack=1 len=100 within=1500   [+917ms]   <- and NOW the first
+```
+
+The retransmission timer was firing the whole time. The packet was not
+eligible. `nx_tcp_socket_retransmit.c:200` walks the transmit queue with
+
+```c
+while (packet_ptr && (packet_ptr -> nx_packet_queue_next == (NX_PACKET *)NX_DRIVER_TX_DONE))
+```
+
+and `NX_DRIVER_TX_DONE` is written by `_nx_packet_transmit_release()`
+(`nx_packet_transmit_release.c:98`) — i.e. **only a packet the driver has given
+back can be retransmitted.** Every NetX Duo reference driver releases inside
+the `NX_LINK_PACKET_SEND` handler. Ours cannot: a SANA-II `CMD_WRITE` is
+asynchronous, so `src/sana2/sana2_tx.c` releases in `ami_sana2_tx_reap()`
+instead — and reap has exactly three callers, all of them reactive:
+
+| `sana2_tx.c:215, 228` | the **start of the next transmit**, and the spin when the ring is full |
+| `sana2_driver.c:316` | `NX_LINK_GET_TX_COUNT` |
+| `sana2_driver.c:362` | `NX_LINK_DEFERRED_PROCESSING`, which this shim never asks for — it calls `_nx_ip_packet_deferred_receive()` directly and never sets `NX_IP_DRIVER_DEFERRED_PROCESSING` |
+
+So on a link that goes quiet, the last packets sent are never released and
+never become retransmittable. The TX reply port is `PA_IGNORE` (`sana2_tx.c:41`
+— deliberately, so any thread may post to it), which means the completion
+signals nobody and there is no context in which reaping could happen on its
+own.
+
+**Why no instrument in this tree could have seen it.** §16.4 and §24.4 report
+**zero retransmissions** across every trace ever taken here, in both
+directions, on both paths, in both views — because nothing was ever lost on an
+emulated wire or on loopback. A bulk transfer never triggers it either: the
+next segment's `tx_send()` reaps the previous one, so under load the queue
+drains and retransmission works. The failure is precisely the case that has no
+"next segment": a request/response protocol whose single request segment is
+lost. An HTTP GET, a DNS query over TCP, a TLS ClientHello. It hangs until the
+application's own timeout, having put nothing back on the wire.
+
+**Where the fix goes: `src/sana2/`, not `third_party/`.** Reaping needs a
+context that runs when nothing is being sent. Not implemented here — this is
+`src/`, and it is a lifecycle change to the transmit ring rather than a
+one-liner.
+
+### 27.5 Defect 2: the retransmission timer does not back off, and is not derived from anything
+
+```
+case x01_syn_retransmission_backs_off
+  ok   tx S seq=0 within=200                   [+2ms]
+  ok   tx S seq=0 after=700 within=1500        [+890ms]
+  FAIL tx S seq=0 after=1500 within=3000
+       gap too short, ms: wanted 1500, got 1002
+```
+
+SYN retransmissions arrive at a flat ~1 s. RFC 6298 §5.5 requires the RTO to be
+doubled on every retransmission; §2 requires it to be computed from measured
+round-trip times in the first place. Neither happens, and the source says why
+in two lines:
+
+- `nx_tcp_socket_retransmit.c:188` computes the next timeout as
+  `timeout_rate << (timeout_retries * timeout_shift)`, and `timeout_shift` is
+  `NX_TCP_RETRY_SHIFT`, which `nx_tcp.h:114` defaults to **0** and
+  `port/netxduo-amiga/inc/nx_user.h` does not override. The shift is a no-op.
+- `timeout_rate` is `_nx_tcp_transmit_timer_rate`, which `nx_tcp_enable.c:116`
+  fixes at `NX_IP_PERIODIC_RATE / NX_TCP_TRANSMIT_TIMER_RATE` = 50 ticks =
+  **exactly one second**, for every socket, on every path. There is no RTT
+  estimator in the vendored tree at all.
+
+So a lossy long-fat path retransmits ten times in ten seconds and then gives
+up, and a lossy LAN waits a full second for a loss it could have recovered in
+twenty milliseconds. Both directions of wrong from one constant.
+
+`#define NX_TCP_RETRY_SHIFT 1` is the one-line half of this and it is **not**
+obviously safe: with `NX_TCP_MAXIMUM_RETRIES` at 10 the last interval becomes
+`50 << 10` ticks = 1024 s, where RFC 6298 §5.7 caps the RTO at 60 s. Raising
+the shift therefore needs the retry count lowered with it. That file is another
+workstream's, so this is reported rather than changed.
+
+The same flat 1 s governs the zero-window probe, which `z01` measures at
+919 ms. RFC 1122 4.2.2.17 asks for exponentially increasing probe intervals and
+`nx_tcp_socket_retransmit.c:133` writes the code for it — through the same
+`timeout_shift` of 0.
+
+### 27.6 Defect 3: `CloseSocket()` sends a RESET, now with the packet
+
+```
+case c03_close_sends_fin
+  ok   close
+  FAIL tx FA seq=1 ack=1
+       flags: wanted FA, got R
+       observed  R seq=1 ack=0 win=32768 len=0
+```
+
+§12.3 listed this as "a risk that has not been reproduced"; §16.9 promoted it
+to an observation, having seen `RST 1` at the end of every flow in every
+capture. It is now an assertion with the packet next to it: a close on a
+connection where everything is acknowledged and nothing is queued emits a bare
+RESET, seq 1, no ACK flag, where RFC 793 §3.5 requires a FIN.
+
+Two things make this worse than a style point. `shutdown(SHUT_WR)` on the same
+connection, in `c04`, sends a correct `FIN|ACK` and takes the correct ACK back
+— so **the stack contains a working orderly-close path and `close()` does not
+use it**. And a RESET tells the peer to discard anything it has not yet handed
+to its application, which is the same class of data loss as the
+`shutdown(SHUT_WR)` defect that has already been fixed once here.
+
+`src/bsdsocket/` is where that lives, and it is a semantic change (linger,
+TIME_WAIT, how long `CloseSocket()` is allowed to take) rather than a swap of
+one call for another, so it is reported here and not made.
+
+### 27.7 Two behaviours that are not defects, recorded so they are not rediscovered
+
+- **Every full-sized segment is acknowledged, not every second one.** `a01`
+  originally asserted that the first of two 1460-byte segments went
+  unacknowledged, and it fails: the first is acknowledged after 213 ms (the
+  delayed-ACK timer) and the second after 30 ms. RFC 1122 4.2.3.2 is a floor
+  — "at least every second" — so acknowledging both is conformant, and the
+  script now says so. Worth writing down because §16.6's headline was that
+  this rule was *missing*, and the natural next mistake is to assert the
+  stricter reading of it.
+- **The zero-window probe is `ACK`, not `PSH|ACK`.** One byte, sequence number
+  at the right edge, no PSH. Correct, and `z01` originally expected PSH.
+
+### 27.8 What it costs to run, and what it does not cover
+
+One emulator boot for the whole script file, 21 cases, about 40 seconds of
+which 11 are `x04` deliberately watching nothing happen. `tests/tcpdrill/
+run-tcpdrill.sh` stages `bsdsocket.library`, the device drawer and the script,
+runs `tools/fsuae-run.sh` **without** `-n`, and reads `DH0:tcpdrill.txt` back
+off the host directory the guest wrote it to. Output is flushed line by line,
+for the reason §16.9 gives: a diagnostic tool that loses its last twenty lines
+when the machine has to be killed is not a diagnostic tool.
+
+Not covered, and named rather than left to be discovered:
+
+- **Simultaneous open and simultaneous close.** Both are scriptable in this
+  format and neither is written.
+- **TIME_WAIT.** Its duration and the handling of a new SYN arriving during it.
+- **Anything that needs two sockets at once**, because the engine drives one
+  socket under test.
+- **Blocking-call semantics**, by the choice in §27.2.
+- **Loopback.** The device is an interface; `lo0` does not go through it.
+- **Congestion control.** Slow start and the cwnd after a loss are visible in
+  this format — segment counts per RTT — and nothing here asserts on them.
+

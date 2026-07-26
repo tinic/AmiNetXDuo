@@ -1,0 +1,265 @@
+# tcpdrill -- the first set of cases.
+#
+# Read this as a specification, because that is what it is: every line says
+# either what the application asked for or what must appear on the wire, and a
+# failure prints the line next to what actually happened.
+#
+# Conventions
+#   * seq/ack are OFFSETS.  Ours count from our own initial sequence number,
+#     which the harness learns from the first SYN it sees; the peer's count
+#     from the ISN the harness chose.  No script contains a number the stack
+#     picked, so nothing here is a snapshot of current behaviour.
+#   * the advertised window is bounded, never fixed: docs/RESEARCH.md 24 makes
+#     it pool-derived and divided by the live socket count, so an exact number
+#     would be a test of how many sockets the previous case left behind.
+#   * `after`/`within` are milliseconds, measured from the E-Clock reading the
+#     device takes inside BeginIO.
+#
+# ---------------------------------------------------------------------------
+
+# The window first, before any case has left a socket behind.  RESEARCH 24.3:
+# a lone socket on the 8 MB profile gets the ceiling, and nothing may ever come
+# out below the floor.
+case w01_advertised_window_in_bounds
+socket
+connect
+tx S seq=0 winmin=8192 winmax=32768 mss=1460
+
+# RFC 793 3.4: three-way handshake, and our ACK carries the peer's ISN + 1.
+case c01_active_open
+socket
+connect
+tx S seq=0 mss=1460
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+writable 1
+readable 0
+
+# RFC 1122 4.2.2.6: the MSS offered is the interface MTU less 40.  1500 - 40.
+case c02_syn_offers_mss
+socket
+connect
+tx S seq=0 mss=1460
+
+# RFC 793 3.5: a close with everything acknowledged is a FIN, not a RESET.
+# docs/RESEARCH.md 16.9 observed a RESET here in every capture ever taken.
+case c03_close_sends_fin
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+close
+tx FA seq=1 ack=1
+
+# RFC 1122 4.2.2.13 / POSIX: shutdown(SHUT_WR) is a FIN and nothing else.
+case c04_shutdown_wr_sends_fin
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+shutdown wr
+tx FA seq=1 ack=1
+rx A seq=1 ack=2
+
+# The peer half-closes.  We acknowledge the FIN, recv() reports end of file,
+# and the socket stays writable because only one direction shut.
+case c05_peer_fin_half_close
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx FA seq=1 ack=1
+tx A seq=1 ack=2
+recv 100 = EOF
+readable 1
+writable 1
+send 50
+tx PA seq=1 ack=2 len=50
+
+# An established connection with nothing in it is NOT readable.  This is the
+# defect docs/RESEARCH.md names fourth, stated as an assertion.
+case c06_idle_is_not_readable
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+readable 0
+recv 100 = AGAIN
+
+# RFC 793 3.4: a SYN to a port nobody listens on is answered RST|ACK.
+case r01_syn_to_closed_port
+localport 4711
+rx S seq=0 win=8192 mss=1460
+tx RA seq=0 ack=1
+
+# RFC 793 3.4: a non-SYN segment to a closed port is answered with a bare RST
+# whose sequence number is the segment's acknowledgement number.
+case r02_data_to_closed_port
+localport 4712
+rx PA seq=1 ack=1 len=10
+tx R seq=1
+
+# RFC 1122 4.2.3.2: acknowledge AT LEAST every second full-sized segment.
+# "At least" is a floor, not a schedule -- acknowledging both is conformant,
+# and is what this stack does, so each segment gets its own expectation and the
+# transcript records which of the two behaviours was seen.
+case a01_ack_every_second_segment
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=1460
+tx A seq=1 ack=1461 within=400
+rx PA seq=1461 ack=1 len=1460
+tx A seq=1 ack=2921 within=400
+recv 4000 = 2920
+
+# RFC 1122 4.2.3.2: a lone segment is acknowledged by the delayed-ACK timer,
+# which docs/RESEARCH.md 16.6 measures at 200 ms on the 50 Hz tick.
+case a02_delayed_ack_timer
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=101 after=100 within=400
+
+# RFC 6298 5.5: back off the retransmission timer on every retransmission.
+# The connection request is the cheapest place to watch it happen.
+case x01_syn_retransmission_backs_off
+socket
+connect
+tx S seq=0 within=200
+tx S seq=0 after=700 within=1500
+tx S seq=0 after=1500 within=3000
+
+# The same rule on data.  Nothing acknowledges, so every segment here is a
+# retransmission of the first one.
+case x02_data_retransmission_backs_off
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+send 100
+tx PA seq=1 ack=1 len=100 within=200
+tx PA seq=1 ack=1 len=100 after=700 within=1500
+tx PA seq=1 ack=1 len=100 after=1500 within=3000
+
+# RFC 793 3.7 / RFC 1122 4.2.2.17: a zero window stops the sender, and the
+# sender must probe it rather than wait for ever.
+case z01_zero_window_probe
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+send 100
+tx PA seq=1 ack=1 len=100
+rx A seq=1 ack=101 win=0
+send 100 = AGAIN
+notx 300
+tx A seq=101 ack=1 len=1 within=6000
+
+# The mechanism behind x02, isolated.  A LATER transmit on the same interface
+# is what releases the earlier packet, and only a released packet is eligible
+# for retransmission -- so if the retransmission that never came above arrives
+# here, the timer was never the problem.
+case x03_retransmission_waits_for_a_later_send
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+send 100
+tx PA seq=1 ack=1 len=100 within=200
+notx 1500
+send 100
+tx PA seq=101 ack=1 len=100 within=400
+tx PA seq=1 ack=1 len=100 within=1500
+
+# What the missing retransmission costs.  NetX Duo rearms the timer on every
+# expiry whether or not it sent anything, so ten expiries later the socket is
+# torn down having never put the data back on the wire.  This case asserts
+# nothing except silence; the transcript is the result.
+case x04_eleven_seconds_of_silence
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+send 100
+tx PA seq=1 ack=1 len=100 within=200
+notx 11000
+
+# RFC 793 3.9: an out-of-order segment is held, and the acknowledgement stays
+# at the left edge of the hole until the hole is filled.
+case o01_out_of_order_fills
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=101 ack=1 len=100
+tx A seq=1 ack=1 within=400
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=201 within=400
+recv 400 = 200
+
+# RFC 793 3.9: a segment received twice is acknowledged twice and delivered
+# once.
+case o02_duplicate_segment
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=101 within=400
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=101 within=400
+recv 400 = 100
+
+# RFC 1122 4.2.2.4: the urgent pointer points at the byte AFTER the urgent
+# data.  docs/RESEARCH.md 17 records one deliberate divergence here -- the
+# urgent byte is also delivered in the ordinary stream -- so with
+# SO_OOBINLINE off the byte count below is what that divergence predicts.
+case u01_urgent_inbound
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PAU seq=1 ack=1 len=4 urg=4
+tx A seq=1 ack=5 within=400
+recv 100 = 4
+
+# RFC 793 3.4: a RESET on an established connection tears it down, and the
+# stack must not answer a RESET with anything at all.
+case r03_reset_tears_down
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx R seq=1
+notx 200
+recv 100 = 0
+
+# Passive open: the whole handshake from the other side.
+case c07_passive_open
+localport 4713
+listen
+rx S seq=0 win=8192 mss=1460
+tx SA seq=0 ack=1 mss=1460
+rx A seq=1 ack=1
+accept
+readable 0
+rx PA seq=1 ack=1 len=20
+recv 100 = 20
