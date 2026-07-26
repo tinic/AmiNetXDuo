@@ -99,6 +99,22 @@
 #define NX_TCP_MAXIMUM_TX_QUEUE                 8
 
 /*
+ * How many ports may be listened on at once (default 10).
+ *
+ * This is a hard ceiling on listen(), not a soft one: the eleventh
+ * nx_tcp_server_socket_listen() returns NX_MAX_LISTEN, which bsdsocket
+ * reports as ENOBUFS, and no amount of closing other kinds of socket helps.
+ * Ten was enough while the only server in the tree was a test; it is not
+ * enough for the tools this stack exists to run.  `ssh -L` opens one listener
+ * per forward, an ftp client opens one per active-mode transfer, and `nc -l`
+ * plus anything else at all is already two.
+ *
+ * Cost is 44 bytes per entry (NX_TCP_LISTEN, with extended notify on) inside
+ * the single NX_IP, so 10 -> 32 is under a kilobyte of BSS, once.
+ */
+#define NX_MAX_LISTEN_REQUESTS                  32
+
+/*
  * Turn on the extended notify callbacks.
  *
  * Without this, NX_DISABLE_EXTENDED_NOTIFY_SUPPORT is what nx_api.h defines

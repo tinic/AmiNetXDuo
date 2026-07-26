@@ -17,6 +17,9 @@
 
 #include "bsdsocket_vectors.h"
 
+/* For _nx_tcp_packet_send_fin() -- see bsd_tcp_send_fin() below. */
+#include "nx_tcp.h"
+
 #include <proto/exec.h>
 
 /*
@@ -48,6 +51,74 @@
 
 static char bsd_tcp_name[] = "AmiNetXDuo TCP";
 static char bsd_udp_name[] = "AmiNetXDuo UDP";
+
+/*
+ * shutdown(SHUT_WR): send a FIN and keep receiving.
+ *
+ * nx_tcp_socket_disconnect() cannot express this, in either of its two modes.
+ * With NX_NO_WAIT it sends a RESET (nx_tcp_socket_disconnect.c, the
+ * !NX_DISABLE_RESET_DISCONNECT branch) -- so the peer's queued data is thrown
+ * away and its next send() fails; with a wait option it sends a FIN and then,
+ * when the wait expires without the peer also closing, calls
+ * _nx_tcp_socket_block_cleanup() and tears the connection down anyway.  Either
+ * way the half of the connection the application asked to KEEP is destroyed.
+ *
+ * The TCP state machine itself is perfectly capable of it:
+ * nx_tcp_socket_packet_process.c calls _nx_tcp_socket_state_data_check() in
+ * both FIN_WAIT_1 and FIN_WAIT_2, so a socket that has sent its FIN goes on
+ * queuing received data normally.  Only the disconnect *API* is unable to
+ * stop there.  So this open-codes the graceful branch of
+ * _nx_tcp_socket_disconnect() -- state change, FIN timeout, sequence bump,
+ * FIN -- and stops before the suspension and the cleanup that follow it.
+ *
+ * This matters for nc -N, for telnet, and for every ftp data connection: the
+ * whole point of half-close is "I have finished sending, now tell me the
+ * rest", and a RESET answers that with silence.
+ *
+ * The caller holds the ThreadX baton (bsd_nx_enter), so no other ThreadX
+ * thread -- the IP thread included -- can be inside the socket while this
+ * runs; the IP protection mutex is taken as well because that is what
+ * _nx_tcp_packet_send_fin() is called under everywhere else.
+ */
+static VOID bsd_tcp_send_fin(AmiSocket *sock)
+{
+    NX_TCP_SOCKET *tcp = &sock->as_Nx.tcp;
+    NX_IP         *ip  = tcp->nx_tcp_socket_ip_ptr;
+
+    if (ip == NX_NULL)
+        return;
+
+    tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+
+    if (tcp->nx_tcp_socket_state == NX_TCP_ESTABLISHED)
+    {
+        tcp->nx_tcp_socket_state = NX_TCP_FIN_WAIT_1;
+    }
+    else if (tcp->nx_tcp_socket_state == NX_TCP_CLOSE_WAIT)
+    {
+        /* The peer closed first, so our FIN is the last one: LAST_ACK. */
+        tcp->nx_tcp_socket_state = NX_TCP_LAST_ACK;
+    }
+    else
+    {
+        /* Already closing, or never established. Nothing to send. */
+        tx_mutex_put(&ip->nx_ip_protection);
+        return;
+    }
+
+    /* The FIN timeout is armed here only if nothing is still unacknowledged;
+       otherwise the transmit path arms it when the queue drains. */
+    if (tcp->nx_tcp_socket_transmit_sent_head == NX_NULL)
+    {
+        tcp->nx_tcp_socket_timeout         = tcp->nx_tcp_socket_timeout_rate;
+        tcp->nx_tcp_socket_timeout_retries = 0;
+    }
+
+    tcp->nx_tcp_socket_tx_sequence++;
+    _nx_tcp_packet_send_fin(tcp, tcp->nx_tcp_socket_tx_sequence - 1);
+
+    tx_mutex_put(&ip->nx_ip_protection);
+}
 
 static ULONG bsd_udp_queue_max(VOID)
 {
@@ -1242,18 +1313,13 @@ LONG bsd_shutdown(register LONG sock_fd __asm("d0"),
     {
         sock->as_Flags |= ASF_WRSHUT;
 
-        /*
-         * NetX Duo has no half-close, so the closest thing to "send FIN and
-         * carry on reading" is a non-blocking disconnect, which queues the
-         * FIN and returns NX_IN_PROGRESS.
-         */
         if ((sock->as_Flags & (ASF_TCP | ASF_CONNECTED)) ==
             (ASF_TCP | ASF_CONNECTED))
         {
             if (bsd_nx_enter(SocketBase) != 0)
                 return bsd_fail(SocketBase, AMI_ENETDOWN);
 
-            nx_tcp_socket_disconnect(&sock->as_Nx.tcp, NX_NO_WAIT);
+            bsd_tcp_send_fin(sock);
 
             bsd_nx_leave(SocketBase);
         }
