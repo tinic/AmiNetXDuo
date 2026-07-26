@@ -120,7 +120,7 @@ static BOOL has_address(void)
         say("bootcheck: cannot write " STATUS_FILE "\n", 0);
         return FALSE;
     }
-    run_to("C:ShowNetStatus ALL", file);
+    run_to("C:ShowNetStatus", file);
     Close(file);
 
     file = Open((STRPTR)STATUS_FILE, MODE_OLDFILE);

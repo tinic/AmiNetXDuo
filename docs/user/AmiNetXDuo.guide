@@ -838,14 +838,23 @@
 
                               @{b}Online@{ub}
 
-      Online INTERFACE/A,QUIET/S
+      Online NAME/A,UNIT/N,TIMEOUT/N
 
   Puts an interface back on the network after
   @{"Offline" link OFFLINE}. Starts the stack first if it is not
   running.
 
-  @{b}INTERFACE@{ub}   The interface name. Required.
-  @{b}QUIET@{ub}       Print nothing.
+  @{b}NAME@{ub}      Either an interface -- the name of its file in
+            DEVS:NetInterfaces -- or the SANA-II driver that an
+            interface uses, such as a2065.device. Required. An
+            interface of that name is taken first; failing that, the
+            interface which uses a driver of that name is found and
+            used, and the command says which one it picked.
+  @{b}UNIT@{ub}      Which unit of the driver, when NAME is a driver.
+            Default 0.
+  @{b}TIMEOUT@{ub}   Seconds to wait for the interface to come up. 0, the
+            default, waits for as long as it takes; Ctrl-C stops the
+            wait either way.
 
   @{b}Example@{ub}
 
@@ -869,14 +878,28 @@
 
                              @{b}Offline@{ub}
 
-      Offline INTERFACE/A,QUIET/S
+      Offline NAME/A,UNIT/N,TIMEOUT/N
 
   Takes an interface off the network. The stack keeps running and the
   interface keeps its address, but nothing is sent or received until
   you put it back with @{"Online" link ONLINE}.
 
-  @{b}INTERFACE@{ub}   The interface name. Required.
-  @{b}QUIET@{ub}       Print nothing.
+  @{b}NAME@{ub}      An interface, or the SANA-II driver one uses -- exactly
+            as for @{"Online" link ONLINE}. Required.
+  @{b}UNIT@{ub}      Which unit of the driver, when NAME is a driver.
+            Default 0.
+  @{b}TIMEOUT@{ub}   Seconds to wait for the interface to go down. 0, the
+            default, waits for as long as it takes.
+
+  @{b}Naming a driver instead of an interface@{ub}
+
+      1> Offline a2065.device UNIT 0
+      a2065.device unit 0 is interface eth0.
+      eth0 is offline
+
+  A driver that no interface uses has nothing here to switch, even when
+  the card is fitted, and the message lists what this machine does have
+  with the driver and unit of each.
 
   @{b}Example@{ub}
 
@@ -908,17 +931,40 @@
 
                            @{b}ShowNetStatus@{ub}
 
-      ShowNetStatus INTERFACE/K,STATS/S,ALL/S
+      ShowNetStatus INTERFACE/M,INTERFACES/S,ARPCACHE=ARP/S,ROUTES/S,
+                    DNS=DOMAINNAMESERVERS/S,ICMP/S,IP/S,MB=MEMORY/S,
+                    TCP/S,UDP/S,TCPSOCKETS/S,UDPSOCKETS/S,NAMES/S,
+                    ALL/S,REPEAT/S,QUIET/S
 
-  The one command to reach for first. It shows what the stack thinks
-  the network looks like: the intent from your configuration files and
-  the reality from the running interface, with reality winning wherever
-  the two disagree.
+  The one command to reach for first. With no options at all it shows
+  what the stack thinks the network looks like: the intent from your
+  configuration files and the reality from the running interface, with
+  reality winning wherever the two disagree, and a list of what to look
+  at when something is wrong.
 
-  @{b}INTERFACE@{ub}  Show only this interface. (A keyword: you must write
-             INTERFACE eth0, not just eth0.)
-  @{b}STATS@{ub}      Also show the SANA-II driver's own counters.
-  @{b}ALL@{ub}        The same as STATS.
+  Name a category and you get that category instead of the summary.
+
+  @{b}INTERFACE@{ub}   Detailed configuration and driver counters for the
+              interfaces named. More than one may be given.
+  @{b}INTERFACES@{ub}  The list of interfaces, one line each.
+  @{b}ARP@{ub}         The address resolution cache, and its counters.
+  @{b}ROUTES@{ub}      The routing table.
+  @{b}DNS@{ub}         The name servers in use.
+  @{b}IP@{ub}          Internet Protocol counters.
+  @{b}ICMP@{ub}        Echo and control message counters.
+  @{b}TCP@{ub}         Transmission Control Protocol counters.
+  @{b}UDP@{ub}         User Datagram Protocol counters.
+  @{b}MEMORY@{ub}      The packet pool: how many buffers there are, how many
+              are free, and how often one was wanted and not there.
+  @{b}TCPSOCKETS@{ub}  The TCP sockets in use.
+  @{b}UDPSOCKETS@{ub}  The UDP sockets in use.
+  @{b}NAMES@{ub}       Put names to the addresses and ports printed, from
+              DEVS:Internet and then from the name servers.
+  @{b}ALL@{ub}         With TCPSOCKETS or UDPSOCKETS, include the sockets
+              that are only bound here and not talking to anything.
+  @{b}REPEAT@{ub}      Print it again every second, clearing the screen
+              first, until Ctrl-C.
+  @{b}QUIET@{ub}       Print no error messages.
 
   @{b}Example@{ub}
 
@@ -947,9 +993,9 @@
   @{b}configured@{ub}  What the interface file asked for: DHCP, static or
               link-local.
 
-  @{b}With STATS@{ub}
+  @{b}Naming an interface@{ub}
 
-      1> ShowNetStatus INTERFACE eth0 STATS
+      1> ShowNetStatus INTERFACE eth0
       ...
       SANA-II counters for eth0
         packets received           2    packets sent               1
@@ -966,6 +1012,13 @@
   Remember that the "Name servers" list is read from
   DEVS:Internet/name_resolution only, and does not include servers that
   came with a DHCP lease -- see @{"Name servers" link RESOLVER}.
+
+  @{b}Categories this command does not have@{ub}
+
+  IGMP, MULTICASTROUTING and ROUTING-as-statistics are absent because
+  there is nothing behind them: multicast group membership is not
+  enabled in this stack, there is no multicast router, and no routing
+  counters are kept. ROUTES prints the routing table itself.
 
   @{b}Errors@{ub}
 
@@ -993,11 +1046,9 @@
   @{b}-i@{ub} or @{b}INTERFACES@{ub}   the interface table
   @{b}-r@{ub} or @{b}ROUTES@{ub}       the routing table
   @{b}-a@{ub} or @{b}ALL@{ub}          the open connections
-  @{b}-s@{ub} or @{b}STATS@{ub}        the interface table with its packet counters,
-                      which is the same output as -i, because the
-                      counters are always in it. For the full driver
-                      counters use
-                      @{"ShowNetStatus STATS" link SHOWNETSTATUS}.
+  @{b}-s@{ub} or @{b}STATS@{ub}        per-protocol statistics -- IP, ICMP, TCP, UDP
+                      and the packet pool -- followed by the SANA-II
+                      driver counters for each interface.
 
   With no switches at all, netstat prints all three.
 
@@ -1035,9 +1086,10 @@
   lookup in progress. TCP connections show the far end and the
   connection state (ESTABLISHED, LISTEN, TIME_WAIT and so on).
 
-  Per-protocol statistics -- the packet and error counts Unix netstat
-  -s prints -- are not available; that counting is switched off in this
-  build to keep it small.
+  netstat and @{"ShowNetStatus" link SHOWNETSTATUS} cover the same
+  ground on purpose: this one has switches and columns, that one has
+  named categories and a diagnosis. They read the same counters, so
+  they cannot disagree -- only the layout differs.
 
 @endnode
 
@@ -1049,24 +1101,48 @@
 
                                 @{b}ping@{ub}
 
-      ping HOST/A,COUNT/N/K,SIZE/N/K,TIMEOUT/N/K,DELAY/N/K,QUIET/S
+      ping -c=COUNT/K/N,-i=INTERVAL/K/N,-l=LOAD/K/N,
+           -n=NUMERICONLY=NUMERIC/S,-o=ONEREPLY/S,-q=QUIET/S,
+           -s=SIZE/K/N,-t=TIMEOUT/K/N,BELL/S,HOST/A
 
   Sends ICMP echo requests and reports what comes back. The single best
   test of whether two machines can see each other.
 
-  @{b}HOST@{ub}     An address or a name. Required. A name is looked up in
-           DEVS:Internet/hosts first and then by DNS.
-  @{b}COUNT@{ub}    How many requests to send. 0 means "until Ctrl-C".
-           Default 4.
-  @{b}SIZE@{ub}     Payload bytes, up to 1400. Default 56.
-  @{b}TIMEOUT@{ub}  Seconds to wait for each reply. Default 5.
-  @{b}DELAY@{ub}    Milliseconds between requests. Default 1000.
-  @{b}QUIET@{ub}    Print only the summary.
+  Every option has both spellings, the short flag and the keyword, so
+  "ping host -c 3" and "ping host COUNT 3" are the same command.
+
+  @{b}HOST@{ub}                    An address or a name. Required. A name is
+                          looked up in DEVS:Internet/hosts first and
+                          then by DNS.
+  @{b}-c@{ub} or @{b}COUNT@{ub}           How many requests to send. 0 means "until
+                          Ctrl-C". Default 4.
+  @{b}-i@{ub} or @{b}INTERVAL@{ub}        Seconds between requests. Default 1.
+  @{b}-l@{ub} or @{b}LOAD@{ub}            Send this many back to back before the
+                          interval starts being honoured.
+  @{b}-n@{ub} or @{b}NUMERIC@{ub}         Do not put a name to the address given.
+  @{b}-o@{ub} or @{b}ONEREPLY@{ub}        Stop as soon as one reply comes back.
+  @{b}-q@{ub} or @{b}QUIET@{ub}           Print only the summary.
+  @{b}-s@{ub} or @{b}SIZE@{ub}            Payload bytes, up to 1400. Default 56.
+  @{b}-t@{ub} or @{b}TIMEOUT@{ub}         Give up after this many seconds however
+                          the run is going. 0, the default, means
+                          there is no such limit.
+  @{b}BELL@{ub}                    Ring the console bell for each reply.
+
+  TIMEOUT limits the whole run, not one reply: the wait for a single
+  reply is five seconds and is not adjustable.
 
   Ctrl-C stops the loop and still prints the summary. It is noticed
   between requests and while waiting between them, so in the worst case
-  -- a request that gets no reply at all -- it takes one TIMEOUT to
+  -- a request that gets no reply at all -- it takes five seconds to
   take effect.
+
+  @{b}Options this ping does not have@{ub}
+
+  DEBUG, RECORDROUTE, DONTROUTE and VERBOSE are absent rather than
+  accepted and ignored. The first three need a socket, an IP option and
+  a routing bypass that the echo call underneath does not offer, and
+  VERBOSE lists inbound ICMP that is not an echo reply, which that call
+  never hands back.
 
   @{b}Examples@{ub}
 
@@ -1080,7 +1156,7 @@
       3 packets transmitted, 3 received, 0% packet loss
       round-trip min/avg/max = 1/2/4 ms
 
-      1> ping 10.0.2.99 COUNT 2 TIMEOUT 2
+      1> ping 10.0.2.99 -c 2
       PING 10.0.2.99 (10.0.2.99): 56 data bytes
       Request timed out for icmp_seq=0
       Request timed out for icmp_seq=1
@@ -1398,7 +1474,7 @@
   see @{"The address is there but nothing can be reached" link T_CABLE}.
   Check the counters too:
 
-      1> ShowNetStatus STATS
+      1> ShowNetStatus INTERFACE eth0
 
   "packets sent" going up while "packets received" stays at 0 means the
   machine is talking and nothing is answering.
@@ -1434,7 +1510,7 @@
 
   @{b}Diagnose@{ub}
 
-      1> ShowNetStatus INTERFACE eth0 STATS
+      1> ShowNetStatus INTERFACE eth0
 
   Look at three things:
 
@@ -1466,7 +1542,7 @@
   another: if something answers, the address is taken.
 
   @{b}Rising error counters.@{ub} Steadily increasing "bad data", "overruns" or
-  "receive errors" in the STATS output point at the hardware or the
+  "receive errors" in the counters point at the hardware or the
   cable, not at the configuration. "buffer failures" rising means the
   machine is short of memory.
 
@@ -1787,7 +1863,8 @@
        modem or DSL connection as unsupported for now.
     o  @{b}MTU= in the interface file is ignored@{ub}; the packet size comes
        from the driver.
-    o  @{b}No per-protocol statistics@{ub} (netstat -s in the Unix sense).
+    o  @{b}No IGMP@{ub}, so no multicast group membership and no multicast
+       routing.
 
   @{b}For people writing or porting software@{ub}
 

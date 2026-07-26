@@ -7360,3 +7360,172 @@ its own alias `10.0.2.2` itself, and lives exactly as long as the emulator does.
 nothing in this test that can time out while the run waits its turn, so a failure from it
 is a failure in the commands.
 
+
+## 23. The command line is part of the contract (2026-07-26)
+
+§22 is about commands that could not see the stack. This one is about what the
+user types at them, which had drifted independently and for a different
+reason.
+
+Four commands had kept the names they are supposed to have and quietly grown
+their own options. That is not a matter of taste. The premise of this project
+is that a program, a script or a person that worked against the reference
+stack works here, and the first thing any of the three touches is the argument
+template. A command whose template differs is a compatibility bug in the same
+sense that a missing library vector is one — it just fails at a layer that is
+easier to look at and therefore easier to excuse.
+
+The reference was the per-command documentation shipped with the Roadshow 1.15
+demo, read for one thing only: names, keywords, flags and argument shapes. No
+wording from it is reproduced anywhere in this tree.
+
+### 23.1 Before and after
+
+| command | was | is |
+| --- | --- | --- |
+| `ping` | `HOST/A,COUNT/N/K,SIZE/N/K,TIMEOUT/N/K,DELAY/N/K,QUIET/S` | `-c=COUNT/K/N,-i=INTERVAL/K/N,-l=LOAD/K/N,-n=NUMERICONLY=NUMERIC/S,-o=ONEREPLY/S,-q=QUIET/S,-s=SIZE/K/N,-t=TIMEOUT/K/N,BELL/S,HOST/A` |
+| `AddNetInterface` | `NAME/A,QUIET/S` | `INTERFACE/M,QUIET/S,TIMEOUT/K/N` |
+| `Online` / `Offline` | `INTERFACE/A,QUIET/S` | `NAME/A,UNIT/N,TIMEOUT/N` |
+| `ShowNetStatus` | `INTERFACE/K,STATS/S,ALL/S` | `INTERFACE/M,INTERFACES/S,ARPCACHE=ARP/S,ROUTES/S,DNS=DOMAINNAMESERVERS/S,ICMP/S,IP/S,MB=MEMORY/S,TCP/S,UDP/S,TCPSOCKETS/S,UDPSOCKETS/S,NAMES/S,ALL/S,REPEAT/S,QUIET/S` |
+
+`netstat` keeps its template and is discussed in 23.5.
+
+The dual-form convention — `-c` and `COUNT` naming one option — was already in
+`nc` and `netstat` (`LISTEN=-l/S`, `INTERFACES=-i/S`) and is now in `ping` as
+well. ReadArgs takes more than one alias per item, so
+`-n=NUMERICONLY=NUMERIC/S` is a single switch with three spellings. That was
+verified under FS-UAE before anything was built on it, because a malformed
+template does not fail loudly: it makes *every* invocation of the command fail
+with "required argument missing", which reads like a bug in the command.
+
+### 23.2 `ping`: implement it or leave it out
+
+Ten of the fourteen options are implemented. Four are absent, and absent is the
+point — a template that accepts `RECORDROUTE` and then does not record the
+route is worse than one that rejects it, because the second tells the truth
+immediately.
+
+* `-d`/`DEBUG` sets `SO_DEBUG` on a socket.
+* `-R`/`RECORDROUTE` needs the IP RECORD_ROUTE option on the outbound packet.
+* `DONTROUTE` is a routing bypass.
+* `-v`/`VERBOSE` lists received ICMP that is not an echo reply.
+
+Two of the ten are worth spelling out because their *meaning*, not just their
+name, had drifted:
+
+**`TIMEOUT` is the whole run, not one reply.** Ours used to be the per-reply
+wait, so `ping host TIMEOUT 5` with the default count waited up to twenty
+seconds — four times what anyone typing it expects. It is now the elapsed
+limit it is documented to be everywhere, `0` meaning no limit, and the
+per-reply wait is fixed and not exposed. The reply wait is clamped to the time
+remaining, so a short `TIMEOUT` cannot be overshot by one outstanding request.
+
+**`INTERVAL` replaces `DELAY`, and it is seconds.** `DELAY` was a name we
+invented, taking milliseconds. The default is one second either way, so
+nothing that did not name the option changes.
+
+`-l`/`LOAD` is honest but partial, and the code says so: a preload sends its
+packets with no wait *between* them.
+
+`-n`/`NUMERIC` had to be given something to suppress before it could be
+accepted, so a numeric HOST is now looked up backwards for the header and
+summary lines, through the local `DEVS:Internet/hosts` and then the resolver.
+`-n` skips that.
+
+### 23.3 `AddNetInterface`: `/M` and a DHCP allowance
+
+`INTERFACE/M` accepts a list, capped at `AMI_CFG_MAX_INTERFACES` because that
+is what the parsed configuration holds, sorted before use. The files are read
+TWICE on purpose: the first pass only parses, and aborts before anything is
+started if any file is unusable. Without that, a list of three with a typo in
+the third brings two interfaces up and then fails, which is the one outcome a
+boot script cannot recover from. Nothing is printed until every file has been
+checked either, or the report implies that the first two were started.
+
+`TIMEOUT` is the DHCP allowance. Ten seconds is both the default and the
+floor: a shorter limit expires before the exchange can finish and reports a
+failure that is not one. An interface whose address is in its file waits for
+nothing.
+
+### 23.4 `Online` / `Offline`: one argument, two kinds of thing
+
+This one needed a decision rather than a rename. The reference commands take a
+**SANA-II device driver name and a unit** — that is the level at which a
+driver is switched off to run diagnostics on a card. Ours took a **configured
+interface**, which is the handle every other command here uses.
+
+Both are now accepted, resolved in this order:
+
+1. an interface, if `DEVS:NetInterfaces/<NAME>` parses. A `UNIT` that
+   contradicts the unit in that file is an error, not a silent override.
+2. otherwise a driver, matched on the last path component of `DEVICE` and on
+   `UNIT` against every interface file in the drawer. The command says which
+   interface it picked.
+3. otherwise neither, and the message lists every interface with its driver
+   and unit, so both spellings are visible in the same table.
+
+A name that is both is taken as the interface and says so, naming the other
+candidate. The drawer is scanned directly rather than through
+`netstack_config()`, so the resolution works with the stack down.
+
+`QUIET` is gone: it is not in the interface these commands are supposed to
+have, and this project carries no legacy burden.
+
+`TIMEOUT` bounds the wait for the interface to reach the requested state, `0`
+meaning indefinitely, as documented; Ctrl-C aborts it either way.
+
+### 23.5 `ShowNetStatus` and `netstat`: keep both, share the data
+
+The decision, and the reasoning:
+
+* **`ShowNetStatus` grows the full category set.** It is the Amiga-shaped
+  introspection command — named categories, a general summary when no category
+  is given, and a "what to look at" diagnosis aimed at somebody who does not
+  yet know what is wrong. That summary and that diagnosis are why a beginner
+  types it, and they have no equivalent anywhere else.
+* **`netstat` stays as it is.** It is the BSD-shaped convenience: `-i`, `-r`,
+  `-a`, `-s`, columns, and nothing but data. It is ours rather than
+  Roadshow's, so it owes nothing to this section, and it is what a decade of
+  Amiga documentation and install scripts type.
+* **Neither reads the stack for itself.** Both take the same two snapshots
+  from `tool_nx.c` — `ToolSnapshot` for interfaces, routes and sockets,
+  `ToolStats` for the protocol counters, the ARP cache and the packet pool —
+  so they cannot report different values for one fact, and a counter added in
+  one place is available to both. Only the layout differs.
+
+Three categories are absent because there is nothing behind them:
+
+* `IGMP` — `nx_igmp_enable()` is never called, so there is no group
+  membership and the counters do not exist.
+* `MR`/`MULTICASTROUTING` — there is no multicast router to have statistics
+  about.
+* `RT`/`ROUTING` as a *statistics* category — no routing counters are kept,
+  and `NX_ENABLE_IP_STATIC_ROUTING` is off, so the routing table is the
+  connected routes plus the default gateway. `ROUTES` prints exactly that.
+
+The rest are implemented against real data. `netstat -s` used to say
+per-protocol statistics were switched off in this build; that had stopped
+being true — `nx_user.h` defines no `NX_DISABLE_*_INFO` — and it now prints
+them.
+
+`NAMES` resolves both halves: addresses through `ami_netdb_host_by_addr()` and
+then a reverse lookup, ports through `ami_netdb_serv_by_port()`. `ALL` is a
+modifier on the two socket categories rather than a category of its own, so
+`ShowNetStatus ALL` is still the summary — which is what the installer's boot
+check had been relying on it to be. `REPEAT` reprints every second after a
+form feed until Ctrl-C.
+
+One trap worth recording for anyone reading the ARP cache directly:
+`nx_ip_arp_table[]` is a hash of **circular** lists — the last entry in a
+bucket points back at the head, not at NULL — so a walk needs a head
+comparison. Getting it wrong does not fail. It spins.
+
+### 23.6 How it was exercised
+
+One FS-UAE boot on SLIRP, 53 command lines through `ToolsSmoke`: every option
+of every changed command in both spellings, the templates through ReadArgs'
+own `?`, the failure cases (no argument, unknown name, unknown driver, wrong
+unit, a bad name in either position of a list), and `REPEAT` started in the
+background so it could be seen looping. The emulator is serialised across
+workstreams by `build/.fsuae.lock`, which is the argument for one boot that
+checks fifty things rather than fifty boots that check one.
