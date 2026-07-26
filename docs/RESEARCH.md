@@ -6068,3 +6068,342 @@ flat rather than hoped to be.** Neither filter is installed in the steady state:
 * The urgent-data callback is now non-NULL on every TCP socket, but
   `_nx_tcp_socket_packet_process()` already tested `NX_TCP_URG_BIT` before deciding
   whether to call it. No segment in 149 curl cases has that bit set.
+
+## 18. The record path: AES-128-CBC and SHA-256 on the 68020 (2026-07-26)
+
+§15 ended by naming this: the bulk path was the one row where neither this tree
+nor AmiSSL had a single byte of m68k assembly, and it is the row that decides
+`https://` throughput, because it is paid on every byte of every transfer
+rather than once per connection. The handshake is now level with OpenSSL and is
+further reduced by session resumption (§13); the per-byte cost is forever.
+
+The ciphersuites this client actually negotiates are `0xC027`
+(ECDHE_RSA_WITH_AES_128_CBC_SHA256) and `0xC023` (ECDHE_ECDSA_…), so the record
+path is AES-128-CBC plus HMAC-SHA256, both directions, per record. GCM is
+compiled in and no negotiated suite reaches it.
+
+**The result, in one line: `https` went from 15,801 B/s to 20,057 B/s on the
+same machine at the same commit, 1.27×, with only the record path's
+implementation differing.** Everything below is how, and what did not work.
+
+### 18.1 What the machine charges, measured before anything was written
+
+`tests/crypto68k/crypto68k_bulk` runs instruction kernels whose mix is known
+because they are assembly (`c68k_bulk_kernels.S`), for the same reason
+`tests/perf/cpucal` does: a C loop that "should" compile to a rotate is a
+measurement of the compiler. A1200 profile, `-k 56`, implied 56.4 MHz.
+
+| | measured | implied cycles | MC68020UM |
+|---|---:|---:|---:|
+| `ADD.L Dn,Dm` | 35.936 ns | 2.00 | 2 |
+| `EOR.L Dn,Dm` | 35.592 ns | 1.98 | 2 |
+| `AND.L Dn,Dm` | 35.597 ns | 1.98 | 2 |
+| `MOVE.B Dn,Dm` | 35.967 ns | 2.00 | 2 |
+| `SWAP Dn` | 71.050 ns | 3.95 | 4 |
+| `LSR.L #3,Dn` | 70.834 ns | 3.94 | 8 |
+| `ROR.L #1,Dn` | 106.798 ns | 5.94 | 8 |
+| `ROR.L #8,Dn` | 106.801 ns | 5.94 | 8 |
+| `ROR.L Dm,Dn`, count 13 | 142.217 ns | 7.91 | 8 |
+| `MOVE.L d16(An),Dm` | 89.011 ns | 4.95 | |
+| `MOVE.B d16(An),Dm` | 88.678 ns | 4.93 | |
+| `MOVE.L Dm,d16(An)` | 156.534 ns | 8.71 | |
+| `MOVE.L (An,Dn.W*4),Dm`, **1 KB** table | **159.845 ns** | 8.89 | |
+| `MOVE.L (An,Dn.W*4),Dm`, **4 KB** table | **159.847 ns** | 8.89 | |
+| `MOVE.B (An,Dn.W),Dm`, 256 B table | 159.842 ns | 8.89 | |
+
+Four rows decide the whole section.
+
+**A 4 KB table and a 1 KB table cost the same to the picosecond.** 159.845 ns
+against 159.847. That is what "no data cache" means in practice, and
+`cpucal`'s 32 KB / 64 B read ratio of 0.88× says the same thing from the other
+direction. Every argument for the one-table AES layout is an argument about
+cache footprint; on this part footprint is free, so the rotates that layout
+spends to save 3 KB are pure loss.
+
+**A byte read from a table costs exactly what a longword read costs**, 159.842
+against 159.845. The addressing mode dominates and the operand size does not
+appear at all. So the byte-oriented S-box variant — which trades 4-byte reads
+for 1-byte reads and pays for MixColumns in the ALU — buys nothing on the side
+it was supposed to win on, and pays full price on the other.
+
+**Rotates are not the bottleneck they look like, and SWAP is a trap.** A rotate
+by an immediate is 5.94 cycles and by a register 7.91. So `SWAP` + `ROR.L #n`
+(3.95 + 5.94 = 9.89) and `MOVEQ` + `ROR.L Dm,Dn` (2 + 7.91 = 9.91) are the same
+price to within the measurement. The SWAP idiom is a **68000** habit, where a
+rotate cost 8 + 2n and rotating by eleven meant thirty cycles; a 68020 has a
+flat shifter and the trick is worth nothing. §18.4 is what that did to a
+SHA-256 written around it.
+
+**The instruction cache is not modelled here, and that has to be said plainly.**
+Sweeping a straight-line body of `ADD.L` from 32 bytes to 2 KB:
+
+```
+   32 B body  46.742 ns per ADD.L      512 B body  36.321 ns
+  128 B body  38.251 ns                1024 B body 35.899 ns
+  256 B body  37.237 ns                2048 B body 35.906 ns
+```
+
+That is monotonically *decreasing* and it flattens at exactly `ADD.L`'s 35.9 ns
+— it is the loop's `SUBQ`/`BNE` being amortised over more instructions and
+nothing else. A real 68EC020 has 256 bytes of direct-mapped instruction cache
+and a 2 KB straight-line body would fetch every instruction from the bus;
+FS-UAE's A1200 model charges nothing for that. **So this emulator would reward
+unrolling that a real machine would punish**, and both round loops below are
+deliberately left rolled on the strength of the MC68020UM rather than of a
+measurement we cannot make. The AES round body is 176 bytes and the SHA-256
+round body 96, both inside the real cache; an eight-round SHA unroll would be
+about 770 bytes and is exactly the trade that cannot be evaluated here.
+
+### 18.2 The AES question, answered
+
+Three implementations of the same cipher, in one process, on one buffer, each
+checked against FIPS-197 and against every other before a time is believed.
+16 KiB, `-k 56`, and the two directions measured separately because a download
+decrypts and §15 only ever measured encryption.
+
+| | encrypt | decrypt |
+|---|---:|---:|
+| `nx_crypto`, what we shipped | 85,307 µs (187 KB/s) | 110,139 µs (144 KB/s) |
+| **T4** four 1 KB tables, C | 73,058 µs (218 KB/s) | 74,387 µs (214 KB/s) |
+| **T1** one 1 KB table + rotates, C | 79,799 µs (200 KB/s) | 86,674 µs (184 KB/s) |
+| **SBOX** 256 B S-box, MixColumns in the ALU, C | 131,856 µs (121 KB/s) | 188,659 µs (83 KB/s) |
+| **T4**, 68020 assembly | **67,298 µs (237 KB/s)** | **67,731 µs (235 KB/s)** |
+| **T1**, 68020 assembly | 78,195 µs (204 KB/s) | 78,809 µs (202 KB/s)|
+
+**Four tables win, and they win by more in assembly than in C: 13.9% on encrypt
+and 14.1% on decrypt.** This is the answer to "what is the right AES for a
+machine with no data cache", and it is the opposite of the folklore. The
+one-table layout exists to keep the working set small enough to stay cached;
+with no cache to stay in, its three rotates per column are twelve rotates per
+round bought for nothing. The three rotations
+per column are `ROR.L #8`, `SWAP` and `ROL.L #8`: 15.8 cycles a column by the
+table above, 63 a round, 570 a block. The measured gap between the two
+assembly rows is 10,897 µs over 1,024 blocks, which is 600 cycles a block. The
+rotates are the whole of it.
+
+**The byte-oriented S-box loses by 1.96× encrypting and 2.79× decrypting**
+against the four-table assembly, and 1.55×/1.71× against the implementation it
+would have replaced, and
+the instruction table says why before the cipher is written: its reads are the
+same price as the T-table's, so its entire MixColumns is added cost. It is kept
+in the tree, and so is the one-table form, because a measurement nobody can
+reproduce is an assertion.
+
+The assembly is worth **8.0% encrypting and 8.9% decrypting** over the best C,
+and 1.27×/1.63× over what we shipped. What it does differently:
+
+- **The state lives in memory, not in registers.** A round needs four state
+  words, four accumulators, an index and a temporary; that is ten values and
+  the 68020 has eight data registers. Reading an index byte out of a register
+  costs `MOVE.B` plus a `ROL.L` to bring the next byte down, because only the
+  low byte of a register can be moved out — two instructions and 7.94 cycles.
+  Reading it out of a sixteen-byte buffer costs one `MOVE.B d16(An),Dn` and
+  4.93, *and* leaves four registers free to hold the accumulators, so the round
+  ends in a single `MOVEM.L`. On a part with a data cache the sixteen byte reads
+  would be nearly free and it would not be close; on this one it is still ahead.
+- **The last round uses the 256-byte S-box** and byte reads, rather than masking
+  four T-table entries the way `aes_core.c` does.
+- **The big-endian longword load is inline assembly**, in the C wrapper: one
+  `MOVE.L` at any alignment, because the 68020 does misaligned accesses in
+  hardware and a TLS record's payload starts 21 bytes into the packet buffer.
+  GCC compiles the portable form into four byte loads, three shifts and three
+  ORs, and it is 300 cycles a block of load and store around a 3,700 cycle
+  cipher.
+
+What is **not** taken, with its price, because a measured option declined is
+worth more than one not noticed: the CBC loop is still C, and it costs one
+`JSR`, one `MOVEM` of eleven registers each way and four longword loads, four
+`EOR`s and four stores a block — about 600 cycles of a 3,725 cycle block, 16%,
+priced from the instruction table above rather than measured on its own.
+Fusing CBC into the assembly would recover perhaps two thirds of it — 11% of
+AES, 5% of the record path, and about 4% on the wire, which is below what the
+wire measurement resolves.
+
+### 18.3 SHA-256: 1.29× on the compression function, and none of it assembly
+
+| | aligned | on an odd address |
+|---|---:|---:|
+| SHA-256, `nx_crypto` | 85,739 µs (186 KB/s) | |
+| SHA-256, ours | **66,198 µs (241 KB/s)** | 66,453 µs |
+| HMAC-SHA256, `nx_crypto`'s hash | 86,730 µs (183 KB/s) | |
+| HMAC-SHA256, ours | **66,869 µs (239 KB/s)** | |
+
+**1.30× on the compression function and 1.30× through HMAC**, and the
+misaligned case — which is the one a TLS record actually presents — costs 0.4%
+rather than the 6.3% it cost before the `MOVE.L` went in.
+
+Two changes produced all of it and neither is assembly:
+
+1. **The sixteen message words are loaded, not assembled.** This is a
+   big-endian machine, so `W[t]` for t < 16 is the longword at `data + 4t`.
+   `nx_crypto_sha2.c`'s `W0()` macro builds each one from four byte loads,
+   three shifts and three ORs — 128 instructions a block that need not exist.
+   OpenSSL has had a big-endian fast path here for decades; the vendored code
+   does not.
+2. **The message schedule is computed up front** rather than interleaved with
+   the rounds. Interleaved, the round's two scratch registers have to serve both
+   and everything spills.
+
+### 18.4 The 68020 SHA-256 that was written, measured, and removed
+
+It was written. `d` and `h` in address registers because they are pure addends
+in any round, which is what makes eight state variables fit in eight data
+registers with two to spare; `g` moved to its address register the instant `Ch`
+finished with it, freeing a third scratch; the two big sigmas factored so that
+`Sigma0(x) = ROTR2(x ^ ROTR11(x) ^ ROTR20(x))`; every rotation expressed as
+`SWAP` plus an immediate rotate. It passed FIPS 180-4, RFC 4231 and the
+million-`a` vector.
+
+| | aligned | one byte in |
+|---|---:|---:|
+| portable C | 66,687 µs | 70,241 µs |
+| 68020 assembly | 67,656 µs | 67,653 µs |
+
+**The C wins on the buffer a benchmark hands it and the assembly wins on the
+one a TLS record actually is, and the whole spread is 5%.** §18.1's instruction
+table is the explanation: `SWAP` + immediate rotate is 9.89 cycles and the
+`MOVEQ` + register rotate a compiler is forced into is 9.91. The trick the
+whole file was built on does not exist on this part.
+
+So the assembly's one genuine advantage was the misaligned `MOVE.L` for the
+message words — and that is three lines of inline assembly, not 230 lines of
+hand-written rounds. It moved into the C, which is now ahead on both
+alignments, and `c68k_sha256.S` was deleted.
+
+**This is a real result and it is worth stating without hedging: for SHA-256 on
+a 68020, GCC 15.2 is not leaving anything on the table.** The 1.29× came from
+knowing the machine is big-endian, which is an algorithm question, not from
+instruction selection. The AES assembly earns its place — 8-9% over the best C
+and a question about table layout that could not have been settled any other
+way — and the SHA-256 assembly did not.
+
+### 18.5 §15's table, re-run
+
+Same harness, same process, same `-k 56`, every result checked against
+AmiSSL's before it is timed. **0 failures, 0 mismatches** — 16 KiB of AES
+ciphertext identical, 16 KiB of recovered plaintext identical, the HMAC tag
+identical. The handshake rows are unchanged and are reproduced for context.
+
+| operation | ours | AmiSSL | measured | corrected |
+|---|---:|---:|---|---|
+| RSA-2048 public, e=65537 | 139.5 ms | 142.7 ms | ours 1.02× | AmiSSL 1.004× |
+| RSA-2048 private CRT, blinding off | 4.97 s | 5.30 s | ours 1.07× | ours 1.22× |
+| RSA-2048 private CRT, OpenSSL's default | 4.97 s | 6.88 s | ours 1.38× | ours 1.54× |
+| ECDSA P-256 verify | 484.9 ms | 840.2 ms | ours 1.73× | ours 1.69× |
+| ECDH P-256 shared secret | 338.3 ms | 1,049.7 ms | ours 3.10× | ours 3.03× |
+| k·G, an ECDHE key generation | 94.1 ms | 1,047.4 ms | ours 11.1× | ours 10.76× |
+| **AES-128-CBC encrypt, 16 KiB** | **67.4 ms** | 84.2 ms | **ours 1.25×** | — |
+| **AES-128-CBC decrypt, 16 KiB** | **67.9 ms** | 85.5 ms | **ours 1.26×** | — |
+| **HMAC-SHA256, 16 KiB** | **68.5 ms** | 111.2 ms | **ours 1.62×** | — |
+
+No MULU.L correction applies to the last three rows: neither implementation
+contains a single multiply, which was true in §15 and is still true — the
+inline-assembly `MOVE.L` and the byte-parallel `xtime` were both chosen partly
+so that it stayed true. `tests/perf/cpucal` reports MULU.L at 32.06 cycles
+against the part's 45 in the same run, and it is irrelevant here.
+
+**The bulk row was a dead heat and is now ours by a quarter to two thirds.**
+One 16 KiB TLS record encrypted and MACed: **135.9 ms our way against
+195.4 ms AmiSSL's, 117 KB/s against 81 KB/s of application data.** §15 had
+92 KB/s against 81; the gap went from 13% to 44%.
+
+Read the decrypt row twice, because §15 did not have it. `nx_crypto`'s AES
+decrypts 25% *slower* than it encrypts (110,139 µs against 85,307) and AmiSSL's
+is nearly symmetric; ours is symmetric to within 0.6%. A download decrypts
+every byte it receives, so the asymmetric implementation was losing on the
+direction that matters.
+
+### 18.6 The number that actually matters: the wire
+
+The primitive is not the deliverable. `tests/curl/run-curlverify.sh` is, and
+the case is `e18_tls_large` — half a megabyte through the record layer against
+the suite's own host peer and its own PKI, with the body hashed against the
+server's copy, so a fast wrong AES cannot pass.
+
+Two `tls.library` binaries built from **one commit**, differing only in
+`AMINETXDUO_TLS_STOCK_BULK`, which puts `nx_crypto`'s AES and SHA-256 back in
+the ciphersuite table and changes nothing else. That is not fussiness: the TCP
+layer grew delayed ACKs (`78b4ed9`) and the input path grew a per-packet
+`SOCK_RAW` filter (`026c348`) in the same window, and a comparison against a
+figure from before those would have landed somebody else's work in this result.
+
+| | bytes | seconds | B/s |
+|---|---:|---:|---:|
+| `https` `e18_tls_large`, `nx_crypto` bulk | 524,288 | 33.18 | **15,801** |
+| `https` `e18_tls_large`, `crypto68k` bulk | 524,288 | 26.14 | **20,057** |
+| `http` `a04_get_1m2`, `nx_crypto` build | 1,200,000 | 6.54 | 183,486 |
+| `http` `a04_get_1m2`, `crypto68k` build | 1,200,000 | 7.44 | 161,290 |
+
+**`https` is 1.27×.** The TLS penalty on the wire, in this hermetic setting,
+goes from about 11.6× to about 8.0×.
+
+**The `http` control needs saying carefully rather than quoting.** The two
+`http` rows differ by 12%, and they differ in the direction *opposite* to the
+`https` gain — which is the tell that it is not a property of either build.
+`bsdsocket.library` is byte-identical between them (`md5` 6386710…, both), only
+`tls.library` differs, and the ciphersuite table is consulted for nothing but
+TLS. What moves is the measurement: every one of these numbers goes through
+FS-UAE's SLIRP, whose packet delivery is scheduled by the *host* and is not
+part of the cycle-exact model, so a contended host puts variance into any wire
+figure however deterministic the CPU is. The control says what a control can
+say — the `http` path is untouched by construction, and its noise does not
+favour the result.
+
+What does corroborate the `https` row is the arithmetic below, measured on the
+E-Clock with no network in it at all: the primitive benchmark predicts an 8.0 s
+difference over half a megabyte and the wire shows 7.04 s.
+
+The arithmetic. Receiving
+costs HMAC plus AES-decrypt: 135.9 ms per 16 KiB at 56.4 MHz is 548 ms at
+14 MHz, and 524,288 bytes is 32 records, so 17.5 s of the measured 26.14. The
+stock path is 197.4 ms per 16 KiB, 795 ms at 14 MHz, 25.5 s of the measured
+33.18. The predicted difference is 8.0 s and the measured one is 7.04 — the
+rest is TCP, the handshake and the file writes, and they are the same on both
+sides.
+
+**On §11's figures.** That section measured 16,464 B/s over `https` against
+114,598 over `http`, and those are not directly comparable to the rows above:
+they were fetched from real hosts across the real internet at `-k 28`, where
+`http` is limited by the far end and the round trip as much as by this machine.
+The hermetic peer makes `http` faster (161 KB/s) and leaves `https` CPU-bound,
+which is why the ratio here starts higher. The controlled number is the A/B,
+and the A/B says 1.27×.
+
+**A primitive-level speedup that did not move the wire number would be a
+finding too. This one moved it, by about what the arithmetic predicted, and the
+remaining ceiling is still the record path**: at 20,057 B/s the record layer is
+about two thirds of the cost and everything else in the stack shares the rest.
+
+### 18.7 Where it is wired, and what is checked
+
+`src/tls/ami_tls_crypto.c` — private `NX_CRYPTO_METHOD` entries, the same
+mechanism the RSA and P-256 methods use, no vendored source touched. HMAC is
+`nx_crypto`'s own framing with the hash swapped underneath it through
+`_nx_crypto_hmac_metadata_set()`, which takes the three hash entry points as
+function pointers; `c68k_sha256_initialize`/`_update`/`_digest_calculate` have
+exactly those signatures on purpose, so none of the ipad/opad, key-shortening
+or padding logic is reimplemented.
+
+`tests/crypto68k/crypto68k_bulk` is the emulator tier and
+`tests/crypto68k/host/test_c68k_host.c` the host one, which is where the
+vectors run on every push. Both check FIPS-197 (AES-128 and AES-256, both
+directions), FIPS 180-4 (`"abc"`, the empty string, the 56-byte message, one
+million `a`), RFC 4231, and the shapes that break CBC implementations: zero
+blocks, a single block, a chaining value carried across calls, a decrypt in
+place, and a buffer on an odd address. Every variant is checked against every
+other and against `nx_crypto` before a single time is printed.
+
+The host tier caught one bug and it is the one worth recording: the SHA-256
+fast path reads `W[0..15]` as longwords, which is right on the m68k and wrong
+on the build machine, and the first version had no endianness guard on it.
+
+And the wire is the last check, because a cipher that corrupts one byte in a
+million looks exactly like a network problem. `run-curlverify.sh -g E` on the
+new build: **21 of 28 cases run and every one of them passes** — six chain
+fetches at depths 2, 3 and 4 in RSA and ECDSA with every body hashed against
+the server's copy, the half-megabyte transfer, TLS reuse across processes, and
+the five negative cases (wrong CA, wrong host, expired, self-signed, TLS on a
+plain port) all refused for the right reason. The seven that did not pass are
+all `no result line -- the run did not reach this case`: three emulators were
+contending for `build/.fsuae.lock` and the run spent most of its budget
+queueing. Nothing failed; the tail was not reached.

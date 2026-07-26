@@ -86,6 +86,19 @@ ULONG   c68k_aes_td[4][256];        /* Td0..Td3, equivalent inverse       */
 UCHAR   c68k_aes_sbox[256];
 UCHAR   c68k_aes_isbox[256];
 
+/*
+ * Built once, on the first c68k_aes_key_set().  Not guarded by anything, and
+ * that is deliberate rather than overlooked: tls.library is an AmigaOS shared
+ * library with ONE data segment behind every opener, so two processes can
+ * reach this at the same time.
+ *
+ * It is safe because both of them write the SAME BYTES.  The flag is set last,
+ * so a thread that sees it set is looking at a finished table; a thread that
+ * does not see it set rebuilds, and every longword it stores is the value that
+ * was already there.  Reads only ever begin after the reader's own
+ * c68k_aes_key_set() returned, which means after its own build completed.  A
+ * Forbid() pair would buy nothing and would have to be explained anyway.
+ */
 static UINT c68k_aes_tables_ready;
 
 /* a * b in GF(2^8) with the AES polynomial, by the schoolbook double-and-add.
