@@ -230,7 +230,13 @@ SYS:whois referral.test SERVER 10.0.2.2 PORT $WHOIS_PORT FOLLOW
 SYS:whois chain.test SERVER 10.0.2.2 PORT $WHOIS_PORT
 SYS:whois chain.test SERVER 10.0.2.2 PORT $WHOIS_PORT FOLLOW
 # ... and the default server, which is a real registry over the real internet.
+# example.com produces NO referral -- IANA administers it and answers for it
+# directly -- so amiga.com is here as well: IANA refers that one to Verisign,
+# and Verisign's record carries the indented "Registrar WHOIS Server:" line
+# that a matcher anchored at column zero silently misses.  That is the case
+# which found the bug, so it is the case that keeps it fixed.
 SYS:whois example.com
+SYS:whois amiga.com FOLLOW
 # ---- give the inbound connection time to have happened ----------------
 wait 15
 EOF
