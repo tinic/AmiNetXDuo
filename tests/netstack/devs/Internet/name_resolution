@@ -1,3 +1,18 @@
-# FS-UAE SLIRP: gateway and DNS forwarder both live at 10.0.2.2.
-nameserver 10.0.2.2
+# FS-UAE SLIRP: the DNS forwarder is 10.0.2.3.  The GATEWAY is 10.0.2.2 and it
+# does NOT answer DNS -- this file said 10.0.2.2 until 2026-07-25, and every
+# on-Amiga name lookup in the tree was paying for it:
+#
+#   nameserver 10.0.2.2    gethostbyname("example.com")   30.06 s
+#   nameserver 10.0.2.3    gethostbyname("example.com")    0.58 s
+#
+# Measured from a program linked against nothing of ours, on the 14 MHz A1200
+# profile, same boot image, only this line changed.  The lookups SUCCEEDED
+# either way, which is why nobody noticed: DHCP supplies a working server as
+# well, so the resolver waits out 10.0.2.2, falls back, and answers -- thirty
+# seconds late.  fetch, host, tests/tls/run-fetch.sh and every conformance DNS
+# case were all paying it, and no harness timed a single command.
+#
+# The thirty seconds is the resolver's own failover time and is worth a look
+# on its own account; see docs/RESEARCH.md.
+nameserver 10.0.2.3
 domain localdomain
