@@ -558,9 +558,57 @@ static AmiSocket *bsd_closing_head;
 
 static BOOL bsd_socket_destroy(AmiSocket *sock);
 
+/*
+ * Data arriving on a connection the application has closed.
+ *
+ * There is nobody left to read it, so acknowledging it would be a lie: the
+ * peer would be told its data was delivered and then never hear about it
+ * again. 4.4BSD's tcp_input answers this with a reset --
+ *
+ *     if (so->so_state & SS_NOFDREF && tp->t_state > TCPS_CLOSE_WAIT && tlen)
+ *             tp = tcp_drop(tp, ECONNRESET);
+ *
+ * -- and it is the same rule as RFC 1122 4.2.2.13's "close with unread data",
+ * one segment later. Without it a closed socket in FIN_WAIT_2 goes on
+ * acknowledging for as long as the peer keeps writing, which is what made
+ * tests/clients' "send() to a closed peer eventually fails" stop failing.
+ *
+ * THE TEARDOWN IS NOT DONE HERE. This runs from inside
+ * _nx_tcp_socket_state_data_check(), which has more to do with both the socket
+ * and the packet after it returns; tearing the control block down underneath it
+ * is not something to do for a corner case. Sending the RST is safe -- it only
+ * builds and transmits a packet -- and the socket is then given an expired
+ * timeout, so NetX Duo's own fast periodic reaches _nx_tcp_socket_connection_
+ * reset() on the next tick, from the top of the IP thread and with nothing in
+ * flight. bsd_closing_sweep() collects it after that.
+ */
+static VOID bsd_closing_data_notify(NX_TCP_SOCKET *tcp)
+{
+    NX_TCP_HEADER header;
+
+    /* A bare FIN queues nothing and must not be answered this way; only real
+       data that nobody can read is a reset. */
+    if (tcp->nx_tcp_socket_receive_queue_count == 0)
+        return;
+
+    /* The fake-header idiom nx_tcp_socket_disconnect.c uses for the same
+       call: word_3 carries only the flag that says this is not a real
+       received header. */
+    header.nx_tcp_header_word_3         = NX_TCP_ACK_BIT;
+    header.nx_tcp_acknowledgment_number = tcp->nx_tcp_socket_tx_sequence;
+    header.nx_tcp_sequence_number       = tcp->nx_tcp_socket_rx_sequence;
+    _nx_tcp_packet_send_rst(tcp, &header);
+
+    tcp->nx_tcp_socket_timeout_retries = tcp->nx_tcp_socket_timeout_max_retries;
+    tcp->nx_tcp_socket_timeout         = 1;
+}
+
 static VOID bsd_closing_park(AmiSocket *sock)
 {
     sock->as_Flags |= ASF_CLOSING;
+
+    /* See above: from here on, data is a reset rather than an acknowledgement. */
+    nx_tcp_socket_receive_notify(&sock->as_Nx.tcp, bsd_closing_data_notify);
 
     /*
      * Nothing may point at the caller any more. The base is about to be freed
@@ -586,7 +634,11 @@ VOID bsd_closing_sweep(VOID)
     {
         UINT state = sock->as_Nx.tcp.nx_tcp_socket_state;
         BOOL done  = (state == NX_TCP_CLOSED) || (state == NX_TCP_TIMED_WAIT);
-        BOOL late  = ((ULONG)(now - sock->as_ClosingAt) >= BSD_CLOSING_DEADLINE);
+        /* Unreadable data is a reset (see bsd_closing_data_notify); this is
+           the same rule for anything that got queued before the notify was
+           installed, or while the socket was between states. */
+        BOOL late  = ((ULONG)(now - sock->as_ClosingAt) >= BSD_CLOSING_DEADLINE) ||
+                     (sock->as_Nx.tcp.nx_tcp_socket_receive_queue_count != 0);
 
         if (!done && !late)
         {
@@ -605,9 +657,14 @@ VOID bsd_closing_sweep(VOID)
          */
         if (!done)
         {
-            AMI_WARN("bsdsocket: close did not complete in %ld s (state %ld); "
-                     "resetting", (long)(BSD_CLOSING_DEADLINE / NX_IP_PERIODIC_RATE),
-                     (long)state);
+            /* Not a warning when it is the data rule: that is a peer still
+               writing to a socket nobody owns, which is ordinary. */
+            if (sock->as_Nx.tcp.nx_tcp_socket_receive_queue_count == 0)
+                AMI_WARN("bsdsocket: close did not complete in %ld s "
+                         "(state %ld); resetting",
+                         (long)(BSD_CLOSING_DEADLINE / NX_IP_PERIODIC_RATE),
+                         (long)state);
+
             nx_tcp_socket_disconnect(&sock->as_Nx.tcp, NX_NO_WAIT);
         }
 
