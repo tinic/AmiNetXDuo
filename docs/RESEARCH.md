@@ -3818,6 +3818,12 @@ The resumed figure is essentially constant, because what is left is one round tr
 PRF invocations and two hashes. It does not depend on the chain, which is the whole
 point: the ECDSA case, the expensive one, is the one that gains most.
 
+**Measure the cold column on a quiet host.** These runs reach a real server over SLIRP, so
+the figure is not purely emulated cycles, and repeats taken while two other FS-UAE
+instances shared the machine read 12.1 s and 28.7 s for the same two hosts. The resumed
+column is unmoved by that — 589 to 620 ms across every run in this work, contended or not,
+because there is almost nothing in it to contend for.
+
 **And the headline. `www.iana.org` is three certificates behind Cloudflare and does not
 complete a cold handshake at 14 MHz — the front end gives up first.** Seeded once at
 `-k 28` (11.2 s), then the machine REBOOTED and only the 436-byte session file carried
@@ -4038,10 +4044,8 @@ have happened anyway. An entry is replaced when a new session for the same host 
 evicted LRU when the table is full, and **evicted immediately when a handshake that
 offered it failed**, so a broken entry cannot make a host permanently unreachable.
 
-Entries are keyed by host, port **and whether the chain was verified**. That last one is
-not fussiness: without it a program that used `TLSA_NoVerify` to reach a printer would
-poison the cache for every program that came afterwards, and resumption skips
-verification by construction.
+**Entries are keyed by host, port and a fingerprint of the whole trust decision** — see
+§13.6.1, because getting that wrong was a security defect and not a detail.
 
 **The security properties, stated and then left alone.** Each entry holds a 48-byte TLS
 master secret and a session ticket in the clear. Anyone who can read the library's memory
@@ -4055,6 +4059,67 @@ traffic from them, which the ECDHE full handshake would not have allowed. That i
 price, it is the price every TLS session cache has paid since 1996, and this stack exists
 so a classic Amiga can read the web. `TLSA_NoResume` turns it off; `TLSA_SessionFile` with
 an empty string keeps the cache in RAM and off the disk.
+
+#### 13.6.1 Keying on the trust decision, and the defect that came of not doing it
+
+The first version keyed on host, port and a **boolean** saying verification had happened.
+That is a trap with a name on it: it records *that* a chain was checked, not *what it was
+checked against*. Found by the curl verification suite, RSA host, cold handshake 5.68 s:
+
+| trust store offered | expected | got |
+|---|---|---|
+| the correct store, cold | 200 | 200 |
+| a valid store holding a root that signed **nothing** in the chain | 60 | **200** |
+
+The second row is the defect. The session cached by the first case was resumed under a
+different store, and **a resumed handshake verifies nothing** — no certificate is sent, no
+signature is checked, no host name is compared. So the library returned a connection it
+called verified, against roots the caller never offered. Cold verification was never
+broken: expired, self-signed and wrong-host were all still refused. It was only the second
+connection that stopped checking, and it survived a reboot through the disk mirror.
+
+**The key now names the decision completely.** What went in, and why:
+
+| in the key | why |
+|---|---|
+| the trust store's **identity** | the whole point: FNV-1a over the index's count and every (subject-name hash, offset, length) record |
+| `TLSA_NoVerify` | two populations that must never mix |
+| whether validity **dates** were checked | skipped on a clockless machine, so setting your clock must not silently fail to start checking expiry |
+| `TLSA_MaxChain` | the cautious reading — a session verified over an eight-deep chain is not one a caller limiting itself to two would have established |
+| host name, port | already the primary key |
+
+What stayed out, because a key that includes things which do not affect trust only costs
+resumptions: `TLSA_Error` is an output pointer, `TLSA_Timeout` is liveness,
+`TLSA_RecordBuffer` is a buffer size, `TLSA_NoResume` turns the machinery off rather than
+parameterising it, `TLSA_SessionFile` selects *which* cache and is handled by the library
+base reloading when it changes.
+
+**Cost.** The fingerprint is computed in `tls_store_open()`, where the whole index is
+already in memory because it was just read off the disk — one pass over 1,428 bytes for
+the Mozilla set, once per connection, against a handshake that spends seconds on
+arithmetic. Hashing the 126 KB of DER instead would have cost more than the resumption
+saves, which is the trade that made the index the right object to hash.
+
+**What that does not protect against, stated rather than implied.** Two stores whose
+indexes agree record for record but whose certificate DER differs — someone rewriting a
+root in place, at the same offset and length, under the same subject Name. That is an
+attacker who can already write the trust store, and such an attacker owns verification
+outright: they would simply add a root of their own. It is not a new exposure. It also
+does not distinguish two different *files* holding the same roots, which is correct rather
+than a gap — the same root set is the same trust, and keying on the path would lose
+resumptions to an assign or a copy without buying anything.
+
+**The disk format moved with it, `ATS1` → `ATS2`.** An `ATS1` record holds a key this code
+must not trust, and the new layout would misread every field after the master secret. An
+unrecognised magic is ignored rather than reinterpreted: every connection becomes a full
+handshake and the next session written replaces the file.
+
+The regression test is in `tests/tls/`, and it tests both directions.
+`run-resume.sh` stages a **second, valid** trust store holding one unrelated self-signed
+root — real enough to open, wrong enough to be useless — and `tls_resume.c` checks that a
+cached verified session is refused under it, with an `UNTRUSTED` reason, and then that the
+**correct** store still resumes and still transfers data. A fix that simply stops resuming
+is not a fix.
 
 ### 13.7 The API did not change, and that was the design
 
@@ -4163,6 +4228,10 @@ right — and connects. The result is a full handshake, 6.8 s, the page still ar
 replaced rather than left to fail forever.
 
 **`TLSA_NoResume`, proved.** Full handshake with a valid session sitting in the cache.
+
+**A different trust store cannot inherit a verification, proved** — §13.6.1, and the check
+runs in both directions in the same test so a pass cannot come from having simply stopped
+resuming.
 
 **The one-off `ecc256.badssl.com` failure reported against `f535728` is closed, and it was
 never a library bug.** It did not reproduce here — two cross-process attempts resumed in
@@ -4722,6 +4791,22 @@ it is two steps of about 25 KB in the first two dozen cases and then a flat
 line for the remaining hundred, which is AmiSSL's 3.5 MB library and its
 allocations settling, not a leak. (Ours drifts 208 bytes over the same run,
 because it has no AmiSSL to load.)
+
+#### Its HTTPS did not complete a case, and that is AmiSSL rather than us
+
+Group E was run against the same binary with AmiSSL staged and **not one case
+finished**. The host peer logged sixteen handshake attempts in nine minutes —
+one about every thirty-two seconds, each ending with the guest closing the
+connection mid-handshake — and the Amiga side never got as far as writing an
+exit code. Not diagnosed, and deliberately not chased: OpenSSL 3.6.2's generic
+bignum on a 14 MHz 68020 is the subject of §15, `--cacert` was being handed a
+PEM rather than the indexed store our own backend takes, and none of it is the
+socket layer. **The stack carried all sixteen attempts without incident**,
+which is the only part of it this suite is entitled to claim.
+
+Our own curl over `tls.library` does the same group in 25 cases and a few
+minutes, which is the comparison worth remembering when anyone proposes
+importing a TLS library instead of writing a backend (§11.6).
 
 **So the "crashes most of the time with Roadshow TCP" report is not reproduced
 and its diagnosis was wrong.** Nothing crashed. The version it referred to is
