@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.20)
 # plain vX.Y.Z.
 #
 # 0.x on purpose: nothing has run on real hardware yet.
-project(AmiNetXDuo VERSION 0.1.1 LANGUAGES C ASM)
+project(AmiNetXDuo VERSION 0.2.0 LANGUAGES C ASM)
 
 # ---------------------------------------------------------------- options ---
 
@@ -71,7 +71,8 @@ endif()
 # limiter?" can be answered by building two libraries out of one tree and
 # measuring, which is how tests/trace/ settled it -- see the note on
 # BSD_TCP_WINDOW in src/bsdsocket/bsdsocket_internal.h.  Empty keeps the
-# built-in floor.
+# built-in floor.  Setting it at or above the ceiling pins every socket at it,
+# which is how a FIXED window is measured against the pool-derived one.
 set(AMINETXDUO_TCP_WINDOW "" CACHE STRING "TCP receive window floor in bytes")
 if(NOT AMINETXDUO_TCP_WINDOW STREQUAL "")
     add_compile_definitions(BSD_TCP_WINDOW=${AMINETXDUO_TCP_WINDOW})
