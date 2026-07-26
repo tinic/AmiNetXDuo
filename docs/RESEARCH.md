@@ -6021,3 +6021,50 @@ there is no port on the host that could carry a connection into the guest whatev
 configuration says. The suite derives the port as `base + 161` and cannot be pointed
 elsewhere. This is not reachable from here and it is not ours; the capability itself is
 covered on loopback by `tests/clients` groups D, E, I and M.
+
+### 17.6 The regression cover, and what a filter on every inbound packet costs
+
+`SOCK_RAW` puts a callback on the dispatch path of **every inbound IP packet**, which is
+the hot path for every transfer in the tree. A correctness win there is cheap to pay for
+with throughput, so it was measured rather than argued.
+
+| | |
+|---|---|
+| conformance, loopback tier | **130 passed, 0 failed, 12 skipped** |
+| conformance, network tier | **141 passed, 1 failed, 0 skipped** |
+| `tests/clients` | **94 checks, 0 failures** |
+| `tests/curl` groups A–F, our curl | **147 passed, 2 failed, 149 cases** |
+| `tests/curl` groups A–D and F, the Aminet binary | **122 passed, 2 failed, 124 cases** |
+| host `ctest` | **6/6** |
+| `tools/ci.sh` on playhouse2, NDK 3.9 | host + all four cross configs + conformance, **all green** |
+
+The two curl failures are §16.8's two and §14's two — `a44_cookies_send` and
+`f07_ftp_active` — unchanged in identity and in count.
+
+**The concurrency sweep, against §16.8's own numbers on the same profile:**
+
+| `--parallel-max` | §16.8 | with `SOCK_RAW` and urgent data |
+|---:|---:|---:|
+| 8 | 2.66 s | **2.66 s** |
+| 16 | 4.86 s | **3.30 s** |
+| 24 | 4.80 s | **4.76 s** |
+| 32 | 6.22 s | **6.94 s** |
+| 40 | 7.42 s | **7.16 s** |
+| 48 | 8.40 s | **8.52 s** |
+
+Every transfer completes, every body byte-identical, `AvailMem` delta **+0**. Three
+points faster, two slower, one identical, about 3% either way — which is run-to-run
+noise on this profile and is stated as noise, not as a win.
+
+**And the reason it is noise is structural, which is why the sweep was expected to be
+flat rather than hoped to be.** Neither filter is installed in the steady state:
+
+* `raw.c` installs `nx_ip_raw_packet_filter` on the first `SOCK_RAW` descriptor and
+  removes it with the last. Nothing in the curl suite opens one, so what remains is the
+  two loads and two branches `NX_ENABLE_IP_RAW_PACKET_ALL_STACK` adds at the top of
+  `_nx_ip_dispatch_process`, inside a branch NetX Duo already had.
+* `oob.c` installs `nx_ip_packet_filter` for the duration of one `nx_tcp_socket_send()`
+  and takes it out again on the next line.
+* The urgent-data callback is now non-NULL on every TCP socket, but
+  `_nx_tcp_socket_packet_process()` already tested `NX_TCP_URG_BIT` before deciding
+  whether to call it. No segment in 149 curl cases has that bit set.
