@@ -68,6 +68,18 @@ a user guide in `Docs/` inside the archive.
 
 The installer copies all of them into `C:`.
 
+## Finding the machine by name
+
+The Amiga answers to **`<hostname>.local`** on the local network, so another
+machine can reach it by name without any DNS server or configuration — and
+`.local` names work from the Amiga in the other direction too. This matters
+most when there is no DHCP server at all: the machine gives itself an address
+and is still reachable.
+
+It needs no separate command. `ping`, `host`, `fetch` and any older program
+that resolves a name all get it, because the lookup happens inside the resolver
+everything already uses.
+
 ## HTTPS
 
 `fetch` handles `https://` URLs, and certificates are properly checked against
