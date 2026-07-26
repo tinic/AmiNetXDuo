@@ -3753,3 +3753,357 @@ with the same names in each list as before.
    acknowledged before the close, so **this is a risk that has not been reproduced, not a
    defect that has been ruled out**. On a slow link with a large final write it would
    truncate.
+
+
+## 13. Session resumption: 23 s becomes 0.6 s (2026-07-25)
+
+`https://` on a 14 MHz 68020 was never limited by anything we control. A full TLS 1.2
+handshake costs **6.8 s** for a two-certificate RSA chain and **23.3 s** for a
+two-certificate ECDSA one, essentially all of it public-key arithmetic, and Cloudflare
+abandons a handshake somewhere between 11 and 20 seconds. Raising the clock fixes it and
+we cannot raise the clock.
+
+**A resumed handshake does none of that arithmetic.** Measured on the A1200 profile,
+cold and resumed back to back in one process with identical instrumentation
+(`tests/tls/tls_resume`, 28 checks, 0 failures):
+
+| host | chain | cold | resumed | ratio |
+|---|---|---|---|---|
+| `tls-v1-2.badssl.com` | 2, RSA, 0xC027 | **6,807 ms** | **596 ms** | 11.4× |
+| `ecc256.badssl.com` | 2, ECDSA, 0xC023 | **23,419 ms** | **595 ms** | 39.4× |
+
+The resumed figure is essentially constant, because what is left is one round trip, four
+PRF invocations and two hashes. It does not depend on the chain, which is the whole
+point: the ECDSA case, the expensive one, is the one that gains most.
+
+**And the headline. `www.iana.org` is three certificates behind Cloudflare and does not
+complete a cold handshake at 14 MHz — the front end gives up first.** Seeded once at
+`-k 28` (11.2 s), then the machine REBOOTED and only the 436-byte session file carried
+across:
+
+```
+===== SYS:fetch https://www.iana.org/ TO DH0:warm.txt =====
+www.iana.org: TLS 0x303, ciphersuite 0xC023, 0 certificate(s), 0.5 s (resumed session)
+  chain verified, validity dates checked
+----- rc 0 -----
+```
+
+**0.5 s, at the A1200's own 14 MHz, on a host that cannot be reached cold at that clock.**
+That is the difference between `https://` working and not.
+
+### 13.1 Tickets, not session IDs, and the measurement that decided it
+
+Both mechanisms were probed before anything was written, against the four hosts this
+library is developed against — ten trials each, first connection then immediate second,
+`openssl s_client` with `-no_ticket` for the session-ID arm:
+
+| host | session ID | ticket |
+|---|---|---|
+| `www.iana.org` | **2/10** | **10/10** |
+| `tls-v1-2.badssl.com` | 0/10 | 10/10 |
+| `ecc256.badssl.com` | 0/10 | 10/10 |
+| `example.com` | 0/10 | 10/10 |
+
+Not a close call. A modern front end is a farm of machines behind one address; a session
+ID is state on **one** of them and a ticket is stateless, so every machine in the farm can
+decrypt it. The two hits on iana are the second connection happening to land on the same
+edge node. **The probe method is sound and was controlled** — the same script against a
+local `openssl s_server -no_ticket` resumes every time, which is what says the 0/10s are
+the servers' answer and not the script's bug.
+
+So: **RFC 5077 tickets.** Session IDs come along free, because the acceptance signal for a
+ticket is the server echoing back the session ID the client offered, and offering the
+previous session's ID is what RFC 5077 §3.4 asks for anyway. That is where those two iana
+hits go, and it is what makes this work against an intranet server that has never heard of
+tickets.
+
+**One risk was checked before building rather than after.** RFC 7627's
+`extended_master_secret` extension: `nx_secure` does not implement it, so every session
+this library creates is a non-EMS session, and RFC 7627 §5.3 says a server SHOULD refuse
+to resume one abbreviated. Measured with `openssl s_client -no_ems`: **5/5 resumed on all
+four hosts.** Nobody enforces the SHOULD. Had they, this work would have needed EMS first
+and that is a different piece of work entirely.
+
+### 13.2 No vendored source was touched, and `--wrap` is why
+
+`nx_secure` has no resumption of any kind, and the previous agent's three findings all
+hold up:
+
+- `nx_secure_tls_send_clienthello.c:199` sets `nx_secure_tls_session_id_length = 0`
+  unconditionally, with a comment saying session resumption is not implemented;
+- there is no `session_ticket` extension anywhere in the tree — not even a constant for
+  0x0023; `nx_secure_tls_process_newsessionticket.c` is TLS 1.3 only;
+- `nx_secure_tls_process_serverhello.c:158` stores the ServerHello's session ID and
+  nothing ever reads it.
+
+A fourth, found here and worse than any of them: **`_nx_secure_tls_client_handshake()`
+has no case for a NewSessionTicket**, and its `switch` leaves `status` at
+`NX_SECURE_TLS_HANDSHAKE_FAILURE`, so merely *asking* for a ticket breaks every full
+handshake. Any implementation of this has to change that function.
+
+The project's established pattern for vendored behaviour is to define the symbol in our
+own archive and let the linker resolve it there. That works here and costs more than it
+should: replacing `_nx_secure_tls_client_handshake()` outright means **copying 450 lines
+of state machine that have nothing to do with resumption**, and re-merging every one of
+them by hand at each submodule bump.
+
+**So this uses the linker's other tool for the same job.**
+`-Wl,--wrap=_nx_secure_tls_client_handshake` sends every call from every other object to
+`__wrap__nx_secure_tls_client_handshake()` in `src/tlslib/tls_resume.c`, and leaves
+`__real__nx_secure_tls_client_handshake()` pointing at the vendored function — still
+linked, still doing all the work it always did. Two functions are wrapped and nothing
+else. Verified on this toolchain **before** anything was written, with a three-object test
+where the caller is a separate archive member: it disassembles to `jsr ___wrap_vendored`.
+Verified again on the shipping binary — `_nx_secure_tls_process_record` calls
+`___wrap__nx_secure_tls_client_handshake`, and the wrapper calls `__nx_secure_tls_client_handshake`.
+
+The flag is on `tls.library`'s link **only**. `tls_handshake`, `tls_https` and `tls_bench`
+link the same archives without it, so their baselines are untouched by construction rather
+than by testing — `tls_handshake` is still 44/0.
+
+**Carrying this across a submodule bump.** The `ClientHello` interception is a splice into
+the finished message and reads only TLS wire format — RFC 5246's field order — so a
+vendored rewrite cannot silently invalidate it; a shape it does not recognise makes it
+leave the message alone and lose resumption rather than corrupt anything. The handshake
+interception is the exposure: it calls seven `_nx_secure_*` entry points and depends on
+`_nx_secure_tls_process_changecipherspec()` demanding `SERVERHELLO_DONE` and on
+`_nx_secure_tls_process_finished()` refusing a peer that sent no credentials. If either
+changes, resumption fails closed (the handshake errors) rather than silently, because the
+tests assert `ti_Resumed` and not just success.
+
+### 13.3 Three handshake messages, and what each needed
+
+**ServerHello.** Handed to the vendored function unchanged; afterwards its echoed session
+ID is compared against the one offered. Equal and non-empty means the server resumed. Then
+the cached master secret goes into the key material and the record keys are derived from
+it through `nx_secure_generate_session_keys` — a *session function pointer*, so a caller
+that replaced it keeps its replacement, and `_nx_secure_tls_generate_keys()` never has to
+be reimplemented. Two pieces of state have to be set that the vendored code has no path
+to: `nx_secure_tls_received_remote_credentials`, because `_nx_secure_tls_process_finished()`
+refuses a Finished from a peer that sent no certificate and a resumed handshake sends none
+*by design*; and `client_state = SERVERHELLO_DONE`, because
+`_nx_secure_tls_process_changecipherspec()` rejects a client CCS in any other state and
+the server's CCS is the very next thing on the wire.
+
+**NewSessionTicket.** Hashed into the transcript (RFC 5077 §3.3 — it counts) and kept.
+
+**Finished, on a resumed handshake only.** The abbreviated handshake reverses the order:
+the server finishes first. So the server's Finished has to go *into* the transcript before
+ours is generated, and our ChangeCipherSpec and Finished have to be sent afterwards —
+neither of which the vendored state machine does. It also **destroys the SHA-256 handshake
+hash context the instant it processes a Finished**, which is exactly the context our own
+Finished needs, so this message cannot be delegated at all.
+
+Everything else goes to the vendored function **in the record boundaries it would have
+seen**. That is deliberate and not tidiness: the record carrying ServerHello, Certificate,
+ServerKeyExchange and ServerHelloDone together is passed whole, with the same
+`data_length`, because that length is what `_nx_secure_tls_process_remote_certificate()`
+bounds itself with. Only a record containing a message the vendored code cannot handle is
+taken apart, and such a record never contains a certificate.
+
+### 13.4 The bug that cost a day: a server issuing a ticket sends an EMPTY session ID
+
+The first working build resumed nothing, and the reason is worth writing down because it
+is not in any summary of RFC 5077 and it is invisible without a wire trace.
+
+A serial trace through the wrapper said it in one line:
+
+```
+[resume] stored tls-v1-2.badssl.com: sid 0 ticket 192 suite C027
+[resume] offering tls-v1-2.badssl.com: sid 0 ticket 192
+[resume] msg type 2 len 45          <- a resumed ServerHello: no certificate follows
+[resume] serverhello: echoed sid 0, offered 0
+```
+
+**The server WAS resuming.** A 45-byte ServerHello with nothing after it is an abbreviated
+handshake. But a server that issues a ticket returns an **empty** session ID — RFC 5077
+§3.4, and nginx does exactly that — so the session recorded from the first handshake had
+no session ID at all, there was nothing to echo, and the only acceptance signal a TLS 1.2
+client gets could never fire. The client then walked into the ChangeCipherSpec with no
+keys derived and failed.
+
+`openssl s_client` hides this, which is why the pre-build probe did not catch it: it
+reports a `Session-ID:` for a ticket session because it **fabricates one** for its own
+cache. The bytes on the wire have none.
+
+RFC 5077 §3.4 provides for exactly this — a client presenting a ticket MAY generate a
+session ID and a server accepting the ticket MUST echo it. So the client now offers **32
+random bytes from the machine's own pool** when the cached session has no session ID of
+its own. Per attempt, never cached: it is a correlation handle, not a secret, and reusing
+one would let an observer link two connections.
+
+### 13.5 A public-header bug that had nothing to do with resumption
+
+Found chasing a second symptom and worth more than the feature that uncovered it.
+
+`tests/tls/tls_resume` completed a handshake, reported 6.8 s, and then `TLSRead()`
+returned **-1 with no error set** — a combination the library cannot produce. It happened
+on every connection including `TLSA_NoResume`, i.e. on a code path byte-identical to the
+one before this work. `tests/tls/tls_api` did the same thing and worked.
+
+The disassembly:
+
+```
+620:  moveal a5,a0            ; a0 = the connection
+622:  lea    10,a1            ; a1 = the request
+62a:  jsr    a6@(-48)         ; TLSWrite
+630:  bnew   ...
+634:  lea    1e0,a1           ; a1 = the read buffer
+640:  jsr    a6@(-42)         ; TLSRead -- and a0 was never reloaded
+```
+
+**`d0`, `d1`, `a0` and `a1` are SCRATCH registers in the AmigaOS ABI.** The inline stubs
+in `include/aminetxduo/tlslib.h` listed `a0` and `a1` as *inputs only*, which tells the
+compiler the opposite, and the compiler believed it: two calls in a row got the arguments
+loaded once, and the second ran on whatever the first left behind. `TLSRead()` was
+dereferencing a stale pointer and taking its own `conn == NULL` branch.
+
+`tls_api` escaped it by accident — different register pressure, so GCC reloaded anyway.
+**Every caller of this header had the bug**, including the curl vtls backend, and it is the
+leading candidate for the one-off `ecc256.badssl.com` resumption failure reported against
+`f535728` (see §13.8). Fixed by marking them `"+r"`; the reload appears in the
+disassembly, and `tls_api` went from 24 checks/1 failure back to **26/0**.
+
+Two things this says beyond the fix. A hand-written inline stub is ABI-critical code and
+should be read as such — the register assignment appears in exactly two places
+(`tlslib.h` and `src/tlslib/tls_vectors.h`) and only one of them was wrong. And a
+symptom that says "the library is broken" while the library's own tests pass is usually
+the caller.
+
+### 13.6 Where the cache lives, and its security properties in one paragraph
+
+**Both the library base and a file, for two different reasons.** The base, because a
+shared library on AmigaOS outlives the programs that open it: `fetch` runs, exits, and
+`tls.library` stays in memory. That already answers the case that matters — somebody
+running curl twice — with no disk access at all, which on a floppy machine is worth
+having. The file, `DEVS:Internet/tlssessions` beside the trust store, because "stays in
+memory" is not a guarantee: `AllocMem()` failure or `avail flush` expunges the library,
+and so does a reboot. It is read once per library lifetime and written only when the cache
+changes, which is once per full handshake against a handshake that just spent seconds on
+arithmetic. Eight entries, fixed 420-byte records, 3,376 bytes at most; the whole file for
+one host is 436 bytes. **Shared between programs, deliberately** — a ticket `fetch`
+obtained is a ticket curl can use, against the same server on behalf of the same user.
+
+Lifetime and invalidation: the server's ticket lifetime hint, clamped to 24 hours (iana
+says 64,800 s, badssl 300). A machine with no clock cannot age anything and therefore does
+not try — a stale ticket costs one round trip and a full handshake, which is what would
+have happened anyway. An entry is replaced when a new session for the same host arrives,
+evicted LRU when the table is full, and **evicted immediately when a handshake that
+offered it failed**, so a broken entry cannot make a host permanently unreachable.
+
+Entries are keyed by host, port **and whether the chain was verified**. That last one is
+not fussiness: without it a program that used `TLSA_NoVerify` to reach a printer would
+poison the cache for every program that came afterwards, and resumption skips
+verification by construction.
+
+**The security properties, stated and then left alone.** Each entry holds a 48-byte TLS
+master secret and a session ticket in the clear. Anyone who can read the library's memory
+can decrypt any session resumed from it — and this is a machine with no memory protection
+where every task can already read every other task's memory. Anyone who can read
+`DEVS:Internet/tlssessions` can do the same, offline, until the entry ages out; the file
+is exactly as sensitive as the sessions it stands for and is not protected, because on
+AmigaOS there is nothing to protect it with. What is specifically given up is forward
+secrecy for the resumed sessions: an attacker who takes the file can decrypt captured
+traffic from them, which the ECDHE full handshake would not have allowed. That is the
+price, it is the price every TLS session cache has paid since 1996, and this stack exists
+so a classic Amiga can read the web. `TLSA_NoResume` turns it off; `TLSA_SessionFile` with
+an empty string keeps the cache in RAM and off the disk.
+
+### 13.7 The API did not change, and that was the design
+
+`TLSOpen()` resumes when it can. There is no tag to ask for it, no call to make first, and
+a program written against the previous header gets resumption by being relinked. The curl
+vtls backend adopted it that way — rebuilt, not restructured.
+
+Three additions, all optional:
+
+| | |
+|---|---|
+| `TLSA_NoResume` (BOOL) | do not offer a cached session and do not remember this one |
+| `TLSA_SessionFile` (STRPTR) | mirror somewhere other than `DEVS:Internet/tlssessions`; an empty string means RAM only |
+| `TLSInfo()` | gains `ti_Resumed`, `ti_Resumable`, `ti_SessionsCached` |
+
+`struct TLSInfo` grew, and `ti_Size` is what makes that safe: a caller compiled against the
+older header passes the older size and gets every field it knows about. `TLS_INFO_SIZE_V1`
+is 40 — **not 44, because `BOOL` on classic AmigaOS is a SHORT** — and the library asserts
+that number against the real offset at build time rather than trusting the arithmetic.
+
+Two more vectors were added for the curl backend, neither related to resumption:
+
+- **`LONG TLSRandom(struct Library *base, APTR buffer, LONG length)`**, LVO **-78**,
+  `a0` = buffer, `d0` = length, `a6` = base, returns bytes written or -1. Puts the
+  machine's one entropy pool — the SHA-256 hash DRBG `bsdsocket.library` seeds, the same
+  generator the session keys come from — behind a published vector, so a ported client
+  does not seed an LCG off the clock. It answers -1 until a connection has been opened in
+  that program, because the pool is reached through the link `TLSOpen()` establishes;
+  §9's assessment of how little entropy the seed carries applies unchanged and this call
+  does not pretend otherwise.
+- **`LONG TLSBuffered(struct Library *base, struct TLSConnection *conn)`**, LVO **-84**,
+  `a0` = connection, `a6` = base, returns undecrypted bytes held or -1. `TLSPending()`
+  answers "is plaintext ready"; this answers the other half. `nx_secure` keeps
+  *undecrypted* bytes in `nx_secure_record_queue_header` whenever one TCP segment carried
+  more than one TLS record — the ordinary case — and in that state the socket is not
+  readable, `TLSPending()` is 0, and a whole record is sitting in memory. Non-zero means
+  `TLSRead()` can make progress without another byte arriving. It deliberately does **not**
+  promise `TLSRead()` will not block, because what is buffered may be half a record; that
+  is the same bound `TLSA_Timeout` already caps. Kept separate from `TLSPending()` rather
+  than folded in, because the two answers mean different things and a caller that conflates
+  them will call `TLSRead()` and block where it meant to poll.
+
+### 13.8 What was measured, and what was not
+
+**Cross-process, proved.** Four `fetch` invocations — four processes — in one boot:
+
+| | |
+|---|---|
+| `https://tls-v1-2.badssl.com/` (follows a 301 to port 1012) | 6.8 s and 5.0 s, both full |
+| the same command again | **0.6 s and 0.6 s, both resumed** |
+| `https://ecc256.badssl.com/` | 23.3 s, full |
+| the same command again | **0.5 s, resumed** |
+
+Both hosts on the redirect are the same name on different ports with different
+ciphersuites (0xC027 on 443, 0x3D on 1012), which is also the check that the cache is
+keyed by port and not only by name.
+
+**Cross-boot, proved.** §13's headline: the machine was rebooted between the two runs and
+only `DEVS:Internet/tlssessions` crossed.
+
+**A rejected ticket falls back, proved.** `tests/tls/tls_resume` copies the session cache,
+flips a byte in the ticket *and* in the session ID — both, because a server with a working
+session-ID cache could otherwise resume from the ID and the test would fail for being
+right — and connects. The result is a full handshake, 6.8 s, the page still arrives, and
+**the very next connection resumes again**, which is the check that the broken entry was
+replaced rather than left to fail forever.
+
+**`TLSA_NoResume`, proved.** Full handshake with a valid session sitting in the cache.
+
+**The one-off `ecc256.badssl.com` failure reported against `f535728` did not reproduce.**
+Two cross-process attempts against that host resumed in 0.5 s, and the in-process test
+resumes it every run. The leading candidate is §13.5 — the curl backend compiles the same
+inline stubs, and a call made with a stale `a0`/`a1` is exactly the shape of a failure that
+takes *longer* than not trying. That is a hypothesis, not a diagnosis; it is worth
+re-measuring on a backend rebuilt against the fixed header before anyone hunts further.
+
+**Not measured, and worth saying:** how long a Cloudflare ticket actually stays good on
+this path (the hint is 64,800 s and nothing here has waited that long); whether an
+`AmigaOS` machine with a genuinely dead clock resumes across a reboot (it should — a
+zero timestamp disables ageing — but the test sets the clock rather than removing it);
+and anything at all about a server that rotates its ticket keys mid-session, which is the
+case the fallback path exists for and which no public host will perform on demand.
+
+### 13.9 What this does not fix
+
+**The first connection to a host still costs what it always cost.** Resumption is a second
+connection's optimisation, so a machine that has never spoken to `www.iana.org` still
+cannot reach it at 14 MHz. The seed has to come from somewhere: a faster clock, a patient
+host, or — the honest option nobody has built — a way to carry a session file between
+machines.
+
+**A verified-chain cache is still worth 8–10% and is still not the answer.** That estimate
+in §11 stands and this work does not change it. What it does change is the priority: with
+resumption in, the expensive handshake is the one that happens once, and shaving 10% off
+something that happens once is worth much less than it was.
+
+**Nothing here helps TLS 1.3**, which is where the web is going. `nx_secure`'s TLS 1.3 is
+impractical on this hardware for an unrelated reason (a bit-serial GHASH), and its
+resumption is a different mechanism — PSK, not tickets — so none of this code carries over.

@@ -610,9 +610,19 @@ int main(VOID)
         if (a_check((BOOL)(sock >= 0), "connect with the clock at 1978",
                     (ULONG)bsd_errno(sbase)))
         {
+            /*
+             * TLSA_NoResume, and it is load-bearing.  This is the fourth
+             * connection to A_HOST in this run, so without it the library
+             * would resume the session the third one established -- and a
+             * resumed handshake sends no certificate, verifies no chain and
+             * checks no host name, which is exactly what the two assertions
+             * below claim still happened.  Forcing a full handshake keeps the
+             * test testing what it says it tests.
+             */
             why = TLS_OK;
             tls = TLSOpen(tbase, (APTR)sbase, sock,
                           TLSA_HostName, (ULONG)A_HOST,
+                          TLSA_NoResume, TRUE,
                           TLSA_Error,    (ULONG)&why);
 
             if (a_check((BOOL)(tls != NULL),
