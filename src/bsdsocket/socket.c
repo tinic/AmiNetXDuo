@@ -295,6 +295,30 @@ ULONG ami_bsd_tcp_window(VOID)
  * Cost: one DRBG draw per TCP socket created, at create time, off every hot
  * path.
  */
+/*
+ * SO_KEEPALIVE IS OFF UNTIL THE APPLICATION ASKS, AND NetX Duo DOES NOT AGREE.
+ *
+ * nx_tcp_socket_create.c:166 sets nx_tcp_socket_keepalive_enabled = NX_TRUE
+ * unconditionally when NX_ENABLE_TCP_KEEPALIVE is defined, so defining it alone
+ * would put every socket in the machine on a two-hour keepalive timer whether
+ * anything asked or not.  That is not what SO_KEEPALIVE means: 4.4BSD, POSIX
+ * and every stack since have it default OFF, and a program that never sets it
+ * has a right to expect an idle connection to stay quiet.
+ *
+ * So the create path clears it and setsockopt(SO_KEEPALIVE) is the only thing
+ * that sets it (src/bsdsocket/options.c).  Called on the three sockets this
+ * library creates, next to the ISN seed, because both are "make the socket the
+ * shape the BSD API promises before anyone can use it".
+ */
+static VOID bsd_tcp_keepalive_default(NX_TCP_SOCKET *tcp)
+{
+#ifdef NX_ENABLE_TCP_KEEPALIVE
+    tcp->nx_tcp_socket_keepalive_enabled = NX_FALSE;
+#else
+    (VOID)tcp;
+#endif
+}
+
 static VOID bsd_tcp_seed_isn(NX_TCP_SOCKET *tcp)
 {
     ULONG seed = ami_random_ulong();
@@ -461,6 +485,195 @@ static AmiSocket *bsd_socket_alloc(struct AmiSocketBase *base,
     return sock;
 }
 
+/* --------------------------------------------------------- orderly close --
+ *
+ * RFC 793 3.5: CLOSE IS A FIN.
+ *
+ * It was a RESET here, on every connection, in every capture this project has
+ * ever taken -- docs/RESEARCH.md 12.3 called it a risk, 16.9 an observation
+ * and 27.6 an assertion with the packet next to it. A RESET tells the peer to
+ * throw away everything it has not yet handed to its application, so a server
+ * that writes a reply and closes could destroy the reply; and it denied every
+ * peer the orderly teardown the protocol promises.
+ *
+ * The reason it was a RESET is that nx_tcp_socket_disconnect() offers two
+ * behaviours and neither is close(). NX_NO_WAIT sends a RESET and returns;
+ * anything else sends a FIN and then SUSPENDS THE CALLER until the peer
+ * answers or the wait expires. A blocking CloseSocket() is not acceptable --
+ * the descriptor is gone the instant the call is made and an application that
+ * closes and exits must not wait on a peer that may never answer -- so the
+ * RESET was what was left.
+ *
+ * WHAT THIS DOES INSTEAD
+ *
+ * The FIN goes out through the same open-coded path shutdown(SHUT_WR) uses
+ * (bsd_tcp_send_fin, above), which is already proven -- tcpdrill c04 asserts
+ * the FIN|ACK and the ACK that comes back. CloseSocket() then returns, and the
+ * AmiSocket is parked on a list until TCP has finished with the connection:
+ * NetX Duo's fast periodic drives FIN_WAIT_1 -> FIN_WAIT_2 -> TIMED_WAIT and
+ * LAST_ACK -> CLOSED by itself, retransmits the FIN, and gives up with a reset
+ * after NX_TCP_MAXIMUM_RETRIES. So the state machine needs nothing from us
+ * except that the control block stay alive, which is exactly what the list is
+ * for -- nx_tcp_socket_delete() refuses anything that is not CLOSED, and
+ * deleting nothing is the AmiSocket-per-connection leak docs/RESEARCH.md 12.5
+ * predicted.
+ *
+ * WHEN IT IS STILL A RESET, AND BOTH ARE THE RULE RATHER THAN AN ESCAPE
+ *
+ *   - Data arrived that the application never read. RFC 1122 4.2.2.13 is
+ *     explicit: the peer must not be told its data was delivered when it is
+ *     about to be discarded, so this close is an abort. Every BSD does this.
+ *   - SO_LINGER on with a zero timeout, which is the documented way to ask
+ *     for an abortive close and is what the option is mostly used for.
+ *
+ * AND WHEN IT BLOCKS: SO_LINGER on with a nonzero timeout, which is the
+ * documented way to ask for that. nx_tcp_socket_disconnect() with a wait is
+ * precisely those semantics, including the tear-down when the wait expires,
+ * so the option finally does what its name says instead of selecting between
+ * two flavours of reset.
+ *
+ * TIME_WAIT, HONESTLY
+ *
+ * A socket that closes first reaches TIMED_WAIT and NetX Duo holds it there
+ * for 2MSL, which its own defaults make 240 seconds. This does not wait that
+ * long: the sweep below reclaims a socket as soon as it reaches TIMED_WAIT,
+ * and nx_tcp_client_socket_unbind() collapses the state on the way out --
+ * which is what NetX Duo itself does whenever an application unbinds, and
+ * what this library has always done. Four minutes of an AmiSocket and an
+ * ephemeral port per closed connection is not affordable on the 4 MB floor,
+ * and the exposure it buys -- an old duplicate landing on a reused port -- is
+ * bounded by NetX Duo allocating ephemeral ports in ascending order.
+ */
+
+#define BSD_CLOSING_DEADLINE    (60UL * NX_IP_PERIODIC_RATE)
+
+/*
+ * Global, not per base, and that is the point: the closing connection has to
+ * outlive the base, because CloseLibrary() is very often the next thing that
+ * happens. Every access is inside a bsd_nx_enter() bracket, which is the
+ * ThreadX baton -- one holder at a time across every base -- so the list needs
+ * no lock of its own.
+ */
+static AmiSocket *bsd_closing_head;
+
+static BOOL bsd_socket_destroy(AmiSocket *sock);
+
+static VOID bsd_closing_park(AmiSocket *sock)
+{
+    sock->as_Flags |= ASF_CLOSING;
+
+    /*
+     * Nothing may point at the caller any more. The base is about to be freed
+     * in the common case, and NetX Duo's receive/disconnect callbacks find
+     * their AmiSocket through this pointer -- select.c returns immediately on
+     * a NULL one, which is the disarm.
+     */
+    sock->as_Nx.tcp.nx_tcp_socket_reserved_ptr = NX_NULL;
+    sock->as_Owner = NULL;
+
+    sock->as_ClosingAt   = tx_time_get();
+    sock->as_ClosingNext = bsd_closing_head;
+    bsd_closing_head     = sock;
+}
+
+VOID bsd_closing_sweep(VOID)
+{
+    AmiSocket  *sock;
+    AmiSocket **link = &bsd_closing_head;
+    ULONG       now  = tx_time_get();
+
+    while ((sock = *link) != NULL)
+    {
+        UINT state = sock->as_Nx.tcp.nx_tcp_socket_state;
+        BOOL done  = (state == NX_TCP_CLOSED) || (state == NX_TCP_TIMED_WAIT);
+        BOOL late  = ((ULONG)(now - sock->as_ClosingAt) >= BSD_CLOSING_DEADLINE);
+
+        if (!done && !late)
+        {
+            link = &sock->as_ClosingNext;
+            continue;
+        }
+
+        *link = sock->as_ClosingNext;
+        sock->as_ClosingNext = NULL;
+
+        /*
+         * Past the deadline and still not finished means the peer has stopped
+         * answering and NetX Duo's own retry limit has not fired either --
+         * a half-open connection. Reset it rather than hold the block for
+         * ever; this is the only path here that emits a RESET after the FIN.
+         */
+        if (!done)
+        {
+            AMI_WARN("bsdsocket: close did not complete in %ld s (state %ld); "
+                     "resetting", (long)(BSD_CLOSING_DEADLINE / NX_IP_PERIODIC_RATE),
+                     (long)state);
+            nx_tcp_socket_disconnect(&sock->as_Nx.tcp, NX_NO_WAIT);
+        }
+
+        if (bsd_socket_destroy(sock))
+            ami_free(sock);
+    }
+}
+
+/*
+ * Start the close. TRUE means the socket is finished with and the caller may
+ * delete it now; FALSE means the FIN is in flight and the block has been
+ * parked, so it is no longer the caller's to free.
+ */
+static BOOL bsd_tcp_close_start(AmiSocket *sock)
+{
+    NX_TCP_SOCKET *tcp   = &sock->as_Nx.tcp;
+    UINT           state = tcp->nx_tcp_socket_state;
+
+    /* A handshake that never finished has nothing to close down gracefully;
+       disconnect() winds SYN_SENT/SYN_RECEIVED back without sending a RESET
+       (nx_tcp_socket_disconnect.c takes that branch before the NX_NO_WAIT
+       one). */
+    if (state == NX_TCP_SYN_SENT || state == NX_TCP_SYN_RECEIVED)
+    {
+        nx_tcp_socket_disconnect(tcp, NX_NO_WAIT);
+        return TRUE;
+    }
+
+    /* RFC 1122 4.2.2.13: unread data turns a close into an abort. */
+    if (sock->as_RxPending != NULL || tcp->nx_tcp_socket_receive_queue_count != 0)
+    {
+        nx_tcp_socket_disconnect(tcp, NX_NO_WAIT);
+        return TRUE;
+    }
+
+    /* SO_LINGER, l_linger == 0: the documented abortive close. */
+    if (sock->as_LingerOn != 0 && sock->as_LingerTime == 0)
+    {
+        nx_tcp_socket_disconnect(tcp, NX_NO_WAIT);
+        return TRUE;
+    }
+
+    /* SO_LINGER, l_linger > 0: block until the peer answers or the time is
+       up, which is what NetX Duo's waiting disconnect already is. */
+    if (sock->as_LingerOn != 0)
+    {
+        nx_tcp_socket_disconnect(tcp, (ULONG)sock->as_LingerTime *
+                                          NX_IP_PERIODIC_RATE);
+        return TRUE;
+    }
+
+    /* The default. bsd_tcp_send_fin() does nothing if the FIN has already
+       gone -- a close after shutdown(SHUT_WR) -- which is correct, and the
+       state test below then parks the socket exactly as it would have. */
+    bsd_tcp_send_fin(sock);
+
+    state = tcp->nx_tcp_socket_state;
+
+    if (state == NX_TCP_CLOSED || state == NX_TCP_LISTEN_STATE)
+        return TRUE;
+
+    bsd_closing_park(sock);
+
+    return FALSE;
+}
+
 /*
  * Tear the NetX Duo socket down; safe to call more than once.
  *
@@ -482,6 +695,19 @@ static BOOL bsd_socket_destroy(AmiSocket *sock)
     if ((sock->as_Flags & ASF_DELETED) != 0)
         return TRUE;
 
+    /*
+     * The FIN goes out before anything is discarded, because whether there is
+     * anything to discard is part of the decision -- see bsd_tcp_close_start().
+     * ASF_CLOSING means this is the sweep coming back for a socket it already
+     * closed, so the close is not started twice.
+     */
+    if ((sock->as_Flags & (ASF_TCP | ASF_RAW | ASF_CLOSING)) == ASF_TCP &&
+        (sock->as_Flags & (ASF_CONNECTED | ASF_CONNECTING)) != 0)
+    {
+        if (!bsd_tcp_close_start(sock))
+            return FALSE;
+    }
+
     if (sock->as_RxPending != NULL)
     {
         nx_packet_release(sock->as_RxPending);
@@ -500,13 +726,6 @@ static BOOL bsd_socket_destroy(AmiSocket *sock)
 
     if ((sock->as_Flags & ASF_TCP) != 0)
     {
-        if ((sock->as_Flags & (ASF_CONNECTED | ASF_CONNECTING)) != 0)
-            nx_tcp_socket_disconnect(&sock->as_Nx.tcp,
-                                     (sock->as_LingerOn != 0)
-                                         ? (ULONG)sock->as_LingerTime *
-                                           NX_IP_PERIODIC_RATE
-                                         : NX_NO_WAIT);
-
         /*
          * Give the port back. A socket that came off a listen port is
          * released with unaccept() whether or not it was ever accepted --
@@ -634,6 +853,14 @@ VOID bsd_close_all(struct AmiSocketBase *base)
         base->sb_Table[fd] = NULL;
         bsd_socket_release(base, sock);
     }
+
+    /*
+     * Take back whatever a PREVIOUS program left closing. Not the ones this
+     * loop has just parked -- their FINs went out microseconds ago and none of
+     * them can be finished yet -- which is the whole reason the list is global
+     * and outlives the base.
+     */
+    bsd_closing_sweep();
 
     bsd_nx_leave(base);
 }
@@ -881,6 +1108,10 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
         return bsd_fail(SocketBase, AMI_ENETDOWN);
     }
 
+    /* A program that opens sockets is the one that can afford to reclaim the
+       ones an earlier program left closing, and it wants their ports back. */
+    bsd_closing_sweep();
+
     if (type == SOCK_RAW)
     {
         if (bsd_raw_open(SocketBase, sock) != 0)
@@ -900,7 +1131,10 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
                                       bsd_tcp_urgent_notify,
                                       bsd_tcp_disconnect_callback);
         if (status == NX_SUCCESS)
+        {
             bsd_tcp_seed_isn(&sock->as_Nx.tcp);
+            bsd_tcp_keepalive_default(&sock->as_Nx.tcp);
+        }
     }
     else
     {
@@ -1111,7 +1345,10 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
                                   bsd_tcp_urgent_notify,
                                   bsd_tcp_disconnect_callback);
     if (status == NX_SUCCESS)
+    {
         bsd_tcp_seed_isn(&incoming->as_Nx.tcp);
+        bsd_tcp_keepalive_default(&incoming->as_Nx.tcp);
+    }
     if (status != NX_SUCCESS)
     {
         bsd_nx_leave(SocketBase);
@@ -1307,6 +1544,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
         if (status == NX_SUCCESS)
         {
             bsd_tcp_seed_isn(&spare->as_Nx.tcp);
+            bsd_tcp_keepalive_default(&spare->as_Nx.tcp);
 
             spare->as_Flags    |= ASF_INCOMING | ASF_SERVER;
             spare->as_Parent    = sock;
@@ -1597,6 +1835,11 @@ LONG bsd_CloseSocket(register LONG sock_fd __asm("d0"),
     if (bsd_nx_enter(SocketBase) == 0)
     {
         bsd_socket_release(SocketBase, sock);
+
+        /* The one place that is guaranteed to run again while a long-lived
+           program is still opening and closing connections. */
+        bsd_closing_sweep();
+
         bsd_nx_leave(SocketBase);
     }
     else

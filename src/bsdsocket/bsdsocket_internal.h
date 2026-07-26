@@ -373,6 +373,7 @@ struct AmiSocketBase
 #define ASF_V6ONLY      (1UL << 21)   /* IPV6_V6ONLY; see options.c         */
 #define ASF_RAW         (1UL << 22)   /* SOCK_RAW; see raw.c                */
 #define ASF_OOBHAVE     (1UL << 23)   /* an urgent byte is waiting; oob.c   */
+#define ASF_CLOSING     (1UL << 24)   /* FIN sent, parked for a late reap   */
 
 typedef struct AmiSocket
 {
@@ -467,6 +468,16 @@ typedef struct AmiSocket
     /* The urgent byte a peer sent us, held for recv(MSG_OOB) -- see oob.c. */
     UBYTE                   as_OobData;
 
+    /*
+     * The orderly-close list. CloseSocket() sends a FIN and returns, so the
+     * connection outlives the descriptor and usually outlives the base as
+     * well; socket.c keeps the block here until TCP has finished with it.
+     * as_ClosingAt is a tx_time_get() stamp, and it is the deadline that stops
+     * a peer which answers nothing from pinning the block for ever.
+     */
+    struct AmiSocket       *as_ClosingNext;
+    ULONG                   as_ClosingAt;
+
     struct AmiSocket       *as_RawNext;     /* raw.c's registry link          */
     NX_PACKET              *as_RawHead;
     NX_PACKET              *as_RawTail;
@@ -510,6 +521,12 @@ AmiSocket *bsd_lookup(struct AmiSocketBase *base, LONG fd);
 LONG       bsd_fd_alloc(struct AmiSocketBase *base, AmiSocket *sock);
 VOID       bsd_fd_free(struct AmiSocketBase *base, LONG fd);
 VOID       bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock);
+
+/* socket.c -- reclaim sockets whose orderly close has finished. Must be
+   called inside a bsd_nx_enter() bracket; cheap, and a no-op when the list is
+   empty, which it is on every path that does not close a connection. */
+VOID       bsd_closing_sweep(VOID);
+
 LONG       bsd_table_resize(struct AmiSocketBase *base, LONG size);
 VOID       bsd_close_all(struct AmiSocketBase *base);
 
