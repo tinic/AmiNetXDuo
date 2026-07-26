@@ -62,6 +62,9 @@ a user guide in `Docs/` inside the archive.
 | `NetTrace` | capture packets to a `.pcap` file Wireshark can open |
 | `traceroute` | trace the path to a host |
 | `tftp`, `whois` | the usual small clients |
+| `CheckNetConfig` | read the configuration and say what is wrong with it |
+| `AddNetRoute`, `DeleteNetRoute` | where packets go that are not for this network |
+| `GetNetStatus`, `NetShutdown` | status for scripts, and a clean shutdown |
 
 The installer copies all of them into `C:`.
 

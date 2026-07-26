@@ -94,7 +94,8 @@ need() {
 
 LIBS=(bsdsocket usergroup)
 CMDS=(AddNetInterface Online Offline ShowNetStatus ping netstat host fetch
-      nc telnet ftp NetTrace sntp traceroute tftp whois)
+      nc telnet ftp NetTrace sntp traceroute tftp whois
+      CheckNetConfig GetNetStatus NetShutdown AddNetRoute DeleteNetRoute)
 
 for lib in "${LIBS[@]}"; do need "$BUILD/src/$lib/$lib.library"; done
 for cmd in "${CMDS[@]}"; do need "$BUILD/src/tools/$cmd"; done

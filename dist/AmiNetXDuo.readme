@@ -46,6 +46,10 @@ Included:
   sntp                  set the clock from a time server
   traceroute            trace the path to a host
   tftp, whois           the usual small clients
+  CheckNetConfig        read the configuration and say what is wrong with it
+  GetNetStatus          the scriptable half of ShowNetStatus
+  NetShutdown           stop the network cleanly
+  AddNetRoute, DeleteNetRoute   where packets go that are not for this network
   an Installer script   asks two questions and writes a working config
 
 Configuration follows Roadshow's layout -- DEVS:NetInterfaces/<name>,
