@@ -7361,6 +7361,137 @@ nothing in this test that can time out while the run waits its turn, so a failur
 is a failure in the commands.
 
 
+### 22.8 What the shipped commands print now, and the one that still does not
+
+The commands were run from a staged directory, as a user would install them, through
+`ToolsSmoke` in one boot. This is the shipped `netstat`, the shipped `ShowNetStatus`,
+reading the stack that `AddNetInterface` brought up in `bsdsocket.library`:
+
+```
+    ===== SYS:ShowNetStatus =====
+    Network stack:  running
+    Host name:      amiga
+    Default route:  10.0.2.2
+
+    Interface eth0 (a2065.device unit 0)
+      state       online          link up
+      address     10.0.2.15       netmask 255.255.255.0 (/24)
+      broadcast   10.0.2.255
+      hardware    00:80:10:32:33:34
+      mtu         1500 bytes        10000000 bits/s
+      configured  DHCP
+
+    ===== SYS:netstat -i =====
+    Name    Mtu   Address          Link   Ipkts      Ierrs  Opkts      Oerrs
+    eth0    1500  10.0.2.15        up     2          0      1          0
+
+    ===== SYS:netstat -r =====
+    Destination      Gateway          Netmask          Flags  Interface
+    default          10.0.2.2         0.0.0.0          UG     eth0
+    10.0.2.0         *                255.255.255.0    U      eth0
+    127.0.0.0        *                255.0.0.0        U      lo0
+
+    ===== SYS:netstat -s =====
+    ip:
+            2 packets sent (616 bytes)
+            2 packets received (578 bytes)
+    udp:
+            2 datagrams sent (600 bytes)
+            2 datagrams received (562 bytes)
+    packet pool:
+            256 packets of 1568 bytes, 222 free
+
+    ===== SYS:netstat -a =====
+    Proto  Local  Foreign               State
+    udp    68     *                     0 queued
+    udp    0      *                     0 queued
+```
+
+Every one of those numbers came out of the running `NX_IP` through `NetStackQuery()`.
+Before this work each of those five commands printed *"the network is up, but this
+command cannot read it"* and exited 5. **`netstat` and `ShowNetStatus` are verified.**
+
+**`ping` is not.** In both runs it hung: the command produced no output at all and the
+emulator run hit its timeout with `ping`'s section of the transcript containing only the
+header `ToolsSmoke` prints before starting it. Two things are known and worth separating
+from what is not:
+
+* The ICMP loop is **not** where it hangs. Both the inner receive loop and the outer
+  probe loop are bounded — the first by a deadline computed before the first
+  `WaitSelect`, the second by `COUNT` — so neither can be the thing that never returns.
+* The first run's shape was consistent with the reverse lookup that turns a typed
+  address into a name: `gethostbyaddr()` reaches `netstack_resolve_reverse()` with
+  `BSD_RESOLVE_TIMEOUT`, **thirty seconds** (`src/bsdsocket/resolver.c:18`), retried per
+  configured name server, against a server that need not answer a PTR query at all — and
+  FS-UAE's SLIRP does not answer them.
+
+That second point led to a change that is right on its own merits and was made for its
+own reasons: **a lookup that can cost thirty seconds must not run before the first packet
+leaves**, which is the one place a ping cannot be slow, and the reward is a cosmetic
+change to one line of output. `ping` now reads `DEVS:Internet/hosts` and nothing else —
+instant, correct with no name server at all, and where the names on a small network
+actually are.
+
+**It did not fix the hang.** The second run, with the DNS query gone, hung in the same
+place. So the thirty-second reverse lookup is a real defect of the stack — *any* command
+that reverse-resolves an address can block that long per name server, and
+`ShowNetStatus NAMES` and `host` both do — but it is **not** the cause of this one, and
+saying otherwise would be exactly the mistake this section exists to stop being made.
+
+What is left, by elimination, is the code between opening the library and the first
+`WaitSelect`: `tool_socket_open()`, `tool_sock_resolve()` on a dotted quad, the host-table
+lookup, `socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)`, and `ami_millis()`. `traceroute`
+reaches the wire through the same helpers and completes (§20.3), which narrows it further
+— the two commands differ in the host-table lookup, and in nothing else that runs before
+the loop. **This is not yet measured.** A build carrying `AMI_INFO` traces at each of
+those points, which write to the serial port unbuffered and so survive a command that
+never exits, is the next step and is the way to find it; the transcript cannot help,
+because the Shell buffers a command's output until it exits and a command that never
+exits therefore prints nothing wherever it stopped.
+
+Until that measurement exists, **`ping` must not be described as working.**
+
+### 22.9 The check that stops a new command guruing on an old library
+
+`tool_netstatus_open()` refuses a `bsdsocket.library` whose `lib_IdString` is not ours
+before it calls either vector, because on somebody else's library that offset is whatever
+their table happens to end with. Writing that down made the other half obvious and it had
+been missed: **it is also whatever OURS ends with.**
+
+In the v0.2.0 library — which is published — `-0x366` is past the last vector, on the
+`(APTR)-1` terminator `MakeLibrary()` puts there. A user who installed the new commands
+over the old library would have got a guru, which is a worse answer than the message this
+whole interface exists to stop being printed, and is precisely the class of defect §22 is
+about.
+
+`lib_Version` cannot carry this. It is 4, it is the AmiTCP V4 ABI number every caller
+passes to `OpenLibrary("bsdsocket.library", 4)`, and moving it locks out every program
+that asks for 4. `lib_Revision` is ours, so it is what says *which* of our libraries this
+is:
+
+| `lib_Revision` | |
+|---|---|
+| 0 | v0.2.0 and earlier |
+| 1 | `NetStackQuery`/`NetStackControl` at `-0x366`/`-0x36c` |
+
+`AMI_NETSTATUS_MIN_REVISION` is the caller's half, and a command that meets an older
+library names the revision it found and the one it needs. Bump the two together whenever
+a slot is added.
+
+### 22.10 What `netstat -s` says about a ping, and why it looks wrong
+
+`ping` sends through `SOCK_RAW` now, so it never calls `nx_icmp_ping()` and
+`nx_ip_pings_sent` never moves. Replies are a different matter:
+`src/bsdsocket/raw.c`'s filter **copies the datagram and then declines it** — it always
+returns `NX_NOT_SUCCESSFUL`, so the stack goes on to process the packet normally and
+`_nx_icmpv4_process_echo_reply()` increments `nx_ip_ping_responses_received` as it
+always did.
+
+So after a successful `ping`, `netstat -s` reports echo **replies received** and **zero
+requests sent**. Both numbers are true, and the asymmetry is a fact about where the
+requests go rather than a counter that is broken.
+
+
 ## 23. The command line is part of the contract (2026-07-26)
 
 §22 is about commands that could not see the stack. This one is about what the
