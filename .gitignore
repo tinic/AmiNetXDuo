@@ -75,3 +75,7 @@ build/fsuae.log
 build/test.fs-uae
 build/cm/
 
+
+# Python bytecode from the host-side test servers (tests/tools, tests/tls).
+__pycache__/
+*.pyc
