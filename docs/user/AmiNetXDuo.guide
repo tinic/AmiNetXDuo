@@ -763,20 +763,29 @@
 
                           @{b}AddNetInterface@{ub}
 
-      AddNetInterface NAME/A,QUIET/S
+      AddNetInterface INTERFACE/M,QUIET/S,TIMEOUT/K/N
 
-  Reads DEVS:NetInterfaces/<NAME>, starts the network stack if it is
-  not running already, and brings that interface online. This is the
+  Reads DEVS:NetInterfaces/<INTERFACE>, starts the network stack if it
+  is not running already, and brings that interface online. This is the
   command that starts everything, and the one to put in S:User-Startup.
 
-  @{b}NAME@{ub}    The interface, which is the name of its file in
-          DEVS:NetInterfaces. Required. The full path is accepted too,
-          so both of these do the same thing:
+  @{b}INTERFACE@{ub}  The interface, which is the name of its file in
+             DEVS:NetInterfaces. Required. The full path is accepted
+             too, so both of these do the same thing:
 
-              AddNetInterface eth0
-              AddNetInterface DEVS:NetInterfaces/eth0
+                 AddNetInterface eth0
+                 AddNetInterface DEVS:NetInterfaces/eth0
 
-  @{b}QUIET@{ub}   Print nothing. For S:User-Startup.
+             More than one may be given; they are sorted by name before
+             any of them is used, and the files are all read and
+             checked before anything is started.
+
+  @{b}QUIET@{ub}      Print nothing. For S:User-Startup.
+  @{b}TIMEOUT@{ub}    Seconds to wait for an interface that asks for its
+             address to be given one. Default 10, which is also the
+             smallest value accepted -- a DHCP exchange given less time
+             than that reports a failure that is not one. An interface
+             with its address in its file waits for nothing.
 
   @{b}Example@{ub}
 
