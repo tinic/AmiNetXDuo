@@ -488,6 +488,14 @@ LONG ami_bpf_ioctl(LONG channel, ULONG command, APTR buffer);
 /* Bytes buffered across both the hold and store buffers. -1 on a bad channel. */
 LONG ami_bpf_data_waiting(LONG channel);
 
+/*
+ * How many channels are currently bound to an interface, i.e. whether tapping
+ * is worth any preparation at all. The two taps below check this themselves;
+ * this is for a caller that has to BUILD something -- a scatter view over a
+ * packet chain -- before it can call one.
+ */
+UWORD ami_bpf_capturing(VOID);
+
 /* ------------------------------------------------- interface registration */
 
 /*

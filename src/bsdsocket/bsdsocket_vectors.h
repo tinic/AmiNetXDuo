@@ -283,6 +283,46 @@ LONG bsd_SocketBaseTagList(register struct TagItem *tags __asm("a0"),
 LONG bsd_GetSocketEvents(register ULONG *event_ptr __asm("a0"),
                          register struct AmiSocketBase *SocketBase __asm("a6"));
 
+/* LVO -0x16e */
+LONG bsd_bpf_open(register LONG channel __asm("d0"),
+                  register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x174 */
+LONG bsd_bpf_close(register LONG channel __asm("d0"),
+                   register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x17a */
+LONG bsd_bpf_read(register LONG channel __asm("d0"),
+                  register APTR buffer __asm("a0"),
+                  register LONG len __asm("d1"),
+                  register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x180 */
+LONG bsd_bpf_write(register LONG channel __asm("d0"),
+                   register APTR buffer __asm("a0"),
+                   register LONG len __asm("d1"),
+                   register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x186 */
+LONG bsd_bpf_set_notify_mask(register LONG channel __asm("d1"),
+                             register ULONG signal_mask __asm("d0"),
+                             register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x18c */
+LONG bsd_bpf_set_interrupt_mask(register LONG channel __asm("d0"),
+                                register ULONG signal_mask __asm("d1"),
+                                register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x192 */
+LONG bsd_bpf_ioctl(register LONG channel __asm("d0"),
+                   register ULONG command __asm("d1"),
+                   register APTR buffer __asm("a0"),
+                   register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x198 */
+LONG bsd_bpf_data_waiting(register LONG channel __asm("d0"),
+                          register struct AmiSocketBase *SocketBase __asm("a6"));
+
 /* LVO -0x210 */
 VOID bsd_ReleaseDomainNameServerList(register struct List *list __asm("a0"),
                                      register struct AmiSocketBase *SocketBase __asm("a6"));

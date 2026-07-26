@@ -96,6 +96,12 @@ IMPLEMENTED = {
     "ObtainServerSocket", "ProcessIsServer",
     # multiplexing and the event API
     "WaitSelect", "SetSocketSignals", "GetSocketEvents",
+    # the raw packet path (bpf.c -> src/bpf/).  Always in the table: when
+    # AMINETXDUO_BPF is off, bpf.c compiles to eight ENOSYS bodies rather than
+    # to nothing, so the slot shape never depends on a build option.
+    "bpf_open", "bpf_close", "bpf_read", "bpf_write",
+    "bpf_set_notify_mask", "bpf_set_interrupt_mask",
+    "bpf_ioctl", "bpf_data_waiting",
     # errno / tags
     "Errno", "SetErrnoPtr", "SocketBaseTagList",
     # address conversion

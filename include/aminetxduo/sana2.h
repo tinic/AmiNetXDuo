@@ -71,6 +71,23 @@ ULONG       ami_sana2_get_mtu(const AmiSana2If *iface);
 ULONG       ami_sana2_get_bps(const AmiSana2If *iface);
 BOOL        ami_sana2_is_online(const AmiSana2If *iface);
 
+/*
+ * Put one frame on the wire that the IP stack did not build.
+ *
+ * This exists for bpf_write(): a capture consumer hands over a complete
+ * DLT_EN10MB frame, src/bpf/ takes the fourteen bytes apart (cooked SANA-II
+ * builds them itself and would otherwise put two link headers on the wire) and
+ * arrives here with the destination, the EtherType and the payload.
+ *
+ * `dst` is six bytes or NULL for a wire with no address field. The payload is
+ * COPIED into a fresh NX_PACKET, because the caller's buffer is an application
+ * buffer that goes away when the call returns and the write completes
+ * asynchronously. Returns 0, or -1 if the payload exceeds the MTU, the pool is
+ * empty or the interface is down.
+ */
+LONG ami_sana2_inject(AmiSana2If *iface, UWORD ether_type, const UBYTE *dst,
+                      const UBYTE *payload, ULONG len);
+
 /* Counters for GetNetworkStatistics()/netstat. */
 typedef struct AmiSana2Stats {
     ULONG   packets_received;

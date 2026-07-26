@@ -24,6 +24,10 @@
 
 #include "sana2_internal.h"
 
+#ifdef AMINETXDUO_BPF
+#include "aminetxduo/bpf.h"
+#endif
+
 #include <proto/exec.h>
 
 VOID ami_sana2_tx_init(AmiSana2If *iface)
@@ -152,6 +156,52 @@ static AmiTxSlot *ami_sana2_tx_claim(AmiSana2If *iface)
     return slot;
 }
 
+/*
+ * bpf_write()'s wire end. The payload is copied into a pool packet because the
+ * caller's buffer is an application buffer and CMD_WRITE completes long after
+ * this returns; ami_sana2_tx_send() releases the packet when it does.
+ */
+LONG ami_sana2_inject(AmiSana2If *iface, UWORD ether_type, const UBYTE *dst,
+                      const UBYTE *payload, ULONG len)
+{
+    NX_PACKET *packet;
+    ULONG      msw = 0;
+    ULONG      lsw = 0;
+
+    if (iface == NULL || payload == NULL || len == 0)
+        return -1;
+
+    if (!iface->online || iface->pool == NULL)
+        return -1;
+
+    if (iface->mtu != 0 && len > iface->mtu)
+        return -1;
+
+    if (nx_packet_allocate(iface->pool, &packet, NX_PHYSICAL_HEADER,
+                           NX_NO_WAIT) != NX_SUCCESS)
+        return -1;
+
+    if (nx_packet_data_append(packet, (VOID *)payload, len, iface->pool,
+                              NX_NO_WAIT) != NX_SUCCESS)
+    {
+        nx_packet_release(packet);
+        return -1;
+    }
+
+    packet->nx_packet_address.nx_packet_interface_ptr = iface->interface_ptr;
+
+    if (dst != NULL && iface->addr_bytes == AMI_ETH_ADDR_SIZE)
+    {
+        msw = ((ULONG)dst[0] << 8) | (ULONG)dst[1];
+        lsw = ((ULONG)dst[2] << 24) | ((ULONG)dst[3] << 16) |
+              ((ULONG)dst[4] << 8) | (ULONG)dst[5];
+    }
+
+    /* tx_send() owns the packet from here, success or failure. */
+    return (ami_sana2_tx_send(iface, packet, ether_type, msw, lsw) == NX_SUCCESS)
+               ? 0 : -1;
+}
+
 UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
                        ULONG dst_msw, ULONG dst_lsw)
 {
@@ -218,6 +268,19 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
         eth[12] = (UCHAR)(ether_type >> 8);
         eth[13] = (UCHAR)(ether_type);
     }
+
+#ifdef AMINETXDUO_BPF
+    /*
+     * The transmit tap, after the raw block above so one call site serves both
+     * modes.  `iface->raw_mode` is exactly `has_link_header`: in raw mode the
+     * 14 bytes are now in the packet, in cooked mode they exist nowhere and
+     * the tap synthesises them from the three facts the CMD_WRITE below is
+     * about to carry.  Nothing is written into the packet -- it is very often
+     * a queued TCP segment that will be handed back for retransmission.
+     */
+    ami_bpf_tap_tx(iface, packet, iface->raw_mode, ether_type,
+                   dst_msw, dst_lsw, iface->mac);
+#endif
 
     length = packet->nx_packet_length;
 

@@ -222,6 +222,12 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
     if (ns == NULL)
         return;
 
+#ifdef AMINETXDUO_BPF
+    /* Before anything is deleted: the taps run on the SANA-II reader threads
+       and the IP thread, both of which are still alive at this point. */
+    ami_netstack_capture_stop(ns);
+#endif
+
     ami_netstack_dns_stop(ns);
 
     if (ns->ns_AutoIpCreated)
@@ -744,6 +750,16 @@ static LONG ami_ns_bring_up(VOID)
         ami_netstack_leave(&caller);
         return status;
     }
+
+#ifdef AMINETXDUO_BPF
+    /*
+     * Capture goes up with the interfaces and before any address is
+     * configured, so that DHCP, ARP and IPv6 neighbour discovery are all
+     * inside the trace rather than in front of it -- those are exactly the
+     * exchanges a bring-up problem lives in.
+     */
+    ami_netstack_capture_start(ns);
+#endif
 
     /* ---- 7. addresses --------------------------------------------------- */
 

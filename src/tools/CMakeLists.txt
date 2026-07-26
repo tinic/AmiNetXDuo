@@ -89,6 +89,12 @@ aminetxduo_add_tool(tool_fetch   fetch    SOURCES fetch.c)
 # needs TLS, and none of them needs a libc porting shim -- which is what makes
 # them the three that can be written natively rather than ported.
 aminetxduo_add_tool(tool_nc      nc       SOURCES nc.c     toolsock.c)
+
+# NetTrace is config-only in exactly the same sense, and deliberately so: it
+# reaches the capture path through the eight published bpf_* LVOs rather than
+# by linking src/bpf/, because a tool that linked the archive would get its
+# OWN copy of the channel table and capture nothing at all.
+aminetxduo_add_tool(tool_nettrace NetTrace SOURCES nettrace.c toolsock.c)
 aminetxduo_add_tool(tool_telnet  telnet   SOURCES telnet.c toolsock.c)
 aminetxduo_add_tool(tool_ftp     ftp      SOURCES ftp.c    toolsock.c)
 
@@ -121,5 +127,5 @@ set_target_properties(tool_smoke PROPERTIES OUTPUT_NAME "ToolsSmoke")
 add_custom_target(tools ALL)
 add_dependencies(tools
     tool_addnetinterface tool_netsetup tool_online tool_offline tool_host
-    tool_fetch tool_nc tool_telnet tool_ftp
+    tool_fetch tool_nc tool_telnet tool_ftp tool_nettrace
     tool_shownetstatus tool_netstat tool_ping tool_smoke)

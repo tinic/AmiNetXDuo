@@ -15,6 +15,13 @@ if(AMINETXDUO_IPV6)
     list(APPEND NETSTACK_SOURCES netstack_ipv6.c)
 endif()
 
+# Capture: registers the SANA-II interfaces with src/bpf/ and installs the
+# NetX Duo IP filter that lo0 needs.  Nothing else in the tree calls src/bpf/,
+# so without this the whole subsystem is unreachable code.
+if(AMINETXDUO_BPF)
+    list(APPEND NETSTACK_SOURCES netstack_capture.c)
+endif()
+
 add_library(aminetxduo_netstack STATIC ${NETSTACK_SOURCES})
 
 target_include_directories(aminetxduo_netstack
@@ -27,5 +34,9 @@ target_link_libraries(aminetxduo_netstack PUBLIC
     aminetxduo_sana2
     netxduo_addons
     threadx_port)
+
+if(AMINETXDUO_BPF)
+    target_link_libraries(aminetxduo_netstack PUBLIC aminetxduo_bpf)
+endif()
 
 target_compile_options(aminetxduo_netstack PRIVATE -Wall -Wextra)

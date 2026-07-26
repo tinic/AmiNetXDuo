@@ -11,7 +11,7 @@
  * the two after gethostbyaddr_r) and every vector we have not implemented
  * yet point at bsd_enosys() rather than NULL.
  *
- * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 70 implemented, 69 stubbed (9 of them NULL-returning, 1 FALSE-returning).
+ * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 78 implemented, 61 stubbed (9 of them NULL-returning, 1 FALSE-returning).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -86,14 +86,14 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_enosys,                    /* -0x15c [ 57] reserved */
     (APTR)bsd_enosys,                    /* -0x162 [ 58] reserved */
     (APTR)bsd_enosys,                    /* -0x168 [ 59] reserved */
-    (APTR)bsd_enosys,             /* -0x16e [ 60] bpf_open */
-    (APTR)bsd_enosys,             /* -0x174 [ 61] bpf_close */
-    (APTR)bsd_enosys,             /* -0x17a [ 62] bpf_read */
-    (APTR)bsd_enosys,             /* -0x180 [ 63] bpf_write */
-    (APTR)bsd_enosys,             /* -0x186 [ 64] bpf_set_notify_mask */
-    (APTR)bsd_enosys,             /* -0x18c [ 65] bpf_set_interrupt_mask */
-    (APTR)bsd_enosys,             /* -0x192 [ 66] bpf_ioctl */
-    (APTR)bsd_enosys,             /* -0x198 [ 67] bpf_data_waiting */
+    (APTR)bsd_bpf_open,           /* -0x16e [ 60] bpf_open */
+    (APTR)bsd_bpf_close,          /* -0x174 [ 61] bpf_close */
+    (APTR)bsd_bpf_read,           /* -0x17a [ 62] bpf_read */
+    (APTR)bsd_bpf_write,          /* -0x180 [ 63] bpf_write */
+    (APTR)bsd_bpf_set_notify_mask, /* -0x186 [ 64] bpf_set_notify_mask */
+    (APTR)bsd_bpf_set_interrupt_mask, /* -0x18c [ 65] bpf_set_interrupt_mask */
+    (APTR)bsd_bpf_ioctl,          /* -0x192 [ 66] bpf_ioctl */
+    (APTR)bsd_bpf_data_waiting,   /* -0x198 [ 67] bpf_data_waiting */
     (APTR)bsd_enosys,             /* -0x19e [ 68] AddRouteTagList */
     (APTR)bsd_enosys,             /* -0x1a4 [ 69] DeleteRouteTagList */
     (APTR)bsd_enosys,             /* -0x1aa [ 70] ChangeRouteTagList */

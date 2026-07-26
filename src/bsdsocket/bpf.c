@@ -1,0 +1,179 @@
+/*
+ * bsdsocket.library -- the eight bpf_* LVOs.
+ *
+ * Thin, on purpose. Everything these do lives in src/bpf/; what is here is the
+ * m68k register convention, the SocketBase argument every vector carries, and
+ * the errno the caller reads back.
+ *
+ * The slots exist whatever AMINETXDUO_BPF says. A build without it compiles
+ * eight ENOSYS bodies rather than nothing at all, so the vector table has the
+ * same shape either way and a caller gets a documented failure instead of a
+ * jump into a slot that means something else in the next build.
+ *
+ * bpf_set_notify_mask takes (d1, d0) -- channel in d1, mask in d0 -- which is
+ * the reverse of every other call in the group INCLUDING its own sibling
+ * bpf_set_interrupt_mask. Both pragmas/bsdsocket_pragmas.h and the .fd agree,
+ * so it is real. tools/gen_vectors.py reads it from the pragma rather than
+ * being told, which is why the declaration in bsdsocket_vectors.h is right
+ * without anybody having to remember this.
+ *
+ * NO ThreadX BRACKET, and that is a decision rather than an omission. Every
+ * other vector that touches the stack goes through bsd_nx_enter() because
+ * NetX Duo will suspend the caller; src/bpf/ never calls NetX Duo, never
+ * allocates from the packet pool and never blocks. It guards its own table
+ * with Forbid()/Permit(), which is the right primitive for a structure shared
+ * with the SANA-II reader Tasks and the IP thread. Adding an adoption bracket
+ * here would make a capture read cost more than the capture.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "bsdsocket_vectors.h"
+
+#ifdef AMINETXDUO_BPF
+#include "aminetxduo/bpf.h"
+#endif
+
+#ifdef AMINETXDUO_BPF
+
+/*
+ * src/bpf/ answers -1 for every kind of failure and does not distinguish
+ * between them. Rather than invent a code per call site, one honest mapping:
+ * a failed bpf_* call sets EINVAL, which is what an ioctl the library does not
+ * understand and a channel that is not open have in common. The exceptions are
+ * the three that return a count, where -1 is the value and errno is what says
+ * whether it was an error at all.
+ */
+static LONG bsd_bpf_result(struct AmiSocketBase *SocketBase, LONG status)
+{
+    if (status < 0)
+        return bsd_fail(SocketBase, AMI_EINVAL);
+
+    return status;
+}
+
+LONG bsd_bpf_open(register LONG channel __asm("d0"),
+                  register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    return bsd_bpf_result(SocketBase, ami_bpf_open(channel));
+}
+
+LONG bsd_bpf_close(register LONG channel __asm("d0"),
+                   register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    return bsd_bpf_result(SocketBase, ami_bpf_close(channel));
+}
+
+LONG bsd_bpf_read(register LONG channel __asm("d0"),
+                  register APTR buffer __asm("a0"),
+                  register LONG len __asm("d1"),
+                  register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    return bsd_bpf_result(SocketBase, ami_bpf_read(channel, buffer, len));
+}
+
+LONG bsd_bpf_write(register LONG channel __asm("d0"),
+                   register APTR buffer __asm("a0"),
+                   register LONG len __asm("d1"),
+                   register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    return bsd_bpf_result(SocketBase, ami_bpf_write(channel, buffer, len));
+}
+
+LONG bsd_bpf_set_notify_mask(register LONG channel __asm("d1"),
+                             register ULONG signal_mask __asm("d0"),
+                             register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    return bsd_bpf_result(SocketBase,
+                          ami_bpf_set_notify_mask(channel, signal_mask));
+}
+
+LONG bsd_bpf_set_interrupt_mask(register LONG channel __asm("d0"),
+                                register ULONG signal_mask __asm("d1"),
+                                register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    return bsd_bpf_result(SocketBase,
+                          ami_bpf_set_interrupt_mask(channel, signal_mask));
+}
+
+LONG bsd_bpf_ioctl(register LONG channel __asm("d0"),
+                   register ULONG command __asm("d1"),
+                   register APTR buffer __asm("a0"),
+                   register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    return bsd_bpf_result(SocketBase, ami_bpf_ioctl(channel, command, buffer));
+}
+
+LONG bsd_bpf_data_waiting(register LONG channel __asm("d0"),
+                          register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    return bsd_bpf_result(SocketBase, ami_bpf_data_waiting(channel));
+}
+
+#else /* !AMINETXDUO_BPF */
+
+LONG bsd_bpf_open(register LONG channel __asm("d0"),
+                  register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)channel;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+LONG bsd_bpf_close(register LONG channel __asm("d0"),
+                   register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)channel;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+LONG bsd_bpf_read(register LONG channel __asm("d0"),
+                  register APTR buffer __asm("a0"),
+                  register LONG len __asm("d1"),
+                  register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)channel; (VOID)buffer; (VOID)len;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+LONG bsd_bpf_write(register LONG channel __asm("d0"),
+                   register APTR buffer __asm("a0"),
+                   register LONG len __asm("d1"),
+                   register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)channel; (VOID)buffer; (VOID)len;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+LONG bsd_bpf_set_notify_mask(register LONG channel __asm("d1"),
+                             register ULONG signal_mask __asm("d0"),
+                             register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)channel; (VOID)signal_mask;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+LONG bsd_bpf_set_interrupt_mask(register LONG channel __asm("d0"),
+                                register ULONG signal_mask __asm("d1"),
+                                register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)channel; (VOID)signal_mask;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+LONG bsd_bpf_ioctl(register LONG channel __asm("d0"),
+                   register ULONG command __asm("d1"),
+                   register APTR buffer __asm("a0"),
+                   register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)channel; (VOID)command; (VOID)buffer;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+LONG bsd_bpf_data_waiting(register LONG channel __asm("d0"),
+                          register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)channel;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+#endif /* AMINETXDUO_BPF */

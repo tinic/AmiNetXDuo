@@ -508,6 +508,11 @@ LONG ami_bpf_read(LONG channel, APTR buffer, LONG len)
     return (LONG)nbytes;
 }
 
+UWORD ami_bpf_capturing(VOID)
+{
+    return ami_bpf_bound_channels;
+}
+
 /* ------------------------------------------------------ bpf_data_waiting */
 
 LONG ami_bpf_data_waiting(LONG channel)

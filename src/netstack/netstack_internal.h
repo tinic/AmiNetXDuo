@@ -109,6 +109,13 @@ VOID ami_netstack_baton_acquire(VOID);
  * tools share this bracket rather than growing their own.
  */
 
+#ifdef AMINETXDUO_BPF
+/* netstack_capture.c -- registers the interfaces with src/bpf/ and installs
+   the IP-level filter that is the only way loopback can be traced. */
+VOID ami_netstack_capture_start(AmiNetStack *ns);
+VOID ami_netstack_capture_stop(AmiNetStack *ns);
+#endif
+
 /* ---------------------------------------------------------------- resolver */
 
 LONG ami_netstack_dns_start(AmiNetStack *ns);

@@ -28,6 +28,10 @@
 #include "nx_rarp.h"
 #endif
 
+#ifdef AMINETXDUO_BPF
+#include "aminetxduo/bpf.h"
+#endif
+
 #include <proto/exec.h>
 
 VOID ami_sana2_block_enter(VOID);
@@ -48,6 +52,18 @@ VOID ami_sana2_block_leave(VOID);
 VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet)
 {
     UINT type;
+
+#ifdef AMINETXDUO_BPF
+    /*
+     * The receive tap, at the convergence of the cooked and raw paths and
+     * BEFORE the link header is stripped below -- so both modes are covered by
+     * the one call and the frame is a complete link-layer frame in one
+     * contiguous run.  A no-op (one load, one compare) when nothing is
+     * capturing on this interface.
+     */
+    ami_bpf_tap_rx(iface, packet->nx_packet_prepend_ptr,
+                   packet->nx_packet_length);
+#endif
 
     if (packet->nx_packet_length < AMI_ETH_HEADER_SIZE)
     {

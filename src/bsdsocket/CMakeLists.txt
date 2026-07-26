@@ -20,6 +20,7 @@ set(BSDSOCKET_SOURCES
     netdb.c                 # get{serv,proto,net}by* over src/config/netdb.c
     addrinfo.c              # getaddrinfo/getnameinfo/freeaddrinfo/gai_strerror
     handoff.c               # ObtainSocket/ReleaseSocket cross-base transfer
+    bpf.c                   # the eight bpf_* LVOs over src/bpf/
     roadshow.c              # the Tier 3 extensions whose ABI is pinned down
     netx_call.c             # ThreadX context bracket for NetX Duo calls
     library_runtime.c)      # DOSBase, rand(): no crt0 in a shared library
@@ -47,6 +48,10 @@ target_include_directories(aminetxduo_bsdsocket PUBLIC
 
 target_link_libraries(aminetxduo_bsdsocket PUBLIC
     aminetxduo_common netxduo aminetxduo_netstack aminetxduo_config)
+
+if(AMINETXDUO_BPF)
+    target_link_libraries(aminetxduo_bsdsocket PUBLIC aminetxduo_bpf)
+endif()
 
 # A shared library has no startup code and must not drag in newlib's stdio.
 target_compile_options(aminetxduo_bsdsocket PRIVATE -Wall -Wextra)
@@ -90,6 +95,10 @@ if(AMINETXDUO_BSDSOCKET_LINK)
     target_link_libraries(bsdsocket_library PRIVATE
         aminetxduo_netstack aminetxduo_sana2 aminetxduo_config
         aminetxduo_common netxduo_addons netxduo threadx threadx_port)
+
+    if(AMINETXDUO_BPF)
+        target_link_libraries(bsdsocket_library PRIVATE aminetxduo_bpf)
+    endif()
 
     if(AMINETXDUO_TLS)
         target_compile_definitions(bsdsocket_library PRIVATE

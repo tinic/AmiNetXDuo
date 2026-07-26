@@ -37,6 +37,13 @@ endif()
 # default.  Bisected in docs/RESEARCH.md 9; turn this ON to work on it.
 option(AMINETXDUO_TLS  "Build tls.library and its trust store"        OFF)
 option(AMINETXDUO_BPF  "Build the bpf_* raw path and filter VM"       ON)
+if(AMINETXDUO_BPF)
+    # Global, because the two SANA-II taps and the netstack's capture
+    # attachment are compiled out without it and the bsdsocket LVOs answer
+    # ENOSYS. One definition for every translation unit, so no two objects
+    # can disagree about whether the taps exist.
+    add_compile_definitions(AMINETXDUO_BPF)
+endif()
 option(AMINETXDUO_TESTS "Build the on-Amiga test harnesses"           ON)
 
 # The SANA-II raw-framing probe posts a CMD_READ with SANA2IOF_RAW and takes it

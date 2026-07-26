@@ -141,6 +141,27 @@
 #define NX_ENABLE_EXTENDED_NOTIFY_SUPPORT
 
 
+/* ---------------------------------------------------------- capture ------ */
+
+/*
+ * The IP-level capture hook, and the ONLY way loopback traffic can be traced.
+ *
+ * The SANA-II taps in src/sana2/ see every frame that crosses a wire, which is
+ * everything -- except loopback, because NetX Duo's loopback interface has
+ * `nx_interface_link_driver_entry == NX_NULL` (nx_ip_create.c:157) and
+ * _nx_ip_driver_packet_send() shortcuts a loopback destination straight into
+ * _nx_ip_packet_deferred_receive().  No driver is called, so no tap on the
+ * driver can ever fire, and the fastest path in the stack -- the one every
+ * throughput number in docs/RESEARCH.md 11 was measured on -- would have been
+ * the one path with no instrument on it.
+ *
+ * This adds two function pointers to NX_IP and two branches per packet in each
+ * direction.  Because it changes the NX_IP layout it MUST be seen by every
+ * translation unit, which is why it lives here and not on a target.
+ */
+#define NX_ENABLE_IP_PACKET_FILTER
+
+
 /* ------------------------------------------------------------- routing --- */
 
 /*
