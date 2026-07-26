@@ -94,9 +94,11 @@ Barthel's freely distributable Roadshow SDK headers and autodocs are used solely
 as an ABI reference, for function offsets, tag values, structure layouts and
 documented behaviour.
 
-`bsdsocket.library` scores **128 of 142** on
+`bsdsocket.library` scores **141 of 142** on
 [`bsdsocktest`](https://github.com/tbdye/bsdsocktest), an independent
-conformance suite, with nothing failing — the remainder are skipped.
+conformance suite, with no tests skipped. Roadshow 4.364 scores 138 on the same
+suite. The one result we do not pass needs an inbound connection that the
+emulator we develop against cannot provide.
 
 ## Prior art
 

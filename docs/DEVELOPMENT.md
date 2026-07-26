@@ -164,8 +164,8 @@ tests/conformance/run-fsuae.sh -a "LOOPBACK NOPAGE"
 
 | | |
 |---|---|
-| conformance, loopback tier | **128/142** (0 fail, 14 skip) |
-| conformance, network tier | **133/142** (2 fail, 7 skip) |
+| conformance, loopback tier | **130/142** (0 fail, 12 skip) |
+| conformance, network tier | **141/142** (1 fail, 0 skip) — Roadshow 4.364 scores 138 |
 | client access patterns | **94/94** (`tests/clients`) — the call sequences curl, wget, nc, ftp and telnet actually issue, each group named for the program and file it came from |
 | curl verification suite | **122/124** on the HTTP groups and **28/28** on the TLS group (`tests/curl`); a third-party curl built by somebody else scores the same 122/124, failing on the same two cases |
 | ThreadX-on-Exec soak | 98 checks, 4+ adopted tasks, Enforcer-clean on 68030 |
@@ -173,12 +173,21 @@ tests/conformance/run-fsuae.sh -a "LOOPBACK NOPAGE"
 | TCP throughput, 24.5 MHz 68020 | **636 KB/s** through the library, 1.78× for a 1.76× clock; conformance unchanged |
 | IPv6 (`-DAMINETXDUO_IPV6=ON`) | ICMPv6 + TCP + UDP between two `NX_IP` instances (78 checks); `AF_INET6` sockets over `::1` through the library ABI; ICMPv6 to the host across an emulated A2065, with a router advertisement and stateless autoconfiguration |
 
-Verified on 68020 and 68030. The single remaining loopback failure is a
-deliberate difference in behaviour. The suite treats `SOCK_RAW` as unsupported
-only when the error returned is `EACCES`, but `EACCES` means that the caller
-lacks privilege, which cannot be true on an operating system with no privilege
-model. This implementation returns `ESOCKTNOSUPPORT` instead, so that test stays
-red.
+Verified on 68020 and 68030. **The loopback tier has no failures**, and it
+cannot reach Roadshow's number by construction: nine of the 142 need a remote
+peer, so 133 is that tier's ceiling and the comparison has to be made on the
+network tier.
+
+The one remaining red anywhere is test 41, `accept(): incoming connection from
+remote host`, and it is the emulator rather than us. `uae_slirp_redir` reaches
+FS-UAE and is echoed in its log; with the guest booted, `lsof` finds no
+listening socket at all. FS-UAE 3.2.35 opens no inbound path whatever the
+configuration says.
+
+Roadshow 4.364 scores 138 with four known deviations of its own and no skips,
+which places it on the network tier with a helper connected and a working
+`SOCK_RAW` — so the figure to have compared against all along was our 133, not
+our loopback score.
 
 ## Continuous integration
 

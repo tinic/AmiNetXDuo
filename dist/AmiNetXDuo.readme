@@ -66,6 +66,6 @@ in the installer, and anything else can be typed in.
 
 Status: it gets a DHCP lease, answers ARP, pings its gateway,
 resolves DNS and moves TCP in both directions, and bsdsocket.library scores
-125 of 142 on the bsdsocktest conformance suite.  It has not been run on real
+141 of 142 on the bsdsocktest conformance suite, where Roadshow scores 138.  It has not been run on real
 hardware -- everything measured so far was on an emulated 68020 and 68030
 under Kickstart 3.1.  It is not yet something to trust with your data.

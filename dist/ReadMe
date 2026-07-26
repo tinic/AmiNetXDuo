@@ -151,7 +151,7 @@ STATUS, HONESTLY
 ----------------
 
 It gets a DHCP lease, answers ARP, pings its gateway, resolves DNS and moves
-TCP in both directions.  bsdsocket.library scores 125 of 142 on the
+TCP in both directions.  bsdsocket.library scores 141 of 142 on the
 bsdsocktest conformance suite.
 
 It has not been run on real hardware.  Everything above was measured on an
