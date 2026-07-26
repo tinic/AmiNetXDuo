@@ -12,9 +12,8 @@ drives the SANA-II network cards you already have.
 > [`bsdsocktest`](https://github.com/tbdye/bsdsocktest) conformance suite, where
 > Roadshow scores 138. Real `curl` runs on it, unmodified.
 >
-> It has **not been run on real hardware** — everything so far was measured on
-> an emulated 68020 and 68030 under Kickstart 3.1 — so treat it as something to
-> try, not something to depend on.
+> It has **only ever been tested under emulation, never on a real Amiga**, so
+> treat it as something to try rather than something to depend on.
 
 ## Why
 
@@ -63,32 +62,22 @@ a user guide in `Docs/` inside the archive.
 
 The installer copies all of them into `C:`.
 
-## HTTPS, and curl
+## HTTPS
 
-`fetch` handles `https://` on its own. Upstream **curl 8.21.0 also runs on a
-14 MHz 68020** against this stack, unpatched, and pulls a 657 KB file
-byte-identical at 117 KB/s.
+`fetch` handles `https://` URLs, and certificates are properly checked against
+the usual set of root authorities. **curl** runs on this stack too, if you want
+something with more options.
 
-Encryption on a machine this slow comes with one honest caveat. A first TLS
-handshake costs about 7 seconds for a simple site and around 23 for a
-three-certificate chain, and many large sites sit behind a CDN that hangs up
-after roughly fifteen. **Reconnecting to a site you have visited before takes
-about half a second**, because the session is cached and survives both a reboot
-and a change of program — so sites that fail on the first attempt often work on
-the second. Certificates are verified against 119 Mozilla roots, and the host
-name is checked, unless you ask otherwise.
-
-TLS is on by default, so a normal build ships `tls.library` and the trust
-store. `-DAMINETXDUO_TLS=OFF` leaves both out if you want a smaller stack, and
-`fetch` still works over `http://` without them.
+One thing to expect on a machine this slow: **the first connection to a site can
+take twenty seconds or more, and some sites will give up before it finishes.**
+Try again — the second attempt to the same site usually takes under a second,
+because the secure session is remembered, even across a reboot.
 
 ## What is not there yet
 
-- Nothing has run on **real hardware**.
-- IPv6 is built only with `-DAMINETXDUO_IPV6=ON`.
-- No TCP window scaling, so the window is capped at 64 KB, and no SACK.
-- Inbound connections are untested against the wider internet, because the
-  emulator we develop against provides no way to reach the guest from outside.
+- Nothing has run on **real hardware** yet.
+- IPv6 works but is not in the standard build.
+- Accepting connections *from* the internet is untested.
 
 ## Compatibility
 
@@ -98,14 +87,8 @@ Barthel's freely distributable Roadshow SDK headers and autodocs are used solely
 as an ABI reference, for function offsets, tag values, structure layouts and
 documented behaviour.
 
-The conformance figure above is `bsdsocktest`'s network tier with no tests
-skipped, which is where Roadshow 4.364's 138 was measured. The one result we do
-not pass needs an inbound connection that the emulator we develop against cannot
-provide.
-
-Third-party software confirms the ABI independently: the Aminet build of curl
-8.22.0-DEV, compiled by someone else against AmiSSL and clib2, runs on this
-stack and scores exactly what our own build does.
+Software built for other Amiga TCP/IP stacks runs on this one unmodified, which
+is the point of implementing the same ABI rather than a new one.
 
 ## Prior art
 
