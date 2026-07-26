@@ -5,6 +5,15 @@
 #   clients/curl/run-fsuae.sh [-m MODEL] [-t SECONDS] [-c CPU] [-k MHZ]
 #                             [-b STACKBUILD] [-C CURLBUILD]
 #
+# THE STACK BUILD MATTERS FOR https:
+#
+#   -b names the AmiNetXDuo build the bsdsocket.library and tls.library come
+#   from, and it defaults to build/tls because that is the one configured with
+#   AMINETXDUO_TLS=ON.  A bsdsocket.library built without it has no private
+#   context vector for tls.library to borrow NetX Duo through, so TLSOpen()
+#   answers TLS_ERR_NOSTACK and every https: URL fails -- legibly, but fails.
+#   http: is unaffected either way.
+#
 # Same shape as tests/tls/run-fetch.sh -- stage a2065.device, the interface
 # configuration, bsdsocket.library and a driver that reads a command list --
 # with two differences that are the whole reason this is a separate script:
@@ -35,8 +44,8 @@ MODEL=A1200
 TIMEOUT=300
 CPU=""
 CLOCK=""
-STACK_BUILD="${AMINETXDUO_BUILD:-build/cm}"
-CURL_BUILD="build/curl"
+STACK_BUILD="${AMINETXDUO_BUILD:-build/tls}"
+CURL_BUILD="build/curl-tls"
 
 while getopts "m:t:c:k:b:C:" opt; do
     case "$opt" in
@@ -53,10 +62,20 @@ done
 CURL="$ROOT/$CURL_BUILD/src/curl"
 BSD="$ROOT/$STACK_BUILD/src/bsdsocket/bsdsocket.library"
 ADDIF="$ROOT/$STACK_BUILD/src/tools/AddNetInterface"
+TLS="$ROOT/$STACK_BUILD/src/tlslib/tls.library"
+STORE="$ROOT/$STACK_BUILD/certificates"
 
 for f in "$CURL" "$BSD" "$ADDIF"; do
     [ -f "$f" ] || { echo "missing $f -- build it first" >&2; exit 2; }
 done
+
+# tls.library and the trust store are optional on purpose: a curl built
+# without the backend has no use for them, and a curl built WITH it has to
+# fail legibly when they are absent.  Both are worth being able to run.
+HAVE_TLS=0
+if [ -f "$TLS" ] && [ -f "$STORE" ]; then
+    HAVE_TLS=1
+fi
 
 # ------------------------------------------------------------ the driver ---
 
@@ -109,6 +128,15 @@ cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$CURL"  "$STAGE/curl"
 cp "$ADDIF" "$STAGE/AddNetInterface"
 
+if [ "$HAVE_TLS" = "1" ]; then
+    mkdir -p "$STAGE/devs/Internet"
+    cp "$TLS"   "$STAGE/libs/tls.library"
+    cp "$STORE" "$STAGE/devs/Internet/certificates"
+    echo "==> tls.library staged, trust store $(wc -c < "$STORE" | tr -d ' ') bytes"
+else
+    echo "==> NO tls.library in $STACK_BUILD -- https: must fail legibly"
+fi
+
 if [ -n "$MATH" ] && [ -f "$MATH" ]; then
     cp "$MATH" "$STAGE/libs/mathieeedoubbas.library"
     echo "==> mathieeedoubbas.library staged ($(wc -c < "$MATH" | tr -d ' ') bytes)"
@@ -127,6 +155,12 @@ cat > "$STAGE/commands.txt" <<'EOF'
 SYS:curl --version
 SYS:AddNetInterface eth0
 SYS:curl -sS -i http://example.com/
+SYS:curl -sS -o DH0:t12.html -w "tls-v1-2: HTTP %{http_code}, %{size_download} B, handshake %{time_appconnect}s total %{time_total}s\n" https://tls-v1-2.badssl.com:1012/
+SYS:curl -sS -o DH0:t12b.html -w "tls-v1-2 again (should resume): HTTP %{http_code}, handshake %{time_appconnect}s\n" https://tls-v1-2.badssl.com:1012/
+SYS:curl -sS -o DH0:ecc.html -w "ecc256: HTTP %{http_code}, %{size_download} B, handshake %{time_appconnect}s total %{time_total}s\n" https://ecc256.badssl.com/
+SYS:curl -sS -o DH0:wrong.html https://wrong.host.badssl.com/
+SYS:curl -sS -o DH0:iana.html -w "iana: HTTP %{http_code}, %{size_download} B, handshake %{time_appconnect}s total %{time_total}s\n" https://www.iana.org/
+SYS:curl -sS -o DH0:ex.html -w "example: HTTP %{http_code}, %{size_download} B, handshake %{time_appconnect}s total %{time_total}s\n" https://example.com/
 EOF
 fi
 

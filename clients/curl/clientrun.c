@@ -49,13 +49,21 @@ static const char version_tag[] __attribute__((used)) =
 #define REDIRECT    " <NIL: >>DH0:client.txt"
 
 /*
- * 256 KB.  curl's own stack use is not published and is not small: the URL
+ * 512 KB.  curl's own stack use is not published and is not small: the URL
  * parser, the multi state machine and the printf family all recurse a little,
  * and it is a Fast RAM allocation on a machine assumed to have four megabytes
  * that lasts only as long as the command.  Over-provision and move on --
  * the alternative to too much stack here is an unreproducible crash.
+ *
+ * It was 256 KB before the TLS backend.  A program that opens tls.library is
+ * bracketed into ThreadX on ITS OWN STACK (port/threadx-amiga/src/
+ * tx_amiga_adopt.c hands _tx_thread_create() the caller's stack region), so
+ * NetX Duo, nx_secure and the bignum code all run on whatever this process has
+ * left -- which is why src/tools/fetch.c allocates 64 KB and StackSwap()s onto
+ * it before its own TLSOpen().  curl cannot do that; it has no idea it is on
+ * AmigaOS.  So the budget has to be here, and doubling it costs nothing.
  */
-#define CLIENT_STACK    (256UL * 1024UL)
+#define CLIENT_STACK    (512UL * 1024UL)
 
 #define MAX_COMMANDS    24
 #define MAX_LINE        320

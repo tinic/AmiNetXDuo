@@ -2,18 +2,34 @@
 #
 # Build curl for m68k AmigaOS 3.x against bsdsocket.library.
 #
-#   clients/curl/build.sh [-u] [-b BUILDDIR] [-t]
+#   clients/curl/build.sh [-u] [-b BUILDDIR] [-t] [-R]
 #
 #   -u  fetch/update third_party/curl to the pinned tag first
 #   -b  build directory (default build/curl)
-#   -t  build with TLS (not implemented yet -- see docs/RESEARCH.md §11)
+#   -t  build with TLS over tls.library (see WITH TLS below)
+#   -R  revert third_party/curl to pristine and stop
 #
 # WHAT IS BEING BUILT
 #
-#   Upstream curl, unmodified, from third_party/curl (a submodule pinned to
-#   the tag in CURL_TAG below).  Nothing in this tree patches curl's sources
+#   Upstream curl from third_party/curl (a submodule pinned to the tag in
+#   CURL_TAG below).  Without -t nothing in this tree patches curl's sources
 #   or its build files; everything specific to this toolchain is a flag, and
 #   every flag is explained in clients/amiga-client.sh or below.
+#
+# WITH TLS
+#
+#   -t adds a vtls backend over tls.library and gives you https://.  Two
+#   things go into the submodule's working tree and neither is committed:
+#
+#     clients/curl/amitls.c, amitls.h  -> lib/vtls/, copied
+#     clients/curl/curl-amitls.patch   -> applied, 27 lines over six files
+#
+#   The submodule PIN never moves and no curl source is committed modified.
+#   Both steps are undone before either is redone, so this is idempotent and
+#   `-R` puts the checkout back the way it was.  A build without -t after a
+#   build with it is therefore genuinely the unpatched curl again -- which is
+#   worth having, because "does the no-TLS build still work" is a question
+#   somebody has to be able to answer.
 #
 #   The output is build/<dir>/src/curl -- an AmigaOS hunk executable that
 #   opens bsdsocket.library by name, exactly as `fetch`, `ping` and `host`
@@ -86,30 +102,64 @@ CURL_TAG="curl-8_21_0"
 BUILD="build/curl"
 UPDATE=0
 WITH_TLS=0
+REVERT=0
 
-while getopts "ub:t" opt; do
+while getopts "ub:tR" opt; do
     case "$opt" in
         u) UPDATE=1 ;;
         b) BUILD="$OPTARG" ;;
         t) WITH_TLS=1 ;;
-        *) echo "usage: $0 [-u] [-b builddir] [-t]" >&2; exit 2 ;;
+        R) REVERT=1 ;;
+        *) echo "usage: $0 [-u] [-b builddir] [-t] [-R]" >&2; exit 2 ;;
     esac
 done
 
-if [ "$WITH_TLS" = "1" ]; then
-    cat >&2 <<'EOF'
--t: there is no TLS backend for tls.library in curl yet.
+CURL_DIR="$ROOT/third_party/curl"
+PATCH="$ROOT/clients/curl/curl-amitls.patch"
 
-curl reaches a TLS library through lib/vtls/, and nothing there knows about
-tls.library.  Writing that backend is scoped in docs/RESEARCH.md 11; until it
-exists this build does http: and not https:.
-EOF
-    exit 2
+# Put the submodule back the way git has it recorded: drop our two copied
+# files and undo the patch.  Deliberately not `git checkout -- .`, which would
+# also throw away somebody else's local experiment without saying so.
+curl_unpatch()
+{
+    rm -f "$CURL_DIR/lib/vtls/amitls.c" "$CURL_DIR/lib/vtls/amitls.h"
+    if ! git -C "$CURL_DIR" diff --quiet -- \
+            CMakeLists.txt include/curl/curl.h lib/Makefile.inc \
+            lib/curl_config-cmake.h.in lib/curl_setup.h lib/vtls/vtls.c
+    then
+        git -C "$CURL_DIR" apply -R "$PATCH" 2>/dev/null || {
+            echo "!! third_party/curl is modified and it is not our patch." >&2
+            echo "   Sort that out first; this script will not guess." >&2
+            git -C "$CURL_DIR" status --short >&2
+            return 1
+        }
+    fi
+    return 0
+}
+
+if [ "$REVERT" = "1" ]; then
+    curl_unpatch || exit 1
+    echo "third_party/curl is pristine"
+    git -C "$CURL_DIR" status --short
+    exit 0
 fi
 
 . "$ROOT/clients/amiga-client.sh"
 
-amiga_client_checkout "$ROOT/third_party/curl" "$CURL_URL" "$CURL_TAG" "$UPDATE"
+amiga_client_checkout "$CURL_DIR" "$CURL_URL" "$CURL_TAG" "$UPDATE"
+
+curl_unpatch || exit 1
+
+if [ "$WITH_TLS" = "1" ]; then
+    echo "==> TLS backend: clients/curl/amitls.c + curl-amitls.patch"
+    cp "$ROOT/clients/curl/amitls.c" "$CURL_DIR/lib/vtls/amitls.c"
+    cp "$ROOT/clients/curl/amitls.h" "$CURL_DIR/lib/vtls/amitls.h"
+    git -C "$CURL_DIR" apply "$PATCH" || {
+        echo "!! curl-amitls.patch does not apply to $CURL_TAG." >&2
+        echo "   Six hunks, six files; rebase it by hand." >&2
+        exit 1
+    }
+fi
 
 echo "==> support archives"
 amiga_client_prepare "$ROOT/build/clients"
@@ -118,8 +168,41 @@ OUT="$ROOT/$BUILD"
 LOG="$OUT-configure.log"
 mkdir -p "$OUT"
 
+# CURL_ENABLE_SSL is a cached option and lib/Makefile.inc is read at configure
+# time, so a build directory that was configured the other way round would
+# quietly keep its old answer.  Throw the cache away when the setting changes
+# rather than debug that later.
+if [ -f "$OUT/CMakeCache.txt" ]; then
+    if grep -q '^CURL_USE_AMITLS:BOOL=ON' "$OUT/CMakeCache.txt"; then
+        WAS_TLS=1
+    else
+        WAS_TLS=0
+    fi
+    if [ "$WAS_TLS" != "$WITH_TLS" ]; then
+        echo "==> TLS setting changed; reconfiguring ${BUILD} from scratch"
+        rm -rf "$OUT"
+        mkdir -p "$OUT"
+    fi
+fi
+
+SSL_ARGS=(-DCURL_ENABLE_SSL=OFF)
+if [ "$WITH_TLS" = "1" ]; then
+    # CURL_CA_BUNDLE is an AMIGA path on purpose.  curl's CA auto-detection
+    # searches the BUILD host's filesystem, and cross-compiling turns it off
+    # rather than making it right -- so without this `curl -V` reports no CA
+    # bundle at all and CURLINFO_CAINFO is empty, while tls.library quietly
+    # uses its own default.  Naming the same path in both places is what makes
+    # `--cacert` an override of something visible rather than of a secret.
+    SSL_ARGS=(-DCURL_ENABLE_SSL=ON
+              -DCURL_USE_AMITLS=ON
+              -DCURL_USE_OPENSSL=OFF
+              -DCURL_CA_BUNDLE=DEVS:Internet/certificates
+              -DCURL_CA_PATH=none)
+fi
+
 echo "==> configuring curl in ${BUILD}"
 cmake -S "$ROOT/third_party/curl" -B "$OUT" -G Ninja \
+    "${SSL_ARGS[@]}" \
     -DAMIGA=1 \
     -DCMAKE_SYSTEM_NAME=Generic \
     -DCMAKE_SYSTEM_PROCESSOR=m68k \
@@ -127,13 +210,12 @@ cmake -S "$ROOT/third_party/curl" -B "$OUT" -G Ninja \
     -DCMAKE_C_COMPILER="$AMIGA_GCC" \
     -DCMAKE_AR="$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-ar" \
     -DCMAKE_RANLIB="$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-ranlib" \
-    -DCMAKE_C_FLAGS="$AMIGA_CLIENT_CFLAGS" \
+    -DCMAKE_C_FLAGS="$AMIGA_CLIENT_CFLAGS -I$ROOT/include" \
     -DCMAKE_EXE_LINKER_FLAGS="$AMIGA_CLIENT_LDFLAGS" \
     -DCMAKE_C_STANDARD_LIBRARIES="-Wl,--start-group -lamigaclient -lc -Wl,--end-group" \
     -DHAVE_SELECT=1 \
     -DHAVE_GETTIMEOFDAY=1 \
     -DENABLE_IPV6=OFF \
-    -DCURL_ENABLE_SSL=OFF \
     -DBUILD_SHARED_LIBS=OFF \
     -DBUILD_TESTING=OFF \
     -DBUILD_LIBCURL_DOCS=OFF \
@@ -170,5 +252,11 @@ echo
 ls -l "$OUT/src/curl"
 echo
 echo "curl for AmigaOS: $BUILD/src/curl"
-grep -E '^(#define )?(HAVE_PROTO_BSDSOCKET_H|HAVE_CLOSESOCKET_CAMEL|HAVE_IOCTLSOCKET_CAMEL_FIONBIO)' \
+grep -E '^(#define )?(HAVE_PROTO_BSDSOCKET_H|HAVE_CLOSESOCKET_CAMEL|HAVE_IOCTLSOCKET_CAMEL_FIONBIO|USE_AMITLS|USE_SSL)' \
      "$OUT/lib/curl_config.h" | sed 's/^/  /'
+
+if [ "$WITH_TLS" = "1" ]; then
+    echo
+    echo "  https: needs LIBS:tls.library and DEVS:Internet/certificates on"
+    echo "  the target -- clients/curl/run-fsuae.sh stages both."
+fi
