@@ -24,9 +24,13 @@ set(TOOLS_WARNINGS -Wall -Wextra)
 # Nothing here is a hot path: ping waits on the wire, ShowNetStatus prints a
 # table once.  -Os buys 14-17% off every command against -O2, measured on the
 # pinned toolchain, and there is no throughput number it can move -- the
-# libraries that actually move bytes keep -O2 from the toolchain file.
+# libraries that actually move bytes are compiled separately.
 #
-# Appended after CMAKE_C_FLAGS_RELEASE so it wins the duplicate -O.
+# Appended after CMAKE_C_FLAGS_RELEASE so it wins the duplicate -O.  There are
+# two duplicates to win, in fact: CMake's own GNU defaults append "-O3 -DNDEBUG"
+# after whatever the toolchain file puts in CMAKE_C_FLAGS_RELEASE_INIT, so the
+# libraries are -O3 builds and not the -O2 that file asks for.  See
+# docs/RESEARCH.md §21.6 -- it is a real finding and deliberately left alone.
 set(TOOLS_OPTIMISE $<$<CONFIG:Release>:-Os>)
 
 # Everything the tools include lives behind the core include set; the port
@@ -51,6 +55,23 @@ function(aminetxduo_add_tool target output)
 
     target_compile_options(${target} PRIVATE ${TOOLS_WARNINGS} ${TOOLS_OPTIMISE})
 
+    # A command is an ordinary executable with one entry point, so everything
+    # unreachable from main() is dead and the linker may be told to say so.
+    # This is where the size of these commands actually was -- NOT newlib,
+    # which contributes 4 KB of the 37 KB Online used to be.
+    # TOOLS_COMMON_SOURCES is named in add_executable() rather than pulled
+    # from an archive, so before --gc-sections the linker had no choice but to
+    # keep every byte of tool_diag.c in every command, whether that command
+    # ever explains anything or not.  Measured: -27% on Online, -38% on host.
+    # See docs/RESEARCH.md §21.
+    #
+    # --gc-sections is deliberately confined to this directory: the .library
+    # targets are reached through a romtag that Exec finds by scanning the
+    # loaded segment, with no relocation pointing at it, so collecting one
+    # throws the library away (measured: 60 KB off tls.library).
+    target_compile_options(${target} PRIVATE -ffunction-sections)
+    target_link_options(${target} PRIVATE -Wl,--gc-sections)
+
     if(TOOL_DEFINES)
         target_compile_definitions(${target} PRIVATE ${TOOL_DEFINES})
     endif()
@@ -66,6 +87,15 @@ function(aminetxduo_add_tool target output)
     endif()
 
     set_target_properties(${target} PROPERTIES OUTPUT_NAME "${output}")
+
+    # The one thing --gc-sections can quietly take that no test would notice:
+    # the "$VER:" tag AmigaDOS finds by scanning the file rather than by any
+    # reference the linker can see.  Checked on the linked binary, every time.
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+                "-DTOOL_BINARY=$<TARGET_FILE:${target}>"
+                -P "${CMAKE_SOURCE_DIR}/cmake/check-version-tag.cmake"
+        VERBATIM)
 
     if(AMIGA_SIZE)
         add_custom_command(TARGET ${target} POST_BUILD

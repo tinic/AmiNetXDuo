@@ -16,6 +16,17 @@ target_include_directories(aminetxduo_config
 
 target_link_libraries(aminetxduo_config PUBLIC aminetxduo_common)
 
+# This archive has two very different consumers.  bsdsocket.library wants all
+# of it; a Shell command wants a slice -- Online reads one interface file and
+# never touches netdb.c, and before -ffunction-sections it carried the whole
+# parser anyway, because a pulled archive member is kept whole.  Splitting the
+# functions lets src/tools/'s --gc-sections drop what a given command cannot
+# reach; with the same flag on the commands' own objects that is 12 KB off
+# Online and 9 KB off host.  The library link does not collect,
+# so all it pays is per-section padding -- 1,848 bytes across bsdsocket.library,
+# measured.  See docs/RESEARCH.md §21.
+target_compile_options(aminetxduo_config PRIVATE -ffunction-sections)
+
 # ---------------------------------------------------------------- host test --
 #
 # Only when configuring for the host: the test links against stdio and a stub

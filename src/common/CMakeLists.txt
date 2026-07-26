@@ -2,6 +2,11 @@ add_library(aminetxduo_common STATIC compat.c crashguard.c ami_random.c)
 target_include_directories(aminetxduo_common PUBLIC ${AMINETXDUO_CORE_INCLUDES})
 target_link_libraries(aminetxduo_common PUBLIC threadx)
 
+# Same reason as src/config: every Shell command in src/tools/ links this and
+# uses two or three functions out of compat.c, and --gc-sections can only drop
+# what has a section to drop.  See docs/RESEARCH.md §21.
+target_compile_options(aminetxduo_common PRIVATE -ffunction-sections)
+
 # ------------------------------------------------------------- NX_RAND ---
 #
 # port/netxduo-amiga/inc/nx_port.h points NX_RAND/NX_SRAND at ami_random.c,

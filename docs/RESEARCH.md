@@ -6925,3 +6925,220 @@ local-server case then reported `connection refused` or `the server stopped answ
 after 0 bytes`, which is indistinguishable from a broken command until the peer's own log
 is read and shows it shut down at 540 seconds. The peer now outlives the queue rather
 than the run.
+
+---
+
+## 21. Ten times Roadshow: where a Shell command's size actually goes (2026-07-26)
+
+`Online` reads one configuration file and calls into `bsdsocket.library`. Roadshow's is
+5,064 bytes. Ours was 44,396 — nearly nine times the size for the same job, and `-Os`
+was already on. The standing hypothesis was newlib: that the C runtime's startup, its
+`stdio` or its floating-point formatting was being dragged in behind everyone's back.
+
+**It is not newlib.** The linker map says so, and the number is not close.
+
+### 21.1 What Online was made of
+
+`m68k-amigaos-gcc 15.2.0`, Release, `-Os`, on the pinned toolchain. `.text` = 37,072
+bytes, by input object, with the map's "included to satisfy reference by" column:
+
+| bytes | % | object | pulled in by |
+|---:|---:|---|---|
+| 8,952 | 24.1% | `tool_diag.c` | named in `add_executable()` |
+| 8,376 | 22.6% | `config_parse.c` | `config_file.c` (`ami_cfg_parse_interface`) |
+| 4,376 | 11.8% | `netdb.c` | `config_file.c` (`ami_netdb_load`) |
+| 3,868 | 10.4% | `config_file.c` | `onoff.c` (`ami_config_load_interface`) |
+| 3,804 | 10.3% | `config_text.c` | `tool_diag.c` (`ami_config_set_reporter`) |
+| 1,896 | 5.1% | `onoff.c` — **the command itself** | — |
+| 1,580 | 4.3% | newlib `strstr` | `crt0.o` |
+| 1,420 | 3.8% | `tool_util.c` | named in `add_executable()` |
+| 772 | 2.1% | newlib `crt0.o` | — |
+| 764 | 2.1% | `compat.c` | `tool_diag.c` (`ami_alloc`) |
+| 1,236 | 3.3% | newlib `mem*`/`str*` | `crt0.o`, `config_file.c`, `strstr.o` |
+| 48 | 0.1% | `netstack_weak.c` | named in `add_executable()` |
+
+**All of newlib is 3,588 bytes — 9.7%.** No `stdio`, no `malloc`, no `printf`, no
+floating point: `dos.library`'s `Printf`/`VPrintf` and `ReadArgs()` did their job exactly
+as the comment at the top of `src/tools/CMakeLists.txt` claims. The largest single newlib
+item is `strstr` at 1,580 bytes — the Two-Way algorithm, referenced by `crt0.o`, which
+then drags in `memchr`, `memcmp` and `strchr` for another 540 between them. That is the
+whole newlib story, and `strstr` alone is 43% of it.
+
+The size is in two things we wrote:
+
+- **The configuration parser, 20,424 bytes — 55%.** `Online` calls
+  `ami_config_load_interface()`; that reaches `ami_cfg_parse_interface()`, which lives in
+  the same object as the gateway and resolver parsers; `config_file.c` also references
+  `ami_netdb_load`, so the whole `/etc/hosts`, `/etc/services` and `/etc/protocols` store
+  arrives with its built-in fallback tables. `Online` never calls any of it.
+- **The prose diagnostics, 8,952 bytes — 24%.** `tool_diag.c` is what prints
+  *"No network interfaces are configured"* and the paragraph of advice under it. It is in
+  `TOOLS_COMMON_SOURCES`, so it is named in `add_executable()` for every command — and an
+  object named in `add_executable()` is not an archive member. The linker has no choice:
+  it goes in whole, whether the command explains anything or not.
+
+That is the answer to the headline question. Roadshow's `Online` is 5 KB because the
+configuration parsing lives in Roadshow's library and the command asks for it. Ours
+carries its own copy, because there is no LVO to ask — and `bsdsocket.library` links the
+*same* `aminetxduo_config` archive, so the parser is in the tree twice over.
+
+### 21.2 What was actually fixed
+
+Not the duplication — that is an interface question, and the same one being answered for
+`netstack_ip()`. What was fixed is that **none of it could be dropped even when
+unreachable**, because nothing in the build was compiled at function granularity.
+
+- `-ffunction-sections` on `aminetxduo_config`, `aminetxduo_common` and the commands' own
+  sources.
+- `-Wl,--gc-sections` on the commands, and only on the commands.
+
+| command | before | after | |
+|---|---:|---:|---:|
+| `Online` | 44,396 | **32,388** | −27.0% |
+| `Offline` | 43,620 | 29,832 | −31.6% |
+| `host` | 23,720 | **14,660** | −38.2% |
+| `AddNetInterface` | 45,796 | 33,788 | −26.2% |
+| `NetSetup` | 33,348 | 25,100 | −24.7% |
+| `fetch` | 29,064 | 20,104 | −30.8% |
+| `nc` | 31,792 | 22,116 | −30.4% |
+| `telnet` | 30,460 | 20,428 | −32.9% |
+| `ftp` | 36,612 | 27,268 | −25.5% |
+| `NetTrace` | 31,964 | 22,152 | −30.7% |
+| `sntp` | 27,620 | 18,104 | −34.5% |
+| `tftp` | 30,932 | 20,548 | −33.6% |
+| `traceroute` | 30,176 | 19,780 | −34.5% |
+| `whois` | 28,200 | 17,352 | −38.5% |
+| `ping` | 94,204 | 49,256 | −47.7% |
+| `netstat` | 89,320 | 80,264 | −10.1% |
+| `ShowNetStatus` | 111,920 | 105,676 | −5.6% |
+
+`Online`'s `.text` goes 37,072 → 26,832. `host` — which loads no interface at all — goes
+18,936 → 11,980, because `--gc-sections` throws the entire parser and netdb store away.
+
+### 21.3 Why the flag is not in the toolchain file
+
+`-ffunction-sections` costs nothing on its own; only a link that passes `--gc-sections`
+sweeps anything up. Two measurements decided where each half goes.
+
+**A `.library` must never be collected.** Its romtag is found by Exec scanning the loaded
+segment, and no relocation points at it — exactly the shape a garbage collector removes.
+Putting `--gc-sections` in `CMAKE_EXE_LINKER_FLAGS` for the whole tree took **60 KB out of
+`tls.library`** and 19 KB out of `bsdsocket.library`. So `--gc-sections` lives in
+`src/tools/CMakeLists.txt` and nowhere else.
+
+**`-ffunction-sections` is not free for the library either.** In the tree-wide form it
+adds per-section padding to every archive the library links: +4,448 bytes on
+`bsdsocket.library`, +3,552 on `tls.library`. Scoped to `aminetxduo_config` and
+`aminetxduo_common` — the two archives a command takes a slice of — every config-only
+command comes out **byte-for-byte identical**, and the cost falls to +1,848 bytes on
+`bsdsocket.library` and **zero** on `tls.library`.
+
+The NX-linked three (`ping`, `netstat`, `ShowNetStatus`) would gain another 12–51 KB from
+extending the flag to `threadx`, `threadx_port`, `netxduo_port` and `aminetxduo_sana2` —
+`netstat` reaches 29,276 that way. That is deliberately not done: those three link a
+complete dead copy of the stack, which is a bug being fixed by publishing LVOs, and paying
+`bsdsocket.library` +2,600 bytes to shrink code that is about to be deleted is the wrong
+trade. When they become config-only they inherit the config-only numbers for nothing.
+
+### 21.4 The one thing `--gc-sections` quietly took
+
+Every command declares
+
+```c
+static const char version_tag[] __attribute__((used)) = "$VER: Online 2.0 (26.7.2026)";
+```
+
+and nothing ever reads it: AmigaDOS's `Version` finds it by scanning the file. `used`
+stops the *compiler* discarding it and says nothing to the linker. The attribute that
+would speak to the linker, `retain`, **this toolchain ignores** — gcc 15.2.0 answers
+`warning: 'retain' attribute ignored`, because the m68k assembler has no
+`SHF_GNU_RETAIN`.
+
+So with `-fdata-sections` the tag gets a section of its own, nothing relocates to it, and
+`--gc-sections` deletes it. Measured: **all seventeen commands lost their `$VER:` string**
+and every test still passed. Without `-fdata-sections` the tag shares the object's
+read-only section with the string literals `main()` prints, which are referenced, so it
+survives. That costs 150–1,100 bytes per command against the `-fdata-sections` variant,
+and it is the right 150–1,100 bytes to spend.
+
+Beyond that one case, `--gc-sections` is sound here by construction: it removes an input
+section only when no relocation from a live section points at it, and a Shell command has
+no AmigaOS mechanism that reaches code without a relocation — the romtag scan belongs to
+libraries, and the only inline assembly in `src/tools/` addresses registers and library
+offsets, never a symbol. What it actually took out of `Online` is 46 symbols, and the list
+reads exactly as it should: the gateway and resolver parsers, the whole `ami_netdb_*` API,
+`tool_explain_resolve`, `tool_format_mac`, the `netstack_*` weak stubs. `ami_netdb_load()`
+is called from `bsdsocket.library` and from `shownetstatus.c` and nowhere else — so
+`ShowNetStatus` keeps the built-in `127.0.0.1 localhost loopback` table and `Online` and
+`AddNetInterface` lose it, which is the correct answer in all three cases.
+
+Checked on the machine as well as on paper. `ToolsSmoke` under FS-UAE, run twice from a
+clean checkout — once as committed, once with these flags — produces **byte-identical**
+output, down to the `rc 10`, the `NAME/A,QUIET/S` template echo and the harness timeout at
+`AddNetInterface eth0` that both builds share.
+
+That reasoning is correct but fragile — a future flag change breaks it silently, with no
+test failing. `cmake/check-version-tag.cmake` therefore greps the linked binary after
+every link and fails the build if the tag is gone. It has already caught one real case: a
+stale `CMakeCache.txt` still carrying `-fdata-sections` from an earlier configure.
+
+### 21.5 What is left, and what would move it
+
+`Online` after the change, `.text` = 26,832:
+
+| bytes | object |
+|---:|---|
+| 8,496 | `tool_diag.c` |
+| 6,844 | `config_parse.c` |
+| 3,132 | `config_text.c` |
+| 1,896 | `onoff.c` |
+| 1,636 | `config_file.c` |
+| 1,580 | newlib `strstr` |
+| 1,204 | `tool_util.c` |
+| 772 | newlib `crt0.o` |
+| 892 | newlib `mem*`/`str*` |
+| 380 | `compat.c`, `netstack_weak.c` |
+
+`netdb.c` is gone entirely — 4,376 bytes of `/etc/hosts`, `/etc/services` and
+`/etc/protocols` handling that `Online` was carrying and could not reach.
+
+Nothing here is waste in the sense that `--gc-sections` understands. `tool_diag.c` and
+the parser are code the command genuinely reaches, and they are the difference between
+our `Online` and Roadshow's: theirs prints an error number, ours prints a paragraph that
+names the file, the device and the thing to fix. Closing the remaining 5× would mean
+moving the parser and the diagnostics behind `bsdsocket.library`'s LVOs so a command asks
+instead of carrying — the same shape as the `bpf_*` idiom `NetTrace` already uses, and
+the same shape as the `netstack_ip()` fix. That is an architecture change, not a build
+flag, and it is the only lever left that is worth anything.
+
+### 21.6 Found on the way: the libraries are not built at `-O2`
+
+`cmake/toolchain-m68k-amigaos.cmake` says
+
+```cmake
+set(CMAKE_C_FLAGS_RELEASE_INIT "-O2 -DNDEBUG")
+```
+
+and every library object is in fact compiled `-O3`. CMake's `Compiler/GNU` module
+*appends* its own default to whatever a toolchain file put in `_INIT`, so the real flags
+are
+
+```
+-m68020 -fomit-frame-pointer -fno-strict-aliasing -O2 -DNDEBUG -O3 -DNDEBUG
+```
+
+and the last `-O` wins. The commands are unaffected — `src/tools/` appends `-Os` after
+that, which is exactly why the comment there says "appended after `CMAKE_C_FLAGS_RELEASE`
+so it wins the duplicate `-O`" — but "`-O2` stays for the libraries" has never been true.
+`bsdsocket.library` and `tls.library` are `-O3` builds, and every throughput and size
+figure recorded for them was measured that way.
+
+Deliberately not changed here: setting `CMAKE_C_FLAGS_RELEASE` as a cache variable rather
+than `_INIT` would fix it in one line, but it would also re-optimise the whole stack and
+invalidate the numbers in §13, §15 and §18. It is a decision, not a bug fix.
+
+Dead ends, recorded so they are not retried: `-noixemul` still breaks `sys/reent.h`
+(§5.4) and would not have helped anyway, since newlib is 9.7% of the problem;
+`__attribute__((retain))` is ignored by this toolchain; and tree-wide `--gc-sections`
+destroys every `.library` in the build.
+
