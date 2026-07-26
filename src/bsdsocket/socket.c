@@ -837,8 +837,6 @@ static BOOL bsd_socket_destroy(AmiSocket *sock)
 
 VOID bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock)
 {
-    (VOID)base;
-
     if (sock == NULL)
         return;
 
@@ -846,7 +844,34 @@ VOID bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock)
         sock->as_RefCount--;
 
     if (sock->as_RefCount > 0)
+    {
+        /*
+         * THE SOCKET OUTLIVES THIS BASE, AND as_Owner MUST NOT.
+         *
+         * as_Owner is the base a NetX Duo receive/disconnect callback signals
+         * (select.c, bsd_event_post), and ObtainSocket() sets it to the base
+         * that took the socket. When that base closes while another reference
+         * is still held -- ReleaseCopyOfSocket() plus ObtainSocket(), or a
+         * Dup2Socket() across bases, which is every inetd-style handoff --
+         * the reference count keeps the AmiSocket alive and the base is freed
+         * underneath the pointer. The next callback then Signal()s a
+         * struct Task read out of freed memory, which on a machine with no
+         * memory protection is a write into whatever now occupies it.
+         *
+         * Found by the TCP: handler work (docs/RESEARCH.md 34), where it hung
+         * the first socket-handoff run.
+         *
+         * NULL is the right answer rather than "the other holder", because
+         * there is no way to know which holder that is: one NX socket has one
+         * owner and handoff.c says so. Events are recorded in as_Events
+         * either way, so a poll still sees them; only the asynchronous wakeup
+         * is lost, and it is lost to the base that no longer exists.
+         */
+        if (sock->as_Owner == base)
+            sock->as_Owner = NULL;
+
         return;
+    }
 
     /*
      * Drop the listen request BEFORE tearing down the socket parked on it,
