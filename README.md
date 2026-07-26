@@ -68,6 +68,26 @@ a user guide in `Docs/` inside the archive.
 
 The installer copies all of them into `C:`.
 
+## curl and ssh
+
+The archive has a `Clients` drawer holding two ported Unix programs:
+
+| | |
+|---|---|
+| `curl` | the real thing, with the options you already know |
+| `ssh` | connects to an ordinary modern server, using a key |
+
+The installer puts them in the `AmiNetXDuo` drawer alongside the
+documentation, rather than in `C:`, because each needs something this archive
+cannot provide for you:
+
+- **`mathieeedoubbas.library` in `LIBS:`.** It is Commodore's, so it is not in
+  the archive, but every Workbench installation has one.
+- **A much larger stack than a Shell gives a command.** Type `stack 200000`
+  once in the Shell you are going to run them from.
+
+Copy them into `C:` yourself if you would like them on your path.
+
 ## Finding the machine by name
 
 The Amiga answers to **`<hostname>.local`** on the local network, so another
@@ -83,12 +103,11 @@ everything already uses.
 ## HTTPS
 
 `fetch` handles `https://` URLs, and certificates are properly checked against
-the usual set of root authorities. **curl** runs on this stack too, if you want
-something with more options.
+the usual set of root authorities. So does `curl`, if you want more options.
 
-**`ssh` works** — to an ordinary modern server, with no special settings at its
-end. Expect a connection to take around ten seconds before the prompt appears;
-almost all of that is the cryptography rather than the network.
+`ssh` needs no special settings at the far end. Expect around ten seconds
+before the prompt appears; almost all of that is the cryptography rather than
+the network.
 
 One thing to expect on a machine this slow: **the first connection to a site can
 take twenty seconds or more, and some sites will give up before it finishes.**
