@@ -49,7 +49,23 @@ add_executable(crypto68k_bench c68k_bench.c)
 add_executable(crypto68k_ec_test  c68k_ec_test.c)
 add_executable(crypto68k_ec_bench c68k_ec_bench.c)
 
-foreach(prog crypto68k_test crypto68k_bench crypto68k_ec_test crypto68k_ec_bench)
+# The bulk path: AES-128-CBC and SHA-256, every variant timed and checked in
+# one run, with the instruction-cost kernels the design decisions rest on.
+#
+#   AMINETXDUO_RUN_TAG=bulk ./tools/fsuae-run.sh -t 600 -k 56 \
+#       build/cm/tests/crypto68k/crypto68k_bulk
+#
+# c68k_bulk_kernels.S is compiled here rather than in src/crypto68k because it
+# is a measurement of the machine and not part of the library.  It needs the
+# arch flag explicitly for the same reason the library's .S files do: the
+# toolchain file's CMAKE_C_FLAGS_INIT does not reach the assembler, and
+# without -m68020 the scaled (An,Dn.W*4) addressing mode does not exist.
+add_executable(crypto68k_bulk c68k_bulk_bench.c c68k_bulk_kernels.S)
+set_source_files_properties(c68k_bulk_kernels.S PROPERTIES
+    COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
+
+foreach(prog crypto68k_test crypto68k_bench crypto68k_ec_test
+             crypto68k_ec_bench crypto68k_bulk)
     target_link_libraries(${prog} PRIVATE
         crypto68k_testsupport crypto68k aminetxduo_common)
     set_target_properties(${prog} PROPERTIES OUTPUT_NAME "${prog}")

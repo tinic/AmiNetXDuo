@@ -58,6 +58,13 @@ else()
     add_library(crypto68k_ref STATIC
         "${NX_CRYPTO_ROOT}/src/nx_crypto_huge_number.c"
         "${NX_CRYPTO_ROOT}/src/nx_crypto_initialize.c"
+        # The bulk path's reference implementations.  tests/crypto68k checks
+        # every AES and SHA-256 variant against these before it times one, so
+        # they have to be present in the AMINETXDUO_TLS=OFF build too.
+        "${NX_CRYPTO_ROOT}/src/nx_crypto_aes.c"
+        "${NX_CRYPTO_ROOT}/src/nx_crypto_cbc.c"
+        "${NX_CRYPTO_ROOT}/src/nx_crypto_sha2.c"
+        "${NX_CRYPTO_ROOT}/src/nx_crypto_hmac.c"
         "${NX_CRYPTO_ROOT}/src/nx_crypto_ec.c"
         "${NX_CRYPTO_ROOT}/src/nx_crypto_ecdh.c"
         "${NX_CRYPTO_ROOT}/src/nx_crypto_ecdsa.c"
@@ -82,10 +89,13 @@ set(CRYPTO68K_SOURCES
     c68k_powm.c
     c68k_crt.c
     c68k_p256.c
-    c68k_p256_table.c)
+    c68k_p256_table.c
+    c68k_aes.c
+    c68k_sha256.c)
 
 if(AMINETXDUO_CRYPTO68K_ASM)
-    list(APPEND CRYPTO68K_SOURCES c68k_prim.S c68k_p256.S)
+    list(APPEND CRYPTO68K_SOURCES
+         c68k_prim.S c68k_p256.S c68k_aes.S c68k_sha256.S)
 endif()
 
 add_library(crypto68k STATIC ${CRYPTO68K_SOURCES})
@@ -105,7 +115,8 @@ if(AMINETXDUO_CRYPTO68K_ASM)
     # on a 68000 at all.  Set here rather than in the shared toolchain file so
     # nothing else in the tree changes behaviour.
     target_compile_definitions(crypto68k PRIVATE C68K_ASM=1)
-    set_source_files_properties(c68k_prim.S c68k_p256.S PROPERTIES
+    set_source_files_properties(
+        c68k_prim.S c68k_p256.S c68k_aes.S c68k_sha256.S PROPERTIES
         COMPILE_DEFINITIONS C68K_ASM=1
         COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
 endif()

@@ -14,11 +14,17 @@
 #include "nx_crypto_rsa.h"
 #include "nx_crypto_ec.h"
 #include "nx_crypto_huge_number.h"
+#include "nx_crypto_aes.h"
+#include "nx_crypto_sha2.h"
+#include "nx_crypto_hmac.h"
+#include "nx_crypto_hmac_sha2.h"
 
 #include "tx_api.h"
 
 #include "crypto68k.h"
 #include "c68k_p256.h"
+#include "c68k_aes.h"
+#include "c68k_sha256.h"
 
 #include "tls.h"
 #include "ami_tls_crypto.h"
@@ -711,6 +717,522 @@ NX_CRYPTO_METHOD ami_crypto_method_rsa =
 };
 
 
+/* ======================================================= the record path == */
+/*
+ * AES-128/256-CBC and HMAC-SHA256, on src/crypto68k/.
+ *
+ * WHY THESE ARE HERE AND NOT BEHIND A LINKER TRICK
+ *
+ *   The same reason the RSA and P-256 methods above are: NX_CRYPTO_METHOD is
+ *   nx_secure's own extension point, it is what the ciphersuite table is made
+ *   of, and swapping an entry redirects every path that reaches the primitive
+ *   without a vendored source being touched.
+ *
+ * WHY THIS IS THE ROW THAT MATTERS
+ *
+ *   docs/RESEARCH.md 15 measured the handshake level with OpenSSL's and the
+ *   bulk path a dead heat, and then said what the dead heat meant: the
+ *   handshake is paid once per connection and the record path is paid on
+ *   every byte forever.  `https` moved 16,464 B/s against `http`'s 114,598 on
+ *   this machine, and most of that ceiling is these two functions.
+ *
+ *   The ciphersuites this client actually negotiates are 0xC027 and 0xC023 --
+ *   ECDHE_RSA and ECDHE_ECDSA with AES_128_CBC_SHA256 -- so it is these two,
+ *   in both directions, per record.  The GCM and CCM rows below are compiled
+ *   in and no negotiated suite reaches them.
+ */
+
+typedef struct
+{
+    C68K_AES    ami_aes;
+    UCHAR       ami_aes_chain[16];      /* the CBC chaining value           */
+} AMI_CRYPTO_AES_CTX;
+
+static UINT ami_crypto_method_aes_init(struct NX_CRYPTO_METHOD_STRUCT *method,
+                                       UCHAR *key,
+                                       NX_CRYPTO_KEY_SIZE key_size_in_bits,
+                                       VOID **handle,
+                                       VOID *crypto_metadata,
+                                       ULONG crypto_metadata_size)
+{
+
+AMI_CRYPTO_AES_CTX *ctx;
+
+
+    NX_CRYPTO_PARAMETER_NOT_USED(handle);
+
+    if ((method == NX_CRYPTO_NULL) || (key == NX_CRYPTO_NULL) ||
+        (crypto_metadata == NX_CRYPTO_NULL))
+    {
+        return(NX_CRYPTO_PTR_ERROR);
+    }
+
+    if (((((ULONG)crypto_metadata) & 0x3u) != 0u) ||
+        (crypto_metadata_size < sizeof(AMI_CRYPTO_AES_CTX)))
+    {
+        return(NX_CRYPTO_PTR_ERROR);
+    }
+
+    ctx = (AMI_CRYPTO_AES_CTX *)crypto_metadata;
+
+    if (c68k_aes_key_set(&ctx -> ami_aes, key, (UINT)key_size_in_bits) !=
+        NX_CRYPTO_SUCCESS)
+    {
+        return(NX_CRYPTO_UNSUPPORTED_KEY_SIZE);
+    }
+
+    return(NX_CRYPTO_SUCCESS);
+}
+
+static UINT ami_crypto_method_aes_cleanup(VOID *crypto_metadata)
+{
+
+#ifdef NX_SECURE_KEY_CLEAR
+    if (crypto_metadata != NX_CRYPTO_NULL)
+    {
+        NX_CRYPTO_MEMSET(crypto_metadata, 0, sizeof(AMI_CRYPTO_AES_CTX));
+    }
+#else
+    NX_CRYPTO_PARAMETER_NOT_USED(crypto_metadata);
+#endif
+
+    return(NX_CRYPTO_SUCCESS);
+}
+
+static VOID ami_aes_set_iv(AMI_CRYPTO_AES_CTX *ctx, const UCHAR *iv)
+{
+
+UINT    i;
+
+
+    for (i = 0; i < 16u; i++)
+    {
+        ctx -> ami_aes_chain[i] = iv[i];
+    }
+}
+
+/*
+ * The vendored operation's contract, case for case.  A record is either one
+ * ENCRYPT/DECRYPT call or an INITIALIZE followed by UPDATEs and a CALCULATE
+ * that has nothing to do -- nx_secure uses both shapes, so both are here.
+ *
+ * A length that is not a whole number of blocks is refused rather than
+ * silently truncated.  CBC has no answer for a partial block and the caller
+ * that asked has a bug; the vendored code returns success and leaves the tail
+ * unwritten, which is worse.
+ */
+static UINT ami_crypto_method_aes_cbc_operation(UINT op,
+                                                VOID *handle,
+                                                struct NX_CRYPTO_METHOD_STRUCT *method,
+                                                UCHAR *key,
+                                                NX_CRYPTO_KEY_SIZE key_size_in_bits,
+                                                UCHAR *input,
+                                                ULONG input_length_in_byte,
+                                                UCHAR *iv_ptr,
+                                                UCHAR *output,
+                                                ULONG output_length_in_byte,
+                                                VOID *crypto_metadata,
+                                                ULONG crypto_metadata_size,
+                                                VOID *packet_ptr,
+                                                VOID (*nx_crypto_hw_process_callback)(VOID *packet_ptr, UINT status))
+{
+
+AMI_CRYPTO_AES_CTX *ctx;
+ULONG               blocks;
+
+
+    NX_CRYPTO_PARAMETER_NOT_USED(handle);
+    NX_CRYPTO_PARAMETER_NOT_USED(key);
+    NX_CRYPTO_PARAMETER_NOT_USED(key_size_in_bits);
+    NX_CRYPTO_PARAMETER_NOT_USED(output_length_in_byte);
+    NX_CRYPTO_PARAMETER_NOT_USED(packet_ptr);
+    NX_CRYPTO_PARAMETER_NOT_USED(nx_crypto_hw_process_callback);
+
+    if ((method == NX_CRYPTO_NULL) || (crypto_metadata == NX_CRYPTO_NULL) ||
+        ((((ULONG)crypto_metadata) & 0x3u) != 0u))
+    {
+        return(NX_CRYPTO_PTR_ERROR);
+    }
+
+    if (crypto_metadata_size < sizeof(AMI_CRYPTO_AES_CTX))
+    {
+        return(NX_CRYPTO_PTR_ERROR);
+    }
+
+    ctx    = (AMI_CRYPTO_AES_CTX *)crypto_metadata;
+    blocks = input_length_in_byte >> 4;
+
+    switch (op)
+    {
+    case NX_CRYPTO_ENCRYPT_INITIALIZE:
+    /* fallthrough */
+    case NX_CRYPTO_DECRYPT_INITIALIZE:
+        if (iv_ptr == NX_CRYPTO_NULL)
+        {
+            return(NX_CRYPTO_PTR_ERROR);
+        }
+        ami_aes_set_iv(ctx, iv_ptr);
+        break;
+
+    case NX_CRYPTO_ENCRYPT:
+        if (iv_ptr == NX_CRYPTO_NULL)
+        {
+            return(NX_CRYPTO_PTR_ERROR);
+        }
+        ami_aes_set_iv(ctx, iv_ptr);
+        /* fallthrough */
+    case NX_CRYPTO_ENCRYPT_UPDATE:
+        if ((input_length_in_byte & 15uL) != 0uL)
+        {
+            return(NX_CRYPTO_INVALID_BUFFER_SIZE);
+        }
+        c68k_aes_cbc_encrypt(&ctx -> ami_aes, ctx -> ami_aes_chain,
+                             input, output, blocks);
+        break;
+
+    case NX_CRYPTO_DECRYPT:
+        if (iv_ptr == NX_CRYPTO_NULL)
+        {
+            return(NX_CRYPTO_PTR_ERROR);
+        }
+        ami_aes_set_iv(ctx, iv_ptr);
+        /* fallthrough */
+    case NX_CRYPTO_DECRYPT_UPDATE:
+        if ((input_length_in_byte & 15uL) != 0uL)
+        {
+            return(NX_CRYPTO_INVALID_BUFFER_SIZE);
+        }
+        c68k_aes_cbc_decrypt(&ctx -> ami_aes, ctx -> ami_aes_chain,
+                             input, output, blocks);
+        break;
+
+    case NX_CRYPTO_ENCRYPT_CALCULATE:
+    /* fallthrough */
+    case NX_CRYPTO_DECRYPT_CALCULATE:
+        break;
+
+    default:
+        return(NX_CRYPTO_INVALID_ALGORITHM);
+    }
+
+    return(NX_CRYPTO_SUCCESS);
+}
+
+NX_CRYPTO_METHOD ami_crypto_method_aes_cbc_128 =
+{
+    NX_CRYPTO_ENCRYPTION_AES_CBC,
+    NX_CRYPTO_AES_128_KEY_LEN_IN_BITS,
+    NX_CRYPTO_AES_IV_LEN_IN_BITS,
+    0,
+    (NX_CRYPTO_AES_BLOCK_SIZE_IN_BITS >> 3),
+    sizeof(AMI_CRYPTO_AES_CTX),
+    ami_crypto_method_aes_init,
+    ami_crypto_method_aes_cleanup,
+    ami_crypto_method_aes_cbc_operation
+};
+
+NX_CRYPTO_METHOD ami_crypto_method_aes_cbc_256 =
+{
+    NX_CRYPTO_ENCRYPTION_AES_CBC,
+    NX_CRYPTO_AES_256_KEY_LEN_IN_BITS,
+    NX_CRYPTO_AES_IV_LEN_IN_BITS,
+    0,
+    (NX_CRYPTO_AES_BLOCK_SIZE_IN_BITS >> 3),
+    sizeof(AMI_CRYPTO_AES_CTX),
+    ami_crypto_method_aes_init,
+    ami_crypto_method_aes_cleanup,
+    ami_crypto_method_aes_cbc_operation
+};
+
+
+/* -------------------------------------------------------------- SHA-256 -- */
+
+static UINT ami_crypto_method_sha256_init(struct NX_CRYPTO_METHOD_STRUCT *method,
+                                          UCHAR *key,
+                                          NX_CRYPTO_KEY_SIZE key_size_in_bits,
+                                          VOID **handle,
+                                          VOID *crypto_metadata,
+                                          ULONG crypto_metadata_size)
+{
+
+    NX_CRYPTO_PARAMETER_NOT_USED(key);
+    NX_CRYPTO_PARAMETER_NOT_USED(key_size_in_bits);
+    NX_CRYPTO_PARAMETER_NOT_USED(handle);
+
+    if ((method == NX_CRYPTO_NULL) || (crypto_metadata == NX_CRYPTO_NULL) ||
+        ((((ULONG)crypto_metadata) & 0x3u) != 0u) ||
+        (crypto_metadata_size < sizeof(C68K_SHA256)))
+    {
+        return(NX_CRYPTO_PTR_ERROR);
+    }
+
+    return(NX_CRYPTO_SUCCESS);
+}
+
+static UINT ami_crypto_method_sha256_cleanup(VOID *crypto_metadata)
+{
+
+#ifdef NX_SECURE_KEY_CLEAR
+    if (crypto_metadata != NX_CRYPTO_NULL)
+    {
+        NX_CRYPTO_MEMSET(crypto_metadata, 0, sizeof(C68K_SHA256));
+    }
+#else
+    NX_CRYPTO_PARAMETER_NOT_USED(crypto_metadata);
+#endif
+
+    return(NX_CRYPTO_SUCCESS);
+}
+
+static UINT ami_crypto_method_sha256_operation(UINT op,
+                                               VOID *handle,
+                                               struct NX_CRYPTO_METHOD_STRUCT *method,
+                                               UCHAR *key,
+                                               NX_CRYPTO_KEY_SIZE key_size_in_bits,
+                                               UCHAR *input,
+                                               ULONG input_length_in_byte,
+                                               UCHAR *iv_ptr,
+                                               UCHAR *output,
+                                               ULONG output_length_in_byte,
+                                               VOID *crypto_metadata,
+                                               ULONG crypto_metadata_size,
+                                               VOID *packet_ptr,
+                                               VOID (*nx_crypto_hw_process_callback)(VOID *packet_ptr, UINT status))
+{
+
+C68K_SHA256    *ctx;
+
+
+    NX_CRYPTO_PARAMETER_NOT_USED(handle);
+    NX_CRYPTO_PARAMETER_NOT_USED(key);
+    NX_CRYPTO_PARAMETER_NOT_USED(key_size_in_bits);
+    NX_CRYPTO_PARAMETER_NOT_USED(iv_ptr);
+    NX_CRYPTO_PARAMETER_NOT_USED(packet_ptr);
+    NX_CRYPTO_PARAMETER_NOT_USED(nx_crypto_hw_process_callback);
+
+    if ((method == NX_CRYPTO_NULL) || (crypto_metadata == NX_CRYPTO_NULL) ||
+        ((((ULONG)crypto_metadata) & 0x3u) != 0u) ||
+        (crypto_metadata_size < sizeof(C68K_SHA256)))
+    {
+        return(NX_CRYPTO_PTR_ERROR);
+    }
+
+    ctx = (C68K_SHA256 *)crypto_metadata;
+
+    switch (op)
+    {
+    case NX_CRYPTO_HASH_INITIALIZE:
+        return(c68k_sha256_initialize(ctx, method -> nx_crypto_algorithm));
+
+    case NX_CRYPTO_HASH_UPDATE:
+        return(c68k_sha256_update(ctx, input, (UINT)input_length_in_byte));
+
+    case NX_CRYPTO_HASH_CALCULATE:
+        if (output_length_in_byte < C68K_SHA256_DIGEST_SIZE)
+        {
+            return(NX_CRYPTO_INVALID_BUFFER_SIZE);
+        }
+        return(c68k_sha256_digest_calculate(ctx, output,
+                                            method -> nx_crypto_algorithm));
+
+    default:
+        break;
+    }
+
+    if (output_length_in_byte < C68K_SHA256_DIGEST_SIZE)
+    {
+        return(NX_CRYPTO_INVALID_BUFFER_SIZE);
+    }
+
+    (VOID)c68k_sha256_initialize(ctx, method -> nx_crypto_algorithm);
+    (VOID)c68k_sha256_update(ctx, input, (UINT)input_length_in_byte);
+
+    return(c68k_sha256_digest_calculate(ctx, output,
+                                        method -> nx_crypto_algorithm));
+}
+
+NX_CRYPTO_METHOD ami_crypto_method_sha256 =
+{
+    NX_CRYPTO_HASH_SHA256,
+    0,
+    0,
+    NX_CRYPTO_SHA256_ICV_LEN_IN_BITS,
+    NX_CRYPTO_SHA2_BLOCK_SIZE_IN_BYTES,
+    sizeof(C68K_SHA256),
+    ami_crypto_method_sha256_init,
+    ami_crypto_method_sha256_cleanup,
+    ami_crypto_method_sha256_operation
+};
+
+
+/* --------------------------------------------------------- HMAC-SHA256 -- */
+/*
+ * nx_crypto's own HMAC framing with the hash swapped underneath it.
+ * _nx_crypto_hmac_metadata_set() takes the three hash entry points as
+ * function pointers and c68k_sha256_initialize / _update /
+ * _digest_calculate have exactly those signatures, on purpose -- so none of
+ * the key shortening, ipad/opad or padding logic is reimplemented here, and
+ * the only thing that changes is which compression function runs.
+ */
+
+typedef struct
+{
+    NX_CRYPTO_HMAC  ami_hmac;
+    C68K_SHA256     ami_hmac_hash;
+} AMI_CRYPTO_HMAC_SHA256;
+
+static VOID ami_hmac_bind(AMI_CRYPTO_HMAC_SHA256 *ctx, UINT algorithm)
+{
+
+    _nx_crypto_hmac_metadata_set(&ctx -> ami_hmac, &ctx -> ami_hmac_hash,
+                                 algorithm,
+                                 NX_CRYPTO_SHA2_BLOCK_SIZE_IN_BYTES,
+                                 C68K_SHA256_DIGEST_SIZE,
+                                 (UINT (*)(VOID *, UINT))
+                                     c68k_sha256_initialize,
+                                 (UINT (*)(VOID *, UCHAR *, UINT))
+                                     c68k_sha256_update,
+                                 (UINT (*)(VOID *, UCHAR *, UINT))
+                                     c68k_sha256_digest_calculate);
+}
+
+static UINT ami_crypto_method_hmac_sha256_init(struct NX_CRYPTO_METHOD_STRUCT *method,
+                                               UCHAR *key,
+                                               NX_CRYPTO_KEY_SIZE key_size_in_bits,
+                                               VOID **handle,
+                                               VOID *crypto_metadata,
+                                               ULONG crypto_metadata_size)
+{
+
+    NX_CRYPTO_PARAMETER_NOT_USED(key);
+    NX_CRYPTO_PARAMETER_NOT_USED(key_size_in_bits);
+    NX_CRYPTO_PARAMETER_NOT_USED(handle);
+
+    if ((method == NX_CRYPTO_NULL) || (crypto_metadata == NX_CRYPTO_NULL) ||
+        ((((ULONG)crypto_metadata) & 0x3u) != 0u) ||
+        (crypto_metadata_size < sizeof(AMI_CRYPTO_HMAC_SHA256)))
+    {
+        return(NX_CRYPTO_PTR_ERROR);
+    }
+
+    return(NX_CRYPTO_SUCCESS);
+}
+
+static UINT ami_crypto_method_hmac_sha256_cleanup(VOID *crypto_metadata)
+{
+
+#ifdef NX_SECURE_KEY_CLEAR
+    if (crypto_metadata != NX_CRYPTO_NULL)
+    {
+        NX_CRYPTO_MEMSET(crypto_metadata, 0, sizeof(AMI_CRYPTO_HMAC_SHA256));
+    }
+#else
+    NX_CRYPTO_PARAMETER_NOT_USED(crypto_metadata);
+#endif
+
+    return(NX_CRYPTO_SUCCESS);
+}
+
+static UINT ami_crypto_method_hmac_sha256_operation(UINT op,
+                                                    VOID *handle,
+                                                    struct NX_CRYPTO_METHOD_STRUCT *method,
+                                                    UCHAR *key,
+                                                    NX_CRYPTO_KEY_SIZE key_size_in_bits,
+                                                    UCHAR *input,
+                                                    ULONG input_length_in_byte,
+                                                    UCHAR *iv_ptr,
+                                                    UCHAR *output,
+                                                    ULONG output_length_in_byte,
+                                                    VOID *crypto_metadata,
+                                                    ULONG crypto_metadata_size,
+                                                    VOID *packet_ptr,
+                                                    VOID (*nx_crypto_hw_process_callback)(VOID *packet_ptr, UINT status))
+{
+
+AMI_CRYPTO_HMAC_SHA256 *ctx;
+ULONG                   want;
+
+
+    NX_CRYPTO_PARAMETER_NOT_USED(handle);
+    NX_CRYPTO_PARAMETER_NOT_USED(iv_ptr);
+    NX_CRYPTO_PARAMETER_NOT_USED(packet_ptr);
+    NX_CRYPTO_PARAMETER_NOT_USED(nx_crypto_hw_process_callback);
+
+    if ((method == NX_CRYPTO_NULL) || (crypto_metadata == NX_CRYPTO_NULL) ||
+        ((((ULONG)crypto_metadata) & 0x3u) != 0u) ||
+        (crypto_metadata_size < sizeof(AMI_CRYPTO_HMAC_SHA256)))
+    {
+        return(NX_CRYPTO_PTR_ERROR);
+    }
+
+    ctx = (AMI_CRYPTO_HMAC_SHA256 *)crypto_metadata;
+
+    /* Rebound on every call, exactly as the vendored operation does: the
+       metadata is the caller's memory and may have been moved or zeroed
+       between calls, and the pointers inside it are self-referential. */
+    ami_hmac_bind(ctx, method -> nx_crypto_algorithm);
+
+    want = (ULONG)(method -> nx_crypto_ICV_size_in_bits >> 3);
+
+    switch (op)
+    {
+    case NX_CRYPTO_HASH_INITIALIZE:
+        if (key == NX_CRYPTO_NULL)
+        {
+            return(NX_CRYPTO_PTR_ERROR);
+        }
+        return(_nx_crypto_hmac_initialize(&ctx -> ami_hmac, key,
+                                          (UINT)(key_size_in_bits >> 3)));
+
+    case NX_CRYPTO_HASH_UPDATE:
+        return(_nx_crypto_hmac_update(&ctx -> ami_hmac, input,
+                                      (UINT)input_length_in_byte));
+
+    case NX_CRYPTO_HASH_CALCULATE:
+        if (output_length_in_byte == 0uL)
+        {
+            return(NX_CRYPTO_INVALID_BUFFER_SIZE);
+        }
+        if (output_length_in_byte < want)
+        {
+            want = output_length_in_byte;
+        }
+        return(_nx_crypto_hmac_digest_calculate(&ctx -> ami_hmac, output,
+                                                (UINT)want));
+
+    default:
+        break;
+    }
+
+    if (key == NX_CRYPTO_NULL)
+    {
+        return(NX_CRYPTO_PTR_ERROR);
+    }
+    if (output_length_in_byte < want)
+    {
+        want = output_length_in_byte;
+    }
+
+    return(_nx_crypto_hmac(&ctx -> ami_hmac, input,
+                           (UINT)input_length_in_byte,
+                           key, (UINT)(key_size_in_bits >> 3),
+                           output, (UINT)want));
+}
+
+NX_CRYPTO_METHOD ami_crypto_method_hmac_sha256 =
+{
+    NX_CRYPTO_AUTHENTICATION_HMAC_SHA2_256,
+    0,
+    0,
+    NX_CRYPTO_HMAC_SHA256_ICV_FULL_LEN_IN_BITS,
+    NX_CRYPTO_SHA2_BLOCK_SIZE_IN_BYTES,
+    sizeof(AMI_CRYPTO_HMAC_SHA256),
+    ami_crypto_method_hmac_sha256_init,
+    ami_crypto_method_hmac_sha256_cleanup,
+    ami_crypto_method_hmac_sha256_operation
+};
+
+
 /* ------------------------------------------------------------- the tables -- */
 
 /* Everything we do not touch comes straight from nx_crypto_methods.c. */
@@ -748,10 +1270,10 @@ extern NX_CRYPTO_METHOD crypto_method_hmac;
 static NX_SECURE_X509_CRYPTO ami_x509_cipher_table[] =
 {
     /* OID identifier,                       public cipher,             hash method */
-    {NX_SECURE_TLS_X509_TYPE_ECDSA_SHA_256,  &crypto_method_ecdsa,      &crypto_method_sha256},
+    {NX_SECURE_TLS_X509_TYPE_ECDSA_SHA_256,  &crypto_method_ecdsa,      &ami_crypto_method_sha256},
     {NX_SECURE_TLS_X509_TYPE_ECDSA_SHA_384,  &crypto_method_ecdsa,      &crypto_method_sha384},
     {NX_SECURE_TLS_X509_TYPE_ECDSA_SHA_512,  &crypto_method_ecdsa,      &crypto_method_sha512},
-    {NX_SECURE_TLS_X509_TYPE_RSA_SHA_256,    &ami_crypto_method_rsa,    &crypto_method_sha256},
+    {NX_SECURE_TLS_X509_TYPE_RSA_SHA_256,    &ami_crypto_method_rsa,    &ami_crypto_method_sha256},
     {NX_SECURE_TLS_X509_TYPE_RSA_SHA_384,    &ami_crypto_method_rsa,    &crypto_method_sha384},
     {NX_SECURE_TLS_X509_TYPE_RSA_SHA_512,    &ami_crypto_method_rsa,    &crypto_method_sha512},
     {NX_SECURE_TLS_X509_TYPE_ECDSA_SHA_224,  &crypto_method_ecdsa,      &crypto_method_sha224},
@@ -769,9 +1291,9 @@ static NX_SECURE_TLS_CIPHERSUITE_INFO ami_ciphersuite_table[] =
 {
     /* Ciphersuite,                           public cipher,            public_auth,              session cipher & mode,          iv, key, hash method,                hash size, TLS PRF */
 #if (NX_SECURE_TLS_TLS_1_3_ENABLED)
-    {TLS_AES_128_GCM_SHA256,                  &crypto_method_ecdhe,     &crypto_method_ecdsa,     &crypto_method_aes_128_gcm_16,  96, 16,  &crypto_method_sha256,      32,        &crypto_method_hkdf},
-    {TLS_AES_128_CCM_SHA256,                  &crypto_method_ecdhe,     &crypto_method_ecdsa,     &crypto_method_aes_ccm_16,      96, 16,  &crypto_method_sha256,      32,        &crypto_method_hkdf},
-    {TLS_AES_128_CCM_8_SHA256,                &crypto_method_ecdhe,     &crypto_method_ecdsa,     &crypto_method_aes_ccm_8,       96, 16,  &crypto_method_sha256,      32,        &crypto_method_hkdf},
+    {TLS_AES_128_GCM_SHA256,                  &crypto_method_ecdhe,     &crypto_method_ecdsa,     &crypto_method_aes_128_gcm_16,  96, 16,  &ami_crypto_method_sha256,  32,        &crypto_method_hkdf},
+    {TLS_AES_128_CCM_SHA256,                  &crypto_method_ecdhe,     &crypto_method_ecdsa,     &crypto_method_aes_ccm_16,      96, 16,  &ami_crypto_method_sha256,  32,        &crypto_method_hkdf},
+    {TLS_AES_128_CCM_8_SHA256,                &crypto_method_ecdhe,     &crypto_method_ecdsa,     &crypto_method_aes_ccm_8,       96, 16,  &ami_crypto_method_sha256,  32,        &crypto_method_hkdf},
 #endif
 
 #ifdef NX_SECURE_ENABLE_AEAD_CIPHER
@@ -779,15 +1301,15 @@ static NX_SECURE_TLS_CIPHERSUITE_INFO ami_ciphersuite_table[] =
     {TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,   &crypto_method_ecdhe,     &ami_crypto_method_rsa,   &crypto_method_aes_128_gcm_16,  16, 16,  &crypto_method_null,         0,        &crypto_method_tls_prf_sha256},
 #endif
 
-    {TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, &crypto_method_ecdhe,     &crypto_method_ecdsa,     &crypto_method_aes_cbc_128,     16, 16,  &crypto_method_hmac_sha256, 32,        &crypto_method_tls_prf_sha256},
-    {TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,   &crypto_method_ecdhe,     &ami_crypto_method_rsa,   &crypto_method_aes_cbc_128,     16, 16,  &crypto_method_hmac_sha256, 32,        &crypto_method_tls_prf_sha256},
+    {TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, &crypto_method_ecdhe,     &crypto_method_ecdsa,     &ami_crypto_method_aes_cbc_128,     16, 16,  &ami_crypto_method_hmac_sha256, 32,        &crypto_method_tls_prf_sha256},
+    {TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,   &crypto_method_ecdhe,     &ami_crypto_method_rsa,   &ami_crypto_method_aes_cbc_128,     16, 16,  &ami_crypto_method_hmac_sha256, 32,        &crypto_method_tls_prf_sha256},
 
 #ifdef NX_SECURE_ENABLE_AEAD_CIPHER
     {TLS_RSA_WITH_AES_128_GCM_SHA256,         &ami_crypto_method_rsa,   &ami_crypto_method_rsa,   &crypto_method_aes_128_gcm_16,  16, 16,  &crypto_method_null,         0,        &crypto_method_tls_prf_sha256},
 #endif
 
-    {TLS_RSA_WITH_AES_256_CBC_SHA256,         &ami_crypto_method_rsa,   &ami_crypto_method_rsa,   &crypto_method_aes_cbc_256,     16, 32,  &crypto_method_hmac_sha256, 32,        &crypto_method_tls_prf_sha256},
-    {TLS_RSA_WITH_AES_128_CBC_SHA256,         &ami_crypto_method_rsa,   &ami_crypto_method_rsa,   &crypto_method_aes_cbc_128,     16, 16,  &crypto_method_hmac_sha256, 32,        &crypto_method_tls_prf_sha256},
+    {TLS_RSA_WITH_AES_256_CBC_SHA256,         &ami_crypto_method_rsa,   &ami_crypto_method_rsa,   &ami_crypto_method_aes_cbc_256,     16, 32,  &ami_crypto_method_hmac_sha256, 32,        &crypto_method_tls_prf_sha256},
+    {TLS_RSA_WITH_AES_128_CBC_SHA256,         &ami_crypto_method_rsa,   &ami_crypto_method_rsa,   &ami_crypto_method_aes_cbc_128,     16, 16,  &ami_crypto_method_hmac_sha256, 32,        &crypto_method_tls_prf_sha256},
 };
 
 const NX_SECURE_TLS_CRYPTO ami_crypto_tls_ciphers_ecc =
@@ -807,7 +1329,7 @@ const NX_SECURE_TLS_CRYPTO ami_crypto_tls_ciphers_ecc =
 #endif
 
 #if (NX_SECURE_TLS_TLS_1_2_ENABLED)
-    &crypto_method_sha256,
+    &ami_crypto_method_sha256,
     &crypto_method_tls_prf_sha256,
 #endif
 
