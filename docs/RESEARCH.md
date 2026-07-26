@@ -11878,3 +11878,301 @@ the channel that is demonstrably wired up rather than the one that ought to be.
 
 Verified on `turo@playhouse2` with the pinned Linux toolchain: `tools/ci.sh` —
 host, all four cross configurations, conformance — all green.
+
+## 36. Does Roadshow run a faster timer? Asked from outside, and answered (2026-07-26)
+
+29.5 is the only place in this document where Roadshow beats us on the wire by
+a factor rather than a few per cent: its `ping` reports a minimum round trip of
+**4.32 ms** against our **7 ms**, and on one run its *maximum* was below our
+minimum. Two explanations fit that equally well and they have opposite
+consequences:
+
+* **a faster periodic timer.** Ours is 50 Hz (16.6, read off the running
+  system). If Roadshow ran at 100 Hz, everything it does on a timer would land
+  on a 10 ms grid where ours lands on 20.
+* **a cheaper receive path**, which is the same direction 29.3's curl result
+  points in and would make this the third independent measurement of the same
+  thing.
+
+**Both were tested. The answer is the second, and it does not go the way 29.5
+reads.** Nothing of Roadshow was disassembled, decompiled or inspected; what
+follows is entirely the behaviour of a running system observed from below it,
+in the same sense that 27.1 characterised SLIRP's DHCP interception.
+
+### 36.1 The instrument: their stack, our wire
+
+27.1 established that a host-side packet injector is impossible here — SLIRP
+terminates the guest's TCP and re-originates it, so nothing on the host ever
+sees a guest sequence number — and built `tests/tcpdrill/tapdev.c` instead: an
+Exec device created at run time with `MakeLibrary()`/`AddDevice()` that
+implements enough of SANA-II for a TCP/IP stack to open it, configure it, take
+it online and run its readers against it. **Every frame it is handed is
+timestamped with `ReadEClock()` inside `BeginIO`** — the instant the stack
+handed it over, 1.4 µs resolution — and every frame the stack receives is one
+the harness composed.
+
+Nothing about that device is ours. `tests/compare/tickprobe.c` installs it,
+then opens whatever `bsdsocket.library` is in `LIBS:`; every call into the
+stack is a published LVO. So the stack is a parameter:
+
+```
+tests/compare/run-tickprobe.sh -s ours|roadshow
+```
+
+**Two things had to change for a foreign stack to come up on it**, and both are
+recorded because each cost a boot:
+
+* **`S2_ONEVENT`.** `tapdev.c` answered it `IOERR_NOCMD`, which is fine for
+  ours — we never issue it — and wrong for a stack that watches its link for a
+  living. It now completes at once if the named event has already happened and
+  is otherwise **held**, which for a device with no wire means forever, and
+  released by `S2_OFFLINE` and by `tap_remove()`.
+* **`STATE=ONLINE`.** Roadshow's own `AddNetInterface.doc` says interfaces
+  "switch automatically to 'up' state" and that `online` is the *alternative*
+  which "tells the underlying network interface driver to go online first".
+  Without it the first run got `AddNetInterface` returning 0, an interface
+  configured with the right address, and a device that had never been sent
+  `S2_ONLINE`. The two stacks' interface files are therefore different and
+  both are in the tree (`tests/compare/tick-if.ours`,
+  `tests/compare/tick-if.roadshow`) — a stack should be measured with a
+  configuration it agrees is well formed.
+
+There is **no `-n` and no `a2065.device`** in any run here: SLIRP, the emulated
+card and the host's networking are all outside the measurement.
+
+### 36.2 How a timer rate is visible from outside
+
+A frame a stack sends *because a timer fired* leaves on that timer's grid, so
+every **interval** between two such frames is a whole number of grid steps.
+For a candidate spacing T,
+
+```
+R(T) = | mean_k exp( 2*pi*i * gap_k / T ) |
+```
+
+is near 1 when every interval is a whole number of T and near 0 otherwise, and
+sweeping T draws a comb with a tooth at the grid and at every submultiple of
+it. `tests/compare/tickphase.py` does the sweep and prints the harmonic ratios
+next to the teeth, because **"the gaps are multiples of 10 ms" settles
+nothing** — quantisation at 20 ms implies quantisation at 10.
+
+Intervals rather than absolute times, deliberately: absolute phase coherence
+across a minute would need the tick source exact to a part in 10^6, and a
+400 ms interval tolerates a hundred times worse.
+
+The event sampled is the **delayed ACK**: timer-driven on every TCP there has
+ever been, provokable once per round trip, and the harness controls exactly
+when the segment that arms it arrives. 160 of them per run.
+
+**Two design decisions are the difference between a measurement and a
+fiction**, and the second one is checked in the output rather than asserted:
+
+* **`Delay()` is never used to pace anything.** It is one 20 ms AmigaDOS tick,
+  the same order as the thing being measured, and sleeping on it would alias
+  the experiment into agreeing with whatever the system tick is. Every wait is
+  a `timer.device` `UNIT_MICROHZ` request.
+* **The injections are spaced by a pseudo-random 0..400 ms**, so the arming
+  segments land at uniformly distributed phases. The analyser runs the same
+  comb over the **injection** intervals and prints it every time: they must
+  show no tooth anywhere. In every run reported below they do not —
+  `R(T) < 0.75` across 1..260 ms — and the harness's own loop is therefore not
+  what any grid below is made of.
+
+Nought..400 ms rather than nought..20, for a reason that is easy to get wrong
+and was got wrong on the first run: intervals that are all nearly equal are
+congruent modulo almost anything. The analyser now says so itself when the
+intervals span fewer than three grid steps.
+
+### 36.3 What the machine offers, timed by the harness
+
+Before either stack is open, 100 back-to-back `timer.device` requests on each
+unit, timed with the same E-Clock:
+
+| | measured | asked for |
+|---|---|---|
+| `UNIT_VBLANK` | **19.853 / 19.848 / 19.880 ms** per frame (50.30–50.37 Hz) | — |
+| `UNIT_MICROHZ` | 5.373 ms | 5.000 ms |
+
+Two things to take from it. The vertical blank in this emulator is **not** a
+crystal: it moves 0.16% between boots. And a `DoIO()` round trip costs about
+0.37 ms here, which is why nothing in this section is paced by one.
+
+### 36.4 The timer: ours is the finer of the two
+
+Same instrument, same machine, same harness binary, `-x` throughout so no other
+agent's boot shares the emulator.
+
+**Ours** — `bsdsocket.library` built from `b0dd15f` in a private build
+directory (24.9 and 29.8 both record measurements lost to another workstream
+rebuilding the instrument underneath them), plus two runs from `build/cm` that
+agree with it:
+
+```
+held acks: 79 intervals, 299.8..902.1 ms (spread 602 ms)
+    T (ms)      R      T / strongest
+      20.0311  0.9918    1.0000
+     100.1330  0.9825    4.9989
+      25.0402  0.9772    1.2501
+      16.6919  0.9714    0.8333
+      10.0155  0.9675    0.5000
+    -> strongest grid: 20.0311 ms  (49.922 Hz), R = 0.9918
+```
+
+**20.031 ms, 49.92 Hz**, reproduced at 20.0311 / 20.0329 / 20.0381 ms across
+three boots. That is the 50 Hz tick 16.6 read off the startup line, now
+measured from the wire instead — and the comb's `× 4.999` tooth at 100.13 ms is
+NetX Duo's fast periodic processing, five ticks, which is what actually
+releases the acknowledgement.
+
+**Roadshow 1.15**, two boots:
+
+```
+held acks: 159 intervals, 219.2..441.8 ms (spread 223 ms)
+    T (ms)      R      T / strongest
+     220.3562  0.9999    1.0000
+     110.1781  0.9997    0.5000
+      73.4521  0.9994    0.3333
+    -> strongest grid: 220.3562 ms, R = 0.9999
+```
+
+**220.356 and 220.275 ms** — the cleanest fit in this whole document,
+`R = 0.9999`, and stable to 366 ppm across boots.
+
+| | finest grid any timer-driven frame lands on | |
+|---|---:|---|
+| AmiNetXDuo | **20.031 ms** | resolves to the individual tick |
+| Roadshow 1.15 | **220.316 ms** | 11.00 × our tick, 2.20 × our ACK grid |
+
+**So the hypothesis is the wrong way round.** Nothing Roadshow puts on the wire
+is quantised more finely than 220 ms; our own timer-driven frames resolve to a
+20 ms grid, and our delayed ACKs are released on a 100 ms one. Whatever their
+tick is, what it *delivers to the wire* is eleven times coarser than what ours
+delivers.
+
+### 36.5 What this does not settle, stated rather than buried
+
+**Roadshow's tick itself is not observable from here, and it is not claimed.**
+220.316 ms is `11 × 20.029` and equally `22 × 10.014`; a 100 Hz tick with a
+protocol timer counting 22 of them fits the data exactly as well as a 50 Hz
+tick counting 11. Nothing in any run separates them, because **every** frame
+Roadshow emits on a timer lands on that one grid — its intervals are 1× or 2×
+220 ms and never anything between, so there is no finer structure to fit. The
+analyser prints the warning itself rather than letting the fit look better than
+it is.
+
+Two things were tried to break the tie and neither did:
+
+* **The machine's vertical blank**, on the theory that a grid which is an exact
+  multiple of it must be VBlank-derived. Measured at 19.85–19.88 ms and moving
+  0.16% between boots (36.3), it is not precise enough: `220.316 / 11` is
+  20.029 and `/22` is 10.014, and neither is within 0.8% of the frame period or
+  half of it.
+* **The retransmission grid**, which would be a second population with a
+  different period and hence a common divisor. Roadshow retransmits an
+  unanswered SYN once in 20 seconds, at 5.740 s on one boot and 5.859 s on the
+  other, and that gap runs from an *application* instant to a *timer* instant —
+  it is not a whole number of ticks and cannot be used. Getting two
+  timer-to-timer intervals out of it needs a 45-second window per boot and was
+  not run.
+
+**What is settled is the thing the question was actually about.** A tick that
+cannot produce a wire event more finely spaced than 220 ms cannot be the reason
+their ICMP round trip is 2.7 ms shorter than ours — and 36.6 shows it is not
+the reason for anything else either.
+
+### 36.6 The competing explanation, and it does not go their way
+
+An ICMP echo reply is **not** timer-driven: it is generated because a request
+arrived. The time from handing an echo request to the device to the stack
+handing the reply back is therefore the entire receive-and-reply path — the
+SANA-II copy hooks, the shim, the IP and ICMP code, and the transmit — with the
+wire, SLIRP, the emulated card and the application all removed.
+
+64 samples at 56 bytes (what every `ping` sends) and 32 at 1400:
+
+| payload | | AmiNetXDuo | Roadshow 1.15 |
+|---|---|---:|---:|
+| 56 B | min / p50 / p90 | **1.789 / 1.793 / 2.127 ms** | 2.209 / 2.219 / 2.478 ms |
+| 1400 B | min / p50 / p90 | **2.563 / 2.566 / 3.278 ms** | 4.206 / 4.208 / 4.483 ms |
+| | fixed cost | **1.761 ms** | 2.136 ms |
+| | per byte | **0.575 µs** | 1.480 µs |
+
+**We are faster on both sizes, and 2.6× cheaper per byte.** At 14 MHz,
+0.575 µs/B is about eight cycles per byte for a copy in, a checksum and a copy
+out; theirs is about twenty-one.
+
+**Neither distribution is quantised.** p50 minus min is 4 µs on ours and 10 µs
+on theirs; the comb finds nothing anywhere in 1..260 ms. An ICMP round trip on
+either stack is not paced by a timer, which on its own disposes of the timer
+explanation for 29.5 — a 20 ms grid cannot produce a 7 ms round trip with a
+2 ms spread.
+
+The same run gives one more arrival-driven figure, for TCP rather than ICMP:
+
+| | AmiNetXDuo | Roadshow 1.15 |
+|---|---|---|
+| one data segment in, ACK out, when the ACK is not held | **2.03 ms**, 80 of 160 segments | never — all 160 were held |
+
+That is 16.6's `NX_TCP_ACK_EVERY_N_PACKETS 2` seen from outside: on a stream of
+lone segments we answer every second one in about 2 ms, and Roadshow answers
+none of them until its 220 ms timer comes round. **On this workload our
+acknowledgement latency is two orders of magnitude better than theirs**, which
+is worth setting against 29.3's bulk-throughput loss: the two are not measuring
+the same thing.
+
+### 36.7 So where are the 2.7 ms?
+
+Not above SANA-II. Through the same device, on the same machine, our ICMP
+turnaround is **0.43 ms faster** than Roadshow's at 56 bytes and **1.64 ms
+faster** at 1400, and neither is timer-paced. Yet on the real wire, through
+`a2065.device` and SLIRP, 29.5 has us 2.7 ms *slower*. The difference is
+therefore in what this instrument replaces, and the candidates are named rather
+than guessed at:
+
+* **`a2065.device` and the interrupt path** — how many `CMD_READ`s each stack
+  keeps queued, what it costs to re-post one, and what the driver does between
+  the card's interrupt and the reply. Ours posts 32 IPv4 reads (16.4);
+  Roadshow's default is 32 and this harness asked it for 8.
+* **The two `ping` commands**, which are different binaries with different
+  clocks and were never compared against each other on a fixed round trip.
+
+**The next measurement is a small one**: the same `tickprobe` phases run over
+the real A2065 with the emulator's own frame dump alongside (16.3), so the
+turnaround measured here can be subtracted from the turnaround measured there
+and the remainder attributed to the driver. That is one boot per stack.
+
+### 36.8 Two by-products worth recording
+
+**Our retransmission now backs off, and 27.5 is out of date.** That section
+measured a flat ~1 s with no backoff and named `NX_TCP_RETRY_SHIFT` as the
+one-line half of the fix. Measured here on `b0dd15f`, an unanswered SYN is
+retransmitted at
+
+```
+802.3, 1982.5, 4006.4, 7992.7 ms
+```
+
+— 1, 2, 4, 8 seconds, and in units of the 20.031 ms tick measured in the same
+run those are 40.05, 98.97, 200.01, 398.99. `nx_user.h` now carries
+`NX_TCP_RETRY_SHIFT 1`; the change is another workstream's and is noted here
+because a reader comparing 27.5's numbers with these would otherwise think one
+of them was wrong. Roadshow's first SYN retransmission comes at 5.74–5.86 s.
+
+**The a2065 frame dump was not used for any of this and here is why.** 16.3
+records that it has no timestamps at all, and a grid measurement is nothing but
+timestamps. The dump remains the right instrument for loss and ordering; for
+timing the only clock below every line of software is the E-Clock read inside
+`BeginIO`, which is what this section is built on.
+
+### 36.9 Running it
+
+```
+tests/compare/run-tickprobe.sh -s ours     [-b BUILD]     # 160 ACKs, 96 pings
+tests/compare/run-tickprobe.sh -s roadshow [-R DIR]
+tests/compare/tickphase.py build/tickprobe-tick-*.txt
+```
+
+About 100 seconds of emulator per run, one boot, no network. `run-tickprobe.sh`
+passes `-x` to `tools/fsuae-run.sh` unconditionally: a quantisation histogram
+taken while another agent's boot shares the machine is a histogram of that
+agent.

@@ -1,0 +1,30 @@
+;
+; DEVS:NetInterfaces/tap0 -- the same interface, written the way Roadshow's own
+; AddNetInterface documents it (Documentation/Reference/AddNetInterface.doc in
+; the demo archive).  The keywords are not the same set ours takes, and a stack
+; should be measured with a configuration it agrees is well formed:
+;
+;   * the address is given with ADDRESS/NETMASK and no CONFIGURE line, because
+;     CONFIGURE there takes DHCP, AUTO or FASTAUTO and there is no server on
+;     this wire;
+;   * REQUIRESINITDELAY defaults to YES, which delays the first transmit by
+;     about a second on every interface, and nothing here is an Ariadne I;
+;   * IPREQUESTS defaults to 32 CMD_READs; eight is plenty for a harness that
+;     injects one frame at a time and keeps the device's queue readable.
+;
+; STATE=ONLINE and not the default.  AddNetInterface.doc: "By default,
+; interfaces whose addresses are configured will switch automatically to 'up'
+; state ... the alternatives 'online' (implies 'up', but tells the underlying
+; network interface driver to go online first)".  Without it the interface is
+; configured and the DEVICE is never sent S2_ONLINE, so the first run of this
+; harness got `AddNetInterface` returning 0 and a device that had never been
+; asked to start.
+;
+DEVICE=tcpdrill.device
+UNIT=0
+ADDRESS=10.9.9.1
+NETMASK=255.255.255.0
+STATE=ONLINE
+REQUIRESINITDELAY=NO
+IPREQUESTS=8
+ARPREQUESTS=4

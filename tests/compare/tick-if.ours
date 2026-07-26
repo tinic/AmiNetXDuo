@@ -1,0 +1,16 @@
+;
+; DEVS:NetInterfaces/tap0 -- tickprobe's interface, in this stack's dialect.
+;
+; DEVICE names a device that is not on this disk and never will be: TickProbe
+; creates it with MakeLibrary()/AddDevice() before anything opens
+; bsdsocket.library, so OpenDevice() finds it in ExecBase's device list.  See
+; tests/tcpdrill/tapdev.h.
+;
+; STATIC, because the only other host on this wire is the harness, and it is
+; not a DHCP server.
+;
+DEVICE=tcpdrill.device
+UNIT=0
+CONFIGURE=STATIC
+ADDRESS=10.9.9.1
+NETMASK=255.255.255.0

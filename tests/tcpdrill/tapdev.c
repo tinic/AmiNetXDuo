@@ -79,6 +79,7 @@ typedef struct TapDevice
     struct Device   dd;
     TapOpen         open;
     struct List     reads;              /* queued CMD_READs                */
+    struct List     events;             /* queued S2_ONEVENTs              */
     BOOL            online;
     BOOL            configured;
     UBYTE           mac[ETH_ADDR];
@@ -463,6 +464,14 @@ static VOID tap_begin_io(register struct Device     *dev __asm("a6"),
             r->ios2_WireError    = S2WERR_UNIT_OFFLINE;
             ReplyMsg(&r->ios2_Req.io_Message);
         }
+        while ((n = RemHead(&d->events)) != NULL)
+        {
+            struct IOSana2Req *r = (struct IOSana2Req *)n;
+
+            r->ios2_Req.io_Error = 0;
+            r->ios2_WireError    = S2EVENT_OFFLINE;
+            ReplyMsg(&r->ios2_Req.io_Message);
+        }
         Permit();
         d->stats.offline_count++;
         tap_complete(io, 0, 0);
@@ -483,6 +492,39 @@ static VOID tap_begin_io(register struct Device     *dev __asm("a6"),
         s->PacketsReceived = d->stats.rx_delivered;
         s->PacketsSent     = d->stats.tx_frames;
         tap_complete(io, 0, 0);
+        return;
+    }
+
+    /*
+     * S2_ONEVENT.  A request that names an event which has already happened
+     * completes at once; anything else is HELD until it does, which for a
+     * device with no wire means forever.  Both halves matter: returning
+     * IOERR_NOCMD instead spins a stack that watches its link for a living,
+     * and completing an ONLINE request that has not happened yet tells one it
+     * has a link when it has not.  Held requests are returned by S2_OFFLINE
+     * and by tap_remove().
+     *
+     * Ours never issues this; Roadshow does, and a device the harness cannot
+     * be opened by is not an instrument.
+     */
+    case S2_ONEVENT:
+    {
+        ULONG want = io->ios2_WireError;
+
+        if (((want & S2EVENT_ONLINE) != 0 && d->online) ||
+            ((want & S2EVENT_OFFLINE) != 0 && !d->online))
+        {
+            io->ios2_WireError = want & (d->online ? S2EVENT_ONLINE
+                                                   : S2EVENT_OFFLINE);
+            tap_complete(io, 0, io->ios2_WireError);
+            return;
+        }
+
+        io->ios2_Req.io_Flags &= (UBYTE)~IOF_QUICK;
+        io->ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+        Forbid();
+        AddTail(&d->events, &io->ios2_Req.io_Message.mn_Node);
+        Permit();
         return;
     }
 
@@ -522,6 +564,20 @@ static LONG tap_abort_io(register struct Device     *dev __asm("a6"),
             ReplyMsg(&io->ios2_Req.io_Message);
             rc = 0;
             break;
+        }
+    }
+    if (rc != 0)
+    {
+        for (n = d->events.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
+        {
+            if (n == &io->ios2_Req.io_Message.mn_Node)
+            {
+                Remove(n);
+                io->ios2_Req.io_Error = (BYTE)IOERR_ABORTED;
+                ReplyMsg(&io->ios2_Req.io_Message);
+                rc = 0;
+                break;
+            }
         }
     }
     Permit();
@@ -731,6 +787,11 @@ LONG tap_install(const UBYTE *mac)
     d->reads.lh_TailPred = (struct Node *)&d->reads.lh_Head;
     d->reads.lh_Type     = NT_MESSAGE;
 
+    d->events.lh_Head     = (struct Node *)&d->events.lh_Tail;
+    d->events.lh_Tail     = NULL;
+    d->events.lh_TailPred = (struct Node *)&d->events.lh_Head;
+    d->events.lh_Type     = NT_MESSAGE;
+
     tap_bytes(d->mac, mac, ETH_ADDR);
 
     d->dd.dd_Library.lib_Node.ln_Type = NT_DEVICE;
@@ -748,13 +809,37 @@ LONG tap_install(const UBYTE *mac)
 
 VOID tap_remove(VOID)
 {
-    TapDevice *d = tap_dev;
+    TapDevice   *d = tap_dev;
+    struct Node *n;
 
     if (d == NULL)
         return;
 
     Forbid();
     RemDevice(&d->dd);
+
+    /*
+     * Anything still queued belongs to a caller that is about to have the
+     * memory holding this device freed underneath it.  Ours closes cleanly
+     * before we get here; a foreign stack that keeps the interface up does
+     * not, and an I/O request that is never replied is a hang rather than a
+     * result.
+     */
+    while ((n = RemHead(&d->reads)) != NULL)
+    {
+        struct IOSana2Req *r = (struct IOSana2Req *)n;
+
+        d->stats.reads_queued--;
+        r->ios2_Req.io_Error = (BYTE)IOERR_ABORTED;
+        ReplyMsg(&r->ios2_Req.io_Message);
+    }
+    while ((n = RemHead(&d->events)) != NULL)
+    {
+        struct IOSana2Req *r = (struct IOSana2Req *)n;
+
+        r->ios2_Req.io_Error = (BYTE)IOERR_ABORTED;
+        ReplyMsg(&r->ios2_Req.io_Message);
+    }
     Permit();
 
     if (d->tx != NULL)
