@@ -12516,17 +12516,18 @@ events **not one was `EWOULDBLOCK`**. An exhausted pool does not produce
 The report's second suspicion. Three separate questions, and they have three
 different answers.
 
-**Is it reachable?** A 32-bit sequence space is 4,294,967,296 bytes. §29
-measures 159 KB/s on the wire and §24 283 KB/s on loopback, so one direction of
+**Is it reachable?** A 32-bit sequence space is 4,294,967,296 bytes. §24.4
+measures 159 KB/s on the wire and 283 KB/s on loopback, so one direction of
 one connection wraps after **7.5 hours on the wire** or **4.2 hours on
-loopback**. That is inside a long test but outside every test this project has
+loopback** — and Fitz over a mounted share is slower still, 68 KB/s of payload
+combined at 14 MHz, which is **17 hours**. That is inside a long test but outside every test this project has
 ever run — and it is *exactly* the duration the EAB report describes. So the
 suspicion is well-formed: it is the first thing that becomes reachable at that
 timescale and at no shorter one.
 
 **Where does a connection start?** `bsd_tcp_seed_isn()`
 (`src/bsdsocket/socket.c:322`) gives every socket a uniform random 32-bit ISN —
-that is §28's fix for the `|`-instead-of-`+` bias. A uniform ISN means the wrap
+that is §28.4's fix for the `|`-instead-of-`+` bias. A uniform ISN means the wrap
 point is uniformly distributed over the connection's life, so a connection
 carrying 4 GB wraps **exactly once**, whatever its ISN, and one carrying less
 than 4 GB wraps with probability equal to its size over 4 GB. You cannot
