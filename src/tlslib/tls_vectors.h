@@ -66,6 +66,15 @@ CONST_STRPTR tls_TLSErrorString(register LONG               code    __asm("d0"),
 LONG tls_TLSWaitSelect(register struct TLSSelect   *sel     __asm("a0"),
                        register struct TLSLibBase *TLSBase  __asm("a6"));
 
+/* -78 */
+LONG tls_TLSRandom(register APTR               buffer  __asm("a0"),
+                   register LONG               length  __asm("d0"),
+                   register struct TLSLibBase *TLSBase __asm("a6"));
+
+/* -84 */
+LONG tls_TLSBuffered(register struct TLSConnection *conn    __asm("a0"),
+                     register struct TLSLibBase    *TLSBase __asm("a6"));
+
 extern const APTR TlsVectorTable[];
 
 #endif /* AMINETXDUO_TLS_VECTORS_H */

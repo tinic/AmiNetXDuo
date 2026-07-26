@@ -88,6 +88,30 @@ if(AMIGA_SIZE)
         COMMENT "tls_api size")
 endif()
 
+# Session resumption, cold against warm, against a real public server.
+#
+#   tests/tls/run-resume.sh -b build/tls
+#
+# Same rule as tls_api: linked against nothing of ours, because the API is what
+# is under test as much as the arithmetic is.
+add_executable(tls_resume tls_resume.c)
+target_include_directories(tls_resume PRIVATE "${CMAKE_SOURCE_DIR}/include")
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(tls_resume PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+set_target_properties(tls_resume PROPERTIES OUTPUT_NAME "tls_resume")
+if(TARGET tls_library)
+    add_dependencies(tls_resume tls_library)
+endif()
+if(TARGET bsdsocket_library)
+    add_dependencies(tls_resume bsdsocket_library)
+endif()
+if(AMIGA_SIZE)
+    add_custom_command(TARGET tls_resume POST_BUILD
+        COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:tls_resume>"
+        COMMENT "tls_resume size")
+endif()
+
 add_executable(tls_https tls_https.c)
 target_link_libraries(tls_https PRIVATE
     aminetxduo_tls aminetxduo_netstack aminetxduo_common netxduo_port)

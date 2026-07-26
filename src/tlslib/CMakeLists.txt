@@ -33,8 +33,22 @@ set(TLSLIB_SOURCES
     tls_netx.c
     tls_conn.c
     tls_store.c
+    tls_resume.c
     tls_time.c
     tls_runtime.c)
+
+# TLS 1.2 session resumption.  nx_secure has none, and the two vendored
+# functions that would have to change are reached through the linker rather
+# than by editing third_party/ -- see the header comment in tls_resume.c for
+# why --wrap was chosen over defining the symbols outright (450 lines of state
+# machine that would have to be re-merged at every submodule bump).
+#
+# These belong to tls.library ONLY.  tls_handshake, tls_https and tls_bench
+# link the same archives without them, so their behaviour and their baselines
+# are untouched by construction.
+set(TLSLIB_WRAP_OPTIONS
+    -Wl,--wrap=_nx_secure_tls_send_clienthello
+    -Wl,--wrap=_nx_secure_tls_client_handshake)
 
 set(TLSLIB_INCLUDES
     ${AMINETXDUO_CORE_INCLUDES}
@@ -48,7 +62,7 @@ if(AMINETXDUO_TLSLIB_LINK)
     add_executable(tls_library ${TLSLIB_SOURCES})
     set_target_properties(tls_library PROPERTIES OUTPUT_NAME "tls.library")
     target_include_directories(tls_library PRIVATE ${TLSLIB_INCLUDES})
-    target_compile_options(tls_library PRIVATE -Wall -Wextra)
+    target_compile_options(tls_library PRIVATE -Wall -Wextra ${TLSLIB_TRACE_DEFS})
 
     add_dependencies(tls_library aminetxduo_tls nx_secure nx_crypto crypto68k)
 
@@ -71,7 +85,7 @@ if(AMINETXDUO_TLSLIB_LINK)
 
     # -nostartfiles, not -nostdlib: no crt0 in a shared library, but nx_crypto
     # wants memcpy/memset/memcmp and the linker only pulls what is referenced.
-    target_link_options(tls_library PRIVATE -nostartfiles)
+    target_link_options(tls_library PRIVATE -nostartfiles ${TLSLIB_WRAP_OPTIONS})
 
     if(AMIGA_SIZE)
         add_custom_command(TARGET tls_library POST_BUILD

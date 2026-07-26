@@ -561,7 +561,14 @@ static UINT tls_store_verify(NX_SECURE_X509_CERTIFICATE_STORE *store,
                                                 current_time);
 }
 
-VOID tls_store_attach(TLSConnection *conn)
+/*
+ * The registry is not only the trust store's: src/tlslib/tls_resume.c reaches
+ * a connection from an NX_SECURE_TLS_SESSION through it too, and resumption
+ * runs whether or not the chain is being verified.  So registration is its own
+ * call, made for every connection, and tls_store_attach() is only the part
+ * that swaps the verifier.
+ */
+VOID tls_registry_add(TLSConnection *conn)
 {
     NX_SECURE_X509_CERTIFICATE_STORE *store;
     UWORD                             i;
@@ -585,13 +592,19 @@ VOID tls_store_attach(TLSConnection *conn)
         }
     }
     Permit();
+}
 
-    if (i == TLS_REGISTRY_SLOTS)
+VOID tls_store_attach(TLSConnection *conn)
+{
+    if (conn == NULL)
+        return;
+
+    if (tls_conn_for_session(&conn->tc_Session) != conn)
     {
-        /* More than eight simultaneous handshakes on a 68020 is not a case
-           worth carrying code for, but silently verifying against an empty
-           trusted store would be a security hole, so leave the vendored
-           verifier in place: it will fail closed with
+        /* The registry is full.  More than eight simultaneous handshakes on a
+           68020 is not a case worth carrying code for, but silently verifying
+           against an empty trusted store would be a security hole, so leave the
+           vendored verifier in place: it will fail closed with
            ISSUER_CERTIFICATE_NOT_FOUND. */
         return;
     }

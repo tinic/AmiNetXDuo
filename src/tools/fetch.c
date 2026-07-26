@@ -791,12 +791,22 @@ static LONG fetch_run(VOID)
                 info.ti_Size = (ULONG)sizeof(info);
                 if (TLSInfo(tbase, io.tls, &info) == 0)
                 {
+                    /*
+                     * "resumed" is worth a word of its own rather than being
+                     * left to be inferred from the time.  A resumed handshake
+                     * sends no certificate and verifies no signature, so
+                     * ti_ChainDepth reads 0 and the seconds read 0.2 -- both
+                     * of which look like something went wrong until you know
+                     * that they are the point.
+                     */
                     tool_printf("%s: TLS 0x%lx, ciphersuite 0x%lx, "
-                                "%ld certificate(s), %lu.%lu s\n",
+                                "%ld certificate(s), %lu.%lu s%s\n",
                                 (LONG)u.host, info.ti_Version,
                                 info.ti_CipherSuite, info.ti_ChainDepth,
                                 info.ti_HandshakeMillis / 1000UL,
-                                (info.ti_HandshakeMillis % 1000UL) / 100UL);
+                                (info.ti_HandshakeMillis % 1000UL) / 100UL,
+                                (LONG)(info.ti_Resumed
+                                           ? " (resumed session)" : ""));
                     tool_printf("  chain %s, %s\n",
                                 (LONG)(info.ti_Verified ? "verified"
                                                         : "NOT VERIFIED"),

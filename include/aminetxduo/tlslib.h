@@ -44,10 +44,28 @@
  *
  * WHAT IT COSTS
  *
- *   A handshake to a public HTTPS server is about seven seconds on a 14 MHz
- *   68020 and most of that is one RSA verification per certificate in the
- *   chain.  Budget roughly 40 KB of Fast RAM per open connection.  Neither is
- *   a bug and neither is going to change much; see docs/RESEARCH.md 9.
+ *   A FULL handshake to a public HTTPS server is about seven seconds on a
+ *   14 MHz 68020 for an RSA certificate chain and about twenty-three for an
+ *   ECDSA one, and nearly all of that is public-key arithmetic -- one
+ *   signature verification per certificate, plus a key exchange.  Budget
+ *   roughly 40 KB of Fast RAM per open connection.  See docs/RESEARCH.md 9.
+ *
+ *   A RESUMED handshake does NONE of that arithmetic, and this library resumes
+ *   automatically.  You do not have to ask for it, there is no API for it, and
+ *   the second connection to a host you have already visited is a fraction of
+ *   a second instead of seven or twenty-three.  The cache lives in the library
+ *   and in DEVS:Internet/tlssessions, so it survives your program exiting --
+ *   running the same command twice is the case it exists for.  TLSInfo()'s
+ *   ti_Resumed says which kind of handshake you got.
+ *
+ *   What that costs, stated plainly: a cached session holds the master secret
+ *   for that session in the library's memory and on disk, in the clear.  On a
+ *   machine with no memory protection that is not much of a change -- every
+ *   task can already read every other task's memory -- but the file means an
+ *   attacker who takes the disk can decrypt captured traffic from the resumed
+ *   sessions, which the full handshake would not have allowed.  TLSA_NoResume
+ *   turns it off entirely; TLSA_SessionFile with an empty string keeps the
+ *   cache in RAM and off the disk.
  *
  * WaitSelect() AND TLS -- READ THIS ONE
  *
@@ -179,6 +197,25 @@ struct TLSConnection;
  */
 #define TLSA_MaxChain       (TLSA_Dummy + 7)
 
+/*
+ * BOOL.  Do not offer a cached session and do not remember this one.  Every
+ * connection then pays the full public-key cost -- seven seconds for an RSA
+ * chain on a 68020, twenty-three for an ECDSA one -- so this is for a program
+ * that would rather have forward secrecy on every connection than have it
+ * finish.  Resumption is on by default because on this hardware the trade goes
+ * the other way for almost everybody.
+ */
+#define TLSA_NoResume       (TLSA_Dummy + 8)
+
+/*
+ * STRPTR.  Where the session cache is mirrored, instead of
+ * DEVS:Internet/tlssessions.  An EMPTY STRING means "nowhere": the cache stays
+ * in the library, so a second connection from the same or another program
+ * still resumes, but nothing survives a reboot and no master secret is
+ * written to disk.
+ */
+#define TLSA_SessionFile    (TLSA_Dummy + 9)
+
 /* --------------------------------------------------------------- errors --- */
 
 #define TLS_OK               0
@@ -220,7 +257,41 @@ struct TLSInfo
 
     ULONG   ti_TrustRoots;      /* roots the store holds                      */
     ULONG   ti_RootsLoaded;     /* roots this connection actually parsed      */
+
+    /*
+     * Added after the fields above.  Set ti_Size to sizeof(struct TLSInfo) and
+     * you get them; a program compiled against the older header passes the
+     * older size, gets everything above, and is not broken by this.
+     */
+
+    /*
+     * TRUE when this handshake resumed a cached session -- no certificate was
+     * sent, no signature was verified, no key exchange happened, and the whole
+     * thing took a fraction of a second.  ti_HandshakeMillis is the number to
+     * quote at anyone who does not believe it.
+     */
+    BOOL    ti_Resumed;
+
+    /* FALSE when resumption was switched off for this connection, either by
+       TLSA_NoResume or because there was no TLSA_HostName to key a cache on. */
+    BOOL    ti_Resumable;
+
+    /* Sessions the library currently holds, across all hosts and all
+       programs.  Diagnostic; a program has no reason to care. */
+    ULONG   ti_SessionsCached;
 };
+
+/*
+ * The size of the structure before ti_Resumed existed.  A caller passing this
+ * gets the original fields and nothing else, which is the entire compatibility
+ * mechanism and is why ti_Size is a required input.
+ *
+ * Forty and not forty-four: BOOL on classic AmigaOS is a SHORT, so ti_Verified
+ * and ti_ExpiryChecked are two bytes each, not four.  The library asserts this
+ * number against the real offset at build time rather than trusting the
+ * arithmetic in this comment.
+ */
+#define TLS_INFO_SIZE_V1    40
 
 /* ------------------------------------------------------ WaitSelect() ------ */
 
@@ -255,6 +326,8 @@ struct TLSSelect
 #define TLS_LVO_TLSInfo         (-60)
 #define TLS_LVO_TLSErrorString  (-66)
 #define TLS_LVO_TLSWaitSelect   (-72)
+#define TLS_LVO_TLSRandom       (-78)
+#define TLS_LVO_TLSBuffered     (-84)
 
 /*
  * Inline stubs.  Hand-written rather than generated from an .fd because there
@@ -262,6 +335,21 @@ struct TLSSelect
  * use this library with nothing but this header.  Every one takes the library
  * base explicitly -- no global TLSBase -- so that a program can hold two, and
  * so that nothing here fights a <proto/> header.
+ *
+ * WHY a0 AND a1 ARE READ-WRITE OPERANDS AND NOT PLAIN INPUTS
+ *
+ *   d0, d1, a0 and a1 are SCRATCH registers in the AmigaOS ABI: a library
+ *   function may leave anything in them.  An inline stub that lists a0 and a1
+ *   only as inputs is telling the compiler the opposite, and the compiler
+ *   believes it -- so two calls in a row get the arguments loaded once and the
+ *   second call is made with whatever the first one left behind.
+ *
+ *   That is not a theoretical hazard.  It happened here, in exactly that
+ *   shape: TLSWrite() followed by TLSRead() compiled to one `moveal a5,a0`
+ *   before the write and none before the read, so TLSRead() ran on a garbage
+ *   connection pointer and answered -1 with no error set.  The failure looked
+ *   like a library bug for most of a day.  Marking them "+r" says what is
+ *   true, and the generated code reloads them.
  */
 
 static __inline struct TLSConnection *
@@ -275,8 +363,8 @@ TLSOpenA(struct Library *base, APTR socket_base, LONG sock,
     register struct TLSConnection *res __asm("d0");
 
     __asm __volatile ("jsr a6@(-30:W)"
-                      : "=r" (res)
-                      : "r" (a6), "r" (a0), "r" (a1), "r" (d0)
+                      : "=r" (res), "+r" (a0), "+r" (a1)
+                      : "r" (a6), "r" (d0)
                       : "d1", "cc", "memory");
     return res;
 }
@@ -305,8 +393,8 @@ static __inline VOID TLSClose(struct Library *base, struct TLSConnection *conn)
     register struct TLSConnection *a0 __asm("a0") = conn;
 
     __asm __volatile ("jsr a6@(-36:W)"
-                      :
-                      : "r" (a6), "r" (a0)
+                      : "+r" (a0)
+                      : "r" (a6)
                       : "d0", "d1", "a1", "cc", "memory");
 }
 
@@ -320,8 +408,8 @@ static __inline LONG TLSRead(struct Library *base, struct TLSConnection *conn,
     register LONG                  res __asm("d0");
 
     __asm __volatile ("jsr a6@(-42:W)"
-                      : "=r" (res)
-                      : "r" (a6), "r" (a0), "r" (a1), "r" (d0)
+                      : "=r" (res), "+r" (a0), "+r" (a1)
+                      : "r" (a6), "r" (d0)
                       : "d1", "cc", "memory");
     return res;
 }
@@ -336,8 +424,8 @@ static __inline LONG TLSWrite(struct Library *base, struct TLSConnection *conn,
     register LONG                  res __asm("d0");
 
     __asm __volatile ("jsr a6@(-48:W)"
-                      : "=r" (res)
-                      : "r" (a6), "r" (a0), "r" (a1), "r" (d0)
+                      : "=r" (res), "+r" (a0), "+r" (a1)
+                      : "r" (a6), "r" (d0)
                       : "d1", "cc", "memory");
     return res;
 }
@@ -349,8 +437,8 @@ static __inline LONG TLSPending(struct Library *base, struct TLSConnection *conn
     register LONG                  res __asm("d0");
 
     __asm __volatile ("jsr a6@(-54:W)"
-                      : "=r" (res)
-                      : "r" (a6), "r" (a0)
+                      : "=r" (res), "+r" (a0)
+                      : "r" (a6)
                       : "d1", "a1", "cc", "memory");
     return res;
 }
@@ -364,8 +452,8 @@ static __inline LONG TLSInfo(struct Library *base, struct TLSConnection *conn,
     register LONG                  res __asm("d0");
 
     __asm __volatile ("jsr a6@(-60:W)"
-                      : "=r" (res)
-                      : "r" (a6), "r" (a0), "r" (a1)
+                      : "=r" (res), "+r" (a0), "+r" (a1)
+                      : "r" (a6)
                       : "d1", "cc", "memory");
     return res;
 }
@@ -390,8 +478,68 @@ static __inline LONG TLSWaitSelect(struct Library *base, struct TLSSelect *sel)
     register LONG              res __asm("d0");
 
     __asm __volatile ("jsr a6@(-72:W)"
-                      : "=r" (res)
-                      : "r" (a6), "r" (a0)
+                      : "=r" (res), "+r" (a0)
+                      : "r" (a6)
+                      : "d1", "a1", "cc", "memory");
+    return res;
+}
+
+/*
+ * Bytes this library is holding that have NOT been decrypted yet, or -1.
+ *
+ * TLSPending() answers "is plaintext ready".  This answers the other half of
+ * the question, and a non-blocking caller needs both.  One TCP segment
+ * routinely carries more than one TLS record, so after a TLSRead() the rest
+ * sit undecrypted inside the library: the socket is not readable,
+ * TLSPending() is 0, and a whole record is already in memory.  A loop that
+ * waits on the descriptor in that state waits for data it has.
+ *
+ * Non-zero means TLSRead() can make progress without another byte arriving.
+ * It does not promise TLSRead() will not block -- what is buffered may be half
+ * a record -- which is the same bound TLSA_Timeout already puts a ceiling on.
+ */
+static __inline LONG TLSBuffered(struct Library *base,
+                                 struct TLSConnection *conn)
+{
+    register struct Library       *a6 __asm("a6") = base;
+    register struct TLSConnection *a0 __asm("a0") = conn;
+    register LONG                  res __asm("d0");
+
+    __asm __volatile ("jsr a6@(-84:W)"
+                      : "=r" (res), "+r" (a0)
+                      : "r" (a6)
+                      : "d1", "a1", "cc", "memory");
+    return res;
+}
+
+/*
+ * Fill a buffer with random bytes.  Returns the count, or -1.
+ *
+ * This is the machine's one entropy pool -- the same SHA-256 hash DRBG the TLS
+ * session keys come from, seeded by bsdsocket.library -- rather than a second
+ * generator of unknown quality.  It is here because a ported client asks its
+ * TLS layer for randomness (curl routes every Curl_rand() through it) and the
+ * alternative is the client seeding an LCG off the clock.
+ *
+ * Be aware of what it is not: an Amiga has no hardware RNG, and the seed this
+ * pool is credited with is around twenty bits on an unattended machine.  That
+ * is fine for a nonce, a boundary string or a request id, which is what a
+ * client wants it for; docs/RESEARCH.md 9 sets out the limits in full.
+ *
+ * Requires a connection to have been opened at least once in this program:
+ * the pool lives in bsdsocket.library and this library reaches it through the
+ * link TLSOpen() establishes.  Before that it answers -1 rather than zeroes.
+ */
+static __inline LONG TLSRandom(struct Library *base, APTR buffer, LONG length)
+{
+    register struct Library *a6 __asm("a6") = base;
+    register APTR            a0 __asm("a0") = buffer;
+    register LONG            d0 __asm("d0") = length;
+    register LONG            res __asm("d0");
+
+    __asm __volatile ("jsr a6@(-78:W)"
+                      : "=r" (res), "+r" (a0)
+                      : "r" (a6), "r" (d0)
                       : "d1", "a1", "cc", "memory");
     return res;
 }

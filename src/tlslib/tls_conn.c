@@ -48,6 +48,13 @@
 #define TLS_FD_MASK(fd)     (1UL << ((ULONG)(fd) % TLS_FD_BITS))
 #define TLS_FD_MAX          256
 
+/* TLS_INFO_SIZE_V1 is the compatibility contract with every caller compiled
+   against the header before resumption existed.  If a field is ever inserted
+   above ti_Resumed this stops the build rather than silently writing the new
+   fields into an old caller's stack. */
+_Static_assert(__builtin_offsetof(struct TLSInfo, ti_Resumed) == TLS_INFO_SIZE_V1,
+               "TLS_INFO_SIZE_V1 must be the offset of the first added field");
+
 /* --------------------------------------------------------------- tags --- */
 
 /*
@@ -250,6 +257,7 @@ static VOID tls_conn_free(TLSConnection *conn)
     tls_store_detach(conn);
     tls_store_close(&conn->tc_StoreIndex);
 
+    tls_free(conn->tc_Ticket);
     tls_free(conn->tc_RootDer);
     tls_free(conn->tc_RemoteDer);
     tls_free(conn->tc_Remote);
@@ -272,6 +280,7 @@ struct TLSConnection *tls_TLSOpenA(
     LONG                     error = TLS_ERR_INTERNAL;
     CONST_STRPTR             hostname;
     CONST_STRPTR             store_path;
+    CONST_STRPTR             session_path;
     ULONG                    timeout_ms;
     ULONG                    record_bytes;
     ULONG                    chain;
@@ -319,6 +328,7 @@ struct TLSConnection *tls_TLSOpenA(
 
     hostname     = (CONST_STRPTR)tls_tag_data(tags, TLSA_HostName, 0);
     store_path   = (CONST_STRPTR)tls_tag_data(tags, TLSA_TrustStore, 0);
+    session_path = (CONST_STRPTR)tls_tag_data(tags, TLSA_SessionFile, 0);
     timeout_ms   = tls_tag_data(tags, TLSA_Timeout, TLS_DEFAULT_TIMEOUT_MS);
     record_bytes = tls_tag_data(tags, TLSA_RecordBuffer, TLS_DEFAULT_RECORD_BUFFER);
     chain        = tls_tag_data(tags, TLSA_MaxChain, TLS_DEFAULT_CHAIN);
@@ -384,6 +394,35 @@ struct TLSConnection *tls_TLSOpenA(
                                      : TLS_DEFAULT_STORE,
                 sizeof(conn->tc_StorePath));
 
+    /* ---- resumption ----------------------------------------------------- */
+
+    /*
+     * On by default and invisible: a caller that does nothing gets a resumed
+     * handshake whenever the far end will give it one, which on this hardware
+     * is the difference between seconds and tens of seconds.  TLSA_NoResume
+     * turns it off; TLSA_SessionFile with an empty string keeps the cache in
+     * the library and off the disk.
+     */
+    if (tls_tag_data(tags, TLSA_NoResume, 0) == 0)
+    {
+        conn->tc_ResumeFlags |= TLSR_ENABLED;
+
+        tls_strncpy(conn->tc_SessionPath,
+                    (session_path != NULL) ? (const char *)session_path
+                                           : TLS_DEFAULT_SESSIONS,
+                    sizeof(conn->tc_SessionPath));
+
+        if (conn->tc_SessionPath[0] != '\0')
+            conn->tc_ResumeFlags |= TLSR_PERSIST;
+
+        conn->tc_Ticket = (UBYTE *)tls_alloc(TLS_RESUME_TICKET_MAX);
+        if (conn->tc_Ticket == NULL)
+        {
+            error = TLS_ERR_NOMEM;
+            goto fail;
+        }
+    }
+
     /* ---- the transport -------------------------------------------------- */
 
     conn->tc_Socket = ctx->nxc_TcpSocket(socket_base, sock);
@@ -392,6 +431,11 @@ struct TLSConnection *tls_TLSOpenA(
         error = TLS_ERR_BADSOCKET;
         goto fail;
     }
+
+    /* The cache is keyed by host AND port, so the same name on 443 and on
+       8443 are two sessions.  The port is the socket's, not the caller's --
+       TLSOpen() is never told one. */
+    conn->tc_Port = (UWORD)conn->tc_Socket->nx_tcp_socket_connect_port;
 
     /* ---- the trust store ------------------------------------------------ */
 
@@ -478,12 +522,20 @@ struct TLSConnection *tls_TLSOpenA(
     conn->tc_ExpiryChecked = tls_time_is_known();
     conn->tc_UnixTime      = tls_time_now();
 
+    /*
+     * Every connection goes in the registry, verified or not: it is how the
+     * session-resumption overrides in tls_resume.c get from an
+     * NX_SECURE_TLS_SESSION back to this structure, and resumption does not
+     * care whether the chain is being checked.
+     */
+    tls_registry_add(conn);
+
     if ((conn->tc_Flags & TLSF_VERIFY) != 0)
     {
         (VOID)_nx_secure_tls_session_certificate_callback_set(
                   &conn->tc_Session, tls_certificate_callback);
 
-        /* Registers the connection AND swaps in the lazy root loader. */
+        /* Swaps in the lazy root loader, on top of the registration above. */
         tls_store_attach(conn);
     }
     else
@@ -499,6 +551,15 @@ struct TLSConnection *tls_TLSOpenA(
     }
 
     /* ---- the handshake -------------------------------------------------- */
+
+    /*
+     * Look for a cached session BEFORE the bracket: this reads a file, and a
+     * disk access inside the ThreadX bracket would hold the baton away from
+     * the IP thread.  The trust store's fetch has to do it the hard way
+     * because the issuer is not known until the server has spoken; this one is
+     * known from the host name, so it does not.
+     */
+    tls_resume_prepare(conn);
 
     if (tls_conn_enter(conn) != 0)
     {
@@ -518,6 +579,16 @@ struct TLSConnection *tls_TLSOpenA(
 
     if (status != NX_SUCCESS)
     {
+        /*
+         * A handshake that offered a cached session and then failed has to
+         * drop that session, or the machine retries the same broken
+         * resumption forever.  The cost of being wrong here is one full
+         * handshake; the cost of not doing it is a host that never works
+         * again until the entry ages out.
+         */
+        if ((conn->tc_ResumeFlags & TLSR_OFFERED) != 0)
+            tls_resume_evict(conn);
+
         error = tls_error_from_nx(status);
         goto fail_session;
     }
@@ -532,6 +603,9 @@ struct TLSConnection *tls_TLSOpenA(
                        ->nx_secure_tls_ciphersuite;
     }
     conn->tc_Protocol = (ULONG)conn->tc_Session.nx_secure_tls_protocol_version;
+
+    /* Also outside the bracket: this is the other half of the disk mirror. */
+    tls_resume_record(conn);
 
     if (error_out != NULL)
         *error_out = TLS_OK;
@@ -636,6 +710,10 @@ LONG tls_TLSRead(register struct TLSConnection *conn    __asm("a0"),
         status = _nx_secure_tls_session_receive(&conn->tc_Session, &packet,
                                                  conn->tc_Timeout);
         tls_conn_leave(conn);
+
+        tls_trace("[resume] session_receive -> %ld packet %lx state %ld",
+                  (LONG)status, (LONG)packet,
+                  (LONG)conn->tc_Session.nx_secure_tls_client_state);
 
         if (status == NX_SECURE_TLS_CLOSE_NOTIFY_RECEIVED ||
             status == NX_NOT_CONNECTED ||
@@ -793,7 +871,15 @@ LONG tls_TLSInfo(register struct TLSConnection *conn    __asm("a0"),
 
     if (conn == NULL || info == NULL)
         return -1;
-    if (info->ti_Size < (ULONG)sizeof(struct TLSInfo))
+
+    /*
+     * ti_Size is a version, not a formality.  A caller compiled against the
+     * header before resumption existed passes the smaller size and gets every
+     * field it knows about; the resumption fields are written only when the
+     * caller's structure is big enough to hold them.  Anything smaller than
+     * the original structure is not a TLSInfo.
+     */
+    if (info->ti_Size < (ULONG)TLS_INFO_SIZE_V1)
         return -1;
 
     info->ti_Version         = conn->tc_Protocol;
@@ -809,7 +895,111 @@ LONG tls_TLSInfo(register struct TLSConnection *conn    __asm("a0"),
     info->ti_TrustRoots      = tls_store_count(conn->tc_Store);
     info->ti_RootsLoaded     = conn->tc_RootsLoaded;
 
+    if (info->ti_Size >= (ULONG)sizeof(struct TLSInfo))
+    {
+        info->ti_Resumed =
+            (BOOL)(((conn->tc_ResumeFlags & TLSR_RESUMED) != 0) ? TRUE : FALSE);
+        info->ti_Resumable =
+            (BOOL)(((conn->tc_ResumeFlags & TLSR_ENABLED) != 0) ? TRUE : FALSE);
+        info->ti_SessionsCached = tls_resume_count(conn->tc_Base);
+    }
+
     return 0;
+}
+
+/* -------------------------------------------------------- TLSBuffered --- */
+
+/*
+ * Bytes this library is holding that have NOT been decrypted yet.
+ *
+ * TLSPending() answers "is there plaintext ready", and that is not the whole
+ * question.  nx_secure reads whatever the socket gives it, and one TCP segment
+ * routinely carries more than one TLS record -- so after a TLSRead() the
+ * remaining records sit UNDECRYPTED in nx_secure's queue.  The socket is then
+ * not readable, TLSPending() is 0, and a complete record is sitting in memory.
+ * A caller that treats an unreadable socket as "nothing to do" waits for data
+ * it already has.
+ *
+ * This is what that caller needs: non-zero means calling TLSRead() can make
+ * progress without the socket producing another byte.  It is deliberately NOT
+ * folded into TLSPending(), because the two answers mean different things --
+ * plaintext is ready to copy, buffered bytes may still be half a record.  A
+ * caller polling non-blocking should test both and read when either is set;
+ * the read can still block if what is buffered is an incomplete record, which
+ * is the same bound TLSA_Timeout already covers.
+ */
+LONG tls_TLSBuffered(register struct TLSConnection *conn    __asm("a0"),
+                     register struct TLSLibBase    *TLSBase __asm("a6"))
+{
+    const NX_PACKET *queued;
+
+    (VOID)TLSBase;
+
+    if (conn == NULL)
+        return -1;
+
+    queued = conn->tc_Session.nx_secure_record_queue_header;
+    if (queued == NX_NULL)
+        return 0;
+
+    return (LONG)queued->nx_packet_length;
+}
+
+/* ---------------------------------------------------------- TLSRandom --- */
+
+/*
+ * The machine's entropy pool, which this library already borrows from
+ * bsdsocket.library (see tls_netx.c) and which nothing outside could reach.
+ *
+ * It exists because a ported client asks its TLS backend for random bytes --
+ * curl routes every Curl_rand() through the backend when it is built with TLS
+ * -- and the alternative it falls back to is a time-seeded LCG in the client.
+ * The pool behind this is a SHA-256 hash DRBG; docs/RESEARCH.md 9 is candid
+ * about how little entropy the seed carries on an unattended Amiga, and this
+ * call inherits that honestly rather than pretending otherwise.  It is a
+ * strict improvement on an LCG and it is the same generator the TLS session
+ * keys come from, so a caller cannot end up with two different qualities of
+ * randomness by accident.
+ *
+ * Returns the number of bytes written, or -1.  Never partially fills: the
+ * generator cannot fail.
+ */
+LONG tls_TLSRandom(register APTR               buffer  __asm("a0"),
+                   register LONG               length  __asm("d0"),
+                   register struct TLSLibBase *TLSBase __asm("a6"))
+{
+    UBYTE *out = (UBYTE *)buffer;
+    LONG   i;
+
+    (VOID)TLSBase;
+
+    if (buffer == NULL || length < 0)
+        return -1;
+
+    /*
+     * The pool lives in bsdsocket.library and is reached through the private
+     * context, so a caller that has not opened a connection yet has nothing to
+     * draw from.  Say so rather than handing back zeroes.
+     */
+    if (tls_netx_ctx() == NULL)
+        return -1;
+
+    for (i = 0; i < length; i++)
+    {
+        /* One 32-bit draw per four bytes; the DRBG's own buffering makes the
+           per-call cost one SHA-256 per eight draws, not per byte. */
+        if ((i & 3) == 0)
+        {
+            ULONG r = (ULONG)ami_random_rand();
+
+            out[i] = (UBYTE)r;
+            if ((i + 1) < length) out[i + 1] = (UBYTE)(r >> 8);
+            if ((i + 2) < length) out[i + 2] = (UBYTE)(r >> 16);
+            if ((i + 3) < length) out[i + 3] = (UBYTE)(r >> 24);
+        }
+    }
+
+    return length;
 }
 
 /* ------------------------------------------------------ TLSWaitSelect --- */
