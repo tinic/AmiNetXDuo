@@ -7947,14 +7947,19 @@ nothing in `third_party/` is patched (§17.3).
 | conformance, loopback tier | **130 passed, 0 failed, 12 skipped** |
 | conformance, network tier | **141 passed, 1 failed, 0 skipped** |
 | `tests/clients` | **94 checks, 0 failures** |
+| `tests/curl` groups A–F | **147 passed, 2 failed, 149 cases** |
 | `tests/curl` groups A–D, both builds | **112 passed, 1 failed, 113 cases** |
 | `tests/curl` concurrency sweep, both builds | **9 passed, 0 failed**, `AvailMem` delta +0 |
 | host `ctest` | **6/6** |
 | `tools/ci.sh` | all green on macOS and on the Linux host with the pinned toolchain |
 
-Both conformance tiers are unchanged from §17.4's numbers, which is the result
-that matters: this touches the size of a window and nothing about what the
-socket API does.
+Both conformance tiers are unchanged from §17.4's numbers and the full curl
+suite is unchanged from §16.8's, which is the result that matters: this touches
+the size of a window and nothing about what the socket API does. The two curl
+failures are the two §14 already names and neither is ours — `a44_cookies_send`
+(curl does not write its cookie jar on AmigaOS, §14.7) and `f07_ftp_active`
+(FS-UAE 3.2.35's SLIRP opens no inbound path, §12). `AvailMem` drops once, by
+291 KB, when `tls.library` loads and is flat either side of it.
 
 One measurement hazard is worth recording because it cost two runs. The absolute
 throughputs here are **lower than §16's** — 230 KB/s on loopback at a pinned
