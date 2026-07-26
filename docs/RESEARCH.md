@@ -10254,3 +10254,255 @@ Against either candidate the same three things bind:
    server could reasonably require — or to feed `ami_random_add_entropy()` a
    real seed, for which operator keystroke timing at first boot is the classic
    answer and this machine does have a keyboard. Either is fine. Neither is not.
+
+## 29. Measured against Roadshow 1.15 and AmiTCP_NG 4.1.1 (2026-07-26)
+
+Everything above compares this stack against itself. This section compares it
+against the two other SANA-II stacks that can be dropped into the same FS-UAE
+profile: **Roadshow 1.15** — the commercial stack whose ABI this project
+implements — and **AmiTCP_NG 4.1.1**, a GPL fork of AmiTCP 3.0b2 with a
+clean-room Roadshow ABI.
+
+**Nothing of either was copied into this tree.** `tests/compare/run-compare.sh`
+takes a path to an unpacked installation and stages it at run time; Roadshow is
+a commercial demo and AmiTCP_NG is GPL, and this tree is MIT.
+
+**We win conformance and loopback outright, we win the wire on our own
+instrument, and we lose the wire on somebody else's client.** That last one is
+the most useful result in the section and it is stated first for that reason.
+
+### 29.1 The rig, stated so it can be disputed
+
+| | |
+|---|---|
+| emulator | FS-UAE 3.2.35, `-m A1200`: 68EC020 at 14 MHz, cycle-exact, 8 MB Zorro II Fast |
+| ROM | Kickstart 3.1 40.68 (A1200) |
+| NIC | one `a2065.device` on SLIRP, 10.0.2.0/24 |
+| host | macOS 26.5, Apple M3; `build/.fsuae.lock` held for every run, so no two emulators ran together |
+| UAE's own emulation | `bsdsocket_library = 0` — otherwise there is a fourth stack in the room |
+
+Four things are the **same binary in every column**, which is the point:
+
+* **the driver** — `tests/curl/curlcheck.c`, which runs each command with a
+  512 KB stack and records its exit code, elapsed ticks and `AvailMem`;
+* **`NetTrace`**, built once from this tree and staged unchanged against all
+  three. It links nothing of `src/`: every call into the library is a published
+  LVO through `toolsock.c`'s inline `jsr a6@(-n:W)`, so it is exactly as foreign
+  to Roadshow as to us;
+* **`bsdsocktest`**, the upstream suite, which knows about none of the three;
+* **the Aminet `curl.020` 8.22.0-DEV** of §14.7 — clib2, AmiSSL, built by
+  somebody with no stake in the result.
+
+Each stack supplies only its **own** `bsdsocket.library`, `AddNetInterface` and
+`ping`. The `DEVS:` tree, the interface file (`DEVICE=a2065.device`,
+`CONFIGURE=DHCP`) and the driver binary are identical, and the a2065 driver is
+staged in both `DEVS:` and `DEVS:Networks/` because the three stacks look in
+different places for it.
+
+**The builds are not comparable and that is stated rather than hidden.**
+
+| | compiler | flags |
+|---|---|---|
+| AmiNetXDuo, commit **`b3b4b49`** | `m68k-amigaos-gcc` 15.2.0 | libraries `-O3`, commands `-Os`, `-m68020` |
+| Roadshow 1.15 demo | shipped binary | not disclosed |
+| AmiTCP_NG 4.1.1 release `.lha` | bebbo GCC 6.5.0b | `-O1 -fomit-frame-pointer -noixemul -std=gnu89`, 68000 baseline |
+
+Our arm is `git archive b3b4b49` built into a private directory, because
+`src/netstack/`, `src/bsdsocket/socket.c` and `nx_user.h` were all under active
+change while this was measured and §24.9 records two measurements already lost
+to exactly that. **`b3b4b49` contains §24's pool-derived receive window**, so
+these are post-window figures, not stale ones. Neither foreign stack was tuned;
+both ran as shipped.
+
+### 29.2 Conformance — we are four ahead of Roadshow on both tiers
+
+The suite identifies the library it ran against in its own TAP output, so there
+is no question which one answered: `# bsdsocket.library: AmiNetXDuo` and
+`# bsdsocket.library: Roadshow 4.364 (1.9.2023) DEMO`.
+
+| | AmiNetXDuo | Roadshow 1.15 | AmiTCP_NG 4.1.1 |
+|---|---|---|---|
+| **network tier** (`HOST 10.0.2.2`) | **141 passed, 1 failed, 0 skipped** | **137 passed, 5 failed, 0 skipped** | could not run |
+| **loopback tier** (`LOOPBACK`) | **130 passed, 0 failed, 12 skipped** | **126 passed, 4 failed, 12 skipped** | could not run |
+| suite wall time, network tier | 35.6 s | 49.6 s | — |
+| suite wall time, loopback tier | 15.0 s | 28.9 s | — |
+
+Roadshow's five network-tier failures:
+
+| # | | |
+|---:|---|---|
+| 27 | `recv(MSG_OOB)` returns `EINVAL` | the suite's own `known_failures.c` |
+| 35 | loopback generates no RST for a closed peer | same |
+| 76 | `SBTC_ERRNOLONGPTR` GET unsupported | same |
+| 77 | `SBTC_HERRNOLONGPTR` GET unsupported | same |
+| 41 | `accept()` an incoming connection from the helper | **ours fails this too** |
+
+**Test 41 cancels out.** It is the failure §12 and §17.4 already name: FS-UAE
+3.2.35's SLIRP opens no inbound TCP socket, so the helper cannot connect back
+to the guest. It fails on both stacks for the same environmental reason. The
+honest scoreline is **141–137 with one shared environmental loss**, and the four
+we win are exactly the four the suite itself documents as Roadshow deviations —
+i.e. we are ahead precisely where §17 predicted and nowhere else.
+
+**A correction to §17.4, which quoted Roadshow at 138 passed, 4 known,
+0 skipped.** That figure came from the suite's `known_failures.c`, not from a
+run. Measured here Roadshow scores **137**, and the missing one is test 41:
+`138 + 4 = 142` was a run with a working inbound path, and this rig has none.
+Our own 141/1/0 and 130/0/12 reproduce §24.9 exactly, from a different harness,
+which is what makes the Roadshow column trustworthy.
+
+### 29.3 Throughput, and the two instruments that disagree
+
+`NetTrace`, one binary, `NOCAPTURE`, 524,288 bytes, against
+`tests/curl/curlpeer.py`. Every boot runs each workload twice.
+
+| | AmiNetXDuo | Roadshow 1.15 | |
+|---|---:|---:|---|
+| **loopback**, 6 vs 4 samples | **352 KB/s** (351–353) | **251 KB/s** (234–265) | **+40%** |
+| **wire**, steady-state samples | **180 KB/s** (176–186) | **116 KB/s** (115–117) | **+55%** |
+| wire, first fetch of a boot | 115–180 KB/s | 115–190 KB/s | both noisy |
+
+**Loopback is the solid one.** Six of our samples span 2 KB/s; four Roadshow
+samples span 31. The *first* wire fetch after bring-up is noisy on both stacks
+and both directions — ours has been as low as 115 and Roadshow as high as 190 —
+so only the second fetch of each boot is quoted, where ours is 176/177/179/186
+and Roadshow's is 115/117.
+
+**And then the same wire, measured with somebody else's client, reverses.**
+Aminet `curl.020`, identical binary, 1,200,000 bytes over `http://`, five
+fetches each:
+
+| | AmiNetXDuo | Roadshow 1.15 | |
+|---|---:|---:|---|
+| total, mean of 5 | 10.72 s = **112 kB/s** | 9.39 s = **128 kB/s** | **Roadshow +14%** |
+| `time_connect` | 0.37–0.51 s | 0.67–0.76 s | ours |
+| `time_starttransfer` | 0.92–1.08 s | 1.17–1.27 s | ours |
+| body only, 1,200,000 B | 9.76 s = 123 kB/s | 8.50 s = 141 kB/s | Roadshow |
+| body only, 300,000 B | 2.38 s = 126 kB/s | 2.17 s = 138 kB/s | Roadshow |
+
+**This is a loss and it is reported as one.** With a client that has no stake in
+either stack, Roadshow moves the same 1.2 MB about 1.3 seconds faster, every
+time, five times out of five, and the gap scales with the body rather than
+sitting in setup — 123 against 141 kB/s at 1.2 MB and 126 against 138 at 300 KB.
+
+Three things are worth reading off it:
+
+* **We win the connect and the first byte and lose the bulk.** `time_connect`
+  and `time_starttransfer` are ours by 0.2–0.3 s on every fetch; everything we
+  lose, we lose after the first byte arrives.
+* **The disagreement between the two instruments is the finding, not a
+  contradiction.** Same wire, same peer, same payload size, same boot order:
+  `NetTrace` says we are 55% faster and curl says we are 12% slower. What
+  differs is the *receive call pattern* — read size, and how many `WaitSelect()`
+  round trips a megabyte costs — so the gap lives in our recv/select path and
+  not on the wire. `NetTrace` reads 4,096 bytes at a time through its own
+  single-`WaitSelect()` loop, and curl does not.
+* **It is not a regression against §24.** §24's 182 KB/s for `a04_get_1m2` is
+  *our* curl (newlib, `tls.library`); this is the clib2/AmiSSL Aminet binary,
+  which §14.7 ran for pass/fail and never timed. The two numbers are different
+  clients, not different stacks.
+
+**The next step is named rather than guessed at**: instrument the guest's
+`recv()` sizes and `WaitSelect()` count for one curl fetch and one `NetTrace`
+fetch of the same size, with the bpf capture of §16 running on both, and compare
+segment counts and inter-segment gaps. If curl is making several times as many
+short reads, the cost is per-call and measurable directly.
+
+### 29.4 Time to a DHCP lease — ours, by a factor of about three
+
+Each stack's own `AddNetInterface`, timed by the driver at 50 Hz. All three
+commands block until the interface has an address or the attempt has failed, so
+the command's elapsed time *is* the figure.
+
+| | AmiNetXDuo | Roadshow 1.15 |
+|---|---:|---:|
+| `AddNetInterface DEVS:NetInterfaces/eth0` | **1.72–1.90 s** (7 boots; one outlier at 2.40) | **4.74–5.28 s** (7 boots) |
+
+Both end with `10.0.2.15`, a default route to 10.0.2.2 and a nameserver from
+the lease. **This is the figure most likely to be stale first**: the DHCP
+lifecycle is under active change in `src/netstack/` and the number above is
+`b3b4b49`'s.
+
+### 29.5 ICMP round trip — Roadshow, by about 2 ms
+
+Each stack's own `ping`, five probes to 10.0.2.2, no loss on either.
+
+| | min / avg / max |
+|---|---|
+| AmiNetXDuo | 7 / 8 / 10–11 ms |
+| Roadshow 1.15 | **4.32 / 5.53–6.06 / 6.69–9.73 ms** |
+
+**Another loss.** Our `ping` prints whole milliseconds so 7 could be anything
+from 6.5 to 7.5, but Roadshow's minimum is 4.32 ms and ours never goes below 7,
+and its *maximum* on one run (6.69) is below our minimum. That is a real
+difference in ICMP turnaround, not a rounding artefact, and it is the same
+direction as the curl result: our per-packet path costs more than Roadshow's.
+
+### 29.6 AmiTCP_NG 4.1.1 would not start on this machine
+
+**Every socket call fails before any of the above can be measured.**
+
+```
+NetTrace: socket() failed: the stack reported error 43     (EPROTONOSUPPORT)
+eth0: AddInterface failed, errno 43
+# bsdsocket.library: not available                          (the suite's own line)
+```
+
+`OpenLibrary("bsdsocket.library", 4)` **succeeds** — `NetTrace` gets past it and
+prints its banner — and then `socket(AF_INET, SOCK_STREAM, 0)` returns
+`EPROTONOSUPPORT`, which is what BSD returns when the INET domain was never
+attached. The stack's self-start does not complete here. The suite runs to test
+49, fails 42 of the first 49, and the machine then stops responding; the run
+ends on its own timeout.
+
+Five things were eliminated rather than assumed:
+
+| tried | result |
+|---|---|
+| their own `Storage/NetInterfaces/A2065` instead of ours | identical, errno 43 |
+| the device named by full path, `DEVS:Networks/a2065.device`, as their own troubleshooting note recommends | identical |
+| their `db/` staged at `SYS:AmiTCP` **and** an `AmiTCP:` assign made before the first library call | identical |
+| an empty `AmiTCP:db/interfaces`, in case a missing file aborted init | identical |
+| a **different driver** — `ToolsSmoke` instead of `CurlCheck`, no `NP_WindowPtr`, no per-command redirection | identical, so the driver is not the variable |
+
+The same `a2065.device`, `DEVS:` tree and boot volume bring up the other two
+stacks in the same harness, so this is not a broken rig. **Their project
+documents validation on AmigaOS 3.2 under Amiberry**, and this harness boots
+Kickstart 3.1 with a bare directory hard drive and no Workbench install; that is
+the most likely gap and no Kickstart 3.2 image was available to test it. It is
+reported as "did not run here", not as a defect in their stack.
+
+Two smaller observations from the attempt, recorded because they cost time:
+their commands open `CON://///AUTO/CLOSE/WAIT`, so `ShowNetStatus` driven with
+its output redirected to a file never returns; and their `ping`, run with the
+stack dead, took the machine into a repeating address-error loop.
+
+Their release ships no `usergroup.library`, which a clib2-built client opens
+before `main()`, so the curl workload would have needed one borrowed from
+elsewhere. That never became relevant.
+
+### 29.7 lwip-amiga cannot be compared — confirmed, and stopped there
+
+Its README settles it in its own words: it is **not a SANA-II stack**, it is
+built on a purpose-built `netdev` driver ABI, and the only driver that
+implements it is `genet.device` 4.x for the onboard Ethernet of a Raspberry Pi
+4/CM4 under PiStorm or Emu68. There is no SANA-II shim and the repository
+publishes no releases. FS-UAE's emulated A2065 cannot present a `netdev` device,
+so nothing in this section can be run against it — including the loopback tier,
+which would still need an AmigaOS 3.2 machine and a build. Confirmed in a few
+minutes and not pursued further.
+
+### 29.8 The harness
+
+`tests/compare/run-compare.sh -s ours|roadshow|amitcpng -w bench|conf|curl|diag`.
+The stack is a parameter; everything else is held fixed. Foreign stacks are
+located at run time (`-R`, `-G`, `AMINETXDUO_CMP_*`) and never enter the tree.
+Two implementation notes worth keeping:
+
+* **TAP counts a skip as `ok N ... # SKIP`.** Reporting the raw `ok` count would
+  have called our loopback tier 142/142 when the suite's own summary says 130
+  passed, 12 skipped. The script subtracts.
+* **`build/` directory names are shared between workstreams.** One arm here was
+  taken with `-b` pointing at a private build directory for the reason §24.9
+  gives, and one run was lost outright when `tools/fsuae-run.sh` was edited by
+  another workstream while bash was reading it.

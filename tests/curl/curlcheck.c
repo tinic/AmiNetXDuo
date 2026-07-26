@@ -168,6 +168,9 @@ int main(int argc, char **argv)
     truncate_file(RESULTS);
     truncate_file(REPORT);
     maybe_assign("AmiSSL", "DH0:AmiSSL");
+    /* Same five lines, same reason, for a stack that reads its configuration
+       through an assign of its own (tests/compare/run-compare.sh). */
+    maybe_assign("AmiTCP", "DH0:AmiTCP");
 
     in = Open((CONST_STRPTR)CHECKS, MODE_OLDFILE);
     if (in == (BPTR)0)
