@@ -9477,3 +9477,369 @@ the transcript instead, which works here because `ToolsSmoke` reopens
   chosen, so it means patching `third_party/`.
 * **`NX_ENABLE_LOW_WATERMARK`**, still. §24.7 found it and reported it rather
   than switching it on; nothing here changed that argument.
+
+## 30. mDNS: the machine gets a name, and SLIRP turns out to pass multicast (2026-07-26)
+
+§27 gave a machine with no DHCP server a working address. It did not give it a *name*:
+169.254.x.y is drawn at random, changes on the next boot, and there is by definition no
+DHCP server whose client list or local zone could hold it. RFC 6762 is the piece that
+closes that, and `third_party/netxduo/addons/mdns` had been vendored and unused since the
+submodule went in.
+
+It is now built, wired into `netstack.c` alongside DHCP, DNS and AutoIP, and behind
+`AMINETXDUO_MDNS` (ON, like `AMINETXDUO_BPF`). Everything below is from a run.
+
+### 30.1 The decisions, and the reasoning for each
+
+**What it announces: `<HOSTNAME>.local`, and nothing else.** §27.4 fixed
+`nx_dhcp_create()` being passed the string literal `"amiga"` instead of the configured
+`HOSTNAME`; inventing a second name source here would have re-created that bug in a
+different place. `src/config/config_file.c` already resolves one name through four
+fallbacks (`hostname` in `DEVS:Internet/name_resolution`, then `ENV:HOSTNAME`, then the
+first non-loopback entry in `DEVS:Internet/hosts`, then `"amiga"`), and this uses whatever
+that produced.
+
+With one transformation, which the run exercises deliberately: **mDNS wants one DNS label
+and `HOSTNAME` may not be one.** The hosts-file fallback in particular finds fully
+qualified names, because that is what a hosts file conventionally holds. Handing
+`amigatest.home.lan` to `nx_mdns_create()` would claim `amigatest.home.lan.local`, which
+nothing will ever ask for. `ami_ns_mdns_label()` takes everything up to the first dot and
+changes nothing else — in particular it does **not** lowercase, because mDNS comparison is
+case-insensitive (RFC 6762 §16) and a log that disagreed with the configuration file would
+be worse than a mixed-case label.
+
+**No services are advertised, and that is a decision rather than an omission.**
+AmiNetXDuo ships `fetch`, `ftp`, `telnet`, `tftp`, `nc`, `sntp` and `whois`, and every one
+of them is a *client*. There is no FTP server and no telnet server on this machine, so a
+`_ftp._tcp` or `_telnet._tcp` record would advertise something that is not there, and a
+browser that believed it would hang on a connection nothing will accept. `src/tools/tftp.c`
+already settles the general question for this tree — *"a mode that is announced and not
+honoured is worse than one that is absent"* — and the same applies to a service record.
+`nx_mdns_service_add()` is one call, and `netstack_mdns.c` says where it goes on the day a
+server exists. (§30.7 is about that day.)
+
+**Name collisions: the module renames, we report.** RFC 6762 §9 says probe three times and
+pick another name on a conflict, and the vendored module does exactly that —
+`NX_MDNS_CONFLICT_COUNT` is set to 4 here rather than the default 8, because past
+`amiga (4)` the answer is to set `HOSTNAME`, not to keep counting.
+
+**One wart, recorded rather than patched.** The vendored renamer appends the *RFC 6763
+service-instance* suffix: `amiga` becomes `amiga (2)`. For a service instance that is
+correct and is what Bonjour shows in a browser. For a **host** name it is not — RFC 6762
+§9's own example is `PrinterOne-2.local.`, and a host label containing a space and
+parentheses is one nobody will successfully type at a shell. `_nx_mdns_conflict_process()`
+is `static` in `nxd_mdns.c`, so neither a symbol override nor `-Wl,--wrap` can reach it
+(§13.2), and this project does not patch vendored source. What is done instead is the
+useful half: `ami_ns_mdns_probing()` says loudly which name was actually claimed and what
+to do about it, and `netstack_mdns_hostname()` returns the **claimed** name rather than the
+configured one so that anything displaying it shows what the network will answer to.
+
+**IPv6 is deliberately not enabled in the module** even in the `AMINETXDUO_IPV6` build.
+`NX_MDNS_ENABLE_IPV6` wants MLD group membership this stack does not run, and the point of
+the module here is that a machine is reachable by name over the network it actually has.
+
+**`NX_MDNS_ENABLE_ADDRESS_CHECK` is left off**, which is the vendored default. It is RFC
+6762 §11's source-address check, and it compares an incoming packet's source against the
+receiving interface's subnet. On a link-local machine that subnet is a /16 drawn at
+random, and the check would reject exactly the case §27 exists to serve.
+
+### 30.2 `.local` is resolved in the resolver, not in a new command
+
+The obvious shape for "let a user see it work" is a new command. It would have been the
+wrong one. Every name any AmigaOS program looks up arrives at `netstack_resolve()` —
+`gethostbyname()` and `getaddrinfo()` in `src/bsdsocket/` both route through it — so a
+seven-line branch there gives `.local` to the whole command set at once, and to somebody
+else's program written for Roadshow. No command was modified.
+
+The branch is **exclusive**, and RFC 6762 §6.7 is explicit about why: a name ending in
+`.local` goes to 224.0.0.251 and never to a unicast server. It is not a matter of taste —
+a great many home routers answer any name at all with their own NXDOMAIN-substitute page,
+and a few forward `.local` upstream where somebody else's server answers. So no mDNS answer
+means the name does not exist, which is the truth, and asking the unicast servers
+afterwards could only produce a wrong one.
+
+`DEVS:Internet/hosts` still wins over both, deliberately: a name pinned there is an
+instruction from the machine's owner and outranks anything the network claims.
+
+### 30.3 The vendored add-on does not compile on a big-endian port
+
+`third_party/netxduo/addons/mdns/nxd_mdns.c:8489`:
+
+```c
+    *(USHORT *)(packet_ptr -> nx_packet_prepend_ptr + NX_MDNS_FLAGS_OFFSET)
+        |= NX_CHANGE_USHORT_ENDIAN(tc_bit);
+```
+
+Every little-endian port defines that macro as `a = ((a >> 8) | (a << 8))` — an assignment
+*expression*, legal in statement position and in the middle of a larger one. Every
+big-endian port defines it as nothing at all, which is legal only in the first. So the line
+expands to `x |= ;` and the file will not compile. It is the **only** expression use in the
+entire vendored tree: six others exist, all in `nx_icmpv6_*`, all in statement position. As
+far as this project can tell, nobody has ever built the mDNS add-on on a big-endian
+machine.
+
+Fixed in `port/netxduo-amiga/inc/nx_port.h` rather than in `third_party/`, and it is a
+correction rather than a workaround — `(a)` is the exact big-endian analogue of what the
+little-endian definition evaluates to:
+
+```c
+    #define NX_CHANGE_ULONG_ENDIAN(a)   (a)
+    #define NX_CHANGE_USHORT_ENDIAN(a)  (a)
+```
+
+The cost is a `-Wunused-value` on the six statement uses, in files `cmake/ci-warnings.cmake`
+exempts from `-Wall` anyway.
+
+### 30.4 One lookup, not two: `ipv6_address` is a second serial query
+
+`nx_mdns_host_address_get()` takes an `ipv4_address` and an `ipv6_address`, and a non-NULL
+second pointer means "also ask for AAAA" — **serially**, with its own full timeout after
+the A query's. The first version of `netstack_mdns.c` passed a buffer it then ignored. On
+the wire that doubled the traffic of every successful lookup, and `host nosuchbox.local
+TIMEOUT 5` spent fifteen seconds failing rather than five. `NX_NULL` there is the whole fix
+and the run asserts it, by counting `AAAA (QM)?` frames and requiring zero.
+
+### 30.5 What the run proves, and the SLIRP finding
+
+`tests/tools/run-mdns.sh`, A1200 + A2065 on SLIRP, one boot. The guest's transcript:
+
+```
+    ===== SYS:host amigatest.local =====
+    amigatest.local has address 10.0.2.15
+    ===== SYS:host AMIGATEST.LOCAL =====
+    AMIGATEST.LOCAL has address 10.0.2.15
+    ===== SYS:host amigatest.local. =====
+    amigatest.local. has address 10.0.2.15
+    ===== SYS:ping -c 2 -t 5 amigatest.local =====
+    PING amigatest.local (10.0.2.15): 56 data bytes
+    56 bytes from 10.0.2.15: icmp_seq=0 time=10 ms
+    ===== SYS:host nosuchbox.local TIMEOUT 5 =====
+    host: cannot resolve "nosuchbox.local"
+    ===== SYS:host example.com =====
+    example.com has address 104.20.23.154
+```
+
+`hostname amigatest.home.lan` was in `DEVS:Internet/name_resolution`, so `amigatest` is the
+derived label and not a copy of anything. `ping` was not modified and resolves through the
+same path. `example.com` is the control: the `.local` branch sits in front of the unicast
+resolver and does not break it.
+
+**A query for the machine's own name is answered from the module's local cache without a
+packet** (`_nx_mdns_query_check()` scans the local cache before the peer one), which is
+what makes this half testable inside an emulator whose network is a NAT.
+
+And what actually left the machine, from the emulated A2065's own frame log — below every
+line of our code (§16.3) — read with `tcpdump`:
+
+```
+  00:80:10:32:33:34 > 01:00:5e:00:00:fb, IPv4, length 106:
+      10.0.2.15.5353 > 224.0.0.251.5353: 0 [1n] ANY (QM)? amigatest.local. (64)
+  00:80:10:32:33:34 > 01:00:5e:00:00:fb, IPv4, length 106:
+      10.0.2.15.5353 > 224.0.0.251.5353: 0 [1n] ANY (QM)? amigatest.local. (64)
+  00:80:10:32:33:34 > 01:00:5e:00:00:fb, IPv4, length 106:
+      10.0.2.15.5353 > 224.0.0.251.5353: 0 [1n] ANY (QM)? amigatest.local. (64)
+  00:80:10:32:33:34 > 01:00:5e:00:00:fb, IPv4, length 132:
+      10.0.2.15.5353 > 224.0.0.251.5353: 0*- [0q] 2/0/0
+          (Cache flush) A 10.0.2.15, (Cache flush) NSEC (90)
+```
+
+Three probes — an ANY question with the proposed record in the authority section, RFC 6762
+§8.1 — then the announcements, unsolicited responses with the cache-flush bit set, §10.2.
+`tcpdump` decodes them as mDNS without being told to. Wireshark opens the same file.
+
+#### FS-UAE's SLIRP **does** relay outbound multicast, and that was not expected
+
+This is the finding, and it contradicts the prior this section started with. §27.1
+established that SLIRP eats DHCP broadcast entirely, and §20.2 that it is a NAT rather than
+a router; the reasonable expectation was that 224.0.0.251 would go nowhere.
+
+`tests/tools/mdnswatch.py` sat on the **host's real LAN** for the whole run, joined to
+224.0.0.251:5353, calibrated by sending one query of its own (id `0x4d44`) and requiring to
+see it come back. What it recorded:
+
+```
+    [96210.47] 192.168.1.193:5353   query  ... mdnswatch.local(type 1)   <- calibration
+    [96342.36] 192.168.1.193:58517  query  ... amigatest.local(type 28)  <- THE GUEST
+    [96372.09] 192.168.1.191:5353   query  ... amigatest.local(type 1)   <- a real machine
+    [96396.91] 192.168.1.193:58517  query  ... nosuchbox.local(type 1)
+    [96427.19] 192.168.1.193:58517  query  ... mdnspeer.local(type 1)
+```
+
+`192.168.1.193` is the *host's* address. The guest's mDNS crossed SLIRP, was NAT'd, and
+arrived on a real home network — where `192.168.1.191`, a Windows machine that had never
+heard of any of this, queried for `amigatest.local` in response to hearing it announced.
+
+**Outbound works, with the source port rewritten.** The guest sends from
+`10.0.2.15:5353`; it arrives from `192.168.1.193:58517`. The NAT allocated an ephemeral
+port, as a NAT does for any UDP flow.
+
+#### The inbound direction fails, and the reason is conformance working correctly
+
+This took a second run to establish and the first answer was wrong. `mdnswatch.py` was made
+to answer `mdnspeer.local` by **both** multicast **and** unicast straight back to
+`192.168.1.193:58517` — the latter being what RFC 6762 §6.7 requires of any responder facing
+a query whose source port is not 5353, which every query crossing this NAT looks like. The
+guest did not resolve the name. The obvious reading is "the NAT has no return path".
+
+It is not that. The A2065's own frame log shows the reply **arriving**:
+
+```
+  52:55:0a:00:02:02 > 00:80:10:32:33:34, IPv4, length 84:
+      192.168.1.193.5353 > 10.0.2.15.5353: 0*- [0q] 1/0/0
+          (Cache flush) A 10.0.2.2 (42)                        x5
+```
+
+Five of them, decoded, well formed, at the card. **The module rejected them, and it was
+right to.** `_nx_mdns_packet_address_check()` implements RFC 6762 §11: a *unicast* mDNS
+response (destination not 224.0.0.251) is accepted only if the source address is on the
+receiving interface's subnet.
+
+```c
+    if ((des_address.nxd_ip_address.v4 != NX_MDNS_IPV4_MULTICAST_ADDRESS) &&
+        (iface -> nx_interface_ip_address & iface -> nx_interface_ip_network_mask) !=
+        (src_address.nxd_ip_address.v4   & iface -> nx_interface_ip_network_mask))
+        return (NX_MDNS_NOT_LOCAL_LINK);
+```
+
+The guest is `10.0.2.15/24`. **SLIRP passes the host's real LAN address through unchanged**
+as the source — `192.168.1.193`, which is off-link by any reading — while rewriting only
+the destination. So the packet genuinely arrives from off-link as far as the guest can
+tell, and §11 says drop it. That check is unconditional in the vendored source; it is not
+behind `NX_MDNS_ENABLE_ADDRESS_CHECK`, which guards something else.
+
+So the precise statement is:
+
+* **The responder half is provable end to end under this emulator, and was proved.**
+* **The querier half against a real peer is not, and the obstruction is the emulator
+  forging an off-link source address** — not the NAT's return path, which works, and not
+  the stack, which is doing exactly what the RFC requires. On a bridged backend or on real
+  hardware the peer is on link and the check passes.
+
+Everything the querier does that needs no peer is exercised: the `.local` branch, the
+local-cache answer, one query rather than two, and a clean bounded failure on a name nobody
+owns. §27.6 reached the same conclusion about a second DHCP server, for a related reason.
+
+One consequence worth stating plainly, because it surprises: **a guest running this stack
+under FS-UAE announces itself onto the developer's real home network.** It did here.
+
+### 30.6 The vendored `ftp`, `telnet` and `tftp` add-ons: no, on the SNTP ground
+
+Asked whether the vendored client add-ons should replace the hand-written commands in
+`src/tools/`, on the two conditions that they be substantially more complete *and* reduce
+maintenance burden. The answer is no on all three, and the comparison never gets as far as
+completeness because §19.6's wall is in the way.
+
+**A Shell command links its own copy of ThreadX and NetX Duo whose kernel never runs.**
+Every one of these add-ons is created against an `NX_IP`:
+
+```
+    nx_ftp_client_create   (client, name, NX_IP *ip_ptr, window, NX_PACKET_POOL *pool)
+    nx_telnet_client_create(client, name, NX_IP *ip_ptr, window)
+    nx_tftp_client_create  (client, name, NX_IP *ip_ptr, NX_PACKET_POOL *pool)
+```
+
+In a shipped tool `netstack_ip()` and `netstack_pool()` are the weak stubs in
+`src/tools/netstack_weak.c` and return NULL — check any tool's `link.txt`. And even given
+a valid pointer, `nx_tcp_socket_create()`, `nx_tcp_socket_receive()`,
+`nx_udp_socket_bind()` and `nx_tcp_client_socket_connect()` all suspend the calling thread
+through scheduler state belonging to a kernel that was never entered. That is precisely why
+`sntp` was written against `bsdsocket.library` instead. Nothing about FTP, TELNET or TFTP
+changes it.
+
+Two further facts settle it even if that wall were removed:
+
+* **The FTP and TFTP *servers* need FileX** — `nxd_ftp_server.h` and `nxd_tftp_server.h`
+  both `#include "fx_api.h"`, and the sources carry 116 and 47 `fx_` references. This
+  machine has AmigaDOS. Already recorded in §5.4 and in `src/tools/tftp.c`'s own header.
+* **A server is not a substitute for a client** in any case, and the client halves are
+  thinner than what is already shipped. `src/tools/ftp.c` has twenty-odd subcommands,
+  active *and* passive data connections, a genuine ASCII/binary distinction that
+  translates line endings in both directions, and a `PASV` parser that tolerates
+  malformed 227 replies. `src/tools/telnet.c` has a full IAC state machine that survives
+  `recv()` boundaries and a documented reason for refusing every option whose
+  subnegotiation it could not complete. `src/tools/tftp.c` enforces the TID, avoids the
+  sorcerer's-apprentice duplicate-ACK bug, and handles the empty terminating block.
+
+And on maintenance, the direction is the opposite of the premise. Ours are AmigaDOS
+commands with `ReadArgs` templates and prose diagnostics, they run on Roadshow and AmiTCP
+as well as on this stack because they use nothing but the published socket vectors, and
+they are code we own. Theirs is vendored code consumed unmodified — the category this
+project has repeatedly had to work around with symbol overrides, `-Wl,--wrap` (§13.2) and,
+as §30.3 above shows, port-header corrections for defects nobody upstream has hit.
+
+**Nothing was ported.**
+
+### 30.7 A telnet *server*, scoped but not built
+
+Raised separately and it is a different question, because a server is new capability rather
+than a duplicate: everything this project ships is a client, and `listen()`/`accept()` is
+exercised only by `nc -l` and active-mode FTP, guest-to-guest, because SLIRP forwards
+nothing inward (§10).
+
+**Can the vendored telnet server be used?** Not from a Shell command — same wall, it takes
+an `NX_IP` and calls `tx_thread_create()`, `tx_timer_create()` and
+`tx_event_flags_create()`. But unlike the FTP and TFTP servers it needs **no FileX**, and
+unlike a command it *could* live inside `bsdsocket.library`, which is where the kernel
+actually runs. What it would give: a listener on port 23, up to `NX_TELNET_MAX_CLIENTS`
+(4) sessions, `WILL ECHO` / `DONT ECHO` / `WILL SGA` on connect, an activity timeout, and
+three callbacks — `new_connection`, `receive_data`, `connection_end`. What it would not
+give is the entire hard part: it has no notion of authentication and no notion of a shell.
+
+**The hard part, and what it actually costs.** AmigaOS has no socket-as-file-handle, so a
+descriptor cannot be handed to `SystemTagList()`. Roadshow's answer is a DOS handler, and
+its `tcp-handler.doc` documents the mechanism exactly:
+
+```
+    Open("TCP:[HOST=<name or address>]/[PORT=<port number>]", ...)
+    Open("TCP:OBTAIN=<number>", ...)
+      ...
+    PACKETS: ACTION_FINDINPUT  ACTION_FINDOUTPUT  ACTION_FINDUPDATE  ACTION_END
+             ACTION_READ  ACTION_WRITE  ACTION_WAIT_CHAR
+             ACTION_IS_FILESYSTEM  ACTION_STACK
+      ...
+    SEE ALSO: bsdsocket.library/ObtainSocket()
+```
+
+That is the right mechanism here and the missing half of it already exists: `ObtainSocket`,
+`ReleaseSocket` and `ReleaseCopyOfSocket` are implemented in `src/bsdsocket/handoff.c` and
+published at LVOs -0x090, -0x096 and -0x09c. So a telnet server becomes
+
+```
+    accept()  ->  ReleaseCopyOfSocket(fd, id)
+              ->  Open("TCP:OBTAIN=<id>")            a DOS filehandle
+              ->  SystemTagList("", SYS_Input, fh, SYS_Output, fh2,
+                                    SYS_Asynch, TRUE)
+```
+
+and the cost is one handler process answering the nine packet types above — a few hundred
+lines, in `src/` and not in `third_party/`. `ACTION_WAIT_CHAR` is the one that matters for
+a Shell: it is what lets the console layer poll rather than block.
+
+The alternative — pumping bytes between the socket and a Shell's input and output handles —
+is worse than it looks. It needs `PIPE:` (`L:Queue-Handler`, present on a normal 3.x
+install but not something to depend on), and it needs to wait simultaneously on a socket,
+which is `WaitSelect()`, and on a DOS `Read()`, which is not selectable. That is two
+threads per session and a shutdown race, to end up with something less useful than the
+handler.
+
+**The handler is worth building on its own account**, independently of telnet: it makes
+`Type TCP:host/daytime` and `Copy TCP:…` work for every AmigaDOS program, and it is part of
+the documented Roadshow surface this project is tracking.
+
+**And it generalises to Dropbear**, which is the stated next destination. An SSH server has
+the identical problem — attach a shell to a socket, on a system with no pty — with
+authentication and crypto on top, and `src/crypto68k/` already accelerates the primitives it
+would want. The socket-to-filehandle bridge should be built **once**, as a handler, and used
+by both.
+
+**Security, stated rather than omitted.** A telnet server with no authentication is a
+remote shell for anyone on the LAN, in clear text, with no audit trail — and unlike a
+client, it is reachable by people who did not choose to run it. The user's position is that
+this is an obsolete machine protecting nothing valuable, which is a fair assessment of the
+*data*; it is not an assessment of the machine as a foothold on the network it is plugged
+into. So if it is built, the recommendation is: **off unless configured on**, bound to a
+configurable interface rather than every interface, a password required by default with the
+no-password case something the user has to write down explicitly, and the fact that it is
+listening reported by `ShowNetStatus` so a machine cannot be left open by accident. None of
+that is expensive, and all of it is much cheaper before the handler exists than after.
+
