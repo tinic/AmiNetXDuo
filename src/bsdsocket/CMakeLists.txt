@@ -22,6 +22,7 @@ set(BSDSOCKET_SOURCES
     netdb.c                 # get{serv,proto,net}by* over src/config/netdb.c
     addrinfo.c              # getaddrinfo/getnameinfo/freeaddrinfo/gai_strerror
     handoff.c               # ObtainSocket/ReleaseSocket cross-base transfer
+    tcp_handler.c           # the TCP: DOS handler: a socket as a file handle
     bpf.c                   # the eight bpf_* LVOs over src/bpf/
     netstatus.c             # NetStackQuery/NetStackControl: the live stack,
                             # readable and steerable from a Shell command

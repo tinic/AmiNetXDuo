@@ -14,6 +14,7 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "tcp_handler.h"
 
 #include "aminetxduo/config.h"
 
@@ -325,6 +326,19 @@ struct AmiSocketBase *bsd_lib_open(
         return NULL;
     }
 
+    /*
+     * TCP: exists from the first OpenLibrary() onwards, which is Roadshow's
+     * rule ("when bsdsocket.library is initialized, it attempts to add a file
+     * system device by the name of TCP:") and the only one that works: DOS has
+     * to find the device node before it can route an Open("TCP:..."), and
+     * `Type` does not open bsdsocket.library.
+     *
+     * Here rather than in bsd_lib_init() because this runs in the opener's own
+     * Process, and the handler is created with CreateNewProc(). Once, guarded
+     * inside; the handler's own OpenLibrary() lands here too and finds it done.
+     */
+    bsd_tcp_handler_start(master);
+
     return child;
 }
 
@@ -377,6 +391,20 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
         base = base->sb_Master;
 
     if (base->sb_Lib.lib_OpenCnt > 0)
+    {
+        base->sb_Lib.lib_Flags |= LIBF_DELEXP;
+        return NULL;
+    }
+
+    /*
+     * The TCP: handler process runs code out of the segment this is about to
+     * hand back for UnLoadSeg(), and it holds no OpenCnt reference -- it takes
+     * one only while a file handle is open, so OpenCnt reaching zero is
+     * exactly the state in which it is idle rather than gone. There is no way
+     * to prove it is not executing, so the library declines instead. ACTION_DIE
+     * is the supported way to take TCP: down; after it, this succeeds.
+     */
+    if (bsd_tcp_handler_alive())
     {
         base->sb_Lib.lib_Flags |= LIBF_DELEXP;
         return NULL;
