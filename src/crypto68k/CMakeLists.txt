@@ -98,7 +98,13 @@ set(CRYPTO68K_SOURCES
     c68k_p256.c
     c68k_p256_table.c
     c68k_aes.c
-    c68k_sha256.c)
+    c68k_sha256.c
+    # X25519 and Ed25519.  No assembly counterpart: the win is the field
+    # representation (eight 32-bit limbs instead of TweetNaCl's sixteen 16-bit
+    # limbs in an i64[16]), and 18.4 established that this GCC does not leave
+    # instruction selection on the table for a loop like this.  See
+    # docs/RESEARCH.md 32.
+    c68k_25519.c)
 
 if(AMINETXDUO_CRYPTO68K_ASM)
     list(APPEND CRYPTO68K_SOURCES

@@ -192,7 +192,31 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_definitions(test_crypto68k PRIVATE
         NX_CRYPTO_STANDALONE_ENABLE)
 
+    # The 25519 vectors are their own executable rather than another section of
+    # test_c68k_host.c: c68k_25519.c shares nothing with the huge-number code
+    # -- no nx_crypto types, no NX_CRYPTO_STANDALONE_ENABLE, no port shim --
+    # and the only thing it needs from this tree is a SHA-512, which
+    # nx_crypto_sha5.c supplies.  Keeping them separate means a failure names
+    # which half broke.
+    add_executable(test_crypto68k_25519
+        host/test_c68k_25519.c
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_25519.c"
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha5.c"
+        # nx_crypto_sha5.c calls through _nx_crypto_memcpy_ptr, and this file
+        # is where the library defines it -- the same reason test_crypto68k
+        # already compiles it in.
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_initialize.c")
+
+    target_include_directories(test_crypto68k_25519 PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"     # nx_crypto_port.h, first
+        "${CMAKE_SOURCE_DIR}/src/crypto68k"
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
+
+    target_compile_definitions(test_crypto68k_25519 PRIVATE
+        NX_CRYPTO_STANDALONE_ENABLE)
+
     include(CTest)
     add_test(NAME crypto68k_vectors COMMAND test_crypto68k)
+    add_test(NAME crypto68k_25519   COMMAND test_crypto68k_25519)
 
 endif()
