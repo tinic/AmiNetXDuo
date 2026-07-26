@@ -111,10 +111,15 @@ jobs:
       # the 25519 rewritten for this machine.
       - name: Build the ported clients
         run: |
-          clients/curl/build.sh -t
+          clients/curl/build.sh -t -b build/curl-tls
           clients/dropbear/build.sh
 
+      # The two AMINETXDUO_* variables name exactly what the step above built,
+      # so the packed binary cannot be a stale tree or a non-TLS curl.
       - name: Build the distribution archive
+        env:
+          AMINETXDUO_CURL: build/curl-tls/src/curl
+          AMINETXDUO_SSH: build/dropbear/dbclient
         run: dist/make-dist.sh -b build/release
 
       # A release that silently lost curl or ssh would look fine.

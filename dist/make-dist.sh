@@ -168,8 +168,21 @@ chmod 755 "$TREE"/C/* "$TREE"/Libs/*
 # is Commodore's and not ours to ship, and a far larger stack than a Shell
 # gives a command -- and a `curl` in C: that fails on both would be worse than
 # one that is clearly a separate thing.
-CLIENT_CURL="$ROOT/build/curl-tls/src/curl"
-CLIENT_SSH="$ROOT/build/dropbear/dbclient"
+#
+# The build directory is NOT fixed: clients/curl/build.sh defaults to
+# build/curl and puts a TLS build wherever -b says, so hardcoding one path
+# means packing whichever tree the author happened to have. AMINETXDUO_CURL
+# and AMINETXDUO_SSH let the caller state it outright -- the release workflow
+# does, so the path it builds into and the path packed here cannot drift --
+# and the fallback prefers a TLS build over a plain one, because a curl that
+# cannot open an https:// URL is not the curl anybody wants shipped.
+CLIENT_CURL="${AMINETXDUO_CURL:-}"
+if [ -z "$CLIENT_CURL" ]; then
+    for c in "$ROOT/build/curl-tls/src/curl" "$ROOT/build/curl/src/curl"; do
+        [ -x "$c" ] && { CLIENT_CURL="$c"; break; }
+    done
+fi
+CLIENT_SSH="${AMINETXDUO_SSH:-$ROOT/build/dropbear/dbclient}"
 if [ -x "$CLIENT_CURL" ] || [ -x "$CLIENT_SSH" ]; then
     mkdir -p "$TREE/Clients"
     [ -x "$CLIENT_CURL" ] && { cp "$CLIENT_CURL" "$TREE/Clients/curl"; \
