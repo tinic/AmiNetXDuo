@@ -1,0 +1,65 @@
+# tcpdrill -- the retransmission timer, and the fact that it now backs off.
+#
+# WHY THIS IS A SEPARATE FILE from tcp.drill's x01/x02.
+#
+# Adding exponential backoff makes sockets LIVE LONGER, and tcpdrill's case_end()
+# closes the socket without completing the exchange -- so the FIN it sends is
+# never acknowledged and is retransmitted for as long as the timer allows.  With
+# a flat one-second timer and ten retries that was ten seconds of noise, which
+# mostly fell between cases.  With 1-2-4-8-16-32-64 it is 127 seconds, and every
+# later case sees the previous case's FIN arrive in the middle of its own
+# expectation ("wanted PA, got FA" with a sequence number from another socket).
+#
+# That is a harness isolation problem rather than a stack defect, and it is not
+# fixed here.  What is done here instead is to make every case END WITH A RESET
+# from the peer, which tears the socket down immediately in any state and leaves
+# nothing retransmitting -- so these cases measure the timer without depending on
+# how the previous one finished.
+#
+# ALL TIMINGS ARE RELATIVE TO THE PREVIOUS MATCHED FRAME, from the E-Clock stamp
+# the tap device takes inside BeginIO.  The bounds are wide (roughly +/- 30%)
+# because the timer runs off the 50 Hz IP tick and the guest is a 14 MHz 68020:
+# what is being asserted is DOUBLING, not a stopwatch reading.
+#
+# SPDX-License-Identifier: MIT
+
+# RFC 6298 5.5.  The connection request is the cheapest place to watch it,
+# because nothing has to be sent or acknowledged first.
+#
+# Before NX_TCP_RETRY_SHIFT was set, docs/RESEARCH.md 27 measured this sequence
+# as 890 ms then 1002 ms -- flat, forever, for ten retries.  What it must be now
+# is 1, 2, 4 and 8 seconds.
+case rt01_syn_retransmission_doubles
+socket
+connect
+tx S seq=0 within=200
+tx S seq=0 after=700  within=1400
+tx S seq=0 after=1400 within=2800
+tx S seq=0 after=2800 within=5600
+tx S seq=0 after=5600 within=11000
+rx R seq=0
+
+# The same rule on data.  Nothing acknowledges the segment, so every one of
+# these is a retransmission of the first.
+case rt02_data_retransmission_doubles
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+send 100
+tx PA seq=1 ack=1 len=100 within=300
+tx PA seq=1 ack=1 len=100 after=700  within=1400
+tx PA seq=1 ack=1 len=100 after=1400 within=2800
+tx PA seq=1 ack=1 len=100 after=2800 within=5600
+rx R seq=1
+
+# And the interval is not merely growing, it is growing from the right place:
+# the FIRST interval is still one second.  A backoff that started at four would
+# also double and would be wrong.
+case rt03_first_interval_is_one_second
+socket
+connect
+tx S seq=0 within=200
+tx S seq=0 after=800 within=1300
+rx R seq=0

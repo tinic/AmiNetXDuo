@@ -118,6 +118,18 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                     sock->as_Flags &= ~ASF_BROADCAST;
                 return 0;
 
+            /*
+             * SO_KEEPALIVE used to be a flag this library stored and reported
+             * back, with nothing behind it: NX_ENABLE_TCP_KEEPALIVE was not
+             * defined, so nx_tcp_periodic_processing.c's whole keepalive block
+             * was compiled out and an idle connection was never probed.  The
+             * option answered yes and did nothing, which is worse than
+             * ENOPROTOOPT because a caller cannot tell.
+             *
+             * It reaches the socket now.  The flag is still kept because
+             * getsockopt() must answer for a socket that is not a live NX one
+             * yet, and because the two must agree.
+             */
             case SO_KEEPALIVE:
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
                     return -1;
@@ -125,6 +137,13 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                     sock->as_Flags |= ASF_KEEPALIVE;
                 else
                     sock->as_Flags &= ~ASF_KEEPALIVE;
+#ifdef NX_ENABLE_TCP_KEEPALIVE
+                if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) == ASF_TCP)
+                {
+                    sock->as_Nx.tcp.nx_tcp_socket_keepalive_enabled =
+                        (value != 0) ? NX_TRUE : NX_FALSE;
+                }
+#endif
                 return 0;
 
             case SO_OOBINLINE:

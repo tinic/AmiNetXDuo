@@ -181,6 +181,111 @@
 #define NX_TCP_ACK_EVERY_N_PACKETS              2
 
 /*
+ * RETRANSMIT WITH EXPONENTIAL BACKOFF (RFC 6298 5.5), AND THE TRAP IN DOING IT.
+ *
+ * NetX Duo's retransmission interval is
+ *
+ *     timeout = nx_tcp_socket_timeout_rate << (retries * NX_TCP_RETRY_SHIFT)
+ *
+ * (nx_tcp_socket_retransmit.c:188, nx_tcp_fast_periodic_processing.c:150).
+ * NX_TCP_RETRY_SHIFT defaults to 0, so the shift is a no-op and the interval is
+ * NX_IP_PERIODIC_RATE / NX_TCP_TRANSMIT_TIMER_RATE -- one second, FOREVER.
+ * tests/tcpdrill measured it directly: SYN retransmissions at 890 ms and then
+ * 1002 ms.  There is no RTT estimator anywhere in the vendored tree either, so
+ * the interval is not merely constant, it is constant at a number nobody chose
+ * for this path.
+ *
+ * A shift of 1 doubles it each time, which is what RFC 6298 5.5 asks for.
+ * NX_TCP_MAXIMUM_RETRIES CANNOT BE LEFT ALONE WHILE DOING THAT, and this is the
+ * whole reason the two are set together.  There is NO CEILING in NetX Duo --
+ * the expression above is a plain shift with no clamp, and NX_TCP_MAXIMUM_RETRIES
+ * is the only thing bounding it.  At the default of 10 the intervals run
+ * 1, 2, 4 ... 1024 seconds and the socket does not give up for
+ * 2^11 - 1 = 2047 s.  A one-second stall would have become a THIRTY-FOUR MINUTE
+ * one.
+ *
+ * Six retries with a shift of 1 gives
+ *
+ *     1  2  4  8  16  32  64 seconds     abandon at 127 s
+ *
+ * which lands on three numbers that are each defensible rather than round:
+ *
+ *   * the largest single interval is 64 s, against RFC 6298 2.5's rule that a
+ *     maximum RTO "MAY be placed provided it is at least 60 seconds";
+ *   * the connection is abandoned at 127 s, against RFC 1122 4.2.3.5's R2 of
+ *     "at least 100 seconds" for data;
+ *   * and it is 12.7x the 10 s this stack gave up after before, not 200x.
+ *
+ * The last point is the one that would otherwise bite: the same counter bounds
+ * SYN retransmission, so every connect() to a host that is not answering now
+ * blocks for 127 s rather than 10 before the stack resets the socket.  That is
+ * what TCP is supposed to do and it is what every other stack does, but it is a
+ * visible behaviour change and it is why the number is 6 and not 8.
+ */
+/* #ifndef, so an arm that answers "was it this?" can be built from one tree with
+   -DNX_TCP_RETRY_SHIFT=0 -DNX_TCP_MAXIMUM_RETRIES=10 and no edit here. */
+#ifndef NX_TCP_RETRY_SHIFT
+#define NX_TCP_RETRY_SHIFT                      1
+#endif
+#ifndef NX_TCP_MAXIMUM_RETRIES
+#define NX_TCP_MAXIMUM_RETRIES                  6
+#endif
+
+/*
+ * TCP KEEPALIVE, BECAUSE setsockopt(SO_KEEPALIVE) WAS ALREADY SAYING YES.
+ *
+ * src/bsdsocket/options.c accepted SO_KEEPALIVE, stored it in a socket flag and
+ * reported it back through getsockopt() -- and nothing anywhere acted on it,
+ * because NX_TCP_ENABLE_KEEPALIVE (the old spelling) was not defined and the
+ * whole of nx_tcp_periodic_processing.c's keepalive block was compiled out.  An
+ * API that answers correctly with no implementation behind it is the exact
+ * shape of the last four defects found in this tree, and it is worse than an
+ * API that returns ENOPROTOOPT: a program that asks for keepalive and is told
+ * yes has no way to find out that its half-open connections will never be
+ * reaped.
+ *
+ * With this, an ESTABLISHED socket that has been idle for
+ * NX_TCP_KEEPALIVE_INITIAL seconds sends a probe -- an ACK carrying
+ * tx_sequence - 1, which is a deliberately backward sequence number the peer
+ * must answer (nx_tcp_periodic_processing.c:125) -- and after
+ * NX_TCP_KEEPALIVE_RETRIES unanswered probes at NX_TCP_KEEPALIVE_RETRY seconds
+ * the socket is reset.  The defaults are BSD's and are left alone: 7200 s
+ * (two hours) initial, 75 s retry, 10 retries.
+ *
+ * ONE THING HAD TO CHANGE IN OUR CODE, and it is not optional.
+ * nx_tcp_socket_create.c:166 sets nx_tcp_socket_keepalive_enabled = NX_TRUE
+ * UNCONDITIONALLY under this define, so turning it on alone would put every
+ * socket on keepalive whether the application asked or not -- which is not what
+ * SO_KEEPALIVE means and not what BSD does.  src/bsdsocket/socket.c clears it
+ * at create and options.c is what sets it, so the default is off and the option
+ * is the only way on.
+ *
+ * Cost: three ULONGs per NX_TCP_SOCKET, and one decrement per socket per second
+ * in the IP thread's one-second periodic -- which already walks the same list.
+ */
+#define NX_ENABLE_TCP_KEEPALIVE
+
+/*
+ * REJECT A SYN THAT ADVERTISES AN ABSURD MSS.
+ *
+ * Without this, nx_tcp_packet_process.c takes whatever MSS a peer's SYN
+ * carries.  A peer advertising 1 makes every segment we send one byte of
+ * payload with forty bytes of header, from a socket the application believes is
+ * working; NX_TCP_MAXIMUM_TX_QUEUE (8) then bounds us at eight bytes in flight.
+ * That is a denial of service that costs the other end one packet, and nothing
+ * in the trace would look like an error.
+ *
+ * With it, a SYN whose MSS is below NX_TCP_MSS_MINIMUM (128, the default, kept)
+ * is answered with a RESET and counted in nx_ip_tcp_invalid_packets.  A peer
+ * that offers NO MSS option at all is unaffected -- the code substitutes the
+ * interface-derived default before this check -- so nothing conformant is
+ * refused.
+ *
+ * Cost: one comparison per incoming SYN.
+ */
+#define NX_ENABLE_TCP_MSS_CHECK
+
+/*
  * RFC 1323 / 7323 WINDOW SCALING IS OFF, AND IT WAS MEASURED RATHER THAN
  * ASSUMED.  docs/RESEARCH.md 28.2 is the write-up; this is the short version,
  * because "NX_ENABLE_TCP_WINDOW_SCALING exists and we do not define it" reads

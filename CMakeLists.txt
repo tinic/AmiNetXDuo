@@ -92,6 +92,19 @@ if(NOT AMINETXDUO_TCP_WINDOW STREQUAL "")
                             BSD_TCP_WINDOW_CEILING=${AMINETXDUO_TCP_WINDOW})
 endif()
 
+# TCP keepalive's idle timer, in SECONDS.  Empty keeps NetX Duo's default of
+# 7200 -- two hours, which is BSD's and is what ships.  It exists because a
+# two-hour timer cannot be observed inside an emulator run: the keepalive arm
+# in docs/RESEARCH.md 29 is built with 5 so that tests/tcpdrill can watch the
+# probe leave.  nx_tcp.h guards the macro with #ifndef, so this reaches it
+# without nx_user.h having to hold a number nobody ships.
+set(AMINETXDUO_TCP_KEEPALIVE_INITIAL "" CACHE STRING
+    "TCP keepalive idle timer in seconds (default 7200)")
+if(NOT AMINETXDUO_TCP_KEEPALIVE_INITIAL STREQUAL "")
+    add_compile_definitions(
+        NX_TCP_KEEPALIVE_INITIAL=${AMINETXDUO_TCP_KEEPALIVE_INITIAL})
+endif()
+
 # RFC 1323 window scaling.  OFF, and measured rather than assumed -- the note
 # in port/netxduo-amiga/inc/nx_user.h says what it changes (nothing this stack
 # can reach) and what it costs (NetX Duo's own guard against a window larger

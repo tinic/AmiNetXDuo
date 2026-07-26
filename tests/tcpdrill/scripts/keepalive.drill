@@ -1,0 +1,78 @@
+# tcpdrill -- TCP keepalive, which setsockopt(SO_KEEPALIVE) used to promise and
+# nothing delivered.
+#
+# THIS SCRIPT NEEDS A BUILD WITH A SHORT IDLE TIMER.  NX_TCP_KEEPALIVE_INITIAL
+# ships at BSD's 7200 seconds, which no emulator run can wait for, so the arm
+# these cases are written against is
+#
+#     cmake -DAMINETXDUO_TCP_KEEPALIVE_INITIAL=5 ...
+#
+# and tests/tcpdrill/run-tcpdrill.sh -s .../keepalive.drill runs it.  Against a
+# default build every case here fails by timing out, correctly: two hours have
+# not passed.
+#
+# WHAT A KEEPALIVE PROBE LOOKS LIKE ON THE WIRE.  It is an ACK carrying
+# tx_sequence - 1 -- a sequence number one behind what we have already sent,
+# which the peer is obliged to acknowledge because it looks like a retransmitted
+# byte it has already seen (RFC 1122 4.2.3.6).  After the handshake our
+# tx_sequence is 1, so the probe is `A seq=0 ack=1`.
+#
+# SPDX-License-Identifier: MIT
+
+# The default is OFF, and that is half the point: NetX Duo sets
+# nx_tcp_socket_keepalive_enabled = NX_TRUE unconditionally in
+# nx_tcp_socket_create(), so a socket that never asked must be shown NOT to
+# probe.  Ten seconds is twice the five-second idle timer this arm is built
+# with, so a probe would have been sent twice over by the time this line ends.
+# Every case here ends with a RESET from the peer, for the reason
+# tests/tcpdrill/scripts/retransmit.drill states at length: case_end() closes
+# the socket without completing the exchange, and with backoff a FIN that is
+# never acknowledged is retransmitted into the next case for two minutes.
+case k01_keepalive_off_by_default
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+notx 10000
+rx R seq=1
+
+# And with the option set, the probe goes out.  Nothing has been sent since the
+# handshake, so seq=0 is tx_sequence - 1 and there is no other reason for a
+# segment to appear at all.
+case k02_keepalive_probes_when_asked
+socket
+opt keepalive 1
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+tx A seq=0 ack=1 after=4000 within=8000
+rx R seq=1
+
+# The peer answers the probe, and the idle timer restarts rather than the
+# connection being torn down.  A second probe about five seconds later is the
+# evidence that the timer rearmed.
+case k03_probe_answered_restarts_the_timer
+socket
+opt keepalive 1
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+tx A seq=0 ack=1 after=4000 within=8000
+rx A seq=1 ack=1
+tx A seq=0 ack=1 after=4000 within=8000
+rx R seq=1
+
+# Turning it back off stops the probes.  The option is not write-only.
+case k04_keepalive_can_be_turned_off
+socket
+opt keepalive 1
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+opt keepalive 0
+notx 10000
+rx R seq=1
