@@ -8003,3 +8003,196 @@ one tree into private build directories and taken back to back; a comparison
 against a number archived from an earlier tree would have been measuring the
 tool. `build/` directory names are shared, so a measurement arm that points at
 one another piece of work also builds is not a controlled arm.
+
+## 25. `ping` rebooted the machine, and none of it was the network (2026-07-26)
+
+`ping` was pulled from the distribution archive because it took the Amiga down.
+§22.8 recorded where it stopped — the library opened, the raw socket opened,
+`sendto()` returned all 64 bytes, `WaitSelect()` called the descriptor readable,
+and the `recvfrom()` that followed never returned — and handed over two facts:
+that `select()` and `bsd_raw_receive()` disagreed about the queue, and that the
+read that followed killed the machine.
+
+**Both facts were true observations and the conclusion drawn from them was
+wrong.** The raw receive path was never involved. Neither was `select()`,
+`recvfrom()`, `sendto()`, `bsdsocket.library`, or the network stack. The bug is
+in the linked image, it is put there by the toolchain, and it is not confined to
+`ping`.
+
+### 25.1 What the bisection actually showed
+
+The repro is `AddNetInterface eth0` followed by `ping 10.0.2.2 -c 3 -t 20`: six
+boots for two commands. `-c 1` passes. `-c 3 -i 0` — three probes, three replies,
+no interval — passes. So the fault is not in a probe, a reply or a read; it needs
+the machine to still be running about a second after `ping` starts.
+
+Instrumenting the receive path with `ami_log()` showed it working perfectly:
+
+```
+    rawtrace: queue copy 002935C4 len 84 sock 002FC334 count 0
+    rawtrace: deq 002935C4 next 00000000 len 84 count 0
+    rawtrace: recv_raw packet 002935C4
+    rawtrace: source done
+    rawtrace: length 84
+    rawtrace: extracted 84
+    rawtrace: release 002935C4
+    rawtrace: released
+    pingtrace: recvfrom returned 84
+    pingtrace: matched, rtt
+```
+
+The reply arrives, is copied, dequeued, extracted, released, and matched. Then
+`ping` waits out its one-second interval and the machine restarts.
+
+From there each step removed something and the fault stayed:
+
+| what was taken away | still reboots? |
+|---|---|
+| `Delay()`, replaced by a busy-wait of the same length | yes |
+| the `select()`/`recvfrom()` loop, never entered | yes |
+| `sendto()` | yes |
+| the raw socket — `SOCK_DGRAM` instead | yes |
+| the socket entirely | yes |
+| `OpenLibrary("bsdsocket.library")` entirely | yes |
+| `ami_millis()` / `timer.device` | yes |
+| `AddNetInterface`, i.e. any network stack at all | yes |
+| `ToolsSmoke`, run straight from the Startup-Sequence | yes (hang, not reset) |
+
+What was left was a Shell command that parses arguments, prints a line, and
+sleeps for a second. That still took the machine down. Enforcer reported **zero**
+illegal accesses and MungWall **zero** wall hits, which rules out a wild pointer
+and a heap overrun; the `struct Task` was intact, `tc_ExceptCode` and
+`tc_TrapCode` were the ROM defaults, and the stack low-water mark never came
+within 2,700 bytes of `tc_SPLower`.
+
+It was also a Heisenbug: adding two `AMI_INFO()` calls in the right place made it
+disappear. That is a code-layout dependency, and code layout is a property of the
+build, not of the program.
+
+### 25.2 The actual defect
+
+`-O0` passes. `-O1` passes. `-Os` reboots. Narrowing by file, with everything
+else at `-O1`, put it in `src/tools/tool_util.c` — and specifically in the one
+thing `-Os` does there that `-O1` does not:
+
+```c
+BOOL tool_delay_ticks(ULONG ticks)
+{
+    while (ticks > 0) { ... }
+    return tool_break();        /* -Os makes this a TAIL CALL */
+}
+```
+
+`-ffunction-sections` puts `tool_break` in its own section, so the tail call is a
+branch to another section of the same object, and the assembler emits a 32-bit
+PC-relative relocation (`RELRELOC32`) against a **local section symbol**. In the
+linked binary:
+
+```
+    5abc <_tool_delay_ticks>:
+    5ac8:   4cdf 440c       moveml sp@+,d2-d3/a2/a6
+    5acc:   60ff ffff ffae  bra.l   <-82>        -> 0x5a7c
+```
+
+`_tool_break` is at **0x5a88**. The branch lands on **0x5a7c**, twelve bytes
+short — in the middle of `_tool_break_arm`, on the second word of
+
+```
+    5a7a:   223c 0000 1000  movel #4096,d1
+```
+
+so the machine resumes executing at an instruction boundary that does not exist,
+with `a6` holding whatever the caller left there and `d1` about to be loaded with
+`0x00001000`. **`d1=00001000` appears in every register dump the crash guard
+took**, and so does a PC inside `_tool_break_arm` — a function that is called
+exactly once, at the top of `main()`, and could not possibly have been running.
+That contradiction was the tell, and it was on the screen for a long time before
+it was read correctly.
+
+The assembler leaves a non-zero addend in the displacement field and the linker
+adds it a second time. Cross-**object** tail calls relocate against a global
+symbol with a zero addend and come out right, which is why the 219 other 32-bit
+PC-relative branches in `bsdsocket.library` — the `_nxe_*` error-checking
+wrappers, which all end `return _nx_...()` — are correct and always have been.
+
+Auditing every linked image found the same defect in four more places:
+
+| image | branches | mis-resolved |
+|---|---|---|
+| `ping`, `AddNetInterface`, `Online`, `Offline`, `ShowNetStatus`, `nc`, `telnet` | 1 each | `tool_delay_ticks` → `tool_break` |
+| `bsdsocket.library` | 223 | 4, all in `src/common/ami_random.c` |
+
+`ping` was simply the command that reached the broken branch first: everything
+else calls `tool_delay_ticks()` only on a path that a healthy machine skips.
+**This was never a `ping` bug and `ping` was never the only thing exposed to it.**
+
+### 25.3 The fix
+
+`-fno-optimize-sibling-calls` wherever `-ffunction-sections` is used —
+`src/tools`, `src/config`, `src/common`. The tail call is the only construct that
+produces the broken relocation here: ordinary calls are absolute `jsr`, and
+intra-section branches need no relocation at all. The two flags are now one
+decision and the comment at each site says so; `-ffunction-sections` stays,
+because the 27–38% it takes off a command (§21) is real and the sibling-call
+optimisation is worth nothing next to it.
+
+That is a workaround for a toolchain defect, so it is backed by a check rather
+than by trust. `cmake/check-pcrel-branches.cmake` runs `POST_BUILD` on every
+linked AmigaOS image, decodes each `bra.l`/`bsr.l`, and fails the build if the
+target is not a function entry point. It has to run on the image: the object
+file's relocation is well formed and the wrong address exists only after the
+link, which is exactly why nothing caught this earlier. Run against the old
+binary it says
+
+```
+  0x5acc: branch by -82 bytes lands inside a function, not on one
+```
+
+### 25.4 What the test now asserts
+
+`tests/tools/run-livetools.sh` counted no boots, and that is why this was written
+up as a hang twice. One boot starts the netstack once, so `netstack: starting
+ThreadX` in the serial log is a boot counter and the only thing in the run that
+can tell a reset from a block. The test now fails with **THE MACHINE REBOOTED**
+if it sees more than one, and says in as many words that a transcript which looks
+like a hang is not one. Checked both ways against real logs: the pre-fix run
+(6 boots) fails, the post-fix run (1 boot) passes.
+
+`ping` now answers, including through SLIRP's proxy, in one boot:
+
+```
+    ===== SYS:ping 10.0.2.2 -c 3 -t 20 =====
+    PING 10.0.2.2 (10.0.2.2): 56 data bytes
+    56 bytes from 10.0.2.2: icmp_seq=0 time=16 ms
+    56 bytes from 10.0.2.2: icmp_seq=1 time=9 ms
+    56 bytes from 10.0.2.2: icmp_seq=2 time=8 ms
+
+    --- 10.0.2.2 ping statistics ---
+    3 packets transmitted, 3 received, 0% packet loss
+    round-trip min/avg/max = 8/11/16 ms
+
+    ===== SYS:ping 8.8.8.8 -c 2 -t 20 =====
+    PING 8.8.8.8 (8.8.8.8): 56 data bytes
+    56 bytes from 8.8.8.8: icmp_seq=0 time=689 ms
+    56 bytes from 8.8.8.8: icmp_seq=1 time=920 ms
+
+    --- 8.8.8.8 ping statistics ---
+    2 packets transmitted, 2 received, 0% packet loss
+```
+
+### 25.5 The lesson, which is not about ping
+
+§22.8 handed over a measured trace and a diagnosis, and the diagnosis was an
+inference: the trace stopped at `recvfrom`, therefore `recvfrom` blocked. The
+trace stopped at `recvfrom` because the machine stopped. **`FIONBIO` was added
+specifically to rule the blocking wait out, it changed nothing, and that result
+was recorded and then not believed** — the search stayed inside the receive path
+for another whole investigation on the strength of a story that its own control
+experiment had already falsified.
+
+The correction that mattered was cheap and was available from the beginning:
+take away one thing at a time until the fault goes away, and be willing for the
+answer to be that none of the suspects were involved. The stale account in
+`src/tools/ping.c` has been rewritten in place rather than deleted, because the
+next person to read a serial trace that stops mid-command needs to know that a
+trace stopping is not evidence about the last line in it.
