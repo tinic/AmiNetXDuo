@@ -85,12 +85,44 @@ AmiNetStack   *netstack_get(VOID);
  */
 typedef struct AmiNetCaller
 {
-    TX_THREAD   nc_Thread;
-    BOOL        nc_Adopted;
+    TX_THREAD    nc_Thread;
+    BOOL         nc_Adopted;    /* inside a bracket right now                */
+    BOOL         nc_Live;       /* nc_Thread exists and is dormant (cached)  */
+    struct Task *nc_Task;       /* whose it is; only that task may use it    */
 } AmiNetCaller;
 
 LONG ami_netstack_enter(AmiNetCaller *caller);
 VOID ami_netstack_leave(AmiNetCaller *caller);
+
+/* --------------------------------------------------- the cached bracket ---
+ *
+ * The pair above adopts on enter and orphans on leave, which is right for a
+ * caller whose AmiNetCaller lives on the stack and wrong for one that makes
+ * thousands of calls: measured on a 14 MHz 68020 (tests/perf/bracket_test.c)
+ * an adopt/orphan pair costs ~600 us and the same handoff over a TX_THREAD
+ * that is merely dormant costs ~270 us. That difference is per CALL, not per
+ * byte, which is why it showed up as this stack losing a bulk transfer to
+ * Roadshow while winning the connect and the first byte (docs/RESEARCH.md
+ * §29.3, §32.11).
+ *
+ * The pair below keeps the TX_THREAD across brackets. Three obligations come
+ * with it, and none of them are optional:
+ *
+ *   1. `caller` must be ZEROED once and must outlive every bracket. A
+ *      TX_THREAD that goes out of scope while ThreadX still lists it is a
+ *      corrupted kernel.
+ *   2. Every call must come from the SAME Exec Task. A different task is
+ *      detected and served by the per-call path instead, never by borrowing.
+ *   3. ami_netstack_release() must be called before the storage goes away,
+ *      from the owning task where possible.
+ *
+ * Everything else is unchanged: the bracket still takes and gives back the
+ * ThreadX baton per call, and NX_THREADS_ONLY_CALLER_CHECKING still sees a
+ * real TX_THREAD. What is cached is the registration, not the baton.
+ */
+LONG ami_netstack_enter_cached(AmiNetCaller *caller);
+VOID ami_netstack_leave_cached(AmiNetCaller *caller);
+VOID ami_netstack_release(AmiNetCaller *caller);
 
 /* Accessors -- all return NULL when the stack is down. */
 NX_IP          *netstack_ip(VOID);

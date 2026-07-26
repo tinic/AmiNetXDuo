@@ -176,6 +176,150 @@ VOID ami_netstack_leave(AmiNetCaller *caller)
     }
 }
 
+/*
+ * The same bracket, with the TX_THREAD kept between calls.
+ *
+ * The registration is what is expensive and what is repeatable: the same task
+ * gets the same thread every time. The baton is still taken and given back per
+ * call, so nothing about the concurrency model changes -- see the contract in
+ * <aminetxduo/netstack.h> and tx_amiga_adopt_resume() in the port.
+ *
+ * Every failure here falls back to the per-call path, which is always correct.
+ * That matters more than the speed: a stale or foreign cache must cost a
+ * bracket, never a wrong answer.
+ */
+LONG ami_netstack_enter_cached(AmiNetCaller *caller)
+{
+    struct Task *me;
+    UINT         status;
+
+    caller->nc_Adopted = FALSE;
+
+    if (tx_amiga_kernel_running() != TX_TRUE)
+        return AMI_NET_ERR_STATE;
+
+    if (tx_thread_identify() != TX_NULL)
+        return AMI_NET_OK;                  /* nested */
+
+    me = FindTask(NULL);
+
+    if (caller->nc_Live && caller->nc_Task == me)
+    {
+        if (tx_amiga_adopt_resume(&caller->nc_Thread) == TX_SUCCESS)
+        {
+            caller->nc_Adopted = TRUE;
+            return AMI_NET_OK;
+        }
+
+        /*
+         * The cached thread is no longer usable -- torn down under us, or in
+         * a state resume will not take. Drop it and adopt afresh. Orphan
+         * rather than discard: this is the owning task, so the Exec signal
+         * can be recovered, and tx_amiga_orphan_thread() handles a TX_THREAD
+         * that has already been deleted.
+         */
+        if (tx_amiga_orphan_thread(&caller->nc_Thread) != TX_SUCCESS)
+            (VOID)tx_amiga_discard_thread(&caller->nc_Thread);
+        caller->nc_Live = FALSE;
+        caller->nc_Task = NULL;
+    }
+
+    /*
+     * A cache belonging to ANOTHER task. There is nowhere to put a second
+     * adoption -- the TX_THREAD storage is this one -- and overwriting it
+     * would deregister a thread that its owner is still using, so this fails
+     * rather than improvising.
+     *
+     * It means a SocketBase used from a task other than the one that opened
+     * it now reports ENETDOWN instead of working by accident. That is already
+     * outside the contract: the descriptor table, the event signal and the
+     * errno pointer all belong to the opener, and src/bsdsocket/tcp_handler.c
+     * states the rule in its own header ("a SocketBase belongs to one task").
+     */
+    if (caller->nc_Live)
+    {
+        AMI_ERROR("netstack: bracket used from a second task");
+        return AMI_NET_ERR_STATE;
+    }
+
+    status = tx_amiga_adopt_thread(&caller->nc_Thread,
+                                   (CHAR *)"aminetxduo caller",
+                                   AMI_CALLER_PRIORITY);
+    if (status != TX_SUCCESS)
+    {
+        AMI_ERROR("netstack: cannot adopt calling task (%ld)", (long)status);
+        return AMI_NET_ERR_KERNEL;
+    }
+
+    caller->nc_Live    = TRUE;
+    caller->nc_Task    = me;
+    caller->nc_Adopted = TRUE;
+
+    return AMI_NET_OK;
+}
+
+VOID ami_netstack_leave_cached(AmiNetCaller *caller)
+{
+    if (!caller->nc_Adopted)
+        return;
+
+    caller->nc_Adopted = FALSE;
+
+    if (caller->nc_Live && caller->nc_Task == FindTask(NULL))
+    {
+        if (tx_amiga_adopt_suspend(&caller->nc_Thread) == TX_SUCCESS)
+            return;
+
+        /* Suspending failed, so the thread is not in a state we understand.
+           Orphaning it is the safe exit: it gives the baton back and takes
+           the registration with it. */
+        caller->nc_Live = FALSE;
+        caller->nc_Task = NULL;
+    }
+
+    (VOID)tx_amiga_orphan_thread(&caller->nc_Thread);
+}
+
+VOID ami_netstack_release(AmiNetCaller *caller)
+{
+    if (caller == NULL || !caller->nc_Live)
+        return;
+
+    /*
+     * Inside a bracket the thread is the baton holder, so it has to be given
+     * back the ordinary way first. This should not happen -- release is a
+     * teardown call -- but a half-released base is worse than a redundant
+     * branch.
+     */
+    if (caller->nc_Adopted)
+    {
+        caller->nc_Adopted = FALSE;
+        (VOID)tx_amiga_orphan_thread(&caller->nc_Thread);
+        caller->nc_Live = FALSE;
+        caller->nc_Task = NULL;
+        return;
+    }
+
+    if (caller->nc_Task == FindTask(NULL))
+    {
+        /* The owner: resume so the signal can be freed by the task that
+           allocated it, then orphan properly. */
+        if (tx_amiga_adopt_resume(&caller->nc_Thread) == TX_SUCCESS)
+            (VOID)tx_amiga_orphan_thread(&caller->nc_Thread);
+        else
+            (VOID)tx_amiga_discard_thread(&caller->nc_Thread);
+    }
+    else
+    {
+        /* Somebody else is tearing this down. The registration must go; the
+           signal bit belongs to a task we may not touch. */
+        (VOID)tx_amiga_discard_thread(&caller->nc_Thread);
+    }
+
+    caller->nc_Live = FALSE;
+    caller->nc_Task = NULL;
+}
+
 /* ------------------------------------------------------------ pool sizing */
 
 /*

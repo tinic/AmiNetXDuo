@@ -293,6 +293,16 @@ struct AmiSocketBase
     AmiNetCaller            sb_NxCaller;
     LONG                    sb_NxNest;      /* bracket depth, 0 == outside   */
 
+#ifdef AMINETXDUO_NXCENSUS
+    /* Measurement build only -- see the census note in netx_call.c. */
+    ULONG                   sb_NxCount;     /* brackets actually taken       */
+    ULONG                   sb_NxNested;    /* and the ones that nested      */
+    ULONG                   sb_NxEnterTicks;
+    ULONG                   sb_NxLeaveTicks;
+    ULONG                   sb_NxSlow;      /* enters that took over 1 ms    */
+    ULONG                   sb_NxWorst;     /* the worst one, E-Clock ticks  */
+#endif
+
     struct AmiSocket      **sb_Table;       /* descriptor table              */
     LONG                    sb_TableSize;
 
@@ -502,6 +512,10 @@ VOID  bsd_runtime_close(VOID);
  * nothing inside one may block on anything except ThreadX. */
 LONG  bsd_nx_enter(struct AmiSocketBase *base);
 VOID  bsd_nx_leave(struct AmiSocketBase *base);
+
+/* Drop the base's cached ThreadX registration. Teardown only, no bracket open;
+   see netx_call.c for what is cached and why. */
+VOID  bsd_nx_release(struct AmiSocketBase *base);
 
 /* library.c */
 struct AmiSocketBase *bsd_lib_open(register ULONG version __asm("d0"),

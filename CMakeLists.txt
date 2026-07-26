@@ -79,6 +79,26 @@ if(NOT AMINETXDUO_SANA2_PROBE_RAW)
     add_compile_definitions(AMI_SANA2_PROBE_RAW=0)
 endif()
 
+# Count the ThreadX brackets bsdsocket.library takes and time them, reporting
+# both to the serial log when a base closes.  OFF: it puts two ReadEClock()
+# calls around the thing it is measuring.  It exists so that "how many brackets
+# does one curl fetch cost, and what fraction of the wall clock are they?" can
+# be answered by measurement rather than by arithmetic on a throughput delta --
+# see the census note in src/bsdsocket/netx_call.c.
+option(AMINETXDUO_NXCENSUS "Count and time the ThreadX bracket" OFF)
+if(AMINETXDUO_NXCENSUS)
+    add_compile_definitions(AMINETXDUO_NXCENSUS)
+endif()
+
+# Keep the calling task's TX_THREAD between brackets instead of building and
+# deleting one per call.  ON, and the OFF arm is the control: two libraries out
+# of one tree differing in this one decision, which is how the before and after
+# were measured.  src/bsdsocket/netx_call.c has the mechanism and the cost.
+option(AMINETXDUO_NXCACHE "Cache the ThreadX adoption per task" ON)
+if(NOT AMINETXDUO_NXCACHE)
+    add_compile_definitions(AMINETXDUO_NXCACHE=0)
+endif()
+
 # PIN the TCP receive window at this many bytes, floor and ceiling together,
 # instead of letting ami_bsd_tcp_window() size it from the packet pool and the
 # live socket count.  Exists so that "is the window the limiter?" can be

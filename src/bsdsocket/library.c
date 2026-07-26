@@ -258,6 +258,11 @@ static VOID bsd_child_destroy(struct AmiSocketBase *child)
 
     ami_signal_free(child->sb_EventSignal);
 
+    /* Last: the base's cached ThreadX registration. Everything above may take
+       the bracket, and this is the one place that runs on the base's own task
+       with every socket already closed (netx_call.c). */
+    bsd_nx_release(child);
+
     ObtainSemaphore(&master->sb_Lock);
     Remove((struct Node *)&child->sb_Node);
     ReleaseSemaphore(&master->sb_Lock);
