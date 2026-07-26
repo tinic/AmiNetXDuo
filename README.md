@@ -234,15 +234,16 @@ ThreadX core 27.7 KB, NetX Duo IPv4 core approximately 73 KB, DHCP client
 
 The shipped libraries, as hunk files rather than link-map text, are 249,636
 bytes for a default `bsdsocket.library`, 250,248 with `-DAMINETXDUO_TLS=ON`, and
-282,516 for `tls.library`. The TLS pair therefore comes to 532,764 bytes, which
-is **8,476 over 512 KiB**. Session resumption accounts for about 9.4 KiB of
-that, so the pair went from just inside the figure to just outside it.
+282,516 for `tls.library`, so the TLS pair comes to 532,764 bytes. Session
+resumption added about 9.4 KiB of that.
 
-The overrun is smaller than the trimming lever nobody has pulled yet:
-`src/tls/CMakeLists.txt` globs the whole of `crypto_libraries/src`, so
-`nx_crypto` still carries DES, 3DES, MD5, CCM, GCM and ECJPAKE, none of which
-any ciphersuite we negotiate can reach. That is a separate change with its own
-correctness argument, so it has not been made as a side effect of anything else.
+There is no size budget for the libraries beyond fitting comfortably in the
+4 MB the target assumes, and none at all for the commands — a multi-megabyte
+ported client is fine. Worth recording anyway: `src/tls/CMakeLists.txt` globs
+the whole of `crypto_libraries/src`, so `nx_crypto` still carries DES, 3DES,
+MD5, CCM, GCM and ECJPAKE, none of which any ciphersuite we negotiate can
+reach. Trimming that is a change with its own correctness argument rather than
+something to do as a side effect.
 
 ## Building
 
