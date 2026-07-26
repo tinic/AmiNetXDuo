@@ -466,7 +466,15 @@ static ULONG end_secs(VOID)
 /* -------------------------------------------------------- shared results -- */
 
 #define END_MAX_CONNS       6
-#define END_MAX_HOGS        6
+/*
+ * Ten, not six.  A hog pair pins about a socket's transmit queue
+ * (NX_TCP_MAXIMUM_TX_QUEUE, 20) plus the receiver's advertised window
+ * (5 to 20 packets, per S24.3), so six pairs took the pool from 256 free to
+ * 171 and P3 never got to test anything.  Ten pairs, with the transmitter
+ * BLOCKING so it parks holding a full queue rather than backing off, is the
+ * smallest arrangement that reaches the floor.
+ */
+#define END_MAX_HOGS        10
 #define END_MAX_WORKERS     (2 * END_MAX_CONNS + 2 * END_MAX_HOGS + 2)
 
 #define ROLE_DRIVER     0
@@ -1375,12 +1383,13 @@ static VOID end_hogtx_body(EndWorker *w)
     }
 
     /*
-     * Non-blocking on purpose.  A blocking hog would suspend on the first
-     * full window and stop contributing; this one keeps pushing whatever the
-     * stack will take and is never itself the thing that is stuck.
+     * BLOCKING, deliberately.  A non-blocking hog backs off the moment the
+     * peer's window closes and gives its packets straight back; a blocking
+     * one suspends inside nx_tcp_socket_send() holding a full transmit queue,
+     * which is the state that keeps packets out of the pool.  Measured: six
+     * non-blocking pairs reached a floor of 171 free of 256 and P3 had
+     * nothing to test.
      */
-    (VOID)end_set_nonblock(w, s, 1);
-
     end_pat_fill(w->w_Buf, 0UL, 4096UL);
 
     while (!ES->es_HogStop && !ES->es_Stop)
@@ -1390,8 +1399,12 @@ static VOID end_hogtx_body(EndWorker *w)
         if (rc > 0)
             end_bump_tx(w, (ULONG)rc);
         else
-            Delay(1);
+            break;              /* the connection is gone; stop, do not spin */
     }
+
+    /* Hold the queue until told to let go. */
+    while (!ES->es_HogStop && !ES->es_Stop)
+        Delay(10);
 
     (VOID)e_close(w->w_Base, s);
 }
@@ -2293,7 +2306,7 @@ static VOID end_p3(struct Library *base)
 
 /* ----------------------------------------------------------------- main --- */
 
-static VOID end_summary(struct Library *base, ULONG ran)
+static VOID end_summary(struct Library *base, ULONG ran, ULONG avail_end)
 {
     EndSysBuf sys;
     LONG      args[12];
@@ -2301,7 +2314,6 @@ static VOID end_summary(struct Library *base, ULONG ran)
     ULONG     tx_mb = 0UL, rx_mb = 0UL, xacts = 0UL, errs = 0UL;
     ULONG     bad = 0UL, desync = 0UL, conns = 0UL;
     ULONG     max_conn_mb = 0UL;
-    ULONG     avail_end;
 
     for (i = 0; i < ES->es_Workers; i++)
     {
@@ -2327,8 +2339,6 @@ static VOID end_summary(struct Library *base, ULONG ran)
 
     end_zero(&sys, sizeof(sys));
     (VOID)end_query(base, NETSTATUS_SYSTEM, &sys, sizeof(sys));
-
-    avail_end = AvailMem(MEMF_PUBLIC);
 
     args[0]  = (LONG)ran;
     args[1]  = (LONG)tx_mb;
@@ -2419,8 +2429,8 @@ int main(void)
 
     {
         static const char *const modename[] =
-            { "loopback", "wire", "fitz", "watch" };
-        const char *mn = modename[ES->es_Mode & 3U];
+            { "loopback", "wire", "fitz", "watch", "leak" };
+        const char *mn = modename[(ES->es_Mode <= MODE_LEAK) ? ES->es_Mode : 0U];
 
         args[0] = (LONG)ES->es_Seconds;
         args[1] = (LONG)ES->es_Conns;
@@ -2616,7 +2626,7 @@ int main(void)
     }
 
     end_sample(base, end_secs());
-    end_summary(base, end_secs());
+    end_summary(base, end_secs(), AvailMem(MEMF_PUBLIC));
 
     {
         ULONG bad = 0UL, desync = 0UL, j;

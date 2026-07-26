@@ -12176,3 +12176,406 @@ About 100 seconds of emulator per run, one boot, no network. `run-tickprobe.sh`
 passes `-x` to `tools/fsuae-run.sh` unconditionally: a quantisation histogram
 taken while another agent's boot shares the machine is a histogram of that
 agent.
+
+## 37. Hours of Fitz, and the socket that never came back (2026-07-26)
+
+Every harness in this tree runs for seconds or minutes. §29 measured throughput
+against Roadshow and AmiTCP_NG over a few megabytes; §27's tcpdrill asserts on
+packets and moves a few hundred bytes; the longest thing here before today was
+§14's curl suite at about four minutes. **Nothing in this project has ever
+tested what happens after an hour.**
+
+A report on English Amiga Board (thread 122501) says that matters: weeks of
+long-term testing with **Fitz** — a cross-platform network file server and
+mounter — made **both AmiTCP 4 and Roadshow return `EAGAIN` on a *blocking*
+socket**, which should be impossible, after which the connection was finished
+and the only thing left to do was close it. The reporter blames mbuf
+fragmentation and sequence-number overrun.
+
+This section builds the harness that would find that, points it at the same
+program, and reports what it found — which is not what it went looking for.
+
+**Headline: a blocking socket in this stack cannot return `EAGAIN` the way the
+report describes, and the reason is arithmetic rather than luck. But the run
+that established it found two defects that are worse, and one of them puts the
+machine on a clock: `AvailMem` falls by a steady 1009 bytes a second under
+connection churn, the packet pool is gone in 115 seconds, and every leaked
+socket is one NetX Duo will never let go of again.**
+
+### 37.1 The specific suspect, traced to the end
+
+`src/bsdsocket/errno.c:63` maps `NX_NO_PACKET` to `AMI_EWOULDBLOCK`
+unconditionally, and `NX_NO_PACKET` does not only mean "nothing to read": it is
+also what NetX Duo returns when the **packet pool is exhausted**. On a blocking
+socket that mapping would produce exactly the reported symptom.
+
+It does not, and the reason is one line: `bsd_wait_option()`
+(`src/bsdsocket/select.c:228`) hands NetX Duo `NX_WAIT_FOREVER` for a blocking
+socket with no `SO_RCVTIMEO`/`SO_SNDTIMEO`, and with a non-zero wait option
+**NetX Duo does not have a path that returns `NX_NO_PACKET`** — it suspends:
+
+| | |
+|---|---|
+| `_nx_tcp_socket_receive.c:231` | `else if ((wait_option) && (_tx_thread_current_ptr != &(ip_ptr -> nx_ip_thread)))` — suspends; the `NX_NO_PACKET` at :263 is the `else` |
+| `_nx_tcp_socket_send_internal.c:1006` | the same guard; `NX_WINDOW_OVERFLOW` (:1086) and `NX_TX_QUEUE_DEPTH` (:1098) are its `else` |
+| `_nx_packet_allocate.c:178` | `if (wait_option)` suspends unconditionally; `NX_NO_PACKET` at :268 is the `else` |
+
+So every one of those returns needs either `wait_option == 0` — a **non**-blocking
+socket, where `EWOULDBLOCK` is correct — or the calling thread to **be the IP
+thread**. And it never is. Every vector in this library brackets itself with
+`bsd_nx_enter()`, which calls `tx_amiga_adopt_thread()` to make the *calling
+Exec task* a TX_THREAD of its own (`src/netstack/netstack.c:143`); the only
+code in `src/bsdsocket/` that runs on the IP thread is the five notify
+callbacks in `select.c:68–169`, and all five do nothing but `bsd_event_post()`.
+
+**That invariant is load-bearing and nobody had written it down.** It is the
+only thing standing between six unconditional `EWOULDBLOCK` mappings and the
+reported defect. If any future vector is ever called from a NetX Duo callback,
+`recv()` on a blocking socket starts returning `EAGAIN` and there is no comment
+anywhere that says why it used to be safe.
+
+### 37.2 Three sites where a blocking socket *can* return `EWOULDBLOCK`
+
+Traced rather than assumed, and none of them is the pool:
+
+| site | when |
+|---|---|
+| **`transfer.c:294`** `if (sent == 0 && len > 0) return bsd_fail(base, AMI_EWOULDBLOCK);` | **the NetX Duo status is discarded before the decision is made.** Every first-iteration failure of `nx_packet_allocate()` or `nx_packet_data_append()` `break`s out of the loop and lands here, whatever it was. With `NX_WAIT_FOREVER` the reachable ones are `NX_WAIT_ABORTED` (should be `EINTR`) and `NX_POOL_DELETED` (should be `ENOBUFS`) |
+| **`socket.c:1521`** `accept()` maps `NX_NOT_CONNECTED` to `EWOULDBLOCK` | `_nx_tcp_connect_cleanup` sets `NX_NOT_CONNECTED` on a suspended accept whose listener is torn down by another task. A blocking `accept()` then reports `EAGAIN` for a socket that is gone |
+| **`transfer.c:641`** `bsd_recv_raw`: `if (packet == NX_NULL) return bsd_fail(base, AMI_EWOULDBLOCK);` | `bsd_raw_receive()` returns `NX_NULL` when `tx_semaphore_get(wait)` fails for **any** reason, `TX_WAIT_ABORTED` included, and the caller cannot tell which |
+
+`transfer.c:277`, `:332`, `:386` and `oob.c:238`, `:272` carry the same
+unconditional mapping and are unreachable on a blocking socket **only** because
+of §37.1's invariant. None of the eight consults `ASF_NONBLOCK` before
+answering.
+
+The measured control is in the harness: `tests/endurance/` records every errno
+**with the socket's blocking state at the time**, because that pairing is the
+whole question. In the loopback arm, 2,796 errno events were recorded, all on
+blocking sockets, and **not one of them was `EWOULDBLOCK`** — they were
+`ECONNREFUSED`, `EINVAL`, `EPIPE` and `EIO`, which is a different section
+(§37.4).
+
+### 37.3 The harness, and Fitz
+
+`tests/endurance/` is two workloads sharing one instrument.
+
+**Fitz is the realistic one, and it is the program from the report.** MIT
+licensed with full source, symmetric between Amiga and Unix, no central server.
+`tests/endurance/fetch-fitz.sh` downloads it and `build.sh` builds **two**
+m68k binaries from the same sources: the released one, and one with
+`-DADEBUG=5`. The second is the point. Fitz's client treats `EAGAIN` on its
+blocking socket as retryable —
+
+```c
+static BOOL checkretry(FitzClient *fc)          /* src/amiga-client.c:583 */
+{
+    if (Errno() == EAGAIN)
+    {
+        db(WARN,("* EAGAIN\n"));
+        Wait(newtimereq(fc, 0, 20000));         /* 20 ms */
+        ...
+        return TRUE;
+    }
+    return FALSE;
+}
+```
+
+— and retries it **ten times** (`MAXRETRY`) before `send_all()`/`recv_all()`
+give up and the connection is abandoned. That is the reported symptom seen from
+the application's side, and on the released binary it is silent. Built with
+debug at WARN, the same code prints `* EAGAIN` and `* recv error err=-1 len=N
+errno=E` through `kprintf()` to the serial port, which `tools/fsuae-run.sh`
+already captures. **A count of zero in that log is a result; an inference from
+a connection that died is not.**
+
+Three things had to be solved to build it, all recorded because they will
+recur:
+
+- **`src/kprintf.asm` is vasm source** and this tree has no vasm.
+  `tests/endurance/fitz-kprintf.c` reimplements `kprintf()` and `mysnprintf()`
+  on `RawDoFmt()`, including `mysnprintf()`'s deliberately non-C99 return
+  value, which Fitz's own header calls out and its callers depend on.
+- **`__udivdi3` is not in this toolchain's `libgcc.a`** — checked with `nm`
+  across every archive it ships, not assumed — and Fitz's `ds_to_unix()` needs
+  one. Supplied in the same file, on 32-bit limbs, because the obvious
+  `unsigned long long` version needs `__lshrdi3` and `__ashldi3`, which are
+  missing for the same reason.
+- **The NDK's `inline/bsdsocket.h` will not compile under GCC 15**
+  (`'asm' specifier ... conflicts with 'asm' clobber list`, on
+  `SetSocketSignals`). `tests/conformance/compat` first on the include path
+  fixes it, exactly as it does for `tests/clients`.
+
+Nothing in Fitz's own sources is changed. The value of running somebody else's
+program is that it is somebody else's.
+
+**The arrangement is Amiga-as-client.** Neither this Mac nor the Linux build
+host has FUSE, and Fitz's Makefile splits the Unix side into `fitz-serve` (no
+FUSE) and `fitz-mount` (FUSE) for precisely that case. So `fitz-serve` runs on
+the host, the guest runs `fitz mount 10.0.2.2:17711 FITZ:`, and the workload is
+AmigaDOS `Open`/`Write`/`Read`/`Close` against a mounted volume — which Fitz's
+handler turns into blocking `send()`/`recv()` pairs on one long-lived TCP
+connection. Both directions are covered: every file is written to the share and
+read back, byte for byte.
+
+**`Endurance` is the reproducible one**, and it is also the instrument. It
+drives sockets directly with read and write sizes redrawn log-uniformly for
+every single call on both sides independently, so the two ends never agree
+about framing; it verifies every byte against a position-addressable pattern
+(`byte(o) = pat[o & 8191] ^ (o >> 13)`, period 2 MB, so a splice that repeats
+or drops a block is caught as well as an altered byte); and every payload
+carries its own stream offset in a header, so a framing desync shows up
+immediately rather than as corruption later.
+
+And every `sample` seconds it appends one CSV row through `NetStackQuery()`
+(§34's private LVO, which is why a program that has not linked `src/netstack`
+can read the running stack at all): packet-pool free count and the pool's own
+empty-request/empty-suspension counters, `AvailMem` **total and largest
+contiguous block**, live socket count, TCP retransmissions, receive drops,
+checksum errors, SANA-II allocation failures. Both output files are opened,
+appended and closed per line, for §16.9's reason: a run that has to be killed
+must not lose its last twenty lines.
+
+### 37.4 The listener that stopped accepting, and did it every time
+
+The loopback arm collapses two seconds into every run, always the same way,
+and it reproduces with **one** responder, one driver and nothing else running.
+One line on the serial log:
+
+```
+[WARN] bsdsocket: relisten failed, status 71
+```
+
+71 is `0x47` = **`NX_INVALID_RELISTEN`**. In `bsd_accept()`
+(`src/bsdsocket/socket.c:1613-1665`) the order is:
+
+```c
+sock->as_Incoming = NULL;                      /* unconditional */
+...
+spare = bsd_socket_alloc(...);
+if (spare != NULL) {
+    if (nx_tcp_socket_create(...) == NX_SUCCESS) {
+        status = nx_tcp_server_socket_relisten(ip, sock->as_ListenPort, ...);
+        if (status == NX_SUCCESS || status == NX_CONNECTION_PENDING)
+            sock->as_Incoming = spare;         /* the ONLY place it is set */
+        else
+            ... AMI_WARN("relisten failed, ...");
+    }
+}
+```
+
+`as_Incoming` is cleared before its replacement is secured, and there are three
+ways not to secure it. When any of them happens the listener is left with
+`as_Incoming == NULL`, and the very first check in `bsd_accept()` is
+
+```c
+if ((sock->as_Flags & ASF_LISTENING) == 0 || sock->as_Incoming == NULL)
+    return bsd_fail(SocketBase, AMI_EINVAL);
+```
+
+**so every subsequent `accept()` on that socket returns `EINVAL` for the
+lifetime of the socket, and there is nothing the application can do about it
+except close the listener and build another one.** Measured: 1,951 consecutive
+`EINVAL`s over 400 seconds in the two-connection run and 673 in the
+single-connection one, both starting at the second `accept()` and both with
+exactly one `relisten failed` on the serial log in front of them.
+
+Two more observations from the same two seconds, recorded because they are
+probably the same root cause and are certainly not separate bugs to chase
+independently:
+
+- **The one connection that *is* accepted is unusable.** Its first `recv()`
+  fails immediately — `EDESTADDRREQ` on the server side, which is
+  `bsd_errno_from_nx(NX_NOT_BOUND)`, and `EIO` on the client side, which is
+  `bsd_errno_from_nx()`'s fallback for a status the table does not name. An
+  accepted socket that NetX Duo does not consider bound.
+- **A blocking `connect()` to that listener afterwards never returns.** In the
+  single-connection run the driver went into `connect()` at `t = 2` and was
+  still there when the stall detector fired at `t = 122`; in the
+  two-connection run the same call came back `ECONNREFUSED` about twice a
+  second. Same listener state, two different answers, and one of them is an
+  unbounded hang on a blocking call with no timeout.
+
+This is the shape the EAB report calls a permanently degraded socket. It is on
+the listening side rather than the data side, and it is ours rather than
+inherited. `tests/curl`'s `d03_parallel_40` and `tests/clients` group M both
+pass, so whatever the trigger is, it is not simply "accept twice" —
+`tests/endurance/run-endurance.sh` is the reproduction.
+
+### 37.5 1009 bytes a second, and 830 sockets NetX Duo will not let go of
+
+The two-connection run then spent 400 seconds in the failure state above, and
+what it recorded there is the second defect:
+
+| t (s) | `AvailMem` | largest block | pool free | pool empty req | live sockets |
+|---:|---:|---:|---:|---:|---:|
+| 25 | 9,027,560 | 6,879,048 | 157 | 0 | 65 |
+| 55 | 8,996,936 | 6,879,048 | 99 | 0 | 123 |
+| 85 | 8,967,368 | 6,879,048 | 41 | 0 | 179 |
+| **115** | 8,937,800 | 6,860,568 | **1** | **16** | 235 |
+| 235 | 8,815,304 | 6,738,072 | 1 | 248 | 467 |
+| 431 | **8,617,832** | **6,540,600** | 1 | 622 | **841** |
+
+- **`AvailMem` falls by 409,728 bytes in 406 seconds — 1009 bytes/s — and
+  never recovers.** The largest contiguous block falls with it, so this is
+  consumption, not fragmentation.
+- **The live socket count climbs 1.91 a second and never falls**: 776 in
+  406 s. 409,728 / 776 = **528 bytes each**, and `sizeof(AmiSocket)` is 520.
+  One socket structure leaked per socket created, plus allocator overhead.
+- **The packet pool is gone in 115 seconds.** From `t = 25` (65 sockets, 157
+  free) to `t = 115` (235 sockets, 1 free) is 170 sockets against 156 packets:
+  about **one packet leaked per leaked socket** — the SYN that is never
+  released, because the socket holding it is never deleted.
+- After that, `pool_empty_requests` and `nsx_IpSendDropped` rise together, 622
+  each, while `pool_empty_suspensions` stays at **0**. Nothing is waiting for
+  the pool; the IP thread asks with `NX_NO_WAIT`, is refused, and **the frame
+  is silently dropped**.
+
+The library says so itself, 830 times in ten minutes:
+
+```
+[WARN] bsdsocket: nx_tcp_socket_delete refused (66); leaking 520 bytes
+       rather than corrupting the created list
+```
+
+66 is `0x42` = **`NX_STILL_BOUND`**. `bsd_socket_destroy()`
+(`src/bsdsocket/socket.c:786-820`) calls `nx_tcp_client_socket_unbind()` and
+then `nx_tcp_socket_delete()`; the unbind does not take, the delete refuses,
+and the code does the only safe thing left — it leaks the block rather than
+free memory NetX Duo still has on `nx_ip_tcp_created_sockets_ptr`, which its
+own comment correctly says would be worse. **The leak is the safe half of a
+bug whose unsafe half was already anticipated.** Two more lines from the same
+log say where the sockets are:
+
+```
+[WARN] bsdsocket: close did not complete in 60 s (state 7); resetting
+[WARN] bsdsocket: close did not complete in 60 s (state 8); resetting
+```
+
+State 7 is `FIN_WAIT_2`, state 8 is `CLOSING`. Worth reading next to §32:
+`close()` sending a FIN instead of a RESET landed in this tree **today**, and a
+socket that resets never had a `FIN_WAIT_2` to get stuck in.
+
+**What it is not.** The obvious explanation — that closing a socket leaks — is
+wrong, and `mode leak` exists to say so. It does the smallest repeatable
+thing: create a socket, put it through one lifecycle, close it, in two arms
+(one `connect()` refused by a port with nothing on it, one full
+connect/exchange/close against a live listener). **11,915 lifecycles in ten
+minutes, and nothing moved**: `AvailMem` 9,325,864 → 9,360,736, live sockets
+5 → 10, pool 222 → 217, and not one `NX_STILL_BOUND`. An ordinary socket
+lifecycle is clean.
+
+So the trigger is narrower than "close", and the measured difference between
+the two runs is the destination: the sockets that leaked were dialling a port
+that **had a listen request on it** in the state §37.4 leaves behind, where the
+ones that did not leak dialled a port with nothing on it at all. That is where
+to look, and it is not proven here — the leak has been measured, its rate
+pinned to the socket size, and the ordinary path cleared, and the remaining
+step needs the file `src/bsdsocket/socket.c`, which is another workstream's.
+
+**What it costs, if it is ever reached in the field.** 1009 bytes/s is
+3.6 MB/hour against a machine with about 9 MB free: out of memory in **under
+three hours**, and out of packet pool — hence dropping every frame it tries to
+send — after **two minutes**. That is the "hours of mixed traffic" failure the
+report describes, arrived at from a different direction.
+
+**And, incidentally, the best test of the suspect this section started with.**
+For 316 consecutive seconds the packet pool sat at **1 free of 256** while
+blocking sockets were being used throughout, and across 2,796 recorded errno
+events **not one was `EWOULDBLOCK`**. An exhausted pool does not produce
+`EAGAIN` on a blocking socket in this stack. It produces dropped frames.
+
+### 37.6 Sequence-number wrap: the arithmetic, and what NetX Duo does about it
+
+The report's second suspicion. Three separate questions, and they have three
+different answers.
+
+**Is it reachable?** A 32-bit sequence space is 4,294,967,296 bytes. §29
+measures 159 KB/s on the wire and §24 283 KB/s on loopback, so one direction of
+one connection wraps after **7.5 hours on the wire** or **4.2 hours on
+loopback**. That is inside a long test but outside every test this project has
+ever run — and it is *exactly* the duration the EAB report describes. So the
+suspicion is well-formed: it is the first thing that becomes reachable at that
+timescale and at no shorter one.
+
+**Where does a connection start?** `bsd_tcp_seed_isn()`
+(`src/bsdsocket/socket.c:322`) gives every socket a uniform random 32-bit ISN —
+that is §28's fix for the `|`-instead-of-`+` bias. A uniform ISN means the wrap
+point is uniformly distributed over the connection's life, so a connection
+carrying 4 GB wraps **exactly once**, whatever its ISN, and one carrying less
+than 4 GB wraps with probability equal to its size over 4 GB. You cannot
+arrange a wrap; you can only buy one with bytes.
+
+**Does NetX Duo handle it?** Yes, and deliberately. Every sequence comparison
+in the two files that matter uses the RFC 1982 signed-difference idiom rather
+than an unsigned compare —
+`nx_tcp_socket_state_data_check.c:366, 384, 636, 678, 696, 718, 738, 785, 887,
+893` are all `(INT)(a - b)` — and
+`nx_tcp_socket_state_ack_check.c:262–398` carries an explicit `wrapped_flag`
+with a full case analysis of an ACK and a queued segment falling on either side
+of the wrap. This is not a place where wrap was forgotten.
+
+**So the honest state of this is: the arithmetic says one wrap per 4 GB, the
+code says wrap is handled, and no run in this project has yet put 4 GB through
+one connection.** The harness reports how far it got (`endreport.py` prints it
+against the 4096 MB figure) so the question stays open with a number on it
+rather than as a worry.
+
+### 37.7 Does the pool scale with memory?
+
+AmiTCP_NG claims to scale with available memory; §24 sizes the receive *window*
+from the pool and the live socket count, but whether the **pool itself** adapts
+is a different question and this is the answer.
+
+`ami_ns_pool_packets()` (`src/netstack/netstack.c:197`):
+
+```c
+avail   = AvailMem(MEMF_PUBLIC);
+packets = (avail / AMI_POOL_MEM_DIVISOR) / ami_ns_packet_stride();   /* /16 */
+clamp(packets, AMI_POOL_MIN_PACKETS /* 16 */, AMI_POOL_MAX_PACKETS /* 256 */);
+```
+
+So: **yes between the floor and the ceiling, and not at all above it.** One
+sixteenth of free public memory, in packets of 1568 bytes plus header, floored
+at 16 and capped at **256**. The cap binds at roughly 6.5 MB of free public
+memory — every machine measured here reports
+
+```
+[INFO] netstack: 10009928 bytes free, pool = 256 x 1568
+```
+
+— so an A1200 with 8 MB of Fast RAM and an A4000 with 128 MB get **the same
+401,408-byte pool**, and it is sampled **once, at stack start**, and never
+revisited. A machine that frees 100 MB after the stack comes up gets nothing
+for it.
+
+That is a defensible design for the floor — §24.3 makes the same argument about
+the 4 MB machine — and an undefended one for the ceiling. 256 is the number
+`AMI_POOL_MAX_PACKETS` has always had; nothing in this document measured it.
+
+### 37.8 What is in the tree
+
+| | |
+|---|---|
+| `tests/endurance/endurance.c` | the harness: five workloads and the timeline sampler |
+| `tests/endurance/fitz-kprintf.c` | `kprintf`, `mysnprintf` and 64-bit division for Fitz |
+| `tests/endurance/fetch-fitz.sh` | fetch and unpack Fitz (not vendored, deliberately) |
+| `tests/endurance/build.sh` | `Endurance`, host `fitz-serve`, and Fitz for m68k twice |
+| `tests/endurance/run-fitz.sh` | the Fitz arm |
+| `tests/endurance/run-endurance.sh` | the synthetic arm and the probes |
+| `tests/endurance/endreport.py` | reads a timeline and says what trended |
+
+Modes: `fitz` (files over a mounted share), `loop` (synthetic, both ends here),
+`wire` (synthetic, a host peer), `leak` (one socket lifecycle, repeated) and
+`watch` (sample only, while somebody else makes the traffic).
+
+Two notes for whoever runs it next, both learned the expensive way:
+
+- **`tools/fsuae-reap.sh` kills any `fs-uae` older than 15 minutes** and cannot
+  tell a long tenant from an orphan. Both run scripts print the `-a` value that
+  makes it safe.
+- **A multi-hour run holds an emulator slot for multiple hours**, and
+  `fsuae-run.sh`'s `.fsuae.perfwait` handshake means a queued `-x` measurement
+  waits `AMINETXDUO_LOCK_WAIT` (40 minutes) and then *proceeds anyway*,
+  silently contended. The runs here were shortened and given `-k 56` rather
+  than left to block somebody else's measurement.
