@@ -3344,6 +3344,246 @@ So the order stands: curl first because it already knows this platform, wget
 second because it does not.
 
 
+### 11.8 `curl https://` works (2026-07-25)
+
+The vtls backend of §11.6 is written and `https://` fetches real pages from the
+emulated A1200. Read from `clients/curl/run-fsuae.sh`, 14 MHz 68020:
+
+```
+--- SYS:curl --version
+curl 8.21.0-DEV (m68k-unknown-amigaos) libcurl/8.21.0-DEV tls.library/1.0
+Protocols: dict file ftp ftps gopher gophers http https imap imaps ipfs ipns
+           mqtt mqtts pop3 pop3s rtsp smtp smtps telnet tftp ws wss
+Features: alt-svc HSTS SSL threadsafe
+
+--- SYS:curl -v -sS -o DH0:t12.html https://tls-v1-2.badssl.com:1012/
+* SSL connection using TLSv1.2 / AES256-SHA256
+* Server certificate chain: 2 certificate(s), verified, handshake 4.99 s
+* ALPN: server did not agree on a protocol. Uses default.
+> GET / HTTP/1.1
+> Host: tls-v1-2.badssl.com:1012
+< HTTP/1.1 200 OK
+< Server: nginx/1.10.3 (Ubuntu)
+< Content-Length: 502
+{ [502 bytes data]
+--- rc 0, 6.56 s
+```
+
+The 502 bytes are byte-identical to the host's copy (SHA-256 `7e93f4f1…`), and
+so are `ecc256.badssl.com`'s 684 and — the one that matters for the record
+loop — **998,733 bytes of `www.iana.org/assignments/media-types/media-types.xhtml`
+over TLS, SHA-256 `f0771af7…`**.
+
+#### Which hosts answer, and where the failures are
+
+`%{time_appconnect}` is the handshake alone. Every row is a real fetch of a
+real page; the body sizes are the servers'.
+
+| host | chain | key exchange | 14 MHz | `-k 28` |
+|---|---|---|---|---|
+| `tls-v1-2.badssl.com:1012` | 2 | RSA, `AES256-SHA256` | **200**, 502 B, 6.14 s | **200**, 3.94 s |
+| `ecc256.badssl.com` | 2 | ECDHE-ECDSA | **200**, 684 B, 24.26 s | **200**, 12.38 s |
+| `www.iana.org` | 3 | ECDHE-ECDSA, Cloudflare | (35) closed at 23.3 s | **200**, 6,253 B, 12.04 s |
+| `example.com` | 4 | Cloudflare | (35) closed at 39.7 s | (35) closed at 19.9 s |
+| `wrong.host.badssl.com` | 2 | — | **(60) refused**, 6.1 s | — |
+
+**The two failures are the far end's patience, not ours.** Both are Cloudflare
+and both are `curl: (35) the connection is closed` — the peer hanging up while
+this machine is still doing arithmetic, which is the same wall §11.6 predicted
+and `src/tools/fetch.c` already documents. Note `ecc256.badssl.com` succeeding
+at 24.26 s where a Cloudflare host gives up at 20: nginx will wait and a CDN
+will not, and that difference is worth more than a second of CPU either way.
+`example.com` is the only host that fails at both clocks, and it is the deepest
+chain of the five.
+
+#### Certificate verification, proved rather than asserted
+
+```
+--- SYS:curl -v -sS -o DH0:wrong.html https://wrong.host.badssl.com/
+*   Trying 104.154.89.105:443...
+* wrong.host.badssl.com: the certificate is issued to another host
+* closing connection #0
+curl: (60) wrong.host.badssl.com: the certificate is issued to another host
+--- rc 60, 5.52 s
+
+--- SYS:curl -sS -k -o DH0:wrongk.html -w "insecure: HTTP %{http_code}, %{size_download} B\n" https://wrong.host.badssl.com/
+insecure: HTTP 200, 500 B
+--- rc 0, 5.00 s
+```
+
+A backend that succeeded by not checking would be worse than no backend, so
+both directions are in the default command list: refused by default with curl's
+own exit 60, and connected with `-k` because that is what `-k` is for.
+`--cacert` reaches `TLSA_TrustStore` and is tested too.
+
+#### Throughput: TLS costs 7× on the wire
+
+Nobody had measured this. Same machine, same run, `-k 28`:
+
+```
+http  ftp.fau.de   657,797 B in  5.74 s = 114,598 B/s
+https www.iana.org 998,733 B in 60.68 s =  16,464 B/s   ECDHE-ECDSA-AES128-SHA256
+```
+
+**7.0×**, and it is all symmetric: AES-128-CBC plus HMAC-SHA256 over every byte,
+twice (decrypt and authenticate). That is a `crypto68k` question and not a
+backend one — the handshake is a fixed cost per connection and this is a cost
+per byte, so it is the number that decides whether a 5 MB download over HTTPS is
+five minutes or fifty. It is also the reason the 998 KB test exists at all:
+without it the backend would have been declared working on three pages of under
+1 KB each.
+
+#### What is in the tree
+
+| | |
+|---|---|
+| `clients/curl/amitls.c` | the backend, 619 lines — 100 of preamble and ~380 of code, against the 600–900 estimated |
+| `clients/curl/amitls.h` | the one `extern` |
+| `clients/curl/curl-amitls.patch` | **31 added lines over six files** |
+
+The 20-slot `struct Curl_ssl` mapped as §11.6 said it would. Eight slots are
+NULL — `shut_down` (`TLSClose()` sends `close_notify` itself), `cert_status_
+request`, `close_all`, the three engine slots, `sha256sum` and
+`get_channel_binding` — and `adjust_pollset` is curl's shared
+`Curl_ssl_adjust_pollset`. What was not foreseen is that `random` cannot be
+NULL: with `USE_SSL` defined, `lib/rand.c` routes **every** `Curl_rand()` in
+libcurl through the TLS backend, and `Curl_ssl_random()` answers
+`CURLE_NOT_BUILT_IN` when the slot is empty.
+
+**The patch is six files rather than five**, and the sixth is the one worth
+naming. `_curl_ca_bundle_supported` is a variable each backend's CMake block
+sets for itself; a backend that does not set it skips curl's whole "CA
+handling" section, and a `-DCURL_CA_BUNDLE=…` then reaches `curl_config.h`
+**verbatim** — including the literal string `none`, which libcurl dutifully
+tries to open. That failure arrives as `TLS_ERR_TRUSTSTORE`, which reads as
+"your trust store is missing" and sent this in the wrong direction for a while.
+
+`clients/curl/build.sh -t` copies the two source files into `lib/vtls/` and
+applies the patch; `-R` undoes both. The submodule pin never moves, no curl
+source is committed modified, and a build without `-t` is bit-for-bit the
+unpatched curl of §11 (`899,048` bytes, unchanged). With TLS it is `939,232`.
+
+#### Three things the design got wrong on paper, and what they actually are
+
+**1. `TLSOpen()` blocks, and the socket's blocking mode is irrelevant.** §11.6
+proposed flipping the descriptor back to blocking around the handshake, because
+curl has set it non-blocking with `IoctlSocket(FIONBIO)` by then. That is not
+needed and the reason is structural: `FIONBIO` sets a flag in
+`bsdsocket.library`'s own per-socket state (`src/bsdsocket/options.c:406`) that
+only `bsd_recv()` and `bsd_send()` read, and **tls.library never calls them**.
+It takes the `NX_TCP_SOCKET` behind the descriptor through the private context
+vector and blocks in NetX Duo on its own `wait_option`. So there is no mode to
+flip and no window in which the descriptor is wrong.
+
+What the blocking handshake does cost is exactly one thing: for 4 to 24 seconds
+curl's event loop is stopped, so the progress meter does not move, `--max-time`
+cannot fire and Ctrl-C is not read. `TLSA_Timeout` is set from
+`Curl_timeleft_ms()` so a dead peer is still bounded. Making it properly
+non-blocking means a state-machine handshake **inside tls.library** — `TLSOpen()`
+returning `TLS_PENDING` and a `TLSHandshake()` to pump — which is a larger piece
+of work than this whole backend and is worth doing only if curl's multi
+interface ever matters here.
+
+**2. Reading has to block too, and the tempting alternative deadlocks.** The
+obvious `recv_plain` polls the socket with a zero timeout and answers
+`CURLE_AGAIN` when nothing is readable. It hangs, and the reason is a layer
+nobody had looked at: `nx_secure` keeps *undecrypted* bytes of its own in
+`nx_secure_record_queue_header` (`nx_secure_tls_session_receive_records.c:106`)
+whenever one TCP segment carried more than one TLS record — the ordinary case
+for a server that writes headers and body separately. In that state the socket
+is not readable, `TLSPending()` is 0 because no plaintext exists yet, and a
+complete record is sitting there ready to decrypt. A backend that answered
+`CURLE_AGAIN` would wait on a descriptor that will never become readable again.
+
+So `TLSRead()` is called and allowed to block. `TLSPending()` still feeds
+curl's `data_pending`, which is what keeps the already-decrypted case from
+waiting on the socket at all. Answering the question properly needs one more
+vector; see below.
+
+**3. No ALPN, and curl says so out loud.** `Curl_alpn_set_negotiated(…, NULL, 0)`
+prints *"ALPN: server did not agree on a protocol. Uses default."* and curl
+uses HTTP/1.1. Nothing is lost — `nghttp2` is not built for m68k.
+
+Connection reuse across requests works and is tested: two URLs on the same host
+in one command line report `1 connects` then `0 connects`, the second answering
+1,506 bytes over the kept-alive TLS connection with no second handshake.
+
+#### Two vectors this backend asked tls.library for and did not get
+
+Neither blocks the milestone. Both are small, and both are in `src/tlslib/`,
+which this work does not own.
+
+**`TLSRandom(base, buffer, length)`.** `Curl_rand()` has no other source on this
+platform. The handshake's own randomness is fine — `nx_secure` draws from the
+entropy pool `bsdsocket.library` seeds — but no *published* vector exposes that
+pool, and `nxc_random_rand` lives behind the private context LVO that only
+tls.library is supposed to call. `amitls_random()` is therefore a time-seeded
+LCG, and it is labelled as one in the source: it feeds multipart boundaries, a
+Digest `cnonce` and curl's session-cache key salt, none of which are TLS
+secrets, but "unpredictable" is the honest requirement and an LCG does not meet
+it. Three lines in `tls_conn.c` would.
+
+**A "bytes buffered below the plaintext layer" answer.** `TLSPending()` reports
+decrypted plaintext only, which is right for what it documents. What a
+non-blocking reader needs in addition is whether `nx_secure_record_queue_header`
+holds anything — either a second vector or a second return value. With it,
+`recv_plain` becomes genuinely non-blocking and curl's multi interface works
+properly for reads even while the handshake stays blocking. That is the cheaper
+half of item 4 in §11.6's order, and it can land before the handshake half.
+
+#### Session resumption: nothing to do, and it works
+
+The concurrent work in `src/tlslib/` landed while this was being written, and
+the API it chose is **no API**: `tls.library` resumes by itself, keyed on
+`TLSA_HostName`, with the cache in the library and mirrored to
+`DEVS:Internet/tlssessions`. So the backend adopted it by being rebuilt. The
+only line of curl that knows about it is the one that reports `ti_Resumed`.
+
+Three `curl` invocations, three separate processes, 14 MHz:
+
+```
+--- SYS:curl -v -sS -o DH0:a1.html -w "1st: HTTP %{http_code}, handshake %{time_appconnect}s\n" https://tls-v1-2.badssl.com:1012/
+* SSL connection using TLSv1.2 / AES256-SHA256
+* Server certificate chain: 2 certificate(s), verified, handshake 5.10 s
+1st: HTTP 200, handshake 6.000000s
+--- rc 0, 6.66 s
+
+--- SYS:curl ... (same URL again)
+* Resumed a cached session: no certificate sent, no signature verified, handshake 0.62 s
+2nd: HTTP 200, handshake 1.620000s
+--- rc 0, 2.24 s
+
+--- SYS:curl ... (and again)
+* Resumed a cached session: no certificate sent, no signature verified, handshake 0.62 s
+3rd: HTTP 200, handshake 1.620000s
+--- rc 0, 2.26 s
+```
+
+**5.10 s to 0.62 s**, and it crosses process boundaries because the cache is the
+library's rather than curl's — which is why `lib/vtls/vtls_scache.c` is compiled
+in and unused, and should stay that way. A per-process cache would have helped
+nobody here: the case that matters on this machine is running the same command
+twice.
+
+`TLSA_NoResume` is deliberately not wired to a curl option. curl has no switch
+that means it — `--no-sessionid` turns off *curl's* cache, not the library's —
+and inventing one would be a patch to curl for something nobody asked for.
+
+**One thing that did not resume, reported rather than diagnosed**, because
+`src/tlslib/` is not this work's to fix: in one run a second connection to
+`ecc256.badssl.com` (ECDSA, port 443) did not resume and instead failed with
+`(35) the connection is closed` after **61.6 s**, against 24.9 s for the full
+handshake that preceded it. First connections to that host succeed every time
+(24.42 s in the run above) and `tls-v1-2.badssl.com:1012` (RSA, nginx) resumes
+every time, so this is either the ECDSA resumption path or what badssl's 443
+front end does with a rapid repeat, and it was seen once. Worth a look before
+anyone calls resumption finished.
+
+**All the numbers in the tables above predate that work** and were measured
+against the `tls.library` at `f535728`. They are the full-handshake costs, which
+is what a first connection to a host still pays.
+
+
 ## 12. Conformance, named — and the client access patterns behind it (2026-07-25)
 
 The loopback tier reads **125 passed, 1 failed, 16 skipped**. A count is not a work list,
