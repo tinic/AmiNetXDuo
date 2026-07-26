@@ -2789,3 +2789,117 @@ headers, `pragmas/bsdsocket_pragmas.h` LVO table), `amigaos/reference/amiga-boot
 - [Roadshow](http://roadshow.apc-tcp.de/index-en.php) · [Aminet: AmiTCP-SDK-4.3](https://aminet.net/package/comm/tcp/AmiTCP-SDK-4.3) · [AmiTCP/IP FAQ](https://wiki.preterhuman.net/AmiTCP/IP_Frequently_Asked_Questions)
 - [Aros/Developer/Docs/Libraries/BSDsocket](https://en.wikibooks.org/wiki/Aros/Developer/Docs/Libraries/BSDsocket)
 - [WinUAE features (uaenet.device / SLIRP / A2065)](https://www.winuae.net/features/) · [EAB: SANA2 / SLIRP / A2065](https://eab.abime.net/showthread.php?p=969044)
+
+### `nc`, `telnet` and `ftp`: the server half of the ABI, and what SLIRP will not do (2026-07-25)
+
+Three more Roadshow-era commands, written against `bsdsocket.library`'s published
+vectors rather than ported: `src/tools/nc.c`, `src/tools/telnet.c`,
+`src/tools/ftp.c`, sharing `src/tools/toolsock.c` for the LVO calls. Nineteen
+vectors between them, against `fetch`'s eight — and the extra eleven are the
+point. `bind`, `listen` and `accept` had never been called by anything in this
+tree except `tests/conformance/conf_probe.c`, which calls them from **one**
+process. `nc -l` calls them from a different process from the one that connects,
+and active-mode FTP calls them in the middle of a session that already has a
+connection open.
+
+#### What the commands are
+
+- **`nc`** — `HOST,PORT,LISTEN=-l/S,UDP=-u/S,SCAN=-z/S,TIMEOUT=-w/N/K,LOCALPORT=-p/N/K,HALFCLOSE=-N/S,VERBOSE=-v/S,CRLF/S`.
+  Connect mode, listen mode, and `-z` for a connection test over a port or a
+  range. `-w` switches `connect()` to the non-blocking `FIONBIO` +
+  `WaitSelect(writefds)` + `SO_ERROR` form, so the plain path stays blocking
+  and simple.
+- **`telnet`** — `HOST/A,PORT,DEBUG=-d/S,QUIET/S`. Agrees to `ECHO` and
+  `SUPPRESS-GO-AHEAD`, refuses everything else with `WONT`/`DONT`, and skips
+  subnegotiations to `IAC SE`.
+- **`ftp`** — `HOST,PORT,USER/K,PASSWORD/K,ACTIVE/S,DATAPORT/N/K,TIMEOUT/N/K,DEBUG=-d/S`,
+  commands on standard input. Both transfer modes; `DATAPORT` pins the
+  active-mode data port so a forwarding rule can name it.
+
+#### The half-close defect, found and then fixed underneath us
+
+`nc -N` (shutdown the write half at end of input) was the first thing in the
+tree to call `shutdown(SHUT_WR)` in anger, and on a connection whose **two ends
+were both on this machine** it wedged the caller inside the library — past the
+reach of Ctrl-C, past `-w`, and past the harness timeout. The peer's next
+`recv()` failed with an errno the command had no name for.
+
+The A/B that identified it, on `fd1de16`: the identical staged command list
+completed in 70 s with the `shutdown()` call compiled out, and never finished
+with it in. Over a wire — the same `nc` against a host-side echo server through
+SLIRP — the half-close was correct throughout: the FIN arrived, the answer came
+back, the connection closed.
+
+By the time it was written up, `src/bsdsocket/` had it. `e63e5f1` gave
+`shutdown(SHUT_WR)` a real FIN instead of a `nx_tcp_socket_disconnect()` RESET,
+and `ed548df` stopped `bsd_readable()` counting `FIN_WAIT_1`/`FIN_WAIT_2` as
+readable — which is what left a half-closed socket spinning on a `select()` that
+returned immediately and a `recv()` that then blocked forever. Re-verified on
+`ed548df`: all three cases of `tests/tools/commands-samehost.txt` pass, `-N`
+included, and that file is now the regression test rather than the reproducer.
+
+**Nothing in `src/bsdsocket/` was touched from this side.**
+
+#### FS-UAE's SLIRP accepts `slirp_redir` and does not implement it
+
+SLIRP is a NAT, so testing `accept()` against something outside the guest needs
+a forward. FS-UAE has the option and takes it: with
+`uae_slirp_redir = tcp:7042:7042` in the config, `fs-uae.log.txt` records
+`set option "slirp_redir" to "tcp:7042:7042" (result: 1)` — and **no host socket
+is ever created**. Measured three ways: `lsof -nP -iTCP:7042 -sTCP:LISTEN`
+finds nothing while the emulator is up; a host-side dialler retrying every two
+seconds got `ECONNREFUSED` 120 times in a row; and the guest's `nc -l 7042`
+sat out its full 120-second timeout and reported "nobody connected". The parse
+succeeds, the forward does not exist. FS-UAE 3.2.35, macOS, `qemu_uae_slirp`.
+
+So of the two ways to exercise the server half:
+
+- **Host → guest: impossible in this emulator.** Not attempted further.
+- **Guest → guest: done, and it is what the claims below rest on.** Two `nc`
+  processes on the Amiga, over `127.0.0.1` and over the machine's own
+  `10.0.2.15`, with `ToolsSmoke` running one of them in the background
+  (`&` prefix) so both are alive at once.
+
+The same limit is why **active-mode FTP is proven up to `accept()` and not
+through it**: the client binds, listens, sends a correct
+`PORT 10,0,2,15,27,148` (27·256+148 = 7060, the pinned `DATAPORT`), takes the
+server's `200` and `150` — and the callback cannot reach it, so it reports
+"the server never opened the data connection" and carries on with the session.
+The `accept()` that would have completed it is the same code path the guest-to-
+guest `nc` runs, which does complete.
+
+#### What was verified, against real servers
+
+`tests/tools/run-nettools.sh` boots the A1200 profile on SLIRP with
+`tests/tools/netpeer.py` on the host: an echo server, a telnet server that
+offers `WILL ECHO`, `WILL SGA`, `DO TERMINAL-TYPE`, `DO NAWS` and records what
+comes back, and an FTP server doing both `PASV` and `PORT`.
+
+- `nc -z` names an open port, a refused one, and a range.
+- `nc` client carries 21 bytes to the echo server and prints the echo; with
+  `-N` the server sees the FIN and closes, and `nc` exits 0.
+- `nc -l` binds, listens, accepts a connection from another process on the
+  Amiga and prints what it is sent, over `127.0.0.1` and over `10.0.2.15`.
+- `telnet` answers `DO ECHO`, `DO SUPPRESS-GO-AHEAD`, `WONT TERMINAL-TYPE`,
+  `WONT WINDOW-SIZE` — verified from the server's side, not just ours — then
+  carries the session and reports the close.
+- `ftp` passive: `USER`/`PASS`/`SYST`/`PWD`/`PASV`/`LIST`/`TYPE I`/`RETR`/
+  `SIZE`/`STOR`/`QUIT`, 49 bytes down and 21 up, both byte-exact.
+- `ftp` active: as above.
+- The failures read as sentences: "connection refused", "cannot resolve", "the
+  server never opened the data connection" with the advice that passive is the
+  way round that works.
+
+#### Two things learned about the harness
+
+`ToolsSmoke` grew a `&` prefix (`SystemTags` with `SYS_Asynch` and its own
+`NIL:` handles) and a `wait <secs>` line, because a listener and the thing that
+connects to it must be running at the same time and `SystemTagList()` waits.
+Its redirection also now adds only the half the command has not brought itself
+— appending a second `>` made the Shell silently drop one of them.
+
+And `tool_output_write()` calls `Flush()` first. These commands print through
+`VPrintf()`, which dos.library buffers, and socket bytes through `Write()`,
+which it does not; without the flush an `ftp` transcript comes out with the
+directory listing spliced into the middle of the reply that announced it.
+Observed exactly that way.
