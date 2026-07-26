@@ -12918,3 +12918,279 @@ comes from describes a failure at several hours. The run should be re-armed —
 and it is more useful re-armed *after* the `src/bsdsocket/socket.c` fixes for
 §37.4 and §37.5 land, because then it tests the stack somebody would ship
 rather than the one that was measured.
+
+## 39. The bracket was 790 µs, and curl takes 108 of them (2026-07-26)
+
+§29.3 left this project with two instruments disagreeing about the same wire:
+our own `NetTrace` made this stack **55% faster** than Roadshow 1.15 and the
+stack-agnostic Aminet curl made it **12% slower**, five runs out of five, with
+the gap scaling with the body rather than sitting in setup. §32.11 read the
+receive path while fixing something else and named a candidate without changing
+it: `bsd_nx_enter()`/`bsd_nx_leave()` bracket every `recv()`, every `send()`
+and every poll pass inside `WaitSelect()`, and `src/bsdsocket/netx_call.c`
+prices one bracket at an `AllocSignal()`, a `_tx_thread_create()`, a baton
+acquire and their inverses. curl reads small and selects between reads;
+`NetTrace` reads 4,096 bytes through one `WaitSelect()` loop. A per-call
+constant is exactly the shape of "we win the first byte and lose everything
+after it".
+
+**The bracket is real, it cost 790 µs, it is now 268 µs — and it was never the
+reason we lose to Roadshow.** One 1.2 MB curl fetch takes **108** brackets, not
+the thousands the mechanism assumed, so the whole of that saving is 76
+milliseconds of a 17-second fetch and the throughput A/B is a flat line. The
+same change moves `NetTrace`'s loopback figure by 12.8%, which is what 380
+brackets at 522 µs comes to — so the mechanism is right about everything except
+the client that loses. That is the sixth predicted bottleneck this project has
+had overturned by measurement in three days, and this section is written that
+way round on purpose.
+
+### 39.1 What one bracket costs, on a 14 MHz 68020
+
+`tests/perf/bracket_test.c`, new here, and it is a sibling of
+`tests/perf/perf_test.c` rather than a part of it: it needs no netstack
+singleton, no configuration file and no SANA-II device, so it builds on every
+profile. `ReadEClock()` is the time base (709,379 Hz, 1.409 µs a tick) and the
+measurement's own cost is calibrated out of every figure, the same way §24's
+census does it. Only the A1200 profile is quoted, for the reason
+`tests/perf/cpucal.c` measures.
+
+Five runs of the unmodified port, the pair timed in halves:
+
+| | |
+|---|---:|
+| `tx_amiga_adopt_thread` + `tx_amiga_orphan_thread` | **776–790 µs** |
+| ... the adopt half | 224–242 µs |
+| ... the orphan half | 539–564 µs |
+| ... `AllocSignal()` + `FreeSignal()` inside it | **16–19 µs** |
+| ... one `_tx_amiga_wake_scheduler()` poke | **202–204 µs** |
+| ... the nested path, `tx_thread_identify()` | 20 µs |
+| ... one `Forbid()`/`Permit()` pair, for scale | 9.6 µs |
+
+Two of those rows decide what the fix is.
+
+**The signal is not the cost.** `netx_call.c` named `AllocSignal()` first and it
+is 2% of the bracket. What is expensive is `_tx_thread_create()` on the way in
+and `_tx_thread_terminate()` + `_tx_thread_delete()` on the way out.
+
+**The scheduler poke is a quarter of it.** `_tx_amiga_wake_scheduler()`
+`Signal()`s the scheduler Task, which on Exec is an immediate switch to a
+higher-priority task that finds nothing to dispatch and goes back to sleep —
+two context switches, 202 µs, at the end of *every* orphan.
+
+### 39.2 Two changes, and what each is worth
+
+**Skip the poke when there is nothing to dispatch.** `_tx_thread_execute_ptr ==
+TX_NULL` means no ThreadX thread is ready, so waking the scheduler cannot
+dispatch anything. It cannot lose a dispatch either: every path that makes a
+thread ready afterwards wakes the scheduler itself, from an interrupt
+(`tx_thread_context_restore.c`) or from whoever holds the baton
+(`_tx_thread_system_return`). Read inside the `Forbid()` that lowers the system
+state, so the answer cannot go stale between the test and its use. The
+adopt/orphan pair goes **790 → 596 µs**, all of it out of the orphan half
+(551 → 367).
+
+**Keep the TX_THREAD between calls.** The baton must be given back per call —
+an adopted task that holds it across application code stops the IP thread, the
+timer and every other socket user, and that is not negotiable. The
+*registration* is a different thing and is repeatable: a base belongs to one
+task (`library.c` records it in `sb_Task`) and that task gets the same
+`TX_THREAD` every time. `tx_amiga_adopt_suspend()`/`tx_amiga_adopt_resume()`
+leave the thread `TX_SUSPENDED` between brackets — on no ready list,
+dispatchable by nobody, with the baton free — and only hand the baton back and
+forth. Measured: **268 µs**, resume 134 and suspend 134.
+
+So the bracket is **2.9× cheaper** and the invariants are untouched:
+`NX_THREADS_ONLY_CALLER_CHECKING` still sees a real `TX_THREAD`, and the baton
+is still taken and released on every call.
+
+**The lifetime this does not close, stated because it is the reason to think
+twice.** A Task that exits without closing the library leaves a suspended
+`TX_THREAD` in ThreadX's created list whose `tx_thread_amiga_task` points at
+freed memory. Nothing dispatches a suspended thread and nothing else resumes
+one, so it is inert — but only for as long as that stays true.
+`bsd_child_destroy()` releases it, which is the one path that runs on the
+owning task with every socket already closed; a base torn down by anyone else
+gets `tx_amiga_discard_thread()`, which removes the registration and leaves the
+Exec signal alone because only its owner may free it. A base used from a second
+task now fails with `ENETDOWN` rather than working by accident: there is
+nowhere to put a second adoption, and `src/bsdsocket/tcp_handler.c` already
+states the rule ("a SocketBase belongs to one task").
+
+### 39.3 What it does to a transfer, before anyone else's client is involved
+
+256 KB over loopback, sent by a native ThreadX thread and drained by an Exec
+Task, at four read sizes and four bracket policies. `per-call` is what
+`transfer.c` does; `cached` is the same with the change above; `on-miss`
+brackets only the calls that actually reach `nx_tcp_socket_receive()`; `once`
+is one bracket for the whole transfer and is the floor.
+
+| read | per-call | cached | on-miss | once |
+|---:|---:|---:|---:|---:|
+| 512 | 300 KB/s | **374** | 460 | 512 |
+| 1,460 | 411 | **451** | 480 | 535 |
+| 4,096 | 473 | **492** | 492 | 548 |
+| 16,384 | 517 | **524** | 493 | 557 |
+
+At 512-byte reads the change is worth **+25%**, and the per-call column is
+already 852 ms where the unmodified port was 947. The two columns converge as
+the read grows, which is the whole claim: this is a per-CALL constant. At
+16 KB reads it is worth 1%.
+
+`on-miss` is in the table because it is the next idea and it is **not taken**:
+it drops the bracket for a `recv()` that can be served out of the packet
+already parked on the socket, which is arithmetic and a copy — but it also
+moves `nx_packet_release()` outside the baton, and releasing a packet can
+resume a thread suspended on the pool. That is precisely what the baton exists
+to serialise. It is worth 86 KB/s at 512-byte reads and it is not worth
+that.
+
+### 39.4 And then the count, which ends the theory
+
+`-DAMINETXDUO_NXCENSUS=ON` counts the brackets `bsdsocket.library` takes and
+times them, reporting both to the serial log when a base closes. It exists
+because §29.3's follow-up experiment was named and never run, and because
+inferring a call count from a throughput delta is how a prediction gets
+confirmed instead of tested.
+
+One fetch of 1,200,000 bytes over `http://` with the Aminet `curl.020`
+8.22.0-DEV — the third-party binary, nothing of ours in it — repeated twice per
+boot:
+
+| | brackets | in `enter` | in `leave` |
+|---|---:|---:|---:|
+| per-call (`-DAMINETXDUO_NXCACHE=OFF`) | **108** | 35 / 34 ms | 2,376 / 2,378 ms |
+| cached | **108** | 24 / 22 ms | 2,311 / 2,272 ms |
+
+**108 brackets for 1.2 MB.** curl is not making thousands of short reads with a
+`select()` between them: it is averaging **11 kB per library call**, because on
+this machine it spends most of the fetch outside the stack — writing the body
+out — while the receive queue fills behind it. §32.11's "twice per chunk" is
+wrong by more than an order of magnitude.
+
+**The `leave` column is not bracket overhead and must not be read as any.** The
+uncontended suspend is 134 µs (§39.1); 21 ms is what releasing the baton
+actually does — it hands the CPU to the ThreadX scheduler, which dispatches the
+IP thread, which does all the inbound processing it could not do while an
+application task held the baton. That is the stack working, charged to whoever
+happened to open the gate.
+
+So the honest accounting of the bracket in one curl fetch is `enter` plus the
+suspend: **35 ms before, 24 ms after, out of ~17,000 ms**. 0.2% of a fetch.
+
+### 39.5 The A/B on the honest instrument, which is a flat line
+
+`tests/compare/run-compare.sh -s ours|roadshow -w curl`, `AMINETXDUO_PERF=1`
+(the measurement lane of 81b8f8d), A1200, 1,200,000 bytes, `CurlCheck`'s own
+50 Hz tick count, both fetches of each boot:
+
+| | fetch 1, ticks | fetch 2, ticks | fetch 2 |
+|---|---:|---:|---:|
+| ours, clean `HEAD` (`b0dd15f`) | 863 | **825** | 16.50 s = 72.7 kB/s |
+| ours, with §39.2 | 861 | **825** | 16.50 s = 72.7 kB/s |
+| Roadshow 1.15 | 782 | **746** | 14.92 s = 80.4 kB/s |
+
+**Nothing moved.** Two ticks on the first fetch and zero on the second, against
+a predicted 76 ms — which is four ticks, i.e. below what this instrument can
+see. The census says why, and the two agree to within the resolution of the
+clock. Roadshow is **10.6% ahead**, in the same direction and about the same
+size as §29's 14%, so the finding reproduces; the bracket is not what it is
+made of.
+
+**The absolute numbers in that table must not be quoted against §29's.** Every
+arm here is roughly 1.6× slower than the same workload in §29 (10.72 s ours,
+9.39 s Roadshow). The `-x` lane takes the *emulator* alone; it does not take
+the Mac, and other workstreams were building on it throughout. The three arms
+above were taken inside one hour under the same conditions, so the comparison
+between them holds and the comparison with §29 does not.
+
+### 39.6 The other instrument, which does move
+
+`NetTrace` is the arm §29.3 said was 55% faster than Roadshow, and it reads
+4,096 bytes at a time through one `WaitSelect()` loop -- so 524,288 bytes is
+about 128 receives and twice that many poll passes, call it 380 brackets where
+curl makes 108 for more than twice the payload. If the diagnosis has any
+predictive power left, this is where it has to show.
+
+`run-compare.sh -w bench`, one `NetTrace` binary staged unchanged against all
+three libraries, `AMINETXDUO_PERF=1`, 524,288 bytes, the command's own elapsed
+time (which *is* the transfer -- `NetTrace` does one and exits):
+
+| | loopback | | wire | |
+|---|---:|---|---:|---|
+| ours, clean `HEAD` | 1.58 s | 324 KB/s | 4.46 s | 115 KB/s |
+| ours, with §39.2 | **1.40 s** | **366 KB/s** | 2.98 s | 172 KB/s |
+| Roadshow 1.15 | 2.08 s | 246 KB/s | 4.52 s | 113 KB/s |
+
+**Loopback moves by 180 ms, and 380 brackets at 522 µs saved is 200.** That is
+the mechanism doing exactly what it says on the workload it was described for,
+and it is the closest thing to a confirmation in this section.
+
+**The wire row is not a measurement**, for the reason §32.8 gives: 2.68 s and
+2.98 s came out of the same library in the same boot, so a 33% column is noise.
+Loopback is the solid one and always has been.
+
+**So the two instruments still disagree, and now they disagree more.** After
+this change `NetTrace` makes us 1.49× faster than Roadshow on loopback and the
+Aminet curl makes us 10.6% slower on the wire. The gap between them did not
+close, which was the outcome that would have proved the diagnosis; what closed
+instead is the question of *why* they differ -- they are counting different
+things, 380 brackets against 108, and the one that counts more of them
+improved by exactly what the arithmetic predicts. The bracket was a real cost
+on `NetTrace`'s pattern and never a large one on curl's.
+
+### 39.7 What is left, and where it is not
+
+* **It is not the adoption.** Priced, reduced by 2.9×, and worth 0.2% of the
+  workload that loses.
+* **It is not the copy path.** §32.11 read it and found no bounce buffer;
+  nothing here contradicts that.
+* **It is not `select()`.** curl makes 108 library calls in total for 1.2 MB,
+  so `WaitSelect()` cannot be a large share of anything, and §35 put it at 1.7%
+  of an SSH handshake from the other direction.
+* **The IP thread costs 2.3 s per 1.2 MB**, measured as the time an application
+  task does not get back after releasing the baton. That is 1.9 µs a byte, and
+  it is the largest single stack-side number in this section. Whether Roadshow's
+  equivalent is cheaper is the question §29.5's ICMP result already hinted at
+  ("our per-packet path costs more than Roadshow's") and nothing here has
+  measured it.
+* **The tick task stalled for 743–761 ms in every arm**, ours and the control
+  alike — `tick: stalled 745 ms, dropping 29 of 37 ticks (cap 8)` — which means
+  TCP's own timers stopped advancing for three quarters of a second in the
+  middle of a transfer. It is present with and without this change, it is not
+  caused by it, and nobody has looked at it.
+
+### 39.8 The instruments, kept
+
+Both switches stay in the tree, and both are off by default:
+
+* `-DAMINETXDUO_NXCENSUS=ON` — the bracket count and its time, per base, to the
+  serial log. It puts two `ReadEClock()` calls around the thing it measures, so
+  it is not something to ship.
+* `-DAMINETXDUO_NXCACHE=OFF` — the control arm, restoring the per-call
+  adopt/orphan. Two libraries out of one tree differing in one decision is how
+  §39.4's table was taken, and it is the only way to take it again once the tree
+  has moved.
+
+`tests/perf/bracket_test.c` is the third, and it is the one to run first the
+next time somebody is sure they know what a call costs.
+
+### 39.9 The cover
+
+Every harness in the tree, against the change, on the same machine. Each line
+is the figure the same suite gives on clean `HEAD`.
+
+| | |
+|---|---|
+| conformance, `LOOPBACK` | 130 passed, 0 failed, 12 skipped |
+| conformance, `HOST 10.0.2.2` | 141 passed, 1 failed (`accept()`, the SLIRP inbound path of §12) |
+| `tests/clients` | 94 checks, 0 failures |
+| `tests/tcpdrill` | 26 cases, 0 failed; 210 checks, 0 failed |
+| `tests/curl` A–F | 147 passed, 2 failed (`a44_cookies_send`, `f07_ftp_active`) |
+| `tests/curl -p`, 8…48 | 9 passed, 0 failed, `AvailMem` delta **+0** |
+| `tests/libraries` | 8 checks, 0 failures |
+| `tests/tools/run-livetools.sh` | 23 ok, harness `FAIL` — the empty-serial-log false red of §32.8.1 |
+| `tools/ci.sh` (host + all four cross configs) | green |
+
+The concurrency sweep is the one that matters most for a change of this shape,
+because a cached registration that were wrong about task identity would show up
+there first and nowhere else. `p05_parallel_48` is green with no memory moved.
