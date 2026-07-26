@@ -5415,3 +5415,301 @@ would **trap** rather than saturate, so the code must test before dividing; and 
 add-back, where the estimate is one too large. Plus unnormalised divisors so the shift
 path runs, single-limb divisors, all-ones, and dividends shorter than the modulus. **0
 mismatches**, 5,660 host checks total, and 0 mismatches against AmiSSL on target.
+
+
+## 16. Packet capture, and what TCP is actually doing (2026-07-26)
+
+Three defects found in the week before this one all presented as *slowness* while
+being something structurally worse underneath: a SANA-II receive queue four frames
+deep that lost 87 of 232 concurrent transfers while TCP hid it in retransmissions;
+a teardown freeing a reply port, pinned packets and the stack of a thread still
+running on it, visible only as a 15-second pause; and a resumed TLS handshake that
+verified nothing, visible only as being fast. The common cause is not carelessness,
+it is that **every instrument in this tree measured outcomes rather than mechanism**,
+so anything TCP can paper over was invisible.
+
+This section builds the instrument that ends that, and then uses it.
+
+### 16.1 The first finding is the instrument itself: `bpf_*` was never called
+
+`src/bpf/` is 46 KB of capture channels, a BPF filter VM and a validator, with 201
+unit-test checks. It was reachable from nothing:
+
+- **No tap call in `src/sana2/`, in either direction.** The two call sites are named
+  and located, with the exact arguments, in a block comment in
+  `include/aminetxduo/bpf.h` — "THE TWO CALLS `src/sana2/` MUST ADD" — and neither
+  existed.
+- **`ami_bpf_attach_interface()` had no caller**, so no interface was ever registered
+  and `BIOCSETIF` could not have succeeded against any name.
+- **All eight `bpf_*` LVOs** (0x16e–0x198) pointed at `bsd_enosys()`.
+- **The `aminetxduo_bpf` archive was linked by `tests/mbuf_bpf` and by nothing that
+  ships** — not by `bsdsocket.library`, not by the netstack.
+
+So the answer to "can `bpf_*` do this?" was *no*, for the most ordinary reason: it
+had been written, tested against synthetic input, and never connected. Both ends are
+connected now and there is a consumer, which is what turned 201 green checks into a
+subsystem that has met a real workload.
+
+### 16.2 Two capture points, and why the second is not optional
+
+| | where | sees |
+|---|---|---|
+| `eth0` | the SANA-II taps, at the top of `ami_sana2_rx_deliver()` and after the raw block in `ami_sana2_tx_send()` | every frame that crosses a wire, in the shape the device saw it, ARP included |
+| `lo0` | NetX Duo's IP packet filter, installed by `src/netstack/netstack_capture.c` | loopback |
+
+The second one is the interesting one. NetX Duo's loopback interface has
+`nx_interface_link_driver_entry == NX_NULL` (`nx_ip_create.c:157`), and
+`_nx_ip_driver_packet_send()` shortcuts a loopback destination straight into
+`_nx_ip_packet_deferred_receive()`. **No driver is called at all**, so no tap on a
+driver can ever see loopback traffic — and loopback is the path every throughput
+figure in §11 was measured on. Without `NX_ENABLE_IP_PACKET_FILTER` the fastest path
+in the stack would have been the one path with no instrument on it.
+
+The `lo0` tap fires on `NX_IP_PACKET_OUT` only. A loopback datagram is sent once and
+received once; capturing both directions would put two identical records in the file
+and every analyser downstream would call the second one a retransmission.
+
+Both write **DLT_EN10MB**, so one pcap writer, one filter program and one set of eyes
+in Wireshark serve both. `lo0`'s fourteen bytes are synthesised with zeroed addresses.
+
+`NetTrace` is the consumer: it runs a workload and captures it to a **classic pcap
+that opens in Wireshark and tcpdump with no conversion**. It links no part of `src/`
+— every call is a published `bsdsocket.library` LVO, which is the point, because a
+tool that linked the archive would get its own copy of the channel table and capture
+nothing. It is one program rather than a daemon plus a workload because the trace
+exists to explain a throughput number, and a number and a trace from two separate
+runs are two experiments.
+
+**The snap length is the filter's return value.** The bpf ABI has no `BIOCSSNAPLEN`
+and 4.4BSD never needed one: a filter program answers with the number of bytes to
+keep, so `BPF_RET|BPF_K, 96` accepts every packet and truncates it to 96 bytes.
+
+### 16.3 What is capturable on the host side of FS-UAE's SLIRP
+
+Stated plainly, because it decides what an independent view can be:
+
+- **FS-UAE 3.2.35 has no packet-dump option.** Not on the command line (`--help`
+  prints a copyright banner and a URL), not as a `uae_*_pcap` config key, and libpcap
+  is not linked. The only `pcap` strings in the binary are three Windows-only winpcap
+  failure messages.
+- **`tcpdump` on the host is not an alternative.** SLIRP is user-mode NAT *inside* the
+  emulator process, so none of the guest's own framing — no Ethernet header, no ARP,
+  no DHCP, and not the guest's TCP headers — ever reaches a host interface. What the
+  host would see on `lo0` is SLIRP's re-originated connection, which is a different
+  TCP conversation. And `/dev/bpf` on this machine needs a password.
+- **What does exist, and is better:** the emulated A2065 writes every frame it
+  handles, both directions, complete, as hex into `<base_dir>/Cache/Logs/
+  fs-uae.log.txt` — **unconditionally** whenever `network_card = a2065`, with no
+  option to request it and none to suppress it. `tests/trace/a2065pcap.py` converts
+  it. That output is produced inside the emulated hardware, below every line of our
+  code, so it is independent by construction: a frame that appears there and not in
+  the guest's own pcap was lost between the card and NetX Duo, which is the exact
+  shape of the `AMI_SANA2_RX_DEPTH_IPV4` defect.
+- **What it cannot tell you: there are no timestamps.** Not coarse — absent. The
+  converter stamps records with a counter so the file opens and the ORDER is right,
+  and `tests/trace/tcpaudit.py` detects that synthetic clock and suppresses every
+  timing rather than printing percentiles computed from a fiction. Take timing from
+  the guest pcap, which has real `GetSysTime()` microseconds; take loss and ordering
+  from the host one.
+- One more caveat, checked rather than assumed: the `SRC:` field of the emulator's
+  own `A2065<-`/`A2065<*` header lines is printed from the wrong offset. The hex
+  dumps are right; the header lines are not, and the converter ignores them.
+
+**The two views agree packet for packet.** On a 524,288-byte transfer over the wire,
+both report 365 segments carrying 524,393 bytes, the same MSS both ways, the same
+window minima and maxima, and **zero retransmissions**. That agreement is the
+strongest single statement in this section: nothing is being lost between SLIRP, the
+A2065, `a2065.device`, the SANA-II shim and NetX Duo.
+
+### 16.4 Retransmissions and duplicate ACKs: there are none
+
+Every trace taken, in both directions, on both paths, in both views:
+
+| | segments | retransmitted | duplicate ACKs |
+|---|---|---|---|
+| loopback, 524288 B | 128 | **0** | 1 |
+| wire, 524288 B, guest view | 365 | **0** | 0 |
+| wire, 524288 B, host view | 365 | **0** | 0 |
+
+`bs_drop` on the capture channel was 0 in every run, so the traces have no holes.
+**The RX-depth fix is complete and there is no residual loss.** The IPv4 read queue
+comes out 32 deep on the 8 MB profile (`sana2: IPv4 read queue 32 deep (pool 256
+packets)` in the serial log), and at that depth a 365-segment bulk receive loses
+nothing.
+
+This is stated as a result and not as an absence of news: it is the direct successor
+to the defect that started all of this, and it is now measured rather than assumed.
+
+### 16.5 The window, and what actually governs it
+
+We advertise **8192 bytes** (`BSD_TCP_WINDOW`, `src/bsdsocket/bsdsocket_internal.h`),
+passed to every `nx_tcp_socket_create()`. It is not adaptive; `SO_RCVBUF` moves the
+receive *queue* depth but not this number.
+
+`tcpaudit.py` measures the thing that settles it: **unacknowledged bytes at the
+moment each segment left, against the window the other side had advertised.**
+
+| A1200, 14 MHz, 524288 B | max in flight | advertised | |
+|---|---|---|---|
+| **loopback** | 4096 | 4096 | **100% — window-limited** |
+| wire | 7200 | 8192 | 88% |
+
+- **Loopback is window-limited, flatly.** Exactly one 4096-byte segment in flight,
+  and a **14.9 ms median gap** between segments in which the sender has nothing it is
+  allowed to do. Raising the window to 32 KB moves loopback from **297 to 352 KB/s
+  (+18%)** and drops occupancy to 33%.
+- **The wire is not.** With prompt acknowledgements the peer never has more than
+  **2880 bytes** outstanding — 9% of a 32 KB window, 35% of an 8 KB one. At 179 KB/s
+  and a 1440-byte segment that is 8 ms per segment, which is the receive pipeline's
+  own cost, not a window stall. So the ~117 KB/s that §11 measured through curl, and
+  the 161–179 KB/s `NetTrace` measures without curl's copies, are **not** capped by
+  the advertised window.
+
+**The window never reached zero on the shipped configuration.** It does now, on
+loopback, as a consequence of §16.6 — see there.
+
+### 16.6 Delayed ACK, Nagle, the tick — and the defect
+
+**The tick first, from the running system rather than from a comment.** The serial
+log prints it at startup:
+
+```
+[INFO] tick: 50 Hz from timer.device unit 1 (48.00 Hz wakeups), E-Clock 709379 Hz
+```
+
+**50 Hz**, one tick every 20 ms, matching `NX_IP_PERIODIC_RATE` in `nx_user.h` and
+`TX_TIMER_TICKS_PER_SECOND`. The 100 Hz in the README diagram is stale. NetX Duo
+derives its own rates from it: the fast periodic timer is `50/10` = 5 ticks = 100 ms,
+and the delayed-ACK timer `50/5` = 10 ticks = **200 ms**.
+
+**Nagle does not exist.** Not "is disabled" — the string `nagle` does not appear
+anywhere in the vendored NetX Duo tree, and `setsockopt(TCP_NODELAY)` returns success
+without doing anything, which is honest because the behaviour is always no-delay. The
+trace agrees: 32 separate 4096-byte segments went out on loopback with an ACK
+outstanding, which a Nagle implementation would have coalesced.
+
+**And the periodic tick does not pace round trips.** That was §11's explanation for
+the wire path scaling sub-linearly with clock, offered as a hypothesis and never
+confirmed. It is now disconfirmed: with the fix below, the median ACK delay on the
+wire is **2.0 ms** and 151 of 289 acknowledgements go out inside **2 ms**. Nothing is
+quantised at 20 ms. Whatever the residual ceiling above ~15 MHz is, it is not the
+50 Hz tick.
+
+#### The defect: RFC 1122's ACK rule is not implemented, so ACK latency scales with the window
+
+`NX_TCP_ACK_EVERY_N_PACKETS` is defined nowhere in the vendored tree, so the whole
+`need_ack` block in `nx_tcp_socket_state_data_check.c` is compiled out and
+**4.2.3.2 — "acknowledge at least every second full-sized segment" — is simply
+absent.** What remains acknowledges on two triggers, and neither is per-segment:
+
+1. a **window update**, sent only once the receive window has re-opened by **half of
+   `nx_tcp_socket_rx_window_default`** (`nx_tcp_socket_state_data_check.c:1135`,
+   `nx_tcp_socket_receive.c:212`);
+2. the **200 ms delayed-ACK timer**.
+
+So **the interval between acknowledgements is proportional to the window**, and when
+the application cannot consume half a window inside 200 ms the timer becomes the
+pacer. The consequence is worse than the delay: it makes the obvious remedy for a
+small window — enlarging it — actively harmful. Measured over the wire, 524288 bytes,
+changing `BSD_TCP_WINDOW` from 8192 to 32768 and **nothing else**:
+
+| | 8 KB | 32 KB |
+|---|---:|---:|
+| throughput | 161 KB/s | **89 KB/s** |
+| ACK delay p50 | 6.7 ms | **71.4 ms** |
+| ACK delay p90 | 8.7 ms | **187.4 ms** |
+| ACKs in the 200 ms bucket | 1 of 122 | **26 of 59** |
+| longest duplicate-ACK run | 0 | **14** |
+| longest gap between data segments | 141 ms | **1361 ms** |
+| retransmissions | **0** | **0** |
+
+**Zero retransmissions in both columns.** Nothing was lost; the sender was waiting,
+and no instrument in this tree before now could have told those two apart. A
+45% throughput regression from raising a window, with no loss anywhere and a
+fourteen-deep run of duplicate ACKs, is precisely the class of thing the last three
+defects were.
+
+#### The fix, and what it is and is not worth
+
+`#define NX_TCP_ACK_EVERY_N_PACKETS 2` in `nx_user.h`. One ULONG per socket that the
+struct already carries and `nx_tcp_socket_create.c:154` already initialises, plus one
+comparison per received data segment.
+
+| wire, 8 KB window, 524288 B | before | after |
+|---|---|---|
+| ACK delay p50 / p90 / max | 6.7 / 8.7 / 137.8 ms | **2.0 / 9.9 / 14.7 ms** |
+| ACKs inside 2 ms | 1 of 122 | **151 of 289** |
+| peer bytes in flight | 7200 of 8192 (88%) | **2880 of 8192 (35%)** |
+| retransmissions | 0 | 0 |
+| throughput | 161–174 KB/s | 163–174 KB/s |
+
+**Bulk throughput does not move**, and that is stated rather than buried: at an 8 KB
+window, half the window is already about three segments, so the window update was
+already firing often enough. What moves is **latency** — a 3.3× cut in the median and
+a 9× cut in the worst case — and that is what every request/response exchange pays:
+each HTTP round trip, each DNS query, each leg of a TLS handshake. It is also the
+prerequisite for ever raising the window: with it, the 32 KB build returns to
+179 KB/s and 208 acknowledgements instead of 59.
+
+**One thing got worse and it is worth naming.** On loopback the receiver now
+advertises a **zero window 64 times** in a 128-segment transfer, where before it never
+did, and loopback bulk throughput falls about 3% (297 → 287 KB/s). That is not the
+ACK rule misbehaving — it is the 8192-byte window being too small for a 4096-byte
+application write, exposed rather than caused. Two 4096-byte segments fill the window
+exactly; acknowledging on the second one therefore advertises zero, honestly. The
+window reopens on the next `recv()` with no persist-timer stall, which is why the
+cost is 3% and not a cliff. At a 32 KB window with the same fix there are **no** zero
+windows at all, in-flight occupancy is 33%, and loopback runs at 352 KB/s.
+
+**So the window should be raised, and it has not been.** The reason is stated rather
+than hidden: the receive queue is drawn from the same `NX_PACKET` pool the SANA-II
+readers pin 32 of, the pool is 256 packets on the 8 MB profile and
+`AMI_POOL_MIN_PACKETS` (16) on the 4 MB floor, and 32 KB of window per socket times
+forty concurrent sockets is several times the whole pool. That is a **functional
+limit, not a memory budget** — exhausting the pool drops frames — and it needs the
+same treatment `AMI_SANA2_RX_DEPTH_IPV4` got: derived from the pool, with the
+concurrency case (`tests/curl` `d03_parallel_40`) as the acceptance test. Until that
+measurement exists, `AMINETXDUO_TCP_WINDOW` is the knob that made this section
+possible — two libraries out of one tree, differing in one constant — and the default
+stays at 8192.
+
+### 16.7 MSS, fragmentation and segment sizes
+
+Nothing wrong here, and the numbers are worth recording because "we are sending
+undersized segments" was a live hypothesis:
+
+- **MSS offered: 1460** in our SYN on the wire, 65495 on loopback. Both are
+  interface-MTU derived and both are right.
+- **The peer sends 1440-byte segments** (364 of them, plus one 233-byte tail). 1440
+  rather than 1460 is SLIRP's re-origination, not ours.
+- **We never fragment.** `nx_ip_fragment_enable()` is not called and no fragment
+  appeared in any trace.
+- **Our own segments are the application's write size**, unmodified: 32 writes of
+  4096 became 32 segments of 4096 on loopback. With no Nagle that is correct
+  behaviour and not a defect, but it does mean an application that writes small
+  writes small on the wire.
+
+### 16.8 Things nobody predicted
+
+- **`CloseSocket()` sending a RESET is visible in every trace.** §12.3 lists it third
+  and calls it "a risk that has not been reproduced". It is now *observed*: every
+  completed flow in every capture ends `RST 1` from the Amiga side. Still not
+  reproduced as data loss — on these paths everything was acknowledged before the
+  close — but it is no longer an inference from source code.
+- **The capture costs about 10% on loopback and nothing measurable on the wire.**
+  Loopback 297 → 266 KB/s with a channel bound; wire 161 → 174 KB/s, i.e. inside
+  run-to-run variance. Both are reported rather than one, because the honest
+  statement is that the instrument perturbs the fast path and not the slow one.
+- **`NetTrace` itself found a class of bug the harness could not report.** Its 16 KB
+  capture buffer started life as a local in `main()`, and an AmigaDOS Shell command
+  runs on a 4 KB stack. The result was an F-line trap (`#8000000B`) and a **reboot
+  loop** — the machine ran the command list, crashed, reset, and ran it again, four
+  times, while `DH0:` kept only what had been flushed before the last reset. The
+  harness reported it as a timeout. Two lessons went into the tool: the control block
+  is static, and every line of output is flushed as it is written, because a
+  diagnostic tool that loses its last twenty lines when the machine has to be killed
+  is not a diagnostic tool.
+- **The emulator log is a capture nobody knew they had.** 41 MB of it was already
+  sitting in `build/fsuae-base-*/Cache/Logs/` from earlier curl runs, and converting
+  a two-week-old log reproduced §14's traffic — 834 segments, 1,200,106 bytes, window
+  minima of 5312 and 3780 — without re-running anything.
