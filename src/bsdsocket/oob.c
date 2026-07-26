@@ -57,7 +57,7 @@
  * nx_ip_packet_filter_extended for packet capture, which is a different slot
  * and a different call.  The previous value is saved and restored regardless.
  *
- * TWO DELIBERATE DIVERGENCES, both recorded in docs/RESEARCH.md 16
+ * TWO DELIBERATE DIVERGENCES, both recorded in docs/RESEARCH.md 17
  *
  *   1. The urgent byte is ALWAYS delivered in the normal stream as well, as
  *      though SO_OOBINLINE were set -- recv(MSG_OOB) returns a copy.  Taking

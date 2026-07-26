@@ -5815,3 +5815,209 @@ and it is stated as one; the point of running it was that it could have been a l
   sitting in `build/fsuae-base-*/Cache/Logs/` from earlier curl runs, and converting
   a two-week-old log reproduced §14's traffic — 834 segments, 1,200,106 bytes, window
   minima of 5312 and 3780 — without re-running anything.
+
+
+## 17. Closing the gap with Roadshow: SOCK_RAW and urgent data (2026-07-26)
+
+§12 named seventeen results that were not green and classified each one. This section
+does the arithmetic §12 did not, and then closes the part of it that is ours.
+
+### 17.1 The thirteen, named — and which tier the number belongs to
+
+**Roadshow 4.364 scores 138 passed, 4 known deviations, 0 unexpected failures — and no
+skips at all.** The four are in the suite's own `src/known_failures.c`, which is the
+authority rather than a claim we are making about a stack we do not have:
+
+| Test | Roadshow's behaviour |
+|---:|---|
+| 27 | `recv(MSG_OOB)` returns `EINVAL` |
+| 35 | loopback does not generate RST for a closed peer |
+| 76 | `SBTC_ERRNOLONGPTR` GET not supported (SET only) |
+| 77 | `SBTC_HERRNOLONGPTR` GET not supported (SET only) |
+
+`138 + 4 = 142` with nothing skipped, so **that run had a host helper connected and a
+working `SOCK_RAW`**. It is a network-tier number. Our comparable number was 133, not
+125, and the thirteen decompose as
+
+* **sixteen** Roadshow passes and we did not — the seventeen of §12 less test 27, which
+  Roadshow fails as well; minus
+* **three** we pass and Roadshow does not — 35, 76 and 77.
+
+As a work list, thirteen of our seventeen have to turn green, and they are:
+
+| Count | Tests | Class |
+|---:|---|---|
+| 6 | 3 `socket_create_raw`, 132–136 the ICMP family | **(a)** real gap — §17.2 |
+| 2 | 27 `recv(MSG_OOB)`, 64 `ws_exceptfds_oob` | **(a)** real gap — §17.3 |
+| 5 | five of the nine helper-gated | **(c)** environment |
+
+**A correction to §12.3**, which said `SOCK_RAW` was worth six results. It is worth six on
+the network tier and **three** on the loopback tier: `run_icmp_tests()` gates 133, 134 and
+135 on `helper_is_connected()` *after* test 132 (`test_icmp.c`), so on loopback only 3,
+132 and 136 can ever run.
+
+**And the loopback tier cannot reach 138 at all.** Nine of the 142 need a remote peer by
+construction, so 133 is that tier's ceiling. Comparing our loopback figure with Roadshow's
+138 was never an apples-to-apples comparison; the network tier is.
+
+### 17.2 `SOCK_RAW`: a tee, not an interception
+
+NetX Duo has no raw socket object. It has an IP-level raw *service*: one queue per
+`NX_IP`, fed by `_nx_ip_raw_packet_processing()` and drained by whoever calls
+`nx_ip_raw_packet_receive()` first. Two things rule it out as the back end for a BSD
+descriptor, and the second is the one that decides the whole design.
+
+1. **ICMP never reaches it.** `_nx_ip_dispatch_process()` sends ICMPv4 to
+   `nx_ip_icmp_packet_receive` and consults the raw hook only in the "protocol I do not
+   recognise" branch, so a raw socket opened with `IPPROTO_ICMP` — the one every `ping`
+   and `traceroute` opens — never sees a byte. `NX_ENABLE_IP_RAW_PACKET_ALL_STACK` moves
+   the hook to the top of the dispatch, ahead of TCP, UDP, ICMP and IGMP. It is not
+   documented in `nx_user_sample.h`; it appears only in `nx_ip_dispatch_process.c`, and
+   it does nothing unless `NX_ENABLE_IP_RAW_PACKET_FILTER` is on too.
+
+2. **That hook is the filter, and installing a filter turns the queue off.**
+   `_nx_ip_raw_packet_processing()` returns as soon as it sees one
+   (`nx_ip_raw_packet_processing.c`) and never touches
+   `nx_ip_raw_received_packet_head`. So `nx_ip_raw_packet_receive()` becomes dead code and
+   the queue, the per-protocol demultiplex and the wakeup are ours.
+
+`src/bsdsocket/raw.c` owns all three. The filter's return value decides ownership:
+`NX_SUCCESS` means "I took it" and the stack stops processing the packet, anything else
+means "not mine". **Ours copies a packet for each interested descriptor and always
+declines.** Consuming would be one packet copy cheaper and would break the machine — an
+echo request claimed by a raw socket is a request nobody answers, and a claimed reply is
+one `nx_icmp_ping()` never wakes on. Test 132 depends on exactly that: it pings 127.0.0.1
+*from a raw socket* and waits for the reply the ICMP layer still generates from the
+request it still sees.
+
+A reader gets a whole IP datagram, header included — the suite parses `(buf[0] & 0x0F) * 4`
+to find the ICMP header, and so does every `ping` ever written. The header is still
+physically in the buffer when the filter runs (`nx_ipv4_packet_receive.c` only advances
+`nx_packet_prepend_ptr` past it and leaves `nx_packet_ip_header` pointing at it), so the
+copy is taken with the pointer wound back and the original restored before declining.
+Transmit is the mirror image and is *not* header-included: the caller writes the protocol
+payload and `nxd_ip_raw_packet_send()` prepends the header from the socket's protocol, TTL
+and TOS. That is BSD's default; `IP_HDRINCL` is the opt-in and NetX Duo's core has no
+equivalent (it exists only in the `addons/BSD` layer this port does not use).
+
+The filter is installed only while at least one raw descriptor is open, so a machine with
+none pays a single NULL test per inbound packet inside a branch NetX Duo already had.
+Blocking `recv()` suspends on a per-socket ThreadX semaphore rather than an Exec signal:
+the filter runs on the IP thread and must not touch Exec, and the reader is already inside
+a `bsd_nx_enter()` bracket where ThreadX suspension is the correct way to wait. The
+registry and the queues are guarded by `nx_ip_protection`, which the IP thread already
+holds for the whole of its event loop.
+
+**The deliberate divergence §12 asked to keep is now moot and was still kept.**
+`test_socket.c:52` skips test 3 only on `EACCES`, and "you lack privilege" is meaningless
+on an OS with no privilege model, so we answer `EPROTONOSUPPORT` or `EAFNOSUPPORT` as the
+case warrants and never `EACCES`. The test passes rather than being skipped.
+
+### 17.3 `MSG_OOB`: the receive half was already there
+
+§12.3 said urgent data "is not a bsdsocket change: NetX Duo's TCP neither sets the `URG`
+bit nor parses it". **Half of that is wrong, and it is the expensive half that was
+already done.** `_nx_tcp_socket_packet_process()` tests `NX_TCP_URG_BIT` and calls the
+socket's `nx_tcp_urgent_data_callback`; the segment is still on
+`nx_tcp_socket_receive_queue_head` *with its TCP header*, because the header is stripped
+only at delivery (`nx_tcp_socket_receive.c`); and the urgent pointer is in the low half of
+`nx_tcp_header_word_4` in host order. Everything needed was reachable.
+`bsdsocket.library` was passing `NX_NULL` for that callback.
+
+Transmit is the half that genuinely is not there, and it cannot be added by preparing a
+header, because **both** senders finish with
+
+```c
+header_ptr -> nx_tcp_header_word_4 = (checksum << NX_SHIFT_BY_16);
+```
+
+— a plain assignment, *after* the checksum has been computed over that word
+(`nx_tcp_socket_send_internal.c`, `nx_tcp_packet_send_control.c`). Any urgent pointer
+planted beforehand is destroyed and the checksum is wrong as well.
+
+The obvious route was to open-code an urgent segment the way `bsd_tcp_send_fin()`
+open-codes the graceful FIN. **It is not the same problem.** A FIN is a control packet:
+fire-and-forget, never retransmitted. An urgent byte is *data*, it consumes a sequence
+number, and a copy of `_nx_tcp_socket_send_internal()` would have to reproduce the window
+arithmetic, the transmit-queue linking, the outstanding-byte accounting and the
+mutex-drop race check around the checksum — or skip the retransmit queue and leave a hole
+in the sequence space that stalls the connection permanently the first time the segment is
+lost.
+
+So the byte goes out through `nx_tcp_socket_send()` like any other: queued, retransmitted,
+accounted, with NetX Duo owning all of it. The `URG` bit and the urgent pointer are
+written into that one segment on its way past `nx_ip_packet_filter`, which
+`_nx_ip_packet_send()` consults *after* `_nx_ip_header_add()` and *before* the driver —
+the last point at which the bytes are still ours. Two 16-bit words change, so the TCP
+checksum is repaired incrementally by RFC 1624 equation 3 rather than recomputed. The
+filter is installed for the duration of that one send and removed immediately, so the
+steady-state cost on the packet path is zero.
+
+`nx_ip_packet_filter` is the plain hook and was free; `src/netstack/` uses
+`nx_ip_packet_filter_extended` for capture, which is a different slot and a different
+call. The previous value is saved and restored regardless.
+
+**Nothing in `third_party/` is patched, and no vendored symbol is overridden.** The
+receive half is a callback argument `nx_tcp_socket_create()` already takes; the transmit
+half is a hook `NX_ENABLE_IP_PACKET_FILTER` already installs for us.
+
+**Two deliberate divergences, both (b):**
+
+1. **The urgent byte is delivered in the normal stream as well**, as though
+   `SO_OOBINLINE` were always set; `recv(MSG_OOB)` returns a copy. Taking a byte back out
+   of the middle of a queued `NX_PACKET` would mean rewriting a segment the TCP state
+   machine still owns and still counts in its sequence space, to hide one byte that both
+   real callers — `ftp`'s `ABOR` and `telnet`'s interrupt — send inline anyway.
+2. **A retransmission carries the byte but not the `URG` bit.**
+   `_nx_tcp_socket_retransmit()` rebuilds `nx_tcp_header_word_3` without it in any case.
+   That is the right failure mode: the data is always reliable, only the urgency marking
+   is best effort.
+
+`recv(MSG_OOB)` with nothing marked answers `EINVAL`, which is 4.4BSD's answer and, as it
+happens, Roadshow's unconditional one. `IoctlSocket(SIOCATMARK)` answered `ENOSYS` and now
+answers whether an unread urgent byte is outstanding; the suite does not test it.
+
+### 17.4 Where it lands
+
+| | before | after |
+|---|---|---|
+| loopback tier | 125 passed, 1 failed, 16 skipped | **130 passed, 0 failed, 12 skipped** |
+| network tier | 133 passed, 2 failed, 7 skipped | **141 passed, 1 failed, 0 skipped** |
+| Roadshow 4.364 | | 138 passed, 4 known, 0 skipped |
+
+The loopback tier is at its structural ceiling less one: 130 of the 133 it can reach.
+
+Everything still not green, named:
+
+| # | Name | Class | Why |
+|---|---|---|---|
+| 39, 40, 42 | `tcp_network_64k`, `udp_network_datagram`, `tcp_network_large` | **(c)** | `helper_is_connected()` gate; green on the network tier |
+| 103, 104 | `gethostbyname_external`, `gethostbyaddr_external` | **(c)** | same gate; green on the network tier |
+| 133, 134, 135 | `icmp_network`, `icmp_large_payload`, `icmp_multi_ping` | **(c)** | same gate; green on the network tier — 2.5 ms, 9.9 ms and 5/5 replies |
+| 138, 140, 142 | `tp_tcp_network`, `tp_udp_network`, `tp_tcp_sustained_network` | **(c)** | same gate; green on the network tier |
+| 41 | `accept(): incoming connection from remote host` | **(c)** | the one result neither tier reaches — see below |
+
+Nothing is left in class **(a)**.
+
+### 17.5 Test 41, re-checked rather than inherited
+
+§12 called it an environment artefact on the strength of the helper log
+(`CONNECT to 127.0.0.1:7861 failed: [Errno 61] Connection refused`) and of
+`uae_slirp_ports` reaching the FS-UAE config and doing nothing. That is circumstantial,
+so it was checked again with the option UAE actually documents for the job.
+
+`uae_slirp_redir = T:7861:7861`, dropped into the run's private `Host.fs-uae` (the same
+route that turns FS-UAE's own bsdsocket emulation off), **reaches the emulator** — it is
+echoed in `fs-uae.log.txt` right after `bsdsocket_library = 0` — and test 41 still fails.
+The decisive measurement is on the host side: with the guest booted and the suite running,
+
+```
+lsof -nP -iTCP -sTCP:LISTEN -a -c fs-uae      →  nothing
+lsof -nP -iTCP:7861                            →  nothing
+```
+
+FS-UAE 3.2.35 opens **no inbound TCP socket at all**, for 7861 or for anything else, so
+there is no port on the host that could carry a connection into the guest whatever the
+configuration says. The suite derives the port as `base + 161` and cannot be pointed
+elsewhere. This is not reachable from here and it is not ours; the capability itself is
+covered on loopback by `tests/clients` groups D, E, I and M.

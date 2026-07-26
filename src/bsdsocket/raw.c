@@ -53,7 +53,7 @@
  * the protocol payload (an ICMP message, say) and nxd_ip_raw_packet_send()
  * prepends the IP header with the socket's protocol, TTL and TOS.  That is
  * BSD's default too -- IP_HDRINCL is the opt-in, and NetX Duo's core has no
- * equivalent (see docs/RESEARCH.md 16).
+ * equivalent (see docs/RESEARCH.md 17).
  *
  * LOCKING
  *
