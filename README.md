@@ -7,10 +7,14 @@ already speaks — on top of
 drives the SANA-II network cards you already have.
 
 > **Status: it works, and it is not finished.** It gets a DHCP lease, answers
-> ARP, pings its gateway, resolves DNS and moves TCP in both directions. Real
-> `curl` runs on it. It has **not been run on real hardware** — everything so
-> far was measured on an emulated 68020 and 68030 under Kickstart 3.1 — so
-> treat it as something to try, not something to depend on.
+> ARP, pings its gateway, resolves DNS, moves TCP in both directions and does
+> HTTPS. It scores **141 of 142** on the independent
+> [`bsdsocktest`](https://github.com/tbdye/bsdsocktest) conformance suite, where
+> Roadshow scores 138. Real `curl` runs on it, unmodified.
+>
+> It has **not been run on real hardware** — everything so far was measured on
+> an emulated 68020 and 68030 under Kickstart 3.1 — so treat it as something to
+> try, not something to depend on.
 
 ## Why
 
@@ -94,11 +98,14 @@ Barthel's freely distributable Roadshow SDK headers and autodocs are used solely
 as an ABI reference, for function offsets, tag values, structure layouts and
 documented behaviour.
 
-`bsdsocket.library` scores **141 of 142** on
-[`bsdsocktest`](https://github.com/tbdye/bsdsocktest), an independent
-conformance suite, with no tests skipped. Roadshow 4.364 scores 138 on the same
-suite. The one result we do not pass needs an inbound connection that the
-emulator we develop against cannot provide.
+The conformance figure above is `bsdsocktest`'s network tier with no tests
+skipped, which is where Roadshow 4.364's 138 was measured. The one result we do
+not pass needs an inbound connection that the emulator we develop against cannot
+provide.
+
+Third-party software confirms the ABI independently: the Aminet build of curl
+8.22.0-DEV, compiled by someone else against AmiSSL and clib2, runs on this
+stack and scores exactly what our own build does.
 
 ## Prior art
 
