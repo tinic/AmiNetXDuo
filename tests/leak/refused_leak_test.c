@@ -17,8 +17,7 @@
  *   D  full lifecycle, the CLIENT closes first         -- 37.5's other control
  *   E  full lifecycle, the SERVER closes first
  *   F  full lifecycle, only the client closes at all   -- a half-open peer
- *   G  three dials, then three accept()s, eight times   -- 37.4's defect,
- *      OFF by default: the dial loop wedges the task, see LEAK_BURST_ARM
+ *   G  three dials, then three accept()s, eight times   -- 37.4's defect
  *
  * The measurement is AvailMem(MEMF_PUBLIC), the library's own live socket
  * count, and a histogram of what state those sockets are in -- all three from
@@ -57,6 +56,17 @@ static const char version_tag[] __attribute__((used)) =
  *
  * Hand-vectored for the same reason tests/endurance/endurance.c does it: the
  * NDK inlines read the base from a global, and nothing here wants that.
+ *
+ * AND EVERY STUB DECLARES d1/a0/a1 WRITTEN, WHICH IS NOT DECORATION.
+ *
+ * An AmigaOS library call clobbers d0, d1, a0 and a1.  A register that is only
+ * an INPUT operand is one GCC may assume the asm leaves alone, so a stub that
+ * passes an argument in d1 and does not also declare d1 written lets GCC keep
+ * a value there across the `jsr` -- and reuse, or spill, whatever the library
+ * left behind.  That is not theoretical: it turned IoctlSocket(FIONBIO) into a
+ * call with a garbage request code and wedged a test for a day
+ * (docs/RESEARCH.md 42).  The `_clob_*` dummies bound to those registers and
+ * listed as outputs are the NDK's own idiom, from inline/macros.h.
  */
 
 #define L_AF_INET       2
@@ -88,9 +98,10 @@ static LONG l_socket(struct Library *base, LONG dom, LONG type, LONG proto)
     register LONG            d1  __asm("d1") = type;
     register LONG            d2  __asm("d2") = proto;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
 
     __asm __volatile ("jsr a6@(-30:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (d2)
                       : "a0", "a1", "cc", "memory");
     return res;
@@ -103,9 +114,11 @@ static LONG l_bind(struct Library *base, LONG s, LeakAddr *sa)
     register APTR            a0  __asm("a0") = sa;
     register LONG            d1  __asm("d1") = (LONG)sizeof(LeakAddr);
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-36:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1)
                       : "a1", "cc", "memory");
     return res;
@@ -117,9 +130,10 @@ static LONG l_listen(struct Library *base, LONG s, LONG backlog)
     register LONG            d0  __asm("d0") = s;
     register LONG            d1  __asm("d1") = backlog;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
 
     __asm __volatile ("jsr a6@(-42:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1)
                       : "r" (a6), "r" (d0), "r" (d1)
                       : "a0", "a1", "cc", "memory");
     return res;
@@ -132,9 +146,11 @@ static LONG l_accept(struct Library *base, LONG s)
     register APTR            a0  __asm("a0") = NULL;
     register APTR            a1  __asm("a1") = NULL;
     register LONG            res __asm("d0");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
 
     __asm __volatile ("jsr a6@(-48:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (a1)
                       : "cc", "memory");
     return res;
@@ -147,9 +163,11 @@ static LONG l_connect(struct Library *base, LONG s, LeakAddr *sa)
     register APTR            a0  __asm("a0") = sa;
     register LONG            d1  __asm("d1") = (LONG)sizeof(LeakAddr);
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-54:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1)
                       : "a1", "cc", "memory");
     return res;
@@ -165,9 +183,11 @@ static LONG l_setsockopt(struct Library *base, LONG s, LONG level, LONG name,
     register APTR            a0  __asm("a0") = val;
     register LONG            d3  __asm("d3") = len;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-90:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (d2), "r" (a0),
                         "r" (d3)
                       : "a1", "cc", "memory");
@@ -181,9 +201,11 @@ static LONG l_ioctl(struct Library *base, LONG s, ULONG req, APTR argp)
     register ULONG           d1  __asm("d1") = req;
     register APTR            a0  __asm("a0") = argp;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-114:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (a0)
                       : "a1", "cc", "memory");
     return res;
@@ -224,9 +246,11 @@ static LONG l_query(struct Library *base, ULONG what, APTR buf, ULONG size)
     register APTR            a0  __asm("a0") = buf;
     register ULONG           d2  __asm("d2") = size;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-870:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (a0), "r" (d2)
                       : "a1", "cc", "memory");
     return res;
@@ -507,23 +531,26 @@ static VOID leak_report(const char *name, ULONG refused,
 #define LEAK_BURSTS     8
 
 /*
- * OFF BY DEFAULT, AND THE REASON IS A SEPARATE DEFECT.
+ * THIS ARM USED TO WEDGE THE CALLING TASK, AND IT WAS NOT THE LIBRARY.
  *
- * The dial loop below -- three non-blocking connect() calls to a port whose
- * listen request has no socket on it, issued one after another -- WEDGES THE
- * CALLING TASK, on the second or the third call. Reproduced three times out
- * of three, and reproduced identically on the library as it stood before any
- * of the repairs this test was written for, so it is not one of them. A
- * Delay(1) between the calls does not help; interposing console I/O between
- * socket(), IoctlSocket() and connect() does, which is what says it is a
- * scheduling problem rather than a socket-state one.
+ * Three non-blocking connect() calls issued one after another wedged on the
+ * second or the third, three times out of three (docs/RESEARCH.md 41.4).  The
+ * cause was in this file: the LVO stubs above did not declare d1/a0/a1
+ * clobbered, so GCC kept the FIONBIO request code in d1 across a library call
+ * that overwrites it, IoctlSocket() was handed a stale request, ASF_NONBLOCK
+ * was never set, and the dial became a BLOCKING connect() to a listen request
+ * with no socket parked on it -- which, as this file's own header says, never
+ * returns.  Any real call in between forced GCC to rematerialise the constant,
+ * which is why interposing a VPrintf() "fixed" it.  docs/RESEARCH.md 42.
  *
- * It is written up in docs/RESEARCH.md 40 and NOT fixed there. Build with
- * -DLEAK_BURST_ARM=1 to run it, which is how to work on it; leaving it on by
- * default would mean this suite never reaches the arms that do pass.
+ * Build with -DLEAK_BURST_DELAY=OFF to run the dials back to back, which is
+ * the shape that failed.
  */
 #ifndef LEAK_BURST_ARM
 #  define LEAK_BURST_ARM 0
+#endif
+#ifndef LEAK_BURST_DELAY
+#  define LEAK_BURST_DELAY 1
 #endif
 
 #if LEAK_BURST_ARM
@@ -558,17 +585,21 @@ static ULONG leak_accept_burst(struct Library *base, LONG listener,
             (VOID)l_connect(base, c[i], &sa);
 
             /*
-             * ONE TICK BETWEEN DIALS, AND IT IS NOT COSMETIC.
+             * ONE TICK BETWEEN DIALS, AND IT IS NOT LOAD-BEARING ANY MORE.
              *
-             * Without it this loop wedges the calling task on the second or
-             * third connect() -- reproduced three times out of three, and
-             * reproduced identically on the library BEFORE the repairs in
-             * this file's history, so it is not one of them. It is recorded
-             * in docs/RESEARCH.md 40 as its own defect and is not fixed
-             * there; the delay is here so that what this arm exists to test
-             * -- that the listener keeps accepting -- can be tested at all.
+             * It used to be: the LVO stubs above did not tell GCC that a
+             * library call clobbers d1/a0/a1, so IoctlSocket(FIONBIO) got a
+             * stale request code, ASF_NONBLOCK was never set, and the dial
+             * became a BLOCKING connect() to a listen request with no socket
+             * on it -- which never returns.  Any real call in between (a
+             * VPrintf, a Delay) forced GCC to reload d1 and hid it.  With the
+             * clobbers fixed the delay only paces the burst; build with
+             * -DLEAK_BURST_DELAY=OFF to run the dials back to back.
+             * docs/RESEARCH.md 42.
              */
+#if LEAK_BURST_DELAY
             Delay(1);
+#endif
         }
 
         for (i = 0; i < LEAK_BURST; i++)

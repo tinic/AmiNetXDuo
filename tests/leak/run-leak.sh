@@ -4,8 +4,8 @@
 #
 #   tests/leak/run-leak.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #
-# Three arms of forty socket lifecycles, about ninety seconds all told, on the
-# SHARED emulator lane -- no -x, so it does not block anybody's measurement.
+# Seven arms of thirty-two socket lifecycles, about ninety seconds all told, on
+# the SHARED emulator lane -- no -x, so it does not block anybody's measurement.
 #
 # Read build/serial.log afterwards as well as the console output: the library's
 # own "nx_tcp_socket_delete refused" warning goes to the serial port and is the

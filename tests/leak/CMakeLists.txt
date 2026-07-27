@@ -24,3 +24,23 @@ endif()
 
 set_target_properties(refused_leak_test PROPERTIES
     OUTPUT_NAME "refused_leak_test")
+
+# Arm G used to be off because it wedged the calling task (docs/RESEARCH.md
+# 41.4), and an arm that hangs means the six that pass never report.  The wedge
+# was this file's own LVO stubs not telling GCC that a library call clobbers
+# d1/a0/a1, so IoctlSocket(FIONBIO) got a stale request code and the dial
+# became a blocking connect() that never returns -- 42.  Fixed, so the arm is
+# built by default and covers 37.4's accept path again.
+#
+# LEAK_BURST_DELAY=OFF removes the Delay(1) between the three dials, which is
+# the back-to-back shape the wedge was first seen in and the one to run when
+# touching the accept path.
+option(LEAK_BURST_ARM "Build arm G of the leak test (three dials, then three accepts)" ON)
+option(LEAK_BURST_DELAY "Keep the Delay(1) between arm G's dials" ON)
+
+if(LEAK_BURST_ARM)
+    target_compile_definitions(refused_leak_test PRIVATE LEAK_BURST_ARM=1)
+endif()
+if(NOT LEAK_BURST_DELAY)
+    target_compile_definitions(refused_leak_test PRIVATE LEAK_BURST_DELAY=0)
+endif()
