@@ -3,6 +3,10 @@
 
     tools/fix-toolchain-crt0.py <toolchain-root> [--check]
 
+    Nothing here is needed against a toolchain built from bebbo/gcc amiga15.2
+    at 168be3619 or later; see FIXED UPSTREAM below. --check reports such a
+    tree as "immune" and succeeds.
+
 WHAT IS WRONG
 
     newlib/libc/sys/amigaos/crt0.c has ____start record the stack pointer
@@ -58,9 +62,39 @@ HOW IT DECIDES WHAT TO PATCH
     since exit() never returns, but a 3-register pop against a 4-register push
     is a trap for the next reader.
 
-    The upstream source fix goes the other way, dropping the d7 register
-    variable from exit, because source can remove the use as well as the save.
-    An object file cannot.
+FIXED UPSTREAM, AND NOT THE WAY THIS FILE PREDICTED
+
+    This docstring used to say "the upstream source fix goes the other way,
+    dropping the d7 register variable from exit". That was a PROPOSAL made
+    from here, not a description of anything, and it is not what was done.
+
+    bebbo/gcc 168be3619 on branch amiga15.2 (2026-07-27) fixes the COMPILER
+    instead, in gcc/config/m68k/m68k.cc:
+
+        static bool
+        m68k_save_reg (unsigned int regno, bool interrupt_handler)
+        {
+        + tree attrs = TYPE_ATTRIBUTES (TREE_TYPE (current_function_decl));
+        + if (lookup_attribute ("entrypoint", attrs))
+        +   return false;
+
+    crt0.c already marked both ____start and exit with __entrypoint -- the
+    attribute was registered (config/m68k/amigaos.h) and the macro predefined
+    (config/m68k/m68kamigaos.h) -- and m68k_save_reg() simply ignored it. An
+    entry point has no caller to preserve registers for, so it must get no
+    prologue at all; once that holds, __savedSp is recorded with nothing
+    pushed and lands exactly on the return address, and neither function has
+    an epilogue to disagree about.
+
+    It is the better fix, and for a reason visible in the disassembly: exit
+    STILL uses d7 (`movel d0,d7` on entry, `movel d7,d0` before the rts) to
+    carry the return code across _callfuncs and the library closes. Removing
+    the use -- what was proposed from here -- would have meant restructuring
+    exit. Suppressing the save keeps the code and fixes every __entrypoint
+    function rather than this one file.
+
+    A toolchain built from that branch therefore needs nothing from this
+    script, and reports as "immune" below rather than as an error.
 
 SPDX-License-Identifier: MIT
 """
@@ -188,6 +222,31 @@ def repair(objdump, path, check_only):
         return ("skipped", "no ____start/exit pair -- not this crt0 shape")
 
     saves = [e for e in exit_ if e[1] == MOVEM_SAVE]
+
+    # THE FIXED COMPILER'S SHAPE, and it is not a failure.
+    #
+    # bebbo/gcc 168be3619 (branch amiga15.2, 2026-07-27) makes m68k_save_reg()
+    # return false for any function carrying the `entrypoint` attribute, which
+    # crt0.c puts on both ____start and exit. Neither then saves anything, so
+    # __savedSp is recorded with no frame pushed and lands exactly on the
+    # return address -- which is what `move.l __savedSp,sp / rts` needs.
+    #
+    # Nothing to repair, and nothing wrong. Reporting it as "refused" told a
+    # user with a REPAIRED toolchain that theirs was broken.
+    if not saves:
+        if not start:
+            return ("immune", "neither ____start nor exit keeps a frame "
+                              "-- the compiler honoured __entrypoint")
+
+        # exit frameless but ____start not is WORSE than the original bug:
+        # __savedSp would point below the return address rather than above it,
+        # so the rts reads a saved register instead of overshooting. Nothing
+        # here can repair it -- widening exit is not possible without knowing
+        # what it clobbers -- so say so plainly.
+        return ("refused",
+                f"exit keeps no frame but ____start has {len(start)} movem: "
+                f"__savedSp would point BELOW the return address")
+
     if len(saves) != 1:
         return ("refused", f"exit has {len(saves)} prologues, expected 1")
     want_save = saves[0][2]
@@ -250,10 +309,14 @@ def main():
         return 1
 
     counts = {}
+    printed_immune = False      # one line is enough for a whole clean tree
     for p in found:
         state, note = repair(objdump, p, check_only)
         counts[state] = counts.get(state, 0) + 1
         if state in ("patched", "buggy", "refused"):
+            print(f"  {state:8s} {p.relative_to(root)}: {note}")
+        elif state == "immune" and not printed_immune:
+            printed_immune = True
             print(f"  {state:8s} {p.relative_to(root)}: {note}")
 
     print(f"fix-toolchain-crt0: {len(found)} crt0.o examined -- "
@@ -269,7 +332,8 @@ def main():
     # single file in the tree yielded a pair, the disassembly was not
     # understood and nothing was actually checked. That is exactly how this
     # returned success over an unrepaired toolchain in CI.
-    if not counts.get("ok") and not counts.get("patched"):
+    if not counts.get("ok") and not counts.get("patched") \
+            and not counts.get("immune"):
         sys.stderr.write("fix-toolchain-crt0: no crt0.o yielded a "
                          "____start/exit pair -- the disassembly was not "
                          "understood, nothing was verified\n")

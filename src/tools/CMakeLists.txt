@@ -68,7 +68,11 @@ set(TOOLS_OPTIMISE $<$<CONFIG:Release>:${AMINETXDUO_TOOLS_OPTIMISE}>)
 # built through this file.  Nothing about it belongs in a link line.
 #
 # `tools/fetch-toolchain.sh --check-crt0` says whether the toolchain in use has
-# been repaired.
+# been repaired -- or does not need repairing.  The bug is fixed upstream in
+# bebbo/gcc amiga15.2 at 168be3619 (m68k_save_reg() now honours the
+# __entrypoint attribute crt0.c already carried), and a toolchain built from
+# that branch or later reports "immune".  The repair stays for the toolchains
+# that predate it; nothing in it runs against one that does not need it.
 
 # Everything the tools include lives behind the core include set; the port
 # headers must stay first (tx_port.h / nx_port.h / nx_user.h).

@@ -15185,3 +15185,81 @@ would report `AAMR_Timeout` too and would be wrong; the tick count is what says
 the deadline honoured is the one the caller asked for. 550 against a floor of
 500 is the ten-second minimum plus the poll granularity.
 
+---
+
+## 48. The crt0 frame bug is fixed in the compiler, and not the way we proposed (2026-07-27)
+
+`tools/fix-toolchain-crt0.py` repairs a newlib `crt0.o` in which `____start`
+records the stack pointer *after* its own prologue and `exit()` restores it and
+then lets its own, wider epilogue pop the frame. The pop overshoots by four
+bytes, the `rts` reads the longword above the return address, and every command
+dies on return to the Shell. Eleven `crt0.o` in the tree carried it.
+
+**It is fixed upstream now — in GCC, not in newlib.** bebbo/gcc `168be3619`,
+branch `amiga15.2`, seven lines in `gcc/config/m68k/m68k.cc`:
+
+```c
+ static bool
+ m68k_save_reg (unsigned int regno, bool interrupt_handler)
+ {
++  tree attrs = TYPE_ATTRIBUTES (TREE_TYPE (current_function_decl));
++  if (lookup_attribute ("entrypoint", attrs))
++    return false;
+```
+
+`crt0.c` had marked both `____start` and `exit` with `__entrypoint` all along.
+The attribute was registered in `config/m68k/amigaos.h` and the macro
+predefined in `config/m68k/m68kamigaos.h` — and `m68k_save_reg()` ignored it.
+An entry point has no caller whose registers it must preserve, so it should
+never have had a prologue; once that holds, `__savedSp` is recorded with
+nothing pushed, lands exactly on the return address, and neither function has
+an epilogue left to disagree about.
+
+### 48.1 It is a better fix than the one proposed from here
+
+The script's docstring used to assert that "the upstream source fix goes the
+other way, dropping the `d7` register variable from `exit`". That was a
+**proposal made from this repository, written up as though it described
+something**. It is not what was done, and it was the worse idea.
+
+The disassembly says why. `exit` still uses `d7`:
+
+```
+  c0:  movel sp@(4),d0      ; the return code
+  c4:  movel d0,d7          ; parked in d7 across _callfuncs and the closes
+  ...
+ 104:  movel d7,d0
+ 106:  rts
+```
+
+Removing the *use* means restructuring `exit`. Suppressing the *save* keeps
+the code exactly as it is — and fixes every `__entrypoint` function in the
+system rather than one file in newlib.
+
+### 48.2 The check was calling a fixed toolchain broken
+
+The local toolchain already has the fixed shape: `_____start` opens with
+`movel sp,__savedSp` and no `movem` at all, despite using `d2` and `a2` for
+`_callfuncs`.
+
+`fix-toolchain-crt0.py --check` classified that as **`refused` — "exit has 0
+prologues, expected 1"** on all eleven objects, and exited 1. So did
+`tools/fetch-toolchain.sh --check-crt0`. A repaired toolchain was being
+reported as a broken one.
+
+The classifier now separates the two states an absent `exit` prologue can
+mean, because they are opposites:
+
+| `exit` | `____start` | verdict |
+|---|---|---|
+| no frame | no frame | **`immune`** — the compiler honoured `__entrypoint`; nothing to do, exit 0 |
+| no frame | keeps a frame | **`refused`** — `__savedSp` would point *below* the return address, so the `rts` reads a saved register. Worse than the original bug, and unrepairable from an object file |
+| one frame | disagrees | `buggy` / `patched` — the original case, unchanged |
+| one frame | agrees | `ok` — already repaired |
+
+All four are exercised by stubbing `functions()`, because only the first two
+are reachable with the toolchains on this machine.
+
+The repair stays for toolchains that predate `168be3619`. Nothing in it runs
+against one that does not need it.
+
