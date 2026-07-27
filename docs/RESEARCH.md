@@ -15763,6 +15763,33 @@ keep on the first release after it was written. The check also had to learn the
 *repaired* shapes, or a fixed toolchain would report every file `skipped` and fail its own
 verification step.
 
+### The objdump on this machine is not the objdump in CI either
+
+v0.6.3 failed the same way, and the reason was one layer further down. The pinned
+toolchain ships **binutils 2.39, which disassembles in MIT syntax** -- `movem.l ...,-(sp)`
+where the local 2.4x prints `moveml ...,sp@-` -- and the parsing was written against
+whichever one happened to be on the development machine. Two consequences, neither
+visible locally:
+
+- **`jsr 0 0 _main`, with no relocation line at all.** 2.39 resolves the symbol into the
+  disassembly text and emits nothing separate, so anchoring on a `_main` *relocation*
+  found nothing. It now accepts either.
+- **`.bss` names every symbol in the section.** `__argv`, `__argc`, `__savedSp`,
+  `__commandline` all relocate against a bare `.bss`, so "no addend means offset zero"
+  was never true on this toolchain -- it held only on the development machine, where
+  `__argc` happens to be a common symbol with a relocation of its own. `__argv` is at
+  `.bss+0`, so the **addend** is the discriminator, and both objdumps print it.
+
+Reading the addend then had its own trap: `pea a4@(0)` keeps the displacement inside the
+parentheses, and taking the leading token yields `a4`, which is valid hex, parses as
+`0xa4`, and silently disqualified seven of the eleven baserel files.
+
+The lesson is the flat one: **the local toolchain was never the shipping toolchain**, and
+three rounds of "fixed" were three rounds of testing the wrong binary. The verification
+that finally meant something was running the script under the pinned binutils on a Linux
+host, both directions, before tagging -- pristine reports 11 buggy and rc 1, repaired
+reports 11 immune and rc 0.
+
 ### Note on the pin
 
 Upstream fixed this in `120371e`, which changed only the declaration. Our pinned

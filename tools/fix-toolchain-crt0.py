@@ -324,6 +324,39 @@ def _writes_areg(text):
     return int(m.group(1)) if m else None
 
 
+def _addend(text):
+    """The leading displacement of this instruction's memory operand, or None.
+
+    THE ONLY RELIABLE WAY TO TELL __argv FROM ITS NEIGHBOURS. Both objdumps
+    print the addend, and neither reliably distinguishes the symbol otherwise:
+
+        this machine's 2.4x   lea 0 <_____start>,a6      RELOC32 .bss
+                              move.l 14 <..+0x14>,-(sp)  RELOC32 .bss
+        the pinned 2.39       lea 0 0 ___argv,a6         RELOC32 .bss
+                              move.l 14 14 ___argc,-(sp) RELOC32 .bss
+
+    The relocation reads `.bss` for EVERY symbol in that section -- __argv,
+    __argc, __savedSp, __commandline alike. An earlier version of this file
+    assumed a bare `.bss` meant offset zero because that happened to hold on
+    the development machine, where __argc is a common symbol and gets its own
+    relocation. It does not hold on the toolchain that builds releases.
+    __argv is at .bss+0, so the addend is the discriminator.
+
+    THE DISPLACEMENT COMES FIRST, and it is not always leading. `pea a4@(0)`
+    has its addend inside the parentheses, and reading the leading token there
+    yields "a4" -- which is valid hex, parses as 0xa4, and quietly disqualified
+    seven of the eleven baserel files the first time this check was added.
+    """
+    m = re.search(r"a[0-7]@\((-?[0-9a-fx]+)\)", text)       # pea a4@(20)
+    if m:
+        return int(m.group(1), 16)
+    m = re.search(r"\b([0-9a-f]+)\(%?a[0-7]\)", text)        # 20(a4), MIT
+    if m:
+        return int(m.group(1), 16)
+    m = re.match(r"^\S+\s+#?([0-9a-f]+)\b", text)            # pea 0 <sym>
+    return int(m.group(1), 16) if m else None
+
+
 def argv_sites(objdump, path):
     """Offsets of the argv push before each `jsr _main`, with their opcode.
 
@@ -369,7 +402,14 @@ def argv_sites(objdump, path):
         return None
 
     def calls_main(i):
-        return any(r in ("_main", "main") for _, _, r, _ in insns[i + 2:i + 6])
+        # Binutils 2.39 renders the call as `jsr 0 0 _main` and emits NO
+        # relocation line for it, so the reloc field alone finds nothing --
+        # which is precisely why v0.6.3's release job still failed. Check the
+        # disassembly text as well.
+        for _, _, r, t in insns[i + 2:i + 6]:
+            if r in ("_main", "main") or re.search(r"\b_?main\b", t):
+                return True
+        return False
 
     def pushes_next(i):
         return i + 1 < len(insns) and 0x2F00 <= insns[i + 1][1] <= 0x2FFF
@@ -378,7 +418,8 @@ def argv_sites(objdump, path):
     holds_argv = {}     # address register -> currently holds &__argv
     for i, (off, word, reloc, text) in enumerate(insns):
         # ---- shape B, first half: lea <__argv>,an
-        if (word & LEA_MASK) == LEA_OP and reloc == ".bss":
+        if (word & LEA_MASK) == LEA_OP and reloc == ".bss" \
+                and _addend(text) == 0:
             holds_argv[(word >> 9) & 7] = True
             continue
 
@@ -389,14 +430,17 @@ def argv_sites(objdump, path):
         # `moveal a4,an` immediately before is required: an + <.bss offset> is
         # only &__argv if an started at a4, and without that check any
         # register carrying anything could be adopted.
-        if (word & 0xF1FF) == ADDA_IMM and reloc == ".bss":
+        if (word & 0xF1FF) == ADDA_IMM and reloc == ".bss" \
+                and _addend(text) == 0:
             n = (word >> 9) & 7
-            if i and re.match(rf"^moveal?\s+%?a4,%?a{n}$", insns[i - 1][3]):
+            # `moveal a4,a6` here, `movea.l a4,a6` under the pinned binutils.
+            if i and re.match(rf"^move[a.l]*\s+%?a4,%?a{n}$", insns[i - 1][3]):
                 holds_argv[n] = True
                 continue
 
         # ---- shape A: a push whose own operand is __argv
-        if reloc == ".bss" and (word in ARGV_FIX or word in PUSH_OPS):
+        if reloc == ".bss" and _addend(text) == 0 \
+                and (word in ARGV_FIX or word in PUSH_OPS):
             if pushes_next(i) and calls_main(i):
                 sites.append((off, word, ARGV_FIX.get(word, word)))
                 continue
