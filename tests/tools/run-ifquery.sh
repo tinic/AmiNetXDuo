@@ -578,6 +578,55 @@ else
     fail "AbortInterfaceConfig did not return"
 fi
 
+# ---- a real DHCP allocation ----------------------------------------------
+#
+# The interface this run is riding on already has an address, so the probe
+# removes it and adds it back -- which is what AddInterfaceTagList leaves you
+# with, an interface with no address at all -- and then asks
+# BeginInterfaceConfig for one.  SLIRP runs a DHCP server, so this is a real
+# DISCOVER/OFFER/REQUEST/ACK on the wire.
+
+if grep -q "^live: begin returned with the message still out -- asynchronous, correctly" "$REPORT"; then
+    pass "BeginInterfaceConfig returned before the allocation finished"
+else
+    fail "BeginInterfaceConfig blocked its caller -- it is documented asynchronous"
+fi
+
+if grep -q "^live: replied after .* result 0 -- AAMR_Success, correctly" "$REPORT"; then
+    pass "and the message came back with AAMR_Success"
+else
+    fail "the allocation did not succeed"
+fi
+
+# The address is the assertion.  A server chose it; nothing in this stack
+# could have invented 10.0.2.15 with the interface freshly added and empty.
+if grep -Eq "^live: address 10\.0\.2\.[0-9]+ mask 255\.255\.255\.0 server 10\.0\.2\.2$" "$REPORT"; then
+    pass "the address, mask and server address came from SLIRP's DHCP server"
+else
+    fail "the lease does not carry the server's own numbers"
+fi
+
+# aam_RouterTable is filled from DHCP option 3, which the server only sends
+# because the client asked for it in its parameter request list.
+if grep -q "^live: router\[0\] 10.0.2.2 -- the server offered one" "$REPORT"; then
+    pass "aam_RouterTable carries the router the server offered"
+else
+    fail "no router came back -- the parameter request list is not being sent"
+fi
+
+if grep -Eq "^live: lease expires day [1-9][0-9]+ " "$REPORT"; then
+    pass "aam_LeaseExpires holds a real date rather than the zero that means infinite"
+else
+    fail "the lease expiry DateStamp was not filled in"
+fi
+
+# And it really configured the interface, rather than only reporting a number.
+if grep -q "^begin a second time: result 4, replied -- correctly" "$REPORT"; then
+    pass "a second allocation on the now-addressed interface is AAMR_AddressKnown"
+else
+    fail "the allocation did not put the address on the interface"
+fi
+
 # A library that could not tell its own messages from a caller's would free a
 # stack frame here, and the machine would not survive the next allocation.
 if grep -q "^DeleteAddrAllocMessage on a stack message: .* -- refused, correctly" "$REPORT"; then

@@ -28,4 +28,14 @@
 /* The physical slot called `name`, or -1. */
 LONG bsd_if_index_of(NX_IP *ip, const char *name);
 
+/*
+ * addralloc.c -- TRUE while an address allocation Process is still running.
+ *
+ * Declared here rather than in a header of its own because it exists for one
+ * caller: bsd_lib_expunge(), which must decline while a worker is executing
+ * out of the segment it is about to hand to UnLoadSeg(). Exactly the reason
+ * bsd_tcp_handler_alive() exists beside it.
+ */
+BOOL bsd_aam_busy(VOID);
+
 #endif /* AMINETXDUO_BSDSOCKET_INTERFACES_H */

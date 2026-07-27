@@ -172,6 +172,55 @@ BOOL    netstack_interface_is_up(UWORD index);
 LONG    netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out);
 LONG    netstack_interface_remove(UWORD index, BOOL force);
 
+/* ------------------------------------------- DHCP on one interface --------
+ *
+ * What bsdsocket.library's BeginInterfaceConfig() drives. The netstack owns
+ * the single NX_DHCP -- there can only be one, because there is only one UDP
+ * port 68 -- so an allocation asked for by an application has to go through
+ * the same client the boot-time configuration uses, on the interface it names
+ * and no other.
+ *
+ * These are DELIBERATELY not one blocking call. The published API's timeout
+ * is mandatory and DHCP retries forever, so somebody has to own a deadline;
+ * that somebody is the caller, which has a Process and can Delay(), and the
+ * netstack has neither dos.library nor any business blocking.
+ *
+ *   netstack_interface_dhcp_start()   enable and start, creating the client
+ *                                     if the machine booted without one.
+ *   netstack_interface_dhcp_state()   AMI_DHCP_* -- poll it.
+ *   netstack_interface_dhcp_lease()   what the server said. BOUND only.
+ *   netstack_interface_dhcp_stop()    give up, or let go of the lease.
+ */
+#define AMI_DHCP_IDLE       0       /* not started, or stopped              */
+#define AMI_DHCP_WORKING    1       /* discovering, requesting, probing     */
+#define AMI_DHCP_BOUND      2       /* the interface has a lease            */
+
+/* How many of each address list a lease is reported with. The DHCP option
+   can carry more; nothing on this machine has room to use more. */
+#define AMI_DHCP_MAX_ADDRS  8
+
+typedef struct AmiDhcpLease {
+    ULONG   adl_Address;
+    ULONG   adl_NetMask;
+    ULONG   adl_Server;
+    ULONG   adl_LeaseSeconds;           /* 0xFFFFFFFF means infinite        */
+
+    ULONG   adl_Router[AMI_DHCP_MAX_ADDRS];
+    UWORD   adl_RouterCount;
+    ULONG   adl_Dns[AMI_DHCP_MAX_ADDRS];
+    UWORD   adl_DnsCount;
+    ULONG   adl_StaticRoute[AMI_DHCP_MAX_ADDRS];
+    UWORD   adl_StaticRouteCount;
+
+    char    adl_HostName[AMI_CFG_NAME_LEN];
+    char    adl_DomainName[AMI_CFG_NAME_LEN];
+} AmiDhcpLease;
+
+LONG    netstack_interface_dhcp_start(UWORD index, ULONG requested_address);
+LONG    netstack_interface_dhcp_state(UWORD index);
+LONG    netstack_interface_dhcp_lease(UWORD index, AmiDhcpLease *out);
+LONG    netstack_interface_dhcp_stop(UWORD index, BOOL release);
+
 /* ------------------------------------------------------------------ IPv6 --
  *
  * Present only in an AMINETXDUO_IPV6 build. The floor build has no IPv6 at

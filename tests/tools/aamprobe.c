@@ -110,6 +110,46 @@ static VOID p_abort_config(struct Library *base,
                       : "a1", "cc", "memory");
 }
 
+static LONG p_add_interface(struct Library *base, const char *name,
+                            const char *device, LONG unit,
+                            struct TagItem *tags)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register CONST_APTR      a0  __asm("a0") = (CONST_APTR)name;
+    register CONST_APTR      a1  __asm("a1") = (CONST_APTR)device;
+    register LONG            d0  __asm("d0") = unit;
+    register APTR            a2  __asm("a2") = (APTR)tags;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
+    register LONG _clob_a2 __asm("a2");
+
+    __asm __volatile ("jsr a6@(-444:W)"     /* AddInterfaceTagList -0x1bc */
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
+                        "=r" (_clob_a1), "=r" (_clob_a2)
+                      : "r" (a6), "r" (a0), "r" (a1), "r" (d0), "r" (a2)
+                      : "cc", "memory");
+    return res;
+}
+
+static LONG p_remove_interface(struct Library *base, const char *name,
+                               LONG force)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register CONST_APTR      a0  __asm("a0") = (CONST_APTR)name;
+    register LONG            d0  __asm("d0") = force;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+
+    __asm __volatile ("jsr a6@(-732:W)"     /* RemoveInterface -0x2dc */
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
+                      : "r" (a6), "r" (a0), "r" (d0)
+                      : "a1", "cc", "memory");
+    return res;
+}
+
 static struct List *p_obtain_interface_list(struct Library *base)
 {
     register struct Library *a6  __asm("a6") = base;
@@ -448,6 +488,138 @@ int main(void)
 
     p_abort_config(base, NULL);
     Printf((CONST_STRPTR)"AbortInterfaceConfig(NULL): returned\n");
+
+    /* ---- and now a real allocation ----------------------------------------
+     *
+     * The interface this run is riding on already has an address, so the only
+     * way to ask for one is to take it away first. RemoveInterface() and
+     * AddInterfaceTagList() do exactly that -- "permitting it to be added
+     * again with new parameters" -- and an interface added that way arrives
+     * with no address at all, which is the state BeginInterfaceConfig() is
+     * for.
+     *
+     * SLIRP runs a DHCP server, so this is a real DISCOVER/OFFER/REQUEST/ACK
+     * on the wire and the address that comes back is one a server chose.
+     */
+    {
+        struct AddressAllocationMessage *live = NULL;
+        struct Message                  *got;
+        struct TagItem                   ltags[8];
+        ULONG                            waited;
+
+        rc = p_remove_interface(base, ifname, 0);
+        Printf((CONST_STRPTR)"live: remove %s: rc %ld\n", (LONG)ifname, rc);
+
+        rc = p_add_interface(base, ifname, "a2065.device", 0, NULL);
+        Printf((CONST_STRPTR)"live: add %s: rc %ld\n", (LONG)ifname, rc);
+
+        ltags[0].ti_Tag  = CAAMTA_ReplyPort;
+        ltags[0].ti_Data = (ULONG)port;
+        ltags[1].ti_Tag  = CAAMTA_RouterTableSize;
+        ltags[1].ti_Data = PROBE_ROUTERS;
+        ltags[2].ti_Tag  = CAAMTA_DNSTableSize;
+        ltags[2].ti_Data = PROBE_DNS;
+        ltags[3].ti_Tag  = CAAMTA_HostNameSize;
+        ltags[3].ti_Data = PROBE_HOSTNAME;
+        ltags[4].ti_Tag  = CAAMTA_DomainNameSize;
+        ltags[4].ti_Data = PROBE_DOMAIN;
+        ltags[5].ti_Tag  = CAAMTA_RecordLeaseExpiration;
+        ltags[5].ti_Data = TRUE;
+        ltags[6].ti_Tag  = TAG_DONE;
+        ltags[6].ti_Data = 0;
+
+        rc = p_create_aam(base, AAM_VERSION, AAMP_DHCP, ifname, &live, ltags);
+
+        if (rc == CAAME_Success && live != NULL)
+        {
+            /*
+             * The call must return PROMPTLY -- "This routine starts an
+             * asynchronous operation, very much like exec.library/SendIO()".
+             * A synchronous implementation would sit here for the whole
+             * ten-second timeout, so the message must NOT be on the port yet.
+             */
+            p_begin_config(base, live);
+
+            got = GetMsg(port);
+            Printf((CONST_STRPTR)"live: begin returned with the message %s%s\n",
+                   (LONG)((got == NULL) ? "still out" : "ALREADY BACK"),
+                   (LONG)((got == NULL) ? " -- asynchronous, correctly"
+                                        : " -- SYNCHRONOUS, WRONG"));
+
+            /* Wait for it, with a bound of our own well past the timeout. */
+            for (waited = 0; got == NULL && waited < 30UL * 50UL; waited += 10)
+            {
+                Delay(10);
+                got = GetMsg(port);
+            }
+
+            if (got == &live->aam_Message)
+            {
+                Printf((CONST_STRPTR)"live: replied after ~%ld ticks, "
+                                     "result %ld%s\n",
+                       (LONG)waited, live->aam_Result,
+                       (LONG)((live->aam_Result == AAMR_Success)
+                                  ? " -- AAMR_Success, correctly" : " -- WRONG"));
+
+                Printf((CONST_STRPTR)"live: address %ld.%ld.%ld.%ld "
+                                     "mask %ld.%ld.%ld.%ld server %ld.%ld.%ld.%ld\n",
+                       (LONG)((live->aam_Address >> 24) & 0xFF),
+                       (LONG)((live->aam_Address >> 16) & 0xFF),
+                       (LONG)((live->aam_Address >> 8) & 0xFF),
+                       (LONG)(live->aam_Address & 0xFF),
+                       (LONG)((live->aam_SubnetMask >> 24) & 0xFF),
+                       (LONG)((live->aam_SubnetMask >> 16) & 0xFF),
+                       (LONG)((live->aam_SubnetMask >> 8) & 0xFF),
+                       (LONG)(live->aam_SubnetMask & 0xFF),
+                       (LONG)((live->aam_ServerAddress >> 24) & 0xFF),
+                       (LONG)((live->aam_ServerAddress >> 16) & 0xFF),
+                       (LONG)((live->aam_ServerAddress >> 8) & 0xFF),
+                       (LONG)(live->aam_ServerAddress & 0xFF));
+
+                Printf((CONST_STRPTR)"live: address is %s\n",
+                       (LONG)((live->aam_Address != 0)
+                                  ? "not zero -- a server really answered"
+                                  : "ZERO, WRONG"));
+
+                if (live->aam_RouterTable != NULL)
+                    Printf((CONST_STRPTR)"live: router[0] %ld.%ld.%ld.%ld%s\n",
+                           (LONG)((live->aam_RouterTable[0] >> 24) & 0xFF),
+                           (LONG)((live->aam_RouterTable[0] >> 16) & 0xFF),
+                           (LONG)((live->aam_RouterTable[0] >> 8) & 0xFF),
+                           (LONG)(live->aam_RouterTable[0] & 0xFF),
+                           (LONG)((live->aam_RouterTable[0] != 0)
+                                      ? " -- the server offered one"
+                                      : " -- none offered"));
+
+                if (live->aam_LeaseExpires != NULL)
+                    Printf((CONST_STRPTR)"live: lease expires day %ld "
+                                         "minute %ld\n",
+                           live->aam_LeaseExpires->ds_Days,
+                           live->aam_LeaseExpires->ds_Minute);
+            }
+            else
+            {
+                Printf((CONST_STRPTR)"live: NOT REPLIED after %ld ticks\n",
+                       (LONG)waited);
+            }
+
+            /*
+             * A second allocation on an interface that now has one: the
+             * documented answer is AAMR_AddressKnown, and it proves the first
+             * one really configured the interface rather than only reporting
+             * an address.
+             */
+            live->aam_Result = AAMR_Ignored;
+            p_begin_and_collect(base, port, live, "a second time",
+                                AAMR_AddressKnown);
+
+            p_delete_aam(base, live);
+        }
+        else
+        {
+            Printf((CONST_STRPTR)"live: could not build a message (%ld)\n", rc);
+        }
+    }
 
     /* ---- and give it back ------------------------------------------------- */
 

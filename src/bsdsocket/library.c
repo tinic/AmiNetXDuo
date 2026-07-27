@@ -15,6 +15,7 @@
 
 #include "bsdsocket_vectors.h"
 #include "tcp_handler.h"
+#include "interfaces.h"
 
 #include "aminetxduo/config.h"
 
@@ -509,6 +510,19 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
      * is the supported way to take TCP: down; after it, this succeeds.
      */
     if (bsd_tcp_handler_alive())
+    {
+        base->sb_Lib.lib_Flags |= LIBF_DELEXP;
+        return NULL;
+    }
+
+    /*
+     * And the same for an address allocation still running. Those workers are
+     * Processes of ours executing out of this segment while holding no
+     * OpenCnt reference either -- see the launch in addralloc.c -- and one of
+     * them is at most a bounded number of seconds from finishing, because the
+     * API it serves has a mandatory timeout.
+     */
+    if (bsd_aam_busy())
     {
         base->sb_Lib.lib_Flags |= LIBF_DELEXP;
         return NULL;

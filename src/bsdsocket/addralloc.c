@@ -47,7 +47,10 @@
 #include "tagwalk.h"
 #include "interfaces.h"
 
+#include <proto/dos.h>
 #include <proto/exec.h>
+
+#include <dos/dostags.h>
 
 /*
  * The cookie. Arbitrary, and chosen to be something no plausible hand-filled
@@ -414,6 +417,277 @@ VOID bsd_DeleteAddrAllocMessage(register struct AddressAllocationMessage *aam __
 /* ------------------------------------------------- BeginInterfaceConfig -- */
 
 /*
+ * THE WORKER
+ *
+ * BeginInterfaceConfig() is documented asynchronous -- "This routine starts an
+ * asynchronous operation, very much like exec.library/SendIO()" -- and it has
+ * to be, because the timeout it is given is at least ten seconds and blocking
+ * a caller for ten seconds inside a library call it expects to return at once
+ * is how an application deadlocks against its own event loop.
+ *
+ * So one Process per request. It owns the whole lifecycle: start the DHCP
+ * client on the interface, poll to its own deadline, fill the message in,
+ * ReplyMsg() it, and exit. That is why the netstack's DHCP primitives are not
+ * one blocking call -- somebody has to own the deadline, and the only party
+ * with a Process and a dos.library to Delay() with is this one.
+ *
+ * WHY THE COUNT, AND WHY EXPUNGE LOOKS AT IT
+ *
+ * The worker runs code out of the library segment while holding no OpenCnt
+ * reference, exactly like the TCP: handler (see bsd_lib_expunge()). If the
+ * last opener closes while a worker is between instructions, UnLoadSeg()
+ * takes the ground out from under it. So the count is taken BEFORE
+ * CreateNewProc() and given back inside Forbid() as the last thing the worker
+ * does, and expunge declines while it is non-zero.
+ */
+
+/* Defined below, beside the rest of BeginInterfaceConfig()'s reporting. */
+static VOID bsd_aam_reply(struct AddressAllocationMessage *aam, LONG result);
+
+#define BSD_AAM_STACK       4096
+#define BSD_AAM_PRI         0
+
+/* How often the worker looks at the DHCP state. Ten times a second is far
+   finer than DHCP moves and costs nothing next to the ten-second floor. */
+#define BSD_AAM_POLL_TICKS  5           /* Delay() ticks: 1/10th of a second */
+
+typedef struct BsdAamJob
+{
+    struct AddressAllocationMessage *baj_Message;
+    UWORD                            baj_Index;
+    volatile BOOL                    baj_Abort;
+    volatile BOOL                    baj_Done;
+} BsdAamJob;
+
+/*
+ * In flight, at most one per interface. A fixed table rather than a list
+ * because AbortInterfaceConfig() has to find a job from nothing but the
+ * message pointer, and because "at most one allocation per interface" is a
+ * rule the published API already states -- AAMR_Busy exists for the second
+ * asker.
+ */
+static BsdAamJob *bsd_aam_jobs[AMI_CFG_MAX_INTERFACES];
+static LONG       bsd_aam_workers;
+
+/* The hand-over to a freshly created Process, the same idiom tcp_handler.c
+   uses: a static slot plus a SIGF_SINGLE handshake, so the pointer cannot
+   outlive the launch. */
+static BsdAamJob *bsd_aam_boot;
+static struct Task *bsd_aam_boot_parent;
+
+BOOL bsd_aam_busy(VOID)
+{
+    return (bsd_aam_workers > 0) ? TRUE : FALSE;
+}
+
+/* The job for a message, or NULL. Called under Forbid(). */
+static BsdAamJob *bsd_aam_find(const struct AddressAllocationMessage *aam)
+{
+    UWORD i;
+
+    for (i = 0; i < (UWORD)AMI_CFG_MAX_INTERFACES; i++)
+    {
+        if (bsd_aam_jobs[i] != NULL && bsd_aam_jobs[i]->baj_Message == aam)
+            return bsd_aam_jobs[i];
+    }
+
+    return NULL;
+}
+
+/* Everything the server said, into the buffers the caller reserved. */
+static VOID bsd_aam_store_lease(struct AddressAllocationMessage *aam,
+                                const AmiDhcpLease *lease)
+{
+    UWORD i;
+
+    aam->aam_Address       = lease->adl_Address;
+    aam->aam_SubnetMask    = lease->adl_NetMask;
+    aam->aam_ServerAddress = lease->adl_Server;
+
+    /* "The allocation process will eventually reset aam_RequestedAddress to
+       zero." */
+    aam->aam_RequestedAddress = 0;
+
+    if (aam->aam_RouterTable != NULL)
+    {
+        for (i = 0; i < (UWORD)aam->aam_RouterTableSize; i++)
+            aam->aam_RouterTable[i] = (i < lease->adl_RouterCount)
+                                          ? lease->adl_Router[i] : 0;
+    }
+
+    if (aam->aam_DNSTable != NULL)
+    {
+        for (i = 0; i < (UWORD)aam->aam_DNSTableSize; i++)
+            aam->aam_DNSTable[i] = (i < lease->adl_DnsCount)
+                                       ? lease->adl_Dns[i] : 0;
+    }
+
+    if (aam->aam_StaticRouteTable != NULL)
+    {
+        for (i = 0; i < (UWORD)aam->aam_StaticRouteTableSize; i++)
+            aam->aam_StaticRouteTable[i] = (i < lease->adl_StaticRouteCount)
+                                               ? lease->adl_StaticRoute[i] : 0;
+    }
+
+    if (aam->aam_HostName != NULL && aam->aam_HostNameSize > 0)
+        bsd_strncpy((char *)aam->aam_HostName, lease->adl_HostName,
+                    (ULONG)aam->aam_HostNameSize);
+
+    if (aam->aam_DomainName != NULL && aam->aam_DomainNameSize > 0)
+        bsd_strncpy((char *)aam->aam_DomainName, lease->adl_DomainName,
+                    (ULONG)aam->aam_DomainNameSize);
+
+    /*
+     * "If the lease is infinitely long, then the DateStamp will contain all
+     * zeroes." It is already zero from the allocation, so an infinite lease
+     * needs nothing done to it -- and DateStamp() is asked for the current
+     * time only when there is a finite lease to add to it.
+     */
+    if (aam->aam_LeaseExpires != NULL &&
+        lease->adl_LeaseSeconds != 0 &&
+        lease->adl_LeaseSeconds != DHCP_INFINITE_LEASE_TIME)
+    {
+        struct DateStamp now;
+
+        DateStamp(&now);
+
+        now.ds_Minute += (LONG)(lease->adl_LeaseSeconds / 60UL);
+        now.ds_Days   += now.ds_Minute / (24L * 60L);
+        now.ds_Minute %= (24L * 60L);
+
+        *aam->aam_LeaseExpires = now;
+    }
+}
+
+/*
+ * The worker. Runs as its own Process, so it may Delay() and it may block --
+ * neither of which the vector that started it could have done.
+ */
+static VOID bsd_aam_worker(VOID)
+{
+    struct AddressAllocationMessage *aam;
+    AmiDhcpLease lease;
+    BsdAamJob   *job;
+    LONG         deadline;
+    LONG         result = AAMR_Timeout;
+    LONG         rc;
+
+    /* The hand-over, before anything that can block. */
+    Forbid();
+    job = bsd_aam_boot;
+    bsd_aam_boot = NULL;
+    Permit();
+
+    if (bsd_aam_boot_parent != NULL)
+        Signal(bsd_aam_boot_parent, SIGF_SINGLE);
+
+    if (job == NULL)
+    {
+        Forbid();
+        bsd_aam_workers--;
+        return;
+    }
+
+    aam = job->baj_Message;
+
+    rc = netstack_interface_dhcp_start(job->baj_Index,
+                                       aam->aam_RequestedAddress);
+    if (rc != AMI_NET_OK)
+    {
+        result = (rc == AMI_NET_ERR_BUSY) ? AAMR_Busy : AAMR_AddrChangeFailed;
+    }
+    else
+    {
+        /*
+         * The deadline, in Delay() ticks. aam_Timeout is in seconds and has
+         * already been floored at ten by whoever built the message -- and
+         * floored again here, because a message filled in by hand never went
+         * through CreateAddrAllocMessageA().
+         */
+        LONG seconds = aam->aam_Timeout;
+
+        if (seconds < AAM_TIMEOUT_MIN)
+            seconds = AAM_TIMEOUT_MIN;
+
+        deadline = seconds * (LONG)TICKS_PER_SECOND;
+
+        while (deadline > 0)
+        {
+            LONG state;
+
+            if (job->baj_Abort)
+            {
+                result = AAMR_Aborted;
+                break;
+            }
+
+            state = netstack_interface_dhcp_state(job->baj_Index);
+
+            if (state == AMI_DHCP_BOUND)
+            {
+                result = AAMR_Success;
+                break;
+            }
+
+            if (state < 0)
+            {
+                result = AAMR_AddrChangeFailed;
+                break;
+            }
+
+            Delay(BSD_AAM_POLL_TICKS);
+            deadline -= BSD_AAM_POLL_TICKS;
+        }
+
+        if (result == AAMR_Success)
+        {
+            if (netstack_interface_dhcp_lease(job->baj_Index, &lease)
+                    == AMI_NET_OK)
+                bsd_aam_store_lease(aam, &lease);
+            else
+                result = AAMR_AddrChangeFailed;
+        }
+        else
+        {
+            /*
+             * Abandoned: stop the client and give the address back if it got
+             * one, so the server does not hold a lease nothing is using. A
+             * timeout means it never got that far, which nx_dhcp_interface_
+             * release() copes with.
+             */
+            (VOID)netstack_interface_dhcp_stop(job->baj_Index, TRUE);
+        }
+    }
+
+    /*
+     * The job leaves the table BEFORE the message is replied. After the reply
+     * the message is the caller's again -- it may already have been deleted
+     * by the time this returns -- so nothing may point at it, and
+     * AbortInterfaceConfig() must no longer find it.
+     */
+    Forbid();
+    if (job->baj_Index < (UWORD)AMI_CFG_MAX_INTERFACES &&
+        bsd_aam_jobs[job->baj_Index] == job)
+        bsd_aam_jobs[job->baj_Index] = NULL;
+    job->baj_Done = TRUE;
+    Permit();
+
+    bsd_aam_reply(aam, result);
+
+    ami_free(job);
+
+    /*
+     * Inside Forbid() so that expunge cannot see the count reach zero, take
+     * the segment away, and leave these last instructions executing out of
+     * memory that has been handed back. The same reasoning as
+     * tcp_session_main()'s exit.
+     */
+    Forbid();
+    bsd_aam_workers--;
+}
+
+
+/*
  * WHY THIS IS HERE AT ALL, WHEN THE ALLOCATION ITSELF IS NOT
  *
  * BeginInterfaceConfig() returns VOID. Everything it has to say, it says by
@@ -427,32 +701,20 @@ VOID bsd_DeleteAddrAllocMessage(register struct AddressAllocationMessage *aam __
  * reported through the documented result codes, replied properly. A caller
  * gets its message back, learns which condition it hit, and can carry on.
  *
- * WHAT IS STILL NOT IMPLEMENTED, AND WHY IT IS AAMR_Ignored
- *
- * The allocation itself. All four protocols are refused with AAMR_Ignored --
- * "Your request was not understood and was therefore ignored", which is
- * literally what happens here:
+ * AAMP_DHCP IS RUN. The other three are not:
  *
  *   AAMP_BOOTP                this stack has no BOOTP client. NetX Duo ships
  *                             DHCP; BOOTP is a different wire protocol and
  *                             nothing here speaks it.
- *   AAMP_DHCP                 the machinery exists -- NetX Duo's DHCP client
- *                             takes a per-interface start, and the netstack
- *                             already owns one with a state-change callback
- *                             wired up -- but the API is ASYNCHRONOUS with a
- *                             MANDATORY timeout ("the timeout must be at
- *                             least 10 seconds"), and there is nowhere yet to
- *                             hang the deadline that fires when a server
- *                             never answers. A request that binds would be
- *                             replied by the existing callback; one that does
- *                             not would never be replied at all, which is the
- *                             precise defect this file exists to remove.
- *                             Half of that is worse than none of it.
  *   AAMP_SLOWAUTO             RFC 3927 self-assignment. NX_AUTO_IP is in the
  *   AAMP_FASTAUTO             build and drives the LINKLOCAL configuration
- *                             type, so this is the same story as DHCP: the
- *                             protocol is there and the completion path is
- *                             not.
+ *                             type, so the protocol is there -- what is not
+ *                             is any way to tell the two flavours apart,
+ *                             since the autodoc distinguishes them only by
+ *                             timeout lengths it does not give.
+ *
+ * All three are replied AAMR_Ignored -- "Your request was not understood and
+ * was therefore ignored", which is literally what happens.
  *
  * The order of the checks below is the order that gives the caller the most
  * useful answer: what is wrong with the MESSAGE first, then what is wrong
@@ -471,6 +733,107 @@ static VOID bsd_aam_reply(struct AddressAllocationMessage *aam, LONG result)
      */
     if (aam->aam_Message.mn_ReplyPort != NULL)
         ReplyMsg(&aam->aam_Message);
+}
+
+/*
+ * Start a worker for one request, or reply the message with the reason it
+ * could not be started. Everything that can fail here fails BEFORE the
+ * Process exists, so there is never a worker with nothing to do.
+ */
+static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
+{
+    struct Process *proc;
+    struct TagItem  tags[6];
+    struct Task    *me = FindTask(NULL);
+    BsdAamJob      *job;
+
+    /*
+     * CreateNewProc() wants a Process to inherit from. A bare Task that asks
+     * for an address allocation is told the request was ignored rather than
+     * taking the machine down -- the same rule bsd_tcp_handler_start()
+     * follows for the same call.
+     */
+    if (me == NULL || me->tc_Node.ln_Type != NT_PROCESS)
+    {
+        bsd_aam_reply(aam, AAMR_Ignored);
+        return;
+    }
+
+    job = (BsdAamJob *)ami_alloc(sizeof(*job));
+    if (job == NULL)
+    {
+        bsd_aam_reply(aam, AAMR_NoMemory);
+        return;
+    }
+
+    job->baj_Message = aam;
+    job->baj_Index   = index;
+    job->baj_Abort   = FALSE;
+    job->baj_Done    = FALSE;
+
+    /*
+     * "AAMR_Busy -- Address allocation is already in progress for this
+     * interface." One at a time, and the table slot is claimed here rather
+     * than in the worker so that two callers racing cannot both get one.
+     */
+    Forbid();
+
+    if (bsd_aam_jobs[index] != NULL)
+    {
+        Permit();
+        ami_free(job);
+        bsd_aam_reply(aam, AAMR_Busy);
+        return;
+    }
+
+    bsd_aam_jobs[index] = job;
+    bsd_aam_workers++;
+
+    /* The hand-over slot is guarded by the same Forbid() as the launch, so
+       two BeginInterfaceConfig() calls cannot swap each other's jobs. */
+    bsd_aam_boot        = job;
+    bsd_aam_boot_parent = me;
+
+    SetSignal(0, SIGF_SINGLE);
+
+    tags[0].ti_Tag  = NP_Entry;
+    tags[0].ti_Data = (ULONG)bsd_aam_worker;
+    tags[1].ti_Tag  = NP_Name;
+    tags[1].ti_Data = (ULONG)"bsdsocket address allocation";
+    tags[2].ti_Tag  = NP_StackSize;
+    tags[2].ti_Data = BSD_AAM_STACK;
+    tags[3].ti_Tag  = NP_Priority;
+    tags[3].ti_Data = (ULONG)BSD_AAM_PRI;
+    tags[4].ti_Tag  = NP_Cli;
+    tags[4].ti_Data = FALSE;
+    tags[5].ti_Tag  = TAG_DONE;
+    tags[5].ti_Data = 0;
+
+    proc = CreateNewProc(tags);
+
+    if (proc == NULL)
+    {
+        bsd_aam_jobs[index] = NULL;
+        bsd_aam_workers--;
+        bsd_aam_boot        = NULL;
+        bsd_aam_boot_parent = NULL;
+        Permit();
+
+        ami_free(job);
+        bsd_aam_reply(aam, AAMR_NoMemory);
+        return;
+    }
+
+    Permit();
+
+    /*
+     * Bounded, and short: the worker signals as the first thing it does,
+     * before anything that can block, because `job` must be out of the
+     * hand-over slot before this returns and a second request can use it.
+     */
+    Wait(SIGF_SINGLE);
+
+    bsd_aam_boot_parent = NULL;
 }
 
 VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __asm("a0"),
@@ -548,31 +911,51 @@ VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __as
     }
 
     /*
-     * Everything about the request is in order and this stack still will not
-     * run it. See the block comment above for which protocol fails for which
-     * reason; the caller gets its message back either way, which is the whole
-     * difference between this and a stub.
+     * Everything about the request is in order. Only DHCP is actually run --
+     * see the block comment above for what the other three would need -- and
+     * the rest still get their message back, which is the whole difference
+     * between this and a stub.
      */
-    bsd_aam_reply(aam, AAMR_Ignored);
+    if (aam->aam_Protocol != AAMP_DHCP)
+    {
+        bsd_aam_reply(aam, AAMR_Ignored);
+        return;
+    }
+
+    bsd_aam_launch(aam, (UWORD)index);
 }
 
 VOID bsd_AbortInterfaceConfig(register struct AddressAllocationMessage *aam __asm("a0"),
                               register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    (VOID)aam;
+    BsdAamJob *job;
+
     (VOID)SocketBase;
+
+    if (aam == NULL)
+        return;
 
     /*
      * "There is no guarantee that the message can be intercepted and the IP
      * address allocation process aborted by this routine. In fact, the
      * process can complete before this routine has managed to abort it."
      *
-     * Nothing here ever has an allocation in flight -- BeginInterfaceConfig()
-     * replies before it returns -- so there is never anything to intercept,
-     * and doing nothing is not a stub standing in for the real behaviour: it
-     * IS the real behaviour, and it is one the published contract already
-     * tells callers to expect. The message has been replied by the time this
-     * can be called, and touching it now would be touching memory the caller
-     * owns again.
+     * That is not a caveat here, it is the design. The flag is raised under
+     * Forbid() and the worker reads it at the top of its next poll; if the
+     * worker has already taken the job out of the table -- which it does
+     * BEFORE it replies -- there is nothing to find and nothing to raise,
+     * which is exactly the race the autodoc is describing. Setting a flag in
+     * a job that is no longer listed would be writing into memory that is
+     * about to be freed.
+     *
+     * A message that was never begun, or one already replied, finds nothing
+     * and does nothing. Both are legal things for a caller to do.
      */
+    Forbid();
+
+    job = bsd_aam_find(aam);
+    if (job != NULL)
+        job->baj_Abort = TRUE;
+
+    Permit();
 }

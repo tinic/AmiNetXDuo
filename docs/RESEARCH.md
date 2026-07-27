@@ -15082,33 +15082,79 @@ Both are taken, and `aam_Unicast` is honoured only at 2 or above, because the
 header says so at the field itself. That is the third place in this document
 where the header and the autodoc disagree and the header is newer.
 
-#### What is not, and why it is `AAMR_Ignored`
+#### And the allocation itself: `AAMP_DHCP` is run
 
-The allocation itself. All four protocols are refused with `AAMR_Ignored` —
-*"Your request was not understood and was therefore ignored"* — which is
-literally what happens.
+One `Process` per request, and the deadline problem dissolves with it: the
+worker owns the whole lifecycle — start the client on the interface, poll to
+its own deadline, fill the message in, `ReplyMsg()`, exit. Nothing needs a
+timer, because the party with the deadline is the party with a `Process` and
+a `dos.library` to `Delay()` with.
 
-`AAMP_BOOTP` has no client here; NetX Duo ships DHCP and BOOTP is a different
-wire protocol. `AAMP_SLOWAUTO`/`AAMP_FASTAUTO` are RFC 3927 self-assignment,
-and `NX_AUTO_IP` *is* in the build driving the `LINKLOCAL` configuration type.
+That is why the netstack's DHCP primitives are deliberately **not** one
+blocking call. `netstack_interface_dhcp_start/_state/_lease/_stop` are four
+non-blocking pieces; the netstack has no `dos.library` and no business
+blocking, and somebody had to own the ten-second floor.
 
-`AAMP_DHCP` is the interesting one, because **every piece of it already
-exists**: `nx_dhcp_interface_enable`/`_start`/`_stop`/`_release`/
-`_request_client_ip`/`_server_address_get`/`_user_option_retrieve`/
-`_state_change_notify` are all per-interface, the netstack already owns an
-`NX_DHCP` with the state-change callback wired up, and a request that reached
-`BOUND` could be filled in and replied from that callback.
+The worker holds no `OpenCnt` reference while executing out of the library
+segment, exactly like the TCP: handler — so the count is taken *before*
+`CreateNewProc()`, given back inside `Forbid()` as the worker's last act, and
+`bsd_lib_expunge()` declines while it is non-zero. That guard already existed
+for `bsd_tcp_handler_alive()`; this is the second user of the same reasoning.
 
-What is missing is the **deadline**. The API's timeout is mandatory — *"the
-timeout must be at least 10 seconds long"* — and DHCP retries indefinitely, so
-a request whose server never answers would never reach `BOUND` and would never
-be replied. That is the *same defect this section exists to remove*, moved
-somewhere harder to see. Half of it is worse than none of it.
+`AAMP_BOOTP` still has no client here — NetX Duo ships DHCP and BOOTP is a
+different wire protocol. `AAMP_SLOWAUTO`/`AAMP_FASTAUTO` are RFC 3927
+self-assignment and `NX_AUTO_IP` *is* in the build driving the `LINKLOCAL`
+type; what is missing is any way to tell the two flavours apart, since the
+autodoc distinguishes them only by timeout lengths it never gives. All three
+are replied `AAMR_Ignored`.
 
-Doing it properly needs one of: a worker `Process` per request (the pattern
-exists — `library.c` and `tcp_handler.c` both use `CreateNewProc()`) with
-lifetime coordination against library expunge, or a periodic timer in the
-netstack that can fire the deadline. Neither is large; both touch the DHCP
-path every boot depends on, and that is the reason it is written down here
-rather than attempted at the end of a long session.
+#### Two bugs the live run found, and neither was in the new code
+
+The probe removes the interface the run is riding on, adds it back — which is
+what `AddInterfaceTagList()` leaves you with, an interface with no address at
+all — and asks for a lease. SLIRP runs a DHCP server, so it is a real
+DISCOVER/OFFER/REQUEST/ACK.
+
+The first run answered **`AAMR_Busy`, instantly**.
+
+`ns_DhcpState[0]` was still `BOUND` from the boot-time lease.
+`nx_ip_interface_detach()` knows nothing about DHCP, so removing an interface
+left the client enabled on a slot that no longer existed and left the state
+byte saying it had a lease. Two separate defects fell out of one symptom:
+
+1. **`netstack_interface_remove()` never stopped DHCP.** A removed interface's
+   client went on trying to renew a lease for a detached slot. It now stops
+   and *releases* — the address really is not in use any more, and telling the
+   server so is what lets the next machine have it.
+2. **The start guard was the wrong shape.** It refused unless the state was
+   `NOT_STARTED`, which reads as "has the client ever run here" rather than
+   "is an allocation under way". An interface that is `BOUND` has already been
+   answered `AAMR_AddressKnown` one layer up, and a re-added one has had its
+   state cleared — so the test is now `AMI_DHCP_WORKING` and nothing else.
+
+Both are bugs in code shipped earlier in this session, found only because the
+new path exercised the old one from an angle nothing else did.
+
+#### What the second run printed
+
+```
+live: remove eth0: rc 1
+live: add eth0: rc 0
+live: begin returned with the message still out -- asynchronous, correctly
+live: replied after ~20 ticks, result 0 -- AAMR_Success, correctly
+live: address 10.0.2.15 mask 255.255.255.0 server 10.0.2.2
+live: router[0] 10.0.2.2 -- the server offered one
+live: lease expires day 17740 minute 398
+begin a second time: result 4, replied -- correctly
+```
+
+Every line is an assertion. **"still out"** is the one that says the call is
+asynchronous as documented rather than blocking its caller for ten seconds.
+**10.0.2.15** could not have been invented by this stack — the interface had
+been freshly added and was empty. **`router[0]`** is DHCP option 3, which the
+server sends only because `nx_dhcp_user_option_request()` put it in the
+parameter request list, so its presence tests a call that would otherwise
+have failed silently into empty tables. And **`AAMR_AddressKnown` the second
+time** proves the lease was actually configured onto the interface rather than
+merely reported.
 

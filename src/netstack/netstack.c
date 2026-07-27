@@ -1536,6 +1536,23 @@ LONG netstack_interface_remove(UWORD index, BOOL force)
         return AMI_NET_ERR_STATE;
     }
 
+    /*
+     * Stop the DHCP client on this interface before the interface goes.
+     *
+     * nx_ip_interface_detach() knows nothing about DHCP, so a client left
+     * enabled would go on trying to renew a lease for a slot that no longer
+     * exists -- and ns_DhcpState[] would keep saying BOUND, which is the
+     * state a later BeginInterfaceConfig() on the SAME slot reads to decide
+     * whether an allocation is already under way. Not clearing it made a
+     * removed-and-re-added interface answer AAMR_Busy forever.
+     *
+     * The lease is released rather than merely abandoned: the address really
+     * is not in use any more, and telling the server so is what lets the next
+     * machine have it.
+     */
+    if (ns->ns_DhcpCreated)
+        (VOID)netstack_interface_dhcp_stop(index, TRUE);
+
     /* src/bpf/ holds the AmiSana2If as an opaque cookie, so it has to stop
        being reachable before the memory goes. */
     ami_netstack_capture_detach_one(ns, index);
@@ -1570,6 +1587,339 @@ LONG netstack_interface_remove(UWORD index, BOOL force)
     ns->ns_Config.interfaces[index].configured = FALSE;
 
     AMI_INFO("netstack: interface %ld removed", (long)index);
+
+    return AMI_NET_OK;
+}
+
+/* ---------------------------------------------- DHCP on one interface ---- */
+
+/*
+ * Two DHCP options NetX Duo does not name. It retrieves any option code the
+ * server sent, so these only need a number -- RFC 2132 3.17 for the domain
+ * name and 3.12 for the classful static route list, which is the one the
+ * published API's aam_StaticRouteTable carries.
+ */
+#define AMI_DHCP_OPTION_DOMAIN          15
+#define AMI_DHCP_OPTION_STATIC_ROUTE    33
+
+static VOID ami_ns_zero(APTR p, ULONG size)
+{
+    UBYTE *b = (UBYTE *)p;
+
+    while (size-- > 0)
+        *b++ = 0;
+}
+
+
+/*
+ * The client, created on demand.
+ *
+ * A machine whose DEVS:NetInterfaces are all static boots without an NX_DHCP
+ * at all, and an application may still ask for one interface to be configured
+ * by DHCP. There can only ever be one client -- there is only one UDP port 68
+ * -- so it is created here if start-up did not, with the same host name and
+ * the same state-change callback, and every later request shares it.
+ *
+ * Must be called inside a ThreadX bracket.
+ */
+static LONG ami_ns_dhcp_ensure(AmiNetStack *ns)
+{
+    UINT status;
+
+    if (ns->ns_DhcpCreated)
+        return AMI_NET_OK;
+
+    /* NetX Duo keeps the host name POINTER rather than a copy, so it has to
+       be storage that outlives the NX_DHCP -- the same reason start-up hands
+       it ns_Config. */
+    status = nx_dhcp_create(&ns->ns_Dhcp, &ns->ns_Ip,
+                            (ns->ns_Config.hostname[0] != '\0')
+                                ? (CHAR *)ns->ns_Config.hostname
+                                : (CHAR *)"amiga");
+    if (status != NX_SUCCESS)
+    {
+        AMI_ERROR("netstack: nx_dhcp_create failed (%ld)", (long)status);
+        return AMI_NET_ERR_STATE;
+    }
+
+    ns->ns_DhcpCreated = TRUE;
+
+    (VOID)nx_dhcp_interface_state_change_notify(&ns->ns_Dhcp,
+                                                ami_ns_dhcp_state_changed);
+
+    /*
+     * Ask the server for the options an application can be given back. Without
+     * this they are not in the parameter request list and a conforming server
+     * has no reason to send any of them, so the tables would come back empty
+     * and look like a server that offered nothing.
+     */
+    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, NX_DHCP_OPTION_GATEWAYS);
+    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, NX_DHCP_OPTION_DNS_SVR);
+    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, NX_DHCP_OPTION_HOST_NAME);
+    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, AMI_DHCP_OPTION_DOMAIN);
+    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, AMI_DHCP_OPTION_STATIC_ROUTE);
+
+    return AMI_NET_OK;
+}
+
+LONG netstack_interface_dhcp_start(UWORD index, ULONG requested_address)
+{
+    AmiNetStack  *ns = ami_ns;
+    AmiNetCaller  caller;
+    UINT          status;
+    LONG          rc;
+
+    if (ns == NULL || !ns->ns_IpCreated ||
+        index >= (UWORD)AMI_CFG_MAX_INTERFACES || ns->ns_Iface[index] == NULL)
+        return AMI_NET_ERR_STATE;
+
+    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+        return AMI_NET_ERR_KERNEL;
+
+    rc = ami_ns_dhcp_ensure(ns);
+    if (rc != AMI_NET_OK)
+    {
+        ami_netstack_leave(&caller);
+        return rc;
+    }
+
+    /*
+     * An allocation genuinely in progress on this interface, and nothing
+     * else. It is deliberately NOT "the client has ever run here": an
+     * interface that is BOUND is one the caller was already told about with
+     * AAMR_AddressKnown, and an interface that was removed and re-added has
+     * had its state cleared by netstack_interface_remove(). Testing for
+     * NOT_STARTED instead made a re-added interface answer AAMR_Busy for as
+     * long as the machine was up.
+     */
+    if (netstack_interface_dhcp_state(index) == AMI_DHCP_WORKING)
+    {
+        ami_netstack_leave(&caller);
+        return AMI_NET_ERR_BUSY;
+    }
+
+    status = nx_dhcp_interface_enable(&ns->ns_Dhcp, (UINT)index);
+    if (status != NX_SUCCESS && status != NX_DHCP_INTERFACE_ALREADY_ENABLED)
+    {
+        ami_netstack_leave(&caller);
+        AMI_WARN("netstack: DHCP would not enable interface %ld (%ld)",
+                 (long)index, (long)status);
+        return AMI_NET_ERR_STATE;
+    }
+
+    /*
+     * "A DHCP client can make a wish, as to which IP address should be
+     * allocated for it." skip_discover is 0 on purpose: skipping DISCOVER
+     * turns the wish into a demand and a server that disagrees answers NAK,
+     * which is a worse outcome than being given a different address.
+     */
+    if (requested_address != 0)
+        (VOID)nx_dhcp_interface_request_client_ip(&ns->ns_Dhcp, (UINT)index,
+                                                  requested_address, 0);
+
+    status = nx_dhcp_interface_start(&ns->ns_Dhcp, (UINT)index);
+
+    ami_netstack_leave(&caller);
+
+    if (status != NX_SUCCESS)
+    {
+        AMI_WARN("netstack: DHCP would not start on interface %ld (%ld)",
+                 (long)index, (long)status);
+        return AMI_NET_ERR_STATE;
+    }
+
+    /* So that netstatus and QueryInterfaceTagList report the binding type
+       this interface now really has. */
+    ns->ns_Config.interfaces[index].iptype = AMI_IPTYPE_DHCP;
+
+    AMI_INFO("netstack: DHCP started on interface %ld", (long)index);
+
+    return AMI_NET_OK;
+}
+
+/*
+ * Where the client has got to. Read out of ns_DhcpState[], which the
+ * state-change callback already maintains for every interface -- there is no
+ * need to reach into the NX_DHCP for it, and no bracket needed to read a byte
+ * the callback wrote.
+ */
+LONG netstack_interface_dhcp_state(UWORD index)
+{
+    AmiNetStack *ns = ami_ns;
+
+    if (ns == NULL || index >= (UWORD)AMI_CFG_MAX_INTERFACES)
+        return AMI_NET_ERR_STATE;
+
+    if (!ns->ns_DhcpCreated)
+        return AMI_DHCP_IDLE;
+
+    switch (ns->ns_DhcpState[index])
+    {
+        case NX_DHCP_STATE_NOT_STARTED:
+            return AMI_DHCP_IDLE;
+
+        case NX_DHCP_STATE_BOUND:
+        case NX_DHCP_STATE_RENEWING:
+        case NX_DHCP_STATE_REBINDING:
+            return AMI_DHCP_BOUND;
+
+        default:
+            /* BOOT, INIT, SELECTING, REQUESTING, FORCERENEW, ADDRESS_PROBING
+               -- all of them "still trying", which is all a caller waiting on
+               a deadline needs to know. */
+            return AMI_DHCP_WORKING;
+    }
+}
+
+/* One DHCP option that is a list of IPv4 addresses, into `out`. */
+static UWORD ami_ns_dhcp_addr_list(AmiNetStack *ns, UWORD index, UINT option,
+                                   ULONG *out, UWORD max)
+{
+    UCHAR buffer[AMI_DHCP_MAX_ADDRS * 4];
+    UINT  size = (UINT)sizeof(buffer);
+    UWORD count = 0;
+    UWORD i;
+
+    if (nx_dhcp_interface_user_option_retrieve(&ns->ns_Dhcp, (UINT)index,
+                                               option, buffer,
+                                               &size) != NX_SUCCESS)
+        return 0;
+
+    for (i = 0; (ULONG)(i + 1) * 4UL <= (ULONG)size && count < max; i++)
+    {
+        ULONG addr = ((ULONG)buffer[i * 4] << 24) |
+                     ((ULONG)buffer[i * 4 + 1] << 16) |
+                     ((ULONG)buffer[i * 4 + 2] << 8) |
+                      (ULONG)buffer[i * 4 + 3];
+
+        /* "A router address of 0 should be ignored" -- and the same for the
+           other two lists, which the autodoc says in the same words. */
+        if (addr != 0)
+            out[count++] = addr;
+    }
+
+    return count;
+}
+
+/* One DHCP option that is text. Not NUL-terminated on the wire. */
+static VOID ami_ns_dhcp_text(AmiNetStack *ns, UWORD index, UINT option,
+                             char *out, ULONG outlen)
+{
+    UCHAR buffer[128];
+    UINT  size = (UINT)sizeof(buffer);
+    ULONG n;
+
+    out[0] = '\0';
+
+    if (nx_dhcp_interface_user_option_retrieve(&ns->ns_Dhcp, (UINT)index,
+                                               option, buffer,
+                                               &size) != NX_SUCCESS)
+        return;
+
+    n = (ULONG)size;
+    if (n >= outlen)
+        n = outlen - 1;
+
+    for (outlen = 0; outlen < n; outlen++)
+        out[outlen] = (char)buffer[outlen];
+
+    out[n] = '\0';
+}
+
+LONG netstack_interface_dhcp_lease(UWORD index, AmiDhcpLease *out)
+{
+    AmiNetStack  *ns = ami_ns;
+    AmiNetCaller  caller;
+    UCHAR         buffer[8];
+    UINT          size;
+    ULONG         addr = 0;
+    ULONG         mask = 0;
+
+    if (out == NULL)
+        return AMI_NET_ERR_STATE;
+
+    ami_ns_zero(out, sizeof(*out));
+
+    if (ns == NULL || !ns->ns_IpCreated || !ns->ns_DhcpCreated ||
+        index >= (UWORD)AMI_CFG_MAX_INTERFACES)
+        return AMI_NET_ERR_STATE;
+
+    if (netstack_interface_dhcp_state(index) != AMI_DHCP_BOUND)
+        return AMI_NET_ERR_STATE;
+
+    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+        return AMI_NET_ERR_KERNEL;
+
+    /* The address and mask come from the interface rather than from the
+       options: they are what the client actually CONFIGURED, which is the
+       number the caller will find on the interface afterwards. */
+    if (nx_ip_interface_address_get(&ns->ns_Ip, (UINT)index, &addr, &mask)
+            == NX_SUCCESS)
+    {
+        out->adl_Address = addr;
+        out->adl_NetMask = mask;
+    }
+
+    (VOID)nx_dhcp_interface_server_address_get(&ns->ns_Dhcp, (UINT)index,
+                                               &out->adl_Server);
+
+    size = (UINT)sizeof(buffer);
+    if (nx_dhcp_interface_user_option_retrieve(&ns->ns_Dhcp, (UINT)index,
+                                               NX_DHCP_OPTION_DHCP_LEASE,
+                                               buffer, &size) == NX_SUCCESS &&
+        size >= 4)
+    {
+        out->adl_LeaseSeconds = ((ULONG)buffer[0] << 24) |
+                                ((ULONG)buffer[1] << 16) |
+                                ((ULONG)buffer[2] << 8) |
+                                 (ULONG)buffer[3];
+    }
+
+    out->adl_RouterCount =
+        ami_ns_dhcp_addr_list(ns, index, NX_DHCP_OPTION_GATEWAYS,
+                              out->adl_Router, AMI_DHCP_MAX_ADDRS);
+    out->adl_DnsCount =
+        ami_ns_dhcp_addr_list(ns, index, NX_DHCP_OPTION_DNS_SVR,
+                              out->adl_Dns, AMI_DHCP_MAX_ADDRS);
+    out->adl_StaticRouteCount =
+        ami_ns_dhcp_addr_list(ns, index, AMI_DHCP_OPTION_STATIC_ROUTE,
+                              out->adl_StaticRoute, AMI_DHCP_MAX_ADDRS);
+
+    ami_ns_dhcp_text(ns, index, NX_DHCP_OPTION_HOST_NAME,
+                     out->adl_HostName, sizeof(out->adl_HostName));
+    ami_ns_dhcp_text(ns, index, AMI_DHCP_OPTION_DOMAIN,
+                     out->adl_DomainName, sizeof(out->adl_DomainName));
+
+    ami_netstack_leave(&caller);
+
+    return AMI_NET_OK;
+}
+
+LONG netstack_interface_dhcp_stop(UWORD index, BOOL release)
+{
+    AmiNetStack  *ns = ami_ns;
+    AmiNetCaller  caller;
+
+    if (ns == NULL || !ns->ns_DhcpCreated ||
+        index >= (UWORD)AMI_CFG_MAX_INTERFACES)
+        return AMI_NET_ERR_STATE;
+
+    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+        return AMI_NET_ERR_KERNEL;
+
+    /*
+     * Releasing tells the server the address is free again, which is the
+     * polite thing to do when an allocation is abandoned and the WRONG thing
+     * when it succeeded -- so the caller says which.
+     */
+    if (release)
+        (VOID)nx_dhcp_interface_release(&ns->ns_Dhcp, (UINT)index);
+
+    (VOID)nx_dhcp_interface_stop(&ns->ns_Dhcp, (UINT)index);
+
+    ns->ns_DhcpState[index] = NX_DHCP_STATE_NOT_STARTED;
+
+    ami_netstack_leave(&caller);
 
     return AMI_NET_OK;
 }
