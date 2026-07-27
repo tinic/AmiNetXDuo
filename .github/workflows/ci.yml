@@ -61,13 +61,22 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/aminetxduo/toolchain
-          key: m68k-amigaos-gcc-15.2.0-${{ steps.pin.outputs.sha }}
+          key: m68k-amigaos-gcc-15.2.0-crt0fix-${{ steps.pin.outputs.sha }}
 
       # On a warm cache this does not run at all, so the mirror is touched
       # once per pin change rather than once per build.
       - name: Fetch the toolchain
         if: steps.toolchain-cache.outputs.cache-hit != 'true'
         run: tools/fetch-toolchain.sh
+
+      # A cache restored from before the crt0 repair existed contains the
+      # BROKEN crt0, and the fetch above does not run on a hit -- so this is
+      # not belt-and-braces, it is the only thing standing between a warm
+      # cache and shipping commands that crash on return to the Shell. The
+      # key is versioned too, so an old cache is not reused in the first
+      # place; this catches the case where it is restored anyway.
+      - name: The toolchain's crt0 is repaired
+        run: tools/fetch-toolchain.sh --check-crt0
 
       - name: Report the toolchain
         run: |
