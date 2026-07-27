@@ -81,14 +81,7 @@
 #define AMI_SANA2_TX_SLOTS          8
 #endif
 
-/* Reader threads run above the IP thread so the read queue drains promptly.
-   ThreadX counts down, so "above" is a SMALLER number than
-   AMI_IP_THREAD_PRIORITY -- this said 2 against the IP thread's 1 for a long
-   time, which is the opposite of what the sentence claims and cost 6.6% of a
-   bulk fetch (docs/RESEARCH.md 52). */
-#ifndef AMI_SANA2_RX_PRIORITY
-#define AMI_SANA2_RX_PRIORITY       1
-#endif
+#include "../thread_priorities.h"
 #ifndef AMI_SANA2_RX_STACK_SIZE
 #define AMI_SANA2_RX_STACK_SIZE     4096
 #endif

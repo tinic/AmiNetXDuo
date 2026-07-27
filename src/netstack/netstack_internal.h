@@ -30,27 +30,7 @@
 
 /* ------------------------------------------------------------- tunables -- */
 
-/*
- * ThreadX priorities, lowest number wins -- _tx_thread_system_resume.c:213,
- * `if (priority < _tx_thread_highest_priority)`.
- *
- * The SANA-II readers (src/sana2/sana2_internal.h) must outrank the IP thread
- * so a burst drains into the pool rather than being dropped on the wire, and
- * the IP thread must outrank everything that consumes packets.
- *
- * THAT IS WHAT THIS COMMENT ALWAYS SAID AND IT WAS NOT WHAT THE NUMBERS DID.
- * The IP thread was 1 and the readers 2, so the IP thread outranked them and
- * preempted the very threads whose job is to keep CMD_READs posted -- the
- * exact failure both this comment and sana2_internal.h's were written to
- * prevent. Measured on a 1.2 MB fetch with the third-party Aminet curl,
- * correcting it is worth 6.6%: 118,400 -> 126,190 B/s, against Roadshow's
- * 127,716 (docs/RESEARCH.md 52).
- *
- * So: readers 1, IP thread 2, everything that consumes packets far below.
- */
-#define AMI_IP_THREAD_PRIORITY      2
-#define AMI_AUTOIP_PRIORITY         3
-#define AMI_CALLER_PRIORITY        16      /* adopted application tasks      */
+#include "../thread_priorities.h"
 
 #define AMI_IP_STACK_SIZE           4096
 #define AMI_ARP_CACHE_SIZE          1024

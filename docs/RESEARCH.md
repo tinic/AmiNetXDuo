@@ -15642,3 +15642,16 @@ invariant with no test is a wish. The ordering now has its rationale, its Thread
 and its measurement recorded in place, but the durable fix would be a startup assertion
 that `AMI_SANA2_RX_PRIORITY < AMI_IP_THREAD_PRIORITY` — cheap, and it would have caught
 this the day it was written.
+
+That is now `src/thread_priorities.h`: the whole ladder in one file, included by both
+internal headers, with the ordering asserted rather than described --
+
+```c
+#if AMI_SANA2_RX_PRIORITY >= AMI_IP_THREAD_PRIORITY
+#error "SANA-II readers must outrank the IP thread (ThreadX: lower number wins)"
+#endif
+```
+
+Each of the three `#error`s was verified to fire by reintroducing the failure it guards,
+the shipped inversion included -- an untested assertion being the same kind of wish as an
+untested comment.
