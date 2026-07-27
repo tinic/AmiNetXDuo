@@ -54,6 +54,10 @@
 
 #include "aminetxduo/config.h"
 
+/* struct sockaddr_dl and IFT_ETHER, for the ARP entries below. The layout of
+   a link-level address is the NDK's, not this file's. */
+#include <net/if_dl.h>
+#include <net/if_types.h>
 
 #include <proto/exec.h>
 
@@ -407,7 +411,21 @@ typedef struct BsdRouteEntry
 #define BSD_ROUTE_STATIC_MAX    0
 #endif
 
-#define BSD_ROUTE_MAX   (NX_MAX_PHYSICAL_INTERFACES + BSD_ROUTE_STATIC_MAX + 1)
+/*
+ * ARP entries are routes too, as far as this interface is concerned: 4.4BSD
+ * keeps the ARP cache IN the routing table, flagged RTF_LLINFO, and that is
+ * what `arp -a` reads -- it asks for routes carrying that flag and formats
+ * whatever comes back. With none emitted, Roadshow's arp printed nothing at
+ * all and looked broken (docs/RESEARCH.md 55).
+ *
+ * The cache is AMI_ARP_CACHE_SIZE bytes of NX_ARP, so this bound is generous
+ * rather than exact; running out truncates the list, which is why the walk
+ * below stops cleanly rather than overrunning.
+ */
+#define BSD_ROUTE_ARP_MAX       32
+
+#define BSD_ROUTE_MAX   (NX_MAX_PHYSICAL_INTERFACES + BSD_ROUTE_STATIC_MAX + \
+                         BSD_ROUTE_ARP_MAX + 1)
 
 typedef struct BsdRouteTable
 {
@@ -457,6 +475,151 @@ static BOOL bsd_route_emit(BsdRouteEntry *out, LONG want_flags, LONG flags,
     bsd_route_sockaddr(&out->bre_NetMask, mask);
 
     return TRUE;
+}
+
+/*
+ * An ARP entry, in the space a route entry occupies.
+ *
+ * The stride stays sizeof(BsdRouteEntry) so the fixed array still works, and
+ * that is safe rather than lucky: a destination sockaddr_in plus a gateway
+ * sockaddr_dl is 36 bytes against the 48 three sockaddr_in take, and
+ * rtm_addrs says only two are present so nothing reads the remainder. A
+ * caller walking by rtm_msglen sees entries of one size throughout.
+ *
+ * sockaddr_dl is net/if_dl.h's, from the NDK -- the layout is not invented
+ * here. sdl_data holds the interface name first and the link address after
+ * it, which is what LLADDR() encodes and why sdl_nlen has to be right.
+ */
+typedef struct BsdLinkEntry
+{
+    struct rt_msghdr    ble_Header;
+    struct sockaddr_in  ble_Dest;
+    struct sockaddr_dl  ble_Gateway;
+} BsdLinkEntry;
+
+/*
+ * One kind of ARP entry, filled in place. Returns FALSE when the caller's
+ * filter excludes it, exactly as bsd_route_emit() does.
+ */
+static BOOL bsd_route_emit_arp(BsdRouteEntry *slot, LONG want_flags,
+                               LONG flags, UWORD index, ULONG dest,
+                               ULONG mac_msw, ULONG mac_lsw)
+{
+    BsdLinkEntry *out = (BsdLinkEntry *)slot;
+    UBYTE        *lla;
+
+    if ((flags & want_flags) != want_flags)
+        return FALSE;
+
+    bsd_bzero(out, sizeof(*slot));
+
+    out->ble_Header.rtm_msglen  = (UWORD)sizeof(BsdRouteEntry);
+    out->ble_Header.rtm_version = RTM_VERSION;
+    out->ble_Header.rtm_type    = RTM_GET;
+    out->ble_Header.rtm_index   = index;
+    out->ble_Header.rtm_flags   = flags;
+    out->ble_Header.rtm_addrs   = RTA_DST | RTA_GATEWAY;
+
+    /*
+     * rtm_rmx.rmx_expire stays 0, and Roadshow's arp prints "permanent" for
+     * it. That is not a missing lifetime -- NX_ARP_EXPIRATION_RATE is 0 in
+     * this build, which is NetX Duo's "entries do not expire", so permanent is
+     * what these entries actually are. Setting an invented expiry here would
+     * make arp print a countdown that never happens.
+     */
+
+    bsd_route_sockaddr(&out->ble_Dest, dest);
+
+    out->ble_Gateway.sdl_len    = (UBYTE)sizeof(struct sockaddr_dl);
+    out->ble_Gateway.sdl_family = AF_LINK;
+    out->ble_Gateway.sdl_index  = index;
+    out->ble_Gateway.sdl_type   = IFT_ETHER;
+    out->ble_Gateway.sdl_nlen   = 0;    /* no name, so LLADDR is sdl_data */
+    out->ble_Gateway.sdl_alen   = 6;
+    out->ble_Gateway.sdl_slen   = 0;
+
+    /* NetX Duo keeps a MAC as a 16-bit msw and a 32-bit lsw. */
+    lla = (UBYTE *)out->ble_Gateway.sdl_data;
+    lla[0] = (UBYTE)((mac_msw >> 8) & 0xFF);
+    lla[1] = (UBYTE)( mac_msw       & 0xFF);
+    lla[2] = (UBYTE)((mac_lsw >> 24) & 0xFF);
+    lla[3] = (UBYTE)((mac_lsw >> 16) & 0xFF);
+    lla[4] = (UBYTE)((mac_lsw >>  8) & 0xFF);
+    lla[5] = (UBYTE)( mac_lsw        & 0xFF);
+
+    return TRUE;
+}
+
+/*
+ * Walk the ARP cache. NetX Duo publishes no enumerator -- only
+ * nx_arp_hardware_address_find() for one address at a time -- so this reads
+ * the table the same way bsd_route_fill() reads nx_ip_interface[].
+ *
+ * Each bucket is a CIRCULAR list threaded on nx_arp_active_next, so the walk
+ * has to stop when it comes back to the head; a `for(;;)` on NULL would spin
+ * for ever. Entries with no hardware address yet are requests in flight and
+ * are skipped -- an incomplete entry is not a resolved one, and printing it
+ * as 00:00:00:00:00:00 would be a lie.
+ */
+static UWORD bsd_route_fill_arp(NX_IP *ip, BsdRouteTable *table,
+                                LONG want_flags, UWORD used)
+{
+    UINT bucket;
+
+    for (bucket = 0; bucket < NX_ARP_TABLE_SIZE; bucket++)
+    {
+        NX_ARP *head = ip->nx_ip_arp_table[bucket];
+        NX_ARP *entry = head;
+
+        if (head == NX_NULL)
+            continue;
+
+        do
+        {
+            LONG  flags;
+            UWORD index = 0;
+
+            if (used >= (UWORD)BSD_ROUTE_MAX)
+                return used;
+
+            if (entry->nx_arp_physical_address_msw == 0 &&
+                entry->nx_arp_physical_address_lsw == 0)
+            {
+                entry = entry->nx_arp_active_next;
+                continue;
+            }
+
+            /* Which interface it was learned on, by identity. */
+            if (entry->nx_arp_ip_interface != NX_NULL)
+            {
+                UINT i;
+
+                for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+                {
+                    if (&ip->nx_ip_interface[i] == entry->nx_arp_ip_interface)
+                    {
+                        index = (UWORD)i;
+                        break;
+                    }
+                }
+            }
+
+            flags = RTF_UP | RTF_HOST | RTF_LLINFO;
+            if (entry->nx_arp_route_static)
+                flags |= RTF_STATIC;
+
+            if (bsd_route_emit_arp(&table->brt_Entry[used], want_flags, flags,
+                                   index, entry->nx_arp_ip_address,
+                                   entry->nx_arp_physical_address_msw,
+                                   entry->nx_arp_physical_address_lsw))
+                used++;
+
+            entry = entry->nx_arp_active_next;
+        }
+        while (entry != head && entry != NX_NULL);
+    }
+
+    return used;
 }
 
 /*
@@ -516,6 +679,8 @@ static UWORD bsd_route_fill(NX_IP *ip, BsdRouteTable *table, LONG want_flags)
                            RTF_UP | RTF_GATEWAY, 0, 0, 0, 0, gateway))
             used++;
     }
+
+    used = bsd_route_fill_arp(ip, table, want_flags, used);
 
     return used;
 }
