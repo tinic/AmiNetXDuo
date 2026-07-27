@@ -15195,8 +15195,10 @@ then lets its own, wider epilogue pop the frame. The pop overshoots by four
 bytes, the `rts` reads the longword above the return address, and every command
 dies on return to the Shell. Eleven `crt0.o` in the tree carried it.
 
-**It is fixed upstream now — in GCC, not in newlib.** bebbo/gcc `168be3619`,
-branch `amiga15.2`, seven lines in `gcc/config/m68k/m68k.cc`:
+We reported it as [bebbo/amiga-gcc issue
+#12](https://codeberg.org/bebbo/amiga-gcc/issues/12). **It is fixed — in GCC,
+not in newlib**, and carried to `amiga15.2` (`168be3619`), `amiga13.4` and
+`amiga16.1`. Seven lines in `gcc/config/m68k/m68k.cc`:
 
 ```c
  static bool
@@ -15215,12 +15217,14 @@ never have had a prologue; once that holds, `__savedSp` is recorded with
 nothing pushed, lands exactly on the return address, and neither function has
 an epilogue left to disagree about.
 
-### 48.1 It is a better fix than the one proposed from here
+### 48.1 It is a better fix than the one we asked for
 
-The script's docstring used to assert that "the upstream source fix goes the
-other way, dropping the `d7` register variable from `exit`". That was a
-**proposal made from this repository, written up as though it described
-something**. It is not what was done, and it was the worse idea.
+Our report proposed a **newlib** change: give `exit`'s return code static
+storage instead of a register variable, so the allocator cannot produce the
+mismatch at any optimisation level. The script's docstring then described that
+as "the upstream source fix" — **our own suggestion, written up as though it
+described something that had happened**. It is not what was done, and it was
+the worse idea.
 
 The disassembly says why. `exit` still uses `d7`:
 
@@ -15236,11 +15240,18 @@ Removing the *use* means restructuring `exit`. Suppressing the *save* keeps
 the code exactly as it is — and fixes every `__entrypoint` function in the
 system rather than one file in newlib.
 
-### 48.2 The check was calling a fixed toolchain broken
+### 48.2 The check was calling a frameless toolchain broken
 
-The local toolchain already has the fixed shape: `_____start` opens with
+The toolchain in use here is already frameless: `_____start` opens with
 `movel sp,__savedSp` and no `movem` at all, despite using `d2` and `a2` for
-`_callfuncs`.
+`_callfuncs`, and `exit` reads its argument straight off `sp@(4)`.
+
+**That is not evidence the upstream fix is in it** — its `crt0.o` predates
+`168be3619` by weeks. Why it is frameless is not established: a hand build, a
+different newlib, or a compiler that happened to allocate nothing, which is
+what GCC 6.5 did and why the defect stayed latent from 2018. The toolchain the
+repair was written against is the one `fetch-toolchain.sh` installs, and its
+`objdump` is a Linux binary that cannot be run from this host to re-check.
 
 `fix-toolchain-crt0.py --check` classified that as **`refused` — "exit has 0
 prologues, expected 1"** on all eleven objects, and exited 1. So did
@@ -15252,13 +15263,16 @@ mean, because they are opposites:
 
 | `exit` | `____start` | verdict |
 |---|---|---|
-| no frame | no frame | **`immune`** — the compiler honoured `__entrypoint`; nothing to do, exit 0 |
+| no frame | no frame | **`immune`** — the two agree; nothing to repair, exit 0 |
 | no frame | keeps a frame | **`refused`** — `__savedSp` would point *below* the return address, so the `rts` reads a saved register. Worse than the original bug, and unrepairable from an object file |
 | one frame | disagrees | `buggy` / `patched` — the original case, unchanged |
 | one frame | agrees | `ok` — already repaired |
 
 All four are exercised by stubbing `functions()`, because only the first two
 are reachable with the toolchains on this machine.
+
+The verdict reports the shape it sees and says nothing about the cause, which
+is the mistake the previous wording made in the other direction.
 
 The repair stays for toolchains that predate `168be3619`. Nothing in it runs
 against one that does not need it.

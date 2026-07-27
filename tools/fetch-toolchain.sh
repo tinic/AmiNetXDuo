@@ -168,11 +168,11 @@ fi
 # for a tree this script did not install -- a hand-built toolchain, or one from
 # before the repair existed.  Exits non-zero if any crt0.o is still broken.
 #
-# A toolchain built from bebbo/gcc amiga15.2 at 168be3619 or later never had
-# the bug: the compiler honours __entrypoint now, so neither ____start nor
-# exit keeps a frame.  That reports "immune" and succeeds -- it used to be
-# reported as an error, which told a user with a FIXED toolchain that theirs
-# was broken.
+# A toolchain whose ____start and exit both keep no frame never had the bug --
+# which is what bebbo/amiga-gcc issue #12 produced, the compiler honouring
+# __entrypoint on amiga15.2, amiga13.4 and amiga16.1.  That reports "immune"
+# and succeeds; it used to be reported as an error, which told a user with a
+# sound toolchain that theirs was broken.
 if [ "$MODE" = "checkcrt0" ]; then
     CHECK_ROOT="${AMIGA_TOOLCHAIN_ROOT:-$ROOT}"
     [ -d "$CHECK_ROOT" ] || { echo "no toolchain at $CHECK_ROOT" >&2; exit 2; }

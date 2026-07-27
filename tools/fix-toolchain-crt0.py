@@ -62,14 +62,17 @@ HOW IT DECIDES WHAT TO PATCH
     since exit() never returns, but a 3-register pop against a 4-register push
     is a trap for the next reader.
 
-FIXED UPSTREAM, AND NOT THE WAY THIS FILE PREDICTED
+FIXED UPSTREAM, AND NOT THE WAY WE ASKED
 
-    This docstring used to say "the upstream source fix goes the other way,
-    dropping the d7 register variable from exit". That was a PROPOSAL made
-    from here, not a description of anything, and it is not what was done.
+    Reported as codeberg.org/bebbo/amiga-gcc issue #12. The report proposed a
+    newlib change -- give exit's return code static storage instead of a
+    register variable, so the allocator cannot produce the mismatch. An
+    earlier version of this docstring described that as "the upstream source
+    fix", which it never was: it was our suggestion, written up as though it
+    described something that had happened.
 
-    bebbo/gcc 168be3619 on branch amiga15.2 (2026-07-27) fixes the COMPILER
-    instead, in gcc/config/m68k/m68k.cc:
+    bebbo fixed the COMPILER instead, in gcc/config/m68k/m68k.cc, and carried
+    it to amiga15.2 (168be3619), amiga13.4 and amiga16.1:
 
         static bool
         m68k_save_reg (unsigned int regno, bool interrupt_handler)
@@ -93,8 +96,17 @@ FIXED UPSTREAM, AND NOT THE WAY THIS FILE PREDICTED
     exit. Suppressing the save keeps the code and fixes every __entrypoint
     function rather than this one file.
 
-    A toolchain built from that branch therefore needs nothing from this
+    A toolchain built from those branches therefore needs nothing from this
     script, and reports as "immune" below rather than as an error.
+
+    NOTE ON WHAT "immune" DOES AND DOES NOT SAY. It says the two functions
+    agree because neither keeps a frame, which is the shape the fix produces.
+    It does NOT prove the fix is what produced it: the toolchain in use here
+    is dated well before 168be3619 and is already frameless, for a reason not
+    established -- a hand build, a different newlib, or an older compiler that
+    happened to allocate nothing (GCC 6.5 did exactly that, which is why the
+    defect stayed latent from 2018). The check reports the shape it sees and
+    leaves the cause alone.
 
 SPDX-License-Identifier: MIT
 """
@@ -236,7 +248,7 @@ def repair(objdump, path, check_only):
     if not saves:
         if not start:
             return ("immune", "neither ____start nor exit keeps a frame "
-                              "-- the compiler honoured __entrypoint")
+                              "-- nothing to repair")
 
         # exit frameless but ____start not is WORSE than the original bug:
         # __savedSp would point below the return address rather than above it,
