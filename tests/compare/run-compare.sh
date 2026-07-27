@@ -243,6 +243,16 @@ fi
 # -L stages a whole LIBS: tree of the caller's own -- amisslmaster.library and
 # its versioned library under AmiSSL/, which the third-party curl opens before
 # main() and which no stack here supplies.
+# Default it, because the failure without it is unreadable: the third-party
+# curl opens amisslmaster.library and its versioned library BEFORE main(), so
+# a missing one means `curl --version` returns rc 20 with no output at all --
+# indistinguishable from the stack under test being broken. That cost an hour
+# once. build/amissl-stage/libs is where tests/curl leaves the tree.
+if [ -z "${EXTRALIBS:-}" ] && [ -d "$ROOT/build/amissl-stage/libs" ]; then
+    EXTRALIBS="$ROOT/build/amissl-stage/libs"
+    say "# staging $EXTRALIBS (default; -L overrides)"
+fi
+
 if [ -n "${EXTRALIBS:-}" ]; then
     cp -R "$EXTRALIBS"/* "$STAGE/libs/"
 fi

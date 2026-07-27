@@ -15551,3 +15551,39 @@ per 1.2 MB there. That is roughly 2.8 ms per received packet, which for
 checksum and copy on a 14 MHz 68020 may simply be what the work costs; both are
 already m68k assembly (`src/net68k/`). Establishing whether it is waste or work
 needs the IP thread profiled, not the window moved.
+
+### 51.3 The gap reproduced, and the staging that was hiding it (2026-07-27)
+
+§51.2 could not run the third-party curl: `curl --version` returned rc 20
+before the network was up. The cause was not the stack and not the CPU variant
+— that binary opens `amisslmaster.library` and its versioned library under
+`AmiSSL/` **before `main()`**, and neither is supplied by any stack here. A
+missing one aborts the program with no output, which reads exactly like the
+library under test being broken.
+
+`tests/compare/run-compare.sh -L` exists for this and its header says so. It
+now defaults to `build/amissl-stage/libs` when that directory is present, and
+says which tree it staged, because the failure it prevents is unreadable.
+
+With it, on the exclusive lane, same binary and staging on both stacks,
+1,200,000 bytes over HTTP:
+
+| | run 1 | run 2 | mean |
+|---|---:|---:|---:|
+| **AmiNetXDuo** | 119,911 B/s | 117,120 | **118,516** |
+| **Roadshow 1.15** | 132,011 B/s | 123,421 | **127,716** |
+
+**Roadshow ahead by 7.8% on the means, 10.1% best against best** — the §29/§39
+figure, reproduced with the window question already settled. Two samples each,
+so the means are indicative; the direction is not in doubt and matches every
+earlier measurement.
+
+Note Roadshow's spread is the wider one (0.63 s against our 0.24 s), which is
+the same pattern §29.3 saw on loopback. Whatever it does to be faster is less
+consistent than what we do.
+
+Both the bracket (§39) and the window (§51.1) are now eliminated by
+measurement. The remaining candidate is unchanged: `bsd_nx_leave` handing the
+CPU to the IP thread at every bracket exit, ThreadX priority 1 against an
+adopted caller's 16. Settling that needs the IP thread profiled — where its
+2.8 ms per received packet goes — not another knob turned.
