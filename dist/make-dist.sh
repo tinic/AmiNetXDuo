@@ -86,7 +86,7 @@ need() {
 }
 
 LIBS=(bsdsocket usergroup)
-CMDS=(AddNetInterface Online Offline ShowNetStatus ping netstat host fetch
+CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ping netstat host fetch
       nc telnet ftp NetTrace sntp traceroute tftp whois
       CheckNetConfig GetNetStatus NetShutdown AddNetRoute DeleteNetRoute)
 

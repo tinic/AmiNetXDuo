@@ -825,7 +825,8 @@
 (copyfiles
   (prompt "Installing the network commands into C:")
   (help   "AddNetInterface, Online and Offline bring an interface up and "
-          "take it down.  ShowNetStatus and netstat report what it is "
+          "take it down, and NetSetup writes or edits the interface file "
+          "for you.  ShowNetStatus and netstat report what it is "
           "doing.  ping, host and traceroute are the usual diagnostics.  "
           "fetch retrieves an http:// or https:// URL; nc, telnet, ftp and "
           "tftp are netcat and the usual clients; sntp sets the clock from "
