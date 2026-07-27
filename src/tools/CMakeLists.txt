@@ -17,6 +17,13 @@ set(TOOLS_COMMON_SOURCES
     tool_diag.c
     netstack_weak.c)
 
+# tool_devdiag.c is deliberately NOT in TOOLS_COMMON_SOURCES: it carries the
+# SANA-II driver table and the card-diagnostic prose, which only the commands
+# that configure an interface can reach.  See the head of that file for why
+# --gc-sections cannot remove it from the ones that cannot.
+set(TOOLS_DEVDIAG tool_devdiag.c)
+
+
 set(TOOLS_WARNINGS -Wall -Wextra)
 
 # The commands are built for size, the libraries for speed.
@@ -140,18 +147,18 @@ function(aminetxduo_add_tool target output)
 endfunction()
 
 aminetxduo_add_tool(tool_addnetinterface AddNetInterface
-    SOURCES addnetinterface.c)
+    SOURCES addnetinterface.c ${TOOLS_DEVDIAG})
 
 # CheckNetConfig is config-only in the strictest sense there is: it never opens
 # bsdsocket.library at all.  That is not an omission -- the machine that needs
 # checking is the one where the stack did not come up, so a checker that needed
 # a running stack would be unavailable in precisely the state it is for.
 aminetxduo_add_tool(tool_checknetconfig CheckNetConfig
-    SOURCES checknetconfig.c)
+    SOURCES checknetconfig.c ${TOOLS_DEVDIAG})
 
 # The interactive configurator.  Config-only: it writes the files the parser
 # reads and then runs AddNetInterface, rather than starting a stack itself.
-aminetxduo_add_tool(tool_netsetup NetSetup SOURCES netsetup.c)
+aminetxduo_add_tool(tool_netsetup NetSetup SOURCES netsetup.c ${TOOLS_DEVDIAG})
 
 # AddNetRoute and DeleteNetRoute are one source, the same way Online and
 # Offline are: they parse the same destination and differ in one library call.
@@ -171,8 +178,9 @@ aminetxduo_add_tool(tool_getnetstatus GetNetStatus NX SOURCES getnetstatus.c)
 # interfaces through NetStackControl(), exactly as Offline does.
 aminetxduo_add_tool(tool_netshutdown NetShutdown SOURCES netshutdown.c)
 
-aminetxduo_add_tool(tool_online  Online   SOURCES onoff.c)
-aminetxduo_add_tool(tool_offline Offline  SOURCES onoff.c DEFINES TOOL_OFFLINE)
+aminetxduo_add_tool(tool_online  Online   SOURCES onoff.c ${TOOLS_DEVDIAG})
+aminetxduo_add_tool(tool_offline Offline  SOURCES onoff.c ${TOOLS_DEVDIAG}
+    DEFINES TOOL_OFFLINE)
 
 aminetxduo_add_tool(tool_host    host     SOURCES host.c)
 
@@ -218,7 +226,7 @@ aminetxduo_add_tool(tool_whois   whois    SOURCES whois.c toolsock.c)
 aminetxduo_add_tool(tool_sntp    sntp     SOURCES sntp.c)
 
 aminetxduo_add_tool(tool_shownetstatus ShowNetStatus NX
-    SOURCES shownetstatus.c)
+    SOURCES shownetstatus.c ${TOOLS_DEVDIAG})
 aminetxduo_add_tool(tool_netstat       netstat       NX SOURCES netstat.c)
 # ping is config-only now, and that is the fix rather than a tidy-up: it used
 # to link its own ThreadX and NetX Duo and call nx_icmp_ping() on an NX_IP that

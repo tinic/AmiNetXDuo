@@ -194,61 +194,6 @@ AmiNetStack *tool_require_stack(VOID)
     return stack;
 }
 
-LONG tool_find_interface(const char *name)
-{
-    const AmiConfig *cfg = netstack_config();
-    UWORD            i;
-
-    if (cfg == NULL)
-    {
-        if (tool_stack_library_running())
-            tool_error("the network is up, but this command cannot read it");
-        else
-            tool_error("the network has not been started");
-
-        tool_explain_no_stack();
-        return -1;
-    }
-
-    for (i = 0; i < cfg->interface_count; i++)
-    {
-        const char *a = cfg->interfaces[i].name;
-        const char *b = name;
-
-        while (*a != '\0' && *b != '\0')
-        {
-            char ca = *a++;
-            char cb = *b++;
-
-            if (ca >= 'A' && ca <= 'Z')
-                ca = (char)(ca + 32);
-            if (cb >= 'A' && cb <= 'Z')
-                cb = (char)(cb + 32);
-            if (ca != cb)
-                break;
-        }
-
-        if (*a == '\0' && *b == '\0')
-            return (LONG)i;
-    }
-
-    tool_error("there is no interface called \"%s\"", (LONG)name);
-
-    if (cfg->interface_count == 0)
-    {
-        tool_explain_no_interfaces();
-    }
-    else
-    {
-        tool_advise_blank();
-        tool_advise("The interfaces this machine has are:");
-        for (i = 0; i < cfg->interface_count; i++)
-            tool_printf("      %s\n", (LONG)cfg->interfaces[i].name);
-        tool_advise("The name is the name of the file in DEVS:NetInterfaces.");
-    }
-
-    return -1;
-}
 
 const char *tool_basename(const char *path)
 {

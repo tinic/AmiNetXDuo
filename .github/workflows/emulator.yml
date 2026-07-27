@@ -72,12 +72,18 @@ jobs:
         id: pin
         run: echo "sha=$(tools/fetch-toolchain.sh --print-sha)" >> "$GITHUB_OUTPUT"
 
+      # The key carries a hash of the crt0 repair as well as the toolchain
+      # pin: the cached tree is a REPAIRED tree, so it is only reusable by a
+      # build whose repair is the same one. Bumping a hand-written suffix was
+      # the first attempt and it went stale immediately -- a cache saved by
+      # the 4-file version of the script was restored by the 11-file version,
+      # which correctly refused to build on it.
       - name: Cache the pinned m68k toolchain
         id: toolchain-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/aminetxduo/toolchain
-          key: m68k-amigaos-gcc-15.2.0-crt0fix-${{ steps.pin.outputs.sha }}
+          key: m68k-amigaos-gcc-15.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py') }}
 
       - name: Fetch the toolchain
         if: steps.toolchain-cache.outputs.cache-hit != 'true'

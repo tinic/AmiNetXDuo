@@ -203,7 +203,7 @@ VOID tool_join_path(char *dst, ULONG dstlen, const char *dir, const char *name)
  * the driver somewhere else and telling the user "it is in the wrong place" is
  * far better than "not found".
  */
-static const char *const diag_device_dirs[] =
+const char *const diag_device_dirs[] =
 {
     DIAG_DIR_NETWORKS,
     "DEVS:",
@@ -212,51 +212,9 @@ static const char *const diag_device_dirs[] =
     NULL
 };
 
-/*
- * SANA-II drivers we know by name. Only used to look harder -- a driver not on
- * this list is found perfectly well by the DEVS:Networks scan. It exists so
- * that a machine whose driver is already in memory (loaded from a Zorro ROM,
- * or by an earlier stack) is reported as having a card even though nothing is
- * on disk.
- */
-static const char *const diag_known_devices[] =
-{
-    "a2065.device", "ariadne.device", "ariadne2.device", "amiganet.device",
-    "cnet.device", "hydra.device", "x-surf.device", "xsurf100.device",
-    "e3b_ax88796.device", "prism2.device", "eth3com.device", "rtl8029.device",
-    "emac.device", "uaenet.device", "slip.device", "ppp.device",
-    NULL
-};
-
-static ToolDevice diag_found[TOOL_MAX_DEVICES];
-static UWORD      diag_found_count;
-static BOOL       diag_scanned;
-
-static BOOL diag_already_found(const char *name)
-{
-    UWORD i;
-
-    for (i = 0; i < diag_found_count; i++)
-    {
-        if (tool_stricmp(diag_found[i].name, name) == 0)
-            return TRUE;
-    }
-
-    return FALSE;
-}
-
-static VOID diag_add(const char *name, const char *where)
-{
-    if (diag_found_count >= (UWORD)TOOL_MAX_DEVICES || diag_already_found(name))
-        return;
-
-    tool_copy_string(diag_found[diag_found_count].name, TOOL_NAME_LEN, name);
-    tool_copy_string(diag_found[diag_found_count].where, TOOL_NAME_LEN, where);
-    diag_found_count++;
-}
 
 /* Is the driver already open somewhere on this machine? */
-static BOOL diag_is_resident(const char *device)
+BOOL diag_is_resident(const char *device)
 {
     struct Node *node;
     BOOL         found = FALSE;
@@ -278,63 +236,6 @@ static BOOL diag_is_resident(const char *device)
     return found;
 }
 
-ULONG tool_scan_devices(VOID)
-{
-    char  names[TOOL_MAX_DEVICES][TOOL_NAME_LEN];
-    ULONG n;
-    ULONG i;
-    int   d;
-
-    if (diag_scanned)
-        return diag_found_count;
-
-    diag_scanned     = TRUE;
-    diag_found_count = 0;
-
-    /* Everything in DEVS:Networks is, by convention, a SANA-II driver. */
-    n = tool_list_dir(DIAG_DIR_NETWORKS, names, (ULONG)TOOL_MAX_DEVICES,
-                      ".device");
-    for (i = 0; i < n; i++)
-        diag_add(names[i], DIAG_DIR_NETWORKS);
-
-    /* Then the names we know, wherever they happen to be. */
-    for (d = 0; diag_known_devices[d] != NULL; d++)
-    {
-        const char *name = diag_known_devices[d];
-        int         dir;
-
-        if (diag_already_found(name))
-            continue;
-
-        if (diag_is_resident(name))
-        {
-            diag_add(name, "already in memory");
-            continue;
-        }
-
-        for (dir = 0; diag_device_dirs[dir] != NULL; dir++)
-        {
-            char path[TOOL_NAME_LEN * 2];
-
-            tool_join_path(path, sizeof(path), diag_device_dirs[dir], name);
-            if (tool_exists(path))
-            {
-                diag_add(name, diag_device_dirs[dir]);
-                break;
-            }
-        }
-    }
-
-    return diag_found_count;
-}
-
-const ToolDevice *tool_scan_device(ULONG index)
-{
-    if (index >= (ULONG)diag_found_count)
-        return NULL;
-
-    return &diag_found[index];
-}
 
 const char *tool_device_where(const char *device)
 {
@@ -589,115 +490,6 @@ VOID tool_explain_interface_file(const char *name)
     tool_advise("written for you.");
 }
 
-VOID tool_explain_device(const char *device, ULONG unit)
-{
-    const char *where = tool_device_where(device);
-    LONG        probe;
-
-    tool_advise_blank();
-
-    if (where == NULL)
-    {
-        tool_printf("  There is no %s on this machine.\n", (LONG)device);
-        tool_advise_blank();
-        tool_advise("That is the driver for your network card, and it has to be");
-        tool_advise("installed before anything can use the card. Drivers belong");
-        tool_advise("in DEVS:Networks/ -- they come with the card, or with the");
-        tool_advise("operating system for cards Commodore made.");
-
-        if (tool_scan_devices() > 0)
-        {
-            ULONG i;
-
-            tool_advise_blank();
-            tool_advise("These network drivers ARE installed:");
-            for (i = 0; i < tool_scan_devices(); i++)
-            {
-                const ToolDevice *dev = tool_scan_device(i);
-
-                tool_printf("      %-24s (%s)\n", (LONG)dev->name,
-                            (LONG)dev->where);
-            }
-            tool_advise("If one of those is your card, run NetSetup and pick it.");
-        }
-
-        return;
-    }
-
-    /*
-     * The driver is there, so ask it directly rather than guessing. This is
-     * the difference between "would not open" and "your card is on unit 0,
-     * not unit 1" -- which is the actual mistake most of the time.
-     */
-    probe = tool_device_probe(device, unit);
-
-    if (probe == 0)
-    {
-        tool_printf("  %s unit %lu opens perfectly well on its own, so the\n",
-                    (LONG)device, unit);
-        tool_advise("card and its driver are fine.");
-        tool_advise_blank();
-        tool_advise("Something else has it open -- another network stack, or an");
-        tool_advise("earlier copy of this one that is still running. A reboot");
-        tool_advise("clears that. If this machine has no other stack installed,");
-        tool_advise("the serial debug log records what actually failed.");
-        return;
-    }
-
-    tool_printf("  %s is installed (%s) but unit %lu would not open.\n",
-                (LONG)device, (LONG)where, unit);
-
-    if (unit != 0 && tool_device_probe(device, 0) == 0)
-    {
-        tool_advise_blank();
-        tool_printf("  Unit 0 opens. Almost every card is unit 0: change the UNIT\n");
-        tool_printf("  line in DEVS:NetInterfaces to 0, or run NetSetup again.\n");
-        return;
-    }
-
-    tool_advise_blank();
-    tool_advise("The driver is installed but the card is not answering. Usually");
-    tool_advise("that means the card is not in the machine, is not seated");
-    tool_advise("properly, or needs a different unit number.");
-}
-
-VOID tool_explain_no_interfaces(VOID)
-{
-    ULONG n;
-
-    tool_advise_blank();
-    tool_advise("No network interfaces are configured.");
-    tool_advise_blank();
-    tool_advise("The stack reads one file per network card from");
-    tool_advise("DEVS:NetInterfaces. There is nothing usable there yet.");
-
-    n = tool_scan_devices();
-
-    if (n > 0)
-    {
-        ULONG i;
-
-        tool_advise_blank();
-        tool_advise("The network card drivers on this machine are:");
-        for (i = 0; i < n; i++)
-        {
-            const ToolDevice *dev = tool_scan_device(i);
-
-            tool_printf("      %-24s (%s)\n", (LONG)dev->name, (LONG)dev->where);
-        }
-        tool_advise_blank();
-        tool_advise("Run  NetSetup  and pick it from the list. Nothing has been");
-        tool_advise("changed for you -- NetSetup asks first and writes after.");
-    }
-    else
-    {
-        tool_advise_blank();
-        tool_advise("No network card driver could be found either. The driver for");
-        tool_advise("your card belongs in DEVS:Networks/ -- for example");
-        tool_advise("DEVS:Networks/ariadne.device for an Ariadne, or a2065.device");
-        tool_advise("for an A2065. Copy it there first, then run  NetSetup.");
-    }
-}
 
 VOID tool_explain_dhcp(const char *name)
 {
