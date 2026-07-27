@@ -13438,3 +13438,234 @@ is the number to beat if anybody takes the underlying wakeup seriously.
 A second server on the same port inside one run does not work either: the second
 `bind()` gets `Address already in use` five seconds after the first server
 exited. Use a different port per connection — the test above does.
+
+## 41. The listener that could not be re-armed, and the close that reset nothing (2026-07-26)
+
+§37 ran the first long test this project has ever run and came back with two
+defects it could not repair, because `src/bsdsocket/socket.c` was another
+workstream's. This is that workstream. Both are fixed, one of them is
+reproduced in a 90-second harness that is now in the tree, and a third defect
+turned up while building it.
+
+**Headline: the leak is `nx_tcp_socket_disconnect()` doing NOTHING for the five
+TCP states a half-closed connection is actually stuck in, so the sweep's
+sixty-second "resetting" was a no-op and every one of those sockets was leaked
+520 bytes at a time. 33 in 66 seconds before, 0 after, measured. The listener
+repair is a recovery rather than a cause, deliberately, and is NOT covered by a
+test — the trigger is still not reachable from the API.**
+
+### 41.1 The reproducer, and what it took to find the right one
+
+`tests/leak/refused_leak_test.c`, run by `tests/leak/run-leak.sh`. Seven arms,
+one boot, 91 seconds of host wall clock on the shared lane, and every arm
+measures the same three things through `NetStackQuery()` (§34): `AvailMem`,
+the library's live socket count, and **a histogram of the TCP state those
+sockets are in**. The histogram is what made the difference — a socket count
+that goes up says "something leaked", a histogram that says 33 sockets are in
+`FIN_WAIT_2` names the bug.
+
+| arm | what it does | leaks? |
+|---|---|---|
+| A | dial a port with nothing on it | no |
+| B | dial a port whose listener never `accept()`s, blocking + `SO_SNDTIMEO` | no |
+| C | the same with a non-blocking `connect()` | no |
+| D | full lifecycle, client closes first | no |
+| E | full lifecycle, **server** closes first | no |
+| F | full lifecycle, **only the client closes at all** | **yes: 33** |
+| G | three dials then three `accept()`s | off by default -- §41.4 |
+
+**§37.5's named suspect is arm B, and arm B is clean.** "Dial a port that has a
+listen request outstanding and get `ECONNREFUSED` back" was labelled in §37.5
+as "not proven here", and it is not the trigger: 32 lifecycles of exactly that
+move `AvailMem` by 0 bytes and the socket count by 0. So is the non-blocking
+version, and so are both close orders on a complete connection.
+
+What leaks is the shape neither §37.5 control had: **a peer that never closes
+its end.** The client sends its FIN, the server end is abandoned open, and the
+client sits in `FIN_WAIT_2` waiting for a FIN that is not coming.
+
+Arm B being clean is worth stating plainly rather than quietly dropping,
+because §37.5 pointed at it in bold and this run says no.
+
+### 41.2 What the sweep could not reset
+
+`bsd_socket_release()` parks such a socket on the closing list
+(`bsd_closing_park`), and `bsd_closing_sweep()` gives it
+`BSD_CLOSING_DEADLINE` -- 60 seconds -- before deciding the peer has stopped
+answering and resetting it. That is the right design. The reset is what does
+not work:
+
+```
+/* nx_tcp_socket_disconnect.c:106 */
+if ((state != NX_TCP_ESTABLISHED) && (state != NX_TCP_SYN_SENT) &&
+    (state != NX_TCP_SYN_RECEIVED) && (state != NX_TCP_CLOSE_WAIT))
+    return(NX_NOT_CONNECTED);
+```
+
+**Those four states exclude every state a half-closed connection can be in.**
+`FIN_WAIT_1`, `FIN_WAIT_2`, `CLOSING`, `TIMED_WAIT`, `LAST_ACK`: for all five,
+`nx_tcp_socket_disconnect()` returns before touching a field. The sweep then
+handed the socket to `bsd_socket_destroy()`, whose `nx_tcp_client_socket_unbind()`
+refuses a state that is not `CLOSED` (`NX_NOT_CLOSED`) and whose
+`nx_tcp_socket_delete()` refuses a socket that is still on a port list or not
+`CLOSED` (`NX_STILL_BOUND`, `nx_tcp_socket_delete.c:94`) -- and 520 bytes were
+leaked, for ever, exactly as §37.5 measured 830 times.
+
+Measured here, on the library as it stood, with the state added to the
+warning:
+
+```
+[WARN] bsdsocket: close did not complete in 60 s (state 8); resetting
+[WARN] bsdsocket: nx_tcp_socket_delete refused (66) state 8 flags 0x102002D
+       port 60091; leaking 520 bytes rather than corrupting the created list
+```
+
+33 pairs of those lines, back to back, one per abandoned connection. State 8 is
+`FIN_WAIT_2`; 66 is `NX_STILL_BOUND`. §37.5 had the same two messages next to
+each other and could not connect them, because the warning did not say which
+state.
+
+**That is the first change: the warning now carries the TCP state, the socket
+flags and the local port.** `NX_STILL_BOUND` has three causes and the repair
+for each is different; a warning that does not say which is a warning that
+costs somebody a day.
+
+**The fix is `bsd_tcp_abort()`.** Presenting the socket as `ESTABLISHED` before
+the disconnect is what makes NetX Duo run its own abort: one RST from the
+socket's real sequence numbers, `_nx_tcp_socket_block_cleanup()` to release the
+transmit queue and the timers, and `CLOSED` (or `LISTEN`, for a server socket)
+on the way out. Writing the field is safe because `bsd_nx_enter()` holds the
+ThreadX baton for the whole of the caller, so the IP thread is not running.
+It is called from two places:
+
+- `bsd_closing_sweep()`, replacing the `nx_tcp_socket_disconnect()` that did
+  nothing;
+- `bsd_socket_destroy()`, as a **retry** when the first `nx_tcp_socket_delete()`
+  answers `NX_STILL_BOUND` -- so every caller is covered, not just the sweep,
+  and the repair does not depend on knowing which caller got there.
+
+One more line in the same sweep: `done` now includes `NX_TCP_LISTEN_STATE`.
+`_nx_tcp_socket_block_cleanup()` branches on `nx_tcp_socket_client_type`, so a
+**server** socket that completes its shutdown lands in `LISTEN`, not `CLOSED`
+-- and every accepted socket was therefore sitting out the full sixty seconds
+before anybody looked at it again.
+
+**Before and after, same harness, same boot sequence:**
+
+| | `nx_tcp_socket_delete refused` | `FIN_WAIT_1` + `FIN_WAIT_2` left | `AvailMem` |
+|---|---:|---:|---:|
+| before | **33** | 33 | −33,792 |
+| after | **0** | 0 | −16,368 |
+
+The −16,368 that remains is the arm doing what it says: 31 server descriptors
+it abandons on purpose, at 528 bytes each. Those become `LISTEN` (the RST from
+the aborted client reached them) and go back when the program closes them.
+
+### 41.3 A listener that survives a failed relisten
+
+§37.4's defect, and the honest position on it is the one §37.4 itself reached:
+**the trigger for the `NX_INVALID_RELISTEN` is not established.** §37.4
+published a root cause and retracted it on finding that
+`nx_tcp_packet_process.c:650` clears the listen request's socket slot itself
+when the SYN arrives. Nothing here depends on knowing which it was.
+
+What is established is the consequence: `bsd_accept()` cleared `as_Incoming`
+before securing its replacement, `as_Incoming` had exactly one assignment, and
+`bsd_accept()`'s first test refuses a listener that has none -- 1,951
+consecutive `EINVAL`s behind one warning line.
+
+`bsd_listen_rearm()` is the repair, and it changes three things:
+
+1. **Three attempts, not one.** `relisten`; on failure, `unlisten` + `listen`,
+   which rebuilds the listen request from nothing (the cost is any queued
+   connection requests, which is cheap against a listener that never accepts
+   again); on failure, warn and give up *for this call*.
+2. **`bsd_accept()` calls it again** on a listener that has no spare, so the
+   re-arm gets a fresh try on every accept rather than one try for ever.
+3. The re-arm at the tail of a successful `accept()` no longer decides that
+   accept's return value. The connection is already the caller's.
+
+**This is not covered by a test, and that is not an oversight.** The relisten
+failure is intermittent and cannot be provoked through the API:
+`NX_INVALID_RELISTEN` needs either no listen request on the port or a listen
+request whose socket slot is occupied, and no sequence of `socket`/`bind`/
+`listen`/`connect`/`accept`/`close` reaches either while a listener is healthy.
+The shared path -- allocate, create, relisten, arm -- is exercised 96 times per
+run by arms D, E and F. The *failure* branch is not exercised at all. Untested
+means untested.
+
+### 41.4 Found on the way: three dials in a row wedge the calling task
+
+Arm G was written to drive the accept path hardest: three non-blocking
+`connect()`s before any `accept()`, so two of them sit in the listen queue and
+each re-arm has to replay a queued connection rather than park an idle socket.
+
+**It never got that far. The dial loop itself wedges the calling task, on the
+second or the third `connect()`.** Reproduced three times out of three, and
+reproduced identically on the library **before** any of §41's repairs, so it is
+not one of them. The stack stays alive around it -- the sixty-second sweep
+warning still fires afterwards -- so it is the application task that is stuck,
+not the machine.
+
+Two facts about it, both measured:
+
+- **A `Delay(1)` between the calls does not help.** So it is not simply a
+  question of elapsed time.
+- **Interposing console I/O between `socket()`, `IoctlSocket()` and
+  `connect()` does.** With a `VPrintf()` + `Flush()` between each of the three
+  calls, the same loop runs 8 rounds and 24 accepts with zero failures; with
+  the prints removed and a `Delay(1)` in their place, it wedges in round 0.
+
+That pair says scheduling rather than socket state, which points at the
+ThreadX bracket rather than at anything in this section. It is left alone
+here: the arm is `#if LEAK_BURST_ARM`, off by default with the recipe in the
+comment, because an arm that hangs means the six arms that pass never report.
+Build `-DLEAK_BURST_ARM=1` to work on it.
+
+### 41.5 The errno mappings, and the invariant nobody had written down
+
+§37.2's list. `transfer.c`'s TCP send loop discarded the NetX Duo status before
+choosing an errno -- every first-iteration failure `break`s out and landed on
+one unconditional `EWOULDBLOCK` -- so a signalled thread (`NX_WAIT_ABORTED`,
+`EINTR`) and a stack being torn down (`NX_POOL_DELETED`, `ENOBUFS`) both came
+back as `EAGAIN` on a socket that was blocking. The status is now carried out
+of the loop, and out of `bsd_packet_append_iov()`, which swallowed it too.
+
+`bsd_wait_errno(wait, status)` (`errno.c`) is the mapping the rest of them now
+use. It takes **the wait option the call was given**, not the socket, because
+that is the only thing that decides it: `NX_NO_WAIT` and an expired
+`SO_RCVTIMEO`/`SO_SNDTIMEO` both mean the caller asked for a bounded wait and
+`EWOULDBLOCK` is right for either, while on `NX_WAIT_FOREVER` `EAGAIN` is a lie
+-- it tells the application to retry a call that cannot succeed, which is
+thread 122501's complaint exactly. There it answers `ENOBUFS`.
+
+`bsd_raw_receive()` now reports why it came back empty, so `transfer.c:640` can
+tell `TX_WAIT_ABORTED` from an empty queue instead of calling both
+`EWOULDBLOCK`.
+
+**And the invariant.** §37.1 established that `errno.c:63`'s unconditional
+`NX_NO_PACKET -> EWOULDBLOCK` is safe only because no vector ever runs on the
+IP thread, and observed that this is written down nowhere. It is now written
+down at `bsd_wait_option()` (`select.c`), which is the single function that
+produces `NX_WAIT_FOREVER` and therefore the place where "and this is safe
+because…" belongs, with a pointer to it from the table entry. The sentence
+worth having there is the one about `nx_packet_allocate.c:178`, which has **no
+IP-thread guard at all**: a vector called from the IP thread suspends the IP
+thread on the pool that only the IP thread can refill, and the stack stops
+rather than merely misreporting an errno.
+
+The wording was checked against `netx_call.c` as it stands after §39's per-task
+adoption cache, not against §37's description of it: the thread is now built
+once per base and resumed, rather than created per call, and it is still never
+`ip->nx_ip_thread`.
+
+### 41.6 What is in the tree
+
+| | |
+|---|---|
+| `tests/leak/refused_leak_test.c` | the seven arms and the state histogram |
+| `tests/leak/run-leak.sh` | stages the library and boots it, shared lane, ~91 s |
+| `src/bsdsocket/socket.c` | `bsd_tcp_abort()`, `bsd_listen_rearm()`, the sweep, the warning |
+| `src/bsdsocket/errno.c` | `bsd_wait_errno()` |
+| `src/bsdsocket/select.c` | the invariant, at `bsd_wait_option()` |
+| `src/bsdsocket/transfer.c`, `raw.c` | the status carried to the decision |
