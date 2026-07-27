@@ -15587,3 +15587,58 @@ measurement. The remaining candidate is unchanged: `bsd_nx_leave` handing the
 CPU to the IP thread at every bracket exit, ThreadX priority 1 against an
 adopted caller's 16. Settling that needs the IP thread profiled — where its
 2.8 ms per received packet goes — not another knob turned.
+
+## 52. The 10.6% was a priority inversion, and the comment had said so all along (2026-07-27)
+
+§51 eliminated the receive window. The bracket had already gone the same way. What was
+left was the scheduler, and it turned out not to need profiling at all — only reading the
+two constants against the sentences directly above them.
+
+`src/netstack/netstack_internal.h` said:
+
+> ThreadX priorities, lowest number wins. The SANA-II readers (priority 2) **must outrank
+> the IP thread** so a burst drains into the pool rather than being dropped on the wire.
+
+`src/sana2/sana2_internal.h` agreed:
+
+> Reader threads **run above the IP thread** so the read queue drains promptly.
+
+And the numbers were `AMI_IP_THREAD_PRIORITY 1`, `AMI_SANA2_RX_PRIORITY 2`. Both comments
+state the convention correctly — ThreadX confirms it in
+`tx_thread_system_resume.c:213`, `if (priority < _tx_thread_highest_priority)` → *"A new
+highest priority thread is present"* — and both then describe the ordering the constants
+do not implement. The IP thread outranked the readers and preempted the very threads whose
+job is keeping `CMD_READ`s posted on the driver.
+
+The readers are real ThreadX threads (`sana2_rx.c:725`, priority and preempt threshold
+both `AMI_SANA2_RX_PRIORITY`), so this is not a theoretical ordering. Under a bulk fetch
+the IP thread has continuous work, and every packet it processes is time a reader is not
+reposting. The driver runs out of pending reads and drops frames on the wire; the far end
+retransmits. That is precisely the failure both comments were written to prevent.
+
+### Measured
+
+Third-party Aminet `curl`, 1.2 MB fetch, two runs of two fetches each per arm, same
+image, same session:
+
+| | samples (B/s) | mean | vs Roadshow |
+|---|---|---:|---:|
+| shipping — IP 1, readers 2 | 119,911 / 117,120 / 119,808 / 116,755 | 118,400 | −7.3% |
+| **corrected — readers 1, IP 2** | 127,652 / 124,800 / 127,719 / 124,584 | **126,190** | **−1.2%** |
+| Roadshow 1.15 | 132,011 / 123,421 | 127,716 | — |
+
+**+6.6%**, and it closes the gap §16 opened. The corrected arm is also visibly steadier —
+127,652 against 127,719 is 0.05% apart across separate runs.
+
+The remaining 1.2% is inside the run-to-run spread of the Roadshow samples themselves
+(132,011 vs 123,421 is 7% apart), so it is not currently a measurable difference and there
+is nothing further to chase without a tighter harness.
+
+### What to take from it
+
+The bug survived because the comment was right. Every reading of that file confirmed the
+intent and nobody checked the intent against the two integers underneath it. A prose
+invariant with no test is a wish. The ordering now has its rationale, its ThreadX citation
+and its measurement recorded in place, but the durable fix would be a startup assertion
+that `AMI_SANA2_RX_PRIORITY < AMI_IP_THREAD_PRIORITY` — cheap, and it would have caught
+this the day it was written.
