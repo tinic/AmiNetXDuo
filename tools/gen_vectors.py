@@ -158,6 +158,7 @@ IMPLEMENTED = {
     # still stubbed below is stubbed because nobody has written it, not because
     # the contract is unknown; see the header of src/bsdsocket/roadshow.c.
     "ObtainInterfaceList", "ReleaseInterfaceList", "QueryInterfaceTagList",
+    "ConfigureInterfaceTagList",
 }
 
 # Return types that are pointers without saying so with a '*'.  A stub for one

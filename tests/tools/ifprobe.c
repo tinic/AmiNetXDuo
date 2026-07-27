@@ -103,6 +103,25 @@ static LONG p_query_interface(struct Library *base, const char *name,
     return res;
 }
 
+static LONG p_configure_interface(struct Library *base, const char *name,
+                                  struct TagItem *tags)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register CONST_APTR      a0  __asm("a0") = (CONST_APTR)name;
+    register APTR            a1  __asm("a1") = (APTR)tags;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
+
+    __asm __volatile ("jsr a6@(-450:W)"     /* ConfigureInterfaceTagList -0x1c2 */
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
+                        "=r" (_clob_a1)
+                      : "r" (a6), "r" (a0), "r" (a1)
+                      : "cc", "memory");
+    return res;
+}
+
 static LONG p_errno(struct Library *base)
 {
     register struct Library *a6  __asm("a6") = base;
@@ -314,6 +333,207 @@ static VOID p_query_one(struct Library *base, const char *name)
     p_show_long("IFQ_LastStart", last_start[0]);
 }
 
+/* --------------------------------------------------------- configuration -- */
+
+/* One IFQ_ tag, fetched on its own, for checking what a configure call did. */
+static LONG p_read_long(struct Library *base, const char *name, Tag tag)
+{
+    LONG           value = (LONG)POISON_LONG;
+    struct TagItem tags[2];
+
+    tags[0].ti_Tag  = tag;
+    tags[0].ti_Data = (ULONG)&value;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+
+    if (p_query_interface(base, name, tags) != 0)
+        return (LONG)POISON_LONG;
+
+    return value;
+}
+
+static ULONG p_read_address(struct Library *base, const char *name, Tag tag)
+{
+    struct sockaddr_in_probe sa;
+    struct TagItem           tags[2];
+
+    p_poison(&sa, sizeof(sa));
+
+    tags[0].ti_Tag  = tag;
+    tags[0].ti_Data = (ULONG)&sa;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+
+    if (p_query_interface(base, name, tags) != 0)
+        return POISON_LONG;
+
+    return sa.sin_addr;
+}
+
+/*
+ * ConfigureInterfaceTagList(), exercised on the interface that is carrying
+ * the run. Every change is put back afterwards, and the ORDER is chosen so
+ * that a failure part-way leaves the machine reachable: the address is
+ * restored before the state is touched.
+ */
+static VOID p_config_phase(struct Library *base, const char *name)
+{
+    static char    addr_text[16];
+    static char    mask_text[16];
+    ULONG          original;
+    ULONG          seen;
+    LONG           rc;
+    LONG           mtu;
+    LONG           state;
+    struct TagItem tags[4];
+
+    original = p_read_address(base, name, IFQ_Address);
+    if (original == POISON_LONG)
+    {
+        Printf((CONST_STRPTR)"config: cannot read the address, skipping\n");
+        return;
+    }
+
+    p_dotted(original, addr_text);
+    Printf((CONST_STRPTR)"config: starting from %s\n", (LONG)addr_text);
+
+    /* ---- a tag this stack refuses, and the atomicity that goes with it ---
+     *
+     * IFC_Metric is documented and unsupported here, so the call must fail.
+     * What matters more is the IFC_NetMask in front of it: the whole list is
+     * validated before any of it is applied, so the mask must NOT have
+     * changed. A one-pass implementation would pass the first half of this
+     * assertion and fail the second.
+     */
+    p_dotted(0xFFFF0000UL, mask_text);          /* 255.255.0.0, not ours */
+
+    tags[0].ti_Tag  = IFC_NetMask;
+    tags[0].ti_Data = (ULONG)mask_text;
+    tags[1].ti_Tag  = IFC_Metric;
+    tags[1].ti_Data = 3;
+    tags[2].ti_Tag  = TAG_DONE;
+    tags[2].ti_Data = 0;
+
+    rc = p_configure_interface(base, name, tags);
+    Printf((CONST_STRPTR)"config: mask+metric: rc %ld (errno %ld)%s\n",
+           rc, p_errno(base),
+           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+
+    seen = p_read_address(base, name, IFQ_NetMask);
+    p_dotted(seen, mask_text);
+    Printf((CONST_STRPTR)"config: mask after the refusal: %s%s\n",
+           (LONG)mask_text,
+           (LONG)((seen == 0xFFFFFF00UL) ? " -- unchanged, correctly"
+                                         : " -- CHANGED, WRONG"));
+
+    /* ---- an address string that is neither dotted-quad nor a host --------- */
+    tags[0].ti_Tag  = IFC_Address;
+    tags[0].ti_Data = (ULONG)"999.1.2.3.4";
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+
+    rc = p_configure_interface(base, name, tags);
+    Printf((CONST_STRPTR)"config: bad address: rc %ld (errno %ld)%s\n",
+           rc, p_errno(base),
+           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+
+    /* ---- the MTU, down and back ------------------------------------------ */
+    tags[0].ti_Tag  = IFC_LimitMTU;
+    tags[0].ti_Data = 576;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+
+    rc  = p_configure_interface(base, name, tags);
+    mtu = p_read_long(base, name, IFQ_MTU);
+    Printf((CONST_STRPTR)"config: IFC_LimitMTU 576: rc %ld, IFQ_MTU now %ld\n",
+           rc, mtu);
+
+    /* Above the hardware's 1500: clamped rather than refused, and the clamp
+       is what puts the interface back the way it was. */
+    tags[0].ti_Tag  = IFC_LimitMTU;
+    tags[0].ti_Data = 9000;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+
+    rc  = p_configure_interface(base, name, tags);
+    mtu = p_read_long(base, name, IFQ_MTU);
+    Printf((CONST_STRPTR)"config: IFC_LimitMTU 9000: rc %ld, IFQ_MTU now %ld\n",
+           rc, mtu);
+
+    /* ---- the address, changed and put straight back ---------------------- */
+    p_dotted((original & 0xFFFFFF00UL) | 200UL, addr_text);
+
+    tags[0].ti_Tag  = IFC_Address;
+    tags[0].ti_Data = (ULONG)addr_text;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+
+    rc   = p_configure_interface(base, name, tags);
+    seen = p_read_address(base, name, IFQ_Address);
+    p_dotted(seen, mask_text);
+    Printf((CONST_STRPTR)"config: address -> %s: rc %ld, IFQ_Address now %s\n",
+           (LONG)addr_text, rc, (LONG)mask_text);
+
+    p_dotted(original, addr_text);
+    tags[0].ti_Tag  = IFC_Address;
+    tags[0].ti_Data = (ULONG)addr_text;
+    tags[1].ti_Tag  = IFC_NetMask;
+    tags[1].ti_Data = (ULONG)"255.255.255.0";
+    tags[2].ti_Tag  = TAG_DONE;
+    tags[2].ti_Data = 0;
+
+    rc   = p_configure_interface(base, name, tags);
+    seen = p_read_address(base, name, IFQ_Address);
+    p_dotted(seen, mask_text);
+    Printf((CONST_STRPTR)"config: address restored: rc %ld, IFQ_Address now %s\n",
+           rc, (LONG)mask_text);
+
+    /* ---- down, and back up ------------------------------------------------ */
+    tags[0].ti_Tag  = IFC_State;
+    tags[0].ti_Data = SM_Down;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+
+    rc    = p_configure_interface(base, name, tags);
+    state = p_read_long(base, name, IFQ_State);
+    Printf((CONST_STRPTR)"config: SM_Down: rc %ld, IFQ_State now %ld%s\n",
+           rc, state,
+           (LONG)((state == SM_Down) ? " -- down, correctly" : " -- STILL UP, WRONG"));
+
+    tags[0].ti_Tag  = IFC_State;
+    tags[0].ti_Data = SM_Online;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+
+    rc    = p_configure_interface(base, name, tags);
+    state = p_read_long(base, name, IFQ_State);
+    Printf((CONST_STRPTR)"config: SM_Online: rc %ld, IFQ_State now %ld%s\n",
+           rc, state,
+           (LONG)((state == SM_Up) ? " -- up, correctly" : " -- STILL DOWN, WRONG"));
+
+    /* ---- a state value the API never defined ----------------------------- */
+    tags[0].ti_Tag  = IFC_State;
+    tags[0].ti_Data = 99;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+
+    rc = p_configure_interface(base, name, tags);
+    Printf((CONST_STRPTR)"config: IFC_State 99: rc %ld (errno %ld)%s\n",
+           rc, p_errno(base),
+           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+
+    /* ---- and an interface that does not exist ---------------------------- */
+    tags[0].ti_Tag  = IFC_State;
+    tags[0].ti_Data = SM_Up;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+
+    rc = p_configure_interface(base, "nosuchif", tags);
+    Printf((CONST_STRPTR)"config: nosuchif: rc %ld (errno %ld)%s\n",
+           rc, p_errno(base),
+           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+}
+
 /* ------------------------------------------------------------------ main -- */
 
 int main(void)
@@ -385,6 +605,15 @@ int main(void)
                (LONG)first, rc,
                (LONG)((rc == 0) ? " -- accepted, correctly" : " -- REFUSED, WRONG"));
     }
+
+    /*
+     * The configuration half, last, and on the interface this run is riding
+     * on: everything it changes it puts back, and it is run after the list
+     * assertions so that a machine it fails to restore has already produced
+     * the transcript for those.
+     */
+    if (first[0] != '\0')
+        p_config_phase(base, first);
 
     p_release_interface_list(base, list);
     Printf((CONST_STRPTR)"ReleaseInterfaceList: returned\n");

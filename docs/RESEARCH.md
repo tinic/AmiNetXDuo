@@ -14677,7 +14677,16 @@ whose `rtm_msglen` member is zero"*.
 `SM_Up` in one block with no hint that they are not interchangeable. The
 autodoc: for `IFQ_State`, *"the values returned can be either 'SM_Down' or
 'SM_Up'"* — the online/offline pair belongs to `IFC_State`, which acts on the
-SANA-II device rather than on the stack's view of it.
+SANA-II device rather than on the stack's view of it. One block of `#define`s,
+two different vocabularies, and only the document says which is which.
+
+**The `struct rt_msghdr` in the autodoc is not the one in `net/route.h`.** The
+members are the same eleven; the ORDER is not. The autodoc lists
+`rtm_index, rtm_pid, rtm_addrs, rtm_seq, rtm_errno, rtm_flags, rtm_use`; the
+NDK header has `rtm_index, rtm_flags, rtm_addrs, rtm_pid, rtm_seq, rtm_errno,
+rtm_use`. The header is the ABI, because it is what a caller compiles against
+— which is a reminder that this document is a *description* of the interface
+and the headers beside it are the interface.
 
 ### 47.2 Where the document is ambiguous, the vector stays unanswered
 
@@ -14708,8 +14717,8 @@ belonging to one interface would be a different fact with the same shape.
 Neither the node layout nor the tag-pointer convention can be caught by a
 build, and neither can be caught by a test that shares a header with the
 implementation. `tests/tools/ifprobe.c` is therefore a separate executable
-that knows only the published NDK header, calls the three vectors at their
-LVOs by hand, and runs on a booted A1200 with an A2065 behind the stack
+that knows only the published NDK header, calls the vectors at their LVOs by
+hand, and runs on a booted A1200 with an A2065 behind the stack
 (`tests/tools/run-ifquery.sh`).
 
 **It poisons every destination with `0xA5` first.** Half the tags are
@@ -14751,15 +14760,59 @@ ioctls use it — so a caller sees one code for the condition however it asked.
 That is a choice, not a finding, and it is written down here so the next
 person does not have to work out whether it was.
 
-### 47.5 What is still stubbed, and why
+### 47.5 `ConfigureInterfaceTagList()`: validate everything, then act
 
-`SBTC_HAVE_INTERFACE_API` now answers `TRUE`: the tag asks whether the
-interface API is *present*, and three of its vectors are. The configuration
-half — `AddInterfaceTagList()`, `ConfigureInterfaceTagList()`,
-`BeginInterfaceConfig()`, `AbortInterfaceConfig()`, `RemoveInterface()` — and
-the routing set and `GetNetworkStatistics()` still answer `ENOSYS`, which is a
-documented failure a caller reads out of `errno`. Answering `FALSE` would
-instead have stopped a monitor from ever asking the three that work.
+The autodoc says nothing about what happens to a tag list whose fourth tag is
+refused. Applying tags as they are read would leave the interface half
+configured — new address, old mask, still down — which is the one state from
+which a user cannot tell what went wrong. So the list is parsed and validated
+in full, and **nothing is applied unless all of it can be**.
+
+That is not only tidiness. `IFC_Address` and `IFC_NetMask` arrive as two tags
+and `nx_ip_interface_address_set()` changes both in one call; applying them
+separately would put a mismatched pair on the interface for as long as it took
+to read the next tag. `tests/tools/ifprobe.c` asserts it directly, by sending
+a legal `IFC_NetMask` in front of an unsupported `IFC_Metric` and reading the
+mask back — a one-pass implementation passes the "call was refused" check and
+fails that one.
+
+A tag this stack cannot honour makes the whole call fail with `EOPNOTSUPP`
+rather than being ignored: `IFC_Metric` (no routing protocol),
+`IFC_AddAliasAddress` (one IPv4 address per interface), `IFC_BroadcastAddress`
+(NetX Duo derives it), `IFC_DestinationAddress`/`IFC_GetPeerAddress`/
+`IFC_GetDNS` (point-to-point and SANA-IIR4), `IFC_AssociatedRoute`/
+`IFC_AssociatedDNS` (a mark nothing would read), `IFC_ReleaseAddress` (the
+DHCP client has no release path). Silently ignoring a configuration tag
+reports success for a change that never happened.
+
+`IFC_Complete` is accepted as a no-op, and truthfully: it is documented to
+cause "the default route configuration file to be read and processed for the
+first time", and this stack reads the whole of `DEVS:NetInterfaces` and
+`DEVS:Internet` at startup and defers nothing.
+
+**`SM_Up`/`SM_Online` and `SM_Down`/`SM_Offline` collapse into one transition
+each.** The autodoc's distinction is whether the SANA-II device is told
+`S2_ONLINE`/`S2_OFFLINE` as well as the stack; `sana2_driver.c`'s
+`NX_LINK_ENABLE` already issues `S2_ONLINE` and starts the readers, and
+`NX_LINK_DISABLE` issues `S2_OFFLINE`. There is no way to move the stack's
+view without moving the device's, so the two spellings describe one thing.
+
+### 47.6 What is still stubbed, and why
+
+`SBTC_HAVE_INTERFACE_API` answers `TRUE`: the tag asks whether the interface
+API is *present*, and four of its vectors are. Answering `FALSE` would have
+stopped a monitor from ever asking the ones that work.
+
+Four remain `ENOSYS`, and none of them because the contract is unclear:
+
+| vector | why not |
+|---|---|
+| `AddInterfaceTagList()` | attaching a SANA-II device to a running `NX_IP` means the netstack singleton, which builds `ns_Iface[]` from `DEVS:NetInterfaces` at startup and owns every entry for the life of the stack. A half-registered interface — attached to NetX Duo, unknown to the netstack — would not have its device closed by `netstack_shutdown()` |
+| `RemoveInterface()` | `nx_ip_interface_detach()` exists; reclaiming the RX readers behind it does not always succeed. `sana2_internal.h` records the case where the device will not give a `CMD_READ` back, and the interface is then "unfreeable and unrestartable, because the device holds pointers into it". The autodoc's own wording for `force` — "memory may remain allocated until you shut down the network" — is Roadshow declining to free it either |
+| `BeginInterfaceConfig()` | an asynchronous allocation whose `AddressAllocationMessage` comes back through `ReplyMsg()` carrying a lease, a router table, a DNS table, a host name and a domain name. This stack's DHCP client runs inside `netstack_startup()` and reports through the config; there is no port to reply to and none of the `aam_*` tables is kept |
+| `AbortInterfaceConfig()` | the counterpart to a call that does not exist |
+
+The routing set and `GetNetworkStatistics()` also still answer `ENOSYS`.
 
 `ChangeRouteTagList()` and the seven `ipf_*` vectors are **not in the
 autodoc**; they stay out of scope. `ObtainRoadshowData()` is in it, but the

@@ -1,9 +1,10 @@
 /*
- * bsdsocket.library -- the interface QUERY half of the Roadshow interface API.
+ * bsdsocket.library -- the Roadshow interface API.
  *
  *   ObtainInterfaceList()       the names of the interfaces the stack has
  *   ReleaseInterfaceList()
  *   QueryInterfaceTagList()     everything else, one IFQ_* tag at a time
+ *   ConfigureInterfaceTagList() address, mask, MTU and up/down
  *
  * WRITTEN FROM THE AUTODOC, NOT FROM THE NAMES
  *
@@ -16,7 +17,7 @@
  * are quoted below, because guessing an ABI is how this project lost time
  * twice already (see the header of roadshow.c).
  *
- * THREE THINGS THE DOCUMENT SETTLED THAT WOULD OTHERWISE HAVE BEEN GUESSES
+ * FOUR THINGS THE DOCUMENT SETTLED THAT WOULD OTHERWISE HAVE BEEN GUESSES
  *
  *   1. ObtainInterfaceList() returns a list of plain Nodes carrying NOTHING
  *      but a name: "Pointer to a 'struct List', whose individual Nodes
@@ -36,13 +37,24 @@
  *      success), which is exactly the kind of inconsistency that cannot be
  *      inferred.
  *
+ *   4. IFC_State takes FOUR values where IFQ_State returns two, and the extra
+ *      pair means something specific: SM_Online is "SM_Up, but send S2_ONLINE
+ *      to the device first, and if that fails do nothing else". One block of
+ *      #defines in libraries/bsdsocket.h, two different vocabularies.
+ *
  * WHAT IS NOT ANSWERED, AND WHY
  *
- * A tag this stack has no true value for is LEFT ALONE: the caller's storage
- * is not written at all. Writing an invented zero would be indistinguishable
+ * On the QUERY side, a tag this stack has no true value for is LEFT ALONE:
+ * the caller's storage is not written at all. Writing an invented zero would be indistinguishable
  * from a measured zero, and a monitor that shows "0 packets dropped" when
  * nothing counts drops is worse than one that shows the caller's own default.
  * Each such tag is listed at its case below with the reason.
+ *
+ * On the CONFIGURE side the same fact produces the opposite behaviour: a tag
+ * this stack cannot honour makes the whole call fail with EOPNOTSUPP, and
+ * nothing in the list is applied. Silently ignoring a configuration tag would
+ * report success for a change that never happened, which is the one answer a
+ * configuration call must never give.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -60,6 +72,13 @@
  * storage this API ever needs.
  */
 #define BSD_IFNAME_SIZE     16
+
+/*
+ * How long ConfigureInterfaceTagList() will wait for a name in IFC_Address to
+ * resolve. The same thirty seconds resolver.c gives gethostbyname(), because
+ * it is the same lookup and a caller cannot tell which one it is waiting for.
+ */
+#define BSD_IF_RESOLVE_TIMEOUT  (30UL * (ULONG)NX_IP_PERIODIC_RATE)
 
 /* ------------------------------------------------------------- tag walking */
 
@@ -739,3 +758,364 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
 
     return 0;
 }
+
+/* --------------------------------------------- ConfigureInterfaceTagList -- */
+
+/*
+ * TWO PASSES, AND THE REASON IS THE FAILURE MODE
+ *
+ * The autodoc says nothing about what happens to a tag list whose fourth tag
+ * is refused. Applying tags as they are read would leave the interface half
+ * configured -- new address, old mask, still down -- which is the one state
+ * from which a user cannot tell what went wrong. So the whole list is parsed
+ * and validated first, and NOTHING is applied unless all of it can be:
+ * a refused call leaves the interface exactly as it was.
+ *
+ * It also has to be that way for correctness rather than only for tidiness.
+ * IFC_Address and IFC_NetMask arrive as two tags and NetX Duo changes both in
+ * one call; applying them separately would put a mismatched pair on the
+ * interface for as long as it took to read the next tag.
+ *
+ * Resolving a host name blocks and allocating nothing may happen inside the
+ * ThreadX bracket, so pass one runs entirely outside it and pass two holds it
+ * only for the address change.
+ */
+typedef struct BsdIfConfigReq
+{
+    BOOL    bcr_HaveAddress;
+    ULONG   bcr_Address;
+    BOOL    bcr_HaveNetMask;
+    ULONG   bcr_NetMask;
+    BOOL    bcr_HaveMTU;
+    ULONG   bcr_MTU;
+    BOOL    bcr_HaveState;
+    LONG    bcr_State;
+} BsdIfConfigReq;
+
+/*
+ * "a NUL-terminated string which can hold a host name to be resolved or an IP
+ * address in dotted-decimal notation (per RFC1700)". Dotted-quad first,
+ * because a machine being configured may well have no working resolver yet --
+ * and because a name that happens to parse as an address must not be sent to
+ * a name server.
+ */
+static BOOL bsd_if_parse_address(const char *text, ULONG *out)
+{
+    if (text == NULL || text[0] == '\0')
+        return FALSE;
+
+    if (ami_config_parse_ip(text, out))
+        return TRUE;
+
+    /* netstack_resolve() consults DEVS:Internet/hosts before the network, so
+       a host named there resolves with no interface up at all. */
+    return (netstack_resolve(text, out, BSD_IF_RESOLVE_TIMEOUT) == AMI_NET_OK)
+               ? TRUE : FALSE;
+}
+
+/*
+ * The mask for an address that arrived without one. The classful default is
+ * not a good netmask in 2026, but it is the one an address alone implies, and
+ * the alternative -- refusing IFC_Address unless IFC_NetMask came with it --
+ * would reject a tag list the published API says is legal.
+ */
+static ULONG bsd_if_classful_mask(ULONG addr)
+{
+    if ((addr & 0x80000000UL) == 0)
+        return 0xFF000000UL;                    /* class A */
+    if ((addr & 0xC0000000UL) == 0x80000000UL)
+        return 0xFFFF0000UL;                    /* class B */
+
+    return 0xFFFFFF00UL;                        /* class C and everything else */
+}
+
+/*
+ * Pass one. Returns 0, or -1 with errno set and *req untouched from the
+ * caller's point of view -- nothing has been applied yet either way.
+ */
+static LONG bsd_if_parse_config(struct AmiSocketBase *SocketBase,
+                                struct TagItem *tags, BsdIfConfigReq *req)
+{
+    struct TagItem *cursor = tags;
+    struct TagItem *item;
+
+    bsd_bzero(req, sizeof(*req));
+
+    while ((item = bsd_next_tag(&cursor)) != NULL)
+    {
+        const char *text = (const char *)item->ti_Data;
+
+        switch (item->ti_Tag)
+        {
+            case IFC_Address:
+                if (!bsd_if_parse_address(text, &req->bcr_Address))
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                req->bcr_HaveAddress = TRUE;
+                break;
+
+            case IFC_NetMask:
+                /* "this must be a NUL-terminated string" and nothing else --
+                   a mask is not a host name, so no resolver here. */
+                if (text == NULL ||
+                    !ami_config_parse_ip(text, &req->bcr_NetMask))
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                req->bcr_HaveNetMask = TRUE;
+                break;
+
+            case IFC_LimitMTU:
+                if (item->ti_Data == 0)
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                req->bcr_MTU     = (ULONG)item->ti_Data;
+                req->bcr_HaveMTU = TRUE;
+                break;
+
+            case IFC_State:
+                switch ((LONG)item->ti_Data)
+                {
+                    case SM_Up:
+                    case SM_Down:
+                    case SM_Online:
+                    case SM_Offline:
+                        req->bcr_State     = (LONG)item->ti_Data;
+                        req->bcr_HaveState = TRUE;
+                        break;
+
+                    default:
+                        return bsd_fail(SocketBase, AMI_EINVAL);
+                }
+                break;
+
+            case IFC_Complete:
+                /*
+                 * "Indicate that the configuration for this interface is now
+                 * complete. This has the effect of causing the default route
+                 * configuration file to be read and processed for the first
+                 * time."
+                 *
+                 * Accepted, and a no-op, which is the truthful answer rather
+                 * than a shrug: this stack reads the whole of
+                 * DEVS:NetInterfaces and DEVS:Internet at startup and defers
+                 * nothing, so there is no first time left to cause.
+                 */
+                break;
+
+            case IFC_SetDebugMode:
+                /* There is no per-interface debug mode, so turning it off is
+                   something this stack can honestly do and turning it on is
+                   not. IFQ_GetDebugMode answers FALSE for the same reason. */
+                if (item->ti_Data != 0)
+                    return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+                break;
+
+            /*
+             * ---------------------------------------------------------------
+             * REFUSED, each for a reason that is a property of this stack
+             * rather than of the caller. EOPNOTSUPP and not ENOSYS: the
+             * vector exists and works, this particular thing does not exist
+             * to be configured.
+             *
+             *   IFC_DestinationAddress  a point-to-point partner. The SANA-II
+             *   IFC_GetPeerAddress      shim is Ethernet-shaped throughout and
+             *                           these need SANA-IIR4 besides, which
+             *                           the autodoc itself warns about.
+             *   IFC_GetDNS              same.
+             *   IFC_BroadcastAddress    NetX Duo derives the broadcast address
+             *                           from the address and the mask; there
+             *                           is no separate one to set.
+             *   IFC_AddAliasAddress     one IPv4 address per interface.
+             *   IFC_DeleteAliasAddress
+             *   IFC_Metric              no routing protocol, so no cost for
+             *                           one to carry.
+             *   IFC_AssociatedRoute     these mark an interface so that
+             *   IFC_AssociatedDNS       going down tears something else down
+             *                           with it. Accepting the mark without
+             *                           the teardown would be a flag nothing
+             *                           reads.
+             *   IFC_ReleaseAddress      the DHCP client has no release path;
+             *                           accepting this would leave the lease
+             *                           held on the server.
+             * ---------------------------------------------------------------
+             */
+            case IFC_DestinationAddress:
+            case IFC_BroadcastAddress:
+            case IFC_Metric:
+            case IFC_AddAliasAddress:
+            case IFC_DeleteAliasAddress:
+            case IFC_GetPeerAddress:
+            case IFC_GetDNS:
+            case IFC_AssociatedRoute:
+            case IFC_AssociatedDNS:
+            case IFC_ReleaseAddress:
+                return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+
+            default:
+                /* Anything this API never defined, including private tags:
+                   ignored, as a tag list requires. */
+                break;
+        }
+    }
+
+    return 0;
+}
+
+LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
+                                   register struct TagItem *tags __asm("a1"),
+                                   register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    NX_IP          *ip = netstack_ip();
+    BsdIfConfigReq  req;
+    NX_INTERFACE   *nxif;
+    AmiSana2If     *sana;
+    LONG            index;
+    UINT            status;
+
+    if (name == NULL)
+        return bsd_fail(SocketBase, AMI_EINVAL);
+
+    if (bsd_strlen((const char *)name) >= (ULONG)BSD_IFNAME_SIZE)
+        return bsd_fail(SocketBase, AMI_EINVAL);
+
+    if (ip == NULL)
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+    index = bsd_if_index_of(ip, (const char *)name);
+    if (index < 0)
+        return bsd_fail(SocketBase, AMI_ENXIO);
+
+    /* An empty list is a legal no-op, same as it is for the query. */
+    if (tags == NULL)
+        return 0;
+
+    if (bsd_if_parse_config(SocketBase, tags, &req) != 0)
+        return -1;
+
+    nxif = &ip->nx_ip_interface[index];
+    sana = (AmiSana2If *)nxif->nx_interface_additional_link_info;
+
+    /* --- pass two, in the order a configuration has to happen in --------- */
+
+    if (req.bcr_HaveMTU)
+    {
+        /*
+         * "Before the maximum transmission unit size is limited, the hardware
+         * MTU settings will be reread and taken into account." The driver's
+         * MTU is a fact read at open time and it does not change, so taking it
+         * into account means clamping to it: this tag can only make the MTU
+         * smaller, and a request for more than the hardware can carry becomes
+         * the hardware's own number rather than an error.
+         */
+        ULONG limit = req.bcr_MTU;
+        ULONG hardware = (sana != NULL) ? ami_sana2_get_mtu(sana) : 0;
+
+        if (hardware != 0 && limit > hardware)
+            limit = hardware;
+
+        if (bsd_nx_enter(SocketBase) != 0)
+            return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+        status = nx_ip_interface_mtu_set(ip, (UINT)index, limit);
+
+        bsd_nx_leave(SocketBase);
+
+        if (status != NX_SUCCESS)
+            return bsd_fail(SocketBase, AMI_EINVAL);
+    }
+
+    if (req.bcr_HaveAddress || req.bcr_HaveNetMask)
+    {
+        ULONG address = req.bcr_HaveAddress ? req.bcr_Address
+                                            : nxif->nx_interface_ip_address;
+        ULONG mask    = req.bcr_HaveNetMask ? req.bcr_NetMask
+                                            : nxif->nx_interface_ip_network_mask;
+
+        if (mask == 0)
+            mask = bsd_if_classful_mask(address);
+
+        if (bsd_nx_enter(SocketBase) != 0)
+            return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+        status = nx_ip_interface_address_set(ip, (UINT)index, address, mask);
+
+        bsd_nx_leave(SocketBase);
+
+        if (status != NX_SUCCESS)
+            return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
+    }
+
+    if (req.bcr_HaveState)
+    {
+        LONG rc;
+
+        /*
+         * Last, so that {IFC_Address, IFC_State SM_Up} does what it reads
+         * like. netstack_interface_up()/down() take the ThreadX bracket
+         * themselves and stop the SANA-II readers as well as telling NetX Duo,
+         * so they are called OUTSIDE ours -- the same rule netstatus.c
+         * follows for NETCTRL_INTERFACE_UP.
+         *
+         * SM_Up and SM_Online, and SM_Down and SM_Offline, do the same thing
+         * here, and that is not a shortcut. The autodoc's distinction is
+         * whether the SANA-II device is told S2_ONLINE/S2_OFFLINE as well as
+         * the stack; this driver's NX_LINK_ENABLE already issues S2_ONLINE and
+         * starts the readers, and NX_LINK_DISABLE issues S2_OFFLINE. There is
+         * no way to move the stack's view without moving the device's, so the
+         * two spellings describe one transition.
+         */
+        if (req.bcr_State == SM_Up || req.bcr_State == SM_Online)
+            rc = netstack_interface_up((UWORD)index);
+        else
+            rc = netstack_interface_down((UWORD)index);
+
+        if (rc != AMI_NET_OK)
+            return bsd_fail(SocketBase, AMI_ENXIO);
+    }
+
+    return 0;
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * THE REST OF THE INTERFACE API, AND WHY IT IS STILL ENOSYS
+ *
+ * These four are documented in the same autodoc, in the same detail. They are
+ * not here because this stack cannot do what they say, not because the
+ * contract is unclear -- and an ENOSYS a caller can read is better than a
+ * vector that reports success and changes nothing.
+ *
+ *   AddInterfaceTagList()   "makes another device available for network
+ *                           access". Doing that means opening a SANA-II
+ *                           device and calling nx_ip_interface_attach() on a
+ *                           running NX_IP, and the netstack singleton builds
+ *                           its ns_Iface[] from DEVS:NetInterfaces at startup
+ *                           and owns every entry for the life of the stack.
+ *                           A half-registered interface -- attached to NetX
+ *                           Duo but unknown to the netstack -- is worse than
+ *                           no interface, because netstack_shutdown() would
+ *                           not close its device.
+ *
+ *   RemoveInterface()       the counterpart, and the harder half.
+ *                           nx_ip_interface_detach() exists, but releasing
+ *                           the AmiSana2If behind it means reclaiming the RX
+ *                           readers, and sana2_internal.h records the case
+ *                           where the device will not give a CMD_READ back:
+ *                           the interface is then "unfreeable and
+ *                           unrestartable, because the device holds pointers
+ *                           into it". A `force` parameter that freed it
+ *                           anyway would hand the device a dangling pointer,
+ *                           and the autodoc's own wording for `force` --
+ *                           "memory may remain allocated until you shut down
+ *                           the network" -- is Roadshow declining to do
+ *                           exactly that.
+ *
+ *   BeginInterfaceConfig()  an ASYNCHRONOUS address allocation: the caller
+ *   AbortInterfaceConfig()  hands over a struct AddressAllocationMessage, and
+ *                           it comes back through ReplyMsg() with a lease, a
+ *                           router table, a DNS table, a host name and a
+ *                           domain name filled in. This stack's DHCP client
+ *                           runs inside netstack_startup() and reports
+ *                           through the config, not through a message port;
+ *                           there is no path by which a caller's message
+ *                           could be replied to, and none of the aam_* result
+ *                           tables is kept anywhere after the lease is taken.
+ * ---------------------------------------------------------------------------
+ */

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 #
-# THE REGRESSION TEST FOR THE ROADSHOW INTERFACE QUERY API.
+# THE REGRESSION TEST FOR THE ROADSHOW INTERFACE API.
 #
 #   tests/tools/run-ifquery.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #
 # WHAT IT IS PROVING
 #
-#   ObtainInterfaceList(), ReleaseInterfaceList() and QueryInterfaceTagList()
-#   are the three vectors a monitoring tool -- Roadie, NetMon,
-#   RoadshowControl -- reaches for first, and both of the shapes they traffic
-#   in are shapes a compiler cannot check:
+#   ObtainInterfaceList(), ReleaseInterfaceList(), QueryInterfaceTagList() and
+#   ConfigureInterfaceTagList() are the vectors a monitoring or configuration
+#   tool -- Roadie, NetMon, RoadshowControl -- reaches for first, and both of
+#   the shapes they traffic in are shapes a compiler cannot check:
 #
 #     * a 'struct List' whose Nodes carry a name in ln_Name and nothing else.
 #       A list of the wrong node type walks fine right up to the first
@@ -31,6 +31,17 @@
 #   first, so the transcript distinguishes "answered zero" from "not answered"
 #   -- a test that pre-zeroed could not tell a deliberate omission from a case
 #   that fell through, which is the mistake this whole file exists to prevent.
+#
+# WHAT THE CONFIGURATION HALF ASSERTS
+#
+#   ConfigureInterfaceTagList() validates the whole tag list before applying
+#   any of it, so that a refused call leaves the interface exactly as it was.
+#   The probe sends a legal IFC_NetMask followed by an unsupported IFC_Metric
+#   and then reads the mask back: a one-pass implementation refuses the call
+#   AND changes the mask, which passes the obvious assertion and fails this
+#   one.  Everything the probe changes it puts back, and the address is
+#   restored before the interface state is touched, so a failure part-way
+#   leaves the machine reachable.
 #
 # The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
 # or drop a copy in build/a2065.device.
@@ -249,6 +260,80 @@ if grep -q "^ReleaseInterfaceList(NULL): returned" "$REPORT"; then
     pass "ReleaseInterfaceList(NULL) did nothing, as documented"
 else
     fail "ReleaseInterfaceList(NULL) did not return"
+fi
+
+# ---- ConfigureInterfaceTagList -------------------------------------------
+#
+# The atomicity assertion is the one worth having. The refused list had a
+# legal IFC_NetMask in front of the unsupported IFC_Metric, so a one-pass
+# implementation would refuse the call AND leave 255.255.0.0 on the
+# interface -- passing the "refused" check and failing this one.
+if grep -q "config: mask+metric: .* -- refused, correctly" "$REPORT"; then
+    pass "a tag list containing an unsupported tag is refused"
+else
+    fail "IFC_Metric was accepted, or the call did not run"
+fi
+
+if grep -q "config: mask after the refusal: .* -- unchanged, correctly" "$REPORT"; then
+    pass "and nothing in that list was applied: validate first, then act"
+else
+    fail "the refused list changed the netmask -- the call is not atomic"
+fi
+
+if grep -q "config: bad address: .* -- refused, correctly" "$REPORT"; then
+    pass "an address string that is neither dotted-quad nor a host is refused"
+else
+    fail "a malformed IFC_Address was accepted"
+fi
+
+if grep -q "config: IFC_LimitMTU 576: rc 0, IFQ_MTU now 576" "$REPORT"; then
+    pass "IFC_LimitMTU lowered the MTU and IFQ_MTU reports it"
+else
+    fail "IFC_LimitMTU did not lower the MTU"
+fi
+
+# "you can request that a smaller size is used" -- so more than the hardware
+# can carry is the hardware's own number, not an error.
+if grep -q "config: IFC_LimitMTU 9000: rc 0, IFQ_MTU now 1500" "$REPORT"; then
+    pass "a request above the hardware MTU is clamped to 1500, not refused"
+else
+    fail "IFC_LimitMTU 9000 was not clamped to the driver's 1500"
+fi
+
+if grep -Eq "config: address -> 10\.0\.2\.200: rc 0, IFQ_Address now 10\.0\.2\.200" "$REPORT"; then
+    pass "IFC_Address moved the interface address"
+else
+    fail "IFC_Address did not move the interface address"
+fi
+
+if grep -Eq "config: address restored: rc 0, IFQ_Address now 10\.0\.2\.[0-9]+" "$REPORT"; then
+    pass "and IFC_Address with IFC_NetMask put it back in one call"
+else
+    fail "the address was not restored"
+fi
+
+if grep -q "config: SM_Down: .* -- down, correctly" "$REPORT"; then
+    pass "IFC_State SM_Down took the interface down"
+else
+    fail "IFC_State SM_Down did not take the interface down"
+fi
+
+if grep -q "config: SM_Online: .* -- up, correctly" "$REPORT"; then
+    pass "IFC_State SM_Online brought it back, and IFQ_State reports SM_Up"
+else
+    fail "IFC_State SM_Online did not bring the interface back"
+fi
+
+if grep -q "config: IFC_State 99: .* -- refused, correctly" "$REPORT"; then
+    pass "an IFC_State value the API never defined is refused"
+else
+    fail "IFC_State 99 was accepted"
+fi
+
+if grep -q "config: nosuchif: .* -- refused, correctly" "$REPORT"; then
+    pass "configuring an interface that does not exist is refused"
+else
+    fail "ConfigureInterfaceTagList accepted an unknown interface"
 fi
 
 echo
