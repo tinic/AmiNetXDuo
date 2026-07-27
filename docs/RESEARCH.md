@@ -15998,6 +15998,36 @@ configured" on the same machine, in the same run, where Roadshow's `ShowNetStatu
 | `ShowNetStatus DNS` | rc 20 | rc 0, server table + default domain |
 | `GetNetStatus` | 4 of 6 lines wrong | all six correct |
 
+### The tunables, and one guess that was wrong
+
+`SocketBaseTagList()` returns the index of the first tag it could not service and stops
+there. That is the documented contract rather than a shortcut, so **one unserviced code
+discards every tag after it in the same call** -- a foreign client that probes a group of
+tunables in one go gets nothing, and it looks like the library not working rather than
+like one tag being unknown.
+
+Eight now answer, and every value is what this stack actually does: `SBTC_UDP_CHECKSUM`
+TRUE, `SBTC_IP_FORWARDING` FALSE, `SBTC_IP_DEFAULT_TTL`, `SBTC_ICMP_MASK_REPLY` FALSE,
+`SBTC_ICMP_SEND_REDIRECTS` FALSE, `SBTC_ICMP_PROCESS_ECHO` = IR_Process,
+`SBTC_ICMP_PROCESS_TSTAMP` = IR_Ignore (NetX Duo does not implement it) and
+`SBTC_IDN_DEFAULT_CHARACTER_SET` = IDNCS_ASCII. Where the honest answer is "no", it says
+no.
+
+`SBTC_GET_BYTES_RECEIVED` / `_SENT` now answer too, from `nx_ip_info_get()` -- the same
+call `netstats.c` already made. They are `SBQUAD_T` by reference; NetX Duo counts in
+ULONG, so the high word is always zero and it wraps at 4 GB, which is its counter and not
+a choice made here.
+
+**The tcpdump guess was wrong.** Servicing the tunables was the leading theory for why it
+fails, and it still exits rc 20 with no output afterwards. Whatever stops it is something
+else -- worth recording so the next person does not re-run the same experiment.
+
+**SampleNetSpeed was never a stack problem.** It reported "Could not query data throughput
+statistics" and exited; with the byte counters answered it gets past that and runs. Its
+argument template is `INTERFACE,LEFT/N,TOP/N,WIDTH/N,HEIGHT/N,SCREEN/K` -- it is a
+graphical meter that opens a window and runs until closed, so it now times out a
+scripted plan instead of failing one, which is the tool working rather than a hang.
+
 ### Refusals that are the right answer
 
 `RoadshowControl` looks tunables up by Roadshow-private name; `ipf`/`ipfstat`/`ipnat`/

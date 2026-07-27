@@ -363,6 +363,38 @@ typedef struct
 static const BsdConstTag bsd_const_tags[] =
 {
     { SBTC_NUM_PACKET_FILTER_CHANNELS,  0     },
+
+    /*
+     * THE TUNABLES, and why answering them is not optional.
+     *
+     * SocketBaseTagList() returns the index of the first tag it could not
+     * service and stops there -- that is the documented contract, not a
+     * shortcut -- so ONE unserviced code in a caller's list discards every
+     * tag after it. A foreign client that probes a group of tunables in a
+     * single call therefore gets nothing, and the failure looks like the
+     * library not working rather than like one tag being unknown. Roadshow's
+     * tcpdump is the one we caught doing it (docs/RESEARCH.md 55).
+     *
+     * Every value below is what this stack ACTUALLY does, not a placating
+     * answer. Where the honest answer is "no", it says no.
+     */
+    { SBTC_UDP_CHECKSUM,        TRUE                  }, /* always computed  */
+    { SBTC_IP_FORWARDING,       FALSE                 }, /* we are a host    */
+    { SBTC_IP_DEFAULT_TTL,      NX_IP_TIME_TO_LIVE    },
+    { SBTC_ICMP_MASK_REPLY,     FALSE                 }, /* not answered     */
+    { SBTC_ICMP_SEND_REDIRECTS, FALSE                 }, /* we do not route  */
+    /*
+     * IR_Process (0) / IR_Ignore (1). Echo is answered -- ping works, which
+     * is most of how anyone tests this stack. Timestamp is not implemented
+     * by NetX Duo at all, so the truthful answer is that it is ignored.
+     */
+    { SBTC_ICMP_PROCESS_ECHO,   0                     },
+    { SBTC_ICMP_PROCESS_TSTAMP, 1                     },
+    /*
+     * IDNCS_ASCII. There is no IDN support here, and ASCII is the honest
+     * description of what host names are put on the wire as.
+     */
+    { SBTC_IDN_DEFAULT_CHARACTER_SET, 0               },
     /*
      * TRUE since routing.c: AddRouteTagList(), DeleteRouteTagList(),
      * GetRouteInfo() and FreeRouteInfo() are the whole routing API the
@@ -536,6 +568,43 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
          * PTP is never set on purpose: a point-to-point interface here would
          * mean SLIP or PPP, and this stack does not do either.
          */
+        /*
+         * Total bytes in and out, as an SBQUAD_T the caller supplies. This is
+         * what Roadshow's SampleNetSpeed measures throughput from; without
+         * them it prints "Could not query data throughput statistics" and
+         * exits (docs/RESEARCH.md 55).
+         *
+         * NetX Duo counts in ULONG, so the high word is always zero and will
+         * wrap after 4 GB. That is NetX Duo's counter, not a choice made here,
+         * and a wrap reads as a sudden drop rather than as garbage.
+         *
+         * Always by reference: a quad does not fit in ti_Data, so a caller
+         * that asks for one without SBTF_REF is asking for something
+         * impossible and is told so rather than handed half the value.
+         */
+        case SBTC_GET_BYTES_RECEIVED:
+        case SBTC_GET_BYTES_SENT:
+        {
+            NX_IP *ip = netstack_ip();
+            ULONG  sent = 0, sent_bytes = 0, received = 0, received_bytes = 0;
+            ULONG *quad;
+
+            if (!by_ref || item->ti_Data == 0)
+                return FALSE;
+            if (ip == NULL)
+                return FALSE;
+            if (nx_ip_info_get(ip, &sent, &sent_bytes, &received,
+                               &received_bytes, NULL, NULL, NULL, NULL,
+                               NULL, NULL) != NX_SUCCESS)
+                return FALSE;
+
+            quad = (ULONG *)item->ti_Data;
+            quad[0] = 0UL;      /* high */
+            quad[1] = (code == SBTC_GET_BYTES_RECEIVED) ? received_bytes
+                                                        : sent_bytes;
+            return TRUE;
+        }
+
         case SBTC_SYSTEM_STATUS:
         {
             const AmiConfig *cfg    = netstack_config();
