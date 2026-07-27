@@ -384,6 +384,16 @@ VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *message 
 VOID bsd_AbortInterfaceConfig(register struct AddressAllocationMessage *message __asm("a0"),
                               register struct AmiSocketBase *SocketBase __asm("a6"));
 
+/* LVO -0x1f2 */
+LONG bsd_AddNetMonitorHookTagList(register LONG type __asm("d0"),
+                                  register struct Hook *hook __asm("a0"),
+                                  register struct TagItem *tags __asm("a1"),
+                                  register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x1f8 */
+VOID bsd_RemoveNetMonitorHook(register struct Hook *hook __asm("a0"),
+                              register struct AmiSocketBase *SocketBase __asm("a6"));
+
 /* LVO -0x1fe */
 LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
                               register LONG version __asm("d1"),

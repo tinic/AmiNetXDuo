@@ -16,6 +16,7 @@
 #include "bsdsocket_vectors.h"
 #include "tcp_handler.h"
 #include "interfaces.h"
+#include "netmonitor.h"
 
 #include "aminetxduo/config.h"
 
@@ -523,6 +524,19 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
      * API it serves has a mandatory timeout.
      */
     if (bsd_aam_busy())
+    {
+        base->sb_Lib.lib_Flags |= LIBF_DELEXP;
+        return NULL;
+    }
+
+    /*
+     * And while a monitoring hook is installed. That is the documented
+     * behaviour rather than a leak: "It must be called before the library is
+     * closed, or the library will stay in memory indefinitely."  Expunging
+     * with a hook in the list would unload the segment out from under a
+     * caller that still believes its hook is live.
+     */
+    if (bsd_netmon_busy())
     {
         base->sb_Lib.lib_Flags |= LIBF_DELEXP;
         return NULL;

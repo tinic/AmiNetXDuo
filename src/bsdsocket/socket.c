@@ -16,6 +16,7 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "netmonitor.h"
 
 /* For _nx_tcp_packet_send_fin() -- see bsd_tcp_send_fin() below. */
 #include "nx_tcp.h"
@@ -1340,6 +1341,33 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
 
+    /*
+     * "The hook function will be invoked before dropping into the kernel
+     * 'bind()' call" -- so here, with a socket already known to exist and
+     * before anything about it has changed. A hook that denies the call
+     * returns the errno to fail it with, and the call must look to the
+     * application exactly as if the stack had refused it.
+     *
+     * After the descriptor lookup rather than before it, so that a monitor
+     * cannot be used to probe which descriptors exist.
+     */
+    if (bsd_netmon_have(MHT_Bind))
+    {
+        struct BindMonitorMsg bmm;
+        LONG                  denied;
+
+        bsd_bzero(&bmm, sizeof(bmm));
+        bmm.bmm_Size    = (LONG)sizeof(bmm);
+        bmm.bmm_Caller  = bsd_netmon_caller(SocketBase);
+        bmm.bmm_Socket  = sock_fd;
+        bmm.bmm_Name    = name;
+        bmm.bmm_NameLen = (LONG)namelen;
+
+        denied = bsd_netmon_dispatch(MHT_Bind, &bmm);
+        if (denied > 0)
+            return bsd_fail(SocketBase, denied);
+    }
+
     if ((sock->as_Flags & ASF_BOUND) != 0)
         return bsd_fail(SocketBase, AMI_EINVAL);
 
@@ -1987,6 +2015,24 @@ LONG bsd_connect(register LONG sock_fd          __asm("d0"),
 
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
+
+    /* The same, for connect() -- see the note in bsd_bind(). */
+    if (bsd_netmon_have(MHT_Connect))
+    {
+        struct ConnectMonitorMsg cmm;
+        LONG                     denied;
+
+        bsd_bzero(&cmm, sizeof(cmm));
+        cmm.cmm_Size    = (LONG)sizeof(cmm);
+        cmm.cmm_Caller  = bsd_netmon_caller(SocketBase);
+        cmm.cmm_Socket  = sock_fd;
+        cmm.cmm_Name    = name;
+        cmm.cmm_NameLen = (LONG)namelen;
+
+        denied = bsd_netmon_dispatch(MHT_Connect, &cmm);
+        if (denied > 0)
+            return bsd_fail(SocketBase, denied);
+    }
 
     if (bsd_sockaddr_get(SocketBase, name, namelen, &addr, &port, &scope) != 0)
         return -1;

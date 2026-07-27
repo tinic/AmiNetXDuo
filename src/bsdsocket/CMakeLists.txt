@@ -31,6 +31,7 @@ set(BSDSOCKET_SOURCES
                             # ConfigureInterfaceTagList, from the NDK 3.2 autodoc
     addralloc.c             # Create/DeleteAddrAllocMessage: the message
                             # BeginInterfaceConfig takes
+    netmonitor.c            # AddNetMonitorHookTagList/RemoveNetMonitorHook
     routing.c               # AddRoute/DeleteRoute/GetRouteInfo, same source
     netstats.c              # GetNetworkStatistics: 4.4BSD's ipstat/tcpstat/
                             # udpstat/icmpstat over NetX Duo's counters

@@ -77,6 +77,19 @@ endif()
 target_compile_options(test_aamprobe PRIVATE -Wall -Wextra)
 set_target_properties(test_aamprobe PROPERTIES OUTPUT_NAME "AamProbe")
 
+# MonProbe drives AddNetMonitorHookTagList/RemoveNetMonitorHook and the two
+# call-site hook types.  The hook register convention (Hook in A0, NULL in A2,
+# message in A1) is not the pair a reader would guess, and a wrong guess hands
+# the message in the wrong register -- so the probe poisons A2 beforehand and
+# asserts it came back NULL.
+add_executable(test_monprobe monprobe.c)
+target_include_directories(test_monprobe PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_monprobe PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_monprobe PRIVATE -Wall -Wextra)
+set_target_properties(test_monprobe PROPERTIES OUTPUT_NAME "MonProbe")
+
 # TcpHandoff runs the whole socket-to-file-handle sequence -- accept(),
 # ReleaseCopyOfSocket(), Open("TCP:OBTAIN="), SystemTagList() -- against two
 # stock AmigaDOS commands.  Linked against nothing of ours: it reaches

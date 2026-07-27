@@ -161,6 +161,9 @@ IMPLEMENTED = {
     "ConfigureInterfaceTagList", "AddInterfaceTagList", "RemoveInterface",
     "CreateAddrAllocMessageA", "DeleteAddrAllocMessage",
     "BeginInterfaceConfig", "AbortInterfaceConfig",
+    # Tier 3, the monitoring hooks (netmonitor.c).  MHT_Send is not dispatched
+    # -- see the foot of netmonitor.c -- but the registry serves all types.
+    "AddNetMonitorHookTagList", "RemoveNetMonitorHook",
     # Tier 3, the routing API (routing.c).  ChangeRouteTagList is NOT here:
     # the NDK assigns it an offset and neither the autodoc nor
     # clib/bsdsocket_protos.h documents it, so it keeps the ENOSYS stub.

@@ -15277,3 +15277,88 @@ is the mistake the previous wording made in the other direction.
 The repair stays for toolchains that predate `168be3619`. Nothing in it runs
 against one that does not need it.
 
+---
+
+## 49. Two hook types, and the five that are refused instead (2026-07-27)
+
+`AddNetMonitorHookTagList()` / `RemoveNetMonitorHook()` are the last of the
+autodoc's monitoring API. "Monitoring hooks can be used both for inspecting
+and filtering data that enters the stack, **or for denying access to certain
+APIs**" — and the denying half is the half with consequences.
+
+### 49.1 What the document settled
+
+**The register convention is not the pair a reader would guess.** The hook is
+entered `hookfunc(hook, reserved, msg)` in **A0, A2, A1** — with *"the
+'reserved' parameter will be set to NULL for future expansion"*. That is
+utility.library's `CallHookPkt` shape with the object slot deliberately
+emptied. An A0/A1 guess hands the message in the wrong register and the hook
+reads whatever was in A1.
+
+`monprobe.c` poisons A2 with `~0` before every call and asserts it came back
+NULL, so the convention itself is under test rather than assumed.
+
+**The two families answer with different vocabularies.** The in-stack types
+(`MHT_ICMP`, `MHT_UDP`, `MHT_TCP_Connect`, `MHT_Packet`) return `MA_Continue` /
+`MA_Ignore` / `MA_Drop` / `MA_DropWithReset` — what to do with a *packet*. The
+call-site types (`MHT_Connect`, `MHT_Bind`, `MHT_Send`) return an **errno** —
+*"any error value > 0 will cause the call to be aborted and the errno variable
+to be set to this value"*. `MA_Continue` is 0 and so is "no error", which is
+the only reason one dispatcher can serve both.
+
+**The walk stops at the first refusal.** *"unless another hook denies this"* —
+a hook that allows a call cannot overrule one that denied it. The probe
+installs two and counts invocations both ways round.
+
+**`RemoveNetMonitorHook()` takes only the hook, no type.** So removal searches
+every list — and one `Hook` cannot be installed for two types at once, because
+there would be no way to say which to remove. `struct Hook` embeds a `MinNode`
+first, which is what "added to an internal list" means: the caller's own Hook
+is the node.
+
+**An installed hook keeps the library resident.** *"It must be called before
+the library is closed, or the library will stay in memory indefinitely."* That
+is a description of the behaviour, not a warning about a leak, and
+`bsd_lib_expunge()` implements it by declining while `bsd_netmon_busy()` — the
+third user of a guard that already existed for the TCP: handler and the
+address-allocation workers.
+
+### 49.2 Five types are refused with EINVAL, and that is the point
+
+The registry serves any type, but a hook is only ever called from a dispatch
+point, and only `connect()` and `bind()` have one. **Accepting a hook for a
+type nothing dispatches returns success to a caller that then never hears
+anything** — which it cannot tell apart from a quiet network. `EINVAL` is the
+documented error for a type this library does not support, and it is true.
+
+| type | why not dispatched |
+|---|---|
+| `MHT_Send` | needs the hook inside `send()`/`sendto()`/`sendmsg()`, in `transfer.c` |
+| `MHT_ICMP`, `MHT_UDP`, `MHT_TCP_Connect`, `MHT_Packet` | all four are invoked *"from within the TCP/IP stack itself"* — the IP receive path, which reaches this library only through the `NX_IP` packet filter `netstack_capture.c` already installs for `src/bpf/`. Dispatching them means chaining that filter |
+
+`MA_DropWithReset` is a second reason to leave `MHT_TCP_Connect` alone: it
+means emitting an RST from inside a receive filter, and a hook told it can
+reject a connection *gracefully*, whose rejection silently became a plain
+drop, has been given a worse answer than a refusal to install.
+
+### 49.3 What ran
+
+```
+add a NULL hook: rc -1 (errno 14) -- EFAULT, correctly
+add type 99: rc -1 (errno 22) -- EINVAL, correctly
+add MHT_Packet: rc -1 (errno 22) -- refused rather than silently ignored
+add the same hook twice: rc -1 -- refused, correctly
+bind with an allowing hook: rc 0, called 1 -- allowed and seen, correctly
+message: size 20 (want 20), socket 0 (want 0), name ours
+reserved was NULL -- correctly, hook was ours -- correctly
+bind with a denying hook: rc -1 (errno 13) -- denied with the hook's errno
+first allows, second denies: rc -1 (errno 13), calls 1/1
+first denies: rc -1, calls 1/0 -- the walk stopped, correctly
+connect with a denying hook: rc -1 (errno 13), called 1
+after removal: bind rc 0, called 0 -- no longer consulted, correctly
+```
+
+`calls 1/0` is the one worth keeping. Both hooks are installed and only the
+first ran, which is what *"unless another hook denies this"* requires and what
+a dispatcher that collected every answer before deciding would fail.
+

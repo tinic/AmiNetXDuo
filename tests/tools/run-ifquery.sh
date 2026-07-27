@@ -73,9 +73,10 @@ BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 PROBE="$ROOT/$BUILD/tests/tools/IfProbe"
 STATPROBE="$ROOT/$BUILD/tests/tools/StatProbe"
 AAMPROBE="$ROOT/$BUILD/tests/tools/AamProbe"
+MONPROBE="$ROOT/$BUILD/tests/tools/MonProbe"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$PROBE" "$STATPROBE" \
-         "$AAMPROBE" "$BSD"; do
+         "$AAMPROBE" "$MONPROBE" "$BSD"; do
     [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
 done
 
@@ -105,6 +106,7 @@ cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
 cp "$PROBE" "$STAGE/IfProbe"
 cp "$STATPROBE" "$STAGE/StatProbe"
 cp "$AAMPROBE" "$STAGE/AamProbe"
+cp "$MONPROBE" "$STAGE/MonProbe"
 
 # The probe runs twice, either side of AddNetInterface.  Not to catch an empty
 # list -- there is no such state to catch, because OpenLibrary("bsdsocket")
@@ -117,6 +119,7 @@ SYS:IfProbe
 SYS:AddNetInterface eth0
 SYS:IfProbe
 SYS:StatProbe
+SYS:MonProbe
 SYS:AamProbe
 EOF
 
@@ -130,7 +133,7 @@ set +e
 "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
     "$STAGE/AddNetInterface" "$STAGE/IfProbe" "$STAGE/StatProbe" \
-    "$STAGE/AamProbe"
+    "$STAGE/AamProbe" "$STAGE/MonProbe"
 RUN_RC=$?
 set -e
 
@@ -669,6 +672,96 @@ if grep -q "^DeleteAddrAllocMessage on a stack message: .* -- refused, correctly
     pass "DeleteAddrAllocMessage refuses a message it did not allocate"
 else
     fail "DeleteAddrAllocMessage tried to free a message it did not allocate"
+fi
+
+# ---- the monitoring hooks ------------------------------------------------
+#
+# The denying half is the half with consequences: a hook that returns an errno
+# must make bind() or connect() fail with exactly that errno, before the stack
+# has done anything.
+
+for case in "a NULL hook:EFAULT" "type 99:EINVAL"; do
+    what=${case%%:*}
+    code=${case##*:}
+    if grep -q "^add $what: .* -- $code, correctly" "$REPORT"; then
+        pass "AddNetMonitorHookTagList returns $code for $what"
+    else
+        fail "AddNetMonitorHookTagList got $what wrong"
+    fi
+done
+
+if grep -q "^add MHT_Packet: .* -- refused rather than silently ignored, correctly" "$REPORT"; then
+    pass "a type nothing dispatches is refused, not accepted and ignored"
+else
+    fail "MHT_Packet was accepted although nothing dispatches it"
+fi
+
+if grep -q "^add the same hook twice: .* -- refused, correctly" "$REPORT"; then
+    pass "one Hook cannot be installed twice -- removal takes no type"
+else
+    fail "the same Hook was accepted into two lists"
+fi
+
+if grep -q "^bind with an allowing hook: .* -- allowed and seen, correctly" "$REPORT"; then
+    pass "a hook that returns 0 sees the call and lets it through"
+else
+    fail "an allowing hook was not consulted, or blocked the call"
+fi
+
+# The register convention: A2 was poisoned before the call and must come back
+# NULL.  A wrong guess hands the message in the wrong register entirely.
+if grep -q "^reserved was NULL -- correctly, hook was ours -- correctly" "$REPORT"; then
+    pass "the hook was entered with A0=Hook, A2=NULL, A1=message"
+else
+    fail "the hook register convention is wrong"
+fi
+
+if grep -q "^message is the published shape: yes -- correctly" "$REPORT"; then
+    pass "bmm_Size, bmm_Socket and bmm_Name are what bind() was given"
+else
+    fail "the monitor message does not match what was passed to bind()"
+fi
+
+if grep -q "^bind with a denying hook: .* -- denied with the hook.s errno, correctly" "$REPORT"; then
+    pass "a hook that returns an errno fails bind() with exactly that errno"
+else
+    fail "a denying hook did not fail bind() with its own errno"
+fi
+
+if grep -q "^two hooks on one type: .* -- both installed, correctly" "$REPORT"; then
+    pass "more than one hook can be installed for one task"
+else
+    fail "a second hook on one type was refused"
+fi
+
+if grep -q "^first allows, second denies: .* -- one hook cannot overrule another, correctly" "$REPORT"; then
+    pass "a hook that allows cannot overrule one that denies"
+else
+    fail "an allowing hook overruled a denying one"
+fi
+
+if grep -q "^first denies: .* -- the walk stopped, correctly" "$REPORT"; then
+    pass "and the walk stops at the first refusal"
+else
+    fail "hooks after the first refusal were still consulted"
+fi
+
+if grep -q "^connect with a denying hook: .* -- denied before the connect, correctly" "$REPORT"; then
+    pass "MHT_Connect denies connect() before the stack has done anything"
+else
+    fail "MHT_Connect did not deny the connect"
+fi
+
+if grep -q "^after removal: .* -- no longer consulted, correctly" "$REPORT"; then
+    pass "a removed hook stops being consulted"
+else
+    fail "a removed hook was still called"
+fi
+
+if grep -q "^RemoveNetMonitorHook(NULL) and twice: returned" "$REPORT"; then
+    pass "RemoveNetMonitorHook is safe with NULL and with a hook already out"
+else
+    fail "RemoveNetMonitorHook did not survive NULL or a double removal"
 fi
 
 echo
