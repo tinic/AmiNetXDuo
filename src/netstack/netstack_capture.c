@@ -173,6 +173,41 @@ VOID ami_netstack_capture_start(AmiNetStack *ns)
              AMI_NS_LO_NAME ")", (long)ns->ns_IfaceCount);
 }
 
+/*
+ * One interface, registered or unregistered after the stack is already up.
+ *
+ * These exist because an interface added at run time through
+ * AddInterfaceTagList() must be capturable like any other, and one removed
+ * through RemoveInterface() must stop being reachable BEFORE its AmiSana2If
+ * is freed -- src/bpf/ holds the pointer as an opaque cookie and would hand a
+ * freed one to an injector.
+ */
+VOID ami_netstack_capture_attach_one(AmiNetStack *ns, UWORD index)
+{
+    const AmiIfConfig *cfg;
+
+    /* Nothing to attach to when capture never started: ami_bpf_init() failed,
+       or this is a build without src/bpf/ at all. */
+    if (ns->ns_Ip.nx_ip_packet_filter_extended == NX_NULL ||
+        ns->ns_Iface[index] == NULL)
+        return;
+
+    cfg = &ns->ns_Config.interfaces[index];
+
+    if (ami_bpf_attach_interface(cfg->name, ns->ns_Iface[index], DLT_EN10MB,
+                                 ami_sana2_get_mtu(ns->ns_Iface[index]),
+                                 ami_ns_capture_inject) != 0)
+    {
+        AMI_WARN("netstack: bpf could not register '%s'", cfg->name);
+    }
+}
+
+VOID ami_netstack_capture_detach_one(AmiNetStack *ns, UWORD index)
+{
+    if (ns->ns_Iface[index] != NULL)
+        ami_bpf_detach_interface(ns->ns_Iface[index]);
+}
+
 VOID ami_netstack_capture_stop(AmiNetStack *ns)
 {
     UWORD i;

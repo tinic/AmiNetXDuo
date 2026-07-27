@@ -340,6 +340,13 @@ struct rt_msghdr *bsd_GetRouteInfo(register LONG address_family __asm("d0"),
                                    register LONG flags __asm("d1"),
                                    register struct AmiSocketBase *SocketBase __asm("a6"));
 
+/* LVO -0x1bc */
+LONG bsd_AddInterfaceTagList(register STRPTR interface_name __asm("a0"),
+                             register STRPTR device_name __asm("a1"),
+                             register LONG unit __asm("d0"),
+                             register struct TagItem *tags __asm("a2"),
+                             register struct AmiSocketBase *SocketBase __asm("a6"));
+
 /* LVO -0x1c2 */
 LONG bsd_ConfigureInterfaceTagList(register STRPTR interface_name __asm("a0"),
                                    register struct TagItem *tags __asm("a1"),
@@ -438,6 +445,11 @@ LONG bsd_ObtainServerSocket(register struct AmiSocketBase *SocketBase __asm("a6"
 BOOL bsd_GetDefaultDomainName(register STRPTR buffer __asm("a0"),
                               register LONG buffer_size __asm("d0"),
                               register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x2dc */
+LONG bsd_RemoveInterface(register STRPTR interface_name __asm("a0"),
+                         register LONG force __asm("d0"),
+                         register struct AmiSocketBase *SocketBase __asm("a6"));
 
 /* LVO -0x2e2 */
 struct hostent *bsd_gethostbyname_r(register STRPTR name __asm("a0"),

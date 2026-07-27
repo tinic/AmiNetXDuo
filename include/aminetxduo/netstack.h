@@ -47,6 +47,7 @@ typedef struct AmiNetStack AmiNetStack;
 #define AMI_NET_ERR_NONAME     (-6)   /* the name does not exist              */
 #define AMI_NET_ERR_NOSERVER   (-7)   /* no name server is configured         */
 #define AMI_NET_ERR_TIMEOUT    (-8)   /* the name server did not answer       */
+#define AMI_NET_ERR_BUSY       (-9)   /* still carrying connections           */
 
 /*
  * Bring the stack up (idempotent, reference-counted). Reads the config, starts
@@ -146,6 +147,30 @@ UWORD   netstack_interface_count(VOID);
 LONG    netstack_interface_up(UWORD index);
 LONG    netstack_interface_down(UWORD index);
 BOOL    netstack_interface_is_up(UWORD index);
+
+/* ------------------------------------------------- interfaces at run time --
+ *
+ * Adding and removing an interface AFTER netstack_startup() has run. This is
+ * what bsdsocket.library's AddInterfaceTagList() and RemoveInterface() are
+ * built on, and it is the only path by which ns_Iface[] changes once the
+ * stack is up -- which is the whole reason it lives here rather than in the
+ * library: an interface attached to NetX Duo but unknown to the netstack
+ * would not have its SANA-II device closed by netstack_shutdown().
+ *
+ * netstack_interface_add() opens the SANA-II device named in *cfg, binds it
+ * and attaches it to the running NX_IP. `cfg` is COPIED into the netstack's
+ * own configuration, because NetX Duo keeps the name pointer rather than the
+ * name; *index_out receives the slot, which is the lowest free one.
+ *
+ * netstack_interface_remove() is the counterpart. It refuses an interface
+ * that still carries TCP connections with AMI_NET_ERR_BUSY unless `force`,
+ * and refuses with AMI_NET_ERR_STATE if the SANA-II device will not give its
+ * read requests back -- in that case nothing is freed and the slot stays
+ * occupied, because a device holding pointers into freed memory is worse than
+ * an interface that will not go away until the next NetShutdown.
+ */
+LONG    netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out);
+LONG    netstack_interface_remove(UWORD index, BOOL force);
 
 /* ------------------------------------------------------------------ IPv6 --
  *

@@ -122,6 +122,46 @@ static LONG p_configure_interface(struct Library *base, const char *name,
     return res;
 }
 
+static LONG p_add_interface(struct Library *base, const char *name,
+                            const char *device, LONG unit,
+                            struct TagItem *tags)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register CONST_APTR      a0  __asm("a0") = (CONST_APTR)name;
+    register CONST_APTR      a1  __asm("a1") = (CONST_APTR)device;
+    register LONG            d0  __asm("d0") = unit;
+    register APTR            a2  __asm("a2") = (APTR)tags;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
+    register LONG _clob_a2 __asm("a2");
+
+    __asm __volatile ("jsr a6@(-444:W)"     /* AddInterfaceTagList -0x1bc */
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
+                        "=r" (_clob_a1), "=r" (_clob_a2)
+                      : "r" (a6), "r" (a0), "r" (a1), "r" (d0), "r" (a2)
+                      : "cc", "memory");
+    return res;
+}
+
+static LONG p_remove_interface(struct Library *base, const char *name,
+                               LONG force)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register CONST_APTR      a0  __asm("a0") = (CONST_APTR)name;
+    register LONG            d0  __asm("d0") = force;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+
+    __asm __volatile ("jsr a6@(-732:W)"     /* RemoveInterface -0x2dc */
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
+                      : "r" (a6), "r" (a0), "r" (d0)
+                      : "a1", "cc", "memory");
+    return res;
+}
+
 static LONG p_errno(struct Library *base)
 {
     register struct Library *a6  __asm("a6") = base;
@@ -534,6 +574,199 @@ static VOID p_config_phase(struct Library *base, const char *name)
            (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
 }
 
+/* --------------------------------------------- add and remove at run time -- */
+
+/* Interface names are file names in DEVS:NetInterfaces, and AmigaDOS file
+   names are case-insensitive, so this is how the library compares them. */
+static BOOL p_same_name(const char *a, const char *b)
+{
+    ULONG i;
+
+    for (i = 0; ; i++)
+    {
+        char ca = a[i];
+        char cb = b[i];
+
+        if (ca >= 'A' && ca <= 'Z')
+            ca = (char)(ca + ('a' - 'A'));
+        if (cb >= 'A' && cb <= 'Z')
+            cb = (char)(cb + ('a' - 'A'));
+
+        if (ca != cb)
+            return FALSE;
+        if (ca == '\0')
+            return TRUE;
+    }
+}
+
+/* The names an interface list holds, so a caller can say what changed. */
+static LONG p_count_interfaces(struct Library *base, const char *want,
+                               BOOL *found)
+{
+    struct List *list;
+    struct Node *node;
+    LONG         count = 0;
+
+    if (found != NULL)
+        *found = FALSE;
+
+    list = p_obtain_interface_list(base);
+    if (list == NULL)
+        return -1;
+
+    for (node = list->lh_Head; node->ln_Succ != NULL; node = node->ln_Succ)
+    {
+        count++;
+
+        if (want != NULL && found != NULL && node->ln_Name != NULL &&
+            p_same_name((const char *)node->ln_Name, want))
+            *found = TRUE;
+    }
+
+    p_release_interface_list(base, list);
+
+    return count;
+}
+
+/*
+ * RemoveInterface() and AddInterfaceTagList(), on the interface this run is
+ * riding on. "It tries to release all the resources associated with a
+ * networking interface, thus permitting it to be added again with new
+ * parameters" -- so removing and re-adding IS the documented use, and doing
+ * exactly that is the only way to find out whether the SANA-II device was
+ * really closed and really reopened.
+ *
+ * The hardware address is the evidence. It is read from the card by
+ * S2_DEVICEQUERY at open time, so a re-added interface that reports the same
+ * MAC went all the way down to the device and back; one that reports zeroes,
+ * or the previous value out of memory that was never freed, did not.
+ */
+static VOID p_addremove_phase(struct Library *base, const char *name,
+                              const char *device, LONG unit)
+{
+    UBYTE          mac_before[8];
+    UBYTE          mac_after[8];
+    struct TagItem tags[3];
+    BOOL           present;
+    LONG           before;
+    LONG           after;
+    LONG           rc;
+    ULONG          i;
+
+    p_poison(mac_before, sizeof(mac_before));
+    p_poison(mac_after, sizeof(mac_after));
+
+    tags[0].ti_Tag  = IFQ_HardwareAddress;
+    tags[0].ti_Data = (ULONG)mac_before;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+    (VOID)p_query_interface(base, name, tags);
+
+    before = p_count_interfaces(base, name, &present);
+    Printf((CONST_STRPTR)"addremove: %ld interface(s), %s is %s\n",
+           before, (LONG)name, (LONG)(present ? "there" : "MISSING"));
+
+    /* ---- a name that is not there ---------------------------------------- */
+    rc = p_remove_interface(base, "nosuchif", 0);
+    Printf((CONST_STRPTR)"remove nosuchif: rc %ld (errno %ld)%s\n",
+           rc, p_errno(base),
+           (LONG)((rc == 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+
+    /* ---- and the real one ------------------------------------------------ */
+    rc = p_remove_interface(base, name, 0);
+    Printf((CONST_STRPTR)"remove %s: rc %ld (errno %ld)%s\n",
+           (LONG)name, rc, p_errno(base),
+           (LONG)((rc != 0) ? " -- removed, correctly" : " -- REFUSED, WRONG"));
+
+    after = p_count_interfaces(base, name, &present);
+    Printf((CONST_STRPTR)"after remove: %ld interface(s), %s is %s%s\n",
+           after, (LONG)name, (LONG)(present ? "STILL THERE" : "gone"),
+           (LONG)((after == before - 1 && !present) ? " -- correctly"
+                                                    : " -- WRONG"));
+
+    /* Everything about it must now be unanswerable. */
+    rc = p_query_interface(base, name, NULL);
+    Printf((CONST_STRPTR)"query the removed %s: rc %ld (errno %ld)%s\n",
+           (LONG)name, rc, p_errno(base),
+           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+
+    /* ---- put it back ------------------------------------------------------
+     *
+     * With a tag this stack refuses in the list, first: AddInterfaceTagList
+     * must fail as a whole and leave nothing half-created, or the retry below
+     * would hit "an interface of that name already exists".
+     */
+    tags[0].ti_Tag  = IFA_NumReadRequests;
+    tags[0].ti_Data = 64;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+
+    rc = p_add_interface(base, name, device, unit, tags);
+    Printf((CONST_STRPTR)"add with an unsupported tag: rc %ld (errno %ld)%s\n",
+           rc, p_errno(base),
+           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+
+    rc = p_add_interface(base, name, device, unit, NULL);
+    Printf((CONST_STRPTR)"add %s (%s unit %ld): rc %ld (errno %ld)%s\n",
+           (LONG)name, (LONG)device, unit, rc, p_errno(base),
+           (LONG)((rc == 0) ? " -- added, correctly" : " -- REFUSED, WRONG"));
+
+    after = p_count_interfaces(base, name, &present);
+    Printf((CONST_STRPTR)"after add: %ld interface(s), %s is %s%s\n",
+           after, (LONG)name, (LONG)(present ? "there" : "MISSING"),
+           (LONG)((after == before && present) ? " -- correctly" : " -- WRONG"));
+
+    /* A second add of the same name must be refused: "Each such device must
+       be assigned a unique interface name." */
+    rc = p_add_interface(base, name, device, unit, NULL);
+    Printf((CONST_STRPTR)"add %s twice: rc %ld (errno %ld)%s\n",
+           (LONG)name, rc, p_errno(base),
+           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+
+    /* ---- the evidence ----------------------------------------------------- */
+    tags[0].ti_Tag  = IFQ_HardwareAddress;
+    tags[0].ti_Data = (ULONG)mac_after;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+    (VOID)p_query_interface(base, name, tags);
+
+    for (i = 0; i < 6; i++)
+    {
+        if (mac_after[i] != mac_before[i])
+            break;
+    }
+
+    Printf((CONST_STRPTR)"hardware address after the round trip: "
+                         "%02lx:%02lx:%02lx:%02lx:%02lx:%02lx%s\n",
+           (LONG)mac_after[0], (LONG)mac_after[1], (LONG)mac_after[2],
+           (LONG)mac_after[3], (LONG)mac_after[4], (LONG)mac_after[5],
+           (LONG)((i == 6 && mac_after[0] != POISON_BYTE)
+                      ? " -- the device was reopened, correctly"
+                      : " -- WRONG"));
+
+    /* ---- and it works again ----------------------------------------------- */
+    {
+        static char addr_text[16] = "10.0.2.15";
+
+        tags[0].ti_Tag  = IFC_Address;
+        tags[0].ti_Data = (ULONG)addr_text;
+        tags[1].ti_Tag  = IFC_State;
+        tags[1].ti_Data = SM_Online;
+        tags[2].ti_Tag  = TAG_DONE;
+        tags[2].ti_Data = 0;
+
+        rc = p_configure_interface(base, name, tags);
+        Printf((CONST_STRPTR)"reconfigure and bring up: rc %ld (errno %ld)\n",
+               rc, p_errno(base));
+
+        Printf((CONST_STRPTR)"state after: %ld, address %ld%s\n",
+               p_read_long(base, name, IFQ_State),
+               (LONG)p_read_address(base, name, IFQ_Address),
+               (LONG)((p_read_long(base, name, IFQ_State) == SM_Up)
+                          ? " -- up again, correctly" : " -- STILL DOWN, WRONG"));
+    }
+}
+
 /* ------------------------------------------------------------------ main -- */
 
 int main(void)
@@ -615,7 +848,18 @@ int main(void)
     if (first[0] != '\0')
         p_config_phase(base, first);
 
+    /*
+     * The list obtained above is released BEFORE the interface it names is
+     * removed. Nothing in the published contract says a list survives its
+     * interfaces -- it is documented as "a copy", so it would -- but a probe
+     * that relied on that would be testing something nobody promised.
+     */
     p_release_interface_list(base, list);
+    list = NULL;
+
+    if (first[0] != '\0')
+        p_addremove_phase(base, first, "a2065.device", 0);
+
     Printf((CONST_STRPTR)"ReleaseInterfaceList: returned\n");
 
     /* Documented to do nothing rather than to fault. */

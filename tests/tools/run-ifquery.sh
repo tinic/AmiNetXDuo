@@ -340,6 +340,81 @@ else
     fail "ConfigureInterfaceTagList accepted an unknown interface"
 fi
 
+# ---- AddInterfaceTagList / RemoveInterface --------------------------------
+#
+# "It tries to release all the resources associated with a networking
+# interface, thus permitting it to be added again with new parameters" -- so
+# removing and re-adding IS the documented use, and doing exactly that is the
+# only way to find out whether the SANA-II device was really closed and really
+# reopened.  The machine this test runs on has one card, and the round trip
+# happens on the interface the run is riding on.
+
+if grep -q "^remove nosuchif: .* -- refused, correctly" "$REPORT"; then
+    pass "RemoveInterface refuses a name that is not there"
+else
+    fail "RemoveInterface accepted an unknown interface"
+fi
+
+# TRUE for success, 0 for failure -- the opposite of every other call in the
+# API, and the NDK header types it LONG where the autodoc says BOOL.
+if grep -q "^remove eth0: rc 1 .* -- removed, correctly" "$REPORT"; then
+    pass "RemoveInterface returned TRUE, not 0-for-success"
+else
+    fail "RemoveInterface did not return TRUE"
+fi
+
+if grep -q "^after remove: 0 interface(s), eth0 is gone -- correctly" "$REPORT"; then
+    pass "the interface left the list"
+else
+    fail "the interface is still listed after RemoveInterface"
+fi
+
+if grep -q "^query the removed eth0: .* -- refused, correctly" "$REPORT"; then
+    pass "and nothing can be queried about it any more"
+else
+    fail "QueryInterfaceTagList still answers for a removed interface"
+fi
+
+if grep -q "^add with an unsupported tag: .* -- refused, correctly" "$REPORT"; then
+    pass "AddInterfaceTagList refuses a tag it cannot honour"
+else
+    fail "AddInterfaceTagList accepted IFA_NumReadRequests"
+fi
+
+if grep -q "^add eth0 (a2065.device unit 0): rc 0 .* -- added, correctly" "$REPORT"; then
+    pass "AddInterfaceTagList put it back"
+else
+    fail "AddInterfaceTagList did not re-add the interface"
+fi
+
+if grep -q "^after add: 1 interface(s), eth0 is there -- correctly" "$REPORT"; then
+    pass "and the refused add above left nothing half-created"
+else
+    fail "the interface count is wrong after the re-add"
+fi
+
+if grep -q "^add eth0 twice: .* -- refused, correctly" "$REPORT"; then
+    pass "a second interface of the same name is refused"
+else
+    fail "two interfaces were allowed to share a name"
+fi
+
+# THE EVIDENCE.  The hardware address is read from the card by S2_DEVICEQUERY
+# at open time, so a re-added interface reporting the same MAC went all the
+# way down to the device and back.  Zeroes, or a stale value out of memory
+# that was never freed, would both show here.
+if grep -q "^hardware address after the round trip: .* -- the device was reopened, correctly" "$REPORT"; then
+    pass "the SANA-II device was really closed and really reopened"
+else
+    fail "the re-added interface did not report the card's own address"
+fi
+
+if grep -q "^state after: 3, .* -- up again, correctly" "$REPORT"; then
+    pass "and it configures and comes up like any other interface"
+else
+    fail "the re-added interface would not come up"
+fi
+
 # ---- GetNetworkStatistics ------------------------------------------------
 #
 # Three things a build cannot check: that the return value is a BYTE COUNT

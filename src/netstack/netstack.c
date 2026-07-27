@@ -1429,3 +1429,318 @@ BOOL netstack_interface_is_up(UWORD index)
     return (ns->ns_Ip.nx_ip_interface[index].nx_interface_link_up != NX_FALSE)
                ? TRUE : FALSE;
 }
+
+/* ------------------------------------------- interfaces at run time ------
+ *
+ * bsdsocket.library's AddInterfaceTagList() and RemoveInterface() are the
+ * only callers, and this is the only path by which ns_Iface[] changes after
+ * netstack_startup() has returned. It lives here rather than in the library
+ * because half the work is the library's (NetX Duo) and half is ours (the
+ * SANA-II device, the BPF registration, the configuration slot), and an
+ * interface that got only one half would not be closed by
+ * netstack_shutdown().
+ *
+ * ns_IfaceCount IS NOT DECREMENTED BY A REMOVAL. It is the number of SLOTS
+ * that have ever been populated, not the number that are live, so that a
+ * removal in the middle does not renumber the ones above it -- an interface
+ * index is a handle a caller may already be holding. Every loop over it that
+ * touches ns_Iface[] checks the slot; the ones that read ns_Config or call a
+ * NetX Duo API by index are safe on a hole either way.
+ */
+
+/*
+ * Whether anything is still using this interface. This is the question
+ * RemoveInterface()'s `force` parameter exists to override: "RemoveInterface()
+ * will refuse to remove an interface which is still in use."
+ *
+ * Counted as TCP connections routed out of it. UDP sockets are deliberately
+ * not counted: a datagram socket is not bound to an interface, so removing
+ * one under a UDP socket costs the socket nothing it was promised. A TCP
+ * connection is a different matter -- nx_ip_interface_detach() RESETS every
+ * one of them, which is a visible event at the other end of the wire.
+ *
+ * Must be called inside a ThreadX bracket: the created-socket list is
+ * circular, so the walk is bounded by NetX Duo's own count rather than by a
+ * NULL that never comes.
+ */
+static UWORD ami_ns_interface_users(AmiNetStack *ns, UWORD index)
+{
+    const NX_INTERFACE *nxif = &ns->ns_Ip.nx_ip_interface[index];
+    NX_TCP_SOCKET      *sock = ns->ns_Ip.nx_ip_tcp_created_sockets_ptr;
+    UWORD               users = 0;
+    ULONG               n;
+
+    for (n = 0; n < ns->ns_Ip.nx_ip_tcp_created_sockets_count &&
+                sock != NX_NULL; n++)
+    {
+        if (sock->nx_tcp_socket_connect_interface == nxif &&
+            sock->nx_tcp_socket_state != NX_TCP_CLOSED)
+            users++;
+
+        sock = sock->nx_tcp_socket_created_next;
+    }
+
+    return users;
+}
+
+LONG netstack_interface_remove(UWORD index, BOOL force)
+{
+    AmiNetStack  *ns = ami_ns;
+    AmiNetCaller  caller;
+    AmiSana2If   *iface;
+    UWORD         users;
+    UINT          status;
+
+    if (ns == NULL || !ns->ns_IpCreated ||
+        index >= (UWORD)AMI_CFG_MAX_INTERFACES || ns->ns_Iface[index] == NULL)
+        return AMI_NET_ERR_STATE;
+
+    iface = ns->ns_Iface[index];
+
+    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+        return AMI_NET_ERR_KERNEL;
+
+    users = ami_ns_interface_users(ns, index);
+
+    ami_netstack_leave(&caller);
+
+    if (users != 0 && !force)
+    {
+        AMI_WARN("netstack: '%s' still carries %ld connection(s)",
+                 ns->ns_Config.interfaces[index].name, (long)users);
+        return AMI_NET_ERR_BUSY;
+    }
+
+    /*
+     * Stop the readers BEFORE anything is detached. NX_LINK_DISABLE is what
+     * takes the wire offline and reclaims the outstanding CMD_READs, and it
+     * is also where a device that will not give them back declares itself --
+     * which has to be known before nx_ip_interface_detach() zeroes the
+     * NX_INTERFACE, not after.
+     */
+    (VOID)netstack_interface_down(index);
+
+    if (ami_sana2_orphaned(iface))
+    {
+        /*
+         * The device still holds read requests that point into this
+         * allocation. Freeing it would hand the device memory that has been
+         * given back to the system, so nothing is freed and the interface
+         * stays registered -- down, and not removable until NetShutdown.
+         * That is the state the published API warns about under `force`, and
+         * it is reported rather than entered silently.
+         */
+        AMI_ERROR("netstack: '%s' cannot be removed -- the device still holds "
+                  "read requests inside it",
+                  ns->ns_Config.interfaces[index].name);
+        return AMI_NET_ERR_STATE;
+    }
+
+    /* src/bpf/ holds the AmiSana2If as an opaque cookie, so it has to stop
+       being reachable before the memory goes. */
+    ami_netstack_capture_detach_one(ns, index);
+
+    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+        return AMI_NET_ERR_KERNEL;
+
+    /*
+     * nx_ip_interface_detach() does the whole of NetX Duo's side: it resets
+     * the TCP connections that went out of this interface, deletes its ARP
+     * entries, drops the static routes and the default gateway that pointed
+     * at it, leaves its multicast groups, calls the driver with
+     * NX_LINK_INTERFACE_DETACH -- which is where sana2_driver.c unbinds -- and
+     * zeroes the NX_INTERFACE.
+     */
+    status = nx_ip_interface_detach(&ns->ns_Ip, (UINT)index);
+
+    ami_netstack_leave(&caller);
+
+    if (status != NX_SUCCESS)
+    {
+        AMI_WARN("netstack: detach of interface %ld failed (%ld)",
+                 (long)index, (long)status);
+        return AMI_NET_ERR_STATE;
+    }
+
+    /* CloseDevice() and the reply-port teardown are exec I/O, so they happen
+       outside the bracket. */
+    ami_sana2_close(iface);
+
+    ns->ns_Iface[index] = NULL;
+    ns->ns_Config.interfaces[index].configured = FALSE;
+
+    AMI_INFO("netstack: interface %ld removed", (long)index);
+
+    return AMI_NET_OK;
+}
+
+/*
+ * Interface names, compared the way the rest of the stack compares them: they
+ * come from file names in DEVS:NetInterfaces and AmigaDOS file names are
+ * case-insensitive, so "ETH0" and "eth0" are one interface and adding both
+ * would give two names for one card.
+ */
+static BOOL ami_ns_same_name(const char *a, const char *b)
+{
+    ULONG i;
+
+    for (i = 0; ; i++)
+    {
+        char ca = a[i];
+        char cb = b[i];
+
+        if (ca >= 'A' && ca <= 'Z')
+            ca = (char)(ca + ('a' - 'A'));
+        if (cb >= 'A' && cb <= 'Z')
+            cb = (char)(cb + ('a' - 'A'));
+
+        if (ca != cb)
+            return FALSE;
+        if (ca == '\0')
+            return TRUE;
+    }
+}
+
+/*
+ * The slot a new interface will land in.
+ *
+ * nx_ip_interface_attach() scans nx_ip_interface[] from zero and takes the
+ * first entry whose nx_interface_valid is clear, so predicting its choice is
+ * the same scan -- and it has to be predicted, because ami_sana2_attach()
+ * records the (NX_IP, index) binding that the driver entry looks itself up
+ * by, and it must be in place BEFORE the attach calls the driver.
+ *
+ * Our own slot must be free too. The two can disagree only if a previous
+ * removal left one of them behind, which is exactly the case worth refusing.
+ */
+static LONG ami_ns_free_interface_slot(AmiNetStack *ns)
+{
+    UWORD i;
+
+    for (i = 0; i < (UWORD)NX_MAX_PHYSICAL_INTERFACES &&
+                i < (UWORD)AMI_CFG_MAX_INTERFACES; i++)
+    {
+        if (ns->ns_Ip.nx_ip_interface[i].nx_interface_valid == 0 &&
+            ns->ns_Iface[i] == NULL)
+            return (LONG)i;
+    }
+
+    return -1;
+}
+
+LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
+{
+    AmiNetStack  *ns = ami_ns;
+    AmiNetCaller  caller;
+    AmiIfConfig  *slot_cfg;
+    AmiSana2If   *iface;
+    LONG          slot;
+    LONG          err = AMI_NET_OK;
+    UINT          status;
+    UWORD         i;
+
+    if (ns == NULL || !ns->ns_IpCreated || cfg == NULL)
+        return AMI_NET_ERR_STATE;
+
+    if (cfg->name[0] == '\0' || cfg->device[0] == '\0')
+        return AMI_NET_ERR_CONFIG;
+
+    /* "Each such device must be assigned a unique interface name." */
+    for (i = 0; i < (UWORD)AMI_CFG_MAX_INTERFACES; i++)
+    {
+        if (ns->ns_Iface[i] == NULL)
+            continue;
+
+        if (ami_ns_same_name(ns->ns_Config.interfaces[i].name, cfg->name))
+            return AMI_NET_ERR_CONFIG;
+    }
+
+    slot = ami_ns_free_interface_slot(ns);
+    if (slot < 0)
+        return AMI_NET_ERR_STATE;
+
+    /*
+     * The configuration is COPIED into the netstack's own storage before the
+     * device is opened, and it stays there: nx_ip_interface_attach() keeps the
+     * NAME POINTER rather than the name, so the string has to outlive the
+     * caller's tag list.
+     */
+    slot_cfg = &ns->ns_Config.interfaces[slot];
+    *slot_cfg = *cfg;
+    slot_cfg->configured = TRUE;
+
+    if ((UWORD)slot >= ns->ns_Config.interface_count)
+        ns->ns_Config.interface_count = (UWORD)(slot + 1);
+
+    iface = ami_sana2_open(slot_cfg, &err);
+    if (iface == NULL)
+    {
+        AMI_ERROR("netstack: interface \'%s\' would not open: %s unit %lu did "
+                  "not answer", slot_cfg->name, slot_cfg->device,
+                  (unsigned long)slot_cfg->unit);
+        slot_cfg->configured = FALSE;
+        return (err != AMI_NET_OK) ? err : AMI_NET_ERR_NODEV;
+    }
+
+    ns->ns_Iface[slot] = iface;
+
+    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+    {
+        ami_sana2_close(iface);
+        ns->ns_Iface[slot] = NULL;
+        slot_cfg->configured = FALSE;
+        return AMI_NET_ERR_KERNEL;
+    }
+
+    /* The binding first, for the reason in ami_ns_free_interface_slot(). */
+    if (ami_sana2_attach(iface, &ns->ns_Ip, (UINT)slot) != AMI_NET_OK)
+    {
+        ami_netstack_leave(&caller);
+        ami_sana2_close(iface);
+        ns->ns_Iface[slot] = NULL;
+        slot_cfg->configured = FALSE;
+        return AMI_NET_ERR_STATE;
+    }
+
+    status = nx_ip_interface_attach(&ns->ns_Ip, (CHAR *)slot_cfg->name,
+                                    (slot_cfg->iptype == AMI_IPTYPE_STATIC)
+                                        ? slot_cfg->address : 0UL,
+                                    (slot_cfg->iptype == AMI_IPTYPE_STATIC)
+                                        ? slot_cfg->netmask : 0UL,
+                                    ami_sana2_driver_entry);
+
+    /*
+     * The slot NetX Duo actually took has to be the one predicted, because
+     * the driver binding was made against the prediction. If they ever
+     * disagree the interface would answer for the wrong device, so this is
+     * checked rather than assumed.
+     */
+    if (status == NX_SUCCESS &&
+        ns->ns_Ip.nx_ip_interface[slot].nx_interface_valid == 0)
+        status = NX_INVALID_INTERFACE;
+
+    ami_netstack_leave(&caller);
+
+    if (status != NX_SUCCESS)
+    {
+        AMI_WARN("netstack: interface \'%s\' attach failed (%ld)",
+                 slot_cfg->name, (long)status);
+        ami_sana2_close(iface);
+        ns->ns_Iface[slot] = NULL;
+        slot_cfg->configured = FALSE;
+        return AMI_NET_ERR_STATE;
+    }
+
+    if ((UWORD)slot >= ns->ns_IfaceCount)
+        ns->ns_IfaceCount = (UWORD)(slot + 1);
+
+    ami_netstack_capture_attach_one(ns, (UWORD)slot);
+
+    if (index_out != NULL)
+        *index_out = (UWORD)slot;
+
+    AMI_INFO("netstack: interface \'%s\' added as %ld", slot_cfg->name,
+             (long)slot);
+
+    return AMI_NET_OK;
+}

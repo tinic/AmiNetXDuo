@@ -134,6 +134,16 @@ VOID ami_sana2_get_info(const AmiSana2If *iface, AmiSana2Info *out);
  * only *used* when the caller has opted in with ami_sana2_set_raw_allowed();
  * the default is cooked.
  */
+/*
+ * TRUE when the device kept one or more of this interface's CMD_READs at
+ * teardown. The requests point into the AmiSana2If and into a reply port
+ * inside it, so nothing here may be freed while it holds -- ami_sana2_close()
+ * refuses to free such an interface and says so. A caller that is deciding
+ * whether an interface can be removed needs to know BEFORE it detaches
+ * anything, which is what this is for.
+ */
+BOOL ami_sana2_orphaned(const AmiSana2If *iface);
+
 BOOL ami_sana2_raw_mode(const AmiSana2If *iface);
 VOID ami_sana2_set_raw_allowed(BOOL allowed);
 

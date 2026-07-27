@@ -231,6 +231,10 @@ VOID ami_netstack_baton_acquire(VOID);
    the IP-level filter that is the only way loopback can be traced. */
 VOID ami_netstack_capture_start(AmiNetStack *ns);
 VOID ami_netstack_capture_stop(AmiNetStack *ns);
+
+/* The same, for one interface that appeared or went away after start-up. */
+VOID ami_netstack_capture_attach_one(AmiNetStack *ns, UWORD index);
+VOID ami_netstack_capture_detach_one(AmiNetStack *ns, UWORD index);
 #endif
 
 /* ---------------------------------------------------------------- resolver */

@@ -1035,49 +1035,276 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
     return 0;
 }
 
+/* ------------------------------------------------ AddInterfaceTagList --- */
+
+/*
+ * "This function makes another device available for network access. Each such
+ * device must be assigned a unique interface name and refer to a SANA-II
+ * device name and unit number."
+ *
+ * The work is netstack_interface_add()'s, and it lives there rather than here
+ * for a reason worth stating: half of it is NetX Duo's (attach an interface
+ * to a running NX_IP) and half is the netstack's (open the SANA-II device,
+ * register it for capture, take a configuration slot). An interface that got
+ * only the first half would be invisible to netstack_shutdown() and its
+ * device would never be closed.
+ *
+ * THE TAGS THAT ARE HONOURED are the ones that describe something this stack
+ * has. Every one that does not is refused, for the same reason
+ * ConfigureInterfaceTagList() refuses its own: an interface brought up with
+ * a packet filter mode or a read-request count that was quietly ignored is
+ * not the interface the caller asked for, and it would take a packet capture
+ * to find out.
+ */
+static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
+                             struct TagItem *tags, AmiIfConfig *cfg)
+{
+    struct TagItem *cursor = tags;
+    struct TagItem *item;
+
+    while ((item = bsd_next_tag(&cursor)) != NULL)
+    {
+        switch (item->ti_Tag)
+        {
+            case IFA_LimitMTU:
+                /* Applied after the attach, once the driver's own MTU is
+                   known -- "you can request that a smaller size is used". */
+                if (item->ti_Data == 0)
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                cfg->mtu = (ULONG)item->ti_Data;
+                break;
+
+            case IFA_SetDebugMode:
+                /* There is no debug mode, so turning it off is something this
+                   stack can honestly do and turning it on is not. */
+                if (item->ti_Data != 0)
+                    return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+                break;
+
+            case IFA_Multicast:
+            case IFA_PointToPoint:
+                /*
+                 * "Not normally necessary since the stack can figure this out
+                 * all by itself" -- and it does: the SANA-II shim reads the
+                 * wire type from S2_DEVICEQUERY. Accepted when it agrees with
+                 * what the hardware says, which for every device this stack
+                 * drives means multicast TRUE and point-to-point FALSE.
+                 */
+                if ((item->ti_Tag == IFA_Multicast) != (item->ti_Data != 0))
+                    return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+                break;
+
+            /*
+             * -----------------------------------------------------------
+             * REFUSED, each because the thing it configures does not exist
+             * here rather than because the caller got it wrong:
+             *
+             *   IFA_IPType, IFA_ARPType     the shim's EtherTypes are the
+             *                               RFC 894 ones and are not
+             *                               configurable.
+             *   IFA_NumReadRequests         the RX depth is computed from the
+             *   IFA_NumWriteRequests        packet pool at open time
+             *   IFA_NumARPRequests          (sana2_rx.c) and the TX ring is a
+             *                               compile-time array.
+             *   IFA_PacketFilterMode        src/bpf/ captures what the stack
+             *                               sees; there is no promiscuous
+             *                               mode to select.
+             *   IFA_DownGoesOffline         down ALWAYS goes offline here --
+             *                               NX_LINK_DISABLE issues S2_OFFLINE
+             *                               -- so FALSE cannot be honoured
+             *                               and TRUE is not a choice.
+             *   IFA_ReportOffline           nothing notifies.
+             *   IFA_RequiresInitDelay       no settle delay is implemented.
+             *   IFA_CopyMode                the copy hooks are chosen by what
+             *                               the device asked for.
+             *   IFA_HardwareAddress         the shim reads the station
+             *                               address; it does not set one.
+             * -----------------------------------------------------------
+             */
+            case IFA_IPType:
+            case IFA_ARPType:
+            case IFA_NumReadRequests:
+            case IFA_NumWriteRequests:
+            case IFA_NumARPRequests:
+            case IFA_PacketFilterMode:
+            case IFA_DownGoesOffline:
+            case IFA_ReportOffline:
+            case IFA_RequiresInitDelay:
+            case IFA_CopyMode:
+            case IFA_HardwareAddress:
+                return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+
+            default:
+                break;
+        }
+    }
+
+    return 0;
+}
+
+LONG bsd_AddInterfaceTagList(register STRPTR name __asm("a0"),
+                             register STRPTR device __asm("a1"),
+                             register LONG unit __asm("d0"),
+                             register struct TagItem *tags __asm("a2"),
+                             register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    NX_IP       *ip = netstack_ip();
+    AmiIfConfig  cfg;
+    UWORD        index = 0;
+    LONG         rc;
+
+    if (name == NULL || device == NULL)
+        return bsd_fail(SocketBase, AMI_EINVAL);
+
+    /* "This name cannot be longer than 15 characters." */
+    if (name[0] == '\0' ||
+        bsd_strlen((const char *)name) >= (ULONG)BSD_IFNAME_SIZE)
+        return bsd_fail(SocketBase, AMI_EINVAL);
+
+    if (device[0] == '\0' ||
+        bsd_strlen((const char *)device) >= (ULONG)AMI_CFG_PATH_LEN)
+        return bsd_fail(SocketBase, AMI_EINVAL);
+
+    if (unit < 0)
+        return bsd_fail(SocketBase, AMI_EINVAL);
+
+    if (ip == NULL)
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+    if (bsd_if_index_of(ip, (const char *)name) >= 0)
+        return bsd_fail(SocketBase, AMI_EEXIST);
+
+    bsd_bzero(&cfg, sizeof(cfg));
+    bsd_strncpy(cfg.name, (const char *)name, sizeof(cfg.name));
+    bsd_strncpy(cfg.device, (const char *)device, sizeof(cfg.device));
+    cfg.unit   = (ULONG)unit;
+    cfg.iptype = AMI_IPTYPE_STATIC;
+    cfg.up     = FALSE;
+
+    /*
+     * The address is deliberately NOT set here, and cannot be: the tag list
+     * this call takes has no address tag in it. An interface arrives with no
+     * address and is given one by ConfigureInterfaceTagList(), which is what
+     * the two calls' tag sets say and is why they are two calls.
+     */
+    if (tags != NULL && bsd_if_parse_add(SocketBase, tags, &cfg) != 0)
+        return -1;
+
+    rc = netstack_interface_add(&cfg, &index);
+    if (rc != AMI_NET_OK)
+    {
+        switch (rc)
+        {
+            case AMI_NET_ERR_NODEV:  return bsd_fail(SocketBase, AMI_ENXIO);
+            case AMI_NET_ERR_NOMEM:  return bsd_fail(SocketBase, AMI_ENOBUFS);
+            case AMI_NET_ERR_CONFIG: return bsd_fail(SocketBase, AMI_EEXIST);
+            /* No free slot: NX_MAX_PHYSICAL_INTERFACES is 2, so a user meets
+               this rather than only a bug. */
+            default:                 return bsd_fail(SocketBase, AMI_ENOSPC);
+        }
+    }
+
+    /* IFA_LimitMTU, now that the driver's own MTU is known and the interface
+       exists to apply it to. The clamp is ConfigureInterfaceTagList()'s. */
+    if (cfg.mtu != 0)
+    {
+        struct TagItem mtu_tags[2];
+
+        mtu_tags[0].ti_Tag  = IFC_LimitMTU;
+        mtu_tags[0].ti_Data = cfg.mtu;
+        mtu_tags[1].ti_Tag  = TAG_DONE;
+        mtu_tags[1].ti_Data = 0;
+
+        (VOID)bsd_ConfigureInterfaceTagList(name, mtu_tags, SocketBase);
+    }
+
+    return 0;
+}
+
+/* ---------------------------------------------------- RemoveInterface --- */
+
+/*
+ * "success -- TRUE for success, 0 for failure" -- the OPPOSITE of every other
+ * call in this file, which are all 0 for success and -1 for failure. One page
+ * apart in the same document. This is why the return convention is read
+ * rather than inferred.
+ *
+ * AND THE TWO SOURCES DISAGREE ABOUT THE TYPE. The autodoc's synopsis is
+ * "BOOL RemoveInterface(STRPTR name,BOOL force)"; clib/bsdsocket_protos.h in
+ * the same NDK says "LONG RemoveInterface(STRPTR interface_name, LONG force)".
+ * The header wins on the TYPE, because the header is what a caller compiles
+ * against -- and the autodoc wins on the VALUES, because the header says
+ * nothing about them. LONG 1 for success and 0 for failure satisfies both
+ * readings; 0-for-success, which every neighbouring call uses, satisfies
+ * neither and would report failure as success to every BOOL test.
+ */
+LONG bsd_RemoveInterface(register STRPTR name __asm("a0"),
+                         register LONG force __asm("d0"),
+                         register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    NX_IP *ip = netstack_ip();
+    LONG   index;
+    LONG   rc;
+
+    if (name == NULL ||
+        bsd_strlen((const char *)name) >= (ULONG)BSD_IFNAME_SIZE)
+    {
+        (VOID)bsd_fail(SocketBase, AMI_EINVAL);
+        return 0;
+    }
+
+    if (ip == NULL)
+    {
+        (VOID)bsd_fail(SocketBase, AMI_ENETDOWN);
+        return 0;
+    }
+
+    index = bsd_if_index_of(ip, (const char *)name);
+    if (index < 0)
+    {
+        (VOID)bsd_fail(SocketBase, AMI_ENXIO);
+        return 0;
+    }
+
+    rc = netstack_interface_remove((UWORD)index, (force != 0) ? TRUE : FALSE);
+    if (rc == AMI_NET_OK)
+        return 1;
+
+    /*
+     * "RemoveInterface() will refuse to remove an interface which is still in
+     * use. Use a 'force' parameter of TRUE to make it remove the interface
+     * anyway." EBUSY is that refusal, and it is the one a caller can do
+     * something about.
+     *
+     * The other failure is a SANA-II device that would not give its read
+     * requests back. The autodoc's own wording for `force` -- "memory may
+     * remain allocated until you shut down the network" -- describes exactly
+     * that state, and this stack declines to enter it: the requests point
+     * into the interface, so freeing it would hand the device memory the
+     * system has taken back. The interface stays, down and registered, and
+     * the caller is told with EBUSY as well, because the remedy is the same
+     * one the autodoc names -- shut the network down.
+     */
+    (VOID)bsd_fail(SocketBase,
+                   (rc == AMI_NET_ERR_BUSY || rc == AMI_NET_ERR_STATE)
+                       ? AMI_EBUSY : AMI_EINVAL);
+
+    return 0;
+}
+
 /*
  * ---------------------------------------------------------------------------
- * THE REST OF THE INTERFACE API, AND WHY IT IS STILL ENOSYS
+ * STILL ENOSYS: BeginInterfaceConfig() and AbortInterfaceConfig()
  *
- * These four are documented in the same autodoc, in the same detail. They are
- * not here because this stack cannot do what they say, not because the
- * contract is unclear -- and an ENOSYS a caller can read is better than a
- * vector that reports success and changes nothing.
+ * An ASYNCHRONOUS address allocation. The caller hands over a
+ * struct AddressAllocationMessage and it comes back through ReplyMsg() with a
+ * lease, a router table, a DNS table, a host name and a domain name filled
+ * in. This stack's DHCP client runs inside netstack_startup() and reports
+ * through the configuration rather than through a message port: there is no
+ * path by which a caller's message could be replied to, and none of the aam_*
+ * result tables is kept anywhere after the lease is taken.
  *
- *   AddInterfaceTagList()   "makes another device available for network
- *                           access". Doing that means opening a SANA-II
- *                           device and calling nx_ip_interface_attach() on a
- *                           running NX_IP, and the netstack singleton builds
- *                           its ns_Iface[] from DEVS:NetInterfaces at startup
- *                           and owns every entry for the life of the stack.
- *                           A half-registered interface -- attached to NetX
- *                           Duo but unknown to the netstack -- is worse than
- *                           no interface, because netstack_shutdown() would
- *                           not close its device.
- *
- *   RemoveInterface()       the counterpart, and the harder half.
- *                           nx_ip_interface_detach() exists, but releasing
- *                           the AmiSana2If behind it means reclaiming the RX
- *                           readers, and sana2_internal.h records the case
- *                           where the device will not give a CMD_READ back:
- *                           the interface is then "unfreeable and
- *                           unrestartable, because the device holds pointers
- *                           into it". A `force` parameter that freed it
- *                           anyway would hand the device a dangling pointer,
- *                           and the autodoc's own wording for `force` --
- *                           "memory may remain allocated until you shut down
- *                           the network" -- is Roadshow declining to do
- *                           exactly that.
- *
- *   BeginInterfaceConfig()  an ASYNCHRONOUS address allocation: the caller
- *   AbortInterfaceConfig()  hands over a struct AddressAllocationMessage, and
- *                           it comes back through ReplyMsg() with a lease, a
- *                           router table, a DNS table, a host name and a
- *                           domain name filled in. This stack's DHCP client
- *                           runs inside netstack_startup() and reports
- *                           through the config, not through a message port;
- *                           there is no path by which a caller's message
- *                           could be replied to, and none of the aam_* result
- *                           tables is kept anywhere after the lease is taken.
+ * Documented in full, and not written. That is a different statement from
+ * "we cannot know the contract", and it should stay a different one.
  * ---------------------------------------------------------------------------
  */

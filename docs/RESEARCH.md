@@ -14803,14 +14803,15 @@ view without moving the device's, so the two spellings describe one thing.
 API is *present*, and four of its vectors are. Answering `FALSE` would have
 stopped a monitor from ever asking the ones that work.
 
-Four remain `ENOSYS`, and none of them because the contract is unclear:
+Two remain `ENOSYS`, and neither because the contract is unclear:
 
 | vector | why not |
 |---|---|
-| `AddInterfaceTagList()` | attaching a SANA-II device to a running `NX_IP` means the netstack singleton, which builds `ns_Iface[]` from `DEVS:NetInterfaces` at startup and owns every entry for the life of the stack. A half-registered interface — attached to NetX Duo, unknown to the netstack — would not have its device closed by `netstack_shutdown()` |
-| `RemoveInterface()` | `nx_ip_interface_detach()` exists; reclaiming the RX readers behind it does not always succeed. `sana2_internal.h` records the case where the device will not give a `CMD_READ` back, and the interface is then "unfreeable and unrestartable, because the device holds pointers into it". The autodoc's own wording for `force` — "memory may remain allocated until you shut down the network" — is Roadshow declining to free it either |
 | `BeginInterfaceConfig()` | an asynchronous allocation whose `AddressAllocationMessage` comes back through `ReplyMsg()` carrying a lease, a router table, a DNS table, a host name and a domain name. This stack's DHCP client runs inside `netstack_startup()` and reports through the config; there is no port to reply to and none of the `aam_*` tables is kept |
 | `AbortInterfaceConfig()` | the counterpart to a call that does not exist |
+
+`AddInterfaceTagList()` and `RemoveInterface()` were on that list and are not
+any more; §47.11 is what it took.
 
 `GetNetworkStatistics()` is in netstats.c; see 47.9.
 
@@ -14942,4 +14943,91 @@ state the application is in rather than the state NetX Duo left it in.
 
 Nothing but a real run on a real machine would have found that. The build was
 clean, every structural assertion passed, and the answer was wrong.
+
+### 47.11 Removing an interface, and putting it back
+
+`AddInterfaceTagList()` and `RemoveInterface()` were stubbed on the grounds
+that half the work belongs to NetX Duo and half to the netstack, and an
+interface that got only one half would never have its SANA-II device closed.
+That is still true; the answer was to put both halves in one place —
+`netstack_interface_add()` / `netstack_interface_remove()` — and let the
+library call it.
+
+**`nx_ip_interface_detach()` does more of the work than expected.** It resets
+every TCP connection routed out of the interface, deletes its ARP entries,
+drops the static routes and the default gateway that pointed at it, leaves its
+multicast groups, calls the driver with `NX_LINK_INTERFACE_DETACH` — which is
+where `sana2_driver.c` already stops the readers and unbinds — and zeroes the
+`NX_INTERFACE`. Almost none of that had to be written.
+
+**The order is the whole design.** `NX_LINK_DISABLE` runs *first*, before
+anything is detached, because that is what reclaims the outstanding
+`CMD_READ`s and therefore where a device that will not give them back declares
+itself. `sana2_internal.h` has recorded that case from the beginning: the
+interface is then "unfreeable and unrestartable, because the device holds
+pointers into it". Finding that out *after* `nx_ip_interface_detach()` had
+zeroed the `NX_INTERFACE` would leave nowhere to put the interface back.
+
+When it happens, nothing is freed and the interface stays registered — down,
+and not removable until `NetShutdown`. That is precisely the state the
+autodoc warns about under `force` ("memory may remain allocated until you
+shut down the network"), and it is reported with `EBUSY` rather than entered
+silently. `force` itself overrides only the *other* refusal: TCP connections
+still routed out of the interface, which `nx_ip_interface_detach()` would
+reset — a visible event at the far end of the wire, and the thing
+"RemoveInterface() will refuse to remove an interface which is still in use"
+is about.
+
+**The slot has to be predicted.** `nx_ip_interface_attach()` scans
+`nx_ip_interface[]` from zero and takes the first entry whose
+`nx_interface_valid` is clear — but `ami_sana2_attach()` has to record the
+`(NX_IP, index)` binding *before* the attach, because the attach calls the
+driver and the driver looks itself up by it. So the scan is done twice, once
+here and once inside NetX Duo, and the result is checked afterwards rather
+than assumed.
+
+`ns_IfaceCount` is **not** decremented by a removal. It is the number of slots
+ever populated, not the number live, so that removing one in the middle does
+not renumber the ones above it — an interface index is a handle a caller may
+already be holding.
+
+#### The type disagreement, and which source wins each half
+
+`RemoveInterface()` is where the autodoc and the header contradict each other
+outright:
+
+| | return type | success value |
+|---|---|---|
+| autodoc | `BOOL` | *"TRUE for success, 0 for failure"* |
+| `clib/bsdsocket_protos.h` | `LONG` | says nothing |
+
+The header wins on the **type**, because the header is what a caller compiles
+against. The autodoc wins on the **values**, because the header has none.
+`LONG` 1 for success and 0 for failure satisfies both; 0-for-success — which
+every neighbouring call in the API uses — satisfies neither and would report
+failure as success to every `BOOL` test a caller writes.
+
+#### What `AddInterfaceTagList()` refuses, and why it is most of the tag list
+
+The tags describe a driver binding this stack does not make configurable: the
+EtherTypes are the RFC 894 ones, the RX depth is computed from the packet pool
+at open time, the TX ring is a compile-time array, there is no promiscuous
+mode, and the shim reads the station address rather than setting one. All of
+them are refused with `EOPNOTSUPP` rather than ignored — an interface brought
+up with a packet filter mode that was quietly dropped is not the interface the
+caller asked for, and it would take a packet capture to find out.
+
+`IFA_Multicast` and `IFA_PointToPoint` are accepted when they agree with what
+`S2_DEVICEQUERY` already said, which is the autodoc's own position on them:
+*"Not normally necessary since the stack can figure this out all by itself."*
+
+#### The assertion that matters
+
+`ifprobe.c` removes the interface the run is riding on, adds it back, and
+reads its **hardware address**. That address comes from the card via
+`S2_DEVICEQUERY` at open time, so a re-added interface reporting the same MAC
+went all the way down to the device and back. Zeroes would mean it never
+reopened; a stale value would mean the old `AmiSana2If` was never freed. It
+reports `00:80:10:32:33:34`, twice per run, and then configures and comes back
+up like any other interface.
 

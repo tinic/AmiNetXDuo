@@ -15,17 +15,16 @@
  * against the autodoc named below (docs/RESEARCH.md S47):
  *
  *   interfaces.c   ObtainInterfaceList(), ReleaseInterfaceList(),
- *                  QueryInterfaceTagList(), ConfigureInterfaceTagList()
+ *                  QueryInterfaceTagList(), ConfigureInterfaceTagList(),
+ *                  AddInterfaceTagList(), RemoveInterface()
  *   routing.c      AddRouteTagList(), DeleteRouteTagList(), GetRouteInfo(),
  *                  FreeRouteInfo()
  *   netstats.c     GetNetworkStatistics()
  *
  * What is still stubbed, each with its reason written where it belongs:
  *
- *   AddInterfaceTagList()      the foot of interfaces.c. Not a contract we
- *   RemoveInterface()          cannot read -- a thing this stack cannot do.
- *   BeginInterfaceConfig()
- *   AbortInterfaceConfig()
+ *   BeginInterfaceConfig()     the foot of interfaces.c. Not a contract we
+ *   AbortInterfaceConfig()     cannot read -- a thing this stack cannot do.
  *   ObtainRoadshowData()       struct RoadshowDataNode is defined, but the
  *                              rdn_Name strings are Roadshow-private and
  *                              ChangeRoadshowData() looks items up BY NAME,

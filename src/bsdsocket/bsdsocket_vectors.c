@@ -11,7 +11,7 @@
  * the two after gethostbyaddr_r) and every vector we have not implemented
  * yet point at bsd_enosys() rather than NULL.
  *
- * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 87 implemented, 52 stubbed (7 of them NULL-returning, 1 FALSE-returning).
+ * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 89 implemented, 50 stubbed (7 of them NULL-returning, 1 FALSE-returning).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -99,7 +99,7 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_enosys,             /* -0x1aa [ 70] ChangeRouteTagList */
     (APTR)bsd_FreeRouteInfo,      /* -0x1b0 [ 71] FreeRouteInfo */
     (APTR)bsd_GetRouteInfo,       /* -0x1b6 [ 72] GetRouteInfo */
-    (APTR)bsd_enosys,             /* -0x1bc [ 73] AddInterfaceTagList */
+    (APTR)bsd_AddInterfaceTagList, /* -0x1bc [ 73] AddInterfaceTagList */
     (APTR)bsd_ConfigureInterfaceTagList, /* -0x1c2 [ 74] ConfigureInterfaceTagList */
     (APTR)bsd_ReleaseInterfaceList, /* -0x1c8 [ 75] ReleaseInterfaceList */
     (APTR)bsd_ObtainInterfaceList, /* -0x1ce [ 76] ObtainInterfaceList */
@@ -147,7 +147,7 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_enosys_ptr,         /* -0x2ca [118] ObtainRoadshowData */
     (APTR)bsd_enosys,             /* -0x2d0 [119] ReleaseRoadshowData */
     (APTR)bsd_enosys_bool,        /* -0x2d6 [120] ChangeRoadshowData */
-    (APTR)bsd_enosys,             /* -0x2dc [121] RemoveInterface */
+    (APTR)bsd_RemoveInterface,    /* -0x2dc [121] RemoveInterface */
     (APTR)bsd_gethostbyname_r,    /* -0x2e2 [122] gethostbyname_r */
     (APTR)bsd_gethostbyaddr_r,    /* -0x2e8 [123] gethostbyaddr_r */
     (APTR)bsd_enosys,                    /* -0x2ee [124] reserved */
