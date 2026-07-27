@@ -95,6 +95,41 @@ def main(argv):
             continue
         i += 1
 
+    # SECOND BUG, unrelated to argv: the register save at _start and the
+    # restore at ___exit do not match.
+    #
+    #     _start:  movem.l d2/a2/a6,-(sp)      48e7 2022   -- 3 regs, SP -= 12
+    #              move.l  sp,__savedSp        23cf ....
+    #     ___exit: movea.l __savedSp,sp
+    #              movem.l (sp)+,d2/d7/a2/a6   4cdf 4484   -- 4 regs, SP += 16
+    #              rts
+    #
+    # The extra d7 on the restore shifts the whole frame by one register: a6 is
+    # loaded from RunCommand's return address, SP ends 4 bytes too high, and the
+    # rts returns to the stack-size word RunCommand pushed above its return
+    # address instead of the return address itself.  So a command dies the
+    # instant it returns to the Shell -- invisible until a tool actually runs to
+    # completion on real hardware.  Add d7 to the _start save (2022 -> 2122) so
+    # the saved and restored frames are the same four registers.  Anchored on
+    # the `move.l sp,__savedSp` that follows it, so it cannot hit another movem.
+    START_SAVE = b'\x48\xe7\x20\x22'        # movem.l d2/a2/a6,-(sp)
+    START_TAIL = b'\x23\xcf'                # move.l  sp,(xxx).L  (__savedSp store)
+    reg_patched = 0
+    j = 0
+    while j + 6 <= len(data):
+        if data[j:j + 4] == START_SAVE and data[j + 4:j + 6] == START_TAIL:
+            data[j + 2] = 0x21              # 2022 -> 2122: add d7 to the save
+            reg_patched += 1
+            j += 6
+            continue
+        j += 1
+
+    if reg_patched != 1:
+        sys.stderr.write(
+            "fix-crt0: register-save patch matched %d site(s), expected 1 "
+            "(_start's 'movem.l d2/a2/a6,-(sp)' before the __savedSp store).\n"
+            % reg_patched)
+
     if patched == 0:
         # Either the toolchain has been fixed upstream or its crt0 is built
         # differently.  Either way, copying it through unchanged is right, and

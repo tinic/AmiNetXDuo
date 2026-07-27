@@ -33,12 +33,49 @@ set(TOOLS_WARNINGS -Wall -Wextra)
 # docs/RESEARCH.md §21.6 -- it is a real finding and deliberately left alone.
 set(TOOLS_OPTIMISE $<$<CONFIG:Release>:-Os>)
 
+# ------------------------------------------------------------------ crt0 -----
+#
+# The toolchain's libnix crt0.o saves d2/a2/a6 at _start but restores
+# d2/d7/a2/a6 at _exit (see clients/compat/fix-crt0.py).  The extra register on
+# the restore shifts the frame one longword: the rts returns a command into the
+# stack-size word RunCommand pushes above its return address instead of the
+# return address, so EVERY command crashes the instant it returns to the Shell.
+# It is invisible under emulator smoke tests because those never run a compiled
+# command to completion under a real Shell -- it only bit once these ran on a
+# real A3000.  (The .library targets are unaffected: a shared library has no
+# crt0.)  fix-crt0.py patches a private copy (2022 -> 2122, adding d7 to the
+# _start save); we link it as the FIRST object under -nostartfiles so _start
+# stays at offset 0 of the first hunk, which is where LoadSeg() enters.
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+separate_arguments(TOOLS_ARCH_LIST UNIX_COMMAND "${AMIGA_ARCH_FLAGS}")
+execute_process(
+    COMMAND "${CMAKE_C_COMPILER}" ${TOOLS_ARCH_LIST} -print-file-name=crt0.o
+    OUTPUT_VARIABLE TOOLS_STOCK_CRT0
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+set(TOOLS_CRT0 "${CMAKE_CURRENT_BINARY_DIR}/crt0-fixed.o")
+add_custom_command(
+    OUTPUT "${TOOLS_CRT0}"
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/clients/compat/fix-crt0.py"
+            "${TOOLS_STOCK_CRT0}" "${TOOLS_CRT0}"
+    DEPENDS "${CMAKE_SOURCE_DIR}/clients/compat/fix-crt0.py" "${TOOLS_STOCK_CRT0}"
+    COMMENT "Patching libnix crt0.o register-save bug (${TOOLS_STOCK_CRT0})"
+    VERBATIM)
+add_custom_target(tools_crt0 DEPENDS "${TOOLS_CRT0}")
+set_source_files_properties("${TOOLS_CRT0}"
+    PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
+
 # Everything the tools include lives behind the core include set; the port
 # headers must stay first (tx_port.h / nx_port.h / nx_user.h).
 function(aminetxduo_add_tool target output)
     cmake_parse_arguments(TOOL "NX" "" "SOURCES;DEFINES" ${ARGN})
 
-    add_executable(${target} ${TOOL_SOURCES} ${TOOLS_COMMON_SOURCES})
+    # The patched crt0 is the FIRST object so _start lands at offset 0; the
+    # matching -nostartfiles is added with the other link options below.
+    add_executable(${target} "${TOOLS_CRT0}" ${TOOL_SOURCES} ${TOOLS_COMMON_SOURCES})
+    add_dependencies(${target} tools_crt0)
 
     # src/sana2 is on the path for its device header alone: the NDK ships no
     # <devices/sana2.h>, and tool_diag.c opens a SANA-II device to find out
@@ -73,7 +110,9 @@ function(aminetxduo_add_tool target output)
     # and docs/RESEARCH.md §25.  It travels with -ffunction-sections.
     target_compile_options(${target} PRIVATE
         -ffunction-sections -fno-optimize-sibling-calls)
-    target_link_options(${target} PRIVATE -Wl,--gc-sections)
+    # -nostartfiles: we supply the repaired crt0 as the first object above, so
+    # the toolchain's buggy stock one must not also be pulled in.
+    target_link_options(${target} PRIVATE -nostartfiles -Wl,--gc-sections)
 
     if(TOOL_DEFINES)
         target_compile_definitions(${target} PRIVATE ${TOOL_DEFINES})
