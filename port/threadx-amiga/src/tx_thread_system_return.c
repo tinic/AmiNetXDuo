@@ -251,6 +251,25 @@ struct Task *me;
 
     thread_ptr -> tx_thread_amiga_suspension_type =  ((UINT) 0);
 
+    /*
+     * A thread that never comes back looks identical from the outside to a
+     * task the port failed to wake, and the two have nothing in common.  This
+     * says which: TX_TCP_IP is NetX Duo suspending its own caller, and the
+     * cleanup routine names the service it is parked in while the timeout
+     * says whether anything will ever end the wait.  Subtract the address of
+     * this function from the cleanup pointer and look the difference up in
+     * `nm` on the library to get the symbol.  docs/RESEARCH.md 42.
+     */
+    if (thread_ptr -> tx_thread_state == ((UINT) TX_TCP_IP))
+    {
+        TXTRACE("TXT nxsusp thr=%08lx sock=%08lx cleanup=%08lx timeout=%08lx here=%08lx",
+                (LONG) thread_ptr,
+                (LONG) thread_ptr -> tx_thread_suspend_control_block,
+                (LONG) thread_ptr -> tx_thread_suspend_cleanup,
+                (LONG) thread_ptr -> tx_thread_timer.tx_timer_internal_remaining_ticks,
+                (LONG) &_tx_thread_system_return);
+    }
+
     /* Release the baton.  */
     _tx_thread_current_ptr =  TX_NULL;
 

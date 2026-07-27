@@ -586,6 +586,7 @@ ULONG                last_lo;
 ULONG                start_lo;
 ULONG                delta;
 ULONG                service;
+ULONG                last_service;
 ULONG                rate_chz;
 ULONG                unit;
 ULONG                ticks;
@@ -834,7 +835,8 @@ UINT                 armed;
 
     /* ---- the tick ------------------------------------------------------- */
 
-    frac =  0UL;
+    frac         =  0UL;
+    last_service =  0UL;
     ReadEClock(&now);
     last_lo  =  now.ev_lo;
     start_lo =  now.ev_lo;
@@ -909,11 +911,21 @@ UINT                 armed;
 
                 if (_tx_amiga_tick.tx_amiga_tick_clipped <= 3UL)
                 {
+                    /* The previous wakeup's service cost is in the message
+                       because the two causes of a stall need different
+                       repairs and nothing else can tell them apart: a service
+                       figure close to the stall means the tick task overran
+                       its own period (too much work under the core lock), and
+                       one in the ordinary hundreds of microseconds means
+                       somebody else held the machine and the tick was simply
+                       not dispatched.  */
                     ami_log(AMI_LOG_WARN,
-                            "tick: stalled %ld ms, dropping %ld of %ld ticks (cap %ld)",
+                            "tick: stalled %ld ms, dropping %ld of %ld ticks "
+                            "(cap %ld, previous service %ld us)",
                             (LONG) (delta / eclock_per_ms),
                             (LONG) (ticks - (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP),
-                            (LONG) ticks, (LONG) TX_AMIGA_TIMER_MAX_CATCHUP);
+                            (LONG) ticks, (LONG) TX_AMIGA_TIMER_MAX_CATCHUP,
+                            (LONG) ((last_service * 1000UL) / eclock_per_ms));
                 }
 
                 ticks   =  (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP;
@@ -960,7 +972,8 @@ UINT                 armed;
             struct EClockVal end;
 
             (VOID) ReadEClock(&end);
-            service =  (ULONG) (end.ev_lo - now.ev_lo);
+            service      =  (ULONG) (end.ev_lo - now.ev_lo);
+            last_service =  service;
             if (service < 4000000UL)
             {
                 _tx_amiga_tick.tx_amiga_tick_service_us +=
