@@ -439,6 +439,43 @@ UINT bsd_recv_once(VOID *arg, ULONG wait)
     return nx_tcp_socket_receive(a->tcp, a->packet, wait);
 }
 
+/* The UDP and raw receives slice the same way -- see bsd_recv_once's note on
+   why these are global rather than static. */
+typedef struct
+{
+    NX_UDP_SOCKET *udp;
+    NX_PACKET     **packet;
+} BsdRecvUdpArgs;
+
+UINT bsd_recv_udp_once(VOID *arg, ULONG wait)
+{
+    BsdRecvUdpArgs *a = (BsdRecvUdpArgs *)arg;
+
+    return nx_udp_socket_receive(a->udp, a->packet, wait);
+}
+
+typedef struct
+{
+    AmiSocket  *sock;
+    NX_PACKET **packet;
+    UINT        why;
+} BsdRecvRawArgs;
+
+UINT bsd_recv_raw_once(VOID *arg, ULONG wait)
+{
+    BsdRecvRawArgs *a = (BsdRecvRawArgs *)arg;
+    NX_PACKET      *packet;
+    UINT            why = NX_NO_PACKET;
+
+    packet      = bsd_raw_receive(a->sock, wait, &why);
+    *a->packet  = packet;
+    a->why      = why;
+
+    /* bsd_raw_receive() leaves `why` at NX_NO_PACKET when nothing is queued,
+       which is exactly the status bsd_wait_sliced() retries on. */
+    return (packet != NX_NULL) ? NX_SUCCESS : why;
+}
+
 
 static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags)
@@ -596,9 +633,17 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
     }
     else
     {
-        ULONG wait = bsd_wait_option(sock, sock->as_RcvTimeout);
+        ULONG          wait = bsd_wait_option(sock, sock->as_RcvTimeout);
+        BsdRecvUdpArgs args;
+        BOOL           aborted;
 
-        status = nx_udp_socket_receive(&sock->as_Nx.udp, &packet, wait);
+        args.udp    = &sock->as_Nx.udp;
+        args.packet = &packet;
+
+        status = bsd_wait_sliced(base, wait, bsd_recv_udp_once, &args,
+                                 &aborted);
+        if (aborted)
+            return bsd_fail(base, AMI_EINTR);
         if (status != NX_SUCCESS)
             return bsd_fail(base, bsd_wait_errno(wait, status));
     }
@@ -681,12 +726,19 @@ static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
     }
     else
     {
-        ULONG wait = bsd_wait_option(sock, sock->as_RcvTimeout);
-        UINT  why  = NX_NO_PACKET;
+        ULONG          wait = bsd_wait_option(sock, sock->as_RcvTimeout);
+        BsdRecvRawArgs args;
+        BOOL           aborted;
 
-        packet = bsd_raw_receive(sock, wait, &why);
+        args.sock   = sock;
+        args.packet = &packet;
+        args.why    = NX_NO_PACKET;
+
+        (VOID)bsd_wait_sliced(base, wait, bsd_recv_raw_once, &args, &aborted);
+        if (aborted)
+            return bsd_fail(base, AMI_EINTR);
         if (packet == NX_NULL)
-            return bsd_fail(base, bsd_wait_errno(wait, why));
+            return bsd_fail(base, bsd_wait_errno(wait, args.why));
     }
 
     bsd_raw_source(packet, &src);

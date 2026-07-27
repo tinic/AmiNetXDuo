@@ -1701,6 +1701,53 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
     return 0;
 }
 
+/*
+ * bsd_wait_sliced() drives these so a blocking accept()/connect() can be
+ * interrupted by Ctrl-C; see transfer.c bsd_recv_once for why they are global
+ * rather than static, and select.c for why the wait is sliced at all.
+ */
+typedef struct
+{
+    NX_TCP_SOCKET *tcp;
+} BsdAcceptArgs;
+
+UINT bsd_accept_once(VOID *arg, ULONG wait)
+{
+    BsdAcceptArgs *a      = (BsdAcceptArgs *)arg;
+    UINT           status = nx_tcp_server_socket_accept(a->tcp, wait);
+
+    /* "Not connected yet" and "still handshaking" both mean keep waiting, so
+       fold them onto NX_NO_PACKET -- the status bsd_wait_sliced() slices on. */
+    if (status == NX_NOT_CONNECTED || status == NX_IN_PROGRESS)
+        return NX_NO_PACKET;
+
+    return status;
+}
+
+typedef struct
+{
+    AmiSocket *sock;
+} BsdConnectArgs;
+
+UINT bsd_connect_once(VOID *arg, ULONG wait)
+{
+    BsdConnectArgs *a    = (BsdConnectArgs *)arg;
+    AmiSocket      *sock = a->sock;
+
+    (VOID)nx_tcp_socket_state_wait(&sock->as_Nx.tcp, NX_TCP_ESTABLISHED, wait);
+
+    /* The establish / disconnect-complete callbacks (select.c) are the
+       authority on the outcome; state_wait() only supplies the sleep. */
+    if ((sock->as_Flags & ASF_CONNECTED) != 0 ||
+        sock->as_Nx.tcp.nx_tcp_socket_state == NX_TCP_ESTABLISHED)
+        return NX_SUCCESS;
+
+    if ((sock->as_Flags & ASF_CONNECTING) == 0)
+        return NX_NOT_CONNECTED;    /* died: a non-retry status, so we stop */
+
+    return NX_NO_PACKET;            /* still connecting: keep slicing */
+}
+
 LONG bsd_accept(register LONG sock_fd          __asm("d0"),
                 register struct sockaddr *addr __asm("a0"),
                 register socklen_t *addrlen    __asm("a1"),
@@ -1740,9 +1787,21 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
 
     incoming = sock->as_Incoming;
 
-    status = nx_tcp_server_socket_accept(
-        &incoming->as_Nx.tcp,
-        bsd_wait_option(sock, sock->as_RcvTimeout));
+    {
+        BsdAcceptArgs args;
+        BOOL          aborted;
+
+        args.tcp = &incoming->as_Nx.tcp;
+
+        status = bsd_wait_sliced(SocketBase,
+                                 bsd_wait_option(sock, sock->as_RcvTimeout),
+                                 bsd_accept_once, &args, &aborted);
+        if (aborted)
+        {
+            bsd_nx_leave(SocketBase);
+            return bsd_fail(SocketBase, AMI_EINTR);
+        }
+    }
 
     if (status == NX_NOT_CONNECTED || status == NX_IN_PROGRESS ||
         status == NX_NO_PACKET)
@@ -1954,9 +2013,15 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
      * NX_IP_VERSION_V4 and calls exactly this, so going straight to it costs
      * nothing in the floor build and is the only way to reach an IPv6 peer.
      */
+    /*
+     * NX_NO_WAIT even for a blocking connect: NetX Duo's own wait would park us
+     * in ThreadX, where a Ctrl-C cannot reach the task.  We initiate here and,
+     * for a blocking socket, wait the handshake out below in sliced pieces via
+     * bsd_wait_sliced() -- the establish / disconnect-complete callbacks
+     * (select.c) report the outcome, exactly as for a non-blocking connect.
+     */
     status = nxd_tcp_client_socket_connect(
-        &sock->as_Nx.tcp, (NXD_ADDRESS *)addr, port,
-        bsd_wait_option(sock, sock->as_SndTimeout));
+        &sock->as_Nx.tcp, (NXD_ADDRESS *)addr, port, NX_NO_WAIT);
 
     if (status == NX_SUCCESS)
     {
@@ -1967,6 +2032,10 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
 
     if (status == NX_IN_PROGRESS)
     {
+        BsdConnectArgs args;
+        BOOL           aborted;
+        UINT           ws;
+
         /* Already established inside the call? Then the connect is done, and
            BSD says a non-blocking connect that completes at once returns 0. */
         if ((sock->as_Flags & ASF_CONNECTED) != 0)
@@ -1985,7 +2054,38 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
             return bsd_fail(SocketBase, sock->as_SoError);
         }
 
-        return bsd_fail(SocketBase, AMI_EINPROGRESS);
+        /* A non-blocking connect() reports "in progress" and lets the caller
+           select() for completion, exactly as before. */
+        if ((sock->as_Flags & ASF_NONBLOCK) != 0)
+            return bsd_fail(SocketBase, AMI_EINPROGRESS);
+
+        /* A blocking connect(): wait the handshake out, interruptibly. */
+        args.sock = sock;
+        ws = bsd_wait_sliced(SocketBase,
+                             (sock->as_SndTimeout != 0) ? sock->as_SndTimeout
+                                                        : NX_WAIT_FOREVER,
+                             bsd_connect_once, &args, &aborted);
+
+        sock->as_Flags &= ~ASF_CONNECTING;
+
+        if (aborted)
+            return bsd_fail(SocketBase, AMI_EINTR);
+
+        if (ws == NX_SUCCESS)
+        {
+            sock->as_Flags |= ASF_CONNECTED;
+            return 0;
+        }
+
+        /* NX_NO_PACKET is the sliced-wait timeout; anything else is a genuine
+           failure the disconnect-complete callback filed in as_SoError. */
+        if (ws == NX_NO_PACKET)
+            return bsd_fail(SocketBase, AMI_ETIMEDOUT);
+
+        if (sock->as_SoError == 0)
+            sock->as_SoError = AMI_ECONNREFUSED;
+
+        return bsd_fail(SocketBase, sock->as_SoError);
     }
 
     sock->as_Flags &= ~ASF_CONNECTING;
