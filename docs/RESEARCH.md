@@ -15323,7 +15323,7 @@ is a description of the behaviour, not a warning about a leak, and
 third user of a guard that already existed for the TCP: handler and the
 address-allocation workers.
 
-### 49.2 Five types are refused with EINVAL, and that is the point
+### 49.2 Four types are refused with EINVAL, and that is the point
 
 The registry serves any type, but a hook is only ever called from a dispatch
 point, and only `connect()` and `bind()` have one. **Accepting a hook for a
@@ -15331,17 +15331,45 @@ type nothing dispatches returns success to a caller that then never hears
 anything** — which it cannot tell apart from a quiet network. `EINVAL` is the
 documented error for a type this library does not support, and it is true.
 
-| type | why not dispatched |
-|---|---|
-| `MHT_Send` | needs the hook inside `send()`/`sendto()`/`sendmsg()`, in `transfer.c` |
-| `MHT_ICMP`, `MHT_UDP`, `MHT_TCP_Connect`, `MHT_Packet` | all four are invoked *"from within the TCP/IP stack itself"* — the IP receive path, which reaches this library only through the `NX_IP` packet filter `netstack_capture.c` already installs for `src/bpf/`. Dispatching them means chaining that filter |
+`MHT_ICMP`, `MHT_UDP`, `MHT_TCP_Connect` and `MHT_Packet` are all invoked
+*"from within the TCP/IP stack itself"* — the IP receive path, which reaches
+this library only through the `NX_IP` packet filter `netstack_capture.c`
+already installs for `src/bpf/`. §50 is what dispatching them would take.
 
-`MA_DropWithReset` is a second reason to leave `MHT_TCP_Connect` alone: it
-means emitting an RST from inside a receive filter, and a hook told it can
-reject a connection *gracefully*, whose rejection silently became a plain
-drop, has been given a worse answer than a refusal to install.
+`MHT_Send` was on this list and is not any more: the three call sites are in
+`transfer.c`, and §49.4 is what they now do.
 
-### 49.3 What ran
+### 49.3 `MHT_Send`, and a contract the document states more weakly than it reads
+
+*"Depending upon the type of function to perform, the contents of the
+SendMonitorMessage may look different. For example, either the `smm_To` or the
+`smm_Msg` field will be NULL."*
+
+Read as "exactly one of the two is always set", that is wrong, and following
+it would mean inventing data. `send()` has neither a destination nor a
+msghdr — the peer is implied by the socket — so **both** are NULL. What the
+sentence actually excludes is the two being set together:
+
+| call | `smm_To` | `smm_Msg` | `smm_Buffer` | `smm_Len` |
+|---|---|---|---|---|
+| `send()` | NULL | NULL | the caller's buffer | `len` |
+| `sendto()` | the caller's address (NULL if none was passed, which is legal on a connected socket) | NULL | the caller's buffer | `len` |
+| `sendmsg()` | NULL | the caller's `msghdr` | NULL | the iovec total |
+
+`smm_Buffer` is NULL for `sendmsg()` because the data is a scatter list;
+pointing it at the first `iovec` would describe part of the send as though it
+were all of it.
+
+The invariant asserted is therefore **never both set**, which holds for all
+three, rather than "exactly one", which does not.
+
+`smm_Size` also turns out to be load-bearing rather than decorative:
+`BindMonitorMsg`, `ConnectMonitorMsg` and `SendMonitorMessage` begin with the
+same three members, and nothing else in the message says which kind it is. The
+probe tells a send message from a bind one by its size alone (36 against 20),
+which is presumably why the field exists.
+
+### 49.4 What ran
 
 ```
 add a NULL hook: rc -1 (errno 14) -- EFAULT, correctly
@@ -15361,4 +15389,106 @@ after removal: bind rc 0, called 0 -- no longer consulted, correctly
 `calls 1/0` is the one worth keeping. Both hooks are installed and only the
 first ran, which is what *"unless another hook denies this"* requires and what
 a dispatcher that collected every answer before deciding would fail.
+
+And the send shapes:
+
+```
+send denied: rc -1 (errno 13), called 1 -- denied before the send, correctly
+send shape: size 36 (want 36) buffer ours len 8 to NULL msg NULL
+sendto shape: to ours msg NULL
+sendmsg shape: to NULL msg ours len 8
+send allowed: rc 8, called 1 -- sent in full, correctly
+```
+
+**Three of those assertions failed on the first run, and the bug was in the
+probe.** `probe_hook_init()` clears `h_MinNode` — and clearing the MinNode of
+a hook that is still *in* the library's list unlinks it, so the list walks past
+it and the hook is never called again. The symptom was "the hook was not
+consulted", which is indistinguishable from the library having dropped it.
+Resetting the observations without touching the Hook is now a separate
+function, with the reason written at it.
+
+---
+
+## 50. What the four in-stack monitor hooks would take (2026-07-27, scoped not built)
+
+`MHT_ICMP`, `MHT_UDP`, `MHT_TCP_Connect` and `MHT_Packet` are refused with
+`EINVAL` (§49.2). This is what dispatching them would involve, written down so
+the decision is made deliberately rather than discovered half-way.
+
+### 50.1 There is exactly one hole into the receive path, and BPF is in it
+
+All four fire on inbound packets, and the only place this library sees one is
+`nx_ip_packet_filter_extended` — which `netstack_capture.c` already sets to
+`ami_ns_capture_filter` for `src/bpf/`. NetX Duo has **one** such pointer per
+`NX_IP`, so monitor hooks cannot simply take it.
+
+So the first piece of work is a **chain**: one filter that calls the capture
+tap and then the monitor dispatch, in a fixed order, with a defined rule for
+what happens when one of them says drop. That is a `src/netstack` change, not
+a `src/bsdsocket` one, and it changes the behaviour of a path every packet
+already goes through.
+
+### 50.2 The filter runs on the IP thread, and the hook may not call back
+
+*"The hook function will be invoked from within the TCP/IP stack itself, which
+disallows calls into `bsdsocket.library`."* That matches where the filter runs
+and is the easy half. The harder half is that §49's dispatcher walks the hook
+list under `Forbid()` — acceptable for a `bind()` on a user task, considerably
+less so on the packet path, where it would hold off task switching once per
+inbound datagram. Either the list needs a lock that is safe from the IP thread
+and cheap enough to take per packet, or the walk needs to be restructured.
+
+### 50.3 Each type needs a header parsed before it can be reported
+
+The filter is handed an `NX_PACKET` at IP level. The message structs want
+more:
+
+| type | needs |
+|---|---|
+| `MHT_Packet` | `pmm_LinkLayerData`/`Size` — **legitimately NULL/0 here**, the doc says both "may be" — plus payload and length |
+| `MHT_ICMP` | `imm_Src`, `imm_Dst`, `struct icmp *` — parse the IPv4 header, check protocol 1, point at the ICMP header |
+| `MHT_UDP` | `umm_Src`, `umm_Dst`, `struct udphdr *` — the same for protocol 17 |
+| `MHT_TCP_Connect` | `tcmm_Src`, `tcmm_Dst`, `struct tcphdr *`, and only for segments *"about to initiate a connection"* — a SYN without an ACK, before the handshake and before the stack has looked for a listening socket |
+
+None of that is difficult; all of it is a hand-rolled IPv4/TCP header walk in a
+path that currently has none, and it must cope with a fragmented `NX_PACKET`
+chain rather than assuming one contiguous buffer.
+
+### 50.4 `MA_DropWithReset` is a design decision, not an implementation detail
+
+`MHT_TCP_Connect` may answer `MA_DropWithReset`, which the autodoc describes
+as the graceful way to reject a connection: *"the remote will receive a
+notification in the form of a connection reset, which will allow it to recover
+immediately"*, as against `MA_Drop`, where *"the remote will not receive any
+notification ... and may have to time out and retransmit"*.
+
+Honouring it means emitting an RST from inside a receive filter. NetX Duo
+exposes no "reset this segment's sender" entry point; it would mean building
+the segment by hand and handing it to the IP layer, on the IP thread, while
+holding whatever the filter holds.
+
+**And the fallback is not acceptable.** Quietly treating `MA_DropWithReset` as
+`MA_Drop` gives a hook that asked for the graceful rejection the ungraceful
+one, with no way to find out — the caller's peer hangs until it times out
+instead of failing at once. That is the same class of defect as accepting a
+hook for a type nothing dispatches: a documented behaviour silently replaced
+by a worse one.
+
+So `MHT_TCP_Connect` should not be accepted until `MA_DropWithReset` is either
+implemented or explicitly refused at install time — and the API has no way to
+say "this type, but not that action".
+
+### 50.5 The order to do it in, if it is done
+
+1. Chain the packet filter in `netstack_capture.c`, with capture and monitor
+   both seeing every packet and a stated rule for a drop from either.
+2. Fix the dispatcher's locking for the IP thread.
+3. `MHT_Packet` first — it needs no header parsing beyond what the filter
+   already has, and it is the one a traffic monitor actually wants.
+4. `MHT_ICMP` and `MHT_UDP`, which are a protocol check and a header offset.
+5. `MHT_TCP_Connect` last, and only with `MA_DropWithReset` settled.
+
+Steps 1 and 2 are the ones that touch code every packet flows through. Nothing
+below them is worth starting first.
 

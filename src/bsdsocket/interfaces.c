@@ -64,7 +64,6 @@
 #include "aminetxduo/config.h"
 #include "aminetxduo/sana2.h"
 
-#include "tagwalk.h"
 #include "interfaces.h"
 
 #include <proto/exec.h>

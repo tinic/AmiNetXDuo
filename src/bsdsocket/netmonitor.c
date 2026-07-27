@@ -48,11 +48,12 @@
  *
  * WHAT IS AND IS NOT ACCEPTED
  *
- * MHT_Connect and MHT_Bind. The other five are refused with EINVAL -- the
- * documented error for a type this library does not support -- because
- * nothing dispatches them yet and a hook that is installed but never called
- * is indistinguishable from a quiet network. The reasons are at the check
- * itself, in bsd_AddNetMonitorHookTagList().
+ * The three call-site types: MHT_Connect, MHT_Bind and MHT_Send. The four
+ * in-stack types are refused with EINVAL -- the documented error for a type
+ * this library does not support -- because nothing dispatches them and a hook
+ * that is installed but never called is indistinguishable from a quiet
+ * network. The reasons are at the check itself, in
+ * bsd_AddNetMonitorHookTagList().
  *
  * WHY AN INSTALLED HOOK KEEPS THE LIBRARY RESIDENT
  *
@@ -168,8 +169,6 @@ LONG bsd_AddNetMonitorHookTagList(register LONG type __asm("d0"),
      * is the worst answer this API can give. EINVAL is the documented one,
      * and it is true: this library does not support monitoring those.
      *
-     *   MHT_Send           needs the hook in send()/sendto()/sendmsg(), which
-     *                      live in transfer.c.
      *   MHT_ICMP           all four are invoked "from within the TCP/IP stack
      *   MHT_UDP            itself" -- the IP receive path, which reaches this
      *   MHT_TCP_Connect    library only through the NX_IP packet filter that
@@ -186,7 +185,7 @@ LONG bsd_AddNetMonitorHookTagList(register LONG type __asm("d0"),
     if (type < 0 || type >= BSD_MHT_COUNT)
         return bsd_fail(SocketBase, AMI_EINVAL);
 
-    if (type != MHT_Connect && type != MHT_Bind)
+    if (type != MHT_Connect && type != MHT_Bind && type != MHT_Send)
         return bsd_fail(SocketBase, AMI_EINVAL);
 
     Forbid();

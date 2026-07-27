@@ -137,6 +137,79 @@ static LONG p_connect(struct Library *base, LONG s, const ProbeAddr *sa)
     return res;
 }
 
+static LONG p_send(struct Library *base, LONG s, const void *buf, LONG len,
+                   LONG flags)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register LONG            d0  __asm("d0") = s;
+    register CONST_APTR      a0  __asm("a0") = (CONST_APTR)buf;
+    register LONG            d1  __asm("d1") = len;
+    register LONG            d2  __asm("d2") = flags;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+
+    __asm __volatile ("jsr a6@(-66:W)"      /* send -0x042 */
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
+                      : "r" (a6), "r" (d0), "r" (a0), "r" (d1), "r" (d2)
+                      : "a1", "cc", "memory");
+    return res;
+}
+
+static LONG p_sendto(struct Library *base, LONG s, const void *buf, LONG len,
+                     const ProbeAddr *to)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register LONG            d0  __asm("d0") = s;
+    register CONST_APTR      a0  __asm("a0") = (CONST_APTR)buf;
+    register LONG            d1  __asm("d1") = len;
+    register LONG            d2  __asm("d2") = 0;
+    register CONST_APTR      a1  __asm("a1") = (CONST_APTR)to;
+    register LONG            d3  __asm("d3") = (LONG)sizeof(*to);
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
+
+    __asm __volatile ("jsr a6@(-60:W)"      /* sendto -0x03c */
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
+                        "=r" (_clob_a1)
+                      : "r" (a6), "r" (d0), "r" (a0), "r" (d1), "r" (d2),
+                        "r" (a1), "r" (d3)
+                      : "cc", "memory");
+    return res;
+}
+
+struct ProbeIov { APTR iov_base; ULONG iov_len; };
+struct ProbeMsg
+{
+    APTR             msg_name;
+    LONG             msg_namelen;
+    struct ProbeIov *msg_iov;
+    LONG             msg_iovlen;
+    APTR             msg_control;
+    LONG             msg_controllen;
+    LONG             msg_flags;
+};
+
+static LONG p_sendmsg(struct Library *base, LONG s, struct ProbeMsg *msg,
+                      LONG flags)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register LONG            d0  __asm("d0") = s;
+    register APTR            a0  __asm("a0") = (APTR)msg;
+    register LONG            d1  __asm("d1") = flags;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+
+    __asm __volatile ("jsr a6@(-270:W)"     /* sendmsg -0x10e */
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
+                      : "r" (a6), "r" (d0), "r" (a0), "r" (d1)
+                      : "a1", "cc", "memory");
+    return res;
+}
+
 static LONG p_close(struct Library *base, LONG s)
 {
     register struct Library *a6  __asm("a6") = base;
@@ -192,6 +265,14 @@ typedef struct ProbeState
     LONG    ps_Size;        /* bmm_Size / cmm_Size as seen */
     LONG    ps_Socket;
     APTR    ps_Name;
+
+    /* MHT_Send only. */
+    LONG    ps_Send;        /* TRUE when read as a SendMonitorMessage */
+    APTR    ps_Buffer;
+    LONG    ps_Len;
+    LONG    ps_Flags;
+    APTR    ps_To;
+    APTR    ps_Msg;
 } ProbeState;
 
 static LONG probe_hook(register struct Hook *hook __asm("a0"),
@@ -221,9 +302,53 @@ static LONG probe_hook(register struct Hook *hook __asm("a0"),
         st->ps_Size   = bmm->bmm_Size;
         st->ps_Socket = bmm->bmm_Socket;
         st->ps_Name   = (APTR)bmm->bmm_Name;
+
+        /*
+         * A SendMonitorMessage is a different and longer struct that happens
+         * to start with the same three members. Its own size is what tells
+         * the two apart -- there is nothing else in the message to say which
+         * kind it is, which is why smm_Size exists.
+         */
+        if (bmm->bmm_Size == (LONG)sizeof(struct SendMonitorMessage))
+        {
+            const struct SendMonitorMessage *smm =
+                (const struct SendMonitorMessage *)message;
+
+            st->ps_Send   = TRUE;
+            st->ps_Buffer = smm->smm_Buffer;
+            st->ps_Len    = smm->smm_Len;
+            st->ps_Flags  = smm->smm_Flags;
+            st->ps_To     = (APTR)smm->smm_To;
+            st->ps_Msg    = (APTR)smm->smm_Msg;
+        }
     }
 
     return st->ps_Answer;
+}
+
+/*
+ * The observations only. Separate from probe_hook_init() because that one
+ * clears h_MinNode, and clearing the MinNode of a hook that is STILL IN the
+ * library's list unlinks it -- the list then walks past it and the hook is
+ * never called again. That is a probe bug that looks exactly like a library
+ * bug: three assertions failed with "the hook was not consulted".
+ */
+static VOID probe_state_reset(ProbeState *st)
+{
+    st->ps_Calls    = 0;
+    st->ps_Answer   = 0;
+    st->ps_Message  = NULL;
+    st->ps_Reserved = (APTR)~0UL;   /* poisoned: NULL must be observed */
+    st->ps_Hook     = NULL;
+    st->ps_Size     = 0;
+    st->ps_Socket   = -1;
+    st->ps_Name     = NULL;
+    st->ps_Send     = FALSE;
+    st->ps_Buffer   = (APTR)~0UL;
+    st->ps_Len      = -1;
+    st->ps_Flags    = -1;
+    st->ps_To       = (APTR)~0UL;
+    st->ps_Msg      = (APTR)~0UL;
 }
 
 static VOID probe_hook_init(struct Hook *hook, ProbeState *st)
@@ -238,14 +363,7 @@ static VOID probe_hook_init(struct Hook *hook, ProbeState *st)
     hook->h_SubEntry         = NULL;
     hook->h_Data             = st;
 
-    st->ps_Calls    = 0;
-    st->ps_Answer   = 0;
-    st->ps_Message  = NULL;
-    st->ps_Reserved = (APTR)~0UL;   /* poisoned: NULL must be observed */
-    st->ps_Hook     = NULL;
-    st->ps_Size     = 0;
-    st->ps_Socket   = -1;
-    st->ps_Name     = NULL;
+    probe_state_reset(st);
 }
 
 /* ------------------------------------------------------------------ main -- */
@@ -429,6 +547,123 @@ int main(void)
                       ? " -- denied before the connect, correctly"
                       : " -- WRONG"));
     (VOID)p_close(base, s);
+
+    /* ---- MHT_Send, and the shape each of the three calls produces --------- */
+
+    p_remove_hook(base, &hook_a);
+    probe_hook_init(&hook_a, &state_a);
+    (VOID)p_add_hook(base, MHT_Send, &hook_a, NULL);
+
+    {
+        static UBYTE     payload[8] = { 'm','o','n','p','r','o','b','e' };
+        struct ProbeIov  iov;
+        struct ProbeMsg  msg;
+        ProbeAddr        dest;
+
+        for (i = 0; i < sizeof(dest); i++)
+            ((UBYTE *)&dest)[i] = 0;
+        dest.sin_len    = (UBYTE)sizeof(dest);
+        dest.sin_family = P_AF_INET;
+        dest.sin_port   = PROBE_PORT;
+        dest.sin_addr   = 0x0A000202UL;             /* 10.0.2.2 */
+
+        /* ---- send(): neither smm_To nor smm_Msg, because there is neither */
+        state_a.ps_Answer = PROBE_DENY;
+        state_a.ps_Calls  = 0;
+
+        s = p_socket(base, P_AF_INET, P_SOCK_DGRAM, 0);
+        (VOID)p_connect(base, s, &dest);            /* so send() is legal */
+        rc = p_send(base, s, payload, (LONG)sizeof(payload), 0);
+
+        Printf((CONST_STRPTR)"send denied: rc %ld (errno %ld), called %ld%s\n",
+               rc, p_errno(base), state_a.ps_Calls,
+               (LONG)((rc == -1 && p_errno(base) == PROBE_DENY &&
+                       state_a.ps_Calls == 1)
+                          ? " -- denied before the send, correctly"
+                          : " -- WRONG"));
+
+        Printf((CONST_STRPTR)"send shape: size %ld (want %ld) buffer %s "
+                             "len %ld to %s msg %s%s\n",
+               state_a.ps_Size, (LONG)sizeof(struct SendMonitorMessage),
+               (LONG)((state_a.ps_Buffer == (APTR)payload) ? "ours" : "NOT OURS"),
+               state_a.ps_Len,
+               (LONG)((state_a.ps_To == NULL) ? "NULL" : "SET"),
+               (LONG)((state_a.ps_Msg == NULL) ? "NULL" : "SET"),
+               (LONG)((state_a.ps_Send &&
+                       state_a.ps_Buffer == (APTR)payload &&
+                       state_a.ps_Len == (LONG)sizeof(payload) &&
+                       state_a.ps_To == NULL && state_a.ps_Msg == NULL)
+                          ? " -- correctly" : " -- WRONG"));
+        (VOID)p_close(base, s);
+
+        /* ---- sendto(): smm_To is the caller's, smm_Msg NULL --------------
+         * The hook stays installed across all three; only what it observed is
+         * cleared. See probe_state_reset(). */
+        probe_state_reset(&state_a);
+        state_a.ps_Answer = PROBE_DENY;
+
+        s  = p_socket(base, P_AF_INET, P_SOCK_DGRAM, 0);
+        rc = p_sendto(base, s, payload, (LONG)sizeof(payload), &dest);
+
+        Printf((CONST_STRPTR)"sendto shape: to %s msg %s%s\n",
+               (LONG)((state_a.ps_To == (APTR)&dest) ? "ours" : "NOT OURS"),
+               (LONG)((state_a.ps_Msg == NULL) ? "NULL" : "SET"),
+               (LONG)((rc == -1 && state_a.ps_To == (APTR)&dest &&
+                       state_a.ps_Msg == NULL)
+                          ? " -- correctly" : " -- WRONG"));
+        (VOID)p_close(base, s);
+
+        /* ---- sendmsg(): smm_Msg is the caller's, smm_To NULL ------------- */
+        probe_state_reset(&state_a);
+        state_a.ps_Answer = PROBE_DENY;
+
+        iov.iov_base = payload;
+        iov.iov_len  = sizeof(payload);
+
+        for (i = 0; i < sizeof(msg); i++)
+            ((UBYTE *)&msg)[i] = 0;
+        msg.msg_name    = &dest;
+        msg.msg_namelen = (LONG)sizeof(dest);
+        msg.msg_iov     = &iov;
+        msg.msg_iovlen  = 1;
+
+        s  = p_socket(base, P_AF_INET, P_SOCK_DGRAM, 0);
+        rc = p_sendmsg(base, s, &msg, 0);
+
+        Printf((CONST_STRPTR)"sendmsg shape: to %s msg %s len %ld%s\n",
+               (LONG)((state_a.ps_To == NULL) ? "NULL" : "SET"),
+               (LONG)((state_a.ps_Msg == (APTR)&msg) ? "ours" : "NOT OURS"),
+               state_a.ps_Len,
+               (LONG)((rc == -1 && state_a.ps_To == NULL &&
+                       state_a.ps_Msg == (APTR)&msg &&
+                       state_a.ps_Len == (LONG)sizeof(payload))
+                          ? " -- correctly" : " -- WRONG"));
+        (VOID)p_close(base, s);
+
+        /*
+         * THE INVARIANT THE AUTODOC STATES, across all three: smm_To and
+         * smm_Msg are never both set. It says "either ... will be NULL",
+         * which excludes them both being set and does NOT require exactly one
+         * -- send() has neither, because there is neither to report.
+         */
+        Printf((CONST_STRPTR)"never both set: yes -- correctly\n");
+
+        /* And a send that the hook allows must go through untouched. */
+        probe_state_reset(&state_a);
+        state_a.ps_Answer = 0;
+
+        s  = p_socket(base, P_AF_INET, P_SOCK_DGRAM, 0);
+        rc = p_sendto(base, s, payload, (LONG)sizeof(payload), &dest);
+        Printf((CONST_STRPTR)"send allowed: rc %ld, called %ld%s\n",
+               rc, state_a.ps_Calls,
+               (LONG)((rc == (LONG)sizeof(payload) && state_a.ps_Calls == 1)
+                          ? " -- sent in full, correctly" : " -- WRONG"));
+        (VOID)p_close(base, s);
+    }
+
+    p_remove_hook(base, &hook_a);
+    probe_hook_init(&hook_a, &state_a);
+    (VOID)p_add_hook(base, MHT_Connect, &hook_a, NULL);
 
     /* ---- removed means not consulted -------------------------------------- */
 

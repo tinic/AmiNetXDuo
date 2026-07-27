@@ -54,7 +54,6 @@
 
 #include "aminetxduo/config.h"
 
-#include "tagwalk.h"
 
 #include <proto/exec.h>
 
@@ -65,12 +64,6 @@
  */
 #define BSD_ROUTE_RESOLVE_TIMEOUT   (30UL * (ULONG)NX_IP_PERIODIC_RATE)
 
-/*
- * 4.4BSD's ESRCH, which the -route- page of the autodoc names as the code for
- * "requested to delete a non-existent entry". bsdsocket_internal.h's AMI_E*
- * set does not carry it, because nothing else in this library can produce it.
- */
-#define BSD_ESRCH   3
 
 /* --------------------------------------------------------- the mask rule -- */
 
@@ -375,7 +368,7 @@ LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
      * one that has none.
      */
     if (status == NX_NOT_SUCCESSFUL || status == NX_ENTRY_NOT_FOUND)
-        return bsd_fail(SocketBase, BSD_ESRCH);
+        return bsd_fail(SocketBase, AMI_ESRCH);
 
     if (status == NX_NOT_SUPPORTED)
         return bsd_fail(SocketBase, AMI_ENOSYS);

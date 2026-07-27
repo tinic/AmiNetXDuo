@@ -691,7 +691,7 @@ for case in "a NULL hook:EFAULT" "type 99:EINVAL"; do
 done
 
 if grep -q "^add MHT_Packet: .* -- refused rather than silently ignored, correctly" "$REPORT"; then
-    pass "a type nothing dispatches is refused, not accepted and ignored"
+    pass "an in-stack type nothing dispatches is refused, not silently ignored"
 else
     fail "MHT_Packet was accepted although nothing dispatches it"
 fi
@@ -750,6 +750,45 @@ if grep -q "^connect with a denying hook: .* -- denied before the connect, corre
     pass "MHT_Connect denies connect() before the stack has done anything"
 else
     fail "MHT_Connect did not deny the connect"
+fi
+
+# MHT_Send, and the per-call message shape the autodoc specifies.  These
+# compile fine while being wrong, which is why they are asserted rather than
+# commented.
+if grep -q "^send denied: .* -- denied before the send, correctly" "$REPORT"; then
+    pass "MHT_Send fails send() with the hook's errno, before anything is sent"
+else
+    fail "MHT_Send did not deny the send"
+fi
+
+if grep -q "^send shape: .* -- correctly" "$REPORT"; then
+    pass "send(): smm_Buffer and smm_Len are the caller's, To and Msg both NULL"
+else
+    fail "send() built the wrong SendMonitorMessage"
+fi
+
+if grep -q "^sendto shape: to ours msg NULL -- correctly" "$REPORT"; then
+    pass "sendto(): smm_To is the caller's address, smm_Msg NULL"
+else
+    fail "sendto() built the wrong SendMonitorMessage"
+fi
+
+if grep -q "^sendmsg shape: to NULL msg ours .* -- correctly" "$REPORT"; then
+    pass "sendmsg(): smm_Msg is the caller's msghdr, smm_To NULL, smm_Len total"
+else
+    fail "sendmsg() built the wrong SendMonitorMessage"
+fi
+
+if grep -q "^never both set: yes -- correctly" "$REPORT"; then
+    pass "smm_To and smm_Msg are never both set, across all three calls"
+else
+    fail "smm_To and smm_Msg were both set"
+fi
+
+if grep -q "^send allowed: .* -- sent in full, correctly" "$REPORT"; then
+    pass "and a send the hook allows goes through untouched"
+else
+    fail "an allowed send did not complete"
 fi
 
 if grep -q "^after removal: .* -- no longer consulted, correctly" "$REPORT"; then

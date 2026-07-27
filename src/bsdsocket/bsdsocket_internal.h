@@ -73,6 +73,7 @@
  */
 #define AMI_EPERM               1
 #define AMI_ENOENT              2
+#define AMI_ESRCH               3
 #define AMI_EINTR               4
 #define AMI_EIO                 5
 #define AMI_ENXIO               6
@@ -685,6 +686,20 @@ UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
                      BsdSlicedCall call, VOID *arg, BOOL *aborted);
 
 ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks);
+
+/*
+ * NextTagItem(), open-coded (errno.c).
+ *
+ * utility.library is not open in a shared library that may be called before
+ * anything else has opened it, and the four control tags are three lines of
+ * arithmetic. Every Roadshow tag-list vector needs it -- interfaces.c,
+ * routing.c and addralloc.c -- so there is one copy rather than one per file.
+ *
+ * Returns the next real tag, advancing *cursor past it, or NULL at the end.
+ * TAG_MORE follows the chain, TAG_SKIP skips ti_Data further items and
+ * TAG_IGNORE skips itself; none of the three is ever handed back.
+ */
+struct TagItem *bsd_next_tag(struct TagItem **cursor);
 
 /* Small string/memory helpers: a shared library must not drag in newlib. */
 ULONG bsd_strlen(const char *s);

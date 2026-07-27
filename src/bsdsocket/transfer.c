@@ -20,6 +20,7 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "netmonitor.h"
 
 #include <proto/exec.h>
 
@@ -930,6 +931,68 @@ static LONG bsd_recv_oob(struct AmiSocketBase *base, AmiSocket *sock,
 
 /* ---------------------------------------------------------------- vectors -- */
 
+/*
+ * MHT_Send: the hook that can refuse a send before one byte of it happens.
+ *
+ * "The hook function will be invoked before dropping into the kernel
+ * 'send()', 'sendto()' or 'sendmsg()' calls ... any error value > 0 will
+ * cause the call to be aborted and the errno variable to be set to this
+ * value."
+ *
+ * So it runs after the descriptor and the arguments have been checked -- a
+ * monitor must not be usable to probe which descriptors exist -- and before
+ * anything is queued, resolved or transmitted. A partial send that then
+ * reported a refusal would be worse than not dispatching at all.
+ *
+ * WHAT GOES IN smm_To AND smm_Msg
+ *
+ * "Depending upon the type of function to perform, the contents of the
+ * SendMonitorMessage may look different. For example, either the 'smm_To' or
+ * the 'smm_Msg' field will be NULL."
+ *
+ * Read carefully, that is an exclusion and not a requirement that exactly one
+ * be set. The three calls give:
+ *
+ *   send()      smm_To NULL, smm_Msg NULL   -- there is no destination and no
+ *                                              msghdr; the peer is implied
+ *   sendto()    smm_To the caller's, smm_Msg NULL   (smm_To is NULL too when
+ *                                              the caller passed none, which
+ *                                              is legal on a connected socket)
+ *   sendmsg()   smm_To NULL, smm_Msg the caller's
+ *
+ * The invariant that always holds is that the two are never BOTH set, and
+ * that is what the probe asserts. "Exactly one is always set" would be a
+ * stronger rule than the document states and there is nothing to put in
+ * either field for a plain send().
+ *
+ * smm_Buffer is the caller's buffer for send()/sendto() and NULL for
+ * sendmsg(), where the buffers are the msghdr's scatter list; smm_Len is the
+ * total either way.
+ */
+static LONG bsd_send_monitor(struct AmiSocketBase *base, LONG sock_fd,
+                             APTR buf, LONG len, LONG flags,
+                             struct sockaddr *to, socklen_t tolen,
+                             struct msghdr *msg)
+{
+    struct SendMonitorMessage smm;
+
+    if (!bsd_netmon_have(MHT_Send))
+        return 0;
+
+    bsd_bzero(&smm, sizeof(smm));
+    smm.smm_Size   = (LONG)sizeof(smm);
+    smm.smm_Caller = bsd_netmon_caller(base);
+    smm.smm_Socket = sock_fd;
+    smm.smm_Buffer = buf;
+    smm.smm_Len    = len;
+    smm.smm_Flags  = flags;
+    smm.smm_To     = to;
+    smm.smm_ToLen  = (LONG)tolen;
+    smm.smm_Msg    = msg;
+
+    return bsd_netmon_dispatch(MHT_Send, &smm);
+}
+
 LONG bsd_send(register LONG sock_fd __asm("d0"),
               register APTR buf     __asm("a0"),
               register LONG len     __asm("d1"),
@@ -944,6 +1007,14 @@ LONG bsd_send(register LONG sock_fd __asm("d0"),
 
     if (buf == NULL && len > 0)
         return bsd_fail(SocketBase, AMI_EFAULT);
+
+    {
+        LONG denied = bsd_send_monitor(SocketBase, sock_fd, buf, len, flags,
+                                       NULL, 0, NULL);
+
+        if (denied > 0)
+            return bsd_fail(SocketBase, denied);
+    }
 
     if ((sock->as_Flags & ASF_TCP) == 0 &&
         (sock->as_Flags & ASF_CONNECTED) == 0)
@@ -977,6 +1048,14 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
 
     if (buf == NULL && len > 0)
         return bsd_fail(SocketBase, AMI_EFAULT);
+
+    {
+        LONG denied = bsd_send_monitor(SocketBase, sock_fd, buf, len, flags,
+                                       to, tolen, NULL);
+
+        if (denied > 0)
+            return bsd_fail(SocketBase, denied);
+    }
 
     bsd_addr_from_v4(&addr, 0UL);
 
@@ -1107,6 +1186,17 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
     total = bsd_iov_total(msg->msg_iov, (LONG)msg->msg_iovlen);
     if (total < 0)
         return bsd_fail(SocketBase, AMI_EINVAL);
+
+    {
+        /* smm_Buffer is NULL here: the data is the msghdr's scatter list, and
+           pointing it at the first iovec would describe part of the send as
+           though it were all of it. */
+        LONG denied = bsd_send_monitor(SocketBase, sock_fd, NULL, total, flags,
+                                       NULL, 0, msg);
+
+        if (denied > 0)
+            return bsd_fail(SocketBase, denied);
+    }
 
     bsd_addr_from_v4(&addr, 0UL);
 

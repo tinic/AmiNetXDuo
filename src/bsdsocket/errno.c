@@ -580,6 +580,46 @@ static BOOL bsd_tag_set(struct AmiSocketBase *base, struct TagItem *item,
     }
 }
 
+/*
+ * NextTagItem() for the Roadshow tag-list vectors -- declared in
+ * bsdsocket_internal.h, and living here beside the hand-rolled walk
+ * bsd_SocketBaseTagList() does inline for its own reasons (it has to report
+ * the 1-based index of the offending tag, which a shared walker cannot).
+ */
+struct TagItem *bsd_next_tag(struct TagItem **cursor)
+{
+    struct TagItem *item = *cursor;
+
+    while (item != NULL)
+    {
+        switch (item->ti_Tag)
+        {
+            case TAG_DONE:
+                *cursor = NULL;
+                return NULL;
+
+            case TAG_IGNORE:
+                item++;
+                continue;
+
+            case TAG_MORE:
+                item = (struct TagItem *)item->ti_Data;
+                continue;
+
+            case TAG_SKIP:
+                item += 1 + (LONG)item->ti_Data;
+                continue;
+
+            default:
+                *cursor = item + 1;
+                return item;
+        }
+    }
+
+    *cursor = NULL;
+    return NULL;
+}
+
 LONG bsd_SocketBaseTagList(register struct TagItem *tags __asm("a0"),
                            register struct AmiSocketBase *SocketBase __asm("a6"))
 {

@@ -44,7 +44,6 @@
 
 #include "aminetxduo/config.h"
 
-#include "tagwalk.h"
 #include "interfaces.h"
 
 #include <proto/dos.h>
