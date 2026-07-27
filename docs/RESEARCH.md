@@ -15797,3 +15797,256 @@ toolchain predates it, which is why the repair is still needed; the CI cache key
 a hash of the repair script, so it re-fetches and re-repairs whenever the script changes.
 Moving the pin forward would retire this, and is worth doing on its own schedule rather
 than in the middle of a broken release.
+
+---
+
+## 54. ChaCha20-Poly1305: reach first, and speed as well (2026-07-27)
+
+`tls.library` shipped two ciphersuites, `0xC027` and `0xC023`, and both are
+AES-128-CBC with HMAC-SHA256. That is now a problem of *reach* rather than of
+taste. From the host, against `www.google.com`:
+
+```
+-cipher ECDHE-RSA-AES128-SHA256      -> handshake failure
+-cipher ECDHE-RSA-CHACHA20-POLY1305  -> Cipher is ECDHE-RSA-CHACHA20-POLY1305
+-cipher ECDHE-RSA-AES128-GCM-SHA256  -> Cipher is ECDHE-RSA-AES128-GCM-SHA256
+```
+
+and from the Amiga, `fetch https://www.google.com/` returned *the server would
+not complete a TLS handshake* after 1.5 s — a `handshake_failure` alert, before
+any arithmetic. GitHub still takes CBC, which is why those two suites stay.
+
+So an AEAD was not optional. Which one was the only real question, and it is a
+question about this machine.
+
+### 54.1 Not AES-GCM, and §5.5 had already said so
+
+GHASH is a carry-less multiply in GF(2¹²⁸). A 68020 has no instruction for it,
+so `nx_crypto_gcm.c` does it bit by bit, and §5.5 measured the result at
+**344.6 ms for 1 KB against AES-CBC's 21.9** — twenty times slower than the
+cipher it would replace. Negotiating GCM would trade a handshake we cannot
+complete for a download nobody would wait for. It is *compiled in* and it is
+deliberately **not offered**: there is no server that takes GCM but takes
+neither ChaCha20-Poly1305 nor CBC.
+
+ChaCha20 is add, rotate and exclusive-or on 32-bit words, and Poly1305 is
+130-bit adds and a 32×32→64 multiply — which is `MULU.L`, the one wide
+instruction this part does have and the reason `src/crypto68k` exists.
+
+### 54.2 What it cost, measured against what it replaces
+
+`tests/crypto68k/crypto68k_bulk`, one process, 16 KiB, A1200 profile at `-k 56`
+(implied 56.4 MHz), every row checked against RFC 8439's own vectors and
+against `nx_crypto` before a time is believed.
+
+| | measured | corrected |
+|---|---:|---:|
+| AES-128-CBC encrypt, 68020 assembly | 67,264 µs (237 KB/s) | — |
+| AES-128-CBC decrypt, 68020 assembly | 67,897 µs (235 KB/s) | — |
+| HMAC-SHA256 | 66,869 µs (239 KB/s) | — |
+| **ChaCha20 alone** | **32,769 µs (487 KB/s)** | — |
+| **Poly1305 alone** | **45,001 µs (355 KB/s)** | ~50,000 µs (327 KB/s) |
+| **the AEAD, one whole record** | **78,031 µs (204 KB/s)** | ~83,000 µs (193 KB/s) |
+| the CBC pair, one whole record | 134,351 µs (118 KB/s) | — |
+
+**The AEAD is 1.72× the CBC pair on send and 1.73× on receive**, or 1.62× both
+ways after the correction below. The compatible choice and the fast one turned
+out to be the same choice, which is not how this usually goes.
+
+Two notes on the arithmetic, since both would otherwise flatter the new rows.
+
+FS-UAE charges `MULU.L` 32 cycles where a 68020 charges 43 (§18.1). Poly1305 is
+**25 `MULU.L` per 16-byte block** — verified in the disassembly, not assumed —
+so 16 KiB is 25,600 multiplies and the emulator under-charges them by 11 cycles
+each: 281,600 cycles, 4,993 µs at 56.4 MHz. That is the correction in the third
+column. **No correction applies to any AES or SHA-256 row**, because neither
+contains a multiply at all — the same thing §18.5 said.
+
+And ChaCha20 costs **0.8% more** on a buffer starting one byte in (33,021 µs
+against 32,769), which is the alignment a TLS record's payload actually has.
+The misaligned `MOVE.L` is doing its job.
+
+### 54.3 The endianness tax, and why it is small
+
+ChaCha20 and Poly1305 both read and write little-endian, and this is a
+big-endian machine. Sixteen keystream words a block have to be reversed on the
+way out, which is `ROL.W #8`, `SWAP`, `ROL.W #8` — three instructions, about
+15.8 cycles by §18.1's table. Folded into the block exclusive-or, one 64-byte
+block costs one `MOVE.L` in, the reversal, an `EOR.L` and one `MOVE.L` out per
+word: ~34 cycles for four bytes, ~8.5 a byte against the cipher's ~120.
+
+The alternative — serialise the keystream into a byte array and exclusive-or
+byte by byte — is four times that by the same table, and it is what the
+portable path (68000, 68040, 68060; `__mc68020__` is defined for `-m68020`
+only) still does.
+
+No assembly was written and none is planned. §18.4 established that for a loop
+of this shape GCC 15.2 is not leaving instruction selection on the table, and
+the disassembly agrees: 25 `MULU.L` where the algorithm says 25, and 75
+rotates in the ChaCha20 object.
+
+### 54.4 The record framing, which is where the work actually was
+
+RFC 7905 is **not** the GCM framing with a different cipher underneath it.
+TLS 1.2's AEAD suites use a partially explicit nonce — a four-byte implicit
+salt, an eight-byte `nonce_explicit` at the head of every record, the sequence
+number as the nonce's low half. ChaCha20-Poly1305 instead uses the construction
+TLS 1.3 later adopted for everything: `record_iv_length` is **zero**, nothing
+precedes the ciphertext, and the per-record nonce is the full twelve-byte write
+IV exclusive-ored with the left-padded sequence number. Only the additional
+data stays TLS 1.2's thirteen bytes.
+
+`nx_secure`'s one extension point here, `NX_SECURE_AEAD_CIPHER_CHECK`, cannot
+express that: it widens the *test* for "is this an AEAD", and everything it
+matches is then converted to `NX_CRYPTO_ENCRYPTION_AES_GCM_16` and framed as
+GCM. The difference is on the wire, in the record's length and layout, and no
+amount of work inside an `NX_CRYPTO_METHOD` can reach it — a method is handed a
+nonce and a buffer after the framing has been decided.
+
+So `nx_secure_tls_record_payload_encrypt.c` and `..._decrypt.c` are **copied**
+into `src/tls/rfc7905/` and dropped from the glob, which is the same mechanism
+the top level uses for `_nx_ip_checksum_compute()`. One hunk each, in the same
+place. `nx_secure_tls_session_iv_size_get.c` is deliberately *not* copied: its
+`switch` has no case for our algorithm, takes the `default:` and returns zero,
+which is exactly what RFC 7905 wants — and leaving `NX_SECURE_AEAD_CIPHER_CHECK`
+at its default of `NX_FALSE` is what keeps it there.
+
+`NX_SECURE_ENABLE_AEAD_CIPHER` had to be defined for the build. It is not on by
+default; `nx_secure_tls.h` only defines it when TLS 1.3 or EC-JPAKE is enabled,
+and both are off here, so the AEAD record path was being compiled out
+altogether. **The comment in `ami_tls_crypto.c` that said "GCM is compiled in
+and no negotiated suite reaches them" was wrong on the first half**: the GCM
+rows were not in the table at all.
+
+### 54.5 What it did
+
+`fetch`, A1200 profile, over SLIRP, cold handshakes, before and after at the
+same clock:
+
+| | `-k 56` before | `-k 56` after |
+|---|---|---|
+| `www.google.com` | **handshake failure at 1.5 s** | **`0xCCA9`, 3 certs, 3.6 s, HTTP 200, 80,846 B** |
+| `www.github.com` | `0xC023`, 3 certs, 5.8 s | `0xCCA9`, 3 certs, 5.9 s, 591,759 B |
+
+The handshake times are unchanged, and that is the expected result rather than
+a disappointment: a handshake is public-key arithmetic, and the record path is
+paid on the bytes after it. GitHub moved from `0xC023` to `0xCCA9` because the
+new suites sit at the *head* of the table — the client's stated preference —
+which is also a second server exercising the new code.
+
+**At 24.5 MHz (`-k 28`) Google still does not complete**, with *the connection
+is closed* rather than a handshake failure: the ClientHello is now accepted and
+the front end stops waiting before a three-certificate chain is verified. That
+is the same patience problem §9 and §13 record for Cloudflare, it is not
+specific to this work, and session resumption is the answer to it. GitHub
+completes at 24.5 MHz in 11.3 s either way.
+
+## 55. Roadshow's own commands, run against this stack (2026-07-27)
+
+The compatibility claim in the README is that software built for other Amiga TCP/IP
+stacks runs on this one unmodified. The sharpest available test of it is Roadshow's own
+shipping binaries, so all 30 commands in the 1.15 demo were run against our
+`bsdsocket.library` (the three `ppp_*` excluded by project policy).
+
+**Nothing crashed the machine.** No Gurus, no hangs, no dead stacks; every failure was a
+printed message and an exit code. `wget` retrieved both bodies byte-exact under `cmp`, and
+`ping` on-net, `AddNetRoute`, `DeleteNetRoute`, `ConfigureNetInterface`,
+`RemoveNetInterface`, `Online` and `Offline` all worked.
+
+The failures were far more concentrated than expected, and three of them were one bug:
+
+| symptom | cause |
+|---|---|
+| Roadshow's `AddNetInterface` returns rc 20 after doing everything right | `AddDomainNameServer()` was ENOSYS |
+| all ten forms of `ShowNetStatus` refuse | we answered `SBTC_HAVE_DNS_API` FALSE |
+| `GetNetStatus` gets four of six lines wrong | `SBTC_SYSTEM_STATUS` returned only `SBSYSSTAT_Interfaces` |
+
+The first is the one that mattered. `AddNetInterface` is the command in every Roadshow
+user's `S:Network-Startup`: it configured the interface, took a DHCP lease, set the
+netmask and the default route, and then failed on the last step because it hands the
+lease's name servers over through `AddDomainNameServer()`. One vector between rc 0 and
+rc 20.
+
+### What was written
+
+`netstack_dns_server_add()`, `netstack_dns_server_remove()` and
+`netstack_set_domain_name()` in `netstack_dns.c`, and the three vectors over them. A
+server has to land in two places or it only half works -- in the NetX Duo DNS client,
+which resolves, and in `ns_Config.resolver`, which is what every report reads. The DHCP
+path already did exactly that, for the same reason.
+
+`SBTC_HAVE_DNS_API` then goes TRUE, and **the order matters**: flipping it while the
+vectors were stubs would advertise an API we did not have, which is worse than refusing.
+
+`SBTC_SYSTEM_STATUS` now answers all six bits. PTP is never set on purpose -- a
+point-to-point interface here would mean SLIP or PPP.
+
+### The bug the test caught
+
+The first version derived `SBSYSSTAT_DefaultRoute` from `AmiConfig`, and got it wrong on
+the common case: a DHCP machine has `default_gateway` 0 in the configuration and a
+perfectly good default route from the lease. `GetNetStatus` said "the default route is not
+configured" on the same machine, in the same run, where Roadshow's `ShowNetStatus` printed
+`Default gateway address = 10.0.2.2`. It now asks `nx_ip_gateway_address_get()`, as
+`routing.c` and `netstatus.c` already did.
+
+### Measured, Roadshow's binaries under FS-UAE
+
+| | before | after |
+|---|---|---|
+| `ShowNetStatus` | rc 20, "does not support the domain name server query method" | rc 0, full summary with address, gateway and DNS servers |
+| `ShowNetStatus DNS` | rc 20 | rc 0, server table + default domain |
+| `GetNetStatus` | 4 of 6 lines wrong | all six correct |
+
+### Refusals that are the right answer
+
+`RoadshowControl` looks tunables up by Roadshow-private name; `ipf`/`ipfstat`/`ipnat`/
+`ipmon` are Roadshow's own firewall (RESEARCH 9); `NetShutdown` never opens
+`bsdsocket.library` at all and is a private message-port rendezvous. Do not "fix" these.
+
+And one that is not ours: Roadshow's `ping` to off-net hosts reports `DUP!`, because
+FS-UAE's libslirp is built without `CONFIG_BSD` and leaves the host's own IP header inside
+forwarded ICMP replies without restoring `icmp_seq`. Roadshow's ping is the correct
+implementation there; ours passes only because it never validates the payload.
+
+## 56. A flat second of nothing before every DHCP DISCOVER (2026-07-27)
+
+53 recorded us at 100 ticks to a DHCP lease against AmiTCP_NG's 19.5. The wire turned out
+to be innocent: the whole exchange is four packets -- DISCOVER, OFFER, REQUEST, ACK -- with
+no retries, no ARP probe and no timer waited out.
+
+**1,000 ms of the 1,201 ms spent in DHCP was a fixed delay before the first DISCOVER.**
+`_nx_dhcp_interface_start()` sets `nx_dhcp_timeout = NX_IP_PERIODIC_RATE` and lets the
+client's own 1 Hz timer expire before sending anything -- NetX Duo taking the bottom of
+RFC 2131 4.4.1's "wait one to ten seconds to desynchronise DHCP at startup". That guards
+against a herd of diskless workstations sharing a power circuit, which an Amiga is not
+part of.
+
+`ami_ns_dhcp_discover_now()` retimes the client's own timer to one tick with public
+ThreadX calls against a public `NX_DHCP` field -- **no vendored code touched**. The expiry
+runs the INIT case exactly as it would have a second later, and the reschedule period is
+the one NetX Duo created the timer with, so backoff, the `secs` field and the renewal
+times are unchanged. `AMI_ADDRESS_POLL_TICKS` drops 5 -> 1 with it.
+
+**100 -> 46.3 ticks, −53%**, same session back to back, baseline reproducing the recorded
+figure. Every other bench number is unchanged.
+
+### The regression, which is the interesting part
+
+`run-dhcp3927.sh -M killlink` broke. Its phase A needs DHCP to fail, and it allowed itself
+200 ms to settle after link-up before taking the wire away -- free only because the client
+was going to sit still for a second anyway. With DISCOVER going out one tick after
+`nx_dhcp_start()`, DHCP won the race and the mode silently tested nothing.
+
+Deleting the settle exposed a second thing: taking the link down within ~20 ms of link-up
+orphans the SANA-II readers ("reader 1 did not stop; leaking its stack"). **That is a
+pre-existing defect** -- `Offline` at the wrong moment during bring-up does it -- and it is
+still open. The helper now waits on `netstack_interface_dhcp_state()` leaving IDLE rather
+than on a clock, which is deterministic in both directions.
+
+### Next
+
+The ThreadX tick source starts 250 ms late (`TX_AMIGA_TIMER_PROBE_MS`), which is now the
+largest single item: of the 227 ms DHCP takes, ~174 ms is waiting for the clock and ~50 ms
+is the four packets. Shortening it measured inside host-side jitter and widened the
+observed wakeup rate, so it needs n>=5 before anyone claims it.

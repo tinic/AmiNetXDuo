@@ -406,6 +406,12 @@ VOID bsd_ReleaseDomainNameServerList(register struct List *list __asm("a0"),
                                      register struct AmiSocketBase *SocketBase __asm("a6"));
 
 /* LVO -0x216 */
+LONG bsd_AddDomainNameServer(register STRPTR address __asm("a0"),
+                             register struct AmiSocketBase *SocketBase __asm("a6"));
+LONG bsd_RemoveDomainNameServer(register STRPTR address __asm("a0"),
+                                register struct AmiSocketBase *SocketBase __asm("a6"));
+LONG bsd_SetDefaultDomainName(register STRPTR name __asm("a0"),
+                              register struct AmiSocketBase *SocketBase __asm("a6"));
 struct List *bsd_ObtainDomainNameServerList(register struct AmiSocketBase *SocketBase __asm("a6"));
 
 /* LVO -0x21c */

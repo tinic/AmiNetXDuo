@@ -366,3 +366,129 @@ LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)
     return AMI_NET_OK;
 }
 #endif /* AMINETXDUO_IPV6 */
+
+/* ------------------------------------------- changing the server list --- */
+
+/*
+ * Roadshow lets a program add and remove name servers while the stack is
+ * running -- AddDomainNameServer() and friends -- and its own AddNetInterface
+ * uses that to hand over the servers from a lease it obtained itself. Until
+ * these existed, that command configured an interface perfectly and then
+ * returned failure on the last step (docs/RESEARCH.md 55).
+ *
+ * A server has to land in TWO places or it only half works: in the NetX Duo
+ * DNS client, which is what actually resolves, and in ns_Config.resolver,
+ * which is what every report reads -- ShowNetStatus, ObtainDomainNameServerList
+ * and CheckNetConfig all describe the configuration rather than the resolver.
+ * The DHCP path above already does exactly this, for the same reason.
+ */
+
+LONG netstack_dns_server_add(ULONG address)
+{
+    AmiNetStack  *ns = netstack_get();
+    AmiNetCaller  caller;
+    UINT          status;
+    UWORD         i;
+
+    if (address == 0UL)
+        return AMI_NET_ERR_CONFIG;
+    if (ns == NULL)
+        return AMI_NET_ERR_STATE;
+
+    /* Already known is success: adding a server twice is not an error. */
+    for (i = 0; i < ns->ns_Config.resolver.nameserver_count; i++)
+        if (ns->ns_Config.resolver.nameserver[i] == address)
+            return AMI_NET_OK;
+
+    if (ns->ns_Config.resolver.nameserver_count >= AMI_CFG_MAX_NAMESERVERS)
+        return AMI_NET_ERR_NOMEM;
+
+    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+        return AMI_NET_ERR_STATE;
+    status = nx_dns_server_add(&ns->ns_Dns, address);
+    ami_netstack_leave(&caller);
+
+    if (status != NX_SUCCESS)
+        return AMI_NET_ERR_CONFIG;
+
+    ns->ns_Config.resolver.nameserver[ns->ns_Config.resolver.nameserver_count] =
+        address;
+    ns->ns_Config.resolver.nameserver_count++;
+
+    AMI_INFO("netstack: name server %lu.%lu.%lu.%lu added",
+             (unsigned long)((address >> 24) & 0xFFUL),
+             (unsigned long)((address >> 16) & 0xFFUL),
+             (unsigned long)((address >>  8) & 0xFFUL),
+             (unsigned long)(address & 0xFFUL));
+
+    return AMI_NET_OK;
+}
+
+LONG netstack_dns_server_remove(ULONG address)
+{
+    AmiNetStack  *ns = netstack_get();
+    AmiNetCaller  caller;
+    UINT          status;
+    UWORD         i;
+    UWORD         at;
+
+    if (address == 0UL)
+        return AMI_NET_ERR_CONFIG;
+    if (ns == NULL)
+        return AMI_NET_ERR_STATE;
+
+    at = (UWORD)AMI_CFG_MAX_NAMESERVERS;
+    for (i = 0; i < ns->ns_Config.resolver.nameserver_count; i++)
+        if (ns->ns_Config.resolver.nameserver[i] == address)
+        {
+            at = i;
+            break;
+        }
+    if (at >= (UWORD)AMI_CFG_MAX_NAMESERVERS)
+        return AMI_NET_ERR_NONAME;
+
+    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+        return AMI_NET_ERR_STATE;
+    status = nx_dns_server_remove(&ns->ns_Dns, address);
+    ami_netstack_leave(&caller);
+
+    if (status != NX_SUCCESS)
+        return AMI_NET_ERR_CONFIG;
+
+    /* Close the gap: the order of the rest is the order they were added in. */
+    for (i = at; i + 1 < ns->ns_Config.resolver.nameserver_count; i++)
+        ns->ns_Config.resolver.nameserver[i] =
+            ns->ns_Config.resolver.nameserver[i + 1];
+    ns->ns_Config.resolver.nameserver_count--;
+    ns->ns_Config.resolver.nameserver[ns->ns_Config.resolver.nameserver_count] =
+        0UL;
+
+    return AMI_NET_OK;
+}
+
+LONG netstack_set_domain_name(const char *name)
+{
+    AmiNetStack *ns = netstack_get();
+    UWORD        i;
+
+    if (ns == NULL)
+        return AMI_NET_ERR_STATE;
+
+    /* A NULL or empty name clears it, which is how Roadshow documents it. */
+    if (name == NULL || name[0] == '\0')
+    {
+        ns->ns_Config.resolver.domain[0] = '\0';
+        return AMI_NET_OK;
+    }
+
+    for (i = 0; i + 1 < (UWORD)sizeof(ns->ns_Config.resolver.domain) &&
+                name[i] != '\0'; i++)
+        ns->ns_Config.resolver.domain[i] = name[i];
+    ns->ns_Config.resolver.domain[i] = '\0';
+
+    /* Truncating a domain name silently would produce wrong lookups. */
+    if (name[i] != '\0')
+        return AMI_NET_ERR_CONFIG;
+
+    return AMI_NET_OK;
+}

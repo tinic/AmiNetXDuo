@@ -267,6 +267,20 @@ LONG netstack_resolve6(const char *name, ULONG addr_out[4],
 #endif /* AMINETXDUO_IPV6 */
 
 /*
+ * Changing the resolver while the stack runs, for AddDomainNameServer() and
+ * the two beside it. Each updates the NetX Duo DNS client AND the stored
+ * configuration, because those are read by different things -- the client
+ * resolves, the configuration is what every report describes.
+ *
+ * Adding a server that is already present succeeds and changes nothing.
+ * netstack_set_domain_name(NULL) or "" clears the domain; a name too long to
+ * store is refused rather than truncated.
+ */
+LONG netstack_dns_server_add(ULONG address);
+LONG netstack_dns_server_remove(ULONG address);
+LONG netstack_set_domain_name(const char *name);
+
+/*
  * Resolver. Implemented over NetX Duo addons/dns; used by gethostbyname and
  * friends in bsdsocket.library. Blocking, with the timeout in ticks.
  *

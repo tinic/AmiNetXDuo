@@ -111,8 +111,8 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_AddNetMonitorHookTagList, /* -0x1f2 [ 82] AddNetMonitorHookTagList */
     (APTR)bsd_RemoveNetMonitorHook, /* -0x1f8 [ 83] RemoveNetMonitorHook */
     (APTR)bsd_GetNetworkStatistics, /* -0x1fe [ 84] GetNetworkStatistics */
-    (APTR)bsd_enosys,             /* -0x204 [ 85] AddDomainNameServer */
-    (APTR)bsd_enosys,             /* -0x20a [ 86] RemoveDomainNameServer */
+    (APTR)bsd_AddDomainNameServer, /* -0x204 [ 85] AddDomainNameServer */
+    (APTR)bsd_RemoveDomainNameServer, /* -0x20a [ 86] RemoveDomainNameServer */
     (APTR)bsd_ReleaseDomainNameServerList, /* -0x210 [ 87] ReleaseDomainNameServerList */
     (APTR)bsd_ObtainDomainNameServerList, /* -0x216 [ 88] ObtainDomainNameServerList */
     (APTR)bsd_setnetent,          /* -0x21c [ 89] setnetent */
@@ -143,7 +143,7 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_ProcessIsServer,    /* -0x2b2 [114] ProcessIsServer */
     (APTR)bsd_ObtainServerSocket, /* -0x2b8 [115] ObtainServerSocket */
     (APTR)bsd_GetDefaultDomainName, /* -0x2be [116] GetDefaultDomainName */
-    (APTR)bsd_enosys,             /* -0x2c4 [117] SetDefaultDomainName */
+    (APTR)bsd_SetDefaultDomainName, /* -0x2c4 [117] SetDefaultDomainName */
     (APTR)bsd_enosys_ptr,         /* -0x2ca [118] ObtainRoadshowData */
     (APTR)bsd_enosys,             /* -0x2d0 [119] ReleaseRoadshowData */
     (APTR)bsd_enosys_bool,        /* -0x2d6 [120] ChangeRoadshowData */

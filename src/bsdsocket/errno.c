@@ -388,7 +388,20 @@ static const BsdConstTag bsd_const_tags[] =
      * stop it being asked about the six that answer.
      */
     { SBTC_HAVE_STATUS_API,             TRUE  },
-    { SBTC_HAVE_DNS_API,                FALSE },
+    /*
+     * TRUE since roadshow.c gained AddDomainNameServer(),
+     * RemoveDomainNameServer() and SetDefaultDomainName(); the list and its
+     * release were already there, so the DNS management API is now complete
+     * rather than partly stubbed. Same argument as the two above.
+     *
+     * This one gates more than it looks. Every form of Roadshow's
+     * ShowNetStatus -- interfaces, routes, DNS, IP, ICMP, TCP, UDP, sockets,
+     * all ten of them -- refuses outright when this reads FALSE, and works
+     * when it reads TRUE (docs/RESEARCH.md 55). It was answered FALSE while
+     * the three vectors above were ENOSYS, which was the correct answer then
+     * and the wrong one now.
+     */
+    { SBTC_HAVE_DNS_API,                TRUE  },
     { SBTC_IPF_API_VERSION,             0     },
     { SBTC_HAVE_LOCAL_DATABASE_API,     FALSE },
     { SBTC_HAVE_ADDRESS_CONVERSION_API, TRUE  },
@@ -509,9 +522,84 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
             bsd_tag_store(item, by_ref, (ULONG)base->sb_HErrnoPtr);
             return TRUE;
 
+        /*
+         * All six bits, not just the first. Roadshow's GetNetStatus reports
+         * one line per bit and its startup scripts WAIT on them --
+         * "GetNetStatus CHECK=RESOLVER" is the documented way to hold a script
+         * until the network is usable. Answering Interfaces alone made four of
+         * its six lines wrong and made that wait meaningless
+         * (docs/RESEARCH.md 55).
+         *
+         * Everything here is read from the configuration the stack is actually
+         * running, so the answer changes as interfaces come up and go down.
+         *
+         * PTP is never set on purpose: a point-to-point interface here would
+         * mean SLIP or PPP, and this stack does not do either.
+         */
         case SBTC_SYSTEM_STATUS:
-            bsd_tag_store(item, by_ref,
-                          (netstack_get() != NULL) ? SBSYSSTAT_Interfaces : 0);
+        {
+            const AmiConfig *cfg    = netstack_config();
+            ULONG            status = 0UL;
+
+            if (netstack_get() != NULL && cfg != NULL)
+            {
+                UWORD i;
+
+                for (i = 0; i < cfg->interface_count; i++)
+                {
+                    if (!cfg->interfaces[i].configured)
+                        continue;
+
+                    status |= SBSYSSTAT_Interfaces;
+
+                    /*
+                     * Every SANA-II interface we can drive is Ethernet, and
+                     * so carries broadcast. Tie it to the interface being UP
+                     * rather than merely configured: a down interface cannot
+                     * carry a broadcast, and a caller asking this is asking
+                     * what works now.
+                     */
+                    if (netstack_interface_is_up(i))
+                    {
+                        status |= SBSYSSTAT_BCast_Interfaces;
+
+                        /*
+                         * An interface that is up has a route to its own
+                         * network, whether or not anyone added one by hand.
+                         */
+                        status |= SBSYSSTAT_Routes;
+                    }
+                }
+
+                if (cfg->resolver.nameserver_count > 0)
+                    status |= SBSYSSTAT_Resolver;
+
+                /*
+                 * THE RUNNING GATEWAY, NOT THE CONFIGURED ONE. Asking the
+                 * configuration gets this wrong on the common case: a DHCP
+                 * machine has default_gateway 0 in AmiConfig and a perfectly
+                 * good default route that arrived in the lease. Reading the
+                 * config made GetNetStatus say "the default route is not
+                 * configured" on the same machine where Roadshow's own
+                 * ShowNetStatus printed "Default gateway address = 10.0.2.2",
+                 * which is how this was caught. routing.c and netstatus.c both
+                 * ask NetX Duo for the same reason.
+                 */
+                {
+                    NX_IP *ip = netstack_ip();
+                    ULONG  gateway = 0UL;
+
+                    if (ip != NULL &&
+                        nx_ip_gateway_address_get(ip, &gateway) == NX_SUCCESS &&
+                        gateway != 0UL)
+                    {
+                        status |= (SBSYSSTAT_DefaultRoute | SBSYSSTAT_Routes);
+                    }
+                }
+            }
+
+            bsd_tag_store(item, by_ref, status);
+        }
             return TRUE;
 
         default:

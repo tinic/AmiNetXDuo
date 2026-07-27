@@ -171,6 +171,67 @@ struct List *bsd_ObtainDomainNameServerList(
     return &out->bdl_List;
 }
 
+/*
+ * The three that CHANGE the resolver, and why they matter more than they look:
+ * Roadshow's own AddNetInterface hands over the name servers from the lease it
+ * obtained by calling AddDomainNameServer(). With these as ENOSYS stubs it
+ * configured the interface, took a DHCP lease, set the netmask and the default
+ * route -- and then returned rc 20 on the last step, so the command in every
+ * Roadshow user's S:Network-Startup reported failure after doing everything
+ * right (docs/RESEARCH.md 55).
+ *
+ * The address arrives as a dotted quad, not as an in_addr: Roadshow's autodoc
+ * spells the parameter "char *address", and its own commands pass the text
+ * straight through from their arguments.
+ */
+
+LONG bsd_AddDomainNameServer(register STRPTR address __asm("a0"),
+                             register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    ULONG addr;
+
+    if (address == NULL || !ami_config_parse_ip((const char *)address, &addr))
+        return bsd_fail(SocketBase, AMI_EINVAL);
+
+    switch (netstack_dns_server_add(addr))
+    {
+        case AMI_NET_OK:          return 0;
+        case AMI_NET_ERR_NOMEM:   return bsd_fail(SocketBase, AMI_ENOBUFS);
+        case AMI_NET_ERR_STATE:   return bsd_fail(SocketBase, AMI_ENETDOWN);
+        default:                  return bsd_fail(SocketBase, AMI_EINVAL);
+    }
+}
+
+LONG bsd_RemoveDomainNameServer(register STRPTR address __asm("a0"),
+                                register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    ULONG addr;
+
+    if (address == NULL || !ami_config_parse_ip((const char *)address, &addr))
+        return bsd_fail(SocketBase, AMI_EINVAL);
+
+    switch (netstack_dns_server_remove(addr))
+    {
+        case AMI_NET_OK:          return 0;
+        /* Removing one that was never there is ESRCH, not a parse failure. */
+        case AMI_NET_ERR_NONAME:  return bsd_fail(SocketBase, AMI_ESRCH);
+        case AMI_NET_ERR_STATE:   return bsd_fail(SocketBase, AMI_ENETDOWN);
+        default:                  return bsd_fail(SocketBase, AMI_EINVAL);
+    }
+}
+
+LONG bsd_SetDefaultDomainName(register STRPTR name __asm("a0"),
+                              register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    switch (netstack_set_domain_name((const char *)name))
+    {
+        case AMI_NET_OK:          return 0;
+        case AMI_NET_ERR_STATE:   return bsd_fail(SocketBase, AMI_ENETDOWN);
+        /* Too long to store: refused rather than silently truncated. */
+        default:                  return bsd_fail(SocketBase, AMI_EINVAL);
+    }
+}
+
 VOID bsd_ReleaseDomainNameServerList(register struct List *list __asm("a0"),
                                      register struct AmiSocketBase *SocketBase __asm("a6"))
 {
