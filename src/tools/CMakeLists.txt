@@ -22,16 +22,35 @@ set(TOOLS_WARNINGS -Wall -Wextra)
 # The commands are built for size, the libraries for speed.
 #
 # Nothing here is a hot path: ping waits on the wire, ShowNetStatus prints a
-# table once.  -Os buys 14-17% off every command against -O2, measured on the
-# pinned toolchain, and there is no throughput number it can move -- the
+# table once, and there is no throughput number the level can move -- the
 # libraries that actually move bytes are compiled separately.
+#
+# Re-measured 2026-07-27 over all 21 commands, and it does NOT reproduce the
+# "14-17% against -O2" this comment used to claim.  Against -O3 the saving is
+# 9.0% (774,096 vs 850,968 bytes total, -3.4% on host to -15.8% on NetTrace);
+# against -O2 it is 4.3%.  Two caveats before treating either number as the
+# last word: the old figure says it was taken on the PINNED toolchain and this
+# one was taken on the local one, which ships a different crt0 and may differ
+# elsewhere; and -ffunction-sections with --gc-sections has been added since,
+# which already removes much of what -Os used to save.  Both numbers may be
+# right about the tree they were taken on.
 #
 # Appended after CMAKE_C_FLAGS_RELEASE so it wins the duplicate -O.  There are
 # two duplicates to win, in fact: CMake's own GNU defaults append "-O3 -DNDEBUG"
 # after whatever the toolchain file puts in CMAKE_C_FLAGS_RELEASE_INIT, so the
 # libraries are -O3 builds and not the -O2 that file asks for.  See
 # docs/RESEARCH.md §21.6 -- it is a real finding and deliberately left alone.
-set(TOOLS_OPTIMISE $<$<CONFIG:Release>:-Os>)
+#
+# AMINETXDUO_TOOLS_OPTIMISE makes the level measurable instead of a constant
+# somebody has to edit.  Note it governs a command's OWN objects only: a tool
+# that asks for NX links aminetxduo_sana2, aminetxduo_config, threadx_port and
+# netxduo_port, which are built at the tree's level -- so a command is a MIX,
+# and its size moves when the global level moves even with this pinned.  That
+# is measured, not assumed: ping is 34,652 bytes in an -O2 tree and 35,572 in
+# an -O3 one with -Os set here in both.
+set(AMINETXDUO_TOOLS_OPTIMISE "-Os" CACHE STRING
+    "Optimisation level for the commands' own objects")
+set(TOOLS_OPTIMISE $<$<CONFIG:Release>:${AMINETXDUO_TOOLS_OPTIMISE}>)
 
 # The libnix crt0.o register-save bug that made every command crash on return
 # to the Shell is repaired in the TOOLCHAIN, by tools/fix-toolchain-crt0.py at
