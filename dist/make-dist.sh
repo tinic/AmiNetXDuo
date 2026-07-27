@@ -268,7 +268,11 @@ fi
 
 # ------------------------------------------------------------- the .readme --
 
-sed -e "s|@VERSION@|$VERSION_FIELD|g" -e "s|@AUTHOR@|$AUTHOR|g" \
+# Lines beginning with ';' are notes to whoever edits the template -- how the
+# header works, how Replaces: works. They are not for somebody reading the
+# description on Aminet, so they are stripped from the generated file rather
+# than shipped as clutter under the header.
+sed -e "s|@VERSION@|$VERSION_FIELD|g" -e "s|@AUTHOR@|$AUTHOR|g" -e "/^;/d" \
     "$ROOT/dist/AmiNetXDuo.readme" > "$OUTDIR/AmiNetXDuo.readme"
 cp "$OUTDIR/AmiNetXDuo.readme" "$TREE/AmiNetXDuo.readme"
 cp "$INSTALL/Document.info" "$TREE/AmiNetXDuo.readme.info"

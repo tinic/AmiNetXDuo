@@ -50,7 +50,16 @@ Included:
   GetNetStatus          the scriptable half of ShowNetStatus
   NetShutdown           stop the network cleanly
   AddNetRoute, DeleteNetRoute   where packets go that are not for this network
+  curl                  the real curl, in a Clients drawer
+  ssh                   an SSH client, in the same drawer
   an Installer script   asks two questions and writes a working config
+
+curl and ssh are ports rather than commands of ours, so the installer keeps
+them out of C: and puts them beside the documentation.  Each needs
+mathieeedoubbas.library in LIBS: -- Commodore's, so not ours to ship, but on
+every Workbench -- and a Shell with a much larger stack than the default:
+type `stack 200000` once before running them.  The ReadMe beside them says
+the same.
 
 Configuration follows Roadshow's layout -- DEVS:NetInterfaces/<name>,
 DEVS:Internet/routes, DEVS:Internet/name_resolution and the standard
