@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.20)
 # plain vX.Y.Z.
 #
 # 0.x on purpose: nothing has run on real hardware yet.
-project(AmiNetXDuo VERSION 0.5.2 LANGUAGES C ASM)
+project(AmiNetXDuo VERSION 0.5.3 LANGUAGES C ASM)
 
 # ---------------------------------------------------------------- options ---
 
