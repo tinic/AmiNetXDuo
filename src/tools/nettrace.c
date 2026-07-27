@@ -153,9 +153,11 @@ static LONG nt_bpf_read(struct Library *base, LONG channel, APTR buf, LONG len)
     register APTR            a0  __asm("a0") = buf;
     register LONG            d1  __asm("d1") = len;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-378:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1)
                       : "a1", "cc", "memory");
     return res;
@@ -170,9 +172,11 @@ static LONG nt_bpf_ioctl(struct Library *base, LONG channel, ULONG cmd,
     register ULONG           d1  __asm("d1") = cmd;
     register APTR            a0  __asm("a0") = buf;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-402:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (a0)
                       : "a1", "cc", "memory");
     return res;

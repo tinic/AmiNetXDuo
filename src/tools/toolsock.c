@@ -9,6 +9,17 @@
  * the two ever disagree, one of them is a bug and this file is the place it
  * shows up.
  *
+ * AND EVERY STUB DECLARES d1/a0/a1 WRITTEN, WHICH IS NOT DECORATION.
+ *
+ * An AmigaOS library call clobbers d0, d1, a0 and a1.  A register that is only
+ * an INPUT operand is one GCC may assume the asm leaves alone, so a stub that
+ * passes an argument in d1 and does not also declare d1 written lets GCC keep
+ * a value there across the `jsr` -- and reuse, or spill, whatever the library
+ * left behind.  That is not theoretical: it turned IoctlSocket(FIONBIO) into a
+ * call with a garbage request code and wedged a test for a day
+ * (docs/RESEARCH.md 42).  The `_clob_*` dummies bound to those registers and
+ * listed as outputs are the NDK's own idiom, from inline/macros.h.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -69,9 +80,10 @@ LONG tool_sock_socket(struct Library *base, LONG domain, LONG type, LONG proto)
     register LONG            d1  __asm("d1") = type;
     register LONG            d2  __asm("d2") = proto;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
 
     __asm __volatile ("jsr a6@(-30:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (d2)
                       : "a0", "a1", "cc", "memory");
     return res;
@@ -85,9 +97,11 @@ LONG tool_sock_bind(struct Library *base, LONG s, const ToolSockAddr *sa)
     register CONST_APTR      a0  __asm("a0") = (CONST_APTR)sa;
     register LONG            d1  __asm("d1") = (LONG)sizeof(*sa);
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-36:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1)
                       : "a1", "cc", "memory");
     return res;
@@ -100,9 +114,10 @@ LONG tool_sock_listen(struct Library *base, LONG s, LONG backlog)
     register LONG            d0  __asm("d0") = s;
     register LONG            d1  __asm("d1") = backlog;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
 
     __asm __volatile ("jsr a6@(-42:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1)
                       : "r" (a6), "r" (d0), "r" (d1)
                       : "a0", "a1", "cc", "memory");
     return res;
@@ -118,9 +133,11 @@ LONG tool_sock_accept(struct Library *base, LONG s, ToolSockAddr *from)
     register APTR            a0  __asm("a0") = (APTR)from;
     register APTR            a1  __asm("a1") = (APTR)&namelen;
     register LONG            res __asm("d0");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
 
     __asm __volatile ("jsr a6@(-48:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (a1)
                       : "d1", "cc", "memory");
     return res;
@@ -134,9 +151,11 @@ LONG tool_sock_connect(struct Library *base, LONG s, const ToolSockAddr *sa)
     register CONST_APTR      a0  __asm("a0") = (CONST_APTR)sa;
     register LONG            d1  __asm("d1") = (LONG)sizeof(*sa);
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-54:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1)
                       : "a1", "cc", "memory");
     return res;
@@ -154,9 +173,12 @@ LONG tool_sock_sendto(struct Library *base, LONG s, const void *buf, LONG len,
     register CONST_APTR      a1  __asm("a1") = (CONST_APTR)to;
     register LONG            d3  __asm("d3") = (LONG)sizeof(*to);
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
 
     __asm __volatile ("jsr a6@(-60:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1), "r" (d2),
                         "r" (a1), "r" (d3)
                       : "cc", "memory");
@@ -172,9 +194,11 @@ LONG tool_sock_send(struct Library *base, LONG s, const void *buf, LONG len)
     register LONG            d1  __asm("d1") = len;
     register LONG            d2  __asm("d2") = 0;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-66:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1), "r" (d2)
                       : "a1", "cc", "memory");
     return res;
@@ -194,9 +218,12 @@ LONG tool_sock_recvfrom(struct Library *base, LONG s, void *buf, LONG len,
     register APTR            a1  __asm("a1") = (APTR)from;
     register APTR            a2  __asm("a2") = (APTR)&namelen;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
 
     __asm __volatile ("jsr a6@(-72:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1), "r" (d2),
                         "r" (a1), "r" (a2)
                       : "cc", "memory");
@@ -212,9 +239,11 @@ LONG tool_sock_recv(struct Library *base, LONG s, void *buf, LONG len)
     register LONG            d1  __asm("d1") = len;
     register LONG            d2  __asm("d2") = 0;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-78:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1), "r" (d2)
                       : "a1", "cc", "memory");
     return res;
@@ -227,9 +256,10 @@ LONG tool_sock_shutdown(struct Library *base, LONG s, LONG how)
     register LONG            d0  __asm("d0") = s;
     register LONG            d1  __asm("d1") = how;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
 
     __asm __volatile ("jsr a6@(-84:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1)
                       : "r" (a6), "r" (d0), "r" (d1)
                       : "a0", "a1", "cc", "memory");
     return res;
@@ -246,9 +276,11 @@ LONG tool_sock_setsockopt(struct Library *base, LONG s, LONG level, LONG name,
     register CONST_APTR      a0  __asm("a0") = (CONST_APTR)val;
     register LONG            d3  __asm("d3") = len;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-90:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (d2), "r" (a0),
                         "r" (d3)
                       : "a1", "cc", "memory");
@@ -266,9 +298,12 @@ LONG tool_sock_getsockopt(struct Library *base, LONG s, LONG level, LONG name,
     register APTR            a0  __asm("a0") = (APTR)val;
     register APTR            a1  __asm("a1") = (APTR)len;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
 
     __asm __volatile ("jsr a6@(-96:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (d2), "r" (a0),
                         "r" (a1)
                       : "cc", "memory");
@@ -285,9 +320,11 @@ LONG tool_sock_getsockname(struct Library *base, LONG s, ToolSockAddr *sa)
     register APTR            a0  __asm("a0") = (APTR)sa;
     register APTR            a1  __asm("a1") = (APTR)&namelen;
     register LONG            res __asm("d0");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
 
     __asm __volatile ("jsr a6@(-102:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (a1)
                       : "d1", "cc", "memory");
     return res;
@@ -301,9 +338,11 @@ LONG tool_sock_ioctl(struct Library *base, LONG s, ULONG req, void *argp)
     register ULONG           d1  __asm("d1") = req;
     register APTR            a0  __asm("a0") = (APTR)argp;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-114:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (a0)
                       : "a1", "cc", "memory");
     return res;
@@ -335,9 +374,12 @@ LONG tool_sock_select(struct Library *base, LONG nfds, ToolFdSet *readfds,
     register APTR            a3  __asm("a3") = (APTR)tv;
     register ULONG          *d1  __asm("d1") = NULL;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
 
     __asm __volatile ("jsr a6@(-126:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (a1), "r" (a2),
                         "r" (a3), "r" (d1)
                       : "cc", "memory");
@@ -363,9 +405,10 @@ ToolHostEnt *tool_sock_gethostbyname(struct Library *base, const char *name)
     register struct Library *a6  __asm("a6") = base;
     register const char     *a0  __asm("a0") = name;
     register ToolHostEnt    *res __asm("d0");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-210:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_a0)
                       : "r" (a6), "r" (a0)
                       : "d1", "a1", "cc", "memory");
     return res;
@@ -379,9 +422,11 @@ ToolServEnt *tool_sock_getservbyname(struct Library *base, const char *name,
     register const char     *a0  __asm("a0") = name;
     register const char     *a1  __asm("a1") = proto;
     register ToolServEnt    *res __asm("d0");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
 
     __asm __volatile ("jsr a6@(-234:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r" (a6), "r" (a0), "r" (a1)
                       : "d1", "cc", "memory");
     return res;

@@ -137,8 +137,9 @@ static LONG s_socket(LONG dom, LONG type, LONG proto)
     register LONG d1 __asm("d1") = type;
     register LONG d2 __asm("d2") = proto;
     register LONG r  __asm("d0");
+    register LONG _clob_d1 __asm("d1");
 
-    __asm __volatile ("jsr a6@(-30:W)" : "=r"(r)
+    __asm __volatile ("jsr a6@(-30:W)" : "=r"(r), "=r" (_clob_d1)
                       : "r"(a6), "r"(d0), "r"(d1), "r"(d2)
                       : "a0", "a1", "cc", "memory");
     return r;
@@ -151,8 +152,10 @@ static LONG s_bind(LONG s, const SockAddrIn *a)
     register CONST_APTR  a0 __asm("a0") = (CONST_APTR)a;
     register LONG        d1 __asm("d1") = (LONG)sizeof(*a);
     register LONG        r  __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
-    __asm __volatile ("jsr a6@(-36:W)" : "=r"(r)
+    __asm __volatile ("jsr a6@(-36:W)" : "=r"(r), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r"(a6), "r"(d0), "r"(a0), "r"(d1)
                       : "a1", "cc", "memory");
     return r;
@@ -164,8 +167,9 @@ static LONG s_listen(LONG s, LONG backlog)
     register LONG d0 __asm("d0") = s;
     register LONG d1 __asm("d1") = backlog;
     register LONG r  __asm("d0");
+    register LONG _clob_d1 __asm("d1");
 
-    __asm __volatile ("jsr a6@(-42:W)" : "=r"(r)
+    __asm __volatile ("jsr a6@(-42:W)" : "=r"(r), "=r" (_clob_d1)
                       : "r"(a6), "r"(d0), "r"(d1)
                       : "a0", "a1", "cc", "memory");
     return r;
@@ -178,8 +182,10 @@ static LONG s_accept(LONG s)
     register APTR a0 __asm("a0") = NULL;
     register APTR a1 __asm("a1") = NULL;
     register LONG r  __asm("d0");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
 
-    __asm __volatile ("jsr a6@(-48:W)" : "=r"(r)
+    __asm __volatile ("jsr a6@(-48:W)" : "=r"(r), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r"(a6), "r"(d0), "r"(a0), "r"(a1)
                       : "cc", "memory");
     return r;
@@ -192,8 +198,10 @@ static LONG s_connect(LONG s, const SockAddrIn *a)
     register CONST_APTR a0 __asm("a0") = (CONST_APTR)a;
     register LONG       d1 __asm("d1") = (LONG)sizeof(*a);
     register LONG       r  __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
-    __asm __volatile ("jsr a6@(-54:W)" : "=r"(r)
+    __asm __volatile ("jsr a6@(-54:W)" : "=r"(r), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r"(a6), "r"(d0), "r"(a0), "r"(d1)
                       : "a1", "cc", "memory");
     return r;
@@ -207,8 +215,10 @@ static LONG s_send(LONG s, const void *buf, LONG len, LONG flags)
     register LONG       d1 __asm("d1") = len;
     register LONG       d2 __asm("d2") = flags;
     register LONG       r  __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
-    __asm __volatile ("jsr a6@(-66:W)" : "=r"(r)
+    __asm __volatile ("jsr a6@(-66:W)" : "=r"(r), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r"(a6), "r"(d0), "r"(a0), "r"(d1), "r"(d2)
                       : "a1", "cc", "memory");
     return r;
@@ -222,8 +232,10 @@ static LONG s_recv(LONG s, void *buf, LONG len, LONG flags)
     register LONG d1 __asm("d1") = len;
     register LONG d2 __asm("d2") = flags;
     register LONG r  __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
-    __asm __volatile ("jsr a6@(-78:W)" : "=r"(r)
+    __asm __volatile ("jsr a6@(-78:W)" : "=r"(r), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r"(a6), "r"(d0), "r"(a0), "r"(d1), "r"(d2)
                       : "a1", "cc", "memory");
     return r;
@@ -235,8 +247,9 @@ static LONG s_shutdown(LONG s, LONG how)
     register LONG d0 __asm("d0") = s;
     register LONG d1 __asm("d1") = how;
     register LONG r  __asm("d0");
+    register LONG _clob_d1 __asm("d1");
 
-    __asm __volatile ("jsr a6@(-84:W)" : "=r"(r)
+    __asm __volatile ("jsr a6@(-84:W)" : "=r"(r), "=r" (_clob_d1)
                       : "r"(a6), "r"(d0), "r"(d1)
                       : "a0", "a1", "cc", "memory");
     return r;
@@ -251,8 +264,10 @@ static LONG s_setsockopt(LONG s, LONG level, LONG name, const void *v, LONG n)
     register CONST_APTR a0 __asm("a0") = (CONST_APTR)v;
     register LONG       d3 __asm("d3") = n;
     register LONG       r  __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
-    __asm __volatile ("jsr a6@(-90:W)" : "=r"(r)
+    __asm __volatile ("jsr a6@(-90:W)" : "=r"(r), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r"(a6), "r"(d0), "r"(d1), "r"(d2), "r"(a0), "r"(d3)
                       : "a1", "cc", "memory");
     return r;
@@ -265,8 +280,10 @@ static LONG s_ioctl(LONG s, ULONG req, void *arg)
     register ULONG d1 __asm("d1") = req;
     register APTR  a0 __asm("a0") = arg;
     register LONG  r  __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
-    __asm __volatile ("jsr a6@(-114:W)" : "=r"(r)
+    __asm __volatile ("jsr a6@(-114:W)" : "=r"(r), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r"(a6), "r"(d0), "r"(d1), "r"(a0)
                       : "a1", "cc", "memory");
     return r;
@@ -298,8 +315,11 @@ static LONG s_waitselect(LONG nfds, DrillFdSet *rd, DrillFdSet *wr,
     register APTR  a3 __asm("a3") = tv;
     register ULONG d1 __asm("d1") = 0;
     register LONG  r  __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
 
-    __asm __volatile ("jsr a6@(-126:W)" : "=r"(r)
+    __asm __volatile ("jsr a6@(-126:W)" : "=r"(r), "=r" (_clob_d1), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r"(a6), "r"(d0), "r"(a0), "r"(a1), "r"(a2),
                         "r"(a3), "r"(d1)
                       : "cc", "memory");

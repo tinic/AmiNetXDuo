@@ -68,9 +68,10 @@ static LONG p_socket(struct Library *base, LONG domain, LONG type, LONG proto)
     register LONG            d1  __asm("d1") = type;
     register LONG            d2  __asm("d2") = proto;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
 
     __asm __volatile ("jsr a6@(-30:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (d2)
                       : "a0", "a1", "cc", "memory");
     return res;
@@ -87,9 +88,12 @@ static LONG p_sendto(struct Library *base, LONG s, const void *buf, LONG len,
     register CONST_APTR      a1  __asm("a1") = (CONST_APTR)to;
     register LONG            d3  __asm("d3") = (LONG)sizeof(*to);
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
 
     __asm __volatile ("jsr a6@(-60:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1), "r" (d2),
                         "r" (a1), "r" (d3)
                       : "cc", "memory");
@@ -106,9 +110,11 @@ static LONG p_setsockopt(struct Library *base, LONG s, LONG level, LONG name,
     register CONST_APTR      a0  __asm("a0") = (CONST_APTR)val;
     register LONG            d3  __asm("d3") = len;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-90:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (d2), "r" (a0),
                         "r" (d3)
                       : "a1", "cc", "memory");
@@ -125,9 +131,12 @@ static LONG p_getsockopt(struct Library *base, LONG s, LONG level, LONG name,
     register APTR            a0  __asm("a0") = (APTR)val;
     register APTR            a1  __asm("a1") = (APTR)len;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
 
     __asm __volatile ("jsr a6@(-96:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (d2), "r" (a0),
                         "r" (a1)
                       : "cc", "memory");

@@ -126,8 +126,9 @@ static LONG s_socket(LONG dom, LONG type, LONG proto)
     register LONG d1 __asm("d1") = type;
     register LONG d2 __asm("d2") = proto;
     register LONG r  __asm("d0");
+    register LONG _clob_d1 __asm("d1");
 
-    __asm __volatile ("jsr a6@(-30:W)" : "=r"(r)
+    __asm __volatile ("jsr a6@(-30:W)" : "=r"(r), "=r" (_clob_d1)
                       : "r"(a6), "r"(d0), "r"(d1), "r"(d2)
                       : "a0", "a1", "cc", "memory");
     return r;
@@ -140,8 +141,10 @@ static LONG s_connect(LONG s, const SockAddrIn *a)
     register CONST_APTR a0 __asm("a0") = (CONST_APTR)a;
     register LONG       d1 __asm("d1") = (LONG)sizeof(*a);
     register LONG       r  __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
-    __asm __volatile ("jsr a6@(-54:W)" : "=r"(r)
+    __asm __volatile ("jsr a6@(-54:W)" : "=r"(r), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r"(a6), "r"(d0), "r"(a0), "r"(d1)
                       : "a1", "cc", "memory");
     return r;
@@ -155,8 +158,10 @@ static LONG s_recv(LONG s, void *buf, LONG len, LONG flags)
     register LONG d1 __asm("d1") = len;
     register LONG d2 __asm("d2") = flags;
     register LONG r  __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
-    __asm __volatile ("jsr a6@(-78:W)" : "=r"(r)
+    __asm __volatile ("jsr a6@(-78:W)" : "=r"(r), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r"(a6), "r"(d0), "r"(a0), "r"(d1), "r"(d2)
                       : "a1", "cc", "memory");
     return r;
@@ -169,8 +174,10 @@ static LONG s_ioctl(LONG s, ULONG req, void *arg)
     register ULONG d1 __asm("d1") = req;
     register APTR  a0 __asm("a0") = arg;
     register LONG  r  __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
-    __asm __volatile ("jsr a6@(-114:W)" : "=r"(r)
+    __asm __volatile ("jsr a6@(-114:W)" : "=r"(r), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r"(a6), "r"(d0), "r"(d1), "r"(a0)
                       : "a1", "cc", "memory");
     return r;

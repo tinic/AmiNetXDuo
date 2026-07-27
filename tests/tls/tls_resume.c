@@ -148,9 +148,10 @@ static LONG bsd_socket(struct Library *base, LONG domain, LONG type, LONG proto)
     register LONG            d1 __asm("d1") = type;
     register LONG            d2 __asm("d2") = proto;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
 
     __asm __volatile ("jsr a6@(-30:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (d2)
                       : "a0", "a1", "cc", "memory");
     return res;
@@ -163,9 +164,11 @@ static LONG bsd_connect(struct Library *base, LONG sock, APTR name, LONG len)
     register APTR            a0 __asm("a0") = name;
     register LONG            d1 __asm("d1") = len;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-54:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1)
                       : "a1", "cc", "memory");
     return res;
@@ -189,9 +192,10 @@ static struct r_hostent *bsd_gethostbyname(struct Library *base, const char *nam
     register struct Library   *a6 __asm("a6") = base;
     register const char       *a0 __asm("a0") = name;
     register struct r_hostent *res __asm("d0");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-210:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_a0)
                       : "r" (a6), "r" (a0)
                       : "d1", "a1", "cc", "memory");
     return res;

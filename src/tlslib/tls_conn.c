@@ -1093,9 +1093,12 @@ LONG tls_TLSWaitSelect(register struct TLSSelect   *sel     __asm("a0"),
         register LONG   d0 __asm("d0") = sel->ts_NFds;
         register ULONG *d1 __asm("d1") = sel->ts_SignalMask;
         register LONG   res __asm("d0");
+        register LONG _clob_d1 __asm("d1");
+        register LONG _clob_a0 __asm("a0");
+        register LONG _clob_a1 __asm("a1");
 
         __asm __volatile ("jsr a6@(-126:W)"     /* -0x07e, WaitSelect */
-                          : "=r" (res)
+                          : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0), "=r" (_clob_a1)
                           : "r" (a6), "r" (a0), "r" (a1), "r" (a2),
                             "r" (a3), "r" (d0), "r" (d1)
                           : "cc", "memory");

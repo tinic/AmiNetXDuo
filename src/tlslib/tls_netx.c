@@ -60,9 +60,11 @@ static LONG tls_obtain_context(APTR socket_base, const AmiNetXDuoContext **out)
     register ULONG                     d0 __asm("d0") = AMI_NXD_CONTEXT_MAGIC;
     register ULONG                     d1 __asm("d1") = AMI_NXD_CONTEXT_VERSION;
     register LONG                      res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-864:W)"     /* -0x360, AMI_NXD_CONTEXT_LVO */
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (a0), "r" (d0), "r" (d1)
                       : "a1", "cc", "memory");
     return res;

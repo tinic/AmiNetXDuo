@@ -165,9 +165,10 @@ static LONG e_socket(struct Library *base, LONG dom, LONG type, LONG proto)
     register LONG            d1  __asm("d1") = type;
     register LONG            d2  __asm("d2") = proto;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
 
     __asm __volatile ("jsr a6@(-30:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (d2)
                       : "a0", "a1", "cc", "memory");
     return res;
@@ -180,9 +181,11 @@ static LONG e_bind(struct Library *base, LONG s, EndAddr *sa)
     register APTR            a0  __asm("a0") = sa;
     register LONG            d1  __asm("d1") = (LONG)sizeof(EndAddr);
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-36:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1)
                       : "a1", "cc", "memory");
     return res;
@@ -194,9 +197,10 @@ static LONG e_listen(struct Library *base, LONG s, LONG backlog)
     register LONG            d0  __asm("d0") = s;
     register LONG            d1  __asm("d1") = backlog;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
 
     __asm __volatile ("jsr a6@(-42:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1)
                       : "r" (a6), "r" (d0), "r" (d1)
                       : "a0", "a1", "cc", "memory");
     return res;
@@ -209,9 +213,11 @@ static LONG e_accept(struct Library *base, LONG s)
     register APTR            a0  __asm("a0") = NULL;
     register APTR            a1  __asm("a1") = NULL;
     register LONG            res __asm("d0");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
 
     __asm __volatile ("jsr a6@(-48:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (a1)
                       : "cc", "memory");
     return res;
@@ -224,9 +230,11 @@ static LONG e_connect(struct Library *base, LONG s, EndAddr *sa)
     register APTR            a0  __asm("a0") = sa;
     register LONG            d1  __asm("d1") = (LONG)sizeof(EndAddr);
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-54:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1)
                       : "a1", "cc", "memory");
     return res;
@@ -241,9 +249,11 @@ static LONG e_send(struct Library *base, LONG s, const UBYTE *buf, LONG len,
     register LONG            d1  __asm("d1") = len;
     register LONG            d2  __asm("d2") = flags;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-66:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1), "r" (d2)
                       : "a1", "cc", "memory");
     return res;
@@ -258,9 +268,11 @@ static LONG e_recv(struct Library *base, LONG s, UBYTE *buf, LONG len,
     register LONG            d1  __asm("d1") = len;
     register LONG            d2  __asm("d2") = flags;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-78:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1), "r" (d2)
                       : "a1", "cc", "memory");
     return res;
@@ -276,9 +288,11 @@ static LONG e_setsockopt(struct Library *base, LONG s, LONG level, LONG name,
     register APTR            a0  __asm("a0") = val;
     register LONG            d3  __asm("d3") = len;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-90:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (d2), "r" (a0),
                         "r" (d3)
                       : "a1", "cc", "memory");
@@ -292,9 +306,11 @@ static LONG e_ioctl(struct Library *base, LONG s, ULONG req, APTR argp)
     register ULONG           d1  __asm("d1") = req;
     register APTR            a0  __asm("a0") = argp;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-114:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (a0)
                       : "a1", "cc", "memory");
     return res;
@@ -333,9 +349,11 @@ static LONG e_query(struct Library *base, ULONG what, APTR buf, ULONG size)
     register APTR            a0  __asm("a0") = buf;
     register ULONG           d2  __asm("d2") = size;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-870:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (a0), "r" (d2)
                       : "a1", "cc", "memory");
     return res;

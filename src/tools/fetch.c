@@ -137,9 +137,10 @@ static LONG sock_socket(struct Library *base, LONG domain, LONG type, LONG proto
     register LONG            d1  __asm("d1") = type;
     register LONG            d2  __asm("d2") = proto;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
 
     __asm __volatile ("jsr a6@(-30:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (d2)
                       : "a0", "a1", "cc", "memory");
     return res;
@@ -152,9 +153,11 @@ static LONG sock_connect(struct Library *base, LONG s, APTR name, LONG len)
     register APTR            a0  __asm("a0") = name;
     register LONG            d1  __asm("d1") = len;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-54:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1)
                       : "a1", "cc", "memory");
     return res;
@@ -168,9 +171,11 @@ static LONG sock_send(struct Library *base, LONG s, CONST_APTR buf, LONG len)
     register LONG            d1  __asm("d1") = len;
     register LONG            d2  __asm("d2") = 0;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-66:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1), "r" (d2)
                       : "a1", "cc", "memory");
     return res;
@@ -184,9 +189,11 @@ static LONG sock_recv(struct Library *base, LONG s, APTR buf, LONG len)
     register LONG            d1  __asm("d1") = len;
     register LONG            d2  __asm("d2") = 0;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-78:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1), "r" (d2)
                       : "a1", "cc", "memory");
     return res;
@@ -216,9 +223,12 @@ static LONG sock_waitselect(struct Library *base, LONG nfds, APTR readfds,
     register struct FetchTimeval *a3 __asm("a3") = tv;
     register ULONG              *d1  __asm("d1") = NULL;
     register LONG                res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
 
     __asm __volatile ("jsr a6@(-126:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (a1), "r" (a2),
                         "r" (a3), "r" (d1)
                       : "cc", "memory");
@@ -231,9 +241,10 @@ static struct FetchHostEnt *sock_gethostbyname(struct Library *base,
     register struct Library     *a6  __asm("a6") = base;
     register const char         *a0  __asm("a0") = name;
     register struct FetchHostEnt *res __asm("d0");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-210:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_a0)
                       : "r" (a6), "r" (a0)
                       : "d1", "a1", "cc", "memory");
     return res;

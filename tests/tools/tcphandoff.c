@@ -90,9 +90,10 @@ static LONG call_socket(LONG domain, LONG type, LONG proto)
     register LONG            d1  __asm("d1") = type;
     register LONG            d2  __asm("d2") = proto;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
 
     __asm __volatile ("jsr a6@(-30:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (d2)
                       : "a0", "a1", "cc", "memory");
     return res;
@@ -105,9 +106,11 @@ static LONG call_bind(LONG s, struct sockaddr_in_local *sa, LONG len)
     register APTR            a0  __asm("a0") = sa;
     register LONG            d1  __asm("d1") = len;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-36:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1)
                       : "a1", "d2", "cc", "memory");
     return res;
@@ -119,9 +122,10 @@ static LONG call_listen(LONG s, LONG backlog)
     register LONG            d0  __asm("d0") = s;
     register LONG            d1  __asm("d1") = backlog;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
 
     __asm __volatile ("jsr a6@(-42:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1)
                       : "r" (a6), "r" (d0), "r" (d1)
                       : "a0", "a1", "d2", "cc", "memory");
     return res;
@@ -134,9 +138,11 @@ static LONG call_accept(LONG s)
     register APTR            a0  __asm("a0") = NULL;
     register APTR            a1  __asm("a1") = NULL;
     register LONG            res __asm("d0");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
 
     __asm __volatile ("jsr a6@(-48:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (a1)
                       : "d1", "d2", "cc", "memory");
     return res;
@@ -151,9 +157,11 @@ static LONG call_setsockopt(LONG s, LONG level, LONG name, APTR val, LONG len)
     register APTR            a0  __asm("a0") = val;
     register LONG            d3  __asm("d3") = len;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-90:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (d2), "r" (a0),
                         "r" (d3)
                       : "a1", "cc", "memory");
@@ -179,9 +187,10 @@ static LONG call_release_copy(LONG s, LONG id)
     register LONG            d0  __asm("d0") = s;
     register LONG            d1  __asm("d1") = id;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
 
     __asm __volatile ("jsr a6@(-156:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1)
                       : "r" (a6), "r" (d0), "r" (d1)
                       : "a0", "a1", "d2", "cc", "memory");
     return res;
@@ -202,9 +211,12 @@ static LONG call_wait_select(LONG nfds, APTR rd, struct TimeVal_local *tv)
     register APTR            a3  __asm("a3") = tv;
     register ULONG          *d1  __asm("d1") = NULL;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
 
     __asm __volatile ("jsr a6@(-126:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (a1), "r" (a2),
                         "r" (a3), "r" (d1)
                       : "d2", "cc", "memory");

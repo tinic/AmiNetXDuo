@@ -103,10 +103,11 @@ register LONG            d0 __asm("d0") = domain;
 register LONG            d1 __asm("d1") = type;
 register LONG            d2 __asm("d2") = proto;
 register LONG            res __asm("d0");
+register LONG _clob_d1 __asm("d1");
 
 
     __asm __volatile ("jsr a6@(-30:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (d2)
                       : "a0", "a1", "cc", "memory");
     return(res);
@@ -134,10 +135,11 @@ register struct Library *a6 __asm("a6") = base;
 register char           *a0 __asm("a0") = name;
 register ULONG           d0 __asm("d0") = len;
 register LONG            res __asm("d0");
+register LONG _clob_a0 __asm("a0");
 
 
     __asm __volatile ("jsr a6@(-282:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_a0)
                       : "r" (a6), "r" (a0), "r" (d0)
                       : "d1", "a1", "cc", "memory");
     return(res);
@@ -164,10 +166,11 @@ static APTR bsd_gethostbyname(struct Library *base, const char *name)
 register struct Library *a6 __asm("a6") = base;
 register const char     *a0 __asm("a0") = name;
 register APTR            res __asm("d0");
+register LONG _clob_a0 __asm("a0");
 
 
     __asm __volatile ("jsr a6@(-210:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_a0)
                       : "r" (a6), "r" (a0)
                       : "d1", "a1", "cc", "memory");
     return(res);

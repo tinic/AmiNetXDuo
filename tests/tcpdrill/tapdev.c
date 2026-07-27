@@ -113,6 +113,7 @@ static ULONG tap_read_eclock(struct EClockVal *dest)
     register struct Device   *a6  __asm("a6") = tap_timer;
     register struct EClockVal *a0 __asm("a0") = dest;
     register ULONG            res __asm("d0");
+    register LONG _clob_a0 __asm("a0");
 
     if (tap_timer == NULL)
     {
@@ -122,7 +123,7 @@ static ULONG tap_read_eclock(struct EClockVal *dest)
     }
 
     __asm __volatile ("jsr a6@(-60:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_a0)
                       : "r" (a6), "r" (a0)
                       : "a1", "d1", "cc", "memory");
     return res;

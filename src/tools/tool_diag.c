@@ -905,9 +905,10 @@ static ToolHostEnt *tool_call_gethostbyname(struct Library *base,
     register struct Library *a6  __asm("a6") = base;
     register const char     *a0  __asm("a0") = name;
     register ToolHostEnt    *res __asm("d0");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-210:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_a0)
                       : "r" (a6), "r" (a0)
                       : "d1", "a1", "cc", "memory");
     return res;
@@ -922,9 +923,11 @@ static ToolHostEnt *tool_call_gethostbyaddr(struct Library *base,
     register LONG            d0  __asm("d0") = len;
     register LONG            d1  __asm("d1") = type;
     register ToolHostEnt    *res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-216:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (a0), "r" (d0), "r" (d1)
                       : "a1", "cc", "memory");
     return res;
@@ -948,9 +951,10 @@ static LONG tool_call_gethostname(struct Library *base, char *name, ULONG len)
     register char           *a0  __asm("a0") = name;
     register ULONG           d0  __asm("d0") = len;
     register LONG            res __asm("d0");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-282:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_a0)
                       : "r" (a6), "r" (a0), "r" (d0)
                       : "d1", "a1", "cc", "memory");
     return res;
@@ -1085,9 +1089,10 @@ static VOID tool_call_release_dns(struct Library *base, struct List *list)
 {
     register struct Library *a6 __asm("a6") = base;
     register struct List    *a0 __asm("a0") = list;
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-528:W)"
-                      : /* no output */
+                      : "=r" (_clob_a0)
                       : "r" (a6), "r" (a0)
                       : "d0", "d1", "a1", "cc", "memory");
 }
@@ -1205,9 +1210,11 @@ static LONG tool_call_netstatus_query(struct Library *base, ULONG what,
     register APTR            a0  __asm("a0") = buffer;
     register ULONG           d2  __asm("d2") = size;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-870:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (a0), "r" (d2)
                       : "a1", "cc", "memory");
     return res;
@@ -1222,9 +1229,11 @@ static LONG tool_call_netstatus_control(struct Library *base, ULONG op,
     register APTR            a0  __asm("a0") = arg;
     register ULONG           d2  __asm("d2") = size;
     register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-876:W)"
-                      : "=r" (res)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (a0), "r" (d2)
                       : "a1", "cc", "memory");
     return res;
