@@ -93,16 +93,28 @@ jobs:
       - name: tools/ci.sh
         run: tools/ci.sh host cross conformance
 
-      # TLS on, because the archive ships tls.library and the trust store.
-      # make-dist.sh refuses to pack a missing or host-scavenged store, so a
-      # release cannot silently ship one that trusts nothing.
+      # TLS is on by default, and the archive ships tls.library and the trust
+      # store.  make-dist.sh refuses to pack a missing or host-scavenged store,
+      # so a release cannot silently ship one that trusts nothing.
+      #
+      # THREE BUILDS, because the archive carries three libraries and the
+      # installer picks between them at install time.  The directory names are
+      # what make-dist.sh derives from -b, so they are not free-form.
+      # AMINETXDUO_CPU=68000 turns TLS off by itself (docs/RESEARCH.md §45) and
+      # is not overridden here.
       - name: Build the shipping configuration
         run: |
-          cmake -S . -B build/release \
-                -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DAMINETXDUO_TLS=ON
-          cmake --build build/release --parallel
+          for cpu in 68020 68000 68060; do
+              case "$cpu" in
+                  68020) dir=build/release ;;
+                  *)     dir=build/release-$cpu ;;
+              esac
+              cmake -S . -B "$dir" \
+                    -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
+                    -DCMAKE_BUILD_TYPE=Release \
+                    -DAMINETXDUO_CPU=$cpu
+              cmake --build "$dir" --parallel
+          done
 
       # The ported clients come from clients/, not the CMake tree, so a
       # `cmake --build` does not produce them and make-dist.sh would quietly
@@ -130,6 +142,18 @@ jobs:
                   echo "::error::$f is missing from the archive"; exit 1; }
           done
           ls -l build/dist/AmiNetXDuo/Clients/
+
+      # And so would a release that lost a CPU drawer -- right up until
+      # somebody with that machine ran the installer and it aborted.  The
+      # installer resolves 68000/68010, 68020/68030/68040 and 68060 to exactly
+      # these three names.
+      - name: All three CPU builds really are in the archive
+        run: |
+          for cpu in 68000 68020-40 68060; do
+              [ -f "build/dist/AmiNetXDuo/Libs/$cpu/bsdsocket.library" ] || {
+                  echo "::error::Libs/$cpu/bsdsocket.library is missing"; exit 1; }
+          done
+          ls -lR build/dist/AmiNetXDuo/Libs/
 
       - name: Describe what is in it
         run: |

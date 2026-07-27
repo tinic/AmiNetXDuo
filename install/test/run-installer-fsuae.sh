@@ -100,6 +100,12 @@ fi
 }
 
 # The distribution tree is what the user would actually unpack.
+#
+# One CPU drawer, not the release's three: this boots a single emulated A1200,
+# so the other two would be built and packed to be ignored.  The installer's
+# CPU pick is still exercised -- it has to resolve 68020 to Libs/68020-40 and
+# find the library there, and it aborts if it does not.
+AMINETXDUO_DIST_CPUS="68020-40" \
 "$ROOT/dist/make-dist.sh" -b "$BUILD" >/dev/null || {
     echo "dist/make-dist.sh failed" >&2
     exit 2

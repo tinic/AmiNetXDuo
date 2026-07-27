@@ -32,8 +32,10 @@
 #                                    installer creates on the user's disk
 #       ReadMe  ReadMe.info
 #       AmiNetXDuo.readme            the Aminet description, for reference
-#       C/                           the seven commands
-#       Libs/                        bsdsocket.library, usergroup.library
+#       C/                           the commands
+#       Libs/68000/                  one drawer per CPU; the installer picks
+#       Libs/68020-40/               the one this machine can run
+#       Libs/68060/
 #       Devs/Internet/               protocols, services, networks
 #       Docs/  Docs.info             whatever docs/ holds
 #       Examples/  Examples.info     commented configuration files
@@ -97,8 +99,84 @@ CMDS=(AddNetInterface Online Offline ShowNetStatus ping netstat host fetch
       nc telnet ftp NetTrace sntp traceroute tftp whois
       CheckNetConfig GetNetStatus NetShutdown AddNetRoute DeleteNetRoute)
 
-for lib in "${LIBS[@]}"; do need "$BUILD/src/$lib/$lib.library"; done
-for cmd in "${CMDS[@]}"; do need "$BUILD/src/tools/$cmd"; done
+# ---------------------------------------------------------- the CPU builds --
+#
+# ONE ARCHIVE, THREE LIBRARIES, and the installer picks.  The alternative --
+# three archives -- was rejected: the thing a user has to get right is the one
+# thing they cannot see from the outside, and an Amiga owner who downloads the
+# wrong one gets either a machine that will not boot the stack or a library
+# that quietly runs emulated instructions.  The installer already reads
+# DEVS: to find the network card, so reading `database "cpu"` to pick a
+# library is in keeping rather than a new kind of magic.
+#
+# THREE, NOT FOUR, and this is the part worth reading.  The toolchain has
+# multilibs for `.` (68000), `libm020` and `libm060`, and those three cover
+# every 68k Amiga:
+#
+#   68000     68000 and 68010.
+#   68020-40  68020, 68030 and 68040.  A 68040 implements the whole 68020
+#             instruction set, so the 020 build is COMPLETE for it -- there is
+#             no 68040 multilib to link against and -m68040 would silently
+#             select the 68000 C library.  AMINETXDUO_CPU=68040 exists for
+#             someone building their own tuned copy; it produces the same
+#             instructions and is not worth a fourth of everything in here.
+#   68060     genuinely different: the 68060 dropped MULU.L's and DIVU.L's
+#             64-bit-result forms, so it needs its own codegen.
+#
+# The naming is AmiSSL's, which ships exactly `68020-40` and `68060` drawers,
+# because a user who has seen one will recognise the other.  docs/RESEARCH.md
+# §45.
+#
+# The build directories are derived from -b rather than named separately, so
+# `-b build/release` wants build/release-68000 and build/release-68060 beside
+# it and cannot be pointed at a tree from a different commit by accident.
+#
+# AMINETXDUO_DIST_CPUS names a subset, for building a test archive from one
+# build tree -- install/test/run-installer-fsuae.sh uses it, because it boots
+# one emulated machine and only ever installs one of the three.  A RELEASE
+# must not set it: the installer aborts on a machine whose drawer is absent,
+# which is the right behaviour for a damaged download and the wrong thing to
+# discover about your own archive.
+CPU_DIRS=(${AMINETXDUO_DIST_CPUS:-68000 68020-40 68060})
+declare -A CPU_BUILD=(
+    [68000]="${AMINETXDUO_BUILD_68000:-$BUILD-68000}"
+    [68020-40]="$BUILD"
+    [68060]="${AMINETXDUO_BUILD_68060:-$BUILD-68060}"
+)
+
+# THE COMMANDS ARE BUILT ONCE, FOR THE 68000, and every machine runs that one
+# set.  They are not where the work happens: each is a few hundred lines around
+# bsdsocket.library calls, and the code whose instruction set actually matters
+# -- the checksums, the copies, the bignums -- is inside the libraries, which
+# ARE per-CPU.  Twenty-one commands times three would add roughly 9 MB to the
+# archive to make `ping` parse its arguments faster.
+#
+# It costs nothing in features: src/tools/CMakeLists.txt notes that one binary
+# serves both -DAMINETXDUO_TLS=ON and OFF, because fetch opens LIBS:tls.library
+# at run time rather than linking it.  So the 68000-built fetch still does
+# https on a machine whose installed library has TLS.
+
+for cpu in "${CPU_DIRS[@]}"; do
+    b="${CPU_BUILD[$cpu]}"
+    case "$b" in /*) ;; *) b="$ROOT/$b"; CPU_BUILD[$cpu]="$b" ;; esac
+    [ -d "$b" ] || {
+        echo "missing the $cpu build: $b" >&2
+        echo "  cmake -S . -B $b -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \\" >&2
+        echo "        -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_CPU=${cpu%%-*}" >&2
+        echo "  cmake --build $b --parallel" >&2
+        exit 2
+    }
+    for lib in "${LIBS[@]}"; do need "$b/src/$lib/$lib.library"; done
+done
+
+# Normally the 68000 build, per the note above.  When AMINETXDUO_DIST_CPUS has
+# excluded it there is no 68000 tree to take them from, so a subset archive
+# falls back to the primary build -- which is right for what that option is
+# for, and never happens in a release.
+CMD_BUILD="${CPU_BUILD[68000]:-$BUILD}"
+[ -d "$CMD_BUILD" ] || CMD_BUILD="$BUILD"
+
+for cmd in "${CMDS[@]}"; do need "$CMD_BUILD/src/tools/$cmd"; done
 
 # -------------------------------------------------------------- the icons --
 #
@@ -113,18 +191,35 @@ rm -rf "$TREE" "$OUTDIR/AmiNetXDuo.info"
 mkdir -p "$TREE/C" "$TREE/Libs" "$TREE/Devs/Internet" "$TREE/Docs" \
          "$TREE/Examples"
 
-for lib in "${LIBS[@]}"; do
-    cp "$BUILD/src/$lib/$lib.library" "$TREE/Libs/"
+for cpu in "${CPU_DIRS[@]}"; do
+    mkdir -p "$TREE/Libs/$cpu"
+    for lib in "${LIBS[@]}"; do
+        cp "${CPU_BUILD[$cpu]}/src/$lib/$lib.library" "$TREE/Libs/$cpu/"
+    done
+
+    # tls.library ships with the bsdsocket.library FROM THE SAME BUILD: the two
+    # share struct layouts and a private context ABI, so a 68060 tls.library
+    # beside a 68020 bsdsocket.library is not a supported combination even
+    # though both would load (include/aminetxduo/nxcontext.h).  Per-CPU
+    # drawers make that impossible to get wrong.
+    #
+    # There is deliberately no 68000 tls.library.  §9's M9 gate measured the
+    # handshake on the 68020 floor and rejected it there; a 7 MHz 68000 with
+    # no 32-bit multiply is not the machine that changes that answer.  The
+    # stack ships for the 68000, the encryption does not, and the installer
+    # says so rather than leaving a drawer mysteriously short of a file.
+    if [ -f "${CPU_BUILD[$cpu]}/src/tlslib/tls.library" ]; then
+        cp "${CPU_BUILD[$cpu]}/src/tlslib/tls.library" "$TREE/Libs/$cpu/"
+        echo "==> $cpu: bsdsocket, usergroup, tls"
+    else
+        echo "==> $cpu: bsdsocket, usergroup (no tls.library in this build)"
+    fi
+    chmod 755 "$TREE/Libs/$cpu"/*
 done
 
-# tls.library and its trust store, when the build has them (AMINETXDUO_TLS=ON).
-# They ship as a pair with the bsdsocket.library from the SAME build: the two
-# share struct layouts and a private context ABI, so mixing versions is not
-# supported (include/aminetxduo/nxcontext.h).
+# The trust store comes from the primary build, and is packed whenever any
+# CPU build produced a tls.library.
 if [ -f "$BUILD/src/tlslib/tls.library" ]; then
-    cp "$BUILD/src/tlslib/tls.library" "$TREE/Libs/"
-    chmod 755 "$TREE/Libs/tls.library"
-    echo "==> including tls.library"
 
     # A trust store is not optional when tls.library is packed: without one the
     # library refuses every connection with TLS_ERR_TRUSTSTORE, and a release
@@ -157,9 +252,9 @@ if [ -f "$BUILD/src/tlslib/tls.library" ]; then
     echo "==> including the trust store ($(wc -c < "$BUILD/certificates" | tr -d " ") bytes, $GOT)"
 fi
 for cmd in "${CMDS[@]}"; do
-    cp "$BUILD/src/tools/$cmd" "$TREE/C/"
+    cp "$CMD_BUILD/src/tools/$cmd" "$TREE/C/"
 done
-chmod 755 "$TREE"/C/* "$TREE"/Libs/*
+chmod 755 "$TREE"/C/*
 
 # The ported Unix clients, when they have been built. Optional, because they
 # come from clients/ rather than the CMake tree and a plain `cmake --build`

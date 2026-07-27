@@ -378,13 +378,41 @@
            "This machine is running Kickstart " OSVER ".\n\n"
            "Nothing has been changed."))
 
+; --- which library this machine can run ----------------------------------
+;
+; The archive carries three builds of bsdsocket.library in Libs/68000,
+; Libs/68020-40 and Libs/68060, and this is where one of them is chosen.  It
+; used to be where the installer gave up on anything below a 68020.
+;
+;   68000, 68010   the 68000 build.  A 68010 is a 68000 plus supervisor
+;                  instructions nothing here uses.
+;   68020..68040   the 68020-40 build.  A 68040 runs every 68020 instruction,
+;                  so this build is complete for it, which is why there is no
+;                  fourth drawer.
+;   68060          its own build: the 68060 dropped the 64-bit-result MULU.L
+;                  and DIVU.L, and the 68020-40 build uses both.  That build
+;                  WOULD run here -- 68060.library emulates them -- but at an
+;                  exception per multiply, which is the whole reason not to.
+;
+; The fallback is the 68020-40 build rather than an abort, because
+; `database "cpu"` on an older Installer does not know every processor and
+; guessing low is the answer that runs everywhere above a 68020.  A 68060
+; reported as something else therefore gets a library that works and is
+; slower, never one that does not load.
 (set CPU (database "cpu"))
 
-(if (patmatch "(68000|68010)" CPU)
-    (abort "AmiNetXDuo is compiled for the 68020 and newer.\n\n"
-           "This machine has a " CPU ", so the stack cannot run on it.  An "
-           "accelerator card, or a machine with a 68020 or better -- an "
-           "A1200, an A3000, an A4000 -- is required.\n\n"
+(set CPUDIR "68020-40")
+
+(if (patmatch "(68000|68010)" CPU) (set CPUDIR "68000"))
+(if (patmatch "68060"         CPU) (set CPUDIR "68060"))
+
+(set S_LIBS (tackon S_LIBS CPUDIR))
+
+(if (NOT (exists (tackon S_LIBS "bsdsocket.library") (noreq)))
+    (abort "This archive has no library for a " CPU ".\n\n"
+           "It should contain Libs/" CPUDIR ", and that drawer is missing or "
+           "empty.  The download is incomplete or was unpacked with a tool "
+           "that dropped the subdrawers.\n\n"
            "Nothing has been changed."))
 
 ; ==========================================================================
@@ -737,7 +765,8 @@
 (working "Installing the libraries")
 
 (copylib
-  (prompt "Installing bsdsocket.library into LIBS:")
+  (prompt (cat "Installing bsdsocket.library into LIBS:\n\n"
+               "This is the build for a " CPU "."))
   (help   @copylib-help)
   (source (tackon S_LIBS "bsdsocket.library"))
   (dest   "LIBS:")
@@ -772,6 +801,18 @@
       (confirm)
       (optional "force"))
   ))
+
+; A 68000 gets no tls.library, and saying nothing would leave the one machine
+; that cannot have it wondering why https: does not work.  Not an error, and
+; not a question -- the rest of the installation is unaffected.
+(if (AND (= CPUDIR "68000")
+         (NOT (exists (tackon S_LIBS "tls.library") (noreq))))
+    (message
+      "Encrypted (https:) connections are not installed on this machine.\n\n"
+      "The cryptography a secure connection needs takes minutes on a 68000, "
+      "which is long enough that the far end gives up first.  Everything "
+      "else -- the stack, the commands, ordinary http: -- works normally.\n\n"
+      "A machine with a 68020 or better gets it."))
 
 (set @special-msg "")
 
