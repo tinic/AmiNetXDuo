@@ -107,7 +107,11 @@ endif()
 #
 # Read the header of cpucal.c before quoting anything it prints.
 
-if(CMAKE_CROSSCOMPILING)
+# 68020 AND UP ONLY, and not for the usual "we did not get round to it"
+# reason: cpucal exists to time MULU.L against the MC68020UM's published
+# figures, so on a 68000 -- which has no MULU.L -- there is no measurement for
+# it to make.  Excluded rather than made portable.  docs/RESEARCH.md §45.
+if(CMAKE_CROSSCOMPILING AND NOT AMINETXDUO_CPU STREQUAL "68000")
 
     add_executable(cpucal cpucal.c cpucal.S)
     target_link_libraries(cpucal PRIVATE aminetxduo_common)

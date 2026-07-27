@@ -60,12 +60,22 @@ add_executable(crypto68k_ec_bench c68k_ec_bench.c)
 # arch flag explicitly for the same reason the library's .S files do: the
 # toolchain file's CMAKE_C_FLAGS_INIT does not reach the assembler, and
 # without -m68020 the scaled (An,Dn.W*4) addressing mode does not exist.
-add_executable(crypto68k_bulk c68k_bulk_bench.c c68k_bulk_kernels.S)
-set_source_files_properties(c68k_bulk_kernels.S PROPERTIES
-    COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
+#
+# NOT BUILT FOR THE 68000, for the same reason tests/perf/cpucal is not: the
+# kernels are a measurement of what a 68020 charges for MULU.L and for its
+# scaled index, and on a machine that has neither there is nothing to measure.
+# The AES and SHA-256 correctness checks in the other four programs cover the
+# 68000; only this one is instruction-cost work.  docs/RESEARCH.md §45.
+set(CRYPTO68K_PROGS crypto68k_test crypto68k_bench crypto68k_ec_test
+                    crypto68k_ec_bench)
+if(NOT AMINETXDUO_CPU STREQUAL "68000")
+    add_executable(crypto68k_bulk c68k_bulk_bench.c c68k_bulk_kernels.S)
+    set_source_files_properties(c68k_bulk_kernels.S PROPERTIES
+        COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
+    list(APPEND CRYPTO68K_PROGS crypto68k_bulk)
+endif()
 
-foreach(prog crypto68k_test crypto68k_bench crypto68k_ec_test
-             crypto68k_ec_bench crypto68k_bulk)
+foreach(prog ${CRYPTO68K_PROGS})
     target_link_libraries(${prog} PRIVATE
         crypto68k_testsupport crypto68k aminetxduo_common)
     set_target_properties(${prog} PROPERTIES OUTPUT_NAME "${prog}")

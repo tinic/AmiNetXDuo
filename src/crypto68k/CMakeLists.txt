@@ -19,9 +19,38 @@
 #
 # SPDX-License-Identifier: MIT
 
+# THE ASSEMBLY IS 68020-ONLY, and on two of the four targets it is not merely
+# unhelpful but unassemblable or actively wrong:
+#
+#   68000   mulu.l, divu.l, extb.l and the scaled index (a1,d6.w*4) do not
+#           exist.  The assembler rejects the files outright.
+#   68060   they assemble, but MULU.L's 32x32 -> 64 form was dropped from the
+#           68060 and traps to vector 61 on every limb multiply.  It is
+#           emulated by 68060.library, so it works; it works at the cost of an
+#           exception per multiply, which is far worse than the portable C's
+#           four mulu.w.  AmiSSL reached the same conclusion and ships its
+#           68060 build without its own m68k bignum assembly.
+#
+# Hence the default is a function of the CPU rather than of cross-compiling
+# alone.  It can still be forced either way by hand -- turning it off is the
+# supported way to bisect a suspected assembly bug -- but nobody has to know
+# the above to get a working build.  docs/RESEARCH.md §45.
+if(CMAKE_CROSSCOMPILING AND AMINETXDUO_CPU MATCHES "^(68020|68040)$")
+    set(_crypto68k_asm_default ON)
+else()
+    set(_crypto68k_asm_default OFF)
+endif()
+
 option(AMINETXDUO_CRYPTO68K_ASM
        "Use the hand-written 68020 limb primitives in crypto68k"
-       ${CMAKE_CROSSCOMPILING})
+       ${_crypto68k_asm_default})
+
+if(AMINETXDUO_CRYPTO68K_ASM AND NOT _crypto68k_asm_default AND CMAKE_CROSSCOMPILING)
+    message(FATAL_ERROR
+        "AMINETXDUO_CRYPTO68K_ASM=ON with AMINETXDUO_CPU=${AMINETXDUO_CPU}. "
+        "The hand-written primitives need 68020 instructions: a 68000 cannot "
+        "assemble them and a 68060 traps on every MULU.L. Leave it off.")
+endif()
 
 set(NX_CRYPTO_ROOT "${AMINETXDUO_NETXDUO}/crypto_libraries")
 

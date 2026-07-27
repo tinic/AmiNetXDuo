@@ -8,10 +8,18 @@
 # the supported way to bisect a suspected assembly bug: the C fallback is the
 # same carry chain, longword for longword.
 #
-# 68060: keep this OFF, for the same reason AMINETXDUO_CRYPTO68K_ASM must be
-# off there.  Nothing in n68k_checksum.S itself is 68060-hostile, but the two
-# switches are meant to be read as one "hand-written 68020 code" decision and
-# crypto68k's MULU.L 32x32 traps to vector 61 on a 68060.
+# THE TWO SWITCHES HAVE COME APART, and this is now the one that stays on for
+# every CPU.  It used to be paired with AMINETXDUO_CRYPTO68K_ASM as a single
+# "hand-written 68020 code" decision, which was fine while 68020 was the only
+# target.  Adding the 68000 and 68060 builds made the difference matter: both
+# files here use nothing but add.l, addx.l, movem.l and dbf, all of which are
+# in the original 68000 instruction set and none of which the 68060 dropped,
+# so both assemble and run on all four targets -- checked, not assumed.
+# crypto68k's do not, and it is gated on the CPU accordingly.
+#
+# This is the good outcome for the 68000 in particular: the checksum and copy
+# inner loops are the data path, and they keep their assembly on the slowest
+# machine, which is the one that needs it most.  docs/RESEARCH.md §45.
 #
 # SPDX-License-Identifier: MIT
 

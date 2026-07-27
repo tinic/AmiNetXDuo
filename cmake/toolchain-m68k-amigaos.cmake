@@ -110,9 +110,62 @@ endif()
 
 # -noixemul is NOT usable with this newlib-based toolchain: it breaks sys/reent.h.
 # See docs/RESEARCH.md §5.4.
-set(AMIGA_ARCH_FLAGS "-m68020" CACHE STRING "Target CPU flags (68020 floor, see docs/RESEARCH.md §9)")
 
-set(CMAKE_C_FLAGS_INIT "${AMIGA_ARCH_FLAGS} -fomit-frame-pointer -fno-strict-aliasing")
+# ------------------------------------------------------------- target CPU ---
+#
+# -DAMINETXDUO_CPU=68000|68020|68040|68060.  The default is 68020 because that
+# is what §9 chose and what everything has been measured on, NOT because the
+# others do not work -- see docs/RESEARCH.md §45, which is where the four
+# entries below come from.
+#
+# THE FLAGS ARE NOT THE OBVIOUS ONES, because this toolchain ships exactly
+# three multilibs -- `.` (68000), `libm020` (@mcpu=68020) and `libm060`
+# (@mcpu=68060) -- and the multilib is selected by the canonical -mcpu value:
+#
+#   68000   -m68020 is the whole difference; the C library is the `.` one.
+#   68020   as before.
+#   68040   -m68020 -mtune=68040, NOT -m68040.  There is no 68040 multilib, so
+#           -m68040 silently selects `.` and links the 68000 C library -- code
+#           that works but has had every 32-bit multiply and divide turned
+#           into a subroutine call.  -m68020 -mtune=68040 keeps libm020 and
+#           schedules for the 040, and the 040 implements every 68020
+#           instruction, so nothing is lost.  This is also what AmiSSL does:
+#           it ships one `68020-40` build and one `68060` build.
+#   68060   -mcpu=68060, which is a genuinely different target rather than a
+#           tuning choice: the 68060 DROPPED the 64-bit-result forms of MULU.L
+#           and DIVU.L, so GCC must not emit them.  They trap to vector 61 and
+#           are emulated by 68060.library, which is correct but slow, and it
+#           is why the hand-written 68020 assembly must stay off there.
+#
+# The FPU is deliberately absent from all four.  No -m68881 anywhere: nothing
+# in this stack uses floating point (the trust store, the checksums and the
+# bignums are all integer), the m68881 multilibs exist only in the 68020 row,
+# and a library that requires an FPU would refuse to load on the 68020s and
+# 68EC020s that do not have one.  A soft-float build runs everywhere.
+set(AMINETXDUO_CPU "68020" CACHE STRING "Target CPU: 68000, 68020, 68040 or 68060")
+set_property(CACHE AMINETXDUO_CPU PROPERTY STRINGS 68000 68020 68040 68060)
+
+set(_amiga_cpu_flags_68000 "-m68000")
+set(_amiga_cpu_flags_68020 "-m68020")
+set(_amiga_cpu_flags_68040 "-m68020;-mtune=68040")
+set(_amiga_cpu_flags_68060 "-mcpu=68060")
+
+if(NOT DEFINED _amiga_cpu_flags_${AMINETXDUO_CPU})
+    message(FATAL_ERROR
+        "AMINETXDUO_CPU=${AMINETXDUO_CPU} is not one of 68000, 68020, 68040, "
+        "68060.  A 68010 runs the 68000 build and a 68030 runs the 68020 one; "
+        "there is no separate configuration for either.")
+endif()
+
+# AMIGA_ARCH_FLAGS is what the rest of the tree reads, including the two
+# CMakeLists that hand it to the assembler by name.  Setting it explicitly
+# still works and wins -- the probe builds that established §45 were done
+# that way -- so this only fills it in when nobody has said otherwise.
+set(AMIGA_ARCH_FLAGS "${_amiga_cpu_flags_${AMINETXDUO_CPU}}"
+    CACHE STRING "Target CPU flags (derived from AMINETXDUO_CPU)")
+string(REPLACE ";" " " AMIGA_ARCH_FLAGS_STR "${AMIGA_ARCH_FLAGS}")
+
+set(CMAKE_C_FLAGS_INIT "${AMIGA_ARCH_FLAGS_STR} -fomit-frame-pointer -fno-strict-aliasing")
 # -O3, stated rather than inherited.  This used to say -O2 and had never once
 # produced an -O2 build: CMake's Compiler/GNU module APPENDS its own
 # "-O3 -DNDEBUG" after CMAKE_C_FLAGS_RELEASE_INIT, and the last -O on the

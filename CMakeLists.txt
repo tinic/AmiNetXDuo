@@ -46,7 +46,26 @@ endif()
 # at 14 MHz.  The connection fails cleanly, says so, and usually succeeds on
 # the next attempt because the session is cached.  That is not a reason to
 # ship without encryption.
-option(AMINETXDUO_TLS  "Build tls.library and its trust store"        ON)
+#
+# OFF BY DEFAULT ON A 68000, and this follows a decision the project has
+# already taken rather than making a new one.  §9's M9 gate benchmarked a real
+# TLS 1.2 handshake on the 68020 floor and concluded TLS is not viable there:
+# 185.5 s client-and-server on one CPU, 158.0 s for the RSA-2048 private
+# operation alone, ~13-20 s derived for a client-only handshake, and the
+# recorded conclusion that offload is the realistic path.  A 7 MHz 68000 on a
+# 16-bit bus is around a quarter of that 14 MHz 68020 before accounting for
+# having no 32-bit multiply at all, and the hand-written limb assembly cannot
+# run there either.  Shipping tls.library for a 68000 would ship the number
+# §9 already rejected, several times over.
+#
+# It is an option, not a wall: -DAMINETXDUO_TLS=ON with AMINETXDUO_CPU=68000
+# configures, builds and links.  Nobody should wait for it.
+if(AMINETXDUO_CPU STREQUAL "68000")
+    set(_aminetxduo_tls_default OFF)
+else()
+    set(_aminetxduo_tls_default ON)
+endif()
+option(AMINETXDUO_TLS  "Build tls.library and its trust store"        ${_aminetxduo_tls_default})
 option(AMINETXDUO_BPF  "Build the bpf_* raw path and filter VM"       ON)
 if(AMINETXDUO_BPF)
     # Global, because the two SANA-II taps and the netstack's capture
@@ -353,7 +372,8 @@ endif()
 message(STATUS "AmiNetXDuo configuration:")
 message(STATUS "  version ....... ${AMINETXDUO_VERSION_COMPOUND}")
 message(STATUS "  built on ...... NetX Duo ${AMINETXDUO_NETXDUO_VERSION}, ThreadX ${AMINETXDUO_THREADX_VERSION}")
-message(STATUS "  arch flags .... ${AMIGA_ARCH_FLAGS}")
+string(REPLACE ";" " " _amiga_arch_shown "${AMIGA_ARCH_FLAGS}")
+message(STATUS "  CPU ........... ${AMINETXDUO_CPU} (${_amiga_arch_shown})")
 message(STATUS "  IPv6 .......... ${AMINETXDUO_IPV6}")
 message(STATUS "  TLS ........... ${AMINETXDUO_TLS}")
 message(STATUS "  BPF ........... ${AMINETXDUO_BPF}")
