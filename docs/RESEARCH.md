@@ -14533,3 +14533,95 @@ works, rather than leaving a drawer mysteriously short of a file.
 `tools/ci.sh` builds `m68000`, `m68040` and `m68060` alongside the four
 configurations it had. The `m68040` entry earns its place by catching anyone who
 "fixes" its flags to `-m68040`.
+
+## 46. Why a WHOIS client knew what an Ariadne was (2026-07-27)
+
+Every command carried the SANA-II driver table and the prose that goes with
+it — sixteen device names, and paragraphs about routers and cables — because
+`tool_diag.c` is in `TOOLS_COMMON_SOURCES`. **3,842 bytes of it in `whois`,**
+a 27 KB program with no way to reach a line of it.
+
+`--gc-sections` **does** collect the dead functions. It cannot collect their
+strings, and on this target nothing can.
+
+### 46.1 There is no `.rodata` on m68k-amigaos
+
+That is the whole finding. String literals go into the plain `.text`, pooled
+together, while `-ffunction-sections` gives each function its own
+`.text.<name>`:
+
+```
+.text                          0000151c   <- every literal in the file, pooled
+.text.tool_scan_devices        0000001c
+.text.tool_explain_device      000000d8
+.text.tool_advise              00000014
+```
+
+One surviving string anchors all 5,404 bytes. Collecting the function can
+never collect its text, because the text was never attached to it.
+
+### 46.2 Every flag that claims to fix this, measured
+
+| flag | result |
+|---|---|
+| `-fdata-sections` | acts on named data objects; there are none here. All 18 device names still present, binaries **0.9% LARGER**, and the `$VER:` tag lost in every command |
+| `-fno-merge-constants` | unpools literals from mergeable `.rodata.str1.1` sections, which this target never creates. No change: 18 device names still present |
+| `-flto` | would drop them before sections are assigned. This binutils has no plugin: `ld: plugin needed to handle lto object` |
+
+The `-fdata-sections` result is worth restating because it is the one the
+internet recommends: it does not shrink anything here, it *grows* the output,
+and it silently destroys the version tag — which is why
+`cmake/check-version-tag.cmake` exists. That guard caught it within a minute.
+
+**`-flto` is the one to revisit.** It is the only mechanism that acts before
+section assignment, and it is a toolchain limitation rather than a target one,
+so a future image with the plugin would make all of this moot.
+
+### 46.3 What was done instead
+
+Exactly three functions touch the device table — `tool_explain_device`,
+`tool_explain_no_interfaces`, `tool_scan_devices` — so they moved to
+`tool_devdiag.c` with it, linked by the five commands that configure an
+interface.
+
+The blocker was not `tool_diag.c`. It was **`tool_util.c`**, also common:
+`tool_find_interface()`'s "there is no interface called X" path calls
+`tool_explain_no_interfaces()`, and that one call dragged the table into all
+21 commands by itself. Its only callers are `AddNetInterface` and
+`Online`/`Offline`, which link the new unit anyway.
+
+16 commands lose 2,020 bytes each; the five that need it gain 192–260 for the
+separate unit. **774,096 → 743,008 bytes, −4.0%.** Residue in `whois` fell
+from 3,842 to about 1,000, and it no longer contains a single `.device` name.
+
+### 46.4 What the remaining size actually is, and it is not printf
+
+There is no `printf`, `vfprintf`, `dtoa` or `ultoa` in any command:
+`tool_printf` is ours, over dos.library's `VPrintf`, so the formatting is in
+ROM. `whois`'s ~20 KB of accounted code:
+
+| | bytes | |
+|---|---:|---:|
+| our own code | 9,434 | 46.7% |
+| newlib odds and ends | 5,038 | 24.9% |
+| **C++ red-black-tree allocator** | 2,218 | 11.0% |
+| newlib stdio teardown | 2,090 | 10.3% |
+| crt0/startup | 1,420 | 7.0% |
+
+newlib's `malloc` here is written in **C++** — `Tree::fixAdd`, `MemMap::alloc`,
+mangled symbols and all — which is also why `___exitcpp` and the
+constructor/destructor lists appear. The stdio comes in through the **exit
+path**, not through printing: `__sflush_r`, `_fclose_r`, `___fp_unlock_all`,
+dragged in by `crt0`'s `__EXIT_LIST__` although nothing opens a `FILE*`.
+
+Oddities noted and not chased: `strlen` is 952 bytes and `strstr` 636, which
+look like unrolled multilib versions.
+
+`-noixemul` would sidestep the allocator and the stdio both — libnix's
+`ncrt0.o` is also the crt0 without the frame bug of §42 — but §5.4 already
+records that it is unusable with this newlib toolchain because it breaks
+`sys/reent.h`.
+
+**Accepted as it stands, deliberately.** The remaining levers are a toolchain
+away, and the size is not what makes this project good or bad on a 4 MB
+machine.

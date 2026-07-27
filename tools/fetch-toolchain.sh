@@ -344,7 +344,7 @@ esac
 # shape.  tools/fix-toolchain-crt0.py says what the bug is and why this is the
 # seam; it is idempotent and it leaves an already-correct toolchain alone, so a
 # future image that has been fixed upstream needs no change here.
-say "==> repairing the libnix crt0 register save"
+say "==> repairing the newlib crt0 frame skew"
 if ! python3 "$(dirname "$0")/fix-toolchain-crt0.py" "$TMP/x/$TC_PREFIX_IN_TAR"; then
     echo "!! crt0 repair failed -- refusing to install a toolchain that" >&2
     echo "!! builds commands which crash on return to the Shell." >&2
