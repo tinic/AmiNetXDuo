@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Repair the newlib crt0.o frame-skew bug in a m68k-amigaos toolchain.
+"""Repair the two newlib crt0.o bugs in a m68k-amigaos toolchain.
 
     tools/fix-toolchain-crt0.py <toolchain-root> [--check]
 
     Nothing here is needed against a toolchain built from bebbo/gcc amiga15.2
     at 168be3619 or later; see FIXED UPSTREAM below. --check reports such a
     tree as "immune" and succeeds.
+
+    TWO SEPARATE BUGS live in the same crt0.c and are repaired independently:
+    the frame skew (below), and the argv indirection (SECOND BUG, further
+    down). A toolchain can have either, both or neither.
 
 WHAT IS WRONG
 
@@ -230,6 +234,155 @@ def functions(objdump, path):
     return fns
 
 
+# --------------------------------------------------------------- SECOND BUG
+#
+# THE ARGV INDIRECTION -- codeberg.org/bebbo/amiga-gcc issue #8.
+#
+# Separate from the frame skew above, in the same file, and it breaks a
+# different class of program. crt0.c declared
+#
+#     char * __argv[];        instead of        char ** __argv;
+#
+# An array name decays to its OWN ADDRESS, so ____start passes &__argv where
+# main expects __argv -- one level of indirection too many. main() then reads
+# the pointer variable itself as argv[0], and whatever follows it in .bss as
+# argv[1..]. Compare the two pushes at the call site, argv first:
+#
+#     pea    __argv          ; 4879 -- pushes the ADDRESS       <- wrong
+#     move.l __argc,-(sp)    ; 2f39 -- pushes the VALUE         <- right
+#     jsr    _main
+#
+# WHY IT WENT UNNOTICED HERE. Our own commands take their arguments through
+# ReadArgs(), which reads the command line from the Shell and never touches
+# argv, so all of them work on a broken toolchain. Ported Unix programs do not:
+# curl and ssh parse argv and get garbage. The Aminet-built curl used for every
+# throughput measurement in docs/RESEARCH.md was built with someone else's
+# toolchain and is unaffected, which is why the benchmarks never showed it.
+#
+# THE REPAIR is a two-byte opcode swap. `pea` and `move.l ...,-(sp)` are the
+# same length in both addressing modes used here and put their operand in the
+# same place, so the relocation is untouched and only the opcode word changes:
+#
+#     absolute   4879 pea <abs>.l        -> 2f39 move.l <abs>.l,-(sp)
+#     baserel    486c pea a4@(d16)       -> 2f2c move.l a4@(d16),-(sp)
+#
+# Fixed upstream in 120371e, which changed only the declaration.
+
+PEA_ABS, PUSH_ABS = 0x4879, 0x2F39      # pea <abs>.l   / move.l <abs>.l,-(sp)
+PEA_A4, PUSH_A4 = 0x486C, 0x2F2C        # pea a4@(d16)  / move.l a4@(d16),-(sp)
+PEA_A4_32, PUSH_A4_32 = 0x4874, 0x2F34  # pea a4@(bd32) / move.l a4@(bd32),-(sp)
+ARGV_FIX = {PEA_ABS: PUSH_ABS, PEA_A4: PUSH_A4, PEA_A4_32: PUSH_A4_32}
+PUSH_OPS = (PUSH_ABS, PUSH_A4, PUSH_A4_32)
+
+# THE 32-BIT BASEREL FORM NEEDS ITS DISPLACEMENT CHECKED, and the others do
+# not. objdump prints the addend as part of the symbol for the short forms --
+# ".bss" vs ".bss+0x8" -- so requiring a bare ".bss" already proves the target
+# is __argv. The libb32 multilibs put the addend in the instruction instead and
+# print a bare "DREL32 .bss" for __savedSp (.bss+8) just the same, so the only
+# way to tell __argv from __savedSp there is to read the displacement.
+PEA_A4_32_TAIL = bytes((0x01, 0x70, 0x00, 0x00, 0x00, 0x00))   # (bd=0,a4)
+
+
+def instructions(objdump, path):
+    """[(offset, first_word, reloc_target_or_None), ...] in .text order."""
+    out = subprocess.run([str(objdump), "-dr", str(path)],
+                         capture_output=True, text=True)
+    if out.returncode != 0:
+        return None
+    insns = []
+    for line in out.stdout.splitlines():
+        m = re.match(r"^\s*([0-9a-f]+):\s+([0-9a-f]{4})[0-9a-f ]*\t", line)
+        if m:
+            insns.append([int(m.group(1), 16), int(m.group(2), 16), None])
+            continue
+        # A relocation line annotates the instruction just emitted.
+        m = re.match(r"^\s+[0-9a-f]+:\s+\S+\s+(\S+)\s*$", line)
+        if m and insns:
+            insns[-1][2] = m.group(1)
+    return insns
+
+
+def argv_sites(objdump, path):
+    """Offsets of the argv push before each `jsr _main`, with their opcode.
+
+    Anchored on the ADJACENT PUSH PAIR -- a push referencing .bss immediately
+    followed by one referencing __argc -- and then confirmed by a _main
+    reference within the next few instructions.
+
+    Anchoring on the call itself does not work. The 68020 baserel multilibs
+    reach main with a bsr.l, which objdump renders as TWO lines (`bsrs` plus a
+    bogus `orib`) carrying RELRELOC32 rather than RELOC32, so "the instruction
+    two before the _main reloc" is not the argv push there. That mistake
+    silently skipped six of eleven files -- benign-looking output for exactly
+    the variants a 68020 build uses.
+
+    The .bss reference must carry NO addend: __argv is at .bss+0, while
+    __savedSp (+8) and cleanupflag (+0xc) would print one and must not be
+    touched.
+    """
+    insns = instructions(objdump, path)
+    if insns is None:
+        return None
+    sites = []
+    for i in range(len(insns) - 1):
+        argv_off, argv_word, argv_reloc = insns[i]
+        _, _, argc_reloc = insns[i + 1]
+        if argv_reloc != ".bss" or argc_reloc not in ("___argc", "__argc"):
+            continue
+        if argv_word not in ARGV_FIX and argv_word not in PUSH_OPS:
+            continue
+        # main is called within a couple of instructions of the pair; accept
+        # any spelling of the reference (RELOC32/RELRELOC32, jsr or bsr).
+        if not any(r in ("_main", "main")
+                   for _, _, r in insns[i + 2:i + 6]):
+            continue
+        sites.append((argv_off, argv_word))
+    return sites
+
+
+def repair_argv(objdump, path, check_only):
+    sites = argv_sites(objdump, path)
+    if sites is None:
+        return ("refused", "objdump could not read it")
+    if not sites:
+        return ("skipped", "no `jsr _main` preceded by an argv/argc pair")
+
+    wrong = [(off, w) for off, w in sites if w in ARGV_FIX]
+    if not wrong:
+        return ("immune", f"{len(sites)} call site(s) already push __argv "
+                          f"by value")
+    if check_only:
+        return ("buggy", f"{len(wrong)} of {len(sites)} call site(s) push "
+                         f"&__argv instead of __argv")
+
+    base = text_file_offset(objdump, path)
+    if base is None:
+        return ("refused", "cannot locate .text in the file")
+
+    data = bytearray(path.read_bytes())
+    for off, word in wrong:
+        at = base + off
+        # Same guard as the frame repair: refuse unless the bytes on disk are
+        # the instruction objdump reported. Section offsets are not file
+        # offsets, and getting that wrong once already destroyed seven files.
+        if (data[at] << 8 | data[at + 1]) != word:
+            return ("refused",
+                    f"file offset 0x{at:x} does not hold the pea objdump "
+                    f"reported at section 0x{off:x}")
+        # See PEA_A4_32_TAIL: only this form can be confused with __savedSp.
+        if word == PEA_A4_32 and \
+                bytes(data[at + 2:at + 8]) != PEA_A4_32_TAIL:
+            return ("refused",
+                    f"file offset 0x{at:x} is a 32-bit baserel pea whose "
+                    f"displacement is not (bd=0,a4) -- not __argv")
+        want = ARGV_FIX[word]
+        data[at] = (want >> 8) & 0xFF
+        data[at + 1] = want & 0xFF
+    path.write_bytes(bytes(data))
+    return ("patched", f"{len(wrong)} call site(s): pea &__argv -> "
+                       f"move.l __argv,-(sp)")
+
+
 def repair(objdump, path, check_only):
     fns = functions(objdump, path)
     if fns is None:
@@ -327,37 +480,40 @@ def main():
                          "(the tree's own may be built for another host)\n")
         return 1
 
-    counts = {}
-    printed_immune = False      # one line is enough for a whole clean tree
-    for p in found:
-        state, note = repair(objdump, p, check_only)
-        counts[state] = counts.get(state, 0) + 1
-        if state in ("patched", "buggy", "refused"):
-            print(f"  {state:8s} {p.relative_to(root)}: {note}")
-        elif state == "immune" and not printed_immune:
-            printed_immune = True
-            print(f"  {state:8s} {p.relative_to(root)}: {note}")
+    # The two bugs are independent, so they are counted and reported
+    # independently -- a tree can be immune to one and carry the other, which
+    # is exactly the state the pinned toolchain was in.
+    rc = 0
+    for label, fn in (("frame skew", repair), ("argv indirection", repair_argv)):
+        counts = {}
+        printed_immune = False  # one line is enough for a whole clean tree
+        print(f"== {label}")
+        for p in found:
+            state, note = fn(objdump, p, check_only)
+            counts[state] = counts.get(state, 0) + 1
+            if state in ("patched", "buggy", "refused"):
+                print(f"  {state:8s} {p.relative_to(root)}: {note}")
+            elif state == "immune" and not printed_immune:
+                printed_immune = True
+                print(f"  {state:8s} {p.relative_to(root)}: {note}")
 
-    print(f"fix-toolchain-crt0: {len(found)} crt0.o examined -- "
-          + ", ".join(f"{n} {s}" for s, n in sorted(counts.items())))
+        print(f"fix-toolchain-crt0: {len(found)} crt0.o examined -- "
+              + ", ".join(f"{n} {s}" for s, n in sorted(counts.items())))
+        if counts.get("refused"):
+            rc = 1
+        if check_only and counts.get("buggy"):
+            rc = 1
+        # Skipping EVERYTHING is not a pass -- that is how an earlier version
+        # returned success over an unrepaired toolchain. "buggy" counts as
+        # understood: under --check a wholly unrepaired tree is every file
+        # buggy and none ok, which is a real verdict, not a parse failure.
+        if not any(counts.get(s) for s in ("ok", "patched", "immune", "buggy")):
+            sys.stderr.write(f"fix-toolchain-crt0: {label}: nothing was "
+                             f"verified on any crt0.o -- the disassembly was "
+                             f"not understood\n")
+            rc = 1
+    return rc
 
-    if counts.get("refused"):
-        return 1
-    if check_only and counts.get("buggy"):
-        return 1
-
-    # Skipping EVERYTHING is not a pass. A crt0.o with no ____start/exit pair
-    # is plausible one at a time -- the ixemul one has neither -- but if not a
-    # single file in the tree yielded a pair, the disassembly was not
-    # understood and nothing was actually checked. That is exactly how this
-    # returned success over an unrepaired toolchain in CI.
-    if not counts.get("ok") and not counts.get("patched") \
-            and not counts.get("immune"):
-        sys.stderr.write("fix-toolchain-crt0: no crt0.o yielded a "
-                         "____start/exit pair -- the disassembly was not "
-                         "understood, nothing was verified\n")
-        return 1
-    return 0
 
 
 if __name__ == "__main__":

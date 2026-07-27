@@ -15655,3 +15655,81 @@ internal headers, with the ordering asserted rather than described --
 Each of the three `#error`s was verified to fire by reintroducing the failure it guards,
 the shipped inversion included -- an untested assertion being the same kind of wish as an
 untested comment.
+
+## 53. The second crt0 bug: argv arrived as its own address (2026-07-27)
+
+The shipped `curl` and `ssh` did not work on a real installation. They are the only
+things in the archive that parse `argv` -- every command we write takes its arguments
+through `ReadArgs()`, which reads the Shell's command line and never looks at `argv` --
+so the whole tool set worked and the two ported Unix programs did not.
+
+It is [bebbo/amiga-gcc issue #8](https://codeberg.org/bebbo/amiga-gcc/issues/8), a
+*second* bug in the `crt0.c` that gave us the frame skew of 44, and entirely separate
+from it. `crt0.c` declared
+
+```c
+char * __argv[];        /* instead of  char ** __argv; */
+```
+
+An array name decays to its own address, so `____start` passes `&__argv` where `main`
+expects `__argv` -- one indirection too many. `main` then reads the pointer variable
+itself as `argv[0]`. Both pushes are visible at the call site, and only one of them is
+right:
+
+```
+ 48: 4879 0000 0000   pea    __argv        ; the ADDRESS   <- wrong
+ 4e: 2f39 0000 0000   move.l __argc,-(sp)  ; the VALUE     <- right
+ 54: 4eb9 0000 0000   jsr    _main
+```
+
+`___argv` is at `.bss+0`, confirmed from the symbol table, which is exactly what that
+`pea` pushes.
+
+### The repair
+
+Same place as the frame fix, for the same reason (44): the defect is the toolchain's, so
+`tools/fix-toolchain-crt0.py` repairs it after unpacking and before installing, and both
+bugs are now checked and counted independently -- a tree can carry either, both or
+neither. Ours carried only the second; all eleven `crt0.o` reported `immune` on the frame
+skew and `buggy` on argv.
+
+`pea` and `move.l ...,-(sp)` are the same length in every addressing mode used here and
+put their operand in the same place, so the relocation is untouched and only the opcode
+word changes:
+
+| multilib | buggy | repaired |
+|---|---|---|
+| plain | `4879` `pea <abs>.l` | `2f39` `move.l <abs>.l,-(sp)` |
+| `libb` | `486c` `pea a4@(d16)` | `2f2c` `move.l a4@(d16),-(sp)` |
+| `libb32` | `4874` `pea a4@(bd32)` | `2f34` `move.l a4@(bd32),-(sp)` |
+
+Two traps, both of which produced *benign-looking* output first:
+
+- **Anchoring on `jsr _main` silently skipped six of eleven files.** The 68020 baserel
+  multilibs reach main with a `bsr.l`, which objdump renders as two lines (`bsrs` plus a
+  bogus `orib`) carrying `RELRELOC32`, so "the instruction two before the `_main` reloc"
+  is not the argv push there. The anchor is now the adjacent `.bss`/`__argc` push pair,
+  confirmed by a `_main` reference nearby. Exactly the failure mode of 44's first
+  version, and exactly the variants a 68020 build uses.
+- **`libb32` prints a bare `DREL32 .bss` for `__savedSp` too.** The short forms print the
+  addend into the symbol (`.bss+0x8`), so requiring a bare `.bss` proves the target is
+  `__argv`; the 32-bit baserel form puts the addend in the instruction instead. That form
+  therefore has its displacement checked against `(bd=0,a4)` before anything is written.
+
+### Verified by running it
+
+Not by reading the disassembly. The same source built against the backed-up original
+`crt0.o` and against the repaired one, run under FS-UAE:
+
+| crt0 | output |
+|---|---|
+| original | `ARGC=1`, `ARGV[0]=[]` |
+| repaired | `ARGC=1`, `ARGV[0]=[argvtest]` |
+
+### Note on the pin
+
+Upstream fixed this in `120371e`, which changed only the declaration. Our pinned
+toolchain predates it, which is why the repair is still needed; the CI cache key includes
+a hash of the repair script, so it re-fetches and re-repairs whenever the script changes.
+Moving the pin forward would retire this, and is worth doing on its own schedule rather
+than in the middle of a broken release.
