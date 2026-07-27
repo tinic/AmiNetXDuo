@@ -26,11 +26,13 @@
 | combination -- note that it is 18%, not the order of magnitude a byte-loop
 | fallback would cost; libm020's memcpy has no byte-loop cliff).  So this
 | brings the destination to a longword boundary and then moves longwords
-| whatever the source is doing, exactly as libm020 does.
+| whatever the source is doing, exactly as libm020 does.  See the parity guard
+| below for what that costs on a 68000, where it is not a performance question.
 |
-| 68060: add.l/movem.l are implemented everywhere; nothing here traps.  The
-| file is nevertheless behind AMINETXDUO_NET68K_ASM, which must stay off for
-| 68060 because src/crypto68k/'s MULU.L does trap there.
+| 68000 and 68060: this file runs on both.  move.l, movem.l and dbf are in the
+| original 68000 instruction set and none of them was dropped from the 68060,
+| so AMINETXDUO_NET68K_ASM stays on for every target -- unlike
+| AMINETXDUO_CRYPTO68K_ASM, which is 68020-only and is gated on the CPU.
 |
 | SPDX-License-Identifier: MIT
 
@@ -40,12 +42,47 @@
         .even
         .globl  _n68k_copy_bytes
 
+| ODD IS FATAL ON A 68000, and this is where that was found out.
+|
+| The routine aligns the DESTINATION and then reads longwords from wherever
+| the source happens to be, which is right for a 68020 -- it fetches a
+| longword from any address and charges one extra bus cycle.  A 68000 does
+| not: a word or longword access to an ODD address is an ADDRESS ERROR,
+| exception 3, and the machine gurus.  This routine is also the tree's
+| memcpy() (AMINETXDUO_NET68K_MEMCPY), so on a 68000 that was every copy in
+| the stack with mismatched pointer parity.  It is what the RAM driver test
+| died of: `Exception 3 (20d9 ...)`, opcode 20d9 being the move.l a1@+,a0@+
+| at .Llong below.  docs/RESEARCH.md §45.
+|
+| The condition is PARITY, not longword alignment -- an address of 2 mod 4 is
+| perfectly legal for move.l on a 68000, it simply becomes two word accesses.
+| So the guard is one test: if the two pointers disagree in bit 0 then no
+| amount of aligning the destination will ever make the source even, and the
+| byte loop is the only option.  If they agree, bringing the destination to a
+| longword boundary moves the source by the same count and leaves it even,
+| and everything below is legal exactly as written.
+|
+| 68020 and up assemble without this and behave as they always did, because
+| there the byte loop would be a 4x slowdown to avoid an 18% one.
+#if !defined(__mc68020__) && !defined(__mc68030__) && \
+    !defined(__mc68040__) && !defined(__mc68060__)
+#define N68K_ODD_IS_FATAL 1
+#endif
+
 | a0 = to, a1 = from, d0 = len
 _n68k_copy_bytes:
         movem.l d2-d7/a2-a3,sp@-
         movea.l sp@(36),a0
         movea.l sp@(40),a1
         move.l  sp@(44),d0
+
+#ifdef N68K_ODD_IS_FATAL
+        move.l  a0,d1
+        move.l  a1,d2
+        eor.l   d1,d2
+        btst    #0,d2
+        bne     .Lbytes
+#endif
 
         moveq   #32,d1
         cmp.l   d1,d0
