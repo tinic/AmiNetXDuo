@@ -14812,7 +14812,7 @@ Four remain `ENOSYS`, and none of them because the contract is unclear:
 | `BeginInterfaceConfig()` | an asynchronous allocation whose `AddressAllocationMessage` comes back through `ReplyMsg()` carrying a lease, a router table, a DNS table, a host name and a domain name. This stack's DHCP client runs inside `netstack_startup()` and reports through the config; there is no port to reply to and none of the `aam_*` tables is kept |
 | `AbortInterfaceConfig()` | the counterpart to a call that does not exist |
 
-`GetNetworkStatistics()` also still answers `ENOSYS`.
+`GetNetworkStatistics()` is in netstats.c; see 47.9.
 
 ### 47.7 Routing: the grammar has no netmask in it
 
@@ -14880,3 +14880,66 @@ invent.
 autodoc**; they stay out of scope. `ObtainRoadshowData()` is in it, but the
 `rdn_Name` strings it looks items up by are not, so inventing them would
 produce an API nothing can use and that silently disagrees with Roadshow.
+
+### 47.9 `GetNetworkStatistics()`, and the one place the tag rule cannot apply
+
+The return value is a **byte count** — *"length -- Number of bytes copied, or
+-1 for failure"* — not zero-on-success and not an entry count, which were the
+two other readings the prototype allows and which `roadshow.c` named as the
+reason this stayed a stub. A NULL destination is a *success* that copies
+nothing and answers *"how much memory would be required"*.
+
+`interfaces.c` leaves a tag alone when this stack keeps no true value for it.
+That option does not exist here: the caller gets a whole C struct copied,
+every member of it, and a member nothing counts is a zero with no way to mark
+it. So each fill function names **every** member it fills, and everything
+unnamed is zero because it is uncounted. The four that are answered:
+
+| type | filled from |
+|---|---|
+| `NETSTATUS_ip` | 6 of `ipstat`'s 24 members, from `nx_ip_info_get()` |
+| `NETSTATUS_tcp` | 9 of `tcpstat`'s 53, from `nx_tcp_info_get()` |
+| `NETSTATUS_udp` | 6 of `udpstat`'s 9, one of them read off the `NX_IP` directly |
+| `NETSTATUS_icmp` | the two histogram slots `nx_icmp_info_get()` can fill, plus the checksum errors |
+
+`NETSTATUS_mb`, `igmp`, `mrt` and `rt` are refused with `EOPNOTSUPP`, which is
+the honest form of the same statement — an all-zero `mbstat` would report a
+healthy mbuf allocator that does not exist.
+
+`ip_invalid_packets` and `ip_receive_packets_dropped` are deliberately not
+placed anywhere: `ipstat` splits input failure into seven named causes and
+NetX Duo counts them as one number, so putting it in any of the seven would be
+a diagnosis this stack did not make. `tcps_connattempt`/`tcps_accepts` are
+left alone for the same reason — `tcp_connections` counts both directions
+together.
+
+### 47.10 One `listen()` was two sockets, and neither was listening
+
+`pcd_tcp_state` is *"as defined in `<netinet/tcp_fsm.h>`"*, and 4.4BSD's
+enumeration is **not** NetX Duo's. They agree up to `CLOSE_WAIT` and then
+diverge: NetX Duo has `FIN_WAIT_2 = 8, CLOSING = 9, TIMED_WAIT = 10,
+LAST_ACK = 11`; `tcp_fsm.h` has `CLOSING = 7, LAST_ACK = 8, FIN_WAIT_2 = 9,
+TIME_WAIT = 10`. The first four states invite a subtract-one — `NX_TCP_CLOSED`
+is 1 and `TCPS_CLOSED` is 0 — and a subtract-one reports a connection in
+`LAST_ACK` as being in `FIN_WAIT_2`. It is a table.
+
+The table was the easy half. **Running the probe showed one `listen()` as two
+entries, on one port, in `CLOSED` and `SYN_RECEIVED`.**
+
+That is this stack's listen model leaking through: `socket.c` keeps the
+descriptor's own `NX_TCP_SOCKET` (never used for a connection, left in
+`NX_TCP_CLOSED`) and parks a *second*, spare socket on the port with the
+accept already posted, so NetX Duo can answer a SYN before the application
+calls `accept()`. `socket.c` says in as many words that the spare "sits in
+SYN_RECEIVED, not LISTEN". Reported literally, a monitor sees a socket
+apparently mid-handshake with nobody, and a phantom closed socket beside it.
+
+So `netstats.c` reads the IP's active listen requests, **skips** the parked
+spare — before counting it, so a caller that sized its buffer from the
+NULL-destination call gets the same number of entries back — and reports the
+descriptor's own socket as `TCPS_LISTEN`. One `listen()`, one entry, in the
+state the application is in rather than the state NetX Duo left it in.
+
+Nothing but a real run on a real machine would have found that. The build was
+clean, every structural assertion passed, and the answer was wrong.
+

@@ -30,6 +30,8 @@ set(BSDSOCKET_SOURCES
     interfaces.c            # ObtainInterfaceList/QueryInterfaceTagList/
                             # ConfigureInterfaceTagList, from the NDK 3.2 autodoc
     routing.c               # AddRoute/DeleteRoute/GetRouteInfo, same source
+    netstats.c              # GetNetworkStatistics: 4.4BSD's ipstat/tcpstat/
+                            # udpstat/icmpstat over NetX Duo's counters
     netx_call.c             # ThreadX context bracket for NetX Duo calls
     library_runtime.c)      # DOSBase, rand(): no crt0 in a shared library
 

@@ -381,7 +381,13 @@ static const BsdConstTag bsd_const_tags[] =
     { SBTC_HAVE_INTERFACE_API,          TRUE  },
     { SBTC_HAVE_MONITORING_API,         FALSE },
     { SBTC_CAN_SHARE_LIBRARY_BASES,     FALSE },
-    { SBTC_HAVE_STATUS_API,             FALSE },
+    /*
+     * TRUE since netstats.c: GetNetworkStatistics() is the whole of what this
+     * tag gates. Four of its ten types are refused with EOPNOTSUPP, which is
+     * a documented failure the caller reads out of errno -- FALSE here would
+     * stop it being asked about the six that answer.
+     */
+    { SBTC_HAVE_STATUS_API,             TRUE  },
     { SBTC_HAVE_DNS_API,                FALSE },
     { SBTC_IPF_API_VERSION,             0     },
     { SBTC_HAVE_LOCAL_DATABASE_API,     FALSE },

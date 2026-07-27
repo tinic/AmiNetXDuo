@@ -11,21 +11,29 @@
  * Tier 3 (docs/RESEARCH.md S3.2) is ~35 vectors: interface config and query,
  * routing, GetNetworkStatistics(), the *RoadshowData set.
  *
- * The interface QUERY set -- ObtainInterfaceList(), ReleaseInterfaceList(),
- * QueryInterfaceTagList() -- is no longer among them; it lives in
- * interfaces.c, written against the autodoc named below (docs/RESEARCH.md
- * S47). What is still stubbed:
+ * Most of them are no longer here, and are not stubbed either. Written
+ * against the autodoc named below (docs/RESEARCH.md S47):
  *
- *   AddInterfaceTagList()      and the rest of the configuration set.
- *   ConfigureInterfaceTagList()
- *   AddRoute/GetRouteInfo/...  the routing set, which mutates.
- *   GetNetworkStatistics()
+ *   interfaces.c   ObtainInterfaceList(), ReleaseInterfaceList(),
+ *                  QueryInterfaceTagList(), ConfigureInterfaceTagList()
+ *   routing.c      AddRouteTagList(), DeleteRouteTagList(), GetRouteInfo(),
+ *                  FreeRouteInfo()
+ *   netstats.c     GetNetworkStatistics()
+ *
+ * What is still stubbed, each with its reason written where it belongs:
+ *
+ *   AddInterfaceTagList()      the foot of interfaces.c. Not a contract we
+ *   RemoveInterface()          cannot read -- a thing this stack cannot do.
+ *   BeginInterfaceConfig()
+ *   AbortInterfaceConfig()
  *   ObtainRoadshowData()       struct RoadshowDataNode is defined, but the
  *                              rdn_Name strings are Roadshow-private and
  *                              ChangeRoadshowData() looks items up BY NAME,
  *                              so inventing them produces an API nothing can
  *                              use and that silently disagrees with Roadshow.
  *                              The autodoc does not list the names either.
+ *   the net-monitor hooks      documented, and not yet written.
+ *   the mbuf_* family          there is no mbuf allocator to expose.
  *
  * THE PRIMARY SOURCE EXISTS. This comment used to say there was no
  * bsdsocket.doc autodoc anywhere, and that the stubs would stand until one
@@ -39,8 +47,8 @@
  *
  * So the reason these are stubs is no longer "we cannot know the contract".
  * It is that nobody has written them yet. That is a different statement and
- * it should not keep hiding behind the old one -- interfaces.c is the first
- * part of it that somebody did write.
+ * it should not keep hiding behind the old one -- interfaces.c, routing.c and
+ * netstats.c are the parts of it that somebody did write.
  *
  * What is NOT in that autodoc: the seven ipf_* vectors and ChangeRouteTagList.
  * ipf_* remains deliberately out of scope (RESEARCH 9); nothing outside

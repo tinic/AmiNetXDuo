@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# THE REGRESSION TEST FOR THE ROADSHOW INTERFACE API.
+# THE REGRESSION TEST FOR THE ROADSHOW INTERFACE AND STATISTICS APIs.
 #
 #   tests/tools/run-ifquery.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #
@@ -69,8 +69,10 @@ done
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 PROBE="$ROOT/$BUILD/tests/tools/IfProbe"
+STATPROBE="$ROOT/$BUILD/tests/tools/StatProbe"
 
-for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$PROBE" "$BSD"; do
+for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$PROBE" "$STATPROBE" \
+         "$BSD"; do
     [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
 done
 
@@ -98,6 +100,7 @@ cp "$A2065" "$STAGE/devs/a2065.device"
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
 cp "$PROBE" "$STAGE/IfProbe"
+cp "$STATPROBE" "$STAGE/StatProbe"
 
 # The probe runs twice, either side of AddNetInterface.  Not to catch an empty
 # list -- there is no such state to catch, because OpenLibrary("bsdsocket")
@@ -109,6 +112,7 @@ cat > "$STAGE/commands.txt" <<'EOF'
 SYS:IfProbe
 SYS:AddNetInterface eth0
 SYS:IfProbe
+SYS:StatProbe
 EOF
 
 # ------------------------------------------------------------------ run ---
@@ -120,7 +124,7 @@ echo "==> booting $MODEL with the A2065 on SLIRP"
 set +e
 "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-    "$STAGE/AddNetInterface" "$STAGE/IfProbe"
+    "$STAGE/AddNetInterface" "$STAGE/IfProbe" "$STAGE/StatProbe"
 RUN_RC=$?
 set -e
 
@@ -334,6 +338,81 @@ if grep -q "config: nosuchif: .* -- refused, correctly" "$REPORT"; then
     pass "configuring an interface that does not exist is refused"
 else
     fail "ConfigureInterfaceTagList accepted an unknown interface"
+fi
+
+# ---- GetNetworkStatistics ------------------------------------------------
+#
+# Three things a build cannot check: that the return value is a BYTE COUNT
+# rather than zero-or-an-entry-count, that the numbers are the running
+# stack's, and that pcd_tcp_state is 4.4BSD's enumeration rather than NetX
+# Duo's -- the two agree up to CLOSE_WAIT and diverge after it.
+
+for case in "version 0" "type 99" "NETSTATUS_mb"; do
+    if grep -q "^$case: .* -- refused, correctly" "$REPORT"; then
+        pass "GetNetworkStatistics refused: $case"
+    else
+        fail "GetNetworkStatistics accepted: $case"
+    fi
+done
+
+if grep -q "^NETSTATUS_ip size: .* -- sizeof(struct ipstat), correctly" "$REPORT"; then
+    pass "a NULL destination returns the size a complete copy would need"
+else
+    fail "GetNetworkStatistics(NULL) did not return sizeof(struct ipstat)"
+fi
+
+# This machine leased its address by DHCP, which is UDP over IP, so a stack
+# that is really counting cannot report zero for either of these.  A stub
+# returning a zeroed struct of the right size passes every structural check
+# and fails here.
+if grep -Eq "^NETSTATUS_ip: rc 96 total [1-9][0-9]* localout [1-9][0-9]* " "$REPORT"; then
+    pass "ipstat carries the running stack's packet counts"
+else
+    fail "ipstat came back zeroed or the wrong size"
+fi
+
+if grep -Eq "^NETSTATUS_udp: rc 36 ipackets [1-9][0-9]* opackets [1-9][0-9]* " "$REPORT"; then
+    pass "udpstat carries the DHCP exchange this machine actually had"
+else
+    fail "udpstat came back zeroed or the wrong size"
+fi
+
+# Every copy is bounded.  The guard bytes past the end are the assertion that
+# matters: "size" is the caller's limit, and a call that copied the whole
+# struct regardless would corrupt a buffer sized against an older layout.
+GUARDS=$(grep -c "guard intact" "$REPORT" || true)
+OVERRUNS=$(grep -c "OVERRUN" "$REPORT" || true)
+if [ "$OVERRUNS" -eq 0 ] && [ "$GUARDS" -ge 6 ]; then
+    pass "no copy wrote past its bound ($GUARDS guards checked)"
+else
+    fail "$OVERRUNS copy/copies overran the caller's buffer"
+fi
+
+if grep -q "^NETSTATUS_ip into 8 bytes: rc 8 " "$REPORT"; then
+    pass "a caller asking for 8 bytes gets 8 and is told so"
+else
+    fail "a partial request did not return the partial count"
+fi
+
+if grep -q "^tcp sockets after listen: .* -- one more connection, correctly" "$REPORT"; then
+    pass "NETSTATUS_tcp_sockets grew by exactly one entry after listen()"
+else
+    fail "the socket table did not grow by one entry"
+fi
+
+# TCPS_LISTEN is 1 and NX_TCP_LISTEN_STATE is 2.  A stack passing NetX Duo's
+# value straight through reports 2, and every monitor shows a listener as a
+# connection in SYN_SENT.
+if grep -q "^listener state: 1 -- TCPS_LISTEN, correctly" "$REPORT"; then
+    pass "pcd_tcp_state is 4.4BSD's enumeration, not NetX Duo's"
+else
+    fail "pcd_tcp_state did not come back as TCPS_LISTEN"
+fi
+
+if grep -q "^tcp table into one entry: .* -- one entry, correctly" "$REPORT"; then
+    pass "a buffer that holds one entry gets one entry and no more"
+else
+    fail "the socket table ignored the caller's size limit"
 fi
 
 echo

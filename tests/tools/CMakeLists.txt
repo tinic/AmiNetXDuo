@@ -52,6 +52,18 @@ endif()
 target_compile_options(test_rtprobe PRIVATE -Wall -Wextra)
 set_target_properties(test_rtprobe PROPERTIES OUTPUT_NAME "RtProbe")
 
+# StatProbe drives GetNetworkStatistics().  It asserts the byte-count return,
+# the guard bytes past the end of each copy, and -- the one that no build can
+# check -- that pcd_tcp_state is 4.4BSD's enumeration and not NetX Duo's,
+# which diverge after CLOSE_WAIT.
+add_executable(test_statprobe statprobe.c)
+target_include_directories(test_statprobe PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_statprobe PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_statprobe PRIVATE -Wall -Wextra)
+set_target_properties(test_statprobe PROPERTIES OUTPUT_NAME "StatProbe")
+
 # TcpHandoff runs the whole socket-to-file-handle sequence -- accept(),
 # ReleaseCopyOfSocket(), Open("TCP:OBTAIN="), SystemTagList() -- against two
 # stock AmigaDOS commands.  Linked against nothing of ours: it reaches

@@ -163,6 +163,8 @@ IMPLEMENTED = {
     # the NDK assigns it an offset and neither the autodoc nor
     # clib/bsdsocket_protos.h documents it, so it keeps the ENOSYS stub.
     "AddRouteTagList", "DeleteRouteTagList", "GetRouteInfo", "FreeRouteInfo",
+    # Tier 3, the statistics call (netstats.c).
+    "GetNetworkStatistics",
 }
 
 # Return types that are pointers without saying so with a '*'.  A stub for one

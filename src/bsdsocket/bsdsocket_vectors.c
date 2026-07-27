@@ -11,7 +11,7 @@
  * the two after gethostbyaddr_r) and every vector we have not implemented
  * yet point at bsd_enosys() rather than NULL.
  *
- * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 86 implemented, 53 stubbed (7 of them NULL-returning, 1 FALSE-returning).
+ * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 87 implemented, 52 stubbed (7 of them NULL-returning, 1 FALSE-returning).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -110,7 +110,7 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_enosys,             /* -0x1ec [ 81] AbortInterfaceConfig */
     (APTR)bsd_enosys,             /* -0x1f2 [ 82] AddNetMonitorHookTagList */
     (APTR)bsd_enosys,             /* -0x1f8 [ 83] RemoveNetMonitorHook */
-    (APTR)bsd_enosys,             /* -0x1fe [ 84] GetNetworkStatistics */
+    (APTR)bsd_GetNetworkStatistics, /* -0x1fe [ 84] GetNetworkStatistics */
     (APTR)bsd_enosys,             /* -0x204 [ 85] AddDomainNameServer */
     (APTR)bsd_enosys,             /* -0x20a [ 86] RemoveDomainNameServer */
     (APTR)bsd_ReleaseDomainNameServerList, /* -0x210 [ 87] ReleaseDomainNameServerList */

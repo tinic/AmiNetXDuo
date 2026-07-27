@@ -357,6 +357,13 @@ LONG bsd_QueryInterfaceTagList(register STRPTR interface_name __asm("a0"),
                                register struct TagItem *tags __asm("a1"),
                                register struct AmiSocketBase *SocketBase __asm("a6"));
 
+/* LVO -0x1fe */
+LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
+                              register LONG version __asm("d1"),
+                              register APTR destination __asm("a0"),
+                              register LONG size __asm("d2"),
+                              register struct AmiSocketBase *SocketBase __asm("a6"));
+
 /* LVO -0x210 */
 VOID bsd_ReleaseDomainNameServerList(register struct List *list __asm("a0"),
                                      register struct AmiSocketBase *SocketBase __asm("a6"));
