@@ -14329,3 +14329,207 @@ truth and nothing has to be maintained by hand on `winbuilder`.
 Not automated, deliberately: nothing here runs in `tools/ci.sh`. It needs a
 Windows host with a logged-in console session and a Kickstart ROM, which is a
 description of one machine on one desk.
+
+## 45. Three CPUs, and the one instruction that made a 68000 a port (2026-07-26)
+
+`cmake/toolchain-m68k-amigaos.cmake` said `-m68020`, "68020 floor, see §9", and
+had said it since the beginning. The question was whether that floor is a
+*decision* or a *dependency* — whether something in the stack genuinely needs
+68020 instructions, in which case a 68000 build is a porting job rather than a
+build-matrix entry.
+
+**§9 is a decision, and it says so.** Decision 1 reads "Minimum target: 68020 +
+OS 3.1, 4 MB. Build `-m68020`; size packet pools for ~4 MB Fast RAM". Its stated
+consequences are about *scope* — which optional subsystems fit, and whether TLS
+is viable — not about instruction availability. The one place §9 talks about the
+instruction set at all is the M9 gate, which measured a TLS handshake and
+rejected it for being slow, not for failing to assemble.
+
+So the answer was settled empirically instead: configure the tree `-m68000` and
+see what breaks.
+
+### 45.1 What actually broke, which was almost nothing
+
+The whole tree compiled and linked for a plain 68000 with **two** failures:
+
+| | |
+|---|---|
+| `tests/perf/cpucal.S`, `tests/crypto68k/c68k_bulk_kernels.S` | 68020-only by construction. They exist to time `MULU.L` and the scaled index against the MC68020UM's published figures. On a machine that has neither there is nothing to measure; both are now excluded rather than made portable. |
+| `__muldi3` | one undefined symbol, at link. |
+
+That was the entire list. `bsdsocket.library` linked at 370,740 bytes on the
+first attempt.
+
+**`__muldi3` was undefined on the 68060 too, for the opposite reason**, and this
+is the finding worth keeping:
+
+| target | 32×32 → 64 | needs `__muldi3` |
+|---|---|---|
+| 68000 | no 32-bit multiply at all, only `mulu.w` | yes |
+| 68020/68030/68040 | `mulu.l Dn,Dh:Dl`, one instruction | no — GCC inlines it |
+| 68060 | **dropped**; traps to vector 61, emulated by `68060.library` | yes |
+
+Both new targets failed the link with exactly one missing symbol and the same
+one. `libgcc.a` in this toolchain is the zero-byte file §9's landmine note
+already described, and there is only one of it — `-print-libgcc-file-name`
+returns the same empty archive for every multilib. `src/common/ami_udivdi3.c`
+now supplies `__muldi3`, plus `__mulsi3`, `__udivsi3`, `__umodsi3`, `__divsi3`
+and `__modsi3` for the 68000, where every 32-bit `*`, `/` and `%` in C becomes a
+libgcc call. Those five are not optional even for code that does no arithmetic
+of its own: newlib's `.` multilib was built for a 68000 and carries the same
+references, so without them a 68000 build of anything calling `printf` does not
+link. Verified against native 64-bit arithmetic over 500,225 randomised and
+edge cases, 0 failures.
+
+`__muldi3` is written as four `mulu.w` partial products with the operands
+declared `unsigned short`, so GCC uses its widening `umulhisi3` pattern rather
+than promoting to `int` and calling `__mulsi3` — which would have recursed. On
+a 68060 this routine *is* the bignum inner loop, reached from every RSA and EC
+operation, so it is worth the care.
+
+### 45.2 The multilibs decide the flags, and `-m68040` is a trap
+
+The toolchain ships three: `.` (68000), `libm020` (`@mcpu=68020`) and `libm060`
+(`@mcpu=68060`), plus baserel and `m68881` variants of each. Multilib selection
+keys on the canonical `-mcpu` value, so:
+
+```
+-m68000   -> .          -m68030  -> .        <-- not libm020
+-m68020   -> libm020    -m68040  -> .        <-- not libm020
+-m68060   -> libm060    -m68020-40 -> .      <-- not libm020
+```
+
+**`-m68040` silently selects the 68000 C library.** It links and it runs — 68000
+code is valid on a 68040 — but every 32-bit multiply and divide inside newlib
+becomes a subroutine call, on the one target that has the instructions. The
+mapping used instead is `-m68020 -mtune=68040`, which keeps `libm020` and
+schedules for the 040; the 68040 implements the entire 68020 instruction set, so
+nothing is given up. This is also what AmiSSL concluded: it ships exactly a
+`68020-40` build and a `68060` build (§15.1), and only the former gets Howard
+Chu's bignum assembly, for the `MULU.L` reason above.
+
+Hence `AMINETXDUO_CPU=68000|68020|68040|68060`, and hence **three** shipped
+libraries rather than four. No `-m68881` anywhere: nothing in this stack uses
+floating point, and a library that required an FPU would refuse to load on the
+68020s and 68EC020s that have none.
+
+`AMINETXDUO_CRYPTO68K_ASM` now defaults from the CPU rather than from
+`CMAKE_CROSSCOMPILING`. It is unassemblable on a 68000 (`mulu.l`, `divu.l`,
+`extb.l`, `(a1,d6.w*4)`) and actively wrong on a 68060, where it assembles and
+then traps once per limb multiply. `AMINETXDUO_NET68K_ASM` went the other way
+and is now on for every target: `add.l`, `addx.l`, `movem.l` and `dbf` are all
+original 68000 instructions and none was dropped from the 68060. The two
+switches used to be one decision; adding the targets is what separated them.
+
+### 45.3 The bug a clean compile could never have found
+
+Everything above still leaves a 68000 that gurus. `tests/ram_driver` reached
+`server: listen` and then reset, over and over:
+
+```
+Exception 3 (20d9 222a9c) at 222a9c -> f80ad0!
+```
+
+Exception 3 is an **address error**, and `20d9` is `move.l (a1)+,(a0)+` at
+`.Llong` in `src/net68k/n68k_copy.S`. That routine brings the *destination* to a
+longword boundary and then reads longwords from wherever the source happens to
+be — correct on a 68020, which fetches a longword from any address for one extra
+bus cycle, and fatal on a 68000, which traps on any word or longword access to an
+odd address. `AMINETXDUO_NET68K_MEMCPY` resolves `memcpy()` to this routine, so
+the fault was every copy in the stack with mismatched pointer parity. The C
+fallback in `n68k_copy.c` had the identical bug, because it was written to follow
+the identical rule.
+
+**The condition is parity, not alignment.** An address of 2 mod 4 is perfectly
+legal for `move.l` on a 68000 — it simply becomes two word accesses. So the fix
+is one test at entry: if the two pointers disagree in bit 0, no amount of
+aligning the destination will ever make the source even and the byte loop is the
+only option; if they agree, aligning the destination advances the source by the
+same count and leaves it even, and the existing code is legal unchanged. Five
+instructions, `#ifdef`'d to the 68000 — on a 68020 that guard would be a 4×
+slowdown taken to avoid an 18% one, and the 68020 object is byte-for-byte what
+it was before.
+
+This is the whole argument for the emulator tier. The 68000 build compiled clean,
+linked clean, passed `tools/ci.sh` and produced a plausible library. It also
+could not open a socket.
+
+### 45.4 What was run, and on what
+
+`-m A600` with `Kickstart v3.1 r40.63 (A500-A600-A2000)`, which is a real 7 MHz
+68000 with no MMU. The A1200 ROM cannot be used for this — it wants a 68020 and
+FS-UAE refuses it — and neither can the AROS ROM be assumed equivalent.
+
+| harness | 68000 / A600 | 68060 | 68040 |
+|---|---|---|---|
+| `tools/smoke/smoke` | 5 / 5 | 5 / 5 | 5 / 5 |
+| `tools/smoke/lifecycle` | 18 / 18 | 18 / 18 | — |
+| `tools/smoke/KernelStop` | 8 / 8 | — | — |
+| `tests/ram_driver` | 32 / 32 | 32 / 32 | 32 / 32 |
+| `tests/mbuf_bpf` | 154 / 154 | 154 / 154 | — |
+| `tests/soak` | 98 / 98 | 98 / 98 | 98 / 98 |
+
+315 checks on the 68000, 0 failures. The 68060 and 68040 runs are CPU overrides
+on the A1200 profile.
+
+**One harness obstacle, not fixed here.** `tools/fsuae-run.sh:184` compiles its
+`envsetup` helper with a hardcoded `-m68020`, and the Startup-Sequence runs it
+before the test — so on a 68000 the run dies with `Illegal instruction: 49c1`
+(`extb.l`) before any of our code executes. The runs above were done by
+populating that script's cached `build/envsetup` with a `-m68000` build of the
+same source. The arch there should follow the binary under test; that file has
+another owner and was left alone.
+
+**Two things the emulator does not prove.** FS-UAE executes the 68060's dropped
+`MULU.L` forms rather than trapping them, so a 68060 run here does not exercise
+`68060.library`'s emulation path — which is precisely the cost that keeps
+`AMINETXDUO_CRYPTO68K_ASM` off for that target, and it remains reasoned rather
+than measured. And an A600 with 8 MB of Zorro II Fast RAM is not a machine
+anyone owns; the CPU is real, the memory configuration is not.
+
+### 45.5 How it ships
+
+**One archive, three libraries, and the installer picks.** Three archives were
+rejected because the thing a user has to get right would be the one thing they
+cannot see from the outside, and the installer already reads `DEVS:` to find the
+network card, so reading `database "cpu"` to choose a library is in keeping.
+
+```
+Libs/68000/      bsdsocket, usergroup           68000, 68010
+Libs/68020-40/   bsdsocket, usergroup, tls      68020, 68030, 68040
+Libs/68060/      bsdsocket, usergroup, tls      68060
+C/               the commands, built once
+```
+
+The drawer names are AmiSSL's, because a user who has seen one will recognise
+the other. The installer's fallback for an unrecognised processor is
+`68020-40` rather than an abort: `database "cpu"` on an older Installer does not
+know every part, and guessing low yields a library that runs everywhere above a
+68020 instead of one that does not load. That replaces the `(abort ...)` which
+used to turn away 68000s and 68010s outright.
+
+**The commands are built once, for the 68000, and every machine runs that set.**
+They are a few hundred lines each around `bsdsocket.library` calls; the code
+whose instruction set matters — checksums, copies, bignums — is in the
+libraries, which are per-CPU. Twenty-one commands times three would add roughly
+9 MB to a 3.8 MB archive so that `ping` could parse its arguments faster. It
+costs no features: `src/tools` reaches `tls.library` through its published
+vectors at run time, so the 68000-built `fetch` still does `https:` on a machine
+whose installed library has TLS.
+
+**There is no 68000 `tls.library`, and that is a judgement rather than an
+omission.** §9's M9 gate measured a real handshake on the 68020 floor — 185.5 s
+with both ends on one CPU, 158.0 s for the RSA-2048 private operation alone,
+~13–20 s derived for a client-only handshake — and concluded that offload is the
+realistic path even there. A 7 MHz 68000 on a 16-bit bus is roughly a quarter of
+that 14 MHz 68020 before accounting for having no 32-bit multiply, and the
+hand-written limb assembly cannot run on it either. Shipping it would ship the
+number §9 already rejected, several times over. `AMINETXDUO_TLS` therefore
+defaults off for `AMINETXDUO_CPU=68000`; it is an option, not a wall, and
+`-DAMINETXDUO_TLS=ON` there configures, builds and links. The installer says
+plainly that encrypted connections are not installed and that everything else
+works, rather than leaving a drawer mysteriously short of a file.
+
+`tools/ci.sh` builds `m68000`, `m68040` and `m68060` alongside the four
+configurations it had. The `m68040` entry earns its place by catching anyone who
+"fixes" its flags to `-m68040`.

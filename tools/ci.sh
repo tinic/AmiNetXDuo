@@ -16,7 +16,7 @@
 #
 #   toolchain    resolve, or download, the pinned m68k-amigaos-gcc
 #   host         the parser / mbuf / BPF VM / crypto68k vector tests, ctest
-#   cross        all four build configurations, warnings fatal
+#   cross        every build configuration, warnings fatal
 #   conformance  build the bsdsocktest suite for m68k (running it needs tier 2)
 #   emulator     tier 2 -- boots FS-UAE, needs a ROM
 #
@@ -29,7 +29,7 @@
 #   AMINETXDUO_CI_BUILD    build directory root (default build/ci)
 #   AMINETXDUO_CI_JOBS     parallel jobs (default: all cores)
 #   AMINETXDUO_CI_CROSS    space-separated subset of the cross configs to
-#                          build, e.g. "default" (default: all four)
+#                          build, e.g. "default" (default: all of them)
 #   AMINETXDUO_KICKSTART   emulator stage: boot ROM.  Unset means fetch AROS.
 #
 # SPDX-License-Identifier: MIT
@@ -42,7 +42,7 @@ cd "$ROOT"
 BUILD="${AMINETXDUO_CI_BUILD:-build/ci}"
 JOBS="${AMINETXDUO_CI_JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl -n hw.ncpu 2>/dev/null || echo 4 )}"
 
-# The four configurations that must all build.  They are not variations on a
+# The configurations that must all build.  They are not variations on a
 # theme: AMINETXDUO_IPV6 changes the layout of NX_IP, NX_PACKET and
 # NX_TCP_SOCKET across the whole tree, AMINETXDUO_TLS pulls in nx_secure and
 # nx_crypto, and AMINETXDUO_CRYPTO68K_ASM=OFF swaps the hand-written 68020
@@ -51,11 +51,31 @@ JOBS="${AMINETXDUO_CI_JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl 
 # TLS is ON by default now, so `default` covers the TLS build and the entry
 # here is the OFF one -- the configuration a user gets by asking for a smaller
 # stack, and the one that would otherwise stop being compiled at all.
+#
+# The last three are the CPU targets.  They are not "the same build with a
+# different -m flag": each one changes what the compiler may emit and what the
+# tree may contain, and each broke something the others did not while it was
+# being brought up (docs/RESEARCH.md §45).
+#
+#   m68000  no 32-bit multiply or divide at all, so the compiler runtime in
+#           src/common carries five more routines and the crypto assembly
+#           cannot be assembled.  TLS is off by default here.
+#   m68040  -m68020 -mtune=68040.  Cheap to build and it is what catches
+#           anyone "fixing" that mapping to -m68040, which would silently
+#           link the 68000 C library.
+#   m68060  the 64-bit-result MULU.L and DIVU.L are gone, so GCC calls
+#           __muldi3 -- the symbol whose absence blocked this target.
+#
+# Together with `default` these are the three libraries the archive ships, so
+# a break here is a break in something a user downloads.
 CROSS_CONFIGS=(
     "default:"
     "ipv6:-DAMINETXDUO_IPV6=ON"
     "notls:-DAMINETXDUO_TLS=OFF"
     "noasm:-DAMINETXDUO_CRYPTO68K_ASM=OFF"
+    "m68000:-DAMINETXDUO_CPU=68000"
+    "m68040:-DAMINETXDUO_CPU=68040"
+    "m68060:-DAMINETXDUO_CPU=68060"
 )
 
 # Host-side test executables.  ctest fails loudly ("Unable to find executable")
