@@ -76,7 +76,13 @@ enum
 #define FETCH_HOST_MAX          128
 #define FETCH_PATH_MAX          512
 #define FETCH_URL_MAX           640
-#define FETCH_HEAD_MAX          3072        /* status line + headers        */
+/*
+ * 3072 was too small for the real web: www.github.com answers a plain GET with
+ * more than that in headers alone, so `fetch` completed the TLS handshake,
+ * received a perfectly good 301, and then refused it. 16 KB is past anything
+ * ordinary -- and running out is no longer fatal either, see head_trunc below.
+ */
+#define FETCH_HEAD_MAX          16384       /* status line + headers        */
 #define FETCH_CHUNK             4096
 
 /*
@@ -659,6 +665,8 @@ static LONG fetch_run(VOID)
         ULONG       address = 0;
         ULONG       head_len = 0;
         BOOL        in_head = TRUE;
+        BOOL        head_trunc = FALSE;
+        char        head_tail[4] = { 0, 0, 0, 0 };
         LONG        n;
         LONG        why = TLS_OK;
         ULONG       i;
@@ -901,26 +909,33 @@ static LONG fetch_run(VOID)
                 goto hop_done;
             }
 
+            /*
+             * Running past the buffer stops us KEEPING headers; it does not
+             * stop us reading them. The end of the block is found from the
+             * last four bytes seen rather than from the last four bytes
+             * stored, so an unusually chatty server costs us the tail of its
+             * headers instead of the whole transfer. What we actually need --
+             * the status line, and Location: on a redirect -- is at the front,
+             * and the two places that care check head_trunc before complaining
+             * about not finding something.
+             */
             while (in_head && at < (ULONG)n)
             {
-                if (head_len + 1 >= (ULONG)FETCH_HEAD_MAX)
-                {
-                    tool_error("the response headers are longer than %ld bytes",
-                               (LONG)FETCH_HEAD_MAX);
-                    rc = RETURN_ERROR;
-                    goto hop_done;
-                }
+                char c = (char)fetch_chunk[at++];
 
-                fetch_head[head_len++] = (char)fetch_chunk[at++];
+                if (head_len + 1 < (ULONG)FETCH_HEAD_MAX)
+                    fetch_head[head_len++] = c;
+                else
+                    head_trunc = TRUE;
 
-                if ((head_len >= 4 &&
-                     fetch_head[head_len - 4] == '\r' &&
-                     fetch_head[head_len - 3] == '\n' &&
-                     fetch_head[head_len - 2] == '\r' &&
-                     fetch_head[head_len - 1] == '\n') ||
-                    (head_len >= 2 &&
-                     fetch_head[head_len - 2] == '\n' &&
-                     fetch_head[head_len - 1] == '\n'))
+                head_tail[0] = head_tail[1];
+                head_tail[1] = head_tail[2];
+                head_tail[2] = head_tail[3];
+                head_tail[3] = c;
+
+                if ((head_tail[0] == '\r' && head_tail[1] == '\n' &&
+                     head_tail[2] == '\r' && head_tail[3] == '\n') ||
+                    (head_tail[2] == '\n' && head_tail[3] == '\n'))
                 {
                     in_head = FALSE;
                 }
@@ -956,6 +971,20 @@ static LONG fetch_run(VOID)
                     {
                         goto hop_done;
                     }
+
+                    /*
+                     * The one case where losing the tail of the headers costs
+                     * something. Say so, rather than reporting a redirect
+                     * with nowhere to go as though the server sent none.
+                     */
+                    if (head_trunc)
+                    {
+                        tool_error("the %ld redirect gave no Location: in the "
+                                   "first %ld bytes of headers",
+                                   (LONG)status, (LONG)FETCH_HEAD_MAX);
+                        rc = RETURN_ERROR;
+                        goto hop_done;
+                    }
                 }
 
                 if (st.headers)
@@ -965,6 +994,11 @@ static LONG fetch_run(VOID)
                         rc = RETURN_FAIL;
                         goto hop_done;
                     }
+
+                    /* Asked to show the headers, and they did not all fit. */
+                    if (head_trunc)
+                        tool_error("showing the first %ld bytes of headers "
+                                   "only", (LONG)FETCH_HEAD_MAX);
                 }
             }
 
