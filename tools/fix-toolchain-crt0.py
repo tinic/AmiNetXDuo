@@ -54,6 +54,13 @@ HOW IT DECIDES WHAT TO PATCH
     and never emit that opcode -- they were reported as "skipped", which reads
     as benign. All eleven crt0.o in the tree carry the bug.
 
+    VERIFIED 2026-07-27: crt0.c marks BOTH ____start (line 48) and exit (line
+    94) __entrypoint, read from bebbo/newlib-cygwin branch `amiga` at 0909ae9.
+    That is what makes the upstream fix safe -- were only ____start marked,
+    suppressing its save while exit kept a frame would put __savedSp BELOW the
+    return address, which is the `refused` case below and worse than the
+    original bug. callfuncs and __restore_a4 carry it too.
+
     ____start's frame is widened to match exit's, rather than exit's narrowed
     to match ____start's, because exit still USES d7 to carry the return code:
     narrowing would stop d7 being saved while it is still clobbered, breaking
