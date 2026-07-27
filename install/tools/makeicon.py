@@ -165,6 +165,55 @@ def text(canvas, x, y, s, colour):
     return x
 
 
+# 4x6 glyphs.  The 5x7 font above needs two lines to fit "AmiNetXDuo" into 64
+# pixels, and two lines of cramped capitals is most of why these icons looked
+# hand-plotted.  At 4x6 the whole name is one 54-pixel line, which leaves the
+# rest of the front for a picture.
+
+FONT_S = {
+    "A": ["0110", "1001", "1001", "1111", "1001", "1001"],
+    "D": ["1110", "1001", "1001", "1001", "1001", "1110"],
+    "N": ["1001", "1101", "1101", "1011", "1011", "1001"],
+    "X": ["1001", "1001", "0110", "0110", "1001", "1001"],
+    "e": ["0000", "0110", "1001", "1111", "1000", "0111"],
+    "i": ["0100", "0000", "1100", "0100", "0100", "1110"],
+    "m": ["0000", "0000", "1110", "1101", "1101", "1101"],
+    "o": ["0000", "0000", "0110", "1001", "1001", "0110"],
+    "t": ["0100", "0100", "1110", "0100", "0100", "0011"],
+    "u": ["0000", "0000", "1001", "1001", "1001", "0111"],
+    " ": ["0000"] * 6,
+}
+
+
+def text_s(canvas, x, y, s, colour):
+    """The 4x6 font, one pixel of tracking."""
+    for ch in s:
+        glyph = FONT_S.get(ch)
+        if glyph is None:
+            x += 5
+            continue
+        for dy, row in enumerate(glyph):
+            for dx, bit in enumerate(row):
+                if bit == "1":
+                    canvas.set(x + dx, y + dy, colour)
+        x += 5
+    return x
+
+
+# Three nodes and the links between them.  A plug or a cable end is not
+# legible at this size -- it comes out as a grey smudge -- but dots joined by
+# lines reads as "network" even at eight pixels tall.
+NET = [
+    "WW     WW",
+    "WW     WW",
+    " K     K ",
+    " KKKKKKK ",
+    "    K    ",
+    "   WWW   ",
+    "   WWW   ",
+]
+
+
 # ------------------------------------------------------------ file writer --
 
 def diskobject(canvas, obj_type, default_tool=None, tooltypes=(),
@@ -263,21 +312,26 @@ PLUG = [
 
 
 def install_icon():
-    """A project icon: the package, with a network plug and a down arrow."""
+    """The installer: a labelled panel with a network on it and an arrow in."""
     c = Canvas(64, 26, GREY)
 
     c.fill(1, 1, 62, 24, BLUE)
     c.bevel(1, 1, 62, 24)
 
-    text(c, 4, 4, "AmiNet", WHITE)
-    text(c, 4, 14, "XDuo", WHITE)
+    # The name across the top, then a rule, then the picture.  Giving the text
+    # its own band instead of letting it share space with the artwork is most
+    # of the difference between this and the two-line version.
+    text_s(c, 5, 3, "AmiNetXDuo", WHITE)
+    c.hline(4, 59, 11, BLACK)
+    c.hline(4, 59, 12, WHITE)
 
-    c.stamp(46, 3, PLUG, {"K": BLACK, "W": WHITE})
+    c.stamp(15, 15, NET, {"K": BLACK, "W": WHITE})
 
-    # an arrow pointing down into the machine: this one installs
-    c.stamp(48, 14, ["  KKKK  ",
-                     "  KWWK  ",
-                     "KKKWWKKK",
+    # An arrow going in: this one installs.
+    c.stamp(36, 14, ["   KK   ",
+                     "   KK   ",
+                     "   KK   ",
+                     "KKKKKKKK",
                      " KWWWWK ",
                      "  KWWK  ",
                      "   KK   "],
@@ -286,25 +340,23 @@ def install_icon():
 
 
 def drawer_icon():
-    """The standard Amiga drawer shape: a tab, a front, a handle."""
+    """The standard Amiga drawer shape, with the name and a network on it."""
     c = Canvas(64, 26, GREY)
 
-    # the tab along the top left
-    c.fill(2, 2, 26, 7, BLUE)
-    c.hline(2, 25, 2, WHITE)
-    c.vline(2, 2, 7, WHITE)
-    c.vline(26, 3, 7, BLACK)
+    # The tab.  Drawn before the front so the front's bevel closes over it.
+    c.fill(2, 1, 24, 6, BLUE)
+    c.hline(2, 23, 1, WHITE)
+    c.vline(2, 1, 6, WHITE)
+    c.vline(24, 2, 6, BLACK)
 
-    # the front
-    c.fill(1, 6, 62, 24, BLUE)
-    c.bevel(1, 6, 62, 24)
+    c.fill(1, 5, 62, 24, BLUE)
+    c.bevel(1, 5, 62, 24)
 
-    text(c, 5, 9, "AmiNet", WHITE)
-    text(c, 5, 17, "XDuo", WHITE)
+    text_s(c, 5, 8, "AmiNetXDuo", WHITE)
+    c.hline(4, 59, 15, BLACK)
+    c.hline(4, 59, 16, WHITE)
 
-    # handle
-    c.fill(46, 13, 57, 16, BLACK)
-    c.hline(46, 57, 12, WHITE)
+    c.stamp(27, 17, NET, {"K": BLACK, "W": WHITE})
     return c
 
 
@@ -312,36 +364,43 @@ def document_icon():
     """A project icon for a text file: a sheet of paper with lines on it."""
     c = Canvas(40, 26, GREY)
 
-    c.fill(6, 1, 33, 24, WHITE)
-    c.box(6, 1, 33, 24, BLACK)
+    c.fill(5, 1, 34, 24, WHITE)
+    c.box(5, 1, 34, 24, BLACK)
 
-    # a folded corner
-    c.fill(27, 1, 33, 6, GREY)
-    for i in range(7):
-        c.set(27 + i, 1 + i, BLACK)
-    c.hline(27, 33, 1, GREY)
-    c.vline(33, 1, 6, GREY)
+    # The folded corner: the fold is a triangle of GREY with a black diagonal,
+    # and the sheet's own outline is broken so the corner reads as turned over
+    # rather than as a grey square pasted on.
+    for i in range(9):
+        for x in range(34 - 8 + i, 35):
+            c.set(x, 1 + i, GREY)
+        c.set(34 - 8 + i, 1 + i, BLACK)
+    c.hline(34 - 8, 34, 1, GREY)
+    c.vline(34, 1, 8, GREY)
+    c.hline(26, 33, 9, BLACK)
 
-    for y in range(9, 22, 3):
-        c.hline(10, 29, y, BLUE)
-    c.hline(10, 22, 21, BLUE)
+    for y in range(12, 22, 3):
+        c.hline(9, 30, y, BLUE)
+    c.hline(9, 23, 21, BLUE)
     return c
 
 
 def plain_drawer_icon():
-    """A drawer icon with no lettering, for Docs and Examples."""
+    """A drawer with no lettering, for Docs and Examples."""
     c = Canvas(52, 24, GREY)
 
-    c.fill(2, 2, 22, 7, BLUE)
-    c.hline(2, 21, 2, WHITE)
-    c.vline(2, 2, 7, WHITE)
-    c.vline(22, 3, 7, BLACK)
+    c.fill(2, 1, 20, 6, BLUE)
+    c.hline(2, 19, 1, WHITE)
+    c.vline(2, 1, 6, WHITE)
+    c.vline(20, 2, 6, BLACK)
 
-    c.fill(1, 6, 50, 22, BLUE)
-    c.bevel(1, 6, 50, 22)
+    c.fill(1, 5, 50, 22, BLUE)
+    c.bevel(1, 5, 50, 22)
 
-    c.fill(20, 12, 32, 15, BLACK)
-    c.hline(20, 32, 11, WHITE)
+    # A handle, centred, with its own highlight and shadow so the front reads
+    # as a surface rather than a flat rectangle.
+    c.fill(18, 11, 33, 14, BLACK)
+    c.hline(18, 33, 10, WHITE)
+    c.hline(18, 33, 15, WHITE)
     return c
 
 
