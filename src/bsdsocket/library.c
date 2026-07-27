@@ -18,7 +18,9 @@
 
 #include "aminetxduo/config.h"
 
+#include <dos/dostags.h>
 #include <proto/exec.h>
+#include <proto/dos.h>
 
 /*
  * A shared library has no startup code, so the SysBase the exec inlines want
@@ -161,6 +163,17 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     /* Clone the jump table as well as the data: the child *is* a library. */
     CopyMem((UBYTE *)master - neg, mem, neg + pos);
 
+    /*
+     * The negative half we just copied is CODE (the LVO jump table). On a 68030
+     * (and up) with the instruction cache on, the CPU may still hold stale lines
+     * for this block -- it was very likely somebody else's freed code a moment
+     * ago -- so a call through the child's vectors would execute that ghost, not
+     * the JMPs we just wrote. CacheClearU() flushes both caches so the copy is
+     * what actually runs. (Missing this is invisible on a 68000/68020 and on
+     * emulators that do not model the I-cache, which is why it survived to here.)
+     */
+    CacheClearU();
+
     child = (struct AmiSocketBase *)(mem + neg);
 
     child->sb_Lib.lib_OpenCnt = 1;
@@ -270,6 +283,90 @@ static VOID bsd_child_destroy(struct AmiSocketBase *child)
     FreeMem((UBYTE *)child - neg, neg + pos);
 }
 
+/* --------------------------------------------------- stack bring-up proc -- */
+/*
+ * netstack_startup() parses DEVS: and runs the whole of NetX Duo's init on the
+ * CALLING task's stack -- it adopts this task (netstack.c, ami_ns_bring_up()).
+ * Opened from a command with the ~4 KB startup-sequence Shell stack -- which is
+ * exactly how AddNetInterface comes up at boot -- that overflows and smashes
+ * the return path, and on a machine with no memory protection that surfaces as
+ * an illegal instruction or line-F at a wild address seconds later.
+ *
+ * So the first open runs the bring-up on a Process of our own with a stack we
+ * choose, and waits for its result; later opens just take a reference. The
+ * handshake mirrors bsd_tcp_handler_start(): a boot record on this stack, a
+ * file-scope pointer to it, and a private signal (NOT SIGF_SINGLE -- see
+ * bsd_netstack_bringup()) -- serialised by the master sb_Lock the caller
+ * already holds across the whole bring-up.
+ */
+#define BSD_STARTUP_STACK   (64UL * 1024UL)
+
+typedef struct
+{
+    struct Task *nb_Parent;
+    ULONG        nb_SigMask;
+    LONG         nb_Result;
+} BsdNetBoot;
+
+static BsdNetBoot *bsd_net_boot;
+
+static VOID bsd_netstack_boot_main(VOID)
+{
+    BsdNetBoot *b = bsd_net_boot;
+
+    /* netstack_startup() blocks until NX_IP has initialised, so signal only
+       after it returns -- the parent Wait()s the whole time and `boot` lives
+       on its stack until then. */
+    b->nb_Result = netstack_startup();
+    Signal(b->nb_Parent, b->nb_SigMask);
+}
+
+static LONG bsd_netstack_bringup(VOID)
+{
+    BsdNetBoot      boot;
+    struct TagItem  tags[5];
+    struct Process *proc;
+    BYTE            sig;
+
+    /* A PRIVATE signal, NOT SIGF_SINGLE: the child runs netstack_startup(),
+       which starts the whole ThreadX kernel, and the port uses SIGF_SINGLE as
+       its thread run-signal. Sharing it would let a stray ThreadX dispatch
+       wake this Wait() early -- we would return and pop this stack frame (with
+       `boot` on it), and the child would then write nb_Result into the dead
+       frame, smashing our return address (the Shell Process wild jump to a
+       near-null PC). */
+    sig = (BYTE)AllocSignal(-1);
+    if (sig < 0)
+        return netstack_startup();      /* no signal: caller-stack fallback */
+
+    boot.nb_Parent  = FindTask(NULL);
+    boot.nb_SigMask = 1UL << sig;
+    boot.nb_Result  = AMI_NET_ERR_KERNEL;
+    bsd_net_boot    = &boot;
+
+    tags[0].ti_Tag  = NP_Entry;     tags[0].ti_Data = (ULONG)bsd_netstack_boot_main;
+    tags[1].ti_Tag  = NP_Name;      tags[1].ti_Data = (ULONG)"bsdsocket stack";
+    tags[2].ti_Tag  = NP_StackSize; tags[2].ti_Data = BSD_STARTUP_STACK;
+    tags[3].ti_Tag  = NP_Cli;       tags[3].ti_Data = (ULONG)FALSE;
+    tags[4].ti_Tag  = TAG_DONE;     tags[4].ti_Data = 0;
+
+    proc = CreateNewProc(tags);
+    if (proc == NULL)
+    {
+        /* Cannot spawn: fall back to the caller's stack. An opener that came
+           with enough stack still works; one that did not is no worse off. */
+        bsd_net_boot = NULL;
+        FreeSignal(sig);
+        return netstack_startup();
+    }
+
+    Wait(boot.nb_SigMask);
+    bsd_net_boot = NULL;
+    FreeSignal(sig);
+
+    return boot.nb_Result;
+}
+
 /* ------------------------------------------------------------ exec vectors -- */
 
 struct AmiSocketBase *bsd_lib_open(
@@ -307,7 +404,9 @@ struct AmiSocketBase *bsd_lib_open(
 
     if (master->sb_StackRefs == 0)
     {
-        if (netstack_startup() != AMI_NET_OK)
+        /* Bring the stack up on our own big-stack Process, not the opener's
+           stack -- see bsd_netstack_bringup() above. */
+        if (bsd_netstack_bringup() != AMI_NET_OK)
         {
             ReleaseSemaphore(&master->sb_Lock);
             master->sb_Lib.lib_OpenCnt--;
