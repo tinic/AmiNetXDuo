@@ -1,0 +1,66 @@
+Two nx_secure record files, copied and edited for RFC 7905
+==========================================================
+
+`nx_secure_tls_record_payload_encrypt.c` and
+`nx_secure_tls_record_payload_decrypt.c` here are copies of the files of the
+same name in `third_party/netxduo/nx_secure/src/`, with one branch added to
+each.  `src/tls/CMakeLists.txt` drops the vendored pair from the glob so that
+these are the ones every internal caller resolves to -- the same mechanism the
+top level uses for `_nx_ip_checksum_compute()`, and for the same reason: a
+NetX Duo inner loop can be replaced without editing `third_party/`.
+
+Why a copy and not a hook
+-------------------------
+
+`nx_secure` has exactly one extension point here, `NX_SECURE_AEAD_CIPHER_CHECK`,
+and it is the wrong shape.  It widens the *test* for "is this an AEAD cipher",
+and then `nx_secure_tls_session_iv_size_get.c` converts anything it matches to
+`NX_CRYPTO_ENCRYPTION_AES_GCM_16` and the two files here build a GCM nonce.
+That is the TLS 1.2 partially-explicit construction: a four-byte implicit salt,
+an eight-byte nonce_explicit written at the head of every record, and the
+sequence number as the nonce's low half.
+
+RFC 7905 does none of that.  ChaCha20-Poly1305 in TLS 1.2 uses the construction
+TLS 1.3 later adopted for everything: `record_iv_length` is **zero**, nothing
+precedes the ciphertext, and the per-record nonce is the full twelve-byte write
+IV exclusive-ored with the sequence number padded on the left.  Only the
+additional data stays TLS 1.2's thirteen bytes.  So the difference is on the
+wire, in the record's length and layout, and no amount of work inside an
+`NX_CRYPTO_METHOD` can reach it -- a method is handed a nonce and a buffer
+after the framing has already been decided.
+
+`nx_secure_tls_session_iv_size_get.c` is deliberately NOT copied.  Its `switch`
+has no case for our algorithm, so it takes the `default:` and returns zero,
+which is what RFC 7905 wants.  Leaving `NX_SECURE_AEAD_CIPHER_CHECK` at its
+default of `NX_FALSE` is what keeps it there.
+
+The whole of the diff
+---------------------
+
+Both files, one hunk each, in the same place: the `#ifdef
+NX_SECURE_ENABLE_AEAD_CIPHER` block that decides the nonce and the additional
+data.
+
+1. `NX_CRYPTO_ENCRYPTION_CHACHA20_POLY1305` added to the `if` that selects the
+   AEAD path.  (The constant is the vendored one, `nx_crypto_const.h`; it was
+   already reserved.)
+
+2. A branch ahead of the TLS 1.3 test that builds the RFC 7905 nonce and
+   additional data.  In the encrypt file it leaves `*data_offset` at zero and
+   takes `message_length` as the whole packet, where the GCM path prepends
+   eight bytes and subtracts them; in the decrypt file it leaves `offset`
+   alone, where the GCM path extracts eight bytes and advances past them.
+
+Nothing else is touched.  `diff -u` against the submodule shows only those
+hunks and the file header comment, and that is the check to run after a NetX
+Duo bump:
+
+    for f in nx_secure_tls_record_payload_encrypt.c \
+             nx_secure_tls_record_payload_decrypt.c; do
+        diff -u third_party/netxduo/nx_secure/src/$f src/tls/rfc7905/$f
+    done
+
+`tests/tls/tls_https` and the curl suite are what say the merge was done right;
+the RFC 8439 vectors in `tests/crypto68k` only say the arithmetic is.
+
+SPDX-License-Identifier: MIT

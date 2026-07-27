@@ -188,6 +188,8 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_crt.c"
         "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_aes.c"
         "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_sha256.c"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_chacha20.c"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_poly1305.c"
         "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_huge_number.c"
         # Defines _NX_CRYPTO_INITIALIZE_, which is what gives the library its
         # one definition of _nx_crypto_memset_ptr / _nx_crypto_memcpy_ptr.

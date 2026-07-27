@@ -78,9 +78,18 @@ extern "C" {
 #endif
 
 /*
- * The drop-in replacements for the vendored ECC ciphersuite tables.  Same
- * ciphersuites in the same order -- negotiation behaviour is unchanged -- with
- * crypto_method_rsa and crypto_method_ec_secp256 swapped for ours.
+ * RFC 7905's two ciphersuite numbers.  nx_secure_tls.h has a define for every
+ * suite the vendored tables mention and these were never among them, because
+ * nx_secure has no ChaCha20-Poly1305 at all -- src/crypto68k/c68k_chacha20.c
+ * is where it now comes from.
+ */
+#define TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256     0xCCA8
+#define TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256   0xCCA9
+
+/*
+ * The drop-in replacements for the vendored ECC ciphersuite tables, with
+ * crypto_method_rsa and crypto_method_ec_secp256 swapped for ours and the two
+ * ChaCha20-Poly1305 suites added at the head of the list.
  *
  *     nx_secure_tls_session_create(&session, &ami_crypto_tls_ciphers_ecc, ...)
  *     nx_secure_tls_ecc_initialize(&session, ami_crypto_ecc_supported_groups,

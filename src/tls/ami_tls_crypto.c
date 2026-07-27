@@ -25,6 +25,7 @@
 #include "c68k_p256.h"
 #include "c68k_aes.h"
 #include "c68k_sha256.h"
+#include "c68k_chacha20.h"
 
 #include "tls.h"
 #include "ami_tls_crypto.h"
@@ -736,10 +737,11 @@ NX_CRYPTO_METHOD ami_crypto_method_rsa =
  *   every byte forever.  `https` moved 16,464 B/s against `http`'s 114,598 on
  *   this machine, and most of that ceiling is these two functions.
  *
- *   The ciphersuites this client actually negotiates are 0xC027 and 0xC023 --
- *   ECDHE_RSA and ECDHE_ECDSA with AES_128_CBC_SHA256 -- so it is these two,
- *   in both directions, per record.  The GCM and CCM rows below are compiled
- *   in and no negotiated suite reaches them.
+ *   These two are the record path for 0xC027 and 0xC023 -- ECDHE_RSA and
+ *   ECDHE_ECDSA with AES_128_CBC_SHA256 -- which is what a server negotiates
+ *   when it will not take the AEAD offered above them.  GitHub is one.
+ *   ChaCha20-Poly1305 is preferred and is the other record path; see the
+ *   block above ami_crypto_method_chacha20_poly1305.
  */
 
 typedef struct
@@ -942,6 +944,244 @@ NX_CRYPTO_METHOD ami_crypto_method_aes_cbc_256 =
     ami_crypto_method_aes_init,
     ami_crypto_method_aes_cleanup,
     ami_crypto_method_aes_cbc_operation
+};
+
+
+/* --------------------------------------------- ChaCha20-Poly1305 (AEAD) -- */
+
+/*
+ * RFC 7905, ciphersuites 0xCCA8 and 0xCCA9.
+ *
+ * WHY THERE IS AN AEAD HERE AT ALL
+ *
+ *   Because the two CBC suites above no longer reach the web.  Google's front
+ *   end answers a ClientHello offering only 0xC027 and 0xC023 with a
+ *   handshake_failure in a second and a half; GitHub still accepts them, which
+ *   is why they stay.  An AEAD is not an optimisation here, it is the
+ *   difference between a stack that can fetch a modern URL and one that
+ *   cannot.
+ *
+ * WHY ChaCha20-Poly1305 AND NOT AES-GCM
+ *
+ *   Both would restore the reach.  Only one is affordable: AES-GCM's GHASH is
+ *   a carry-less multiply in GF(2^128), which no 68k instruction does, so
+ *   nx_crypto_gcm.c does it bit by bit and charges 344.6 ms for 1 KB against
+ *   AES-CBC's 21.9 (docs/RESEARCH.md 5.5).  Negotiating it would trade a
+ *   handshake we cannot complete for a download nobody would wait for.
+ *   ChaCha20 is add, rotate and exclusive-or on 32-bit words and Poly1305 is
+ *   MULU.L, and both come out AHEAD of the CBC suite rather than behind it --
+ *   docs/RESEARCH.md 54 has the measurement, and it is why the 0xCCA8 rows sit
+ *   at the top of the table rather than the bottom.
+ *
+ * THE FRAMING IS NOT IN THIS FILE
+ *
+ *   An NX_CRYPTO_METHOD is handed a nonce and a buffer; what a record looks
+ *   like on the wire is decided before it is called.  RFC 7905 differs from
+ *   the GCM suites there -- no nonce_explicit, a twelve-byte implicit IV --
+ *   and that lives in src/tls/rfc7905/, which explains itself.
+ */
+
+typedef struct
+{
+    C68K_CHACHA20_POLY1305  ami_aead;
+    UCHAR                   ami_aead_key[C68K_CHACHA20_KEY_SIZE];
+} AMI_CRYPTO_CHACHA20_CTX;
+
+static UINT ami_crypto_method_chacha20_poly1305_init(struct NX_CRYPTO_METHOD_STRUCT *method,
+                                                     UCHAR *key,
+                                                     NX_CRYPTO_KEY_SIZE key_size_in_bits,
+                                                     VOID **handle,
+                                                     VOID *crypto_metadata,
+                                                     ULONG crypto_metadata_size)
+{
+
+AMI_CRYPTO_CHACHA20_CTX *ctx;
+UINT                     i;
+
+
+    NX_CRYPTO_PARAMETER_NOT_USED(handle);
+
+    if ((method == NX_CRYPTO_NULL) || (key == NX_CRYPTO_NULL) ||
+        (crypto_metadata == NX_CRYPTO_NULL))
+    {
+        return(NX_CRYPTO_PTR_ERROR);
+    }
+
+    if (((((ULONG)crypto_metadata) & 0x3u) != 0u) ||
+        (crypto_metadata_size < sizeof(AMI_CRYPTO_CHACHA20_CTX)))
+    {
+        return(NX_CRYPTO_PTR_ERROR);
+    }
+
+    if (key_size_in_bits != (NX_CRYPTO_KEY_SIZE)(C68K_CHACHA20_KEY_SIZE << 3))
+    {
+        return(NX_CRYPTO_UNSUPPORTED_KEY_SIZE);
+    }
+
+    /*
+     * The key is kept rather than expanded, because ChaCha20 has no key
+     * schedule: the state is rebuilt from key and nonce once per RECORD, and
+     * the nonce only arrives with the record.
+     */
+    ctx = (AMI_CRYPTO_CHACHA20_CTX *)crypto_metadata;
+
+    for (i = 0u; i < C68K_CHACHA20_KEY_SIZE; i++)
+    {
+        ctx -> ami_aead_key[i] = key[i];
+    }
+
+    return(NX_CRYPTO_SUCCESS);
+}
+
+static UINT ami_crypto_method_chacha20_poly1305_cleanup(VOID *crypto_metadata)
+{
+
+#ifdef NX_SECURE_KEY_CLEAR
+    if (crypto_metadata != NX_CRYPTO_NULL)
+    {
+        NX_CRYPTO_MEMSET(crypto_metadata, 0, sizeof(AMI_CRYPTO_CHACHA20_CTX));
+    }
+#else
+    NX_CRYPTO_PARAMETER_NOT_USED(crypto_metadata);
+#endif
+
+    return(NX_CRYPTO_SUCCESS);
+}
+
+/*
+ * The record's shape, call for call.  INITIALIZE carries the nonce in
+ * `iv_ptr` -- length in byte 0, twelve bytes after it, which is nx_secure's
+ * own convention -- and the additional data in `input`.  UPDATE moves payload,
+ * possibly several times for a chained packet.  CALCULATE produces the tag on
+ * the way out and checks it on the way in.
+ *
+ * A tag mismatch is NX_CRYPTO_AUTHENTICATION_FAILED and nothing else: the
+ * caller maps it to an alert, and the plaintext it has already written into
+ * the packet is discarded with it.
+ */
+static UINT ami_crypto_method_chacha20_poly1305_operation(UINT op,
+                                                          VOID *handle,
+                                                          struct NX_CRYPTO_METHOD_STRUCT *method,
+                                                          UCHAR *key,
+                                                          NX_CRYPTO_KEY_SIZE key_size_in_bits,
+                                                          UCHAR *input,
+                                                          ULONG input_length_in_byte,
+                                                          UCHAR *iv_ptr,
+                                                          UCHAR *output,
+                                                          ULONG output_length_in_byte,
+                                                          VOID *crypto_metadata,
+                                                          ULONG crypto_metadata_size,
+                                                          VOID *packet_ptr,
+                                                          VOID (*nx_crypto_hw_process_callback)(VOID *packet_ptr, UINT status))
+{
+
+AMI_CRYPTO_CHACHA20_CTX *ctx;
+UCHAR                    tag[C68K_POLY1305_TAG_SIZE];
+
+
+    NX_CRYPTO_PARAMETER_NOT_USED(handle);
+    NX_CRYPTO_PARAMETER_NOT_USED(key);
+    NX_CRYPTO_PARAMETER_NOT_USED(key_size_in_bits);
+    NX_CRYPTO_PARAMETER_NOT_USED(packet_ptr);
+    NX_CRYPTO_PARAMETER_NOT_USED(nx_crypto_hw_process_callback);
+
+    if ((method == NX_CRYPTO_NULL) || (crypto_metadata == NX_CRYPTO_NULL) ||
+        ((((ULONG)crypto_metadata) & 0x3u) != 0u) ||
+        (crypto_metadata_size < sizeof(AMI_CRYPTO_CHACHA20_CTX)))
+    {
+        return(NX_CRYPTO_PTR_ERROR);
+    }
+
+    ctx = (AMI_CRYPTO_CHACHA20_CTX *)crypto_metadata;
+
+    switch (op)
+    {
+    case NX_CRYPTO_ENCRYPT_INITIALIZE:
+    /* fallthrough */
+    case NX_CRYPTO_DECRYPT_INITIALIZE:
+        if ((iv_ptr == NX_CRYPTO_NULL) ||
+            (iv_ptr[0] != (UCHAR)C68K_CHACHA20_NONCE_SIZE))
+        {
+            return(NX_CRYPTO_PTR_ERROR);
+        }
+
+        c68k_chacha20_poly1305_initialize(&ctx -> ami_aead,
+                                          ctx -> ami_aead_key, &iv_ptr[1]);
+
+        if ((input != NX_CRYPTO_NULL) && (input_length_in_byte != 0uL))
+        {
+            c68k_chacha20_poly1305_associate(&ctx -> ami_aead, input,
+                                             input_length_in_byte);
+        }
+        break;
+
+    case NX_CRYPTO_ENCRYPT_UPDATE:
+        if ((input == NX_CRYPTO_NULL) || (output == NX_CRYPTO_NULL))
+        {
+            return(NX_CRYPTO_PTR_ERROR);
+        }
+        c68k_chacha20_poly1305_encrypt(&ctx -> ami_aead, input, output,
+                                       input_length_in_byte);
+        break;
+
+    case NX_CRYPTO_DECRYPT_UPDATE:
+        if ((input == NX_CRYPTO_NULL) || (output == NX_CRYPTO_NULL))
+        {
+            return(NX_CRYPTO_PTR_ERROR);
+        }
+        c68k_chacha20_poly1305_decrypt(&ctx -> ami_aead, input, output,
+                                       input_length_in_byte);
+        break;
+
+    case NX_CRYPTO_ENCRYPT_CALCULATE:
+        if ((output == NX_CRYPTO_NULL) ||
+            (output_length_in_byte < (ULONG)C68K_POLY1305_TAG_SIZE))
+        {
+            return(NX_CRYPTO_INVALID_BUFFER_SIZE);
+        }
+        c68k_chacha20_poly1305_tag(&ctx -> ami_aead, output);
+        break;
+
+    case NX_CRYPTO_DECRYPT_CALCULATE:
+        if ((input == NX_CRYPTO_NULL) ||
+            (input_length_in_byte != (ULONG)C68K_POLY1305_TAG_SIZE))
+        {
+            return(NX_CRYPTO_INVALID_BUFFER_SIZE);
+        }
+        c68k_chacha20_poly1305_tag(&ctx -> ami_aead, tag);
+        if (c68k_chacha20_poly1305_verify(tag, input) != NX_CRYPTO_TRUE)
+        {
+            return(NX_CRYPTO_AUTHENTICATION_FAILED);
+        }
+        break;
+
+    default:
+        /*
+         * The one-shot ENCRYPT and DECRYPT forms are not implemented: an AEAD
+         * record is always INITIALIZE / UPDATE / CALCULATE because the tag
+         * arrives separately from the payload, and nx_secure never issues the
+         * one-shot form for one.  Refusing beats appearing to work.
+         */
+        return(NX_CRYPTO_INVALID_ALGORITHM);
+    }
+
+    return(NX_CRYPTO_SUCCESS);
+}
+
+NX_CRYPTO_METHOD ami_crypto_method_chacha20_poly1305 =
+{
+    NX_CRYPTO_ENCRYPTION_CHACHA20_POLY1305,
+    (C68K_CHACHA20_KEY_SIZE << 3),          /* 256-bit key                    */
+    (C68K_CHACHA20_NONCE_SIZE << 3),        /* the whole 12-byte IV is        */
+                                            /* implicit, RFC 7905             */
+    (C68K_POLY1305_TAG_SIZE << 3),          /* 128-bit tag                    */
+    1,                                      /* block size: a stream cipher,   */
+                                            /* so a record may be split       */
+                                            /* anywhere                       */
+    sizeof(AMI_CRYPTO_CHACHA20_CTX),
+    ami_crypto_method_chacha20_poly1305_init,
+    ami_crypto_method_chacha20_poly1305_cleanup,
+    ami_crypto_method_chacha20_poly1305_operation
 };
 
 
@@ -1313,9 +1553,27 @@ static NX_SECURE_X509_CRYPTO ami_x509_cipher_table[] =
 };
 
 /*
- * The ciphersuite table.  Same suites, same ORDER as the vendored ECC table --
- * nx_secure negotiates top-down, so reordering would silently change which
- * suite a handshake picks and make every before/after comparison meaningless.
+ * The ciphersuite table.  This is the list a ClientHello carries, in the order
+ * it carries it, so it is also the client's stated preference.
+ *
+ * ChaCha20-Poly1305 is FIRST, and both halves of that are deliberate.  It has
+ * to be present because the CBC suites underneath it no longer reach a large
+ * and growing share of the web -- Google's front end refuses a ClientHello
+ * that offers only those -- and it has to be first because it is also the
+ * cheaper record path on this machine: ~120 cycles a byte for the cipher and
+ * ~67 for the authenticator, against AES-128-CBC's measured 233 and
+ * HMAC-SHA256's 236 (docs/RESEARCH.md 18.2 and 19).  A server that takes it is
+ * doing us a favour twice over.
+ *
+ * The CBC pair stays underneath it, unchanged and in its old order, because
+ * plenty of servers still speak nothing else.
+ *
+ * AES-GCM IS DELIBERATELY ABSENT.  It would restore the same reach, and it
+ * would do it at 344.6 ms for 1 KB against AES-CBC's 21.9 (docs/RESEARCH.md
+ * 5.5) -- nx_crypto_gcm.c's GHASH is a bit-serial GF(2^128) multiply, because
+ * a 68k has no carry-less multiply to build it from.  Offering it would mean
+ * some servers negotiating a download nobody would wait for, and there is no
+ * server that takes GCM but not ChaCha20-Poly1305 and not CBC.
  */
 static NX_SECURE_TLS_CIPHERSUITE_INFO ami_ciphersuite_table[] =
 {
@@ -1326,17 +1584,11 @@ static NX_SECURE_TLS_CIPHERSUITE_INFO ami_ciphersuite_table[] =
     {TLS_AES_128_CCM_8_SHA256,                &crypto_method_ecdhe,     &crypto_method_ecdsa,     &crypto_method_aes_ccm_8,       96, 16,  &AMI_BULK_SHA256,          32,        &crypto_method_hkdf},
 #endif
 
-#ifdef NX_SECURE_ENABLE_AEAD_CIPHER
-    {TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, &crypto_method_ecdhe,     &crypto_method_ecdsa,     &crypto_method_aes_128_gcm_16,  16, 16,  &crypto_method_null,         0,        &crypto_method_tls_prf_sha256},
-    {TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,   &crypto_method_ecdhe,     &ami_crypto_method_rsa,   &crypto_method_aes_128_gcm_16,  16, 16,  &crypto_method_null,         0,        &crypto_method_tls_prf_sha256},
-#endif
+    {TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, &crypto_method_ecdhe, &crypto_method_ecdsa,   &ami_crypto_method_chacha20_poly1305, 12, 32, &crypto_method_null, 0,   &crypto_method_tls_prf_sha256},
+    {TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,   &crypto_method_ecdhe, &ami_crypto_method_rsa, &ami_crypto_method_chacha20_poly1305, 12, 32, &crypto_method_null, 0,   &crypto_method_tls_prf_sha256},
 
     {TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, &crypto_method_ecdhe,     &crypto_method_ecdsa,     &AMI_BULK_AES128,     16, 16,  &AMI_BULK_HMAC256, 32,        &crypto_method_tls_prf_sha256},
     {TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,   &crypto_method_ecdhe,     &ami_crypto_method_rsa,   &AMI_BULK_AES128,     16, 16,  &AMI_BULK_HMAC256, 32,        &crypto_method_tls_prf_sha256},
-
-#ifdef NX_SECURE_ENABLE_AEAD_CIPHER
-    {TLS_RSA_WITH_AES_128_GCM_SHA256,         &ami_crypto_method_rsa,   &ami_crypto_method_rsa,   &crypto_method_aes_128_gcm_16,  16, 16,  &crypto_method_null,         0,        &crypto_method_tls_prf_sha256},
-#endif
 
     {TLS_RSA_WITH_AES_256_CBC_SHA256,         &ami_crypto_method_rsa,   &ami_crypto_method_rsa,   &AMI_BULK_AES256,     16, 32,  &AMI_BULK_HMAC256, 32,        &crypto_method_tls_prf_sha256},
     {TLS_RSA_WITH_AES_128_CBC_SHA256,         &ami_crypto_method_rsa,   &ami_crypto_method_rsa,   &AMI_BULK_AES128,     16, 16,  &AMI_BULK_HMAC256, 32,        &crypto_method_tls_prf_sha256},

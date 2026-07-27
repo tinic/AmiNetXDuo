@@ -128,6 +128,13 @@ set(CRYPTO68K_SOURCES
     c68k_p256_table.c
     c68k_aes.c
     c68k_sha256.c
+    # ChaCha20-Poly1305, the AEAD record path.  No assembly counterpart and
+    # none planned: the cipher is add, rotate and exclusive-or on 32-bit words
+    # and the authenticator is MULU.L, which is to say both are already the
+    # instructions 18.4 established this GCC picks well.  See
+    # docs/RESEARCH.md 54.
+    c68k_chacha20.c
+    c68k_poly1305.c
     # X25519 and Ed25519.  No assembly counterpart: the win is the field
     # representation (eight 32-bit limbs instead of TweetNaCl's sixteen 16-bit
     # limbs in an i64[16]), and 18.4 established that this GCC does not leave

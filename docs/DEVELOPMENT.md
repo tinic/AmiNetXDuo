@@ -202,7 +202,7 @@ beyond a network connection.
 | toolchain | `tools/fetch-toolchain.sh` retrieves GCC 15.2 with NDK 3.9 from this repository's toolchain mirror release, verified against the asset's sha256, with the upstream Docker layer (pinned by its content digest) as a fallback; cached between runs |
 | cross builds | default, `-DAMINETXDUO_IPV6=ON`, `-DAMINETXDUO_TLS=OFF` and `-DAMINETXDUO_CRYPTO68K_ASM=OFF`; all four are built, because each of them has broken at some point while the others still worked |
 | warnings | `-Wall -Wextra -Werror` on our own sources, with vendored code exempt (`cmake/ci-warnings.cmake`) |
-| host tests | 5 suites through `ctest`: config parsers (157 checks), mbuf chains (206), BPF filter VM (201), crypto68k vectors (4,964, being RSA-2048 known-answer tests plus a differential comparison against the vendored bignum code), and net68k checksum (10,030, a differential comparison against the vendored checksum across every length, alignment and packet chain) |
+| host tests | 5 suites through `ctest`: config parsers (157 checks), mbuf chains (206), BPF filter VM (201), crypto68k vectors (5,724, being RSA-2048 known-answer tests, a differential comparison against the vendored bignum code, and the AES, SHA-256 and RFC 8439 record-path vectors), and net68k checksum (10,030, a differential comparison against the vendored checksum across every length, alignment and packet chain) |
 | host compilers | GCC on Linux and clang on macOS, so that neither becomes the only one that works |
 | conformance | `bsdsocktest` is compiled for m68k; running it belongs to tier 2 |
 
@@ -294,6 +294,28 @@ read that way.
 **The bulk path is a dead heat because neither tree has a byte of m68k AES or
 SHA-256 assembly**, which is the one place real leverage is still sitting: TLS
 costs about 7× plaintext on the wire, and that is where the bytes actually go.
+
+## Ciphersuites
+
+Three are offered, ChaCha20-Poly1305 first:
+
+| | |
+|---|---|
+| `0xCCA8` / `0xCCA9` | ECDHE-RSA / ECDHE-ECDSA with **ChaCha20-Poly1305** |
+| `0xC027` / `0xC023` | ECDHE-RSA / ECDHE-ECDSA with AES-128-CBC and HMAC-SHA256 |
+
+The AEAD is there because the CBC pair no longer reaches a growing share of the
+web — Google's front end refuses a ClientHello offering only those — and it is
+*first* because it is also the cheaper record path here: **1.72× the CBC pair on
+send and 1.73× on receive** over 16 KiB, measured on the 68020. AES-GCM would
+restore the same reach and is deliberately not offered: GHASH is a carry-less
+multiply the part cannot do, and `nx_crypto`'s bit-serial one costs 344.6 ms per
+KB against AES-CBC's 21.9.
+
+RFC 7905's record framing is not GCM's, and `nx_secure` has no hook for the
+difference, so two of its record files are copied and edited in
+[`src/tls/rfc7905/`](../src/tls/rfc7905/README). See
+[RESEARCH.md §54](RESEARCH.md#54-chacha20-poly1305-reach-first-and-speed-as-well-2026-07-27).
 
 Two measurement notes, since both would otherwise flatter us. FS-UAE charges
 `MULU.L` 32 cycles where a 68020 charges 43, and `DIVU.L` 51.8 where the manual

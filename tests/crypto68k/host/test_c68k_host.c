@@ -88,6 +88,7 @@ static unsigned long    t_checks;
 
 #include "c68k_aes.h"
 #include "c68k_sha256.h"
+#include "c68k_chacha20.h"
 
 #include "c68k_vectors.h"
 
@@ -1028,6 +1029,173 @@ static void t_bulk_sha(unsigned variant)
     t_bytes("SHA-256 of one million 'a'", d, t_sha_million, 32u);
 }
 
+/* ------------------------------------------- ChaCha20-Poly1305, RFC 8439 -- */
+/*
+ * The AEAD record path, ciphersuites 0xCCA8 and 0xCCA9.  Same reason the AES
+ * and SHA-256 vectors are here: this tier is where they run on every push.
+ *
+ * And the same endianness trap, from the other side.  ChaCha20 and Poly1305
+ * read their input LITTLE-endian, so the m68k fast path is one MOVE.L and a
+ * byte reversal and the portable path is four byte loads -- get the guard
+ * backwards and one of the two machines produces a self-consistent wrong
+ * answer.  These vectors are the only thing that says which.
+ */
+
+static const unsigned char t_cc_key[32] =
+{ 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
+  16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31 };
+
+static const unsigned char t_cc_nonce[12] =
+{ 0,0,0,0,0,0,0,0x4a,0,0,0,0 };
+
+/* RFC 8439 2.4.2, the first 64 keystream bytes at block counter 1. */
+static const unsigned char t_cc_stream[64] =
+{ 0x22,0x4f,0x51,0xf3,0x40,0x1b,0xd9,0xe1,0x2f,0xde,0x27,0x6f,0xb8,0x63,0x1d,0xed,
+  0x8c,0x13,0x1f,0x82,0x3d,0x2c,0x06,0xe2,0x7e,0x4f,0xca,0xec,0x9e,0xf3,0xcf,0x78,
+  0x8a,0x3b,0x0a,0xa3,0x72,0x60,0x0a,0x92,0xb5,0x79,0x74,0xcd,0xed,0x2b,0x93,0x34,
+  0x79,0x4c,0xba,0x40,0xc6,0x3e,0x34,0xcd,0xea,0x21,0x2c,0x4c,0xf0,0x7d,0x41,0xb7 };
+
+/* RFC 8439 2.5.2. */
+static const unsigned char t_poly_key[32] =
+{ 0x85,0xd6,0xbe,0x78,0x57,0x55,0x6d,0x33,0x7f,0x44,0x52,0xfe,0x42,0xd5,0x06,0xa8,
+  0x01,0x03,0x80,0x8a,0xfb,0x0d,0xb2,0xfd,0x4a,0xbf,0xf6,0xaf,0x41,0x49,0xf5,0x1b };
+
+static const unsigned char t_poly_tag[16] =
+{ 0xa8,0x06,0x1d,0xc1,0x30,0x51,0x36,0xc6,0xc2,0x2b,0x8b,0xaf,0x0c,0x01,0x27,0xa9 };
+
+/* RFC 8439 2.8.2. */
+static const unsigned char t_aead_key[32] =
+{ 0x80,0x81,0x82,0x83,0x84,0x85,0x86,0x87,0x88,0x89,0x8a,0x8b,0x8c,0x8d,0x8e,0x8f,
+  0x90,0x91,0x92,0x93,0x94,0x95,0x96,0x97,0x98,0x99,0x9a,0x9b,0x9c,0x9d,0x9e,0x9f };
+
+static const unsigned char t_aead_nonce[12] =
+{ 0x07,0x00,0x00,0x00,0x40,0x41,0x42,0x43,0x44,0x45,0x46,0x47 };
+
+static const unsigned char t_aead_aad[12] =
+{ 0x50,0x51,0x52,0x53,0xc0,0xc1,0xc2,0xc3,0xc4,0xc5,0xc6,0xc7 };
+
+static const unsigned char t_aead_cipher[114] =
+{ 0xd3,0x1a,0x8d,0x34,0x64,0x8e,0x60,0xdb,0x7b,0x86,0xaf,0xbc,0x53,0xef,0x7e,0xc2,
+  0xa4,0xad,0xed,0x51,0x29,0x6e,0x08,0xfe,0xa9,0xe2,0xb5,0xa7,0x36,0xee,0x62,0xd6,
+  0x3d,0xbe,0xa4,0x5e,0x8c,0xa9,0x67,0x12,0x82,0xfa,0xfb,0x69,0xda,0x92,0x72,0x8b,
+  0x1a,0x71,0xde,0x0a,0x9e,0x06,0x0b,0x29,0x05,0xd6,0xa5,0xb6,0x7e,0xcd,0x3b,0x36,
+  0x92,0xdd,0xbd,0x7f,0x2d,0x77,0x8b,0x8c,0x98,0x03,0xae,0xe3,0x28,0x09,0x1b,0x58,
+  0xfa,0xb3,0x24,0xe4,0xfa,0xd6,0x75,0x94,0x55,0x85,0x80,0x8b,0x48,0x31,0xd7,0xbc,
+  0x3f,0xf4,0xde,0xf0,0x8e,0x4b,0x7a,0x9d,0xe5,0x76,0xd2,0x65,0x86,0xce,0xc6,0x4b,
+  0x61,0x16 };
+
+static const unsigned char t_aead_tag[16] =
+{ 0x1a,0xe1,0x0b,0x59,0x4f,0x09,0xe2,0x6a,0x7e,0x90,0x2e,0xcb,0xd0,0x60,0x06,0x91 };
+
+static const char t_aead_plain[] =
+    "Ladies and Gentlemen of the class of '99: If I could offer you only "
+    "one tip for the future, sunscreen would be it.";
+
+static void t_bulk_chacha(void)
+{
+    C68K_CHACHA20           cc;
+    C68K_POLY1305           poly;
+    C68K_CHACHA20_POLY1305  aead;
+    unsigned char           got[128];
+    unsigned char           tag[16];
+    unsigned                i;
+
+    for (i = 0; i < 64; i++)
+    {
+        got[i] = 0;
+    }
+    c68k_chacha20_initialize(&cc, t_cc_key, t_cc_nonce, 1uL);
+    c68k_chacha20_keystream(&cc, got, 64uL);
+    t_bytes("RFC 8439 2.4.2 keystream", got, t_cc_stream, 64);
+
+    /* Split where no block boundary is, which is what a chained packet does. */
+    for (i = 0; i < 64; i++)
+    {
+        got[i] = 0;
+    }
+    c68k_chacha20_initialize(&cc, t_cc_key, t_cc_nonce, 1uL);
+    c68k_chacha20_keystream(&cc, &got[0], 7uL);
+    c68k_chacha20_keystream(&cc, &got[7], 50uL);
+    c68k_chacha20_keystream(&cc, &got[57], 7uL);
+    t_bytes("RFC 8439 2.4.2 across three calls", got, t_cc_stream, 64);
+
+    c68k_poly1305_initialize(&poly, t_poly_key);
+    c68k_poly1305_update(&poly,
+                         (const unsigned char *)
+                             "Cryptographic Forum Research Group", 34uL);
+    c68k_poly1305_finish(&poly, tag);
+    t_bytes("RFC 8439 2.5.2 tag", tag, t_poly_tag, 16);
+
+    c68k_poly1305_initialize(&poly, t_poly_key);
+    c68k_poly1305_update(&poly,
+                         (const unsigned char *)"Cryptographic", 13uL);
+    c68k_poly1305_update(&poly,
+                         (const unsigned char *)" Forum Research", 15uL);
+    c68k_poly1305_update(&poly, (const unsigned char *)" Group", 6uL);
+    c68k_poly1305_finish(&poly, tag);
+    t_bytes("RFC 8439 2.5.2 across three updates", tag, t_poly_tag, 16);
+
+    c68k_chacha20_poly1305_initialize(&aead, t_aead_key, t_aead_nonce);
+    c68k_chacha20_poly1305_associate(&aead, t_aead_aad, 12uL);
+    c68k_chacha20_poly1305_encrypt(&aead,
+                                   (const unsigned char *)t_aead_plain,
+                                   got, 114uL);
+    c68k_chacha20_poly1305_tag(&aead, tag);
+    t_bytes("RFC 8439 2.8.2 ciphertext", got, t_aead_cipher, 114);
+    t_bytes("RFC 8439 2.8.2 tag", tag, t_aead_tag, 16);
+
+    /* The same encryption in three uneven pieces must give the same record. */
+    c68k_chacha20_poly1305_initialize(&aead, t_aead_key, t_aead_nonce);
+    c68k_chacha20_poly1305_associate(&aead, t_aead_aad, 12uL);
+    c68k_chacha20_poly1305_encrypt(&aead,
+                                   (const unsigned char *)t_aead_plain,
+                                   &got[0], 5uL);
+    c68k_chacha20_poly1305_encrypt(&aead,
+                                   (const unsigned char *)&t_aead_plain[5],
+                                   &got[5], 100uL);
+    c68k_chacha20_poly1305_encrypt(&aead,
+                                   (const unsigned char *)&t_aead_plain[105],
+                                   &got[105], 9uL);
+    c68k_chacha20_poly1305_tag(&aead, tag);
+    t_bytes("RFC 8439 2.8.2 ciphertext, chunked", got, t_aead_cipher, 114);
+    t_bytes("RFC 8439 2.8.2 tag, chunked", tag, t_aead_tag, 16);
+
+    /* Decrypt in place, which is what the record path does. */
+    c68k_chacha20_poly1305_initialize(&aead, t_aead_key, t_aead_nonce);
+    c68k_chacha20_poly1305_associate(&aead, t_aead_aad, 12uL);
+    c68k_chacha20_poly1305_decrypt(&aead, got, got, 114uL);
+    c68k_chacha20_poly1305_tag(&aead, tag);
+    t_bytes("RFC 8439 2.8.2 plaintext recovered", got,
+            (const unsigned char *)t_aead_plain, 114);
+    t_bytes("RFC 8439 2.8.2 tag on decrypt", tag, t_aead_tag, 16);
+
+    /* One flipped ciphertext bit must not verify.  This is the whole point of
+       an AEAD and it is the one property no published vector states. */
+    t_checks++;
+    if (c68k_chacha20_poly1305_verify(tag, t_aead_tag) != NX_CRYPTO_TRUE)
+    {
+        t_failures++;
+        printf("  FAIL a correct tag did not verify\n");
+    }
+
+    for (i = 0; i < 114; i++)
+    {
+        got[i] = t_aead_cipher[i];
+    }
+    got[57] = (unsigned char)(got[57] ^ 0x01u);
+    c68k_chacha20_poly1305_initialize(&aead, t_aead_key, t_aead_nonce);
+    c68k_chacha20_poly1305_associate(&aead, t_aead_aad, 12uL);
+    c68k_chacha20_poly1305_decrypt(&aead, got, got, 114uL);
+    c68k_chacha20_poly1305_tag(&aead, tag);
+
+    t_checks++;
+    if (c68k_chacha20_poly1305_verify(tag, t_aead_tag) != NX_CRYPTO_FALSE)
+    {
+        t_failures++;
+        printf("  FAIL a forged record verified\n");
+    }
+}
+
 static VOID t_bulk(VOID)
 {
     unsigned v;
@@ -1051,7 +1219,10 @@ static VOID t_bulk(VOID)
     }
     c68k_sha256_variant = C68K_SHA256_V_BEST;
 
-    printf("  every portable AES and SHA-256 variant checked\n");
+    t_bulk_chacha();
+
+    printf("  every portable AES and SHA-256 variant checked, and the "
+           "AEAD\n");
 }
 
 

@@ -66,9 +66,28 @@ if(NOT AMINETXDUO_DTLS)
     list(FILTER NX_SECURE_SOURCES EXCLUDE REGEX "/nx_secure_dtls")
 endif()
 
+# rfc7905/ supplies the two record-payload objects, so the vendored ones must
+# not.  Same mechanism as _nx_ip_checksum_compute() at the top level: drop the
+# file from the glob and every internal caller resolves to ours instead.  The
+# copies differ from the originals by one branch each -- the ChaCha20-Poly1305
+# record framing, which is decided before an NX_CRYPTO_METHOD is ever called
+# and therefore cannot be supplied by one.  src/tls/rfc7905/README is the diff
+# and the reason.
+list(FILTER NX_SECURE_SOURCES EXCLUDE REGEX "/nx_secure_tls_record_payload_(en|de)crypt\\.c$")
+list(APPEND NX_SECURE_SOURCES
+     "${CMAKE_CURRENT_SOURCE_DIR}/rfc7905/nx_secure_tls_record_payload_encrypt.c"
+     "${CMAKE_CURRENT_SOURCE_DIR}/rfc7905/nx_secure_tls_record_payload_decrypt.c")
+
 add_library(nx_secure STATIC ${NX_SECURE_SOURCES})
 target_include_directories(nx_secure PUBLIC ${AMINETXDUO_TLS_INCLUDES})
 target_link_libraries(nx_secure PUBLIC nx_crypto netxduo)
+
+# The AEAD record path is compiled out by default: nx_secure_tls.h only defines
+# this when TLS 1.3 or EC-JPAKE is on, and both are off here.  It is what makes
+# the AEAD branches in the two files above -- and the 0xCCA8/0xCCA9 rows in
+# ami_tls_crypto.c's ciphersuite table -- exist at all.  PUBLIC so that every
+# translation unit that includes nx_secure_tls.h agrees with this one.
+target_compile_definitions(nx_secure PUBLIC NX_SECURE_ENABLE_AEAD_CIPHER)
 
 # ------------------------------------------------------------ amiga glue ---
 

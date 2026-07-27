@@ -9,9 +9,10 @@
  *   it.  That row is the one that decides `https://` throughput, because it is
  *   paid on every byte of every transfer rather than once per connection.
  *
- *   The ciphersuites this client actually negotiates are 0xC027 and 0xC023,
- *   both AES-128-CBC with HMAC-SHA256, so this and c68k_sha256.c are the whole
- *   of the record path.  GCM is compiled in and never reached.
+ *   This and c68k_sha256.c are the record path for 0xC027 and 0xC023, both
+ *   AES-128-CBC with HMAC-SHA256, which is what a server negotiates when it
+ *   will not take the AEAD this client now prefers.  Plenty still will not,
+ *   GitHub among them.  c68k_chacha20.c is the other path and the faster one.
  *
  * WHAT THE MACHINE SAYS, AND WHAT IT CHANGED
  *

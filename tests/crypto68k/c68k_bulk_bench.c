@@ -35,6 +35,7 @@
 #include "c68k_timer.h"
 #include "c68k_aes.h"
 #include "c68k_sha256.h"
+#include "c68k_chacha20.h"
 
 #include "aminetxduo/crashguard.h"
 
@@ -817,6 +818,208 @@ UINT    saved;
 }
 
 
+/* ================================================ ChaCha20-Poly1305 ======= */
+/*
+ * The other record path, and the reason this section exists is that the whole
+ * case for adding it rests on one claim: that on a 68020 an AEAD nobody has
+ * hand-optimised beats the AES-CBC-plus-HMAC pair that two rounds of work have
+ * already been spent on.  It is checked against RFC 8439's own vectors first
+ * -- 2.4.2 for the cipher, 2.5.2 for the authenticator, 2.8.2 for the AEAD --
+ * because a fast wrong answer is worth nothing.
+ */
+
+static const UCHAR b_cc_key[32] =
+{
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+    0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+    0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F
+};
+
+static const UCHAR b_cc_nonce[12] =
+{
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4A, 0x00, 0x00, 0x00, 0x00
+};
+
+/* RFC 8439 2.4.2: the first 64 bytes of the keystream at block counter 1. */
+static const UCHAR b_cc_stream[64] =
+{
+    0x22, 0x4F, 0x51, 0xF3, 0x40, 0x1B, 0xD9, 0xE1,
+    0x2F, 0xDE, 0x27, 0x6F, 0xB8, 0x63, 0x1D, 0xED,
+    0x8C, 0x13, 0x1F, 0x82, 0x3D, 0x2C, 0x06, 0xE2,
+    0x7E, 0x4F, 0xCA, 0xEC, 0x9E, 0xF3, 0xCF, 0x78,
+    0x8A, 0x3B, 0x0A, 0xA3, 0x72, 0x60, 0x0A, 0x92,
+    0xB5, 0x79, 0x74, 0xCD, 0xED, 0x2B, 0x93, 0x34,
+    0x79, 0x4C, 0xBA, 0x40, 0xC6, 0x3E, 0x34, 0xCD,
+    0xEA, 0x21, 0x2C, 0x4C, 0xF0, 0x7D, 0x41, 0xB7
+};
+
+/* RFC 8439 2.5.2. */
+static const UCHAR b_poly_key[32] =
+{
+    0x85, 0xD6, 0xBE, 0x78, 0x57, 0x55, 0x6D, 0x33,
+    0x7F, 0x44, 0x52, 0xFE, 0x42, 0xD5, 0x06, 0xA8,
+    0x01, 0x03, 0x80, 0x8A, 0xFB, 0x0D, 0xB2, 0xFD,
+    0x4A, 0xBF, 0xF6, 0xAF, 0x41, 0x49, 0xF5, 0x1B
+};
+
+static const UCHAR b_poly_tag[16] =
+{
+    0xA8, 0x06, 0x1D, 0xC1, 0x30, 0x51, 0x36, 0xC6,
+    0xC2, 0x2B, 0x8B, 0xAF, 0x0C, 0x01, 0x27, 0xA9
+};
+
+/* RFC 8439 2.8.2 -- the AEAD, tag only; the ciphertext is checked by the
+   round trip below, which is the property that actually matters. */
+static const UCHAR b_aead_key[32] =
+{
+    0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87,
+    0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E, 0x8F,
+    0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97,
+    0x98, 0x99, 0x9A, 0x9B, 0x9C, 0x9D, 0x9E, 0x9F
+};
+
+static const UCHAR b_aead_nonce[12] =
+{
+    0x07, 0x00, 0x00, 0x00, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47
+};
+
+static const UCHAR b_aead_aad[12] =
+{
+    0x50, 0x51, 0x52, 0x53, 0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7
+};
+
+static const UCHAR b_aead_tag[16] =
+{
+    0x1A, 0xE1, 0x0B, 0x59, 0x4F, 0x09, 0xE2, 0x6A,
+    0x7E, 0x90, 0x2E, 0xCB, 0xD0, 0x60, 0x06, 0x91
+};
+
+/* 114 bytes and a NUL, which is why the size is left to the compiler: only
+   the 114 are fed to the AEAD. */
+static const UCHAR b_aead_plain[] =
+    "Ladies and Gentlemen of the class of '99: If I could offer you only "
+    "one tip for the future, sunscreen would be it.";
+
+static C68K_CHACHA20            b_cc;
+static C68K_POLY1305            b_poly;
+static C68K_CHACHA20_POLY1305   b_aead;
+static UCHAR                    b_tag[16];
+
+static VOID b_chacha_check_vectors(VOID)
+{
+
+static UCHAR    got[128];
+UINT            i;
+
+
+    for (i = 0; i < 64u; i++)
+    {
+        got[i] = 0u;
+    }
+    c68k_chacha20_initialize(&b_cc, b_cc_key, b_cc_nonce, 1uL);
+    c68k_chacha20_keystream(&b_cc, got, 64uL);
+    b_check("RFC 8439 2.4.2 keystream", got, b_cc_stream, 64uL);
+
+    /* Split at boundaries no block aligns with, because that is what a packet
+       chain hands the record path. */
+    for (i = 0; i < 64u; i++)
+    {
+        got[i] = 0u;
+    }
+    c68k_chacha20_initialize(&b_cc, b_cc_key, b_cc_nonce, 1uL);
+    c68k_chacha20_keystream(&b_cc, &got[0], 7uL);
+    c68k_chacha20_keystream(&b_cc, &got[7], 50uL);
+    c68k_chacha20_keystream(&b_cc, &got[57], 7uL);
+    b_check("RFC 8439 2.4.2 across three calls", got, b_cc_stream, 64uL);
+
+    c68k_poly1305_initialize(&b_poly, b_poly_key);
+    c68k_poly1305_update(&b_poly,
+                         (const UCHAR *)"Cryptographic Forum Research Group",
+                         34uL);
+    c68k_poly1305_finish(&b_poly, b_tag);
+    b_check("RFC 8439 2.5.2 tag", b_tag, b_poly_tag, 16uL);
+
+    c68k_poly1305_initialize(&b_poly, b_poly_key);
+    c68k_poly1305_update(&b_poly,
+                         (const UCHAR *)"Cryptographic Forum Research Group",
+                         1uL);
+    c68k_poly1305_update(&b_poly,
+                         (const UCHAR *)"ryptographic Forum Research Group",
+                         20uL);
+    c68k_poly1305_update(&b_poly, (const UCHAR *)"Forum Research Group" + 7u,
+                         13uL);
+    c68k_poly1305_finish(&b_poly, b_tag);
+    b_check("RFC 8439 2.5.2 across three updates", b_tag, b_poly_tag, 16uL);
+
+    c68k_chacha20_poly1305_initialize(&b_aead, b_aead_key, b_aead_nonce);
+    c68k_chacha20_poly1305_associate(&b_aead, b_aead_aad, 12uL);
+    c68k_chacha20_poly1305_encrypt(&b_aead, b_aead_plain, got, 114uL);
+    c68k_chacha20_poly1305_tag(&b_aead, b_tag);
+    b_check("RFC 8439 2.8.2 AEAD tag", b_tag, b_aead_tag, 16uL);
+
+    c68k_chacha20_poly1305_initialize(&b_aead, b_aead_key, b_aead_nonce);
+    c68k_chacha20_poly1305_associate(&b_aead, b_aead_aad, 12uL);
+    c68k_chacha20_poly1305_decrypt(&b_aead, got, got, 114uL);
+    c68k_chacha20_poly1305_tag(&b_aead, b_tag);
+    b_check("RFC 8439 2.8.2 plaintext recovered", got, b_aead_plain, 114uL);
+    b_check("RFC 8439 2.8.2 tag on decrypt", b_tag, b_aead_tag, 16uL);
+}
+
+static VOID b_bench_chacha(VOID)
+{
+
+ULONG   start;
+ULONG   cipher_us;
+ULONG   mac_us;
+ULONG   aead_us;
+ULONG   odd_us;
+
+
+    c68k_log("");
+    c68k_log("5. ChaCha20-Poly1305 over %lu bytes -- the AEAD record path",
+             B_BULK_BYTES);
+
+    b_chacha_check_vectors();
+
+    c68k_chacha20_initialize(&b_cc, b_cc_key, b_cc_nonce, 1uL);
+    start = c68k_eclock();
+    c68k_chacha20_xor(&b_cc, b_plain, b_cipher, B_BULK_BYTES);
+    cipher_us = c68k_eclock_micros(c68k_eclock() - start);
+
+    c68k_poly1305_initialize(&b_poly, b_poly_key);
+    start = c68k_eclock();
+    c68k_poly1305_update(&b_poly, b_cipher, B_BULK_BYTES);
+    c68k_poly1305_finish(&b_poly, b_tag);
+    mac_us = c68k_eclock_micros(c68k_eclock() - start);
+
+    c68k_log("  %-44s %lu us (%lu KB/s)", (LONG)"ChaCha20 alone",
+             cipher_us, b_kbs(cipher_us));
+    c68k_log("  %-44s %lu us (%lu KB/s)", (LONG)"Poly1305 alone",
+             mac_us, b_kbs(mac_us));
+
+    /* And through the AEAD, which is what a record actually costs: the two
+       above plus one extra ChaCha20 block for the one-time Poly1305 key. */
+    start = c68k_eclock();
+    c68k_chacha20_poly1305_initialize(&b_aead, b_aead_key, b_aead_nonce);
+    c68k_chacha20_poly1305_associate(&b_aead, b_aead_aad, 13uL);
+    c68k_chacha20_poly1305_encrypt(&b_aead, b_plain, b_cipher, B_BULK_BYTES);
+    c68k_chacha20_poly1305_tag(&b_aead, b_tag);
+    aead_us = c68k_eclock_micros(c68k_eclock() - start);
+
+    c68k_log("  %-44s %lu us (%lu KB/s)", (LONG)"the AEAD, one whole record",
+             aead_us, b_kbs(aead_us));
+
+    /* The same buffer starting one byte in, which is where a TLS record's
+       payload actually lives. */
+    c68k_chacha20_initialize(&b_cc, b_cc_key, b_cc_nonce, 1uL);
+    start = c68k_eclock();
+    c68k_chacha20_xor(&b_cc, &b_plain[1], &b_cipher[1], B_BULK_BYTES - 1uL);
+    odd_us = c68k_eclock_micros(c68k_eclock() - start);
+    c68k_log("      the cipher starting one byte in: %lu us", odd_us);
+}
+
+
 /* ============================================================== summary ==== */
 
 static VOID b_summary(VOID)
@@ -826,12 +1029,14 @@ ULONG   start;
 ULONG   enc;
 ULONG   mac;
 ULONG   dec;
+ULONG   aead_enc;
+ULONG   aead_dec;
 UINT    i;
 C68K_SHA256 ctx;
 
 
     c68k_log("");
-    c68k_log("5. One 16 KiB TLS record, end to end, at the defaults this "
+    c68k_log("6. One 16 KiB TLS record, end to end, at the defaults this "
              "build ships");
 
     (VOID)c68k_aes_key_set(&b_aes, b_key, 128u);
@@ -860,10 +1065,46 @@ C68K_SHA256 ctx;
 
     (VOID)c68k_sha256_initialize(&ctx, NX_CRYPTO_HASH_SHA256);
 
-    c68k_log("  send: AES encrypt %lu us + HMAC %lu us = %lu us, %lu KB/s",
+    c68k_log("  0xC027/0xC023, AES-128-CBC + HMAC-SHA256");
+    c68k_log("    send: AES encrypt %lu us + HMAC %lu us = %lu us, %lu KB/s",
              enc, mac, enc + mac, b_kbs(enc + mac));
-    c68k_log("  recv: HMAC %lu us + AES decrypt %lu us = %lu us, %lu KB/s",
+    c68k_log("    recv: HMAC %lu us + AES decrypt %lu us = %lu us, %lu KB/s",
              mac, dec, mac + dec, b_kbs(mac + dec));
+
+    /*
+     * The same record through the AEAD, in one call each way, because that is
+     * how it is actually paid: the cipher and the authenticator are not two
+     * passes with a choice between them, they are one operation.
+     */
+    start = c68k_eclock();
+    c68k_chacha20_poly1305_initialize(&b_aead, b_key, b_iv);
+    c68k_chacha20_poly1305_associate(&b_aead, b_iv, 13uL);
+    c68k_chacha20_poly1305_encrypt(&b_aead, b_plain, b_cipher, B_BULK_BYTES);
+    c68k_chacha20_poly1305_tag(&b_aead, b_tag);
+    aead_enc = c68k_eclock_micros(c68k_eclock() - start);
+
+    start = c68k_eclock();
+    c68k_chacha20_poly1305_initialize(&b_aead, b_key, b_iv);
+    c68k_chacha20_poly1305_associate(&b_aead, b_iv, 13uL);
+    c68k_chacha20_poly1305_decrypt(&b_aead, b_cipher, b_back, B_BULK_BYTES);
+    c68k_chacha20_poly1305_tag(&b_aead, b_digest);
+    aead_dec = c68k_eclock_micros(c68k_eclock() - start);
+
+    b_check("AEAD round trip", b_back, b_plain, B_BULK_BYTES);
+    b_check("AEAD tag agrees both ways", b_digest, b_tag, 16uL);
+
+    c68k_log("  0xCCA8/0xCCA9, ChaCha20-Poly1305");
+    c68k_log("    send: %lu us, %lu KB/s", aead_enc, b_kbs(aead_enc));
+    c68k_log("    recv: %lu us, %lu KB/s", aead_dec, b_kbs(aead_dec));
+
+    /* The whole point of the section, stated rather than left to be read off
+       two tables: which record path is cheaper on this machine, and by how
+       much.  Scaled by 100 because there is no floating point here. */
+    c68k_log("  AEAD is %lu.%02lux the CBC pair on send, %lu.%02lux on recv",
+             ((enc + mac) * 100uL / aead_enc) / 100uL,
+             ((enc + mac) * 100uL / aead_enc) % 100uL,
+             ((mac + dec) * 100uL / aead_dec) / 100uL,
+             ((mac + dec) * 100uL / aead_dec) % 100uL);
 }
 
 
@@ -905,6 +1146,7 @@ UINT    i;
     b_bench_aes();
     b_bench_sha();
     b_bench_hmac();
+    b_bench_chacha();
     b_summary();
 
     c68k_log("");
