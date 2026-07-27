@@ -225,6 +225,37 @@ static LONG bsd_packet_append_iov(NX_PACKET *packet, BsdIovCursor *cur,
 
 /* ------------------------------------------------------------------- send -- */
 
+/* The two blocking points of a TCP send: waiting for a free packet (pool
+   empty -> NX_NO_PACKET) and waiting for send-window room (peer not reading ->
+   NX_WINDOW_OVERFLOW / NX_TX_QUEUE_DEPTH).  Both are statuses bsd_wait_sliced()
+   retries on, so Ctrl-C breaks a send stalled on either.  Global, not static,
+   for the reason bsd_recv_once (below) gives. */
+typedef struct
+{
+    NX_PACKET_POOL *pool;
+    NX_PACKET      **packet;
+} BsdAllocArgs;
+
+UINT bsd_alloc_once(VOID *arg, ULONG wait)
+{
+    BsdAllocArgs *a = (BsdAllocArgs *)arg;
+
+    return nx_packet_allocate(a->pool, a->packet, NX_TCP_PACKET, wait);
+}
+
+typedef struct
+{
+    NX_TCP_SOCKET *tcp;
+    NX_PACKET     *packet;
+} BsdSendArgs;
+
+UINT bsd_send_once(VOID *arg, ULONG wait)
+{
+    BsdSendArgs *a = (BsdSendArgs *)arg;
+
+    return nx_tcp_socket_send(a->tcp, a->packet, wait);
+}
+
 static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags)
 {
@@ -270,7 +301,22 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
         if (chunk > mss)
             chunk = mss;
 
-        status = nx_packet_allocate(pool, &packet, NX_TCP_PACKET, wait);
+        {
+            BsdAllocArgs aargs;
+            BOOL         aborted;
+
+            aargs.pool   = pool;
+            aargs.packet = &packet;
+
+            status = bsd_wait_sliced(base, wait, bsd_alloc_once, &aargs,
+                                     &aborted);
+            if (aborted)
+            {
+                if (sent > 0)
+                    return sent;        /* short write, as BSD allows */
+                return bsd_fail(base, AMI_EINTR);
+            }
+        }
         if (status != NX_SUCCESS)
         {
             why = status;
@@ -284,7 +330,23 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
             break;
         }
 
-        status = nx_tcp_socket_send(&sock->as_Nx.tcp, packet, wait);
+        {
+            BsdSendArgs sargs;
+            BOOL        aborted;
+
+            sargs.tcp    = &sock->as_Nx.tcp;
+            sargs.packet = packet;
+
+            status = bsd_wait_sliced(base, wait, bsd_send_once, &sargs,
+                                     &aborted);
+            if (aborted)
+            {
+                nx_packet_release(packet);
+                if (sent > 0)
+                    return sent;        /* short write, as BSD allows */
+                return bsd_fail(base, AMI_EINTR);
+            }
+        }
         if (status != NX_SUCCESS)
         {
             nx_packet_release(packet);
