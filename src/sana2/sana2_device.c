@@ -455,6 +455,49 @@ VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out)
     *out = iface->stats;
 }
 
+/*
+ * The non-counter facts. Every field is a plain read of shim state; the
+ * `posted` and `busy` flags are written by the readers and by the TX reaper,
+ * so a count taken here is a sample rather than a snapshot -- which is what a
+ * "how many are pending right now" question asks for anyway.
+ */
+VOID ami_sana2_get_info(const AmiSana2If *iface, AmiSana2Info *out)
+{
+    UWORD r, i;
+
+    if (out == NULL)
+        return;
+
+    *out = (AmiSana2Info){ 0 };
+
+    if (iface == NULL)
+        return;
+
+    out->hardware_type = iface->hw_type;
+    out->address_bits  = (ULONG)iface->addr_bits;
+
+    for (r = 0; r < (UWORD)AMI_SANA2_RX_READERS; r++)
+    {
+        const AmiSana2Rx *rx = &iface->rx[r];
+
+        out->read_requests += (ULONG)rx->depth;
+
+        for (i = 0; i < rx->depth; i++)
+        {
+            if (rx->slot[i].posted)
+                out->read_pending++;
+        }
+    }
+
+    out->write_requests = (ULONG)AMI_SANA2_TX_SLOTS;
+
+    for (i = 0; i < (UWORD)AMI_SANA2_TX_SLOTS; i++)
+    {
+        if (iface->tx[i].busy)
+            out->write_pending++;
+    }
+}
+
 /* ------------------------------------------------------------- open / close */
 
 AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)

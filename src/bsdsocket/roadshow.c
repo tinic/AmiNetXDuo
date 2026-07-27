@@ -9,42 +9,38 @@
  * WHY THIS FILE IS SHORT
  *
  * Tier 3 (docs/RESEARCH.md S3.2) is ~35 vectors: interface config and query,
- * routing, GetNetworkStatistics(), the *RoadshowData set. Nearly all of them
- * pass data structures whose SHAPE or CONVENTION is not defined anywhere on
- * this machine:
+ * routing, GetNetworkStatistics(), the *RoadshowData set.
  *
- *   ObtainInterfaceList()      returns "struct List *"; the node type is in
- *                              no NDK header. A list of the wrong node shape
- *                              gurus inside the caller on the first
- *                              dereference -- the exact failure the dense
- *                              stub table exists to prevent (see errno.c).
- *   QueryInterfaceTagList()    the IFQ_* tags are documented individually in
- *                              libraries/bsdsocket.h, but not whether ti_Data
- *                              carries the value or a pointer to storage.
- *   GetNetworkStatistics()     the payload struct is defined for the two
- *                              socket types (struct protocol_connection_data)
- *                              but the return convention is not: zero on
- *                              success, or a count, or a byte total?
+ * The interface QUERY set -- ObtainInterfaceList(), ReleaseInterfaceList(),
+ * QueryInterfaceTagList() -- is no longer among them; it lives in
+ * interfaces.c, written against the autodoc named below (docs/RESEARCH.md
+ * S47). What is still stubbed:
+ *
+ *   AddInterfaceTagList()      and the rest of the configuration set.
+ *   ConfigureInterfaceTagList()
+ *   AddRoute/GetRouteInfo/...  the routing set, which mutates.
+ *   GetNetworkStatistics()
  *   ObtainRoadshowData()       struct RoadshowDataNode is defined, but the
  *                              rdn_Name strings are Roadshow-private and
  *                              ChangeRoadshowData() looks items up BY NAME,
  *                              so inventing them produces an API nothing can
  *                              use and that silently disagrees with Roadshow.
- *   AddRoute/GetRouteInfo/...  same, plus they mutate.
+ *                              The autodoc does not list the names either.
  *
  * THE PRIMARY SOURCE EXISTS. This comment used to say there was no
  * bsdsocket.doc autodoc anywhere, and that the stubs would stand until one
  * turned up. One has: NDK 3.2 ships it, at
  * SANA+RoadshowTCP-IP/doc/bsdsocket.doc, beside interfaces/bsdsocket.xml --
  * the same NDK this project builds against. It is 10,436 lines and documents
- * 121 functions, including 35 of the 43 vectors still answering ENOSYS here:
- * the whole interface configuration and query set, the routing set,
+ * 121 functions, including 35 of the 43 vectors that were answering ENOSYS
+ * here: the whole interface configuration and query set, the routing set,
  * GetNetworkStatistics, the net-monitor hooks, the domain-name-server calls,
  * *RoadshowData and the mbuf_* family.
  *
  * So the reason these are stubs is no longer "we cannot know the contract".
- * It is that nobody has written them. That is a different statement and it
- * should not keep hiding behind the old one.
+ * It is that nobody has written them yet. That is a different statement and
+ * it should not keep hiding behind the old one -- interfaces.c is the first
+ * part of it that somebody did write.
  *
  * What is NOT in that autodoc: the seven ipf_* vectors and ChangeRouteTagList.
  * ipf_* remains deliberately out of scope (RESEARCH 9); nothing outside

@@ -11,7 +11,7 @@
  * the two after gethostbyaddr_r) and every vector we have not implemented
  * yet point at bsd_enosys() rather than NULL.
  *
- * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 78 implemented, 61 stubbed (9 of them NULL-returning, 1 FALSE-returning).
+ * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 81 implemented, 58 stubbed (8 of them NULL-returning, 1 FALSE-returning).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -101,9 +101,9 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_enosys_ptr,         /* -0x1b6 [ 72] GetRouteInfo */
     (APTR)bsd_enosys,             /* -0x1bc [ 73] AddInterfaceTagList */
     (APTR)bsd_enosys,             /* -0x1c2 [ 74] ConfigureInterfaceTagList */
-    (APTR)bsd_enosys,             /* -0x1c8 [ 75] ReleaseInterfaceList */
-    (APTR)bsd_enosys_ptr,         /* -0x1ce [ 76] ObtainInterfaceList */
-    (APTR)bsd_enosys,             /* -0x1d4 [ 77] QueryInterfaceTagList */
+    (APTR)bsd_ReleaseInterfaceList, /* -0x1c8 [ 75] ReleaseInterfaceList */
+    (APTR)bsd_ObtainInterfaceList, /* -0x1ce [ 76] ObtainInterfaceList */
+    (APTR)bsd_QueryInterfaceTagList, /* -0x1d4 [ 77] QueryInterfaceTagList */
     (APTR)bsd_enosys,             /* -0x1da [ 78] CreateAddrAllocMessageA */
     (APTR)bsd_enosys,             /* -0x1e0 [ 79] DeleteAddrAllocMessage */
     (APTR)bsd_enosys,             /* -0x1e6 [ 80] BeginInterfaceConfig */

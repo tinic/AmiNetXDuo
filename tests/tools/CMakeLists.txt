@@ -25,6 +25,19 @@ endif()
 target_compile_options(test_routeprobe PRIVATE -Wall -Wextra)
 set_target_properties(test_routeprobe PROPERTIES OUTPUT_NAME "RouteProbe")
 
+# IfProbe drives ObtainInterfaceList/QueryInterfaceTagList/ReleaseInterfaceList
+# through the published LVOs, as Roadie and NetMon do.  It links against
+# nothing of ours: the list node layout and the IFQ_* tag conventions are the
+# whole point, and a probe that shared a header with the implementation could
+# not catch either of them being wrong.
+add_executable(test_ifprobe ifprobe.c)
+target_include_directories(test_ifprobe PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_ifprobe PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_ifprobe PRIVATE -Wall -Wextra)
+set_target_properties(test_ifprobe PROPERTIES OUTPUT_NAME "IfProbe")
+
 # TcpHandoff runs the whole socket-to-file-handle sequence -- accept(),
 # ReleaseCopyOfSocket(), Open("TCP:OBTAIN="), SystemTagList() -- against two
 # stock AmigaDOS commands.  Linked against nothing of ours: it reaches

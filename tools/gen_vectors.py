@@ -146,18 +146,18 @@ IMPLEMENTED = {
     # configurations; only the AF_INET6 answers depend on AMINETXDUO_IPV6.
     "getaddrinfo", "getnameinfo", "freeaddrinfo", "gai_strerror",
     # Tier 3, read-only query side (roadshow.c).
-    #
-    # Only the calls whose contract is FULLY specified by the headers that
-    # ship with the toolchain.  There is no bsdsocket.doc autodoc anywhere on
-    # this machine (docs/RESEARCH.md S3.2), so for the rest of Tier 3 -- the
-    # interface list, QueryInterfaceTagList, GetNetworkStatistics, the routing
-    # calls, ObtainRoadshowData -- the *data structures* are either undefined
-    # in the NDK or defined without the naming/return conventions that make
-    # them usable.  Handing a stock Roadshow tool a list of the wrong node
-    # shape is worse than ENOSYS: it gurus inside the application.  Those stay
-    # stubbed until a primary source turns up.
     "ObtainDomainNameServerList", "ReleaseDomainNameServerList",
     "GetDefaultDomainName",
+    # Tier 3, the interface query API (interfaces.c).
+    #
+    # These are written against NDK 3.2's SANA+RoadshowTCP-IP/doc/bsdsocket.doc
+    # -- Barthel's own autodoc, which ships in the same NDK this project builds
+    # against and which settles the two things libraries/bsdsocket.h does not:
+    # the node shape ObtainInterfaceList() returns, and that every IFQ_* tag's
+    # ti_Data is a pointer to caller storage rather than the value.  Everything
+    # still stubbed below is stubbed because nobody has written it, not because
+    # the contract is unknown; see the header of src/bsdsocket/roadshow.c.
+    "ObtainInterfaceList", "ReleaseInterfaceList", "QueryInterfaceTagList",
 }
 
 # Return types that are pointers without saying so with a '*'.  A stub for one

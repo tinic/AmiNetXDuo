@@ -27,6 +27,8 @@ set(BSDSOCKET_SOURCES
     netstatus.c             # NetStackQuery/NetStackControl: the live stack,
                             # readable and steerable from a Shell command
     roadshow.c              # the Tier 3 extensions whose ABI is pinned down
+    interfaces.c            # ObtainInterfaceList/QueryInterfaceTagList: the
+                            # interface query API, from the NDK 3.2 autodoc
     netx_call.c             # ThreadX context bracket for NetX Duo calls
     library_runtime.c)      # DOSBase, rand(): no crt0 in a shared library
 

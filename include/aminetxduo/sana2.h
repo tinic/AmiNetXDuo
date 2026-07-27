@@ -104,6 +104,27 @@ typedef struct AmiSana2Stats {
 VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out);
 
 /*
+ * The facts QueryInterfaceTagList() is asked for by name and that are not
+ * counters: IFQ_HardwareType, IFQ_HardwareAddressSize and the four I/O
+ * request tags. All of it is read out of the shim's own state -- nothing here
+ * touches the device, so it is safe from any task.
+ *
+ * `address_bits` is in BITS, because that is the unit the published API asks
+ * for ("for an Ethernet interface the number 48 would be returned"), and it
+ * comes from S2_DEVICEQUERY rather than from an assumption about Ethernet.
+ */
+typedef struct AmiSana2Info {
+    ULONG   hardware_type;      /* SANA-II wire type, S2WireType_*          */
+    ULONG   address_bits;       /* hardware address size, in bits           */
+    ULONG   read_requests;      /* CMD_READs allocated across all readers   */
+    ULONG   read_pending;       /* of those, outstanding at the device now  */
+    ULONG   write_requests;     /* CMD_WRITE slots allocated                */
+    ULONG   write_pending;      /* of those, in flight now                  */
+} AmiSana2Info;
+
+VOID ami_sana2_get_info(const AmiSana2If *iface, AmiSana2Info *out);
+
+/*
  * Raw-frame fast path. SANA-II expresses it as SANA2IOF_RAW in io_Flags on
  * CMD_READ/CMD_WRITE rather than as separate commands, and offers no way to
  * ask a device whether it implements the flag. The shim probes at open time

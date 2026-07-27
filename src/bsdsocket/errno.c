@@ -364,7 +364,15 @@ static const BsdConstTag bsd_const_tags[] =
 {
     { SBTC_NUM_PACKET_FILTER_CHANNELS,  0     },
     { SBTC_HAVE_ROUTING_API,            FALSE },
-    { SBTC_HAVE_INTERFACE_API,          FALSE },
+    /*
+     * TRUE since interfaces.c: the tag asks whether the interface API is
+     * PRESENT, and ObtainInterfaceList(), ReleaseInterfaceList() and
+     * QueryInterfaceTagList() are. The configuration half of the same API
+     * still answers ENOSYS, which is a documented failure a caller reads out
+     * of errno -- whereas FALSE here would stop a monitor from ever asking
+     * the three that work.
+     */
+    { SBTC_HAVE_INTERFACE_API,          TRUE  },
     { SBTC_HAVE_MONITORING_API,         FALSE },
     { SBTC_CAN_SHARE_LIBRARY_BASES,     FALSE },
     { SBTC_HAVE_STATUS_API,             FALSE },

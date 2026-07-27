@@ -14625,3 +14625,143 @@ records that it is unusable with this newlib toolchain because it breaks
 **Accepted as it stands, deliberately.** The remaining levers are a toolchain
 away, and the size is not what makes this project good or bad on a 4 MB
 machine.
+
+---
+
+## 47. The autodoc was in the NDK all along (2026-07-27)
+
+`src/bsdsocket/roadshow.c` used to say the interface and routing vectors were
+stubbed because their data structures were "not defined anywhere on this
+machine". That was wrong, and it had been wrong since the first line of this
+project was written.
+
+**NDK 3.2 ships Olaf Barthel's own `bsdsocket.library` autodoc**, at
+`SANA+RoadshowTCP-IP/doc/bsdsocket.doc` — 10,436 lines, 121 functions, in the
+same NDK this tree already compiles against, beside `interfaces/bsdsocket.xml`
+and the `netinclude/` headers we have been reading for a year. Nobody looked
+in `doc/`.
+
+So the reason those vectors answered `ENOSYS` was never "we cannot know the
+contract". It was that nobody had written them.
+
+### 47.1 What the document settled that would otherwise have been guessed
+
+Four things, and each of them is a defect that compiles.
+
+**`ObtainInterfaceList()` returns plain `struct Node`s.** The prototype says
+`struct List *` and nothing in any header names the node type, which is why
+this was stubbed. The autodoc: *"Pointer to a 'struct List', whose individual
+Nodes contain the names of the respective interfaces (found in
+`node->ln_Name`)"*. Not a Roadshow-private node with fields after it — a
+plain `Node` carrying a name. A caller walks it with `ln_Name` and nothing
+else. A list of the wrong node shape does not fail here; it gurus inside the
+application on the first dereference.
+
+**Every `IFQ_*` tag's `ti_Data` is a pointer to caller storage.**
+`libraries/bsdsocket.h` documents each tag individually and says nothing about
+this. The autodoc types every one of them — `(LONG *)`, `(ULONG *)`,
+`(struct sockaddr *)`, `(SBQUAD_T *)`. Getting it backwards writes a number
+into a pointer the application still owns.
+
+**The return conventions are not consistent, and cannot be inferred.**
+`QueryInterfaceTagList()`, `AddInterfaceTagList()`,
+`ConfigureInterfaceTagList()`, `AddRouteTagList()` and
+`DeleteRouteTagList()` are all *"0 for success, -1 for failure"*.
+`RemoveInterface()`, one page further on in the same document, is *"TRUE for
+success, 0 for failure"*. `GetNetworkStatistics()` returns a **byte count**.
+`GetRouteInfo()` returns a pointer to a table terminated by *"a dummy entry
+whose `rtm_msglen` member is zero"*.
+
+**`IFQ_State` is restricted to two of the four `SM_*` values.**
+`libraries/bsdsocket.h` defines `SM_Offline`, `SM_Online`, `SM_Down` and
+`SM_Up` in one block with no hint that they are not interchangeable. The
+autodoc: for `IFQ_State`, *"the values returned can be either 'SM_Down' or
+'SM_Up'"* — the online/offline pair belongs to `IFC_State`, which acts on the
+SANA-II device rather than on the stack's view of it.
+
+### 47.2 Where the document is ambiguous, the vector stays unanswered
+
+Two tags out of the forty-two are typed `(LONG)` where every one of their
+neighbours is `(LONG *)`: `IFQ_MaxReadRequests` and `IFQ_MaxWriteRequests`.
+On a query that has no other way to return anything, a bare `LONG` can only be
+a typo — but writing through a `ti_Data` the caller passed as a scalar
+corrupts its memory, and being right about the typo is not worth that. Both
+are left unanswered.
+
+The same rule is applied at tag granularity throughout. A tag this stack keeps
+no true value for is **left alone** — the caller's storage is not written at
+all — rather than filled with a zero indistinguishable from a measurement:
+`IFQ_LastStart` (nothing records when an interface came up),
+`IFQ_AddressLeaseExpires` (all-zero is documented to mean *infinite*, the one
+wrong answer for a DHCP lease), `IFQ_GetBytesIn`/`Out` (no per-interface byte
+counters), `IFQ_GetSANA2CopyStats`, the multicast counters, `IFQ_OutputDrops`.
+
+`IFQ_PrimaryDNSAddress` and `IFQ_SecondaryDNSAddress` are the opposite case
+and are answered with zero, because zero is what the document says an
+unknown answer looks like: *"If the address is not known, then the IP address
+filled in by this tag will be zero."* The resolver's own name servers are
+deliberately not put there — they are stack-wide, and reporting them as
+belonging to one interface would be a different fact with the same shape.
+
+### 47.3 Testing a shape a compiler cannot check
+
+Neither the node layout nor the tag-pointer convention can be caught by a
+build, and neither can be caught by a test that shares a header with the
+implementation. `tests/tools/ifprobe.c` is therefore a separate executable
+that knows only the published NDK header, calls the three vectors at their
+LVOs by hand, and runs on a booted A1200 with an A2065 behind the stack
+(`tests/tools/run-ifquery.sh`).
+
+**It poisons every destination with `0xA5` first.** Half the tags are
+documented above to be left alone, so a test that pre-zeroed could not tell a
+deliberate omission from a case that fell through into its neighbour — which
+is the exact defect the poison caught nothing of, and would have.
+
+The transcript from the first green run:
+
+```
+interface 1: eth0
+ObtainInterfaceList: 1 interface(s)
+query eth0: rc 0 (errno 0)
+  IFQ_DeviceName           a2065.device
+  IFQ_HardwareAddressSize  48
+  IFQ_HardwareAddress      00:80:10:32:33:34 (7th byte A5)
+  IFQ_MTU                  1500
+  IFQ_Address              10.0.2.15 (len 16 family 2)
+  IFQ_BroadcastAddress     10.0.2.255 (len 16 family 2)
+  IFQ_State                3
+  IFQ_AddressBindType      2
+  IFQ_NumReadRequests      34
+  IFQ_GetBytesIn           unanswered
+  IFQ_LastStart            unanswered
+query nosuchif: rc -1 (errno 6) -- refused, correctly
+```
+
+`(7th byte A5)` is the assertion that matters most in that block: *"a maximum
+of 16 bytes will be copied"*, and six is what an Ethernet address is. A shim
+that copied a fixed sixteen would have scribbled ten bytes past what the
+caller reserved, and every other line would still have read correctly.
+
+### 47.4 One error the autodoc does not give
+
+There is no documented `errno` for "no such interface". `ENXIO` is used,
+because that is what the rest of this library already answers for one —
+`netstatus.c` maps `NX_INVALID_INTERFACE` to it and 4.4BSD's `SIOCGIF*`
+ioctls use it — so a caller sees one code for the condition however it asked.
+That is a choice, not a finding, and it is written down here so the next
+person does not have to work out whether it was.
+
+### 47.5 What is still stubbed, and why
+
+`SBTC_HAVE_INTERFACE_API` now answers `TRUE`: the tag asks whether the
+interface API is *present*, and three of its vectors are. The configuration
+half — `AddInterfaceTagList()`, `ConfigureInterfaceTagList()`,
+`BeginInterfaceConfig()`, `AbortInterfaceConfig()`, `RemoveInterface()` — and
+the routing set and `GetNetworkStatistics()` still answer `ENOSYS`, which is a
+documented failure a caller reads out of `errno`. Answering `FALSE` would
+instead have stopped a monitor from ever asking the three that work.
+
+`ChangeRouteTagList()` and the seven `ipf_*` vectors are **not in the
+autodoc**; they stay out of scope. `ObtainRoadshowData()` is in it, but the
+`rdn_Name` strings it looks items up by are not, so inventing them would
+produce an API nothing can use and that silently disagrees with Roadshow.

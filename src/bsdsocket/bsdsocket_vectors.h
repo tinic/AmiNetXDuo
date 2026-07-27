@@ -323,6 +323,18 @@ LONG bsd_bpf_ioctl(register LONG channel __asm("d0"),
 LONG bsd_bpf_data_waiting(register LONG channel __asm("d0"),
                           register struct AmiSocketBase *SocketBase __asm("a6"));
 
+/* LVO -0x1c8 */
+VOID bsd_ReleaseInterfaceList(register struct List *list __asm("a0"),
+                              register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x1ce */
+struct List *bsd_ObtainInterfaceList(register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x1d4 */
+LONG bsd_QueryInterfaceTagList(register STRPTR interface_name __asm("a0"),
+                               register struct TagItem *tags __asm("a1"),
+                               register struct AmiSocketBase *SocketBase __asm("a6"));
+
 /* LVO -0x210 */
 VOID bsd_ReleaseDomainNameServerList(register struct List *list __asm("a0"),
                                      register struct AmiSocketBase *SocketBase __asm("a6"));
