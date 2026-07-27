@@ -13669,3 +13669,174 @@ once per base and resumed, rather than created per call, and it is still never
 | `src/bsdsocket/errno.c` | `bsd_wait_errno()` |
 | `src/bsdsocket/select.c` | the invariant, at `bsd_wait_option()` |
 | `src/bsdsocket/transfer.c`, `raw.c` | the status carried to the decision |
+
+## 43. The accept() that suspended on a finished connection, fixed upstream (2026-07-26)
+
+§32.10 diagnosed a blocking `accept()` that never returned, named the two
+repairs it thought were safe, and deliberately shipped neither — because both
+were a change of mechanism in `src/bsdsocket/socket.c` for a defect that is in
+`third_party/netxduo`. This is the third option, which §32.10 did not have:
+**we maintain a fork, so the vendored file can simply be correct.**
+
+**Headline: `_nx_tcp_server_socket_accept()` reads `nx_tcp_socket_state` before
+it takes `nx_ip_protection` and never reads it again. Moving the mutex above
+the two early-out checks fixes it, matches what `_nxd_tcp_client_socket_connect()`
+already does, and is nine lines. Reproduced on the ThreadX linux port with an
+injected delay of one tick — HUNG before, returns after. `tools/ci.sh host
+cross conformance` green. Nothing in `src/` changed and nothing in `src/`
+needs to.**
+
+### 43.1 The reproducer, which is the part §32.10 did not have
+
+§32.10 saw the hang once in four runs and argued the rest from the source. That
+is enough to name a defect and not enough to prove a fix, so this started with
+a harness that can be made to fail on demand.
+
+It is not on the Amiga. Two `NX_IP` instances over `nx_ram_network_driver`, the
+ThreadX `linux/gnu` port, `x86_64`, built straight from the vendored trees at
+`473d1928` — the same code the m68k build compiles, running where it can be
+provoked in milliseconds instead of on a shared emulator lane. Two things had
+to be sorted out before it ran at all, both of them upstream's problem and
+neither of them ours:
+
+- `tx_port.h` makes `ULONG` **32-bit** on `x86_64` while pointers are 64-bit,
+  and `nx_ip_create()` passes `ip_ptr` to the IP thread as a `ULONG`. The IP
+  thread dereferences a truncated pointer and segfaults on its first
+  `tx_mutex_get()`. NetX Duo ships the fix as
+  `test/cmake/netxduo64/nx_user.h`, which redefines
+  `NX_THREAD_EXTENSION_PTR_SET/GET` to stash the pointer in a `TX_THREAD`
+  extension field; it is not wired into `ports/linux/gnu`.
+- macOS cannot host this port at all — the ThreadX linux port needs unnamed
+  POSIX semaphores and `sem_timedwait()`, which macOS does not implement. The
+  harness runs on `playhouse2`.
+
+The sequence is AmiNetXDuo's, not a demo's: the server arms its listener with
+`accept(NX_NO_WAIT)` exactly as `bsd_listen()` does, and then calls
+`accept(TX_WAIT_FOREVER)` while the client connects. The race needs the IP
+thread to complete the handshake between the unlocked read and the mutex
+acquire, so the harness calls a hook at exactly that point and the hook sleeps.
+**That is not cheating; it is the only way to ask for a specific interleaving.**
+The delay does nothing the IP thread cannot do on its own — it just stops the
+experiment from being a lottery.
+
+| injected delay (ticks) | vendored, before | vendored, after |
+|---|---|---|
+| 0 | returns | returns |
+| 1 | **HUNG** | returns |
+| 2 | **HUNG** | returns |
+| 5 | **HUNG** | returns |
+| 25 | **HUNG** | returns |
+
+In every HUNG run the client reports `NX_SUCCESS` from `connect()`, the
+server's socket state is 5 (`NX_TCP_ESTABLISHED`), and
+`nx_tcp_socket_connect_suspended_thread` is non-NULL — a thread parked on a
+connection that finished before it got there. That is §32.10's step 4, printed.
+
+**One tick is enough**, which matters: this does not need the Amiga port's
+baton scheduler or any other exotic timing. Twenty-four runs with no injected
+delay all returned, which is the same result §32.10 got three times out of four
+and means the same thing. The defect is in the ordering, not in the timing of
+any one port, and a green run proves nothing either way.
+
+### 43.2 The fix, and why it is not the one §32.10 named
+
+The repair is to stop reading the state without the mutex:
+
+```c
+    tx_mutex_get(&(ip_ptr -> nx_ip_protection), TX_WAIT_FOREVER);
+
+    if (socket_ptr -> nx_tcp_socket_state == NX_TCP_ESTABLISHED)
+    {
+        tx_mutex_put(&(ip_ptr -> nx_ip_protection));
+        return(NX_SUCCESS);
+    }
+    ...
+```
+
+The mutex moves above the two early-out checks and each of them grows a
+`tx_mutex_put()`. Nothing else moves.
+
+**The argument that this is right is not "a lock fixes a race" — it is that the
+sibling function already does exactly this.**
+`_nxd_tcp_client_socket_connect()` takes `nx_ip_protection` at
+`nxd_tcp_client_socket_connect.c:305` and reads `nx_tcp_socket_state` at `:320`,
+releasing the mutex on each early return. Same subsystem, same author, same
+release. The accept path is the one that got it backwards.
+
+**It fixes more than the reported hang.** The `ESTABLISHED` recheck is the case
+§32.10 saw, but the second check has the same shape: a socket that races from
+`SYN_RECEIVED` to `CLOSED` — a RST during the handshake — passes the unlocked
+check, and `nx_tcp_socket_connection_reset.c:115` only cleans up a thread that
+is *already* suspended. Rechecking `ESTABLISHED` alone would leave that one.
+Moving the mutex closes both, which is why the whole check moved rather than a
+recheck being bolted on.
+
+**No new deadlock, and this had to be checked rather than assumed.** The
+function can be reached from the IP thread — the `_tx_thread_current_ptr !=
+&(ip_ptr -> nx_ip_thread)` test at the bottom exists for that case — and the IP
+thread holds `nx_ip_protection` while it runs callbacks. `tx_mutex_get.c:175`
+is the answer: ThreadX mutexes are recursive, an owner re-acquiring only bumps
+`tx_mutex_ownership_count`. Every non-early-return path through this function
+already took the same mutex a few lines further down, so that case behaved this
+way before the change. The cost is one uncontended acquire/release on the
+"already established" fast path. In our tree that path is `bsd_listen()`,
+`bsd_listen_rearm()` and two error paths in `bsd_accept()`, all of them
+`NX_NO_WAIT` arming calls, none of them in a hot loop.
+
+**The retry loop §32.10 warned about is still wrong** and is worth restating
+where someone will find it: slicing the wait and calling `accept()` again makes
+`_nx_tcp_connect_cleanup` wind the socket back to `NX_TCP_LISTEN_STATE` on the
+timeout, so the next call re-enters the `LISTEN` block and **sends a second
+SYN+ACK on a half-open connection.** There is no application-side repair for
+this defect. That is the whole reason it belongs upstream.
+
+### 43.3 Where it is
+
+`tinic/netxduo`, branch `amiga-tcp-accept-race`, commit `d50bcc20`, based on
+`473d1928` and signed off. Merged into `amiga-integration` (`08f7ec99`), which
+is what the submodule tracks.
+
+It shares a file with `amiga-tcp-isn-entropy` — both defects are in
+`nx_tcp_server_socket_accept.c` — but not a hunk: the ISN change is at old line
+108 inside the `LISTEN` block, this one ends at old line 104. Checked rather
+than assumed. All three branches `git am` cleanly onto `473d1928` in either
+order (mdns → isn → accept, and accept → isn → mdns) and produce byte-identical
+trees, so upstream can take any one of them alone.
+
+The PR body is written and the PR is **not** open: the Eclipse Contributor
+Agreement is a legal signature and it is the maintainer's to give.
+
+### 43.4 What our tree does now, which is nothing
+
+`src/bsdsocket/tcp_handler.c:607` waits with `WaitSelect()` before calling
+`bsd_accept()`, and `src/tools/nc.c:567` does the same. §32.10 called this the
+workaround, and it was: it makes the socket `ESTABLISHED` before the unlocked
+check runs, so the suspension is never reached.
+
+**It stays, and it stays for a reason that is not inertia.** With the vendored
+file correct it is no longer load-bearing — but it was never only a workaround.
+`nc.c` says why in its own comment: *a blocked `accept()` cannot see Ctrl-C*.
+Waiting on readiness and then taking the connection is what gives a break
+somewhere to be noticed and a timeout somewhere to apply, and that argument
+survives the fix untouched. Removing it would trade a shape that has never
+stalled for one that is merely no longer known to.
+
+Nothing else in `src/` needed a change. `bsd_accept()`'s status mapping is
+unaffected: an already-established socket returned `NX_SUCCESS` before the fix
+and returns `NX_SUCCESS` after it, and `NX_IN_PROGRESS` still means "armed, not
+yet connected".
+
+**Not verified on target.** The linux-port harness proves the defect and the
+fix; the m68k side has the four cross configurations building clean and no
+semantic change at any of our call sites, and that is all. The emulator was not
+run for this — `port/threadx-amiga/` had another workstream's uncommitted
+changes in it at the time, so neither a pass nor a failure would have been
+attributable.
+
+### 43.5 What is in the tree
+
+| | |
+|---|---|
+| `third_party/netxduo` | submodule bumped to `08f7ec99` (the merge) |
+| `common/src/nx_tcp_server_socket_accept.c` | in the submodule: the mutex moved above both checks |
+| `src/` | unchanged, deliberately — see 43.4 |
