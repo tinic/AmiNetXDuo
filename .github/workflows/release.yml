@@ -43,8 +43,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-          # The .readme and the release body quote a commit count, and
-          # tools/version.sh --build derives it from history.
+          # The release body quotes a commit count, and tools/version.sh
+          # --build derives it from history.
           fetch-depth: 0
 
       - name: Derive the version
@@ -170,7 +170,7 @@ jobs:
             echo "### $(tools/version.sh --long)"
             echo
             echo '```'
-            ls -l build/dist/*.lha build/dist/*.readme
+            ls -l build/dist/*.lha
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -180,9 +180,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: AmiNetXDuo-${{ env.AMINETXDUO_VERSION_COMPOUND }}
-          path: |
-            build/dist/*.lha
-            build/dist/*.readme
+          path: build/dist/*.lha
           if-no-files-found: error
           retention-days: 30
 
@@ -211,4 +209,4 @@ jobs:
           gh release create "${GITHUB_REF#refs/tags/}" \
              --title "$(tools/version.sh --long)" \
              --notes-file "$notes" \
-             build/dist/*.lha build/dist/*.readme
+             build/dist/*.lha

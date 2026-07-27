@@ -149,11 +149,24 @@ def functions(objdump, path):
                          capture_output=True, text=True)
     if out.returncode != 0:
         return None
+    # Two symbol-line formats, because binutils versions disagree and the
+    # toolchains in play are different versions:
+    #     00000000 <_____start>:              (newer)
+    #     00000000 00000000 _____start:       (the pinned 2.39 build)
+    # Only the second appears on the pinned toolchain, so matching just the
+    # first parsed nothing, reported every file as "skipped", and passed.
+    SYMBOL = (re.compile(r"^([0-9a-f]+) <([^>]+)>:"),
+              re.compile(r"^[0-9a-f]+ [0-9a-f]+ (\S+):\s*$"))
     fns, cur = {}, None
     for line in out.stdout.splitlines():
-        m = re.match(r"^([0-9a-f]+) <([^>]+)>:", line)
+        m = SYMBOL[0].match(line)
         if m:
             cur = m.group(2)
+            fns[cur] = []
+            continue
+        m = SYMBOL[1].match(line)
+        if m:
+            cur = m.group(1)
             fns[cur] = []
             continue
         m = re.match(r"^\s*([0-9a-f]+):\s+([0-9a-f]{4}) ([0-9a-f]{4})\s", line)
@@ -249,6 +262,17 @@ def main():
     if counts.get("refused"):
         return 1
     if check_only and counts.get("buggy"):
+        return 1
+
+    # Skipping EVERYTHING is not a pass. A crt0.o with no ____start/exit pair
+    # is plausible one at a time -- the ixemul one has neither -- but if not a
+    # single file in the tree yielded a pair, the disassembly was not
+    # understood and nothing was actually checked. That is exactly how this
+    # returned success over an unrepaired toolchain in CI.
+    if not counts.get("ok") and not counts.get("patched"):
+        sys.stderr.write("fix-toolchain-crt0: no crt0.o yielded a "
+                         "____start/exit pair -- the disassembly was not "
+                         "understood, nothing was verified\n")
         return 1
     return 0
 

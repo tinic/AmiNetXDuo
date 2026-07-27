@@ -3,21 +3,19 @@
 # Build the AmiNetXDuo distribution archive.
 #
 #   dist/make-dist.sh [-b BUILDDIR] [-v VERSION] [-o OUTDIR]
-#                     [-a "Name <address@example.com>"]
 #
 # Produces, in OUTDIR (default build/dist):
 #
 #   AmiNetXDuo-<version>.lha   the archive, laid out the way Aminet expects
-#   AmiNetXDuo.readme          the upload description, with its header fields
 #   AmiNetXDuo/                the same tree unpacked, for inspection
 #
 # The version comes from tools/version.sh, i.e. from project(AmiNetXDuo
 # VERSION ...) compounded with the NetX Duo version read out of the submodule.
 # -v overrides the product part for a test build; there is deliberately no way
 # to override the NetX Duo part, because it describes what is in the archive.
-# The archive filename carries our version alone -- an Aminet filename is read
-# by people -- and the full compound goes in the .readme header, where the
-# question "built on what?" is actually asked.
+# The archive filename carries our version alone, because a filename is read
+# by people.  The full compound is in the installer and in each binary's
+# version string.
 #
 # The Aminet convention is that an archive extracts into the directory it is
 # unpacked in as one drawer plus that drawer's icon, so that dropping it on a
@@ -31,7 +29,6 @@
 #       AmiNetXDuo.info              a spare drawer icon, for the drawer the
 #                                    installer creates on the user's disk
 #       ReadMe  ReadMe.info
-#       AmiNetXDuo.readme            the Aminet description, for reference
 #       C/                           the commands
 #       Libs/68000/                  one drawer per CPU; the installer picks
 #       Libs/68020-40/               the one this machine can run
@@ -53,16 +50,13 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 OUTDIR="$ROOT/build/dist"
 VERSION="$("$ROOT/tools/version.sh" --product)"
-AUTHOR="${AMINETXDUO_AUTHOR:-UNSET -- pass -a \"Name <you@example.com>\"}"
 
-while getopts "b:v:o:a:" opt; do
+while getopts "b:v:o:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         v) VERSION="$OPTARG" ;;
         o) OUTDIR="$OPTARG" ;;
-        a) AUTHOR="$OPTARG" ;;
-        *) echo "usage: $0 [-b builddir] [-v version] [-o outdir]" \
-                "[-a author]" >&2
+        *) echo "usage: $0 [-b builddir] [-v version] [-o outdir]" >&2
            exit 2 ;;
     esac
 done
@@ -75,11 +69,8 @@ esac
 INSTALL="$ROOT/install"
 TREE="$OUTDIR/AmiNetXDuo"
 
-# What the .readme's Version: field says.  Aminet shows that field verbatim,
-# so it is the one place a user sees the compound version without unpacking
-# anything.  tools/version.sh checks the recorded NetX Duo version against the
-# submodule and exits nonzero if they have drifted, so a stale label cannot be
-# packed.
+# tools/version.sh checks the recorded NetX Duo version against the submodule
+# and exits nonzero if they have drifted, so a stale label cannot be packed.
 NETXDUO_VERSION=$("$ROOT/tools/version.sh" --netxduo)
 THREADX_VERSION=$("$ROOT/tools/version.sh" --threadx)
 VERSION_FIELD="$VERSION (NetX Duo $NETXDUO_VERSION, ThreadX $THREADX_VERSION)"
@@ -361,36 +352,6 @@ if [ -z "$(ls -A "$TREE/Docs" 2>/dev/null)" ]; then
     cp "$INSTALL/Document.info" "$TREE/Docs/ReadMe.info"
 fi
 
-# ------------------------------------------------------------- the .readme --
-
-# Lines beginning with ';' are notes to whoever edits the template -- how the
-# header works, how Replaces: works. They are not for somebody reading the
-# description on Aminet, so they are stripped from the generated file rather
-# than shipped as clutter under the header.
-sed -e "s|@VERSION@|$VERSION_FIELD|g" -e "s|@AUTHOR@|$AUTHOR|g" -e "/^;/d" \
-    "$ROOT/dist/AmiNetXDuo.readme" > "$OUTDIR/AmiNetXDuo.readme"
-cp "$OUTDIR/AmiNetXDuo.readme" "$TREE/AmiNetXDuo.readme"
-cp "$INSTALL/Document.info" "$TREE/AmiNetXDuo.readme.info"
-
-# Aminet rejects a .readme whose header fields are not all present and in
-# order, so check rather than find out after uploading.
-missing=""
-for field in Short Author Uploader Type Version Architecture; do
-    grep -q "^$field: " "$OUTDIR/AmiNetXDuo.readme" || missing="$missing $field"
-done
-[ -z "$missing" ] || {
-    echo "AmiNetXDuo.readme is missing header fields:$missing" >&2
-    exit 2
-}
-if grep -q "@VERSION@\|@AUTHOR@" "$OUTDIR/AmiNetXDuo.readme"; then
-    echo "AmiNetXDuo.readme still has a placeholder in it" >&2
-    exit 2
-fi
-if grep -q "^Author: *UNSET" "$OUTDIR/AmiNetXDuo.readme"; then
-    echo "!! Author/Uploader are unset.  Aminet wants a real name and" >&2
-    echo "!! address there; re-run with -a \"Name <you@example.com>\"." >&2
-fi
-
 # ------------------------------------------------------------ the archive --
 
 # Versioned filename, unversioned drawer: the .lha says which release it is,
@@ -452,5 +413,4 @@ python3 "$INSTALL/tools/showicon.py" "$TREE"/*.info >/dev/null
 echo
 echo "==> version $VERSION_FIELD"
 echo "==> $ARCHIVE"
-echo "==> $OUTDIR/AmiNetXDuo.readme"
 du -sh "$ARCHIVE" | sed 's/^/    /'
