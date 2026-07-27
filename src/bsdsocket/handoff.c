@@ -69,6 +69,64 @@ static struct AmiSocketBase *bsd_master_of(struct AmiSocketBase *base)
 }
 
 /* Caller holds the master's semaphore. */
+/*
+ * THE ID RANGE IS A PROTOCOL, not just a key.
+ *
+ * ReleaseSocket's autodoc: "If the Id value is between 0 and 65535
+ * (inclusively), then the id is considered non-unique and anyone can pick it
+ * up via ObtainSocket() by specifying the right combination of socket type
+ * and protocol. If the Id value is greater than 65535 then it must be unique
+ * number (this function will fail if it is not)."
+ *
+ * We used to reject EVERY duplicate with EEXIST, which makes the whole
+ * non-unique range unusable -- and that range is the one a daemon uses when
+ * it hands each accepted connection to a child under the same well-known id.
+ */
+#define BSD_ID_NONUNIQUE_MAX  65535L
+
+static BOOL bsd_handoff_id_is_unique(LONG id)
+{
+    return (id < 0 || id > BSD_ID_NONUNIQUE_MAX) ? TRUE : FALSE;
+}
+
+/*
+ * ObtainSocket "must be identified by an ID, a domain, type and protocol
+ * number", so a non-unique id is only half the key: the rest is what the
+ * caller asks for. Matching on id alone handed back whichever socket happened
+ * to be first in the list.
+ */
+static BsdHandoff *bsd_handoff_match(struct AmiSocketBase *master, LONG id,
+                                     LONG domain, LONG type, LONG protocol)
+{
+    struct MinNode *node;
+
+    for (node = master->sb_Handoffs.mlh_Head;
+         node->mln_Succ != NULL;
+         node = node->mln_Succ)
+    {
+        BsdHandoff *entry = (BsdHandoff *)node;
+        AmiSocket  *sock  = entry->bh_Socket;
+
+        if (entry->bh_Id != id)
+            continue;
+
+        if (sock == NULL)
+            continue;
+
+        if ((LONG)sock->as_Domain != domain || (LONG)sock->as_Type != type)
+            continue;
+
+        /* Protocol 0 means "the default for this type", which is what the
+           socket was created with -- so it matches whatever is parked. */
+        if (protocol != 0 && sock->as_Protocol != protocol)
+            continue;
+
+        return entry;
+    }
+
+    return NULL;
+}
+
 static BsdHandoff *bsd_handoff_find(struct AmiSocketBase *master, LONG id)
 {
     struct MinNode *node;
@@ -123,8 +181,11 @@ static LONG bsd_handoff_park(struct AmiSocketBase *base, AmiSocket *sock,
     {
         id = bsd_handoff_new_id(master);
     }
-    else if (bsd_handoff_find(master, id) != NULL)
+    else if (bsd_handoff_id_is_unique(id) && bsd_handoff_find(master, id) != NULL)
     {
+        /* Only the >65535 range promises uniqueness, and only there is a
+           duplicate an error. Below it, several sockets sharing one id is
+           the documented arrangement. */
         ReleaseSemaphore(&master->sb_Lock);
         ami_free(entry);
         return bsd_fail(base, AMI_EEXIST);
@@ -265,7 +326,7 @@ LONG bsd_ObtainSocket(register LONG id       __asm("d0"),
 
     ObtainSemaphore(&master->sb_Lock);
 
-    entry = bsd_handoff_find(master, id);
+    entry = bsd_handoff_match(master, id, domain, type, protocol);
     if (entry == NULL)
     {
         ReleaseSemaphore(&master->sb_Lock);

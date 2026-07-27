@@ -678,6 +678,45 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
     for (;;)
     {
         ULONG received;
+        ULONG pending;
+
+        /*
+         * TEST THE BREAK BEFORE ANYTHING CAN RETURN, not only after Wait().
+         *
+         * The autodoc's own BUGS section names this: "WaitSelect() may ignore
+         * the break signal altogether if a zero length timeout is given, or
+         * sockets are ready at the time the function is entered. This
+         * behaviour was changed in bsdsocket.library V4.289, which will always
+         * make sure that the break signal is tested and acted upon -- note
+         * that no other AmiTCP-alike Amiga TCP/IP stack may check the break
+         * signal under these circumstances".
+         *
+         * Both escapes are below: `count > 0` and `poll_only` each leave the
+         * loop without reaching the check after Wait(). A program polling a
+         * busy socket therefore never noticed Ctrl-C, which is the case that
+         * matters -- a quiet socket blocks in Wait() and always did.
+         *
+         * SetSignal(0,0) observes without consuming, so the break stays set
+         * for the caller's own handling, exactly as the post-Wait path leaves
+         * it. User signals ARE consumed, because the caller is promised them
+         * in `signals` and a signal reported but left standing would be
+         * delivered twice.
+         */
+        pending = SetSignal(0UL, 0UL);
+
+        if ((pending & break_mask) != 0)
+        {
+            if (timer_running)
+            {
+                AbortIO((struct IORequest *)&SocketBase->sb_TimerReq);
+                WaitIO((struct IORequest *)&SocketBase->sb_TimerReq);
+            }
+
+            return bsd_fail(SocketBase, AMI_EINTR);
+        }
+
+        if ((pending & user_mask) != 0)
+            got_signals |= SetSignal(0UL, user_mask) & user_mask;
 
         /*
          * Clear first, then poll. An event that arrives after the clear sets
