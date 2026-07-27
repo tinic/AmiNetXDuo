@@ -64,6 +64,8 @@
 #include "aminetxduo/config.h"
 #include "aminetxduo/sana2.h"
 
+#include "tagwalk.h"
+
 #include <proto/exec.h>
 
 /*
@@ -80,47 +82,7 @@
  */
 #define BSD_IF_RESOLVE_TIMEOUT  (30UL * (ULONG)NX_IP_PERIODIC_RATE)
 
-/* ------------------------------------------------------------- tag walking */
-
-/*
- * Hand-rolled NextTagItem(). utility.library is not open in a shared library
- * that may be called before anything else has opened it, and the four control
- * tags are three lines of arithmetic; errno.c does the same for
- * SocketBaseTagList().
- */
-static struct TagItem *bsd_next_tag(struct TagItem **cursor)
-{
-    struct TagItem *item = *cursor;
-
-    while (item != NULL)
-    {
-        switch (item->ti_Tag)
-        {
-            case TAG_DONE:
-                *cursor = NULL;
-                return NULL;
-
-            case TAG_IGNORE:
-                item++;
-                continue;
-
-            case TAG_MORE:
-                item = (struct TagItem *)item->ti_Data;
-                continue;
-
-            case TAG_SKIP:
-                item += 1 + (LONG)item->ti_Data;
-                continue;
-
-            default:
-                *cursor = item + 1;
-                return item;
-        }
-    }
-
-    *cursor = NULL;
-    return NULL;
-}
+/* ------------------------------------------------------------- tag storage */
 
 /* The storage a tag points at, or NULL when the caller passed none. */
 static APTR bsd_tag_storage(const struct TagItem *item)

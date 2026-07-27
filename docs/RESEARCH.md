@@ -14812,7 +14812,69 @@ Four remain `ENOSYS`, and none of them because the contract is unclear:
 | `BeginInterfaceConfig()` | an asynchronous allocation whose `AddressAllocationMessage` comes back through `ReplyMsg()` carrying a lease, a router table, a DNS table, a host name and a domain name. This stack's DHCP client runs inside `netstack_startup()` and reports through the config; there is no port to reply to and none of the `aam_*` tables is kept |
 | `AbortInterfaceConfig()` | the counterpart to a call that does not exist |
 
-The routing set and `GetNetworkStatistics()` also still answer `ENOSYS`.
+`GetNetworkStatistics()` also still answers `ENOSYS`.
+
+### 47.7 Routing: the grammar has no netmask in it
+
+`AddRouteTagList()` takes `RTA_Destination`, `RTA_Gateway`,
+`RTA_DefaultGateway`, `RTA_DestinationHost` and `RTA_DestinationNet` — and
+that is the whole grammar. **There is no netmask tag.** The prefix length is
+implied:
+
+> *"if the destination has a local address part of INADDR_ANY or if the
+> destination is the symbolic name of a network, then the route is assumed to
+> be a to a network"*
+
+so `192.168.66.0` becomes a `/24` and `192.168.67.7` becomes a `/32`, from
+nothing but the address, and `RTA_DestinationHost`/`RTA_DestinationNet`
+override the guess. "Network" means the **classful** network, because that is
+the only prefix an address alone can imply. It is a poor netmask in 2026; it
+is also the one the published API defines, and — the part that makes it
+non-negotiable — `DeleteRouteTagList()` has the same grammar, so an entry
+added under one rule can only ever be found again under the same rule.
+
+`RTA_Destination` with no `RTA_Gateway` is refused with `EINVAL`. The autodoc
+permits the tags in that combination, but every entry NetX Duo's table holds
+has a next hop; the routes that do not are the directly attached prefix of
+each interface, and those are created by configuring the interface.
+
+**`GetRouteInfo()`'s table is the routing-socket layout**, which the prototype
+does not say and the `-route-` page of the same autodoc does: *"a header
+followed by a small number of sockadders, interpreted by position ... the
+sequence is least significant to most significant bit within the vector"*.
+So `rtm_addrs` is the map, the sockaddrs follow in `RTA_DST`, `RTA_GATEWAY`,
+`RTA_NETMASK` order, and the table ends at *"a dummy entry whose `rtm_msglen`
+member is zero"*. A caller handed a bare array of `rt_msghdr` — which is what
+the prototype alone suggests — walks off the end of the first entry.
+
+The BSD padding rule (each sockaddr rounded up to a multiple of
+`sizeof(long)`) is a no-op here and is deliberately not written out:
+`sockaddr_in` is sixteen bytes, and sixteen is already a multiple of four.
+
+`tests/tools/rtprobe.c` walks the table exactly that way and asserts the
+implied masks, the `RTF_STATIC` filter, `rtm_version` 3, the MTU in
+`rtm_rmx`, and that two routes added and two deleted leave the table where it
+started.
+
+### 47.8 The one hole NetX Duo leaves in `DeleteRouteTagList()`
+
+*"ESRCH if requested to delete a non-existent entry"* — and it does, except on
+an empty table. `nx_ip_static_route_delete()` returns `NX_SUCCESS` outright
+when `nx_ip_routing_table_entry_count` is zero, without searching.
+
+The default gateway does not fill that table: it lives in
+`nx_ip_gateway_address`. So a machine whose only route is its default gateway
+has an *empty* static table, and deleting a route that was never added reports
+success there and fails everywhere else. `rtprobe.c` ran that experiment in
+the wrong order first and found it; the ordering, and the reason for it, are
+now written into the probe.
+
+`EEXIST` — the other code the `-route-` page names — is not used, because
+NetX Duo does not produce the condition: a second add for a destination
+already in the table updates its next hop and reports success. That is the
+"last one wins" behaviour a route command gives, so it is reported as the
+success it is rather than turned into an error this stack would have to
+invent.
 
 `ChangeRouteTagList()` and the seven `ipf_*` vectors are **not in the
 autodoc**; they stay out of scope. `ObtainRoadshowData()` is in it, but the

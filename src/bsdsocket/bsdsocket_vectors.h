@@ -323,6 +323,23 @@ LONG bsd_bpf_ioctl(register LONG channel __asm("d0"),
 LONG bsd_bpf_data_waiting(register LONG channel __asm("d0"),
                           register struct AmiSocketBase *SocketBase __asm("a6"));
 
+/* LVO -0x19e */
+LONG bsd_AddRouteTagList(register struct TagItem *tags __asm("a0"),
+                         register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x1a4 */
+LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
+                            register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x1b0 */
+VOID bsd_FreeRouteInfo(register struct rt_msghdr *buf __asm("a0"),
+                       register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x1b6 */
+struct rt_msghdr *bsd_GetRouteInfo(register LONG address_family __asm("d0"),
+                                   register LONG flags __asm("d1"),
+                                   register struct AmiSocketBase *SocketBase __asm("a6"));
+
 /* LVO -0x1c2 */
 LONG bsd_ConfigureInterfaceTagList(register STRPTR interface_name __asm("a0"),
                                    register struct TagItem *tags __asm("a1"),

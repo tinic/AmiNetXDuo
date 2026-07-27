@@ -73,9 +73,10 @@ TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
 PROBE="$ROOT/$BUILD/tests/tools/RouteProbe"
+RTPROBE="$ROOT/$BUILD/tests/tools/RtProbe"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/netstat" \
-         "$PROBE" "$BSD"; do
+         "$PROBE" "$RTPROBE" "$BSD"; do
     [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
 done
 
@@ -105,6 +106,7 @@ for t in AddNetInterface netstat; do
     cp "$TOOLS/$t" "$STAGE/$t"
 done
 cp "$PROBE" "$STAGE/RouteProbe"
+cp "$RTPROBE" "$STAGE/RtProbe"
 
 # The order is the experiment.  RouteProbe prints the table before, with and
 # after the route, so the transcript shows it changing rather than only its
@@ -115,6 +117,7 @@ SYS:AddNetInterface eth0
 SYS:netstat -r
 SYS:RouteProbe
 SYS:netstat -r
+SYS:RtProbe
 EOF
 
 # ------------------------------------------------------------------ run ---
@@ -127,7 +130,8 @@ echo "==> booting $MODEL with the A2065 on SLIRP"
 set +e
 "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-    "$STAGE/AddNetInterface" "$STAGE/netstat" "$STAGE/RouteProbe"
+    "$STAGE/AddNetInterface" "$STAGE/netstat" "$STAGE/RouteProbe" \
+    "$STAGE/RtProbe"
 RUN_RC=$?
 set -e
 
@@ -251,6 +255,90 @@ if [ -s "$HD/host.pcap" ]; then
     fi
 else
     fail "no host-side capture at $HD/host.pcap -- the wire was not observed"
+fi
+
+# ---- THE PUBLISHED ROUTING API -------------------------------------------
+#
+# Everything above drives the private NETCTRL_ROUTE_ADD vector.  RtProbe
+# drives AddRouteTagList()/DeleteRouteTagList()/GetRouteInfo()/FreeRouteInfo()
+# instead -- the Roadshow ABI a third-party tool uses -- and walks the
+# returned table by rtm_msglen, which is the shape no build can check.
+
+if grep -q "^add 192.168.66.0 via 10.0.2.98: rc 0 " "$REPORT"; then
+    pass "AddRouteTagList added a route with no netmask tag in the grammar"
+else
+    fail "AddRouteTagList refused 192.168.66.0 via 10.0.2.98"
+fi
+
+# The mask is IMPLIED: 192.168.66.0 has a zero host part under its classful
+# mask, so "the route is assumed to be a to a network" and 255.255.255.0 comes
+# from nothing but the address.  192.168.67.7 does not, so it is a host route
+# with a /32 and the H flag.
+if grep -Eq "^  with +192\.168\.66\.0 +10\.0\.2\.98 +255\.255\.255\.0 +UGS" "$REPORT"; then
+    pass "and the classful mask was derived from the address alone"
+else
+    fail "192.168.66.0 did not come back as a /24 gateway route"
+fi
+
+if grep -Eq "^  with +192\.168\.67\.7 +10\.0\.2\.98 +255\.255\.255\.255 +UGHS" "$REPORT"; then
+    pass "a destination with a host part became a host route, flagged H"
+else
+    fail "192.168.67.7 did not come back as a /32 host route"
+fi
+
+# GetRouteInfo's own shape: version 3 on every entry, and the MTU carried in
+# rtm_rmx for the interface routes that have one.
+if grep -Eq "^  before .* v3 if " "$REPORT"; then
+    pass "every entry reports rtm_version 3, as the autodoc specifies"
+else
+    fail "the table entries do not carry rtm_version 3"
+fi
+
+if grep -Eq "^  before .* mtu 1500$" "$REPORT"; then
+    pass "the interface route carries its MTU in rtm_rmx"
+else
+    fail "no entry carries an MTU"
+fi
+
+if grep -q "^routes static-only: 2 entries" "$REPORT"; then
+    pass "the flags filter returned exactly the two RTF_STATIC entries"
+else
+    fail "GetRouteInfo(AF_INET, RTF_STATIC) did not return exactly two entries"
+fi
+
+for case in "dest+default together" "dest with no gateway" \
+            "via an unreachable next hop"; do
+    if grep -q "^add $case: .* -- refused, correctly" "$REPORT"; then
+        pass "AddRouteTagList refused: $case"
+    else
+        fail "AddRouteTagList accepted: $case"
+    fi
+done
+
+if grep -q "^GetRouteInfo(AF_INET6): NULL .* -- refused, correctly" "$REPORT"; then
+    pass "GetRouteInfo refuses an address family it has no table for"
+else
+    fail "GetRouteInfo(AF_INET6) returned a table"
+fi
+
+if grep -q "^delete a route never added: .* -- refused, correctly" "$REPORT"; then
+    pass "deleting an absent route fails while the table is not empty"
+else
+    fail "deleting an absent route reported success"
+fi
+
+# The whole of it: delete has to derive the same prefix length add did, from
+# the same string and no mask, or the entries could never be found again.
+if grep -q "^counts: .* -- two added and two removed, correctly" "$REPORT"; then
+    pass "the table came back to exactly what it was"
+else
+    fail "the routes added through the published API were not all removed"
+fi
+
+if grep -q "^FreeRouteInfo(NULL): returned" "$REPORT"; then
+    pass "FreeRouteInfo(NULL) did nothing, as documented"
+else
+    fail "FreeRouteInfo(NULL) did not return"
 fi
 
 echo

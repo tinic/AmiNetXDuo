@@ -38,6 +38,20 @@ endif()
 target_compile_options(test_ifprobe PRIVATE -Wall -Wextra)
 set_target_properties(test_ifprobe PROPERTIES OUTPUT_NAME "IfProbe")
 
+# RtProbe drives AddRouteTagList/DeleteRouteTagList/GetRouteInfo/FreeRouteInfo
+# through the published LVOs.  It walks the returned table the way the routing
+# socket convention requires -- advance by rtm_msglen, read the sockaddrs by
+# their bit order in rtm_addrs -- rather than by indexing an array of
+# rt_msghdr, which is what the prototype alone would suggest and which would
+# walk off the end of the first entry.
+add_executable(test_rtprobe rtprobe.c)
+target_include_directories(test_rtprobe PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_rtprobe PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_rtprobe PRIVATE -Wall -Wextra)
+set_target_properties(test_rtprobe PROPERTIES OUTPUT_NAME "RtProbe")
+
 # TcpHandoff runs the whole socket-to-file-handle sequence -- accept(),
 # ReleaseCopyOfSocket(), Open("TCP:OBTAIN="), SystemTagList() -- against two
 # stock AmigaDOS commands.  Linked against nothing of ours: it reaches

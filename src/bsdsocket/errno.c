@@ -363,7 +363,13 @@ typedef struct
 static const BsdConstTag bsd_const_tags[] =
 {
     { SBTC_NUM_PACKET_FILTER_CHANNELS,  0     },
-    { SBTC_HAVE_ROUTING_API,            FALSE },
+    /*
+     * TRUE since routing.c: AddRouteTagList(), DeleteRouteTagList(),
+     * GetRouteInfo() and FreeRouteInfo() are the whole routing API the
+     * autodoc documents. ChangeRouteTagList() has an LVO and no
+     * documentation anywhere, so it is not part of what this answers for.
+     */
+    { SBTC_HAVE_ROUTING_API,            TRUE  },
     /*
      * TRUE since interfaces.c: the tag asks whether the interface API is
      * PRESENT, and ObtainInterfaceList(), ReleaseInterfaceList() and
