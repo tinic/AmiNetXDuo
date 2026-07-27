@@ -1040,7 +1040,18 @@ pid_t setsid(void) { errno = ENOSYS; return -1; }
  *                      that is only read while the session loop runs.
  *   stdout and stderr  one file, because AmigaOS 3.x has one: a process's
  *                      pr_CES is NULL by default and errors go to its output.
+ *                      The Shell's own messages land there too, which is why
+ *                      SYS_Output is used rather than a ">" appended to the
+ *                      command line.
  *   the exit status    System()'s return code, which IS the command's rc
+ *
+ * NOTHING CROSSES A TASK BOUNDARY.  The command runs in a Process of its own
+ * and never touches the server's SocketBase -- src/bsdsocket/tcp_handler.c
+ * states the rule and the ThreadX bracket now enforces it, so a spawned
+ * process using its parent's base gets ENETDOWN.  It does not arise here: the
+ * socket stays in the session's task and only a DOS file passes between them.
+ * A NETWORK command run over SSH opens its own bsdsocket.library, which is
+ * what any AmigaOS program does anyway.
  *
  * IT RUNS SYNCHRONOUSLY, AND THAT IS A LIMITATION AND NOT A DETAIL.  The
  * session loop is stopped for as long as the command takes, so nothing is
@@ -1262,7 +1273,7 @@ extern void dropbear_log(int priority, const char *format, ...);
  * channel reading it.  T: is the AmigaOS scratch assign; a machine without one
  * gets the current directory, which execchild() has just made the user's home.
  */
-static int spawn_outfile(char *name, size_t namelen)
+static BPTR spawn_outfile(char *name, size_t namelen)
 {
     static ULONG serial;
     static const char *const dirs[] = { "T:", "" };
@@ -1275,19 +1286,15 @@ static int spawn_outfile(char *name, size_t namelen)
         snprintf(name, namelen, "%sdbssh-%lx-%lu.out", dirs[i],
                  (unsigned long)(ULONG)FindTask(NULL), (unsigned long)serial);
 
-        /* Created here rather than left to the Shell's ">" so that a directory
-           that cannot be written to is found NOW, with a name to print, and
-           not as an empty transfer later. */
         fh = Open((CONST_STRPTR)name, MODE_NEWFILE);
         if (fh != (BPTR)0)
         {
-            Close(fh);
             serial++;
-            return 1;
+            return fh;
         }
     }
 
-    return 0;
+    return (BPTR)0;
 }
 
 int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
@@ -1295,21 +1302,16 @@ int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
                          int *ret_writefd, int *ret_readfd, int *ret_errfd,
                          pid_t *ret_pid)
 {
-    static struct TagItem cmd_tags[] =
-    {
-        { NP_StackSize, DB_CMD_STACK },
-        { TAG_END,      0            }
-    };
-
     static pid_t next_pid = 1000;       /* not 0: chansess->pid == 0 means
                                            "no command has run on this
                                            channel" */
 
+    struct TagItem cmd_tags[4];
     char  outname[64];
-    char  line[DB_CMD_MAX + sizeof(outname) + 16];
     int   in[2], out[2], err[2];
+    int   nt;
     LONG  rc;
-    BPTR  fh;
+    BPTR  fh, cmd_in, cmd_out;
 
     /*
      * Dropbear's own child path, run in this process to the point where it
@@ -1339,23 +1341,29 @@ int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
         return DB_FAILURE;
     }
 
-    if (!spawn_outfile(outname, sizeof(outname)))
+    cmd_out = spawn_outfile(outname, sizeof(outname));
+    if (cmd_out == (BPTR)0)
     {
         dropbear_log(DB_LOG_WARNING, "amiga: cannot create an output file");
         return DB_FAILURE;
     }
 
     if (pipe(in) != 0)
+    {
+        Close(cmd_out);
         return DB_FAILURE;
+    }
     if (pipe(out) != 0)
     {
         (void)__wrap_close(in[0]); (void)__wrap_close(in[1]);
+        Close(cmd_out);
         return DB_FAILURE;
     }
     if (pipe(err) != 0)
     {
         (void)__wrap_close(in[0]);  (void)__wrap_close(in[1]);
         (void)__wrap_close(out[0]); (void)__wrap_close(out[1]);
+        Close(cmd_out);
         return DB_FAILURE;
     }
 
@@ -1369,17 +1377,46 @@ int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
     PIPE_PAIR(in[1])->sink = 1;         /* the command's stdin is NIL: */
 
     /*
-     * The redirection is written into the command line rather than passed as
-     * SYS_Input/SYS_Output, because the Shell then opens and closes the file
-     * itself -- so it is flushed and complete before System() returns.  A
-     * handle passed in through the tags is closed by System() on some paths and
-     * by the caller on others, and "on some paths" is not good enough for the
-     * file the answer is in.
+     * SYS_Input and SYS_Output rather than "<NIL: >file" appended to the
+     * command line, for two reasons that both cost a run to find.
+     *
+     * The Shell's OWN messages go to its Output(), and a redirection in the
+     * command line does not apply to them -- it applies to the command.  So
+     * `NoSuchCommand` printed "Unknown command" onto the SERVER's stderr and
+     * the client got an empty transfer with a return code of 10 and no idea
+     * why.  With the handle passed in, the Shell's Output() IS the file and
+     * everything lands in it.
+     *
+     * And the command line stays the user's: a command containing its own
+     * redirection is not fighting one somebody appended to it.
+     *
+     * Handing over a handle is safe here because dos.library says so, in
+     * System()'s own autodoc: "The input and output filehandles will not be
+     * closed by System, you must close them (if needed) after System returns".
+     * Only SYS_Asynch takes ownership.  Closing cmd_out below is therefore
+     * both required and what flushes the file before it is read back.
+     *
+     * SYS_Input is omitted rather than passed as 0 when NIL: cannot be opened;
+     * the tag's presence is what dos reads, so a zero would be a broken
+     * handle rather than "use the default".
      */
-    snprintf(line, sizeof(line), "%s <NIL: >%s", exec_cmd, outname);
+    cmd_in = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+
+    nt = 0;
+    cmd_tags[nt].ti_Tag = SYS_Output;   cmd_tags[nt++].ti_Data = (ULONG)cmd_out;
+    if (cmd_in != (BPTR)0)
+    {
+        cmd_tags[nt].ti_Tag = SYS_Input; cmd_tags[nt++].ti_Data = (ULONG)cmd_in;
+    }
+    cmd_tags[nt].ti_Tag = NP_StackSize; cmd_tags[nt++].ti_Data = DB_CMD_STACK;
+    cmd_tags[nt].ti_Tag = TAG_END;      cmd_tags[nt].ti_Data   = 0;
 
     dropbear_log(DB_LOG_INFO, "amiga: running '%s'", exec_cmd);
-    rc = SystemTagList((CONST_STRPTR)line, cmd_tags);
+    rc = SystemTagList((CONST_STRPTR)exec_cmd, cmd_tags);
+
+    Close(cmd_out);
+    if (cmd_in != (BPTR)0)
+        Close(cmd_in);
 
     if (rc == -1)
     {
