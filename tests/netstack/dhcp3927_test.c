@@ -261,7 +261,35 @@ ULONG   i;
             break;
         Delay(1UL);
     }
-    Delay(10UL);                        /* 200 ms to settle */
+
+    /*
+     * Then wait for the DHCP client itself, and SPIN rather than Delay() to
+     * do it.
+     *
+     * This used to be a flat Delay(10) -- 200 ms to settle -- which worked
+     * only because the client sat out RFC 2131's desynchronisation second
+     * before its first DISCOVER, so nothing was going to be sent during the
+     * grace period anyway.  It is not free now: the DISCOVER goes out one
+     * ThreadX tick after nx_dhcp_start() returns (see
+     * ami_ns_dhcp_discover_now() in src/netstack/netstack.c), and a settling
+     * delay of any length hands DHCP the lease that phase A exists to deny
+     * it, leaving the whole mode testing nothing.
+     *
+     * So the sequence point moves from the clock to the client: the state
+     * leaves IDLE when nx_dhcp_start() runs, one tick before the DISCOVER,
+     * and by then the readers have had the whole of NX_IP initialisation to
+     * come up.  Twenty milliseconds is too little to poll for with Delay(),
+     * whose floor is a tick, hence the spin -- bounded, and yielding once in
+     * a while so that a client which never starts ends the loop rather than
+     * the run.
+     */
+    for (i = 0; i < 200000UL; i++)
+    {
+        if (netstack_interface_dhcp_state(0) != AMI_DHCP_IDLE)
+            break;
+        if ((i % 20000UL) == 19999UL)
+            Delay(1UL);
+    }
 
     for (i = 0; i < (T_KILL_SECONDS * 25UL); i++)
     {

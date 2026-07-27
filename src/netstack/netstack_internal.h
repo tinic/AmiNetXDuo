@@ -116,8 +116,15 @@
  */
 #define AMI_AUTOIP_TIMEOUT_TICKS    (15UL * (ULONG)NX_IP_PERIODIC_RATE)
 
-/* Granularity of the "has anything got an address yet?" poll. */
-#define AMI_ADDRESS_POLL_TICKS      ((ULONG)NX_IP_PERIODIC_RATE / 10UL)
+/*
+ * Granularity of the "has anything got an address yet?" poll, and therefore
+ * how much of a DHCP lease's arrival is spent asleep after it has arrived.
+ * A tenth of a second was 67 ms of a 980 ms AddNetInterface once the client's
+ * startup delay had gone; one tick is the floor, and the poll it repeats is
+ * two loads and a compare per interface, so a full thirty-second wait for a
+ * server that never answers costs 1,500 of them.
+ */
+#define AMI_ADDRESS_POLL_TICKS      1UL
 
 /* --------------------------------------------------------------- the state */
 

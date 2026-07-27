@@ -920,6 +920,38 @@ static BOOL ami_ns_wait_for_address(AmiNetStack *ns, ULONG timeout_ticks)
     }
 }
 
+/*
+ * Send the first DISCOVER now rather than a second from now.
+ *
+ * RFC 2131 4.4.1 asks a client to wait a random one to ten seconds before its
+ * first DHCPDISCOVER, so that a room of machines coming back together after a
+ * power cut does not answer as one. NetX Duo takes the bottom of that range,
+ * writes NX_IP_PERIODIC_RATE into the interface record's timeout, and leaves
+ * the client's own one-second timer to expire before anything is sent. It is
+ * therefore a flat second of nothing happening on every boot, and it was the
+ * largest single item in AddNetInterface: 1,201 ms of DHCP in a 1,980 ms
+ * command, of which 1,000 ms was this wait and ~200 ms the four packets.
+ *
+ * The herd this defends against is a hundred diskless workstations on one
+ * power circuit. An Amiga is switched on by hand, one at a time, and the
+ * comparison stacks on this wire do not wait either.
+ *
+ * The timer is what gates the first send, so re-arming it to expire on the
+ * next tick is the whole change: the expiry that follows finds the same
+ * NX_IP_PERIODIC_RATE timeout already at or below one interval and runs the
+ * INIT case exactly as it would have a second later. Every interval after it
+ * -- the retransmission backoff, the `secs` field the INIT case zeroes, the
+ * renewal times -- is left as NetX Duo set it, because the reschedule period
+ * handed back here is the one it created the timer with.
+ */
+static VOID ami_ns_dhcp_discover_now(NX_DHCP *dhcp)
+{
+    (VOID)tx_timer_deactivate(&dhcp->nx_dhcp_timer);
+    (VOID)tx_timer_change(&dhcp->nx_dhcp_timer, 1UL,
+                          (ULONG)NX_DHCP_TIME_INTERVAL);
+    (VOID)tx_timer_activate(&dhcp->nx_dhcp_timer);
+}
+
 static LONG ami_ns_configure_addresses(AmiNetStack *ns)
 {
     UINT  status;
@@ -994,6 +1026,7 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
             else
             {
                 ns->ns_DhcpStarted = TRUE;
+                ami_ns_dhcp_discover_now(&ns->ns_Dhcp);
                 AMI_INFO("netstack: DHCP started, waiting up to %lu ticks",
                          (unsigned long)AMI_DHCP_TIMEOUT_TICKS);
             }
@@ -1718,6 +1751,12 @@ LONG netstack_interface_dhcp_start(UWORD index, ULONG requested_address)
                                                   requested_address, 0);
 
     status = nx_dhcp_interface_start(&ns->ns_Dhcp, (UINT)index);
+
+    /* Same reason as at startup: an interface brought up by hand has no more
+       reason to sit out RFC 2131's desynchronisation second than one brought
+       up at boot. */
+    if (status == NX_SUCCESS)
+        ami_ns_dhcp_discover_now(&ns->ns_Dhcp);
 
     ami_netstack_leave(&caller);
 
