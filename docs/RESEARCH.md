@@ -13670,6 +13670,281 @@ once per base and resumed, rather than created per call, and it is still never
 | `src/bsdsocket/select.c` | the invariant, at `bsd_wait_option()` |
 | `src/bsdsocket/transfer.c`, `raw.c` | the status carried to the decision |
 
+## 42. The task that would not wake was a stale register, and the tick stall is not it (2026-07-26)
+
+§41.4 left a task that wedges on the second or third `connect()` and §39.7 left
+a tick that stalls for three quarters of a second, and the brief for this
+section was to treat them as one bug until there was evidence they are two.
+They are two. One is found and fixed; the other did not reproduce at all.
+
+**Headline: the wedge is not in the library and never was. The LVO stubs in
+`tests/leak/refused_leak_test.c` do not tell GCC that an AmigaOS library call
+clobbers `d1`/`a0`/`a1`, so `IoctlSocket(FIONBIO)` was handed a stale request
+code, `ASF_NONBLOCK` was never set, and the "non-blocking" dial was a BLOCKING
+`connect()` to a listen request with no socket parked on it — which, as that
+file's own header says, never returns. The same defect is in 117 inline-asm
+blocks across 20 files of this tree, including the shipped tools. All of them
+are fixed here. The tick stall is a different mechanism, is not caused by
+this, and could not be reproduced in eleven runs across five workloads.**
+
+### 42.1 Reproducing it, and finding out where the task actually was
+
+Arm G, built with `-DLEAK_BURST_ARM=ON -DLEAK_BURST_DELAY=OFF`, wedges on the
+first attempt and on every attempt after it. That much §41.4 already had.
+
+What it did not have is *where*. "The application task is stuck" has two
+completely different causes — the port failed to wake it, or something inside
+NetX Duo suspended it and never resumed it — and nothing in the tree could tell
+them apart. So the port learned to say:
+
+```c
+/* tx_thread_system_return.c, inside TX_AMIGA_TRACE */
+if (thread_ptr -> tx_thread_state == ((UINT) TX_TCP_IP))
+    TXTRACE("TXT nxsusp thr=%08lx sock=%08lx cleanup=%08lx timeout=%08lx here=%08lx", ...);
+```
+
+`TX_TCP_IP` is NetX Duo suspending its own caller. `tx_thread_suspend_cleanup`
+names the service it is parked in, `tx_thread_suspend_control_block` names the
+socket, and `tx_timer_internal_remaining_ticks` says whether anything will ever
+end the wait. `here` is the address of a function whose offset `nm` knows, so
+the cleanup pointer can be resolved to a symbol without a debugger.
+
+Four lines, and the run ends on the fourth:
+
+```
+TXT nxsusp cb=002FA324 cl=0025F18C tmo=FFFFFFFF tl=00000000 ref=00267448
+TXT nxsusp cb=002FA524 cl=0025F18C tmo=FFFFFFFF tl=00000000 ref=00267448
+TXT nxsusp cb=002FA724 cl=0025F18C tmo=FFFFFFFF tl=00000000 ref=00267448
+TXT nxsusp cb=002FA924 cl=0025F18C tmo=FFFFFFFF tl=00000000 ref=00267448
+```
+
+`0x25F18C - 0x267448 = -0x82BC`, and `_tx_thread_system_return` is at `0x427C0`
+in the library, so the cleanup routine is at `0x3A504` — which `nm` gives as
+**`_nx_tcp_connect_cleanup`, offset zero**. `tmo=FFFFFFFF` is `TX_WAIT_FOREVER`
+and `tl=0` says no timer was ever armed.
+
+So the task is not unwoken. It is suspended inside
+`nxd_tcp_client_socket_connect()`, on a wait with no end, and NetX Duo is right
+to leave it there: the SYN it sent is sitting in a listen queue with no socket
+to give it to, and nothing is ever coming back. §41's own header says exactly
+this about a blocking connect to that port.
+
+Four such suspensions and only four: the deliberate "spend the first dial"
+`connect()` before arm G, which is blocking on purpose, and arm G's three
+dials — **which are supposed to be non-blocking.** The library did what it was
+told. The question is why it was told that.
+
+### 42.2 `IoctlSocket()` was called with a request code the library had just overwritten
+
+`bsd_wait_option()` returns `NX_NO_WAIT` when `ASF_NONBLOCK` is set, and
+`ASF_NONBLOCK` is set by `IoctlSocket(FIONBIO)` and by nothing else. Arm G calls
+it on every socket it opens. Here is what the compiler emitted for it:
+
+```
+bbe:  movel #0x8004667E,d1        ; FIONBIO, for the LISTENER
+bc4:  jsr   a6@(-114)             ; IoctlSocket(listener, FIONBIO, &on)
+bd2:  movel d1,sp@(44)            ; *** spill d1, believing it still holds FIONBIO ***
+bd8:  jsr   a6@(-30)              ; socket()
+be6:  movel sp@(44),d1            ; reload... whatever the library left in d1
+bee:  jsr   a6@(-114)             ; IoctlSocket(c[0], <garbage>, &on)
+c1e:  jsr   a6@(-54)              ; connect(c[0]) -- blocking, because the ioctl failed
+```
+
+The stub is the ordinary hand-vectored one this tree uses in twenty files:
+
+```c
+register ULONG d1 __asm("d1") = req;
+__asm __volatile ("jsr a6@(-114:W)"
+                  : "=r" (res)
+                  : "r" (a6), "r" (d0), "r" (d1), "r" (a0)
+                  : "a1", "cc", "memory");
+```
+
+`d1` and `a0` are *inputs*. An operand that is only an input is one GCC may
+assume the asm leaves alone — and an AmigaOS library call clobbers `d0`, `d1`,
+`a0` and `a1`, always has, and the NDK's own `LP*` macros in
+`inline/macros.h` say so by declaring dummy `_d1`/`_a0`/`_a1` variables and
+listing them as *outputs*. Ours did not. So GCC kept a six-byte immediate
+"live" in `d1` across a call that destroys it, spilled the destroyed value, and
+reloaded it for the next three calls.
+
+`bsd_IoctlSocket()` took the garbage request, fell through its `switch` to
+`default`, returned `EINVAL`, and the test — which ignores the return value, as
+BSD code does for `FIONBIO` — carried on with a blocking socket.
+
+The fix is the NDK's:
+
+```c
+register LONG _clob_d1 __asm("d1");
+__asm __volatile ("jsr a6@(-114:W)"
+                  : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
+                  : "r" (a6), "r" (d0), "r" (d1), "r" (a0)
+                  : "a1", "cc", "memory");
+```
+
+After it, the constant is rematerialised before each of the four calls and the
+spill is gone.
+
+### 42.3 Both of §41.4's clues, explained by the same spill
+
+§41.4 recorded two things that looked like scheduling and were not.
+
+**`Delay(1)` does not help — correct, and now with a reason.** Compiling the
+unfixed source *with* the `Delay(1)` in place gives:
+
+```
+bba:  movel #0x8004667E,d1
+bc4:  jsr   a6@(-114)      ; listener
+bd8:  jsr   a6@(-30)       ; socket()
+be8:  jsr   a6@(-114)      ; ioctl -- still no reload
+c18:  jsr   a6@(-54)       ; connect
+c24:  jsr   a6@(-198)      ; Delay(1)
+c30:  jsr   a6@(-30)       ; socket()
+c40:  jsr   a6@(-114)      ; ioctl -- still no reload
+```
+
+`Delay()` *is* an honest inline — the LP macros declare `d1` written — so GCC
+knows `d1` dies there. It does not matter: the stale value was spilled to the
+stack before the loop was ever entered, and every iteration reloads the spill.
+A delay cannot repair a value that is already wrong.
+
+**Console I/O does help — also correct.** `VPrintf()`/`Flush()` are ordinary C
+calls, so the value cannot live in a register across them and the extra
+pressure makes rematerialising a six-byte immediate cheaper than keeping a
+stack slot alive for it. The constant gets reloaded, the ioctl works, the dial
+is non-blocking, and 24 of 24 pass. That is why the one thing that looked most
+like a scheduling clue — "another Exec interaction fixes it, a delay does not"
+— was a register allocator all along.
+
+And it explains the rest of §41.4 without any of it being about the library:
+it reproduces on the library before §41's changes (the defect is in the test),
+it is 3 of 3 (a miscompile is deterministic), and the stack survives (nothing
+was ever wrong with the stack).
+
+### 42.4 The same defect in 117 places, and where it is not
+
+A scan of every `jsr a6@` block outside `third_party/` found 117 in 20 files
+where `d1`, `a0` or `a1` is passed in and not declared written. Two files were
+already correct and are untouched: `tests/ipv6/ipv6_socket_test.c`, which has a
+`BSD_SCRATCH` macro that does exactly the right thing, and
+`include/aminetxduo/tlslib.h`, which uses `"+r"`. Everything else is fixed
+here, including `src/tools/toolsock.c` — the one every shipped Shell command
+calls the stack through.
+
+**Whether any of the other 117 miscompiles today is not established.** GCC
+emitted a bad sequence for arm G because a six-byte immediate was worth keeping
+in a register across a call; most of the others pass values it would reload
+anyway. They are fixed because the contract was wrong, not because each one was
+measured, and that distinction is the whole reason this paragraph exists.
+
+**Clients are not affected.** curl and Dropbear reach the stack through the
+NDK's `inline/bsdsocket.h`, whose `send()` — to take the one §40.9 complains
+about — declares `register int _d1 __asm("d1")` and lists it as an output. So
+the `send()` returning `EINVAL` on an established loopback socket in §40.9,
+§37 and §34.6 is **not** this bug, and this section makes no claim about it.
+
+### 42.5 Arm G, run
+
+With the stubs fixed, arm G runs to completion with the dials back to back and
+no delay at all:
+
+```
+-- arm G
+G accept burst: 0/24 accepts failed, last errno 0
+...
+refused_leak: clean
+==> exit status 0 after 92s of host wall clock
+```
+
+Eight rounds, three dials before each set of three `accept()`s, 24 accepts, no
+failures — which is also the first time §37.4's accept path has actually been
+exercised by this arm, and it does not reproduce there. Verified in both
+shapes, `-DLEAK_BURST_DELAY=ON` and `OFF`, against a library built without any
+of the tracing. **Arm G is now built by default**; the reason it was not is
+gone.
+
+### 42.6 The tick stall: not reproduced, and not this
+
+§39.7's `tick: stalled 743 ms, dropping 29 of 37 ticks (cap 8)` was the other
+half of the brief. It did not happen once here.
+
+| workload | runs | guest time | stalls |
+|---|---:|---:|---:|
+| `tests/leak/run-leak.sh`, all seven arms | 8 | ~11 min | 0 |
+| `tests/perf/bracket_test` (RAM driver, no device) | 1 | 14 s | 0 |
+| the same, under ten host CPU hogs on eight cores | 1 | 14 s | 0 |
+| `tests/compare/run-tickprobe.sh -s ours` | 1 | ~3 min | 0 |
+| `tests/compare/run-compare.sh -s ours -w bench` | 2 | ~6 min | 0 |
+| three emulators at once, plus a full `tools/ci.sh` | (above) | — | 0 |
+
+Every recorded instance in `build/serial-*.log` — 13 files out of 763 — falls
+in two windows: 2026-07-25 22:52–2026-07-26 01:59, and 2026-07-26 13:39–16:28.
+Both are windows in which this machine was shared, the second of them with the
+orphaned emulator that had been running for 219 minutes before it was reaped.
+Nothing after that reaping has stalled. That is a correlation and not a cause,
+and it is offered as one.
+
+Two things are worth writing down about the shape of it, because the next
+person to see it should not have to rediscover them:
+
+* **The values are bimodal and tight**: 403–426 ms (12–13 ticks dropped) and
+  732–761 ms (28–30). Two clusters, not a spread.
+* **Host CPU starvation is not sufficient.** Ten spinners on eight cores, and
+  three emulators plus a four-configuration cross build running together,
+  produced none. That is consistent with what the port measures: the tick reads
+  `ReadEClock()`, which in the emulator advances with emulated cycles, so an
+  emulator that is merely *slow* produces no gap at all. Whatever this is, it
+  is 740 ms of **emulated** time in which a priority-20 Exec Task was not
+  dispatched.
+
+So the instrument was improved instead of the guess:
+
+```
+tick: stalled 745 ms, dropping 29 of 37 ticks (cap 8, previous service 412 us)
+```
+
+The previous wakeup's service cost is the discriminator the message was
+missing. A stall with a service figure close to it is the tick task overrunning
+its own period — too much work under the core lock — and is ours to fix. A
+stall with a service figure in the ordinary hundreds of microseconds (355 µs
+average over 4,354 wakeups, measured here) means the tick was simply not
+dispatched, and the repair is somewhere else entirely. One number, and it
+halves the search.
+
+**Are the two symptoms the same bug? No.** The wedge is a compile-time defect
+in a test program's calling convention, with no dependence on time, and it
+reproduced 5 times out of 5 in runs that logged not a single stall. The stall
+appears in runs that never wedged. They share the word "scheduling" and nothing
+else.
+
+### 42.7 The three commits of that morning, audited and cleared
+
+`97dcf6b` skips `_tx_amiga_wake_scheduler()` when `_tx_thread_execute_ptr ==
+TX_NULL`, which is exactly the shape of "a task that fails to wake", so it was
+the first thing to look at. It is not implicated, on two grounds: the wedged
+task was never waiting for a dispatch — it was on a NetX Duo suspension list
+with `TX_WAIT_FOREVER` — and the tick task pokes the scheduler unconditionally
+on every wakeup that delivers a tick (`tx_initialize_low_level.c`), so the
+worst a lost poke could cost is 20 ms rather than forever. It was not reverted
+and did not need to be.
+
+`df924b5`'s change of behaviour — a `SocketBase` used from a task other than
+its opener now answers `ENETDOWN` — is not involved either: arm G is one task
+throughout, and `ami_netstack_enter_cached()` took the resume path on every one
+of its calls.
+
+### 42.8 What is in the tree
+
+| | |
+|---|---|
+| `src/tools/`, `src/tlslib/`, `tests/` (18 files) | `d1`/`a0`/`a1` declared written in every `jsr a6@` stub |
+| `tests/leak/refused_leak_test.c` | the stubs, and arm G's comment rewritten to say what actually happened |
+| `tests/leak/CMakeLists.txt` | `LEAK_BURST_ARM` now ON, `LEAK_BURST_DELAY` for the back-to-back shape |
+| `port/threadx-amiga/src/tx_thread_system_return.c` | the `TX_TCP_IP` suspension trace, behind `TX_AMIGA_TRACE` |
+| `port/threadx-amiga/src/tx_initialize_low_level.c` | the previous wakeup's service cost in the stall warning |
+
+`tools/ci.sh host cross conformance` is green.
+
 ## 43. The accept() that suspended on a finished connection, fixed upstream (2026-07-26)
 
 §32.10 diagnosed a blocking `accept()` that never returned, named the two
