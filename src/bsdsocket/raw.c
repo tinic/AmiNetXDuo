@@ -371,16 +371,27 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
 
 /* ---------------------------------------------------------------- receive -- */
 
-NX_PACKET *bsd_raw_receive(AmiSocket *sock, ULONG wait)
+NX_PACKET *bsd_raw_receive(AmiSocket *sock, ULONG wait, UINT *why)
 {
     NX_IP *ip = netstack_ip();
 
+    /* NX_NO_PACKET is the "nothing queued" answer, so a caller that forgets
+       to look still gets the old behaviour rather than a stale status. */
+    if (why != NULL)
+        *why = NX_NO_PACKET;
+
     if (ip == NULL)
+    {
+        if (why != NULL)
+            *why = NX_NOT_ENABLED;
+
         return NX_NULL;
+    }
 
     for (;;)
     {
         NX_PACKET *packet;
+        UINT       status;
 
         tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
 
@@ -416,8 +427,20 @@ NX_PACKET *bsd_raw_receive(AmiSocket *sock, ULONG wait)
             return NX_NULL;
 
         /* Outside the mutex, or the IP thread could never queue anything. */
-        if (tx_semaphore_get(&sock->as_RawSem, wait) != TX_SUCCESS)
+        status = tx_semaphore_get(&sock->as_RawSem, wait);
+        if (status != TX_SUCCESS)
+        {
+            /*
+             * TX_WAIT_ABORTED is a signalled thread and must not come back as
+             * "try again" -- the caller cannot tell the difference otherwise,
+             * which is docs/RESEARCH.md 37.2's third site.
+             */
+            if (why != NULL)
+                *why = (status == TX_WAIT_ABORTED) ? NX_WAIT_ABORTED
+                                                   : NX_NO_PACKET;
+
             return NX_NULL;
+        }
     }
 }
 

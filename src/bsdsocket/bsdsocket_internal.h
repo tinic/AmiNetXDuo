@@ -528,6 +528,8 @@ APTR  bsd_lib_reserved(VOID);
 VOID  bsd_set_errno(struct AmiSocketBase *base, LONG code);
 VOID  bsd_set_herrno(struct AmiSocketBase *base, LONG code);
 LONG  bsd_errno_from_nx(UINT status);
+/* The same, for a status from a call that was given `wait` -- see errno.c. */
+LONG  bsd_wait_errno(ULONG wait, UINT status);
 LONG  bsd_fail(struct AmiSocketBase *base, LONG code);   /* set errno, ret -1 */
 
 /* socket.c -- descriptor table */
@@ -643,7 +645,7 @@ LONG       bsd_raw_open(struct AmiSocketBase *base, AmiSocket *sock);
 VOID       bsd_raw_close(AmiSocket *sock);
 LONG       bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
                                NX_PACKET *packet, const NXD_ADDRESS *addr);
-NX_PACKET *bsd_raw_receive(AmiSocket *sock, ULONG wait);
+NX_PACKET *bsd_raw_receive(AmiSocket *sock, ULONG wait, UINT *why);
 VOID       bsd_raw_source(NX_PACKET *packet, NXD_ADDRESS *addr);
 ULONG      bsd_raw_available(AmiSocket *sock);
 

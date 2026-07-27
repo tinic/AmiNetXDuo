@@ -187,7 +187,8 @@ static VOID bsd_drop_pending(AmiSocket *sock)
  * iovec boundaries. Returns the number appended, or -1 on failure.
  */
 static LONG bsd_packet_append_iov(NX_PACKET *packet, BsdIovCursor *cur,
-                                  ULONG want, NX_PACKET_POOL *pool, ULONG wait)
+                                  ULONG want, NX_PACKET_POOL *pool, ULONG wait,
+                                  UINT *why)
 {
     ULONG done = 0;
 
@@ -205,7 +206,14 @@ static LONG bsd_packet_append_iov(NX_PACKET *packet, BsdIovCursor *cur,
 
         status = nx_packet_data_append(packet, src, chunk, pool, wait);
         if (status != NX_SUCCESS)
+        {
+            /* The caller decides what an append failure means, and cannot
+               without knowing which one it was. */
+            if (why != NULL)
+                *why = status;
+
             return (done > 0) ? (LONG)done : -1;
+        }
 
         bsd_iov_advance(cur, chunk);
         done += chunk;
@@ -223,6 +231,16 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
     ULONG           mss  = 0;
     LONG            sent = 0;
     ULONG           wait;
+    /*
+     * WHY THE LOOP STOPPED, and the whole reason this variable exists.
+     *
+     * Every first-iteration failure below breaks out and lands on the "sent
+     * == 0" test at the bottom, which used to answer EWOULDBLOCK whatever had
+     * happened -- so a signalled thread (NX_WAIT_ABORTED, EINTR) and a stack
+     * being torn down (NX_POOL_DELETED, ENOBUFS) both came back as EAGAIN on
+     * a socket that was blocking. docs/RESEARCH.md 37.2.
+     */
+    UINT            why  = NX_NO_PACKET;
 
     (VOID)flags;
 
@@ -253,9 +271,12 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
 
         status = nx_packet_allocate(pool, &packet, NX_TCP_PACKET, wait);
         if (status != NX_SUCCESS)
+        {
+            why = status;
             break;
+        }
 
-        filled = bsd_packet_append_iov(packet, cur, chunk, pool, wait);
+        filled = bsd_packet_append_iov(packet, cur, chunk, pool, wait, &why);
         if (filled <= 0)
         {
             nx_packet_release(packet);
@@ -270,18 +291,13 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
             if (sent > 0)
                 return sent;            /* short write, as BSD allows */
 
-            if (status == NX_WAIT_ABORTED)
-                return bsd_fail(base, AMI_EINTR);
-            if (status == NX_NO_PACKET || status == NX_TX_QUEUE_DEPTH ||
-                status == NX_WINDOW_OVERFLOW)
-                return bsd_fail(base, AMI_EWOULDBLOCK);
             if (status == NX_NOT_CONNECTED)
             {
                 sock->as_Flags &= ~ASF_CONNECTED;
                 return bsd_fail(base, AMI_EPIPE);
             }
 
-            return bsd_fail(base, bsd_errno_from_nx(status));
+            return bsd_fail(base, bsd_wait_errno(wait, status));
         }
 
         sent += filled;
@@ -292,7 +308,7 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
     }
 
     if (sent == 0 && len > 0)
-        return bsd_fail(base, AMI_EWOULDBLOCK);
+        return bsd_fail(base, bsd_wait_errno(wait, why));
 
     return sent;
 }
@@ -329,12 +345,12 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
 
     status = nx_packet_allocate(pool, &packet, NX_UDP_PACKET, wait);
     if (status != NX_SUCCESS)
-        return bsd_fail(base, (status == NX_NO_PACKET) ? AMI_EWOULDBLOCK
-                                                       : bsd_errno_from_nx(status));
+        return bsd_fail(base, bsd_wait_errno(wait, status));
 
     /* A zero-length datagram is legal and is sent as an empty packet. */
     filled = (len > 0)
-                 ? bsd_packet_append_iov(packet, cur, (ULONG)len, pool, wait)
+                 ? bsd_packet_append_iov(packet, cur, (ULONG)len, pool, wait,
+                                         NULL)
                  : 0;
     if (filled < len)
     {
@@ -382,12 +398,11 @@ static LONG bsd_send_raw(struct AmiSocketBase *base, AmiSocket *sock,
 
     status = nx_packet_allocate(pool, &packet, NX_IP_PACKET, wait);
     if (status != NX_SUCCESS)
-        return bsd_fail(base, (status == NX_NO_PACKET)
-                                  ? AMI_EWOULDBLOCK
-                                  : bsd_errno_from_nx(status));
+        return bsd_fail(base, bsd_wait_errno(wait, status));
 
     filled = (len > 0)
-                 ? bsd_packet_append_iov(packet, cur, (ULONG)len, pool, wait)
+                 ? bsd_packet_append_iov(packet, cur, (ULONG)len, pool, wait,
+                                         NULL)
                  : 0;
     if (filled < len)
     {
@@ -446,12 +461,6 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                 if (copied > 0)
                     break;                      /* return what we have */
 
-                if (status == NX_WAIT_ABORTED)
-                    return bsd_fail(base, AMI_EINTR);
-
-                if (status == NX_NO_PACKET)
-                    return bsd_fail(base, AMI_EWOULDBLOCK);
-
                 if (status == NX_NOT_CONNECTED)
                 {
                     /*
@@ -467,7 +476,10 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                     return bsd_fail(base, AMI_ENOTCONN);
                 }
 
-                return bsd_fail(base, bsd_errno_from_nx(status));
+                /* `now`, not `wait`: only the first read of a call is allowed
+                   to block, so a later one that came up empty really is a
+                   caller that asked not to wait. */
+                return bsd_fail(base, bsd_wait_errno(now, status));
             }
         }
 
@@ -544,17 +556,11 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
     }
     else
     {
-        status = nx_udp_socket_receive(&sock->as_Nx.udp, &packet,
-                                       bsd_wait_option(sock, sock->as_RcvTimeout));
-        if (status != NX_SUCCESS)
-        {
-            if (status == NX_WAIT_ABORTED)
-                return bsd_fail(base, AMI_EINTR);
-            if (status == NX_NO_PACKET)
-                return bsd_fail(base, AMI_EWOULDBLOCK);
+        ULONG wait = bsd_wait_option(sock, sock->as_RcvTimeout);
 
-            return bsd_fail(base, bsd_errno_from_nx(status));
-        }
+        status = nx_udp_socket_receive(&sock->as_Nx.udp, &packet, wait);
+        if (status != NX_SUCCESS)
+            return bsd_fail(base, bsd_wait_errno(wait, status));
     }
 
     /* nxd_, not nx_: nx_udp_source_extract() reports 0.0.0.0 for a datagram
@@ -635,10 +641,12 @@ static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
     }
     else
     {
-        packet = bsd_raw_receive(sock, bsd_wait_option(sock,
-                                                       sock->as_RcvTimeout));
+        ULONG wait = bsd_wait_option(sock, sock->as_RcvTimeout);
+        UINT  why  = NX_NO_PACKET;
+
+        packet = bsd_raw_receive(sock, wait, &why);
         if (packet == NX_NULL)
-            return bsd_fail(base, AMI_EWOULDBLOCK);
+            return bsd_fail(base, bsd_wait_errno(wait, why));
     }
 
     bsd_raw_source(packet, &src);

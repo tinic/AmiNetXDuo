@@ -225,6 +225,45 @@ VOID bsd_events_attach(AmiSocket *sock)
 
 /* ----------------------------------------------------------- readiness ---- */
 
+/*
+ * How long a NetX Duo call may wait, and THE INVARIANT THAT MAKES THE ERRNO
+ * MAPPINGS SAFE.
+ *
+ * NX_WAIT_FOREVER here is what keeps ten unconditional
+ * NX_NO_PACKET -> EWOULDBLOCK mappings honest, because with a NON-ZERO wait
+ * option NetX Duo has no path that RETURNS NX_NO_PACKET -- it suspends:
+ *
+ *   nx_tcp_socket_receive.c:231       suspends; NX_NO_PACKET at :263 is the else
+ *   nx_tcp_socket_send_internal.c:1006  suspends; NX_WINDOW_OVERFLOW (:1086)
+ *                                     and NX_TX_QUEUE_DEPTH (:1098) are the else
+ *   nx_packet_allocate.c:178          suspends on `if (wait_option)`;
+ *                                     NX_NO_PACKET at :268 is the else
+ *
+ * Every one of those returns therefore needs either wait_option == 0 -- a
+ * non-blocking socket, where EWOULDBLOCK is exactly right -- or the calling
+ * thread to BE ip->nx_ip_thread. And it never is:
+ *
+ *   NO bsdsocket.library VECTOR IS EVER ENTERED ON THE NETX DUO IP THREAD.
+ *
+ * bsd_nx_enter() (netx_call.c) brackets every vector with
+ * ami_netstack_enter_cached(), which gives the calling Exec task a TX_THREAD
+ * of its own -- built once per base and resumed thereafter, but never
+ * ip->nx_ip_thread. What DOES run on the IP thread is the callback set and
+ * nothing else: the five notify hooks above, bsd_listen_callback,
+ * bsd_tcp_disconnect_callback, bsd_tcp_urgent_notify (oob.c), bsd_oob_ip_filter
+ * and bsd_raw_filter (raw.c). Not one of them enters a vector and not one can
+ * suspend.
+ *
+ * Break that and a blocking recv() starts answering EAGAIN, which is the
+ * defect English Amiga Board thread 122501 reports against AmiTCP and
+ * Roadshow (docs/RESEARCH.md 37.1). WORSE AT nx_packet_allocate.c:178, WHICH
+ * HAS NO IP-THREAD GUARD AT ALL: a vector called from the IP thread suspends
+ * the IP thread on the pool it is the only one who can refill, and the stack
+ * stops rather than merely misreporting an errno.
+ *
+ * bsd_wait_errno() (errno.c) is the mapping that asks instead of assuming, and
+ * is what a new call site should use.
+ */
 ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks)
 {
     if ((sock->as_Flags & ASF_NONBLOCK) != 0)

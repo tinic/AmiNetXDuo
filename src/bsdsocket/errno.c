@@ -60,6 +60,15 @@ typedef struct
 static const BsdStatusMap bsd_status_map[] =
 {
     { NX_SUCCESS,           0                    },
+    /*
+     * NX_NO_PACKET is "nothing to read" AND "the packet pool is empty", and
+     * EWOULDBLOCK is only right for the first. It is safe here because no
+     * caller can reach the second on a socket that was willing to wait --
+     * bsd_wait_option() (select.c) is where that argument lives, and it is
+     * where to look before adding a call site that does not go through it.
+     * bsd_wait_errno() below is the version that asks the socket rather than
+     * relying on the invariant, and is what new code should use.
+     */
     { NX_NO_PACKET,         AMI_EWOULDBLOCK      },
     { NX_UNDERFLOW,         AMI_EINVAL           },
     { NX_OVERFLOW,          AMI_EMSGSIZE         },
@@ -123,6 +132,52 @@ LONG bsd_errno_from_nx(UINT status)
     }
 
     return AMI_EIO;
+}
+
+/*
+ * The same, for a status that came back from a call that was willing to wait.
+ *
+ * Three of NetX Duo's statuses mean "I would have had to wait" -- NX_NO_PACKET
+ * (no data, or no packet in the pool), NX_TX_QUEUE_DEPTH and
+ * NX_WINDOW_OVERFLOW -- and EWOULDBLOCK is the right answer to all three ONLY
+ * for a caller that asked not to wait. On a socket that was prepared to block
+ * for ever, EAGAIN is a lie: it tells the application to retry a call that
+ * cannot succeed, which is precisely the failure English Amiga Board thread
+ * 122501 reports against AmiTCP and Roadshow (docs/RESEARCH.md 37).
+ *
+ * ENOBUFS is the honest answer there, and it is reachable: the pool is a fixed
+ * 16..256 packets and docs/RESEARCH.md 37.5 measured it at 1 free of 256 for
+ * 316 consecutive seconds.
+ *
+ * NX_WAIT_ABORTED and NX_POOL_DELETED are here because a caller that maps
+ * status through the table alone turns both into something they are not --
+ * they are a signalled thread and a stack shutting down, not "try again".
+ *
+ * `wait` is the value the call was given, straight from bsd_wait_option() --
+ * not the socket -- because that is the only thing that actually decides it:
+ * NX_NO_WAIT and an expired SO_RCVTIMEO/SO_SNDTIMEO both mean the caller
+ * asked for a bounded wait and EWOULDBLOCK is what BSD returns for either.
+ */
+LONG bsd_wait_errno(ULONG wait, UINT status)
+{
+    BOOL impatient = (wait != NX_WAIT_FOREVER);
+
+    switch (status)
+    {
+        case NX_WAIT_ABORTED:
+            return AMI_EINTR;
+
+        case NX_POOL_DELETED:
+            return AMI_ENOBUFS;
+
+        case NX_NO_PACKET:
+        case NX_TX_QUEUE_DEPTH:
+        case NX_WINDOW_OVERFLOW:
+            return impatient ? AMI_EWOULDBLOCK : AMI_ENOBUFS;
+
+        default:
+            return bsd_errno_from_nx(status);
+    }
 }
 
 /* ------------------------------------------------------------ error texts -- */
