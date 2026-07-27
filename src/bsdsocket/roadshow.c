@@ -32,11 +32,27 @@
  *                              use and that silently disagrees with Roadshow.
  *   AddRoute/GetRouteInfo/...  same, plus they mutate.
  *
- * There is no bsdsocket.doc autodoc in the toolchain, in the NDK, or in the
- * vscode-amiga-debug copy of it. Guessing an ABI is how this project already
- * lost time twice (ndk-include/pwd.h, bpf_set_notify_mask's register order),
- * so those vectors keep the honest ENOSYS stub until a primary source turns
- * up -- the Roadshow SDK's own autodocs would close all of it at once.
+ * THE PRIMARY SOURCE EXISTS. This comment used to say there was no
+ * bsdsocket.doc autodoc anywhere, and that the stubs would stand until one
+ * turned up. One has: NDK 3.2 ships it, at
+ * SANA+RoadshowTCP-IP/doc/bsdsocket.doc, beside interfaces/bsdsocket.xml --
+ * the same NDK this project builds against. It is 10,436 lines and documents
+ * 121 functions, including 35 of the 43 vectors still answering ENOSYS here:
+ * the whole interface configuration and query set, the routing set,
+ * GetNetworkStatistics, the net-monitor hooks, the domain-name-server calls,
+ * *RoadshowData and the mbuf_* family.
+ *
+ * So the reason these are stubs is no longer "we cannot know the contract".
+ * It is that nobody has written them. That is a different statement and it
+ * should not keep hiding behind the old one.
+ *
+ * What is NOT in that autodoc: the seven ipf_* vectors and ChangeRouteTagList.
+ * ipf_* remains deliberately out of scope (RESEARCH 9); nothing outside
+ * Roadshow's own tools calls it.
+ *
+ * Guessing an ABI is still how this project lost time twice
+ * (ndk-include/pwd.h, bpf_set_notify_mask's register order), so anything
+ * written here is written against that document and not from the name.
  *
  * What IS here is everything whose contract the headers pin down completely.
  *
