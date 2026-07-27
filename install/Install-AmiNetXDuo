@@ -66,13 +66,16 @@
   (cat "AmiNetXDuo talks to your network card through its SANA-II driver, "
        "which is a file whose name ends in \".device\".\n\n"
        "The choices, in full, and the driver each one needs:\n\n"
-       "  Commodore A2065     Zorro II       a2065.device\n"
-       "  Ariadne             Zorro II       ariadne.device\n"
-       "  Ariadne II          Zorro II       ariadne2.device\n"
-       "  Hydra AmigaNet      Zorro II       amiganet.device\n"
-       "  X-Surf              Zorro II       xsurf.device\n"
-       "  X-Surf 100          Zorro II       xsurf100.device\n"
-       "  A PCMCIA card       A600/A1200     asked next\n\n"
+       "  A2065        a2065.device\n"
+       "  Ariadne      ariadne.device\n"
+       "  Ariadne II   ariadne2.device\n"
+       "  AmigaNet     amiganet.device\n"
+       "  X-Surf       xsurf.device\n"
+       "  X-Surf 100   xsurf100.device\n"
+       "  PCMCIA       asked next\n"
+       "  UAE          uaenet.device\n\n"
+       "UAE's driver is in the emulator rather than on disk, so it is not "
+       "detected like the others -- pick it yourself.\n\n"
        "Pick the card you actually have.  If the installer already found a "
        "driver in DEVS: it has pre-selected the matching entry, and that is "
        "almost certainly the right answer.\n\n"
@@ -233,13 +236,17 @@
        "AmiNetXDuo has to replace it.  The old one will be renamed to "
        "bsdsocket.library.old, not deleted."))
 
+; The final page does not scroll: anything past the bottom of the requester is
+; simply lost, so it is kept short enough to fit rather than complete.  The
+; command list and the troubleshooting notes that used to be here are in the
+; guide, which is where someone will look for them a second time anyway.
+
 (set F_START_YES
-  (cat "The network will start by itself the next time you reboot.\n\n"
-       "To start it now without rebooting, type:\n\n"
+  (cat "It starts by itself when you reboot.  To start it now, type:\n\n"
        "    C:AddNetInterface DEVS:NetInterfaces/%s\n"))
 
 (set F_START_NO
-  (cat "The network will NOT start by itself.  To start it, type:\n\n"
+  (cat "It will NOT start by itself.  To start it, type:\n\n"
        "    C:AddNetInterface DEVS:NetInterfaces/%s\n"))
 
 (set H_DOCDIR
@@ -456,6 +463,7 @@
           "xsurf.device"
           "xsurf100.device"
           "cnet.device"
+          "uaenet.device"
           ""))
   (
     (if (< DET_INDEX 0)
@@ -542,14 +550,15 @@
         ; full product names do not.  Keep every label under about 20
         ; characters and put the detail in the help text.
         (choices
-          "Commodore A2065"
+          "A2065"
           "Ariadne"
           "Ariadne II"
-          "Hydra AmigaNet"
+          "AmigaNet"
           "X-Surf"
           "X-Surf 100"
-          "A PCMCIA card"
-          "Not in this list")
+          "PCMCIA"
+          "UAE"
+          "Other")
         (default CARD_DEFAULT)))
 
     (set DEV_NAME
@@ -561,6 +570,7 @@
         "xsurf.device"
         "xsurf100.device"
         "cnet.device"
+        "uaenet.device"
         ""))
 
     ; PCMCIA: one more question, because the slot takes several kinds of card
@@ -1120,12 +1130,5 @@
 (exit
   "AmiNetXDuo is installed.\n\n"
   FINAL_START
-  "\nOnce it is up, these are the commands worth knowing:\n\n"
-  "    ShowNetStatus      is it up, and what address did it get\n"
-  "    ping " IPGW "      can it reach the router\n"
-  "    host aminet.net    can it look names up\n"
-  "    netstat -r         what does it think the routes are\n"
-  "    Offline " START_IF "        take the network down\n\n"
-  "If nothing works, the first thing to check is that your card's driver "
-  "really is in DEVS: -- that is the single most common reason a stack does "
-  "not come up.\n")
+  "\nShowNetStatus says whether it came up.  The guide in the\n"
+  "AmiNetXDuo drawer has the rest.\n")

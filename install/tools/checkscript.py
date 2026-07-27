@@ -41,7 +41,17 @@ MAX_STRING = 512
 # the prompt and the buttons.  Two columns of four short labels fit; eight
 # long ones do not.  These limits are empirical, from watching Installer 2.17
 # fail on the real thing.
-MAX_CHOICES = 8
+#
+# NINE fits once the labels are short.  The card page carries nine at ten
+# characters or less ("Ariadne II", "X-Surf 100") and lays out; it did not
+# when the same page used names like "Commodore A2065" and "Not in this
+# list".  Both numbers are about ROOM, and the count alone was never the
+# whole story -- which is why the length limit below matters more than this
+# one.  Raised only after install/test/run-installer-fsuae.sh -l AVERAGE
+# drove the page under Installer 2.17 and completed; if a future page dies on
+# "askchoice: No choices selected", it has too many or they are too wide, and
+# the answer is to merge entries rather than to raise this again.
+MAX_CHOICES = 9
 MAX_CHOICE_LEN = 22
 
 # ---------------------------------------------------------------- symbols --

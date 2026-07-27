@@ -70,6 +70,39 @@ static const char *const diag_known_devices[] =
     "cnet.device", "hydra.device", "x-surf.device", "xsurf100.device",
     "e3b_ax88796.device", "prism2.device", "eth3com.device", "rtl8029.device",
     "emac.device", "uaenet.device", "slip.device", "ppp.device",
+
+    /*
+     * USB Ethernet through Poseidon, on a Deneb, Subway or Algor. Both names
+     * are documented in the Roadshow 1.15 manual, so they are as certain as
+     * anything else on this list.
+     */
+    "moschipeth.device", "usbmoschipeth.device",
+
+    /*
+     * The modern hardware, and the reason this list exists at all: none of
+     * these keeps its driver in DEVS:Networks where the scan above would find
+     * it. ZZ9000 and PiStorm load theirs from the card, so a machine running
+     * one has a working card with nothing on disk to prove it.
+     *
+     * Every name here was read out of the vendor's own build, not guessed:
+     *
+     *   ZZ9000Net.device   BlitterStudio/zz9000-drivers, net/Makefile:
+     *                      "Makefile for ZZ9000Net.device (SANA-II)"
+     *   pi-net.device      captain-amygdala/pistorm, the built driver at
+     *                      platforms/amiga/net/net_driver_amiga/
+     *   a314eth.device     the same repo, a314/software-amiga/ethernet_pistorm
+     *                      build.sh -- "-o ../a314eth.device"
+     *   scsidayna.device   RobSmithDev/daynaport-amiga, Makefile DEVICEID
+     *                      (a DaynaPORT SCSI/Link, still being worked on)
+     *
+     * The mixed case in ZZ9000Net is the vendor's. It costs nothing either
+     * way -- diag_is_resident() compares with tool_stricmp() and AmigaDOS
+     * paths are case-insensitive -- but it is what a user would see.
+     */
+    "ZZ9000Net.device",         /* MNT ZZ9000                               */
+    "pi-net.device",            /* PiStorm                                  */
+    "a314eth.device",           /* A314, and PiStorm's emulation of it      */
+    "scsidayna.device",         /* DaynaPORT SCSI/Link                      */
     NULL
 };
 
