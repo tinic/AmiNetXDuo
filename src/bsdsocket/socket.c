@@ -624,6 +624,42 @@ static VOID bsd_closing_park(AmiSocket *sock)
     bsd_closing_head     = sock;
 }
 
+/*
+ * Force a TCP socket into a state nx_tcp_socket_delete() will accept.
+ *
+ * THIS IS NOT A SECOND WAY TO CLOSE A SOCKET. It is what is left when the
+ * ordinary one has already been tried and NetX Duo still holds the block.
+ *
+ * nx_tcp_socket_disconnect() does NOTHING AT ALL for a socket that is not in
+ * ESTABLISHED, SYN_SENT, SYN_RECEIVED or CLOSE_WAIT: it returns
+ * NX_NOT_CONNECTED at nx_tcp_socket_disconnect.c:106 before touching a field.
+ * Those four exclude every state a half-closed connection actually sits in --
+ * FIN_WAIT_1, FIN_WAIT_2, CLOSING, TIMED_WAIT, LAST_ACK -- so the sweep's
+ * "resetting" below was a no-op for precisely the case it was written for,
+ * and the socket then failed nx_tcp_socket_delete()'s "state must be CLOSED"
+ * test and was leaked. docs/RESEARCH.md 40 measures 33 of them in 66 seconds.
+ *
+ * Presenting the socket as ESTABLISHED is what makes NetX Duo run its own
+ * abort on it: one RST built from the socket's real sequence numbers, then
+ * _nx_tcp_socket_block_cleanup() to release the transmit queue and the
+ * timers, leaving CLOSED (a client socket) or LISTEN (a server one). Writing
+ * the field is safe here because bsd_nx_enter() holds the ThreadX baton for
+ * the whole of the caller, so the IP thread is not running.
+ */
+static VOID bsd_tcp_abort(NX_TCP_SOCKET *tcp)
+{
+    UINT state = tcp->nx_tcp_socket_state;
+
+    if (state == NX_TCP_CLOSED || state == NX_TCP_LISTEN_STATE)
+        return;
+
+    if (state != NX_TCP_ESTABLISHED && state != NX_TCP_SYN_SENT &&
+        state != NX_TCP_SYN_RECEIVED && state != NX_TCP_CLOSE_WAIT)
+        tcp->nx_tcp_socket_state = NX_TCP_ESTABLISHED;
+
+    nx_tcp_socket_disconnect(tcp, NX_NO_WAIT);
+}
+
 VOID bsd_closing_sweep(VOID)
 {
     AmiSocket  *sock;
@@ -633,7 +669,15 @@ VOID bsd_closing_sweep(VOID)
     while ((sock = *link) != NULL)
     {
         UINT state = sock->as_Nx.tcp.nx_tcp_socket_state;
-        BOOL done  = (state == NX_TCP_CLOSED) || (state == NX_TCP_TIMED_WAIT);
+        /*
+         * LISTEN is a finished close, not an unfinished one: a SERVER socket
+         * that completes its shutdown lands there rather than in CLOSED --
+         * _nx_tcp_socket_block_cleanup() branches on
+         * nx_tcp_socket_client_type. Without it every accepted socket waited
+         * out the full deadline before anyone looked at it again.
+         */
+        BOOL done  = (state == NX_TCP_CLOSED) || (state == NX_TCP_TIMED_WAIT) ||
+                     (state == NX_TCP_LISTEN_STATE);
         /* Unreadable data is a reset (see bsd_closing_data_notify); this is
            the same rule for anything that got queued before the notify was
            installed, or while the socket was between states. */
@@ -665,7 +709,7 @@ VOID bsd_closing_sweep(VOID)
                          (long)(BSD_CLOSING_DEADLINE / NX_IP_PERIODIC_RATE),
                          (long)state);
 
-            nx_tcp_socket_disconnect(&sock->as_Nx.tcp, NX_NO_WAIT);
+            bsd_tcp_abort(&sock->as_Nx.tcp);
         }
 
         if (bsd_socket_destroy(sock))
@@ -795,6 +839,26 @@ static BOOL bsd_socket_destroy(AmiSocket *sock)
             nx_tcp_client_socket_unbind(&sock->as_Nx.tcp);
 
         status = nx_tcp_socket_delete(&sock->as_Nx.tcp);
+
+        /*
+         * NX_STILL_BOUND means the flags said this socket was finished with
+         * and NetX Duo disagrees -- it is on a port list, or its state is not
+         * CLOSED (nx_tcp_socket_delete.c:94). Leaking the block is the safe
+         * answer but it is a permanent one, so abort the connection outright
+         * and ask once more. The unbind is unconditional this time because
+         * ASF_NXBOUND is the library's belief and the port list is the fact.
+         */
+        if (status == NX_STILL_BOUND)
+        {
+            bsd_tcp_abort(&sock->as_Nx.tcp);
+
+            if ((sock->as_Flags & ASF_SERVER) != 0)
+                nx_tcp_server_socket_unaccept(&sock->as_Nx.tcp);
+            else
+                nx_tcp_client_socket_unbind(&sock->as_Nx.tcp);
+
+            status = nx_tcp_socket_delete(&sock->as_Nx.tcp);
+        }
     }
     else
     {
@@ -808,10 +872,23 @@ static BOOL bsd_socket_destroy(AmiSocket *sock)
        ours either way. Anything else means NetX Duo still points at it. */
     if (status != NX_SUCCESS && status != NX_NOT_CREATED)
     {
-        AMI_WARN("bsdsocket: %s_socket_delete refused (%ld); leaking %ld bytes "
-                 "rather than corrupting the created list",
+        /*
+         * The TCP state and the socket flags are in the message because
+         * without them this warning says only "it leaked": NX_STILL_BOUND has
+         * three separate causes in nx_tcp_socket_delete.c (still on the port
+         * list, a bind in progress, or a state that is not CLOSED) and the
+         * repair for each is different. docs/RESEARCH.md 37.5 had 830 of
+         * these and could not say which.
+         */
+        AMI_WARN("bsdsocket: %s_socket_delete refused (%ld) state %ld "
+                 "flags 0x%lx port %ld; leaking %ld bytes rather than "
+                 "corrupting the created list",
                  ((sock->as_Flags & ASF_TCP) != 0) ? "nx_tcp" : "nx_udp",
-                 (long)status, (long)sizeof(AmiSocket));
+                 (long)status,
+                 ((sock->as_Flags & ASF_TCP) != 0)
+                     ? (long)sock->as_Nx.tcp.nx_tcp_socket_state : 0L,
+                 (long)sock->as_Flags, (long)sock->as_LocalPort,
+                 (long)sizeof(AmiSocket));
 
         sock->as_Flags |= ASF_ORPHANED;
 
@@ -1374,6 +1451,115 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
     return 0;
 }
 
+/*
+ * Park a fresh socket on a listening descriptor's port, so the port keeps
+ * answering. Call inside a ThreadX bracket; TRUE means the listener has a
+ * spare again.
+ *
+ * THE LISTENER MUST SURVIVE THIS FAILING. The version this replaces cleared
+ * as_Incoming, tried once, and on failure left the listener with nothing --
+ * and as_Incoming is what bsd_accept() checks first, so every later accept()
+ * on that descriptor returned EINVAL for the life of the socket.
+ * docs/RESEARCH.md 37.4 measured 1,951 consecutive EINVALs behind exactly one
+ * `relisten failed` line. So there are three attempts here rather than one,
+ * and bsd_accept() calls this again on a listener that has no spare, which is
+ * the part that matters: whatever ended the last attempt, the next accept()
+ * gets a clean try rather than a permanent refusal.
+ *
+ * WHY THE TRIGGER IS NOT ASSUMED. 37.4 published a root cause for that
+ * NX_INVALID_RELISTEN and then retracted it: nx_tcp_packet_process.c:650
+ * clears the listen request's socket slot itself when the SYN arrives, so the
+ * obvious "the slot is still occupied" explanation predicts a failure that is
+ * structural, and the measured one is intermittent. Nothing here depends on
+ * knowing which it was.
+ */
+static BOOL bsd_listen_rearm(struct AmiSocketBase *base, AmiSocket *sock)
+{
+    NX_IP     *ip = netstack_ip();
+    AmiSocket *spare;
+    UINT       status;
+
+    if (ip == NULL || (sock->as_Flags & ASF_LISTENING) == 0)
+        return FALSE;
+
+    if (sock->as_Incoming != NULL)
+        return TRUE;
+
+    spare = bsd_socket_alloc(base, sock->as_Domain, sock->as_Type,
+                             sock->as_Protocol);
+    if (spare == NULL)
+        return FALSE;
+
+    status = nx_tcp_socket_create(ip, &spare->as_Nx.tcp, bsd_tcp_name,
+                                  NX_IP_NORMAL, NX_FRAGMENT_OKAY,
+                                  NX_IP_TIME_TO_LIVE, ami_bsd_tcp_window(),
+                                  bsd_tcp_urgent_notify,
+                                  bsd_tcp_disconnect_callback);
+    if (status != NX_SUCCESS)
+    {
+        ami_free(spare);
+        return FALSE;
+    }
+
+    bsd_tcp_seed_isn(&spare->as_Nx.tcp);
+    bsd_tcp_keepalive_default(&spare->as_Nx.tcp);
+
+    spare->as_Flags    |= ASF_INCOMING | ASF_SERVER;
+    spare->as_Parent    = sock;
+    spare->as_LocalPort = sock->as_ListenPort;
+    bsd_events_attach(spare);
+
+    /*
+     * NX_CONNECTION_PENDING means a queued connection was handed straight to
+     * the spare -- still a success, and the next accept() returns at once.
+     */
+    status = nx_tcp_server_socket_relisten(ip, sock->as_ListenPort,
+                                           &spare->as_Nx.tcp);
+
+    if (status != NX_SUCCESS && status != NX_CONNECTION_PENDING)
+    {
+        /*
+         * Rebuild the listen request from nothing. unlisten() drops whatever
+         * state it had got into, including any queued connection requests --
+         * that is the cost, and it is cheap next to a listener that never
+         * accepts again -- and listen() then puts the spare on the port
+         * exactly as bsd_listen() did in the first place.
+         */
+        AMI_WARN("bsdsocket: relisten on port %ld failed (%ld); rebuilding "
+                 "the listen request",
+                 (long)sock->as_ListenPort, (long)status);
+
+        nx_tcp_server_socket_unlisten(ip, sock->as_ListenPort);
+
+        status = nx_tcp_server_socket_listen(ip, sock->as_ListenPort,
+                                             &spare->as_Nx.tcp,
+                                             sock->as_Backlog,
+                                             bsd_listen_callback);
+    }
+
+    if (status != NX_SUCCESS && status != NX_CONNECTION_PENDING)
+    {
+        AMI_WARN("bsdsocket: port %ld has no listen request left (%ld); "
+                 "the next accept() will try again",
+                 (long)sock->as_ListenPort, (long)status);
+
+        if (bsd_socket_destroy(spare))
+            ami_free(spare);
+
+        return FALSE;
+    }
+
+    /* Arm it, exactly as bsd_listen() does -- see the comment there. Without
+       this the next client's SYN goes unanswered. */
+    (VOID)nx_tcp_server_socket_accept(&spare->as_Nx.tcp, NX_NO_WAIT);
+
+    sock->as_Incoming = spare;
+    if (status == NX_CONNECTION_PENDING)
+        sock->as_Flags |= ASF_ACCEPTPEND;
+
+    return TRUE;
+}
+
 LONG bsd_listen(register LONG sock_fd __asm("d0"),
                 register LONG backlog __asm("d1"),
                 register struct AmiSocketBase *SocketBase __asm("a6"))
@@ -1493,7 +1679,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
                 register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     AmiSocket  *sock = bsd_lookup(SocketBase, sock_fd);
-    AmiSocket  *incoming, *spare;
+    AmiSocket  *incoming;
     NX_IP      *ip = netstack_ip();
     NXD_ADDRESS peer;
     ULONG       peer_port = 0;
@@ -1506,13 +1692,25 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
     if (ip == NULL)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 
-    if ((sock->as_Flags & ASF_LISTENING) == 0 || sock->as_Incoming == NULL)
+    if ((sock->as_Flags & ASF_LISTENING) == 0)
         return bsd_fail(SocketBase, AMI_EINVAL);
-
-    incoming = sock->as_Incoming;
 
     if (bsd_nx_enter(SocketBase) != 0)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+    /*
+     * A listener with no spare parked on it is a listener that lost one, not
+     * a listener the application got wrong -- see bsd_listen_rearm(). Try to
+     * give it one back before answering, so a single failed re-arm costs one
+     * accept() rather than the socket.
+     */
+    if (sock->as_Incoming == NULL && !bsd_listen_rearm(SocketBase, sock))
+    {
+        bsd_nx_leave(SocketBase);
+        return bsd_fail(SocketBase, AMI_ENOBUFS);
+    }
+
+    incoming = sock->as_Incoming;
 
     status = nx_tcp_server_socket_accept(
         &incoming->as_Nx.tcp,
@@ -1613,56 +1811,13 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
     sock->as_Incoming = NULL;
     sock->as_Flags   &= ~ASF_ACCEPTPEND;
 
-    /* Park a fresh socket so the port keeps accepting. */
-    spare = bsd_socket_alloc(SocketBase, sock->as_Domain, sock->as_Type,
-                             sock->as_Protocol);
-    if (spare != NULL)
-    {
-        status = nx_tcp_socket_create(ip, &spare->as_Nx.tcp, bsd_tcp_name,
-                                      NX_IP_NORMAL, NX_FRAGMENT_OKAY,
-                                      NX_IP_TIME_TO_LIVE, ami_bsd_tcp_window(),
-                                      bsd_tcp_urgent_notify,
-                                      bsd_tcp_disconnect_callback);
-        if (status == NX_SUCCESS)
-        {
-            bsd_tcp_seed_isn(&spare->as_Nx.tcp);
-            bsd_tcp_keepalive_default(&spare->as_Nx.tcp);
-
-            spare->as_Flags    |= ASF_INCOMING | ASF_SERVER;
-            spare->as_Parent    = sock;
-            spare->as_LocalPort = sock->as_ListenPort;
-            bsd_events_attach(spare);
-
-            status = nx_tcp_server_socket_relisten(ip, sock->as_ListenPort,
-                                                   &spare->as_Nx.tcp);
-            /*
-             * NX_CONNECTION_PENDING means a queued connection was handed
-             * straight to the spare -- still a success, and the next accept()
-             * will return immediately.
-             */
-            if (status == NX_SUCCESS || status == NX_CONNECTION_PENDING)
-            {
-                /* Arm it, exactly as bsd_listen() does -- see the comment
-                   there. Without this the next client's SYN goes unanswered. */
-                (VOID)nx_tcp_server_socket_accept(&spare->as_Nx.tcp,
-                                                  NX_NO_WAIT);
-
-                sock->as_Incoming = spare;
-                if (status == NX_CONNECTION_PENDING)
-                    sock->as_Flags |= ASF_ACCEPTPEND;
-            }
-            else
-            {
-                if (bsd_socket_destroy(spare))
-                    ami_free(spare);
-                AMI_WARN("bsdsocket: relisten failed, status %ld", (LONG)status);
-            }
-        }
-        else
-        {
-            ami_free(spare);
-        }
-    }
+    /*
+     * Park a fresh socket so the port keeps accepting. The connection this
+     * call is returning is already the caller's, so a re-arm that does not
+     * take is NOT this accept()'s failure -- it is the next one's problem,
+     * and bsd_listen_rearm() is what the next one calls.
+     */
+    (VOID)bsd_listen_rearm(SocketBase, sock);
 
     bsd_nx_leave(SocketBase);
 
