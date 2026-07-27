@@ -419,6 +419,26 @@ static LONG bsd_send_raw(struct AmiSocketBase *base, AmiSocket *sock,
 
 /* ---------------------------------------------------------------- receive -- */
 
+/* bsd_wait_sliced() drives this; see select.c for why the wait is sliced. */
+typedef struct
+{
+    NX_TCP_SOCKET *tcp;
+    NX_PACKET     **packet;
+} BsdRecvArgs;
+
+/* NOT static, deliberately.  A tail call to a local symbol in another
+   -ffunction-sections section of the same object is the relocation this
+   toolchain mis-resolves (cmake/check-pcrel-branches.cmake, RESEARCH 25);
+   as a global it relocates with a zero addend and comes out right.  The
+   68040 build caught this within a minute of the file being written. */
+UINT bsd_recv_once(VOID *arg, ULONG wait)
+{
+    BsdRecvArgs *a = (BsdRecvArgs *)arg;
+
+    return nx_tcp_socket_receive(a->tcp, a->packet, wait);
+}
+
+
 static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags)
 {
@@ -449,7 +469,26 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
             ULONG now = (first || (flags & MSG_WAITALL) != 0) ? wait
                                                               : NX_NO_WAIT;
 
-            status = nx_tcp_socket_receive(&sock->as_Nx.tcp, &packet, now);
+            {
+                BsdRecvArgs args;
+                BOOL        aborted;
+
+                args.tcp    = &sock->as_Nx.tcp;
+                args.packet = &packet;
+
+                status = bsd_wait_sliced(base, now, bsd_recv_once, &args,
+                                         &aborted);
+                if (aborted)
+                {
+                    /* Ctrl-C, or whatever SBTC_BREAKMASK was set to. The
+                       signal is LEFT SET: it is the caller's, and a program
+                       that polls SetSignal() after an EINTR has to still see
+                       it. */
+                    if (copied > 0)
+                        break;
+                    return bsd_fail(base, AMI_EINTR);
+                }
+            }
 
             if (status == NX_SUCCESS)
             {

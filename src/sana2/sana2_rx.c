@@ -286,9 +286,34 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
         }
         else if (err == (LONG)S2ERR_OUTOFSERVICE)
         {
-            /* S2_OFFLINE returns every pending read this way. Stop posting
-               until the interface comes back. */
+            /*
+             * S2_OFFLINE returns every pending read this way, and so does a
+             * driver whose card has gone away underneath us -- a pulled cable
+             * on a2065.device is the case that matters.
+             *
+             * Stopping the reader is not enough on its own. NetX Duo learns
+             * the link state ONLY from nx_interface_link_up, which the driver
+             * entry point sets on NX_LINK_ENABLE/DISABLE -- that is, only
+             * when the stack asks. Nothing asks when the wire is pulled, so
+             * without this the interface stayed marked up: ShowNetStatus
+             * reported LINKUP, ARP kept queueing, and every send failed in
+             * the shim with no way for the layer above to know why. Reporting
+             * an interface as working when it is not is worse than reporting
+             * it as down, because it is the one state a user cannot diagnose.
+             *
+             * `Online` recovers it: netstack.c:1393 issues NX_LINK_ENABLE,
+             * whose driver case sets nx_interface_link_up back to NX_TRUE.
+             * There is deliberately no automatic retry here -- this runs on
+             * the reader, and a driver that has gone out of service is not
+             * one to hammer with S2_ONLINE from inside a receive loop.
+             */
             rx->iface->online = FALSE;
+
+            if (rx->iface->interface_ptr != NULL)
+                rx->iface->interface_ptr->nx_interface_link_up = NX_FALSE;
+
+            AMI_WARN("sana2: %s went out of service; link marked down",
+                     rx->iface->device);
         }
         else
         {

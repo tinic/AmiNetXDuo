@@ -264,6 +264,81 @@ VOID bsd_events_attach(AmiSocket *sock)
  * bsd_wait_errno() (errno.c) is the mapping that asks instead of assuming, and
  * is what a new call site should use.
  */
+/*
+ * How long a blocking call sleeps before it looks at the break signal.
+ *
+ * The Roadshow autodoc is explicit that a blocking operation is abortable:
+ * SetSocketSignals says SIGINT "is the signal to send to the process which
+ * owns the socket in order to abort a blocking operation, such as recv()",
+ * and recv() documents [EINTR] for it.  We passed NX_WAIT_FOREVER and sampled
+ * nothing, so a program with a "press Ctrl-C to stop" loop hung instead --
+ * src/tools/nc.c:567 works around the same gap from the outside, which is
+ * where it was first noticed and the wrong place to fix it.
+ *
+ * Ten ticks is 200 ms: short enough that a person pressing Ctrl-C does not
+ * think the machine has died, long enough that a 14 MHz 68020 is not paying
+ * for a bracket four times a second while idle.
+ */
+#define BSD_BREAK_SLICE_TICKS   10
+
+/*
+ * Wait in slices, checking the break mask between them.
+ *
+ * ONLY FOR CALLS WHERE A TIMEOUT IS HARMLESS.  nx_tcp_socket_receive() and
+ * nx_tcp_socket_send() answer NX_NO_PACKET / NX_TX_QUEUE_DEPTH on expiry and
+ * change nothing, so slicing them is invisible to the peer.
+ *
+ * It is NOT usable for nx_tcp_server_socket_accept(): on a timeout that runs
+ * _nx_tcp_connect_cleanup and winds the socket back to LISTEN, so the next
+ * call re-enters the LISTEN block and sends a SECOND SYN+ACK on a half-open
+ * connection.  docs/RESEARCH.md 32.10 and 43 have the detail; accept() waits
+ * on readiness first instead.
+ *
+ * Returns NX_SUCCESS with *aborted set when the break arrived, so the caller
+ * fails with EINTR; otherwise returns whatever the sliced call last said.
+ */
+UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
+                     BsdSlicedCall call, VOID *arg, BOOL *aborted)
+{
+    ULONG break_mask = base->sb_BreakMask;
+    ULONG remaining  = wait;
+    UINT  status;
+
+    *aborted = FALSE;
+
+    /* A caller that asked not to block, or a base with no break signal, gets
+       the plain call -- there is nothing to interleave. */
+    if (wait == NX_NO_WAIT || break_mask == 0)
+        return call(arg, wait);
+
+    for (;;)
+    {
+        ULONG slice;
+
+        if ((SetSignal(0UL, 0UL) & break_mask) != 0)
+        {
+            *aborted = TRUE;
+            return NX_SUCCESS;
+        }
+
+        if (wait == NX_WAIT_FOREVER)
+            slice = BSD_BREAK_SLICE_TICKS;
+        else if (remaining == 0)
+            return call(arg, NX_NO_WAIT);
+        else
+            slice = (remaining < BSD_BREAK_SLICE_TICKS) ? remaining
+                                                        : BSD_BREAK_SLICE_TICKS;
+
+        status = call(arg, slice);
+        if (status != NX_NO_PACKET && status != NX_TX_QUEUE_DEPTH &&
+            status != NX_WINDOW_OVERFLOW)
+            return status;
+
+        if (wait != NX_WAIT_FOREVER)
+            remaining -= slice;
+    }
+}
+
 ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks)
 {
     if ((sock->as_Flags & ASF_NONBLOCK) != 0)

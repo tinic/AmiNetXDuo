@@ -77,6 +77,28 @@ set(want 0)          # words still needed to complete a displacement
 set(words "")
 set(bad "")
 
+# DATA READ AS CODE.
+#
+# On m68k-amigaos there is no .rodata: string literals live in the plain .text
+# (docs/RESEARCH.md 46).  objdump disassembles .text linearly, so it renders
+# those strings, and the tables beside them, as instructions -- and a table
+# entry whose bytes are 61 FF at an even address, first on an objdump line, is
+# indistinguishable from a bsr.l here.
+#
+# Not hypothetical: the configuration name table ("bootp\0auto\0...\0none\0")
+# and the lookup array after it produced exactly that, and adding one warning
+# string elsewhere in the library shifted the bytes onto an even address and
+# started failing the build.
+#
+# The discriminator is that the m68k fetches instructions on even addresses
+# ONLY.  A computed target that is odd cannot be a branch destination on any
+# 68k, so the bytes were data.  The real defect this check exists for lands
+# twelve bytes short of a function -- even, and inside a function -- so
+# nothing it was written to catch is lost.
+#
+# Attributing the data to a symbol does not help: objdump counts it as part of
+# whatever function precedes it, so the run has no boundary to detect.
+
 foreach(line IN LISTS dis_lines)
     # Byte column: "   5acc:\t60ff           \tbras ..."
     if(NOT line MATCHES "^ +([0-9a-fA-F]+):\t([0-9a-fA-F][0-9a-fA-F 	]*)")
@@ -110,7 +132,10 @@ foreach(line IN LISTS dis_lines)
                     math(EXPR disp "${disp} - 4294967296")
                 endif()
                 math(EXPR target "${branch_at} + 2 + (${disp})")
-                if(NOT target IN_LIST code_addrs)
+                math(EXPR odd "${target} % 2")
+                if(odd EQUAL 1)
+                    # Data, not an instruction -- see the note above.
+                elseif(NOT target IN_LIST code_addrs)
                     list(APPEND bad
                          "0x${branch_hex}: branch by ${disp} bytes lands inside a function, not on one")
                 endif()

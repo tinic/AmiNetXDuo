@@ -197,7 +197,20 @@
  */
 #define BSD_LIB_REVISION    1
 
-#define BSD_DEFAULT_DTABLESIZE  64
+/*
+ * 256, because that is what Roadshow documents as its default and therefore
+ * what a program written against it expects to already have.  <sys/types.h>
+ * makes FD_SETSIZE 256, so `WaitSelect(FD_SETSIZE, ...)` -- which is how a
+ * great deal of ported code spells "all of them" -- failed with EINVAL on the
+ * 64 we used to ship, on the first call, before the program had done anything
+ * wrong.
+ *
+ * The table is a lazily allocated array of pointers, so this costs 1,024
+ * bytes instead of 256 for an opener that makes a socket, and nothing at all
+ * for one that does not.  A program that wants fewer can still set
+ * SBTC_DTABLESIZE down.
+ */
+#define BSD_DEFAULT_DTABLESIZE 256
 #define BSD_MAX_DTABLESIZE     256
 
 /* NetX Duo's listen queue depth for a bound port. */
@@ -664,6 +677,13 @@ BOOL  bsd_writable(AmiSocket *sock);
 BOOL  bsd_exception(AmiSocket *sock);
 
 /* Wait option for a blocking call, in ThreadX ticks. */
+/* A NetX Duo call reduced to "wait this long, tell me what happened", so
+   bsd_wait_sliced() can drive it in slices without knowing which call it is. */
+typedef UINT (*BsdSlicedCall)(VOID *arg, ULONG wait);
+
+UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
+                     BsdSlicedCall call, VOID *arg, BOOL *aborted);
+
 ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks);
 
 /* Small string/memory helpers: a shared library must not drag in newlib. */
