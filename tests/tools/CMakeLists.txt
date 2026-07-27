@@ -64,6 +64,19 @@ endif()
 target_compile_options(test_statprobe PRIVATE -Wall -Wextra)
 set_target_properties(test_statprobe PROPERTIES OUTPUT_NAME "StatProbe")
 
+# AamProbe drives CreateAddrAllocMessageA/DeleteAddrAllocMessage/
+# BeginInterfaceConfig/AbortInterfaceConfig.  BeginInterfaceConfig returns
+# VOID, so its only channel is the replied message -- which is why the dullest
+# assertion in that file (the message came back on the port) is the one that
+# matters: an ENOSYS stub for it is a hang, not a refusal.
+add_executable(test_aamprobe aamprobe.c)
+target_include_directories(test_aamprobe PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_aamprobe PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_aamprobe PRIVATE -Wall -Wextra)
+set_target_properties(test_aamprobe PROPERTIES OUTPUT_NAME "AamProbe")
+
 # TcpHandoff runs the whole socket-to-file-handle sequence -- accept(),
 # ReleaseCopyOfSocket(), Open("TCP:OBTAIN="), SystemTagList() -- against two
 # stock AmigaDOS commands.  Linked against nothing of ours: it reaches

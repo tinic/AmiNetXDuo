@@ -20,11 +20,15 @@
  *   routing.c      AddRouteTagList(), DeleteRouteTagList(), GetRouteInfo(),
  *                  FreeRouteInfo()
  *   netstats.c     GetNetworkStatistics()
+ *   addralloc.c    CreateAddrAllocMessageA(), DeleteAddrAllocMessage(),
+ *                  BeginInterfaceConfig(), AbortInterfaceConfig() -- the
+ *                  message and every documented refusal. The allocation
+ *                  itself is the one gap left, and it is AAMR_Ignored rather
+ *                  than a stub, because that vector returns VOID and an
+ *                  ENOSYS in it is a HANG (RESEARCH S47.12).
  *
  * What is still stubbed, each with its reason written where it belongs:
  *
- *   BeginInterfaceConfig()     the foot of interfaces.c. Not a contract we
- *   AbortInterfaceConfig()     cannot read -- a thing this stack cannot do.
  *   ObtainRoadshowData()       struct RoadshowDataNode is defined, but the
  *                              rdn_Name strings are Roadshow-private and
  *                              ChangeRoadshowData() looks items up BY NAME,

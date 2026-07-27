@@ -159,6 +159,8 @@ IMPLEMENTED = {
     # the contract is unknown; see the header of src/bsdsocket/roadshow.c.
     "ObtainInterfaceList", "ReleaseInterfaceList", "QueryInterfaceTagList",
     "ConfigureInterfaceTagList", "AddInterfaceTagList", "RemoveInterface",
+    "CreateAddrAllocMessageA", "DeleteAddrAllocMessage",
+    "BeginInterfaceConfig", "AbortInterfaceConfig",
     # Tier 3, the routing API (routing.c).  ChangeRouteTagList is NOT here:
     # the NDK assigns it an offset and neither the autodoc nor
     # clib/bsdsocket_protos.h documents it, so it keeps the ENOSYS stub.

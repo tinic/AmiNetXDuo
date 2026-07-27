@@ -65,15 +65,9 @@
 #include "aminetxduo/sana2.h"
 
 #include "tagwalk.h"
+#include "interfaces.h"
 
 #include <proto/exec.h>
-
-/*
- * "This name cannot be longer than 15 characters" -- QueryInterfaceTagList()
- * and AddInterfaceTagList() both say so, so 15 plus a NUL is the whole name
- * storage this API ever needs.
- */
-#define BSD_IFNAME_SIZE     16
 
 /*
  * How long ConfigureInterfaceTagList() will wait for a name in IFC_Address to
@@ -204,8 +198,9 @@ static BOOL bsd_name_equal(const char *a, const char *b)
     }
 }
 
-/* The physical slot called `name`, or -1. */
-static LONG bsd_if_index_of(NX_IP *ip, const char *name)
+/* The physical slot called `name`, or -1. Published in interfaces.h, because
+   addralloc.c has to ask the same question under the same naming rule. */
+LONG bsd_if_index_of(NX_IP *ip, const char *name)
 {
     char  have[BSD_IFNAME_SIZE];
     UINT  i;
@@ -1293,18 +1288,8 @@ LONG bsd_RemoveInterface(register STRPTR name __asm("a0"),
 }
 
 /*
- * ---------------------------------------------------------------------------
- * STILL ENOSYS: BeginInterfaceConfig() and AbortInterfaceConfig()
- *
- * An ASYNCHRONOUS address allocation. The caller hands over a
- * struct AddressAllocationMessage and it comes back through ReplyMsg() with a
- * lease, a router table, a DNS table, a host name and a domain name filled
- * in. This stack's DHCP client runs inside netstack_startup() and reports
- * through the configuration rather than through a message port: there is no
- * path by which a caller's message could be replied to, and none of the aam_*
- * result tables is kept anywhere after the lease is taken.
- *
- * Documented in full, and not written. That is a different statement from
- * "we cannot know the contract", and it should stay a different one.
- * ---------------------------------------------------------------------------
+ * BeginInterfaceConfig() and AbortInterfaceConfig() are in addralloc.c, with
+ * the message they traffic in. They are not here because what they mostly do
+ * is validate and reply a struct AddressAllocationMessage, which is that
+ * file's subject rather than this one's.
  */

@@ -29,6 +29,8 @@ set(BSDSOCKET_SOURCES
     roadshow.c              # the Tier 3 extensions whose ABI is pinned down
     interfaces.c            # ObtainInterfaceList/QueryInterfaceTagList/
                             # ConfigureInterfaceTagList, from the NDK 3.2 autodoc
+    addralloc.c             # Create/DeleteAddrAllocMessage: the message
+                            # BeginInterfaceConfig takes
     routing.c               # AddRoute/DeleteRoute/GetRouteInfo, same source
     netstats.c              # GetNetworkStatistics: 4.4BSD's ipstat/tcpstat/
                             # udpstat/icmpstat over NetX Duo's counters

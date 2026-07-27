@@ -14803,15 +14803,9 @@ view without moving the device's, so the two spellings describe one thing.
 API is *present*, and four of its vectors are. Answering `FALSE` would have
 stopped a monitor from ever asking the ones that work.
 
-Two remain `ENOSYS`, and neither because the contract is unclear:
-
-| vector | why not |
-|---|---|
-| `BeginInterfaceConfig()` | an asynchronous allocation whose `AddressAllocationMessage` comes back through `ReplyMsg()` carrying a lease, a router table, a DNS table, a host name and a domain name. This stack's DHCP client runs inside `netstack_startup()` and reports through the config; there is no port to reply to and none of the `aam_*` tables is kept |
-| `AbortInterfaceConfig()` | the counterpart to a call that does not exist |
-
 `AddInterfaceTagList()` and `RemoveInterface()` were on that list and are not
-any more; §47.11 is what it took.
+any more; §47.11 is what it took. `BeginInterfaceConfig()` and
+`AbortInterfaceConfig()` came off it too, though not all the way — §47.12.
 
 `GetNetworkStatistics()` is in netstats.c; see 47.9.
 
@@ -15030,4 +15024,91 @@ went all the way down to the device and back. Zeroes would mean it never
 reopened; a stale value would mean the old `AmiSana2If` was never freed. It
 reports `00:80:10:32:33:34`, twice per run, and then configures and comes back
 up like any other interface.
+
+### 47.12 The stub that was not a refusal but a hang
+
+`BeginInterfaceConfig()` returns **`VOID`**.
+
+Everything it has to say, it says by filling in `aam_Result` and replying the
+caller's message. So the `ENOSYS` stub was not refusing anything: it returned
+−1 in a register the caller cannot see, and **never replied the message the
+caller was already waiting on**. An application that did the documented thing —
+
+```c
+BeginInterfaceConfig(aam);
+WaitPort(port);
+```
+
+waited forever. That is a worse failure than an unimplemented vector, and it
+was invisible because the dense stub table's whole design rule is "never
+NULL, always return an error" — which is exactly right for the 120 vectors
+that *can* return one.
+
+The same shape applies to `AbortInterfaceConfig()`, `DeleteAddrAllocMessage()`
+and `ReleaseInterfaceList()`. Of those, only `BeginInterfaceConfig()` owns
+something the caller is blocked on.
+
+#### What is implemented
+
+The whole message half, and all of the validation:
+
+* **`CreateAddrAllocMessageA()`** — the autodoc enumerates *ten* distinct
+  error codes for this one call and names the condition for each, which is
+  unusually specific and worth honouring exactly. A caller told
+  `CAAME_Client_identifier_too_short` can fix its input; one told "failed"
+  cannot. Every buffer the `CAAMTA_*` tags ask for is carved out of one block
+  that the message sits at the top of, longword-aligned — two of them are
+  arrays of `ULONG` and an m68k handed a misaligned one takes an address
+  error rather than a wrong answer.
+* **`DeleteAddrAllocMessage()`** — *"can only deallocate address allocation
+  messages created by `CreateAddrAllocMessageA()` and will not work with
+  anything else"*, so it has to be able to **tell**. The message carries a
+  cookie in `aam_Reserved`, which is reserved from the *application's* side
+  and not from the library's. A hand-filled message — which
+  `BeginInterfaceConfig()` explicitly accepts — has no cookie and is refused
+  rather than freed. `aamprobe.c` calls it on a message on its own stack; a
+  library that could not tell would free a stack frame and the machine would
+  not survive the next allocation.
+* **`BeginInterfaceConfig()`** — every documented failure condition, checked
+  and **replied**: `AAMR_VersionUnknown`, `AAMR_InterfaceNotKnown`,
+  `AAMR_InterfaceWrongType`, `AAMR_AddressKnown`.
+* **`AbortInterfaceConfig()`** — a genuine no-op rather than a stub standing
+  in for one. Nothing is ever in flight, and the autodoc already tells callers
+  *"There is no guarantee that the message can be intercepted"*.
+
+`AAM_VERSION` is **2**, not the 1 the autodoc's prose describes, and
+`AAM_VERSION_MINIMUM` is 1 — which only means anything if 1 is still accepted.
+Both are taken, and `aam_Unicast` is honoured only at 2 or above, because the
+header says so at the field itself. That is the third place in this document
+where the header and the autodoc disagree and the header is newer.
+
+#### What is not, and why it is `AAMR_Ignored`
+
+The allocation itself. All four protocols are refused with `AAMR_Ignored` —
+*"Your request was not understood and was therefore ignored"* — which is
+literally what happens.
+
+`AAMP_BOOTP` has no client here; NetX Duo ships DHCP and BOOTP is a different
+wire protocol. `AAMP_SLOWAUTO`/`AAMP_FASTAUTO` are RFC 3927 self-assignment,
+and `NX_AUTO_IP` *is* in the build driving the `LINKLOCAL` configuration type.
+
+`AAMP_DHCP` is the interesting one, because **every piece of it already
+exists**: `nx_dhcp_interface_enable`/`_start`/`_stop`/`_release`/
+`_request_client_ip`/`_server_address_get`/`_user_option_retrieve`/
+`_state_change_notify` are all per-interface, the netstack already owns an
+`NX_DHCP` with the state-change callback wired up, and a request that reached
+`BOUND` could be filled in and replied from that callback.
+
+What is missing is the **deadline**. The API's timeout is mandatory — *"the
+timeout must be at least 10 seconds long"* — and DHCP retries indefinitely, so
+a request whose server never answers would never reach `BOUND` and would never
+be replied. That is the *same defect this section exists to remove*, moved
+somewhere harder to see. Half of it is worse than none of it.
+
+Doing it properly needs one of: a worker `Process` per request (the pattern
+exists — `library.c` and `tcp_handler.c` both use `CreateNewProc()`) with
+lifetime coordination against library expunge, or a periodic timer in the
+netstack that can fire the deadline. Neither is large; both touch the DHCP
+path every boot depends on, and that is the reason it is written down here
+rather than attempted at the end of a long session.
 

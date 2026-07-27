@@ -70,9 +70,10 @@ TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 PROBE="$ROOT/$BUILD/tests/tools/IfProbe"
 STATPROBE="$ROOT/$BUILD/tests/tools/StatProbe"
+AAMPROBE="$ROOT/$BUILD/tests/tools/AamProbe"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$PROBE" "$STATPROBE" \
-         "$BSD"; do
+         "$AAMPROBE" "$BSD"; do
     [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
 done
 
@@ -101,6 +102,7 @@ cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
 cp "$PROBE" "$STAGE/IfProbe"
 cp "$STATPROBE" "$STAGE/StatProbe"
+cp "$AAMPROBE" "$STAGE/AamProbe"
 
 # The probe runs twice, either side of AddNetInterface.  Not to catch an empty
 # list -- there is no such state to catch, because OpenLibrary("bsdsocket")
@@ -113,6 +115,7 @@ SYS:IfProbe
 SYS:AddNetInterface eth0
 SYS:IfProbe
 SYS:StatProbe
+SYS:AamProbe
 EOF
 
 # ------------------------------------------------------------------ run ---
@@ -124,7 +127,8 @@ echo "==> booting $MODEL with the A2065 on SLIRP"
 set +e
 "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-    "$STAGE/AddNetInterface" "$STAGE/IfProbe" "$STAGE/StatProbe"
+    "$STAGE/AddNetInterface" "$STAGE/IfProbe" "$STAGE/StatProbe" \
+    "$STAGE/AamProbe"
 RUN_RC=$?
 set -e
 
@@ -488,6 +492,98 @@ if grep -q "^tcp table into one entry: .* -- one entry, correctly" "$REPORT"; th
     pass "a buffer that holds one entry gets one entry and no more"
 else
     fail "the socket table ignored the caller's size limit"
+fi
+
+# ---- the address allocation message --------------------------------------
+#
+# BeginInterfaceConfig() returns VOID.  Everything it has to say it says by
+# filling in aam_Result and replying the message, so an ENOSYS stub for it was
+# not a refusal but a HANG: it returned -1 in a register the caller cannot see
+# and never replied the message the caller was already waiting on.  "replied"
+# on each line below is the assertion that removes that.
+
+for case in "no result ptr:CAAME_Invalid_result_ptr" \
+            "version 99:CAAME_Invalid_version" \
+            "protocol 77:CAAME_Invalid_protocol" \
+            "an empty name:CAAME_Invalid_interface_name" \
+            "an unknown interface:CAAME_Interface_not_found" \
+            "a 1-character client id:CAAME_Client_identifier_too_short" \
+            "a 299-character client id:CAAME_Client_identifier_too_long"; do
+    what=${case%%:*}
+    code=${case##*:}
+    if grep -q "^create \(with \)\?\(for \)\?$what: .* -- correctly" "$REPORT"; then
+        pass "CreateAddrAllocMessageA returns $code"
+    else
+        fail "CreateAddrAllocMessageA got $what wrong"
+    fi
+done
+
+if grep -q "^create with every buffer: 0, message allocated" "$REPORT"; then
+    pass "CreateAddrAllocMessageA built a message with every buffer asked for"
+else
+    fail "CreateAddrAllocMessageA could not build a full message"
+fi
+
+if grep -q "^timeout asked 3, got 10 -- extended, correctly" "$REPORT"; then
+    pass "a timeout below the documented minimum is extended, not refused"
+else
+    fail "the 10-second minimum timeout was not applied"
+fi
+
+if grep -q "^reply port set, mn_Length .* -- correctly" "$REPORT"; then
+    pass "the message is a well-formed struct Message, mn_Length and all"
+else
+    fail "the message was not initialised for ReplyMsg()"
+fi
+
+if grep -q "^client id .* -- duplicated, correctly" "$REPORT"; then
+    pass "the client identifier was duplicated into the message"
+else
+    fail "the client identifier was not duplicated"
+fi
+
+# Two of the buffers are arrays of ULONG, and an m68k handed a misaligned one
+# takes an address error rather than a wrong answer.
+if grep -q "^buffers: all present, aligned and distinct -- correctly" "$REPORT"; then
+    pass "every buffer is present, longword-aligned and distinct"
+else
+    fail "the carved buffers overlap, are misaligned or are missing"
+fi
+
+if grep -q "^buffers zeroed: yes -- correctly" "$REPORT"; then
+    pass "and zeroed, so a caller reading them after the reply sees no rubbish"
+else
+    fail "the carved buffers were not zeroed"
+fi
+
+if grep -q "^unicast 1 -- honoured at version 2, correctly" "$REPORT"; then
+    pass "CAAMTA_RequestUnicast is honoured at AAM_VERSION 2"
+else
+    fail "CAAMTA_RequestUnicast was not stored"
+fi
+
+# THE ONE THAT MATTERS.  Not the result code -- the message coming back.
+for case in "on an addressed interface" "on an unknown interface" \
+            "with a bad version"; do
+    if grep -q "^begin $case: .* replied -- correctly" "$REPORT"; then
+        pass "BeginInterfaceConfig replied the message: $case"
+    else
+        fail "BeginInterfaceConfig did not reply the message: $case"
+    fi
+done
+
+if grep -q "^AbortInterfaceConfig(NULL): returned" "$REPORT"; then
+    pass "AbortInterfaceConfig is safe with nothing in flight and with NULL"
+else
+    fail "AbortInterfaceConfig did not return"
+fi
+
+# A library that could not tell its own messages from a caller's would free a
+# stack frame here, and the machine would not survive the next allocation.
+if grep -q "^DeleteAddrAllocMessage on a stack message: .* -- refused, correctly" "$REPORT"; then
+    pass "DeleteAddrAllocMessage refuses a message it did not allocate"
+else
+    fail "DeleteAddrAllocMessage tried to free a message it did not allocate"
 fi
 
 echo

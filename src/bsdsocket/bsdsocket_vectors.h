@@ -364,6 +364,26 @@ LONG bsd_QueryInterfaceTagList(register STRPTR interface_name __asm("a0"),
                                register struct TagItem *tags __asm("a1"),
                                register struct AmiSocketBase *SocketBase __asm("a6"));
 
+/* LVO -0x1da */
+LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
+                                 register LONG protocol __asm("d1"),
+                                 register STRPTR interface_name __asm("a0"),
+                                 register struct AddressAllocationMessage **result_ptr __asm("a1"),
+                                 register struct TagItem *tags __asm("a2"),
+                                 register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x1e0 */
+VOID bsd_DeleteAddrAllocMessage(register struct AddressAllocationMessage *aam __asm("a0"),
+                                register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x1e6 */
+VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *message __asm("a0"),
+                              register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x1ec */
+VOID bsd_AbortInterfaceConfig(register struct AddressAllocationMessage *message __asm("a0"),
+                              register struct AmiSocketBase *SocketBase __asm("a6"));
+
 /* LVO -0x1fe */
 LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
                               register LONG version __asm("d1"),

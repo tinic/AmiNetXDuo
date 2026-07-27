@@ -11,7 +11,7 @@
  * the two after gethostbyaddr_r) and every vector we have not implemented
  * yet point at bsd_enosys() rather than NULL.
  *
- * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 89 implemented, 50 stubbed (7 of them NULL-returning, 1 FALSE-returning).
+ * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 93 implemented, 46 stubbed (7 of them NULL-returning, 1 FALSE-returning).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -104,10 +104,10 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_ReleaseInterfaceList, /* -0x1c8 [ 75] ReleaseInterfaceList */
     (APTR)bsd_ObtainInterfaceList, /* -0x1ce [ 76] ObtainInterfaceList */
     (APTR)bsd_QueryInterfaceTagList, /* -0x1d4 [ 77] QueryInterfaceTagList */
-    (APTR)bsd_enosys,             /* -0x1da [ 78] CreateAddrAllocMessageA */
-    (APTR)bsd_enosys,             /* -0x1e0 [ 79] DeleteAddrAllocMessage */
-    (APTR)bsd_enosys,             /* -0x1e6 [ 80] BeginInterfaceConfig */
-    (APTR)bsd_enosys,             /* -0x1ec [ 81] AbortInterfaceConfig */
+    (APTR)bsd_CreateAddrAllocMessageA, /* -0x1da [ 78] CreateAddrAllocMessageA */
+    (APTR)bsd_DeleteAddrAllocMessage, /* -0x1e0 [ 79] DeleteAddrAllocMessage */
+    (APTR)bsd_BeginInterfaceConfig, /* -0x1e6 [ 80] BeginInterfaceConfig */
+    (APTR)bsd_AbortInterfaceConfig, /* -0x1ec [ 81] AbortInterfaceConfig */
     (APTR)bsd_enosys,             /* -0x1f2 [ 82] AddNetMonitorHookTagList */
     (APTR)bsd_enosys,             /* -0x1f8 [ 83] RemoveNetMonitorHook */
     (APTR)bsd_GetNetworkStatistics, /* -0x1fe [ 84] GetNetworkStatistics */
