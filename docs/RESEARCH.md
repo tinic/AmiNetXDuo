@@ -15726,6 +15726,43 @@ Not by reading the disassembly. The same source built against the backed-up orig
 | original | `ARGC=1`, `ARGV[0]=[]` |
 | repaired | `ARGC=1`, `ARGV[0]=[argvtest]` |
 
+### THREE SHAPES, and a release job that failed for the right reason
+
+The first version of this repair was written against the toolchain on the development
+machine and covered one instruction shape. v0.6.2's release job then failed in 45 seconds
+with `nothing was verified on any crt0.o`, because **the pinned toolchain CI actually
+builds with is a different build entirely** -- twelve `crt0.o` rather than eleven, and it
+carries the frame skew that the local one is immune to. The local tree was never the
+shipping tree.
+
+The bug is in the SOURCE, so the compiler is free to express it however it likes, and
+which form appears is a property of the toolchain build rather than of the multilib:
+
+| | how `&__argv` reaches the push | repair |
+|---|---|---|
+| A | `pea __argv` | `4879`/`486c`/`4874` -> `2f39`/`2f2c`/`2f34` |
+| B | `lea __argv,a6` ... `move.l a6,-(sp)` | `2f0e` -> `2f16` |
+| C | `moveal a4,a6` / `addal #<.bss>,a6` ... `move.l a6,-(sp)` | `2f0e` -> `2f16` |
+
+Shapes B and C never name `__argv` as an operand of the push at all, which is why a
+matcher written for A saw nothing whatsoever. B is the plain pinned form -- the address is
+needed in a register anyway, to store into `__argv` on the Workbench path -- and C is its
+baserel equivalent, where the address cannot be named absolutely and is built from `a4`.
+C is only adopted when the immediately preceding instruction is `moveal a4,an`, since
+`an + <.bss displacement>` is `&__argv` only if `an` started at the base.
+
+Anchoring on the `argc` push had to go as well: under the pinned toolchain `__argc` is a
+LOCAL `.bss` symbol at `+0x14`, so its relocation reads `.bss`, not `___argc` as it does
+where argc is common. The confirmation is now structural -- two adjacent pushes followed
+closely by a reference to `main`.
+
+**The failure is the point.** The guard added with the first version -- verifying nothing
+is not a pass -- turned an unrecognised toolchain into a failed release rather than a
+second archive with broken clients. That is the whole reason it exists, and it earned its
+keep on the first release after it was written. The check also had to learn the
+*repaired* shapes, or a fixed toolchain would report every file `skipped` and fail its own
+verification step.
+
 ### Note on the pin
 
 Upstream fixed this in `120371e`, which changed only the declaration. Our pinned

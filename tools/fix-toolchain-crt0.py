@@ -282,24 +282,46 @@ PUSH_OPS = (PUSH_ABS, PUSH_A4, PUSH_A4_32)
 # way to tell __argv from __savedSp there is to read the displacement.
 PEA_A4_32_TAIL = bytes((0x01, 0x70, 0x00, 0x00, 0x00, 0x00))   # (bd=0,a4)
 
+# Shape B (see argv_sites): the address is kept in an address register and the
+# REGISTER is pushed. `move.l an,-(sp)` and `move.l (an),-(sp)` differ only in
+# the source addressing mode -- 001nnn against 010nnn -- so this too is a
+# two-byte swap that leaves everything around it alone.
+LEA_MASK, LEA_OP = 0xF1C0, 0x41C0       # lea <ea>,an  (an in bits 11..9)
+PUSH_AN = 0x2F08                        # move.l an,-(sp)   | reg
+PUSH_AN_IND = 0x2F10                    # move.l (an),-(sp) | reg
+ADDA_IMM = 0xD1FC                       # adda.l #imm32,an  (an in bits 11..9)
+
 
 def instructions(objdump, path):
-    """[(offset, first_word, reloc_target_or_None), ...] in .text order."""
+    """[[offset, first_word, reloc_target_or_None, text], ...] in .text order."""
     out = subprocess.run([str(objdump), "-dr", str(path)],
                          capture_output=True, text=True)
     if out.returncode != 0:
         return None
     insns = []
     for line in out.stdout.splitlines():
-        m = re.match(r"^\s*([0-9a-f]+):\s+([0-9a-f]{4})[0-9a-f ]*\t", line)
+        m = re.match(r"^\s*([0-9a-f]+):\s+([0-9a-f]{4})[0-9a-f ]*\t(.*)$", line)
         if m:
-            insns.append([int(m.group(1), 16), int(m.group(2), 16), None])
+            insns.append([int(m.group(1), 16), int(m.group(2), 16), None,
+                          m.group(3).strip()])
             continue
         # A relocation line annotates the instruction just emitted.
         m = re.match(r"^\s+[0-9a-f]+:\s+\S+\s+(\S+)\s*$", line)
         if m and insns:
             insns[-1][2] = m.group(1)
     return insns
+
+
+def _writes_areg(text):
+    """The address register this instruction's destination is, or None.
+
+    Deliberately crude and deliberately conservative: it only has to notice
+    that some register stopped holding what we thought. `movel d0,a6@` writes
+    THROUGH a6 and leaves a6 itself alone, and does not match, because the
+    text ends `,a6@` rather than `,a6`.
+    """
+    m = re.search(r",%?a([0-7])$", text)
+    return int(m.group(1)) if m else None
 
 
 def argv_sites(objdump, path):
@@ -319,24 +341,87 @@ def argv_sites(objdump, path):
     The .bss reference must carry NO addend: __argv is at .bss+0, while
     __savedSp (+8) and cleanupflag (+0xc) would print one and must not be
     touched.
+
+    TWO SHAPES, because the bug is in the source and the compiler is free to
+    express it however it likes. Which one appears is a property of the
+    toolchain BUILD, not of the multilib:
+
+      A. pea __argv                   -- a direct push of the address
+      B. lea __argv,an ... move.l an,-(sp)
+
+    Shape B is what the pinned toolchain emits: it needs the address in a
+    register anyway (to store into __argv on the Workbench path), so it keeps
+    it in a6 and pushes the register. The address never appears as an operand
+    of the push at all, so a matcher written for shape A sees NOTHING -- which
+    is exactly what happened, and why v0.6.2's release job failed rather than
+    shipping a second broken archive.
+
+    Anchoring on the argc push does not work either. Under the pinned
+    toolchain __argc is a LOCAL .bss symbol at +0x14, so its relocation reads
+    `.bss`, not `___argc` as it does where argc is a common symbol. The
+    confirmation is therefore structural: two adjacent pushes followed closely
+    by a reference to main.
+
+    Returns [(offset, old_word, new_word), ...].
     """
     insns = instructions(objdump, path)
     if insns is None:
         return None
+
+    def calls_main(i):
+        return any(r in ("_main", "main") for _, _, r, _ in insns[i + 2:i + 6])
+
+    def pushes_next(i):
+        return i + 1 < len(insns) and 0x2F00 <= insns[i + 1][1] <= 0x2FFF
+
     sites = []
-    for i in range(len(insns) - 1):
-        argv_off, argv_word, argv_reloc = insns[i]
-        _, _, argc_reloc = insns[i + 1]
-        if argv_reloc != ".bss" or argc_reloc not in ("___argc", "__argc"):
+    holds_argv = {}     # address register -> currently holds &__argv
+    for i, (off, word, reloc, text) in enumerate(insns):
+        # ---- shape B, first half: lea <__argv>,an
+        if (word & LEA_MASK) == LEA_OP and reloc == ".bss":
+            holds_argv[(word >> 9) & 7] = True
             continue
-        if argv_word not in ARGV_FIX and argv_word not in PUSH_OPS:
-            continue
-        # main is called within a couple of instructions of the pair; accept
-        # any spelling of the reference (RELOC32/RELRELOC32, jsr or bsr).
-        if not any(r in ("_main", "main")
-                   for _, _, r in insns[i + 2:i + 6]):
-            continue
-        sites.append((argv_off, argv_word))
+
+        # ---- shape C, first half: moveal a4,an / addal #<__argv>,an
+        #
+        # The baserel multilibs cannot name __argv as an absolute address, so
+        # they seed the register with the base and add the displacement. The
+        # `moveal a4,an` immediately before is required: an + <.bss offset> is
+        # only &__argv if an started at a4, and without that check any
+        # register carrying anything could be adopted.
+        if (word & 0xF1FF) == ADDA_IMM and reloc == ".bss":
+            n = (word >> 9) & 7
+            if i and re.match(rf"^moveal?\s+%?a4,%?a{n}$", insns[i - 1][3]):
+                holds_argv[n] = True
+                continue
+
+        # ---- shape A: a push whose own operand is __argv
+        if reloc == ".bss" and (word in ARGV_FIX or word in PUSH_OPS):
+            if pushes_next(i) and calls_main(i):
+                sites.append((off, word, ARGV_FIX.get(word, word)))
+                continue
+
+        # ---- shape B/C, second half: the push of the register itself
+        if (word & 0xFFF8) == PUSH_AN:
+            n = word & 7
+            if holds_argv.get(n) and pushes_next(i) and calls_main(i):
+                sites.append((off, word, PUSH_AN_IND | n))
+                continue
+
+        # ---- the same site once already repaired, or correct to begin with.
+        # Without this a repaired tree reports every file "skipped" and fails
+        # its own --check, which is how it must NOT behave: --check runs
+        # unconditionally in CI against a toolchain this script just fixed.
+        if (word & 0xFFF8) == PUSH_AN_IND:
+            n = word & 7
+            if holds_argv.get(n) and pushes_next(i) and calls_main(i):
+                sites.append((off, word, word))
+                continue
+
+        # Anything that redefines an address register invalidates it.
+        w = _writes_areg(text)
+        if w is not None:
+            holds_argv.pop(w, None)
     return sites
 
 
@@ -345,9 +430,9 @@ def repair_argv(objdump, path, check_only):
     if sites is None:
         return ("refused", "objdump could not read it")
     if not sites:
-        return ("skipped", "no `jsr _main` preceded by an argv/argc pair")
+        return ("skipped", "no argv/argc push pair ahead of a call to main")
 
-    wrong = [(off, w) for off, w in sites if w in ARGV_FIX]
+    wrong = [(off, old, new) for off, old, new in sites if new != old]
     if not wrong:
         return ("immune", f"{len(sites)} call site(s) already push __argv "
                           f"by value")
@@ -360,26 +445,25 @@ def repair_argv(objdump, path, check_only):
         return ("refused", "cannot locate .text in the file")
 
     data = bytearray(path.read_bytes())
-    for off, word in wrong:
+    for off, old, new in wrong:
         at = base + off
         # Same guard as the frame repair: refuse unless the bytes on disk are
         # the instruction objdump reported. Section offsets are not file
         # offsets, and getting that wrong once already destroyed seven files.
-        if (data[at] << 8 | data[at + 1]) != word:
+        if (data[at] << 8 | data[at + 1]) != old:
             return ("refused",
-                    f"file offset 0x{at:x} does not hold the pea objdump "
-                    f"reported at section 0x{off:x}")
+                    f"file offset 0x{at:x} does not hold the instruction "
+                    f"objdump reported at section 0x{off:x}")
         # See PEA_A4_32_TAIL: only this form can be confused with __savedSp.
-        if word == PEA_A4_32 and \
+        if old == PEA_A4_32 and \
                 bytes(data[at + 2:at + 8]) != PEA_A4_32_TAIL:
             return ("refused",
                     f"file offset 0x{at:x} is a 32-bit baserel pea whose "
                     f"displacement is not (bd=0,a4) -- not __argv")
-        want = ARGV_FIX[word]
-        data[at] = (want >> 8) & 0xFF
-        data[at + 1] = want & 0xFF
+        data[at] = (new >> 8) & 0xFF
+        data[at + 1] = new & 0xFF
     path.write_bytes(bytes(data))
-    return ("patched", f"{len(wrong)} call site(s): pea &__argv -> "
+    return ("patched", f"{len(wrong)} call site(s): push &__argv -> "
                        f"move.l __argv,-(sp)")
 
 
