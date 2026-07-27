@@ -138,9 +138,10 @@ while [ $# -gt 0 ]; do
         --export)     MODE="export" ;;
         --print-root) MODE="print" ;;
         --print-sha)  MODE="printsha" ;;
+        --check-crt0) MODE="checkcrt0" ;;
         --force)      FORCE=1 ;;
         -h|--help)    sed -n '2,97p' "$0"; exit 0 ;;
-        *) echo "usage: $0 [--export|--print-root|--print-sha] [--force]" >&2; exit 2 ;;
+        *) echo "usage: $0 [--export|--print-root|--print-sha|--check-crt0] [--force]" >&2; exit 2 ;;
     esac
     shift
 done
@@ -161,6 +162,16 @@ fi
 if [ "$MODE" = "printsha" ]; then
     printf '%s\n' "$TC_MIRROR_SHA256"
     exit 0
+fi
+
+# Answers "does the toolchain I am about to build with still have the crt0 bug"
+# for a tree this script did not install -- a hand-built toolchain, or one from
+# before the repair existed.  Exits non-zero if any crt0.o is still broken.
+if [ "$MODE" = "checkcrt0" ]; then
+    CHECK_ROOT="${AMIGA_TOOLCHAIN_ROOT:-$ROOT}"
+    [ -d "$CHECK_ROOT" ] || { echo "no toolchain at $CHECK_ROOT" >&2; exit 2; }
+    echo "==> $CHECK_ROOT"
+    exec python3 "$(dirname "$0")/fix-toolchain-crt0.py" "$CHECK_ROOT" --check
 fi
 
 emit_root() {
@@ -324,6 +335,21 @@ esac
     echo "!! extracted tree has no NDK headers" >&2
     exit 1
 }
+
+# The libnix crt0.o in this image saves three registers at _start and restores
+# four at ___exit, so every command built with it dies the moment it returns to
+# the Shell.  It is repaired HERE, once, before the tree is installed -- not in
+# every link line downstream.  There are four affected crt0.o files, one per
+# CPU multilib, which is a second reason a per-target workaround was the wrong
+# shape.  tools/fix-toolchain-crt0.py says what the bug is and why this is the
+# seam; it is idempotent and it leaves an already-correct toolchain alone, so a
+# future image that has been fixed upstream needs no change here.
+say "==> repairing the libnix crt0 register save"
+if ! python3 "$(dirname "$0")/fix-toolchain-crt0.py" "$TMP/x/$TC_PREFIX_IN_TAR"; then
+    echo "!! crt0 repair failed -- refusing to install a toolchain that" >&2
+    echo "!! builds commands which crash on return to the Shell." >&2
+    exit 1
+fi
 
 rm -rf "$ROOT" "$ROOT.tmp"
 mkdir -p "$CACHE"
