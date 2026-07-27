@@ -103,6 +103,20 @@ static const char *const diag_known_devices[] =
     "pi-net.device",            /* PiStorm                                  */
     "a314eth.device",           /* A314, and PiStorm's emulation of it      */
     "scsidayna.device",         /* DaynaPORT SCSI/Link                      */
+
+    /*
+     * plipbox (cnvogelg/plipbox, amiga/src/makefile DEVICE_NAME). It reaches
+     * the network over the parallel port, which sounds like it belongs with
+     * SLIP and PPP above and does not: HW_ADDRFIELDSIZE is 6, the header is
+     * 14 bytes of dst/src/type, the MTU is 1500 and it reports
+     * S2WireType_Ethernet. It is an ordinary Ethernet SANA-II device whose
+     * cable happens to be a parallel one, and the bridge on the far end is
+     * what makes it so -- nothing above the driver can tell.
+     *
+     * Which is the point of driving SANA-II generically: this needed no code,
+     * only the name.
+     */
+    "plipbox.device",           /* plipbox, and the ESP32 variants of it    */
     NULL
 };
 
