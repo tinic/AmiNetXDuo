@@ -1,0 +1,93 @@
+; AmiNetXDuo -- WinUAE A3000, for opening in the GUI and using by hand.
+;
+; This is the machine the project is aimed at: a 68030 with 32-bit motherboard
+; RAM, Kickstart 3.1, and a Commodore A2065 on WinUAE's SLIRP user-mode NAT.
+; It is the same machine tools/winuae-run.sh builds for automated runs, with
+; the GUI left on and a floppy drive put back so a person can actually work in
+; it.  Drop it in the WinUAE Configurations folder -- on a default install that
+; is C:\Users\Public\Documents\Amiga Files\WinUAE\Configurations.
+;
+; THREE PATHS TO CHANGE before it will start, all marked CHANGE ME below:
+;   kickstart_rom_file  a Kickstart 3.1 (40.68) A3000 ROM
+;   filesystem2/uaehf0  a directory on the PC that the Amiga sees as DH0:
+;   hardfile2           OPTIONAL: a real Workbench install, in an .hdf
+;
+; THE NETWORK.  SLIRP is a user-mode NAT: the guest gets 10.0.2.15 by DHCP, the
+; gateway and the DNS server are both 10.0.2.2, and outbound connections work
+; without any driver or privilege on the Windows side.  Inbound does not,
+; unless you add slirp_redir lines.  The Amiga side needs a2065.device in
+; DEVS:Networks/ and a DEVS:NetInterfaces/ entry naming it; tests/netstack/devs
+; in this repository is a working example of both.
+;
+; WHY NO OTHER ETHERNET CARD IS SET UP HERE.  WinUAE also emulates the Ariadne,
+; Ariadne II, AmigaNet, LAN Rover, X-Surf and X-Surf-100 -- all of them were
+; brought up on this exact configuration -- but each needs its own SANA-II
+; driver, and the only one we have is a2065.device.  To try one, add the
+; matching line and put its driver in DEVS:Networks/:
+;   ariadne_rom_file=:ENABLED       ariadne.device
+;   ariadne2_rom_file=:ENABLED      ariadne2.device
+;   hydra_rom_file=:ENABLED         amiganet.device
+;   eb920_rom_file=:ENABLED         (ASDG LAN Rover)
+;   xsurf_rom_file=:ENABLED         xsurf.device
+;   xsurf100z2_rom_file=:ENABLED    xsurf100.device
+;   xsurf100z3_rom_file=:ENABLED    xsurf100.device
+;
+; SPDX-License-Identifier: MIT
+
+config_description=AmiNetXDuo A3000 (68030, Kickstart 3.1, A2065 on SLIRP)
+
+; ------------------------------------------------------------------- ROM ----
+; CHANGE ME
+kickstart_rom_file=C:\aminetxduo\roms\kick31-a3000.rom
+
+; ------------------------------------------------------------------- CPU ----
+; A real A3000: 68030 with a 68882, and 32-bit addressing.
+cpu_type=68030
+cpu_model=68030
+fpu_model=68882
+cpu_24bit_addressing=false
+cpu_speed=max
+cpu_compatible=false
+
+; Warp through the Kickstart boot only, then drop to normal speed.  A cold boot
+; of this machine is about thirty seconds of real time otherwise.
+warpboot=true
+
+; ---------------------------------------------------------------- chipset ----
+chipset=ecs
+chipset_compatible=A3000
+rtc=MSM6242B
+
+; ----------------------------------------------------------------- memory ----
+; chipmem_size and friends are in 512 KB units whatever WinUAE's help text
+; says: 4 is 2 MB.  a3000mem_size is the A3000's own RAMSEY memory on the CPU
+; bus -- 32 bits wide -- which is the whole reason to run an A3000 rather than
+; an A1200.  fastmem_size would be Zorro II, i.e. a 16-bit path, and putting
+; the working set there throws away the machine.
+chipmem_size=4
+bogomem_size=0
+fastmem_size=0
+a3000mem_size=8
+z3mem_size=0
+
+; ------------------------------------------------------------------ disks ----
+; DH0: is a host DIRECTORY, not an image, so anything the Amiga writes to it
+; appears on the PC immediately and vice versa.  That is how you get a .lha
+; into the guest: copy it into this folder.
+; CHANGE ME (both lines, same path)
+filesystem2=rw,DH0:DH0:C:\aminetxduo\dh0,0
+uaehf0=dir,rw,DH0:DH0:C:\aminetxduo\dh0,0
+
+; A real Workbench install goes in a hardfile, which boots ahead of DH0: if you
+; give it a higher boot priority.  Uncomment and point it at your .hdf.
+; hardfile2=rw,DH1:C:\aminetxduo\workbench.hdf,32,1,2,512,1,,uae
+
+nr_floppies=1
+floppy0type=0
+
+; ------------------------------------------------------------------- host ----
+use_gui=yes
+win32.logfile=true
+
+; --------------------------------------------------------------- network ----
+a2065=slirp

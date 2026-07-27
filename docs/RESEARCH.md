@@ -14115,3 +14115,217 @@ attributable.
 | `third_party/netxduo` | submodule bumped to `08f7ec99` (the merge) |
 | `common/src/nx_tcp_server_socket_accept.c` | in the submodule: the mutex moved above both checks |
 | `src/` | unchanged, deliberately — see 43.4 |
+
+## 44. WinUAE, driven from a Mac over SSH, and the seven ethernet cards we have no drivers for (2026-07-26)
+
+`tools/fsuae-run.sh` has been the only way to run this code on an Amiga, and it
+has two limits that are not going to move: FS-UAE emulates exactly one ethernet
+card, the A2065, and it switches cycle accounting off for every CPU above a
+68020, so no 68030/68040/68060 timing taken there means anything. WinUAE has
+neither limit. It runs on `winbuilder`, the Windows box this project already
+uses for MSVC builds, and it is a GUI application on the far side of an SSH
+connection — which is the whole problem.
+
+**Headline: it works. `tools/winuae-run.sh` boots an A3000 with Kickstart 3.1,
+runs a binary staged from this Mac, and brings back the guest's stdout, its
+serial log and its exit status in about six seconds. The netstack bring-up test
+passes 14/14 on it over an emulated A2065 on SLIRP, including a DNS lookup that
+resolved `example.com` against the real internet. WinUAE presents seven more
+ethernet cards — Ariadne, Ariadne II, AmigaNet, LAN Rover/EB920, X-Surf and
+X-Surf-100 in both Zorro flavours — every one of which was brought up and
+confirmed in its autoconfig dump. We cannot drive any of them, because the only
+SANA-II driver binary we possess is `a2065.device`.**
+
+### 44.1 A GUI application in session 0 does not start
+
+The first thing that has to be established is whether this is possible at all,
+because an SSH session on Windows lands in session 0, and session 0 has no
+interactive window station.
+
+WinUAE started, enumerated its hardware, and stopped. Its boot log ends after
+`Windowsmouse initialization..` and the process sits there until it is killed.
+`headless=true` does not help and was never going to: WinUAE's own changelog
+describes it as "window gets hidden", not "no window", and the D3D device is
+created either way.
+
+What does work is PsExec. `query session` on this box reports an active console
+session 1 owned by `jenkins` with `explorer.exe` in it and two display adapters
+attached (one of them a Parsec virtual display), so there is a real desktop to
+launch into, and `PsExec64 -i 1 -d` launches into it. First measured run after
+that change: Kickstart booted and the smoke probe returned in **seven seconds**.
+
+This is the load-bearing dependency of the whole harness. On a build agent with
+no console session it would not work, and the honest statement is that this
+works *on this host* because somebody is logged into it.
+
+### 44.2 Making a run end, rather than killing it on a timer
+
+`tools/fsuae-run.sh` polls for `DH0:.done` and then kills the emulator. That
+works here too, and is the fallback, but WinUAE ships something better:
+`UAEquit`, an Amiga executable in `C:\Program Files\WinUAE\Amiga Programs\`,
+which stops the emulator from inside the guest. Staging it into `C:` and
+calling it as the last line of the `Startup-Sequence` means WinUAE exits by
+itself, flushes its log properly, and the host never has to guess.
+
+`warp=true` is the other half of the speed. A cold Kickstart 3.1 A3000 boot is
+about **30 seconds** of host wall clock at normal speed and about **7** in warp,
+and a correctness run does not care how many cycles it took. The hand-written
+config uses `warpboot=true` instead, which warps the boot only and drops to
+normal speed once the machine is up — the right setting for a human.
+
+### 44.3 WinUAE cannot write serial output to a file
+
+`ami_log()` goes out of the serial port, and capturing it is how anything is
+learned from a failing run. WinUAE has four serial backends and none of them is
+a file: a real COM port, an inter-process pipe, a loopback, and TCP.
+
+`-seriallog` was the obvious first try and produced nothing — the emulator logs
+`SERIAL: period=372/3357, baud=9600` and not one character of payload.
+
+TCP works. `win32.serial_port=TCP://0.0.0.0:<port>/wait` makes WinUAE listen and
+*block the emulation until something connects*, which is what makes the capture
+race-free: no character can be transmitted before the collector is attached, so
+the first line is never lost. `tools/winuae/sercap.ps1` is the collector.
+
+The `win32.` prefix is not decoration. Without it the line is silently ignored,
+the emulator never opens a socket, and the only evidence is the absence of
+`SERIAL_TCP:` in the log. `serial_port`, `logfile`, `map_drives` and the
+`inactive_*`/`active_*` group are all `win32.` options; `serial_direct`,
+`serial_translate` and `uaeserial` are not.
+
+### 44.4 The A3000 profile, verified from the memory map rather than assumed
+
+| setting | value | why |
+|---|---|---|
+| `cpu_model` / `fpu_model` | `68030` / `68882` | the machine |
+| `chipset` / `chipset_compatible` | `ecs` / `A3000` | |
+| `chipmem_size` | `4` | 512 KB units, **not** the megabytes the help text claims |
+| `a3000mem_size` | `8` | RAMSEY memory: the A3000's own 32-bit RAM on the CPU bus |
+| `fastmem_size` | `0` | Zorro II, i.e. a 16-bit path — the wrong place for the working set |
+| `filesystem2` + `uaehf0` | directory | DH0: is a host folder, so the guest reports by writing a file |
+
+Confirmed from WinUAE's own memory map, which is why the units question is
+settled rather than argued:
+
+```
+00000000    2048K/1 =    2048K ID* C32 Chip memory
+07800000       8M/1 =       8M ID* F32 RAMSEY memory (low)
+=KS ROM v3.1 (A3000) rev 40.68 (512k)
+CPU=68030, FPU=68882 (host 64b), MMU=0, JIT=0
+```
+
+`-m A4000` (68040) and `-c 68060` both boot and run the smoke probe, and the
+guest sees the CPU it was given — which is what the 68040/68060 build variants
+being added elsewhere will need somewhere to run on.
+
+### 44.5 The ROM: Kickstart, with AROS behind it
+
+`tools/fsuae-run.sh` prefers Kickstart and falls back to AROS; CI uses AROS
+because Kickstart cannot be redistributed. This harness keeps that order and
+means it more strongly, because the point of running on WinUAE at all is to run
+on the machine the users have. `Kickstart v3.1 r40.68 (A3000).rom` was already
+on this Mac, WinUAE identified it by CRC as `KS ROM v3.1 (A3000)` rev 40.68, and
+that is what the A3000 profile boots.
+
+The AROS pair still works and is still the fallback (`-K` forces it). Nothing
+about it needed changing for WinUAE: the same two 512 KB files go in as
+`kickstart_rom_file` and `kickstart_ext_rom_file`.
+
+### 44.6 68030 timing on WinUAE: better than FS-UAE, and still not a 68030
+
+`tests/perf/cpucal` on the A3000 profile, with `-x` (cycle accounting on, warp
+off) and without:
+
+| | WinUAE `-x` | WinUAE default | FS-UAE A3000 (§ CPU calibration) |
+|---|---|---|---|
+| implied clock | **26.42 MHz** | 180.13 MHz | 323 MHz |
+| `ADD.L Dn,Dm` | 2.00 cycles (published 2) | 2.00 | 2 |
+| `MULU.L Dn,Dm` | 3.88 cycles (**real 44**) | 3.18 | 3.2 |
+| Fast RAM read, 32 KB | 24611 KB/s | 32524 KB/s | — |
+| Chip RAM read, 32 KB | 6749 KB/s | 6697 KB/s | same as Fast |
+| data cache visible | no | no | no |
+
+Read that carefully before quoting it. The **clock** and the **memory
+hierarchy** come out A3000-shaped under `-x`: 26.4 MHz against a real machine's
+25, and a genuine 3.6x split between 32-bit RAMSEY memory and 16-bit Chip RAM,
+where FS-UAE reports the two as identical and an implied clock an order of
+magnitude too fast. That is a real improvement and it makes bus-bound
+comparisons defensible in a way they were not before.
+
+The **instruction costs are still wrong**, and not slightly: `MULU.L` is charged
+3.88 cycles against a 68030's published 44. And no data cache effect is visible
+even with `cpu_data_cache=true` and CacheControl asking for it — the 32 KB / 64 B
+read ratio is 0.88x, which `cpucal` reads as "no data cache, i.e. a 68020".
+
+So the rule is: **anything bus-bound can be compared on WinUAE `-x`; anything
+ALU-bound cannot.** Neither emulator can price a multiply.
+
+### 44.7 What network hardware WinUAE has, and what each one needs
+
+Every card below was enabled one at a time and confirmed in WinUAE's autoconfig
+dump on the A3000 profile on 2026-07-26. All of them come up on SLIRP without
+being asked to — `slirp` is WinUAE's default network device — so there is no
+per-board backend setting in the harness.
+
+| config line | card the guest sees | chip | SANA-II driver needed | have it? |
+|---|---|---|---|---|
+| `a2065=slirp` | `A2065` | Am7990 | `a2065.device` | **yes** |
+| `ariadne_rom_file=:ENABLED` | `Ariadne` | Am7990 | `ariadne.device` | no |
+| `ariadne2_rom_file=:ENABLED` | `Ariadne II` | NE2000 | `ariadne2.device` | no |
+| `hydra_rom_file=:ENABLED` | `AmigaNet` | NE2000 | `amiganet.device` | no |
+| `eb920_rom_file=:ENABLED` | `LAN Rover/EB920` | NE2000 | ASDG's own | no |
+| `xsurf_rom_file=:ENABLED` | `X-Surf` | NE2000 | `xsurf.device` | no |
+| `xsurf100z2_rom_file=:ENABLED` | `X-Surf-100 Z2` | NE2000 | `xsurf100.device` | no |
+| `xsurf100z3_rom_file=:ENABLED` | `X-Surf-100 Z3` | NE2000 | `xsurf100.device` | no |
+
+Two entries in our installer's list have no hardware here at all. **`cnet.device`
+has no card in WinUAE.** And the **PCMCIA NE2000 could not be brought up**:
+`ne2000_pcmcia=slirp`, `ne2000pcmcia_rom_file=:ENABLED`, `pcmcia=true` and
+`pcmcia_mb_rom_file=:ENABLED` were tried on the A1200 profile in every
+combination and none of them logged the card. The Gayle PCMCIA address windows
+are mapped on that profile whether or not a card is asked for, and PCMCIA is not
+autoconfig, so their presence proves nothing either way. With no PCMCIA SANA-II
+driver to hand there was nothing to probe it with. Unresolved, not ruled out.
+
+### 44.8 The one thing that stops this being useful, and it is not the emulator
+
+`tests/netstack/run-winuae.sh -N ariadne` puts an Ariadne in the machine and
+runs the same test that passes 14/14 on the A2065. It fails in four lines:
+
+```
+[INFO] config: interface eth0: ariadne.device unit 0
+[ERR ] sana2: cannot open ariadne.device unit 0 (-1)
+[ERR ] netstack: interface 'eth0' would not open: ariadne.device unit 0 did not
+       answer -- is the driver in DEVS:Networks/ and is the card fitted?
+```
+
+That is the correct behaviour and it is as far as this can go. The hardware is
+emulated; the driver is a third-party binary nobody in this tree has. The
+`ariadne.device` in `build/testhd-ux4/devs/Networks/` is an 18-byte file reading
+`not a real driver` — an installer-detection fixture, not a driver.
+
+**So the honest state of device coverage is unchanged: `a2065.device` is still
+the only SANA-II driver this project has ever run.** What changed is that the
+hardware for seven more is now one config line away, and
+`AMINETXDUO_SANA2_DRIVER=<path> tests/netstack/run-winuae.sh -N <board>` will
+exercise any of them the moment a driver binary turns up. Acquiring those is a
+licensing question, not an engineering one.
+
+### 44.9 What is in the tree
+
+| | |
+|---|---|
+| `tools/winuae-run.sh` | the harness; same interface as `fsuae-run.sh` plus `-N` and `-x` |
+| `tools/winuae/run.ps1` | Windows side: mutex, PsExec launch, poll, reap |
+| `tools/winuae/sercap.ps1` | drains the serial TCP socket into a file |
+| `tools/winuae/AmiNetXDuo-A3000.uae` | a config to open in the GUI and use by hand |
+| `tests/netstack/run-winuae.sh` | the netstack test, on any of the eight cards |
+
+One-time host setup is `tools/winuae-run.sh --setup`, which extracts PSTools and
+reports whether WinUAE and PsExec are where they need to be. Both halves of the
+Windows side are pushed on every run, so this repository stays the source of
+truth and nothing has to be maintained by hand on `winbuilder`.
+
+Not automated, deliberately: nothing here runs in `tools/ci.sh`. It needs a
+Windows host with a logged-in console session and a Kickstart ROM, which is a
+description of one machine on one desk.
