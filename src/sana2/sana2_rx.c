@@ -776,9 +776,26 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
      * Doing it here rather than at each call site means the next caller
      * cannot get it wrong. ami_sana2_offline() is idempotent, so the
      * offline() the callers still do afterwards costs nothing.
+     *
+     * TELL THE READERS TO STOP BEFORE TAKING THE WIRE OFFLINE, not after.
+     *
+     * This used to go offline first and set `stop` in the loop below, which
+     * left a window: between the two, a reader is still running and still
+     * posting fresh CMD_READs -- onto a device that is now offline, so they
+     * are never returned, and the drain that follows finds them outstanding,
+     * times out after five seconds and orphans the reader.
+     *
+     * The window is widest exactly where it was found: an Offline() issued
+     * within ~20 ms of link-up, when the reader is filling all of its slots
+     * at once. docs/RESEARCH.md 56 records it as the reason a DHCP test had
+     * to wait 200 ms before taking the wire away, and it is reachable by a
+     * user typing Offline while the interface is still coming up.
+     *
+     * Three phases now, and each needs the one before it:
+     *   1. stop posting  -- `stop` seen at the top of the reader's loop
+     *   2. offline       -- S2_OFFLINE returns every read still queued
+     *   3. join          -- every reader is now guaranteed to reach its exit
      */
-    (VOID)ami_sana2_offline(iface);
-
     for (i = 0; i < AMI_SANA2_RX_READERS; i++)
     {
         AmiSana2Rx *rx = &iface->rx[i];
@@ -795,6 +812,16 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
          */
         if (rx->task != NULL && rx->wake_mask != 0)
             Signal(rx->task, rx->wake_mask);
+    }
+
+    (VOID)ami_sana2_offline(iface);
+
+    for (i = 0; i < AMI_SANA2_RX_READERS; i++)
+    {
+        AmiSana2Rx *rx = &iface->rx[i];
+
+        if (!rx->started)
+            continue;
 
         if (tx_semaphore_get(&rx->exited, 5 * NX_IP_PERIODIC_RATE) != TX_SUCCESS)
         {
