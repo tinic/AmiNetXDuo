@@ -15158,3 +15158,30 @@ have failed silently into empty tables. And **`AAMR_AddressKnown` the second
 time** proves the lease was actually configured onto the interface rather than
 merely reported.
 
+#### The two paths a working server hides
+
+`AAMR_Timeout` and `AAMR_Aborted` are unreachable while SLIRP answers in four
+tenths of a second — neither the deadline nor the abort window ever opens. The
+fix costs nothing: **take the interface down first.** Nothing leaves the card,
+DISCOVER goes unanswered, and the worker runs to its own deadline. That is the
+only path that proves the deadline exists at all, and the only one that
+exercises releasing a lease that was never granted.
+
+```
+slow: take eth0 down: rc 0
+slow: still running after a second: yes -- correctly
+slow: abort replied after ~5 ticks, result 1 -- AAMR_Aborted, correctly
+slow: timeout replied after ~550 ticks, result 7 -- AAMR_Timeout, correctly
+slow: waited at least -- correctly the 10-second floor
+```
+
+Five ticks from `AbortInterfaceConfig()` to the reply is the worker noticing
+the flag on its next poll — the race the autodoc warns about ("the process can
+complete before this routine has managed to abort it") resolved the other way,
+which is the way that needs the flag to work.
+
+**550 ticks is the assertion, not 7.** A worker that gave up after two seconds
+would report `AAMR_Timeout` too and would be wrong; the tick count is what says
+the deadline honoured is the one the caller asked for. 550 against a floor of
+500 is the ten-second minimum plus the poll granularity.
+

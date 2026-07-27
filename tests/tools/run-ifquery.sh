@@ -54,7 +54,9 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
 MODEL=A1200
-TIMEOUT=240
+# The allocation phase spends a documented ten-second minimum waiting for a
+# DHCP server that cannot answer, twice over, so this is not the usual 240.
+TIMEOUT=400
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 
 while getopts "m:t:b:" opt; do
@@ -625,6 +627,40 @@ if grep -q "^begin a second time: result 4, replied -- correctly" "$REPORT"; the
     pass "a second allocation on the now-addressed interface is AAMR_AddressKnown"
 else
     fail "the allocation did not put the address on the interface"
+fi
+
+# ---- the two paths a working DHCP server hides ---------------------------
+#
+# AAMR_Timeout and AAMR_Aborted cannot be reached while SLIRP is answering in
+# four tenths of a second: neither the deadline nor the abort window ever
+# opens.  The probe takes the interface DOWN first, so DISCOVER goes nowhere
+# and the worker runs to its own deadline -- the only path that proves the
+# deadline exists, and the only one that releases a lease never granted.
+
+if grep -q "^slow: still running after a second: yes -- correctly" "$REPORT"; then
+    pass "an allocation with no server to answer is still running a second in"
+else
+    fail "the allocation did not stay in flight"
+fi
+
+if grep -q "^slow: abort replied after .* -- AAMR_Aborted, correctly" "$REPORT"; then
+    pass "AbortInterfaceConfig stopped one in flight, replied AAMR_Aborted"
+else
+    fail "AbortInterfaceConfig did not abort an allocation in flight"
+fi
+
+if grep -q "^slow: timeout replied after .* -- AAMR_Timeout, correctly" "$REPORT"; then
+    pass "and one left alone gives up with AAMR_Timeout"
+else
+    fail "the allocation never timed out"
+fi
+
+# A worker that gave up early would report AAMR_Timeout too, and would be
+# wrong.  The number of ticks is what says the deadline is the caller's.
+if grep -q "^slow: waited at least -- correctly the 10-second floor" "$REPORT"; then
+    pass "it waited at least the documented ten-second minimum"
+else
+    fail "the allocation gave up before the ten-second floor"
 fi
 
 # A library that could not tell its own messages from a caller's would free a

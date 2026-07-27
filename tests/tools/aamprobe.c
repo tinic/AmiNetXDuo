@@ -150,6 +150,25 @@ static LONG p_remove_interface(struct Library *base, const char *name,
     return res;
 }
 
+static LONG p_configure_interface(struct Library *base, const char *name,
+                                  struct TagItem *tags)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register CONST_APTR      a0  __asm("a0") = (CONST_APTR)name;
+    register APTR            a1  __asm("a1") = (APTR)tags;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
+
+    __asm __volatile ("jsr a6@(-450:W)"     /* ConfigureInterfaceTagList -0x1c2 */
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
+                        "=r" (_clob_a1)
+                      : "r" (a6), "r" (a0), "r" (a1)
+                      : "cc", "memory");
+    return res;
+}
+
 static struct List *p_obtain_interface_list(struct Library *base)
 {
     register struct Library *a6  __asm("a6") = base;
@@ -619,6 +638,119 @@ int main(void)
         {
             Printf((CONST_STRPTR)"live: could not build a message (%ld)\n", rc);
         }
+    }
+
+    /* ---- the two paths a server that answers can never reach ---------------
+     *
+     * AAMR_Timeout and AAMR_Aborted are the halves of BeginInterfaceConfig()
+     * that a working DHCP server hides: SLIRP answers in about four tenths of
+     * a second, so neither the deadline nor the abort window ever opens.
+     *
+     * Taking the interface DOWN first opens both. Nothing can leave the card,
+     * so DISCOVER goes unanswered and the worker runs to its own deadline --
+     * which is the only code path that proves the deadline exists at all, and
+     * the only one that exercises releasing a lease that was never granted.
+     */
+    {
+        struct AddressAllocationMessage *slow = NULL;
+        struct Message                  *got;
+        struct TagItem                   stags[4];
+        ULONG                            waited;
+
+        rc = p_remove_interface(base, ifname, 0);
+        Printf((CONST_STRPTR)"slow: remove %s: rc %ld\n", (LONG)ifname, rc);
+
+        rc = p_add_interface(base, ifname, "a2065.device", 0, NULL);
+        Printf((CONST_STRPTR)"slow: add %s: rc %ld\n", (LONG)ifname, rc);
+
+        stags[0].ti_Tag  = IFC_State;
+        stags[0].ti_Data = SM_Down;
+        stags[1].ti_Tag  = TAG_DONE;
+        stags[1].ti_Data = 0;
+
+        rc = p_configure_interface(base, ifname, stags);
+        Printf((CONST_STRPTR)"slow: take %s down: rc %ld\n", (LONG)ifname, rc);
+
+        /* ---- aborted ------------------------------------------------------ */
+
+        stags[0].ti_Tag  = CAAMTA_ReplyPort;
+        stags[0].ti_Data = (ULONG)port;
+        stags[1].ti_Tag  = TAG_DONE;
+        stags[1].ti_Data = 0;
+
+        rc = p_create_aam(base, AAM_VERSION, AAMP_DHCP, ifname, &slow, stags);
+
+        if (rc == CAAME_Success && slow != NULL)
+        {
+            p_begin_config(base, slow);
+
+            /* Long enough that the worker is certainly in its poll loop, and
+               far short of the ten-second floor. */
+            Delay(50);
+
+            got = GetMsg(port);
+            Printf((CONST_STRPTR)"slow: still running after a second: %s%s\n",
+                   (LONG)((got == NULL) ? "yes" : "NO, already replied"),
+                   (LONG)((got == NULL) ? " -- correctly" : " -- WRONG"));
+
+            p_abort_config(base, slow);
+
+            for (waited = 0; got == NULL && waited < 5UL * 50UL; waited += 5)
+            {
+                Delay(5);
+                got = GetMsg(port);
+            }
+
+            Printf((CONST_STRPTR)"slow: abort replied after ~%ld ticks, "
+                                 "result %ld%s\n",
+                   (LONG)waited, slow->aam_Result,
+                   (LONG)((got == &slow->aam_Message &&
+                           slow->aam_Result == AAMR_Aborted)
+                              ? " -- AAMR_Aborted, correctly" : " -- WRONG"));
+
+            /* ---- and timed out -------------------------------------------- */
+
+            slow->aam_Result = AAMR_Ignored;
+            p_begin_config(base, slow);
+
+            /* The floor is ten seconds; wait half again as long before
+               calling it a failure to reply at all. */
+            got = NULL;
+            for (waited = 0; got == NULL && waited < 15UL * 50UL; waited += 10)
+            {
+                Delay(10);
+                got = GetMsg(port);
+            }
+
+            Printf((CONST_STRPTR)"slow: timeout replied after ~%ld ticks, "
+                                 "result %ld%s\n",
+                   (LONG)waited, slow->aam_Result,
+                   (LONG)((got == &slow->aam_Message &&
+                           slow->aam_Result == AAMR_Timeout)
+                              ? " -- AAMR_Timeout, correctly" : " -- WRONG"));
+
+            /*
+             * It waited at least the floor. A worker that gave up early would
+             * report AAMR_Timeout too, and would be wrong: the number is what
+             * says the deadline is the one the caller asked for.
+             */
+            Printf((CONST_STRPTR)"slow: waited %s the 10-second floor\n",
+                   (LONG)((waited >= 10UL * 50UL) ? "at least -- correctly"
+                                                  : "LESS THAN, WRONG"));
+
+            p_delete_aam(base, slow);
+        }
+        else
+        {
+            Printf((CONST_STRPTR)"slow: could not build a message (%ld)\n", rc);
+        }
+
+        /* Put the machine back the way it was found. */
+        stags[0].ti_Tag  = IFC_State;
+        stags[0].ti_Data = SM_Online;
+        stags[1].ti_Tag  = TAG_DONE;
+        stags[1].ti_Data = 0;
+        (VOID)p_configure_interface(base, ifname, stags);
     }
 
     /* ---- and give it back ------------------------------------------------- */
