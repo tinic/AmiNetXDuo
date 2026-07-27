@@ -15492,3 +15492,62 @@ say "this type, but not that action".
 Steps 1 and 2 are the ones that touch code every packet flows through. Nothing
 below them is worth starting first.
 
+
+## 51. The receive window is not the 10.6%, and 32 KB is worse than 8 (2026-07-27)
+
+§29 records the two instruments disagreeing: our own `NetTrace` has us **40–55%
+ahead** of Roadshow on loopback and wire, while the third-party Aminet curl has
+Roadshow **10.6% ahead**. §39 closed half of that — the per-call ThreadX bracket
+is not the cause, because one 1.2 MB fetch takes 108 brackets and not thousands.
+What remained was the receive window, which §16.5 and §24 had measured the
+sender filling: 7,200 bytes in flight against 8,192 advertised, 88%.
+
+**It is not the window.**
+
+### 51.1 Three arms, same client, same case
+
+`tests/curl/run-curlverify.sh -g A -n a04_get_1m2` — 1,200,000 bytes over
+HTTP — on the exclusive emulator lane, A1200, our own curl in every arm so the
+only thing differing is `AMINETXDUO_TCP_WINDOW`.
+
+| window | elapsed | |
+|---|---|---|
+| 8 KB pinned | 5.80, 5.76 s | |
+| **shipping default** (pool-derived) | **5.80, 5.80 s** | indistinguishable from 8 KB |
+| 32 KB pinned | 7.28, 8.78, 10.20 s | **25–75% worse**, and much noisier |
+
+Two things follow, and the second is the one worth keeping.
+
+**Between 8 KB and the pool-derived default the window does not matter at
+all** — four samples across two builds land on 5.76–5.80. So the advertised
+window is not what limits this transfer, and the 88%-full observation in §24
+was the sender keeping the pipe full, not the pipe being too small.
+
+**Pinning 32 KB actively hurts.** Not marginally: the best 32 KB sample is
+worse than the worst 8 KB one, and the spread widens run on run (7.28, 8.78,
+10.20) where the 8 KB samples agree to 0.04 s. `AMINETXDUO_TCP_WINDOW` pins the
+floor *and* the ceiling, so this bypasses `ami_bsd_tcp_window()` entirely and
+gives every socket 32 KB regardless of what the pool can support. That is the
+arm §28.6 predicted would cost something without SACK — but there is no loss on
+this path to recover from, so SACK is not the mechanism. Whatever it is, it is
+not "bigger is better", and the ceiling in `bsdsocket_internal.h` should not be
+raised on argument.
+
+### 51.2 What this does NOT establish
+
+**The 10.6% was measured with the THIRD-PARTY curl and this was not.** That
+binary would not start in the harness here — `curl --version` returns rc 20
+before the network is up, which is a staging problem and not a stack one — so
+these arms use our own curl. They answer "does the window limit *our* client",
+which is what the window hypothesis needed, and they do not reproduce the
+Roadshow comparison. The absolute figures are not comparable to §39's either:
+207 KB/s here against 72.7 kB/s there, on a differently loaded host.
+
+So the 10.6% remains open, with the window eliminated alongside the bracket.
+What is left of the original suspicion is `bsd_nx_leave` handing the CPU to the
+IP thread — ThreadX priority 1 against an adopted caller's 16, so the IP thread
+is the highest-priority ready thread at every bracket exit. §39 measured 2.3 s
+per 1.2 MB there. That is roughly 2.8 ms per received packet, which for
+checksum and copy on a 14 MHz 68020 may simply be what the work costs; both are
+already m68k assembly (`src/net68k/`). Establishing whether it is waste or work
+needs the IP thread profiled, not the window moved.
