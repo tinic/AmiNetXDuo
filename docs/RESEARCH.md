@@ -13194,3 +13194,247 @@ is the figure the same suite gives on clean `HEAD`.
 The concurrency sweep is the one that matters most for a change of this shape,
 because a cached registration that were wrong about task identity would show up
 there first and nowhere else. `p05_parallel_48` is green with no memory moved.
+
+## 40. The SSH server runs a command, and there was never a fork in it (2026-07-26)
+
+§38 left the server authenticating a client and then doing nothing: `execv()`
+answered `ENOSYS`, `execchild()` never started anything, and `dbclient` exited 0
+with an empty stdout. This is the piece that makes it a shell account.
+
+### 40.1 The fork that mattered was the second one
+
+Dropbear forks twice. `svr-main.c` forks per connection, and `DEBUG_NOFORK`
+already deals with that (§38) by taking the child branch in the same process.
+The other one is `dbutil.c`'s `spawn_command()`, and it is the only place
+Dropbear ever starts a program:
+
+```c
+	if (pipe(infds) != 0) return DROPBEAR_FAILURE;
+	if (pipe(outfds) != 0) return DROPBEAR_FAILURE;
+	if (ret_errfd && pipe(errfds) != 0) return DROPBEAR_FAILURE;
+	pid = vfork();          /* fork() where HAVE_FORK */
+	...
+	if (!pid) {             /* child */
+		dup2(infds[FDIN], STDIN_FILENO); ...
+		exec_fn(exec_data); /* execchild() -> ... -> execv() */
+```
+
+There is no build option that skips it and no shape of it this machine can run:
+the child branch needs `fork`, `dup2` and `execv`, and the parent branch is
+where the three descriptors the session channel reads and writes come from. A
+failed `vfork()` reports `DROPBEAR_FAILURE`, the exec request fails, and the
+client gets a well-formed session that runs nothing — the failure this project
+keeps finding.
+
+**No upstream source is patched.** The whole function is replaced with
+`-Wl,--wrap=spawn_command`, which is the mechanism `clients/dropbear/build.sh`
+already uses for `open`/`read`/`write`/`close`. It is wrapped for both programs
+because there is one link line; that is free, because the client's only caller
+is `-J proxycmd` and `localoptions.h` compiles it out, so `dbclient` does not
+reference the symbol at all.
+
+### 40.2 Getting the command line without reading Dropbear's structs
+
+The wrapper is handed `exec_fn` and an opaque `exec_data`, which is the
+`struct ChanSess`. Two ways to get the command out of it:
+
+* include `chansession.h` and read `chansess->cmd`, which means compiling a
+  translation unit against Dropbear's internals and its `options.h`
+* let Dropbear tell us
+
+The second one is exact and costs nothing. `execchild()` is called, in this
+process, and it does the whole real job — the forced command, the pubkey
+`command=` option, `USER`/`HOME`/`PATH`, and the `chdir()` to the home
+directory. It ends in `run_shell_command()`, which builds
+`{shell, "-c", cmd, NULL}` and calls `execv()`. `execv()` is ours, so it takes
+the argv apart and `longjmp()`s back into the wrapper.
+
+The jump is ordinary and not the dangerous kind: the wrapper's frame is live,
+because it is the frame that called `exec_fn`. Nothing is being resumed after
+it returned.
+
+Doing it this way means the environment and the working directory are Dropbear's
+own, not a second implementation of them that drifts.
+
+### 40.3 The one call that would have ended the session quietly
+
+`run_command()` does this immediately before `execv()`:
+
+```c
+	/* close file descriptors except stdin/stdout/stderr
+	 * Need to be sure FDs are closed here to avoid reading files as root */
+	for (i = 3; i <= maxfd; i++) {
+		m_close(i);
+	}
+```
+
+In a forked child that is correct and important. Here it is running in the
+server's own process, and 3..`ses.maxfd` is the session socket, the listener's
+pipes and the pipes the command's output is about to arrive on. `close()`
+therefore does nothing while the child path runs, which is stated in
+`amiga_dropbear.c` next to the other reason `close()` refuses — 0, 1 and 2 are
+the Shell's and closing them reboots the machine.
+
+This is worth writing down because it would not have looked like a bug in the
+descriptor code. The session would simply have stopped, after a successful
+authentication, with no error anywhere.
+
+### 40.4 What runs the command, and what "stdout" means on this machine
+
+`SystemTagList()`, synchronously, with `SYS_Input` on `NIL:`, `SYS_Output` on a
+file in `T:`, and `NP_StackSize` at 256 KB — a Shell gives a command 4 KB and
+every ported program on this machine needs far more, which is the same reason
+`clients/curl/clientrun.c` allocates 512 KB.
+
+`pipe()` grew two shapes to carry the result. A read end may drain a DOS file,
+which is how the output reaches the channel and how end of file reaches it; a
+write end may discard, which is what the command's stdin is. The wakeup pipe
+`ses.signal_pipe` is the third shape and the only one that was ever needed
+before: a byte in, a byte out.
+
+**The redirection is passed as a tag and not written into the command line, and
+that was a defect found in a run.** With `cmd <NIL: >T:file`, the redirection
+applies to the *command* — so a Shell that cannot find the command prints
+`Unknown command` on its own `Output()`, which is the server's stderr. The
+client got an empty transfer with a return code of 10 and no statement of why:
+
+```
+--- SYS:dbclient ... "NoSuchCommand"
+--- rc 10, 22.08 s
+```
+
+with the reason in the server's log where nobody asking the question can see it.
+Passing `SYS_Output` makes the Shell's own `Output()` the file, so its messages
+land with the command's, and it leaves the user's command line alone — a command
+containing a redirection of its own is no longer fighting an appended one.
+
+Handing a file handle to `System()` is safe, and this is documented rather than
+assumed. From `System()`'s autodoc:
+
+> The input and output filehandles will not be closed by System, you must close
+> them (if needed) after System returns, if you specified them via SYS_Input or
+> SYS_Output.
+
+Only `SYS_Asynch` takes ownership. Closing the handle after `System()` returns
+is therefore required, and it is also what flushes the file before it is read
+back.
+
+There is one output stream and not two. AmigaOS 3.x gives a process a `pr_CES`
+that is NULL by default, so a command's errors go to its output; the channel's
+`errfd` is a pipe that is already at end of file, and the client sees one
+stream. That is the machine's answer, not a simplification of it.
+
+### 40.5 The exit status had no route at all
+
+`sesscheckclose()` will not let a session channel close until
+`chansess->exit.exitpid != -1`, and the only thing that ever sets it is
+`svr_chansess_checksignal()`, which runs from the session loop when
+`ses.signal_pipe` has been written by the `SIGCHLD` handler. With no signals
+there is no handler and no byte, so a client would have waited for a status that
+could never arrive.
+
+`sigaction()` now remembers one thing — `SIGCHLD`'s handler — and the wrapper
+calls it directly once the command has exited. That is the same sequence a real
+signal produces with the asynchrony removed, and every step after it is
+upstream's: the handler writes the wakeup byte, the loop reaps with `waitpid()`,
+and `waitpid()` reports the one child there is. Because `noptycommand()` has not
+yet called `addchildpid()` when this happens, the reap lands in
+`svr_ses.lastexit` — which is exactly the race upstream already handles two
+lines further down, and it is now the normal path rather than the unlikely one.
+
+`System()` returns the command's return code, so an AmigaDOS `rc` shifted left
+by eight is a newlib `WIFEXITED` status with that code. No AmigaOS command is
+ever killed by a signal, so a client always sees an exit status and never an
+exit signal.
+
+### 40.6 The run
+
+Both ends in one guest over 127.0.0.1, because FS-UAE's SLIRP is outbound-only
+and there is no other arrangement (§38). `clients/dropbear/run-fsuae.sh -D … -S …`:
+
+```
+--- SYS:dbclient -T -y -y -i DH0:id_amiga -p 2222 amiga@127.0.0.1 "echo AMIGA-SSH-SERVER-OK"
+SYS:dbclient: Caution, skipping hostkey check for 127.0.0.1
+
+AMIGA-SSH-SERVER-OK
+--- rc 0, 22.00 s
+```
+
+```
+--- SYS:dbclient ... amiga@127.0.0.1 "NoSuchCommand"
+NoSuchCommand: Unknown command
+NoSuchCommand failed returncode 10
+--- rc 10, 22.04 s
+```
+
+```
+--- SYS:dbclient ... amiga@127.0.0.1 "SYS:dbclient -V"
+Dropbear v2026.94
+--- rc 0, 22.36 s
+```
+
+with the server saying, on the other side of the loopback:
+
+```
+[2250456] Child connection from 127.0.0.1:54357
+[2250456] Pubkey auth succeeded for 'amiga' with ssh-ed25519 key SHA256:6b5C… from 127.0.0.1:54357
+[2250456] amiga: running 'echo AMIGA-SSH-SERVER-OK'
+```
+
+Three things are established there and not one. The output of a Shell built-in
+comes back. A **return code comes back** — `rc 10` is the AmigaDOS return code
+of a command the Shell could not find, carried as an SSH exit status. And a real
+ported binary runs: `SYS:dbclient -V` is a 345 KB program started by the server,
+on a stack the server gave it, with its output on the channel.
+
+### 40.7 Nothing crosses a task boundary, and that is by construction
+
+`df924b5` made a `SocketBase` used from a task other than its opener fail with
+`ENETDOWN`, which closes the "spawn a process and let it share the socket"
+design. It never arises here. The command runs in a Process of its own and
+touches no descriptor of the server's; the socket stays in the session's task
+and the only thing that passes between them is a DOS file. A *network* command
+run over SSH opens its own `bsdsocket.library`, which is what any AmigaOS
+program does anyway.
+
+So `TCP:` (§34) is not needed for this and is not used. It is the answer to a
+different question — attaching a socket to a program that only knows `Read()` —
+and it stays that.
+
+### 40.8 What this is not
+
+* **It is synchronous.** The session loop is stopped for as long as the command
+  runs, so nothing is echoed while it works and a command that never exits never
+  returns. `SYS_Asynch` plus a wakeup through `WaitSelect()`'s signal mask is the
+  design that fixes it, and it is a real one rather than a small one.
+* **There is no stdin.** The command reads `NIL:`. Feeding it from the channel
+  needs the asynchronous shape first — there is nothing to read the channel
+  while a synchronous `System()` holds the process.
+* **There is no interactive shell.** `ssh amiga` with no command is refused with
+  a message. A Shell needs a console handle and there is no pty to make one; that
+  is the `TCP:`-and-`ObtainSocket()` design in §34.9, not this.
+* **The host key is still generated on the host.** §38's entropy finding is
+  unchanged and is the reason the server is not in the shipped archive.
+
+### 40.9 The loopback test is flaky, and it is not this code
+
+Nine runs were taken. Six did what is quoted above; three did not, and all three
+failed in the *key exchange*, before `spawn_command()` exists to be called:
+
+| symptom | where |
+|---|---|
+| client: `Error writing: Invalid argument` | after `Child connection from`, no auth line |
+| server: `Exit before auth: Error writing: Invalid argument` | in the same second as the connection |
+| both ends hang until the harness times out | after `Child connection from`, no auth line |
+
+A `send()` on an established loopback socket returning `EINVAL`, and a session
+that stops with neither end noticing, are the same family as §34.6's `accept()`
+that did not return and §37's socket that never came back. Every one of these
+runs shared the emulator with two others, which `tools/fsuae-run.sh` names as a
+known cause of exactly this. It is written down here so that the next person to
+see it does not go looking in the Dropbear port, and because "one run in three"
+is the number to beat if anybody takes the underlying wakeup seriously.
+
+A second server on the same port inside one run does not work either: the second
+`bind()` gets `Address already in use` five seconds after the first server
+exited. Use a different port per connection — the test above does.
