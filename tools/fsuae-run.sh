@@ -176,12 +176,29 @@ done
 # the harness self-contained (no Workbench binaries to extract or stage).
 # ENV: and T: are backed by host directories, so variables a test sets survive
 # the run and can be inspected afterwards -- and pre-seeded by staging env/.
-ENVSETUP="$ROOT/build/envsetup"
+#
+# The ARCH here has to follow the machine, not the host's default.  envsetup
+# runs on the guest before anything under test does, so a -m68020 build of it
+# stops a 68000 run with `Illegal instruction: 49c1` before a single line of
+# ours executes -- and the failure looks like the thing being tested, because
+# nothing of ours has run yet to say otherwise.
+#
+# AMINETXDUO_ENVSETUP_ARCH overrides it; the default follows -c/-m, since an
+# unexpanded A500 or A600 is the only machine that cannot run 68020 code.  The
+# binary is cached per arch so switching machines does not silently reuse the
+# wrong one.
+case "${CPU:-}${MODEL:-}" in
+    *68000*|*A500*|*A600*|*A2000*) ENVSETUP_ARCH="-m68000" ;;
+    *)                             ENVSETUP_ARCH="-m68020" ;;
+esac
+ENVSETUP_ARCH="${AMINETXDUO_ENVSETUP_ARCH:-$ENVSETUP_ARCH}"
+
+ENVSETUP="$ROOT/build/envsetup${ENVSETUP_ARCH}"
 if [ ! -x "$ENVSETUP" ] || [ "$ROOT/tools/envsetup/envsetup.c" -nt "$ENVSETUP" ]; then
     AMIGA_TOOLCHAIN_QUIET=1 . "$ROOT/tools/amiga-toolchain.sh"
     GCC="$AMIGA_GCC"
     NDK="$AMIGA_NDK"
-    "$GCC" -O2 -m68020 -I"$NDK" -o "$ENVSETUP" "$ROOT/tools/envsetup/envsetup.c" \
+    "$GCC" -O2 $ENVSETUP_ARCH -I"$NDK" -o "$ENVSETUP" "$ROOT/tools/envsetup/envsetup.c" \
         || { echo "failed to build envsetup" >&2; exit 2; }
 fi
 cp "$ENVSETUP" "$HD/c/envsetup"
