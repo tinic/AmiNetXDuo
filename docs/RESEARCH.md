@@ -16455,3 +16455,82 @@ the `SIOCGIF*` family size **32** (`char ifr_name[16]` plus a 16-byte union), an
 strides the list by `ifr->ifr_addr.sa_len` at offset 16 -- so the sockaddrs must carry
 `sa_len`. `bsd_if_gather()` in `interfaces.c` already produces address, mask, broadcast,
 MTU and link state.
+
+## 61. The TCP retry limit was unreachable, and the caller was never told (2026-07-28)
+
+§56's impaired-link work found retransmissions of the same sequence at +1, +2, +4, +8,
++16, +32, +64 and **+128 seconds with no reset**, where `NX_TCP_MAXIMUM_RETRIES 6` with
+`NX_TCP_RETRY_SHIFT 1` should abandon the connection at 127 s. `curl` sat blocked for the
+full 600 s with empty stdout *and* empty stderr.
+
+### The value was right, so it was not the configuration
+
+`nx_tcp_socket_timeout_max_retries` is **6**, printed by the socket itself after
+`_nx_tcp_socket_create()`. Four theories were eliminated before that number was obtained,
+which is the argument for obtaining it first.
+
+One of the four was wrong in an interesting way. The elimination said `nx_user.h` reaches
+NetX Duo because `third_party/netxduo/CMakeLists.txt:73` defines
+`NX_INCLUDE_USER_DEFINE_FILE`. **That file is never used** -- this tree declares its own
+`netxduo` target at `CMakeLists.txt:267` and never adds the vendored subdirectory. The
+macro arrives because `port/netxduo-amiga/inc/nx_port.h:42` includes `nx_user.h`
+unconditionally. Right conclusion, wrong reason, and the reason mattered here because it
+was being used to rule the configuration out.
+
+### Two defects, and neither alone would have hidden it
+
+`_nx_tcp_fast_periodic_processing()` tests the limit against **one of two counters**
+depending on `nx_tcp_socket_zero_window_probe_has_data` -- `timeout_retries` when false,
+`zero_window_probe_failure` when true.
+
+1. **`nx_tcp_socket_send_internal.c` armed the probe for any send it could not queue.**
+   There are three reasons data does not go out -- the receiver's advertised window, the
+   congestion window, the transmit queue depth -- and only the first is a zero window.
+   Setting the flag for the other two describes a socket as being in persist when it is
+   not, moving the limit onto a counter the data path never advances.
+2. **`nx_tcp_socket_retransmit.c` cleared `zero_window_probe_failure` on every probe**
+   rather than when a probe began, pinning it at 1 -- so the second arm could not fire
+   either, and a peer that stopped answering its probes was never given up on.
+
+**What makes it bite is the caller.** One blocked send does not hide the limit: the next
+retransmission clears the flag. But `bsd_wait_sliced()` re-enters `nx_tcp_socket_send()`
+every 200 ms while the status is `NX_WINDOW_OVERFLOW`/`NX_TX_QUEUE_DEPTH`, and a
+non-blocking caller returns on its select loop just as often -- re-arming the flag faster
+than the ladder doubles. From the second rung on, the flag was set every time the timer
+looked.
+
+That is also why the capture could not settle it: within 600 s, a limit of 10 predicts
+retransmissions at 1, 3, 7 … 511 and a reset at 2047 s, which is indistinguishable from no
+limit at all.
+
+### The caller learning was the same bug
+
+Nothing was wrong with the notification path -- the reset simply never happened.
+`_nx_tcp_socket_connection_reset()` invokes `nx_tcp_disconnect_complete_notify`, which is
+`bsd_tcp_disconnect_complete_notify` here, setting `ASF_EOF` and
+`FD_CLOSE|FD_READ|FD_WRITE`; the cleanup routines wake suspended readers and writers, and
+a send loop gets `NX_NOT_CONNECTED`, which `bsd_wait_sliced()` does not retry. **curl now
+fails at 127 s instead of hanging.**
+
+One nuance left open: it surfaces as a clean EOF rather than `ETIMEDOUT` or `ECONNRESET`,
+because the callback cannot distinguish a timeout reset from a peer's FIN.
+
+### Where it is, and how it is tested
+
+`tinic/netxduo`, branch `amiga-tcp-retry-limit` (`540bc8a2`), off `473d1928`, merged into
+`amiga-integration` (`497da7e9`) which the submodule tracks -- the same shape as the three
+branches in §43.
+
+`tests/netstack/host/test_tcp_retries_host.c` links six real vendored translation units
+against a host shim and drives the timer directly: **600 simulated seconds in 0.3 s, no
+emulator**, 19 checks. Seven failed before the fix. The third case is the guard against
+over-fixing:
+
+```
+caller retrying its write        +1 +3 +7 +15 +31 +63   reset at 127 s
+zero window, probes unanswered   +1 +3 +7 +15 +31 +63   reset at 127 s
+zero window, probes answered     +1 ... +511            NO RESET
+```
+
+A peer that is alive and holding a zero window must never be dropped, and that row proves
+it still is not.

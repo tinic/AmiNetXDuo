@@ -221,6 +221,20 @@
  * blocks for 127 s rather than 10 before the stack resets the socket.  That is
  * what TCP is supposed to do and it is what every other stack does, but it is a
  * visible behaviour change and it is why the number is 6 and not 8.
+ *
+ * AND FOR A WHILE THE SIX WAS UNREACHABLE, WHICH WAS NOT THIS FILE'S DOING.
+ * The first run over an impaired link retransmitted at +1, +2, +4 ... +128 s
+ * and never gave up.  The socket had the right numbers in it -- 6 and 1, from
+ * here -- but _nx_tcp_fast_periodic_processing() tests the limit against
+ * nx_tcp_socket_zero_window_probe_failure instead of the retry count whenever
+ * the socket is marked as probing a zero window, and
+ * nx_tcp_socket_send_internal() set that mark for ANY send it could not queue,
+ * including one blocked by the congestion window or the transmit queue depth.
+ * A caller that keeps offering data -- which is what bsd_wait_sliced() does
+ * every 200 ms -- therefore re-armed the mark faster than the ladder doubled,
+ * and the limit was never looked at.  Both are fixed in the vendored fork;
+ * tests/netstack/host/test_tcp_retries_host.c is what says so, in 0.3 s and
+ * without a network.
  */
 /* #ifndef, so an arm that answers "was it this?" can be built from one tree with
    -DNX_TCP_RETRY_SHIFT=0 -DNX_TCP_MAXIMUM_RETRIES=10 and no edit here. */

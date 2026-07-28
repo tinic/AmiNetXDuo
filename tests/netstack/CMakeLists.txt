@@ -44,3 +44,43 @@ if(AMIGA_SIZE)
         COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:dhcp3927_test>"
         COMMENT "dhcp3927_test size")
 endif()
+
+# ---------------------------------------------------------------- host tier --
+#
+# The retransmission retry limit, checked against a socket rather than against
+# a network.  It compiles the vendored TCP output path a second time -- with
+# tests/perf/host/shim's tx_port.h for the m68k's type widths, and with
+# port/netxduo-amiga/inc on the include path so nx_user.h is the one that
+# ships -- and drives the fast periodic timer by hand.  See the file header
+# for what that answers that a packet capture cannot.
+#
+# The linux port's nx_port.h has to come BEFORE port/netxduo-amiga/inc, or the
+# m68k one is found first and wants an AmigaOS ThreadX; nx_user.h is picked up
+# from the port directory either way, which is the point.
+
+if(NOT CMAKE_CROSSCOMPILING)
+
+    add_executable(test_tcp_retries
+        host/test_tcp_retries_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_create.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_send_internal.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_retransmit.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_fast_periodic_processing.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_connection_reset.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_block_cleanup.c")
+
+    target_include_directories(test_tcp_retries PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_tcp_retries PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    include(CTest)
+    add_test(NAME tcp_retries COMMAND test_tcp_retries)
+
+endif()
