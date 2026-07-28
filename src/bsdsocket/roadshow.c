@@ -35,15 +35,30 @@
  *                              so inventing them produces an API nothing can
  *                              use and that silently disagrees with Roadshow.
  *                              The autodoc does not list the names either.
- *   the net-monitor hooks      documented, and not yet written.
- *   the mbuf_* family          there is no mbuf allocator to expose.
+ *   the mbuf_* family          there is no mbuf allocator to expose. NetX
+ *                              Duo allocates fixed-size NX_PACKETs from one
+ *                              pool; an mbuf chain is a different shape, and
+ *                              the eleven vectors would need an allocator
+ *                              built to serve them alone.
+ *   ChangeRouteTagList()       the NDK assigns it an offset and neither the
+ *                              autodoc nor clib/bsdsocket_protos.h says what
+ *                              it takes.
+ *   the ipf_* set              Roadshow's packet filter, out of scope per
+ *                              RESEARCH 9; nothing outside Roadshow's own
+ *                              tools calls it, and NetTrace covers the
+ *                              capture half through BPF.
+ *   vsyslog()                  prototyped, and there is nothing on this
+ *                              machine for it to log TO.
+ *
+ * The net-monitor hooks are no longer on that list: netmonitor.c registers
+ * all four types, and socket.c dispatches MHT_Connect and MHT_Bind.
  *
  * THE PRIMARY SOURCE EXISTS. This comment used to say there was no
  * bsdsocket.doc autodoc anywhere, and that the stubs would stand until one
  * turned up. One has: NDK 3.2 ships it, at
  * SANA+RoadshowTCP-IP/doc/bsdsocket.doc, beside interfaces/bsdsocket.xml --
  * the same NDK this project builds against. It is 10,436 lines and documents
- * 121 functions, including 35 of the 43 vectors that were answering ENOSYS
+ * 121 functions, including 35 of the vectors that were answering ENOSYS
  * here: the whole interface configuration and query set, the routing set,
  * GetNetworkStatistics, the net-monitor hooks, the domain-name-server calls,
  * *RoadshowData and the mbuf_* family.
