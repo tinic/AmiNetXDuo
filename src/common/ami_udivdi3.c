@@ -531,3 +531,71 @@ u32     remainder = 0;
 }
 
 #endif  /* plain 68000 */
+
+/* ------------------------------------------------------ 64-bit shifts --- */
+
+/*
+ * THESE APPEARED WHEN THE TREE MOVED TO -Os (docs/RESEARCH.md 57).
+ *
+ * At -O3 GCC expanded 64-bit shifts inline; at -Os it calls out to libgcc for
+ * them, and libgcc.a is the zero-byte file described at the top of this file.
+ * The whole 68020 build linked until the optimisation level changed and then
+ * failed on one symbol, __lshrdi3, from ami_udivdi3.c itself.
+ *
+ * All three are provided rather than only the one that was missing: which of
+ * them a given -Os build calls for is a property of the code the optimiser
+ * happens to see, and discovering the next one the same way -- as a link
+ * failure in an unrelated commit -- is not worth the two functions saved.
+ *
+ * The shape is libgcc's: a shift count of 0 must return the value unchanged,
+ * a count of 32 or more moves whole words, and a count of 64 or more is
+ * undefined in C but must not fault here. The arithmetic version replicates
+ * the sign bit; the logical one does not.
+ */
+
+u64 __lshrdi3(u64 value, int count);
+u64 __ashldi3(u64 value, int count);
+s64 __ashrdi3(s64 value, int count);
+
+u64 __lshrdi3(u64 value, int count)
+{
+    if (count <= 0)
+        return value;
+    if (count >= 64)
+        return 0;
+    if (count >= 32)
+        return (u64)((u32)(value >> 32) >> (count - 32));
+
+    return (value >> count);
+}
+
+u64 __ashldi3(u64 value, int count)
+{
+    if (count <= 0)
+        return value;
+    if (count >= 64)
+        return 0;
+    if (count >= 32)
+        return ((u64)((u32)value << (count - 32))) << 32;
+
+    return (value << count);
+}
+
+s64 __ashrdi3(s64 value, int count)
+{
+    if (count <= 0)
+        return value;
+
+    /* Saturate to the sign, which is what an arithmetic shift converges to. */
+    if (count >= 64)
+        return (value < 0) ? (s64)-1 : (s64)0;
+
+    if (count >= 32)
+    {
+        long high = (long)(u32)((u64)value >> 32);
+
+        return (s64)(high >> (count - 32));
+    }
+
+    return (value >> count);
+}

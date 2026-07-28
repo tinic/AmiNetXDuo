@@ -16080,3 +16080,81 @@ The ThreadX tick source starts 250 ms late (`TX_AMIGA_TIMER_PROBE_MS`), which is
 largest single item: of the 227 ms DHCP takes, ~174 ms is waiting for the clock and ~50 ms
 is the four packets. Shortening it measured inside host-side jitter and widened the
 observed wakeup rate, so it needs n>=5 before anyone claims it.
+
+## 57. -Os everywhere, and where it actually costs something (2026-07-27)
+
+The tree built at `-O3` and there was never evidence that was faster. On a 68000, or an 020
+with a 256-byte cache and a 16-bit path to memory, instruction fetch competes with data
+for the same slow bus, so `-O3`'s unrolling and inlining buy speed with the scarcest
+resource on the machine.
+
+### The flag did not apply the first time, for the second time
+
+`cmake/toolchain-m68k-amigaos.cmake` sets `CMAKE_C_FLAGS_RELEASE_INIT`, and that is not
+enough: CMake's `Compiler/GNU` module runs *after* the toolchain file and appends its own
+`-O3 -DNDEBUG`, so the command line came out
+
+```
+-Os -DNDEBUG -O3 -DNDEBUG
+```
+
+and the last `-O` won. **This is the same trap that had this project believing it built at
+`-O2` for a year while every published figure was measured at `-O3`**, and it silently
+swallowed the first attempt at this change too. The giveaway was the result: the libraries
+came out 0.1% smaller, which is not what a real level change looks like. The setting now
+lives in `CMakeLists.txt` after `project()`, where nothing can append to it, and the
+comment there says to check `flags.make` rather than trust the file.
+
+### Size
+
+| | -O3 | -Os | |
+|---|---:|---:|---:|
+| `bsdsocket.library` | 394,968 | 267,736 | **-32.2%** |
+| `usergroup.library` | 12,328 | 9,840 | -20.2% |
+| `netstat` | 50,328 | 45,372 | -9.8% |
+| `ShowNetStatus` | 63,664 | 58,264 | -8.5% |
+| **total measured** | **600,400** | **455,984** | **-24.1%** |
+
+The commands moved less because `src/tools` already appended `-Os`; what changed for them
+is the libraries they link.
+
+### Speed, on the thing users actually do
+
+Third-party Aminet curl, 1.2 MB fetch, back to back in one session:
+
+| | samples (B/s) | mean |
+|---|---|---:|
+| -O3 | 121,748 / 124,004 | 122,876 |
+| **-Os** | 126,362 / 123,496 | **124,929** |
+
+**+1.7%**, which is inside the spread -- so no regression, on a third less code.
+
+### Where it does cost, and the rule that follows
+
+`tests/crypto68k/crypto68k_bulk`, cycle-accurate 68020:
+
+| | -O3 | -Os | |
+|---|---:|---:|---:|
+| AES T4, hand-written 68020 assembly | 272,692 | 275,635 | +1.1% |
+| nx_crypto AES | 347,729 | 327,081 | **-5.9%** |
+| nx_crypto SHA-256 | 352,416 | 331,683 | **-5.9%** |
+| **ChaCha20 alone (C)** | 132,847 | 162,413 | **+22.3%** |
+| Poly1305 alone (C) | 182,297 | 193,691 | +6.3% |
+| **AEAD, one whole record** | 316,156 | 358,142 | **+13.3%** |
+
+The hand-written assembly does not care what the optimiser was asked for (+1.1% is noise),
+and two nx_crypto paths got *faster* at `-Os`. **The entire cost lands on C we wrote
+ourselves**, and the answer is to write those kernels rather than to raise the optimisation
+level for the whole tree to suit two files. ChaCha20 is the identified hot spot: pure
+add-rotate-xor over sixteen 32-bit words, which is exactly the shape that hand-scheduling
+helps and exactly what `c68k_bulk_kernels.S` already does for AES.
+
+### One link failure, worth knowing about
+
+`libgcc.a` is a zero-byte file in this toolchain, so `src/common/ami_udivdi3.c` supplies
+the 64-bit runtime. At `-O3` GCC expanded 64-bit shifts inline; at `-Os` it calls out for
+them, and the build failed on `__lshrdi3` -- from that same file. `__lshrdi3`, `__ashldi3`
+and `__ashrdi3` are now all provided, rather than only the one that happened to be missing:
+which of them an `-Os` build needs is a property of the code the optimiser happens to see,
+and finding the next one as a link failure in an unrelated commit is not worth two
+functions.

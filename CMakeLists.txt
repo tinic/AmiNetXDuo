@@ -9,6 +9,28 @@ cmake_minimum_required(VERSION 3.20)
 # 0.x on purpose: nothing has run on real hardware yet.
 project(AmiNetXDuo VERSION 0.7.0 LANGUAGES C ASM)
 
+# -Os, AFTER project(), because nothing earlier can make it stick.
+#
+# cmake/toolchain-m68k-amigaos.cmake sets CMAKE_C_FLAGS_RELEASE_INIT, and that
+# is NOT enough: CMake's Compiler/GNU module runs after the toolchain file and
+# APPENDS its own "-O3 -DNDEBUG", so the flags come out as
+#
+#     -Os -DNDEBUG -O3 -DNDEBUG
+#
+# and the last -O wins. That is exactly how this project spent a year
+# believing it built at -O2 while every published figure was measured at -O3,
+# and it silently swallowed the first attempt at this change too -- the
+# libraries came out 0.1% smaller, which was the giveaway.
+#
+# Setting the real variable here, after the language is enabled, is the one
+# place the answer cannot be appended to. Check it rather than trust it:
+#
+#     grep C_FLAGS build/<dir>/**/flags.make
+#
+# The rationale for -Os over -O3 is in the toolchain file and RESEARCH 57.
+set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG"
+    CACHE STRING "C flags for Release builds" FORCE)
+
 # ---------------------------------------------------------------- options ---
 
 option(AMINETXDUO_IPV6 "Build the IPv6 dual stack"                    OFF)

@@ -166,18 +166,29 @@ set(AMIGA_ARCH_FLAGS "${_amiga_cpu_flags_${AMINETXDUO_CPU}}"
 string(REPLACE ";" " " AMIGA_ARCH_FLAGS_STR "${AMIGA_ARCH_FLAGS}")
 
 set(CMAKE_C_FLAGS_INIT "${AMIGA_ARCH_FLAGS_STR} -fomit-frame-pointer -fno-strict-aliasing")
-# -O3, stated rather than inherited.  This used to say -O2 and had never once
-# produced an -O2 build: CMake's Compiler/GNU module APPENDS its own
-# "-O3 -DNDEBUG" after CMAKE_C_FLAGS_RELEASE_INIT, and the last -O on the
-# command line wins.  Every figure this project has published -- the checksum
-# and copy primitives, the crypto, the throughput numbers -- was measured on an
-# -O3 build while the file claimed -O2.
+# -Os, everywhere, and stated rather than inherited.  CMake's Compiler/GNU
+# module APPENDS its own "-O3 -DNDEBUG" after CMAKE_C_FLAGS_RELEASE_INIT and
+# the last -O on the command line wins, so this line has to name the level it
+# wants or it gets -O3 whatever it says.  It said -O2 for a long time and
+# produced -O3 builds throughout, which is how every published figure in this
+# project came to be measured at a level the file denied.
 #
-# Left at -O3 deliberately rather than "fixed" to -O2: -O3 is what everything
-# was measured at, and forcing -O2 would invalidate those numbers to honour a
-# comment.  src/tools appends -Os after this, which is why the commands are the
-# one thing that really is built for size.
-set(CMAKE_C_FLAGS_RELEASE_INIT "-O3 -DNDEBUG")
+# WHY -Os RATHER THAN -O3 (docs/RESEARCH.md 57)
+#
+# On a 68000 or an 020 with a 16-bit path to memory, instruction fetch IS the
+# bottleneck: there is no cache worth the name on a 68000, the 020's is 256
+# bytes, and everything competes for the same slow bus that the data is on.
+# Smaller code is faster code far more often than it is on a modern machine,
+# and -O3's unrolling and inlining buy speed with exactly the resource that is
+# scarcest here.
+#
+# The hot paths do not depend on the compiler for their speed and never did:
+# the checksum and copy primitives, the AES and ChaCha20 kernels are hand
+# written 68020 assembly, chosen and measured against C alternatives
+# (tests/crypto68k/crypto68k_bulk prints both).  So the optimiser is being
+# asked to make the OTHER 95% small, which is what it is good at, and anything
+# that turns out to matter gets hand written rather than a bigger -O.
+set(CMAKE_C_FLAGS_RELEASE_INIT "-Os -DNDEBUG")
 set(CMAKE_C_FLAGS_DEBUG_INIT "-O1 -g -DAMINETXDUO_DEBUG=1")
 
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM BEFORE)
