@@ -840,9 +840,22 @@ typedef struct
     UBYTE          cr_Buf[CON_RING_SIZE];
 } ConReader;
 
-static ConReader *con_reader;
-static BYTE       con_data_bit = -1;
-static BYTE       con_done_bit = -1;
+static ConReader   *con_reader;
+static BYTE         con_data_bit = -1;
+static BYTE         con_done_bit = -1;
+static volatile int con_intr;             /* a local Ctrl-C to feed the remote */
+
+static void con_ring_put(ConReader *cr, UBYTE b)
+{
+    ULONG head = cr->cr_Head;
+    ULONG next = (head + 1U) & (CON_RING_SIZE - 1U);
+
+    if (next != cr->cr_Tail)                   /* drop on overflow: typing is slow */
+    {
+        cr->cr_Buf[head] = b;
+        cr->cr_Head = next;
+    }
+}
 
 /* The child.  Picks cr up from the global, which is set before it is spawned. */
 static void con_child(void)
@@ -852,8 +865,6 @@ static void con_child(void)
 
     while (!cr->cr_Quit)
     {
-        ULONG head, next;
-
         if (!WaitForChar(cr->cr_Handle, CON_POLL_US))
             continue;                          /* nothing yet; re-check cr_Quit */
 
@@ -864,12 +875,18 @@ static void con_child(void)
             break;
         }
 
-        head = cr->cr_Head;
-        next = (head + 1U) & (CON_RING_SIZE - 1U);
-        if (next != cr->cr_Tail)               /* drop on overflow: typing is slow */
+        if ((UBYTE)c == 0x9B)
         {
-            cr->cr_Buf[head] = (UBYTE)c;
-            cr->cr_Head = next;
+            /* The Amiga console emits an 8-bit CSI (0x9B) to introduce a control
+               sequence -- arrow keys are 0x9B 'A'..'D'.  The server, and the
+               ncurses "amiga" terminfo, speak the 7-bit form ESC '[', and a lone
+               0x9B is not valid UTF-8 either, so rewrite it. */
+            con_ring_put(cr, 0x1B);
+            con_ring_put(cr, (UBYTE)'[');
+        }
+        else
+        {
+            con_ring_put(cr, (UBYTE)c);
         }
         Signal(cr->cr_Parent, cr->cr_DataSig);
     }
@@ -942,7 +959,7 @@ static int con_active(void)
 static int con_readable(void)
 {
     ConReader *cr = con_reader;
-    return cr != NULL && (cr->cr_Tail != cr->cr_Head || cr->cr_Eof);
+    return cr != NULL && (con_intr || cr->cr_Tail != cr->cr_Head || cr->cr_Eof);
 }
 
 /* The parent's read() of the console: drain the ring the child fills. */
@@ -951,6 +968,14 @@ static int con_read(void *buf, size_t len)
     ConReader *cr = con_reader;
     UBYTE     *out = (UBYTE *)buf;
     int        n = 0;
+
+    /* A Ctrl-C the local Shell raised goes to the remote as a literal ^C rather
+       than aborting the client -- select() sets con_intr; see there. */
+    if (con_intr && (size_t)n < len)
+    {
+        con_intr = 0;
+        out[n++] = 0x03;
+    }
 
     while ((size_t)n < len && cr->cr_Tail != cr->cr_Head)
     {
@@ -1101,12 +1126,21 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
         }
 
         /* Wait on the console keystroke signal alongside the sockets, so a key
-           wakes the same WaitSelect() the socket does -- the whole point. */
-        sigs = (con_watch && !con_readable()) ? con_reader->cr_DataSig : 0;
+           wakes the same WaitSelect() the socket does -- the whole point.  Take
+           Ctrl-C as a USER signal too: keeping it out of the break mask stops
+           WaitSelect from returning EINTR and the library reposting it, which is
+           the spin that locked the session up.  During an interactive session
+           Ctrl-C is a keystroke for the remote, not a local abort. */
+        sigs = 0;
+        if (con_watch && !con_readable()) sigs |= con_reader->cr_DataSig;
+        if (con_active())                 sigs |= SIGBREAKF_CTRL_C;
 
         rc = nx_waitselect(sock_n, &sock_r, &sock_w, NULL, (APTR)tv, &sigs);
         if (rc < 0)
             return -1;
+
+        if ((sigs & SIGBREAKF_CTRL_C) != 0)
+            con_intr = 1;
 
         for (fd = DB_SOCK_BASE; fd < nfds && fd < DB_SOCK_LIMIT; fd++)
         {
@@ -1116,7 +1150,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
             if (FD_ISSET((int)s, &sock_w)) { FD_SET(fd, &out_w); ready++; }
         }
 
-        if (con_watch && con_readable() && !FD_ISSET(con_fd, &out_r))
+        if (con_fd >= 0 && con_readable() && !FD_ISSET(con_fd, &out_r))
         {
             FD_SET(con_fd, &out_r);
             ready++;
@@ -1124,10 +1158,13 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
     }
     else if (con_watch && !con_readable())
     {
-        /* No socket in the set -- only the console.  Wait on its signal (a key
-           always ends it; an interactive loop always has the socket too, so
-           this is the rare case). */
-        Wait(con_reader->cr_DataSig);
+        /* No socket in the set -- only the console.  Wait on its signal or a
+           Ctrl-C (a key always ends it; an interactive loop always has the
+           socket too, so this is the rare case). */
+        ULONG got = Wait(con_reader->cr_DataSig | SIGBREAKF_CTRL_C);
+
+        if ((got & SIGBREAKF_CTRL_C) != 0)
+            con_intr = 1;
         if (con_readable()) { FD_SET(con_fd, &out_r); ready++; }
     }
     else if (other_ready == 0)
