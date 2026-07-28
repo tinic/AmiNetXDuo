@@ -1,28 +1,18 @@
 /*
- * CheckNetConfig -- read the configuration and say what is wrong with it.
+ * CheckNetConfig -- read the network configuration and report what is wrong
+ * with it.
  *
- * What this is for. A configuration that is wrong does not announce itself.
- * The stack comes up, every field it printed is individually correct, and
- * nothing works -- because the driver named in the interface file is not on
- * this machine, or the netmask makes the address its own network's broadcast,
- * or the router is on a network this Amiga is not on. The installer only helps
- * at install time, and after that there is nothing that reads the files and
- * says "line 3 names a driver you do not have".
+ *     CheckNetConfig QUIET/S,VERBOSE/S
  *
- * This is that. It reads every file the stack would read, applies the checks a
- * parser cannot -- the ones that need the rest of the configuration, or the
- * hardware -- and prints a file, a line and something to type.
+ * Reads every file the stack would read and prints a file, a line and
+ * something to type. Works with the network down: nothing here opens
+ * bsdsocket.library or asks the running stack anything.
  *
- * It works with the network down, and that is the whole point: the machine
- * that needs checking is the one where the stack did not come up. Nothing here
- * opens bsdsocket.library or asks the running stack anything.
- *
- * What it adds to the parser. src/config already reports bad syntax, unknown
- * keywords, a missing DEVICE line and a static interface with no ADDRESS,
- * every one of them with a line number, through the reporter hook that
- * tool_config_watch() installs. All of that is forwarded here rather than
- * rewritten, and the checks below are the ones the parser cannot make because
- * they need more than the one line in front of it:
+ * src/config already reports bad syntax, unknown keywords, a missing DEVICE
+ * line and a static interface with no ADDRESS, each with a line number,
+ * through the reporter hook tool_config_watch() installs. Those are forwarded
+ * rather than rewritten. The checks here are the ones needing more than a
+ * single line:
  *
  *   * the driver named exists on this machine, and the unit it names opens;
  *   * the netmask is a mask at all, and the address is a host on it rather
@@ -33,12 +23,13 @@
  *     default route that exists;
  *   * the netdb files parse as the columns they are meant to be.
  *
- * RETURN CODES. 0 when nothing was found, 5 (RETURN_WARN) when something was,
+ * Return codes: 0 when nothing was found, 5 (RETURN_WARN) when something was,
  * so a startup script can say
  *
  *     CheckNetConfig QUIET
  *     IF WARN
  *         echo "The network configuration needs attention."
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -70,9 +61,8 @@ enum
 /* ---------------------------------------------------------------- output --
  *
  * QUIET suppresses the findings but not the counting, so the return code is
- * the same either way -- that is what makes the script above work. Every
- * printing path in this command therefore goes through these three, and
- * tool_printf() is not called directly anywhere below.
+ * the same either way. Every printing path goes through these three;
+ * tool_printf() is not called directly below.
  */
 
 static BOOL  cnc_quiet;
@@ -101,9 +91,8 @@ static VOID note(const char *text)
 }
 
 /*
- * The one line QUIET does not suppress when VERBOSE asked for it: the verdict.
- * That combination is how a script gets "your configuration needs attention"
- * without the report that says why.
+ * The verdict: the one line QUIET does not suppress when VERBOSE is also
+ * given, so a script can print a summary without the full report.
  */
 static VOID verdict(const char *fmt, ...)
 {
@@ -118,8 +107,8 @@ static VOID verdict(const char *fmt, ...)
 }
 
 /*
- * The heading of a finding: which file, and which line of it. Counts first and
- * prints second, so QUIET changes what is shown and never what is returned.
+ * The heading of a finding: which file, and which line of it. Counts before
+ * printing, so QUIET changes what is shown and never what is returned.
  */
 static VOID finding(const char *file, ULONG line, UWORD severity)
 {
@@ -151,10 +140,8 @@ static VOID cnc_report(const AmiCfgProblem *problem, APTR user)
 
 /* --------------------------------------------------------------- reading --
  *
- * The files are read a second time, by hand, for one reason: to be able to say
- * WHICH LINE. Everything this command adds is about what a line means rather
- * than how it is written, and by the time the parser has a parsed AmiConfig it
- * has thrown the positions away.
+ * The files are read a second time, by hand, to be able to name a line number:
+ * a parsed AmiConfig no longer carries the positions.
  */
 
 /* TRUE when `line` begins with `keyword` as a whole word. */
@@ -228,8 +215,7 @@ static BOOL same_network(ULONG a, ULONG b, ULONG mask)
 
 /*
  * The first static interface whose network `addr` is on, or -1. DHCP
- * interfaces have no address until the lease arrives, so they cannot answer
- * this question and are skipped rather than guessed at.
+ * interfaces have no address until the lease arrives, so they are skipped.
  */
 static LONG network_holding(const AmiConfig *cfg, ULONG addr)
 {
@@ -279,14 +265,13 @@ static BOOL any_static_address(const AmiConfig *cfg)
 
 /* ------------------------------------------------------- the driver check --
  *
- * Roadshow's headline check, and the one that catches the commonest way for a
- * configuration to be wrong while looking right: the file names a driver that
- * is not on this machine, or names the wrong unit of one that is.
+ * Catches the commonest way for a configuration to be wrong while looking
+ * right: the file names a driver that is not on this machine, or the wrong
+ * unit of one that is.
  *
- * tool_explain_device() already asks the hardware rather than guessing -- it
- * probes the unit, and probes unit 0 as well when another was asked for -- so
- * the finding here is the one line that says where, and the explainer prints
- * what to do about it.
+ * tool_explain_device() asks the hardware -- it probes the unit, and unit 0
+ * too when another was asked for -- and prints what to do about it, so the
+ * finding here only says where.
  */
 static VOID check_device(const char *path, const AmiIfConfig *ifc)
 {
@@ -300,12 +285,10 @@ static VOID check_device(const char *path, const AmiIfConfig *ifc)
     line  = keyword_line(path, "DEVICE");
 
     /*
-     * The probe is skipped while the network is running, and this is not
-     * caution -- it is correctness. The stack has the card's driver open, and
-     * a second OpenDevice() of a unit already in use fails; probing here would
-     * report a perfectly good interface as broken on exactly the machine where
-     * it is demonstrably working. Whether the card opens is answered by the
-     * network being up, and ShowNetStatus reports the rest.
+     * The probe is skipped while the network is running: the stack has the
+     * driver open and a second OpenDevice() of a unit already in use fails,
+     * which would report a working interface as broken. The network being up
+     * already answers whether the card opens; ShowNetStatus reports the rest.
      */
     if (where != NULL && tool_stack_library_running())
         return;
@@ -325,10 +308,7 @@ static VOID check_device(const char *path, const AmiIfConfig *ifc)
     if (tool_device_probe(ifc->device, ifc->unit) == 0)
         return;                     /* installed, and it opens */
 
-    /*
-     * The unit rather than the driver: the driver is here, so the line the
-     * reader has to look at is the one that picks which card on it.
-     */
+    /* The driver is present, so the line to look at is the UNIT one. */
     line = keyword_line(path, "UNIT");
 
     finding(path, line, AMI_CFG_PROBLEM_ERROR);
@@ -346,10 +326,9 @@ static VOID check_addressing(const char *path, const AmiIfConfig *ifc)
     UWORD prefix;
 
     /*
-     * An interface that is given its address at run time has nothing here to
-     * check: the file says DHCP and the fields are zero on purpose. An ADDRESS
-     * line alongside CONFIGURE=DHCP is a request for a particular lease and is
-     * checked like a static one.
+     * An interface addressed at run time has nothing to check: the file says
+     * DHCP and the fields are zero. An ADDRESS line alongside CONFIGURE=DHCP
+     * requests a particular lease, and is checked like a static address.
      */
     if (ifc->address == 0)
         return;
@@ -456,9 +435,8 @@ static VOID check_gateway(const AmiConfig *cfg)
     if (cfg->default_gateway == 0)
     {
         /*
-         * No default route. That is only a problem when nothing is going to
-         * supply one: a DHCP lease carries the router with it, so complaining
-         * here would be a false alarm on the commonest setup there is.
+         * No default route is only a problem when nothing will supply one: a
+         * DHCP lease carries the router with it.
          */
         if (any_dynamic(cfg) || cfg->interface_count == 0)
             return;
@@ -497,10 +475,9 @@ static VOID check_gateway(const AmiConfig *cfg)
     }
 
     /*
-     * The router has to be on a network this machine is on, or packets sent to
-     * it never leave. Only checkable when an address is written down: with
-     * DHCP the lease decides, and the router it hands out is right by
-     * construction.
+     * The router has to be on a network this machine is on, or packets sent
+     * to it never leave. Only checkable with a static address: with DHCP the
+     * lease decides, and the router it hands out is correct by construction.
      */
     if (!any_static_address(cfg) || any_dynamic(cfg))
         return;
@@ -568,14 +545,11 @@ static VOID check_resolver(const AmiConfig *cfg)
 /* ------------------------------------------------- the whole-drawer checks */
 
 /*
- * Two interfaces on one card, or two interfaces with one address. Either is a
- * configuration that parses perfectly and produces a machine where one of the
- * two silently does nothing.
+ * Two interfaces on one card, or two with one address: both parse cleanly and
+ * leave one of the pair silently doing nothing.
  *
- * The finding is against the DRAWER and not against either file, because
- * nothing here can tell which of the two is the mistake -- and picking one
- * accuses a file that may well be the correct one. Both are named instead, and
- * the reader knows which they meant.
+ * The finding is against the drawer rather than either file, since nothing
+ * here can tell which of the two is the mistake. Both are named.
  */
 static VOID check_collisions(const AmiConfig *cfg)
 {
@@ -621,9 +595,8 @@ static VOID check_collisions(const AmiConfig *cfg)
 
 /*
  * Interface files the stack will never look at. The parsed configuration holds
- * AMI_CFG_MAX_INTERFACES of them and the drawer may hold more, and the ones
- * past the end are dropped in silence -- alphabetically, so it is not even the
- * last file written that goes.
+ * AMI_CFG_MAX_INTERFACES and the drawer may hold more; the rest are dropped
+ * silently, in alphabetical order rather than by write time.
  */
 static VOID check_drawer_size(const AmiConfig *cfg)
 {
@@ -650,8 +623,8 @@ static VOID check_drawer_size(const AmiConfig *cfg)
 /*
  * Roadshow keeps interface files it is not to start at boot in
  * SYS:Storage/NetInterfaces, and a machine migrated from it will have them.
- * They are not a fault -- they are a fact worth knowing, because "I wrote the
- * file and nothing happened" is exactly what having one there feels like.
+ * Reported as information, not as a fault: they explain "I wrote the file and
+ * nothing happened".
  */
 static VOID check_storage_drawer(VOID)
 {
@@ -675,15 +648,13 @@ static VOID check_storage_drawer(VOID)
 
 /* ---------------------------------------------------------- the netdb files
  *
- * These four back get{host,net,proto,serv}by*(), and src/config/netdb.c drops
- * a line it cannot use without saying anything -- which is right for a stack
- * that must come up regardless, and is exactly the silence this command is
- * for.
+ * These back get{host,net,proto,serv}by*(). src/config/netdb.c drops a line it
+ * cannot use without saying anything, which is right for a stack that must
+ * come up regardless.
  *
- * DEVS:Internet/networks is deliberately NOT checked. Its second column is a
- * network number, which may be written short ("10", "192.168.1"), and a
- * checker that flags those would fire on correct files. A check that goes off
- * when nothing is wrong gets ignored, and then it protects nothing.
+ * DEVS:Internet/networks is not checked: its second column is a network
+ * number, which may be written short ("10", "192.168.1"), so a checker would
+ * fire on correct files.
  */
 
 #define CNC_COL_ADDRESS     0       /* a dotted quad                          */
@@ -790,8 +761,8 @@ static BOOL column_is_valid(UWORD kind, const char *text)
 
 /*
  * AmiTCP installations put resolver settings in the hosts file, and
- * ami_config_load() reads them from there on purpose. They are not netdb
- * entries and must not be reported as broken ones.
+ * ami_config_load() reads them from there. They are not netdb entries, so they
+ * must not be reported as broken ones.
  */
 static BOOL is_resolver_line(const char *line)
 {
@@ -847,7 +818,7 @@ static VOID check_netdb_file(const NetdbFile *spec)
 
         /*
          * A file with the wrong format throughout would otherwise produce one
-         * finding per line and bury everything else this command found.
+         * finding per line and bury every other finding.
          */
         if (said >= 5)
         {
@@ -863,7 +834,7 @@ static VOID check_netdb_file(const NetdbFile *spec)
 
 /* --------------------------------------------------------------- the run -- */
 
-/* Static: an AmiConfig is far more than a Shell command's 4 KB stack holds. */
+/* Static: an AmiConfig is far larger than a Shell command's 4 KB stack. */
 static AmiConfig cnc_config;
 
 static VOID check_interfaces(const AmiConfig *cfg)
@@ -935,9 +906,9 @@ int main(int argc, char **argv)
     }
 
     /*
-     * Everything the parser itself finds -- bad syntax, unknown keywords, a
-     * missing DEVICE line, a static interface with no address -- arrives
-     * through this hook with the file and the line already attached.
+     * Everything the parser finds -- bad syntax, unknown keywords, a missing
+     * DEVICE line, a static interface with no address -- arrives through this
+     * hook with the file and line already attached.
      */
     ami_config_set_reporter(cnc_report, NULL);
     (VOID)ami_config_load(&cnc_config);

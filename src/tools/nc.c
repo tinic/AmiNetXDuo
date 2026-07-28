@@ -1,10 +1,8 @@
 /*
- * nc -- netcat.  Shovel bytes between a socket and the Shell.
+ * nc -- netcat.  Copy bytes between a socket and the Shell.
  *
  *     nc HOST,PORT,LISTEN=-l/S,UDP=-u/S,SCAN=-z/S,TIMEOUT=-w/N/K,
  *        LOCALPORT=-p/N/K,VERBOSE=-v/S,CRLF/S
- *
- * Three things in one command, as everywhere else:
  *
  *   nc HOST PORT      connect, and copy standard input to it and it to
  *                     standard output until one end stops.
@@ -12,21 +10,18 @@
  *   nc -z HOST PORT   connect, say whether it worked, and stop.  PORT may be
  *                     a range, "20-25", which is a port scan.
  *
- *   Every other network command in this tree is a client: it calls socket()
- *   and connect() and nothing else.  `nc -l` is the first thing here that
- *   calls bind(), listen() and accept(), which is half of the socket ABI and
- *   was until now exercised only by the conformance probe.  A stack that gets
- *   the client half right and the server half wrong looks perfectly healthy
- *   from `fetch`.
+ * Every other network command in this tree is a client: socket() and
+ * connect().  `nc -l` is the only one calling bind(), listen() and accept(),
+ * so outside the conformance probe it is the only coverage of the server half
+ * of the socket ABI.
  *
- *   Not a proxy, not -e (running a program on the far end of a socket is a
- *   remote shell, and nobody should ship one by accident), and it takes one
- *   caller in listen mode rather than staying up for the next.  UDP is here
- *   because it costs two `if`s: connect() on a datagram socket is only a
- *   remembered destination, which is exactly what this needs.
+ * No proxy mode and no -e (running a program on the far end of a socket is a
+ * remote shell).  Listen mode takes one caller and then exits.  UDP costs two
+ * `if`s: connect() on a datagram socket is only a remembered destination,
+ * which is all this needs.
  *
- *   End of input does not close the connection unless -N says so, which is
- *   OpenBSD nc's rule -- see the comment on -N in nc_shovel().
+ * End of input does not close the connection unless -N says so, following
+ * OpenBSD nc -- see the comment on -N in nc_shovel().
  *
  * SPDX-License-Identifier: MIT
  */
@@ -59,8 +54,8 @@ enum
 
 /*
  * Static, not automatic: a Shell command gets whatever stack the Shell has --
- * 4 KB on a stock Kickstart 3.1 -- and these are 12 KB between them.  Same
- * reasoning as src/tools/fetch.c.
+ * 4 KB on a stock Kickstart 3.1 -- and these are 12 KB between them.  Same as
+ * src/tools/fetch.c.
  */
 #define NC_CHUNK        4096
 
@@ -146,16 +141,15 @@ static BOOL parse_range(const char *text, UWORD *lo, UWORD *hi)
 /*
  * connect(), with a ceiling on how long it may take.
  *
- * The plain call blocks for as long as the stack's own retransmit schedule
- * says, which on an unreachable address is the better part of a minute.  With
- * TIMEOUT the socket goes non-blocking (FIONBIO), the connect returns
- * EINPROGRESS, and WaitSelect() watches the WRITE set -- which is how BSD has
- * always spelled "tell me when the handshake finishes".  SO_ERROR then says
- * whether it finished or failed.
+ * The plain call blocks for the stack's whole retransmit schedule, which on an
+ * unreachable address is the better part of a minute.  With TIMEOUT the socket
+ * goes non-blocking (FIONBIO), the connect returns EINPROGRESS, and
+ * WaitSelect() watches the write set for the end of the handshake.  SO_ERROR
+ * then says whether it finished or failed.
  *
- * 0 on success, -1 on failure, -2 on timeout.  Nothing is printed: a port
- * scan calls this once per port and would drown in it, so the reason comes
- * back in *why and the caller decides whether it is worth saying.
+ * 0 on success, -1 on failure, -2 on timeout.  Nothing is printed; the errno
+ * comes back in *why, so a port scan calling this once per port decides for
+ * itself what to report.
  */
 #define NC_TIMED_OUT    (-2)
 
@@ -183,7 +177,7 @@ static LONG nc_connect(struct Library *sb, LONG sock, const ToolSockAddr *sa,
     if (tool_sock_ioctl(sb, sock, TOOL_FIONBIO, &nonblock) != 0)
     {
         /* No non-blocking mode: the blocking call is still correct, it just
-           cannot be cut short.  Say nothing and do the right thing. */
+           cannot be cut short. */
         if (tool_sock_connect(sb, sock, sa) == 0)
             return 0;
 
@@ -220,9 +214,8 @@ static LONG nc_connect(struct Library *sb, LONG sock, const ToolSockAddr *sa,
                                  &err, &errlen) != 0)
         {
             /*
-             * No SO_ERROR to read.  A second connect() on a socket that is
-             * already through reports EISCONN and one that failed reports the
-             * real reason, so ask that way instead.
+             * No SO_ERROR to read.  A second connect() reports EISCONN if the
+             * socket is already through, and the real reason if it failed.
              */
             err = (tool_sock_connect(sb, sock, sa) == 0)
                       ? 0 : tool_sock_errno(sb);
@@ -247,15 +240,13 @@ static LONG nc_connect(struct Library *sb, LONG sock, const ToolSockAddr *sa,
 /* --------------------------------------------------------------- shovel --- */
 
 /*
- * The transfer itself: everything standard input produces goes to the socket,
- * everything the socket produces goes to standard output, until one of them
- * stops.
+ * The transfer itself: standard input to the socket, the socket to standard
+ * output, until one of them stops.
  *
- * The two halves are polled rather than waited on together, because they are
- * different kinds of thing: WaitSelect() understands sockets and knows nothing
- * about a DOS handle, and there is no Amiga call that waits on both.  A 50 ms
- * poll is imperceptible at a keyboard and costs nothing on a bulk transfer,
- * where the socket is ready every time round.
+ * The two halves are polled rather than waited on together: WaitSelect()
+ * handles sockets and knows nothing about a DOS handle, and no Amiga call
+ * waits on both.  A 50 ms poll is imperceptible at a keyboard and costs
+ * nothing on a bulk transfer, where the socket is ready every time round.
  *
  * When standard input ends the write half is shut down rather than the whole
  * socket, so `nc host 80 <request.txt` still reads the answer.
@@ -296,20 +287,15 @@ static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
             if (n == 0 && opt->halfclose)
             {
                 /*
-                 * -N: end of input sends a FIN, so a far end that is
-                 * waiting for the end of the request can answer it.
+                 * -N: end of input sends a FIN, so a far end waiting for the
+                 * end of the request can answer it.  Off by default, as in
+                 * OpenBSD nc since 2015; HTTP/1.0 and other "send a file,
+                 * then read the reply" protocols need it.
                  *
-                 * Off by default, which is OpenBSD nc's rule and has been
-                 * since 2015: a connection that goes on carrying the answer
-                 * is the more useful default, and the caller is the one who
-                 * knows whether the protocol needs the FIN.  HTTP/1.0 and
-                 * every "send a file, then read the reply" case do.
-                 *
-                 * This is also the switch that found the half-close defect in
-                 * bsdsocket.library -- a same-machine shutdown(SHUT_WR) used
-                 * to wedge the caller where not even Ctrl-C reached it.
-                 * Fixed in the library, not here; docs/RESEARCH.md has the
-                 * bisect.
+                 * This switch found the half-close defect in
+                 * bsdsocket.library, where a same-machine shutdown(SHUT_WR)
+                 * wedged the caller past Ctrl-C.  Fixed in the library, not
+                 * here; docs/RESEARCH.md has the bisect.
                  */
                 if (!opt->udp && !wrote_eof)
                 {
@@ -344,9 +330,9 @@ static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
                     len = o;
                 }
 
-                /* Both modes reach here on a connected socket -- a datagram
-                   socket included, where connect() is only a remembered
-                   destination -- so one send() covers all four cases. */
+                /* Both modes reach here on a connected socket, datagram
+                   included, where connect() is only a remembered destination,
+                   so one send() covers all four cases. */
                 n = tool_sock_send(sb, sock, out, len);
 
                 if (n != len)
@@ -406,11 +392,10 @@ static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
             }
 
             /*
-             * Ready, and then nothing there.  It happens -- a select() that
-             * wakes for a state change rather than for data is within its
-             * rights -- and the naive answer, `continue`, is a spin at full
-             * CPU that no timeout can end because it never waits.  So this
-             * counts as an idle tick like any other and is paced like one.
+             * Ready, and then nothing there: select() may wake for a state
+             * change rather than for data.  A bare `continue` would spin at
+             * full CPU and never wait, so no timeout could end it; count this
+             * as an idle tick and pace it like one.
              */
             ready = 0;
             (VOID)tool_delay_ticks(2);      /* ~40 ms, near the poll period */
@@ -451,10 +436,9 @@ static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
 /*
  * bind(), listen(), accept() -- the half of the ABI a client never reaches.
  *
- * SO_REUSEADDR goes on first, and not as a formality: a listener that has just
- * exited leaves the port in TIME-WAIT, and without it the next `nc -l` on the
- * same port fails with "address already in use" for two minutes.  That is the
- * single most common way a hand-run listener looks broken.
+ * SO_REUSEADDR goes on first: a listener that has just exited leaves the port
+ * in TIME-WAIT, and without it the next `nc -l` on the same port fails with
+ * "address already in use" for two minutes.
  */
 static LONG nc_listen(struct Library *sb, const NcOptions *opt, ULONG bindaddr,
                       UWORD port, LONG *accepted)
@@ -503,8 +487,7 @@ static LONG nc_listen(struct Library *sb, const NcOptions *opt, ULONG bindaddr,
     {
         /*
          * A datagram listener has nothing to accept.  It waits for the first
-         * packet, and whoever sent it becomes the peer -- which is what every
-         * netcat does and what makes `nc -u -l` usable at all.
+         * packet, and whoever sent it becomes the peer, as in every netcat.
          */
         LONG n;
 
@@ -560,7 +543,7 @@ static LONG nc_listen(struct Library *sb, const NcOptions *opt, ULONG bindaddr,
         tool_printf("listening on port %ld\n", (LONG)port);
 
     /*
-     * accept() blocks, and a blocked accept() cannot see Ctrl-C.  So it is
+     * accept() blocks, and a blocked accept() cannot see Ctrl-C, so it is
      * armed through WaitSelect() first -- a listening socket becomes readable
      * exactly when there is a connection to take -- which gives the break a
      * place to be noticed and TIMEOUT somewhere to apply.
@@ -755,8 +738,8 @@ int main(int argc, char **argv)
     portspec = (const char *)args[ARG_PORT];
 
     /*
-     * "nc -l 1234" is what everybody types, and it leaves the port sitting in
-     * the HOST position.  Nothing else can be meant, so take it.
+     * "nc -l 1234" leaves the port sitting in the HOST position.  Nothing
+     * else can be meant there, so take it as the port.
      */
     if (opt.listen && portspec == NULL)
     {
@@ -835,8 +818,8 @@ int main(int argc, char **argv)
 
     if (opt.listen)
     {
-        /* A host in listen mode is the local address to bind to, which is how
-           a machine with two interfaces says "only this one". */
+        /* A host in listen mode is the local address to bind to, so a machine
+           with two interfaces can listen on just one. */
         if (host != NULL && !tool_sock_resolve(sb, host, &address))
         {
             CloseLibrary(sb);
@@ -876,8 +859,8 @@ int main(int argc, char **argv)
             return RETURN_FAIL;
         }
 
-        /* -p pins the local port, which is what a firewall on the far side
-           may be written against. */
+        /* -p pins the local port, which a firewall on the far side may be
+           written against. */
         if (opt.localport != 0)
         {
             ToolSockAddr local;

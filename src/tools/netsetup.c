@@ -4,31 +4,28 @@
  *     NetSetup [NAME] [DEVICE=..] [UNIT=n] [DHCP] [ADDRESS=..] [NETMASK=..]
  *              [GATEWAY=..] [DNS=..] [ONLINE] [NOONLINE] [FORCE] [QUIET]
  *
- * This is the command that turns "create DEVS:NetInterfaces/eth0 with the
- * right keywords in it" into four questions. It exists because the format of
- * those files is only obvious to somebody who already knows what a SANA-II
- * driver is, and everyone has to not know that once.
+ * Writes the DEVS:NetInterfaces/<name> keyword file from a few questions,
+ * instead of requiring the SANA-II driver details to be known up front.
  *
- * What it does, in order:
+ * In order:
  *
- *   1. looks for the network drivers actually installed on this machine and
- *      offers them as a numbered list -- no typing device names from memory;
+ *   1. lists the network drivers installed on this machine as a numbered
+ *      choice;
  *   2. opens the chosen driver to check the card answers, before writing
- *      anything, so a wrong unit number is caught in the question rather than
+ *      anything, so a wrong unit number is caught at the question rather than
  *      three commands later;
- *   3. asks whether the address should be handed out (DHCP) or set here, and
- *      validates every value as it is typed;
- *   4. shows exactly what it is about to write and asks;
+ *   3. asks whether the address is handed out (DHCP) or set here, validating
+ *      every value as it is typed;
+ *   4. shows what it is about to write and asks;
  *   5. writes DEVS:NetInterfaces/<name>, and DEVS:Internet/routes and
  *      name_resolution when a fixed address needs them;
- *   6. offers to start the network there and then, so the answer to "did that
- *      work?" arrives now rather than after a reboot.
+ *   6. offers to start the network there and then.
  *
- * Two rules run through all of it. Nothing is written until the last
- * question is answered -- every file is composed in memory first, and an
- * existing file is renamed to .old rather than overwritten, so an abort or a
- * full disk cannot leave a half-written configuration behind. And Q or Ctrl-C
- * at any question stops with the disk untouched.
+ * Nothing is written until the last question is answered: every file is
+ * composed in memory first, and an existing file is renamed to .old rather
+ * than overwritten, so an abort or a full disk cannot leave a half-written
+ * configuration behind. Q or Ctrl-C at any question stops with the disk
+ * untouched.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -87,9 +84,9 @@ typedef struct Plan
 
 /*
  * Abort is a state rather than a return code because every question can hit
- * it: Ctrl-C, "Q", or end of input (which is what a NetSetup driven from a
- * script that ran out of answers looks like -- and stopping there, having
- * written nothing, is the only safe thing to do).
+ * it: Ctrl-C, "Q", or end of input -- which is what NetSetup driven from a
+ * script that ran out of answers looks like, and it stops having written
+ * nothing.
  */
 static BOOL setup_aborted;
 
@@ -100,9 +97,9 @@ static VOID abort_setup(const char *why)
 }
 
 /*
- * One line from the user, with the prompt flushed first. Returns NULL once
- * the setup has been aborted -- callers test setup_aborted rather than
- * threading an error code through every question.
+ * One line from the user, with the prompt flushed first. Returns NULL once the
+ * setup has been aborted; callers test setup_aborted rather than threading an
+ * error code through every question.
  */
 static char *ask(const char *prompt, const char *suggestion, char *buf)
 {
@@ -158,10 +155,9 @@ static char *ask(const char *prompt, const char *suggestion, char *buf)
     }
 
     /*
-     * A console echoes what was typed, including the Return. A file does not,
-     * so a NetSetup driven from a script would otherwise print its questions
-     * run together with no sign of the answers. Echo them -- before acting on
-     * the answer, so that a transcript shows the Q that stopped it too.
+     * A console echoes what was typed; a file does not, so a scripted run
+     * would print its questions run together with no sign of the answers. Echo
+     * before acting on the answer, so a transcript shows the Q that stopped it.
      */
     if (!IsInteractive(Input()))
         tool_printf("%s\n", (LONG)buf);
@@ -283,11 +279,9 @@ static BOOL name_is_sane(const char *name)
 /* ---------------------------------------------------------------- writing -- */
 
 /*
- * Files are built here in full and written in one go at the end. Nothing
- * about this is clever; it is just the only way to guarantee that an abort,
+ * Files are built here in full and written in one go at the end, so an abort,
  * an out-of-disk or a Ctrl-C cannot leave DEVS:NetInterfaces holding half a
- * file, which is a state the stack would then read and complain about
- * forever.
+ * file for the stack to read and complain about.
  */
 typedef struct Blob
 {
@@ -616,10 +610,9 @@ static BOOL ask_device(Plan *plan)
 }
 
 /*
- * Ask the card whether it is really there. This is the whole reason NetSetup
- * probes before it writes: a wrong unit or a driver for a card that is not
- * fitted is otherwise found out much later, by a command that can only say
- * "would not open".
+ * Ask the card whether it is really there, before anything is written: a wrong
+ * unit, or a driver for a card that is not fitted, is otherwise found out much
+ * later by a command that can only say "would not open".
  */
 static BOOL check_device(Plan *plan, BOOL quiet)
 {
@@ -851,20 +844,18 @@ static VOID bring_up(const Plan *plan)
     tool_printf("\n%s\n", (LONG)line);
 
     /*
-     * Run the real command rather than starting the stack here: whatever
-     * AddNetInterface would tell the user about a failure is exactly what
-     * they should see, and there is then only one place that knows how to
-     * start a network.
+     * Run the real command rather than starting the stack here, so only one
+     * place knows how to start a network and the user sees whatever
+     * AddNetInterface says about a failure.
      */
     rc = SystemTagList((CONST_STRPTR)line, NULL);
 
     if (rc == -1)
     {
         /*
-         * Not on the command path. That happens on a machine where the
-         * commands have not been copied to C: yet -- including, usefully, the
-         * moment just after an installer unpacked them somewhere else -- so
-         * try alongside ourselves before giving up.
+         * Not on the command path: the commands may not have been copied to C:
+         * yet, as just after an installer unpacked them elsewhere. Try
+         * alongside ourselves before giving up.
          */
         char alt[PATH_LEN + 40];
 
@@ -1007,9 +998,9 @@ int main(int argc, char **argv)
         plan.netmask = default_netmask(plan.address);
 
     /*
-     * Fully specified on the command line -- a driver and a way of getting an
-     * address -- means nothing needs to be asked. That is what makes NetSetup
-     * usable from an installer script as well as from a Shell.
+     * A driver plus a way of getting an address is a full specification, so
+     * nothing needs to be asked; that is what makes NetSetup usable from an
+     * installer script as well as from a Shell.
      */
     interactive = (BOOL)!(plan.device[0] != '\0' &&
                           (plan.dhcp || plan.address != 0));
@@ -1123,9 +1114,9 @@ int main(int argc, char **argv)
     else if (tool_exists(ifpath) && args[ARG_FORCE] == 0)
     {
         /*
-         * Nobody is being asked anything, so an existing interface file is
-         * not ours to replace on a guess -- an installer re-run must not
-         * quietly discard a configuration somebody spent an evening on.
+         * Nobody is being asked anything, so an existing interface file is not
+         * replaced on a guess: an installer re-run must not quietly discard a
+         * working configuration.
          */
         tool_error("%s already exists", (LONG)ifpath);
         tool_advise_blank();

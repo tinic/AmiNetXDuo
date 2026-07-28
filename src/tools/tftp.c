@@ -9,30 +9,23 @@
  *   PORT     the server's port. Default 69.
  *   TIMEOUT  seconds to wait for a block before asking again. Default 5.
  *
- * One transfer per command, which is what a script wants. There is no
- * interactive prompt and no `mget`: a command that stops to ask cannot be put
- * in a script, and everything TFTP is still used for -- ROM images, boot
- * files, a router's configuration -- is one file at a time.
+ * One transfer per command: no interactive prompt and no `mget`, so it can be
+ * driven from a script.
  *
- *   RFC 1350's other mode, netascii, rewrites line endings in transit. That
- *   silently destroys every binary anybody actually moves with this protocol,
- *   and a switch that offers it would be a switch whose only use is to corrupt
- *   a ROM image. Every TFTP server in existence accepts octet.
+ *   Octet mode only. RFC 1350's other mode, netascii, rewrites line endings in
+ *   transit, which corrupts any binary moved with it. Every TFTP server
+ *   accepts octet.
  *
- *   NetX Duo's TFTP add-on has one and it wants FileX, a filesystem this
- *   machine does not have and does not need, having AmigaDOS (docs/RESEARCH.md
- *   5.4). Its client would build -- but it is not what is used here either,
- *   because the protocol is a couple of hundred lines over the socket API and
- *   a command written that way runs on Roadshow and AmiTCP too.
+ *   NetX Duo's TFTP add-on wants FileX, a filesystem this machine does not
+ *   have and does not need, having AmigaDOS (docs/RESEARCH.md 5.4). Its client
+ *   would build, but the protocol is a couple of hundred lines over the socket
+ *   API, and written that way the command runs on Roadshow and AmiTCP too.
  *
- * The transfer identifier, which is the part people get wrong
- *
- *   The request goes to port 69. The answer comes from a DIFFERENT port that
- *   the server picked, and every later packet of the transfer belongs to that
- *   port alone. So the first reply fixes the peer, and anything that arrives
- *   afterwards from anywhere else is sent an ERROR and otherwise ignored --
- *   RFC 1350 section 4, and the reason one server can run two transfers at
- *   once.
+ * Transfer identifiers: the request goes to port 69, but the answer comes from
+ * a different port the server picked, and every later packet of the transfer
+ * belongs to that port alone. The first reply fixes the peer; anything
+ * arriving afterwards from elsewhere is sent an ERROR and otherwise ignored
+ * (RFC 1350 section 4). That is how one server runs two transfers at once.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -75,9 +68,9 @@ enum
 #define TFTP_BREAK      (-2)
 
 /*
- * Static rather than automatic: a Shell command gets whatever stack the Shell
- * has, which on a stock Kickstart 3.1 is 4 KB, and these are a kilobyte and a
- * half between them. Same reasoning as nc and fetch.
+ * Static rather than automatic: a Shell command gets the Shell's stack, 4 KB
+ * on a stock Kickstart 3.1, and these are a kilobyte and a half between them.
+ * Same as nc and fetch.
  */
 static UBYTE tftp_out[TFTP_BLOCK + 4];
 static UBYTE tftp_in[TFTP_BLOCK + 4 + 64];
@@ -106,10 +99,8 @@ static ULONG tftp_strlen(const char *s)
 }
 
 /*
- * "DH0:roms/kick.rom" -> "kick.rom".
- *
- * Both separators, because one end of this transfer names its files the
- * AmigaDOS way and the other almost always names them the Unix way.
+ * "DH0:roms/kick.rom" -> "kick.rom". Both separators, since one end of the
+ * transfer names files the AmigaDOS way and the other the Unix way.
  */
 static const char *tftp_basename(const char *path)
 {
@@ -126,11 +117,9 @@ static const char *tftp_basename(const char *path)
 }
 
 /*
- * The server's own error, as a sentence.
- *
- * The text is printed as it stands where there is any -- it is the only thing
- * that says which file, or why -- but the code is named as well, because
- * plenty of servers send an empty string with it.
+ * The server's own error, as a sentence. The server's text is printed where
+ * there is any, since it is the only thing that says which file or why, but
+ * the code is named as well: plenty of servers send an empty string.
  */
 static const char *tftp_error_name(UWORD code)
 {
@@ -168,7 +157,7 @@ static VOID tftp_report_error(const UBYTE *buf, LONG len)
         tool_error("%s", (LONG)tftp_error_name(code));
 }
 
-/* RFC 1350's answer to a packet from the wrong port: go away. */
+/* RFC 1350's answer to a packet from the wrong port. */
 static VOID tftp_stray(struct Library *sb, LONG sock, const ToolSockAddr *who)
 {
     static const char msg[] = "unknown transfer ID";
@@ -185,7 +174,7 @@ static VOID tftp_stray(struct Library *sb, LONG sock, const ToolSockAddr *who)
 
 /*
  * A request packet -- opcode, filename, 0, "octet", 0 -- built into tftp_out.
- * Its length, or 0 when the name will not fit.
+ * Returns its length, or 0 when the name will not fit.
  */
 static ULONG tftp_build_request(UWORD opcode, const char *name)
 {
@@ -211,11 +200,9 @@ static ULONG tftp_build_request(UWORD opcode, const char *name)
 }
 
 /*
- * Wait for one packet, at most `secs` seconds.
- *
- * Bytes received, 0 on timeout, TFTP_BROKEN on a failed socket, TFTP_BREAK on
- * Ctrl-C. The wait is cut into 200 ms slices so that a break is noticed while
- * a dead server is being waited for, which is the case where it matters.
+ * Wait for one packet, at most `secs` seconds. Returns bytes received, 0 on
+ * timeout, TFTP_BROKEN on a failed socket, TFTP_BREAK on Ctrl-C. The wait is
+ * cut into 200 ms slices so a break is noticed while waiting on a dead server.
  */
 static LONG tftp_wait(struct Library *sb, LONG sock, ULONG secs,
                       ToolSockAddr *from)
@@ -266,11 +253,9 @@ static BOOL tftp_same(const ToolSockAddr *a, const ToolSockAddr *b)
 }
 
 /*
- * Everything both directions share.
- *
- * `last` is whatever was last sent -- the request, an ACK or a DATA block --
- * because TFTP's entire reliability mechanism is "send it again", and the
- * thing to send again is always the last thing sent.
+ * Everything both directions share. `last` is whatever was last sent -- the
+ * request, an ACK or a DATA block -- since TFTP's entire reliability mechanism
+ * is sending that again.
  */
 typedef struct TftpXfer
 {
@@ -307,11 +292,8 @@ static BOOL tftp_send_last(TftpXfer *x)
 }
 
 /*
- * One dot per 32 KB, so a big transfer over a slow link looks alive.
- *
- * Nothing at all for a small one: a file that arrives in a second does not
- * need a progress display, and an empty line where one might have been is
- * worse than no line.
+ * One dot per 32 KB, so a big transfer over a slow link looks alive. Nothing
+ * at all for a small one.
  */
 static VOID tftp_tick(TftpXfer *x)
 {
@@ -327,10 +309,9 @@ static VOID tftp_tick(TftpXfer *x)
 
 /*
  * Wait for the reply this side is expecting, re-sending on each timeout.
- *
- * `want_op` is TFTP_DATA or TFTP_ACK and `want_block` the block number. The
- * length of the accepted packet in tftp_in, or one of the negative codes; 0
- * means the server stopped answering.
+ * `want_op` is TFTP_DATA or TFTP_ACK and `want_block` the block number.
+ * Returns the length of the accepted packet in tftp_in, one of the negative
+ * codes, or 0 when the server stopped answering.
  */
 static LONG tftp_await(TftpXfer *x, UWORD want_op, UWORD want_block)
 {
@@ -388,11 +369,10 @@ static LONG tftp_await(TftpXfer *x, UWORD want_op, UWORD want_block)
             return n;
 
         /*
-         * A block we have already dealt with, whose acknowledgement was lost.
-         * On a GET the answer is to acknowledge it AGAIN without advancing --
-         * advancing is the "sorcerer's apprentice" bug, which doubles every
-         * packet on the wire for the rest of the transfer. On a PUT an old ACK
-         * is simply ignored.
+         * A block already dealt with, whose acknowledgement was lost. On a GET
+         * it is acknowledged again without advancing; advancing is the
+         * "sorcerer's apprentice" bug, which doubles every packet on the wire
+         * for the rest of the transfer. On a PUT an old ACK is ignored.
          */
         if (want_op == TFTP_DATA)
         {
@@ -585,8 +565,8 @@ static LONG tftp_put(TftpXfer *x, const char *local, const char *remote)
 
         /*
          * A file that is an exact multiple of 512 bytes ends with an empty
-         * DATA block, which is why this is a flag rather than a `break`: the
-         * empty block still has to be sent and acknowledged.
+         * DATA block, so this is a flag rather than a `break`: that block
+         * still has to be sent and acknowledged.
          */
         final = (got < TFTP_BLOCK) ? TRUE : FALSE;
     }
@@ -677,10 +657,9 @@ int main(int argc, char **argv)
     x.last_len  = 0;
 
     /*
-     * The two names. Only one of them is ever given, so the other is that one
-     * without its directory -- `tftp box GET pub/kick.rom` writing kick.rom
-     * into the current drawer is the case that has to be pleasant, and AS is
-     * there for when it is not what was wanted.
+     * The two names. Only one is ever given, so the other is that one without
+     * its directory: `tftp box GET pub/kick.rom` writes kick.rom into the
+     * current drawer. AS overrides it.
      */
     if (get != NULL)
     {

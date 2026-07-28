@@ -2,21 +2,20 @@
  * ToolsSmoke -- run every command-line tool under the emulator and record
  * what it printed.
  *
- * tools/fsuae-run.sh boots a real Kickstart 3.1 A1200, runs ONE executable
+ * tools/fsuae-run.sh boots a real Kickstart 3.1 A1200, runs one executable
  * from s/Startup-Sequence with no arguments, and prints back anything the
  * Amiga left in DH0:*.txt.  The tools take arguments and write to stdout, so
- * this driver stands in the middle: it runs each of them through
- * SystemTagList() with the Shell's own redirection, appends the return code,
- * and leaves the lot in DH0:tools.txt for the host to read.
+ * this driver runs each of them through SystemTagList() with the Shell's own
+ * redirection, appends the return code, and leaves the lot in DH0:tools.txt
+ * for the host to read.
  *
  *   ./tools/fsuae-run.sh -t 120 build/cm/src/tools/ToolsSmoke \
  *       build/cm/src/tools/AddNetInterface build/cm/src/tools/Online ... \
  *       src/tools/testdata/Devs
  *
- * With no stack linked in (the netstack_weak.c stubs) every tool should
- * report that the network stack is not running and exit with a sensible
- * return code.  That is the state a user meets first, and it is the one thing
- * that can be tested end to end before src/netstack exists.
+ * With no stack linked in (the netstack_weak.c stubs) every tool should report
+ * that the network stack is not running and exit with a sensible return code.
+ * That is what can be tested end to end before src/netstack exists.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -40,23 +39,23 @@ static const char version_tag[] __attribute__((used)) =
  * so tool_error() and PrintFault() both land on stdout anyway.
  *
  * Each half is added only when the command has not brought its own: NetSetup
- * reads a file of answers with "<", and a command redirected to a file wants its
- * transcript in a file of its own. Adding a second redirection of the same
- * kind makes the Shell take one of them and quietly drop the other.
+ * reads a file of answers with "<", and a command redirected to a file wants
+ * its transcript in a file of its own. A second redirection of the same kind
+ * makes the Shell take one and silently drop the other.
  */
 #define REDIRECT_IN  " <NIL:"
 #define REDIRECT_OUT " >>DH0:tools.txt"
 
 /*
  * The command list can be staged as DH0:commands.txt, one command per line,
- * '#' and blank lines ignored. That is what lets one harness run -- which can
- * only start a single executable with no arguments -- exercise a machine with
- * no configuration, a machine with a broken one, and a machine whose config
- * names a device that is not there, simply by staging different directories.
+ * '#' and blank lines ignored. Staging different directories lets the harness
+ * -- which can only start one executable with no arguments -- exercise a
+ * machine with no configuration, one with a broken configuration, and one whose
+ * config names a device that is not there.
  *
- * Two prefixes, both there for one reason: a listener and the thing that
- * connects to it have to be running At the same time, and SystemTagList()
- * waits. Without them no staged list can test `nc -l` at all.
+ * Two prefixes exist because SystemTagList() waits, while a listener and the
+ * thing that connects to it must run at the same time. Without them no staged
+ * list can test `nc -l`.
  *
  *   &<command>   run it and carry straight on -- SYS_Asynch, which is what
  *                the Shell's own `Run` does. Its output must be redirected by
@@ -67,9 +66,9 @@ static const char version_tag[] __attribute__((used)) =
  */
 #define COMMANDS    "DH0:commands.txt"
 /*
- * The ceiling is a silent truncation, so it is set well above what any staged
- * list uses: a run that quietly stops reading at line 40 looks exactly like a
- * set of commands that were never written.
+ * Truncation at this ceiling is silent, so it sits well above what any staged
+ * list uses: a run that stops reading at line 40 looks like a set of commands
+ * that were never written.
  */
 #define MAX_COMMANDS    96
 #define MAX_LINE        160

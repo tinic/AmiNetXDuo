@@ -1,20 +1,16 @@
 /*
  * toolsock -- bsdsocket.library through its published vectors, for the
- * commands that are ordinary network applications rather than parts of the
- * stack.
+ * commands that are network applications rather than parts of the stack.
  *
- *   nc and telnet are worked examples as much as they are commands: a
- *   program on somebody else's Amiga will have Roadshow or AmiTCP underneath
- *   it, so none of them may link one line of src/netstack or src/bsdsocket.
- *   They call the library by hand at the LVOs docs/RESEARCH.md 3.2 lists,
- *   exactly as fetch.c does -- and for the same reason the NDK inlines are
- *   not used: those assume a global SocketBase and hide the ABI these
- *   programs exist to demonstrate.
+ * nc and telnet must run on an Amiga with Roadshow or AmiTCP underneath, so
+ * they link no part of src/netstack or src/bsdsocket. They call the library by
+ * hand at the LVOs docs/RESEARCH.md 3.2 lists, as fetch.c does. The NDK inlines
+ * are not used because they assume a global SocketBase and hide the ABI these
+ * programs demonstrate.
  *
- *   fetch needed eight vectors and open-coded them.  These three need
- *   nineteen between them, including the whole server half -- bind, listen,
- *   accept -- that no client-only tool ever touches, so they are written once
- *   here.
+ * fetch open-codes the eight vectors it needs. These three need nineteen
+ * between them, including the server half -- bind, listen, accept -- that no
+ * client-only tool touches, so they are written once here.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -30,10 +26,10 @@ extern "C" {
 
 /* ------------------------------------------------------------ the shapes --
  *
- * Open-coded rather than included.  <sys/socket.h> in this toolchain is the
+ * Open-coded rather than included: <sys/socket.h> in this toolchain is the
  * socket world's, tools.h has already pulled in NetX Duo's <sys/types.h>, and
- * the two disagree; these four structures are the whole of the ABI surface
- * these commands need and they have not changed since 4.2BSD.
+ * the two disagree. These four structures are the whole ABI surface these
+ * commands need, unchanged since 4.2BSD.
  */
 
 typedef struct ToolSockAddr
@@ -79,10 +75,9 @@ typedef struct ToolTimeval
 #define TOOL_SO_ERROR       0x1007
 
 /*
- * <netinet/in.h>'s and <sys/socket.h>'s -- 4.4BSD's, and Roadshow's -- and NOT
+ * <netinet/in.h>'s and <sys/socket.h>'s -- 4.4BSD's, and Roadshow's -- not
  * NetX Duo's addons/BSD layer, which numbers IPPROTO_IP 2 and IP_TTL 26 and is
- * not what this library speaks.  Shared because `ping` and `traceroute` both
- * want them and each had grown its own copy.
+ * not what this library speaks.  Shared by `ping` and `traceroute`.
  */
 #define TOOL_IPPROTO_IP     0
 #define TOOL_IPPROTO_ICMP   1
@@ -132,12 +127,12 @@ BOOL tool_fd_isset(const ToolFdSet *set, LONG fd);
 /* ---------------------------------------------------------- the library --- */
 
 /*
- * Open bsdsocket.library, which is what starts the network -- the library is
- * self-starting -- and prints a legible explanation when it will not.  NULL
- * on failure, nothing printed on success.
+ * Open bsdsocket.library, which starts the network -- the library is
+ * self-starting -- and print an explanation when it will not.  NULL on
+ * failure, nothing printed on success.
  *
- * A command whose whole job is to use the network has no business refusing to
- * bring it up, which is why this is not tool_require_stack().
+ * Not tool_require_stack(): these commands exist to use the network, so they
+ * may bring it up.
  */
 struct Library *tool_socket_open(VOID);
 
@@ -207,18 +202,15 @@ VOID tool_sock_fail(struct Library *base, const char *what, ULONG address,
 /* ------------------------------------------------------------- console ---- */
 
 /*
- * Standard input, polled.
- *
- * A byte shovel has to watch a socket and a keyboard at once, and WaitSelect()
- * knows nothing about DOS handles.  So the socket is polled with a short
- * timeout and the input side is polled between polls:
+ * Standard input, polled.  Watching a socket and a keyboard at once means
+ * polling the socket with a short timeout and the input side between polls,
+ * because WaitSelect() knows nothing about DOS handles:
  *
  *   * an interactive stream (a Shell window) is put in RAW mode and read one
- *     keystroke at a time behind WaitForChar(), which is the only way to get
+ *     keystroke at a time behind WaitForChar(), the only way to get
  *     character-at-a-time out of the Amiga console;
- *   * anything else -- a file, NIL:, a redirection -- is read in blocks,
- *     because a file read returns immediately and there is nothing to
- *     multiplex with.
+ *   * anything else -- a file, NIL:, a redirection -- is read in blocks, since
+ *     a file read returns immediately.
  *
  * tool_input_open() must be paired with tool_input_close(): RAW mode outlives
  * the process and a Shell left in it is unusable.

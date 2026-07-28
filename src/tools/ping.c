@@ -4,61 +4,47 @@
  *     ping -c=COUNT/K/N,-i=INTERVAL/K/N,-l=LOAD/K/N,-n=NUMERICONLY=NUMERIC/S,
  *          -o=ONEREPLY/S,-q=QUIET/S,-s=SIZE/K/N,-t=TIMEOUT/K/N,BELL/S,HOST/A
  *
- * Every option carries both spellings, short flag and keyword, because that is
- * the interface this command is expected to have; netstat does the same for
- * its switches.
+ * Every option carries both spellings, short flag and keyword, as netstat does
+ * for its switches.
  *
  *   COUNT     echo requests to send; 0 means "until Ctrl-C". Default 4.
  *   INTERVAL  seconds to wait between requests. Default 1.
  *   LOAD      send this many requests back to back before the interval
  *             starts being honoured.
- *   NUMERIC   do not try to put a name to an address that was given as a
- *             number. That lookup is the local host table only -- see the
- *             note where it happens for why it is not a DNS query.
+ *   NUMERIC   do not put a name to an address given as a number. That lookup
+ *             is the local host table only -- see the note where it happens.
  *   ONEREPLY  stop as soon as one reply has come back.
  *   QUIET     only the summary.
- *   SIZE      payload bytes. Default 56, which is what everyone else uses.
- *   TIMEOUT   give up after this many seconds no matter how the run is
- *             going. 0, the default, means there is no such limit.
+ *   SIZE      payload bytes. Default 56, matching other implementations.
+ *   TIMEOUT   give up after this many seconds. 0, the default, means no limit.
  *   BELL      ring the console bell for each reply.
  *
- * TIMEOUT is a limit on the whole run rather than on one reply: the wait for
- * an individual reply is fixed at PING_REPLY_WAIT below and is not exposed,
- * which is what makes "stop after N seconds" mean the same thing here as it
- * does everywhere else the command is documented.
+ * TIMEOUT limits the whole run, not one reply: the wait for an individual
+ * reply is fixed at PING_REPLY_WAIT below and is not exposed.
  *
- * Why this is A Raw socket and not nx_icmp_ping()
+ * Raw socket rather than nx_icmp_ping(): no command links aminetxduo_netstack,
+ * so netstack_ip() resolved to src/tools/netstack_weak.c's weak stub, returned
+ * NULL, and this command printed "the network is up, but this command cannot
+ * read it" and exited 5 (docs/RESEARCH.md 22). Handing out the running NX_IP
+ * means a pointer into another task's stack on a machine with no memory
+ * protection. A "do a ping for me" LVO on bsdsocket.library was designed and
+ * rejected, because nx_icmp_ping() matches an inbound echo reply on the
+ * sequence number alone: nx_icmpv4_process_echo_reply.c:124 compares
+ * tx_thread_suspend_info against nx_icmpv4_echo_sequence_num and looks at
+ * nothing else, and nx_icmpv4.h:191 says the identifier "is not used as a
+ * host". FS-UAE's SLIRP zeroes the sequence on a proxied reply and preserves
+ * the identifier (docs/RESEARCH.md 20.2), so every probe after the first of an
+ * NX_IP's lifetime would time out while its reply sat in the stack.
  *
- *   It used to call nx_icmp_ping() on netstack_ip(). That could not work in
- *   anything shipped and did not: no command links aminetxduo_netstack, so
- *   netstack_ip() was src/tools/netstack_weak.c's weak stub and returned NULL,
- *   and this command printed "the network is up, but this command cannot read
- *   it" and exited 5. docs/RESEARCH.md 22.
+ * SOCK_RAW is published ABI, carries IP_TTL and IP_TOS to the wire (measured,
+ * docs/RESEARCH.md 20.1), and lets this command decide what counts as an
+ * answer. traceroute reaches the wire the same way. This command therefore
+ * runs on Roadshow and AmiTCP too, links no NetX Duo, and needs no ThreadX
+ * adoption.
  *
- *   Reaching the real one needed a decision, and "give me the running NX_IP"
- *   was the wrong half of it -- a pointer into another task's stack, on a
- *   machine with no memory protection. "Do a ping for me" was a published LVO
- *   on bsdsocket.library, and was designed and then rejected, because
- *   nx_icmp_ping() matches an inbound echo reply on the Sequence number alone:
- *   nx_icmpv4_process_echo_reply.c:124 compares tx_thread_suspend_info against
- *   nx_icmpv4_echo_sequence_num and looks at nothing else, and nx_icmpv4.h:191
- *   says outright that the identifier "is not used as a host". Under FS-UAE's
- *   SLIRP -- which zeroes the sequence on a proxied reply and preserves the
- *   identifier (docs/RESEARCH.md 20.2) -- that matches the one field the NAT
- *   destroys and ignores the one it keeps, so every probe after the first of
- *   the NX_IP's lifetime would time out while its reply sat in the stack.
- *
- *   SOCK_RAW is already published ABI, already carries IP_TTL and IP_TOS to
- *   the wire (measured, docs/RESEARCH.md 20.1), and lets THIS command decide
- *   what counts as an answer. traceroute reaches the wire the same way, and so
- *   this command now runs on Roadshow and AmiTCP as well, links no NetX Duo,
- *   and needs no ThreadX adoption at all.
- *
- * Ctrl-C stops the loop and still prints the summary -- an Amiga command that
- * cannot be interrupted is broken, and one that throws away its results when
- * interrupted is only slightly less so. The break is noticed every 200 ms,
- * including while waiting for a reply, which the ThreadX version could not
- * manage: it suspended inside a kernel where an Exec signal means nothing.
+ * Ctrl-C stops the loop and still prints the summary. The break is noticed
+ * every 200 ms, including while waiting for a reply; the ThreadX version
+ * suspended inside a kernel where an Exec signal means nothing.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -130,9 +116,8 @@ static UWORD ping_get16(const UBYTE *p)
     return (UWORD)(((UWORD)p[0] << 8) | (UWORD)p[1]);
 }
 
-/* The 16-bit one's-complement sum every IP protocol uses. Nothing below this
-   command computes the ICMP checksum: the raw send path prepends the IP header
-   and nothing else. */
+/* The 16-bit one's-complement sum. Nothing below this command computes the
+   ICMP checksum: the raw send path prepends the IP header and nothing else. */
 static UWORD ping_checksum(const UBYTE *data, ULONG len)
 {
     ULONG sum = 0;
@@ -173,19 +158,16 @@ static ULONG ping_build(UWORD ident, UWORD seq, ULONG payload)
 /*
  * Is this datagram the reply to the probe we are waiting on?
  *
- * A raw ICMP socket sees EVERY inbound ICMP datagram -- src/bsdsocket/raw.c
- * filters on the IP protocol number, not on the type -- so this has to be
- * strict about what it accepts, and recvfrom() hands back the IP header too.
+ * A raw ICMP socket sees every inbound ICMP datagram -- src/bsdsocket/raw.c
+ * filters on the IP protocol number, not on the type -- so the checks have to
+ * be strict, and recvfrom() hands back the IP header too.
  *
- * The sequence rule is the one piece that is not textbook. `seq == 0` is
- * accepted alongside the expected number because FS-UAE's SLIRP zeroes the
- * sequence on a proxied reply while preserving the identifier
- * (docs/RESEARCH.md 20.2), and a ping that rejected those would report 100%
- * loss against every address outside the emulated LAN while the replies were
- * arriving. It is safe HERE and is not safe in traceroute, and the difference
- * is real: this command has exactly one probe outstanding at a time, so there
- * is no other probe a reply could belong to. traceroute has three per hop,
- * which is why it prints stars instead.
+ * `seq == 0` is accepted alongside the expected number because FS-UAE's SLIRP
+ * zeroes the sequence on a proxied reply while preserving the identifier
+ * (docs/RESEARCH.md 20.2); rejecting those would report 100% loss against
+ * every address outside the emulated LAN. Safe here because this command has
+ * exactly one probe outstanding at a time. traceroute has three per hop and
+ * cannot do the same.
  */
 static BOOL ping_is_reply(const UBYTE *buf, ULONG len, UWORD ident, UWORD seq,
                           ULONG from, ULONG target, ULONG *payload_out)
@@ -215,9 +197,8 @@ static BOOL ping_is_reply(const UBYTE *buf, ULONG len, UWORD ident, UWORD seq,
             return FALSE;
     }
 
-    /* A forged reply from somewhere else is not an answer from the host that
-       was asked about. SLIRP's proxied replies do carry the destination's
-       address, which is exactly why this check is worth making. */
+    /* A reply from another address is not an answer from the host that was
+       asked about; SLIRP's proxied replies do carry the destination's. */
     if (from != target)
         return FALSE;
 
@@ -230,10 +211,9 @@ static BOOL ping_is_reply(const UBYTE *buf, ULONG len, UWORD ident, UWORD seq,
 /* ----------------------------------------------------------- the clock --- */
 
 /*
- * Whole milliseconds is the right resolution for this command -- it is what
- * every ping has printed -- and ami_millis() already counts them through the
- * timer.device it opens on first use. Opening it BEFORE the first send, so
- * that the first round trip is not measured with a device open inside it.
+ * ami_millis() counts whole milliseconds through the timer.device it opens on
+ * first use. It is called before the first send so the device open is not
+ * inside the first round-trip measurement.
  */
 
 int main(int argc, char **argv)
@@ -305,9 +285,8 @@ int main(int argc, char **argv)
     }
 
     /*
-     * tool_socket_open(), not tool_require_stack(): this command's whole job
-     * is to use the network, and bsdsocket.library brings the stack up on its
-     * first open. A status command must not do that; this one must.
+     * tool_socket_open(), not tool_require_stack(): opening bsdsocket.library
+     * brings the stack up, which is right here and wrong for a status command.
      */
     sb = tool_socket_open();
     if (sb == NULL)
@@ -329,22 +308,15 @@ int main(int argc, char **argv)
     if (!numeric && ami_config_parse_ip(host, &target))
     {
         /*
-         * The address was typed as a number, so the only name that can be put
-         * to it has to be looked up backwards -- and that lookup is
-         * DEVS:Internet/hosts and nothing else, which is a decision rather
-         * than a shortcut.
+         * A numeric address can only get a name from a reverse lookup, and
+         * that lookup is DEVS:Internet/hosts and nothing else.
          *
-         * The other route is gethostbyaddr(), and on this stack it costs
-         * BSD_RESOLVE_TIMEOUT: thirty seconds (src/bsdsocket/resolver.c:18),
-         * per name server, against a server that may simply never answer a
-         * PTR query -- FS-UAE's SLIRP does not answer them. Every second of
-         * that is spent BEFORE the first packet leaves, which is the one
-         * place a ping must not be slow, and the reward is a cosmetic change
-         * to one line of output.
-         *
-         * The host table is instant, needs no name server at all, and is
-         * where the names on a small network actually live. NUMERIC still
-         * means something: it skips even that.
+         * gethostbyaddr() would cost BSD_RESOLVE_TIMEOUT: thirty seconds
+         * (src/bsdsocket/resolver.c:18) per name server, against a server that
+         * may never answer a PTR query -- FS-UAE's SLIRP does not -- all of it
+         * before the first packet leaves, for a cosmetic change to one line of
+         * output. The host table is instant and needs no name server. NUMERIC
+         * skips even that.
          */
         const AmiNetdbEntry *local;
 
@@ -382,27 +354,20 @@ int main(int argc, char **argv)
     }
 
     /*
-     * NON-BLOCKING, and this is not belt-and-braces -- it is the only correct
-     * way to use a descriptor that has been through select().
+     * Non-blocking, because select() readiness is advisory: the datagram can
+     * be taken by another reader, or dropped by a checksum test, between the
+     * poll and the read. FIONBIO makes the read return EWOULDBLOCK instead,
+     * the deadline below does its job, and a lost reply costs one "Request
+     * timed out" line rather than the command.
      *
-     * select() readiness is advisory in every stack there has ever been: the
-     * datagram can be taken by another reader, or dropped by a checksum test,
-     * between the poll and the read. A program that blocks on the strength of
-     * it is relying on a guarantee no socket API offers. FIONBIO makes the
-     * read return EWOULDBLOCK instead, the deadline below does its job, and a
-     * stack that loses a reply costs one "Request timed out" line rather than
-     * the command.
-     *
-     * An earlier version of this comment blamed the stack, And was wrong.
-     * It read a serial trace that stopped at `recvfrom` as proof that
-     * WaitSelect() and bsd_raw_receive() disagreed about the queue. They never
-     * did. The command was jumping into the middle of another function on the
-     * way out of tool_delay_ticks() -- a mis-resolved 32-bit PC-relative
-     * branch, docs/RESEARCH.md 25 -- and the trace stopped where it did
-     * because the MACHINE stopped, not because a read blocked. Adding FIONBIO
-     * changed nothing, which should have been the clue. The raw receive path
-     * was innocent throughout and is not to be "fixed" on the strength of that
-     * old note.
+     * An earlier version of this comment blamed the stack, reading a serial
+     * trace that stopped at `recvfrom` as proof that WaitSelect() and
+     * bsd_raw_receive() disagreed about the queue. They never did. The command
+     * was jumping into the middle of another function on the way out of
+     * tool_delay_ticks() -- a mis-resolved 32-bit PC-relative branch,
+     * docs/RESEARCH.md 25 -- and the trace stopped because the machine
+     * stopped, not because a read blocked. Adding FIONBIO changed nothing. The
+     * raw receive path is not to be "fixed" on the strength of that old note.
      */
     {
         LONG nonblock = 1;
@@ -421,11 +386,11 @@ int main(int argc, char **argv)
     tool_sock_addr(&to, target, 0);
 
     /*
-     * The identifier tells this command's replies from another raw reader's.
+     * The identifier tells this command's replies from another raw reader's:
      * src/bsdsocket/raw.c tees every inbound ICMP datagram to every open raw
-     * socket, so two pings running at once would otherwise credit each other's
-     * answers. The task pointer is unique on the machine and its low two bits
-     * are always zero, which is why they are shifted off.
+     * socket, so two pings at once would credit each other's answers. The task
+     * pointer is unique on the machine; its low two bits are always zero, so
+     * they are shifted off.
      */
     ident = (UWORD)((((ULONG)FindTask(NULL)) >> 2) & 0xffffUL);
 
@@ -457,8 +422,8 @@ int main(int argc, char **argv)
 
         /*
          * TIMEOUT bounds the run, not the reply, so it is checked here and
-         * again against the wait below -- a five-second reply wait must not be
-         * able to overshoot a two-second limit.
+         * again against the wait below: a five-second reply wait must not
+         * overshoot a two-second limit.
          */
         if (timeout != 0)
         {
@@ -518,10 +483,8 @@ int main(int argc, char **argv)
                 break;
             }
 
-            /*
-             * Signed difference rather than `now >= deadline`, so the
-             * comparison stays right across the millisecond counter's wrap.
-             */
+            /* Signed difference rather than `now >= deadline`, so the
+               comparison stays right across the millisecond counter's wrap. */
             if ((LONG)(now - deadline) >= 0)
                 break;
 
@@ -589,10 +552,8 @@ int main(int argc, char **argv)
             tool_printf("Request timed out for icmp_seq=%lu\n", i);
         }
 
-        /*
-         * No trailing pause after the last request, and none at all while the
-         * preload is going out -- that is what LOAD asks for.
-         */
+        /* No pause after the last request, and none while the preload is
+           going out, which is what LOAD asks for. */
         if ((count != 0 && i + 1 >= count) || interval == 0)
             continue;
         if (i + 1 < preload)

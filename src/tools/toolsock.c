@@ -4,21 +4,18 @@
  * See toolsock.h for why these are called by hand rather than through the NDK
  * inlines.  Every stub below is written the same way: the arguments go into
  * the registers the ABI names, a6 holds the library base, and the call is a
- * `jsr a6@(-LVO:W)`.  The LVOs are docs/RESEARCH.md 3.2's, and the register
- * assignments are the ones src/bsdsocket/bsdsocket_vectors.h declares -- so if
- * the two ever disagree, one of them is a bug and this file is the place it
- * shows up.
+ * `jsr a6@(-LVO:W)`.  The LVOs are docs/RESEARCH.md 3.2's and the register
+ * assignments are src/bsdsocket/bsdsocket_vectors.h's; a disagreement between
+ * the two is a bug, and shows up here.
  *
- * And every stub declares d1/a0/a1 WRITTEN, Which is not decoration.
- *
- * An AmigaOS library call clobbers d0, d1, a0 and a1.  A register that is only
- * an INPUT operand is one GCC may assume the asm leaves alone, so a stub that
- * passes an argument in d1 and does not also declare d1 written lets GCC keep
- * a value there across the `jsr` -- and reuse, or spill, whatever the library
- * left behind.  That is not theoretical: it turned IoctlSocket(FIONBIO) into a
- * call with a garbage request code and wedged a test for a day
- * (docs/RESEARCH.md 42).  The `_clob_*` dummies bound to those registers and
- * listed as outputs are the NDK's own idiom, from inline/macros.h.
+ * Hazard: every stub must declare d1/a0/a1 written.  An AmigaOS library call
+ * clobbers d0, d1, a0 and a1, and GCC may assume an input-only operand is left
+ * alone, so a stub passing an argument in d1 without declaring d1 written lets
+ * GCC keep a value there across the `jsr` and then reuse or spill whatever the
+ * library left behind.  This turned IoctlSocket(FIONBIO) into a call with a
+ * garbage request code and wedged a test for a day (docs/RESEARCH.md 42).  The
+ * `_clob_*` dummies bound to those registers and listed as outputs are the
+ * NDK's own idiom, from inline/macros.h.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -514,9 +511,8 @@ UWORD tool_sock_port(struct Library *base, const char *text, const char *proto)
     }
 
     /*
-     * A service name.  Straight through the library's own getservbyname(),
-     * so the answer comes from DEVS:Internet/services -- the same file every
-     * other program on the machine reads.
+     * A service name, through the library's own getservbyname(), so the answer
+     * comes from DEVS:Internet/services like every other program's.
      */
     se = tool_sock_getservbyname(base, text, proto);
     if (se == NULL)
@@ -533,12 +529,9 @@ UWORD tool_sock_port(struct Library *base, const char *text, const char *proto)
 }
 
 /*
- * The unnamed case gets the number.
- *
- * "the network refused" for every errno this command has never heard of is
- * exactly as useful as no message at all, and the errnos that turn up in a
- * bug report are precisely the ones not in the list below.  A sentence with
- * the number in it is still a sentence.
+ * The unnamed case gets the number.  The errnos that turn up in bug reports are
+ * the ones not in the list below, so printing the number beats a generic "the
+ * network refused".
  */
 static char tool_sock_errbuf[64];
 
@@ -618,11 +611,10 @@ VOID tool_input_open(ToolInput *in, BOOL want_raw)
     {
         /*
          * SetMode(fh, 1) is the console's RAW mode: no line editing, no local
-         * echo, and every keystroke available the moment it is pressed.  It
-         * is a property of the console, not of this process, so a command
-         * that forgets to put it back leaves the user's Shell unusable --
-         * hence tool_input_close(), which every caller must reach on every
-         * path including Ctrl-C.
+         * echo, every keystroke available as it is pressed.  It is a property
+         * of the console, not of this process, so every caller must reach
+         * tool_input_close() on every path including Ctrl-C or the user's Shell
+         * is left unusable.
          */
         if (SetMode(in->fh, 1L) != 0)
             in->raw = TRUE;
@@ -662,15 +654,12 @@ LONG tool_input_read(ToolInput *in, UBYTE *buf, LONG len, ULONG micros)
 }
 
 /*
- * Straight to standard output -- past dos.library's buffer, and that is why
- * the Flush() is here.
+ * Straight to standard output, past dos.library's buffer.
  *
  * These commands print two kinds of thing to the same stream: their own lines
- * through VPrintf(), which dos.library buffers, and the bytes off the socket
- * through Write(), which it does not.  Without the flush the second overtakes
- * the first, and a transcript comes out with the directory listing
- * spliced into the middle of the reply that announced it.  Observed exactly
- * that way before this line existed.
+ * through VPrintf(), which dos.library buffers, and socket bytes through
+ * Write(), which it does not.  Without the Flush() the second overtakes the
+ * first and the transcript comes out interleaved.  Observed.
  */
 LONG tool_output_write(const UBYTE *buf, LONG len)
 {

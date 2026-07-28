@@ -3,32 +3,25 @@
  *
  *     telnet HOST/A,PORT,DEBUG=-d/S,QUIET/S
  *
- * A connection with a command language embedded in it.  Nearly everything a
- * telnet session carries is data, but 0xFF (IAC) introduces two- and
- * three-byte commands that must be taken out of the stream before the user
- * sees them, and answered -- a client that prints them is the one whose
- * screen fills with accented characters the moment it meets a real server.
+ * Most of the stream is data; 0xFF (IAC) introduces two- and three-byte
+ * commands that must be stripped and answered before the user sees them.
  *
- *   RFC 854's rule is that an option is only in effect once both ends have
- *   agreed, and that a refusal is a complete and correct answer.  This client
- *   therefore agrees to exactly two options and refuses everything else:
+ * An option is only in effect once both ends agree, and a refusal is a valid
+ * answer.  This client accepts two options and refuses the rest:
  *
- *     ECHO (1)                 the server may echo for us -- accepted, and
- *                              local echo goes off when it is
- *     SUPPRESS-GO-AHEAD (3)    in both directions; this is what puts a Unix
- *                              server into character-at-a-time mode
+ *   ECHO (1)                 the server may echo for us; local echo then
+ *                            goes off
+ *   SUPPRESS-GO-AHEAD (3)    both directions; puts a Unix server into
+ *                            character-at-a-time mode
  *
- *   TERMINAL-TYPE, NAWS, LINEMODE, environment passing and the rest are
- *   refused with WONT/DONT.  That is not a gap: half-implementing an option
- *   whose subnegotiation we cannot complete is how a session hangs waiting
- *   for a reply that never comes, and a server told WONT simply does without.
+ * TERMINAL-TYPE, NAWS, LINEMODE, environment passing and the rest get
+ * WONT/DONT.  Half-implementing an option whose subnegotiation we cannot
+ * complete hangs the session waiting for a reply that never comes.
  *
- *   The state of every option is remembered, both halves of it, because the
- *   protocol's one real trap is the negotiation loop: an end that answers
- *   every DONT with a WONT and every WONT with a DONT will trade them with a
- *   peer doing the same thing until one of them is switched off.  See the
- *   note above tn_recv_will() for the exact rule used, which is not quite the
- *   one RFC 854 states.
+ * Both halves of every option's state are remembered, to avoid the
+ * negotiation loop where each end answers every DONT with a WONT and every
+ * WONT with a DONT forever.  See the note above tn_recv_will() for the exact
+ * rule used, which is not quite the one RFC 854 states.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -80,7 +73,7 @@ enum
 #define TNOPT_LINEMODE  34
 #define TNOPT_NEWENV    39
 
-/* Ctrl-] -- the escape everyone's fingers already know. */
+/* Ctrl-] -- the escape character. */
 #define TN_ESCAPE       0x1D
 
 #define TN_CHUNK        4096
@@ -90,19 +83,15 @@ static UBYTE tn_from_user[TN_CHUNK];
 static UBYTE tn_staged[TN_CHUNK * 2];   /* IAC and CR both double a byte */
 
 /*
- * One byte bigger than the read, And the one byte is the point.
+ * One byte bigger than the read. tn_demux() emits at most one byte per byte
+ * consumed, except at the start: a CR held back from the previous segment
+ * (st->saw_cr survives between calls) resolves into a '\n' and then the byte
+ * that decided it is emitted as well. A segment ending on a bare CR followed
+ * by a full 4096-byte segment with no CR and no IAC therefore produces 4097
+ * bytes -- a server-controlled one-byte write past the end of a static, which
+ * on a machine with no MMU lands in whichever static the linker put next.
  *
- * tn_demux() emits at most one byte per byte consumed -- except for the first,
- * because a CR held back from the PREVIOUS segment (st->saw_cr, which survives
- * between calls by design) resolves into a '\n' and then falls through to emit
- * the byte that decided it as well. So a segment that ends on a bare CR
- * followed by a full 4096-byte segment carrying no CR and no IAC produces 4097
- * bytes, and the far end chooses both. That is a server-controlled one-byte
- * write past the end of a static, which on a machine with no MMU lands in
- * whichever static the linker put next.
- *
- * TN_CHUNK + 1 is exact rather than generous: no other path in the parser
- * expands.
+ * TN_CHUNK + 1 is exact: no other path in the parser expands.
  */
 static UBYTE tn_clean[TN_CHUNK + 1];
 
@@ -201,20 +190,17 @@ static VOID tn_reply(TnState *st, UBYTE verb, UBYTE opt)
 }
 
 /*
- * The four halves of the negotiation.
- *
- * Two arrays are not enough: alongside "is the option on" there has to be
- * "have we answered a request for it", because RFC 854's loop-prevention rule
- * ("do not reply if the reply would not change the state") taken literally
- * means a client that refuses an option never answers at all, and a server
- * waiting for that answer hangs.  The first request always gets a reply; a
- * repeat of one already answered does not.  That satisfies both halves of the
- * rule, which is the trap this protocol is famous for.
+ * Alongside "is the option on" there has to be "have we answered a request
+ * for it": RFC 854's loop-prevention rule ("do not reply if the reply would
+ * not change the state") taken literally means a client that refuses an
+ * option never answers at all, and a server waiting for that answer hangs.
+ * So the first request always gets a reply; a repeat of one already answered
+ * does not.
  */
 static UBYTE tn_him_told[256];
 static UBYTE tn_us_told[256];
 
-/* "The far end says it WILL do <opt>."  ECHO and SUPPRESS-GO-AHEAD cost us
+/* The far end says it WILL do <opt>.  ECHO and SUPPRESS-GO-AHEAD cost us
    nothing and are accepted; the rest are refused. */
 static VOID tn_recv_will(TnState *st, UBYTE opt)
 {
@@ -229,7 +215,7 @@ static VOID tn_recv_will(TnState *st, UBYTE opt)
         tn_him_told[opt] = 1;
         tn_reply(st, TN_DO, opt);
 
-        /* If the server is echoing, we must not: two echoes is a stutter. */
+        /* If the server echoes, we must not, or every key appears twice. */
         if (opt == TNOPT_ECHO)
             st->local_echo = FALSE;
         return;
@@ -257,10 +243,10 @@ static VOID tn_recv_wont(TnState *st, UBYTE opt)
 }
 
 /*
- * "The far end asks us to do <opt>."  SUPPRESS-GO-AHEAD is agreed -- we never
- * send GA anyway, so the promise is free and it is what a Unix server is
- * waiting for before it will run character-at-a-time.  Everything else is
- * refused, including every option whose subnegotiation we could not finish.
+ * The far end asks us to do <opt>.  SUPPRESS-GO-AHEAD is agreed: we never send
+ * GA anyway, and a Unix server waits for it before running
+ * character-at-a-time.  Everything else is refused, including every option
+ * whose subnegotiation we could not finish.
  */
 static VOID tn_recv_do(TnState *st, UBYTE opt)
 {
@@ -300,10 +286,9 @@ static VOID tn_recv_dont(TnState *st, UBYTE opt)
 
 /*
  * Take one block off the network: strip the commands, answer them, and leave
- * the data in tn_clean.  Returns the number of data bytes.
- *
- * The parser's state survives between calls, because a three-byte command can
- * and does arrive split across two segments.
+ * the data in tn_clean.  Returns the number of data bytes.  Parser state
+ * survives between calls, since a three-byte command can arrive split across
+ * two segments.
  */
 static LONG tn_demux(TnState *st, const UBYTE *buf, LONG len)
 {
@@ -324,10 +309,10 @@ static LONG tn_demux(TnState *st, const UBYTE *buf, LONG len)
                 }
 
                 /*
-                 * NVT line endings: CR LF is a new line and CR NUL is a bare
+                 * NVT line endings: CR LF is a new line, CR NUL a bare
                  * carriage return.  The Amiga console wants a single LF for
-                 * the first and nothing useful for the second, so the CR is
-                 * held back one byte and decided when the next one arrives.
+                 * the first and nothing for the second, so the CR is held
+                 * back one byte and decided when the next one arrives.
                  */
                 if (st->saw_cr)
                 {
@@ -369,10 +354,9 @@ static LONG tn_demux(TnState *st, const UBYTE *buf, LONG len)
                 else
                 {
                     /*
-                     * NOP, DM, BRK, AYT and the rest.  None of them needs an
-                     * answer from a client that has agreed to no options, and
-                     * an AYT answered by a program nobody is watching is
-                     * noise; they are consumed and dropped.
+                     * NOP, DM, BRK, AYT and the rest.  A client that has
+                     * agreed to no options needs to answer none of them, so
+                     * they are consumed and dropped.
                      */
                     if (st->debug)
                         tool_printf("telnet: command %ld ignored\n", (LONG)c);
@@ -415,9 +399,8 @@ static LONG tn_demux(TnState *st, const UBYTE *buf, LONG len)
             case TN_SAW_SB:
                 /*
                  * A subnegotiation, for an option we cannot have agreed to.
-                 * Swallow it to IAC SE rather than guess at its length --
-                 * this is the one place where a wrong byte count would put
-                 * option bytes on the user's screen.
+                 * Swallow it to IAC SE rather than guess at its length; a
+                 * wrong byte count would put option bytes on the screen.
                  */
                 if (c == TN_IAC)
                     st->parse = TN_SAW_SB_IAC;
@@ -450,10 +433,9 @@ static LONG tn_demux(TnState *st, const UBYTE *buf, LONG len)
 }
 
 /*
- * The user's bytes, on their way out.  Two substitutions, both required:
- * a literal 0xFF has to be doubled or it starts a command, and a line ending
- * has to go out as CR LF, which is what NVT means by "new line" whatever the
- * local convention is.
+ * The user's bytes on their way out.  A literal 0xFF has to be doubled or it
+ * starts a command, and a line ending has to go out as CR LF, which is what
+ * NVT means by "new line" whatever the local convention is.
  *
  * Returns -1 when the escape character was pressed.
  */
@@ -478,7 +460,7 @@ static LONG tn_encode(const UBYTE *buf, LONG len, UBYTE *out, BOOL interactive)
 
         if (c == '\r')
         {
-            /* A CR LF pair from a file must not become Cr lf lf. */
+            /* A CR LF pair from a file must not become CR LF LF. */
             if (i + 1 < len && buf[i + 1] == '\n')
                 i++;
             out[o++] = '\r';
@@ -614,10 +596,10 @@ int main(int argc, char **argv)
     }
 
     /*
-     * RAW mode, so a keystroke reaches the server the moment it is pressed
-     * rather than when the line is finished.  On a redirected input this does
-     * nothing and the whole file is shovelled instead, which is what makes a
-     * scripted session possible.
+     * RAW mode, so a keystroke reaches the server when it is pressed rather
+     * than when the line is finished.  On redirected input it does nothing
+     * and the whole file is shovelled instead, which makes a scripted
+     * session possible.
      */
     tool_input_open(&in, TRUE);
 
@@ -668,15 +650,12 @@ int main(int argc, char **argv)
             }
 
             /*
-             * End of input is NOT the end of the session, and this is where
-             * an earlier version got it wrong.
-             *
-             * Half-closing here -- shutdown(SHUT_WR), which is right for nc
-             * -- breaks telnet, because the negotiation is still going on:
-             * the server's WILL ECHO can arrive after the last line of a
-             * script, and the DO ECHO that answers it then fails with EPIPE
-             * on a write half we have already given away.  Measured: every
-             * option reply after the first was lost that way.
+             * End of input is not the end of the session.  Half-closing here
+             * -- shutdown(SHUT_WR), right for nc -- breaks telnet, because
+             * negotiation is still going on: the server's WILL ECHO can
+             * arrive after the last line of a script, and the DO ECHO that
+             * answers it then fails with EPIPE on a write half already given
+             * away.  Measured: every option reply after the first was lost.
              *
              * So a script that has run out simply stops typing.  The session
              * ends when the server closes it, at Ctrl-], or at Ctrl-C.
@@ -720,8 +699,8 @@ int main(int argc, char **argv)
         {
             LONG err = tool_sock_errno(sb);
 
-            /* Ready, and then nothing there: pace it, or the retry is a spin
-               at full CPU.  Same reasoning as nc_shovel(). */
+            /* Ready but nothing there: pace it, or the retry spins at full
+               CPU.  Same as nc_shovel(). */
             if (err == TOOL_EINTR || err == TOOL_EWOULDBLOCK)
             {
                 (VOID)tool_delay_ticks(2);

@@ -1,27 +1,24 @@
 /*
- * NetTrace -- capture the stack's own traffic to a pcap file, and run a
+ * NetTrace -- capture the stack's own traffic to a pcap file while running a
  * workload underneath it.
  *
  *     NetTrace [WIRE|LOOPBACK] [HOST=..] [PORT=n] [PATH=..] [BYTES=n]
  *              [OUT=file] [SNAP=n] [NOCAPTURE/S] [BLEN=n]
  *
- *   A capture daemon plus a separate workload is the Unix shape, and it needs
- *   two processes with a clock between them.  Here the point of the trace is
- *   to explain a throughput number, so the number and the trace have to come
- *   out of one run or they are two experiments.  Draining the capture between
- *   socket operations also bounds the buffer: the channel holds 2 x BLEN and
- *   a megabyte at 1460 bytes a segment is well over a thousand records.
+ *   Capture and workload share one process so the throughput number and the
+ *   trace come out of the same run.  Draining the capture between socket
+ *   operations also bounds the buffer: the channel holds 2 x BLEN, and a
+ *   megabyte at 1460 bytes a segment is well over a thousand records.
  *
- *   Nothing in src/.  Every call below is a published bsdsocket.library LVO,
- *   the eight bpf_* ones included -- which is the point: the capture path in
+ *   Nothing from src/.  Every call below is a published bsdsocket.library LVO,
+ *   including the eight bpf_* ones.  Before this existed the capture path in
  *   src/bpf/ had 201 unit-test checks, no caller anywhere in the product, and
- *   all eight vectors pointing at bsd_enosys() until this existed.
+ *   all eight vectors pointing at bsd_enosys().
  *
- *   The bpf ABI has no BIOCSSNAPLEN.  4.4BSD never needed one: a filter
- *   program answers with the number of bytes to keep, so `BPF_RET|BPF_K, n`
- *   is a program that accepts every packet and truncates it to n.  96 bytes
- *   covers Ethernet + IP + TCP with 20 bytes of options and is what tcpdump's
- *   own default was for twenty years.
+ *   The bpf ABI has no BIOCSSNAPLEN: a filter program returns the number of
+ *   bytes to keep, so `BPF_RET|BPF_K, n` accepts every packet and truncates
+ *   it to n.  96 bytes covers Ethernet + IP + TCP with 20 bytes of options,
+ *   and was tcpdump's own default for twenty years.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -58,9 +55,8 @@ enum
 /* --------------------------------------------------------------- the ABI */
 
 /*
- * The bpf half of <net/bpf.h>, open-coded for the same reason toolsock.h
- * open-codes sockaddr_in: this command must build against a stock NDK and
- * demonstrate the ABI rather than hide it behind our own header.
+ * The bpf half of <net/bpf.h>, open-coded like toolsock.h's sockaddr_in, so
+ * this command builds against a stock NDK.
  */
 #define IOC_VOID_       0x20000000UL
 #define IOC_OUT_        0x40000000UL
@@ -191,13 +187,10 @@ static LONG nt_bpf_data_waiting(struct Library *base, LONG channel)
 }
 
 /*
- * Every line is flushed as it is written.
- *
- * VPrintf() goes through dos.library's buffer, and a diagnostic tool that
- * loses its last twenty lines because the machine had to be killed is not a
- * diagnostic tool.  This is also the only progress indicator there is: a
- * megabyte at 14 MHz takes seconds, and a run that has stopped and a run that
- * is working look identical without it.
+ * Every line is flushed as it is written: VPrintf() buffers through
+ * dos.library, so the last lines are lost if the machine has to be killed.
+ * It is also the only progress indicator -- a megabyte at 14 MHz takes
+ * seconds, and a stalled run looks like a working one without it.
  */
 static VOID nt_say(const char *fmt, ...)
 {
@@ -213,16 +206,14 @@ static VOID nt_say(const char *fmt, ...)
 /* ------------------------------------------------------------ pcap output */
 
 /*
- * Classic libpcap, not pcapng: the whole point is that the file opens in
- * Wireshark and tcpdump with no conversion step, and the classic format is
- * the one every tool in that family has read since 1993.
+ * Classic libpcap, not pcapng: it opens in Wireshark and tcpdump with no
+ * conversion step.
  *
- * Every field goes out big-endian, explicitly, byte by byte -- including the
- * magic, which is what tells the reader so.  A pcap file carries its own
- * endianness in that first longword and every tool in the family has honoured
- * it since 1993, so a 68k-written file opens on a little-endian host with no
- * conversion.  Writing the bytes by hand rather than storing a ULONG also
- * means no alignment assumption about the output buffer.
+ * Every field goes out big-endian, byte by byte, including the magic.  A pcap
+ * file carries its endianness in that first longword and every tool in the
+ * family has honoured it since 1993, so a 68k-written file opens on a
+ * little-endian host as it stands.  Writing the bytes by hand rather than
+ * storing a ULONG also avoids any alignment assumption about the buffer.
  */
 #define PCAP_MAGIC          0xa1b2c3d4UL
 #define PCAP_VERSION_MAJOR  2
@@ -342,16 +333,12 @@ static UWORD nt_get16(const UBYTE *p)
 }
 
 /*
- * STATIC, and it has to be.
- *
- * NtCap embeds NtOut, which embeds a 16 KB write buffer, and an AmigaDOS
- * Shell command runs on a 4 KB stack by default -- a SystemTagList() child
- * gets whatever the parent had and nobody here calls SetStackSize().  As a
- * local in main() this overran the stack into whatever was below it and the
- * machine took an F-line trap (#8000000B) and reset, three commands into a
- * run, with no message: the crash was in code that had nothing to do with the
- * overwrite.  There is one of these per process and the process is
- * single-threaded, so static costs nothing and removes the class of bug.
+ * Static, and it has to be: NtCap embeds NtOut's 16 KB write buffer, while an
+ * AmigaDOS Shell command runs on a 4 KB stack (a SystemTagList() child gets
+ * whatever the parent had, and nothing here calls SetStackSize()).  As a local
+ * in main() this overran the stack and the machine took an F-line trap
+ * (#8000000B) and reset, with the crash landing in unrelated code.  One per
+ * process, single-threaded, so static costs nothing.
  */
 typedef struct NtCap
 {
@@ -368,9 +355,9 @@ typedef struct NtCap
  * Copy everything buffered in the channel into the pcap file.  Returns the
  * number of records taken.
  *
- * bpf_read() is non-blocking by design (include/aminetxduo/bpf.h), so this is
- * called from inside the workload's own loop rather than from a reader task:
- * there is no third thread here and nothing to synchronise.
+ * bpf_read() is non-blocking (include/aminetxduo/bpf.h), so this is called
+ * from inside the workload's own loop rather than from a reader task; there is
+ * nothing to synchronise.
  */
 static ULONG nt_drain(NtCap *cap)
 {
@@ -388,9 +375,9 @@ static ULONG nt_drain(NtCap *cap)
         if (got <= 0)
         {
             /*
-             * -1 means "not even one record fits in your buffer", which with a
-             * buffer sized from BIOCGBLEN cannot happen -- count it rather
-             * than ignore it, because if it ever does the trace has a hole.
+             * -1 means no record fits in the buffer, which cannot happen with
+             * a buffer sized from BIOCGBLEN.  Counted rather than ignored: if
+             * it ever does, the trace has a hole.
              */
             if (got < 0)
                 cap->short_reads++;
@@ -444,8 +431,8 @@ static BOOL nt_cap_start(NtCap *cap, struct Library *base, const char *iface,
     cap->out.fh  = 0;
     cap->short_reads = 0;
 
-    /* -1 is "any free channel", and the answer names the one claimed, so two
-       captures can run at once instead of fighting over channel 0. */
+    /* -1 asks for any free channel and the answer names the one claimed, so
+       two captures can run at once. */
     cap->channel = nt_bpf_open(base, -1);
     if (cap->channel < 0)
     {
@@ -456,7 +443,7 @@ static BOOL nt_cap_start(NtCap *cap, struct Library *base, const char *iface,
     }
     cap->open = TRUE;
 
-    /* Buffer size BEFORE the interface: real BPF refuses BIOCSBLEN once the
+    /* Buffer size before the interface: real BPF refuses BIOCSBLEN once the
        buffers are allocated, and so does ours. */
     value = blen;
     if (nt_bpf_ioctl(base, cap->channel, BIOCSBLEN_, &value) != 0)
@@ -539,7 +526,7 @@ static VOID nt_cap_stop(NtCap *cap)
     (VOID)nt_bpf_ioctl(cap->base, cap->channel, BIOCGSTATS_, &st);
 
     /* Nothing should still be buffered after the drain above; if it is, the
-       trace stops short of the last few frames and that has to be said. */
+       trace stops short of the last few frames. */
     left = nt_bpf_data_waiting(cap->base, cap->channel);
 
     nt_out_close(&cap->out);
@@ -590,10 +577,9 @@ typedef struct NtResult
  * A bulk transfer between two sockets in this one process, over 127.0.0.1.
  *
  * Single-threaded and therefore entirely non-blocking: listener, client and
- * accepted socket all go through one WaitSelect(), which is also the shape
- * curl's multi interface uses and the shape tests/clients replays.  The
- * capture is drained on every pass, so the channel never has more than a few
- * hundred microseconds of traffic in it.
+ * accepted socket all go through one WaitSelect().  The capture is drained on
+ * every pass, so the channel never holds more than a few hundred microseconds
+ * of traffic.
  */
 static VOID nt_loopback(struct Library *base, NtCap *cap, ULONG want,
                         NtResult *res)
@@ -753,10 +739,9 @@ done:
 /*
  * One HTTP/1.0 GET over the wire, read to completion.
  *
- * HTTP/1.0 with no keep-alive on purpose: the body then ends when the peer
- * closes, so the trace covers the whole shutdown as well, and there is no
- * chunk parser here to get wrong.  The bytes are counted, not kept -- what is
- * being measured is the stack, and tests/curl checks payloads byte for byte.
+ * HTTP/1.0 with no keep-alive, so the body ends when the peer closes: the
+ * trace covers the shutdown as well, and there is no chunk parser here.  The
+ * bytes are counted, not kept; tests/curl checks payloads byte for byte.
  */
 static VOID nt_wire(struct Library *base, NtCap *cap, ULONG address,
                     UWORD port, const char *path, NtResult *res)
@@ -799,12 +784,12 @@ static VOID nt_wire(struct Library *base, NtCap *cap, ULONG address,
     }
 
     /*
-     * PATH comes off the command line, and `req` is on the caller's stack --
-     * which a Shell command gets four kilobytes of. Copying it unbounded meant
-     * any PATH longer than 462 characters wrote over this frame's return
-     * address, silently, because there is no MMU to say so. The trailer is
-     * appended only if it still fits, so a truncated request is refused by the
-     * server rather than sent as something else.
+     * PATH comes off the command line and `req` is on the caller's stack,
+     * which a Shell command gets four kilobytes of. Copying it unbounded let
+     * any PATH longer than 462 characters overwrite this frame's return
+     * address, silently -- there is no MMU here. The trailer is appended only
+     * if it still fits, so a truncated request is refused by the server rather
+     * than sent as something else.
      */
     {
         static const char nt_head[]  = "GET ";
@@ -918,8 +903,8 @@ static VOID nt_report(const char *what, const NtResult *r)
         return;
     }
 
-    /* Bytes per second without a 64-bit divide: bytes/ms * 1000 loses too
-       much on a short run, so scale by 1000 first in the safe order. */
+    /* Bytes per second without a 64-bit divide: bytes/ms * 1000 loses too much
+       on a short run, so scale by 1000 in the safe order. */
     rate = (r->bytes / r->ticks) * 1000UL +
            ((r->bytes % r->ticks) * 1000UL) / r->ticks;
 

@@ -3,11 +3,11 @@
  *
  *     arp [ADDRESS] [DELETE] [SET=<hardware address>] [UNIT=<n>] [STATS]
  *
- * Every packet that leaves this machine for the local network needs the
- * ethernet address of whatever it is going to, and ARP is how that is found
- * out and remembered. The cache is therefore the answer to a question that
- * comes up constantly and that nothing else answers cheaply: "is the other
- * machine even there?"
+ * Every packet leaving this machine for the local network needs the ethernet
+ * address of its destination, and ARP is how that is found and remembered. The
+ * cache separates "the network does not work" from "that machine is not
+ * answering", and needs nothing of the other end but ARP, which a machine that
+ * drops pings still answers.
  *
  *   an entry with a hardware address   it answered; the wire is fine, and
  *                                      whatever is wrong is above this layer
@@ -15,11 +15,6 @@
  *                                      wrong address, wrong network, or it
  *                                      is switched off
  *   no entry at all                    nothing here has tried to reach it
- *
- * That is worth more than a ping, because it separates "the network does not
- * work" from "that machine is not answering", and it needs nothing of the
- * other end but ARP -- which even a machine with a firewall that drops pings
- * still replies to.
  *
  *     arp                     the whole cache
  *     arp 192.168.1.1         one address
@@ -30,13 +25,12 @@
  *                             answer ARP or that keeps changing
  *
  * Nothing ages out. NX_ARP_EXPIRATION_RATE is 0 in this build, so an entry
- * stays until DELETE removes it or the stack stops. Worth knowing before
- * wondering why a machine that has since moved is still listed here.
+ * stays until DELETE removes it or the stack stops, and a machine that has
+ * since moved is still listed.
  *
- * It does not start the network, unlike fetch or nslookup. The cache is a
- * statement about a running stack, and starting one to report that its cache
- * is empty would be a bug rather than a convenience -- the same rule
- * ShowNetStatus follows, for the same reason.
+ * It does not start the network, unlike fetch or nslookup. The cache describes
+ * a running stack, so starting one to report an empty cache would make the
+ * answer meaningless. ShowNetStatus follows the same rule.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -74,9 +68,8 @@ static VOID zero_control(NetStatusControl *ctl)
 }
 
 /*
- * "02:11:22:33:44:55". The separator may be ':' or '-' or absent, because all
- * three are what people have written down, and a command that rejects the
- * form printed on the underside of the machine is not much use.
+ * "02:11:22:33:44:55". The separator may be ':' or '-' or absent; all three
+ * turn up on labels and in documentation.
  */
 static BOOL parse_mac(const char *text, UBYTE *out)
 {
@@ -118,10 +111,10 @@ static BOOL parse_mac(const char *text, UBYTE *out)
 }
 
 /*
- * The interface an entry was learnt on, by the name the rest of the tools use
- * for it. "interface 0" is a number out of the stack's internals; "a2065.0"
- * is the line the user wrote in the config file, and on a machine with two
- * cards it is the difference between a useful column and a decorative one.
+ * The interface an entry was learnt on, by the name the rest of the tools use.
+ * "interface 0" is a number out of the stack's internals; "a2065.0" is the line
+ * the user wrote in the config file, which is what identifies the card on a
+ * machine with two of them.
  */
 static const char *interface_name(UWORD nx_index, BOOL have_snapshot)
 {
@@ -151,11 +144,9 @@ static VOID print_entry(const ToolArpEntry *e, BOOL have_snapshot)
     ami_config_format_ip(e->address, addr, sizeof(addr));
 
     /*
-     * An unresolved entry has an all-zero hardware address, and printing it
-     * as 00:00:00:00:00:00 would read as a machine with a strange address
-     * rather than as silence -- which is the one distinction this command
-     * exists to draw. The retry count is the evidence: it is how many times
-     * we asked before giving up on it for now.
+     * An unresolved entry has an all-zero hardware address. Printing it as
+     * 00:00:00:00:00:00 would read as a machine with a strange address rather
+     * than as silence. The retry count is how many times we asked.
      */
     if (!e->resolved)
     {
@@ -206,13 +197,13 @@ static BOOL on_our_network(ULONG addr, BOOL have_snapshot)
 }
 
 /*
- * Why an address is not in the cache, which is two quite different things.
+ * Why an address is not in the cache; there are two distinct reasons.
  *
- * ARP is only ever spoken to machines on this machine's own network. An
- * address anywhere else is reached by handing the packet to the router, so it
- * will NEVER appear here however much traffic goes to it -- and someone who
- * has just pinged it successfully and then found nothing in the cache is
- * owed that sentence rather than "nothing has tried to reach it".
+ * ARP is only spoken to machines on this machine's own network. An address
+ * anywhere else is reached by handing the packet to the router, so it never
+ * appears here however much traffic goes to it. That needs saying rather than
+ * "nothing has tried to reach it", which would be wrong after a successful
+ * ping.
  */
 static VOID explain_absence(ULONG addr, BOOL have_snapshot)
 {
@@ -339,9 +330,9 @@ int main(int argc, char **argv)
     }
 
     /*
-     * The interface table, for the name column and for deciding whether an
-     * address is one ARP could ever have an answer about. Wanted on every
-     * path, and a failure here is never fatal -- it only costs detail.
+     * The interface table, for the name column and for deciding whether ARP
+     * could ever have an answer about an address. Wanted on every path; a
+     * failure here only costs detail.
      */
     tool_nx_quiet(TRUE);
     have_snapshot = (BOOL)(tool_snapshot(&arp_snap, FALSE) == 0);
@@ -388,10 +379,9 @@ int main(int argc, char **argv)
                            (LONG)address_text);
 
                 /*
-                 * Nearly always this, and it is worth saying rather than
-                 * leaving as an unexplained refusal from the stack: an entry
-                 * maps an address to a card on the same wire, so an address
-                 * on some other network has no card here to map it to.
+                 * Nearly always the cause: an entry maps an address to a card
+                 * on the same wire, so an address on another network has no
+                 * card here to map it to.
                  */
                 if (!on_our_network(want, have_snapshot))
                     tool_advise("It is not on any network this machine has an "
@@ -480,9 +470,8 @@ int main(int argc, char **argv)
     else if (arp_stats.arp_truncated && !quiet)
     {
         /*
-         * The snapshot holds TOOL_MAX_ARP entries and the stack may have
-         * more. Saying so is the point of nsh_Available: a list that silently
-         * stops reads as a complete one.
+         * The snapshot holds TOOL_MAX_ARP entries and the stack may have more.
+         * nsh_Available says so; a list that silently stops reads as complete.
          */
         tool_printf("\n");
         tool_advise("More entries exist than are shown here.");

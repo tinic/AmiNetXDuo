@@ -2,15 +2,14 @@
  * AmiNetXDuo tools -- talking to the live NetX Duo instance.
  *
  * Every function here is a NetStackQuery() call and a copy out of the answer.
- * There is no ThreadX in this file any more, and that is the whole point: the
- * ThreadX a command could adopt into was never the one the stack is running
- * on. See tools_nx.h for what that cost, and include/aminetxduo/netstatus.h
- * for the interface these go through.
+ * No ThreadX is involved: the ThreadX a command could adopt into is never the
+ * one the stack is running on. See tools_nx.h, and
+ * include/aminetxduo/netstatus.h for the interface these go through.
  *
  * The library is opened and closed around each of the three calls rather than
- * held across them. Opening it is a child-base clone and costs nothing worth
- * saving, and holding a base open across a printing loop is how a status
- * command ends up keeping the network alive after it exits.
+ * held across them. Opening it is a child-base clone and costs almost nothing,
+ * and a base held open across a printing loop would keep the network alive
+ * after the command exits.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -34,10 +33,9 @@ static union
 } nx_answer;
 
 /*
- * The failure message, once. Every caller here fails the same way and for the
- * same reason, and the message has to distinguish "nothing is running" from
- * "something is running that is not us" -- tool_netstatus_open() already
- * does, so this only covers a library that opened and then would not answer.
+ * The failure message, once. tool_netstatus_open() already distinguishes
+ * "nothing is running" from "something is running that is not us", so this only
+ * covers a library that opened and then would not answer.
  */
 static BOOL nx_quiet;
 
@@ -217,10 +215,7 @@ LONG tool_stats(ToolStats *out)
     if (out == NULL)
         return -1;
 
-    /*
-     * Zeroed field by field rather than with a memset: these tools link no
-     * libc, and a struct this size is worth being explicit about anyway.
-     */
+    /* Zeroed field by field rather than with memset: these tools link no libc. */
     out->have_ip = out->have_icmp = out->have_tcp = FALSE;
     out->have_udp = out->have_arp = out->have_pool = FALSE;
     out->arp_count     = 0;
@@ -376,9 +371,9 @@ LONG tool_dhcp(ToolDhcp *out)
         return -1;
 
     /*
-     * No nx_query_failed() here. A stack that does not know the selector is
-     * not a fault to announce: it is one part of one report going missing,
-     * and the caller has its own words for that.
+     * No nx_query_failed() here: a stack that does not know the selector just
+     * means one part of one report is missing, and the caller words that
+     * itself.
      */
     n = tool_netstatus_query(base, NETSTATUS_DHCP, &nx_answer,
                              sizeof(nx_answer.dhcp), sizeof(NetStatusDhcp));
@@ -489,14 +484,11 @@ LONG tool_routes(ToolRoutes *out)
 }
 
 /*
- * The routing table, printed the same way twice.
- *
- * netstat and ShowNetStatus both used to build this out of the interface list
- * and the default gateway, which was correct exactly while there was no
- * routing table -- and it stopped being correct the moment
- * NX_ENABLE_IP_STATIC_ROUTING landed, because a hand-added route would have
- * been in the stack and in neither report.  It is one function so the two
- * commands cannot drift again.
+ * The routing table, printed the same way for netstat and ShowNetStatus. Both
+ * used to derive it from the interface list and the default gateway, which
+ * stopped being correct once NX_ENABLE_IP_STATIC_ROUTING landed: a hand-added
+ * route was in the stack and in neither report. One function keeps them from
+ * drifting again.
  *
  * Order is the order NETSTATUS_ROUTES hands them over, which is the order
  * _nx_ip_route_find() matches in: connected prefixes, then the static table
@@ -553,9 +545,9 @@ VOID tool_print_routes(const ToolRoutes *routes, const AmiConfig *cfg,
     /*
      * Loopback is real and is not in the table: NetX Duo's loopback interface
      * is not one of the nx_ip_interface[] slots NETSTATUS_ROUTES walks, and
-     * _nx_ip_driver_packet_send() shortcuts 127/8 without consulting a route
-     * at all.  Printing it is the honest description of where a 127.0.0.1
-     * packet goes; leaving it out would read as though there were no loopback.
+     * _nx_ip_driver_packet_send() shortcuts 127/8 without consulting a route.
+     * Printed anyway, so the report does not read as though there were no
+     * loopback.
      */
     tool_printf("%-16s %-16s %-16s %-6s %s\n",
                 (LONG)"127.0.0.0", (LONG)"*", (LONG)"255.0.0.0",

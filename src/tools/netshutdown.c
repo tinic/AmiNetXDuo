@@ -1,34 +1,26 @@
 /*
- * NetShutdown -- stop the network.
+ * NetShutdown -- take every network interface down.
  *
- * Every interface goes down, in one command, and nothing goes in or out of
- * this machine afterwards. It is the counterpart of AddNetInterface: that one
- * starts the network, this one stops it, and until now the only way to stop it
- * was to take each interface down by name or to reboot.
+ *     NetShutdown TIMEOUT/N,QUIET/S
  *
- * TIMEOUT is how many seconds to wait for the interfaces to actually reach the
- * down state, five by default. Going down is normally instant -- the transition
- * is synchronous -- so the wait exists for the case where it is not, and
- * running out of it is reported rather than hidden.
+ * The counterpart of AddNetInterface. TIMEOUT is how many seconds to wait for
+ * the interfaces to reach the down state, five by default; the transition is
+ * synchronous so it is normally instant, and running out of the wait is
+ * reported rather than hidden.
  *
- * What it does not do, said out loud because the name promises more than this
- * machine can deliver.
+ * It does not unload the stack, despite the name. The stack is a singleton
+ * inside bsdsocket.library, coming up on that library's first OpenLibrary() and
+ * going down when the last opener closes (src/bsdsocket/library.c).
+ * AddNetInterface starts the network by opening the library and never closing
+ * it, and that leaked reference keeps the interface up after the command exits.
+ * No other command holds that reference, so no other command can drop it:
+ * bsdsocket.library stays in memory with its ThreadX kernel running until a
+ * reboot.
  *
- * The stack is a singleton inside bsdsocket.library and it comes up on that
- * library's first OpenLibrary() and goes down when the last opener closes
- * (src/bsdsocket/library.c). AddNetInterface starts the network precisely by
- * opening the library and never closing it, and that deliberately leaked
- * reference is what keeps the interface up after the command exits. No other
- * command holds that reference, so no other command can drop it: bsdsocket.
- * library therefore stays in memory with its ThreadX kernel running, and only
- * a reboot clears it.
- *
- * What is stoppable is the traffic, and that is what this stops. Every
- * interface is taken down through NETCTRL_INTERFACE_DOWN -- the same call
- * Offline makes, which reaches nx_ip_driver_interface_direct_command(
- * NX_LINK_DISABLE) and stops the SANA-II readers with it. Afterwards nothing
- * is sent and nothing is received. Saying that plainly is better than a
- * command that claims to have shut the stack down and left it running.
+ * What is stoppable is the traffic. Every interface is taken down through
+ * NETCTRL_INTERFACE_DOWN -- the same call Offline makes, reaching
+ * nx_ip_driver_interface_direct_command(NX_LINK_DISABLE) and stopping the
+ * SANA-II readers with it. Afterwards nothing is sent and nothing is received.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -74,9 +66,8 @@ static struct
 } nsd_ifaces;
 
 /*
- * How many interfaces are up right now, and their names when asked for. The
- * whole table is re-read each time rather than cached, because the wait below
- * is watching for it to change.
+ * How many interfaces are up right now. The whole table is re-read each time
+ * rather than cached, because the wait below is watching for it to change.
  */
 static LONG count_up(struct Library *base)
 {
@@ -92,10 +83,10 @@ static LONG count_up(struct Library *base)
     for (i = 0; i < n; i++)
     {
         /*
-         * NETSTATUS_IF_LINKUP and not NETSTATUS_IF_ONLINE, for the reason
-         * onoff.c gives: LINKUP is the flag NETCTRL_INTERFACE_DOWN clears, and
-         * the SANA-II shim's own online flag belongs to a layer below and does
-         * not follow in step. Waiting on the other one would wait forever.
+         * NETSTATUS_IF_LINKUP, not NETSTATUS_IF_ONLINE, for the reason onoff.c
+         * gives: LINKUP is the flag NETCTRL_INTERFACE_DOWN clears, while the
+         * SANA-II shim's online flag is a layer below and does not follow in
+         * step. Waiting on that one would wait forever.
          */
         if (nsd_ifaces.e[i].nsi_Flags & NETSTATUS_IF_LINKUP)
             up++;
@@ -147,11 +138,7 @@ int main(int argc, char **argv)
         timeout = (given > 0) ? (ULONG)given : 0UL;
     }
 
-    /*
-     * Nothing to stop. Roadshow exits at once and says so, and that is right:
-     * a shutdown command that starts the network in order to have something to
-     * shut down would be absurd, and tool_netstatus_open() will not do it.
-     */
+    /* Nothing to stop; tool_netstatus_open() will not start the stack. */
     if (!tool_stack_library_running())
     {
         say("The network is not running, so there is nothing to stop.\n");
@@ -219,9 +206,9 @@ int main(int argc, char **argv)
     }
 
     /*
-     * Wait for the table to agree. The transition is synchronous, so this
-     * normally finds nothing left to wait for on its first look; the loop is
-     * for the case where it does not, which is the case TIMEOUT is about.
+     * Wait for the table to agree. The transition is synchronous, so the first
+     * look normally finds nothing left to wait for; the loop covers the case
+     * TIMEOUT is about.
      */
     for (;;)
     {

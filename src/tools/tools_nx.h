@@ -1,32 +1,23 @@
 /*
- * AmiNetXDuo tools -- reading the RUNNING NetX Duo instance.
+ * AmiNetXDuo tools -- reading the running NetX Duo instance.
  *
  * Only ShowNetStatus and netstat need this; the rest of the tools stay clear
- * of the stack's internals entirely.
+ * of the stack's internals.
  *
- *   This file used to hand each command an NX_IP * from netstack_ip() and let
- *   it walk NetX Duo's tables itself, after adopting the Process as a
- *   TX_THREAD.  That could never work in a shipped build and did not:
+ * The snapshot comes from bsdsocket.library through NetStackQuery()
+ * (include/aminetxduo/netstatus.h), the same idiom NetTrace uses for the
+ * capture engine. The structures below are filled by copying scalars across a
+ * library boundary, not by walking another task's memory.
  *
- *     * A Shell command links its OWN copy of ThreadX and NetX Duo.  Its
- *       kernel was never entered and its NX_IP owns no interfaces.  The stack
- *       that is running lives inside bsdsocket.library, in that library's own
- *       copy of the same archives.
- *     * No tool links aminetxduo_netstack, so netstack_ip() resolved to
- *       src/tools/netstack_weak.c's weak stub and returned NULL -- in every
- *       build that was ever shipped.
- *
- *   So `netstat`, `ping` and ShowNetStatus's live path reached
- *   tool_require_stack(), got NULL, and printed "the network is up, but this
- *   command cannot read it".  Correct English, and a lie about what the
- *   commands could do.  docs/RESEARCH.md 21.
- *
- *   The snapshot now comes from bsdsocket.library through NetStackQuery()
- *   (include/aminetxduo/netstatus.h), which is the same idiom NetTrace
- *   already used for the capture engine.  The structures below are unchanged
- *   in shape -- they are what the two commands print from -- but they are
- *   filled by copying scalars across a library boundary rather than by
- *   walking another task's memory.
+ * The earlier design handed each command an NX_IP * from netstack_ip() and let
+ * it walk NetX Duo's tables. That cannot work in a shipped build: a Shell
+ * command links its own copy of ThreadX and NetX Duo, its kernel is never
+ * entered and its NX_IP owns no interfaces, while the running stack lives
+ * inside bsdsocket.library's own copy of the same archives. No tool links
+ * aminetxduo_netstack, so netstack_ip() resolved to src/tools/netstack_weak.c's
+ * weak stub and returned NULL in every shipped build, leaving `netstat`, `ping`
+ * and ShowNetStatus's live path printing "the network is up, but this command
+ * cannot read it". docs/RESEARCH.md 21.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -43,11 +34,9 @@ extern "C" {
 
 /*
  * Suppress the failure messages the three calls below print by default.
- *
- * netstat wants them: it has nothing else to say and no report to spoil.
- * ShowNetStatus does not: it is printing a table, it words the "up but
- * unreadable" case itself and in its own place, and an error block halfway
- * through a report is worse than no error block at all.
+ * netstat wants them; ShowNetStatus does not, since it words the "up but
+ * unreadable" case itself and an error block halfway through its table would
+ * break the report.
  */
 VOID tool_nx_quiet(BOOL quiet);
 
@@ -67,11 +56,9 @@ typedef struct ToolIfInfo
     UBYTE           mac[AMI_ETH_ADDR_SIZE];
     char            nx_name[NETSTATUS_NAME_LEN];
     /*
-     * The driver the RUNNING stack has open, which is not always the driver
+     * The driver the running stack has open, which is not always the driver
      * the config file names: the file can be edited after the stack starts,
-     * and an interface brought up by hand need never have been in it at all.
-     * Reporting the file's answer to "what is this running on" is the same
-     * mistake ShowNetStatus made with the name servers.
+     * and an interface brought up by hand need never have been in it.
      *
      * Empty when the interface has no SANA-II device -- a loopback or an
      * unattached slot -- so an empty string is a fact, not a failure.
@@ -111,23 +98,22 @@ typedef struct ToolSnapshot
 } ToolSnapshot;
 
 /*
- * One question to the running library. `want_sockets` is honoured only when
- * the caller needs the connection table, because that is one more call across
- * the boundary. Returns 0, or a negative code after printing a message.
+ * One question to the running library. Set `want_sockets` only when the
+ * connection table is needed; it costs another call across the boundary.
+ * Returns 0, or a negative code after printing a message.
  */
 LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets);
 
 /* -------------------------------------------------- protocol counters -- */
 
 /*
- * The per-protocol counters and the ARP cache, in one place so that no two
- * commands can report different numbers for the same thing: ShowNetStatus and
- * netstat both take this snapshot and only the layout of what they print
- * differs.
+ * The per-protocol counters and the ARP cache in one place, so ShowNetStatus
+ * and netstat cannot report different numbers for the same thing; only their
+ * layout differs.
  *
- * A `have_*` flag is FALSE when the protocol in question is not enabled in the
- * running stack, which is not the same as "all its counters are zero" and must
- * not be printed as though it were.
+ * A `have_*` flag is FALSE when the protocol is not enabled in the running
+ * stack. That is not the same as "all its counters are zero" and must not be
+ * printed as though it were.
  */
 
 #define TOOL_MAX_ARP    32
@@ -217,10 +203,9 @@ LONG tool_stats(ToolStats *out);
 /* --------------------------------------------------------------- DHCP -- */
 
 /*
- * What the server said, per interface.  Nothing kept this before: the lease
- * was applied at bring-up and discarded, so a machine that got its address by
- * DHCP could not say who gave it out or for how long -- the two questions
- * that matter when the address changes underneath something.
+ * What the server said, per interface. The lease used to be applied at
+ * bring-up and discarded, so a DHCP-addressed machine could not say who gave
+ * out its address or for how long.
  */
 
 typedef struct ToolDhcpInfo
@@ -249,7 +234,7 @@ typedef struct ToolDhcp
 
 /*
  * Returns 0, or a negative code.  A stack too old to know the selector is not
- * an error worth a message -- callers treat it as "no lease detail".
+ * an error; callers treat it as "no lease detail".
  */
 LONG tool_dhcp(ToolDhcp *out);
 
@@ -283,11 +268,11 @@ LONG tool_routes(ToolRoutes *out);
 
 /*
  * The table, printed. Both commands that print one call this, so they cannot
- * disagree about what the stack's routes are.
+ * disagree about the stack's routes.
  *
- * `fmt` is how an address becomes text. NULL means ami_config_format_ip(), the
- * dotted quad; ShowNetStatus passes its own so that NAMES still turns a
- * gateway into a host name here as it does everywhere else in that report.
+ * `fmt` turns an address into text. NULL means ami_config_format_ip(), the
+ * dotted quad; ShowNetStatus passes its own so NAMES turns a gateway into a
+ * host name here as it does elsewhere in that report.
  */
 typedef VOID (*ToolAddrText)(ULONG addr, char *buf, ULONG buflen);
 
