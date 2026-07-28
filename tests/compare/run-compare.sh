@@ -250,7 +250,7 @@ fi
 # once. build/amissl-stage/libs is where tests/curl leaves the tree.
 if [ -z "${EXTRALIBS:-}" ] && [ -d "$ROOT/build/amissl-stage/libs" ]; then
     EXTRALIBS="$ROOT/build/amissl-stage/libs"
-    say "# staging $EXTRALIBS (default; -L overrides)"
+    echo "==> staging $EXTRALIBS into LIBS: (default; -L overrides)"
 fi
 
 if [ -n "${EXTRALIBS:-}" ]; then
