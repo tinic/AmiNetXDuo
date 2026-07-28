@@ -744,6 +744,14 @@ int __wrap_write(int fd, const void *buf, size_t len)
  */
 static struct ConUnit *con_unit;    /* the console's ConUnit -- stable once found */
 
+/* Dynamic resize.  The reader child polls the ConUnit's live size -- its poll
+   already runs every CON_POLL_US for the quit check -- and on a change wakes the
+   parent, which hands it to the SIGWINCH handler Dropbear gave us (the only door
+   to cli_ses.winchange, which the port cannot reach directly). */
+static int          con_last_x, con_last_y;    /* last-seen console size        */
+static volatile int con_resized;               /* reader saw the window change  */
+static void       (*con_winch)(int);           /* Dropbear's SIGWINCH handler   */
+
 /*
  * Find the console's ConUnit.
  *
@@ -804,6 +812,23 @@ static int con_query_size(int *rows, int *cols)
         return 0;
     }
     return -1;
+}
+
+/*
+ * Capture Dropbear's SIGWINCH handler.
+ *
+ * AmigaOS delivers no Unix signals, so signal() has nothing to install -- but
+ * Dropbear's SIGWINCH handler is the only door to cli_ses.winchange, which this
+ * file cannot reach directly.  Remember it; the resize path calls it by hand.
+ * Return SIG_DFL rather than SIG_ERR so Dropbear does not think it failed.
+ */
+typedef void (*con_sigfn)(int);
+
+con_sigfn __wrap_signal(int sig, con_sigfn handler)
+{
+    if (sig == SIGWINCH)
+        con_winch = handler;
+    return (con_sigfn)0;
 }
 
 extern int __real_ioctl(int fd, unsigned long request, ...);
@@ -1003,6 +1028,22 @@ static void con_child(void)
 
     while (!cr->cr_Quit)
     {
+        /* A window resize shows up in the ConUnit's live size.  Piggyback on
+           this poll (it already runs every CON_POLL_US for the quit check): on
+           a change, wake the parent, which calls Dropbear's SIGWINCH handler. */
+        if (con_unit != NULL)
+        {
+            int x = con_unit->cu_XMax, y = con_unit->cu_YMax;
+
+            if (x > 0 && y > 0 && (x != con_last_x || y != con_last_y))
+            {
+                con_last_x  = x;
+                con_last_y  = y;
+                con_resized = 1;
+                Signal(cr->cr_Parent, cr->cr_DataSig);
+            }
+        }
+
         if (!WaitForChar(cr->cr_Handle, CON_POLL_US))
             continue;                          /* nothing yet; re-check cr_Quit */
 
@@ -1055,6 +1096,13 @@ static void con_reader_start(BPTR handle)
     cr->cr_DoneSig = 1UL << con_done_bit;
 
     con_reader = cr;
+
+    /* Prime the resize detector (and cache the ConUnit) so the child's first
+       poll compares against the real starting size, not zero. */
+    {
+        struct ConUnit *cu = con_get_unit();
+        if (cu != NULL) { con_last_x = cu->cu_XMax; con_last_y = cu->cu_YMax; }
+    }
 
     /* SAME priority as us, not higher.  A higher-priority reader that keeps
        finding input -- fast typing -- never blocks, so the parent (this task)
@@ -1334,6 +1382,16 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
 
         if ((sigs & SIGBREAKF_CTRL_C) != 0)
             con_intr = 1;
+
+        /* The reader woke us for a window resize: hand it to Dropbear's SIGWINCH
+           handler, which sets cli_ses.winchange, and the session loop sends the
+           new size (read live from the ConUnit) on this same pass. */
+        if (con_resized)
+        {
+            con_resized = 0;
+            if (con_winch != NULL)
+                con_winch(SIGWINCH);
+        }
 
         for (fd = DB_SOCK_BASE; fd < nfds && fd < DB_SOCK_LIMIT; fd++)
         {
