@@ -1419,7 +1419,7 @@ buffer, four remote-certificate slots and two root slots at 2.5 KB of DER each �
 40 KB**, and none of it resident when no connection is open.
 
 **Recommendation: not yet, and for one reason that is not technical.** Both stated blockers
-are gone and the pieces work. What is missing is a *traveller*: no command in the
+are gone and the pieces work. What is missing is a client: no command in the
 distribution opens `tls.library`, so default-on would ship 273 KB that only third-party
 software could use, and no third-party software exists because the library has never
 shipped. Two things would settle it, and both are small:
@@ -1448,7 +1448,7 @@ file up to the copy correctly installed — which reads exactly like an Installe
 aborted mid-way, and is not one. `GONE_LIMIT` is now 20; `MAX_POLLS` still bounds the run,
 and a genuinely stuck Installer keeps its window up, so it fails on the cap instead.
 
-#### Update (2026-07-25, later): the traveller and a reproducible store landed — the default still does not
+#### Update (2026-07-25, later): the client and a reproducible store landed — the default still does not
 
 The two things the section above said stood between this and "TLS on by default" are
 both done. A third thing turned up while proving the first one works, and it is worse
@@ -1458,7 +1458,7 @@ than either of them: **a certificate chain of three or more takes the machine do
 killed by SIGPIPE on the host, and everything in this section that reads as a library
 defect is that. See "The three-certificate 'crash' was the emulator dying of SIGPIPE".
 
-##### 1. `fetch`, the traveller
+##### 1. `fetch`
 
 `src/tools/fetch.c`, one more Roadshow-shaped Shell command beside `ping` and `host`:
 
@@ -1667,7 +1667,7 @@ not a hole anyone can shoot through. Re-argued at the end of the section named a
 The three arguments that used to be made against it are all gone. Speed: a public
 handshake is 6.8 s. Size: the pair is 523,164 bytes, unchanged (`bsdsocket.library`
 250,084 with the private vector, `tls.library` 273,080), which is still 1,124 bytes
-inside 512 KiB. A traveller: `fetch` ships. A trust store: 119 roots, 128,928 bytes,
+inside 512 KiB. A client: `fetch` ships. A trust store: 119 roots, 128,928 bytes,
 byte-reproducible on any host.
 
 What is left is that turning it on would put a `tls.library` in `LIBS:` that any program
@@ -2599,7 +2599,7 @@ entropy pool documented under the M9 gate above.
   they were on their way to rotting. They build with everything else and are deliberately
   **not** registered with `ctest`: `crashtest` jumps to `0x2` and `gurutest` double-frees,
   both on purpose, and `KernelStop` re-execs itself and fills free memory with `ILLEGAL`.
-  `KernelStop`'s output name is load-bearing — its parent process runs
+  `KernelStop`'s output name is relied on — its parent process runs
   `SYS:KernelStop child`.
 - **The netdb file parser now runs on the Amiga.** `tests/netstack/devs/Internet/` held
   only `hosts` and `name_resolution`, so every on-Amiga `get{serv,proto,net}by*` test was
@@ -2751,7 +2751,7 @@ The blocker is no longer a crash — there was no crash, and the argument in §4
 rested on one is void. Nothing can be taken down by a peer that is slow, rude or absent;
 that is four measured cases and a baseline test that keeps them measured.
 
-It stays off anyway, and the honest reason is worse for being ordinary: **at 14 MHz this
+It stays off anyway, for an ordinary reason: **at 14 MHz this
 finishes a three-certificate handshake in about 23 seconds and Cloudflare waits about
 fifteen.** A `LIBS:tls.library` that fails on a large fraction of the web through no
 fault of the caller is not a default; it is a footgun with good error messages. The
@@ -3130,7 +3130,7 @@ Two settings that are curl's own quirks:
   IPv6 on, and `AMINETXDUO_IPV6` is OFF in the shipping stack. Turn it back on when
   the stack under it was built with it.
 
-**A fabricated `libnet.a` is load-bearing and not cosmetic.** curl's CMakeLists
+**A fabricated `libnet.a` is relied on and not cosmetic.** curl's CMakeLists
 hardcodes `list(APPEND CURL_NETWORK_AND_TIME_LIBS "net" "m" "atomic")` for AMIGA,
 with no switch. `libm.a` is real; the other two we make. `libatomic.a` is empty on
 purpose. `libnet.a` holds **one weak `SocketBase`** — because the NDK inlines all
@@ -3327,7 +3327,7 @@ not built. Four differences that matter, in the order they will bite:
    `run_with_timeout()`, which is `sigsetjmp` + `alarm` — neither of which does
    anything here. A blocking `connect()` to a dead port therefore has to fail
    promptly by itself or wget hangs with nothing of its own to save it. Our
-   `connect()`'s own timeout becomes load-bearing in a way it is not for curl.
+   `connect()`'s own timeout becomes relied on in a way it is not for curl.
 
 4. **TLS is *easier* than curl's, which is the one pleasant surprise.** wget has
    no plugin backend — `--with-ssl={gnutls,openssl,no}` and nothing else — but
@@ -4285,7 +4285,7 @@ reaches. Anyone who ever does need the space should start there.
 **The first connection to a host still costs what it always cost.** Resumption is a second
 connection's optimisation, so a machine that has never spoken to `www.iana.org` still
 cannot reach it at 14 MHz. The seed has to come from somewhere: a faster clock, a patient
-host, or — the honest option nobody has built — a way to carry a session file between
+host, or — nobody has built this — a way to carry a session file between
 machines.
 
 **A verified-chain cache is still worth 8–10% and is still not the answer.** That estimate
@@ -5184,7 +5184,7 @@ scalar — against our comb's 26 doublings and 50 additions. Eleven times.
 would not help if it were yes: the generator case is routed to the ladder before
 `pre_comp` is ever consulted.
 
-ECDSA verify is the honest middle. Both sides run a variable-time wNAF because both
+ECDSA verify sits in the middle. Both sides run a variable-time wNAF because both
 scalars are public, we issue 12% *fewer* multiplies, and we are 1.69× faster — so about
 half of that gap is not multiplies at all. It is the same diagnosis §9 made about
 `nx_crypto`, one level less severe: OpenSSL's field elements are `BIGNUM`s with a size
@@ -5671,7 +5671,7 @@ receive, the checksum, the TCP reassembly and the copy out through `recv()`. Tha
 CPU work, and it is the same work §11 already ranked (`bsdsocket.library`'s per-call
 overhead first at ~1010 ms/MB, the copies second).
 
-So the honest position on §11's fit is that **the fixed-ceiling component is still
+On §11's fit: **the fixed-ceiling component is still
 unexplained**, and three named candidates have now been eliminated rather than one
 added. The next place to look is the per-segment cost above, which is measurable
 directly (segments per second against clock) rather than by fitting.
@@ -5800,7 +5800,7 @@ and it is stated as one; the point of running it was that it could have been a l
   close — but it is no longer an inference from source code.
 - **The capture costs about 10% on loopback and nothing measurable on the wire.**
   Loopback 297 → 266 KB/s with a channel bound; wire 161 → 174 KB/s, i.e. inside
-  run-to-run variance. Both are reported rather than one, because the honest
+  run-to-run variance. Both are reported rather than one, because the
   statement is that the instrument perturbs the fast path and not the slow one.
 - **`NetTrace` itself found a class of bug the harness could not report.** Its 16 KB
   capture buffer started life as a local in `main()`, and an AmigaDOS Shell command
@@ -7887,7 +7887,7 @@ every body hashed against the server's copy:
 and `AvailMem` delta is +0 on both.** Five of six points are faster and one (the
 eight-way) is slower; the mean is 10% better. The direction is what the
 mechanism predicts — the sockets that get a window above the floor are the ones
-opened while few others are — but the honest reading of a single sweep with this
+opened while few others are — but the reading of a single sweep with this
 spread is **no regression**, not a 10% win.
 
 The named acceptance test and curl's own throughput, groups A–D on both builds:
@@ -8327,7 +8327,7 @@ That is a failure to find out, not a verdict.
 Two of Roadshow's six conditions mean something specific here and are documented in the
 command rather than left to be inferred. `PTPINTERFACES` is **never** satisfied: a
 point-to-point interface is SLIP or PPP, and every interface this stack attaches is a
-SANA-II Ethernet device with a hardware address, so the honest answer is "none" rather
+SANA-II Ethernet device with a hardware address, so the answer is "none" rather
 than "none found". `ROUTES` is satisfied by the routes that exist rather than by a routing
 table, because the directly-attached prefix of an interface is a real route.
 
@@ -8371,7 +8371,7 @@ rather than one that silently does nothing.
 ### 26.5 `NetShutdown` stops the traffic, and says what it cannot stop
 
 Roadshow's own documentation for this command says, in its FUNCTION section, that it stops
-all running interfaces. That is exactly what ours does, and the honest part is what it says
+all running interfaces. That is what ours does, and what it says
 afterwards.
 
 The stack is a singleton inside `bsdsocket.library`; it comes up on that library's first
@@ -10858,7 +10858,7 @@ Every inetd-style handoff takes that path: `ReleaseCopyOfSocket()` plus
 `ObtainSocket()`, or `Dup2Socket()` across bases. §34 found it hanging the first
 socket-handoff run of the `TCP:` handler, which guards the case locally; the
 general fix is three lines in `bsd_socket_release()` and the local guard is now
-redundant rather than load-bearing.
+redundant rather than relied on.
 
 `NULL` is the right answer rather than "the other holder", because there is no
 way to know which holder that is — one NX socket has one owner and `handoff.c`
@@ -11381,7 +11381,7 @@ only correct way to get a descriptor table, because every opener gets its own ch
 later packet for that handle goes straight to the session, which may block for as long as
 it likes because nobody else is behind it.
 
-**Moving `fh_Type` is legal and load-bearing.** `dos.library` sets it to the device's port
+**Moving `fh_Type` is legal and relied on.** `dos.library` sets it to the device's port
 just before sending the packet and re-initialises the whole file handle on every retry "in
 case handler played with it" (v40 `dos/bcplio.c`, `findstream`). One port per open file is
 also the *only* way to implement `ACTION_WAIT_CHAR`, which is on Roadshow's packet list:
@@ -11795,7 +11795,7 @@ is fast; **Dropbear's** P-256 is `ltc_ecc_mulmod` over libtommath, which is not
 `crypto68k` and is slower per scalar multiplication than TweetNaCl's curve25519
 by a factor of five. §31.6's own caveat — that our speed lives in the
 representation and wiring `nx_crypto`'s limb layout to libtommath's `mp_int`
-may be a rewrite rather than a shim — was the load-bearing sentence, and this
+may be a rewrite rather than a shim — was the relied on sentence, and this
 result is what makes it decisive rather than cautionary. **Route A was never a
 cheap experiment with an expensive follow-up; it was an expensive rewrite with
 nothing in front of it.** Route B needed one new file and no bridge at all,
@@ -11831,7 +11831,7 @@ from tables that cost nothing to look up on a part §18.1 measured as having no
 data cache. It is a contained, testable change against the same vectors and it
 is the obvious next piece of work.
 
-Below that, the honest answer starts to arrive. A curve25519 scalar
+Below that, the answer starts to arrive. A curve25519 scalar
 multiplication is irreducibly about 2,500 field multiplications and a field
 multiplication is irreducibly 72 `MULU.L` at 32 cycles, which is 2,300 cycles of
 pure multiply — 0.16 ms at 14 MHz, against the 0.54 ms measured. So there is
@@ -12236,7 +12236,7 @@ six bytes of a header; and `bsd_raw_filter` (`raw.c:144`) copies with
 `NX_NO_WAIT` and does a `tx_semaphore_put`. Not one of them can suspend, and
 not one of them calls `bsd_recv()`.
 
-**That invariant is load-bearing and nobody had written it down.** It is the
+**That invariant is relied on and nobody had written it down.** It is the
 only thing standing between six unconditional `EWOULDBLOCK` mappings and the
 reported defect. If any future vector is ever called from a NetX Duo callback,
 `recv()` on a blocking socket starts returning `EAGAIN` and there is no comment
@@ -12458,7 +12458,7 @@ fails, exactly as its `bsd_fd_alloc()` failure path already does, instead of
 leaving the listener with nothing. Both are in `src/bsdsocket/socket.c`, which
 is another workstream's.
 
-**Where the honesty line is.** The `relisten failed` warning and the permanent
+**The line.** The `relisten failed` warning and the permanent
 `EINVAL` after it are library behaviour and a plain reading of the code: the
 warning is the library's own, and `as_Incoming` has exactly one assignment.
 What provoked the *first* accept to hand back an unbound socket is not settled
@@ -12598,7 +12598,7 @@ than an unsigned compare —
 with a full case analysis of an ACK and a queued segment falling on either side
 of the wrap. This is not a place where wrap was forgotten.
 
-**So the honest state of this is: the arithmetic says one wrap per 4 GB, the
+**So: the arithmetic says one wrap per 4 GB, the
 code says wrap is handled, and no run in this project has yet put 4 GB through
 one connection.** The harness reports how far it got (`endreport.py` prints it
 against the 4096 MB figure) so the question stays open with a number on it
@@ -12750,7 +12750,7 @@ than the scheduler and round-trip variance the delay is hiding behind.
 ### Linking was not the same as working
 
 `svr-main.c` forks per connection and treats a failed fork as *log a warning
-and drop the connection*. So the honest `ENOSYS` above would have produced a
+and drop the connection*. So the `ENOSYS` above would have produced a
 server that accepted every connection and instantly hung up — the exact
 failure mode this project keeps finding, a well-formed thing that never runs.
 
@@ -13074,10 +13074,10 @@ IP thread, which does all the inbound processing it could not do while an
 application task held the baton. That is the stack working, charged to whoever
 happened to open the gate.
 
-So the honest accounting of the bracket in one curl fetch is `enter` plus the
+So the accounting of the bracket in one curl fetch is `enter` plus the
 suspend: **35 ms before, 24 ms after, out of ~17,000 ms**. 0.2% of a fetch.
 
-### 39.5 The A/B on the honest instrument, which is a flat line
+### 39.5 The A/B, which is a flat line
 
 `tests/compare/run-compare.sh -s ours|roadshow -w curl`, `AMINETXDUO_PERF=1`
 (the measurement lane of 81b8f8d), A1200, 1,200,000 bytes, `CurlCheck`'s own
@@ -13563,7 +13563,7 @@ the aborted client reached them) and go back when the program closes them.
 
 ### 41.3 A listener that survives a failed relisten
 
-§37.4's defect, and the honest position on it is the one §37.4 itself reached:
+§37.4's defect, and the position on it is the one §37.4 itself reached:
 **the trigger for the `NX_INVALID_RELISTEN` is not established.** §37.4
 published a root cause and retracted it on finding that
 `nx_tcp_packet_process.c:650` clears the listen request's socket slot itself
@@ -14089,7 +14089,7 @@ workaround, and it was: it makes the socket `ESTABLISHED` before the unlocked
 check runs, so the suspension is never reached.
 
 **It stays, and it stays for a reason that is not inertia.** With the vendored
-file correct it is no longer load-bearing — but it was never only a workaround.
+file correct it is no longer relied on — but it was never only a workaround.
 `nc.c` says why in its own comment: *a blocked `accept()` cannot see Ctrl-C*.
 Waiting on readiness and then taking the connection is what gives a break
 somewhere to be noticed and a timeout somewhere to apply, and that argument
@@ -14154,8 +14154,8 @@ attached (one of them a Parsec virtual display), so there is a real desktop to
 launch into, and `PsExec64 -i 1 -d` launches into it. First measured run after
 that change: Kickstart booted and the smoke probe returned in **seven seconds**.
 
-This is the load-bearing dependency of the whole harness. On a build agent with
-no console session it would not work, and the honest statement is that this
+This is the relied on dependency of the whole harness. On a build agent with
+no console session it would not work, so this
 works *on this host* because somebody is logged into it.
 
 ### 44.2 Making a run end, rather than killing it on a timer
@@ -14304,7 +14304,7 @@ emulated; the driver is a third-party binary nobody in this tree has. The
 `ariadne.device` in `build/testhd-ux4/devs/Networks/` is an 18-byte file reading
 `not a real driver` — an installer-detection fixture, not a driver.
 
-**So the honest state of device coverage is unchanged: `a2065.device` is still
+**Device coverage is unchanged: `a2065.device` is still
 the only SANA-II driver this project has ever run.** What changed is that the
 hardware for seven more is now one config line away, and
 `AMINETXDUO_SANA2_DRIVER=<path> tests/netstack/run-winuae.sh -N <board>` will
@@ -14898,7 +14898,7 @@ unnamed is zero because it is uncounted. The four that are answered:
 | `NETSTATUS_icmp` | the two histogram slots `nx_icmp_info_get()` can fill, plus the checksum errors |
 
 `NETSTATUS_mb`, `igmp`, `mrt` and `rt` are refused with `EOPNOTSUPP`, which is
-the honest form of the same statement — an all-zero `mbstat` would report a
+the same statement — an all-zero `mbstat` would report a
 healthy mbuf allocator that does not exist.
 
 `ip_invalid_packets` and `ip_receive_packets_dropped` are deliberately not
@@ -15363,7 +15363,7 @@ were all of it.
 The invariant asserted is therefore **never both set**, which holds for all
 three, rather than "exactly one", which does not.
 
-`smm_Size` also turns out to be load-bearing rather than decorative:
+`smm_Size` also turns out to be relied on rather than decorative:
 `BindMonitorMsg`, `ConnectMonitorMsg` and `SendMonitorMessage` begin with the
 same three members, and nothing else in the message says which kind it is. The
 probe tells a send message from a bind one by its size alone (36 against 20),
@@ -16015,7 +16015,7 @@ Eight now answer, and every value is what this stack actually does: `SBTC_UDP_CH
 TRUE, `SBTC_IP_FORWARDING` FALSE, `SBTC_IP_DEFAULT_TTL`, `SBTC_ICMP_MASK_REPLY` FALSE,
 `SBTC_ICMP_SEND_REDIRECTS` FALSE, `SBTC_ICMP_PROCESS_ECHO` = IR_Process,
 `SBTC_ICMP_PROCESS_TSTAMP` = IR_Ignore (NetX Duo does not implement it) and
-`SBTC_IDN_DEFAULT_CHARACTER_SET` = IDNCS_ASCII. Where the honest answer is "no", it says
+`SBTC_IDN_DEFAULT_CHARACTER_SET` = IDNCS_ASCII. Where the answer is "no", it says
 no.
 
 `SBTC_GET_BYTES_RECEIVED` / `_SENT` now answer too, from `nx_ip_info_get()` -- the same
@@ -16640,7 +16640,7 @@ Both configuration mistakes mattered, and both looked like results:
 
 The first run looked like 252 findings. It was a quarter of the tree.
 
-### The gate is a baseline, and that is the honest answer
+### The gate is a baseline
 
 `-fanalyzer -Werror` is not reachable here without dead NULL tests, blanket pragmas or
 rewriting a test's formatter. **25 recorded findings with a reason each beats 25 hidden by
