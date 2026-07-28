@@ -70,7 +70,7 @@ PRIVATE_VECTORS = [
     (0x360, "bsd_ObtainNetXDuoContext", "AMINETXDUO_TLS_CONTEXT",
      "hands tls.library the NetX Duo singleton -- nxcontext.h"),
     (0x366, "bsd_NetStackQuery", None,
-     "a snapshot of the RUNNING stack -- netstatus.h"),
+     "a snapshot of the running stack -- netstatus.h"),
     (0x36c, "bsd_NetStackControl", None,
      "interfaces, routes and the ARP cache -- netstatus.h"),
 ]
@@ -334,22 +334,21 @@ HEADER_PREAMBLE = """\
 #include <sys/mbuf.h>
 #include <net/route.h>
 
-/* The private vector below traffics in one of these. */
+/* Used by the private vector below. */
 #ifdef AMINETXDUO_TLS_CONTEXT
 #include "aminetxduo/nxcontext.h"
 #endif
 
-/* The shared stubs every unimplemented slot points at: they set errno to
- * ENOSYS and return the "failed" value for their shape.  Never NULL in the
- * table -- a jump through a NULL LVO takes the machine down, and Tier-3
- * vectors do get called by stock Roadshow tools.
+/* Shared stubs for unimplemented slots: set errno to ENOSYS and return the
+ * failure value for their return type.  Never leave a NULL in the table -- a
+ * jump through a NULL LVO takes the machine down, and stock Roadshow tools do
+ * call Tier-3 vectors.
  *
- * Three of them because the shapes differ.  A vector documented to return a
- * pointer must return NULL on failure, not -1: its callers test for NULL and
- * then dereference, so a -1 stub turns "unimplemented" into a guru inside the
- * application.  A vector documented to return BOOL must return FALSE, because
- * -1 is all-bits-set and every BOOL test reads that as TRUE -- a -1 stub for
- * ProcessIsServer() or ChangeRoadshowData() reports SUCCESS. */
+ * Three variants because the failure value differs.  Pointer-returning vectors
+ * must fail with NULL, not -1: callers test for NULL and then dereference.
+ * BOOL-returning vectors must fail with FALSE, because -1 is all-bits-set and
+ * reads as TRUE -- a -1 stub for ProcessIsServer() or ChangeRoadshowData()
+ * would report success. */
 LONG bsd_enosys(register struct AmiSocketBase *SocketBase __asm("a6"));
 APTR bsd_enosys_ptr(register struct AmiSocketBase *SocketBase __asm("a6"));
 BOOL bsd_enosys_bool(register struct AmiSocketBase *SocketBase __asm("a6"));
@@ -373,9 +372,9 @@ SOURCE_PREAMBLE = """\
  * library base, so entry i sits at LVO -(6 * (i + 1)).  The first four are
  * the exec standard set; user vector n is at index (offset / 6) - 1.
  *
- * The table is dense on purpose.  Slots the ABI reserves (0x132..0x168 and
- * the two after gethostbyaddr_r) and every vector we have not implemented
- * yet point at bsd_enosys() rather than NULL.
+ * The table is dense: slots the ABI reserves (0x132..0x168 and the two after
+ * gethostbyaddr_r) and every vector not yet implemented point at bsd_enosys()
+ * rather than NULL.
  *
  * SPDX-License-Identifier: MIT
  */

@@ -2,9 +2,9 @@
  * bsdsocket.library -- gethostby*, gethostname, gethostid.
  *
  * Everything routes through netstack_resolve()/netstack_resolve_reverse()
- * (include/aminetxduo/netstack.h), which owns the NetX Duo DNS client and the
- * name_resolution config. This file only deals with the Amiga-side contract:
- * a per-opener struct hostent for the non-reentrant calls, a caller-supplied
+ * (include/aminetxduo/netstack.h), which drives the NetX Duo DNS client and
+ * the name_resolution config. This file only handles the Amiga side: a
+ * per-opener struct hostent for the non-reentrant calls, a caller-supplied
  * buffer for the _r ones, and h_errno.
  *
  * SPDX-License-Identifier: MIT
@@ -14,7 +14,7 @@
 
 #include <proto/exec.h>
 
-/* Resolver patience, in ThreadX ticks. */
+/* Resolver timeout, in ThreadX ticks. */
 #define BSD_RESOLVE_TIMEOUT     (30UL * (ULONG)NX_IP_PERIODIC_RATE)
 
 /* Fill in the per-opener hostent, which the non-reentrant calls return. */
@@ -47,7 +47,7 @@ static struct hostent *bsd_hostent_fill(struct AmiSocketBase *base,
  *
  *   char *addr_list[2] | char *aliases[1] | ULONG address | name
  *
- * all longword aligned, which is all m68k asks for.
+ * all longword aligned, which is what m68k needs.
  */
 static struct hostent *bsd_hostent_pack(struct AmiSocketBase *base,
                                         struct hostent *hp, APTR buf,

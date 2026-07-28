@@ -1,13 +1,12 @@
 /*
- * bsdsocket.library -- what the interface API publishes to its neighbours.
+ * bsdsocket.library -- interface lookup shared between interfaces.c and its
+ * callers.
  *
- * interfaces.c owns the answer to "which slot is the interface called X",
- * because it owns the naming rule: the name from DEVS:NetInterfaces if there
- * is one, otherwise the name NetX Duo gave the slot, compared without regard
- * to case. addralloc.c has to ask the same question -- CreateAddrAllocMessageA()
- * returns CAAME_Interface_not_found for a name nothing answers to -- and a
- * second implementation of that rule is a second place for the two APIs to
- * disagree about what an interface is called.
+ * interfaces.c holds the naming rule: the name from DEVS:NetInterfaces if
+ * there is one, otherwise the name NetX Duo gave the slot, compared
+ * case-insensitively. addralloc.c needs the same lookup --
+ * CreateAddrAllocMessageA() returns CAAME_Interface_not_found for an unknown
+ * name -- so the rule is implemented once and declared here.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -18,10 +17,10 @@
 #include "bsdsocket_internal.h"
 
 /*
- * "This name cannot be longer than 15 characters" -- QueryInterfaceTagList()
- * and AddInterfaceTagList() both say so, so 15 plus a NUL is the whole name
- * storage this API ever needs. struct AddressAllocationMessage's
- * aam_InterfaceName is sixteen bytes for the same reason.
+ * QueryInterfaceTagList() and AddInterfaceTagList() both cap interface names
+ * at 15 characters, so 15 plus a NUL covers everything this API stores.
+ * struct AddressAllocationMessage's aam_InterfaceName is 16 bytes for the same
+ * reason.
  */
 #define BSD_IFNAME_SIZE     16
 
@@ -30,21 +29,17 @@ LONG bsd_if_index_of(NX_IP *ip, const char *name);
 
 /*
  * SIOCGIFCONF and the SIOCGIF* family, for options.c's IoctlSocket().
- *
- * Here rather than there because answering them means knowing the naming rule
- * and the gather, both of which live in interfaces.c -- and a second copy of
- * either is a second place for two APIs to disagree about what an interface
- * is. Returns 0, or -1 with errno set.
+ * Implemented in interfaces.c because answering them needs the naming rule and
+ * the interface gather. Returns 0, or -1 with errno set.
  */
 LONG bsd_if_ioctl(ULONG req, APTR argp, struct AmiSocketBase *SocketBase);
 
 /*
- * addralloc.c -- TRUE while an address allocation Process is still running.
- *
- * Declared here rather than in a header of its own because it exists for one
- * caller: bsd_lib_expunge(), which must decline while a worker is executing
- * out of the segment it is about to hand to UnLoadSeg(). Exactly the reason
- * bsd_tcp_handler_alive() exists beside it.
+ * From addralloc.c: TRUE while an address allocation Process is still running.
+ * Declared here rather than in its own header because it has one caller,
+ * bsd_lib_expunge(), which must decline while a worker is executing out of the
+ * segment it would hand to UnLoadSeg(). Same reason as
+ * bsd_tcp_handler_alive().
  */
 BOOL bsd_aam_busy(VOID);
 

@@ -21,22 +21,21 @@
 #include <sys/mbuf.h>
 #include <net/route.h>
 
-/* The private vector below traffics in one of these. */
+/* Used by the private vector below. */
 #ifdef AMINETXDUO_TLS_CONTEXT
 #include "aminetxduo/nxcontext.h"
 #endif
 
-/* The shared stubs every unimplemented slot points at: they set errno to
- * ENOSYS and return the "failed" value for their shape.  Never NULL in the
- * table -- a jump through a NULL LVO takes the machine down, and Tier-3
- * vectors do get called by stock Roadshow tools.
+/* Shared stubs for unimplemented slots: set errno to ENOSYS and return the
+ * failure value for their return type.  Never leave a NULL in the table -- a
+ * jump through a NULL LVO takes the machine down, and stock Roadshow tools do
+ * call Tier-3 vectors.
  *
- * Three of them because the shapes differ.  A vector documented to return a
- * pointer must return NULL on failure, not -1: its callers test for NULL and
- * then dereference, so a -1 stub turns "unimplemented" into a guru inside the
- * application.  A vector documented to return BOOL must return FALSE, because
- * -1 is all-bits-set and every BOOL test reads that as TRUE -- a -1 stub for
- * ProcessIsServer() or ChangeRoadshowData() reports SUCCESS. */
+ * Three variants because the failure value differs.  Pointer-returning vectors
+ * must fail with NULL, not -1: callers test for NULL and then dereference.
+ * BOOL-returning vectors must fail with FALSE, because -1 is all-bits-set and
+ * reads as TRUE -- a -1 stub for ProcessIsServer() or ChangeRoadshowData()
+ * would report success. */
 LONG bsd_enosys(register struct AmiSocketBase *SocketBase __asm("a6"));
 APTR bsd_enosys_ptr(register struct AmiSocketBase *SocketBase __asm("a6"));
 BOOL bsd_enosys_bool(register struct AmiSocketBase *SocketBase __asm("a6"));
@@ -545,7 +544,7 @@ LONG bsd_ObtainNetXDuoContext(
         register struct AmiSocketBase    *SocketBase  __asm("a6"));
 #endif
 
-/* LVO -0x366 -- PRIVATE: a snapshot of the RUNNING stack -- netstatus.h */
+/* LVO -0x366 -- PRIVATE: a snapshot of the running stack -- netstatus.h */
 LONG bsd_NetStackQuery(
         register ULONG                 magic      __asm("d0"),
         register ULONG                 what       __asm("d1"),

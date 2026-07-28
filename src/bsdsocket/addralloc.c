@@ -2,9 +2,11 @@
  * bsdsocket.library -- the address allocation message.
  *
  *   CreateAddrAllocMessageA()   build one, with its buffers
- * These are the constructor and destructor for the struct
- * AddressAllocationMessage that BeginInterfaceConfig() takes. They do not
- * touch the network: all they do is validate, allocate and fill in defaults.
+ *   DeleteAddrAllocMessage()    free it
+ *
+ * Constructor and destructor for the struct AddressAllocationMessage that
+ * BeginInterfaceConfig() takes. They do not touch the network: they validate,
+ * allocate and fill in defaults.
  *
  * Same primary source as interfaces.c: NDK 3.2's
  * SANA+RoadshowTCP-IP/doc/bsdsocket.doc, plus libraries/bsdsocket.h from the
@@ -12,24 +14,21 @@
  * Miami code was consulted or is present.
  *
  * The autodoc enumerates ten distinct error codes for this one call and says
- * which condition produces each. That is unusually specific, and it is the
- * whole reason this file is worth writing rather than guessing: a caller that
- * gets CAAME_Client_identifier_too_short can fix its input, and one that gets
- * a generic failure cannot.
+ * which condition produces each, so each one is returned as documented: a
+ * caller that gets CAAME_Client_identifier_too_short can fix its input, and
+ * one that gets a generic failure cannot.
  *
  * Every buffer the tags ask for is carved out of a single block that the
  * message sits at the top of, so DeleteAddrAllocMessage() is one free of the
- * pointer it was handed. The alternative -- a separate allocation per buffer
- * -- would need a bookkeeping structure that the published message has no
- * room for.
+ * pointer it was handed. A separate allocation per buffer would need a
+ * bookkeeping structure that the published message has no room for.
  *
  * "This routine can only deallocate address allocation messages created by
- * CreateAddrAllocMessageA() and will not work with anything else." So it has
- * to be able to TELL, and the message carries a cookie in aam_Reserved to
- * make that possible. That field is the library's to use -- it is reserved
- * from the application's side, not from ours -- and a message the caller
- * filled in by hand, which the autodoc explicitly permits, simply will not
- * have it and is refused rather than freed.
+ * CreateAddrAllocMessageA() and will not work with anything else." To tell
+ * the difference, the message carries a cookie in aam_Reserved. That field is
+ * reserved from the application's side, not from the library's. A message the
+ * caller filled in by hand -- which the autodoc permits -- will not have the
+ * cookie and is refused rather than freed.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -46,9 +45,9 @@
 #include <dos/dostags.h>
 
 /*
- * The cookie. Arbitrary, and chosen to be something no plausible hand-filled
- * message would contain -- a caller that memsets its message to zero, which
- * the autodoc tells it to do, leaves aam_Reserved at zero.
+ * The cookie. Arbitrary, and unlikely in a hand-filled message: a caller that
+ * memsets its message to zero, which the autodoc tells it to do, leaves
+ * aam_Reserved at zero.
  */
 #define BSD_AAM_COOKIE      0x414D4147L     /* 'AMAG' */
 
@@ -76,8 +75,8 @@ typedef struct BsdAamWanted
     struct MsgPort *baw_ReplyPort;
 } BsdAamWanted;
 
-/* Sizes are byte counts and table sizes are entry counts; a negative one is
-   not a small request, it is a bad argument. */
+/* Sizes are byte counts and table sizes are entry counts; a negative value is
+   a bad argument, not a small request. */
 static LONG bsd_aam_size(const struct TagItem *item)
 {
     LONG value = (LONG)item->ti_Data;
@@ -86,10 +85,10 @@ static LONG bsd_aam_size(const struct TagItem *item)
 }
 
 /*
- * Everything in the block after the message itself is longword-aligned,
- * because two of the buffers are arrays of ULONG and m68k will fault on a
- * misaligned one -- and because ami_alloc() returns memory aligned enough for
- * anything, the carving is the only place alignment can be lost.
+ * Everything in the block after the message itself is longword-aligned: two
+ * of the buffers are arrays of ULONG and m68k faults on a misaligned one.
+ * ami_alloc() returns memory aligned enough for anything, so the carving is
+ * the only place alignment can be lost.
  */
 static ULONG bsd_aam_round(ULONG size)
 {
@@ -97,24 +96,24 @@ static ULONG bsd_aam_round(ULONG size)
 }
 
 /*
- * Add one region to the running total, Or say the sum will not fit.
+ * Add one region to the running total, or return FALSE if the sum will not
+ * fit.
  *
- * Every one of the seven size tags is a caller-supplied LONG that only has to
- * be positive, so two of them at 0x7FFFFFFC sum to 0xFFFFFFF8 and the whole
- * total wraps to something the message itself does not fit in. The allocation
- * then SUCCEEDS at the wrapped size, the struct's own last fields are written
- * past the end of it, and every carved pointer handed back to the caller
- * points outside the block -- one of which bsd_aam_store_lease() later copies
- * a DHCP-supplied host name into. On a machine with no MMU that is a silent
- * corruption of whatever the allocator put next.
+ * Each of the seven size tags is a caller-supplied LONG that only has to be
+ * positive, so two of them at 0x7FFFFFFC sum to 0xFFFFFFF8 and the total wraps
+ * to less than the message itself needs. The allocation then succeeds at the
+ * wrapped size, the struct's last fields are written past the end of it, and
+ * every carved pointer handed back to the caller points outside the block --
+ * one of which bsd_aam_store_lease() later copies a DHCP-supplied host name
+ * into. On a machine with no MMU that silently corrupts whatever the allocator
+ * put next.
  *
- * `entries` is a count of ULONGs rather than a byte size for the three table
- * tags, and that multiply can wrap on its own, so it is checked separately
- * rather than being folded into the caller's argument.
+ * For the three table tags `count` is a number of ULONGs rather than a byte
+ * size, and that multiply can wrap on its own, so it is checked separately.
  *
- * The answer to an over-large request is CAAME_Not_enough_memory, which is
- * what the caller would have been told anyway had the arithmetic been done in
- * a width that could hold it.
+ * An over-large request returns CAAME_Not_enough_memory, which is what the
+ * caller would have been told anyway had the arithmetic been done in a width
+ * that could hold it.
  */
 static BOOL bsd_aam_add(ULONG *total, ULONG count, ULONG unit)
 {
@@ -155,10 +154,10 @@ LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
     (VOID)SocketBase;
 
     /*
-     * The order below is the order the ERRORS section lists, and it matters:
-     * a caller that got both the version and the result pointer wrong should
-     * be told about the pointer first, because that is the one that means
-     * nothing was written anywhere.
+     * The checks are in the order the autodoc's ERRORS section lists them. A
+     * caller that got both the version and the result pointer wrong is told
+     * about the pointer first, since that is the one meaning nothing was
+     * written anywhere.
      */
     if (result_ptr == NULL)
         return CAAME_Invalid_result_ptr;
@@ -167,21 +166,20 @@ LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
 
     /*
      * "version -- Data structure version; this must be AAM_VERSION". The
-     * header is more generous than that sentence: it defines AAM_VERSION as 2
-     * AND AAM_VERSION_MINIMUM as 1, which only means something if 1 is still
-     * accepted. Both are taken, and aam_Unicast is honoured only at 2 or
-     * above -- the header says so where it defines the field.
+     * header is more generous: it defines AAM_VERSION as 2 and
+     * AAM_VERSION_MINIMUM as 1, which only means something if 1 is still
+     * accepted. Both are taken; aam_Unicast is honoured only at 2 or above,
+     * as the header says where it defines the field.
      */
     if (version < AAM_VERSION_MINIMUM || version > AAM_VERSION)
         return CAAME_Invalid_version;
 
     /*
      * "protocol -- Configuration protocol type, either AAMP_BOOTP or
-     * AAMP_DHCP." Read literally, and it is: AAMP_SLOWAUTO and AAMP_FASTAUTO
-     * are legal values of aam_Protocol for BeginInterfaceConfig() but are not
-     * among the two this constructor names, and a caller that wants one of
-     * them may still fill the message in by hand -- which the autodoc
-     * explicitly permits.
+     * AAMP_DHCP." Taken literally. AAMP_SLOWAUTO and AAMP_FASTAUTO are legal
+     * values of aam_Protocol for BeginInterfaceConfig() but are not among the
+     * two this constructor names; a caller that wants one of them may fill
+     * the message in by hand, which the autodoc permits.
      */
     if (protocol != AAMP_BOOTP && protocol != AAMP_DHCP)
         return CAAME_Invalid_protocol;
@@ -192,8 +190,8 @@ LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
 
     /*
      * "CAAME_Interface_not_found -- The interface whose name you provided
-     * could not be found." So this one does consult the running stack, and it
-     * is the only part of this file that does.
+     * could not be found." The only check in this file that consults the
+     * running stack.
      */
     ip = netstack_ip();
     if (ip == NULL || bsd_if_index_of(ip, (const char *)interface_name) < 0)
@@ -272,10 +270,9 @@ LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
     }
 
     /*
-     * The client identifier gets three error codes of its own, and they are
-     * distinct on purpose: "not valid" is a pointer that is not a string,
-     * "too short" and "too long" are lengths the DHCP option cannot carry.
-     * A caller told which of the three it hit does not have to guess.
+     * The client identifier has three error codes of its own, kept distinct:
+     * "not valid" is a pointer that is not a string, "too short" and "too
+     * long" are lengths the DHCP option cannot carry.
      */
     if (want.baw_ClientId != NULL)
     {
@@ -326,8 +323,8 @@ LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
     /*
      * "The message must be initialized like any other kind of struct Message
      * that is to be attached to a MsgPort and eventually replied with
-     * ReplyMsg()." mn_Length is the part a caller forgets and ReplyMsg()
-     * needs; it is filled in here so that it cannot be forgotten.
+     * ReplyMsg()." mn_Length is easy for a caller to omit and ReplyMsg()
+     * needs it, so it is filled in here.
      */
     aam->aam_Message.mn_Node.ln_Type = NT_MESSAGE;
     aam->aam_Message.mn_Length       = (UWORD)sizeof(*aam);
@@ -345,7 +342,7 @@ LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
                 sizeof(aam->aam_InterfaceName));
 
     /* "This requires aam_Version 2 or higher" -- libraries/bsdsocket.h, at
-       the field itself. A version 1 message has no aam_Unicast to set. */
+       the field. A version 1 message has no aam_Unicast to set. */
     if (version >= AAM_VERSION)
         aam->aam_Unicast = want.baw_Unicast;
 
@@ -407,9 +404,9 @@ LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
     }
 
     /*
-     * "The name will be duplicated and stored in the allocation message" --
-     * so the caller's string does not have to outlive this call, and the copy
-     * lives in the same block as everything else.
+     * "The name will be duplicated and stored in the allocation message", so
+     * the caller's string need not outlive this call. The copy lives in the
+     * same block as everything else.
      */
     if (cid_len != 0)
     {
@@ -438,10 +435,10 @@ VOID bsd_DeleteAddrAllocMessage(register struct AddressAllocationMessage *aam __
      * "This routine can only deallocate address allocation messages created
      * by CreateAddrAllocMessageA() and will not work with anything else."
      *
-     * Refused rather than freed, and quietly: a message built by hand is a
-     * legal thing for a caller to have -- BeginInterfaceConfig() takes one --
-     * and handing it here is a mistake that must not become a corrupted
-     * memory pool. There is no errno on this call to report it through.
+     * Refused quietly rather than freed. A hand-built message is legal for a
+     * caller to have -- BeginInterfaceConfig() takes one -- and passing it
+     * here must not corrupt the memory pool. This call has no errno to report
+     * it through.
      */
     if (aam->aam_Reserved != BSD_AAM_COOKIE)
         return;
@@ -456,32 +453,32 @@ VOID bsd_DeleteAddrAllocMessage(register struct AddressAllocationMessage *aam __
 
 /*
  * BeginInterfaceConfig() is documented asynchronous -- "This routine starts an
- * asynchronous operation, very much like exec.library/SendIO()" -- and it has
- * to be, because the timeout it is given is at least ten seconds and blocking
- * a caller for ten seconds inside a library call it expects to return at once
- * is how an application deadlocks against its own event loop.
+ * asynchronous operation, very much like exec.library/SendIO()" -- and has to
+ * be: the timeout is at least ten seconds, and blocking that long inside a
+ * library call the caller expects to return at once would deadlock an
+ * application against its own event loop.
  *
- * So one Process per request. It owns the whole lifecycle: start the DHCP
+ * So one Process per request, handling the whole lifecycle: start the DHCP
  * client on the interface, poll to its own deadline, fill the message in,
- * ReplyMsg() it, and exit. That is why the netstack's DHCP primitives are not
- * one blocking call -- somebody has to own the deadline, and the only party
- * with a Process and a dos.library to Delay() with is this one.
+ * ReplyMsg() it, exit. This is also why the netstack's DHCP primitives are not
+ * one blocking call: something has to own the deadline, and only this side has
+ * a Process and a dos.library to Delay() with.
  *
  * The worker runs code out of the library segment while holding no OpenCnt
- * reference, exactly like the TCP: handler (see bsd_lib_expunge()). If the
- * last opener closes while a worker is between instructions, UnLoadSeg()
- * takes the ground out from under it. So the count is taken BEFORE
- * CreateNewProc() and given back inside Forbid() as the last thing the worker
- * does, and expunge declines while it is non-zero.
+ * reference, like the TCP: handler (see bsd_lib_expunge()). If the last opener
+ * closes while a worker is between instructions, UnLoadSeg() frees the segment
+ * underneath it. So the count is taken before CreateNewProc() and given back
+ * inside Forbid() as the last thing the worker does, and expunge declines
+ * while it is non-zero.
  */
 
-/* Defined below, beside the rest of BeginInterfaceConfig()'s reporting. */
+/* Defined below, with the rest of BeginInterfaceConfig()'s reporting. */
 static VOID bsd_aam_reply(struct AddressAllocationMessage *aam, LONG result);
 
 #define BSD_AAM_STACK       4096
 #define BSD_AAM_PRI         0
 
-/* How often the worker looks at the DHCP state. Ten times a second is far
+/* How often the worker looks at the DHCP state. Ten times a second is much
    finer than DHCP moves and costs nothing next to the ten-second floor. */
 #define BSD_AAM_POLL_TICKS  5           /* Delay() ticks: 1/10th of a second */
 
@@ -494,18 +491,17 @@ typedef struct BsdAamJob
 } BsdAamJob;
 
 /*
- * In flight, at most one per interface. A fixed table rather than a list
+ * Jobs in flight, at most one per interface. A fixed table rather than a list
  * because AbortInterfaceConfig() has to find a job from nothing but the
- * message pointer, and because "at most one allocation per interface" is a
- * rule the published API already states -- AAMR_Busy exists for the second
- * asker.
+ * message pointer, and because the published API already limits it to one
+ * allocation per interface -- AAMR_Busy is what the second asker gets.
  */
 static BsdAamJob *bsd_aam_jobs[AMI_CFG_MAX_INTERFACES];
 static LONG       bsd_aam_workers;
 
-/* The hand-over to a freshly created Process, the same idiom tcp_handler.c
-   uses: a static slot plus a SIGF_SINGLE handshake, so the pointer cannot
-   outlive the launch. */
+/* Hand-over to a freshly created Process, the same idiom tcp_handler.c uses:
+   a static slot plus a SIGF_SINGLE handshake, so the pointer cannot outlive
+   the launch. */
 static BsdAamJob *bsd_aam_boot;
 static struct Task *bsd_aam_boot_parent;
 
@@ -574,8 +570,8 @@ static VOID bsd_aam_store_lease(struct AddressAllocationMessage *aam,
     /*
      * "If the lease is infinitely long, then the DateStamp will contain all
      * zeroes." It is already zero from the allocation, so an infinite lease
-     * needs nothing done to it -- and DateStamp() is asked for the current
-     * time only when there is a finite lease to add to it.
+     * needs nothing done; DateStamp() is called only when there is a finite
+     * lease to add to the current time.
      */
     if (aam->aam_LeaseExpires != NULL &&
         lease->adl_LeaseSeconds != 0 &&
@@ -594,8 +590,8 @@ static VOID bsd_aam_store_lease(struct AddressAllocationMessage *aam,
 }
 
 /*
- * The worker. Runs as its own Process, so it may Delay() and it may block --
- * neither of which the vector that started it could have done.
+ * The worker. Runs as its own Process, so it may Delay() and block; the
+ * vector that started it could do neither.
  */
 static VOID bsd_aam_worker(VOID)
 {
@@ -606,7 +602,7 @@ static VOID bsd_aam_worker(VOID)
     LONG         result = AAMR_Timeout;
     LONG         rc;
 
-    /* The hand-over, before anything that can block. */
+    /* Take the job from the hand-over slot, before anything that can block. */
     Forbid();
     job = bsd_aam_boot;
     bsd_aam_boot = NULL;
@@ -633,10 +629,10 @@ static VOID bsd_aam_worker(VOID)
     else
     {
         /*
-         * The deadline, in Delay() ticks. aam_Timeout is in seconds and has
-         * already been floored at ten by whoever built the message -- and
-         * floored again here, because a message filled in by hand never went
-         * through CreateAddrAllocMessageA().
+         * The deadline, in Delay() ticks. aam_Timeout is in seconds and was
+         * floored at ten when the message was built; floored again here,
+         * because a hand-filled message never went through
+         * CreateAddrAllocMessageA().
          */
         LONG seconds = aam->aam_Timeout;
 
@@ -684,20 +680,20 @@ static VOID bsd_aam_worker(VOID)
         else
         {
             /*
-             * Abandoned: stop the client and give the address back if it got
-             * one, so the server does not hold a lease nothing is using. A
-             * timeout means it never got that far, which nx_dhcp_interface_
-             * release() copes with.
+             * Abandoned: stop the client and release the address if it got
+             * one, so the server does not hold a lease nothing is using. On a
+             * timeout it never got that far, which nx_dhcp_interface_release()
+             * copes with.
              */
             (VOID)netstack_interface_dhcp_stop(job->baj_Index, TRUE);
         }
     }
 
     /*
-     * The job leaves the table BEFORE the message is replied. After the reply
-     * the message is the caller's again -- it may already have been deleted
-     * by the time this returns -- so nothing may point at it, and
-     * AbortInterfaceConfig() must no longer find it.
+     * The job leaves the table before the message is replied. After the reply
+     * the message is the caller's again and may already have been deleted, so
+     * nothing may point at it and AbortInterfaceConfig() must no longer find
+     * it.
      */
     Forbid();
     if (job->baj_Index < (UWORD)AMI_CFG_MAX_INTERFACES &&
@@ -711,10 +707,9 @@ static VOID bsd_aam_worker(VOID)
     ami_free(job);
 
     /*
-     * Inside Forbid() so that expunge cannot see the count reach zero, take
-     * the segment away, and leave these last instructions executing out of
-     * memory that has been handed back. The same reasoning as
-     * tcp_session_main()'s exit.
+     * Inside Forbid() so that expunge cannot see the count reach zero, free
+     * the segment, and leave these last instructions executing out of memory
+     * that has been handed back. Same reasoning as tcp_session_main()'s exit.
      */
     Forbid();
     bsd_aam_workers--;
@@ -722,37 +717,34 @@ static VOID bsd_aam_worker(VOID)
 
 
 /*
- * Why this is here at all, When the allocation itself is not
+ * BeginInterfaceConfig() returns VOID: everything it has to say it says by
+ * filling in aam_Result and replying the message. The ENOSYS stub this
+ * replaces therefore hung rather than refused -- it returned -1 in a register
+ * the caller cannot see and never replied the message the caller was already
+ * waiting on, so an application doing the documented BeginInterfaceConfig()
+ * then WaitPort() waited forever.
  *
- * BeginInterfaceConfig() returns VOID. Everything it has to say, it says by
- * filling in aam_Result and replying the message -- which means the ENOSYS
- * stub this replaces was not a refusal, it was a HANG: it returned -1 in a
- * register the caller cannot see, and never replied the message the caller
- * was already waiting on. An application that did the documented thing --
- * BeginInterfaceConfig() then WaitPort() -- waited forever.
+ * So the validation half is implemented and every outcome is reported through
+ * the documented result codes, with the message replied.
  *
- * So the validation half is implemented and every one of its outcomes is
- * reported through the documented result codes, replied properly. A caller
- * gets its message back, learns which condition it hit, and can carry on.
- *
- * AAMP_DHCP IS RUN. The other three are not:
+ * Only AAMP_DHCP is run. The other three are not:
  *
  *   AAMP_BOOTP                this stack has no BOOTP client. NetX Duo ships
  *                             DHCP; BOOTP is a different wire protocol and
  *                             nothing here speaks it.
  *   AAMP_SLOWAUTO             RFC 3927 self-assignment. NX_AUTO_IP is in the
  *   AAMP_FASTAUTO             build and drives the LINKLOCAL configuration
- *                             type, so the protocol is there -- what is not
+ *                             type, so the protocol is there; what is missing
  *                             is any way to tell the two flavours apart,
  *                             since the autodoc distinguishes them only by
  *                             timeout lengths it does not give.
  *
  * All three are replied AAMR_Ignored -- "Your request was not understood and
- * was therefore ignored", which is literally what happens.
+ * was therefore ignored".
  *
- * The order of the checks below is the order that gives the caller the most
- * useful answer: what is wrong with the MESSAGE first, then what is wrong
- * with the INTERFACE, and only then "this stack does not do that".
+ * The checks below run in the order that gives the caller the most useful
+ * answer: what is wrong with the message first, then what is wrong with the
+ * interface, then "this stack does not do that".
  */
 
 /* Fill in the result and hand the message back. */
@@ -761,9 +753,9 @@ static VOID bsd_aam_reply(struct AddressAllocationMessage *aam, LONG result)
     aam->aam_Result = result;
 
     /*
-     * "it will be returned to the caller via ReplyMsg()". A message with no
-     * reply port is a caller that does not want it back -- exec's ReplyMsg()
-     * tolerates that, but saying so here is clearer than relying on it.
+     * "it will be returned to the caller via ReplyMsg()". No reply port means
+     * the caller does not want the message back. exec's ReplyMsg() tolerates
+     * that, but the check is explicit here rather than relying on it.
      */
     if (aam->aam_Message.mn_ReplyPort != NULL)
         ReplyMsg(&aam->aam_Message);
@@ -771,7 +763,7 @@ static VOID bsd_aam_reply(struct AddressAllocationMessage *aam, LONG result)
 
 /*
  * Start a worker for one request, or reply the message with the reason it
- * could not be started. Everything that can fail here fails BEFORE the
+ * could not be started. Everything that can fail here fails before the
  * Process exists, so there is never a worker with nothing to do.
  */
 static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
@@ -784,8 +776,8 @@ static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
     /*
      * CreateNewProc() wants a Process to inherit from. A bare Task that asks
      * for an address allocation is told the request was ignored rather than
-     * taking the machine down -- the same rule bsd_tcp_handler_start()
-     * follows for the same call.
+     * taking the machine down; bsd_tcp_handler_start() does the same for the
+     * same call.
      */
     if (me == NULL || me->tc_Node.ln_Type != NT_PROCESS)
     {
@@ -807,8 +799,8 @@ static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
 
     /*
      * "AAMR_Busy -- Address allocation is already in progress for this
-     * interface." One at a time, and the table slot is claimed here rather
-     * than in the worker so that two callers racing cannot both get one.
+     * interface." The table slot is claimed here rather than in the worker so
+     * that two racing callers cannot both get one.
      */
     Forbid();
 
@@ -823,8 +815,8 @@ static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
     bsd_aam_jobs[index] = job;
     bsd_aam_workers++;
 
-    /* The hand-over slot is guarded by the same Forbid() as the launch, so
-       two BeginInterfaceConfig() calls cannot swap each other's jobs. */
+    /* The hand-over slot is guarded by the same Forbid() as the launch, so two
+       BeginInterfaceConfig() calls cannot swap each other's jobs. */
     bsd_aam_boot        = job;
     bsd_aam_boot_parent = me;
 
@@ -861,7 +853,7 @@ static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
     Permit();
 
     /*
-     * Bounded, and short: the worker signals as the first thing it does,
+     * Short and bounded: the worker signals as the first thing it does,
      * before anything that can block, because `job` must be out of the
      * hand-over slot before this returns and a second request can use it.
      */
@@ -885,9 +877,8 @@ VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __as
 
     /*
      * "You must fill in this member or the message will be rejected." The
-     * header's AAM_VERSION_MINIMUM is what makes a range rather than an
-     * equality the right test -- see the note in
-     * bsd_CreateAddrAllocMessageA().
+     * test is a range rather than an equality because of the header's
+     * AAM_VERSION_MINIMUM; see bsd_CreateAddrAllocMessageA().
      */
     if (aam->aam_Version < AAM_VERSION_MINIMUM ||
         aam->aam_Version > AAM_VERSION)
@@ -903,8 +894,8 @@ VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __as
         return;
     }
 
-    /* aam_InterfaceName is a fixed sixteen bytes and need not be terminated
-       by a caller that filled it in by hand, so it is bounded here. */
+    /* aam_InterfaceName is a fixed sixteen bytes and a hand-filled message
+       need not terminate it, so it is bounded here. */
     if (aam->aam_InterfaceName[0] == '\0')
     {
         bsd_aam_reply(aam, AAMR_InterfaceNotKnown);
@@ -926,7 +917,7 @@ VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __as
      * "The BOOTP protocol only works with broadcast interfaces (e.g. Ethernet
      * hardware). The interface you provided is not of this kind."
      *
-     * NetX Duo records that as address mapping being needed -- an interface
+     * NetX Duo records that as address mapping being needed: an interface
      * that resolves addresses with ARP is one that broadcasts. An interface
      * with no SANA-II device behind it cannot broadcast either.
      */
@@ -945,10 +936,9 @@ VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __as
     }
 
     /*
-     * Everything about the request is in order. Only DHCP is actually run --
-     * see the block comment above for what the other three would need -- and
-     * the rest still get their message back, which is the whole difference
-     * between this and a stub.
+     * The request is in order. Only DHCP is run -- see the block comment
+     * above for what the other three would need -- and the rest still get
+     * their message back.
      */
     if (aam->aam_Protocol != AAMP_DHCP)
     {
@@ -974,16 +964,14 @@ VOID bsd_AbortInterfaceConfig(register struct AddressAllocationMessage *aam __as
      * address allocation process aborted by this routine. In fact, the
      * process can complete before this routine has managed to abort it."
      *
-     * That is not a caveat here, it is the design. The flag is raised under
-     * Forbid() and the worker reads it at the top of its next poll; if the
-     * worker has already taken the job out of the table -- which it does
-     * BEFORE it replies -- there is nothing to find and nothing to raise,
-     * which is exactly the race the autodoc is describing. Setting a flag in
-     * a job that is no longer listed would be writing into memory that is
-     * about to be freed.
+     * The flag is raised under Forbid() and the worker reads it at the top of
+     * its next poll. If the worker has already taken the job out of the table
+     * -- which it does before it replies -- there is nothing to find, which is
+     * the race the autodoc describes. Setting a flag in a job that is no
+     * longer listed would write into memory that is about to be freed.
      *
      * A message that was never begun, or one already replied, finds nothing
-     * and does nothing. Both are legal things for a caller to do.
+     * and does nothing. Both are legal for a caller to do.
      */
     Forbid();
 

@@ -11,33 +11,27 @@
  * and the netinet/ *_var.h headers from the same NDK, used as an ABI reference only. No
  * Roadshow, AmiTCP, AROSTCP or Miami code was consulted or is present.
  *
- *   The return value is a BYTE COUNT. "length -- Number of bytes copied, or
- *   -1 for failure" -- not zero-on-success and not an entry count, which were
- *   the two other readings the prototype allows and which roadshow.c named as
- *   the reason this stayed a stub.
+ *   The return value is a byte count: "length -- Number of bytes copied, or -1
+ *   for failure". Not zero-on-success and not an entry count, the two other
+ *   readings the prototype allows.
  *
  *   NULL means "how much would I need?". "Pass a NULL pointer to find out how
  *   much memory would be required for a complete copy of the data you
- *   requested." So a NULL destination is a success that copies nothing, not
- *   an EFAULT.
+ *   requested." A NULL destination is a success that copies nothing, not an
+ *   EFAULT.
  *
  *   `version` is mandatory and is 1. "you must specify which version of the
  *   data structures you need to see. The version described in this
  *   documentation is 1."
  *
- * THE ONE PLACE THIS FILE CANNOT SAY "I DO NOT KNOW"
+ * Unlike interfaces.c, this call cannot leave a value unset: the caller gets a
+ * whole C struct copied, every member of it, and a member this stack does not
+ * count is a zero with no way to mark it as unmeasured. The mapping at each
+ * fill function below therefore names every member it fills; anything unnamed
+ * is zero because it is uncounted, not because it was measured as none.
  *
- * interfaces.c leaves a tag alone when this stack keeps no true value for it,
- * because a zero written into caller storage is indistinguishable from a
- * measurement. That option does not exist here: the caller gets a whole C
- * struct copied, every member of it, and a member this stack does not count
- * is a zero with no way to mark it. The mapping at each fill function below
- * therefore names EVERY member it fills, and everything unnamed is zero
- * because it is uncounted rather than because it was measured as none.
- *
- * A type this stack keeps nothing at all for is refused with EOPNOTSUPP,
- * which is the honest form of the same statement: an all-zero mbstat would
- * report a healthy mbuf allocator that does not exist.
+ * A type this stack keeps nothing for at all is refused with EOPNOTSUPP: an
+ * all-zero mbstat would report a healthy mbuf allocator that does not exist.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -73,11 +67,10 @@ typedef union BsdNetStat
  *   ips_fragments   <- ip_total_fragments_received
  *   ips_ofragments  <- ip_total_fragments_sent
  *
- * ip_invalid_packets and ip_receive_packets_dropped have no ipstat member
- * that means the same thing: ipstat splits input failure into seven named
- * causes (tooshort, toosmall, badhlen, badlen, badvers, badoptions, noproto)
- * and NetX Duo counts them as one number. Putting that number in any one of
- * the seven would be a diagnosis this stack did not make.
+ * ip_invalid_packets and ip_receive_packets_dropped have no ipstat member that
+ * means the same thing: ipstat splits input failure into seven named causes
+ * (tooshort, toosmall, badhlen, badlen, badvers, badoptions, noproto) and
+ * NetX Duo counts them as one number, so it goes into none of them.
  */
 static VOID bsd_stat_ip(NX_IP *ip, struct ipstat *out)
 {
@@ -104,16 +97,13 @@ static VOID bsd_stat_ip(NX_IP *ip, struct ipstat *out)
  *   icps_outhist[ICMP_ECHO]       <- pings_sent
  *   icps_inhist[ICMP_ECHOREPLY]   <- ping_responses_received
  *   icps_checksum                 <- icmp_checksum_errors
- *   icps_reflect                  <- icmp_unhandled_messages ... no.
  *
- * That last one is written out and struck out on purpose: "icps_reflect" is
- * the number of ICMP messages this host ANSWERED, and
- * icmp_unhandled_messages is the number it did NOT. They are opposites, and
- * the names are close enough that swapping them is the mistake to expect.
- * NetX Duo counts no replies sent, so icps_reflect stays zero.
+ * icps_reflect is not icmp_unhandled_messages: icps_reflect is the number of
+ * ICMP messages this host answered, icmp_unhandled_messages the number it did
+ * not. NetX Duo counts no replies sent, so icps_reflect stays zero.
  *
  * ping_threads_suspended and ping_timeouts describe this host's own outbound
- * pings and have no icmpstat member at all -- icmpstat is a per-message-type
+ * pings and have no icmpstat member -- icmpstat is a per-message-type
  * histogram, not a client statistic.
  */
 static VOID bsd_stat_icmp(NX_IP *ip, struct icmpstat *out)
@@ -134,7 +124,7 @@ static VOID bsd_stat_icmp(NX_IP *ip, struct icmpstat *out)
 }
 
 /*
- * TCP. From nx_tcp_info_get(), which is the best-matched of the four:
+ * TCP. From nx_tcp_info_get():
  *
  *   tcps_rcvtotal       <- tcp_packets_received
  *   tcps_rcvbyte        <- tcp_bytes_received
@@ -146,9 +136,9 @@ static VOID bsd_stat_icmp(NX_IP *ip, struct icmpstat *out)
  *   tcps_drops          <- tcp_connections_dropped
  *   tcps_sndrexmitpack  <- tcp_retransmit_packets
  *
- * tcps_connattempt and tcps_accepts are NOT filled from tcp_connections: that
- * counter is connections ESTABLISHED, incoming and outgoing together, and
- * splitting it into the two would be inventing the split.
+ * tcps_connattempt and tcps_accepts are not filled from tcp_connections: that
+ * counter is connections established, incoming and outgoing together, and
+ * there is no basis for splitting it.
  */
 static VOID bsd_stat_tcp(NX_IP *ip, struct tcpstat *out)
 {
@@ -184,14 +174,13 @@ static VOID bsd_stat_tcp(NX_IP *ip, struct tcpstat *out)
  *   udps_hdrops    <- udp_invalid_packets
  *   udps_noport    <- nx_ip_udp_no_port_for_delivery
  *
- * The last three are the ones worth justifying. NetX Duo increments
- * nx_ip_udp_invalid_packets at exactly two places, both of them a datagram
- * whose length is shorter than its header (nx_udp_packet_receive.c), which is
- * what udps_hdrops means and not what udps_badlen means. Its
- * receive_packets_dropped is a socket whose queue is full, which is
- * udps_fullsock precisely. And "no socket on port" has a counter of its own
- * that nx_udp_info_get() does not return, so it is read off the NX_IP -- the
- * same way netstatus.c reads the interface table.
+ * On the last three: NetX Duo increments nx_ip_udp_invalid_packets at exactly
+ * two places, both a datagram whose length is shorter than its header
+ * (nx_udp_packet_receive.c), which is udps_hdrops and not udps_badlen. Its
+ * receive_packets_dropped is a socket whose queue is full, exactly
+ * udps_fullsock. "No socket on port" has a counter of its own that
+ * nx_udp_info_get() does not return, so it is read off the NX_IP, the same way
+ * netstatus.c reads the interface table.
  */
 static VOID bsd_stat_udp(NX_IP *ip, struct udpstat *out)
 {
@@ -216,15 +205,13 @@ static VOID bsd_stat_udp(NX_IP *ip, struct udpstat *out)
 /* ------------------------------------------------------------ the sockets */
 
 /*
- * TCP state, NetX Duo's -> 4.4BSD's, as a table.
- *
- * It has to be A TABLE. The two enumerations agree up to CLOSE_WAIT and then
- * diverge: NetX Duo has FIN_WAIT_2 = 8, CLOSING = 9, TIMED_WAIT = 10,
- * LAST_ACK = 11, where <netinet/tcp_fsm.h> has CLOSING = 7, LAST_ACK = 8,
- * FIN_WAIT_2 = 9, TIME_WAIT = 10. A subtraction of one -- which is what the
- * first four states invite, since NX_TCP_CLOSED is 1 and TCPS_CLOSED is 0 --
- * reports a connection in LAST_ACK as being in FIN_WAIT_2, and a monitor
- * would show a socket about to disappear as one waiting for a peer.
+ * TCP state, NetX Duo's -> 4.4BSD's. A table, not arithmetic: the two
+ * enumerations agree up to CLOSE_WAIT and then diverge. NetX Duo has
+ * FIN_WAIT_2 = 8, CLOSING = 9, TIMED_WAIT = 10, LAST_ACK = 11;
+ * <netinet/tcp_fsm.h> has CLOSING = 7, LAST_ACK = 8, FIN_WAIT_2 = 9,
+ * TIME_WAIT = 10. Subtracting one -- which the first four states invite, since
+ * NX_TCP_CLOSED is 1 and TCPS_CLOSED is 0 -- reports a connection in LAST_ACK
+ * as being in FIN_WAIT_2.
  */
 typedef struct BsdTcpStateMap
 {
@@ -262,12 +249,11 @@ static LONG bsd_tcp_state(ULONG nx_state)
 }
 
 /*
- * The bytes sitting in a packet queue. NetX Duo queues whole NX_PACKETs, so
- * the count it keeps is a packet count -- and pcd_receive_queue_size says
- * SIZE. Summing nx_packet_length over the queue is what makes the member mean
- * what it is called; the queues are short (the receive one is bounded by the
- * socket's window) and the walk happens inside the bracket, where nothing
- * else can be adding to them.
+ * The bytes sitting in a packet queue. NetX Duo queues whole NX_PACKETs and
+ * keeps a packet count, but pcd_receive_queue_size is a byte size, so
+ * nx_packet_length is summed over the queue. The queues are short (the receive
+ * one is bounded by the socket's window) and the walk happens inside the
+ * bracket, where nothing else can be adding to them.
  */
 static ULONG bsd_queue_bytes(NX_PACKET *head, ULONG count)
 {
@@ -286,8 +272,7 @@ static ULONG bsd_queue_bytes(NX_PACKET *head, ULONG count)
 /*
  * How many entries the caller's buffer holds, and where the next one goes.
  * `size` may be smaller than the whole answer -- "size -- Number of bytes to
- * copy" is the caller's limit, not a promise about the total -- so this is
- * bounded on both sides.
+ * copy" is the caller's limit, not the total -- so this is bounded both ways.
  */
 typedef struct BsdPcdWriter
 {
@@ -313,40 +298,32 @@ static struct protocol_connection_data *bsd_pcd_next(BsdPcdWriter *w)
 }
 
 /*
- * LISTENING SOCKETS, And why they need A Rule of their own
+ * Listening sockets need a rule of their own. One BSD listen() is two
+ * NX_TCP_SOCKETs here, and neither is in NetX Duo's LISTEN state: as socket.c
+ * describes, the descriptor keeps its own socket, which is never used for a
+ * connection and stays in NX_TCP_CLOSED, and parks a second spare socket on
+ * the port with the accept already posted so NetX Duo can answer a SYN before
+ * the application calls accept(). The spare sits in NX_TCP_SYN_RECEIVED.
  *
- * One BSD listen() is TWO NX_TCP_SOCKETs in this stack, and neither of them
- * is in NetX Duo's LISTEN state. socket.c explains the model: the descriptor
- * keeps its own socket, which is never used for a connection and stays in
- * NX_TCP_CLOSED, and parks a SECOND, spare socket on the port with the accept
- * already posted -- so NetX Duo can answer a SYN before the application has
- * called accept(). That spare sits in NX_TCP_SYN_RECEIVED, and socket.c says
- * so in as many words.
- *
- * Reported literally, a single `listen()` on port 80 therefore appears to a
- * monitor as one socket in CLOSED and one in SYN_RECEIVED, on the same port,
- * with no SYN having arrived from anybody. That is not a translation of the
- * application's state; it is a leak of this stack's internals into an ABI
- * whose whole purpose is to look like 4.4BSD's.
- *
+ * Reported literally, one listen() on port 80 shows a monitor a socket in
+ * CLOSED and one in SYN_RECEIVED on the same port with no SYN having arrived.
  * So:
  *
- *   the parked spare      is SKIPPED. It is not a socket the application
- *                         owns, and it has no descriptor.
- *   the descriptor's own  is reported as TCPS_LISTEN, which is what it is
- *                         doing, rather than TCPS_CLOSED, which is only where
- *                         NetX Duo left it.
+ *   the parked spare      is skipped. The application does not own it and it
+ *                         has no descriptor.
+ *   the descriptor's own  is reported as TCPS_LISTEN rather than TCPS_CLOSED,
+ *                         which is only where NetX Duo left it.
  *
- * Both are decided from the IP's active listen requests, which is the only
- * place the association between a port and a parked socket is recorded.
+ * Both are decided from the IP's active listen requests, the only place the
+ * association between a port and a parked socket is recorded.
  */
 static NX_TCP_SOCKET *bsd_listen_spare(NX_IP *ip, UINT port)
 {
     NX_TCP_LISTEN *listen_ptr = ip->nx_ip_tcp_active_listen_requests;
     ULONG          n;
 
-    /* Circular, like every other NetX Duo list here, so the walk is bounded
-       by the table size rather than by a NULL that never comes. */
+    /* Circular, like every other NetX Duo list here, so the walk is bounded by
+       the table size rather than by a NULL that never comes. */
     for (n = 0; n < (ULONG)NX_MAX_LISTEN_REQUESTS && listen_ptr != NX_NULL; n++)
     {
         if (listen_ptr->nx_tcp_listen_port == port)
@@ -362,9 +339,9 @@ static NX_TCP_SOCKET *bsd_listen_spare(NX_IP *ip, UINT port)
 }
 
 /*
- * The created-socket lists are singly linked and CIRCULAR, so the walk is
+ * The created-socket lists are singly linked and circular, so the walk is
  * bounded by the count NetX Duo keeps rather than by a NULL that never comes
- * -- the same trap netstatus.c documents for the same two lists.
+ * -- the same trap netstatus.c notes for the same two lists.
  */
 static VOID bsd_pcd_tcp(NX_IP *ip, BsdPcdWriter *w)
 {
@@ -381,10 +358,9 @@ static VOID bsd_pcd_tcp(NX_IP *ip, BsdPcdWriter *w)
 
         if (spare == sock)
         {
-            /* The parked spare: skipped, and skipped BEFORE bsd_pcd_next(),
-               so it is not counted either. A caller that sized its buffer
-               from the NULL-destination call must get the same number of
-               entries back. */
+            /* The parked spare: skipped before bsd_pcd_next(), so it is not
+               counted either. A caller that sized its buffer from the
+               NULL-destination call must get the same number of entries. */
             sock = sock->nx_tcp_socket_created_next;
             continue;
         }
@@ -405,9 +381,9 @@ static VOID bsd_pcd_tcp(NX_IP *ip, BsdPcdWriter *w)
             out->pcd_foreign_address.s_addr = (in_addr_t)BSD_HTONL(
                 sock->nx_tcp_socket_connect_ip.nxd_ip_address.v4);
 
-            /* The local address is the address of the interface the
-               connection went out of; a listening socket has none yet, and
-               INADDR_ANY is the truthful answer for it. */
+            /* The local address is the address of the interface the connection
+               went out of; a listening socket has none yet, so it stays
+               INADDR_ANY. */
             if (sock->nx_tcp_socket_connect_interface != NX_NULL)
                 out->pcd_local_address.s_addr = (in_addr_t)BSD_HTONL(
                     sock->nx_tcp_socket_connect_interface->nx_interface_ip_address);
@@ -449,9 +425,9 @@ static VOID bsd_pcd_udp(NX_IP *ip, BsdPcdWriter *w)
                                 sock->nx_udp_socket_receive_count);
 
             /* A datagram socket has no peer and nothing queued for output --
-               sendto() hands the packet to the IP thread and returns -- so
-               the foreign address, the foreign port and the send queue are
-               all genuinely zero rather than uncounted. */
+               sendto() hands the packet to the IP thread and returns -- so the
+               foreign address, foreign port and send queue really are zero
+               rather than uncounted. */
         }
 
         sock = sock->nx_udp_socket_created_next;
@@ -494,22 +470,21 @@ LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
 
         /*
          * Documented types this stack keeps nothing for. EOPNOTSUPP rather
-         * than a struct of zeroes, because a zeroed one is a measurement a
-         * caller cannot tell from a real one:
+         * than a struct of zeroes, which a caller cannot tell from a real
+         * measurement:
          *
-         *   NETSTATUS_mb    there is no mbuf allocator. NetX Duo has a fixed
-         *                   NX_PACKET pool with entirely different semantics,
-         *                   and mapping one onto the other would report free
-         *                   clusters that do not exist. The mbuf_* vectors
-         *                   are stubs for the same reason.
+         *   NETSTATUS_mb    no mbuf allocator. NetX Duo has a fixed NX_PACKET
+         *                   pool with different semantics, and mapping one
+         *                   onto the other would report free clusters that do
+         *                   not exist. The mbuf_* vectors are stubs for the
+         *                   same reason.
          *   NETSTATUS_igmp  IGMP is not enabled in this build.
-         *   NETSTATUS_mrt   there is no multicast routing.
-         *   NETSTATUS_rt    three of rtstat's five members would be honestly
+         *   NETSTATUS_mrt   no multicast routing.
+         *   NETSTATUS_rt    three of rtstat's five members would be genuinely
          *                   zero -- this stack creates no dynamic routes and
          *                   processes no redirects -- and the other two,
          *                   rts_unreach and rts_wildcard, are lookups nothing
-         *                   counts. A struct that is three-fifths true is not
-         *                   worth the two-fifths that are not.
+         *                   counts.
          */
         case NETSTATUS_mb:
         case NETSTATUS_igmp:
@@ -546,9 +521,9 @@ LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
 
         /*
          * With no destination the answer is what a complete copy would take.
-         * It is a snapshot: a caller that allocates from it and asks again
-         * may find one more socket, so the SECOND call's return value is the
-         * one to trust for how much was actually written.
+         * It is a snapshot: a caller that allocates from it and asks again may
+         * find one more socket, so the second call's return value is what was
+         * actually written.
          */
         if (destination == NULL)
             return (LONG)(writer.bpw_Available * entry);
@@ -575,9 +550,9 @@ LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
 
     bsd_nx_leave(SocketBase);
 
-    /* "size -- Number of bytes to copy" is the caller's limit, and a caller
-       built against an older struct is entitled to ask for less than all of
-       it. Copying `need` regardless would overrun its buffer. */
+    /* "size -- Number of bytes to copy" is the caller's limit; a caller built
+       against an older struct may ask for less than all of it, and copying
+       `need` regardless would overrun its buffer. */
     copy = ((ULONG)size < need) ? (ULONG)size : need;
 
     bsd_bcopy(&fixed, destination, copy);

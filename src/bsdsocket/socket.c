@@ -4,13 +4,12 @@
  * socket/bind/listen/accept/connect/shutdown/CloseSocket, built on
  * nx_tcp_socket_* and nx_udp_socket_*.
  *
- * The one genuinely awkward mapping is listen/accept. NetX Duo hands an
- * incoming connection to a *named socket* that was parked on the port, and a
- * server keeps listening by handing it a fresh socket afterwards
- * (nx_tcp_server_socket_relisten). BSD instead spawns a new descriptor per
- * connection. So a listening descriptor here keeps a spare "incoming" socket
- * parked on the port; accept() promotes that socket to a descriptor of its
- * own and parks another one.
+ * listen/accept is the awkward mapping. NetX Duo hands an incoming connection
+ * to a named socket parked on the port, and a server keeps listening by
+ * handing it a fresh socket afterwards (nx_tcp_server_socket_relisten). BSD
+ * instead spawns a new descriptor per connection. So a listening descriptor
+ * here keeps a spare "incoming" socket parked on the port; accept() promotes
+ * that socket to a descriptor of its own and parks another one.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -28,25 +27,22 @@
 /*
  * How many datagrams a UDP socket may hold un-read.
  *
- * This is a pool-budget decision, not a tuning knob. A queued datagram is a
- * whole NX_PACKET out of the shared pool for as long as the application does
- * not read it, and the pool is the stack's only buffer: 16..256 packets of
- * 1568 bytes, sized from AvailMem() at startup (netstack.h). Everything else
- * that can pin packets is already budgeted the same way -- the SANA-II
- * readers keep up to 8 outstanding CMD_READs, and NX_TCP_MAXIMUM_TX_QUEUE
- * caps a TCP socket at 8 in flight.
+ * A queued datagram pins a whole NX_PACKET from the shared pool until the
+ * application reads it, and the pool is the stack's only buffer: 16..256
+ * packets of 1568 bytes, sized from AvailMem() at startup (netstack.h). Other
+ * packet consumers are budgeted the same way -- the SANA-II readers keep up
+ * to 8 outstanding CMD_READs, and NX_TCP_MAXIMUM_TX_QUEUE caps a TCP socket
+ * at 8 in flight.
  *
- * A flat 8 was the old value, and it is far too tight on anything but the
- * floor: a sender that bursts 200 datagrams into loopback before the receiver
- * runs loses 192 of them. A flat large value is worse -- one socket nobody is
- * reading would drain the pool and the IP thread could not allocate to
- * receive or transmit anything at all, which is a machine-wide failure caused
- * by one careless application.
+ * A flat 8 (the old value) is too tight above the floor: a sender that bursts
+ * 200 datagrams into loopback before the receiver runs loses 192 of them. A
+ * flat large value lets one unread socket drain the pool, after which the IP
+ * thread cannot allocate to receive or transmit at all.
  *
- * So: a quarter of the pool, never fewer than the 8 we had, never more than
- * 64. On the 4 MB floor (16 packets) that is 8, exactly as before; on a
- * full 256-packet pool it is 64. Three sockets asleep on full queues still
- * leave a quarter of the pool for the stack.
+ * So: a quarter of the pool, never fewer than 8, never more than 64. On the
+ * 4 MB floor (16 packets) that is 8, as before; on a full 256-packet pool it
+ * is 64. Three sockets asleep on full queues still leave a quarter of the
+ * pool for the stack.
  */
 #define BSD_UDP_QUEUE_MIN       8
 #define BSD_UDP_QUEUE_CEILING   64
@@ -64,23 +60,23 @@ static char bsd_udp_name[] = "AmiNetXDuo UDP";
  * away and its next send() fails; with a wait option it sends a FIN and then,
  * when the wait expires without the peer also closing, calls
  * _nx_tcp_socket_block_cleanup() and tears the connection down anyway.  Either
- * way the half of the connection the application asked to KEEP is destroyed.
+ * way the half of the connection the application asked to keep is destroyed.
  *
- * The TCP state machine itself is perfectly capable of it:
+ * The TCP state machine handles it fine:
  * nx_tcp_socket_packet_process.c calls _nx_tcp_socket_state_data_check() in
  * both FIN_WAIT_1 and FIN_WAIT_2, so a socket that has sent its FIN goes on
- * queuing received data normally.  Only the disconnect *API* is unable to
- * stop there.  So this open-codes the graceful branch of
- * _nx_tcp_socket_disconnect() -- state change, FIN timeout, sequence bump,
- * FIN -- and stops before the suspension and the cleanup that follow it.
+ * queuing received data normally.  Only the disconnect API cannot stop there.
+ * So this open-codes the graceful branch of _nx_tcp_socket_disconnect() --
+ * state change, FIN timeout, sequence bump, FIN -- and stops before the
+ * suspension and the cleanup that follow it.
  *
- * This matters for nc -N, for telnet, and for every ftp data connection: the
- * whole point of half-close is "I have finished sending, now tell me the
- * rest", and a RESET answers that with silence.
+ * nc -N, telnet and every ftp data connection need this: half-close means
+ * "I have finished sending, now tell me the rest", and a RESET answers with
+ * silence.
  *
- * The caller holds the ThreadX baton (bsd_nx_enter), so no other ThreadX
- * thread -- the IP thread included -- can be inside the socket while this
- * runs; the IP protection mutex is taken as well because that is what
+ * The caller holds the ThreadX scheduler lock (bsd_nx_enter), so no other
+ * ThreadX thread -- the IP thread included -- can be inside the socket while
+ * this runs; the IP protection mutex is taken as well because that is what
  * _nx_tcp_packet_send_fin() is called under everywhere else.
  */
 static VOID bsd_tcp_send_fin(AmiSocket *sock)
@@ -142,59 +138,51 @@ static ULONG bsd_udp_queue_max(VOID)
 }
 
 /*
- * How large a receive window THIS machine can afford to advertise right now.
+ * How large a receive window this machine can afford to advertise right now.
  *
- * Why it cannot be A CONSTANT.  The window is what a bulk transfer is limited
- * by: on loopback the sender held exactly one segment in flight against the
- * whole advertised window, advertised a zero window 64 times in a 128-segment
- * transfer, and waited 22 ms (median) between segments with nothing it was
- * allowed to do.  Sizing the window here instead moves that path 230 -> 283
- * KB/s with nothing else changed.  It also cannot simply BE the ceiling,
- * because a TCP socket's receive queue is packets off the same pool
- * the SANA-II readers pin an eighth of, and forty concurrent sockets each
- * promising 32 KB promise several times the whole pool.  Exhausting it drops
- * frames stack-wide, which is a functional failure and not a slowdown.
+ * A constant does not work in either direction.  Too small and the window is
+ * what limits a bulk transfer: on loopback the sender held one segment in
+ * flight against the whole advertised window, advertised a zero window 64
+ * times in a 128-segment transfer, and waited 22 ms (median) between segments.
+ * Sizing the window here moves that path 230 -> 283 KB/s with nothing else
+ * changed.  Too large and it overcommits the packet pool -- a TCP receive
+ * queue draws on the same pool the SANA-II readers pin an eighth of, and forty
+ * concurrent sockets each promising 32 KB promise several times the pool.
+ * Exhausting it drops frames stack-wide.
  *
- * Why the socket count and not just the pool.  AMI_SANA2_RX_DEPTH_IPV4 could
- * be settled from the pool alone because the number of things drawing on it
- * -- two or three reader threads -- is fixed and known when the stack starts.
- * Here it is not: the consumer count is one socket for a bulk transfer and
- * forty for `tests/curl` d03_parallel_40, and a number chosen at stack start
- * would have to assume the worst.  Assuming forty gives every socket the
- * floor and throws the whole gain away.  So the pool sets a BUDGET and the
- * live socket count divides it.
+ * So the pool sets a budget and the live socket count divides it.  A number
+ * fixed at stack start cannot work because the consumer count is not known
+ * then: one socket for a bulk transfer, forty for `tests/curl`
+ * d03_parallel_40.  Assuming forty gives every socket the floor and throws the
+ * gain away.  (AMI_SANA2_RX_DEPTH_IPV4 can be settled from the pool alone
+ * because its two or three reader threads are known at startup.)
  *
- * The floor is the status quo, deliberately.  8192 is what every socket got
- * before this function existed, and forty concurrent transfers were measured
- * passing on it.  So a socket can never come out of here with less than a
- * configuration that is known to work, and everything above the floor is an
- * over-commitment that the budget bounds: granting budget/n to the n'th
- * socket, clamped, the excess over the floor summed across every socket comes
- * to about 1.1x the budget -- 56,370 bytes, 36 of 256 packets, on the 8 MB
- * profile.  That is the same order as the eighth the SANA-II readers take,
- * and it is why the share here is also an eighth.
+ * The floor is the status quo: 8192 is what every socket got before this
+ * function existed, and forty concurrent transfers were measured passing on
+ * it.  Everything above the floor is an over-commitment the budget bounds:
+ * granting budget/n to the n'th socket, clamped, the excess over the floor
+ * summed across every socket comes to about 1.1x the budget -- 56,370 bytes,
+ * 36 of 256 packets, on the 8 MB profile.  That is the same order as the
+ * eighth the SANA-II readers take, hence the eighth share here.
  *
- * Why at create time and not continuously.  A window that tracked the socket
- * count would have to shrink an established socket's advertised window, and
- * NetX Duo has no supported way to do that: nx_tcp_socket_rx_window_current
- * is unsigned and derived from the default by subtraction, so lowering the
- * default under a socket with data queued underflows it, and retracting the
- * right edge of a window the peer is already filling is the one thing RFC 793
- * says not to do.  Create time is the only safe point, and it is enough,
- * because the two workloads that matter are distinguishable there: a bulk
- * transfer opens one or two sockets and a concurrent client opens forty.
+ * Sizing happens at create time only.  Tracking the socket count would mean
+ * shrinking an established socket's advertised window, which NetX Duo has no
+ * supported way to do: nx_tcp_socket_rx_window_current is unsigned and derived
+ * from the default by subtraction, so lowering the default under a socket with
+ * data queued underflows it, and RFC 793 forbids retracting the right edge of
+ * a window the peer is already filling.  Create time is enough, because the
+ * two workloads that matter are distinguishable there: a bulk transfer opens
+ * one or two sockets and a concurrent client opens forty.
  *
- * The pool's FREE count was considered instead of the socket count and is
- * worse: curl's multi interface opens all forty sockets before any of them
- * carries data, so the pool is still full at the moment every one of them
- * would be sized.
+ * The pool's free count is worse than the socket count: curl's multi interface
+ * opens all forty sockets before any of them carries data, so the pool is
+ * still full when every one of them would be sized.
  *
- * The counter is NetX Duo's own, maintained by nx_tcp_socket_create/delete,
- * so there is none here to leak -- and a leaked one would pin every future
- * socket at the floor while looking like nothing at all.  It counts listeners
- * and parked spares, which never carry a connection: that over-counts
- * consumers, which is the direction to be wrong in.  The socket being created
- * is not on the list yet, hence the +1.
+ * The counter is NetX Duo's own, maintained by nx_tcp_socket_create/delete, so
+ * there is none here to leak -- a leaked one would silently pin every future
+ * socket at the floor.  It counts listeners and parked spares, which never
+ * carry a connection, so it over-counts consumers; that is the safe direction.
+ * The socket being created is not on the list yet, hence the +1.
  */
 ULONG ami_bsd_tcp_window(VOID)
 {
@@ -234,11 +222,10 @@ ULONG ami_bsd_tcp_window(VOID)
 /* ------------------------------------------------- initial sequence number */
 
 /*
- * NetX Duo'S ISN IS BIASED, NOT ABSENT -- AND THE BIAS IS WORTH 9 BITS.
+ * NetX Duo's ISN is randomised but biased, and the bias is worth 9 bits.
  *
- * It does randomise, and the claim that it does not is wrong.  The code is
- * nxd_tcp_client_socket_connect.c:411 and nx_tcp_server_socket_accept.c:106,
- * and both read:
+ * The code is nxd_tcp_client_socket_connect.c:411 and
+ * nx_tcp_server_socket_accept.c:106, and both read:
  *
  *     if (socket -> nx_tcp_socket_tx_sequence == 0)
  *     {
@@ -249,8 +236,8 @@ ULONG ami_bsd_tcp_window(VOID)
  *         socket -> nx_tcp_socket_tx_sequence += 0x10000 + (ULONG)NX_RAND();
  *
  * NX_RAND() is ami_random_rand() here -- a SHA-256 hash DRBG over an entropy
- * pool (src/common/ami_random.c) -- so the generator is not the problem.  The
- * COMBINING STEP is.  `|` is a bitwise OR of two independent draws, and
+ * pool (src/common/ami_random.c), so the generator is fine.  The combining
+ * step is the problem: `|` is a bitwise OR of two independent draws, and
  * rand() is specified to return 0..0x7FFFFFFF, so:
  *
  *   bits  0..15   come from the second draw alone           -- uniform
@@ -259,57 +246,50 @@ ULONG ami_bsd_tcp_window(VOID)
  *   bit     31    is the first draw's bit 15 alone (the second draw's bit 31
  *                 is always zero)                           -- uniform
  *
- * Fifteen of the thirty-two bits are therefore three-quarters ones.  That is
- * 29.2 bits of Shannon entropy, and -- the number that matters for guessing --
- * a MIN-ENTROPY OF 23.2 BITS: the single likeliest ISN comes up 438 times more
- * often than it would under a uniform distribution, and an attacker who tries
- * the dense-upper-half values first faces 2^23 rather than 2^32.
+ * Fifteen of the thirty-two bits are therefore three-quarters ones: 29.2 bits
+ * of Shannon entropy, but only 23.2 bits of min-entropy, which is the number
+ * that matters for guessing.  The single likeliest ISN comes up 438 times more
+ * often than under a uniform distribution, and an attacker who tries the
+ * dense-upper-half values first faces 2^23 rather than 2^32.
  *
- * It is visible in a packet trace, which is how it was confirmed rather than
- * argued: across the SYNs captured in docs/RESEARCH.md 28.4, bits 16..30 were
- * set in 35 of 45 places before this function existed (0.78, against the 0.75
- * the expression predicts) and 69 of 135 after it (0.51, against 0.50).
+ * Confirmed in a packet trace: across the SYNs captured in docs/RESEARCH.md
+ * 28.4, bits 16..30 were set in 35 of 45 places before this function existed
+ * (0.78, against the 0.75 the expression predicts) and 69 of 135 after it
+ * (0.51, against 0.50).
  *
- * Why it matters.  Blind injection into an established connection needs a
- * sequence number inside the receive window; off-path, it also needs the
- * ephemeral port.  Nine bits off the sequence space is not by itself a break,
- * but it is nine bits an attacker gets for free, and predictable sequence
- * numbers are the ingredient every off-path TCP attack since Morris has
- * needed.
+ * Blind injection into an established connection needs a sequence number
+ * inside the receive window; off-path, it also needs the ephemeral port.  Nine
+ * bits is not by itself a break, but predictable sequence numbers are the
+ * ingredient every off-path TCP attack since Morris has needed.
  *
- * The fix without patching third_party/.  The `else` branch above is a
- * supported path rather than a fallback: it is what every REUSED socket takes.
- * Seeding tx_sequence at create time makes a fresh socket take the branch a
- * reused one takes, and that branch ADDS rather than ORs, so with a full
- * 32-bit seed the result is uniform over the whole space.  No vendored file
- * changes, no symbol override, no linker wrapper.
+ * The fix avoids patching third_party/.  The `else` branch above is what every
+ * reused socket takes, so seeding tx_sequence at create time makes a fresh
+ * socket take it too, and that branch adds rather than ORs: with a full 32-bit
+ * seed the result is uniform over the whole space.  No vendored file changes,
+ * no symbol override, no linker wrapper.
  *
- * What this is not.  It is not RFC 6528.  6528 computes
+ * This is not RFC 6528.  6528 computes
  * M + F(local addr, local port, remote addr, remote port, secret); the
- * four-tuple hash is there so a new connection on a RECENTLY USED four-tuple
- * gets an ISN above the old one, which is what makes TIME-WAIT recycling safe.
- * What this produces is a purely random ISN -- RFC 793 / RFC 1948 against
- * prediction, and silent about recycling, which the 2 MSL timer already
- * answers.  6528 proper is not reachable from here in any case: NetX Duo picks
- * tx_sequence inside connect(), and at create time there is no peer to hash.
+ * four-tuple hash makes a new connection on a recently used four-tuple get an
+ * ISN above the old one, which is what makes TIME-WAIT recycling safe.  This
+ * produces a purely random ISN -- RFC 793 / RFC 1948 against prediction, and
+ * silent about recycling, which the 2 MSL timer already answers.  6528 proper
+ * is not reachable from here anyway: NetX Duo picks tx_sequence inside
+ * connect(), and at create time there is no peer to hash.
  *
- * Cost: one DRBG draw per TCP socket created, at create time, off every hot
- * path.
+ * Cost: one DRBG draw per TCP socket created, off every hot path.
  */
 /*
- * SO_KEEPALIVE Is off until the application asks, AND NetX Duo Does not agree.
+ * SO_KEEPALIVE must default off, and NetX Duo defaults it on.
  *
  * nx_tcp_socket_create.c:166 sets nx_tcp_socket_keepalive_enabled = NX_TRUE
- * unconditionally when NX_ENABLE_TCP_KEEPALIVE is defined, so defining it alone
- * would put every socket in the machine on a two-hour keepalive timer whether
- * anything asked or not.  That is not what SO_KEEPALIVE means: 4.4BSD, POSIX
- * and every stack since have it default OFF, and a program that never sets it
- * has a right to expect an idle connection to stay quiet.
+ * unconditionally when NX_ENABLE_TCP_KEEPALIVE is defined, so defining that
+ * alone would put every socket in the machine on a two-hour keepalive timer.
+ * 4.4BSD, POSIX and every stack since default SO_KEEPALIVE off.
  *
  * So the create path clears it and setsockopt(SO_KEEPALIVE) is the only thing
  * that sets it (src/bsdsocket/options.c).  Called on the three sockets this
- * library creates, next to the ISN seed, because both are "make the socket the
- * shape the BSD API promises before anyone can use it".
+ * library creates, next to the ISN seed.
  */
 static VOID bsd_tcp_keepalive_default(NX_TCP_SOCKET *tcp)
 {
@@ -324,11 +304,8 @@ static VOID bsd_tcp_seed_isn(NX_TCP_SOCKET *tcp)
 {
     ULONG seed = ami_random_ulong();
 
-    /*
-     * Zero is the one value that means "not seeded" to the code above, so it
-     * must not be handed back: a zero draw would silently restore the biased
-     * branch.  One draw in 2^32, and it costs a comparison.
-     */
+    /* Zero means "not seeded" to the code above, so a zero draw would restore
+       the biased branch. One draw in 2^32; costs a comparison. */
     if (seed == 0)
         seed = 1;
 
@@ -446,12 +423,12 @@ static AmiSocket *bsd_socket_alloc(struct AmiSocketBase *base,
     }
 
     /*
-     * The version tag has to be set even though ami_alloc() cleared the block:
-     * a cleared NXD_ADDRESS reads as version 0, not NX_IP_VERSION_V4 (4), and
-     * every "is this address unset" test in options.c and transfer.c asks the
-     * version first. A zero there is not "IPv4 0.0.0.0", it is "no family",
-     * and getsockname() on a connected socket bound to INADDR_ANY would stop
-     * reporting the interface address.
+     * The version tag must be set even though ami_alloc() cleared the block: a
+     * cleared NXD_ADDRESS has version 0, not NX_IP_VERSION_V4 (4), and every
+     * "is this address unset" test in options.c and transfer.c checks the
+     * version first. Version 0 means "no family", so getsockname() on a
+     * connected socket bound to INADDR_ANY would stop reporting the interface
+     * address.
      */
     bsd_addr_from_v4(&sock->as_LocalAddr, 0UL);
     bsd_addr_from_v4(&sock->as_PeerAddr, 0UL);
@@ -465,20 +442,16 @@ static AmiSocket *bsd_socket_alloc(struct AmiSocketBase *base,
         sock->as_PeerAddr.nxd_ip_version  = NX_IP_VERSION_V6;
 
         /*
-         * IPV6_V6ONLY Defaults to off, i.e. an AF_INET6 socket is dual-stack.
-         *
-         * This is not a copy of anyone's default -- Linux says off, modern
-         * BSD says on -- it follows from what NetX Duo is. Its port tables are
+         * IPV6_V6ONLY defaults to off, i.e. an AF_INET6 socket is dual-stack.
+         * (Linux defaults it off, modern BSD on.) NetX Duo's port tables are
          * family-agnostic: nx_tcp_server_socket_listen() registers a listen on
-         * a PORT, and the SYN that arrives for it may be v4 or v6. There is no
-         * arrangement under which an AF_INET6 socket and an AF_INET socket can
-         * both hold port 80 here, so the "V6ONLY on lets you run separate v4
-         * and v6 servers" argument for defaulting it on does not apply, while
-         * the "one socket serves both" behaviour it would block is the only
-         * one available.
+         * a port, and the SYN that arrives may be v4 or v6. An AF_INET6 and an
+         * AF_INET socket cannot both hold port 80 here, so the "separate v4
+         * and v6 servers" argument for defaulting it on does not apply, and
+         * "one socket serves both" is the only behaviour available.
          *
-         * Setting it to 1 is still honoured -- see options.c -- and then a v4
-         * peer is refused rather than reported as ::ffff:a.b.c.d.
+         * Setting it to 1 is still honoured (options.c); a v4 peer is then
+         * refused rather than reported as ::ffff:a.b.c.d.
          */
     }
 #endif
@@ -488,70 +461,62 @@ static AmiSocket *bsd_socket_alloc(struct AmiSocketBase *base,
 
 /* --------------------------------------------------------- orderly close --
  *
- * RFC 793 3.5: CLOSE IS A FIN.
+ * RFC 793 3.5: close sends a FIN.
  *
- * It was a RESET here, on every connection, in every capture this project has
- * ever taken -- docs/RESEARCH.md 12.3 called it a risk, 16.9 an observation
- * and 27.6 an assertion with the packet next to it. A RESET tells the peer to
- * throw away everything it has not yet handed to its application, so a server
- * that writes a reply and closes could destroy the reply; and it denied every
- * peer the orderly teardown the protocol promises.
+ * It used to send a RESET here, on every connection -- docs/RESEARCH.md 12.3,
+ * 16.9 and 27.6. A RESET tells the peer to throw away everything it has not
+ * yet handed to its application, so a server that writes a reply and closes
+ * could destroy the reply, and no peer got an orderly teardown.
  *
- * The reason it was a RESET is that nx_tcp_socket_disconnect() offers two
- * behaviours and neither is close(). NX_NO_WAIT sends a RESET and returns;
- * anything else sends a FIN and then Suspends the caller until the peer
- * answers or the wait expires. A blocking CloseSocket() is not acceptable --
- * the descriptor is gone the instant the call is made and an application that
- * closes and exits must not wait on a peer that may never answer -- so the
- * RESET was what was left.
+ * That happened because nx_tcp_socket_disconnect() offers two behaviours and
+ * neither is close(). NX_NO_WAIT sends a RESET and returns; anything else
+ * sends a FIN and then suspends the caller until the peer answers or the wait
+ * expires. CloseSocket() must not block -- the descriptor is gone the instant
+ * the call is made and an application that closes and exits must not wait on a
+ * peer that may never answer -- so the RESET was what was left.
  *
  * The FIN goes out through the same open-coded path shutdown(SHUT_WR) uses
- * (bsd_tcp_send_fin, above), which is already proven -- tcpdrill c04 asserts
- * the FIN|ACK and the ACK that comes back. CloseSocket() then returns, and the
- * AmiSocket is parked on a list until TCP has finished with the connection:
- * NetX Duo's fast periodic drives FIN_WAIT_1 -> FIN_WAIT_2 -> TIMED_WAIT and
- * LAST_ACK -> CLOSED by itself, retransmits the FIN, and gives up with a reset
- * after NX_TCP_MAXIMUM_RETRIES. So the state machine needs nothing from us
- * except that the control block stay alive, which is exactly what the list is
- * for -- nx_tcp_socket_delete() refuses anything that is not CLOSED, and
- * deleting nothing is the AmiSocket-per-connection leak docs/RESEARCH.md 12.5
- * predicted.
+ * (bsd_tcp_send_fin, above); tcpdrill c04 asserts the FIN|ACK and the ACK that
+ * comes back. CloseSocket() then returns, and the AmiSocket is parked on a
+ * list until TCP has finished with the connection: NetX Duo's fast periodic
+ * drives FIN_WAIT_1 -> FIN_WAIT_2 -> TIMED_WAIT and LAST_ACK -> CLOSED by
+ * itself, retransmits the FIN, and gives up with a reset after
+ * NX_TCP_MAXIMUM_RETRIES. So the state machine only needs the control block to
+ * stay alive, which is what the list is for: nx_tcp_socket_delete() refuses
+ * anything that is not CLOSED, and deleting nothing is the
+ * AmiSocket-per-connection leak docs/RESEARCH.md 12.5 predicted.
  *
- * When it is still A RESET, And both are the rule rather than an escape
+ * Two cases still send a RESET:
  *
- *   - Data arrived that the application never read. RFC 1122 4.2.2.13 is
- *     explicit: the peer must not be told its data was delivered when it is
- *     about to be discarded, so this close is an abort. Every BSD does this.
- *   - SO_LINGER on with a zero timeout, which is the documented way to ask
- *     for an abortive close and is what the option is mostly used for.
+ *   - Data arrived that the application never read. RFC 1122 4.2.2.13: the
+ *     peer must not be told its data was delivered when it is about to be
+ *     discarded, so this close is an abort. Every BSD does this.
+ *   - SO_LINGER on with a zero timeout, the documented way to ask for an
+ *     abortive close.
  *
- * And when it blocks: SO_LINGER on with a nonzero timeout, which is the
- * documented way to ask for that. nx_tcp_socket_disconnect() with a wait is
- * precisely those semantics, including the tear-down when the wait expires,
- * so the option finally does what its name says instead of selecting between
- * two flavours of reset.
- *
- * TIME_WAIT, HONESTLY
+ * And one case blocks: SO_LINGER on with a nonzero timeout.
+ * nx_tcp_socket_disconnect() with a wait is exactly those semantics,
+ * including the tear-down when the wait expires.
  *
  * A socket that closes first reaches TIMED_WAIT and NetX Duo holds it there
  * for 2MSL, which its own defaults make 240 seconds. This does not wait that
  * long: the sweep below reclaims a socket as soon as it reaches TIMED_WAIT,
- * and nx_tcp_client_socket_unbind() collapses the state on the way out --
- * which is what NetX Duo itself does whenever an application unbinds, and
- * what this library has always done. Four minutes of an AmiSocket and an
- * ephemeral port per closed connection is not affordable on the 4 MB floor,
- * and the exposure it buys -- an old duplicate landing on a reused port -- is
- * bounded by NetX Duo allocating ephemeral ports in ascending order.
+ * and nx_tcp_client_socket_unbind() collapses the state on the way out, which
+ * is what NetX Duo itself does whenever an application unbinds. Four minutes
+ * of an AmiSocket and an ephemeral port per closed connection is not
+ * affordable on the 4 MB floor, and the exposure -- an old duplicate landing
+ * on a reused port -- is bounded by NetX Duo allocating ephemeral ports in
+ * ascending order.
  */
 
 #define BSD_CLOSING_DEADLINE    (60UL * NX_IP_PERIODIC_RATE)
 
 /*
- * Global, not per base, and that is the point: the closing connection has to
- * outlive the base, because CloseLibrary() is very often the next thing that
- * happens. Every access is inside a bsd_nx_enter() bracket, which is the
- * ThreadX baton -- one holder at a time across every base -- so the list needs
- * no lock of its own.
+ * Global rather than per base: the closing connection has to outlive the base,
+ * because CloseLibrary() is very often the next thing that happens. Every
+ * access is inside a bsd_nx_enter() bracket, which holds the ThreadX scheduler
+ * lock -- one holder at a time across every base -- so the list needs no lock
+ * of its own.
  */
 static AmiSocket *bsd_closing_head;
 
@@ -560,33 +525,32 @@ static BOOL bsd_socket_destroy(AmiSocket *sock);
 /*
  * Data arriving on a connection the application has closed.
  *
- * There is nobody left to read it, so acknowledging it would be a lie: the
- * peer would be told its data was delivered and then never hear about it
- * again. 4.4BSD's tcp_input answers this with a reset --
+ * Nobody is left to read it, so acknowledging it would tell the peer its data
+ * was delivered when it will be discarded. 4.4BSD's tcp_input answers with a
+ * reset --
  *
  *     if (so->so_state & SS_NOFDREF && tp->t_state > TCPS_CLOSE_WAIT && tlen)
  *             tp = tcp_drop(tp, ECONNRESET);
  *
- * -- and it is the same rule as RFC 1122 4.2.2.13's "close with unread data",
- * one segment later. Without it a closed socket in FIN_WAIT_2 goes on
+ * -- the same rule as RFC 1122 4.2.2.13's "close with unread data", one
+ * segment later. Without it a closed socket in FIN_WAIT_2 goes on
  * acknowledging for as long as the peer keeps writing, which is what made
  * tests/clients' "send() to a closed peer eventually fails" stop failing.
  *
  * The teardown is not done here. This runs from inside
- * _nx_tcp_socket_state_data_check(), which has more to do with both the socket
- * and the packet after it returns; tearing the control block down underneath it
- * is not something to do for a corner case. Sending the RST is safe -- it only
- * builds and transmits a packet -- and the socket is then given an expired
- * timeout, so NetX Duo's own fast periodic reaches _nx_tcp_socket_connection_
- * reset() on the next tick, from the top of the IP thread and with nothing in
- * flight. bsd_closing_sweep() collects it after that.
+ * _nx_tcp_socket_state_data_check(), which still uses both the socket and the
+ * packet after it returns, so the control block must not be torn down
+ * underneath it. Sending the RST only builds and transmits a packet, and the
+ * socket is then given an expired timeout, so NetX Duo's fast periodic reaches
+ * _nx_tcp_socket_connection_reset() on the next tick, from the top of the IP
+ * thread with nothing in flight. bsd_closing_sweep() collects it after that.
  */
 static VOID bsd_closing_data_notify(NX_TCP_SOCKET *tcp)
 {
     NX_TCP_HEADER header;
 
-    /* A bare FIN queues nothing and must not be answered this way; only real
-       data that nobody can read is a reset. */
+    /* A bare FIN queues nothing and must not be answered this way; only
+       unreadable data gets a reset. */
     if (tcp->nx_tcp_socket_receive_queue_count == 0)
         return;
 
@@ -610,10 +574,10 @@ static VOID bsd_closing_park(AmiSocket *sock)
     nx_tcp_socket_receive_notify(&sock->as_Nx.tcp, bsd_closing_data_notify);
 
     /*
-     * Nothing may point at the caller any more. The base is about to be freed
-     * in the common case, and NetX Duo's receive/disconnect callbacks find
-     * their AmiSocket through this pointer -- select.c returns immediately on
-     * a NULL one, which is the disarm.
+     * Nothing may point at the caller any more: the base is usually about to
+     * be freed, and NetX Duo's receive/disconnect callbacks find their
+     * AmiSocket through this pointer. select.c returns immediately on a NULL
+     * one, which disarms them.
      */
     sock->as_Nx.tcp.nx_tcp_socket_reserved_ptr = NX_NULL;
     sock->as_Owner = NULL;
@@ -626,24 +590,24 @@ static VOID bsd_closing_park(AmiSocket *sock)
 /*
  * Force a TCP socket into a state nx_tcp_socket_delete() will accept.
  *
- * This is not A Second way to close A SOCKET. It is what is left when the
- * ordinary one has already been tried and NetX Duo still holds the block.
+ * Last resort, used when the ordinary close has already been tried and NetX
+ * Duo still holds the block.
  *
- * nx_tcp_socket_disconnect() does Nothing at all for a socket that is not in
+ * nx_tcp_socket_disconnect() does nothing at all for a socket that is not in
  * ESTABLISHED, SYN_SENT, SYN_RECEIVED or CLOSE_WAIT: it returns
  * NX_NOT_CONNECTED at nx_tcp_socket_disconnect.c:106 before touching a field.
- * Those four exclude every state a half-closed connection actually sits in --
+ * Those four exclude every state a half-closed connection sits in --
  * FIN_WAIT_1, FIN_WAIT_2, CLOSING, TIMED_WAIT, LAST_ACK -- so the sweep's
- * "resetting" below was a no-op for precisely the case it was written for,
- * and the socket then failed nx_tcp_socket_delete()'s "state must be CLOSED"
- * test and was leaked. docs/RESEARCH.md 40 measures 33 of them in 66 seconds.
+ * "resetting" below was a no-op for the case it was written for, and the
+ * socket then failed nx_tcp_socket_delete()'s "state must be CLOSED" test and
+ * was leaked. docs/RESEARCH.md 40 measures 33 of them in 66 seconds.
  *
- * Presenting the socket as ESTABLISHED is what makes NetX Duo run its own
- * abort on it: one RST built from the socket's real sequence numbers, then
- * _nx_tcp_socket_block_cleanup() to release the transmit queue and the
- * timers, leaving CLOSED (a client socket) or LISTEN (a server one). Writing
- * the field is safe here because bsd_nx_enter() holds the ThreadX baton for
- * the whole of the caller, so the IP thread is not running.
+ * Presenting the socket as ESTABLISHED makes NetX Duo run its own abort: one
+ * RST built from the socket's real sequence numbers, then
+ * _nx_tcp_socket_block_cleanup() to release the transmit queue and the timers,
+ * leaving CLOSED (a client socket) or LISTEN (a server one). Writing the field
+ * is safe because bsd_nx_enter() holds the ThreadX scheduler lock for the
+ * whole of the caller, so the IP thread is not running.
  */
 static VOID bsd_tcp_abort(NX_TCP_SOCKET *tcp)
 {
@@ -669,8 +633,8 @@ VOID bsd_closing_sweep(VOID)
     {
         UINT state = sock->as_Nx.tcp.nx_tcp_socket_state;
         /*
-         * LISTEN is a finished close, not an unfinished one: a SERVER socket
-         * that completes its shutdown lands there rather than in CLOSED --
+         * LISTEN counts as a finished close: a server socket that completes
+         * its shutdown lands there rather than in CLOSED --
          * _nx_tcp_socket_block_cleanup() branches on
          * nx_tcp_socket_client_type. Without it every accepted socket waited
          * out the full deadline before anyone looked at it again.
@@ -700,8 +664,8 @@ VOID bsd_closing_sweep(VOID)
          */
         if (!done)
         {
-            /* Not a warning when it is the data rule: that is a peer still
-               writing to a socket nobody owns, which is ordinary. */
+            /* Not a warning in the unread-data case: a peer still writing to a
+               socket nobody owns is ordinary. */
             if (sock->as_Nx.tcp.nx_tcp_socket_receive_queue_count == 0)
                 AMI_WARN("bsdsocket: close did not complete in %ld s "
                          "(state %ld); resetting",
@@ -759,9 +723,9 @@ static BOOL bsd_tcp_close_start(AmiSocket *sock)
         return TRUE;
     }
 
-    /* The default. bsd_tcp_send_fin() does nothing if the FIN has already
-       gone -- a close after shutdown(SHUT_WR) -- which is correct, and the
-       state test below then parks the socket exactly as it would have. */
+    /* The default. bsd_tcp_send_fin() does nothing if the FIN has already gone
+       (a close after shutdown(SHUT_WR)); the state test below then parks the
+       socket as usual. */
     bsd_tcp_send_fin(sock);
 
     state = tcp->nx_tcp_socket_state;
@@ -777,13 +741,13 @@ static BOOL bsd_tcp_close_start(AmiSocket *sock)
 /*
  * Tear the NetX Duo socket down; safe to call more than once.
  *
- * Returns TRUE only when NetX Duo has actually let go of the control block --
- * i.e. when the caller may hand the memory back to the allocator. This is not
- * bookkeeping pedantry: nx_tcp_socket_delete() links every live socket into
- * ip->nx_ip_tcp_created_sockets_ptr, and freeing a socket that is still on
- * that list means the next nx_tcp_socket_create() walks a freed-and-reused
- * address. It reports NX_PTR_ERROR (EFAULT) and TCP socket() is dead for the
- * lifetime of the process.
+ * Returns TRUE only when NetX Duo has let go of the control block, i.e. when
+ * the caller may hand the memory back to the allocator.
+ * nx_tcp_socket_delete() links every live socket into
+ * ip->nx_ip_tcp_created_sockets_ptr, and freeing a socket still on that list
+ * means the next nx_tcp_socket_create() walks a freed-and-reused address: it
+ * reports NX_PTR_ERROR (EFAULT) and TCP socket() is dead for the lifetime of
+ * the process.
  */
 static BOOL bsd_socket_destroy(AmiSocket *sock)
 {
@@ -797,7 +761,7 @@ static BOOL bsd_socket_destroy(AmiSocket *sock)
 
     /*
      * The FIN goes out before anything is discarded, because whether there is
-     * anything to discard is part of the decision -- see bsd_tcp_close_start().
+     * anything to discard is part of the decision (bsd_tcp_close_start()).
      * ASF_CLOSING means this is the sweep coming back for a socket it already
      * closed, so the close is not started twice.
      */
@@ -842,10 +806,10 @@ static BOOL bsd_socket_destroy(AmiSocket *sock)
         /*
          * NX_STILL_BOUND means the flags said this socket was finished with
          * and NetX Duo disagrees -- it is on a port list, or its state is not
-         * CLOSED (nx_tcp_socket_delete.c:94). Leaking the block is the safe
-         * answer but it is a permanent one, so abort the connection outright
-         * and ask once more. The unbind is unconditional this time because
-         * ASF_NXBOUND is the library's belief and the port list is the fact.
+         * CLOSED (nx_tcp_socket_delete.c:94). Leaking the block is safe but
+         * permanent, so abort the connection outright and ask once more. The
+         * unbind is unconditional this time because ASF_NXBOUND may be out of
+         * date and the port list is not.
          */
         if (status == NX_STILL_BOUND)
         {
@@ -873,11 +837,10 @@ static BOOL bsd_socket_destroy(AmiSocket *sock)
     {
         /*
          * The TCP state and the socket flags are in the message because
-         * without them this warning says only "it leaked": NX_STILL_BOUND has
-         * three separate causes in nx_tcp_socket_delete.c (still on the port
-         * list, a bind in progress, or a state that is not CLOSED) and the
-         * repair for each is different. docs/RESEARCH.md 37.5 had 830 of
-         * these and could not say which.
+         * NX_STILL_BOUND has three separate causes in nx_tcp_socket_delete.c
+         * (still on the port list, a bind in progress, or a state that is not
+         * CLOSED) and the repair for each differs. docs/RESEARCH.md 37.5 had
+         * 830 of these and could not say which.
          */
         AMI_WARN("bsdsocket: %s_socket_delete refused (%ld) state %ld "
                  "flags 0x%lx port %ld; leaking %ld bytes rather than "
@@ -922,14 +885,15 @@ VOID bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock)
     if (sock->as_RefCount > 0)
     {
         /*
-         * The socket outlives this base, AND as_Owner MUST NOT.
+         * The socket outlives this base, so as_Owner must not keep pointing
+         * at it.
          *
          * as_Owner is the base a NetX Duo receive/disconnect callback signals
          * (select.c, bsd_event_post), and ObtainSocket() sets it to the base
          * that took the socket. When that base closes while another reference
          * is still held -- ReleaseCopyOfSocket() plus ObtainSocket(), or a
-         * Dup2Socket() across bases, which is every inetd-style handoff --
-         * the reference count keeps the AmiSocket alive and the base is freed
+         * Dup2Socket() across bases, i.e. every inetd-style handoff -- the
+         * reference count keeps the AmiSocket alive and the base is freed
          * underneath the pointer. The next callback then Signal()s a
          * struct Task read out of freed memory, which on a machine with no
          * memory protection is a write into whatever now occupies it.
@@ -937,11 +901,10 @@ VOID bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock)
          * Found by the TCP: handler work (docs/RESEARCH.md 34), where it hung
          * the first socket-handoff run.
          *
-         * NULL is the right answer rather than "the other holder", because
-         * there is no way to know which holder that is: one NX socket has one
-         * owner and handoff.c says so. Events are recorded in as_Events
-         * either way, so a poll still sees them; only the asynchronous wakeup
-         * is lost, and it is lost to the base that no longer exists.
+         * NULL rather than "the other holder", because there is no way to know
+         * which holder that is: one NX socket has one owner (handoff.c).
+         * Events are still recorded in as_Events, so a poll sees them; only
+         * the asynchronous wakeup is lost, to a base that no longer exists.
          */
         if (sock->as_Owner == base)
             sock->as_Owner = NULL;
@@ -950,7 +913,7 @@ VOID bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock)
     }
 
     /*
-     * Drop the listen request BEFORE tearing down the socket parked on it,
+     * Drop the listen request before tearing down the socket parked on it,
      * or NetX Duo is left holding a pointer to freed memory.
      *
      * The parked socket sits in SYN_RECEIVED, not LISTEN -- bsd_listen() posts
@@ -1013,10 +976,9 @@ VOID bsd_close_all(struct AmiSocketBase *base)
     }
 
     /*
-     * Take back whatever a PREVIOUS program left closing. Not the ones this
-     * loop has just parked -- their FINs went out microseconds ago and none of
-     * them can be finished yet -- which is the whole reason the list is global
-     * and outlives the base.
+     * Reclaim whatever a previous program left closing. The ones this loop
+     * just parked cannot be finished yet -- their FINs went out microseconds
+     * ago -- which is why the list is global and outlives the base.
      */
     bsd_closing_sweep();
 
@@ -1032,19 +994,16 @@ VOID bsd_addr_from_v4(NXD_ADDRESS *addr, ULONG v4)
 }
 
 /*
- * Which family is this sockaddr?
- *
- * It cannot be answered by reading a struct member, because the two structs
- * this NDK offers do not agree on where the family lives:
+ * Work out a sockaddr's family. Cannot be done by reading a struct member: the
+ * two structs this NDK offers do not agree on where the family lives.
  *
  *   sockaddr_in    [0] = sin_len (16, or 0 from a memset), [1] = sin_family
  *   sockaddr_in6   [0] = sin6_family, [1] = padding
  *
  * So the answer comes from the bytes plus the length the caller declared,
- * longest and most specific first. The AF_INET6 test requires BOTH a 23 in
+ * longest and most specific first. The AF_INET6 test requires both a 23 in
  * byte 0 and a length that could hold a sockaddr_in6, which no sockaddr_in
- * can satisfy (a sin_len of 23 with a namelen of 28 is not something any
- * caller produces).
+ * can satisfy (no caller produces a sin_len of 23 with a namelen of 28).
  */
 LONG bsd_sa_family(const struct sockaddr *sa, socklen_t len)
 {
@@ -1137,10 +1096,10 @@ VOID bsd_sockaddr_put(const AmiSocket *sock, struct sockaddr *sa,
 
 #ifdef AMINETXDUO_IPV6
     /*
-     * The SHAPE follows the socket, not the address. An AF_INET6 socket that
-     * accepted an IPv4 connection must report the peer as a sockaddr_in6
-     * holding ::ffff:a.b.c.d -- an application that called accept() on an
-     * AF_INET6 socket has a sockaddr_in6 on its stack and nothing else.
+     * The struct shape follows the socket family, not the address family. An
+     * AF_INET6 socket that accepted an IPv4 connection must report the peer as
+     * a sockaddr_in6 holding ::ffff:a.b.c.d, because an application that
+     * called accept() on an AF_INET6 socket has a sockaddr_in6 on its stack.
      */
     if (sock != NULL && (sock->as_Flags & ASF_INET6) != 0)
     {
@@ -1232,17 +1191,14 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
     if (type == SOCK_RAW)
     {
         /*
-         * IPv4 only, and the protocol number is mandatory.
+         * IPv4 only, and the protocol number is mandatory: it is the
+         * demultiplex key raw.c matches an inbound datagram's IP protocol byte
+         * against, and it is what goes into the header of everything the
+         * socket sends. BSD reports EPROTONOSUPPORT for
+         * socket(AF_INET, SOCK_RAW, 0) for the same reason.
          *
-         * Mandatory because it is the demultiplex key: raw.c matches an
-         * inbound datagram's IP protocol byte against it, and it is also what
-         * goes into the header of everything the socket sends. BSD reports
-         * EPROTONOSUPPORT for socket(AF_INET, SOCK_RAW, 0) for the same
-         * reason.
-         *
-         * NOT EACCES. bsdsocktest skips this test when it sees EACCES, which
-         * on an OS with no privilege model would be a lie -- and there is
-         * nothing to skip now that it works.
+         * Not EACCES: bsdsocktest skips this test when it sees EACCES, and
+         * there is no privilege model here to justify that errno.
          */
         if (domain != AF_INET)
             return bsd_fail(SocketBase, AMI_EAFNOSUPPORT);
@@ -1266,8 +1222,8 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
         return bsd_fail(SocketBase, AMI_ENETDOWN);
     }
 
-    /* A program that opens sockets is the one that can afford to reclaim the
-       ones an earlier program left closing, and it wants their ports back. */
+    /* Good moment to reclaim what an earlier program left closing: this caller
+       wants their ports back. */
     bsd_closing_sweep();
 
     if (type == SOCK_RAW)
@@ -1374,10 +1330,10 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
 
 #ifdef AMINETXDUO_IPV6
     /*
-     * The families have to agree. An AF_INET socket handed a sockaddr_in6
-     * (or the reverse) is a programming error, not something to interpret --
-     * except for the v4-mapped case on a dual-stack socket, which is a
-     * legitimate way of saying "bind the v4 side of this port".
+     * The families have to agree: an AF_INET socket handed a sockaddr_in6 (or
+     * the reverse) is a programming error. The exception is a v4-mapped
+     * address on a dual-stack socket, which means "bind the v4 side of this
+     * port".
      */
     if ((sock->as_Flags & ASF_INET6) != 0)
     {
@@ -1394,11 +1350,10 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
 #endif
 
     /*
-     * NetX Duo binds a socket to a PORT, not to an address: there is no
-     * nx_*_socket_bind that takes one. A bind to a specific local address is
-     * therefore recorded (so getsockname reports it) but does not restrict
-     * what the socket receives. That is a real gap, and it is the same one
-     * the IPv4 path has always had.
+     * NetX Duo binds a socket to a port only -- no nx_*_socket_bind takes an
+     * address. A bind to a specific local address is therefore recorded (so
+     * getsockname reports it) but does not restrict what the socket receives.
+     * A real gap, and the same one the IPv4 path has always had.
      */
     sock->as_LocalAddr = addr;
     sock->as_LocalPort = port;
@@ -1406,8 +1361,7 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
     if ((sock->as_Flags & ASF_RAW) != 0)
     {
         /* A raw socket has no port and NetX Duo has nothing to bind it to.
-           The address is recorded so getsockname() answers, exactly as the
-           IPv4 note above describes for the transport sockets. */
+           The address is recorded so getsockname() answers, as above. */
         sock->as_Flags |= ASF_BOUND;
 
         return 0;
@@ -1483,20 +1437,19 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
  * spare again.
  *
  * The listener must survive this failing. The version this replaces cleared
- * as_Incoming, tried once, and on failure left the listener with nothing --
- * and as_Incoming is what bsd_accept() checks first, so every later accept()
- * on that descriptor returned EINVAL for the life of the socket.
- * docs/RESEARCH.md 37.4 measured 1,951 consecutive EINVALs behind exactly one
+ * as_Incoming, tried once, and on failure left the listener with nothing.
+ * as_Incoming is what bsd_accept() checks first, so every later accept() on
+ * that descriptor returned EINVAL for the life of the socket:
+ * docs/RESEARCH.md 37.4 measured 1,951 consecutive EINVALs behind one
  * `relisten failed` line. So there are three attempts here rather than one,
- * and bsd_accept() calls this again on a listener that has no spare, which is
- * the part that matters: whatever ended the last attempt, the next accept()
- * gets a clean try rather than a permanent refusal.
+ * and bsd_accept() calls this again on a listener that has no spare, so the
+ * next accept() gets a clean try rather than a permanent refusal.
  *
- * Why the trigger is not assumed. 37.4 published a root cause for that
+ * The trigger is not known. 37.4 published a root cause for that
  * NX_INVALID_RELISTEN and then retracted it: nx_tcp_packet_process.c:650
  * clears the listen request's socket slot itself when the SYN arrives, so the
- * obvious "the slot is still occupied" explanation predicts a failure that is
- * structural, and the measured one is intermittent. Nothing here depends on
+ * obvious "the slot is still occupied" explanation predicts a structural
+ * failure while the measured one is intermittent. Nothing here depends on
  * knowing which it was.
  */
 static BOOL bsd_listen_rearm(struct AmiSocketBase *base, AmiSocket *sock)
@@ -1546,10 +1499,9 @@ static BOOL bsd_listen_rearm(struct AmiSocketBase *base, AmiSocket *sock)
     {
         /*
          * Rebuild the listen request from nothing. unlisten() drops whatever
-         * state it had got into, including any queued connection requests --
-         * that is the cost, and it is cheap next to a listener that never
-         * accepts again -- and listen() then puts the spare on the port
-         * exactly as bsd_listen() did in the first place.
+         * state it had got into, including any queued connection requests;
+         * listen() then puts the spare on the port as bsd_listen() did
+         * originally.
          */
         AMI_WARN("bsdsocket: relisten on port %ld failed (%ld); rebuilding "
                  "the listen request",
@@ -1575,8 +1527,8 @@ static BOOL bsd_listen_rearm(struct AmiSocketBase *base, AmiSocket *sock)
         return FALSE;
     }
 
-    /* Arm it, exactly as bsd_listen() does -- see the comment there. Without
-       this the next client's SYN goes unanswered. */
+    /* Arm it, as bsd_listen() does -- see the comment there. Without this the
+       next client's SYN goes unanswered. */
     (VOID)nx_tcp_server_socket_accept(&spare->as_Nx.tcp, NX_NO_WAIT);
 
     sock->as_Incoming = spare;
@@ -1667,7 +1619,7 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
     }
 
     /*
-     * Arm the parked socket NOW, before anyone calls accept().
+     * Arm the parked socket here, before anyone calls accept().
      *
      * BSD completes the three-way handshake in the stack and queues the
      * finished connection for accept(); NetX Duo does not. Its SYN handler
@@ -1675,14 +1627,14 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
      * been made for this socket" -- i.e. if the socket is already in
      * SYN_RECEIVED (nx_tcp_packet_process.c). A socket left in LISTEN state
      * silently ignores the SYN, so a client that connect()s before the server
-     * happens to be inside accept() retransmits until it gives up. That is not
-     * a corner case: it is what every listen/connect/accept sequence in one
-     * task does, and it is why loopback connect() failed with ECONNREFUSED.
+     * happens to be inside accept() retransmits until it gives up. That is
+     * what every listen/connect/accept sequence in one task does, and it is
+     * why loopback connect() failed with ECONNREFUSED.
      *
      * nx_tcp_server_socket_accept() with NX_NO_WAIT moves LISTEN ->
-     * SYN_RECEIVED and returns NX_IN_PROGRESS without blocking, which is
-     * exactly the arming step. The real accept() below then either finds the
-     * socket ESTABLISHED already or suspends on it.
+     * SYN_RECEIVED and returns NX_IN_PROGRESS without blocking. The real
+     * accept() below then either finds the socket ESTABLISHED already or
+     * suspends on it.
      */
     status = nx_tcp_server_socket_accept(&incoming->as_Nx.tcp, NX_NO_WAIT);
     if (status != NX_IN_PROGRESS && status != NX_SUCCESS)
@@ -1772,10 +1724,10 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 
     /*
-     * A listener with no spare parked on it is a listener that lost one, not
-     * a listener the application got wrong -- see bsd_listen_rearm(). Try to
-     * give it one back before answering, so a single failed re-arm costs one
-     * accept() rather than the socket.
+     * A listener with no spare parked on it lost one; the application did
+     * nothing wrong (see bsd_listen_rearm()). Try to give it one back before
+     * answering, so a single failed re-arm costs one accept() rather than the
+     * socket.
      */
     if (sock->as_Incoming == NULL && !bsd_listen_rearm(SocketBase, sock))
     {
@@ -1829,21 +1781,17 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
 
 #ifdef AMINETXDUO_IPV6
     /*
-     * IPV6_V6ONLY enforcement lives here and can live nowhere else.
-     *
-     * NetX Duo's listen is registered against a port, not an address family,
-     * so a V6ONLY socket still has an IPv4 SYN answered for it down in the TCP
-     * state machine -- by the time this code runs the handshake is complete.
-     * The only honest thing left is to close that connection and go back to
-     * waiting, which is what a V6ONLY listener on any other stack looks like
-     * from the client's side (a connection that is accepted and immediately
-     * reset, rather than a SYN that goes unanswered).
+     * IPV6_V6ONLY can only be enforced here. NetX Duo's listen is registered
+     * against a port, not an address family, so a V6ONLY socket still has an
+     * IPv4 SYN answered for it down in the TCP state machine; by the time this
+     * code runs the handshake is complete. So the connection is closed and we
+     * go back to waiting. From the client's side that is a connection accepted
+     * and immediately reset, rather than a SYN that goes unanswered.
      *
      * Reported as EWOULDBLOCK rather than looping internally: a blocking
      * accept() that silently swallowed connections would hide the fact that
      * something is knocking on the v4 side, and a non-blocking one must return
-     * anyway. The caller retries, exactly as it would after any spurious
-     * wakeup.
+     * anyway. The caller retries as it would after any spurious wakeup.
      */
     if ((sock->as_Flags & ASF_V6ONLY) != 0 &&
         peer.nxd_ip_version == NX_IP_VERSION_V4)
@@ -1898,9 +1846,8 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
 
     /*
      * Park a fresh socket so the port keeps accepting. The connection this
-     * call is returning is already the caller's, so a re-arm that does not
-     * take is NOT this accept()'s failure -- it is the next one's problem,
-     * and bsd_listen_rearm() is what the next one calls.
+     * call is returning is already the caller's, so a failed re-arm does not
+     * fail this accept(); the next accept() calls bsd_listen_rearm() again.
      */
     (VOID)bsd_listen_rearm(SocketBase, sock);
 
@@ -1990,17 +1937,16 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
     }
 
     /*
-     * ASF_CONNECTING goes on BEFORE the call, not after.
+     * ASF_CONNECTING must go on before the connect call, not after.
      *
      * The establish / disconnect-complete callbacks (select.c) can fire from
-     * *inside* nx_tcp_client_socket_connect(): a loopback SYN is queued to the
+     * inside nx_tcp_client_socket_connect(): a loopback SYN is queued to the
      * IP thread, which outranks us, and tx_mutex_put() inside the connect is a
-     * scheduling point -- so on loopback the entire SYN -> RST -> reset
-     * sequence can finish before the connect returns NX_IN_PROGRESS to us.
-     * Setting the flag afterwards meant the callback saw a socket that was not
-     * yet "connecting", filed the RST as an ordinary EOF, and left SO_ERROR at
-     * zero. Setting it first makes the callback authoritative and this code
-     * merely read its answer.
+     * scheduling point, so on loopback the whole SYN -> RST -> reset sequence
+     * can finish before the connect returns NX_IN_PROGRESS. Setting the flag
+     * afterwards meant the callback saw a socket that was not yet
+     * "connecting", filed the RST as an ordinary EOF, and left SO_ERROR at
+     * zero.
      */
     sock->as_PeerAddr = *addr;
     sock->as_PeerPort = port;
@@ -2012,11 +1958,11 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
      * nothing in the floor build and is the only way to reach an IPv6 peer.
      */
     /*
-     * NX_NO_WAIT even for a blocking connect: NetX Duo's own wait would park us
-     * in ThreadX, where a Ctrl-C cannot reach the task.  We initiate here and,
-     * for a blocking socket, wait the handshake out below in sliced pieces via
-     * bsd_wait_sliced() -- the establish / disconnect-complete callbacks
-     * (select.c) report the outcome, exactly as for a non-blocking connect.
+     * NX_NO_WAIT even for a blocking connect: NetX Duo's own wait would park
+     * the task in ThreadX where a Ctrl-C cannot reach it.  Initiate here and,
+     * for a blocking socket, wait the handshake out below in slices via
+     * bsd_wait_sliced(); the establish / disconnect-complete callbacks
+     * (select.c) report the outcome, as for a non-blocking connect.
      */
     status = nxd_tcp_client_socket_connect(
         &sock->as_Nx.tcp, (NXD_ADDRESS *)addr, port, NX_NO_WAIT);
@@ -2053,7 +1999,7 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
         }
 
         /* A non-blocking connect() reports "in progress" and lets the caller
-           select() for completion, exactly as before. */
+           select() for completion. */
         if ((sock->as_Flags & ASF_NONBLOCK) != 0)
             return bsd_fail(SocketBase, AMI_EINPROGRESS);
 
@@ -2217,8 +2163,8 @@ LONG bsd_CloseSocket(register LONG sock_fd __asm("d0"),
     {
         bsd_socket_release(SocketBase, sock);
 
-        /* The one place that is guaranteed to run again while a long-lived
-           program is still opening and closing connections. */
+        /* Runs regularly for as long as a program keeps opening and closing
+           connections, so parked sockets get reclaimed. */
         bsd_closing_sweep();
 
         bsd_nx_leave(SocketBase);

@@ -1,9 +1,9 @@
 /*
  * bsdsocket.library -- WaitSelect() and the socket event plumbing.
  *
- * WaitSelect() is the call Amiga network programming is built around, and the
- * one conformance suites hammer (docs/RESEARCH.md S3.1, risk 3). It waits on
- * socket readiness *and* Exec signal bits at the same time, so a single loop
+ * WaitSelect() is the central call in Amiga network programming and the one
+ * conformance suites exercise most (docs/RESEARCH.md S3.1, risk 3). It waits
+ * on socket readiness and Exec signal bits at the same time, so a single loop
  * can serve the network, Intuition, ARexx and timers.
  *
  * Documented behaviour honoured here:
@@ -71,11 +71,10 @@ static VOID bsd_tcp_receive_notify(NX_TCP_SOCKET *socket_ptr)
 }
 
 /*
- * The peer closed, or the connection was reset.
- *
- * This is the callback handed to nx_tcp_socket_create(). It fires from
- * _nx_tcp_socket_connection_reset() and from the FIN handling in the state
- * machine, but only while the socket still counts as connected.
+ * The peer closed, or the connection was reset. Handed to
+ * nx_tcp_socket_create(); fires from _nx_tcp_socket_connection_reset() and
+ * from the FIN handling in the state machine, but only while the socket still
+ * counts as connected.
  */
 VOID bsd_tcp_disconnect_callback(NX_TCP_SOCKET *socket_ptr)
 {
@@ -93,20 +92,20 @@ VOID bsd_tcp_disconnect_callback(NX_TCP_SOCKET *socket_ptr)
 /*
  * The three-way handshake finished.
  *
- * NX_ENABLE_EXTENDED_NOTIFY_SUPPORT (port/netxduo-amiga/inc/nx_user.h) is what
- * makes this reachable; without it nx_tcp_socket_establish_notify() returns
- * NX_NOT_SUPPORTED and completion has to be polled out of
- * nx_tcp_socket_state. It fires from two places:
+ * Reachable only with NX_ENABLE_EXTENDED_NOTIFY_SUPPORT
+ * (port/netxduo-amiga/inc/nx_user.h); without it
+ * nx_tcp_socket_establish_notify() returns NX_NOT_SUPPORTED and completion has
+ * to be polled out of nx_tcp_socket_state. It fires from two places:
  *
  *   nx_tcp_socket_state_syn_sent.c      -- our connect() got its SYN+ACK
  *   nx_tcp_socket_state_syn_received.c  -- a client's handshake with a socket
  *                                          we parked on a listen port
  *
- * The second case is why this matters for more than non-blocking connect:
- * bsd_listen_callback() fires when the SYN *arrives*, but a listener is not
- * accept()-ready until the handshake completes, so without this callback a
- * WaitSelect() on a listening descriptor could sleep through the ACK and only
- * wake on the next unrelated event.
+ * The second case matters beyond non-blocking connect: bsd_listen_callback()
+ * fires when the SYN arrives, but a listener is not accept()-ready until the
+ * handshake completes, so without this callback a WaitSelect() on a listening
+ * descriptor could sleep through the ACK and only wake on the next unrelated
+ * event.
  */
 static VOID bsd_tcp_establish_notify(NX_TCP_SOCKET *socket_ptr)
 {
@@ -134,9 +133,9 @@ static VOID bsd_tcp_establish_notify(NX_TCP_SOCKET *socket_ptr)
  * The connection is completely gone: an RST arrived, or the SYN/data retries
  * ran out (_nx_tcp_socket_connection_reset), or an orderly close finished.
  *
- * This is the other half of the extended notify set, and the only thing that
- * can tell a *pending* connect() it has failed -- the create-time disconnect
- * callback above is not invoked for a socket that never reached ESTABLISHED.
+ * The other half of the extended notify set, and the only thing that can tell
+ * a pending connect() it has failed -- the create-time disconnect callback
+ * above is not invoked for a socket that never reached ESTABLISHED.
  */
 static VOID bsd_tcp_disconnect_complete_notify(NX_TCP_SOCKET *socket_ptr)
 {
@@ -226,12 +225,11 @@ VOID bsd_events_attach(AmiSocket *sock)
 /* ----------------------------------------------------------- readiness ---- */
 
 /*
- * How long a NetX Duo call may wait, and The invariant that makes the errno
- * MAPPINGS SAFE.
+ * How long a NetX Duo call may wait, and what makes the errno mappings safe.
  *
  * NX_WAIT_FOREVER here is what keeps ten unconditional
- * NX_NO_PACKET -> EWOULDBLOCK mappings honest, because with a NON-ZERO wait
- * option NetX Duo has no path that RETURNS NX_NO_PACKET -- it suspends:
+ * NX_NO_PACKET -> EWOULDBLOCK mappings correct: with a non-zero wait option
+ * NetX Duo has no path that returns NX_NO_PACKET, it suspends instead.
  *
  *   nx_tcp_socket_receive.c:231       suspends; NX_NO_PACKET at :263 is the else
  *   nx_tcp_socket_send_internal.c:1006  suspends; NX_WINDOW_OVERFLOW (:1086)
@@ -239,59 +237,55 @@ VOID bsd_events_attach(AmiSocket *sock)
  *   nx_packet_allocate.c:178          suspends on `if (wait_option)`;
  *                                     NX_NO_PACKET at :268 is the else
  *
- * Every one of those returns therefore needs either wait_option == 0 -- a
- * non-blocking socket, where EWOULDBLOCK is exactly right -- or the calling
- * thread to BE ip->nx_ip_thread. And it never is:
- *
- *   NO bsdsocket.library Vector is ever entered on the NETX duo ip thread.
+ * So each of those returns needs either wait_option == 0 -- a non-blocking
+ * socket, where EWOULDBLOCK is right -- or the calling thread to be
+ * ip->nx_ip_thread, which it never is: no bsdsocket.library vector is ever
+ * entered on the NetX Duo IP thread.
  *
  * bsd_nx_enter() (netx_call.c) brackets every vector with
  * ami_netstack_enter_cached(), which gives the calling Exec task a TX_THREAD
  * of its own -- built once per base and resumed thereafter, but never
- * ip->nx_ip_thread. What DOES run on the IP thread is the callback set and
- * nothing else: the five notify hooks above, bsd_listen_callback,
- * bsd_tcp_disconnect_callback, bsd_tcp_urgent_notify (oob.c), bsd_oob_ip_filter
- * and bsd_raw_filter (raw.c). Not one of them enters a vector and not one can
- * suspend.
+ * ip->nx_ip_thread. Only the callback set runs on the IP thread: the five
+ * notify hooks above, bsd_listen_callback, bsd_tcp_disconnect_callback,
+ * bsd_tcp_urgent_notify (oob.c), bsd_oob_ip_filter and bsd_raw_filter (raw.c).
+ * None of them enters a vector and none can suspend.
  *
- * Break that and a blocking recv() starts answering EAGAIN, which is the
- * defect English Amiga Board thread 122501 reports against AmiTCP and
- * Roadshow (docs/RESEARCH.md 37.1). WORSE AT nx_packet_allocate.c:178, WHICH
- * Has no ip-Thread guard at all: a vector called from the IP thread suspends
- * the IP thread on the pool it is the only one who can refill, and the stack
- * stops rather than merely misreporting an errno.
+ * Break that and a blocking recv() starts answering EAGAIN, the defect English
+ * Amiga Board thread 122501 reports against AmiTCP and Roadshow
+ * (docs/RESEARCH.md 37.1). nx_packet_allocate.c:178 is worse still, having no
+ * IP-thread guard at all: a vector called from the IP thread suspends the IP
+ * thread on the pool only that thread can refill, stopping the stack rather
+ * than just misreporting an errno.
  *
- * bsd_wait_errno() (errno.c) is the mapping that asks instead of assuming, and
- * is what a new call site should use.
+ * bsd_wait_errno() (errno.c) checks instead of assuming; new call sites should
+ * use it.
  */
 /*
  * How long a blocking call sleeps before it looks at the break signal.
  *
- * The Roadshow autodoc is explicit that a blocking operation is abortable:
+ * The Roadshow autodoc requires a blocking operation to be abortable:
  * SetSocketSignals says SIGINT "is the signal to send to the process which
  * owns the socket in order to abort a blocking operation, such as recv()",
- * and recv() documents [EINTR] for it.  We passed NX_WAIT_FOREVER and sampled
- * nothing, so a program with a "press Ctrl-C to stop" loop hung instead --
- * src/tools/nc.c:567 works around the same gap from the outside, which is
- * where it was first noticed and the wrong place to fix it.
+ * and recv() documents [EINTR] for it. Passing NX_WAIT_FOREVER and sampling
+ * nothing hung any program with a "press Ctrl-C to stop" loop;
+ * src/tools/nc.c:567 works around the same gap from the outside.
  *
- * Ten ticks is 200 ms: short enough that a person pressing Ctrl-C does not
- * think the machine has died, long enough that a 14 MHz 68020 is not paying
- * for a bracket four times a second while idle.
+ * Ten ticks is 200 ms: short enough that Ctrl-C feels responsive, long enough
+ * that an idle 14 MHz 68020 is not paying for a bracket four times a second.
  */
 #define BSD_BREAK_SLICE_TICKS   10
 
 /*
  * Wait in slices, checking the break mask between them.
  *
- * Only for calls where A Timeout is harmless.  nx_tcp_socket_receive() and
+ * Only for calls where a timeout is harmless. nx_tcp_socket_receive() and
  * nx_tcp_socket_send() answer NX_NO_PACKET / NX_TX_QUEUE_DEPTH on expiry and
  * change nothing, so slicing them is invisible to the peer.
  *
- * It is NOT usable for nx_tcp_server_socket_accept(): on a timeout that runs
+ * Not usable for nx_tcp_server_socket_accept(): a timeout there runs
  * _nx_tcp_connect_cleanup and winds the socket back to LISTEN, so the next
- * call re-enters the LISTEN block and sends a SECOND SYN+ACK on a half-open
- * connection.  docs/RESEARCH.md 32.10 and 43 have the detail; accept() waits
+ * call re-enters the LISTEN block and sends a second SYN+ACK on a half-open
+ * connection. docs/RESEARCH.md 32.10 and 43 have the detail; accept() waits
  * on readiness first instead.
  *
  * Returns NX_SUCCESS with *aborted set when the break arrived, so the caller
@@ -380,7 +374,7 @@ BOOL bsd_readable(AmiSocket *sock)
                         NX_TCP_ESTABLISHED);
         }
 
-        /* A closed or half-closed connection reads as end-of-file. */
+        /* A closed or half-closed connection returns end-of-file. */
         if ((sock->as_Flags & (ASF_EOF | ASF_RDSHUT)) != 0)
             return TRUE;
 
@@ -388,17 +382,15 @@ BOOL bsd_readable(AmiSocket *sock)
          * Same thing seen from the state machine, in case the peer's FIN
          * landed before the socket had a disconnect callback attached.
          *
-         * The states are named rather than compared with >=, and that is the
-         * whole point of this comment.  NetX Duo numbers them CLOSE_WAIT 6,
-         * FIN_WAIT_1 7, FIN_WAIT_2 8 (nx_api.h), so ">= NX_TCP_CLOSE_WAIT"
-         * also catches the two states that mean *we* sent the FIN and are
-         * still waiting to hear the peer's -- which is precisely a socket
-         * after shutdown(SHUT_WR), where nothing has arrived and nothing may
-         * ever arrive.  Reporting that readable makes `nc -N` (half-close,
-         * then select for the rest of the answer) spin at full speed on a
-         * select() that returns immediately and a recv() that returns
-         * EWOULDBLOCK.  Only the states in which the peer's FIN has actually
-         * been received belong here.
+         * The states are listed by name, not compared with >=. NetX Duo
+         * numbers them CLOSE_WAIT 6, FIN_WAIT_1 7, FIN_WAIT_2 8 (nx_api.h), so
+         * ">= NX_TCP_CLOSE_WAIT" would also catch the two states that mean we
+         * sent the FIN and are still waiting for the peer's -- a socket after
+         * shutdown(SHUT_WR), where nothing has arrived and nothing may ever
+         * arrive. Reporting that readable makes `nc -N` (half-close, then
+         * select for the rest of the answer) spin at full speed on a select()
+         * that returns immediately and a recv() that returns EWOULDBLOCK. Only
+         * the states in which the peer's FIN has been received belong here.
          */
         if ((sock->as_Flags & ASF_CONNECTED) != 0)
         {
@@ -445,9 +437,9 @@ BOOL bsd_writable(AmiSocket *sock)
         return TRUE;                    /* the write will fail immediately */
 
     /*
-     * A pending error makes a socket writable in BSD -- that is how a caller
-     * waiting on a non-blocking connect is told to go and read SO_ERROR
-     * rather than waiting out its whole timeout.
+     * A pending error makes a socket writable in BSD, which is how a caller
+     * waiting on a non-blocking connect is told to read SO_ERROR instead of
+     * waiting out its whole timeout.
      */
     if (sock->as_SoError != 0)
         return TRUE;
@@ -523,13 +515,14 @@ typedef struct
 /*
  * One readiness sweep, inside a ThreadX context bracket.
  *
- * WaitSelect() is the one vector that cannot simply adopt on entry and orphan
- * on exit: it parks in Exec Wait() for as long as the caller asked for, and an
- * adopted task holding the ThreadX baton across that would stop the IP thread,
- * the timer and every other socket user until the wait ended. So the bracket
- * covers only the poll -- bsd_readable() reaches nx_tcp_socket_bytes_available()
- * and nx_udp_socket_bytes_available(), both THREADS_ONLY -- and the Wait() and
- * the timer IO below happen as an ordinary Exec task.
+ * WaitSelect() cannot adopt on entry and orphan on exit like the other
+ * vectors: it parks in Exec Wait() for as long as the caller asked for, and an
+ * adopted task holding the ThreadX scheduler lock across that would stop the
+ * IP thread, the timer and every other socket user until the wait ended. So
+ * the bracket covers only the poll -- bsd_readable() reaches
+ * nx_tcp_socket_bytes_available() and nx_udp_socket_bytes_available(), both
+ * THREADS_ONLY -- and the Wait() and the timer IO below run as an ordinary
+ * Exec task.
  */
 static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
                           const ULONG *in_read, const ULONG *in_write,
@@ -642,7 +635,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
     bsd_fdset_in(in_except, except_fds, words);
 
     /*
-     * Validate every descriptor named in the sets BEFORE anything is written
+     * Validate every descriptor named in the sets before anything is written
      * back: a failing WaitSelect() must leave the caller's sets untouched.
      */
     for (fd = 0; fd < nfds; fd++)
@@ -683,7 +676,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
         /*
          * Test the break before anything can return, not only after Wait().
          *
-         * The autodoc's own BUGS section names this: "WaitSelect() may ignore
+         * The autodoc's BUGS section covers this: "WaitSelect() may ignore
          * the break signal altogether if a zero length timeout is given, or
          * sockets are ready at the time the function is entered. This
          * behaviour was changed in bsdsocket.library V4.289, which will always
@@ -692,15 +685,14 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
          * signal under these circumstances".
          *
          * Both escapes are below: `count > 0` and `poll_only` each leave the
-         * loop without reaching the check after Wait(). A program polling a
-         * busy socket therefore never noticed Ctrl-C, which is the case that
-         * matters -- a quiet socket blocks in Wait() and always did.
+         * loop without reaching the check after Wait(), so a program polling a
+         * busy socket never noticed Ctrl-C. A quiet socket blocks in Wait() and
+         * was always fine.
          *
-         * SetSignal(0,0) observes without consuming, so the break stays set
-         * for the caller's own handling, exactly as the post-Wait path leaves
-         * it. User signals ARE consumed, because the caller is promised them
-         * in `signals` and a signal reported but left standing would be
-         * delivered twice.
+         * SetSignal(0,0) observes without consuming, so the break stays set for
+         * the caller's own handling, as the post-Wait path leaves it. User
+         * signals are consumed, because the caller is given them in `signals`
+         * and a signal reported but left standing would be delivered twice.
          */
         pending = SetSignal(0UL, 0UL);
 

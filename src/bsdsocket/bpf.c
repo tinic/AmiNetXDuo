@@ -1,29 +1,27 @@
 /*
  * bsdsocket.library -- the eight bpf_* LVOs.
  *
- * Thin, on purpose. Everything these do lives in src/bpf/; what is here is the
- * m68k register convention, the SocketBase argument every vector carries, and
- * the errno the caller reads back.
+ * Thin wrappers: the work lives in src/bpf/, and what is here is the m68k
+ * register convention, the SocketBase argument every vector carries, and the
+ * errno the caller reads back.
  *
  * The slots exist whatever AMINETXDUO_BPF says. A build without it compiles
- * eight ENOSYS bodies rather than nothing at all, so the vector table has the
- * same shape either way and a caller gets a documented failure instead of a
- * jump into a slot that means something else in the next build.
+ * eight ENOSYS bodies, so the vector table has the same shape either way and a
+ * caller gets a documented failure instead of a jump into a slot that means
+ * something else in the next build.
  *
- * bpf_set_notify_mask takes (d1, d0) -- channel in d1, mask in d0 -- which is
- * the reverse of every other call in the group INCLUDING its own sibling
- * bpf_set_interrupt_mask. Both pragmas/bsdsocket_pragmas.h and the .fd agree,
- * so it is real. tools/gen_vectors.py reads it from the pragma rather than
- * being told, which is why the declaration in bsdsocket_vectors.h is right
- * without anybody having to remember this.
+ * bpf_set_notify_mask takes (d1, d0) -- channel in d1, mask in d0 -- the
+ * reverse of every other call in the group, including bpf_set_interrupt_mask.
+ * Both pragmas/bsdsocket_pragmas.h and the .fd agree, so it is real.
+ * tools/gen_vectors.py reads the order from the pragma, so the declaration in
+ * bsdsocket_vectors.h follows automatically.
  *
- * NO ThreadX BRACKET, and that is a decision rather than an omission. Every
- * other vector that touches the stack goes through bsd_nx_enter() because
- * NetX Duo will suspend the caller; src/bpf/ never calls NetX Duo, never
- * allocates from the packet pool and never blocks. It guards its own table
- * with Forbid()/Permit(), which is the right primitive for a structure shared
- * with the SANA-II reader Tasks and the IP thread. Adding an adoption bracket
- * here would make a capture read cost more than the capture.
+ * No ThreadX bracket here, unlike every other vector that touches the stack:
+ * those go through bsd_nx_enter() because NetX Duo will suspend the caller.
+ * src/bpf/ never calls NetX Duo, never allocates from the packet pool and
+ * never blocks. It guards its own table with Forbid()/Permit(), which suits a
+ * structure shared with the SANA-II reader Tasks and the IP thread. An
+ * adoption bracket would cost more than the capture read itself.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -37,12 +35,11 @@
 #ifdef AMINETXDUO_BPF
 
 /*
- * src/bpf/ answers -1 for every kind of failure and does not distinguish
- * between them. Rather than invent a code per call site, one honest mapping:
- * a failed bpf_* call sets EINVAL, which is what an ioctl the library does not
- * understand and a channel that is not open have in common. The exceptions are
- * the three that return a count, where -1 is the value and errno is what says
- * whether it was an error at all.
+ * src/bpf/ answers -1 for every kind of failure without distinguishing them,
+ * so a failed bpf_* call sets EINVAL -- what an unrecognised ioctl and a
+ * channel that is not open have in common. The three calls that return a count
+ * are the exception: there -1 is the value and errno says whether it was an
+ * error.
  */
 static LONG bsd_bpf_result(struct AmiSocketBase *SocketBase, LONG status)
 {

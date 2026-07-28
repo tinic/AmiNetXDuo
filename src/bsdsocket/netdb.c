@@ -6,32 +6,31 @@
  *
  * The store itself is src/config/netdb.c, which parses
  * DEVS:Internet/{services,protocols,networks} once into memory and answers
- * read-only afterwards. Everything here is the Amiga-side contract on top of
- * it.
+ * read-only afterwards. This file is the Amiga-side layer on top of it.
  *
- * Two things that matter, both of which the conformance suite has caught in
- * other stacks (third_party/bsdsocktest/src/known_failures.c):
+ * Two details the conformance suite has caught in other stacks
+ * (third_party/bsdsocktest/src/known_failures.c):
  *
- *   1. The returned struct is PER OPENER, not a file static. Two tasks each
+ *   1. The returned struct is per opener, not a file static. Two tasks each
  *      have their own SocketBase (docs/RESEARCH.md S3.1), and a shared static
  *      would mean task A's getservbyname() overwrites the servent task B is
- *      still holding. That is Amiberry's "getservbyname() returns stale
- *      pointer" bug, test 93.
+ *      still holding -- Amiberry's "getservbyname() returns stale pointer"
+ *      bug, test 93.
  *
- *   2. s_port is in NETWORK byte order, as BSD specifies -- callers do
+ *   2. s_port is in network byte order, as BSD specifies -- callers do
  *      ntohs(s->s_port). That is identity on m68k, so it is spelled out with
  *      BSD_HTONS() rather than left implicit; the port number a caller passes
  *      to getservbyport() comes back the same way. (Amiberry's test 94
- *      failure is exactly this conversion applied in the wrong direction.)
+ *      failure is this conversion applied in the wrong direction.)
  *
  * The name/alias/protocol strings point straight into the parsed file buffer,
  * which is allocated once at startup and never freed while the library is
  * open, so nothing here copies strings.
  *
- * Where the load happens: ami_netdb_load() is not re-entrant, so it runs
- * exactly once, from bsd_lib_open() under the master base's semaphore (and,
- * before that, from ami_config_load() inside netstack_startup()). Every
- * lookup below is then read-only and lock-free.
+ * ami_netdb_load() is not re-entrant, so it runs exactly once, from
+ * bsd_lib_open() under the master base's semaphore (and, before that, from
+ * ami_config_load() inside netstack_startup()). Every lookup below is then
+ * read-only and lock-free.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -42,8 +41,8 @@
 
 /*
  * An entry with no aliases still needs a valid, NULL-terminated alias vector:
- * callers walk h_aliases/s_aliases without checking for NULL first. Shared and
- * never written, so a static is safe here in a way a shared servent is not.
+ * callers walk h_aliases/s_aliases without checking for NULL first. Never
+ * written, so a shared static is safe here.
  */
 static char *bsd_no_aliases[1] = { NULL };
 
@@ -52,8 +51,8 @@ static __STRPTR *bsd_aliases_of(const AmiNetdbEntry *entry)
     if (entry->aliases == NULL)
         return (__STRPTR *)bsd_no_aliases;
 
-    /* Const is dropped on purpose: the ABI says char **, the store is
-       read-only, and nothing in the library writes through it. */
+    /* Const is dropped because the ABI says char **. The store is read-only
+       and nothing in the library writes through it. */
     return (__STRPTR *)(APTR)entry->aliases;
 }
 
@@ -98,12 +97,9 @@ struct servent *bsd_getservbyport(register LONG port    __asm("d0"),
 VOID bsd_setservent(register LONG stay_open __asm("d0"),
                     register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    /*
-     * stay_open asks the database file to be kept open between calls. The
-     * store is parsed into memory once and never closed, so there is nothing
-     * to keep open and nothing to honour -- rewinding is the whole of the
-     * observable contract.
-     */
+    /* stay_open asks the database file to be kept open between calls. The
+       store is parsed into memory once and never closed, so there is nothing
+       to keep open; rewinding is all that is observable. */
     (VOID)stay_open;
 
     SocketBase->sb_ServCursor = 0;
@@ -194,7 +190,7 @@ static struct netent *bsd_netent_fill(struct AmiSocketBase *base,
     base->sb_NetEnt.n_addrtype = AF_INET;
 
     /*
-     * n_net is a network NUMBER, not an address: 127, not 127.0.0.0. BSD
+     * n_net is a network number, not an address: 127, not 127.0.0.0. BSD
      * returns it in host order (getnetbyaddr() takes it the same way), which
      * is what src/config/netdb.c parses out of DEVS:Internet/networks.
      */
