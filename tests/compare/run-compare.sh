@@ -250,6 +250,11 @@ fi
 # once. build/amissl-stage/libs is where tests/curl leaves the tree.
 if [ -z "${EXTRALIBS:-}" ] && [ -d "$ROOT/build/amissl-stage/libs" ]; then
     EXTRALIBS="$ROOT/build/amissl-stage/libs"
+    # echo, NOT say(): say() is defined ~40 lines below this and appends to
+    # $PLAN, so calling it here was "command not found" under set -e -- rc 127
+    # for every run that had build/amissl-stage/libs, which is every run after
+    # the TLS tests have been built once. It was committed as a cosmetic change
+    # to where the message goes; it was not, it was a fatal one.
     echo "==> staging $EXTRALIBS into LIBS: (default; -L overrides)"
 fi
 
