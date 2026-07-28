@@ -29,6 +29,16 @@
 LONG bsd_if_index_of(NX_IP *ip, const char *name);
 
 /*
+ * SIOCGIFCONF and the SIOCGIF* family, for options.c's IoctlSocket().
+ *
+ * Here rather than there because answering them means knowing the naming rule
+ * and the gather, both of which live in interfaces.c -- and a second copy of
+ * either is a second place for two APIs to disagree about what an interface
+ * is. Returns 0, or -1 with errno set.
+ */
+LONG bsd_if_ioctl(ULONG req, APTR argp, struct AmiSocketBase *SocketBase);
+
+/*
  * addralloc.c -- TRUE while an address allocation Process is still running.
  *
  * Declared here rather than in a header of its own because it exists for one

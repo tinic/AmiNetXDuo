@@ -66,6 +66,11 @@
 
 #include "interfaces.h"
 
+#include <net/if.h>
+#include <sys/sockio.h>
+
+#include "aminetxduo/bpf.h"   /* AMI_STATIC_ASSERT */
+
 #include <proto/exec.h>
 
 /*
@@ -1292,3 +1297,189 @@ LONG bsd_RemoveInterface(register STRPTR name __asm("a0"),
  * is validate and reply a struct AddressAllocationMessage, which is that
  * file's subject rather than this one's.
  */
+
+/* ---------------------------------------------------- the BSD ioctl half -- */
+
+/*
+ * SIOCGIFCONF and the SIOCGIF* family, which exist here for one reason:
+ * libpcap's pcap_findalldevs() is how `tcpdump -D` and a bare `tcpdump` with
+ * no -i discover what they can capture on, and it asks through these and
+ * nothing else. Capture on a NAMED interface already worked; it was only
+ * being ASKED which names exist that returned ENOSYS, so tcpdump exited 20
+ * with an empty file (docs/RESEARCH.md 60).
+ *
+ * THE ENCODINGS ARE THE NDK'S, not invented here, because guessing an ABI has
+ * cost this project time twice. sys/sockio.h gives SIOCGIFCONF as
+ * _IOWR('i',36,struct ifconf) and the rest as _IOWR('i',n,struct ifreq); the
+ * static assertions below fail the build if those sizes ever stop being 8 and
+ * 32, which is the only way the layout below can silently go wrong.
+ *
+ * THE ONE SUBTLETY IS sa_len. fad-gifc walks the SIOCGIFCONF result by
+ * striding sizeof(ifr_name) + ifr_addr.sa_len rather than sizeof(struct
+ * ifreq), so an entry whose sockaddr says 0 makes the walk stride 16 and read
+ * the second half of the entry it has already read as a name. Every sockaddr
+ * written here therefore carries its length, and because sockaddr_in and
+ * sockaddr are both 16 bytes on this NDK the stride comes out at 32 either
+ * way -- which is what makes the bug invisible until somebody looks.
+ *
+ * ONLY PHYSICAL INTERFACES ARE LISTED. NetX Duo puts loopback past the
+ * physical range, and there is no BPF channel that can bind to it: offering a
+ * name that cannot then be captured on would turn one honest failure into two
+ * confusing ones.
+ */
+
+AMI_STATIC_ASSERT(sizeof(struct ifreq) == 32,  "struct ifreq is the NDK's");
+AMI_STATIC_ASSERT(sizeof(struct ifconf) == 8,  "struct ifconf is the NDK's");
+AMI_STATIC_ASSERT(sizeof(struct sockaddr_in) == 16, "sockaddr_in is 4.4BSD's");
+AMI_STATIC_ASSERT(IOCPARM_LEN(SIOCGIFCONF) == 8,   "SIOCGIFCONF parameter");
+AMI_STATIC_ASSERT(IOCPARM_LEN(SIOCGIFADDR) == 32,  "SIOCGIFADDR parameter");
+
+/* One address into a caller's sockaddr slot, with the length BSD requires. */
+static VOID bsd_if_put_addr(struct sockaddr *sa, ULONG addr)
+{
+    struct sockaddr_in sin;
+
+    bsd_bzero(&sin, sizeof(sin));
+    sin.sin_len         = (UBYTE)sizeof(sin);
+    sin.sin_family      = AF_INET;
+    sin.sin_port        = 0;
+    sin.sin_addr.s_addr = (ULONG)htonl(addr);
+
+    bsd_bcopy(&sin, sa, sizeof(sin));
+}
+
+/*
+ * What an interface looks like to code that thinks in BSD flags. RUNNING and
+ * UP are distinct on purpose: UP is "configured and meant to be carrying
+ * traffic", RUNNING is "the link is actually there", and libpcap prints the
+ * difference. Every interface here is a SANA-II Ethernet device, so BROADCAST
+ * and MULTICAST are unconditional -- there is no SLIP or PPP in this stack to
+ * make them conditional on.
+ */
+static UWORD bsd_if_flags(const BsdIfInfo *info)
+{
+    UWORD flags = (UWORD)(IFF_BROADCAST | IFF_MULTICAST | IFF_SIMPLEX);
+
+    if (info->bii_Address != 0)
+        flags |= (UWORD)IFF_UP;
+
+    if (info->bii_LinkUp)
+        flags |= (UWORD)IFF_RUNNING;
+
+    return flags;
+}
+
+LONG bsd_if_ioctl(ULONG req, APTR argp,
+                  struct AmiSocketBase *SocketBase)
+{
+    NX_IP *ip;
+    UINT   i;
+
+    if (argp == NULL)
+        return bsd_fail(SocketBase, AMI_EFAULT);
+
+    ip = netstack_ip();
+    if (ip == NULL)
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+    /* ----------------------------------------------------- SIOCGIFCONF -- */
+    if (req == (ULONG)SIOCGIFCONF)
+    {
+        struct ifconf *ifc    = (struct ifconf *)argp;
+        struct ifreq  *out    = ifc->ifc_req;
+        LONG           room   = ifc->ifc_len;
+        LONG           used   = 0;
+
+        /*
+         * A NULL buffer is the caller asking how much room it needs, which
+         * fad-gifc does not do but other callers of this ioctl have always
+         * been allowed to. Counting costs one pass and removes a way to
+         * crash.
+         */
+        if (out == NULL)
+            room = 0;
+
+        if (bsd_nx_enter(SocketBase) != 0)
+            return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+        for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+        {
+            char name[BSD_IFNAME_SIZE];
+
+            if (!bsd_if_name_of(ip, i, name, sizeof(name)))
+                continue;
+
+            if (used + (LONG)sizeof(struct ifreq) <= room)
+            {
+                struct ifreq *ifr = (struct ifreq *)((UBYTE *)out + used);
+
+                bsd_bzero(ifr, sizeof(*ifr));
+                bsd_strncpy((char *)ifr->ifr_name, name,
+                            sizeof(ifr->ifr_name));
+                bsd_if_put_addr(&ifr->ifr_addr,
+                                ip->nx_ip_interface[i].nx_interface_ip_address);
+            }
+
+            /*
+             * Counted whether or not it fitted: that is what makes the
+             * grow-and-retry loop every caller of this ioctl writes actually
+             * terminate.
+             */
+            used += (LONG)sizeof(struct ifreq);
+        }
+
+        bsd_nx_leave(SocketBase);
+
+        ifc->ifc_len = used;
+        return 0;
+    }
+
+    /* ------------------------------------------------------- SIOCGIF* -- */
+    {
+        struct ifreq *ifr = (struct ifreq *)argp;
+        BsdIfInfo     info;
+        char          name[BSD_IFNAME_SIZE];
+        LONG          index;
+
+        /* ifr_name arrives from the caller and need not be terminated. */
+        bsd_strncpy(name, (const char *)ifr->ifr_name, sizeof(name));
+        name[sizeof(name) - 1] = '\0';
+
+        index = bsd_if_index_of(ip, name);
+        if (index < 0)
+            return bsd_fail(SocketBase, AMI_ENXIO);
+
+        if (bsd_nx_enter(SocketBase) != 0)
+            return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+        bsd_if_gather(ip, (UINT)index, &info);
+
+        bsd_nx_leave(SocketBase);
+
+        /* Out of the bracket before the caller's memory is touched, for the
+           reason bsd_QueryInterfaceTagList() gives at its own gather. */
+        switch (req)
+        {
+            case SIOCGIFFLAGS:
+                ifr->ifr_flags = (WORD)bsd_if_flags(&info);
+                return 0;
+
+            case SIOCGIFADDR:
+                bsd_if_put_addr(&ifr->ifr_addr, info.bii_Address);
+                return 0;
+
+            case SIOCGIFNETMASK:
+                bsd_if_put_addr(&ifr->ifr_addr, info.bii_NetMask);
+                return 0;
+
+            case SIOCGIFBRDADDR:
+                bsd_if_put_addr(&ifr->ifr_addr, info.bii_Broadcast);
+                return 0;
+
+            default:
+                break;
+        }
+    }
+
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}

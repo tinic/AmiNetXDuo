@@ -16442,19 +16442,36 @@ coexist.
 | `tcpdump -c 2 -n -i eth0` | rc 20, nothing | **rc 0**, `IP 10.0.2.15.5353 > 224.0.0.251.5353` x2 |
 | `NetTrace LOOPBACK BYTES=65536` | rc 0, 31 records | rc 0, 31 records, valid pcap |
 
-### What still does not work, with the ABI written down
+### The third bug: nothing could be ASKED which interfaces exist (fixed 2026-07-28)
 
 `tcpdump -D`, and `tcpdump` with no `-i`, need `pcap_findalldevs`: `socket(AF_INET,
 SOCK_DGRAM, 0)` then `IoctlSocket(SIOCGIFCONF)`, then `SIOCGIFFLAGS`/`SIOCGIFADDR`/
-`SIOCGIFNETMASK`/`SIOCGIFBRDADDR` per interface. `bsd_IoctlSocket()` handles only FIONBIO,
-FIONREAD, SIOCATMARK and FIOASYNC, and fad-gifc tolerates only EINVAL from the rest.
+`SIOCGIFNETMASK`/`SIOCGIFBRDADDR` per interface. `bsd_IoctlSocket()` handled only FIONBIO,
+FIONREAD, SIOCATMARK and FIOASYNC, and fad-gifc tolerates only EINVAL from the rest --
+so capture on a NAMED interface worked while asking which names exist did not.
 
-That is a separate feature, and the encodings are pinned by the binary if anyone builds
-it: `SIOCGIFCONF` is `_IOWR('i',36,...)` size **8** (`{int ifc_len; caddr_t ifc_buf;}`),
-the `SIOCGIF*` family size **32** (`char ifr_name[16]` plus a 16-byte union), and libpcap
-strides the list by `ifr->ifr_addr.sa_len` at offset 16 -- so the sockaddrs must carry
-`sa_len`. `bsd_if_gather()` in `interfaces.c` already produces address, mask, broadcast,
-MTU and link state.
+Now in `bsd_if_ioctl()` (`interfaces.c`), which is where the naming rule and
+`bsd_if_gather()` already live. The encodings came from the NDK rather than from the
+name, and five `AMI_STATIC_ASSERT`s fail the build if they ever drift: `SIOCGIFCONF` is
+`_IOWR('i',36,...)` size **8** (`{int ifc_len; caddr_t ifc_buf;}`) and the `SIOCGIF*`
+family size **32** (`char ifr_name[16]` plus a 16-byte union).
+
+**The one subtlety is `sa_len`.** fad-gifc strides the `SIOCGIFCONF` result by
+`sizeof(ifr_name) + ifr->ifr_addr.sa_len`, not by `sizeof(struct ifreq)`. An entry whose
+sockaddr says 0 makes the walk stride 16 and read the second half of the entry it has
+already read as the next name. Every sockaddr written carries its length -- and because
+`sockaddr` and `sockaddr_in` are both 16 bytes here the stride is 32 either way, which is
+exactly what would have made the bug invisible until somebody went looking.
+
+Only physical interfaces are listed. NetX Duo puts loopback past the physical range and no
+BPF channel can bind to it, so offering a name that cannot then be captured on would turn
+one honest failure into two confusing ones.
+
+| | before | after |
+|---|---|---|
+| `tcpdump -D` | rc 20, nothing | **rc 0**, `1.eth0` |
+| `tcpdump -c 2 -n` (no `-i`) | rc 20, nothing | **rc 0**, two mDNS records |
+| `tcpdump -c 2 -n -i eth0` | rc 0 | rc 0, unchanged |
 
 ## 61. The TCP retry limit was unreachable, and the caller was never told (2026-07-28)
 

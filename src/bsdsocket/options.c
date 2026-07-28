@@ -9,6 +9,9 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "interfaces.h"
+
+#include <sys/sockio.h>
 
 #include <proto/exec.h>
 #include <netinet/tcp.h>
@@ -531,6 +534,19 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
                                         FD_CONNECT | FD_CLOSE | FD_ERROR)
                                      : 0;
             return 0;
+
+        /*
+         * The interface queries, answered in interfaces.c because that is
+         * where the naming rule and the gather live. They ignore the socket
+         * entirely -- BSD requires one to be passed and says nothing about
+         * which, and libpcap opens a throwaway AF_INET/SOCK_DGRAM for it.
+         */
+        case SIOCGIFCONF:
+        case SIOCGIFFLAGS:
+        case SIOCGIFADDR:
+        case SIOCGIFNETMASK:
+        case SIOCGIFBRDADDR:
+            return bsd_if_ioctl(req, argp, SocketBase);
 
         default:
             return bsd_fail(SocketBase, AMI_ENOSYS);
