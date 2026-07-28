@@ -65,6 +65,12 @@ command -v openssl >/dev/null || { echo "no openssl on PATH" >&2; exit 2; }
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
+# Absolute from here on: the script cd's into $OUT and then keeps writing to
+# "$OUT/ext.cnf", so a relative argument stops resolving after the cd and the
+# run dies one file in.  run-curlverify.sh passes an absolute path, which is
+# why it never showed.
+OUT=$(cd "$OUT" && pwd)
+STAMP="$OUT/.stamp"
 cd "$OUT"
 
 # FIXED DATES, NOT -days, AND THE REASON IS THE GUEST'S CLOCK.
