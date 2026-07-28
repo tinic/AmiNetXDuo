@@ -304,7 +304,8 @@ stage_emulator() {
                 fail "emulator/$tag: $exe was not built"
                 continue
             fi
-            local log="$BUILD/emu-$tag-$(basename "$exe").log"
+            local log
+            log="$BUILD/emu-$tag-$(basename "$exe").log"
             if AMINETXDUO_RUN_TAG="ci-$tag" tools/fsuae-run.sh $cpuopt \
                    -t "$timeout" "$BUILD/$dir/$exe" > "$log" 2>&1; then
                 note "PASS  $(grep -E '[0-9]+ checks' "$log" | tail -1)"
