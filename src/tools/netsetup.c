@@ -1098,9 +1098,8 @@ int main(int argc, char **argv)
 
         if (tool_exists(ifpath) && args[ARG_FORCE] == 0)
         {
-            tool_printf("\n  %s already exists. The old one will be kept as\n",
+            tool_printf("\n  %s already exists and will be replaced.\n",
                         (LONG)ifpath);
-            tool_printf("  %s.old\n", (LONG)ifpath);
         }
 
         if (!ask_yes("\nWrite it", TRUE))
@@ -1120,9 +1119,8 @@ int main(int argc, char **argv)
          */
         tool_error("%s already exists", (LONG)ifpath);
         tool_advise_blank();
-        tool_advise("Add FORCE to replace it; the old one is kept as");
-        tool_printf("  %s.old\n", (LONG)ifpath);
-        tool_advise("Or run NetSetup with no arguments to be asked about it.");
+        tool_advise("Add FORCE to replace it,");
+        tool_advise("or run NetSetup with no arguments to be asked about it.");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -1198,6 +1196,22 @@ int main(int argc, char **argv)
             }
             tool_printf("Wrote %s\n", (LONG)rpath);
         }
+    }
+
+    /* All the files are in place, so the interface's .old rollback backup has
+       done its job -- delete it.  Left in DEVS:NetInterfaces it would be loaded
+       as a second, phantom interface, because the drawer is read whole
+       (src/config/config_file.c). */
+    if (kept_if)
+    {
+        char  keep[PATH_LEN + 8];
+        ULONG n = 0;
+
+        tool_copy_string(keep, sizeof(keep), ifpath);
+        while (keep[n] != '\0')
+            n++;
+        tool_copy_string(keep + n, sizeof(keep) - n, ".old");
+        (VOID)DeleteFile((CONST_STRPTR)keep);
     }
 
     ami_free(blob);
