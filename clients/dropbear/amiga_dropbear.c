@@ -55,11 +55,12 @@
  *   -J proxycmd and the SSH_ASKPASS helper, and both are compiled out in
  *   localoptions.h, so a linked dbclient contains the stubs and calls none.
  *
- *   tcgetattr()/tcsetattr() FAIL with ENOTTY.  AmigaOS has no termios; a
- *   console is a DOS handle and raw mode is SetMode().  Dropbear calls them
- *   only on the pty path, so `dbclient -T user@host command` never does and
- *   an interactive attempt fails with Dropbear's own message rather than
- *   silently sending a terminal mode nobody set.
+ *   tcgetattr()/tcsetattr() fabricate a termios and drive raw mode with
+ *   SetMode().  AmigaOS has no termios, but a console has the one capability
+ *   an interactive session needs -- SetMode(handle, 1) is raw -- so tcgetattr()
+ *   reports a plausible cooked terminal and tcsetattr() maps Dropbear's ICANON
+ *   switch onto SetMode().  A non-console fd still returns ENOTTY, so
+ *   `dbclient -T user@host command` still asks the server for no pty.
  *
  *   pipe() is real, in the small way a program with no second process needs:
  *   a byte written to one end can be read from the other, and a read end may
@@ -1641,21 +1642,63 @@ struct passwd *getpwnam(const char *name)
 
 /* ------------------------------------------------------------ terminal --- */
 
+/*
+ * AmigaOS has no termios, but an interactive console has the one thing an
+ * interactive ssh session needs: raw mode, via SetMode().  So rather than
+ * refuse, these fabricate a plausible COOKED terminal for tcgetattr() and
+ * map Dropbear's raw/cooked switch onto SetMode() in tcsetattr().  A file or
+ * NIL: still returns ENOTTY, which is how `dbclient -T host command` detects
+ * "no terminal" and asks the server for no pty.
+ */
 int tcgetattr(int fd, struct termios *t)
 {
-    (void)fd;
-    (void)t;
-    errno = ENOTTY;
-    return -1;
+    BPTR h = dos_handle_for(fd);
+    int  i;
+
+    if (h == (BPTR)0 || !IsInteractive(h))
+    {
+        errno = ENOTTY;
+        return -1;
+    }
+
+    if (t == NULL)
+        return 0;
+
+    /* Dropbear saves this, ships it to the server's pty so the REMOTE shell
+       echoes, and derives a raw copy for the local side.  The only field
+       tcsetattr() reads back is c_lflag's ICANON. */
+    t->c_iflag = 0;
+    t->c_oflag = 0;
+    t->c_cflag = CREAD | CS8;
+    t->c_lflag = ISIG | ICANON | ECHO;
+
+    for (i = 0; i < NCCS; i++)
+        t->c_cc[i] = 0;
+    t->c_cc[VINTR]  = 0x03;      /* ^C  */
+    t->c_cc[VERASE] = 0x7F;      /* DEL */
+    t->c_cc[VMIN]   = 1;
+    t->c_cc[VTIME]  = 0;
+
+    return 0;
 }
 
 int tcsetattr(int fd, int actions, const struct termios *t)
 {
-    (void)fd;
+    BPTR h = dos_handle_for(fd);
+
     (void)actions;
-    (void)t;
-    errno = ENOTTY;
-    return -1;
+
+    if (h == (BPTR)0 || !IsInteractive(h))
+    {
+        errno = ENOTTY;
+        return -1;
+    }
+
+    /* Dropbear clears ICANON for its raw local mode.  SetMode(h, 1) is the
+       console's raw mode -- no echo, no line editing, a keystroke at a time --
+       and SetMode(h, 0) restores cooked mode on cleanup. */
+    SetMode(h, (t != NULL && (t->c_lflag & ICANON) == 0) ? 1 : 0);
+    return 0;
 }
 
 /*
