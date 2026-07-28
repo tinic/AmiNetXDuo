@@ -89,9 +89,11 @@
  */
 
 #include <exec/types.h>
+#include <exec/io.h>            /* struct IOStdReq -- the console ConUnit */
 #include <dos/dos.h>
 #include <dos/dosextens.h>
 #include <dos/dostags.h>        /* SystemTagList() tags */
+#include <devices/conunit.h>    /* struct ConUnit, cu_XMax/cu_YMax */
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/bsdsocket.h>
@@ -740,58 +742,65 @@ int __wrap_write(int fd, const void *buf, size_t len)
  * the reader should that ever change; the wait is bounded so a console that
  * never answers cannot stall the connection.
  */
+static struct ConUnit *con_unit;    /* the console's ConUnit -- stable once found */
+
+/*
+ * Find the console's ConUnit.
+ *
+ * The console handler answers an ACTION_DISK_INFO packet by putting its
+ * console.device IORequest in InfoData.id_InUse; that request's io_Unit is the
+ * ConUnit.  The pointer does not move for the life of the window, so it is
+ * cached: the first call sends the packet, later calls just return it.
+ */
+static struct ConUnit *con_get_unit(void)
+{
+    BPTR               fh;
+    struct FileHandle *fhp;
+    struct MsgPort    *port;
+    struct InfoData   *id;
+
+    if (con_unit != NULL)
+        return con_unit;
+
+    fh = Output();
+    if (fh == (BPTR)0 || !IsInteractive(fh))
+        return NULL;
+    fhp  = (struct FileHandle *)BADDR(fh);
+    port = fhp->fh_Type;
+    if (port == NULL)
+        return NULL;
+
+    /* InfoData must be longword aligned for MKBADDR; AllocMem guarantees it. */
+    id = (struct InfoData *)AllocMem(sizeof(struct InfoData), MEMF_PUBLIC | MEMF_CLEAR);
+    if (id == NULL)
+        return NULL;
+
+    if (DoPkt(port, ACTION_DISK_INFO, (LONG)MKBADDR(id), 0, 0, 0, 0))
+    {
+        struct IOStdReq *ios = (struct IOStdReq *)id->id_InUse;
+        if (ios != NULL)
+            con_unit = (struct ConUnit *)ios->io_Unit;
+    }
+    FreeMem(id, sizeof(struct InfoData));
+    return con_unit;
+}
+
+/*
+ * The real size of the Amiga console, for TIOCGWINSZ.
+ *
+ * cu_XMax/cu_YMax are the last column and row (so the count is one more).  This
+ * is a plain memory read of a live structure -- no console I/O, so nothing to
+ * echo and no bell.  The documented Window Status Request (CSI 0 SP q) would be
+ * the portable route, but Kickstart 3.x's CON: handler does not answer it.
+ */
 static int con_query_size(int *rows, int *cols)
 {
-    BPTR in  = Input();
-    BPTR out = Output();
-    char buf[64];
-    int  n = 0, raw, r = 0, c = 0, field = 0, i;
+    struct ConUnit *cu = con_get_unit();
 
-    if (con_active())
-        return -1;
-    if (in == (BPTR)0 || out == (BPTR)0 || !IsInteractive(in) || !IsInteractive(out))
-        return -1;
-
-    raw = SetMode(in, 1) ? 1 : 0;
-
-    Write(out, (APTR)"\x9b" "0 q", 4);          /* CSI '0' SP 'q' */
-    Flush(out);
-
-    while (n < (int)sizeof(buf) - 1)
+    if (cu != NULL && cu->cu_XMax > 0 && cu->cu_YMax > 0)
     {
-        char ch;
-        if (WaitForChar(in, 200000) == 0)       /* 200 ms */
-            break;
-        if (Read(in, &ch, 1) != 1)
-            break;
-        buf[n++] = ch;
-        if (ch == 'r')
-            break;
-    }
-
-    if (raw)
-        SetMode(in, 0);
-
-    /* CSI 1;1;<rows>;<cols> SP r -- the 3rd and 4th ';'-separated fields.
-       Restart at the CSI so a stray byte ahead of the report cannot skew it. */
-    for (i = 0; i < n; i++)
-    {
-        unsigned char ch = (unsigned char)buf[i];
-
-        if (ch == 0x9B)      { field = 0; r = 0; c = 0; }
-        else if (ch >= '0' && ch <= '9')
-        {
-            if      (field == 2) r = r * 10 + (ch - '0');
-            else if (field == 3) c = c * 10 + (ch - '0');
-        }
-        else if (ch == ';')  field++;
-        else if (ch == 'r')  break;
-    }
-
-    if (r > 0 && c > 0)
-    {
-        *rows = r;
-        *cols = c;
+        *cols = cu->cu_XMax + 1;
+        *rows = cu->cu_YMax + 1;
         return 0;
     }
     return -1;
