@@ -1,9 +1,10 @@
 /*
- * AmiNetXDuo -- does a TCP connection give up after NX_TCP_MAXIMUM_RETRIES?
+ * AmiNetXDuo -- whether a TCP connection gives up after
+ * NX_TCP_MAXIMUM_RETRIES.
  *
  * Over an impaired link -- loss, a 576-byte path MTU, and a router silently
  * dropping the oversized datagrams -- a socket retransmitted the same sequence
- * number at +1, +2, +4, +8, +16, +32, +64 AND +128 seconds.  The doubling is
+ * number at +1, +2, +4, +8, +16, +32, +64 and +128 seconds.  The doubling is
  * NX_TCP_RETRY_SHIFT 1, so port/netxduo-amiga/inc/nx_user.h had plainly been
  * read; the +128 is a retry that NX_TCP_MAXIMUM_RETRIES 6 should never have
  * allowed, and 600 s later curl was still blocked with an empty stderr.
@@ -12,9 +13,8 @@
  * vendored translation unit, or the limit is tested against the wrong counter
  * -- and they need opposite fixes.  A packet capture cannot separate them,
  * because the interval ladder is driven by nx_tcp_socket_timeout_retries and
- * looks identical either way; only the socket can say which it was.  So this
- * PRINTS what the socket holds after nx_tcp_socket_create() and then drives
- * the timer that has to act on it.
+ * looks identical either way.  So this prints what the socket holds after
+ * nx_tcp_socket_create() and then drives the timer that has to act on it.
  *
  * Real, compiled from third_party/netxduo/common/src into this binary:
  * nx_tcp_socket_create.c, nx_tcp_socket_send_internal.c,
@@ -25,8 +25,8 @@
  *
  * Stubbed: everything that would touch a driver, a packet pool or another
  * thread.  _nx_ip_packet_send() counts the datagram and hands the packet back
- * marked NX_DRIVER_TX_DONE, which is precisely what a SANA-II transmit
- * completion does and what the retransmit path needs to see to send again.
+ * marked NX_DRIVER_TX_DONE, which is what a SANA-II transmit completion does
+ * and what the retransmit path needs to see to send again.
  *
  * The clock is a loop rather than a timer: one call to
  * _nx_tcp_fast_periodic_processing() is one NX_TCP_FAST_TIMER_RATE tick, so
@@ -47,8 +47,8 @@
 
 /*
  * Simulated time, in ThreadX ticks, advanced by the tick loop below.  The
- * stubs read it so that every datagram can be stamped with the moment it went
- * out -- the ladder is the evidence, not the count.
+ * stubs read it to stamp every datagram with the moment it went out, so the
+ * checks can test the interval ladder rather than the count alone.
  */
 static ULONG h_now;
 
@@ -211,10 +211,10 @@ USHORT _nx_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
 }
 
 /*
- * The wire.  A retransmission clears nx_packet_queue_next before sending
+ * A retransmission clears nx_packet_queue_next before sending
  * (nx_tcp_socket_retransmit.c:386) and only sends again once the driver has
  * put NX_DRIVER_TX_DONE back, so this stub does what the SANA-II transmit
- * completion does -- otherwise the ladder stops after one rung for a reason
+ * completion does.  Without it the ladder stops after one rung for a reason
  * that has nothing to do with the retry limit.
  */
 VOID _nx_ip_packet_send(NX_IP *ip_ptr, NX_PACKET *packet_ptr,
@@ -332,11 +332,10 @@ UINT _nx_packet_release(NX_PACKET *packet_ptr)
 /* ------------------------------------------------------------- fixture ---- */
 
 /*
- * A socket that looks exactly like one in the middle of the failure: ESTABLISHED,
- * one full segment sent and unacknowledged, the peer advertising a healthy
- * window, and a retransmit timeout armed.  Nothing the peer sends ever arrives
- * again -- which is the whole scenario, since the datagrams are being dropped
- * by a router that says nothing.
+ * A socket in the middle of the failure: ESTABLISHED, one full segment sent
+ * and unacknowledged, the peer advertising a healthy window, and a retransmit
+ * timeout armed.  Nothing from the peer ever arrives again, because the
+ * datagrams are being dropped by a router that says nothing.
  */
 
 #define H_SEG_BYTES     1460
@@ -364,9 +363,9 @@ static VOID h_disconnect_callback(NX_TCP_SOCKET *socket_ptr)
  * is the only thing that sets ASF_EOF on a socket nobody has FIN'd:
  * bsd_writable() (select.c:430) answers FALSE for every state but
  * NX_TCP_ESTABLISHED, so without this a reset socket is neither readable nor
- * writable and WaitSelect() never returns.  What was untested is whether it
- * fires for a reset that came from the RETRANSMIT TIMER rather than from a
- * peer's FIN or RST, so the reset path is run for real and this counts it.
+ * writable and WaitSelect() never returns.  Whether it fires for a reset that
+ * came from the retransmit timer rather than from a peer's FIN or RST was
+ * untested, so the reset path is run for real and this counts it.
  */
 static VOID h_disconnect_complete(NX_TCP_SOCKET *socket_ptr)
 {
@@ -405,11 +404,11 @@ static void h_fixture(void)
     h_sock.nx_tcp_socket_connect_mss = H_SEG_BYTES;
 
     /*
-     * The peer's window is WIDE OPEN.  This is the point of the whole test:
-     * nothing here is a zero-window condition, and the only reason a further
-     * send cannot proceed is that one segment is already in flight and the
-     * congestion window is one segment (which is where a retransmit timeout
-     * leaves it -- nx_tcp_socket_retransmit.c:182).
+     * The peer's window is wide open: nothing here is a zero-window
+     * condition.  The only reason a further send cannot proceed is that one
+     * segment is already in flight and the congestion window is one segment,
+     * which is where a retransmit timeout leaves it
+     * (nx_tcp_socket_retransmit.c:182).
      */
     h_sock.nx_tcp_socket_tx_window_advertised = 8192;
     h_sock.nx_tcp_socket_tx_window_congestion = H_SEG_BYTES;
@@ -468,16 +467,14 @@ static NX_PACKET *h_app_packet(void)
 }
 
 /*
- * What else is going on while the timer runs.
- *
- * H_APP_WRITES is not decoration: it is what a caller stuck in send() does.
- * bsd_wait_sliced() (src/bsdsocket/select.c:300) re-enters nx_tcp_socket_send()
- * every BSD_BREAK_SLICE_TICKS -- 200 ms -- for as long as the status is
+ * H_APP_WRITES models a caller stuck in send().  bsd_wait_sliced()
+ * (src/bsdsocket/select.c:300) re-enters nx_tcp_socket_send() every
+ * BSD_BREAK_SLICE_TICKS -- 200 ms -- for as long as the status is
  * NX_WINDOW_OVERFLOW or NX_TX_QUEUE_DEPTH, so that Ctrl-C still works; a
  * non-blocking caller such as curl comes back on its select loop just as
- * often, and for the same two statuses.  Either way the
- * application is offering data several times a second throughout the ladder
- * below, and that is the difference between the ladder ending and not.
+ * often, and for the same two statuses.  Either way the application offers
+ * data several times a second throughout the ladder below, which decides
+ * whether the ladder ends.
  */
 #define H_APP_WRITES        0x01u   /* the caller keeps offering data       */
 #define H_PEER_ACKS_PROBES  0x02u   /* the peer answers every probe         */
@@ -537,9 +534,9 @@ int main(void)
 
     /* ---- 1. what nx_tcp_socket_create() actually left in the socket ---- */
     /*
-     * The number that decides between "the macro did not arrive" and "the
-     * limit is tested against the wrong counter".  It is printed because that
-     * is the only reason this file exists.
+     * These numbers decide between "the macro did not arrive" and "the limit
+     * is tested against the wrong counter", so they are printed as well as
+     * checked.
      */
     h_fixture();
 
@@ -587,10 +584,10 @@ int main(void)
      * _nx_tcp_socket_send_internal() answers NX_TX_QUEUE_DEPTH, which the BSD
      * layer turns into EWOULDBLOCK and bsd_wait_sliced() retries.
      *
-     * That path also used to declare the socket to be probing a ZERO WINDOW,
+     * That path also used to declare the socket to be probing a zero window,
      * which it is not: the peer is advertising 8 KB and has never asked us to
      * stop.  The flag is what nx_tcp_fast_periodic_processing.c:129 uses to
-     * decide WHICH COUNTER the retry limit is tested against, so setting it
+     * decide which counter the retry limit is tested against, so setting it
      * here aimed the test at nx_tcp_socket_zero_window_probe_failure, which
      * the ordinary data path never advances.  The neighbouring arm of the
      * same else -- NX_WINDOW_OVERFLOW, when the queue has room but the window
@@ -610,7 +607,7 @@ int main(void)
     h_check(h_sock.nx_tcp_socket_zero_window_probe_has_data == NX_FALSE,
             "a send blocked by a full queue armed the ZERO-window probe");
 
-    /* ---- 5. THE REPRODUCTION: a caller that keeps trying to write ------ */
+    /* ---- 5. the reproduction: a caller that keeps trying to write ------ */
     /*
      * One blocked send is not enough to hide the limit, because the next
      * retransmission clears the flag again (nx_tcp_socket_retransmit.c:158).
@@ -649,12 +646,11 @@ int main(void)
     h_check(h_r.reset_at == 127,
             "the zero-window probe budget is not the retransmission budget");
 
-    /* ---- 7. ... and a zero window whose probes ARE answered ------------ */
+    /* ---- 7. ... and a zero window whose probes are answered ------------ */
     /*
-     * The other side of the same coin, and the thing a retry limit on probes
-     * must not break: a peer that is still there and still says "not now" is
-     * entitled to keep the connection (RFC 1122 4.2.2.17).  It gets probed
-     * for the full ten minutes and is never reset.
+     * What a retry limit on probes must not break: a peer that is still there
+     * and still says "not now" is entitled to keep the connection (RFC 1122
+     * 4.2.2.17).  It gets probed for the full ten minutes and is never reset.
      */
     h_fixture();
     h_sock.nx_tcp_socket_tx_window_advertised = 0;

@@ -1,12 +1,12 @@
 /*
  * AmiNetXDuo -- the AmiSSL half of the crypto68k-versus-AmiSSL benchmark.
  *
- * Two translation units, not one, and the split is deliberate.  nx_crypto's
- * headers and OpenSSL's headers both want to own names like SHA256_CTX and
- * both arrive through <exec/types.h>, which defines BOOL, LONG and VOID for
- * everyone.  Keeping them in separate files means neither has to be taught
- * about the other, and this header -- plain C types only, no nx_crypto and no
- * OpenSSL -- is the whole interface between them.
+ * Split across two translation units because nx_crypto's headers and OpenSSL's
+ * headers both want to own names like SHA256_CTX, and both arrive through
+ * <exec/types.h>, which defines BOOL, LONG and VOID for everyone.  Separate
+ * files mean neither has to be taught about the other, and this header --
+ * plain C types only, no nx_crypto and no OpenSSL -- is the whole interface
+ * between them.
  *
  * Every function returns 0 for success and non-zero for failure, so the
  * orchestrator can check without knowing what an OpenSSL error looks like.
@@ -23,11 +23,11 @@
  * Opens amisslmaster.library and the versioned amissl library behind it.
  * `err` receives a human-readable reason on failure.
  *
- * Split in two because the two halves have wildly different costs and the
- * first version of this program looked hung for minutes with no way to tell
- * which: LoadSeg of a 3.5 MB library and OpenSSL 3.x's own initialisation are
- * both slow on a 14 MHz 68020, and a benchmark that cannot say which stage it
- * is in is a benchmark nobody can debug.  The caller times and logs both.
+ * Split in two because the halves cost very different amounts and the first
+ * version of this program looked hung for minutes with no way to tell which
+ * was running: LoadSeg of a 3.5 MB library and OpenSSL 3.x's own
+ * initialisation are both slow on a 14 MHz 68020.  The caller times and logs
+ * both.
  */
 int         a_ossl_open_master(char *err, unsigned long err_len);
 int         a_ossl_open_ssl(char *err, unsigned long err_len);
@@ -44,8 +44,8 @@ void        a_ossl_close(void);
  */
 void        a_ossl_touch(void);
 
-/* "OpenSSL 3.6.2 ..." from the library itself, never from a header constant --
-   the point is to record what actually ran. */
+/* "OpenSSL 3.6.2 ..." from the library itself, never from a header constant,
+   so it records what actually ran. */
 const char *a_ossl_version(void);
 /* Which CPU build of amissl_v*.library got opened, from its version string. */
 const char *a_ossl_library_id(void);
@@ -95,8 +95,8 @@ int  a_ossl_ecdh(const unsigned char *peer65, unsigned char *out32);
 int  a_ossl_ec_mul_g(const unsigned char *k32, int consttime,
                      unsigned char *out65);
 
-/* Was a generator precomputation table built?  Asked rather than assumed,
-   because it is worth several times the scalar multiplication. */
+/* Was a generator precomputation table built?  It is worth several times the
+   scalar multiplication, so the answer is measured rather than assumed. */
 int  a_ossl_ec_have_precompute(void);
 
 /* ----------------------------------------------------------------- bulk -- */

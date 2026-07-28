@@ -5,11 +5,10 @@
  * every primitive the data path touches per byte, count how many times the
  * data path touches it per megabyte, multiply, and compare the total against
  * a measured end-to-end transfer.  Whatever is left over is not in the copy
- * loops, and knowing THAT is the point -- three of this project's last four
- * performance efforts found the bottleneck somewhere other than predicted.
+ * loops.
  *
  *   1. E-Clock bracket overhead, so it can be subtracted from everything else.
- *   2. Per-primitive cost: the checksum (vendored AND net68k, in one process),
+ *   2. Per-primitive cost: the checksum (vendored and net68k, in one process),
  *      memcpy at every one of the sixteen alignment pairs, net68k's movem.l
  *      copy, the SANA-II shim's copy loop, nx_packet_data_append,
  *      nx_packet_data_extract_offset, nx_packet_copy, an allocate/release
@@ -22,15 +21,14 @@
  *      copy loops impose.
  *   5. End to end: TCP over 127.0.0.1 and TCP between two NX_IP instances
  *      over the simulated RAM driver, each run with the vendored checksum and
- *      with net68k's, back to back, with NOTHING ELSE CHANGED -- the same
- *      "one variable and nothing else" discipline the P-256 work used.
+ *      with net68k's, back to back, with nothing else changed.
  *
- * What is not measured here: bsdsocket.library.  This binary talks to NetX
- * Duo directly, so the difference between its loopback figure and the
- * conformance suite's throughput category IS the library layer, and that is
- * how the library's cost is priced.
+ * bsdsocket.library is not measured here.  This binary talks to NetX Duo
+ * directly, so the difference between its loopback figure and the conformance
+ * suite's throughput category is the library layer, and that is how the
+ * library's cost is priced.
  *
- * ONLY THE 68020 Profiles mean anything, and that is now measured rather than
+ * Only the 68020 profiles mean anything, and that is measured rather than
  * suspected: tests/perf/cpucal.c times instructions with published cycle costs
  * and finds FS-UAE's A1200 model faithful to under 2% for two-cycle integer
  * work, while its 68030 -- any 68030, including `-c 68030` on the A1200 model
@@ -38,9 +36,9 @@
  * a 68020.  Run this under `-m A3000` as a correctness check and do not quote
  * the numbers.
  *
- * `tools/fsuae-run.sh -k MHZ` moves the 68020 model's clock WITHOUT losing the
- * cycle accounting, so "what would this do at 25 MHz?" does have an answer
- * here even though "what would this do on an A3000?" does not.
+ * `tools/fsuae-run.sh -k MHZ` moves the 68020 model's clock without losing the
+ * cycle accounting, so "what would this do at 25 MHz?" has an answer here even
+ * though "what would this do on an A3000?" does not.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -191,19 +189,17 @@ static ULONG p_ms(ULONG ticks)
 
 /*
  * Nanoseconds per byte, x100 so a fraction survives an integer print, taken
- * over the WHOLE loop rather than a per-iteration mean.
+ * over the whole loop rather than as a per-iteration mean.
  *
- * That distinction is not pedantry.  The per-iteration form quantises to one
- * E-Clock tick per rep -- 1.409 us -- and at 14 MHz a 1460-byte copy is ~180
- * ticks, so the granularity is half a percent and invisible.  Run the same
- * binary at 24.5 MHz with `fsuae-run.sh -k 25` and it is ~105 ticks, and
- * three copy routines that differ by 4% all printed the SAME 102.29 ns/B.
- * Dividing once, at the end, by the total byte count removes it.
+ * The per-iteration form quantises to one E-Clock tick per rep -- 1.409 us --
+ * and at 14 MHz a 1460-byte copy is ~180 ticks, so the granularity is half a
+ * percent and invisible.  At 24.5 MHz with `fsuae-run.sh -k 25` it is ~105
+ * ticks, and three copy routines that differ by 4% all printed the same
+ * 102.29 ns/B.  Dividing once, at the end, by the total byte count removes it.
  *
- * `total_bytes` is reps * bytes and is large, so the scaling is done by
- * dividing it by 100 rather than multiplying the ticks by it: the pipeline
- * benchmark's 105,000 ticks * 1409 is already 1.5e8, and another 100 would
- * not fit in a longword.
+ * `total_bytes` is reps * bytes and is large, so the scaling divides it by 100
+ * rather than multiplying the ticks by it: the pipeline benchmark's 105,000
+ * ticks * 1409 is already 1.5e8, and another 100 would not fit in a longword.
  */
 static ULONG p_ns_per_byte_x100(ULONG ticks, ULONG total_bytes)
 {
@@ -254,11 +250,9 @@ ULONG            t0, t1, total;
 /*
  * NetX Duo calls _nx_ip_checksum_compute() by name from IP, TCP, UDP and
  * ICMP.  The top-level CMakeLists drops the vendored object from the core, so
- * the symbol is ours to define -- and defining it HERE, rather than linking
- * src/net68k's hook, is what lets one process run both implementations back to
- * back with a single variable between them.  That is the same discipline the
- * P-256 work used (one function pointer in a copy of the curve struct) and it
- * exists for the same reason: two binaries are two experiments.
+ * the symbol is ours to define; defining it here, rather than linking
+ * src/net68k's hook, lets one process run both implementations back to back
+ * with a single variable between them.
  */
 
 USHORT n68k_checksum_reference(NX_PACKET *packet_ptr, ULONG protocol,
@@ -495,13 +489,14 @@ UINT    da, sa;
      *
      * Read the build flags before reading these rows.  With
      * AMINETXDUO_NET68K_MEMCPY=ON -- the default on a cross build -- memcpy()
-     * IS n68k_copy_bytes(), and these rows measure it twice under two names.
+     * is n68k_copy_bytes(), and these rows measure it twice under two names.
      * The C library's own numbers quoted in docs/RESEARCH.md were taken from a
-     * -DAMINETXDUO_NET68K_MEMCPY=OFF build, which is the only way to get them.  The libm020 multilib -- which -m68020 selects, verified in
-     * the link map -- aligns only the DESTINATION and then moves longwords
-     * regardless of what the source is doing, so the expensive case is
-     * supposed to be a misaligned destination, not a misaligned source.  This
-     * is the measurement that says whether that is true.
+     * -DAMINETXDUO_NET68K_MEMCPY=OFF build, which is the only way to get them.
+     * The libm020 multilib -- which -m68020 selects, verified in the link map
+     * -- aligns only the destination and then moves longwords regardless of
+     * what the source is doing, so the expensive case is supposed to be a
+     * misaligned destination, not a misaligned source.  This measurement says
+     * whether that is true.
      */
     for (da = 0; da < 4; da++)
     {
@@ -527,16 +522,15 @@ UINT    da, sa;
     }
 
     /*
-     * The movem.l candidate, checked before it is timed.
-     *
-     * This routine is memcpy() for the whole library when
-     * AMINETXDUO_NET68K_MEMCPY is on, so "fast" is worthless without "exact".
-     * Every length from 0 to 96 and every one of the sixteen source/
-     * destination alignment combinations, verifying three things each time:
-     * the copied bytes match, the byte before the destination is untouched,
-     * and the byte after it is untouched.  That is 1552 cases; a routine that
-     * mishandles the head alignment, the movem block, the longword tail or
-     * the byte tail fails at least one of them.
+     * The movem.l candidate, checked before it is timed.  This routine is
+     * memcpy() for the whole library when AMINETXDUO_NET68K_MEMCPY is on, so
+     * "fast" is worthless without "exact".  Every length from 0 to 96 and
+     * every one of the sixteen source/destination alignment combinations,
+     * verifying three things each time: the copied bytes match, the byte
+     * before the destination is untouched, and the byte after it is
+     * untouched.  That is 1552 cases; a routine that mishandles the head
+     * alignment, the movem block, the longword tail or the byte tail fails at
+     * least one of them.
      */
     {
     ULONG   n, da, sa, k;
@@ -639,10 +633,10 @@ UINT    da, sa;
     p_report("ami_sana2_copy_bytes d0 s2", ticks, reps, len);
 
     /*
-     * Opposite parity.  THIS is where a real cliff lives, and it is in our own
-     * code rather than in the C library: the SANA-II shim's loop takes its
-     * longword path only when source and destination agree mod 2, and drops to
-     * one byte per iteration when they do not.
+     * Opposite parity, where a real cliff lives -- in our own code, not the C
+     * library: the SANA-II shim's loop takes its longword path only when
+     * source and destination agree mod 2, and drops to one byte per iteration
+     * when they do not.
      */
     t0 = p_now();
     for (i = 0UL; i < reps; i++)
@@ -680,10 +674,10 @@ ULONG       len = 1460UL;
           (LONG)reps);
 
     /*
-     * The same pair through the INTERNAL entry points.  nx_user.h deliberately
-     * leaves NX_DISABLE_ERROR_CHECKING unset ("revisit for the release
-     * build"), so every nx_* call in the tree goes through an _nxe_ wrapper
-     * first.  This is what that costs on the hottest call in the stack.
+     * The same pair through the internal entry points.  nx_user.h leaves
+     * NX_DISABLE_ERROR_CHECKING unset ("revisit for the release build"), so
+     * every nx_* call in the tree goes through an _nxe_ wrapper first.  This
+     * is what that costs on the hottest call in the stack.
      */
     t0 = p_now();
     for (i = 0UL; i < reps; i++)
@@ -790,10 +784,8 @@ ULONG       len = 1460UL;
 }
 
 /*
- * The pipeline ceiling.
- *
- * Every operation a loopback TCP segment pays for, in order, with no protocol,
- * no scheduler and no timers in the way:
+ * The pipeline ceiling: every operation a loopback TCP segment pays for, in
+ * order, with no protocol, no scheduler and no timers in the way:
  *
  *   allocate -> append (the send() copy) -> TCP checksum ->
  *   nx_packet_copy (the loopback hand-over) -> TCP checksum (receive side) ->
@@ -801,7 +793,7 @@ ULONG       len = 1460UL;
  *
  * The reciprocal of the per-byte total is the fastest this stack could
  * possibly move loopback TCP if the protocol were free.  Anything the
- * end-to-end runs fall short of THAT is not in the copy loops.
+ * end-to-end runs fall short of it by is not in the copy loops.
  */
 static VOID p_bench_pipeline(ULONG mode, const char *what)
 {
@@ -1084,17 +1076,14 @@ ULONG       t0;
         }
 
         /*
-         * The clock stops HERE, not after the teardown.
-         *
-         * It used to stop after nx_tcp_socket_disconnect(), and that added a
-         * flat five seconds to every run: the server closes first, the client
-         * is still blocked waiting to be told the transfer finished, so
-         * nobody completes the handshake and the disconnect burns its whole
-         * timeout.  Every figure in the first pass was therefore ~5000 ms of
-         * nothing plus the real transfer, which is why they all came out
-         * around 45 KB/s regardless of what was changed.  Recorded because
-         * the shape of that mistake -- a constant offset that flattens every
-         * comparison -- is easy to make again.
+         * The clock stops here, not after the teardown.  Stopping it after
+         * nx_tcp_socket_disconnect() added a flat five seconds to every run:
+         * the server closes first, the client is still blocked waiting to be
+         * told the transfer finished, so nobody completes the handshake and
+         * the disconnect burns its whole timeout.  Every figure in the first
+         * pass was ~5000 ms of nothing plus the real transfer, and they all
+         * came out around 45 KB/s regardless of what was changed -- a constant
+         * offset that flattens every comparison.
          */
         (VOID)tx_semaphore_put(&p_srv_gotall);
 
@@ -1213,7 +1202,7 @@ ULONG       before_sent;
         sent += chunk;
     }
 
-    /* The transfer is not over until the receiver has it -- but it IS over
+    /* The transfer is not over until the receiver has it, and it is over
        before either side tears its socket down. */
     (VOID)tx_semaphore_get(&p_srv_gotall, 60UL * NX_IP_PERIODIC_RATE);
 

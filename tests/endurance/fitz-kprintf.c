@@ -2,20 +2,20 @@
  * kprintf() and mysnprintf() for Fitz, in C.
  *
  * Fitz supplies both in `src/kprintf.asm`, which is vasm source (`XDEF`,
- * `include "lvo/exec_lib.i"`).  This tree has no vasm, and building Fitz from
- * source is the whole point of using it here -- a debug build prints
+ * `include "lvo/exec_lib.i"`).  This tree has no vasm, and Fitz is built from
+ * source here so that a debug build prints
  *
  *     * EAGAIN
  *     * recv error err=-1 len=... errno=...
  *
- * on the serial port, which tools/fsuae-run.sh already captures, and those two
- * lines are the direct evidence for the defect this harness exists to hunt.
- * Without them a lost connection is only ever an inference.
+ * on the serial port, which tools/fsuae-run.sh already captures.  Those two
+ * lines are the direct evidence for the defect this harness hunts; without
+ * them a lost connection is only ever an inference.
  *
  * So the two entry points are reimplemented here, on the same Exec primitive
  * the original uses (RawDoFmt), with the same semantics -- including
- * mysnprintf()'s deliberate non-C99 return value, which Fitz's own header
- * calls out ("does not allow str=NULL, size=0") and which its callers rely on.
+ * mysnprintf()'s non-C99 return value, which Fitz's own header calls out
+ * ("does not allow str=NULL, size=0") and which its callers rely on.
  *
  * Compiled only into the harness's Fitz build; nothing in src/ sees it.
  *
@@ -38,13 +38,12 @@
 
 /*
  * `__udivdi3` and `__umoddi3` are absent from this toolchain's libgcc.a --
- * checked, not assumed: `nm` finds neither in any archive it ships.  Fitz's
- * `ds_to_unix()` (src/amiga-common.c) needs one, because it composes a Unix
- * timestamp in `uint64_t` and divides the tick field by 50 there.
+ * checked with `nm`, which finds neither in any archive it ships.  Fitz's
+ * `ds_to_unix()` (src/amiga-common.c) needs one: it composes a Unix timestamp
+ * in `uint64_t` and divides the tick field by 50 there.
  *
- * Supplied here rather than by editing Fitz, because the value of running
- * Fitz at all is that it is somebody else's program: a harness that had to
- * change the code under test would not be testing the released one.
+ * Supplied here rather than by editing Fitz, so the harness tests the released
+ * program unmodified.
  *
  * Restoring-shift division: 64 iterations, no multiply, so it is correct on a
  * 68000 as well.  It runs once per timestamp conversion and is nowhere near
@@ -95,7 +94,7 @@ static Fitz64 fitz_divmod(unsigned long long nn, unsigned long long dd,
     {
         if (rem != NULL)
             *rem = r;
-        return q;                       /* the caller has already lost */
+        return q;                       /* division by zero */
     }
 
     for (i = 63; i >= 0; i--)
@@ -171,7 +170,7 @@ typedef struct
 
 /*
  * The original stops incrementing once the buffer is full, so the count is
- * the number of bytes actually written -- NOT the length that would have been
+ * the number of bytes actually written, not the length that would have been
  * needed.  Mirrored exactly: Fitz uses the return value to advance write
  * cursors, and a C99 return would walk them off the end of a truncated
  * buffer.

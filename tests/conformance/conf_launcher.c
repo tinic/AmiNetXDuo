@@ -7,9 +7,9 @@
  * a CATEGORY or a HOST, and the 64 KB stack its own `__stack` global asks for
  * -- a libnix feature this newlib toolchain does not implement.
  *
- * So the thing the harness actually runs is this launcher.  It reads the
- * command line from a staged file and re-launches the suite as a child
- * process with a real stack:
+ * So the harness runs this launcher instead.  It reads the command line from
+ * a staged file and re-launches the suite as a child process with a real
+ * stack:
  *
  *     DH0:conf-args    one line, e.g. "LOOPBACK VERBOSE NOPAGE"
  *     DH0:bsdsocktest  the suite itself
@@ -21,7 +21,7 @@
  * The crash guard is installed around the child so a Guru raised by the stack
  * under test is decoded to the serial log instead of killing the emulator
  * silently.  The Alert hook is machine-wide, so it covers the child too; the
- * trap handler is per-task and only covers this launcher, which is why the
+ * trap handler is per-task and covers only this launcher, which is why the
  * child's own exceptions still show up as a dead process rather than a dump.
  *
  * SPDX-License-Identifier: MIT
@@ -107,7 +107,7 @@ int main(VOID)
     /*
      * SystemTagList() closes the handles it is given, so these must be ours
      * and must not be closed again here.  NP_StackSize reaches CreateNewProc
-     * through the same tag list, which is the whole point of the launcher.
+     * through the same tag list.
      */
     rc = SystemTags((STRPTR)command,
                     SYS_Input,     (ULONG)in,

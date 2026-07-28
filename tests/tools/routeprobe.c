@@ -1,10 +1,9 @@
 /*
- * RouteProbe -- does NX_ENABLE_IP_STATIC_ROUTING reach the wire?
+ * RouteProbe -- checks that NX_ENABLE_IP_STATIC_ROUTING reaches the wire.
  *
- * A `#define` that changes no packet is not a feature, so this does not stop
- * at "nx_ip_static_route_add() returned NX_SUCCESS". It adds a route whose
- * next hop is an address Nothing else in the run ever names, sends to a
- * destination that only that route can reach, and leaves the consequence
+ * Rather than stopping at "nx_ip_static_route_add() returned NX_SUCCESS", it
+ * adds a route whose next hop is an address nothing else in the run names,
+ * sends to a destination only that route can reach, and leaves the consequence
  * where an instrument below this stack can see it.
  *
  *   destination 192.168.77.5      not on any of the guest's own subnets
@@ -18,20 +17,17 @@
  *                      because it has never resolved that address;
  *   without the route  the default gateway 10.0.2.2 is used, whose ARP entry
  *                      the DHCP exchange already resolved, so the frame goes
- *                      out immediately and there is NO ARP at all.
+ *                      out immediately and there is no ARP at all.
  *
- * So an ARP request for 10.0.2.99 in the emulated A2065's own frame log
- * appears if and only if the routing table was consulted. That log is written
- * inside the emulated hardware, below every line of our code, which is why the
- * assertion is made there rather than on a capture this stack took of itself.
+ * An ARP request for 10.0.2.99 in the emulated A2065's own frame log therefore
+ * appears if and only if the routing table was consulted.  That log is written
+ * inside the emulated hardware, below every line of our code, so the assertion
+ * is made there rather than on a capture this stack took of itself.
  *
- *   The commands are one caller of NETCTRL_ROUTE_ADD and their argument
- *   grammar is their own business. What is being tested here is the stack:
- *   the table exists, an entry goes into it, the entry is reported back, it
- *   governs where a packet goes, and deleting it undoes all of that. Testing
- *   that through a command's ReadArgs template would make this test fail
- *   whenever the template changed, which is the wrong thing to be sensitive
- *   to.
+ * The subject is the stack, not the commands: the table exists, an entry goes
+ * into it, the entry is reported back, it governs where a packet goes, and
+ * deleting it undoes all of that.  Going through a command's ReadArgs template
+ * would make this fail whenever the template changed.
  *
  * Vectors are called by hand at the LVOs docs/RESEARCH.md 3.2 lists, the same
  * way tests/tools/ttlprobe.c and src/tools/toolsock.c do: the NDK inlines
@@ -172,8 +168,8 @@ static LONG p_control(struct Library *base, ULONG op, NetStatusControl *ctl)
 
 /*
  * The LVOs above are written as literals because `jsr a6@(-870:W)` needs one,
- * so the header's own numbers are checked against them here rather than
- * trusted. A slot that moved would otherwise land on whatever is next.
+ * so the header's own numbers are checked against them here.  A slot that
+ * moved would otherwise land on whatever is next.
  */
 _Static_assert(AMI_NETSTATUS_QUERY_LVO   == -870, "NetStackQuery LVO moved");
 _Static_assert(AMI_NETSTATUS_CONTROL_LVO == -876, "NetStackControl LVO moved");
@@ -187,10 +183,9 @@ static struct
 } probe_routes;
 
 /*
- * Every control block carries the magic and the version. bsd_NetStackControl()
- * rejects one that does not with EINVAL -- which is the same errno an
- * unreachable next hop produces, so forgetting them looks exactly like the
- * feature not working. It cost one run of this test to find out.
+ * Every control block carries the magic and the version.  bsd_NetStackControl()
+ * rejects one that does not with EINVAL, the same errno an unreachable next
+ * hop produces, so forgetting them looks exactly like the feature not working.
  */
 static VOID probe_ctl_init(NetStatusControl *ctl);
 
@@ -231,7 +226,7 @@ static VOID probe_dotted(ULONG addr, char *out)
     out[pos] = '\0';
 }
 
-/* Every route the stack has, printed. The point is the count and the flags. */
+/* Every route the stack has, with its flags. */
 static VOID show_routes(struct Library *base, const char *when)
 {
     LONG n;
@@ -276,9 +271,8 @@ static VOID show_routes(struct Library *base, const char *when)
 }
 
 /*
- * One datagram at 192.168.77.5. Nothing will answer it and nothing is meant
- * to: what matters is where the stack decided to send it, which is a question
- * only the wire can answer.
+ * One datagram at 192.168.77.5.  Nothing will answer it; the measurement is
+ * where the stack decided to send it, which only the wire shows.
  */
 static VOID send_one(struct Library *base)
 {
@@ -364,9 +358,7 @@ int main(void)
 
     /*
      * A next hop on no local subnet must be refused rather than stored: NetX
-     * Duo derives the outgoing interface from it, and there is none. This is
-     * the negative case, and it is here because "the call returned success"
-     * is not by itself evidence that anything was checked.
+     * Duo derives the outgoing interface from it, and there is none.
      */
     probe_ctl_init(&ctl);
     ctl.nsc_Destination = 0xAC100000UL;         /* 172.16.0.0   */
@@ -379,7 +371,7 @@ int main(void)
            (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
 
     /*
-     * Deleting a route that is not there, while the table is NOT empty.  The
+     * Deleting a route that is not there, while the table is not empty.  The
      * emptiness matters: nx_ip_static_route_delete() returns NX_SUCCESS
      * outright when nx_ip_routing_table_entry_count is zero, so a delete
      * attempted on an empty table proves nothing about whether it searched.

@@ -1,7 +1,7 @@
 /*
- * tickprobe -- what rate does a TCP/IP stack's periodic timer run at, and how
- * long does it take to turn a packet around?  Asked of a stack from OUTSIDE,
- * with no knowledge of its internals and nothing of its code inspected.
+ * tickprobe -- a TCP/IP stack's periodic-timer rate and packet turnaround,
+ * measured from outside, with no knowledge of its internals and nothing of its
+ * code inspected.
  *
  * docs/RESEARCH.md 29.5 measured Roadshow's ICMP round trip at 4.32 ms
  * minimum against ours at 7 ms, and two explanations fit that equally well:
@@ -14,11 +14,11 @@
  * The two are distinguishable on the wire and nowhere else, so this program
  * is a wire.
  *
- * A packet a stack sends BECAUSE A TIMER FIRED leaves at the instant that
+ * A packet a stack sends because a timer fired leaves at the instant that
  * timer fires.  Sample enough of them and their timestamps lie on a grid whose
- * spacing is the tick period -- not because any one gap is the tick, but
- * because t mod T is concentrated for T = the tick and spread for every other
- * T.  That is a measurement of the periodic rate that never opens the binary.
+ * spacing is the tick period: t mod T is concentrated for T = the tick and
+ * spread for every other T.  That measures the periodic rate without ever
+ * opening the binary.
  *
  * The delayed ACK is the event to sample: it is timer-driven on every TCP
  * implementation there has ever been, it can be provoked once per round trip
@@ -26,42 +26,40 @@
  * segment that arms it arrives.  Phase II below collects a few hundred.
  *
  * The interval between one injection and the next is drawn from 0..400 ms and
- * not from 0..20, for a reason that is easy to get wrong: the analyser looks
- * for a grid in the INTERVALS between departures, and intervals that are all
- * nearly equal are congruent modulo almost anything.  A spread of twenty ticks
- * makes the comb sharp; a spread of one makes it meaningless.
+ * not from 0..20: the analyser looks for a grid in the intervals between
+ * departures, and intervals that are all nearly equal are congruent modulo
+ * almost anything.  A spread of twenty ticks makes the comb sharp; a spread of
+ * one makes it meaningless.
  *
- * The phase must be randomised or the answer is A FICTION
+ * The phase has to be randomised.  If the harness injected each segment
+ * immediately after seeing the previous ACK, the injections would themselves
+ * be locked to whatever grid the harness polls on, every measured delay would
+ * come out identical, and a stack with no periodic timer at all would look
+ * perfectly quantised.  So each injection is preceded by a timer.device
+ * UNIT_MICROHZ sleep of a pseudo-random length -- Delay() is one 20 ms
+ * AmigaDOS tick and sleeping on it would alias the experiment into agreeing
+ * with whatever the system tick is.  The analyser checks the control as well
+ * as the result: the injection intervals must show no concentration at any
+ * period, or the run says nothing.
  *
- * If the harness injected each segment immediately after seeing the previous
- * ACK, the injections would themselves be locked to whatever grid the harness
- * polls on, every measured delay would come out identical, and a stack with no
- * periodic timer at all would look perfectly quantised.  So each injection is
- * preceded by a timer.device UNIT_MICROHZ sleep of a pseudo-random length --
- * Delay() is one 20 ms AmigaDOS tick and sleeping on it would alias the
- * experiment into agreeing with whatever the system tick is.  The analyser
- * checks the control as well as the result: the INJECTION intervals must show
- * no concentration at any period, or the run says nothing.
+ * The competing explanation is measured in the same run.  An ICMP echo reply
+ * is not timer-driven -- it is generated when the request arrives -- so the
+ * time from handing an echo request to the device to the stack handing the
+ * reply back is the whole receive-and-reply path with the wire, the emulator's
+ * SLIRP and the application all taken out of it.  Phase I measures it at two
+ * sizes, which separates per-packet cost from per-byte.
  *
- * And the competing explanation is measured in the same run
+ * The stack under test is a parameter: anything with a bsdsocket.library.
+ * Every call into the stack is a published LVO and every packet is seen
+ * through a SANA-II device this program installs in its own address space
+ * (tests/tcpdrill/tapdev.c, linked unchanged).  With a foreign stack,
+ * DH0:tickif.txt holds the command line that brings its interface up -- our
+ * own library configures DEVS:NetInterfaces itself when it opens, and Roadshow
+ * needs its own AddNetInterface to be run.
  *
- * An ICMP echo reply is not timer-driven -- it is generated when the request
- * arrives -- so the time from handing an echo request to the device to the
- * stack handing the reply back is the whole receive-and-reply path with the
- * wire, the emulator's SLIRP and the application all taken out of it.  Phase I
- * measures it at two sizes, which separates per-packet cost from per-byte.
- *
- * Anything with a bsdsocket.library.  Every call into the stack is a published
- * LVO and every packet is seen through a SANA-II device this program installs
- * in its own address space (tests/tcpdrill/tapdev.c, linked unchanged), so the
- * stack under test is a parameter.  With a foreign stack, DH0:tickif.txt holds
- * the command line that brings its interface up -- our own library configures
- * DEVS:NetInterfaces itself when it opens, and Roadshow needs its own
- * AddNetInterface to be run.
- *
- * DH0:tickprobe.txt, one line per sample, all times in raw E-Clock ticks so
- * the analyser and not the Amiga decides what a millisecond is.  Flushed line
- * by line (16.9).
+ * DH0:tickprobe.txt holds one line per sample, all times in raw E-Clock ticks
+ * so the analyser and not the Amiga decides what a millisecond is.  Flushed
+ * line by line (16.9).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -345,12 +343,12 @@ static VOID usleep_(ULONG usec)
 
 /* ------------------------------------------------------- the time bases -- */
 /*
- * What the MACHINE offers, measured rather than assumed, because the answer to
- * "is that grid 11 wakeups or 22?" turns on it.  An Amiga has two periodic
- * sources a stack can ride: the vertical blank interrupt, whose rate is the
- * display's and is 49.92 Hz on PAL, and the CIA, which timer.device's
- * UNIT_MICROHZ divides to whatever was asked for.  A grid that is an exact
- * multiple of the first cannot have come from the second, and vice versa.
+ * What the machine offers, measured rather than assumed, because whether a
+ * grid is 11 wakeups or 22 turns on it.  An Amiga has two periodic sources a
+ * stack can ride: the vertical blank interrupt, whose rate is the display's
+ * and is 49.92 Hz on PAL, and the CIA, which timer.device's UNIT_MICROHZ
+ * divides to whatever was asked for.  A grid that is an exact multiple of the
+ * first cannot have come from the second, and vice versa.
  *
  * Both are timed here with the same E-Clock that timestamps every frame, on
  * the same machine, in the same run.
@@ -413,8 +411,8 @@ static VOID measure_timebases(ULONG rounds)
 }
 
 /* xorshift32, seeded from the E-Clock so two boots do not sample the same
-   phases.  The sequence itself does not matter; its lack of correlation with
-   anything the stack does is the whole requirement. */
+   phases.  The sequence itself does not matter; only its lack of correlation
+   with anything the stack does. */
 static ULONG rng_state = 2463534242UL;
 
 static ULONG rnd(VOID)
@@ -580,7 +578,7 @@ static VOID pump(VOID)
 }
 
 /*
- * Wait for an event, polling.  The poll interval does NOT enter any
+ * Wait for an event, polling.  The poll interval does not enter any
  * measurement: every stamp comes from ReadEClock() inside the device's
  * BeginIO, i.e. the instant the stack handed the frame over.  It is short
  * anyway so that the next sample starts promptly.
@@ -615,7 +613,7 @@ static VOID drain(VOID)
 static UBYTE injf[TAP_FRAME_MAX];
 
 /* An ICMP echo request from the peer.  `dlen` is the ICMP payload, so 56
-   matches what every ping on earth sends by default. */
+   matches what ping sends by default. */
 static ULONG inject_echo(UWORD id, UWORD seqno, ULONG dlen)
 {
     UBYTE *ip = &injf[ETH_HDR];
@@ -943,8 +941,8 @@ static VOID phase_dack(ULONG count)
  * A second, independent population of timer-driven frames, on a much longer
  * period.  A SYN to a peer that never answers is retransmitted by the
  * retransmission timer, and every one of those departures is another sample of
- * the same grid -- with the added value that the GAPS say what the stack's RTO
- * is and whether it backs off.
+ * the same grid; the gaps also say what the stack's RTO is and whether it
+ * backs off.
  */
 
 static VOID phase_retransmit(ULONG ms)

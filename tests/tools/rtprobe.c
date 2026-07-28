@@ -1,25 +1,23 @@
 /*
- * RtProbe -- does the Roadshow ROUTING API work on a running stack?
+ * RtProbe -- exercises the Roadshow routing API on a running stack.
  *
- * tests/tools/routeprobe.c already proves that a static route reaches the
- * wire, through the private NETCTRL_ROUTE_ADD vector. This one proves the
- * PUBLISHED API on top of it: AddRouteTagList(), DeleteRouteTagList(),
- * GetRouteInfo() and FreeRouteInfo(), called at their LVOs by a program that
- * knows only the NDK headers.
+ * tests/tools/routeprobe.c covers the private NETCTRL_ROUTE_ADD vector.  This
+ * covers the published API on top of it: AddRouteTagList(),
+ * DeleteRouteTagList(), GetRouteInfo() and FreeRouteInfo(), called at their
+ * LVOs by a program that knows only the NDK headers.
  *
- * The shape under test is GetRouteInfo()'s, and it is one a compiler cannot
- * check. The autodoc says the table is "a header followed by a small number
- * of sockadders, interpreted by position", with rtm_addrs as the map and a
- * terminator whose rtm_msglen is zero. So this walks the table exactly the
- * way a caller must -- advance by rtm_msglen, stop at zero, read the
- * sockaddrs by their bit order -- rather than by indexing an array of
- * rt_msghdr, which is what the prototype alone would suggest and which would
- * walk off the end of the first entry.
+ * The shape under test is GetRouteInfo()'s, which a compiler cannot check.
+ * The autodoc says the table is "a header followed by a small number of
+ * sockadders, interpreted by position", with rtm_addrs as the map and a
+ * terminator whose rtm_msglen is zero.  So this walks the table the way a
+ * caller must -- advance by rtm_msglen, stop at zero, read the sockaddrs by
+ * their bit order -- rather than indexing an array of rt_msghdr, which the
+ * prototype alone would suggest and which walks off the end of the first
+ * entry.
  *
- * The default gateway is read and then set to the value it already had. This
- * run is riding on it; deleting it to prove DeleteRouteTagList() works on
- * default gateways would take the machine off the network for the rest of the
- * test, and the assertion is not worth the boot.
+ * The default gateway is read and then set to the value it already had.  This
+ * run is riding on it; deleting it to exercise DeleteRouteTagList() on default
+ * gateways would take the machine off the network for the rest of the test.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -149,7 +147,7 @@ static VOID p_dotted(ULONG addr, char *out)
 /*
  * The sockaddr for one RTA_ bit, found the way the routing-socket convention
  * says: walk the bits from least significant, skipping the ones that are not
- * set, and step over each present address by its OWN sa_len.
+ * set, and step over each present address by its own sa_len.
  */
 static const struct sockaddr_in_probe *p_route_addr(const struct rt_msghdr *hdr,
                                                     LONG want)
@@ -328,8 +326,8 @@ int main(void)
     /* ---- the flags filter ------------------------------------------------
      *
      * "Flags which have to be set in each routing table entry to be returned"
-     * -- so RTF_STATIC returns the two just added and nothing else, and the
-     * count is the assertion.
+     * -- so RTF_STATIC returns the two just added and nothing else; the count
+     * is the assertion.
      */
     (VOID)p_show_table(base, "static-only", AF_INET, RTF_STATIC);
 
@@ -399,16 +397,14 @@ int main(void)
     p_free_route_info(base, table);
 
     /*
-     * Deleting one that was never there -- and it has to happen HERE, while
-     * the two above are still in the STATIC table.
-     *
+     * Deleting one that was never there.  This has to happen here, while the
+     * two above are still in the static table:
      * nx_ip_static_route_delete() returns NX_SUCCESS outright when
      * nx_ip_routing_table_entry_count is zero, without searching, and the
-     * default gateway is not in that table: it lives in
-     * nx_ip_gateway_address. So a machine whose only route is its default
-     * gateway has an empty static table, and this same call would report
-     * success. Running it after the two deletes below proved exactly that,
-     * which is how the ordering got written down.
+     * default gateway is not in that table -- it lives in
+     * nx_ip_gateway_address.  A machine whose only route is its default
+     * gateway has an empty static table, so run after the two deletes below
+     * this call reports success regardless.
      */
     tags[0].ti_Tag  = RTA_Destination;
     tags[0].ti_Data = (ULONG)"192.168.69.0";

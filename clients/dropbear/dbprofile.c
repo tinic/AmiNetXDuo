@@ -1,48 +1,40 @@
 /*
  * clients/dropbear/dbprofile.c -- where an SSH handshake's 84 seconds go.
  *
- *   docs/RESEARCH.md 31.5 measured a whole connection (96.06 s, 84.07 s once
- *   the optimistic kex guess was off) and could not split it.  The attempt
- *   there timestamped the SERVER's log host-side and the split came out
- *   contradicting itself, because a contended build host does not measure a
- *   guest.  31.5 draws the right conclusion from that -- trust the guest's own
- *   clock -- and this file is that conclusion applied one level down: the
- *   guest times its own crypto, on the E-Clock, inside the process that is
- *   doing the handshake.
+ * docs/RESEARCH.md 31.5 measured a whole connection (96.06 s, 84.07 s once the
+ * optimistic kex guess was off) and could not split it: that attempt
+ * timestamped the server's log host-side and the split came out contradicting
+ * itself, because a contended build host does not measure a guest.  Here the
+ * guest times its own crypto, on the E-Clock, inside the process doing the
+ * handshake.  Every row is a call count and a tick total from a real
+ * connection to a real OpenSSH, not inferred from reading the code.
  *
- *   Three predicted bottlenecks in this project have been wrong (the RSA limb
- *   loop, the emulator tick source, ping's reboot), so nothing here is
- *   inferred from reading the code.  Every row is a call count and a tick
- *   total from a real connection to a real OpenSSH.
+ * -Wl,--wrap=SYM, the same mechanism clients/dropbear/build.sh already uses
+ * for open/read/write/close.  Every reference to SYM from Dropbear's own
+ * objects is redirected to __wrap_SYM here; __real_SYM is the untouched
+ * original.  third_party/dropbear stays byte-identical to the tag.
  *
- *   -Wl,--wrap=SYM, the same mechanism clients/dropbear/build.sh already uses
- *   for open/read/write/close.  Every reference to SYM from Dropbear's own
- *   objects is redirected to __wrap_SYM here; __real_SYM is the untouched
- *   original.  third_party/dropbear stays byte-identical to the tag, which is
- *   the property that whole port is built on.
+ * --wrap only catches cross-object calls, so curve25519.c's internal calls to
+ * its own field arithmetic are invisible here: they are part of the primitive
+ * being timed, not a separate row.
  *
- *   That also makes the instrument honest about what it can see: --wrap only
- *   catches CROSS-OBJECT calls.  curve25519.c's internal calls to its own
- *   field arithmetic are invisible here, which is correct -- they are part of
- *   the primitive being timed, not a separate row.
+ * Some rows call others: crypto_hash() inside ed25519 sign/verify calls
+ * sha512_process(), and ltc_ecc_mulmod() calls into libtommath.  Every row is
+ * inclusive time and the report says which rows are nested inside which; the
+ * call graph does not support an exclusive breakdown.  Adding up the
+ * non-nested rows is the meaningful sum.
  *
- *   Some of these call others: crypto_hash() inside ed25519 sign/verify calls
- *   sha512_process(), and ltc_ecc_mulmod() calls into libtommath.  Every row
- *   is INCLUSIVE time and the report says which rows are nested inside which,
- *   rather than pretending to an exclusive breakdown that the call graph does
- *   not support.  Adding up the non-nested rows is the meaningful sum.
+ * timer.device UNIT_ECLOCK, through the TimerBase that src/common/compat.c
+ * already opens for ami_millis(), so there is one timer device open in the
+ * process and this file does not open a second.  The 32-bit low word wraps
+ * every ~100 minutes at 709 kHz and a difference survives one wrap, which is
+ * longer than any run here.
  *
- *   timer.device UNIT_ECLOCK, through the TimerBase that src/common/compat.c
- *   already opens for ami_millis() -- so there is one timer device open in the
- *   process and this file does not open a second.  The 32-bit low word wraps
- *   every ~100 minutes at 709 kHz and a difference survives one wrap, which is
- *   longer than any run here.
- *
- *   ReadEClock() costs a library call.  Everything measured is milliseconds or
- *   seconds and the most-called row (chacha, once per packet) is a few dozen
- *   calls, so the instrument's own cost is below the resolution of what it
- *   reports.  It is charged to the row it is measuring in any case, so it can
- *   only make a row look SLOWER, never faster.
+ * ReadEClock() costs a library call.  Everything measured is milliseconds or
+ * seconds and the most-called row (chacha, once per packet) is a few dozen
+ * calls, so the instrument's own cost is below the resolution of what it
+ * reports.  It is charged to the row it is measuring, so it can only make a
+ * row look slower.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -65,7 +57,7 @@ extern struct Device *TimerBase;
 /* ------------------------------------------------------------------ slots */
 
 enum {
-    P_X25519,           /* curve25519 scalar multiply: kex keygen AND secret  */
+    P_X25519,           /* curve25519 scalar multiply: kex keygen and secret  */
     P_ED25519_SIGN,     /* client publickey authentication                     */
     P_ED25519_VERIFY,   /* the server host key's signature over the exchange   */
     P_ECC_MULMOD,       /* P-256 scalar multiply (nistp256 kex/ECDSA builds)   */
@@ -76,7 +68,7 @@ enum {
     P_SHA256,           /* the exchange hash and the key derivation            */
     P_CHACHA,           /* the record path, both directions                    */
     P_POLY1305,         /* the record path's MAC                               */
-    P_SELECT,           /* NOT crypto: time blocked on the network             */
+    P_SELECT,           /* not crypto: time blocked on the network             */
     P_SLOTS
 };
 
@@ -134,8 +126,8 @@ static void p_add(int slot, ULONG t0)
     p_ticks[slot] += p_tick() - t0;
 }
 
-/* ticks -> milliseconds.  Deliberately outside every timed region: the divide
-   is a __udivdi3 call (this toolchain's libgcc.a is empty and
+/* ticks -> milliseconds, outside every timed region: the divide is a
+   __udivdi3 call (this toolchain's libgcc.a is empty and
    src/common/ami_udivdi3.c supplies it), which is fine on a report path and
    would not be fine inside a measurement. */
 static ULONG p_ms(ULONG ticks)
@@ -164,13 +156,10 @@ static void p_report(void)
             named += p_ticks[i];
 
     /*
-     * stderr, not stdout, and that is a measurement rather than a preference.
-     * The first profiling run printed nothing at all through printf(), while
-     * Dropbear's own "Caution, skipping hostkey check" -- dbutil.c's
-     * fprintf(stderr) -- came through in the same transcript.  So stderr is
-     * the stream that is demonstrably wired up under ClientRun on this
-     * platform, and an instrument should use the channel that is known to
-     * work rather than the one that ought to.
+     * stderr, not stdout.  The first profiling run printed nothing at all
+     * through printf(), while Dropbear's own "Caution, skipping hostkey check"
+     * -- dbutil.c's fprintf(stderr) -- came through in the same transcript.
+     * stderr is the stream that is wired up under ClientRun on this platform.
      */
     fprintf(stderr, "\n--- dbprofile: where this connection went ---\n");
     fprintf(stderr, "%-26s %7s %10s %8s\n", "primitive", "calls", "ms", "% wall");
@@ -212,20 +201,17 @@ static void p_report(void)
 
 
 /*
- * ARMING, And why it is not done in the constructor.
+ * Arming is not done in the constructor.  The first version registered
+ * p_report() with atexit() from a constructor and nothing was ever printed.
+ * The constructor does run -- the linked ___CTOR_LIST__ grew by one entry when
+ * this file joined the link -- but it runs before this crt0 has finished
+ * setting newlib up, so an atexit() registered there does not survive and an
+ * fprintf() from there goes nowhere.  amiga_dropbear.c's own constructor gets
+ * away with it because it touches only dos.library.
  *
- * The first version registered p_report() with atexit() from a constructor and
- * nothing was ever printed.  The constructor DOES run -- the linked
- * ___CTOR_LIST__ grew by one entry when this file joined the link -- but it
- * runs before this crt0 has finished setting newlib up, so an atexit()
- * registered there does not survive and an fprintf() from there goes nowhere.
- * amiga_dropbear.c's own constructor gets away with it because it touches only
- * dos.library.
- *
- * So the registration happens on the First wrapped call instead, which is
- * inside main() by construction.  Three exits are then armed and p_reported
- * makes them idempotent: atexit(), the toolchain's own DTOR list, and
- * --wrap=exit, which is the mechanism this link already proves works.
+ * Registration therefore happens on the first wrapped call, which is inside
+ * main() by construction.  Three exits are then armed and p_reported makes
+ * them idempotent: atexit(), the toolchain's own DTOR list, and --wrap=exit.
  */
 static void p_arm(void)
 {
@@ -249,9 +235,9 @@ void __wrap_exit(int status)
 }
 
 /*
- * All the constructor does is take the starting tick, which is exec and
- * timer.device only and therefore safe this early -- the same reason
- * amiga_dropbear.c's constructor works.
+ * The constructor only takes the starting tick, which is exec and timer.device
+ * only and therefore safe this early, the same reason amiga_dropbear.c's
+ * constructor works.
  */
 __attribute__((constructor)) static void p_init(void)
 {
@@ -295,12 +281,12 @@ __attribute__((constructor)) static void p_init(void)
 /*
  * Two sets of names for the same three rows.
  *
- * With clients/dropbear/amiga_25519.c linked, IT owns __wrap_dropbear_* and
- * this file cannot -- only one definition of a wrap symbol can exist.  So when
- * the accelerated build is being profiled the instrument moves one level down
- * and wraps src/crypto68k's own entry points, which amiga_25519.o reaches
- * across an object boundary and --wrap therefore still catches.  The rows mean
- * the same thing either way, which is the point: the A/B is comparable.
+ * With clients/dropbear/amiga_25519.c linked, that file owns
+ * __wrap_dropbear_* and this one cannot: only one definition of a wrap symbol
+ * can exist.  So when the accelerated build is being profiled the instrument
+ * moves one level down and wraps src/crypto68k's own entry points, which
+ * amiga_25519.o reaches across an object boundary and --wrap still catches.
+ * The rows mean the same thing either way, so the A/B is comparable.
  */
 #if DBPROF_FAST25519
 
@@ -346,8 +332,8 @@ P_WRAP_RET(P_ED25519_VERIFY, int, dropbear_ed25519_verify,
 /*
  * The two libtomcrypt/libtommath entry points a P-256 handshake goes through.
  * ltc_ecc_mulmod is every scalar multiply -- the kex keypair, the ECDH, and
- * both halves of an ECDSA verify -- so its call count is the interesting
- * number as much as its total is.
+ * both halves of an ECDSA verify -- so its call count matters as much as its
+ * total.
  */
 P_WRAP_RET(P_ECC_MULMOD, int, ltc_ecc_mulmod,
            (void *k, void *G, void *R, void *modulus, int map),
@@ -384,12 +370,11 @@ P_WRAP_RET(P_POLY1305, int, poly1305_process,
            (st, in, inlen))
 
 /*
- * Not a crypto row, and the one that decides whether the other rows are the
- * whole story.  select() is clients/dropbear/amiga_dropbear.c's own, so
- * __real_select is that function; what is measured is every moment this
+ * Not a crypto row.  select() is clients/dropbear/amiga_dropbear.c's own, so
+ * __real_select is that function, and what is measured is every moment this
  * process spent waiting for the network or for a DOS handle rather than
  * computing.  If the public-key rows and this one together account for the
- * wall clock, then nothing unnamed is hiding in the handshake.
+ * wall clock, nothing unnamed is hiding in the handshake.
  */
 P_WRAP_RET(P_SELECT, int, select,
            (int n, void *r, void *w, void *e, void *t), (n, r, w, e, t))

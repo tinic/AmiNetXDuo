@@ -3,21 +3,19 @@
  *
  * Every performance number this project has recorded carries the same
  * disclaimer: "only the 68020 column is meaningful, FS-UAE's 68030 model is
- * not cycle-exact".  That disclaimer was reached three separate times, by
- * three different workstreams, from three different symptoms -- a 95x
- * memory-to-memory copy, a MULU.L that costs nothing, and an RSA ratio that
- * came out 1.7x, 3.0x and 3.1x on three runs of one binary.  None of them
- * measured *what* the model gets wrong, so nobody could say what, if
- * anything, an A3000 profile would be good for.
+ * not cycle-exact".  None of the symptoms behind it -- a 95x memory-to-memory
+ * copy, a MULU.L that costs nothing, an RSA ratio that came out 1.7x, 3.0x and
+ * 3.1x on three runs of one binary -- measured *what* the model gets wrong, so
+ * nobody could say what an A3000 profile would be good for.
  *
- * This does.  It runs instruction sequences whose cost on real silicon is
- * published, and reports what the emulator charges for them.
+ * This runs instruction sequences whose cost on real silicon is published, and
+ * reports what the emulator charges for them.
  *
- * An absolute "nanoseconds per instruction" is worth nothing on its own: it
- * conflates the model's cycle accounting with whatever clock the emulator
- * thinks it is running at, and the two cannot be separated from one figure.
- * So the primary results here are RATIOS between kernels measured in the same
- * run, which are clock-independent by construction:
+ * An absolute "nanoseconds per instruction" conflates the model's cycle
+ * accounting with whatever clock the emulator thinks it is running at, and the
+ * two cannot be separated from one figure.  So the primary results here are
+ * ratios between kernels measured in the same run, which are
+ * clock-independent by construction:
  *
  *   MULU.L / ADD.L      44/2 = 22.0 on a real 68030 (43/2 = 21.5 on a 68020)
  *   MOVE.L (An)+,(Am)+ / ADD.L        5/2 =  2.5 with the operands in cache
@@ -27,10 +25,9 @@
  *                                     ~4x on an A3000's 32-bit one
  *
  * Only after those does it quote an implied clock, derived from ADD.L at its
- * published two cycles.  If the ratios are wrong, the clock is meaningless
- * and is printed only so the reader can see how meaningless.
+ * published two cycles.  If the ratios are wrong, the clock is meaningless.
  *
- * WHAT A Real machine would say (cache case, from the MC68020UM/MC68030UM
+ * What a real machine would say (cache case, from the MC68020UM/MC68030UM
  * instruction-timing appendices; the 68030's figures assume both caches on):
  *
  *   MOVE.L Dn,Dm 2   ADD.L Dn,Dm 2   ADDX.L Dn,Dm 2   MULU.L Dn,Dm 44
@@ -202,23 +199,22 @@ static VOID c_run(ULONG kind, ULONG reps)
 
 /*
  * Pick a repeat count that puts the measurement two or three orders of
- * magnitude above the bracket, then measure.  Auto-scaling is not a nicety
- * here: the whole question is whether one profile is ~100x faster than the
- * other, and a fixed count that suits the slow one measures nothing but
- * quantisation on the fast one.
+ * magnitude above the bracket, then measure.  Auto-scaling matters here: the
+ * question is whether one profile is ~100x faster than the other, and a fixed
+ * count that suits the slow one measures nothing but quantisation on the fast
+ * one.
  *
- * Returns picoseconds per UNIT -- an instruction for the register kernels, a
- * byte for the memory ones -- because an operation that an unthrottled model
- * charges a fraction of a nanosecond for still has to have digits left.
+ * Returns picoseconds per unit -- an instruction for the register kernels, a
+ * byte for the memory ones -- so an operation an unthrottled model charges a
+ * fraction of a nanosecond for still has digits left.
  *
- * ARITHMETIC, in a language with no 64-bit divide worth linking here.
- * `ticks * c_tick_ns` is about 1e8 and fits; multiplying that by the further
- * 1000 that picoseconds need does not, and the first version of this file did
- * exactly that and printed a 32 KB memory sweep as 3.3 ns/B -- faster than
- * the 68020's bus can physically go, and faster than the same routine over 64
- * bytes, which should have been the tell.  So the scaling is done by dividing
- * the unit count by 1000 instead, and the loop below refuses to stop until
- * there are at least 1000 units to make that exact.
+ * There is no 64-bit divide worth linking here.  `ticks * c_tick_ns` is about
+ * 1e8 and fits; multiplying that by the further 1000 picoseconds need does
+ * not.  The first version of this file did exactly that and printed a 32 KB
+ * memory sweep as 3.3 ns/B -- faster than the 68020's bus can physically go,
+ * and faster than the same routine over 64 bytes.  So the scaling divides the
+ * unit count by 1000 instead, and the loop below refuses to stop until there
+ * are at least 1000 units to make that exact.
  */
 #define C_TARGET_TICKS  70000UL         /* ~100 ms of E-Clock */
 #define C_MIN_UNITS     100000UL
@@ -339,7 +335,7 @@ ULONG   kbs;
     ps_per_byte = c_measure_ps(kind, bytes, &reps);
 
     /* KB/s = 1e12 / ps_per_byte / 1024.  Divide first to stay in 32 bits, but
-       divide only ONCE by a thousand: doing it twice truncated 8065 KB/s to
+       divide only once by a thousand: doing it twice truncated 8065 KB/s to
        7. */
     kbs = (ps_per_byte != 0UL)
               ? ((1000000000UL / ps_per_byte) * 1000UL / 1024UL)
@@ -385,8 +381,7 @@ ULONG   big_read, small_read;
         /* Below 1.00 rather than exactly 1.00 on a cacheless part because the
            64 B window pays the kernel's outer-loop reset once per 16
            longwords and the 32 KB one pays it once per 8192; ~0.9 is the
-           measured floor.  What matters is that a real data cache puts this
-           well ABOVE 1. */
+           measured floor.  A real data cache puts this well above 1. */
         c_log("    32 KB / 64 B read ratio: %ld.%02ldx  "
               "(~0.9x = no data cache, i.e. a 68020)",
               (LONG)((big_read * 100UL / small_read) / 100UL),
@@ -450,10 +445,9 @@ ULONG   reps;
     c_print_reg("MULU.L Dn,Dh:Dl",K_MULU64, 45UL, 44UL);
 
     /*
-     * The implied clock.  Printed last and hedged, because it is the one
-     * figure here that assumes something: that the model charges ADD.L its
-     * published two cycles.  If MULU.L above did not come out near 22x, it
-     * does not, and this number is decoration.
+     * The implied clock, the one figure here that assumes something: that the
+     * model charges ADD.L its published two cycles.  If MULU.L above did not
+     * come out near 22x, it does not, and this number is decoration.
      */
     if (c_add_ps != 0UL)
     {
@@ -491,10 +485,9 @@ ULONG   reps;
     }
 
     /*
-     * And again with the data cache forced on, which is the single most
-     * useful yes/no question about a 68030 model: a 68020 has no data cache,
-     * so if turning it on changes nothing, the model is not simulating the
-     * part it claims to be.
+     * Again with the data cache forced on: a 68020 has no data cache, so if
+     * turning it on changes nothing, the model is not simulating the part it
+     * claims to be.
      */
     if ((flags & AFF_68030) != 0UL && fast != NULL)
     {

@@ -1,23 +1,22 @@
 /*
  * CheckRunner -- the guest half of every harness in tests/compare.
  *
- *   A harness points a command at bsdsocket.library and asks whether the
- *   STACK survived, so the driver has to be the thing that keeps running when
- *   the command does not.  Everything it produces is appended and flushed one
- *   line at a time, on purpose: when a transfer takes the machine down, the
- *   file already on the host is the entire evidence, and a buffered report
- *   would lose exactly the line that mattered.
+ *   A harness points a command at bsdsocket.library and asks whether the stack
+ *   survived, so the driver has to keep running when the command does not.
+ *   Everything it produces is appended and flushed one line at a time: when a
+ *   transfer takes the machine down, the file already on the host is the whole
+ *   evidence, and a buffered report would lose the line that mattered.
  *
- *   For the same reason it does not score anything.  The expectations live on
- *   the host, so a run that dies in the middle is scored the same way as one
- *   that finishes -- every case with no result line is a failure, and the
- *   first of them names the command that did it.
+ *   For the same reason it scores nothing.  The expectations live on the host,
+ *   so a run that dies in the middle is scored the same way as one that
+ *   finishes -- every case with no result line is a failure, and the first of
+ *   them names the command that did it.
  *
- *   It was CheckRunner, written for a curl suite that no longer exists.  Nothing
- *   about it was ever curl-specific: it runs a list of commands and writes
- *   down what happened, which is what run-compare.sh has always used it for.
+ *   Written for a curl suite that no longer exists; nothing about it was ever
+ *   curl-specific.  It runs a list of commands and writes down what happened,
+ *   which is what run-compare.sh uses it for.
  *
- * INPUT: DH0:checks.txt, one per line
+ * Input: DH0:checks.txt, one per line
  *
  *   #  ...                 comment
  *   wait N                 sleep N seconds (nothing here needs it yet; the
@@ -29,20 +28,18 @@
  *   DH0:checkrunner.txt    the same thing for a human
  *
  *   "Crashes most of the time" and "degrades over a few hundred transfers"
- *   look identical from a single run, and the second one is invisible unless
+ *   look identical from a single run, and the second is invisible unless
  *   somebody writes the number down.  AvailMem(MEMF_ANY) after each command,
  *   with the child gone and its memory returned, turns a leak of a few
- *   kilobytes per socket into a straight line the host can fit.  It is not
- *   free of noise -- allocation patterns fragment -- but a leak is a trend and
+ *   kilobytes per socket into a straight line the host can fit.  Allocation
+ *   patterns fragment, so it is not noise-free, but a leak is a trend and
  *   fragmentation is not.
  *
- * Why every command gets 512 Kb of stack
- *
- *   A Kickstart 3.1 Shell gives a command 4,096 bytes and this toolchain's
- *   crt0 exports no __stack hook to ask for more.  See clients/curl/
- *   clientrun.c, which is the same trick for the same reason; this file is a
- *   separate one because a verification driver wants results.txt and a demo
- *   driver does not.
+ *   Every command gets 512 Kb of stack because a Kickstart 3.1 Shell gives a
+ *   command 4,096 bytes and this toolchain's crt0 exports no __stack hook to
+ *   ask for more.  clients/curl/clientrun.c is the same trick for the same
+ *   reason; this file is separate because a verification driver wants
+ *   results.txt and a demo driver does not.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -67,13 +64,11 @@ static const char version_tag[] __attribute__((used)) =
 
 /*
  * NP_WindowPtr = -1 turns "Please insert volume Foo:" into a failed call.
- *
- * Not a nicety.  A client that names a path on a volume or assign which does
- * not exist -- AmiSSL is configured OPENSSLDIR=AmiSSL:, so any AmiSSL-linked
- * binary does exactly this if the assign is missing -- otherwise puts up a
- * requester on a machine with nobody at the keyboard, and the whole run sits
- * there until the harness times out.  A missing file should fail, loudly and
- * immediately, in a test rig.
+ * A client that names a path on a volume or assign which does not exist --
+ * AmiSSL is configured OPENSSLDIR=AmiSSL:, so any AmiSSL-linked binary does
+ * this if the assign is missing -- otherwise puts up a requester on a machine
+ * with nobody at the keyboard, and the run sits there until the harness times
+ * out.
  */
 static struct TagItem client_tags[] =
 {
@@ -93,9 +88,9 @@ static LONG now_ticks(VOID)
     return ds.ds_Minute * (60L * TICKS_PER_SECOND) + ds.ds_Tick;
 }
 
-/* Append one formatted line and close.  Closing is the point: the host has to
-   be able to read this file while the emulator is still running, and after it
-   has stopped running in a way that never reached an exit. */
+/* Append one formatted line and close.  The host has to be able to read this
+   file while the emulator is still running, and after it has stopped in a way
+   that never reached an exit. */
 static VOID emit(const char *file, const char *fmt, LONG *args)
 {
     BPTR out = Open((CONST_STRPTR)file, MODE_READWRITE);
@@ -123,9 +118,8 @@ static ULONG append(char *dst, ULONG dstlen, ULONG used, const char *src)
  * A third-party curl built against AmiSSL wants an AmiSSL: assign, because
  * amisslmaster.library resolves the versioned library through it.  A bare
  * directory hard drive has no C:assign to type it with, so the driver makes
- * it when the directory is staged and does nothing when it is not.  Five
- * lines, and without them the strongest ABI evidence available -- somebody
- * else's binary, over somebody else's TLS -- cannot be collected at all.
+ * the assign when the directory is staged and does nothing when it is not.
+ * Without it a third-party AmiSSL-linked binary cannot be run at all.
  */
 static VOID maybe_assign(const char *name, const char *dir)
 {
@@ -165,8 +159,8 @@ int main(int argc, char **argv)
     truncate_file(RESULTS);
     truncate_file(REPORT);
     maybe_assign("AmiSSL", "DH0:AmiSSL");
-    /* Same five lines, same reason, for a stack that reads its configuration
-       through an assign of its own (tests/compare/run-compare.sh). */
+    /* Same reason, for a stack that reads its configuration through an assign
+       of its own (tests/compare/run-compare.sh). */
     maybe_assign("AmiTCP", "DH0:AmiTCP");
 
     in = Open((CONST_STRPTR)CHECKS, MODE_OLDFILE);

@@ -1,11 +1,11 @@
 /*
  * AmiNetXDuo -- the access patterns real network clients use.
  *
- * bsdsocktest checks that each vector behaves; this checks that the SEQUENCES
- * a ported client actually issues behave.  The two are not the same thing.  A
- * stack can pass "connect() to loopback listener" and still hang a client that
- * does non-blocking connect + select-for-writable + getsockopt(SO_ERROR),
- * because nothing in the per-vector suite ever puts those three together.
+ * bsdsocktest checks that each vector behaves; this checks that the sequences
+ * a ported client actually issues behave.  A stack can pass "connect() to
+ * loopback listener" and still hang a client that does non-blocking connect +
+ * select-for-writable + getsockopt(SO_ERROR), because nothing in the
+ * per-vector suite ever puts those three together.
  *
  * Every group below is copied from a real program, named in its comment:
  *
@@ -17,7 +17,7 @@
  *   F  curl   lib/select.c             select() over a wide, sparse fd set
  *   G  curl                            descriptor churn across many transfers
  *   H  curl   lib/cf-socket.c          send() after the peer has gone
- *   I  wget   src/connect.c            BLOCKING connect (wget has no async path)
+ *   I  wget   src/connect.c            blocking connect (wget has no async path)
  *   J  ssh/nc                          a raised descriptor table
  *   K  nc -N                           half-close in both directions
  *   L  nc, telnet                      FIONREAD before reading
@@ -53,8 +53,8 @@ struct Library *SocketBase;
 
 /*
  * The errno curl installs with SBTC_ERRNOPTR(sizeof(errno)).  A plain int,
- * because that is what curl passes -- the whole point of group A is that the
- * library writes through this pointer at the width the caller asked for.
+ * because that is what curl passes: group A checks that the library writes
+ * through this pointer at the width the caller asked for.
  */
 static int  c_errno;
 static LONG c_h_errno;
@@ -208,9 +208,9 @@ static VOID group_a(VOID)
     t_group("A  curl init: SocketBaseTags + errno mirroring");
 
     /*
-     * Verbatim from Curl_amiga_init().  curl treats ANY nonzero return as
-     * fatal and refuses to run, so this single call is the gate on the whole
-     * port -- an unrecognised tag here means curl never issues a request.
+     * Verbatim from Curl_amiga_init().  curl treats any nonzero return as
+     * fatal and refuses to run, so an unrecognised tag here means curl never
+     * issues a request.
      */
     rc = SocketBaseTags(SBTM_SETVAL(SBTC_ERRNOPTR(sizeof(c_errno))),
                         (ULONG)&c_errno,
@@ -229,7 +229,7 @@ static VOID group_a(VOID)
     t_ok(rc < 0 && c_errno == EBADF,
          "errno mirrored into the caller's int at its own width", (LONG)c_errno);
 
-    /* getdtablesize() is how curl sizes nothing, but ssh and nc size fd sets. */
+    /* curl ignores getdtablesize(); ssh and nc size their fd sets with it. */
     rc = getdtablesize();
     t_ok(rc >= 64, "getdtablesize() >= 64", rc);
 
@@ -358,9 +358,9 @@ static VOID group_c(VOID)
     }
 
     /*
-     * The point of the whole group: curl learns WHY from SO_ERROR, not from
-     * errno, and it must read it exactly once -- BSD clears the pending error
-     * on read, and curl relies on that when it retries the next address.
+     * curl learns why the connect failed from SO_ERROR, not from errno, and
+     * reads it exactly once: BSD clears the pending error on read, and curl
+     * relies on that when it retries the next address.
      */
     sl = sizeof(soerr);
     rc = getsockopt(cli, SOL_SOCKET, SO_ERROR, &soerr, &sl);
@@ -390,10 +390,10 @@ static VOID group_d(VOID)
     t_group("D  curl: wakeup_inet() -- its own loopback socketpair");
 
     /*
-     * This is wakeup_inet() step for step.  curl builds a socketpair this way
-     * on every platform without AF_UNIX, which includes AmigaOS, and it does
-     * it for EVERY multi handle -- so a stack that cannot do this cannot run
-     * curl at all, whatever it can do for plain client sockets.
+     * wakeup_inet() step for step.  curl builds a socketpair this way on every
+     * platform without AF_UNIX, which includes AmigaOS, and does it for every
+     * multi handle, so a stack that cannot do this cannot run curl at all,
+     * whatever it can do for plain client sockets.
      */
     listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     t_ok(listener >= 0, "socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)", listener);
@@ -491,11 +491,11 @@ static VOID group_e(VOID)
     t_ok(echo_check(ctl_c, ctl_s), "control connection carries data", 0);
 
     /*
-     * Active mode: for EACH transfer the client opens a fresh listener, tells
+     * Active mode: for each transfer the client opens a fresh listener, tells
      * the server the port (PORT command), the server connects back, the data
-     * moves, the data connection closes -- and the control connection has to
-     * still be there afterwards.  Three rounds, because the first one working
-     * says nothing about the fourth.
+     * moves, the data connection closes, and the control connection has to
+     * still be there afterwards.  Three rounds, because one working round says
+     * nothing about the next.
      */
     for (round = 0; round < 3; round++)
     {
@@ -675,10 +675,9 @@ static VOID group_f(VOID)
 /* ---- N. write a whole response, then close (http server, ftp data) ----- */
 
 /*
- * Deliberately under the 8 KB receive window: the reader below does not read
- * until the writer has closed, so a payload larger than the window would
- * simply deadlock a blocking send() -- correct BSD behaviour, and not what
- * this group is about.
+ * Under the 8 KB receive window: the reader below does not read until the
+ * writer has closed, so a payload larger than the window would deadlock a
+ * blocking send() -- correct BSD behaviour, and not what this group is about.
  */
 #define N_BYTES     6144
 
@@ -710,12 +709,11 @@ static VOID group_n(VOID)
     }
 
     /*
-     * A non-blocking reader would interleave; this deliberately does NOT read
-     * until the writer has closed, which is what makes the test sharp: every
-     * byte has to survive in the stack's buffers across the close.  A close
-     * that resets instead of finishing the connection loses whatever has not
-     * been acknowledged yet, and the caller sees a truncated response with no
-     * error anywhere -- the classic "curl got half the page" symptom.
+     * A non-blocking reader would interleave; this one does not read until the
+     * writer has closed, so every byte has to survive in the stack's buffers
+     * across the close.  A close that resets instead of finishing the
+     * connection loses whatever has not been acknowledged yet, and the caller
+     * sees a truncated response with no error anywhere.
      */
     while (sent < N_BYTES)
     {
@@ -830,7 +828,7 @@ static VOID group_g(VOID)
     t_ok(failures == 0, "64 connect/accept/transfer/close rounds", failures);
 
     /*
-     * Descriptors must be RECYCLED, not consumed.  64 rounds through a
+     * Descriptors must be recycled, not consumed.  64 rounds through a
      * 64-entry table would run out on the first pass if close() leaked one.
      */
     t_ok(maxfd < 16, "descriptor numbers stayed low -- fds are recycled", maxfd);
@@ -906,9 +904,9 @@ static VOID group_i(VOID)
     /*
      * wget calls connect() on a blocking socket and relies on the OS to bound
      * it; its run_with_timeout() only works where sigsetjmp+alarm exist, which
-     * is not AmigaOS.  So a blocking connect to a closed port MUST come back
-     * promptly with ECONNREFUSED -- if it hangs, wget hangs, with no timeout
-     * of its own to save it.
+     * is not AmigaOS.  So a blocking connect to a closed port must come back
+     * promptly with ECONNREFUSED; if it hangs, wget hangs, with no timeout of
+     * its own.
      */
     fd = socket(AF_INET, SOCK_STREAM, 0);
     addr_in(&sa, INADDR_LOOPBACK, BASE_PORT + 92);
@@ -1073,7 +1071,7 @@ static VOID group_k(VOID)
     /*
      * The half-closed client now selects for read with nothing on the wire.
      * `nc -N` sits in exactly this loop waiting for the rest of the answer, so
-     * it must SLEEP: a socket that has sent its own FIN and heard nothing back
+     * it must sleep: a socket that has sent its own FIN and heard nothing back
      * is not readable, however close FIN_WAIT_1 looks to a state comparison.
      */
     {

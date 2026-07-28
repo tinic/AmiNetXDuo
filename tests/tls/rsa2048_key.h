@@ -1,7 +1,7 @@
 /*
  * A throwaway RSA-2048 key pair, for benchmarking only.
  *
- * Generated once with `openssl genrsa 2048` and pasted in.  It is a PUBLIC
+ * Generated once with `openssl genrsa 2048` and pasted in.  It is a public
  * private key -- it is in a git repository -- and exists solely so that
  * tests/tls/tls_bench.c can time a 2048-bit modular exponentiation with a
  * verifiable round trip (public(private(m)) == m).  Never use it for anything.

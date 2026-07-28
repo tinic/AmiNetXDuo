@@ -1,22 +1,19 @@
 /*
- * AamProbe -- the address allocation message, and the hang that was there.
+ * AamProbe -- the address allocation message.
  *
- * BeginInterfaceConfig() returns VOID. Everything it has to say it says by
- * filling in aam_Result and replying the message, which means an ENOSYS stub
- * for it is not a refusal but a HANG: it returns -1 in a register the caller
- * cannot see and never replies the message the caller is already waiting on.
+ * BeginInterfaceConfig() returns VOID and reports everything by filling in
+ * aam_Result and replying the message, so an ENOSYS stub for it hangs rather
+ * than refuses: it returns -1 in a register the caller cannot see and never
+ * replies the message the caller is waiting on.  The central assertion is
+ * therefore that after BeginInterfaceConfig() returns, the message is back on
+ * the port.  The ten error codes CreateAddrAllocMessageA() enumerates, the
+ * buffers it carves and the defaults it fills in are checked too.
  *
- * So the assertion that matters most in this file is the dullest one: after
- * BeginInterfaceConfig() returns, The message is back on the port. Everything
- * else -- the ten distinct error codes CreateAddrAllocMessageA() enumerates,
- * the buffers it carves, the defaults it fills in -- is checked because the
- * autodoc is specific enough to check against.
- *
- * The probe deliberately calls DeleteAddrAllocMessage() on a message it built
- * itself, on the stack. "This routine can only deallocate address allocation
- * messages created by CreateAddrAllocMessageA() and will not work with
- * anything else" -- so it has to be able to tell, and a library that could
- * not would free a stack frame here and take the machine with it.
+ * The probe calls DeleteAddrAllocMessage() on a message it built itself, on
+ * the stack.  "This routine can only deallocate address allocation messages
+ * created by CreateAddrAllocMessageA() and will not work with anything else"
+ * -- so it has to be able to tell, and a library that could not would free a
+ * stack frame here and take the machine with it.
  *
  * Vectors are called by hand at their LVOs, as in the other probes.
  *
@@ -206,8 +203,8 @@ static VOID p_zero(APTR p, ULONG n)
 }
 
 /*
- * The message, replied or not. Everything BeginInterfaceConfig() reports goes
- * through this: a result code AND the message being back where the caller can
+ * The message, replied or not.  Everything BeginInterfaceConfig() reports goes
+ * through this: a result code, and the message being back where the caller can
  * pick it up.
  */
 static VOID p_begin_and_collect(struct Library *base, struct MsgPort *port,
@@ -417,9 +414,9 @@ int main(void)
            aam->aam_BOOTPMessageSize);
 
     /*
-     * Every buffer present, longword-aligned and distinct. The alignment is
-     * not decoration: two of them are arrays of ULONG, and an m68k that is
-     * handed a misaligned one takes an address error.
+     * Every buffer present, longword-aligned and distinct.  Two of them are
+     * arrays of ULONG, and an m68k handed a misaligned one takes an address
+     * error.
      */
     {
         APTR  bufs[9];
@@ -481,9 +478,9 @@ int main(void)
 
     /*
      * This interface already has an address, so the documented answer is
-     * AAMR_AddressKnown. What is really being tested is that the message came
-     * BACK: a stub that returns -1 in d0 leaves a caller waiting on this port
-     * forever, because the call returns VOID and nothing else can tell it.
+     * AAMR_AddressKnown.  The assertion is that the message came back: a stub
+     * that returns -1 in d0 leaves a caller waiting on this port forever,
+     * because the call returns VOID and nothing else can tell it.
      */
     p_begin_and_collect(base, port, aam, "on an addressed interface",
                         AAMR_AddressKnown);
@@ -511,11 +508,10 @@ int main(void)
     /* ---- and now a real allocation ----------------------------------------
      *
      * The interface this run is riding on already has an address, so the only
-     * way to ask for one is to take it away first. RemoveInterface() and
-     * AddInterfaceTagList() do exactly that -- "permitting it to be added
-     * again with new parameters" -- and an interface added that way arrives
-     * with no address at all, which is the state BeginInterfaceConfig() is
-     * for.
+     * way to ask for one is to take it away first.  RemoveInterface() and
+     * AddInterfaceTagList() do that -- "permitting it to be added again with
+     * new parameters" -- and an interface added that way arrives with no
+     * address at all, which is the state BeginInterfaceConfig() is for.
      *
      * SLIRP runs a DHCP server, so this is a real DISCOVER/OFFER/REQUEST/ACK
      * on the wire and the address that comes back is one a server chose.
@@ -552,10 +548,10 @@ int main(void)
         if (rc == CAAME_Success && live != NULL)
         {
             /*
-             * The call must return PROMPTLY -- "This routine starts an
+             * The call must return promptly -- "This routine starts an
              * asynchronous operation, very much like exec.library/SendIO()".
              * A synchronous implementation would sit here for the whole
-             * ten-second timeout, so the message must NOT be on the port yet.
+             * ten-second timeout, so the message must not be on the port yet.
              */
             p_begin_config(base, live);
 
@@ -624,9 +620,9 @@ int main(void)
 
             /*
              * A second allocation on an interface that now has one: the
-             * documented answer is AAMR_AddressKnown, and it proves the first
-             * one really configured the interface rather than only reporting
-             * an address.
+             * documented answer is AAMR_AddressKnown, which shows the first
+             * one configured the interface rather than only reporting an
+             * address.
              */
             live->aam_Result = AAMR_Ignored;
             p_begin_and_collect(base, port, live, "a second time",
@@ -646,10 +642,10 @@ int main(void)
      * that a working DHCP server hides: SLIRP answers in about four tenths of
      * a second, so neither the deadline nor the abort window ever opens.
      *
-     * Taking the interface DOWN first opens both. Nothing can leave the card,
-     * so DISCOVER goes unanswered and the worker runs to its own deadline --
-     * which is the only code path that proves the deadline exists at all, and
-     * the only one that exercises releasing a lease that was never granted.
+     * Taking the interface down first opens both: nothing can leave the card,
+     * so DISCOVER goes unanswered and the worker runs to its own deadline.
+     * That is the only path that exercises the deadline, and the only one that
+     * exercises releasing a lease that was never granted.
      */
     {
         struct AddressAllocationMessage *slow = NULL;
@@ -730,9 +726,9 @@ int main(void)
                               ? " -- AAMR_Timeout, correctly" : " -- WRONG"));
 
             /*
-             * It waited at least the floor. A worker that gave up early would
-             * report AAMR_Timeout too, and would be wrong: the number is what
-             * says the deadline is the one the caller asked for.
+             * It waited at least the floor.  A worker that gave up early would
+             * report AAMR_Timeout too and be wrong; the elapsed time is what
+             * shows the deadline is the one the caller asked for.
              */
             Printf((CONST_STRPTR)"slow: waited %s the 10-second floor\n",
                    (LONG)((waited >= 10UL * 50UL) ? "at least -- correctly"
@@ -762,7 +758,7 @@ int main(void)
     Printf((CONST_STRPTR)"DeleteAddrAllocMessage(NULL): returned\n");
 
     /*
-     * A message this library did not allocate, on the stack. "This routine
+     * A message this library did not allocate, on the stack.  "This routine
      * can only deallocate address allocation messages created by
      * CreateAddrAllocMessageA() and will not work with anything else" -- a
      * library that could not tell would free a stack frame, and the machine

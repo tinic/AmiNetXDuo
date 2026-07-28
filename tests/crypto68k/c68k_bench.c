@@ -1,18 +1,17 @@
 /*
  * AmiNetXDuo -- crypto68k before/after benchmark.
  *
- *   Every figure below is a PAIR run back to back in the same process, on the
+ *   Every figure below is a pair run back to back in the same process, on the
  *   same operands: the unmodified vendored routine, then this module.  Only
  *   the ratio of a pair is trustworthy.  FS-UAE's 68020 is not a 14 MHz A1200
  *   and its 68030 model is not cycle exact at all -- a sibling measurement
  *   found the same code running 31x to 45x faster on the 68030 model depending
- *   on which operation it was, which is not a speed, it is noise.  A ratio
- *   between two routines timed seconds apart survives that; an absolute
- *   millisecond count does not.
+ *   on the operation, which is noise rather than a speed.  A ratio between two
+ *   routines timed seconds apart survives that; an absolute millisecond count
+ *   does not.
  *
- *   The absolute numbers are printed anyway, because they are what a reader
- *   wants and because they are directly comparable with tests/tls/tls_bench,
- *   which was measured on the same emulator.  They should be read as "the
+ *   The absolute numbers are printed anyway, and are directly comparable with
+ *   tests/tls/tls_bench, measured on the same emulator.  Read them as "the
  *   emulator's 68020", not "a 68020".
  *
  *   Cheapest first.  The reference RSA-2048 private operation without CRT runs
@@ -60,16 +59,16 @@ static ULONG        b_failures;
 typedef VOID (*B_OP)(VOID);
 
 /*
- * Time one operation, in Microseconds per operation -- one unit everywhere, so
+ * Time one operation, in microseconds per operation -- one unit everywhere, so
  * that dividing one result by another is always meaningful.  Microseconds in a
  * ULONG reach 4,295 seconds; the longest thing here is under 200.
  *
  * A fixed iteration count cannot work: these span four orders of magnitude,
  * from a 64-limb multiply-accumulate to a 2048-bit exponentiation with a
- * 2048-bit exponent.  So run once; if that already took longer than a quarter
- * second it IS the measurement -- repeating a two-minute exponentiation to
- * refine a figure already good to four digits only burns emulator time --
- * otherwise repeat towards half a second.
+ * 2048-bit exponent.  So run once; if that took longer than a quarter second
+ * it is the measurement, since repeating a two-minute exponentiation to refine
+ * a figure already good to four digits only burns emulator time.  Otherwise
+ * repeat towards half a second.
  *
  * Ticks are accumulated raw and converted exactly once, so the 64-bit divide
  * in the conversion never happens inside a timed region.

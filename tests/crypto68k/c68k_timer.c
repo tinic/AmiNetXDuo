@@ -1,10 +1,10 @@
 /*
  * AmiNetXDuo -- crypto68k test: E-Clock timing.
  *
- * A private copy of the timer glue rather than a link against src/tls.  That
- * directory is owned by the TLS work and only builds when AMINETXDUO_TLS is
- * ON; this test has to stand alone, and linking aminetxduo_tls would drag the
- * whole of nx_secure in behind it for four functions.
+ * A private copy of the timer glue rather than a link against src/tls, which
+ * only builds when AMINETXDUO_TLS is ON; this test has to stand alone, and
+ * linking aminetxduo_tls would drag the whole of nx_secure in for four
+ * functions.
  *
  * TIMER_BASE_NAME gives this file its own library base: src/common/compat.c
  * defines the conventional `TimerBase` for ami_millis(), and with -fno-common
@@ -130,10 +130,9 @@ ULONG c68k_eclock_millis(ULONG ticks)
      * ULONG after 4,295 seconds.  Everything measured here is >= 1 ms.
      *
      * The 64-bit divide is a __udivdi3 call, resolved out of
-     * src/common/ami_udivdi3.c (this toolchain's libgcc.a is empty).  That is
-     * fine on a report path and would not be fine inside a timed region,
-     * which is why every measurement accumulates raw ticks and converts
-     * exactly once.
+     * src/common/ami_udivdi3.c (this toolchain's libgcc.a is empty).  Fine on
+     * a report path, not inside a timed region: every measurement accumulates
+     * raw ticks and converts exactly once.
      */
     return((ULONG)(((unsigned long long)ticks * 1000ULL) /
                    (unsigned long long)c68k_hz));

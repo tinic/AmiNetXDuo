@@ -10,16 +10,13 @@
  * and src/bsdsocket/netx_call.c prices one bracket at an AllocSignal(), a
  * _tx_thread_create(), a baton acquire and their inverses.  curl reads small
  * and selects between reads; NetTrace reads 4,096 bytes through one
- * WaitSelect() loop.  A per-call constant is exactly the shape of "we win the
- * first byte and lose everything after it".
+ * WaitSelect() loop.  A per-call constant would produce exactly that shape.
  *
- * That is a prediction.  This binary is the measurement, and it is here
- * because this project has had five predicted bottlenecks overturned by one
- * in three days.
+ * This binary measures:
  *
  *   1. One tx_amiga_adopt_thread() + tx_amiga_orphan_thread() pair, split
  *      into its two halves, from a plain Exec Task with the kernel up and an
- *      NX_IP running -- i.e. the real bracket in the real population.
+ *      NX_IP running -- the real bracket in the real population.
  *   2. Its parts, so the fix has somewhere to aim: the AllocSignal()/
  *      FreeSignal() pair, the _tx_amiga_wake_scheduler() poke, and the
  *      already-adopted fast path bsd_nx_enter() takes when tx_thread_identify()
@@ -33,12 +30,11 @@
  *                   nx_tcp_socket_receive() has to be called;
  *        once       one bracket around the whole transfer -- the floor.
  *
- *      The difference between the first two is what a recv() that can be
- *      satisfied from already-extracted data pays for nothing.  The
- *      difference between the first and the third is the whole bracket bill
- *      for that read size.
+ *      The difference between the first two is what a recv() satisfied from
+ *      already-extracted data pays for nothing.  The difference between the
+ *      first and the third is the whole bracket bill for that read size.
  *
- * ONLY THE 68020 Profiles mean anything -- tests/perf/cpucal.c measures why:
+ * Only the 68020 profiles mean anything -- tests/perf/cpucal.c measures why:
  * FS-UAE charges no cycles at all above a 68020.  Run under -m A1200.
  *
  *   cmake --build build/cm --parallel --target bracket_test
@@ -321,8 +317,8 @@ UINT    status;
     /*
      * The pair, halves timed separately.  Reading the clock between them
      * costs one calibrated bracket each, which b_elapsed() subtracts; at
-     * ~1.4 us a tick against a pair this size that is noise, and timing the
-     * halves is worth it because they are not symmetric.
+     * ~1.4 us a tick that is noise against a pair this size, and the two
+     * halves are not symmetric.
      */
     for (i = 0UL; i < reps; i++)
     {
@@ -460,7 +456,7 @@ UINT    status;
 
 /*
  * The sender is a ThreadX thread, so it never brackets anything: the variable
- * under test is what the RECEIVER pays, and putting the sender on a native
+ * under test is what the receiver pays, and putting the sender on a native
  * thread keeps it out of the measurement.
  */
 static VOID b_server_entry(ULONG id)
@@ -474,11 +470,10 @@ NX_PACKET  *pkt;
     (VOID)tx_semaphore_get(&b_srv_ready, TX_WAIT_FOREVER);
 
     /*
-     * The listen and the accept happen HERE, on a native ThreadX thread, and
-     * the client connects from the Exec Task in main().  That is the shape
-     * tests/perf/perf_test.c uses and it is not cosmetic: a listen armed from
-     * the same task that then blocks in connect() never completes on this
-     * port.
+     * The listen and the accept happen here, on a native ThreadX thread, and
+     * the client connects from the Exec Task in main() -- the shape
+     * tests/perf/perf_test.c uses.  A listen armed from the same task that
+     * then blocks in connect() never completes on this port.
      */
     status = nx_tcp_socket_create(&b_ip, &b_server, "bracket server",
                                   NX_IP_NORMAL, NX_FRAGMENT_OKAY,
@@ -564,9 +559,8 @@ NX_PACKET  *pkt;
 
 /*
  * Drain B_XFER_BYTES with reads of `read_size`, under one of the three
- * bracket policies.  The packet bookkeeping is deliberately the same shape as
- * bsd_recv_tcp()'s: a partially drained packet is parked and the next call
- * continues out of it.
+ * bracket policies.  The packet bookkeeping mirrors bsd_recv_tcp()'s: a
+ * partially drained packet is parked and the next call continues out of it.
  *
  * Returns elapsed E-Clock ticks; *calls_out and *misses_out report how many
  * logical recv() calls were made and how many of them had to reach
@@ -825,15 +819,15 @@ UINT    status;
     (VOID)b_check((UINT)(status == NX_SUCCESS), "ip create", status);
 
     /*
-     * A SECOND NX_IP, which nothing in this test addresses.
+     * A second NX_IP, which nothing in this test addresses.
      *
      * _nx_ram_network_driver keeps a fixed table of attached instances and
      * decides where a frame goes by walking it.  With one instance in the
      * table it accepts the frame and delivers it nowhere, and a loopback
      * connect() on the sole instance times out with its SYN counted as
      * received and never matched -- measured, five SYN attempts and zero TCP
-     * packets received, before this line existed.  tests/perf/perf_test.c has
-     * always created two for the same reason and does not say so.
+     * packets received, before this line existed.  tests/perf/perf_test.c
+     * creates two for the same reason.
      */
     status = nx_ip_create(&b_ip2, "ip2", B_IP2_ADDRESS, B_NETMASK, &b_pool,
                           _nx_ram_network_driver,
@@ -884,7 +878,7 @@ ULONG   i;
     b_log("E-Clock %ld Hz, %ld ns/tick, measurement bracket %ld ticks",
           (LONG)b_rate, (LONG)b_tick_ns, (LONG)b_bracket);
 
-    /* Everything below runs from a plain Exec Task, which is the point. */
+    /* Everything below runs from a plain Exec Task. */
     status = tx_amiga_adopt_thread(&b_caller, (CHAR *)"bracket caller", 16);
     if (!b_check((UINT)(status == TX_SUCCESS), "first adoption", status))
     {

@@ -1,33 +1,33 @@
 /*
- * IfProbe -- does the Roadshow interface QUERY API work on a running stack?
+ * IfProbe -- exercises the Roadshow interface query API on a running stack.
  *
  * ObtainInterfaceList(), ReleaseInterfaceList() and QueryInterfaceTagList()
  * are the three vectors Roadie, NetMon and RoadshowControl reach for first.
  * They pass a struct List of Nodes and a tag list of pointers to caller
- * storage, and both of those are shapes that a build cannot check: a list of
- * the wrong node type or a tag that writes a value where a pointer was
- * expected compiles perfectly and gurus inside the application.
+ * storage, neither of which a build can check: a list of the wrong node type
+ * or a tag that writes a value where a pointer was expected compiles
+ * perfectly and gurus inside the application.
  *
- * So this is not a unit test of the tag switch. It is the same call sequence
- * a monitor makes, made from a separate executable that knows nothing about
- * this stack's internals, against the library on a booted machine:
+ * This is the call sequence a monitor makes, from a separate executable that
+ * knows nothing about this stack's internals, against the library on a booted
+ * machine:
  *
- *   1. list the interfaces and print ln_Name for each -- proving the caller
- *      can walk the list with nothing but the published Node layout;
- *   2. query the FIRST one for a bundle of tags in one call, which is how a
- *      monitor asks and is also the only way to catch a case that falls
- *      through into its neighbour;
+ *   1. list the interfaces and print ln_Name for each, so the caller walks the
+ *      list with nothing but the published Node layout;
+ *   2. query the first one for a bundle of tags in one call, which is how a
+ *      monitor asks and the only way to catch a case that falls through into
+ *      its neighbour;
  *   3. query a name that does not exist, which must fail with -1 and leave a
  *      sensible errno rather than succeed quietly;
  *   4. query with an empty tag list, which must succeed -- that is how a
  *      caller asks "does this interface exist?";
  *   5. release the list.
  *
- * The tag storage is poisoned first, on purpose. Every destination is filled
- * with 0xA5 before the query, so a tag that was silently not answered is
- * distinguishable in the transcript from one that answered zero. Half of the
- * published tags have no true value on this stack and are documented to be
- * left alone; a test that pre-zeroed could not tell that apart from a bug.
+ * The tag storage is poisoned first: every destination is filled with 0xA5
+ * before the query, so a tag that was silently not answered is distinguishable
+ * from one that answered zero.  Half of the published tags have no true value
+ * on this stack and are documented to be left alone; pre-zeroing could not
+ * tell that apart from a bug.
  *
  * Vectors are called by hand at the LVOs the ABI assigns, the same way
  * tests/tools/routeprobe.c and src/tools/toolsock.c do: the NDK inlines
@@ -44,7 +44,7 @@
 
 /*
  * The IFQ_* tags come from the NDK's own header, not from a copy: a probe that
- * restated the numbers could agree with a wrong implementation. That header
+ * restated the numbers could agree with a wrong implementation.  That header
  * pulls in <sys/socket.h>, which uses size_t and ssize_t without declaring
  * them, so these two come first -- the same ordering bsdsocket_internal.h
  * documents.
@@ -411,10 +411,10 @@ static ULONG p_read_address(struct Library *base, const char *name, Tag tag)
 }
 
 /*
- * ConfigureInterfaceTagList(), exercised on the interface that is carrying
- * the run. Every change is put back afterwards, and the ORDER is chosen so
- * that a failure part-way leaves the machine reachable: the address is
- * restored before the state is touched.
+ * ConfigureInterfaceTagList(), exercised on the interface carrying the run.
+ * Every change is put back afterwards, and the order matters: a failure
+ * part-way must leave the machine reachable, so the address is restored
+ * before the state is touched.
  */
 static VOID p_config_phase(struct Library *base, const char *name)
 {
@@ -440,10 +440,10 @@ static VOID p_config_phase(struct Library *base, const char *name)
     /* ---- a tag this stack refuses, and the atomicity that goes with it ---
      *
      * IFC_Metric is documented and unsupported here, so the call must fail.
-     * What matters more is the IFC_NetMask in front of it: the whole list is
-     * validated before any of it is applied, so the mask must NOT have
-     * changed. A one-pass implementation would pass the first half of this
-     * assertion and fail the second.
+     * The IFC_NetMask in front of it checks atomicity: the whole list is
+     * validated before any of it is applied, so the mask must not have
+     * changed.  A one-pass implementation passes the first half of this
+     * assertion and fails the second.
      */
     p_dotted(0xFFFF0000UL, mask_text);          /* 255.255.0.0, not ours */
 
@@ -630,13 +630,12 @@ static LONG p_count_interfaces(struct Library *base, const char *want,
 
 /*
  * RemoveInterface() and AddInterfaceTagList(), on the interface this run is
- * riding on. "It tries to release all the resources associated with a
+ * riding on.  "It tries to release all the resources associated with a
  * networking interface, thus permitting it to be added again with new
- * parameters" -- so removing and re-adding IS the documented use, and doing
- * exactly that is the only way to find out whether the SANA-II device was
- * really closed and really reopened.
+ * parameters" -- removing and re-adding is the documented use, and the only
+ * way to find out whether the SANA-II device was really closed and reopened.
  *
- * The hardware address is the evidence. It is read from the card by
+ * The hardware address is the evidence.  It is read from the card by
  * S2_DEVICEQUERY at open time, so a re-added interface that reports the same
  * MAC went all the way down to the device and back; one that reports zeroes,
  * or the previous value out of memory that was never freed, did not.
@@ -820,9 +819,9 @@ int main(void)
         p_query_one(base, first);
 
     /*
-     * A name nothing answers to. The autodoc gives no errno for this, so what
-     * is asserted is only that it FAILS -- a query that returns 0 having
-     * written nothing is the failure mode a monitor cannot see.
+     * A name nothing answers to.  The autodoc gives no errno for this, so the
+     * assertion is only that it fails: a query that returns 0 having written
+     * nothing is the failure mode a monitor cannot see.
      */
     rc = p_query_interface(base, "nosuchif", NULL);
     Printf((CONST_STRPTR)"query nosuchif: rc %ld (errno %ld)%s\n",
@@ -840,8 +839,8 @@ int main(void)
     }
 
     /*
-     * The configuration half, last, and on the interface this run is riding
-     * on: everything it changes it puts back, and it is run after the list
+     * The configuration half, last, on the interface this run is riding on.
+     * Everything it changes it puts back, and it runs after the list
      * assertions so that a machine it fails to restore has already produced
      * the transcript for those.
      */
@@ -849,10 +848,9 @@ int main(void)
         p_config_phase(base, first);
 
     /*
-     * The list obtained above is released BEFORE the interface it names is
-     * removed. Nothing in the published contract says a list survives its
-     * interfaces -- it is documented as "a copy", so it would -- but a probe
-     * that relied on that would be testing something nobody promised.
+     * The list obtained above is released before the interface it names is
+     * removed.  It is documented as "a copy", but nothing published says a
+     * list survives its interfaces, so the probe does not rely on it.
      */
     p_release_interface_list(base, list);
     list = NULL;

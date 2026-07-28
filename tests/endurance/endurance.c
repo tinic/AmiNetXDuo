@@ -1,8 +1,8 @@
 /*
  * Endurance -- hours of mixed TCP traffic, with the pool on a timeline.
  *
- *   Every harness in this tree runs for seconds or minutes.  tests/compare moves
- *   a few megabytes, tests/trace moves 512 KB, tests/tcpdrill moves a few
+ *   The other harnesses in this tree run for seconds or minutes: tests/compare
+ *   moves a few megabytes, tests/trace moves 512 KB, tests/tcpdrill moves a few
  *   hundred bytes and watches the packets.  None of them can see a defect
  *   whose argument is "bytes" or "hours".
  *
@@ -13,11 +13,8 @@
  *   only thing left is to close it.  The reporter blames mbuf fragmentation
  *   and sequence-number overrun.  Neither claim has ever been tested here.
  *
- *   This program is written to reproduce it if it is reproducible, and to
- *   leave enough evidence behind to say what happened if it is not.
- *
  *   N concurrent TCP connections, each driven by a pair of AmigaOS Processes
- *   (a driver and a responder, each with its OWN bsdsocket.library base,
+ *   (a driver and a responder, each with its own bsdsocket.library base,
  *   because the library is per-opener).  Every transaction picks:
  *
  *     - a direction   -- PUT (driver writes), GET (driver reads) or ECHO
@@ -25,7 +22,7 @@
  *     - a length      -- log-uniform from 1 byte to `maxxfer`, so the mix is
  *                        mostly small with a long tail, which is what copying
  *                        a directory of files over a share looks like;
- *     - a chunk size  -- redrawn log-uniform for EVERY send() and recv() on
+ *     - a chunk size  -- redrawn log-uniform for every send() and recv() on
  *                        both sides independently, so the two ends never
  *                        agree about framing and the stack has to.
  *
@@ -40,53 +37,52 @@
  *   and the high-bits term makes the period 2 MB, so a splice that repeats or
  *   drops a block is caught too unless the displacement is an exact multiple
  *   of 2 MB.  Every payload carries its own pattern offset in its header, so
- *   the receiver never has to trust its own bookkeeping -- and a framing
- *   desync shows up immediately as a header whose magic is wrong.
+ *   the receiver never has to trust its own bookkeeping, and a framing desync
+ *   shows up immediately as a header whose magic is wrong.
  *
- * What is recorded, And why it is recorded on A TIMELINE
+ *   Every `sample` seconds the supervisor appends one CSV row: packet-pool
+ *   free count and the pool's own empty-request and empty-suspension counters,
+ *   AvailMem total and largest contiguous block (a heap that fragments holds
+ *   the first and loses the second), live socket count, TCP retransmissions,
+ *   receive drops, checksum errors, interface allocation failures, and the
+ *   workers' byte counters.  A timeline is what makes "it broke after forty
+ *   minutes" useful: it says what the machine looked like at minute
+ *   thirty-nine.
  *
- *   "It broke after forty minutes" is only useful next to what the machine
- *   looked like at minute thirty-nine.  Every `sample` seconds the supervisor
- *   appends one CSV row: packet-pool free count and the pool's own
- *   empty-request and empty-suspension counters, AvailMem total AND largest
- *   contiguous block (a heap that fragments holds the first and loses the
- *   second), live socket count, TCP retransmissions, receive drops, checksum
- *   errors, interface allocation failures, and the workers' byte counters.
+ *   Every errno any worker sees is appended to a second file with the
+ *   socket's blocking state at the time: EWOULDBLOCK on a non-blocking socket
+ *   is the API working, and the same answer on a blocking one is the defect
+ *   being hunted.
  *
- *   Every errno any worker sees is appended to a second file WITH the
- *   socket's blocking state at the time, because that is the whole question:
- *   EWOULDBLOCK on a non-blocking socket is the API working, and the same
- *   answer on a blocking one is the defect being hunted.
- *
- *   Both files are opened, appended and closed per line.  A run that has to
- *   be killed must not lose its last twenty lines (the reasoning in
+ *   Both files are opened, appended and closed per line, so a run that has to
+ *   be killed does not lose its last twenty lines (the reasoning in
  *   tests/compare/checkrunner.c, and in docs/RESEARCH.md 16.9).
  *
- * THE PROBES, Which run first and take under A MINUTE
+ *   The probes run first and take under a minute:
  *
- *   P1  a blocking recv() on an idle established socket must WAIT, not answer
- *   P2  a blocking send() into a peer that is not reading must WAIT, and must
+ *   P1  a blocking recv() on an idle established socket must wait, not answer
+ *   P2  a blocking send() into a peer that is not reading must wait, and must
  *       not come back short
- *   P3  the same blocking send() while the packet pool is deliberately
- *       exhausted by connections nobody reads -- this is the specific suspect,
- *       because NX_NO_PACKET means both "nothing to read" and "the pool is
- *       empty", and src/bsdsocket/errno.c maps it to EWOULDBLOCK either way
- *   P4  the same three on a NON-BLOCKING socket, as the control: EWOULDBLOCK
+ *   P3  the same blocking send() while the packet pool is exhausted by
+ *       connections nobody reads -- the specific suspect, because
+ *       NX_NO_PACKET means both "nothing to read" and "the pool is empty",
+ *       and src/bsdsocket/errno.c maps it to EWOULDBLOCK either way
+ *   P4  the same three on a non-blocking socket, as the control: EWOULDBLOCK
  *       there is correct, and a probe suite that never sees it is not testing
  *       anything
  *
  *   P3 is supervised from the main Process rather than timed inside the
- *   worker, because the three outcomes it distinguishes are "returned EAGAIN"
- *   (the reported defect), "waited and then succeeded" (correct) and "never
- *   returned at all" (a deadlock, which is worse than either) -- and only an
- *   observer outside the call can tell the third from the second.
+ *   worker, because it distinguishes three outcomes -- "returned EAGAIN" (the
+ *   reported defect), "waited and then succeeded" (correct) and "never
+ *   returned at all" (a deadlock) -- and only an observer outside the call can
+ *   tell the third from the second.
  *
  *   bsdsocket.library is reached through its published LVOs, as a third-party
- *   program reaches it, and the packet pool through NetStackQuery() at
- *   -0x366 -- which exists precisely so that a program that has not linked
- *   src/netstack can still read the running stack (include/aminetxduo/
- *   netstatus.h).  A harness that linked the stack would get its own NX_IP
- *   with no interfaces in it and report zeroes.
+ *   program reaches it, and the packet pool through NetStackQuery() at -0x366,
+ *   which exists so that a program that has not linked src/netstack can still
+ *   read the running stack (include/aminetxduo/netstatus.h).  A harness that
+ *   linked the stack would get its own NX_IP with no interfaces in it and
+ *   report zeroes.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -477,12 +473,12 @@ static ULONG end_secs(VOID)
 
 #define END_MAX_CONNS       6
 /*
- * Ten, not six.  A hog pair pins about a socket's transmit queue
+ * Ten pairs, not six.  A hog pair pins about a socket's transmit queue
  * (NX_TCP_MAXIMUM_TX_QUEUE, 20) plus the receiver's advertised window
  * (5 to 20 packets, per S24.3), so six pairs took the pool from 256 free to
- * 171 and P3 never got to test anything.  Ten pairs, with the transmitter
- * BLOCKING so it parks holding a full queue rather than backing off, is the
- * smallest arrangement that reaches the floor.
+ * 171 and P3 had nothing to test.  Ten pairs, with the transmitter blocking
+ * so it parks holding a full queue rather than backing off, is the smallest
+ * arrangement that reaches the floor.
  */
 #define END_MAX_HOGS        10
 #define END_MAX_WORKERS     (2 * END_MAX_CONNS + 2 * END_MAX_HOGS + 2)
@@ -582,9 +578,8 @@ static EndState *ES;
 static struct SignalSemaphore end_out_sem;
 
 /*
- * Append one formatted line and close.  One open/close per line is expensive
- * and is the point: a run that has to be killed keeps everything written so
- * far, which for a multi-hour test is the whole value of the file.
+ * Append one formatted line and close.  One open/close per line is expensive,
+ * but a run that has to be killed keeps everything written so far.
  */
 static VOID end_emit(const char *file, const char *fmt, LONG *args)
 {
@@ -612,9 +607,9 @@ static VOID end_truncate(const char *file)
 }
 
 /*
- * One errno, with the socket's blocking state next to it.  That pairing is
- * the entire question this harness exists to answer, so it is the shape of
- * the record rather than something to be reconstructed later.
+ * One errno, with the socket's blocking state next to it: that pairing is the
+ * question this harness answers, so it is recorded rather than reconstructed
+ * later.
  */
 static VOID end_event(EndWorker *w, const char *what, LONG rc, LONG err,
                       UWORD blocking, ULONG detail)
@@ -1009,10 +1004,10 @@ static VOID end_serve(EndWorker *w, LONG s)
         else if (op == OP_ECHO)
         {
             /*
-             * Drain the WHOLE record before echoing a byte of it.  Echoing as
+             * Drain the whole record before echoing a byte of it.  Echoing as
              * it arrives would deadlock: the driver is still writing, and two
-             * blocking sockets whose windows are both full is exactly the
-             * shape that never recovers.  es_MaxEcho bounds the buffer.
+             * blocking sockets whose windows are both full never recover.
+             * es_MaxEcho bounds the buffer.
              */
             if (len > ES->es_MaxEcho)
                 len = ES->es_MaxEcho;
@@ -1253,10 +1248,10 @@ static VOID end_driver_body(EndWorker *w)
             UWORD blocking = 1;
 
             /*
-             * A non-blocking excursion every so often.  It is the control
-             * group: EWOULDBLOCK here is the API working, and a run in which
-             * it never appears has not exercised the path the blocking case
-             * is being compared against.
+             * A non-blocking excursion every so often, as the control:
+             * EWOULDBLOCK here is the API working, and a run in which it never
+             * appears has not exercised the path the blocking case is compared
+             * against.
              */
             if (ES->es_NbEvery != 0UL && (since % ES->es_NbEvery) == 0UL &&
                 since != 0UL)
@@ -1306,11 +1301,11 @@ static VOID end_driver_body(EndWorker *w)
 /* ------------------------------------------------------------------ hogs -- */
 
 /*
- * The pool-exhaustion pair.  HOGRX accepts and then reads NOTHING; HOGTX
+ * The pool-exhaustion pair.  HOGRX accepts and then reads nothing; HOGTX
  * blasts at it.  The bytes pile up in the receiver's socket queue, and since
  * NX_TCP_MAXIMUM_RX_QUEUE is not defined in port/netxduo-amiga/inc/nx_user.h
  * (docs/RESEARCH.md 24.7) the only bound on that queue is the advertised
- * window -- so a handful of these takes the packet pool down.
+ * window, so a handful of these takes the packet pool down.
  *
  * That is the state in which the suspect mapping matters: NX_NO_PACKET means
  * both "nothing to read" and "the pool is empty", and src/bsdsocket/errno.c
@@ -1393,10 +1388,10 @@ static VOID end_hogtx_body(EndWorker *w)
     }
 
     /*
-     * BLOCKING, deliberately.  A non-blocking hog backs off the moment the
-     * peer's window closes and gives its packets straight back; a blocking
-     * one suspends inside nx_tcp_socket_send() holding a full transmit queue,
-     * which is the state that keeps packets out of the pool.  Measured: six
+     * Blocking, deliberately: a non-blocking hog backs off the moment the
+     * peer's window closes and gives its packets straight back, while a
+     * blocking one suspends inside nx_tcp_socket_send() holding a full
+     * transmit queue, which keeps packets out of the pool.  Measured: six
      * non-blocking pairs reached a floor of 171 free of 256 and P3 had
      * nothing to test.
      */
@@ -1426,20 +1421,18 @@ static VOID end_hogtx_body(EndWorker *w)
  *
  * The first run of the loopback arm showed AvailMem falling by a steady
  * 1009 bytes a second and NETSTATUS_SOCKETS climbing by two a second and
- * never coming down, while the whole workload was busy failing for an
- * unrelated reason -- so the honest reading of that run was "something in
- * this mess leaks", which is not a defect report.
+ * never coming down, while the workload was also failing for an unrelated
+ * reason, so that run said only that something in it leaked.
  *
- * This mode exists to turn it into one.  It does the smallest thing that can
- * be repeated: create a socket, put it through ONE lifecycle, close it.  Two
- * kinds, chosen so the difference between them isolates the cause:
+ * This mode narrows it to the smallest repeatable step: create a socket, put
+ * it through one lifecycle, close it.  Two kinds, chosen so the difference
+ * between them isolates the cause:
  *
  *   conn 0  connect() to a port with nothing on it (ECONNREFUSED), close
  *   conn 1  connect() to a listener, exchange four bytes, close both ends
  *
  * If both leak, closing leaks.  If only the refused one does, a connection
- * that was never established is the case that leaks.  Either way the answer
- * is a straight line on the timeline rather than an inference.
+ * that was never established is the case that leaks.
  */
 static VOID end_leaker_body(EndWorker *w)
 {
@@ -1518,22 +1511,19 @@ static VOID end_leaker_body(EndWorker *w)
  * The Fitz workload: files of wildly varying size, written to a mounted share
  * and read back, in a loop, for hours.
  *
- * This is deliberately AmigaDOS calls on a mounted volume rather than sockets.
+ * AmigaDOS calls on a mounted volume rather than sockets, deliberately.
  * Fitz's Amiga client is a DOS handler that turns each Read()/Write() into
  * blocking send()/recv() pairs on one TCP connection (src/amiga-client.c,
  * send_all()/recv_all()), so the traffic this generates is the reported
- * workload exactly: many small requests, occasional large ones, both
- * directions, driven by a program that has no idea a network is involved.
+ * workload: many small requests, occasional large ones, both directions,
+ * driven by a program that has no idea a network is involved.
  *
- * Fitz's own reaction to the defect being hunted is worth writing down,
- * because it is what makes this workload the right probe. checkretry() in
- * amiga-client.c treats EAGAIN on its blocking socket as a retryable
- * condition, waits 20 ms and tries again -- but only MAXRETRY = 10 times per
+ * checkretry() in amiga-client.c treats EAGAIN on its blocking socket as
+ * retryable, waits 20 ms and tries again, but only MAXRETRY = 10 times per
  * call, after which send_all()/recv_all() fail and the connection is
- * abandoned. So a stack that answers EAGAIN on a blocking socket does not
- * merely slow Fitz down; past ten in a row it loses the connection, which is
- * the symptom the EAB report describes. Every I/O error below is therefore
- * recorded with its DOS error code and the time.
+ * abandoned.  So a stack that answers EAGAIN on a blocking socket loses the
+ * connection past ten in a row, which is the symptom the EAB report describes.
+ * Every I/O error below is recorded with its DOS error code and the time.
  */
 
 #define FILER_NAMES     16
@@ -1773,7 +1763,7 @@ static VOID end_filer_body(EndWorker *w)
  * A healthy connection, held open beside the hogs, on which one blocking
  * send() is attempted once the pool has been driven down.  The Process
  * publishes "in call" and "returned" so the supervisor can tell a wait from
- * an answer from a wedge; it does NOT time itself, because a wedged Process
+ * an answer from a wedge; it does not time itself, because a wedged Process
  * cannot report that it is wedged.
  */
 static VOID end_probe_body(EndWorker *w)
@@ -2051,10 +2041,10 @@ static VOID end_read_config(VOID)
         if (end_key(line, "mode", &v))
         {
             /*
-             * loop | wire | fitz | watch | leak.  Two letters, not one:
-             * "loop" and "leak" share their first, and the run that found
-             * that out silently executed the wrong workload for ten minutes
-             * and produced a timeline nobody could have read correctly.
+             * loop | wire | fitz | watch | leak.  Matched on two letters:
+             * "loop" and "leak" share their first, and matching on one ran
+             * the wrong workload for ten minutes and produced a timeline that
+             * could not be read correctly.
              */
             if      (v[0] == 'w' && v[1] == 'i') ES->es_Mode = MODE_WIRE;
             else if (v[0] == 'w' && v[1] == 'a') ES->es_Mode = MODE_WATCH;
@@ -2186,22 +2176,22 @@ static VOID end_sample(struct Library *base, ULONG t)
 }
 
 /*
- * A worker that has been inside one socket call for longer than this has not
- * "slowed down": every call in this harness has a peer that is trying to
- * satisfy it.  Reported once per worker, with the call and the blocking flag,
- * because a blocking call that never returns on an exhausted pool is a
- * distinct failure from one that returns EAGAIN and is worth telling apart.
+ * A worker inside one socket call for longer than this has not merely slowed
+ * down: every call in this harness has a peer trying to satisfy it.  Reported
+ * once per worker, with the call and the blocking flag, because a blocking
+ * call that never returns on an exhausted pool is a distinct failure from one
+ * that returns EAGAIN.
  */
 #define END_STALL_TICKS     (120UL * 50UL)
 
 /*
  * The elapsed time inside a call, in ticks, or 0 when it has not started yet.
  *
- * The guard is not decoration.  w_CallStart is stamped `end_ticks() | 1` so
- * that 0 can mean "not in a call", which puts it up to one tick in the
- * future; an unguarded `now - start` then underflows to 0xFFFFFFFF and the
- * stall detector reports every healthy worker as stalled for 85899345
- * seconds.  Observed on the first run that used it.
+ * w_CallStart is stamped `end_ticks() | 1` so that 0 can mean "not in a call",
+ * which puts it up to one tick in the future; without the guard below,
+ * `now - start` underflows to 0xFFFFFFFF and the stall detector reports every
+ * healthy worker as stalled for 85899345 seconds.  Observed on the first run
+ * that used it.
  */
 static ULONG end_in_call(ULONG start)
 {

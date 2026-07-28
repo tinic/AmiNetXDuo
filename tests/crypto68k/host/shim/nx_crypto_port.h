@@ -1,31 +1,26 @@
 /*
- * AmiNetXDuo -- nx_crypto port header for the HOST build of the crypto68k
+ * AmiNetXDuo -- nx_crypto port header for the host build of the crypto68k
  * vector test.  Never compiled for the Amiga.
  *
  * NX_CRYPTO_STANDALONE_ENABLE is nx_crypto's own supported way to build the
  * crypto library without NetX Duo underneath it: nx_crypto.h then includes
- * this header instead of nx_api.h.  Using it here is what keeps the host test
- * free of tx_port.h, nx_port.h and everything else that only makes sense on
- * a 68k.
+ * this header instead of nx_api.h.  Using it here keeps the host test free of
+ * tx_port.h, nx_port.h and everything else that only makes sense on a 68k.
  *
- * Why the types are fixed width and not `unsigned long`
+ * The types are fixed width rather than `unsigned long` because every
+ * nx_crypto port in third_party -- and tx_port.h in ours -- spells ULONG as
+ * `unsigned long`, which is 32 bits on m68k-amigaos and 64 bits on any LP64
+ * host.  nx_crypto's multi-precision code is built on
  *
- *   Every nx_crypto port in third_party -- and tx_port.h in ours -- spells
- *   ULONG as `unsigned long`, which is 32 bits on m68k-amigaos and 64 bits on
- *   any LP64 host.  nx_crypto's multi-precision code is built on
+ *     HN_BASE == LONG, HN_UBASE == ULONG, HN_UBASE2 == ULONG64,
+ *     HN_SHIFT == sizeof(HN_BASE) * 8
  *
- *       HN_BASE == LONG, HN_UBASE == ULONG, HN_UBASE2 == ULONG64,
- *       HN_SHIFT == sizeof(HN_BASE) * 8
- *
- *   and needs HN_UBASE2 to be exactly twice HN_UBASE.  Compiled with a 64-bit
- *   ULONG that invariant collapses: HN_SHIFT becomes 64, every
- *   `product >> HN_SHIFT` shifts a 64-bit value by its own width, and the
- *   library silently computes nonsense (clang says so out loud --
- *   "shift count >= width of type", fourteen times in one file).
- *
- *   Pinning LONG/ULONG to int32_t/uint32_t therefore is not a host-specific
- *   liberty; it is the m68k widths, reproduced exactly, which is the only way
- *   the host run tests the same arithmetic the Amiga run does.
+ * and needs HN_UBASE2 to be exactly twice HN_UBASE.  With a 64-bit ULONG,
+ * HN_SHIFT becomes 64, every `product >> HN_SHIFT` shifts a 64-bit value by
+ * its own width, and the library computes nonsense (clang: "shift count >=
+ * width of type", fourteen times in one file).  Pinning LONG/ULONG to
+ * int32_t/uint32_t reproduces the m68k widths exactly, so the host run tests
+ * the same arithmetic the Amiga run does.
  *
  * SPDX-License-Identifier: MIT
  */

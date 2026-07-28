@@ -3,26 +3,26 @@
  *
  *   docs/RESEARCH.md 15 left the bulk path as the one row where neither this
  *   tree nor AmiSSL had any m68k assembly, and named it the largest remaining
- *   lever on `https://` throughput.  Before writing any, two questions had to
- *   be settled on the machine rather than from the literature:
+ *   lever on `https://` throughput.  Before writing any, two things had to be
+ *   settled on the machine rather than from the literature:
  *
- *     1. What is the right AES for a part with No data cache?  The classic
- *        four-table layout, the one-table-and-rotates layout that
- *        nx_crypto_aes.c uses, and a byte-oriented S-box are three different
- *        answers to "which resource is scarce", and the usual reasoning
- *        assumes a cache this machine does not have.
- *     2. Where is the instruction cache knee?  It is 256 bytes here, so
- *        unrolling can and does make things slower, and the point where it
- *        turns has to be measured before an assembly round is written.
+ *     1. Which AES suits a part with no data cache.  The classic four-table
+ *        layout, the one-table-and-rotates layout that nx_crypto_aes.c uses,
+ *        and a byte-oriented S-box are three different answers to "which
+ *        resource is scarce", and the usual reasoning assumes a cache this
+ *        machine does not have.
+ *     2. Where the instruction cache knee falls.  It is 256 bytes here, so
+ *        unrolling can and does make things slower, and the turning point has
+ *        to be measured before an assembly round is written.
  *
  *   So this program is three things in one run: instruction-cost kernels,
  *   every AES and SHA-256 variant timed on the same buffer, and every one of
- *   them checked against the published vectors AND against each other before
+ *   them checked against the published vectors and against each other before
  *   a single time is believed.
  *
- *   The same reason c68k_amissl_bench.c gives.  Ratios measured back to back
- *   inside one run are the only figures an emulator does not distort, and the
- *   only thing that differs between two rows here is the code that ran.
+ *   As in c68k_amissl_bench.c, ratios measured back to back inside one run are
+ *   the only figures an emulator does not distort, and the only difference
+ *   between two rows here is the code that ran.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -165,13 +165,12 @@ typedef VOID (*B_MEM_KERNEL)(APTR, ULONG);
 /*
  * Picoseconds per body slot.
  *
- * The arithmetic is the whole of this function and the first version of it
- * was wrong in the way this project has now been bitten by twice (see the
- * note above c_measure_ps() in tests/perf/cpucal.c): ULONG is 32 bits, a
- * 23 ms kernel is 23,000,000 nanoseconds, and multiplying THAT by the further
- * thousand picoseconds want overflows and prints a rotate as costing nothing.
- * So the scaling is done by dividing the SLOT COUNT by a thousand instead,
- * and the rep count is a round 40,000 to keep that exact.
+ * The first version of this was wrong in a way that has caught this project
+ * twice (see the note above c_measure_ps() in tests/perf/cpucal.c): ULONG is
+ * 32 bits, a 23 ms kernel is 23,000,000 nanoseconds, and multiplying that by
+ * the further thousand picoseconds want overflows and prints a rotate as
+ * costing nothing.  So the scaling divides the slot count by a thousand
+ * instead, and the rep count is a round 40,000 to keep that exact.
  */
 static ULONG b_scale(ULONG micros, ULONG slots)
 {
@@ -478,8 +477,8 @@ UINT    i;
     }
     b_check("CBC encrypt with 0 blocks moved the IV", iv_a, b_iv, 16uL);
 
-    /* Four blocks in one call against four blocks in four calls: the whole
-       point of an IV that is read and written in place. */
+    /* Four blocks in one call against four blocks in four calls, which is what
+       an IV read and written in place has to survive. */
     c68k_aes_cbc_encrypt(&b_aes, iv_a, b_plain, ref, 4uL);
 
     for (i = 0; i < 4u; i++)
@@ -840,12 +839,11 @@ UINT    saved;
 
 /* ================================================ ChaCha20-Poly1305 ======= */
 /*
- * The other record path, and the reason this section exists is that the whole
- * case for adding it rests on one claim: that on a 68020 an AEAD nobody has
- * hand-optimised beats the AES-CBC-plus-HMAC pair that two rounds of work have
- * already been spent on.  It is checked against RFC 8439's own vectors first
- * -- 2.4.2 for the cipher, 2.5.2 for the authenticator, 2.8.2 for the AEAD --
- * because a fast wrong answer is worth nothing.
+ * The other record path.  The case for adding it rests on one claim: that on a
+ * 68020 an AEAD nobody has hand-optimised beats the AES-CBC-plus-HMAC pair two
+ * rounds of work have already gone into.  Checked against RFC 8439's own
+ * vectors first -- 2.4.2 for the cipher, 2.5.2 for the authenticator, 2.8.2
+ * for the AEAD.
  */
 
 static const UCHAR b_cc_key[32] =
@@ -890,7 +888,7 @@ static const UCHAR b_poly_tag[16] =
 };
 
 /* RFC 8439 2.8.2 -- the AEAD, tag only; the ciphertext is checked by the
-   round trip below, which is the property that actually matters. */
+   round trip below. */
 static const UCHAR b_aead_key[32] =
 {
     0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87,
@@ -1040,15 +1038,14 @@ UINT            o;
  * Poly1305's block function, the shipped one against the portable C one, over
  * the same blocks and from the same starting accumulator.
  *
- * This is the equivalent of the ChaCha20 check above and it exists for the
- * same reason: RFC 8439 2.5.2 authenticates 34 bytes, which is two blocks and
- * a partial, and a kernel bug in the carry between limbs or in the fold round
- * the top of 2^130 can hide until the accumulator is large and the limbs have
- * been near their bounds a few hundred times.  So it runs both over 1, 2, 3,
- * 5, 17 and 200 blocks, and it does it Twice per count -- once with the 2^128
- * bit a full block carries and once without, which is the short-final-block
- * case c68k_poly1305_finish() takes and which nothing else here reaches with a
- * grown accumulator.
+ * The equivalent of the ChaCha20 check above, for the same reason: RFC 8439
+ * 2.5.2 authenticates 34 bytes, two blocks and a partial, and a kernel bug in
+ * the carry between limbs or in the fold round the top of 2^130 can hide until
+ * the accumulator is large and the limbs have been near their bounds a few
+ * hundred times.  So it runs both over 1, 2, 3, 5, 17 and 200 blocks, twice
+ * per count -- once with the 2^128 bit a full block carries and once without,
+ * which is the short-final-block case c68k_poly1305_finish() takes and which
+ * nothing else here reaches with a grown accumulator.
  *
  * It compares the accumulator rather than a tag: h is what the kernel writes,
  * a tag is h after a reduction that is common to both paths, and a difference
@@ -1083,9 +1080,9 @@ UINT            pass;
             c68k_poly1305_initialize(&ours, b_poly_key);
             c68k_poly1305_initialize(&ref, b_poly_key);
 
-            /* Not from zero: run 64 blocks in first, through BOTH paths, so
-               that what the counts below compare is a kernel picking up an
-               accumulator it did not itself produce. */
+            /* Not from zero: run 64 blocks in first, through both paths, so
+               that the counts below compare a kernel picking up an accumulator
+               it did not itself produce. */
             c68k_poly1305_blocks(&ours, b_plain, 64uL, (ULONG)1uL << 24);
             c68k_poly1305_blocks_c(&ref, b_plain, 64uL, (ULONG)1uL << 24);
 
@@ -1105,12 +1102,12 @@ UINT            pass;
  * buffering has -- empty, one byte, one short of a block, exactly a block, one
  * past it, and the same around 32, 64, 128, 1024 and the whole 16 KiB.
  *
- * Where these came from: computed off-target from the definition in RFC 8439
- * 2.5 -- r clamped, the message read little-endian sixteen bytes at a time
- * with the 2^128 bit appended, the accumulator multiplied by r modulo
- * 2^130 - 5, s added at the end -- by a generator that reproduces 2.5.2's own
- * tag before it emits any of these.  They are NOT this implementation's output
- * recorded, which would only prove it is deterministic.
+ * They were computed off-target from the definition in RFC 8439 2.5 -- r
+ * clamped, the message read little-endian sixteen bytes at a time with the
+ * 2^128 bit appended, the accumulator multiplied by r modulo 2^130 - 5, s
+ * added at the end -- by a generator that reproduces 2.5.2's own tag before it
+ * emits any of these.  They are not this implementation's own output recorded,
+ * which would only prove it is deterministic.
  *
  * Every length is run twice: once as a single update, and once split at 1, 13
  * and the rest, which lands the split inside a block for every length past 14
@@ -1193,12 +1190,10 @@ UINT    k;
 }
 
 /*
- * A tag that verifies when it should not is the only failure here that is
- * worse than a slow one, and neither the RFC vectors nor the comparisons
- * above would catch a verify() that always agreed.  So: the real tag, then
- * every one of the sixteen bytes flipped in turn, then a record whose
- * ciphertext was altered under an untouched tag -- which is the forgery an
- * attacker actually has.
+ * Neither the RFC vectors nor the comparisons above would catch a verify()
+ * that always agreed.  So: the real tag, then every one of the sixteen bytes
+ * flipped in turn, then a record whose ciphertext was altered under an
+ * untouched tag, which is the forgery an attacker can construct.
  */
 static VOID b_poly_check_forged(VOID)
 {
@@ -1288,9 +1283,8 @@ ULONG   odd_us;
     mac_us = c68k_eclock_micros(c68k_eclock() - start);
 
     /* And the portable C block function over the same bytes, in the same run
-       -- which is the only comparison an emulator does not distort, and the
-       one that says what the assembly is actually worth on this machine
-       rather than what two builds measured minutes apart did. */
+       -- the only comparison an emulator does not distort, and the one that
+       says what the assembly is worth on this machine. */
     c68k_poly1305_initialize(&b_poly, b_poly_key);
     start = c68k_eclock();
     c68k_poly1305_blocks_c(&b_poly, b_cipher, B_BULK_BYTES / 16uL,
@@ -1305,8 +1299,8 @@ ULONG   odd_us;
              (LONG)"      its block function, portable C",
              mac_c_us, b_kbs(mac_c_us));
 
-    /* And through the AEAD, which is what a record actually costs: the two
-       above plus one extra ChaCha20 block for the one-time Poly1305 key. */
+    /* And through the AEAD, which is what a record costs: the two above plus
+       one extra ChaCha20 block for the one-time Poly1305 key. */
     start = c68k_eclock();
     c68k_chacha20_poly1305_initialize(&b_aead, b_aead_key, b_aead_nonce);
     c68k_chacha20_poly1305_associate(&b_aead, b_aead_aad, 13uL);
@@ -1380,8 +1374,8 @@ C68K_SHA256 ctx;
 
     /*
      * The same record through the AEAD, in one call each way, because that is
-     * how it is actually paid: the cipher and the authenticator are not two
-     * passes with a choice between them, they are one operation.
+     * how it is paid: the cipher and the authenticator are one operation, not
+     * two passes to choose between.
      */
     start = c68k_eclock();
     c68k_chacha20_poly1305_initialize(&b_aead, b_key, b_iv);
@@ -1404,9 +1398,8 @@ C68K_SHA256 ctx;
     c68k_log("    send: %lu us, %lu KB/s", aead_enc, b_kbs(aead_enc));
     c68k_log("    recv: %lu us, %lu KB/s", aead_dec, b_kbs(aead_dec));
 
-    /* The whole point of the section, stated rather than left to be read off
-       two tables: which record path is cheaper on this machine, and by how
-       much.  Scaled by 100 because there is no floating point here. */
+    /* Which record path is cheaper on this machine, and by how much.  Scaled
+       by 100 because there is no floating point here. */
     c68k_log("  AEAD is %lu.%02lux the CBC pair on send, %lu.%02lux on recv",
              ((enc + mac) * 100uL / aead_enc) / 100uL,
              ((enc + mac) * 100uL / aead_enc) % 100uL,

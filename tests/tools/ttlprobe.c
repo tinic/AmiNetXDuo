@@ -1,28 +1,26 @@
 /*
- * ttlprobe -- does setsockopt(IP_TTL) reach the wire, and on which socket?
+ * ttlprobe -- measures whether setsockopt(IP_TTL) reaches the wire, and on
+ * which socket type.
  *
- * This is the measurement `traceroute` is designed around, kept because the
- * design rests on it: IP_TTL is honoured on a raw socket and ignored on a UDP
- * one, so a UDP-probe traceroute cannot work on this stack. That is a claim
- * about the wire, and this is what put it there.
+ * This is the measurement `traceroute` is designed around: IP_TTL is honoured
+ * on a raw socket and ignored on a UDP one, so a UDP-probe traceroute cannot
+ * work on this stack.
  *
- *   Four datagrams, each preceded by setsockopt(IPPROTO_IP, IP_TTL) and a
- *   getsockopt() to show what the library thinks it stored:
+ * Four datagrams, each preceded by setsockopt(IPPROTO_IP, IP_TTL) and a
+ * getsockopt() to show what the library thinks it stored:
  *
- *     1. raw ICMP, TTL 1      2. raw ICMP, TTL 5
- *     3. UDP,      TTL 1      4. UDP,      TTL 5
+ *   1. raw ICMP, TTL 1      2. raw ICMP, TTL 5
+ *   3. UDP,      TTL 1      4. UDP,      TTL 5
  *
- *   Its own output proves nothing -- getsockopt reads back whatever
- *   setsockopt stored, on both. The answer is in the frame dump the emulated
- *   A2065 writes, which is below every line of this stack:
+ * Its own output proves nothing: getsockopt reads back whatever setsockopt
+ * stored, on both.  The answer is in the frame dump the emulated A2065 writes:
  *
- *     tests/trace/a2065pcap.py build/fsuae-base-<tag>/Cache/Logs/fs-uae.log.txt \
- *         -o ttl.pcap
- *     tcpdump -nr ttl.pcap -v        # or open it in Wireshark
+ *   tests/trace/a2065pcap.py build/fsuae-base-<tag>/Cache/Logs/fs-uae.log.txt \
+ *       -o ttl.pcap
+ *   tcpdump -nr ttl.pcap -v        # or open it in Wireshark
  *
- * Not part of the build, deliberately: it is a one-off probe rather than a
- * command or a test, so it has no CMake entry to keep working. Compile it by
- * hand and stage it like any other executable:
+ * A one-off probe rather than a command or a test, so it has no CMake entry.
+ * Compile it by hand and stage it like any other executable:
  *
  *   . tools/amiga-toolchain.sh
  *   "$AMIGA_GCC" -O2 -m68020 -I"$AMIGA_NDK" -o TtlProbe tests/tools/ttlprobe.c

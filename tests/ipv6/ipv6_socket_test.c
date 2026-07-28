@@ -3,17 +3,17 @@
  *
  * The third IPv6 test, and the only one that goes through the LVO jump table:
  * ipv6_test.c drives NetX Duo directly, ipv6_link_test.c drives the netstack,
- * and this one is an ordinary AmigaOS program that does nothing but
- * OpenLibrary("bsdsocket.library") and call vectors -- exactly what a ported
- * Unix application would do.  It is linked against none of our code.
+ * and this one is an ordinary AmigaOS program that does
+ * OpenLibrary("bsdsocket.library") and calls vectors, as a ported Unix
+ * application would.  It is linked against none of our code.
  *
  * Everything happens over ::1, which nxd_ipv6_enable() configures on the
- * internal loopback interface.  That is deliberate: the point here is the
- * socket layer -- sockaddr_in6 in and out of bind/connect/accept/getsockname/
- * getpeername, IPV6_V6ONLY, inet_ntop/inet_pton for AF_INET6, getaddrinfo --
- * and loopback removes the wire as a variable.
+ * internal loopback interface, so the wire is not a variable.  What is under
+ * test is the socket layer -- sockaddr_in6 in and out of bind/connect/accept/
+ * getsockname/getpeername, IPV6_V6ONLY, inet_ntop/inet_pton for AF_INET6,
+ * getaddrinfo.
  *
- * The NDK's sockaddr_in6 is the LINUX one (no sin6_len, family at offset 0)
+ * The NDK's sockaddr_in6 is the Linux one (no sin6_len, family at offset 0)
  * sitting in a header whose sockaddr_in is 4.4BSD (sin_len at offset 0, family
  * at offset 1).  A stack that reads sa->sa_family generically gets the padding
  * byte.  Every sockaddr below is built the way a real application would build
@@ -40,13 +40,11 @@
 #endif
 
 /*
- * Buffered, and flushed to stdout at the end, exactly as ipv6_test.c does.
- *
- * Streaming straight to RawPutChar() is what the first version did, and the
- * serial capture came back as several hundred NUL bytes: this program logs in
- * a tight burst with none of the pauses ami_log() leaves between lines, and
- * the emulator's serial capture does not keep up. The buffer costs 8 KB of
- * BSS and makes the result readable, which for a test is the whole point.
+ * Buffered, and flushed to stdout at the end, as ipv6_test.c does. Streaming
+ * straight to RawPutChar() came back as several hundred NUL bytes in the
+ * serial capture: this program logs in a tight burst with none of the pauses
+ * ami_log() leaves between lines, and the emulator's serial capture does not
+ * keep up. The buffer costs 8 KB of BSS.
  */
 #define T_LOG_SIZE      8192
 
@@ -120,12 +118,12 @@ static BOOL t_check(BOOL ok, const char *what, LONG detail)
 
 /*
  * Declared here rather than taken from the NDK's <netinet/in.h>, for the same
- * reason library_test.c declares its own LVOs: the layout IS the thing under
- * test, so writing it out makes the expectation explicit and independent of
- * whatever header happens to be on the include path.
+ * reason library_test.c declares its own LVOs: the layout is the thing under
+ * test, so writing it out keeps the expectation independent of whatever
+ * header is on the include path.
  *
  * This must match ndk-include/netinet/in.h:182 exactly -- 28 bytes, family at
- * offset 0, NO length byte.
+ * offset 0, no length byte.
  */
 struct t_in6_addr
 {
@@ -134,7 +132,7 @@ struct t_in6_addr
 
 struct t_sockaddr_in6
 {
-    UBYTE               sin6_family;    /* offset  0 -- NOT a length byte */
+    UBYTE               sin6_family;    /* offset  0 -- not a length byte */
     UBYTE               sin6_pad;       /* offset  1 -- compiler padding  */
     UWORD               sin6_port;      /* offset  2 */
     ULONG               sin6_flowinfo;  /* offset  4 */
@@ -184,23 +182,19 @@ struct t_addrinfo
 /* ------------------------------------------------------------ LVO stubs --- */
 
 /*
- * Why every stub declares three variables it never uses
- *
- * d0, d1, a0 and a1 are SCRATCH on AmigaOS: a library function may destroy
- * them and is not obliged to say so.  An `asm` block that lists them only as
- * inputs tells GCC the opposite -- that whatever was in them survives the
- * call -- and GCC will happily reuse the "still valid" copy afterwards.
- *
- * That is not theoretical.  The first version of this file did exactly that,
- * and `send()` returned the right value while `rc == sizeof(message)` compared
+ * Every stub declares three variables it never uses because d0, d1, a0 and a1
+ * are scratch on AmigaOS: a library function may destroy them without saying
+ * so.  An `asm` block that lists them only as inputs tells GCC the opposite --
+ * that whatever was in them survives the call -- and GCC will reuse the
+ * "still valid" copy afterwards.  The first version of this file did that, and
+ * `send()` returned the right value while `rc == sizeof(message)` compared
  * false immediately after, because GCC had kept `len` in d1 and the library
- * had overwritten it.  Three checks failed with the correct number printed
- * next to them, which is about as confusing as a bug gets.
+ * had overwritten it.
  *
- * The fix is the NDK's own idiom (see inline/bsdsocket.h, which declares
+ * The NDK's own idiom (see inline/bsdsocket.h, which declares
  * `register int _d1 __asm("d1"); register int _a0 __asm("a0");
- *  register int _a1 __asm("a1");` and lists them as "=r" outputs): name the
- * scratch registers and declare them written, so GCC knows their previous
+ *  register int _a1 __asm("a1");` and lists them as "=r" outputs) names the
+ * scratch registers and declares them written, so GCC knows their previous
  * contents are gone.  a2/a3/d2/d3 are callee-saved and need no such treatment.
  */
 #define BSD_SCRATCH                                                          \
@@ -512,7 +506,7 @@ BSD_SCRATCH;
                       : "cc", "memory");
 }
 
-/* gai_strerror takes its argument in a0, NOT d0 -- pragmas line 141. */
+/* gai_strerror takes its argument in a0, not d0 -- pragmas line 141. */
 static APTR bsd_gai_strerror(LONG code)
 {
 register struct Library *a6  __asm("a6") = SocketBase;
@@ -577,7 +571,7 @@ static VOID t_make_loopback6(struct t_sockaddr_in6 *sa, UWORD port)
 {
     t_bzero(sa, sizeof(*sa));
     sa->sin6_family        = T_AF_INET6;
-    sa->sin6_port          = port;      /* m68k IS network order */
+    sa->sin6_port          = port;      /* m68k is network order */
     sa->sin6_addr.s6_addr[15] = 1;
 }
 

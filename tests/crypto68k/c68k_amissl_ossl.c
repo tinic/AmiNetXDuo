@@ -1,34 +1,31 @@
 /*
  * AmiNetXDuo -- the AmiSSL side of tests/crypto68k/c68k_amissl.
  *
- *   OpenSSL, and nothing of ours except c68k_amissl.h.  The orchestrator owns
- *   the clock, the vectors and the reporting; this file only performs the
- *   operation it is asked for and hands back bytes.  That is what makes the
- *   comparison fair: both sides are called from the same timing loop, with the
- *   same inputs, in the same process.
+ *   OpenSSL, and nothing of ours except c68k_amissl.h.  The orchestrator holds
+ *   the clock, the vectors and the reporting; this file performs the operation
+ *   it is asked for and hands back bytes.  Both sides are then called from the
+ *   same timing loop, with the same inputs, in the same process.
  *
  *   Every OpenSSL function here is a macro from <inline/amissl.h> that expands
  *   to a jsr through AmiSSLBase or AmiSSLExtBase -- AmiSSL v5 spans two library
  *   bases because OpenSSL has more entry points than one LVO table holds.  So
  *   nothing is linked: no libamisslauto.a, no libamisslstubs.a, no object of
- *   AmiSSL's in this binary at all.  That matters for two reasons.  It sidesteps
- *   the question of whether an archive built by adtools GCC 2.95.3 links against
- *   GCC 15.2 output, and it guarantees that every cycle measured on the AmiSSL
- *   side was executed inside amissl_v362.library, which is the thing being
- *   measured.  Verified in the disassembly: BN_new() is `jsr a6@(-2196)`.
+ *   AmiSSL's in this binary at all.  That sidesteps the question of whether an
+ *   archive built by adtools GCC 2.95.3 links against GCC 15.2 output, and it
+ *   means every cycle measured on the AmiSSL side ran inside
+ *   amissl_v362.library.  Verified in the disassembly: BN_new() is
+ *   `jsr a6@(-2196)`.
  *
  *   AmiSSL_UsesOpenSSLStructs is FALSE, so this file must never dereference an
  *   OpenSSL structure.  It does not: RSA, EC_KEY, EC_POINT, BIGNUM, BN_CTX and
  *   EVP_CIPHER_CTX are all handled through accessors.
  *
- * WHY RSA_NO_PADDING
- *
- *   The comparison is of modular exponentiation, and padding is a memcpy and a
- *   memcmp on this scale.  RSA_public_encrypt() and RSA_private_decrypt() with
- *   RSA_NO_PADDING are the shortest route to "raise this 2048-bit number to
- *   this power" through OpenSSL's real RSA path -- the same rsa_ossl_mod_exp()
- *   a TLS handshake reaches, including its CRT, its constant-time exponentiation
- *   and (unless turned off) its blinding.
+ *   RSA_NO_PADDING is used because the comparison is of modular exponentiation
+ *   and padding is a memcpy and a memcmp on this scale.  RSA_public_encrypt()
+ *   and RSA_private_decrypt() with RSA_NO_PADDING are the shortest route to
+ *   "raise this 2048-bit number to this power" through OpenSSL's real RSA path
+ *   -- the same rsa_ossl_mod_exp() a TLS handshake reaches, including its CRT,
+ *   its constant-time exponentiation and (unless turned off) its blinding.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -139,10 +136,10 @@ struct TagItem  tags[5];
     err[0] = '\0';
 
     /*
-     * AmiSSL_SocketBase is deliberately absent.  The autodoc says it may be
-     * omitted when the caller needs no networking, which is exactly this case,
-     * and it means the benchmark does not drag bsdsocket.library -- ours or
-     * anybody's -- into a measurement of arithmetic.
+     * AmiSSL_SocketBase is absent deliberately.  The autodoc says it may be
+     * omitted when the caller needs no networking, which is the case here, and
+     * it keeps bsdsocket.library -- ours or anybody's -- out of a measurement
+     * of arithmetic.
      */
     tags[0].ti_Tag = AmiSSL_GetAmiSSLBase;    tags[0].ti_Data = (ULONG)&AmiSSLBase;
     tags[1].ti_Tag = AmiSSL_GetAmiSSLExtBase; tags[1].ti_Data = (ULONG)&AmiSSLExtBase;
@@ -161,11 +158,10 @@ struct TagItem  tags[5];
     a_version[sizeof(a_version) - 1] = '\0';
 
     /*
-     * The library's own $VER string says which CPU build was loaded, and that
-     * is the single most important thing to record: AmiSSL ships a 68020-40
-     * build with Howard Chu's bignum assembly and a 68060 build without it.
-     * IdString is what the library node carries; it is the same string
-     * `version` would print.
+     * The library's own $VER string says which CPU build was loaded, which
+     * matters: AmiSSL ships a 68020-40 build with Howard Chu's bignum assembly
+     * and a 68060 build without it.  IdString is what the library node
+     * carries; it is the same string `version` would print.
      */
     if (AmiSSLBase -> lib_IdString != NULL)
     {
@@ -266,9 +262,9 @@ int     ok   = 1;
     /*
      * The CRT exponents.  rsa_ossl_mod_exp() takes the CRT path only when all
      * three are present -- without them OpenSSL falls back to a full-width
-     * BN_mod_exp_mont_consttime over a 2048-bit exponent, which is about four
-     * times the work and would not be the comparison anyone wants.  Computed
-     * before RSA_set0_key() takes ownership of d.
+     * BN_mod_exp_mont_consttime over a 2048-bit exponent, about four times the
+     * work and not the comparison intended here.  Computed before
+     * RSA_set0_key() takes over d.
      */
     t    = BN_new();
     dmp1 = BN_new();
@@ -297,11 +293,10 @@ int     ok   = 1;
     dmp1 = dmq1 = iqmp = NULL;
 
     /*
-     * Blinding is OpenSSL's default and is a real defence, not overhead for
-     * its own sake: it is what stops a remote attacker recovering d from the
-     * timing of the private operation.  Turning it off is how the arithmetic
-     * gets compared against ours, which has no blinding at all; the benchmark
-     * measures both and says which is which.
+     * Blinding is OpenSSL's default, and it is what stops a remote attacker
+     * recovering d from the timing of the private operation.  Turning it off
+     * is how the arithmetic gets compared against ours, which has no blinding
+     * at all; the benchmark measures both and labels them.
      */
     if (!blinding)
     {
@@ -366,10 +361,10 @@ int a_ossl_rsa_private(const unsigned char *in, unsigned char *out)
 /* ---------------------------------------------------- bare exponentiation -- */
 
 /*
- * The same arithmetic without OpenSSL's RSA object around it, because that is
- * the only way to compare like with like against c68k_mont_power_modulus().
+ * The same arithmetic without OpenSSL's RSA object around it, which is the
+ * only way to compare like with like against c68k_mont_power_modulus().
  *
- * `cached` is the interesting switch.  Our routine recomputes R^2 mod m on
+ * `cached` selects the setup treatment.  Our routine recomputes R^2 mod m on
  * every call; OpenSSL's RSA object caches a BN_MONT_CTX and does not.  Timing
  * both says how much of any difference is the exponentiation and how much is
  * the setup.
@@ -469,7 +464,7 @@ int     rc;
     /*
      * BN_FLG_CONSTTIME on the exponent is what routes BN_mod_exp_mont() into
      * BN_mod_exp_mont_consttime().  Set here explicitly rather than relying on
-     * an RSA object to set it, so that the flag is visibly the variable.
+     * an RSA object to set it.
      */
     BN_set_flags(e, BN_FLG_CONSTTIME);
 
@@ -754,8 +749,8 @@ out:
 
 
 /*
- * The direction a download actually spends its time in.  Section 15 measured
- * encryption only, which is the direction a client uses for request headers.
+ * The direction a download spends its time in.  Section 15 measured encryption
+ * only, which is the direction a client uses for request headers.
  */
 int a_ossl_aes128_cbc_dec(const unsigned char *key16, const unsigned char *iv16,
                           const unsigned char *in, unsigned char *out,

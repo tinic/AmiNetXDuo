@@ -1,30 +1,26 @@
 /*
  * AmiNetXDuo -- fetching a real HTTPS URL through tls.library, and nothing else.
  *
- * What makes this different from tests/tls/tls_https.c
+ * tests/tls/tls_https.c is linked against our whole stack: it calls
+ * netstack_startup(), nx_tcp_socket_create(), nx_secure_tls_session_create(),
+ * and verifies the chain against one root CA compiled into the test.  It
+ * covers the crypto, not the interface an application would use.
  *
- *   tls_https is linked against our whole stack: it calls netstack_startup(),
- *   nx_tcp_socket_create(), nx_secure_tls_session_create(), and it verifies the
- *   chain against ONE root CA compiled into the test.  It proves the crypto
- *   works.  It does not prove anybody could use it.
+ * This program is linked against nothing of ours.  It opens two shared
+ * libraries by name, calls their published vectors, and verifies the chain
+ * against DEVS:Internet/certificates -- 119 Mozilla roots on disk, of which it
+ * parses the one the chain actually needs.
  *
- *   This program is linked against NOTHING of ours.  It opens two shared
- *   libraries by name, calls their published vectors, and verifies the chain
- *   against DEVS:Internet/certificates -- 119 Mozilla roots on disk, of which
- *   it parses the one the chain actually needs.  It is the program an ordinary
- *   Amiga application would be.
+ * Everything below the TLSOpen() call is therefore evidence about the design
+ * rather than the arithmetic: that a separate library can borrow
+ * bsdsocket.library's NetX Duo through one private vector, that a trust store
+ * on disk can be searched lazily by issuer, and that WaitSelect()-shaped code
+ * does not hang when the plaintext is already decrypted.
  *
- *   Everything below the TLSOpen() call is therefore evidence about the
- *   design, not about the arithmetic: that a separate library can borrow
- *   bsdsocket.library's NetX Duo through one private vector, that a trust
- *   store on disk can be searched lazily by issuer, and that
- *   WaitSelect()-shaped code does not hang when the plaintext is already
- *   decrypted.
+ * Needs LIBS:bsdsocket.library, LIBS:tls.library, DEVS:Internet/certificates,
+ * DEVS:NetInterfaces/eth0 and DEVS:a2065.device -- see tests/tls/run-api.sh.
  *
- *   LIBS:bsdsocket.library, LIBS:tls.library, DEVS:Internet/certificates,
- *   DEVS:NetInterfaces/eth0 and DEVS:a2065.device -- see tests/tls/run-api.sh.
- *
- * NOT A BASELINE.  It depends on the internet, on FS-UAE's SLIRP NAT, on a
+ * Not a baseline: it depends on the internet, on FS-UAE's SLIRP NAT, on a
  * third party's server, and on a certificate that rotates every ninety days.
  *
  * SPDX-License-Identifier: MIT
@@ -413,13 +409,13 @@ int main(VOID)
                       "a certificate for another host is REFUSED", 0);
 
         /*
-         * WHICH refusal is the server's business, not ours.  Asked for a name
+         * Which refusal is the server's business, not ours.  Asked for a name
          * it does not serve, this host answers with whatever its default vhost
-         * has -- and badssl.com's exists to be broken in assorted ways, so the
-         * observed reason has been "issued to another host" and "expired" on
-         * different days.  Pinning the test to one of them would make it fail
-         * when somebody else changes their configuration.  What must hold is
-         * that the refusal is a VERIFICATION refusal and not, say, a timeout.
+         * has -- and badssl.com's is broken in assorted ways, so the observed
+         * reason has been "issued to another host" and "expired" on different
+         * days.  Pinning the test to one of them would make it fail when
+         * somebody else changes their configuration.  What must hold is that
+         * the refusal is a verification refusal and not, say, a timeout.
          */
         (VOID)a_check((BOOL)(why == TLS_ERR_HOSTNAME ||
                              why == TLS_ERR_HANDSHAKE ||
@@ -592,17 +588,16 @@ int main(VOID)
     /* ---- the machine with no clock --------------------------------------- */
 
     /*
-     * The sharp case.  An Amiga with a dead RTC battery reports 1 January
-     * 1978, which is before every certificate on the internet was issued, so a
-     * library that checks validity dates unconditionally cannot reach a single
-     * HTTPS site from such a machine.  src/tlslib/tls_time.c decides to skip
-     * the date check when the clock is outside a plausible window, and to say
-     * so in TLSInfo().
+     * An Amiga with a dead RTC battery reports 1 January 1978, which is before
+     * every certificate on the internet was issued, so a library that checks
+     * validity dates unconditionally cannot reach a single HTTPS site from
+     * such a machine.  src/tlslib/tls_time.c skips the date check when the
+     * clock is outside a plausible window, and says so in TLSInfo().
      *
      * This sets the emulated machine's clock to the AmigaOS epoch, fetches the
      * same page again, and puts the clock back.  Under FS-UAE the clock is
      * normally the host's, so without this the branch would never be
-     * exercised and the decision would be a claim rather than a result.
+     * exercised.
      */
     if (a_clock_open())
     {
@@ -613,13 +608,11 @@ int main(VOID)
                     (ULONG)bsd_errno(sbase)))
         {
             /*
-             * TLSA_NoResume, and it is load-bearing.  This is the fourth
-             * connection to A_HOST in this run, so without it the library
-             * would resume the session the third one established -- and a
-             * resumed handshake sends no certificate, verifies no chain and
-             * checks no host name, which is exactly what the two assertions
-             * below claim still happened.  Forcing a full handshake keeps the
-             * test testing what it says it tests.
+             * TLSA_NoResume is load-bearing.  This is the fourth connection to
+             * A_HOST in this run, so without it the library would resume the
+             * session the third one established -- and a resumed handshake
+             * sends no certificate, verifies no chain and checks no host name,
+             * which is what the two assertions below claim still happened.
              */
             why = TLS_OK;
             tls = TLSOpen(tbase, (APTR)sbase, sock,

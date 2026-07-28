@@ -8,11 +8,11 @@
  * unit test uses.  Two trust boundaries meet in this code and both are
  * covered:
  *
- *   the WIRE       -- ami_bpf_tap_rx() runs the filter over attacker-chosen
- *                     frame bytes on the IP thread;
- *   the LIBRARY    -- bpf_setf() runs a caller-chosen program, and the
+ *   the wire       -- ami_bpf_tap_rx() runs the filter over untrusted frame
+ *                     bytes on the IP thread;
+ *   the library    -- bpf_setf() runs a caller-chosen program, and the
  *                     interpreter is documented to be total whether or not
- *                     ami_bpf_validate() accepted it, so BOTH the validated
+ *                     ami_bpf_validate() accepted it, so both the validated
  *                     and the unvalidated path are exercised here.
  *
  * The channel is also driven through BIOCSBLEN / BIOCSETF / read / rotate so
@@ -200,9 +200,9 @@ int main(int argc, char **argv)
             frame[j] = (UBYTE)fz_rand();
 
         /*
-         * THE INTERPRETER, UNVALIDATED. bpf_filter.c's header promises there
-         * is no program and no packet for which it can read outside the view,
-         * so it is run on the raw program before the validator has seen it.
+         * The interpreter, unvalidated.  bpf_filter.c's header states that no
+         * program and no packet can make it read outside the view, so it is
+         * run on the raw program before the validator has seen it.
          */
         (void)ami_bpf_filter(prog, insns, frame, flen, flen);
 

@@ -1,14 +1,13 @@
 /*
  * AmiNetXDuo -- host vectors for src/crypto68k/c68k_25519.c.
  *
- * WHY A Host tier at all, When the target is A 68020
+ * The code is portable C over <stdint.h> and makes every arithmetic error
+ * identically on both machines, so the vectors run here -- in a second, on
+ * every push -- rather than only under the emulator, where queue time is the
+ * scarcest resource in the project.  §18's SHA-256 endianness bug was caught
+ * this way and would not have been by a vector run only on the guest.
  *
- *   Because this code is portable C over <stdint.h> and the emulator queue is
- *   the scarcest resource in the project.  Every arithmetic error it can make
- *   it makes identically on both machines, so the vectors belong where they
- *   run in a second and on every push.  §18's SHA-256 endianness bug was
- *   caught exactly this way and would not have been by a vector run only on
- *   the guest.
+ * The checks:
  *
  *   1. fe_sqr against fe_mul on random inputs.  Published vectors cannot find
  *      a squaring bug: they exercise a handful of values and both routines
@@ -17,20 +16,17 @@
  *      Ed25519 doubling return 37 where it owed -1 -- see the fe_fold comment.
  *   2. RFC 7748 section 5.2 and 6.1: X25519 against the published values, and
  *      a full Diffie-Hellman where both sides have to reach the same secret.
- *   3. RFC 8032 section 7.1: Ed25519 tests 1, 2, 3 and SHA(abc), every one of
- *      them checking the PUBLIC KEY, the SIGNATURE byte for byte, and the
- *      verification -- so a signer that is wrong in a self-consistent way
- *      cannot pass.
+ *   3. RFC 8032 section 7.1: Ed25519 tests 1, 2, 3 and SHA(abc), each checking
+ *      the public key, the signature byte for byte, and the verification, so a
+ *      signer that is wrong in a self-consistent way cannot pass.
  *   4. Rejection.  A verifier that returns 0 for everything passes every
  *      positive vector ever written, so each signature is also mutated and
  *      has to be refused.
  *
- * THE SHA-512 IS nx_crypto's
- *
- *   c68k_25519.c takes its hash as a callback and contains none (see its
- *   header).  This tier binds it to _nx_crypto_sha512_*, which is the SHA-512
- *   this tree already has, so the test proves the callback contract as well as
- *   the curve arithmetic.
+ * c68k_25519.c takes its hash as a callback and contains none (see its
+ * header).  This tier binds it to _nx_crypto_sha512_*, the SHA-512 this tree
+ * already has, so the test covers the callback interface as well as the curve
+ * arithmetic.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -43,7 +39,8 @@
 
 #include "c68k_25519.h"
 
-/* Not in the public header on purpose; see the note where it is defined. */
+/* Declared here rather than in the public header; see the note where it is
+   defined. */
 int c68k_25519_selfcheck_sqr(const unsigned char in[32]);
 
 
@@ -96,8 +93,7 @@ static void test_sqr_is_mul(void)
     srand(20260726);
 
     /* All-zero, all-ones and 2^256-38 first: the lazy representation carries 0
-       as 2^256-38 routinely, and that is the neighbourhood the carry bugs
-       live in. */
+       as 2^256-38 routinely, and that is where the carry bugs live. */
     memset(a, 0x00, 32); bad |= c68k_25519_selfcheck_sqr(a) != 0;
     memset(a, 0xff, 32); bad |= c68k_25519_selfcheck_sqr(a) != 0;
     memset(a, 0xff, 32); a[0] = 0xda; bad |= c68k_25519_selfcheck_sqr(a) != 0;
