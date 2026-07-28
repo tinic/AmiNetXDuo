@@ -16676,3 +16676,59 @@ input on the reachable path.**
 Also `nx_tcp_packet_process.c` (four `dereference of NULL 'source_ip'`),
 `nx_crypto_drbg.c:200` uninitialised `temp[]`, an overlapping `memcpy` reached from
 `_nx_secure_session_keys_set`, and two `deref-before-check`.
+
+## 63. A bridged network, and the two defects it found (2026-07-28)
+
+FS-UAE cannot bridge: its A2065 has three backends, all SLIRP or nothing, and
+`uae_slirp_redir` is an empty function in every slirp it ships (60). WinUAE on
+`winbuilder` can, so the guest now takes a real DHCP lease -- 192.168.1.133/24,
+gateway 192.168.1.1 -- and a third machine on the LAN can reach it.
+
+### Getting there: `rpcap://`, and a MAC that is not yours
+
+`a2065=<pcap name>` is ignored. Even `a2065=slirp_inbound`, a name WinUAE
+hardcodes, comes back as `7990: 'slirp'` in the log. The selection lives in the
+board's `rom_options` and the device wants an `rpcap://` prefix:
+
+    a2065_rom_file=:ENABLED
+    a2065_rom_options=mac=02:41:4d:49:00:01,rpcap://\Device\NPF_{GUID}
+    a2065=rpcap://\Device\NPF_{GUID}
+
+Only the last three bytes of the MAC are yours; WinUAE overwrites the first
+three with Commodore's OUI, so `02:41:4d:49:00:01` reaches the wire as
+`00:80:10:49:00:01`. Leaving `mac=` empty makes WinUAE invent one per run, and
+the router then hands out a different lease every time.
+
+**Test from a third machine, not from the Windows host.** A frame the host
+sends to the guest's MAC leaves its NIC and never returns to that NIC's own
+pcap capture, so ping and TCP fail from there while ARP -- broadcast, and
+reflected by the switch -- succeeds. That pattern reads exactly like a
+hypervisor filtering promiscuous mode, and it is not: from `playhouse2` the
+same connection succeeds immediately.
+
+### What it found
+
+`getdtablesize()` does not follow `SBTC_DTABLESIZE`. Test 128, bridged, no
+host tier: asked for 320, still reports 256. Nothing to do with the network.
+
+**The guest hard-resets at the first bulk transfer over the bridge.** Test 39,
+`tcp_network_64k`: connect to the helper's echo service and push 8 x 8 KB.
+`Reset at 00000000, hardreset, memory cleared` in the WinUAE log, nothing on
+the serial line, no `DH0:.done`. Reproduced three times. The helper records the
+control connection and is never asked to dial back, so the guest dies in its
+own setup rather than in the inbound path, and no `RECEIVE BUFFER ERROR`
+accompanies it -- the obvious guess, that the Lance receive ring overruns on a
+fast link, is not supported.
+
+Bridged without the host tier is 141/142, so bridging alone is fine. FS-UAE
+with the host tier is 18/19 dialling out to 10.0.2.2, so the host tier alone is
+fine; its one failure is the helper dialling back, which SLIRP cannot do. The
+crash needs both.
+
+### Why this is awkward to debug
+
+Enforcer needs an MMU and runs under FS-UAE, which cannot bridge -- so the one
+configuration that crashes is the one configuration Enforcer cannot watch.
+WinUAE's own SLIRP does not expose the host at 10.0.2.2 the way FS-UAE's does,
+so the obvious bisect (same emulator, different network) could not be run
+either: the suite reports `Bail out! Could not connect to host helper`.
