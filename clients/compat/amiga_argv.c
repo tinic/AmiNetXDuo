@@ -1,0 +1,132 @@
+/*
+ * __wrap_main -- give a ported Unix client a real POSIX argv[].
+ *
+ * THE PROBLEM
+ *
+ *   This toolchain's newlib crt0 does not turn the CLI command line into an
+ *   argv[]: on the Shell path it hands main() argc = 1 and a single "argv"
+ *   that is the whole raw argument string (and, before tools/fix-toolchain-
+ *   crt0.py repaired the indirection, the ADDRESS of that pointer rather than
+ *   the pointer).  AmiNetXDuo's own commands never noticed -- they read their
+ *   arguments through ReadArgs() and only ever look at argc -- but curl and
+ *   Dropbear parse argv and nothing else, so every invocation comes back as
+ *   "no URL" / "no host", or dereferences the garbage and crashes.
+ *
+ * THE FIX
+ *
+ *   -Wl,--wrap=main (clients/amiga-client.sh) routes the crt0's call to main()
+ *   through here, leaving the client's real main() reachable as __real_main().
+ *   We build argv from dos.library -- GetProgramName() for argv[0], GetArgStr()
+ *   for the tail -- split on whitespace with "..." grouping and the '*' escape
+ *   AmigaDOS uses inside quotes, and hand the real main() the array it expects.
+ *
+ *   This is authoritative regardless of what the crt0 did: GetArgStr() is the
+ *   same command tail ReadArgs() would parse, so it stays correct even if a
+ *   later toolchain crt0 tokenises argv itself -- we simply rebuild the same
+ *   answer.  Compiled into libamigaclient, so curl and Dropbear share it.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <exec/types.h>
+#include <dos/dosextens.h>
+#include <proto/exec.h>
+#include <proto/dos.h>
+
+extern int __real_main(int argc, char **argv);
+
+/* Generous, and static: this runs before the client's main() sets anything up,
+   on whatever stack the crt0 provided.  A command line longer than this is
+   truncated rather than overrun. */
+#define AMIGA_ARGV_MAX      256
+#define AMIGA_ARGV_BUFSIZE  8192
+#define AMIGA_ARGV_NAMESIZE 256
+
+static char  argv_name[AMIGA_ARGV_NAMESIZE];
+static char  argv_buf[AMIGA_ARGV_BUFSIZE];
+static char *argv_vec[AMIGA_ARGV_MAX + 1];
+
+static int argv_is_space(char c)
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+}
+
+int __wrap_main(int argc_ignored, char **argv_ignored)
+{
+    struct Process *proc = (struct Process *)FindTask(NULL);
+    const char     *args;
+    int             argc = 0;
+    ULONG           w = 0;              /* write cursor into argv_buf   */
+    ULONG           r;                  /* read cursor into args        */
+
+    (void)argc_ignored;
+    (void)argv_ignored;
+
+    /*
+     * A Workbench launch has no CLI, and GetArgStr()/GetProgramName() are a
+     * CLI's.  A ported client cannot do anything useful from Workbench anyway,
+     * so hand main() an empty argv rather than touch dos.library without one.
+     */
+    if (proc == NULL || proc->pr_CLI == 0)
+    {
+        argv_vec[0] = (char *)"";
+        argv_vec[1] = NULL;
+        return __real_main(1, argv_vec);
+    }
+
+    /* argv[0] -- the program name, as the Shell knows it. */
+    argv_name[0] = '\0';
+    (void)GetProgramName((STRPTR)argv_name, (LONG)sizeof(argv_name));
+    argv_vec[argc++] = argv_name;
+
+    /* argv[1..] -- the argument tail, tokenised in a private buffer. */
+    args = (const char *)GetArgStr();
+    if (args != NULL)
+    {
+        r = 0;
+        while (argc < AMIGA_ARGV_MAX && w < AMIGA_ARGV_BUFSIZE - 1)
+        {
+            while (argv_is_space(args[r]))
+                r++;
+            if (args[r] == '\0')
+                break;
+
+            argv_vec[argc++] = &argv_buf[w];
+
+            if (args[r] == '"')
+            {
+                /* Quoted: spaces are literal, '*' is the escape. */
+                r++;
+                while (args[r] != '\0' && args[r] != '"' &&
+                       w < AMIGA_ARGV_BUFSIZE - 1)
+                {
+                    char c = args[r++];
+
+                    if (c == '*' && args[r] != '\0')
+                    {
+                        char e = args[r++];
+                        c = (e == 'n' || e == 'N') ? '\n'
+                          : (e == 'e' || e == 'E') ? (char)0x1b
+                          :                          e;   /* *", **, ... */
+                    }
+
+                    argv_buf[w++] = c;
+                }
+                if (args[r] == '"')
+                    r++;
+            }
+            else
+            {
+                while (args[r] != '\0' && !argv_is_space(args[r]) &&
+                       w < AMIGA_ARGV_BUFSIZE - 1)
+                    argv_buf[w++] = args[r++];
+            }
+
+            argv_buf[w++] = '\0';
+        }
+    }
+
+    argv_vec[argc] = NULL;
+
+    return __real_main(argc, argv_vec);
+}
