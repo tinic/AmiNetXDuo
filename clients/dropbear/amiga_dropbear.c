@@ -1501,8 +1501,8 @@ pid_t setsid(void) { errno = ENOSYS; return -1; }
 #define DB_CMD_MAX      512
 
 /* 256 KB.  A Shell gives a command 4,096 bytes and every ported program on this
-   machine needs far more than that (clients/curl/clientrun.c allocates 512 KB
-   for the same reason).  A command arriving over SSH is exactly as likely to be
+   machine needs far more than that (clientrun.c allocates 512 KB for the same
+   reason).  A command arriving over SSH is exactly as likely to be
    a ported program as one typed at a Shell prompt. */
 #define DB_CMD_STACK    (256UL * 1024UL)
 

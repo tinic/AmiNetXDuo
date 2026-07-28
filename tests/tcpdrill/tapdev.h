@@ -14,7 +14,7 @@
  * user-mode NAT that TERMINATES the guest's TCP connection and re-originates
  * it as its own.  A host peer therefore never sees the guest's sequence
  * numbers, never sees its flags, and cannot put a byte of its own choosing into
- * the guest's receive path.  tests/tools/netpeer.py and tests/curl/curlpeer.py
+ * the guest's receive path.  tests/tools/netpeer.py and tests/peer/httppeer.py
  * are stream peers for that reason, and no amount of work on them changes it.
  *
  * So the TUN device goes INSIDE the guest.  This file is an AmigaOS Exec

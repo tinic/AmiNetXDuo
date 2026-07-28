@@ -196,7 +196,6 @@ tests/conformance/run-fsuae.sh -a "LOOPBACK NOPAGE"
 | conformance, loopback tier | **130/142** (0 fail, 12 skip) |
 | conformance, network tier | **141/142** (1 fail, 0 skip) — Roadshow 4.364 scores 138 |
 | client access patterns | **94/94** (`tests/clients`) — the call sequences curl, wget, nc, ftp and telnet actually issue, each group named for the program and file it came from |
-| curl verification suite | **122/124** on the HTTP groups and **28/28** on the TLS group (`tests/curl`); a third-party curl built by somebody else scores the same 122/124, failing on the same two cases |
 | ThreadX-on-Exec soak | 98 checks, 4+ adopted tasks, Enforcer-clean on 68030 |
 | TCP throughput, 13.9 MHz 68020 | **356 KB/s** loopback, **368 KB/s** to a host over SLIRP (was 261 / 312 before `src/net68k/`) |
 | TCP throughput, 24.5 MHz 68020 | **636 KB/s** through the library, 1.78× for a 1.76× clock; conformance unchanged |
@@ -411,62 +410,53 @@ Nothing here can be taken down by a peer that is slow, rude or absent:
 FIN, silence, and non-TLS bytes — and each produces a legible error and `rc 10`
 with the machine carrying on.
 
-## The curl verification suite
+## What an adversarial client suite found
 
-`tests/curl/` uses curl as an adversary against `bsdsocket.library` rather than
+`tests/curl/` pointed curl at `bsdsocket.library` as an ADVERSARY rather than
 as something to be tested: 149 hermetic cases over HTTP mechanics, connection
-reuse, byte-exactness, failure paths, resource behaviour under repetition, TLS
-and FTP, with host-side servers including four deliberately rude ones, a local
-PKI covering chain depths 2/3/4 and expired, self-signed and untrusted roots,
-and every body hashed against the server's copy.
+reuse, byte-exactness, failure paths, behaviour under repetition, TLS and FTP,
+against host-side servers including four deliberately rude ones and a local PKI
+covering chain depths 2/3/4 plus expired, self-signed and untrusted roots.
 
-It found three defects in two days, none of which the conformance suite could
-see, and the pattern in them is worth more than the count. Two presented as
-*slowness* and were something worse underneath:
+**It has been removed along with curl itself.** What it found has not been, and
+is why this section stays: three defects in two days, none of which the
+conformance suite could see, and the pattern in them is worth more than the
+count. Two presented as *slowness* and were something worse underneath:
 
 - **The SANA-II receive window was 4 frames**, that constant being a window
   rather than a queue length. A concurrency sweep lost 87 of 232 transfers. The
-  case that had never failed got 2.5× faster once fixed — TCP had been hiding
+  case that had never failed got 2.5x faster once fixed -- TCP had been hiding
   the loss in retransmissions, which means every throughput figure this project
-  ever measured was taken through it.
+  took before it was measured through it.
 - **Every last close of the library cost fifteen seconds**, so `curl --version`
-  took 16.22 s where it now takes 2.20 s. `S2_OFFLINE` returns queued reads
-  without needing `AbortIO()`, and was simply being issued after the readers had
-  already timed out waiting for an abort that this driver never performs.
-  Underneath the delay, the old path freed the reply port, the pinned packets
-  and the stack a reader thread was still running on.
+  took 16.22 s where it went on to take 2.20 s. `S2_OFFLINE` returns queued
+  reads without needing `AbortIO()`, and was being issued after the readers had
+  already timed out waiting for an abort this driver never performs. Underneath
+  the delay, the old path freed the reply port, the pinned packets and the stack
+  a reader thread was still running on.
 - **A resumed TLS handshake ignored the trust store**, described above.
 
-**A third-party curl runs on it.** Aminet's `curl-8.22.0-DEV-210726` — built by
-someone else, against AmiSSL and clib2, with no knowledge of this project —
-scores the same 122/124 as our own build, and its two failures are our two
-failures. It reaches the ABI through a different door: `USE_AMISSL` compiles
-`Curl_amiga_init()` out entirely, so it never calls `SocketBaseTags` and clib2's
-startup opens the library and installs the errno pointer instead. That is
-evidence our own build cannot supply, since ours was written by the same people
-as the library. Its HTTPS did not complete a case in nine minutes, sixteen
-handshake attempts in — OpenSSL 3.6.2's bignum arithmetic on a 14 MHz 68020,
-with our sockets carrying all sixteen attempts without incident.
+The lesson generalises past the client that produced it: a suite that tries to
+BREAK the stack finds things a suite that checks conformance cannot, because
+the second one only ever asks questions the implementer already thought of.
 
-Running it is `tests/curl/run-curlverify.sh`, hermetic by default, with `-g G`
-for the internet group. Two things any ported clib2 client needs on the target,
-both of which cost several failed runs to discover: `mathieeedoubbas.library`
-and `mathieeedoubtrans.library` staged as a **matched pair** from the same
-source, since a mixed pair does not work; and anything linked against AmiSSL
-needs an `AmiSSL:` assign, or AmigaDOS puts up a requester and waits forever.
+Its host end survives and is still load-bearing. `tests/peer/httppeer.py` and
+`tests/peer/mkpki.sh` -- HTTP with keep-alive, ranges, chunking and drip-feed,
+seven HTTPS servers on seven certificate chains, and a whole test PKI -- now
+serve `tests/compare`, `tests/tools/run-sntp.sh` and `tests/trace`. The guest
+end survives too, as `tests/compare/checkrunner.c`: nothing about running a
+list of commands and writing down what happened was ever curl-specific.
 
 ## Ported clients
 
 [`clients/`](../clients/) is a harness for porting a Unix network client to
 AmigaOS 3.x: toolchain resolution, the NDK flags every such port needs, and the
-libc and libgcc gaps in `clients/compat/`. **curl 8.21.0 builds through it
-unpatched**, as a pinned submodule, and works:
-
-```
-curl 8.21.0-DEV (m68k-unknown-amigaos) libcurl/8.21.0-DEV
-example.com: HTTP 200, 559 B, dns 0.98s connect 1.48s total 2.02s
-AmiTCP-SDK-4.3.lha: HTTP 200, 657797 B in 5.60s (117463 B/s)
-```
+libc and libgcc gaps in `clients/compat/`. curl was the first client through it
+and is the reason several of those shims exist -- `__ctzdi2` for a bitset scan,
+`__floatdidf` for a progress meter -- which is why `clients/compat/` still
+names it. It is no longer built or shipped here: no TLS through our own
+`tls.library`, and its remaining faults were the toolchain's rather than the
+stack's.
 
 Dropbear builds through the same harness, so the Amiga can `ssh`: unpatched
 against stock OpenSSH 10.2 with no compatibility settings, negotiating
@@ -486,16 +476,13 @@ Switching to the algorithms `crypto68k` already accelerates was tried and is
 **1.8x worse** -- 149.62 s -- because Dropbear's P-256 goes through libtommath,
 which is 5x slower per scalar multiply than TweetNaCl's curve25519.
 
-The 657,797-byte download is byte-identical to the host's copy. Chunked
-decoding, range requests, redirects and the failure messages all behave.
-`https://` is refused legibly and is the next milestone, since curl reaches TLS
-through `lib/vtls/` and nothing there knows about `tls.library` yet.
-
-Two things a person running it needs to know. curl wants
-**`mathieeedoubbas.library` in `LIBS:`** — newlib implements double arithmetic
-by calling it, and it is *not* in the Kickstart 3.1 ROM, though every Workbench
-install has it. And a Shell gives a command 4 KB of stack, so **`stack 200000`**
-first.
+Two things a person running a ported client needs to know, both of which cost
+several failed runs to find. It wants **`mathieeedoubbas.library` in `LIBS:`**
+— newlib implements double arithmetic by calling it, and it is *not* in the
+Kickstart 3.1 ROM, though every Workbench install has it; if the client is
+linked against AmiSSL it wants `mathieeedoubtrans.library` too, as a **matched
+pair from the same source**, since a mixed pair does not work. And a Shell
+gives a command 4 KB of stack, so **`stack 200000`** first.
 
 ## Two things left as they are, on purpose
 

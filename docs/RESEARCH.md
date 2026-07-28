@@ -4322,8 +4322,8 @@ touched.
 
 | | |
 |---|---|
-| `tests/curl/curlpeer.py` | the host end: HTTP/1.1 with keep-alive, ranges, chunking and drip-feeding; seven HTTPS servers on seven certificate chains; FTP (borrowed from `tests/tools/netpeer.py` rather than rewritten); and four deliberately rude listeners |
-| `tests/curl/mkpki.sh` | a whole test PKI — RSA and ECDSA roots, three levels of intermediates, expired, self-signed, and a root nobody trusts |
+| `tests/peer/httppeer.py` | the host end: HTTP/1.1 with keep-alive, ranges, chunking and drip-feeding; seven HTTPS servers on seven certificate chains; FTP (borrowed from `tests/tools/netpeer.py` rather than rewritten); and four deliberately rude listeners |
+| `tests/peer/mkpki.sh` | a whole test PKI — RSA and ECDSA roots, three levels of intermediates, expired, self-signed, and a root nobody trusts |
 | `tests/curl/curlsuite.py` | the cases and the scoring, in one file |
 | `tests/curl/curlcheck.c` | the Amiga-side driver |
 | `tests/curl/run-curlverify.sh` | stage, serve, run, score |
@@ -4375,7 +4375,7 @@ about thirteen seconds. A sweep found the cliff between eight and sixteen:
 | 48 | **22** |
 
 **87 of 232 transfers.** The measurement that turned this from a mystery into a
-diagnosis is on the host side: `curlpeer.py` logs every connection it accepts,
+diagnosis is on the host side: `httppeer.py` logs every connection it accepts,
 and it accepted **213** across the sweep while only **145** transfers completed
 on the Amiga. Sixty-eight connections were therefore established at the far end
 and never used — the SYN went out, the peer answered, and the answer was never
@@ -5747,7 +5747,7 @@ scaling.
 
 Two other numbers in that transcript belong to the host and not to us, and are noted
 so nobody attributes them here later: the SYN to SYN/ACK took **353 ms** and the
-request to the first data segment **494 ms**. That is `curlpeer.py` and SLIRP; our
+request to the first data segment **494 ms**. That is `httppeer.py` and SLIRP; our
 own ACK of the SYN/ACK went out **1.6 ms** after it arrived.
 
 ### 16.8 The regression cover, and the concurrency sweep
@@ -6499,7 +6499,7 @@ however wrong the clock is it cancels exactly.
 ### 19.3 AmigaOS keeps local time, and the offset is not ours to invent
 
 NTP is UTC. The Amiga clock is local: `DateStamp()` has no timezone concept at all, and
-neither has the battery clock. `tests/curl/mkpki.sh` already had to pin certificate dates
+neither has the battery clock. `tests/peer/mkpki.sh` already had to pin certificate dates
 because of exactly this (host 04:09 UTC, guest 21:09, every leaf refused as "not yet
 valid"). So writing the clock needs an offset, and the only real question is where it
 comes from.
@@ -6648,7 +6648,7 @@ local one is not possible, because SNTP is UDP port 123 and ports below 1024 nee
 macOS and on Linux alike, and this suite does not ask for root. Giving `sntp` a `PORT`
 argument would have made the run hermetic at the cost of a knob that exists only for the
 test, which is the wrong trade. Everything else in the run is hermetic, against
-`tests/curl/curlpeer.py`, and the script asks the time server **from the host, before
+`tests/peer/httppeer.py`, and the script asks the time server **from the host, before
 starting the emulator**, so that an unreachable one fails in ten seconds and looks like
 what it is rather than like a bug in `sntp`.
 
@@ -8750,7 +8750,7 @@ with evidence because it is the first thing anyone will try:
   guest's peer is SLIRP's own TCP stack, not anything on the host. A host peer
   never sees the guest's sequence numbers, never sees its flags, and cannot
   place a byte of its own choosing in the guest's receive path. That is why
-  `tests/tools/netpeer.py` and `tests/curl/curlpeer.py` are stream peers, and
+  `tests/tools/netpeer.py` and `tests/peer/httppeer.py` are stream peers, and
   no amount of work on them changes it.
 - **A guest-side raw socket is not a way round it either.** `src/bsdsocket/
   raw.c` says so in its own header: NetX Duo's core has no `IP_HDRINCL`, so the
@@ -10354,7 +10354,7 @@ which is what makes the Roadshow column trustworthy.
 ### 29.3 Throughput, and the two instruments that disagree
 
 `NetTrace`, one binary, `NOCAPTURE`, 524,288 bytes, against
-`tests/curl/curlpeer.py`. Every boot runs each workload twice.
+`tests/peer/httppeer.py`. Every boot runs each workload twice.
 
 | | AmiNetXDuo | Roadshow 1.15 | |
 |---|---:|---:|---|

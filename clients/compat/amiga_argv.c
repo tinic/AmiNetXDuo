@@ -23,7 +23,7 @@
  *   This is authoritative regardless of what the crt0 did: GetArgStr() is the
  *   same command tail ReadArgs() would parse, so it stays correct even if a
  *   later toolchain crt0 tokenises argv itself -- we simply rebuild the same
- *   answer.  Compiled into libamigaclient, so curl and Dropbear share it.
+ *   answer.  Compiled into libamigaclient, which every ported client links.
  *
  * SPDX-License-Identifier: MIT
  */

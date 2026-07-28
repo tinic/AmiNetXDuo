@@ -1,20 +1,23 @@
 /*
- * CurlCheck -- the Amiga half of the curl verification suite.
+ * CheckRunner -- the guest half of every harness in tests/compare.
  *
  * WHAT IT IS FOR
  *
- *   The suite points curl at bsdsocket.library and asks whether the STACK
- *   survived, so the driver has to be the thing that keeps running when a
- *   command does not.  Everything it produces is appended and flushed one
+ *   A harness points a command at bsdsocket.library and asks whether the
+ *   STACK survived, so the driver has to be the thing that keeps running when
+ *   the command does not.  Everything it produces is appended and flushed one
  *   line at a time, on purpose: when a transfer takes the machine down, the
- *   file that is already on the host is the entire evidence, and a buffered
- *   report would lose exactly the line that mattered.
+ *   file already on the host is the entire evidence, and a buffered report
+ *   would lose exactly the line that mattered.
  *
  *   For the same reason it does not score anything.  The expectations live on
- *   the host (tests/curl/curlsuite.py) with the body hashes and the -w
- *   metrics, so a run that dies in the middle is scored the same way as one
+ *   the host, so a run that dies in the middle is scored the same way as one
  *   that finishes -- every case with no result line is a failure, and the
  *   first of them names the command that did it.
+ *
+ *   It was CheckRunner, written for a curl suite that no longer exists.  Nothing
+ *   about it was ever curl-specific: it runs a list of commands and writes
+ *   down what happened, which is what run-compare.sh has always used it for.
  *
  * INPUT: DH0:checks.txt, one per line
  *
@@ -27,7 +30,7 @@
  *
  *   DH0:results.txt        NAME rc ticks availmem   -- one line per case
  *   DH0:w/NAME.txt         that command's own stdout and stderr
- *   DH0:curlcheck.txt      the same thing for a human
+ *   DH0:checkrunner.txt    the same thing for a human
  *
  * WHY availmem IS IN THE RESULT LINE
  *
@@ -59,11 +62,11 @@
 #include <proto/dos.h>
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: CurlCheck 1.0 (25.7.2026)";
+    "$VER: CheckRunner 1.0 (25.7.2026)";
 
 #define CHECKS      "DH0:checks.txt"
 #define RESULTS     "DH0:results.txt"
-#define REPORT      "DH0:curlcheck.txt"
+#define REPORT      "DH0:checkrunner.txt"
 
 #define MAX_LINE    640
 #define CLIENT_STACK    (512UL * 1024UL)
@@ -178,7 +181,7 @@ int main(int argc, char **argv)
         LONG args[1];
 
         args[0] = (LONG)CHECKS;
-        emit(REPORT, "CurlCheck: cannot open %s\n", args);
+        emit(REPORT, "CheckRunner: cannot open %s\n", args);
         return RETURN_FAIL;
     }
 
@@ -277,8 +280,8 @@ int main(int argc, char **argv)
         LONG args[1];
 
         args[0] = (LONG)ran;
-        emit(REPORT, "\n=== CurlCheck ran %ld commands\n", args);
-        Printf((CONST_STRPTR)"CurlCheck ran %ld commands\n", (LONG)ran);
+        emit(REPORT, "\n=== CheckRunner ran %ld commands\n", args);
+        Printf((CONST_STRPTR)"CheckRunner ran %ld commands\n", (LONG)ran);
     }
 
     return RETURN_OK;

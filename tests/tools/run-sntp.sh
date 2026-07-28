@@ -26,7 +26,7 @@
 #
 # WHAT IS ON THE OTHER END
 #
-#   tests/curl/curlpeer.py with tests/curl/mkpki.sh's local PKI, which already
+#   tests/peer/httppeer.py with tests/peer/mkpki.sh's local PKI, which already
 #   contains an expired leaf (notAfter 2021-01-01) chained to a root the guest
 #   trusts.  The guest reaches it at 10.0.2.2, which is what SLIRP calls the
 #   host, and resolves the names out of DEVS:Internet/hosts.
@@ -136,8 +136,8 @@ fi
 
 # ----------------------------------------------------------------- PKI ---
 
-PKI="$ROOT/build/curl-pki"
-"$ROOT/tests/curl/mkpki.sh" "$PKI" >/dev/null
+PKI="$ROOT/build/peer-pki"
+"$ROOT/tests/peer/mkpki.sh" "$PKI" >/dev/null
 [ -f "$PKI/teststore" ] || { echo "no trust store in $PKI" >&2; exit 2; }
 
 # ------------------------------------------------------------- staging ---
@@ -198,7 +198,7 @@ PEERLOG="$ROOT/build/sntp-peer.log"
 # still in the queue, and the whole thing then failed as four refused
 # connections.  The trap below is what actually ends it; the number is only a
 # backstop for a script that dies without running it.
-python3 "$ROOT/tests/curl/curlpeer.py" --base-port "$BASE_PORT" --pki "$PKI" \
+python3 "$ROOT/tests/peer/httppeer.py" --base-port "$BASE_PORT" --pki "$PKI" \
     --advertise 10.0.2.2 --log "$PEERLOG" --seconds 7200 \
     > "$ROOT/build/sntp-peer.out" 2>&1 &
 PEER_PID=$!
@@ -208,11 +208,11 @@ trap cleanup_peer EXIT INT TERM HUP
 
 sleep 1
 kill -0 "$PEER_PID" 2>/dev/null || {
-    echo "curlpeer.py did not start:" >&2
+    echo "httppeer.py did not start:" >&2
     cat "$ROOT/build/sntp-peer.out" >&2
     exit 2
 }
-echo "==> curlpeer.py: good cert on $GOOD, expired cert on $EXPIRED"
+echo "==> httppeer.py: good cert on $GOOD, expired cert on $EXPIRED"
 
 # ---------------------------------------------------------------- run ---
 

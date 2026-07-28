@@ -2,7 +2,7 @@
 #
 # The test PKI the hermetic TLS half of the curl verification suite runs on.
 #
-#   tests/curl/mkpki.sh [OUTDIR]        (default build/curl-pki)
+#   tests/peer/mkpki.sh [OUTDIR]        (default build/peer-pki)
 #
 # WHY A LOCAL PKI AND NOT badssl.com
 #
@@ -10,7 +10,7 @@
 #   property the brief asks for -- chain depth 2, 3 and 4, RSA and ECDSA,
 #   expired, self-signed, wrong host, --cacert -- is a property of the
 #   certificates, and certificates are free.  badssl is still worth pointing at
-#   occasionally (tests/curl/run-curlverify.sh -s internet), but it is a
+#   occasionally against a real server, but it is a
 #   different kind of test: it tells you the internet still works, not that the
 #   stack does.
 #
@@ -53,7 +53,7 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-OUT="${1:-$ROOT/build/curl-pki}"
+OUT="${1:-$ROOT/build/peer-pki}"
 
 STAMP="$OUT/.stamp"
 if [ -f "$STAMP" ]; then
@@ -67,7 +67,7 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 # Absolute from here on: the script cd's into $OUT and then keeps writing to
 # "$OUT/ext.cnf", so a relative argument stops resolving after the cd and the
-# run dies one file in.  run-curlverify.sh passes an absolute path, which is
+# run dies one file in.  Callers pass an absolute path, which is
 # why it never showed.
 OUT=$(cd "$OUT" && pwd)
 STAMP="$OUT/.stamp"

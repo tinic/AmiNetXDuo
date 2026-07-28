@@ -3,7 +3,7 @@
  *
  * WHY THIS EXISTS
  *
- *   Every harness in this tree runs for seconds or minutes.  tests/curl moves
+ *   Every harness in this tree runs for seconds or minutes.  tests/compare moves
  *   a few megabytes, tests/trace moves 512 KB, tests/tcpdrill moves a few
  *   hundred bytes and watches the packets.  None of them can see a defect
  *   whose argument is "bytes" or "hours".
@@ -66,7 +66,7 @@
  *
  *   Both files are opened, appended and closed per line.  A run that has to
  *   be killed must not lose its last twenty lines (the reasoning in
- *   tests/curl/curlcheck.c, and in docs/RESEARCH.md 16.9).
+ *   tests/compare/checkrunner.c, and in docs/RESEARCH.md 16.9).
  *
  * THE PROBES, WHICH RUN FIRST AND TAKE UNDER A MINUTE
  *
