@@ -143,9 +143,13 @@ case "$BOARD" in
         #
         # The MAC is set rather than left empty.  An empty mac= leaves WinUAE
         # to invent one per run, so a DHCP server hands out a different lease
-        # every time and nothing on the LAN can be given a reservation.  The
-        # default is locally administered (02: prefix) so it cannot collide
-        # with a real card.
+        # every time and nothing on the LAN can be given a reservation.
+        #
+        # Only the LAST THREE BYTES are ours.  WinUAE overwrites the first
+        # three with Commodore's OUI (win32_uaenet.cpp: memcpy(tc->mac, uaemac,
+        # 3)), so 02:41:4d:49:00:01 reaches the wire as 00:80:10:49:00:01 and
+        # the locally-administered bit is gone.  Pick the tail to be unique on
+        # the network; the head is not ours to choose.
         _a2065="${AMINETXDUO_WINUAE_A2065:-slirp}"
         case "$_a2065" in
             slirp|slirp_inbound|none)

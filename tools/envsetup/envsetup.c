@@ -31,6 +31,14 @@ static const struct Assignment assignments[] =
     { "ENVARC", "DH0:envarc"    },
     { "T",      "DH0:t"         },
     { "CLIPS",  "DH0:clips"     },
+    /* LIBS: and DEVS: so a staged bsdsocket.library or SANA-II driver can be
+       found.  A command that links the stack does not need them; one that
+       opens the library -- nc, ping, bsdsocktest -- finds nothing without
+       them, and fails in a way that looks like the stack rather than the
+       harness.  CreateDir() below makes them when nothing was staged, so an
+       empty assign is harmless. */
+    { "LIBS",   "DH0:libs"      },
+    { "DEVS",   "DH0:devs"      },
     { NULL,     NULL            }
 };
 
