@@ -59,6 +59,7 @@ static char *argv_vec[AMIGA_ARGV_MAX + 1];
 static struct StackSwapStruct argv_sss;
 static int                    argv_argc;
 static int                    argv_result;
+static BOOL                   argv_on_swapped;   /* TRUE between the swaps */
 
 /*
  * Run __real_main() on the swapped stack.  NO locals and NO arguments, and
@@ -69,9 +70,57 @@ static int                    argv_result;
  */
 static __attribute__((noinline)) VOID argv_run_on_stack(VOID)
 {
+    argv_on_swapped = TRUE;
     StackSwap(&argv_sss);
     argv_result = __real_main(argv_argc, argv_vec);
     StackSwap(&argv_sss);
+    argv_on_swapped = FALSE;
+}
+
+/*
+ * exit() unwinds THROUGH the swapped stack.
+ *
+ * A client that ends by calling exit() rather than returning from main() --
+ * Dropbear always, curl on some paths -- never comes back to
+ * argv_run_on_stack(), so its second StackSwap() does not run.  The crt0's exit
+ * restores the stack POINTER from its own saved copy, but not tc_SPLower/
+ * tc_SPUpper: the task is left advertising the swapped (about-to-be-abandoned)
+ * stack as its bounds, and the next stack check sees the pointer outside them
+ * and traps -- an illegal instruction "right at the end", after everything
+ * appeared to work.
+ *
+ * StackSwap() cannot put them back from here: it moves its OWN return address
+ * onto the stack it swaps to, and the frames between an exit() call site and
+ * this point live on the stack we are abandoning, so the returns would unwind
+ * through the wrong memory.  Restore the two bounds directly instead, from what
+ * the first StackSwap() saved into argv_sss -- the pointer itself is the crt0's
+ * to restore.  -Wl,--wrap=exit,--wrap=_exit routes both here.
+ */
+extern void __real_exit(int status);
+extern void __real__exit(int status);
+
+static VOID argv_restore_bounds(VOID)
+{
+    if (argv_on_swapped)
+    {
+        struct Task *self = FindTask(NULL);
+
+        argv_on_swapped   = FALSE;
+        self->tc_SPLower  = argv_sss.stk_Lower;
+        self->tc_SPUpper  = (APTR)argv_sss.stk_Upper;
+    }
+}
+
+void __wrap_exit(int status)
+{
+    argv_restore_bounds();
+    __real_exit(status);
+}
+
+void __wrap__exit(int status)
+{
+    argv_restore_bounds();
+    __real__exit(status);
 }
 
 static int argv_is_space(char c)
