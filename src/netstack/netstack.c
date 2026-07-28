@@ -385,6 +385,18 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
 
     ami_netstack_dns_stop(ns);
 
+    /*
+     * Stop the callback posting BEFORE the semaphore goes away. The order is
+     * the whole point: ami_ns_address_changed() runs on the IP thread, which
+     * is still running here, and an address genuinely does change during
+     * teardown -- interfaces lose theirs on the way down.
+     */
+    if (ns->ns_AddrArrivedReady)
+    {
+        ns->ns_AddrArrivedReady = FALSE;
+        (VOID)tx_semaphore_delete(&ns->ns_AddrArrived);
+    }
+
     if (ns->ns_AutoIpCreated)
     {
         (VOID)nx_auto_ip_stop(&ns->ns_AutoIp);
@@ -789,6 +801,13 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
 
         ns->ns_LastAddress[i] = addr;
 
+        /*
+         * Wake anyone waiting for an address to turn up. tx_semaphore_put()
+         * does not block, which it must not: this runs on the IP thread.
+         */
+        if (ns->ns_AddrArrivedReady)
+            (VOID)tx_semaphore_put(&ns->ns_AddrArrived);
+
         if (addr == 0UL)
             AMI_WARN("netstack: interface %ld no longer has an address",
                      (long)i);
@@ -915,8 +934,34 @@ static BOOL ami_ns_wait_for_address(AmiNetStack *ns, ULONG timeout_ticks)
         if (waited >= timeout_ticks)
             return FALSE;
 
-        tx_thread_sleep((ULONG)AMI_ADDRESS_POLL_TICKS);
-        waited += (ULONG)AMI_ADDRESS_POLL_TICKS;
+        /*
+         * WAIT FOR THE NOTIFICATION RATHER THAN POLLING FOR THE ANSWER.
+         *
+         * NetX Duo already tells us when an address arrives -- we registered
+         * ami_ns_address_changed() for it -- so sleeping a tick at a time and
+         * looking again spent up to a whole tick asleep after the lease had
+         * already landed, on the boot path where it is most visible
+         * (docs/RESEARCH.md 56).
+         *
+         * The loop stays. The address is re-checked after every wake because
+         * a semaphore says "something changed", not "you got what you wanted":
+         * the change may be a DIFFERENT interface, or an address going away.
+         * And the poll interval remains as the wait bound, so a notification
+         * that is somehow missed costs a tick rather than the whole timeout.
+         */
+        {
+            ULONG slice = (ULONG)AMI_ADDRESS_POLL_TICKS;
+
+            if (slice > timeout_ticks - waited)
+                slice = timeout_ticks - waited;
+
+            if (ns->ns_AddrArrivedReady)
+                (VOID)tx_semaphore_get(&ns->ns_AddrArrived, slice);
+            else
+                tx_thread_sleep(slice);
+
+            waited += slice;
+        }
     }
 }
 
@@ -960,6 +1005,19 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
 
     /* Before anything can change an address, so the first one is announced
        too. */
+    /*
+     * Create the semaphore BEFORE registering the callback that posts it --
+     * the notification can fire the moment a static interface is addressed
+     * below, and ns_AddrArrivedReady is what stops the callback touching a
+     * semaphore that does not exist yet.
+     */
+    if (tx_semaphore_create(&ns->ns_AddrArrived, (CHAR *)"nsaddr", 0)
+            == TX_SUCCESS)
+        ns->ns_AddrArrivedReady = TRUE;
+    else
+        AMI_WARN("netstack: no address-arrival semaphore; falling back to "
+                 "polling for the first address");
+
     (VOID)nx_ip_address_change_notify(&ns->ns_Ip, ami_ns_address_changed,
                                       NX_NULL);
 

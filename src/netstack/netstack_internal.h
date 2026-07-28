@@ -160,6 +160,15 @@ struct AmiNetStack
     UBYTE               ns_DhcpState[AMI_CFG_MAX_INTERFACES];
     ULONG               ns_LastAddress[AMI_CFG_MAX_INTERFACES];
 
+    /*
+     * Posted by ami_ns_address_changed() when an interface gains or loses an
+     * address, so ami_ns_wait_for_address() can block instead of polling.
+     * NetX Duo already calls that notification; this only gives it somewhere
+     * to wake somebody up.
+     */
+    TX_SEMAPHORE        ns_AddrArrived;
+    BOOL                ns_AddrArrivedReady;
+
     NX_AUTO_IP          ns_AutoIp;
     APTR                ns_AutoIpStack;
     BOOL                ns_AutoIpCreated;
