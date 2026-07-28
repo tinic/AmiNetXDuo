@@ -6,11 +6,11 @@
  */
 
 /*
- * Use a PRIVATE library base for the timer inlines.  src/common/compat.c
+ * Use a private library base for the timer inlines.  src/common/compat.c
  * defines the conventional `TimerBase` for its own ami_millis(); with
  * -fno-common (the GCC 15 default) a second definition here would be a
- * duplicate symbol the moment anything links both.  The NDK inlines are
- * parameterised for exactly this.
+ * duplicate symbol as soon as anything links both.  The NDK inlines are
+ * parameterised for this.
  */
 #define TIMER_BASE_NAME ami_tls_timer_base
 
@@ -129,8 +129,8 @@ ULONG ami_tls_eclock_micros(ULONG ticks)
      * ticks, and ticks * 1,000,000 overflows 32 bits after ~4,295 ticks (6 ms).
      * This is a report path, not a hot path, so the __udivdi3 call (out of
      * src/common/ami_udivdi3.c -- this toolchain's libgcc.a is empty) is
-     * acceptable here -- it is NOT acceptable inside the timed region, which is
-     * why every measurement below accumulates raw ticks and converts once.
+     * acceptable here.  It is not acceptable inside the timed region, so every
+     * measurement below accumulates raw ticks and converts once.
      */
     return (ULONG)(((unsigned long long)ticks * 1000000ULL) /
                    (unsigned long long)ami_tls_hz);
@@ -144,9 +144,8 @@ ULONG ami_tls_seed_rng(VOID)
 
     /*
      * The E-Clock and beam position are already sampled by the pool's own
-     * collection; feeding them again here credits nothing and is done only so
-     * that a caller who opened the timer earlier than the pool did
-     * contributes its phase too.
+     * collection; feeding them again credits nothing, and is done only so a
+     * caller who opened the timer before the pool did contributes its phase.
      */
     eclock = ami_tls_eclock();
     ami_random_add_entropy(&eclock, sizeof(eclock), 0);

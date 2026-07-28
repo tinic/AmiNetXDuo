@@ -6,10 +6,10 @@
  * caller inside NetX Duo -- IP, TCP, UDP, ICMP, ICMPv6 -- resolves to this
  * one instead.  No vendored file is edited and no call site is patched.
  *
- * The hook lives in a file of its own so that a program can link the
- * algorithm WITHOUT it and supply its own symbol: tests/perf does exactly
- * that, to run the vendored implementation and ours back to back in one
- * process with nothing changed but a variable.
+ * The hook lives in a file of its own so a program can link the algorithm
+ * without it and supply its own symbol: tests/perf does that, to run the
+ * vendored implementation and this one back to back in one process with
+ * nothing changed but a variable.
  *
  * SPDX-License-Identifier: MIT
  */

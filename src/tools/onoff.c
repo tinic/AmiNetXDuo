@@ -19,7 +19,7 @@
  *      configured interface, and the command operates on the interface found.
  *   3. otherwise the message says so and lists what this machine does have,
  *      with the driver and unit of each. A driver name that no interface uses
- *      may be a card that is fitted, but nothing here has been told to use it,
+ *      may be a card installed, but nothing here has been told to use it,
  *      so there is nothing to switch.
  *
  * A name that is both -- an interface file called the same thing as a driver
@@ -181,7 +181,7 @@ static VOID explain_unknown_name(const char *given, ULONG unit, BOOL had_unit)
 
     tool_advise_blank();
     tool_advise("Either column works as the name; a driver that no interface");
-    tool_advise("uses has nothing here to switch, even when the card is fitted.");
+    tool_advise("uses has nothing here to switch, even when the card is installed.");
 }
 
 /* ------------------------------------------------- the running stack -----

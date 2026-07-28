@@ -481,7 +481,7 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
                with a device probe behind it, is in src/tools/tool_diag.c. */
             AMI_ERROR("netstack: interface '%s' would not open: %s unit %lu "
                       "did not answer -- is the driver in DEVS:Networks/ and "
-                      "is the card fitted on that unit?",
+                      "is the card installed on that unit?",
                       cfg->name, cfg->device, (unsigned long)cfg->unit);
             err = status;
             continue;

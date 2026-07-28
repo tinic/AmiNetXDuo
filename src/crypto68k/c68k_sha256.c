@@ -2,23 +2,19 @@
  * AmiNetXDuo -- crypto68k: SHA-256.  The portable C compression function, the
  * buffering and padding layer both variants share, and the dispatch.
  *
- * WHAT THE C Variant does that the vendored one does not
+ * Two things the C here does that the vendored implementation does not, both
+ * worth having independently of any assembly:
  *
- *   Two things, and both are worth having independently of the assembly,
- *   because they are what makes "is the assembly earning its place" a fair
- *   question rather than a comparison against a straw man:
+ *   1. The first sixteen message words are loaded, not assembled.  This is a
+ *      big-endian machine, so W[t] for t < 16 is the longword at data + 4t.
+ *      nx_crypto_sha2.c's W0(t) macro builds each one from four byte loads,
+ *      three shifts and three ORs -- 128 instructions a block that need not
+ *      exist.  The byte path remains for pointers that are not longword
+ *      aligned on targets that fault on such a load.
  *
- *     1. The first sixteen message words are LOADED, not assembled.  This is
- *        a big-endian machine, so W[t] for t < 16 is the longword at
- *        data + 4t.  nx_crypto_sha2.c's W0(t) macro builds each one from four
- *        byte loads, three shifts and three ORs -- 128 instructions a block
- *        that do not need to exist.  When the pointer is not longword
- *        aligned the byte path is still there, because a portable C fallback
- *        that faults on a misaligned load is not a fallback.
- *
- *     2. The message schedule is computed up front rather than interleaved
- *        with the rounds.  On a machine with eight data registers and eight
- *        live state variables, the interleaved form spills both.
+ *   2. The message schedule is computed up front rather than interleaved with
+ *      the rounds.  On a machine with eight data registers and eight live
+ *      state variables, the interleaved form spills both.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -105,22 +101,20 @@ const ULONG c68k_sha256_k[64] =
 /*
  * A big-endian longword at an arbitrary address.
  *
- * On the 68020 this is ONE MOVE.L, written as inline assembly because C
- * cannot say "this pointer is not aligned and I want the load anyway": the
- * part does misaligned data accesses in hardware, and a TLS record's payload
- * starts 21 bytes into the packet buffer, so misaligned is the normal case
- * here and not the exceptional one.
+ * On the 68020 this is one MOVE.L, written as inline assembly because C cannot
+ * express an intentionally unaligned load: the part does misaligned data
+ * accesses in hardware, and a TLS record's payload starts 21 bytes into the
+ * packet buffer, so misaligned is the normal case here.
  *
  * nx_crypto_sha2.c's W0() macro builds each of the sixteen message words from
- * four byte loads, three shifts and three ORs.  That is 128 instructions a
- * block that need not exist on a big-endian machine, and it is most of why
- * the C below is 1.29x the vendored implementation before any assembly is
- * written at all.
+ * four byte loads, three shifts and three ORs -- 128 instructions a block that
+ * need not exist on a big-endian machine, and most of why the C below is 1.29x
+ * the vendored implementation before any assembly.
  *
- * Everything else takes the portable form, which is also the only CORRECT
- * form anywhere else: reading the longword directly is right on a big-endian
- * machine and wrong on the build host, and the host tier of the vectors is
- * what catches getting that backwards.  It did.
+ * Everything else takes the portable form, which is also the only correct form
+ * elsewhere: reading the longword directly is right on a big-endian machine
+ * and wrong on the build host, and the host tier of the vectors catches that
+ * inversion.  It did.
  */
 static ULONG c68k_sha256_load_be(const UCHAR *p)
 {

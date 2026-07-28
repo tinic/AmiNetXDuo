@@ -10,9 +10,9 @@
  *   the same base every time and the connection is the only object with
  *   identity.
  *
- *   A TLSConnection owns a whole handshake's worth of memory (about 40 KB) and
- *   is allocated at TLSOpen() rather than reserved up front, because a machine
- *   that never makes a TLS connection should pay for none of it.
+ *   A TLSConnection owns a whole handshake's worth of memory (about 40 KB),
+ *   allocated at TLSOpen() rather than reserved up front, so a machine that
+ *   never makes a TLS connection pays for none of it.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -21,11 +21,11 @@
 #define AMINETXDUO_TLSLIB_INTERNAL_H
 
 /*
- * tx_api.h FIRST, and this is not a style choice: port/threadx-amiga/inc/
- * tx_port.h typedefs VOID, and so does <exec/types.h>.  Whichever comes second
- * loses, and the error ("two or more data types in declaration specifiers") is
- * a hundred lines away from the include that caused it.  tests/tls/tls_https.c
- * has the same ordering for the same reason.
+ * tx_api.h must come first: port/threadx-amiga/inc/tx_port.h typedefs VOID,
+ * and so does <exec/types.h>.  Whichever comes second loses, and the error
+ * ("two or more data types in declaration specifiers") points a hundred lines
+ * away from the include that caused it.  tests/tls/tls_https.c has the same
+ * ordering for the same reason.
  */
 #include "tx_api.h"
 #include "nx_api.h"
@@ -81,10 +81,10 @@
 /* ------------------------------------------------------- resumption --- */
 
 /*
- * A resumed TLS 1.2 handshake performs NO public-key arithmetic at all, which
- * on this machine is the difference between 6.8 s / 23.3 s and a fraction of a
- * second.  See src/tlslib/tls_resume.c for the mechanism and the evidence
- * behind choosing RFC 5077 tickets over session IDs.
+ * A resumed TLS 1.2 handshake performs no public-key arithmetic, which on this
+ * machine is the difference between 6.8 s / 23.3 s and a fraction of a second.
+ * See src/tlslib/tls_resume.c for the mechanism and the evidence behind
+ * choosing RFC 5077 tickets over session IDs.
  */
 
 #define TLS_MASTER_SECRET_SIZE      48
@@ -96,28 +96,27 @@
  * Largest session ticket we will keep.  Measured on the hosts this was
  * developed against: Cloudflare and nginx both issue 192 bytes, Google 240.
  *
- * The ceiling is not politeness, it is the ClientHello budget below.  A
- * ClientHello from this library runs to about 135 bytes plus the host name, so
- * 256 bytes of ticket plus 32 of session ID leaves roughly seventy bytes of
- * slack against the 500-byte cache even for a sixty-character host name.  A
- * ticket that does not fit is not offered, which costs a full handshake and
- * nothing worse -- but it would cost it SILENTLY, so the cap is set where
- * nothing measured comes close to it.
+ * The ceiling comes from the ClientHello budget below.  A ClientHello from
+ * this library runs to about 135 bytes plus the host name, so 256 bytes of
+ * ticket plus 32 of session ID leaves roughly seventy bytes of slack against
+ * the 500-byte cache even for a sixty-character host name.  A ticket that does
+ * not fit is not offered, which silently costs a full handshake and nothing
+ * worse, so the cap is set where nothing measured comes close to it.
  */
 #define TLS_RESUME_TICKET_MAX       256
 
 /*
  * NX_SECURE_TLS_SESSION carries `UCHAR nx_secure_tls_handshake_cache[500]`,
  * and _nx_secure_tls_send_handshake_record() memcpy()s the whole ClientHello
- * into it with NO bounds check.  Everything this library appends to a
- * ClientHello is therefore checked against this, and dropped rather than
- * written, because the alternative is a silent overwrite of the session
- * struct on a machine with no memory protection.
+ * into it with no bounds check.  Everything this library appends to a
+ * ClientHello is therefore checked against this and dropped rather than
+ * written; otherwise it is a silent overwrite of the session struct on a
+ * machine with no memory protection.
  */
 #define TLS_CLIENTHELLO_CACHE_MAX   500
 
-/* One cached session.  Deliberately fixed-size: it is also the on-disk
-   record, and a fixed stride means the file cannot be mis-parsed. */
+/* One cached session.  Fixed-size because it is also the on-disk record, and
+   a fixed stride means the file cannot be mis-parsed. */
 typedef struct TLSResumeEntry
 {
     char    re_Host[TLS_RESUME_HOST_MAX];   /* NUL-terminated, as connected  */
@@ -142,15 +141,15 @@ typedef struct TLSResumeEntry
  * In re_Flags, and folded into re_TrustKey along with everything else that
  * decides what a connection is worth.
  *
- * TLSRE_VERIFIED: a session established WITHOUT chain and host-name
+ * TLSRE_VERIFIED: a session established without chain and host-name
  * verification must never be resumed by a connection that asked for
  * verification -- that would let a program which used TLSA_NoVerify to reach a
  * printer poison the cache for every program after it.
  *
- * TLSRE_DATED: whether the certificate validity dates were actually checked.
- * On a machine with no clock they are skipped (tls_time.c), and a session
- * established that way must not be resumed once the clock has been set --
- * otherwise setting your clock silently fails to start checking expiry.
+ * TLSRE_DATED: whether the certificate validity dates were checked.  On a
+ * machine with no clock they are skipped (tls_time.c), and a session
+ * established that way must not be resumed once the clock has been set, or
+ * setting the clock silently fails to start checking expiry.
  */
 #define TLSRE_VERIFIED      (1U << 0)
 #define TLSRE_DATED         (1U << 1)
@@ -176,15 +175,15 @@ typedef struct TLSStoreEntry
 } TLSStoreEntry;
 
 /*
- * The index lives in the CONNECTION, not in the library base, and is read
+ * The index lives in the connection, not in the library base, and is read
  * fresh at every TLSOpen().
  *
- * Caching it in the base was the obvious design and was wrong twice over.  It
- * needs reload detection, because "replace the file" is the whole update story
- * and a resident library would otherwise keep serving the old roots.  And it
- * puts a pointer that one task can free -- a second TLSOpen() with a different
- * TLSA_TrustStore, or after the file changed -- under a pointer another task is
- * reading from inside a handshake, on a machine with no memory protection.
+ * Caching it in the base fails twice over.  It needs reload detection, because
+ * replacing the file is the whole update story and a resident library would
+ * otherwise keep serving the old roots.  And it puts a pointer that one task
+ * can free -- a second TLSOpen() with a different TLSA_TrustStore, or after
+ * the file changed -- under a pointer another task is reading from inside a
+ * handshake, on a machine with no memory protection.
  *
  * A per-connection index costs 1,428 bytes for the Mozilla set, against the
  * ~40 KB the connection already needs, and one 1.4 KB read against a handshake
@@ -198,14 +197,14 @@ typedef struct TLSStore
     ULONG           ts_Count;
 
     /*
-     * A fingerprint of WHICH ROOTS this store holds -- FNV-1a over the count
-     * and every index record.  Computed once when the index is read, which is
-     * the only moment the whole of it is in memory anyway, so it costs one
-     * pass over 1,428 bytes that were just read off the disk.
+     * A fingerprint of which roots this store holds -- FNV-1a over the count
+     * and every index record.  Computed once when the index is read, the only
+     * moment the whole of it is in memory, so it costs one pass over 1,428
+     * bytes that were just read off the disk.
      *
-     * It exists because a resumed handshake verifies NOTHING, so the cached
-     * session has to be keyed by the trust decision that established it and
-     * not merely by the fact that one happened.  See tls_resume.c.
+     * A resumed handshake verifies nothing, so the cached session has to be
+     * keyed by the trust decision that established it and not merely by the
+     * fact that one happened.  See tls_resume.c.
      */
     ULONG           ts_Fingerprint;
 } TLSStore;
@@ -228,23 +227,22 @@ struct TLSLibBase
     BOOL                    tb_CryptoReady;   /* ami_tls_crypto_initialize() */
 
     /*
-     * The resumption cache, and the reason it lives HERE rather than in a
-     * connection: a curl invocation is a process, and the second invocation is
-     * a different process.  A cache with a connection's lifetime would resume
-     * nothing that anybody actually does.  A shared library base outlives every
-     * program that opens it, so this is the state that makes "run fetch twice"
-     * fast.  Allocated on first use, so a machine that never completes a
-     * handshake never pays for it.
+     * The resumption cache lives here rather than in a connection: a curl
+     * invocation is a process, and the second invocation is a different
+     * process, so a cache with a connection's lifetime would resume nothing.
+     * A shared library base outlives every program that opens it, so this is
+     * the state that makes a second fetch fast.  Allocated on first use, so a
+     * machine that never completes a handshake never pays for it.
      */
     TLSResumeEntry         *tb_Sessions;      /* TLS_RESUME_SLOTS entries    */
     ULONG                   tb_SessionSerial;
 
     /*
-     * Which file the resident cache came from, so that a connection asking for
-     * a DIFFERENT TLSA_SessionFile gets that file's sessions instead of the
+     * Which file the resident cache came from, so a connection asking for a
+     * different TLSA_SessionFile gets that file's sessions instead of the
      * previous one's.  Without this the tag would be honoured on the write and
-     * ignored on the read, which is worse than not having it.  Empty and
-     * tb_SessionsLoaded set means "RAM only, nothing to reload".
+     * ignored on the read.  Empty with tb_SessionsLoaded set means RAM only,
+     * nothing to reload.
      */
     char                    tb_SessionPath[TLS_STORE_PATH_MAX];
     BOOL                    tb_SessionsLoaded;
@@ -292,8 +290,8 @@ struct TLSConnection
     ULONG                       tc_RootsLoaded;
     ULONG                       tc_RootKey[TLS_MAX_ROOTS];
 
-    /* Plaintext already decrypted and not yet handed to the caller.  This is
-       the whole reason TLSPending() and TLSWaitSelect() exist. */
+    /* Plaintext already decrypted and not yet handed to the caller -- why
+       TLSPending() and TLSWaitSelect() exist. */
     NX_PACKET                  *tc_Pending;
     ULONG                       tc_PendingOffset;
 
@@ -306,8 +304,8 @@ struct TLSConnection
     ULONG                       tc_ResumeFlags;
     UWORD                       tc_Port;
 
-    /* What we put in the ClientHello, kept so the ServerHello's echo can be
-       compared against it -- that echo is the whole acceptance signal. */
+    /* What went into the ClientHello, kept so the ServerHello's echo can be
+       compared against it -- that echo is the acceptance signal. */
     UBYTE                       tc_OfferSid[TLS_RESUME_SID_MAX];
     UBYTE                       tc_OfferSidLength;
 
@@ -357,14 +355,14 @@ ULONG tls_store_count(const TLSStore *store);
 ULONG tls_store_fetch(TLSStore *store, ULONG key, UCHAR *buffer, ULONG size);
 
 /* FNV-1a over a certificate's issuer Name DER, walked out of the raw
-   certificate.  0 means "could not find it", which no real key ever is
-   because tools/mkcertstore.py rejects that hash. */
+   certificate.  0 means not found, which no real key ever is because
+   tools/mkcertstore.py rejects that hash. */
 ULONG tls_cert_issuer_key(const NX_SECURE_X509_CERT *cert);
 
 /*
  * Put the connection in the session->connection registry.  Every connection
  * needs this, verified or not: it is how the vendored-override layer in
- * tls_resume.c finds its way back from an NX_SECURE_TLS_SESSION.
+ * tls_resume.c gets back from an NX_SECURE_TLS_SESSION to the connection.
  */
 VOID  tls_registry_add(TLSConnection *conn);
 
@@ -382,8 +380,7 @@ TLSConnection *tls_conn_for_session(const NX_SECURE_TLS_SESSION *session);
 
 /*
  * The value handed to nx_secure as "now", in UNIX seconds -- or 0, which is
- * nx_secure's own encoding for "do not check validity dates".  See tls_time.c
- * for the argument.
+ * nx_secure's own encoding for "do not check validity dates".  See tls_time.c.
  */
 ULONG tls_time_now(VOID);
 BOOL  tls_time_is_known(VOID);
@@ -409,9 +406,9 @@ VOID  tls_conn_leave(TLSConnection *conn);
 LONG  tls_error_from_nx(UINT status);
 
 /*
- * The serial-port commentary, compiled in only by -DTLS_RESUME_TRACE.  It
- * lives in tls_resume.c because that is where most of it is used; nothing in a
- * shipping build calls it, and nothing in a shipping build contains it.
+ * Serial-port tracing, compiled in only by -DTLS_RESUME_TRACE.  It lives in
+ * tls_resume.c, where most of it is used; a shipping build neither calls nor
+ * contains it.
  */
 #ifdef TLS_RESUME_TRACE
 VOID tls_trace(const char *fmt, ...);

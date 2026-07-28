@@ -1,15 +1,13 @@
 | AmiNetXDuo -- crypto68k: P-256 carry chains, 68020 assembly.
 |
-| WHAT THE COMPILER WAS ALREADY DOING, AND WHY IT IS NOT ENOUGH HERE
-|
 |   The sibling RSA work established the rule that matters on this machine:
 |   GCC 15.2 emits MULU.L, so hand-written multiply loops buy 1.4x and not 4x.
-|   That rule still holds -- c68k_p256.c's field multiply calls c68k_addmul_1
-|   and is within a whisker of the MULU.L floor, and nothing here touches it.
+|   That still holds -- c68k_p256.c's field multiply calls c68k_addmul_1 and is
+|   within a whisker of the MULU.L floor, and nothing here touches it.
 |
-|   Carry PROPAGATION is a different case, and the disassembly says so.  GCC
-|   cannot express "add, then add the carry into the next word" as ADD.L
-|   followed by ADDX.L, because C has no carry flag: the source has to say
+|   Carry propagation is a different case, per the disassembly.  GCC cannot
+|   express "add, then add the carry into the next word" as ADD.L followed by
+|   ADDX.L, because C has no carry flag: the source has to say
 |   `lo += v; if (lo < v) hi++;`, and -O2 -m68020 turns each such term into
 |
 |       movel   a2@(36),d2
@@ -31,33 +29,31 @@
 |   on a field multiply, and 1.13x on every elliptic curve operation above it
 |   (an ECDSA verify went from 2.209 s to 1.961 s).
 |
-|   1.13x is the whole claim.  It is worth having and it is not a headline: the
-|   3.8x that c68k_p256.c gets comes from throwing away NX_CRYPTO_HUGE_NUMBER,
-|   not from this file.  Anyone tempted to hand-write more of the module should
-|   note that the field multiply is now 74% MULU.L, so the remaining ceiling
-|   from assembly is about 1.2x and most of it is the per-call overhead of the
-|   eight c68k_addmul_1 invocations, not the instruction selection inside them.
+|   1.13x is the whole claim; the 3.8x that c68k_p256.c gets comes from
+|   dropping NX_CRYPTO_HUGE_NUMBER, not from this file.  Before hand-writing
+|   more of the module, note that the field multiply is now 74% MULU.L, so the
+|   remaining ceiling from assembly is about 1.2x, most of it the per-call
+|   overhead of the eight c68k_addmul_1 invocations rather than the instruction
+|   selection inside them.
 |
-| WHY THE MOVE INSTRUCTIONS BETWEEN THE ADDX CHAIN ARE SAFE
+|   The MOVE instructions inside the ADDX chain are safe: on m68k, MOVE and
+|   MOVEQ set N and Z but leave X alone, and only arithmetic instructions write
+|   X.  So a limb's result can be stored, and the next limb's operand loaded,
+|   mid-carry-chain without a save-and-restore.  Scc likewise does not touch
+|   the CCR.
 |
-|   On m68k, MOVE and MOVEQ set N and Z but leave X ALONE.  Only the
-|   arithmetic instructions write X.  That is what lets a limb's result be
-|   stored, and the next limb's operand loaded, in the middle of a carry chain
-|   without a save-and-restore.  Scc likewise does not touch the CCR.
-|
-| REGISTER RULES (m68k-amigaos, stack calling convention)
+| Register rules (m68k-amigaos, stack calling convention)
 |
 |   Arguments on the stack from 4(sp) upward; return value in d0; d0/d1/a0/a1
 |   are scratch and d2-d7/a2-a6 must be preserved.
 |
-| THE 68060 RULE APPLIES TO THE MODULE, NOT TO THIS FILE
+| The 68060 rule applies to the module, not to this file
 |
 |   Nothing here uses MULU.L, so this file alone would be safe on a 68060.  It
-|   is nevertheless under the same AMINETXDUO_CRYPTO68K_ASM guard as
-|   c68k_prim.S, because the module is built as one unit and c68k_prim.S must
-|   never be enabled for an 060: MULU.L's 32x32->64 form is NOT IMPLEMENTED
-|   there, it traps to vector 61 and is emulated.  One guard, one rule, no
-|   chance of half a build.
+|   is still under the same AMINETXDUO_CRYPTO68K_ASM guard as c68k_prim.S,
+|   because the module is built as one unit and c68k_prim.S must never be
+|   enabled for an 060: MULU.L's 32x32->64 form is unimplemented there, traps
+|   to vector 61 and is emulated.  One guard, one rule.
 |
 | SPDX-License-Identifier: MIT
 
@@ -135,9 +131,9 @@ _c68k_p256_sub_raw:
 | INT c68k_p256_reduce_core(c68k_limb *r, const c68k_limb *t)
 |
 | The Solinas reduction of FIPS 186-4 D.2.3, collapsed to one pass over the
-| eight output limbs.  Writes r[0..7] and RETURNS the signed coefficient of
-| 2^256 that is left over; the caller folds it in with conditional additions
-| and subtractions of p.  Measured to stay within [-4, 4].
+| eight output limbs.  Writes r[0..7] and returns the leftover signed
+| coefficient of 2^256; the caller folds it in with conditional additions and
+| subtractions of p.  Measured to stay within [-4, 4].
 |
 | The term lists are the same ones c68k_p256.c documents and the C fallback
 | implements, and were verified against Python's arbitrary precision
@@ -162,8 +158,8 @@ _c68k_p256_sub_raw:
 .endm
 
 | Store the finished limb and shift the signed carry down into lo.
-| MOVE.L sets N from hi, Scc reads it, and neither writes X -- which does not
-| matter here only because every limb below starts with a plain ADD.L.
+| MOVE.L sets N from hi, Scc reads it, and neither writes X -- immaterial here
+| because every limb below starts with a plain ADD.L.
 .macro  PNEXT
         move.l  d0,(a0)+
         move.l  d1,d0

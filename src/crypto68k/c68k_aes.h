@@ -3,9 +3,9 @@
  *
  *   docs/RESEARCH.md 15 measured the bulk path against AmiSSL and found a dead
  *   heat -- 85.3 ms against 84.2 ms for 16 KiB of AES-128-CBC -- for the same
- *   reason on both sides: neither tree has a single byte of m68k assembly for
- *   it.  That row is the one that decides `https://` throughput, because it is
- *   paid on every byte of every transfer rather than once per connection.
+ *   reason on both sides: neither tree has any m68k assembly for it.  That row
+ *   decides `https://` throughput, being paid on every byte of every transfer
+ *   rather than once per connection.
  *
  *   This and c68k_sha256.c are the record path for 0xC027 and 0xC023, both
  *   AES-128-CBC with HMAC-SHA256, which is what a server negotiates when it
@@ -14,34 +14,33 @@
  *
  *   tests/perf/cpucal on the A1200 profile, -k 56:
  *
- *     32 KB / 64 B read ratio  0.88x        -- there is NO data cache
+ *     32 KB / 64 B read ratio  0.88x        -- no data cache
  *     Fast RAM longword read   117.7 ns     -- 6.6 cycles, against ADD.L's 2
  *     Fast RAM byte read        29.4 ns/B
  *     instruction cache        256 bytes
  *
- *   No data cache is the interesting constraint, because the classic AES
- *   four-table layout is an argument about cache footprint, and on this
- *   machine footprint costs nothing at all: a lookup into a 4 KB table and a
- *   lookup into a 1 KB table are the same instruction with the same bus cycle.
- *   So the usual reason to prefer one table and three rotates over four tables
- *   -- the 3 KB it saves in a cache that would otherwise hold the state --
- *   does not exist here, and the rotates are pure loss.  That is the single
- *   biggest decision in this file and it was measured, not assumed; see
- *   c68k_aes_variant below and the numbers in docs/RESEARCH.md 16.
+ *   No data cache is the constraint that matters.  The classic AES four-table
+ *   layout is an argument about cache footprint, and here footprint costs
+ *   nothing: a lookup into a 4 KB table and a lookup into a 1 KB table are the
+ *   same instruction with the same bus cycle.  The usual reason to prefer one
+ *   table and three rotates over four tables -- the 3 KB it saves in a cache
+ *   that would otherwise hold the state -- does not apply, and the rotates are
+ *   pure loss.  Measured, not assumed; see c68k_aes_variant below and
+ *   docs/RESEARCH.md 16.
  *
- *   The other half of the answer is that AES on this machine is NOT memory
- *   bound.  160 table reads per block at ~140 ns is 22 us against a measured
- *   83 us per block, so three quarters of the cost is instruction issue, and
- *   the lever is the instruction count of the byte extraction rather than the
- *   number of bytes read.  A byte-oriented S-box implementation -- which
- *   trades 4-byte reads for 1-byte reads and pays for MixColumns in the ALU --
- *   moves the wrong one of those two, and measured accordingly.
+ *   AES on this machine is also not memory bound.  160 table reads per block
+ *   at ~140 ns is 22 us against a measured 83 us per block, so three quarters
+ *   of the cost is instruction issue, and the lever is the instruction count
+ *   of the byte extraction rather than the number of bytes read.  A
+ *   byte-oriented S-box implementation -- trading 4-byte reads for 1-byte
+ *   reads and paying for MixColumns in the ALU -- moves the wrong one of those
+ *   two, and measured accordingly.
  *
- * CONSTANT TIME: NO.  Table-driven AES is not, on any machine without a data
+ * Not constant time.  Table-driven AES cannot be, on a machine with no data
  * cache to hide the access pattern in, and this one has neither the cache nor
  * a defence.  docs/RESEARCH.md 9's threat model -- a vintage machine on a LAN,
- * no remote timing attacker -- is what makes that acceptable here.  It would
- * not be acceptable for a server.
+ * no remote timing attacker -- makes that acceptable here.  It would not be
+ * for a server.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -79,9 +78,9 @@ typedef struct C68K_AES_STRUCT
 UINT c68k_aes_key_set(C68K_AES *aes, const UCHAR *key, UINT key_bits);
 
 /*
- * One block, ECB.  Present because the vectors are specified that way and
- * because CCM/CTR would want it; the record path uses the CBC entry points
- * below, which do not call through here.
+ * One block, ECB.  The vectors are specified that way and CCM/CTR would want
+ * it; the record path uses the CBC entry points below, which do not call
+ * through here.
  */
 VOID c68k_aes_encrypt_block(const C68K_AES *aes, const UCHAR *in, UCHAR *out);
 VOID c68k_aes_decrypt_block(const C68K_AES *aes, const UCHAR *in, UCHAR *out);
@@ -93,8 +92,8 @@ VOID c68k_aes_decrypt_block(const C68K_AES *aes, const UCHAR *in, UCHAR *out);
  * 68020 does misaligned longword accesses in hardware and a TLS record's
  * payload starts 21 bytes into the buffer.
  *
- * Fused rather than "call a block cipher through a function pointer per 16
- * bytes, then XOR in a second pass", which is what nx_crypto_cbc.c does.  The
+ * Fused rather than calling a block cipher through a function pointer per 16
+ * bytes and XORing in a second pass, which is what nx_crypto_cbc.c does.  The
  * chaining value never leaves registers.
  */
 VOID c68k_aes_cbc_encrypt(const C68K_AES *aes, UCHAR *iv,
@@ -107,13 +106,12 @@ VOID c68k_aes_cbc_decrypt(const C68K_AES *aes, UCHAR *iv,
 
 /*
  * Which implementation the entry points above dispatch to.  A variable and
- * not a build option for the same reason c68k_karatsuba_limbs is one: the
- * question "which of these is right for a machine with no data cache" is
- * answered by timing them against each other in ONE process on the same
- * buffer, and by checking each against the others' output before believing
- * any of it.  tests/crypto68k/crypto68k_bulk does exactly that.
+ * not a build option for the same reason c68k_karatsuba_limbs is one: which
+ * form suits a machine with no data cache is settled by timing them against
+ * each other in one process on the same buffer, and by checking each against
+ * the others' output.  tests/crypto68k/crypto68k_bulk does that.
  *
- * The default is C68K_AES_V_BEST, which is whichever won.
+ * The default is C68K_AES_V_BEST, whichever won.
  */
 #define C68K_AES_V_T4_C     0u  /* four 1 KB tables, portable C              */
 #define C68K_AES_V_T1_C     1u  /* one 1 KB table + three rotates, portable C */
@@ -123,10 +121,9 @@ VOID c68k_aes_cbc_decrypt(const C68K_AES *aes, UCHAR *iv,
 #define C68K_AES_V_COUNT    5u
 
 /*
- * The default.  It resolves to the C form in a build without the assembly --
- * AMINETXDUO_CRYPTO68K_ASM=OFF, which CI builds as one of its four
- * configurations -- so that the reported variant is never a name for code
- * that is not there.
+ * Resolves to the C form in a build without the assembly --
+ * AMINETXDUO_CRYPTO68K_ASM=OFF, one of CI's four configurations -- so the
+ * reported variant never names code that is not there.
  */
 #ifdef C68K_ASM
 #define C68K_AES_V_BEST     C68K_AES_V_T4_ASM
@@ -136,7 +133,7 @@ VOID c68k_aes_cbc_decrypt(const C68K_AES *aes, UCHAR *iv,
 
 extern UINT c68k_aes_variant;
 
-/* Name of a variant, for a report that cannot mislabel a row. */
+/* Name of a variant, so a report cannot mislabel a row. */
 const char *c68k_aes_variant_name(UINT variant);
 
 /* NX_CRYPTO_TRUE when `variant` is assembly that this build actually has. */

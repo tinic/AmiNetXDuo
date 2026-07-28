@@ -3,12 +3,11 @@
  *
  * See c68k_poly1305.h for why the limbs are 2^26 wide.
  *
- * WHERE THIS CAME FROM: written here, from RFC 8439's specification.  The
- * five-limb radix-2^26 decomposition it uses is the standard one for a 32-bit
- * machine -- it is what Bernstein's original description does and what
- * poly1305-donna (Andrew Moon, public domain) made the common spelling of --
- * and the clamp constants below are the RFC's, transposed into those limbs.
- * No code was copied from either.
+ * Written here from RFC 8439's specification.  The five-limb radix-2^26
+ * decomposition is the standard one for a 32-bit machine -- what Bernstein's
+ * original description does and what poly1305-donna (Andrew Moon, public
+ * domain) made the common spelling -- and the clamp constants below are the
+ * RFC's, transposed into those limbs.  No code was copied from either.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -23,8 +22,8 @@
  * The 68020 does misaligned data accesses in hardware, so this is one MOVE.L
  * and a three-instruction byte reversal; the portable form GCC compiles the
  * shifts-and-ORs into is four byte reads and six ALU operations.  Same
- * reasoning and the same __mc68020__ guard as c68k_sha256_load_be(), with the
- * reversal added because Poly1305 reads its input little-endian and this is a
+ * reasoning and the same __mc68020__ guard as c68k_sha256_load_be(), with a
+ * reversal because Poly1305 reads its input little-endian and this is a
  * big-endian machine. */
 static ULONG c68k_poly1305_load_le(const UCHAR *p)
 {
@@ -95,11 +94,11 @@ ULONG   t0, t1, t2, t3;
  * withholds from a short final one, passed in rather than tested for, so the
  * loop has no branch in it.
  *
- * The twenty-five products are the whole cost.  Each one is a MULU.L with a
- * 64-bit destination -- real on a 68020, and the reason src/crypto68k exists
- * at all -- and the s1..s4 values are r1..r4 pre-multiplied by five, which is
- * the reduction of the terms that fall off the top of the 130-bit accumulator
- * folded into the multiplier instead of into a separate pass.
+ * The twenty-five products are the whole cost.  Each is a MULU.L with a 64-bit
+ * destination -- real on a 68020, and the reason src/crypto68k exists at all.
+ * The s1..s4 values are r1..r4 pre-multiplied by five: the reduction of the
+ * terms that fall off the top of the 130-bit accumulator, folded into the
+ * multiplier instead of into a separate pass.
  */
 VOID c68k_poly1305_blocks_c(C68K_POLY1305 *ctx, const UCHAR *m,
                             ULONG blocks, ULONG hibit)
@@ -157,7 +156,7 @@ ULONG64 d0, d1, d2, d3, d4;
         d4 = ((ULONG64)h0 * r4) + ((ULONG64)h1 * r3) + ((ULONG64)h2 * r2) +
              ((ULONG64)h3 * r1) + ((ULONG64)h4 * r0);
 
-        /* h %= 2^130 - 5, partially: enough that the next block cannot
+        /* h %= 2^130 - 5, partially -- enough that the next block cannot
            overflow, with the last carry folded round by the factor of five. */
         c  = (ULONG)(d0 >> 26); h0 = (ULONG)d0 & 0x03FFFFFFuL;
         d1 += c; c = (ULONG)(d1 >> 26); h1 = (ULONG)d1 & 0x03FFFFFFuL;
@@ -180,11 +179,11 @@ ULONG64 d0, d1, d2, d3, d4;
 
 
 /*
- * Which one the rest of this file calls.  A macro rather than a wrapper for
- * the same reason c68k_chacha20.c's is: the build without the assembly should
- * have no extra call at all, and there is nothing here to choose between --
- * the assembly is the same function, faster, on every part that can run it.
- * AMINETXDUO_CRYPTO68K_ASM=OFF, the 68000 and the 68060 take the C.
+ * Which one the rest of this file calls.  A macro rather than a wrapper, as in
+ * c68k_chacha20.c: a build without the assembly gets no extra call, and there
+ * is nothing to choose between -- the assembly is the same function, faster,
+ * on every part that can run it.  AMINETXDUO_CRYPTO68K_ASM=OFF, the 68000 and
+ * the 68060 take the C.
  */
 #ifdef C68K_ASM
 extern VOID c68k_poly1305_blocks_asm(C68K_POLY1305 *ctx, const UCHAR *m,
@@ -193,9 +192,9 @@ extern VOID c68k_poly1305_blocks_asm(C68K_POLY1305 *ctx, const UCHAR *m,
 
 /*
  * c68k_poly1305.S reaches into C68K_POLY1305 with two hardcoded offsets, and
- * a struct that moved under it would be a wrong tag rather than a crash.  So
- * it is a build failure instead.  (An array of negative size; this tree is
- * built as C89 and _Static_assert is not available.)
+ * a struct that moved under it would give a wrong tag rather than a crash, so
+ * make it a build failure.  (An array of negative size; this tree is built as
+ * C89 and _Static_assert is not available.)
  */
 typedef char c68k_poly1305_layout_check[
     (offsetof(C68K_POLY1305, c68k_poly1305_r) == 0u &&
@@ -205,11 +204,11 @@ typedef char c68k_poly1305_layout_check[
 #endif
 
 /*
- * The dispatch, as a real function, because tests/crypto68k/crypto68k_bulk
- * has to be able to call the shipped kernel and the portable one over the
- * same input and compare -- and it is not compiled with C68K_ASM, so it
- * cannot make the choice itself.  Nothing on the hot path goes through here:
- * update() and finish() below call the macro.
+ * The dispatch, as a real function, so tests/crypto68k/crypto68k_bulk can call
+ * the shipped kernel and the portable one over the same input and compare; it
+ * is not compiled with C68K_ASM, so it cannot make the choice itself.  Nothing
+ * on the hot path goes through here: update() and finish() below call the
+ * macro.
  */
 VOID c68k_poly1305_blocks(C68K_POLY1305 *ctx, const UCHAR *m, ULONG blocks,
                           ULONG hibit)
@@ -315,7 +314,7 @@ UINT    i;
     h3 = ctx -> c68k_poly1305_h[3];
     h4 = ctx -> c68k_poly1305_h[4];
 
-    /* Carry fully, which the block loop deliberately does not. */
+    /* Carry fully, which the block loop does not. */
     c = h1 >> 26; h1 &= 0x03FFFFFFuL;
     h2 += c; c = h2 >> 26; h2 &= 0x03FFFFFFuL;
     h3 += c; c = h3 >> 26; h3 &= 0x03FFFFFFuL;
@@ -332,7 +331,7 @@ UINT    i;
     g4 = h4 + c - ((ULONG)1uL << 26);
 
     /* Branch-free select: the borrow is g4's sign bit, and ULONG is 32 bits
-       here by the contract in the header. */
+       here, as the header requires. */
     mask = (g4 >> 31) - 1uL;
     g0 &= mask;
     g1 &= mask;

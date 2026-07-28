@@ -75,7 +75,7 @@
        "  UAE          uaenet.device\n\n"
        "UAE's driver is in the emulator rather than on disk, so it is not "
        "detected like the others and must be selected explicitly.\n\n"
-       "Select the card fitted to this machine.  If a driver was found in "
+       "Select the card this machine has.  If a driver was found in "
        "DEVS: the matching entry is already selected, and that is almost "
        "always correct.\n\n"
        "A card that is not listed goes under the last entry, where the "
@@ -494,7 +494,7 @@
 (if (AND (= @user-level 0) (AND (< DET_INDEX 0) (= HAVE_OLD 0)))
     (abort "The installer could not find a network card driver in DEVS: or "
            "DEVS:Networks, and in Novice mode it cannot ask which card is "
-           "fitted.\n\n"
+           "installed.\n\n"
            "Either copy the card's .device driver into DEVS: first, or "
            "start this installer again and choose \"Intermediate User\" so "
            "so that the card can be picked from a list.\n\n"
@@ -508,7 +508,7 @@
   "AmiNetXDuo " VERSION_STR " -- a TCP/IP stack for AmigaOS.\n\n"
   "This installs bsdsocket.library and usergroup.library into LIBS:, seven "
   "network commands into C:, and writes a working configuration into DEVS:.\n\n"
-  "It asks which network card is fitted and whether the network hands out "
+  "It asks which network card is installed and whether the network hands out "
   "addresses automatically.  Nothing else is required.\n\n")
 
 (complete 0)

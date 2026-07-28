@@ -9,15 +9,14 @@
  * src/net68k/n68k_checksum_hook.c uses for the checksum.  Nothing is patched
  * and no call site changes.
  *
- * MEASURED, because 23% on a primitive is not 23% on a stack.  See
+ * Measured, since 23% on a primitive is not 23% on a stack.  See
  * docs/RESEARCH.md: n68k_copy_bytes() is 176.6 ns/B against libm020 memcpy's
  * 216-224 ns/B, the loopback data path spends three copies per byte, and the
  * end-to-end effect on a megabyte of TCP is in that table.  The option exists
  * so the two can be built from one tree and compared.
  *
- * What this does not do: it does not make memcpy() safe for overlapping
- * regions.  Neither does the C library's -- that is what memmove() is for,
- * and memmove() is deliberately left alone.
+ * This does not make memcpy() safe for overlapping regions.  Neither does the
+ * C library's -- that is what memmove() is for, and memmove() is left alone.
  *
  * SPDX-License-Identifier: MIT
  */

@@ -1,47 +1,43 @@
 | AmiNetXDuo -- crypto68k: the Poly1305 block function, 68020 assembly.
 |
-| WHAT THIS IS
-|
-|   One entry point with the same contract as c68k_poly1305_blocks_c() beside
+|   One entry point with the same interface as c68k_poly1305_blocks_c() beside
 |   it: h = (h + m) * r mod 2^130 - 5 over some number of whole 16-byte
 |   blocks, five limbs of 26 bits, `hibit` supplying the 2^128 term that a
 |   full block carries and a short final one does not.  Everything else --
 |   the clamp, the buffering, the final reduction, the one-time key -- stays
-|   in C, for the same reason c68k_chacha20.S leaves the AEAD there.
+|   in C, as c68k_chacha20.S leaves the AEAD there.
 |
-|   WHERE IT CAME FROM: written here, from RFC 8439 section 2.5, as the C
-|   beside it was.  The five-limb radix-2^26 split is the standard 32-bit
-|   decomposition -- Bernstein described it and poly1305-donna (Andrew Moon,
-|   public domain) made it the common spelling -- and the clamp constants are
-|   the RFC's.  NO CODE OR SCHEDULE WAS TAKEN FROM DONNA OR FROM ANY OTHER
-|   IMPLEMENTATION: what is shared with it is the mathematics, which is the
-|   RFC's, and nothing below -- the register map, the memory-operand multiply,
-|   the misaligned limb loads, the loop over the five product columns -- has a
-|   counterpart there.  The schedule was simulated against RFC 8439 section
-|   2.5.2 before a line of this was typed, and the assembled article is
+|   Written here from RFC 8439 section 2.5, as the C beside it was.  The
+|   five-limb radix-2^26 split is the standard 32-bit decomposition --
+|   Bernstein described it and poly1305-donna (Andrew Moon, public domain) made
+|   it the common spelling -- and the clamp constants are the RFC's.  No code
+|   or schedule was taken from donna or any other implementation; what is
+|   shared is the RFC's mathematics, and nothing below -- the register map, the
+|   memory-operand multiply, the misaligned limb loads, the loop over the five
+|   product columns -- has a counterpart there.  The schedule was simulated
+|   against RFC 8439 section 2.5.2 before this was written, and the result is
 |   checked against 2.5.2, against 2.8.2 and against the C limb for limb over
 |   many blocks by tests/crypto68k/crypto68k_bulk.
 |
-| WHY IT EXISTS, AND WHAT THE CEILING IS
+| Why it exists, and what the ceiling is
 |
 |   docs/RESEARCH.md 58 wrote the cipher and left this: Poly1305 became 64% of
 |   an AEAD record.  Its estimate of what was available was 20-30% rather than
-|   the third ChaCha20 gave up, because twenty-five MULU.L a block is an
-|   instruction nobody can schedule away -- 1,075 cycles of about 2,900 on
-|   real hardware, and this emulator charges 32 for MULU.L where a 68020
-|   charges 43 (docs/RESEARCH.md 18.1, 54).
+|   the third ChaCha20 gave up, because twenty-five MULU.L a block cannot be
+|   scheduled away -- 1,075 cycles of about 2,900 on real hardware, and this
+|   emulator charges 32 for MULU.L where a 68020 charges 43
+|   (docs/RESEARCH.md 18.1, 54).
 |
-|   THE OTHER TWO THIRDS ARE THE 130-BIT ACCUMULATE, and that is where the
-|   compiler is at a structural disadvantage rather than merely a scheduling
-|   one.  A 32x32 -> 64 product lands in a REGISTER PAIR and a 64-bit add is
-|   ADD.L plus ADDX.L; C can only reach either through `unsigned long long`,
-|   and at -Os GCC gives every one of the twenty-five products a round trip
-|   through the frame -- two stores and two loads, ~28 cycles, 690 a block --
-|   on top of not inlining the little-endian limb load at all.  The 300-byte
-|   stack frame in the -Os disassembly is that, and it is what this file is
-|   for.
+|   The other two thirds are the 130-bit accumulate, where the compiler is at a
+|   structural disadvantage rather than a scheduling one.  A 32x32 -> 64
+|   product lands in a register pair and a 64-bit add is ADD.L plus ADDX.L; C
+|   can only reach either through `unsigned long long`, and at -Os GCC gives
+|   every one of the twenty-five products a round trip through the frame -- two
+|   stores and two loads, ~28 cycles, 690 a block -- on top of not inlining the
+|   little-endian limb load at all.  That is the 300-byte stack frame in the
+|   -Os disassembly, and what this file removes.
 |
-| THE PROBLEM: FOURTEEN LIVE VALUES, FIFTEEN REGISTERS, AND MULU.L's <ea>
+| Fourteen live values, fifteen registers, and MULU.L's <ea>
 |
 |   A block is
 |
@@ -50,33 +46,32 @@
 |   where K is r0..r4 below the diagonal and 5*r1..5*r4 above it -- the
 |   reduction of the terms that fall off the top of 2^130, folded into the
 |   multiplier instead of into a separate pass.  So the values live across the
-|   whole block are five accumulator limbs and NINE constants, and the five
-|   new limbs have to go somewhere as they are produced.  That does not fit
-|   eight data registers and it does not fit fifteen either.
+|   whole block are five accumulator limbs and nine constants, and the five
+|   new limbs have to go somewhere as they are produced: more than eight data
+|   registers, and more than fifteen registers.
 |
-|   It fits because MULU.L takes a DATA ADDRESSING MODE, not just a register:
+|   It fits because MULU.L takes a data addressing mode, not just a register:
 |
 |       mulu.l  d16(An),Dh:Dl        Dl * memory -> Dh:Dl
 |
-|   so the nine constants live in the frame and are never loaded at all, and
-|   the five accumulator limbs live in ADDRESS registers -- MOVE.L An,Dn costs
-|   what MOVE.L Dn,Dm costs, and the multiplicand has to be moved into Dl in
-|   either case.  tests/crypto68k/crypto68k_bulk prices the operand before
-|   this file relies on it, and the answer is that the operand is very nearly
-|   free:
+|   so the nine constants live in the frame and are never loaded, and the five
+|   accumulator limbs live in address registers -- MOVE.L An,Dn costs what
+|   MOVE.L Dn,Dm costs, and the multiplicand has to be moved into Dl either
+|   way.  tests/crypto68k/crypto68k_bulk prices the operand before this file
+|   relies on it; it is very nearly free:
 |
 |       MULU.L Dn,Dh:Dl          31.90 cycles     the register form
 |       MULU.L (An),Dh:Dl        31.90            straight out of the frame
 |       MULU.L d16(An),Dh:Dl     33.94            ... with a displacement
 |
 |   Two cycles on a 32-cycle instruction, and nothing for the undisplaced
-|   form, which is why the constant pointer is stepped rather than indexed
-|   from the frame pointer.  ADDX.L Dn,Dm costs 1.99 in the same table, so a
-|   64-bit accumulate is 4 cycles on top of the multiply and the whole block
-|   is twenty-five products of four instructions -- MOVE.L An,Dl, MULU.L,
-|   ADD.L, ADDX.L -- with not one spill.
+|   form, so the constant pointer is stepped rather than indexed from the frame
+|   pointer.  ADDX.L Dn,Dm costs 1.99 in the same table, so a 64-bit accumulate
+|   is 4 cycles on top of the multiply and the whole block is twenty-five
+|   products of four instructions -- MOVE.L An,Dl, MULU.L, ADD.L, ADDX.L --
+|   with no spills.
 |
-| THE LOOP OVER j, WHICH IS A CACHE DECISION AND NOT A SIZE ONE
+| The loop over j is a cache decision, not a size one
 |
 |   Fully unrolled, the five columns are 25 products of 12 bytes and the block
 |   body comes to about 500 bytes against a 256-byte instruction cache.  Rolled
@@ -86,14 +81,13 @@
 |   to the frame per column, and reading those five back in the message phase:
 |   roughly 125 cycles of about 1,425, a tenth.
 |
-|   That trade is taken deliberately and it is the one measurement in this file
-|   that the emulator argues AGAINST.  It does not charge for instruction fetch
-|   -- section 1's cache sweep reports a 2048-byte straight-line body FASTER
-|   per ADD.L (144.8 ns) than a 256-byte one (151.2), which is the wrong way
-|   round -- so the unrolled form measures better here and would be fetching
-|   500 bytes over a 16-bit bus on the machine this is actually for.  Every
-|   figure this file is credited with is therefore a lower bound on real
-|   hardware, and by a wider margin than the unrolled version would be.
+|   This is the one measurement in the file the emulator argues against.  It
+|   does not charge for instruction fetch -- section 1's cache sweep reports a
+|   2048-byte straight-line body faster per ADD.L (144.8 ns) than a 256-byte
+|   one (151.2) -- so the unrolled form measures better here and would be
+|   fetching 500 bytes over a 16-bit bus on the target machine.  Every figure
+|   this file is credited with is therefore a lower bound on real hardware, by
+|   a wider margin than the unrolled version would be.
 |
 |   The constants are laid out so that one pointer serves the whole loop:
 |
@@ -101,10 +95,10 @@
 |
 |   because K[j][i] is exactly C[4+j-i] -- check the corners, K[0][0] = C[4] =
 |   r0 and K[4][4] = C[4] = r0, K[0][4] = C[0] = s1, K[4][0] = C[8] = r4 -- so
-|   column j reads five DESCENDING longwords from &C[4+j], and stepping to the
+|   column j reads five descending longwords from &C[4+j], and stepping to the
 |   next column is one ADDQ.
 |
-| THE MESSAGE, WHICH IS FIVE MISALIGNED READS AND NOT FOUR ALIGNED ONES
+| The message: five misaligned reads, not four aligned ones
 |
 |   A 16-byte block splits into limbs at bits 26, 52, 78 and 104, which do not
 |   fall on longword boundaries, so the obvious form reads four longwords and
@@ -113,13 +107,12 @@
 |   of those is a register count or a SWAP and a shift.
 |
 |   Reading the block at byte offsets 0, 3, 6, 9 and 12 instead puts every
-|   limb inside ONE longword, and the shift counts become 0, 2, 4, 6 and 8 --
-|   all immediate.  The 68020 does misaligned longword reads in hardware,
-|   which is what makes it legal, and none of the five reads leaves the block.
-|   It costs one more byte reversal than the four-read form and saves the
-|   whole reassembly.
+|   limb inside one longword, and the shift counts become 0, 2, 4, 6 and 8, all
+|   immediate.  The 68020 does misaligned longword reads in hardware, and none
+|   of the five reads leaves the block.  It costs one more byte reversal than
+|   the four-read form and saves the whole reassembly.
 |
-| REGISTERS
+| Registers
 |
 |   d0       the low half of the 64-bit column accumulator, and between
 |            columns the carry -- it is left there rather than moved
@@ -137,8 +130,8 @@
 |   m68k-amigaos: arguments on the stack, d0/d1/a0/a1 scratch, d2-d7/a2-a6
 |   preserved.
 |
-| CONSTANT TIME: yes.  No branch below depends on anything but the block
-| count, and there is no table.
+| Constant time: no branch below depends on anything but the block count, and
+| there is no table.
 |
 | SPDX-License-Identifier: MIT
 

@@ -1,9 +1,7 @@
 | AmiNetXDuo -- crypto68k limb primitives, 68020 assembly.
 |
-| WHAT THE COMPILER WAS ALREADY DOING
-|
-|   GCC 15.2 does emit MULU.L for the portable C.  This was checked, not
-|   assumed: nx_crypto_huge_number.c built -O2 -m68020 disassembles to
+|   GCC 15.2 does emit MULU.L for the portable C.  Checked, not assumed:
+|   nx_crypto_huge_number.c built -O2 -m68020 disassembles to
 |
 |       1aea:  2c19       movel a1@+,d6         | y[j]
 |       1aec:  2a2f 007c  movel sp@(124),d5     | xi, reloaded every iteration
@@ -29,7 +27,7 @@
 |   cannot decode MULU.L and prints it as `.short 0x4c06`.  Pass
 |   `-m m68k:68020` or you will conclude there is no multiply at all.)
 |
-|   So there is NO __muldi3 helper call to eliminate.  That matters for
+|   So there is no __muldi3 helper call to eliminate.  That matters for
 |   calibration against the prior art: when Howard Chu measured his 68k bignum
 |   assembly at "over 4x faster than gcc -O3" in 2002 (openssl-dev, "M68020
 |   bn_asm", https://marc.info/?l=openssl-dev&m=101407286200398&w=2 -- the code
@@ -39,16 +37,14 @@
 |   above (seventeen when the same C is compiled standalone, where `a` survives
 |   in a register instead of being spilled) against five and a half below, on a
 |   CPU where MULU.L alone is 44 of the ~101 cycles.  Measured on the emulated
-|   68020, this file is 1.4x the portable C for a 64-limb multiply-accumulate.
-|   Not 4x, and no instruction selection will make it 4x: at 44 cycles of a
-|   ~67 cycle loop, the multiply is the floor and everything else is rounding.
-|
-| WHY THIS LOOP LOOKS THE WAY IT DOES
+|   68020, this file is 1.4x the portable C for a 64-limb multiply-accumulate,
+|   and no instruction selection will make it 4x: at 44 cycles of a ~67 cycle
+|   loop, the multiply is the floor and everything else is rounding.
 |
 |   The two-limb unroll with the carry ping-ponged between d0 and d1 is GMP's
 |   design, from mpn/m68k/mc68020/aorsmul_1.asm (25 cycles/limb on a 68040);
-|   libgcrypt's mpi/m68k/mc68020/mpih-mul1.S is the same code.  It is better
-|   than the obvious formulation for two reasons:
+|   libgcrypt's mpi/m68k/mc68020/mpih-mul1.S is the same code.  It beats the
+|   obvious formulation for two reasons:
 |
 |     - alternating the carry register removes a MOVE.L per limb;
 |     - ADDX.L folds the previous limb's memory carry (X) into this limb's
@@ -59,17 +55,17 @@
 |   machine that leaves CCR alone.  MULU.L and MOVE do not affect X, which is
 |   what makes the fold legal across the multiply.
 |
-| CYCLE COUNTS (MC68020UM section 8.2.8 / MC68030UM section 11.6.8)
+| Cycle counts (MC68020UM section 8.2.8 / MC68030UM section 11.6.8)
 |
 |   MULU.L <ea>,Dh:Dl is 41 best / 43 cached / 44 worst on 68020, and 44 max on
-|   68030.  It is 20 on a 68040.  On a 68060 the 64-bit form is NOT IMPLEMENTED
+|   68030.  It is 20 on a 68040.  On a 68060 the 64-bit form is unimplemented
 |   -- it traps to vector 61 and is emulated in software -- so this file is a
-|   pessimisation there and must not be enabled for a 68060 build.  That is not
-|   a guess: AmiSSL shipped the same discovery in 4.4 ("disabled m68k asm
+|   pessimisation there and must not be enabled for a 68060 build.  Confirmed
+|   elsewhere: AmiSSL shipped the same finding in 4.4 ("disabled m68k asm
 |   replacement as it's slower"), and Roberto Ragusa's 1998 PGP 68060 patch got
 |   2x by removing MULU.L.  This project's floor is 68020 (docs/RESEARCH.md 9).
 |
-| REGISTER RULES (m68k-amigaos, stack calling convention)
+| Register rules (m68k-amigaos, stack calling convention)
 |
 |   Arguments on the stack from 4(sp) upward; return value in d0; d0/d1/a0/a1
 |   are scratch and d2-d7/a2-a6 must be preserved.
@@ -191,14 +187,15 @@ Lac_done:
 | portable form is a 64-bit divide, which on this toolchain reaches __udivdi3
 | in src/common/ami_udivdi3.c because libgcc.a is empty here.
 |
-| THE CALLER GUARANTEES hi < d.  DIVU.L TRAPS on quotient overflow rather than
+| The caller must ensure hi < d.  DIVU.L traps on quotient overflow rather than
 | saturating, and Knuth's algorithm D produces exactly one case that would
 | overflow -- the partial remainder's top limb equal to the divisor's, whose
 | quotient digit is B-1.  c68k_mod() tests for it and never calls here with it.
 |
-| DIVU.L is 78 cycles on a 68020 and, like MULU.L's 32x32->64 form, is NOT
-| IMPLEMENTED on a 68060 -- it traps to vector 61 and is emulated.  Same guard,
-| same rule: AMINETXDUO_CRYPTO68K_ASM must never be enabled for a 68060 build.
+| DIVU.L is 78 cycles on a 68020 and, like MULU.L's 32x32->64 form, is
+| unimplemented on a 68060 -- it traps to vector 61 and is emulated.  Same
+| guard, same rule: AMINETXDUO_CRYPTO68K_ASM must never be enabled for a 68060
+| build.
 |
 | d0, d1 and a0 are scratch in this ABI, so nothing needs saving.
 | ---------------------------------------------------------------------------
@@ -220,11 +217,11 @@ _c68k_div_2by1:
 |   the same reason: it is the only decrement-and-branch that leaves the CCR
 |   alone, so the X flag survives from one limb's ADDX to the next.
 |
-|   Karatsuba is what wanted this.  The recombination is four passes of add and
-|   subtract over half-width operands and nothing else, so on the 64-limb
-|   squaring it runs about 320 limbs per call -- small against the 1,108 limb
-|   products the split removes, but not small enough to leave to the compiler,
-|   which spends five instructions and a branch where this needs two.
+|   Added for Karatsuba.  The recombination is four passes of add and subtract
+|   over half-width operands and nothing else, so on the 64-limb squaring it
+|   runs about 320 limbs per call -- small against the 1,108 limb products the
+|   split removes, but not small enough to leave to the compiler, which spends
+|   five instructions and a branch where this needs two.
 | ---------------------------------------------------------------------------
 
         .globl  _c68k_add

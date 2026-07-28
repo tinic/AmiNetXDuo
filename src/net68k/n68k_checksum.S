@@ -10,12 +10,12 @@
 | add.l reloads X every time, so the chain cannot leak a carry from the addx
 | into the following add.  The result is the one's-complement 32-bit sum, which
 | is congruent to the plain 16-bit sum modulo 0xFFFF and is zero only when
-| every longword was zero -- exactly the interchangeability the C caller relies
-| on (see n68k_checksum.c).
+| every longword was zero -- the interchangeability the C caller relies on (see
+| n68k_checksum.c).
 |
-| WHY THIS IS HAND WRITTEN, measured against what the compiler emits.  Three
-| spellings of the same loop were compiled with GCC 15.2 -O2 -m68020 and
-| disassembled before any of this was written:
+| Hand written, measured against what the compiler emits.  Three spellings of
+| the same loop were compiled with GCC 15.2 -O2 -m68020 and disassembled before
+| this was written:
 |
 |   64-bit accumulator   movea.l (a2)+,a1 / suba.l a0,a0 / move.l a0,d1 /
 |                        add.l a1,d5 / addx.l d1,d4 / dbf   -- 5 + dbf, and it
@@ -28,16 +28,14 @@
 |
 | None of them reaches two, because C cannot name the carry flag and cannot
 | fold the load into the add's addressing mode once the value has to become a
-| variable.  That is the whole justification; the fallback in n68k_checksum.c
-| is the middle spelling and is within ~2x, so this file is worth about that
-| much and no more.
+| variable.  The fallback in n68k_checksum.c is the middle spelling and is
+| within ~2x, so this file is worth about that much.
 |
-| 68060 NOTE: nothing here is 68060-hostile -- add.l/addx.l are fully
-| implemented on every 68k -- but the file is built under the same
-| AMINETXDUO_NET68K_ASM guard src/crypto68k/ uses for its own assembly, and
-| that guard must never be enabled for a 68060 target, because crypto68k's
-| MULU.L 32x32 traps to vector 61 there.  Keeping one switch for "the hand
-| written 68020 code" is deliberate.
+| 68060: nothing here is 68060-hostile -- add.l/addx.l are implemented on every
+| 68k -- but the file is built under the same AMINETXDUO_NET68K_ASM guard
+| src/crypto68k/ uses for its own assembly, and that guard must never be
+| enabled for a 68060 target, because crypto68k's MULU.L 32x32 traps to vector
+| 61 there.  One switch covers all the hand-written 68020 code.
 |
 | SPDX-License-Identifier: MIT
 

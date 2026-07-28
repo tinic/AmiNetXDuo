@@ -1,10 +1,9 @@
 /*
  * AmiNetXDuo -- nx_secure glue.
  *
- * Deliberately tiny.  docs/RESEARCH.md 9 gates the TLS work on a 68020
- * benchmark (tests/tls/tls_bench), so nothing here promises an API shape.
- * What lives here is the platform glue nx_secure needs no matter what shape
- * the eventual library takes.
+ * docs/RESEARCH.md 9 gates the TLS work on a 68020 benchmark
+ * (tests/tls/tls_bench), so nothing here promises an API shape.  Only the
+ * platform glue nx_secure needs whatever shape the eventual library takes.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -24,7 +23,7 @@ extern "C" {
  * NX_RAND now points at src/common/ami_random.c (see
  * port/netxduo-amiga/inc/nx_port.h), a SHA-256 hash DRBG over an entropy
  * pool, instead of newlib's 32-bit LCG.  That fixes the *expansion*; it does
- * not conjure entropy onto a machine that has none.
+ * not create entropy on a machine that has none.
  *
  * Returns the pool's own credited entropy estimate in bits.  A caller about
  * to perform a real TLS handshake must treat a value below
@@ -32,8 +31,8 @@ extern "C" {
  * the same test -- and either obtain a seed from the operator, a persisted
  * seed file or user input timing and feed it to ami_random_add_entropy(), or
  * decline to generate the key.  Generating an ECDHE private key from a pool
- * that credits itself 6 bits is worse than not offering TLS at all, because
- * the caller believes it worked.
+ * that credits itself 6 bits is worse than not offering TLS at all: the caller
+ * believes it worked.
  */
 ULONG ami_tls_seed_rng(VOID);
 
@@ -53,10 +52,10 @@ VOID  ami_tls_timer_close(VOID);
 
 /*
  * TRUE once ami_tls_timer_open() has succeeded.  ami_tls_crypto.c's
- * instrumentation asks this rather than calling ami_tls_timer_open() itself:
- * a crypto method has no business doing an OpenDevice() in the middle of a
- * handshake, so an application that never opened the timer gets counts with no
- * microseconds instead of a surprise.
+ * instrumentation asks this rather than calling ami_tls_timer_open() itself,
+ * since a crypto method should not do an OpenDevice() in the middle of a
+ * handshake; an application that never opened the timer gets counts with no
+ * microseconds.
  */
 BOOL  ami_tls_timer_is_open(VOID);
 ULONG ami_tls_eclock(VOID);

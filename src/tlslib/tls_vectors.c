@@ -1,10 +1,9 @@
 /*
  * tls.library -- the LVO vector table.
  *
- * Ten user vectors, and no reserved slots after them: this ABI is ours, so
- * "reserved for future expansion" would only mean "we have not decided yet".
- * A caller reaching past the end of the table lands on the (APTR)-1
- * terminator, which MakeLibrary() does not turn into a jump.
+ * Ten user vectors and no reserved slots after them.  A caller reaching past
+ * the end of the table lands on the (APTR)-1 terminator, which MakeLibrary()
+ * does not turn into a jump.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -14,8 +13,8 @@
 const APTR TlsVectorTable[] =
 {
     /* The four Exec vectors, then TLS_LIB_VECTORS user vectors, then the
-       terminator -- asserted below, which is what stops a new vector from
-       shipping without TLS_LIB_VERSION moving. */
+       terminator -- asserted below, which stops a new vector from shipping
+       without TLS_LIB_VERSION moving. */
     /* -6 Open, -12 Close, -18 Expunge, -24 Reserved */
     (APTR)tls_lib_open,
     (APTR)tls_lib_close,
@@ -37,19 +36,18 @@ const APTR TlsVectorTable[] =
 };
 
 /*
- * The drift guard, and the whole reason TLS_LIB_VECTORS is derived from
- * TLS_LIB_VERSION rather than written down beside it.
+ * The drift guard, and why TLS_LIB_VECTORS is derived from TLS_LIB_VERSION
+ * rather than written down beside it.
  *
  * Add a vector to the table above and this assertion fails.  The only way to
  * make it pass is to declare a TLS_LIB_VECTORS_V<n> in the public header and
- * point TLS_LIB_VERSION at it -- so a new vector cannot reach a shipped
- * library without the version moving with it, and OpenLibrary() keeps telling
- * callers the truth.
+ * point TLS_LIB_VERSION at it, so a new vector cannot reach a shipped library
+ * without the version moving with it and OpenLibrary() stays accurate.
  *
- * Version 2 was one call away from being the counter-example: TLSRandom and
- * TLSBuffered went into the table while the version stayed at 1, and
- * OpenLibrary("tls.library", 1) would happily have handed an older library to
- * a caller that then jumped past its jump table.
+ * Version 2 nearly went out wrong: TLSRandom and TLSBuffered went into the
+ * table while the version stayed at 1, and OpenLibrary("tls.library", 1) would
+ * have handed an older library to a caller that then jumped past its jump
+ * table.
  */
 _Static_assert(sizeof(TlsVectorTable) / sizeof(TlsVectorTable[0]) ==
                    (4u + TLS_LIB_VECTORS + 1u),

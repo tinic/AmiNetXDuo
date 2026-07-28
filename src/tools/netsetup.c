@@ -611,7 +611,7 @@ static BOOL ask_device(Plan *plan)
 
 /*
  * Ask the card whether it is really there, before anything is written: a wrong
- * unit, or a driver for a card that is not fitted, is otherwise found out much
+ * unit, or a driver for a card that is not installed, is otherwise found out much
  * later by a command that can only say "would not open".
  */
 static BOOL check_device(Plan *plan, BOOL quiet)
@@ -655,7 +655,7 @@ static BOOL check_device(Plan *plan, BOOL quiet)
     else
     {
         tool_printf("  The driver is installed but the card is not answering:\n");
-        tool_printf("  it may not be fitted, or not seated properly.\n");
+        tool_printf("  it may not be installed, or not seated properly.\n");
     }
 
     if (setup_aborted)

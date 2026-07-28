@@ -18,15 +18,15 @@
  * sum that produces is congruent to the 16-bit one modulo 0xFFFF, so folding
  * it at the end gives the same checksum; see n68k_sum_longwords().
  *
- * Everything else.  The pseudo-header arithmetic, the chain walk, the
+ * Everything else -- the pseudo-header arithmetic, the chain walk, the
  * end-pointer rounding, the two-byte carry across a packet boundary whose
  * append pointer is 2 mod 4, and the trailing 1/2/3-byte case including its
- * zero-write into the pad byte are all structurally identical to the vendored
- * code, because the requirement here is not "compute a correct internet
- * checksum" -- it is "return exactly what NetX Duo would have returned".
- * tests/perf/host/ checks that differentially against the vendored function
- * compiled under a different name, over random buffers, every length from 0
- * to 64, every start alignment and multi-packet chains.
+ * zero-write into the pad byte -- is structurally identical to the vendored
+ * code.  The requirement is to return exactly what NetX Duo would have
+ * returned, not merely a correct internet checksum.  tests/perf/host/ checks
+ * that differentially against the vendored function compiled under a different
+ * name, over random buffers, every length from 0 to 64, every start alignment
+ * and multi-packet chains.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -41,16 +41,15 @@
 #ifndef AMINETXDUO_NET68K_ASM
 
 /*
- * The portable fallback.  Kept honest rather than clever: this is the same
- * carry chain the assembly does, and GCC compiles it to
+ * The portable fallback: the same carry chain the assembly does, which GCC
+ * compiles to
  *
  *     movea.l (a1)+,a0 / add.l a0,d0 / cmp.l a0,d0 / bcc.s / addq.l #1,d0
  *
- * -- four instructions and a branch where the machine needs two, which is
- * still comfortably better than the vendored seven.  Selecting the assembly
- * is a build option (AMINETXDUO_NET68K_ASM) and not a #if on the target,
- * because a host build has to compile this file to run the host tier of the
- * differential test.
+ * -- four instructions and a branch where the machine needs two, still better
+ * than the vendored seven.  Selecting the assembly is a build option
+ * (AMINETXDUO_NET68K_ASM) and not a #if on the target, because a host build
+ * has to compile this file to run the host tier of the differential test.
  */
 ULONG n68k_sum_longwords(const ULONG *p, ULONG count)
 {
@@ -196,9 +195,9 @@ UINT        i;
              * The vendored loop is `while (long_ptr < end_ptr) long_ptr++`,
              * which is ceil((end_ptr - long_ptr) / 4) iterations.  That equals
              * consumed/4 whenever the prepend pointer is longword aligned --
-             * which it always is here -- but it is computed rather than
-             * assumed, so a pool that ever handed out an odd prepend pointer
-             * would still sum the same bytes the vendored code sums.
+             * always, here -- but it is computed rather than assumed, so a
+             * pool that handed out an odd prepend pointer would still sum the
+             * same bytes the vendored code sums.
              */
             words =  ((ULONG)(end_ptr - (ALIGN_TYPE)long_ptr) + 3UL) >> 2;
 

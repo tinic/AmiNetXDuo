@@ -1,11 +1,11 @@
 /*
  * AmiNetXDuo -- crypto68k: P-256 field and point arithmetic for the 68020.
  *
- * See c68k_p256.h for what this replaces and why.  The short version: the
- * vendored nx_crypto_ec.c has the right ALGORITHMS -- NAF, Solinas reduction,
- * a fixed-base comb, Jacobian coordinates with one inversion -- and runs them
- * on a representation that costs more than the arithmetic does.  This file
- * keeps the algorithms and drops the representation.
+ * See c68k_p256.h for what this replaces and why.  In short: the vendored
+ * nx_crypto_ec.c has the right algorithms -- NAF, Solinas reduction, a
+ * fixed-base comb, Jacobian coordinates with one inversion -- and runs them on
+ * a representation that costs more than the arithmetic does.  This file keeps
+ * the algorithms and drops the representation.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -36,8 +36,8 @@ static const c68k_limb c68k_p256_one[C68K_P256_LIMBS] =
 
 /*
  * The portable halves of the three routines c68k_p256.S replaces.  Always
- * buildable, and the supported way to bisect a suspected assembly bug: same
- * algorithm, limb for limb, term for term.
+ * buildable, and the way to bisect a suspected assembly bug: same algorithm,
+ * limb for limb, term for term.
  */
 
 c68k_limb c68k_p256_add_raw(c68k_limb *r, const c68k_limb *a, const c68k_limb *b)
@@ -94,16 +94,16 @@ c68k_limb   t;
  *     r = s1 + 2*s2 + 2*s3 + s4 + s5 - s6 - s7 - s8 - s9  (mod p)
  *
  * where each s_k is a permutation of the sixteen product limbs c0..c15.  The
- * vendored implementation materialises each s_k as a 64-byte BIG-ENDIAN byte
+ * vendored implementation materialises each s_k as a 64-byte big-endian byte
  * stream -- built one byte at a time -- and adds them as sign-carrying huge
  * numbers.  Here the nine terms are collapsed into one pass: limb 0 is
  * c0 + c8 + c9 - c11 - c12 - c13 - c14 and so on, accumulated in a (lo, hi)
  * pair where hi is the signed carry into the next limb.  Nothing is
- * serialised and no byte is touched.
+ * serialised.
  *
  * Returns the leftover coefficient of 2^256, for the caller to fold in.
  *
- * This decomposition was verified against Python's arbitrary precision
+ * The decomposition was verified against Python's arbitrary precision
  * arithmetic over 20000 random 512-bit inputs plus the all-zero and all-ones
  * cases, and the leftover was measured to stay in [-4, 4].
  */
@@ -291,10 +291,9 @@ INT     hi;
     hi = c68k_p256_reduce_core(r, t);
 
     /*
-     * hi is the coefficient of 2^256 the collapsed sum left over.  Fold it in.
-     * Adding p raises the value by very nearly 2^256, so each addition moves
-     * hi towards zero by one; likewise each subtraction.  A handful of
-     * iterations, never a search.
+     * hi is the leftover coefficient of 2^256.  Adding p raises the value by
+     * very nearly 2^256, so each addition moves hi towards zero by one;
+     * likewise each subtraction.  A handful of iterations.
      */
     while (hi < 0)
     {
@@ -354,8 +353,8 @@ UINT        i;
     /*
      * Schoolbook, one c68k_addmul_1 per limb of a.  That routine is the 68020
      * assembly the RSA work produced, so the ~1.4x limb-loop win carries over
-     * to elliptic curves with no new assembly written.  t[i + 8] has not been
-     * written when row i runs, so the carry-out is a store, not an add.
+     * to elliptic curves with no new assembly.  t[i + 8] has not been written
+     * when row i runs, so the carry-out is a store, not an add.
      */
     for (i = 0; i < C68K_P256_LIMBS; i++)
     {
@@ -439,10 +438,9 @@ c68k_limb   top;
 
 /*
  * Binary extended Euclid, Hankerson Algorithm 2.22.  Chosen over Fermat
- * (a^(p-2), 255 squarings) because it uses no multiplications at all: on this
- * machine an inversion costs about what four field multiplications do, so
- * paying one per scalar multiplication -- and one more for each batch
- * inversion -- is not worth optimising around.
+ * (a^(p-2), 255 squarings) because it uses no multiplications: on this machine
+ * an inversion costs about four field multiplications, so one per scalar
+ * multiplication plus one per batch inversion is not worth optimising around.
  */
 VOID c68k_p256_fe_inv(c68k_p256_fe r, const c68k_p256_fe a)
 {
@@ -505,8 +503,8 @@ c68k_p256_fe    x2;
  *     Z3 = (Y + Z)^2 - gamma - delta
  *     Y3 = alpha * (4*beta - X3) - 8*gamma^2
  *
- * 3M + 5S, against the vendored 4M + 4S.  That is only a win because squaring
- * here really is cheaper than multiplying -- 28 limb products against 64.
+ * 3M + 5S, against the vendored 4M + 4S.  A win only because squaring here is
+ * cheaper than multiplying -- 28 limb products against 64.
  */
 VOID c68k_p256_jac_double(c68k_p256_jac *r, const c68k_p256_jac *p1)
 {
@@ -569,10 +567,9 @@ c68k_p256_fe    z3;
 /*
  * madd-2007-bl: Jacobian + affine, 7M + 4S against the vendored 8M + 3S.
  *
- * Every degenerate case is handled explicitly.  This matters more than it
- * looks: a scalar multiplication that silently produces the wrong point when
- * the accumulator happens to equal a table entry gives an answer that is a
- * perfectly valid curve point and simply wrong, which no sanity check catches.
+ * Every degenerate case is handled explicitly.  A scalar multiplication that
+ * mishandles the accumulator equalling a table entry returns a valid curve
+ * point that is wrong, which no sanity check catches.
  */
 VOID c68k_p256_jac_add_affine(c68k_p256_jac *r, const c68k_p256_jac *p1,
                               const c68k_p256_aff *q)
@@ -721,8 +718,8 @@ UINT            row;
      * Lim-Lee: k = sum_c 2^c * T1[digit(c)] over c in 0..d-1, split at e so
      * that columns e..d-1 are served by T2 = 2^e * T1 in the same iteration.
      * 26 doublings and 52 additions, against 256 doublings for a generic
-     * point -- which is the entire reason ECDH key generation measures at
-     * 1.52 s while an ECDH shared secret measures at 5.18 s.
+     * point -- why ECDH key generation measures at 1.52 s while an ECDH shared
+     * secret measures at 5.18 s.
      */
     for (c = C68K_P256_COMB_E; c > 0u; c--)
     {
@@ -1022,8 +1019,8 @@ c68k_p256_work *work;
     /*
      * Everything this cannot do falls through to the vendored routine, so
      * substituting it is safe under every caller.  _nx_crypto_ec_precomputation
-     * really does pass scalars wider than 256 bits, which is the case that
-     * would otherwise be silently truncated.
+     * does pass scalars wider than 256 bits, which would otherwise be silently
+     * truncated.
      */
     if ((curve -> nx_crypto_ec_id != NX_CRYPTO_EC_SECP256R1) ||
         (r -> nx_crypto_ec_point_x.nx_crypto_huge_buffer_size <
@@ -1054,7 +1051,7 @@ c68k_p256_work *work;
          * runs under a 4 KB AmigaOS process stack, and the callers already
          * carry a scratch area sized for the vendored routine's own tables
          * (ECDSA 3016 bytes, ECDH 2464, of which roughly 450 are spent before
-         * this point -- against the C68K_P256_WORK_LIMBS needed here).
+         * this point, against the C68K_P256_WORK_LIMBS needed here).
          */
         work = (c68k_p256_work *)(VOID *)scratch;
         c68k_p256_mul_point(&out, &q, k, work);

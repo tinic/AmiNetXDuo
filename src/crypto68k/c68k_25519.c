@@ -2,7 +2,7 @@
  * AmiNetXDuo -- crypto68k: X25519 and Ed25519 over eight 32-bit limbs.
  *
  * Read src/crypto68k/c68k_25519.h first; it says why this file exists.  This
- * comment is about how, and about the two decisions that are not obvious.
+ * comment covers how, and the two decisions that are not obvious.
  *
  *   A field element is eight uint32 limbs, little-endian, holding any value
  *   below 2^256 that is congruent to the intended one modulo p = 2^255-19.
@@ -13,26 +13,24 @@
  *   so a 512-bit product folds into 256 bits with eight multiplies by 38, and
  *   an addition that carries out of the top folds with a single add of 38.
  *
- *   The comparison that matters is with what Dropbear runs today.  TweetNaCl
- *   stores sixteen 16-bit limbs in an `i64[16]` and multiplies with
- *   `t[i+j] += a[i]*b[j]` on those i64s: 256 iterations, each a software
- *   64x64 multiply, on a machine whose MULU.L does 32x32->64 in one
- *   instruction.  Here it is 64 iterations of exactly that instruction.
+ *   For comparison, what Dropbear runs today: TweetNaCl stores sixteen 16-bit
+ *   limbs in an `i64[16]` and multiplies with `t[i+j] += a[i]*b[j]` on those
+ *   i64s -- 256 iterations, each a software 64x64 multiply, on a machine whose
+ *   MULU.L does 32x32->64 in one instruction.  Here it is 64 iterations of
+ *   that instruction.
  *
- * WHY NOT RADIX 2^25.5 (ref10's LAYOUT)
+ *   Not radix 2^25.5 (ref10's layout): this part has a real 32x32->64 multiply
+ *   and a real ADDX, and ref10 splits limbs to 25/26 bits only to keep
+ *   products inside a 64-bit accumulator on machines where the carry is
+ *   expensive to propagate.  ref10 pays 100 multiplies where this pays 64 (72
+ *   with the reduction), and its saving is carry handling this machine does in
+ *   the ALU for free.
  *
- *   Because this part has a real 32x32->64 multiply and a real ADDX, and the
- *   reason ref10 splits limbs to 25/26 bits is to keep products inside a
- *   64-bit accumulator on machines where the carry is expensive to propagate.
- *   ref10 pays 100 multiplies where this pays 64 (72 with the reduction), and
- *   its saving is carry handling this machine does in the ALU for free.
- *
- *   The scalar-multiplication ALGORITHMS.  The Montgomery ladder for X25519
- *   and the double-and-add for Ed25519 are the textbook ones, and the
- *   Ed25519 base point has no precomputed table.  A signed-window base table
- *   would cut Ed25519 signing by roughly another five times and it is a
- *   separate, testable change; this file changes the field and nothing else,
- *   so that a measurement of it measures one thing.
+ *   The Montgomery ladder for X25519 and the double-and-add for Ed25519 are
+ *   the textbook algorithms, and the Ed25519 base point has no precomputed
+ *   table.  A signed-window base table would cut Ed25519 signing by roughly
+ *   another five times; it is a separate, testable change.  This file changes
+ *   the field and nothing else, so a measurement of it measures one thing.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -85,14 +83,13 @@ static void fe_copy(fe r, const fe a)
  * Fold a carry out of the top back in.  2^256 = 38 (mod p), so a carry of c
  * out of limb 7 is worth 38c at the bottom.
  *
- * The loop is not belt and braces.  The first version of this function ran one
- * propagation pass and dropped whatever came out of limb 7, on the reasoning
- * that a value near 2^256-1 could not arise.  It arises constantly: this
- * representation is lazy, so 0 is routinely carried as 2^256-38 and 1 as
- * 2^256-37, and adding 38 to either of those carries straight through all
- * eight limbs.  Dropping that carry loses exactly 38, which is why the symptom
- * was an Ed25519 doubling returning 37 where it owed -1.  A second pass always
- * terminates: a carry out means every limb is now small.
+ * The loop is required.  The first version ran one propagation pass and
+ * dropped whatever came out of limb 7, assuming a value near 2^256-1 could not
+ * arise.  It arises constantly: this representation is lazy, so 0 is routinely
+ * carried as 2^256-38 and 1 as 2^256-37, and adding 38 to either carries
+ * straight through all eight limbs.  Dropping that carry loses exactly 38 --
+ * the symptom was an Ed25519 doubling returning 37 where it owed -1.  A second
+ * pass always terminates: a carry out means every limb is now small.
  */
 static void fe_fold(fe r, uint32_t c)
 {
@@ -135,9 +132,9 @@ static void fe_sub(fe r, const fe a, const fe b)
         t = (t >> 32) & 1u ? (uint64_t)1 << 63 : 0;   /* borrow flag */
     }
 
-    /* Same shape as fe_fold, and the same trap: a borrow out of limb 7 is
-       worth another 38 off, because dropping it silently adds 2^256 = 38 back
-       on.  Terminates for the mirror-image reason. */
+    /* Same form as fe_fold, and the same trap: a borrow out of limb 7 is worth
+       another 38 off, because dropping it silently adds 2^256 = 38 back on.
+       Terminates for the mirror-image reason. */
     while (t) {
         uint64_t s = 38u;
 
@@ -156,8 +153,8 @@ static void fe_sub(fe r, const fe a, const fe b)
  * The multiply.  Operand scanning, 64 MULU.L, then the 2^256 = 38 fold.
  *
  * The accumulator never overflows: (2^32-1)^2 + (2^32-1) + (2^32-1) is exactly
- * 2^64-1, which is why the product, the running word and the carry can all be
- * added before the store without a second accumulator word.
+ * 2^64-1, so the product, the running word and the carry can all be added
+ * before the store without a second accumulator word.
  */
 static void fe_mul(fe r, const fe a, const fe b)
 {
@@ -196,9 +193,9 @@ static void fe_mul(fe r, const fe a, const fe b)
  * off-diagonal product appears twice: sum them once, double the lot, then add
  * the eight diagonal squares.
  *
- * This is the one routine in the file where a transcription error would still
- * produce plausible-looking output, so tests/crypto68k/host checks it against
- * fe_mul(r,a,a) on random inputs rather than only against published vectors.
+ * A transcription error here would still produce plausible-looking output, so
+ * tests/crypto68k/host checks it against fe_mul(r,a,a) on random inputs rather
+ * than only against published vectors.
  */
 static void fe_sqr(fe r, const fe a)
 {
@@ -301,11 +298,11 @@ static void fe_frombytes(fe r, const unsigned char b[32])
 /*
  * Full reduction, then little-endian bytes.
  *
- * Two steps, and the second is the one people get wrong.  First fold bit 255
- * back in -- 2^255 = 19 (mod p) -- which leaves a value below 2^255.  That is
- * still not canonical, because anything from p to 2^255-1 is a second
- * representation of 0..18.  So compute t+19 and look at its bit 255: it is set
- * exactly when t >= p, and in that case t+19-2^255 IS t-p.
+ * Two steps.  First fold bit 255 back in -- 2^255 = 19 (mod p) -- which leaves
+ * a value below 2^255.  That is still not canonical, because anything from p
+ * to 2^255-1 is a second representation of 0..18.  So compute t+19 and look at
+ * its bit 255: it is set exactly when t >= p, and in that case t+19-2^255 is
+ * t-p.
  */
 static void fe_tobytes(unsigned char out[32], const fe a)
 {
@@ -654,8 +651,7 @@ static void ge_pack(unsigned char out[32], const ge *p)
 
 /*
  * Constant-time double-and-add.  The scalar steers a conditional swap and
- * never a branch, which is the same shape TweetNaCl uses and is kept for the
- * same reason.
+ * never a branch, as in TweetNaCl.
  */
 static void ge_scalarmult(ge *r, const ge *q, const unsigned char s[32])
 {
@@ -686,7 +682,7 @@ static void ge_scalarmult_base(ge *r, const unsigned char s[32])
 
 /*
  * Decompress a public key: recover x from y and the sign bit, on the curve
- * -x^2 + y^2 = 1 + d x^2 y^2.  Returns 0 on success.  The point is NEGATED on
+ * -x^2 + y^2 = 1 + d x^2 y^2.  Returns 0 on success.  The point is negated on
  * the way out, because verification computes h*(-A) + s*B and comparing that
  * with R is one group addition cheaper than the other arrangement.
  */
@@ -739,10 +735,9 @@ static int ge_unpack_neg(ge *r, const unsigned char p[32])
 
 /*
  * L = 2^252 + 27742317777372353535851937790883648493, the group order, as 32
- * little-endian bytes.  The reduction below is TweetNaCl's, which is the
- * clearest correct version of this operation in print and is nowhere near the
- * hot path: it runs three times in a handshake against twenty thousand field
- * multiplies.
+ * little-endian bytes.  The reduction below is TweetNaCl's, and is nowhere
+ * near the hot path: it runs three times in a handshake against twenty
+ * thousand field multiplies.
  */
 static const int64_t sc_L[32] = {
     0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58,
@@ -862,8 +857,8 @@ void c68k_ed25519_sign(c68k_sha512_fn sha512, unsigned char sig[64],
  * Verification.  Two variable-base scalar multiplications and one addition:
  *   [s]B + [h](-A) must equal R.
  * The two multiplications are done separately rather than with a joint
- * (Straus) loop; a joint one saves about a quarter and is a change to make
- * against a measurement of this, not instead of one.
+ * (Straus) loop; a joint one saves about a quarter, and is a change to make
+ * against a measurement of this.
  */
 int c68k_ed25519_verify(c68k_sha512_fn sha512,
                         const unsigned char *m, unsigned long mlen,
@@ -875,8 +870,8 @@ int c68k_ed25519_verify(c68k_sha512_fn sha512,
     int           i;
 
     /* RFC 8032 section 5.1.7: S must be canonical, below L.  Compared from
-       the top down, which is what the little-endian encoding makes awkward
-       and is why it is written out. */
+       the top down, written out because the little-endian encoding makes that
+       awkward. */
     for (i = 31; i >= 0; i--) {
         if ((int64_t)(unsigned char)sig[32 + i] < sc_L[i])
             break;
@@ -907,10 +902,10 @@ int c68k_ed25519_verify(c68k_sha512_fn sha512,
 /* ---------------------------------------------------------- self-check - */
 
 /*
- * Exposed only for tests/crypto68k: fe_sqr(r,a) has to equal fe_mul(r,a,a) for
- * every input, and a published vector cannot prove that on its own because
- * every vector exercises the same handful of values.  Kept out of the header
- * so nothing in the stack can reach it.
+ * Exposed only for tests/crypto68k: fe_sqr(r,a) must equal fe_mul(r,a,a) for
+ * every input, and published vectors cannot prove that because they exercise
+ * the same handful of values.  Kept out of the header so nothing in the stack
+ * can reach it.
  */
 int c68k_25519_selfcheck_sqr(const unsigned char in[32]);
 int c68k_25519_selfcheck_sqr(const unsigned char in[32])

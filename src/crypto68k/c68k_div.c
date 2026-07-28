@@ -1,49 +1,45 @@
 /*
  * AmiNetXDuo -- crypto68k long division, 32-bit limbs.
  *
- *   Measured, not guessed: on an RSA-2048 public operation through
- *   crypto68k, 36.6 ms of 163.9 went into ONE routine -- the R^2 mod m setup
- *   in c68k_powm.c, which reduces through the vendored
- *   _nx_crypto_huge_number_modulus().  AmiSSL's equivalent is 15.9 ms.  With
- *   the exponentiation itself level at 0.997x after Karatsuba, that setup was
- *   98% of everything still separating us from OpenSSL on that operation.
+ *   Measured: on an RSA-2048 public operation through crypto68k, 36.6 ms of
+ *   163.9 went into one routine -- the R^2 mod m setup in c68k_powm.c, which
+ *   reduces through the vendored _nx_crypto_huge_number_modulus().  AmiSSL's
+ *   equivalent is 15.9 ms.  With the exponentiation itself level at 0.997x
+ *   after Karatsuba, that setup was 98% of the remaining gap to OpenSSL on
+ *   that operation.
  *
  *   The vendored divider is a correct implementation of the right algorithm
  *   -- traditional long division with a two-digit quotient estimate -- done in
- *   SIXTEEN-BIT half-limbs.  Its own declarations say so ("In number of USHORT
+ *   16-bit half-limbs.  Its own declarations say so ("In number of USHORT
  *   words") and it takes its estimate from `>> (HN_SHIFT >> 1)`.  Halving the
- *   digit size doubles the number of quotient digits AND doubles the length of
+ *   digit size doubles the number of quotient digits and doubles the length of
  *   the multiply-subtract pass under each one, so it is about four times the
  *   inner work of the same algorithm over 32-bit limbs.  OpenSSL gets its
  *   quotient digit from bn_div_words, which on this target is one DIVU.L out
- *   of Howard Chu's bn_m68k.s.
+ *   of Howard Chu's bn_m68k.s.  This file is the same algorithm at the
+ *   machine's own word size, not a better one.
  *
- *   So this is not a better algorithm.  It is the same algorithm at the
- *   machine's own word size.
- *
- *   Caching R^2 against the modulus, which would have avoided the division
- *   rather than speeding it up.  It buys nothing for a TLS client: the three
+ *   Rejected: caching R^2 against the modulus, which avoids the division
+ *   rather than speeding it up.  It buys nothing for a TLS client -- the three
  *   RSA public operations in a handshake verify the leaf with the
  *   intermediate's key, the intermediate with the root's, and the
- *   ServerKeyExchange with the leaf's -- three DIFFERENT moduli, so a cache
+ *   ServerKeyExchange with the leaf's, three different moduli, so a cache
  *   keyed on the modulus never hits inside a handshake.  Across handshakes to
  *   one host, session resumption (docs/RESEARCH.md 13) does no public-key work
  *   at all, so it would not be consulted there either.
  *
- *   Also rejected, and worth recording because they look attractive: R^2 mod m
- *   by repeated modular doubling from R mod m is 2048 shift-and-subtract
- *   passes over 64 limbs, and by a Montgomery-squaring ladder is eleven
- *   Montgomery squares.  Priced at this module's own measured figures those
- *   are ~42 ms and ~72 ms against the 36.6 ms being replaced.  Division is the
- *   right primitive; it just has to be done in 32-bit digits.
+ *   Also rejected: R^2 mod m by repeated modular doubling from R mod m is 2048
+ *   shift-and-subtract passes over 64 limbs, and by a Montgomery-squaring
+ *   ladder is eleven Montgomery squares.  Priced at this module's measured
+ *   figures those are ~42 ms and ~72 ms against the 36.6 ms being replaced.
+ *   Division is the right primitive, in 32-bit digits.
  *
- * The one place divu.L CAN TRAP
- *
- *   Algorithm D's quotient estimate divides a two-limb prefix of the partial
- *   remainder by the top limb of the divisor, and the result fits in one limb
- *   EXCEPT when those two top limbs are equal, where the true quotient digit
- *   is B-1.  A 68020 DIVU.L traps on that overflow rather than saturating, so
- *   the case is tested for and never reaches the instruction.
+ *   The one place DIVU.L can trap: algorithm D's quotient estimate divides a
+ *   two-limb prefix of the partial remainder by the top limb of the divisor,
+ *   and the result fits in one limb except when those two top limbs are equal,
+ *   where the true quotient digit is B-1.  A 68020 DIVU.L traps on that
+ *   overflow rather than saturating, so the case is tested for and never
+ *   reaches the instruction.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -227,8 +223,8 @@ subtract:
         if (un[(UINT)j + n] < borrow)
         {
             /*
-             * The estimate was one too large -- which normalisation makes
-             * rare but not impossible.  Add the divisor back once.
+             * The estimate was one too large -- rare after normalisation, but
+             * possible.  Add the divisor back once.
              */
             un[(UINT)j + n] = (c68k_limb)(un[(UINT)j + n] - borrow);
             carry = c68k_add(&un[(UINT)j], vn, n);
