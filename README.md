@@ -118,25 +118,6 @@ The first connection to a site takes twenty seconds or more, and some servers
 give up before it finishes. The second attempt to the same site takes under a
 second: the session is kept on disk and survives a reboot.
 
-## Limits
-
-- Measured under emulation; not run on real hardware.
-- IPv6 is built only when asked for.
-- Incoming connections work on a local network. Nothing here has been exposed
-  to the open internet or reviewed for it — keep it behind your router.
-
-## Compatibility
-
-AmiNetXDuo is an independent implementation of a *published ABI*. No AmiTCP,
-AROSTCP, Miami or Roadshow code has been used, copied or disassembled. Olaf
-Barthel's freely distributable Roadshow SDK headers and autodocs are used solely
-as an ABI reference, for function offsets, tag values, structure layouts and
-documented behaviour.
-
-Software built for other Amiga TCP/IP stacks runs on this one unmodified.
-Roadshow's own commands — its `arp`, `netstat`, `tcpdump` and `ShowNetStatus`
-— run against this library as they ship.
-
 ## Prior art
 
 Two other modern-stack projects appeared in July 2026 and are worth knowing
@@ -161,6 +142,11 @@ the test suites, continuous integration and how everything is measured, and
 **[docs/RESEARCH.md](docs/RESEARCH.md)** for the engineering record.
 
 ## Licence
+
+AmiNetXDuo is an independent implementation of a published ABI. No AmiTCP,
+AROSTCP, Miami or Roadshow code has been used, copied or disassembled. Olaf
+Barthel's freely distributable Roadshow SDK headers and autodocs are used
+solely as an ABI reference.
 
 MIT. ThreadX and NetX Duo are MIT-licensed as well (© Microsoft and the Eclipse
 ThreadX contributors) and are consumed as unmodified git submodules. The one
