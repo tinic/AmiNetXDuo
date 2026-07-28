@@ -11,6 +11,10 @@
 
 #include "bsdsocket_vectors.h"
 
+#ifdef AMINETXDUO_BPF
+#include "aminetxduo/bpf.h"
+#endif
+
 #include <proto/exec.h>
 #include <stddef.h>
 
@@ -360,9 +364,24 @@ typedef struct
     ULONG   value;
 } BsdConstTag;
 
+/*
+ * How many bpf_* capture channels this build has, which is the whole of what
+ * SBTC_NUM_PACKET_FILTER_CHANNELS asks. It is the FIRST thing Roadshow's
+ * tcpdump does: main() reads this code by reference and, if it comes back
+ * zero, prints `"%s" V%ld.%ld does not support the raw packet access method
+ * used by this program.` and exits before touching anything else. Answering 0
+ * while bpf.c's eight vectors are present said no to a question this library
+ * can say yes to (docs/RESEARCH.md 55).
+ */
+#ifdef AMINETXDUO_BPF
+#  define BSD_PACKET_FILTER_CHANNELS    AMI_BPF_MAX_CHANNELS
+#else
+#  define BSD_PACKET_FILTER_CHANNELS    0
+#endif
+
 static const BsdConstTag bsd_const_tags[] =
 {
-    { SBTC_NUM_PACKET_FILTER_CHANNELS,  0     },
+    { SBTC_NUM_PACKET_FILTER_CHANNELS,  BSD_PACKET_FILTER_CHANNELS },
 
     /*
      * THE TUNABLES, and why answering them is not optional.
@@ -372,8 +391,8 @@ static const BsdConstTag bsd_const_tags[] =
      * shortcut -- so ONE unserviced code in a caller's list discards every
      * tag after it. A foreign client that probes a group of tunables in a
      * single call therefore gets nothing, and the failure looks like the
-     * library not working rather than like one tag being unknown. Roadshow's
-     * tcpdump is the one we caught doing it (docs/RESEARCH.md 55).
+     * library not working rather than like one tag being unknown
+     * (docs/RESEARCH.md 55).
      *
      * Every value below is what this stack ACTUALLY does, not a placating
      * answer. Where the honest answer is "no", it says no.

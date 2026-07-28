@@ -16023,9 +16023,20 @@ call `netstats.c` already made. They are `SBQUAD_T` by reference; NetX Duo count
 ULONG, so the high word is always zero and it wraps at 4 GB, which is its counter and not
 a choice made here.
 
-**The tcpdump guess was wrong.** Servicing the tunables was the leading theory for why it
-fails, and it still exits rc 20 with no output afterwards. Whatever stops it is something
-else -- worth recording so the next person does not re-run the same experiment.
+**The tcpdump guess was wrong, and so was the reasoning that declared it wrong.**
+Servicing the tunables was the leading theory; tcpdump still exited rc 20 with no output
+afterwards, and that was recorded here as "whatever stops it is something else".
+
+Both halves were built on evidence that could not exist. **The harness cannot capture
+stderr.** `curlcheck.c` builds `<cmd> <NIL: >>DH0:w/NAME.txt`, and AmigaDOS 3.x shell
+redirection covers stdout only -- there is no `2>`. Every fatal tcpdump diagnostic goes to
+stderr and then `exit(20)`, so **every distinct failure looked identical**: rc 20, empty
+file. "Setting the channel count to 4 changed nothing" was the same illusion -- it moved
+the failure to the next call, whose message was equally invisible.
+
+The proof it was the harness and not the stack: against **Roadshow's own**
+`bsdsocket.library`, `tcpdump --version` and `tcpdump -h` also return rc 20 with an empty
+file, while `-D` returns 0. See 60 for what was actually wrong.
 
 **SampleNetSpeed was never a stack problem.** It reported "Could not query data throughput
 statistics" and exited; with the byte counters answered it gets past that and runs. Its
@@ -16373,3 +16384,74 @@ conformance, the 68000 build and the emulator suite. Against that, the repair sc
 loudly when it meets something it does not recognise — which it has now done twice,
 correctly. The cheap trigger for revisiting is one manifest query: if the layer digest
 moves, the bump becomes nearly free.
+
+## 60. tcpdump: two bugs, and an investigation blinded by AmigaDOS (2026-07-28)
+
+Roadshow's `tcpdump` was the last unexplained failure of the thirty commands in §55. It
+exited rc 20 with no output, which read as dying before `main()`. It was not.
+
+### The blindfold, which cost two wrong conclusions
+
+`main()` is at 0x4d8d8 and its **first** action, before argument parsing, is a single
+`SocketBaseTagList()` asking `SBTM_GETREF(SBTC_NUM_PACKET_FILTER_CHANNELS)`. If that call
+fails **or answers zero**, it goes to `error()`, which does `fprintf(stderr, ...)` and
+`exit(20)`.
+
+Every fatal tcpdump diagnostic is therefore rc 20 on **stderr** — and
+`tests/curl/curlcheck.c` runs commands as `<cmd> <NIL: >>DH0:w/NAME.txt`, where AmigaDOS
+3.x redirection covers stdout only. There is no `2>`. So every distinct failure produced
+byte-identical evidence, and two investigations drew conclusions from it:
+
+* "setting the channel count to 4 changed nothing" — it did change something; it moved the
+  failure to the next call, whose message was equally invisible;
+* "the tunables were not the cause, so it is something else" — the tunables were not the
+  cause, but the reasoning that established it was worthless.
+
+The control that settles it: against **Roadshow's own** `bsdsocket.library`,
+`tcpdump --version` and `tcpdump -h` also exit rc 20 with an empty file, while `-D` exits
+0. The harness, not the stack.
+
+Capturing stderr was attempted and **reverted as inert**: Roadshow's crt0 builds fd 2 at
+constructor time with a NULL DOS handle and never consults `pr_CES`; `SYS_Error` is V50 and
+`NP_Error` was documented in V40 without being implemented. A foreign binary's fatal
+message is visible only from an interactive Shell. Our own tools are unaffected --
+`tool_error()` uses `pr_CES ? pr_CES : Output()`.
+
+### Bug one: we owned a BPF implementation and denied having it
+
+`SBTC_NUM_PACKET_FILTER_CHANNELS` answered **0** while `src/bpf/` and all eight `bpf_*`
+LVOs were present and working -- and those eight are exactly what Roadshow's libpcap
+drives: `bpf_open`, `bpf_set_interrupt_mask`, then `bpf_ioctl` with BIOCVERSION, BIOCGBLEN,
+BIOCSBLEN, BIOCSETIF, BIOCGDLT, BIOCSRTIMEOUT and BIOCSETF. It now answers
+`AMI_BPF_MAX_CHANNELS`.
+
+### Bug two: bpf_open()'s ABI was guessed, and guessed wrong
+
+Roadshow's libpcap calls `bpf_open(-1)` -- "any free channel" -- and then uses the
+**return value** as the channel for every subsequent call (0x59eee: `movel d0,d2`, no
+reload before `jsr a6@(-396)`). Ours rejected every negative argument and returned 0
+rather than the channel number. The header had flagged this convention as unconfirmed;
+the real client confirms it. Fixed in `src/bpf/bpf_channel.c`, with the header, both unit
+tests, and `NetTrace` -- which now asks for `-1` and keeps the answer, so two captures can
+coexist.
+
+### Measured
+
+| | before | after |
+|---|---|---|
+| `tcpdump -c 2 -n -i eth0` | rc 20, nothing | **rc 0**, `IP 10.0.2.15.5353 > 224.0.0.251.5353` x2 |
+| `NetTrace LOOPBACK BYTES=65536` | rc 0, 31 records | rc 0, 31 records, valid pcap |
+
+### What still does not work, with the ABI written down
+
+`tcpdump -D`, and `tcpdump` with no `-i`, need `pcap_findalldevs`: `socket(AF_INET,
+SOCK_DGRAM, 0)` then `IoctlSocket(SIOCGIFCONF)`, then `SIOCGIFFLAGS`/`SIOCGIFADDR`/
+`SIOCGIFNETMASK`/`SIOCGIFBRDADDR` per interface. `bsd_IoctlSocket()` handles only FIONBIO,
+FIONREAD, SIOCATMARK and FIOASYNC, and fad-gifc tolerates only EINVAL from the rest.
+
+That is a separate feature, and the encodings are pinned by the binary if anyone builds
+it: `SIOCGIFCONF` is `_IOWR('i',36,...)` size **8** (`{int ifc_len; caddr_t ifc_buf;}`),
+the `SIOCGIF*` family size **32** (`char ifr_name[16]` plus a 16-byte union), and libpcap
+strides the list by `ifr->ifr_addr.sa_len` at offset 16 -- so the sockaddrs must carry
+`sa_len`. `bsd_if_gather()` in `interfaces.c` already produces address, mask, broadcast,
+MTU and link state.

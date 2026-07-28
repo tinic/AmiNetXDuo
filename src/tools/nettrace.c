@@ -450,8 +450,12 @@ static BOOL nt_cap_start(NtCap *cap, struct Library *base, const char *iface,
     cap->out.fh  = 0;
     cap->short_reads = 0;
 
-    if (nt_bpf_open(base, cap->channel) != 0)
+    /* -1 is "any free channel", and the answer names the one claimed, so two
+       captures can run at once instead of fighting over channel 0. */
+    cap->channel = nt_bpf_open(base, -1);
+    if (cap->channel < 0)
     {
+        cap->channel = 0;
         tool_error("bpf_open failed -- is this bsdsocket.library ours, and "
                    "was it built with BPF on?");
         return FALSE;

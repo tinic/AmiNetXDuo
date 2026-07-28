@@ -424,14 +424,23 @@ VOID ami_bpf_cleanup(VOID);
  * and not a typo in one source. The generated vector must not "tidy" it.
  *
  * Return values are 0 for success and -1 for failure throughout, except
- * bpf_read (bytes copied), bpf_write (bytes accepted) and bpf_data_waiting
- * (bytes available). INFERRED: no bsdsocket autodoc covering the bpf_* group
- * could be found on this machine, so the exact failure codes Roadshow returns
- * are not confirmed -- only the signatures are.
+ * bpf_open (the channel claimed), bpf_read (bytes copied), bpf_write (bytes
+ * accepted) and bpf_data_waiting (bytes available). No bsdsocket autodoc
+ * covering the bpf_* group could be found on this machine, so the exact
+ * failure codes Roadshow returns are still not confirmed -- but bpf_open's
+ * convention is, because Roadshow's own libpcap uses it (below).
  */
 
-/* Claim channel 0..AMI_BPF_MAX_CHANNELS-1. -1 if out of range, already open,
-   or out of memory. A channel captures nothing until BIOCSETIF. */
+/*
+ * Claim a channel: 0..AMI_BPF_MAX_CHANNELS-1 for a particular one, NEGATIVE
+ * for any free one. Returns the channel claimed, or -1 if it is out of range,
+ * already open, or there are none left. A channel captures nothing until
+ * BIOCSETIF.
+ *
+ * Roadshow's libpcap is the reference client for the negative form: it calls
+ * bpf_open(-1) and then uses the return value as the channel for every call
+ * that follows (docs/RESEARCH.md 55).
+ */
 LONG ami_bpf_open(LONG channel);
 
 /* Release the channel, its buffers and its filter. */

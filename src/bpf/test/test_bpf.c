@@ -645,8 +645,12 @@ static void test_channel_basics(void)
 
     CHECK(ami_bpf_open(0) == 0);
     CHECK(ami_bpf_open(0) == -1);                   /* already open          */
-    CHECK(ami_bpf_open(-1) == -1);
     CHECK(ami_bpf_open(AMI_BPF_MAX_CHANNELS) == -1);
+
+    /* "Any free one" skips the channel already taken and names the one it
+       claimed -- the form Roadshow's libpcap uses. */
+    CHECK(ami_bpf_open(-1) == 1);
+    CHECK(ami_bpf_close(1) == 0);
     CHECK(ami_bpf_ioctl(1, BIOCFLUSH, NULL) == -1); /* not open              */
 
     CHECK(ami_bpf_ioctl(0, BIOCGBLEN, &value) == 0);
@@ -976,7 +980,7 @@ static void test_write_and_binding(void)
 
         CHECK(ami_bpf_attach_interface("eth1", other, DLT_EN10MB, 1500,
                                        NULL) == 0);
-        CHECK(ami_bpf_open(1) == 0);
+        CHECK(ami_bpf_open(1) == 1);
         CHECK(ami_bpf_ioctl(1, BIOCSETIF, "eth1") == 0);
         CHECK(ami_bpf_write(1, frame, (LONG)len) == -1);
         ami_bpf_tap_rx(other, frame, len);

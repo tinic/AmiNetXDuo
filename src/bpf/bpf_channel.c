@@ -211,16 +211,44 @@ static VOID ami_bpf_chan_release(AmiBpfChan *ch)
     ami_free(filter);
 }
 
+/*
+ * A NEGATIVE channel means "any free one", and the channel actually claimed
+ * is the return value. That is not a convenience invented here: Roadshow's
+ * own libpcap calls bpf_open(-1) and then passes the returned value straight
+ * back in d0 as the channel for bpf_set_interrupt_mask() and every bpf_ioctl()
+ * that follows (docs/RESEARCH.md 55). A client cannot know which channels some
+ * other program already holds, so asking by number is the exception and asking
+ * for one is the rule.
+ */
 LONG ami_bpf_open(LONG channel)
 {
     AmiBpfChan *ch;
 
-    if (channel < 0 || channel >= AMI_BPF_MAX_CHANNELS)
+    if (channel >= AMI_BPF_MAX_CHANNELS)
         return -1;
 
-    ch = &ami_bpf_chan[channel];
-
     ami_bpf_lock();
+
+    if (channel < 0)
+    {
+        LONG i;
+
+        for (i = 0; i < AMI_BPF_MAX_CHANNELS; i++)
+        {
+            if (!ami_bpf_chan[i].open)
+                break;
+        }
+
+        if (i == AMI_BPF_MAX_CHANNELS)
+        {
+            ami_bpf_unlock();
+            return -1;
+        }
+
+        channel = i;
+    }
+
+    ch = &ami_bpf_chan[channel];
 
     if (ch->open)
     {
@@ -235,7 +263,7 @@ LONG ami_bpf_open(LONG channel)
 
     ami_bpf_unlock();
 
-    return 0;
+    return channel;
 }
 
 LONG ami_bpf_close(LONG channel)
