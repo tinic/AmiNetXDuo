@@ -3247,7 +3247,7 @@ keyed by a hash of the intermediate's whole DER, of certificates whose signature
 has already been checked against a trusted root; on a hit, admit the intermediate
 as an issuer without the public-key operation. It wants the same on-disk shape as
 `DEVS:Internet/certificates` (`tools/mkcertstore.py` already writes that format)
-so it survives a reboot, which is the whole point.
+so it survives a reboot.
 
 **What it buys is less than it sounds, and the estimate should be written down
 before anyone builds it.** `_nx_secure_x509_certificate_chain_verify()` already
@@ -3988,7 +3988,7 @@ one would let an observer link two connections.
 
 ### 13.5 A public-header bug that had nothing to do with resumption
 
-Found chasing a second symptom and worth more than the feature that uncovered it.
+Found while chasing a second symptom.
 
 `tests/tls/tls_resume` completed a handshake, reported 6.8 s, and then `TLSRead()`
 returned **-1 with no error set** — a combination the library cannot produce. It happened
@@ -5340,7 +5340,7 @@ writing into 64-limb arrays, and had been reporting 316 of its own 4,000 trials 
 failures — 7.9%, against the 6/71 = 8.45% of draws that overrun. `ctest` had been red for
 this reason and not for a real one.
 
-**The shape of the answer, which is the point.** Karatsuba took our exponentiation from
+**The shape of the answer.** Karatsuba took our exponentiation from
 131.6 ms to 127.3 ms and put it level with OpenSSL's 126.9. It did not move the headline,
 because the headline was never the multiplies: 98% of what remains is a 16-bit long
 division in the setup. Adopting it was right — it is 2.7% and it is now the reason our
@@ -5474,7 +5474,7 @@ in Wireshark serve both. `lo0`'s fourteen bytes are synthesised with zeroed addr
 
 `NetTrace` is the consumer: it runs a workload and captures it to a **classic pcap
 that opens in Wireshark and tcpdump with no conversion**. It links no part of `src/`
-— every call is a published `bsdsocket.library` LVO, which is the point, because a
+— every call is a published `bsdsocket.library` LVO, because a
 tool that linked the archive would get its own copy of the channel table and capture
 nothing. It is one program rather than a daemon plus a workload because the trace
 exists to explain a throughput number, and a number and a trace from two separate
@@ -7691,7 +7691,7 @@ of every changed command in both spellings, the templates through ReadArgs'
 own `?`, the failure cases (no argument, unknown name, unknown driver, wrong
 unit, a bad name in either position of a list), and `REPEAT` started in the
 background so it could be seen looping. The emulator is serialised across
-workstreams by `build/.fsuae.lock`, which is the argument for one boot that
+workstreams by `build/.fsuae.lock`, so one boot that
 checks fifty things rather than fifty boots that check one.
 
 ## 24. The loopback window, sized from the packet pool (2026-07-26)
@@ -7819,7 +7819,7 @@ host contention does not enter them.
 | **wire**, no capture | 152 KB/s | **159 KB/s** | +4.5% |
 | wire, capturing | 119 KB/s | 127 KB/s | +6.5% |
 
-And the mechanism, which is the point — a throughput number alone could not
+And the mechanism: a throughput number alone could not
 distinguish any of this:
 
 | loopback | pinned 8192 | pool-derived |
@@ -8283,7 +8283,7 @@ adds is the set of checks that need more than the line in front of them:
 * a name server is reachable, either directly or through a default route that exists;
 * the netdb files parse as the columns they are meant to be.
 
-**It works with the network down**, which is the whole point: the machine that needs
+**It works with the network down.** The machine that needs
 checking is the one where the stack did not come up. It never opens `bsdsocket.library`.
 
 Three decisions in it are worth recording because each was a bug first.
@@ -10281,7 +10281,7 @@ the most useful result in the section and it is stated first for that reason.
 | host | macOS 26.5, Apple M3; `build/.fsuae.lock` held for every run, so no two emulators ran together |
 | UAE's own emulation | `bsdsocket_library = 0` — otherwise there is a fourth stack in the room |
 
-Four things are the **same binary in every column**, which is the point:
+Four things are the **same binary in every column**:
 
 * **the driver** — `tests/curl/curlcheck.c`, which runs each command with a
   512 KB stack and records its exit code, elapsed ticks and `AvailMem`;
@@ -11549,7 +11549,7 @@ succeeds normally.
 * **No `UDP:`.** Roadshow has none either; a datagram is not a stream and `Read()` has no
   way to say where one ended.
 * **Name resolution is synchronous inside the session.** A slow DNS server delays that one
-  `Open()` and nothing else, which is the whole point of a process per connection, but it
+  `Open()` and nothing else, which is what a process per connection buys, but it
   is still a blocking call and there is no timeout keyword to shorten it. Roadshow's
   template has none either, so none was invented.
 * **A blocked `Read()` cannot be interrupted.** Ctrl-C goes to the Shell, which is asleep
@@ -15784,7 +15784,7 @@ Reading the addend then had its own trap: `pea a4@(0)` keeps the displacement in
 parentheses, and taking the leading token yields `a4`, which is valid hex, parses as
 `0xa4`, and silently disqualified seven of the eleven baserel files.
 
-The lesson is the flat one: **the local toolchain was never the shipping toolchain**, and
+**The local toolchain was never the shipping toolchain**, and
 three rounds of "fixed" were three rounds of testing the wrong binary. The verification
 that finally meant something was running the script under the pinned binutils on a Linux
 host, both directions, before tagging -- pristine reports 11 buggy and rc 1, repaired
@@ -16302,7 +16302,7 @@ in section 1 reports a 2048-byte straight-line body at 144.5 ns per `ADD.L` agai
 256-byte body's 150.0, which is the wrong way round and says instruction fetch is close to
 free in the model. Every figure above is therefore a lower bound on a real 68EC020.
 
-And **the C core stays compiled and reachable in the assembly build**, which is the point
+And **the C core stays compiled and reachable in the assembly build**
 of `c68k_chacha20_core_c()` being in the header. `crypto68k_bulk` now runs both over eight
 consecutive blocks and compares them before it times either -- RFC 8439's vectors check one
 block and one keystream, and an assembly bug that only appeared once the counter had
@@ -16384,19 +16384,17 @@ conformance, the 68000 build and the emulator suite. Against that, the repair sc
 loudly when it meets something it does not recognise — which it has now done twice,
 correctly.
 
-**And the horizon is years, not months, so `fix-toolchain-crt0.py` is permanent
-infrastructure rather than a workaround waiting to be deleted.** An earlier version of this
-entry named the wrong trigger: "if the layer digest moves, the bump becomes nearly free".
-That is false, and the way it is false matters. A moved digest means the image was rebuilt;
-it says nothing about which compiler went into it. What the repair actually needs in order
-to become unnecessary is a *distributed artefact* carrying bebbo's `m68k_save_reg` fix
-(amiga15.2 at 168be3619 or later) — and prebuilt m68k-amigaos toolchains lag their upstream
-by a very long way. `amigadev/crosstools:m68k-amigaos-gcc10` is named for GCC 10 and was
-built 2025-11-09, eight months before either fix landed.
+`fix-toolchain-crt0.py` is permanent, not a workaround waiting to be deleted. An earlier
+version of this entry gave the trigger as "if the layer digest moves, the bump becomes
+nearly free", which is wrong: a moved digest means the image was rebuilt and says nothing
+about which compiler went into it. The repair becomes unnecessary only when a distributed
+artefact carries bebbo's `m68k_save_reg` fix (amiga15.2 at 168be3619 or later), and
+prebuilt m68k-amigaos toolchains lag upstream by years.
+`amigadev/crosstools:m68k-amigaos-gcc10` is named for GCC 10 and was built 2025-11-09,
+eight months before either fix landed.
 
-"Fixed upstream" and "fixed in the thing people install" are different statements, and §53
-conflated them. Treat the script as load-bearing: keep it verified, keep its failure loud,
-and do not write anything that reads as though it is on its way out.
+§53 read "fixed upstream" as "fixed in the thing people install". Keep the script
+verified and its failure loud.
 
 ## 60. tcpdump: two bugs, and an investigation blinded by AmigaDOS (2026-07-28)
 
@@ -16455,13 +16453,13 @@ coexist.
 | `tcpdump -c 2 -n -i eth0` | rc 20, nothing | **rc 0**, `IP 10.0.2.15.5353 > 224.0.0.251.5353` x2 |
 | `NetTrace LOOPBACK BYTES=65536` | rc 0, 31 records | rc 0, 31 records, valid pcap |
 
-### The third bug: nothing could be ASKED which interfaces exist (fixed 2026-07-28)
+### Bug three: no way to ask which interfaces exist (fixed 2026-07-28)
 
 `tcpdump -D`, and `tcpdump` with no `-i`, need `pcap_findalldevs`: `socket(AF_INET,
 SOCK_DGRAM, 0)` then `IoctlSocket(SIOCGIFCONF)`, then `SIOCGIFFLAGS`/`SIOCGIFADDR`/
 `SIOCGIFNETMASK`/`SIOCGIFBRDADDR` per interface. `bsd_IoctlSocket()` handled only FIONBIO,
-FIONREAD, SIOCATMARK and FIOASYNC, and fad-gifc tolerates only EINVAL from the rest --
-so capture on a NAMED interface worked while asking which names exist did not.
+FIONREAD, SIOCATMARK and FIOASYNC, and fad-gifc tolerates only EINVAL from the rest, so
+capture on a named interface worked while enumeration did not.
 
 Now in `bsd_if_ioctl()` (`interfaces.c`), which is where the naming rule and
 `bsd_if_gather()` already live. The encodings came from the NDK rather than from the
@@ -16469,7 +16467,7 @@ name, and five `AMI_STATIC_ASSERT`s fail the build if they ever drift: `SIOCGIFC
 `_IOWR('i',36,...)` size **8** (`{int ifc_len; caddr_t ifc_buf;}`) and the `SIOCGIF*`
 family size **32** (`char ifr_name[16]` plus a 16-byte union).
 
-**The one subtlety is `sa_len`.** fad-gifc strides the `SIOCGIFCONF` result by
+`sa_len` matters. fad-gifc strides the `SIOCGIFCONF` result by
 `sizeof(ifr_name) + ifr->ifr_addr.sa_len`, not by `sizeof(struct ifreq)`. An entry whose
 sockaddr says 0 makes the walk stride 16 and read the second half of the entry it has
 already read as the next name. Every sockaddr written carries its length -- and because
@@ -16477,8 +16475,7 @@ already read as the next name. Every sockaddr written carries its length -- and 
 exactly what would have made the bug invisible until somebody went looking.
 
 Only physical interfaces are listed. NetX Duo puts loopback past the physical range and no
-BPF channel can bind to it, so offering a name that cannot then be captured on would turn
-one honest failure into two confusing ones.
+BPF channel can bind to it, so listing it would name a device that cannot be opened.
 
 | | before | after |
 |---|---|---|
@@ -16497,7 +16494,7 @@ full 600 s with empty stdout *and* empty stderr.
 
 `nx_tcp_socket_timeout_max_retries` is **6**, printed by the socket itself after
 `_nx_tcp_socket_create()`. Four theories were eliminated before that number was obtained,
-which is the argument for obtaining it first.
+so it is worth obtaining first.
 
 One of the four was wrong in an interesting way. The elimination said `nx_user.h` reaches
 NetX Duo because `third_party/netxduo/CMakeLists.txt:73` defines
