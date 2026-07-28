@@ -8,6 +8,10 @@ add_subdirectory(crypto68k)
 add_subdirectory(perf)
 add_subdirectory(tools)
 add_subdirectory(tcpdrill)
+
+# Host-only, and it says so itself: the sanitizer fuzz drivers for the parsers
+# that read bytes we did not write. Nothing to build when cross-compiling.
+add_subdirectory(fuzz)
 add_subdirectory(leak)
 if(AMINETXDUO_IPV6)
     add_subdirectory(ipv6)

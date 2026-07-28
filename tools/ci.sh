@@ -82,7 +82,8 @@ CROSS_CONFIGS=(
 # if one is registered but not built, so a test added without touching this
 # list turns CI red rather than silently disappearing -- which is what used to
 # happen when `ctest` reported "No tests were found" and nobody noticed.
-HOST_TEST_TARGETS=(test_config test_mbuf test_bpf test_crypto68k test_crypto68k_25519 test_net68k_checksum)
+HOST_TEST_TARGETS=(test_config test_mbuf test_bpf test_crypto68k test_crypto68k_25519 test_net68k_checksum
+                   fuzz_config fuzz_bpf)
 
 # The on-Amiga harnesses the AROS ROM can run.  Verified 2026-07-25 against
 # Kickstart 3.1 -- identical check counts on both.  Deliberately NOT here:
