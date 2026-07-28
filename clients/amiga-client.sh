@@ -113,6 +113,7 @@ amiga_client_prepare()
 
     local sources=(
         "$AMIGA_CLIENT_ROOT/clients/compat/amiga_posix.c"
+        "$AMIGA_CLIENT_ROOT/clients/compat/amiga_argv.c"
         "$AMIGA_CLIENT_ROOT/clients/compat/amiga_libgcc.c"
         "$AMIGA_CLIENT_ROOT/src/common/ami_udivdi3.c"
     )
@@ -167,7 +168,10 @@ amiga_client_prepare()
     fi
 
     AMIGA_CLIENT_COMPAT_A="$AMIGA_CLIENT_LIBDIR/libamigaclient.a"
-    AMIGA_CLIENT_LDFLAGS="$AMIGA_CLIENT_ARCH -nostartfiles $AMIGA_CLIENT_STARTFILE -L$AMIGA_CLIENT_LIBDIR"
+    # --wrap=main: the crt0 does not tokenise the CLI command line into argv[],
+    # so route main() through clients/compat/amiga_argv.c, which rebuilds a real
+    # POSIX argv[] from dos.library before the client sees it.
+    AMIGA_CLIENT_LDFLAGS="$AMIGA_CLIENT_ARCH -nostartfiles $AMIGA_CLIENT_STARTFILE -L$AMIGA_CLIENT_LIBDIR -Wl,--wrap=main"
 
     export AMIGA_CLIENT_LIBDIR AMIGA_CLIENT_COMPAT_A AMIGA_CLIENT_LDFLAGS
     export AMIGA_CLIENT_STARTFILE
