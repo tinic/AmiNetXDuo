@@ -918,10 +918,15 @@ static void con_reader_start(BPTR handle)
 
     con_reader = cr;
 
+    /* SAME priority as us, not higher.  A higher-priority reader that keeps
+       finding input -- fast typing -- never blocks, so the parent (this task)
+       is never scheduled to drain the ring or service the socket, and the
+       session hangs until the typing stops.  Equal priority time-slices the
+       two, so the parent always gets the CPU back. */
     tags[0].ti_Tag = NP_Entry;     tags[0].ti_Data = (ULONG)con_child;
     tags[1].ti_Tag = NP_Name;      tags[1].ti_Data = (ULONG)"AmiNetXDuo ssh console";
     tags[2].ti_Tag = NP_StackSize; tags[2].ti_Data = 8192UL;
-    tags[3].ti_Tag = NP_Priority;  tags[3].ti_Data = (ULONG)1;
+    tags[3].ti_Tag = NP_Priority;  tags[3].ti_Data = (ULONG)0;
     tags[4].ti_Tag = TAG_END;      tags[4].ti_Data = 0;
 
     if (CreateNewProc(tags) == NULL)
