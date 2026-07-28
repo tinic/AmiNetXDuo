@@ -9,7 +9,7 @@
  * the two ever disagree, one of them is a bug and this file is the place it
  * shows up.
  *
- * AND EVERY STUB DECLARES d1/a0/a1 WRITTEN, WHICH IS NOT DECORATION.
+ * And every stub declares d1/a0/a1 WRITTEN, Which is not decoration.
  *
  * An AmigaOS library call clobbers d0, d1, a0 and a1.  A register that is only
  * an INPUT operand is one GCC may assume the asm leaves alone, so a stub that

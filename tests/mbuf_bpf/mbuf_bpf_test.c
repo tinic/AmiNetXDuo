@@ -4,11 +4,11 @@
  * The host tests in src/mbuf/test/ and src/bpf/test/ carry the exhaustive
  * batteries. This one exists for the four things a host cannot answer:
  *
- *   1. THE REAL CONSTANTS. On a 64-bit host the mbuf replica scales MSIZE to
+ *   1. The real constants. On a 64-bit host the mbuf replica scales MSIZE to
  *      256 and MLEN/MHLEN to 224/208, so every boundary case is exercised at
  *      the wrong number. Here they are 128/108/100, and `struct bpf_hdr` is
  *      the real 18 bytes with bh_hdrlen 20.
- *   2. MSIZE ALIGNMENT FROM A REAL AllocVec(). dtom() is published ABI and
+ *   2. Msize alignment from A REAL AllocVec(). dtom() is published ABI and
  *      needs every mbuf on a 128-byte boundary; AllocVec() promises 8. The
  *      slab allocator's rounding is only really tested against the real
  *      allocator.

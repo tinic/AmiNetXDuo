@@ -20,7 +20,7 @@
 /* ---------------------------------------------------------------- timing -- */
 
 /*
- * One tick is 20 ms.  THIS MUST EQUAL TX_TIMER_TICKS_PER_SECOND in
+ * One tick is 20 ms.  This must equal TX_TIMER_TICKS_PER_SECOND in
  * port/threadx-amiga/inc/tx_port.h: NetX Duo expresses every one of its own
  * rates as a divisor of this, so a disagreement does not fail -- it silently
  * scales every TCP timer by the ratio.
@@ -141,7 +141,7 @@
 #define NX_ENABLE_EXTENDED_NOTIFY_SUPPORT
 
 /*
- * ACK EVERY SECOND FULL-SIZED SEGMENT (RFC 1122, 4.2.3.2).
+ * ACK every second full-SIZED SEGMENT (RFC 1122, 4.2.3.2).
  *
  * NetX Duo does not do this by default -- NX_TCP_ACK_EVERY_N_PACKETS is not
  * defined anywhere in the vendored tree, so the whole `need_ack` block in
@@ -153,7 +153,7 @@
  *      (nx_tcp_socket_state_data_check.c:1135, nx_tcp_socket_receive.c:212);
  *   2. the 200 ms delayed-ACK timer.
  *
- * So the interval between acknowledgements is PROPORTIONAL TO THE WINDOW, and
+ * So the interval between acknowledgements is Proportional to the window, and
  * when the application cannot consume half a window inside 200 ms the timer
  * becomes the pacer.  That makes the obvious tuning knob actively harmful:
  * measured in tests/trace/ on the A1200 profile, 524288 bytes over the wire,
@@ -181,9 +181,7 @@
 #define NX_TCP_ACK_EVERY_N_PACKETS              2
 
 /*
- * RETRANSMIT WITH EXPONENTIAL BACKOFF (RFC 6298 5.5), AND THE TRAP IN DOING IT.
- *
- * NetX Duo's retransmission interval is
+ * Retransmit with exponential backoff (RFC 6298 5.5), And the trap in doing it.
  *
  *     timeout = nx_tcp_socket_timeout_rate << (retries * NX_TCP_RETRY_SHIFT)
  *
@@ -196,7 +194,7 @@
  * for this path.
  *
  * A shift of 1 doubles it each time, which is what RFC 6298 5.5 asks for.
- * NX_TCP_MAXIMUM_RETRIES CANNOT BE LEFT ALONE WHILE DOING THAT, and this is the
+ * NX_TCP_MAXIMUM_RETRIES Cannot be left alone while doing that, and this is the
  * whole reason the two are set together.  There is NO CEILING in NetX Duo --
  * the expression above is a plain shift with no clamp, and NX_TCP_MAXIMUM_RETRIES
  * is the only thing bounding it.  At the default of 10 the intervals run
@@ -246,7 +244,7 @@
 #endif
 
 /*
- * TCP KEEPALIVE, BECAUSE setsockopt(SO_KEEPALIVE) WAS ALREADY SAYING YES.
+ * TCP KEEPALIVE, BECAUSE setsockopt(SO_KEEPALIVE) Was already saying yes.
  *
  * src/bsdsocket/options.c accepted SO_KEEPALIVE, stored it in a socket flag and
  * reported it back through getsockopt() -- and nothing anywhere acted on it,
@@ -266,7 +264,7 @@
  * the socket is reset.  The defaults are BSD's and are left alone: 7200 s
  * (two hours) initial, 75 s retry, 10 retries.
  *
- * ONE THING HAD TO CHANGE IN OUR CODE, and it is not optional.
+ * One thing had to change in our code, and it is not optional.
  * nx_tcp_socket_create.c:166 sets nx_tcp_socket_keepalive_enabled = NX_TRUE
  * UNCONDITIONALLY under this define, so turning it on alone would put every
  * socket on keepalive whether the application asked or not -- which is not what
@@ -280,7 +278,7 @@
 #define NX_ENABLE_TCP_KEEPALIVE
 
 /*
- * REJECT A SYN THAT ADVERTISES AN ABSURD MSS.
+ * REJECT A SYN that advertises an absurd MSS.
  *
  * Without this, nx_tcp_packet_process.c takes whatever MSS a peer's SYN
  * carries.  A peer advertising 1 makes every segment we send one byte of
@@ -300,7 +298,7 @@
 #define NX_ENABLE_TCP_MSS_CHECK
 
 /*
- * RFC 1323 / 7323 WINDOW SCALING IS OFF, AND IT WAS MEASURED RATHER THAN
+ * RFC 1323 / 7323 Window scaling is off, And it was measured rather than
  * ASSUMED.  docs/RESEARCH.md 28.2 is the write-up; this is the short version,
  * because "NX_ENABLE_TCP_WINDOW_SCALING exists and we do not define it" reads
  * as an oversight and is not one.
@@ -317,14 +315,14 @@
  *              than a coincidence: the peer never holds more than 2880 bytes
  *              outstanding against the window it is already offered (16.5).
  *
- * IT CANNOT DO ANYTHING ELSE HERE, and this is structural rather than a
+ * It cannot do anything else here, and this is structural rather than a
  * property of one workload.  The scale factor NetX Duo computes is the
  * smallest shift that brings the receive window under 65536
  * (nx_tcp_packet_send_syn.c:292).  ami_bsd_tcp_window() draws every window
  * from one eighth of the packet pool, and the pool tops out at
  * AMI_POOL_MAX_PACKETS (256), so the largest window ANY socket can be given is
  * 256/8 * 1568 = 50,176 bytes -- with the ceiling removed entirely.  50,176 is
- * under 65,536, so THE NEGOTIATED SCALE IS ALWAYS ZERO.  The SYN confirms it:
+ * under 65,536, so The negotiated scale is always zero.  The SYN confirms it:
  * with this on, `tcpdump -r` reads `options [mss 1460,wscale 0,eol]`.
  *
  * The option itself is free -- NetX Duo builds a fixed eight-byte option area
@@ -333,7 +331,7 @@
  * 12 bytes per NX_TCP_SOCKET and a shift on every segment sent, retransmitted
  * and acknowledged, for a factor that is always zero.
  *
- * AND IT REMOVES A GUARD.  nxe_tcp_socket_create.c:170 rejects a window above
+ * And it removes A GUARD.  nxe_tcp_socket_create.c:170 rejects a window above
  * 65535 with NX_OPTION_ERROR while this is off, and accepts anything under
  * 2^30 while it is on.  That guard is worth keeping, because a window that
  * large is actively harmful on this machine and the trace says so: pinning
@@ -411,8 +409,8 @@
 /* ------------------------------------------------------------------- IP --- */
 
 /*
- * THE IP IDENTIFICATION FIELD: NX_ENABLE_IP_ID_RANDOMIZATION IS OFF, AND THE
- * FREE HALF OF IT IS DONE IN src/netstack/ INSTEAD.
+ * The ip identification field: NX_ENABLE_IP_ID_RANDOMIZATION IS OFF, AND THE
+ * Free half of it is done in src/netstack/ INSTEAD.
  *
  * Without the define, nx_ip_header_add.c:151 uses `ip_ptr -> nx_ip_packet_id++`
  * -- a global counter that nx_ip_create.c zeroes at startup and increments once
@@ -427,7 +425,7 @@
  *      sent in between -- which is how a host is used as a zombie to port-scan
  *      a third party without appearing in that party's logs.
  *
- * THE DEFINE FIXES BOTH AND COSTS 5% OF LOOPBACK.  Measured, two arms out of
+ * The define fixes both and costs 5% OF LOOPBACK.  Measured, two arms out of
  * one tree (docs/RESEARCH.md 29.4), A1200, 524288 bytes:
  *
  *                       counter      randomised
@@ -448,7 +446,7 @@
  * packet.  NetX Duo offers no way to pick a cheaper source for this one field:
  * it is the same NX_RAND macro everywhere.
  *
- * WHAT SHIPS INSTEAD, and what it does and does not buy.  src/netstack/ seeds
+ * What ships instead, and what it does and does not buy.  src/netstack/ seeds
  * nx_ip_packet_id from the DRBG ONCE, when the NX_IP is created.  That costs a
  * single draw at startup and nothing per packet, and it removes (1): the
  * counter no longer starts at zero, so the absolute value says nothing about
@@ -469,7 +467,7 @@
 /* ------------------------------------------------------------- routing --- */
 
 /*
- * COMPILE THE IPv4 ROUTING TABLE IN.
+ * COMPILE THE IPv4 Routing table in.
  *
  * NX_IP_ROUTING_TABLE_SIZE below is inert on its own, and used to be set here
  * without this -- which reads as though routes existed and is the exact shape
@@ -520,7 +518,7 @@
 /* -------------------------------------------------------------- resolver -- */
 
 /*
- * CACHE DNS ANSWERS.
+ * Cache DNS answers.
  *
  * addons/dns has had this all along; nxd_dns.h ships the define commented out
  * and nothing here uncommented it, so every lookup went to the wire -- every
@@ -537,7 +535,7 @@
  * workload degrades to the behaviour it replaced rather than to a failure.
  * Forward (A, AAAA) and reverse (PTR) lookups share it.
  *
- * Cost inside NX_DNS: a pointer, a size and three counters.  THE CACHE ITSELF
+ * Cost inside NX_DNS: a pointer, a size and three counters.  The cache itself
  * IS THE CALLER'S -- src/netstack/netstack_dns.c owns the buffer and states
  * there how big it is and why.  Without a call to nx_dns_cache_initialize()
  * this define is inert: the code compiles in, dns_ptr->nx_dns_cache stays
@@ -684,7 +682,7 @@
 
 
 /*
- * FIVE MORE THAT WERE SURVEYED AND REJECTED, each with the reason rather than
+ * Five more that were surveyed and rejected, each with the reason rather than
  * with silence -- docs/RESEARCH.md 29.3 has the working.  Four of the five are
  * rejected on a measurement or on a missing consumer, not on taste, and each
  * says what would change the answer.

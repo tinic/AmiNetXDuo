@@ -1,45 +1,30 @@
 /*
  * AmiNetXDuo -- entropy pool and random number generation.
  *
- * READ THIS BEFORE TRUSTING IT WITH A KEY.
+ * A classic Amiga has no hardware RNG.  This samples many individually weak
+ * sources, mixes them through SHA-256 and expands with a hash DRBG.  The
+ * conditioning is textbook; the input is the weak part, and hashing does not
+ * create entropy that was not there.
  *
- * A classic Amiga has no hardware RNG, no /dev/urandom, no RDRAND and no
- * jitter source that anyone has ever analysed.  What this module does is the
- * standard fallback: sample a lot of individually weak things, mix them all
- * through SHA-256, and expand the result with a hash-based DRBG.  The
- * expansion is sound.  The *input* is the problem, and no amount of hashing
- * creates entropy that was not there.
+ * The collection is unaudited and its yield unmeasured on real hardware.
+ * ami_random_entropy_bits() returns this module's own conservative guess, not
+ * a measurement.  Several sources are identical run to run on a fixed boot
+ * image -- every AvailMem() figure, the AllocVec() addresses and the
+ * uninitialised memory residue were byte-for-byte equal over three cold boots
+ * under FS-UAE.  They are mixed and credited nothing.  That is a property of
+ * the machine rather than of this code, so re-run tools/smoke/randtest.c on a
+ * new target instead of assuming it carries over.
  *
- * The honest summary, stated so nobody has to guess:
+ * ami_random_is_seeded() reports whether the pool reached
+ * AMI_RANDOM_MIN_BITS from sources this module will count.  Left to itself it
+ * is FALSE, because the internal sources cap below that bar.  Nothing refuses
+ * to run because of it and TLS does not check it; a caller with real entropy
+ * feeds it in through ami_random_add_entropy().
  *
- *   - The conditioning (SHA-256 mixing, counter-mode expansion, forward
- *     ratchet) is textbook and is not where the risk lives.
- *   - The collection is UNAUDITED and its yield is UNMEASURED on real
- *     hardware.  ami_random_entropy_bits() returns this module's own
- *     conservative *guess*, not a measurement.  Treat it as a lower bound on
- *     nothing; it is an accounting convenience.
- *   - Several of the sources ARE identical run to run on a fixed boot image,
- *     measured: every AvailMem() figure, the AllocVec() addresses, and the
- *     "uninitialised" memory residue were byte-for-byte the same over three
- *     cold boots under FS-UAE.  They are mixed and credited nothing.  Which
- *     ones those are is a property of the machine, not of this code, so
- *     re-run tools/smoke/randtest.c on any new target rather than assuming
- *     these findings carry over.
- *   - Nothing here has been reviewed by anyone who does this for a living.
- *
- * ami_random_is_seeded() reports whether the pool reached AMI_RANDOM_MIN_BITS
- * from sources this module is willing to count.  On a machine left to itself
- * it is FALSE, because the internal sources cap below that bar -- see the
- * constant.  It is a REPORTER, not a gate: nothing in this project refuses to
- * run because of it, and TLS does not check it.  A caller that has real
- * entropy (an operator seed, a seed file, input timing) can feed it in with
- * ami_random_add_entropy().
- *
- * For everything the stack actually uses this for -- IP identification
- * fields, TCP initial sequence numbers, ephemeral ports, DHCP transaction
- * ids, DNS query ids, and TLS key agreement on a machine that is fetching web
- * pages rather than moving money -- it is a strict improvement on the 32-bit
- * LCG it replaces, at 21 ms once at init.
+ * For what the stack uses it for -- IP ids, TCP initial sequence numbers,
+ * ephemeral ports, DHCP and DNS transaction ids, and TLS key agreement on a
+ * machine fetching web pages -- it is a strict improvement on the 32-bit LCG
+ * it replaces, at 21 ms once at init.
  *
  * SPDX-License-Identifier: MIT
  */

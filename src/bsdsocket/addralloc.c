@@ -2,13 +2,9 @@
  * bsdsocket.library -- the address allocation message.
  *
  *   CreateAddrAllocMessageA()   build one, with its buffers
- *   DeleteAddrAllocMessage()    give it back
- *
  * These are the constructor and destructor for the struct
  * AddressAllocationMessage that BeginInterfaceConfig() takes. They do not
  * touch the network: all they do is validate, allocate and fill in defaults.
- *
- * WRITTEN FROM THE AUTODOC
  *
  * Same primary source as interfaces.c: NDK 3.2's
  * SANA+RoadshowTCP-IP/doc/bsdsocket.doc, plus libraries/bsdsocket.h from the
@@ -20,8 +16,6 @@
  * whole reason this file is worth writing rather than guessing: a caller that
  * gets CAAME_Client_identifier_too_short can fix its input, and one that gets
  * a generic failure cannot.
- *
- * ONE ALLOCATION, AND A COOKIE IN THE RESERVED FIELD
  *
  * Every buffer the tags ask for is carved out of a single block that the
  * message sits at the top of, so DeleteAddrAllocMessage() is one free of the
@@ -103,7 +97,7 @@ static ULONG bsd_aam_round(ULONG size)
 }
 
 /*
- * ADD ONE REGION TO THE RUNNING TOTAL, OR SAY THE SUM WILL NOT FIT.
+ * Add one region to the running total, Or say the sum will not fit.
  *
  * Every one of the seven size tags is a caller-supplied LONG that only has to
  * be positive, so two of them at 0x7FFFFFFC sum to 0xFFFFFFF8 and the whole
@@ -461,8 +455,6 @@ VOID bsd_DeleteAddrAllocMessage(register struct AddressAllocationMessage *aam __
 /* ------------------------------------------------- BeginInterfaceConfig -- */
 
 /*
- * THE WORKER
- *
  * BeginInterfaceConfig() is documented asynchronous -- "This routine starts an
  * asynchronous operation, very much like exec.library/SendIO()" -- and it has
  * to be, because the timeout it is given is at least ten seconds and blocking
@@ -474,8 +466,6 @@ VOID bsd_DeleteAddrAllocMessage(register struct AddressAllocationMessage *aam __
  * ReplyMsg() it, and exit. That is why the netstack's DHCP primitives are not
  * one blocking call -- somebody has to own the deadline, and the only party
  * with a Process and a dos.library to Delay() with is this one.
- *
- * WHY THE COUNT, AND WHY EXPUNGE LOOKS AT IT
  *
  * The worker runs code out of the library segment while holding no OpenCnt
  * reference, exactly like the TCP: handler (see bsd_lib_expunge()). If the
@@ -732,7 +722,7 @@ static VOID bsd_aam_worker(VOID)
 
 
 /*
- * WHY THIS IS HERE AT ALL, WHEN THE ALLOCATION ITSELF IS NOT
+ * Why this is here at all, When the allocation itself is not
  *
  * BeginInterfaceConfig() returns VOID. Everything it has to say, it says by
  * filling in aam_Result and replying the message -- which means the ENOSYS

@@ -1,14 +1,12 @@
 /*
  * AmiNetXDuo -- crypto68k: P-256 elliptic curve arithmetic for the 68020.
  *
- * WHY THIS EXISTS
- *
  *   docs/RESEARCH.md 9 records that after src/crypto68k made RSA 8x faster,
  *   elliptic curve arithmetic became what dominates a TLS handshake: ECDHE
  *   P-256 shared secret 5.18 s, ECDSA P-256 verify 6.97 s on the emulated
  *   68020.  This file is the follow-on.
  *
- * WHAT WAS ALREADY DONE IN THE VENDORED CODE, AND IS NOT REDONE HERE
+ * What was already done in the vendored code, And is not redone here
  *
  *   nx_crypto_ec.c is better than a first look suggests, and three of the
  *   obvious levers are already pulled:
@@ -30,7 +28,7 @@
  *   Which leaves: none of the textbook algorithmic wins were missing.  What is
  *   slow is the layer underneath them.
  *
- * WHAT IS ACTUALLY SLOW, AND WHAT THIS FILE DOES ABOUT IT
+ * What is actually slow, And what this file does about it
  *
  *   Every field operation in nx_crypto_ec.c runs through NX_CRYPTO_HUGE_NUMBER:
  *   a variable-length limb array with a size field, a sign field, and an
@@ -66,8 +64,6 @@
  *   NOT hand written: it is already within a whisker of the 68020's MULU.L
  *   floor, exactly as the sibling RSA work found, and no instruction selection
  *   will move it.
- *
- * WHAT WAS COSTED AND REJECTED
  *
  *   Shamir's trick for ECDSA verify.  The usual argument -- verify computes
  *   u1*G + u2*Q as two separate scalar multiplications, interleaving them

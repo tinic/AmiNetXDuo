@@ -10,8 +10,6 @@
  * still ships a working `fetch` for http: URLs and says something legible if
  * it is asked for an https: one.
  *
- * WHAT IT TALKS TO
- *
  *   bsdsocket.library's published vectors, called by hand, and tls.library's
  *   eight (include/aminetxduo/tlslib.h).  Nothing here links our stack: this
  *   is an ordinary Amiga network application and it is written like one, so
@@ -23,8 +21,6 @@
  *   contract for an application, and unlike ping or ShowNetStatus, a command
  *   whose whole job is to use the network has no business refusing to bring it
  *   up.
- *
- * WHAT IT DOES NOT DO
  *
  *   No chunked transfer decoding and no keep-alive: the request goes out as
  *   HTTP/1.0 with Connection: close, so the body is "everything until the
@@ -706,7 +702,7 @@ static LONG fetch_run(VOID)
                 tool_advise_blank();
 
                 /*
-                 * WHY THE CPU IS TESTED HERE. On a 68000 there is no
+                 * Why the CPU is tested here. On a 68000 there is no
                  * tls.library to install -- the archive deliberately carries
                  * none, because the encryption needs a 68020 -- so telling
                  * that user to go and install it sends them looking for a

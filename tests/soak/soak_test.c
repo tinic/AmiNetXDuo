@@ -36,7 +36,7 @@
  * White box on purpose: it reads _tx_thread_current_ptr and friends directly.
  * A soak that only proves "it did not crash" would be worth very little.
  *
- * WHAT IT FOUND (2026-07-25, FS-UAE A1200/68020, Kickstart 3.1)
+ * What it found (2026-07-25, FS-UAE A1200/68020, Kickstart 3.1)
  *
  *   1. OPEN, blocking: an Exec Task that was adopted and then orphaned cannot
  *      call RemTask(NULL).  Doing so raises "GURU 01000009 -- freeing memory
@@ -2271,7 +2271,7 @@ struct EClockVal ev;
                    s_pt_done);
 
     /*
-     * THE STARVATION FLOOR SCALES WITH WHAT THIS MACHINE MANAGED.
+     * The starvation floor scales with what this machine managed.
      *
      * S_MIN_ITERS was tuned against a 68020 and a 68000 run put the check
      * wrong: the lowest-priority worker (pri 22) finished 44 iterations

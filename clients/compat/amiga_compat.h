@@ -2,8 +2,6 @@
  * clients/compat/amiga_compat.h -- prototypes for the shims in this directory
  * that newlib's headers do not declare.
  *
- * WHY A FORCED INCLUDE
- *
  *   amiga_posix.c supplies functions the toolchain's libc.a genuinely does
  *   not have.  Defining them is enough to LINK, but a caller that has never
  *   seen a prototype is an implicit declaration, which this toolchain treats

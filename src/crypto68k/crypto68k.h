@@ -1,8 +1,6 @@
 /*
  * AmiNetXDuo -- crypto68k: 68020 multi-precision arithmetic for nx_crypto.
  *
- * WHY THIS EXISTS
- *
  *   docs/RESEARCH.md 9 makes TLS conditional on a 68020 benchmark, and the
  *   thing being benchmarked is dominated by one loop: the multiply-accumulate
  *   at the heart of Montgomery multiplication.  A TLS 1.2 client doing
@@ -12,8 +10,6 @@
  *   third_party/netxduo/crypto_libraries/src/nx_crypto_huge_number.c.  The
  *   vendored file is not touched; it stays the reference implementation that
  *   tests/crypto68k/rsa_test cross-checks every result against.
- *
- * WHAT IS FASTER, AND WHY
  *
  *   1. Exponent leading-zero bits are skipped.  The vendored
  *      _nx_crypto_huge_number_mont_power_modulus walks all 32 bits of the top
@@ -135,7 +131,7 @@ c68k_limb c68k_submul_1(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a);
 /*
  * (hi:lo) / d, returning the quotient and storing the remainder.
  *
- * CALLER MUST GUARANTEE hi < d.  This is not politeness: on a 68020 the
+ * Caller must guarantee hi < d.  This is not politeness: on a 68020 the
  * assembly form is a single DIVU.L, and DIVU.L TRAPS when the quotient will
  * not fit in 32 bits.  Knuth's algorithm D produces exactly one case where it
  * would -- the partial remainder's top limb equal to the divisor's -- and

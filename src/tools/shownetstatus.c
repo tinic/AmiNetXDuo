@@ -5,13 +5,11 @@
  *     ShowNetStatus INTERFACE/M,INTERFACES/S,ARPCACHE=ARP/S,ROUTES/S,
  *                   DNS=DOMAINNAMESERVERS/S,ICMP/S,IP/S,MB=MEMORY/S,TCP/S,
  *                   UDP/S,TCPSOCKETS/S,UDPSOCKETS/S,NAMES/S,ALL/S,REPEAT/S,
- *                   QUIET/S
- *
  * This is the one introspection command with a category per subject, and with
  * no category at all it prints a general summary -- which is what someone who
  * has just found out the network does not work will type.
  *
- * WHY THIS AND netstat BOTH EXIST. This command is the Amiga-shaped one: named
+ * Why this and netstat BOTH EXIST. This command is the Amiga-shaped one: named
  * categories, a summary by default, and a diagnosis at the end aimed at
  * somebody who does not yet know what is wrong. netstat is the BSD-shaped one:
  * -i, -r, -a, -s, columns, and nothing but data. Neither is a subset of the

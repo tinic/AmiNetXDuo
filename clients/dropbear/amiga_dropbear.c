@@ -1,8 +1,6 @@
 /*
  * clients/dropbear -- the AmigaOS half of the Dropbear port.
  *
- * WHAT THIS FILE IS
- *
  *   Everything `dbclient` calls that this toolchain does not have, in one
  *   translation unit.  It is the file curl did not need: curl's own
  *   lib/curl_setup.h already knows that on classic AmigaOS a socket is not a
@@ -14,7 +12,7 @@
  *   Nothing in third_party/dropbear is patched.  The whole port is this file,
  *   two shim headers, a localoptions.h and the flags in build.sh.
  *
- * THE ONE IDEA: TWO DESCRIPTOR SPACES, MADE INTO ONE
+ * The one idea: Two descriptor spaces, Made into one
  *
  *   bsdsocket.library hands out socket descriptors from its own table
  *   starting at 0 (src/bsdsocket/socket.c, bsd_fd_alloc()).  newlib hands out
@@ -44,8 +42,6 @@
  *   newlib's default is 64.  dbutil.c's dropbear_fd_set() checks the bound
  *   itself, so an overflow is a legible error and not a smashed stack.
  *
- * WHAT IS HONEST AND WHAT IS A STUB
- *
  *   The socket calls are real: they are the Roadshow NDK inlines, the same
  *   121 vectors `fetch` and curl use.
  *
@@ -68,7 +64,7 @@
  *   command's output back to an SSH channel; see THE SERVER RUNS A COMMAND
  *   below.
  *
- * THE SERVER RUNS A COMMAND, AND spawn_command() IS WHERE THAT IS DECIDED
+ * The server runs A COMMAND, AND spawn_command() Is where that is decided
  *
  *   dbutil.c's spawn_command() is three pipe()s and a fork(), and the child
  *   branch redirects the pipes onto 0/1/2 and calls execv().  There is no
@@ -205,7 +201,7 @@ static LONG nx_socketbasetaglist(APTR tags)            { return SocketBaseTagLis
 static int exec_capturing;
 
 /*
- * THE PIPE TABLE.  Declared here rather than beside pipe(), because read(),
+ * The pipe table.  Declared here rather than beside pipe(), because read(),
  * write(), close() and select() all come first in the file and all four have
  * to see it.
  *
@@ -360,7 +356,7 @@ extern int __real_open(const char *path, int flags, ...);
 /* ----------------------------------------------------- no requesters ---- */
 
 /*
- * THE BUG THIS FIXES, BECAUSE IT COST A RUN AND WILL COST THE NEXT ONE TOO.
+ * The bug this fixes, Because it cost A Run and will cost the next one too.
  *
  *   dbrandom.c's write_urandom() feeds the pool back to the random device
  *   with fopen(DROPBEAR_URANDOM_DEV, "w"), and calls the result opportunistic
@@ -602,8 +598,6 @@ int inet_aton(const char *cp, struct in_addr *addr)
 /* -------------------------------------------------------- read/write/close */
 
 /*
- * THE ENTROPY DEVICE, AND WHAT IT ACTUALLY IS
- *
  * dbrandom.c's seedrandom() opens DROPBEAR_URANDOM_DEV, reads 32 bytes, and
  * dropbear_exit()s if it cannot -- there is no fallback and no way to build
  * without one.  This machine has no /dev/urandom, so localoptions.h renames
@@ -614,8 +608,6 @@ int inet_aton(const char *cp, struct in_addr *addr)
  * bsdsocket.library uses for TCP initial sequence numbers and nx_secure uses
  * for TLS key agreement.  That is deliberate: one entropy story per machine,
  * and one place to fix it.
- *
- * WHAT THAT GENERATOR IS WORTH, SAID PLAINLY
  *
  *   The conditioning is textbook -- SHA-256 mixing, counter-mode expansion,
  *   forward ratchet.  The COLLECTION is guesswork.  It credits itself about
@@ -856,7 +848,7 @@ int __wrap_ioctl(int fd, unsigned long request, ...)
 int __wrap_close(int fd)
 {
     /*
-     * 0, 1 AND 2 ARE NOT OURS TO CLOSE, AND CLOSING THEM REBOOTS THE MACHINE.
+     * 0, 1 AND 2 Are not ours to close, And closing them reboots the machine.
      *
      * On Unix a process owns its own descriptor table and close(1) at exit is
      * free.  On AmigaOS a Shell command does NOT own Input() and Output():
@@ -886,7 +878,7 @@ int __wrap_close(int fd)
         return 0;
 
     /*
-     * AND NEITHER IS ANYTHING ELSE, WHILE A COMMAND IS BEING CAPTURED.
+     * And neither is anything else, WHILE A Command is being captured.
      *
      * dbutil.c's run_command() closes every descriptor from 3 to ses.maxfd
      * before it execs, so that a child cannot inherit a file the server opened
@@ -1459,7 +1451,7 @@ pid_t setsid(void) { errno = ENOSYS; return -1; }
 /* ----------------------------------------------- running a command ------- */
 
 /*
- * WHAT THE SERVER NEEDS AND WHY IT IS NOT A fork().
+ * What the server needs and why it is not A fork().
  *
  * dbutil.c's spawn_command() is the only place Dropbear starts a program: three
  * pipe()s, a fork(), and a child branch that dup2()s the pipes onto 0/1/2 and
@@ -1490,7 +1482,7 @@ pid_t setsid(void) { errno = ENOSYS; return -1; }
  * A NETWORK command run over SSH opens its own bsdsocket.library, which is
  * what any AmigaOS program does anyway.
  *
- * IT RUNS SYNCHRONOUSLY, AND THAT IS A LIMITATION AND NOT A DETAIL.  The
+ * It runs synchronously, And that is A Limitation and not A DETAIL.  The
  * session loop is stopped for as long as the command takes, so nothing is
  * echoed back while it runs and a command that never exits never returns.  The
  * alternative is SYS_Asynch plus a wakeup through WaitSelect()'s signal mask,

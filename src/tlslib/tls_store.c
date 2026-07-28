@@ -1,8 +1,6 @@
 /*
  * tls.library -- the trust store, and the lazy loader that reads it.
  *
- * THE CONSTRAINT
- *
  *   The Mozilla root set is about 120 certificates and 125 KB of DER.  This
  *   machine has four megabytes.  Parsing all of them at startup is not viable
  *   and neither is holding them: an NX_SECURE_X509_CERT is 252 bytes, so the
@@ -13,8 +11,6 @@
  *   A chain needs exactly one of them.  So the file is INDEXED, the index is
  *   the only part read up front, and the one root a chain actually needs is
  *   read and parsed while the handshake is already in progress.
- *
- * THE FILE
  *
  *   DEVS:Internet/certificates, written by tools/mkcertstore.py.  Big-endian
  *   throughout, which is the machine's own order, so nothing is byte-swapped.
@@ -32,8 +28,6 @@
  *   For the Mozilla set that is 16 + 1,428 + 127,484 = about 126 KB on disk,
  *   of which 1,428 bytes are ever resident.
  *
- * THE KEY, AND WHY IT IS THE WHOLE NAME
- *
  *   RFC 5280 says a certificate's issuer field matches a CA's subject field
  *   when the two encoded Names are equal.  The key is a hash of exactly those
  *   bytes -- the Name SEQUENCE including its tag and length -- taken from the
@@ -42,7 +36,7 @@
  *   disagree about what a Name means.
  *
  *   This matters more than it looks.  nx_secure's own store lookup compares
- *   distinguished names by COMMON NAME ONLY unless
+ *   distinguished names by Common name only unless
  *   NX_SECURE_X509_STRICT_NAME_COMPARE is defined, and in the current Mozilla
  *   set four roots share the common name "GlobalSign" and four more have no
  *   common name at all.  Handing nx_secure a store with all four GlobalSign
@@ -50,8 +44,6 @@
  *   Matching on the full Name means we add exactly the one root the chain
  *   asked for, so the name nx_secure then looks up is unambiguous by
  *   construction.
- *
- * UPDATES
  *
  *   Roots expire, get distrusted, and get added.  There is no package manager
  *   on this machine and there is not going to be one, so the update story is:

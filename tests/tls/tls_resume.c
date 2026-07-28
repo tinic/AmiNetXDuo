@@ -1,8 +1,6 @@
 /*
  * AmiNetXDuo -- TLS session resumption, measured against a real public server.
  *
- * WHAT THIS IS FOR
- *
  *   A full TLS handshake on a 14 MHz 68020 is 6.8 s for an RSA certificate
  *   chain and 23.3 s for an ECDSA one, nearly all of it public-key
  *   arithmetic.  A RESUMED handshake does none of that arithmetic.  This
@@ -23,8 +21,6 @@
  *   program does not claim it.  tests/tls/run-resume.sh does that part, by
  *   running the shipped `fetch` command twice and then rebooting the machine
  *   and running it again.
- *
- * STAGING
  *
  *   LIBS:bsdsocket.library, LIBS:tls.library, DEVS:Internet/certificates,
  *   DEVS:NetInterfaces/eth0 and DEVS:a2065.device -- see run-resume.sh.
@@ -565,8 +561,6 @@ static VOID r_host_round(struct Library *sbase, struct Library *tbase,
 }
 
 /*
- * THE STACK, AND WHY THIS PROGRAM NEEDS ITS OWN
- *
  *   A command started by the Kickstart 3.1 Shell gets 4,096 bytes of stack,
  *   and tls.library brackets its caller into ThreadX with THAT stack -- NetX
  *   Duo, nx_secure and the bignum code all run on it (docs/RESEARCH.md, the
@@ -690,7 +684,7 @@ static int r_run(VOID)
     /* ---- a DIFFERENT trust store must not inherit the verification ------ */
 
     /*
-     * THE ONE THAT MATTERS MOST, and the regression test for a real defect.
+     * The one that matters most, and the regression test for a real defect.
      *
      * A resumed handshake verifies nothing -- no certificate, no signature, no
      * host name.  So a session cached after verification against one trust

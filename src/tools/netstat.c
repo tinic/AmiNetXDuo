@@ -15,7 +15,7 @@
  * SANA-II per-interface counters -- the driver's own numbers are the ones that
  * answer "is the cable plugged in", and no other switch shows them.
  *
- * THIS COMMAND AND ShowNetStatus COVER THE SAME GROUND ON PURPOSE, and the
+ * This command and ShowNetStatus Cover the same ground on purpose, and the
  * comment at the top of shownetstatus.c says why: that one is the Amiga-shaped
  * introspection command with named categories and a diagnosis, this one is the
  * BSD-shaped convenience with switches and columns. What they must never do is

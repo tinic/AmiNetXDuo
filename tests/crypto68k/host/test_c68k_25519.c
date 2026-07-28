@@ -1,7 +1,7 @@
 /*
  * AmiNetXDuo -- host vectors for src/crypto68k/c68k_25519.c.
  *
- * WHY A HOST TIER AT ALL, WHEN THE TARGET IS A 68020
+ * WHY A Host tier at all, When the target is A 68020
  *
  *   Because this code is portable C over <stdint.h> and the emulator queue is
  *   the scarcest resource in the project.  Every arithmetic error it can make
@@ -9,8 +9,6 @@
  *   run in a second and on every push.  §18's SHA-256 endianness bug was
  *   caught exactly this way and would not have been by a vector run only on
  *   the guest.
- *
- * WHAT IS CHECKED, AND WHY THESE THINGS
  *
  *   1. fe_sqr against fe_mul on random inputs.  Published vectors cannot find
  *      a squaring bug: they exercise a handful of values and both routines

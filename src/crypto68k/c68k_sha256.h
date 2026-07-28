@@ -2,15 +2,11 @@
  * AmiNetXDuo -- crypto68k: SHA-256, for the TLS record path and everything
  * else in the handshake that hashes.
  *
- * WHY THIS EXISTS
- *
  *   docs/RESEARCH.md 15.7 ends with the plainest sentence in that section:
  *   "the largest single lever available to https:// on a classic Amiga is
  *   still an unwritten 68020 SHA-256."  This is it.  We were already 1.28x
  *   AmiSSL on HMAC-SHA256 and both sides were portable C, so the 1.28x was a
  *   statement about two C implementations and not about the machine.
- *
- * WHAT IT COST, AND WHAT DID NOT WORK
  *
  *   The C below is 1.29x the vendored implementation on the same buffer --
  *   85,952 us to 66,687 for 16 KiB -- and none of that came from assembly.

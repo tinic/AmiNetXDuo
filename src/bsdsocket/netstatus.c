@@ -5,15 +5,11 @@
  * stack what it is doing, and tell it to change. include/aminetxduo/
  * netstatus.h has the contract and the reasoning; this file has the walks.
  *
- * WHAT MADE THESE NECESSARY
- *
  *   Every command that wanted live numbers linked its own copy of NetX Duo,
  *   got its own NX_IP with no interfaces in it, and read zeroes -- or, once
  *   src/tools/netstack_weak.c's weak stubs answered NULL, printed "the
  *   network is up, but this command cannot read it" and exited 5. That
  *   message reads like a pass, which is why it survived a release.
- *
- * THREE RULES THIS FILE FOLLOWS
  *
  *   1. COPY, NEVER LEND. Nothing that leaves here is a pointer into the
  *      stack. The caller gets scalars in its own buffer, and what it does
@@ -28,8 +24,6 @@
  *      caller that arrived here by accident (some future vendor putting a
  *      different function at the same offset) presents the wrong magic and
  *      gets -1 with nothing written.
- *
- * WHAT IS NOT HERE, AND WHY
  *
  *   There is no "ping for me" vector. It was designed and rejected:
  *   nx_icmp_ping() matches an inbound echo reply on the SEQUENCE NUMBER

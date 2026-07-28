@@ -9,8 +9,6 @@
  * sees them, and answered -- a client that prints them is the one whose
  * screen fills with accented characters the moment it meets a real server.
  *
- * WHAT IT NEGOTIATES, AND WHY SO LITTLE
- *
  *   RFC 854's rule is that an option is only in effect once both ends have
  *   agreed, and that a refusal is a complete and correct answer.  This client
  *   therefore agrees to exactly two options and refuses everything else:
@@ -92,7 +90,7 @@ static UBYTE tn_from_user[TN_CHUNK];
 static UBYTE tn_staged[TN_CHUNK * 2];   /* IAC and CR both double a byte */
 
 /*
- * ONE BYTE BIGGER THAN THE READ, AND THE ONE BYTE IS THE POINT.
+ * One byte bigger than the read, And the one byte is the point.
  *
  * tn_demux() emits at most one byte per byte consumed -- except for the first,
  * because a CR held back from the PREVIOUS segment (st->saw_cr, which survives
@@ -480,7 +478,7 @@ static LONG tn_encode(const UBYTE *buf, LONG len, UBYTE *out, BOOL interactive)
 
         if (c == '\r')
         {
-            /* A CR LF pair from a file must not become CR LF LF. */
+            /* A CR LF pair from a file must not become Cr lf lf. */
             if (i + 1 < len && buf[i + 1] == '\n')
                 i++;
             out[o++] = '\r';

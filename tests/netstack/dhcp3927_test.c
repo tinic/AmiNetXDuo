@@ -1,24 +1,18 @@
 /*
  * AmiNetXDuo -- the DHCP lease lifecycle, and RFC 3927 link-local addressing.
  *
- * WHAT THIS IS FOR
- *
  * Every emulator run in this tree takes a DHCP lease and stops there.  The
  * acquisition handshake (DISCOVER/OFFER/REQUEST/ACK) is therefore exercised
- * constantly and NOTHING ELSE IS: renewal at T1, rebinding at T2, a lease
+ * constantly and Nothing else is: renewal at T1, rebinding at T2, a lease
  * running out, a NAK, and the whole of RFC 3927 had never executed once.
  * This test drives those paths against FS-UAE's SLIRP, which is a real DHCP
  * server that will renew and will NAK, and reports what the stack does.
  *
- * WHAT IT CANNOT DO, AND WHY
- *
  * SLIRP's lease is 24 hours and it never expires or withdraws one, so the
- * timers are shortened IN THE LIVE NX_DHCP RECORD rather than waited out --
+ * timers are shortened In the live NX_DHCP RECORD rather than waited out --
  * the state machine, the wire traffic and the server are all real, only the
  * clock is not.  "The server stopped answering" is produced by taking the
  * link down, which is what an unplugged cable looks like to the client.
- *
- * PHASES
  *
  *   A  DHCP times out and the RFC 3927 fallback fires (mode `killlink`):
  *      a link-local address is chosen and probed, and then the link comes
@@ -222,7 +216,7 @@ ULONG   i;
 }
 
 /*
- * NO ADDRESS-CHANGE CALLBACK HERE, ON PURPOSE.
+ * NO ADDRESS-Change callback here, ON PURPOSE.
  *
  * NX_IP holds exactly ONE, and netstack.c now registers it -- the "[INFO]
  * netstack: interface 0 address is now ..." lines in the log below are the

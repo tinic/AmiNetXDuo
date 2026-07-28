@@ -1,8 +1,6 @@
 /*
  * Endurance -- hours of mixed TCP traffic, with the pool on a timeline.
  *
- * WHY THIS EXISTS
- *
  *   Every harness in this tree runs for seconds or minutes.  tests/compare moves
  *   a few megabytes, tests/trace moves 512 KB, tests/tcpdrill moves a few
  *   hundred bytes and watches the packets.  None of them can see a defect
@@ -17,8 +15,6 @@
  *
  *   This program is written to reproduce it if it is reproducible, and to
  *   leave enough evidence behind to say what happened if it is not.
- *
- * WHAT IT DOES
  *
  *   N concurrent TCP connections, each driven by a pair of AmigaOS Processes
  *   (a driver and a responder, each with its OWN bsdsocket.library base,
@@ -36,8 +32,6 @@
  *   Occasional short-lived connections are opened and closed alongside the
  *   long-lived ones, because a per-socket leak only shows under churn.
  *
- * HOW A CORRUPTED BYTE IS CAUGHT
- *
  *   The payload is a position-addressable pattern:
  *
  *       byte(o) = pat[o & 8191] ^ (UBYTE)(o >> 13)
@@ -49,7 +43,7 @@
  *   the receiver never has to trust its own bookkeeping -- and a framing
  *   desync shows up immediately as a header whose magic is wrong.
  *
- * WHAT IS RECORDED, AND WHY IT IS RECORDED ON A TIMELINE
+ * What is recorded, And why it is recorded on A TIMELINE
  *
  *   "It broke after forty minutes" is only useful next to what the machine
  *   looked like at minute thirty-nine.  Every `sample` seconds the supervisor
@@ -68,7 +62,7 @@
  *   be killed must not lose its last twenty lines (the reasoning in
  *   tests/compare/checkrunner.c, and in docs/RESEARCH.md 16.9).
  *
- * THE PROBES, WHICH RUN FIRST AND TAKE UNDER A MINUTE
+ * THE PROBES, Which run first and take under A MINUTE
  *
  *   P1  a blocking recv() on an idle established socket must WAIT, not answer
  *   P2  a blocking send() into a peer that is not reading must WAIT, and must
@@ -86,8 +80,6 @@
  *   (the reported defect), "waited and then succeeded" (correct) and "never
  *   returned at all" (a deadlock, which is worse than either) -- and only an
  *   observer outside the call can tell the third from the second.
- *
- * NOTHING OF OURS IS LINKED
  *
  *   bsdsocket.library is reached through its published LVOs, as a third-party
  *   program reaches it, and the packet pool through NetStackQuery() at

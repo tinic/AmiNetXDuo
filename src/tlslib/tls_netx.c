@@ -1,8 +1,6 @@
 /*
  * tls.library -- borrowing bsdsocket.library's NetX Duo instead of linking one.
  *
- * THE PROBLEM, STATED ONCE
- *
  *   NetX Duo and ThreadX are singletons with file-scope state: the IP thread,
  *   the created-object lists, _tx_thread_current_ptr.  bsdsocket.library
  *   contains the only copy on the machine.  If this library linked netxduo
@@ -14,8 +12,6 @@
  *   per-session, so linking THEM here is correct and is what keeps 227 KB out
  *   of the resident library of every machine that never makes a TLS
  *   connection.
- *
- * THE MECHANISM
  *
  *   nx_secure calls twelve NetX Duo/ThreadX entry points and nothing else --
  *   measured with `nm` over the archives, not assumed.  This file DEFINES those
@@ -29,8 +25,6 @@
  *   here rather than linking src/common/ami_random.c means a TLS handshake
  *   draws from the pool bsdsocket.library already seeded -- one pool per
  *   machine, not two.
- *
- * IF THE CONTEXT IS MISSING
  *
  *   Every forwarder checks.  A caller that reached a forwarder without a
  *   context has a bug in this library (TLSOpenA binds before it does anything

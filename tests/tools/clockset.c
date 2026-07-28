@@ -2,14 +2,10 @@
  * ClockSet -- move the guest's clock, so a test can stand where a real Amiga
  * stands.
  *
- *     ClockSet SECONDS/A/N
- *
  * SECONDS is seconds since the AmigaOS epoch, 1978-01-01, which is the same
  * count timer.device and battclock.resource keep.  `ClockSet 0` is therefore
  * the machine everybody actually has: no real-time clock, or a battery that
  * died, so AmigaOS starts at its epoch and stays there.
- *
- * WHY THIS EXISTS
  *
  *   tls.library skips certificate validity dates when the clock is outside a
  *   plausible window (src/tlslib/tls_time.c), which means an EXPIRED

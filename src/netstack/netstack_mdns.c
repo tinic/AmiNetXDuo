@@ -1,7 +1,7 @@
 /*
  * AmiNetXDuo -- mDNS (RFC 6762), the responder and the ".local" resolver.
  *
- * WHY THIS EXISTS, and why it lands next to the RFC 3927 work.
+ * Why this exists, and why it lands next to the RFC 3927 work.
  *
  * A machine that fell back to a link-local address has 169.254.x.y and nothing
  * on the network knows how to reach it. There is no DHCP server, so there is
@@ -15,8 +15,6 @@
  * "amiga.local" is easier to say than whichever address the router handed out
  * this week.
  *
- * WHAT THIS MACHINE ANNOUNCES
- *
  * One host name and its A record: <HOSTNAME>.local, address whatever the
  * interface currently has. HOSTNAME is the SAME string DHCP option 12 sends
  * (docs/RESEARCH.md 27) -- src/config/config_file.c resolves it from the
@@ -24,7 +22,7 @@
  * back to "amiga". Two names for one machine would be worse than none, so
  * there is exactly one source of truth and this is not it.
  *
- * NO SERVICES ARE ADVERTISED, deliberately. AmiNetXDuo ships clients: fetch,
+ * No services are advertised, deliberately. AmiNetXDuo ships clients: fetch,
  * ftp, telnet, tftp, nc, sntp, whois. There is no FTP server and no telnet
  * server on this machine, so a _ftp._tcp or _telnet._tcp record would be an
  * advertisement for something that is not there -- and a browser that believed
@@ -32,8 +30,6 @@
  * settles the general question for this tree: "a mode that is announced and
  * not honoured is worse than one that is absent." When a server does exist,
  * nx_mdns_service_add() is one call and this is where it goes.
- *
- * NAME COLLISIONS
  *
  * RFC 6762 9: probe three times before claiming a name, and on a conflict
  * pick another. The vendored module does both, and ami_ns_mdns_probing()
@@ -124,7 +120,7 @@ static BOOL ami_ns_mdns_differs(const char *a, const char *b)
  * that it renames and re-probes on its own, which is RFC 6762 9's prescription
  * and is why this callback usually only ever reports success.
  *
- * ONE WART, RECORDED RATHER THAN PATCHED. The vendored renamer appends the
+ * ONE WART, Recorded rather than patched. The vendored renamer appends the
  * RFC 6763 service-instance suffix -- "amiga" becomes "amiga (2)" -- and for a
  * SERVICE instance that is correct and is what Bonjour shows in a browser. For
  * a HOST name it is not: RFC 6762 9's own example is "PrinterOne-2.local.",

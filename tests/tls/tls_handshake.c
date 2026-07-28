@@ -8,8 +8,6 @@
  * chain verification against a trust store, key derivation, Finished hashing
  * and the record layer.
  *
- * THREE EXECUTABLES, ONE SOURCE
- *
  *   tls_handshake   one round in the shipping configuration: crypto68k
  *                   arithmetic, CRT on every private-key path.  This is the
  *                   correctness gate and the headline number.
@@ -27,8 +25,6 @@
  *                   change together a mutual arithmetic error is invisible;
  *                   this is the test that makes it visible.
  *
- * WHY LOOPBACK AND NOT A PUBLIC HOST
- *
  *   Reaching a real HTTPS server from the emulator is possible in principle
  *   (SLIRP gives outbound internet, and tests/netstack proves DNS and routing
  *   work), but it makes the measurement depend on a certificate chain we do
@@ -43,8 +39,6 @@
  *   private-key operation is most of the loopback total.  The per-role
  *   arithmetic breakdown below is the number that answers "can this machine
  *   talk to modern sites"; the wall time answers a question nobody asked.
- *
- * SHAPE
  *
  *   Same fabric as tests/ram_driver: ThreadX on Exec, two NX_IP instances
  *   talking over the in-tree simulated RAM driver, the server on a

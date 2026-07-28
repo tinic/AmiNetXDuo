@@ -1,8 +1,6 @@
 /*
  * AmiNetXDuo -- CPU and memory timing calibration.
  *
- * WHY THIS EXISTS
- *
  * Every performance number this project has recorded carries the same
  * disclaimer: "only the 68020 column is meaningful, FS-UAE's 68030 model is
  * not cycle-exact".  That disclaimer was reached three separate times, by
@@ -14,8 +12,6 @@
  *
  * This does.  It runs instruction sequences whose cost on real silicon is
  * published, and reports what the emulator charges for them.
- *
- * THE METHOD, AND WHY IT NEEDS NO CLOCK
  *
  * An absolute "nanoseconds per instruction" is worth nothing on its own: it
  * conflates the model's cycle accounting with whatever clock the emulator
@@ -34,7 +30,7 @@
  * published two cycles.  If the ratios are wrong, the clock is meaningless
  * and is printed only so the reader can see how meaningless.
  *
- * WHAT A REAL MACHINE WOULD SAY (cache case, from the MC68020UM/MC68030UM
+ * WHAT A Real machine would say (cache case, from the MC68020UM/MC68030UM
  * instruction-timing appendices; the 68030's figures assume both caches on):
  *
  *   MOVE.L Dn,Dm 2   ADD.L Dn,Dm 2   ADDX.L Dn,Dm 2   MULU.L Dn,Dm 44

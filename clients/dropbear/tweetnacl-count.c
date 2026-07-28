@@ -2,8 +2,6 @@
  * clients/dropbear/tweetnacl-count.c -- how many field multiplications an SSH
  * handshake actually costs, counted on the BUILD HOST.
  *
- * WHY COUNT ON THE HOST
- *
  *   The emulator queue is deep and every timing run has to hold the machine
  *   alone (tools/fsuae-run.sh -x), so anything that does not need a 68020
  *   should not take a slot.  An operation COUNT does not: 2^255-19 arithmetic
@@ -15,7 +13,7 @@
  *   the cost of ONE field multiply on this part, which is the number every
  *   proposed optimisation has to be argued against.
  *
- * HOW IT GETS AT A `static` FUNCTION WITHOUT PATCHING third_party/dropbear
+ * How it gets at A `static` Function without patching third_party/dropbear
  *
  *   clients/dropbear/tweetnacl-count.sh derives a copy of
  *   third_party/dropbear/src/curve25519.c into build/, renaming the two

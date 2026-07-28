@@ -1,12 +1,10 @@
 /*
  * bsdsocket.library -- TCP urgent data: MSG_OOB, SIOCATMARK and SIGURG.
  *
- * WHAT NETX DUO HAS, AND WHAT IT DOES NOT
- *
  * On RECEIVE it is most of the way there and nobody had connected it:
  * _nx_tcp_socket_packet_process() tests NX_TCP_URG_BIT and calls the socket's
  * nx_tcp_urgent_data_callback (nx_tcp_socket_packet_process.c:465-483), the
- * segment is still on nx_tcp_socket_receive_queue_head WITH ITS TCP HEADER --
+ * segment is still on nx_tcp_socket_receive_queue_head With its TCP header --
  * the header is only stripped at delivery, in nx_tcp_socket_receive.c:176 --
  * and the urgent pointer is sitting in the low half of nx_tcp_header_word_4
  * in host order.  Everything needed is reachable; bsdsocket.library simply
@@ -22,8 +20,6 @@
  * (nx_tcp_socket_send_internal.c:856, nx_tcp_packet_send_control.c:312).  Any
  * urgent pointer planted beforehand is destroyed, and the checksum was
  * computed over it, so you would get both a zero pointer and a wrong sum.
- *
- * HOW THIS DOES IT, AND WHY NOT THE OTHER WAY
  *
  * The obvious alternative was to open-code an urgent segment the way
  * bsd_tcp_send_fin() open-codes the graceful FIN.  A FIN is a control packet:
@@ -57,7 +53,7 @@
  * nx_ip_packet_filter_extended for packet capture, which is a different slot
  * and a different call.  The previous value is saved and restored regardless.
  *
- * TWO DELIBERATE DIVERGENCES, both recorded in docs/RESEARCH.md 17
+ * Two deliberate divergences, both recorded in docs/RESEARCH.md 17
  *
  *   1. The urgent byte is ALWAYS delivered in the normal stream as well, as
  *      though SO_OOBINLINE were set -- recv(MSG_OOB) returns a copy.  Taking

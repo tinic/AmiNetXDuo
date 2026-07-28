@@ -663,7 +663,7 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
                     status |= SBSYSSTAT_Resolver;
 
                 /*
-                 * THE RUNNING GATEWAY, NOT THE CONFIGURED ONE. Asking the
+                 * The running gateway, Not the configured one. Asking the
                  * configuration gets this wrong on the common case: a DHCP
                  * machine has default_gateway 0 in AmiConfig and a perfectly
                  * good default route that arrived in the lease. Reading the

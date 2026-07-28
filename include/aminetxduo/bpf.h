@@ -16,7 +16,7 @@
  *      one must be rejected, never merely survived.
  *
  * ---------------------------------------------------------------------------
- * WHAT A CAPTURE CONSUMER SEES, AND WHY IT IS NOT THE WIRE BUFFER
+ * WHAT A Capture consumer sees, And why it is not the wire buffer
  * ---------------------------------------------------------------------------
  *
  * SANA-II is cooked (docs/RESEARCH.md 3.4): the device owns the link header.
@@ -530,7 +530,7 @@ VOID ami_bpf_detach_interface(APTR cookie);
 /* --------------------------------------------------------------- the taps */
 
 /*
- * THE TWO CALLS src/sana2/ MUST ADD. Both are cheap no-ops when no channel is
+ * The two calls src/sana2/ MUST ADD. Both are cheap no-ops when no channel is
  * capturing on that interface -- a load, a compare and a return.
  *
  * 1. Receive. In src/sana2/sana2_rx.c, at the TOP of ami_sana2_rx_deliver(),

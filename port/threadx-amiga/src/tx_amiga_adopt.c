@@ -8,9 +8,9 @@
 /*                                                                        */
 /*    tx_amiga_adopt_thread / tx_amiga_orphan_thread   AmigaOS/m68k       */
 /*                                                                        */
-/*  WHY THIS EXISTS                                                       */
+/*  Why this exists                                                       */
 /*                                                                        */
-/*    NetX Duo suspends THE CALLING THREAD.  nx_tcp_socket_receive(),      */
+/*    NetX Duo suspends The calling thread.  nx_tcp_socket_receive(),      */
 /*    nx_packet_allocate(), nx_tcp_socket_send() and ~40 other core files  */
 /*    reach into the TX_THREAD control block of whoever called them and    */
 /*    park it on a suspension list (docs/RESEARCH.md 5.2).  On AmigaOS the */
@@ -18,7 +18,7 @@
 /*    either they become ThreadX threads (this file) or every socket call  */
 /*    is marshalled to a worker pool (docs/RESEARCH.md 6.3, option B).     */
 /*                                                                        */
-/*  HOW IT WORKS                                                          */
+/*  How it works                                                          */
 /*                                                                        */
 /*    tx_amiga_adopt_thread() allocates one Exec signal in the calling     */
 /*    Task, then drives the ordinary _tx_thread_create() path with         */
@@ -36,7 +36,7 @@
 /*    system_state turns those windows into "interrupt" context, where     */
 /*    ThreadX defers every context switch to the caller.                   */
 /*                                                                        */
-/*  WHAT THE BATON DOES AND DOES NOT CLOSE -- read before using this       */
+/*  What the baton does and does not close -- read before using this       */
 /*                                                                        */
 /*    Closed: concurrent mutation of ThreadX ready lists, suspension       */
 /*    lists and _tx_thread_current_ptr by Exec's preemptive scheduler.     */

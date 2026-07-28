@@ -1,8 +1,6 @@
 /*
  * AmiNetXDuo -- does a TCP connection give up after NX_TCP_MAXIMUM_RETRIES?
  *
- * WHY THIS EXISTS
- *
  * Over an impaired link -- loss, a 576-byte path MTU, and a router silently
  * dropping the oversized datagrams -- a socket retransmitted the same sequence
  * number at +1, +2, +4, +8, +16, +32, +64 AND +128 seconds.  The doubling is
@@ -17,8 +15,6 @@
  * looks identical either way; only the socket can say which it was.  So this
  * PRINTS what the socket holds after nx_tcp_socket_create() and then drives
  * the timer that has to act on it.
- *
- * WHAT IS REAL HERE AND WHAT IS NOT
  *
  * Real, compiled from third_party/netxduo/common/src into this binary:
  * nx_tcp_socket_create.c, nx_tcp_socket_send_internal.c,
@@ -439,7 +435,7 @@ static void h_fixture(void)
     h_sock.nx_tcp_socket_transmit_sent_count = 1;
 
     /*
-     * AND THE TRANSMIT QUEUE IS FULL.  An application with more to say than
+     * And the transmit queue is full.  An application with more to say than
      * the connection will take fills the queue to
      * nx_tcp_socket_transmit_queue_maximum (NX_TCP_MAXIMUM_TX_QUEUE, twenty
      * segments) and stays there for as long as nothing is acknowledged, which

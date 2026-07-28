@@ -5,8 +5,6 @@
  *     NetTrace [WIRE|LOOPBACK] [HOST=..] [PORT=n] [PATH=..] [BYTES=n]
  *              [OUT=file] [SNAP=n] [NOCAPTURE/S] [BLEN=n]
  *
- * WHY IT IS ONE PROGRAM AND NOT TWO
- *
  *   A capture daemon plus a separate workload is the Unix shape, and it needs
  *   two processes with a clock between them.  Here the point of the trace is
  *   to explain a throughput number, so the number and the trace have to come
@@ -14,14 +12,10 @@
  *   socket operations also bounds the buffer: the channel holds 2 x BLEN and
  *   a megabyte at 1460 bytes a segment is well over a thousand records.
  *
- * WHAT IT TALKS TO
- *
  *   Nothing in src/.  Every call below is a published bsdsocket.library LVO,
  *   the eight bpf_* ones included -- which is the point: the capture path in
  *   src/bpf/ had 201 unit-test checks, no caller anywhere in the product, and
  *   all eight vectors pointing at bsd_enosys() until this existed.
- *
- * THE SNAP LENGTH IS THE FILTER'S RETURN VALUE
  *
  *   The bpf ABI has no BIOCSSNAPLEN.  4.4BSD never needed one: a filter
  *   program answers with the number of bytes to keep, so `BPF_RET|BPF_K, n`

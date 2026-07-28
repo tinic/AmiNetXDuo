@@ -28,7 +28,7 @@
  * floor. Each outstanding read therefore pins one NX_PACKET for its whole
  * life, so depth trades pool occupancy against loss under burst.
  *
- * THE IPv4 DEPTH IS THE RECEIVE WINDOW, IN FRAMES, AND FOUR WAS TOO FEW.
+ * THE IPv4 Depth is the receive window, IN FRAMES, And four was too few.
  *
  *   Measured with tests/curl/run-curlverify.sh -p: sixteen concurrent HTTP
  *   transfers through curl's multi interface lost six of them, twenty-four

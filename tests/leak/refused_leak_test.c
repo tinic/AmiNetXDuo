@@ -9,7 +9,7 @@
  * listener on its own leaks nothing.
  *
  * This program is a matrix of socket lifecycles, each measured the same way,
- * so the arms that leak can be told from the arms that do not IN ONE RUN:
+ * so the arms that leak can be told from the arms that do not In one run:
  *
  *   A  dial a port with NOTHING on it                  -- 37.5's control
  *   B  dial a port whose listener never accept()s      -- the named suspect
@@ -57,7 +57,7 @@ static const char version_tag[] __attribute__((used)) =
  * Hand-vectored for the same reason tests/endurance/endurance.c does it: the
  * NDK inlines read the base from a global, and nothing here wants that.
  *
- * AND EVERY STUB DECLARES d1/a0/a1 WRITTEN, WHICH IS NOT DECORATION.
+ * And every stub declares d1/a0/a1 WRITTEN, Which is not decoration.
  *
  * An AmigaOS library call clobbers d0, d1, a0 and a1.  A register that is only
  * an INPUT operand is one GCC may assume the asm leaves alone, so a stub that
@@ -531,7 +531,7 @@ static VOID leak_report(const char *name, ULONG refused,
 #define LEAK_BURSTS     8
 
 /*
- * THIS ARM USED TO WEDGE THE CALLING TASK, AND IT WAS NOT THE LIBRARY.
+ * This arm used to wedge the calling task, And it was not the library.
  *
  * Three non-blocking connect() calls issued one after another wedged on the
  * second or the third, three times out of three (docs/RESEARCH.md 41.4).  The
@@ -585,7 +585,7 @@ static ULONG leak_accept_burst(struct Library *base, LONG listener,
             (VOID)l_connect(base, c[i], &sa);
 
             /*
-             * ONE TICK BETWEEN DIALS, AND IT IS NOT LOAD-BEARING ANY MORE.
+             * One tick between dials, And it is not load-Bearing any more.
              *
              * It used to be: the LVO stubs above did not tell GCC that a
              * library call clobbers d1/a0/a1, so IoctlSocket(FIONBIO) got a

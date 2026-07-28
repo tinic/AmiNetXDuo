@@ -1,7 +1,7 @@
 /*
  * AmiNetXDuo -- fetching a real HTTPS URL through tls.library, and nothing else.
  *
- * WHAT MAKES THIS DIFFERENT FROM tests/tls/tls_https.c
+ * What makes this different from tests/tls/tls_https.c
  *
  *   tls_https is linked against our whole stack: it calls netstack_startup(),
  *   nx_tcp_socket_create(), nx_secure_tls_session_create(), and it verifies the
@@ -20,8 +20,6 @@
  *   store on disk can be searched lazily by issuer, and that
  *   WaitSelect()-shaped code does not hang when the plaintext is already
  *   decrypted.
- *
- * STAGING
  *
  *   LIBS:bsdsocket.library, LIBS:tls.library, DEVS:Internet/certificates,
  *   DEVS:NetInterfaces/eth0 and DEVS:a2065.device -- see tests/tls/run-api.sh.

@@ -1,8 +1,6 @@
 /*
  * GetNetStatus -- is the network working? Answered as a return code.
  *
- *     GetNetStatus CHECK/K,QUIET/S
- *
  * ShowNetStatus prints a report for a person to read. This prints a number for
  * a script to branch on, and that is the whole difference between them: a
  * startup script that has to wait for the network, or decide whether to start
@@ -12,8 +10,6 @@
  *     IF WARN
  *         echo "The network is not ready; not starting the server."
  *         SKIP done
- *     ENDIF
- *
  * RETURN CODES, which are the interface here and not a detail:
  *
  *     0  (RETURN_OK)     every condition asked about is satisfied
@@ -25,7 +21,7 @@
  * Nothing here starts the network. A command that brought the stack up in
  * order to report that it was up would make its own answer true.
  *
- * WITH NO CHECK it lists every condition and says which are satisfied, and the
+ * With no check it lists every condition and says which are satisfied, and the
  * return code is the answer to INTERFACES alone -- "is the network
  * operational" is what a bare GetNetStatus is asking, and an operational
  * network is one with an interface that is up and has an address.

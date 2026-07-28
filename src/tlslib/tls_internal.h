@@ -4,8 +4,6 @@
  * The public contract is include/aminetxduo/tlslib.h; nothing here is visible
  * to a caller.
  *
- * SHAPE
- *
  *   One master base, one semaphore, and everything else hanging off a
  *   TLSConnection.  Unlike bsdsocket.library there is no per-opener state to
  *   keep apart -- no errno, no descriptor table -- so OpenLibrary() hands back

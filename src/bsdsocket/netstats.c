@@ -6,14 +6,10 @@
  * per-connection struct protocol_connection_data. netstat -s and every
  * traffic monitor written against Roadshow reads this.
  *
- * WRITTEN FROM THE AUTODOC
- *
  * Same primary source as interfaces.c and routing.c: NDK 3.2's
  * SANA+RoadshowTCP-IP/doc/bsdsocket.doc, together with libraries/bsdsocket.h
  * and the netinet/ *_var.h headers from the same NDK, used as an ABI reference only. No
  * Roadshow, AmiTCP, AROSTCP or Miami code was consulted or is present.
- *
- * WHAT THE DOCUMENT SETTLED
  *
  *   The return value is a BYTE COUNT. "length -- Number of bytes copied, or
  *   -1 for failure" -- not zero-on-success and not an entry count, which were
@@ -222,7 +218,7 @@ static VOID bsd_stat_udp(NX_IP *ip, struct udpstat *out)
 /*
  * TCP state, NetX Duo's -> 4.4BSD's, as a table.
  *
- * IT HAS TO BE A TABLE. The two enumerations agree up to CLOSE_WAIT and then
+ * It has to be A TABLE. The two enumerations agree up to CLOSE_WAIT and then
  * diverge: NetX Duo has FIN_WAIT_2 = 8, CLOSING = 9, TIMED_WAIT = 10,
  * LAST_ACK = 11, where <netinet/tcp_fsm.h> has CLOSING = 7, LAST_ACK = 8,
  * FIN_WAIT_2 = 9, TIME_WAIT = 10. A subtraction of one -- which is what the
@@ -317,7 +313,7 @@ static struct protocol_connection_data *bsd_pcd_next(BsdPcdWriter *w)
 }
 
 /*
- * LISTENING SOCKETS, AND WHY THEY NEED A RULE OF THEIR OWN
+ * LISTENING SOCKETS, And why they need A Rule of their own
  *
  * One BSD listen() is TWO NX_TCP_SOCKETs in this stack, and neither of them
  * is in NetX Duo's LISTEN state. socket.c explains the model: the descriptor

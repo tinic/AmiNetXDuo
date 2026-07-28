@@ -16,15 +16,11 @@
  * child and tells it the id; the child opens its own bsdsocket.library and
  * obtains it.
  *
- * WHERE THE REGISTRY LIVES
- *
  * In the MASTER base, guarded by its semaphore, because that is the one
  * object both tasks can see. A parked socket belongs to no base at all --
  * as_Owner is cleared, so the NetX Duo receive/disconnect callbacks find no
  * task to signal rather than signalling one that has closed the library. It
  * is restored on ObtainSocket().
- *
- * REFERENCE COUNTING
  *
  * AmiSocket already carries as_RefCount for Dup2Socket(). A release moves the
  * existing reference into the registry; a *copy* takes an extra one, so the
@@ -70,7 +66,7 @@ static struct AmiSocketBase *bsd_master_of(struct AmiSocketBase *base)
 
 /* Caller holds the master's semaphore. */
 /*
- * THE ID RANGE IS A PROTOCOL, not just a key.
+ * The id range is A PROTOCOL, not just a key.
  *
  * ReleaseSocket's autodoc: "If the Id value is between 0 and 65535
  * (inclusively), then the id is considered non-unique and anyone can pick it

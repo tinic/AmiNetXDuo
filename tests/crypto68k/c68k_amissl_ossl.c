@@ -1,15 +1,11 @@
 /*
  * AmiNetXDuo -- the AmiSSL side of tests/crypto68k/c68k_amissl.
  *
- * WHAT THIS FILE IS ALLOWED TO SEE
- *
  *   OpenSSL, and nothing of ours except c68k_amissl.h.  The orchestrator owns
  *   the clock, the vectors and the reporting; this file only performs the
  *   operation it is asked for and hands back bytes.  That is what makes the
  *   comparison fair: both sides are called from the same timing loop, with the
  *   same inputs, in the same process.
- *
- * HOW AmiSSL IS REACHED
  *
  *   Every OpenSSL function here is a macro from <inline/amissl.h> that expands
  *   to a jsr through AmiSSLBase or AmiSSLExtBase -- AmiSSL v5 spans two library

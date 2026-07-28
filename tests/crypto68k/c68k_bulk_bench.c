@@ -1,14 +1,12 @@
 /*
  * AmiNetXDuo -- the TLS record path, measured: AES-128-CBC and SHA-256.
  *
- * WHAT THIS ANSWERS
- *
  *   docs/RESEARCH.md 15 left the bulk path as the one row where neither this
  *   tree nor AmiSSL had any m68k assembly, and named it the largest remaining
  *   lever on `https://` throughput.  Before writing any, two questions had to
  *   be settled on the machine rather than from the literature:
  *
- *     1. What is the right AES for a part with NO DATA CACHE?  The classic
+ *     1. What is the right AES for a part with No data cache?  The classic
  *        four-table layout, the one-table-and-rotates layout that
  *        nx_crypto_aes.c uses, and a byte-oriented S-box are three different
  *        answers to "which resource is scarce", and the usual reasoning
@@ -21,8 +19,6 @@
  *   every AES and SHA-256 variant timed on the same buffer, and every one of
  *   them checked against the published vectors AND against each other before
  *   a single time is believed.
- *
- * WHY ONE PROCESS, AGAIN
  *
  *   The same reason c68k_amissl_bench.c gives.  Ratios measured back to back
  *   inside one run are the only figures an emulator does not distort, and the
@@ -169,7 +165,7 @@ typedef VOID (*B_MEM_KERNEL)(APTR, ULONG);
 /*
  * Picoseconds per body slot.
  *
- * THE ARITHMETIC IS THE WHOLE OF THIS FUNCTION and the first version of it
+ * The arithmetic is the whole of this function and the first version of it
  * was wrong in the way this project has now been bitten by twice (see the
  * note above c_measure_ps() in tests/perf/cpucal.c): ULONG is 32 bits, a
  * 23 ms kernel is 23,000,000 nanoseconds, and multiplying THAT by the further
@@ -1049,7 +1045,7 @@ UINT            o;
  * a partial, and a kernel bug in the carry between limbs or in the fold round
  * the top of 2^130 can hide until the accumulator is large and the limbs have
  * been near their bounds a few hundred times.  So it runs both over 1, 2, 3,
- * 5, 17 and 200 blocks, and it does it TWICE PER COUNT -- once with the 2^128
+ * 5, 17 and 200 blocks, and it does it Twice per count -- once with the 2^128
  * bit a full block carries and once without, which is the short-final-block
  * case c68k_poly1305_finish() takes and which nothing else here reaches with a
  * grown accumulator.
@@ -1109,7 +1105,7 @@ UINT            pass;
  * buffering has -- empty, one byte, one short of a block, exactly a block, one
  * past it, and the same around 32, 64, 128, 1024 and the whole 16 KiB.
  *
- * WHERE THESE CAME FROM: computed off-target from the definition in RFC 8439
+ * Where these came from: computed off-target from the definition in RFC 8439
  * 2.5 -- r clamped, the message read little-endian sixteen bytes at a time
  * with the 2^128 bit appended, the accumulator multiplied by r modulo
  * 2^130 - 5, s added at the end -- by a generator that reproduces 2.5.2's own

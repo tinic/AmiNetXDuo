@@ -37,7 +37,7 @@ const APTR TlsVectorTable[] =
 };
 
 /*
- * THE DRIFT GUARD, and the whole reason TLS_LIB_VECTORS is derived from
+ * The drift guard, and the whole reason TLS_LIB_VECTORS is derived from
  * TLS_LIB_VERSION rather than written down beside it.
  *
  * Add a vector to the table above and this assertion fails.  The only way to

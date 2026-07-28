@@ -1,8 +1,6 @@
 /*
  * AmiNetXDuo -- crypto68k RSA CRT exponentiation.
  *
- * WHY THIS IS HERE AT ALL
- *
  *   This function is structurally identical to the vendored
  *   _nx_crypto_huge_number_crt_power_modulus().  The only difference is the
  *   two lines that raise xp and xq to a power: they call this module instead.

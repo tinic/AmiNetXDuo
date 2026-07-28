@@ -16,8 +16,6 @@
  * carries over; three of Roadshow's are missing rather than accepted and
  * ignored, and the reason for each is with the argument list below.
  *
- * WHY ICMP ECHO RATHER THAN UDP TO A HIGH PORT
- *
  *   The classic Unix tool sends UDP datagrams to ports nothing listens on and
  *   reads ICMP PORT_UNREACHABLE to know it has arrived; the Windows one sends
  *   ICMP echo the whole way and reads the echo reply. Both need SOCK_RAW to
@@ -37,8 +35,6 @@
  *   TTL as an argument and puts it in the header it builds. So this command is
  *   ICMP echo throughout, and there is no switch to select the other, because
  *   a switch that selects a broken behaviour is not an option, it is a trap.
- *
- * WHAT COMES BACK
  *
  *   A raw ICMP socket here is a tee on the whole ICMP input, so it sees the
  *   TIME_EXCEEDED from each router, the ECHOREPLY from the destination, and

@@ -3,8 +3,6 @@
  *
  *     sntp SERVER/A,TIMEOUT/N/K,SHOW/S,QUIET/S
  *
- * WHY THIS IS NOT A CONVENIENCE
- *
  *   tls.library skips a certificate's notBefore/notAfter entirely when the
  *   machine's clock is outside a plausible window (src/tlslib/tls_time.c).
  *   That is deliberate and it is the right call on an Amiga whose battery died
@@ -14,8 +12,6 @@
  *   user can do to what this stack actually verifies.  `fetch` says which of
  *   the two happened on every https: URL, so the effect is visible.
  *
- * UNICAST, NOT BROADCAST
- *
  *   RFC 4330 has both.  Broadcast means sitting and waiting for a server on
  *   the LAN to announce the time whenever it feels like it -- NetX Duo's own
  *   client allows two hours between announcements -- which no Shell command
@@ -23,7 +19,7 @@
  *   server.  Unicast asks a server the user named and gets an answer or a
  *   timeout.  That is the only one of the two that suits a command you type.
  *
- * THE EPOCHS.  THERE ARE THREE OF THEM
+ * THE EPOCHS.  There are three of them
  *
  *   NTP counts seconds from 1900-01-01, UNIX from 1970-01-01, and AmigaOS from
  *   1978-01-01.  Only the first and last matter here, and the gap between them
@@ -37,7 +33,7 @@
  *   our arithmetic are the same wrap -- (t + 2^32) - K == t - K, modulo 2^32.
  *   The AmigaOS epoch runs out in 2114, which is when this stops being true.
  *
- * LOCAL TIME, WHICH IS A DECISION AND NOT AN OVERSIGHT
+ * LOCAL TIME, WHICH IS A Decision and not an oversight
  *
  *   NTP is UTC.  AmigaOS keeps LOCAL time: DateStamp() has no timezone concept
  *   whatever, and neither has the battery clock.  So writing the clock needs an
@@ -57,8 +53,6 @@
  *   otherwise is not.  AmigaOS has no daylight-saving rules of any kind: the
  *   offset in the preferences is the whole answer, summer and winter alike.
  *
- * AND THE BATTERY CLOCK
- *
  *   Setting only the system time loses it at the next reboot, which on a
  *   machine that has just been given a correct clock is the one thing that
  *   must not happen -- SetClock SAVE exists for exactly this reason.  So both
@@ -66,8 +60,6 @@
  *   battclock.resource for the next boot.  A machine with no real-time clock
  *   has no battclock.resource, OpenResource() returns NULL, and that half is
  *   skipped and said out loud.
- *
- * WHY THE PROTOCOL IS HERE AND NOT NetX Duo's
  *
  *   NetX Duo vendors an SNTP client at third_party/netxduo/addons/sntp, and it
  *   is the obvious thing to use.  It cannot be used from a Shell command, for

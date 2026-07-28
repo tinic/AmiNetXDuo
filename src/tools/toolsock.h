@@ -3,8 +3,6 @@
  * commands that are ordinary network applications rather than parts of the
  * stack.
  *
- * WHY THIS EXISTS
- *
  *   nc and telnet are worked examples as much as they are commands: a
  *   program on somebody else's Amiga will have Roadshow or AmiTCP underneath
  *   it, so none of them may link one line of src/netstack or src/bsdsocket.

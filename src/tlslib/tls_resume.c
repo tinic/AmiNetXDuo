@@ -1,7 +1,7 @@
 /*
  * tls.library -- TLS 1.2 session resumption.
  *
- * WHY THIS IS THE MOST VALUABLE THING IN THE TLS TREE
+ * Why this is the most valuable thing in the TLS tree
  *
  *   A full handshake on a 14 MHz 68020 costs 6.8 s for a two-certificate RSA
  *   chain and 23.3 s for a two-certificate ECDSA one, and essentially all of
@@ -16,7 +16,7 @@
  *   cache instead of out of a key exchange.  Nothing else in this tree turns
  *   twenty-three seconds into under one.
  *
- * WHICH MECHANISM, AND THE MEASUREMENT THAT DECIDED IT
+ * WHICH MECHANISM, And the measurement that decided it
  *
  *   There are two.  RFC 5077 session TICKETS: the server hands the client an
  *   opaque blob encrypted under a key only the server knows, and the client
@@ -40,7 +40,7 @@
  *   The probe method is sound -- the same script against a local
  *   `openssl s_server -no_ticket` resumes every time, which is the control.
  *
- *   So: TICKETS ARE THE MECHANISM.  Session IDs come along for free, because
+ *   So: Tickets are the mechanism.  Session IDs come along for free, because
  *   the acceptance signal for a ticket is the server echoing back the session
  *   ID we offered, and offering the previous session's ID (RFC 5077 3.4) means
  *   a server with a working ID cache resumes us too.  That is where those two
@@ -54,7 +54,7 @@
  *   `openssl s_client -no_ems`: 5/5 resumed on all four hosts.  Nobody
  *   enforces the SHOULD.
  *
- * HOW THIS IS BUILT WITHOUT TOUCHING third_party/
+ * How this is built without touching third_party/
  *
  *   nx_secure has no resumption of any kind.  nx_secure_tls_send_clienthello.c
  *   sets the session ID length to zero unconditionally with a comment saying
@@ -93,8 +93,6 @@
  *   three-object test with the caller in a separate archive member disassembles
  *   to `jsr ___wrap_vendored`.
  *
- * THE THREE MESSAGES
- *
  *   ServerHello.  Handed to the vendored function.  Afterwards its echoed
  *   session ID is compared against the one we offered; equal and non-empty
  *   means the server has resumed.  Then the cached master secret goes into the
@@ -115,8 +113,6 @@
  *   machine does, and it also destroys the SHA-256 handshake hash context
  *   immediately after processing a Finished, which is exactly the context our
  *   own Finished needs.  So this whole message is handled here.
- *
- * WHAT IS DELIBERATELY NOT DONE
  *
  *   No renegotiation interaction: this library never renegotiates.  No TLS 1.3
  *   (nx_secure's TLS 1.3 is impractical here anyway -- its GCM is a bit-serial
@@ -304,8 +300,6 @@ static BOOL tls_r_path_equal(const char *a, const char *b)
 /* ---------------------------------------------------------- the cache --- */
 
 /*
- * THE CACHE, AND WHERE IT LIVES
- *
  *   In the LIBRARY BASE, and mirrored to a file.  Both, and for two different
  *   reasons.
  *
@@ -327,8 +321,6 @@ static BOOL tls_r_path_equal(const char *a, const char *b)
  *   Shared between programs, deliberately.  A ticket obtained by `fetch` is a
  *   ticket curl can use; they are talking to the same server on behalf of the
  *   same user.
- *
- * SECURITY, STATED ONCE AND WITHOUT AGONISING
  *
  *   Each entry holds a 48-byte TLS master secret and a session ticket in the
  *   clear.  Anyone who can read the library's memory can decrypt any session
@@ -358,8 +350,6 @@ static TLSResumeEntry *tls_resume_table(struct TLSLibBase *base)
 }
 
 /*
- * THE TRUST KEY, AND WHY A BOOLEAN WAS NOT ENOUGH
- *
  *   A resumed handshake verifies NOTHING.  No certificate is sent, no
  *   signature is checked, no host name is compared -- that is the entire
  *   saving.  So every cached session carries a trust decision that was made
@@ -405,7 +395,7 @@ static TLSResumeEntry *tls_resume_table(struct TLSLibBase *base)
  *   turns the machinery off rather than parameterising it; TLSA_SessionFile
  *   selects WHICH cache and is handled by the base reloading when it changes.
  *
- * WHAT THE FINGERPRINT DOES NOT PROTECT AGAINST, stated rather than implied
+ * What the fingerprint does not protect against, stated rather than implied
  *
  *   Two stores whose indexes agree record for record but whose certificate
  *   DER differs -- someone rewriting a root in place, at the same offset and
@@ -850,7 +840,7 @@ VOID tls_resume_prepare(TLSConnection *conn)
             conn->tc_TicketLength = 0;
 
         /*
-         * A SESSION ID WE INVENT, when the cached session has none.
+         * A Session id we invent, when the cached session has none.
          *
          * This is not an optimisation, it is the difference between resumption
          * working and not, and it was found the hard way.  A server that issues

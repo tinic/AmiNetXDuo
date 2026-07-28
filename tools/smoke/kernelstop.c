@@ -19,7 +19,7 @@
  *       the parent's own hunk stays put to report on it.  Afterwards the parent
  *
  *         - looks for surviving "ThreadX" / "ThreadX tick" Tasks by name;
- *         - FILLS FREE MEMORY WITH THE 68000 ILLEGAL INSTRUCTION, so that a
+ *         - Fills free memory with the 68000 ILLEGAL INSTRUCTION, so that a
  *           stale Task jumping into the child's freed hunk faults immediately
  *           and visibly instead of running whatever happens to be there;
  *         - stays alive for several seconds -- hundreds of ticks -- and only

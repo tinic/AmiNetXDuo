@@ -8,8 +8,6 @@
  * all is not ours to decide -- see tests/ipv6/ipv6_link_test.c, which asks it
  * empirically.  This test's answer does not depend on the answer to that one.
  *
- * WHAT THIS PROVES
- *
  *   1. nxd_ipv6_enable() + nxd_icmp_enable() bring the dual stack up on a
  *      68020, and ::1 is configured by doing so.
  *   2. A link-local address is derived from the interface MAC as RFC 4291
@@ -24,7 +22,7 @@
  *      through nxd_udp_source_extract().
  *   6. The IPv6 text conversions round-trip.
  *
- * WHAT IT DOES NOT PROVE: that any of this works over a real SANA-II device.
+ * What it does not prove: that any of this works over a real SANA-II device.
  * The SANA-II shim's 0x86DD reader has no wire to run on here -- that is
  * ipv6_link_test.c's job -- and neither has bsdsocket.library's AF_INET6
  * surface, which is ipv6_socket_test.c's.

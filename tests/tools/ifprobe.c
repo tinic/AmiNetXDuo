@@ -23,7 +23,7 @@
  *      caller asks "does this interface exist?";
  *   5. release the list.
  *
- * THE TAG STORAGE IS POISONED FIRST, on purpose. Every destination is filled
+ * The tag storage is poisoned first, on purpose. Every destination is filled
  * with 0xA5 before the query, so a tag that was silently not answered is
  * distinguishable in the transcript from one that answered zero. Half of the
  * published tags have no true value on this stack and are documented to be

@@ -9,7 +9,7 @@
  *
  * Three things here cannot be checked by a build:
  *
- *   1. THE REGISTER CONVENTION. The hook is entered with the Hook in A0, NULL
+ *   1. The register convention. The hook is entered with the Hook in A0, NULL
  *      in A2 and the message in A1 -- not the A0/A1 pair a reader would
  *      guess, and not utility.library's usual "object in A2". A wrong guess
  *      passes the message in the wrong register and the hook reads rubbish.
@@ -19,7 +19,7 @@
  *      it. The probe installs two and counts invocations to prove the second
  *      is never consulted once the first has said no.
  *
- *   3. THE MESSAGE IS THE PUBLISHED SHAPE. bmm_Size, bmm_Socket and bmm_Name
+ *   3. The message is the published shape. bmm_Size, bmm_Socket and bmm_Name
  *      are checked against what was actually passed to bind().
  *
  * Vectors are called by hand at their LVOs, as in the other probes.
@@ -641,7 +641,7 @@ int main(void)
         (VOID)p_close(base, s);
 
         /*
-         * THE INVARIANT THE AUTODOC STATES, across all three: smm_To and
+         * The invariant the autodoc states, across all three: smm_To and
          * smm_Msg are never both set. It says "either ... will be NULL",
          * which excludes them both being set and does NOT require exactly one
          * -- send() has neither, because there is neither to report.

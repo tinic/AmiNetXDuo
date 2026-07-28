@@ -43,7 +43,7 @@ UINT    tx_amiga_kernel_start(VOID);
 UINT    tx_amiga_kernel_running(VOID);
 
 /*
- * Bring the kernel down and return only when NOTHING THE PORT OWNS WILL EVER
+ * Bring the kernel down and return only when Nothing the port owns will ever
  * EXECUTE AGAIN -- no tick, no scheduler, no ThreadX thread.
  *
  * This is what makes it safe for a PROGRAM to exit.  tx_amiga_kernel_start()
@@ -53,8 +53,6 @@ UINT    tx_amiga_kernel_running(VOID);
  * memory and takes the machine with it.  A resident shared library that never
  * goes away does not need to call this; anything that can be unloaded does.
  *
- * WHAT IT BRINGS DOWN
- *
  *   1. the periodic tick Task, including its timer.device request;
  *   2. ThreadX's own system timer thread -- ThreadX creates it, on a stack in
  *      ThreadX's BSS, so it is neither the application's to delete nor safe to
@@ -63,7 +61,7 @@ UINT    tx_amiga_kernel_running(VOID);
  *   4. everything tx_amiga_kernel_start() allocated: both Task stacks, and the
  *      kernel memory block if the port allocated it rather than the caller.
  *
- * THE CONTRACT ON OUTSTANDING THREADS -- IT REFUSES, IT DOES NOT REAP
+ * The contract on outstanding threads -- IT REFUSES, It does not reap
  *
  * If any application TX_THREAD still exists, stop REFUSES and changes nothing.
  * It does not terminate them for you.  tx_thread_delete() of a thread that is
@@ -78,8 +76,6 @@ UINT    tx_amiga_kernel_running(VOID);
  * when it finally wakes.  Only the caller knows how to unstick the device that
  * is holding it.
  *
- * CALLING IT
- *
  * Callable from any Exec Task the port did not create, including one that is
  * currently ADOPTED: the caller's own thread does not count against it, and is
  * orphaned on its behalf -- but only once the stop is going ahead, so a refusal
@@ -92,7 +88,7 @@ UINT    tx_amiga_kernel_running(VOID);
  *
  *   TX_SUCCESS       Down.  Nothing of the port's is running.  Safe to return
  *                    to AmigaDOS, or to expunge the library.
- *   TX_THREAD_ERROR  Refused; the kernel is untouched AND STILL USABLE.
+ *   TX_THREAD_ERROR  Refused; the kernel is untouched And still usable.
  *                    Application threads or live zombies remain.  NOT safe to
  *                    exit.
  *   TX_NO_MEMORY     Refused for want of an Exec signal; kernel untouched and
@@ -102,8 +98,6 @@ UINT    tx_amiga_kernel_running(VOID);
  *                    owns could not be woken.  The kernel is now unusable AND
  *                    something is still running in the program's hunk.  DO NOT
  *                    EXIT.  Every failure is logged through ami_log().
- *
- * RESTART
  *
  * start -> stop -> start works, and is covered by tools/smoke/kernelstop.c.
  * ThreadX's own initialisation is re-run from scratch, which re-clears the
@@ -127,7 +121,7 @@ UINT    tx_amiga_kernel_stop(VOID);
  * no longer touch its TX_THREAD, the ThreadX baton is recovered if it held
  * one, and the task destroys itself whenever it finally unblocks.
  *
- * This counter is the only signal that it happened.  A CALLER THAT SEES IT
+ * This counter is the only signal that it happened.  A Caller that sees it
  * MOVE ACROSS A tx_thread_delete() MUST NOT FREE THAT THREAD'S STACK: the
  * zombie is still running on it.
  */
@@ -201,7 +195,7 @@ VOID    tx_amiga_tick_stats(TX_AMIGA_TICK_STATS *stats);
  * is allocated: the Task already owns one, and _tx_thread_stack_build() binds
  * to it instead of building a frame.
  *
- * On return the calling Task HOLDS THE THREADX BATON, i.e. it is
+ * On return the calling Task Holds the THREADX baton, i.e. it is
  * _tx_thread_current_ptr and no other ThreadX thread is running.  The call
  * blocks until that is true.
  *
@@ -231,8 +225,6 @@ UINT    tx_amiga_adopt_thread(TX_THREAD *thread_ptr, CHAR *name, UINT priority);
 UINT    tx_amiga_orphan_thread(TX_THREAD *thread_ptr);
 
 /*
- * KEEPING AN ADOPTION BETWEEN CALLS
- *
  * A task that makes one stack call makes thousands.  Measured on a 14 MHz
  * 68020 (tests/perf/bracket_test.c), one adopt/orphan pair costs ~800 us, of
  * which the AllocSignal()/FreeSignal() is 17 us and everything else is
@@ -256,7 +248,7 @@ UINT    tx_amiga_orphan_thread(TX_THREAD *thread_ptr);
  * with TX_CALLER_ERROR -- a caller that gets that should fall back to a fresh
  * tx_amiga_adopt_thread(), which is always correct and merely slower.
  *
- * THE LIFETIME THIS DOES NOT CLOSE, stated because it is the reason to think
+ * The lifetime this does not close, stated because it is the reason to think
  * twice: a Task that exits without orphaning leaves a TX_SUSPENDED TX_THREAD
  * in the created list whose tx_thread_amiga_task points at freed memory.
  * Nothing dispatches a suspended thread and nothing else resumes one, so it is

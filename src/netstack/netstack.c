@@ -935,7 +935,7 @@ static BOOL ami_ns_wait_for_address(AmiNetStack *ns, ULONG timeout_ticks)
             return FALSE;
 
         /*
-         * WAIT FOR THE NOTIFICATION RATHER THAN POLLING FOR THE ANSWER.
+         * Wait for the notification rather than polling for the answer.
          *
          * NetX Duo already tells us when an address arrives -- we registered
          * ami_ns_address_changed() for it -- so sleeping a tick at a time and
@@ -1531,7 +1531,7 @@ BOOL netstack_interface_is_up(UWORD index)
  * interface that got only one half would not be closed by
  * netstack_shutdown().
  *
- * ns_IfaceCount IS NOT DECREMENTED BY A REMOVAL. It is the number of SLOTS
+ * ns_IfaceCount Is not decremented by A REMOVAL. It is the number of SLOTS
  * that have ever been populated, not the number that are live, so that a
  * removal in the middle does not renumber the ones above it -- an interface
  * index is a handle a caller may already be holding. Every loop over it that

@@ -3,8 +3,6 @@
  * long does it take to turn a packet around?  Asked of a stack from OUTSIDE,
  * with no knowledge of its internals and nothing of its code inspected.
  *
- * WHY THIS EXISTS
- *
  * docs/RESEARCH.md 29.5 measured Roadshow's ICMP round trip at 4.32 ms
  * minimum against ours at 7 ms, and two explanations fit that equally well:
  *
@@ -15,8 +13,6 @@
  *
  * The two are distinguishable on the wire and nowhere else, so this program
  * is a wire.
- *
- * HOW A TIMER RATE IS VISIBLE FROM OUTSIDE
  *
  * A packet a stack sends BECAUSE A TIMER FIRED leaves at the instant that
  * timer fires.  Sample enough of them and their timestamps lie on a grid whose
@@ -35,7 +31,7 @@
  * nearly equal are congruent modulo almost anything.  A spread of twenty ticks
  * makes the comb sharp; a spread of one makes it meaningless.
  *
- * THE PHASE MUST BE RANDOMISED OR THE ANSWER IS A FICTION
+ * The phase must be randomised or the answer is A FICTION
  *
  * If the harness injected each segment immediately after seeing the previous
  * ACK, the injections would themselves be locked to whatever grid the harness
@@ -47,15 +43,13 @@
  * checks the control as well as the result: the INJECTION intervals must show
  * no concentration at any period, or the run says nothing.
  *
- * AND THE COMPETING EXPLANATION IS MEASURED IN THE SAME RUN
+ * And the competing explanation is measured in the same run
  *
  * An ICMP echo reply is not timer-driven -- it is generated when the request
  * arrives -- so the time from handing an echo request to the device to the
  * stack handing the reply back is the whole receive-and-reply path with the
  * wire, the emulator's SLIRP and the application all taken out of it.  Phase I
  * measures it at two sizes, which separates per-packet cost from per-byte.
- *
- * WHAT IT RUNS ON
  *
  * Anything with a bsdsocket.library.  Every call into the stack is a published
  * LVO and every packet is seen through a SANA-II device this program installs
@@ -64,8 +58,6 @@
  * the command line that brings its interface up -- our own library configures
  * DEVS:NetInterfaces itself when it opens, and Roadshow needs its own
  * AddNetInterface to be run.
- *
- * OUTPUT
  *
  * DH0:tickprobe.txt, one line per sample, all times in raw E-Clock ticks so
  * the analyser and not the Amiga decides what a millisecond is.  Flushed line

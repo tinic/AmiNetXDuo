@@ -8,8 +8,6 @@
  * loops, and knowing THAT is the point -- three of this project's last four
  * performance efforts found the bottleneck somewhere other than predicted.
  *
- * WHAT IS MEASURED
- *
  *   1. E-Clock bracket overhead, so it can be subtracted from everything else.
  *   2. Per-primitive cost: the checksum (vendored AND net68k, in one process),
  *      memcpy at every one of the sixteen alignment pairs, net68k's movem.l
@@ -27,12 +25,12 @@
  *      with net68k's, back to back, with NOTHING ELSE CHANGED -- the same
  *      "one variable and nothing else" discipline the P-256 work used.
  *
- * WHAT IS NOT MEASURED HERE: bsdsocket.library.  This binary talks to NetX
+ * What is not measured here: bsdsocket.library.  This binary talks to NetX
  * Duo directly, so the difference between its loopback figure and the
  * conformance suite's throughput category IS the library layer, and that is
  * how the library's cost is priced.
  *
- * ONLY THE 68020 PROFILES MEAN ANYTHING, and that is now measured rather than
+ * ONLY THE 68020 Profiles mean anything, and that is now measured rather than
  * suspected: tests/perf/cpucal.c times instructions with published cycle costs
  * and finds FS-UAE's A1200 model faithful to under 2% for two-cycle integer
  * work, while its 68030 -- any 68030, including `-c 68030` on the A1200 model
@@ -495,7 +493,7 @@ UINT    da, sa;
     /*
      * memcpy(), at every combination of destination and source alignment.
      *
-     * READ THE BUILD FLAGS BEFORE READING THESE ROWS.  With
+     * Read the build flags before reading these rows.  With
      * AMINETXDUO_NET68K_MEMCPY=ON -- the default on a cross build -- memcpy()
      * IS n68k_copy_bytes(), and these rows measure it twice under two names.
      * The C library's own numbers quoted in docs/RESEARCH.md were taken from a
@@ -792,7 +790,7 @@ ULONG       len = 1460UL;
 }
 
 /*
- * THE PIPELINE CEILING.
+ * The pipeline ceiling.
  *
  * Every operation a loopback TCP segment pays for, in order, with no protocol,
  * no scheduler and no timers in the way:

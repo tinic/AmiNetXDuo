@@ -1,8 +1,6 @@
 /*
  * CheckRunner -- the guest half of every harness in tests/compare.
  *
- * WHAT IT IS FOR
- *
  *   A harness points a command at bsdsocket.library and asks whether the
  *   STACK survived, so the driver has to be the thing that keeps running when
  *   the command does not.  Everything it produces is appended and flushed one
@@ -26,13 +24,9 @@
  *                          nettools harness grew one and it costs four lines)
  *   NAME<TAB>COMMAND       run COMMAND, calling the result NAME
  *
- * OUTPUT
- *
  *   DH0:results.txt        NAME rc ticks availmem   -- one line per case
  *   DH0:w/NAME.txt         that command's own stdout and stderr
  *   DH0:checkrunner.txt    the same thing for a human
- *
- * WHY availmem IS IN THE RESULT LINE
  *
  *   "Crashes most of the time" and "degrades over a few hundred transfers"
  *   look identical from a single run, and the second one is invisible unless
@@ -42,7 +36,7 @@
  *   free of noise -- allocation patterns fragment -- but a leak is a trend and
  *   fragmentation is not.
  *
- * WHY EVERY COMMAND GETS 512 KB OF STACK
+ * Why every command gets 512 Kb of stack
  *
  *   A Kickstart 3.1 Shell gives a command 4,096 bytes and this toolchain's
  *   crt0 exports no __stack hook to ask for more.  See clients/curl/

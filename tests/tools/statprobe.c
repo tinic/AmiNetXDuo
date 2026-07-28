@@ -4,7 +4,7 @@
  * The call hands back 4.4BSD's own kernel statistics structures by value, so
  * there are three separate things a build cannot check and this can:
  *
- *   1. THE RETURN VALUE IS A BYTE COUNT. Not zero-on-success and not an entry
+ *   1. The return value is A BYTE COUNT. Not zero-on-success and not an entry
  *      count -- the two other readings the prototype allows. A NULL
  *      destination asks how much would be needed and copies nothing.
  *
@@ -14,7 +14,7 @@
  *      check and fails these.
  *
  *   3. pcd_tcp_state IS 4.4BSD's ENUMERATION, NOT NetX Duo's, and A BSD
- *      listen() IS ONE ENTRY. Both halves are asserted by the same
+ *      listen() Is one entry. Both halves are asserted by the same
  *      experiment. The enumerations agree up to CLOSE_WAIT and diverge after
  *      it. And this stack implements one listening descriptor as TWO
  *      NX_TCP_SOCKETs -- the descriptor's own, left in CLOSED, and a spare

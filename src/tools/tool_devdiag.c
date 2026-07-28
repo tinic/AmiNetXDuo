@@ -1,7 +1,7 @@
 /*
  * src/tools -- what a command needs in order to explain a NETWORK CARD.
  *
- * WHY THIS IS NOT IN tool_diag.c
+ * Why this is not in tool_diag.c
  *
  * tool_diag.c is in TOOLS_COMMON_SOURCES, so every command links it, and this
  * material is 3.8 KB of prose plus a table of sixteen driver names.  `whois`

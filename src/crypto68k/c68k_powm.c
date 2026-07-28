@@ -1,8 +1,6 @@
 /*
  * AmiNetXDuo -- crypto68k modular exponentiation.
  *
- * WHERE THE TIME GOES, AND WHAT THIS FIXES
- *
  *   The vendored _nx_crypto_huge_number_mont_power_modulus() is bit-at-a-time
  *   square-and-multiply over every bit of every exponent limb.  Two things
  *   follow from that, and both are fixed here.
@@ -23,8 +21,6 @@
  *
  *   Squarings are then the overwhelming majority of the work, which is why
  *   c68k_mont_sqr() earning its ~24% over c68k_mont_mul() matters at all.
- *
- * WHAT IS NOT CHANGED
  *
  *   The setup -- radix^2 mod m -- still goes through the vendored long
  *   division, deliberately.  It is O(s^2) and runs once, so replacing it would

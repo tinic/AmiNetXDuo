@@ -2,8 +2,6 @@
  * AmiNetXDuo -- crypto68k: X25519 and Ed25519 for a 32-bit machine with a
  * 32x32->64 multiplier.
  *
- * WHY THIS EXISTS
- *
  *   docs/RESEARCH.md 31.6 recorded that src/crypto68k/ accelerated RSA, P-256,
  *   SHA-256 and AES, and that the suite a modern OpenSSH negotiates --
  *   curve25519, ed25519, chacha20-poly1305 -- used none of it.  32 measured
@@ -15,8 +13,6 @@
  *   multiply is 256 SOFTWARE 64x64 multiplies on a part that has a 32x32->64
  *   in hardware.  This file is the same mathematics over eight 32-bit limbs,
  *   which is the shape src/crypto68k/c68k_p256.c already uses for P-256.
- *
- * WHAT IT IS NOT
  *
  *   It is not a wrapper around a reference implementation and it is not
  *   assembly.  §18 established that this toolchain's GCC leaves nothing on the
@@ -33,8 +29,6 @@
  *   a second copy would be a second thing to keep right.  The callback takes
  *   up to three chunks because that is exactly what RFC 8032 hashes
  *   (prefix||M, and R||A||M); a NULL chunk with length 0 is skipped.
- *
- * CONSTANT TIME, AND THE HONEST LIMIT OF IT
  *
  *   The scalar multiplications are ladder/always-add shaped and the
  *   conditional moves are mask-based, so the secret scalar does not steer a

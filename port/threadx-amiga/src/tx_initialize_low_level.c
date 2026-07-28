@@ -382,7 +382,7 @@ VOID _tx_amiga_start_interrupts(void)
  * machine runs, so the ThreadX thread that currently holds the baton really is
  * frozen -- exactly the property the Linux port buys with pthread_kill().
  *
- * THE WAKEUP SOURCE IS NOT THE TIME BASE.  The task parks on timer.device
+ * The wakeup source is not the time base.  The task parks on timer.device
  * UNIT_VBLANK, which costs a list insertion on an interrupt the machine takes
  * anyway; but it never counts those wakeups.  On each one it reads the E-Clock
  * and asks how many whole TX_TIMER_TICKS_PER_SECOND periods have really
@@ -476,7 +476,7 @@ static VOID _tx_amiga_timer_arm(struct timerequest *tr, ULONG secs, ULONG micro)
  * VERTB interrupt behind it (exactly the configuration this check exists to
  * survive) yields 0 rather than parking the tick task in Wait() forever.
  *
- * NOTHING HERE IS EVER AbortIO()ed.  The guard always completes on its own,
+ * Nothing here is ever AbortIO()ed.  The guard always completes on its own,
  * and the source's outstanding request is left pending for the caller: if the
  * source is accepted that request becomes the first tick wakeup, and if it is
  * rejected the whole request is thrown away.  That is not fastidiousness --

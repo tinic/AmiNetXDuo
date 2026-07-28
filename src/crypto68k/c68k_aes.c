@@ -4,7 +4,7 @@
  * against.  See c68k_aes.h for why this file exists and what the machine's
  * missing data cache changed about it.
  *
- * WHAT IS IN HERE, AND WHY THERE IS MORE THAN ONE OF IT
+ * What is in here, And why there is more than one of it
  *
  *   Three portable implementations of the same cipher.  That is not
  *   indecision: "what is the right AES for a machine with no data cache" has
@@ -790,7 +790,7 @@ UINT    r;
  * (round keys, rounds, four-longword state in memory) -- so the dispatch is a
  * switch and not two code paths.
  *
- * THE STATE LIVES IN MEMORY ON PURPOSE, and it is the one design decision in
+ * The state lives in memory on purpose, and it is the one design decision in
  * the assembly that is not obvious.  The 68020 has eight data registers; a
  * round needs four state words, four accumulators, an index and a temporary,
  * which is ten.  Something has to give, and the choice is between extracting

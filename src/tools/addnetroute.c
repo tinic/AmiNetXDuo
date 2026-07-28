@@ -12,7 +12,7 @@
  * that is or is not there, and only the operation differs -- which is exactly
  * the pair that must never disagree about what "192.168.10.0" means.
  *
- * THESE COULD NOT BE WRITTEN BEFORE NOW, and the reason did not look like a
+ * These could not be written before now, and the reason did not look like a
  * missing feature: NetX Duo has had nx_ip_static_route_add() all along, but
  * without NX_ENABLE_IP_STATIC_ROUTING it compiles to a stub returning
  * NX_NOT_SUPPORTED and NX_IP carries no routing table at all.
@@ -20,7 +20,7 @@
  * exactly as though routes existed -- and not the enable, so there was nothing
  * to add to and NETCTRL_ROUTE_ADD answered ENOSYS. docs/RESEARCH.md 22.5.
  *
- * TWO KINDS OF ROUTE, and they are different mechanisms rather than two
+ * Two kinds of route, and they are different mechanisms rather than two
  * spellings of one.
  *
  *   DEFAULTGATEWAY is the default route: everything with nowhere better to go.
@@ -36,13 +36,13 @@
  *   route command that quietly did nothing would be worse than one that
  *   refuses.
  *
- * THE ONE CONSTRAINT THAT SURPRISES PEOPLE: the GATEWAY must be an address on
+ * The one constraint that surprises people: the GATEWAY must be an address on
  * one of this machine's own subnets. NetX Duo derives the outgoing interface
  * from the next hop (nx_ip_static_route_add.c), so a next hop it cannot reach
  * directly is rejected rather than stored -- which is right, and is why the
  * command says so in those words rather than printing "invalid argument".
  *
- * NETMASKS ARE INFERRED, because the template has nowhere to write one. The
+ * Netmasks are inferred, because the template has nowhere to write one. The
  * rule is stated here rather than left to be discovered:
  *
  *   HOSTDESTINATION       one machine: /32, whatever the address looks like

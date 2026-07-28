@@ -1,8 +1,6 @@
 /*
  * clients/dropbear/dbprofile.c -- where an SSH handshake's 84 seconds go.
  *
- * WHY THIS EXISTS
- *
  *   docs/RESEARCH.md 31.5 measured a whole connection (96.06 s, 84.07 s once
  *   the optimistic kex guess was off) and could not split it.  The attempt
  *   there timestamped the SERVER's log host-side and the split came out
@@ -17,8 +15,6 @@
  *   inferred from reading the code.  Every row is a call count and a tick
  *   total from a real connection to a real OpenSSH.
  *
- * HOW IT ATTACHES, WITHOUT PATCHING ANYTHING
- *
  *   -Wl,--wrap=SYM, the same mechanism clients/dropbear/build.sh already uses
  *   for open/read/write/close.  Every reference to SYM from Dropbear's own
  *   objects is redirected to __wrap_SYM here; __real_SYM is the untouched
@@ -30,15 +26,11 @@
  *   field arithmetic are invisible here, which is correct -- they are part of
  *   the primitive being timed, not a separate row.
  *
- * NESTING
- *
  *   Some of these call others: crypto_hash() inside ed25519 sign/verify calls
  *   sha512_process(), and ltc_ecc_mulmod() calls into libtommath.  Every row
  *   is INCLUSIVE time and the report says which rows are nested inside which,
  *   rather than pretending to an exclusive breakdown that the call graph does
  *   not support.  Adding up the non-nested rows is the meaningful sum.
- *
- * THE CLOCK
  *
  *   timer.device UNIT_ECLOCK, through the TimerBase that src/common/compat.c
  *   already opens for ami_millis() -- so there is one timer device open in the
@@ -220,7 +212,7 @@ static void p_report(void)
 
 
 /*
- * ARMING, AND WHY IT IS NOT DONE IN THE CONSTRUCTOR.
+ * ARMING, And why it is not done in the constructor.
  *
  * The first version registered p_report() with atexit() from a constructor and
  * nothing was ever printed.  The constructor DOES run -- the linked
@@ -230,7 +222,7 @@ static void p_report(void)
  * amiga_dropbear.c's own constructor gets away with it because it touches only
  * dos.library.
  *
- * So the registration happens on the FIRST WRAPPED CALL instead, which is
+ * So the registration happens on the First wrapped call instead, which is
  * inside main() by construction.  Three exits are then armed and p_reported
  * makes them idempotent: atexit(), the toolchain's own DTOR list, and
  * --wrap=exit, which is the mechanism this link already proves works.
@@ -301,7 +293,7 @@ __attribute__((constructor)) static void p_init(void)
 
 
 /*
- * TWO SETS OF NAMES FOR THE SAME THREE ROWS.
+ * Two sets of names for the same three rows.
  *
  * With clients/dropbear/amiga_25519.c linked, IT owns __wrap_dropbear_* and
  * this file cannot -- only one definition of a wrap symbol can exist.  So when

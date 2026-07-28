@@ -1,8 +1,6 @@
 /*
  * AmiNetXDuo -- crypto68k before/after benchmark.
  *
- * WHAT IT MEASURES AND WHY IT MEASURES IT THIS WAY
- *
  *   Every figure below is a PAIR run back to back in the same process, on the
  *   same operands: the unmodified vendored routine, then this module.  Only
  *   the ratio of a pair is trustworthy.  FS-UAE's 68020 is not a 14 MHz A1200
@@ -16,8 +14,6 @@
  *   wants and because they are directly comparable with tests/tls/tls_bench,
  *   which was measured on the same emulator.  They should be read as "the
  *   emulator's 68020", not "a 68020".
- *
- * ORDER
  *
  *   Cheapest first.  The reference RSA-2048 private operation without CRT runs
  *   for over two minutes on the floor target, so it goes last: a run that hits
@@ -64,7 +60,7 @@ static ULONG        b_failures;
 typedef VOID (*B_OP)(VOID);
 
 /*
- * Time one operation, in MICROSECONDS PER OPERATION -- one unit everywhere, so
+ * Time one operation, in Microseconds per operation -- one unit everywhere, so
  * that dividing one result by another is always meaningful.  Microseconds in a
  * ULONG reach 4,295 seconds; the longest thing here is under 200.
  *

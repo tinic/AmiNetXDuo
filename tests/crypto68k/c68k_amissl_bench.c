@@ -1,8 +1,6 @@
 /*
  * AmiNetXDuo -- crypto68k against AmiSSL, one process, identical inputs.
  *
- * WHAT THIS ANSWERS
- *
  *   Everything src/crypto68k/ has ever been measured against is the vendored
  *   nx_crypto it replaces.  That is the right baseline for "did the change
  *   work" and the wrong one for "is this stack worth having", because the
@@ -11,16 +9,12 @@
  *   runs both on the same numbers, back to back, in one process, and checks
  *   that they agree before it believes any timing.
  *
- * WHY ONE PROCESS
- *
  *   Two runs of one binary under FS-UAE agree to about one part in ten
  *   thousand on register kernels (tests/perf/cpucal), but a handshake-scale
  *   measurement drifts with disk state, library load order and whatever else
  *   the emulator is doing.  Timing both sides inside a single run removes all
  *   of it: the only thing that differs between an "ours" number and a "theirs"
  *   number is the code that ran.
- *
- * THE EMULATOR CAVEAT, AND WHY IT IS NOT SYMMETRIC
  *
  *   FS-UAE's A1200 model charges MULU.L 32.14 cycles where a real 68020
  *   charges 45 for the 64-bit form -- measured, tests/perf/cpucal, and
@@ -31,8 +25,6 @@
  *   statically derived MULU.L count and a corrected time beside the measured
  *   one.  A ratio quoted without that correction is a ratio of two differently
  *   flattered numbers.
- *
- * WHAT IS DELIBERATELY NOT COMPARED
  *
  *   The whole handshake.  AmiSSL is a TLS stack and so are we, but a
  *   handshake includes a network round trip, certificate parsing and record
@@ -188,7 +180,7 @@ static UINT     a_row_count;
  * from a measured t_mulu rather than an assumed clock is what makes this
  * independent of -k: the same expression is right at 14 MHz and at 28.
  *
- * WHERE THE COUNTS COME FROM.  Both sides are deterministic given the
+ * Where the counts come from.  Both sides are deterministic given the
  * operands, so these are derived rather than sampled.
  *
  *   crypto68k, SOS Montgomery over s limbs (src/crypto68k/c68k_mont.c):

@@ -3,8 +3,6 @@
  *
  *     arp [ADDRESS] [DELETE] [SET=<hardware address>] [UNIT=<n>] [STATS]
  *
- * WHAT IT IS FOR
- *
  * Every packet that leaves this machine for the local network needs the
  * ethernet address of whatever it is going to, and ARP is how that is found
  * out and remembered. The cache is therefore the answer to a question that
@@ -31,11 +29,11 @@
  *                             a permanent entry, for something that does not
  *                             answer ARP or that keeps changing
  *
- * NOTHING AGES OUT. NX_ARP_EXPIRATION_RATE is 0 in this build, so an entry
+ * Nothing ages out. NX_ARP_EXPIRATION_RATE is 0 in this build, so an entry
  * stays until DELETE removes it or the stack stops. Worth knowing before
  * wondering why a machine that has since moved is still listed here.
  *
- * IT DOES NOT START THE NETWORK, unlike fetch or nslookup. The cache is a
+ * It does not start the network, unlike fetch or nslookup. The cache is a
  * statement about a running stack, and starting one to report that its cache
  * is empty would be a bug rather than a convenience -- the same rule
  * ShowNetStatus follows, for the same reason.

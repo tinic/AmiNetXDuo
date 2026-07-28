@@ -7,8 +7,6 @@
  * whole packet, so a partially drained one is parked on the socket
  * (as_RxPending/as_RxOffset) until it runs out.
  *
- * SCATTER/GATHER
- *
  * Every path here works on an iovec list, and the flat-buffer calls hand it a
  * one-element list on the stack. That is not gold plating: it is what makes
  * sendmsg()/recvmsg() the same code as send()/recv() rather than a second
@@ -264,7 +262,7 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
     LONG            sent = 0;
     ULONG           wait;
     /*
-     * WHY THE LOOP STOPPED, and the whole reason this variable exists.
+     * Why the loop stopped, and the whole reason this variable exists.
      *
      * Every first-iteration failure below breaks out and lands on the "sent
      * == 0" test at the bottom, which used to answer EWOULDBLOCK whatever had
@@ -1058,7 +1056,7 @@ static LONG bsd_recv_oob(struct AmiSocketBase *base, AmiSocket *sock,
  * anything is queued, resolved or transmitted. A partial send that then
  * reported a refusal would be worse than not dispatching at all.
  *
- * WHAT GOES IN smm_To AND smm_Msg
+ * What goes in smm_To AND smm_Msg
  *
  * "Depending upon the type of function to perform, the contents of the
  * SendMonitorMessage may look different. For example, either the 'smm_To' or
@@ -1265,8 +1263,6 @@ LONG bsd_recvfrom(register LONG sock_fd          __asm("d0"),
 /* ------------------------------------------------------ sendmsg / recvmsg -- */
 
 /*
- * ANCILLARY DATA
- *
  * msg_control is ignored on send and reported as empty on receive. That is
  * not a shortcut: the only thing a BSD stack passes through SCM_RIGHTS is a
  * file descriptor, and AmigaOS has no descriptor passing over a socket at all

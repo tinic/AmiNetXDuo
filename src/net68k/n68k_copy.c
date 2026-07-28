@@ -12,7 +12,7 @@
  * source is doing.  Requiring both pointers to agree, and dropping to one
  * byte per iteration when they do not, is the mistake this replaces.
  *
- * ON A 68000 THAT RULE IS ILLEGAL, not merely slow, and the guard below is
+ * ON A 68000 That rule is illegal, not merely slow, and the guard below is
  * the same one n68k_copy.S carries -- read the long comment there.  A word or
  * longword access to an ODD address is an address error on a 68000, so when
  * the two pointers disagree in bit 0 there is no alignment of the destination

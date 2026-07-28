@@ -6,8 +6,6 @@
  *   QueryInterfaceTagList()     everything else, one IFQ_* tag at a time
  *   ConfigureInterfaceTagList() address, mask, MTU and up/down
  *
- * WRITTEN FROM THE AUTODOC, NOT FROM THE NAMES
- *
  * The contract implemented here is Olaf Barthel's, from the bsdsocket.library
  * autodoc that ships in NDK 3.2 (SANA+RoadshowTCP-IP/doc/bsdsocket.doc), read
  * together with libraries/bsdsocket.h from the same NDK. Both are freely
@@ -17,7 +15,7 @@
  * are quoted below, because guessing an ABI is how this project lost time
  * twice already (see the header of roadshow.c).
  *
- * FOUR THINGS THE DOCUMENT SETTLED THAT WOULD OTHERWISE HAVE BEEN GUESSES
+ * Four things the document settled that would otherwise have been guesses
  *
  *   1. ObtainInterfaceList() returns a list of plain Nodes carrying NOTHING
  *      but a name: "Pointer to a 'struct List', whose individual Nodes
@@ -41,8 +39,6 @@
  *      pair means something specific: SM_Online is "SM_Up, but send S2_ONLINE
  *      to the device first, and if that fails do nothing else". One block of
  *      #defines in libraries/bsdsocket.h, two different vocabularies.
- *
- * WHAT IS NOT ANSWERED, AND WHY
  *
  * On the QUERY side, a tag this stack has no true value for is LEFT ALONE:
  * the caller's storage is not written at all. Writing an invented zero would be indistinguishable
@@ -666,7 +662,7 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
 
             /*
              * ---------------------------------------------------------------
-             * LEFT ALONE ON PURPOSE. Each of these has a well-defined meaning
+             * Left alone on purpose. Each of these has a well-defined meaning
              * that this stack keeps no true value for, and the caller's
              * storage is better left holding the caller's own default than an
              * invented zero that reads like a measurement.
@@ -723,8 +719,6 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
 /* --------------------------------------------- ConfigureInterfaceTagList -- */
 
 /*
- * TWO PASSES, AND THE REASON IS THE FAILURE MODE
- *
  * The autodoc says nothing about what happens to a tag list whose fourth tag
  * is refused. Applying tags as they are read would leave the interface half
  * configured -- new address, old mask, still down -- which is the one state
@@ -1048,7 +1042,7 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
  * only the first half would be invisible to netstack_shutdown() and its
  * device would never be closed.
  *
- * THE TAGS THAT ARE HONOURED are the ones that describe something this stack
+ * The tags that are honoured are the ones that describe something this stack
  * has. Every one that does not is refused, for the same reason
  * ConfigureInterfaceTagList() refuses its own: an interface brought up with
  * a packet filter mode or a read-request count that was quietly ignored is
@@ -1314,7 +1308,7 @@ LONG bsd_RemoveInterface(register STRPTR name __asm("a0"),
  * static assertions below fail the build if those sizes ever stop being 8 and
  * 32, which is the only way the layout below can silently go wrong.
  *
- * THE ONE SUBTLETY IS sa_len. fad-gifc walks the SIOCGIFCONF result by
+ * The one subtlety is sa_len. fad-gifc walks the SIOCGIFCONF result by
  * striding sizeof(ifr_name) + ifr_addr.sa_len rather than sizeof(struct
  * ifreq), so an entry whose sockaddr says 0 makes the walk stride 16 and read
  * the second half of the entry it has already read as a name. Every sockaddr
@@ -1322,7 +1316,7 @@ LONG bsd_RemoveInterface(register STRPTR name __asm("a0"),
  * sockaddr are both 16 bytes on this NDK the stride comes out at 32 either
  * way -- which is what makes the bug invisible until somebody looks.
  *
- * ONLY PHYSICAL INTERFACES ARE LISTED. NetX Duo puts loopback past the
+ * Only physical interfaces are listed. NetX Duo puts loopback past the
  * physical range, and there is no BPF channel that can bind to it: offering a
  * name that cannot then be captured on would turn one honest failure into two
  * confusing ones.

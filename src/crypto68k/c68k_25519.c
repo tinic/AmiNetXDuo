@@ -4,8 +4,6 @@
  * Read src/crypto68k/c68k_25519.h first; it says why this file exists.  This
  * comment is about how, and about the two decisions that are not obvious.
  *
- * THE REPRESENTATION, WHICH IS THE WHOLE POINT
- *
  *   A field element is eight uint32 limbs, little-endian, holding any value
  *   below 2^256 that is congruent to the intended one modulo p = 2^255-19.
  *   Nothing is kept fully reduced until it is serialised.  That works because
@@ -28,8 +26,6 @@
  *   64-bit accumulator on machines where the carry is expensive to propagate.
  *   ref10 pays 100 multiplies where this pays 64 (72 with the reduction), and
  *   its saving is carry handling this machine does in the ALU for free.
- *
- * WHAT IS DELIBERATELY LEFT ALONE
  *
  *   The scalar-multiplication ALGORITHMS.  The Montgomery ladder for X25519
  *   and the double-and-add for Ed25519 are the textbook ones, and the
@@ -89,7 +85,7 @@ static void fe_copy(fe r, const fe a)
  * Fold a carry out of the top back in.  2^256 = 38 (mod p), so a carry of c
  * out of limb 7 is worth 38c at the bottom.
  *
- * THE LOOP IS NOT BELT AND BRACES.  The first version of this function ran one
+ * The loop is not belt and braces.  The first version of this function ran one
  * propagation pass and dropped whatever came out of limb 7, on the reasoning
  * that a value near 2^256-1 could not arise.  It arises constantly: this
  * representation is lazy, so 0 is routinely carried as 2^256-38 and 1 as

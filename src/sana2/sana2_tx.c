@@ -19,7 +19,7 @@
  * or an application thread inside nx_tcp_socket_send, and neither may block on
  * the wire.
  *
- * REAPING IS A LIFECYCLE PROBLEM, NOT A BOOKKEEPING ONE, AND IT COST US
+ * REAPING IS A LIFECYCLE PROBLEM, NOT A BOOKKEEPING ONE, And it cost us
  * RETRANSMISSION ENTIRELY.
  *
  * nx_packet_transmit_release() does not free a queued TCP segment -- it marks
@@ -37,7 +37,7 @@
  * and TCP believed the driver still had it. docs/RESEARCH.md 27.4 measured the
  * result: eleven seconds of total silence after one unacknowledged segment.
  *
- * So completions are reaped WHEN THEY COMPLETE, in two hops:
+ * So completions are reaped When they complete, in two hops:
  *
  *   1. The reply port raises a signal on one of the SANA-II reader threads
  *      (ami_sana2_tx_reap_bind), which is the only thread in this shim that
@@ -56,9 +56,9 @@
  * question does not arise. docs/RESEARCH.md 27.4 noted that this shim never
  * asked for NX_LINK_DEFERRED_PROCESSING; this is what it is for.
  *
- * THE TRANSMIT PATH PAYS ALMOST NOTHING, and that is measured rather than
+ * The transmit path pays almost nothing, and that is measured rather than
  * asserted: the reader only asks for deferred processing when the reply port
- * is NOT ALREADY EMPTY, and during a bulk transfer the next ami_sana2_tx_send()
+ * is Not already empty, and during a bulk transfer the next ami_sana2_tx_send()
  * has already drained it -- so the common case costs one pointer compare in a
  * thread that was going to wake anyway, and the IP thread is never disturbed.
  * The hop only happens when the link goes quiet, which is the case that was
@@ -113,8 +113,6 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
 
 /*
  * Hand the reply port a task to signal, so a completion wakes somebody.
- *
- * WHY A SIGNAL AND NOT A POLL, AND WHY THIS TASK
  *
  *   The two alternatives were a periodic sweep and a thread of our own. A
  *   sweep adds latency to every retransmission in exchange for work done when

@@ -1,8 +1,6 @@
 /*
  * AmiNetXDuo -- the private handle bsdsocket.library gives tls.library.
  *
- * WHY THIS EXISTS AT ALL
- *
  *   The whole NetX Duo/ThreadX stack is a singleton that lives inside
  *   bsdsocket.library's segment: one NX_IP, one packet pool, one ThreadX
  *   kernel, one set of NetX Duo globals.  A second library that linked its own
@@ -26,8 +24,6 @@
  *   checking at the LVO, so those archive members are never pulled in and the
  *   data symbols never become undefined.  Verified with `nm` after the link.
  *
- * HOW IT IS OBTAINED
- *
  *   One private LVO on bsdsocket.library at AMI_NXD_CONTEXT_LVO, present only
  *   in an AMINETXDUO_TLS build.  The public 121-vector Roadshow/AmiTCP ABI is
  *   untouched, and a default build of bsdsocket.library does not have this
@@ -40,8 +36,6 @@
  *   whatever it had in d0/d1, and this call must do nothing rather than
  *   something.  Wrong magic or wrong version returns failure and writes
  *   nothing.
- *
- * VERSION LOCKING
  *
  *   tls.library and bsdsocket.library share struct layouts (NX_TCP_SOCKET,
  *   NX_PACKET, NX_PACKET_POOL) and must be built from the same tree with the

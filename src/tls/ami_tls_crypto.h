@@ -1,14 +1,10 @@
 /*
  * AmiNetXDuo -- the nx_secure crypto table that actually uses src/crypto68k/.
  *
- * WHY THIS FILE EXISTS
- *
  *   src/crypto68k/ made RSA-2048 2.9x/2.2x faster and P-256 3.6-3.9x faster,
  *   measured, and none of it reached a handshake: nothing outside
  *   src/crypto68k/ referenced the module, so tests/tls/tls_handshake ran
  *   entirely on the vendored arithmetic.  This file is the wire.
- *
- * THE MECHANISM, AND WHY THIS ONE
  *
  *   nx_secure already has an application-supplied extension point and it is
  *   exactly the right shape.  nx_secure_tls_session_create() takes a
@@ -41,8 +37,6 @@
  *   differential tests that check us against the vendored path.  Our own copy
  *   costs one NX_CRYPTO_EC (about 200 bytes) and leaves the reference intact,
  *   which is what tests/crypto68k needs and what the interop test below needs.
- *
- * RSA CRT ON THE PATHS THAT SKIP IT
  *
  *   NX_CRYPTO_SET_PRIME_P appears exactly once in all of nx_secure/src, in
  *   nx_secure_process_client_key_exchange.c.  The ECDHE_RSA ServerKeyExchange

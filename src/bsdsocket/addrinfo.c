@@ -6,7 +6,7 @@
  * ship in both build configurations -- an IPv4-only build still answers them,
  * just never with an AF_INET6 result.
  *
- * WHAT AF_UNSPEC RETURNS, AND IN WHAT ORDER
+ * WHAT AF_UNSPEC RETURNS, And in what order
  *
  * The NDK's netdb.h:176 defines AI_MASK as only
  *     AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST | AI_NUMERICSERV
@@ -34,8 +34,6 @@
  *      were the whole RRset would be a lie about round-robin DNS.  A caller
  *      that walks the list still behaves correctly, it just has fewer things
  *      to walk.
- *
- * MEMORY
  *
  * Each result is ONE allocation: the addrinfo, its sockaddr and (on the first
  * node only) its canonical name live in one block, so freeaddrinfo() is a walk
@@ -226,7 +224,7 @@ static VOID bsd_gai_append(struct addrinfo **head, struct addrinfo **tail,
 /* ---------------------------------------------------------------- vectors */
 
 /*
- * REGISTER ASSIGNMENT IS FROM THE NDK PRAGMA, NOT FROM THE C PROTOTYPE.
+ * Register assignment is from the NDK pragma, Not from the C PROTOTYPE.
  *
  *   pragmas/bsdsocket_pragmas.h:139  freeaddrinfo(a0)
  *   pragmas/bsdsocket_pragmas.h:140  getaddrinfo(a0,a1,a2,a3)

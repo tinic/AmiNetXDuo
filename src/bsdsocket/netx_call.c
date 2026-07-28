@@ -17,15 +17,13 @@
  * nx_packet_* helpers (no check at all) tolerate a plain Task -- which is
  * exactly why socket() used to be the one thing that worked.
  *
- * ONE BRACKET
- *
  * The adopt/orphan itself is ami_netstack_enter()/ami_netstack_leave() from
  * include/aminetxduo/netstack.h -- the same bracket src/netstack/ and the
  * tools use. This file adds only the two things that are specific to a
  * library base: where the TX_THREAD control block lives, and the nesting
  * counter.
  *
- * GRANULARITY: PER CALL FOR THE BATON, PER TASK FOR THE THREAD
+ * GRANULARITY: Per call for the baton, Per task for the thread
  *
  * The port's adoption model (port/threadx-amiga/src/tx_amiga_adopt.c) makes
  * an adopted Task the holder of the ThreadX baton: while it is adopted, no
@@ -59,8 +57,6 @@
  * Wait() for as long as the caller asked for. It brackets each poll pass and
  * drops out of ThreadX context before parking -- see select.c.
  *
- * NESTING
- *
  * Vectors call other vectors' internals (CloseSocket -> bsd_socket_release,
  * accept -> relisten), and a base's task is inside at most one vector at a
  * time, so a plain depth counter in the base is enough. Depth > 0 means the
@@ -84,8 +80,6 @@
 #endif
 
 /*
- * THE CENSUS
- *
  * How many brackets a real client's fetch costs, and what fraction of its wall
  * clock they are. Not compiled in by default -- it adds two ReadEClock() calls
  * per bracket, which is precisely the thing being measured -- but the question

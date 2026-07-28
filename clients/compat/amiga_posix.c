@@ -2,14 +2,12 @@
  * clients/compat -- the POSIX calls a ported Unix network client references
  * and this toolchain's newlib does not define.
  *
- * WHY THIS FILE EXISTS
- *
  *   curl, wget and every other Unix client were written against a libc that
  *   has stat(), mkdir(), unlink(), isatty() and gettimeofday().  The newlib
  *   in this m68k-amigaos toolchain has a deliberately thin syscall layer:
  *   libc.a's lib_a-dummy.o defines _fstat, _unlink, _lseek, _getpid and
  *   _kill and nothing else, and there are no non-underscore wrappers over
- *   any of them.  So a link of the curl COMMAND LINE TOOL (libcurl itself is
+ *   any of them.  So a link of the curl Command line tool (libcurl itself is
  *   clean) fails with exactly this list:
  *
  *       fstat  stat  ftruncate  isatty  mkdir  unlink  _gettimeofday  _link
@@ -18,8 +16,6 @@
  *   this is a shim and not a port.  It is deliberately in clients/ and not in
  *   src/: nothing in the stack itself uses newlib, and a bsdsocket.library
  *   that dragged dos.library file calls in would be a defect.
- *
- * WHAT IS FAITHFUL AND WHAT IS NOT
  *
  *   stat()/lstat()   Lock() + Examine().  st_mode, st_size, st_mtime and
  *                    st_nlink are real.  AmigaOS has no symbolic links in the

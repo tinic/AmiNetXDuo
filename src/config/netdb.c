@@ -95,7 +95,7 @@ static const char ami_netdb_builtin_services[] =
  * whitespace-separated tokens. Overshooting is fine -- it costs a few hundred
  * bytes and saves parsing the file twice.
  *
- * IT IS AN ESTIMATE AND NOT A CONTRACT, which is why netdb_parse() below
+ * It is an estimate and not A CONTRACT, which is why netdb_parse() below
  * bounds every write against what was actually allocated rather than trusting
  * this to have been generous. It counts a run of non-space characters as ONE
  * token, and ami_cfg_tokenize() does not: scan_item() in config_text.c returns

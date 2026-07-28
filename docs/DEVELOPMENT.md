@@ -412,7 +412,7 @@ with the machine carrying on.
 
 ## What an adversarial client suite found
 
-`tests/curl/` pointed curl at `bsdsocket.library` as an ADVERSARY rather than
+`tests/curl/` pointed curl at `bsdsocket.library` as an adversary rather than
 as something to be tested: 149 hermetic cases over HTTP mechanics, connection
 reuse, byte-exactness, failure paths, behaviour under repetition, TLS and FTP,
 against host-side servers including four deliberately rude ones and a local PKI

@@ -12,16 +12,12 @@
  *   nc -z HOST PORT   connect, say whether it worked, and stop.  PORT may be
  *                     a range, "20-25", which is a port scan.
  *
- * WHY IT IS THE FIRST OF THE THREE
- *
  *   Every other network command in this tree is a client: it calls socket()
  *   and connect() and nothing else.  `nc -l` is the first thing here that
  *   calls bind(), listen() and accept(), which is half of the socket ABI and
  *   was until now exercised only by the conformance probe.  A stack that gets
  *   the client half right and the server half wrong looks perfectly healthy
  *   from `fetch`.
- *
- * WHAT IT IS NOT
  *
  *   Not a proxy, not -e (running a program on the far end of a socket is a
  *   remote shell, and nobody should ship one by accident), and it takes one

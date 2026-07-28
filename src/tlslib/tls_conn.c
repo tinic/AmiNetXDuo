@@ -5,8 +5,6 @@
  * all in include/aminetxduo/tlslib.h.  What is here is the implementation and
  * the decisions that do not belong in a public header.
  *
- * MEMORY
- *
  *   A connection allocates, in one place so it can be read off:
  *
  *     crypto metadata      sized by _nx_secure_tls_metadata_size_calculate()
@@ -20,8 +18,6 @@
  *   About 40 KB for the defaults.  It is freed at TLSClose() and none of it is
  *   held while no connection is open, which is the reason this is a separate
  *   library and not a corner of bsdsocket.library.
- *
- * THE THREADX BRACKET
  *
  *   NetX Duo rejects a caller that is not a ThreadX thread, so every entry
  *   point that reaches the stack brackets itself with the enter/leave the

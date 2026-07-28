@@ -6,8 +6,6 @@
  * harmless if someone tries to execute it.  Same rule as bsdsocket.library and
  * usergroup.library.
  *
- * WHY THERE IS NO PER-OPENER BASE
- *
  *   bsdsocket.library clones a base per OpenLibrary() because the ABI puts
  *   errno, the descriptor table and the tag state *in* SocketBase, so two
  *   tasks sharing one would corrupt each other.  Nothing in this library's

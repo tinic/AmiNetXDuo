@@ -27,7 +27,7 @@
  * which is what makes "stop after N seconds" mean the same thing here as it
  * does everywhere else the command is documented.
  *
- * WHY THIS IS A RAW SOCKET AND NOT nx_icmp_ping()
+ * Why this is A Raw socket and not nx_icmp_ping()
  *
  *   It used to call nx_icmp_ping() on netstack_ip(). That could not work in
  *   anything shipped and did not: no command links aminetxduo_netstack, so
@@ -39,7 +39,7 @@
  *   was the wrong half of it -- a pointer into another task's stack, on a
  *   machine with no memory protection. "Do a ping for me" was a published LVO
  *   on bsdsocket.library, and was designed and then rejected, because
- *   nx_icmp_ping() matches an inbound echo reply on the SEQUENCE NUMBER ALONE:
+ *   nx_icmp_ping() matches an inbound echo reply on the Sequence number alone:
  *   nx_icmpv4_process_echo_reply.c:124 compares tx_thread_suspend_info against
  *   nx_icmpv4_echo_sequence_num and looks at nothing else, and nx_icmpv4.h:191
  *   says outright that the identifier "is not used as a host". Under FS-UAE's
@@ -393,7 +393,7 @@ int main(int argc, char **argv)
      * stack that loses a reply costs one "Request timed out" line rather than
      * the command.
      *
-     * AN EARLIER VERSION OF THIS COMMENT BLAMED THE STACK, AND WAS WRONG.
+     * An earlier version of this comment blamed the stack, And was wrong.
      * It read a serial trace that stopped at `recvfrom` as proof that
      * WaitSelect() and bsd_raw_receive() disagreed about the queue. They never
      * did. The command was jumping into the middle of another function on the

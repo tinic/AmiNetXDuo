@@ -1,8 +1,6 @@
 /*
  * AmiNetXDuo -- handing the ThreadX baton back around an exec Wait().
  *
- * THE PROBLEM
- *
  * The port runs the baton model (docs/RESEARCH.md 6.2): a ThreadX thread runs
  * if and only if it is _tx_thread_current_ptr, and _tx_thread_schedule()
  * refuses to dispatch anyone while that pointer is non-NULL. The SANA-II
@@ -12,15 +10,11 @@
  * thread and every other socket user queue up behind a task that is not
  * runnable and will not become runnable until a packet arrives.
  *
- * WHY RELEASING THE BATON IS NOT ENOUGH
- *
  * Clearing _tx_thread_current_ptr alone re-creates the deadlock one step
  * later: the thread is still READY, so the scheduler picks it straight back
  * (the readers are the highest-priority threads in the system), sets
  * _tx_thread_current_ptr to it again and pokes a run signal the thread is not
  * waiting for. The thread must come OFF the ready list as well.
- *
- * WHAT THIS DOES
  *
  * release():  suspend the calling thread the way tx_thread_suspend() does, but
  *             with _tx_thread_system_state raised so ThreadX treats it as

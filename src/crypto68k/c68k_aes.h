@@ -1,8 +1,6 @@
 /*
  * AmiNetXDuo -- crypto68k: AES-128/192/256 in CBC, for the TLS record path.
  *
- * WHY THIS EXISTS
- *
  *   docs/RESEARCH.md 15 measured the bulk path against AmiSSL and found a dead
  *   heat -- 85.3 ms against 84.2 ms for 16 KiB of AES-128-CBC -- for the same
  *   reason on both sides: neither tree has a single byte of m68k assembly for
@@ -13,8 +11,6 @@
  *   AES-128-CBC with HMAC-SHA256, which is what a server negotiates when it
  *   will not take the AEAD this client now prefers.  Plenty still will not,
  *   GitHub among them.  c68k_chacha20.c is the other path and the faster one.
- *
- * WHAT THE MACHINE SAYS, AND WHAT IT CHANGED
  *
  *   tests/perf/cpucal on the A1200 profile, -k 56:
  *

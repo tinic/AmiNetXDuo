@@ -7,8 +7,6 @@
  *
  *     C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET
  *
- *     AddNetInterface INTERFACE/M,QUIET/S,TIMEOUT/K/N
- *
  * INTERFACE is either a bare interface name or the full path to the interface
  * file -- the name is what matters and the directory is fixed -- and more than
  * one may be given. Several names are sorted before they are used, so a list

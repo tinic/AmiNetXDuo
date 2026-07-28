@@ -24,12 +24,10 @@
  * interrupt level and a shared library should not depend on the C library's
  * choice of implementation there.
  *
- * It used to be a local longword loop guarded by
- *
  *     if (((ULONG)to & 1UL) == ((ULONG)from & 1UL))
  *
  * -- i.e. it took its fast path only when source and destination agreed mod 2,
- * and copied ONE BYTE PER ITERATION when they did not.  Measured on the
+ * and copied One byte per iteration when they did not.  Measured on the
  * emulated 68020 over 1460 bytes (tests/perf/perf_test.c):
  *
  *     parities agree     240.3 ns/B

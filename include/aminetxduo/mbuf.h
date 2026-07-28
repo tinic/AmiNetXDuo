@@ -395,7 +395,7 @@ struct mbuf *ami_mbuf_copym(struct mbuf *m, LONG off, LONG len);
  * Make room for len bytes at the front of the chain (4.4BSD m_prepend), by
  * moving m_data back if there is leading space in a buffer we own, otherwise
  * by pushing a new head mbuf on. The new bytes are NOT initialised.
- * Returns the new head, or NULL -- and on failure THE WHOLE CHAIN IS FREED,
+ * Returns the new head, or NULL -- and on failure The whole chain is freed,
  * which is the 4.4BSD contract and the usual way callers leak if they forget.
  */
 struct mbuf *ami_mbuf_prepend(struct mbuf *m, LONG len);
@@ -403,7 +403,7 @@ struct mbuf *ami_mbuf_prepend(struct mbuf *m, LONG len);
 /*
  * Make the first len bytes of the chain contiguous in the head mbuf
  * (4.4BSD m_pullup). len must fit in one mbuf's internal storage.
- * Returns the new head, or NULL -- and on failure THE WHOLE CHAIN IS FREED.
+ * Returns the new head, or NULL -- and on failure The whole chain is freed.
  */
 struct mbuf *ami_mbuf_pullup(struct mbuf *m, LONG len);
 

@@ -1,8 +1,6 @@
 /*
  * tls.library -- TLS for ordinary Amiga programs.
  *
- * WHAT THIS IS
- *
  *   A small shared library that puts TLS 1.2 over a descriptor you already
  *   have from bsdsocket.library.  You do the socket(), the DNS lookup and the
  *   connect() exactly as you would for plain HTTP; then you hand the
@@ -42,8 +40,6 @@
  *   "insecure by accident" mode: TLSA_NoVerify has to be asked for, in those
  *   words.
  *
- * WHAT IT COSTS
- *
  *   A FULL handshake to a public HTTPS server is about seven seconds on a
  *   14 MHz 68020 for an RSA certificate chain and about twenty-three for an
  *   ECDSA one, and nearly all of that is public-key arithmetic -- one
@@ -66,8 +62,6 @@
  *   sessions, which the full handshake would not have allowed.  TLSA_NoResume
  *   turns it off entirely; TLSA_SessionFile with an empty string keeps the
  *   cache in RAM and off the disk.
- *
- * WaitSelect() AND TLS -- READ THIS ONE
  *
  *   A TLS record is not a byte.  The library reads a whole record off the
  *   socket, decrypts it, and hands you plaintext out of it a bit at a time, so
@@ -95,16 +89,12 @@
  *   removable without a non-blocking record layer, and it is bounded: the rest
  *   of a record is already on its way.  TLSA_Timeout puts a ceiling on it.
  *
- * THE TRUST STORE
- *
  *   DEVS:Internet/certificates, a file of certificate authorities the machine
  *   trusts.  Without it TLSOpen() fails with TLS_ERR_TRUSTSTORE rather than
  *   connecting to something it cannot vouch for.  It is read fresh on every
  *   connection, so replacing the file is the whole of the update story: no
  *   reboot, no flushing the library.  tools/mkcertstore.py turns any PEM
  *   bundle into one.
- *
- * THE CLOCK
  *
  *   Certificates carry validity dates and a great many Amigas have no working
  *   clock, in which case AmigaOS reports 1978 -- earlier than every certificate
@@ -134,9 +124,9 @@ extern "C" {
 #define TLS_LIB_NAME        "tls.library"
 
 /*
- * THE VERSION IS THE VECTOR LEVEL, AND THE RULE IS ABSOLUTE
+ * The version is the vector level, And the rule is absolute
  *
- *   ADDING A VECTOR MEANS BUMPING TLS_LIB_VERSION.  Full stop, no exceptions,
+ *   ADDING A Vector means bumping TLS_LIB_VERSION.  Full stop, no exceptions,
  *   not even for "nobody will call it yet".
  *
  *   Exec opens a library when lib_Version >= the version asked for and does
@@ -154,16 +144,12 @@ extern "C" {
  *   program that only needs the original eight keeps asking for 1 and keeps
  *   working against every version since.
  *
- *   ASK FOR WHAT YOU USE, not for TLS_LIB_VERSION.  Passing the constant means
+ *   Ask for what you use, not for TLS_LIB_VERSION.  Passing the constant means
  *   recompiling makes your program demand a library it does not need.
- *
- * REVISION
  *
  *   Zero, and it stays zero.  bsdsocket.library and usergroup.library report
  *   revision 0 for the same reason: nothing in this project reads a revision,
  *   and a number nobody reads is a number that goes stale.
- *
- * VERSION HISTORY
  *
  *   1   TLSOpenA TLSClose TLSRead TLSWrite TLSPending TLSInfo
  *       TLSErrorString TLSWaitSelect
@@ -298,7 +284,7 @@ struct TLSInfo
     /*
      * Set to sizeof(struct TLSInfo) before the call.
      *
-     * ZERO THE WHOLE STRUCTURE FIRST if you opened the library with a version
+     * Zero the whole structure first if you opened the library with a version
      * older than the one you compiled against.  ti_Size lets an OLD caller
      * talk to a new library; the other direction -- a new caller talking to an
      * old library -- is you asking for fields it has never heard of, and it
@@ -419,7 +405,7 @@ struct TLSSelect
  * base explicitly -- no global TLSBase -- so that a program can hold two, and
  * so that nothing here fights a <proto/> header.
  *
- * WHY a0 AND a1 ARE READ-WRITE OPERANDS AND NOT PLAIN INPUTS
+ * WHY a0 AND a1 ARE READ-Write operands and not plain inputs
  *
  *   d0, d1, a0 and a1 are SCRATCH registers in the AmigaOS ABI: a library
  *   function may leave anything in them.  An inline stub that lists a0 and a1

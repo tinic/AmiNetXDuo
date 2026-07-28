@@ -1,8 +1,6 @@
 /*
  * AmiNetXDuo -- the internet checksum, in the form the 68k actually has.
  *
- * WHAT IS WRONG WITH THE VENDORED LOOP
- *
  * third_party/netxduo/common/src/nx_ip_checksum_compute.c walks the payload a
  * longword at a time and splits each one into two 16-bit halves by hand:
  *
@@ -19,8 +17,6 @@
  * the operand comes straight out of (An)+ with no separate load.  The 32-bit
  * sum that produces is congruent to the 16-bit one modulo 0xFFFF, so folding
  * it at the end gives the same checksum; see n68k_sum_longwords().
- *
- * WHAT IS DELIBERATELY UNCHANGED
  *
  * Everything else.  The pseudo-header arithmetic, the chain walk, the
  * end-pointer rounding, the two-byte carry across a packet boundary whose

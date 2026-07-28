@@ -40,7 +40,7 @@
 #define AMI_POOL_MEM_DIVISOR        16
 
 /*
- * THE DNS ANSWER CACHE, and how this number was picked.
+ * The DNS answer cache, and how this number was picked.
  *
  * NetX Duo's cache is one buffer with resource records growing up from the
  * bottom and the strings they name growing down from the top.  On this target

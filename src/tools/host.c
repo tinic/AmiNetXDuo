@@ -3,7 +3,7 @@
  *
  *     host NAME/A,TIMEOUT/N/K
  *
- * WHAT IT ACTUALLY DOES, because the name does not say
+ * What it actually does, because the name does not say
  *
  * It asks the machine's own resolver, through bsdsocket.library's
  * gethostbyname()/gethostbyaddr(), exactly as any program on this Amiga does.
@@ -22,7 +22,7 @@
  * tool of the same name does. TIMEOUT is accepted and ignored: the resolver
  * owns the timeout and it is set in DEVS:Internet/name_resolution.
  *
- * HOW IT DIFFERS FROM nslookup, WHICH IS WHY BOTH EXIST
+ * How it differs from nslookup, Which is why both exist
  *
  * nslookup does not use the resolver. It builds a DNS query and sends it to a
  * name server itself, so it reports what that SERVER said -- no hosts file, no
@@ -37,8 +37,6 @@
  *     host fails, nslookup works  this machine's resolver configuration is
  *                                 wrong; not the network and not the name
  *     both fail                   the name, the servers, or the network
- *
- * IT STARTS THE NETWORK, AND IT USED NOT TO
  *
  * host was the only client command that refused to. Every other one -- fetch,
  * nc, telnet, tftp, whois, traceroute, ping, nslookup -- calls

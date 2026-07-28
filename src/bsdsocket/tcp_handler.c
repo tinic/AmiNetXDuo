@@ -31,8 +31,6 @@
  * "TCP:<service>" a listener and "TCP:<host>/<service>" a connection, exactly
  * as the Roadshow document's two examples require.
  *
- * ONE PROCESS PER CONNECTION, and why
- *
  * A handler answers a DOSPACKET when it can and not before, and the packet's
  * sender is asleep in the meantime. A single-process handler therefore has to
  * hold every unanswerable packet in a queue and drive them from one
@@ -64,8 +62,6 @@
  * dos.library's DoPkt replies arrive on pr_MsgPort; sharing the two would mean
  * a reply and an incoming packet in the same queue and a pr_PktWait hook to
  * tell them apart. A second MsgPort costs nothing and removes the problem.
- *
- * WHAT A PROGRAM THAT ONLY KNOWS Read() SEES
  *
  *   peer closed, all data delivered   Read() returns 0. Ordinary EOF.
  *   connection reset                  Read() returns -1, IoErr() set. Not 0:

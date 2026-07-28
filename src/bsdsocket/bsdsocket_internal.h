@@ -124,7 +124,7 @@
 
 /* ------------------------------------------------------------------ IPv6 --
  *
- * WHAT THE ROADSHOW NDK ALREADY DEFINES, verified against
+ * What the roadshow NDK already defines, verified against
  * amigaos/tools/m68k-amigaos-gcc/m68k-amigaos/ndk-include:
  *
  *   sys/socket.h:196   AF_INET6 23          -- and note it collides with
@@ -135,7 +135,7 @@
  *                                              sin6_flowinfo, sin6_addr,
  *                                              sin6_scope_id
  *
- * WHAT IT DOES NOT DEFINE, and therefore what is defined here: IPPROTO_IPV6,
+ * What it does not define, and therefore what is defined here: IPPROTO_IPV6,
  * every IPV6_* socket option, INET6_ADDRSTRLEN, in6addr_any, IN6ADDR_*_INIT,
  * the IN6_IS_ADDR_* macros, sockaddr_storage, PF_INET6, AI_V4MAPPED and
  * AI_ADDRCONFIG. An application built against this NDK cannot name any of
@@ -143,7 +143,7 @@
  * have spelled out itself -- which is exactly why they have to be the numbers
  * everyone else uses.
  *
- * THE TRAP IN struct sockaddr_in6, and it is a real one:
+ * The trap in struct sockaddr_in6, and it is a real one:
  *
  * `struct sockaddr_in` in this header is 4.4BSD's, with sin_len at offset 0
  * and sin_family at offset 1. `struct sockaddr_in6` right below it is the

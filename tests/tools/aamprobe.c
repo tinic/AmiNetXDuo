@@ -7,7 +7,7 @@
  * cannot see and never replies the message the caller is already waiting on.
  *
  * So the assertion that matters most in this file is the dullest one: after
- * BeginInterfaceConfig() returns, THE MESSAGE IS BACK ON THE PORT. Everything
+ * BeginInterfaceConfig() returns, The message is back on the port. Everything
  * else -- the ten distinct error codes CreateAddrAllocMessageA() enumerates,
  * the buffers it carves, the defaults it fills in -- is checked because the
  * autodoc is specific enough to check against.

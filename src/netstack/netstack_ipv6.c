@@ -26,7 +26,7 @@
  *   STATIC      Link-local, plus the ADDRESS6/prefix from the interface file,
  *               plus GATEWAY6 as a default router if given.
  *
- * DHCPv6 IS NOT USED, and that is a decision rather than an omission.
+ * DHCPv6 Is not used, and that is a decision rather than an omission.
  * NetX Duo does ship a DHCPv6 client (addons/dhcp/nxd_dhcpv6_client.c), but
  * it is 40 KB of code before its own IANA/IAID option handling, it needs its
  * own thread and its own UDP socket, and it answers a question SLAAC has

@@ -6,8 +6,6 @@
  *   ReleaseDomainNameServerList()
  *   In_LocalAddr() / In_CanForward()
  *
- * WHY THIS FILE IS SHORT
- *
  * Tier 3 (docs/RESEARCH.md S3.2) is ~35 vectors: interface config and query,
  * routing, GetNetworkStatistics(), the *RoadshowData set.
  *
@@ -70,7 +68,7 @@
  * The net-monitor hooks are no longer on that list: netmonitor.c registers
  * all four types, and socket.c dispatches MHT_Connect and MHT_Bind.
  *
- * THE PRIMARY SOURCE EXISTS. This comment used to say there was no
+ * The primary source exists. This comment used to say there was no
  * bsdsocket.doc autodoc anywhere, and that the stubs would stand until one
  * turned up. One has: NDK 3.2 ships it, at
  * SANA+RoadshowTCP-IP/doc/bsdsocket.doc, beside interfaces/bsdsocket.xml --

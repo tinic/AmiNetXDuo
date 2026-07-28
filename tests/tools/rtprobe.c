@@ -16,8 +16,6 @@
  * rt_msghdr, which is what the prototype alone would suggest and which would
  * walk off the end of the first entry.
  *
- * WHAT IT DOES NOT TOUCH
- *
  * The default gateway is read and then set to the value it already had. This
  * run is riding on it; deleting it to prove DeleteRouteTagList() works on
  * default gateways would take the machine off the network for the rest of the

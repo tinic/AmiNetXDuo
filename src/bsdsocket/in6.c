@@ -3,8 +3,6 @@
  *
  * Compiled only in an AMINETXDUO_IPV6 build.
  *
- * WHAT THIS FILE IS FOR
- *
  * The Roadshow NDK defines the IPv6 socket ABI even though no Amiga stack has
  * ever implemented it, so the shape of the thing is not ours to choose.  It
  * is, however, ours to VERIFY -- and this project has been bitten twice by
@@ -19,7 +17,7 @@
  * whose netinet/in.h differs is a build failure here, not a wrong answer at
  * run time.
  *
- * WHAT WAS ACTUALLY FOUND (verified, not inferred, against
+ * What was actually found (verified, not inferred, against
  * amigaos/tools/m68k-amigaos-gcc/m68k-amigaos/ndk-include on 2026-07-25):
  *
  *   sys/socket.h:110   typedef unsigned char sa_family_t;

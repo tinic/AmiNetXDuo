@@ -4,8 +4,6 @@
  * Only ShowNetStatus and netstat need this; the rest of the tools stay clear
  * of the stack's internals entirely.
  *
- * WHAT CHANGED HERE, AND WHY IT HAD TO
- *
  *   This file used to hand each command an NX_IP * from netstack_ip() and let
  *   it walk NetX Duo's tables itself, after adopting the Process as a
  *   TX_THREAD.  That could never work in a shipped build and did not:

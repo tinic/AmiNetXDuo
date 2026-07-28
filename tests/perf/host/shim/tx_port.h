@@ -1,8 +1,6 @@
 /*
  * AmiNetXDuo -- host shim: ThreadX port header with the m68k's type widths.
  *
- * WHY THIS EXISTS
- *
  * The host tier of the checksum differential test compiles TWO
  * implementations of _nx_ip_checksum_compute() -- the vendored one under a
  * renamed symbol, and src/net68k/n68k_checksum.c -- and checks that they agree.
@@ -27,7 +25,7 @@
  * little-endian setting exercises the byte-swap path, which the big-endian
  * target compiles away entirely.
  *
- * WHAT THE HOST TIER THEREFORE DOES NOT COVER: the hand-written 68020
+ * What the host tier therefore does not cover: the hand-written 68020
  * assembly, which cannot be assembled here.  AMINETXDUO_NET68K_ASM is OFF off
  * target for that reason, and the assembly stays an emulator-tier test --
  * the same split src/crypto68k/ documents.

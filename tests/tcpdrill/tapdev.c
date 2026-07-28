@@ -1,18 +1,14 @@
 /*
  * tcpdrill -- the synthetic SANA-II device.  See tapdev.h for why it exists.
  *
- * SHAPE
- *
  * MakeLibrary() builds a six-entry Exec device vector -- Open, Close, Expunge,
  * Null, BeginIO, AbortIO -- and AddDevice() puts it where OpenDevice() looks
  * first.  Everything is in this program's own address space, so there is no
  * segment list, no __saveds and nothing resident: the device dies with the
  * process that installed it, which is exactly the lifetime a test wants.
  *
- * THE ONE PIECE OF REAL SANA-II IN HERE
- *
  * The buffer-management hooks.  OpenDevice() is handed a tag list carrying
- * S2_CopyToBuff and S2_CopyFromBuff, and a SANA-II device MOVES PACKET DATA
+ * S2_CopyToBuff and S2_CopyFromBuff, and a SANA-II device Moves packet data
  * ONLY THROUGH THEM -- the stack's NX_PACKET is not something the device may
  * touch directly.  src/sana2/sana2_copy.c is the other end of both, and
  * calling them is what makes this a test of the shipped receive and transmit
@@ -24,8 +20,6 @@
  * first argument -- so the call is written out as inline asm below.  That was
  * found by disassembling, not by testing; the wrong version compiles cleanly
  * and corrupts every received frame.
- *
- * WHAT IS DELIBERATELY REFUSED
  *
  * Raw framing (SANA2IOF_RAW) is answered S2ERR_NOT_SUPPORTED, so
  * ami_sana2_probe_raw() decides against it and the stack runs its COOKED path.

@@ -6,8 +6,6 @@
  * collection is guesswork, and the module says so out loud through
  * ami_random_is_seeded().
  *
- * WHY IT LIVES IN src/common
- *
  *   NX_RAND is consumed by the NetX Duo core (IP identification, TCP initial
  *   sequence numbers, ephemeral ports), by the DHCP/DNS add-ons, and by
  *   nx_secure (ECDHE private keys, the TLS client random).  Only the last of
@@ -17,8 +15,6 @@
  *   bytes of text (SHA-256, the K table and the collection) less the 104 saved
  *   by deleting the xorshift in src/bsdsocket/library_runtime.c that this
  *   replaces -- a net 5,224 bytes, for a generator every component can reach.
- *
- * WHY A HASH DRBG AND NOT SOMETHING SMALLER
  *
  *   The state has to survive being read: a TLS client random goes on the wire
  *   in clear, and with an LCG or an xorshift that is the whole state.  A

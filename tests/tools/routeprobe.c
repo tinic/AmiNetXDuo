@@ -3,11 +3,9 @@
  *
  * A `#define` that changes no packet is not a feature, so this does not stop
  * at "nx_ip_static_route_add() returned NX_SUCCESS". It adds a route whose
- * next hop is an address NOTHING ELSE IN THE RUN EVER NAMES, sends to a
+ * next hop is an address Nothing else in the run ever names, sends to a
  * destination that only that route can reach, and leaves the consequence
  * where an instrument below this stack can see it.
- *
- * WHY THE ANSWER IS UNAMBIGUOUS
  *
  *   destination 192.168.77.5      not on any of the guest's own subnets
  *   next hop    10.0.2.99         on the guest's subnet, so NetX Duo will
@@ -26,8 +24,6 @@
  * appears if and only if the routing table was consulted. That log is written
  * inside the emulated hardware, below every line of our code, which is why the
  * assertion is made there rather than on a capture this stack took of itself.
- *
- * WHY A PROBE AND NOT AddNetRoute
  *
  *   The commands are one caller of NETCTRL_ROUTE_ADD and their argument
  *   grammar is their own business. What is being tested here is the stack:

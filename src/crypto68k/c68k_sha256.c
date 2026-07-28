@@ -2,7 +2,7 @@
  * AmiNetXDuo -- crypto68k: SHA-256.  The portable C compression function, the
  * buffering and padding layer both variants share, and the dispatch.
  *
- * WHAT THE C VARIANT DOES THAT THE VENDORED ONE DOES NOT
+ * WHAT THE C Variant does that the vendored one does not
  *
  *   Two things, and both are worth having independently of the assembly,
  *   because they are what makes "is the assembly earning its place" a fair

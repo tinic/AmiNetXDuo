@@ -1,8 +1,6 @@
 /*
  * AmiNetXDuo -- asking the RUNNING stack what it is doing.
  *
- * WHY THIS EXISTS
- *
  *   The whole ThreadX/NetX Duo stack is a singleton inside
  *   bsdsocket.library's segment. A Shell command that links libnetxduo.a gets
  *   a SECOND set of NetX Duo globals, a second NX_IP that owns no interfaces
@@ -36,8 +34,6 @@
  *   So the library COPIES. NetStackQuery() takes the baton, fills the
  *   caller's buffer with plain scalars, and gives the baton back before
  *   returning. Nothing the caller holds afterwards points into the stack.
- *
- * VERSIONING, AND WHY THE MAGIC IS NOT CEREMONY
  *
  *   These two slots sit past every offset any published bsdsocket ABI names
  *   -- past AmiTCP V3, past AmiTCP V4, past Roadshow's extension set and past
@@ -86,7 +82,7 @@ extern "C" {
 #define NETSTATUS_MAC_SIZE      6
 
 /*
- * THE LIBRARY REVISION THAT FIRST HAD THESE SLOTS, and the one check a caller
+ * The library revision that first had these slots, and the one check a caller
  * cannot skip.
  *
  * lib_Version stays 4 forever -- it is the AmiTCP V4 ABI number every caller

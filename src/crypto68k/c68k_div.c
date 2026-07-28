@@ -1,8 +1,6 @@
 /*
  * AmiNetXDuo -- crypto68k long division, 32-bit limbs.
  *
- * WHY THIS EXISTS
- *
  *   Measured, not guessed: on an RSA-2048 public operation through
  *   crypto68k, 36.6 ms of 163.9 went into ONE routine -- the R^2 mod m setup
  *   in c68k_powm.c, which reduces through the vendored
@@ -23,8 +21,6 @@
  *   So this is not a better algorithm.  It is the same algorithm at the
  *   machine's own word size.
  *
- * WHAT WAS COSTED AND REJECTED FIRST
- *
  *   Caching R^2 against the modulus, which would have avoided the division
  *   rather than speeding it up.  It buys nothing for a TLS client: the three
  *   RSA public operations in a handshake verify the leaf with the
@@ -41,7 +37,7 @@
  *   are ~42 ms and ~72 ms against the 36.6 ms being replaced.  Division is the
  *   right primitive; it just has to be done in 32-bit digits.
  *
- * THE ONE PLACE DIVU.L CAN TRAP
+ * The one place divu.L CAN TRAP
  *
  *   Algorithm D's quotient estimate divides a two-limb prefix of the partial
  *   remainder by the top limb of the divisor, and the result fits in one limb

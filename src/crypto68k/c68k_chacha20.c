@@ -3,7 +3,7 @@
  *
  * See c68k_chacha20.h for why this cipher and not AES-GCM.
  *
- * WHERE THIS CAME FROM: written here, from RFC 8439.  The quarter-round, the
+ * Where this came from: written here, from RFC 8439.  The quarter-round, the
  * state layout and the AEAD's padding rule are the RFC's; no code was copied
  * from any implementation of it.  Checked against RFC 8439's own vectors --
  * the 2.3.2 block, the 2.4.2 keystream and the 2.8.2 AEAD -- in
@@ -58,7 +58,7 @@ ULONG   v;
  * lets it spill the ones it chooses.  docs/RESEARCH.md 18.1 is the same
  * finding from the AES side: on this machine the state lives in memory.
  *
- * THIS IS THE REFERENCE, not the fast path.  c68k_chacha20.S does the same
+ * This is the reference, not the fast path.  c68k_chacha20.S does the same
  * sixteen words in registers -- eight in d0-d7, seven in a0-a6 and one on the
  * stack, exchanged with EXG -- and crypto68k_bulk checks the two against each
  * other block for block before it times either.  It is deliberately still

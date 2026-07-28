@@ -18,12 +18,12 @@
  *     ... code under test ...
  *     ami_crash_remove();
  *
- * WHAT IS RELIABLE: the report. A caught exception is dumped to the serial port
+ * What is reliable: the report. A caught exception is dumped to the serial port
  * with the exception name, PC, SR and every register, and a one-line summary is
  * written to DH0:crash.txt, which the harness stages from a host directory and
  * prints after the run. That works.
  *
- * WHAT IS NOT: resuming. The handler patches the exception frame to return into
+ * What is not: resuming. The handler patches the exception frame to return into
  * a user-mode bail-out routine, which then longjmp()s back to the install site
  * -- but that unwind has been observed under FS-UAE resuming *after* the call
  * site rather than at it, so ami_crash_install() cannot be relied on to return

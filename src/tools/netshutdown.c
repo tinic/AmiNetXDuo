@@ -1,8 +1,6 @@
 /*
  * NetShutdown -- stop the network.
  *
- *     NetShutdown TIMEOUT/N,QUIET/S
- *
  * Every interface goes down, in one command, and nothing goes in or out of
  * this machine afterwards. It is the counterpart of AddNetInterface: that one
  * starts the network, this one stops it, and until now the only way to stop it
@@ -13,7 +11,7 @@
  * is synchronous -- so the wait exists for the case where it is not, and
  * running out of it is reported rather than hidden.
  *
- * WHAT IT DOES NOT DO, said out loud because the name promises more than this
+ * What it does not do, said out loud because the name promises more than this
  * machine can deliver.
  *
  * The stack is a singleton inside bsdsocket.library and it comes up on that

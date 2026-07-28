@@ -1,8 +1,6 @@
 /*
  * AmiNetXDuo -- what the ThreadX adoption bracket costs, measured.
  *
- * WHY THIS EXISTS
- *
  * docs/RESEARCH.md 29.3 records two instruments disagreeing about this stack's
  * throughput: our own NetTrace makes it 55% faster than Roadshow on the wire
  * and the stack-agnostic Aminet curl makes it 12% slower, five runs out of
@@ -18,8 +16,6 @@
  * That is a prediction.  This binary is the measurement, and it is here
  * because this project has had five predicted bottlenecks overturned by one
  * in three days.
- *
- * WHAT IT MEASURES
  *
  *   1. One tx_amiga_adopt_thread() + tx_amiga_orphan_thread() pair, split
  *      into its two halves, from a plain Exec Task with the kernel up and an
@@ -42,7 +38,7 @@
  *      difference between the first and the third is the whole bracket bill
  *      for that read size.
  *
- * ONLY THE 68020 PROFILES MEAN ANYTHING -- tests/perf/cpucal.c measures why:
+ * ONLY THE 68020 Profiles mean anything -- tests/perf/cpucal.c measures why:
  * FS-UAE charges no cycles at all above a 68020.  Run under -m A1200.
  *
  *   cmake --build build/cm --parallel --target bracket_test

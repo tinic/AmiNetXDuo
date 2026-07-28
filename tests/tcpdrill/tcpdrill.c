@@ -1,8 +1,6 @@
 /*
  * tcpdrill -- a packet-level conformance harness for AmiNetXDuo's TCP.
  *
- * THE IDEA, AND WHERE IT COMES FROM
- *
  * Google's packetdrill states a test as two interleaved things: the socket
  * calls an application makes, and the exact packets that must appear on the
  * wire in response -- flags, sequence numbers, window, options, and the time
@@ -12,8 +10,6 @@
  * code or syntax is reproduced here, and it could not be run here anyway (see
  * tapdev.h for the SLIRP argument, which is the reason the peer lives inside
  * the guest).
- *
- * THE SCRIPT
  *
  * One file, DH0:drill.txt, holding every case.  One directive per line, first
  * word is the verb, `#` starts a comment.  Blank lines are ignored.
@@ -62,8 +58,6 @@
  *           measured from the E-Clock reading taken INSIDE the device's
  *           BeginIO -- the instant the stack handed the frame over -- so the
  *           harness's own polling interval does not enter the measurement.
- *
- * OUTPUT
  *
  * DH0:tcpdrill.txt, one line per directive that asserted something, and a
  * decoded expected/observed pair for every failure.  Flushed line by line:
@@ -739,7 +733,7 @@ static VOID pump(VOID)
         }
 
         /*
-         * TRAFFIC THAT IS NOT PART OF ANY CASE.
+         * Traffic that is not part of any case.
          *
          * The stack under test is a whole stack: it answers ARP (above), and
          * anything else in the tree that opens a UDP socket -- mDNS, a DHCP
@@ -750,7 +744,7 @@ static VOID pump(VOID)
          * frame out of step.  That is how c04, c05 and a01 came to fail in one
          * run of an unchanged stack and pass in the next.
          *
-         * Anything that is IPv4 and is NOT TCP TO THE PEER is therefore
+         * Anything that is IPv4 and is Not TCP to the peer is therefore
          * counted and dropped.  A malformed TCP segment, or one aimed at the
          * peer, still reaches the queue -- those are results.
          */

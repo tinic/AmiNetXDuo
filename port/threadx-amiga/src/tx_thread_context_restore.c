@@ -17,7 +17,7 @@
 /*    Leaves "interrupt" context and releases the core lock taken by       */
 /*    _tx_thread_context_save().                                           */
 /*                                                                        */
-/*    PREEMPTION IS DEFERRED, NOT ASYNCHRONOUS.  If the tick made a higher */
+/*    Preemption is deferred, NOT ASYNCHRONOUS.  If the tick made a higher */
 /*    priority thread ready while another thread held the baton, this      */
 /*    function does NOT take the baton away.  It cannot: the baton holder  */
 /*    is an Exec Task stopped at an arbitrary instruction, and AmigaOS has */

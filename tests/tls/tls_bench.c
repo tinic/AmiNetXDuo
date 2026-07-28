@@ -6,8 +6,6 @@
  * promised.  This program is that benchmark.  It answers one question: how
  * long does the arithmetic in a TLS 1.2 handshake take on the floor target?
  *
- * WHAT IT MEASURES, AND WHY THESE
- *
  *   Public key, per handshake, once:
  *     RSA-2048 public op   -- every certificate signature the client checks,
  *                             plus the ServerKeyExchange signature under
@@ -30,16 +28,12 @@
  *     whether a connection is *usable* once it is up -- a 14 MHz 68020 pulling
  *     150 KB/s off the wire cannot afford a cipher that runs at 40 KB/s.
  *
- * WHAT IT DOES NOT NEED
- *
  *   ThreadX, NetX Duo, a packet pool or a network.  crypto_libraries/src makes
  *   no tx_* or nx_* call at runtime (verified by grep over all 56 files), so
  *   the primitives can be timed in a plain AmigaDOS process with nothing else
  *   running.  That keeps the numbers clean: no tick task, no driver interrupts.
  *   The handshake-composition figures at the end are arithmetic on these
  *   measurements, and are labelled as such.
- *
- * ENTROPY CAVEAT
  *
  *   nx_port.h does not define NX_RAND, so nx_api.h falls back to newlib rand()
  *   -- a 32-bit LCG.  ECDHE private keys come out of it.  That is fine for a
@@ -170,8 +164,8 @@ static B_RESULT b_results[B_MAX_RESULTS];
 static ULONG    b_result_count;
 
 /*
- * Named slots the composition step reads back.  The ORDER HERE IS THE ORDER
- * THE BENCHMARKS RUN IN, cheapest first, and that is deliberate: the RSA
+ * Named slots the composition step reads back.  The Order here is the order
+ * The benchmarks run in, cheapest first, and that is deliberate: the RSA
  * private operation without CRT takes minutes on the floor target, so it goes
  * last.  A run that hits the harness timeout then still delivers every other
  * figure instead of none of them.
@@ -1084,7 +1078,7 @@ B_CIPHER_CONTEXT    ctx;
 /* --------------------------------------------------- handshake arithmetic -- */
 
 /*
- * These are SUMS OF MEASUREMENTS, not a measured handshake -- they say what
+ * These are Sums of measurements, not a measured handshake -- they say what
  * the public-key arithmetic in each handshake shape costs, with the record
  * layer, X.509 parsing, TCP round trips and the server's own latency all
  * excluded.  A real handshake cannot be faster than these numbers and will be

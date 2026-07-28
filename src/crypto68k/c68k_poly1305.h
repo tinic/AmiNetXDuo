@@ -1,8 +1,6 @@
 /*
  * AmiNetXDuo -- crypto68k: Poly1305, the authenticator half of RFC 8439.
  *
- * WHY THIS EXISTS
- *
  *   docs/RESEARCH.md 5.5 measured AES-GCM at 344.6 ms for 1 KB against
  *   AES-CBC's 21.9, twenty times slower, because nx_crypto_gcm.c's GHASH is a
  *   bit-serial GF(2^128) multiply -- and then said what the alternative was:
@@ -15,7 +13,7 @@
  *   AES-GCM and nothing else, so the choice is not "which AEAD is nicer" but
  *   "which AEAD does this machine survive".
  *
- * WHY 2^26 LIMBS AND NOT 2^32
+ * WHY 2^26 Limbs and not 2^32
  *
  *   Poly1305 is arithmetic modulo 2^130 - 5, so a 32-bit machine holds the
  *   accumulator in five limbs either way.  The 2^26 layout is the standard

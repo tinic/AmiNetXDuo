@@ -2,8 +2,6 @@
  * clients/dropbear/localoptions-p256.h -- the same client with the OTHER half
  * of its algorithm set: P-256 and RSA instead of curve25519 and ed25519.
  *
- * WHAT THIS IS FOR
- *
  *   docs/RESEARCH.md 31.6 asked one question and could not answer it: "is
  *   P-256 faster on this machine than curve25519?"  It is not a rhetorical
  *   question.  Dropbear's curve25519 and ed25519 are TweetNaCl -- a field
@@ -17,7 +15,7 @@
  *   It is built from clients/dropbear/build.sh -O this-file, so the ONLY
  *   difference from the shipping client is the list below.
  *
- * WHY ED25519 HAS TO GO TOO, AND NOT ONLY CURVE25519
+ * WHY ED25519 Has to go too, And not only CURVE25519
  *
  *   Turning off DROPBEAR_CURVE25519 moves the KEY EXCHANGE to
  *   ecdh-sha2-nistp256 and nothing else.  The server's HOST KEY signature and
@@ -46,7 +44,7 @@
 #ifndef DROPBEAR_AMIGA_LOCALOPTIONS_P256_H
 #define DROPBEAR_AMIGA_LOCALOPTIONS_P256_H
 
-/* ------------------------------------------------ THE WHOLE EXPERIMENT --- */
+/* ------------------------------------------------ The whole experiment --- */
 
 #define DROPBEAR_CURVE25519 0       /* kex     -> ecdh-sha2-nistp256      */
 #define DROPBEAR_ED25519 0          /* hostkey -> ecdsa-sha2-nistp256     */

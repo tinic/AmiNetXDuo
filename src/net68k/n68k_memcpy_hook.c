@@ -15,7 +15,7 @@
  * end-to-end effect on a megabyte of TCP is in that table.  The option exists
  * so the two can be built from one tree and compared.
  *
- * WHAT THIS DOES NOT DO: it does not make memcpy() safe for overlapping
+ * What this does not do: it does not make memcpy() safe for overlapping
  * regions.  Neither does the C library's -- that is what memmove() is for,
  * and memmove() is deliberately left alone.
  *

@@ -1,8 +1,6 @@
 /*
  * ClientRun -- run a ported Unix client under tools/fsuae-run.sh.
  *
- * WHY THIS EXISTS AND WHY IT IS NOT ToolsSmoke
- *
  *   tools/fsuae-run.sh starts ONE executable with no arguments, so anything
  *   that takes a command line needs a driver in the middle.  src/tools/
  *   toolssmoke.c is that driver for our own commands and this is deliberately
@@ -25,8 +23,6 @@
  *   The same applies to a human typing `curl` at a Shell prompt: they need
  *   `stack 200000` first.  That is ordinary Amiga practice for a ported
  *   program and it is what the run report says.
- *
- * WHAT IT DOES
  *
  *   Reads DH0:commands.txt, one command per line ('#' and blank ignored), runs
  *   each through SystemTagList() with output appended to DH0:client.txt, and
@@ -80,7 +76,7 @@ static const char version_tag[] __attribute__((used)) =
  * the alternative to too much stack here is an unreproducible crash.
  *
  * It was 256 KB before the TLS backend.  A program that opens tls.library is
- * bracketed into ThreadX on ITS OWN STACK (port/threadx-amiga/src/
+ * bracketed into ThreadX on Its own stack (port/threadx-amiga/src/
  * tx_amiga_adopt.c hands _tx_thread_create() the caller's stack region), so
  * NetX Duo, nx_secure and the bignum code all run on whatever this process has
  * left -- which is why src/tools/fetch.c allocates 64 KB and StackSwap()s onto

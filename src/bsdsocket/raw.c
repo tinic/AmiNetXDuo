@@ -1,7 +1,7 @@
 /*
  * bsdsocket.library -- SOCK_RAW.
  *
- * WHY THIS IS NOT A WRAPPER AROUND nx_ip_raw_packet_receive()
+ * Why this is not A WRAPPER AROUND nx_ip_raw_packet_receive()
  *
  * NetX Duo has no raw socket object.  It has an IP-level raw *service*: one
  * queue per NX_IP, fed by _nx_ip_raw_packet_processing(), drained by whoever
@@ -22,8 +22,6 @@
  *      dead code, and the queue, the per-protocol demultiplex and the wakeup
  *      have to live here.
  *
- * WE COPY AND DECLINE, WE DO NOT CONSUME
- *
  * The filter's return value decides who owns the packet: NX_SUCCESS means "I
  * took it" and the stack stops processing it, anything else means "not mine"
  * and normal dispatch continues.  Consuming would be cheaper by one packet
@@ -39,8 +37,6 @@
  * machine with none pays a single NULL test per inbound packet, inside a
  * branch NetX Duo already had.
  *
- * WHAT A READER GETS
- *
  * A whole IP datagram, header included, exactly as 4.4BSD delivers a raw
  * read: the suite parses `(buf[0] & 0x0F) * 4` to find the ICMP header, and
  * so does every ping and traceroute ever written.  The IP header is still
@@ -54,8 +50,6 @@
  * prepends the IP header with the socket's protocol, TTL and TOS.  That is
  * BSD's default too -- IP_HDRINCL is the opt-in, and NetX Duo's core has no
  * equivalent (see docs/RESEARCH.md 17).
- *
- * LOCKING
  *
  * The filter runs on the NetX Duo IP thread, which holds nx_ip_protection for
  * the whole of its event loop (nx_ip_thread_entry.c).  So the registry and the
@@ -351,7 +345,7 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
     }
 
     /*
-     * IP_HDRINCL, TRANSLATED RATHER THAN PASSED THROUGH.
+     * IP_HDRINCL, Translated rather than passed through.
      *
      * NetX Duo's core has no header-included raw transmit: every raw send goes
      * out through nxd_ip_raw_packet_send(), which builds the IP header itself
@@ -366,7 +360,7 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
      * mapped onto the call, and it is stripped -- NetX Duo then emits an
      * equivalent header.
      *
-     * WHAT DOES NOT SURVIVE, and a caller that needs any of it should not use
+     * What does not survive, and a caller that needs any of it should not use
      * this stack for it: IP options (the header is dropped whole, options
      * included), a chosen identification field, a chosen source address, the
      * DF/MF flags and fragment offsets, and any deliberately wrong checksum.

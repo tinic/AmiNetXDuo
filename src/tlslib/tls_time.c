@@ -1,16 +1,12 @@
 /*
  * tls.library -- what "now" means on a machine that does not know.
  *
- * THE PROBLEM
- *
  *   A certificate carries notBefore and notAfter, and checking them needs a
  *   clock.  A great many Amigas do not have one: no battery-backed RTC, or a
  *   dead battery, and AmigaOS then starts at its epoch, 1 January 1978.
  *   tests/tls/tls_https saw exactly this -- `tv_secs == 0`.  Every certificate
  *   on the internet was issued after 1978, so on such a machine EVERY
  *   certificate fails notBefore and every HTTPS connection fails.
- *
- * THE THREE OPTIONS, AND WHY THIS ONE
  *
  *   Refuse.  Correct, and it makes the library useless on the hardware it was
  *   written for.  A user with a flat battery gets "certificate not yet valid"
@@ -20,8 +16,6 @@
  *
  *   Skip the validity dates when the clock is obviously unset, check them when
  *   it is not, and say which happened.  That is what this does.
- *
- * WHAT IS GIVEN UP, PRECISELY
  *
  *   Not much, and it is worth being exact rather than reassuring.  Expiry
  *   checking does not stop an attacker from impersonating a site -- the

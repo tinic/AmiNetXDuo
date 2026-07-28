@@ -7,9 +7,9 @@
  *   1. KNOWN ANSWERS from Python's arbitrary-precision integers, including
  *      the full RSA-2048 public and private operations, straight out of the
  *      generated c68k_vectors.h -- the same file the Amiga tier reads.
- *   2. THE LIMB PRIMITIVE against a straight-line C model, over random limb
+ *   2. The limb primitive against a straight-line C model, over random limb
  *      counts including 0 and 1, operands biased to 0 and 0xFFFFFFFF.
- *   3. MONTGOMERY MULTIPLY AND SQUARE against the unmodified vendored
+ *   3. Montgomery multiply and square against the unmodified vendored
  *      _nx_crypto_huge_number_mont().
  *   4. WHOLE EXPONENTIATIONS against
  *      _nx_crypto_huge_number_mont_power_modulus(), with exponent top-limb
@@ -18,7 +18,7 @@
  * Same seed and same trial counts as the Amiga tier, so a failure here
  * reproduces there on the same inputs.
  *
- * WHY THIS FILE EXISTS INSTEAD OF JUST BUILDING c68k_test.c FOR THE HOST
+ * Why this file exists instead of just building c68k_test.c For the host
  *
  *   c68k_test.c is ILP32 code by construction.  It logs through RawDoFmt(),
  *   whose contract is that every argument is longword sized -- so it passes
@@ -27,15 +27,11 @@
  *   tier runs, to suit a machine it does not run on.  Duplicating the four
  *   checks against the one shared vector header was the smaller price.
  *
- * WHAT THIS TIER DOES NOT COVER
- *
  *   The hand-written 68020 assembly (c68k_prim.S, c68k_p256.S).  It cannot be
  *   assembled here, so the host always exercises the portable C -- which is
  *   why AMINETXDUO_CRYPTO68K_ASM defaults OFF off-target.  The assembly stays
  *   an emulator-tier test, and the two are a matched pair: this one says the
  *   algorithm is right, that one says the assembly agrees with it.
- *
- * ONE KNOWN WART
  *
  *   _nx_crypto_huge_number_mont_power_modulus() compares two pointers by
  *   casting both to ULONG, which is 32 bits by definition here and 64 on the

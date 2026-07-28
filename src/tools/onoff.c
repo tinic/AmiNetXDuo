@@ -2,9 +2,7 @@
  * Online / Offline -- switch a network interface up or down.
  *
  *     Online  NAME/A,UNIT/N,TIMEOUT/N
- *     Offline NAME/A,UNIT/N,TIMEOUT/N
- *
- * NAME IS TWO THINGS, and that is the whole design of this command.
+ * Name is two things, and that is the whole design of this command.
  *
  * The interface these commands are expected to have takes a SANA-II DEVICE
  * DRIVER and a unit number -- "Offline a2065.device UNIT 0" -- because that is

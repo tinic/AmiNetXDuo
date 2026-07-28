@@ -13,8 +13,6 @@
  * getpeername, IPV6_V6ONLY, inet_ntop/inet_pton for AF_INET6, getaddrinfo --
  * and loopback removes the wire as a variable.
  *
- * THE ABI DETAIL THIS TEST EXISTS TO CATCH
- *
  * The NDK's sockaddr_in6 is the LINUX one (no sin6_len, family at offset 0)
  * sitting in a header whose sockaddr_in is 4.4BSD (sin_len at offset 0, family
  * at offset 1).  A stack that reads sa->sa_family generically gets the padding
@@ -186,7 +184,7 @@ struct t_addrinfo
 /* ------------------------------------------------------------ LVO stubs --- */
 
 /*
- * WHY EVERY STUB DECLARES THREE VARIABLES IT NEVER USES
+ * Why every stub declares three variables it never uses
  *
  * d0, d1, a0 and a1 are SCRATCH on AmigaOS: a library function may destroy
  * them and is not obliged to say so.  An `asm` block that lists them only as

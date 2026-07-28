@@ -14,14 +14,10 @@
  * in a script, and everything TFTP is still used for -- ROM images, boot
  * files, a router's configuration -- is one file at a time.
  *
- * OCTET ONLY, DELIBERATELY
- *
  *   RFC 1350's other mode, netascii, rewrites line endings in transit. That
  *   silently destroys every binary anybody actually moves with this protocol,
  *   and a switch that offers it would be a switch whose only use is to corrupt
  *   a ROM image. Every TFTP server in existence accepts octet.
- *
- * NO SERVER HALF
  *
  *   NetX Duo's TFTP add-on has one and it wants FileX, a filesystem this
  *   machine does not have and does not need, having AmigaDOS (docs/RESEARCH.md
@@ -29,7 +25,7 @@
  *   because the protocol is a couple of hundred lines over the socket API and
  *   a command written that way runs on Roadshow and AmiTCP too.
  *
- * THE TRANSFER IDENTIFIER, which is the part people get wrong
+ * The transfer identifier, which is the part people get wrong
  *
  *   The request goes to port 69. The answer comes from a DIFFERENT port that
  *   the server picked, and every later packet of the transfer belongs to that

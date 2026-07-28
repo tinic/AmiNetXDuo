@@ -2,8 +2,6 @@
  * AmiNetXDuo -- crypto68k: ChaCha20, and the RFC 8439 AEAD built from it and
  * Poly1305.  This is the TLS record path for ciphersuites 0xCCA8 and 0xCCA9.
  *
- * WHY THIS EXISTS
- *
  *   Reach, first.  This client offered two ciphersuites, `0xC027` and
  *   `0xC023`, and both are AES-128-CBC with HMAC-SHA256.  Google's front end
  *   answers a ClientHello carrying only those with a handshake_failure alert
@@ -22,7 +20,7 @@
  *   is the one wide instruction the part does have.  The measured comparison
  *   is in docs/RESEARCH.md 54 and tests/crypto68k/crypto68k_bulk prints it.
  *
- * THE COST, PRICED FROM docs/RESEARCH.md 18.1 BEFORE IT WAS WRITTEN
+ * THE COST, PRICED FROM docs/RESEARCH.md 18.1 Before it was written
  *
  *   Twenty rounds are eighty quarter-rounds of four ADD.L, four EOR.L and
  *   four rotates for every 64 bytes.  On the measured instruction table that
@@ -39,8 +37,6 @@
  *   EXG, and the block function costs a third less than the C did.  What the
  *   assembly cannot change is the 42 cycles, which are the cipher.  See
  *   docs/RESEARCH.md 58 for the schedule and the measurement.
- *
- * ENDIANNESS IS THE ONE TAX
  *
  *   ChaCha20 is defined little-endian and this is a big-endian machine, so
  *   sixteen words a block have to be reversed on the way out.  That is three
@@ -136,7 +132,7 @@ UINT c68k_chacha20_core_is_asm(VOID);
  * through, because the padding between the two halves is written at that
  * transition.
  *
- * DECRYPTION DOES NOT COMPARE THE TAG.  The caller does, and must, because
+ * Decryption does not compare the tag.  The caller does, and must, because
  * the tag arrives after the ciphertext in a TLS record and nx_secure hands it
  * over in a separate call.  c68k_chacha20_poly1305_verify() below is the
  * comparison, constant-time, for callers that have both.

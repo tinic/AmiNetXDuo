@@ -1,7 +1,7 @@
 /*
  * tcpdrill -- the synthetic SANA-II device.
  *
- * WHY THIS EXISTS AND NOT A HOST-SIDE PACKET INJECTOR
+ * Why this exists and not A HOST-Side packet injector
  *
  * packetdrill drives a real stack from below through a TUN device: the script
  * says what the application asks for AND what must appear on the wire, and the
@@ -34,8 +34,6 @@
  *   * the peer is not a TCP implementation, so nothing answers by accident.
  *     A segment sent to the fake peer stays unanswered until the script says
  *     otherwise, which is what makes an RTO measurable at all.
- *
- * WHAT THIS IS NOT
  *
  * It is not a network device.  It has no wire, it drops nothing on its own,
  * and its timing is the emulated machine's, not Ethernet's.  Anything measured

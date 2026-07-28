@@ -1,7 +1,7 @@
 /*
  * AmiNetXDuo -- the compiler runtime this toolchain does not ship.
  *
- * WHAT IS IN HERE DEPENDS ON THE TARGET, and the set grew when the 68000 and
+ * What is in here depends on the target, and the set grew when the 68000 and
  * 68060 builds were added (docs/RESEARCH.md 45):
  *
  *   every target   __udivdi3 __umoddi3 __divdi3 __moddi3 __udivmoddi4
@@ -13,8 +13,6 @@
  * never had any 32-bit multiply.  Adding the two targets cost exactly this
  * file -- both linked with one undefined symbol, __muldi3, and nothing else.
  *
- * THE PROBLEM
- *
  *   $AMIGA_TOOLCHAIN_ROOT/lib/gcc/m68k-amigaos/15.2.0/libgcc.a is a ZERO BYTE
  *   file in this toolchain.  Nothing else in the tree exports __udivdi3
  *   either (checked: libc.a, libm020/libc.a, libnix*.a, libamiga.a).  So the
@@ -25,8 +23,6 @@
  *   and GCC emits that call for `unsigned long long / unsigned long long`
  *   whatever the optimisation level, because the 68020's divu.l only covers
  *   64/32 -> 32 and the compiler cannot prove the operands fit.
- *
- * WHO NEEDS IT
  *
  *   nx_crypto        nx_crypto_huge_number.c's long-division quotient
  *                    estimate, where HN_UBASE2 is `unsigned long long`
@@ -47,16 +43,12 @@
  *   the first one again for crypto68k).  One copy, here, is what the original
  *   header comment asked for the moment a second component needed it.
  *
- * THE ALTERNATIVE WE DID NOT TAKE
- *
  *   -DNX_CRYPTO_HUGE_NUMBER_BITS=16 drops the huge-number digit to a USHORT
  *   and HN_UBASE2 to a ULONG, which removes every 64-bit operation and links
  *   clean.  It also halves the digit width, so a 2048-bit modular
  *   exponentiation does ~4x the multiplies -- on the one target where public
  *   key arithmetic is the whole question.  Supplying the helper is a few dozen
  *   instructions; halving the radix is a 4x tax on the thing being measured.
- *
- * LINKING
  *
  *   This is built as its OWN static library (aminetxduo_m68k_rt), not folded
  *   into libaminetxduo_common.a: static archives resolve left to right in one
@@ -293,7 +285,7 @@ u64     remainder = 0;
 
 /* ------------------------------------------------------------ __muldi3 --
  *
- * 64x64 -> 64.  NEEDED BY THE 68000 AND THE 68060 BUILDS, AND BY NEITHER OF
+ * 64x64 -> 64.  Needed by the 68000 AND THE 68060 BUILDS, And by neither of
  * THE OTHERS, for opposite reasons:
  *
  *   68020/68030/68040   mulu.l Dn,Dh:Dl gives 32x32 -> 64 in one instruction,
@@ -535,7 +527,7 @@ u32     remainder = 0;
 /* ------------------------------------------------------ 64-bit shifts --- */
 
 /*
- * THESE APPEARED WHEN THE TREE MOVED TO -Os (docs/RESEARCH.md 57).
+ * These appeared when the tree moved to -Os (docs/RESEARCH.md 57).
  *
  * At -O3 GCC expanded 64-bit shifts inline; at -Os it calls out to libgcc for
  * them, and libgcc.a is the zero-byte file described at the top of this file.

@@ -7,7 +7,7 @@
  * third_party/dropbear/src/default_options.h, so this file is the whole
  * difference between upstream's defaults and ours.
  *
- * THE THINGS THAT NEED fork(), AND THEREFORE CANNOT EXIST HERE
+ * The things that need fork(), And therefore cannot exist here
  *
  *   DROPBEAR_CLI_PROXYCMD   -J: runs a helper program and talks to it over a
  *                           pipe.  fork() + exec() + pipe(), none of which
@@ -22,7 +22,7 @@
  *   is the finding, not the workaround: the SSH CLIENT does not need a
  *   process model, only the server does.
  *
- * THE THINGS THAT NEED A UNIX SOCKET OR A LISTENING SOCKET
+ * The things that need A UNIX socket or A LISTENING SOCKET
  *
  *   DROPBEAR_CLI_AGENTFWD   talks to ssh-agent over AF_UNIX.  bsdsocket.library
  *                           has no AF_UNIX and there is no agent to talk to.
@@ -32,7 +32,7 @@
  *                           off only because nothing has tested them yet.  This
  *                           is the first line to turn back on.
  *
- * THE THINGS THAT ARE TOO BIG OR TOO SLOW FOR A 14 MHz 68020
+ * The things that are too big or too slow for A 14 MHz 68020
  *
  *   DROPBEAR_SNTRUP761 / DROPBEAR_MLKEM768
  *                           post-quantum hybrid key exchange.  ML-KEM-768 is
@@ -45,13 +45,13 @@
  *
  *   DROPBEAR_SMALL_CODE 0   the opposite of upstream's default, on purpose.
  *                           docs/RESEARCH.md §18 measured this machine: it has
- *                           NO DATA CACHE, a 4 KB table costs the same per
+ *                           No data cache, a 4 KB table costs the same per
  *                           lookup as a 1 KB one (159.845 ns against 159.847),
  *                           and the small-table layouts pay rotates to save a
  *                           footprint that is free here.  Small code is a
  *                           pessimisation on this part.
  *
- * SERVER OPTIONS APPEAR HERE BECAUSE sysoptions.h CHECKS THEM UNCONDITIONALLY
+ * Server options appear here because sysoptions.h Checks them unconditionally
  *
  *   DROPBEAR_SVR_PASSWORD_AUTH must be 0: it is `#error ... requires crypt()`
  *   and this toolchain has no crypt().  DROPBEAR_SVR_MULTIUSER must be 0: it
@@ -85,8 +85,8 @@
 #define DROPBEAR_SMALL_CODE 0
 
 /*
- * THE OPTIMISTIC KEY EXCHANGE GUESS, WHICH COSTS THIS MACHINE A WHOLE SCALAR
- * MULTIPLICATION AND SAVES IT ONE ROUND TRIP.
+ * The optimistic key exchange guess, Which costs this machine A WHOLE SCALAR
+ * Multiplication and saves it one round trip.
  *
  * With DROPBEAR_KEX_FIRST_FOLLOWS on (upstream's default), dbclient sends a
  * KEXDH_INIT for its own first-preference kex before it has seen the server's
@@ -96,7 +96,7 @@
  * cli-kex.c's send_msg_kexdh_init() runs again, starting with
  * cli_kex_free_param() and a FRESH gen_kexcurve25519_param().
  *
- * A MODERN OpenSSH ALWAYS WINS THAT BET AGAINST US, because it prefers an
+ * A MODERN OpenSSH Always wins that bet against us, because it prefers an
  * ML-KEM hybrid and we do not offer one (see above).  So the guess is not a
  * gamble here, it is a guaranteed loss.
  *
@@ -118,7 +118,7 @@
 #define DO_MOTD 0
 
 /*
- * THE ENTROPY DEVICE.
+ * The entropy device.
  *
  * dbrandom.c's seedrandom() opens this path, reads 32 bytes and
  * dropbear_exit()s if it cannot.  There is no build without one.  AmigaOS has

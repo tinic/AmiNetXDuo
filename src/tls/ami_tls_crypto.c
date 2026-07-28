@@ -722,14 +722,10 @@ NX_CRYPTO_METHOD ami_crypto_method_rsa =
 /*
  * AES-128/256-CBC and HMAC-SHA256, on src/crypto68k/.
  *
- * WHY THESE ARE HERE AND NOT BEHIND A LINKER TRICK
- *
  *   The same reason the RSA and P-256 methods above are: NX_CRYPTO_METHOD is
  *   nx_secure's own extension point, it is what the ciphersuite table is made
  *   of, and swapping an entry redirects every path that reaches the primitive
  *   without a vendored source being touched.
- *
- * WHY THIS IS THE ROW THAT MATTERS
  *
  *   docs/RESEARCH.md 15 measured the handshake level with OpenSSL's and the
  *   bulk path a dead heat, and then said what the dead heat meant: the
@@ -952,8 +948,6 @@ NX_CRYPTO_METHOD ami_crypto_method_aes_cbc_256 =
 /*
  * RFC 7905, ciphersuites 0xCCA8 and 0xCCA9.
  *
- * WHY THERE IS AN AEAD HERE AT ALL
- *
  *   Because the two CBC suites above no longer reach the web.  Google's front
  *   end answers a ClientHello offering only 0xC027 and 0xC023 with a
  *   handshake_failure in a second and a half; GitHub still accepts them, which
@@ -961,7 +955,7 @@ NX_CRYPTO_METHOD ami_crypto_method_aes_cbc_256 =
  *   difference between a stack that can fetch a modern URL and one that
  *   cannot.
  *
- * WHY ChaCha20-Poly1305 AND NOT AES-GCM
+ * WHY ChaCha20-Poly1305 And not aes-GCM
  *
  *   Both would restore the reach.  Only one is affordable: AES-GCM's GHASH is
  *   a carry-less multiply in GF(2^128), which no 68k instruction does, so
@@ -972,8 +966,6 @@ NX_CRYPTO_METHOD ami_crypto_method_aes_cbc_256 =
  *   MULU.L, and both come out AHEAD of the CBC suite rather than behind it --
  *   docs/RESEARCH.md 54 has the measurement, and it is why the 0xCCA8 rows sit
  *   at the top of the table rather than the bottom.
- *
- * THE FRAMING IS NOT IN THIS FILE
  *
  *   An NX_CRYPTO_METHOD is handed a nonce and a buffer; what a record looks
  *   like on the wire is decided before it is called.  RFC 7905 differs from
@@ -1568,7 +1560,7 @@ static NX_SECURE_X509_CRYPTO ami_x509_cipher_table[] =
  * The CBC pair stays underneath it, unchanged and in its old order, because
  * plenty of servers still speak nothing else.
  *
- * AES-GCM IS DELIBERATELY ABSENT.  It would restore the same reach, and it
+ * AES-Gcm is deliberately absent.  It would restore the same reach, and it
  * would do it at 344.6 ms for 1 KB against AES-CBC's 21.9 (docs/RESEARCH.md
  * 5.5) -- nx_crypto_gcm.c's GHASH is a bit-serial GF(2^128) multiply, because
  * a 68k has no carry-less multiply to build it from.  Offering it would mean

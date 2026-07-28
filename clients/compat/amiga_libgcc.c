@@ -18,8 +18,6 @@
  *   (src/common/ami_udivdi3.c) and clients/amiga-client.sh compiles that same
  *   file rather than keeping a second.
  *
- * THE FLOATING POINT ONES ARE NOT SELF-CONTAINED
- *
  *   __floatdidf and __fixdfdi are written in C over double arithmetic, which
  *   on this toolchain means libc.a's __adddf3 / __muldf3 / ..., which call
  *   mathieeedoubbas.library.  That is not a new dependency -- any client that
@@ -28,7 +26,7 @@
  *   (checked: the 40.68 A1200 image contains mathieeesingbas and no other),
  *   so it has to be in LIBS: on the machine.  Every Workbench install has it.
  *
- * __atomic_exchange_4 AND WHY IT IS Disable()
+ * __atomic_exchange_4 And why it is Disable()
  *
  *   The 68020 has CAS, so a lock-free version is possible.  It is not worth
  *   it: this is called once per curl_global_init() on a machine with one CPU

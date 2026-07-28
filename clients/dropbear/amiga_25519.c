@@ -11,8 +11,6 @@
  *   eight 32-bit limbs, which is one MULU.L per partial product on a part that
  *   has one.
  *
- * HOW IT ATTACHES
- *
  *   -Wl,--wrap on the four functions curve25519.c exports.  Every reference
  *   from ed25519.c and kex-x25519.c lands here instead; the TweetNaCl bodies
  *   are still linked and are simply never called, which is what makes the A/B
@@ -22,8 +20,6 @@
  *   __real_* is deliberately NOT referenced.  Naming it would keep a route
  *   back into the code being replaced, and a fallback nobody exercises is a
  *   fallback nobody knows is broken.
- *
- * THE SIGNATURES ARE DROPBEAR'S, NOT OURS
  *
  *   third_party/dropbear/src/curve25519.h is the contract, down to `unsigned
  *   long` where c68k_25519.h says the same thing.  It is included rather than

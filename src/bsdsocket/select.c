@@ -226,7 +226,7 @@ VOID bsd_events_attach(AmiSocket *sock)
 /* ----------------------------------------------------------- readiness ---- */
 
 /*
- * How long a NetX Duo call may wait, and THE INVARIANT THAT MAKES THE ERRNO
+ * How long a NetX Duo call may wait, and The invariant that makes the errno
  * MAPPINGS SAFE.
  *
  * NX_WAIT_FOREVER here is what keeps ten unconditional
@@ -243,7 +243,7 @@ VOID bsd_events_attach(AmiSocket *sock)
  * non-blocking socket, where EWOULDBLOCK is exactly right -- or the calling
  * thread to BE ip->nx_ip_thread. And it never is:
  *
- *   NO bsdsocket.library VECTOR IS EVER ENTERED ON THE NETX DUO IP THREAD.
+ *   NO bsdsocket.library Vector is ever entered on the NETX duo ip thread.
  *
  * bsd_nx_enter() (netx_call.c) brackets every vector with
  * ami_netstack_enter_cached(), which gives the calling Exec task a TX_THREAD
@@ -257,7 +257,7 @@ VOID bsd_events_attach(AmiSocket *sock)
  * Break that and a blocking recv() starts answering EAGAIN, which is the
  * defect English Amiga Board thread 122501 reports against AmiTCP and
  * Roadshow (docs/RESEARCH.md 37.1). WORSE AT nx_packet_allocate.c:178, WHICH
- * HAS NO IP-THREAD GUARD AT ALL: a vector called from the IP thread suspends
+ * Has no ip-Thread guard at all: a vector called from the IP thread suspends
  * the IP thread on the pool it is the only one who can refill, and the stack
  * stops rather than merely misreporting an errno.
  *
@@ -284,7 +284,7 @@ VOID bsd_events_attach(AmiSocket *sock)
 /*
  * Wait in slices, checking the break mask between them.
  *
- * ONLY FOR CALLS WHERE A TIMEOUT IS HARMLESS.  nx_tcp_socket_receive() and
+ * Only for calls where A Timeout is harmless.  nx_tcp_socket_receive() and
  * nx_tcp_socket_send() answer NX_NO_PACKET / NX_TX_QUEUE_DEPTH on expiry and
  * change nothing, so slicing them is invisible to the peer.
  *
@@ -681,7 +681,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
         ULONG pending;
 
         /*
-         * TEST THE BREAK BEFORE ANYTHING CAN RETURN, not only after Wait().
+         * Test the break before anything can return, not only after Wait().
          *
          * The autodoc's own BUGS section names this: "WaitSelect() may ignore
          * the break signal altogether if a zero length timeout is given, or

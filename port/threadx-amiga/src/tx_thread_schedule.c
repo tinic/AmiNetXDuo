@@ -115,7 +115,7 @@ TX_THREAD   *thread_ptr;
  * removing, so the "signal the reaper then die" pair really is atomic and the
  * reaper cannot observe a half-removed task.
  *
- *  *** THE WAIT IS BOUNDED, AND THAT IS NOT A WORKAROUND. ***
+ *  *** The wait is bounded, And that is not A WORKAROUND. ***
  *
  * A ThreadX thread may be blocked inside Exec rather than on its run signal --
  * a SANA-II reader parked in WaitIO() on a device that ignores AbortIO() is

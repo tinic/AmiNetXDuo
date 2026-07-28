@@ -6,8 +6,6 @@
  * one, so a UDP-probe traceroute cannot work on this stack. That is a claim
  * about the wire, and this is what put it there.
  *
- * WHAT IT DOES
- *
  *   Four datagrams, each preceded by setsockopt(IPPROTO_IP, IP_TTL) and a
  *   getsockopt() to show what the library thinks it stored:
  *
@@ -22,7 +20,7 @@
  *         -o ttl.pcap
  *     tcpdump -nr ttl.pcap -v        # or open it in Wireshark
  *
- * NOT PART OF THE BUILD, deliberately: it is a one-off probe rather than a
+ * Not part of the build, deliberately: it is a one-off probe rather than a
  * command or a test, so it has no CMake entry to keep working. Compile it by
  * hand and stage it like any other executable:
  *

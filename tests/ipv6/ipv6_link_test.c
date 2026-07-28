@@ -7,8 +7,6 @@
  * against whatever is actually on the wire, and REPORTS what it found rather
  * than asserting what it hoped for.
  *
- * WHY THE SPLIT
- *
  * FS-UAE's SLIRP user-mode NAT is the only network an emulated Amiga has
  * here, and whether it carries IPv6 is not ours to decide. So the checks in
  * this test are exactly the ones that hold with NOTHING else on the link:

@@ -17,7 +17,7 @@
  *      including 0 and 1, and with operands biased towards 0 and 0xFFFFFFFF
  *      where the carry logic actually breaks.
  *
- *   3. THE WHOLE THING against the unmodified vendored implementation, over
+ *   3. The whole thing against the unmodified vendored implementation, over
  *      random moduli, random operands and random exponent lengths.  This is
  *      the one that matters: it is a differential test against the code this
  *      module is a drop-in for, so any disagreement is a bug in one of them.

@@ -13,7 +13,7 @@
  * format and no character set, which is why what comes back is written out
  * exactly as it arrived rather than parsed.
  *
- * WHY THE DEFAULT IS whois.iana.org
+ * Why the default is whois.iana.org
  *
  *   There is no server that knows everything, and the one that used to be
  *   assumed -- whois.internic.net -- has known only .com and .net for twenty

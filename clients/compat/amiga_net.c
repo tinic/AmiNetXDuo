@@ -1,7 +1,7 @@
 /*
  * clients/compat -- the whole of "libnet" for a Roadshow-NDK client build.
  *
- * WHY A STUB libnet.a EXISTS AT ALL
+ * WHY A STUB libnet.a Exists at all
  *
  *   Every Unix client's build system, curl's included, expects `-lnet` on
  *   AmigaOS, because bebbo's amiga-gcc ships a libnet.a holding C wrappers
@@ -10,8 +10,6 @@
  *   because <proto/bsdsocket.h> from the Roadshow NDK is a set of INLINE
  *   stubs that jump straight to the library vectors.  So `-lnet` has exactly
  *   one job left, and it is this file.
- *
- * WHAT IS LEFT
  *
  *   The NDK inlines all dereference a global `SocketBase`.  A client's own
  *   sources define it (curl does, in lib/amigaos.c) -- but a CONFIGURE-TIME

@@ -4,16 +4,10 @@
  *   AddRouteTagList()       a gateway route, or the default one
  *   DeleteRouteTagList()    the same, undone
  *   GetRouteInfo()          a copy of the whole table, as rt_msghdr entries
- *   FreeRouteInfo()
- *
- * WRITTEN FROM THE AUTODOC
- *
  * Same primary source as interfaces.c: NDK 3.2's
  * SANA+RoadshowTCP-IP/doc/bsdsocket.doc, plus libraries/bsdsocket.h and
  * net/route.h from the same NDK, used as an ABI reference only. No Roadshow,
  * AmiTCP, AROSTCP or Miami code was consulted or is present.
- *
- * THREE THINGS THE DOCUMENT SETTLED
  *
  *   1. GetRouteInfo() returns "a header followed by a small number of
  *      sockadders, interpreted by position ... The interpretation of which
@@ -31,7 +25,7 @@
  *   3. rtm_version is 3: "The 'struct rt_msghdr' layout described above
  *      corresponds to version 3", and RTM_VERSION in net/route.h agrees.
  *
- * AND ONE THE DOCUMENT GETS WRONG, WHICH IS WORTH KNOWING
+ * And one the document gets wrong, Which is worth knowing
  *
  * The rt_msghdr the autodoc prints has the same eleven members as the one in
  * net/route.h and NOT the same order: the document has rtm_pid before
@@ -39,8 +33,6 @@
  * rtm_pid fourth. The HEADER is the ABI, because it is what a caller compiles
  * against. Everything below is written against the header and uses member
  * names throughout, so the disagreement cannot reach the wire.
- *
- * WHAT THE ROUTING TAG GRAMMAR DOES NOT HAVE
  *
  * There is no netmask tag. AddRouteTagList() takes RTA_Destination,
  * RTA_Gateway, RTA_DefaultGateway, RTA_DestinationHost and RTA_DestinationNet

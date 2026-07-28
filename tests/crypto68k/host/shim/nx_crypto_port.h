@@ -8,7 +8,7 @@
  * free of tx_port.h, nx_port.h and everything else that only makes sense on
  * a 68k.
  *
- * WHY THE TYPES ARE FIXED WIDTH AND NOT `unsigned long`
+ * Why the types are fixed width and not `unsigned long`
  *
  *   Every nx_crypto port in third_party -- and tx_port.h in ours -- spells
  *   ULONG as `unsigned long`, which is 32 bits on m68k-amigaos and 64 bits on

@@ -3,8 +3,6 @@
  *
  *     nslookup NAME/A,SERVER,TYPE/K,TIMEOUT/N/K
  *
- * WHY THIS EXISTS BESIDE host
- *
  * `host` answers the question an ordinary user has: what address is this name.
  * It looks a dotted quad up backwards and anything else forwards, and that is
  * the whole of it.
@@ -27,8 +25,6 @@
  * A dotted quad with no TYPE is looked up backwards, exactly as `host` does --
  * asking for a PTR by typing the address is what everyone expects.
  *
- * WHY IT BUILDS THE PACKET ITSELF
- *
  *   There is no published call that asks for an MX. gethostbyname() is the
  *   whole of what bsdsocket.library offers a program, and it answers exactly
  *   one question; everything below it belongs to the resolver and no stack on
@@ -48,8 +44,6 @@
  *
  *   With no SERVER, the first one the stack is really using: the DHCP lease's
  *   if there is one, DEVS:Internet/name_resolution's if there is not.
- *
- * THE ANSWER IS ATTACKER-CONTROLLED INPUT
  *
  *   A datagram from port 53 is whatever arrived, from whoever sent it, and
  *   this machine has no MMU to catch a parser that believes it. So every
@@ -303,7 +297,7 @@ static VOID nsl_reverse_name(ULONG addr, char *out, ULONG outlen)
  * a compressed name that is two past the pointer, not the end of whatever it
  * pointed at -- or -1 when the message will not support one.
  *
- * EVERY EXIT FROM THE LOOP IS A BOUND. `len` is the bytes received, never a
+ * Every exit from the loop is A BOUND. `len` is the bytes received, never a
  * length the message claimed. A pointer must go strictly BACKWARDS, which is
  * what makes the walk terminate at all: forwards or self-referential pointers
  * are the classic way to hang a resolver, and sixteen jumps is far past any

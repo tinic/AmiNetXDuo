@@ -2,20 +2,14 @@
  * bsdsocket.library -- the network monitoring hooks.
  *
  *   AddNetMonitorHookTagList()  install a callback
- *   RemoveNetMonitorHook()      take it out again
- *
  * "Monitoring hooks can be used both for inspecting and filtering data that
  * enters the stack, or for denying access to certain APIs. More than one hook
  * can be installed for each monitoring task."
- *
- * WRITTEN FROM THE AUTODOC
  *
  * Same primary source as interfaces.c, routing.c and netstats.c: NDK 3.2's
  * SANA+RoadshowTCP-IP/doc/bsdsocket.doc, plus libraries/bsdsocket.h from the
  * same NDK, used as an ABI reference only. No Roadshow, AmiTCP, AROSTCP or
  * Miami code was consulted or is present.
- *
- * WHAT THE DOCUMENT SETTLED
  *
  *   The hook is called with the STANDARD Amiga hook register convention and
  *   the middle argument is NOT the usual object: "action = hookfunc(hook,
@@ -46,16 +40,12 @@
  *   searches every list. That is why one hook cannot be installed for two
  *   types at once: there would be no way to say which one to remove.
  *
- * WHAT IS AND IS NOT ACCEPTED
- *
  * The three call-site types: MHT_Connect, MHT_Bind and MHT_Send. The four
  * in-stack types are refused with EINVAL -- the documented error for a type
  * this library does not support -- because nothing dispatches them and a hook
  * that is installed but never called is indistinguishable from a quiet
  * network. The reasons are at the check itself, in
  * bsd_AddNetMonitorHookTagList().
- *
- * WHY AN INSTALLED HOOK KEEPS THE LIBRARY RESIDENT
  *
  * "It must be called before the library is closed, or the library will stay
  * in memory indefinitely." That is not a warning about a leak, it is a
@@ -161,7 +151,7 @@ LONG bsd_AddNetMonitorHookTagList(register LONG type __asm("d0"),
     /*
      * "[EINVAL] The monitor type is not supported."
      *
-     * AND FIVE OF THE SEVEN ARE NOT, HERE. The registry below serves any
+     * And five of the seven are not, HERE. The registry below serves any
      * type, but a hook is only ever called from a dispatch point, and only
      * connect() and bind() have one. Accepting a hook for a type nothing
      * dispatches would return success to a caller that then never hears

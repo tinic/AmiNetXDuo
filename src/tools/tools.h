@@ -218,7 +218,7 @@ ULONG tool_stack_name_servers(char out[][16], ULONG max);
  * asks the stack that is actually running, through the two private LVOs in
  * include/aminetxduo/netstatus.h.
  *
- * WHY IT HAS TO BE DONE THIS WAY. A command that links libnetxduo.a gets its
+ * Why it has to be done this way. A command that links libnetxduo.a gets its
  * own NX_IP with no interfaces in it and its own ThreadX kernel that nobody
  * ever started; the stack that is running lives inside bsdsocket.library.
  * netstack_ip() in a tool is src/tools/netstack_weak.c's stub and returns

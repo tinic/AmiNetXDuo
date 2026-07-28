@@ -17,7 +17,7 @@
  * Duo in exactly the shape an Ethernet driver would, and immediately reposts
  * the read.
  *
- * One of these threads also NOTICES TRANSMIT COMPLETIONS, which is not where
+ * One of these threads also Notices transmit completions, which is not where
  * anyone would look for it. The reason is that they are the only threads in
  * the shim that block in exec Wait() rather than on a ThreadX object, so they
  * are the only ones a device's ReplyMsg can wake -- and without a thread that
@@ -363,8 +363,6 @@ static VOID ami_sana2_rx_flush(AmiSana2Rx *rx)
  * Collect whatever the device has given back, waiting up to `tries` ticks of
  * 40 ms, and answer how many requests it still owns.
  *
- * WHY THIS IS NOT WaitIO()
- *
  *   It used to be, and WaitIO() has no deadline. Commodore's a2065.device
  *   2.16 does not honour AbortIO() on a queued CMD_READ -- the top of
  *   CMakeLists.txt records the same discovery from the other end of the
@@ -500,7 +498,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     rx->wake_mask = 1UL << rx->port->mp_SigBit;
 
     /*
-     * TX REAPING DUTY. One reader takes it, and this is where the transmit
+     * Tx reaping duty. One reader takes it, and this is where the transmit
      * ring finally acquires a context that runs when nothing is being sent --
      * see the header of sana2_tx.c for what the absence of one cost.
      *
@@ -754,7 +752,7 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
     UWORD i;
 
     /*
-     * OFFLINE FIRST, AND THE ORDER IS THE WHOLE FIX.
+     * OFFLINE FIRST, And the order is the whole fix.
      *
      * S2_OFFLINE returns every queued CMD_READ with S2ERR_OUTOFSERVICE --
      * ami_sana2_rx_drain() has said so in a comment since the day it was
@@ -777,7 +775,7 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
      * cannot get it wrong. ami_sana2_offline() is idempotent, so the
      * offline() the callers still do afterwards costs nothing.
      *
-     * TELL THE READERS TO STOP BEFORE TAKING THE WIRE OFFLINE, not after.
+     * Tell the readers to stop before taking the wire offline, not after.
      *
      * This used to go offline first and set `stop` in the loop below, which
      * left a window: between the two, a reader is still running and still

@@ -25,8 +25,6 @@
  *   4x a 2048-bit one.  Root key size is a real term in a client's handshake
  *   cost here, and the client does not get to choose it.
  *
- * WHAT THIS TEST IS NOT
- *
  *   It is not a baseline.  It depends on the internet, on DHCP from SLIRP, on
  *   a third party's server and on a certificate that rotates every ninety
  *   days.  It is built but never part of the pass/fail set, and it is the

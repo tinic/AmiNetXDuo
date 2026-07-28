@@ -1,8 +1,6 @@
 /*
  * AmiNetXDuo -- crypto68k Montgomery multiplication and squaring.
  *
- * CHOICE OF VARIANT
- *
  *   Koc, Acar and Kaliski ("Analyzing and Comparing Montgomery Multiplication
  *   Algorithms", IEEE Micro 16(3), 1996,
  *   https://www.microsoft.com/en-us/research/wp-content/uploads/1996/01/j37acmon.pdf)
@@ -39,8 +37,6 @@
  *   one private one only if it holds a certificate.  So the threshold, not the
  *   technique, was the thing to get right.
  *
- * WHY SQUARING IS A SEPARATE ROUTINE
- *
  *   The off-diagonal products of a square each appear twice, so the product
  *   phase costs s(s+1)/2 instead of s^2 (HAC Algorithm 14.16).  The reduction
  *   is unchanged, so a Montgomery square is (s^2 + 3s/2) / (2s^2 + s), about
@@ -48,7 +44,7 @@
  *   exponentiation almost every operation is a squaring, which is what makes
  *   a 24% saving on it worth having.
  *
- * BIT-FOR-BIT, AND ONE PLACE WHERE THAT IS THE WRONG BAR
+ * BIT-FOR-BIT, And one place where that is the wrong bar
  *
  *   Both routines produce exactly what _nx_crypto_huge_number_mont() produces
  *   over thousands of random operands, including the final conditional
@@ -175,7 +171,7 @@ c68k_limb   sum;
 /* ----------------------------------------------------------- Karatsuba ---- */
 
 /*
- * WHY THIS IS HERE NOW WHEN docs/RESEARCH.md 9 REJECTED IT
+ * Why this is here now when docs/RESEARCH.md 9 REJECTED IT
  *
  *   It rejected it AT 32 LIMBS, where it measured ~5%, and that measurement
  *   stands.  An RSA-2048 CRT half is 32 limbs; an RSA-2048 *public* operation
@@ -189,7 +185,7 @@ c68k_limb   sum;
  *   this machine rather than copied out of another project.  Below it,
  *   schoolbook -- which at 8 limbs is exactly as good (36 products either way).
  *
- * WHAT IT IS ACTUALLY WORTH, WHICH IS LESS THAN THAT TABLE SUGGESTS
+ * What it is actually worth, Which is less than that table suggests
  *
  *   A Montgomery step is a product AND a reduction, and the reduction is a
  *   chain of scalar-by-vector c68k_addmul_1 calls that Karatsuba cannot touch
@@ -197,7 +193,7 @@ c68k_limb   sum;
  *   limbs dilutes to 6240 -> 5132 on the Montgomery square, 1.22x, and the
  *   whole e=65537 exponentiation goes 124,608 -> 99,776 limb products.
  *
- * WHY SUBTRACTIVE FOR THE SQUARE AND ADDITIVE FOR THE MULTIPLY
+ * Why subtractive for the square and additive for the multiply
  *
  *   Squaring:  x^2 = x1^2*B^2h + (x0^2 + x1^2 - (x1-x0)^2)*B^h + x0^2.
  *   The middle is 2*x0*x1, so it is never negative, and |x1-x0| fits in h

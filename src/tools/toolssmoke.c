@@ -55,7 +55,7 @@ static const char version_tag[] __attribute__((used)) =
  * names a device that is not there, simply by staging different directories.
  *
  * Two prefixes, both there for one reason: a listener and the thing that
- * connects to it have to be running AT THE SAME TIME, and SystemTagList()
+ * connects to it have to be running At the same time, and SystemTagList()
  * waits. Without them no staged list can test `nc -l` at all.
  *
  *   &<command>   run it and carry straight on -- SYS_Asynch, which is what

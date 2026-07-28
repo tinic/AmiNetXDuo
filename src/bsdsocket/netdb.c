@@ -9,7 +9,7 @@
  * read-only afterwards. Everything here is the Amiga-side contract on top of
  * it.
  *
- * TWO THINGS THAT MATTER, both of which the conformance suite has caught in
+ * Two things that matter, both of which the conformance suite has caught in
  * other stacks (third_party/bsdsocktest/src/known_failures.c):
  *
  *   1. The returned struct is PER OPENER, not a file static. Two tasks each
@@ -28,7 +28,7 @@
  * which is allocated once at startup and never freed while the library is
  * open, so nothing here copies strings.
  *
- * WHERE THE LOAD HAPPENS: ami_netdb_load() is not re-entrant, so it runs
+ * Where the load happens: ami_netdb_load() is not re-entrant, so it runs
  * exactly once, from bsd_lib_open() under the master base's semaphore (and,
  * before that, from ami_config_load() inside netstack_startup()). Every
  * lookup below is then read-only and lock-free.

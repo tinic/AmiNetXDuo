@@ -1,9 +1,7 @@
 /*
  * CheckNetConfig -- read the configuration and say what is wrong with it.
  *
- *     CheckNetConfig QUIET/S,VERBOSE/S
- *
- * WHAT THIS IS FOR. A configuration that is wrong does not announce itself.
+ * What this is for. A configuration that is wrong does not announce itself.
  * The stack comes up, every field it printed is individually correct, and
  * nothing works -- because the driver named in the interface file is not on
  * this machine, or the netmask makes the address its own network's broadcast,
@@ -15,11 +13,11 @@
  * parser cannot -- the ones that need the rest of the configuration, or the
  * hardware -- and prints a file, a line and something to type.
  *
- * IT WORKS WITH THE NETWORK DOWN, and that is the whole point: the machine
+ * It works with the network down, and that is the whole point: the machine
  * that needs checking is the one where the stack did not come up. Nothing here
  * opens bsdsocket.library or asks the running stack anything.
  *
- * WHAT IT ADDS TO THE PARSER. src/config already reports bad syntax, unknown
+ * What it adds to the parser. src/config already reports bad syntax, unknown
  * keywords, a missing DEVICE line and a static interface with no ADDRESS,
  * every one of them with a line number, through the reporter hook that
  * tool_config_watch() installs. All of that is forwarded here rather than
@@ -41,8 +39,6 @@
  *     CheckNetConfig QUIET
  *     IF WARN
  *         echo "The network configuration needs attention."
- *     ENDIF
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -304,7 +300,7 @@ static VOID check_device(const char *path, const AmiIfConfig *ifc)
     line  = keyword_line(path, "DEVICE");
 
     /*
-     * THE PROBE IS SKIPPED WHILE THE NETWORK IS RUNNING, and this is not
+     * The probe is skipped while the network is running, and this is not
      * caution -- it is correctness. The stack has the card's driver open, and
      * a second OpenDevice() of a unit already in use fails; probing here would
      * report a perfectly good interface as broken on exactly the machine where

@@ -1,8 +1,6 @@
 /*
  * __wrap_main -- give a ported Unix client a real POSIX argv[] and a big stack.
  *
- * THE PROBLEM
- *
  *   This toolchain's newlib crt0 does not turn the CLI command line into an
  *   argv[]: on the Shell path it hands main() argc = 1 and a single "argv"
  *   that is the whole raw argument string (and, before tools/fix-toolchain-
@@ -11,8 +9,6 @@
  *   arguments through ReadArgs() and only ever look at argc -- but curl and
  *   Dropbear parse argv and nothing else, so every invocation comes back as
  *   "no URL" / "no host", or dereferences the garbage and crashes.
- *
- * THE FIX
  *
  *   -Wl,--wrap=main (clients/amiga-client.sh) routes the crt0's call to main()
  *   through here, leaving the client's real main() reachable as __real_main().
