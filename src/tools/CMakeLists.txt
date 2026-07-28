@@ -186,7 +186,17 @@ aminetxduo_add_tool(tool_online  Online   SOURCES onoff.c ${TOOLS_DEVDIAG})
 aminetxduo_add_tool(tool_offline Offline  SOURCES onoff.c ${TOOLS_DEVDIAG}
     DEFINES TOOL_OFFLINE)
 
-aminetxduo_add_tool(tool_host    host     SOURCES host.c)
+# host resolves through bsdsocket.library like every other client command,
+# and toolsock.c is where tool_socket_open() lives -- opening the library is
+# what starts the stack, which host used to refuse to do.
+aminetxduo_add_tool(tool_host    host     SOURCES host.c toolsock.c)
+
+# nslookup asks for the record types host cannot: MX, TXT, NS, SRV, SOA and
+# CNAME.  It is config-only in the same sense as tftp -- one datagram socket
+# through the published vectors, and toolsock.c for them -- because there is no
+# published call that asks for an MX and it therefore writes the RFC 1035 query
+# itself.  See the header of nslookup.c for why that is the right shape.
+aminetxduo_add_tool(tool_nslookup nslookup SOURCES nslookup.c toolsock.c)
 
 # fetch is config-only in the same sense: it never touches NetX Duo directly.
 # It reaches bsdsocket.library and tls.library through their published vectors
@@ -264,7 +274,7 @@ add_dependencies(tools
     tool_addnetroute tool_deletenetroute
     tool_getnetstatus tool_netshutdown
     tool_netsetup tool_online tool_offline tool_host
-    tool_fetch tool_nc tool_telnet tool_nettrace tool_traceroute
+    tool_fetch tool_nc tool_telnet tool_nettrace tool_traceroute tool_nslookup
     tool_tftp tool_whois
     tool_sntp
     tool_shownetstatus tool_netstat tool_ping tool_smoke)

@@ -61,6 +61,7 @@ a user guide in `Docs/` inside the archive.
 | `AddNetInterface`, `Online`, `Offline` | bring an interface up and take it down |
 | `ShowNetStatus`, `netstat` | interface state, routes, connections |
 | `ping`, `host` | reachability and name lookups |
+| `nslookup` | ask the DNS for one kind of record, from a server of your choosing |
 | `sntp` | set the clock from a time server |
 | `fetch` | retrieve an `http://` or `https://` URL |
 | `nc` | connect or listen, TCP and UDP, port ranges, timeouts |
