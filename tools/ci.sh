@@ -285,10 +285,15 @@ stage_emulator() {
 
     local entry exe timeout dir cpuopt tag budget
     for dir in default m68000; do
+        # These budgets multiply the per-test ceilings below.  They are ceilings,
+        # not fixed waits, so a passing run finishes long before them and paying
+        # for headroom is free -- and the hosted GitHub runner is markedly slower
+        # at emulation than a dedicated box, enough to time a test out on the old
+        # 68020 x1 / 68000 x2 budgets.  Doubled so a slow runner has rope.
         if [ "$dir" = "m68000" ]; then
-            cpuopt="-c 68000"; tag="68000"; budget=2
+            cpuopt="-c 68000"; tag="68000"; budget=4
         else
-            cpuopt="";         tag="68020"; budget=1
+            cpuopt="";         tag="68020"; budget=2
         fi
 
         printf '\n\033[1m-- emulator: %s\033[0m\n' "$tag"
