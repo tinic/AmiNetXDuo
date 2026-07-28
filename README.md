@@ -6,14 +6,14 @@ already speaks — on top of
 [Eclipse ThreadX NetX Duo](https://github.com/eclipse-threadx/netxduo), and it
 drives the SANA-II network cards you already have.
 
-> **Status: it works, and it is not finished.** It gets a DHCP lease, answers
-> ARP, pings its gateway, resolves DNS, moves TCP in both directions and does
-> HTTPS. It scores **141 of 142** on the independent
+> It gets a DHCP lease, answers ARP, pings its gateway, resolves DNS, moves TCP
+> in both directions, does HTTPS, and listens for incoming connections. It
+> scores **141 of 142** on the independent
 > [`bsdsocktest`](https://github.com/tbdye/bsdsocktest) conformance suite, where
-> Roadshow scores 138. A real `ssh` client — Dropbear's dbclient — runs on it.
+> Roadshow scores 138. Dropbear's `dbclient` runs on it, so the Amiga can `ssh`.
 >
-> It has **only ever been tested under emulation, never on a real Amiga**, so
-> treat it as something to try rather than something to depend on.
+> Everything here has been measured under emulation. It has not run on real
+> hardware.
 
 ## Why
 
@@ -25,17 +25,17 @@ commercial and closed.
 
 AmiNetXDuo is MIT-licensed throughout, with no 4.4BSD or GPL-derived code
 anywhere in it. It speaks the same socket API and reads the same configuration
-files as Roadshow, so existing software and existing habits carry over. And it
-supports **IPv6** — as far as we can establish, a first for a classic Amiga
-stack — though that is off by default for now.
+files as Roadshow, so existing software and existing habits carry over. It
+supports **IPv6**, which is off by default.
 
 ## Requirements
 
-Any 68000 or better — an unexpanded A500 or A600 included — AmigaOS 3.1 or
-newer, and 4 MB of RAM. A SANA-II network card: `a2065.device`,
+Any 68000 or better, AmigaOS 3.1 or newer, and 4 MB of RAM — so an A500 or
+A600 needs a memory expansion. A SANA-II network card: `a2065.device`,
 `ariadne.device`, `ariadne2.device`, `amiganet.device`, `xsurf.device`,
-`xsurf100.device`, `cnet.device` and the PCMCIA drivers are all offered by name
-in the installer, and anything else can be typed in.
+`xsurf100.device`, `cnet.device`, the PCMCIA drivers and `uaenet.device` for
+emulators are all offered by name in the installer, and anything else can be
+typed in.
 
 The archive carries a separate build for the 68000, the 68020–68040 and the
 68060, and the installer works out which one your machine wants. Encrypted
@@ -51,8 +51,8 @@ writes a working configuration.
 
 Configuration follows Roadshow's layout — `DEVS:NetInterfaces/<name>`,
 `DEVS:Internet/routes`, `DEVS:Internet/name_resolution` and the standard
-`/etc`-style netdb files — so existing documentation and habits apply. There is
-a user guide in `Docs/` inside the archive.
+`/etc`-style netdb files — so existing documentation and habits apply. The
+`ReadMe` in the archive covers the rest, including writing the files by hand.
 
 ## Commands
 
@@ -114,20 +114,16 @@ across will not be read — and you name the key on the command line with `-i`.
 Make it on your PC rather than on the Amiga, which has neither the entropy nor
 the patience. The ReadMe in the archive has the exact commands.
 
-One thing to expect on a machine this slow: **the first connection to a site can
-take twenty seconds or more, and some sites will give up before it finishes.**
-Try again — the second attempt to the same site usually takes under a second,
-because the secure session is remembered, even across a reboot.
+The first connection to a site takes twenty seconds or more, and some servers
+give up before it finishes. The second attempt to the same site takes under a
+second: the session is kept on disk and survives a reboot.
 
-## What is not there yet
+## Limits
 
-- Nothing has run on **real hardware** yet.
-- IPv6 works but is not in the standard build.
-- Listening for incoming connections works — `nc -l` takes a file from another
-  machine, and an SSH server has run on the Amiga with clients connecting to
-  it. What has *not* been done is exposing any of that to the open internet,
-  and nothing here has been reviewed with that in mind. Put it behind your
-  router, as you would anything else of this vintage.
+- Measured under emulation; not run on real hardware.
+- IPv6 is built only when asked for.
+- Incoming connections work on a local network. Nothing here has been exposed
+  to the open internet or reviewed for it — keep it behind your router.
 
 ## Compatibility
 
@@ -137,8 +133,9 @@ Barthel's freely distributable Roadshow SDK headers and autodocs are used solely
 as an ABI reference, for function offsets, tag values, structure layouts and
 documented behaviour.
 
-Software built for other Amiga TCP/IP stacks runs on this one unmodified, which
-is the point of implementing the same ABI rather than a new one.
+Software built for other Amiga TCP/IP stacks runs on this one unmodified.
+Roadshow's own commands — its `arp`, `netstat`, `tcpdump` and `ShowNetStatus`
+— run against this library as they ship.
 
 ## Prior art
 

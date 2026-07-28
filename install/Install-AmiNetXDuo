@@ -1140,5 +1140,5 @@
 (exit
   "AmiNetXDuo is installed.\n\n"
   FINAL_START
-  "\nShowNetStatus says whether it came up.  The guide in the\n"
+  "\nShowNetStatus says whether it came up.  The ReadMe in the\n"
   "AmiNetXDuo drawer has the rest.\n")

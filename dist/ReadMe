@@ -195,15 +195,15 @@ S:User-Startup.  If you had another stack before, rename
 LIBS:bsdsocket.library.old back over LIBS:bsdsocket.library.
 
 
-STATUS, HONESTLY
-----------------
+STATUS
+------
 
-It gets a DHCP lease, answers ARP, pings its gateway, resolves DNS and moves
-TCP in both directions.  bsdsocket.library scores 141 of 142 on the
-bsdsocktest conformance suite.
+It gets a DHCP lease, answers ARP, pings its gateway, resolves DNS, moves TCP
+in both directions and listens for incoming connections.  bsdsocket.library
+scores 141 of 142 on the bsdsocktest conformance suite.
 
-It has not been run on real hardware.  Everything above was measured on an
-emulated 68020 and 68030 under Kickstart 3.1.  Treat it accordingly.
+Everything above was measured on an emulated 68000, 68020 and 68030 under
+Kickstart 3.1.  It has not run on real hardware.
 
 
 LICENCE
