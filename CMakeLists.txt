@@ -56,8 +56,7 @@ endif()
 #     dominated by the SERVER half, which a client never performs; the client
 #     cost is ~7 s and resumption makes a repeat connection ~0.6 s.
 #   * too big -- the pair is ~520 KB.  Not a constraint on a 4 MB machine.
-#   * nothing uses it -- `fetch` does, and so does curl through the vtls
-#     backend in clients/curl.
+#   * nothing uses it -- `fetch` does.
 #   * a chain of three or more crashes the machine.  THIS WAS WRONG and is
 #     the one worth remembering: fs-uae was being killed by SIGPIPE on the
 #     HOST when a slow handshake outlasted the peer's patience, and every
@@ -123,7 +122,7 @@ endif()
 # Count the ThreadX brackets bsdsocket.library takes and time them, reporting
 # both to the serial log when a base closes.  OFF: it puts two ReadEClock()
 # calls around the thing it is measuring.  It exists so that "how many brackets
-# does one curl fetch cost, and what fraction of the wall clock are they?" can
+# does one `fetch` cost, and what fraction of the wall clock are they?" can
 # be answered by measurement rather than by arithmetic on a throughput delta --
 # see the census note in src/bsdsocket/netx_call.c.
 option(AMINETXDUO_NXCENSUS "Count and time the ThreadX bracket" OFF)

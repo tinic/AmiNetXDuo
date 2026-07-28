@@ -10,7 +10,7 @@ drives the SANA-II network cards you already have.
 > ARP, pings its gateway, resolves DNS, moves TCP in both directions and does
 > HTTPS. It scores **141 of 142** on the independent
 > [`bsdsocktest`](https://github.com/tbdye/bsdsocktest) conformance suite, where
-> Roadshow scores 138. Real `curl` runs on it unmodified, and so does `ssh`.
+> Roadshow scores 138. A real `ssh` client — Dropbear's dbclient — runs on it.
 >
 > It has **only ever been tested under emulation, never on a real Amiga**, so
 > treat it as something to try rather than something to depend on.
@@ -75,25 +75,15 @@ a user guide in `Docs/` inside the archive.
 
 The installer copies all of them into `C:`.
 
-## curl and ssh
+## ssh
 
-The archive has a `Clients` drawer holding two ported Unix programs:
-
-| | |
-|---|---|
-| `curl` | the real thing, with the options you already know |
-| `ssh` | connects to an ordinary modern server, using a key |
-
-The installer puts them in the `AmiNetXDuo` drawer alongside the
-documentation, rather than in `C:`, because each needs something this archive
-cannot provide for you:
-
-- **`mathieeedoubbas.library` in `LIBS:`.** It is Commodore's, so it is not in
-  the archive, but every Workbench installation has one.
-- **A much larger stack than a Shell gives a command.** Type `stack 200000`
-  once in the Shell you are going to run them from.
-
-Copy them into `C:` yourself if you would like them on your path.
+The archive also carries `ssh`, a ported Unix program rather than a command we
+wrote — it is Dropbear's `dbclient` under a shorter name, connecting to an
+ordinary modern server with a key or a password. The installer puts it in `C:`
+with the other commands: it brings its own stack and parses its own arguments,
+so the `stack 200000` ritual the earlier ported clients needed is gone. It does
+still want **`mathieeedoubbas.library` in `LIBS:`** — Commodore's, so not in the
+archive, but every Workbench installation has one.
 
 ## Finding the machine by name
 
@@ -110,7 +100,7 @@ everything already uses.
 ## HTTPS
 
 `fetch` handles `https://` URLs, and certificates are properly checked against
-the usual set of root authorities. So does `curl`, if you want more options.
+the usual set of root authorities.
 
 `ssh` needs no special settings at the far end. Expect around ten seconds
 before the prompt appears; almost all of that is the cryptography rather than

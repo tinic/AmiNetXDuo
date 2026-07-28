@@ -318,7 +318,7 @@ chmod -R a+rx "$HD/Unpacked"
 echo "==> the archive holds:"
 for f in Libs/68020-40/bsdsocket.library Libs/68020-40/usergroup.library \
          Libs/68020-40/tls.library Devs/Internet/certificates \
-         C/fetch Clients/curl Clients/ssh; do
+         C/fetch C/ssh; do
     if [ -f "$HD/Unpacked/AmiNetXDuo/$f" ]; then
         printf '      %-36s %s bytes\n' "$f" \
                "$(wc -c < "$HD/Unpacked/AmiNetXDuo/$f" | tr -d ' ')"

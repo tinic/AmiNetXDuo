@@ -247,59 +247,22 @@ for cmd in "${CMDS[@]}"; do
 done
 chmod 755 "$TREE"/C/*
 
-# The ported Unix clients, when they have been built. Optional, because they
-# come from clients/ rather than the CMake tree and a plain `cmake --build`
-# produces neither. They go in their own drawer rather than into C:, because
-# each needs something a user has to provide -- mathieeedoubbas.library, which
-# is Commodore's and not ours to ship, and a far larger stack than a Shell
-# gives a command -- and a `curl` in C: that fails on both would be worse than
-# one that is clearly a separate thing.
+# The ssh client, when it has been built. Optional, because it comes from
+# clients/ rather than the CMake tree and a plain `cmake --build` does not
+# produce it. It goes into C: with the other commands: the argv/stack shim
+# (clients/compat/amiga_argv.c) now gives it a real POSIX argv[] and its own
+# 256 KB stack, so the two reasons the clients used to be kept out of C: -- no
+# tokenised arguments, and a stack far bigger than a Shell hands a command --
+# are both gone. It still wants mathieeedoubbas.library in LIBS:, which every
+# Workbench installation has; the installer's help text says so.
 #
-# The build directory is NOT fixed: clients/curl/build.sh defaults to
-# build/curl and puts a TLS build wherever -b says, so hardcoding one path
-# means packing whichever tree the author happened to have. AMINETXDUO_CURL
-# and AMINETXDUO_SSH let the caller state it outright -- the release workflow
-# does, so the path it builds into and the path packed here cannot drift --
-# and the fallback prefers a TLS build over a plain one, because a curl that
-# cannot open an https:// URL is not the curl anybody wants shipped.
-CLIENT_CURL="${AMINETXDUO_CURL:-}"
-if [ -z "$CLIENT_CURL" ]; then
-    for c in "$ROOT/build/curl-tls/src/curl" "$ROOT/build/curl/src/curl"; do
-        [ -x "$c" ] && { CLIENT_CURL="$c"; break; }
-    done
-fi
+# AMINETXDUO_SSH names the built binary outright -- the release workflow sets
+# it, so the path it builds into and the path packed here cannot drift.
 CLIENT_SSH="${AMINETXDUO_SSH:-$ROOT/build/dropbear/dbclient}"
-if [ -x "$CLIENT_CURL" ] || [ -x "$CLIENT_SSH" ]; then
-    mkdir -p "$TREE/Clients"
-    [ -x "$CLIENT_CURL" ] && { cp "$CLIENT_CURL" "$TREE/Clients/curl"; \
-        echo "==> including curl ($(wc -c < "$CLIENT_CURL" | tr -d ' ') bytes)"; }
-    [ -x "$CLIENT_SSH" ]  && { cp "$CLIENT_SSH" "$TREE/Clients/ssh"; \
-        echo "==> including ssh ($(wc -c < "$CLIENT_SSH" | tr -d ' ') bytes)"; }
-    chmod 755 "$TREE"/Clients/*
-    cat > "$TREE/Clients/ReadMe" <<'CLIENTEOF'
-These are ports of ordinary Unix programs, not commands we wrote. They are
-here rather than in C: because each needs something this archive cannot
-provide for you.
-
-  curl   fetches http:// and https:// URLs.
-  ssh    connects to an SSH server. It is Dropbear's dbclient under another
-         name. Use a key: -i <keyfile>. A connection takes roughly ten seconds
-         while the machine does the cryptography. Password logins are built in
-         but have not been tried against a real server.
-
-Both need:
-
-  * mathieeedoubbas.library in LIBS:. It is Commodore's, so it is not in this
-    archive, but every Workbench installation has it.
-
-  * a much bigger stack than a Shell gives a command. Type
-
-        stack 200000
-
-    once in the Shell you are going to run them from.
-
-Copy them into C: yourself if you would like them on your path.
-CLIENTEOF
+if [ -x "$CLIENT_SSH" ]; then
+    cp "$CLIENT_SSH" "$TREE/C/ssh"
+    chmod 755 "$TREE/C/ssh"
+    echo "==> including ssh ($(wc -c < "$CLIENT_SSH" | tr -d ' ') bytes)"
 fi
 
 # The installer prints its version in the about text; stamp it from the same

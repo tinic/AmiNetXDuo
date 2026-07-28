@@ -54,7 +54,6 @@
 (set S_DEVS  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Devs")     "Devs"))
 (set S_DOCS  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Docs")     "Docs"))
 (set S_EXAM  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Examples") "Examples"))
-(set S_CLNT  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Clients")  "Clients"))
 
 ; --------------------------------------------------------------------------
 ; Help texts.  Every ask.../copy... statement is required by the Installer to
@@ -879,7 +878,10 @@
           "tftp are netcat and the usual clients; sntp sets the clock from "
           "a time server and whois asks who owns a name.  NetTrace captures "
           "packets to a .pcap file, and CheckNetConfig reads the "
-          "configuration back and says what is wrong with it.\n\nAll of "
+          "configuration back and says what is wrong with it.  ssh connects "
+          "to an SSH server -- it is Dropbear's dbclient, and brings its own "
+          "stack and arguments, but wants mathieeedoubbas.library in LIBS:, "
+          "which every Workbench installation has.\n\nAll of "
           "them are installed: they are small, and missing the one command "
           "you happen to want is worse than a few extra files in C:.")
   (source S_C)
@@ -1097,43 +1099,10 @@
       (all)
       (optional "nofail")))
 
-; --- curl and ssh --------------------------------------------------------
-;
-; Only an archive built with the ported clients has this drawer, so its
-; absence is normal rather than an error -- the same shape as tls.library
-; above.
-;
-; They go into the AmiNetXDuo drawer and NOT into C:, which is a deliberate
-; choice and not laziness.  Both need a far larger stack than the 4 KB a
-; Kickstart 3.1 Shell gives a command, and on a machine with no memory
-; protection running one without it is not a clean failure -- it is an
-; illegal instruction at a random address some seconds later.  A `curl` on
-; the path that behaves that way when typed without preparation would be
-; worse than no curl at all.
-;
-; The whole drawer is copied, ReadMe included, because that file is where the
-; two requirements are written down.  At NOVICE level every ask... returns
-; its default and (message ...) prints nothing, so a warning shown here would
-; be invisible to exactly the user most likely to need it; a ReadMe that
-; travels with the binaries is not.
-
-(if (exists S_CLNT (noreq))
-    (copyfiles
-      (prompt "Installing curl and ssh")
-      (help   "curl fetches http:// and https:// URLs with the options you "
-              "already know, and ssh connects to an ordinary modern server "
-              "using a key.\n\nThey are put in the AmiNetXDuo drawer rather "
-              "than in C:, because each needs two things this archive "
-              "cannot provide: mathieeedoubbas.library in LIBS:, which is "
-              "Commodore's but is on every Workbench installation, and a "
-              "much bigger stack than a Shell gives a command -- type "
-              "`stack 200000` once in the Shell you run them from.  The "
-              "ReadMe beside them says the same.\n\nCopy them into C: "
-              "yourself once you have done both.")
-      (source S_CLNT)
-      (dest   (tackon DOCDIR "Clients"))
-      (all)
-      (optional "nofail")))
+; ssh (Dropbear's dbclient) rides into C: with the other network commands
+; above -- the argv/stack shim gives it a real argv[] and its own 256 KB
+; stack, so it no longer needs the separate drawer and the `stack 200000`
+; ritual the ported clients once did.
 
 (complete 90)
 

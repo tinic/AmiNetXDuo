@@ -8,9 +8,6 @@
 [submodule "third_party/bsdsocktest"]
 	path = third_party/bsdsocktest
 	url = https://github.com/tbdye/bsdsocktest.git
-[submodule "third_party/curl"]
-	path = third_party/curl
-	url = https://github.com/curl/curl.git
 [submodule "third_party/dropbear"]
 	path = third_party/dropbear
 	url = https://github.com/mkj/dropbear.git

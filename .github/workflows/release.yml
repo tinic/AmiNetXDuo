@@ -131,32 +131,28 @@ jobs:
               cmake --build "$dir" --parallel
           done
 
-      # The ported clients come from clients/, not the CMake tree, so a
-      # `cmake --build` does not produce them and make-dist.sh would quietly
-      # ship an archive without them. Built here so a release always carries
-      # the same set; -t gives curl its TLS backend, and dbclient defaults to
-      # the 25519 rewritten for this machine.
+      # ssh comes from clients/, not the CMake tree, so a `cmake --build` does
+      # not produce it and make-dist.sh would quietly ship an archive without
+      # it. Built here so a release always carries it; dbclient defaults to the
+      # 25519 rewritten for this machine.
       - name: Build the ported clients
         run: |
-          clients/curl/build.sh -t -b build/curl-tls
           clients/dropbear/build.sh
 
-      # The two AMINETXDUO_* variables name exactly what the step above built,
-      # so the packed binary cannot be a stale tree or a non-TLS curl.
+      # AMINETXDUO_SSH names exactly what the step above built, so the packed
+      # binary cannot be a stale tree.
       - name: Build the distribution archive
         env:
-          AMINETXDUO_CURL: build/curl-tls/src/curl
           AMINETXDUO_SSH: build/dropbear/dbclient
         run: dist/make-dist.sh -b build/release
 
-      # A release that silently lost curl or ssh would look fine.
-      - name: The clients really are in the archive
+      # A release that silently lost ssh would look fine. It rides in C: with
+      # the other commands now that the shim gives it a stack and an argv.
+      - name: ssh really is in the archive
         run: |
-          for f in Clients/curl Clients/ssh; do
-              [ -f "build/dist/AmiNetXDuo/$f" ] || {
-                  echo "::error::$f is missing from the archive"; exit 1; }
-          done
-          ls -l build/dist/AmiNetXDuo/Clients/
+          [ -f "build/dist/AmiNetXDuo/C/ssh" ] || {
+              echo "::error::C/ssh is missing from the archive"; exit 1; }
+          ls -l build/dist/AmiNetXDuo/C/ssh
 
       # And so would a release that lost a CPU drawer -- right up until
       # somebody with that machine ran the installer and it aborted.  The

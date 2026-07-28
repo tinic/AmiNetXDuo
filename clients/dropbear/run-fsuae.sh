@@ -55,10 +55,9 @@
 #   write would fail, and more to the point a test that trusts a key on first
 #   sight should say so rather than accumulate state between runs.
 #
-# Same shape as clients/curl/run-fsuae.sh, and it reuses the same driver:
-# clients/curl/clientrun.c, which is a general "run these command lines with a
-# real stack" program and not a curl one.  dbclient needs the big stack for
-# the same reason curl does -- a Kickstart 3.1 Shell gives 4 KB.
+# It uses clients/dropbear/clientrun.c, a general "run these command lines with
+# a real stack" program (once shared with the curl port, now gone).  dbclient
+# needs the big stack because a Kickstart 3.1 Shell gives only 4 KB.
 #
 # NOT A BASELINE: it depends on a server this script does not start.
 #
@@ -111,10 +110,10 @@ done
 
 RUNNER="$ROOT/build/clients/ClientRun"
 mkdir -p "$ROOT/build/clients"
-if [ ! -x "$RUNNER" ] || [ "$ROOT/clients/curl/clientrun.c" -nt "$RUNNER" ]; then
+if [ ! -x "$RUNNER" ] || [ "$ROOT/clients/dropbear/clientrun.c" -nt "$RUNNER" ]; then
     echo "==> building ClientRun"
     "$AMIGA_GCC" -O2 -m68020 -fomit-frame-pointer -Wall -I"$AMIGA_NDK" \
-                 -o "$RUNNER" "$ROOT/clients/curl/clientrun.c"
+                 -o "$RUNNER" "$ROOT/clients/dropbear/clientrun.c"
 fi
 
 # ------------------------------------------------------------- a2065 -------

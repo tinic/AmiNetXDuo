@@ -23,9 +23,8 @@
 # WHAT IS BEING BUILT
 #
 #   Upstream Dropbear from third_party/dropbear, a submodule pinned to the tag
-#   in DROPBEAR_TAG below.  NOTHING IN third_party/dropbear IS PATCHED -- there
-#   is no counterpart to clients/curl/curl-amitls.patch here, because none was
-#   needed.  The entire AmigaOS port is:
+#   in DROPBEAR_TAG below.  NOTHING IN third_party/dropbear IS PATCHED -- the
+#   submodule is built as-is.  The entire AmigaOS port is:
 #
 #     clients/dropbear/localoptions.h     what is compiled in
 #     clients/dropbear/amiga_dropbear.c   the syscalls this toolchain lacks
