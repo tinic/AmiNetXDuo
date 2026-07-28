@@ -129,7 +129,34 @@ shift $((OPTIND - 1))
 # the only "fit the card, wire it to nothing" setting proven to work; the
 # equivalent for the other boards is UNTESTED.
 case "$BOARD" in
-    a2065)     BOARD_LINE="a2065=${AMINETXDUO_WINUAE_A2065:-slirp}" ;;
+    a2065)
+        # slirp | slirp_inbound | none, or a host adapter to bridge onto.
+        #
+        # A bridged adapter is NOT just its pcap name.  WinUAE stores it as
+        # rpcap://<pcap name> and keeps it in the board's rom_options, and the
+        # legacy `a2065=' key alone is ignored -- even `a2065=slirp_inbound',
+        # a name WinUAE hardcodes, comes back as 'slirp' in the log.  Both
+        # lines are written, which is what WinUAE itself saves.
+        #
+        # AMINETXDUO_WINUAE_A2065 takes the bare pcap name (\Device\NPF_{...},
+        # from `pcap_findalldevs'); the rpcap:// prefix is added here.
+        #
+        # The MAC is set rather than left empty.  An empty mac= leaves WinUAE
+        # to invent one per run, so a DHCP server hands out a different lease
+        # every time and nothing on the LAN can be given a reservation.  The
+        # default is locally administered (02: prefix) so it cannot collide
+        # with a real card.
+        _a2065="${AMINETXDUO_WINUAE_A2065:-slirp}"
+        case "$_a2065" in
+            slirp|slirp_inbound|none)
+                BOARD_LINE="a2065=$_a2065" ;;
+            *)
+                _mac="${AMINETXDUO_WINUAE_MAC:-02:41:4d:49:00:01}"
+                BOARD_LINE="a2065_rom_file=:ENABLED
+a2065_rom_options=mac=$_mac,rpcap://$_a2065
+a2065=rpcap://$_a2065" ;;
+        esac
+        ;;
     ariadne|ariadne2|hydra|eb920|xsurf|xsurf100z2|xsurf100z3)
                BOARD_LINE="${BOARD}_rom_file=:ENABLED" ;;
     *)         echo "unknown network board $BOARD" >&2; exit 2 ;;
@@ -265,6 +292,9 @@ cp "$ENVSETUP" "$HD/c/envsetup"
 # rather than be killed: WinUAE exits on its own, flushes its log, and the host
 # never has to guess from a timer.  If it is missing the harness still works --
 # the host falls back to killing the emulator once DH0:.done appears.
+# AMINETXDUO_GUEST_ARGS is appended to the command the guest runs.
+GUEST_ARGS="${AMINETXDUO_GUEST_ARGS:-}"
+
 UAEQUIT="${AMINETXDUO_UAEQUIT:-$ROOT/build/uaequit}"
 if [ ! -f "$UAEQUIT" ]; then
     scp -q "$HOST:C:/Program\\ Files/WinUAE/Amiga\\ Programs/UAEquit" "$UAEQUIT" 2>/dev/null || true
@@ -272,10 +302,16 @@ fi
 QUIT_LINE=""
 [ -f "$UAEQUIT" ] && { cp "$UAEQUIT" "$HD/c/uaequit"; QUIT_LINE="c:uaequit"; }
 
+# AMINETXDUO_GUEST_PRECMD runs before the executable, one command per line.
+# A command that needs the network up -- nc, ping, anything using
+# bsdsocket.library rather than linking the stack -- wants an
+# AddNetInterface here, and the library and DEVS:NetInterfaces staged as
+# extra files.
 cat > "$HD/s/Startup-Sequence" <<EOF
 failat 9999
 c:envsetup
-$EXE_NAME >DH0:stdout.txt
+${AMINETXDUO_GUEST_PRECMD:-}
+$EXE_NAME $GUEST_ARGS >DH0:stdout.txt
 echo >DH0:.done "\$RC"
 $QUIT_LINE
 EOF
@@ -362,7 +398,15 @@ fi
 # ------------------------------------------------------------------- running --
 
 echo "==> $EXE_NAME under WinUAE $MODEL/$CPU_MODEL on $HOST (timeout ${TIMEOUT}s)"
-[ "$NETWORK" = "1" ] && echo "==> $BOARD on SLIRP (10.0.2.0/24, gateway 10.0.2.2)"
+if [ "$NETWORK" = "1" ]; then
+    case "${AMINETXDUO_WINUAE_A2065:-slirp}" in
+        slirp)          echo "==> $BOARD on SLIRP (10.0.2.0/24, gateway 10.0.2.2)" ;;
+        slirp_inbound)  echo "==> $BOARD on SLIRP with ports 21-23,80 forwarded" ;;
+        none)           echo "==> $BOARD present and wired to nothing" ;;
+        *)              echo "==> $BOARD bridged onto ${AMINETXDUO_WINUAE_A2065}" 
+                        echo "    MAC ${AMINETXDUO_WINUAE_MAC:-02:41:4d:49:00:01}; the address comes from the real network" ;;
+    esac
+fi
 [ "$ACCURATE" = "1" ] && echo "==> cycle accounting on, warp off (fidelity UNVERIFIED -- see the header)"
 echo "==> boot ROM $(basename "$KICK")"
 
