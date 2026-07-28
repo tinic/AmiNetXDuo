@@ -49,6 +49,7 @@
 #include "aminetxduo/netstatus.h"
 #include "aminetxduo/sana2.h"
 #include "aminetxduo/config.h"
+#include "aminetxduo/netstack.h"
 
 /*
  * The wire values in netstatus.h must be NetX Duo's own, because that is what
@@ -190,6 +191,46 @@ static VOID ns_fill_system(NX_IP *ip, NetStatusSystem *out)
         out->nss_Flags  |= NETSTATUS_SYS_GATEWAY;
     }
 
+#ifdef AMINETXDUO_MDNS
+    {
+        const char *mdns = netstack_mdns_hostname();
+
+        out->nss_Flags |= NETSTATUS_SYS_MDNS;
+
+        /*
+         * NULL before the responder has claimed a name, which the flag
+         * already distinguishes from a build without one -- so an empty
+         * string here is "not yet", not "never".
+         */
+        if (mdns != NULL && mdns[0] != '\0')
+        {
+            static const char suffix[] = ".local";
+            ULONG i;
+            ULONG j;
+
+            /*
+             * The responder keeps the bare label ("amiga"), which is not what
+             * anyone types. The ".local" is added here rather than at each
+             * display so that every consumer gets the name in the form it is
+             * used in, and none of them has to know that.
+             */
+            for (i = 0; i + 1 < (ULONG)NETSTATUS_NAME_LEN && mdns[i] != '\0';
+                 i++)
+            {
+                out->nss_MdnsName[i] = mdns[i];
+            }
+
+            for (j = 0; suffix[j] != '\0' &&
+                        i + 1 < (ULONG)NETSTATUS_NAME_LEN; j++)
+            {
+                out->nss_MdnsName[i++] = suffix[j];
+            }
+
+            out->nss_MdnsName[i] = '\0';
+        }
+    }
+#endif
+
     pool = ip->nx_ip_default_packet_pool;
     if (pool != NX_NULL &&
         nx_packet_pool_info_get(pool, &out->nss_PoolTotal, &out->nss_PoolFree,
@@ -198,6 +239,84 @@ static VOID ns_fill_system(NX_IP *ip, NetStatusSystem *out)
                                 &out->nss_PoolInvalidReleases) == NX_SUCCESS)
     {
         out->nss_PoolPayload = pool->nx_packet_pool_payload_size;
+    }
+}
+
+/*
+ * One row per interface, including the ones not using DHCP: "this interface
+ * does not get its address from a server" is an answer somebody looking for
+ * why their address never changes needs to be given, and a table that simply
+ * omits those rows does not give it.
+ *
+ * netstack_interface_dhcp_lease() re-reads the live NX_DHCP every time, so
+ * this is current rather than a copy of what was true at bring-up. It brackets
+ * itself with ami_netstack_enter(), which is a no-op inside the bsd_nx_enter()
+ * this already runs under -- the nesting is detected, not paid for.
+ */
+static VOID ns_fill_dhcp(NsWriter *w)
+{
+    UWORD index;
+
+    for (index = 0; index < (UWORD)NX_MAX_PHYSICAL_INTERFACES; index++)
+    {
+        NetStatusDhcp *out;
+        AmiDhcpLease   lease;
+        LONG           state;
+        UWORD          i;
+
+        out = (NetStatusDhcp *)ns_writer_next(w);
+        if (out == NULL)
+            break;                      /* the caller's buffer is full */
+
+        out->nsd_Index = index;
+
+        state = netstack_interface_dhcp_state(index);
+
+        if (state == AMI_DHCP_BOUND)
+            out->nsd_State = NETSTATUS_DHCP_BOUND;
+        else if (state == AMI_DHCP_WORKING)
+            out->nsd_State = NETSTATUS_DHCP_WORKING;
+        else
+            out->nsd_State = NETSTATUS_DHCP_OFF;
+
+        if (out->nsd_State != NETSTATUS_DHCP_BOUND)
+            continue;                   /* ns_writer_next() zeroed the rest */
+
+        if (netstack_interface_dhcp_lease(index, &lease) != AMI_NET_OK)
+        {
+            /* Bound a moment ago and not now: report the state, not a lease
+               of zeroes that would read as a server saying nothing. */
+            out->nsd_State = NETSTATUS_DHCP_WORKING;
+            continue;
+        }
+
+        out->nsd_Address      = lease.adl_Address;
+        out->nsd_NetMask      = lease.adl_NetMask;
+        out->nsd_Server       = lease.adl_Server;
+        out->nsd_LeaseSeconds = lease.adl_LeaseSeconds;
+
+        out->nsd_RouterCount = lease.adl_RouterCount;
+        if (out->nsd_RouterCount > (UWORD)NETSTATUS_DHCP_ADDRS)
+            out->nsd_RouterCount = (UWORD)NETSTATUS_DHCP_ADDRS;
+        for (i = 0; i < out->nsd_RouterCount; i++)
+            out->nsd_Router[i] = lease.adl_Router[i];
+
+        out->nsd_DnsCount = lease.adl_DnsCount;
+        if (out->nsd_DnsCount > (UWORD)NETSTATUS_DHCP_ADDRS)
+            out->nsd_DnsCount = (UWORD)NETSTATUS_DHCP_ADDRS;
+        for (i = 0; i < out->nsd_DnsCount; i++)
+            out->nsd_Dns[i] = lease.adl_Dns[i];
+
+        out->nsd_StaticRouteCount = lease.adl_StaticRouteCount;
+        if (out->nsd_StaticRouteCount > (UWORD)NETSTATUS_DHCP_ADDRS)
+            out->nsd_StaticRouteCount = (UWORD)NETSTATUS_DHCP_ADDRS;
+        for (i = 0; i < out->nsd_StaticRouteCount; i++)
+            out->nsd_StaticRoute[i] = lease.adl_StaticRoute[i];
+
+        ns_copy_name(out->nsd_HostName, sizeof(out->nsd_HostName),
+                     lease.adl_HostName);
+        ns_copy_name(out->nsd_DomainName, sizeof(out->nsd_DomainName),
+                     lease.adl_DomainName);
     }
 }
 
@@ -629,6 +748,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         case NETSTATUS_ARP:         need = 0;                        break;
         case NETSTATUS_ROUTES:      need = 0;                        break;
         case NETSTATUS_SOCKETS:     need = 0;                        break;
+        case NETSTATUS_DHCP:        need = 0;                        break;
         default:                    return bsd_fail(SocketBase, AMI_EINVAL);
     }
 
@@ -682,6 +802,13 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             ns_writer_init(&w, hdr, size, NETSTATUS_ROUTES,
                            sizeof(NetStatusRoute));
             ns_fill_routes(ip, &w);
+            ns_writer_finish(&w);
+            break;
+
+        case NETSTATUS_DHCP:
+            ns_writer_init(&w, hdr, size, NETSTATUS_DHCP,
+                           sizeof(NetStatusDhcp));
+            ns_fill_dhcp(&w);
             ns_writer_finish(&w);
             break;
 

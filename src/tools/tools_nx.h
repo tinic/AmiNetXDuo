@@ -68,6 +68,18 @@ typedef struct ToolIfInfo
     ULONG           mtu;
     UBYTE           mac[AMI_ETH_ADDR_SIZE];
     char            nx_name[NETSTATUS_NAME_LEN];
+    /*
+     * The driver the RUNNING stack has open, which is not always the driver
+     * the config file names: the file can be edited after the stack starts,
+     * and an interface brought up by hand need never have been in it at all.
+     * Reporting the file's answer to "what is this running on" is the same
+     * mistake ShowNetStatus made with the name servers.
+     *
+     * Empty when the interface has no SANA-II device -- a loopback or an
+     * unattached slot -- so an empty string is a fact, not a failure.
+     */
+    char            nx_device[NETSTATUS_DEVICE_LEN];
+    ULONG           nx_unit;
     /* From the SANA-II shim, when the interface has one attached. */
     BOOL            have_sana2;
     BOOL            sana2_online;
@@ -94,6 +106,10 @@ typedef struct ToolSnapshot
     BOOL            sock_truncated;
     ULONG           gateway;
     BOOL            have_gateway;
+    /* What this machine answers to on the local network, with the ".local".
+       Empty when the build has no responder or it has not claimed one yet. */
+    BOOL            have_mdns;
+    char            mdns_name[NETSTATUS_NAME_LEN];
 } ToolSnapshot;
 
 /*
@@ -199,6 +215,45 @@ typedef struct ToolStats
  * code after printing a message.
  */
 LONG tool_stats(ToolStats *out);
+
+/* --------------------------------------------------------------- DHCP -- */
+
+/*
+ * What the server said, per interface.  Nothing kept this before: the lease
+ * was applied at bring-up and discarded, so a machine that got its address by
+ * DHCP could not say who gave it out or for how long -- the two questions
+ * that matter when the address changes underneath something.
+ */
+
+typedef struct ToolDhcpInfo
+{
+    UWORD   nx_index;
+    UWORD   state;                   /* NETSTATUS_DHCP_*                     */
+    ULONG   address;                 /* host byte order                      */
+    ULONG   netmask;
+    ULONG   server;                  /* 0 when it did not identify itself    */
+    ULONG   lease_seconds;           /* 0 = not stated                       */
+    ULONG   router[NETSTATUS_DHCP_ADDRS];
+    UWORD   router_count;
+    ULONG   dns[NETSTATUS_DHCP_ADDRS];
+    UWORD   dns_count;
+    ULONG   static_route[NETSTATUS_DHCP_ADDRS];
+    UWORD   static_route_count;
+    char    host_name[NETSTATUS_NAME_LEN];
+    char    domain_name[NETSTATUS_NAME_LEN];
+} ToolDhcpInfo;
+
+typedef struct ToolDhcp
+{
+    ToolDhcpInfo    iface[TOOL_MAX_IF];
+    UWORD           count;
+} ToolDhcp;
+
+/*
+ * Returns 0, or a negative code.  A stack too old to know the selector is not
+ * an error worth a message -- callers treat it as "no lease detail".
+ */
+LONG tool_dhcp(ToolDhcp *out);
 
 /* ------------------------------------------------------------- routes -- */
 

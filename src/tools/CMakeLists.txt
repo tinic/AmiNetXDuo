@@ -198,6 +198,11 @@ aminetxduo_add_tool(tool_host    host     SOURCES host.c toolsock.c)
 # itself.  See the header of nslookup.c for why that is the right shape.
 aminetxduo_add_tool(tool_nslookup nslookup SOURCES nslookup.c toolsock.c)
 
+# arp reads NETSTATUS_ARP and writes through NETCTRL_ARP_ADD/DELETE -- both
+# already existed with nothing driving them.  Status-only, so it must never
+# start the stack: see the header of arp.c.
+aminetxduo_add_tool(tool_arp     arp      NX SOURCES arp.c)
+
 # fetch is config-only in the same sense: it never touches NetX Duo directly.
 # It reaches bsdsocket.library and tls.library through their published vectors
 # at run time, so ONE binary serves both -DAMINETXDUO_TLS=ON and OFF builds --
@@ -274,7 +279,7 @@ add_dependencies(tools
     tool_addnetroute tool_deletenetroute
     tool_getnetstatus tool_netshutdown
     tool_netsetup tool_online tool_offline tool_host
-    tool_fetch tool_nc tool_telnet tool_nettrace tool_traceroute tool_nslookup
+    tool_fetch tool_nc tool_telnet tool_nettrace tool_traceroute tool_nslookup tool_arp
     tool_tftp tool_whois
     tool_sntp
     tool_shownetstatus tool_netstat tool_ping tool_smoke)

@@ -77,8 +77,8 @@ It puts
      bsdsocket.library, usergroup.library      into LIBS:
      AddNetInterface, Online, Offline,
      ShowNetStatus, ping, netstat, host,
-     nslookup, fetch, nc, telnet, NetTrace,
-     sntp, traceroute, tftp, whois,
+     nslookup, arp, fetch, nc, telnet,
+     NetTrace, sntp, traceroute, tftp, whois,
      CheckNetConfig, GetNetStatus, NetShutdown,
      AddNetRoute, DeleteNetRoute               into C:
      the interface description                 into DEVS:NetInterfaces
@@ -141,7 +141,7 @@ UNINSTALLING
 
      Delete LIBS:bsdsocket.library LIBS:usergroup.library
      Delete C:AddNetInterface C:Online C:Offline C:ShowNetStatus
-     Delete C:ping C:netstat C:host C:nslookup C:fetch
+     Delete C:ping C:netstat C:host C:nslookup C:arp C:fetch
      Delete C:nc C:telnet C:NetTrace
      Delete C:sntp C:traceroute C:tftp C:whois
      Delete C:CheckNetConfig C:GetNetStatus C:NetShutdown

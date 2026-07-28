@@ -207,7 +207,137 @@ static VOID show_counters(const char *name, const AmiSana2Stats *st)
     tool_printf("  buffer failures   %10lu\n", st->alloc_failures);
 }
 
+/*
+ * A lease time as somebody would say it: servers hand out round numbers of
+ * seconds -- 86400, 3600 -- and printing those makes the reader do the
+ * division every time. Returns the unit and writes the count, or NULL when
+ * the server said the lease never expires.
+ */
+static const char *lease_duration(ULONG seconds, ULONG *value_out)
+{
+    if (seconds == NETSTATUS_DHCP_FOREVER)
+        return NULL;
+
+    if (seconds >= 86400UL && (seconds % 86400UL) == 0)
+    {
+        *value_out = seconds / 86400UL;
+        return "day";
+    }
+    if (seconds >= 3600UL && (seconds % 3600UL) == 0)
+    {
+        *value_out = seconds / 3600UL;
+        return "hour";
+    }
+    if (seconds >= 60UL && (seconds % 60UL) == 0)
+    {
+        *value_out = seconds / 60UL;
+        return "minute";
+    }
+
+    *value_out = seconds;
+    return "second";
+}
+
+/*
+ * One line of the "it offered" block. The label appears once for the whole
+ * block and the rest align under it, so the group reads as one statement --
+ * "the server offered these things" -- rather than as four unrelated fields
+ * that happen to be adjacent.
+ */
+static VOID offered_line(BOOL *first, const char *what, const ULONG *addr,
+                         UWORD count, const char *text)
+{
+    UWORD i;
+    char  buf[16];
+
+    if (count == 0 && text == NULL)
+        return;
+
+    tool_printf("  %-11s %s ", (LONG)(*first ? "it offered" : ""), (LONG)what);
+    *first = FALSE;
+
+    if (text != NULL)
+    {
+        tool_printf("%s\n", (LONG)text);
+        return;
+    }
+
+    for (i = 0; i < count; i++)
+    {
+        ami_config_format_ip(addr[i], buf, sizeof(buf));
+        tool_printf("%s%s", (LONG)buf, (LONG)((i + 1 < count) ? ", " : ""));
+    }
+
+    tool_printf("\n");
+}
+
+/*
+ * What the DHCP server said. None of this was reported anywhere before: the
+ * lease is applied at bring-up and was then discarded, so the two questions
+ * that matter when an address changes underneath something -- who handed it
+ * out, and how long it is good for -- had no answer on the machine.
+ *
+ * The offered lists are shown whether or not they were taken up. A server
+ * handing out a name server this machine is not using is a fact worth seeing,
+ * because it is usually the explanation for whatever led somebody here.
+ */
+static VOID show_lease(const ToolDhcpInfo *d)
+{
+    char addr[16];
+    BOOL first = TRUE;
+
+    if (d == NULL)
+        return;
+
+    if (d->state == NETSTATUS_DHCP_WORKING)
+    {
+        tool_printf("  lease       asking -- no server has answered yet\n");
+        return;
+    }
+
+    if (d->state != NETSTATUS_DHCP_BOUND)
+        return;
+
+    if (d->server != 0)
+    {
+        ami_config_format_ip(d->server, addr, sizeof(addr));
+        tool_printf("  lease       from %s", (LONG)addr);
+    }
+    else
+    {
+        /* Rare, and worth naming rather than leaving blank: the server
+           answered without identifying itself. */
+        tool_printf("  lease       from a server that did not name itself");
+    }
+
+    if (d->lease_seconds != 0)
+    {
+        ULONG       value = 0;
+        const char *unit  = lease_duration(d->lease_seconds, &value);
+
+        if (unit == NULL)
+            tool_printf(", which never expires");
+        else
+            tool_printf(", good for %lu %s%s", (LONG)value, (LONG)unit,
+                        (LONG)((value == 1) ? "" : "s"));
+    }
+
+    tool_printf("\n");
+
+    offered_line(&first, "router     ", d->router, d->router_count, NULL);
+    offered_line(&first, "name server", d->dns, d->dns_count, NULL);
+    offered_line(&first, "routes     ", d->static_route,
+                 d->static_route_count, NULL);
+
+    if (d->domain_name[0] != '\0')
+        offered_line(&first, "domain     ", NULL, 0, d->domain_name);
+
+    if (d->host_name[0] != '\0')
+        offered_line(&first, "the name   ", NULL, 0, d->host_name);
+}
+
 static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
+                           const ToolDhcpInfo *lease,
                            BOOL up, BOOL stats, BOOL stack_running,
                            BOOL readable)
 {
@@ -216,8 +346,36 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
     char bcast[16];
     char mac[24];
 
-    tool_printf("\nInterface %s (%s unit %ld)\n",
-                (LONG)cfg->name, (LONG)cfg->device, (LONG)cfg->unit);
+    /*
+     * The driver the stack actually has open, when it can be read, and the
+     * config file's answer only as a fallback. They are usually the same and
+     * then nothing changes here -- but when they differ, the file is the one
+     * that is wrong, and printing it is how somebody spends an afternoon on
+     * a card that was never the one in use.
+     */
+    if (live != NULL && live->nx_device[0] != '\0')
+    {
+        tool_printf("\nInterface %s (%s unit %ld)\n",
+                    (LONG)cfg->name, (LONG)live->nx_device,
+                    (LONG)live->nx_unit);
+
+        if (cfg->device[0] != '\0' &&
+            (tool_stricmp(cfg->device, live->nx_device) != 0 ||
+             cfg->unit != live->nx_unit))
+        {
+            tool_printf("  NOTE        running on this driver, but the "
+                        "configuration file says\n");
+            tool_printf("              %s unit %ld -- the file has been "
+                        "changed since\n", (LONG)cfg->device, (LONG)cfg->unit);
+            tool_printf("              the network started, or this "
+                        "interface was brought up by hand.\n");
+        }
+    }
+    else
+    {
+        tool_printf("\nInterface %s (%s unit %ld)\n",
+                    (LONG)cfg->name, (LONG)cfg->device, (LONG)cfg->unit);
+    }
 
     if (stack_running && readable)
     {
@@ -277,6 +435,8 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
                 (LONG)(cfg->iptype == AMI_IPTYPE_DHCP      ? "DHCP" :
                        cfg->iptype == AMI_IPTYPE_LINKLOCAL ? "link-local"
                                                            : "static"));
+
+    show_lease(lease);
 
     if (stats)
     {
@@ -816,6 +976,8 @@ static BOOL interface_selected(STRPTR *list, const char *name)
 static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
 {
     static ToolSnapshot snap;
+    static ToolDhcp     dhcp;
+    BOOL                have_lease = FALSE;
     static ToolStats    stats;
     BOOL                have_live     = FALSE;
     BOOL                have_stats    = FALSE;
@@ -864,6 +1026,11 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
         if (tool_stats(&stats) == 0)
             have_stats = TRUE;
 
+        /* Quietly, and never fatal: a stack too old to know the selector
+           simply has no lease detail to add. */
+        if (tool_dhcp(&dhcp) == 0)
+            have_lease = TRUE;
+
         /* Running, and we could not see in. Say which. */
         elsewhere = (BOOL)(!have_live);
     }
@@ -887,6 +1054,23 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
             tool_printf("Host name:      %s\n", (LONG)ext_host);
         else if (cfg->hostname[0] != '\0')
             tool_printf("Host name:      %s\n", (LONG)cfg->hostname);
+
+        /*
+         * The name OTHER machines can use, which is not the same thing and
+         * was reported nowhere: netstack_mdns_hostname() had no caller at
+         * all. Somebody who cannot be told their own .local name cannot give
+         * it to anyone, and then reaches for the address instead -- which is
+         * the thing DHCP will change underneath them.
+         */
+        if (have_live && snap.have_mdns)
+        {
+            if (snap.mdns_name[0] != '\0')
+                tool_printf("Known here as:  %s (to other machines on this "
+                            "network)\n", (LONG)snap.mdns_name);
+            else
+                tool_printf("Known here as:  nothing yet -- still claiming a "
+                            "name on this network\n");
+        }
 
         if (elsewhere && ext_addr != 0)
         {
@@ -940,6 +1124,8 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
                 live = &snap.iface[i];
 
             show_interface(&cfg->interfaces[i], live,
+                           (have_lease && i < (LONG)dhcp.count)
+                               ? &dhcp.iface[i] : NULL,
                            iface_online(live), detailed,
                            stack_running, (BOOL)!elsewhere);
             shown++;

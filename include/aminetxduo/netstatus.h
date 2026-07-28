@@ -76,7 +76,14 @@ extern "C" {
 #define AMI_NETSTATUS_CONTROL_LVO   (-0x36c)
 
 #define AMI_NETSTATUS_MAGIC         0x414E5351UL    /* 'ANSQ' */
-#define AMI_NETSTATUS_VERSION       1
+#define AMI_NETSTATUS_VERSION       2
+
+/* Fixed widths every record shares.  Up here rather than beside the first
+   record that uses one, because NetStatusSystem needs NETSTATUS_NAME_LEN and
+   is declared before the interface table. */
+#define NETSTATUS_NAME_LEN      32
+#define NETSTATUS_DEVICE_LEN    32
+#define NETSTATUS_MAC_SIZE      6
 
 /*
  * THE LIBRARY REVISION THAT FIRST HAD THESE SLOTS, and the one check a caller
@@ -109,6 +116,7 @@ extern "C" {
 #define NETSTATUS_ARP           4   /* NetStatusArp[]                        */
 #define NETSTATUS_ROUTES        5   /* NetStatusRoute[]                      */
 #define NETSTATUS_SOCKETS       6   /* NetStatusSocket[]                     */
+#define NETSTATUS_DHCP          7   /* NetStatusDhcp[]                       */
 
 /*
  * Every buffer starts with this. The caller fills nsh_Magic and nsh_Version;
@@ -147,6 +155,14 @@ typedef struct NetStatusHeader
  */
 #define NETSTATUS_SYS_ROUTING   0x0008UL
 
+/*
+ * AMINETXDUO_MDNS, and nss_MdnsName is then the name this machine answers to
+ * on the local network.  CLEAR means the build has no responder and the field
+ * is empty; SET with an empty field means the responder is there but has not
+ * claimed a name yet, which is a different thing and worth saying differently.
+ */
+#define NETSTATUS_SYS_MDNS      0x0010UL
+
 typedef struct NetStatusSystem
 {
     ULONG   nss_Flags;
@@ -158,14 +174,17 @@ typedef struct NetStatusSystem
     ULONG   nss_PoolEmptyRequests;
     ULONG   nss_PoolEmptySuspensions;
     ULONG   nss_PoolInvalidReleases;
-    ULONG   nss_Reserved[7];
+    /*
+     * What this machine calls itself on the local network, with the ".local"
+     * -- the name somebody at another machine types to reach it.  Nothing
+     * else reports it, and a user who cannot be told their own name cannot
+     * give it to anyone.  Empty unless NETSTATUS_SYS_MDNS.
+     */
+    char    nss_MdnsName[NETSTATUS_NAME_LEN];
+    ULONG   nss_Reserved[3];
 } NetStatusSystem;
 
 /* ----------------------------------------------- NETSTATUS_INTERFACES --- */
-
-#define NETSTATUS_NAME_LEN      32
-#define NETSTATUS_DEVICE_LEN    32
-#define NETSTATUS_MAC_SIZE      6
 
 /* nsi_Flags */
 #define NETSTATUS_IF_ATTACHED   0x0001  /* the NX_INTERFACE slot is valid    */
@@ -199,6 +218,52 @@ typedef struct NetStatusInterface
     ULONG   nsi_RxErrors;
     ULONG   nsi_AllocFailures;
 } NetStatusInterface;
+
+/* ----------------------------------------------------- NETSTATUS_DHCP --- */
+
+/*
+ * What the DHCP server said, per interface -- which nothing kept until now.
+ * The lease is applied at bring-up and was then thrown away, so a machine
+ * that got its address by DHCP could not answer the two questions that come
+ * up when it goes wrong: WHO gave me this, and HOW LONG is it good for.
+ *
+ * The offered lists are reported whether or not they were used.  A server
+ * that hands out a name server this machine ignored is a fact worth seeing,
+ * because it is usually the explanation.
+ */
+
+/* nsd_State */
+#define NETSTATUS_DHCP_OFF      0   /* not using DHCP on this interface     */
+#define NETSTATUS_DHCP_WORKING  1   /* asking: discovering, requesting, ARP */
+#define NETSTATUS_DHCP_BOUND    2   /* it has a lease; the rest is filled   */
+
+#define NETSTATUS_DHCP_ADDRS    8   /* of each list; the option may hold more */
+
+/* nsd_LeaseSeconds when the server said the lease never expires. */
+#define NETSTATUS_DHCP_FOREVER  0xFFFFFFFFUL
+
+typedef struct NetStatusDhcp
+{
+    UWORD   nsd_Index;                  /* NX_IP interface index             */
+    UWORD   nsd_State;                  /* NETSTATUS_DHCP_*                  */
+
+    /* All below are meaningful only in NETSTATUS_DHCP_BOUND. */
+    ULONG   nsd_Address;                /* host byte order                   */
+    ULONG   nsd_NetMask;
+    ULONG   nsd_Server;                 /* who answered; 0 if it did not say */
+    ULONG   nsd_LeaseSeconds;           /* 0 = not stated                    */
+
+    ULONG   nsd_Router[NETSTATUS_DHCP_ADDRS];
+    UWORD   nsd_RouterCount;
+    ULONG   nsd_Dns[NETSTATUS_DHCP_ADDRS];
+    UWORD   nsd_DnsCount;
+    ULONG   nsd_StaticRoute[NETSTATUS_DHCP_ADDRS];
+    UWORD   nsd_StaticRouteCount;
+    UWORD   nsd_Pad;
+
+    char    nsd_HostName[NETSTATUS_NAME_LEN];
+    char    nsd_DomainName[NETSTATUS_NAME_LEN];
+} NetStatusDhcp;
 
 /* ---------------------------------------------------- NETSTATUS_STATS --- */
 

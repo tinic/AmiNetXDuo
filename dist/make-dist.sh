@@ -87,7 +87,7 @@ need() {
 
 LIBS=(bsdsocket usergroup)
 CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ping netstat host
-      nslookup fetch nc telnet NetTrace sntp traceroute tftp whois
+      nslookup arp fetch nc telnet NetTrace sntp traceroute tftp whois
       CheckNetConfig GetNetStatus NetShutdown AddNetRoute DeleteNetRoute)
 
 # ---------------------------------------------------------- the CPU builds --
