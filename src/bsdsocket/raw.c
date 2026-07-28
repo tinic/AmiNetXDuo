@@ -340,6 +340,9 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
     NX_PACKET  *handed = packet;
     NXD_ADDRESS dest   = *addr;
     UINT        status;
+    ULONG       protocol = (ULONG)(sock->as_Protocol & 0xFF);
+    UINT        ttl      = (UINT)(sock->as_Ttl & 0xFF);
+    ULONG       tos      = (ULONG)(sock->as_Tos & 0xFF);
 
     if (ip == NULL)
     {
@@ -347,10 +350,71 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_ENETDOWN);
     }
 
-    status = nxd_ip_raw_packet_send(ip, handed, &dest,
-                                    (ULONG)(sock->as_Protocol & 0xFF),
-                                    (UINT)(sock->as_Ttl & 0xFF),
-                                    (ULONG)(sock->as_Tos & 0xFF));
+    /*
+     * IP_HDRINCL, TRANSLATED RATHER THAN PASSED THROUGH.
+     *
+     * NetX Duo's core has no header-included raw transmit: every raw send goes
+     * out through nxd_ip_raw_packet_send(), which builds the IP header itself
+     * from a protocol, a TTL and a TOS. Refusing IP_HDRINCL on that basis is
+     * what we did, and it cost us traceroute -- Roadshow's fails at startup
+     * with ENOPROTOOPT (docs/RESEARCH.md 55).
+     *
+     * But a caller that sets IP_HDRINCL is not usually asking for an arbitrary
+     * header. traceroute is asking to vary the TTL and the destination per
+     * probe, and those are exactly two of the three fields the send call
+     * already takes. So the header the caller wrote is PARSED, its fields are
+     * mapped onto the call, and it is stripped -- NetX Duo then emits an
+     * equivalent header.
+     *
+     * WHAT DOES NOT SURVIVE, and a caller that needs any of it should not use
+     * this stack for it: IP options (the header is dropped whole, options
+     * included), a chosen identification field, a chosen source address, the
+     * DF/MF flags and fragment offsets, and any deliberately wrong checksum.
+     * The version, IHL, total length and checksum are all recomputed.
+     *
+     * A short or implausible header is refused rather than guessed at: EINVAL
+     * is what BSD gives for a header-included write it cannot parse.
+     */
+    if (sock->as_HdrIncl)
+    {
+        const UBYTE *hdr = (const UBYTE *)handed->nx_packet_prepend_ptr;
+        ULONG        have = (ULONG)(handed->nx_packet_append_ptr -
+                                    handed->nx_packet_prepend_ptr);
+        ULONG        ihl;
+
+        if (have < 20UL || (hdr[0] >> 4) != 4)
+        {
+            nx_packet_release(handed);
+            return bsd_fail(base, AMI_EINVAL);
+        }
+
+        ihl = (ULONG)(hdr[0] & 0x0F) * 4UL;
+        if (ihl < 20UL || ihl > have)
+        {
+            nx_packet_release(handed);
+            return bsd_fail(base, AMI_EINVAL);
+        }
+
+        tos      = (ULONG)hdr[1];
+        ttl      = (UINT)hdr[8];
+        protocol = (ULONG)hdr[9];
+
+        /*
+         * The destination in the header wins over the one passed to sendto():
+         * that is what "the header is included" means, and traceroute fills
+         * both in agreement anyway.
+         */
+        dest.nxd_ip_version = NX_IP_VERSION_V4;
+        dest.nxd_ip_address.v4 = ((ULONG)hdr[16] << 24) |
+                                 ((ULONG)hdr[17] << 16) |
+                                 ((ULONG)hdr[18] <<  8) |
+                                  (ULONG)hdr[19];
+
+        handed->nx_packet_prepend_ptr += ihl;
+        handed->nx_packet_length      -= ihl;
+    }
+
+    status = nxd_ip_raw_packet_send(ip, handed, &dest, protocol, ttl, tos);
 
     if (status != NX_SUCCESS)
     {

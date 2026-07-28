@@ -466,6 +466,14 @@ typedef struct AmiSocket
     LONG                    as_Tos;
 
     /*
+     * IP_HDRINCL. The caller supplies its own IP header ahead of the payload
+     * on a raw socket; traceroute is what wants it, and it is the only reason
+     * this exists. See bsd_raw_hdrincl() in raw.c for what survives the
+     * translation and what does not.
+     */
+    LONG                    as_HdrIncl;
+
+    /*
      * Listening state. NetX Duo hands an incoming connection to a *specific*
      * socket, so a listening descriptor keeps a spare socket parked on the
      * port; accept() takes it and relistens a fresh one. docs/RESEARCH.md

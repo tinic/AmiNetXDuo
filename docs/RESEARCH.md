@@ -16028,6 +16028,33 @@ argument template is `INTERFACE,LEFT/N,TOP/N,WIDTH/N,HEIGHT/N,SCREEN/K` -- it is
 graphical meter that opens a window and runs until closed, so it now times out a
 scripted plan instead of failing one, which is the tool working rather than a hang.
 
+### IP_HDRINCL, translated rather than passed through
+
+Roadshow's `traceroute` died at startup in 0.08 s: `setsockopt(IPPROTO_IP, IP_HDRINCL)`
+returned ENOPROTOOPT. `raw.c` had said why since it was written -- NetX Duo's core has no
+header-included transmit; every raw send goes through `nxd_ip_raw_packet_send()`, which
+builds the IP header itself.
+
+That was a correct description of NetX Duo and the wrong conclusion about traceroute. A
+caller setting IP_HDRINCL is usually not asking for an arbitrary header: **traceroute is
+asking to vary the TTL and the destination per probe, and those are two of the three
+fields that send call already takes.** So the header the caller wrote is parsed, its TOS,
+TTL, protocol and destination are mapped onto the call, and it is stripped; NetX Duo emits
+an equivalent header.
+
+What does not survive, and is written where someone will read it: IP options, a chosen
+identification field, a chosen source address, DF/MF and fragment offsets, and any
+deliberately wrong checksum. A short or implausible header is refused with EINVAL rather
+than guessed at.
+
+| | before | after |
+|---|---|---|
+| `traceroute 10.0.2.2` | ENOPROTOOPT at startup, 0.08 s | `1  10.0.2.2 (10.0.2.2)  12.766 ms  8.606 ms  8.884 ms` |
+
+Hops past the first are `* * *`, and that is the environment rather than the stack: SLIRP
+is a terminating NAT and does not relay TTL-exceeded from beyond itself -- the same limit
+that mangles the forwarded ICMP Roadshow's `ping` complains about above.
+
 ### Refusals that are the right answer
 
 `RoadshowControl` looks tunables up by Roadshow-private name; `ipf`/`ipfstat`/`ipnat`/

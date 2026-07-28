@@ -249,6 +249,18 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 sock->as_Ttl = value;
                 return 0;
 
+            /*
+             * IP_HDRINCL is only meaningful on a raw socket, and BSD returns
+             * ENOPROTOOPT rather than pretending otherwise on anything else.
+             */
+            case IP_HDRINCL:
+                if (sock->as_Type != SOCK_RAW)
+                    return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+                if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
+                    return -1;
+                sock->as_HdrIncl = (value != 0);
+                return 0;
+
             case IP_TOS:
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
                     return -1;
@@ -406,6 +418,10 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
         {
             case IP_TTL:
                 return bsd_opt_get_long(SocketBase, optval, optlen, sock->as_Ttl);
+
+            case IP_HDRINCL:
+                return bsd_opt_get_long(SocketBase, optval, optlen,
+                                        sock->as_HdrIncl);
 
             case IP_TOS:
                 return bsd_opt_get_long(SocketBase, optval, optlen, sock->as_Tos);
