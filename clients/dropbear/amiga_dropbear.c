@@ -2062,16 +2062,15 @@ char *getpass(const char *prompt)
 {
     static char buf[128];
     BPTR  in  = Input();
-    BPTR  out = Output();
     int   raw = 0;
     ULONG n   = 0;
     char  c;
 
+    /* Output through __wrap_write(), not DOS Write(): the CR-for-LF fixup that
+       makes the other prompts break lines lives there, and Read() consuming the
+       Return in raw mode means the newline HAS to be emitted by us. */
     if (prompt != NULL)
-    {
-        Write(out, (APTR)prompt, (LONG)strlen(prompt));
-        Flush(out);
-    }
+        __wrap_write(1, prompt, strlen(prompt));
 
     if (IsInteractive(in))
         raw = SetMode(in, 1) ? 1 : 0;
@@ -2096,8 +2095,7 @@ char *getpass(const char *prompt)
     if (raw)
         SetMode(in, 0);
 
-    Write(out, (APTR)"\r\n", 2);   /* CR+LF: the Amiga console needs the CR */
-    Flush(out);
+    __wrap_write(1, "\n", 1);      /* con_write() gives it the CR the console needs */
 
     return buf;
 }
