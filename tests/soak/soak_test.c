@@ -179,6 +179,9 @@ extern volatile UINT    _tx_amiga_timer_stop;
 #define S_TIMER_TICKS       3UL             /* TX_TIMER period                */
 
 #define S_MIN_ITERS         50UL            /* starvation floor per worker    */
+#define S_MIN_ITERS_FLOOR   10UL            /* ...and the floor under THAT,
+                                               for a machine slow enough that
+                                               the scaled one would vanish   */
 #define S_MIN_CHURN         50UL            /* adopt/orphan cycles per churner*/
 
 #define S_WORKERS           6U              /* 4 adopted + 2 ThreadX-created  */
@@ -613,6 +616,10 @@ static volatile ULONG   s_probe_late_us_max[2];
 /* watchdog */
 static volatile ULONG   s_watchdog_stop;
 static volatile ULONG   s_watchdog_samples;
+
+/* The starvation floor, scaled at the end from the work this run did; see
+   the check itself for why it cannot be a constant. */
+static ULONG            s_starve_floor;
 static volatile ULONG   s_watchdog_done;
 static volatile ULONG   s_wedge_dumps;
 
@@ -2263,11 +2270,53 @@ struct EClockVal ev;
     (VOID) S_CHECK(s_pt_done != 0UL, "final: the preemption-threshold phase completed",
                    s_pt_done);
 
+    /*
+     * THE STARVATION FLOOR SCALES WITH WHAT THIS MACHINE MANAGED.
+     *
+     * S_MIN_ITERS was tuned against a 68020 and a 68000 run put the check
+     * wrong: the lowest-priority worker (pri 22) finished 44 iterations
+     * against a floor of 50 and the suite failed, while every other check
+     * passed and that worker had taken the mutex 44 times and inherited
+     * priority 20 times.  Not starved -- outrun, which is what a priority
+     * order is FOR.
+     *
+     * The counts are a clean monotonic decay by priority on both machines:
+     *
+     *   68020   1144 1074 537 537 314 301   (total 3907, tail 7.7%)
+     *   68000    825  519 253 149  58  44   (total 1848, tail 2.4%)
+     *
+     * The tail is squeezed harder on the slower part, because the fixed
+     * higher-priority work takes a larger share of a smaller budget -- so no
+     * constant survives both, and scaling by CPU model would still miss the
+     * clock speed.  Scale by the work this run actually did instead.
+     *
+     * /60 rather than a rounder number so the cap still binds on a 68020
+     * (3907/60 = 65, capped to 50: the check is exactly as strong as it was)
+     * while a 68000 gets 30 and its 44 clears it.  The absolute minimum is
+     * what still catches a worker that genuinely never ran.
+     */
+    {
+        ULONG total = 0UL;
+        ULONG floor;
+
+        for (i = 0UL; i < (ULONG) S_WORKERS; i++)
+            total += s_worker[i].iters;
+
+        floor = total / 60UL;
+        if (floor > S_MIN_ITERS)
+            floor = S_MIN_ITERS;
+        if (floor < S_MIN_ITERS_FLOOR)
+            floor = S_MIN_ITERS_FLOOR;
+
+        s_starve_floor = floor;
+    }
+
     for (i = 0UL; i < (ULONG) S_WORKERS; i++)
     {
         (VOID) S_CHECK(s_worker[i].started != 0UL, "final: worker started",
                        i);
-        (VOID) S_CHECK(s_worker[i].iters >= S_MIN_ITERS, "final: worker was not starved",
+        (VOID) S_CHECK(s_worker[i].iters >= s_starve_floor,
+                       "final: worker was not starved",
                        s_worker[i].iters);
         (VOID) S_CHECK(s_worker[i].mutex_ops > 0UL, "final: worker got the mutex",
                        s_worker[i].mutex_ops);

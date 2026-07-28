@@ -427,8 +427,6 @@
 ; exactly who has a 68000 -- (message) prints NOTHING, so the people who most
 ; need this would never see it.  See the header of this file.  The final page
 ; is shown at every level, so the fact is recorded here and said there.
-(set NO_TLS 0)
-(if (NOT (exists (tackon S_LIBS "tls.library") (noreq))) (set NO_TLS 1))
 
 (if (NOT (exists (tackon S_LIBS "bsdsocket.library") (noreq)))
     (abort "This archive has no library for a " CPU ".\n\n"
@@ -1134,15 +1132,13 @@
     (set FINAL_START (F_START_YES START_IF))
     (set FINAL_START (F_START_NO  START_IF)))
 
-(if NO_TLS
-    (set FINAL_TLS
-      (cat "\nThis is a " CPU ", so https:// is not available -- the\n"
-           "encryption needs a 68020.  Everything else works.\n"))
-    (set FINAL_TLS ""))
-
+; The 68000 https:// notice used to be here, and it is not any more.  A user
+; who never types an https: URL was being warned about something that would
+; never affect them, on the one page they read once; and the user who DOES
+; type one is told by `fetch' itself, at the moment it matters, in words that
+; fit their machine.  fetch tests AttnFlags for exactly this.
 (exit
   "AmiNetXDuo is installed.\n\n"
   FINAL_START
   "\nShowNetStatus says whether it came up.  The guide in the\n"
-  "AmiNetXDuo drawer has the rest.\n"
-  FINAL_TLS)
+  "AmiNetXDuo drawer has the rest.\n")

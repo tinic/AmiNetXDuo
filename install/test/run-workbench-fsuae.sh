@@ -572,8 +572,10 @@ fi
 
 # An ordinary Shell script, doing ordinary things, with every command's return
 # code written down beside its output.  `Stack 200000` is the Shell's internal
-# stack command, and it is here because the Clients ReadMe tells the user to
-# type exactly that before running ssh.
+# stack command.  It is NOT needed any more -- clients/compat/amiga_argv.c
+# swaps in 256 KB of its own before main() runs, and the ReadMe says so -- and
+# it stays here precisely because a cautious user will still type it: a client
+# that mishandled an already-large Shell stack would fail nowhere else.
 cat > "$HD/S/AmiNetXDuo-Check" <<EOF
 ; Written by install/test/run-workbench-fsuae.sh.  Nothing here is installed
 ; by AmiNetXDuo -- it is what a user would type.

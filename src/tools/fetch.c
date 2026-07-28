@@ -704,9 +704,34 @@ static LONG fetch_run(VOID)
             {
                 tool_error("https: needs LIBS:tls.library, and there is none");
                 tool_advise_blank();
-                tool_advise("Install it from the same archive as this "
-                            "bsdsocket.library -- the two are a pair and are "
-                            "not interchangeable between builds.");
+
+                /*
+                 * WHY THE CPU IS TESTED HERE. On a 68000 there is no
+                 * tls.library to install -- the archive deliberately carries
+                 * none, because the encryption needs a 68020 -- so telling
+                 * that user to go and install it sends them looking for a
+                 * file that does not exist. One binary serves every CPU, so
+                 * the only place that difference can be known is at run time,
+                 * and the only moment it matters is this one.
+                 *
+                 * It also puts the explanation where the person who hit the
+                 * problem is standing, which is why the installer no longer
+                 * says any of this on its way out.
+                 */
+                if ((SysBase->AttnFlags & AFF_68020) == 0)
+                {
+                    tool_advise("This machine is a 68000, and there is no "
+                                "tls.library for one -- the encryption needs "
+                                "a 68020. Nothing is missing from your "
+                                "installation.");
+                }
+                else
+                {
+                    tool_advise("Install it from the same archive as this "
+                                "bsdsocket.library -- the two are a pair and "
+                                "are not interchangeable between builds.");
+                }
+
                 tool_advise("http: URLs work without it.");
                 rc = RETURN_FAIL;
                 break;

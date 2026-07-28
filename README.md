@@ -58,6 +58,7 @@ a user guide in `Docs/` inside the archive.
 
 | | |
 |---|---|
+| `NetSetup` | set up an interface by answering questions -- start here |
 | `AddNetInterface`, `Online`, `Offline` | bring an interface up and take it down |
 | `ShowNetStatus`, `netstat` | interface state, routes, connections |
 | `ping`, `host` | reachability and name lookups |
@@ -67,6 +68,7 @@ a user guide in `Docs/` inside the archive.
 | `fetch` | retrieve an `http://` or `https://` URL |
 | `nc` | connect or listen, TCP and UDP, port ranges, timeouts |
 | `telnet` | with enough option negotiation not to confuse a real server |
+| `ssh` | Dropbear's dbclient, public-key auth; see the ReadMe for keys |
 | `NetTrace` | capture packets to a `.pcap` file Wireshark can open |
 | `traceroute` | trace the path to a host |
 | `tftp`, `whois` | the usual small clients |
@@ -107,6 +109,11 @@ the usual set of root authorities.
 before the prompt appears; almost all of that is the cryptography rather than
 the network.
 
+Keys must be in **Dropbear's own format** — an OpenSSH key copied straight
+across will not be read — and you name the key on the command line with `-i`.
+Make it on your PC rather than on the Amiga, which has neither the entropy nor
+the patience. The ReadMe in the archive has the exact commands.
+
 One thing to expect on a machine this slow: **the first connection to a site can
 take twenty seconds or more, and some sites will give up before it finishes.**
 Try again — the second attempt to the same site usually takes under a second,
@@ -116,7 +123,11 @@ because the secure session is remembered, even across a reboot.
 
 - Nothing has run on **real hardware** yet.
 - IPv6 works but is not in the standard build.
-- Accepting connections *from* the internet is untested.
+- Listening for incoming connections works — `nc -l` takes a file from another
+  machine, and an SSH server has run on the Amiga with clients connecting to
+  it. What has *not* been done is exposing any of that to the open internet,
+  and nothing here has been reviewed with that in mind. Put it behind your
+  router, as you would anything else of this vintage.
 
 ## Compatibility
 

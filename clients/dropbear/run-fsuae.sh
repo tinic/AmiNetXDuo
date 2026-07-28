@@ -170,6 +170,16 @@ cp "$ADDIF"    "$STAGE/AddNetInterface"
 if [ -f "$KEYFILE" ]; then
     cp "$KEYFILE" "$STAGE/id_amiga"
     echo "==> client key staged: $KEYFILE ($(wc -c < "$KEYFILE" | tr -d ' ') bytes)"
+
+    # ...and again at the path dbclient finds ON ITS OWN, which is the one the
+    # ReadMe tells a user to use and the one nothing tested until now.  The
+    # shim answers getpwnam() with a home of SYS: (ENV:HOME when set), Dropbear
+    # appends "/.ssh/id_dropbear", and amiga_fix_path() collapses the "SYS:/"
+    # that produces.  Every other command here passes -i and therefore proves
+    # none of that.
+    mkdir -p "$STAGE/.ssh"
+    cp "$KEYFILE" "$STAGE/.ssh/id_dropbear"
+    echo "==> and as SYS:.ssh/id_dropbear, for the no -i default"
 else
     echo "!! no client key at $KEYFILE -- public-key auth will fail." >&2
     echo "   clients/dropbear/sshd-testserver.sh start makes one." >&2
@@ -285,6 +295,11 @@ SYS:AddNetInterface eth0
 SYS:dbclient -V
 SYS:dbclient -T -y -y -i DH0:id_amiga -p $DBPORT $DBUSER@$DBHOST "echo AMIGA-SSH-OK; uname -a; date"
 SYS:dbclient -T -y -y -i DH0:id_amiga -p $DBPORT $DBUSER@$DBHOST "echo second connection"
+# NOT a passing case: the key is staged at SYS:.ssh/id_dropbear above and
+# dbclient with no -i still refuses with "No auth methods could be used".  It
+# stays in the list so the ReadMe's "use -i" stops being folklore, and so that
+# a future build which DOES read the default path shows up here as a change.
+SYS:dbclient -T -y -y -p $DBPORT $DBUSER@$DBHOST "echo AMIGA-SSH-DEFAULTKEY-OK"
 SYS:dbclient -T -y -y -i DH0:id_amiga -c aes128-ctr -p $DBPORT $DBUSER@$DBHOST "echo aes128-ctr"
 SYS:dbclient -T -y -y -i DH0:id_amiga -c chacha20-poly1305@openssh.com -p $DBPORT $DBUSER@$DBHOST "echo chacha20"
 EOF

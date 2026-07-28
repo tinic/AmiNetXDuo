@@ -75,12 +75,12 @@ to change afterwards.
 It puts
 
      bsdsocket.library, usergroup.library      into LIBS:
-     AddNetInterface, Online, Offline,
+     NetSetup, AddNetInterface, Online, Offline,
      ShowNetStatus, ping, netstat, host,
      nslookup, arp, fetch, nc, telnet,
      NetTrace, sntp, traceroute, tftp, whois,
      CheckNetConfig, GetNetStatus, NetShutdown,
-     AddNetRoute, DeleteNetRoute               into C:
+     AddNetRoute, DeleteNetRoute, ssh          into C:
      the interface description                 into DEVS:NetInterfaces
      the routing and name server settings      into DEVS:Internet
      this file, the documentation, examples    into a drawer you choose
@@ -136,16 +136,58 @@ IPTYPE is a number, the SANA-II packet type.  AmiNetXDuo accepts both, so
 such a file still works here, but it will not work on Roadshow.
 
 
+USING SSH
+---------
+
+`ssh' is Dropbear's dbclient.  It wants mathieeedoubbas.library in LIBS:,
+which every Workbench install has, and nothing else -- it brings its own
+stack, so there is no `stack 200000' to type first.
+
+     ssh me@192.168.1.10                    log in
+     ssh me@192.168.1.10 "uname -a"         run one command
+
+A password works if the far end allows one.  A key is better, and on a
+machine this slow it also saves the typing.
+
+THE KEY MUST BE IN DROPBEAR'S FORMAT, not OpenSSH's.  An OpenSSH key copied
+straight over will not be read.  On the PC, with Dropbear's own tools:
+
+     dropbearkey -t ed25519 -f id_amiga     make one
+     dropbearconvert openssh dropbear ~/.ssh/id_ed25519 id_amiga
+                                            or convert one you already have
+     dropbearkey -y -f id_amiga             print the line for the server's
+                                            authorized_keys
+
+MAKE THE KEY ON THE PC, not on the Amiga.  This machine has very little
+entropy to make one from, and ed25519 keygen on a 14 MHz 68020 takes about a
+minute.  Copy the private key over afterwards.
+
+NAME THE KEY WITH -i, every time:
+
+     ssh -i DH0:keys/id_amiga me@192.168.1.10
+
+There is a default path -- dbclient reads ENV:HOME, appends /.ssh/id_dropbear,
+and falls back to SYS: when ENV:HOME is unset -- but putting a key there and
+leaving -i off was tried and does NOT work; the connection is refused with
+"No auth methods could be used".  Use -i and it works every time.
+
+ENV:USER is the name sent when the command line has no user@ in front of the
+host; with none set it is "amiga".
+
+     SetEnv SAVE USER me
+
+
 UNINSTALLING
 ------------
 
      Delete LIBS:bsdsocket.library LIBS:usergroup.library
-     Delete C:AddNetInterface C:Online C:Offline C:ShowNetStatus
+     Delete C:NetSetup C:AddNetInterface C:Online C:Offline
+     Delete C:ShowNetStatus
      Delete C:ping C:netstat C:host C:nslookup C:arp C:fetch
      Delete C:nc C:telnet C:NetTrace
      Delete C:sntp C:traceroute C:tftp C:whois
      Delete C:CheckNetConfig C:GetNetStatus C:NetShutdown
-     Delete C:AddNetRoute C:DeleteNetRoute
+     Delete C:AddNetRoute C:DeleteNetRoute C:ssh
      Delete DEVS:NetInterfaces/eth0
 
 and take the ";BEGIN AmiNetXDuo" .. ";END AmiNetXDuo" block out of
