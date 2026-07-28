@@ -505,11 +505,7 @@
 ; ==========================================================================
 
 (welcome
-  "AmiNetXDuo " VERSION_STR " -- a TCP/IP stack for AmigaOS.\n\n"
-  "This installs bsdsocket.library and usergroup.library into LIBS:, seven "
-  "network commands into C:, and writes a working configuration into DEVS:.\n\n"
-  "It asks which network card is installed and whether the network hands out "
-  "addresses automatically.  Nothing else is required.\n\n")
+  "AmiNetXDuo " VERSION_STR " -- a TCP/IP stack for AmigaOS.\n\n")
 
 (complete 0)
 
