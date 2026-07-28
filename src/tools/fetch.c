@@ -31,6 +31,7 @@
 
 #include "tools.h"
 
+#include <exec/execbase.h>   /* SysBase->AttnFlags, AFF_68020 */
 #include <exec/memory.h>
 #include <exec/tasks.h>
 
