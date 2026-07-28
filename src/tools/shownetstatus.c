@@ -490,7 +490,24 @@ static VOID show_resolver(const AmiResolverConfig *r, BOOL from_files)
  */
 static BOOL show_dns(const AmiConfig *cfg, BOOL elsewhere, BOOL from_disk)
 {
-    if (elsewhere)
+    (VOID)elsewhere;
+
+    /*
+     * ALWAYS ask the running stack first, whether or not the snapshot worked.
+     *
+     * This used to be gated on `elsewhere` -- that is, it asked the stack only
+     * when it had FAILED to read the stack, and used the file whenever it had
+     * succeeded. Backwards, and it hid in plain sight because the snapshot
+     * looks like the authoritative source and simply does not carry name
+     * servers. A DHCP machine therefore reported "none configured" while
+     * resolving perfectly through the server its lease supplied -- the exact
+     * disagreement netstack_dns.c's comment about recording DHCP servers was
+     * written to prevent.
+     *
+     * tool_stack_name_servers() returns 0 when nothing is running, so the file
+     * remains the fallback and a stopped machine still reports what it is
+     * configured to use.
+     */
     {
         char  live_ns[AMI_CFG_MAX_NAMESERVERS][16];
         ULONG live_count =
