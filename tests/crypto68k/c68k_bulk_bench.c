@@ -137,6 +137,12 @@ extern VOID bk_addself(ULONG reps);
 extern VOID bk_exg_da(ULONG reps);
 extern VOID bk_movel_ad(ULONG reps);
 extern VOID bk_movel_da(ULONG reps);
+extern VOID bk_addx(ULONG reps);
+extern VOID bk_andi(ULONG reps);
+extern VOID bk_rol6(ULONG reps);
+extern VOID bk_mulu_dd(APTR table, ULONG reps);
+extern VOID bk_mulu_an(APTR table, ULONG reps);
+extern VOID bk_mulu_d16(APTR table, ULONG reps);
 extern VOID bk_idx1k(APTR table, ULONG reps);
 extern VOID bk_idx4k(APTR table, ULONG reps);
 extern VOID bk_idxb(APTR table, ULONG reps);
@@ -289,6 +295,9 @@ static VOID b_bench_kernels(VOID)
     b_report_ps("EXG    Dn,An            ", b_time_reg(bk_exg_da, B_KERNEL_REPS));
     b_report_ps("MOVE.L An,Dn            ", b_time_reg(bk_movel_ad, B_KERNEL_REPS));
     b_report_ps("MOVEA.L Dn,An           ", b_time_reg(bk_movel_da, B_KERNEL_REPS));
+    b_report_ps("ADDX.L Dn,Dm            ", b_time_reg(bk_addx, B_KERNEL_REPS));
+    b_report_ps("AND.L  #imm32,Dn        ", b_time_reg(bk_andi, B_KERNEL_REPS));
+    b_report_ps("ROL.L  #6,Dn            ", b_time_reg(bk_rol6, B_KERNEL_REPS));
 
     if (b_table != NULL)
     {
@@ -304,6 +313,15 @@ static VOID b_bench_kernels(VOID)
                     b_time_mem(bk_moveb_d16, B_KERNEL_REPS));
         b_report_ps("MOVE.L Dm,d16(An)       ",
                     b_time_mem(bk_movel_store, B_KERNEL_REPS));
+        /* Poly1305's whole register allocation turns on these three: fourteen
+           live values against fifteen registers only works if MULU.L takes
+           its multiplier straight out of memory. */
+        b_report_ps("MULU.L Dn,Dh:Dl         ",
+                    b_time_mem(bk_mulu_dd, B_KERNEL_REPS / 4uL));
+        b_report_ps("MULU.L (An),Dh:Dl       ",
+                    b_time_mem(bk_mulu_an, B_KERNEL_REPS / 4uL));
+        b_report_ps("MULU.L d16(An),Dh:Dl    ",
+                    b_time_mem(bk_mulu_d16, B_KERNEL_REPS / 4uL));
     }
 
     c68k_log("");
@@ -1022,12 +1040,226 @@ UINT            o;
             got, want, (ULONG)(B_CC_BLOCKS * 64u));
 }
 
+/*
+ * Poly1305's block function, the shipped one against the portable C one, over
+ * the same blocks and from the same starting accumulator.
+ *
+ * This is the equivalent of the ChaCha20 check above and it exists for the
+ * same reason: RFC 8439 2.5.2 authenticates 34 bytes, which is two blocks and
+ * a partial, and a kernel bug in the carry between limbs or in the fold round
+ * the top of 2^130 can hide until the accumulator is large and the limbs have
+ * been near their bounds a few hundred times.  So it runs both over 1, 2, 3,
+ * 5, 17 and 200 blocks, and it does it TWICE PER COUNT -- once with the 2^128
+ * bit a full block carries and once without, which is the short-final-block
+ * case c68k_poly1305_finish() takes and which nothing else here reaches with a
+ * grown accumulator.
+ *
+ * It compares the accumulator rather than a tag: h is what the kernel writes,
+ * a tag is h after a reduction that is common to both paths, and a difference
+ * in the fifth limb that the final carry happens to absorb should still be a
+ * failure.
+ */
+static const ULONG b_poly_block_counts[] =
+{
+    1uL, 2uL, 3uL, 5uL, 17uL, 200uL
+};
+
+static VOID b_poly_check_blocks(VOID)
+{
+
+C68K_POLY1305   ours;
+C68K_POLY1305   ref;
+ULONG           hibit;
+ULONG           n;
+UINT            k;
+UINT            pass;
+
+
+    for (pass = 0u; pass < 2u; pass++)
+    {
+        hibit = (pass == 0u) ? ((ULONG)1uL << 24) : 0uL;
+
+        for (k = 0u; k < (UINT)(sizeof(b_poly_block_counts) /
+                                sizeof(b_poly_block_counts[0])); k++)
+        {
+            n = b_poly_block_counts[k];
+
+            c68k_poly1305_initialize(&ours, b_poly_key);
+            c68k_poly1305_initialize(&ref, b_poly_key);
+
+            /* Not from zero: run 64 blocks in first, through BOTH paths, so
+               that what the counts below compare is a kernel picking up an
+               accumulator it did not itself produce. */
+            c68k_poly1305_blocks(&ours, b_plain, 64uL, (ULONG)1uL << 24);
+            c68k_poly1305_blocks_c(&ref, b_plain, 64uL, (ULONG)1uL << 24);
+
+            c68k_poly1305_blocks(&ours, &b_plain[1024], n, hibit);
+            c68k_poly1305_blocks_c(&ref, &b_plain[1024], n, hibit);
+
+            b_check("Poly1305 block function against the portable C",
+                    (const UCHAR *)ours.c68k_poly1305_h,
+                    (const UCHAR *)ref.c68k_poly1305_h, 20uL);
+        }
+    }
+}
+
+/*
+ * Independent known answers: the tag over the first N bytes of b_plain under
+ * RFC 8439 2.5.2's key, for seventeen lengths that straddle every boundary the
+ * buffering has -- empty, one byte, one short of a block, exactly a block, one
+ * past it, and the same around 32, 64, 128, 1024 and the whole 16 KiB.
+ *
+ * WHERE THESE CAME FROM: computed off-target from the definition in RFC 8439
+ * 2.5 -- r clamped, the message read little-endian sixteen bytes at a time
+ * with the 2^128 bit appended, the accumulator multiplied by r modulo
+ * 2^130 - 5, s added at the end -- by a generator that reproduces 2.5.2's own
+ * tag before it emits any of these.  They are NOT this implementation's output
+ * recorded, which would only prove it is deterministic.
+ *
+ * Every length is run twice: once as a single update, and once split at 1, 13
+ * and the rest, which lands the split inside a block for every length past 14
+ * and exercises the leftover buffer in the state a packet chain leaves it.
+ */
+static const ULONG b_poly_lens[] =
+{
+    0uL, 1uL, 15uL, 16uL, 17uL, 31uL, 32uL, 33uL, 63uL, 64uL, 127uL, 128uL,
+    129uL, 1023uL, 1024uL, 4096uL, 16384uL
+};
+
+static const UCHAR b_poly_tags[][16] =
+{
+    { 0x01, 0x03, 0x80, 0x8A, 0xFB, 0x0D, 0xB2, 0xFD,
+      0x4A, 0xBF, 0xF6, 0xAF, 0x41, 0x49, 0xF5, 0x1B },     /* 0     */
+    { 0x0B, 0x88, 0x56, 0x49, 0x04, 0x62, 0x07, 0x6B,
+      0x4E, 0x3B, 0x3B, 0x02, 0x50, 0x89, 0xCA, 0x22 },     /* 1     */
+    { 0xD1, 0xF2, 0x85, 0x98, 0xBC, 0x85, 0x0C, 0xAA,
+      0xE6, 0xC4, 0x57, 0x9B, 0x04, 0xBB, 0x4F, 0xA0 },     /* 15    */
+    { 0xA1, 0x8A, 0x0D, 0xE2, 0xBA, 0x29, 0x91, 0x28,
+      0x30, 0x3A, 0x39, 0x8E, 0x28, 0xBD, 0xE4, 0xF0 },     /* 16    */
+    { 0x37, 0x47, 0x7D, 0x65, 0x16, 0x0C, 0x3C, 0xA0,
+      0x46, 0x6A, 0xAC, 0x57, 0x80, 0x78, 0x5E, 0xF5 },     /* 17    */
+    { 0x0E, 0x25, 0xD9, 0x3D, 0x39, 0x50, 0x72, 0x35,
+      0x12, 0x7A, 0x78, 0xC3, 0x43, 0x31, 0x1E, 0xCA },     /* 31    */
+    { 0xA0, 0xA5, 0x0F, 0x18, 0xE2, 0x7E, 0x3B, 0x64,
+      0xB5, 0x5C, 0x78, 0xB7, 0x10, 0xBC, 0x53, 0x6B },     /* 32    */
+    { 0x4B, 0x43, 0xC8, 0x89, 0xC0, 0x67, 0xC2, 0xFA,
+      0x13, 0xA0, 0xF4, 0x16, 0xF5, 0xB9, 0x1D, 0x74 },     /* 33    */
+    { 0x14, 0x29, 0x57, 0xB2, 0xB0, 0x3E, 0x4D, 0xCA,
+      0x04, 0x00, 0xA6, 0xD5, 0x4D, 0x2E, 0xFC, 0x66 },     /* 63    */
+    { 0x2A, 0x7B, 0xEB, 0xAD, 0xAE, 0x82, 0x9F, 0x59,
+      0x5B, 0xBD, 0xE2, 0xCB, 0x6C, 0xCA, 0x72, 0xA9 },     /* 64    */
+    { 0x5E, 0x16, 0x8C, 0x4D, 0xA1, 0x9B, 0xF3, 0x8E,
+      0x76, 0xD5, 0xD4, 0xA7, 0xE8, 0xF3, 0xB3, 0x54 },     /* 127   */
+    { 0x81, 0x0B, 0xDC, 0x8B, 0x49, 0x0A, 0x58, 0xDF,
+      0x33, 0x48, 0x8B, 0xA2, 0xAB, 0xB2, 0xAC, 0xD9 },     /* 128   */
+    { 0x19, 0x37, 0x4E, 0x4A, 0xD5, 0xC2, 0x41, 0x13,
+      0x61, 0x45, 0x20, 0xB7, 0xD6, 0x80, 0xDA, 0x2B },     /* 129   */
+    { 0x96, 0xCC, 0x60, 0x62, 0x56, 0xEE, 0x56, 0xD0,
+      0x32, 0x52, 0x0A, 0xAA, 0x98, 0xAF, 0x29, 0xF8 },     /* 1023  */
+    { 0x29, 0x3C, 0x07, 0x2B, 0x53, 0xD8, 0xD2, 0xD1,
+      0x3C, 0x7B, 0x7E, 0xFD, 0x03, 0x9A, 0x08, 0x73 },     /* 1024  */
+    { 0x6E, 0x9A, 0x3A, 0xB0, 0xDD, 0x5B, 0xC4, 0xC5,
+      0xBD, 0xEC, 0x52, 0xF5, 0x17, 0xBB, 0xEC, 0x42 },     /* 4096  */
+    { 0x66, 0xBF, 0x39, 0xC5, 0xE1, 0x6D, 0x1E, 0x38,
+      0x76, 0xFD, 0x59, 0x87, 0x40, 0x0E, 0x1F, 0xDC }      /* 16384 */
+};
+
+static VOID b_poly_check_lengths(VOID)
+{
+
+ULONG   n;
+ULONG   first;
+ULONG   second;
+UINT    k;
+
+
+    for (k = 0u; k < (UINT)(sizeof(b_poly_lens) / sizeof(b_poly_lens[0])); k++)
+    {
+        n = b_poly_lens[k];
+
+        c68k_poly1305_initialize(&b_poly, b_poly_key);
+        c68k_poly1305_update(&b_poly, b_plain, n);
+        c68k_poly1305_finish(&b_poly, b_tag);
+        b_check("Poly1305 known answer", b_tag, b_poly_tags[k], 16uL);
+
+        first  = (n < 1uL) ? n : 1uL;
+        second = ((n - first) < 13uL) ? (n - first) : 13uL;
+
+        c68k_poly1305_initialize(&b_poly, b_poly_key);
+        c68k_poly1305_update(&b_poly, b_plain, first);
+        c68k_poly1305_update(&b_poly, &b_plain[first], second);
+        c68k_poly1305_update(&b_poly, &b_plain[first + second],
+                             n - first - second);
+        c68k_poly1305_finish(&b_poly, b_tag);
+        b_check("Poly1305 known answer, split 1/13/rest", b_tag,
+                b_poly_tags[k], 16uL);
+    }
+}
+
+/*
+ * A tag that verifies when it should not is the only failure here that is
+ * worse than a slow one, and neither the RFC vectors nor the comparisons
+ * above would catch a verify() that always agreed.  So: the real tag, then
+ * every one of the sixteen bytes flipped in turn, then a record whose
+ * ciphertext was altered under an untouched tag -- which is the forgery an
+ * attacker actually has.
+ */
+static VOID b_poly_check_forged(VOID)
+{
+
+static UCHAR    cipher[114];
+UCHAR           forged[16];
+UCHAR           good[16];
+UINT            i;
+
+
+    c68k_chacha20_poly1305_initialize(&b_aead, b_aead_key, b_aead_nonce);
+    c68k_chacha20_poly1305_associate(&b_aead, b_aead_aad, 12uL);
+    c68k_chacha20_poly1305_encrypt(&b_aead, b_aead_plain, cipher, 114uL);
+    c68k_chacha20_poly1305_tag(&b_aead, good);
+
+    if (c68k_chacha20_poly1305_verify(good, b_aead_tag) !=
+        (UINT)NX_CRYPTO_TRUE)
+    {
+        b_fail("the genuine tag did not verify");
+    }
+
+    for (i = 0u; i < 16u; i++)
+    {
+        UINT j;
+
+        for (j = 0u; j < 16u; j++)
+        {
+            forged[j] = good[j];
+        }
+        forged[i] ^= 0x40u;
+
+        if (c68k_chacha20_poly1305_verify(good, forged) !=
+            (UINT)NX_CRYPTO_FALSE)
+        {
+            b_fail("a tag with one byte altered VERIFIED");
+        }
+    }
+
+    cipher[57] ^= 0x01u;
+    c68k_chacha20_poly1305_initialize(&b_aead, b_aead_key, b_aead_nonce);
+    c68k_chacha20_poly1305_associate(&b_aead, b_aead_aad, 12uL);
+    c68k_chacha20_poly1305_decrypt(&b_aead, cipher, cipher, 114uL);
+    c68k_chacha20_poly1305_tag(&b_aead, forged);
+
+    if (c68k_chacha20_poly1305_verify(good, forged) != (UINT)NX_CRYPTO_FALSE)
+    {
+        b_fail("an altered ciphertext kept its tag");
+    }
+}
+
 static VOID b_bench_chacha(VOID)
 {
 
 ULONG   start;
 ULONG   cipher_us;
 ULONG   mac_us;
+ULONG   mac_c_us;
 ULONG   aead_us;
 ULONG   odd_us;
 
@@ -1035,12 +1267,18 @@ ULONG   odd_us;
     c68k_log("");
     c68k_log("5. ChaCha20-Poly1305 over %lu bytes -- the AEAD record path",
              B_BULK_BYTES);
-    c68k_log("   block function: %s",
+    c68k_log("   ChaCha20 block function: %s",
              (LONG)(c68k_chacha20_core_is_asm() == (UINT)NX_CRYPTO_TRUE ?
+                    "68020 assembly" : "portable C"));
+    c68k_log("   Poly1305 block function: %s",
+             (LONG)(c68k_poly1305_blocks_is_asm() == (UINT)NX_CRYPTO_TRUE ?
                     "68020 assembly" : "portable C"));
 
     b_chacha_check_vectors();
     b_chacha_check_core();
+    b_poly_check_blocks();
+    b_poly_check_lengths();
+    b_poly_check_forged();
 
     c68k_chacha20_initialize(&b_cc, b_cc_key, b_cc_nonce, 1uL);
     start = c68k_eclock();
@@ -1053,10 +1291,23 @@ ULONG   odd_us;
     c68k_poly1305_finish(&b_poly, b_tag);
     mac_us = c68k_eclock_micros(c68k_eclock() - start);
 
+    /* And the portable C block function over the same bytes, in the same run
+       -- which is the only comparison an emulator does not distort, and the
+       one that says what the assembly is actually worth on this machine
+       rather than what two builds measured minutes apart did. */
+    c68k_poly1305_initialize(&b_poly, b_poly_key);
+    start = c68k_eclock();
+    c68k_poly1305_blocks_c(&b_poly, b_cipher, B_BULK_BYTES / 16uL,
+                           (ULONG)1uL << 24);
+    mac_c_us = c68k_eclock_micros(c68k_eclock() - start);
+
     c68k_log("  %-44s %lu us (%lu KB/s)", (LONG)"ChaCha20 alone",
              cipher_us, b_kbs(cipher_us));
     c68k_log("  %-44s %lu us (%lu KB/s)", (LONG)"Poly1305 alone",
              mac_us, b_kbs(mac_us));
+    c68k_log("  %-44s %lu us (%lu KB/s)",
+             (LONG)"      its block function, portable C",
+             mac_c_us, b_kbs(mac_c_us));
 
     /* And through the AEAD, which is what a record actually costs: the two
        above plus one extra ChaCha20 block for the one-time Poly1305 key. */

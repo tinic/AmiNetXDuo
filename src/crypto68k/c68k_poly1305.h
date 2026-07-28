@@ -85,6 +85,28 @@ VOID c68k_poly1305_update(C68K_POLY1305 *ctx, const UCHAR *input,
  */
 VOID c68k_poly1305_finish(C68K_POLY1305 *ctx, UCHAR *tag);
 
+
+/*
+ * h = (h + m) * r mod 2^130 - 5 over `blocks` whole 16-byte blocks, with
+ * `hibit` the 2^128 term a full block carries and a short final one does not.
+ *
+ * Exposed for one reason: c68k_poly1305.S implements the same contract in
+ * 68020 assembly and the two have to be checkable against each other.  The
+ * three calls above take whichever this build has -- ask which with
+ * c68k_poly1305_blocks_is_asm() -- but the C stays compiled either way, so a
+ * test can run both over the same blocks and compare the accumulator.
+ * tests/crypto68k/crypto68k_bulk does; a kernel bug that only showed once the
+ * accumulator had grown would pass RFC 8439 2.5.2's single vector.
+ */
+VOID c68k_poly1305_blocks(C68K_POLY1305 *ctx, const UCHAR *m, ULONG blocks,
+                          ULONG hibit);
+
+VOID c68k_poly1305_blocks_c(C68K_POLY1305 *ctx, const UCHAR *m, ULONG blocks,
+                            ULONG hibit);
+
+/* NX_CRYPTO_TRUE when this build's block function is the assembly. */
+UINT c68k_poly1305_blocks_is_asm(VOID);
+
 #ifdef __cplusplus
 }
 #endif

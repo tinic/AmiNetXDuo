@@ -137,6 +137,56 @@ _bk_\name:
 
 
 | ---------------------------------------------------------------------------
+| The 32x32 -> 64 multiply, and what its operand costs.  VOID bk_xxx(ULONG).
+|
+| Poly1305 is twenty-five MULU.L a block against nine constants and five
+| accumulator limbs, which is fourteen live values for fifteen registers --
+| and MULU.L's <ea> operand may be MEMORY, which is the only reason it fits
+| at all.  These three rows are the price of that: if a longword read costs
+| what MOVE.L d16(An),Dm costs then the constants live in the frame and the
+| limbs live in registers, and if it costs much more the whole allocation has
+| to be rethought.  ADDX.L is here because the 130-bit accumulate is one
+| ADD.L and one ADDX.L per product and nothing else prices it.
+|
+| The multiplicand is d4 and the product overwrites d5:d4, so d4 walks a
+| pseudo-random sequence rather than settling -- both seeds are odd and an odd
+| product stays odd, so it never reaches zero and no early-out in the model
+| can flatter the row.
+| ---------------------------------------------------------------------------
+
+        .macro  BK_MUL name, src
+        .globl  _bk_\name
+_bk_\name:
+        movem.l d2-d5,-(sp)
+        movea.l 20(sp),a0               | 4 KB scratch, used by the mem rows
+        move.l  24(sp),d0
+        move.l  #0x5A3C71E9,d2
+        move.l  d2,(a0)
+        move.l  d2,8(a0)
+        move.l  #0x2F6B41D7,d4
+        tst.l   d0
+        beq     .Lbk_\name\()_done
+.Lbk_\name\()_loop:
+        .rept   16
+        mulu.l  \src,d5:d4
+        .endr
+        subq.l  #1,d0
+        bne     .Lbk_\name\()_loop
+.Lbk_\name\()_done:
+        movem.l (sp)+,d2-d5
+        rts
+        .endm
+
+        BK_MUL  mulu_dd,   "d2"
+        BK_MUL  mulu_an,   "(a0)"
+        BK_MUL  mulu_d16,  "8(a0)"
+
+        BK_REG  addx,      addx.l, "d2,d3"
+        BK_REG  andi,      and.l,  "#0x03FFFFFF,d3"
+        BK_REG  rol6,      rol.l,  "#6,d3"
+
+
+| ---------------------------------------------------------------------------
 | Table kernels.  VOID bk_xxx(APTR table, ULONG reps).
 |
 | a0..a3 point at the four 1 KB quarters of the caller's 4 KB buffer, so

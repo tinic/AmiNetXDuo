@@ -13,6 +13,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <stddef.h>
+
 #include "c68k_poly1305.h"
 
 
@@ -99,8 +101,8 @@ ULONG   t0, t1, t2, t3;
  * the reduction of the terms that fall off the top of the 130-bit accumulator
  * folded into the multiplier instead of into a separate pass.
  */
-static VOID c68k_poly1305_blocks(C68K_POLY1305 *ctx, const UCHAR *m,
-                                 ULONG blocks, ULONG hibit)
+VOID c68k_poly1305_blocks_c(C68K_POLY1305 *ctx, const UCHAR *m,
+                            ULONG blocks, ULONG hibit)
 {
 
 ULONG   r0, r1, r2, r3, r4;
@@ -177,6 +179,56 @@ ULONG64 d0, d1, d2, d3, d4;
 }
 
 
+/*
+ * Which one the rest of this file calls.  A macro rather than a wrapper for
+ * the same reason c68k_chacha20.c's is: the build without the assembly should
+ * have no extra call at all, and there is nothing here to choose between --
+ * the assembly is the same function, faster, on every part that can run it.
+ * AMINETXDUO_CRYPTO68K_ASM=OFF, the 68000 and the 68060 take the C.
+ */
+#ifdef C68K_ASM
+extern VOID c68k_poly1305_blocks_asm(C68K_POLY1305 *ctx, const UCHAR *m,
+                                     ULONG blocks, ULONG hibit);
+#define C68K_POLY1305_BLOCKS    c68k_poly1305_blocks_asm
+
+/*
+ * c68k_poly1305.S reaches into C68K_POLY1305 with two hardcoded offsets, and
+ * a struct that moved under it would be a wrong tag rather than a crash.  So
+ * it is a build failure instead.  (An array of negative size; this tree is
+ * built as C89 and _Static_assert is not available.)
+ */
+typedef char c68k_poly1305_layout_check[
+    (offsetof(C68K_POLY1305, c68k_poly1305_r) == 0u &&
+     offsetof(C68K_POLY1305, c68k_poly1305_h) == 20u) ? 1 : -1];
+#else
+#define C68K_POLY1305_BLOCKS    c68k_poly1305_blocks_c
+#endif
+
+/*
+ * The dispatch, as a real function, because tests/crypto68k/crypto68k_bulk
+ * has to be able to call the shipped kernel and the portable one over the
+ * same input and compare -- and it is not compiled with C68K_ASM, so it
+ * cannot make the choice itself.  Nothing on the hot path goes through here:
+ * update() and finish() below call the macro.
+ */
+VOID c68k_poly1305_blocks(C68K_POLY1305 *ctx, const UCHAR *m, ULONG blocks,
+                          ULONG hibit)
+{
+
+    C68K_POLY1305_BLOCKS(ctx, m, blocks, hibit);
+}
+
+UINT c68k_poly1305_blocks_is_asm(VOID)
+{
+
+#ifdef C68K_ASM
+    return((UINT)NX_CRYPTO_TRUE);
+#else
+    return((UINT)NX_CRYPTO_FALSE);
+#endif
+}
+
+
 VOID c68k_poly1305_update(C68K_POLY1305 *ctx, const UCHAR *input,
                           ULONG input_length)
 {
@@ -210,7 +262,7 @@ UINT    i;
             return;
         }
 
-        c68k_poly1305_blocks(ctx, ctx -> c68k_poly1305_buffer, 1uL,
+        C68K_POLY1305_BLOCKS(ctx, ctx -> c68k_poly1305_buffer, 1uL,
                              (ULONG)1uL << 24);
         ctx -> c68k_poly1305_leftover = 0u;
     }
@@ -218,7 +270,7 @@ UINT    i;
     blocks = input_length / C68K_POLY1305_BLOCK_SIZE;
     if (blocks != 0uL)
     {
-        c68k_poly1305_blocks(ctx, input, blocks, (ULONG)1uL << 24);
+        C68K_POLY1305_BLOCKS(ctx, input, blocks, (ULONG)1uL << 24);
         input += blocks * C68K_POLY1305_BLOCK_SIZE;
         input_length -= blocks * C68K_POLY1305_BLOCK_SIZE;
     }
@@ -253,7 +305,7 @@ UINT    i;
             ctx -> c68k_poly1305_buffer[i] = 0u;
         }
 
-        c68k_poly1305_blocks(ctx, ctx -> c68k_poly1305_buffer, 1uL, 0uL);
+        C68K_POLY1305_BLOCKS(ctx, ctx -> c68k_poly1305_buffer, 1uL, 0uL);
         ctx -> c68k_poly1305_leftover = 0u;
     }
 

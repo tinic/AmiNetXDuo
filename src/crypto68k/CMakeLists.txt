@@ -128,12 +128,14 @@ set(CRYPTO68K_SOURCES
     c68k_p256_table.c
     c68k_aes.c
     c68k_sha256.c
-    # ChaCha20-Poly1305, the AEAD record path.  The cipher's block function
-    # has a 68020 counterpart in c68k_chacha20.S -- sixteen state words against
-    # eight data registers is a scheduling problem and 57 measured what leaving
-    # it to the compiler costs.  The C core stays compiled in the assembly
-    # build as the reference the tests compare against.  Poly1305 has no
-    # counterpart: it is MULU.L, which 18.4 established this GCC picks well.
+    # ChaCha20-Poly1305, the AEAD record path.  Both halves have a 68020
+    # counterpart -- c68k_chacha20.S and c68k_poly1305.S -- and in both cases
+    # the reason is register allocation rather than instruction selection: the
+    # cipher is sixteen state words against eight data registers (57, 58), and
+    # the authenticator is fourteen live values and a 32x32 -> 64 product that
+    # C can only reach through `unsigned long long`, which at -Os costs it a
+    # frame round trip per product.  The C stays compiled in the assembly build
+    # as the reference the tests compare against.
     c68k_chacha20.c
     c68k_poly1305.c
     # X25519 and Ed25519.  No assembly counterpart: the win is the field
@@ -145,7 +147,7 @@ set(CRYPTO68K_SOURCES
 
 if(AMINETXDUO_CRYPTO68K_ASM)
     list(APPEND CRYPTO68K_SOURCES
-         c68k_prim.S c68k_p256.S c68k_aes.S c68k_chacha20.S)
+         c68k_prim.S c68k_p256.S c68k_aes.S c68k_chacha20.S c68k_poly1305.S)
 endif()
 
 add_library(crypto68k STATIC ${CRYPTO68K_SOURCES})
@@ -166,7 +168,8 @@ if(AMINETXDUO_CRYPTO68K_ASM)
     # nothing else in the tree changes behaviour.
     target_compile_definitions(crypto68k PRIVATE C68K_ASM=1)
     set_source_files_properties(
-        c68k_prim.S c68k_p256.S c68k_aes.S c68k_chacha20.S PROPERTIES
+        c68k_prim.S c68k_p256.S c68k_aes.S c68k_chacha20.S c68k_poly1305.S
+        PROPERTIES
         COMPILE_DEFINITIONS C68K_ASM=1
         COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
 endif()
