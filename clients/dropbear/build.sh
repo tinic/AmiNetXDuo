@@ -387,7 +387,7 @@ done
 echo "==> building $PROGRAMS"
 make -C "$OUT" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" \
      PROGRAMS="$PROGRAMS" \
-     LDFLAGS="$AMIGA_CLIENT_LDFLAGS -Wl,--wrap=open,--wrap=read,--wrap=write,--wrap=close,--wrap=spawn_command$FAST_WRAPS$PROF_WRAPS" \
+     LDFLAGS="$AMIGA_CLIENT_LDFLAGS -Wl,--wrap=open,--wrap=read,--wrap=write,--wrap=close,--wrap=spawn_command,--wrap=getenv$FAST_WRAPS$PROF_WRAPS" \
      LIBS="${SHIM_OBJS[*]} $PROF_LIBS -Wl,--start-group -lamigaclient -lc -Wl,--end-group"
 
 echo

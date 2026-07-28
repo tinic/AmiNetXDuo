@@ -1691,6 +1691,40 @@ static char **amiga_environ          = amiga_environ_empty;
 char        ***environ_ptr           = &amiga_environ;
 
 /*
+ * getenv() over ENV:, and the terminal type in particular.
+ *
+ * environ is empty (above), so newlib's getenv() answers NULL for everything --
+ * and send_chansess_pty_req() then tells the server TERM=vt100, whose terminfo
+ * drives the VT100 line-drawing charset the Amiga console does not have, so vim
+ * paints its frames as garbage.  Route getenv() through GetVar() instead, which
+ * is where the rest of this file reads named variables, so a `setenv TERM ...`
+ * is honoured -- and default TERM to "amiga", the ncurses entry written for
+ * this console (it knows there is no line-drawing).  -Wl,--wrap=getenv.
+ */
+char *__wrap_getenv(const char *name)
+{
+    static char value[256];
+    LONG        len;
+
+    if (name == NULL)
+        return NULL;
+
+    len = GetVar((STRPTR)name, (STRPTR)value, (LONG)sizeof(value) - 1, 0);
+    if (len >= 0)
+    {
+        value[len] = '\0';
+        while (len > 0 && (value[len - 1] == '\n' || value[len - 1] == '\r'))
+            value[--len] = '\0';
+        return value;
+    }
+
+    if (strcmp(name, "TERM") == 0)
+        return (char *)"amiga";
+
+    return NULL;
+}
+
+/*
  * A Process address is unique for as long as the process exists, which is
  * what dbrandom.c and gensignkey.c want it for -- a per-run distinguisher
  * hashed into the pool, not an identity.
