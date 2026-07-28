@@ -136,9 +136,9 @@ static LONG nx_getsockname(LONG s, APTR n, APTR l)     { return getsockname(s, n
 static LONG nx_getpeername(LONG s, APTR n, APTR l)     { return getpeername(s, n, l); }
 static LONG nx_ioctlsocket(LONG s, ULONG r, APTR a)    { return IoctlSocket(s, r, a); }
 static LONG nx_closesocket(LONG s)                     { return CloseSocket(s); }
-static LONG nx_waitselect(LONG n, APTR r, APTR w, APTR e, APTR t)
+static LONG nx_waitselect(LONG n, APTR r, APTR w, APTR e, APTR t, ULONG *sigs)
                                                        { return WaitSelect(n, r, w, e,
-                                                                (struct __timeval *)t, 0); }
+                                                                (struct __timeval *)t, sigs); }
 static struct hostent *nx_gethostbyname(APTR n)        { return gethostbyname(n); }
 static struct hostent *nx_gethostbyaddr(APTR a, LONG l, LONG t)
                                                        { return gethostbyaddr(a, l, t); }
@@ -178,6 +178,7 @@ static LONG nx_socketbasetaglist(APTR tags)            { return SocketBaseTagLis
 #include <fcntl.h>
 #include <termios.h>
 #include <sys/filio.h>
+#include <dos/dostags.h>
 
 
 /* ------------------------------------------------------ the descriptor map */
@@ -676,10 +677,20 @@ int __wrap_open(const char *path, int flags, ...)
     return __real_open(path, flags, mode);
 }
 
+/* The interactive console reader lives further down (it needs select's fd
+   helpers); read() here is its one caller before then. */
+static int con_active(void);
+static int con_read(void *buf, size_t len);
+
 int __wrap_read(int fd, void *buf, size_t len)
 {
     if (IS_SOCK(fd))
         return (int)nx_recv(SOCKOF(fd), (APTR)buf, (LONG)len, 0);
+
+    /* stdin, while an interactive session's console reader child is running --
+       hand back what it has buffered rather than read the console twice. */
+    if (fd == 0 && con_active())
+        return con_read(buf, len);
 
     if (IS_RAND(fd))
         return rand_fill(buf, len);
@@ -796,6 +807,168 @@ int fcntl(int fd, int cmd, ...)
 }
 
 
+/* ---------------------------------------------- interactive console reader */
+
+/*
+ * WaitSelect() waits on sockets and Exec signals, never on a DOS console, so an
+ * interactive session cannot wait on the keyboard and the socket at once
+ * through it directly.  A small child process bridges the gap: it blocks on
+ * WaitForChar() -- which wakes the instant a key is pressed, so it is not a
+ * spin -- reads each byte into a ring the parent drains, and Signal()s the
+ * parent.  select() (below) folds that signal into WaitSelect()'s mask, so
+ * Dropbear's loop waits on the socket AND the keyboard with no polling.
+ *
+ * Started and stopped by tcsetattr()'s raw/cooked switch, which IS Dropbear's
+ * cli_tty_setup()/cli_tty_cleanup() pairing: the child lives exactly as long as
+ * the raw-mode session, and con_reader_stop() waits for it (cr_DoneSig) before
+ * freeing anything it might still Signal -- the one way a stray reply to a dead
+ * task, and the crash that is, is avoided.
+ */
+#define CON_RING_SIZE   256U                  /* power of two -- see the mask */
+#define CON_POLL_US     100000UL              /* WaitForChar() quit-check bound */
+
+typedef struct
+{
+    BPTR           cr_Handle;                 /* the console to read (Input()) */
+    struct Task   *cr_Parent;
+    ULONG          cr_DataSig;                /* parent: a byte is waiting     */
+    ULONG          cr_DoneSig;                /* child -> parent: I have stopped */
+    volatile ULONG cr_Head;                   /* child writes                  */
+    volatile ULONG cr_Tail;                   /* parent reads                  */
+    volatile UBYTE cr_Quit;
+    volatile UBYTE cr_Eof;
+    UBYTE          cr_Buf[CON_RING_SIZE];
+} ConReader;
+
+static ConReader *con_reader;
+static BYTE       con_data_bit = -1;
+static BYTE       con_done_bit = -1;
+
+/* The child.  Picks cr up from the global, which is set before it is spawned. */
+static void con_child(void)
+{
+    ConReader *cr = con_reader;
+    char       c;
+
+    while (!cr->cr_Quit)
+    {
+        ULONG head, next;
+
+        if (!WaitForChar(cr->cr_Handle, CON_POLL_US))
+            continue;                          /* nothing yet; re-check cr_Quit */
+
+        if (Read(cr->cr_Handle, &c, 1) != 1)
+        {
+            cr->cr_Eof = 1;
+            Signal(cr->cr_Parent, cr->cr_DataSig);
+            break;
+        }
+
+        head = cr->cr_Head;
+        next = (head + 1U) & (CON_RING_SIZE - 1U);
+        if (next != cr->cr_Tail)               /* drop on overflow: typing is slow */
+        {
+            cr->cr_Buf[head] = (UBYTE)c;
+            cr->cr_Head = next;
+        }
+        Signal(cr->cr_Parent, cr->cr_DataSig);
+    }
+
+    Signal(cr->cr_Parent, cr->cr_DoneSig);     /* last act; then touch nothing */
+}
+
+static void con_reader_start(BPTR handle)
+{
+    ConReader     *cr;
+    struct TagItem tags[5];
+
+    if (con_reader != NULL)
+        return;
+
+    con_data_bit = AllocSignal(-1);
+    con_done_bit = AllocSignal(-1);
+    if (con_data_bit < 0 || con_done_bit < 0)
+        goto fail;
+
+    cr = (ConReader *)AllocMem(sizeof(*cr), MEMF_PUBLIC | MEMF_CLEAR);
+    if (cr == NULL)
+        goto fail;
+
+    cr->cr_Handle  = handle;
+    cr->cr_Parent  = FindTask(NULL);
+    cr->cr_DataSig = 1UL << con_data_bit;
+    cr->cr_DoneSig = 1UL << con_done_bit;
+
+    con_reader = cr;
+
+    tags[0].ti_Tag = NP_Entry;     tags[0].ti_Data = (ULONG)con_child;
+    tags[1].ti_Tag = NP_Name;      tags[1].ti_Data = (ULONG)"AmiNetXDuo ssh console";
+    tags[2].ti_Tag = NP_StackSize; tags[2].ti_Data = 8192UL;
+    tags[3].ti_Tag = NP_Priority;  tags[3].ti_Data = (ULONG)1;
+    tags[4].ti_Tag = TAG_END;      tags[4].ti_Data = 0;
+
+    if (CreateNewProc(tags) == NULL)
+    {
+        con_reader = NULL;
+        FreeMem(cr, sizeof(*cr));
+        goto fail;
+    }
+    return;
+
+fail:
+    if (con_data_bit >= 0) { FreeSignal(con_data_bit); con_data_bit = -1; }
+    if (con_done_bit >= 0) { FreeSignal(con_done_bit); con_done_bit = -1; }
+}
+
+static void con_reader_stop(void)
+{
+    if (con_reader == NULL)
+        return;
+
+    con_reader->cr_Quit = 1;
+    Wait(con_reader->cr_DoneSig);              /* the child's final signal      */
+
+    FreeMem(con_reader, sizeof(*con_reader));
+    con_reader = NULL;
+    FreeSignal(con_data_bit); con_data_bit = -1;
+    FreeSignal(con_done_bit); con_done_bit = -1;
+}
+
+static int con_active(void)
+{
+    return con_reader != NULL;
+}
+
+static int con_readable(void)
+{
+    ConReader *cr = con_reader;
+    return cr != NULL && (cr->cr_Tail != cr->cr_Head || cr->cr_Eof);
+}
+
+/* The parent's read() of the console: drain the ring the child fills. */
+static int con_read(void *buf, size_t len)
+{
+    ConReader *cr = con_reader;
+    UBYTE     *out = (UBYTE *)buf;
+    int        n = 0;
+
+    while ((size_t)n < len && cr->cr_Tail != cr->cr_Head)
+    {
+        out[n++] = cr->cr_Buf[cr->cr_Tail];
+        cr->cr_Tail = (cr->cr_Tail + 1U) & (CON_RING_SIZE - 1U);
+    }
+
+    if (n == 0)
+    {
+        if (cr->cr_Eof)
+            return 0;
+        errno = EWOULDBLOCK;
+        return -1;
+    }
+    return n;
+}
+
+
 /* -------------------------------------------------------------- select --- */
 
 /*
@@ -854,6 +1027,8 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
     int   ready = 0;
     int   other_ready = 0;
     int   have_sockets = 0;
+    int   con_watch = 0;              /* the interactive console is in readfds */
+    int   con_fd = -1;
     int   fd;
     LONG  rc;
 
@@ -892,12 +1067,25 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
             continue;
         }
 
-        if (want_r && dos_readable(fd)) { FD_SET(fd, &out_r); other_ready++; }
-        if (want_w)                     { FD_SET(fd, &out_w); other_ready++; }
+        /* The interactive console is read by the child reader, not here: its
+           readiness is the ring it fills, and its wakeup is an Exec signal that
+           goes into WaitSelect()'s mask below -- never WaitForChar() from this
+           process, which would fight the child for the same handle. */
+        if (want_r && fd == 0 && con_active())
+        {
+            con_watch = 1;
+            con_fd    = fd;
+            if (con_readable()) { FD_SET(fd, &out_r); other_ready++; }
+        }
+        else if (want_r && dos_readable(fd)) { FD_SET(fd, &out_r); other_ready++; }
+
+        if (want_w) { FD_SET(fd, &out_w); other_ready++; }
     }
 
     if (have_sockets)
     {
+        ULONG sigs;
+
         if (amiga_sock_init() != 0)
             return -1;
 
@@ -912,7 +1100,11 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
             tv = timeout;
         }
 
-        rc = nx_waitselect(sock_n, &sock_r, &sock_w, NULL, (APTR)tv);
+        /* Wait on the console keystroke signal alongside the sockets, so a key
+           wakes the same WaitSelect() the socket does -- the whole point. */
+        sigs = (con_watch && !con_readable()) ? con_reader->cr_DataSig : 0;
+
+        rc = nx_waitselect(sock_n, &sock_r, &sock_w, NULL, (APTR)tv, &sigs);
         if (rc < 0)
             return -1;
 
@@ -923,6 +1115,20 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
             if (FD_ISSET((int)s, &sock_r)) { FD_SET(fd, &out_r); ready++; }
             if (FD_ISSET((int)s, &sock_w)) { FD_SET(fd, &out_w); ready++; }
         }
+
+        if (con_watch && con_readable() && !FD_ISSET(con_fd, &out_r))
+        {
+            FD_SET(con_fd, &out_r);
+            ready++;
+        }
+    }
+    else if (con_watch && !con_readable())
+    {
+        /* No socket in the set -- only the console.  Wait on its signal (a key
+           always ends it; an interactive loop always has the socket too, so
+           this is the rare case). */
+        Wait(con_reader->cr_DataSig);
+        if (con_readable()) { FD_SET(con_fd, &out_r); ready++; }
     }
     else if (other_ready == 0)
     {
@@ -1696,8 +1902,19 @@ int tcsetattr(int fd, int actions, const struct termios *t)
 
     /* Dropbear clears ICANON for its raw local mode.  SetMode(h, 1) is the
        console's raw mode -- no echo, no line editing, a keystroke at a time --
-       and SetMode(h, 0) restores cooked mode on cleanup. */
-    SetMode(h, (t != NULL && (t->c_lflag & ICANON) == 0) ? 1 : 0);
+       and SetMode(h, 0) restores cooked mode on cleanup.  The raw/cooked switch
+       is also where the console reader child lives and dies (see it above): raw
+       means an interactive session is starting, cooked means it is ending. */
+    if (t != NULL && (t->c_lflag & ICANON) == 0)
+    {
+        SetMode(h, 1);
+        con_reader_start(h);
+    }
+    else
+    {
+        con_reader_stop();
+        SetMode(h, 0);
+    }
     return 0;
 }
 
