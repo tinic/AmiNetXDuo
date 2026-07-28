@@ -16710,6 +16710,8 @@ same connection succeeds immediately.
 
 `getdtablesize()` does not follow `SBTC_DTABLESIZE`. Test 128, bridged, no
 host tier: asked for 320, still reports 256. Nothing to do with the network.
+Fixed: `BSD_MAX_DTABLESIZE` was 256, so the resize refused anything above the
+default. The ceiling is now 1024 and the table grows for real.
 
 **The guest hard-resets at the first bulk transfer over the bridge.** Test 39,
 `tcp_network_64k`: connect to the helper's echo service and push 8 x 8 KB.

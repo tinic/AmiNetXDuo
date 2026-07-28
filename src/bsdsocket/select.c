@@ -615,8 +615,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
     BOOL       timer_running = FALSE;
     BOOL       poll_only     = FALSE;
 
-    if (nfds < 0 || nfds > BSD_MAX_DTABLESIZE ||
-        (SocketBase->sb_Table != NULL && nfds > SocketBase->sb_TableSize))
+    if (nfds < 0 || nfds > bsd_table_size(SocketBase))
         return bsd_fail(SocketBase, AMI_EINVAL);
 
     if (timeout != NULL)

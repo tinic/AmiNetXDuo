@@ -198,10 +198,15 @@
  *
  * The table is a lazily allocated array of pointers, so this costs 1,024
  * bytes instead of 256 for an opener that makes a socket, and nothing for one
- * that does not. SBTC_DTABLESIZE can still lower it.
+ * that does not. SBTC_DTABLESIZE can raise or lower it.
+ *
+ * The ceiling is the largest table SBTC_DTABLESIZE will hand out. It also
+ * sizes the fd_set scratch in WaitSelect() and tcp_handler.c, 4 bytes per 32
+ * descriptors per set. A caller asking for more than FD_SETSIZE descriptors
+ * has to build its own wider fd_set to name them.
  */
 #define BSD_DEFAULT_DTABLESIZE 256
-#define BSD_MAX_DTABLESIZE     256
+#define BSD_MAX_DTABLESIZE     1024
 
 /* NetX Duo's listen queue depth for a bound port. */
 #define BSD_MAX_BACKLOG          8
@@ -546,6 +551,11 @@ VOID       bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock);
 VOID       bsd_closing_sweep(VOID);
 
 LONG       bsd_table_resize(struct AmiSocketBase *base, LONG size);
+
+/* socket.c -- the table size this base reports, before the table has been
+   allocated as well as after. */
+LONG       bsd_table_size(struct AmiSocketBase *base);
+
 VOID       bsd_close_all(struct AmiSocketBase *base);
 
 /* socket.c -- the receive window this machine can afford right now. */

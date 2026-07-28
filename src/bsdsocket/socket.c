@@ -329,6 +329,14 @@ static LONG bsd_table_ensure(struct AmiSocketBase *base)
     return 0;
 }
 
+LONG bsd_table_size(struct AmiSocketBase *base)
+{
+    if (base->sb_TableSize == 0)
+        return BSD_DEFAULT_DTABLESIZE;
+
+    return base->sb_TableSize;
+}
+
 LONG bsd_table_resize(struct AmiSocketBase *base, LONG size)
 {
     AmiSocket **table;
@@ -337,8 +345,19 @@ LONG bsd_table_resize(struct AmiSocketBase *base, LONG size)
     if (size < 1 || size > BSD_MAX_DTABLESIZE)
         return -1;
 
-    if (bsd_table_ensure(base) != 0)
-        return -1;
+    /* Nothing allocated yet: take the requested size straight away rather
+       than allocating the default first and immediately replacing it. */
+    if (base->sb_Table == NULL)
+    {
+        base->sb_Table = (AmiSocket **)ami_alloc(
+            (ULONG)size * sizeof(AmiSocket *));
+        if (base->sb_Table == NULL)
+            return -1;
+
+        base->sb_TableSize = size;
+
+        return 0;
+    }
 
     if (size == base->sb_TableSize)
         return 0;

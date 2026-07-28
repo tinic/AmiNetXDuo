@@ -487,7 +487,7 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
     switch (code)
     {
         case SBTC_DTABLESIZE:
-            bsd_tag_store(item, by_ref, (ULONG)base->sb_TableSize);
+            bsd_tag_store(item, by_ref, (ULONG)bsd_table_size(base));
             return TRUE;
 
         /* The *STRPTR tags are in/out: the caller passes an error number and

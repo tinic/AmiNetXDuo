@@ -630,10 +630,7 @@ LONG bsd_getpeername(register LONG sock_fd          __asm("d0"),
 
 int bsd_getdtablesize(register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    if (SocketBase->sb_TableSize == 0)
-        return BSD_DEFAULT_DTABLESIZE;
-
-    return (int)SocketBase->sb_TableSize;
+    return (int)bsd_table_size(SocketBase);
 }
 
 LONG bsd_Dup2Socket(register LONG old_socket __asm("d0"),
