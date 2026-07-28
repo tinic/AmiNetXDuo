@@ -31,7 +31,6 @@
 1	src/net68k/n68k_checksum.c	warning: nullPointerRedundantCheck: Either the condition 'src_ip_addr!=0' is redundant or there is possible null pointer dereference: src_ip_short.
 1	src/tls/rfc7905/nx_secure_tls_record_payload_decrypt.c	warning: nullPointerRedundantCheck: Either the condition 'decrypted_packet!=0' is redundant or there is possible null pointer dereference: decrypted_packet.
 1	src/tlslib/tls_time.c	error: uninitvar: Uninitialized variable: ds.ds_Days
-1	src/tools/ftp.c	warning: uninitvar: Uninitialized variable: out
 1	src/usergroup/ug_misc.c	error: uninitvar: Uninitialized variable: c
 1	tests/perf/bracket_test.c	error: uninitvar: Uninitialized variable: ev.ev_lo
 1	tests/perf/cpucal.c	error: uninitvar: Uninitialized variable: ev.ev_lo

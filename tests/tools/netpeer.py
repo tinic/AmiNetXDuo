@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-netpeer -- the other end, on the host, for the nc / telnet / ftp runs.
+netpeer -- the other end, on the host, for the nc / telnet runs.
 
 tools/fsuae-run.sh attaches FS-UAE's SLIRP user-mode NAT.  From inside the
 guest the host is 10.0.2.2, so a server bound to 127.0.0.1 here is reachable
@@ -15,22 +15,6 @@ Three servers, one process, one log:
           DO TERMINAL-TYPE and DO WINDOW-SIZE, and RECORDS what the client
           answers.  Refusing an option correctly is a thing that has to be
           seen from the other side to be believed, and this is the side.
-  ftp     RFC 959, enough of it: USER/PASS/SYST/TYPE/PWD/CWD/PASV/PORT/
-          LIST/RETR/STOR/SIZE/QUIT, over a handful of in-memory files.
-
-THE ONE ACCOMMODATION, and it is only for active mode
------------------------------------------------------
-In active FTP the SERVER connects back to the client.  The client is inside
-the NAT, so its address (10.0.2.15) is not routable from here; the only way in
-is FS-UAE's own `slirp_redir`, which listens on a port of the HOST's and
-forwards it to the same port of the guest's.  So when --active-via-loopback is
-given, the PORT command's port number is honoured and its ADDRESS is replaced
-with 127.0.0.1.
-
-That is a property of the test rig, not of the client: the Amiga still binds,
-listens, sends a correct PORT with its own address in it, and accepts an
-inbound connection it did not initiate.  Every part of the client's active
-mode is exercised.  What is faked is the route back through the NAT.
 
 SPDX-License-Identifier: MIT
 """
@@ -188,200 +172,12 @@ class TelnetHandler(socketserver.BaseRequestHandler):
         log("telnet", "closed; answers: %s" % (", ".join(answers) or "(none)"))
 
 
-# ---------------------------------------------------------------------- ftp --
-
+# The in-memory file set the tftp server serves.  It outlived the ftp server
+# that used to share it.
 FILES = {
     "hello.txt": b"Hello from the host.\r\nSecond line.\r\nThird line.\r\n",
     "binary.dat": bytes(range(256)) * 4,
 }
-
-UPLOADS = {}
-
-
-class FtpHandler(socketserver.BaseRequestHandler):
-    def setup(self):
-        self.rfile = self.request.makefile("rb")
-        self.binary = True
-        self.pasv_sock = None
-        self.port_target = None
-        self.cwd = "/"
-        self.rest = 0
-
-    def reply(self, text):
-        log("ftp", "--> %s" % text)
-        self.request.sendall(text.encode("latin-1") + b"\r\n")
-
-    def open_data(self):
-        """The data connection, whichever way round this transfer is."""
-        if self.pasv_sock is not None:
-            self.pasv_sock.settimeout(30)
-            conn, addr = self.pasv_sock.accept()
-            log("ftp", "passive data connection from %s:%d" % addr[:2])
-            self.pasv_sock.close()
-            self.pasv_sock = None
-            return conn
-
-        if self.port_target is None:
-            self.reply("425 Use PORT or PASV first.")
-            return None
-
-        host, port = self.port_target
-        if self.server.active_via_loopback:
-            log("ftp", "PORT named %s:%d; dialling 127.0.0.1:%d "
-                       "(the SLIRP forward)" % (host, port, port))
-            host = "127.0.0.1"
-        else:
-            log("ftp", "dialling back to %s:%d" % (host, port))
-
-        conn = socket.create_connection((host, port), timeout=30)
-        log("ftp", "active data connection established")
-        self.port_target = None
-        return conn
-
-    def handle(self):
-        log("ftp", "connection from %s:%d" % self.client_address[:2])
-        self.reply("220 AmiNetXDuo test FTP server")
-
-        while True:
-            raw = self.rfile.readline()
-            if not raw:
-                break
-            line = raw.decode("latin-1").rstrip("\r\n")
-            if not line:
-                continue
-
-            shown = line
-            if line.upper().startswith("PASS"):
-                shown = "PASS ********"
-            log("ftp", "<-- %s" % shown)
-
-            parts = line.split(" ", 1)
-            cmd = parts[0].upper()
-            arg = parts[1] if len(parts) > 1 else ""
-
-            if cmd == "USER":
-                self.reply("331 Password required for %s." % arg)
-            elif cmd == "PASS":
-                self.reply("230 Logged in.")
-            elif cmd == "SYST":
-                self.reply("215 UNIX Type: L8")
-            elif cmd == "TYPE":
-                self.binary = arg.upper().startswith("I")
-                self.reply("200 Type set to %s." % arg.upper())
-            elif cmd == "PWD":
-                self.reply('257 "%s" is the current directory.' % self.cwd)
-            elif cmd == "CWD":
-                self.cwd = arg if arg.startswith("/") else self.cwd + arg
-                self.reply("250 Directory changed to %s." % self.cwd)
-            elif cmd == "CDUP":
-                self.reply("250 Directory changed to /.")
-            elif cmd == "SIZE":
-                blob = FILES.get(arg) or UPLOADS.get(arg)
-                if blob is None:
-                    self.reply("550 %s: no such file." % arg)
-                else:
-                    self.reply("213 %d" % len(blob))
-            elif cmd == "REST":
-                # Resume, and what curl's -r / -C - turn into on ftp://.
-                # Without it curl gives up with (31) Couldn't use REST before
-                # it has opened a data connection at all.
-                try:
-                    self.rest = max(0, int(arg))
-                except ValueError:
-                    self.reply("501 Bad REST.")
-                    continue
-                self.reply("350 Restarting at %d." % self.rest)
-            elif cmd == "NOOP":
-                self.reply("200 OK.")
-            elif cmd == "PASV":
-                if self.pasv_sock:
-                    self.pasv_sock.close()
-                self.pasv_sock = socket.socket()
-                self.pasv_sock.setsockopt(socket.SOL_SOCKET,
-                                          socket.SO_REUSEADDR, 1)
-                self.pasv_sock.bind(("0.0.0.0", 0))
-                self.pasv_sock.listen(1)
-                port = self.pasv_sock.getsockname()[1]
-                a = self.server.advertise.split(".")
-                self.reply("227 Entering Passive Mode (%s,%s,%s,%s,%d,%d)." %
-                           (a[0], a[1], a[2], a[3], port >> 8, port & 0xFF))
-            elif cmd == "PORT":
-                try:
-                    n = [int(v) for v in arg.split(",")]
-                    self.port_target = ("%d.%d.%d.%d" % tuple(n[:4]),
-                                        (n[4] << 8) | n[5])
-                except (ValueError, IndexError):
-                    self.reply("501 Bad PORT.")
-                    continue
-                self.reply("200 PORT command successful.")
-            elif cmd in ("LIST", "NLST"):
-                self.reply("150 Opening data connection for %s." % cmd)
-                try:
-                    conn = self.open_data()
-                except OSError as exc:
-                    log("ftp", "data connection FAILED: %s" % exc)
-                    self.reply("425 Cannot open data connection.")
-                    continue
-                if conn is None:
-                    continue
-                if cmd == "NLST":
-                    body = "".join("%s\r\n" % n for n in sorted(FILES))
-                else:
-                    body = "".join(
-                        "-rw-r--r-- 1 host host %8d Jul 25 12:00 %s\r\n"
-                        % (len(FILES[n]), n) for n in sorted(FILES))
-                conn.sendall(body.encode("latin-1"))
-                conn.close()
-                self.reply("226 Transfer complete.")
-            elif cmd == "RETR":
-                blob = FILES.get(arg) or UPLOADS.get(arg)
-                if blob is None:
-                    self.reply("550 %s: no such file." % arg)
-                    continue
-                if self.rest:
-                    blob = blob[self.rest:]
-                    self.rest = 0
-                self.reply("150 Opening data connection for %s (%d bytes)."
-                           % (arg, len(blob)))
-                try:
-                    conn = self.open_data()
-                except OSError as exc:
-                    log("ftp", "data connection FAILED: %s" % exc)
-                    self.reply("425 Cannot open data connection.")
-                    continue
-                if conn is None:
-                    continue
-                conn.sendall(blob)
-                conn.close()
-                self.reply("226 Transfer complete.")
-            elif cmd == "STOR":
-                self.reply("150 Ready for %s." % arg)
-                try:
-                    conn = self.open_data()
-                except OSError as exc:
-                    log("ftp", "data connection FAILED: %s" % exc)
-                    self.reply("425 Cannot open data connection.")
-                    continue
-                if conn is None:
-                    continue
-                blob = b""
-                while True:
-                    chunk = conn.recv(4096)
-                    if not chunk:
-                        break
-                    blob += chunk
-                conn.close()
-                UPLOADS[arg] = blob
-                log("ftp", "stored %s: %d bytes, %r"
-                    % (arg, len(blob), blob[:120]))
-                self.reply("226 Transfer complete.")
-            elif cmd == "QUIT":
-                self.reply("221 Goodbye.")
-                break
-            else:
-                self.reply("502 %s is not implemented here." % cmd)
-
-        log("ftp", "session ended")
 
 
 # --------------------------------------------------------------------- tftp --
@@ -641,7 +437,6 @@ def main():
     ap.add_argument("--bind", default="0.0.0.0")
     ap.add_argument("--echo-port", type=int, default=7001)
     ap.add_argument("--telnet-port", type=int, default=7023)
-    ap.add_argument("--ftp-port", type=int, default=7021)
     ap.add_argument("--tftp-port", type=int, default=0,
                     help="UDP port for the TFTP server; 0 leaves it off")
     ap.add_argument("--whois-port", type=int, default=0,
@@ -652,9 +447,6 @@ def main():
     ap.add_argument("--advertise", default="10.0.2.2",
                     help="address to put in the 227 PASV reply -- what the "
                          "guest must dial, not what we are bound to")
-    ap.add_argument("--active-via-loopback", action="store_true",
-                    help="in active mode dial 127.0.0.1 instead of the "
-                         "address the client named; see the module comment")
     ap.add_argument("--log")
     ap.add_argument("--seconds", type=int, default=600)
     ap.add_argument("--dial",
@@ -675,11 +467,6 @@ def main():
 
     tn = Threaded((args.bind, args.telnet_port), TelnetHandler)
     servers.append(("telnet", tn))
-
-    ftp = Threaded((args.bind, args.ftp_port), FtpHandler)
-    ftp.advertise = args.advertise
-    ftp.active_via_loopback = args.active_via_loopback
-    servers.append(("ftp", ftp))
 
     if args.whois_port:
         who = Threaded((args.bind, args.whois_port), WhoisHandler)
@@ -711,8 +498,7 @@ def main():
             % (args.dial, args.dial_for))
 
     log("start", "pid %d, advertising %s for PASV%s"
-        % (os.getpid(), args.advertise,
-           ", active dials 127.0.0.1" if args.active_via_loopback else ""))
+        % (os.getpid(), args.advertise))
 
     try:
         time.sleep(args.seconds)

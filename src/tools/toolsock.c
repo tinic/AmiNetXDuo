@@ -668,7 +668,7 @@ LONG tool_input_read(ToolInput *in, UBYTE *buf, LONG len, ULONG micros)
  * These commands print two kinds of thing to the same stream: their own lines
  * through VPrintf(), which dos.library buffers, and the bytes off the socket
  * through Write(), which it does not.  Without the flush the second overtakes
- * the first, and an ftp transcript comes out with the directory listing
+ * the first, and a transcript comes out with the directory listing
  * spliced into the middle of the reply that announced it.  Observed exactly
  * that way before this line existed.
  */

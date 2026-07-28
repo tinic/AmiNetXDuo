@@ -13,16 +13,16 @@
  *   B  curl   lib/cf-socket.c          non-blocking connect -> writable -> SO_ERROR
  *   C  curl   lib/cf-socket.c          the same, to a closed port
  *   D  curl   lib/socketpair.c         wakeup_inet(): its own loopback socketpair
- *   E  ftp                             control + active-mode data connection
+ *   E  control + active-mode data connection (the shape ftp used)
  *   F  curl   lib/select.c             select() over a wide, sparse fd set
  *   G  curl                            descriptor churn across many transfers
  *   H  curl   lib/cf-socket.c          send() after the peer has gone
  *   I  wget   src/connect.c            BLOCKING connect (wget has no async path)
  *   J  ssh/nc                          a raised descriptor table
- *   K  nc -N, ftp                      half-close in both directions
+ *   K  nc -N                           half-close in both directions
  *   L  nc, telnet                      FIONREAD before reading
- *   M  nc -l, ftp                      re-listen on the same port after close
- *   N  http server, ftp data         write a whole response, then close
+ *   M  nc -l                           re-listen on the same port after close
+ *   N  http server                     write a whole response, then close
  *   O  nc, ssh -L                    simultaneous listening sockets
  *   P  wget, nc, ssh                 getaddrinfo / getnameinfo
  *
@@ -460,7 +460,7 @@ static VOID group_d(VOID)
 }
 
 
-/* ---- E. ftp: a control connection and a data connection, together ------ */
+/* ---- E. a control connection and a data connection, together ---------- */
 
 static VOID group_e(VOID)
 {

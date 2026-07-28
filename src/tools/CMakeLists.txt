@@ -195,11 +195,11 @@ aminetxduo_add_tool(tool_host    host     SOURCES host.c)
 # is none.  Nothing here is conditional on the build option, deliberately.
 aminetxduo_add_tool(tool_fetch   fetch    SOURCES fetch.c)
 
-# nc, telnet and ftp are config-only in the same sense as fetch, and share
+# nc and telnet are config-only in the same sense as fetch, and share
 # toolsock.c: bsdsocket.library through its published vectors, including the
-# bind/listen/accept half that no client-only command reaches.  None of them
-# needs TLS, and none of them needs a libc porting shim -- which is what makes
-# them the three that can be written natively rather than ported.
+# bind/listen/accept half that no client-only command reaches.  Neither needs
+# TLS, and neither needs a libc porting shim -- which is what makes them
+# writable natively rather than ported.
 aminetxduo_add_tool(tool_nc      nc       SOURCES nc.c     toolsock.c)
 
 # NetTrace is config-only in exactly the same sense, and deliberately so: it
@@ -208,7 +208,6 @@ aminetxduo_add_tool(tool_nc      nc       SOURCES nc.c     toolsock.c)
 # OWN copy of the channel table and capture nothing at all.
 aminetxduo_add_tool(tool_nettrace NetTrace SOURCES nettrace.c toolsock.c)
 aminetxduo_add_tool(tool_telnet  telnet   SOURCES telnet.c toolsock.c)
-aminetxduo_add_tool(tool_ftp     ftp      SOURCES ftp.c    toolsock.c)
 
 # traceroute is config-only too, and is the first command here to open a
 # SOCK_RAW descriptor -- so it reaches the raw half of the ABI the same way it
@@ -265,7 +264,7 @@ add_dependencies(tools
     tool_addnetroute tool_deletenetroute
     tool_getnetstatus tool_netshutdown
     tool_netsetup tool_online tool_offline tool_host
-    tool_fetch tool_nc tool_telnet tool_ftp tool_nettrace tool_traceroute
+    tool_fetch tool_nc tool_telnet tool_nettrace tool_traceroute
     tool_tftp tool_whois
     tool_sntp
     tool_shownetstatus tool_netstat tool_ping tool_smoke)

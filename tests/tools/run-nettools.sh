@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Run nc, telnet and ftp against real servers, under FS-UAE on SLIRP.
+# Run nc and telnet against real servers, under FS-UAE on SLIRP.
 #
 #   tests/tools/run-nettools.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
 #                               [-o "line;line;..."]
@@ -76,7 +76,6 @@ ADDIF="$ROOT/$BUILD/src/tools/AddNetInterface"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 NC="$ROOT/$BUILD/src/tools/nc"
 TELNET="$ROOT/$BUILD/src/tools/telnet"
-FTP="$ROOT/$BUILD/src/tools/ftp"
 TRACEROUTE="$ROOT/$BUILD/src/tools/traceroute"
 TFTP="$ROOT/$BUILD/src/tools/tftp"
 WHOIS="$ROOT/$BUILD/src/tools/whois"
@@ -113,7 +112,6 @@ cp "$BSD"    "$STAGE/libs/bsdsocket.library"
 cp "$ADDIF"  "$STAGE/AddNetInterface"
 cp "$NC"     "$STAGE/nc"
 cp "$TELNET" "$STAGE/telnet"
-cp "$FTP"    "$STAGE/ftp"
 cp "$TRACEROUTE" "$STAGE/traceroute"
 cp "$TFTP"       "$STAGE/tftp"
 cp "$WHOIS"      "$STAGE/whois"
@@ -127,27 +125,7 @@ amiga
 quit
 EOF
 
-cat > "$STAGE/ftppasv.txt" <<'EOF'
-status
-system
-pwd
-ls
-binary
-get hello.txt DH0:got-passive.txt
-size hello.txt
-put DH0:greeting.txt uploaded-passive.txt
-bye
-EOF
 
-cat > "$STAGE/ftpactive.txt" <<'EOF'
-active
-status
-ls
-binary
-get hello.txt DH0:got-active.txt
-put DH0:greeting.txt uploaded-active.txt
-bye
-EOF
 
 if [ -n "${AMINETXDUO_NETTOOLS_COMMANDS:-}" ]; then
     cp "$AMINETXDUO_NETTOOLS_COMMANDS" "$STAGE/commands.txt"
@@ -157,7 +135,6 @@ cat > "$STAGE/commands.txt" <<EOF
 # ---- the templates, through ReadArgs' own "?" -------------------------
 SYS:nc ?
 SYS:telnet ?
-SYS:ftp ?
 # ---- bring the network up once, and leave it up -----------------------
 SYS:AddNetInterface eth0
 # ---- nc, as a client --------------------------------------------------
@@ -171,13 +148,9 @@ SYS:nc 10.0.2.2 $ECHO_PORT -v -w 10 -N <DH0:greeting.txt >DH0:nc-echo.txt
 &SYS:nc -l $NC_INBOUND_PORT -v -w 120 >DH0:nc-inbound.txt
 # ---- telnet -----------------------------------------------------------
 SYS:telnet 10.0.2.2 $TELNET_PORT -d <DH0:telnetin.txt >DH0:telnet.txt
-# ---- ftp, passive then active -----------------------------------------
-SYS:ftp 10.0.2.2 $FTP_PORT USER amiga PASSWORD test -d <DH0:ftppasv.txt >DH0:ftp-passive.txt
-SYS:ftp 10.0.2.2 $FTP_PORT USER amiga PASSWORD test DATAPORT $FTP_DATA_PORT TIMEOUT 15 -d <DH0:ftpactive.txt >DH0:ftp-active.txt
 # ---- and what the failures look like ----------------------------------
 SYS:nc 10.0.2.2 1 -v -w 5
 SYS:nc no.such.host.invalid 80
-SYS:ftp 10.0.2.2 1
 # ---- nc as a server, guest to guest -----------------------------------
 # The only listen/accept this emulator can actually drive end to end: SLIRP
 # forwards nothing inward (see the section in docs/RESEARCH.md), so the
@@ -246,7 +219,7 @@ fi
 # rather than a gap in the commands: shutdown(SHUT_WR) on a connection whose
 # two ends are on this machine hangs the caller in WaitSelect() forever.
 # tests/tools/commands-samehost.txt reproduces it on its own; see the "nc,
-# telnet and ftp" section of docs/RESEARCH.md.
+# telnet" section of docs/RESEARCH.md.
 
 # --------------------------------------------------------------- peers ---
 
@@ -263,7 +236,7 @@ python3 "$ROOT/tests/tools/netpeer.py" \
     --echo-port "$ECHO_PORT" --telnet-port "$TELNET_PORT" \
     --ftp-port "$FTP_PORT" --tftp-port "$TFTP_PORT" \
     --whois-port "$WHOIS_PORT" \
-    --advertise 10.0.2.2 --active-via-loopback \
+    --advertise 10.0.2.2 \
     --dial "127.0.0.1:$NC_INBOUND_PORT" --dial-for "$TIMEOUT" \
     --log "$PEERLOG" --seconds "$((TIMEOUT + 3600))" \
     > "$ROOT/build/netpeer.out" 2>&1 &
@@ -280,7 +253,7 @@ kill -0 "$PEER_PID" 2>/dev/null || {
     cat "$ROOT/build/netpeer.out" >&2
     exit 2
 }
-echo "==> netpeer.py: echo $ECHO_PORT, telnet $TELNET_PORT, ftp $FTP_PORT," \
+echo "==> netpeer.py: echo $ECHO_PORT, telnet $TELNET_PORT," \
      "tftp $TFTP_PORT, whois $WHOIS_PORT"
 
 # --------------------------------------------------------------- slirp ---

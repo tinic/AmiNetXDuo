@@ -77,7 +77,7 @@ It puts
      bsdsocket.library, usergroup.library      into LIBS:
      AddNetInterface, Online, Offline,
      ShowNetStatus, ping, netstat, host, fetch,
-     nc, telnet, ftp, NetTrace, sntp,
+     nc, telnet, NetTrace, sntp,
      traceroute, tftp, whois, CheckNetConfig,
      GetNetStatus, NetShutdown, AddNetRoute,
      DeleteNetRoute                            into C:

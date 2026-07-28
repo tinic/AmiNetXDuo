@@ -5,7 +5,7 @@
  *
  * WHY THIS EXISTS
  *
- *   nc, telnet and ftp are worked examples as much as they are commands: a
+ *   nc and telnet are worked examples as much as they are commands: a
  *   program on somebody else's Amiga will have Roadshow or AmiTCP underneath
  *   it, so none of them may link one line of src/netstack or src/bsdsocket.
  *   They call the library by hand at the LVOs docs/RESEARCH.md 3.2 lists,

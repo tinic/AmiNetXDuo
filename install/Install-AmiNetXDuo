@@ -838,7 +838,7 @@
           "take it down, and NetSetup writes or edits the interface file "
           "for you.  ShowNetStatus and netstat report what it is "
           "doing.  ping, host and traceroute are the usual diagnostics.  "
-          "fetch retrieves an http:// or https:// URL; nc, telnet, ftp and "
+          "fetch retrieves an http:// or https:// URL; nc, telnet and "
           "tftp are netcat and the usual clients; sntp sets the clock from "
           "a time server and whois asks who owns a name.  NetTrace captures "
           "packets to a .pcap file, and CheckNetConfig reads the "

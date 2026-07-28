@@ -40,7 +40,7 @@ static const char version_tag[] __attribute__((used)) =
  * so tool_error() and PrintFault() both land on stdout anyway.
  *
  * Each half is added only when the command has not brought its own: NetSetup
- * reads a file of answers with "<", and `ftp ... >DH0:session.txt` wants its
+ * reads a file of answers with "<", and a command redirected to a file wants its
  * transcript in a file of its own. Adding a second redirection of the same
  * kind makes the Shell take one of them and quietly drop the other.
  */
