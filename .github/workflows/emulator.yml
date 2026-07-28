@@ -120,8 +120,8 @@ jobs:
         if: steps.aros-cache.outputs.cache-hit != 'true'
         run: tools/fetch-aros-rom.sh
 
-      - name: Build the default configuration
-        run: AMINETXDUO_CI_CROSS=default tools/ci.sh cross
+      - name: Build the default and 68000 configurations
+        run: AMINETXDUO_CI_CROSS="default m68000" tools/ci.sh cross
 
       - name: Run the on-Amiga harnesses
         run: xvfb-run -a tools/ci.sh emulator
@@ -169,8 +169,8 @@ jobs:
             exit 1
           fi
 
-      - name: Build the default configuration
-        run: AMINETXDUO_CI_CROSS=default tools/ci.sh cross
+      - name: Build the default and 68000 configurations
+        run: AMINETXDUO_CI_CROSS="default m68000" tools/ci.sh cross
 
       - name: Run the on-Amiga harnesses
         run: tools/ci.sh emulator
