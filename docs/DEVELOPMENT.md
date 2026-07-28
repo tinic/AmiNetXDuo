@@ -98,15 +98,44 @@ CI runs `tools/ci.sh` and nothing else, so the same checks can be run before
 pushing:
 
 ```sh
-tools/ci.sh                 # host tests, all four cross builds, conformance build
+tools/ci.sh                 # host tests, all cross builds, static analysis, conformance
 tools/ci.sh host            # just the host tests (no cross toolchain needed)
+tools/ci.sh analyze         # just the static analysis
 tools/ci.sh emulator        # the on-Amiga harnesses under FS-UAE
 ```
 
 A first run with nothing installed will fetch the toolchain itself; a warm run
-of the whole of tier 1 takes about a minute. The workflows in `.github/` call
-this script and add nothing beyond caching and scheduling, so a green tick there
-and a green run here mean the same thing.
+of the whole of tier 1 takes about four minutes, three of which are the analysis
+stage. The workflows in `.github/` call this script and add nothing beyond
+caching and scheduling, so a green tick there and a green run here mean the same
+thing.
+
+### Static analysis
+
+The `analyze` stage runs two tools against baselines of triaged findings, and
+fails when a finding appears that is not in one:
+
+```sh
+tools/analyze.sh            # GCC -fanalyzer, cross compiler, vs the baseline
+tools/analyze.sh --update   # accept this run as the new baseline
+tools/cppcheck.sh           # cppcheck error/warning classes, vs its baseline
+tools/cppcheck.sh --style   # print the style classes too, gate nothing
+```
+
+Both script headers explain what is in their baseline and why none of it is a
+defect. Two things about them are worth knowing before reading a result:
+
+* `tools/analyze.sh` compiles with `-D_NO_INLINE`, which swaps the NDK's inline
+  `jsr` stubs for the `clib/` prototypes. Without it `-fanalyzer` believes
+  `ReadEClock(&ev)` leaves `ev` uninitialised — an `__asm volatile` with a
+  `"memory"` clobber is not a store it can see — and two thirds of its findings
+  on this tree are that one blind spot.
+* Both scripts print what they could **not** cover: units too complex for the
+  analyser to finish, and units that would not compile under `_NO_INLINE`. At
+  GCC's default exploration limit 48 of 213 units gave up silently — including
+  `netdb.c`, `nettrace.c` and `telnet.c`, three of the five files the
+  memory-safety audit found defects in. The limit is raised until three units
+  are left, and those three are named on every run.
 
 `tools/fsuae-run.sh` runs an AmigaOS executable under FS-UAE on an emulated
 A1200 with a real Kickstart 3.1, captures `ami_log()` serial output, and returns

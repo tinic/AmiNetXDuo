@@ -17,11 +17,12 @@
 #   toolchain    resolve, or download, the pinned m68k-amigaos-gcc
 #   host         the parser / mbuf / BPF VM / crypto68k vector tests, ctest
 #   cross        every build configuration, warnings fatal
+#   analyze      GCC -fanalyzer over our own sources vs a triaged baseline
 #   conformance  build the bsdsocktest suite for m68k (running it needs tier 2)
 #   emulator     tier 2 -- boots FS-UAE, needs a ROM
 #
-# `tools/ci.sh` with no arguments runs toolchain, host, cross and conformance:
-# everything that needs neither an emulator nor a licensed ROM.
+# `tools/ci.sh` with no arguments runs toolchain, host, cross, analyze and
+# conformance: everything that needs neither an emulator nor a licensed ROM.
 #
 # ENVIRONMENT
 #
@@ -215,6 +216,38 @@ stage_conformance() {
     note "build/bsdsocktest/bsdsocktest"
 }
 
+# -------------------------------------------------------------- analyse ----
+
+stage_analyze() {
+    hr "static analysis (cross)"
+
+    export AMINETXDUO_ANALYZE_BUILD="$BUILD/analyze"
+
+    if tools/analyze.sh > "$BUILD/analyze.log" 2>&1; then
+        # The uncovered units are the number worth reading, so print them here
+        # too rather than only in the log nobody opens on a green run.
+        grep '^NOT COVERED' "$BUILD/analyze.log" | while read -r l; do note "$l"; done
+        note "$(grep 'known findings' "$BUILD/analyze.log")"
+    else
+        cat "$BUILD/analyze.log"
+        fail "analyze (-fanalyzer)"
+    fi
+
+    # cppcheck is not part of the toolchain and CI runners may not have it.
+    # Say so out loud rather than passing quietly: a stage that skips without
+    # a word reads as coverage it is not providing.
+    if ! command -v cppcheck > /dev/null; then
+        note "cppcheck NOT INSTALLED -- that half of this stage did not run"
+        return 0
+    fi
+    if tools/cppcheck.sh > "$BUILD/cppcheck.log" 2>&1; then
+        note "$(grep 'known findings' "$BUILD/cppcheck.log")"
+    else
+        cat "$BUILD/cppcheck.log"
+        fail "analyze (cppcheck)"
+    fi
+}
+
 # -------------------------------------------------------------- emulator ----
 
 stage_emulator() {
@@ -265,14 +298,14 @@ stage_emulator() {
 mkdir -p "$BUILD"
 
 WANT=("$@")
-[ ${#WANT[@]} -gt 0 ] || WANT=(host cross conformance)
+[ ${#WANT[@]} -gt 0 ] || WANT=(host cross analyze conformance)
 
 stage_submodules
 
 # Anything but a pure host run needs the cross compiler.
 for s in "${WANT[@]}"; do
     case "$s" in
-        cross|conformance|emulator) stage_toolchain; break ;;
+        cross|analyze|conformance|emulator) stage_toolchain; break ;;
     esac
 done
 
@@ -281,6 +314,7 @@ for s in "${WANT[@]}"; do
         toolchain)   [ -n "${AMIGA_TOOLCHAIN_ROOT:-}" ] || stage_toolchain ;;
         host)        stage_host || true ;;
         cross)       stage_cross ;;
+        analyze)     stage_analyze || true ;;
         conformance) stage_conformance || true ;;
         emulator)    stage_emulator || true ;;
         *) echo "unknown stage: $s" >&2; exit 2 ;;

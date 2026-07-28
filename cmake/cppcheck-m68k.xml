@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<!-- m68k-amigaos: ILP32, big-endian, plain char is signed, 2-byte struct
+     alignment (m68k ABI).  Matching this matters: cppcheck invents
+     findings when it assumes 64-bit longs or little-endian layout. -->
+<platform>
+  <char_bit>8</char_bit>
+  <default-sign>signed</default-sign>
+  <sizeof>
+    <bool>1</bool>
+    <short>2</short>
+    <int>4</int>
+    <long>4</long>
+    <long-long>8</long-long>
+    <float>4</float>
+    <double>8</double>
+    <long-double>8</long-double>
+    <pointer>4</pointer>
+    <size_t>4</size_t>
+    <wchar_t>2</wchar_t>
+  </sizeof>
+</platform>

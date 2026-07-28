@@ -656,7 +656,9 @@ BOOL tool_stack_is_ours(struct Library *base)
     if (id == NULL)
         return FALSE;
 
-    for (i = 0; id[i] != '\0' && i < 200UL; i++)
+    /* The cap comes first: `id` belongs to a library this code did not write,
+       and the old order read id[200] before deciding to stop there. */
+    for (i = 0; i < 200UL && id[i] != '\0'; i++)
     {
         if (id[i] == 'A' && tool_stricmp_n(&id[i], "AmiNetXDuo", 10) == 0)
             return TRUE;

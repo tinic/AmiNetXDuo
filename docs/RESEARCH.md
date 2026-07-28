@@ -16534,3 +16534,118 @@ zero window, probes answered     +1 ... +511            NO RESET
 
 A peer that is alive and holding a zero window must never be dropped, and that row proves
 it still is not.
+
+## 62. The analyser was not finding nothing, it was not running (2026-07-28)
+
+`-fanalyzer` works in the m68k cross compiler, which makes it the strongest tool available
+here: path-sensitive, real target, real headers, the same GCC 15.2 that ships the binaries.
+Run over the tree it produced 48 findings in our own sources and one real defect. The
+interesting result is neither of those numbers.
+
+### 48 of 213 translation units silently gave up
+
+`-Wanalyzer-too-complex` is **off by default**, and when the analyser exceeds its
+exploration budget it stops and says nothing. At GCC's default `bb-explosion-factor=5`,
+**48 units gave up** -- among them `socket.c`, `select.c`, `tcp_handler.c`, `errno.c`,
+`netdb.c`, `fetch.c`, `telnet.c` and `nettrace.c`.
+
+**Three of the five defects §the memory-safety audit found were in files `-fanalyzer` had
+never looked at.** "The analyser found nothing real" was, in large part, "the analyser did
+not run". A clean report from a tool that quit is worse than no report, because it is
+indistinguishable from coverage.
+
+Raising the factor to 50 -- 200 for `netdb.c` and `nettrace.c`, measured rather than
+guessed -- brings it to **3 uncovered units**, and `-Wanalyzer-too-complex` is now on so
+those three are named on every run.
+
+### The NDK blind spot, and the flag that removes it
+
+32 of the 48 findings were one structural class: `ReadEClock`, `GetSysTime`, `DateStamp`,
+`Read`, `FGets` and `ReadArgs` reach the library through `LPn()` macros in
+`<inline/macros.h>` -- `jsr a6@(-offs:W)` inside `__asm volatile` with a `"memory"` clobber
+and **no output constraint for the destination**. The analyser cannot know the callee
+filled the caller's variable, so every out-parameter reads as uninitialised.
+
+Proved rather than assumed with a three-function reproduction: the same call declared as a
+plain extern, or with `access(write_only,1)`, produces nothing; only the asm form warns.
+
+`-D_NO_INLINE` flips `<proto/*.h>` to the real `clib/` prototypes and removes the blind
+spot entirely: **48 findings become 16**. Objects go to `/dev/null` because they would not
+link that way. Sixteen units hand-roll an `LPnNR()` and cannot compile under it; those fall
+back to an ordinary pass and are **named on every run** rather than quietly dropped.
+
+### The one real defect
+
+`src/tools/tool_diag.c:659`, and it is hardening rather than a live bug:
+
+```c
+for (i = 0; id[i] != '\0' && i < 200UL; i++)      /* reads before it checks */
+```
+
+`id` is the `lib_IdString` of a `bsdsocket.library` this code did not write -- the whole
+point of the function is that Roadshow, AmiTCP or an emulator's stack may be answering.
+The 200 is a sanity cap on a foreign string, and the old order evaluates `id[200]` before
+deciding to stop at 200. Read-only and bounded, but a cap that is not a cap. Operands
+swapped.
+
+### What was judged false, and why that list is the deliverable
+
+Everything else. Four structural classes, each with a reproduction rather than an opinion:
+the NDK out-parameters above (32); `tcpdrill.c`'s hand-rolled `say()`, where GCC does not
+read the format literal through the call and walks every conversion branch (9); six
+`dereference of NULL 'out'` in `netstatus.c` where a `need` pre-check guarantees
+`room >= 1` through an arithmetic chain the analyser cannot follow -- **documented at the
+site and the code left alone**, because a NULL test there would be dead code reading as if
+the buffer might be short; and `Wait(0UL)`, which is a never-returns trap the analyser
+continues past.
+
+### cppcheck: two of its results were about cppcheck
+
+1,059 findings over 213 units once the target was described correctly; 1,046 are
+`constVariablePointer`/`variableScope`/`unusedStructMember`, which is house style.
+
+Both configuration mistakes mattered, and both looked like results:
+
+* without `-D'__asm(x)='` it cannot parse `register ULONG version __asm("d0")` and
+  **abandons the file** -- 32 files including all of `src/bsdsocket`;
+* without the compiler's own predefines it dies on `#error Endianess not declared!!` in
+  `<machine/ieeefp.h>`.
+
+The first run looked like 252 findings. It was a quarter of the tree.
+
+### The gate is a baseline, and that is the honest answer
+
+`-fanalyzer -Werror` is not reachable here without dead NULL tests, blanket pragmas or
+rewriting a test's formatter. **25 recorded findings with a reason each beats 25 hidden by
+suppressions**, so `tools/analyze.sh` compares against `tools/analyzer-baseline.txt` and
+fails on anything new.
+
+The baseline is keyed on **count + file + warning + message, not line numbers**: one that
+fires when an unrelated line moves gets regenerated blindly, and a baseline that is
+regenerated blindly is not a gate.
+
+Verified to fail, the same standard as the fuzz gate: `return *(long *)0` planted in
+`sana2_copy.c` gives `new -fanalyzer findings: 1 ... -Wanalyzer-null-dereference`, exit 1;
+`LONG v; return v;` in `mbuf_alloc.c` gives `new cppcheck findings: ... uninitvar`, exit 1.
+Both reverted.
+
+cppcheck is **deliberately not in CI**: it is not in the pinned toolchain and its findings
+move between releases, so `tools/ci.sh` says out loud when it is absent rather than
+passing quietly.
+
+### Vendored, reported not fixed
+
+15 findings, 13 in `third_party/netxduo` and 2 in `third_party/threadx`. One is worth an
+upstream report on its own merits:
+
+**`addons/mdns/nxd_mdns.c`, `_nx_mdns_conflict_process()`.** `UCHAR *name;` at `:10148` is
+uninitialised where `type` and `domain` beside it are `NX_NULL`. For SRV/TXT it is set only
+by `_nx_mdns_service_name_resolve()`, which need not set it; `:10207` passes it to the
+probing-notify callback and `:10219` dereferences it. Then `:10236` does
+`temp_string_buffer[i-2]` with `i` the length just copied from `name` -- so **an empty name
+with `conflict_count` in 1..3 writes one byte before a static buffer, from peer-supplied
+input on the reachable path.**
+
+Also `nx_tcp_packet_process.c` (four `dereference of NULL 'source_ip'`),
+`nx_crypto_drbg.c:200` uninitialised `temp[]`, an overlapping `memcpy` reached from
+`_nx_secure_session_keys_set`, and two `deref-before-check`.

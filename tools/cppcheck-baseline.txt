@@ -1,0 +1,41 @@
+# Produced by Cppcheck 2.20.0.
+# cppcheck error/warning findings that have been triaged and are not defects.
+# Regenerate with tools/cppcheck.sh --update.  Every entry below is one of:
+#
+#   * an NDK inline out-parameter.  ReadEClock(&ev), DateStamp(&ds),
+#     Read(fh,&c,1) and FGets() are `jsr` inside __asm volatile, so no analyser
+#     sees the store.  All the uninitvar entries are this.
+#   * a ReadArgs() /A argument.  ReadArgs writes the array and returns NULL if
+#     a /A is missing, so args[0] is non-NULL past the check -- clockset.c.
+#   * NX_ASSERT, which is a no-op under NDEBUG.  cppcheck reads the assert as
+#     the NULL test it then says is redundant -- n68k_checksum.c and the
+#     rfc7905 copy, both of which mirror vendored NetX Duo code.
+#   * dead under this configuration, live under another: socket.c's second
+#     domain check is reachable with AMINETXDUO_IPV6, and c68k_crt.c's last
+#     scratch advance is the vendored carving kept deliberately intact.
+#   * a bound cppcheck cannot prove: c68k_chacha20.c's n is 1..15 by
+#     construction, ami_udivdi3.c shifts a 32-bit value by at most 31 (legal,
+#     and a right shift at that), ami_random.c takes the ADDRESS of an
+#     uninitialised local for entropy and never reads it.
+#   * tests/tls/tls_resume.c: a static tag array pointing at an automatic that
+#     is alive for the whole call and rebuilt on the next one.
+#
+# count<TAB>file<TAB>finding
+1	port/threadx-amiga/src/tx_initialize_low_level.c	error: uninitvar: Uninitialized variable: end.ev_lo
+1	src/bsdsocket/socket.c	warning: identicalConditionAfterEarlyExit: Identical condition 'domain!=2', second condition is always false
+1	src/common/ami_random.c	error: autoVariables: Address of local auto-variable assigned to a function parameter.
+1	src/common/ami_udivdi3.c	warning: shiftTooManyBitsSigned: Shifting signed 32-bit value by 31 bits is undefined behaviour. See condition at line 590.
+1	src/crypto68k/c68k_chacha20.c	warning: uninitvar: Uninitialized variable: zeros
+1	src/crypto68k/c68k_crt.c	warning: uselessAssignmentPtrArg: Assignment of function parameter has no effect outside the function. Did you forget dereferencing it?
+1	src/net68k/n68k_checksum.c	warning: nullPointerRedundantCheck: Either the condition 'dest_ip_addr!=0' is redundant or there is possible null pointer dereference: dest_ip_short.
+1	src/net68k/n68k_checksum.c	warning: nullPointerRedundantCheck: Either the condition 'src_ip_addr!=0' is redundant or there is possible null pointer dereference: src_ip_short.
+1	src/tls/rfc7905/nx_secure_tls_record_payload_decrypt.c	warning: nullPointerRedundantCheck: Either the condition 'decrypted_packet!=0' is redundant or there is possible null pointer dereference: decrypted_packet.
+1	src/tlslib/tls_time.c	error: uninitvar: Uninitialized variable: ds.ds_Days
+1	src/tools/ftp.c	warning: uninitvar: Uninitialized variable: out
+1	src/usergroup/ug_misc.c	error: uninitvar: Uninitialized variable: c
+1	tests/perf/bracket_test.c	error: uninitvar: Uninitialized variable: ev.ev_lo
+1	tests/perf/cpucal.c	error: uninitvar: Uninitialized variable: ev.ev_lo
+1	tests/perf/perf_test.c	error: uninitvar: Uninitialized variable: ev.ev_lo
+1	tests/soak/soak_test.c	error: uninitvar: Uninitialized variable: ev.ev_lo
+1	tests/tls/tls_resume.c	error: danglingLifetime: Static variable 'tags' will use pointer to local variable 'why'.
+1	tests/tools/clockset.c	error: nullPointer: Null pointer dereference: (LONG*)args[0]

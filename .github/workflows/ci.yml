@@ -91,7 +91,7 @@ jobs:
           "$AMIGA_GCC" --version | head -1
 
       - name: tools/ci.sh
-        run: tools/ci.sh host cross conformance
+        run: tools/ci.sh host cross analyze conformance
 
       # The logs are where a failure is diagnosed, and they are the only thing
       # that survives the runner.
@@ -151,6 +151,8 @@ jobs:
           # -e SC1091: the sourced toolchain resolver is found at run time.
           shellcheck -S warning -e SC1091 \
             tools/ci.sh \
+            tools/analyze.sh \
+            tools/cppcheck.sh \
             tools/version.sh \
             tools/fetch-toolchain.sh \
             tools/package-toolchain-mirror.sh \

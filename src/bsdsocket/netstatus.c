@@ -612,6 +612,14 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
     /*
      * The one-entry answers are written straight into the caller's buffer, so
      * the size check has to happen before the walk rather than inside it.
+     *
+     * It is also what makes the two unchecked ns_writer_next() results below
+     * safe: `need != 0` for SYSTEM and STATS, so size >= header + entry_size,
+     * so ns_writer_init() computes room >= 1 and the first slot exists.  GCC's
+     * -fanalyzer reports those two as "dereference of NULL 'out'" because that
+     * chain goes through a division it will not reason about; the invariant is
+     * here rather than a NULL test at the call, because a NULL test there
+     * would be dead code that reads as if the buffer might be too small.
      */
     switch (what)
     {

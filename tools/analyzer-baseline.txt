@@ -1,0 +1,16 @@
+# GCC -fanalyzer findings that have been triaged and are not defects.
+# Regenerate with tools/analyze.sh --update.  See the script header.
+# count<TAB>file<TAB>warning<TAB>message
+1	port/threadx-amiga/src/tx_thread_stack_build.c	-Wanalyzer-null-dereference	dereference of NULL 'ctrl'
+1	src/common/compat.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value 'ev'
+1	src/common/compat.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value 'ev.ev_lo'
+1	tests/perf/bracket_test.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value 'ev.ev_lo'
+1	tests/perf/cpucal.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value 'ev.ev_lo'
+1	tests/perf/perf_test.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value 'ev.ev_lo'
+1	tests/tcpdrill/tcpdrill.c	-Wanalyzer-va-arg-type-mismatch	'va_arg' expected 'const char *' but received 'long unsigned int' for variadic argument 1 of 'ap'
+1	tests/tcpdrill/tcpdrill.c	-Wanalyzer-va-arg-type-mismatch	'va_arg' expected 'long int' but received 'const char *' for variadic argument 1 of 'ap'
+1	tests/tools/ifprobe.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value 'sa.sin_addr'
+2	tests/tcpdrill/tcpdrill.c	-Wanalyzer-va-arg-type-mismatch	'va_arg' expected 'long unsigned int' but received 'const char *' for variadic argument 1 of 'ap'
+4	tests/tcpdrill/tcpdrill.c	-Wanalyzer-va-list-exhausted	'ap' has no more arguments (0 consumed)
+4	tests/tcpdrill/tcpdrill.c	-Wanalyzer-va-list-exhausted	'ap' has no more arguments (1 consumed)
+6	src/bsdsocket/netstatus.c	-Wanalyzer-null-dereference	dereference of NULL 'out'
