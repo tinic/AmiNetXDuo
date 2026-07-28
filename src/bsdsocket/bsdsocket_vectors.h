@@ -401,17 +401,19 @@ LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
                               register LONG size __asm("d2"),
                               register struct AmiSocketBase *SocketBase __asm("a6"));
 
+/* LVO -0x204 */
+LONG bsd_AddDomainNameServer(register STRPTR address __asm("a0"),
+                             register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x20a */
+LONG bsd_RemoveDomainNameServer(register STRPTR address __asm("a0"),
+                                register struct AmiSocketBase *SocketBase __asm("a6"));
+
 /* LVO -0x210 */
 VOID bsd_ReleaseDomainNameServerList(register struct List *list __asm("a0"),
                                      register struct AmiSocketBase *SocketBase __asm("a6"));
 
 /* LVO -0x216 */
-LONG bsd_AddDomainNameServer(register STRPTR address __asm("a0"),
-                             register struct AmiSocketBase *SocketBase __asm("a6"));
-LONG bsd_RemoveDomainNameServer(register STRPTR address __asm("a0"),
-                                register struct AmiSocketBase *SocketBase __asm("a6"));
-LONG bsd_SetDefaultDomainName(register STRPTR name __asm("a0"),
-                              register struct AmiSocketBase *SocketBase __asm("a6"));
 struct List *bsd_ObtainDomainNameServerList(register struct AmiSocketBase *SocketBase __asm("a6"));
 
 /* LVO -0x21c */
@@ -480,6 +482,10 @@ LONG bsd_ObtainServerSocket(register struct AmiSocketBase *SocketBase __asm("a6"
 /* LVO -0x2be */
 BOOL bsd_GetDefaultDomainName(register STRPTR buffer __asm("a0"),
                               register LONG buffer_size __asm("d0"),
+                              register struct AmiSocketBase *SocketBase __asm("a6"));
+
+/* LVO -0x2c4 */
+VOID bsd_SetDefaultDomainName(register STRPTR buffer __asm("a0"),
                               register struct AmiSocketBase *SocketBase __asm("a6"));
 
 /* LVO -0x2dc */

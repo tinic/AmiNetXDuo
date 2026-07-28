@@ -220,15 +220,29 @@ LONG bsd_RemoveDomainNameServer(register STRPTR address __asm("a0"),
     }
 }
 
-LONG bsd_SetDefaultDomainName(register STRPTR name __asm("a0"),
+/*
+ * VOID, which is not a slip. clib/bsdsocket_protos.h:184 says
+ *
+ *     __stdargs VOID SetDefaultDomainName( STRPTR buffer );
+ *
+ * while its Add/Remove neighbours return LONG. This used to return LONG here,
+ * and the mismatch was invisible because the prototype had been hand-added to
+ * bsdsocket_vectors.h -- under the wrong LVO comment, so the generator never
+ * saw the disagreement. Regenerating the table is what surfaced it.
+ *
+ * A caller cannot be given a result, so the failures go to errno and nowhere
+ * else: bsd_fail() sets it, and Errno() is where somebody who cares looks.
+ * Silently doing nothing would be the alternative, and it is worse.
+ */
+VOID bsd_SetDefaultDomainName(register STRPTR name __asm("a0"),
                               register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     switch (netstack_set_domain_name((const char *)name))
     {
-        case AMI_NET_OK:          return 0;
-        case AMI_NET_ERR_STATE:   return bsd_fail(SocketBase, AMI_ENETDOWN);
+        case AMI_NET_OK:          break;
+        case AMI_NET_ERR_STATE:   (VOID)bsd_fail(SocketBase, AMI_ENETDOWN); break;
         /* Too long to store: refused rather than silently truncated. */
-        default:                  return bsd_fail(SocketBase, AMI_EINVAL);
+        default:                  (VOID)bsd_fail(SocketBase, AMI_EINVAL);   break;
     }
 }
 

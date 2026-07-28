@@ -145,9 +145,12 @@ IMPLEMENTED = {
     # the family-agnostic resolver (addrinfo.c).  Present in both build
     # configurations; only the AF_INET6 answers depend on AMINETXDUO_IPV6.
     "getaddrinfo", "getnameinfo", "freeaddrinfo", "gai_strerror",
-    # Tier 3, read-only query side (roadshow.c).
+    # Tier 3, the name-server and domain calls (roadshow.c).  The write half
+    # is here as well as the read half: a resolver configuration nothing can
+    # change is only half an API, and ShowNetStatus reads these back.
     "ObtainDomainNameServerList", "ReleaseDomainNameServerList",
-    "GetDefaultDomainName",
+    "AddDomainNameServer", "RemoveDomainNameServer",
+    "GetDefaultDomainName", "SetDefaultDomainName",
     # Tier 3, the interface query API (interfaces.c).
     #
     # These are written against NDK 3.2's SANA+RoadshowTCP-IP/doc/bsdsocket.doc
