@@ -1,5 +1,5 @@
 /*
- * __wrap_main -- give a ported Unix client a real POSIX argv[].
+ * __wrap_main -- give a ported Unix client a real POSIX argv[] and a big stack.
  *
  * THE PROBLEM
  *
@@ -29,6 +29,8 @@
  */
 
 #include <exec/types.h>
+#include <exec/memory.h>
+#include <exec/tasks.h>
 #include <dos/dosextens.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -46,6 +48,32 @@ static char  argv_name[AMIGA_ARGV_NAMESIZE];
 static char  argv_buf[AMIGA_ARGV_BUFSIZE];
 static char *argv_vec[AMIGA_ARGV_MAX + 1];
 
+/*
+ * A ported client needs far more stack than the Shell's 4 KB default -- curl's
+ * TLS work and Dropbear's bignum key exchange both run deep -- so the same
+ * shim that fixes argv also brings the stack, and the user never has to type
+ * `stack 200000` first.  256 KB covers both.
+ */
+#define AMIGA_ARGV_STACK    (256UL * 1024UL)
+
+static struct StackSwapStruct argv_sss;
+static int                    argv_argc;
+static int                    argv_result;
+
+/*
+ * Run __real_main() on the swapped stack.  NO locals and NO arguments, and
+ * noinline on purpose: between the two StackSwap() calls the stack pointer is
+ * the new stack's, so anything this function touched on the old one would be
+ * the wrong memory.  Everything it needs is static -- the discipline
+ * src/tools/fetch.c documents at length for exactly this.
+ */
+static __attribute__((noinline)) VOID argv_run_on_stack(VOID)
+{
+    StackSwap(&argv_sss);
+    argv_result = __real_main(argv_argc, argv_vec);
+    StackSwap(&argv_sss);
+}
+
 static int argv_is_space(char c)
 {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
@@ -58,6 +86,7 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
     int             argc = 0;
     ULONG           w = 0;              /* write cursor into argv_buf   */
     ULONG           r;                  /* read cursor into args        */
+    APTR            stack;
 
     (void)argc_ignored;
     (void)argv_ignored;
@@ -70,63 +99,86 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
     if (proc == NULL || proc->pr_CLI == 0)
     {
         argv_vec[0] = (char *)"";
-        argv_vec[1] = NULL;
-        return __real_main(1, argv_vec);
+        argc = 1;
     }
-
-    /* argv[0] -- the program name, as the Shell knows it. */
-    argv_name[0] = '\0';
-    (void)GetProgramName((STRPTR)argv_name, (LONG)sizeof(argv_name));
-    argv_vec[argc++] = argv_name;
-
-    /* argv[1..] -- the argument tail, tokenised in a private buffer. */
-    args = (const char *)GetArgStr();
-    if (args != NULL)
+    else
     {
-        r = 0;
-        while (argc < AMIGA_ARGV_MAX && w < AMIGA_ARGV_BUFSIZE - 1)
+        /* argv[0] -- the program name, as the Shell knows it. */
+        argv_name[0] = '\0';
+        (void)GetProgramName((STRPTR)argv_name, (LONG)sizeof(argv_name));
+        argv_vec[argc++] = argv_name;
+
+        /* argv[1..] -- the argument tail, tokenised in a private buffer. */
+        args = (const char *)GetArgStr();
+        if (args != NULL)
         {
-            while (argv_is_space(args[r]))
-                r++;
-            if (args[r] == '\0')
-                break;
-
-            argv_vec[argc++] = &argv_buf[w];
-
-            if (args[r] == '"')
+            r = 0;
+            while (argc < AMIGA_ARGV_MAX && w < AMIGA_ARGV_BUFSIZE - 1)
             {
-                /* Quoted: spaces are literal, '*' is the escape. */
-                r++;
-                while (args[r] != '\0' && args[r] != '"' &&
-                       w < AMIGA_ARGV_BUFSIZE - 1)
-                {
-                    char c = args[r++];
-
-                    if (c == '*' && args[r] != '\0')
-                    {
-                        char e = args[r++];
-                        c = (e == 'n' || e == 'N') ? '\n'
-                          : (e == 'e' || e == 'E') ? (char)0x1b
-                          :                          e;   /* *", **, ... */
-                    }
-
-                    argv_buf[w++] = c;
-                }
-                if (args[r] == '"')
+                while (argv_is_space(args[r]))
                     r++;
-            }
-            else
-            {
-                while (args[r] != '\0' && !argv_is_space(args[r]) &&
-                       w < AMIGA_ARGV_BUFSIZE - 1)
-                    argv_buf[w++] = args[r++];
-            }
+                if (args[r] == '\0')
+                    break;
 
-            argv_buf[w++] = '\0';
+                argv_vec[argc++] = &argv_buf[w];
+
+                if (args[r] == '"')
+                {
+                    /* Quoted: spaces are literal, '*' is the escape. */
+                    r++;
+                    while (args[r] != '\0' && args[r] != '"' &&
+                           w < AMIGA_ARGV_BUFSIZE - 1)
+                    {
+                        char c = args[r++];
+
+                        if (c == '*' && args[r] != '\0')
+                        {
+                            char e = args[r++];
+                            c = (e == 'n' || e == 'N') ? '\n'
+                              : (e == 'e' || e == 'E') ? (char)0x1b
+                              :                          e;   /* *", **, ... */
+                        }
+
+                        argv_buf[w++] = c;
+                    }
+                    if (args[r] == '"')
+                        r++;
+                }
+                else
+                {
+                    while (args[r] != '\0' && !argv_is_space(args[r]) &&
+                           w < AMIGA_ARGV_BUFSIZE - 1)
+                        argv_buf[w++] = args[r++];
+                }
+
+                argv_buf[w++] = '\0';
+            }
         }
     }
 
     argv_vec[argc] = NULL;
+    argv_argc      = argc;
 
-    return __real_main(argc, argv_vec);
+    /*
+     * Run the client on a stack of our own.  On a machine too short of memory
+     * to spare 256 KB, run on the caller's stack rather than refuse -- a small
+     * program may still fit, and refusing helps nobody.
+     */
+    stack = AllocMem(AMIGA_ARGV_STACK, MEMF_ANY);
+    if (stack != NULL)
+    {
+        argv_sss.stk_Lower   = stack;
+        argv_sss.stk_Upper   = (ULONG)stack + AMIGA_ARGV_STACK;
+        argv_sss.stk_Pointer = (APTR)((ULONG)stack + AMIGA_ARGV_STACK);
+
+        argv_run_on_stack();
+
+        FreeMem(stack, AMIGA_ARGV_STACK);
+    }
+    else
+    {
+        argv_result = __real_main(argv_argc, argv_vec);
+    }
+
+    return argv_result;
 }
