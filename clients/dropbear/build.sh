@@ -96,6 +96,12 @@
 #       localoptions.h compiles out, so dbclient does not reference the symbol
 #       at all.
 #
+#   -Wl,--wrap=getenv,--wrap=ioctl
+#       getenv() answers TERM (and reads ENV:) from dos.library.  ioctl()
+#       answers TIOCGWINSZ from the console's real size so the server is told
+#       the true terminal geometry instead of a fixed 80x25 -- see con_query_size()
+#       in clients/dropbear/amiga_dropbear.c.
+#
 #   --disable-{syslog,shadow,lastlog,utmp,utmpx,wtmp,loginfunc,pututline,pututxline}
 #       There is no system logger and no account database on AmigaOS 3.x.  Left
 #       enabled, configure finds <utmp.h> in the Roadshow NDK -- it is there for
@@ -386,7 +392,7 @@ done
 echo "==> building $PROGRAMS"
 make -C "$OUT" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" \
      PROGRAMS="$PROGRAMS" \
-     LDFLAGS="$AMIGA_CLIENT_LDFLAGS -Wl,--wrap=open,--wrap=read,--wrap=write,--wrap=close,--wrap=spawn_command,--wrap=getenv$FAST_WRAPS$PROF_WRAPS" \
+     LDFLAGS="$AMIGA_CLIENT_LDFLAGS -Wl,--wrap=open,--wrap=read,--wrap=write,--wrap=close,--wrap=spawn_command,--wrap=getenv,--wrap=ioctl$FAST_WRAPS$PROF_WRAPS" \
      LIBS="${SHIM_OBJS[*]} $PROF_LIBS -Wl,--start-group -lamigaclient -lc -Wl,--end-group"
 
 echo

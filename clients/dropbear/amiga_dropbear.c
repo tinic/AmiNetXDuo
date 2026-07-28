@@ -178,6 +178,7 @@ static LONG nx_socketbasetaglist(APTR tags)            { return SocketBaseTagLis
 #include <fcntl.h>
 #include <termios.h>
 #include <sys/filio.h>
+#include <sys/ioctl.h>          /* TIOCGWINSZ, struct winsize */
 #include <dos/dostags.h>
 
 
@@ -720,6 +721,127 @@ int __wrap_write(int fd, const void *buf, size_t len)
         return con_write(fd, buf, len);
 
     return __real_write(fd, buf, len);
+}
+
+/*
+ * The real size of the Amiga console.
+ *
+ * Dropbear tells the server the terminal geometry (put_winsize()), and without
+ * an answer here it ships a fixed 80x25 -- which leaves vim, nano, less and
+ * every other full-screen program drawing to the wrong size.  The Amiga console
+ * will tell us: a Window Status Request written to it -- CSI '0' SP 'q' --
+ * comes back through the INPUT stream as a Window Bounds Report,
+ * CSI 1;1;<rows>;<cols> SP 'r'.  We must be in raw mode to read that reply
+ * without waiting for a newline.
+ *
+ * This runs while the pty request is built, BEFORE tcsetattr() starts the
+ * interactive reader child, so nothing else is reading the console and the
+ * reply is ours.  The con_active() guard is a belt-and-braces refusal to fight
+ * the reader should that ever change; the wait is bounded so a console that
+ * never answers cannot stall the connection.
+ */
+static int con_query_size(int *rows, int *cols)
+{
+    BPTR in  = Input();
+    BPTR out = Output();
+    char buf[64];
+    int  n = 0, raw, r = 0, c = 0, field = 0, i;
+
+    if (con_active())
+        return -1;
+    if (in == (BPTR)0 || out == (BPTR)0 || !IsInteractive(in) || !IsInteractive(out))
+        return -1;
+
+    raw = SetMode(in, 1) ? 1 : 0;
+
+    Write(out, (APTR)"\x9b" "0 q", 4);          /* CSI '0' SP 'q' */
+    Flush(out);
+
+    while (n < (int)sizeof(buf) - 1)
+    {
+        char ch;
+        if (WaitForChar(in, 200000) == 0)       /* 200 ms */
+            break;
+        if (Read(in, &ch, 1) != 1)
+            break;
+        buf[n++] = ch;
+        if (ch == 'r')
+            break;
+    }
+
+    if (raw)
+        SetMode(in, 0);
+
+    /* CSI 1;1;<rows>;<cols> SP r -- the 3rd and 4th ';'-separated fields.
+       Restart at the CSI so a stray byte ahead of the report cannot skew it. */
+    for (i = 0; i < n; i++)
+    {
+        unsigned char ch = (unsigned char)buf[i];
+
+        if (ch == 0x9B)      { field = 0; r = 0; c = 0; }
+        else if (ch >= '0' && ch <= '9')
+        {
+            if      (field == 2) r = r * 10 + (ch - '0');
+            else if (field == 3) c = c * 10 + (ch - '0');
+        }
+        else if (ch == ';')  field++;
+        else if (ch == 'r')  break;
+    }
+
+    if (r > 0 && c > 0)
+    {
+        *rows = r;
+        *cols = c;
+        return 0;
+    }
+    return -1;
+}
+
+extern int __real_ioctl(int fd, unsigned long request, ...);
+
+/*
+ * Dropbear reaches TIOCGWINSZ through ioctl(); newlib has no answer, so it fell
+ * back to 80x25 every time.  Answer it from the console, pass socket ioctls to
+ * the library, and leave everything else to newlib.
+ */
+int __wrap_ioctl(int fd, unsigned long request, ...)
+{
+    va_list ap;
+    void   *arg;
+
+    va_start(ap, request);
+    arg = va_arg(ap, void *);
+    va_end(ap);
+
+    if (request == TIOCGWINSZ)
+    {
+        struct winsize *ws = (struct winsize *)arg;
+        int rows = 0, cols = 0;
+
+        if (ws == NULL)
+        {
+            errno = EFAULT;
+            return -1;
+        }
+        if ((fd == 0 || fd == 1 || fd == 2) && con_query_size(&rows, &cols) == 0)
+        {
+            ws->ws_row = (unsigned short)rows;
+            ws->ws_col = (unsigned short)cols;
+        }
+        else
+        {
+            ws->ws_row = 25;
+            ws->ws_col = 80;
+        }
+        ws->ws_xpixel = 0;
+        ws->ws_ypixel = 0;
+        return 0;
+    }
+
+    if (IS_SOCK(fd))
+        return (int)nx_ioctlsocket(SOCKOF(fd), request, arg);
+
+    return __real_ioctl(fd, request, arg);
 }
 
 int __wrap_close(int fd)
