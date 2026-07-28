@@ -15,38 +15,31 @@
  *      through BIOCSETF; on a machine with no memory protection a malformed
  *      one must be rejected, never merely survived.
  *
- * ---------------------------------------------------------------------------
- * WHAT A Capture consumer sees, And why it is not the wire buffer
- * ---------------------------------------------------------------------------
+ * What a capture consumer sees is not the wire buffer.
  *
  * SANA-II is cooked (docs/RESEARCH.md 3.4): the device owns the link header.
- * The two directions are therefore not symmetric, and neither of them is
- * simply "the bytes in the buffer":
+ * The two directions are therefore not symmetric:
  *
- *   RX -- src/sana2/sana2_rx.c has already SYNTHESISED a 14-byte Ethernet
+ *   RX -- src/sana2/sana2_rx.c has already synthesised a 14-byte Ethernet
  *         header from ios2_DstAddr / ios2_SrcAddr / ios2_PacketType by the
  *         time the frame reaches ami_sana2_rx_deliver(). Tapped there, the
- *         frame is already exactly what a DLT_EN10MB consumer expects, in one
+ *         frame is already what a DLT_EN10MB consumer expects, in one
  *         contiguous run, and the filter reads it in place with no copy.
  *
- *   TX -- in cooked mode NO Ethernet header is ever built. The wire buffer
- *         starts at the IP or ARP header. So ami_bpf_tap_tx() synthesises the
- *         14 bytes itself, from the same three facts SANA-II is about to be
- *         handed (ios2_PacketType, ios2_DstAddr, and our own MAC as the
- *         source), and presents them to the filter as the first segment of a
- *         scatter view whose remaining segments are the NX_PACKET chain. The
- *         packet is never modified and never copied whole -- only the
- *         captured prefix is copied, into the channel buffer.
+ *   TX -- in cooked mode no Ethernet header is ever built; the wire buffer
+ *         starts at the IP or ARP header. ami_bpf_tap_tx() synthesises the 14
+ *         bytes itself, from the same three facts SANA-II is about to be given
+ *         (ios2_PacketType, ios2_DstAddr, and our own MAC as the source), and
+ *         presents them to the filter as the first segment of a scatter view
+ *         whose remaining segments are the NX_PACKET chain. The packet is never
+ *         modified and never copied whole; only the captured prefix is copied,
+ *         into the channel buffer.
  *
- * That is the entire difference, and it is why the tap takes framing facts
- * rather than just a pointer and a length.
+ * That is why the tap takes framing facts rather than just a pointer and a
+ * length.
  *
- * ---------------------------------------------------------------------------
- * CAPTURE COVERAGE -- read this before believing a capture is complete
- * ---------------------------------------------------------------------------
- *
- * The tap sits on the stack's own frame path, so it sees exactly what the
- * stack sees and no more:
+ * Capture coverage. The tap sits on the stack's own frame path, so it sees
+ * exactly what the stack sees and no more:
  *
  *   - Only EtherTypes the SANA-II shim posts a CMD_READ for: 0x0800, 0x0806,
  *     and 0x86DD in an IPv6 build. CMD_READ is per packet type and a SANA-II
@@ -59,7 +52,7 @@
  *     abandon the interface when the call fails, and the partial capture is
  *     more useful than none.
  *   - Frames dropped by the device for want of an outstanding CMD_READ are
- *     invisible to us and are NOT counted in bs_drop, which counts only what
+ *     invisible to us and are not counted in bs_drop, which counts only what
  *     the channel itself discarded for want of buffer space.
  *
  * SPDX-License-Identifier: MIT
@@ -91,9 +84,9 @@ extern "C" {
 
 /*
  * Host-test replica of the Roadshow NDK <net/bpf.h> (Olaf Barthel 2001-2016,
- * over 4.4BSD's @(#)bpf.h 8.2 1/9/95). Structurally identical; on a 64-bit
- * host `struct bpf_hdr` gets two bytes of tail padding that the 68k struct
- * does not have, which is one reason nothing in the implementation ever uses
+ * over 4.4BSD's @(#)bpf.h 8.2 1/9/95). Structurally identical; on a 64-bit host
+ * `struct bpf_hdr` gets two bytes of tail padding that the 68k struct does not
+ * have, which is one reason nothing in the implementation uses
  * sizeof(struct bpf_hdr) -- see AMI_BPF_HDR_BYTES below.
  */
 
@@ -255,16 +248,15 @@ struct bpf_insn {
  *
  * <devices/timer.h> first, for `struct timeval`. bh_tstamp is declared as
  * `struct __timeval`, which <net/bpf.h> resolves to `struct timeval` or
- * `struct TimeVal` depending on __NEW_TIMEVAL_DEFINITION_USED__ -- and
- * `TimeVal` is an AmigaOS type from <devices/timer.h>, which is what settles
- * that Roadshow means the Amiga timeval and not a Unix one. VERIFIED
- * 2026-07-24 on this toolchain: <devices/timer.h> and <sys/time.h> both give
- * an 8-byte, 2-byte-aligned struct with tv_secs/tv_micro (newlib's here is
- * Amiga-adapted, with tv_sec/tv_secs and tv_usec/tv_micro as union aliases),
- * so `struct bpf_hdr` comes out 18 bytes either way. The assert below is kept
- * anyway: a toolchain that substituted a stock Unix timeval would change the
- * record layout silently, which is exactly how <pwd.h> went wrong
- * (docs/RESEARCH.md 3.3).
+ * `struct TimeVal` depending on __NEW_TIMEVAL_DEFINITION_USED__, and `TimeVal`
+ * is an AmigaOS type from <devices/timer.h>, which settles that Roadshow means
+ * the Amiga timeval and not a Unix one. Verified 2026-07-24 on this toolchain:
+ * <devices/timer.h> and <sys/time.h> both give an 8-byte, 2-byte-aligned struct
+ * with tv_secs/tv_micro (newlib's here is Amiga-adapted, with tv_sec/tv_secs
+ * and tv_usec/tv_micro as union aliases), so `struct bpf_hdr` comes out 18
+ * bytes either way. The assert below is kept anyway: a toolchain that
+ * substituted a stock Unix timeval would change the record layout silently,
+ * which is how <pwd.h> went wrong (docs/RESEARCH.md 3.3).
  *
  * <sys/types.h> before <net/if.h>, because <net/if.h> reaches <sys/socket.h>,
  * which uses ssize_t without declaring it on this newlib-based toolchain and
@@ -289,9 +281,9 @@ struct bpf_insn {
  * <net/bpf.h>. On 68k a struct is 2-byte aligned, so `struct bpf_hdr` is 18
  * bytes -- 8 for the timeval, 4 + 4 for the two lengths, 2 for bh_hdrlen --
  * and BPF_WORDALIGN rounds the header to 20, leaving two pad bytes before the
- * captured data. That padding is not cosmetic: consumers step to the next
- * record with BPF_WORDALIGN(bh_hdrlen + bh_caplen) and read the data at
- * record + bh_hdrlen, so both numbers have to be exactly these.
+ * captured data. Consumers step to the next record with
+ * BPF_WORDALIGN(bh_hdrlen + bh_caplen) and read the data at record +
+ * bh_hdrlen, so both numbers have to be exactly these.
  *
  * The implementation writes the six fields at these offsets explicitly and
  * never stores a `struct bpf_hdr` as a unit, so the emitted bytes are right
@@ -331,9 +323,9 @@ AMI_STATIC_ASSERT(BPF_ALIGNMENT == 4, "BPF_ALIGNMENT");
  * linear); two or more for a transmit, where segment 0 is the synthesised
  * link header and the rest is the NX_PACKET chain.
  *
- * `wirelen` is the length BPF_LEN reports and bh_datalen records -- the whole
- * frame. `caplen` is how much of it the segments actually cover, which is the
- * same thing unless a truncated frame is being filtered.
+ * `wirelen` is the length BPF_LEN reports and bh_datalen records: the whole
+ * frame. `caplen` is how much of it the segments cover, which is the same
+ * unless a truncated frame is being filtered.
  */
 #define AMI_BPF_MAX_SEGS    8
 
@@ -364,10 +356,10 @@ LONG ami_bpf_view_add(AmiBpfView *view, const UBYTE *base, ULONG len);
  *
  * The interpreter is total: every out-of-range packet read, every division by
  * zero and every scratch-memory index is checked at run time and rejects the
- * packet rather than trapping. It does not need a validated program to be
- * safe -- but jump targets are NOT range-checked here, so a program that has
- * not been through ami_bpf_validate() can still run off the end of its own
- * instruction array. Validate first; BIOCSETF always does.
+ * packet rather than trapping. It does not need a validated program to be safe,
+ * but jump targets are not range-checked here, so a program that has not been
+ * through ami_bpf_validate() can still run off the end of its own instruction
+ * array. Validate first; BIOCSETF always does.
  */
 ULONG ami_bpf_filter_view(const struct bpf_insn *insns, ULONG count,
                           const AmiBpfView *view);
@@ -382,9 +374,9 @@ ULONG ami_bpf_filter(const struct bpf_insn *insns, ULONG count,
  * past BPF_MEMWORDS, a constant division by zero, an unknown opcode, or a
  * program that does not end in a BPF_RET. Returns 0 to accept, -1 to reject.
  *
- * Strict on purpose. 4.4BSD's bpf_validate lets several unknown encodings
- * through on the grounds that the interpreter will treat them as no-ops;
- * here anything the interpreter does not implement is refused at load time.
+ * Stricter than 4.4BSD's bpf_validate, which lets several unknown encodings
+ * through on the grounds that the interpreter will treat them as no-ops; here
+ * anything the interpreter does not implement is refused at load time.
  */
 LONG ami_bpf_validate(const struct bpf_insn *insns, ULONG count);
 
@@ -418,21 +410,21 @@ VOID ami_bpf_cleanup(VOID);
  *   0x192 bpf_ioctl              (channel,command,buf) d0/d1/a0
  *   0x198 bpf_data_waiting       (channel)             d0
  *
- * bpf_set_notify_mask takes its channel in d1 and its mask in d0 -- the
- * reverse of every other call in the group, including its own sibling
- * bpf_set_interrupt_mask. Both the pragma and the .fd agree, so it is real
- * and not a typo in one source. The generated vector must not "tidy" it.
+ * bpf_set_notify_mask takes its channel in d1 and its mask in d0, the reverse
+ * of every other call in the group, including bpf_set_interrupt_mask. Both the
+ * pragma and the .fd agree, so it is real and not a typo in one source. The
+ * generated vector must not tidy it.
  *
  * Return values are 0 for success and -1 for failure throughout, except
  * bpf_open (the channel claimed), bpf_read (bytes copied), bpf_write (bytes
  * accepted) and bpf_data_waiting (bytes available). No bsdsocket autodoc
- * covering the bpf_* group could be found on this machine, so the exact
- * failure codes Roadshow returns are still not confirmed -- but bpf_open's
- * convention is, because Roadshow's own libpcap uses it (below).
+ * covering the bpf_* group could be found on this machine, so the exact failure
+ * codes Roadshow returns are unconfirmed; bpf_open's convention is confirmed,
+ * because Roadshow's own libpcap uses it (below).
  */
 
 /*
- * Claim a channel: 0..AMI_BPF_MAX_CHANNELS-1 for a particular one, NEGATIVE
+ * Claim a channel: 0..AMI_BPF_MAX_CHANNELS-1 for a particular one, negative
  * for any free one. Returns the channel claimed, or -1 if it is out of range,
  * already open, or there are none left. A channel captures nothing until
  * BIOCSETIF.
@@ -447,16 +439,16 @@ LONG ami_bpf_open(LONG channel);
 LONG ami_bpf_close(LONG channel);
 
 /*
- * Copy out whole capture records. NON-BLOCKING: returns 0 when nothing is
+ * Copy out whole capture records. Non-blocking: returns 0 when nothing is
  * buffered rather than waiting, because the Amiga idiom for waiting is the
- * signal mask set by bpf_set_notify_mask(), and blocking here would strand
- * the caller's other Exec signals. Returns the number of bytes copied.
+ * signal mask set by bpf_set_notify_mask(), and blocking here would strand the
+ * caller's other Exec signals. Returns the number of bytes copied.
  *
  * Only complete records are ever returned, so a consumer can walk the buffer
  * with BPF_WORDALIGN(bh_hdrlen + bh_caplen) without bounds surprises. If the
  * caller's buffer is too small for even the first pending record, -1 is
- * returned and nothing is consumed -- ask BIOCGBLEN and size the buffer to
- * match, which is what capture libraries do anyway.
+ * returned and nothing is consumed: ask BIOCGBLEN and size the buffer to match,
+ * as capture libraries do.
  */
 LONG ami_bpf_read(LONG channel, APTR buffer, LONG len);
 
@@ -467,7 +459,7 @@ LONG ami_bpf_read(LONG channel, APTR buffer, LONG len);
  * device builds the header itself and would otherwise duplicate it.
  *
  * Returns the number of bytes accepted, or -1. Requires the interface to have
- * been registered with an injector -- see ami_bpf_attach_interface().
+ * been registered with an injector; see ami_bpf_attach_interface().
  */
 LONG ami_bpf_write(LONG channel, APTR buffer, LONG len);
 
@@ -476,10 +468,9 @@ LONG ami_bpf_set_notify_mask(LONG channel, ULONG signal_mask);
 
 /*
  * The interrupt-time counterpart. The tap runs at task level in this
- * implementation (the SANA-II readers are Tasks and the copy hooks do not
- * call it), so this mask is delivered by the same Signal() from the same
- * context as the notify mask. It is honoured, not ignored, but it carries no
- * extra guarantee here.
+ * implementation (the SANA-II readers are Tasks and the copy hooks do not call
+ * it), so this mask is delivered by the same Signal() from the same context as
+ * the notify mask. It is honoured, not ignored, but means nothing extra here.
  */
 LONG ami_bpf_set_interrupt_mask(LONG channel, ULONG signal_mask);
 
@@ -499,19 +490,19 @@ LONG ami_bpf_data_waiting(LONG channel);
 
 /*
  * How many channels are currently bound to an interface, i.e. whether tapping
- * is worth any preparation at all. The two taps below check this themselves;
- * this is for a caller that has to BUILD something -- a scatter view over a
- * packet chain -- before it can call one.
+ * is worth any preparation. The two taps below check this themselves; this is
+ * for a caller that has to build something -- a scatter view over a packet
+ * chain -- before it can call one.
  */
 UWORD ami_bpf_capturing(VOID);
 
 /* ------------------------------------------------- interface registration */
 
 /*
- * Called by whoever creates a SANA-II interface -- the netstack bring-up code
- * is the natural place, since it holds both the configured name and the
- * AmiSana2If pointer. `cookie` is an opaque identity: whatever value is
- * passed here is the value the taps below must be given.
+ * Called by whoever creates a SANA-II interface; the netstack bring-up code is
+ * the natural place, since it holds both the configured name and the
+ * AmiSana2If pointer. `cookie` is an opaque identity: whatever value is passed
+ * here is the value the taps below must be given.
  *
  * `inject` may be NULL, in which case bpf_write() on a channel bound to this
  * interface fails. See the note in src/bpf/bpf_tap.c for the shape a SANA-II
@@ -530,10 +521,10 @@ VOID ami_bpf_detach_interface(APTR cookie);
 /* --------------------------------------------------------------- the taps */
 
 /*
- * The two calls src/sana2/ MUST ADD. Both are cheap no-ops when no channel is
+ * The two calls src/sana2/ has to add. Both are no-ops when no channel is
  * capturing on that interface -- a load, a compare and a return.
  *
- * 1. Receive. In src/sana2/sana2_rx.c, at the TOP of ami_sana2_rx_deliver(),
+ * 1. Receive. In src/sana2/sana2_rx.c, at the top of ami_sana2_rx_deliver(),
  *    before the length check and before the link header is stripped:
  *
  *        ami_bpf_tap_rx(iface, packet->nx_packet_prepend_ptr,

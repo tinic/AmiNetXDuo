@@ -34,8 +34,8 @@ typedef enum {
 /*
  * How an interface gets its IPv6 addresses. Every mode except OFF configures
  * the fe80::/64 link-local address derived from the MAC (RFC 4291 modified
- * EUI-64) -- that one needs no router, no server and no configuration, and is
- * the only mode guaranteed to work on an isolated Amiga.
+ * EUI-64), which needs no router, no server and no configuration and is the
+ * only mode that works on an isolated Amiga.
  */
 typedef enum {
     AMI_IP6TYPE_OFF = 0,        /* no IPv6 on this interface                  */
@@ -45,10 +45,10 @@ typedef enum {
 } AmiIp6Type;
 
 /*
- * An IPv6 address as four ULONGs in HOST byte order, [0] most significant.
+ * An IPv6 address as four ULONGs in host byte order, [0] most significant.
  * This is NetX Duo's own representation (NXD_ADDRESS.nxd_ip_address.v6), and
  * matching it means no conversion anywhere between the config file and the
- * stack. It is NOT the byte order of struct in6_addr -- src/bsdsocket/ has the
+ * stack. It is not the byte order of struct in6_addr; src/bsdsocket/ has the
  * conversion, which on m68k is a straight copy but is spelled out anyway.
  */
 #define AMI_CFG_IP6_WORDS           4
@@ -98,8 +98,8 @@ typedef struct AmiConfig {
 } AmiConfig;
 
 /*
- * Read the Roadshow config layout into *cfg. Missing files are not an error --
- * an empty config yields interface_count == 0 and the caller decides.
+ * Read the Roadshow config layout into *cfg. Missing files are not an error: an
+ * empty config yields interface_count == 0 and the caller decides.
  * Returns 0 on success, or a negative AMI_CFG_ERR_* code.
  */
 #define AMI_CFG_OK              0
@@ -115,14 +115,14 @@ LONG ami_config_load_interface(const char *name, AmiIfConfig *out);
 /* ------------------------------------------------------------- diagnostics
  *
  * Everything wrong with a configuration file is reported twice: once to
- * ami_log() for whoever is reading the serial port, and once through this
- * hook, which is how a Shell command puts the same fact on the user's screen
- * with a file name, a line number and a suggestion.
+ * ami_log() for whoever is reading the serial port, and once through this hook,
+ * which is how a Shell command puts the same fact on the user's screen with a
+ * file name, a line number and a suggestion.
  *
- * The hook is optional and global. src/netstack never installs one -- a
+ * The hook is optional and global. src/netstack never installs one, because a
  * program that opens bsdsocket.library must not have configuration warnings
- * appear in its output -- so the only reporters are the tools, which install
- * one for the duration of a load and remove it afterwards.
+ * appear in its output, so the only reporters are the tools, which install one
+ * for the duration of a load and remove it afterwards.
  *
  * The AmiCfgProblem and every string in it are valid only for the duration of
  * the call; copy anything you need to keep.
@@ -153,8 +153,8 @@ VOID  ami_config_format_ip(ULONG addr, char *buf, ULONG buflen);
  * compression (at most one), and a trailing dotted quad ("::ffff:10.0.0.1").
  * Leading zeroes inside a group are allowed, more than four hex digits is not.
  *
- * `prefix_out` selects the dialect, which is the whole reason the two callers
- * can share one parser:
+ * `prefix_out` selects the dialect, which is what lets the two callers share
+ * one parser:
  *   - non-NULL: a "/N" suffix is accepted and written there (N in 0..128).
  *     Without a suffix the value is left untouched, so the caller pre-seeds
  *     its default. This is the config-file dialect.

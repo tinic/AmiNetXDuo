@@ -2,12 +2,11 @@
  * AmiNetXDuo -- NetX Duo tuning for the AmigaOS floor target.
  *
  * Target (docs/RESEARCH.md 9, decision 1): 68020, OS 3.1, 4 MB.  NetX Duo's
- * shipped defaults assume an embedded target with a static budget and no
- * competition for RAM; on an Amiga the stack shares memory with everything
- * else on the machine and must stay modest.  Everything here is a conscious
- * departure from the default -- if a value is not listed, the default stands.
+ * defaults assume an embedded target with a static memory budget; on an Amiga
+ * the stack shares memory with everything else on the machine.  Every value
+ * here departs from the default; if a value is not listed, the default stands.
  *
- * Sizes that the rest of AmiNetXDuo shares (packet payload, pool bounds) live
+ * Sizes shared with the rest of AmiNetXDuo (packet payload, pool bounds) live
  * in include/aminetxduo/netstack.h and are mirrored, not redefined, here.
  *
  * SPDX-License-Identifier: MIT
@@ -20,17 +19,16 @@
 /* ---------------------------------------------------------------- timing -- */
 
 /*
- * One tick is 20 ms.  This must equal TX_TIMER_TICKS_PER_SECOND in
- * port/threadx-amiga/inc/tx_port.h: NetX Duo expresses every one of its own
- * rates as a divisor of this, so a disagreement does not fail -- it silently
- * scales every TCP timer by the ratio.
+ * One tick is 20 ms.  Must equal TX_TIMER_TICKS_PER_SECOND in
+ * port/threadx-amiga/inc/tx_port.h: NetX Duo expresses its own rates as
+ * divisors of this, so a disagreement silently scales every TCP timer by the
+ * ratio.
  *
- * 50 Hz rather than 100 because that is what the platform has always run
- * (AmiTCP and its descendants: `#define hz (50)`) and an order of magnitude
- * more than the BSD protocol timers above us consume -- pfslowtimo at hz/2
- * (500 ms) and pffasttimo at hz/5 (200 ms).  The tick task takes its wakeups
- * from timer.device UNIT_VBLANK and its TIME from ReadEClock(), so the rate is
- * honest on PAL, NTSC, RTG and accelerated systems alike.
+ * 50 Hz rather than 100 to match the platform (AmiTCP and its descendants:
+ * `#define hz (50)`), an order of magnitude above the BSD protocol timers
+ * above us -- pfslowtimo at hz/2 (500 ms), pffasttimo at hz/5 (200 ms).  The
+ * tick task wakes on timer.device UNIT_VBLANK and takes its time from
+ * ReadEClock(), so the rate holds on PAL, NTSC, RTG and accelerated systems.
  */
 
 #define NX_IP_PERIODIC_RATE                     50
@@ -41,32 +39,32 @@
 /*
  * Payload of a pool packet.  Must match AMI_POOL_PAYLOAD in
  * include/aminetxduo/netstack.h (1568 = 1500 MTU + 14 Ethernet + slack,
- * longword aligned).  NetX Duo itself takes this from nx_packet_pool_create();
- * it is recorded here so a driver can size a bounce buffer without pulling in
- * the AmiNetXDuo headers.
+ * longword aligned).  NetX Duo takes this from nx_packet_pool_create(); it is
+ * recorded here so a driver can size a bounce buffer without pulling in the
+ * AmiNetXDuo headers.
  */
 #define NX_AMIGA_POOL_PAYLOAD                   1568
 
 /*
- * Leave NX_PHYSICAL_HEADER at its default of 16 rather than trimming it to the
- * 14 bytes an Ethernet header actually needs.  With a longword-aligned payload
- * the 14-byte header then starts at +2, which puts the IP header on a longword
- * boundary -- worth having on 68020, where a longword access at an odd-word
- * address costs an extra bus cycle, and mandatory the day this runs on a
- * strict-alignment host.  The SANA-II shim relies on the same offset.
+ * NX_PHYSICAL_HEADER stays at its default of 16 rather than the 14 bytes an
+ * Ethernet header needs.  With a longword-aligned payload the 14-byte header
+ * starts at +2, putting the IP header on a longword boundary: on 68020 a
+ * longword access at an odd-word address costs an extra bus cycle, and a
+ * strict-alignment host would require it.  The SANA-II shim relies on the same
+ * offset.
  */
 
-/* Packets may still be chained: a TCP receive of more than one payload's worth
+/* Packets may be chained: a TCP receive of more than one payload's worth
    arrives as a chain, and NX_DISABLE_PACKET_CHAIN would silently truncate it. */
 
 
 /* ----------------------------------------------------------- interfaces --- */
 
 /*
- * Two physical interfaces: one SANA-II device plus room for a second (a PPP
- * or SLIP unit alongside Ethernet is a normal Amiga configuration).  Each
- * costs an NX_INTERFACE in every NX_IP, so this is not free -- raise it only
- * with a measurement.  The loopback interface is separate and always present.
+ * Two physical interfaces: one SANA-II device plus room for a second, which is
+ * a normal Amiga configuration.  Each costs an NX_INTERFACE in every NX_IP;
+ * raise it only with a measurement.  The loopback interface is separate and
+ * always present.
  */
 #define NX_MAX_PHYSICAL_INTERFACES              2
 
@@ -75,16 +73,14 @@
 
 /*
  * Queue at most two packets per unresolved ARP entry (default 4).  Each queued
- * packet is a whole pool buffer held hostage while the ARP resolves, and on a
- * 16-packet floor pool losing eight of them to one unreachable host is not
- * acceptable.
+ * packet is a whole pool buffer held while the ARP resolves; on a 16-packet
+ * floor pool, losing eight to one unreachable host is too many.
  */
 #define NX_ARP_MAX_QUEUE_DEPTH                  2
 
 /*
  * Retry an unanswered ARP 8 times rather than 18.  At the default one-second
- * update rate that is 8 s before giving up instead of 18 s, which is closer to
- * what Amiga software (and users) expect from a stack.
+ * update rate that is 8 s before giving up instead of 18 s.
  */
 #define NX_ARP_MAXIMUM_RETRIES                  8
 
@@ -93,21 +89,19 @@
 
 /*
  * Cap the transmit queue at 8 packets per socket (default 20).  20 in-flight
- * packets is 20 * 1568 = 30 KB of pool per socket, which on the floor target
- * is more than the entire pool.
+ * packets is 20 * 1568 = 30 KB of pool per socket, more than the entire floor
+ * pool.
  */
 #define NX_TCP_MAXIMUM_TX_QUEUE                 8
 
 /*
  * How many ports may be listened on at once (default 10).
  *
- * This is a hard ceiling on listen(), not a soft one: the eleventh
- * nx_tcp_server_socket_listen() returns NX_MAX_LISTEN, which bsdsocket
- * reports as ENOBUFS, and no amount of closing other kinds of socket helps.
- * Ten was enough while the only server in the tree was a test; it is not
- * enough for the tools this stack exists to run.  `ssh -L` opens one listener
- * per forward, an ftp client opens one per active-mode transfer, and `nc -l`
- * plus anything else at all is already two.
+ * A hard ceiling on listen(): the eleventh nx_tcp_server_socket_listen()
+ * returns NX_MAX_LISTEN, which bsdsocket reports as ENOBUFS, and closing other
+ * kinds of socket does not help.  `ssh -L` opens one listener per forward, an
+ * ftp client one per active-mode transfer, and `nc -l` plus anything else is
+ * already two.
  *
  * Cost is 44 bytes per entry (NX_TCP_LISTEN, with extended notify on) inside
  * the single NX_IP, so 10 -> 32 is under a kilobyte of BSS, once.
@@ -117,13 +111,13 @@
 /*
  * Turn on the extended notify callbacks.
  *
- * Without this, NX_DISABLE_EXTENDED_NOTIFY_SUPPORT is what nx_api.h defines
- * for us, and nx_tcp_socket_establish_notify() /
+ * Without this, nx_api.h defines NX_DISABLE_EXTENDED_NOTIFY_SUPPORT for us and
+ * nx_tcp_socket_establish_notify() /
  * nx_tcp_socket_disconnect_complete_notify() compile to a stub returning
- * NX_NOT_SUPPORTED.  bsdsocket.library then has no way to be told that a
- * non-blocking connect() completed or that a disconnect finished, and has to
- * derive both by reading nx_tcp_socket_state on every readiness poll --
- * i.e. WaitSelect() polls where it should be sleeping.
+ * NX_NOT_SUPPORTED.  bsdsocket.library then cannot be told that a non-blocking
+ * connect() completed or that a disconnect finished, and has to derive both by
+ * reading nx_tcp_socket_state on every readiness poll, so WaitSelect() polls
+ * where it could sleep.
  *
  * With it, four call sites in the TCP state machine reach us directly:
  *   nx_tcp_socket_state_syn_sent.c      establish  (client connect complete)
@@ -132,107 +126,74 @@
  *   nx_tcp_socket_state_fin_wait{1,2}/closing/last_ack.c
  *                                       disconnect (orderly close complete)
  *
- * Cost: four function pointers (16 bytes) per NX_TCP_SOCKET, and the two
- * extra branches per received segment that guard them.  It also changes the
- * NX_TCP_SOCKET layout, so it is an ABI break for anything compiled against
- * the old header -- everything here is built from one tree, but that is why
- * this is not a per-file define.
+ * Cost: four function pointers (16 bytes) per NX_TCP_SOCKET, and the two extra
+ * branches per received segment that guard them.  It changes the
+ * NX_TCP_SOCKET layout, so it is an ABI break for anything compiled against the
+ * old header, and cannot be a per-file define.
  */
 #define NX_ENABLE_EXTENDED_NOTIFY_SUPPORT
 
 /*
- * ACK every second full-SIZED SEGMENT (RFC 1122, 4.2.3.2).
+ * ACK every second full-sized segment (RFC 1122, 4.2.3.2).
  *
- * NetX Duo does not do this by default -- NX_TCP_ACK_EVERY_N_PACKETS is not
- * defined anywhere in the vendored tree, so the whole `need_ack` block in
- * nx_tcp_socket_state_data_check.c is compiled out and the rule is simply
- * absent.  What is left is two triggers, and NEITHER of them is per-segment:
+ * NX_TCP_ACK_EVERY_N_PACKETS is not defined anywhere in the vendored tree, so
+ * by default the `need_ack` block in nx_tcp_socket_state_data_check.c is
+ * compiled out.  Two triggers remain, neither per-segment: a window-update ACK
+ * once the receive window has re-opened by half of
+ * nx_tcp_socket_rx_window_default (nx_tcp_socket_state_data_check.c:1135,
+ * nx_tcp_socket_receive.c:212), and the 200 ms delayed-ACK timer.  ACK interval
+ * is therefore proportional to the window, and the timer paces it whenever the
+ * application cannot consume half a window inside 200 ms -- so raising the
+ * window alone is harmful.  tests/trace/, A1200 profile, 524288 bytes over the
+ * wire, 8 KB -> 32 KB receive window and nothing else changed: 161 -> 89 KB/s,
+ * ACK delay p50 6.7 -> 71.4 ms, p90 8.7 -> 187.4 ms, 26 of 59 ACKs in the
+ * 200 ms delayed bucket, a 14-deep duplicate-ACK run, one 1361 ms gap between
+ * data segments, and no retransmissions.  With this defined the same 32 KB
+ * build returns to 179 KB/s and p50 2.0 ms, 148 of 208 ACKs inside 2 ms.
  *
- *   1. a window-update ACK, sent only once the receive window has re-opened
- *      by HALF OF nx_tcp_socket_rx_window_default
- *      (nx_tcp_socket_state_data_check.c:1135, nx_tcp_socket_receive.c:212);
- *   2. the 200 ms delayed-ACK timer.
+ * At the current 8 KB window throughput is unchanged -- half of 8192 is already
+ * about three segments -- but ACK latency drops from a 6.7 ms median to 2.0 ms,
+ * which every request/response exchange pays (HTTP, DNS, each leg of a TLS
+ * handshake).
  *
- * So the interval between acknowledgements is Proportional to the window, and
- * when the application cannot consume half a window inside 200 ms the timer
- * becomes the pacer.  That makes the obvious tuning knob actively harmful:
- * measured in tests/trace/ on the A1200 profile, 524288 bytes over the wire,
- * raising the receive window from 8 KB to 32 KB and changing nothing else
- *
- *      161 KB/s -> 89 KB/s,        ACK delay p50 6.7 ms -> 71.4 ms
- *                                  p90 8.7 ms -> 187.4 ms
- *                                  26 of 59 ACKs in the 200 ms delayed bucket
- *                                  a 14-deep run of duplicate ACKs
- *                                  one 1361 ms gap between data segments
- *
- * with ZERO retransmissions throughout -- nothing was lost, the sender was
- * simply waiting.  With this defined the same 32 KB build returns to
- * 179 KB/s and ACK delay p50 2.0 ms, 148 of 208 ACKs inside 2 ms.
- *
- * At the current 8 KB window it changes throughput by ~0% -- half of 8192 is
- * already about three segments -- but it cuts ACK latency from a 6.7 ms
- * median to 2.0 ms, which is what every request/response exchange pays
- * (HTTP, DNS, and each leg of a TLS handshake), and it removes the trap.
- *
- * Cost: one ULONG per NX_TCP_SOCKET (already in the struct, already
- * initialised by nx_tcp_socket_create.c:154) and one comparison per received
- * data segment.
+ * Cost: one ULONG per NX_TCP_SOCKET (already in the struct, already initialised
+ * by nx_tcp_socket_create.c:154) and one comparison per received data segment.
  */
 #define NX_TCP_ACK_EVERY_N_PACKETS              2
 
 /*
- * Retransmit with exponential backoff (RFC 6298 5.5), And the trap in doing it.
+ * Retransmit with exponential backoff (RFC 6298 5.5).
  *
  *     timeout = nx_tcp_socket_timeout_rate << (retries * NX_TCP_RETRY_SHIFT)
  *
  * (nx_tcp_socket_retransmit.c:188, nx_tcp_fast_periodic_processing.c:150).
  * NX_TCP_RETRY_SHIFT defaults to 0, so the shift is a no-op and the interval is
- * NX_IP_PERIODIC_RATE / NX_TCP_TRANSMIT_TIMER_RATE -- one second, FOREVER.
- * tests/tcpdrill measured it directly: SYN retransmissions at 890 ms and then
- * 1002 ms.  There is no RTT estimator anywhere in the vendored tree either, so
- * the interval is not merely constant, it is constant at a number nobody chose
- * for this path.
+ * NX_IP_PERIODIC_RATE / NX_TCP_TRANSMIT_TIMER_RATE -- one second, forever.
+ * tests/tcpdrill measured SYN retransmissions at 890 ms and then 1002 ms.
+ * There is no RTT estimator anywhere in the vendored tree either.
  *
- * A shift of 1 doubles it each time, which is what RFC 6298 5.5 asks for.
- * NX_TCP_MAXIMUM_RETRIES Cannot be left alone while doing that, and this is the
- * whole reason the two are set together.  There is NO CEILING in NetX Duo --
- * the expression above is a plain shift with no clamp, and NX_TCP_MAXIMUM_RETRIES
- * is the only thing bounding it.  At the default of 10 the intervals run
- * 1, 2, 4 ... 1024 seconds and the socket does not give up for
- * 2^11 - 1 = 2047 s.  A one-second stall would have become a THIRTY-FOUR MINUTE
- * one.
+ * The two settings go together because the expression has no clamp, so
+ * NX_TCP_MAXIMUM_RETRIES is the only bound.  A shift of 1 with the default of
+ * 10 retries runs 1, 2, 4 ... 1024 seconds and does not give up for
+ * 2^11 - 1 = 2047 s.  Six retries gives 1 2 4 8 16 32 64 seconds, abandoning at
+ * 127 s: the largest single interval satisfies RFC 6298 2.5's "at least 60
+ * seconds" maximum RTO, and 127 s satisfies RFC 1122 4.2.3.5's R2 of "at least
+ * 100 seconds" for data.  The same counter bounds SYN retransmission, so
+ * connect() to a host that is not answering now blocks for 127 s rather than
+ * 10 -- a visible behaviour change, and why the number is 6 and not 8.
  *
- * Six retries with a shift of 1 gives
- *
- *     1  2  4  8  16  32  64 seconds     abandon at 127 s
- *
- * which lands on three numbers that are each defensible rather than round:
- *
- *   * the largest single interval is 64 s, against RFC 6298 2.5's rule that a
- *     maximum RTO "MAY be placed provided it is at least 60 seconds";
- *   * the connection is abandoned at 127 s, against RFC 1122 4.2.3.5's R2 of
- *     "at least 100 seconds" for data;
- *   * and it is 12.7x the 10 s this stack gave up after before, not 200x.
- *
- * The last point is the one that would otherwise bite: the same counter bounds
- * SYN retransmission, so every connect() to a host that is not answering now
- * blocks for 127 s rather than 10 before the stack resets the socket.  That is
- * what TCP is supposed to do and it is what every other stack does, but it is a
- * visible behaviour change and it is why the number is 6 and not 8.
- *
- * AND FOR A WHILE THE SIX WAS UNREACHABLE, WHICH WAS NOT THIS FILE'S DOING.
- * The first run over an impaired link retransmitted at +1, +2, +4 ... +128 s
- * and never gave up.  The socket had the right numbers in it -- 6 and 1, from
- * here -- but _nx_tcp_fast_periodic_processing() tests the limit against
+ * The six was unreachable at first, for a reason outside this file:
+ * _nx_tcp_fast_periodic_processing() tests the limit against
  * nx_tcp_socket_zero_window_probe_failure instead of the retry count whenever
  * the socket is marked as probing a zero window, and
- * nx_tcp_socket_send_internal() set that mark for ANY send it could not queue,
+ * nx_tcp_socket_send_internal() set that mark for any send it could not queue,
  * including one blocked by the congestion window or the transmit queue depth.
- * A caller that keeps offering data -- which is what bsd_wait_sliced() does
- * every 200 ms -- therefore re-armed the mark faster than the ladder doubled,
- * and the limit was never looked at.  Both are fixed in the vendored fork;
- * tests/netstack/host/test_tcp_retries_host.c is what says so, in 0.3 s and
- * without a network.
+ * A caller that keeps offering data -- bsd_wait_sliced(), every 200 ms --
+ * re-armed the mark faster than the ladder doubled, so the limit was never
+ * read, and an impaired link retransmitted at +1, +2, +4 ... +128 s without
+ * giving up.  Both are fixed in the vendored fork;
+ * tests/netstack/host/test_tcp_retries_host.c covers it in 0.3 s without a
+ * network.
  */
 /* #ifndef, so an arm that answers "was it this?" can be built from one tree with
    -DNX_TCP_RETRY_SHIFT=0 -DNX_TCP_MAXIMUM_RETRIES=10 and no edit here. */
@@ -244,108 +205,85 @@
 #endif
 
 /*
- * TCP KEEPALIVE, BECAUSE setsockopt(SO_KEEPALIVE) Was already saying yes.
+ * TCP keepalive, because setsockopt(SO_KEEPALIVE) was already accepting it.
+ * src/bsdsocket/options.c stored the flag and reported it back through
+ * getsockopt(), but NX_TCP_ENABLE_KEEPALIVE (the old spelling) was not defined,
+ * so the keepalive block in nx_tcp_periodic_processing.c was compiled out and
+ * a program told yes never had its half-open connections reaped.
  *
- * src/bsdsocket/options.c accepted SO_KEEPALIVE, stored it in a socket flag and
- * reported it back through getsockopt() -- and nothing anywhere acted on it,
- * because NX_TCP_ENABLE_KEEPALIVE (the old spelling) was not defined and the
- * whole of nx_tcp_periodic_processing.c's keepalive block was compiled out.  An
- * API that answers correctly with no implementation behind it is the exact
- * shape of the last four defects found in this tree, and it is worse than an
- * API that returns ENOPROTOOPT: a program that asks for keepalive and is told
- * yes has no way to find out that its half-open connections will never be
- * reaped.
- *
- * With this, an ESTABLISHED socket that has been idle for
- * NX_TCP_KEEPALIVE_INITIAL seconds sends a probe -- an ACK carrying
- * tx_sequence - 1, which is a deliberately backward sequence number the peer
- * must answer (nx_tcp_periodic_processing.c:125) -- and after
+ * With this, an ESTABLISHED socket idle for NX_TCP_KEEPALIVE_INITIAL seconds
+ * sends a probe -- an ACK carrying tx_sequence - 1, a backward sequence number
+ * the peer must answer (nx_tcp_periodic_processing.c:125) -- and after
  * NX_TCP_KEEPALIVE_RETRIES unanswered probes at NX_TCP_KEEPALIVE_RETRY seconds
- * the socket is reset.  The defaults are BSD's and are left alone: 7200 s
- * (two hours) initial, 75 s retry, 10 retries.
+ * the socket is reset.  BSD's defaults are kept: 7200 s initial, 75 s retry,
+ * 10 retries.
  *
- * One thing had to change in our code, and it is not optional.
  * nx_tcp_socket_create.c:166 sets nx_tcp_socket_keepalive_enabled = NX_TRUE
- * UNCONDITIONALLY under this define, so turning it on alone would put every
- * socket on keepalive whether the application asked or not -- which is not what
- * SO_KEEPALIVE means and not what BSD does.  src/bsdsocket/socket.c clears it
- * at create and options.c is what sets it, so the default is off and the option
- * is the only way on.
+ * unconditionally under this define, which would put every socket on keepalive
+ * whether the application asked or not.  src/bsdsocket/socket.c therefore
+ * clears it at create and options.c sets it, so the default is off and
+ * SO_KEEPALIVE is the only way on.
  *
  * Cost: three ULONGs per NX_TCP_SOCKET, and one decrement per socket per second
- * in the IP thread's one-second periodic -- which already walks the same list.
+ * in the IP thread's one-second periodic, which already walks the same list.
  */
 #define NX_ENABLE_TCP_KEEPALIVE
 
 /*
- * REJECT A SYN that advertises an absurd MSS.
+ * Reject a SYN that advertises an absurd MSS.
  *
  * Without this, nx_tcp_packet_process.c takes whatever MSS a peer's SYN
- * carries.  A peer advertising 1 makes every segment we send one byte of
- * payload with forty bytes of header, from a socket the application believes is
- * working; NX_TCP_MAXIMUM_TX_QUEUE (8) then bounds us at eight bytes in flight.
- * That is a denial of service that costs the other end one packet, and nothing
- * in the trace would look like an error.
+ * carries.  A peer advertising 1 makes every segment one byte of payload with
+ * forty bytes of header, and NX_TCP_MAXIMUM_TX_QUEUE (8) then bounds us at
+ * eight bytes in flight -- a denial of service costing the other end one
+ * packet, with nothing in the trace looking like an error.
  *
  * With it, a SYN whose MSS is below NX_TCP_MSS_MINIMUM (128, the default, kept)
- * is answered with a RESET and counted in nx_ip_tcp_invalid_packets.  A peer
- * that offers NO MSS option at all is unaffected -- the code substitutes the
- * interface-derived default before this check -- so nothing conformant is
- * refused.
+ * is answered with a reset and counted in nx_ip_tcp_invalid_packets.  A peer
+ * that offers no MSS option is unaffected: the code substitutes the
+ * interface-derived default before this check.
  *
  * Cost: one comparison per incoming SYN.
  */
 #define NX_ENABLE_TCP_MSS_CHECK
 
 /*
- * RFC 1323 / 7323 Window scaling is off, And it was measured rather than
- * ASSUMED.  docs/RESEARCH.md 28.2 is the write-up; this is the short version,
- * because "NX_ENABLE_TCP_WINDOW_SCALING exists and we do not define it" reads
- * as an oversight and is not one.
+ * RFC 1323 / 7323 window scaling is off, on a measurement (docs/RESEARCH.md
+ * 28.2).  Build with -DAMINETXDUO_TCP_WINDOW_SCALING=ON to turn it on; measured
+ * on the A1200 profile over 524,288 bytes, three arms out of one tree, loopback
+ * stayed at 351 KB/s (the traces agree segment for segment: 128 segments, the
+ * same 25088 and 16725 advertised windows, 8192 bytes in flight against 8533,
+ * 315838 vs 315873 bytes/s) and the wire was unchanged, because the peer never
+ * holds more than 2880 bytes outstanding against the window it is already
+ * offered (16.5).
  *
- * Build with -DAMINETXDUO_TCP_WINDOW_SCALING=ON to turn it on.  What that gets
- * you, measured on the A1200 profile over 524,288 bytes, three arms out of one
- * tree:
+ * That is structural.  The scale factor NetX Duo computes is the smallest shift
+ * bringing the receive window under 65536 (nx_tcp_packet_send_syn.c:292).
+ * ami_bsd_tcp_window() draws every window from one eighth of the packet pool,
+ * and the pool tops out at AMI_POOL_MAX_PACKETS (256), so the largest window
+ * any socket can be given is 256/8 * 1568 = 50,176 bytes -- under 65,536, so
+ * the negotiated scale is always zero.  With this on, `tcpdump -r` reads
+ * `options [mss 1460,wscale 0,eol]`.
  *
- *   loopback   351 KB/s -> 351 KB/s.  Not "about the same": the two traces
- *              agree segment for segment -- 128 segments, the same 25088 and
- *              16725 advertised windows, 8192 bytes in flight against 8533,
- *              the same p50 gap to 0.1 ms, 315838 vs 315873 bytes/s.
- *   wire       unchanged, and unchanged for a reason the trace states rather
- *              than a coincidence: the peer never holds more than 2880 bytes
- *              outstanding against the window it is already offered (16.5).
+ * The option is free (the scale replaces the `nop,nop,nop,eol` padding in a
+ * fixed eight-byte option area, so the SYN is 24 bytes either way and no other
+ * segment carries options).  Not free: 12 bytes per NX_TCP_SOCKET and a shift
+ * on every segment sent, retransmitted and acknowledged, for a factor that is
+ * always zero.
  *
- * It cannot do anything else here, and this is structural rather than a
- * property of one workload.  The scale factor NetX Duo computes is the
- * smallest shift that brings the receive window under 65536
- * (nx_tcp_packet_send_syn.c:292).  ami_bsd_tcp_window() draws every window
- * from one eighth of the packet pool, and the pool tops out at
- * AMI_POOL_MAX_PACKETS (256), so the largest window ANY socket can be given is
- * 256/8 * 1568 = 50,176 bytes -- with the ceiling removed entirely.  50,176 is
- * under 65,536, so The negotiated scale is always zero.  The SYN confirms it:
- * with this on, `tcpdump -r` reads `options [mss 1460,wscale 0,eol]`.
+ * It also removes a guard: nxe_tcp_socket_create.c:170 rejects a window above
+ * 65535 with NX_OPTION_ERROR while this is off, and accepts anything under 2^30
+ * while it is on.  Pinning AMINETXDUO_TCP_WINDOW at 65536 -- the smallest value
+ * that makes the scale non-zero, and the arm that shows the mechanism works,
+ * `wscale 1` in the SYN -- took the wire from 172 KB/s to 32 KB/s, with 15
+ * retransmitted segments and a nine-deep duplicate-ACK run where the shipped
+ * configuration has neither.  There is no SACK in the vendored tree (16.7), so
+ * a burst loss inside a big window costs a full go-back-N, and 24.3's pool
+ * budget is what stops that happening.  With scaling off, that
+ * misconfiguration fails at socket() instead of running five times slower.
  *
- * The option itself is free -- NetX Duo builds a fixed eight-byte option area
- * and the scale replaces the `nop,nop,nop,eol` padding, so the SYN is 24 bytes
- * either way and no other segment carries options at all.  What is not free is
- * 12 bytes per NX_TCP_SOCKET and a shift on every segment sent, retransmitted
- * and acknowledged, for a factor that is always zero.
- *
- * And it removes A GUARD.  nxe_tcp_socket_create.c:170 rejects a window above
- * 65535 with NX_OPTION_ERROR while this is off, and accepts anything under
- * 2^30 while it is on.  That guard is worth keeping, because a window that
- * large is actively harmful on this machine and the trace says so: pinning
- * AMINETXDUO_TCP_WINDOW at 65536 -- the smallest value that makes the scale
- * non-zero, and the arm that proves the mechanism works, `wscale 1` in the SYN
- * -- took the wire from 172 KB/s to 32 KB/s, with 15 retransmitted segments
- * and a nine-deep duplicate-ACK run where the shipped configuration has none
- * of either.  There is no SACK in the vendored tree (16.7), so a burst loss
- * inside a big window costs a full go-back-N, and 24.3's pool budget is the
- * arithmetic that stops it happening.  With scaling off, that misconfiguration
- * fails at socket() instead of running five times slower.
- *
- * So this stays off until something changes the arithmetic: SACK, or a pool
- * budget that can offer one socket more than 64 KB.  Neither is close.
+ * This stays off until SACK exists, or a pool budget can offer one socket more
+ * than 64 KB.
  */
 #ifdef AMINETXDUO_TCP_WINDOW_SCALING
 #define NX_ENABLE_TCP_WINDOW_SCALING
@@ -361,15 +299,13 @@
  * NX_IP and makes nx_ip_raw_packet_filter_set() something other than a stub
  * returning NX_NOT_SUPPORTED.
  *
- * NX_ENABLE_IP_RAW_PACKET_ALL_STACK is the one that matters, and it is not
- * documented in nx_user_sample.h -- it appears only in
- * nx_ip_dispatch_process.c.  Without it the raw hook is consulted ONLY in the
- * "protocol I do not recognise" branch, after TCP, UDP, ICMP and IGMP have all
- * been dispatched, so a raw ICMP socket could never see an echo reply and
- * `ping`, `traceroute` and bsdsocktest tests 3 and 132-136 would be
- * unreachable by construction.  With it, the filter is called first for every
- * inbound IP packet, and normal dispatch continues unless the filter claims
- * the packet.
+ * NX_ENABLE_IP_RAW_PACKET_ALL_STACK is not documented in nx_user_sample.h --
+ * it appears only in nx_ip_dispatch_process.c.  Without it the raw hook is
+ * consulted only in the "protocol I do not recognise" branch, after TCP, UDP,
+ * ICMP and IGMP have all been dispatched, so a raw ICMP socket could never see
+ * an echo reply and `ping`, `traceroute` and bsdsocktest tests 3 and 132-136
+ * would be unreachable.  With it, the filter is called first for every inbound
+ * IP packet, and normal dispatch continues unless the filter claims the packet.
  *
  * Our filter never claims one -- it copies what a raw socket asked for and
  * declines -- so ICMP echo replies still reach nx_icmp_ping(), echo requests
@@ -378,8 +314,8 @@
  * machine that has none is a NULL pointer test.
  *
  * NX_ENABLE_IP_RAW_PACKET_FILTER changes the layout of NX_IP, so like
- * NX_ENABLE_IP_PACKET_FILTER below it has to be seen by every translation
- * unit and therefore lives here rather than on a target.
+ * NX_ENABLE_IP_PACKET_FILTER below it has to be seen by every translation unit
+ * and lives here rather than on a target.
  */
 #define NX_ENABLE_IP_RAW_PACKET_FILTER
 #define NX_ENABLE_IP_RAW_PACKET_ALL_STACK
@@ -388,20 +324,20 @@
 /* ---------------------------------------------------------- capture ------ */
 
 /*
- * The IP-level capture hook, and the ONLY way loopback traffic can be traced.
+ * The IP-level capture hook, and the only way loopback traffic can be traced.
  *
- * The SANA-II taps in src/sana2/ see every frame that crosses a wire, which is
- * everything -- except loopback, because NetX Duo's loopback interface has
+ * The SANA-II taps in src/sana2/ see every frame that crosses a wire, but not
+ * loopback: NetX Duo's loopback interface has
  * `nx_interface_link_driver_entry == NX_NULL` (nx_ip_create.c:157) and
  * _nx_ip_driver_packet_send() shortcuts a loopback destination straight into
  * _nx_ip_packet_deferred_receive().  No driver is called, so no tap on the
- * driver can ever fire, and the fastest path in the stack -- the one every
- * throughput number in docs/RESEARCH.md 11 was measured on -- would have been
- * the one path with no instrument on it.
+ * driver can fire, and the fastest path in the stack -- the one every
+ * throughput number in docs/RESEARCH.md 11 was measured on -- would have no
+ * instrument on it.
  *
  * This adds two function pointers to NX_IP and two branches per packet in each
- * direction.  Because it changes the NX_IP layout it MUST be seen by every
- * translation unit, which is why it lives here and not on a target.
+ * direction.  Because it changes the NX_IP layout it must be seen by every
+ * translation unit, so it lives here and not on a target.
  */
 #define NX_ENABLE_IP_PACKET_FILTER
 
@@ -409,23 +345,18 @@
 /* ------------------------------------------------------------------- IP --- */
 
 /*
- * The ip identification field: NX_ENABLE_IP_ID_RANDOMIZATION IS OFF, AND THE
- * Free half of it is done in src/netstack/ INSTEAD.
+ * The IP identification field: NX_ENABLE_IP_ID_RANDOMIZATION is off, and the
+ * free half of it is done in src/netstack/ instead.
  *
  * Without the define, nx_ip_header_add.c:151 uses `ip_ptr -> nx_ip_packet_id++`
  * -- a global counter that nx_ip_create.c zeroes at startup and increments once
- * per transmitted IP datagram.  Two things follow, and they are not the same
- * size:
+ * per transmitted IP datagram.  That is (1) a fingerprint, since the rate it
+ * climbs at is a machine-wide packet counter readable from any single flow, and
+ * (2) RFC 6274 5.1's idle scan, where an off-path attacker reads the ID this
+ * machine answers with to learn how many packets it sent in between, using it
+ * as a zombie to port-scan a third party.
  *
- *   1. IT IS A FINGERPRINT.  A monotonic, boot-zeroed, machine-wide ID is
- *      distinctive on its own, and the rate it climbs at is a packet counter
- *      for the WHOLE MACHINE readable from any single flow.
- *   2. IT IS RFC 6274 5.1's IDLE SCAN.  An off-path attacker who can send to
- *      this machine and read the ID it answers with learns how many packets it
- *      sent in between -- which is how a host is used as a zombie to port-scan
- *      a third party without appearing in that party's logs.
- *
- * The define fixes both and costs 5% OF LOOPBACK.  Measured, two arms out of
+ * The define fixes both and costs 5% of loopback.  Measured, two arms out of
  * one tree (docs/RESEARCH.md 29.4), A1200, 524288 bytes:
  *
  *                       counter      randomised
@@ -433,31 +364,26 @@
  *      loopback, capturing  305         290         -4.9%
  *      wire                171          167         -2.3%
  *
- * The mechanism is not in doubt, because the two paths differ by exactly the
- * ratio of datagrams they SEND: loopback puts about 130 a second on the wire
- * and the wire path about 70, and 5.2/2.3 is that ratio.  It works out at
- * roughly 400 us per transmitted datagram.
+ * The two paths differ by the ratio of datagrams they send -- loopback about
+ * 130 a second, the wire path about 70, and 5.2/2.3 is that ratio -- so roughly
+ * 400 us per transmitted datagram.  The cost is NX_RAND, which nx_port.h maps
+ * to ami_random_rand(): a SHA-256 hash DRBG with a Forbid()/Permit() pair per
+ * draw and a SHA-256 pair per 32 bytes of output, one refill every eight calls.
+ * That is right for TLS key material, ECDHE privates and TCP sequence numbers
+ * and far too expensive for a 16-bit header field once per packet, and NetX Duo
+ * uses the same NX_RAND macro everywhere, so a cheaper source cannot be picked
+ * for this one field.
  *
- * That is NX_RAND, which nx_port.h maps to ami_random_rand() -- a SHA-256 hash
- * DRBG with a Forbid()/Permit() pair per draw and a SHA-256 pair per 32 bytes
- * of output, so one refill every eight calls.  It is the right generator for
- * what it was chosen for (TLS key material, ECDHE privates, TCP sequence
- * numbers) and much too expensive to spend on a 16-bit header field once per
- * packet.  NetX Duo offers no way to pick a cheaper source for this one field:
- * it is the same NX_RAND macro everywhere.
- *
- * What ships instead, and what it does and does not buy.  src/netstack/ seeds
- * nx_ip_packet_id from the DRBG ONCE, when the NX_IP is created.  That costs a
- * single draw at startup and nothing per packet, and it removes (1): the
- * counter no longer starts at zero, so the absolute value says nothing about
- * uptime or about how much this machine has sent.  It does NOT remove (2) --
- * the DELTA between two observations is still a packet count, and idle scan
- * works on the delta.  Being clear about that is the point of writing it down:
- * the cheap half is done and the expensive half is a `-D` away.
+ * Instead, src/netstack/ seeds nx_ip_packet_id from the DRBG once, when the
+ * NX_IP is created: a single draw at startup, nothing per packet.  That removes
+ * (1), since the counter no longer starts at zero, so its absolute value says
+ * nothing about uptime or about how much this machine has sent.  It does not
+ * remove (2): the delta between two observations is still a packet count, and
+ * idle scan works on the delta.
  *
  * Build with -DAMINETXDUO_IP_ID_RANDOMIZATION to turn the define on and pay the
  * 5%.  On a network where an idle scan is a real threat that is a good trade;
- * on the 14 MHz floor target this stack is built for, it is not the default.
+ * on the 14 MHz floor target it is not the default.
  */
 #ifdef AMINETXDUO_IP_ID_RANDOMIZATION
 #define NX_ENABLE_IP_ID_RANDOMIZATION
@@ -467,11 +393,10 @@
 /* ------------------------------------------------------------- routing --- */
 
 /*
- * COMPILE THE IPv4 Routing table in.
+ * Compile the IPv4 routing table in.
  *
  * NX_IP_ROUTING_TABLE_SIZE below is inert on its own, and used to be set here
- * without this -- which reads as though routes existed and is the exact shape
- * of thing that costs an afternoon.  Without the enable:
+ * without this, which reads as though routes existed.  Without the enable:
  *
  *   * NX_IP has no nx_ip_routing_table[] and no
  *     nx_ip_routing_table_entry_count (nx_api.h:2972);
@@ -482,18 +407,14 @@
  *     directly-attached prefix of each interface and the single default
  *     gateway.
  *
- * One gateway is enough for a machine on one Ethernet, which is why this was
- * never noticed.  It is not enough for the two configurations Amiga users
- * actually build: a second interface (PPP or SLIP alongside Ethernet -- the
- * reason NX_MAX_PHYSICAL_INTERFACES is 2 above) reachable only through its own
- * next hop, and a VPN or a second subnet behind a router that is not the
- * default one.  Both need "this prefix goes via that address", which is a
- * route and cannot be expressed as a gateway.
- *
- * With it, _nx_ip_route_find() consults the table BEFORE falling back to the
- * default gateway and picks the longest prefix that matches, so a route is
- * capable of overriding the gateway for part of the address space -- which is
- * what makes it worth having rather than a second name for one.
+ * One gateway is enough for a machine on one Ethernet, but not for a second
+ * interface (the reason NX_MAX_PHYSICAL_INTERFACES is 2 above) reachable only
+ * through its own next hop, or for a VPN or second subnet behind a router that
+ * is not the default one.  Both need "this prefix goes via that address", which
+ * cannot be expressed as a gateway.  With the enable, _nx_ip_route_find()
+ * consults the table before falling back to the default gateway and picks the
+ * longest matching prefix, so a route can override the gateway for part of the
+ * address space.
  *
  * Cost: NX_IP_ROUTING_TABLE_SIZE * sizeof(NX_IP_ROUTING_ENTRY) (16 bytes each,
  * so 64) plus a count, inside the single NX_IP, and a walk of at most four
@@ -501,10 +422,10 @@
  * the layout of NX_IP, so like the packet filters above it must be seen by
  * every translation unit and belongs here rather than on a target.
  *
- * What this switches on above it: NETSTATUS_ROUTES now reports the table as
- * well as the interface prefixes and the gateway, NETCTRL_ROUTE_ADD/DELETE
- * stop returning ENOSYS, NETSTATUS_SYS_ROUTING is set, and AddNetRoute /
- * DeleteNetRoute exist at all (src/tools/).
+ * It also switches on: NETSTATUS_ROUTES reporting the table as well as the
+ * interface prefixes and the gateway, NETCTRL_ROUTE_ADD/DELETE no longer
+ * returning ENOSYS, NETSTATUS_SYS_ROUTING, and AddNetRoute / DeleteNetRoute
+ * existing at all (src/tools/).
  */
 #define NX_ENABLE_IP_STATIC_ROUTING
 
@@ -518,32 +439,29 @@
 /* -------------------------------------------------------------- resolver -- */
 
 /*
- * Cache DNS answers.
- *
- * addons/dns has had this all along; nxd_dns.h ships the define commented out
- * and nothing here uncommented it, so every lookup went to the wire -- every
- * one, including the second lookup of a name resolved a moment earlier, which
- * is what a shell session, an FTP transfer and a redirect-following fetch all
- * do.
+ * Cache DNS answers.  addons/dns has had this all along, but nxd_dns.h ships
+ * the define commented out and nothing here uncommented it, so every lookup
+ * went to the wire -- including the second lookup of a name resolved a moment
+ * earlier, which is what a shell session, an FTP transfer and a
+ * redirect-following fetch all do.
  *
  * With it, _nx_dns_host_resource_data_by_name_get() and
- * _nx_dns_host_by_address_get_internal() consult the cache BEFORE binding a
+ * _nx_dns_host_by_address_get_internal() consult the cache before binding a
  * socket, so a hit costs a mutex and a linear walk and puts no packet on the
- * wire at all.  It caches what the server said, honours the TTL the server
- * sent (aged from tx_time_get() against NX_IP_PERIODIC_RATE), and replaces the
- * least recently used record when it is full -- so a cache too small for a
- * workload degrades to the behaviour it replaced rather than to a failure.
- * Forward (A, AAAA) and reverse (PTR) lookups share it.
+ * wire.  It honours the TTL the server sent (aged from tx_time_get() against
+ * NX_IP_PERIODIC_RATE) and replaces the least recently used record when full,
+ * so a cache too small for a workload degrades to the previous behaviour rather
+ * than to a failure.  Forward (A, AAAA) and reverse (PTR) lookups share it.
  *
- * Cost inside NX_DNS: a pointer, a size and three counters.  The cache itself
- * IS THE CALLER'S -- src/netstack/netstack_dns.c owns the buffer and states
+ * Cost inside NX_DNS: a pointer, a size and three counters.  The cache buffer
+ * belongs to the caller -- src/netstack/netstack_dns.c allocates it and states
  * there how big it is and why.  Without a call to nx_dns_cache_initialize()
- * this define is inert: the code compiles in, dns_ptr->nx_dns_cache stays
- * NULL, and every lookup goes to the wire exactly as before.
+ * this define is inert: dns_ptr->nx_dns_cache stays NULL and every lookup goes
+ * to the wire as before.
  *
- * This does not change what DEVS:Internet/hosts does.  netstack_resolve()
- * still consults the file first and never reaches NetX Duo for a name that is
- * in it, so a hosts entry cannot be shadowed by a cached answer.
+ * DEVS:Internet/hosts is unaffected.  netstack_resolve() consults the file
+ * first and never reaches NetX Duo for a name that is in it, so a hosts entry
+ * cannot be shadowed by a cached answer.
  */
 #define NX_DNS_CACHE_ENABLE
 
@@ -553,8 +471,8 @@
 /*
  * IPv6 is a build option, not a default (docs/RESEARCH.md 9).  The root
  * CMakeLists keeps the nx_icmpv6/nx_ipv6/nx_nd objects out of the floor build;
- * disabling it here as well stops the dual-stack code paths being compiled
- * into the IPv4 objects.  Define AMINETXDUO_IPV6 to build the dual stack.
+ * disabling it here as well keeps the dual-stack code paths out of the IPv4
+ * objects.  Define AMINETXDUO_IPV6 to build the dual stack.
  */
 #ifndef AMINETXDUO_IPV6
 #define NX_DISABLE_IPV6
@@ -562,24 +480,22 @@
 
 /*
  * The dual stack, sized for the same 68020/4 MB floor as everything else.
- * NetX Duo's IPv6 defaults assume an embedded target that has nothing else to
- * spend RAM on; every table below is a fixed array inside the single NX_IP, so
- * these are the difference between an NX_IP that costs ~3 KB extra and one
- * that costs ~9 KB.  Measured with sizeof(NX_IP) at build time.
+ * Every table below is a fixed array inside the single NX_IP, so these are the
+ * difference between an NX_IP that costs ~3 KB extra and one that costs ~9 KB.
+ * Measured with sizeof(NX_IP) at build time.
  */
 
 /*
- * Neighbour cache (default 16).  This is the IPv6 equivalent of the ARP cache,
- * and it is sized by the same argument: an Amiga on a home LAN talks to a
- * router and a handful of hosts.  Each ND_CACHE_ENTRY carries a 16-byte
- * address, a MAC, timers and a queued-packet pointer.
+ * Neighbour cache (default 16).  The IPv6 equivalent of the ARP cache, sized by
+ * the same argument: an Amiga on a home LAN talks to a router and a handful of
+ * hosts.  Each ND_CACHE_ENTRY carries a 16-byte address, a MAC, timers and a
+ * queued-packet pointer.
  */
 #define NX_IPV6_NEIGHBOR_CACHE_SIZE             8
 
 /*
  * Destination cache (default 8).  One entry per off-link destination in use;
- * four matches NX_IP_ROUTING_TABLE_SIZE above, which is the IPv4 equivalent
- * decision.
+ * four matches NX_IP_ROUTING_TABLE_SIZE above, the IPv4 equivalent.
  */
 #define NX_IPV6_DESTINATION_TABLE_SIZE          4
 
@@ -595,8 +511,8 @@
 /*
  * Addresses per NX_IP.  The default is NX_MAX_PHYSICAL_INTERFACES * 3, which
  * with two interfaces is 6: link-local + one autoconfigured global + one
- * static per interface.  That is exactly the budget AmiNetXDuo needs, so the
- * default stands and is spelled out rather than redefined.
+ * static per interface.  That is the budget AmiNetXDuo needs, so the default
+ * stands and is spelled out rather than redefined.
  *
  *   NX_MAX_IPV6_ADDRESSES  == NX_MAX_PHYSICAL_INTERFACES * 3 == 6
  *
@@ -606,43 +522,41 @@
  */
 
 /*
- * Duplicate Address Detection stays ON (NX_DISABLE_IPV6_DAD is NOT defined).
- *
+ * Duplicate Address Detection stays on (NX_DISABLE_IPV6_DAD is not defined).
  * It costs three neighbour solicitations and roughly one second per address
- * before that address becomes usable, which is a real delay at startup.  It is
- * kept because the alternative is silently sharing an address with another
- * host on the link -- and because it is the one part of neighbour discovery
- * that exercises solicited-node multicast on every boot, so turning it off
- * would also remove the only routine test of the S2_ADDMULTICASTADDRESS path
- * in src/sana2/.
+ * before that address becomes usable.  Kept because the alternative is silently
+ * sharing an address with another host on the link, and because it is the one
+ * part of neighbour discovery that exercises solicited-node multicast on every
+ * boot -- the only routine test of the S2_ADDMULTICASTADDRESS path in
+ * src/sana2/.
  */
 
 /*
- * Router solicitation stays ON (NX_DISABLE_ICMPV6_ROUTER_SOLICITATION is NOT
+ * Router solicitation stays on (NX_DISABLE_ICMPV6_ROUTER_SOLICITATION is not
  * defined): stateless autoconfiguration is the configuration mode this port
- * expects to be used on a real network, and it starts with an RS.
+ * expects on a real network, and it starts with an RS.
  */
 
 /*
  * Make stateless autoconfiguration switchable per interface.
  *
- * Without this, SLAAC is UNCONDITIONAL: nx_icmpv6_process_ra.c forms a global
+ * Without this, SLAAC is unconditional: nx_icmpv6_process_ra.c forms a global
  * address from any advertised prefix and does not consult a status flag, and
  * nxd_ipv6_stateless_address_autoconfig_{enable,disable}() compile to stubs
- * returning NX_NOT_SUPPORTED.  CONFIGURE6=LINKLOCAL and CONFIGURE6=STATIC
- * would then be lies -- an interface configured either way would still take a
- * global address off the wire the moment a router advertised one.
+ * returning NX_NOT_SUPPORTED.  CONFIGURE6=LINKLOCAL and CONFIGURE6=STATIC would
+ * then be wrong -- an interface configured either way would still take a global
+ * address off the wire the moment a router advertised one.
  *
  * Cost: one ULONG per NX_INTERFACE (8 bytes across the two we allow) and one
- * comparison per prefix option in a received router advertisement.  The
- * default when the field is zeroed is ENABLED (0), which is why AUTO works
- * without calling enable() at all -- but src/netstack/netstack_ipv6.c calls it
- * anyway, so the intent is in the code rather than in the initialisation.
+ * comparison per prefix option in a received router advertisement.  The default
+ * when the field is zeroed is enabled (0), which is why AUTO works without
+ * calling enable() at all; src/netstack/netstack_ipv6.c calls it anyway, so the
+ * intent is in the code rather than in the initialisation.
  */
 #define NX_IPV6_STATELESS_AUTOCONFIG_CONTROL
 
 /*
- * Deliberately NOT set, and why:
+ * Not set, and why:
  *
  *   NX_ENABLE_IPV6_MULTICAST     -- the application-level
  *                                   nxd_ipv6_multicast_interface_join() API.
@@ -656,7 +570,7 @@
  *                                   would be code with no caller.
  *   NX_ENABLE_IPV6_PATH_MTU_DISCOVERY -- adds a periodic sweep of the
  *                                   destination table for a benefit that only
- *                                   shows up on paths with a smaller MTU than
+ *                                   appears on paths with a smaller MTU than
  *                                   the 1500 a SANA-II Ethernet device
  *                                   reports.
  *   NX_IPSEC_ENABLE              -- out of scope; §9 decision 4 lists the four
@@ -667,11 +581,11 @@
 
 
 /*
- * Deliberately NOT set, and why:
+ * Not set, and why:
  *
- *   NX_DISABLE_ERROR_CHECKING   -- saves code, but the whole point of the
- *                                  bring-up milestones is to catch our own
- *                                  misuse.  Revisit for the release build.
+ *   NX_DISABLE_ERROR_CHECKING   -- saves code, but the bring-up milestones
+ *                                  exist to catch our own misuse.  Revisit for
+ *                                  the release build.
  *   NX_DISABLE_PACKET_CHAIN     -- would break TCP receives larger than one
  *                                  payload.
  *   NX_DISABLE_FRAGMENTATION    -- fragmentation is already off unless
@@ -682,75 +596,57 @@
 
 
 /*
- * Five more that were surveyed and rejected, each with the reason rather than
- * with silence -- docs/RESEARCH.md 29.3 has the working.  Four of the five are
- * rejected on a measurement or on a missing consumer, not on taste, and each
- * says what would change the answer.
+ * Five more surveyed and rejected; docs/RESEARCH.md 29.3 has the working.
  *
  *   NX_DISABLE_ARP_AUTO_ENTRY
- *       Today every ARP we SEE creates a cache entry (nx_arp_packet_receive.c:
- *       490), which is the classic poisoning surface: anything on the link can
- *       fill or steer our cache without us having asked it a question.
- *       Disabling that looks like the safe choice and is the wrong one HERE,
- *       for a reason specific to this machine rather than to the idea.
- *
- *       The auto entry is only ever created for a sender we have no entry for,
- *       and it is created from a broadcast ARP REQUEST -- which on a home LAN
- *       means the gateway asking for us.  Turning it off does not stop an
- *       attacker: nx_arp_packet_receive.c updates an EXISTING entry from any
- *       ARP it sees whether this is defined or not, which is the poisoning path
- *       that actually matters, and this define does not touch it.  What it does
- *       stop is the free entry for the gateway, so the next outbound packet to
- *       an unresolved next hop costs an ARP request, a queued packet out of
- *       AMI_ARP_MAX_QUEUE_DEPTH (2 -- deliberately small) and a round trip on
- *       the one path this stack cares about.  Security nothing, latency
- *       something.
- *
- *       What would change it: an ARP cache that distinguishes "learned from a
- *       request addressed to us" from "learned from anything on the wire", or
+ *       Every ARP we see creates a cache entry (nx_arp_packet_receive.c:490),
+ *       the classic poisoning surface, but disabling that does not close it:
+ *       nx_arp_packet_receive.c updates an existing entry from any ARP it sees
+ *       whether this is defined or not, and this define does not touch that
+ *       path.  The auto entry is only created for a sender we have no entry
+ *       for, from a broadcast ARP request -- on a home LAN, the gateway asking
+ *       for us -- so turning it off costs an ARP request, a queued packet out
+ *       of AMI_ARP_MAX_QUEUE_DEPTH (2) and a round trip on the next outbound
+ *       packet to an unresolved next hop.  What would change the answer: an ARP
+ *       cache that distinguishes "learned from a request addressed to us" from
+ *       "learned from anything on the wire", or
  *       NX_ENABLE_ARP_MAC_CHANGE_NOTIFICATION below growing a consumer that can
  *       refuse a change.  Neither exists in the vendored tree.
  *
  *   NX_ENABLE_ARP_MAC_CHANGE_NOTIFICATION
  *       Adds a callback when a cached entry's MAC changes -- a gateway being
- *       replaced, or being impersonated.  It is a NOTIFICATION and nothing
- *       else: nx_arp_packet_receive.c:418 calls it AFTER writing the new
- *       address, so nothing it does can refuse the change, and there is no
- *       handler anywhere in this tree that would act on it.  Turning it on
- *       would add a function pointer to NX_IP and a branch per received ARP for
- *       a callback that logs.  It becomes worth having the day something can
- *       act -- a static-ARP pin for the gateway, or a warning surfaced in
- *       ShowNetStatus -- and not before.
+ *       replaced, or impersonated.  It is a notification only:
+ *       nx_arp_packet_receive.c:418 calls it after writing the new address, so
+ *       nothing it does can refuse the change, and no handler in this tree
+ *       would act on it.  It would add a function pointer to NX_IP and a branch
+ *       per received ARP for a callback that logs.  Revisit when something can
+ *       act -- a static-ARP pin for the gateway, or a warning in ShowNetStatus.
  *
  *   NX_ENABLE_PACKET_DEBUG_INFO
  *       Records the file and line each packet was allocated at, in the
- *       NX_PACKET itself.  Directly relevant to the packet-ownership defects
- *       this project keeps finding, and it is NOT rejected on merit: it is
- *       rejected as a permanent setting, because it costs two pointers in every
- *       one of up to 256 pool packets and the pool is sized from AvailMem on a
- *       4 MB machine.  It belongs behind a build option next to the debug log
- *       level, turned on for the run that is chasing a leak, and that option
- *       does not exist yet.
+ *       NX_PACKET itself.  Relevant to the packet-ownership defects this
+ *       project keeps finding, but rejected as a permanent setting: two
+ *       pointers in every one of up to 256 pool packets, on a pool sized from
+ *       AvailMem on a 4 MB machine.  It belongs behind a build option next to
+ *       the debug log level, and that option does not exist yet.
  *
  *   NX_ENABLE_DUAL_PACKET_POOL
  *       Lets TCP allocate control packets (SYN, ACK, FIN, RST -- no payload)
  *       from a second, smaller pool so a full data pool cannot stop the stack
- *       acknowledging.  The premise is right and the shape is wrong for this
- *       machine: docs/RESEARCH.md 24.8 already established that there is one
- *       pool here on purpose, and a second one takes memory permanently away
- *       from the 4 MB floor to protect against an exhaustion that 24.3's
- *       arithmetic is what actually prevents.  It is also the wrong half of the
- *       problem -- an ACK that cannot be allocated is a symptom of a data pool
- *       already empty, and the data is what was lost.
+ *       acknowledging.  docs/RESEARCH.md 24.8 established that there is one
+ *       pool here for a reason, and a second takes memory permanently away from
+ *       the 4 MB floor to protect against an exhaustion that 24.3's arithmetic
+ *       already prevents.  An ACK that cannot be allocated is also a symptom of
+ *       a data pool already empty, and the data is what was lost.
  *
  *   NX_ENABLE_LOW_WATERMARK
- *       docs/RESEARCH.md 24.7 found this, reported it rather than switching it
- *       on, and that argument has not changed.  It needs THREE things together
- *       -- the define, an nx_packet_pool_low_watermark_set() call from
- *       src/netstack/ (nx_packet_pool_create() never touches the field, so a
- *       zeroed watermark means the guard is compiled in and can never fire),
- *       and NX_TCP_MAXIMUM_RX_QUEUE raised, because at its default of 20 and
- *       1440-byte wire segments it binds at about 28 KB, BEFORE a 32 KB window
+ *       docs/RESEARCH.md 24.7 found this and reported it rather than switching
+ *       it on.  It needs three things together: the define, an
+ *       nx_packet_pool_low_watermark_set() call from src/netstack/
+ *       (nx_packet_pool_create() never touches the field, so a zeroed watermark
+ *       means the guard is compiled in and can never fire), and
+ *       NX_TCP_MAXIMUM_RX_QUEUE raised, because at its default of 20 and
+ *       1440-byte wire segments it binds at about 28 KB, before a 32 KB window
  *       does, and the tail-drop it would then perform costs a retransmission
  *       this stack has no SACK to recover cheaply.  It also changes IPv4
  *       fragment reassembly and UDP receive, not only TCP.  That is a piece of

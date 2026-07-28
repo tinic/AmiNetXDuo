@@ -23,23 +23,23 @@
 /*                                                                        */
 /*    ThreadX runs on top of Exec as a "hosted" port, in the same shape    */
 /*    as the Linux and Win32 ports: every TX_THREAD is backed by a real    */
-/*    Exec Task, and a single baton ("core lock") guarantees that exactly  */
-/*    one ThreadX thread executes at a time.  See docs/RESEARCH.md 6.2.    */
+/*    Exec Task, and a single baton ("core lock") means exactly one        */
+/*    ThreadX thread executes at a time.  See docs/RESEARCH.md 6.2.        */
 /*                                                                        */
-/*    Critical sections map to Forbid()/Permit(), NOT Disable()/Enable().  */
-/*    Nothing in ThreadX or NetX Duo runs at Exec interrupt level in this  */
-/*    design -- the SANA-II reader is a Task, packet arrival is an         */
-/*    IORequest completion, and the periodic tick is a Task.  Forbid()     */
-/*    nests, which matches the save/restore posture idiom exactly, and     */
-/*    Exec preserves the per-task nesting count across Wait(), which is    */
-/*    what makes it legal for a thread to block inside a TX_DISABLE        */
-/*    region (see tx_thread_system_return.c).                              */
+/*    Critical sections map to Forbid()/Permit(), not Disable()/Enable().  */
+/*    Nothing in ThreadX or NetX Duo runs at Exec interrupt level here --  */
+/*    the SANA-II reader is a Task, packet arrival is an IORequest         */
+/*    completion, and the periodic tick is a Task.  Forbid() nests, which  */
+/*    matches the save/restore posture idiom, and Exec preserves the       */
+/*    per-task nesting count across Wait(), which is what makes it legal   */
+/*    for a thread to block inside a TX_DISABLE region (see                */
+/*    tx_thread_system_return.c).                                          */
 /*                                                                        */
-/*    IMPORTANT: this header must not include any AmigaOS header.  It is   */
-/*    pulled into all 185 ThreadX core files and all 511 NetX Duo core     */
-/*    files, and <exec/types.h> redefines VOID/ULONG/SHORT/USHORT in ways  */
-/*    that only work when ThreadX's typedefs come first.  Port sources     */
-/*    include "tx_api.h" and only then the Exec headers.                   */
+/*    This header must not include any AmigaOS header.  It is pulled into  */
+/*    all 185 ThreadX core files and all 511 NetX Duo core files, and      */
+/*    <exec/types.h> redefines VOID/ULONG/SHORT/USHORT in ways that only   */
+/*    work when ThreadX's typedefs come first.  Port sources include       */
+/*    "tx_api.h" and only then the Exec headers.                           */
 /*                                                                        */
 /**************************************************************************/
 
@@ -54,9 +54,9 @@
 #endif
 
 
-/* Define compiler library include files.  Deliberately minimal: no <stdio.h>,
-   because a shared library build must not drag newlib's stdio in.  The core
-   needs memset/memcpy/memcmp only.  */
+/* Define compiler library include files.  No <stdio.h>: a shared library build
+   must not drag newlib's stdio in.  The core needs memset/memcpy/memcmp
+   only.  */
 
 #include <stdlib.h>
 #include <string.h>
@@ -86,7 +86,7 @@ typedef uint64_t                                ULONG64;
 #endif
 
 
-/* Minimum stack for a ThreadX thread.  On AmigaOS the ThreadX stack IS the
+/* Minimum stack for a ThreadX thread.  On AmigaOS the ThreadX stack is the
    Exec Task stack (see tx_thread_stack_build.c), so this is a real limit and
    68k frames are not small.  */
 
@@ -96,7 +96,7 @@ typedef uint64_t                                ULONG64;
 
 
 /* The system timer thread.  Timer expiration is processed on a real ThreadX
-   thread (TX_TIMER_PROCESS_IN_ISR is NOT defined), so application timer
+   thread (TX_TIMER_PROCESS_IN_ISR is not defined), so application timer
    callbacks -- including NetX Duo's periodic handlers -- run at thread level
    where they may take mutexes.  */
 
@@ -109,11 +109,11 @@ typedef uint64_t                                ULONG64;
 #endif
 
 
-/* Do not pre-fill thread stacks.  Two reasons: (1) adopted threads
-   (tx_amiga_adopt_thread) hand ThreadX the bounds of an Exec Task stack that
-   is already live -- filling it would destroy the caller's own frames; and
-   (2) a byte-wise fill of every stack is expensive on a 14 MHz 68020.
-   Stack checking (TX_ENABLE_STACK_CHECKING) is consequently unavailable.  */
+/* Do not pre-fill thread stacks.  (1) Adopted threads (tx_amiga_adopt_thread)
+   give ThreadX the bounds of an Exec Task stack that is already live, so
+   filling it would destroy the caller's own frames; (2) a byte-wise fill of
+   every stack is expensive on a 14 MHz 68020.  Stack checking
+   (TX_ENABLE_STACK_CHECKING) is consequently unavailable.  */
 
 #define TX_DISABLE_STACK_FILLING
 
@@ -177,18 +177,18 @@ VOID   _tx_thread_interrupt_restore(UINT previous_posture);
 /* ------------------------------------------------------------------------ */
 
 /* tx_thread_amiga_task            struct Task * backing this TX_THREAD
-   tx_thread_amiga_run_signal      Exec signal mask the scheduler pokes to
-                                   hand this thread the baton
+   tx_thread_amiga_run_signal      Exec signal mask the scheduler pokes to give
+                                   this thread the baton
    tx_thread_amiga_suspension_type 0 = solicited (parked on the run signal).
                                    Reserved for a future asynchronous
                                    suspension path; this port only ever
                                    suspends threads at their own request.
    tx_thread_amiga_flags           TX_AMIGA_THREAD_* bits below
 
-   The teardown handshake deliberately does NOT live here: it is in the Exec
-   Task's own control block (struct _tx_amiga_ctrl, tx_amiga_internal.h), so
-   that a task the reaper had to give up on can still destroy itself after the
-   TX_THREAD has been deleted and its storage reused.                        */
+   The teardown handshake does not live here: it is in the Exec Task's own
+   control block (struct _tx_amiga_ctrl, tx_amiga_internal.h), so a task the
+   reaper had to give up on can still destroy itself after the TX_THREAD has
+   been deleted and its storage reused.                                      */
 
 #define TX_THREAD_EXTENSION_0                   VOID  *tx_thread_amiga_task; \
                                                 ULONG  tx_thread_amiga_run_signal; \
@@ -310,26 +310,26 @@ void    _tx_amiga_start_interrupts(void);
 /* ----------------------------------------------------------- the tick ---- */
 
 /*
- * 50 Hz, and the wakeup source is NOT the time base.
+ * 50 Hz.  The wakeup source is not the time base.
  *
- * Rate: the AmiTCP-derived stacks have run a 50 Hz computational clock since
- * 1993 (`#define hz (50)`), and 4.4BSD's protocol timers -- which is what a TCP
- * stack actually consumes ticks for -- are hz/2 (500 ms) and hz/5 (200 ms).
- * 20 ms of granularity is an order of magnitude finer than anything above us
- * asks for, at half the wakeups the previous 100 Hz cost.
+ * The AmiTCP-derived stacks have run a 50 Hz computational clock since 1993
+ * (`#define hz (50)`), and 4.4BSD's protocol timers -- what a TCP stack
+ * consumes ticks for -- are hz/2 (500 ms) and hz/5 (200 ms).  20 ms of
+ * granularity is an order of magnitude finer than anything above us asks for,
+ * at half the wakeups the previous 100 Hz cost.
  *
- * NX_IP_PERIODIC_RATE in port/netxduo-amiga/inc/nx_user.h MUST equal this.
+ * NX_IP_PERIODIC_RATE in port/netxduo-amiga/inc/nx_user.h must equal this.
  * NetX Duo derives every one of its own timeouts from it, so a disagreement
  * scales every TCP timer by the ratio rather than failing loudly.
  *
- * Source vs. time base: the tick task wakes on timer.device UNIT_VBLANK, but
- * it does not COUNT those wakeups -- it reads ReadEClock() and works out how
- * many 20 ms periods have really elapsed.  VBlank is 50 Hz PAL and 60 Hz NTSC,
- * and under RTG (Picasso96/CyberGraphX), on PiStorm/Emu68 and inside emulators
- * its relationship to real time is not ours to rely on.  The E-Clock is
- * CIA-derived, is independent of the display, and reports its own frequency,
- * so it is correct on all of them.  A wakeup that is late or coalesced
- * delivers the arrears; one that is early delivers nothing.
+ * The tick task wakes on timer.device UNIT_VBLANK but does not count those
+ * wakeups: it reads ReadEClock() and works out how many 20 ms periods have
+ * elapsed.  VBlank is 50 Hz PAL and 60 Hz NTSC, and under RTG
+ * (Picasso96/CyberGraphX), on PiStorm/Emu68 and inside emulators its
+ * relationship to real time cannot be relied on.  The E-Clock is CIA-derived,
+ * independent of the display, and reports its own frequency, so it is correct
+ * on all of them.  A wakeup that is late or coalesced delivers the arrears; one
+ * that is early delivers nothing.
  */
 
 #ifndef TX_TIMER_TICKS_PER_SECOND
@@ -348,11 +348,11 @@ void    _tx_amiga_start_interrupts(void);
 /* Most ticks one wakeup may deliver.  A Forbid()-heavy section, a disk access
    or an emulator host hiccup can stall the tick task for a long time; without
    a cap the catch-up would then fire thousands of timer callbacks back to back
-   with the core lock held, which is far worse than the lost time.  8 ticks is
-   160 ms -- comfortably more than any stall the port causes itself, and still
-   below BSD's 200 ms fast timer.  Beyond the cap the port RESYNCS (it drops
-   the arrears rather than paying them off over the following seconds) and
-   counts the event; tx_amiga_tick_stats() reports it.  */
+   with the core lock held, which is worse than the lost time.  8 ticks is
+   160 ms -- more than any stall the port causes itself, and still below BSD's
+   200 ms fast timer.  Beyond the cap the port resyncs: it drops the arrears
+   rather than paying them off over the following seconds, and counts the event.
+   tx_amiga_tick_stats() reports it.  */
 
 #ifndef TX_AMIGA_TIMER_MAX_CATCHUP
 #define TX_AMIGA_TIMER_MAX_CATCHUP              8UL
@@ -375,7 +375,7 @@ void    _tx_amiga_start_interrupts(void);
 
 
 /* How long tx_amiga_kernel_stop() waits for each of the two Tasks the port
-   owns to remove itself before declaring the shutdown failed.  Both are
+   created to remove itself before declaring the shutdown failed.  Both are
    parked on a signal and answer within milliseconds; the only way to spend
    this budget is a Task that cannot be woken at all, and then the answer is
    "not safe to exit" however long we wait.  */
@@ -399,7 +399,7 @@ extern ULONG    _tx_amiga_kernel_memory_size;
 /* Poke the scheduler task so it re-evaluates _tx_thread_execute_ptr.  */
 VOID    _tx_amiga_wake_scheduler(VOID);
 
-/* Hand a thread the baton, or park the caller.  Internal to the port.  */
+/* Give a thread the baton, or park the caller.  Internal to the port.  */
 VOID    _tx_amiga_signal_task(VOID *task, ULONG sigmask);
 
 

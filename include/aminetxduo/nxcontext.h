@@ -5,17 +5,17 @@
  *   bsdsocket.library's segment: one NX_IP, one packet pool, one ThreadX
  *   kernel, one set of NetX Duo globals.  A second library that linked its own
  *   copy of netxduo would get a second set of those globals and drive a stack
- *   that owns no interfaces.  So tls.library must not link NetX Duo -- it must
- *   CALL bsdsocket.library's copy.
+ *   with no interfaces.  So tls.library must not link NetX Duo; it calls
+ *   bsdsocket.library's copy.
  *
- *   The coupling surface is small, and that is a measurement rather than a
- *   hope.  `nm` on libnx_secure.a + libnx_crypto.a + libcrypto68k.a +
- *   libaminetxduo_tls.a, minus everything they define themselves, leaves
- *   exactly twelve NetX Duo/ThreadX entry points (plus memcpy, ami_random and
- *   __udivdi3, which are ordinary link-time dependencies).  Those twelve are
- *   the middle block below; src/tlslib/tls_netx.c defines the vendored symbol
- *   names as one-line forwarders through this table, so no nx_secure source is
- *   touched and no NetX Duo object is duplicated.
+ *   The coupling surface was measured.  `nm` on libnx_secure.a + libnx_crypto.a
+ *   + libcrypto68k.a + libaminetxduo_tls.a, minus everything they define
+ *   themselves, leaves exactly twelve NetX Duo/ThreadX entry points (plus
+ *   memcpy, ami_random and __udivdi3, which are ordinary link-time
+ *   dependencies).  Those twelve are the middle block below;
+ *   src/tlslib/tls_netx.c defines the vendored symbol names as one-line
+ *   forwarders through this table, so no nx_secure source is touched and no
+ *   NetX Duo object is duplicated.
  *
  *   The three ThreadX *data* symbols nx_secure also wants
  *   (_tx_thread_current_ptr, _tx_thread_system_state, _tx_timer_thread) are
@@ -27,15 +27,14 @@
  *   One private LVO on bsdsocket.library at AMI_NXD_CONTEXT_LVO, present only
  *   in an AMINETXDUO_TLS build.  The public 121-vector Roadshow/AmiTCP ABI is
  *   untouched, and a default build of bsdsocket.library does not have this
- *   vector at all (which is what keeps that build byte-identical).
+ *   vector at all, which keeps that build byte-identical.
  *
- *   The magic and version arguments are not ceremony.  The slot sits past the
+ *   The magic and version arguments are load-bearing.  The slot sits past the
  *   last vector any published bsdsocket ABI defines, so the only way to reach
- *   it is deliberately -- but if some future Roadshow ever allocates the same
- *   offset for something else, a caller of THAT function lands here with
- *   whatever it had in d0/d1, and this call must do nothing rather than
- *   something.  Wrong magic or wrong version returns failure and writes
- *   nothing.
+ *   it is on purpose; but if some future Roadshow allocates the same offset for
+ *   something else, a caller of that function lands here with whatever it had
+ *   in d0/d1, and this call must then do nothing.  Wrong magic or wrong version
+ *   returns failure and writes nothing.
  *
  *   tls.library and bsdsocket.library share struct layouts (NX_TCP_SOCKET,
  *   NX_PACKET, NX_PACKET_POOL) and must be built from the same tree with the
@@ -75,12 +74,11 @@ extern "C" {
  * The version carries the build option that changes struct layout.
  *
  * AMINETXDUO_IPV6 decides FEATURE_NX_IPV6, which changes the layout of NX_IP,
- * NX_INTERFACE, NX_PACKET and NX_TCP_SOCKET -- all of which cross this
- * interface.  Two libraries built from the same source with different answers
- * would pass a plain version check and then read each other's structs at the
- * wrong offsets, on a machine with no memory protection, which is the worst
- * possible failure to debug.  Folding the flag into the version number turns it
- * into a refusal at TLSOpen() instead.
+ * NX_INTERFACE, NX_PACKET and NX_TCP_SOCKET, all of which cross this interface.
+ * Two libraries built from the same source with different answers would pass a
+ * plain version check and then read each other's structs at the wrong offsets,
+ * on a machine with no memory protection.  Folding the flag into the version
+ * number turns that into a refusal at TLSOpen().
  *
  * Bump the high half whenever this header changes.
  */
@@ -112,16 +110,16 @@ typedef struct AmiNetXDuoContext
     NX_PACKET_POOL     *(*nxc_Pool)(VOID);
 
     /*
-     * The transport behind a descriptor.  `socket_base` is the CALLER's
+     * The transport behind a descriptor.  `socket_base` is the caller's
      * SocketBase, because the descriptor table is per opener (docs/RESEARCH.md
      * 3.1: SocketBase is never shared), so the fd is meaningless without it.
      *
      * Returns NX_NULL unless the descriptor is a connected TCP socket.  Once a
-     * descriptor has been handed over this way, the application must not
+     * descriptor has been passed over this way, the application must not
      * recv()/send() on it: those would take bytes out of the middle of a TLS
      * record.  Nothing enforces that -- enforcing it would mean a flag test on
-     * the hot path of every recv() in the system -- so it is a contract, and
-     * TLSClose() is what ends it.
+     * the hot path of every recv() in the system -- so the caller must observe
+     * it until TLSClose().
      */
     NX_TCP_SOCKET      *(*nxc_TcpSocket)(APTR socket_base, LONG fd);
 
@@ -135,17 +133,17 @@ typedef struct AmiNetXDuoContext
     VOID                (*nxc_Leave)(AmiNetCaller *caller);
 
     /*
-     * Hand the ThreadX baton back around a blocking Exec call, and take it
+     * Release the ThreadX baton around a blocking Exec call and acquire it
      * again afterwards.  These are the hooks the SANA-II readers use to make it
      * legal for a ThreadX thread to sit in Wait() for an IORequest.
      *
      * tls.library needs them for one thing: reading a CA root out of
-     * DEVS:Internet/certificates happens INSIDE the handshake -- the issuer is
+     * DEVS:Internet/certificates happens inside the handshake -- the issuer is
      * not known until the server sends its chain -- and dos.library's Read()
      * blocks in Exec.  Doing that while holding the baton would stop the IP
      * thread and both SANA-II readers for the duration of a disk access, which
      * on a floppy is long enough to lose packets.  Bracketing the file I/O with
-     * these means the rest of the stack keeps running while the head moves.
+     * these keeps the rest of the stack running while the head moves.
      *
      * Nesting is handled inside; a caller that does not hold the baton gets a
      * pair of no-ops.
@@ -198,8 +196,8 @@ typedef struct AmiNetXDuoContext
 
 /*
  * The vector itself, for anyone linking against src/bsdsocket directly.  A
- * shared-library caller reaches it through the LVO -- see
- * src/tlslib/tls_netx.c, which is the only caller in the tree.
+ * shared-library caller reaches it through the LVO; see src/tlslib/tls_netx.c,
+ * the only caller in the tree.
  *
  * Returns 0 and writes *ctx on success; -1 and writes nothing otherwise.
  */

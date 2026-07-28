@@ -15,13 +15,13 @@
 /*  DESCRIPTION                                                           */
 /*                                                                        */
 /*    ThreadX's "interrupt lockout" is Forbid()/Permit() here, not         */
-/*    Disable()/Enable().  Rationale (docs/RESEARCH.md 6.2): nothing in    */
-/*    ThreadX or NetX Duo runs at Exec interrupt level in this design, and */
-/*    a long Disable() region is actively harmful on an Amiga -- it drops  */
-/*    serial characters, breaks floppy transfers and audibly glitches      */
-/*    audio.  Forbid() gives the same mutual exclusion against every other */
-/*    task at a fraction of the system cost, and it nests, which is        */
-/*    exactly the shape of the save/restore posture idiom.                 */
+/*    Disable()/Enable() (docs/RESEARCH.md 6.2).  Nothing in ThreadX or    */
+/*    NetX Duo runs at Exec interrupt level in this design, and a long     */
+/*    Disable() region is harmful on an Amiga: it drops serial characters, */
+/*    breaks floppy transfers and audibly glitches audio.  Forbid() gives  */
+/*    the same mutual exclusion against every other task at a fraction of  */
+/*    the system cost, and it nests, matching the save/restore posture     */
+/*    idiom.                                                               */
 /*                                                                        */
 /*    Interrupt handlers really must not touch ThreadX state.  Data        */
 /*    arriving from a SANA-II device reaches the stack as an IORequest     */
@@ -61,10 +61,10 @@ VOID _tx_thread_interrupt_restore(UINT previous_posture)
 /*
  * tx_interrupt_control() -- the application-visible service.
  *
- * Note the asymmetry with the pair above: this one may legitimately be called
- * unbalanced, so it changes the nesting by at most one level and reports what
- * the posture was.  Requesting TX_INT_ENABLE from inside N nested Forbid()s
- * therefore drops one level, not all N.  ThreadX's own core never calls this.
+ * Unlike the pair above, this one may be called unbalanced, so it changes the
+ * nesting by at most one level and reports what the posture was.  Requesting
+ * TX_INT_ENABLE from inside N nested Forbid()s drops one level, not all N.
+ * ThreadX's own core never calls this.
  */
 UINT _tx_thread_interrupt_control(UINT new_posture)
 {

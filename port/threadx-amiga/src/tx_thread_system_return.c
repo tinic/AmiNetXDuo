@@ -14,17 +14,17 @@
 /*                                                                        */
 /*  DESCRIPTION                                                           */
 /*                                                                        */
-/*    Hands the baton back to the scheduler and parks the calling Exec     */
-/*    Task on its run signal until the scheduler picks it again.           */
+/*    Returns the baton to the scheduler and parks the calling Exec Task   */
+/*    on its run signal until the scheduler picks it again.                */
 /*                                                                        */
 /*    The core always calls this with the critical section already         */
 /*    restored (every call site is preceded by TX_RESTORE), so the Wait()  */
-/*    below happens at Forbid() nesting zero.  Even if it did not: Exec    */
+/*    below happens at Forbid() nesting zero.  Even if it did not, Exec    */
 /*    saves SysBase->TDNestCnt into tc_TDNestCnt when a task blocks and    */
 /*    restores it on redispatch, so a Forbid() held across Wait() neither  */
-/*    stops the machine nor is lost.  That property is what makes          */
-/*    Forbid()/Permit() a legal TX_DISABLE/TX_RESTORE for a port whose     */
-/*    threads block inside critical sections.                              */
+/*    stops the machine nor is lost.  That is what makes Forbid()/Permit() */
+/*    a legal TX_DISABLE/TX_RESTORE for a port whose threads block inside  */
+/*    critical sections.                                                   */
 /*                                                                        */
 /**************************************************************************/
 
@@ -80,7 +80,7 @@ TX_THREAD       *owner;
     }
 
     /* The flag lives on the reaper's stack and it is blocked in Wait(), so it
-       is alive.  Set it BEFORE the Signal, so a reaper that wakes on its
+       is alive.  Set it before the Signal, so a reaper that wakes on its
        timeout in the same instant still sees a completed handshake rather than
        declaring a zombie.  Signalling and dying both happen inside the
        Forbid(), and Exec discards the forbid nesting of a task it removes, so
@@ -110,13 +110,12 @@ TX_THREAD       *owner;
  * TX_THREAD_COMPLETED_EXTENSION.
  *
  * _tx_thread_shell_entry() calls this the moment a thread's entry function
- * returns, and crucially BEFORE _tx_thread_system_suspend() unlinks the thread
- * from the ready lists.  For a thread the reaper had to abandon (see
- * _tx_amiga_reap()) that unlinking would be done with a TX_THREAD that has
- * already been deleted -- tx_thread_ready_next/previous still point at live
- * threads, so it splices a dead node's stale neighbours into the live list and
- * the next dispatch jumps through whatever that leaves behind.  Dying here
- * instead is the difference between a tidy exit and a wild jump.
+ * returns, and before _tx_thread_system_suspend() unlinks the thread from the
+ * ready lists.  For a thread the reaper had to abandon (see _tx_amiga_reap())
+ * that unlinking would be done with a TX_THREAD that has already been deleted
+ * -- tx_thread_ready_next/previous still point at live threads, so it splices a
+ * dead node's stale neighbours into the live list and the next dispatch jumps
+ * through whatever that leaves behind.  Dying here avoids that.
  *
  * shell_entry has already done _tx_thread_preempt_disable++ on the assumption
  * that _tx_thread_system_suspend() will undo it, so undo it here instead.
@@ -162,9 +161,9 @@ struct _tx_amiga_ctrl   *ctrl;
     run_signal =  thread_ptr -> tx_thread_amiga_run_signal;
     adopted    =  thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED;
 
-    /* Cache the control block ONCE, while the TX_THREAD is certainly still
-       ours.  Everything the teardown below touches lives in it, so a task that
-       the reaper gave up on can still destroy itself safely long after the
+    /* Cache the control block once, while the TX_THREAD is still ours.
+       Everything the teardown below touches lives in it, so a task that the
+       reaper gave up on can still destroy itself safely long after the
        TX_THREAD has been deleted and reused.  An adopted Task has no control
        block -- its teardown is a return, not a RemTask().  */
     ctrl =  (adopted != 0U) ? ((struct _tx_amiga_ctrl *) 0)
@@ -232,11 +231,11 @@ struct Task *me;
         (thread_ptr -> tx_thread_amiga_task != (VOID *) me))
     {
 
-        /* We are not the baton holder, so there is nothing to give back.
-           The port keeps _tx_thread_system_state non-zero over every window
-           in which a non-ThreadX Exec Task touches ThreadX state
-           (tx_amiga_adopt.c, the tick task), so this should be unreachable;
-           returning quietly is still better than corrupting the ready list.  */
+        /* Not the baton holder, so there is nothing to release.  The port keeps
+           _tx_thread_system_state non-zero over every window in which a
+           non-ThreadX Exec Task touches ThreadX state (tx_amiga_adopt.c, the
+           tick task), so this should be unreachable; returning quietly is still
+           better than corrupting the ready list.  */
         Permit();
         return;
     }
@@ -253,12 +252,12 @@ struct Task *me;
 
     /*
      * A thread that never comes back looks identical from the outside to a
-     * task the port failed to wake, and the two have nothing in common.  This
-     * says which: TX_TCP_IP is NetX Duo suspending its own caller, and the
-     * cleanup routine names the service it is parked in while the timeout
-     * says whether anything will ever end the wait.  Subtract the address of
-     * this function from the cleanup pointer and look the difference up in
-     * `nm` on the library to get the symbol.  docs/RESEARCH.md 42.
+     * task the port failed to wake.  This trace distinguishes them: TX_TCP_IP
+     * is NetX Duo suspending its own caller, the cleanup routine names the
+     * service it is parked in, and the timeout says whether anything will ever
+     * end the wait.  Subtract the address of this function from the cleanup
+     * pointer and look the difference up in `nm` on the library to get the
+     * symbol.  docs/RESEARCH.md 42.
      */
     if (thread_ptr -> tx_thread_state == ((UINT) TX_TCP_IP))
     {
@@ -277,7 +276,7 @@ struct Task *me;
 
     _tx_amiga_wake_scheduler();
 
-    /* Park.  A completed or terminated thread simply stays here until
-       tx_thread_delete() reaps it; that keeps teardown on one path.  */
+    /* Park.  A completed or terminated thread stays here until
+       tx_thread_delete() reaps it, which keeps teardown on one path.  */
     (VOID) _tx_amiga_thread_park(thread_ptr);
 }

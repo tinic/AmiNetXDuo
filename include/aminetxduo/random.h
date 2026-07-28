@@ -7,24 +7,23 @@
  * create entropy that was not there.
  *
  * The collection is unaudited and its yield unmeasured on real hardware.
- * ami_random_entropy_bits() returns this module's own conservative guess, not
- * a measurement.  Several sources are identical run to run on a fixed boot
- * image -- every AvailMem() figure, the AllocVec() addresses and the
- * uninitialised memory residue were byte-for-byte equal over three cold boots
- * under FS-UAE.  They are mixed and credited nothing.  That is a property of
- * the machine rather than of this code, so re-run tools/smoke/randtest.c on a
- * new target instead of assuming it carries over.
+ * ami_random_entropy_bits() returns this module's own conservative guess, not a
+ * measurement.  Several sources are identical run to run on a fixed boot image:
+ * every AvailMem() figure, the AllocVec() addresses and the uninitialised memory
+ * residue were byte-for-byte equal over three cold boots under FS-UAE.  They are
+ * mixed and credited nothing.  That is a property of the machine rather than of
+ * this code, so re-run tools/smoke/randtest.c on a new target instead of
+ * assuming it carries over.
  *
- * ami_random_is_seeded() reports whether the pool reached
- * AMI_RANDOM_MIN_BITS from sources this module will count.  Left to itself it
- * is FALSE, because the internal sources cap below that bar.  Nothing refuses
- * to run because of it and TLS does not check it; a caller with real entropy
- * feeds it in through ami_random_add_entropy().
+ * ami_random_is_seeded() reports whether the pool reached AMI_RANDOM_MIN_BITS
+ * from sources this module will count.  Left to itself it is FALSE, because the
+ * internal sources cap below that bar.  Nothing refuses to run because of it and
+ * TLS does not check it; a caller with real entropy feeds it in through
+ * ami_random_add_entropy().
  *
  * For what the stack uses it for -- IP ids, TCP initial sequence numbers,
- * ephemeral ports, DHCP and DNS transaction ids, and TLS key agreement on a
- * machine fetching web pages -- it is a strict improvement on the 32-bit LCG
- * it replaces, at 21 ms once at init.
+ * ephemeral ports, DHCP and DNS transaction ids, and TLS key agreement -- it is
+ * an improvement on the 32-bit LCG it replaces, at 21 ms once at init.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -48,12 +47,12 @@ extern "C" {
 
 /*
  * Gather from every source we have and mix into the pool.  Safe to call
- * repeatedly -- each call only ever adds.  Costs 21-22 ms on an emulated
- * 68020, nearly all of it in the E-Clock jitter sampling.  Called lazily by
- * the generation functions if nothing called it first, so there is no
- * ordering requirement; call it early anyway, from a context where 22 ms does
- * not matter, because the lazy path would otherwise land on whatever sends
- * the first packet.
+ * repeatedly; each call only ever adds.  Costs 21-22 ms on an emulated 68020,
+ * nearly all of it in the E-Clock jitter sampling.  Called lazily by the
+ * generation functions if nothing called it first, so there is no ordering
+ * requirement; call it early anyway, from a context where 22 ms does not
+ * matter, because the lazy path would otherwise land on whatever sends the
+ * first packet.
  */
 VOID ami_random_init(VOID);
 
@@ -64,7 +63,7 @@ VOID ami_random_init(VOID);
  * address, a boot count) rather than unpredictable.  The material is always
  * mixed regardless of the credit claimed.
  *
- * Never replaces the pool: a caller cannot make the state worse by supplying
+ * Never replaces the pool, so a caller cannot make the state worse by supplying
  * something bad, only fail to make it better.
  */
 VOID ami_random_add_entropy(const void *data, ULONG length, ULONG credit_bits);
@@ -78,9 +77,8 @@ ULONG ami_random_ulong(VOID);
 /*
  * This module's own running estimate of the entropy credited to the pool, in
  * bits, saturating at 256.  It is a bookkeeping figure derived from fixed
- * per-source guesses and a few "did this actually vary?" checks -- NOT a
- * measurement of the generator's output, and NOT evidence of anything to an
- * attacker.  Its only real job is to drive ami_random_is_seeded().
+ * per-source guesses and a few "did this vary?" checks, not a measurement of
+ * the generator's output.  Its job is to drive ami_random_is_seeded().
  */
 ULONG ami_random_entropy_bits(VOID);
 
@@ -92,10 +90,10 @@ BOOL ami_random_is_seeded(VOID);
  * NetX Duo and nx_secure macros at these.  ami_random_rand() returns
  * 0..0x7FFFFFFF like C's rand().
  *
- * ami_random_srand() MIXES its argument in and leaves the credit alone.  It
- * deliberately does not reset the generator: NX_SRAND exists so an
- * application can make a run reproducible, and honouring that literally would
- * turn a caller's convenience into a key-recovery bug.
+ * ami_random_srand() mixes its argument in and leaves the credit alone.  It
+ * does not reset the generator: NX_SRAND exists so an application can make a
+ * run reproducible, and honouring that literally would turn a caller's
+ * convenience into a key-recovery bug.
  */
 int  ami_random_rand(void);
 void ami_random_srand(unsigned int seed);

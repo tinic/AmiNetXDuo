@@ -1,53 +1,49 @@
 /*
- * AmiNetXDuo -- asking the RUNNING stack what it is doing.
+ * AmiNetXDuo -- asking the running stack what it is doing.
  *
- *   The whole ThreadX/NetX Duo stack is a singleton inside
- *   bsdsocket.library's segment. A Shell command that links libnetxduo.a gets
- *   a SECOND set of NetX Duo globals, a second NX_IP that owns no interfaces
- *   and a ThreadX kernel that was never entered -- so every question it asks
- *   is answered by the wrong stack, and every NetX Duo call that suspends
- *   "the calling thread" reaches for a scheduler that is not running.
+ *   The whole ThreadX/NetX Duo stack is a singleton inside bsdsocket.library's
+ *   segment. A Shell command that links libnetxduo.a gets a second set of NetX
+ *   Duo globals, a second NX_IP with no interfaces and a ThreadX kernel that
+ *   was never entered, so every question it asks is answered by the wrong
+ *   stack, and every NetX Duo call that suspends "the calling thread" reaches
+ *   for a scheduler that is not running.
  *
- *   That is not a hypothetical. src/tools/netstack_weak.c supplies weak
- *   netstack_get()/netstack_ip() stubs that return NULL, no command links
- *   src/netstack, and so in every shipped build `netstat`, `ping` and
- *   ShowNetStatus's live path read NULL and print "the network is up, but
- *   this command cannot read it" -- a message that reads like a pass. See
- *   docs/RESEARCH.md 19.6 and 21.
+ *   src/tools/netstack_weak.c supplies weak netstack_get()/netstack_ip() stubs
+ *   that return NULL, and no command links src/netstack, so in every shipped
+ *   build `netstat`, `ping` and ShowNetStatus's live path read NULL and print
+ *   "the network is up, but this command cannot read it", which reads like a
+ *   pass. See docs/RESEARCH.md 19.6 and 21.
  *
- *   src/tools/nettrace.c is the one command that already solved this: it
- *   reaches the capture engine through the eight published bpf_* LVOs rather
- *   than by linking src/bpf/, "because a tool that linked the archive would
- *   get its OWN copy of the channel table and capture nothing at all". This
- *   header is the same answer for the rest of the stack.
+ *   src/tools/nettrace.c already solved this: it reaches the capture engine
+ *   through the eight published bpf_* LVOs rather than by linking src/bpf/,
+ *   "because a tool that linked the archive would get its OWN copy of the
+ *   channel table and capture nothing at all". This header is the same answer
+ *   for the rest of the stack.
  *
- * A SNAPSHOT, NOT A POINTER
+ *   It returns a snapshot, not a pointer. AmigaOS has no memory protection, so
+ *   a live NX_IP * into another task's structures stays dereferenceable long
+ *   after the stack has gone down, and this project has already shipped one
+ *   use-after-free of that kind (a teardown path that freed a reply port and
+ *   the stack a thread was still running on). Walking NetX Duo's tables also
+ *   takes the ThreadX baton, which a Shell command must not hold while it
+ *   prints.
  *
- *   The obvious shape -- hand the caller the live NX_IP * -- is the wrong
- *   one. AmigaOS has no memory protection, so a pointer into another task's
- *   structures stays dereferenceable long after the stack has gone down, and
- *   this project has already shipped one use-after-free of exactly that kind
- *   (a teardown path that freed a reply port and the stack a thread was still
- *   running on). Worse, walking NetX Duo's tables takes the ThreadX baton,
- *   which a Shell command must not hold while it prints.
+ *   So the library copies. NetStackQuery() acquires the baton, fills the caller's
+ *   buffer with plain scalars, and releases the baton before returning. Nothing
+ *   the caller holds afterwards points into the stack.
  *
- *   So the library COPIES. NetStackQuery() takes the baton, fills the
- *   caller's buffer with plain scalars, and gives the baton back before
- *   returning. Nothing the caller holds afterwards points into the stack.
- *
- *   These two slots sit past every offset any published bsdsocket ABI names
- *   -- past AmiTCP V3, past AmiTCP V4, past Roadshow's extension set and past
- *   the six reserved-for-expansion slots that clib/bsdsocket_protos.h
- *   documents after getnameinfo(). The only way to reach them is
- *   deliberately. But if some future vendor ever allocates the same offset
- *   for something else, a caller of THAT function arrives here with whatever
- *   it happened to have in its registers, and this call must do nothing
- *   rather than something. Wrong magic, wrong version or a buffer too small
+ *   These two slots sit past every offset any published bsdsocket ABI names --
+ *   past AmiTCP V3, past AmiTCP V4, past Roadshow's extension set and past the
+ *   six reserved-for-expansion slots that clib/bsdsocket_protos.h documents
+ *   after getnameinfo(). The only way to reach them is on purpose. But if some
+ *   future vendor allocates the same offset for something else, a caller of
+ *   that function arrives here with whatever it had in its registers, and this
+ *   call must then do nothing. Wrong magic, wrong version or a buffer too small
  *   for its own header: the library writes nothing and fails.
  *
- *   nsh_Version is the CALLER's, and the library refuses a version it does
- *   not know. nsh_EntrySize is the LIBRARY's, so a caller can check that the
- *   struct it was compiled against is the struct it was handed.
+ *   nsh_Version is the caller's, and the library refuses a version it does not
+ *   know. nsh_EntrySize is the library's, so a caller can check that the struct
+ *   it was compiled against is the struct it was handed.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -64,9 +60,8 @@ extern "C" {
 /* ------------------------------------------------------------------ LVOs --
  *
  * -0x360 is bsd_ObtainNetXDuoContext (aminetxduo/nxcontext.h), which exists
- * only in an AMINETXDUO_TLS build -- but its SLOT is unconditional, so these
- * two are at the same offset in every configuration. A network command that
- * works only in a TLS build is not a command.
+ * only in an AMINETXDUO_TLS build, but its slot is unconditional, so these two
+ * are at the same offset in every configuration.
  */
 #define AMI_NETSTATUS_QUERY_LVO     (-0x366)
 #define AMI_NETSTATUS_CONTROL_LVO   (-0x36c)
@@ -85,17 +80,16 @@ extern "C" {
  * The library revision that first had these slots, and the one check a caller
  * cannot skip.
  *
- * lib_Version stays 4 forever -- it is the AmiTCP V4 ABI number every caller
- * passes to OpenLibrary(), and moving it would lock out every program that
- * asks for 4. lib_Revision is ours, so it is what says which of OUR libraries
- * this is.
+ * lib_Version stays 4: it is the AmiTCP V4 ABI number every caller passes to
+ * OpenLibrary(), and moving it would lock out every program that asks for 4.
+ * lib_Revision is ours, so it is what identifies which of our libraries this
+ * is.
  *
- * It matters because the identity check is not enough on its own. A caller
- * that finds a bsdsocket.library whose lib_IdString says AmiNetXDuo will
- * happily jump to -0x366 -- and in the v0.2.0 library, which is published,
- * that offset is past the end of the vector table, where MakeLibrary() put
- * the (APTR)-1 terminator. That is a guru, and a guru is a worse answer than
- * the message this whole interface exists to stop being printed.
+ * The identity check is not enough on its own. A caller that finds a
+ * bsdsocket.library whose lib_IdString says AmiNetXDuo will jump to -0x366, and
+ * in the published v0.2.0 library that offset is past the end of the vector
+ * table, where MakeLibrary() put the (APTR)-1 terminator. That is a guru, which
+ * is a worse answer than the message this interface exists to stop printing.
  *
  * Bump this and BSD_LIB_REVISION together whenever a slot is added.
  */
@@ -103,8 +97,7 @@ extern "C" {
 
 /* ------------------------------------------------------------ selectors --
  *
- * One selector per table. Adding a table later costs a selector, not an LVO,
- * which is why this is a selector at all.
+ * One selector per table, so adding a table later costs a selector, not an LVO.
  */
 #define NETSTATUS_SYSTEM        1   /* one NetStatusSystem                   */
 #define NETSTATUS_INTERFACES    2   /* NetStatusInterface[]                  */
@@ -118,7 +111,7 @@ extern "C" {
  * Every buffer starts with this. The caller fills nsh_Magic and nsh_Version;
  * the library fills the rest and writes as many entries after it as will fit,
  * reporting in nsh_Available how many it had. Truncation is therefore
- * detectable rather than silent -- nsh_Count < nsh_Available.
+ * detectable rather than silent: nsh_Count < nsh_Available.
  */
 typedef struct NetStatusHeader
 {
@@ -141,10 +134,10 @@ typedef struct NetStatusHeader
 #define NETSTATUS_SYS_GATEWAY   0x0002UL /* nss_Gateway is meaningful        */
 #define NETSTATUS_SYS_IPV6      0x0004UL /* built with AMINETXDUO_IPV6       */
 /*
- * NX_ENABLE_IP_STATIC_ROUTING, which the shipped build defines. SET means
- * NetX Duo's static routing table is compiled in: NETSTATUS_ROUTES reports it
+ * NX_ENABLE_IP_STATIC_ROUTING, which the shipped build defines. Set means NetX
+ * Duo's static routing table is compiled in: NETSTATUS_ROUTES reports it
  * alongside the interface prefixes and the default gateway, and
- * NETCTRL_ROUTE_ADD/DELETE work. CLEAR means the table does not exist in this
+ * NETCTRL_ROUTE_ADD/DELETE work. Clear means the table does not exist in this
  * build, NETSTATUS_ROUTES has only the prefixes and the gateway to report, and
  * NETCTRL_ROUTE_ADD/DELETE fail with ENOSYS. Ask before adding a route rather
  * than reading ENOSYS as a failure.
@@ -152,10 +145,10 @@ typedef struct NetStatusHeader
 #define NETSTATUS_SYS_ROUTING   0x0008UL
 
 /*
- * AMINETXDUO_MDNS, and nss_MdnsName is then the name this machine answers to
- * on the local network.  CLEAR means the build has no responder and the field
- * is empty; SET with an empty field means the responder is there but has not
- * claimed a name yet, which is a different thing and worth saying differently.
+ * AMINETXDUO_MDNS, and nss_MdnsName is then the name this machine answers to on
+ * the local network.  Clear means the build has no responder and the field is
+ * empty; set with an empty field means the responder is there but has not
+ * claimed a name yet.
  */
 #define NETSTATUS_SYS_MDNS      0x0010UL
 
@@ -171,10 +164,9 @@ typedef struct NetStatusSystem
     ULONG   nss_PoolEmptySuspensions;
     ULONG   nss_PoolInvalidReleases;
     /*
-     * What this machine calls itself on the local network, with the ".local"
-     * -- the name somebody at another machine types to reach it.  Nothing
-     * else reports it, and a user who cannot be told their own name cannot
-     * give it to anyone.  Empty unless NETSTATUS_SYS_MDNS.
+     * What this machine calls itself on the local network, with the ".local":
+     * the name somebody at another machine types to reach it.  Nothing else
+     * reports it.  Empty unless NETSTATUS_SYS_MDNS.
      */
     char    nss_MdnsName[NETSTATUS_NAME_LEN];
     ULONG   nss_Reserved[3];
@@ -218,14 +210,13 @@ typedef struct NetStatusInterface
 /* ----------------------------------------------------- NETSTATUS_DHCP --- */
 
 /*
- * What the DHCP server said, per interface -- which nothing kept until now.
- * The lease is applied at bring-up and was then thrown away, so a machine
- * that got its address by DHCP could not answer the two questions that come
- * up when it goes wrong: WHO gave me this, and HOW LONG is it good for.
+ * What the DHCP server said, per interface, which nothing kept until now.  The
+ * lease was applied at bring-up and then thrown away, so a machine that got its
+ * address by DHCP could not say who gave it that address or how long it is good
+ * for.
  *
- * The offered lists are reported whether or not they were used.  A server
- * that hands out a name server this machine ignored is a fact worth seeing,
- * because it is usually the explanation.
+ * The offered lists are reported whether or not they were used.  A server that
+ * hands out a name server this machine ignored is usually the explanation.
  */
 
 /* nsd_State */
@@ -388,25 +379,24 @@ typedef struct NetStatusSocket
 
 /* ------------------------------------------------------------- control --
  *
- * NetStackControl() is the mutating half, and is deliberately a separate LVO
- * from the reading half so that a caller which only reads cannot get one of
- * these by mistyping a selector.
+ * NetStackControl() is the mutating half, on a separate LVO from the reading
+ * half so that a caller which only reads cannot get one of these by mistyping a
+ * selector.
  *
- * Every operation takes the same argument block. Which fields matter depends
- * on the operation and is stated per operation below; the rest must be zero,
- * so that adding a meaning to one later cannot change what an older caller
- * asked for.
+ * Every operation takes the same argument block. Which fields matter is stated
+ * per operation below; the rest must be zero, so that giving one a meaning
+ * later cannot change what an older caller asked for.
  */
 #define NETCTRL_INTERFACE_UP    1   /* nsc_Index                             */
 #define NETCTRL_INTERFACE_DOWN  2   /* nsc_Index                             */
 #define NETCTRL_GATEWAY_SET     3   /* nsc_Gateway                           */
 #define NETCTRL_GATEWAY_CLEAR   4   /* --                                    */
 /*
- * ROUTE_ADD takes nsc_Destination/NetMask/Gateway and NOT nsc_Index: NetX Duo
+ * ROUTE_ADD takes nsc_Destination/NetMask/Gateway and not nsc_Index: NetX Duo
  * derives the interface from the next hop, which must be on an interface's own
  * subnet or the call fails with EINVAL. An entry with the same destination and
  * mask has its next hop replaced rather than being duplicated, and the table
- * holds NX_IP_ROUTING_TABLE_SIZE entries -- ENOBUFS past that.
+ * holds NX_IP_ROUTING_TABLE_SIZE entries; ENOBUFS past that.
  */
 #define NETCTRL_ROUTE_ADD       5   /* nsc_Destination/NetMask/Gateway       */
 #define NETCTRL_ROUTE_DELETE    6   /* nsc_Destination/NetMask               */

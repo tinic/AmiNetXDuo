@@ -18,16 +18,16 @@
  *     ... code under test ...
  *     ami_crash_remove();
  *
- * What is reliable: the report. A caught exception is dumped to the serial port
- * with the exception name, PC, SR and every register, and a one-line summary is
+ * The report is reliable. A caught exception is dumped to the serial port with
+ * the exception name, PC, SR and every register, and a one-line summary is
  * written to DH0:crash.txt, which the harness stages from a host directory and
- * prints after the run. That works.
+ * prints after the run.
  *
- * What is not: resuming. The handler patches the exception frame to return into
- * a user-mode bail-out routine, which then longjmp()s back to the install site
- * -- but that unwind has been observed under FS-UAE resuming *after* the call
- * site rather than at it, so ami_crash_install() cannot be relied on to return
- * a second time. Treat a caught crash as fatal: use the guard to find out what
+ * Resuming is not. The handler patches the exception frame to return into a
+ * user-mode bail-out routine, which then longjmp()s back to the install site,
+ * but that unwind has been observed under FS-UAE resuming *after* the call site
+ * rather than at it, so ami_crash_install() cannot be relied on to return a
+ * second time. Treat a caught crash as fatal: use the guard to find out what
  * died and where, not to keep running afterwards.
  *
  * SPDX-License-Identifier: MIT
@@ -69,9 +69,9 @@ const AmiCrashInfo *ami_crash_info(VOID);
 
 /*
  * Record the load address of the program's code hunk so the report can print
- * PC-relative offsets. Without it, a PC is only useful if you can guess where
- * the hunk was loaded. Pass any function in the code hunk (main is fine) --
- * the reporter prints both the raw PC and PC minus this reference.
+ * PC-relative offsets. Without it, a PC is only useful if you know where the
+ * hunk was loaded. Pass any function in the code hunk (main is fine); the
+ * reporter prints both the raw PC and PC minus this reference.
  */
 VOID ami_crash_set_reference(APTR code_address, const char *label);
 
@@ -79,13 +79,13 @@ VOID ami_crash_set_reference(APTR code_address, const char *label);
 const char *ami_crash_name(ULONG number);
 
 /*
- * Exec Alert (Guru) interception. A Guru is NOT a CPU exception -- Exec calls
+ * Exec Alert (Guru) interception. A Guru is not a CPU exception -- Exec calls
  * its own Alert() when it detects corruption, so the trap handler never sees
  * it. These hook exec's Alert vector so a double free, corrupt memory list or
  * reused IORequest gets logged with a decoded reason before the Guru appears.
  *
- * This patches Exec machine-wide: use it in tests and tools under the
- * emulator, and ALWAYS remove it before exiting.
+ * This patches Exec machine-wide: use it in tests and tools under the emulator,
+ * and always remove it before exiting.
  */
 BOOL ami_crash_install_alert_hook(VOID);
 VOID ami_crash_remove_alert_hook(VOID);
