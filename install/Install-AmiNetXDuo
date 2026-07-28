@@ -62,7 +62,7 @@
 ; --------------------------------------------------------------------------
 
 (set H_CARD
-  (cat "AmiNetXDuo talks to your network card through its SANA-II driver, "
+  (cat "AmiNetXDuo reaches the network card through its SANA-II driver, "
        "which is a file whose name ends in \".device\".\n\n"
        "The choices, in full, and the driver each one needs:\n\n"
        "  A2065        a2065.device\n"
@@ -74,15 +74,15 @@
        "  PCMCIA       asked next\n"
        "  UAE          uaenet.device\n\n"
        "UAE's driver is in the emulator rather than on disk, so it is not "
-       "detected like the others -- pick it yourself.\n\n"
-       "Pick the card you actually have.  If the installer already found a "
-       "driver in DEVS: it has pre-selected the matching entry, and that is "
-       "almost certainly the right answer.\n\n"
-       "If your card is not listed, choose the last entry and type the "
-       "driver's file name -- for example \"myCard.device\".  The driver "
-       "itself comes with the card; this installer does not supply it.\n\n"
-       "Choosing the wrong card is harmless: nothing is damaged, the network "
-       "simply will not come up, and you can run this installer again."))
+       "detected like the others and must be selected explicitly.\n\n"
+       "Select the card fitted to this machine.  If a driver was found in "
+       "DEVS: the matching entry is already selected, and that is almost "
+       "always correct.\n\n"
+       "A card that is not listed goes under the last entry, where the "
+       "driver's file name is typed in -- for example \"myCard.device\".  "
+       "The driver comes with the card; this installer does not supply it."
+       "\n\nThe wrong choice is harmless: nothing is damaged, the network "
+       "does not come up, and the installer can be run again."))
 
 (set H_PCMCIA
   (cat "PCMCIA (credit-card sized) network cards for the A600 and A1200 use "
@@ -93,10 +93,10 @@
        "Most NE2000-compatible Ethernet cards -- which is most of the cheap "
        "ones -- use cnet.device.  3Com's EtherLink III / 3C589 has its own "
        "driver.  Prism2 is the usual driver for wireless cards.\n\n"
-       "If you are not sure, try cnet.device first."))
+       "When in doubt, cnet.device is the one to try first."))
 
 (set H_OTHERDEV
-  (cat "Type the file name of your card's SANA-II driver, including the "
+  (cat "Type the file name of the card's SANA-II driver, including the "
        "\".device\" part -- for example \"ariadne.device\".\n\n"
        "The installer looks for it in DEVS: and in DEVS:Networks.  If it is "
        "somewhere else, type the whole path, for example "
@@ -105,49 +105,48 @@
 (set H_UNIT
   (cat "A driver can drive more than one card.  The unit number says which "
        "one.\n\n"
-       "If you have a single network card -- and nearly everyone does -- "
-       "leave this at 0."))
+       "With a single network card, which is the usual case, this stays "
+       "at 0."))
 
 (set H_IFNAME
   (cat "Each network interface is described by one file in "
        "DEVS:NetInterfaces, and the file's name is the interface's name.  It "
-       "is the name you will type at commands like\n\n"
+       "is the name the network commands take, as in\n\n"
        "\tOnline eth0\n\tShowNetStatus INTERFACE eth0\n\n"
        "\"eth0\" is a good name and is what the documentation uses.  The name "
        "may be at most 15 characters long."))
 
 (set H_DHCP
   (cat "Almost every home network has a router that hands out addresses "
-       "automatically, using DHCP.  If yours does -- and if every other "
-       "computer in the house just works when you plug it in, it does -- "
-       "choose the first option and you will not have to type any numbers at "
-       "all.\n\n"
-       "Choose the second option only if somebody has given you a fixed "
-       "address to use, or if there is no router on the network.\n\n"
+       "automatically, using DHCP.  Where other machines on the network "
+       "simply work when plugged in, it does.  The first option then needs "
+       "no numbers entered at all.\n\n"
+       "The second option is for a fixed address supplied by whoever runs "
+       "the network, or for a network with no router.\n\n"
        "This choice is easy to change later: it is one line, CONFIGURE=, in "
        "the file DEVS:NetInterfaces that this installer writes."))
 
 (set H_ADDR
   (cat "The Internet address for this Amiga, written as four numbers from 0 "
        "to 255 separated by full stops -- for example 192.168.1.10.\n\n"
-       "It must be an address nothing else on your network is using, and it "
-       "must be on the same network as your router.  If your router is "
-       "192.168.1.1, then 192.168.1.something is what you want.\n\n"
-       "If you pick an address that is already in use, both machines will "
-       "misbehave until one of them is changed."))
+       "It must be unused by anything else on the network, and on the same "
+       "network as the router.  With a router at 192.168.1.1, that means "
+       "192.168.1.something.\n\n"
+       "An address already in use leaves both machines misbehaving until one "
+       "of them is changed."))
 
 (set H_MASK
   (cat "The netmask says which part of the address is the network and which "
        "part is this machine.\n\n"
        "255.255.255.0 is right for essentially every home and small office "
-       "network, and it is what you should leave here unless somebody has "
-       "told you otherwise."))
+       "network, and stays as it is unless the network requires "
+       "otherwise."))
 
 (set H_GW
-  (cat "The gateway -- your router -- is the machine that forwards traffic "
-       "to the rest of the world.  Anything that is not on your own network "
-       "is handed to it.\n\n"
-       "It is usually the address ending in .1 or .254 on your network.\n\n"
+  (cat "The gateway -- the router -- is the machine that forwards traffic "
+       "to the rest of the world.  Anything not on the local network is "
+       "handed to it.\n\n"
+       "It is usually the address ending in .1 or .254.\n\n"
        "Without a correct gateway the Amiga can still talk to other machines "
        "in the same house, but nothing beyond them.\n\n"
        "This is written to DEVS:Internet/routes as DEFAULT=."))
@@ -156,8 +155,7 @@
   (cat "A name server turns names like \"aminet.net\" into addresses.  On a "
        "home network this is nearly always the router itself, so the address "
        "offered here is usually correct.\n\n"
-       "If you would rather use a public one, 9.9.9.9 and 1.1.1.1 both "
-       "work.\n\n"
+       "A public server also works: 9.9.9.9 and 1.1.1.1 both do.\n\n"
        "Without a name server, addresses typed as numbers still work but "
        "names do not.\n\n"
        "This is written to DEVS:Internet/name_resolution."))
@@ -171,8 +169,8 @@
 (set H_KEEPOLD
   (cat "This machine already has an AmiNetXDuo or Roadshow style network "
        "configuration in DEVS:NetInterfaces.\n\n"
-       "Answer \"Keep them\" to update the software and leave your settings "
-       "exactly as they are -- this is what you want when installing a newer "
+       "Answer \"Keep them\" to update the software and leave the existing "
+       "settings alone -- the usual choice when installing a newer "
        "version.\n\n"
        "Answer \"Set them up again\" to be asked all the network questions "
        "afresh.  That rewrites the interface file, DEVS:Internet/routes and "
@@ -183,7 +181,7 @@
   (cat "S:User-Startup is the file the Amiga runs every time it boots.  "
        "Adding the line\n\n\tC:AddNetInterface DEVS:NetInterfaces/"
        "<interface> QUIET\n\nto it makes the network come up by itself.\n\n"
-       "If you answer no, the network will not start on its own; you would "
+       "Answering no leaves the network not starting on its own; it would "
        "type that command yourself, or just run any networking program, "
        "because bsdsocket.library starts the stack the first time a program "
        "opens it.\n\n"
@@ -198,7 +196,7 @@
        "Two stacks cannot share the machine: there is one LIBS:bsdsocket."
        "library and whoever owns it owns the network.\n\n"
        "Answering yes renames the old file to bsdsocket.library.old rather "
-       "than deleting it, so you can put it back by hand if you change your "
+       "than deleting it, so it can be put back by hand later if the "
        "mind.  Answering no leaves the other stack in place and installs "
        "nothing but the commands -- which will then not work."))
 
@@ -241,11 +239,11 @@
 ; guide, which is where someone will look for them a second time anyway.
 
 (set F_START_YES
-  (cat "It starts by itself when you reboot.  To start it now, type:\n\n"
+  (cat "It starts by itself at the next reboot.  To start it now:\n\n"
        "    C:AddNetInterface DEVS:NetInterfaces/%s\n"))
 
 (set F_START_NO
-  (cat "It will NOT start by itself.  To start it, type:\n\n"
+  (cat "It will not start by itself.  To start it:\n\n"
        "    C:AddNetInterface DEVS:NetInterfaces/%s\n"))
 
 (set H_DOCDIR
@@ -253,7 +251,7 @@
        "installation log go into a drawer called AmiNetXDuo.\n\n"
        "Choose where that drawer should be created.  Nothing here is needed "
        "for the network to work -- the parts that matter go to LIBS:, C: and "
-       "DEVS: -- so any drawer you like is fine."))
+       "DEVS: -- so any drawer will do."))
 
 ; ==========================================================================
 ;  Small helpers
@@ -495,11 +493,11 @@
 
 (if (AND (= @user-level 0) (AND (< DET_INDEX 0) (= HAVE_OLD 0)))
     (abort "The installer could not find a network card driver in DEVS: or "
-           "DEVS:Networks, and in Novice mode it cannot ask you which card "
-           "you have.\n\n"
-           "Either copy your card's .device driver into DEVS: first, or "
+           "DEVS:Networks, and in Novice mode it cannot ask which card is "
+           "fitted.\n\n"
+           "Either copy the card's .device driver into DEVS: first, or "
            "start this installer again and choose \"Intermediate User\" so "
-           "that you can pick the card from a list.\n\n"
+           "so that the card can be picked from a list.\n\n"
            "Nothing has been changed."))
 
 ; ==========================================================================
@@ -510,8 +508,8 @@
   "AmiNetXDuo " VERSION_STR " -- a TCP/IP stack for AmigaOS.\n\n"
   "This installs bsdsocket.library and usergroup.library into LIBS:, seven "
   "network commands into C:, and writes a working configuration into DEVS:.\n\n"
-  "You will be asked which network card you have and whether your network "
-  "hands out addresses automatically.  Nothing else is required.\n\n")
+  "It asks which network card is fitted and whether the network hands out "
+  "addresses automatically.  Nothing else is required.\n\n")
 
 (complete 0)
 
@@ -615,7 +613,7 @@
         (set DEV_OK 0)
         (until DEV_OK
           (set DEV_NAME (askstring
-            (prompt "Type the file name of your card's driver, ending "
+            (prompt "Type the file name of the card's driver, ending "
                     "in \".device\".")
             (help   H_OTHERDEV)
             (default "mycard.device")))
@@ -660,7 +658,7 @@
 
     (set USEDHCP
       (askbool
-        (prompt "Does your network hand out addresses automatically?\n\n"
+        (prompt "Does the network hand out addresses automatically?\n\n"
                 "If other computers just plug in and work, it does.")
         (help    H_DHCP)
         (choices "Yes, use DHCP" "No, I will type them")
@@ -693,7 +691,7 @@
     (P_ip_parse)
     (set IPGW ("%ld.%ld.%ld.1" ip_o1 ip_o2 ip_o3))
 
-    (set ask_prompt "What is the address of your router (the gateway)?")
+    (set ask_prompt "What is the address of the router (the gateway)?")
     (set ask_help   H_GW)
     (set ask_default IPGW)
     (P_ask_ip)
@@ -868,10 +866,10 @@
   (prompt "Installing the network commands into C:")
   (help   "AddNetInterface, Online and Offline bring an interface up and "
           "take it down, and NetSetup writes or edits the interface file "
-          "for you.  ShowNetStatus and netstat report what it is "
+          "instead.  ShowNetStatus and netstat report what it is "
           "doing.  ping, host and traceroute are the usual diagnostics, and "
           "nslookup asks the DNS for one kind of record -- an MX, a TXT, an "
-          "SRV -- from whichever name server you name, and arp lists which "
+          "SRV -- from a named server, and arp lists which "
           "machines on this network have answered.  "
           "fetch retrieves an http:// or https:// URL; nc, telnet and "
           "tftp are netcat and the usual clients; sntp sets the clock from "
@@ -882,7 +880,8 @@
           "stack and arguments, but wants mathieeedoubbas.library in LIBS:, "
           "which every Workbench installation has.\n\nAll of "
           "them are installed: they are small, and missing the one command "
-          "you happen to want is worse than a few extra files in C:.")
+          "that turns out to be wanted is worse than a few extra files "
+          "in C:.")
   (source S_C)
   (dest   "C:")
   (all)
@@ -895,7 +894,7 @@
 ; ==========================================================================
 
 (makedir "DEVS:NetInterfaces"
-  (prompt "Creating DEVS:NetInterfaces, the drawer that describes your "
+  (prompt "Creating DEVS:NetInterfaces, the drawer that describes the "
           "network cards")
   (help   @makedir-help))
 
@@ -955,7 +954,7 @@
     (textfile
       (prompt "Writing DEVS:Internet/routes")
       (help   "This file holds the default route -- the address of the "
-              "router that everything not on your own network is sent to.")
+              "router that everything not on the local network is sent to.")
       (dest   "DEVS:Internet/routes")
       (append "; DEVS:Internet/routes -- written by the AmiNetXDuo installer.\n")
       (append ";\n")
@@ -1005,7 +1004,7 @@
     ""
     (textfile
       (prompt "Writing DEVS:Internet/hosts")
-      (help   "Names you want the Amiga to know without asking a name "
+      (help   "Names the Amiga should know without asking a name "
               "server.  One address, then the name, then any nicknames.")
       (dest   "DEVS:Internet/hosts")
       (append "# DEVS:Internet/hosts -- names this machine knows by itself.\n")
@@ -1042,7 +1041,7 @@
     (copyfiles
       (prompt (cat "Installing DEVS:Internet/certificates\n\n"
                    "The list of certificate authorities tls.library trusts.  "
-                   "Replace this file with a newer one when you want to "
+                   "Replace this file with a newer one to "
                    "update them; nothing else has to change."))
       (help   @copyfiles-help)
       (source (tackon (tackon S_DEVS "Internet") "certificates"))
@@ -1092,7 +1091,7 @@
       (help   "These are commented copies of the files this installer just "
               "wrote, one for each kind of card.  Nothing reads them where "
               "they are -- they are there to be read, and copied into DEVS: "
-              "by hand if you would rather configure the network that way.")
+              "by hand where that is the preferred way to configure it.")
       (source S_EXAM)
       (dest   (tackon DOCDIR "Examples"))
       (all)
@@ -1140,5 +1139,5 @@
 (exit
   "AmiNetXDuo is installed.\n\n"
   FINAL_START
-  "\nShowNetStatus says whether it came up.  The ReadMe in the\n"
-  "AmiNetXDuo drawer has the rest.\n")
+  "\nShowNetStatus reports whether it came up.  The ReadMe in the "
+  "AmiNetXDuo drawer covers the rest.\n")
