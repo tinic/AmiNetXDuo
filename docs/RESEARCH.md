@@ -16108,6 +16108,15 @@ largest single item: of the 227 ms DHCP takes, ~174 ms is waiting for the clock 
 is the four packets. Shortening it measured inside host-side jitter and widened the
 observed wakeup rate, so it needs n>=5 before anyone claims it.
 
+The address-arrival poll was the other candidate, and it is **done and worth nothing
+measurable**. `nx_ip_address_change_notify()` had been registered all along, so
+`ami_ns_wait_for_address()` now blocks on a semaphore the callback posts rather than
+sleeping a tick at a time. `AddNetInterface` measured 46 ticks against the 46.3 recorded
+above, with every other bench figure unchanged: the poll had already been cut from 5 ticks
+to 1, and what was left was below the resolution of the harness measuring it. The change
+is kept for removing a poll loop, not for a speedup -- the ~20 ms predicted for it was
+never there to collect.
+
 ## 57. -Os everywhere, and where it actually costs something (2026-07-27)
 
 The tree built at `-O3` and there was never evidence that was faster. On a 68000, or an 020
