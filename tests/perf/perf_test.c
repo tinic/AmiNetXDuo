@@ -320,6 +320,14 @@ extern VOID _nx_ram_network_driver(NX_IP_DRIVER *driver_req_ptr);
 static NX_PACKET_POOL   p_pool;
 static NX_IP            p_ip0;
 static NX_IP            p_ip1;
+/*
+ * The receive window both ends of an end-to-end case are created with.  A
+ * global rather than an argument because the server socket is created inside
+ * p_server_entry(), which p_transfer() reaches only through the semaphore
+ * handshake and cannot pass anything to.
+ */
+static ULONG            p_window = 16384UL;
+
 static NX_TCP_SOCKET    p_client;
 static NX_TCP_SOCKET    p_server;
 
@@ -1001,8 +1009,8 @@ ULONG       t0;
 
         status = nx_tcp_socket_create(p_run_ip, &p_server, "perf server",
                                       NX_IP_NORMAL, NX_FRAGMENT_OKAY,
-                                      NX_IP_TIME_TO_LIVE, 16384, NX_NULL,
-                                      NX_NULL);
+                                      NX_IP_TIME_TO_LIVE, p_window,
+                                      NX_NULL, NX_NULL);
         if (status != NX_SUCCESS)
         {
             p_srv_status = status;
@@ -1119,8 +1127,8 @@ ULONG       before_sent;
     tx_thread_sleep(NX_IP_PERIODIC_RATE / 5UL);
 
     status = nx_tcp_socket_create(cip, &p_client, "perf client", NX_IP_NORMAL,
-                                  NX_FRAGMENT_OKAY, NX_IP_TIME_TO_LIVE, 16384,
-                                  NX_NULL, NX_NULL);
+                                  NX_FRAGMENT_OKAY, NX_IP_TIME_TO_LIVE,
+                                  p_window, NX_NULL, NX_NULL);
     if (!P_OK(status, "client socket create"))
     {
         (VOID)tx_semaphore_get(&p_srv_done, 30UL * NX_IP_PERIODIC_RATE);
@@ -1285,6 +1293,62 @@ ULONG   calls, ckbytes, misaligned;
 }
 
 
+
+/* ------------------------------------------------------- window sweep --- */
+
+/*
+ * One transfer per receive window, printed as a curve.
+ *
+ * The question this answers is whether the receive window bounds this stack
+ * at its operating point, or whether the CPU does.  A window helps only when
+ * the sender is waiting for an ACK; when the machine is the bottleneck the
+ * curve is flat and every byte of extra window is pool held for nothing.
+ *
+ * 65535 is the last window a socket can be created with while
+ * NX_ENABLE_TCP_WINDOW_SCALING is off -- nxe_tcp_socket_create.c:170 refuses
+ * anything larger -- so it is the ceiling of the sweep rather than an
+ * arbitrary stopping point.
+ */
+
+static const ULONG p_sweep_windows[] =
+{
+    2048UL, 4096UL, 8192UL, 16384UL, 32768UL, 65535UL
+};
+
+#define P_SWEEP_BYTES   (128UL * 1024UL)
+
+static VOID p_window_sweep(const char *what, NX_IP *cip, NX_IP *sip,
+                           ULONG peer, UINT port)
+{
+ULONG   i, ticks, ms, kbps, packets;
+ULONG   saved = p_window;
+
+    for (i = 0UL; i < (sizeof(p_sweep_windows) / sizeof(p_sweep_windows[0])); i++)
+    {
+        p_window = p_sweep_windows[i];
+        p_ck_mode = P_CK_NET68K;
+
+        packets = 0UL;
+        ticks   = p_transfer(cip, sip, peer, port, 1, P_SWEEP_BYTES, &packets);
+        if (ticks == 0UL)
+        {
+            p_log("  %-10s window %5ld: FAILED", (LONG)what, (LONG)p_window);
+            continue;
+        }
+
+        ms   = p_ms(ticks);
+        kbps = (ms != 0UL) ? ((P_SWEEP_BYTES / 1024UL) * 1000UL / ms) : 0UL;
+
+        p_log("  %-10s window %5ld: %5ld ms, %4ld KB/s, %ld packets,"
+              " retransmits %ld",
+              (LONG)what, (LONG)p_window, (LONG)ms, (LONG)kbps,
+              (LONG)packets, (LONG)p_tcp_retransmits);
+    }
+
+    p_window = saved;
+}
+
+
 /* ------------------------------------------------------ ThreadX startup --- */
 
 VOID tx_application_define(VOID *first_unused_memory)
@@ -1416,6 +1480,12 @@ ULONG   actual;
                P_PORT_WIRE, 1, P_CK_VENDORED);
     p_run_case("wire, +extract, net68k",         &p_ip0, &p_ip1, P_IP1_ADDRESS,
                P_PORT_WIRE, 1, P_CK_NET68K);
+
+    p_log("");
+    p_log("-- receive window sweep, %ld KB per run -----------------------",
+          (LONG)(P_SWEEP_BYTES / 1024UL));
+    p_window_sweep("loopback", &p_ip0, &p_ip0, P_LOOPBACK, P_PORT_LOOP);
+    p_window_sweep("wire",     &p_ip0, &p_ip1, P_IP1_ADDRESS, P_PORT_WIRE);
 
     p_log("");
     p_log("%ld checks, %ld failures -- %s",

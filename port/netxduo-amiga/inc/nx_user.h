@@ -580,18 +580,83 @@
 #endif /* AMINETXDUO_IPV6 */
 
 
+/* ------------------------------------------------------------- loopback -- */
+
+/*
+ * Do not checksum a packet that never leaves memory.
+ *
+ * This is the checksum-offload switch, and no SANA-II device offers offload.
+ * The loopback interface does: nx_ip_create.c:169 sets every checksum bit in
+ * nx_interface_capability_flag on NX_LOOPBACK_INTERFACE, unconditionally,
+ * under this define and only under it.  So the define's effect here is not
+ * about hardware at all -- it is 127.0.0.1, where the sender computes a
+ * checksum over a buffer and the receiver verifies it against the same bytes
+ * in the same RAM, having crossed no wire that could have corrupted them.
+ * BSD has treated lo0 this way for decades.
+ *
+ * One of the two checksums goes, not both: _nx_ip_driver_packet_send()
+ * fills the field in on the looped-back copy so the packet on the receive
+ * side is well formed, and it is the verification that is skipped.
+ * tests/perf/perf_test.c counts it -- 316 checksum calls over 518 KB become
+ * 158 over 259 KB for the same 256 KB transfer.
+ *
+ * Measured, A1200 profile, 256 KB, two runs per arm agreeing to the KB/s:
+ *
+ *                            off        on
+ *      loopback, drain      603      682 KB/s     +13.1%
+ *      loopback, +extract   535      595          +11.2%
+ *      simulated wire       229      224           -2.2%
+ *
+ * The wire loses because the branches are compiled in everywhere while the
+ * flag is zero on every real interface, and because NX_PACKET grows by the
+ * capability field.  A 2.2% cost on the wire against 12% on loopback is the
+ * trade, and it is taken on a machine where `TCP:`, local services and the
+ * conformance suite's throughput test all run over 127.0.0.1.  Reverting is
+ * one line if a wire measurement ever says otherwise.
+ *
+ * It changes the layout of NX_INTERFACE and NX_PACKET, so like the packet
+ * filters it must be seen by every translation unit and belongs here.  No
+ * driver work is needed: nothing in the vendored tree asks a driver for its
+ * capabilities, and nx_ip_interface_attach.c:154 zeroes the flag for every
+ * attached interface, so a SANA-II device claims nothing by accident.
+ */
+#define NX_ENABLE_INTERFACE_CAPABILITY
+
+
 /*
  * Not set, and why:
  *
- *   NX_DISABLE_ERROR_CHECKING   -- saves code, but the bring-up milestones
- *                                  exist to catch our own misuse.  Revisit for
- *                                  the release build.
+ *   NX_DISABLE_ERROR_CHECKING   -- saves code, and the _nxe_ wrappers are 30%
+ *                                  of an nx_packet_allocate/release pair (90
+ *                                  us against 63).  It is still not worth it:
+ *                                  NetX Duo's own internals call _nx_ and
+ *                                  never see a wrapper, so only our call
+ *                                  sites pay, and an arm built with it
+ *                                  measured 580/216 KB/s against 584/216 --
+ *                                  no change outside the noise.  The bring-up
+ *                                  milestones exist to catch our own misuse
+ *                                  and now cost nothing measurable.
  *   NX_DISABLE_PACKET_CHAIN     -- would break TCP receives larger than one
  *                                  payload.
  *   NX_DISABLE_FRAGMENTATION    -- fragmentation is already off unless
  *                                  nx_ip_fragment_enable() is called.
- *   NX_ENABLE_INTERFACE_CAPABILITY -- checksum offload; no SANA-II device
- *                                  exposes it.
+ *   NX_TCP_ACK_TIMER_RATE 25    -- a 40 ms delayed ACK rather than 200 ms,
+ *                                  which is what AmiTCP_NG 4.1.4 did.  It
+ *                                  needs NX_TCP_FAST_TIMER_RATE raised with
+ *                                  it, since the fast periodic is what
+ *                                  decrements the timeout, and that runs the
+ *                                  whole socket list 2.5x as often.  Measured
+ *                                  as a cost with no return: 592/524/224
+ *                                  against 603/535/229 KB/s.  The latency it
+ *                                  would buy is already bought by
+ *                                  NX_TCP_ACK_EVERY_N_PACKETS above, which
+ *                                  put ACK delay at a 2.0 ms median.
+ *   NX_TCP_MAXIMUM_TX_QUEUE 16  -- twice the in-flight depth.  Also a cost:
+ *                                  592/528/224 against 603/535/229.  On a
+ *                                  machine that is CPU-bound rather than
+ *                                  window-bound (docs/RESEARCH.md 64) more
+ *                                  packets in flight is more pool held for
+ *                                  the same throughput.
  */
 
 
