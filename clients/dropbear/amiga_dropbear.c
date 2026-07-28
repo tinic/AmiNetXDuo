@@ -678,9 +678,10 @@ int __wrap_open(const char *path, int flags, ...)
 }
 
 /* The interactive console reader lives further down (it needs select's fd
-   helpers); read() here is its one caller before then. */
+   helpers); read() and write() here are its callers before then. */
 static int con_active(void);
 static int con_read(void *buf, size_t len);
+static int con_write(int fd, const void *buf, size_t len);
 
 int __wrap_read(int fd, void *buf, size_t len)
 {
@@ -711,6 +712,12 @@ int __wrap_write(int fd, const void *buf, size_t len)
 
     if (IS_RAND(fd))
         return (int)len;                /* swallowed: see rand_fill() */
+
+    /* The client's own console output (prompts, messages) before an interactive
+       session is up: give it the CR the Amiga console needs.  Once the session
+       runs, the server's byte stream (already CRLF) passes straight through. */
+    if ((fd == 1 || fd == 2) && !con_active())
+        return con_write(fd, buf, len);
 
     return __real_write(fd, buf, len);
 }
@@ -996,6 +1003,51 @@ static int con_read(void *buf, size_t len)
         return -1;
     }
     return n;
+}
+
+/*
+ * Console output with the newline the Amiga console wants.
+ *
+ * Dropbear is Unix code and ends its own lines -- the password prompt, "Host
+ * key...", "Permission denied" -- with a bare '\n', but the Amiga console only
+ * moves to the start of the next line on CR+LF, so those prompts pile up on one
+ * line.  Insert a CR before any LF that does not already have one (so the
+ * server's own CRLF, once the session is up, is never doubled).  Only the
+ * client's own output -- fd 1/2 while no interactive session is running -- goes
+ * through here; the session's byte stream is passed straight through untouched.
+ */
+static char con_wr_prev[3];               /* last byte written per fd, for CRLF */
+
+static int con_write(int fd, const void *buf, size_t len)
+{
+    const char *in   = (const char *)buf;
+    char        out[256];
+    ULONG       o    = 0;
+    size_t      i;
+    char        prev = (fd >= 0 && fd < 3) ? con_wr_prev[fd] : 0;
+
+    for (i = 0; i < len; i++)
+    {
+        char c = in[i];
+
+        if (o >= sizeof(out) - 2)       /* room for a CR + the byte */
+        {
+            __real_write(fd, out, o);
+            o = 0;
+        }
+
+        if (c == '\n' && prev != '\r')
+            out[o++] = '\r';
+        out[o++] = c;
+        prev = c;
+    }
+
+    if (o > 0)
+        __real_write(fd, out, o);
+    if (fd >= 0 && fd < 3)
+        con_wr_prev[fd] = prev;
+
+    return (int)len;
 }
 
 
@@ -2044,7 +2096,7 @@ char *getpass(const char *prompt)
     if (raw)
         SetMode(in, 0);
 
-    Write(out, (APTR)"\n", 1);
+    Write(out, (APTR)"\r\n", 2);   /* CR+LF: the Amiga console needs the CR */
     Flush(out);
 
     return buf;
