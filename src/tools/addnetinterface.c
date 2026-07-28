@@ -2,39 +2,35 @@
  * AddNetInterface -- bring up the interface described by
  * DEVS:NetInterfaces/<name>.
  *
- * This is the command S:User-Startup invokes, so it is the one that actually
- * starts the network:
+ * This is the command S:User-Startup invokes, so it is the one that starts the
+ * network:
  *
  *     C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET
  *
- *     AddNetInterface INTERFACE/M,QUIET/S,TIMEOUT/K/N
- *
  * INTERFACE is either a bare interface name or the full path to the interface
- * file -- the name is what matters and the directory is fixed -- and more than
- * one may be given. Several names are sorted before they are used, so a list
- * brings interfaces up in a defined order rather than in the order they were
- * typed; the ceiling is AMI_CFG_MAX_INTERFACES, which is what the parsed
- * configuration holds.
+ * file -- only the name matters, the directory is fixed -- and more than one
+ * may be given. Several names are sorted before they are used, so a list
+ * brings interfaces up in a defined order rather than in the order typed; the
+ * ceiling is AMI_CFG_MAX_INTERFACES, which is what the parsed configuration
+ * holds.
  *
  * TIMEOUT is how long to wait, in seconds, for an interface that asks for its
- * address to be given one. It is the DHCP exchange that this bounds, so ten
- * seconds is both the default and the floor: a shorter limit expires before the
- * protocol has had a chance to finish and reports a failure that is not one.
+ * address to be given one. It bounds the DHCP exchange, so ten seconds is both
+ * the default and the floor: a shorter limit expires before the protocol can
+ * finish and reports a failure that is not one.
  *
- * The files are read twice on purpose. The first pass only parses, and stops
- * the command before anything is started if any file cannot be used; without
- * it, a list of three interfaces with a typo in the third brings two up and
- * then fails, which is the one outcome nobody can act on.
+ * The files are read twice. The first pass only parses, and stops the command
+ * before anything is started if any file cannot be used; without it, a list of
+ * three interfaces with a typo in the third brings two up and then fails.
  *
- * It is also the first command a new user runs, and the first place they meet
- * anything they got wrong. Every failure below therefore prints what is
- * wrong, where, and what to type next; the terse version still goes to the
- * serial log for whoever is debugging the stack itself.
+ * This is also the first command a new user runs, so every failure below
+ * prints what is wrong, where, and what to type next; the terse version still
+ * goes to the serial log.
  *
- * It deliberately does NOT shut the stack down again. The reference taken by
+ * It does not shut the stack down again: the reference taken by
  * tool_stack_start() is what keeps the interface online after this command
- * exits -- exactly Roadshow's model, where the interface stays up until
- * Offline or a reboot.
+ * exits, as in Roadshow, where the interface stays up until Offline or a
+ * reboot.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -60,9 +56,8 @@ enum
 #define ADDIF_TIMEOUT       10UL
 
 /*
- * Whatever the stack said, turned into something the person at the keyboard
- * can act on. `ifc` is the interface file we already parsed, which is what
- * lets the device explanation name the actual driver and unit.
+ * Turn a stack error code into advice. `ifc` is the interface file already
+ * parsed, which lets the device explanation name the driver and unit.
  */
 static VOID explain_startup_failure(LONG err, const AmiIfConfig *ifc)
 {
@@ -74,9 +69,9 @@ static VOID explain_startup_failure(LONG err, const AmiIfConfig *ifc)
 
         case AMI_NET_ERR_CONFIG:
             /*
-             * The stack came up but no interface got an address. For a DHCP
-             * interface that is nearly always the cable or the server; for a
-             * static one it is the file.
+             * The stack came up but no interface got an address. For DHCP
+             * that is nearly always the cable or the server; for a static
+             * interface it is the file.
              */
             if (ifc->iptype == AMI_IPTYPE_DHCP)
             {
@@ -131,13 +126,10 @@ static VOID explain_library_failure(const AmiIfConfig *ifc)
     tool_advise("bsdsocket.library is installed, so the network stack is here;");
     tool_advise("it was the interface that would not come up.");
 
-    /* Ask the hardware directly rather than speculating about it. */
+    /* Probe the hardware rather than guess at it. */
     tool_explain_device(ifc->device, ifc->unit);
 
-    /*
-     * Only worth saying when the card itself was fine -- if the driver is
-     * missing there is no point sending the reader to look at cables.
-     */
+    /* Only when the card is fine: a missing driver is not a cable fault. */
     if (ifc->iptype == AMI_IPTYPE_DHCP &&
         tool_device_where(ifc->device) != NULL &&
         tool_device_probe(ifc->device, ifc->unit) == 0)
@@ -150,9 +142,9 @@ static VOID explain_library_failure(const AmiIfConfig *ifc)
 }
 
 /*
- * Read DEVS:NetInterfaces/<name>, saying what is wrong with it if anything is.
- * tool_config_watch() is what puts the parser's complaints -- with line
- * numbers -- on the screen instead of only on the serial port.
+ * Read DEVS:NetInterfaces/<name>, reporting what is wrong with it if anything
+ * is. tool_config_watch() puts the parser's complaints, with line numbers, on
+ * the screen instead of only on the serial port.
  */
 static BOOL load_interface(const char *name, AmiIfConfig *ifc, BOOL quiet)
 {
@@ -190,9 +182,9 @@ static BOOL load_interface(const char *name, AmiIfConfig *ifc, BOOL quiet)
 }
 
 /*
- * Sort the names before anything is done with them, so that a list of
- * interfaces is brought up in an order that does not depend on how it was
- * typed. Insertion sort: the list is at most AMI_CFG_MAX_INTERFACES long.
+ * Sort the names, so a list of interfaces is brought up in an order that does
+ * not depend on how it was typed. Insertion sort: the list is at most
+ * AMI_CFG_MAX_INTERFACES long.
  */
 static VOID sort_names(STRPTR *names, ULONG count)
 {
@@ -216,10 +208,9 @@ static VOID sort_names(STRPTR *names, ULONG count)
 }
 
 /*
- * Wait for this machine to be given an address, which is what TIMEOUT is for.
- * `addr_out` is where the answer lands; FALSE means the time ran out or Ctrl-C
- * was pressed. Nothing is waited for when there is already an address, so on a
- * static interface this returns at once.
+ * Wait up to `seconds` for this machine to be given an address. `addr_out` is
+ * where the answer lands; FALSE means the time ran out or Ctrl-C was pressed.
+ * Returns at once when there is already an address, as on a static interface.
  */
 static BOOL wait_for_address(ULONG seconds, ULONG *addr_out, BOOL *broken)
 {
@@ -363,9 +354,9 @@ int main(int argc, char **argv)
     primary = tool_basename((const char *)names[0]);
 
     /*
-     * First pass: every named file must parse before anything is started. A
-     * typo in User-Startup should produce a clear message rather than a stack
-     * that comes up with nothing on it.
+     * First pass: every named file must parse before anything is started, so
+     * that a typo in User-Startup gives a message rather than a stack that
+     * comes up with nothing on it.
      */
     for (n = 0; n < count; n++)
     {
@@ -382,9 +373,9 @@ int main(int argc, char **argv)
     }
 
     /*
-     * Only now that every file is known to be good: a first pass that printed
-     * as it went would report two interfaces and then reject the third, which
-     * reads as though the first two had been started.
+     * Printed only now that every file is known to be good: printing during
+     * the parse pass would list two interfaces and then reject the third,
+     * reading as though the first two had been started.
      */
     if (!quiet)
     {
@@ -399,9 +390,9 @@ int main(int argc, char **argv)
 
     /*
      * TIMEOUT is an allowance for an address to be handed out, so there is
-     * nothing for it to wait for when every named interface has its address in
-     * its file. Spending it there would turn a misconfigured static interface
-     * into a ten-second pause before the message that says so.
+     * nothing to wait for when every named interface has its address in its
+     * file. Waiting anyway would turn a misconfigured static interface into a
+     * ten-second pause before the message that says so.
      */
     allowance = dynamic ? timeout : 0UL;
 
@@ -410,10 +401,10 @@ int main(int argc, char **argv)
     name = primary;
 
     /*
-     * netstack_startup() is idempotent and reference counted, and is the right
-     * call when the stack is linked into this command. It is not in the
+     * netstack_startup() is idempotent and reference counted, and is the call
+     * to use when the stack is linked into this command. It is not in the
      * shipped build -- the stack has to outlive the command, so it lives in
-     * bsdsocket.library -- and AMI_NET_ERR_STATE is exactly what says so.
+     * bsdsocket.library -- and AMI_NET_ERR_STATE is what says so.
      */
     err = netstack_startup();
 
@@ -423,8 +414,8 @@ int main(int argc, char **argv)
 
         /*
          * Starting the network blocks until an address arrives or DHCP gives
-         * up, which is up to half a minute of nothing happening. Say so
-         * first: a silent pause that long reads as a hung machine.
+         * up, up to half a minute. Say so first, or the pause looks like a
+         * hung machine.
          */
         if (!quiet)
             tool_printf("%s: starting the network...\n", (LONG)name);
@@ -454,8 +445,8 @@ int main(int argc, char **argv)
         }
 
         /*
-         * Up, and every configured interface with it -- the library reads them
-         * all once, so one start is what a list of names amounts to here.
+         * Up, and every configured interface with it: the library reads them
+         * all once, so a list of names amounts to a single start here.
          *
          * The stack is inside the library, so the address it was given has to
          * be asked for rather than read out of our own memory. This is where
@@ -524,7 +515,7 @@ int main(int argc, char **argv)
         if (index < 0)
         {
             /*
-             * The file parses but the running stack does not know the name --
+             * The file parses but the running stack does not know the name:
              * the stack was already up when this interface file was added.
              */
             if (!quiet)
@@ -563,12 +554,12 @@ int main(int argc, char **argv)
             NX_IP *ip;
 
             /*
-             * The address a DHCP interface ends up with is not the one in the
-             * config file -- the file says "DHCP" and has zeroes in it. Read
-             * the interface, which is where the lease landed; printing the
-             * file's fields here is what produced "eth0: 0.0.0.0 netmask
-             * 0.0.0.0 (DHCP)" one line after a successful lease. TIMEOUT is
-             * how long that lease is given to arrive.
+             * A DHCP interface's address is not the one in the config file:
+             * the file says "DHCP" and has zeroes in it. Read the interface,
+             * where the lease landed. Printing the file's fields here
+             * produced "eth0: 0.0.0.0 netmask 0.0.0.0 (DHCP)" one line after
+             * a successful lease. TIMEOUT is how long the lease is given to
+             * arrive.
              */
             (VOID)wait_for_interface_address(index,
                                              (ifc.iptype != AMI_IPTYPE_STATIC)

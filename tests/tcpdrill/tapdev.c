@@ -1,37 +1,30 @@
 /*
  * tcpdrill -- the synthetic SANA-II device.  See tapdev.h for why it exists.
  *
- * SHAPE
- *
  * MakeLibrary() builds a six-entry Exec device vector -- Open, Close, Expunge,
  * Null, BeginIO, AbortIO -- and AddDevice() puts it where OpenDevice() looks
  * first.  Everything is in this program's own address space, so there is no
  * segment list, no __saveds and nothing resident: the device dies with the
- * process that installed it, which is exactly the lifetime a test wants.
+ * process that installed it.
  *
- * THE ONE PIECE OF REAL SANA-II IN HERE
- *
- * The buffer-management hooks.  OpenDevice() is handed a tag list carrying
- * S2_CopyToBuff and S2_CopyFromBuff, and a SANA-II device MOVES PACKET DATA
- * ONLY THROUGH THEM -- the stack's NX_PACKET is not something the device may
- * touch directly.  src/sana2/sana2_copy.c is the other end of both, and
- * calling them is what makes this a test of the shipped receive and transmit
- * paths rather than of a bypass around them.
+ * OpenDevice() is handed a tag list carrying S2_CopyToBuff and S2_CopyFromBuff,
+ * and a SANA-II device moves packet data only through them -- the stack's
+ * NX_PACKET is not something the device may touch directly.
+ * src/sana2/sana2_copy.c is the other end of both, so calling them tests the
+ * shipped receive and transmit paths rather than a bypass around them.
  *
  * They are m68k register-convention functions (a0 = to, a1 = from, d0 = len).
- * A `register ... __asm()` typedef MISCOMPILES on this toolchain -- GCC 15
+ * A `register ... __asm()` typedef miscompiles on this toolchain -- GCC 15
  * loads the function pointer into a0 and then jumps through it, destroying the
- * first argument -- so the call is written out as inline asm below.  That was
- * found by disassembling, not by testing; the wrong version compiles cleanly
- * and corrupts every received frame.
- *
- * WHAT IS DELIBERATELY REFUSED
+ * first argument -- so the call is written out as inline asm below.  The wrong
+ * version compiles cleanly and corrupts every received frame, so it shows up
+ * only under a disassembler.
  *
  * Raw framing (SANA2IOF_RAW) is answered S2ERR_NOT_SUPPORTED, so
- * ami_sana2_probe_raw() decides against it and the stack runs its COOKED path.
+ * ami_sana2_probe_raw() decides against it and the stack runs its cooked path.
  * That is the path a2065.device drives and the one every measurement in
- * docs/RESEARCH.md was taken through; a harness that quietly exercised the
- * other one would be testing code the shipped configuration does not run.
+ * docs/RESEARCH.md was taken through; exercising the raw path here would test
+ * code the shipped configuration does not run.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -104,9 +97,8 @@ static const char tap_id[]   = TAP_DEVICE_NAME " 1.0 (tcpdrill)";
 
 /*
  * ReadEClock() by LVO rather than through <proto/timer.h>: the NDK spells
- * TimerBase as one type and this file holds another, and a timestamp is not
- * worth a header argument.  timer.device LVOs: AddTime -42, SubTime -48,
- * CmpTime -54, ReadEClock -60, GetSysTime -66.
+ * TimerBase as one type and this file holds another.  timer.device LVOs:
+ * AddTime -42, SubTime -48, CmpTime -54, ReadEClock -60, GetSysTime -66.
  */
 static ULONG tap_read_eclock(struct EClockVal *dest)
 {
@@ -230,8 +222,8 @@ static VOID tap_complete(struct IOSana2Req *io, LONG err, ULONG wire)
 /*
  * CMD_WRITE.  The stack hands over an IP-or-ARP payload with no link header
  * (cooked framing), so the 14 bytes are rebuilt here from the fields SANA-II
- * carries them in -- which is the same reconstruction sana2_rx.c performs in
- * the other direction, and it is what lets one pcap-shaped decoder read both.
+ * carries them in -- the same reconstruction sana2_rx.c performs in the other
+ * direction, so one pcap-shaped decoder reads both.
  */
 static VOID tap_capture(TapDevice *dev, struct IOSana2Req *io)
 {
@@ -336,7 +328,7 @@ static VOID tap_begin_io(register struct Device     *dev __asm("a6"),
     case CMD_READ:
         /*
          * Raw reads are refused on purpose -- see the file header.  The
-         * refusal has to happen HERE, in BeginIO, because that is the only
+         * refusal has to happen here, in BeginIO, because that is the only
          * signal ami_sana2_probe_raw() reads.
          */
         if ((io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0)
@@ -448,10 +440,10 @@ static VOID tap_begin_io(register struct Device     *dev __asm("a6"),
         struct Node *n;
 
         /*
-         * "S2_OFFLINE returns every queued CMD_READ with S2ERR_OUTOFSERVICE"
-         * -- src/sana2/sana2_rx.c depends on exactly this, and says so: it is
-         * the only mechanism that frees the readers on a device which ignores
-         * AbortIO(), which a2065.device 2.16 does.  Implemented here so the
+         * S2_OFFLINE returns every queued CMD_READ with S2ERR_OUTOFSERVICE.
+         * src/sana2/sana2_rx.c depends on exactly this: it is the only
+         * mechanism that frees the readers on a device which ignores
+         * AbortIO(), as a2065.device 2.16 does.  Implemented here so the
          * shutdown path under test is the one that ships.
          */
         Forbid();
@@ -498,15 +490,14 @@ static VOID tap_begin_io(register struct Device     *dev __asm("a6"),
 
     /*
      * S2_ONEVENT.  A request that names an event which has already happened
-     * completes at once; anything else is HELD until it does, which for a
-     * device with no wire means forever.  Both halves matter: returning
-     * IOERR_NOCMD instead spins a stack that watches its link for a living,
-     * and completing an ONLINE request that has not happened yet tells one it
-     * has a link when it has not.  Held requests are returned by S2_OFFLINE
-     * and by tap_remove().
+     * completes at once; anything else is held until it does, which for a
+     * device with no wire means forever.  Returning IOERR_NOCMD instead spins
+     * a stack that polls its link state, and completing an ONLINE request that
+     * has not happened yet tells one it has a link when it has not.  Held
+     * requests are returned by S2_OFFLINE and by tap_remove().
      *
-     * Ours never issues this; Roadshow does, and a device the harness cannot
-     * be opened by is not an instrument.
+     * Our stack never issues this; Roadshow does, and the device has to be
+     * openable by both.
      */
     case S2_ONEVENT:
     {
@@ -821,10 +812,9 @@ VOID tap_remove(VOID)
 
     /*
      * Anything still queued belongs to a caller that is about to have the
-     * memory holding this device freed underneath it.  Ours closes cleanly
-     * before we get here; a foreign stack that keeps the interface up does
-     * not, and an I/O request that is never replied is a hang rather than a
-     * result.
+     * memory holding this device freed underneath it.  Our stack closes
+     * cleanly before we get here; a foreign stack that keeps the interface up
+     * does not, and an I/O request that is never replied hangs its caller.
      */
     while ((n = RemHead(&d->reads)) != NULL)
     {

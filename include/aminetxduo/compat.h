@@ -1,9 +1,9 @@
 /*
  * AmiNetXDuo -- shared AmigaOS glue.
  *
- * Everything in this header is available to every component. Keep it small:
- * it exists so the port layer, the SANA-II shim, bsdsocket.library and the
- * tools agree on memory allocation, logging and library bases.
+ * Everything in this header is available to every component. Keep it small: it
+ * exists so the port layer, the SANA-II shim, bsdsocket.library and the tools
+ * agree on memory allocation, logging and library bases.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -45,13 +45,13 @@ ULONG ami_alloc_count(VOID);          /* debug: outstanding allocations */
  * Serial/console debug output. Compiled out entirely in release builds except
  * for AMI_LOG_ERROR. Never call from an interrupt.
  *
- * FORMATTING: this goes through exec's RawDoFmt, which is NOT printf.
+ * Formatting goes through exec's RawDoFmt, which is not printf.
  *   * Use %ld / %lu / %lx / %s only -- all longword-sized. Cast every argument
  *     to LONG, including pointers and strings: ami_log(..., "%s", (LONG)str).
- *   * Do NOT use %c or bare %d/%u/%x: RawDoFmt consumes a *word* for those,
+ *   * Do not use %c or bare %d/%u/%x: RawDoFmt consumes a *word* for those,
  *     while the C caller pushes a longword, so every argument after one is
- *     misaligned and prints garbage. This bites silently -- the first few
- *     values look right and the rest are nonsense.
+ *     misaligned and prints garbage, silently -- the first few values look
+ *     right and the rest are nonsense.
  *   * No %p, no %f, no field-width-from-argument.
  */
 VOID ami_log(int level, const char *fmt, ...);

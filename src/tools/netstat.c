@@ -3,25 +3,17 @@
  *
  *     netstat INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S
  *
- * Every switch carries its Unix spelling as a ReadArgs alias, so both
- * "netstat -r" (what a decade of Amiga documentation and install scripts
- * type) and "netstat ROUTES" (what the Shell's own conventions suggest) do
- * the same thing, and "netstat ?" prints a template that shows both.
+ * Every switch carries its Unix spelling as a ReadArgs alias, so "netstat -r"
+ * and "netstat ROUTES" do the same thing and "netstat ?" shows both. With no
+ * switches it prints everything.
  *
- * With no switches at all it prints everything, which is what someone typing
- * "netstat" on an Amiga is nearly always after.
+ * -s is per-protocol statistics followed by the SANA-II per-interface counters;
+ * no other switch shows the driver's own numbers.
  *
- * -s is per-protocol statistics, as it is everywhere else, followed by the
- * SANA-II per-interface counters -- the driver's own numbers are the ones that
- * answer "is the cable plugged in", and no other switch shows them.
- *
- * THIS COMMAND AND ShowNetStatus COVER THE SAME GROUND ON PURPOSE, and the
- * comment at the top of shownetstatus.c says why: that one is the Amiga-shaped
- * introspection command with named categories and a diagnosis, this one is the
- * BSD-shaped convenience with switches and columns. What they must never do is
- * disagree, so neither reads the stack directly -- both take the SAME two
- * snapshots from tool_nx.c, ToolSnapshot and ToolStats, and only the layout of
- * what they print differs.
+ * This command covers the same ground as ShowNetStatus: that one has named
+ * categories and a diagnosis, this one has switches and columns. Neither reads
+ * the stack directly -- both take the same two snapshots from tool_nx.c,
+ * ToolSnapshot and ToolStats, so they cannot disagree.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -177,8 +169,8 @@ static VOID show_protocol_stats(const ToolStats *st)
 }
 
 /*
- * And the driver half: the SANA-II counters, which no other switch shows and
- * which are the numbers that say whether a card is seeing traffic at all.
+ * The driver half: the SANA-II counters, which say whether a card is seeing
+ * traffic at all.
  */
 static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
 {
@@ -230,11 +222,10 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
 }
 
 /*
- * The routing table the stack actually has, not one derived from the
- * interface list. NETSTATUS_ROUTES answers with the connected prefixes, the
- * static table and the default gateway together, in match order, so a route
- * added with AddNetRoute appears here -- which the derived version could not
- * have shown however carefully it was written.
+ * The routing table the stack has, not one derived from the interface list.
+ * NETSTATUS_ROUTES answers with the connected prefixes, the static table and
+ * the default gateway together, in match order, so a route added with
+ * AddNetRoute appears here.
  */
 static VOID show_routes(const AmiConfig *cfg)
 {
@@ -343,12 +334,11 @@ int main(int argc, char **argv)
         want_if = want_routes = want_conn = TRUE;
 
     /*
-     * Straight to the running library. There is no tool_require_stack() call
-     * here any more and there must not be one: it asks netstack_get(), which
-     * in a command is src/tools/netstack_weak.c's stub and is always NULL --
-     * that is what made this command inert in v0.2.0 while printing a message
-     * that read like a pass. tool_snapshot() opens bsdsocket.library, which
-     * is where the stack really is, and explains itself when it cannot.
+     * Straight to the running library. Do not add a tool_require_stack() call:
+     * it asks netstack_get(), which in a command is src/tools/netstack_weak.c's
+     * stub and is always NULL, which is what made this command inert in v0.2.0.
+     * tool_snapshot() opens bsdsocket.library, where the stack really is, and
+     * explains itself when it cannot.
      */
     if (tool_snapshot(&snap, want_conn) != 0)
     {
@@ -363,11 +353,10 @@ int main(int argc, char **argv)
     }
 
     /*
-     * The interface NAMES come off the disk rather than out of the stack:
-     * netstack_config() is another of the weak stubs, and DEVS:NetInterfaces
-     * is the same file the running stack read. The live snapshot carries the
-     * name too (ToolIfInfo.nx_name), and the two agree; this keeps the
-     * printing code below unchanged.
+     * The interface names come off the disk rather than out of the stack:
+     * netstack_config() is another weak stub, and DEVS:NetInterfaces is the
+     * same file the running stack read. The live snapshot carries the name too
+     * (ToolIfInfo.nx_name) and the two agree.
      */
     tool_config_watch();
     cfg = (ami_config_load(&netstat_config) == AMI_CFG_OK) ? &netstat_config

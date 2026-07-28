@@ -1,24 +1,23 @@
 /*
- * src/tools -- what a command needs in order to explain a NETWORK CARD.
+ * src/tools -- what a command needs in order to explain a network card.
  *
- * WHY THIS IS NOT IN tool_diag.c
+ * Kept out of tool_diag.c, which is in TOOLS_COMMON_SOURCES and so linked by
+ * every command: this material is 3.8 KB of prose plus a table of sixteen
+ * driver names.  `whois` carried "a2065.device ... uaenet.device" and "the
+ * router or switch at the other end is powered on" with no way to reach the
+ * code that prints them.
  *
- * tool_diag.c is in TOOLS_COMMON_SOURCES, so every command links it, and this
- * material is 3.8 KB of prose plus a table of sixteen driver names.  `whois`
- * carried "a2065.device ... uaenet.device" and "the router or switch at the
- * other end is powered on" without any way to reach the code that prints them.
- *
- * --gc-sections DOES collect the dead functions; it cannot collect their
+ * --gc-sections does collect the dead functions; it cannot collect their
  * strings.  On m68k-amigaos there is no .rodata: string literals go into the
  * plain `.text`, pooled, while -ffunction-sections gives each function its own
- * `.text.<name>`.  One surviving string anchors the whole pool.  Measured
- * rather than assumed, and every flag that claims to fix it was tried:
+ * `.text.<name>`.  One surviving string anchors the whole pool.  Measured, and
+ * every flag that claims to fix it was tried:
  *
  *   -fdata-sections        acts on named data objects; there are none here.
  *                          Also gives the `$VER:` tag a section of its own
  *                          that nothing references, so every command silently
  *                          loses its version string (cmake/check-version-tag
- *                          .cmake), and the binaries come out 0.9% LARGER.
+ *                          .cmake), and the binaries come out 0.9% larger.
  *   -fno-merge-constants   unpools literals from mergeable .rodata.str1.1
  *                          sections, which this target never creates.  No
  *                          effect: all 18 device names still present.
@@ -26,15 +25,15 @@
  *                          binutils has no LTO plugin ("plugin needed to
  *                          handle lto object").
  *
- * So the only mechanism left is not to compile it into commands that cannot
- * reach it, which is what this file is for.  Exactly three functions touched
- * the device table -- tool_explain_device, tool_explain_no_interfaces and
- * tool_scan_devices -- and they live here with it.
+ * The remaining mechanism is not to compile it into commands that cannot reach
+ * it, which is what this file is for.  The three functions that touch the
+ * device table -- tool_explain_device, tool_explain_no_interfaces and
+ * tool_scan_devices -- live here with it.
  *
  * tool_find_interface() came from tool_util.c, which is also common: its
  * "there is no interface called X" path calls tool_explain_no_interfaces(),
- * which was enough to drag the table into every command on its own.  Its only
- * callers are AddNetInterface and Online/Offline, both of which link this.
+ * which dragged the table into every command on its own.  Its only callers are
+ * AddNetInterface and Online/Offline, both of which link this.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -58,11 +57,10 @@ extern const char *const diag_device_dirs[];
 extern BOOL diag_is_resident(const char *device);
 
 /*
- * SANA-II drivers we know by name. Only used to look harder -- a driver not on
- * this list is found perfectly well by the DEVS:Networks scan. It exists so
- * that a machine whose driver is already in memory (loaded from a Zorro ROM,
- * or by an earlier stack) is reported as having a card even though nothing is
- * on disk.
+ * SANA-II drivers known by name, used only to look harder; a driver not on this
+ * list is still found by the DEVS:Networks scan. This catches a machine whose
+ * driver is already in memory (loaded from a Zorro ROM, or by an earlier stack)
+ * with nothing on disk.
  */
 static const char *const diag_known_devices[] =
 {
@@ -73,18 +71,16 @@ static const char *const diag_known_devices[] =
 
     /*
      * USB Ethernet through Poseidon, on a Deneb, Subway or Algor. Both names
-     * are documented in the Roadshow 1.15 manual, so they are as certain as
-     * anything else on this list.
+     * are documented in the Roadshow 1.15 manual.
      */
     "moschipeth.device", "usbmoschipeth.device",
 
     /*
-     * The modern hardware, and the reason this list exists at all: none of
-     * these keeps its driver in DEVS:Networks where the scan above would find
-     * it. ZZ9000 and PiStorm load theirs from the card, so a machine running
-     * one has a working card with nothing on disk to prove it.
+     * Modern hardware: none of these keeps its driver in DEVS:Networks where
+     * the scan above would find it. ZZ9000 and PiStorm load theirs from the
+     * card, so a machine running one has a working card with nothing on disk.
      *
-     * Every name here was read out of the vendor's own build, not guessed:
+     * Every name here was read out of the vendor's own build:
      *
      *   ZZ9000Net.device   BlitterStudio/zz9000-drivers, net/Makefile:
      *                      "Makefile for ZZ9000Net.device (SANA-II)"
@@ -95,9 +91,9 @@ static const char *const diag_known_devices[] =
      *   scsidayna.device   RobSmithDev/daynaport-amiga, Makefile DEVICEID
      *                      (a DaynaPORT SCSI/Link, still being worked on)
      *
-     * The mixed case in ZZ9000Net is the vendor's. It costs nothing either
-     * way -- diag_is_resident() compares with tool_stricmp() and AmigaDOS
-     * paths are case-insensitive -- but it is what a user would see.
+     * The mixed case in ZZ9000Net is the vendor's, and is what a user sees.
+     * Matching does not depend on it: diag_is_resident() compares with
+     * tool_stricmp() and AmigaDOS paths are case-insensitive.
      */
     "ZZ9000Net.device",         /* MNT ZZ9000                               */
     "pi-net.device",            /* PiStorm                                  */
@@ -105,16 +101,12 @@ static const char *const diag_known_devices[] =
     "scsidayna.device",         /* DaynaPORT SCSI/Link                      */
 
     /*
-     * plipbox (cnvogelg/plipbox, amiga/src/makefile DEVICE_NAME). It reaches
-     * the network over the parallel port, which sounds like it belongs with
-     * SLIP and PPP above and does not: HW_ADDRFIELDSIZE is 6, the header is
-     * 14 bytes of dst/src/type, the MTU is 1500 and it reports
-     * S2WireType_Ethernet. It is an ordinary Ethernet SANA-II device whose
-     * cable happens to be a parallel one, and the bridge on the far end is
-     * what makes it so -- nothing above the driver can tell.
-     *
-     * Which is the point of driving SANA-II generically: this needed no code,
-     * only the name.
+     * plipbox (cnvogelg/plipbox, amiga/src/makefile DEVICE_NAME) reaches the
+     * network over the parallel port but does not belong with SLIP and PPP:
+     * HW_ADDRFIELDSIZE is 6, the header is 14 bytes of dst/src/type, the MTU is
+     * 1500 and it reports S2WireType_Ethernet. It is an ordinary Ethernet
+     * SANA-II device whose cable is a parallel one, so nothing above the driver
+     * can tell and supporting it needed no code, only the name.
      */
     "plipbox.device",           /* plipbox, and the ESP32 variants of it    */
     NULL
@@ -241,9 +233,9 @@ VOID tool_explain_device(const char *device, ULONG unit)
     }
 
     /*
-     * The driver is there, so ask it directly rather than guessing. This is
-     * the difference between "would not open" and "your card is on unit 0,
-     * not unit 1" -- which is the actual mistake most of the time.
+     * The driver is there, so ask it directly rather than guessing: that
+     * distinguishes "would not open" from "the card is on unit 0, not unit 1",
+     * which is the usual mistake.
      */
     probe = tool_device_probe(device, unit);
 

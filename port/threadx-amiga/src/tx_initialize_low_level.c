@@ -15,28 +15,27 @@
 /*  DESCRIPTION                                                           */
 /*                                                                        */
 /*    Adopts the calling Exec Task as the ThreadX scheduler ("master")     */
-/*    task, allocates the signal that yielding threads use to hand the     */
-/*    baton back, reserves the memory block handed to                      */
-/*    tx_application_define(), and creates the periodic tick Task.  The    */
-/*    tick Task is held at its start signal until                          */
-/*    _tx_amiga_start_interrupts() releases it, which the generic kernel   */
-/*    entry does immediately before calling _tx_thread_schedule().  It     */
-/*    then validates its wakeup source, which takes about 250 ms, before   */
-/*    the first tick is delivered.                                         */
+/*    task, allocates the signal that yielding threads use to release the  */
+/*    baton, reserves the memory block passed to tx_application_define(),  */
+/*    and creates the periodic tick Task.  The tick Task is held at its    */
+/*    start signal until _tx_amiga_start_interrupts() releases it, which   */
+/*    the generic kernel entry does immediately before calling             */
+/*    _tx_thread_schedule().  It then validates its wakeup source, which   */
+/*    takes about 250 ms, before the first tick is delivered.              */
 /*                                                                        */
-/*    This file also holds the two ends of the kernel's LIFETIME:          */
+/*    This file also holds the two ends of the kernel's lifetime:          */
 /*    tx_amiga_kernel_start(), which puts the above on a private Task and  */
 /*    returns once the scheduler is live, and tx_amiga_kernel_stop(),      */
 /*    which takes it all back down and returns only when nothing the port  */
-/*    owns will execute again.  The contract stop imposes on the caller    */
-/*    -- and the reasoning behind refusing rather than reaping outstanding */
-/*    threads -- is written out in inc/tx_amiga.h; the mechanism is here.  */
+/*    created will execute again.  What stop requires of the caller, and   */
+/*    why it refuses rather than reaps outstanding threads, is in          */
+/*    inc/tx_amiga.h; the mechanism is here.                               */
 /*                                                                        */
 /*    The three Tasks that have to die, and how each is reached:           */
 /*                                                                        */
 /*      tick      _tx_amiga_timer_stop plus SIGF_SINGLE.  Every place the  */
-/*                tick task can park now waits on that signal -- it used   */
-/*                to Wait(0) forever when it had no usable timer, which is */
+/*                tick task can park now waits on that signal; it used to  */
+/*                Wait(0) forever when it had no usable timer, which is    */
 /*                fine for a kernel that never stops and unreapable for    */
 /*                one that does.                                           */
 /*      system    ThreadX's own timer thread, on a stack in ThreadX's BSS. */
@@ -49,8 +48,8 @@
 /*    Each publishes its "gone" flag and pokes the stopper inside the same */
 /*    Forbid() as its RemTask().  Exec discards the forbid nesting of a    */
 /*    Task it removes, so the pair is atomic and seeing the flag means the */
-/*    Task is off the ready list and finished with its stack -- which is   */
-/*    what makes freeing that stack safe.  Same argument, same shape, as   */
+/*    Task is off the ready list and finished with its stack, which is     */
+/*    what makes freeing that stack safe.  Same shape as                   */
 /*    _tx_amiga_task_destroy().                                            */
 /*                                                                        */
 /**************************************************************************/
@@ -61,14 +60,14 @@
 
 #include <devices/timer.h>
 
-/* `struct timerequest`, not `struct timerequest`.  NDK 3.2 renamed the timer
+/* `struct timerequest`, not `struct TimeRequest`.  NDK 3.2 renamed the timer
    types to TimeVal/TimeRequest to stop `struct timeval` colliding with the
    POSIX one, and kept the old lowercase names as aliases; NDK 3.9 and earlier
    only ever had the lowercase ones.  The lowercase spelling therefore compiles
    against both NDKs and the CamelCase one does not, and the member names
    (tr_node, tr_time, tv_secs, tv_micro) are identical either way.  The rest of
-   this tree already spells it lowercase -- including _tx_amiga_stop_wait()
-   further down this same file.  */
+   this tree already spells it lowercase, including _tx_amiga_stop_wait()
+   further down this file.  */
 
 /* ReadEClock() is an inline that resolves the timer.device base through the
    symbol named by TIMER_BASE_NAME.  Point it at a base of our own rather than
@@ -103,11 +102,11 @@ volatile ULONG  _tx_amiga_zombies_live        = 0UL;
 /* Set when the port allocated the kernel memory block itself.  */
 static UINT     _tx_amiga_memory_owned        = TX_FALSE;
 
-/* Stack of the tick task; owned by the port.  */
+/* Stack of the tick task; allocated and freed by the port.  */
 static APTR     _tx_amiga_timer_stack         = (APTR) 0;
 static ULONG    _tx_amiga_timer_stack_size    = 4096UL;
 
-/* Stack of the master (scheduler) task; owned by the port.  */
+/* Stack of the master (scheduler) task; allocated and freed by the port.  */
 static APTR     _tx_amiga_master_stack        = (APTR) 0;
 static ULONG    _tx_amiga_master_stack_size   = 0UL;
 
@@ -119,11 +118,11 @@ static UINT         _tx_amiga_start_status    = TX_NOT_DONE;
 /*
  * Handshake for tx_amiga_kernel_stop().
  *
- * Each of the two Tasks the port owns sets its flag and pokes the stopper in
- * the SAME Forbid() as its RemTask(), which Exec discards the forbid nesting
- * of.  The pair is therefore atomic: seeing the flag means the Task is off the
- * ready list and done with its stack, which is what makes the stack safe to
- * free.  Same reasoning, and the same shape, as _tx_amiga_task_destroy().
+ * Each of the two Tasks the port created sets its flag and pokes the stopper in
+ * the same Forbid() as its RemTask(), whose forbid nesting Exec discards.  The
+ * pair is therefore atomic: seeing the flag means the Task is off the ready
+ * list and done with its stack, which is what makes the stack safe to free.
+ * Same shape as _tx_amiga_task_destroy().
  */
 static struct Task    *_tx_amiga_stop_task    = (struct Task *) 0;
 static ULONG           _tx_amiga_stop_signal  = 0UL;
@@ -169,14 +168,14 @@ ULONG                    top;
         return((struct Task *) 0);
     }
 
-    /* TWO allocations, deliberately.  RemTask() walks tc_MemEntry and hands
-       each MemList to FreeEntry(), which is the exact inverse of AllocEntry():
-       it frees every me_Addr/me_Length the list describes AND THEN THE MemList
-       ITSELF.  Putting the MemList inside the block it describes therefore
-       frees that address twice -- FreeMem(block, block_size) followed by
-       FreeMem(block, sizeof(struct MemList)) -- which is Guru 01000009,
-       AN_FreeTwice, on every task that exits.  amiga.lib's CreateTask() keeps
-       them apart for the same reason.  */
+    /* Two allocations.  RemTask() walks tc_MemEntry and hands each MemList to
+       FreeEntry(), the exact inverse of AllocEntry(): it frees every
+       me_Addr/me_Length the list describes and then the MemList itself.
+       Putting the MemList inside the block it describes therefore frees that
+       address twice -- FreeMem(block, block_size) followed by FreeMem(block,
+       sizeof(struct MemList)) -- which is Guru 01000009, AN_FreeTwice, on every
+       task that exits.  amiga.lib's CreateTask() keeps them apart for the same
+       reason.  */
 
     memlist =  (struct MemList *) AllocMem((ULONG) sizeof(struct MemList),
                                            MEMF_PUBLIC | MEMF_CLEAR);
@@ -313,7 +312,7 @@ BYTE             sig;
     if (sig < 0)
     {
 
-        /* Without a signal there is no way to hand the baton back; refuse to
+        /* Without a signal there is no way to release the baton; refuse to
            come up rather than fail obscurely later.  */
         _tx_amiga_scheduler_task    =  (VOID *) 0;
         _tx_amiga_scheduler_signal  =  0UL;
@@ -377,35 +376,35 @@ VOID _tx_amiga_start_interrupts(void)
  * The ThreadX periodic interrupt.
  *
  * This runs as an ordinary (high priority) Exec Task, not an interrupt server.
- * _tx_thread_context_save() takes the core lock with Forbid(), which is what
- * gives the tick genuine ISR semantics: while it is held, no other task in the
- * machine runs, so the ThreadX thread that currently holds the baton really is
- * frozen -- exactly the property the Linux port buys with pthread_kill().
+ * _tx_thread_context_save() takes the core lock with Forbid(), which gives the
+ * tick ISR semantics: while it is held, no other task in the machine runs, so
+ * the ThreadX thread that holds the baton is frozen -- the property the Linux
+ * port buys with pthread_kill().
  *
- * THE WAKEUP SOURCE IS NOT THE TIME BASE.  The task parks on timer.device
+ * The wakeup source is not the time base.  The task parks on timer.device
  * UNIT_VBLANK, which costs a list insertion on an interrupt the machine takes
- * anyway; but it never counts those wakeups.  On each one it reads the E-Clock
- * and asks how many whole TX_TIMER_TICKS_PER_SECOND periods have really
- * elapsed, then calls _tx_timer_interrupt() exactly that many times.  A late
- * or coalesced wakeup pays its arrears, an early one delivers nothing, and the
- * ThreadX clock tracks real time regardless of what the display is doing.
+ * anyway, but it never counts those wakeups.  On each one it reads the E-Clock
+ * and works out how many whole TX_TIMER_TICKS_PER_SECOND periods have elapsed,
+ * then calls _tx_timer_interrupt() that many times.  A late or coalesced wakeup
+ * pays its arrears, an early one delivers nothing, and the ThreadX clock tracks
+ * real time regardless of what the display is doing.
  *
- * That matters more than it looks.  VBlank is 50 Hz PAL and 60 Hz NTSC, so a
- * stack that counts frames (as the AmiTCP lineage does, with a hardcoded 50)
- * runs 20% fast on an NTSC machine.  Under RTG the chipset VERTB is no longer
- * driving the monitor, and on PiStorm/Emu68-class systems and under emulation
- * its rate and regularity are outside our control.  The E-Clock is CIA-derived
- * and reports its own frequency, so it is right on all of them.
+ * VBlank is 50 Hz PAL and 60 Hz NTSC, so a stack that counts frames (as the
+ * AmiTCP lineage does, with a hardcoded 50) runs 20% fast on an NTSC machine.
+ * Under RTG the chipset VERTB is no longer driving the monitor, and on
+ * PiStorm/Emu68-class systems and under emulation its rate and regularity are
+ * outside our control.  The E-Clock is CIA-derived and reports its own
+ * frequency, so it is right on all of them.
  *
- * The previous design -- 100 Hz on UNIT_MICROHZ, one fresh IORequest round
- * trip per tick, ticks counted rather than measured -- lost 4-5% of the clock
- * under soak load, because every re-arm paid its own scheduling latency and
- * nothing ever noticed the shortfall.
+ * The previous design -- 100 Hz on UNIT_MICROHZ, one fresh IORequest round trip
+ * per tick, ticks counted rather than measured -- lost 4-5% of the clock under
+ * soak load, because every re-arm paid its own scheduling latency and nothing
+ * noticed the shortfall.
  */
 
 /*
  * Tell a waiting tx_amiga_kernel_stop() that this Task has finished with its
- * stack.  Call INSIDE the Forbid() that ends in RemTask(), never outside it.
+ * stack.  Call inside the Forbid() that ends in RemTask(), never outside it.
  */
 static VOID _tx_amiga_stop_notify(volatile ULONG *flag)
 {
@@ -423,11 +422,11 @@ static VOID _tx_amiga_stop_notify(volatile ULONG *flag)
  * Park a tick task that has no usable wakeup source, so that it is still
  * reapable.
  *
- * This used to be Wait(0UL) -- "park forever" -- which is correct for a kernel
+ * This used to be Wait(0UL) -- park forever -- which is correct for a kernel
  * that never comes down and fatal for one that does: the Task would keep its
  * entry point inside a code hunk that AmigaDOS is about to unload, and nothing
- * could ever wake it to say so.  Waiting on SIGF_SINGLE instead costs nothing
- * and leaves tx_amiga_kernel_stop() a way in.
+ * could wake it to say so.  Waiting on SIGF_SINGLE instead costs nothing and
+ * leaves tx_amiga_kernel_stop() a way in.
  */
 static VOID _tx_amiga_timer_park(VOID)
 {
@@ -468,23 +467,23 @@ static VOID _tx_amiga_timer_arm(struct timerequest *tr, ULONG secs, ULONG micro)
 
 
 /*
- * Measure what a wakeup source actually does, in Hz * 100.  Returns 0 for a
- * source that produced nothing at all in the window.
+ * Measure what a wakeup source does, in Hz * 100.  Returns 0 for a source that
+ * produced nothing in the window.
  *
- * `guard` is a request on a DIFFERENT unit and port, and it is what bounds the
+ * `guard` is a request on a different unit and port, and it bounds the
  * measurement: the window ends when the guard completes, so a source with no
- * VERTB interrupt behind it (exactly the configuration this check exists to
- * survive) yields 0 rather than parking the tick task in Wait() forever.
+ * VERTB interrupt behind it -- the configuration this check exists to survive
+ * -- yields 0 rather than parking the tick task in Wait() forever.
  *
- * NOTHING HERE IS EVER AbortIO()ed.  The guard always completes on its own,
- * and the source's outstanding request is left pending for the caller: if the
+ * Nothing here is ever AbortIO()ed.  The guard always completes on its own, and
+ * the source's outstanding request is left pending for the caller: if the
  * source is accepted that request becomes the first tick wakeup, and if it is
- * rejected the whole request is thrown away.  That is not fastidiousness --
- * a timer.device request that has been aborted and then re-armed does not
- * complete again (measured, twice, under FS-UAE with Kickstart 3.1), and both
- * times the symptom was a ThreadX clock stuck at zero with every thread on it.
+ * rejected the whole request is thrown away.  A timer.device request that has
+ * been aborted and then re-armed does not complete again (measured twice under
+ * FS-UAE with Kickstart 3.1), and both times the symptom was a ThreadX clock
+ * stuck at zero with every thread on it.
  *
- * On return `tr` HAS A REQUEST OUTSTANDING.
+ * On return `tr` has a request outstanding.
  */
 static ULONG _tx_amiga_timer_probe(struct timerequest *tr, ULONG sig,
                                    struct timerequest *guard, ULONG guard_sig,
@@ -597,13 +596,12 @@ UINT                 armed;
     /*
      * Wait for _tx_amiga_start_interrupts().
      *
-     * Opening and validating the wakeup source AHEAD of this point was tried,
+     * Opening and validating the wakeup source ahead of this point was tried,
      * to overlap the 250 ms validation with the rest of kernel start-up rather
      * than delay the first tick by it.  It made the "preferred unit will not
      * open" fallback leave the clock dead (_tx_timer_system_clock stuck at 0)
-     * and is reverted: the ThreadX clock starting a quarter of a second late
-     * is a startup transient nobody can observe, a clock that never starts is
-     * the whole machine.
+     * and was reverted: a ThreadX clock starting a quarter of a second late is
+     * an unobservable startup transient, a clock that never starts is not.
      */
     Wait(SIGF_SINGLE);
 
@@ -639,13 +637,13 @@ UINT                 armed;
     interval_micro =  interval_micro % 1000000UL;
 
     /*
-     * The startup guard: a UNIT_MICROHZ request on its OWN port, so that its
-     * completion is distinguishable from the source under test by signal
-     * alone.  It is what stops a machine whose VBlank never fires from parking
-     * the tick task forever in Wait() instead of falling back -- and if the
-     * preferred unit is rejected, the guard BECOMES the tick rather than being
-     * thrown away.  A machine where even this will not open has no usable
-     * timer at all, and the probe simply runs unguarded.
+     * The startup guard: a UNIT_MICROHZ request on its own port, so its
+     * completion is distinguishable from the source under test by signal alone.
+     * It stops a machine whose VBlank never fires from parking the tick task
+     * forever in Wait() instead of falling back, and if the preferred unit is
+     * rejected the guard becomes the tick rather than being thrown away.  A
+     * machine where even this will not open has no usable timer at all, and the
+     * probe runs unguarded.
      */
     guard      =  (struct timerequest *) 0;
     guard_port =  (struct MsgPort *) 0;
@@ -687,9 +685,9 @@ UINT                 armed;
 
         if (guard != (struct timerequest *) 0)
         {
-            /* Hand the tick over to the guard's request, which is already
-               open on UNIT_MICROHZ; see the fallback below for why the
-               rejected request is thrown away rather than reopened.  */
+            /* Move the tick to the guard's request, which is already open on
+               UNIT_MICROHZ; see the fallback below for why the rejected
+               request is thrown away rather than reopened.  */
             DeleteIORequest((APTR) tr);
             DeleteMsgPort(port);
             tr         =  guard;
@@ -866,7 +864,7 @@ UINT                 armed;
 
         if (CheckIO((struct IORequest *) tr) == (struct IORequest *) 0)
         {
-            /* Woken by something that was not our request.  Do NOT abort it --
+            /* Woken by something that was not our request.  Do not abort it --
                an aborted timer request cannot be re-armed (see
                _tx_amiga_timer_probe) -- just go back to sleep.  */
             continue;
@@ -876,7 +874,7 @@ UINT                 armed;
 
         /* Re-arm before doing the tick work.  On UNIT_VBLANK that reserves the
            next frame up front, so a tick that overruns costs a late delivery
-           rather than a skipped frame -- and the catch-up below then makes even
+           rather than a skipped frame, and the catch-up below then makes even
            that invisible to the clock.  */
         _tx_amiga_timer_arm(tr, interval_secs, interval_micro);
         armed =  TX_TRUE;
@@ -904,7 +902,7 @@ UINT                 armed;
                 /* Something held the machine for longer than the cap allows.
                    Resync rather than pay the arrears off over the following
                    seconds: a burst of thousands of timer callbacks under the
-                   core lock is far worse for the stack than the lost time.  */
+                   core lock is worse for the stack than the lost time.  */
                 _tx_amiga_tick.tx_amiga_tick_lost +=
                     ticks - (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP;
                 _tx_amiga_tick.tx_amiga_tick_clipped++;
@@ -912,13 +910,12 @@ UINT                 armed;
                 if (_tx_amiga_tick.tx_amiga_tick_clipped <= 3UL)
                 {
                     /* The previous wakeup's service cost is in the message
-                       because the two causes of a stall need different
-                       repairs and nothing else can tell them apart: a service
-                       figure close to the stall means the tick task overran
-                       its own period (too much work under the core lock), and
-                       one in the ordinary hundreds of microseconds means
-                       somebody else held the machine and the tick was simply
-                       not dispatched.  */
+                       because it is the only way to tell the two causes of a
+                       stall apart, and they need different repairs: a service
+                       figure close to the stall means the tick task overran its
+                       own period (too much work under the core lock), and one
+                       in the ordinary hundreds of microseconds means somebody
+                       else held the machine and the tick was not dispatched. */
                     ami_log(AMI_LOG_WARN,
                             "tick: stalled %ld ms, dropping %ld of %ld ticks "
                             "(cap %ld, previous service %ld us)",
@@ -959,9 +956,9 @@ UINT                 armed;
             }
             _tx_amiga_tick.tx_amiga_tick_delivered +=  ticks;
 
-            /* Unconditionally poke the scheduler.  Only the idle case strictly
-               needs it, but one Signal() per tick is a cheap insurance policy
-               against a lost wake-up hanging the whole stack.  */
+            /* Unconditionally poke the scheduler.  Only the idle case needs it,
+               but one Signal() per tick is cheap insurance against a lost
+               wake-up hanging the whole stack.  */
             _tx_amiga_wake_scheduler();
         }
 
@@ -1116,8 +1113,8 @@ ULONG        stack_size =  8192UL;
         return(TX_NO_MEMORY);
     }
 
-    /* Remembered so that tx_amiga_kernel_stop() can give it back; the master
-       Task cannot free the stack it is standing on.  */
+    /* Remembered so that tx_amiga_kernel_stop() can free it; the master Task
+       cannot free the stack it is standing on.  */
     _tx_amiga_master_stack      =  stack;
     _tx_amiga_master_stack_size =  stack_size;
 
@@ -1135,11 +1132,11 @@ ULONG        stack_size =  8192UL;
 /*
  * Wait, with a timeout, for one of the teardown flags above.
  *
- * A fresh timer.device request per call, deliberately: an AbortIO()d
- * timer.device request does not complete again when it is re-armed (see
- * _tx_amiga_timer_probe), so a request that may have to be aborted can never be
- * reused.  Two waits therefore cost two OpenDevice()s, which on a shutdown path
- * is not worth a cleverer scheme.  Mirrors _tx_amiga_reap()'s structure.
+ * A fresh timer.device request per call: an AbortIO()d timer.device request
+ * does not complete again when it is re-armed (see _tx_amiga_timer_probe), so a
+ * request that may have to be aborted can never be reused.  Two waits therefore
+ * cost two OpenDevice()s, which on a shutdown path is acceptable.  Mirrors
+ * _tx_amiga_reap()'s structure.
  *
  * Returns TX_TRUE if the flag came up, TX_FALSE on timeout.
  */
@@ -1210,9 +1207,9 @@ UINT                 got;
         {
 
             /* No timer could be opened, so there is no timeout to be had.  One
-               wait is all we can offer -- going round again would block for
-               ever, which on the path whose whole job is making exit safe is
-               worse than reporting failure.  */
+               wait is all we can offer; going round again would block for ever,
+               which on the path whose job is making exit safe is worse than
+               reporting failure.  */
             break;
         }
     }
@@ -1239,13 +1236,12 @@ UINT                 got;
 
 
 /*
- * ThreadX threads that belong to the APPLICATION and would still be there
- * after the stop.
+ * Application-owned ThreadX threads that would still be there after the stop.
  *
- * Two are discounted: the system timer thread, which ThreadX creates for
- * itself and stop reaps, and `mine` -- the caller's own adopted thread, which
- * stop orphans.  Discounting `mine` here rather than orphaning first is what
- * lets a refusal leave the caller exactly as it found it.
+ * Two are discounted: the system timer thread, which ThreadX creates for itself
+ * and stop reaps, and `mine`, the caller's own adopted thread, which stop
+ * orphans.  Discounting `mine` here rather than orphaning first is what lets a
+ * refusal leave the caller as it found it.
  */
 static ULONG _tx_amiga_application_threads(TX_THREAD *mine)
 {
@@ -1300,29 +1296,29 @@ UINT         status;
     {
 
         /* A Task the port created: the master, the tick, or a ThreadX thread.
-           Every one of them is something this function reaps, so it would be
-           waiting for itself.  */
+           This function reaps every one of them, so it would be waiting for
+           itself.  */
         ami_log(AMI_LOG_ERROR, "kernel stop: called from a Task the port owns");
         return(TX_CALLER_ERROR);
     }
 
     if ((_tx_amiga_kernel_up == TX_FALSE) && (_tx_amiga_kernel_stopping == TX_FALSE))
     {
-        /* Never started, or already stopped.  Idempotent by design: a shutdown
-           path may run twice and must not turn the second run into an error.  */
+        /* Never started, or already stopped.  Idempotent: a shutdown path may
+           run twice and must not turn the second run into an error.  */
         return(TX_SUCCESS);
     }
 
     /* ---- preconditions --------------------------------------------------- */
 
     /*
-     * The caller may be adopted -- netstack_shutdown() calls from exactly that
-     * position -- so its own TX_THREAD does not count against it.  Nothing is
-     * orphaned yet: every refusal below has to leave the caller as it found it.
+     * The caller may be adopted -- netstack_shutdown() calls from that position
+     * -- so its own TX_THREAD does not count against it.  Nothing is orphaned
+     * yet: every refusal below has to leave the caller as it found it.
      */
     adopted =  tx_amiga_adopted_thread();
 
-    /* Taken before the Forbid() below, because a refusal has to give it back
+    /* Taken before the Forbid() below, because a refusal has to free it again
        and AllocSignal() inside a critical section buys nothing.  */
     sig =  AllocSignal(-1);
     if (sig < 0)
@@ -1333,9 +1329,7 @@ UINT         status;
     sigmask =  1UL << ((ULONG) sig);
 
     /*
-     * Check and commit as one atom.
-     *
-     * Not fastidiousness: tx_amiga_adopt_thread() runs on some other
+     * Check and commit as one atom.  tx_amiga_adopt_thread() runs on some other
      * application Task and only refuses once _tx_amiga_kernel_up is clear.  Do
      * the counting and the clearing in separate critical sections and there is
      * a window in which a Task counts as absent, then adopts, then holds the
@@ -1359,10 +1353,10 @@ UINT         status;
         /*
          * Refuse.  The port cannot terminate these safely on the caller's
          * behalf: tx_thread_delete() of a thread that is blocked in Exec
-         * produces a zombie (see _tx_amiga_reap), and a zombie is by definition
-         * a Task still running on memory somebody else owns.  Turning "you
-         * still have threads" into "here are some zombies" would convert a
-         * clear refusal into an unreportable hazard.
+         * produces a zombie (see _tx_amiga_reap), and a zombie is a Task still
+         * running on memory somebody else allocated.  Turning "you still have
+         * threads" into "here are some zombies" would convert a clear refusal
+         * into an unreportable hazard.
          */
         status =  TX_THREAD_ERROR;
     }
@@ -1370,9 +1364,9 @@ UINT         status;
     {
 
         /*
-         * Refuse.  A zombie cannot be reclaimed on demand -- that is what makes
-         * it a zombie -- and it will run port and application code again when
-         * it finally unblocks.  Only the caller knows how to unstick it.
+         * Refuse.  A zombie cannot be reclaimed on demand, and it will run port
+         * and application code again when it finally unblocks.  Only the caller
+         * knows how to unstick it.
          */
         status =  TX_THREAD_ERROR;
     }
@@ -1381,9 +1375,9 @@ UINT         status;
               (_tx_amiga_scheduler_signal == 0UL)))
     {
 
-        /* No master Task to bring down -- _tx_initialize_low_level() could not
+        /* No master Task to bring down: _tx_initialize_low_level() could not
            allocate its signal, so the scheduler is parked in Wait(0) and will
-           never leave.  Say so rather than pretending.  */
+           never leave.  */
         status =  TX_NOT_DONE;
     }
     else
@@ -1431,11 +1425,10 @@ UINT         status;
 
     /*
      * First, because everything after this is quieter without it, and because
-     * the tick Task is the one whose entry point is most obviously inside the
-     * caller's code hunk.  It waits on its timer request OR SIGF_SINGLE, so the
-     * Signal() makes it notice now rather than one tick from now; the tick's
-     * own teardown retires the outstanding timer request (it aborts it and
-     * destroys it, never re-arms it).
+     * the tick Task's entry point is inside the caller's code hunk.  It waits
+     * on its timer request or SIGF_SINGLE, so the Signal() makes it notice now
+     * rather than one tick from now; the tick's own teardown retires the
+     * outstanding timer request (it aborts and destroys it, never re-arms it).
      */
     if (_tx_amiga_timer_task != (VOID *) 0)
     {
@@ -1464,10 +1457,9 @@ UINT         status;
 
         /*
          * ThreadX creates this one itself, on a stack that lives in ThreadX's
-         * BSS -- i.e. in the caller's data hunk.  It is not the application's
-         * to delete and it is not optional to leave: reaping it is the whole
-         * difference between "the program exited" and "the program exited and
-         * something is still running in its BSS".
+         * BSS, i.e. in the caller's data hunk.  It is not the application's to
+         * delete, and leaving it behind means something is still running in the
+         * program's BSS after the program exits.
          *
          * The tick is already stopped, so it is parked on its run signal and
          * the ordinary reaper wakes it.
@@ -1515,11 +1507,11 @@ UINT         status;
     {
 
         /*
-         * Something the port owns is still alive and cannot be reached.  Leave
-         * every allocation exactly where it is -- the survivor is standing on
+         * Something the port created is still alive and cannot be reached.
+         * Leave every allocation where it is -- the survivor is standing on
          * some of it -- and tell the caller that exiting is not safe.  The
          * stopping flag stays set, so nothing will start a second kernel on top
-         * of the wreckage.
+         * of it.
          */
         ami_log(AMI_LOG_ERROR,
                 "kernel stop: FAILED -- it is NOT safe to unload this program");

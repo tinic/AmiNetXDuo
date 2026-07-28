@@ -2,39 +2,32 @@
  * AmiNetXDuo -- a TLS 1.2 handshake against a real public HTTPS server.
  *
  * tls_handshake.c runs both ends of the conversation, which measures the
- * arithmetic exactly and proves nothing about interoperating with anybody
- * else.  This talks to a host on the internet that has never heard of us,
- * through FS-UAE's SLIRP NAT, over the real SANA-II path:
+ * arithmetic exactly and says nothing about interoperating with anybody else.
+ * This talks to a host on the internet that has never heard of us, through
+ * FS-UAE's SLIRP NAT, over the real SANA-II path:
  *
  *     DHCP -> DNS -> TCP -> ClientHello -> a chain we did not issue,
  *     verified against a root CA compiled in here -> HTTP GET -> a response.
  *
- * WHY tls-v1-2.badssl.com
+ * tls-v1-2.badssl.com exists to be connected to, speaks TLS 1.2, its chain is
+ * two deep (leaf + Let's Encrypt R13) rather than the four Cloudflare and
+ * SSL.com hand out, and -- checked, not assumed -- it will negotiate
+ * TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256, the same suite the loopback test
+ * uses.  That last point matters on this machine: nx_crypto's AES-GCM is a
+ * bit-serial GHASH at 345 ms per KB against AES-CBC's 22 ms, so a GCM suite
+ * would make the transfer the slow part.
  *
- *   It is a host that exists to be connected to, it speaks TLS 1.2, its chain
- *   is two deep (leaf + Let's Encrypt R13) rather than the four Cloudflare and
- *   SSL.com hand out, and -- checked, not assumed -- it will negotiate
- *   TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256, the same suite the loopback test
- *   uses.  That last point matters on this machine: nx_crypto's AES-GCM is a
- *   bit-serial GHASH at 345 ms per KB against AES-CBC's 22 ms, so a GCM suite
- *   would make the *transfer* the slow part.
+ * Measured cost of that chain, 68020: three signature verifications totalling
+ * 4.1 s, not 3 x 0.68 s, because ISRG Root X1 is a 4096-bit key and verifying
+ * the intermediate against it is a 4096-bit modular exponentiation -- roughly
+ * 4x a 2048-bit one.  Root key size is a real term in a client's handshake
+ * cost here, and the client does not get to choose it.
  *
- *   Measured cost of that chain, 68020: three signature verifications totalling
- *   4.1 s, not 3 x 0.68 s, because ISRG Root X1 is a 4096-BIT key and verifying
- *   the intermediate against it is a 4096-bit modular exponentiation -- roughly
- *   4x a 2048-bit one.  Root key size is a real term in a client's handshake
- *   cost here, and the client does not get to choose it.
- *
- * WHAT THIS TEST IS NOT
- *
- *   It is not a baseline.  It depends on the internet, on DHCP from SLIRP, on
- *   a third party's server and on a certificate that rotates every ninety
- *   days.  It is built but never part of the pass/fail set, and it is the
- *   only test here that can fail for reasons that are nobody's fault.
- *
- *   It also is not evidence that this stack can browse.  ONE root CA is
- *   compiled in.  A trust store is a separate and larger problem, and it is
- *   what stands between this and "talk to modern sites" -- see the report.
+ * Not a baseline: it depends on the internet, on DHCP from SLIRP, on a third
+ * party's server and on a certificate that rotates every ninety days.  It is
+ * built but never part of the pass/fail set.  Only one root CA is compiled in,
+ * so it is no evidence that this stack can reach arbitrary sites; a real trust
+ * store is a separate and larger problem.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -292,8 +285,8 @@ char                        line[96];
     handshake_us = ami_tls_eclock_micros(ami_tls_eclock() - start);
 
     /*
-     * One thread does everything here, and it is not registered as "the
-     * client" -- there is no server half to tell it apart from -- so fold both
+     * One thread does everything here and is not registered as the client --
+     * there is no server half to tell it apart from -- so fold both counter
      * banks together rather than reading the one that happens to be empty.
      */
     ami_tls_crypto_counters_get(&ops, &other);

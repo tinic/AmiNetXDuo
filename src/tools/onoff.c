@@ -2,48 +2,41 @@
  * Online / Offline -- switch a network interface up or down.
  *
  *     Online  NAME/A,UNIT/N,TIMEOUT/N
- *     Offline NAME/A,UNIT/N,TIMEOUT/N
  *
- * NAME IS TWO THINGS, and that is the whole design of this command.
+ * NAME is either a configured interface or a SANA-II driver. Commands like
+ * these are usually given a driver and a unit -- "Offline a2065.device UNIT 0"
+ * -- since that is the level at which a driver can be switched off to run
+ * hardware diagnostics. What this stack acts on is a configured interface: a
+ * file in DEVS:NetInterfaces naming a driver and a unit, which is the handle
+ * ShowNetStatus prints, AddNetInterface takes, and the netstack indexes by.
  *
- * The interface these commands are expected to have takes a SANA-II DEVICE
- * DRIVER and a unit number -- "Offline a2065.device UNIT 0" -- because that is
- * the level at which a driver can be switched off to run hardware diagnostics
- * on the card. What this stack can act on, though, is a CONFIGURED INTERFACE:
- * a file in DEVS:NetInterfaces which names a driver and a unit, and which is
- * the handle everything else here uses -- ShowNetStatus prints it,
- * AddNetInterface takes it, and the netstack indexes by it.
- *
- * So NAME is resolved in that order, and both spellings work:
+ * NAME is resolved in this order, and both spellings work:
  *
  *   1. a configured interface, if DEVS:NetInterfaces/<NAME> parses. UNIT is
  *      then checked against the unit that file already names rather than being
  *      allowed to contradict it.
  *   2. otherwise a driver name, matched against the DEVICE and UNIT of every
- *      configured interface -- so "a2065.device" finds the interface that uses
- *      it, and the command operates on that.
- *   3. otherwise neither, and the message says so and lists what this machine
- *      does have, with the driver and unit of each. A driver name that no
- *      interface uses is the interesting case: the card may well be present,
- *      but nothing here has been told to use it, so there is nothing to switch.
+ *      configured interface, and the command operates on the interface found.
+ *   3. otherwise the message says so and lists what this machine does have,
+ *      with the driver and unit of each. A driver name that no interface uses
+ *      may be a card installed, but nothing here has been told to use it,
+ *      so there is nothing to switch.
  *
- * A name that is both -- an interface file called the same thing as a driver --
- * is taken as the interface, and says so.
+ * A name that is both -- an interface file called the same thing as a driver
+ * -- is taken as the interface, and says so.
  *
  * TIMEOUT is how many seconds to wait for the interface to reach the state
  * that was asked for, with 0 meaning wait for as long as it takes; Ctrl-C
  * aborts the wait either way. The transition here is synchronous, so the state
- * is normally reached before the wait begins and nothing is waited for.
+ * is normally reached before the wait begins.
  *
- * One source, two executables: TOOL_OFFLINE picks which. The asymmetry that
- * matters is that Online may have to start the network (the user may never
- * have run AddNetInterface), while Offline never does -- taking an interface
- * down on a machine with no stack is a no-op worth saying out loud rather than
- * a reason to boot the whole thing.
+ * One source, two executables: TOOL_OFFLINE picks which. Online may have to
+ * start the network (the user may never have run AddNetInterface); Offline
+ * never does, since taking an interface down on a machine with no stack is a
+ * no-op rather than a reason to boot the stack.
  *
- * Both resolve NAME before they touch anything, so that a mistyped name is
- * answered with "there is no such interface, here are the ones there are"
- * rather than with a fact about the stack.
+ * Both resolve NAME before they touch anything, so a mistyped name is answered
+ * with the list of interfaces that do exist.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -74,9 +67,8 @@ enum
 #define ONOFF_MAX_FILES     16
 
 /*
- * Read DEVS:NetInterfaces/<name> purely to be able to talk about it. `loud`
- * FALSE is a probe: nothing is printed and the caller decides what the answer
- * means.
+ * Read DEVS:NetInterfaces/<name>. `loud` FALSE is a probe: nothing is printed
+ * and the caller decides what the answer means.
  */
 static BOOL load_interface(const char *name, AmiIfConfig *ifc, BOOL loud)
 {
@@ -112,7 +104,7 @@ static BOOL load_interface(const char *name, AmiIfConfig *ifc, BOOL loud)
 }
 
 /*
- * Every interface file in the drawer, whether or not a stack is running --
+ * Every interface file in the drawer, whether or not a stack is running.
  * netstack_config() is empty in the shipped build, where the stack lives in
  * bsdsocket.library, so the files are the only list there is.
  */
@@ -151,7 +143,7 @@ static BOOL find_by_device(const char *device, ULONG unit, char *name_out,
     return FALSE;
 }
 
-/* "a2065.device is not used by any interface" -- with the list, so it is act-on-able. */
+/* Report an unresolvable name, with the list of interfaces that do exist. */
 static VOID explain_unknown_name(const char *given, ULONG unit, BOOL had_unit)
 {
     static char        names[ONOFF_MAX_FILES][TOOL_NAME_LEN];
@@ -189,22 +181,19 @@ static VOID explain_unknown_name(const char *given, ULONG unit, BOOL had_unit)
 
     tool_advise_blank();
     tool_advise("Either column works as the name; a driver that no interface");
-    tool_advise("uses has nothing here to switch, even when the card is fitted.");
+    tool_advise("uses has nothing here to switch, even when the card is installed.");
 }
 
 /* ------------------------------------------------- the running stack -----
  *
- * These two commands used to say, in as many words, that an interface could
- * not be switched while the stack ran -- "that needs a call the library does
- * not have yet". The library has it now: NetStackControl() at
+ * Switching an interface while the stack runs uses NetStackControl() at
  * AMI_NETSTATUS_CONTROL_LVO (include/aminetxduo/netstatus.h). docs/RESEARCH.md
  * 22.
  *
- * The index is looked up BY NAME out of the live snapshot rather than computed
- * from the order of DEVS:NetInterfaces. The two do agree -- src/netstack
- * attaches the configured interfaces in config order -- but agreeing is not
- * the same as being the same thing, and taking an interface down by index is
- * the wrong operation to be approximately right about.
+ * The index is looked up by name out of the live snapshot rather than computed
+ * from the order of DEVS:NetInterfaces. The two happen to agree, since
+ * src/netstack attaches the configured interfaces in config order, but that is
+ * a coincidence and the wrong thing to rely on when taking an interface down.
  */
 
 static struct
@@ -241,11 +230,11 @@ static LONG live_index(struct Library *base, const char *name, BOOL *online)
             continue;
 
         /*
-         * NETSTATUS_IF_LINKUP, not NETSTATUS_IF_ONLINE. This is the flag these
-         * two commands set: NETCTRL_INTERFACE_UP/DOWN reach
-         * nx_ip_driver_interface_direct_command(NX_LINK_ENABLE/DISABLE), which
-         * is what nx_interface_link_up records. The SANA-II shim's own online
-         * flag belongs to a layer below and does not follow in step, so
+         * NETSTATUS_IF_LINKUP, not NETSTATUS_IF_ONLINE: LINKUP is the flag
+         * these two commands set. NETCTRL_INTERFACE_UP/DOWN reach
+         * nx_ip_driver_interface_direct_command(NX_LINK_ENABLE/DISABLE),
+         * which is what nx_interface_link_up records. The SANA-II shim's own
+         * online flag is a layer below and does not follow in step, so
          * waiting on it would wait forever.
          */
         if (online != NULL)
@@ -292,12 +281,10 @@ static BOOL wait_for_live_state(struct Library *base, const char *name,
 }
 
 /*
- * Switch one interface of the RUNNING stack, and report what happened. Both
- * commands end up here whenever bsdsocket.library has the network up, which
- * on a machine that has run AddNetInterface is always.
- *
- * Owns the FreeArgs(): it is the tail of main() for this path, and threading
- * the return code back out through three more branches bought nothing.
+ * Switch one interface of the running stack, and report what happened. Both
+ * commands end up here whenever bsdsocket.library has the network up, which on
+ * a machine that has run AddNetInterface is always. Calls FreeArgs(): this is
+ * the tail of main() for this path.
  */
 static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
                         ULONG timeout, struct RDArgs *rda)
@@ -492,7 +479,7 @@ int main(int argc, char **argv)
 
     /*
      * Resolve NAME: interface first, then driver. See the note at the top of
-     * this file for why that order and not the other one.
+     * this file for that order.
      */
     if (load_interface(given, &ifc, FALSE))
     {
@@ -517,7 +504,7 @@ int main(int argc, char **argv)
             return RETURN_FAIL;
         }
 
-        /* The one ambiguous case, named rather than left to be guessed at. */
+        /* The ambiguous case: the name is both an interface and a driver. */
         {
             /* static: a second AmiIfConfig is most of a Shell command's 4K. */
             static AmiIfConfig other;
@@ -554,18 +541,13 @@ int main(int argc, char **argv)
         /*
          * No stack in this command: it lives in bsdsocket.library and comes
          * up on first open (tool_stack_start()). That brings every configured
-         * interface up at once, which is what Online was asked for -- but it
+         * interface up at once, which is what Online was asked for, but it
          * also means a single interface cannot be toggled once the stack is
          * already running.
          */
         if (tool_stack_library_running())
         {
-            /*
-             * The stack is up inside bsdsocket.library. This used to be the
-             * end of the road -- "individual interfaces cannot be taken up and
-             * down while the stack runs; that needs a call the library does
-             * not have yet". It has one now.
-             */
+            /* The stack is up inside bsdsocket.library. */
             return switch_live(name, &ifc, TRUE, timeout, rda);
         }
 

@@ -1,12 +1,11 @@
 /*
  * AmiNetXDuo -- crypto68k P-256 correctness.
  *
- * The gate for src/crypto68k/c68k_p256.c.  Elliptic curves are less forgiving
- * than RSA: a subtly wrong point addition does not produce garbage, it produces
- * a different point on the same curve, which passes every plausibility check
- * anyone would think to write.  So nothing here checks that a result "looks
- * like" a point.  Everything is checked against a value computed somewhere
- * else:
+ * The gate for src/crypto68k/c68k_p256.c.  A subtly wrong point addition does
+ * not produce garbage; it produces a different point on the same curve, which
+ * passes every plausibility check anyone would think to write.  So nothing
+ * here checks that a result "looks like" a point.  Everything is checked
+ * against a value computed somewhere else:
  *
  *   1. The field layer on its own, against the vendored multiply-and-reduce.
  *      A reduction that is wrong only for a rare carry pattern shows up in a
@@ -17,11 +16,10 @@
  *      Python's arbitrary precision arithmetic in affine coordinates -- a
  *      different representation, a different algorithm, and no shared code.
  *
- *   3. Differential.  Several hundred random scalars through the UNMODIFIED
+ *   3. Differential.  Several hundred random scalars through the unmodified
  *      vendored _nx_crypto_ec_fp_projective_multiple and through this module,
  *      compared limb for limb.  Both the fixed-base path (k*G) and the generic
- *      path (k*Q) are covered, together with the boundary cases that separate
- *      a working point routine from a nearly working one: k = 0, 1, 2, n-1, n,
+ *      path (k*Q) are covered, with the boundary cases: k = 0, 1, 2, n-1, n,
  *      2^256-1, and the small scalars where the running accumulator becomes
  *      equal to a table entry and the addition formula degenerates into a
  *      doubling.
@@ -30,9 +28,9 @@
  *      only the curve's point multiplication swapped, on RFC 6979 A.2.5
  *      signatures.
  *
- *   5. ECDSA verify REJECTING eight invalid signatures.  This is the test that
- *      matters most: an "optimisation" that made verify always return success
- *      would pass items 1 through 3 unchanged and be catastrophic.
+ *   5. ECDSA verify rejecting eight invalid signatures.  An "optimisation"
+ *      that made verify always return success would pass items 1 through 3
+ *      unchanged.
  *
  *   6. ECDH shared secret, end to end, against a known answer and against the
  *      vendored implementation, computed from both sides so the answer is not
@@ -61,8 +59,8 @@ static ULONG    t_failures;
 static NX_CRYPTO_EC     *t_ref_curve;
 static NX_CRYPTO_EC      t_opt_curve;
 
-/* Scratch for the vendored routines.  Deliberately generous and static: the
-   AmigaOS process stack this runs on is 4 KB. */
+/* Scratch for the vendored routines.  Generous and static: the AmigaOS process
+   stack this runs on is 4 KB. */
 static HN_UBASE     t_scratch_a[2048];
 static HN_UBASE     t_scratch_b[2048];
 static HN_UBASE     t_store[512];
@@ -280,13 +278,12 @@ UINT                    mismatched;
         }
 
         /*
-         * Trials 7..49 use small scalars.  That is not laziness: it is where
-         * the accumulator repeatedly equals a table entry, which is the case
-         * the mixed-addition formula cannot handle without an explicit test.
-         * It is also cheap, which matters because the REFERENCE generic
-         * multiplication costs about five seconds on this machine and the
-         * budget for the whole run is a few minutes.  The full-width random
-         * scalars are trials 50 and up; the arithmetic-critical edge values
+         * Trials 7..49 use small scalars: that is where the accumulator
+         * repeatedly equals a table entry, the case the mixed-addition formula
+         * cannot handle without an explicit test.  It is also cheap, and the
+         * reference generic multiplication costs about five seconds on this
+         * machine against a budget of a few minutes for the whole run.  The
+         * full-width random scalars are trials 50 and up; the edge values
          * (0, 1, 2, n-1, n, n+1, all ones) are trials 0..6.
          */
         generic = (UINT)(t & 1u);
@@ -311,7 +308,7 @@ UINT                    mismatched;
         else
         {
             /*
-             * A generic point, and for the low trials a SMALL scalar, so that
+             * A generic point, and for the low trials a small scalar, so that
              * the accumulator repeatedly lands on a table entry -- the
              * doubling-versus-addition boundary the mixed-addition formula
              * cannot handle without an explicit test.
@@ -425,8 +422,8 @@ UCHAR               tampered[64];
     t_check(status != NX_CRYPTO_SUCCESS, "wrong digest rejected");
 
     /* A good signature against a public key with one bit flipped.  The point
-       is then off the curve, so key validation should catch it -- but it must
-       be REJECTED either way, which is what is checked. */
+       is then off the curve, so key validation should catch it; the check is
+       that it is rejected either way. */
     for (i = 0; i < 64u; i++)
     {
         tampered[i] = v_pubkey[i + 1u];
@@ -467,11 +464,11 @@ UINT    ok;
     c68k_log("6. ECDH shared secret, end to end:");
 
     /*
-     * _nx_crypto_ecdh_key_pair_import() sets the key SIZE but not the curve
+     * _nx_crypto_ecdh_key_pair_import() sets the key size but not the curve
      * pointer -- only _nx_crypto_ecdh_setup() does that, and setup generates a
-     * random key, which is exactly what a known-answer test cannot use.  So
-     * the curve is assigned here.  Vendored behaviour, not ours; without it
-     * compute_secret dereferences a null curve.
+     * random key, which a known-answer test cannot use.  So the curve is
+     * assigned here.  Vendored behaviour, not ours; without it compute_secret
+     * dereferences a null curve.
      */
     t_ecdh.nx_crypto_ecdh_curve = &t_opt_curve;
     status = _nx_crypto_ecdh_key_pair_import(&t_ecdh, &t_opt_curve,

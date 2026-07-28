@@ -8,16 +8,16 @@
  * assembly bug -- and so it is not compiled at all on the target.
  *
  * It follows the same rule the assembly does, and the same one libm020's
- * memcpy follows: align the DESTINATION, then move longwords whatever the
+ * memcpy follows: align the destination, then move longwords whatever the
  * source is doing.  Requiring both pointers to agree, and dropping to one
  * byte per iteration when they do not, is the mistake this replaces.
  *
- * ON A 68000 THAT RULE IS ILLEGAL, not merely slow, and the guard below is
- * the same one n68k_copy.S carries -- read the long comment there.  A word or
- * longword access to an ODD address is an address error on a 68000, so when
- * the two pointers disagree in bit 0 there is no alignment of the destination
- * that leaves the source even, and only the byte loop is available.  When
- * they agree, aligning the destination moves the source by the same count and
+ * On a 68000 that rule is illegal, not merely slow, and the guard below is the
+ * same one n68k_copy.S carries -- see the comment there.  A word or longword
+ * access to an odd address is an address error on a 68000, so when the two
+ * pointers disagree in bit 0 there is no alignment of the destination that
+ * leaves the source even, and only the byte loop is available.  When they
+ * agree, aligning the destination moves the source by the same count and
  * everything below is legal unchanged.  docs/RESEARCH.md §45.
  *
  * SPDX-License-Identifier: MIT

@@ -14,13 +14,12 @@
  * order, so a va_list is that stream. src/common/compat.c relies on the same
  * property for RawDoFmt().
  *
- * The argarray cast is (APTR), not (CONST_APTR), and that is deliberate. The
- * two NDKs disagree about the parameter: NDK 3.2 declares it CONST_APTR
- * (`const void *`), while NDK 3.9's <inline/dos.h> writes `const APTR`
- * (`void *const` -- a const POINTER, not a pointer to const). Handing the
- * latter a CONST_APTR is "initialization discards const qualifier", which
- * -Werror turns into a build failure. A plain APTR converts cleanly to either,
- * and the stream is a local va_list that nothing is promising not to touch.
+ * The argarray cast is (APTR), not (CONST_APTR). The two NDKs disagree about
+ * the parameter: NDK 3.2 declares it CONST_APTR (`const void *`), NDK 3.9's
+ * <inline/dos.h> writes `const APTR` (`void *const` -- a const pointer, not a
+ * pointer to const). Handing the latter a CONST_APTR is "initialization
+ * discards const qualifier", which -Werror turns into a build failure. A plain
+ * APTR converts cleanly to either, and the stream is a local va_list.
  */
 VOID tool_printf(const char *fmt, ...)
 {
@@ -34,14 +33,14 @@ VOID tool_printf(const char *fmt, ...)
 /*
  * Where diagnostics go.
  *
- * NOT ErrorOutput(): that is dos.library LVO -1134, which only exists from
- * V50 on. On Kickstart 3.1 (V40, the floor -- docs/RESEARCH.md 9) the LVO
- * table stops well short of it, so calling it jumps into whatever follows the
- * library and hangs the machine. Verified under FS-UAE, 2026-07-25.
+ * Not ErrorOutput(): that is dos.library LVO -1134, which only exists from V50
+ * on. On Kickstart 3.1 (V40, the floor -- docs/RESEARCH.md 9) the LVO table
+ * stops well short of it, so calling it jumps into whatever follows the library
+ * and hangs the machine. Verified under FS-UAE, 2026-07-25.
  *
- * pr_CES is the same field ErrorOutput() would have returned and has been in
- * struct Process since 2.0; it is ZERO unless the Shell was given a "*>"
- * redirection, in which case stdout is the right answer anyway.
+ * pr_CES is the field ErrorOutput() would have returned and has been in struct
+ * Process since 2.0. It is zero unless the Shell was given a "*>" redirection,
+ * in which case stdout is the right answer anyway.
  */
 static BPTR tool_error_stream(VOID)
 {
@@ -178,10 +177,10 @@ AmiNetStack *tool_require_stack(VOID)
     if (stack == NULL)
     {
         /*
-         * "not running" would be a lie when another program has the stack up
-         * inside bsdsocket.library and we simply cannot see in. Which of the
-         * two it is changes what the user should do about it, so it changes
-         * the message; tool_explain_no_stack() prints the rest.
+         * "not running" would be wrong when another program has the stack up
+         * inside bsdsocket.library and we cannot see in. The two cases need
+         * different action from the user, so they get different messages;
+         * tool_explain_no_stack() prints the rest.
          */
         if (tool_stack_library_running())
             tool_error("the network is up, but this command cannot read it");
@@ -212,9 +211,9 @@ const char *tool_basename(const char *path)
 BOOL tool_from_workbench(int argc)
 {
     /*
-     * A Workbench launch arrives with argc == 0 and a WBStartup message
-     * instead of a command line. None of these commands has a GUI, and
-     * ReadArgs() would read the Shell's -- nonexistent -- arguments.
+     * A Workbench launch arrives with argc == 0 and a WBStartup message instead
+     * of a command line. None of these commands has a GUI, and ReadArgs() would
+     * read the Shell's nonexistent arguments.
      */
     if (argc == 0)
     {

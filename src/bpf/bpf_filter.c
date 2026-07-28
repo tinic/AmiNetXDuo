@@ -5,10 +5,10 @@
  * BPF_MEMWORDS words of scratch, eight instruction classes, and a return value
  * that is the number of bytes of the packet to keep.
  *
- * It is written to be TOTAL. There is no input -- valid program or not, valid
- * packet or not -- for which it can trap, read outside the packet, divide by
- * zero, shift by more than 31, loop forever, or step outside the instruction
- * array. Every one of those is checked and rejects the packet instead:
+ * It is total: there is no input, valid program or not, valid packet or not,
+ * for which it can trap, read outside the packet, divide by zero, shift by
+ * more than 31, loop forever, or step outside the instruction array. Each of
+ * those is checked and rejects the packet instead:
  *
  *   - packet reads are bounds-checked against the view, in arithmetic that
  *     cannot wrap (`off > caplen - size` after proving `size <= caplen`);
@@ -19,12 +19,12 @@
  *   - scratch indices are checked against BPF_MEMWORDS;
  *   - unknown encodings reject rather than falling through.
  *
- * ami_bpf_validate() is still run at BIOCSETF time, because rejecting a bad
- * program when it is loaded is far better than silently dropping every packet
- * afterwards. But the interpreter does not depend on having been validated.
+ * ami_bpf_validate() still runs at BIOCSETF time, so a bad program is rejected
+ * when it is loaded rather than silently dropping every packet afterwards. The
+ * interpreter does not depend on having been validated.
  *
  * Packet bytes are assembled big-endian, which is what BPF specifies (network
- * order) and, on 68k, also what a direct load would have given.
+ * order) and, on 68k, also what a direct load would give.
  *
  * No AmigaOS calls here.
  *

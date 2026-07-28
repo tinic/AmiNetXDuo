@@ -1,29 +1,25 @@
 /*
  * __wrap_main -- give a ported Unix client a real POSIX argv[] and a big stack.
  *
- * THE PROBLEM
+ * This toolchain's newlib crt0 does not turn the CLI command line into an
+ * argv[]: on the Shell path it hands main() argc = 1 and a single "argv" that
+ * is the whole raw argument string (and, before tools/fix-toolchain-crt0.py
+ * repaired the indirection, the address of that pointer rather than the
+ * pointer).  AmiNetXDuo's own commands never noticed -- they read their
+ * arguments through ReadArgs() and only look at argc -- but curl and Dropbear
+ * parse argv and nothing else, so every invocation comes back as "no URL" /
+ * "no host", or dereferences the garbage and crashes.
  *
- *   This toolchain's newlib crt0 does not turn the CLI command line into an
- *   argv[]: on the Shell path it hands main() argc = 1 and a single "argv"
- *   that is the whole raw argument string (and, before tools/fix-toolchain-
- *   crt0.py repaired the indirection, the ADDRESS of that pointer rather than
- *   the pointer).  AmiNetXDuo's own commands never noticed -- they read their
- *   arguments through ReadArgs() and only ever look at argc -- but curl and
- *   Dropbear parse argv and nothing else, so every invocation comes back as
- *   "no URL" / "no host", or dereferences the garbage and crashes.
+ * -Wl,--wrap=main (clients/amiga-client.sh) routes the crt0's call to main()
+ * through here, leaving the client's real main() reachable as __real_main().
+ * argv is built from dos.library -- GetProgramName() for argv[0], GetArgStr()
+ * for the tail -- split on whitespace with "..." grouping and the '*' escape
+ * AmigaDOS uses inside quotes.
  *
- * THE FIX
- *
- *   -Wl,--wrap=main (clients/amiga-client.sh) routes the crt0's call to main()
- *   through here, leaving the client's real main() reachable as __real_main().
- *   We build argv from dos.library -- GetProgramName() for argv[0], GetArgStr()
- *   for the tail -- split on whitespace with "..." grouping and the '*' escape
- *   AmigaDOS uses inside quotes, and hand the real main() the array it expects.
- *
- *   This is authoritative regardless of what the crt0 did: GetArgStr() is the
- *   same command tail ReadArgs() would parse, so it stays correct even if a
- *   later toolchain crt0 tokenises argv itself -- we simply rebuild the same
- *   answer.  Compiled into libamigaclient, so curl and Dropbear share it.
+ * GetArgStr() is the same command tail ReadArgs() would parse, so this stays
+ * correct even if a later toolchain crt0 tokenises argv itself: the same
+ * answer is rebuilt either way.  Compiled into libamigaclient, which every
+ * ported client links.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -62,11 +58,11 @@ static int                    argv_result;
 static BOOL                   argv_on_swapped;   /* TRUE between the swaps */
 
 /*
- * Run __real_main() on the swapped stack.  NO locals and NO arguments, and
- * noinline on purpose: between the two StackSwap() calls the stack pointer is
- * the new stack's, so anything this function touched on the old one would be
- * the wrong memory.  Everything it needs is static -- the discipline
- * src/tools/fetch.c documents at length for exactly this.
+ * Run __real_main() on the swapped stack.  No locals, no arguments, and
+ * noinline: between the two StackSwap() calls the stack pointer is the new
+ * stack's, so anything this function touched on the old one would be the wrong
+ * memory.  Everything it needs is static, the same discipline
+ * src/tools/fetch.c documents.
  */
 static __attribute__((noinline)) VOID argv_run_on_stack(VOID)
 {
@@ -78,22 +74,22 @@ static __attribute__((noinline)) VOID argv_run_on_stack(VOID)
 }
 
 /*
- * exit() unwinds THROUGH the swapped stack.
+ * exit() unwinds through the swapped stack.
  *
  * A client that ends by calling exit() rather than returning from main() --
  * Dropbear always, curl on some paths -- never comes back to
  * argv_run_on_stack(), so its second StackSwap() does not run.  The crt0's exit
- * restores the stack POINTER from its own saved copy, but not tc_SPLower/
- * tc_SPUpper: the task is left advertising the swapped (about-to-be-abandoned)
+ * restores the stack pointer from its own saved copy, but not tc_SPLower/
+ * tc_SPUpper: the task is left advertising the swapped, about-to-be-abandoned
  * stack as its bounds, and the next stack check sees the pointer outside them
- * and traps -- an illegal instruction "right at the end", after everything
+ * and traps with an illegal instruction right at the end, after everything
  * appeared to work.
  *
- * StackSwap() cannot put them back from here: it moves its OWN return address
+ * StackSwap() cannot put them back from here: it moves its own return address
  * onto the stack it swaps to, and the frames between an exit() call site and
- * this point live on the stack we are abandoning, so the returns would unwind
+ * this point live on the stack being abandoned, so the returns would unwind
  * through the wrong memory.  Restore the two bounds directly instead, from what
- * the first StackSwap() saved into argv_sss -- the pointer itself is the crt0's
+ * the first StackSwap() saved into argv_sss; the pointer itself is the crt0's
  * to restore.  -Wl,--wrap=exit,--wrap=_exit routes both here.
  */
 extern void __real_exit(int status);
@@ -210,8 +206,8 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
 
     /*
      * Run the client on a stack of our own.  On a machine too short of memory
-     * to spare 256 KB, run on the caller's stack rather than refuse -- a small
-     * program may still fit, and refusing helps nobody.
+     * to spare 256 KB, fall back to the caller's stack rather than refuse: a
+     * small program may still fit.
      */
     stack = AllocMem(AMIGA_ARGV_STACK, MEMF_ANY);
     if (stack != NULL)

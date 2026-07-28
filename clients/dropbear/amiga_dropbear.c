@@ -1,89 +1,77 @@
 /*
  * clients/dropbear -- the AmigaOS half of the Dropbear port.
  *
- * WHAT THIS FILE IS
+ * Everything `dbclient` calls that this toolchain does not have, in one
+ * translation unit.  curl did not need this file: its own lib/curl_setup.h
+ * already knows that on classic AmigaOS a socket is not a file descriptor,
+ * that close() is CloseSocket() and that select() is WaitSelect().  Dropbear
+ * knows none of that -- `grep -ril amiga src/` finds nothing -- which is the
+ * situation docs/RESEARCH.md §11.7 predicted for wget.
  *
- *   Everything `dbclient` calls that this toolchain does not have, in one
- *   translation unit.  It is the file curl did not need: curl's own
- *   lib/curl_setup.h already knows that on classic AmigaOS a socket is not a
- *   file descriptor, that close() is CloseSocket() and that select() is
- *   WaitSelect().  Dropbear knows none of that -- `grep -ril amiga src/`
- *   finds nothing -- so it is exactly the situation docs/RESEARCH.md §11.7
- *   predicted for wget, and this is the answer to it.
+ * Nothing in third_party/dropbear is patched.  The whole port is this file,
+ * two shim headers, a localoptions.h and the flags in build.sh.
  *
- *   Nothing in third_party/dropbear is patched.  The whole port is this file,
- *   two shim headers, a localoptions.h and the flags in build.sh.
+ * Two descriptor spaces, made into one.  bsdsocket.library hands out socket
+ * descriptors from its own table starting at 0 (src/bsdsocket/socket.c,
+ * bsd_fd_alloc()).  newlib hands out file descriptors starting at 0 as well,
+ * and 0/1/2 are the Shell's stdin/stdout/stderr.  So `socket()` can and does
+ * return 0, and a program holding both -- which every SSH client is, since it
+ * copies between a socket and a terminal -- cannot tell them apart.
  *
- * THE ONE IDEA: TWO DESCRIPTOR SPACES, MADE INTO ONE
+ * Rather than teach Dropbear the difference, which is a patch to every call
+ * site rebased forever, the two spaces are merged here by offset:
  *
- *   bsdsocket.library hands out socket descriptors from its own table
- *   starting at 0 (src/bsdsocket/socket.c, bsd_fd_alloc()).  newlib hands out
- *   file descriptors starting at 0 as well, and 0/1/2 are the Shell's
- *   stdin/stdout/stderr.  So `socket()` can and does return 0, and a program
- *   holding both -- which every SSH client is, since it copies between a
- *   socket and a terminal -- cannot tell them apart.
+ *     fd  0 ..  63     newlib: stdin, stdout, stderr, and files
+ *     fd 64 .. 191     bsdsocket, biased by DB_SOCK_BASE
+ *     fd 192, 193      the wakeup "pipe" -- see pipe() below
  *
- *   Rather than teach Dropbear the difference (which is a patch to every call
- *   site, rebased forever), the two spaces are merged here by OFFSET:
+ * Every function that takes a descriptor dispatches on that range, so
+ * Dropbear's read()/write()/close()/select()/fcntl() do the right thing for
+ * whatever it hands them, and its `int` is an `int` everywhere.
  *
- *       fd  0 ..  63     newlib: stdin, stdout, stderr, and files
- *       fd 64 .. 191     bsdsocket, biased by DB_SOCK_BASE
- *       fd 192, 193      the wakeup "pipe" -- see pipe() below
+ * read/write/close exist in newlib and cannot simply be redefined, so they are
+ * taken with `-Wl,--wrap`; the linker sends Dropbear's references to
+ * __wrap_read and leaves __real_read for us.  That also survives
+ * `atomicio(read, ...)`, which passes read as a function pointer, where a
+ * macro would not have.
  *
- *   Every function that takes a descriptor dispatches on that range, so
- *   Dropbear's read()/write()/close()/select()/fcntl() do the right thing for
- *   whatever it hands them, and its `int` is an `int` everywhere.
+ * FD_SETSIZE is 256 (build.sh), because 192 has to fit in an fd_set and
+ * newlib's default is 64.  dbutil.c's dropbear_fd_set() checks the bound
+ * itself, so an overflow is a legible error and not a smashed stack.
  *
- *   read/write/close exist in newlib and cannot simply be redefined, so they
- *   are taken with `-Wl,--wrap`; the linker sends Dropbear's references to
- *   __wrap_read and leaves __real_read for us.  That also survives
- *   `atomicio(read, ...)`, which passes read as a FUNCTION POINTER -- a macro
- *   would not have.
+ * The socket calls are the Roadshow NDK inlines, the same 121 vectors `fetch`
+ * and curl use.
  *
- *   FD_SETSIZE is 256 (build.sh), because 192 has to fit in an fd_set and
- *   newlib's default is 64.  dbutil.c's dropbear_fd_set() checks the bound
- *   itself, so an overflow is a legible error and not a smashed stack.
+ * fork(), vfork(), execv(), setsid(), dup(), dup2() and kill() fail with
+ * ENOSYS.  AmigaOS has no fork and pretending otherwise would produce a client
+ * that looks like it worked.  dbclient reaches them only through -J proxycmd
+ * and the SSH_ASKPASS helper, both compiled out in localoptions.h, so a linked
+ * dbclient contains the stubs and calls none.
  *
- * WHAT IS HONEST AND WHAT IS A STUB
+ * tcgetattr()/tcsetattr() fabricate a termios and drive raw mode with
+ * SetMode().  AmigaOS has no termios, but a console has the one capability an
+ * interactive session needs -- SetMode(handle, 1) is raw -- so tcgetattr()
+ * reports a plausible cooked terminal and tcsetattr() maps Dropbear's ICANON
+ * switch onto SetMode().  A non-console fd still returns ENOTTY, so
+ * `dbclient -T user@host command` still asks the server for no pty.
  *
- *   The socket calls are real: they are the Roadshow NDK inlines, the same
- *   121 vectors `fetch` and curl use.
+ * pipe() works in the small way a program with no second process needs: a byte
+ * written to one end can be read from the other, and a read end may instead be
+ * pointed at a DOS file.  That second form carries a command's output back to
+ * an SSH channel; see spawn_command() below.
  *
- *   fork(), vfork(), execv(), setsid(), dup(), dup2() and kill() FAIL with
- *   ENOSYS.  AmigaOS has no fork and pretending otherwise would produce a
- *   client that looks like it worked.  dbclient reaches them only through
- *   -J proxycmd and the SSH_ASKPASS helper, and both are compiled out in
- *   localoptions.h, so a linked dbclient contains the stubs and calls none.
+ * dbutil.c's spawn_command() is three pipe()s and a fork(), and the child
+ * branch redirects the pipes onto 0/1/2 and calls execv().  There is no fork()
+ * here, so the whole function is replaced with __wrap_spawn_command() below,
+ * the same -Wl,--wrap mechanism the file already uses for read/write/close,
+ * and for the same reason: it leaves third_party/dropbear unpatched.
  *
- *   tcgetattr()/tcsetattr() fabricate a termios and drive raw mode with
- *   SetMode().  AmigaOS has no termios, but a console has the one capability
- *   an interactive session needs -- SetMode(handle, 1) is raw -- so tcgetattr()
- *   reports a plausible cooked terminal and tcsetattr() maps Dropbear's ICANON
- *   switch onto SetMode().  A non-console fd still returns ENOTTY, so
- *   `dbclient -T user@host command` still asks the server for no pty.
- *
- *   pipe() is real, in the small way a program with no second process needs:
- *   a byte written to one end can be read from the other, and a read end may
- *   instead be pointed at a DOS file.  That second form is what carries a
- *   command's output back to an SSH channel; see THE SERVER RUNS A COMMAND
- *   below.
- *
- * THE SERVER RUNS A COMMAND, AND spawn_command() IS WHERE THAT IS DECIDED
- *
- *   dbutil.c's spawn_command() is three pipe()s and a fork(), and the child
- *   branch redirects the pipes onto 0/1/2 and calls execv().  There is no
- *   fork() here and there will not be one, so the whole function is replaced
- *   with __wrap_spawn_command() below -- the same -Wl,--wrap mechanism the
- *   file already uses for read/write/close, and for the same reason: it
- *   leaves third_party/dropbear unpatched.
- *
- *   The command line itself is not guessed and not parsed out of a log.  The
- *   wrapper calls Dropbear's own exec_fn (execchild), which does the whole
- *   real job -- forced commands, the environment, the chdir to the home
- *   directory -- and ends in execv(shell, {"sh", "-c", cmd}).  execv() then
- *   longjmp()s back into the wrapper with that command in hand.  The jump is
- *   ordinary: the wrapper's frame is live, because exec_fn was called from
- *   it.
+ * The command line is not guessed and not parsed out of a log.  The wrapper
+ * calls Dropbear's own exec_fn (execchild), which does the real work -- forced
+ * commands, the environment, the chdir to the home directory -- and ends in
+ * execv(shell, {"sh", "-c", cmd}).  execv() then longjmp()s back into the
+ * wrapper with that command in hand; the wrapper's frame is live, because
+ * exec_fn was called from it.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -200,16 +188,16 @@ static LONG nx_socketbasetaglist(APTR tags)            { return SocketBaseTagLis
 #define SOCKOF(fd)      ((LONG)((fd) - DB_SOCK_BASE))
 
 /* Set while __wrap_spawn_command() is running Dropbear's own child path in
-   THIS process -- see THE SERVER RUNS A COMMAND at the top of the file, and
+   this process -- see the spawn_command() note at the top of the file, and
    the two places below that have to know: close() and execv(). */
 static int exec_capturing;
 
 /*
- * THE PIPE TABLE.  Declared here rather than beside pipe(), because read(),
+ * The pipe table.  Declared here rather than beside pipe(), because read(),
  * write(), close() and select() all come first in the file and all four have
  * to see it.
  *
- * Three kinds of pipe are needed and they are the same object with different
+ * Three kinds of pipe are needed; they are the same object with different
  * fields set:
  *
  *   a wakeup pipe   ses.signal_pipe: one byte in, one byte out.  `buf` is it.
@@ -219,7 +207,7 @@ static int exec_capturing;
  *                   the file does.  This is how a command's output reaches an
  *                   SSH channel; the file is deleted when the read end closes.
  *   a sink          everything written to it is discarded.  This is the
- *                   command's stdin, which is NIL:.  It has to SUCCEED rather
+ *                   command's stdin, which is NIL:.  It has to succeed rather
  *                   than fill up: a full pipe leaves data pending on the
  *                   channel forever and the channel then never closes.
  */
@@ -342,7 +330,7 @@ static int pipe_close(int fd)
         p->wclosed = 1;
     }
 
-    /* Released only once BOTH ends are closed.  Dropbear closes one end and
+    /* Released only once both ends are closed.  Dropbear closes one end and
        keeps the other, so freeing on the first close would hand the live end
        to the next caller. */
     if (p->rclosed && p->wclosed)
@@ -360,28 +348,23 @@ extern int __real_open(const char *path, int flags, ...);
 /* ----------------------------------------------------- no requesters ---- */
 
 /*
- * THE BUG THIS FIXES, BECAUSE IT COST A RUN AND WILL COST THE NEXT ONE TOO.
+ * dbrandom.c's write_urandom() feeds the pool back to the random device with
+ * fopen(DROPBEAR_URANDOM_DEV, "w") and treats the result as opportunistic.
+ * On AmigaOS "RANDOM:" looks like a device name, and dos.library's answer to
+ * an unmounted device is not an error code but a system requester reading
  *
- *   dbrandom.c's write_urandom() feeds the pool back to the random device
- *   with fopen(DROPBEAR_URANDOM_DEV, "w"), and calls the result opportunistic
- *   -- "don't worry about failure".  On Unix it is.  On AmigaOS, "RANDOM:"
- *   looks like a DEVICE NAME, and dos.library's answer to an unmounted device
- *   is not an error code: it is a system requester reading
+ *     Please insert volume RANDOM: in any drive
  *
- *       Please insert volume RANDOM: in any drive
+ * with Retry and Cancel buttons.  On a headless emulator run there is nobody
+ * to click Cancel, so the process waits forever and the whole run times out
+ * with `dbclient -V` as the last thing it printed.  A user running dbclient
+ * from a Shell on a real Amiga gets the requester on their screen.
  *
- *   with Retry and Cancel buttons.  On a headless emulator run there is
- *   nobody to click Cancel, so the process waits forever and the whole run
- *   times out with `dbclient -V` as the last thing it printed.
- *
- *   pr_WindowPtr = -1 is dos.library's documented "never put up a requester,
- *   fail the call instead", and it is the right setting for ANY ported client
- *   -- every one of them assumes a failed open() returns.  It is set once, in
- *   a constructor, so it is in place before main() and therefore before
- *   Dropbear's first file access.
- *
- *   This applies to a real Amiga too, not only to the emulator: a user who
- *   ran dbclient from a Shell would get the requester on their screen.
+ * pr_WindowPtr = -1 is dos.library's documented "never put up a requester,
+ * fail the call instead", and is the right setting for any ported client;
+ * every one of them assumes a failed open() returns.  It is set once, in a
+ * constructor, so it is in place before main() and therefore before Dropbear's
+ * first file access.
  */
 __attribute__((constructor)) static void amiga_no_requesters(void)
 {
@@ -480,14 +463,11 @@ int listen(int fd, int backlog)
 
 /*
  * The one call in here no client needed: dbclient only ever connects.  It is
- * written the same way as socket(), including the out-of-window refusal --
- * an accepted socket comes from the same bsdsocket descriptor space as one
- * from socket(), so it can land outside the window just as easily, and on a
- * busy listener it is MORE likely to.
- *
- * Refusing by closing the accepted socket drops that one connection rather
- * than aliasing a file descriptor, which is the trade this window scheme
- * exists to make.
+ * written the same way as socket(), including the out-of-window refusal: an
+ * accepted socket comes from the same bsdsocket descriptor space as one from
+ * socket(), so it can land outside the window just as easily, and on a busy
+ * listener it is more likely to.  Refusing by closing the accepted socket
+ * drops that one connection rather than aliasing a file descriptor.
  */
 int accept(int fd, struct sockaddr *addr, socklen_t *len)
 {
@@ -574,11 +554,11 @@ char *inet_ntoa(struct in_addr in)
 }
 
 /*
- * inet_addr() cannot distinguish 255.255.255.255 from failure, which is the
- * whole reason inet_aton() exists.  bsdsocket.library publishes inet_aton on
- * vector 98 -- but a Roadshow older than that vector would jump off the end
- * of its own LVO table, so this is done over inet_addr and the one ambiguous
- * address is spelled out.
+ * inet_addr() cannot distinguish 255.255.255.255 from failure, which is why
+ * inet_aton() exists.  bsdsocket.library publishes inet_aton on vector 98, but
+ * a Roadshow older than that vector would jump off the end of its own LVO
+ * table, so this goes through inet_addr and spells out the one ambiguous
+ * address.
  */
 int inet_aton(const char *cp, struct in_addr *addr)
 {
@@ -602,41 +582,35 @@ int inet_aton(const char *cp, struct in_addr *addr)
 /* -------------------------------------------------------- read/write/close */
 
 /*
- * THE ENTROPY DEVICE, AND WHAT IT ACTUALLY IS
- *
  * dbrandom.c's seedrandom() opens DROPBEAR_URANDOM_DEV, reads 32 bytes, and
  * dropbear_exit()s if it cannot -- there is no fallback and no way to build
  * without one.  This machine has no /dev/urandom, so localoptions.h renames
  * the device to "RANDOM:" (a name shaped like an AmigaOS device, so nothing
  * pretends to be Unix) and open() answers it here.
  *
- * The bytes come from src/common/ami_random.c, which is the SAME generator
+ * The bytes come from src/common/ami_random.c, the same generator
  * bsdsocket.library uses for TCP initial sequence numbers and nx_secure uses
- * for TLS key agreement.  That is deliberate: one entropy story per machine,
- * and one place to fix it.
+ * for TLS key agreement: one entropy story per machine, and one place to fix
+ * it.
  *
- * WHAT THAT GENERATOR IS WORTH, SAID PLAINLY
+ * The conditioning is textbook -- SHA-256 mixing, counter-mode expansion,
+ * forward ratchet.  The collection is guesswork: it credits itself about 21
+ * bits from E-Clock jitter, the clock and the task list against the 64 it sets
+ * as its own bar, so ami_random_is_seeded() returns FALSE by construction and
+ * include/aminetxduo/random.h says so in its first paragraph.  Several of its
+ * sources measured identical across three cold boots under FS-UAE and are
+ * credited nothing.
  *
- *   The conditioning is textbook -- SHA-256 mixing, counter-mode expansion,
- *   forward ratchet.  The COLLECTION is guesswork.  It credits itself about
- *   21 bits from E-Clock jitter, the clock and the task list, against the 64
- *   it sets as its own bar, so ami_random_is_seeded() returns FALSE by
- *   construction and include/aminetxduo/random.h says so in its first
- *   paragraph.  Several of its sources were MEASURED identical across three
- *   cold boots under FS-UAE and are credited nothing.
+ * For an SSH client that is survivable.  What the client generates from this
+ * pool is its ephemeral curve25519 private key and its session cookie, both
+ * per-connection, both forward-secret, and neither written down; an attacker
+ * who can predict them can read that session.
  *
- *   For an SSH CLIENT that is survivable but not comfortable.  What the
- *   client generates from this pool is its ephemeral curve25519 private key
- *   and its session cookie -- both per-connection, both forward-secret, and
- *   neither of them written down.  An attacker who can predict them can read
- *   THAT session.
- *
- *   For an SSH SERVER it is not survivable, and that is the finding to carry
- *   into any server work: a host key generated from a 21-bit pool is a key an
- *   attacker can enumerate, it persists on disk, and clients pin it -- so it
- *   defeats the protocol rather than weakening it.  A server on this machine
- *   needs its host key generated somewhere else, or needs a real seed fed in
- *   through ami_random_add_entropy() before dropbearkey runs.
+ * For an SSH server it is not survivable: a host key generated from a 21-bit
+ * pool can be enumerated, it persists on disk, and clients pin it, so it
+ * defeats the protocol rather than weakening it.  A server on this machine
+ * needs its host key generated somewhere else, or a real seed fed in through
+ * ami_random_add_entropy() before dropbearkey runs.
  */
 static int rand_fd_open = 0;
 
@@ -729,18 +703,18 @@ int __wrap_write(int fd, const void *buf, size_t len)
  * The real size of the Amiga console.
  *
  * Dropbear tells the server the terminal geometry (put_winsize()), and without
- * an answer here it ships a fixed 80x25 -- which leaves vim, nano, less and
- * every other full-screen program drawing to the wrong size.  The Amiga console
- * will tell us: a Window Status Request written to it -- CSI '0' SP 'q' --
- * comes back through the INPUT stream as a Window Bounds Report,
- * CSI 1;1;<rows>;<cols> SP 'r'.  We must be in raw mode to read that reply
+ * an answer here it ships a fixed 80x25, leaving vim, nano, less and every
+ * other full-screen program drawing to the wrong size.  The Amiga console will
+ * report it: a Window Status Request written to it -- CSI '0' SP 'q' -- comes
+ * back through the input stream as a Window Bounds Report,
+ * CSI 1;1;<rows>;<cols> SP 'r'.  Raw mode is required to read that reply
  * without waiting for a newline.
  *
- * This runs while the pty request is built, BEFORE tcsetattr() starts the
+ * This runs while the pty request is built, before tcsetattr() starts the
  * interactive reader child, so nothing else is reading the console and the
- * reply is ours.  The con_active() guard is a belt-and-braces refusal to fight
- * the reader should that ever change; the wait is bounded so a console that
- * never answers cannot stall the connection.
+ * reply is ours.  The con_active() guard refuses to fight the reader should
+ * that ever change; the wait is bounded so a console that never answers cannot
+ * stall the connection.
  */
 static struct ConUnit *con_unit;    /* the console's ConUnit -- stable once found */
 
@@ -778,7 +752,7 @@ static struct ConUnit *con_get_unit(void)
     if (port == NULL)
         return NULL;
 
-    /* InfoData must be longword aligned for MKBADDR; AllocMem guarantees it. */
+    /* InfoData must be longword aligned for MKBADDR; AllocMem returns it so. */
     id = (struct InfoData *)AllocMem(sizeof(struct InfoData), MEMF_PUBLIC | MEMF_CLEAR);
     if (id == NULL)
         return NULL;
@@ -881,44 +855,42 @@ int __wrap_ioctl(int fd, unsigned long request, ...)
 int __wrap_close(int fd)
 {
     /*
-     * 0, 1 AND 2 ARE NOT OURS TO CLOSE, AND CLOSING THEM REBOOTS THE MACHINE.
+     * 0, 1 and 2 are not ours to close, and closing them reboots the machine.
      *
      * On Unix a process owns its own descriptor table and close(1) at exit is
-     * free.  On AmigaOS a Shell command does NOT own Input() and Output():
+     * free.  On AmigaOS a Shell command does not own Input() and Output():
      * they are the parent's DOS FileHandles, lent for the duration.  newlib's
      * close() Close()s the BPTR, and then the Shell -- or, here,
      * SystemTagList() in ClientRun -- Close()s the same freed FileHandle
      * again.  A double Close() on a machine with no memory protection is not
      * an error return.
      *
-     * Dropbear does exactly this: common-channel.c's close_chan_fd() calls
-     * m_close() on the session channel's readfd/writefd/errfd, and for
-     * `dbclient -T host command` those three are STDIN, STDOUT and STDERR.
+     * Dropbear does this: common-channel.c's close_chan_fd() calls m_close()
+     * on the session channel's readfd/writefd/errfd, and for
+     * `dbclient -T host command` those three are stdin, stdout and stderr.
      *
-     * MEASURED, because it looked like a success at first.  Every pass ran
-     * `dbclient ... "echo AMIGA-SSH-OK; uname -a; date"`, wrote the server's
-     * real answer into the report, and then the emulated A1200 REBOOTED
-     * before ClientRun could write the return code -- so the command list
-     * started over from the top, forever, and the run looked like a hang with
-     * a correct transcript inside it.
+     * Observed: every pass ran `dbclient ... "echo AMIGA-SSH-OK; uname -a;
+     * date"`, wrote the server's real answer into the report, and then the
+     * emulated A1200 rebooted before ClientRun could write the return code, so
+     * the command list started over from the top forever and the run looked
+     * like a hang with a correct transcript inside it.
      *
-     * Refusing is right rather than merely safe: nothing in a client needs to
-     * close the terminal it was given, and writes to a "closed" stdout still
-     * have to work because Dropbear may report an error after closing the
-     * channel.
+     * Nothing in a client needs to close the terminal it was given, and writes
+     * to a "closed" stdout still have to work because Dropbear may report an
+     * error after closing the channel.
      */
     if (fd == 0 || fd == 1 || fd == 2)
         return 0;
 
     /*
-     * AND NEITHER IS ANYTHING ELSE, WHILE A COMMAND IS BEING CAPTURED.
+     * Neither is anything else, while a command is being captured.
      *
      * dbutil.c's run_command() closes every descriptor from 3 to ses.maxfd
      * before it execs, so that a child cannot inherit a file the server opened
-     * as root.  In a forked child that is right.  Here it is running in the
-     * SERVER's process, and that range is the session socket, the listener's
-     * pipes and the pipes the command's own output is about to arrive on --
-     * closing them ends the session in the middle of setting it up.
+     * as root.  In a forked child that is right.  Here it runs in the server's
+     * own process, and that range is the session socket, the listener's pipes
+     * and the pipes the command's output is about to arrive on -- closing them
+     * ends the session in the middle of setting it up.
      */
     if (exec_capturing)
         return 0;
@@ -979,13 +951,13 @@ int fcntl(int fd, int cmd, ...)
  * WaitForChar() -- which wakes the instant a key is pressed, so it is not a
  * spin -- reads each byte into a ring the parent drains, and Signal()s the
  * parent.  select() (below) folds that signal into WaitSelect()'s mask, so
- * Dropbear's loop waits on the socket AND the keyboard with no polling.
+ * Dropbear's loop waits on the socket and the keyboard with no polling.
  *
- * Started and stopped by tcsetattr()'s raw/cooked switch, which IS Dropbear's
+ * Started and stopped by tcsetattr()'s raw/cooked switch, which is Dropbear's
  * cli_tty_setup()/cli_tty_cleanup() pairing: the child lives exactly as long as
  * the raw-mode session, and con_reader_stop() waits for it (cr_DoneSig) before
- * freeing anything it might still Signal -- the one way a stray reply to a dead
- * task, and the crash that is, is avoided.
+ * freeing anything it might still Signal, so a stray signal to a dead task
+ * cannot happen.
  */
 #define CON_RING_SIZE   256U                  /* power of two -- see the mask */
 #define CON_POLL_US     100000UL              /* WaitForChar() quit-check bound */
@@ -1104,7 +1076,7 @@ static void con_reader_start(BPTR handle)
         if (cu != NULL) { con_last_x = cu->cu_XMax; con_last_y = cu->cu_YMax; }
     }
 
-    /* SAME priority as us, not higher.  A higher-priority reader that keeps
+    /* Same priority as us, not higher.  A higher-priority reader that keeps
        finding input -- fast typing -- never blocks, so the parent (this task)
        is never scheduled to drain the ring or service the socket, and the
        session hangs until the typing stops.  Equal priority time-slices the
@@ -1246,12 +1218,11 @@ static int con_write(int fd, const void *buf, size_t len)
  * If anything off-socket is already ready, WaitSelect() is called with a zero
  * timeout so the answer is not delayed behind the socket.
  *
- * THE LIMITATION, STATED: an interactive stdin is only noticed when
- * WaitSelect() next returns, so a console keystroke can wait as long as
- * select_timeout() -- which is the reason `dbclient -T ... command` is the
- * supported shape and an interactive session is not.  Doing better needs the
- * same mechanism a telnet server needs: a DOS handler that makes a Shell
- * look like a socket.  That is being scoped separately; it is not this file.
+ * An interactive stdin is only noticed when WaitSelect() next returns, so a
+ * console keystroke can wait as long as select_timeout().  That is why
+ * `dbclient -T ... command` is the supported shape and an interactive session
+ * is not.  Doing better needs the same mechanism a telnet server needs: a DOS
+ * handler that makes a Shell look like a socket, which is scoped separately.
  */
 static BPTR dos_handle_for(int fd)
 {
@@ -1362,8 +1333,8 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
         }
 
         /* Wait on the console keystroke signal alongside the sockets, so a key
-           wakes the same WaitSelect() the socket does -- the whole point.
-           ALWAYS include it while watching the console, never conditionally on
+           wakes the same WaitSelect() the socket does.
+           Always include it while watching the console, never conditionally on
            the ring being empty: a byte can land between the readiness check
            above and here, and excluding the signal then would block with the
            byte already queued and its wake-up not in the mask -- a lost wakeup
@@ -1488,9 +1459,9 @@ int pipe(int fds[2])
  * fatal, and a client that cannot install a handler it will never receive is
  * not in trouble.
  *
- * The consequence to know about: Ctrl-C does not interrupt dbclient.  The
- * Shell's break signal (SIGBREAKF_CTRL_C) is never polled, because the place
- * to poll it is inside WaitSelect() and that is the library's loop.
+ * Ctrl-C therefore does not interrupt dbclient: the Shell's break signal
+ * (SIGBREAKF_CTRL_C) is never polled, because the place to poll it is inside
+ * WaitSelect() and that is the library's loop.
  */
 void (*signal(int sig, void (*handler)(int)))(int)
 {
@@ -1517,18 +1488,16 @@ pid_t setsid(void) { errno = ENOSYS; return -1; }
 /* ----------------------------------------------- running a command ------- */
 
 /*
- * WHAT THE SERVER NEEDS AND WHY IT IS NOT A fork().
- *
  * dbutil.c's spawn_command() is the only place Dropbear starts a program: three
  * pipe()s, a fork(), and a child branch that dup2()s the pipes onto 0/1/2 and
- * calls execv().  Every one of those is a thing this machine does not have, and
- * the failure is not graceful -- fork() returns -1, spawn_command() reports
- * DROPBEAR_FAILURE, and the client gets an authenticated session that runs
- * nothing and exits 0 with empty output.
+ * calls execv().  None of those exist on this machine, and the failure is not
+ * graceful: fork() returns -1, spawn_command() reports DROPBEAR_FAILURE, and
+ * the client gets an authenticated session that runs nothing and exits 0 with
+ * empty output.
  *
  * __wrap_spawn_command() below replaces the whole function.  On AmigaOS the
  * equivalent of "run this and give me its output" is SystemTagList(), which
- * starts a Shell, and the honest shape of that is:
+ * starts a Shell:
  *
  *   the command line   comes from Dropbear, via execv() -- see exec_capturing
  *   stdin              NIL:.  A synchronous Shell cannot be fed by a channel
@@ -1538,29 +1507,28 @@ pid_t setsid(void) { errno = ENOSYS; return -1; }
  *                      The Shell's own messages land there too, which is why
  *                      SYS_Output is used rather than a ">" appended to the
  *                      command line.
- *   the exit status    System()'s return code, which IS the command's rc
+ *   the exit status    System()'s return code, which is the command's rc
  *
- * NOTHING CROSSES A TASK BOUNDARY.  The command runs in a Process of its own
+ * Nothing crosses a task boundary.  The command runs in a Process of its own
  * and never touches the server's SocketBase -- src/bsdsocket/tcp_handler.c
- * states the rule and the ThreadX bracket now enforces it, so a spawned
- * process using its parent's base gets ENETDOWN.  It does not arise here: the
- * socket stays in the session's task and only a DOS file passes between them.
- * A NETWORK command run over SSH opens its own bsdsocket.library, which is
- * what any AmigaOS program does anyway.
+ * states the rule and the ThreadX bracket enforces it, so a spawned process
+ * using its parent's base gets ENETDOWN.  The socket stays in the session's
+ * task and only a DOS file passes between them; a network command run over SSH
+ * opens its own bsdsocket.library, as any AmigaOS program does.
  *
- * IT RUNS SYNCHRONOUSLY, AND THAT IS A LIMITATION AND NOT A DETAIL.  The
- * session loop is stopped for as long as the command takes, so nothing is
- * echoed back while it runs and a command that never exits never returns.  The
- * alternative is SYS_Asynch plus a wakeup through WaitSelect()'s signal mask,
- * which is a real design and not a small one; this is the piece that makes
- * `ssh amiga "command"` return its output, and it stops there deliberately.
+ * It runs synchronously, which is a limitation: the session loop is stopped for
+ * as long as the command takes, so nothing is echoed back while it runs and a
+ * command that never exits never returns.  The alternative is SYS_Asynch plus
+ * a wakeup through WaitSelect()'s signal mask, which is a larger design.  This
+ * is the piece that makes `ssh amiga "command"` return its output, and stops
+ * there.
  */
 
 #define DB_CMD_MAX      512
 
 /* 256 KB.  A Shell gives a command 4,096 bytes and every ported program on this
-   machine needs far more than that (clients/curl/clientrun.c allocates 512 KB
-   for the same reason).  A command arriving over SSH is exactly as likely to be
+   machine needs far more than that (clientrun.c allocates 512 KB for the same
+   reason).  A command arriving over SSH is exactly as likely to be
    a ported program as one typed at a Shell prompt. */
 #define DB_CMD_STACK    (256UL * 1024UL)
 
@@ -1569,12 +1537,12 @@ static int     exec_have_cmd;
 static char    exec_cmd[DB_CMD_MAX];
 
 /*
- * ENOSYS is still the answer for anybody who really means "replace this
- * process", and there is no such caller: the one execv() in a linked server is
- * run_command()'s, at the end of the child path __wrap_spawn_command() calls
- * deliberately.  While that is running, execv() is a hand-back rather than a
- * call -- it takes the argv apart and jumps to the wrapper, whose frame is
- * live because it is the frame that called into here.
+ * ENOSYS is still the answer for a caller that means "replace this process",
+ * and there is no such caller: the one execv() in a linked server is
+ * run_command()'s, at the end of the child path __wrap_spawn_command() calls.
+ * While that is running, execv() is a hand-back rather than a call -- it takes
+ * the argv apart and jumps to the wrapper, whose frame is live because it is
+ * the frame that called into here.
  *
  * run_shell_command() builds argv as {shell, "-c", command} for a command and
  * {"-shell"} for a login shell.  The second has no answer here: an interactive
@@ -1641,14 +1609,13 @@ int fsync(int fd)
 }
 
 /*
- * SetProtection().  The RWED bits are ACTIVE LOW -- a SET bit forbids the
- * operation -- which is the opposite of every POSIX mode, so the conversion
- * is inverted deliberately and not by accident.  The other AmigaOS bits
- * (archive, script, pure) are cleared, which is what a chmod means: the
- * caller is stating the whole mode, not adjusting part of it.
+ * SetProtection().  The RWED bits are active low -- a set bit forbids the
+ * operation -- the opposite of every POSIX mode, so the conversion is
+ * inverted.  The other AmigaOS bits (archive, script, pure) are cleared: a
+ * chmod states the whole mode rather than adjusting part of it.
  *
  * The three POSIX classes collapse into one: AmigaOS has no owner, group or
- * other, so the mode is read as the OWNER bits and the rest is dropped.
+ * other, so the mode is read as the owner bits and the rest is dropped.
  */
 int chmod(const char *path, mode_t mode)
 {
@@ -1669,9 +1636,8 @@ int chmod(const char *path, mode_t mode)
 }
 
 /*
- * There is no ownership to change.  ENOSYS rather than a silent 0: a caller
- * that gave a file away and was told it worked would be worse off than one
- * told the platform cannot.
+ * There is no ownership to change.  ENOSYS rather than a silent 0, so a caller
+ * is not told a change it asked for happened.
  */
 int chown(const char *path, uid_t uid, gid_t gid)
 {
@@ -1681,7 +1647,7 @@ int chown(const char *path, uid_t uid, gid_t gid)
 }
 
 /*
- * There IS a child now -- SystemTagList()'s, already finished by the time
+ * There is a child now -- SystemTagList()'s, already finished by the time
  * anybody asks -- so this reports it once and ECHILD after that.
  *
  * The status word is newlib's: WIFEXITED() reads the low byte and
@@ -1712,20 +1678,20 @@ pid_t waitpid(pid_t pid, int *status, int options)
 }
 
 /*
- * Installs nothing and remembers ONE thing: SIGCHLD's handler.
+ * Installs nothing and remembers one thing: SIGCHLD's handler.
  *
  * AmigaOS delivers no asynchronous signals to a C handler, so there is no
- * mechanism to attach one to and reporting failure would be worse than
- * reporting success -- commonsetup() treats an error as fatal, so a -1 would
- * refuse to start the server over handlers that cannot fire.
+ * mechanism to attach one to.  Reporting failure would be worse than reporting
+ * success: commonsetup() treats an error as fatal, so a -1 would refuse to
+ * start the server over handlers that cannot fire.
  *
- * But sesssigchild_handler() is not only reachable asynchronously.  Its whole
- * job is to write a byte to ses.signal_pipe so the session loop wakes and calls
+ * sesssigchild_handler() is also reachable synchronously.  Its job is to write
+ * a byte to ses.signal_pipe so the session loop wakes and calls
  * svr_chansess_checksignal(), which reaps with waitpid() and hands the exit
- * status to the channel.  __wrap_spawn_command() knows exactly when the child
- * exited, so it calls the handler itself at that moment -- which is the same
- * sequence a real SIGCHLD would produce, minus the asynchrony, and it is the
- * only route by which a client ever learns a command's return code.
+ * status to the channel.  __wrap_spawn_command() knows when the child exited,
+ * so it calls the handler itself at that moment: the same sequence a real
+ * SIGCHLD would produce, and the only route by which a client learns a
+ * command's return code.
  *
  * oldact is zeroed rather than left alone, so a caller that saves and later
  * restores gets a defined value instead of stack contents.
@@ -1810,9 +1776,9 @@ int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
 
     /*
      * Dropbear's own child path, run in this process to the point where it
-     * would have called execv().  It is not a formality: it applies the forced
-     * command, sets the environment, and chdir()s to the home directory, and
-     * doing any of that here instead would be a second implementation of it.
+     * would have called execv().  It applies the forced command, sets the
+     * environment and chdir()s to the home directory; doing any of that here
+     * instead would be a second implementation of it.
      */
     exec_have_cmd  = 0;
     exec_capturing = 1;
@@ -1873,17 +1839,17 @@ int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
 
     /*
      * SYS_Input and SYS_Output rather than "<NIL: >file" appended to the
-     * command line, for two reasons that both cost a run to find.
+     * command line, for two reasons.
      *
-     * The Shell's OWN messages go to its Output(), and a redirection in the
-     * command line does not apply to them -- it applies to the command.  So
-     * `NoSuchCommand` printed "Unknown command" onto the SERVER's stderr and
-     * the client got an empty transfer with a return code of 10 and no idea
-     * why.  With the handle passed in, the Shell's Output() IS the file and
-     * everything lands in it.
+     * The Shell's own messages go to its Output(), and a redirection in the
+     * command line applies to the command, not to them.  So `NoSuchCommand`
+     * printed "Unknown command" onto the server's stderr and the client got an
+     * empty transfer with a return code of 10 and no explanation.  With the
+     * handle passed in, the Shell's Output() is the file and everything lands
+     * in it.
      *
-     * And the command line stays the user's: a command containing its own
-     * redirection is not fighting one somebody appended to it.
+     * The command line also stays the user's: a command containing its own
+     * redirection is not fighting one appended to it.
      *
      * Handing over a handle is safe here because dos.library says so, in
      * System()'s own autodoc: "The input and output filehandles will not be
@@ -1954,8 +1920,8 @@ int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
      * to ses.signal_pipe, the session loop notices on its next pass and calls
      * svr_chansess_checksignal(), and waitpid() above hands over the status --
      * the same sequence a real signal would have produced.  noptycommand() has
-     * not yet called addchildpid(), so the reap lands in svr_ses.lastexit,
-     * which is precisely the race upstream already handles two lines later.
+     * not yet called addchildpid(), so the reap lands in svr_ses.lastexit, the
+     * race upstream already handles two lines later.
      */
     if (sigchld_handler != NULL)
         sigchld_handler(SIGCHLD);
@@ -1968,11 +1934,11 @@ int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
  * by that header but defined nowhere in the toolchain -- so any client that
  * touches environ fails to link rather than failing at runtime.
  *
- * An empty, correctly terminated environment is the accurate answer.  AmigaOS
- * keeps its environment in ENV:, which is a directory and not a char ** the
- * process owns; the code that wants a named variable already goes through
- * GetVar() (see amiga_pw_fill above).  The one caller of environ here is
- * execchild(), which is unreachable because execv() fails.
+ * An empty, correctly terminated environment is the accurate answer: AmigaOS
+ * keeps its environment in ENV:, a directory rather than a char ** the process
+ * owns, and the code that wants a named variable goes through GetVar() (see
+ * amiga_pw_fill above).  The one caller of environ here is execchild(), which
+ * is unreachable because execv() fails.
  */
 static char  *amiga_environ_empty[1] = { NULL };
 static char **amiga_environ          = amiga_environ_empty;
@@ -1981,13 +1947,13 @@ char        ***environ_ptr           = &amiga_environ;
 /*
  * getenv() over ENV:, and the terminal type in particular.
  *
- * environ is empty (above), so newlib's getenv() answers NULL for everything --
+ * environ is empty (above), so newlib's getenv() answers NULL for everything,
  * and send_chansess_pty_req() then tells the server TERM=vt100, whose terminfo
  * drives the VT100 line-drawing charset the Amiga console does not have, so vim
- * paints its frames as garbage.  Route getenv() through GetVar() instead, which
- * is where the rest of this file reads named variables, so a `setenv TERM ...`
- * is honoured -- and default TERM to "amiga", the ncurses entry written for
- * this console (it knows there is no line-drawing).  -Wl,--wrap=getenv.
+ * paints its frames as garbage.  getenv() is routed through GetVar() instead,
+ * where the rest of this file reads named variables, so a `setenv TERM ...` is
+ * honoured, and TERM defaults to "amiga", the ncurses entry written for this
+ * console (it knows there is no line-drawing).  -Wl,--wrap=getenv.
  */
 char *__wrap_getenv(const char *name)
 {
@@ -2030,12 +1996,12 @@ gid_t getegid(void) { return 0; }
 /*
  * The server calls svr_switch_user() after authentication, and reaches these
  * because getuid() above says 0 and getpwnam() fills pw_uid/pw_gid with 0 too.
- * Switching from 0 to 0 is not a privilege change, it is a no-op, and POSIX
- * setuid(0) as root succeeds -- so returning success is the true answer and
- * not a convenient one.
+ * Switching from 0 to 0 is a no-op, and POSIX setuid(0) as root succeeds, so
+ * success is the correct answer.
  *
- * Any OTHER id fails with EPERM, which is also true: there is nothing on this
- * machine to switch to.  Spelled as a comparison rather than an unconditional
+ * Any other id fails with EPERM, which is also correct: there is nothing on
+ * this machine to switch to.  Spelled as a comparison rather than an
+ * unconditional
  * `return 0` so that a future getpwnam() handing out a nonzero uid gets a
  * refusal instead of silently appearing to work.
  */
@@ -2063,9 +2029,9 @@ int initgroups(const char *user, gid_t group)
 
 /*
  * NULL, always.  There is no group database on AmigaOS 3.x, and unlike
- * getpwnam() -- which has one honest answer, the user running the program --
- * there is no group that could be meant.  sshpty.c uses it to find "tty" so
- * it can chown a pty node, which is a thing this machine does not have.
+ * getpwnam() -- which can answer with the user running the program -- there is
+ * no group that could be meant.  sshpty.c uses it to find "tty" so it can
+ * chown a pty node, which this machine does not have.
  */
 struct group *getgrnam(const char *name)
 {
@@ -2116,12 +2082,11 @@ int setrlimit(int resource, struct rlimit *lim)
 /* ------------------------------------------------------------- users ----- */
 
 /*
- * AmigaOS 3.x is a single-user machine with no account database at all, so
- * there is nothing to look up and the honest thing is to answer with the one
- * user there is.  The name matters: it is what dbclient sends as the SSH
- * username when the command line does not say `user@host`, so ENV:USER is
- * read first and that is the documented way to set it.  HOME likewise feeds
- * the `~/.ssh/id_dropbear` default.
+ * AmigaOS 3.x is a single-user machine with no account database, so there is
+ * nothing to look up and this answers with the one user there is.  The name
+ * matters: it is what dbclient sends as the SSH username when the command line
+ * does not say `user@host`, so ENV:USER is read first and is the documented
+ * way to set it.  HOME likewise feeds the `~/.ssh/id_dropbear` default.
  */
 static struct passwd amiga_pw;
 static char amiga_pw_name[64];
@@ -2172,11 +2137,11 @@ struct passwd *getpwnam(const char *name)
 
 /*
  * AmigaOS has no termios, but an interactive console has the one thing an
- * interactive ssh session needs: raw mode, via SetMode().  So rather than
- * refuse, these fabricate a plausible COOKED terminal for tcgetattr() and
- * map Dropbear's raw/cooked switch onto SetMode() in tcsetattr().  A file or
- * NIL: still returns ENOTTY, which is how `dbclient -T host command` detects
- * "no terminal" and asks the server for no pty.
+ * interactive ssh session needs: raw mode, via SetMode().  These fabricate a
+ * plausible cooked terminal for tcgetattr() and map Dropbear's raw/cooked
+ * switch onto SetMode() in tcsetattr().  A file or NIL: still returns ENOTTY,
+ * which is how `dbclient -T host command` detects "no terminal" and asks the
+ * server for no pty.
  */
 int tcgetattr(int fd, struct termios *t)
 {
@@ -2192,7 +2157,7 @@ int tcgetattr(int fd, struct termios *t)
     if (t == NULL)
         return 0;
 
-    /* Dropbear saves this, ships it to the server's pty so the REMOTE shell
+    /* Dropbear saves this, ships it to the server's pty so the remote shell
        echoes, and derives a raw copy for the local side.  The only field
        tcsetattr() reads back is c_lflag's ICANON. */
     t->c_iflag = 0;
@@ -2241,10 +2206,10 @@ int tcsetattr(int fd, int actions, const struct termios *t)
 }
 
 /*
- * getpass() over dos.library.  SetMode(handle, 1) puts a console into RAW
- * mode, in which it stops echoing and Read() returns each keystroke instead
- * of waiting for a line -- which is exactly what a password prompt wants.
- * A non-interactive stdin (a file, a NIL:) skips the mode change and reads a
+ * getpass() over dos.library.  SetMode(handle, 1) puts a console into raw
+ * mode, in which it stops echoing and Read() returns each keystroke instead of
+ * waiting for a line, which is what a password prompt wants.  A
+ * non-interactive stdin (a file, a NIL:) skips the mode change and reads a
  * line, so a scripted run still works.
  */
 char *getpass(const char *prompt)
@@ -2257,7 +2222,7 @@ char *getpass(const char *prompt)
 
     /* Output through __wrap_write(), not DOS Write(): the CR-for-LF fixup that
        makes the other prompts break lines lives there, and Read() consuming the
-       Return in raw mode means the newline HAS to be emitted by us. */
+       Return in raw mode means the newline has to be emitted by us. */
     if (prompt != NULL)
         __wrap_write(1, prompt, strlen(prompt));
 

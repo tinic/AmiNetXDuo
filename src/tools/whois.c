@@ -8,23 +8,15 @@
  *   FOLLOW   chase the referral automatically instead of printing it.
  *
  * The protocol is one line long: connect, send the query, read until the other
- * end hangs up, print what came back. RFC 3912 is three pages and most of them
- * are about how little it specifies -- there is no request format, no reply
- * format and no character set, which is why what comes back is written out
- * exactly as it arrived rather than parsed.
+ * end hangs up, print what came back. RFC 3912 specifies no request format, no
+ * reply format and no character set, so the reply is written out exactly as it
+ * arrived rather than parsed.
  *
- * WHY THE DEFAULT IS whois.iana.org
- *
- *   There is no server that knows everything, and the one that used to be
- *   assumed -- whois.internic.net -- has known only .com and .net for twenty
- *   years. IANA's knows one thing about everything: which registry to ask.
- *   So the default answers usefully for any TLD, any IP range and any AS
- *   number, and the answer names the server that has the detail.
- *
- *   That referral is the whole reason FOLLOW exists. Without it the answer is
- *   still useful, because the line to type next is printed underneath it; a
- *   command that leaves you able to finish the job by hand is better than one
- *   that hides the second step.
+ * The default server is whois.iana.org because no server knows everything and
+ * whois.internic.net has known only .com and .net for twenty years. IANA's
+ * knows which registry to ask, so it answers for any TLD, any IP range and any
+ * AS number, naming the server that has the detail. FOLLOW chases that
+ * referral; without it the line to type next is printed instead.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -69,14 +61,11 @@ static char  whois_request[WHOIS_NAME_MAX + 4];
  *   Registrar WHOIS Server:  the gTLD registries, since ICANN required it
  *   ReferralServer:          the RIRs, and it carries a whois:// scheme
  *
- * Matched case-insensitively at the start of a line, AFTER any indentation.
- * The indentation is not a detail: IANA writes its fields hard against the
- * left margin and the gTLD registries indent every one of theirs by three
- * spaces, so a matcher anchored at column zero finds IANA's referral and
- * silently misses the registry-to-registrar one -- which is the referral
- * anybody looking up a domain actually needs. Observed exactly that way
- * against whois.verisign-grs.com before this line said "after any
- * indentation".
+ * Matched case-insensitively at the start of a line, after any indentation.
+ * IANA writes its fields hard against the left margin while the gTLD
+ * registries indent theirs by three spaces, so a matcher anchored at column
+ * zero finds IANA's referral and silently misses the registry-to-registrar
+ * one. Observed against whois.verisign-grs.com.
  */
 static const char *const whois_keys[] =
 {
@@ -109,9 +98,9 @@ static BOOL whois_starts_with(const char *line, const char *key)
  * Pull a host name out of a referral line, if that is what it is.
  *
  * "ReferralServer: whois://whois.arin.net" and
- * "refer:          whois.verisign-grs.com" both reduce to a bare host: the
- * scheme is dropped, and so is any :port, because the port belongs to this
- * command's own PORT argument and a name with a colon in it would not resolve.
+ * "refer:          whois.verisign-grs.com" both reduce to a bare host. The
+ * scheme is dropped, and so is any :port: the port comes from this command's
+ * PORT argument, and a name with a colon in it would not resolve.
  */
 static BOOL whois_referral_from(const char *line, char *out, ULONG outlen)
 {
@@ -171,11 +160,9 @@ static BOOL whois_referral_from(const char *line, char *out, ULONG outlen)
 /* ------------------------------------------------------------ the exchange */
 
 /*
- * One server, one query.
- *
- * Everything that arrives goes straight to standard output; the reply is also
- * scanned a line at a time for a referral, which is left in whois_referral.
- * RETURN_OK, or a code after printing why not.
+ * One server, one query. Everything that arrives goes straight to standard
+ * output; the reply is also scanned a line at a time for a referral, which is
+ * left in whois_referral. RETURN_OK, or a code after printing why not.
  */
 static LONG whois_ask(struct Library *sb, const char *server, UWORD port,
                       const char *query, BOOL *referred)
@@ -261,9 +248,9 @@ static LONG whois_ask(struct Library *sb, const char *server, UWORD port,
 
         /*
          * The same bytes again, a line at a time, looking for the referral.
-         * Only the FIRST one is kept: a registry answer that mentions several
-         * servers means the one nearest the top, and chasing the last would
-         * follow whatever happened to be in the free-text legal notice.
+         * Only the first one is kept: in an answer that mentions several
+         * servers the one nearest the top is meant, and the last is likely to
+         * be inside the free-text legal notice.
          */
         for (i = 0; i < (ULONG)n; i++)
         {

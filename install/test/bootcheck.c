@@ -101,12 +101,20 @@ static LONG run(const char *command)
 }
 
 /*
- * Did the machine end up with an address?  ShowNetStatus prints
+ * Did the machine end up with an address?  ShowNetStatus prints, per
+ * interface,
  *
- *      This machine:   10.0.2.15
+ *      address     10.0.2.15       netmask 255.255.255.0 (/24)
  *
- * or "none" when it has not got one.  Reading its output back is the only
- * way to ask: there is no call into the running stack from another process.
+ * and this used to look for "This machine:" instead -- which ShowNetStatus
+ * prints ONLY when it cannot read the running stack and has to fall back on
+ * asking the library for an address.  So the test asserted on the output of
+ * the failure path: it could not pass on a machine where everything worked,
+ * which is the machine it exists to check.
+ *
+ * Both are accepted now.  The fallback line is still a real answer -- the
+ * stack is up, in somebody else's library -- and refusing it would trade one
+ * wrong assertion for another.
  */
 static BOOL has_address(void)
 {
@@ -137,10 +145,13 @@ static BOOL has_address(void)
         while (*p == ' ' || *p == '\t')
             p++;
 
-        if (!starts_with(p, "This machine:"))
+        if (starts_with(p, "address"))
+            p += 7;
+        else if (starts_with(p, "This machine:"))
+            p += 13;
+        else
             continue;
 
-        p += 13;
         while (*p == ' ' || *p == '\t')
             p++;
 

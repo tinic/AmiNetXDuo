@@ -6,14 +6,14 @@ already speaks — on top of
 [Eclipse ThreadX NetX Duo](https://github.com/eclipse-threadx/netxduo), and it
 drives the SANA-II network cards you already have.
 
-> **Status: it works, and it is not finished.** It gets a DHCP lease, answers
-> ARP, pings its gateway, resolves DNS, moves TCP in both directions and does
-> HTTPS. It scores **141 of 142** on the independent
+> It gets a DHCP lease, answers ARP, pings its gateway, resolves DNS, moves TCP
+> in both directions, does HTTPS, and listens for incoming connections. It
+> scores **141 of 142** on the independent
 > [`bsdsocktest`](https://github.com/tbdye/bsdsocktest) conformance suite, where
-> Roadshow scores 138. A real `ssh` client — Dropbear's dbclient — runs on it.
+> Roadshow scores 138. Dropbear's `dbclient` runs on it, so the Amiga can `ssh`.
 >
-> It has **only ever been tested under emulation, never on a real Amiga**, so
-> treat it as something to try rather than something to depend on.
+> Everything here has been measured under emulation. It has not run on real
+> hardware.
 
 ## Why
 
@@ -25,17 +25,17 @@ commercial and closed.
 
 AmiNetXDuo is MIT-licensed throughout, with no 4.4BSD or GPL-derived code
 anywhere in it. It speaks the same socket API and reads the same configuration
-files as Roadshow, so existing software and existing habits carry over. And it
-supports **IPv6** — as far as we can establish, a first for a classic Amiga
-stack — though that is off by default for now.
+files as Roadshow, so existing software and existing habits carry over. It
+supports **IPv6**, which is off by default.
 
 ## Requirements
 
-Any 68000 or better — an unexpanded A500 or A600 included — AmigaOS 3.1 or
-newer, and 4 MB of RAM. A SANA-II network card: `a2065.device`,
+Any 68000 or better, AmigaOS 3.1 or newer, and 4 MB of RAM — so an A500 or
+A600 needs a memory expansion. A SANA-II network card: `a2065.device`,
 `ariadne.device`, `ariadne2.device`, `amiganet.device`, `xsurf.device`,
-`xsurf100.device`, `cnet.device` and the PCMCIA drivers are all offered by name
-in the installer, and anything else can be typed in.
+`xsurf100.device`, `cnet.device`, the PCMCIA drivers and `uaenet.device` for
+emulators are all offered by name in the installer, and anything else can be
+typed in.
 
 The archive carries a separate build for the 68000, the 68020–68040 and the
 68060, and the installer works out which one your machine wants. Encrypted
@@ -51,21 +51,24 @@ writes a working configuration.
 
 Configuration follows Roadshow's layout — `DEVS:NetInterfaces/<name>`,
 `DEVS:Internet/routes`, `DEVS:Internet/name_resolution` and the standard
-`/etc`-style netdb files — so existing documentation and habits apply. There is
-a user guide in `Docs/` inside the archive.
+`/etc`-style netdb files — so existing documentation and habits apply. The
+`ReadMe` in the archive covers the rest, including writing the files by hand.
 
 ## Commands
 
 | | |
 |---|---|
+| `NetSetup` | set up an interface by answering questions -- start here |
 | `AddNetInterface`, `Online`, `Offline` | bring an interface up and take it down |
 | `ShowNetStatus`, `netstat` | interface state, routes, connections |
 | `ping`, `host` | reachability and name lookups |
 | `nslookup` | ask the DNS for one kind of record, from a server of your choosing |
+| `arp` | which machines on this network have answered, and what they are |
 | `sntp` | set the clock from a time server |
 | `fetch` | retrieve an `http://` or `https://` URL |
 | `nc` | connect or listen, TCP and UDP, port ranges, timeouts |
 | `telnet` | with enough option negotiation not to confuse a real server |
+| `ssh` | Dropbear's dbclient, public-key auth; see the ReadMe for keys |
 | `NetTrace` | capture packets to a `.pcap` file Wireshark can open |
 | `traceroute` | trace the path to a host |
 | `tftp`, `whois` | the usual small clients |
@@ -106,27 +109,14 @@ the usual set of root authorities.
 before the prompt appears; almost all of that is the cryptography rather than
 the network.
 
-One thing to expect on a machine this slow: **the first connection to a site can
-take twenty seconds or more, and some sites will give up before it finishes.**
-Try again — the second attempt to the same site usually takes under a second,
-because the secure session is remembered, even across a reboot.
+Keys must be in **Dropbear's own format** — an OpenSSH key copied straight
+across will not be read — and you name the key on the command line with `-i`.
+Make it on your PC rather than on the Amiga, which has neither the entropy nor
+the patience. The ReadMe in the archive has the exact commands.
 
-## What is not there yet
-
-- Nothing has run on **real hardware** yet.
-- IPv6 works but is not in the standard build.
-- Accepting connections *from* the internet is untested.
-
-## Compatibility
-
-AmiNetXDuo is an independent implementation of a *published ABI*. No AmiTCP,
-AROSTCP, Miami or Roadshow code has been used, copied or disassembled. Olaf
-Barthel's freely distributable Roadshow SDK headers and autodocs are used solely
-as an ABI reference, for function offsets, tag values, structure layouts and
-documented behaviour.
-
-Software built for other Amiga TCP/IP stacks runs on this one unmodified, which
-is the point of implementing the same ABI rather than a new one.
+The first connection to a site takes twenty seconds or more, and some servers
+give up before it finishes. The second attempt to the same site takes under a
+second: the session is kept on disk and survives a reboot.
 
 ## Prior art
 
@@ -152,6 +142,11 @@ the test suites, continuous integration and how everything is measured, and
 **[docs/RESEARCH.md](docs/RESEARCH.md)** for the engineering record.
 
 ## Licence
+
+AmiNetXDuo is an independent implementation of a published ABI. No AmiTCP,
+AROSTCP, Miami or Roadshow code has been used, copied or disassembled. Olaf
+Barthel's freely distributable Roadshow SDK headers and autodocs are used
+solely as an ABI reference.
 
 MIT. ThreadX and NetX Duo are MIT-licensed as well (© Microsoft and the Eclipse
 ThreadX contributors) and are consumed as unmodified git submodules. The one

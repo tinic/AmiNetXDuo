@@ -19,9 +19,9 @@
 #define AMINETXDUO_SANA2_H
 
 /*
- * tx_api.h first, and deliberately: exec/types.h turns VOID into a macro,
- * which breaks tx_port.h's `typedef void VOID`. The undef/restore pair makes
- * this header safe to include after an exec header too -- whichever of the two
+ * tx_api.h has to come first: exec/types.h turns VOID into a macro, which
+ * breaks tx_port.h's `typedef void VOID`. The undef/restore pair makes this
+ * header safe to include after an exec header too -- whichever of the two
  * spellings of VOID survives, it still means `void`.
  */
 #undef VOID
@@ -80,7 +80,7 @@ BOOL        ami_sana2_is_online(const AmiSana2If *iface);
  * arrives here with the destination, the EtherType and the payload.
  *
  * `dst` is six bytes or NULL for a wire with no address field. The payload is
- * COPIED into a fresh NX_PACKET, because the caller's buffer is an application
+ * copied into a fresh NX_PACKET, because the caller's buffer is an application
  * buffer that goes away when the call returns and the write completes
  * asynchronously. Returns 0, or -1 if the payload exceeds the MTU, the pool is
  * empty or the interface is down.
@@ -104,14 +104,14 @@ typedef struct AmiSana2Stats {
 VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out);
 
 /*
- * The facts QueryInterfaceTagList() is asked for by name and that are not
- * counters: IFQ_HardwareType, IFQ_HardwareAddressSize and the four I/O
- * request tags. All of it is read out of the shim's own state -- nothing here
- * touches the device, so it is safe from any task.
+ * The non-counter facts QueryInterfaceTagList() is asked for by name:
+ * IFQ_HardwareType, IFQ_HardwareAddressSize and the four I/O request tags. All
+ * of it is read out of the shim's own state; nothing here touches the device,
+ * so it is safe from any task.
  *
- * `address_bits` is in BITS, because that is the unit the published API asks
- * for ("for an Ethernet interface the number 48 would be returned"), and it
- * comes from S2_DEVICEQUERY rather than from an assumption about Ethernet.
+ * `address_bits` is in bits, the unit the published API asks for ("for an
+ * Ethernet interface the number 48 would be returned"), and it comes from
+ * S2_DEVICEQUERY rather than from an assumption about Ethernet.
  */
 typedef struct AmiSana2Info {
     ULONG   hardware_type;      /* SANA-II wire type, S2WireType_*          */
@@ -130,17 +130,16 @@ VOID ami_sana2_get_info(const AmiSana2If *iface, AmiSana2Info *out);
  * ask a device whether it implements the flag. The shim probes at open time
  * (post a raw read, take it straight back) and reports the answer here, but a
  * device that accepts the flag and then ignores it is indistinguishable from
- * one that honours it -- and would silently mis-frame every packet. So raw is
+ * one that honours it, and would silently mis-frame every packet. So raw is
  * only *used* when the caller has opted in with ami_sana2_set_raw_allowed();
  * the default is cooked.
  */
 /*
  * TRUE when the device kept one or more of this interface's CMD_READs at
- * teardown. The requests point into the AmiSana2If and into a reply port
- * inside it, so nothing here may be freed while it holds -- ami_sana2_close()
- * refuses to free such an interface and says so. A caller that is deciding
- * whether an interface can be removed needs to know BEFORE it detaches
- * anything, which is what this is for.
+ * teardown. The requests point into the AmiSana2If and into a reply port inside
+ * it, so nothing here may be freed while it holds; ami_sana2_close() refuses to
+ * free such an interface and says so. A caller deciding whether an interface
+ * can be removed needs this answer before it detaches anything.
  */
 BOOL ami_sana2_orphaned(const AmiSana2If *iface);
 
@@ -150,9 +149,9 @@ VOID ami_sana2_set_raw_allowed(BOOL allowed);
 /*
  * The SANA-II readers block in exec Wait() for IORequest completion, which is
  * outside ThreadX's view of the world. Under the baton scheduling model
- * (docs/RESEARCH.md §6.2) a ThreadX thread must hand the baton back before
+ * (docs/RESEARCH.md §6.2) a ThreadX thread must release the baton before
  * blocking that way; the ThreadX port registers the pair here. Both default to
- * no-ops, which is the correct behaviour when Exec does the scheduling.
+ * no-ops, which is correct when Exec does the scheduling.
  */
 typedef VOID (*AmiSana2BlockHook)(VOID);
 VOID ami_sana2_set_block_hooks(AmiSana2BlockHook before_wait,

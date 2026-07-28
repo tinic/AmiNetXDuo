@@ -5,7 +5,7 @@
  * semantics for m_adj / m_cat / m_copyback / m_copydata / m_copym / m_prepend
  * / m_pullup, including the two that surprise people:
  *
- *   - mbuf_prepend and mbuf_pullup FREE THE WHOLE CHAIN when they fail. A
+ *   - mbuf_prepend and mbuf_pullup Free the whole chain when they fail. A
  *     caller that writes `if ((m = mbuf_pullup(m, n)) == NULL) mbuf_freem(m);`
  *     double-frees.
  *   - mbuf_adj never frees anything. Emptied mbufs stay in the chain with

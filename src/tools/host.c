@@ -1,56 +1,37 @@
 /*
- * host -- what does THIS MACHINE make of a name?
+ * host -- resolve a name the way this machine's own programs would.
  *
  *     host NAME/A,TIMEOUT/N/K
  *
- * WHAT IT ACTUALLY DOES, because the name does not say
- *
- * It asks the machine's own resolver, through bsdsocket.library's
- * gethostbyname()/gethostbyaddr(), exactly as any program on this Amiga does.
- * So the answer comes from the whole chain, in the order the chain uses it:
+ * Asks the machine's resolver through bsdsocket.library's gethostbyname() /
+ * gethostbyaddr(), so the answer comes from the whole chain, in the order the
+ * chain uses it:
  *
  *     DEVS:Internet/hosts     names written down on this machine
  *     mDNS (.local)           names the local network answers for itself
  *     the resolver cache      anything looked up recently
  *     the name servers        DEVS:Internet/name_resolution, or the DHCP lease
  *
- * That makes it the answer to "what will my programs get when they ask for
- * this?", which is the question worth asking first, because it is what
- * everything else on the machine is going to act on.
- *
  * A dotted quad is looked up backwards and anything else forwards, as the Unix
- * tool of the same name does. TIMEOUT is accepted and ignored: the resolver
- * owns the timeout and it is set in DEVS:Internet/name_resolution.
+ * tool of the same name does. TIMEOUT is accepted and ignored: the timeout is
+ * the resolver's, set in DEVS:Internet/name_resolution.
  *
- * HOW IT DIFFERS FROM nslookup, WHICH IS WHY BOTH EXIST
- *
- * nslookup does not use the resolver. It builds a DNS query and sends it to a
- * name server itself, so it reports what that SERVER said -- no hosts file, no
- * mDNS, no cache -- and it can ask for record types the resolver has no call
- * for (MX, TXT, NS, SRV, SOA) against a server you nominate.
- *
- * The difference between the two answers is the diagnosis:
+ * nslookup differs in that it bypasses the resolver: it builds a DNS query and
+ * sends it to a name server itself, so it reports what that server said -- no
+ * hosts file, no mDNS, no cache -- and can ask for record types the resolver has
+ * no call for (MX, TXT, NS, SRV, SOA) against a nominated server. Comparing the
+ * two gives the diagnosis:
  *
  *     both agree                  the name is fine
- *     host works, nslookup fails  the answer came from THIS machine --
+ *     host works, nslookup fails  the answer came from this machine --
  *                                 DEVS:Internet/hosts, or mDNS, or the cache
  *     host fails, nslookup works  this machine's resolver configuration is
  *                                 wrong; not the network and not the name
  *     both fail                   the name, the servers, or the network
  *
- * IT STARTS THE NETWORK, AND IT USED NOT TO
- *
- * host was the only client command that refused to. Every other one -- fetch,
- * nc, telnet, tftp, whois, traceroute, ping, nslookup -- calls
- * tool_socket_open(), and opening bsdsocket.library is what brings the stack
- * up. host instead checked whether somebody ELSE had already started it and
- * gave up if not, then advised running AddNetInterface: work it could have
- * done itself. Asking a question is not a reason to refuse to start.
- *
- * (It also carried a second, unreachable implementation over
- * netstack_resolve(). The tools do not link src/netstack -- they get the weak
- * stubs, whose netstack_resolve() is `moveq #-5,d0 / rts` -- so that half was
- * dead code in every build ever shipped. It is gone.)
+ * Like every other client command, host calls tool_socket_open() and so starts
+ * the stack if nothing else has. An earlier version instead checked whether
+ * something else had started it and gave up if not.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -104,9 +85,9 @@ int main(int argc, char **argv)
     name = (const char *)args[ARG_NAME];
 
     /*
-     * Starts the stack if nothing else has. The base is deliberately not
-     * closed -- that open reference is what keeps the network up afterwards,
-     * which is the same bargain every other client command makes.
+     * Starts the stack if nothing else has. The base is not closed: that open
+     * reference keeps the network up afterwards, as in every other client
+     * command.
      */
     sbase = tool_socket_open();
     if (sbase == NULL)
@@ -141,8 +122,8 @@ int main(int argc, char **argv)
     {
         /*
          * gethostbyname() fails without a reason a command can read, and the
-         * two candidates want opposite actions from the user, so say both
-         * rather than pick one. nslookup is how you tell them apart.
+         * two candidates need opposite actions from the user, so print both.
+         * nslookup tells them apart.
          */
         tool_explain_resolve(name, AMI_NET_ERR_NONAME);
         tool_advise("nslookup will say whether the name servers answer.");

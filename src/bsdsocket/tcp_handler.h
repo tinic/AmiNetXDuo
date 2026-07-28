@@ -1,9 +1,8 @@
 /*
  * bsdsocket.library -- the TCP: AmigaDOS handler.
  *
- * See tcp_handler.c. Declared in its own header rather than in
- * bsdsocket_internal.h so that the handler is additive to the library and
- * touches nothing else.
+ * See tcp_handler.c. Kept in its own header rather than in
+ * bsdsocket_internal.h so the handler stays a self-contained addition.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -17,8 +16,8 @@ struct AmiSocketBase;
 
 /*
  * Start the handler process and publish "TCP:" in the DOS device list. Called
- * once, from the first bsd_lib_open(); every later call is a no-op. Failure is
- * not fatal to the library -- the machine simply has no TCP: device.
+ * once, from the first bsd_lib_open(); later calls are no-ops. Failure is not
+ * fatal to the library -- the machine just has no TCP: device.
  */
 VOID bsd_tcp_handler_start(struct AmiSocketBase *master);
 

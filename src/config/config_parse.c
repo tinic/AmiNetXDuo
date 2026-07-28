@@ -6,25 +6,25 @@
  * (DEVS:Internet/name_resolution) and 7.1.2.6 (DEVS:Internet/routes):
  *
  *   - one `keyword=value` per line, whitespace around either side ignored;
- *   - lines starting with ';' or '#' are comments (we also drop a comment
- *     that starts mid-line, which Roadshow does not, because hand-written
- *     files in the wild do it and it can never make a valid file invalid);
+ *   - lines starting with ';' or '#' are comments (a comment starting mid-line
+ *     is dropped too, which Roadshow does not do; hand-written files in the
+ *     wild use it and it can never make a valid file invalid);
  *   - keywords are case-insensitive (ReadArgs templates);
  *   - "quoted values" use the AmigaDOS '*' escape.
  *
- * Deviations from the manual, all deliberate and all additive:
+ * Additions to the manual:
  *
- *   - Roadshow's IPTYPE is the SANA-II packet type number (default 2048), NOT
+ *   - Roadshow's IPTYPE is the SANA-II packet type number (default 2048), not
  *     an address-configuration mode. AmiTCP/Genesis-era documentation and
  *     several config generators use `IPTYPE=DHCP`/`STATIC` instead. Both are
- *     accepted: a numeric IPTYPE is the packet type, an alphabetic one is the
- *     address mode. This is unambiguous, so nothing is lost either way.
- *   - GATEWAY= inside an interface file is not a Roadshow keyword (the real
- *     stack puts the default route in DEVS:Internet/routes) but AmiTCP_NG
- *     writes it, and AmiIfConfig has the field, so it is accepted.
+ *     accepted: a numeric IPTYPE is the packet type, an alphabetic one the
+ *     address mode, which is unambiguous.
+ *   - GATEWAY= inside an interface file is not a Roadshow keyword (Roadshow
+ *     puts the default route in DEVS:Internet/routes) but AmiTCP_NG writes it
+ *     and AmiIfConfig has the field, so it is accepted.
  *   - DEVS:Internet/default_gateway does not exist in Roadshow 1.15 either;
- *     docs/RESEARCH.md and the config.h contract call for it, so it is read
- *     first and DEVS:Internet/routes is read after it.
+ *     docs/RESEARCH.md and config.h call for it, so it is read first and
+ *     DEVS:Internet/routes after it.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -148,11 +148,10 @@ static IfKey lookup_if_keyword(const char *name)
 
 /* ------------------------------------------------ "did you mean DEVICE?" --
  *
- * A mistyped keyword is the commonest thing wrong with a hand-edited
- * interface file, and "unknown keyword 'devcie'" on its own leaves the reader
- * hunting for the difference. Levenshtein distance over the keyword table
- * finds it: the table is 40 short words and this runs once per bad line, so
- * the cost is irrelevant and the payoff is a message that names the fix.
+ * A mistyped keyword is the commonest fault in a hand-edited interface file,
+ * and "unknown keyword 'devcie'" alone leaves the reader hunting for the
+ * difference. Levenshtein distance over the keyword table names the fix; the
+ * table is 40 short words and this runs once per bad line.
  */
 #define CFG_SUGGEST_MAX     24      /* longer than any keyword we know */
 
@@ -202,7 +201,7 @@ static ULONG edit_distance(const char *a, const char *b)
     return prev[lb];
 }
 
-/* Uppercase, because that is how the keywords are written in the manual. */
+/* Uppercase, as the keywords are written in the manual. */
 static VOID upcase_into(char *dst, ULONG dstlen, const char *src)
 {
     ULONG i;
@@ -242,8 +241,8 @@ static const char *suggest_if_keyword(const char *name)
 }
 
 /*
- * "unknown keyword 'devcie'" + "Did you mean DEVICE? ...". Built here rather
- * than at each call site because four of them want the same shape.
+ * "unknown keyword 'devcie'" + "Did you mean DEVICE? ...". Built here because
+ * four call sites want the same shape.
  */
 static VOID report_unknown_keyword(ULONG line, const char *key,
                                    const char *known)
@@ -718,9 +717,9 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
 
 /*
  * Roadshow's name_resolution is resolv.conf-shaped: `keyword value`, one per
- * line, '#' comments. We also accept `keyword=value` and ';' comments, and we
- * accept AmiTCP netdb-myhost lines (HOST <addr> <name> [alias...]) so that the
- * same routine can be pointed at an AmiTCP database.
+ * line, '#' comments. Also accepted are `keyword=value`, ';' comments, and
+ * AmiTCP netdb-myhost lines (HOST <addr> <name> [alias...]), so the same
+ * routine can be pointed at an AmiTCP database.
  */
 VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
                             char *hostname, ULONG hostname_len)

@@ -1,40 +1,35 @@
 /*
- * clients/compat -- the libgcc helpers this toolchain's ZERO BYTE libgcc.a
+ * clients/compat -- the libgcc helpers this toolchain's zero-byte libgcc.a
  * does not supply, beyond the 64-bit division already in src/common.
  *
- *   $AMIGA_TOOLCHAIN_ROOT/lib/gcc/m68k-amigaos/15.2.0/libgcc.a is 0 bytes.
- *   src/common/ami_udivdi3.c covers __udivdi3 / __umoddi3 / __divdi3 /
- *   __moddi3 / __udivmoddi4, which is everything the stack itself and
- *   newlib's printf need.  A ported Unix client reaches further:
+ * $AMIGA_TOOLCHAIN_ROOT/lib/gcc/m68k-amigaos/15.2.0/libgcc.a is 0 bytes.
+ * src/common/ami_udivdi3.c covers __udivdi3 / __umoddi3 / __divdi3 / __moddi3
+ * / __udivmoddi4, which is everything the stack itself and newlib's printf
+ * need.  A ported Unix client reaches further:
  *
- *       __ctzdi2         curl's bitset scan over a 64-bit mask
- *       __popcountdi2    ditto
- *       __floatdidf      curl_off_t -> double, the progress meter
- *       __fixdfdi        double -> curl_off_t, --max-filesize and friends
- *       __atomic_exchange_4   the once-only guard in curl_global_init()
+ *     __ctzdi2         curl's bitset scan over a 64-bit mask
+ *     __popcountdi2    ditto
+ *     __floatdidf      curl_off_t -> double, the progress meter
+ *     __fixdfdi        double -> curl_off_t, --max-filesize and friends
+ *     __atomic_exchange_4   the once-only guard in curl_global_init()
  *
- *   This file is those five and nothing else.  It deliberately does NOT
- *   redefine the division helpers: there is one copy of those in the tree
- *   (src/common/ami_udivdi3.c) and clients/amiga-client.sh compiles that same
- *   file rather than keeping a second.
+ * This file is those five and nothing else.  It does not redefine the division
+ * helpers: there is one copy of those in the tree (src/common/ami_udivdi3.c)
+ * and clients/amiga-client.sh compiles that same file.
  *
- * THE FLOATING POINT ONES ARE NOT SELF-CONTAINED
+ * __floatdidf and __fixdfdi are written in C over double arithmetic, which on
+ * this toolchain means libc.a's __adddf3 / __muldf3 / ..., which call
+ * mathieeedoubbas.library.  Any client that touches a double already has that
+ * dependency, and these two do not escape it.  mathieeedoubbas.library is not
+ * in Kickstart 3.1 ROM (the 40.68 A1200 image contains mathieeesingbas and no
+ * other), so it has to be in LIBS: on the machine.  Every Workbench install
+ * has it.
  *
- *   __floatdidf and __fixdfdi are written in C over double arithmetic, which
- *   on this toolchain means libc.a's __adddf3 / __muldf3 / ..., which call
- *   mathieeedoubbas.library.  That is not a new dependency -- any client that
- *   touches a double already has it -- but it is worth knowing that these two
- *   do not escape it.  mathieeedoubbas.library is NOT in Kickstart 3.1 ROM
- *   (checked: the 40.68 A1200 image contains mathieeesingbas and no other),
- *   so it has to be in LIBS: on the machine.  Every Workbench install has it.
- *
- * __atomic_exchange_4 AND WHY IT IS Disable()
- *
- *   The 68020 has CAS, so a lock-free version is possible.  It is not worth
- *   it: this is called once per curl_global_init() on a machine with one CPU
- *   and no memory ordering to speak of, and Disable() is four instructions.
- *   What it does have to be is safe against an INTERRUPT touching the same
- *   word, which Forbid() would not give.
+ * __atomic_exchange_4 uses Disable().  The 68020 has CAS, so a lock-free
+ * version is possible, but this is called once per curl_global_init() on a
+ * machine with one CPU and no memory ordering to speak of, and Disable() is
+ * four instructions.  It does have to be safe against an interrupt touching
+ * the same word, which Forbid() would not give.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -53,9 +48,8 @@ s64 __fixdfdi(double x);
 u32 __atomic_exchange_4(volatile void *ptr, u32 val, int memorder);
 
 
-/* Count trailing zeros.  GCC's contract: undefined for x == 0, and every
-   caller in a client guards it, but returning 64 is cheaper than a comment
-   about it. */
+/* Count trailing zeros.  GCC leaves x == 0 undefined and every caller in a
+   client guards it; this returns 64 anyway. */
 int __ctzdi2(u64 x)
 {
     u32 lo = (u32)x;
@@ -106,8 +100,7 @@ int __popcountdi2(u64 x)
  * Split rather than a single conversion because there is no 64-bit path in
  * the toolchain to call: the halves go through __floatsidf/__floatunsidf,
  * which libc.a does have.  2^32 is exact in a double, and so is each half, so
- * the only rounding is the final add -- which is what the hardware would do
- * as well.
+ * the only rounding is the final add, matching what the hardware would do.
  */
 double __floatdidf(s64 x)
 {

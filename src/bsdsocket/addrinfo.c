@@ -6,43 +6,33 @@
  * ship in both build configurations -- an IPv4-only build still answers them,
  * just never with an AF_INET6 result.
  *
- * WHAT AF_UNSPEC RETURNS, AND IN WHAT ORDER
+ * What AF_UNSPEC returns, and in what order.
  *
  * The NDK's netdb.h:176 defines AI_MASK as only
  *     AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST | AI_NUMERICSERV
- * There is no AI_V4MAPPED and no AI_ADDRCONFIG, so the two hints modern POSIX
- * uses to steer dual-stack results cannot be expressed by a caller compiled
- * against this header.  The behaviour therefore has to be chosen once, here,
- * and documented -- a caller has no way to ask for anything else:
+ * There is no AI_V4MAPPED and no AI_ADDRCONFIG, so a caller compiled against
+ * this header cannot express the two hints modern POSIX uses to steer
+ * dual-stack results.  The behaviour is therefore fixed here:
  *
- *   1. IPv6 results come FIRST, then IPv4.  A dual-stack host should prefer
- *      IPv6, and a caller that walks the list in order and connects to the
- *      first address that works gets that for free.
+ *   1. IPv6 results come first, then IPv4, so a caller that walks the list in
+ *      order and connects to the first address that works prefers IPv6.
  *   2. AI_ADDRCONFIG is implied and cannot be turned off: AAAA is only looked
- *      up when the stack actually has IPv6 running (netstack_ipv6_enabled()),
- *      and A is only looked up when it has an IPv4 address.  Returning an
- *      address family the machine cannot use has no honest purpose, and the
- *      caller cannot ask for it.
- *   3. AI_V4MAPPED is NOT implied and is not available.  An AF_INET6 query
- *      returns AAAA records and nothing else -- it never synthesises
- *      ::ffff:a.b.c.d from an A record.  A caller that wants both asks for
- *      AF_UNSPEC, which is what the flag exists to avoid needing and what is
- *      left when the flag does not exist.
- *   4. At most ONE address per family is returned.  The resolver underneath
+ *      up when the stack has IPv6 running (netstack_ipv6_enabled()), and A is
+ *      only looked up when it has an IPv4 address.
+ *   3. AI_V4MAPPED is not implied and not available.  An AF_INET6 query
+ *      returns AAAA records only; it never synthesises ::ffff:a.b.c.d from an
+ *      A record.  A caller that wants both asks for AF_UNSPEC.
+ *   4. At most one address per family is returned.  The resolver underneath
  *      (netstack_resolve/netstack_resolve6 over NetX Duo's addons/dns) answers
- *      with a single address, not a set; reporting a one-element list as if it
- *      were the whole RRset would be a lie about round-robin DNS.  A caller
- *      that walks the list still behaves correctly, it just has fewer things
- *      to walk.
+ *      with a single address, not a set, so a one-element list would
+ *      misrepresent round-robin DNS.  A caller that walks the list still
+ *      behaves correctly with fewer entries.
  *
- * MEMORY
- *
- * Each result is ONE allocation: the addrinfo, its sockaddr and (on the first
+ * Each result is one allocation: the addrinfo, its sockaddr and (on the first
  * node only) its canonical name live in one block, so freeaddrinfo() is a walk
- * and a free per node with nothing to get wrong.  ai_canonname on the second
- * node points into the first node's block, which is why freeaddrinfo() must
- * not free it separately and why the list is only ever freed as a whole -- as
- * POSIX requires.
+ * and a free per node.  ai_canonname on the second node points into the first
+ * node's block, so freeaddrinfo() must not free it separately and the list is
+ * only ever freed as a whole, as POSIX requires.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -57,8 +47,8 @@
 #define BSD_GAI_TIMEOUT     (30UL * (ULONG)NX_IP_PERIODIC_RATE)
 
 /*
- * One result node. The sockaddr is embedded rather than pointed at somewhere
- * else so that the whole node is one allocation; ai_addr points at it.
+ * One result node. The sockaddr is embedded so the whole node is one
+ * allocation; ai_addr points at it.
  *
  * The union is sized by the larger of the two sockaddrs in the build. In the
  * floor build that is sockaddr_in (16 bytes) and the node is smaller.
@@ -106,8 +96,8 @@ static BOOL bsd_gai_number(const char *s, ULONG *out)
 }
 
 /*
- * Resolve the service name. Returns an EAI_* code, or 0 with *port set (in
- * HOST order -- the sockaddr writers do the conversion).
+ * Resolve the service name. Returns an EAI_* code, or 0 with *port set in host
+ * order -- the sockaddr writers do the conversion.
  */
 static LONG bsd_gai_service(const char *servname, LONG flags, LONG socktype,
                             UINT *port)
@@ -132,7 +122,7 @@ static LONG bsd_gai_service(const char *servname, LONG flags, LONG socktype,
     /*
      * DEVS:Internet/services, through the same store getservbyname() uses.
      * With no socktype hint both protocols are acceptable and tcp is tried
-     * first, which is what every other resolver does.
+     * first.
      */
     entry = ami_netdb_serv_by_name(servname,
                                    (socktype == SOCK_DGRAM) ? "udp" : "tcp");
@@ -149,8 +139,8 @@ static LONG bsd_gai_service(const char *servname, LONG flags, LONG socktype,
 
 /*
  * Build one node. `canon` is copied into it when non-NULL; otherwise the node
- * carries no name and ai_canonname is left as `inherit` (which points into an
- * earlier node's block -- see the memory note at the top).
+ * carries no name and ai_canonname is set to `inherit`, which points into an
+ * earlier node's block -- see the memory note at the top.
  */
 static BsdAddrInfoNode *bsd_gai_node(LONG family, LONG socktype, LONG protocol,
                                      const NXD_ADDRESS *addr, UINT port,
@@ -226,21 +216,20 @@ static VOID bsd_gai_append(struct addrinfo **head, struct addrinfo **tail,
 /* ---------------------------------------------------------------- vectors */
 
 /*
- * REGISTER ASSIGNMENT IS FROM THE NDK PRAGMA, NOT FROM THE C PROTOTYPE.
+ * Register assignment comes from the NDK pragma, not from the C prototype.
  *
  *   pragmas/bsdsocket_pragmas.h:139  freeaddrinfo(a0)
  *   pragmas/bsdsocket_pragmas.h:140  getaddrinfo(a0,a1,a2,a3)
- *   pragmas/bsdsocket_pragmas.h:141  gai_strerror(a0)      <-- NOT d0
+ *   pragmas/bsdsocket_pragmas.h:141  gai_strerror(a0)      <-- not d0
  *   pragmas/bsdsocket_pragmas.h:142  getnameinfo(a0,d0,a1,d1,a2,d2,d3)
  *
- * gai_strerror() takes a LONG in an ADDRESS register. That is not a typo in
- * the header -- the libcall form on line 264 says "801" too, which is the
- * same a0 -- and it is the second time this project has found an argument in
- * the register you would not have guessed (bpf_set_notify_mask takes (d1,d0)
- * where its neighbour takes (d0,d1)). Every prototype here is generated from
- * that pragma table by tools/gen_vectors.py rather than written by hand,
- * which is why the definitions below have to match bsdsocket_vectors.h
- * exactly and not merely plausibly.
+ * gai_strerror() takes a LONG in an address register. Not a typo in the
+ * header: the libcall form on line 264 says "801" too, which is the same a0.
+ * This is the second surprising register assignment in this ABI
+ * (bpf_set_notify_mask takes (d1,d0) where its neighbour takes (d0,d1)).
+ * Every prototype here is generated from that pragma table by
+ * tools/gen_vectors.py, so the definitions below must match
+ * bsdsocket_vectors.h exactly.
  */
 LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
                      register STRPTR servname         __asm("a1"),
@@ -282,7 +271,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
          * AI_MASK is the NDK's own list of the flags that exist here
          * (netdb.h:176). A caller that sets a bit outside it was compiled
          * against a different header and is asking for something this library
-         * cannot promise, so say so rather than ignore it.
+         * cannot do, so refuse rather than ignore it.
          */
         if ((flags & ~(LONG)(AI_MASK | AI_EXT)) != 0)
             return EAI_BADFLAGS;
@@ -392,8 +381,8 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
                 /*
                  * A dotted quad with an AF_INET6 hint. On a stack with
                  * AI_V4MAPPED this would return ::ffff:a.b.c.d; this NDK has
-                 * no such flag, so there is no way for the caller to have
-                 * asked for it and EAI_ADDRFAMILY is the truthful answer.
+                 * no such flag, so the caller cannot have asked for it and
+                 * EAI_ADDRFAMILY is the right answer.
                  */
                 return EAI_ADDRFAMILY;
             }
@@ -483,9 +472,8 @@ VOID bsd_freeaddrinfo(register struct addrinfo *ai __asm("a0"),
         /*
          * ai_canonname is never freed separately: it is either inside this
          * node's own block or inside the first node's, and both go with the
-         * ami_free() below (the first node is freed last only by accident of
-         * order -- it is freed first, which is fine, because nothing reads
-         * the name after freeaddrinfo() starts).
+         * ami_free() below. The first node is freed first, which is fine --
+         * nothing reads the name once freeaddrinfo() has started.
          */
         ami_free(ai);
 
@@ -568,15 +556,12 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
                             == AMI_NET_OK);
             }
             /*
-             * There is no reverse lookup for IPv6.
-             *
-             * It would be an ip6.arpa PTR query, which NetX Duo's DNS client
-             * only offers through nxd_dns_host_by_address_get() on an
-             * NXD_ADDRESS -- available -- but the nibble-reversed name it
-             * builds has never been exercised here, and a name that is wrong
-             * is worse than no name. NI_NAMEREQD callers get EAI_NONAME and
-             * everyone else gets the numeric form, which is what a host with
-             * no PTR record produces anyway.
+             * No reverse lookup for IPv6. It would be an ip6.arpa PTR query,
+             * available through NetX Duo's nxd_dns_host_by_address_get() on an
+             * NXD_ADDRESS, but the nibble-reversed name it builds has never
+             * been exercised here. NI_NAMEREQD callers get EAI_NONAME and
+             * everyone else gets the numeric form, which is also what a host
+             * with no PTR record produces.
              */
         }
 
@@ -600,8 +585,8 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
         }
         else if ((flags & (ULONG)NI_NOFQDN) != 0)
         {
-            /* Strip everything from the first dot: the caller asked for the
-               short form, which is only meaningful in the local domain. */
+            /* Strip everything from the first dot; the short form is only
+               meaningful in the local domain. */
             ULONG i;
 
             for (i = 0; name[i] != '\0'; i++)

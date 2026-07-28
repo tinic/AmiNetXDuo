@@ -2,15 +2,14 @@
  * AmiNetXDuo tools -- talking to the live NetX Duo instance.
  *
  * Every function here is a NetStackQuery() call and a copy out of the answer.
- * There is no ThreadX in this file any more, and that is the whole point: the
- * ThreadX a command could adopt into was never the one the stack is running
- * on. See tools_nx.h for what that cost, and include/aminetxduo/netstatus.h
- * for the interface these go through.
+ * No ThreadX is involved: the ThreadX a command could adopt into is never the
+ * one the stack is running on. See tools_nx.h, and
+ * include/aminetxduo/netstatus.h for the interface these go through.
  *
  * The library is opened and closed around each of the three calls rather than
- * held across them. Opening it is a child-base clone and costs nothing worth
- * saving, and holding a base open across a printing loop is how a status
- * command ends up keeping the network alive after it exits.
+ * held across them. Opening it is a child-base clone and costs almost nothing,
+ * and a base held open across a printing loop would keep the network alive
+ * after the command exits.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -30,13 +29,13 @@ static union
     struct { NetStatusHeader hdr; NetStatusArp       e[TOOL_MAX_ARP]; } arp;
     struct { NetStatusHeader hdr; NetStatusRoute     e[TOOL_MAX_ROUTE]; } route;
     struct { NetStatusHeader hdr; NetStatusSocket    e[TOOL_MAX_SOCK]; } sock;
+    struct { NetStatusHeader hdr; NetStatusDhcp      e[TOOL_MAX_IF]; }   dhcp;
 } nx_answer;
 
 /*
- * The failure message, once. Every caller here fails the same way and for the
- * same reason, and the message has to distinguish "nothing is running" from
- * "something is running that is not us" -- tool_netstatus_open() already
- * does, so this only covers a library that opened and then would not answer.
+ * The failure message, once. tool_netstatus_open() already distinguishes
+ * "nothing is running" from "something is running that is not us", so this only
+ * covers a library that opened and then would not answer.
  */
 static BOOL nx_quiet;
 
@@ -82,6 +81,8 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
         info->netmask      = 0;
         info->mtu          = 0;
         info->nx_name[0]   = '\0';
+        info->nx_device[0] = '\0';
+        info->nx_unit      = 0;
         info->have_sana2   = FALSE;
         info->sana2_online = FALSE;
         info->bps          = 0;
@@ -93,6 +94,8 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
     out->sock_truncated = FALSE;
     out->gateway        = 0;
     out->have_gateway   = FALSE;
+    out->have_mdns      = FALSE;
+    out->mdns_name[0]   = '\0';
 
     base = nx_open();
     if (base == NULL)
@@ -124,6 +127,9 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
             info->mac[j] = src->nsi_HwAddress[j];
 
         tool_copy_string(info->nx_name, sizeof(info->nx_name), src->nsi_Name);
+        tool_copy_string(info->nx_device, sizeof(info->nx_device),
+                         src->nsi_Device);
+        info->nx_unit = src->nsi_Unit;
 
         if (src->nsi_Flags & NETSTATUS_IF_SANA2)
         {
@@ -153,6 +159,13 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
         {
             out->gateway      = nx_answer.system.e.nss_Gateway;
             out->have_gateway = TRUE;
+        }
+
+        if (nx_answer.system.e.nss_Flags & NETSTATUS_SYS_MDNS)
+        {
+            out->have_mdns = TRUE;
+            tool_copy_string(out->mdns_name, sizeof(out->mdns_name),
+                             nx_answer.system.e.nss_MdnsName);
         }
     }
 
@@ -202,10 +215,7 @@ LONG tool_stats(ToolStats *out)
     if (out == NULL)
         return -1;
 
-    /*
-     * Zeroed field by field rather than with a memset: these tools link no
-     * libc, and a struct this size is worth being explicit about anyway.
-     */
+    /* Zeroed field by field rather than with memset: these tools link no libc. */
     out->have_ip = out->have_icmp = out->have_tcp = FALSE;
     out->have_udp = out->have_arp = out->have_pool = FALSE;
     out->arp_count     = 0;
@@ -342,6 +352,80 @@ LONG tool_stats(ToolStats *out)
     return 0;
 }
 
+/* ------------------------------------------------------------------ DHCP -- */
+
+LONG tool_dhcp(ToolDhcp *out)
+{
+    struct Library *base;
+    LONG            n;
+    LONG            i;
+    LONG            j;
+
+    if (out == NULL)
+        return -1;
+
+    out->count = 0;
+
+    base = nx_open();
+    if (base == NULL)
+        return -1;
+
+    /*
+     * No nx_query_failed() here: a stack that does not know the selector just
+     * means one part of one report is missing, and the caller words that
+     * itself.
+     */
+    n = tool_netstatus_query(base, NETSTATUS_DHCP, &nx_answer,
+                             sizeof(nx_answer.dhcp), sizeof(NetStatusDhcp));
+    if (n < 0)
+    {
+        tool_netstatus_close(base);
+        return -1;
+    }
+
+    for (i = 0; i < n && i < (LONG)TOOL_MAX_IF; i++)
+    {
+        const NetStatusDhcp *src  = &nx_answer.dhcp.e[i];
+        ToolDhcpInfo        *info = &out->iface[i];
+
+        info->nx_index      = src->nsd_Index;
+        info->state         = src->nsd_State;
+        info->address       = src->nsd_Address;
+        info->netmask       = src->nsd_NetMask;
+        info->server        = src->nsd_Server;
+        info->lease_seconds = src->nsd_LeaseSeconds;
+
+        info->router_count = src->nsd_RouterCount;
+        if (info->router_count > (UWORD)NETSTATUS_DHCP_ADDRS)
+            info->router_count = (UWORD)NETSTATUS_DHCP_ADDRS;
+        for (j = 0; j < (LONG)info->router_count; j++)
+            info->router[j] = src->nsd_Router[j];
+
+        info->dns_count = src->nsd_DnsCount;
+        if (info->dns_count > (UWORD)NETSTATUS_DHCP_ADDRS)
+            info->dns_count = (UWORD)NETSTATUS_DHCP_ADDRS;
+        for (j = 0; j < (LONG)info->dns_count; j++)
+            info->dns[j] = src->nsd_Dns[j];
+
+        info->static_route_count = src->nsd_StaticRouteCount;
+        if (info->static_route_count > (UWORD)NETSTATUS_DHCP_ADDRS)
+            info->static_route_count = (UWORD)NETSTATUS_DHCP_ADDRS;
+        for (j = 0; j < (LONG)info->static_route_count; j++)
+            info->static_route[j] = src->nsd_StaticRoute[j];
+
+        tool_copy_string(info->host_name, sizeof(info->host_name),
+                         src->nsd_HostName);
+        tool_copy_string(info->domain_name, sizeof(info->domain_name),
+                         src->nsd_DomainName);
+
+        out->count++;
+    }
+
+    tool_netstatus_close(base);
+
+    return 0;
+}
+
 /* ---------------------------------------------------------------- routes -- */
 
 LONG tool_routes(ToolRoutes *out)
@@ -400,14 +484,11 @@ LONG tool_routes(ToolRoutes *out)
 }
 
 /*
- * The routing table, printed the same way twice.
- *
- * netstat and ShowNetStatus both used to build this out of the interface list
- * and the default gateway, which was correct exactly while there was no
- * routing table -- and it stopped being correct the moment
- * NX_ENABLE_IP_STATIC_ROUTING landed, because a hand-added route would have
- * been in the stack and in neither report.  It is one function so the two
- * commands cannot drift again.
+ * The routing table, printed the same way for netstat and ShowNetStatus. Both
+ * used to derive it from the interface list and the default gateway, which
+ * stopped being correct once NX_ENABLE_IP_STATIC_ROUTING landed: a hand-added
+ * route was in the stack and in neither report. One function keeps them from
+ * drifting again.
  *
  * Order is the order NETSTATUS_ROUTES hands them over, which is the order
  * _nx_ip_route_find() matches in: connected prefixes, then the static table
@@ -464,9 +545,9 @@ VOID tool_print_routes(const ToolRoutes *routes, const AmiConfig *cfg,
     /*
      * Loopback is real and is not in the table: NetX Duo's loopback interface
      * is not one of the nx_ip_interface[] slots NETSTATUS_ROUTES walks, and
-     * _nx_ip_driver_packet_send() shortcuts 127/8 without consulting a route
-     * at all.  Printing it is the honest description of where a 127.0.0.1
-     * packet goes; leaving it out would read as though there were no loopback.
+     * _nx_ip_driver_packet_send() shortcuts 127/8 without consulting a route.
+     * Printed anyway, so the report does not read as though there were no
+     * loopback.
      */
     tool_printf("%-16s %-16s %-16s %-6s %s\n",
                 (LONG)"127.0.0.0", (LONG)"*", (LONG)"255.0.0.0",

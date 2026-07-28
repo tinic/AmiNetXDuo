@@ -15,18 +15,15 @@
 #
 #   So the stack is a parameter here, and everything else is held fixed:
 #
-#     * the driver is tests/curl/curlcheck.c, built once and reused, which
-#       runs each command with a 512 KB stack and records its exit code and
-#       elapsed ticks -- so the DHCP figure is the stack's own AddNetInterface
-#       and the throughput figure is one binary run three times;
+#     * the driver is tests/compare/checkrunner.c, built once and reused,
+#       which runs each command with a 512 KB stack and records its exit
+#       code and elapsed ticks -- so the DHCP figure is the stack's own
+#       AddNetInterface and the throughput figure is one binary run twice;
 #     * NetTrace comes out of ONE build and is staged unchanged against every
 #       stack.  It links nothing of src/: every call into the library is a
 #       published LVO through toolsock.c's inline `jsr a6@(-n:W)`, so it is as
 #       foreign to our stack as to theirs;
-#     * bsdsocktest is the upstream suite, which knows about none of us;
-#     * the curl workload runs the Aminet binary from build/thirdparty-curl,
-#       which links AmiSSL and clib2 and was built by somebody with no stake
-#       in the result.
+#     * bsdsocktest is the upstream suite, which knows about none of us.
 #
 # NOTHING OF THEIRS IS COPIED INTO THIS REPOSITORY.  Both foreign stacks are
 # located at run time through a path -- AMINETXDUO_CMP_ROADSHOW and
@@ -37,17 +34,16 @@
 # OPTIONS
 #
 #   -s ours|roadshow|amitcpng     which stack (required)
-#   -w bench|conf|curl|diag            which workload (required)
+#   -w bench|conf|diag            which workload (required)
 #        bench  AddNetInterface (= time to a DHCP lease), ping, and NetTrace
 #               on loopback and over the wire
 #        conf   the bsdsocktest conformance suite, tier chosen with -a
-#        curl   a fixed-size http:// fetch with the third-party Aminet curl
+#        diag   bring-up only, plus whatever -X adds
 #   -a "ARGS"   bsdsocktest's own argument line (default "NOPAGE";
 #               "LOOPBACK NOPAGE" for the loopback tier).  A line containing
 #               HOST starts the suite's host helper on this machine.
 #   -b DIR      build directory for the `ours` stack (default build/cm)
 #   -B BYTES    NetTrace workload size (default 524288, as docs/RESEARCH.md 24)
-#   -c BYTES    curl workload size (default 1200000, as a04_get_1m2)
 #   -m MODEL    emulator profile (default A1200 -- the only timing profile)
 #   -t SECS     timeout
 #   -T TAG      run tag; results land in build/testhd-<tag>/
@@ -71,7 +67,6 @@ WORKLOAD=""
 CONF_ARGS="NOPAGE"
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 NT_BYTES=524288
-CURL_BYTES=1200000
 MODEL=A1200
 TIMEOUT=900
 TAG=""
@@ -85,14 +80,13 @@ CMDDIR=""
 EXTRALIBS=""
 STAGED_CMDS=()
 
-while getopts "s:w:a:b:B:c:m:t:T:P:R:G:i:X:C:L:U" opt; do
+while getopts "s:w:a:b:B:m:t:T:P:R:G:i:X:C:L:U" opt; do
     case "$opt" in
         s) STACK="$OPTARG" ;;
         w) WORKLOAD="$OPTARG" ;;
         a) CONF_ARGS="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
         B) NT_BYTES="$OPTARG" ;;
-        c) CURL_BYTES="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         T) TAG="$OPTARG" ;;
@@ -174,17 +168,16 @@ done
 
 # ------------------------------------------------------------- ingredients --
 
-DRIVER="$ROOT/build/curl/CurlCheck"
+DRIVER="$ROOT/build/compare/CheckRunner"
 NETTRACE="${AMINETXDUO_CMP_NETTRACE:-$BUILD/src/tools/NetTrace}"
 SUITE="$ROOT/build/bsdsocktest/bsdsocktest"
-THIRDCURL="${AMINETXDUO_CMP_CURL:-}"
 
 . "$ROOT/tools/amiga-toolchain.sh"
-mkdir -p "$ROOT/build/curl"
-if [ ! -x "$DRIVER" ] || [ "$ROOT/tests/curl/curlcheck.c" -nt "$DRIVER" ]; then
-    echo "==> building CurlCheck"
+mkdir -p "$ROOT/build/compare"
+if [ ! -x "$DRIVER" ] || [ "$ROOT/tests/compare/checkrunner.c" -nt "$DRIVER" ]; then
+    echo "==> building CheckRunner"
     "$AMIGA_GCC" -O2 -m68020 -fomit-frame-pointer -Wall -I"$AMIGA_NDK" \
-                 -o "$DRIVER" "$ROOT/tests/curl/curlcheck.c"
+                 -o "$DRIVER" "$ROOT/tests/compare/checkrunner.c"
 fi
 
 A2065="${AMINETXDUO_A2065:-}"
@@ -241,13 +234,13 @@ fi
 # Staging it for every stack costs nothing and is not a thumb on the scale:
 # it is a maths library, not a network one.
 # -L stages a whole LIBS: tree of the caller's own -- amisslmaster.library and
-# its versioned library under AmiSSL/, which the third-party curl opens before
-# main() and which no stack here supplies.
-# Default it, because the failure without it is unreadable: the third-party
-# curl opens amisslmaster.library and its versioned library BEFORE main(), so
-# a missing one means `curl --version` returns rc 20 with no output at all --
-# indistinguishable from the stack under test being broken. That cost an hour
-# once. build/amissl-stage/libs is where tests/curl leaves the tree.
+# its versioned library under AmiSSL/, which no stack here supplies.
+# Defaulted, because the failure without it is unreadable: a client that opens
+# a library BEFORE main() gives no output at all when it is missing, only a
+# return code -- indistinguishable from the stack under test being broken.
+# That cost an hour once, on the third-party curl this harness no longer runs;
+# the trap is the pre-main open, not that client, so the default stays.
+# build/amissl-stage/libs is where the TLS tests leave the tree.
 if [ -z "${EXTRALIBS:-}" ] && [ -d "$ROOT/build/amissl-stage/libs" ]; then
     EXTRALIBS="$ROOT/build/amissl-stage/libs"
     # echo, NOT say(): say() is defined ~40 lines below this and appends to
@@ -314,7 +307,7 @@ case "$WORKLOAD" in
         [ -f "$NETTRACE" ] || { echo "missing $NETTRACE" >&2; exit 2; }
         cp "$NETTRACE" "$STAGE/NetTrace"
         STAGED+=("$STAGE/NetTrace")
-        PEER_KIND="curlpeer"
+        PEER_KIND="httppeer"
         printf 'loopwarm\tDH0:NetTrace LOOPBACK NOCAPTURE BYTES=%s\n' \
                "$NT_BYTES" >> "$PLAN"
         printf 'loop\tDH0:NetTrace LOOPBACK NOCAPTURE BYTES=%s\n' \
@@ -336,29 +329,6 @@ case "$WORKLOAD" in
         STAGED+=("$STAGE/bsdsocktest")
         case "$CONF_ARGS" in *HOST*) PEER_KIND="helper" ;; esac
         printf 'conf\tDH0:bsdsocktest %s\n' "$CONF_ARGS" >> "$PLAN"
-        ;;
-    curl)
-        [ -n "$THIRDCURL" ] && [ -f "$THIRDCURL" ] || {
-            echo "set AMINETXDUO_CMP_CURL to the third-party curl binary" >&2
-            exit 2; }
-        cp "$THIRDCURL" "$STAGE/curl"
-        STAGED+=("$STAGE/curl")
-        PEER_KIND="curlpeer"
-        # The maths libraries are deliberately NOT re-copied here.  They are
-        # staged above from the -os build, and doing it again from build/
-        # would put back the variant clib2 refuses to open with
-        # "mathieeedoubtrans.library could not be opened." -- two files with
-        # the same name and different contents, which cost two runs.
-        MASTER="${AMINETXDUO_CMP_LIBS:-$ROOT/build}/amisslmaster.library"
-        [ -f "$MASTER" ] && cp "$MASTER" "$STAGE/libs/amisslmaster.library"
-        if [ -n "${AMINETXDUO_CMP_AMISSL:-}" ]; then
-            cp -R "${AMINETXDUO_CMP_AMISSL}" "$STAGE/AmiSSL"
-            STAGED+=("$STAGE/AmiSSL")
-        fi
-        printf 'curlget\tDH0:curl -s -o DH0:d/x -w "size=%%{size_download} time=%%{time_total} speed=%%{speed_download}\\n" http://10.0.2.2:%s/bytes/%s\n' \
-               "$BASE_PORT" "$CURL_BYTES" >> "$PLAN"
-        printf 'curlget2\tDH0:curl -s -o DH0:d/y -w "size=%%{size_download} time=%%{time_total} speed=%%{speed_download}\\n" http://10.0.2.2:%s/bytes/%s\n' \
-               "$BASE_PORT" "$CURL_BYTES" >> "$PLAN"
         ;;
     diag)
         # Bring-up and whatever -X asks for, and nothing else.  A stack that
@@ -386,8 +356,8 @@ cleanup() { [ -z "$PEER_PID" ] || kill -TERM "$PEER_PID" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM HUP
 
 case "$PEER_KIND" in
-    curlpeer)
-        python3 "$ROOT/tests/curl/curlpeer.py" --base-port "$BASE_PORT" \
+    httppeer)
+        python3 "$ROOT/tests/peer/httppeer.py" --base-port "$BASE_PORT" \
                 --log "$ROOT/build/cmppeer-$TAG.log" \
                 --seconds "$((TIMEOUT + 300))" \
                 > "$ROOT/build/cmppeer-$TAG.out" 2>&1 &

@@ -1,8 +1,6 @@
 /*
  * tls.library -- TLS for ordinary Amiga programs.
  *
- * WHAT THIS IS
- *
  *   A small shared library that puts TLS 1.2 over a descriptor you already
  *   have from bsdsocket.library.  You do the socket(), the DNS lookup and the
  *   connect() exactly as you would for plain HTTP; then you hand the
@@ -42,60 +40,54 @@
  *   "insecure by accident" mode: TLSA_NoVerify has to be asked for, in those
  *   words.
  *
- * WHAT IT COSTS
- *
- *   A FULL handshake to a public HTTPS server is about seven seconds on a
+ *   A full handshake to a public HTTPS server is about seven seconds on a
  *   14 MHz 68020 for an RSA certificate chain and about twenty-three for an
- *   ECDSA one, and nearly all of that is public-key arithmetic -- one
- *   signature verification per certificate, plus a key exchange.  Budget
- *   roughly 40 KB of Fast RAM per open connection.  See docs/RESEARCH.md 9.
+ *   ECDSA one, nearly all of it public-key arithmetic -- one signature
+ *   verification per certificate, plus a key exchange.  Budget roughly 40 KB of
+ *   Fast RAM per open connection.  See docs/RESEARCH.md 9.
  *
- *   A RESUMED handshake does NONE of that arithmetic, and this library resumes
- *   automatically.  You do not have to ask for it, there is no API for it, and
- *   the second connection to a host you have already visited is a fraction of
- *   a second instead of seven or twenty-three.  The cache lives in the library
- *   and in DEVS:Internet/tlssessions, so it survives your program exiting --
- *   running the same command twice is the case it exists for.  TLSInfo()'s
- *   ti_Resumed says which kind of handshake you got.
+ *   A resumed handshake does none of that arithmetic, and this library resumes
+ *   automatically: there is no API for it, and the second connection to a host
+ *   you have already visited takes a fraction of a second instead of seven or
+ *   twenty-three.  The cache lives in the library and in
+ *   DEVS:Internet/tlssessions, so it survives your program exiting -- running
+ *   the same command twice is the case it exists for.  TLSInfo()'s ti_Resumed
+ *   says which kind of handshake you got.
  *
- *   What that costs, stated plainly: a cached session holds the master secret
- *   for that session in the library's memory and on disk, in the clear.  On a
- *   machine with no memory protection that is not much of a change -- every
- *   task can already read every other task's memory -- but the file means an
- *   attacker who takes the disk can decrypt captured traffic from the resumed
- *   sessions, which the full handshake would not have allowed.  TLSA_NoResume
- *   turns it off entirely; TLSA_SessionFile with an empty string keeps the
- *   cache in RAM and off the disk.
- *
- * WaitSelect() AND TLS -- READ THIS ONE
+ *   What that costs: a cached session holds the master secret for that session
+ *   in the library's memory and on disk, in the clear.  On a machine with no
+ *   memory protection the memory copy changes little -- every task can already
+ *   read every other task's memory -- but the file means an attacker who takes
+ *   the disk can decrypt captured traffic from the resumed sessions, which the
+ *   full handshake would not have allowed.  TLSA_NoResume turns it off
+ *   entirely; TLSA_SessionFile with an empty string keeps the cache in RAM and
+ *   off the disk.
  *
  *   A TLS record is not a byte.  The library reads a whole record off the
  *   socket, decrypts it, and hands you plaintext out of it a bit at a time, so
  *   the socket's readability and the connection's readability are two
  *   different questions:
  *
- *     * WaitSelect() can say NOT READABLE while TLSRead() would return data
+ *     * WaitSelect() can say not readable while TLSRead() would return data
  *       immediately, because the bytes are already decrypted and sitting in the
- *       library.  A program that waits on the descriptor alone will hang with
- *       its answer already in memory.  This is the dangerous one.
+ *       library.  A program that waits on the descriptor alone hangs with its
+ *       answer already in memory.
  *
- *     * WaitSelect() can say READABLE while TLSRead() has to block, because
+ *     * WaitSelect() can say readable while TLSRead() has to block, because
  *       what arrived is the first half of a record and no plaintext can come
  *       out of it until the rest does.
  *
- *   So: do not call WaitSelect() on a descriptor you have given to TLSOpen().
- *   Call TLSWaitSelect(), which takes the same arguments plus the list of TLS
+ *   Do not call WaitSelect() on a descriptor you have given to TLSOpen().  Call
+ *   TLSWaitSelect(), which takes the same arguments plus the list of TLS
  *   connections involved.  It reports a connection readable if the library is
- *   already holding plaintext for it -- returning at once, without waiting --
- *   and otherwise hands the whole thing to bsdsocket.library's WaitSelect().
+ *   already holding plaintext for it, returning at once without waiting, and
+ *   otherwise passes the whole thing to bsdsocket.library's WaitSelect().
  *   TLSPending() is the same test on its own, if you would rather build the
  *   loop yourself.
  *
  *   The second case, a readable socket that yields no plaintext yet, is not
  *   removable without a non-blocking record layer, and it is bounded: the rest
  *   of a record is already on its way.  TLSA_Timeout puts a ceiling on it.
- *
- * THE TRUST STORE
  *
  *   DEVS:Internet/certificates, a file of certificate authorities the machine
  *   trusts.  Without it TLSOpen() fails with TLS_ERR_TRUSTSTORE rather than
@@ -104,18 +96,16 @@
  *   reboot, no flushing the library.  tools/mkcertstore.py turns any PEM
  *   bundle into one.
  *
- * THE CLOCK
- *
  *   Certificates carry validity dates and a great many Amigas have no working
  *   clock, in which case AmigaOS reports 1978 -- earlier than every certificate
  *   on the internet.  Rather than refuse every connection on such a machine,
- *   this library SKIPS the validity dates when the clock is obviously unset and
+ *   this library skips the validity dates when the clock is obviously unset and
  *   checks them when it is not.  TLSInfo()'s ti_ExpiryChecked says which
  *   happened, so a program that wants to tell the user can.
  *
  *   The chain signature and the host name are checked either way, so an
- *   impostor is still refused; what is given up is the guarantee that a
- *   long-since-revoked certificate has stopped working.  Set your clock.
+ *   impostor is still refused; what is given up is any assurance that a
+ *   long-since-revoked certificate has stopped working.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -134,57 +124,51 @@ extern "C" {
 #define TLS_LIB_NAME        "tls.library"
 
 /*
- * THE VERSION IS THE VECTOR LEVEL, AND THE RULE IS ABSOLUTE
+ * The version is the vector level.
  *
- *   ADDING A VECTOR MEANS BUMPING TLS_LIB_VERSION.  Full stop, no exceptions,
- *   not even for "nobody will call it yet".
+ *   Adding a vector means bumping TLS_LIB_VERSION, with no exceptions.
  *
- *   Exec opens a library when lib_Version >= the version asked for and does
- *   not look at anything else.  So a library that grew a vector without
- *   growing its version still answers OpenLibrary(TLS_LIB_NAME, 1) -- and the
- *   caller, compiled against the newer header, jumps to an offset that library
- *   never had.  MakeLibrary() stopped at the (APTR)-1 terminator, so the jump
- *   table simply is not that long: the jump goes into whatever happens to be
- *   in front of the base, on a machine with no memory protection.  Version 2
- *   shipped one call away from exactly that.
+ *   Exec opens a library when lib_Version >= the version asked for and looks at
+ *   nothing else.  A library that grew a vector without growing its version
+ *   still answers OpenLibrary(TLS_LIB_NAME, 1), and the caller, compiled
+ *   against the newer header, jumps to an offset that library never had.
+ *   MakeLibrary() stopped at the (APTR)-1 terminator, so the jump table is not
+ *   that long: the jump goes into whatever is in front of the base, on a
+ *   machine with no memory protection.  Version 2 shipped one call away from
+ *   that.
  *
- *   Get it right and the standard mechanism does the work.  A program that
- *   needs TLSBuffered() asks for 2 and is refused by an older library, which
- *   is a legible failure at OpenLibrary() rather than a wild jump later.  A
- *   program that only needs the original eight keeps asking for 1 and keeps
- *   working against every version since.
+ *   Done right, the standard mechanism does the work.  A program that needs
+ *   TLSBuffered() asks for 2 and is refused by an older library, which is a
+ *   legible failure at OpenLibrary() rather than a wild jump later.  A program
+ *   that only needs the original eight keeps asking for 1 and keeps working
+ *   against every version since.
  *
- *   ASK FOR WHAT YOU USE, not for TLS_LIB_VERSION.  Passing the constant means
+ *   Ask for what you use, not for TLS_LIB_VERSION.  Passing the constant means
  *   recompiling makes your program demand a library it does not need.
  *
- * REVISION
- *
- *   Zero, and it stays zero.  bsdsocket.library and usergroup.library report
- *   revision 0 for the same reason: nothing in this project reads a revision,
- *   and a number nobody reads is a number that goes stale.
- *
- * VERSION HISTORY
+ *   TLS_LIB_REVISION is zero and stays zero.  bsdsocket.library and
+ *   usergroup.library report revision 0 for the same reason: nothing in this
+ *   project reads a revision, and a number nobody reads goes stale.
  *
  *   1   TLSOpenA TLSClose TLSRead TLSWrite TLSPending TLSInfo
  *       TLSErrorString TLSWaitSelect
  *   2   + TLSRandom, TLSBuffered.  Also the version at which TLSInfo() began
  *       filling ti_Resumed, ti_Resumable and ti_SessionsCached -- see the note
- *       on ti_Size, which is what makes asking version 1 for those fields
- *       safe rather than merely unlucky.
+ *       on ti_Size, which is what makes asking version 1 for those fields safe.
  */
 #define TLS_LIB_VERSION     2
 #define TLS_LIB_REVISION    0
 
 /*
- * How many user vectors each version has, and the ONE place that fact is
- * written down.  TLS_LIB_VECTORS is DERIVED from TLS_LIB_VERSION rather than
- * maintained beside it, and src/tlslib/tls_vectors.c asserts the real table
- * against it at build time.
+ * How many user vectors each version has, and the only place that is written
+ * down.  TLS_LIB_VECTORS is derived from TLS_LIB_VERSION rather than maintained
+ * beside it, and src/tlslib/tls_vectors.c asserts the real table against it at
+ * build time.
  *
- * That is what turns the rule above from a comment into a mechanism: add a
- * vector to the table and the build fails, and the only way to make it pass is
- * to declare a TLS_LIB_VECTORS_V<n> and point TLS_LIB_VERSION at it.  You
- * cannot get a new vector into a shipped library without the version moving.
+ * That turns the rule above into a mechanism: add a vector to the table and the
+ * build fails, and the only way to make it pass is to declare a
+ * TLS_LIB_VECTORS_V<n> and point TLS_LIB_VERSION at it.  A new vector cannot
+ * reach a shipped library without the version moving.
  */
 #define TLS_LIB_VECTORS_V1  8
 #define TLS_LIB_VECTORS_V2  10
@@ -198,16 +182,16 @@ struct TLSConnection;
 
 /* ---------------------------------------------------------------- tags --- */
 
-/* 'TLS' << 8.  Tag space is a free-for-all on AmigaOS; a four-byte pattern
-   nobody else would pick is the whole of the collision avoidance available. */
+/* 'TLS' << 8.  Tag space is unallocated on AmigaOS; a four-byte pattern nobody
+   else would pick is the whole of the collision avoidance available. */
 #define TLSA_Dummy          (TAG_USER + 0x544C5300UL)
 
 /*
  * STRPTR.  The name you connected to.  Sent as SNI (without it a shared-IP
  * host answers with the wrong certificate or refuses outright) and checked
  * against the certificate's subject alternative names.  Required unless
- * TLSA_NoVerify is set -- verifying a chain without checking who it is for
- * proves only that SOMEBODY has a valid certificate.
+ * TLSA_NoVerify is set: verifying a chain without checking who it is for
+ * proves only that somebody has a valid certificate.
  */
 #define TLSA_HostName       (TLSA_Dummy + 1)
 
@@ -226,10 +210,9 @@ struct TLSConnection;
 
 /*
  * BOOL.  Do not verify the chain and do not check the host name.  This makes
- * the connection encrypted and NOT authenticated: anyone in the path can be
- * the other end.  It exists because "talk to the printer on my LAN with a
- * self-signed certificate" is a real thing people do; it is not a fallback to
- * reach for when verification fails.
+ * the connection encrypted and not authenticated: anyone in the path can be the
+ * other end.  It exists for cases like a LAN printer with a self-signed
+ * certificate; it is not a fallback for when verification fails.
  */
 #define TLSA_NoVerify       (TLSA_Dummy + 4)
 
@@ -259,18 +242,18 @@ struct TLSConnection;
  * BOOL.  Do not offer a cached session and do not remember this one.  Every
  * connection then pays the full public-key cost -- seven seconds for an RSA
  * chain on a 68020, twenty-three for an ECDSA one -- so this is for a program
- * that would rather have forward secrecy on every connection than have it
- * finish.  Resumption is on by default because on this hardware the trade goes
- * the other way for almost everybody.
+ * that wants forward secrecy on every connection more than it wants speed.
+ * Resumption is on by default because on this hardware the trade usually goes
+ * the other way.
  */
 #define TLSA_NoResume       (TLSA_Dummy + 8)
 
 /*
  * STRPTR.  Where the session cache is mirrored, instead of
- * DEVS:Internet/tlssessions.  An EMPTY STRING means "nowhere": the cache stays
- * in the library, so a second connection from the same or another program
- * still resumes, but nothing survives a reboot and no master secret is
- * written to disk.
+ * DEVS:Internet/tlssessions.  An empty string means nowhere: the cache stays in
+ * the library, so a second connection from the same or another program still
+ * resumes, but nothing survives a reboot and no master secret is written to
+ * disk.
  */
 #define TLSA_SessionFile    (TLSA_Dummy + 9)
 
@@ -298,13 +281,13 @@ struct TLSInfo
     /*
      * Set to sizeof(struct TLSInfo) before the call.
      *
-     * ZERO THE WHOLE STRUCTURE FIRST if you opened the library with a version
-     * older than the one you compiled against.  ti_Size lets an OLD caller
-     * talk to a new library; the other direction -- a new caller talking to an
-     * old library -- is you asking for fields it has never heard of, and it
-     * will fill what it knows and leave the rest of your stack alone.  Zeroed,
-     * an older library's silence reads as FALSE and 0, which is the truth.
-     * Uninitialised, it reads as whatever was on the stack.
+     * Zero the whole structure first if you opened the library with a version
+     * older than the one you compiled against.  ti_Size lets an old caller talk
+     * to a new library; in the other direction, a new caller asks an old
+     * library for fields it has never heard of, and it fills what it knows and
+     * leaves the rest of your stack alone.  Zeroed, an older library's silence
+     * reads as FALSE and 0, which is correct.  Uninitialised, it reads as
+     * whatever was on the stack.
      */
     ULONG   ti_Size;
 
@@ -318,7 +301,7 @@ struct TLSInfo
 
     /*
      * FALSE when the machine's clock is unset and the certificate's validity
-     * dates were therefore NOT checked -- see the note in the library's
+     * dates were therefore not checked -- see the note in the library's
      * documentation.  ti_UnixTime is what we believed the time was, or 0.
      */
     BOOL    ti_ExpiryChecked;
@@ -339,10 +322,9 @@ struct TLSInfo
      */
 
     /*
-     * TRUE when this handshake resumed a cached session -- no certificate was
+     * TRUE when this handshake resumed a cached session: no certificate was
      * sent, no signature was verified, no key exchange happened, and the whole
-     * thing took a fraction of a second.  ti_HandshakeMillis is the number to
-     * quote at anyone who does not believe it.
+     * thing took a fraction of a second.  ti_HandshakeMillis measures it.
      */
     BOOL    ti_Resumed;
 
@@ -351,13 +333,13 @@ struct TLSInfo
     BOOL    ti_Resumable;
 
     /* Sessions the library currently holds, across all hosts and all
-       programs.  Diagnostic; a program has no reason to care. */
+       programs.  Diagnostic. */
     ULONG   ti_SessionsCached;
 };
 
 /*
  * The size of the structure before ti_Resumed existed.  A caller passing this
- * gets the original fields and nothing else, which is the entire compatibility
+ * gets the original fields and nothing else, which is the whole compatibility
  * mechanism and is why ti_Size is a required input.
  *
  * Forty and not forty-four: BOOL on classic AmigaOS is a SHORT, so ti_Verified
@@ -408,8 +390,8 @@ struct TLSSelect
 #define TLS_LVO_TLSBuffered     (-84)
 
 /* The last vector, so a caller that wants to check rather than trust can
-   compare against lib_NegSize.  Opening with the right version is the right
-   answer and this is the belt to its braces. */
+   compare against lib_NegSize.  Opening with the right version is the primary
+   defence; this is a second one. */
 #define TLS_LVO_LAST            TLS_LVO_TLSBuffered
 
 /*
@@ -419,20 +401,18 @@ struct TLSSelect
  * base explicitly -- no global TLSBase -- so that a program can hold two, and
  * so that nothing here fights a <proto/> header.
  *
- * WHY a0 AND a1 ARE READ-WRITE OPERANDS AND NOT PLAIN INPUTS
+ * a0 and a1 are read-write operands rather than plain inputs.
  *
- *   d0, d1, a0 and a1 are SCRATCH registers in the AmigaOS ABI: a library
+ *   d0, d1, a0 and a1 are scratch registers in the AmigaOS ABI: a library
  *   function may leave anything in them.  An inline stub that lists a0 and a1
- *   only as inputs is telling the compiler the opposite, and the compiler
- *   believes it -- so two calls in a row get the arguments loaded once and the
- *   second call is made with whatever the first one left behind.
+ *   only as inputs tells the compiler the opposite, so two calls in a row get
+ *   the arguments loaded once and the second call is made with whatever the
+ *   first one left behind.
  *
- *   That is not a theoretical hazard.  It happened here, in exactly that
- *   shape: TLSWrite() followed by TLSRead() compiled to one `moveal a5,a0`
- *   before the write and none before the read, so TLSRead() ran on a garbage
- *   connection pointer and answered -1 with no error set.  The failure looked
- *   like a library bug for most of a day.  Marking them "+r" says what is
- *   true, and the generated code reloads them.
+ *   That happened here: TLSWrite() followed by TLSRead() compiled to one
+ *   `moveal a5,a0` before the write and none before the read, so TLSRead() ran
+ *   on a garbage connection pointer and answered -1 with no error set.  Marking
+ *   them "+r" is accurate, and the generated code reloads them.
  */
 
 static __inline struct TLSConnection *
@@ -460,9 +440,9 @@ TLSOpenA(struct Library *base, APTR socket_base, LONG sock,
  *                   TLSA_HostName, (ULONG)"example.com",
  *                   TLSA_Error,    (ULONG)&why);
  *
- * At least one tag is required -- call TLSOpenA(base, sockbase, sock, NULL) if
- * you want the defaults and nothing else.  A statement expression rather than a
- * true varargs stub because a shared library's ABI is register-based and this
+ * At least one tag is required; call TLSOpenA(base, sockbase, sock, NULL) for
+ * the defaults and nothing else.  A statement expression rather than a true
+ * varargs stub, because a shared library's ABI is register-based and this
  * header has no .fd to generate a stack-to-register shim from.
  */
 #define TLSOpen(base, sockbase, sock, ...)                                  \
@@ -568,18 +548,18 @@ static __inline LONG TLSWaitSelect(struct Library *base, struct TLSSelect *sel)
 }
 
 /*
- * Bytes this library is holding that have NOT been decrypted yet, or -1.
+ * Bytes this library is holding that have not been decrypted yet, or -1.
  *
- * TLSPending() answers "is plaintext ready".  This answers the other half of
- * the question, and a non-blocking caller needs both.  One TCP segment
- * routinely carries more than one TLS record, so after a TLSRead() the rest
- * sit undecrypted inside the library: the socket is not readable,
- * TLSPending() is 0, and a whole record is already in memory.  A loop that
- * waits on the descriptor in that state waits for data it has.
+ * TLSPending() answers whether plaintext is ready; this answers the other half,
+ * and a non-blocking caller needs both.  One TCP segment routinely carries more
+ * than one TLS record, so after a TLSRead() the rest sit undecrypted inside the
+ * library: the socket is not readable, TLSPending() is 0, and a whole record is
+ * already in memory.  A loop that waits on the descriptor in that state waits
+ * for data it already has.
  *
- * Non-zero means TLSRead() can make progress without another byte arriving.
- * It does not promise TLSRead() will not block -- what is buffered may be half
- * a record -- which is the same bound TLSA_Timeout already puts a ceiling on.
+ * Non-zero means TLSRead() can make progress without another byte arriving.  It
+ * does not mean TLSRead() will not block -- what is buffered may be half a
+ * record -- which is what TLSA_Timeout puts a ceiling on.
  */
 static __inline LONG TLSBuffered(struct Library *base,
                                  struct TLSConnection *conn)
@@ -604,10 +584,10 @@ static __inline LONG TLSBuffered(struct Library *base,
  * TLS layer for randomness (curl routes every Curl_rand() through it) and the
  * alternative is the client seeding an LCG off the clock.
  *
- * Be aware of what it is not: an Amiga has no hardware RNG, and the seed this
- * pool is credited with is around twenty bits on an unattended machine.  That
- * is fine for a nonce, a boundary string or a request id, which is what a
- * client wants it for; docs/RESEARCH.md 9 sets out the limits in full.
+ * An Amiga has no hardware RNG, and the seed this pool is credited with is
+ * around twenty bits on an unattended machine.  That is enough for a nonce, a
+ * boundary string or a request id, which is what a client wants it for;
+ * docs/RESEARCH.md 9 sets out the limits in full.
  *
  * Requires a connection to have been opened at least once in this program:
  * the pool lives in bsdsocket.library and this library reaches it through the

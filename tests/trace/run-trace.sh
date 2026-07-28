@@ -25,7 +25,7 @@
 #   emulator, so nothing of the guest's own framing reaches a host interface,
 #   and /dev/bpf on this machine needs a password anyway.
 #
-# The peer is tests/curl/curlpeer.py, unchanged and reused: it already serves
+# The peer is tests/peer/httppeer.py, unchanged and reused: it already serves
 # /bytes/N out of one seeded buffer and is what the curl suite is scored
 # against, so the wire workload here is the same traffic as that suite's.
 #
@@ -115,14 +115,14 @@ CAPARG=""
 # ---------------------------------------------------------------- peer ----
 
 PEERLOG="$ROOT/build/tracepeer-$TAG.log"
-python3 "$ROOT/tests/curl/curlpeer.py" --base-port "$BASE_PORT" \
+python3 "$ROOT/tests/peer/httppeer.py" --base-port "$BASE_PORT" \
         --log "$PEERLOG" --seconds "$((TIMEOUT + 120))" \
         > "$ROOT/build/tracepeer-$TAG.out" 2>&1 &
 PEER_PID=$!
 trap 'kill "$PEER_PID" 2>/dev/null || true' EXIT
 sleep 2
 kill -0 "$PEER_PID" 2>/dev/null || {
-    echo "curlpeer.py did not start:" >&2
+    echo "httppeer.py did not start:" >&2
     cat "$ROOT/build/tracepeer-$TAG.out" >&2
     exit 2
 }

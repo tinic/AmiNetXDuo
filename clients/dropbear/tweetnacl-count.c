@@ -1,33 +1,26 @@
 /*
  * clients/dropbear/tweetnacl-count.c -- how many field multiplications an SSH
- * handshake actually costs, counted on the BUILD HOST.
+ * handshake costs, counted on the build host.
  *
- * WHY COUNT ON THE HOST
+ * The emulator queue is deep and every timing run has to hold the machine
+ * alone (tools/fsuae-run.sh -x), so anything that does not need a 68020 should
+ * not take a slot.  An operation count does not: 2^255-19 arithmetic executes
+ * the same number of multiplies on any machine, and the count is the half of
+ * the cost model a wall clock cannot give.  The guest measures milliseconds
+ * per primitive, this measures multiplies per primitive, and dividing one by
+ * the other gives the cost of one field multiply on this part.
  *
- *   The emulator queue is deep and every timing run has to hold the machine
- *   alone (tools/fsuae-run.sh -x), so anything that does not need a 68020
- *   should not take a slot.  An operation COUNT does not: 2^255-19 arithmetic
- *   executes the same number of multiplies on any machine, and the count is
- *   the half of the cost model that a wall clock cannot give.
+ * Reaching a `static` function without patching third_party/dropbear:
+ * clients/dropbear/tweetnacl-count.sh derives a copy of
+ * third_party/dropbear/src/curve25519.c into build/, renaming the two
+ * definitions `M` and `S` and inserting counting macros of the same names
+ * directly after them.  Every later use in the file -- and every use is later,
+ * because TweetNaCl defines bottom-up -- goes through the counter.  The
+ * submodule is untouched; the derived file is a build artifact the script
+ * regenerates, so it cannot drift from the pinned tag unnoticed.
  *
- *   Pairing them is the point.  The guest measures milliseconds per primitive;
- *   this measures multiplies per primitive; dividing one by the other gives
- *   the cost of ONE field multiply on this part, which is the number every
- *   proposed optimisation has to be argued against.
- *
- * HOW IT GETS AT A `static` FUNCTION WITHOUT PATCHING third_party/dropbear
- *
- *   clients/dropbear/tweetnacl-count.sh derives a copy of
- *   third_party/dropbear/src/curve25519.c into build/, renaming the two
- *   definitions `M` and `S` and inserting counting macros of the same names
- *   directly after them.  Every later use in the file -- and every use is
- *   later, because TweetNaCl defines bottom-up -- goes through the counter.
- *   The submodule is untouched; the derived file is a build artifact and the
- *   script regenerates it, so it cannot drift from the pinned tag unnoticed.
- *
- *   The counts are therefore of the EXACT code the Amiga runs, not of a
- *   re-implementation, which is what makes them worth putting next to the
- *   measured milliseconds.
+ * The counts are therefore of the same code the Amiga runs, not of a
+ * re-implementation.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -50,11 +43,11 @@ int  dropbear_ed25519_verify(const unsigned char *m, unsigned long mlen,
                              const unsigned char *pk);
 
 /*
- * RFC 8032 section 7.1, TEST 2.  A real key pair and a real signature, so the
- * counts are of a correct operation and the harness proves itself right before
- * it reports anything.  The 1-byte message is what makes this test 2 rather
- * than test 1; SSH signs a 32-byte exchange hash, and the message length moves
- * only the SHA-512, never the curve arithmetic.
+ * RFC 8032 section 7.1, test 2.  A real key pair and a real signature, so the
+ * counts are of a correct operation and the harness checks itself before it
+ * reports anything.  The 1-byte message is what makes this test 2 rather than
+ * test 1; SSH signs a 32-byte exchange hash, and the message length moves only
+ * the SHA-512, never the curve arithmetic.
  */
 static const unsigned char sk2[32] = {
     0x4c,0xcd,0x08,0x9b,0x28,0xff,0x96,0xda,0x9d,0xb6,0xc3,0x46,0xec,0x11,0x4e,0x0f,
@@ -133,9 +126,8 @@ int main(void)
           memcmp(out, x25519_pk_expect, 32) == 0);
     memcpy(pub, out, 32);
 
-    /* 2. The shared secret: the same routine on the peer's point.  Counted
-          separately anyway, because "it is the same function" is exactly the
-          kind of thing that turns out not to be. */
+    /* 2. The shared secret: the same routine on the peer's point, counted
+          separately in case the two ever diverge. */
     m0 = tn_count_M; s0 = tn_count_S;
     dropbear_curve25519_scalarmult(out, x25519_sk, pub);
     row("curve25519 shared secret", m0, s0);

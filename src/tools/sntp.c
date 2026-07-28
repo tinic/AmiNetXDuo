@@ -3,90 +3,60 @@
  *
  *     sntp SERVER/A,TIMEOUT/N/K,SHOW/S,QUIET/S
  *
- * WHY THIS IS NOT A CONVENIENCE
+ * tls.library skips a certificate's notBefore/notAfter entirely when the
+ * machine's clock is outside a plausible window (src/tlslib/tls_time.c), so an
+ * Amiga whose battery died in 2003 can still reach HTTPS sites -- at the price
+ * of accepting an expired certificate.  A correct clock restores the check.
+ * `fetch` reports which of the two happened on every https: URL.
  *
- *   tls.library skips a certificate's notBefore/notAfter entirely when the
- *   machine's clock is outside a plausible window (src/tlslib/tls_time.c).
- *   That is deliberate and it is the right call on an Amiga whose battery died
- *   in 2003 -- the alternative is a machine that cannot reach any HTTPS site at
- *   all -- but the price is exact: an EXPIRED certificate is accepted.  Put the
- *   clock right and the check comes back, which is the single biggest thing a
- *   user can do to what this stack actually verifies.  `fetch` says which of
- *   the two happened on every https: URL, so the effect is visible.
+ * RFC 4330 defines broadcast and unicast.  Broadcast means waiting for a LAN
+ * server to announce the time on its own schedule -- NetX Duo's own client
+ * allows two hours between announcements -- and believing whatever claims to
+ * be a time server; neither suits a Shell command.  This is unicast: ask the
+ * named server, get an answer or a timeout.
  *
- * UNICAST, NOT BROADCAST
+ * Epochs.  NTP counts seconds from 1900-01-01, UNIX from 1970-01-01, AmigaOS
+ * from 1978-01-01.  Only the first and last matter here, and the gap is
+ * 2461449600 seconds (2208988800 from 1900 to 1970, plus 252460800 from 1970
+ * to 1978, which src/tlslib/tls_time.c already carries).
  *
- *   RFC 4330 has both.  Broadcast means sitting and waiting for a server on
- *   the LAN to announce the time whenever it feels like it -- NetX Duo's own
- *   client allows two hours between announcements -- which no Shell command
- *   can do, and it means believing whatever on the LAN claims to be a time
- *   server.  Unicast asks a server the user named and gets an answer or a
- *   timeout.  That is the only one of the two that suits a command you type.
+ * NTP's 32-bit seconds field wraps in February 2036.  A plain 32-bit unsigned
+ * subtraction of the constant above gets the next era right with no special
+ * case, because the server's wrap and ours are the same wrap:
+ * (t + 2^32) - K == t - K, modulo 2^32.  The AmigaOS epoch runs out in 2114,
+ * which is when this stops holding.
  *
- * THE EPOCHS.  THERE ARE THREE OF THEM
+ * Local time.  NTP is UTC; AmigaOS keeps local time, and neither DateStamp()
+ * nor the battery clock has any timezone concept, so writing the clock needs
+ * an offset.  It comes from locale.library's loc_GMTOffset, held since
+ * AmigaOS 2.1 and set by the Locale preferences editor -- not from a new
+ * configuration file, since nothing in DEVS:Internet or DEVS:NetInterfaces
+ * has ever known about time and NetSetup has never asked.  When
+ * locale.library is absent (a bare 3.1 install may not have it) or the offset
+ * is zero, the clock is set to UTC and the report says so.  AmigaOS has no
+ * daylight-saving rules: the preferences offset is the whole answer, summer
+ * and winter alike.
  *
- *   NTP counts seconds from 1900-01-01, UNIX from 1970-01-01, and AmigaOS from
- *   1978-01-01.  Only the first and last matter here, and the gap between them
- *   is 2461449600 seconds (2208988800 from 1900 to 1970, which is the number
- *   everyone knows, plus 252460800 from 1970 to 1978, which is the one
- *   src/tlslib/tls_time.c already carries).
+ * Both clocks are written -- timer.device's TR_SETSYSTIME for the running
+ * system, battclock.resource for the next boot -- because setting only the
+ * system time loses it at the next reboot, which is what SetClock SAVE exists
+ * for.  A machine with no real-time clock has no battclock.resource,
+ * OpenResource() returns NULL, and that half is skipped and reported.
  *
- *   NTP's 32-bit seconds field wraps in February 2036.  A plain 32-bit
- *   unsigned subtraction of the constant above gets the NEXT era right without
- *   any special case, because the wrap in the server's field and the wrap in
- *   our arithmetic are the same wrap -- (t + 2^32) - K == t - K, modulo 2^32.
- *   The AmigaOS epoch runs out in 2114, which is when this stops being true.
+ * NetX Duo vendors an SNTP client at third_party/netxduo/addons/sntp; it
+ * cannot be used from a Shell command.  A command links its own copy of
+ * ThreadX and NetX Duo whose kernel is not running -- the running one is
+ * inside bsdsocket.library.  nx_sntp_client_create() calls tx_thread_create(),
+ * tx_timer_create() and tx_mutex_create(); nx_sntp_client_run_unicast() calls
+ * nx_udp_socket_bind(), which suspends the calling thread.  All of those touch
+ * ThreadX's scheduler globals, which in a Shell command belong to a kernel
+ * that was never entered.  The same fact keeps netstat and ping from reading
+ * the live NX_IP (netstack_weak.c), and is why NetTrace reaches the capture
+ * engine through published bpf_* LVOs rather than by linking src/bpf.
  *
- * LOCAL TIME, WHICH IS A DECISION AND NOT AN OVERSIGHT
- *
- *   NTP is UTC.  AmigaOS keeps LOCAL time: DateStamp() has no timezone concept
- *   whatever, and neither has the battery clock.  So writing the clock needs an
- *   offset, and the question is where it comes from.
- *
- *   Not from a new configuration file.  Nothing in DEVS:Internet or
- *   DEVS:NetInterfaces has ever known about time, NetSetup has never asked,
- *   and inventing an eleventh place to configure the machine to serve one
- *   command would be the wrong answer -- the machine already knows.
- *   locale.library has held loc_GMTOffset since AmigaOS 2.1, the Locale
- *   preferences editor is where a user sets it, and every other program that
- *   cares reads it there.  So this reads it there too.
- *
- *   When locale.library is absent (a bare 3.1 install may not have it) or the
- *   offset is zero, the clock is set to UTC and the report says so, because a
- *   machine three hours out is worth mentioning and silently pretending
- *   otherwise is not.  AmigaOS has no daylight-saving rules of any kind: the
- *   offset in the preferences is the whole answer, summer and winter alike.
- *
- * AND THE BATTERY CLOCK
- *
- *   Setting only the system time loses it at the next reboot, which on a
- *   machine that has just been given a correct clock is the one thing that
- *   must not happen -- SetClock SAVE exists for exactly this reason.  So both
- *   are written: timer.device's TR_SETSYSTIME for the running system, and
- *   battclock.resource for the next boot.  A machine with no real-time clock
- *   has no battclock.resource, OpenResource() returns NULL, and that half is
- *   skipped and said out loud.
- *
- * WHY THE PROTOCOL IS HERE AND NOT NetX Duo's
- *
- *   NetX Duo vendors an SNTP client at third_party/netxduo/addons/sntp, and it
- *   is the obvious thing to use.  It cannot be used from a Shell command, for
- *   a reason that has nothing to do with SNTP:
- *
- *     A command links its OWN copy of ThreadX and NetX Duo, and that copy's
- *     kernel is not running -- the one that is runs inside bsdsocket.library.
- *     nx_sntp_client_create() calls tx_thread_create(), tx_timer_create() and
- *     tx_mutex_create(); nx_sntp_client_run_unicast() calls
- *     nx_udp_socket_bind(), which suspends the calling thread.  Every one of
- *     those touches ThreadX's scheduler globals, and in a Shell command those
- *     globals belong to a kernel that was never entered.  The same fact is why
- *     netstat and ping cannot read the live NX_IP either (netstack_weak.c), and
- *     why NetTrace reaches the capture engine through published bpf_* LVOs
- *     rather than by linking src/bpf.
- *
- *   What a command DOES have is bsdsocket.library, and SNTP over a connected
- *   UDP socket is 48 bytes out and 48 bytes back.  The checks RFC 4330 5
- *   requires of a client are all here and are named where they are made.
+ * A command does have bsdsocket.library, and SNTP over a connected UDP socket
+ * is 48 bytes out and 48 bytes back.  The checks RFC 4330 5 requires of a
+ * client are all here, named where they are made.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -104,9 +74,8 @@
 const char *const tool_name = "sntp";
 
 /*
- * The library bases the two inline sets above expect to find.  Both are opened
- * and dropped inside the one function that uses them, so neither is live for
- * more than the few instructions it takes to read a number.
+ * The library bases the two inline sets above expect to find.  Each is opened
+ * and closed inside the single function that uses it.
  */
 struct Library    *BattClockBase;
 struct LocaleBase *LocaleBase;
@@ -136,10 +105,10 @@ enum
 /* --------------------------------------------------- bsdsocket, by hand --- */
 
 /*
- * Through the LVOs, for the reason fetch.c gives: a command must not link the
- * whole socket surface to send one datagram, and the NDK inlines assume a
- * global SocketBase.  These are the six vectors this command needs; the
- * offsets are docs/RESEARCH.md 3.2's.
+ * Through the LVOs, for the reason fetch.c gives: linking the whole socket
+ * surface to send one datagram is too much, and the NDK inlines assume a
+ * global SocketBase.  These are the vectors this command needs; offsets from
+ * docs/RESEARCH.md 3.2.
  */
 
 struct SntpSockAddr
@@ -306,7 +275,7 @@ static struct SntpHostEnt *sock_gethostbyname(struct Library *base,
 /*
  * timer.device through exec.library alone -- a timerequest and DoIO(), with no
  * TimerBase to collide with anything else the command links.  tests/tls/
- * tls_api.c does the same thing to push the clock back to 1978 on purpose.
+ * tls_api.c does the same to push the clock back to 1978.
  */
 static struct MsgPort     *clock_port;
 static struct timerequest *clock_req;
@@ -373,15 +342,14 @@ static VOID clock_set(ULONG secs, ULONG micro)
 }
 
 /*
- * The battery-backed clock, which is what survives the power switch.  It holds
- * the same "seconds since 1978, local time" the system clock does; a machine
- * without a real-time chip -- a bare A500 or A1200 -- has no resource at all
- * and this returns FALSE.
+ * The battery-backed clock, which survives the power switch.  It holds the same
+ * "seconds since 1978, local time" as the system clock.  A machine without a
+ * real-time chip -- a bare A500 or A1200 -- has no resource at all, and this
+ * returns FALSE.
  *
- * Through the NDK inlines rather than by hand.  fetch.c and toolsock.c
- * hand-code bsdsocket.library's LVOs on purpose, because the ABI is the thing
- * those commands exist to demonstrate; nothing of the kind is true of a
- * resource that has had three functions since 1985.
+ * Through the NDK inlines rather than by hand: fetch.c and toolsock.c hand-code
+ * bsdsocket.library's LVOs because that ABI is what they exist to demonstrate,
+ * which does not apply to a resource that has had three functions since 1985.
  */
 static BOOL battclock_write(ULONG secs)
 {
@@ -398,8 +366,8 @@ static BOOL battclock_write(ULONG secs)
 
 /*
  * Minutes west of Greenwich, from the Locale preferences.  FALSE when
- * locale.library is not on the machine, in which case nothing here knows the
- * timezone and UTC is the only defensible answer.
+ * locale.library is not on the machine; nothing else here knows the timezone,
+ * so the caller falls back to UTC.
  */
 static BOOL locale_gmt_offset(LONG *minutes_west)
 {
@@ -428,10 +396,8 @@ static BOOL locale_gmt_offset(LONG *minutes_west)
 /* ------------------------------------------------------------- formatting -- */
 
 /*
- * dos.library's own date formatter, so the time reads exactly like every other
- * date on the machine -- and in the user's own Locale, which is the point of
- * having set the clock to local time in the first place.  DateToStr() is V36
- * and the floor is V40.
+ * dos.library's date formatter, so the time reads like every other date on the
+ * machine and in the user's Locale.  DateToStr() is V36 and the floor is V40.
  */
 typedef struct SntpDateText
 {
@@ -464,9 +430,9 @@ static VOID format_amiga_time(ULONG secs, SntpDateText *out)
 }
 
 /*
- * "3 days 4 hours", "12 minutes", "6 seconds" -- the two largest units that
- * are worth saying and no more.  Printed rather than formatted into a buffer,
- * because dos.library's only formatter is VPrintf and it writes to a file.
+ * "3 days 4 hours", "12 minutes", "6 seconds" -- the two largest useful units.
+ * Printed rather than formatted into a buffer, because dos.library's only
+ * formatter is VPrintf and it writes to a file.
  */
 static VOID print_span(ULONG secs)
 {
@@ -491,11 +457,9 @@ static VOID print_span(ULONG secs)
 /* -------------------------------------------------------------- the wire --- */
 
 /*
- * An SNTP message is 48 bytes and every multi-byte field is big-endian, which
- * on m68k means the bytes are already in the right order -- so a cast would
- * work and is still not used.  Byte at a time costs four instructions, says on
- * its face what the wire format is, and does not quietly become wrong if any
- * of this is ever read on something little-endian.
+ * An SNTP message is 48 bytes and every multi-byte field is big-endian, so on
+ * m68k a cast would work.  Byte at a time instead: four instructions, states
+ * the wire format, and stays correct if this is ever read little-endian.
  */
 static ULONG be32(const UBYTE *p)
 {
@@ -513,12 +477,11 @@ static VOID put_be32(UBYTE *p, ULONG v)
 
 /*
  * NTP's fraction field is a binary fraction of a second; timer.device wants
- * microseconds.  The exact conversion is frac * 1000000 / 2^32, which needs 64
- * bits, and 64-bit division on a 68020 is a libgcc call for a number whose
- * bottom sixteen bits are noise anyway.  Dropping those first leaves
- * g * 15625 / 1024 with g < 65536, which is exact in 32 bits and resolves to
- * about 15 microseconds -- four orders of magnitude finer than the round trip
- * it is added to.
+ * microseconds.  The exact conversion, frac * 1000000 / 2^32, needs 64 bits,
+ * and 64-bit division on a 68020 is a libgcc call for a number whose bottom
+ * sixteen bits are noise.  Dropping those first leaves g * 15625 / 1024 with
+ * g < 65536, exact in 32 bits, resolving to about 15 microseconds -- four
+ * orders of magnitude finer than the round trip it is added to.
  */
 static ULONG frac_to_micro(ULONG frac)
 {
@@ -540,8 +503,8 @@ typedef struct SntpReply
  *   LI != 3         the server says its own clock is not synchronised
  *   stratum 1..15   0 is a kiss-o'-death, 16+ is unsynchronised
  *   transmit != 0   a server that has never had the time sends zero
- *   originate       must be the timestamp we put in our request, which is
- *                   what stops a stale or spoofed reply being believed
+ *   originate       must be the timestamp we put in our request; this is what
+ *                   stops a stale or spoofed reply being believed
  *
  * The source address needs no check: the socket is connect()ed, so the stack
  * has already dropped anything that did not come from the server.
@@ -596,13 +559,11 @@ static LONG arg_or(const LONG *args, int index, LONG fallback)
 }
 
 /*
- * One request, one reply.  FALSE after saying what went wrong; `where` is the
- * server's address, so that a failure names the machine it was talking to
- * rather than "the time server".
+ * One request, one reply.  FALSE after reporting what went wrong; `where` is
+ * the server's address, so a failure names the machine it was talking to.
  *
- * Up to SNTP_ATTEMPTS requests go out, sharing TIMEOUT between them, because a
- * lost datagram is the ordinary case on UDP and one dropped request should not
- * cost the user the whole command.
+ * Up to SNTP_ATTEMPTS requests go out, sharing TIMEOUT between them, since a
+ * lost datagram is ordinary on UDP.
  */
 static BOOL sntp_exchange(struct Library *sbase, LONG sock, ULONG timeout,
                           const char *where, SntpReply *reply)
@@ -626,12 +587,11 @@ static BOOL sntp_exchange(struct Library *sbase, LONG sock, ULONG timeout,
             return FALSE;
 
         /*
-         * The transmit timestamp we send is our own clock, which may be
-         * decades out -- that does not matter.  Its only job is to come back
-         * in the originate field so a reply can be matched to a request, and
-         * RFC 4330 says a client may use any unique value.  The microsecond
-         * reading is used raw as the fraction for that reason: it is unique
-         * and nothing on either end has to interpret it.
+         * The transmit timestamp is our own clock, which may be decades out.
+         * That does not matter: its only job is to come back in the originate
+         * field so the reply can be matched to the request, and RFC 4330 lets
+         * a client use any unique value.  The microsecond reading is used raw
+         * as the fraction because it is unique and nothing interprets it.
          */
         clock_get(&sent_secs, &sent_micro);
         sent_secs += SNTP_NTP_TO_AMIGA;
@@ -651,9 +611,9 @@ static BOOL sntp_exchange(struct Library *sbase, LONG sock, ULONG timeout,
         }
 
         /*
-         * Wait in one-second slices so Ctrl-C is noticed promptly: WaitSelect
-         * is given no signal mask, because a break during a one-second wait is
-         * indistinguishable from a break a moment after it.
+         * Wait in one-second slices so Ctrl-C is noticed promptly.  WaitSelect
+         * gets no signal mask: a break during a one-second wait is
+         * indistinguishable from one a moment after it.
          */
         while (waited < per_attempt)
         {
@@ -688,18 +648,18 @@ static BOOL sntp_exchange(struct Library *sbase, LONG sock, ULONG timeout,
                 if (bad != NULL)
                 {
                     /*
-                     * A bad reply is not a reason to give up: on a busy
-                     * network it may be a stale datagram from a previous run.
-                     * Say so once and go round again.
+                     * A bad reply is not a reason to give up: it may be a
+                     * stale datagram from a previous run.  Report it once and
+                     * try again.
                      */
                     tool_error("%s", (LONG)bad);
                     break;
                 }
 
                 /*
-                 * The round trip, by our own clock.  Both readings come from
-                 * timer.device before anything is changed, so the decades the
-                 * clock may be out cancel exactly.
+                 * The round trip by our own clock.  Both readings come from
+                 * timer.device before anything is changed, so however far out
+                 * the clock is cancels exactly.
                  */
                 reply->round_trip_us =
                     (now_secs - (sent_secs - SNTP_NTP_TO_AMIGA)) * 1000000UL
@@ -774,10 +734,9 @@ int main(int argc, char **argv)
         timeout = SNTP_DEFAULT_TIMEOUT;
 
     /*
-     * Opening bsdsocket.library is what starts the network on a machine where
-     * nothing has yet -- the same contract AddNetInterface relies on -- so a
-     * user who has configured an interface and not started it still gets a
-     * clock rather than a lecture.
+     * Opening bsdsocket.library starts the network on a machine where nothing
+     * has started it yet, the same behaviour AddNetInterface relies on, so a
+     * configured but unstarted interface still yields a clock.
      */
     sbase = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
     if (sbase == NULL)
@@ -802,12 +761,10 @@ int main(int argc, char **argv)
         struct SntpHostEnt *he = sock_gethostbyname(sbase, server);
 
         /*
-         * h_length is checked as well as the pointers, and that is not
-         * belt-and-braces: a resolver that answers with a hostent it could not
-         * fill produces a plausible-looking record whose address is four bytes
-         * of nothing, and the first version of this command turned that into
-         * "could not send the request" -- an error about the wrong thing
-         * entirely.  fetch.c checks the same three, for the same reason.
+         * h_length is checked as well as the pointers: a resolver that answers
+         * with a hostent it could not fill gives a plausible record whose
+         * address is four bytes of nothing, which an earlier version reported
+         * as "could not send the request".  fetch.c checks the same three.
          */
         if (he == NULL || he->h_addr_list == NULL ||
             he->h_addr_list[0] == NULL || he->h_length != 4)
@@ -851,9 +808,9 @@ int main(int argc, char **argv)
             sa.sin_zero[i] = 0;
 
         /*
-         * connect() on a datagram socket sets the peer, which is what makes
-         * send/recv usable -- and makes the stack drop every datagram that did
-         * not come from the server, so no source check is needed here.
+         * connect() on a datagram socket sets the peer, which makes send/recv
+         * usable and makes the stack drop every datagram that did not come
+         * from the server, so no source check is needed.
          */
         if (sock_connect(sbase, sock, &sa, (LONG)sizeof(sa)) != 0)
         {
@@ -879,10 +836,9 @@ int main(int argc, char **argv)
 
     /*
      * The server's transmit timestamp plus half the round trip is the time
-     * NOW.  The textbook four-timestamp offset formula is deliberately not
-     * used: it is for disciplining a clock that is already close, and it
-     * overflows 32 bits outright when the local clock is 48 years out, which
-     * is exactly the machine this command exists for.
+     * now.  The four-timestamp offset formula is not used: it is for
+     * disciplining a clock that is already close, and it overflows 32 bits
+     * when the local clock is 48 years out -- the case this command is for.
      */
     new_utc   = reply.transmit_secs - SNTP_NTP_TO_AMIGA;
     new_micro = frac_to_micro(reply.transmit_frac) + reply.round_trip_us / 2UL;
@@ -896,10 +852,9 @@ int main(int argc, char **argv)
 
     /*
      * Local time is UTC minus the offset west of Greenwich, and the Amiga
-     * clock holds local time.  A machine east of Greenwich has a negative
-     * offset, so this adds; the clamp is for the absurd case of a UTC value so
-     * small that the subtraction would wrap, which only happens if a server
-     * hands out 1978.
+     * clock holds local time.  East of Greenwich the offset is negative, so
+     * this adds.  The clamp covers a UTC value small enough for the
+     * subtraction to wrap, which needs a server handing out 1978.
      */
     if (have_locale && gmt_west != 0)
     {

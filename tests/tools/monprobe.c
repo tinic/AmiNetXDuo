@@ -1,25 +1,24 @@
 /*
- * MonProbe -- the network monitoring hooks, and whether they can say no.
+ * MonProbe -- the network monitoring hooks, and whether they can deny a call.
  *
  * "Monitoring hooks can be used both for inspecting and filtering data that
- * enters the stack, or for denying access to certain APIs." The denying half
- * is what this exercises, because it is the half with consequences: a hook
- * that returns an errno must make bind() or connect() fail with exactly that
- * errno, and must do it BEFORE the stack has done anything.
+ * enters the stack, or for denying access to certain APIs."  This exercises
+ * the denying half: a hook that returns an errno must make bind() or connect()
+ * fail with exactly that errno, before the stack has done anything.
  *
  * Three things here cannot be checked by a build:
  *
- *   1. THE REGISTER CONVENTION. The hook is entered with the Hook in A0, NULL
- *      in A2 and the message in A1 -- not the A0/A1 pair a reader would
- *      guess, and not utility.library's usual "object in A2". A wrong guess
- *      passes the message in the wrong register and the hook reads rubbish.
+ *   1. The register convention.  The hook is entered with the Hook in A0, NULL
+ *      in A2 and the message in A1 -- not the A0/A1 pair a reader would guess,
+ *      and not utility.library's usual "object in A2".  A wrong guess passes
+ *      the message in the wrong register and the hook reads rubbish.
  *
- *   2. THE WALK STOPS AT THE FIRST REFUSAL. "unless another hook denies
- *      this" -- so a hook that allows a call cannot overrule one that denied
- *      it. The probe installs two and counts invocations to prove the second
- *      is never consulted once the first has said no.
+ *   2. The walk stops at the first refusal.  "unless another hook denies this"
+ *      -- a hook that allows a call cannot overrule one that denied it.  The
+ *      probe installs two and counts invocations to show the second is never
+ *      consulted once the first has said no.
  *
- *   3. THE MESSAGE IS THE PUBLISHED SHAPE. bmm_Size, bmm_Socket and bmm_Name
+ *   3. The message is the published shape.  bmm_Size, bmm_Socket and bmm_Name
  *      are checked against what was actually passed to bind().
  *
  * Vectors are called by hand at their LVOs, as in the other probes.
@@ -291,8 +290,8 @@ static LONG probe_hook(register struct Hook *hook __asm("a0"),
 
     /*
      * BindMonitorMsg and ConnectMonitorMsg have the same first four members
-     * in the same order, so one reader serves both -- which is a property of
-     * the published structs, not an assumption: size, caller, socket, name.
+     * in the same order -- size, caller, socket, name -- so one reader serves
+     * both.
      */
     if (message != NULL)
     {
@@ -304,10 +303,9 @@ static LONG probe_hook(register struct Hook *hook __asm("a0"),
         st->ps_Name   = (APTR)bmm->bmm_Name;
 
         /*
-         * A SendMonitorMessage is a different and longer struct that happens
-         * to start with the same three members. Its own size is what tells
-         * the two apart -- there is nothing else in the message to say which
-         * kind it is, which is why smm_Size exists.
+         * A SendMonitorMessage is a longer struct that starts with the same
+         * three members.  Its size is the only thing in the message that tells
+         * the two apart, which is why smm_Size exists.
          */
         if (bmm->bmm_Size == (LONG)sizeof(struct SendMonitorMessage))
         {
@@ -327,11 +325,11 @@ static LONG probe_hook(register struct Hook *hook __asm("a0"),
 }
 
 /*
- * The observations only. Separate from probe_hook_init() because that one
- * clears h_MinNode, and clearing the MinNode of a hook that is STILL IN the
- * library's list unlinks it -- the list then walks past it and the hook is
- * never called again. That is a probe bug that looks exactly like a library
- * bug: three assertions failed with "the hook was not consulted".
+ * The observations only.  Separate from probe_hook_init() because that one
+ * clears h_MinNode, and clearing the MinNode of a hook still in the library's
+ * list unlinks it: the list then walks past it and the hook is never called
+ * again, which looks exactly like a library bug ("the hook was not
+ * consulted").
  */
 static VOID probe_state_reset(ProbeState *st)
 {
@@ -417,9 +415,9 @@ int main(void)
                                                     : " -- WRONG"));
 
     /*
-     * A type the API defines but this library does not dispatch. Refusing it
-     * is the point: a hook accepted for MHT_Packet and then never called
-     * cannot be told apart from a network with no traffic on it.
+     * A type the API defines but this library does not dispatch.  It must be
+     * refused: a hook accepted for MHT_Packet and then never called cannot be
+     * told apart from a network with no traffic on it.
      */
     rc = p_add_hook(base, MHT_Packet, &hook_a, NULL);
     Printf((CONST_STRPTR)"add MHT_Packet: rc %ld (errno %ld)%s\n",
@@ -641,10 +639,10 @@ int main(void)
         (VOID)p_close(base, s);
 
         /*
-         * THE INVARIANT THE AUTODOC STATES, across all three: smm_To and
-         * smm_Msg are never both set. It says "either ... will be NULL",
-         * which excludes them both being set and does NOT require exactly one
-         * -- send() has neither, because there is neither to report.
+         * The autodoc states, across all three, that smm_To and smm_Msg are
+         * never both set: "either ... will be NULL".  That excludes them both
+         * being set and does not require exactly one -- send() has neither,
+         * because there is neither to report.
          */
         Printf((CONST_STRPTR)"never both set: yes -- correctly\n");
 

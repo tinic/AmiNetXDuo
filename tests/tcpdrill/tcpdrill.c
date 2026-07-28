@@ -1,19 +1,14 @@
 /*
  * tcpdrill -- a packet-level conformance harness for AmiNetXDuo's TCP.
  *
- * THE IDEA, AND WHERE IT COMES FROM
- *
  * Google's packetdrill states a test as two interleaved things: the socket
  * calls an application makes, and the exact packets that must appear on the
  * wire in response -- flags, sequence numbers, window, options, and the time
  * between them.  A failing case is then a specification of what should have
  * happened, which is the property this harness is after.  Its published
  * scripts were read as a description of correct TCP behaviour; none of its
- * code or syntax is reproduced here, and it could not be run here anyway (see
- * tapdev.h for the SLIRP argument, which is the reason the peer lives inside
- * the guest).
- *
- * THE SCRIPT
+ * code or syntax is reproduced here, and it could not be run here anyway
+ * (tapdev.h has the SLIRP detail that puts the peer inside the guest).
  *
  * One file, DH0:drill.txt, holding every case.  One directive per line, first
  * word is the verb, `#` starts a comment.  Blank lines are ignored.
@@ -46,7 +41,7 @@
  *
  * FLAGS is a string from FSRPAUEC, or `-` for none.  Keys:
  *
- *   seq=N   our sequence numbers are offsets from OUR initial sequence number,
+ *   seq=N   our sequence numbers are offsets from our initial sequence number,
  *           which the harness learns from the first SYN it sees; the peer's
  *           are offsets from the ISN this harness chose.  So `seq=1 ack=1`
  *           after a handshake means what it looks like, on both sides, and a
@@ -59,16 +54,14 @@
  *           with it (rx).
  *   within=MS / after=MS
  *           bounds on the gap between this frame and the previous event,
- *           measured from the E-Clock reading taken INSIDE the device's
+ *           measured from the E-Clock reading taken inside the device's
  *           BeginIO -- the instant the stack handed the frame over -- so the
  *           harness's own polling interval does not enter the measurement.
  *
- * OUTPUT
- *
- * DH0:tcpdrill.txt, one line per directive that asserted something, and a
- * decoded expected/observed pair for every failure.  Flushed line by line:
- * §16.9 records a diagnostic tool losing its last twenty lines to a reboot,
- * and a harness that cannot report the crash it caused is not a harness.
+ * Output goes to DH0:tcpdrill.txt: one line per directive that asserted
+ * something, and a decoded expected/observed pair for every failure.  Flushed
+ * line by line, because §16.9 records a diagnostic tool losing its last twenty
+ * lines to a reboot.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -533,9 +526,8 @@ typedef struct Seg
     BOOL    tcp_ok;             /* TCP checksum verified        */
 
     /* Enough of the frame to say what a frame the decoder rejected actually
-       was.  "non-TCP frame ether=0x0800" is not a diagnosis, and the first
-       time one appeared it cost an emulator boot to find out that it was an
-       ICMP echo reply. */
+       was: "non-TCP frame ether=0x0800" on its own does not distinguish, for
+       instance, an ICMP echo reply. */
     ULONG   frame_len;
     UBYTE   head[34];
 } Seg;
@@ -593,9 +585,8 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
     s->urg      = rd16(&tcp[18]);
     s->dlen     = iplen - ihl - thl;
 
-    /* The TCP checksum is verified on every frame the stack sends.  It costs
-       nothing here and it is the one field a script would never think to
-       assert on. */
+    /* The TCP checksum is verified on every frame the stack sends: it costs
+       nothing here and no script would think to assert on it. */
     {
         ULONG sum = 0;
         UBYTE ph[4];
@@ -714,8 +705,7 @@ static VOID arp_reply(const UBYTE *req)
 
 /*
  * Drain the device.  ARP is answered here and never queued: it is not part of
- * any script, it happens whenever the stack has to resolve the peer, and a
- * test that had to spell it out would be a test of ARP.
+ * any script and happens whenever the stack has to resolve the peer.
  */
 static ULONG n_background;      /* frames dropped by the filter in pump() */
 
@@ -739,20 +729,18 @@ static VOID pump(VOID)
         }
 
         /*
-         * TRAFFIC THAT IS NOT PART OF ANY CASE.
+         * Traffic that is not part of any case.  The stack under test is a
+         * whole stack: it answers ARP (above), and anything else in the tree
+         * that opens a UDP socket -- mDNS, a DHCP renewal, an IGMP report --
+         * puts frames on this wire that no script mentions.  They used to be
+         * queued like everything else, so the next `tx` in whatever case was
+         * running failed with "non-TCP frame ether=0x0800" and every assertion
+         * after it was one frame out of step; that is how c04, c05 and a01
+         * failed in one run of an unchanged stack and passed in the next.
          *
-         * The stack under test is a whole stack: it answers ARP (above), and
-         * anything else in the tree that opens a UDP socket -- mDNS, a DHCP
-         * renewal, an IGMP report -- puts frames on this wire that no script
-         * mentions.  They used to be queued like everything else, so the next
-         * `tx` in whatever case happened to be running failed with
-         * "non-TCP frame ether=0x0800" and every assertion after it was one
-         * frame out of step.  That is how c04, c05 and a01 came to fail in one
-         * run of an unchanged stack and pass in the next.
-         *
-         * Anything that is IPv4 and is NOT TCP TO THE PEER is therefore
-         * counted and dropped.  A malformed TCP segment, or one aimed at the
-         * peer, still reaches the queue -- those are results.
+         * Anything IPv4 that is not TCP to the peer is therefore counted and
+         * dropped.  A malformed TCP segment, or one aimed at the peer, still
+         * reaches the queue -- those are results.
          */
         if (ether == ETYPE_IP && len >= ETH_HDR + 20 &&
             (scratch[ETH_HDR + 9] != 6 || rd32(&scratch[ETH_HDR + 16]) != PEER_IP))
@@ -763,7 +751,8 @@ static VOID pump(VOID)
 
         if (pend_count >= PEND_MAX)
         {
-            /* Dropping here would make every later assertion a lie. */
+            /* Dropping here would leave every later assertion one frame out
+               of step. */
             say("  !! frame queue overflow -- a case sent more than %u frames "
                 "between directives", (ULONG)PEND_MAX);
             pend_tail = (UWORD)((pend_tail + 1) % PEND_MAX);
@@ -1136,7 +1125,7 @@ static VOID do_tx(const char *args, const char *raw)
     }
 
     /* The first SYN we ever see fixes our initial sequence number.  Nothing
-       in a script may name it, which is the point. */
+       in a script may name it. */
     if (!cs.u_isn_known && (got.flags & TF_SYN) != 0)
     {
         cs.u_isn       = got.seq;
@@ -1269,12 +1258,12 @@ static VOID do_rx(const char *args, const char *raw)
     pump();
 
     /*
-     * The clock is read BEFORE the injection and not after.  tap_rx_put()
-     * ends in ReplyMsg(), which signals the reader thread, and the reader
-     * runs at a higher priority -- so the stack's answer can be transmitted,
-     * and stamped, before tap_rx_put() has returned here.  Reading the clock
-     * afterwards made every `after`/`within` on an answering frame come out
-     * as an unsigned underflow of about 6,057,780 ms.
+     * The clock is read before the injection, not after.  tap_rx_put() ends in
+     * ReplyMsg(), which signals the reader thread, and the reader runs at a
+     * higher priority, so the stack's answer can be transmitted and stamped
+     * before tap_rx_put() has returned here.  Reading the clock afterwards
+     * made every `after`/`within` on an answering frame come out as an
+     * unsigned underflow of about 6,057,780 ms.
      */
     cs.t_last = tap_eclock_now();
     build_and_inject(&in);
@@ -1655,12 +1644,11 @@ static VOID do_opt(const char *args, const char *raw)
 /*
  * `close [within=MS]`.
  *
- * The bound is the point of the option.  CloseSocket() sends a FIN and the
- * connection outlives the descriptor, so the one thing that must never happen
- * is the call waiting for a peer that has stopped answering -- a program that
- * closes and exits would hang on the way out.  A case that cares says so, and
- * the number in the transcript is the whole CloseSocket(), measured across the
- * call rather than off the frame it produced.
+ * CloseSocket() sends a FIN and the connection outlives the descriptor, so the
+ * call must never wait for a peer that has stopped answering -- a program that
+ * closes and exits would hang on the way out.  The optional bound asserts
+ * that.  The number in the transcript is the whole CloseSocket(), measured
+ * across the call rather than off the frame it produced.
  */
 static VOID do_close(const char *args, const char *raw)
 {
@@ -1708,11 +1696,9 @@ static VOID do_close(const char *args, const char *raw)
  * `txcount MIN MAX` -- how many frames the stack sent while we were not
  * looking, discarded.
  *
- * A retransmission series is a count, not a sequence: asserting ten separate
- * `tx` lines would be asserting the interval as well, and the interval is
- * another workstream's. This says "it kept trying, and then it stopped
- * trying", which is the part that belongs to whether retransmission works at
- * all.
+ * A retransmission series is asserted as a count: ten separate `tx` lines
+ * would assert the intervals too, and the intervals belong to another
+ * workstream.  This checks only that the stack kept retrying and then stopped.
  */
 static VOID do_txcount(const char *args, const char *raw)
 {
@@ -1776,16 +1762,15 @@ static VOID do_idle(const char *args, const char *raw)
 /* ----------------------------------------------------------- case control - */
 
 /*
- * Tear a case's socket down so that NOTHING of it appears in the next case.
+ * Tear a case's socket down so that nothing of it appears in the next case.
  *
- * SO_LINGER {on, 0} is not decoration. Once CloseSocket() started sending a
- * FIN -- which is what RFC 793 3.5 asks for and what this harness asserts in
- * c03 -- a plain close left a connection retransmitting that FIN into a peer
- * that had stopped listening, once a second, for ten seconds. Those frames
- * turned up in the next four cases, and every case that leaves unacknowledged
- * data behind (x02, x03, x04, z01) does the same with the data. The abortive
- * close is the documented way to say "this connection is over now", and a
- * harness whose cases share one stack has to say it.
+ * SO_LINGER {on, 0} is required. Once CloseSocket() started sending a FIN --
+ * which is what RFC 793 3.5 asks for and what this harness asserts in c03 --
+ * a plain close left a connection retransmitting that FIN into a peer that had
+ * stopped listening, once a second, for ten seconds. Those frames turned up in
+ * the next four cases, and every case that leaves unacknowledged data behind
+ * (x02, x03, x04, z01) does the same with the data. The abortive close ends
+ * the connection at once, which a harness whose cases share one stack needs.
  */
 static VOID case_abort(LONG s)
 {
@@ -1973,8 +1958,8 @@ int main(void)
     /*
      * Opening the library is what brings DEVS:NetInterfaces/tap0 up, and
      * bring-up is what calls OpenDevice() on the device installed above.  The
-     * order is the whole trick: a stack that started first would have looked
-     * for tcpdrill.device in DEVS: and not found it.
+     * order matters: a stack that started first would have looked for
+     * tcpdrill.device in DEVS: and not found it.
      */
     SockBase = OpenLibrary((STRPTR)"bsdsocket.library", 4);
     if (SockBase == NULL)
@@ -2012,8 +1997,8 @@ int main(void)
     say("tap: tx %u  rx delivered %u  rx no-reader %u  copy-failed %u  "
         "tx-overrun %u", st.tx_frames, st.rx_delivered, st.rx_no_reader,
         st.rx_copy_failed, st.tx_overrun);
-    /* Reported rather than hidden: these are frames the stack sent that no
-       case is about (see pump()), and a number that moves is worth noticing. */
+    /* Frames the stack sent that no case is about (see pump()).  Reported so a
+       change in the count is visible. */
     say("background frames ignored: %u", n_background);
     say("%u case(s), %u failed; %u check(s) passed, %u failed",
         n_cases, n_cases_failed, n_pass, n_fail);

@@ -9,6 +9,9 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "interfaces.h"
+
+#include <sys/sockio.h>
 
 #include <proto/exec.h>
 #include <netinet/tcp.h>
@@ -119,16 +122,12 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 return 0;
 
             /*
-             * SO_KEEPALIVE used to be a flag this library stored and reported
-             * back, with nothing behind it: NX_ENABLE_TCP_KEEPALIVE was not
-             * defined, so nx_tcp_periodic_processing.c's whole keepalive block
-             * was compiled out and an idle connection was never probed.  The
-             * option answered yes and did nothing, which is worse than
-             * ENOPROTOOPT because a caller cannot tell.
-             *
-             * It reaches the socket now.  The flag is still kept because
-             * getsockopt() must answer for a socket that is not a live NX one
-             * yet, and because the two must agree.
+             * SO_KEEPALIVE reaches the NX socket only when
+             * NX_ENABLE_TCP_KEEPALIVE is defined; without it
+             * nx_tcp_periodic_processing.c's keepalive block is compiled out
+             * and an idle connection is never probed.  The flag is kept
+             * alongside because getsockopt() must answer for a socket that is
+             * not a live NX one yet, and the two must agree.
              */
             case SO_KEEPALIVE:
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
@@ -250,8 +249,8 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 return 0;
 
             /*
-             * IP_HDRINCL is only meaningful on a raw socket, and BSD returns
-             * ENOPROTOOPT rather than pretending otherwise on anything else.
+             * IP_HDRINCL is only meaningful on a raw socket; BSD returns
+             * ENOPROTOOPT on anything else.
              */
             case IP_HDRINCL:
                 if (sock->as_Type != SOCK_RAW)
@@ -336,11 +335,10 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
                                         (LONG)sock->as_EventMask);
 
             /*
-             * Unasked-for, report the window this socket ACTUALLY got.  A TCP
+             * With nothing set, report the window this socket got.  A TCP
              * socket's is sized from the packet pool and the live socket count
-             * when it is created (ami_bsd_tcp_window()), so BSD_TCP_WINDOW is
-             * only the floor and answering with it would be answering with a
-             * number no socket necessarily has.
+             * at creation (ami_bsd_tcp_window()), so BSD_TCP_WINDOW is only
+             * the floor and may not be any socket's actual window.
              */
             case SO_RCVBUF:
             {
@@ -508,15 +506,13 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
                 return bsd_fail(SocketBase, AMI_EFAULT);
 
             /*
-             * "Is the next byte the urgent one?"
-             *
-             * This implementation is always OOBINLINE (see oob.c), so the
-             * urgent byte is in the stream and the mark is simply "one has
-             * arrived and recv(MSG_OOB) has not taken it yet". A caller that
-             * uses SIOCATMARK to decide when to stop discarding -- which is
-             * what telnet does -- gets the right answer at the right moment;
-             * a caller that expects the byte to be missing from the stream
-             * does not, and that is the divergence oob.c documents.
+             * "Is the next byte the urgent one?"  This implementation is
+             * always OOBINLINE (see oob.c), so the urgent byte is in the
+             * stream and the mark means "one has arrived and recv(MSG_OOB) has
+             * not taken it yet".  A caller that uses SIOCATMARK to decide when
+             * to stop discarding, as telnet does, gets the right answer; a
+             * caller that expects the byte to be absent from the stream does
+             * not -- the divergence oob.c documents.
              */
             *(LONG *)argp = ((sock->as_Flags & ASF_OOBHAVE) != 0) ? 1 : 0;
             return 0;
@@ -531,6 +527,19 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
                                         FD_CONNECT | FD_CLOSE | FD_ERROR)
                                      : 0;
             return 0;
+
+        /*
+         * The interface queries, answered in interfaces.c where the naming
+         * rule and the gather live.  They ignore the socket: BSD requires one
+         * to be passed and says nothing about which, and libpcap opens a
+         * throwaway AF_INET/SOCK_DGRAM for it.
+         */
+        case SIOCGIFCONF:
+        case SIOCGIFFLAGS:
+        case SIOCGIFADDR:
+        case SIOCGIFNETMASK:
+        case SIOCGIFBRDADDR:
+            return bsd_if_ioctl(req, argp, SocketBase);
 
         default:
             return bsd_fail(SocketBase, AMI_ENOSYS);
@@ -561,11 +570,10 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
          addr.nxd_ip_address.v6[2] | addr.nxd_ip_address.v6[3]) == 0)
     {
         /*
-         * Bound to in6addr_any. Report the source address the stack would
-         * actually put on a packet to this socket's peer -- asking NetX Duo's
-         * own RFC 6724 selection rather than guessing means the answer matches
-         * what the peer will see, which for link-local vs global is not a
-         * detail an application can work out for itself.
+         * Bound to in6addr_any. Report the source address the stack would put
+         * on a packet to this socket's peer, using NetX Duo's own RFC 6724
+         * selection, so the answer matches what the peer sees. Link-local vs
+         * global is not something an application can work out for itself.
          */
         ULONG chosen[4];
 

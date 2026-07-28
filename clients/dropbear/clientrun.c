@@ -1,56 +1,47 @@
 /*
  * ClientRun -- run a ported Unix client under tools/fsuae-run.sh.
  *
- * WHY THIS EXISTS AND WHY IT IS NOT ToolsSmoke
+ * tools/fsuae-run.sh starts one executable with no arguments, so anything that
+ * takes a command line needs a driver in the middle.  src/tools/toolssmoke.c
+ * is that driver for our own commands; this is a separate one because of the
+ * stack.
  *
- *   tools/fsuae-run.sh starts ONE executable with no arguments, so anything
- *   that takes a command line needs a driver in the middle.  src/tools/
- *   toolssmoke.c is that driver for our own commands and this is deliberately
- *   a separate one, for a reason that is the whole point of the file:
+ * A Kickstart 3.1 Shell gives a command 4,096 bytes of stack.  Our own
+ * commands are written to that budget -- src/tools/fetch.c allocates its own
+ * 64 KB stack and StackSwap()s onto it before opening tls.library.  curl was
+ * written for a machine where the stack is 8 MB and grows on demand, and its
+ * crt0 here has no __stack hook to ask for more with (this toolchain's crt0.o
+ * exports no such symbol).  Running it on a Shell's 4 KB produces an illegal
+ * instruction at a random address some seconds later, on a machine with no
+ * memory protection.
  *
- *       A Kickstart 3.1 Shell gives a command 4,096 bytes of stack.
+ * So every command started here gets NP_StackSize.  System() passes unknown
+ * tags through to CreateNewProc(), which is the documented route.  A human
+ * typing `curl` at a Shell prompt needs `stack 200000` first, which is what
+ * the run report says.
  *
- *   Our own commands are written to that budget -- src/tools/fetch.c goes as
- *   far as allocating its own 64 KB stack and StackSwap()ping onto it before
- *   it opens tls.library.  curl was written for a machine where the stack is
- *   8 MB and grows on demand, and its crt0 here has no __stack hook to ask
- *   for more with (checked: this toolchain's crt0.o exports no such symbol).
- *   Running it on a Shell's 4 KB is not a crash, it is an illegal instruction
- *   at a random address some seconds later, on a machine with no memory
- *   protection.
+ * Reads DH0:commands.txt, one command per line ('#' and blank ignored), runs
+ * each through SystemTagList() with output appended to DH0:client.txt, and
+ * writes the return code after each.  The host prints DH0:client.txt back.
  *
- *   So every command started here gets NP_StackSize.  System() passes unknown
- *   tags through to CreateNewProc(), which is the documented route.
+ * Two lines are not commands:
  *
- *   The same applies to a human typing `curl` at a Shell prompt: they need
- *   `stack 200000` first.  That is ordinary Amiga practice for a ported
- *   program and it is what the run report says.
+ *     &<command>   start it and do not wait.  Its output goes to
+ *                  DH0:server.txt rather than the shared report, so a
+ *                  long-running process writing while the next command
+ *                  writes does not interleave two streams into one file.
+ *     wait <n>     Delay(n seconds).
  *
- * WHAT IT DOES
+ * Both exist for running a server and a client in the same guest.  FS-UAE's
+ * SLIRP has no inbound path, so a server on the Amiga cannot be reached from
+ * the host, and the only way to make it accept a connection is to make the
+ * connection from inside -- dropbear listening on 127.0.0.1 and dbclient
+ * connecting to it.  That needs one command running while another starts,
+ * which a list of synchronous SystemTagList() calls cannot express.
  *
- *   Reads DH0:commands.txt, one command per line ('#' and blank ignored), runs
- *   each through SystemTagList() with output appended to DH0:client.txt, and
- *   writes the return code after each.  The host prints DH0:client.txt back.
- *
- *   Two lines are not commands:
- *
- *       &<command>   start it and do NOT wait.  Its output goes to
- *                    DH0:server.txt rather than the shared report, so a
- *                    long-running process writing while the next command
- *                    writes does not interleave two streams into one file.
- *       wait <n>     Delay(n seconds).
- *
- *   Both exist for one case: running a SERVER and a client in the same guest.
- *   FS-UAE's SLIRP has no inbound path, so a server on the Amiga cannot be
- *   reached from the host at all, and the only way to make it accept a
- *   connection is to make the connection from inside -- dropbear listening on
- *   127.0.0.1 and dbclient connecting to it.  That needs one command running
- *   while another starts, which is the one thing a list of synchronous
- *   SystemTagList() calls cannot express.
- *
- *   SYS_Asynch means the child, not us, closes SYS_Input and SYS_Output, so
- *   they are opened fresh for each async command and never handed the same
- *   handle twice.
+ * SYS_Asynch means the child, not us, closes SYS_Input and SYS_Output, so they
+ * are opened fresh for each async command and never handed the same handle
+ * twice.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -74,18 +65,17 @@ static const char version_tag[] __attribute__((used)) =
 
 /*
  * 512 KB.  curl's own stack use is not published and is not small: the URL
- * parser, the multi state machine and the printf family all recurse a little,
- * and it is a Fast RAM allocation on a machine assumed to have four megabytes
- * that lasts only as long as the command.  Over-provision and move on --
- * the alternative to too much stack here is an unreproducible crash.
+ * parser, the multi state machine and the printf family all recurse a little.
+ * It is a Fast RAM allocation on a machine assumed to have four megabytes, and
+ * it lasts only as long as the command.
  *
  * It was 256 KB before the TLS backend.  A program that opens tls.library is
- * bracketed into ThreadX on ITS OWN STACK (port/threadx-amiga/src/
+ * adopted into ThreadX on its own stack (port/threadx-amiga/src/
  * tx_amiga_adopt.c hands _tx_thread_create() the caller's stack region), so
  * NetX Duo, nx_secure and the bignum code all run on whatever this process has
- * left -- which is why src/tools/fetch.c allocates 64 KB and StackSwap()s onto
+ * left, which is why src/tools/fetch.c allocates 64 KB and StackSwap()s onto
  * it before its own TLSOpen().  curl cannot do that; it has no idea it is on
- * AmigaOS.  So the budget has to be here, and doubling it costs nothing.
+ * AmigaOS.  So the budget has to be here.
  */
 #define CLIENT_STACK    (512UL * 1024UL)
 
@@ -210,8 +200,8 @@ int main(int argc, char **argv)
     (VOID)argv;
 
     /* Truncate both reports once, so a rerun does not append to the last run.
-       The async one is truncated even when nothing async runs -- otherwise a
-       run with no server would print the PREVIOUS run's server log. */
+       The async one is truncated even when nothing async runs, or a run with
+       no server would print the previous run's server log. */
     out = Open((CONST_STRPTR)REPORT, MODE_NEWFILE);
     if (out != (BPTR)0)
         Close(out);
@@ -251,8 +241,8 @@ int main(int argc, char **argv)
             continue;
         }
 
-        /* &<command> -- start it and carry on.  There is no return code to
-           report, because the point is that we did not wait for one. */
+        /* &<command> -- start it and carry on.  Nothing waits for it, so
+           there is no return code to report. */
         if (lines[i][0] == '&')
         {
             BPTR in  = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
@@ -291,11 +281,10 @@ int main(int argc, char **argv)
         elapsed = now_ticks() - t0;
 
         /*
-         * The elapsed time is here because the alternative is measuring on
-         * the host, and the host's clock includes emulator start-up, the
-         * boot and every other command in the list.  A command that takes
-         * thirty seconds when it should take one is the kind of thing that
-         * hides in a wall-clock total.
+         * Elapsed time is measured here rather than on the host, whose clock
+         * includes emulator start-up, the boot and every other command in the
+         * list.  A command that takes thirty seconds when it should take one
+         * disappears into a wall-clock total.
          */
         report("--- rc %ld", rc);
         report(", %ld", elapsed / TICKS_PER_SECOND);

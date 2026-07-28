@@ -1,31 +1,25 @@
 /*
  * AmiNetXDuo -- entropy collection and a hash DRBG.
  *
- * See include/aminetxduo/random.h for what this is and, more importantly,
- * what it is not.  The short version: the conditioning is textbook, the
- * collection is guesswork, and the module says so out loud through
- * ami_random_is_seeded().
- *
- * WHY IT LIVES IN src/common
+ * See include/aminetxduo/random.h for the scope and limits.  The conditioning
+ * is textbook, the collection is estimated, and ami_random_is_seeded() reports
+ * which.
  *
  *   NX_RAND is consumed by the NetX Duo core (IP identification, TCP initial
  *   sequence numbers, ephemeral ports), by the DHCP/DNS add-ons, and by
- *   nx_secure (ECDHE private keys, the TLS client random).  Only the last of
- *   those is a TLS build, so the generator cannot live under src/tls -- and
- *   nx_crypto's SHA-256 cannot be reused for the same reason, which is why
- *   there is a small one here.  Measured cost in the shipping library: 5,328
- *   bytes of text (SHA-256, the K table and the collection) less the 104 saved
- *   by deleting the xorshift in src/bsdsocket/library_runtime.c that this
- *   replaces -- a net 5,224 bytes, for a generator every component can reach.
- *
- * WHY A HASH DRBG AND NOT SOMETHING SMALLER
+ *   nx_secure (ECDHE private keys, the TLS client random).  Only the last is a
+ *   TLS build, so the generator cannot live under src/tls and nx_crypto's
+ *   SHA-256 cannot be reused; hence the small one here.  Measured cost in the
+ *   shipping library: 5,328 bytes of text (SHA-256, the K table and the
+ *   collection) less the 104 saved by deleting the xorshift in
+ *   src/bsdsocket/library_runtime.c that this replaces, a net 5,224 bytes.
  *
  *   The state has to survive being read: a TLS client random goes on the wire
- *   in clear, and with an LCG or an xorshift that is the whole state.  A
- *   SHA-256 counter mode plus a forward ratchet costs ~300-500 us per 32-byte
- *   block on a 14 MHz 68020 -- one hash per eight rand() calls -- and that is
- *   affordable for the packet paths that call it (a 200 packet/s TCP stream
- *   spends well under 1% of the CPU here).
+ *   in clear, and with an LCG or an xorshift that is the whole state.  SHA-256
+ *   counter mode plus a forward ratchet costs ~300-500 us per 32-byte block on
+ *   a 14 MHz 68020, one hash per eight rand() calls, which the packet paths
+ *   can afford (a 200 packet/s TCP stream spends well under 1% of the CPU
+ *   here).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -41,23 +35,22 @@
 #include <proto/timer.h>
 
 /*
- * compat.c owns the shared timer.device base (the conventional `TimerBase`
- * that proto/timer.h declares) and opens it on the first ami_millis() call.
- * Nothing here opens a second one.
+ * compat.c defines the shared timer.device base (the `TimerBase` that
+ * proto/timer.h declares) and opens it on the first ami_millis() call. Nothing
+ * here opens a second one.
  */
 
 /* ==================================================================== SHA-256
  *
- * FIPS 180-4, straight.  Self-contained: no libc, no nx_crypto -- a shared
- * library must not drag newlib in, and nx_crypto is a TLS-only build.
+ * FIPS 180-4.  Self-contained: no libc, no nx_crypto -- a shared library must
+ * not drag newlib in, and nx_crypto is a TLS-only build.
  *
- * Verified against the published vectors -- empty string, "abc", both
+ * Verified against the published vectors (empty string, "abc", both
  * multi-block examples from FIPS 180-4 Appendix B, and the one-million-'a'
- * vector -- by lifting this block verbatim into a host harness.  Worth doing
- * again after any edit here, and worth knowing that the first attempt at that
- * harness FAILED all five: it defined ULONG as `unsigned long`, which is 64
- * bits on a modern host and 32 on m68k-amigaos.  The code was right; the
- * harness was wrong.  Hence the assertion below.
+ * vector) by lifting this block verbatim into a host harness.  Repeat that
+ * after any edit here.  A harness that defines ULONG as `unsigned long` fails
+ * all five, because that is 64 bits on a modern host and 32 on m68k-amigaos.
+ * Hence the assertion below.
  */
 
 /* Every rotate and every addition here assumes exactly 32 bits. */
@@ -265,19 +258,18 @@ static VOID pool_mix(const void *data, ULONG length, ULONG credit_bits)
 
 /* ============================================================ entropy sources
  *
- * Every one of these is weak on its own.  What follows each is what it is
- * actually believed to be worth, and why the credit is what it is.  The
- * credits are deliberately mean; see docs/RESEARCH.md.
+ * Each source is weak on its own.  The comment on each says what it is worth
+ * and why its credit is what it is.  The credits are conservative; see
+ * docs/RESEARCH.md.
  */
 
 /*
  * VHPOSR, the raster beam position.  Its low byte advances once per two
  * pixels, so on a running machine it is a free-running counter at ~3.5 MHz.
- * That makes it a *phase* sample, not entropy -- if the machine is
- * deterministic from reset then so is the beam.  It is read here because
- * reading it is a Chip RAM cycle that contends with display DMA, which is
- * what makes the interval below variable; the value itself is credited
- * nothing.
+ * That makes it a phase sample rather than entropy: if the machine is
+ * deterministic from reset then so is the beam.  It is read because the read
+ * is a Chip RAM cycle contending with display DMA, which is what makes the
+ * interval below variable; the value itself is credited nothing.
  */
 #define CUSTOM_VHPOSR   ((volatile UWORD *)0x00DFF006)
 
@@ -314,25 +306,22 @@ typedef struct
 
 /*
  * E-Clock jitter.  Take an interval measurement repeatedly and keep the low
- * bits of the delta.  On real hardware the interval genuinely varies: bitplane
- * and sprite DMA steal cycles from the CPU, memory refresh lands where it
- * lands, and level 2/3/6 interrupts arrive asynchronously to whatever the
- * caller is doing.  The worry was that a cycle-exact emulator booting a fixed
- * image would reproduce all of that and yield nothing.
+ * bits of the delta.  On real hardware the interval varies: bitplane and
+ * sprite DMA steal cycles from the CPU, memory refresh lands where it lands,
+ * and level 2/3/6 interrupts arrive asynchronously.  A cycle-exact emulator
+ * booting a fixed image might reproduce all of that and yield nothing.
  *
- * That distinction cannot be settled from inside the function, so it is
- * settled empirically instead: count how many BIT POSITIONS actually varied
- * across the samples and credit one bit per varying position, capped at 12.
- * A machine where every delta is identical gets zero, which is the correct
- * and honest answer.
+ * That cannot be settled from inside the function, so it is measured instead:
+ * count how many bit positions varied across the samples and credit one bit
+ * per varying position, capped at 12.  A machine where every delta is
+ * identical gets zero.
  *
- * Measured under FS-UAE, which was expected to be the metronome case and is
- * not: 22-27 DISTINCT delta values out of 256 samples, spanning 52 to 263
- * E-Clock ticks, over three cold boots.  This source scores 7-9 bits there.
- * The cap stays at 12 rather than the ~4.6 bits/sample that 24 distinct
- * values would nominally support, because an emulator's timing variation
- * comes from the HOST's scheduler, and how much of that an attacker can see
- * or influence is exactly the thing nobody here has analysed.
+ * Measured under FS-UAE: 22-27 distinct delta values out of 256 samples,
+ * spanning 52 to 263 E-Clock ticks, over three cold boots, so this source
+ * scores 7-9 bits there.  The cap stays at 12 rather than the ~4.6
+ * bits/sample that 24 distinct values would nominally support, because an
+ * emulator's timing variation comes from the host's scheduler and how much of
+ * that an attacker can see or influence has not been analysed.
  */
 static ULONG gather_jitter(EntropySample *s)
 {
@@ -352,11 +341,11 @@ static ULONG gather_jitter(EntropySample *s)
         ReadEClock(&a);
 
         /*
-         * The work between the two reads is deliberately chip-bus traffic:
-         * reading a custom register is a Chip RAM cycle, so it contends with
-         * whatever DMA the display is doing.  The iteration count varies with
-         * the sample index so the loop cannot settle into one fixed phase
-         * relationship with the video beam.
+         * The work between the two reads is chip-bus traffic: reading a custom
+         * register is a Chip RAM cycle, so it contends with whatever DMA the
+         * display is doing.  The iteration count varies with the sample index
+         * so the loop cannot settle into one fixed phase relationship with the
+         * video beam.
          */
         for (j = 0; j < 16 + (i & 15); j++)
             spin = (UWORD)(spin ^ *CUSTOM_VHPOSR);
@@ -385,24 +374,21 @@ static ULONG gather_jitter(EntropySample *s)
  * Free memory figures, allocation addresses, and the residue in freshly
  * allocated blocks.
  *
- * MIXED, CREDITED ZERO -- and that is a measurement, not caution.  All of
- * this was credited until tools/smoke/randtest.c printed it across three cold
- * boots under FS-UAE:
+ * Mixed in, credited zero, on measurement: tools/smoke/randtest.c printed
+ * these across three cold boots under FS-UAE:
  *
  *   AvailMem ANY/CHIP/FAST/LARGEST   identical to the byte, all three runs
  *   AllocVec() address               identical, all three runs
- *   16 bytes of MEMF_ANY residue     identical, all three runs, and NON-ZERO
+ *   16 bytes of MEMF_ANY residue     identical, all three runs, and non-zero
  *
- * The last of those is the instructive one.  The obvious heuristic -- "the
- * block came back non-zero, so it holds a previous owner's data, so credit
- * it" -- awarded 8 bits to a value that is the same on every boot, because
- * the allocator hands out the same block to the same caller at the same point
- * in the same boot sequence.  Non-zero does not mean unpredictable.
+ * Crediting the residue because it came back non-zero would award 8 bits to a
+ * value that is the same on every boot, since the allocator hands out the same
+ * block to the same caller at the same point in the same boot sequence.
  *
- * On a machine that has been *used* -- a warm reboot, a Workbench that
- * launched and quit things, a fragmented pool -- these carry real
- * information, and it still goes into the pool.  It just does not go into the
- * accounting, because nothing here can tell that case from this one.
+ * On a machine that has been used -- a warm reboot, a Workbench that launched
+ * and quit things, a fragmented pool -- these carry real information, and it
+ * still goes into the pool.  It does not go into the accounting, because
+ * nothing here can tell the two cases apart.
  */
 static ULONG gather_memory(EntropySample *s)
 {
@@ -445,15 +431,15 @@ static ULONG gather_memory(EntropySample *s)
  * Exec's own state.
  *
  * IdleCount and DispCount are free-running dispatcher counters, so they encode
- * how much scheduling has happened since reset.  These DO move: measured 44 /
- * 66 / 57 and 282 / 276 / 283 across three identical cold boots, i.e. a spread
- * of a few dozen counts.  Credited 4 bits for the pair, which is roughly
- * log2(that spread) and is still a guess.
+ * how much scheduling has happened since reset.  They do move: 44 / 66 / 57
+ * and 282 / 276 / 283 across three identical cold boots, a spread of a few
+ * dozen counts.  Credited 4 bits for the pair, roughly log2(that spread) and
+ * still an estimate.
  *
- * The rest of what this reads is constant on every boot measured -- AttnFlags,
+ * The rest of what this reads was constant on every boot measured: AttnFlags,
  * VBlankFrequency and the E-Clock rate are hardware description, ThisTask and
- * the stack address were identical all three runs, LastAlert was 0xFFFFFFFF
- * every time.  Mixed anyway; credited nothing.
+ * the stack address were identical all three runs, and LastAlert was
+ * 0xFFFFFFFF every time.  Mixed in, credited nothing.
  */
 static ULONG gather_exec(EntropySample *s)
 {
@@ -486,11 +472,11 @@ static ULONG gather_exec(EntropySample *s)
  * saved SP of a task parked in Wait() depends on how deep it was when it
  * blocked, which on a machine doing anything at all is not fixed.
  *
- * Credited 2 bits, and that is charity: on our own bare test boot there are
- * perhaps five tasks, they are the same five every time, and the one address
- * that was checked directly (FindTask(NULL)) was identical across three cold
- * boots.  On a real Workbench with a browser, a shell and some commodities it
- * would be worth considerably more, which is why it is not zero.
+ * Credited 2 bits, generously: on a bare test boot there are perhaps five
+ * tasks, the same five every time, and the one address checked directly
+ * (FindTask(NULL)) was identical across three cold boots.  On a real Workbench
+ * with a browser, a shell and some commodities it is worth considerably more,
+ * hence not zero.
  */
 static ULONG gather_tasks(EntropySample *s)
 {
@@ -530,20 +516,20 @@ static ULONG gather_tasks(EntropySample *s)
 }
 
 /*
- * The system clock, and the best source on the list by a distance.
+ * The system clock, the strongest source on the list.
  *
  * On a machine with a battery-backed clock that somebody has set, this is real
- * wall time: measured 1532507776.382025 / 1532507783.606435 /
- * 1532507798.617969 across three cold boots, so both fields move.  On a
- * machine without one -- or a bare boot that never ran SetClock -- timer.device
- * starts at 1978-01-01 and this degenerates to uptime, which is the same every
- * boot, so the credit is conditional on the seconds field being non-zero.
+ * wall time: 1532507776.382025 / 1532507783.606435 / 1532507798.617969 across
+ * three cold boots, so both fields move.  Without one -- or on a boot that
+ * never ran SetClock -- timer.device starts at 1978-01-01 and this degenerates
+ * to uptime, the same every boot, so the credit is conditional on the seconds
+ * field being non-zero.
  *
- * Credited 8 bits, deliberately far below the ~20 bits the microsecond field
- * nominally holds.  An attacker who knows within a second WHEN the machine
- * was switched on has only the sub-second part left to search, and one who
- * can observe the boot -- anyone on the same LAN watching for DHCP -- narrows
- * it further.  8 is what is left after assuming they can do that.
+ * Credited 8 bits, far below the ~20 the microsecond field nominally holds.
+ * An attacker who knows within a second when the machine was switched on has
+ * only the sub-second part left to search, and one who can observe the boot
+ * (anyone on the same LAN watching for DHCP) narrows it further.  8 is what
+ * remains after assuming they can.
  */
 static ULONG gather_clock(EntropySample *s)
 {
@@ -563,8 +549,8 @@ static ULONG gather_clock(EntropySample *s)
 
 /*
  * ~460 bytes of EntropySample on the stack, plus 256 for SHA-256's message
- * schedule -- under a kilobyte, which matters because this is reached from
- * bsd_lib_init() on the *caller's* task stack.
+ * schedule: under a kilobyte, which matters because this is reached from
+ * bsd_lib_init() on the caller's task stack.
  */
 static VOID random_gather(VOID)
 {
@@ -574,9 +560,8 @@ static VOID random_gather(VOID)
     UBYTE        *p = (UBYTE *)&s;
     ULONG         i;
 
-    /* Do not rely on the caller: leave nothing uninitialised on purpose here,
-     * because an uninitialised struct read is undefined behaviour the
-     * compiler is allowed to exploit, however tempting the "free entropy". */
+    /* Zero the whole struct rather than harvesting uninitialised stack: an
+     * uninitialised read is undefined behaviour the compiler may exploit. */
     for (i = 0; i < sizeof(s); i++)
         p[i] = 0;
 
@@ -613,9 +598,9 @@ VOID ami_random_add_entropy(const void *data, ULONG length, ULONG credit_bits)
 {
     /*
      * Collect first if nothing has yet.  Setting pool_started here instead
-     * would let an early ami_random_srand() -- which routes through this
-     * function -- suppress the machine's own collection entirely, leaving the
-     * pool holding nothing but whatever the caller passed.
+     * would let an early ami_random_srand(), which routes through this
+     * function, suppress the machine's own collection entirely, leaving the
+     * pool holding only whatever the caller passed.
      */
     if (!pool_started)
         ami_random_init();
@@ -643,8 +628,8 @@ BOOL ami_random_is_seeded(VOID)
  *
  * Forbid()/Permit() rather than a semaphore: this is called from the NetX Duo
  * IP thread, from adopted user tasks and from library code, and it must not
- * block.  It is NOT interrupt-callable -- Permit() from an interrupt can try
- * to dispatch -- and nothing in the tree calls NX_RAND from one.
+ * block.  It is not interrupt-callable, since Permit() from an interrupt can
+ * try to dispatch, and nothing in the tree calls NX_RAND from one.
  */
 static VOID random_refill(VOID)
 {
@@ -680,14 +665,14 @@ VOID ami_random_bytes(APTR buffer, ULONG length)
         ami_random_init();
 
     /*
-     * Forbid() is taken PER BLOCK, not around the whole request.  A 32-byte
+     * Forbid() is taken per block, not around the whole request.  A 32-byte
      * block costs one SHA-256 pair, a few hundred microseconds; a 16 KB
-     * request is 512 of them, and holding the scheduler off for the ~200 ms
-     * that would take is not something a shared library gets to do.
+     * request is 512 of them, and a shared library must not hold the scheduler
+     * off for the ~200 ms that would take.
      *
      * Releasing between blocks lets another task interleave and consume the
      * blocks after this one, which is harmless: pool_out_used advances inside
-     * the Forbid(), so no byte is ever handed to two callers.
+     * the Forbid(), so no byte is handed to two callers.
      */
     while (length > 0)
     {
@@ -738,9 +723,9 @@ void ami_random_srand(unsigned int seed)
     ULONG value = (ULONG)seed;
 
     /*
-     * Mixed, not assigned, and credited nothing.  See the note in random.h:
-     * a caller asking for reproducibility must not be able to hand an
-     * attacker the state of the generator that makes their session keys.
+     * Mixed in, not assigned, and credited nothing.  See random.h: a caller
+     * asking for reproducibility must not be able to hand an attacker the
+     * state of the generator that makes their session keys.
      */
     ami_random_add_entropy(&value, sizeof(value), 0);
 }

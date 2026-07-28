@@ -267,29 +267,52 @@ stage_emulator() {
     export AMINETXDUO_KICKSTART
     export AMINETXDUO_KICKSTART_EXT="${AMINETXDUO_KICKSTART_EXT:-}"
 
-    # The emulator tier runs the DEFAULT cross build; stage_cross has to have
-    # produced it.
-    if [ ! -d "$BUILD/default" ]; then
-        fail "no $BUILD/default -- run the cross stage first"
-        return 1
-    fi
+    # TWO MACHINES, not one.  The default cross build on a 68020, and the
+    # m68000 build on an actual 68000 -- which is a different compiler output
+    # (no 32-bit multiply or divide, the 68000 C library) executing under a
+    # different scheduler budget, and for a long time nothing ran it at all.
+    #
+    # That gap hid a real defect in this suite: soak_test's starvation floor
+    # was a constant tuned against 68020 throughput, so the lowest-priority
+    # worker failed it on a 68000 while being perfectly healthy.  A build that
+    # is never executed is not tested, and we ship a 68000 library.
+    for dir in default m68000; do
+        if [ ! -d "$BUILD/$dir" ]; then
+            fail "no $BUILD/$dir -- run the cross stage first"
+            return 1
+        fi
+    done
 
-    local entry exe timeout
-    for entry in "${EMULATOR_TESTS[@]}"; do
-        exe="${entry%%:*}"
-        timeout="${entry##*:}"
-        printf '\n-- %s\n' "$exe"
-        if [ ! -f "$BUILD/default/$exe" ]; then
-            fail "emulator: $exe was not built"
-            continue
-        fi
-        if AMINETXDUO_RUN_TAG=ci tools/fsuae-run.sh -t "$timeout" \
-               "$BUILD/default/$exe" > "$BUILD/emu-$(basename "$exe").log" 2>&1; then
-            note "PASS  $(grep -E '[0-9]+ checks' "$BUILD/emu-$(basename "$exe").log" | tail -1)"
+    local entry exe timeout dir cpuopt tag budget
+    for dir in default m68000; do
+        if [ "$dir" = "m68000" ]; then
+            cpuopt="-c 68000"; tag="68000"; budget=2
         else
-            tail -25 "$BUILD/emu-$(basename "$exe").log"
-            fail "emulator: $exe"
+            cpuopt="";         tag="68020"; budget=1
         fi
+
+        printf '\n\033[1m-- emulator: %s\033[0m\n' "$tag"
+
+        for entry in "${EMULATOR_TESTS[@]}"; do
+            exe="${entry%%:*}"
+            timeout="${entry##*:}"
+            # A 68000 is roughly a quarter of the 68020 here, so the same work
+            # needs a longer rope before a timeout means anything.
+            timeout=$(( timeout * budget ))
+            printf '\n-- %s (%s)\n' "$exe" "$tag"
+            if [ ! -f "$BUILD/$dir/$exe" ]; then
+                fail "emulator/$tag: $exe was not built"
+                continue
+            fi
+            local log="$BUILD/emu-$tag-$(basename "$exe").log"
+            if AMINETXDUO_RUN_TAG="ci-$tag" tools/fsuae-run.sh $cpuopt \
+                   -t "$timeout" "$BUILD/$dir/$exe" > "$log" 2>&1; then
+                note "PASS  $(grep -E '[0-9]+ checks' "$log" | tail -1)"
+            else
+                tail -25 "$log"
+                fail "emulator/$tag: $exe"
+            fi
+        done
     done
 }
 

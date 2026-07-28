@@ -8,7 +8,7 @@
  * answered here from an in-memory fixture table rather than from disk).
  *
  * config_file.c -- the dos.library Open/Read/Close and the Examine/ExNext scan
- * of DEVS:NetInterfaces -- is therefore NOT covered here; it is verified by
+ * of DEVS:NetInterfaces -- is therefore not covered here; it is verified by
  * compilation and needs an on-Amiga run to be tested properly.
  *
  *   cc -std=c99 -Wall -Wextra -I../../../include -Ishim \
@@ -639,10 +639,10 @@ static void test_interface_errors(void)
 /* ---------------------------------------------------------- the reporter */
 
 /*
- * The problem reporter is what puts a file name, a line number and a
- * suggestion on the user's screen (src/tools/tool_diag.c installs one). The
- * line numbers are the part worth pinning down: they are what makes the
- * message actionable, and they are easy to break by adding a `continue`.
+ * The problem reporter puts a file name, a line number and a suggestion on the
+ * user's screen (src/tools/tool_diag.c installs one). The line numbers are
+ * what these tests pin down: they make the message actionable and are easy to
+ * break by adding a `continue`.
  */
 #define MAX_SEEN    8
 

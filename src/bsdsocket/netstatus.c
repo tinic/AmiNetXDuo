@@ -1,45 +1,38 @@
 /*
  * bsdsocket.library -- NetStackQuery() and NetStackControl().
  *
- * The two private LVOs that let a separate Shell command ask the RUNNING
+ * The two private LVOs that let a separate Shell command ask the running
  * stack what it is doing, and tell it to change. include/aminetxduo/
- * netstatus.h has the contract and the reasoning; this file has the walks.
+ * netstatus.h has the interface; this file has the walks.
  *
- * WHAT MADE THESE NECESSARY
+ * Before these existed, every command that wanted live numbers linked its own
+ * copy of NetX Duo, got its own NX_IP with no interfaces in it, and read
+ * zeroes -- or, once src/tools/netstack_weak.c's weak stubs answered NULL,
+ * printed "the network is up, but this command cannot read it" and exited 5.
  *
- *   Every command that wanted live numbers linked its own copy of NetX Duo,
- *   got its own NX_IP with no interfaces in it, and read zeroes -- or, once
- *   src/tools/netstack_weak.c's weak stubs answered NULL, printed "the
- *   network is up, but this command cannot read it" and exited 5. That
- *   message reads like a pass, which is why it survived a release.
+ * Three rules here:
  *
- * THREE RULES THIS FILE FOLLOWS
+ *   1. Copy, never lend. Nothing that leaves here is a pointer into the
+ *      stack; the caller gets scalars in its own buffer.
  *
- *   1. COPY, NEVER LEND. Nothing that leaves here is a pointer into the
- *      stack. The caller gets scalars in its own buffer, and what it does
- *      with them afterwards cannot fault.
- *
- *   2. ONE BRACKET, HELD BRIEFLY. bsd_nx_enter() adopts the calling task as a
+ *   2. One bracket, held briefly. bsd_nx_enter() adopts the calling task as a
  *      TX_THREAD -- required, because nx_*_info_get() are behind
  *      NX_THREADS_ONLY_CALLER_CHECKING -- and the walk does nothing but read
  *      memory and call those. No dos.library, no Wait(), no allocation.
  *
- *   3. THE CALLER'S BUFFER IS TOUCHED ONLY AFTER THE HEADER CHECKS PASS. A
- *      caller that arrived here by accident (some future vendor putting a
+ *   3. The caller's buffer is touched only after the header checks pass, so a
+ *      caller that arrived here by accident (a future vendor putting a
  *      different function at the same offset) presents the wrong magic and
  *      gets -1 with nothing written.
  *
- * WHAT IS NOT HERE, AND WHY
- *
- *   There is no "ping for me" vector. It was designed and rejected:
- *   nx_icmp_ping() matches an inbound echo reply on the SEQUENCE NUMBER
- *   ALONE -- nx_icmpv4_process_echo_reply.c:124 compares
- *   tx_thread_suspend_info against nx_icmpv4_echo_sequence_num and looks at
- *   nothing else, and nx_icmpv4.h:191 says outright that the identifier "is
- *   not used as a host". A vector wrapping it would inherit that. The raw
- *   socket path (src/bsdsocket/raw.c) lets the command choose its own
- *   matching rule, is already published ABI, and is what src/tools/ping.c
- *   uses. See docs/RESEARCH.md 21.3.
+ * There is no "ping for me" vector. nx_icmp_ping() matches an inbound echo
+ * reply on the sequence number alone -- nx_icmpv4_process_echo_reply.c:124
+ * compares tx_thread_suspend_info against nx_icmpv4_echo_sequence_num and
+ * looks at nothing else, and nx_icmpv4.h:191 says the identifier "is not used
+ * as a host". A vector wrapping it would inherit that. The raw socket path
+ * (src/bsdsocket/raw.c) lets the command choose its own matching rule, is
+ * already published ABI, and is what src/tools/ping.c uses. See
+ * docs/RESEARCH.md 21.3.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -49,12 +42,13 @@
 #include "aminetxduo/netstatus.h"
 #include "aminetxduo/sana2.h"
 #include "aminetxduo/config.h"
+#include "aminetxduo/netstack.h"
 
 /*
- * The wire values in netstatus.h must be NetX Duo's own, because that is what
- * the socket table copies straight across. If a NetX Duo update ever
- * renumbers them the build stops here rather than at a user reading
- * "ESTABLISHED" off a socket that is closing.
+ * The wire values in netstatus.h must be NetX Duo's own, because the socket
+ * table copies them straight across. If a NetX Duo update renumbers them the
+ * build stops here rather than at a user reading "ESTABLISHED" off a socket
+ * that is closing.
  */
 _Static_assert(NETSTATUS_TCP_CLOSED       == NX_TCP_CLOSED,        "TCP state ABI");
 _Static_assert(NETSTATUS_TCP_LISTEN       == NX_TCP_LISTEN_STATE,  "TCP state ABI");
@@ -113,8 +107,8 @@ static VOID ns_mac_from_words(ULONG msw, ULONG lsw, UBYTE *mac)
 /*
  * How many entries of `entry_size` fit after the header, and where the first
  * one goes. `room` is 0 when the buffer holds only the header, which is a
- * legitimate way to ask "how many are there?" -- nsh_Available still comes
- * back filled in.
+ * legitimate way to ask "how many are there?" -- nsh_Available is still
+ * filled in.
  */
 typedef struct NsWriter
 {
@@ -142,7 +136,7 @@ static VOID ns_writer_init(NsWriter *w, NetStatusHeader *hdr, ULONG size,
 
 /*
  * The next slot to fill, or NULL when the buffer is full. `available` counts
- * regardless, so a caller with a small buffer still learns how big one it
+ * regardless, so a caller with a small buffer still learns what size it
  * needs.
  */
 static APTR ns_writer_next(NsWriter *w)
@@ -190,6 +184,45 @@ static VOID ns_fill_system(NX_IP *ip, NetStatusSystem *out)
         out->nss_Flags  |= NETSTATUS_SYS_GATEWAY;
     }
 
+#ifdef AMINETXDUO_MDNS
+    {
+        const char *mdns = netstack_mdns_hostname();
+
+        out->nss_Flags |= NETSTATUS_SYS_MDNS;
+
+        /*
+         * NULL before the responder has claimed a name. The flag already
+         * distinguishes that from a build without mDNS, so an empty string
+         * here means "not yet", not "never".
+         */
+        if (mdns != NULL && mdns[0] != '\0')
+        {
+            static const char suffix[] = ".local";
+            ULONG i;
+            ULONG j;
+
+            /*
+             * The responder keeps the bare label ("amiga"). Append ".local"
+             * here rather than at each display, so every consumer gets the
+             * name in the form it is actually used in.
+             */
+            for (i = 0; i + 1 < (ULONG)NETSTATUS_NAME_LEN && mdns[i] != '\0';
+                 i++)
+            {
+                out->nss_MdnsName[i] = mdns[i];
+            }
+
+            for (j = 0; suffix[j] != '\0' &&
+                        i + 1 < (ULONG)NETSTATUS_NAME_LEN; j++)
+            {
+                out->nss_MdnsName[i++] = suffix[j];
+            }
+
+            out->nss_MdnsName[i] = '\0';
+        }
+    }
+#endif
+
     pool = ip->nx_ip_default_packet_pool;
     if (pool != NX_NULL &&
         nx_packet_pool_info_get(pool, &out->nss_PoolTotal, &out->nss_PoolFree,
@@ -202,15 +235,90 @@ static VOID ns_fill_system(NX_IP *ip, NetStatusSystem *out)
 }
 
 /*
- * The NX physical interface index IS the config index. src/netstack attaches
- * the configured interfaces in config order from slot 0
- * (netstack.c:376 for the primary, :451 for the rest), and NetX Duo puts the
- * loopback at NX_LOOPBACK_INTERFACE == NX_MAX_PHYSICAL_INTERFACES, past the
- * physical range this walks -- so there is no off-by-one here, which is worth
- * saying because there looks as though there should be.
+ * One row per interface, including the ones not using DHCP, so a caller can
+ * tell "no DHCP on this interface" from "interface missing".
  *
- * NULL when the slot is not configured; NETSTATUS_IF_NAMED is how the caller
- * tells a name that came from the config from one that did not.
+ * netstack_interface_dhcp_lease() re-reads the live NX_DHCP every time, so
+ * this is current rather than a copy of what was true at bring-up. It brackets
+ * itself with ami_netstack_enter(), which is a no-op inside the bsd_nx_enter()
+ * this already runs under -- the nesting is detected, not paid for.
+ */
+static VOID ns_fill_dhcp(NsWriter *w)
+{
+    UWORD index;
+
+    for (index = 0; index < (UWORD)NX_MAX_PHYSICAL_INTERFACES; index++)
+    {
+        NetStatusDhcp *out;
+        AmiDhcpLease   lease;
+        LONG           state;
+        UWORD          i;
+
+        out = (NetStatusDhcp *)ns_writer_next(w);
+        if (out == NULL)
+            break;                      /* the caller's buffer is full */
+
+        out->nsd_Index = index;
+
+        state = netstack_interface_dhcp_state(index);
+
+        if (state == AMI_DHCP_BOUND)
+            out->nsd_State = NETSTATUS_DHCP_BOUND;
+        else if (state == AMI_DHCP_WORKING)
+            out->nsd_State = NETSTATUS_DHCP_WORKING;
+        else
+            out->nsd_State = NETSTATUS_DHCP_OFF;
+
+        if (out->nsd_State != NETSTATUS_DHCP_BOUND)
+            continue;                   /* ns_writer_next() zeroed the rest */
+
+        if (netstack_interface_dhcp_lease(index, &lease) != AMI_NET_OK)
+        {
+            /* Bound a moment ago and not now: report the state, not a lease
+               of zeroes. */
+            out->nsd_State = NETSTATUS_DHCP_WORKING;
+            continue;
+        }
+
+        out->nsd_Address      = lease.adl_Address;
+        out->nsd_NetMask      = lease.adl_NetMask;
+        out->nsd_Server       = lease.adl_Server;
+        out->nsd_LeaseSeconds = lease.adl_LeaseSeconds;
+
+        out->nsd_RouterCount = lease.adl_RouterCount;
+        if (out->nsd_RouterCount > (UWORD)NETSTATUS_DHCP_ADDRS)
+            out->nsd_RouterCount = (UWORD)NETSTATUS_DHCP_ADDRS;
+        for (i = 0; i < out->nsd_RouterCount; i++)
+            out->nsd_Router[i] = lease.adl_Router[i];
+
+        out->nsd_DnsCount = lease.adl_DnsCount;
+        if (out->nsd_DnsCount > (UWORD)NETSTATUS_DHCP_ADDRS)
+            out->nsd_DnsCount = (UWORD)NETSTATUS_DHCP_ADDRS;
+        for (i = 0; i < out->nsd_DnsCount; i++)
+            out->nsd_Dns[i] = lease.adl_Dns[i];
+
+        out->nsd_StaticRouteCount = lease.adl_StaticRouteCount;
+        if (out->nsd_StaticRouteCount > (UWORD)NETSTATUS_DHCP_ADDRS)
+            out->nsd_StaticRouteCount = (UWORD)NETSTATUS_DHCP_ADDRS;
+        for (i = 0; i < out->nsd_StaticRouteCount; i++)
+            out->nsd_StaticRoute[i] = lease.adl_StaticRoute[i];
+
+        ns_copy_name(out->nsd_HostName, sizeof(out->nsd_HostName),
+                     lease.adl_HostName);
+        ns_copy_name(out->nsd_DomainName, sizeof(out->nsd_DomainName),
+                     lease.adl_DomainName);
+    }
+}
+
+/*
+ * The NX physical interface index is the config index. src/netstack attaches
+ * the configured interfaces in config order from slot 0 (netstack.c:376 for
+ * the primary, :451 for the rest), and NetX Duo puts the loopback at
+ * NX_LOOPBACK_INTERFACE == NX_MAX_PHYSICAL_INTERFACES, past the physical range
+ * this walks, so there is no off-by-one to correct for.
+ *
+ * NULL when the slot is not configured; NETSTATUS_IF_NAMED tells the caller
+ * whether a name came from the config.
  */
 static const AmiIfConfig *ns_config_for(UINT nx_index)
 {
@@ -263,8 +371,8 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
 
         /*
          * ami_sana2_attach() parks the AmiSana2If in the interface's
-         * additional link info (aminetxduo/sana2.h), which is how the driver's
-         * own counters are reached without a separate registry.
+         * additional link info (aminetxduo/sana2.h), so the driver's own
+         * counters are reachable without a separate registry.
          */
         sana = (AmiSana2If *)nxif->nx_interface_additional_link_info;
         if (sana != NULL)
@@ -297,8 +405,8 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
         }
         else
         {
-            /* NetX Duo's own name for the slot, which for loopback is the
-             * only name there is. */
+            /* NetX Duo's own name for the slot; for loopback it is the only
+             * name there is. */
             ns_copy_name(out->nsi_Name, sizeof(out->nsi_Name),
                          (const char *)nxif->nx_interface_name);
         }
@@ -351,10 +459,10 @@ static VOID ns_fill_stats(NX_IP *ip, NetStatusStats *out)
 }
 
 /*
- * The ARP cache is a hash table of CIRCULAR lists -- nx_arp_active_next of the
+ * The ARP cache is a hash table of circular lists -- nx_arp_active_next of the
  * last entry in a bucket points back at the bucket head, not at NX_NULL -- so
- * every walk needs the head comparison below. Getting that wrong does not
- * fail; it spins, inside the bracket, with the baton held.
+ * the walk needs the head comparison below. Without it the loop spins inside
+ * the bracket, holding the lock.
  */
 static VOID ns_fill_arp(NX_IP *ip, NsWriter *w)
 {
@@ -415,23 +523,19 @@ static VOID ns_fill_arp(NX_IP *ip, NsWriter *w)
 }
 
 /*
- * ROUTES.
- *
- * Three kinds, and they are reported in the order the stack consults them,
- * because that order is the answer to "why did my packet go there":
+ * Three kinds of route, reported in the order the stack consults them:
  *
  *   1. the directly-attached prefix of each interface that has an address;
  *   2. NetX Duo's static routing table, longest prefix first -- it keeps
  *      nx_ip_routing_table[] sorted by netmask descending, so the order here
  *      is the order _nx_ip_route_find() matches in;
- *   3. the default gateway (nx_ip_gateway_address), which is consulted last
- *      and which nx_ip_gateway_address_set() maintains in every build.
+ *   3. the default gateway (nx_ip_gateway_address), consulted last and
+ *      maintained by nx_ip_gateway_address_set() in every build.
  *
- * The static table exists because port/netxduo-amiga/inc/nx_user.h defines
- * NX_ENABLE_IP_STATIC_ROUTING; NX_IP_ROUTING_TABLE_SIZE alone would not have
- * been enough, and for a long time was all that was there. NETSTATUS_SYS_ROUTING
- * in the SYSTEM query is how a caller tells a build with the table from one
- * without it, so this file still compiles and reports honestly either way.
+ * The static table exists only when port/netxduo-amiga/inc/nx_user.h defines
+ * NX_ENABLE_IP_STATIC_ROUTING; NX_IP_ROUTING_TABLE_SIZE alone is not enough.
+ * NETSTATUS_SYS_ROUTING in the SYSTEM query tells a caller which kind of build
+ * it is talking to, so this file compiles and reports correctly either way.
  */
 /* Which nx_ip_interface[] slot a route points at, 0 when it points nowhere. */
 static UWORD ns_interface_index(NX_IP *ip, const NX_INTERFACE *nxif)
@@ -521,11 +625,10 @@ static VOID ns_fill_routes(NX_IP *ip, NsWriter *w)
 }
 
 /*
- * The created-socket lists are singly linked and CIRCULAR too, so the walk is
+ * The created-socket lists are singly linked and circular too, so the walk is
  * bounded by the count NetX Duo keeps rather than by a NULL that never comes.
- * These are the sockets of every task using the library, which is the point:
- * netstat run from one Shell must see the connection another Shell's `fetch`
- * has open.
+ * These are the sockets of every task using the library, so netstat run from
+ * one Shell sees the connection another Shell's `fetch` has open.
  */
 static VOID ns_fill_sockets(NX_IP *ip, NsWriter *w)
 {
@@ -575,10 +678,9 @@ static VOID ns_fill_sockets(NX_IP *ip, NsWriter *w)
 /* ---------------------------------------------------------- NetStackQuery */
 
 /*
- * The header check, done BEFORE anything is written. A caller that landed
+ * The header check, done before anything is written, so a caller that landed
  * here by accident presents the wrong magic and leaves with its buffer
- * untouched -- which is the whole reason the magic is in the buffer's first
- * four bytes rather than nowhere.
+ * untouched. That is why the magic sits in the buffer's first four bytes.
  */
 static LONG ns_header_ok(const NetStatusHeader *hdr, ULONG size)
 {
@@ -611,15 +713,14 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
 
     /*
      * The one-entry answers are written straight into the caller's buffer, so
-     * the size check has to happen before the walk rather than inside it.
+     * the size check happens before the walk rather than inside it.
      *
-     * It is also what makes the two unchecked ns_writer_next() results below
-     * safe: `need != 0` for SYSTEM and STATS, so size >= header + entry_size,
-     * so ns_writer_init() computes room >= 1 and the first slot exists.  GCC's
+     * It also makes the two unchecked ns_writer_next() results below safe:
+     * `need != 0` for SYSTEM and STATS, so size >= header + entry_size, so
+     * ns_writer_init() computes room >= 1 and the first slot exists. GCC's
      * -fanalyzer reports those two as "dereference of NULL 'out'" because that
-     * chain goes through a division it will not reason about; the invariant is
-     * here rather than a NULL test at the call, because a NULL test there
-     * would be dead code that reads as if the buffer might be too small.
+     * chain goes through a division it will not reason about. A NULL test at
+     * the call would be dead code implying the buffer might be too small.
      */
     switch (what)
     {
@@ -629,6 +730,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         case NETSTATUS_ARP:         need = 0;                        break;
         case NETSTATUS_ROUTES:      need = 0;                        break;
         case NETSTATUS_SOCKETS:     need = 0;                        break;
+        case NETSTATUS_DHCP:        need = 0;                        break;
         default:                    return bsd_fail(SocketBase, AMI_EINVAL);
     }
 
@@ -685,7 +787,14 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             ns_writer_finish(&w);
             break;
 
-        default:    /* NETSTATUS_SOCKETS -- the switch above rejected the rest */
+        case NETSTATUS_DHCP:
+            ns_writer_init(&w, hdr, size, NETSTATUS_DHCP,
+                           sizeof(NetStatusDhcp));
+            ns_fill_dhcp(&w);
+            ns_writer_finish(&w);
+            break;
+
+        default:    /* NETSTATUS_SOCKETS; the switch above rejected the rest */
             ns_writer_init(&w, hdr, size, NETSTATUS_SOCKETS,
                            sizeof(NetStatusSocket));
             ns_fill_sockets(ip, &w);
@@ -712,8 +821,8 @@ static LONG ns_map_status(struct AmiSocketBase *SocketBase, UINT status)
         case NX_NO_MORE_ENTRIES:    return bsd_fail(SocketBase, AMI_ENOBUFS);
         case NX_IP_ADDRESS_ERROR:   return bsd_fail(SocketBase, AMI_EINVAL);
         case NX_INVALID_INTERFACE:  return bsd_fail(SocketBase, AMI_ENXIO);
-        /* The static routing table is full -- NX_IP_ROUTING_TABLE_SIZE is 4,
-           so this is reachable by a user rather than only by a bug. */
+        /* Static routing table full. NX_IP_ROUTING_TABLE_SIZE is 4, so a user
+           can hit this without a bug being involved. */
         case NX_OVERFLOW:           return bsd_fail(SocketBase, AMI_ENOBUFS);
         default:                    return bsd_fail(SocketBase, AMI_EINVAL);
     }
@@ -744,7 +853,7 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
      * Online/Offline go through src/netstack rather than through NetX Duo:
      * taking an interface down means stopping its SANA-II readers as well as
      * telling NetX Duo, and netstack_interface_down() is the only thing that
-     * knows about both. It brackets itself, so it is called OUTSIDE ours.
+     * knows about both. It brackets itself, so it is called outside ours.
      */
     switch (op)
     {
@@ -789,8 +898,8 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
             /*
              * NX_ENABLE_IP_STATIC_ROUTING is not defined in
              * port/netxduo-amiga/inc/nx_user.h, so there is no routing table
-             * to add to. ENOSYS rather than a lie; NETSTATUS_SYS_ROUTING lets
-             * a command say so before it asks.
+             * to add to. NETSTATUS_SYS_ROUTING lets a command check before it
+             * asks.
              */
             rc = bsd_fail(SocketBase, AMI_ENOSYS);
 #endif
@@ -820,10 +929,9 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
         case NETCTRL_ARP_DELETE:
             /*
              * nx_arp_entry_delete() rather than nx_arp_static_entry_delete():
-             * an address may be cached statically or dynamically and the
-             * person typing `arp -d` neither knows nor should have to. This
-             * one removes whichever it is; the static-only call needs the
-             * hardware address as well and fails on a dynamic entry.
+             * an address may be cached statically or dynamically, and this
+             * call removes either. The static-only call needs the hardware
+             * address as well and fails on a dynamic entry.
              */
             status = nx_arp_entry_delete(ip, ctl->nsc_Destination);
             rc = ns_map_status(SocketBase, status);

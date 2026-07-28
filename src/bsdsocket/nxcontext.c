@@ -3,8 +3,8 @@
  *
  * Compiled only when AMINETXDUO_TLS_CONTEXT is defined, which happens only in
  * an AMINETXDUO_TLS build.  A default build has neither this object nor the
- * vector-table slot that points at it, which is what keeps the default
- * bsdsocket.library byte-identical to a build of the tree without TLS.
+ * vector-table slot that points at it, so the default bsdsocket.library stays
+ * byte-identical to a build of the tree without TLS.
  *
  * See include/aminetxduo/nxcontext.h for why a separate library has to borrow
  * the stack rather than link one.
@@ -20,16 +20,15 @@
 #include "nx_packet.h"
 #include "nx_tcp.h"
 
-/* The baton hooks are src/netstack internals rather than public API -- they are
-   not something an application should ever reach for -- so the declarations
-   come from there rather than from include/aminetxduo/netstack.h. */
+/* The baton hooks are src/netstack internals, not public API, so the
+   declarations come from there rather than include/aminetxduo/netstack.h. */
 VOID ami_netstack_baton_release(VOID);
 VOID ami_netstack_baton_acquire(VOID);
 
 /*
- * The table is `const` and static, and every entry is a function this library
- * already contains.  Nothing here is per opener, so one copy serves every
- * caller; the only per-caller argument is the SocketBase passed to
+ * The table is const and static; every entry is a function this library
+ * already contains.  Nothing in it is per opener, so one copy serves every
+ * caller -- the only per-caller argument is the SocketBase passed to
  * nxc_TcpSocket().
  */
 
@@ -45,12 +44,10 @@ static NX_TCP_SOCKET *bsd_nxc_tcp_socket(APTR socket_base, LONG fd)
     if (sock == NULL)
         return NX_NULL;
 
-    /*
-     * TLS runs over a connected byte stream and nothing else.  A UDP socket, a
-     * listening socket or a socket whose connect() has not completed would all
-     * fail later and much less legibly -- nx_secure would sit in
-     * nx_tcp_socket_receive() until the caller's timeout.
-     */
+    /* TLS runs only over a connected byte stream.  A UDP socket, a listening
+       socket or one whose connect() has not completed would instead fail late
+       and obscurely: nx_secure would sit in nx_tcp_socket_receive() until the
+       caller's timeout. */
     if ((sock->as_Flags & ASF_TCP) == 0)
         return NX_NULL;
     if ((sock->as_Flags & ASF_CONNECTED) == 0)
@@ -107,9 +104,9 @@ LONG ami_nxd_context_obtain(ULONG magic, ULONG version,
     if (ctx == NULL)
         return -1;
 
-    /* The stack is up because the caller holds an open bsdsocket.library, but
-       say so anyway: a caller that gets a context with a NULL NX_IP behind it
-       would fail in nx_secure with a caller error instead of here. */
+    /* The stack is up because the caller holds an open bsdsocket.library;
+       checked anyway, since a context with a NULL NX_IP behind it would fail
+       in nx_secure with a caller error instead of here. */
     if (netstack_ip() == NX_NULL)
         return -1;
 
@@ -118,9 +115,8 @@ LONG ami_nxd_context_obtain(ULONG magic, ULONG version,
     return 0;
 }
 
-/* The LVO wrapper.  Register assignment is fixed by
-   include/aminetxduo/nxcontext.h and by the inline in src/tlslib/tls_netx.c;
-   they must agree, and this is the one place it is spelled out in C. */
+/* The LVO wrapper.  Register assignment must match
+   include/aminetxduo/nxcontext.h and the inline in src/tlslib/tls_netx.c. */
 LONG bsd_ObtainNetXDuoContext(
     register ULONG                   magic       __asm("d0"),
     register ULONG                   version     __asm("d1"),

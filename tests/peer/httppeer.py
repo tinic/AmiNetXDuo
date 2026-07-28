@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""curlpeer -- everything curl is pointed at, on the host.
+"""httppeer -- the host end every guest-side network test is pointed at.
 
 tools/fsuae-run.sh attaches FS-UAE's SLIRP user-mode NAT, so a server bound to
 127.0.0.1 here is what the guest reaches at 10.0.2.2:<port>.  Same arrangement
@@ -680,7 +680,7 @@ def main():
     ap.add_argument("--advertise", default="10.0.2.2",
                     help="what the guest calls this host: goes in the PASV "
                          "reply and in redirect Locations")
-    ap.add_argument("--pki", help="directory of tests/curl/mkpki.sh output; "
+    ap.add_argument("--pki", help="directory of tests/peer/mkpki.sh output; "
                                   "without it the https ports do not open")
     ap.add_argument("--log")
     ap.add_argument("--seconds", type=int, default=3600)

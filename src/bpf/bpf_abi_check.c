@@ -2,8 +2,8 @@
  * AmiNetXDuo -- bpf ABI pin.
  *
  * Amiga-only, and a translation unit of its own so that every assertion runs
- * against the Roadshow NDK <net/bpf.h> itself. The record layout is the whole
- * point of the exercise: a consumer walks the buffer with
+ * against the Roadshow NDK <net/bpf.h> itself. The record layout is what
+ * matters: a consumer walks the buffer with
  * BPF_WORDALIGN(bh_hdrlen + bh_caplen) and reads data at record + bh_hdrlen,
  * so bh_hdrlen being 20 rather than 18 or 24 is load-bearing.
  *
@@ -79,9 +79,9 @@ AMI_STATIC_ASSERT(BPF_IMM == 0x00 && BPF_ABS == 0x20 && BPF_IND == 0x40 &&
 AMI_STATIC_ASSERT(BPF_K == 0x00 && BPF_X == 0x08 && BPF_A == 0x10, "src/rval");
 AMI_STATIC_ASSERT(DLT_EN10MB == 1 && DLT_NULL == 0, "link types");
 
-/* The ioctl encodings. IOCPARM_LEN is what a caller built against a different
-   struct ifreq would disagree about, which is why ami_bpf_ioctl() dispatches
-   on direction + group + number and ignores the length. */
+/* The ioctl encodings. A caller built against a different struct ifreq would
+   disagree on IOCPARM_LEN, so ami_bpf_ioctl() dispatches on direction + group
+   + number and ignores the length. */
 AMI_STATIC_ASSERT(IOCGROUP(BIOCGBLEN)    == 'B', "BIOCGBLEN group");
 AMI_STATIC_ASSERT(IOCPARM_LEN(BIOCSETIF) == 32,  "sizeof(struct ifreq)");
 AMI_STATIC_ASSERT(IOCPARM_LEN(BIOCGSTATS) == 8,  "sizeof(struct bpf_stat)");

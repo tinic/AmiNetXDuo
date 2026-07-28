@@ -3,12 +3,9 @@
  *
  * Compiled only in an AMINETXDUO_IPV6 build.
  *
- * WHAT THIS FILE IS FOR
- *
  * The Roadshow NDK defines the IPv6 socket ABI even though no Amiga stack has
- * ever implemented it, so the shape of the thing is not ours to choose.  It
- * is, however, ours to VERIFY -- and this project has been bitten twice by
- * assuming a header said what it looked like it said:
+ * ever implemented it, so the shape is not ours to choose, only to verify.
+ * Two earlier cases where a header did not say what it looked like it said:
  *
  *   - ndk-include/pwd.h turned out to be newlib's ten-field `struct passwd`
  *     rather than the Amiga's seven-field one, a silent 12-byte difference;
@@ -19,28 +16,28 @@
  * whose netinet/in.h differs is a build failure here, not a wrong answer at
  * run time.
  *
- * WHAT WAS ACTUALLY FOUND (verified, not inferred, against
- * amigaos/tools/m68k-amigaos-gcc/m68k-amigaos/ndk-include on 2026-07-25):
+ * Verified against amigaos/tools/m68k-amigaos-gcc/m68k-amigaos/ndk-include on
+ * 2026-07-25:
  *
  *   sys/socket.h:110   typedef unsigned char sa_family_t;
  *   sys/socket.h:196   #define AF_INET6 23
  *   netinet/in.h:87    typedef unsigned short in_port_t;
  *   netinet/in.h:170   struct sockaddr_in { __UBYTE sin_len; sa_family_t
- *                        sin_family; ... }       <-- 4.4BSD, HAS a length byte
+ *                        sin_family; ... }       <-- 4.4BSD, has a length byte
  *   netinet/in.h:178   struct in6_addr { unsigned char s6_addr[16]; }
  *   netinet/in.h:182   struct sockaddr_in6 { sa_family_t sin6_family; ... }
- *                                              <-- LINUX, has NO length byte
+ *                                              <-- Linux, no length byte
  *
- * The last two lines are the whole problem.  `sockaddr_in` and `sockaddr_in6`
- * in the same header disagree about where the address family lives: offset 1
- * in one, offset 0 in the other.  Casting a sockaddr_in6 to `struct sockaddr *`
- * and reading sa_family therefore reads the padding byte the compiler inserted
- * in front of sin6_port.  bsd_sa_family() in socket.c never does that; it
- * decides from the bytes plus the declared length.
+ * So `sockaddr_in` and `sockaddr_in6` in the same header disagree about where
+ * the address family lives: offset 1 in one, offset 0 in the other.  Casting a
+ * sockaddr_in6 to `struct sockaddr *` and reading sa_family therefore reads
+ * the padding byte the compiler inserted in front of sin6_port.
+ * bsd_sa_family() in socket.c never does that; it decides from the bytes plus
+ * the declared length.
  *
- * The other consequence is that nothing here may write a length byte into a
- * sockaddr_in6 the way bsd_sockaddr_put() writes sin_len into a sockaddr_in:
- * on this NDK that byte IS sin6_family.
+ * Nothing here may write a length byte into a sockaddr_in6 the way
+ * bsd_sockaddr_put() writes sin_len into a sockaddr_in: on this NDK that byte
+ * is sin6_family.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -57,7 +54,7 @@ _Static_assert(sizeof(struct in6_addr) == 16, "in6_addr is not 16 bytes");
 
 /*
  * 28 bytes: family(1) + pad(1) + port(2) + flowinfo(4) + addr(16) + scope(4).
- * The pad at offset 1 is NOT a length byte -- see the header comment.
+ * The pad at offset 1 is not a length byte -- see the header comment.
  */
 _Static_assert(sizeof(struct sockaddr_in6) == 28,
                "sockaddr_in6 is not the 28-byte no-sin6_len shape");
@@ -82,7 +79,7 @@ _Static_assert(sizeof(((struct sockaddr_in6 *)0)->sin6_flowinfo) == 4,
 _Static_assert(sizeof(((struct sockaddr_in6 *)0)->sin6_scope_id) == 4,
                "sin6_scope_id is not four bytes");
 
-/* The IPv4 side, restated: this is the struct sockaddr_in6 is NOT like. */
+/* The IPv4 side, restated: the layout sockaddr_in6 does not share. */
 _Static_assert(sizeof(struct sockaddr_in) == 16, "sockaddr_in is not 16 bytes");
 _Static_assert(offsetof(struct sockaddr_in, sin_len)    == 0, "sin_len moved");
 _Static_assert(offsetof(struct sockaddr_in, sin_family) == 1, "sin_family moved");
@@ -95,10 +92,10 @@ _Static_assert(sizeof(((NXD_ADDRESS *)0)->nxd_ip_address.v6) == 16,
 
 /*
  * struct in6_addr is 16 bytes in network order; NetX Duo keeps four ULONGs in
- * HOST order with [0] most significant.  On m68k those are the same bytes, so
- * a memcpy would work -- and would break silently the day this is built for
- * anything little-endian.  The shifts cost four instructions per word and
- * make the file portable, which is the same trade the BSD_HTONL macros make.
+ * host order with [0] most significant.  On m68k those are the same bytes, so
+ * a memcpy would work, but would break silently on a little-endian build.  The
+ * shifts cost four instructions per word, the same trade the BSD_HTONL macros
+ * make.
  */
 VOID bsd_in6_to_words(const UBYTE bytes[16], ULONG words[4])
 {
@@ -160,20 +157,20 @@ BOOL bsd_addr_normalise(const AmiSocket *sock, NXD_ADDRESS *addr)
 
     /*
      * A V6ONLY socket may not talk to an IPv4 host at all, mapped notation or
-     * not.  That is the entire meaning of the option on the transmit side.
+     * not.
      */
     if ((sock->as_Flags & ASF_V6ONLY) != 0)
         return FALSE;
 
     /*
-     * On a dual-stack socket the mapped form is a spelling of an IPv4
-     * address, so it becomes one.  It cannot be left as-is: NetX Duo has no
-     * concept of a v4-mapped destination, and would build an IPv6 header
-     * addressed to ::ffff:a.b.c.d and hand it to neighbour discovery -- which
-     * would then look for the MAC of a host that is not speaking IPv6.
+     * On a dual-stack socket the mapped form is a spelling of an IPv4 address,
+     * so convert it.  It cannot be left as-is: NetX Duo has no concept of a
+     * v4-mapped destination and would build an IPv6 header addressed to
+     * ::ffff:a.b.c.d, then hand it to neighbour discovery, which would look
+     * for the MAC of a host that is not speaking IPv6.
      *
      * The unspecified address (::) is left alone: it is a wildcard for bind(),
-     * not a destination, and is caught by the port checks instead.
+     * not a destination, and the port checks catch it.
      */
     bsd_addr_from_v4(addr, v4);
 
@@ -185,18 +182,17 @@ BOOL bsd_addr_normalise(const AmiSocket *sock, NXD_ADDRESS *addr)
 /*
  * Level IPPROTO_IPV6.
  *
- * The option NUMBERS are not in the NDK and differ between BSD and Linux, so
+ * The option numbers are not in the NDK and differ between BSD and Linux, so
  * both numberings are accepted -- see the note in bsdsocket_internal.h for why
- * that is safe.  The option SET is deliberately small: an option that cannot
- * be implemented correctly is refused with ENOPROTOOPT rather than accepted
- * and quietly ignored, which is the same rule MSG_OOB is held to in
- * transfer.c.
+ * that is safe.  An option that cannot be implemented correctly is refused
+ * with ENOPROTOOPT rather than accepted and ignored, the same rule MSG_OOB is
+ * held to in transfer.c.
  *
  * Refused, and why:
  *   IPV6_MULTICAST_HOPS/_IF/_LOOP, IPV6_JOIN_GROUP, IPV6_LEAVE_GROUP
  *       -- IPv6 multicast membership needs NX_ENABLE_IPV6_MULTICAST, which the
  *          floor-target tuning leaves off (port/netxduo-amiga/inc/nx_user.h).
- *          Accepting a join that never happens is worse than refusing it.
+ *          A join that never happens is worse than a refused one.
  *   IPV6_RECVPKTINFO / IPV6_PKTINFO and the rest of RFC 3542
  *       -- ancillary data.  recvmsg() here reports msg_controllen == 0 always
  *          and cannot do otherwise; see the note in transfer.c.
@@ -238,9 +234,9 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
     {
         /*
          * BSD requires this to be set before bind(); after that the socket's
-         * behaviour is already fixed.  Enforced, rather than silently
-         * accepted, because an application that gets the order wrong on a
-         * real stack gets EINVAL and needs to find out here too.
+         * behaviour is fixed.  Enforced rather than accepted, so an
+         * application that gets the order wrong sees the same EINVAL it would
+         * get on a real stack.
          */
         if ((sock->as_Flags & (ASF_BOUND | ASF_CONNECTED)) != 0)
             return bsd_fail(base, AMI_EINVAL);
@@ -257,9 +253,8 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
     {
         /*
          * The IPv6 hop limit is the IPv4 TTL under another name, and NetX Duo
-         * stores exactly one of them per socket, so IP_TTL and
-         * IPV6_UNICAST_HOPS are the same knob here.  -1 means "use the
-         * default", as RFC 3493 specifies.
+         * stores one per socket, so IP_TTL and IPV6_UNICAST_HOPS are the same
+         * setting here.  -1 means "use the default", per RFC 3493.
          */
         if (value < -1 || value > 255)
             return bsd_fail(base, AMI_EINVAL);

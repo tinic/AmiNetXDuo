@@ -22,11 +22,11 @@
 static BOOL ami_raw_allowed = (AMI_SANA2_RAW_DEFAULT != 0) ? TRUE : FALSE;
 
 /*
- * The reader threads block in exec Wait() for IORequest completion, which is
- * outside ThreadX's knowledge. Under the baton scheduling model
- * (docs/RESEARCH.md §6.2) a ThreadX thread must hand the baton back before
- * blocking that way. The ThreadX port registers these; both default to
- * no-ops, which is the right answer for a model that lets Exec schedule.
+ * The reader threads block in exec Wait() for IORequest completion, which
+ * ThreadX knows nothing about. Under the baton scheduling model
+ * (docs/RESEARCH.md §6.2) a ThreadX thread must release the baton before
+ * blocking that way. The ThreadX port registers these; both default to no-ops,
+ * which suits a model that lets Exec schedule.
  */
 static AmiSana2BlockHook ami_block_enter;
 static AmiSana2BlockHook ami_block_leave;
@@ -39,20 +39,17 @@ VOID ami_sana2_set_block_hooks(AmiSana2BlockHook before_wait,
 }
 
 /*
- * Both hooks are called unconditionally, and the pairing is the hook's problem
- * rather than ours.
+ * Both hooks are called unconditionally; pairing them is the hook's job.
  *
- * They used to be guarded on tx_thread_identify() != TX_NULL, on the reasoning
- * that ami_sana2_open() runs on a plain Exec task and must not hand back a
- * baton it never held. That guard is unusable: a real "before wait" hook
+ * Do not guard them on tx_thread_identify() != TX_NULL. The before-wait hook
  * releases the baton, which clears _tx_thread_current_ptr, which makes
- * tx_thread_identify() return TX_NULL -- so the matching "after wait" hook was
- * silently skipped and the thread ran on without the baton. Verified under
- * FS-UAE, 2026-07-25: the NX_IP thread came back from S2_ONLINE unbatoned and
+ * tx_thread_identify() return TX_NULL, so the matching after-wait hook is
+ * skipped and the thread runs on without the baton. Verified under FS-UAE,
+ * 2026-07-25: the NX_IP thread came back from S2_ONLINE without the baton and
  * every ThreadX service it called afterwards returned garbage.
  *
  * src/netstack/netstack_baton.c keeps a per-Exec-Task record of whether the
- * enter hook actually did anything, which is the only place that can know.
+ * enter hook did anything, which is the only place that can know.
  */
 VOID ami_sana2_block_enter(VOID)
 {
@@ -106,10 +103,10 @@ VOID ami_sana2_port_init(struct MsgPort *port, struct Task *task, BYTE sigbit,
 
 /*
  * Run one synchronous device command. A fresh reply port is created for the
- * calling task each time: control commands come from whichever task happens to
- * be driving (startup task at open, IP thread from the driver entry), and
- * DoIO() waits on mn_ReplyPort->mp_SigTask, so a cached port would signal the
- * wrong task. Control traffic is rare enough that the cost does not matter.
+ * calling task each time: control commands come from whichever task is driving
+ * (startup task at open, IP thread from the driver entry) and DoIO() waits on
+ * mn_ReplyPort->mp_SigTask, so a cached port would signal the wrong task.
+ * Control traffic is rare enough for the cost not to matter.
  */
 LONG ami_sana2_command(AmiSana2If *iface, struct IOSana2Req *req, UWORD command)
 {
@@ -131,8 +128,8 @@ LONG ami_sana2_command(AmiSana2If *iface, struct IOSana2Req *req, UWORD command)
     req->ios2_Req.io_Error                   = 0;
     req->ios2_WireError                      = 0;
 
-    /* DoIO() blocks in exec Wait(), so it is subject to the same baton rule as
-       the readers -- NX_LINK_ENABLE reaches here on the IP thread. */
+    /* DoIO() blocks in exec Wait(), so the same baton rule as the readers
+       applies; NX_LINK_ENABLE reaches here on the IP thread. */
     ami_sana2_block_enter();
     DoIO((struct IORequest *)req);
     ami_sana2_block_leave();
@@ -187,10 +184,10 @@ static LONG ami_sana2_query(AmiSana2If *iface)
         iface->mtu = 1500;
 
     /*
-     * SANA-II's MTU is the maximum *packet data* size -- the IP payload, with
-     * no link header in it -- so it maps straight onto NetX Duo's
-     * nx_interface_ip_mtu_size. Clamp to what one packet buffer can hold once
-     * the alignment pad and the synthesised Ethernet header are accounted for.
+     * SANA-II's MTU is the maximum packet data size -- the IP payload, with no
+     * link header in it -- so it maps straight onto NetX Duo's
+     * nx_interface_ip_mtu_size. Clamp to what one packet buffer holds once the
+     * alignment pad and the synthesised Ethernet header are accounted for.
      */
     {
         ULONG limit = AMI_POOL_PAYLOAD - AMI_SANA2_RX_PAD - AMI_ETH_HEADER_SIZE;
@@ -210,10 +207,9 @@ static LONG ami_sana2_query(AmiSana2If *iface)
 
 /*
  * S2_GETSTATIONADDRESS returns the current address in ios2_SrcAddr and the
- * factory address, if there is one, in ios2_DstAddr. S2_CONFIGINTERFACE then
- * commits an address and, per the spec, may only be run once per unit -- a
- * device that has already been configured by another opener answers
- * S2WERR_IS_CONFIGURED, which is success as far as we are concerned.
+ * factory address, if any, in ios2_DstAddr. S2_CONFIGINTERFACE then commits an
+ * address and may only be run once per unit; a device already configured by
+ * another opener answers S2WERR_IS_CONFIGURED, treated here as success.
  */
 static LONG ami_sana2_configure(AmiSana2If *iface)
 {
@@ -286,15 +282,14 @@ static AmiRxSlot ami_raw_probe_slot;
 /*
  * There is no capability query for raw framing, so this posts one raw CMD_READ
  * and immediately takes it back. A device that does not implement the flag
- * *should* refuse the request in BeginIO (IOERR_NOCMD, S2ERR_BAD_ARGUMENT or
+ * should refuse the request in BeginIO (IOERR_NOCMD, S2ERR_BAD_ARGUMENT or
  * S2ERR_NOT_SUPPORTED); one that does implement it queues the request, and
  * AbortIO returns it with IOERR_ABORTED.
  *
- * The failure mode this cannot see is the device that accepts the flag and
- * then ignores it, handing back cooked frames that we would parse as though
- * they carried a link header. That is why the result only *enables* raw when
- * ami_sana2_set_raw_allowed(TRUE) has been called; the probe on its own is
- * reported, not trusted.
+ * This cannot detect a device that accepts the flag and then ignores it,
+ * handing back cooked frames that would be parsed as though they carried a
+ * link header. The result therefore only enables raw when
+ * ami_sana2_set_raw_allowed(TRUE) has been called.
  */
 static BOOL ami_sana2_probe_raw(AmiSana2If *iface)
 {
@@ -328,9 +323,9 @@ static BOOL ami_sana2_probe_raw(AmiSana2If *iface)
     err = (LONG)(BYTE)req.ios2_Req.io_Error;
     DeleteMsgPort(port);
 
-    /* IOERR_ABORTED means the device queued a raw read; 0 means one was even
-       satisfied. Everything else -- including S2ERR_OUTOFSERVICE from a unit
-       that is not up yet -- counts as "no". */
+    /* IOERR_ABORTED means the device queued a raw read; 0 means one was
+       satisfied. Everything else, including S2ERR_OUTOFSERVICE from a unit
+       that is not up yet, counts as no. */
     return (err == 0 || err == (LONG)IOERR_ABORTED) ? TRUE : FALSE;
 }
 #endif /* AMI_SANA2_PROBE_RAW */
@@ -411,9 +406,9 @@ LONG ami_sana2_multicast(AmiSana2If *iface, UWORD command,
 /* --------------------------------------------------------------- statistics */
 
 /*
- * Refreshes the device-derived half of AmiSana2Stats. Only ever called from
- * the IP thread (via the driver entry) or from open/close, because it borrows
- * the calling task for its reply port.
+ * Refresh the device-derived half of AmiSana2Stats. Called only from the IP
+ * thread (via the driver entry) or from open/close, because it borrows the
+ * calling task for its reply port.
  */
 VOID ami_sana2_refresh_stats(AmiSana2If *iface)
 {
@@ -456,10 +451,9 @@ VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out)
 }
 
 /*
- * The non-counter facts. Every field is a plain read of shim state; the
- * `posted` and `busy` flags are written by the readers and by the TX reaper,
- * so a count taken here is a sample rather than a snapshot -- which is what a
- * "how many are pending right now" question asks for anyway.
+ * The non-counter facts. Every field is a plain read of shim state. The
+ * `posted` and `busy` flags are written by the readers and the TX reaper, so a
+ * count taken here is a sample, not a snapshot.
  */
 VOID ami_sana2_get_info(const AmiSana2If *iface, AmiSana2Info *out)
 {
@@ -527,10 +521,8 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     ami_str_copy(iface->device, cfg->device, (ULONG)sizeof(iface->device));
     iface->unit = cfg->unit;
 
-    /*
-     * The buffer-management tag list is an *input* to OpenDevice and must
-     * outlive the unit, so it lives in the interface, not on the stack.
-     */
+    /* The buffer-management tag list is an input to OpenDevice and must
+       outlive the unit, so it lives in the interface, not on the stack. */
     iface->buffer_tags[tag].ti_Tag  = S2_CopyToBuff;
     iface->buffer_tags[tag].ti_Data = (ULONG)ami_sana2_copy_to_buff;
     tag++;
@@ -600,7 +592,8 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
 
     if (iface->raw_mode && iface->addr_bytes != AMI_ETH_ADDR_SIZE)
     {
-        /* Raw framing only means anything when we know the link header shape. */
+        /* Raw framing only means anything when the link header shape is
+           known. */
         iface->raw_mode = FALSE;
     }
 
@@ -619,10 +612,10 @@ VOID ami_sana2_close(AmiSana2If *iface)
     if (iface == NULL)
         return;
 
-    /* ami_sana2_rx_stop() takes the wire offline itself, and it does it
-       FIRST -- S2_OFFLINE is what returns the readers' queued CMD_READs on a
-       device that ignores AbortIO(). This used to offline after the stop, and
-       paid ten seconds of reader timeouts for the privilege. */
+    /* ami_sana2_rx_stop() takes the wire offline itself, and does so first:
+       S2_OFFLINE is what returns the readers' queued CMD_READs on a device
+       that ignores AbortIO(). Offlining after the stop instead costs ten
+       seconds of reader timeouts. */
     ami_sana2_rx_stop(iface);
     ami_sana2_tx_drain(iface);
 
@@ -631,12 +624,10 @@ VOID ami_sana2_close(AmiSana2If *iface)
         ami_sana2_offline(iface);
 
         /*
-         * A device that still owns one of our read requests must not be
-         * closed and its memory must not be freed: the request points into
-         * this allocation and into a reply port inside it, and the next frame
-         * that matches would be written into whatever took their place. On a
-         * machine with no memory protection that is the difference between a
-         * leak and a crash three commands later.
+         * A device that still owns one of these read requests must not be
+         * closed and this memory must not be freed: the request points into
+         * this allocation and into a reply port inside it, so the next
+         * matching frame would be written over whatever took their place.
          */
         if (iface->rx_orphaned)
         {

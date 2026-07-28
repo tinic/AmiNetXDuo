@@ -15,9 +15,8 @@
  * this file is a copy rather than a hook, and for the whole of the diff
  * against the vendored original.
  *
- * Both trees are MIT, so copying is a licensing non-event; it is a
- * MAINTENANCE event, and the README is what makes a submodule bump able to
- * find it.
+ * Both trees are MIT, so copying raises no licensing question.  It does raise
+ * a maintenance one, and the README is what lets a submodule bump find this.
  */
 
 
@@ -462,15 +461,15 @@ UINT                                  message_length;
         (session_cipher_method -> nx_crypto_algorithm == NX_CRYPTO_ENCRYPTION_CHACHA20_POLY1305) ||
         NX_SECURE_AEAD_CIPHER_CHECK(session_cipher_method -> nx_crypto_algorithm))
     {
-        /* AmiNetXDuo, RFC 7905.  ChaCha20-Poly1305 in TLS 1.2 does NOT use
-           the partially explicit nonce the GCM and CCM suites do: there is no
-           nonce_explicit on the wire at all, and the per-record nonce is the
+        /* AmiNetXDuo, RFC 7905.  ChaCha20-Poly1305 in TLS 1.2 does not use the
+           partially explicit nonce the GCM and CCM suites do: there is no
+           nonce_explicit on the wire, and the per-record nonce is the
            twelve-byte write IV exclusive-ored with the sequence number padded
            on the left -- the TLS 1.3 construction, arrived at two years
            earlier.  The additional data stays TLS 1.2's thirteen bytes.
 
-           So the record is eight bytes shorter than a GCM one and the branch
-           below cannot be shared with it. */
+           The record is therefore eight bytes shorter than a GCM one and this
+           branch cannot be shared with it. */
         if (session_cipher_method -> nx_crypto_algorithm == NX_CRYPTO_ENCRYPTION_CHACHA20_POLY1305)
         {
 

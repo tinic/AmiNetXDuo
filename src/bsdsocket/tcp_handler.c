@@ -3,12 +3,11 @@
  *
  * AmigaOS has no socket-as-file-handle. A descriptor belongs to a SocketBase,
  * a SocketBase belongs to one task, and there is no way to hand either to
- * Open(), Read(), Write() or SystemTagList(). That is the wall every "attach a
- * shell to a connection" idea hits, and a DOS handler is the way through it:
+ * Open(), Read(), Write() or SystemTagList(). A DOS handler gets around that:
  * DOS routes Open("TCP:...") here, this file makes the connection, and the
  * caller gets an ordinary BPTR.
  *
- * What it buys, in order of how surprising it is:
+ * What that allows:
  *
  *   Type TCP:host/daytime          every AmigaDOS command that reads a file
  *   Copy TCP:host/1234 TO RAM:x    can now read a socket, unmodified
@@ -19,7 +18,7 @@
  *                                  that SystemTagList() will take as
  *                                  SYS_Input/SYS_Output.
  *
- * NAME SYNTAX, which is Roadshow's (tcp-handler.doc) and not invented here:
+ * Name syntax, taken from Roadshow's tcp-handler.doc:
  *
  *   TCP:<host>/<service>           connect to <service> on <host>
  *   TCP:<service>                  listen on <service>, accept one connection
@@ -27,53 +26,45 @@
  *   TCP:OBTAIN=<id>                ObtainSocket() a socket someone parked
  *
  * Components are separated by '/'. A component with an '=' is a keyword; a
- * bare component fills SERVICE first and HOST second, which is what makes
- * "TCP:<service>" a listener and "TCP:<host>/<service>" a connection, exactly
- * as the Roadshow document's two examples require.
- *
- * ONE PROCESS PER CONNECTION, and why
+ * bare component fills SERVICE first and HOST second, which makes
+ * "TCP:<service>" a listener and "TCP:<host>/<service>" a connection, as the
+ * Roadshow document's two examples require.
  *
  * A handler answers a DOSPACKET when it can and not before, and the packet's
- * sender is asleep in the meantime. A single-process handler therefore has to
- * hold every unanswerable packet in a queue and drive them from one
- * WaitSelect() -- which works, but only for the packets. It does nothing for
- * the two calls that genuinely block and are not sockets: gethostbyname() and
- * connect(). One name lookup would stall every other file handle the handler
- * owns.
+ * sender is asleep in the meantime. A single-process handler would have to
+ * hold every unanswerable packet in a queue driven from one WaitSelect(),
+ * which covers the packets but not the two blocking calls that are not
+ * sockets: gethostbyname() and connect(). One name lookup would stall every
+ * other file handle the handler owns.
  *
- * So this is shaped like console.handler instead: a control process owns the
- * device node and answers ACTION_FINDINPUT/FINDOUTPUT/FINDUPDATE by starting a
- * *session* process, handing it the packet, and forgetting about it. The
- * session opens its own bsdsocket.library -- which is the only correct way to
- * get a descriptor table, since every opener gets its own child base
- * (library.c) -- connects, points the FileHandle's fh_Type at its own port,
- * and replies. Every later packet for that handle goes straight to the
- * session, which may block in recv() for as long as it likes because nobody
- * else is behind it.
+ * So this is shaped like console.handler: a control process owns the device
+ * node and answers ACTION_FINDINPUT/FINDOUTPUT/FINDUPDATE by starting a
+ * session process, handing it the packet, and forgetting about it. The session
+ * opens its own bsdsocket.library -- every opener gets its own child base
+ * (library.c), which is how it gets a descriptor table -- connects, points the
+ * FileHandle's fh_Type at its own port, and replies. Every later packet for
+ * that handle goes straight to the session, which may block in recv() for as
+ * long as it likes because nobody else is behind it.
  *
- * The FileHandle's fh_Type is ours to change: dos.library sets it to the
- * device's port before sending the packet and re-initialises it on every
- * retry "in case handler played with it" (v40 dos, bcplio.c findstream). That
- * is also what makes ACTION_WAIT_CHAR usable at all -- WaitForChar() sends
- * only a timeout and NOT the file handle, so a handler with one port for many
- * files cannot tell which file is being asked about. One port per file makes
- * the question unambiguous.
+ * Changing fh_Type is allowed: dos.library sets it to the device's port before
+ * sending the packet and re-initialises it on every retry "in case handler
+ * played with it" (v40 dos, bcplio.c findstream). It is also what makes
+ * ACTION_WAIT_CHAR usable -- WaitForChar() sends only a timeout, not the file
+ * handle, so a handler with one port for many files cannot tell which file is
+ * being asked about. One port per file resolves that.
  *
  * Neither process uses its pr_MsgPort for DOS packets. Both do their own DOS
  * and library I/O (CreateNewProc, the resolver reading DEVS:Internet), and
- * dos.library's DoPkt replies arrive on pr_MsgPort; sharing the two would mean
- * a reply and an incoming packet in the same queue and a pr_PktWait hook to
- * tell them apart. A second MsgPort costs nothing and removes the problem.
- *
- * WHAT A PROGRAM THAT ONLY KNOWS Read() SEES
+ * dos.library's DoPkt replies arrive on pr_MsgPort; sharing the two would put
+ * a reply and an incoming packet in the same queue and need a pr_PktWait hook
+ * to tell them apart. A second MsgPort costs nothing.
  *
  *   peer closed, all data delivered   Read() returns 0. Ordinary EOF.
  *   connection reset                  Read() returns -1, IoErr() set. Not 0:
  *                                     a reset means the transfer was cut
  *                                     short, and reporting that as EOF turns
  *                                     a truncated file into a successful copy.
- *   nothing to read yet               Read() blocks. There is no idle timeout;
- *                                     this is a connection, not a file.
+ *   nothing to read yet               Read() blocks; no idle timeout.
  *   name lookup or connect failed     Open() fails, so Read() never happens.
  *
  * AmigaDOS has no error code for "connection reset by peer", so the mapping
@@ -124,10 +115,9 @@ typedef struct TcpBoot
 } TcpBoot;
 
 /*
- * Library globals. There is exactly one handler per loaded library, created
- * once under the master semaphore, so these need no further locking; the
- * session count is touched from several processes and is therefore only ever
- * changed inside Forbid().
+ * Library globals. One handler per loaded library, created once under the
+ * master semaphore, so these need no further locking. The session count is
+ * touched from several processes, so it is only changed inside Forbid().
  */
 static struct MsgPort    *tcp_ctrl_port;
 static struct DeviceNode *tcp_node;
@@ -175,7 +165,7 @@ static BOOL tcp_ci_equal(const char *a, const char *b)
     return (*a == '\0' && *b == '\0');
 }
 
-/* Decimal only, and only when the WHOLE string is one. -1 means "it is not". */
+/* Decimal only, and only when the whole string is one. -1 if it is not. */
 static LONG tcp_decimal(const char *s)
 {
     LONG value = 0;
@@ -221,12 +211,10 @@ static VOID tcp_bstr_to_c(BSTR bs, char *out, ULONG size)
 }
 
 /*
- * Reply a packet.
- *
- * Not ReplyPkt(): that stamps dp_Port with the CURRENT process's pr_MsgPort,
- * and neither of our processes takes DOS packets there -- see the header
- * comment. The convention dp_Port carries is "the port to send this packet
- * back to", so it has to be the port this handle actually listens on.
+ * Reply a packet. Not ReplyPkt(): that stamps dp_Port with the current
+ * process's pr_MsgPort, and neither of our processes takes DOS packets there
+ * (see the header comment). dp_Port means "the port to send this packet back
+ * to", so it must be the port this handle listens on.
  */
 static VOID tcp_reply(struct DosPacket *pkt, LONG res1, LONG res2,
                       struct MsgPort *from)
@@ -246,9 +234,9 @@ static VOID tcp_reply(struct DosPacket *pkt, LONG res1, LONG res2,
 /* --------------------------------------------------------- errno -> DOS -- */
 
 /*
- * There is no DOS error for most of these, so the table says what each one is
- * being reported AS rather than pretending to be a translation. The socket
- * errno is logged next to it at every site that uses this.
+ * There is no DOS error for most of these, so the table records what each one
+ * is reported as rather than pretending to be a translation. The socket errno
+ * is logged alongside at every site that uses this.
  */
 typedef struct TcpErrorMap
 {
@@ -284,10 +272,10 @@ static LONG tcp_dos_error(LONG err)
     }
 
     /*
-     * ECONNREFUSED, ECONNRESET, ETIMEDOUT, EPIPE, ENOTCONN and everything
-     * else all mean the same thing to a program holding a file handle: the
-     * thing at the other end is not there. "Object not found" is the closest
-     * AmigaDOS gets, and Fault() has a sentence for it.
+     * ECONNREFUSED, ECONNRESET, ETIMEDOUT, EPIPE, ENOTCONN and the rest all
+     * mean the same thing to a program holding a file handle: the other end is
+     * not there. "Object not found" is the closest AmigaDOS gets, and Fault()
+     * has a sentence for it.
      */
     return ERROR_OBJECT_NOT_FOUND;
 }
@@ -389,12 +377,10 @@ static LONG tcp_parse(const char *path, TcpName *out)
     }
 
     /*
-     * Where the bare components go, and why SERVICE comes first.
-     *
-     * The Roadshow document has to be satisfied in both directions at once:
-     * "TCP:localhost/daytime" is a connection, and "TCP:<service name>" alone
-     * is the same thing as "TCP:service=<service name>" -- a listener. So two
-     * bare components are host then service, and a single one is a service.
+     * Bare components. The Roadshow document requires both
+     * "TCP:localhost/daytime" (a connection) and "TCP:<service name>" alone
+     * (equivalent to "TCP:service=<service name>", a listener). So two bare
+     * components are host then service, and a single one is a service.
      */
     if (bares == 2)
     {
@@ -442,16 +428,15 @@ static UWORD tcp_service_port(struct AmiSocketBase *base, const char *service)
 }
 
 /*
- * Wait until `fd` has something to say. `timeout` is NULL for "as long as it
- * takes". Returns >0 ready, 0 timed out, -1 failed.
+ * Wait until `fd` is ready. `timeout` NULL means wait indefinitely. Returns >0
+ * ready, 0 timed out, -1 failed.
  *
- * Every wait in this file goes through WaitSelect() rather than through a
- * blocking socket call, and that is deliberate: a blocking accept() was
- * observed once, under this emulator, not to return after a connection had
- * plainly been established (the peer's Open() had already succeeded), while
- * the same connection made the descriptor readable to WaitSelect() straight
- * away. Waiting on readiness and then taking the socket in a call that cannot
- * block is the shape that has never stalled.
+ * Every wait in this file goes through WaitSelect() rather than a blocking
+ * socket call: a blocking accept() was once observed under this emulator not
+ * to return after a connection had been established (the peer's Open() had
+ * already succeeded), while the same connection made the descriptor readable
+ * to WaitSelect() immediately. Waiting on readiness and then taking the socket
+ * in a call that cannot block has never stalled.
  */
 static LONG tcp_wait_ready(struct AmiSocketBase *base, LONG fd,
                            struct timeval *timeout)
@@ -582,8 +567,8 @@ static LONG tcp_open_socket(struct AmiSocketBase *base, const TcpName *name,
         /*
          * No host: Roadshow's "allow other networked hosts to open a
          * connection to the local machine on the port specified here". One
-         * connection, then the listener is done -- a DOS file handle is one
-         * stream and there is nowhere to put a second.
+         * connection, then the listener is closed -- a DOS file handle is one
+         * stream, so there is nowhere to put a second.
          */
         {
             LONG on = 1;
@@ -645,7 +630,7 @@ static VOID tcp_session_read(TcpSession *s, struct DosPacket *pkt)
 
     if (got >= 0)
     {
-        /* 0 is EOF to DOS, which is exactly what an orderly close means. */
+        /* 0 is EOF to DOS, which is what an orderly close means. */
         tcp_reply(pkt, got, 0, s->ts_Port);
         return;
     }
@@ -700,10 +685,9 @@ static VOID tcp_session_write(TcpSession *s, struct DosPacket *pkt)
 }
 
 /*
- * ACTION_WAIT_CHAR. dp_Arg1 is a timeout in microseconds and there is no file
- * handle in the packet at all -- see the header comment on why each handle has
- * its own port. This is the one place the handler uses WaitSelect(), and it is
- * the natural use for it: one descriptor, one timeout.
+ * ACTION_WAIT_CHAR. dp_Arg1 is a timeout in microseconds and the packet
+ * carries no file handle -- see the header comment on why each handle has its
+ * own port. One descriptor and one timeout maps straight onto WaitSelect().
  */
 static VOID tcp_session_wait_char(TcpSession *s, struct DosPacket *pkt)
 {
@@ -717,15 +701,15 @@ static VOID tcp_session_wait_char(TcpSession *s, struct DosPacket *pkt)
     ready = tcp_wait_ready(s->ts_Base, s->ts_Fd, &tv);
 
     /*
-     * A closed connection counts as ready: the next Read() will return
-     * immediately, which is precisely what WaitForChar() is asked to predict.
+     * A closed connection counts as ready: the next Read() returns
+     * immediately, which is what WaitForChar() reports on.
      */
     tcp_reply(pkt, (ready > 0) ? DOSTRUE : DOSFALSE, 0, s->ts_Port);
 }
 
 /*
- * The FIND packet, from the point of view of the process that will own the
- * handle. Returns TRUE if the handle is live and the session should carry on.
+ * The FIND packet, handled by the process that will own the handle. Returns
+ * TRUE if the handle is live and the session should carry on.
  */
 static BOOL tcp_session_open(TcpSession *s, struct DosPacket *pkt)
 {
@@ -779,10 +763,10 @@ static BOOL tcp_session_open(TcpSession *s, struct DosPacket *pkt)
     }
 
     /*
-     * fh_Type moves the handle off the device's port and onto ours. fh_Port
-     * is dos.library's "interactive" flag: a connection is a stream with no
-     * length and no seek, which is what interactive means to DOS, and it is
-     * what allows WaitForChar() at all.
+     * fh_Type moves the handle off the device's port and onto ours. fh_Port is
+     * dos.library's "interactive" flag: a connection is a stream with no length
+     * and no seek, which is what interactive means to DOS, and it is what
+     * allows WaitForChar().
      */
     fh->fh_Arg1 = (LONG)s;
     fh->fh_Type = s->ts_Port;
@@ -805,17 +789,16 @@ static VOID tcp_session_close(TcpSession *s)
 
     /*
      * A socket taken through TCP:OBTAIN= can outlive this session: the program
-     * that released a COPY of it still holds the original descriptor. Its
-     * as_Owner points at this base, though, and this base is about to be freed
-     * -- so the next receive or disconnect callback would Signal() a task read
-     * out of freed memory. Handing it back to nobody is exactly what
-     * handoff.c does with a parked socket, and bsd_event_post() already treats
-     * a NULL owner as "there is no task to wake".
+     * that released a copy of it still holds the original descriptor. Its
+     * as_Owner points at this base, which is about to be freed, so the next
+     * receive or disconnect callback would Signal() a task pointer read out of
+     * freed memory. Clearing as_Owner is what handoff.c does with a parked
+     * socket, and bsd_event_post() treats a NULL owner as "no task to wake".
      *
-     * The refcount is read BEFORE the close because after it the block may be
-     * gone. This is the local half of a general hazard -- any base that closes
-     * while a socket it owns is still referenced elsewhere has it -- and the
-     * general fix belongs in bsd_socket_release().
+     * The refcount is read before the close because after it the block may be
+     * gone. Any base that closes while a socket it owns is still referenced
+     * elsewhere has this hazard; the general fix belongs in
+     * bsd_socket_release().
      */
     sock   = bsd_lookup(s->ts_Base, s->ts_Fd);
     shared = (sock != NULL && sock->as_RefCount > 1);
@@ -961,9 +944,10 @@ static VOID tcp_ctrl_find(struct DosPacket *pkt)
 }
 
 /*
- * Info() on the device. Answered rather than refused because commands ask it
- * about a copy destination before they write, and "0 blocks free" reads as a
- * full disk. There is no disk, so the numbers say "plenty, and valid".
+ * Info() on the device. Answered rather than refused because commands ask
+ * about a copy destination before they write, and "0 blocks free" would look
+ * like a full disk. There is no disk, so report plenty of space and a valid
+ * state.
  */
 static VOID tcp_ctrl_disk_info(struct DosPacket *pkt, struct InfoData *info)
 {
@@ -1070,12 +1054,12 @@ static VOID tcp_ctrl_main(VOID)
                     break;
 
                 /*
-                 * DOSFALSE with dp_Res2 == 0 is load-bearing and is not a
-                 * failure. dos.library's MatchFirst() (v40, patternhack.c)
-                 * asks this about any path containing a ':' and, on a NO with
-                 * no error, returns the path verbatim instead of trying to
-                 * Lock() it -- which is the entire reason `Type TCP:...`
-                 * works without this handler implementing locks.
+                 * DOSFALSE with dp_Res2 == 0 is load-bearing, not a failure.
+                 * dos.library's MatchFirst() (v40, patternhack.c) asks this
+                 * about any path containing a ':' and, on a no with no error,
+                 * returns the path verbatim instead of trying to Lock() it.
+                 * That is why `Type TCP:...` works without this handler
+                 * implementing locks.
                  */
                 case ACTION_IS_FILESYSTEM:
                     tcp_reply(pkt, DOSFALSE, 0, tcp_ctrl_port);
@@ -1091,12 +1075,12 @@ static VOID tcp_ctrl_main(VOID)
                     break;
 
                 /*
-                 * Lock("TCP:...") -- and something really does send it: `Copy`
-                 * locks its source to compare it against C: before it decides
-                 * what kind of copy this is (v40 copy.c). Refusing is the
-                 * whole answer; Copy carries on and opens the stream instead.
-                 * It is here rather than in the default arm so that the log
-                 * only ever names packets nobody has thought about.
+                 * Lock("TCP:...") does get sent: `Copy` locks its source to
+                 * compare it against C: before deciding what kind of copy this
+                 * is (v40 copy.c). Refusing is enough; Copy carries on and
+                 * opens the stream instead. Handled here rather than in the
+                 * default arm so the log only names packets nobody has
+                 * considered.
                  */
                 case ACTION_LOCATE_OBJECT:
                     tcp_reply(pkt, DOSFALSE, ERROR_ACTION_NOT_KNOWN,
@@ -1164,9 +1148,9 @@ VOID bsd_tcp_handler_start(struct AmiSocketBase *master)
     struct Task    *me = FindTask(NULL);
 
     /*
-     * CreateNewProc() wants a Process to inherit from. Every real opener is
-     * one; a bare Task that opens the library simply does not get a TCP:
-     * device rather than taking the machine down.
+     * CreateNewProc() needs a Process to inherit from. Every real opener is
+     * one; a bare Task that opens the library gets no TCP: device instead of
+     * crashing.
      */
     if (me == NULL || me->tc_Node.ln_Type != NT_PROCESS)
         return;
@@ -1208,8 +1192,9 @@ VOID bsd_tcp_handler_start(struct AmiSocketBase *master)
     }
 
     /*
-     * Bounded: the handler signals before it does anything that can block, and
-     * `boot` is on this stack so it has to be gone before we return.
+     * Bounded wait: the handler signals before it does anything that can
+     * block, and `boot` is on this stack, so it must be finished with before
+     * we return.
      */
     Wait(SIGF_SINGLE);
     tcp_boot = NULL;

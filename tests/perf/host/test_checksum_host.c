@@ -4,7 +4,7 @@
  * A faster checksum that is wrong corrupts silently: every packet still goes
  * out, the peer drops some of them, and the symptom is "the network is a bit
  * flaky".  So this does not check that n68k_ip_checksum_compute() computes a
- * correct internet checksum -- it checks that it returns EXACTLY what
+ * correct internet checksum -- it checks that it returns exactly what
  * _nx_ip_checksum_compute() returns, for every input shape the stack can
  * produce and several it cannot.
  *
@@ -13,7 +13,7 @@
  * symbol without touching the file.  host/shim/tx_port.h pins the m68k's type
  * widths so the vendored loop reads longwords, not 64-bit words.
  *
- * COVERED
+ * Covered:
  *   - every data_length from 0 to 96, and a spread up to 8 KB
  *   - TCP and UDP (pseudo header) and ICMP (none)
  *   - prepend offsets 0..7, i.e. every alignment including the odd ones the
@@ -42,9 +42,9 @@ USHORT n68k_checksum_reference(NX_PACKET *packet_ptr, ULONG protocol,
 /*
  * NX_ASSERT's failure path parks the calling thread in tx_thread_sleep(-1).
  * Both implementations reference it and neither reaches it -- every call
- * below passes non-null addresses -- but the link needs the symbol, and a
- * stub that aborts is better than one that returns, because reaching it would
- * mean the test had stopped testing what it thinks it is.
+ * below passes non-null addresses -- but the link needs the symbol.  The stub
+ * aborts rather than returns: reaching it would mean the test had stopped
+ * testing what it thinks it is.
  */
 UINT _tx_thread_sleep(ULONG timer_ticks)
 {
@@ -216,7 +216,7 @@ int main(void)
         }
     }
 
-    /* ---- 3. data_length SHORTER than the packet holds ------------------ */
+    /* ---- 3. data_length shorter than the packet holds ------------------ */
     for (len = 0; len <= 64; len++)
     {
         fill[0] = 1460;

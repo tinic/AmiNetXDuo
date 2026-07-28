@@ -15,24 +15,22 @@
 /*  DESCRIPTION                                                           */
 /*                                                                        */
 /*    The baton dispatcher.  Runs forever on the Exec Task that called     */
-/*    tx_kernel_enter() and is the ONLY place a ThreadX thread is started. */
+/*    tx_kernel_enter() and is the only place a ThreadX thread is started. */
 /*                                                                        */
-/*    Invariant: a thread runs if and only if it is                        */
-/*    _tx_thread_current_ptr.  The dispatcher therefore refuses to hand    */
-/*    the baton out while _tx_thread_current_ptr is non-NULL, which is     */
-/*    what makes the model safe against a third party (an adopting Task,   */
-/*    the tick Task) waking it at an arbitrary moment.  The Linux port     */
-/*    relies on the yielding thread having NULLed the pointer before it    */
-/*    posts; making the check explicit costs one compare and removes a     */
-/*    whole class of double-dispatch race.                                 */
+/*    A thread runs if and only if it is _tx_thread_current_ptr.  The      */
+/*    dispatcher therefore refuses to give the baton out while             */
+/*    _tx_thread_current_ptr is non-NULL, which makes the model safe       */
+/*    against a third party (an adopting Task, the tick Task) waking it at */
+/*    an arbitrary moment.  The Linux port relies on the yielding thread   */
+/*    having NULLed the pointer before it posts; making the check explicit */
+/*    costs one compare and removes a class of double-dispatch race.       */
 /*                                                                        */
-/*    "Runs forever" has exactly one exception:                            */
-/*    tx_amiga_kernel_stop() sets _tx_amiga_kernel_stopping and pokes the  */
-/*    scheduler signal, and this function then RETURNS -- through          */
-/*    _tx_initialize_kernel_enter() and back into                          */
-/*    _tx_amiga_kernel_task_entry(), which destroys the master Task.  By   */
-/*    then stop has already reaped every thread, so the loop below is      */
-/*    necessarily sitting in its idle wait when the flag arrives.          */
+/*    "Runs forever" has one exception: tx_amiga_kernel_stop() sets        */
+/*    _tx_amiga_kernel_stopping and pokes the scheduler signal, and this   */
+/*    function then returns -- through _tx_initialize_kernel_enter() and   */
+/*    back into _tx_amiga_kernel_task_entry(), which destroys the master   */
+/*    Task.  By then stop has already reaped every thread, so the loop     */
+/*    below is sitting in its idle wait when the flag arrives.             */
 /*                                                                        */
 /**************************************************************************/
 
@@ -53,7 +51,7 @@ TX_THREAD   *thread_ptr;
     {
 
         /* _tx_initialize_low_level() could not allocate a signal, so there is
-           no way to hand the baton back.  Park rather than spin.  */
+           no way to release the baton.  Park rather than spin.  */
         Wait(0UL);
     }
 
@@ -85,7 +83,7 @@ TX_THREAD   *thread_ptr;
 
         thread_ptr =  _tx_thread_execute_ptr;
 
-        /* Hand over the baton.  */
+        /* Pass the baton on.  */
         _tx_thread_current_ptr =  thread_ptr;
         thread_ptr -> tx_thread_run_count++;
         _tx_timer_time_slice =  thread_ptr -> tx_thread_time_slice;
@@ -112,22 +110,19 @@ TX_THREAD   *thread_ptr;
  * Setting ctrl_die and poking its run signal makes it fall out of that Wait
  * and destroy itself.  It signals back first, under Forbid(), and only then
  * calls RemTask(NULL) -- Exec discards the forbid nesting of a task it is
- * removing, so the "signal the reaper then die" pair really is atomic and the
- * reaper cannot observe a half-removed task.
+ * removing, so the "signal the reaper then die" pair is atomic and the reaper
+ * cannot observe a half-removed task.
  *
- *  *** THE WAIT IS BOUNDED, AND THAT IS NOT A WORKAROUND. ***
+ * The wait is bounded.  A ThreadX thread may be blocked inside Exec rather than
+ * on its run signal -- a SANA-II reader parked in WaitIO() on a device that
+ * ignores AbortIO() is the case that matters.  Such a task cannot be woken by
+ * the port and cannot be removed by it either: RemTask() on another task would
+ * leave that device holding a queued IORequest that it will later write into
+ * freed memory.  There is therefore no interleaving in which an unbounded
+ * Wait() terminates, and the caller -- likely holding the ThreadX baton --
+ * would become permanently unrunnable, taking the whole stack with it.
  *
- * A ThreadX thread may be blocked inside Exec rather than on its run signal --
- * a SANA-II reader parked in WaitIO() on a device that ignores AbortIO() is
- * the case that matters here.  Such a task cannot be woken by the port and
- * cannot be removed by the port either: RemTask() on another task would leave
- * that device holding a queued IORequest that it will later write into freed
- * memory.  There is therefore no interleaving in which an unbounded Wait()
- * terminates, and the caller -- who is very likely holding the ThreadX baton
- * -- becomes permanently unrunnable, taking the whole stack with it.  Waiting
- * forever is not "safer", it is the failure.
- *
- * The defined outcome when the task cannot be woken is a ZOMBIE:
+ * The defined outcome when the task cannot be woken is a zombie:
  *
  *   - the task is detached from its TX_THREAD in both directions, so neither
  *     side can ever dereference the other again;
@@ -136,7 +131,7 @@ TX_THREAD   *thread_ptr;
  *   - the task keeps its own Task/MemList blocks and destroys itself at its
  *     next port entry point, whenever that finally happens;
  *   - _tx_amiga_zombies is bumped.  tx_amiga_zombie_tasks() reports it, and a
- *     caller that sees it move MUST NOT free that thread's stack -- the zombie
+ *     caller that sees it move must not free that thread's stack: the zombie
  *     is still running on it.
  *
  * Adopted threads are never reaped: their Exec Task belongs to the application.

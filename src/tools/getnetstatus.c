@@ -1,20 +1,14 @@
 /*
- * GetNetStatus -- is the network working? Answered as a return code.
+ * GetNetStatus -- report network readiness as a return code, for scripts.
  *
  *     GetNetStatus CHECK/K,QUIET/S
- *
- * ShowNetStatus prints a report for a person to read. This prints a number for
- * a script to branch on, and that is the whole difference between them: a
- * startup script that has to wait for the network, or decide whether to start
- * a server, cannot parse a table.
  *
  *     C:GetNetStatus CHECK=INTERFACES,DEFAULTROUTE QUIET
  *     IF WARN
  *         echo "The network is not ready; not starting the server."
  *         SKIP done
- *     ENDIF
  *
- * RETURN CODES, which are the interface here and not a detail:
+ * Return codes:
  *
  *     0  (RETURN_OK)     every condition asked about is satisfied
  *     5  (RETURN_WARN)   at least one is not -- this is what IF WARN tests
@@ -22,25 +16,22 @@
  *                        is not a condition, or a bsdsocket.library that is
  *                        not this stack's
  *
- * Nothing here starts the network. A command that brought the stack up in
- * order to report that it was up would make its own answer true.
+ * Nothing here starts the network; doing so would make the answer true.
  *
- * WITH NO CHECK it lists every condition and says which are satisfied, and the
- * return code is the answer to INTERFACES alone -- "is the network
- * operational" is what a bare GetNetStatus is asking, and an operational
- * network is one with an interface that is up and has an address.
+ * With no CHECK it lists every condition, says which are satisfied, and returns
+ * the answer to INTERFACES alone -- an interface that is up and has an address.
  *
- * THE CONDITIONS are Roadshow's, because a script written for one stack should
- * work on the other. Two of them mean something specific here:
+ * The conditions are Roadshow's, so a script written for one stack works on the
+ * other. Two mean something specific here:
  *
  *   PTPINTERFACES is never satisfied. A point-to-point interface is SLIP or
  *   PPP; every interface this stack attaches is a SANA-II Ethernet device with
- *   a hardware address, so the honest answer is "none", not "none found".
+ *   a hardware address.
  *
  *   ROUTES is satisfied by the routes that exist rather than by a routing
  *   table: without NX_ENABLE_IP_STATIC_ROUTING the routes a machine has are
- *   the directly-attached prefix of each interface and the default gateway,
- *   and those are real routes. See docs/RESEARCH.md 22.5.
+ *   the directly-attached prefix of each interface and the default gateway.
+ *   docs/RESEARCH.md 22.5.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -75,9 +66,8 @@ enum
 };
 
 /*
- * A table rather than a chain of comparisons, because the same list is used
- * three times: to parse CHECK, to print the report, and to name the condition
- * that failed.
+ * A table rather than a chain of comparisons: the same list parses CHECK,
+ * prints the report and names the condition that failed.
  */
 static const struct ConditionName
 {
@@ -128,8 +118,8 @@ static VOID measure(BOOL satisfied[COND_COUNT])
         return;
 
     /*
-     * Quietly: this command's whole output is a verdict, and an explanation
-     * block in the middle of it would be read as one of the answers.
+     * Quietly: this command's output is a verdict, and an explanation block in
+     * the middle of it would be read as one of the answers.
      */
     tool_nx_quiet(TRUE);
 
@@ -144,8 +134,8 @@ static VOID measure(BOOL satisfied[COND_COUNT])
             continue;
 
         /*
-         * Ethernet, because that is what a SANA-II interface with a hardware
-         * address is. PTPINTERFACES stays FALSE: see the note at the top.
+         * A SANA-II interface with a hardware address is Ethernet.
+         * PTPINTERFACES stays FALSE: see the note at the top.
          */
         satisfied[COND_BCASTINTERFACES] = TRUE;
 
@@ -279,10 +269,7 @@ int main(int argc, char **argv)
     }
     else
     {
-        /*
-         * No CHECK: report all six, and answer with INTERFACES -- "is the
-         * network operational" is the question a bare GetNetStatus asks.
-         */
+        /* No CHECK: report all six and answer with INTERFACES. */
         for (i = 0; i < (UWORD)COND_COUNT; i++)
             wanted[i] = FALSE;
 
@@ -292,9 +279,9 @@ int main(int argc, char **argv)
     running = tool_stack_library_running();
 
     /*
-     * A stack that is running but is somebody else's cannot be asked, and the
-     * answer "not ready" would send the reader to fix a network that is fine.
-     * That is a failure to find out, not a verdict, and it is RETURN_ERROR.
+     * A running stack that is somebody else's cannot be asked. Answering "not
+     * ready" would send the reader to fix a network that is fine, so this is a
+     * failure to find out and returns RETURN_ERROR.
      */
     if (running)
     {

@@ -22,12 +22,12 @@
 /*    switches to _tx_thread_context_restore().                            */
 /*                                                                        */
 /*    (a) is free: Forbid() stops every other task in the machine, so the  */
-/*    ThreadX thread that holds the baton really is frozen for the whole   */
-/*    tick.  This is the Amiga substitute for the Linux port's             */
+/*    ThreadX thread that holds the baton is frozen for the whole tick.    */
+/*    This is the Amiga substitute for the Linux port's                    */
 /*    pthread_kill(SUSPEND_SIG) -- cheaper and, unlike signals, it cannot  */
-/*    land in the middle of a libc call.  The corresponding constraint is  */
-/*    absolute: nothing between context_save and context_restore may       */
-/*    Wait(), because that would break the Forbid().                       */
+/*    land in the middle of a libc call.  The constraint that comes with   */
+/*    it: nothing between context_save and context_restore may Wait(),     */
+/*    because that would break the Forbid().                               */
 /*                                                                        */
 /*    The Forbid() taken here is released by _tx_thread_context_restore(). */
 /*                                                                        */

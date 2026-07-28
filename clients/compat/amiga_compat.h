@@ -2,22 +2,19 @@
  * clients/compat/amiga_compat.h -- prototypes for the shims in this directory
  * that newlib's headers do not declare.
  *
- * WHY A FORCED INCLUDE
+ * amiga_posix.c supplies functions the toolchain's libc.a does not have.
+ * Defining them is enough to link, but a caller that has never seen a
+ * prototype is an implicit declaration, which this toolchain treats as an
+ * error.  The declaration has to reach the client's own sources.
  *
- *   amiga_posix.c supplies functions the toolchain's libc.a genuinely does
- *   not have.  Defining them is enough to LINK, but a caller that has never
- *   seen a prototype is an implicit declaration, which this toolchain treats
- *   as an error.  The declaration has to reach the client's own sources.
+ * Three ways to do that: patch the client, drop a replacement <time.h> into
+ * the shim include directory, or force-include a header of our own.  The first
+ * has to be rebased on every version bump; the second shadows a real header
+ * for every translation unit that includes it.  This is the third, and it is
+ * why clients/amiga-client.sh already carries -include sys/types.h.
  *
- *   The three ways to do that are: patch the client, drop a replacement
- *   <time.h> into the shim include directory, or force-include a header of
- *   our own.  The first has to be rebased on every version bump.  The second
- *   shadows a real header for every translation unit that includes it, which
- *   is a large blast radius for two prototypes.  This is the third, and it is
- *   why clients/amiga-client.sh already carries -include sys/types.h.
- *
- *   Keep this file cheap.  It is parsed by every translation unit of every
- *   ported client, so it declares and includes as little as it can.
+ * Keep this file cheap: it is parsed by every translation unit of every ported
+ * client, so it declares and includes as little as it can.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -43,15 +40,14 @@ const char *amiga_fix_path(const char *path);
 /* Delay().  One tick of resolution, rounds up, never returns EINTR. */
 int nanosleep(const struct timespec *req, struct timespec *rem);
 
-/* NOT ours: newlib's libc.a really does define clearenv() (lib_a-environ.o),
-   it just never declares it -- <stdlib.h> puts it behind a visibility guard
-   this toolchain does not set.  Declaring it here rather than defining it,
-   because defining it is a multiple definition at link time.
+/* Not ours: newlib's libc.a defines clearenv() (lib_a-environ.o) but never
+   declares it -- <stdlib.h> puts it behind a visibility guard this toolchain
+   does not set.  Declared here rather than defined, because defining it is a
+   multiple definition at link time.
 
-   Do not be tempted to write one using environ: <unistd.h> makes that a macro
-   for (*environ_ptr), and environ_ptr is declared but defined nowhere in the
-   toolchain.  newlib's own clearenv() touches the _environ array directly and
-   so does not have that problem. */
+   Do not write one using environ: <unistd.h> makes that a macro for
+   (*environ_ptr), and environ_ptr is declared but defined nowhere in the
+   toolchain.  newlib's own clearenv() touches the _environ array directly. */
 int clearenv(void);
 
 #ifdef __cplusplus

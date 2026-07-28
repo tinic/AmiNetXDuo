@@ -43,10 +43,9 @@ typedef struct AmiBpfIf
 
 /*
  * Two buffers per channel, as in 4.4BSD: the tap fills `store` and the reader
- * drains `hold`, and they swap when the reader asks for data it has already
- * finished with. That is what keeps the reader's copy-out -- which can be the
- * whole buffer -- from having to happen inside the critical section that the
- * tap also needs.
+ * drains `hold`, and they swap when the reader asks for data it has finished
+ * with. This keeps the reader's copy-out, which can be the whole buffer, out
+ * of the critical section the tap also needs.
  */
 typedef struct AmiBpfChan
 {
@@ -55,7 +54,7 @@ typedef struct AmiBpfChan
     AmiBpfIf        *iface;                     /* NULL until BIOCSETIF     */
     char             ifname[AMI_BPF_IFNAMSIZ];  /* remembered across detach */
 
-    ULONG            blen;                      /* size of EACH buffer      */
+    ULONG            blen;                      /* size of each buffer      */
     UBYTE           *bufbase;                   /* one allocation of 2*blen */
     UBYTE           *store;
     UBYTE           *hold;
@@ -120,8 +119,8 @@ VOID ami_bpf_zero_bytes(void *dst, ULONG len);
 /*
  * Guard the channel table. Forbid()/Permit() on the Amiga: the taps run on the
  * SANA-II reader threads and on whatever thread is inside nx_tcp_socket_send,
- * and the vectors run on application tasks, so the table genuinely is shared.
- * Nothing inside the bracket allocates, frees or blocks.
+ * and the vectors run on application tasks, so the table is shared. Nothing
+ * inside the bracket allocates, frees or blocks.
  */
 VOID ami_bpf_lock(VOID);
 VOID ami_bpf_unlock(VOID);

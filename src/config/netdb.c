@@ -11,12 +11,11 @@
  *   services    <name>     <port>/<proto> [alias...]
  *
  * AmiTCP's netdb / netdb-myhost put a HOST keyword in front of the address in
- * the hosts file. That is accepted here too: the two forms cannot collide,
- * because a standard hosts line always starts with a dotted-quad address and
- * "HOST" is not one. Where the two formats genuinely disagree the standard
- * /etc shape wins; AmiTCP's NAMESERVER/DOMAIN lines in the same file are not
- * netdb entries and are skipped here (ami_config_load() feeds them to the
- * resolver instead).
+ * the hosts file. That is accepted too, and cannot collide: a standard hosts
+ * line always starts with a dotted-quad address and "HOST" is not one. Where
+ * the two formats disagree the standard /etc shape wins. AmiTCP's
+ * NAMESERVER/DOMAIN lines in the same file are not netdb entries and are
+ * skipped here; ami_config_load() feeds them to the resolver instead.
  *
  * Each file is read once into one buffer and tokenised in place, so an entry's
  * strings point straight into that buffer -- three allocations per table, not
@@ -50,10 +49,9 @@ static NetdbTable ami_netdb[4];
 static BOOL       ami_netdb_loaded;
 
 /*
- * Used when a file is missing entirely. Roadshow ships all four, but a stack
- * that cannot resolve "localhost" or getprotobyname("tcp") is not much use, so
- * these keep the basics working on a half-installed system. Parsed by exactly
- * the same code as the real files.
+ * Used when a file is missing entirely, so that "localhost" and
+ * getprotobyname("tcp") still work on a half-installed system. Parsed by the
+ * same code as the real files.
  */
 static const char ami_netdb_builtin_hosts[] =
     "127.0.0.1 localhost loopback\n";
@@ -92,21 +90,20 @@ static const char ami_netdb_builtin_services[] =
 
 /*
  * Non-destructive first pass: an upper bound on the number of lines and of
- * whitespace-separated tokens. Overshooting is fine -- it costs a few hundred
- * bytes and saves parsing the file twice.
+ * whitespace-separated tokens. Overshooting costs a few hundred bytes and
+ * saves parsing the file twice.
  *
- * IT IS AN ESTIMATE AND NOT A CONTRACT, which is why netdb_parse() below
- * bounds every write against what was actually allocated rather than trusting
- * this to have been generous. It counts a run of non-space characters as ONE
- * token, and ami_cfg_tokenize() does not: scan_item() in config_text.c returns
- * an empty, non-NULL token for every `""` pair, so the single 64-character run
- * `""""..""` is one token here and thirty-two there. The line
+ * It is only an estimate, so netdb_parse() below bounds every write against
+ * what was actually allocated. This counts a run of non-space characters as
+ * one token where ami_cfg_tokenize() does not: scan_item() in config_text.c
+ * returns an empty, non-NULL token for every `""` pair, so the single
+ * 64-character run `""""..""` is one token here and thirty-two there. The line
  *
  *     1.2.3.4 host """"""""""""""""""""""""""""""""
  *
- * in DEVS:Internet/hosts therefore used to write twenty-nine pointers past the
- * end of alias_pool, and repeating it filled the file's whole size in stray
- * pointers over the heap -- silently, on a machine with no MMU. Found by the
+ * in DEVS:Internet/hosts therefore wrote twenty-nine pointers past the end of
+ * alias_pool, and repeating it scattered the file's whole size in stray
+ * pointers over the heap, silently, on a machine with no MMU. Found by the
  * host sanitizer fuzz driver.
  */
 static VOID netdb_measure(const char *buf, ULONG *lines, ULONG *tokens)
@@ -138,10 +135,10 @@ static VOID netdb_measure(const char *buf, ULONG *lines, ULONG *tokens)
 /* -------------------------------------------------------------- one table */
 
 /*
- * Copy one entry's aliases into the pool and terminate the vector, or answer
+ * Copy one entry's aliases into the pool and terminate the vector, or return
  * FALSE when the pool cannot hold them. Every alias write in this file goes
- * through here: the sizing pass above is an estimate, and the one place a
- * wrong estimate must not reach is a pointer store.
+ * through here, so a wrong estimate from the sizing pass above can never reach
+ * a pointer store.
  */
 static BOOL netdb_aliases(NetdbTable *table, ULONG pool_size, ULONG *alias_pos,
                           AmiNetdbEntry *entry, char **row, ULONG count,
@@ -366,8 +363,8 @@ VOID ami_netdb_free(VOID)
 
 /*
  * Lookups load on demand. bsdsocket.library should still call
- * ami_netdb_load() from its init path: the load itself is not re-entrant, and
- * doing it once up front keeps every later lookup read-only and lock-free.
+ * ami_netdb_load() from its init path: the load is not re-entrant, and doing
+ * it once up front keeps every later lookup read-only and lock-free.
  */
 static const NetdbTable *netdb_table(NetdbKind kind)
 {
@@ -526,9 +523,9 @@ const AmiNetdbEntry *ami_netdb_serv_entry(ULONG index)
 }
 
 /*
- * Not in the public header (there is no gethostent() in the bsdsocket LVO
- * table), but the same store answers it and ami_config_load() uses it to find
- * a host name.
+ * Not in the public header, since the bsdsocket LVO table has no gethostent().
+ * The same store answers it, and ami_config_load() uses it to find a host
+ * name.
  */
 const AmiNetdbEntry *ami_netdb_host_entry(ULONG index)
 {

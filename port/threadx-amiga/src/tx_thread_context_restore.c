@@ -17,21 +17,20 @@
 /*    Leaves "interrupt" context and releases the core lock taken by       */
 /*    _tx_thread_context_save().                                           */
 /*                                                                        */
-/*    PREEMPTION IS DEFERRED, NOT ASYNCHRONOUS.  If the tick made a higher */
-/*    priority thread ready while another thread held the baton, this      */
-/*    function does NOT take the baton away.  It cannot: the baton holder  */
-/*    is an Exec Task stopped at an arbitrary instruction, and AmigaOS has */
-/*    no equivalent of pthread_kill()/sigsuspend() with which to park it   */
-/*    safely.  Instead the running thread keeps the baton until its next   */
-/*    _tx_thread_system_preempt_check(), which every blocking ThreadX      */
-/*    service performs, and hands over there.                              */
+/*    Preemption is deferred rather than asynchronous.  If the tick made a */
+/*    higher priority thread ready while another thread held the baton,    */
+/*    this function does not take the baton away.  It cannot: the baton    */
+/*    holder is an Exec Task stopped at an arbitrary instruction, and      */
+/*    AmigaOS has no equivalent of pthread_kill()/sigsuspend() with which  */
+/*    to park it safely.  Instead the running thread keeps the baton until */
+/*    its next _tx_thread_system_preempt_check(), which every blocking     */
+/*    ThreadX service performs, and passes it on there.                    */
 /*                                                                        */
-/*    Consequence: ThreadX priorities are honoured at ThreadX API          */
-/*    boundaries rather than at tick granularity.  For a network stack     */
-/*    whose threads block constantly this costs latency, not correctness.  */
-/*    It does mean a ThreadX thread that neither blocks nor calls a        */
-/*    ThreadX service will not be preempted -- see the adoption notes in   */
-/*    tx_amiga_adopt.c.                                                    */
+/*    So ThreadX priorities are honoured at ThreadX API boundaries rather  */
+/*    than at tick granularity.  For a network stack whose threads block   */
+/*    constantly this costs latency, not correctness.  It does mean a      */
+/*    ThreadX thread that neither blocks nor calls a ThreadX service will  */
+/*    not be preempted -- see the adoption notes in tx_amiga_adopt.c.      */
 /*                                                                        */
 /*    When the system was idle (no baton holder) the scheduler task is     */
 /*    poked so it dispatches whatever the tick made ready.                 */

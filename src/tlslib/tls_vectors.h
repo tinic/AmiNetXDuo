@@ -2,9 +2,9 @@
  * tls.library -- LVO declarations.
  *
  * Hand-written, unlike src/bsdsocket/bsdsocket_vectors.h, because there is no
- * vendor .fd to generate them from: this ABI is ours.  The register assignment
- * here is the ABI -- it has to match the inline stubs in
- * include/aminetxduo/tlslib.h exactly, and those are the only other place it
+ * vendor .fd to generate them from -- this ABI is local.  The register
+ * assignment here is the ABI, and has to match the inline stubs in
+ * include/aminetxduo/tlslib.h exactly; those are the only other place it
  * appears.
  *
  * Only d0, d1, a0 and a1 carry arguments.  a2 upward are ones GCC wants for

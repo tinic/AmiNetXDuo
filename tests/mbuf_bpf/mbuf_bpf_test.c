@@ -4,15 +4,14 @@
  * The host tests in src/mbuf/test/ and src/bpf/test/ carry the exhaustive
  * batteries. This one exists for the four things a host cannot answer:
  *
- *   1. THE REAL CONSTANTS. On a 64-bit host the mbuf replica scales MSIZE to
+ *   1. The real constants. On a 64-bit host the mbuf replica scales MSIZE to
  *      256 and MLEN/MHLEN to 224/208, so every boundary case is exercised at
  *      the wrong number. Here they are 128/108/100, and `struct bpf_hdr` is
  *      the real 18 bytes with bh_hdrlen 20.
- *   2. MSIZE ALIGNMENT FROM A REAL AllocVec(). dtom() is published ABI and
- *      needs every mbuf on a 128-byte boundary; AllocVec() promises 8. The
- *      slab allocator's rounding is only really tested against the real
- *      allocator.
- *   3. THE NX_PACKET BRIDGE, which needs a live packet pool, which needs
+ *   2. Msize alignment from a real AllocVec(). dtom() is published ABI and
+ *      needs every mbuf on a 128-byte boundary; AllocVec() gives 8. The slab
+ *      allocator's rounding is only really tested against the real allocator.
+ *   3. The NX_PACKET bridge, which needs a live packet pool, which needs
  *      ThreadX running.
  *   4. Forbid()/Permit(), Signal() and GetSysTime() -- the four platform
  *      hooks that the host build replaces with stubs.
@@ -68,8 +67,8 @@ static VOID t_put_char(register UBYTE c      __asm("d0"),
 }
 
 /*
- * Every caller is main()'s Process -- no ThreadX thread ever logs here -- so
- * dos.library is safe and the output goes straight out rather than being
+ * Every caller is main()'s Process; no ThreadX thread ever logs here, so
+ * dos.library is safe and output goes out as it happens instead of being
  * buffered for a replay at the end.
  */
 static VOID t_log(const char *fmt, ...)
@@ -519,9 +518,8 @@ UINT         status;
               "readback from the chain");
         CHECK(t_ramp_ok(out, (ULONG) sizeof(out), 17), "chain content matches");
 
-        /* ...and back again. The point of the round trip is that the mbuf
-           chain does NOT reference the packet: releasing the packet first
-           must leave the chain intact. */
+        /* ...and back again. The mbuf chain does not reference the packet:
+           releasing the packet first must leave the chain intact. */
         nx_packet_release(packet);
         packet = NX_NULL;
 
@@ -644,12 +642,12 @@ ULONG len;
 }
 
 /*
- * The validator's whole job is to stop a malformed filter program from
- * reaching the interpreter, and the interpreter's whole job is to survive one
- * anyway. On a machine with no memory protection there is no way to observe
- * the difference between "rejected the packet" and "corrupted something" from
- * inside the process -- so this runs under the crash guard, which turns a CPU
- * exception into a readable report instead of a dead emulator.
+ * The validator stops a malformed filter program reaching the interpreter,
+ * and the interpreter has to survive one anyway. On a machine with no memory
+ * protection, "rejected the packet" and "corrupted something" are
+ * indistinguishable from inside the process, so this runs under the crash
+ * guard, which turns a CPU exception into a readable report instead of a dead
+ * emulator.
  *
  * Two batteries: hand-written programs aimed at each thing the interpreter
  * range-checks, then a few thousand pseudo-random instruction arrays. A random
@@ -678,7 +676,7 @@ UWORD                   i;
     empty.caplen  = 0;
     empty.nsegs   = 0;
 
-    /* Each of these must be rejected by the validator AND survive the VM. */
+    /* Each of these must be rejected by the validator and survive the VM. */
     {
         static const struct bpf_insn bad_abs[] = {
             BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (LONG) 0x7FFFFFFFUL),
@@ -714,14 +712,12 @@ UWORD                   i;
         ULONG                  n;
 
         /*
-         * The first three are LEGAL encodings carrying impossible packet
-         * offsets. A packet offset is not something the validator can judge --
-         * it depends on the frame, not the program -- so it must let them
-         * through and the interpreter must be the thing that copes. Checking
-         * that the validator does not over-reject matters as much as checking
-         * that it rejects: a validator that refused these would make
-         * "ldxb 4*([14]&0xf)" unloadable, and that is in every filter libpcap
-         * emits for a TCP or UDP port.
+         * The first three are legal encodings carrying impossible packet
+         * offsets. A packet offset depends on the frame, not the program, so
+         * the validator must let them through and the interpreter must cope.
+         * A validator that refused these would make "ldxb 4*([14]&0xf)"
+         * unloadable, and that is in every filter libpcap emits for a TCP or
+         * UDP port.
          */
         progs[0] = bad_abs;  lens[0] = 2;
         progs[1] = bad_neg;  lens[1] = 2;
@@ -766,8 +762,8 @@ UWORD                   i;
         CHECK(TX_TRUE, "the interpreter survived every malformed program");
     }
 
-    /* Pseudo-random programs. A 32-bit LCG is plenty: the point is coverage of
-       undefined encodings, not statistical quality. */
+    /* Pseudo-random programs. A 32-bit LCG is plenty for covering undefined
+       encodings. */
     for (trial = 0; trial < 3000; trial++)
     {
         ULONG count;
@@ -868,8 +864,8 @@ ULONG            sigmask = 0;
     hdrlen  = *(const UWORD *) (const void *) (rec + AMI_BPF_OFF_HDRLEN);
     sec     = *(const ULONG *) (const void *) (rec + AMI_BPF_OFF_TSTAMP_SEC);
 
-    /* The fields are also readable through the NDK struct, which is the whole
-       point of pinning the offsets. */
+    /* The fields are also readable through the NDK struct; that is what
+       pinning the offsets buys. */
     {
         const struct bpf_hdr *bh = (const struct bpf_hdr *) (const void *) rec;
 

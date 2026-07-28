@@ -1,70 +1,59 @@
 /*
  * bsdsocket.library -- putting the calling task into ThreadX context.
  *
- * WHY
- *
- * NetX Duo checks who is calling. Roughly forty of its entry points are
- * wrapped in NX_THREADS_ONLY_CALLER_CHECKING, which returns NX_CALLER_ERROR
- * unless tx_thread_identify() is non-NULL -- that is bind, listen, unlisten,
- * accept, relisten, unaccept, the client bind/unbind/connect, disconnect,
- * send, receive, bytes_available, peer_info_get, port_get and both
- * socket_delete flavours. An Exec Task that ThreadX has never adopted fails
- * every one of them, and bsd_status_map[] turns NX_CALLER_ERROR into EINVAL,
- * so the failure surfaces as "listen(): Invalid argument" rather than as
- * anything that points at the real cause.
+ * NetX Duo checks who is calling. Roughly forty of its entry points are wrapped
+ * in NX_THREADS_ONLY_CALLER_CHECKING and return NX_CALLER_ERROR unless
+ * tx_thread_identify() is non-NULL: bind, listen, unlisten, accept, relisten,
+ * unaccept, the client bind/unbind/connect, disconnect, send, receive,
+ * bytes_available, peer_info_get, port_get and both socket_delete flavours. An
+ * Exec Task that ThreadX has never adopted fails all of them, and
+ * bsd_status_map[] turns NX_CALLER_ERROR into EINVAL, so the failure surfaces
+ * as "listen(): Invalid argument".
  *
  * Only nx_tcp_socket_create/nx_udp_socket_create (INIT_AND_THREADS) and the
- * nx_packet_* helpers (no check at all) tolerate a plain Task -- which is
- * exactly why socket() used to be the one thing that worked.
- *
- * ONE BRACKET
+ * nx_packet_* helpers (no check at all) tolerate a plain Task, which is why
+ * socket() used to be the one call that worked.
  *
  * The adopt/orphan itself is ami_netstack_enter()/ami_netstack_leave() from
- * include/aminetxduo/netstack.h -- the same bracket src/netstack/ and the
- * tools use. This file adds only the two things that are specific to a
- * library base: where the TX_THREAD control block lives, and the nesting
- * counter.
+ * include/aminetxduo/netstack.h, the same bracket src/netstack/ and the tools
+ * use. This file adds only what is specific to a library base: where the
+ * TX_THREAD control block lives, and the nesting counter.
  *
- * GRANULARITY: PER CALL FOR THE BATON, PER TASK FOR THE THREAD
+ * Granularity is per call for the ThreadX scheduler lock, per task for the
+ * thread. The port's adoption model (port/threadx-amiga/src/tx_amiga_adopt.c)
+ * gives an adopted Task that lock: while it is adopted, no other ThreadX thread
+ * runs, including the NetX Duo IP thread and the periodic timer. Holding it
+ * from OpenLibrary() to CloseLibrary() would park it inside application code
+ * for the lifetime of the base -- one Wait() on an Intuition port and the
+ * entire stack stops. So it is acquired and released on every call.
  *
- * The port's adoption model (port/threadx-amiga/src/tx_amiga_adopt.c) makes
- * an adopted Task the holder of the ThreadX baton: while it is adopted, no
- * other ThreadX thread runs, including the NetX Duo IP thread and the
- * periodic timer. Holding the baton from OpenLibrary() to CloseLibrary()
- * would therefore park it inside application code for the lifetime of the
- * base -- one Wait() on an Intuition port and the entire stack stops. So the
- * BATON is taken and given back on every call, and that is not negotiable.
+ * The TX_THREAD does not have to be rebuilt each time. It used to be: this file
+ * called ami_netstack_enter(), which adopts on the way in and orphans on the
+ * way out, so every recv(), every send() and every poll pass inside
+ * WaitSelect() paid an AllocSignal(), a _tx_thread_create(), a
+ * _tx_thread_terminate(), a _tx_thread_delete() and a scheduler poke.
+ * tests/perf/bracket_test.c prices that pair at ~790 us on a 14 MHz 68020, of
+ * which AllocSignal()/FreeSignal() is 17 us. It is a per-call constant, so it
+ * scales with how a client reads rather than with how much it reads -- the
+ * shape of docs/RESEARCH.md §29.3, where this stack beat Roadshow on connect
+ * and on time-to-first-byte and lost the body, on a client that reads small and
+ * selects between reads.
  *
- * The TX_THREAD is a different thing and does not have to be rebuilt each
- * time. It used to be: this file called ami_netstack_enter(), which adopts on
- * the way in and orphans on the way out, so every recv(), every send() and
- * every poll pass inside WaitSelect() paid an AllocSignal(), a
- * _tx_thread_create(), a _tx_thread_terminate(), a _tx_thread_delete() and a
- * scheduler poke. tests/perf/bracket_test.c prices that pair at ~790 us on a
- * 14 MHz 68020, of which the AllocSignal()/FreeSignal() is 17 us. It is a
- * per-CALL constant, so it scales with how a client reads rather than with
- * how much it reads -- which is exactly the shape of docs/RESEARCH.md §29.3,
- * where this stack beat Roadshow on connect and on time-to-first-byte and
- * lost the body, on a client that reads small and selects between reads.
+ * A base belongs to one task (library.c records it in sb_Task) and that task
+ * gets the same TX_THREAD every time, so ami_netstack_enter_cached() builds it
+ * once and keeps it dormant between brackets -- TX_SUSPENDED, on no ready list,
+ * dispatchable by nobody. The same measurement prices that pair at ~270 us.
+ * bsd_nx_release() gives it back; library.c calls it from bsd_child_destroy(),
+ * which runs on the owning task with every socket already closed.
  *
- * A base belongs to one task (library.c records it in sb_Task), and that task
- * gets the same TX_THREAD every time, so ami_netstack_enter_cached() builds
- * it once and keeps it dormant -- TX_SUSPENDED, on no ready list, dispatchable
- * by nobody -- between brackets. The same measurement prices that pair at
- * ~270 us. bsd_nx_release() gives it back, and library.c calls it from
- * bsd_child_destroy(), which is the one place that runs on the owning task
- * with every socket already closed.
- *
- * The one call this shape does not fit is WaitSelect(), which blocks in Exec
- * Wait() for as long as the caller asked for. It brackets each poll pass and
- * drops out of ThreadX context before parking -- see select.c.
- *
- * NESTING
+ * WaitSelect() does not fit this shape: it blocks in Exec Wait() for as long as
+ * the caller asked for, so it brackets each poll pass and drops out of ThreadX
+ * context before parking. See select.c.
  *
  * Vectors call other vectors' internals (CloseSocket -> bsd_socket_release,
- * accept -> relisten), and a base's task is inside at most one vector at a
- * time, so a plain depth counter in the base is enough. Depth > 0 means the
- * task already holds the baton.
+ * accept -> relisten) and a base's task is inside at most one vector at a time,
+ * so a plain depth counter in the base is enough. Depth > 0 means the task is
+ * already inside the bracket.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -74,24 +63,18 @@
 #include <proto/exec.h>
 
 /*
- * The control arm.  -DAMINETXDUO_NXCACHE=OFF puts the per-call adopt/orphan
- * back, so the two libraries differ in this one decision and nothing else --
- * which is how the before and after in docs/RESEARCH.md were taken, and the
- * only way to keep taking them once the tree has moved on.
+ * The control arm. -DAMINETXDUO_NXCACHE=OFF puts the per-call adopt/orphan
+ * back, so two builds differ in this one decision and nothing else. That is
+ * how the before/after numbers in docs/RESEARCH.md were taken.
  */
 #ifndef AMINETXDUO_NXCACHE
 #  define AMINETXDUO_NXCACHE 1
 #endif
 
 /*
- * THE CENSUS
- *
- * How many brackets a real client's fetch costs, and what fraction of its wall
- * clock they are. Not compiled in by default -- it adds two ReadEClock() calls
- * per bracket, which is precisely the thing being measured -- but the question
- * "is the bracket the cost?" has no answer without it, and answering it by
- * arithmetic on a throughput delta is how a prediction gets confirmed rather
- * than tested.
+ * Counts the brackets a client's fetch costs and their share of its wall clock.
+ * Off by default: it adds two ReadEClock() calls per bracket, which is the
+ * thing being measured.
  *
  *   cmake -B build/census -DAMINETXDUO_NXCENSUS=ON ...
  *
@@ -189,12 +172,10 @@ VOID bsd_nx_leave(struct AmiSocketBase *base)
 }
 
 /*
- * Give the cached TX_THREAD back.
- *
- * Called from bsd_child_destroy() (library.c) after the last socket is shut,
- * so it runs on the base's own task with no bracket open. A base that is torn
- * down by anyone else still gets the registration removed -- see
- * ami_netstack_release().
+ * Give the cached TX_THREAD back. Called from bsd_child_destroy() (library.c)
+ * after the last socket is shut, so it runs on the base's own task with no
+ * bracket open. A base torn down by anyone else still gets the registration
+ * removed -- see ami_netstack_release().
  */
 VOID bsd_nx_release(struct AmiSocketBase *base)
 {
@@ -202,8 +183,7 @@ VOID bsd_nx_release(struct AmiSocketBase *base)
         return;
 
 #ifdef AMINETXDUO_NXCENSUS
-    /* 709379 E-Clock ticks a second on PAL; report milliseconds so the number
-       can be put next to a stopwatch without arithmetic. */
+    /* 709379 E-Clock ticks a second on PAL; report milliseconds. */
     AMI_INFO("bsdsocket: %ld brackets (%ld nested): enter %ld ms, leave %ld ms,"
              " %ld over 1 ms, worst %ld ms",
              (long)base->sb_NxCount, (long)base->sb_NxNested,

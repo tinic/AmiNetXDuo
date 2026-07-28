@@ -1,16 +1,16 @@
 /*
  * AmiNetXDuo -- crypto68k portable limb primitives.
  *
- * This is the fallback half of the build option: when C68K_ASM is not defined
- * these definitions are used, and when it is they are replaced wholesale by
- * c68k_prim.S.  Keeping both means the module builds and can be cross-checked
- * on any target, and that a suspected assembly bug can be isolated with one
- * build flag instead of a bisect.
+ * The fallback half of the build option: when C68K_ASM is not defined these
+ * definitions are used, and when it is they are replaced wholesale by
+ * c68k_prim.S.  Keeping both lets the module build and be cross-checked on any
+ * target, and isolates a suspected assembly bug with one build flag instead of
+ * a bisect.
  *
  * The C here is written the way that makes GCC generate the best m68k it can:
- * one 64-bit accumulator per limb, no separate high/low bookkeeping.  It is
- * not slow -- GCC really does emit MULU.L for it -- it just carries about nine
- * instructions of register shuffling per limb that the assembly does not need.
+ * one 64-bit accumulator per limb, no separate high/low bookkeeping.  GCC does
+ * emit MULU.L for it; it carries about nine instructions of register shuffling
+ * per limb that the assembly does not need.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -19,8 +19,8 @@
 
 /*
  * Always compiled, under its own name, even in an assembly build: the
- * benchmark measures the two against each other in the same run, which is the
- * only comparison the emulator does not distort.
+ * benchmark measures the two against each other in the same run, the only
+ * comparison the emulator does not distort.
  */
 c68k_limb c68k_addmul_1_c(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a)
 {
@@ -31,8 +31,7 @@ HN_UBASE2   product;
 
     /*
      * product holds the running 64-bit sum; its high half is the carry into
-     * the next limb.  The identity that makes a separate carry bit
-     * unnecessary is that
+     * the next limb.  No separate carry bit is needed because
      *
      *     (2^32-1) * (2^32-1) + (2^32-1) + (2^32-1) == 2^64 - 1
      *
@@ -56,9 +55,9 @@ HN_UBASE2   product;
  * r -= a * b, the inner loop of long division.
  *
  * Always compiled: unlike c68k_addmul_1 there is no assembly twin.  GCC emits
- * MULU.L for the product here exactly as it does there, and the division's
- * cost turned out to be dominated by the quotient estimate rather than by
- * this pass, so hand-writing it was not the lever.
+ * MULU.L for the product here as it does there, and the division's cost is
+ * dominated by the quotient estimate rather than by this pass, so
+ * hand-writing it gains little.
  */
 c68k_limb c68k_submul_1(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a)
 {
@@ -98,8 +97,8 @@ c68k_limb   old;
 
     /*
      * The high half of the last product plus any final borrow.  It cannot
-     * itself overflow a limb: a*b + carry <= (2^32-1)^2 + (2^32-1), whose high
-     * half is at most 2^32-2, and the borrow adds at most one.
+     * overflow a limb: a*b + carry <= (2^32-1)^2 + (2^32-1), whose high half
+     * is at most 2^32-2, and the borrow adds at most one.
      */
     return((c68k_limb)((product >> 32) + borrow));
 }
@@ -161,11 +160,10 @@ HN_UBASE2   sum;
 
 
     /*
-     * The 64-bit running accumulator, exactly as c68k_add_carry and
-     * c68k_addmul_1_c above: its high half IS the carry, so there is no
-     * separate carry bookkeeping to get wrong.  (c68k_sub below cannot use
-     * the same shape because a borrow needs a 64-bit compare, which this
-     * machine does not have.)
+     * The 64-bit running accumulator, as in c68k_add_carry and
+     * c68k_addmul_1_c above: its high half is the carry, so there is no
+     * separate carry bookkeeping.  c68k_sub below cannot use the same form
+     * because a borrow needs a 64-bit compare, which this machine lacks.
      */
     sum = 0;
 

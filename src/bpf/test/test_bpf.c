@@ -7,14 +7,14 @@
  * the <exec/types.h> shim in src/config/test/shim, the stubs below, and the
  * replica ABI that -DAMI_BPF_REPLICA selects in include/aminetxduo/bpf.h.
  *
- * The filter programs below are the real thing -- what libpcap emits for
- * "ip", "arp" and "tcp port 80" on an Ethernet link -- run against real
- * frames, with the accept/reject decision asserted each way round. The
- * "tcp port 80" program in particular exercises the awkward parts: a
- * BPF_LDX|BPF_B|BPF_MSH to pick the IP header length out of the low nibble, a
- * BPF_JSET against the fragment-offset field, and two BPF_IND loads through X.
+ * The filter programs below are what libpcap emits for "ip", "arp" and
+ * "tcp port 80" on an Ethernet link, run against real frames with the
+ * accept/reject decision asserted each way round. The "tcp port 80" program
+ * exercises the awkward parts: a BPF_LDX|BPF_B|BPF_MSH to pick the IP header
+ * length out of the low nibble, a BPF_JSET against the fragment-offset field,
+ * and two BPF_IND loads through X.
  *
- * What this canNOT cover, and what covers it instead:
+ * Not covered here, and what covers it instead:
  *   - the exact bpf_hdr and bpf_insn offsets and the BIOC* encodings: asserted
  *     at compile time against the real NDK <net/bpf.h> by bpf_abi_check.c;
  *   - Forbid()/Permit(), Signal(), and GetSysTime(): tests/mbuf_bpf/;
@@ -145,9 +145,9 @@ static void put32be(UBYTE *p, ULONG v)
 }
 
 /*
- * Ethernet + IPv4 + TCP, with the two knobs the filter under test cares about:
- * `ihl_words` (so BPF_MSH has something to compute) and `fragoff` (so the
- * BPF_JSET #0x1fff fragment check has something to reject).
+ * Ethernet + IPv4 + TCP, with the two fields the filter under test cares
+ * about: `ihl_words` (so BPF_MSH has something to compute) and `fragoff` (so
+ * the BPF_JSET #0x1fff fragment check has something to reject).
  */
 static ULONG make_tcp(UBYTE *buf, UWORD sport, UWORD dport, UBYTE ihl_words,
                       UWORD fragoff, UBYTE proto)
@@ -414,7 +414,7 @@ static void test_filter_real_programs(void)
     len = make_tcp(frame, 1234, 80, 5, 0x0025, 6);
     CHECK(ami_bpf_filter(prog_tcp80, NELEM(prog_tcp80), frame, len, len) == 0);
 
-    /* The don't-fragment bit is above the offset field and must NOT match. */
+    /* The don't-fragment bit is above the offset field and must not match. */
     len = make_tcp(frame, 1234, 80, 5, 0x4000, 6);
     CHECK(ami_bpf_filter(prog_tcp80, NELEM(prog_tcp80), frame, len, len) == 262144);
 }

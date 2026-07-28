@@ -1,24 +1,19 @@
 /*
- * AmiNetXDuo tools -- the layer that turns a failure into an instruction.
+ * AmiNetXDuo tools -- console diagnostics for the user at the keyboard.
  *
- * The stack's own diagnostics go to the serial port through ami_log(): they
- * are precise, they are aimed at whoever is debugging the stack, and nobody
- * setting up an Amiga for the first time will ever see them. Everything in
- * this file is the other half -- what the person at the keyboard is told, on
- * the console, when something they can fix is wrong.
+ * The stack's own diagnostics go to the serial port through ami_log() and are
+ * aimed at whoever is debugging the stack. This file is the other half: what
+ * gets printed on the console when something the user can fix is wrong. Kept
+ * in one file so every command says it the same way:
  *
- * Three rules, which are why this is one file rather than sprinkled through
- * the commands:
+ *   1. What is wrong, without assuming the reader knows how a TCP/IP stack is
+ *      put together.
+ *   2. Where: a path, a line number, a device name.
+ *   3. What to do next, as a command they can type.
  *
- *   1. Say what is wrong in words that do not assume the reader knows how a
- *      TCP/IP stack is put together.
- *   2. Say where: a path, a line number, a device name.
- *   3. Say what to do next, as a command they can type.
- *
- * Nothing here needs a running stack. That is deliberate: the machine that
- * needs explaining is exactly the machine where the stack did not come up, so
- * every check below works off the file system, the Exec device list and a
- * throw-away OpenDevice().
+ * Nothing here needs a running stack -- the machine that needs explaining is
+ * the one where the stack did not come up -- so every check below works off the
+ * file system, the Exec device list and a throw-away OpenDevice().
  *
  * SPDX-License-Identifier: MIT
  */
@@ -31,8 +26,8 @@
 
 /*
  * The NDK ships no <devices/sana2.h>; src/sana2/sana2_device.h restates the
- * published protocol and is what the whole project uses. Including it does
- * not pull in the shim -- only the structure and the two open tags.
+ * published protocol. Including it pulls in only the structure and the two
+ * open tags, not the shim.
  */
 #include "sana2_device.h"
 
@@ -61,8 +56,8 @@ BOOL tool_exists(const char *path)
 
 /*
  * A directory listing, into the caller's fixed table. The FileInfoBlock is
- * allocated rather than declared on the stack: it is 260 bytes and must be
- * longword aligned, and a Shell command starts with a 4 KB stack.
+ * allocated rather than declared on the stack: 260 bytes, longword aligned,
+ * against a Shell command's 4 KB stack.
  */
 ULONG tool_list_dir(const char *path, char names[][TOOL_NAME_LEN], ULONG max,
                     const char *suffix)
@@ -95,7 +90,7 @@ ULONG tool_list_dir(const char *path, char names[][TOOL_NAME_LEN], ULONG max,
             while (entry[len] != '\0')
                 len++;
 
-            /* Workbench icons sit beside the real files; they are not one. */
+            /* Workbench icons sit beside the real files; skip them. */
             if (len >= 5 && tool_stricmp(entry + len - 5, ".info") == 0)
                 continue;
 
@@ -198,10 +193,9 @@ VOID tool_join_path(char *dst, ULONG dstlen, const char *dir, const char *name)
 
 /*
  * Where a SANA-II driver could be. DEVS:Networks is where Roadshow, AmiTCP and
- * every installer since 1994 put them, and it is the answer we give when one
- * is missing; the rest are checked because a machine set up by hand often has
- * the driver somewhere else and telling the user "it is in the wrong place" is
- * far better than "not found".
+ * every installer since 1994 put them, and is what we name when one is missing.
+ * The rest are checked so a hand-installed driver can be reported as "in the
+ * wrong place" rather than "not found".
  */
 const char *const diag_device_dirs[] =
 {
@@ -263,10 +257,9 @@ const char *tool_device_where(const char *device)
 
 /*
  * SANA-II drivers are told at OpenDevice() time how to move packet data, and
- * several refuse to open at all without the tags. These two are never called
- * -- the probe opens and immediately closes -- but they have to be there and
- * they have to be real, so they are the same shape the shim uses (a0 = to,
- * a1 = from, d0 = length).
+ * several refuse to open without the tags. The probe opens and immediately
+ * closes, so these are never called, but they must exist and be real functions
+ * of the shape the shim uses (a0 = to, a1 = from, d0 = length).
  */
 static BOOL diag_copy(register APTR to __asm("a0"),
                       register APTR from __asm("a1"),
@@ -325,10 +318,9 @@ LONG tool_device_probe(const char *device, ULONG unit)
 /* ---------------------------------------------------------------- output -- */
 
 /*
- * Advice is printed as a block: a blank line, then lines indented two spaces
- * under the one-line complaint tool_error() has already produced. The
- * indentation is what makes a wall of text scan as "this belongs to the error
- * above" on an 80-column screen.
+ * Advice prints as a block: a blank line, then lines indented two spaces under
+ * the one-line complaint tool_error() has already produced. The indentation is
+ * what ties it to that error on an 80-column screen.
  */
 VOID tool_advise(const char *text)
 {
@@ -337,10 +329,9 @@ VOID tool_advise(const char *text)
 
 /*
  * Wrap `text` to the width of a Shell window, every line indented by `indent`
- * spaces. Only the config layer's messages go through this -- everything else
- * here is written as fixed lines, which reads better -- but those are built
- * at run time from a keyword the user typed, so their length is not known
- * until it is printed.
+ * spaces. Only the config layer's messages need this: they are built at run
+ * time from a keyword the user typed, so their length is not known in advance.
+ * Everything else here is written as fixed lines.
  */
 #define TOOL_WRAP_WIDTH     77
 
@@ -414,11 +405,7 @@ static VOID diag_report(const AmiCfgProblem *problem, APTR user)
 
     if (diag_problem_total++ == 0)
     {
-        /*
-         * A header on the first one only. Without it the list arrives before
-         * the command has said anything at all, and reads as though it came
-         * from nowhere.
-         */
+        /* A header on the first problem only, so the list is introduced. */
         tool_printf("\nProblems in the configuration:\n");
     }
 
@@ -599,15 +586,15 @@ BOOL tool_stack_library_running(VOID)
     BOOL            running = FALSE;
 
     /*
-     * Looking, not opening: OpenLibrary("bsdsocket.library") would BRING THE
-     * STACK UP, which is precisely what a status command must not do.
+     * Looking, not opening: OpenLibrary("bsdsocket.library") would bring the
+     * stack up, which a status command must not do.
      *
-     * Two signs, either of which is enough. The AMITCP public message port is
-     * the conventional Amiga barrier -- src/netstack adds it when the stack
-     * comes up and removes it on the way down, and `WaitForPort AMITCP` in
-     * S:User-Startup waits on the same thing. The library's open count catches
-     * a stack whose port could not be added (another one already owns the
-     * name), which is a state worth reading as "running" too.
+     * Either sign is enough. The AMITCP public message port is the conventional
+     * Amiga barrier -- src/netstack adds it when the stack comes up and removes
+     * it on the way down, and `WaitForPort AMITCP` in S:User-Startup waits on
+     * the same thing. The library's open count also counts as running, and
+     * catches a stack whose port could not be added because another one already
+     * owns the name.
      */
     Forbid();
 
@@ -635,14 +622,10 @@ BOOL tool_stack_installed(VOID)
 }
 
 /*
- * Is the bsdsocket.library on this machine ours?
- *
- * It matters because "bsdsocket.library" is the name every Amiga TCP/IP stack
- * answers to. A machine with Roadshow or AmiTCP already installed -- or one
- * running under an emulator that provides its own -- will hand out somebody
- * else's library, and the user needs to be told that rather than left
- * wondering why their AmiNetXDuo configuration has no effect. Two stacks
- * cannot share one machine.
+ * Is the bsdsocket.library on this machine ours? Every Amiga TCP/IP stack
+ * answers to that name, and two cannot share one machine, so a box with
+ * Roadshow or AmiTCP installed (or an emulator providing its own) hands out
+ * somebody else's library and the AmiNetXDuo configuration has no effect.
  */
 BOOL tool_stack_is_ours(struct Library *base)
 {
@@ -656,8 +639,8 @@ BOOL tool_stack_is_ours(struct Library *base)
     if (id == NULL)
         return FALSE;
 
-    /* The cap comes first: `id` belongs to a library this code did not write,
-       and the old order read id[200] before deciding to stop there. */
+    /* The cap is tested first: `id` belongs to a foreign library, and the old
+       order read id[200] before deciding to stop there. */
     for (i = 0; i < 200UL && id[i] != '\0'; i++)
     {
         if (id[i] == 'A' && tool_stricmp_n(&id[i], "AmiNetXDuo", 10) == 0)
@@ -669,8 +652,8 @@ BOOL tool_stack_is_ours(struct Library *base)
 
 /*
  * bsdsocket.library LVOs, from the NDK's <inline/bsdsocket.h>. Called by hand
- * rather than through the NDK inlines because a command that merely asks a
- * question must not link the whole socket surface.
+ * so a command that only asks a question does not link the whole socket
+ * surface.
  */
 #define LVO_gethostbyname   (-210)
 #define LVO_gethostbyaddr   (-216)
@@ -680,9 +663,9 @@ BOOL tool_stack_is_ours(struct Library *base)
 /*
  * struct hostent, exactly as the NDK's <netdb.h> declares it (h_name,
  * h_aliases, LONG h_addrtype, LONG h_length, h_addr_list). Restated here
- * because tools.h has already pulled in the NetX Duo headers and mixing the
- * two socket worlds in one file is how this project's earlier ABI mistakes
- * happened; the layout is the published Roadshow one and is not guessed.
+ * because tools.h has already pulled in the NetX Duo headers, and mixing the
+ * two socket worlds in one file caused earlier ABI mistakes. The layout is the
+ * published Roadshow one, not a guess.
  */
 typedef struct ToolHostEnt
 {
@@ -757,30 +740,27 @@ static LONG tool_call_gethostname(struct Library *base, char *name, ULONG len)
 struct Library *tool_stack_start(VOID)
 {
     /*
-     * This is how a command starts the network.
+     * How a command starts the network.
      *
      * The stack singleton cannot live in a command: ThreadX runs its Tasks on
      * stacks inside the hunk that created them, so a stack built here would be
-     * executing freed memory the moment this program exits -- and the whole
-     * point of AddNetInterface is that the interface stays up afterwards. The
-     * stack therefore lives inside bsdsocket.library, which brings it up on
-     * its first OpenLibrary() (docs/RESEARCH.md 3.3, "self-starting").
+     * executing freed memory the moment the program exits, and AddNetInterface
+     * needs the interface to stay up afterwards. The stack therefore lives
+     * inside bsdsocket.library, which brings it up on its first OpenLibrary()
+     * (docs/RESEARCH.md 3.3, "self-starting").
      *
-     * Opening it is how you start the network; NOT closing it is how it stays
-     * up. The reference this leaks is deliberate and is exactly the reference
-     * AddNetInterface's own comment describes.
+     * Opening it starts the network; not closing it is how it stays up. The
+     * leaked reference is intentional -- the same one AddNetInterface's comment
+     * describes.
      */
     return OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
 }
 
 /*
- * Name lookup through the running stack's own vectors.
- *
- * This is what makes `host` work on a normal machine. The stack is inside
- * bsdsocket.library and a command cannot reach netstack_resolve() there, but
- * gethostbyname() is a published entry point and answers from the same
- * resolver -- including the name servers a DHCP lease supplied, which is
- * exactly the case the configuration files know nothing about.
+ * Name lookup through the running stack's own vectors. A command cannot reach
+ * netstack_resolve() inside bsdsocket.library, but gethostbyname() is a
+ * published entry point into the same resolver -- including name servers a DHCP
+ * lease supplied, which the configuration files know nothing about.
  */
 BOOL tool_stack_lookup(const char *name, ULONG *addr_out)
 {
@@ -848,16 +828,14 @@ BOOL tool_stack_lookup_addr(ULONG addr, char *name_out, ULONG name_len)
 }
 
 /*
- * The name servers the running stack is really using.
+ * The name servers the running stack is really using. A DHCP lease supplies
+ * them, so the files on disk say nothing or something stale.
+ * ObtainDomainNameServerList() is the published call that answers, and
+ * src/netstack records the lease's servers in the configuration it reports, so
+ * the two agree.
  *
- * This matters because a DHCP lease supplies them, and the files on disk
- * therefore say nothing (or something stale). ObtainDomainNameServerList() is
- * the published call that answers, and src/netstack now records the lease's
- * servers in the configuration it reports, so the two agree.
- *
- * struct DomainNameServerNode is mirrored from src/bsdsocket/roadshow.c,
- * which is the code that builds the list -- producer and consumer are both
- * ours, so this is not a guess at somebody else's ABI.
+ * struct DomainNameServerNode is mirrored from src/bsdsocket/roadshow.c, the
+ * code that builds the list, so producer and consumer are both ours.
  */
 typedef struct ToolDnsNode
 {
@@ -952,8 +930,8 @@ BOOL tool_stack_query(ULONG *addr_out, char *host, ULONG hostlen)
         host[0] = '\0';
 
     /*
-     * Only ask a stack that is already running: opening the library when it
-     * is not would start it, and no status command may do that.
+     * Only ask a stack that is already running: opening the library otherwise
+     * would start it, and no status command may do that.
      */
     if (!tool_stack_library_running())
         return FALSE;
@@ -980,19 +958,19 @@ VOID tool_usage(const char *tmpl, const char *summary)
     tool_printf("  %s\n", (LONG)summary);
 }
 
-/* ------------------------------------------------- the RUNNING stack -----
+/* ------------------------------------------------- the running stack -----
  *
- * NetStackQuery()/NetStackControl(), from the caller's side. These are the
- * only way a Shell command can see the stack that is actually running: its
- * own linked copy of NetX Duo is a different, empty one, and
+ * NetStackQuery()/NetStackControl(), from the caller's side. These are the only
+ * way a Shell command can see the stack that is actually running: its own
+ * linked copy of NetX Duo is a different, empty one, and
  * src/tools/netstack_weak.c's netstack_ip() answers NULL. See
  * include/aminetxduo/netstatus.h and docs/RESEARCH.md 21.
  *
- * Same idiom as tool_call_gethostbyaddr() above and as nettrace.c's bpf_*
- * calls: an inline jsr through the library base, with the ABI's registers
- * named. d2 carries the size, which is a call-saved register -- the compiler
- * saves it around the call because it is a register variable here, exactly as
- * it does for the published vectors that use d2 (recvfrom, sendto).
+ * Same idiom as tool_call_gethostbyaddr() above and nettrace.c's bpf_* calls:
+ * an inline jsr through the library base with the ABI's registers named. d2
+ * carries the size and is call-saved; the compiler saves it around the call
+ * because it is a register variable here, as it does for the published vectors
+ * that use d2 (recvfrom, sendto).
  */
 
 static LONG tool_call_netstatus_query(struct Library *base, ULONG what,
@@ -1033,7 +1011,7 @@ static LONG tool_call_netstatus_control(struct Library *base, ULONG op,
     return res;
 }
 
-/* Errno(), LVO -0x0a2. What the two above leave behind on failure. */
+/* Errno(), LVO -0x0a2: what the two above leave behind on failure. */
 static LONG tool_call_errno(struct Library *base)
 {
     register struct Library *a6  __asm("a6") = base;
@@ -1058,10 +1036,9 @@ VOID tool_explain_no_netstatus(struct Library *base)
     }
 
     /*
-     * Not "your library is too old" -- tool_netstatus_open() checks
-     * lib_Revision and says that in its own words before any call is made. By
-     * the time this is reached the library IS new enough and answered no, so
-     * the interesting states are the ones below.
+     * The library is not too old here: tool_netstatus_open() checks
+     * lib_Revision and reports that itself before any call is made. Reaching
+     * this point means a new enough library answered no.
      */
     tool_advise_blank();
     tool_advise("The network is up and the library is the right one, but it");
@@ -1077,9 +1054,9 @@ struct Library *tool_netstatus_open(BOOL quiet)
     struct Library *base;
 
     /*
-     * Looking before opening. OpenLibrary() on a stack that is not running
-     * would START it, and a command that reports on the network must not
-     * bring it up in order to have something to report.
+     * Looking before opening: OpenLibrary() on a stack that is not running
+     * would start it, and a command that reports on the network must not bring
+     * it up to have something to report.
      */
     if (!tool_stack_library_running())
     {
@@ -1100,13 +1077,12 @@ struct Library *tool_netstatus_open(BOOL quiet)
     }
 
     /*
-     * MANDATORY, not a nicety. These two vectors sit past everything any
-     * published bsdsocket ABI names, so on somebody else's library that slot
-     * is whatever their table happens to end with -- possibly the (APTR)-1
-     * terminator, possibly nothing at all. Jumping through it would take the
-     * machine down. The magic argument protects against a FUTURE vendor
-     * defining the same offset; only this check protects against a present
-     * one that has not defined it.
+     * Required, not a nicety. These two vectors sit past everything any
+     * published bsdsocket ABI names, so on somebody else's library that slot is
+     * whatever their table ends with -- possibly the (APTR)-1 terminator,
+     * possibly nothing. Jumping through it takes the machine down. The magic
+     * argument protects against a future vendor defining the same offset; only
+     * this check protects against a present one that has not.
      */
     if (!tool_stack_is_ours(base))
     {
@@ -1121,11 +1097,9 @@ struct Library *tool_netstatus_open(BOOL quiet)
 
     /*
      * And ours has to be new enough. lib_IdString says whose library it is;
-     * lib_Revision says which one. In the v0.2.0 library -- which is published
-     * -- offset -0x366 is past the end of the vector table, on MakeLibrary()'s
-     * (APTR)-1 terminator, and jumping there takes the machine down. A command
-     * that gurus against last release's library is a worse answer than the
-     * message this whole interface exists to stop printing.
+     * lib_Revision says which one. In the published v0.2.0 library, offset
+     * -0x366 is past the end of the vector table, on MakeLibrary()'s (APTR)-1
+     * terminator, and jumping there takes the machine down.
      */
     if (base->lib_Revision < (UWORD)AMI_NETSTATUS_MIN_REVISION)
     {
@@ -1171,12 +1145,11 @@ LONG tool_netstatus_query(struct Library *base, ULONG what,
         return -1;
 
     /*
-     * The library reports the size of the struct IT was built with. If that
-     * is not the size this command was built with, every field after the
-     * first is at the wrong offset and the numbers would be plausible
-     * nonsense -- which is worse than an error. The version check inside the
-     * library catches a changed ABI; this catches one header compiled two
-     * different ways, which is what a half-installed pair looks like.
+     * The library reports the size of the struct it was built with. If that
+     * differs from this command's, every field after the first is at the wrong
+     * offset and the numbers come out as plausible nonsense. The version check
+     * inside the library catches a changed ABI; this catches one header
+     * compiled two different ways, i.e. a half-installed pair.
      */
     if (hdr->nsh_Type != (UWORD)what)
         return -1;

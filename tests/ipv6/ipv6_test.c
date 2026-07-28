@@ -1,14 +1,12 @@
 /*
  * AmiNetXDuo -- milestone 8: the IPv6 dual stack, on 68k.
  *
- * Shaped exactly like tests/ram_driver/ram_driver_test.c, and for the same
- * reason: two NX_IP instances on one simulated wire prove the stack end to
- * end without needing anything outside the emulator.  That matters more here
- * than it did for IPv4, because whether the emulated network carries IPv6 at
- * all is not ours to decide -- see tests/ipv6/ipv6_link_test.c, which asks it
- * empirically.  This test's answer does not depend on the answer to that one.
- *
- * WHAT THIS PROVES
+ * Shaped like tests/ram_driver/ram_driver_test.c, and for the same reason:
+ * two NX_IP instances on one simulated wire prove the stack end to end
+ * without needing anything outside the emulator.  That matters more here than
+ * it did for IPv4, since the emulated network may not carry IPv6 at all --
+ * see tests/ipv6/ipv6_link_test.c, which probes that empirically.  This
+ * test's result does not depend on it.
  *
  *   1. nxd_ipv6_enable() + nxd_icmp_enable() bring the dual stack up on a
  *      68020, and ::1 is configured by doing so.
@@ -16,7 +14,7 @@
  *      modified EUI-64 requires, and survives duplicate address detection --
  *      which means solicited-node multicast, neighbour solicitations and
  *      neighbour advertisements all work.
- *   3. ICMPv6 echo request/reply works, over loopback AND between two
+ *   3. ICMPv6 echo request/reply works, over loopback and between two
  *      separate NX_IP instances across the link.
  *   4. TCP over IPv6 completes a three-way handshake, moves data both ways
  *      and closes -- between an adopted Exec Task and a ThreadX-created one.
@@ -24,10 +22,9 @@
  *      through nxd_udp_source_extract().
  *   6. The IPv6 text conversions round-trip.
  *
- * WHAT IT DOES NOT PROVE: that any of this works over a real SANA-II device.
- * The SANA-II shim's 0x86DD reader has no wire to run on here -- that is
- * ipv6_link_test.c's job -- and neither has bsdsocket.library's AF_INET6
- * surface, which is ipv6_socket_test.c's.
+ * None of this runs over a real SANA-II device: the shim's 0x86DD reader has
+ * no wire here (that is ipv6_link_test.c's job), nor does bsdsocket.library's
+ * AF_INET6 surface (ipv6_socket_test.c's).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -151,8 +148,7 @@ static UINT t_check(UINT ok, const char *what, ULONG detail)
 
 /*
  * The IPv4 addresses are here only so nx_ip_create() has something to take;
- * nothing in this test uses them. The point is that the same NX_IP carries
- * both families, which is what "dual stack" means.
+ * nothing in this test uses them. The same NX_IP carries both families.
  */
 #define T_IP0_ADDRESS           IP_ADDRESS(192, 168, 100, 1)
 #define T_IP1_ADDRESS           IP_ADDRESS(192, 168, 100, 2)
@@ -206,12 +202,11 @@ static VOID t_log_addr(const char *what, const NXD_ADDRESS *a)
 /*
  * Configure the link-local address and wait for duplicate address detection.
  *
- * The wait is the interesting part. DAD sends NX_IPV6_DAD_TRANSMITS neighbour
- * solicitations to the address's own solicited-node multicast group and
- * declares the address usable only if nothing answers. Until then the address
- * is TENTATIVE and cannot be a source, so a send issued too early either
- * picks another address or fails -- which is exactly the race this test
- * exists to rule out.
+ * DAD sends NX_IPV6_DAD_TRANSMITS neighbour solicitations to the address's
+ * own solicited-node multicast group and declares the address usable only if
+ * nothing answers. Until then the address is TENTATIVE and cannot be a
+ * source, so a send issued too early either picks another address or fails.
+ * The wait rules that race out.
  */
 static UINT t_bring_up_ipv6(NX_IP *ip, NXD_ADDRESS *out, const char *who)
 {
@@ -245,13 +240,12 @@ UINT    if_index = 0;
 
     /*
      * The address starts TENTATIVE and becomes usable when DAD finishes.
-     *
      * The terminal state is VALID, not PREFERRED: PREFERRED belongs to an
-     * address that carries a preferred lifetime, which is what stateless
-     * autoconfiguration produces from a router advertisement's prefix option.
-     * A link-local or manually configured address has no lifetime and lands
-     * in VALID (nxd_ipv6_address_set.c). Both are usable as a source; only
-     * TENTATIVE is not.
+     * address carrying a preferred lifetime, which stateless autoconfiguration
+     * produces from a router advertisement's prefix option. A link-local or
+     * manually configured address has no lifetime and lands in VALID
+     * (nxd_ipv6_address_set.c). Both are usable as a source; only TENTATIVE
+     * is not.
      */
     while (waited < (10UL * NX_IP_PERIODIC_RATE))
     {
@@ -281,8 +275,8 @@ UINT    if_index = 0;
 
     t_log_addr(who, out);
 
-    /* fe80::/10 with the universal/local bit inverted in the EUI-64, which is
-       what RFC 4291 requires and what a peer will be looking for. */
+    /* fe80::/10 with the universal/local bit inverted in the EUI-64, as
+       RFC 4291 requires and as a peer will look for. */
     (VOID)t_check((UINT)((out -> nxd_ip_address.v6[0] & 0xFFC00000UL) ==
                          0xFE800000UL),
                   "address is inside fe80::/10", out -> nxd_ip_address.v6[0]);
@@ -293,7 +287,7 @@ UINT    if_index = 0;
      * and the universal/local bit (bit 1 of the first byte) inverted --
      * RFC 4291 appendix A. The RAM driver's MACs are 00:11:22:33:44:56 and
      * ...:57, so the identifier must read 0211:22ff:fe33:4456: the ff is the
-     * LOW byte of word 2, the fe is the HIGH byte of word 3, and the leading
+     * low byte of word 2, the fe is the high byte of word 3, and the leading
      * 00 has become 02.
      */
     (VOID)t_check((UINT)((out -> nxd_ip_address.v6[2] & 0x000000FFUL) == 0x000000FFUL &&
@@ -499,9 +493,8 @@ UINT        i;
 
     /*
      * ::1 is configured by nxd_ipv6_enable() itself, on the interface
-     * nx_ip_create() always makes. So this leg works on a machine with no
-     * network card at all, and it is the one IPv6 path an Amiga can exercise
-     * with nothing plugged in.
+     * nx_ip_create() always makes, so this leg works on a machine with no
+     * network card present.
      */
     loopback.nxd_ip_version       =  NX_IP_VERSION_V6;
     loopback.nxd_ip_address.v6[0] =  0UL;
@@ -684,7 +677,7 @@ UINT        i;
         ULONG       msw = 0, lsw = 0;
         UINT        if_index =  0;
 
-        /* interface_index is NOT optional -- the error-checking wrapper
+        /* interface_index is not optional -- the error-checking wrapper
            returns NX_PTR_ERROR (0x07) for a NULL, unlike most NetX Duo
            out-parameters. */
         status =  nxd_nd_cache_hardware_address_find(&t_ip0, &lookup,

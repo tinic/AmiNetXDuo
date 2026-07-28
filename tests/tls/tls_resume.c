@@ -1,35 +1,30 @@
 /*
  * AmiNetXDuo -- TLS session resumption, measured against a real public server.
  *
- * WHAT THIS IS FOR
- *
  *   A full TLS handshake on a 14 MHz 68020 is 6.8 s for an RSA certificate
  *   chain and 23.3 s for an ECDSA one, nearly all of it public-key
- *   arithmetic.  A RESUMED handshake does none of that arithmetic.  This
+ *   arithmetic.  A resumed handshake does none of that arithmetic.  This
  *   program measures both against the same host in the same run, so the
  *   difference is a measurement rather than a composition of two runs on two
  *   days.
  *
- *   It also proves the things that make resumption safe to have on by default:
- *   that a resumed connection actually carries data, that a ticket the server
- *   refuses produces a full handshake instead of a failure, and that
- *   TLSA_NoResume means what it says.
+ *   It also checks what makes resumption safe to have on by default: that a
+ *   resumed connection actually carries data, that a ticket the server refuses
+ *   produces a full handshake instead of a failure, and that TLSA_NoResume
+ *   means what it says.
  *
- *   Linked against NOTHING of ours, exactly like tests/tls/tls_api.c: it opens
- *   two shared libraries by name and uses their published vectors.  If this
- *   ever needs a target_link_libraries line, the API has failed.
+ *   Linked against nothing of ours, exactly like tests/tls/tls_api.c: it opens
+ *   two shared libraries by name and uses their published vectors.
  *
- *   Cross-PROCESS resumption is not provable from inside one process and this
+ *   Cross-process resumption is not provable from inside one process and this
  *   program does not claim it.  tests/tls/run-resume.sh does that part, by
  *   running the shipped `fetch` command twice and then rebooting the machine
  *   and running it again.
  *
- * STAGING
- *
- *   LIBS:bsdsocket.library, LIBS:tls.library, DEVS:Internet/certificates,
+ *   Needs LIBS:bsdsocket.library, LIBS:tls.library, DEVS:Internet/certificates,
  *   DEVS:NetInterfaces/eth0 and DEVS:a2065.device -- see run-resume.sh.
  *
- * NOT A BASELINE.  It depends on the internet, on FS-UAE's SLIRP NAT, on a
+ * Not a baseline: it depends on the internet, on FS-UAE's SLIRP NAT, on a
  * third party's server, and on that server's willingness to issue and honour a
  * session ticket.
  *
@@ -206,8 +201,7 @@ static struct r_hostent *bsd_gethostbyname(struct Library *base, const char *nam
 #define R_PORT          443
 
 /*
- * Two hosts, because the two chains cost wildly different amounts and the
- * saving is the point:
+ * Two hosts, because the two chain types cost very different amounts:
  *
  *   tls-v1-2.badssl.com  RSA leaf, TLS_ECDHE_RSA_*, 6.8 s cold
  *   ecc256.badssl.com    ECDSA leaf, TLS_ECDHE_ECDSA_*, 23.3 s cold
@@ -227,7 +221,7 @@ static struct r_hostent *bsd_gethostbyname(struct Library *base, const char *nam
 
 /* The session-cache record stride, from src/tlslib/tls_resume.c: 164 bytes of
    fixed fields plus TLS_RESUME_TICKET_MAX.  Spelled out rather than included
-   because this program is deliberately linked against nothing of ours. */
+   because this program links against nothing of ours. */
 #define R_RECORD        424
 
 static UBYTE r_body[2048];
@@ -340,10 +334,9 @@ static ULONG r_fetch(struct Library *tbase, struct TLSConnection *tls,
 }
 
 /*
- * A handshake, with everything worth knowing about it reported.  `sessions` is
- * the TLSA_SessionFile to use, or NULL for the default; `no_resume` sets
- * TLSA_NoResume.  Returns the handshake time in milliseconds, or 0 on failure,
- * and sets *resumed.
+ * One handshake, reported.  `sessions` is the TLSA_SessionFile to use, or NULL
+ * for the default; `no_resume` sets TLSA_NoResume.  Returns the handshake time
+ * in milliseconds, or 0 on failure, and sets *resumed.
  */
 static ULONG r_handshake(struct Library *sbase, struct Library *tbase,
                          const char *host, ULONG address,
@@ -358,12 +351,12 @@ static ULONG r_handshake(struct Library *sbase, struct Library *tbase,
     ULONG                 millis = 0;
 
     /*
-     * Static, not automatic, and this is not tidiness.  A Shell command gets
-     * 4,096 bytes of stack on Kickstart 3.1, and tls.library brackets its
-     * caller into ThreadX with THAT stack -- NetX Duo, nx_secure and the
-     * bignum code all run on it (docs/RESEARCH.md).  This program calls into
-     * the library three frames deeper than tests/tls/tls_api.c does, and every
-     * local here is a byte the record layer does not get.
+     * Static, not automatic: a Shell command gets 4,096 bytes of stack on
+     * Kickstart 3.1, and tls.library brackets its caller into ThreadX with
+     * that stack -- NetX Duo, nx_secure and the bignum code all run on it
+     * (docs/RESEARCH.md).  This program calls into the library three frames
+     * deeper than tests/tls/tls_api.c does, and every local here is a byte the
+     * record layer does not get.
      */
     static struct TLSInfo info;
     static struct TagItem tags[6];
@@ -443,9 +436,9 @@ static ULONG r_handshake(struct Library *sbase, struct Library *tbase,
  * a 16-byte header, then fixed-size records with the session ID at offset 72
  * and the ticket at 164.
  *
- * Corrupting BOTH matters.  A ticket the server rejects would still leave the
- * session ID on the wire, and a server with a working ID cache could resume
- * from that instead -- which would be correct behaviour and a failed test.
+ * Both have to be corrupted.  A ticket the server rejects would still leave
+ * the session ID on the wire, and a server with a working ID cache could
+ * resume from that instead -- correct behaviour, and a failed test.
  */
 static BOOL r_tamper(const char *in, const char *out)
 {
@@ -553,10 +546,10 @@ static VOID r_host_round(struct Library *sbase, struct Library *tbase,
                   "and the whole body arrives", warm_bytes);
 
     /*
-     * The deliverable.  Two seconds is a floor chosen to be unarguable rather
-     * than tight: the cold figures are 6.8 s and 23.3 s and the resumed ones
-     * are a fraction of a second, so anything close to this bound means
-     * something has gone wrong rather than that the margin was thin.
+     * The 2x bound is chosen loose rather than tight: the cold figures are
+     * 6.8 s and 23.3 s and the resumed ones are a fraction of a second, so
+     * anything close to this bound means something has gone wrong rather than
+     * that the margin was thin.
      */
     (VOID)r_check((BOOL)(warm * 2UL < cold),
                   "the resumed handshake is at least twice as fast", warm);
@@ -565,17 +558,15 @@ static VOID r_host_round(struct Library *sbase, struct Library *tbase,
 }
 
 /*
- * THE STACK, AND WHY THIS PROGRAM NEEDS ITS OWN
- *
  *   A command started by the Kickstart 3.1 Shell gets 4,096 bytes of stack,
- *   and tls.library brackets its caller into ThreadX with THAT stack -- NetX
+ *   and tls.library brackets its caller into ThreadX with that stack -- NetX
  *   Duo, nx_secure and the bignum code all run on it (docs/RESEARCH.md, the
  *   `fetch` traveller).  This program calls into the library from three frames
- *   down rather than from main(), and the symptom of running out was not a
- *   crash: the handshake completed and then TLSRead() returned -1 having never
- *   reached the record layer, because the library's own file-scope pointer to
- *   the borrowed NetX Duo context had been overwritten from below.  A machine
- *   with no memory protection does not fault, it just does something else.
+ *   down rather than from main(), and running out did not crash it: the
+ *   handshake completed and then TLSRead() returned -1 having never reached
+ *   the record layer, because the library's own file-scope pointer to the
+ *   borrowed NetX Duo context had been overwritten from below.  A machine with
+ *   no memory protection does not fault.
  *
  *   Same answer as src/tools/fetch.c: 64 KB of our own, through StackSwap()
  *   (exec V36, so it is on the 3.1 floor).  The trampoline has no locals, no
@@ -650,11 +641,11 @@ static int r_run(VOID)
     /* ---- a ticket the server will not accept ---------------------------- */
 
     /*
-     * The failure mode that matters most in practice.  Tickets expire, servers
-     * rotate their ticket keys without telling anybody, and a machine with no
-     * clock cannot age its own cache.  A client that treats a refused ticket as
-     * an error would be worse than one with no resumption at all, because it
-     * would break AFTER working.
+     * The common failure mode in practice.  Tickets expire, servers rotate
+     * their ticket keys without telling anybody, and a machine with no clock
+     * cannot age its own cache.  A client that treats a refused ticket as an
+     * error would be worse than one with no resumption at all, because it
+     * would break after having worked.
      */
     r_log("");
     r_log("--- a ticket the server refuses");
@@ -687,23 +678,22 @@ static int r_run(VOID)
         (VOID)DeleteFile((STRPTR)R_TAMPERED);
     }
 
-    /* ---- a DIFFERENT trust store must not inherit the verification ------ */
+    /* ---- a different trust store must not inherit the verification ------ */
 
     /*
-     * THE ONE THAT MATTERS MOST, and the regression test for a real defect.
+     * Regression test for a real defect.
      *
      * A resumed handshake verifies nothing -- no certificate, no signature, no
      * host name.  So a session cached after verification against one trust
-     * store must NOT be handed to a caller presenting a different store: the
+     * store must not be handed to a caller presenting a different store: the
      * caller would get a connection the library says is verified, against
      * roots it never offered and that signed nothing in the chain.
      *
-     * The first version of the cache keyed on a BOOLEAN saying verification
+     * The first version of the cache keyed on a boolean saying verification
      * had happened rather than on what it happened against, and did exactly
      * that.  DH0:otherstore is a valid, well-formed trust store holding one
-     * unrelated self-signed root; the correct answer is a REFUSAL, the same
-     * one a cold handshake gives, and anything else means resumption is
-     * laundering a trust decision.
+     * unrelated self-signed root; the correct answer is a refusal, the same
+     * one a cold handshake gives.
      */
     r_log("");
     r_log("--- a session must not be resumed under a different trust store");
@@ -713,8 +703,8 @@ static int r_run(VOID)
         LONG                  sock;
         LONG                  why = TLS_OK;
 
-        /* Make sure there IS a session cached for this host first, or the
-           test would pass by having nothing to wrongly resume. */
+        /* Make sure a session is cached for this host first, or the test
+           would pass by having nothing to wrongly resume. */
         millis = r_handshake(sbase, tbase, R_HOST_RSA, address, NULL, FALSE,
                              &resumed, &bytes, first, sizeof(first));
         (VOID)r_check((BOOL)(millis != 0 && resumed),
@@ -753,8 +743,8 @@ static int r_run(VOID)
             (VOID)bsd_close_socket(sbase, sock);
         }
 
-        /* And the correct store still resumes -- a "fix" that simply stops
-           resuming is not a fix. */
+        /* And the correct store still resumes: a fix that simply stops
+           resuming would also pass the check above. */
         millis = r_handshake(sbase, tbase, R_HOST_RSA, address, NULL, FALSE,
                              &resumed, &bytes, first, sizeof(first));
         (VOID)r_check((BOOL)(millis != 0 && resumed),

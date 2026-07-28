@@ -22,8 +22,8 @@ extern "C" {
 /*
  * The one's-complement 32-bit sum of `count` longwords at `p`, i.e. the
  * add.l/addx.l carry chain.  The result is congruent to the plain sum modulo
- * 0xFFFFFFFF and is zero only when every longword was zero, which is what
- * makes it interchangeable with the 16-bit accumulation NetX Duo does.
+ * 0xFFFFFFFF and is zero only when every longword was zero, so it is
+ * interchangeable with the 16-bit accumulation NetX Duo does.
  *
  * `p` is read as longwords, so on a strict-alignment host it must be 4-byte
  * aligned.  The 68020 does not require that, and neither does the caller
@@ -33,12 +33,12 @@ extern "C" {
 ULONG n68k_sum_longwords(const ULONG *p, ULONG count);
 
 /*
- * The replacement for _nx_ip_checksum_compute().  Same signature, same
- * semantics, same side effects (it zero-pads a trailing odd byte in the
- * packet buffer exactly where the vendored code does), differing only in the
- * inner loop.  n68k_checksum_hook.c gives it the vendored name; the perf
- * harness links the algorithm without the hook so it can A/B against the
- * vendored implementation in one process.
+ * The replacement for _nx_ip_checksum_compute().  Same signature, semantics
+ * and side effects (it zero-pads a trailing odd byte in the packet buffer
+ * where the vendored code does), differing only in the inner loop.
+ * n68k_checksum_hook.c gives it the vendored name; the perf harness links the
+ * algorithm without the hook so it can A/B against the vendored implementation
+ * in one process.
  */
 USHORT n68k_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
                                 UINT data_length, ULONG *src_ip_addr,
@@ -47,7 +47,7 @@ USHORT n68k_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
 /*
  * Bulk copy.  On the assembly path this is movem.l based -- see n68k_copy.S
  * for what it is measured against and why C cannot reach it.  Off that path it
- * is a plain loop, present so the API is total and a host build links.
+ * is a plain loop, present so a host build links.
  */
 VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len);
 

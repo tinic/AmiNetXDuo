@@ -2,7 +2,7 @@
  * AmiNetXDuo -- milestone 3 bring-up test.
  *
  * Brings the whole stack up against a real SANA-II device and reports what
- * actually happened:
+ * happened:
  *
  *   - netstack_startup() reads DEVS:NetInterfaces, opens the device, starts
  *     ThreadX, creates the pool and the NX_IP, runs DHCP and blocks for an
@@ -87,8 +87,8 @@ va_list args;
 }
 
 /*
- * Replay whatever has been logged since the last call. Incremental, because
- * the teardown step below can wedge (see the note in main()) and the results
+ * Replay whatever has been logged since the last call. Incremental because
+ * the teardown step can wedge (see the note in main()) and the results
  * gathered before it must reach stdout either way.
  */
 static ULONG    t_log_flushed;
@@ -153,10 +153,10 @@ static VOID t_log_ip(const char *label, ULONG addr)
 /* ------------------------------------------------------------- watchdog --- */
 
 /*
- * A bring-up test that hangs tells you nothing. This dumps the ThreadX
- * scheduler state -- who holds the baton, who wants it, and what every thread
- * in the system is doing -- from an ordinary Exec Process, so it keeps
- * running even when every ThreadX thread is wedged.
+ * A bring-up test that hangs reports nothing. This dumps the ThreadX
+ * scheduler state -- the current thread, the thread due to execute, and what
+ * every thread in the system is doing -- from an ordinary Exec Process, so it
+ * keeps running even when every ThreadX thread is wedged.
  */
 static const char *const t_state_name[] =
 {

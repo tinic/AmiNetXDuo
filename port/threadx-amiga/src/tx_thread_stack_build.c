@@ -15,11 +15,11 @@
 /*  DESCRIPTION                                                           */
 /*                                                                        */
 /*    There is no stack frame to build in a hosted port.  Instead this     */
-/*    creates the Exec Task that will execute the thread, using the very   */
-/*    stack tx_thread_create() was given -- so a ThreadX thread costs one  */
-/*    struct Task plus one MemList over and above its ThreadX stack.       */
+/*    creates the Exec Task that will execute the thread, using the stack  */
+/*    tx_thread_create() was given, so a ThreadX thread costs one struct   */
+/*    Task plus one MemList over and above its ThreadX stack.              */
 /*                                                                        */
-/*    For an ADOPTED thread there is nothing to create: the Exec Task      */
+/*    For an adopted thread there is nothing to create: the Exec Task      */
 /*    already exists and already owns a stack.  tx_amiga_adopt_thread()    */
 /*    leaves the task and its run signal in _tx_amiga_adopt_task /         */
 /*    _tx_amiga_adopt_signal and we bind to those.  The handshake is a     */
@@ -129,7 +129,7 @@ struct _tx_amiga_ctrl   *ctrl;
        It does return if _tx_thread_system_suspend() declines to switch (the
        preempt-disable / system-state guard), and falling off the end of an
        Exec task entry point lands in Exec's default finaliser, which removes
-       the task WITHOUT telling the port -- leaving tx_thread_amiga_task
+       the task without telling the port -- leaving tx_thread_amiga_task
        pointing at freed memory.  Go through the port's own teardown instead.  */
 
     TXTRACE("TXT shell_entry returned task=%08lx", (LONG) FindTask((STRPTR) 0));

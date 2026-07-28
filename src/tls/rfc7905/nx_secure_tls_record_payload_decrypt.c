@@ -15,9 +15,8 @@
  * this file is a copy rather than a hook, and for the whole of the diff
  * against the vendored original.
  *
- * Both trees are MIT, so copying is a licensing non-event; it is a
- * MAINTENANCE event, and the README is what makes a submodule bump able to
- * find it.
+ * Both trees are MIT, so copying raises no licensing question.  It does raise
+ * a maintenance one, and the README is what lets a submodule bump find this.
  */
 
 

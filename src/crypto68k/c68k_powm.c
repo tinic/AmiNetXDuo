@@ -1,19 +1,17 @@
 /*
  * AmiNetXDuo -- crypto68k modular exponentiation.
  *
- * WHERE THE TIME GOES, AND WHAT THIS FIXES
- *
  *   The vendored _nx_crypto_huge_number_mont_power_modulus() is bit-at-a-time
- *   square-and-multiply over every bit of every exponent limb.  Two things
- *   follow from that, and both are fixed here.
+ *   square-and-multiply over every bit of every exponent limb.  Two
+ *   consequences, both fixed here.
  *
  *   1. It never skips the leading zero bits of the top exponent limb.  For
  *      e = 65537 the exponent is one limb, 0x00010001, so it performs 32
  *      squarings and 2 multiplies where 16 squarings and 1 multiply suffice.
  *      An RSA *public* operation -- the certificate signature check a TLS
- *      client does three times per handshake -- therefore costs almost exactly
- *      twice what it should.  This is the single biggest win in the module and
- *      it is not an assembly trick.
+ *      client does three times per handshake -- therefore costs about twice
+ *      what it should.  The largest win in the module, and not an assembly
+ *      trick.
  *
  *   2. For a full-length private exponent it does one multiply per set bit,
  *      about 1024 of them for RSA-2048.  Sliding window with w bits needs
@@ -21,16 +19,13 @@
  *      against 512.  (Formula from OpenSSL's bn_local.h, which is also where
  *      the window thresholds below come from.)
  *
- *   Squarings are then the overwhelming majority of the work, which is why
- *   c68k_mont_sqr() earning its ~24% over c68k_mont_mul() matters at all.
- *
- * WHAT IS NOT CHANGED
+ *   Squarings are then most of the work, which is what makes c68k_mont_sqr()'s
+ *   ~24% over c68k_mont_mul() matter.
  *
  *   The setup -- radix^2 mod m -- still goes through the vendored long
- *   division, deliberately.  It is O(s^2) and runs once, so replacing it would
- *   buy little; leaving it means the before/after numbers differ only in the
- *   part being optimised, and it means there is one less division routine to
- *   get subtly wrong.
+ *   division.  It is O(s^2) and runs once, so replacing it would buy little;
+ *   leaving it keeps the before/after numbers differing only in the part being
+ *   optimised, and leaves one less division routine to get subtly wrong.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -138,8 +133,8 @@ static UINT c68k_window_for(UINT bits)
 /*
  * rr = radix^(2*m_len) mod m, i.e. R^2 mod m.
  *
- * Done exactly the way the vendored routine does it: reduce R, square the
- * remainder, reduce again.  setup needs 3*m_len + 4 limbs.
+ * Done the way the vendored routine does it: reduce R, square the remainder,
+ * reduce again.  setup needs 3*m_len + 4 limbs.
  */
 VOID c68k_mont_setup_rr(c68k_limb *rr, const c68k_limb *m, UINT m_len,
                         c68k_limb *setup)
@@ -170,11 +165,10 @@ UINT                    i;
     if (c68k_fast_modulus != 0u)
     {
         /*
-         * R mod m and then (R mod m)^2 mod m, both through our own 32-bit
-         * divider.  This is the whole of what the fast path changes: the
-         * square in between is the vendored one either way, and it is 2080
-         * limb products against the tens of thousands of limb operations the
-         * two reductions cost.
+         * R mod m and then (R mod m)^2 mod m, both through this module's
+         * 32-bit divider -- all the fast path changes.  The square in between
+         * is the vendored one either way: 2080 limb products against the tens
+         * of thousands of limb operations the two reductions cost.
          */
         c68k_mod(temp, temp, m_len + 1u, m, m_len, &setup[m_len + 1u]);
 
@@ -315,8 +309,8 @@ UINT        started;
 
     /*
      * Left-to-right sliding window.  `started` stays false until the first set
-     * bit, which is how the leading zeros of the top exponent limb cost
-     * nothing -- the fix that halves the RSA public operation.
+     * bit, so the leading zeros of the top exponent limb cost nothing -- the
+     * change that halves the RSA public operation.
      */
     started = 0;
     pos     = (INT)bits - 1;
@@ -335,7 +329,7 @@ UINT        started;
 
         /*
          * Longest window ending at a set bit, at most w bits wide.  The value
-         * is therefore odd, which is why only odd powers are tabulated.
+         * is therefore odd, so only odd powers are tabulated.
          */
         low = pos - (INT)(w - 1u);
         if (low < 0)
@@ -412,10 +406,9 @@ UINT    status;
     if (status != NX_CRYPTO_SUCCESS)
     {
         /*
-         * Nothing here can recover -- the caller gave a buffer too small or a
-         * modulus this module cannot use (even).  Fall back to the vendored
-         * routine rather than returning a wrong answer, which is the whole
-         * point of keeping it as the reference.
+         * Unrecoverable here: the caller gave a buffer too small or a modulus
+         * this module cannot use (even).  Fall back to the vendored routine
+         * rather than returning a wrong answer.
          */
         _nx_crypto_huge_number_mont_power_modulus(x, e, m, result, scratch);
         return;

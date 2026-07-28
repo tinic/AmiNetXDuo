@@ -7,6 +7,14 @@
     at 168be3619 or later; see FIXED UPSTREAM below. --check reports such a
     tree as "immune" and succeeds.
 
+    THIS IS NOT TRANSITIONAL. Both bugs are fixed in bebbo's git and neither
+    fix is in any toolchain anybody installs: the prebuilt m68k-amigaos images
+    lag upstream by years, not months, and the one this project pins is named
+    for GCC 10 and predates both fixes by eight months. Expect to be running
+    this script for the life of the project, and keep it that way -- verified
+    in every configuration, and loud when it meets something new. It has
+    already stopped two releases that would otherwise have shipped broken.
+
     TWO SEPARATE BUGS live in the same crt0.c and are repaired independently:
     the frame skew (below), and the argv indirection (SECOND BUG, further
     down). A toolchain can have either, both or neither.

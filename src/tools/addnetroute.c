@@ -1,5 +1,5 @@
 /*
- * AddNetRoute / DeleteNetRoute -- where packets go that are not for this
+ * AddNetRoute / DeleteNetRoute -- routes for packets that are not for this
  * network.
  *
  *     AddNetRoute    QUIET/S,DST=DESTINATION/K,HOSTDST=HOSTDESTINATION/K,
@@ -8,42 +8,37 @@
  *     DeleteNetRoute QUIET/S,DST=DESTINATION/K,DEFAULT=DEFAULTGATEWAY/K
  *
  * One source, two executables: TOOL_DELETE picks which. They share the address
- * parsing, the name lookup, the netmask rules and every message about a route
- * that is or is not there, and only the operation differs -- which is exactly
- * the pair that must never disagree about what "192.168.10.0" means.
+ * parsing, the name lookup, the netmask rules and the messages, so the pair
+ * cannot disagree about what "192.168.10.0" means.
  *
- * THESE COULD NOT BE WRITTEN BEFORE NOW, and the reason did not look like a
- * missing feature: NetX Duo has had nx_ip_static_route_add() all along, but
- * without NX_ENABLE_IP_STATIC_ROUTING it compiles to a stub returning
- * NX_NOT_SUPPORTED and NX_IP carries no routing table at all.
- * port/netxduo-amiga/inc/nx_user.h set NX_IP_ROUTING_TABLE_SIZE -- which reads
- * exactly as though routes existed -- and not the enable, so there was nothing
- * to add to and NETCTRL_ROUTE_ADD answered ENOSYS. docs/RESEARCH.md 22.5.
+ * These needed a stack change first. NetX Duo's nx_ip_static_route_add()
+ * compiles to a stub returning NX_NOT_SUPPORTED without
+ * NX_ENABLE_IP_STATIC_ROUTING, and NX_IP then carries no routing table.
+ * port/netxduo-amiga/inc/nx_user.h set NX_IP_ROUTING_TABLE_SIZE but not the
+ * enable, so there was nothing to add to and NETCTRL_ROUTE_ADD answered
+ * ENOSYS. docs/RESEARCH.md 22.5.
  *
- * TWO KINDS OF ROUTE, and they are different mechanisms rather than two
- * spellings of one.
+ * Two kinds of route, on different mechanisms:
  *
  *   DEFAULTGATEWAY is the default route: everything with nowhere better to go.
- *   NetX Duo keeps it in nx_ip_gateway_address and it exists in every build of
- *   this stack, so this half works even where the other does not.
+ *   NetX Duo keeps it in nx_ip_gateway_address, present in every build of this
+ *   stack, so this half works even where the other does not.
  *
  *   DESTINATION / HOSTDESTINATION / NETDESTINATION with GATEWAY add an entry
- *   to the static routing table, which NetX Duo consults BEFORE the gateway
- *   and matches longest prefix first -- so a route can override the default
- *   for part of the address space. That is what a subnet behind a second
- *   router needs, and it cannot be expressed as a gateway. NETSTATUS_SYS_ROUTING
- *   says which build this is, and it is asked BEFORE anything is attempted: a
- *   route command that quietly did nothing would be worse than one that
- *   refuses.
+ *   to the static routing table, which NetX Duo consults before the gateway
+ *   and matches longest prefix first, so a route can override the default for
+ *   part of the address space -- what a subnet behind a second router needs,
+ *   and not expressible as a gateway. NETSTATUS_SYS_ROUTING says which build
+ *   this is, and is asked before anything is attempted so the command refuses
+ *   rather than quietly doing nothing.
  *
- * THE ONE CONSTRAINT THAT SURPRISES PEOPLE: the GATEWAY must be an address on
- * one of this machine's own subnets. NetX Duo derives the outgoing interface
- * from the next hop (nx_ip_static_route_add.c), so a next hop it cannot reach
- * directly is rejected rather than stored -- which is right, and is why the
- * command says so in those words rather than printing "invalid argument".
+ * The GATEWAY must be an address on one of this machine's own subnets. NetX
+ * Duo derives the outgoing interface from the next hop
+ * (nx_ip_static_route_add.c), so a next hop it cannot reach directly is
+ * rejected rather than stored; the command says so instead of printing
+ * "invalid argument".
  *
- * NETMASKS ARE INFERRED, because the template has nowhere to write one. The
- * rule is stated here rather than left to be discovered:
+ * Netmasks are inferred, because the template has nowhere to write one:
  *
  *   HOSTDESTINATION       one machine: /32, whatever the address looks like
  *   NETDESTINATION        the mask covering the octets that are not zero, so
@@ -53,21 +48,19 @@
  *   DESTINATION           whichever of the two the address looks like.
  *
  * A prefix length written into the address -- 10.1.2.0/24 -- overrides all of
- * that. It is not a new keyword, so the template is still Roadshow's, and it
- * is what anyone who has touched a router in thirty years will type.
+ * that. It is not a new keyword, so the template is still Roadshow's.
  *
  * DeleteNetRoute infers nothing. It reads the live routing table and deletes
- * the entry whose destination matches, with the netmask that entry really has
- * -- so a route added with any idea of the mask can always be removed by
- * naming where it goes.
+ * the entry whose destination matches, with the netmask that entry really has,
+ * so a route added with any mask can be removed by naming where it goes.
  *
  * A destination may be a name as well as an address. DEVS:Internet/hosts is
  * consulted first because it needs no network and cannot time out; the running
  * stack's resolver is asked only if that fails.
  *
- * Nothing here is persistent, deliberately: this is the live table, the same
- * way Online and Offline are the live interface state. A route that should
- * survive a reboot belongs in S:User-Startup next to the AddNetInterface line.
+ * Nothing here is persistent: this is the live table, as Online and Offline
+ * are the live interface state. A route that should survive a reboot belongs
+ * in S:User-Startup next to the AddNetInterface line.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -111,19 +104,15 @@ enum
 };
 #endif
 
-/*
- * The errno numbers this command names, as bsdsocket.library reports them
- * (src/bsdsocket/bsdsocket_internal.h), the same way toolsock.h names its.
- */
+/* The errno numbers this command names, as bsdsocket.library reports them
+   (src/bsdsocket/bsdsocket_internal.h). */
 #define ROUTE_ENOENT        2
 #define ROUTE_EINVAL       22
 #define ROUTE_ENOBUFS      55
 #define ROUTE_ENOSYS       78
 
-/*
- * As many routes as the stack can report: one per interface, the static table,
- * and the default gateway.
- */
+/* As many routes as the stack can report: one per interface, the static
+   table, and the default gateway. */
 #define NR_MAX_ROUTES   (NX_MAX_PHYSICAL_INTERFACES + NX_IP_ROUTING_TABLE_SIZE + 1)
 
 /* ---------------------------------------------------------------- output -- */
@@ -154,10 +143,9 @@ static union
 
 /*
  * An address, an address with a prefix length, or a name. The local hosts file
- * is tried before the resolver deliberately: it needs no network at all, while
- * a lookup costs BSD_RESOLVE_TIMEOUT per name server against one that need not
- * answer (docs/RESEARCH.md 22.8), and a route command should not sit for
- * thirty seconds over a typo.
+ * is tried before the resolver: it needs no network, while a lookup costs
+ * BSD_RESOLVE_TIMEOUT per name server against one that need not answer
+ * (docs/RESEARCH.md 22.8), so a typo would cost thirty seconds.
  */
 static BOOL resolve_address(const char *text, ULONG *addr, ULONG *mask,
                             BOOL *have_mask)
@@ -239,12 +227,11 @@ static VOID explain_bad_address(const char *what, const char *text)
 #ifndef TOOL_DELETE
 /*
  * The mask covering the octets of `addr` that are not zero. 0.0.0.0 has none
- * and answers /0 -- which is the default route, reached through the DEFAULT
- * keyword rather than from here.
+ * and answers /0, the default route, which is reached through the DEFAULT
+ * keyword instead.
  *
- * Inference belongs to the add half alone: DeleteNetRoute takes the mask out
- * of the live table, so guessing one here would be a second, disagreeing
- * answer to the same question.
+ * Add half only: DeleteNetRoute takes the mask out of the live table, and a
+ * guess here could disagree with it.
  */
 static ULONG mask_for_network(ULONG addr)
 {
@@ -323,10 +310,9 @@ static ULONG current_gateway(struct Library *base, BOOL *routing_out)
 }
 
 /*
- * The live route `dest` falls in, or -1. Matched with each route's OWN mask
- * rather than by equality, so that naming either the network (192.168.77.0) or
- * a machine on it (192.168.77.5) finds the route that carries it -- which is
- * what someone deleting a route they can see in netstat -r will type.
+ * The live route `dest` falls in, or -1. Matched with each route's own mask
+ * rather than by equality, so naming either the network (192.168.77.0) or a
+ * machine on it (192.168.77.5) finds the route that carries it.
  */
 static LONG find_route(struct Library *base, ULONG dest, ULONG *mask_out)
 {
@@ -346,11 +332,11 @@ static LONG find_route(struct Library *base, ULONG dest, ULONG *mask_out)
             continue;               /* the default route: DEFAULT deletes it */
 
         /*
-         * Static entries only. The directly-attached prefix of an interface is
-         * a real route and netstat -r prints it, but it belongs to the
+         * Static entries only. An interface's directly-attached prefix is a
+         * real route and netstat -r prints it, but it belongs to the
          * interface's address and nx_ip_static_route_delete() cannot remove
-         * it -- so matching one here would turn "that is not yours to delete"
-         * into an unexplained failure from the stack.
+         * it, so matching one here would produce an unexplained failure from
+         * the stack instead of "that is not yours to delete".
          */
         if (!(r->nsr_Flags & NETSTATUS_RT_STATIC))
             continue;
@@ -369,10 +355,10 @@ static LONG find_route(struct Library *base, ULONG dest, ULONG *mask_out)
 
 #ifndef TOOL_DELETE
 /*
- * TRUE when `addr` is on the network of an interface the stack has up, which
- * is the one thing a next hop has to be. Checked before the call so the answer
- * is "your router is not reachable" rather than EINVAL. Nothing on the delete
- * path takes a next hop, so this is the add half's alone.
+ * TRUE when `addr` is on the network of an interface the stack has up, which a
+ * next hop has to be. Checked before the call so the answer is "your router is
+ * not reachable" rather than EINVAL. Add half only; nothing on the delete path
+ * takes a next hop.
  */
 static BOOL gateway_is_reachable(struct Library *base, ULONG addr)
 {
@@ -383,7 +369,7 @@ static BOOL gateway_is_reachable(struct Library *base, ULONG addr)
                              sizeof(nr_answer.iface),
                              sizeof(NetStatusInterface));
     if (n <= 0)
-        return TRUE;                /* cannot tell; do not accuse */
+        return TRUE;                /* cannot tell; assume reachable */
 
     for (i = 0; i < n; i++)
     {
@@ -403,9 +389,8 @@ static BOOL gateway_is_reachable(struct Library *base, ULONG addr)
 #endif /* !TOOL_DELETE */
 
 /*
- * The stack said no. Every one of these is something the person at the
- * keyboard can act on, which is why they are spelled out rather than mapped to
- * a DOS error code and left there.
+ * The stack said no. Each of these is actionable, so it is spelled out rather
+ * than mapped to a DOS error code.
  */
 static VOID explain(LONG err, ULONG gateway)
 {
@@ -530,11 +515,8 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    /*
-     * DEFAULTGATEWAY wins outright. Saying so is the difference between a
-     * command that ignored half of what it was given and one that silently did
-     * something other than what was asked.
-     */
+    /* DEFAULTGATEWAY wins outright; say so rather than silently ignoring the
+       destination. */
     if (have_default && have_dest)
         say("%s: DEFAULTGATEWAY was given, so the destination is ignored.\n",
             (LONG)tool_name);
@@ -647,11 +629,11 @@ int main(int argc, char **argv)
         dest &= mask;
 #endif
         /*
-         * Deliberately NOT done on the delete path: there the mask is not
-         * known yet -- it comes out of the live table below -- and masking
-         * with the zero it still holds turned every DESTINATION into 0.0.0.0
-         * and answered "there is no route to 0.0.0.0" for a route that was
-         * plainly there. Caught by tests/tools/run-livetools.sh.
+         * Not done on the delete path: there the mask is not known yet -- it
+         * comes out of the live table below -- and masking with the zero it
+         * still holds turned every DESTINATION into 0.0.0.0, answering "there
+         * is no route to 0.0.0.0" for a route that was plainly there. Caught
+         * by tests/tools/run-livetools.sh.
          */
     }
 
@@ -778,9 +760,8 @@ int main(int argc, char **argv)
     /* ---- a route to somewhere in particular ------------------------------ */
 
     /*
-     * Ask before doing rather than reading ENOSYS afterwards. The two failures
-     * read identically to a user and have completely different answers -- one
-     * is "your gateway is wrong", the other is "this build cannot do it".
+     * Ask before doing rather than reading ENOSYS afterwards: "your gateway is
+     * wrong" and "this build cannot do it" read identically to a user.
      */
     if (!routing)
     {
@@ -794,9 +775,9 @@ int main(int argc, char **argv)
 #ifdef TOOL_DELETE
     /*
      * The mask comes out of the live table rather than being inferred, so a
-     * route added with any mask at all can be removed by naming its
-     * destination. An explicit prefix length still wins, for the case of two
-     * routes to the same address with different masks.
+     * route added with any mask can be removed by naming its destination. An
+     * explicit prefix length still wins, for two routes to the same address
+     * with different masks.
      */
     if (!have_mask && find_route(base, dest, &mask) < 0)
     {

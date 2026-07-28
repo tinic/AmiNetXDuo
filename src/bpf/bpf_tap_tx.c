@@ -5,24 +5,23 @@
  * tx_api.h / nx_api.h ahead of any exec header (same rule as
  * src/sana2/sana2_internal.h and src/mbuf/mbuf_packet.c).
  *
- * What a transmit looks like at the tap point, in cooked mode -- which is the
- * default and the only mode most SANA-II devices are safe in:
+ * A transmit at the tap point, in cooked mode (the default, and the only mode
+ * most SANA-II devices are safe in):
  *
  *     nx_packet_prepend_ptr ---> [ IP header ][ payload ... ]
  *
  * There is no Ethernet header. NetX Duo leaves the link header to the driver
  * and reserves NX_PHYSICAL_HEADER bytes of headroom for it; the SANA-II shim
- * then never builds one either, because CMD_WRITE takes ios2_PacketType and
- * ios2_DstAddr as separate fields and the device does the framing. So what
- * goes on the wire is a complete Ethernet frame that never exists in memory
- * anywhere.
+ * never builds one either, because CMD_WRITE takes ios2_PacketType and
+ * ios2_DstAddr as separate fields and the device does the framing. The
+ * complete Ethernet frame that goes on the wire never exists in memory.
  *
- * A DLT_EN10MB consumer must see that frame. The tap therefore reconstructs
- * the 14 bytes on the stack from exactly the three things the CMD_WRITE is
- * about to carry -- destination from nx_ip_driver_physical_address_msw/lsw,
- * source from the interface's own MAC, type from the driver command -- and
- * hands the filter a two-segment view. The packet is not touched: it is very
- * often a queued TCP segment that will be handed back for retransmission.
+ * A DLT_EN10MB consumer must see that frame, so the tap reconstructs the 14
+ * bytes on the stack from the three things the CMD_WRITE carries --
+ * destination from nx_ip_driver_physical_address_msw/lsw, source from the
+ * interface's own MAC, type from the driver command -- and hands the filter a
+ * two-segment view. The packet is not touched, since it is often a queued TCP
+ * segment that will be handed back for retransmission.
  *
  * In raw mode the shim has already prepended the header, so segment 0 is
  * skipped and the view is just the packet chain.

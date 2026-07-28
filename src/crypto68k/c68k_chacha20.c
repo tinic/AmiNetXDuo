@@ -3,11 +3,11 @@
  *
  * See c68k_chacha20.h for why this cipher and not AES-GCM.
  *
- * WHERE THIS CAME FROM: written here, from RFC 8439.  The quarter-round, the
- * state layout and the AEAD's padding rule are the RFC's; no code was copied
- * from any implementation of it.  Checked against RFC 8439's own vectors --
- * the 2.3.2 block, the 2.4.2 keystream and the 2.8.2 AEAD -- in
- * tests/crypto68k, on the host and on the Amiga.
+ * Written here from RFC 8439.  The quarter-round, the state layout and the
+ * AEAD's padding rule are the RFC's; no code was copied from any
+ * implementation of it.  Checked against RFC 8439's own vectors -- the 2.3.2
+ * block, the 2.4.2 keystream and the 2.8.2 AEAD -- in tests/crypto68k, on the
+ * host and on the Amiga.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -30,7 +30,7 @@
     (c) += (d); (b) ^= (c); (b) = C68K_ROTL((b), 7u)
 
 
-/* A little-endian longword at an arbitrary address; same shape and the same
+/* A little-endian longword at an arbitrary address; same form and the same
    __mc68020__ guard as c68k_sha256_load_be(), with a byte reversal because
    ChaCha20 reads its key and nonce little-endian on a big-endian machine. */
 static ULONG c68k_chacha20_load_le(const UCHAR *p)
@@ -52,18 +52,17 @@ ULONG   v;
 
 /*
  * The core: twenty rounds over a copy of the state, then the original added
- * back in.  The state is an array rather than sixteen locals on purpose --
- * the part has eight data registers and a quarter-round needs four of them,
- * so a compiler given sixteen live values spills them anyway and an array
- * lets it spill the ones it chooses.  docs/RESEARCH.md 18.1 is the same
- * finding from the AES side: on this machine the state lives in memory.
+ * back in.  The state is an array rather than sixteen locals -- the part has
+ * eight data registers and a quarter-round needs four of them, so a compiler
+ * given sixteen live values spills them anyway, and an array lets it spill the
+ * ones it chooses.  docs/RESEARCH.md 18.1 is the same finding from the AES
+ * side: on this machine the state lives in memory.
  *
- * THIS IS THE REFERENCE, not the fast path.  c68k_chacha20.S does the same
- * sixteen words in registers -- eight in d0-d7, seven in a0-a6 and one on the
- * stack, exchanged with EXG -- and crypto68k_bulk checks the two against each
- * other block for block before it times either.  It is deliberately still
- * compiled and still reachable in the assembly build for exactly that reason;
- * a fast implementation with nothing to check it against is not evidence.
+ * The reference, not the fast path.  c68k_chacha20.S does the same sixteen
+ * words in registers -- eight in d0-d7, seven in a0-a6 and one on the stack,
+ * exchanged with EXG -- and crypto68k_bulk checks the two against each other
+ * block for block before timing either.  This stays compiled and reachable in
+ * the assembly build so that check is possible.
  */
 VOID c68k_chacha20_core_c(const ULONG *in, ULONG *out)
 {
@@ -101,12 +100,11 @@ UINT    i;
 
 
 /*
- * Which one the rest of this file calls.  A macro rather than a wrapper so
- * that the build without the assembly has no extra call at all, and rather
- * than a variant switch like c68k_aes.c's because there is nothing here to
- * choose between: the assembly is the same algorithm, faster, on every part
- * that can run it.  AMINETXDUO_CRYPTO68K_ASM=OFF, the 68000 and the 68060
- * take the C.
+ * Which one the rest of this file calls.  A macro rather than a wrapper so a
+ * build without the assembly has no extra call, and not a variant switch like
+ * c68k_aes.c's because there is nothing to choose between: the assembly is the
+ * same algorithm, faster, on every part that can run it.
+ * AMINETXDUO_CRYPTO68K_ASM=OFF, the 68000 and the 68060 take the C.
  */
 #ifdef C68K_ASM
 extern VOID c68k_chacha20_core_asm(const ULONG *in, ULONG *out);
@@ -135,8 +133,8 @@ UINT c68k_chacha20_core_is_asm(VOID)
  * byte, which is what the portable form below has to do, is four times that
  * by the instruction table in docs/RESEARCH.md 18.1.
  *
- * The 68020 build takes the assembly instead, because this loop is a sixth of
- * the cipher and -Os does not compile it to those seven instructions.
+ * The 68020 build takes the assembly instead: this loop is a sixth of the
+ * cipher and -Os does not compile it to those seven instructions.
  */
 #ifndef C68K_ASM
 static VOID c68k_chacha20_xor_block(const ULONG *ks, const UCHAR *in,
@@ -176,7 +174,7 @@ ULONG   k;
 }
 #else
 /* The same seven instructions a word, hand-written: see c68k_chacha20.S for
-   what -Os made of the loop above.  Same #ifndef/#ifdef shape as the limb
+   what -Os made of the loop above.  Same #ifndef/#ifdef structure as the limb
    primitives in c68k_prim.c. */
 extern VOID c68k_chacha20_xor_block_asm(const ULONG *ks, const UCHAR *in,
                                         UCHAR *out);
@@ -311,8 +309,8 @@ UINT    i;
 /* ------------------------------------------------------------- the AEAD -- */
 
 /* The zero padding that brings a half to a multiple of sixteen.  RFC 8439
-   pads the associated data and the ciphertext independently, which is what
-   stops one from being read as part of the other. */
+   pads the associated data and the ciphertext independently, so one cannot be
+   read as part of the other. */
 static VOID c68k_chacha20_poly1305_pad16(C68K_CHACHA20_POLY1305 *ctx,
                                          ULONG so_far)
 {
@@ -360,9 +358,9 @@ UINT    i;
 
     /*
      * The one-time Poly1305 key is the first 32 bytes of the cipher's own
-     * block 0, and the payload then starts at block 1.  That is what makes
-     * the key one-time without a second key exchange: it is a function of
-     * this record's nonce.
+     * block 0, and the payload then starts at block 1.  The key is one-time
+     * without a second key exchange because it is a function of this record's
+     * nonce.
      */
     c68k_chacha20_initialize(&ctx -> c68k_aead_cipher, key, nonce, 0uL);
     c68k_chacha20_keystream(&ctx -> c68k_aead_cipher, mac_key,
@@ -406,8 +404,8 @@ VOID c68k_chacha20_poly1305_encrypt(C68K_CHACHA20_POLY1305 *ctx,
 
     c68k_chacha20_xor(&ctx -> c68k_aead_cipher, in, out, length);
 
-    /* The tag covers the CIPHERTEXT -- encrypt-then-MAC, which is what makes
-       a forged record cost nothing to reject. */
+    /* The tag covers the ciphertext -- encrypt-then-MAC, so a forged record
+       costs nothing to reject. */
     c68k_poly1305_update(&ctx -> c68k_aead_mac, out, length);
     ctx -> c68k_aead_data_length += length;
 }
@@ -420,7 +418,7 @@ VOID c68k_chacha20_poly1305_decrypt(C68K_CHACHA20_POLY1305 *ctx,
 
     c68k_chacha20_poly1305_start_data(ctx);
 
-    /* Read the ciphertext into the tag BEFORE it is overwritten, since `in`
+    /* Read the ciphertext into the tag before it is overwritten, since `in`
        and `out` are the same buffer on the record path. */
     c68k_poly1305_update(&ctx -> c68k_aead_mac, in, length);
     ctx -> c68k_aead_data_length += length;
@@ -441,8 +439,8 @@ UINT    i;
     c68k_chacha20_poly1305_pad16(ctx, ctx -> c68k_aead_data_length);
 
     /* The two lengths, each a 64-bit little-endian count.  A TLS record
-       cannot reach 2^32 bytes, so the top halves are zero -- written out
-       rather than assumed, because the field is 64 bits wide. */
+       cannot reach 2^32 bytes, so the top halves are zero; written out
+       because the field is 64 bits wide. */
     for (i = 0u; i < 16u; i++)
     {
         lengths[i] = 0u;

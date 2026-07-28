@@ -7,14 +7,11 @@
  * whole packet, so a partially drained one is parked on the socket
  * (as_RxPending/as_RxOffset) until it runs out.
  *
- * SCATTER/GATHER
- *
  * Every path here works on an iovec list, and the flat-buffer calls hand it a
- * one-element list on the stack. That is not gold plating: it is what makes
- * sendmsg()/recvmsg() the same code as send()/recv() rather than a second
- * implementation, and NetX Duo takes to it without a bounce buffer --
- * nx_packet_data_append() called once per iovec builds one packet, and
- * nx_packet_data_extract_offset() scatters straight into each destination.
+ * one-element list on the stack, so sendmsg()/recvmsg() are the same code as
+ * send()/recv(). No bounce buffer is needed: nx_packet_data_append() called
+ * once per iovec builds one packet, and nx_packet_data_extract_offset()
+ * scatters straight into each destination.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -28,16 +25,14 @@
 #define BSD_DEFAULT_MSS     536
 
 /*
- * struct msghdr / struct iovec are ABI, not ours to guess.
- *
- * The definitions we compile against come from the Roadshow netinclude
- * headers in the toolchain's ndk-include (sys/socket.h, sys/uio.h) -- the
- * only <sys/socket.h> and <sys/uio.h> on the include path; this toolchain's
- * newlib tree has neither, so there is no chance of picking up the wrong
- * lineage the way ndk-include/pwd.h shadows the usergroup struct passwd.
+ * struct msghdr / struct iovec are ABI. The definitions come from the Roadshow
+ * netinclude headers in the toolchain's ndk-include (sys/socket.h, sys/uio.h),
+ * the only ones on the include path -- this toolchain's newlib tree has
+ * neither, so the wrong lineage cannot be picked up the way ndk-include/pwd.h
+ * shadows the usergroup struct passwd.
  *
  * That header carries the POSIX / 4.4BSD-Lite msghdr with ancillary data
- * (msg_control / msg_controllen / msg_flags), NOT the older 4.3BSD form with
+ * (msg_control / msg_controllen / msg_flags), not the older 4.3BSD form with
  * msg_accrights. Pinned below so a header swap is a build error rather than a
  * silent 8-byte shift from msg_control onwards.
  */
@@ -208,8 +203,8 @@ static LONG bsd_packet_append_iov(NX_PACKET *packet, BsdIovCursor *cur,
         status = nx_packet_data_append(packet, src, chunk, pool, wait);
         if (status != NX_SUCCESS)
         {
-            /* The caller decides what an append failure means, and cannot
-               without knowing which one it was. */
+            /* The caller decides what an append failure means, so it needs
+               the status. */
             if (why != NULL)
                 *why = status;
 
@@ -228,8 +223,8 @@ static LONG bsd_packet_append_iov(NX_PACKET *packet, BsdIovCursor *cur,
 /* The two blocking points of a TCP send: waiting for a free packet (pool
    empty -> NX_NO_PACKET) and waiting for send-window room (peer not reading ->
    NX_WINDOW_OVERFLOW / NX_TX_QUEUE_DEPTH).  Both are statuses bsd_wait_sliced()
-   retries on, so Ctrl-C breaks a send stalled on either.  Global, not static,
-   for the reason bsd_recv_once (below) gives. */
+   retries on, so Ctrl-C breaks a send stalled on either.  Global rather than
+   static, for the reason bsd_recv_once (below) gives. */
 typedef struct
 {
     NX_PACKET_POOL *pool;
@@ -264,13 +259,12 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
     LONG            sent = 0;
     ULONG           wait;
     /*
-     * WHY THE LOOP STOPPED, and the whole reason this variable exists.
-     *
-     * Every first-iteration failure below breaks out and lands on the "sent
-     * == 0" test at the bottom, which used to answer EWOULDBLOCK whatever had
-     * happened -- so a signalled thread (NX_WAIT_ABORTED, EINTR) and a stack
-     * being torn down (NX_POOL_DELETED, ENOBUFS) both came back as EAGAIN on
-     * a socket that was blocking. docs/RESEARCH.md 37.2.
+     * Why the loop stopped. Every first-iteration failure below breaks out and
+     * lands on the "sent == 0" test at the bottom, which used to answer
+     * EWOULDBLOCK whatever had happened -- so a signalled thread
+     * (NX_WAIT_ABORTED, EINTR) and a stack being torn down (NX_POOL_DELETED,
+     * ENOBUFS) both came back as EAGAIN on a blocking socket.
+     * docs/RESEARCH.md 37.2.
      */
     UINT            why  = NX_NO_PACKET;
 
@@ -434,12 +428,10 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
 }
 
 /*
- * One raw datagram out.
- *
- * The caller writes the protocol payload -- an ICMP message, say -- and
- * nxd_ip_raw_packet_send() prepends the IP header from the socket's protocol,
- * TTL and TOS. There is no partial send: a datagram either goes whole or not
- * at all.
+ * One raw datagram out. The caller writes the protocol payload -- an ICMP
+ * message, say -- and nxd_ip_raw_packet_send() prepends the IP header from the
+ * socket's protocol, TTL and TOS. No partial send: a datagram goes whole or
+ * not at all.
  */
 static LONG bsd_send_raw(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, const NXD_ADDRESS *addr)
@@ -489,11 +481,10 @@ typedef struct
     NX_PACKET     **packet;
 } BsdRecvArgs;
 
-/* NOT static, deliberately.  A tail call to a local symbol in another
+/* Not static, deliberately.  A tail call to a local symbol in another
    -ffunction-sections section of the same object is the relocation this
    toolchain mis-resolves (cmake/check-pcrel-branches.cmake, RESEARCH 25);
-   as a global it relocates with a zero addend and comes out right.  The
-   68040 build caught this within a minute of the file being written. */
+   as a global it relocates with a zero addend and comes out right. */
 UINT bsd_recv_once(VOID *arg, ULONG wait)
 {
     BsdRecvArgs *a = (BsdRecvArgs *)arg;
@@ -534,7 +525,7 @@ UINT bsd_recv_raw_once(VOID *arg, ULONG wait)
     a->why      = why;
 
     /* bsd_raw_receive() leaves `why` at NX_NO_PACKET when nothing is queued,
-       which is exactly the status bsd_wait_sliced() retries on. */
+       the status bsd_wait_sliced() retries on. */
     return (packet != NX_NULL) ? NX_SUCCESS : why;
 }
 
@@ -561,10 +552,10 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
             NX_PACKET *packet = NX_NULL;
 
             /*
-             * Only the FIRST read of a call may block: after that, a stream
+             * Only the first read of a call may block: after that, a stream
              * receive returns whatever the socket buffer holds. MSG_WAITALL
-             * asks for the opposite -- keep waiting until the caller's
-             * buffers are full or the connection ends.
+             * asks for the opposite -- keep waiting until the caller's buffers
+             * are full or the connection ends.
              */
             ULONG now = (first || (flags & MSG_WAITALL) != 0) ? wait
                                                               : NX_NO_WAIT;
@@ -581,8 +572,8 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                 if (aborted)
                 {
                     /* Ctrl-C, or whatever SBTC_BREAKMASK was set to. The
-                       signal is LEFT SET: it is the caller's, and a program
-                       that polls SetSignal() after an EINTR has to still see
+                       signal is left set: it is the caller's, and a program
+                       that polls SetSignal() after an EINTR must still see
                        it. */
                     if (copied > 0)
                         break;
@@ -602,10 +593,8 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
 
                 if (status == NX_NOT_CONNECTED)
                 {
-                    /*
-                     * The peer closed. A socket that was connected reports
-                     * end-of-file; one that never was reports ENOTCONN.
-                     */
+                    /* The peer closed. A socket that was connected reports
+                       end-of-file; one that never was reports ENOTCONN. */
                     if ((sock->as_Flags & (ASF_CONNECTED | ASF_EOF)) != 0)
                     {
                         sock->as_Flags |= ASF_EOF;
@@ -615,9 +604,9 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                     return bsd_fail(base, AMI_ENOTCONN);
                 }
 
-                /* `now`, not `wait`: only the first read of a call is allowed
-                   to block, so a later one that came up empty really is a
-                   caller that asked not to wait. */
+                /* `now`, not `wait`: only the first read of a call may block,
+                   so a later one that came up empty is a caller that asked not
+                   to wait. */
                 return bsd_fail(base, bsd_wait_errno(now, status));
             }
         }
@@ -668,11 +657,9 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
 }
 
 /*
- * One datagram, scattered across the caller's buffers.
- *
- * `truncated` reports whether the datagram was longer than the buffers, which
- * is what recvmsg() turns into MSG_TRUNC. The excess is discarded, as BSD
- * does.
+ * One datagram, scattered across the caller's buffers. `truncated` reports
+ * whether the datagram was longer than the buffers, which recvmsg() turns into
+ * MSG_TRUNC. The excess is discarded, as BSD does.
  */
 static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags,
@@ -763,11 +750,9 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
 }
 
 /*
- * One raw datagram in, whole IP header included.
- *
- * That is what 4.4BSD delivers on a raw read and what every ping and
- * traceroute parses; see the header of raw.c. As with UDP, whatever does not
- * fit the caller's buffers is discarded.
+ * One raw datagram in, whole IP header included -- what 4.4BSD delivers on a
+ * raw read and what ping and traceroute parse; see the header of raw.c. As
+ * with UDP, whatever does not fit the caller's buffers is discarded.
  */
 static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags,
@@ -853,10 +838,8 @@ static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
 
 /* --------------------------------------------------- the shared entry paths */
 
-/*
- * Everything below funnels into these two so that send/sendto/sendmsg and
- * recv/recvfrom/recvmsg cannot drift apart.
- */
+/* Everything below funnels into these two so send/sendto/sendmsg and
+   recv/recvfrom/recvmsg cannot drift apart. */
 static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
                          const struct iovec *iov, LONG iovcnt, LONG len,
                          LONG flags, const NXD_ADDRESS *addr, UINT port)
@@ -923,10 +906,9 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
  * The destination a sendto()/sendmsg() supplied has to belong to the same
  * family as the socket. 0 = ok, -1 = errno set.
  *
- * The one interesting case is a v4-mapped destination on a dual-stack socket:
- * bsd_addr_normalise() turns ::ffff:a.b.c.d into a plain IPv4 address, because
- * NetX Duo would otherwise put the mapped form in an IPv6 header and send it
- * to a host that has no IPv6 at all.
+ * For a v4-mapped destination on a dual-stack socket, bsd_addr_normalise()
+ * turns ::ffff:a.b.c.d into a plain IPv4 address; NetX Duo would otherwise put
+ * the mapped form in an IPv6 header and send it to a host that has no IPv6.
  */
 static LONG bsd_dest_check(struct AmiSocketBase *base, AmiSocket *sock,
                            NXD_ADDRESS *addr)
@@ -964,10 +946,8 @@ static LONG bsd_transfer_check(struct AmiSocketBase *base, AmiSocket *sock,
     if (len < 0)
         return bsd_fail(base, AMI_EINVAL);
 
-    /*
-     * MSG_OOB is TCP's, and only TCP's: there is no urgent data on a datagram
-     * or a raw socket to send or to wait for. oob.c has the rest.
-     */
+    /* MSG_OOB is TCP-only: there is no urgent data on a datagram or raw
+       socket. oob.c has the rest. */
     if ((flags & MSG_OOB) != 0 && (sock->as_Flags & ASF_TCP) == 0)
         return bsd_fail(base, AMI_EOPNOTSUPP);
 
@@ -975,11 +955,10 @@ static LONG bsd_transfer_check(struct AmiSocketBase *base, AmiSocket *sock,
 }
 
 /*
- * send(..., MSG_OOB): every byte goes, and the LAST one is the urgent one.
- *
- * That is 4.4BSD's rule, and the one telnet and ftp rely on -- they write a
- * short command whose final byte is the signal. The leading bytes take the
- * ordinary path; only the last needs oob.c.
+ * send(..., MSG_OOB): every byte goes and the last one is the urgent one.
+ * That is 4.4BSD's rule, and what telnet and ftp rely on -- they write a short
+ * command whose final byte is the signal. The leading bytes take the ordinary
+ * path; only the last needs oob.c.
  */
 static LONG bsd_send_oob(struct AmiSocketBase *base, AmiSocket *sock,
                          const UBYTE *buf, LONG len)
@@ -1021,11 +1000,9 @@ static LONG bsd_send_oob(struct AmiSocketBase *base, AmiSocket *sock,
 }
 
 /*
- * recv(..., MSG_OOB): the byte the peer marked urgent, once.
- *
- * EINVAL when there is none is what 4.4BSD answers, and there is no waiting
- * variant: a caller that wants to be told when one arrives selects on
- * exceptfds or takes SIGURG.
+ * recv(..., MSG_OOB): the byte the peer marked urgent, once. EINVAL when there
+ * is none, as 4.4BSD answers. There is no waiting variant: a caller that wants
+ * to be told when one arrives selects on exceptfds or takes SIGURG.
  */
 static LONG bsd_recv_oob(struct AmiSocketBase *base, AmiSocket *sock,
                          UBYTE *buf, LONG len)
@@ -1046,38 +1023,31 @@ static LONG bsd_recv_oob(struct AmiSocketBase *base, AmiSocket *sock,
 /* ---------------------------------------------------------------- vectors -- */
 
 /*
- * MHT_Send: the hook that can refuse a send before one byte of it happens.
+ * MHT_Send: the hook that can refuse a send before any of it happens.
  *
- * "The hook function will be invoked before dropping into the kernel
- * 'send()', 'sendto()' or 'sendmsg()' calls ... any error value > 0 will
- * cause the call to be aborted and the errno variable to be set to this
- * value."
+ * "The hook function will be invoked before dropping into the kernel 'send()',
+ * 'sendto()' or 'sendmsg()' calls ... any error value > 0 will cause the call
+ * to be aborted and the errno variable to be set to this value."
  *
- * So it runs after the descriptor and the arguments have been checked -- a
- * monitor must not be usable to probe which descriptors exist -- and before
- * anything is queued, resolved or transmitted. A partial send that then
- * reported a refusal would be worse than not dispatching at all.
+ * It runs after the descriptor and the arguments have been checked -- so a
+ * monitor cannot be used to probe which descriptors exist -- and before
+ * anything is queued, resolved or transmitted.
  *
- * WHAT GOES IN smm_To AND smm_Msg
+ * On smm_To and smm_Msg: "Depending upon the type of function to perform, the
+ * contents of the SendMonitorMessage may look different. For example, either
+ * the 'smm_To' or the 'smm_Msg' field will be NULL." That is an exclusion, not
+ * a requirement that exactly one be set. The three calls give:
  *
- * "Depending upon the type of function to perform, the contents of the
- * SendMonitorMessage may look different. For example, either the 'smm_To' or
- * the 'smm_Msg' field will be NULL."
- *
- * Read carefully, that is an exclusion and not a requirement that exactly one
- * be set. The three calls give:
- *
- *   send()      smm_To NULL, smm_Msg NULL   -- there is no destination and no
- *                                              msghdr; the peer is implied
+ *   send()      smm_To NULL, smm_Msg NULL   -- no destination and no msghdr;
+ *                                              the peer is implied
  *   sendto()    smm_To the caller's, smm_Msg NULL   (smm_To is NULL too when
  *                                              the caller passed none, which
  *                                              is legal on a connected socket)
  *   sendmsg()   smm_To NULL, smm_Msg the caller's
  *
- * The invariant that always holds is that the two are never BOTH set, and
- * that is what the probe asserts. "Exactly one is always set" would be a
- * stronger rule than the document states and there is nothing to put in
- * either field for a plain send().
+ * So the two are never both set, and that is what the probe asserts; "exactly
+ * one is always set" would be stronger than the document states, and a plain
+ * send() has nothing to put in either field.
  *
  * smm_Buffer is the caller's buffer for send()/sendto() and NULL for
  * sendmsg(), where the buffers are the msghdr's scatter list; smm_Len is the
@@ -1265,15 +1235,11 @@ LONG bsd_recvfrom(register LONG sock_fd          __asm("d0"),
 /* ------------------------------------------------------ sendmsg / recvmsg -- */
 
 /*
- * ANCILLARY DATA
- *
- * msg_control is ignored on send and reported as empty on receive. That is
- * not a shortcut: the only thing a BSD stack passes through SCM_RIGHTS is a
- * file descriptor, and AmigaOS has no descriptor passing over a socket at all
- * -- handing a socket to another task is ObtainSocket()/ReleaseSocket()
- * (handoff.c), a completely different mechanism. There is therefore nothing
- * that could legitimately arrive in msg_control, so MSG_CTRUNC is never set:
- * no ancillary data is ever dropped, because none can ever exist.
+ * msg_control is ignored on send and reported as empty on receive. The only
+ * thing a BSD stack passes through SCM_RIGHTS is a file descriptor, and
+ * AmigaOS has no descriptor passing over a socket -- handing a socket to
+ * another task is ObtainSocket()/ReleaseSocket() (handoff.c). Nothing can
+ * legitimately arrive in msg_control, so MSG_CTRUNC is never set.
  */
 LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
                  register struct msghdr *msg  __asm("a0"),
@@ -1288,9 +1254,8 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
     if (bsd_transfer_check(SocketBase, sock, 0, flags) != 0)
         return -1;
 
-    /* MSG_OOB is a send()/sendto() shape here: the urgent byte is the last
-       one written, and finding it in a scatter list buys nothing that a
-       caller cannot do with one more send(). */
+    /* MSG_OOB is a send()/sendto() shape here: the urgent byte is the last one
+       written, and a caller can do that with one more send(). */
     if ((flags & MSG_OOB) != 0)
         return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
 
@@ -1303,8 +1268,8 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
 
     {
         /* smm_Buffer is NULL here: the data is the msghdr's scatter list, and
-           pointing it at the first iovec would describe part of the send as
-           though it were all of it. */
+           pointing it at the first iovec would describe only part of the
+           send. */
         LONG denied = bsd_send_monitor(SocketBase, sock_fd, NULL, total, flags,
                                        NULL, 0, msg);
 
@@ -1372,8 +1337,8 @@ LONG bsd_recvmsg(register LONG sock_fd        __asm("d0"),
         fromlen = (socklen_t)msg->msg_namelen;
     }
 
-    /* msg_flags is an out parameter; whatever the caller left there is not
-       an input and must not survive. */
+    /* msg_flags is an out parameter; whatever the caller left there is not an
+       input and must not survive. */
     msg->msg_flags = 0;
 
     result = bsd_recv_iov(SocketBase, sock, msg->msg_iov,

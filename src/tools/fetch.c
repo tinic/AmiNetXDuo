@@ -3,50 +3,35 @@
  *
  *     fetch URL/A,TO/K,HEADERS/S,QUIET/S,NOVERIFY/S,TIMEOUT/N/K
  *
- * The traveller for tls.library.  Everything else in this tree either builds
- * TLS or tests it; this is the command that uses it, and it is deliberately
- * the same program either way: the scheme decides at run time whether
- * LIBS:tls.library is opened at all, so a build made with -DAMINETXDUO_TLS=OFF
- * still ships a working `fetch` for http: URLs and says something legible if
- * it is asked for an https: one.
+ * The scheme decides at run time whether LIBS:tls.library is opened at all, so
+ * a build made with -DAMINETXDUO_TLS=OFF still fetches http: URLs and reports
+ * something legible for an https: one.
  *
- * WHAT IT TALKS TO
+ * Uses bsdsocket.library's published vectors, called by hand, and tls.library's
+ * eight (include/aminetxduo/tlslib.h).  Nothing here links our stack; this is
+ * an ordinary Amiga network application.
  *
- *   bsdsocket.library's published vectors, called by hand, and tls.library's
- *   eight (include/aminetxduo/tlslib.h).  Nothing here links our stack: this
- *   is an ordinary Amiga network application and it is written like one, so
- *   that it is also a worked example.
+ * Opening bsdsocket.library starts the network -- the library is
+ * self-starting -- and closing it stops it again unless something else (Online,
+ * AddNetInterface) is holding it open.
  *
- *   Opening bsdsocket.library is what starts the network -- the library is
- *   self-starting -- and closing it is what stops it again, unless something
- *   else (Online, AddNetInterface) is holding it open.  That is the normal
- *   contract for an application, and unlike ping or ShowNetStatus, a command
- *   whose whole job is to use the network has no business refusing to bring it
- *   up.
+ * No chunked transfer decoding and no keep-alive: the request goes out as
+ * HTTP/1.0 with Connection: close, so the body runs until the other end hangs
+ * up.  No POST, authentication, cookies or resume.  Follows up to five
+ * redirects, and refuses one that steps down from https: to http:.
  *
- * WHAT IT DOES NOT DO
- *
- *   No chunked transfer decoding and no keep-alive: the request goes out as
- *   HTTP/1.0 with Connection: close, so the body is "everything until the
- *   other end hangs up" and there is no framing to get wrong.  No POST, no
- *   authentication, no cookies, no resume.  It follows up to five redirects
- *   and refuses to follow one that steps down from https: to http:, because
- *   silently dropping the encryption a user asked for is worse than stopping.
- *
- *   And there is one it cannot do anything about, though it is not the one an
- *   earlier version of this comment claimed: on a certificate chain of three
- *   or more, a 14 MHz 68020 spends longer verifying than a busy front end is
- *   willing to wait for a ClientKeyExchange, and the peer closes.  This
- *   command says "the connection is closed" and returns 10, which is the
- *   right answer; there is no third-party fix for it short of a faster
- *   handshake.  See docs/RESEARCH.md.  (The crash that used to be described
- *   here was the EMULATOR dying of SIGPIPE on the host, not the Amiga.)
+ * Known limit: on a certificate chain of three or more, a 14 MHz 68020 takes
+ * longer to verify than a busy front end will wait for a ClientKeyExchange, and
+ * the peer closes.  This command reports "the connection is closed" and returns
+ * 10; only a faster handshake fixes it.  See docs/RESEARCH.md.  (The crash once
+ * described here was the emulator dying of SIGPIPE on the host, not the Amiga.)
  *
  * SPDX-License-Identifier: MIT
  */
 
 #include "tools.h"
 
+#include <exec/execbase.h>   /* SysBase->AttnFlags, AFF_68020 */
 #include <exec/memory.h>
 #include <exec/tasks.h>
 
@@ -77,10 +62,9 @@ enum
 #define FETCH_PATH_MAX          512
 #define FETCH_URL_MAX           640
 /*
- * 3072 was too small for the real web: www.github.com answers a plain GET with
- * more than that in headers alone, so `fetch` completed the TLS handshake,
- * received a perfectly good 301, and then refused it. 16 KB is past anything
- * ordinary -- and running out is no longer fatal either, see head_trunc below.
+ * 3072 was too small: www.github.com answers a plain GET with more than that in
+ * headers alone, so `fetch` completed the handshake, got a good 301 and refused
+ * it.  Running out is no longer fatal either, see head_trunc below.
  */
 #define FETCH_HEAD_MAX          16384       /* status line + headers        */
 #define FETCH_CHUNK             4096
@@ -95,18 +79,17 @@ static char  fetch_head[FETCH_HEAD_MAX];
 static char  fetch_request[FETCH_PATH_MAX + FETCH_HOST_MAX + 160];
 static char  fetch_next[FETCH_URL_MAX];
 
-/* fd_set, open-coded.  <sys/types.h> is the socket world's and tools.h has
-   already pulled in NetX Duo's; 256 descriptors is the published maximum. */
+/* fd_set, open-coded: <sys/types.h> is the socket world's and tools.h has
+   already pulled in NetX Duo's.  256 descriptors is the published maximum. */
 static ULONG fetch_readfds[8];
 
 
 /* ---------------------------------------------------- bsdsocket, by hand --- */
 
 /*
- * Called through the LVOs rather than the NDK inlines, for the reason
- * src/tools/tool_diag.c gives: a command must not link the whole socket
- * surface to make one connection, and an inline header that assumes a global
- * SocketBase hides the very ABI this program exists to demonstrate.
+ * Called through the LVOs rather than the NDK inlines: a command must not link
+ * the whole socket surface to make one connection, and the inline headers
+ * assume a global SocketBase.  Same reasoning as src/tools/tool_diag.c.
  */
 
 struct FetchSockAddrIn
@@ -280,8 +263,8 @@ static ULONG str_len(const char *s)
     return n;
 }
 
-/* Append to a bounded buffer.  Returns FALSE when it would not fit, which
-   every caller treats as a hard error rather than truncating a URL. */
+/* Append to a bounded buffer.  Returns FALSE when it would not fit; callers
+   treat that as a hard error rather than truncating a URL. */
 static BOOL str_append(char *dst, ULONG dstlen, ULONG *used, const char *src)
 {
     ULONG srclen = str_len(src);
@@ -309,9 +292,8 @@ typedef struct FetchUrl
 } FetchUrl;
 
 /*
- * scheme://host[:port][/path][#fragment], plus the courtesy of accepting a
- * bare "host/path" as http.  A fragment is dropped: it is the browser's, and
- * sending it would be wrong.
+ * scheme://host[:port][/path][#fragment], and a bare "host/path" is taken as
+ * http.  The fragment is dropped -- it is never sent to the server.
  */
 static BOOL url_parse(const char *url, FetchUrl *out)
 {
@@ -441,12 +423,10 @@ static LONG io_write(FetchIO *io, const char *buf, LONG len)
 }
 
 /*
- * A read with a ceiling on how long it may block.
- *
- * tls.library has TLSA_Timeout and applies it itself.  The plain socket has
- * no timeout the NDK spells portably, so this polls with WaitSelect() first --
- * a published vector, and the one every Amiga network program already uses.
- * 0 is end of stream, -1 is an error, -2 is the timeout.
+ * A read with a ceiling on how long it may block.  tls.library applies
+ * TLSA_Timeout itself; the plain socket has no portable NDK timeout, so this
+ * polls with WaitSelect() first.  Returns 0 at end of stream, -1 on error, -2
+ * on timeout.
  */
 #define FETCH_TIMED_OUT (-2)
 
@@ -568,12 +548,11 @@ static VOID head_first_line(const char *head, char *dst, ULONG dstlen)
 /* ------------------------------------------------------------------ main --- */
 
 /*
- * One request/response.  Returns the HTTP status, 0 on failure.  When the
- * answer is a redirect the new location is left in fetch_next.
+ * One request/response.  Returns the HTTP status, 0 on failure.  On a redirect
+ * the new location is left in fetch_next.
  *
- * `out` is opened lazily by the caller through open_output(), so a redirect
- * never truncates the user's file and a failure before the first body byte
- * leaves it alone.
+ * `out` is opened lazily, so a redirect never truncates the user's file and a
+ * failure before the first body byte leaves it alone.
  */
 struct FetchState
 {
@@ -621,8 +600,7 @@ static BOOL emit(struct FetchState *st, const UBYTE *data, LONG len)
 
 /*
  * What main() hands over to the transfer.  File-static because the transfer
- * runs on a different stack from main() -- see the StackSwap() note at the
- * bottom of this file.
+ * runs on a different stack -- see the StackSwap() note at the bottom.
  */
 static struct FetchState fetch_init_state;
 static FetchUrl          fetch_init_url;
@@ -644,8 +622,8 @@ static LONG fetch_run(VOID)
     /* ---- the network ---------------------------------------------------- */
 
     /*
-     * This open is what starts the stack, and the close at the end is what
-     * stops it again if nobody else wants it.  See tool_stack_start().
+     * This open starts the stack; the close at the end stops it again if
+     * nobody else wants it.  See tool_stack_start().
      */
     sbase = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
     if (sbase == NULL)
@@ -690,23 +668,39 @@ static LONG fetch_run(VOID)
         if (u.secure && tbase == NULL)
         {
             /*
-             * VERSION 1, not TLS_LIB_VERSION, because 1 is what this command
-             * uses: TLSOpen, TLSWrite, TLSRead, TLSClose, TLSInfo and
-             * TLSErrorString are all original vectors.  Asking for the
-             * constant would mean a recompile silently demanded a newer
-             * library than the transfer needs, and a user with a working
-             * older pair would lose https: for nothing.  ti_Resumed is a
-             * version-2 TLSInfo field and is handled by zeroing the structure
-             * below, which is what makes asking for 1 safe rather than lucky.
+             * Version 1, not TLS_LIB_VERSION: TLSOpen, TLSWrite, TLSRead,
+             * TLSClose, TLSInfo and TLSErrorString are all original vectors,
+             * so asking for the constant would let a recompile demand a newer
+             * library than the transfer needs and break https: for a user with
+             * a working older pair.  ti_Resumed is a version-2 TLSInfo field;
+             * zeroing the structure below is what makes version 1 safe.
              */
             tbase = OpenLibrary((CONST_STRPTR)TLS_LIB_NAME, 1UL);
             if (tbase == NULL)
             {
                 tool_error("https: needs LIBS:tls.library, and there is none");
                 tool_advise_blank();
-                tool_advise("Install it from the same archive as this "
-                            "bsdsocket.library -- the two are a pair and are "
-                            "not interchangeable between builds.");
+
+                /*
+                 * The archive carries no tls.library for a 68000 -- the
+                 * encryption needs a 68020 -- so telling that user to install
+                 * one sends them after a file that does not exist.  One binary
+                 * serves every CPU, so the check can only happen at run time.
+                 */
+                if ((SysBase->AttnFlags & AFF_68020) == 0)
+                {
+                    tool_advise("This machine is a 68000, and there is no "
+                                "tls.library for one -- the encryption needs "
+                                "a 68020. Nothing is missing from your "
+                                "installation.");
+                }
+                else
+                {
+                    tool_advise("Install it from the same archive as this "
+                                "bsdsocket.library -- the two are a pair and "
+                                "are not interchangeable between builds.");
+                }
+
                 tool_advise("http: URLs work without it.");
                 rc = RETURN_FAIL;
                 break;
@@ -819,13 +813,10 @@ static LONG fetch_run(VOID)
                 ULONG          i;
 
                 /*
-                 * Zeroed first, and that is load-bearing rather than tidy.
-                 * This command opens tls.library with version 1, so it can be
-                 * talking to a library that predates ti_Resumed -- which will
-                 * fill the fields it knows about and leave the rest untouched.
-                 * Uninitialised stack would then decide whether this prints
-                 * "(resumed session)".  Zeroed, an older library simply says
-                 * no, which is the truth: it cannot resume.
+                 * Zeroed first, and that is load-bearing.  This command opens
+                 * tls.library with version 1, so the library may predate
+                 * ti_Resumed and will leave that field untouched; uninitialised
+                 * stack would then decide whether "(resumed session)" prints.
                  */
                 for (i = 0; i < (ULONG)sizeof(info); i++)
                     info_bytes[i] = 0;
@@ -834,12 +825,10 @@ static LONG fetch_run(VOID)
                 if (TLSInfo(tbase, io.tls, &info) == 0)
                 {
                     /*
-                     * "resumed" is worth a word of its own rather than being
-                     * left to be inferred from the time.  A resumed handshake
+                     * "resumed" is printed explicitly: a resumed handshake
                      * sends no certificate and verifies no signature, so
-                     * ti_ChainDepth reads 0 and the seconds read 0.2 -- both
-                     * of which look like something went wrong until you know
-                     * that they are the point.
+                     * ti_ChainDepth reads 0 and the time reads 0.2 s, which
+                     * otherwise look like a failure.
                      */
                     tool_printf("%s: TLS 0x%lx, ciphersuite 0x%lx, "
                                 "%ld certificate(s), %lu.%lu s%s\n",
@@ -910,14 +899,12 @@ static LONG fetch_run(VOID)
             }
 
             /*
-             * Running past the buffer stops us KEEPING headers; it does not
-             * stop us reading them. The end of the block is found from the
-             * last four bytes seen rather than from the last four bytes
-             * stored, so an unusually chatty server costs us the tail of its
-             * headers instead of the whole transfer. What we actually need --
-             * the status line, and Location: on a redirect -- is at the front,
-             * and the two places that care check head_trunc before complaining
-             * about not finding something.
+             * Running past the buffer stops us keeping headers, not reading
+             * them: the end of the block is found from the last four bytes
+             * seen, not the last four stored, so a chatty server costs the
+             * tail of its headers instead of the whole transfer.  The status
+             * line and Location: are at the front; the two places that care
+             * check head_trunc before complaining.
              */
             while (in_head && at < (ULONG)n)
             {
@@ -959,9 +946,8 @@ static LONG fetch_run(VOID)
                 }
 
                 /*
-                 * A redirect is decided here, before a single body byte is
-                 * written, so the user's file is never opened for an answer
-                 * that turns out not to be the answer.
+                 * Decided before any body byte is written, so the user's file
+                 * is never opened for an answer we are not going to keep.
                  */
                 if (status >= 300 && status < 400)
                 {
@@ -974,8 +960,8 @@ static LONG fetch_run(VOID)
 
                     /*
                      * The one case where losing the tail of the headers costs
-                     * something. Say so, rather than reporting a redirect
-                     * with nowhere to go as though the server sent none.
+                     * something; report it as truncation rather than as a
+                     * redirect the server never sent.
                      */
                     if (head_trunc)
                     {
@@ -1057,9 +1043,8 @@ static LONG fetch_run(VOID)
 
             if (fetch_next[0] == '/' && fetch_next[1] == '/')
             {
-                /* Scheme-relative.  RFC 7231 asks for an absolute URI here and
-                   nothing on the public web sends this; say so rather than
-                   guess a scheme on the user's behalf. */
+                /* Scheme-relative.  RFC 7231 asks for an absolute URI here, so
+                   report it rather than guess a scheme. */
                 tool_error("%s redirects to \"%s\", which this command does "
                            "not follow", (LONG)u.host, (LONG)fetch_next);
                 rc = RETURN_ERROR;
@@ -1107,9 +1092,9 @@ static LONG fetch_run(VOID)
             tool_printf("%lu bytes -> %s\n", st.total, (LONG)st.to);
         }
 
-        /* A 4xx or 5xx is a successful transfer of a bad answer.  The body is
-           the server's explanation and is worth keeping, so it is written --
-           but the return code says the fetch did not get what was asked for. */
+        /* A 4xx or 5xx is a successful transfer of a bad answer: the body is
+           the server's explanation, so it is written, but the return code says
+           the fetch did not get what was asked for. */
         if (status >= 400)
         {
             tool_error("%s", (LONG)line);
@@ -1136,32 +1121,28 @@ static LONG fetch_run(VOID)
 /*
  * A program that opens tls.library must not run on a Shell's stack.
  *
- * Two measurements, on the emulated 68020.  A command started by the Kickstart
- * 3.1 Shell gets 4,096 bytes (tc_SPUpper - tc_SPLower), and by the time this
- * one reaches TLSOpen() 2,736 of them are left.  And tls.library brackets its
- * caller into ThreadX to reach the stack, which -- see
- * port/threadx-amiga/src/tx_amiga_adopt.c -- hands _tx_thread_create() the
- * CALLER'S stack region as the ThreadX thread stack.  So those 2,736 bytes are
- * not just this command's: NetX Duo, nx_secure and the bignum code all run on
- * them.  On a machine with no memory protection, running off the bottom is not
- * an error message, it is an illegal instruction at a random address some
+ * Measured on the emulated 68020: a command started by the Kickstart 3.1 Shell
+ * gets 4,096 bytes (tc_SPUpper - tc_SPLower), and 2,736 are left by the time
+ * this one reaches TLSOpen().  tls.library brackets its caller into ThreadX,
+ * and port/threadx-amiga/src/tx_amiga_adopt.c hands _tx_thread_create() the
+ * caller's stack region as the ThreadX thread stack, so NetX Duo, nx_secure and
+ * the bignum code all run on those 2,736 bytes.  With no memory protection,
+ * running off the bottom shows up as an illegal instruction at a random address
  * seconds later.
  *
- * So this command brings its own stack rather than expecting the user to type
- * `stack 65536` first, and any program that opens tls.library should do the
- * same.  StackSwap() is the documented way (exec V36, so it is there on the
- * 3.1 floor).  64 KB is a deliberate over-provision -- it is against the
- * ~40 KB the connection itself allocates on a machine assumed to have four
- * megabytes, and it costs nothing when no connection is open.
+ * So this command brings its own stack via StackSwap() (exec V36, present on
+ * the 3.1 floor) instead of requiring `stack 65536` first; any program that
+ * opens tls.library should do the same.  64 KB against the ~40 KB the
+ * connection allocates, on a machine assumed to have four megabytes.
  *
- * fetch_trampoline() has NO locals and NO arguments on purpose, and is
+ * Hazard: fetch_trampoline() must have no locals and no arguments, and is
  * noinline for the same reason.  Between the two StackSwap() calls the stack
- * pointer belongs to the new stack, so a function reading a stack-based local
- * of its own in there would be reading the wrong memory.  Everything it needs
- * is static; the transfer's own locals are fine, because they live on the new
- * stack.  (Verified in the disassembly: the function's only stack traffic is
- * one push of a6 before the first swap and its matching pop after the second,
- * which balances because StackSwap() restores the pointer exactly.)
+ * pointer belongs to the new stack, so reading a stack-based local of its own
+ * there would read the wrong memory.  Everything it needs is static; the
+ * transfer's own locals are fine because they live on the new stack.  Verified
+ * in the disassembly: the only stack traffic is one push of a6 before the first
+ * swap and its matching pop after the second, which balances because
+ * StackSwap() restores the pointer exactly.
  */
 #define FETCH_STACK_SIZE    (64UL * 1024UL)
 
@@ -1215,9 +1196,8 @@ int main(int argc, char **argv)
     fetch_init_state.failed   = FALSE;
 
     /*
-     * The body goes to standard output unless TO names a file, so the only
-     * place a progress line could go without corrupting it is nowhere.  With
-     * TO there is a free channel and the summary is worth having.
+     * Without TO the body goes to standard output, so a progress line would
+     * corrupt it.  With TO that channel is free and the summary can print.
      */
     if (fetch_init_state.to == NULL)
         fetch_init_state.quiet = TRUE;
@@ -1249,8 +1229,8 @@ int main(int argc, char **argv)
     else
     {
         /* Out of memory for a stack.  http: fits on the caller's, so try
-           rather than refuse -- and https: was not going to work anyway on a
-           machine this short of memory. */
+           rather than refuse; https: would not have worked on a machine this
+           short of memory anyway. */
         fetch_result = fetch_run();
     }
 

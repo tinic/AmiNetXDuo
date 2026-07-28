@@ -1,22 +1,21 @@
 /*
  * AmiNetXDuo -- crypto68k P-256 before/after benchmark.
  *
- * Same discipline as c68k_bench.c: every figure is a PAIR, the unmodified
- * vendored routine and this module, run back to back in one process on the
- * same operands, and only the RATIO of a pair is trustworthy.  FS-UAE's 68020
- * is not a 14 MHz A1200, and its 68030 model is not a timing model at all --
- * it does not charge for MULU.L, so it systematically flatters anything that
- * moves work into multiplies.  Read the 68020 column; the 68030 column is
- * printed only so nobody has to wonder what it said.
+ * Same method as c68k_bench.c: every figure is a pair, the unmodified vendored
+ * routine and this module, run back to back in one process on the same
+ * operands, and only the ratio of a pair is trustworthy.  FS-UAE's 68020 is
+ * not a 14 MHz A1200, and its 68030 model is not a timing model at all -- it
+ * does not charge for MULU.L, so it flatters anything that moves work into
+ * multiplies.  Read the 68020 column; the 68030 column is printed so the
+ * figure is attributable.
  *
  * The three headline operations are the ones docs/RESEARCH.md 9 measured:
  * ECDHE key generation, ECDHE shared secret, ECDSA verify.  They are timed
  * through the real vendored APIs, with nothing changed but one function
- * pointer in a copy of the curve structure -- so the ratio is what a TLS
- * handshake would actually see, not what a microbenchmark would like it to be.
+ * pointer in a copy of the curve structure, so the ratio is what a TLS
+ * handshake would see.
  *
- * The layers below are timed too, because the interesting question was never
- * "is it faster" but "which layer was costing the time".
+ * The layers below are timed too, to show which layer costs the time.
  *
  * Budget about 120 s of emulated time; run it with -t 400.
  *
@@ -150,8 +149,8 @@ static VOID b_opt_reduce(VOID)
     c68k_p256_fe_reduce(b_fr, b_prod);
 }
 
-/* The multiply on its own, so the reduction's share of a field multiply can
-   be read off rather than guessed at. */
+/* The multiply on its own, so the reduction's share of a field multiply can be
+   read off. */
 static VOID b_ref_mul_only(VOID)
 {
 
@@ -427,8 +426,8 @@ ULONG   ratio;
     c68k_log("");
     c68k_log("4. The three operations docs/RESEARCH.md 9 measured:");
 
-    /* ECDHE key generation is exactly one fixed-base multiplication; the
-       random draw around it is noise by comparison. */
+    /* ECDHE key generation is one fixed-base multiplication; the random draw
+       around it is noise by comparison. */
     b_curve = b_ref_curve;
     ref = b_time_n(b_op_keygen, 3UL);
     b_curve = &b_opt_curve;
@@ -437,11 +436,11 @@ ULONG   ratio;
     b_sum_ref += ref; b_sum_opt += opt;
 
     /*
-     * _nx_crypto_ecdh_key_pair_import() sets the key SIZE but not the curve
+     * _nx_crypto_ecdh_key_pair_import() sets the key size but not the curve
      * pointer -- only _nx_crypto_ecdh_setup() does that, and setup generates a
-     * random key, which is exactly what a known-answer test cannot use.  So
-     * the curve is assigned here.  Vendored behaviour, not ours; without it
-     * compute_secret dereferences a null curve.
+     * random key, which a known-answer test cannot use.  So the curve is
+     * assigned here.  Vendored behaviour, not ours; without it compute_secret
+     * dereferences a null curve.
      */
     b_ecdh.nx_crypto_ecdh_curve = b_ref_curve;
     (VOID) _nx_crypto_ecdh_key_pair_import(&b_ecdh, b_ref_curve,

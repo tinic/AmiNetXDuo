@@ -1,27 +1,24 @@
 /*
  * tls.library -- library skeleton.
  *
- * This file must be linked FIRST so that the "moveq #-1,d0 / rts" below is at
- * offset 0 of the first code hunk -- that is what makes the library file
- * harmless if someone tries to execute it.  Same rule as bsdsocket.library and
- * usergroup.library.
- *
- * WHY THERE IS NO PER-OPENER BASE
+ * This file must be linked first so that the "moveq #-1,d0 / rts" below is at
+ * offset 0 of the first code hunk, which makes the library file harmless if
+ * executed.  Same rule as bsdsocket.library and usergroup.library.
  *
  *   bsdsocket.library clones a base per OpenLibrary() because the ABI puts
  *   errno, the descriptor table and the tag state *in* SocketBase, so two
- *   tasks sharing one would corrupt each other.  Nothing in this library's
- *   contract lives in the base: a caller's state is entirely inside the
- *   TLSConnection it was handed.  One base is therefore correct, and cheaper.
+ *   tasks sharing one would corrupt each other.  None of this library's state
+ *   lives in the base: a caller's state is entirely inside the TLSConnection
+ *   it was handed.  One base is therefore correct, and cheaper.
  *
  * SPDX-License-Identifier: MIT
  */
 
 #include "tls_vectors.h"
 
-/* Explicitly, not transitively.  NDK 3.2 reaches <exec/resident.h> through
-   another header and NDK 3.9 does not, so leaving it out builds here and fails
-   on a machine with the other NDK -- which is exactly how it reached CI.
+/* Included explicitly, not transitively.  NDK 3.2 reaches <exec/resident.h>
+   through another header and NDK 3.9 does not, so leaving it out builds here
+   and fails on a machine with the other NDK -- which is how it reached CI.
    src/bsdsocket/bsdsocket_internal.h and src/usergroup/ug_library.c both name
    it for the same reason. */
 #include <exec/resident.h>
@@ -97,8 +94,8 @@ static struct TLSLibBase *tls_lib_init(
 
     base->tb_CryptoReady = FALSE;
 
-    /* Silence the unused warning without pretending the list is used: the
-       shape is here so a future per-opener base has somewhere to hang. */
+    /* Silences the unused warning; the helper is kept so a future per-opener
+       base has somewhere to hang. */
     (VOID)tls_new_list;
 
     return base;
@@ -124,7 +121,7 @@ APTR tls_lib_close(register struct TLSLibBase *TLSBase __asm("a6"))
     if (TLSBase->tb_Lib.lib_OpenCnt == 0)
     {
         /* Nothing to release: the trust-store index belongs to a connection,
-           and TLSClose() gave it back. */
+           and TLSClose() freed it. */
         if ((TLSBase->tb_Lib.lib_Flags & LIBF_DELEXP) != 0)
             return tls_lib_expunge(TLSBase);
     }
@@ -147,9 +144,9 @@ APTR tls_lib_expunge(register struct TLSLibBase *TLSBase __asm("a6"))
     neg     = TLSBase->tb_Lib.lib_NegSize;
     pos     = TLSBase->tb_Lib.lib_PosSize;
 
-    /* The session cache is the one thing the base owns outright -- it is
-       allocated lazily on the first handshake that has something to remember,
-       and it holds master secrets, so it is cleared and not merely freed. */
+    /* The session cache is the one thing the base owns outright: allocated
+       lazily on the first handshake that has something to remember, and it
+       holds master secrets, so it is cleared and not merely freed. */
     if (TLSBase->tb_Sessions != NULL)
     {
         tls_bzero(TLSBase->tb_Sessions,

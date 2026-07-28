@@ -1,46 +1,42 @@
 | AmiNetXDuo -- crypto68k: the ChaCha20 block function, 68020 assembly.
 |
-| WHAT THIS IS
-|
-|   One entry point with the same contract as c68k_chacha20_core_c() beside
+|   One entry point with the same interface as c68k_chacha20_core_c() beside
 |   it: twenty rounds over a copy of a sixteen-word state, then the original
 |   state added back in.  Everything else -- the buffering, the counter, the
-|   little-endian serialisation, the AEAD -- stays in C, for the same reason
-|   c68k_aes.S leaves the key schedule and CBC there.
+|   little-endian serialisation, the AEAD -- stays in C, as c68k_aes.S leaves
+|   the key schedule and CBC there.
 |
-|   WHERE IT CAME FROM: written here, from RFC 8439 section 2.3, as the C
-|   beside it was.  The register schedule below was derived and then checked
-|   against RFC 8439's own 2.3.2 block before a line of this was typed; the
-|   assembled article is checked against 2.4.2, 2.5.2 and 2.8.2 by
-|   tests/crypto68k/crypto68k_bulk, and against the C core block for block.
+|   Written here from RFC 8439 section 2.3, as the C beside it was.  The
+|   register schedule below was derived and checked against RFC 8439's own
+|   2.3.2 block before this was written; the result is checked against 2.4.2,
+|   2.5.2 and 2.8.2 by tests/crypto68k/crypto68k_bulk, and against the C core
+|   block for block.
 |
-| WHY IT EXISTS, WHICH IS A DATE AND A MEASUREMENT
+|   The tree moved to -Os and this cipher regressed by 22.3%
+|   (docs/RESEARCH.md 57); that section settled on writing the kernel rather
+|   than raising the optimisation level of a whole stack to suit one file.
+|   ChaCha20 is worth hand-writing not because it is hot but because it is add,
+|   rotate and exclusive-or over sixteen 32-bit words with no table and no
+|   carry, so the only thing left to decide is which words are in registers
+|   when -- which a compiler answers with a spill heuristic and a human can
+|   answer exactly.
 |
-|   The tree moved to -Os, and one thing regressed: this cipher, by 22.3%
-|   (docs/RESEARCH.md 57).  The answer that section settled on was to write
-|   the kernel rather than to raise the optimisation level of a whole stack
-|   to suit one file.  ChaCha20 is the right thing to hand-write and it is not
-|   because it is hot -- it is because it is add, rotate and exclusive-or over
-|   sixteen 32-bit words with no table and no carry, so the ONLY thing left to
-|   decide is which words are in registers when, and that is a question a
-|   compiler answers with a spill heuristic and a human can answer exactly.
-|
-| THE PROBLEM: SIXTEEN WORDS, EIGHT DATA REGISTERS
+| Sixteen words, eight data registers
 |
 |   A quarter-round is
 |
 |       a += b; d ^= a; d = rotl(d,16);   c += d; b ^= c; b = rotl(b,12);
 |       a += b; d ^= a; d = rotl(d, 8);   c += d; b ^= c; b = rotl(b, 7);
 |
-|   and all four operands have to be in DATA registers.  Not three and an
+|   and all four operands have to be in data registers, not three and an
 |   address register: EOR has no An destination and no An source, and the
 |   rotates have neither, so `b`, `c` and `d` are excluded outright -- and `a`,
 |   which is only ever added to, is still read by `d ^= a`.  Four data
-|   registers per quarter-round, no temporary needed, and the eight the part
-|   has therefore hold exactly TWO quarter-rounds at a time.
+|   registers per quarter-round, no temporary needed, so the part's eight hold
+|   exactly two quarter-rounds at a time.
 |
-|   That fixes the shape of the whole thing.  A double round is eight
-|   quarter-rounds, taken two at a time:
+|   That fixes the schedule.  A double round is eight quarter-rounds, taken
+|   two at a time:
 |
 |       G1  QR(0,4,8,12)  QR(1,5,9,13)      the column round
 |       G2  QR(2,6,10,14) QR(3,7,11,15)
@@ -51,11 +47,11 @@
 |   takes exactly one word from each column quarter-round -- so a group of two
 |   column quarter-rounds and a group of two diagonal ones always share four
 |   words, whichever way the four are paired.  Eight words change at G1->G2,
-|   four at G2->G3, eight at G3->G4, four at G4->G1.  TWENTY-FOUR word
-|   exchanges a double round, and no pairing of the quarter-rounds does
-|   better; it is a property of the cipher, not of the schedule.
+|   four at G2->G3, eight at G3->G4, four at G4->G1: 24 word exchanges a double
+|   round, and no pairing of the quarter-rounds does better.  A property of the
+|   cipher, not of the schedule.
 |
-| WHERE THE OTHER EIGHT WORDS LIVE, AND WHY EXG
+| Where the other eight words live, and why EXG
 |
 |   tests/crypto68k/crypto68k_bulk prices the three candidate homes:
 |
@@ -63,49 +59,47 @@
 |       MOVEA.L Dn,An     / MOVE.L An,Dn         2.00 + 2.00
 |       EXG    Dn,An                             4.01
 |
-|   A spill to the stack costs 13.8 cycles a round trip and an address
-|   register costs 4, so the seven address registers are the store -- but the
-|   pair of MOVEs cannot be used, because there is no ninth data register to
-|   stage the outgoing word through.  EXG is the whole exchange in one
-|   instruction, at the price of the two MOVEs and with no temporary: it
-|   retires the word this data register has finished with and produces the
-|   next one in the same register.  It is exactly the primitive the schedule
-|   wants, which does not happen often.
+|   A spill to the stack costs 13.8 cycles a round trip and an address register
+|   costs 4, so the seven address registers are the store -- but the pair of
+|   MOVEs cannot be used, because there is no ninth data register to stage the
+|   outgoing word through.  EXG is the whole exchange in one instruction, at
+|   the price of the two MOVEs and with no temporary: it retires the word this
+|   data register has finished with and produces the next one in the same
+|   register.
 |
 |   Eight data registers plus seven address registers is fifteen homes for
-|   sixteen words, so ONE word is on the stack at any moment -- and which one
-|   is chosen, not left to chance.  A word resident in adjacent groups is
-|   exchanged once a double round; a word resident in G1 and G3, or G2 and G4,
-|   is exchanged twice.  The stack word must be one of the once-only kind, and
-|   there are two of them to place: x15, which is in G2 and G3 and so sits on
-|   the stack across G4 and G1, and x9, which is in G4 and G1 and sits there
-|   across G2 and G3.  They hand over in d6, the one data register that ever
-|   touches memory inside the loop.
+|   sixteen words, so one word is on the stack at any moment, and which one is
+|   chosen.  A word resident in adjacent groups is exchanged once a double
+|   round; a word resident in G1 and G3, or G2 and G4, is exchanged twice.  The
+|   stack word must be one of the once-only kind, and there are two to place:
+|   x15, in G2 and G3, sits on the stack across G4 and G1; x9, in G4 and G1,
+|   sits there across G2 and G3.  They hand over in d6, the one data register
+|   that touches memory inside the loop.
 |
-|   The cost of the round loop is therefore 22 EXG, one store and one load a
-|   double round -- 115.6 cycles against 336 of arithmetic, so the state
-|   traffic is a quarter of the work rather than the half it was.
+|   The round loop therefore costs 22 EXG, one store and one load a double
+|   round -- 115.6 cycles against 336 of arithmetic, so state traffic is a
+|   quarter of the work rather than the half it was.
 |
-| THE MAP, WHICH REPEATS EVERY DOUBLE ROUND
+| The map, which repeats every double round
 |
 |       d0 x0   d1 x4   d2 x8   d3 x12   d4 x1  d5 x5  d6 x9  d7 x13
 |       a0 x2   a1 x3   a2 x6   a3 x7    a4 x10 a5 x11 a6 x14   stack x15
 |
 |   It has to repeat, or the body could not be a loop; that it repeats after
-|   exactly one double round with 22 exchanges rather than 24 is the result of
-|   picking the two stack words above.  Both SWAP8s use the same seven EXG
-|   pairs and both SWAP4s the same four, which is not a coincidence either --
-|   the column-to-diagonal relabelling is the same permutation both times.
+|   one double round with 22 exchanges rather than 24 follows from picking the
+|   two stack words above.  Both SWAP8s use the same seven EXG pairs and both
+|   SWAP4s the same four, because the column-to-diagonal relabelling is the
+|   same permutation both times.
 |
-| SIZE
+| Size
 |
-|   The body is 270 bytes against the 68020's 256-byte instruction cache, so
-|   it overhangs by one cache line's worth.  It is not unrolled further for
-|   that reason; two double rounds would be 540 bytes and fetched from the bus
-|   every pass.  The alternative -- shrinking the body under 256 -- would mean
-|   giving up the immediate rotate counts, and the rotates are the arithmetic.
+|   The body is 270 bytes against the 68020's 256-byte instruction cache, so it
+|   overhangs by one cache line's worth.  Not unrolled further for that reason:
+|   two double rounds would be 540 bytes and fetched from the bus every pass.
+|   Shrinking the body under 256 would mean giving up the immediate rotate
+|   counts, and the rotates are the arithmetic.
 |
-| REGISTERS
+| Registers
 |
 |   d0-d7    eight of the sixteen state words, two quarter-rounds' worth
 |   a0-a6    seven more; a0 is the input pointer during the prologue only
@@ -293,14 +287,13 @@ _c68k_chacha20_core_asm:
 |
 | out = in XOR the little-endian serialisation of one 64-byte keystream block.
 |
-| This is here because it turned out to be a sixth of the cipher, not because
-| it is interesting.  The C beside it is already the right seven instructions
-| a word -- load, the three-instruction byte reversal, load, EOR, store -- and
-| at -O3 that is what it compiled to; at -Os GCC gave every word two LEAs, a
-| reloaded `moveq #64` and the 68020's full-extension double-indexed
-| addressing for both the load and the store, which is about 64 cycles a word
-| where 37 buys the same four bytes.  Post-increment addressing is the whole
-| fix and there is nothing to schedule.
+| Here because it measured a sixth of the cipher.  The C beside it is already
+| the right seven instructions a word -- load, the three-instruction byte
+| reversal, load, EOR, store -- and at -O3 that is what it compiled to; at -Os
+| GCC gave every word two LEAs, a reloaded `moveq #64` and the 68020's
+| full-extension double-indexed addressing for both the load and the store,
+| about 64 cycles a word where 37 buys the same four bytes.  Post-increment
+| addressing is the whole fix; there is nothing to schedule.
 |
 | Unrolled four words, so the DBRA is amortised and the body is 60 bytes.
 | `in` and `out` need no alignment: the 68020 does misaligned longwords in

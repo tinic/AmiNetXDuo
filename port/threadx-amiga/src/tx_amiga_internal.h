@@ -38,22 +38,22 @@ static __inline VOID _tx_amiga_newlist(struct List *list)
 /*
  * Per-Task control block for every Exec Task the port creates.
  *
- * The teardown state lives HERE and not in the TX_THREAD, because a dying task
- * must be able to destroy itself using only memory it owns.  If the reaper
- * gave up on it (see _tx_amiga_reap()) the TX_THREAD may already have been
- * deleted, reused or freed by the application by the time the task finally
- * unblocks; reading tx_thread_amiga_flags at that point would be a
- * use-after-free.  This block is registered in tc_MemEntry, so it stays valid
- * for exactly as long as the Task does.
+ * The teardown state lives here and not in the TX_THREAD, because a dying task
+ * must be able to destroy itself using only memory it owns.  If the reaper gave
+ * up on it (see _tx_amiga_reap()) the TX_THREAD may already have been deleted,
+ * reused or freed by the application by the time the task finally unblocks;
+ * reading tx_thread_amiga_flags at that point would be a use-after-free.  This
+ * block is registered in tc_MemEntry, so it stays valid for as long as the Task
+ * does.
  *
  * ctrl_task is at offset 0, so the struct Task * the rest of the port passes
- * around IS the control block.
+ * around is the control block.
  *
- * Identifying one from a bare struct Task * has to be safe on a FOREIGN task
+ * Identifying one from a bare struct Task * has to be safe on a foreign task
  * too -- _tx_amiga_thread_completed() runs before the port knows whose task it
- * is on.  So the test never reads past the struct Task: tc_UserData points
- * back at the Task itself, which no other task does, and only once that holds
- * is ctrl_magic (our own memory by then) consulted.
+ * is on.  The test therefore never reads past the struct Task: tc_UserData
+ * points back at the Task itself, which no other task does, and only once that
+ * holds is ctrl_magic (our own memory by then) consulted.
  */
 
 #define TX_AMIGA_CTRL_MAGIC     0x54584143UL        /* 'TXAC'  */
@@ -74,15 +74,15 @@ struct _tx_amiga_ctrl
 /*
  * Create an Exec Task on a caller-supplied stack.
  *
- * Two allocations, and that is deliberate: RemTask() hands each MemList in
- * tc_MemEntry to FreeEntry(), which frees the entries the list describes AND
- * the MemList structure itself.  A MemList that lives inside the block it
- * describes is therefore freed twice -- Guru 01000009, AN_FreeTwice -- on
- * every task that exits.  The Task (inside its control block) and the MemList
- * are separate blocks for exactly that reason.
+ * Two allocations, because RemTask() hands each MemList in tc_MemEntry to
+ * FreeEntry(), which frees both the entries the list describes and the MemList
+ * structure itself.  A MemList that lives inside the block it describes is
+ * therefore freed twice -- Guru 01000009, AN_FreeTwice -- on every task that
+ * exits.  The Task (inside its control block) and the MemList are separate
+ * blocks for that reason.
  *
- * The stack is NOT owned by the task: for ThreadX threads it belongs to
- * whoever called tx_thread_create().
+ * The stack is not owned by the task: for ThreadX threads it belongs to whoever
+ * called tx_thread_create().
  *
  * Returns the struct Task * or NULL.
  */
@@ -146,7 +146,7 @@ VOID _tx_amiga_task_destroy(struct _tx_amiga_ctrl *ctrl);
 
 /*
  * TX_THREAD_COMPLETED_EXTENSION.  Runs on the thread's own Exec Task the
- * instant its entry function returns, BEFORE _tx_thread_system_suspend() does
+ * instant its entry function returns, before _tx_thread_system_suspend() does
  * any ready-list surgery.  That is the only place a detached zombie can be
  * caught before it corrupts ThreadX with a TX_THREAD that no longer exists.
  */
@@ -170,10 +170,10 @@ extern volatile ULONG   _tx_amiga_zombies;
 extern volatile UINT    _tx_amiga_kernel_stopping;
 
 /*
- * Zombies that have NOT yet unblocked and destroyed themselves.
+ * Zombies that have not yet unblocked and destroyed themselves.
  *
- * _tx_amiga_zombies counts every zombie ever declared and never goes down; it
- * is a "this happened" signal for the caller of tx_thread_delete().  This one
+ * _tx_amiga_zombies counts every zombie ever declared and never goes down, so
+ * it only tells the caller of tx_thread_delete() that this happened.  This one
  * goes back down when the zombie finally reaches _tx_amiga_task_destroy(), and
  * is what tx_amiga_kernel_stop() consults: a program may exit safely once its
  * zombies are gone, but not while one is still parked in Exec with its entry

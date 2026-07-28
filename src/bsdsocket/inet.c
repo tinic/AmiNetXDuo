@@ -13,15 +13,12 @@
 #ifdef AMINETXDUO_IPV6
 /*
  * The IPv6 text conversions are src/config/config_text.c's -- the same
- * routines the DEVS:NetInterfaces parser uses for ADDRESS6.  That is
- * deliberate rather than convenient: an address that the config file accepts
- * and inet_pton() rejects (or that inet_ntop() prints in a form the config
- * file will not read back) is a bug that only shows up on someone else's
- * machine, and the one way to be sure it cannot happen is to have one parser.
+ * routines the DEVS:NetInterfaces parser uses for ADDRESS6. One parser means
+ * the config file and inet_pton()/inet_ntop() cannot disagree about what an
+ * address is.
  *
- * The dialect difference between the two callers -- the config file takes a
- * "/prefixlen" suffix and inet_pton() must not -- is expressed by passing NULL
- * for the prefix output, not by having two parsers.
+ * The dialect difference -- the config file takes a "/prefixlen" suffix and
+ * inet_pton() must not -- is expressed by passing NULL for the prefix output.
  */
 #include "aminetxduo/config.h"
 #endif
@@ -374,8 +371,8 @@ LONG bsd_inet_pton(register LONG af    __asm("d0"),
         }
 
         /* NULL prefix output == strict mode: "fe80::1/64" is not an address.
-           A malformed address is 0, not -1: -1 is reserved for a family this
-           function does not know, which is what POSIX specifies. */
+           Per POSIX, a malformed address returns 0; -1 is reserved for an
+           unknown family. */
         if (!ami_config_parse_ip6((const char *)src, words, NULL))
             return 0;
 

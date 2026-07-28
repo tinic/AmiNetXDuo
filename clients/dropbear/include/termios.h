@@ -1,11 +1,11 @@
 /* clients/dropbear/include -- see clients/dropbear/build.sh.
  *
  * newlib on this toolchain has <sys/termios.h> with `struct termios` and the
- * flag constants, and declares NONE of the functions.  AmigaOS has no termios
+ * flag constants, and declares none of the functions.  AmigaOS has no termios
  * at all: a Shell's input is a DOS handle and raw mode is SetMode() on a
  * console.  So the declarations are here and the definitions are in
  * clients/dropbear/amiga_dropbear.c, where they fail with ENOTTY rather than
- * pretend.  That is what makes `dbclient -T` (no pty) the supported shape.
+ * pretend.  Hence `dbclient -T` (no pty) is the supported shape.
  *
  * SPDX-License-Identifier: MIT */
 #ifndef AMIGA_TERMIOS_SHIM_H

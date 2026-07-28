@@ -4,25 +4,22 @@
  * The companion to ipv6_test.c. That one proves the protocol machinery over
  * the in-tree RAM driver, where both ends are ours; this one drives the whole
  * stack -- config file, SANA-II shim, 0x86DD reader, neighbour discovery --
- * against whatever is actually on the wire, and REPORTS what it found rather
- * than asserting what it hoped for.
- *
- * WHY THE SPLIT
+ * against whatever is on the wire, and reports what it found.
  *
  * FS-UAE's SLIRP user-mode NAT is the only network an emulated Amiga has
- * here, and whether it carries IPv6 is not ours to decide. So the checks in
- * this test are exactly the ones that hold with NOTHING else on the link:
+ * here, and whether it carries IPv6 varies. The checks are limited to the
+ * ones that hold with nothing else on the link:
  *
  *   - IPv6 came up;
  *   - the interface configured its fe80::/64 address from the MAC and it
  *     survived duplicate address detection;
  *   - ICMPv6 echo to ::1 works;
- *   - ICMPv6 echo to our OWN link-local address works -- which is a real
- *     round trip through _nx_ipv6_packet_send and back, not a shortcut.
+ *   - ICMPv6 echo to our own link-local address works -- a real round trip
+ *     through _nx_ipv6_packet_send and back, not a shortcut.
  *
- * Everything about routers, prefixes and off-link destinations is printed as
- * a finding, not counted as a check. A run on a link with no IPv6 router
- * therefore still passes, and still tells you that no router answered.
+ * Routers, prefixes and off-link destinations are printed as findings, not
+ * counted as checks, so a run on a link with no IPv6 router still passes and
+ * still reports that no router answered.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -200,9 +197,8 @@ UINT         status;
 /*
  * The addresses libslirp hands out on its IPv6 side, if it has one enabled:
  * fec0::/64 with the host at fec0::2 and the name server at fec0::3, plus the
- * link-local fe80::2 it answers neighbour solicitations for. Probing them is
- * how this test answers "does FS-UAE's SLIRP carry IPv6 at all?" without
- * needing to read its source.
+ * link-local fe80::2 it answers neighbour solicitations for. Probing them
+ * establishes whether FS-UAE's SLIRP carries IPv6 at all.
  */
 static const ULONG t_slirp_host6[4]   = { 0xFEC00000UL, 0, 0, 2UL };
 static const ULONG t_slirp_ll6[4]     = { 0xFE800000UL, 0, 0, 2UL };
@@ -238,7 +234,7 @@ UWORD            slot;
         return;
     }
 
-    /* ---- what did address configuration produce? ------------------------ */
+    /* ---- what address configuration produced ---------------------------- */
 
     t_log("interface 0 IPv6 addresses:");
 
@@ -288,7 +284,7 @@ UWORD            slot;
                       "ICMPv6 echo to our own link-local address", 0UL);
     }
 
-    /* ---- what is out there? --------------------------------------------- */
+    /* ---- what else is on the link --------------------------------------- */
 
     /*
      * Router solicitation went out when IPv6 was enabled. Give an
@@ -336,8 +332,8 @@ UWORD            slot;
     /*
      * The direct probes. ff02::2 is all-routers, which any IPv6 router on the
      * link answers; fe80::2 and fec0::2 are libslirp's own addresses. If none
-     * of the three answers, the link has no IPv6 on it -- which is the result
-     * this test exists to establish, not a failure of the stack.
+     * of the three answers, the link has no IPv6 on it; that is a finding,
+     * not a failure of the stack.
      */
     t_finding("something answered all-routers ff02::2",
               t_ping6(ip, t_allrouters6, "ff02::2"));
@@ -367,10 +363,9 @@ LONG    status;
     t_log("netstack_startup() = %ld", (ULONG)status);
 
     /*
-     * A startup that could not get an IPv4 address is NOT fatal here: IPv6
-     * needs neither DHCP nor a router, and the whole point of this test is
-     * what IPv6 can do on its own. AMI_NET_ERR_CONFIG means "up, but no IPv4
-     * address", which is a perfectly good state to test IPv6 in.
+     * A startup that could not get an IPv4 address is not fatal here: IPv6
+     * needs neither DHCP nor a router. AMI_NET_ERR_CONFIG means up but with
+     * no IPv4 address, which is a fine state to test IPv6 in.
      */
     if (status != AMI_NET_OK && status != AMI_NET_ERR_CONFIG)
     {

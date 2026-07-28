@@ -1,32 +1,28 @@
 /*
  * AmiNetXDuo -- the compiler runtime this toolchain does not ship.
  *
- * WHAT IS IN HERE DEPENDS ON THE TARGET, and the set grew when the 68000 and
- * 68060 builds were added (docs/RESEARCH.md 45):
+ * The set depends on the target, and grew when the 68000 and 68060 builds were
+ * added (docs/RESEARCH.md 45):
  *
  *   every target   __udivdi3 __umoddi3 __divdi3 __moddi3 __udivmoddi4
  *   68000, 68060   __muldi3 as well
  *   68000 only     __mulsi3 __udivsi3 __umodsi3 __divsi3 __modsi3
  *
- * The 68020 build needs none of the multiply helpers because mulu.l gives it
- * 32x32 -> 64 in one instruction.  The 68060 dropped that form; the 68000
- * never had any 32-bit multiply.  Adding the two targets cost exactly this
- * file -- both linked with one undefined symbol, __muldi3, and nothing else.
+ * The 68020 build needs no multiply helper because mulu.l gives it 32x32 -> 64
+ * in one instruction.  The 68060 dropped that form; the 68000 never had any
+ * 32-bit multiply.  Both new targets linked with one undefined symbol,
+ * __muldi3, and nothing else.
  *
- * THE PROBLEM
- *
- *   $AMIGA_TOOLCHAIN_ROOT/lib/gcc/m68k-amigaos/15.2.0/libgcc.a is a ZERO BYTE
- *   file in this toolchain.  Nothing else in the tree exports __udivdi3
- *   either (checked: libc.a, libm020/libc.a, libnix*.a, libamiga.a).  So the
- *   moment any translation unit divides a 64-bit value the link fails with
+ *   $AMIGA_TOOLCHAIN_ROOT/lib/gcc/m68k-amigaos/15.2.0/libgcc.a is a zero-byte
+ *   file in this toolchain, and nothing else in the tree exports __udivdi3
+ *   (checked: libc.a, libm020/libc.a, libnix*.a, libamiga.a).  So the moment
+ *   any translation unit divides a 64-bit value the link fails with
  *
  *       undefined reference to `__udivdi3'
  *
- *   and GCC emits that call for `unsigned long long / unsigned long long`
- *   whatever the optimisation level, because the 68020's divu.l only covers
- *   64/32 -> 32 and the compiler cannot prove the operands fit.
- *
- * WHO NEEDS IT
+ *   GCC emits that call for `unsigned long long / unsigned long long` at every
+ *   optimisation level, because the 68020's divu.l only covers 64/32 -> 32 and
+ *   the compiler cannot prove the operands fit.
  *
  *   nx_crypto        nx_crypto_huge_number.c's long-division quotient
  *                    estimate, where HN_UBASE2 is `unsigned long long`
@@ -36,33 +32,28 @@
  *                    and __umoddi3 for %lld and for the float paths, so any
  *                    stock C program that calls printf() fails to link.  That
  *                    is the conformance suite (tests/conformance/build.sh);
- *                    AmiNetXDuo's own code never hits it because it formats
- *                    through dos.library.
+ *                    AmiNetXDuo's own code formats through dos.library and
+ *                    never hits it.
  *   E-Clock maths    src/tls/tls_amiga.c and tests/crypto68k/c68k_timer.c
  *                    convert tick deltas to microseconds with a 64-bit
  *                    intermediate on their report paths.
  *
- *   This file used to exist three times over (src/tls/tls_udivdi3.c,
- *   tests/conformance/compat/libgcc64.c, plus a second CMake target compiling
- *   the first one again for crypto68k).  One copy, here, is what the original
- *   header comment asked for the moment a second component needed it.
- *
- * THE ALTERNATIVE WE DID NOT TAKE
+ *   This file replaces three earlier copies (src/tls/tls_udivdi3.c,
+ *   tests/conformance/compat/libgcc64.c, and a second CMake target compiling
+ *   the first one again for crypto68k).
  *
  *   -DNX_CRYPTO_HUGE_NUMBER_BITS=16 drops the huge-number digit to a USHORT
  *   and HN_UBASE2 to a ULONG, which removes every 64-bit operation and links
  *   clean.  It also halves the digit width, so a 2048-bit modular
- *   exponentiation does ~4x the multiplies -- on the one target where public
- *   key arithmetic is the whole question.  Supplying the helper is a few dozen
- *   instructions; halving the radix is a 4x tax on the thing being measured.
+ *   exponentiation does ~4x the multiplies, on the one target where public-key
+ *   arithmetic is the whole question.  These helpers are a few dozen
+ *   instructions by comparison.
  *
- * LINKING
- *
- *   This is built as its OWN static library (aminetxduo_m68k_rt), not folded
+ *   Built as its own static library (aminetxduo_m68k_rt) rather than folded
  *   into libaminetxduo_common.a: static archives resolve left to right in one
- *   pass, so a definition sitting in a library CMake happens to place before
- *   its consumer would not be found.  Never link two copies -- the
- *   definitions are identical and would collide.
+ *   pass, so a definition in a library CMake places before its consumer would
+ *   not be found.  Never link two copies; the definitions are identical and
+ *   would collide.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -135,8 +126,8 @@ s64 __divdi3(s64 numerator, s64 denominator);
 s64 __moddi3(s64 numerator, s64 denominator);
 
 /*
- * libgcc spells this one __udivmoddi4 and it is a public entry point in its
- * own right -- GCC emits a call to it directly when it wants both halves.
+ * libgcc spells this one __udivmoddi4, and it is a public entry point: GCC
+ * calls it directly when it wants both halves.
  */
 u64 __udivmoddi4(u64 numerator, u64 denominator, u64 *remainder)
 {
@@ -241,10 +232,10 @@ u64     remainder;
 }
 
 /*
- * The signed pair.  AmiNetXDuo's own code has no use for them, but newlib's
+ * The signed pair.  AmiNetXDuo's own code has no use for them; newlib's
  * integer printf does (%lld with a negative value), so the conformance suite
- * needs them present.  Truncating division, as C99 requires: the quotient
- * rounds toward zero and the remainder takes the numerator's sign.
+ * needs them.  Truncating division, as C99 requires: the quotient rounds
+ * toward zero and the remainder takes the numerator's sign.
  */
 s64 __divdi3(s64 numerator, s64 denominator)
 {
@@ -293,8 +284,8 @@ u64     remainder = 0;
 
 /* ------------------------------------------------------------ __muldi3 --
  *
- * 64x64 -> 64.  NEEDED BY THE 68000 AND THE 68060 BUILDS, AND BY NEITHER OF
- * THE OTHERS, for opposite reasons:
+ * 64x64 -> 64.  Needed by the 68000 and 68060 builds and by no other, for
+ * opposite reasons:
  *
  *   68020/68030/68040   mulu.l Dn,Dh:Dl gives 32x32 -> 64 in one instruction,
  *                       so GCC composes the 64-bit product inline and never
@@ -305,16 +296,15 @@ u64     remainder = 0;
  *                       will not emit it and calls here instead.
  *   68000               no 32-bit multiply of any kind; only mulu.w.
  *
- * Which is why the link failed with exactly one undefined symbol on both of
- * the new targets and none on the old one.  nx_crypto's huge-number limb
- * multiply is the caller that matters: on a 68060 this routine IS the
- * bignum inner loop, and it is reached from every RSA and EC operation.
+ * nx_crypto's huge-number limb multiply is the caller that matters: on a
+ * 68060 this routine is the bignum inner loop, reached from every RSA and EC
+ * operation.
  */
 
 /*
  * 32x32 -> 64 from four mulu.w.  The operands are declared u16 so that GCC
  * uses the widening umulhisi3 pattern (one mulu.w) rather than promoting to
- * int and calling __mulsi3 -- which would recurse through the routine below.
+ * int and calling __mulsi3, which would recurse through the routine below.
  */
 static u64 ami_umul32_wide(u32 a, u32 b)
 {
@@ -363,13 +353,13 @@ u64     product = ami_umul32_wide(a_lo, b_lo);
 /* ------------------------------------------------ the 68000 32-bit set --
  *
  * mulu.l, divu.l and divs.l do not exist before the 68020, so on a plain
- * 68000 every 32-bit `*`, `/` and `%` in C becomes a libgcc call -- and the
- * libgcc here is the zero-byte file this whole module exists because of.
- * Compiled away on every other target, where GCC emits the instruction.
+ * 68000 every 32-bit `*`, `/` and `%` in C becomes a libgcc call, into the
+ * zero-byte libgcc described at the top of this file.  Compiled away on every
+ * other target, where GCC emits the instruction.
  *
- * newlib's `.` multilib needs all five (it was built for a 68000 and has the
- * same references), so this is not only about our own arithmetic: without
- * them the 68000 build of anything that calls printf does not link.
+ * newlib's `.` multilib was built for a 68000 and has the same references, so
+ * without all five the 68000 build of anything that calls printf does not
+ * link.
  */
 #if !defined(__mc68020__) && !defined(__mc68030__) && \
     !defined(__mc68040__) && !defined(__mc68060__)
@@ -393,8 +383,8 @@ u32 __mulsi3(u32 a, u32 b)
  * in the low word and the remainder in the high word, and sets V without
  * changing the register if the quotient will not fit in 16 bits.  Two of them
  * cover every divisor below 65536, which is nearly every division a network
- * stack or a printf actually performs; the step-2 quotient cannot overflow
- * because step 1 leaves a remainder strictly below the divisor.
+ * stack or a printf performs; the step-2 quotient cannot overflow because
+ * step 1 leaves a remainder strictly below the divisor.
  */
 static u32 ami_udivmodsi(u32 numerator, u32 denominator, u32 *remainder)
 {
@@ -535,20 +525,19 @@ u32     remainder = 0;
 /* ------------------------------------------------------ 64-bit shifts --- */
 
 /*
- * THESE APPEARED WHEN THE TREE MOVED TO -Os (docs/RESEARCH.md 57).
+ * These appeared when the tree moved to -Os (docs/RESEARCH.md 57).
  *
- * At -O3 GCC expanded 64-bit shifts inline; at -Os it calls out to libgcc for
- * them, and libgcc.a is the zero-byte file described at the top of this file.
- * The whole 68020 build linked until the optimisation level changed and then
- * failed on one symbol, __lshrdi3, from ami_udivdi3.c itself.
+ * At -O3 GCC expands 64-bit shifts inline; at -Os it calls out to libgcc,
+ * which is the zero-byte file described at the top of this file. The 68020
+ * build linked until the optimisation level changed and then failed on one
+ * symbol, __lshrdi3, from ami_udivdi3.c itself.
  *
- * All three are provided rather than only the one that was missing: which of
- * them a given -Os build calls for is a property of the code the optimiser
- * happens to see, and discovering the next one the same way -- as a link
- * failure in an unrelated commit -- is not worth the two functions saved.
+ * All three are provided rather than only the one that was missing, since
+ * which of them a given -Os build calls for depends on the code the optimiser
+ * sees.
  *
- * The shape is libgcc's: a shift count of 0 must return the value unchanged,
- * a count of 32 or more moves whole words, and a count of 64 or more is
+ * The shape is libgcc's: a shift count of 0 returns the value unchanged, a
+ * count of 32 or more moves whole words, and a count of 64 or more is
  * undefined in C but must not fault here. The arithmetic version replicates
  * the sign bit; the logical one does not.
  */

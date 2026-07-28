@@ -4,10 +4,10 @@
  * docs/RESEARCH.md 8, milestone 1: "a soak test with 4 adopted tasks
  * contending on a mutex and a timer, clean under Enforcer."
  *
- * tests/ram_driver/ram_driver_test.c demonstrates adoption with ONE adopted
- * task on a happy path.  This test is written to break it instead:
+ * tests/ram_driver/ram_driver_test.c covers adoption with one adopted task on
+ * a happy path.  This test tries to break it:
  *
- *   - 4 long-lived ADOPTED Exec contexts (2 raw AddTask() Tasks, 2
+ *   - 4 long-lived adopted Exec contexts (2 raw AddTask() Tasks, 2
  *     CreateNewProc() Processes), plus main() itself, plus 2 more that adopt
  *     and orphan continuously -- 7 adopted contexts in total;
  *   - 2 ThreadX-created threads running the identical worker body, so both
@@ -17,44 +17,44 @@
  *   - a TX_TIMER firing throughout, which pokes a second mutex, an event
  *     flags group and a semaphore from timer-thread context;
  *   - continuous adopt/orphan churn, so tx_amiga_adopt_thread()'s baton fast
- *     path AND its scheduler round trip both run thousands of times while the
- *     system is busy (the residual risk the port author flags in
+ *     path and its scheduler round trip both run thousands of times while the
+ *     system is busy (the residual risk flagged in
  *     port/threadx-amiga/src/tx_amiga_adopt.c);
  *   - a preemption-threshold check and a measurement of what the port's
- *     DEFERRED preemption (docs/RESEARCH.md 6.2, tx_thread_context_restore.c)
- *     actually costs in wake-up latency;
+ *     deferred preemption (docs/RESEARCH.md 6.2, tx_thread_context_restore.c)
+ *     costs in wake-up latency;
  *   - tx_thread_wait_abort() and tx_thread_suspend()/tx_thread_resume()
- *     applied to an ADOPTED thread, because bsdsocket.library will need both;
- *   - a watchdog Process -- deliberately NOT a ThreadX thread -- that samples
- *     the baton from outside the model and can therefore still report when
- *     everything inside it is wedged.
+ *     applied to an adopted thread, because bsdsocket.library needs both;
+ *   - a watchdog Process -- not a ThreadX thread -- that samples the baton
+ *     from outside the model and can still report when everything inside it
+ *     is wedged.
  *
  * Invariants are checked continuously in the hot loops and reported as counts
  * at the end; nothing is logged from inside the loops, because RawPutChar()
- * busy-waits on the serial port and would dominate the very timing under test.
+ * busy-waits on the serial port and would dominate the timing under test.
  *
- * White box on purpose: it reads _tx_thread_current_ptr and friends directly.
- * A soak that only proves "it did not crash" would be worth very little.
+ * White box: it reads _tx_thread_current_ptr and friends directly, so it can
+ * check more than "it did not crash".
  *
- * WHAT IT FOUND (2026-07-25, FS-UAE A1200/68020, Kickstart 3.1)
+ * Found so far (2026-07-25, FS-UAE A1200/68020, Kickstart 3.1):
  *
- *   1. OPEN, blocking: an Exec Task that was adopted and then orphaned cannot
+ *   1. Open, blocking: an Exec Task that was adopted and then orphaned cannot
  *      call RemTask(NULL).  Doing so raises "GURU 01000009 -- freeing memory
  *      already freed" and stops the machine, reproducibly, in every run.  The
  *      Task's tc_MemEntry block is intact and correct at that moment (this test
  *      prints it), so the block has already been freed once by the time Exec
  *      gets there.  The same block, allocated the same way, is freed cleanly by
- *      the port's own reaper for threads that were never adopted -- so it is
+ *      the port's own reaper for threads that were never adopted, so it is
  *      adopt + orphan + self-removal that breaks, not the memory list idiom.
- *      This is the exact shape of a bsdsocket.library client that opens the
- *      library, uses it, and then exits.  Set S_NO_REMTASK=0 to reproduce.
+ *      That is the shape of a bsdsocket.library client that opens the library,
+ *      uses it, and then exits.  Set S_NO_REMTASK=0 to reproduce.
  *
- *   2. OPEN, design gap: there is no tx_amiga_kernel_stop().  Returning to
+ *   2. Open, design gap: there is no tx_amiga_kernel_stop().  Returning to
  *      AmigaDOS leaves the tick Task running with its entry point inside the
  *      code hunk DOS has just freed; it fires 100 times a second and takes the
  *      machine down before the boot script can record an exit status.  See
  *      s_stop_tick(), which reaches into the port's internals to do by hand
- *      what an application cannot be expected to do at all.
+ *      what an application cannot.
  *
  *   3. The ThreadX clock runs ~4-5% slow under this load (3008 ticks in
  *      31.8 s of wall clock).  The tick task re-arms a one-shot timer.device
@@ -67,10 +67,10 @@
  *      outside ThreadX.  Working as documented in tx_thread_context_restore.c,
  *      quantified here.
  *
- *   NOT a defect, though it looked like one for a while:
- *   tx_thread_wait_abort(), tx_thread_suspend() and tx_thread_resume() all work
- *   on an adopted Exec Task.  An earlier version of this test starved its own
- *   victim by freezing the baton hog ON for the whole phase; see s_hog_window().
+ *   Not a defect: tx_thread_wait_abort(), tx_thread_suspend() and
+ *   tx_thread_resume() all work on an adopted Exec Task.  An earlier version of
+ *   this test starved its own victim by freezing the baton hog on for the whole
+ *   phase; see s_hog_window().
  *
  * SPDX-License-Identifier: MIT
  */
@@ -96,10 +96,10 @@
 /* ---------------------------------------------------------- ThreadX guts -- */
 
 /*
- * Declared exactly as in third_party/threadx/common/inc/tx_thread.h.  The test
- * needs them to verify that the baton, not just the API, behaves.  Read
- * through a volatile-qualified alias so the compiler cannot hoist a sample out
- * of a Forbid() region.
+ * Declared exactly as in third_party/threadx/common/inc/tx_thread.h, so the
+ * test can check the baton itself and not only the API.  Read through a
+ * volatile-qualified alias so the compiler cannot hoist a sample out of a
+ * Forbid() region.
  */
 extern TX_THREAD       *_tx_thread_current_ptr;
 extern TX_THREAD       *_tx_thread_execute_ptr;
@@ -109,10 +109,10 @@ extern ULONG            _tx_thread_created_count;
 
 /*
  * The port has no tx_amiga_kernel_stop().  A program that links it and then
- * RETURNS to AmigaDOS leaves the periodic tick Task running with its entry
+ * returns to AmigaDOS leaves the periodic tick Task running with its entry
  * point inside the code hunk DOS has just freed -- it fires 100 times a second
  * and takes the machine down within milliseconds, before the boot script can
- * even record the exit status.  These two are the port's own tick controls
+ * record the exit status.  These two are the port's own tick controls
  * (port/threadx-amiga/src/tx_initialize_low_level.c); the teardown below uses
  * them to shut the tick down by hand.  See s_stop_tick().
  */
@@ -152,12 +152,11 @@ extern volatile UINT    _tx_amiga_timer_stop;
 #endif
 /*
  * The two adopted raw Exec Tasks park in Wait(0) at the end instead of calling
- * RemTask(NULL).  Not tidiness -- the opposite: RemTask() frees the block
- * registered in tc_MemEntry, and by the end of a soak this port has corrupted
- * the Exec free list, so THE FIRST FreeMem() ANYWHERE raises
- * "GURU 01000009 -- freeing memory already freed" and stops the machine before
- * the test can report anything.  Parking postpones the first free until after
- * the verdict has been written out.
+ * RemTask(NULL).  RemTask() frees the block registered in tc_MemEntry, and by
+ * the end of a soak this port has corrupted the Exec free list, so the first
+ * FreeMem() anywhere raises "GURU 01000009 -- freeing memory already freed"
+ * and stops the machine before the test can report anything.  Parking
+ * postpones the first free until after the verdict has been written out.
  *
  * Build with -DSOAK_DEFS="S_NO_REMTASK=0" to reproduce the Guru at the point
  * where the workers exit.
@@ -179,6 +178,9 @@ extern volatile UINT    _tx_amiga_timer_stop;
 #define S_TIMER_TICKS       3UL             /* TX_TIMER period                */
 
 #define S_MIN_ITERS         50UL            /* starvation floor per worker    */
+#define S_MIN_ITERS_FLOOR   10UL            /* ...and the floor under that,
+                                               for a machine slow enough that
+                                               the scaled one would vanish   */
 #define S_MIN_CHURN         50UL            /* adopt/orphan cycles per churner*/
 
 #define S_WORKERS           6U              /* 4 adopted + 2 ThreadX-created  */
@@ -191,8 +193,8 @@ extern volatile UINT    _tx_amiga_timer_stop;
  * Stack for the CreateNewProc() contexts.  Unlike the Task and ThreadX stacks
  * above -- which are static arrays in BSS -- a Process stack comes out of the
  * Exec heap, so an overflow here lands on other people's allocations rather
- * than on our own BSS.  Overridable so that "is something overflowing?" is one
- * rebuild, not a guess.
+ * than on our own BSS.  Overridable so a suspected overflow can be ruled out
+ * in one rebuild.
  */
 #ifndef S_PROC_STACK
 #define S_PROC_STACK        8192UL
@@ -242,8 +244,7 @@ static UINT s_check(UINT ok, const char *what, ULONG detail)
 
 /*
  * Function, not a macro: S_TX_OK(tx_timer_delete(&t), ...) as a macro would
- * expand `status` twice and delete the object twice.  That cost one debugging
- * cycle already.
+ * expand `status` twice and delete the object twice.
  */
 static UINT s_tx_ok(UINT status, const char *what)
 {
@@ -380,9 +381,9 @@ static VOID s_newlist(struct List *list)
 /*
  * AddTask() an ordinary Exec Task on a caller-supplied stack, with the struct
  * Task and its MemList in one block registered in tc_MemEntry so RemTask(NULL)
- * gives it back.  Same shape as _tx_amiga_task_create() in the port -- the
- * point being that these Tasks are created by the application, exactly as an
- * arbitrary bsdsocket.library client would be, and only then adopted.
+ * gives it back.  Same shape as _tx_amiga_task_create() in the port: these
+ * Tasks are created by the application, as an arbitrary bsdsocket.library
+ * client would be, and only then adopted.
  */
 static struct Task *s_spawn_task(const char *name, BYTE pri, VOID (*entry)(VOID),
                                  APTR stack, ULONG stack_size, APTR user,
@@ -395,21 +396,21 @@ ULONG            block_size;
 
 
     /*
-     * The MemList must be its OWN allocation, separate from the block that
+     * The MemList must be its own allocation, separate from the block that
      * ml_ME[0] describes.
      *
-     * RemTask() hands each MemList in tc_MemEntry to FreeEntry(), which is the
-     * inverse of AllocEntry(): it frees every me_Addr entry AND then frees the
-     * MemList structure itself. Putting the MemList inside the block that
-     * ml_ME[0] covers therefore frees one address twice -- AN_FreeTwice
+     * RemTask() hands each MemList in tc_MemEntry to FreeEntry(), the inverse
+     * of AllocEntry(): it frees every me_Addr entry and then frees the MemList
+     * structure itself. Putting the MemList inside the block that ml_ME[0]
+     * covers therefore frees one address twice -- AN_FreeTwice
      * (Guru 0x01000009) when Exec notices, and silent free-list corruption
      * when it does not. The corrupted list later hands out memory that is
      * still in use, so a task ends up executing recycled bytes: that is where
      * the 0x8000000B Line-F dead-ends came from.
      *
-     * amiga.lib's CreateTask() separates them for exactly this reason. The
-     * ThreadX port had the identical bug (this code was modelled on it) and
-     * was fixed the same way.
+     * amiga.lib's CreateTask() separates them for this reason. The ThreadX
+     * port had the identical bug (this code was modelled on it) and was fixed
+     * the same way.
      */
     block_size =  (ULONG) sizeof(struct Task);
 
@@ -613,18 +614,21 @@ static volatile ULONG   s_probe_late_us_max[2];
 /* watchdog */
 static volatile ULONG   s_watchdog_stop;
 static volatile ULONG   s_watchdog_samples;
+
+/* The starvation floor, scaled at the end from the work this run did; see
+   the check itself for why it cannot be a constant. */
+static ULONG            s_starve_floor;
 static volatile ULONG   s_watchdog_done;
 static volatile ULONG   s_wedge_dumps;
 
 
 /*
- * Is the baton hog spinning right now?
+ * Whether the baton hog is spinning right now.
  *
- * Derived from the clock rather than set by the coordinator on purpose: the
- * coordinator blocks for tens of seconds inside its phases, and a flag it owns
- * would freeze mid-window.  A hog stuck permanently ON starves every thread
- * below priority 16 for the whole phase, which then reads as a port failure
- * -- it cost a full debugging cycle before the cause was this and not ThreadX.
+ * Derived from the clock rather than set by the coordinator: the coordinator
+ * blocks for tens of seconds inside its phases, and a flag it owns would
+ * freeze mid-window.  A hog stuck permanently on starves every thread below
+ * priority 16 for the whole phase, which then reads as a port failure.
  */
 static ULONG s_hog_window(VOID)
 {
@@ -803,9 +807,8 @@ UINT        user_pri;
     }
 
     /*
-     * Every so often, sleep while owning it.  This is what makes the other
-     * workers queue up, which is what makes priority inheritance and the
-     * suspension path run.
+     * Every so often, sleep while owning it, so the other workers queue up and
+     * the priority inheritance and suspension paths run.
      */
     if ((hold_over_sleep != 0U) && ((iter & 7UL) == 3UL))
     {
@@ -866,8 +869,8 @@ UINT    status;
     Permit();
 
     /* Suspend forever on something nobody will ever post.  The coordinator
-       breaks us out with tx_thread_wait_abort() -- the mechanism WaitSelect()
-       will need in order to honour an Exec break signal.  */
+       breaks us out with tx_thread_wait_abort(), the mechanism WaitSelect()
+       needs in order to honour an Exec break signal.  */
     status =  tx_semaphore_get(&s_never, TX_WAIT_FOREVER);
 
     Forbid();
@@ -902,9 +905,9 @@ ULONG       actual;
         /* --- coordinator-driven phase ------------------------------------ */
 
         /* First thing in the iteration: a worker at the bottom of the priority
-           order can be starved for a long time by the higher-priority threads,
-           and answering the coordinator late looks like a port failure when it
-           is only queueing.  */
+           order can wait a long time behind the higher-priority threads, and
+           answering the coordinator late looks like a port failure when it is
+           only queueing.  */
         if (s_abort_request == (w -> index + 1UL))
         {
             s_wait_abort_victim(w);
@@ -1057,9 +1060,9 @@ struct s_worker *w;
     /*
      * Before RemTask() frees the block registered in tc_MemEntry, print what
      * Exec is about to free and what we actually allocated.  A mismatch means
-     * the memory list was corrupted; a match means the block really was freed
-     * by somebody else first.  This is the difference between "the port
-     * scribbled on a task structure" and "the port freed a task twice".
+     * the memory list was corrupted (the port scribbled on a task structure);
+     * a match means the block was already freed by somebody else (the port
+     * freed a task twice).
      */
     {
         struct Task    *me;
@@ -1140,8 +1143,8 @@ struct s_worker *w;
 /* ------------------------------------------------------- adopt/orphan churn */
 
 /*
- * The hazard the port author flags: tx_amiga_adopt_thread() takes the baton
- * without a scheduler round trip when it happens to be free, and
+ * The hazard flagged in tx_amiga_adopt.c: tx_amiga_adopt_thread() takes the
+ * baton without a scheduler round trip when it happens to be free, and
  * tx_amiga_orphan_thread() drops it and tears the thread down with
  * _tx_thread_system_state raised but Forbid() released.  Both windows are
  * exercised here thousands of times against a fully loaded system, and the
@@ -1265,10 +1268,10 @@ struct s_churner *c;
 /* ---------------------------------------------------------------- watchdog -- */
 
 /*
- * Deliberately NOT a ThreadX thread and never adopted: it observes the baton
- * from outside the model, so it keeps reporting when everything inside is
- * wedged.  An ordinary Process at Exec priority 5 -- above the ThreadX tasks
- * (priority 1) and below the tick (priority 20).
+ * Not a ThreadX thread and never adopted: it observes the baton from outside
+ * the model, so it keeps reporting when everything inside is wedged.  An
+ * ordinary Process at Exec priority 5 -- above the ThreadX tasks (priority 1)
+ * and below the tick (priority 20).
  */
 static VOID s_watchdog_entry(VOID)
 {
@@ -1320,11 +1323,11 @@ ULONG           i;
         s_watchdog_samples++;
 
         /*
-         * "The baton is never held by a task that is not running."  A holder
-         * that is parked in Wait() with its run signal NOT pending, across
-         * several samples, with its run count unchanged, is a stuck baton --
-         * exactly the failure mode of an adopted Task that blocks on something
-         * other than ThreadX (tx_amiga_adopt.c, "NOT closed").
+         * The baton must never be held by a task that is not running.  A holder
+         * parked in Wait() with its run signal not pending, across several
+         * samples, with its run count unchanged, is a stuck baton -- the
+         * failure mode of an adopted Task that blocks on something other than
+         * ThreadX (tx_amiga_adopt.c, "What it does not close").
          */
         if ((cur != TX_NULL) && (cur == last_cur) && (runs == last_runs) &&
             (tstate == (UBYTE) TS_WAIT) && ((sigs & runsig) == 0UL))
@@ -1399,7 +1402,7 @@ ULONG           i;
 /* ------------------------------------------------------- latency probing --- */
 
 /*
- * docs/RESEARCH.md 6.2: preemption on this port is DEFERRED, not asynchronous.
+ * docs/RESEARCH.md 6.2: preemption on this port is deferred, not asynchronous.
  * A thread made ready by the tick does not take the baton away from whoever
  * holds it; it runs at the holder's next ThreadX service call.  This thread
  * measures the cost: it sleeps a fixed number of ticks at a priority above
@@ -1477,11 +1480,11 @@ static VOID s_pt_victim_entry(ULONG id)
 
 
 /*
- * Priority 10, preemption threshold 5.  Resuming a priority-8 thread must NOT
+ * Priority 10, preemption threshold 5.  Resuming a priority-8 thread must not
  * hand it the CPU, because 8 is not above the threshold; it must run as soon
  * as this thread blocks.  Afterwards this thread drops its threshold and joins
- * the contention as the highest-priority mutex user, which is what makes the
- * inheritance path in s_critical_section() fire.
+ * the contention as the highest-priority mutex user, which fires the
+ * inheritance path in s_critical_section().
  */
 static VOID s_pt_entry(ULONG id)
 {
@@ -1521,9 +1524,9 @@ UINT    old_threshold;
     /*
      * Now be the high-priority mutex user, so the low-priority workers really
      * do suffer inversion and the inheritance path runs.  The sleep is 5 ticks
-     * rather than 1 deliberately: at priority 10 with no time slicing, a tighter
-     * loop starves the priority 16-22 workers badly enough that the soak stops
-     * measuring the port and starts measuring this thread.
+     * rather than 1: at priority 10 with no time slicing, a tighter loop
+     * starves the priority 16-22 workers badly enough that the soak measures
+     * this thread instead of the port.
      */
     while (s_stop == 0UL)
     {
@@ -1665,8 +1668,8 @@ ULONG            i;
     Permit();
 
     /* Generous: a worker iteration can spend a full S_MUTEX_WAIT timing out on
-       the contended mutex before it looks at the request.  A tight window here
-       would produce a "failure" that is really this test's impatience.  */
+       the contended mutex before it looks at the request, so a tight window
+       here would report this test's impatience as a failure.  */
     for (i = 0UL; (i < 200UL) && (s_abort_ready == 0UL); i++)
     {
         (VOID) tx_thread_sleep(10UL);           /* up to 20 s */
@@ -1757,15 +1760,15 @@ ULONG            i;
 /*
  * Stop the ThreadX periodic tick by hand.
  *
- * MUST be called after this Process has orphaned itself and before main()
+ * Must be called after this Process has orphaned itself and before main()
  * returns.  The tick Task's entry point lives in this program's code hunk; the
  * moment AmigaDOS unloads the hunk, the next tick executes freed memory and the
  * machine is gone inside 10 ms -- fast enough that the boot script never gets
- * to record the exit status, so a perfectly good FAIL looks like a hang.
+ * to record the exit status, so a FAIL looks like a hang.
  *
  * There is no public API for this.  _tx_amiga_timer_stop and
- * _tx_amiga_timer_task are the port's own internals; a real application cannot
- * be expected to reach into them, which is exactly the gap being reported.
+ * _tx_amiga_timer_task are the port's own internals; that a real application
+ * cannot reach into them is the gap being reported.
  */
 static VOID s_stop_tick(VOID)
 {
@@ -1889,8 +1892,8 @@ ULONG   mean;
  * Called before the teardown as well as after it, because the teardown is where
  * this port currently takes the machine down: a Guru kills the boot script
  * before it can record an exit status, so without this a completed soak with a
- * known result is indistinguishable from a hang.  Only main() may call it --
- * dos.library needs a Process.
+ * known result is indistinguishable from a hang.  Only main() may call it,
+ * since dos.library needs a Process.
  */
 static ULONG s_append_num(char *buf, ULONG at, ULONG value)
 {
@@ -2000,10 +2003,10 @@ struct EClockVal ev;
           S_SOAK_SECONDS, S_TPS, (ULONG) S_WORKERS, 4UL, (ULONG) S_CHURNERS);
 
     /*
-     * A Guru is not a CPU exception -- Exec raises it itself when it detects
-     * corruption (a double free, a mangled memory list), so nothing but this
-     * hook will name the task responsible before the machine stops.  It patches
-     * Exec machine-wide and is removed before we return.
+     * A Guru is not a CPU exception: Exec raises it itself when it detects
+     * corruption (a double free, a mangled memory list), and only this hook
+     * names the task responsible before the machine stops.  It patches Exec
+     * machine-wide and is removed before we return.
      */
     (VOID) S_CHECK(ami_crash_install_alert_hook() != FALSE,
                    "main: Exec Alert hook installed", 0);
@@ -2263,11 +2266,52 @@ struct EClockVal ev;
     (VOID) S_CHECK(s_pt_done != 0UL, "final: the preemption-threshold phase completed",
                    s_pt_done);
 
+    /*
+     * The starvation floor scales with what this machine managed.
+     *
+     * S_MIN_ITERS was tuned against a 68020 and a 68000 run put the check
+     * wrong: the lowest-priority worker (pri 22) finished 44 iterations
+     * against a floor of 50 and the suite failed, while every other check
+     * passed and that worker had taken the mutex 44 times and inherited
+     * priority 20 times -- outrun by the priority order, not starved.
+     *
+     * The counts are a clean monotonic decay by priority on both machines:
+     *
+     *   68020   1144 1074 537 537 314 301   (total 3907, tail 7.7%)
+     *   68000    825  519 253 149  58  44   (total 1848, tail 2.4%)
+     *
+     * The tail is squeezed harder on the slower part, because the fixed
+     * higher-priority work takes a larger share of a smaller budget, so no
+     * constant survives both and scaling by CPU model would still miss the
+     * clock speed.  Scale by the work this run actually did instead.
+     *
+     * /60 rather than a rounder number so the cap still binds on a 68020
+     * (3907/60 = 65, capped to 50: the check is exactly as strong as it was)
+     * while a 68000 gets 30 and its 44 clears it.  The absolute minimum is
+     * what still catches a worker that genuinely never ran.
+     */
+    {
+        ULONG total = 0UL;
+        ULONG floor;
+
+        for (i = 0UL; i < (ULONG) S_WORKERS; i++)
+            total += s_worker[i].iters;
+
+        floor = total / 60UL;
+        if (floor > S_MIN_ITERS)
+            floor = S_MIN_ITERS;
+        if (floor < S_MIN_ITERS_FLOOR)
+            floor = S_MIN_ITERS_FLOOR;
+
+        s_starve_floor = floor;
+    }
+
     for (i = 0UL; i < (ULONG) S_WORKERS; i++)
     {
         (VOID) S_CHECK(s_worker[i].started != 0UL, "final: worker started",
                        i);
-        (VOID) S_CHECK(s_worker[i].iters >= S_MIN_ITERS, "final: worker was not starved",
+        (VOID) S_CHECK(s_worker[i].iters >= s_starve_floor,
+                       "final: worker was not starved",
                        s_worker[i].iters);
         (VOID) S_CHECK(s_worker[i].mutex_ops > 0UL, "final: worker got the mutex",
                        s_worker[i].mutex_ops);
@@ -2310,15 +2354,15 @@ struct EClockVal ev;
 
     s_report_measurements(wall_ms, end_tick - start_tick);
 
-    /* Record the tally NOW: everything below can and does take the machine
-       down, and a result that never reaches the host is not a result.  */
+    /* Record the tally now: everything below can and does take the machine
+       down, and the result has to reach the host first.  */
     s_write_result("soak");
 
     /* ---- delete what the port lets us ------------------------------------ */
 
     /*
-     * Not tidiness: the periodic timer and the ThreadX-created threads live in
-     * THIS program's BSS and its code hunk, and the port has no
+     * The periodic timer and the ThreadX-created threads live in this
+     * program's BSS and its code hunk, and the port has no
      * tx_amiga_kernel_stop().  Anything still armed when main() returns fires
      * into memory AmigaDOS has already given back.  Deleting the threads also
      * exercises _tx_amiga_reap(), which removes the Exec Task behind a deleted
@@ -2373,8 +2417,8 @@ struct EClockVal ev;
      * The port has no shutdown path: the scheduler Task, the tick Task and the
      * ThreadX system timer thread stay alive with their entry points inside
      * this program's code hunk, which AmigaDOS frees the moment main() returns.
-     * Nothing here can fix that -- it is a property of the port, and it is why
-     * this test deletes every object it created above.
+     * That is a property of the port, and why this test deletes every object it
+     * created above.
      */
     S_LOG("note: %ld ThreadX threads still exist; the ThreadX scheduler and tick",
           _tx_thread_created_count);

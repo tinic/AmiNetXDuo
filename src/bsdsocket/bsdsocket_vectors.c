@@ -7,11 +7,11 @@
  * library base, so entry i sits at LVO -(6 * (i + 1)).  The first four are
  * the exec standard set; user vector n is at index (offset / 6) - 1.
  *
- * The table is dense on purpose.  Slots the ABI reserves (0x132..0x168 and
- * the two after gethostbyaddr_r) and every vector we have not implemented
- * yet point at bsd_enosys() rather than NULL.
+ * The table is dense: slots the ABI reserves (0x132..0x168 and the two after
+ * gethostbyaddr_r) and every vector not yet implemented point at bsd_enosys()
+ * rather than NULL.
  *
- * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 95 implemented, 44 stubbed (7 of them NULL-returning, 1 FALSE-returning).
+ * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 98 implemented, 41 stubbed (7 of them NULL-returning, 1 FALSE-returning).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -177,7 +177,7 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_enosys,
 #endif
 
-    /* -0x366 [144] bsd_NetStackQuery -- PRIVATE: a snapshot of the RUNNING stack -- netstatus.h */
+    /* -0x366 [144] bsd_NetStackQuery -- PRIVATE: a snapshot of the running stack -- netstatus.h */
     (APTR)bsd_NetStackQuery,
 
     /* -0x36c [145] bsd_NetStackControl -- PRIVATE: interfaces, routes and the ARP cache -- netstatus.h */

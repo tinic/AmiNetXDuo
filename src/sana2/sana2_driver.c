@@ -2,10 +2,10 @@
  * AmiNetXDuo -- the NX_IP driver entry.
  *
  * NetX Duo talks to this in NX_LINK_* commands; SANA-II answers in exec
- * IORequests. The interesting asymmetry is framing, and it is handled in
- * sana2_tx.c (never build a link header in cooked mode) and sana2_rx.c
- * (synthesise one from ios2_SrcAddr/DstAddr/PacketType). Everything here is
- * dispatch, state and counters.
+ * IORequests. Framing is handled elsewhere: sana2_tx.c never builds a link
+ * header in cooked mode, and sana2_rx.c synthesises one from
+ * ios2_SrcAddr/DstAddr/PacketType. Everything here is dispatch, state and
+ * counters.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -18,9 +18,9 @@
 
 /*
  * Interface 0 is attached by nx_ip_create() itself, before anyone can reach
- * its NX_INTERFACE to set nx_interface_additional_link_info. So bindings are
- * recorded here first and folded into additional_link_info the first time the
- * driver is called for that interface.
+ * its NX_INTERFACE to set nx_interface_additional_link_info. Bindings are
+ * therefore recorded here first and folded into additional_link_info the first
+ * time the driver is called for that interface.
  */
 typedef struct AmiSana2Binding
 {
@@ -189,10 +189,8 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
     case NX_LINK_INITIALIZE:
         iface->pool = ip_ptr->nx_ip_default_packet_pool;
 
-        /*
-         * SANA-II's MTU is already the IP payload size -- unlike a link MTU,
-         * it has no room for the header in it -- so it maps straight across.
-         */
+        /* SANA-II's MTU is already the IP payload size, with no room for the
+           link header in it, so it maps straight across. */
         nx_ip_interface_mtu_set(ip_ptr, iface->index, iface->mtu);
 
         nx_ip_interface_physical_address_set(ip_ptr, iface->index,
@@ -200,11 +198,8 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
                                              ami_sana2_mac_lsw(iface),
                                              NX_FALSE);
 
-        /*
-         * ARP only makes sense where there is a hardware address to resolve
-         * to. Point-to-point SANA-II wires (PPP, SLIP) report AddrFieldSize 0
-         * and get address mapping turned off instead.
-         */
+        /* ARP needs a hardware address to resolve to. Addressless SANA-II
+           wires report AddrFieldSize 0 and get address mapping turned off. */
         nx_ip_interface_address_mapping_configure(
             ip_ptr, iface->index,
             (iface->addr_bytes == AMI_ETH_ADDR_SIZE) ? NX_TRUE : NX_FALSE);
@@ -271,10 +266,9 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
             != 0)
         {
             /*
-             * Plenty of SANA-II devices answer S2ERR_NOT_SUPPORTED here and
-             * simply pass multicast through (or run wide open). Failing the
-             * join would break IGMP and IPv6 ND on hardware that works fine,
-             * so this is reported and swallowed.
+             * Many SANA-II devices answer S2ERR_NOT_SUPPORTED here and pass
+             * multicast through anyway. Failing the join would break IGMP and
+             * IPv6 ND on working hardware, so it is logged and swallowed.
              */
             AMI_WARN("sana2: multicast join not honoured by %s", iface->device);
         }
@@ -341,10 +335,9 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
         req.ios2_SrcAddr[5] = (UBYTE)(lsw);
 
         /*
-         * The spec is explicit that S2_CONFIGINTERFACE may only run once per
-         * unit, so this generally fails with S2WERR_IS_CONFIGURED. DHCP does
-         * not need it and neither does anything else we ship; it is here for
-         * completeness rather than because it is expected to work.
+         * S2_CONFIGINTERFACE may only run once per unit, so this generally
+         * fails with S2WERR_IS_CONFIGURED. Nothing in this tree needs it; it
+         * is implemented for completeness.
          */
         if (ami_sana2_command(iface, &req, S2_CONFIGINTERFACE) != 0)
         {
@@ -360,20 +353,17 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
 
     case NX_LINK_DEFERRED_PROCESSING:
         /*
-         * The transmit ring's completion handler, and the reason this shim
-         * finally asks for deferred processing at all: a SANA-II CMD_WRITE
-         * finishes long after the driver entry returned, and the packet cannot
-         * go back to TCP until somebody says so. A reader thread notices the
-         * completion and calls _nx_ip_driver_deferred_processing(); the reap
-         * itself happens here, on the IP thread, under nx_ip_protection, in
-         * the same context as every send. See sana2_tx.c.
+         * The transmit ring's completion handler. A SANA-II CMD_WRITE finishes
+         * long after the driver entry returned, and the packet cannot go back
+         * to TCP until then. A reader thread notices the completion and calls
+         * _nx_ip_driver_deferred_processing(); the reap happens here, on the
+         * IP thread, under nx_ip_protection, in the same context as every
+         * send. See sana2_tx.c.
          *
-         * Nothing else belongs in this case. It used to refresh the SANA-II
-         * statistics as well, which is a synchronous DoIO() to the device --
-         * fine when nothing ever invoked this command, and one blocking device
-         * round trip per transmitted frame now that something does. The
-         * counters are refreshed by the NX_LINK_GET_*_COUNT commands, which
-         * is where a caller asks for them.
+         * Nothing else belongs in this case. Refreshing the SANA-II statistics
+         * here would be a synchronous DoIO() to the device on every
+         * transmitted frame; the counters are refreshed by the
+         * NX_LINK_GET_*_COUNT commands instead.
          */
         ami_sana2_tx_reap(iface);
         break;

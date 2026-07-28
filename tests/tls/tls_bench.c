@@ -1,12 +1,10 @@
 /*
  * AmiNetXDuo -- nx_secure feasibility gate (docs/RESEARCH.md 9, decision 4).
  *
- * The decision recorded in 9 is that TLS ships as a separate library behind
- * its own build option AND that it is benchmarked on 68020 before any API is
- * promised.  This program is that benchmark.  It answers one question: how
- * long does the arithmetic in a TLS 1.2 handshake take on the floor target?
- *
- * WHAT IT MEASURES, AND WHY THESE
+ * Section 9 records that TLS ships as a separate library behind its own build
+ * option and that it is benchmarked on 68020 before any API is promised.  This
+ * program is that benchmark: how long the arithmetic in a TLS 1.2 handshake
+ * takes on the floor target.
  *
  *   Public key, per handshake, once:
  *     RSA-2048 public op   -- every certificate signature the client checks,
@@ -14,11 +12,11 @@
  *                             ECDHE_RSA, plus the premaster encryption under
  *                             plain RSA key exchange.  e = 65537, so this is
  *                             17 squarings and a multiply: the cheap one.
- *     RSA-2048 private op  -- only if the Amiga is the TLS *server*, or
- *                             presents a client certificate.  Full 2048-bit
- *                             exponent; measured both plain and CRT, because
- *                             CRT is ~3x and nx_crypto only uses it when the
- *                             primes are supplied.
+ *     RSA-2048 private op  -- only if the Amiga is the TLS server, or presents
+ *                             a client certificate.  Full 2048-bit exponent;
+ *                             measured both plain and CRT, because CRT is ~3x
+ *                             and nx_crypto only uses it when the primes are
+ *                             supplied.
  *     ECDHE P-256 keygen   -- one fixed-point scalar multiply.
  *     ECDHE P-256 shared   -- one variable-point scalar multiply.  These two
  *                             are what an ECDHE_* suite costs the client.
@@ -27,19 +25,15 @@
  *
  *   Bulk, per byte, forever after:
  *     SHA-256, HMAC-SHA256, AES-128/256-CBC, AES-128/256-GCM.  These decide
- *     whether a connection is *usable* once it is up -- a 14 MHz 68020 pulling
+ *     whether a connection is usable once it is up -- a 14 MHz 68020 pulling
  *     150 KB/s off the wire cannot afford a cipher that runs at 40 KB/s.
  *
- * WHAT IT DOES NOT NEED
- *
- *   ThreadX, NetX Duo, a packet pool or a network.  crypto_libraries/src makes
- *   no tx_* or nx_* call at runtime (verified by grep over all 56 files), so
- *   the primitives can be timed in a plain AmigaDOS process with nothing else
- *   running.  That keeps the numbers clean: no tick task, no driver interrupts.
+ *   No ThreadX, NetX Duo, packet pool or network is needed.
+ *   crypto_libraries/src makes no tx_* or nx_* call at runtime (verified by
+ *   grep over all 56 files), so the primitives are timed in a plain AmigaDOS
+ *   process with nothing else running -- no tick task, no driver interrupts.
  *   The handshake-composition figures at the end are arithmetic on these
  *   measurements, and are labelled as such.
- *
- * ENTROPY CAVEAT
  *
  *   nx_port.h does not define NX_RAND, so nx_api.h falls back to newlib rand()
  *   -- a 32-bit LCG.  ECDHE private keys come out of it.  That is fine for a
@@ -149,12 +143,11 @@ static ULONG    b_failures;
 static ULONG    b_started;      /* E-Clock at the first measurement */
 
 /*
- * Results are held in MICROSECONDS per operation, not nanoseconds.  The
- * handshake composition at the end sums them, so they have to survive being
- * added up: nanoseconds in a ULONG top out at 4.29 seconds, and a measured
- * RSA-2048 private operation on the floor target is 158 of them.  Microseconds
- * give 4295 seconds of headroom and are still 1000x finer than the E-Clock's
- * 1.4 us tick.
+ * Results are held in microseconds per operation.  The handshake composition
+ * at the end sums them, so they have to survive being added up: nanoseconds in
+ * a ULONG top out at 4.29 seconds, and a measured RSA-2048 private operation
+ * on the floor target is 158 of them.  Microseconds give 4295 seconds of
+ * headroom and are still 1000x finer than the E-Clock's 1.4 us tick.
  */
 #define B_MAX_RESULTS   24
 
@@ -170,11 +163,10 @@ static B_RESULT b_results[B_MAX_RESULTS];
 static ULONG    b_result_count;
 
 /*
- * Named slots the composition step reads back.  The ORDER HERE IS THE ORDER
- * THE BENCHMARKS RUN IN, cheapest first, and that is deliberate: the RSA
- * private operation without CRT takes minutes on the floor target, so it goes
- * last.  A run that hits the harness timeout then still delivers every other
- * figure instead of none of them.
+ * Named slots the composition step reads back, in the order the benchmarks run
+ * in: cheapest first.  The RSA private operation without CRT takes minutes on
+ * the floor target, so it goes last -- a run that hits the harness timeout
+ * still delivers every other figure.
  */
 #define B_SHA256            0
 #define B_HMAC_SHA256       1
@@ -278,15 +270,15 @@ static VOID b_fail(const char *what, UINT status)
  * a 2048-bit exponent -- and the program has to finish inside the harness
  * timeout on a CPU whose speed is the thing being measured.
  *
- * So: run once, timed.  If that single run already took longer than
- * B_ENOUGH_TICKS, it IS the measurement; repeating a four-minute RSA private
+ * So run once, timed.  If that single run already took longer than
+ * B_ENOUGH_TICKS it is the measurement; repeating a four-minute RSA private
  * operation to refine a figure already good to four significant digits would
  * only burn emulator time.  Otherwise pick a repeat count landing near half a
  * second and loop.
  *
  * The operation is a function pointer plus an opaque context rather than five
- * copies of a calibrate/loop/record dance, because the dance is where an
- * off-by-one in the iteration count would silently scale a result.
+ * copies of a calibrate/loop/record sequence, where an off-by-one in the
+ * iteration count would silently scale a result.
  */
 typedef UINT (*B_OP)(VOID *context);
 
@@ -364,7 +356,7 @@ extern NX_CRYPTO_METHOD crypto_method_aes_256_gcm_16;
  * 1024 bytes: comfortably more than one TLS record's worth of framing, small
  * enough that a whole buffer plus the AES round keys stays in a 68030's 256
  * byte caches' working set the same way a real record would.  Both CPUs see
- * the same figure, so the comparison is honest even though neither is a
+ * the same figure, so the comparison holds even though neither is a
  * cache-accurate model of real silicon.
  */
 #define B_PAYLOAD       1024
@@ -416,8 +408,8 @@ ULONG   i;
 
 /*
  * One metadata block per algorithm, sized from the method tables.  These are
- * the largest single allocations a TLS session needs and they are why the
- * memory estimate at the end is what it is -- printed, not guessed.
+ * the largest single allocations a TLS session needs, and the memory estimate
+ * at the end prints their measured sizes.
  */
 static NX_CRYPTO_RSA        b_rsa_metadata;
 static NX_CRYPTO_ECDH       b_ecdh_metadata;
@@ -534,8 +526,8 @@ VOID   *handler = NX_CRYPTO_NULL;
 
 /*
  * The message: raw modexp input, high byte zeroed so it is safely below the
- * modulus.  Deliberately not PKCS#1 padded -- padding is a memcpy standing
- * next to a 2048-bit exponentiation and would only blur the figure.
+ * modulus.  Not PKCS#1 padded -- padding is a memcpy standing next to a
+ * 2048-bit exponentiation and would only blur the figure.
  */
 static UCHAR    b_rsa_message[256];
 
@@ -583,11 +575,10 @@ B_RSA_CONTEXT   private_ctx;
     private_ctx.exponent_bits = 2048;
 
     /*
-     * Correctness first: public(private(m)) must be m.  A benchmark of an
-     * arithmetic bug is worthless.  The private half uses CRT, which is both
-     * the fast path and the one nx_secure actually takes -- the PKCS#1 parser
-     * hands it p and q -- so this validates the path that matters and costs a
-     * quarter of what the plain exponentiation would.
+     * Correctness first: public(private(m)) must be m.  The private half uses
+     * CRT, which is both the fast path and the one nx_secure actually takes --
+     * the PKCS#1 parser hands it p and q -- so this validates the path that
+     * matters and costs a quarter of what the plain exponentiation would.
      */
     status = b_rsa_op_crt(b_rsa_message, b_rsa_output);
     if (status == NX_CRYPTO_SUCCESS)
@@ -1084,11 +1075,11 @@ B_CIPHER_CONTEXT    ctx;
 /* --------------------------------------------------- handshake arithmetic -- */
 
 /*
- * These are SUMS OF MEASUREMENTS, not a measured handshake -- they say what
- * the public-key arithmetic in each handshake shape costs, with the record
- * layer, X.509 parsing, TCP round trips and the server's own latency all
- * excluded.  A real handshake cannot be faster than these numbers and will be
- * slower.  Certificate-chain depth is taken as two signatures (leaf + one
+ * Sums of measurements, not a measured handshake: what the public-key
+ * arithmetic in each handshake shape costs, with the record layer, X.509
+ * parsing, TCP round trips and the server's own latency all excluded.  A real
+ * handshake cannot be faster than these numbers and will be slower.
+ * Certificate-chain depth is taken as two signatures (leaf + one
  * intermediate), which is what the public web overwhelmingly serves.
  */
 static VOID b_compose(VOID)
@@ -1134,7 +1125,7 @@ ULONG   total;
 /*
  * Session memory.  The 4 MB floor already spends up to 256 x 1568 bytes on the
  * packet pool (docs/RESEARCH.md 9), so what matters is what a TLS session adds
- * ON TOP of a socket, per connection.
+ * on top of a socket, per connection.
  */
 static VOID b_memory(VOID)
 {
@@ -1193,8 +1184,7 @@ ULONG   hz;
     {
         /*
          * A caught exception resumes here.  crashguard.h is explicit that the
-         * unwind is not trustworthy, so do the one thing that is: get the
-         * report out and fail.
+         * unwind is not trustworthy, so get the report out and fail.
          */
         b_log("CRASHED -- see the serial log and DH0:crash.txt");
         b_flush();

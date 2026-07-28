@@ -7,11 +7,10 @@
  *                   CF:E8:A3:C0:AA:E1:1A:8F:FC:EE:05:C0:BD:DF:08:C6
  *   notAfter        2035-06-04
  *
- * ONE root, not a bundle.  This file exists to prove a handshake against a
- * server that has never heard of us, not to be a trust store -- shipping a
- * real CA set is a separate problem (~150 roots, and nx_secure wants each one
- * parsed into its own NX_SECURE_X509_CERT with its own buffer), and it is the
- * thing standing between this stack and "talk to modern sites".
+ * One root, not a trust store: enough to prove a handshake against a server
+ * that has never heard of us.  Shipping a real CA set is a separate problem
+ * (~150 roots, and nx_secure wants each one parsed into its own
+ * NX_SECURE_X509_CERT with its own buffer).
  *
  * SPDX-License-Identifier: MIT
  */

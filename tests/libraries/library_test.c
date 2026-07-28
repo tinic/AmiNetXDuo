@@ -9,7 +9,7 @@
  *
  * It is a separate executable from tests/netstack because it exercises the
  * libraries through their ABI, not through the C API: nothing here is linked
- * against our code at all.
+ * against our code.
  *
  * Stage the libraries into LIBS: first -- see tests/libraries/run-fsuae.sh.
  *
@@ -81,14 +81,14 @@ static BOOL t_check(BOOL ok, const char *what, ULONG detail)
 /* -------------------------------------------------------------- vectors -- */
 
 /*
- * The library bases are declared here rather than pulled from <proto/...>
- * because the inline headers expect the base to be a global with a specific
- * name, and that is exactly the ABI detail worth testing.
+ * The library bases are declared here rather than pulled from <proto/...>:
+ * the inline headers expect the base to be a global with a specific name,
+ * which is the ABI detail under test.
  */
 struct Library *SocketBase;
 
-/* bsdsocket.library LVOs, straight out of the NDK's bsdsocket_lib.fd. */
-/* Offsets taken from the NDK's <inline/bsdsocket.h>, not guessed. */
+/* bsdsocket.library LVOs, from the NDK's bsdsocket_lib.fd and
+   <inline/bsdsocket.h>. */
 #define LVO_socket          (-30)
 #define LVO_CloseSocket     (-120)
 #define LVO_Inet_NtoA       (-174)

@@ -1,9 +1,9 @@
 /*
- * bsdsocket.library -- what the monitoring hooks publish to their call sites.
+ * bsdsocket.library -- monitoring hook dispatch, for the call sites.
  *
- * netmonitor.c owns the hook lists; the calls that have to consult them live
- * elsewhere (socket.c for connect() and bind()), so the dispatch is here
- * rather than static.
+ * netmonitor.c holds the hook lists; the calls that consult them live
+ * elsewhere (socket.c for connect() and bind()), so the dispatch is declared
+ * here rather than kept static.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -14,20 +14,19 @@
 #include "bsdsocket_internal.h"
 
 /*
- * Run every hook of `type` over `message`, stopping at the first that does
- * not answer 0, and return what it said. 0 when there are no hooks, which is
- * "continue" in both of the API's two vocabularies.
+ * Run every hook of `type` over `message`, stopping at the first non-zero
+ * result and returning it. Returns 0 when there are no hooks, which means
+ * "continue" for both result vocabularies:
  *
- * For the call-site types (MHT_Connect, MHT_Bind, MHT_Send) a non-zero result
- * is an ERRNO the call must fail with. For the in-stack types it is an MA_*
+ * for the call-site types (MHT_Connect, MHT_Bind, MHT_Send) a non-zero result
+ * is an errno the call must fail with; for the in-stack types it is an MA_*
  * action. See the header of netmonitor.c for why one function serves both.
  */
 LONG bsd_netmon_dispatch(LONG type, APTR message);
 
 /*
- * Whether anything is listening for `type`. The point is to keep the cost of
- * an uninstalled hook down to one test at the call sites, so that building
- * a monitor message is only paid for when somebody wants it.
+ * Whether anything is listening for `type`. Lets a call site skip building a
+ * monitor message when no hook is installed, at the cost of one test.
  */
 BOOL bsd_netmon_have(LONG type);
 
@@ -35,9 +34,8 @@ BOOL bsd_netmon_have(LONG type);
 STRPTR bsd_netmon_caller(struct AmiSocketBase *base);
 
 /*
- * TRUE while any hook is installed. bsd_lib_expunge() declines then, which is
- * the autodoc's "the library will stay in memory indefinitely" -- a
- * description of the behaviour rather than a warning about a leak.
+ * TRUE while any hook is installed; bsd_lib_expunge() then declines. This is
+ * the autodoc's "the library will stay in memory indefinitely", not a leak.
  */
 BOOL bsd_netmon_busy(VOID);
 

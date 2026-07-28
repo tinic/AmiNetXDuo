@@ -1,38 +1,31 @@
 /*
- * AmiNetXDuo -- handing the ThreadX baton back around an exec Wait().
+ * AmiNetXDuo -- releasing and reacquiring the ThreadX baton around an exec
+ * Wait().
  *
- * THE PROBLEM
+ * The port uses the baton model (docs/RESEARCH.md 6.2): a ThreadX thread runs
+ * only if it is _tx_thread_current_ptr, and _tx_thread_schedule() will not
+ * dispatch anyone while that pointer is non-NULL. The SANA-II reader threads,
+ * and every driver control command, block in exec Wait() for an IORequest,
+ * which ThreadX knows nothing about. Doing so while holding the baton stalls
+ * the whole stack: the IP thread, the timer thread and every other socket user
+ * queue behind a task that will not become runnable until a packet arrives.
  *
- * The port runs the baton model (docs/RESEARCH.md 6.2): a ThreadX thread runs
- * if and only if it is _tx_thread_current_ptr, and _tx_thread_schedule()
- * refuses to dispatch anyone while that pointer is non-NULL. The SANA-II
- * reader threads, and every driver control command, block in exec Wait() for
- * an IORequest -- which ThreadX knows nothing about. A thread that does that
- * while holding the baton stops the entire stack: the IP thread, the timer
- * thread and every other socket user queue up behind a task that is not
- * runnable and will not become runnable until a packet arrives.
+ * Clearing _tx_thread_current_ptr alone moves the deadlock one step later: the
+ * thread is still ready, so the scheduler picks it straight back (the readers
+ * are the highest-priority threads in the system), sets _tx_thread_current_ptr
+ * again and pokes a run signal the thread is not waiting for. The thread must
+ * come off the ready list too.
  *
- * WHY RELEASING THE BATON IS NOT ENOUGH
- *
- * Clearing _tx_thread_current_ptr alone re-creates the deadlock one step
- * later: the thread is still READY, so the scheduler picks it straight back
- * (the readers are the highest-priority threads in the system), sets
- * _tx_thread_current_ptr to it again and pokes a run signal the thread is not
- * waiting for. The thread must come OFF the ready list as well.
- *
- * WHAT THIS DOES
- *
- * release():  suspend the calling thread the way tx_thread_suspend() does, but
- *             with _tx_thread_system_state raised so ThreadX treats it as
- *             interrupt context and does not try to context-switch on our
- *             behalf; then drop the baton by hand and wake the scheduler.
+ * release():  suspend the calling thread as tx_thread_suspend() does, but with
+ *             _tx_thread_system_state raised so ThreadX treats it as interrupt
+ *             context and does not context-switch on our behalf; then clear
+ *             the baton and wake the scheduler.
  * acquire():  resume the thread the same way, then park on the run signal
- *             until the scheduler hands the baton back.
+ *             until the scheduler restores the baton.
  *
- * This is the same shape the port itself uses in tx_amiga_adopt.c: raise the
- * system state over the window in which an Exec Task is touching ThreadX state
- * without being a scheduled thread, and drive _tx_thread_current_ptr and the
- * run signal directly.
+ * tx_amiga_adopt.c uses the same shape: raise the system state over the window
+ * in which an Exec Task touches ThreadX state without being a scheduled
+ * thread, and drive _tx_thread_current_ptr and the run signal directly.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -45,21 +38,20 @@
 #include <exec/tasks.h>
 #include <proto/exec.h>
 
-/* Port internals (port/threadx-amiga/src/). Not in tx_amiga.h because they
-   are not application API -- but they are exactly what a blocking bracket
-   needs, and duplicating them here would mean duplicating the baton. */
+/* Port internals (port/threadx-amiga/src/). Not in tx_amiga.h because they are
+   not application API, but a blocking bracket needs them. */
 extern VOID _tx_amiga_wake_scheduler(VOID);
 extern UINT _tx_amiga_thread_park(TX_THREAD *thread_ptr);
 
 /*
  * One entry per Exec Task currently inside a release/acquire bracket. The
- * hooks take no argument, so the thread pointer has to be parked somewhere;
- * a small table keyed by struct Task * is the cheapest correct answer, and it
- * doubles as the "did release() actually do anything?" record that keeps
- * acquire() from resuming a thread that was never suspended.
+ * hooks take no argument, so the thread pointer is stored in a table keyed by
+ * struct Task *; the entry also records whether release() did anything, which
+ * keeps acquire() from resuming a thread that was never suspended.
  *
- * Size: the SANA-II readers (2, or 3 with IPv6) per interface, the IP thread,
- * the DHCP thread and any adopted application task that reaches the driver.
+ * Size covers the SANA-II readers (2, or 3 with IPv6) per interface, the IP
+ * thread, the DHCP thread and any adopted application task that reaches the
+ * driver.
  */
 #define AMI_BATON_SLOTS     16
 
@@ -139,8 +131,8 @@ VOID ami_netstack_baton_release(VOID)
 
     if (slot == NULL)
     {
-        /* Out of slots. Blocking with the baton held is bad, but losing track
-           of a suspended thread is worse -- so leave it running and say so. */
+        /* Out of slots. Leave the thread running rather than suspend one we
+           cannot track, and warn. */
         Permit();
         AMI_WARN("netstack: baton table full; '%s' will block holding the baton",
                  (thread->tx_thread_name != TX_NULL) ? thread->tx_thread_name
@@ -157,7 +149,7 @@ VOID ami_netstack_baton_release(VOID)
 
     Permit();
 
-    /* Off the ready list. With the system state raised this returns to us
+    /* Off the ready list. With the system state raised this returns here
        rather than ending in _tx_thread_system_return(). */
     (VOID)tx_thread_suspend(thread);
 

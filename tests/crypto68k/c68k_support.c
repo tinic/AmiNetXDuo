@@ -114,8 +114,8 @@ UINT    i;
     {
         /*
          * The top limb must be nonzero or the value is not really n limbs
-         * wide, and _nx_crypto_huge_number_adjust_size would shorten it behind
-         * our back -- which would silently stop testing the width we asked for.
+         * wide, and _nx_crypto_huge_number_adjust_size would shorten it,
+         * silently testing a narrower width than the one asked for.
          */
         while (p[n - 1] == 0)
         {

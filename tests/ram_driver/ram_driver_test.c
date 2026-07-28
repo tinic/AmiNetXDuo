@@ -10,12 +10,11 @@
  *   - data survives a round trip between the two IP instances over the
  *     in-tree simulated RAM driver.
  *
- * Shape: main() is an ordinary AmigaDOS Process.  It starts ThreadX on a
- * private task with tx_amiga_kernel_start(), then ADOPTS ITSELF so it can run
- * the client half of the test in its own context -- which is precisely the
- * thing bsdsocket.library will have to do for every application task.  The
- * server half runs on a thread that ThreadX created, so both thread flavours
- * are exercised against each other.
+ * main() is an ordinary AmigaDOS Process.  It starts ThreadX on a private task
+ * with tx_amiga_kernel_start(), then adopts itself so it can run the client
+ * half of the test in its own context -- what bsdsocket.library will have to
+ * do for every application task.  The server half runs on a thread that
+ * ThreadX created, so both thread flavours are exercised against each other.
  *
  * Output goes to the serial debug port (visible in FS-UAE/WinUAE's serial log)
  * as it happens, and is replayed to stdout at the end -- ThreadX threads are
@@ -79,12 +78,11 @@ va_list args;
 
     /*
      * No lock.  Every caller is either tx_application_define() (before any
-     * thread exists) or a ThreadX thread, and the baton guarantees that only
-     * one ThreadX thread runs at a time -- so the log cannot interleave.
-     * Wrapping this in Forbid() would be worse than useless: RawPutChar()
-     * busy-waits on the serial port, and 60 characters at 9600 baud would
-     * hold off the tick task for tens of milliseconds and distort the very
-     * timing the test is measuring.
+     * thread exists) or a ThreadX thread, and the baton means only one
+     * ThreadX thread runs at a time, so the log cannot interleave.  Forbid()
+     * around this would be worse than useless: RawPutChar() busy-waits on the
+     * serial port, and 60 characters at 9600 baud would hold off the tick task
+     * for tens of milliseconds and distort the timing the test measures.
      */
     va_start(args, fmt);
     RawDoFmt((STRPTR) fmt, args, (void (*)()) t_put_char, NULL);
@@ -211,7 +209,7 @@ CHAR        buffer[80];
     status =  nx_tcp_server_socket_accept(&t_server_socket, 10UL * NX_IP_PERIODIC_RATE);
     (VOID) T_OK(status, "server: accept");
 
-    /* Receive.  This suspends THIS ThreadX thread inside NetX Duo.  */
+    /* Receive.  This suspends this ThreadX thread inside NetX Duo.  */
     packet_ptr =  NX_NULL;
     status =  nx_tcp_socket_receive(&t_server_socket, &packet_ptr,
                                     10UL * NX_IP_PERIODIC_RATE);
@@ -315,8 +313,8 @@ UINT        i;
         }
     }
 
-    /* Read the echo back.  Suspends the adopted Exec Task inside NetX Duo --
-       the whole point of the adoption experiment.  */
+    /* Read the echo back.  Suspends the adopted Exec Task inside NetX Duo,
+       which is what the adoption experiment tests.  */
     packet_ptr =  NX_NULL;
     status =  nx_tcp_socket_receive(&t_client_socket, &packet_ptr,
                                     10UL * NX_IP_PERIODIC_RATE);

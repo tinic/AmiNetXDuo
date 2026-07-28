@@ -3,18 +3,6 @@
  *
  *     nslookup NAME/A,SERVER,TYPE/K,TIMEOUT/N/K
  *
- * WHY THIS EXISTS BESIDE host
- *
- * `host` answers the question an ordinary user has: what address is this name.
- * It looks a dotted quad up backwards and anything else forwards, and that is
- * the whole of it.
- *
- * This one answers the question somebody has when the network is not working:
- * WHICH part is not working. A name that will not resolve, a mail server that
- * cannot be found, a service that is advertised but not reachable -- those are
- * different records, and being able to ask for one of them separately is the
- * difference between "DNS is broken" and knowing what is broken.
- *
  *   TYPE=A       the address                     (the default)
  *   TYPE=PTR     the name of an address
  *   TYPE=CNAME   what this name is an alias for
@@ -24,47 +12,29 @@
  *   TYPE=SRV     a service: priority, weight, port and host
  *   TYPE=SOA     the start of authority for a zone
  *
- * A dotted quad with no TYPE is looked up backwards, exactly as `host` does --
- * asking for a PTR by typing the address is what everyone expects.
+ * A dotted quad with no TYPE is looked up backwards, as `host` does.
  *
- * WHY IT BUILDS THE PACKET ITSELF
+ * This is a DNS client rather than a caller of one: a UDP socket, an RFC 1035
+ * query built here and the answer section parsed here. bsdsocket.library
+ * offers only gethostbyname(), so there is no way to ask for an MX, and a
+ * lookup through the resolver cache diagnoses the cache.
  *
- *   There is no published call that asks for an MX. gethostbyname() is the
- *   whole of what bsdsocket.library offers a program, and it answers exactly
- *   one question; everything below it belongs to the resolver and no stack on
- *   this machine, ours included, exports it. So this command is a DNS client
- *   rather than a caller of one: a UDP socket, an RFC 1035 query written by
- *   hand, and the answer section parsed here. That is what the Unix tool of
- *   the same name does, and it is what makes it the right tool for the job --
- *   a diagnostic that goes through somebody's resolver cache is diagnosing the
- *   cache.
+ * Sending our own datagram is also what makes SERVER possible: the machine has
+ * one resolver server list, so pointing it elsewhere would move every other
+ * program's lookups too. With no SERVER, the first server the stack is using:
+ * the DHCP lease's, else DEVS:Internet/name_resolution's.
  *
- *   It also earns the SERVER argument, which a resolver-based version could
- *   not have had: the machine has ONE server list and pointing the resolver
- *   somewhere else would move every other program's lookups with it. Sending
- *   our own datagram moves nothing. `nslookup www.example.com 8.8.8.8` asks
- *   that server and only this command is affected -- which is precisely how
- *   you tell "our name server is broken" from "the name does not exist".
+ * A datagram from port 53 is unvalidated input and this machine has no MMU, so
+ * every length in the reply is bounded against the bytes actually received.
+ * Message compression (RFC 1035 4.1.4 -- a label length byte with its top two
+ * bits set points to an earlier name) is followed only backwards and at most
+ * sixteen times; a forward or self-referential pointer would otherwise let a
+ * fourteen-byte reply loop until the machine is reset. Text out of a record is
+ * filtered too, because 0x9B is the Amiga console's CSI and a TXT record can
+ * carry one.
  *
- *   With no SERVER, the first one the stack is really using: the DHCP lease's
- *   if there is one, DEVS:Internet/name_resolution's if there is not.
- *
- * THE ANSWER IS ATTACKER-CONTROLLED INPUT
- *
- *   A datagram from port 53 is whatever arrived, from whoever sent it, and
- *   this machine has no MMU to catch a parser that believes it. So every
- *   length in the reply is bounded against the bytes actually received before
- *   it is used, and message compression (RFC 1035 4.1.4 -- a label length byte
- *   with its top two bits set is a pointer to an earlier name) is followed
- *   only BACKWARDS and only sixteen times. Both halves of that rule matter: a
- *   pointer that goes forwards or to itself is how a fourteen-byte reply makes
- *   a command loop until the machine is reset. Text out of a record is filtered
- *   as well, because 0x9B is the Amiga console's CSI and a TXT record is a
- *   place anyone can put one.
- *
- *   UDP only, and no retry over TCP: a truncated answer is reported as
- *   truncated rather than silently shortened. Everything this command is for
- *   fits in a datagram.
+ * UDP only, no retry over TCP: a truncated answer is reported as truncated
+ * rather than silently shortened.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -98,9 +68,9 @@ enum
 #define NSL_QUERY_MAX           (NSL_HDR + NSL_WIRE_NAME_MAX + 4)
 
 /*
- * Bigger than the 512 a reply without EDNS0 may be, because the bound that
- * keeps this parser safe has to be the bytes RECEIVED and not the bytes a
- * well-behaved server would have sent.
+ * Bigger than the 512 a reply without EDNS0 may be: the bound that keeps this
+ * parser safe is the bytes received, not the bytes a well-behaved server would
+ * have sent.
  */
 #define NSL_REPLY_MAX           1472
 
@@ -130,8 +100,8 @@ enum
 #define NSL_BREAK               (-2)
 
 /*
- * Static, not automatic: a Shell command gets whatever stack the Shell has,
- * which on a stock Kickstart 3.1 is 4 KB. Same reasoning as tftp and fetch.
+ * Static, not automatic: a Shell command gets the Shell's stack, 4 KB on a
+ * stock Kickstart 3.1. Same as tftp and fetch.
  */
 static UBYTE nsl_query[NSL_QUERY_MAX];
 static UBYTE nsl_reply[NSL_REPLY_MAX];
@@ -141,10 +111,8 @@ static char  nsl_text2[NSL_TEXT_MAX];
 static AmiConfig nsl_config;
 
 /*
- * The names a user types, and what each one asks for. A table rather than a
- * chain of comparisons because that is what this project does with
- * multi-branch mappings, and because the help text below is generated from it
- * -- so a type cannot be added without appearing in the usage.
+ * The names a user types, and the QTYPE each asks for. The help text is
+ * generated from this table, so a new type always appears in the usage.
  */
 typedef struct
 {
@@ -184,12 +152,10 @@ static VOID nsl_put16(UBYTE *p, UWORD v)
 }
 
 /*
- * One byte of somebody else's record, on its way to the user's screen.
- *
- * Anything below a space is a control character; 0x7f-0x9f are the C1 set, and
- * on an Amiga console 0x9b is CSI -- the introducer that moves the cursor,
- * clears the window and changes the mode. A name or a TXT record is free text
- * chosen by whoever runs the zone, so it is filtered rather than trusted.
+ * One byte of a record, on its way to the screen. Below 0x20 is a control
+ * character; 0x7f-0x9f are C1, and 0x9b is the Amiga console's CSI, which
+ * moves the cursor, clears the window and changes the mode. Names and TXT
+ * records are free text chosen by whoever runs the zone.
  */
 static char nsl_safe_char(UBYTE c)
 {
@@ -202,11 +168,11 @@ static char nsl_safe_char(UBYTE c)
 /* --------------------------------------------------------- names, out ---- */
 
 /*
- * A name, in the wire form: each label prefixed by its length, a zero label
- * for the root. Bytes written, or 0 when the name cannot be one.
+ * A name in wire form: each label prefixed by its length, a zero label for the
+ * root. Returns bytes written, or 0 when the name is not a valid one.
  *
- * "example.com." and "example.com" are the same name; "." on its own is the
- * root, which is a legitimate thing to ask an NS or SOA about.
+ * "example.com." and "example.com" are the same name; "." alone is the root,
+ * which is a legitimate NS or SOA question.
  */
 static ULONG nsl_encode_name(const char *name, UBYTE *out, ULONG outlen)
 {
@@ -296,19 +262,17 @@ static VOID nsl_reverse_name(ULONG addr, char *out, ULONG outlen)
 /* ---------------------------------------------------------- names, in ---- */
 
 /*
- * A name out of a reply, at `pos`, as text in `out` (which may be NULL when
- * only the length is wanted).
+ * A name out of a reply at `pos`, as text in `out` (NULL when only the length
+ * is wanted).
  *
- * Returns the offset of the byte AFTER the name as it appears at `pos` -- for
+ * Returns the offset of the byte after the name as it appears at `pos` -- for
  * a compressed name that is two past the pointer, not the end of whatever it
  * pointed at -- or -1 when the message will not support one.
  *
- * EVERY EXIT FROM THE LOOP IS A BOUND. `len` is the bytes received, never a
- * length the message claimed. A pointer must go strictly BACKWARDS, which is
- * what makes the walk terminate at all: forwards or self-referential pointers
- * are the classic way to hang a resolver, and sixteen jumps is far past any
- * real message. The 0x40 and 0x80 label types are reserved and rejected
- * rather than guessed at.
+ * Every exit from the loop is a bound. `len` is the bytes received, never a
+ * length the message claimed. A pointer must go strictly backwards, which is
+ * what makes the walk terminate; sixteen jumps is far past any real message.
+ * The 0x40 and 0x80 label types are reserved, so they are rejected.
  */
 static LONG nsl_decode_name(const UBYTE *msg, ULONG len, ULONG pos,
                             char *out, ULONG outlen)
@@ -422,12 +386,10 @@ static ULONG nsl_build(const char *qname, UWORD type, UWORD id)
 }
 
 /*
- * The identifier, which is checked on the way back.
- *
- * Not a cryptographic number and not claimed to be one: together with the
- * source address it is what makes this command ignore a stale answer to the
- * PREVIOUS question and a bystander's datagram, which is the whole of what a
- * one-shot diagnostic needs. A resolver that kept a cache would need more.
+ * The identifier, checked on the way back. Not a cryptographic number: with
+ * the source address it is enough for a one-shot diagnostic to ignore a stale
+ * answer to the previous question and a bystander's datagram. A resolver
+ * keeping a cache would need more.
  */
 static UWORD nsl_id(VOID)
 {
@@ -440,8 +402,8 @@ static UWORD nsl_id(VOID)
 /* ----------------------------------------------------------- the answer -- */
 
 /* One record of the answer section, formatted for the type it turned out to
-   be -- which is not always the type asked for, because an A question is
-   answered with the CNAME chain in front of it. */
+   be, which is not always the type asked for: an A question is answered with
+   the CNAME chain in front of it. */
 static VOID nsl_print_record(const UBYTE *msg, ULONG len, UWORD type,
                              ULONG rdata, ULONG rdlen)
 {
@@ -505,10 +467,9 @@ static VOID nsl_print_record(const UBYTE *msg, ULONG len, UWORD type,
         case NSL_T_TXT:
         {
             /*
-             * A TXT record is a SEQUENCE of length-prefixed strings, and the
-             * ones that matter -- SPF, DKIM, a domain verification token --
-             * are split across them by servers with a 255-byte limit and are
-             * meant to be read joined. So they are joined here.
+             * A TXT record is a sequence of length-prefixed strings. SPF,
+             * DKIM and verification tokens get split across them by the
+             * 255-byte limit and are meant to be read joined, so join them.
              */
             ULONG p   = rdata;
             ULONG end = rdata + rdlen;
@@ -553,9 +514,8 @@ static VOID nsl_print_record(const UBYTE *msg, ULONG len, UWORD type,
 
         default:
             /*
-             * Something we were not asked for and cannot format -- an AAAA, a
-             * signature, an OPT. Saying it is there is worth a line: "no
-             * records" would be a lie.
+             * A record we cannot format -- an AAAA, a signature, an OPT.
+             * Still reported, since "no records" would be wrong.
              */
             tool_printf("  type %-6lu %lu bytes\n", (LONG)type, (LONG)rdlen);
             break;
@@ -563,11 +523,9 @@ static VOID nsl_print_record(const UBYTE *msg, ULONG len, UWORD type,
 }
 
 /*
- * Walk the answer section. Records printed, or -1 when the message will not
- * support being walked -- which is a malformed reply, not an empty one.
- *
- * The question section is walked too, because it is what the answer section
- * starts after, and its own name may be compressed.
+ * Walk the answer section. Returns records printed, or -1 for a malformed
+ * reply (not the same as an empty one). The question section is walked first
+ * to find where the answers start; its name may itself be compressed.
  */
 static LONG nsl_print_answers(const UBYTE *msg, ULONG len)
 {
@@ -614,13 +572,11 @@ static LONG nsl_print_answers(const UBYTE *msg, ULONG len)
 /* --------------------------------------------------------- the exchange -- */
 
 /*
- * Send the query and wait for the answer to it.
- *
- * Bytes received into nsl_reply, 0 when nobody answered, NSL_BROKEN on a
- * failed socket, NSL_BREAK on Ctrl-C. The wait is cut into 200 ms slices so a
- * break is noticed while a dead server is being waited for, and the datagram
- * that comes back has to be from the server that was asked, be a response, and
- * carry the identifier that was sent -- anything else is somebody else's.
+ * Send the query and wait for its answer. Returns bytes received into
+ * nsl_reply, 0 when nobody answered, NSL_BROKEN on a failed socket, NSL_BREAK
+ * on Ctrl-C. The wait is cut into 200 ms slices so a break is noticed while
+ * waiting on a dead server. An accepted datagram must come from the server
+ * asked, be a response, and carry the identifier sent.
  */
 static LONG nsl_exchange(struct Library *sb, LONG sock, const ToolSockAddr *srv,
                          const UBYTE *q, LONG qlen, UWORD id, ULONG secs)
@@ -733,11 +689,9 @@ static VOID nsl_print_types(VOID)
 }
 
 /*
- * The server to ask when none was named.
- *
- * The running stack's own list first, through ObtainDomainNameServerList(),
- * because a DHCP lease supplies name servers and no file on disk mentions
- * them. DEVS:Internet/name_resolution second, for a static configuration.
+ * The server to ask when none was named. The running stack's list first, via
+ * ObtainDomainNameServerList(), since DHCP-supplied name servers appear in no
+ * file on disk. DEVS:Internet/name_resolution second, for a static setup.
  */
 static BOOL nsl_default_server(ULONG *out)
 {
@@ -849,8 +803,8 @@ int main(int argc, char **argv)
     else
     {
         /*
-         * tool_copy_string() truncates, and a truncated name is a DIFFERENT
-         * name -- asking about it would produce an answer that looks real.
+         * tool_copy_string() truncates, and a truncated name is a different
+         * name: asking about it would produce a plausible-looking answer.
          */
         for (i = 0; name[i] != '\0'; i++)
             ;
@@ -968,13 +922,12 @@ int main(int argc, char **argv)
     }
 
     /*
-     * TC means the answer did not fit in a datagram and the rest of it is only
-     * available over TCP, which this command does not do. It is checked BEFORE
-     * the empty case rather than after, because a server with too much to say
-     * commonly sets TC and sends the answer section EMPTY -- and printing "no
-     * records of that type" for a name with more of them than fit is the one
-     * way this command could mislead outright. Observed against
-     * `nslookup google.com TYPE TXT`, whose RRset is well over 512 bytes.
+     * TC means the answer did not fit in a datagram and the rest is only
+     * available over TCP, which this command does not do. Checked before the
+     * empty case, because a server with too much to say commonly sets TC and
+     * sends an empty answer section; reporting "no records of that type" there
+     * would be wrong. Seen with `nslookup google.com TYPE TXT`, whose RRset is
+     * well over 512 bytes.
      */
     if ((flags & NSL_F_TC) != 0)
     {
@@ -985,9 +938,9 @@ int main(int argc, char **argv)
     else if (printed == 0)
     {
         /*
-         * No records is not an error in the resolver's sense -- the name
-         * exists and simply has none of this kind -- and saying so is more
-         * useful than "not found", which sends people to check the name.
+         * Not an error: the name exists and has no record of this kind.
+         * Saying that is more useful than "not found", which reads as a bad
+         * name.
          */
         tool_printf("  no records of that type\n");
         rc = RETURN_WARN;

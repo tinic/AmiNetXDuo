@@ -1,42 +1,38 @@
 | AmiNetXDuo -- crypto68k: the AES round, 68020 assembly.
 |
-| WHAT THIS IS, AND WHAT IT IS NOT
-|
-|   Four entry points, all with the same contract as the C round cores in
+|   Four entry points, all with the same interface as the C round cores in
 |   c68k_aes.c: (round keys, number of rounds, a four-longword state in
-|   memory).  Two of them are the four-table layout and two are the
-|   one-table-and-rotates layout, because "which is right for a machine with
-|   no data cache" is the question this file exists to answer and answering it
-|   means building both.
+|   memory).  Two are the four-table layout and two the one-table-and-rotates
+|   layout, so the two can be measured against each other on a machine with no
+|   data cache.
 |
 |   The buffering, the key schedule and CBC stay in C.  They are 9% of a
 |   block, they are where the awkward cases live, and the one instruction that
 |   mattered in them -- a misaligned MOVE.L for a big-endian longword -- is
 |   already inline assembly there.
 |
-| THE STATE IS IN MEMORY, AND THAT IS THE DESIGN
+| The state is kept in memory
 |
 |   A round needs four state words, four accumulators, an index and a
-|   temporary.  That is ten values and the 68020 has eight data registers, so
-|   something has to give.  The two candidates:
+|   temporary: ten values against the 68020's eight data registers.  The two
+|   candidates:
 |
 |     state in registers   16 byte extractions a round, each a MOVE.B out of
 |                          the low byte plus a ROL.L to bring the next byte
-|                          down -- because only the low byte of a register can
-|                          be moved out.  Two instructions a byte, and the
-|                          four accumulators no longer fit either.
-|     state in memory      16 MOVE.B d16(An),Dn a round.  ONE instruction a
+|                          down, since only the low byte of a register can be
+|                          moved out.  Two instructions a byte, and the four
+|                          accumulators no longer fit either.
+|     state in memory      16 MOVE.B d16(An),Dn a round.  One instruction a
 |                          byte, and it frees d2-d5 to hold the accumulators,
 |                          so the round ends with a single MOVEM.L.
 |
-|   The second is strictly fewer instructions.  On a part with a data cache
-|   the sixteen byte reads would be nearly free and it would not be close; on
-|   this part they are bus cycles and it is still ahead, because the rotates
-|   they replace are not free either.  tests/crypto68k/crypto68k_bulk measures
-|   both forms of the rotate and the byte read, so this reasoning is checkable
-|   rather than asserted.
+|   The second is fewer instructions.  On a part with a data cache the sixteen
+|   byte reads would be nearly free and it would not be close; on this part
+|   they are bus cycles and it is still ahead, because the rotates they replace
+|   are not free either.  tests/crypto68k/crypto68k_bulk measures both forms of
+|   the rotate and the byte read.
 |
-| THE ROUND LOOP IS NOT UNROLLED, AND THAT IS ALSO THE DESIGN
+| The round loop is not unrolled
 |
 |   The 68020's instruction cache is 256 bytes.  The four-table round body
 |   below is 176 bytes and the one-table body is 200, so each sits inside it
@@ -45,7 +41,7 @@
 |   sweeps a straight-line body from 32 bytes to 2 KB and shows where that
 |   turns.
 |
-| REGISTERS
+| Registers
 |
 |   a0  round keys, advancing          d0  round counter
 |   a1  Te0 / Td0, and the S-box in    d1  the value just looked up
@@ -89,7 +85,7 @@
         .endm
 
 | ---------------------------------------------------------------------------
-| The same word from ONE table, with the three rotations that recover the
+| The same word from one table, with the three rotations that recover the
 | other three.  T1 = ROR 8, T2 = ROR 16 (which is SWAP), T3 = ROR 24 (ROL 8).
 | ---------------------------------------------------------------------------
         .macro  AES_W1  acc, o0, o1, o2, o3
@@ -233,8 +229,7 @@ _c68k_aes_core_dec_t4_asm:
 |
 | The same cipher out of Te0 alone.  Three rotates a column, twelve a round,
 | in exchange for 3 KB of table that this machine has no cache to keep it out
-| of.  Built to be measured against the four-table form above, not because it
-| is expected to win.
+| of.  Built to be measured against the four-table form above.
 | ---------------------------------------------------------------------------
         .globl  _c68k_aes_core_enc_t1_asm
 _c68k_aes_core_enc_t1_asm:

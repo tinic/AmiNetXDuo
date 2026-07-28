@@ -2,8 +2,6 @@
 |
 | VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len);
 |
-| WHY THIS EXISTS, and what it is measured against.
-|
 | Three copy loops were timed on the emulated 68020 over 1460 bytes, longword
 | aligned (tests/perf/perf_test.c):
 |
@@ -11,23 +9,23 @@
 |   ami_sana2_copy_bytes (C)      243 ns/B    *(ULONG *)to = *(const ULONG *)from
 |   byte loop                    ~900 ns/B
 |
-| The C loop loses to newlib by 11% for one reason: C cannot express a
+| The C loop loses to newlib by 11% because C cannot express a
 | memory-to-memory move, so GCC emits a load into a data register and a
-| separate store, where the machine has a single addressing-mode pair.  That is
-| the same shape of argument src/crypto68k/ makes about the carry flag.
+| separate store where the machine has a single addressing-mode pair -- the
+| same kind of gap src/crypto68k/ finds around the carry flag.
 |
 | This routine uses movem.l, which moves eight longwords per instruction pair
 | and is the only way on a 68020 to reduce the instruction count further --
 | there is no move16 until the 68040.
 |
-| ALIGNMENT.  The 68020 will fetch a longword from any address, but an
-| unaligned one costs an extra bus cycle, and the measurements say that is
-| worth about 18% (218 ns/B aligned against 254-260 ns/B for every misaligned
-| combination -- note that it is 18%, not the order of magnitude a byte-loop
-| fallback would cost; libm020's memcpy has no byte-loop cliff).  So this
-| brings the destination to a longword boundary and then moves longwords
-| whatever the source is doing, exactly as libm020 does.  See the parity guard
-| below for what that costs on a 68000, where it is not a performance question.
+| Alignment: the 68020 will fetch a longword from any address, but an unaligned
+| one costs an extra bus cycle, measured at about 18% (218 ns/B aligned against
+| 254-260 ns/B for every misaligned combination -- 18%, not the order of
+| magnitude a byte-loop fallback would cost; libm020's memcpy has no byte-loop
+| cliff).  So this brings the destination to a longword boundary and then moves
+| longwords whatever the source is doing, as libm020 does.  See the parity
+| guard below for what that costs on a 68000, where it is a correctness
+| question rather than a performance one.
 |
 | 68000 and 68060: this file runs on both.  move.l, movem.l and dbf are in the
 | original 68000 instruction set and none of them was dropped from the 68060,
@@ -42,28 +40,28 @@
         .even
         .globl  _n68k_copy_bytes
 
-| ODD IS FATAL ON A 68000, and this is where that was found out.
+| An odd address is fatal on a 68000.
 |
-| The routine aligns the DESTINATION and then reads longwords from wherever
+| The routine aligns the destination and then reads longwords from wherever
 | the source happens to be, which is right for a 68020 -- it fetches a
 | longword from any address and charges one extra bus cycle.  A 68000 does
-| not: a word or longword access to an ODD address is an ADDRESS ERROR,
+| not: a word or longword access to an odd address is an address error,
 | exception 3, and the machine gurus.  This routine is also the tree's
 | memcpy() (AMINETXDUO_NET68K_MEMCPY), so on a 68000 that was every copy in
 | the stack with mismatched pointer parity.  It is what the RAM driver test
 | died of: `Exception 3 (20d9 ...)`, opcode 20d9 being the move.l a1@+,a0@+
 | at .Llong below.  docs/RESEARCH.md §45.
 |
-| The condition is PARITY, not longword alignment -- an address of 2 mod 4 is
-| perfectly legal for move.l on a 68000, it simply becomes two word accesses.
-| So the guard is one test: if the two pointers disagree in bit 0 then no
-| amount of aligning the destination will ever make the source even, and the
-| byte loop is the only option.  If they agree, bringing the destination to a
-| longword boundary moves the source by the same count and leaves it even,
-| and everything below is legal exactly as written.
+| The condition is parity, not longword alignment -- an address of 2 mod 4 is
+| legal for move.l on a 68000, it simply becomes two word accesses.  So the
+| guard is one test: if the two pointers disagree in bit 0 then no amount of
+| aligning the destination will make the source even, and the byte loop is the
+| only option.  If they agree, bringing the destination to a longword boundary
+| moves the source by the same count and leaves it even, and everything below
+| is legal as written.
 |
-| 68020 and up assemble without this and behave as they always did, because
-| there the byte loop would be a 4x slowdown to avoid an 18% one.
+| 68020 and up assemble without this, where the byte loop would be a 4x
+| slowdown to avoid an 18% one.
 #if !defined(__mc68020__) && !defined(__mc68030__) && \
     !defined(__mc68040__) && !defined(__mc68060__)
 #define N68K_ODD_IS_FATAL 1

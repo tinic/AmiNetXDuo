@@ -12,14 +12,13 @@
  *      SystemTagList(cmd, SYS_Output = that)    dos.library
  *
  * The far end of the connection is `Copy TCP:localhost/<port> TO <file>`,
- * started asynchronously before the accept(). The near end, once the socket
- * has become a file handle, is `Echo`. Neither command has any idea it is
- * talking over TCP; between them they prove that a file handle made this way
- * is an ordinary one, in both directions, to programs that were compiled
- * years before any of this existed.
+ * started asynchronously before the accept().  The near end, once the socket
+ * has become a file handle, is `Echo`.  Neither command knows it is talking
+ * over TCP, so between them they show that a file handle made this way is an
+ * ordinary one in both directions.
  *
  * Nothing here is linked against our code: the library is reached through its
- * published LVOs, exactly as a third-party program would reach it.
+ * published LVOs, as a third-party program would reach it.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -198,8 +197,8 @@ static LONG call_release_copy(LONG s, LONG id)
 
 /*
  * WaitSelect() with a timeout, so that "the connection never arrived" is a
- * report rather than a hang. It is also the call an Amiga server loop is
- * really built around, so exercising it here is not a detour.
+ * report rather than a hang.  It is also the call an Amiga server loop is
+ * built around.
  */
 static LONG call_wait_select(LONG nfds, APTR rd, struct TimeVal_local *tv)
 {
@@ -240,10 +239,10 @@ static LONG call_errno(void)
 /*
  * Progress, written with the file opened and closed around every line.
  *
- * Not Printf(): this program's stdout is a handle the Shell holds open for
- * its whole life, so anything printed is still sitting in a buffer if the
- * program stops early -- and "stopped early" is precisely the case a trace is
- * for. Same reasoning as ToolsSmoke's report().
+ * Printf() is not used: this program's stdout is a handle the Shell holds open
+ * for its whole life, so anything printed is still sitting in a buffer if the
+ * program stops early, which is the case a trace is for.  Same reasoning as
+ * ToolsSmoke's report().
  */
 #define STEP_FILE   "DH0:handoff-steps.txt"
 
@@ -295,9 +294,9 @@ static LONG start_peer(void)
     LONG           rc;
 
     /*
-     * SYS_Asynch closes both handles itself when the command finishes, which
-     * is why they are opened here and never closed here. They must also be
-     * two different handles -- dos.library says so explicitly.
+     * SYS_Asynch closes both handles itself when the command finishes, so
+     * they are opened here and never closed here.  dos.library also requires
+     * them to be two different handles.
      */
     tags[0].ti_Tag  = SYS_Input;
     tags[0].ti_Data = (ULONG)nil;
@@ -364,7 +363,7 @@ static LONG hand_over(LONG client)
     tags[3].ti_Tag  = TAG_DONE;
     tags[3].ti_Data = 0;
 
-    /* Synchronous: System() does NOT close these, so they are ours to close. */
+    /* Synchronous: System() does not close these, so they are ours to close. */
     rc = SystemTagList((CONST_STRPTR)HANDOFF_MESSAGE, tags);
 
     Printf((CONST_STRPTR)"TcpHandoff: the command returned %ld\n", rc);

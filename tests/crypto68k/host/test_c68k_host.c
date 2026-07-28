@@ -1,49 +1,42 @@
 /*
- * AmiNetXDuo -- crypto68k correctness gate, HOST tier.
+ * AmiNetXDuo -- crypto68k correctness gate, host tier.
  *
  * The same four checks as tests/crypto68k/c68k_test.c, run on the build
  * machine instead of under FS-UAE:
  *
- *   1. KNOWN ANSWERS from Python's arbitrary-precision integers, including
+ *   1. Known answers from Python's arbitrary-precision integers, including
  *      the full RSA-2048 public and private operations, straight out of the
  *      generated c68k_vectors.h -- the same file the Amiga tier reads.
- *   2. THE LIMB PRIMITIVE against a straight-line C model, over random limb
+ *   2. The limb primitive against a straight-line C model, over random limb
  *      counts including 0 and 1, operands biased to 0 and 0xFFFFFFFF.
- *   3. MONTGOMERY MULTIPLY AND SQUARE against the unmodified vendored
+ *   3. Montgomery multiply and square against the unmodified vendored
  *      _nx_crypto_huge_number_mont().
- *   4. WHOLE EXPONENTIATIONS against
+ *   4. Whole exponentiations against
  *      _nx_crypto_huge_number_mont_power_modulus(), with exponent top-limb
  *      widths swept across the window boundaries.
  *
  * Same seed and same trial counts as the Amiga tier, so a failure here
  * reproduces there on the same inputs.
  *
- * WHY THIS FILE EXISTS INSTEAD OF JUST BUILDING c68k_test.c FOR THE HOST
+ * The checks are duplicated here rather than built from c68k_test.c because
+ * that file is ILP32 code by construction: it logs through RawDoFmt(), which
+ * takes every argument longword sized, so it passes strings as `(LONG)ptr` --
+ * lossless on m68k, truncating on any LP64 host.  Retargeting it would mean
+ * editing the program the emulator tier runs.
  *
- *   c68k_test.c is ILP32 code by construction.  It logs through RawDoFmt(),
- *   whose contract is that every argument is longword sized -- so it passes
- *   strings as `(LONG)ptr`, which is lossless on m68k and truncating on any
- *   LP64 host.  Retargeting it would mean editing the program the emulator
- *   tier runs, to suit a machine it does not run on.  Duplicating the four
- *   checks against the one shared vector header was the smaller price.
+ * The hand-written 68020 assembly (c68k_prim.S, c68k_p256.S) cannot be
+ * assembled here, so the host always exercises the portable C, which is why
+ * AMINETXDUO_CRYPTO68K_ASM defaults off off-target.  The assembly stays an
+ * emulator-tier test: this tier says the algorithm is right, that one says the
+ * assembly agrees with it.
  *
- * WHAT THIS TIER DOES NOT COVER
- *
- *   The hand-written 68020 assembly (c68k_prim.S, c68k_p256.S).  It cannot be
- *   assembled here, so the host always exercises the portable C -- which is
- *   why AMINETXDUO_CRYPTO68K_ASM defaults OFF off-target.  The assembly stays
- *   an emulator-tier test, and the two are a matched pair: this one says the
- *   algorithm is right, that one says the assembly agrees with it.
- *
- * ONE KNOWN WART
- *
- *   _nx_crypto_huge_number_mont_power_modulus() compares two pointers by
- *   casting both to ULONG, which is 32 bits by definition here and 64 on the
- *   host -- the compiler says so (-Wpointer-to-int-cast, twice).  The two
- *   pointers are always into the same small static array, so the truncation
- *   is consistent and the comparison is correct in practice; it would only
- *   break for a buffer straddling a 4 GiB boundary, which a static a few
- *   kilobytes wide does not do.  Vendored code, so it stays as it is.
+ * _nx_crypto_huge_number_mont_power_modulus() compares two pointers by casting
+ * both to ULONG, which is 32 bits by definition here and 64 on the host
+ * (-Wpointer-to-int-cast, twice).  The two pointers are always into the same
+ * small static array, so the truncation is consistent and the comparison is
+ * correct in practice; it would only break for a buffer straddling a 4 GiB
+ * boundary, which a static a few kilobytes wide does not do.  Vendored code,
+ * so it stays as it is.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -65,9 +58,7 @@ static c68k_limb    t_m[T_MAX_LIMBS];
  * t_x and t_y are +8 because section 2 sweeps n up to 70 to catch the loop
  * tails, and T_MAX_LIMBS is 64.  Without the slack the test wrote past t_y
  * for n in 65..70 and reported ~8% of its own trials as addmul mismatches --
- * 316 of 4000, against the 6/71 = 8.45% of draws that overrun.  The author
- * saw half of it: t_x below carried a "% T_MAX_LIMBS" comment reading "keep
- * the arrays in range" and t_y did not.
+ * 316 of 4000, against the 6/71 = 8.45% of draws that overrun.
  */
 static c68k_limb    t_x[T_MAX_LIMBS + 8u];
 static c68k_limb    t_y[T_MAX_LIMBS + 8u];
@@ -353,7 +344,7 @@ UINT                    bad_sqr = 0;
         m_len = (UINT)(t_rand() % 64u) + 1u;            /* 1..64 limbs */
 
         /* Forced low so that every even width here goes through Karatsuba and
-           is checked against the VENDORED routine, not just against our own
+           is checked against the vendored routine, not just against our own
            schoolbook.  Random operands, so the reference is trustworthy --
            unlike the near-maximal ones in 3b. */
         c68k_karatsuba_limbs = 2u;
@@ -577,16 +568,15 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
 /* ------------------------------------------------------------------ main -- */
 
 /*
- * Karatsuba, deliberately at the sizes and shapes the random sweep will not
- * produce often enough to trust.
+ * Karatsuba at the sizes and shapes the random sweep will not produce often
+ * enough to trust.
  *
  * The split's carry and borrow handling is where this kind of code goes wrong,
  * and all of it lives in the recombination: L + H can carry out of n limbs,
  * L + H - u must not borrow (it is 2*x0*x1, so it cannot, and the test is
  * whether the code agrees), and the (x0+x1)*(y0+y1) form of the multiply has
- * two carry bits out of the half-width sums plus their product term.  So the
- * operands below are chosen to drive those to their extremes rather than to
- * be random:
+ * two carry bits out of the half-width sums plus their product term.  The
+ * operands below drive those to their extremes rather than being random:
  *
  *   all ones      every add carries, every subtract borrows
  *   x1 == x0      |x1 - x0| == 0, so the middle term is a square of zero
@@ -603,11 +593,11 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
  * always been validated against.
  *
  * Two code paths in algorithm D are almost unreachable by chance and are
- * driven deliberately, because both are where this kind of routine breaks:
+ * driven directly, because both are where this kind of routine breaks:
  *
  *   the B-1 clamp   the partial remainder's top limb equal to the divisor's.
  *                   The true quotient digit is B-1, and on a 68020 a DIVU.L
- *                   would TRAP rather than saturate, so the code must test
+ *                   would trap rather than saturate, so the code must test
  *                   for it before dividing.  Driven by giving u and m the
  *                   same top limb.
  *   the add-back    the estimate one too large, needing the divisor added
@@ -847,16 +837,15 @@ c68k_limb           n0inv;
 
 /* ============================================================ the bulk path ==
  *
- * AES-128/256 and SHA-256, against the published vectors, for every PORTABLE
+ * AES-128/256 and SHA-256, against the published vectors, for every portable
  * variant in src/crypto68k/.  The assembly cannot be assembled here and stays
- * an emulator-tier test (tests/crypto68k/crypto68k_bulk), which is the same
- * split the limb primitives have.
+ * an emulator-tier test (tests/crypto68k/crypto68k_bulk), the same split the
+ * limb primitives have.
  *
- * This tier is where the vectors actually get run on every push, and it is
- * also the only place the ENDIANNESS of the message-word load is tested: the
- * SHA-256 fast path loads W[0..15] as longwords, which is correct on the
- * m68k and wrong here, and the guard around it is what this catches.  It did
- * catch it.
+ * This tier runs the vectors on every push, and is the only place the
+ * endianness of the message-word load is tested: the SHA-256 fast path loads
+ * W[0..15] as longwords, which is correct on the m68k and wrong here, so a
+ * mis-set guard around it shows up only here.  It has.
  */
 
 static void t_bytes(const char *what, const unsigned char *got,
@@ -1031,14 +1020,14 @@ static void t_bulk_sha(unsigned variant)
 
 /* ------------------------------------------- ChaCha20-Poly1305, RFC 8439 -- */
 /*
- * The AEAD record path, ciphersuites 0xCCA8 and 0xCCA9.  Same reason the AES
- * and SHA-256 vectors are here: this tier is where they run on every push.
+ * The AEAD record path, ciphersuites 0xCCA8 and 0xCCA9.  Here for the same
+ * reason as the AES and SHA-256 vectors: this tier runs them on every push.
  *
- * And the same endianness trap, from the other side.  ChaCha20 and Poly1305
- * read their input LITTLE-endian, so the m68k fast path is one MOVE.L and a
- * byte reversal and the portable path is four byte loads -- get the guard
- * backwards and one of the two machines produces a self-consistent wrong
- * answer.  These vectors are the only thing that says which.
+ * Same endianness trap as SHA-256.  ChaCha20 and Poly1305 read their input
+ * little-endian, so the m68k fast path is one MOVE.L and a byte reversal and
+ * the portable path is four byte loads; get the guard backwards and one of the
+ * two machines produces a self-consistent wrong answer.  These vectors are the
+ * only thing that says which.
  */
 
 static const unsigned char t_cc_key[32] =
@@ -1169,8 +1158,8 @@ static void t_bulk_chacha(void)
             (const unsigned char *)t_aead_plain, 114);
     t_bytes("RFC 8439 2.8.2 tag on decrypt", tag, t_aead_tag, 16);
 
-    /* One flipped ciphertext bit must not verify.  This is the whole point of
-       an AEAD and it is the one property no published vector states. */
+    /* One flipped ciphertext bit must not verify -- the one AEAD property no
+       published vector states. */
     t_checks++;
     if (c68k_chacha20_poly1305_verify(tag, t_aead_tag) != NX_CRYPTO_TRUE)
     {

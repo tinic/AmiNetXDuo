@@ -8,43 +8,36 @@
  * chain verification against a trust store, key derivation, Finished hashing
  * and the record layer.
  *
- * THREE EXECUTABLES, ONE SOURCE
- *
  *   tls_handshake   one round in the shipping configuration: crypto68k
  *                   arithmetic, CRT on every private-key path.  This is the
  *                   correctness gate and the headline number.
  *
  *   tls_decompose   four rounds -- {reference, crypto68k} x {no CRT, CRT} --
  *                   so the before number, the after number and the two levers
- *                   in between are measured through IDENTICAL instrumentation
+ *                   in between are measured through identical instrumentation
  *                   in one process.  Composing a decomposition out of separate
- *                   runs on an inexact emulator is how you get a total that
- *                   does not add up.
+ *                   runs on an inexact emulator gives a total that does not
+ *                   add up.
  *
- *   tls_interop     the same handshake with our fast crypto on ONE side and
+ *   tls_interop     the same handshake with our fast crypto on one side and
  *                   the unmodified vendored ciphersuite table on the other,
  *                   both ways round, plus vendored-on-both.  If both ends
  *                   change together a mutual arithmetic error is invisible;
- *                   this is the test that makes it visible.
- *
- * WHY LOOPBACK AND NOT A PUBLIC HOST
+ *                   this round makes it visible.
  *
  *   Reaching a real HTTPS server from the emulator is possible in principle
  *   (SLIRP gives outbound internet, and tests/netstack proves DNS and routing
  *   work), but it makes the measurement depend on a certificate chain we do
  *   not control, a trust store we would have to ship, and a server's patience.
  *   Running both halves locally measures the same arithmetic with none of that
- *   variance.  The cost is that ONE Amiga does BOTH sides' work -- so the wall
- *   time here is a client handshake plus a server handshake, and the two are
+ *   variance.  The cost is that one Amiga does both sides' work, so the wall
+ *   time here is a client handshake plus a server handshake; the two are
  *   reported separately.
  *
- *   That separation matters more than it used to.  A client fetching a page
- *   never performs the private-key operation, and after this work the server's
- *   private-key operation is most of the loopback total.  The per-role
- *   arithmetic breakdown below is the number that answers "can this machine
- *   talk to modern sites"; the wall time answers a question nobody asked.
- *
- * SHAPE
+ *   A client fetching a page never performs the private-key operation, and
+ *   after this work the server's private-key operation is most of the loopback
+ *   total, so the per-role arithmetic breakdown below is the figure to read
+ *   for what a client costs.
  *
  *   Same fabric as tests/ram_driver: ThreadX on Exec, two NX_IP instances
  *   talking over the in-tree simulated RAM driver, the server on a
@@ -255,8 +248,8 @@ static volatile UINT    h_round;
  *
  * It grew when src/tls/ami_tls_crypto.c was wired in: our RSA method carries
  * 6 KB of sliding-window scratch on top of the vendored NX_CRYPTO_RSA, and a
- * session allocates a public-cipher slot AND a public-auth slot at the largest
- * size in the table, so that is ~12 KB.  The printed figure is the truth.
+ * session allocates a public-cipher slot and a public-auth slot at the largest
+ * size in the table, so that is ~12 KB.
  *
  * The packet reassembly buffer must hold the largest single handshake message,
  * which here is the Certificate message carrying the chain.  8 KB holds a
@@ -289,11 +282,11 @@ static TX_THREAD                h_main_thread;
 static TX_SEMAPHORE             h_server_done;
 
 /*
- * The server is listening and the client may connect.  Without this the two
- * halves race: the client used to win because the server's setup happened once
- * at thread start, and once the rounds became a loop it stopped winning --
- * nx_tcp_client_socket_connect() against a port with no listener does not wait,
- * it comes straight back NX_NOT_CONNECTED.
+ * Signals that the server is listening and the client may connect.  Without it
+ * the two halves race, and nx_tcp_client_socket_connect() against a port with
+ * no listener does not wait -- it comes straight back NX_NOT_CONNECTED.  The
+ * client only won before the rounds became a loop, when the server's setup
+ * happened once at thread start.
  */
 static TX_SEMAPHORE             h_server_ready;
 
@@ -527,8 +520,8 @@ ULONG       start;
      * The trust store, and the buffers the incoming chain is parsed into.
      * Without the remote-certificate allocation nx_secure has nowhere to put
      * what the server sends and the handshake fails with a buffer error
-     * rather than a verification error -- a distinction worth knowing when
-     * this is being debugged.
+     * rather than a verification error -- a distinction that matters when
+     * debugging this.
      */
     status =  nx_secure_x509_certificate_initialize(&h_trusted_certificate,
                                                     test_ca_cert_der,
@@ -568,14 +561,14 @@ ULONG       start;
     }
 
     /*
-     * THE MEASUREMENT.  Everything from ClientHello to Finished: negotiation,
+     * The measurement: everything from ClientHello to Finished -- negotiation,
      * the server's certificate chain parsed and verified against the trust
      * store, the key exchange, key derivation and the handshake hash.
      *
-     * Note that this wall time INCLUDES the server's own arithmetic, because
-     * the server is another thread on the same 68k and the client is blocked
-     * waiting for it.  It is a whole-machine figure; the per-role arithmetic
-     * totals below are what separate the two.
+     * This wall time includes the server's own arithmetic, because the server
+     * is another thread on the same 68k and the client is blocked waiting for
+     * it.  It is a whole-machine figure; the per-role arithmetic totals below
+     * separate the two.
      */
     start =  ami_tls_eclock();
     status = nx_secure_tls_session_start(&h_client_session, &h_client_socket,
@@ -649,7 +642,7 @@ ULONG   start;
      * needs, rather than trusting a round number -- the memory figure in the
      * report should be measured.
      *
-     * This has to happen HERE and not in tx_application_define(): the nxe_
+     * This has to happen here and not in tx_application_define(): the nxe_
      * error-checking wrappers apply NX_THREADS_ONLY_CALLER_CHECKING, so a call
      * from initialization context comes back NX_CALLER_ERROR (0x11) with the
      * output untouched.
@@ -862,9 +855,9 @@ UINT    status;
     /*
      * The comb table in c68k_p256_table.c is generated, so a table built for
      * the wrong curve would produce points that are self-consistent and wrong.
-     * Two generic scalar multiplications settle it -- and unlike everything
-     * else here, a failure would still complete a handshake against a peer
-     * that had the same table.
+     * Two generic scalar multiplications settle it.  Nothing else here would
+     * catch it: such a table still completes a handshake against a peer that
+     * has the same one.
      */
     status =  c68k_p256_self_check();
     (VOID) h_check((UINT)(status == NX_CRYPTO_SUCCESS),

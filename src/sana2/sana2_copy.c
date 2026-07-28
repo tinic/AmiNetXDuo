@@ -4,9 +4,9 @@
  * OpenDevice() is handed a tag list carrying these two functions. The device
  * calls them, in m68k register convention (a0 = to, a1 = from, d0 = length),
  * whenever it needs to move packet data in or out of "the abstract data
- * structure" -- which for us is an NX_PACKET, reached through the AmiRxSlot or
- * AmiTxSlot that ios2_Data points at. That is the whole point of the tags:
- * one copy, straight into the packet, no bounce buffer.
+ * structure", here an NX_PACKET reached through the AmiRxSlot or AmiTxSlot
+ * that ios2_Data points at. One copy, straight into the packet, no bounce
+ * buffer.
  *
  * Constraints from copybuff.doc: these run at interrupt level. No exec memory
  * calls, no logging, no stack checking, nothing that Forbid()s. They are pure
@@ -20,34 +20,26 @@
 #include "net68k.h"
 
 /*
- * The copy loop, still deliberately not newlib's memcpy: this runs at
- * interrupt level and a shared library should not depend on the C library's
- * choice of implementation there.
+ * The copy loop is not newlib's memcpy: this runs at interrupt level and a
+ * shared library should not depend on the C library's implementation there.
  *
- * It used to be a local longword loop guarded by
- *
- *     if (((ULONG)to & 1UL) == ((ULONG)from & 1UL))
- *
- * -- i.e. it took its fast path only when source and destination agreed mod 2,
- * and copied ONE BYTE PER ITERATION when they did not.  Measured on the
+ * The earlier loop took its fast path only when source and destination agreed
+ * mod 2, and copied one byte per iteration otherwise.  Measured on the
  * emulated 68020 over 1460 bytes (tests/perf/perf_test.c):
  *
  *     parities agree     240.3 ns/B
  *     parities differ   1203.4 ns/B      -- a 5.0x cliff
  *
- * sitting on every frame whose driver buffer happened to land on the wrong
- * parity.  Nothing in SANA-II promises anything about a device's buffer
- * parity, so avoiding that was luck rather than design.  Worth recording
- * because the cliff was expected to be in newlib's memcpy and is not: the
+ * on every frame whose driver buffer landed on the wrong parity, and SANA-II
+ * promises nothing about a device's buffer parity.  For comparison, the
  * libm020 memcpy this toolchain links costs 216 ns/B aligned and 252-260
- * misaligned, an 18% penalty with no cliff at all.
+ * misaligned: an 18% penalty with no cliff.
  *
- * n68k_copy_bytes() has no such condition either: it brings the DESTINATION
- * to a longword boundary and then moves longwords whatever the source is
- * doing, which is what the 68020 supports.  179.5 ns/B when the parities
- * agree (1.34x on what used to be the fast path) and 228.7 when they differ
- * (5.3x on what used to be the slow one), because movem.l moves eight
- * longwords per instruction pair.  See src/net68k/n68k_copy.S.
+ * n68k_copy_bytes() brings the destination to a longword boundary and then
+ * moves longwords whatever the source is doing, which is what the 68020
+ * supports: 179.5 ns/B when the parities agree (1.34x the old fast path) and
+ * 228.7 when they differ (5.3x the old slow path), because movem.l moves
+ * eight longwords per instruction pair.  See src/net68k/n68k_copy.S.
  */
 VOID ami_sana2_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
 {
@@ -85,12 +77,12 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
  * S2_CopyFromBuff: the device wants `len` bytes of the frame we are sending.
  * `from` is our CMD_WRITE's ios2_Data, i.e. the AmiTxSlot.
  *
- * A device may take the frame in one call or in several, and may restart the
+ * A device may take the frame in one call or several, and may restart the
  * whole transfer if it has to retry the wire. The cursor below handles the
- * chunked case; the reset conditions handle the retry case: any request that
- * cannot be satisfied from where the cursor stands rewinds to the start of the
- * packet first. For the overwhelmingly common single-buffer, single-call frame
- * both are no-ops and this degenerates to one memcpy from the prepend pointer.
+ * chunked case; the reset conditions handle the retry case, rewinding to the
+ * start of the packet for any request the cursor cannot satisfy from where it
+ * stands. For the common single-buffer, single-call frame both are no-ops and
+ * this reduces to one copy from the prepend pointer.
  */
 BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
                               register APTR from __asm("a1"),

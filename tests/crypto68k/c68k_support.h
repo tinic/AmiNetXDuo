@@ -2,10 +2,10 @@
  * AmiNetXDuo -- crypto68k test support: logging, RNG, huge-number glue.
  *
  * Shared by tests/crypto68k/c68k_test.c (correctness) and c68k_bench.c
- * (timings), which are separate executables because they have very different
- * run times: the correctness pass fits comfortably inside the harness's
- * default timeout, and the benchmark contains a reference RSA-2048 private
- * operation that on the floor target runs for over two minutes on its own.
+ * (timings), separate executables because of their run times: the correctness
+ * pass fits inside the harness's default timeout, and the benchmark contains a
+ * reference RSA-2048 private operation that runs for over two minutes on its
+ * own on the floor target.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -23,8 +23,7 @@ VOID  c68k_log(const char *fmt, ...);
 VOID  c68k_flush(VOID);
 
 /* xorshift32.  Deterministic and seeded from a constant, so a failing run can
-   be reproduced exactly -- which for input-dependent bignum bugs is the whole
-   game. */
+   be reproduced exactly. */
 VOID      c68k_rng_seed(ULONG seed);
 c68k_limb c68k_rand(VOID);
 

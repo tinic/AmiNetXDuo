@@ -1,13 +1,11 @@
 /*
  * AmiNetXDuo -- crypto68k RSA CRT exponentiation.
  *
- * WHY THIS IS HERE AT ALL
- *
- *   This function is structurally identical to the vendored
+ *   Structurally identical to the vendored
  *   _nx_crypto_huge_number_crt_power_modulus().  The only difference is the
  *   two lines that raise xp and xq to a power: they call this module instead.
- *   It exists so that the CRT path can be measured with the fast
- *   exponentiation, and because CRT is the single largest lever available.
+ *   It lets the CRT path be measured with the fast exponentiation, and CRT is
+ *   the largest single lever available.
  *
  *   The measured baseline on the emulated 68020 is 44.4 s with CRT against
  *   158.0 s without -- 3.6x -- and nx_secure reaches for CRT on exactly one
@@ -21,11 +19,11 @@
  *   the price of two nx_crypto_operation() calls, and it multiplies with
  *   everything in this module rather than overlapping it.
  *
- *   Why CRT is ~4x, from first principles: each half works modulo a number of
- *   half the width, so each Montgomery multiply costs a quarter, and each
- *   exponent is half as long, so there are half as many of them -- 8x per
- *   half, two halves, 4x overall (HAC Note 14.75(ii)).  The recombination is
- *   O(s^2) and eats the rest.
+ *   CRT is ~4x because each half works modulo a number of half the width, so
+ *   each Montgomery multiply costs a quarter, and each exponent is half as
+ *   long, so there are half as many of them -- 8x per half, two halves, 4x
+ *   overall (HAC Note 14.75(ii)).  The recombination is O(s^2) and eats the
+ *   rest.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -61,10 +59,10 @@ HN_UBASE                digit_value;
      *   pi = p^-1 mod q    qi = q^-1 mod p
      *   r  = (m1*qi*q + m2*pi*p) mod m
      *
-     * The buffer carving below is the vendored routine's, unchanged, because
-     * it is load bearing: NX_CRYPTO_HUGE_NUMBER_INITIALIZE is a bump allocator
-     * that advances `scratch`, and several of these buffers are deliberately
-     * reused under a second name once their first value is dead.
+     * The buffer carving below is the vendored routine's, unchanged, and load
+     * bearing: NX_CRYPTO_HUGE_NUMBER_INITIALIZE is a bump allocator that
+     * advances `scratch`, and several of these buffers are reused under a
+     * second name once their first value is dead.
      */
     NX_CRYPTO_HUGE_NUMBER_INITIALIZE(&pi, scratch, p -> nx_crypto_huge_buffer_size);
     NX_CRYPTO_HUGE_NUMBER_INITIALIZE(&qi, scratch, q -> nx_crypto_huge_buffer_size);

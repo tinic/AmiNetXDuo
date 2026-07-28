@@ -6,11 +6,10 @@
  *   Copyright (c) 2025-present Eclipse ThreadX Contributors
  *
  * Changes from the Linux original:
- *   - NX_LITTLE_ENDIAN is NOT defined.  m68k is big-endian, which is also the
+ *   - NX_LITTLE_ENDIAN is not defined.  m68k is big-endian, which is also the
  *     network byte order, so NX_CHANGE_ULONG_ENDIAN/NX_CHANGE_USHORT_ENDIAN
- *     and htons/htonl/ntohs/ntohl all compile away to nothing.  Every header
- *     byte-swap in the stack disappears -- a real advantage over x86 targets
- *     (docs/RESEARCH.md 5.3).
+ *     and htons/htonl/ntohs/ntohl all compile away to nothing, removing every
+ *     header byte-swap in the stack (docs/RESEARCH.md 5.3).
  *   - <stdio.h> and <stdlib.h> are not pulled in.  A shared library build
  *     must not drag newlib's stdio along; the core needs memset/memcpy/memcmp
  *     only, which we supply.
@@ -45,23 +44,22 @@
 #include <string.h>
 
 
-/* Big-endian target: NX_LITTLE_ENDIAN deliberately left undefined.  */
+/* Big-endian target: NX_LITTLE_ENDIAN left undefined.  */
 
 
 /*
  * Random numbers.
  *
  * Left undefined, nx_api.h falls back to NX_RAND == rand(), which on this
- * toolchain is newlib's 32-bit LCG -- and NX_RAND is what generates ECDHE
- * private keys and the TLS client random in nx_secure, as well as TCP initial
- * sequence numbers, IP identification fields, ephemeral ports and the DHCP
- * transaction id in the core.  An LCG is fully recoverable from one output.
+ * toolchain is newlib's 32-bit LCG -- and NX_RAND generates ECDHE private keys
+ * and the TLS client random in nx_secure, as well as TCP initial sequence
+ * numbers, IP identification fields, ephemeral ports and the DHCP transaction
+ * id in the core.  An LCG is fully recoverable from one output.
  *
- * src/common/ami_random.c replaces it with a SHA-256 hash DRBG over an
- * entropy pool.  Read include/aminetxduo/random.h before believing the pool
- * is any good: the expansion is sound, the collection is not audited, and the
- * module reports its own weakness through ami_random_is_seeded() rather than
- * pretending.  Anything generating a real key is expected to check that.
+ * src/common/ami_random.c replaces it with a SHA-256 hash DRBG over an entropy
+ * pool.  See include/aminetxduo/random.h: the expansion is sound, the
+ * collection is not audited, and ami_random_is_seeded() reports the difference.
+ * Anything generating a real key is expected to check it.
  *
  * Declared by hand rather than by including the header: nx_port.h is pulled
  * into every vendored translation unit, and aminetxduo/random.h drags in
@@ -89,35 +87,32 @@ extern void ami_random_srand(unsigned int seed);
 #endif
 
 
-/* Endian conversion.  All no-ops on m68k -- but SPELLED as a no-op assignment
- * rather than as nothing at all, and that is load-bearing.
+/* Endian conversion.  No-ops on m68k, spelled as a no-op assignment rather
+ * than as nothing at all.
  *
  * Every little-endian port defines these as `a = ((a >> 8) | (a << 8))` and so
- * on: an ASSIGNMENT EXPRESSION, which is legal in statement position AND in
- * the middle of a larger expression, and which requires `a` to be an lvalue.
- * The empty definition this used to carry is legal only in the first of those,
- * and the difference is invisible until a caller uses the second form.  One
- * does:
+ * on: an assignment expression, legal in statement position and in the middle
+ * of a larger expression, requiring `a` to be an lvalue.  An empty definition
+ * is legal only in the first position.  One caller uses the second:
  *
  *     addons/mdns/nxd_mdns.c:8489
  *       *(USHORT *)(... + NX_MDNS_FLAGS_OFFSET) |= NX_CHANGE_USHORT_ENDIAN(tc_bit);
  *
- * which expanded to `x |= ;` and would not compile.  It is the only such use
- * in the whole vendored tree -- six others exist, all in nx_icmpv6_*, all in
- * statement position -- so it is a defect in the add-on that no big-endian
- * NetX Duo port has ever run into, because as far as we can tell nobody has
- * ever built the mDNS add-on on one.  Fixing it HERE rather than in
- * third_party/ keeps the standing rule that vendored source is not modified,
- * and it is a correction rather than a workaround: this now evaluates to the
- * value, and requires an lvalue, exactly as the little-endian definition does.
+ * which expanded to `x |= ;` and would not compile.  It is the only such use in
+ * the vendored tree -- six others exist, all in nx_icmpv6_*, all in statement
+ * position -- so no big-endian NetX Duo port has hit it, the mDNS add-on
+ * apparently never having been built on one.  Fixing it here rather than in
+ * third_party/ keeps the rule that vendored source is not modified, and this
+ * definition evaluates to the value and requires an lvalue exactly as the
+ * little-endian one does.
  *
- * `((a) = (a))` and not the shorter `(a)`, for one measured reason.  The plain
- * form makes every statement use a bare expression with no effect, and two of
- * those are in OUR code (src/net68k/n68k_checksum.c), which unlike anything in
- * third_party/ is compiled with -Wall -Wextra -Werror by cmake/ci-warnings
- * .cmake.  All four cross configurations failed on -Werror=unused-value.  A
- * self-assignment has an effect as far as the front end is concerned, compiles
- * to nothing, and keeps both call positions legal.
+ * `((a) = (a))` and not the shorter `(a)`: the plain form makes every statement
+ * use a bare expression with no effect, and two of those are in our own code
+ * (src/net68k/n68k_checksum.c), which unlike third_party/ is compiled with
+ * -Wall -Wextra -Werror by cmake/ci-warnings.cmake.  All four cross
+ * configurations failed on -Werror=unused-value.  A self-assignment has an
+ * effect as far as the front end is concerned, compiles to nothing, and keeps
+ * both call positions legal.
  */
 
 #define NX_CHANGE_ULONG_ENDIAN(a)   ((a) = (a))

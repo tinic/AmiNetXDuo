@@ -1,38 +1,29 @@
 /*
  * AmiNetXDuo -- attaching src/bpf/ to the running stack.
  *
- * Until this file existed, `bpf_*` was a subsystem the product shipped and
- * never called: no tap in src/sana2/, no interface registered, all eight LVOs
- * pointing at bsd_enosys(), and `aminetxduo_bpf` linked by nothing but its own
- * unit test.  Two hundred and one checks passed against a workload that was
- * entirely synthetic.
- *
- * There are two capture points, and the reason there are two is structural
- * rather than a matter of taste:
+ * There are two capture points:
  *
  *   eth0 -- the SANA-II taps in src/sana2/sana2_rx.c and sana2_tx.c.  Every
  *           frame that crosses a wire, in the exact shape the device saw it,
  *           ARP included.
  *
  *   lo0  -- the NetX Duo IP packet filter, installed here.  NetX Duo's
- *           loopback interface has no link driver at all
- *           (nx_ip_create.c:157 sets nx_interface_link_driver_entry to
- *           NX_NULL) and _nx_ip_driver_packet_send() shortcuts a loopback
- *           destination straight into _nx_ip_packet_deferred_receive().  No
- *           driver is called, so no tap on a driver can see it, and loopback
- *           is the path every throughput figure in docs/RESEARCH.md 11 was
- *           measured on.
+ *           loopback interface has no link driver (nx_ip_create.c:157 sets
+ *           nx_interface_link_driver_entry to NX_NULL) and
+ *           _nx_ip_driver_packet_send() shortcuts a loopback destination
+ *           straight into _nx_ip_packet_deferred_receive(), so no tap on a
+ *           driver can see it.  Loopback is the path every throughput figure
+ *           in docs/RESEARCH.md 11 was measured on.
  *
  * The loopback tap fires on NX_IP_PACKET_OUT only.  A loopback datagram is
  * sent once and received once, so capturing both directions would put two
- * identical records in the file and every analyser downstream would call the
- * second one a retransmission.  OUT is the complete record: it is taken after
- * _nx_ip_header_add(), so the IP header is real and the checksum is final.
+ * identical records in the file and analysers downstream would read the second
+ * as a retransmission.  The out direction is taken after _nx_ip_header_add(),
+ * so the IP header is real and the checksum final.
  *
- * DLT_EN10MB for both, and lo0's fourteen bytes are synthesised here with
- * zeroed addresses.  A single link type means one pcap writer, one filter
- * program and one set of eyes in Wireshark; the alternative (DLT_NULL for
- * loopback) buys nothing and costs a second code path everywhere.
+ * DLT_EN10MB for both; lo0's fourteen bytes are synthesised here with zeroed
+ * addresses.  A single link type means one pcap writer and one filter program;
+ * DLT_NULL for loopback would cost a second code path everywhere.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -43,10 +34,8 @@
 
 /* ------------------------------------------------------------ the lo0 tap */
 
-/*
- * A cookie that is not a pointer to anything the taps also use.  The address
- * of this object identifies the loopback pseudo-interface and nothing else.
- */
+/* The address of this object identifies the loopback pseudo-interface; it is
+   not a pointer to anything the taps also use. */
 static const UBYTE ami_ns_lo_cookie;
 
 #define AMI_NS_LO_NAME      "lo0"
@@ -63,9 +52,9 @@ static UINT ami_ns_capture_filter(NX_IP *ip_ptr, NX_PACKET *packet_ptr,
     (VOID)ip_ptr;
 
     /*
-     * OUT only, and only for a packet the loopback interface is carrying.
-     * Anything else is on its way to (or in from) a real device, where the
-     * SANA-II taps have it with its true link header.
+     * Outbound only, and only for a packet the loopback interface is carrying.
+     * Anything else is to or from a real device, where the SANA-II taps have
+     * it with its true link header.
      */
     if (direction != NX_IP_PACKET_OUT ||
         ami_bpf_capturing() == 0 ||
@@ -80,9 +69,9 @@ static UINT ami_ns_capture_filter(NX_IP *ip_ptr, NX_PACKET *packet_ptr,
         eth[i] = 0;
 
     /*
-     * The EtherType from the IP version nibble rather than from a flag: this
-     * filter is the only place both families arrive at the same call site, and
-     * a dual-stack build loops IPv6 through here as well.
+     * EtherType from the IP version nibble rather than a flag: both families
+     * arrive at this one call site, and a dual-stack build loops IPv6 through
+     * here as well.
      */
     if ((packet_ptr->nx_packet_prepend_ptr[0] & 0xF0) == 0x60)
     {
@@ -118,8 +107,8 @@ static UINT ami_ns_capture_filter(NX_IP *ip_ptr, NX_PACKET *packet_ptr,
 
     ami_bpf_tap_view((APTR)&ami_ns_lo_cookie, &view);
 
-    /* NX_SUCCESS or the packet is dropped -- this is a filter hook that the
-       stack asked a yes/no question of, and a capture always says yes. */
+    /* Anything other than NX_SUCCESS drops the packet; a capture never
+       rejects. */
     return NX_SUCCESS;
 }
 
@@ -175,12 +164,10 @@ VOID ami_netstack_capture_start(AmiNetStack *ns)
 
 /*
  * One interface, registered or unregistered after the stack is already up.
- *
- * These exist because an interface added at run time through
- * AddInterfaceTagList() must be capturable like any other, and one removed
- * through RemoveInterface() must stop being reachable BEFORE its AmiSana2If
- * is freed -- src/bpf/ holds the pointer as an opaque cookie and would hand a
- * freed one to an injector.
+ * An interface added at run time through AddInterfaceTagList() must be
+ * capturable like any other; one removed through RemoveInterface() must stop
+ * being reachable before its AmiSana2If is freed, since src/bpf/ holds the
+ * pointer as an opaque cookie and would hand a freed one to an injector.
  */
 VOID ami_netstack_capture_attach_one(AmiNetStack *ns, UWORD index)
 {

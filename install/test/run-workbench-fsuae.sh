@@ -12,7 +12,7 @@
 # DEVS: holding one driver and an S: with nothing in it, boots a bare
 # directory hard drive with no Workbench on it at all, and drives its own
 # boot script.  Every failure a user has reported so far -- `fetch https://`
-# not working, `curl` not seeing its arguments -- happened on a real
+# not working, a command not seeing its arguments -- happened on a real
 # Workbench and was invisible here, because "works on the staging tree" and
 # "works on a Workbench" are different claims and only the second one is the
 # product.
@@ -31,7 +31,7 @@
 #      the harness knows is in the path;
 #   4. runs, from an ordinary Shell script, the four things a user does
 #      first: look at the network, fetch an http: URL, fetch an https: URL,
-#      and run the shipped curl WITH ARGUMENTS.
+#      and run the shipped commands WITH ARGUMENTS.
 #
 # Each of those four reports its own return code, and this script prints them
 # as a table.  IT DOES NOT ADJUST THEM UNTIL THEY PASS: a failure here is the
@@ -546,20 +546,6 @@ cat "$HD/S/User-Startup" 2>/dev/null || echo "(none)"
 echo "---- DEVS:NetInterfaces/eth0 ----"
 cat "$HD/Devs/NetInterfaces/eth0" 2>/dev/null || echo "(none)"
 
-# Where did the drawer go, and is curl in it?  Asked rather than assumed: the
-# destination comes from @default-dest inside the Installer, and a machine
-# with a real Workbench is exactly the case where that could differ.
-CURL_HOST=$(find "$HD" -maxdepth 4 -type f -name curl 2>/dev/null | head -1)
-CURL_AMIGA=""
-if [ -n "$CURL_HOST" ]; then
-    CURL_AMIGA="DH0:${CURL_HOST#"$HD"/}"
-    echo
-    echo "==> curl landed at $CURL_AMIGA"
-else
-    echo
-    echo "!! no curl anywhere under the boot volume"
-fi
-
 if [ "$INSTALL_STATUS" != "0" ] || [ "$fail" != "0" ]; then
     echo
     echo "!! the install run did not complete cleanly (status $INSTALL_STATUS)"
@@ -584,14 +570,12 @@ if [ "$(shasum "$HD/S/Startup-Sequence" | cut -d' ' -f1)" != "$STARTUP_SUM" ]; t
     echo "      the stock 3.1 one is worth reading before the reboot"
 fi
 
-CURL_LINE='Echo >>DH0:usercheck.txt "RESULT curl-version rc=(no curl installed)"'
-[ -z "$CURL_AMIGA" ] || CURL_LINE="$CURL_AMIGA --version >>DH0:usercheck.txt
-Echo >>DH0:usercheck.txt \"RESULT curl-version rc=\$RC\""
-
 # An ordinary Shell script, doing ordinary things, with every command's return
 # code written down beside its output.  `Stack 200000` is the Shell's internal
-# stack command, and it is here because the Clients ReadMe tells the user to
-# type exactly that before running curl or ssh.
+# stack command.  It is NOT needed any more -- clients/compat/amiga_argv.c
+# swaps in 256 KB of its own before main() runs, and the ReadMe says so -- and
+# it stays here precisely because a cautious user will still type it: a client
+# that mishandled an already-large Shell stack would fail nowhere else.
 cat > "$HD/S/AmiNetXDuo-Check" <<EOF
 ; Written by install/test/run-workbench-fsuae.sh.  Nothing here is installed
 ; by AmiNetXDuo -- it is what a user would type.
@@ -611,8 +595,9 @@ Echo >>DH0:usercheck.txt "*N=== 3. fetch https://tls-v1-2.badssl.com/"
 C:fetch https://tls-v1-2.badssl.com/ TO DH0:https-body.txt >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT fetch-https rc=\$RC"
 
-Echo >>DH0:usercheck.txt "*N=== 4. curl --version"
-$CURL_LINE
+Echo >>DH0:usercheck.txt "*N=== 4. arp -- what answered on this network"
+C:arp >>DH0:usercheck.txt
+Echo >>DH0:usercheck.txt "RESULT arp rc=\$RC"
 
 Echo >>DH0:usercheck.txt "*N=== done"
 EOF
@@ -668,7 +653,7 @@ report() {
 report "ShowNetStatus"                 network
 report "fetch http://example.com/"     fetch-http
 report "fetch https://...badssl.com/"  fetch-https
-report "curl --version"                curl-version
+report "arp"                           arp
 
 echo
 if [ "$bad" = "0" ] && [ "$BOOT_STATUS" != "124" ]; then

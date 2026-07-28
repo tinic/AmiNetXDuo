@@ -1,45 +1,29 @@
 /*
  * AmiNetXDuo -- entropy pool and random number generation.
  *
- * READ THIS BEFORE TRUSTING IT WITH A KEY.
+ * A classic Amiga has no hardware RNG.  This samples many individually weak
+ * sources, mixes them through SHA-256 and expands with a hash DRBG.  The
+ * conditioning is textbook; the input is the weak part, and hashing does not
+ * create entropy that was not there.
  *
- * A classic Amiga has no hardware RNG, no /dev/urandom, no RDRAND and no
- * jitter source that anyone has ever analysed.  What this module does is the
- * standard fallback: sample a lot of individually weak things, mix them all
- * through SHA-256, and expand the result with a hash-based DRBG.  The
- * expansion is sound.  The *input* is the problem, and no amount of hashing
- * creates entropy that was not there.
- *
- * The honest summary, stated so nobody has to guess:
- *
- *   - The conditioning (SHA-256 mixing, counter-mode expansion, forward
- *     ratchet) is textbook and is not where the risk lives.
- *   - The collection is UNAUDITED and its yield is UNMEASURED on real
- *     hardware.  ami_random_entropy_bits() returns this module's own
- *     conservative *guess*, not a measurement.  Treat it as a lower bound on
- *     nothing; it is an accounting convenience.
- *   - Several of the sources ARE identical run to run on a fixed boot image,
- *     measured: every AvailMem() figure, the AllocVec() addresses, and the
- *     "uninitialised" memory residue were byte-for-byte the same over three
- *     cold boots under FS-UAE.  They are mixed and credited nothing.  Which
- *     ones those are is a property of the machine, not of this code, so
- *     re-run tools/smoke/randtest.c on any new target rather than assuming
- *     these findings carry over.
- *   - Nothing here has been reviewed by anyone who does this for a living.
+ * The collection is unaudited and its yield unmeasured on real hardware.
+ * ami_random_entropy_bits() returns this module's own conservative guess, not a
+ * measurement.  Several sources are identical run to run on a fixed boot image:
+ * every AvailMem() figure, the AllocVec() addresses and the uninitialised memory
+ * residue were byte-for-byte equal over three cold boots under FS-UAE.  They are
+ * mixed and credited nothing.  That is a property of the machine rather than of
+ * this code, so re-run tools/smoke/randtest.c on a new target instead of
+ * assuming it carries over.
  *
  * ami_random_is_seeded() reports whether the pool reached AMI_RANDOM_MIN_BITS
- * from sources this module is willing to count.  On a machine left to itself
- * it is FALSE, because the internal sources cap below that bar -- see the
- * constant.  It is a REPORTER, not a gate: nothing in this project refuses to
- * run because of it, and TLS does not check it.  A caller that has real
- * entropy (an operator seed, a seed file, input timing) can feed it in with
+ * from sources this module will count.  Left to itself it is FALSE, because the
+ * internal sources cap below that bar.  Nothing refuses to run because of it and
+ * TLS does not check it; a caller with real entropy feeds it in through
  * ami_random_add_entropy().
  *
- * For everything the stack actually uses this for -- IP identification
- * fields, TCP initial sequence numbers, ephemeral ports, DHCP transaction
- * ids, DNS query ids, and TLS key agreement on a machine that is fetching web
- * pages rather than moving money -- it is a strict improvement on the 32-bit
- * LCG it replaces, at 21 ms once at init.
+ * For what the stack uses it for -- IP ids, TCP initial sequence numbers,
+ * ephemeral ports, DHCP and DNS transaction ids, and TLS key agreement -- it is
+ * an improvement on the 32-bit LCG it replaces, at 21 ms once at init.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -63,12 +47,12 @@ extern "C" {
 
 /*
  * Gather from every source we have and mix into the pool.  Safe to call
- * repeatedly -- each call only ever adds.  Costs 21-22 ms on an emulated
- * 68020, nearly all of it in the E-Clock jitter sampling.  Called lazily by
- * the generation functions if nothing called it first, so there is no
- * ordering requirement; call it early anyway, from a context where 22 ms does
- * not matter, because the lazy path would otherwise land on whatever sends
- * the first packet.
+ * repeatedly; each call only ever adds.  Costs 21-22 ms on an emulated 68020,
+ * nearly all of it in the E-Clock jitter sampling.  Called lazily by the
+ * generation functions if nothing called it first, so there is no ordering
+ * requirement; call it early anyway, from a context where 22 ms does not
+ * matter, because the lazy path would otherwise land on whatever sends the
+ * first packet.
  */
 VOID ami_random_init(VOID);
 
@@ -79,7 +63,7 @@ VOID ami_random_init(VOID);
  * address, a boot count) rather than unpredictable.  The material is always
  * mixed regardless of the credit claimed.
  *
- * Never replaces the pool: a caller cannot make the state worse by supplying
+ * Never replaces the pool, so a caller cannot make the state worse by supplying
  * something bad, only fail to make it better.
  */
 VOID ami_random_add_entropy(const void *data, ULONG length, ULONG credit_bits);
@@ -93,9 +77,8 @@ ULONG ami_random_ulong(VOID);
 /*
  * This module's own running estimate of the entropy credited to the pool, in
  * bits, saturating at 256.  It is a bookkeeping figure derived from fixed
- * per-source guesses and a few "did this actually vary?" checks -- NOT a
- * measurement of the generator's output, and NOT evidence of anything to an
- * attacker.  Its only real job is to drive ami_random_is_seeded().
+ * per-source guesses and a few "did this vary?" checks, not a measurement of
+ * the generator's output.  Its job is to drive ami_random_is_seeded().
  */
 ULONG ami_random_entropy_bits(VOID);
 
@@ -107,10 +90,10 @@ BOOL ami_random_is_seeded(VOID);
  * NetX Duo and nx_secure macros at these.  ami_random_rand() returns
  * 0..0x7FFFFFFF like C's rand().
  *
- * ami_random_srand() MIXES its argument in and leaves the credit alone.  It
- * deliberately does not reset the generator: NX_SRAND exists so an
- * application can make a run reproducible, and honouring that literally would
- * turn a caller's convenience into a key-recovery bug.
+ * ami_random_srand() mixes its argument in and leaves the credit alone.  It
+ * does not reset the generator: NX_SRAND exists so an application can make a
+ * run reproducible, and honouring that literally would turn a caller's
+ * convenience into a key-recovery bug.
  */
 int  ami_random_rand(void);
 void ami_random_srand(unsigned int seed);

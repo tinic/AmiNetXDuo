@@ -8,9 +8,7 @@
 /*                                                                        */
 /*    tx_amiga_adopt_thread / tx_amiga_orphan_thread   AmigaOS/m68k       */
 /*                                                                        */
-/*  WHY THIS EXISTS                                                       */
-/*                                                                        */
-/*    NetX Duo suspends THE CALLING THREAD.  nx_tcp_socket_receive(),      */
+/*    NetX Duo suspends the calling thread.  nx_tcp_socket_receive(),      */
 /*    nx_packet_allocate(), nx_tcp_socket_send() and ~40 other core files  */
 /*    reach into the TX_THREAD control block of whoever called them and    */
 /*    park it on a suspension list (docs/RESEARCH.md 5.2).  On AmigaOS the */
@@ -18,58 +16,52 @@
 /*    either they become ThreadX threads (this file) or every socket call  */
 /*    is marshalled to a worker pool (docs/RESEARCH.md 6.3, option B).     */
 /*                                                                        */
-/*  HOW IT WORKS                                                          */
-/*                                                                        */
 /*    tx_amiga_adopt_thread() allocates one Exec signal in the calling     */
 /*    Task, then drives the ordinary _tx_thread_create() path with         */
 /*    _tx_amiga_adopt_task set, which makes _tx_thread_stack_build() bind  */
 /*    to the existing Task instead of spawning one.  The thread is created */
-/*    TX_AUTO_START, so it is READY the moment it exists, and the call     */
-/*    does not return until the Task holds the baton -- i.e. until it is   */
+/*    TX_AUTO_START, so it is ready the moment it exists, and the call     */
+/*    does not return until the Task holds the baton: until it is          */
 /*    _tx_thread_current_ptr and no other ThreadX thread is running.       */
 /*                                                                        */
 /*    Both create and delete happen with _tx_thread_system_state raised.   */
-/*    That is not decoration: _tx_thread_system_resume() ends in           */
-/*    _tx_thread_system_return() whenever the new thread outranks          */
-/*    _tx_thread_execute_ptr, and at that instant the calling Task is NOT  */
-/*    yet a ThreadX thread and does NOT hold the baton.  Raising           */
-/*    system_state turns those windows into "interrupt" context, where     */
-/*    ThreadX defers every context switch to the caller.                   */
+/*    _tx_thread_system_resume() ends in _tx_thread_system_return()        */
+/*    whenever the new thread outranks _tx_thread_execute_ptr, and at that */
+/*    instant the calling Task is not yet a ThreadX thread and does not    */
+/*    hold the baton.  Raising system_state turns those windows into       */
+/*    "interrupt" context, where ThreadX defers every context switch to    */
+/*    the caller.                                                          */
 /*                                                                        */
-/*  WHAT THE BATON DOES AND DOES NOT CLOSE -- read before using this       */
+/*    What holding the baton closes:                                       */
 /*                                                                        */
-/*    Closed: concurrent mutation of ThreadX ready lists, suspension       */
-/*    lists and _tx_thread_current_ptr by Exec's preemptive scheduler.     */
-/*    Every access is inside Forbid(), which stops all task switching,     */
-/*    and only the baton holder executes ThreadX code at all.              */
+/*    - concurrent mutation of ThreadX ready lists, suspension lists and   */
+/*      _tx_thread_current_ptr by Exec's preemptive scheduler.  Every      */
+/*      access is inside Forbid(), which stops all task switching, and     */
+/*      only the baton holder executes ThreadX code at all.                */
+/*    - an adopted Task being preempted by Exec mid-update.  Exec can      */
+/*      still preempt it (Forbid is not held between ThreadX calls), but   */
+/*      the preempting task cannot enter ThreadX unless it too holds the   */
+/*      baton, and it cannot while we do.                                  */
 /*                                                                        */
-/*    Closed: an adopted Task being preempted by Exec mid-update.  Exec    */
-/*    can still preempt it (Forbid is not held between ThreadX calls), but */
-/*    the preempting task cannot enter ThreadX unless it too holds the     */
-/*    baton, and it cannot hold the baton because we do.                   */
+/*    What it does not close:                                              */
 /*                                                                        */
-/*    NOT closed: an adopted Task that blocks on something other than      */
-/*    ThreadX while holding the baton.  Wait() on an Intuition port, a DOS */
-/*    packet or a device IORequest leaves the baton held by a task that    */
-/*    is not runnable, and the entire stack -- IP thread, timer thread,    */
-/*    every other socket user -- stops behind it.  Nothing in the port can */
-/*    detect this; it is a contract on the caller.  Hence: adopt on entry  */
-/*    to a stack call, orphan on exit, never hold the baton across         */
-/*    application code.                                                    */
+/*    - an adopted Task that blocks on something other than ThreadX while  */
+/*      holding the baton.  Wait() on an Intuition port, a DOS packet or a */
+/*      device IORequest leaves the baton held by a task that is not       */
+/*      runnable, and the entire stack -- IP thread, timer thread, every   */
+/*      other socket user -- stops behind it.  Nothing in the port can     */
+/*      detect this; the caller must adopt on entry to a stack call,       */
+/*      orphan on exit, and never hold the baton across application code.  */
+/*    - a Task terminated by Exec (or crashing) while adopted never        */
+/*      releases the baton.  A shared library can defend against the tidy  */
+/*      case (its own Close vector) but not against a Ctrl-C handler that  */
+/*      RemTask()s itself.                                                 */
+/*    - priority is bounded rather than closed.  A higher-priority         */
+/*      ThreadX thread made ready by the tick does not preempt the baton   */
+/*      holder asynchronously (see tx_thread_context_restore.c); it runs   */
+/*      at the holder's next ThreadX service call.                         */
 /*                                                                        */
-/*    NOT closed: a Task that is terminated by Exec (or crashes) while     */
-/*    adopted takes the baton to the grave.  A shared library can defend   */
-/*    against the tidy case (its own Close vector) but not against a       */
-/*    Ctrl-C handler that RemTask()s itself.                               */
-/*                                                                        */
-/*    Bounded, not closed: priority.  A higher-priority ThreadX thread     */
-/*    made ready by the tick does not preempt the baton holder             */
-/*    asynchronously -- see tx_thread_context_restore.c.  It runs at the   */
-/*    holder's next ThreadX service call.                                  */
-/*                                                                        */
-/*  THE FALLBACK, FOR COMPARISON (docs/RESEARCH.md 6.3, option B)         */
-/*                                                                        */
-/*    A worker pool would replace this file with, roughly:                */
+/*    The alternative (docs/RESEARCH.md 6.3, option B) is a worker pool:  */
 /*                                                                        */
 /*      - N ThreadX threads created by tx_thread_create(), each looping   */
 /*        on a tx_queue_receive() of request blocks;                      */
@@ -80,27 +72,24 @@
 /*        on completion;                                                  */
 /*      - a cancellation path, because WaitSelect() must abort on an Exec */
 /*        break signal while a worker is parked inside                    */
-/*        nx_tcp_socket_receive() -- that means tx_thread_wait_abort() on */
-/*        the worker plus a protocol for what the worker does next.       */
+/*        nx_tcp_socket_receive() -- tx_thread_wait_abort() on the worker */
+/*        plus a protocol for what the worker does next.                  */
 /*                                                                        */
-/*    What it buys: no application task ever holds the baton, so the      */
-/*    "adopted task blocks outside ThreadX" hazard disappears entirely,   */
-/*    and a crashing application cannot wedge the stack.                  */
+/*    It buys: no application task ever holds the baton, so the "adopted  */
+/*    task blocks outside ThreadX" hazard disappears and a crashing       */
+/*    application cannot wedge the stack.                                 */
 /*                                                                        */
-/*    What it costs: two extra Exec context switches AND a queue          */
-/*    round-trip per socket call instead of the direct path; one worker   */
-/*    tied up for the whole duration of every blocking call, so N bounds  */
-/*    the number of concurrently blocked sockets in the machine; and      */
-/*    WaitSelect() over M sockets becomes an M-worker problem or needs a  */
-/*    second, callback-driven mechanism.  It also needs a worker stack    */
-/*    per worker (4 KB each) whether or not anyone is using the stack --  */
-/*    on a 4 MB machine that is a standing cost, where adoption borrows   */
-/*    the caller's existing stack for free.                               */
+/*    It costs: two extra Exec context switches and a queue round-trip    */
+/*    per socket call; one worker tied up for the whole duration of every */
+/*    blocking call, so N bounds the number of concurrently blocked       */
+/*    sockets in the machine; WaitSelect() over M sockets becomes an      */
+/*    M-worker problem or needs a second, callback-driven mechanism; and  */
+/*    a 4 KB stack per worker as a standing cost on a 4 MB machine, where */
+/*    adoption borrows the caller's existing stack for free.              */
 /*                                                                        */
-/*    Adoption is the better trade here provided the "never block outside */
-/*    ThreadX while adopted" contract is kept inside bsdsocket.library,   */
-/*    where it is one library's discipline rather than every             */
-/*    application's.                                                      */
+/*    Adoption is the better trade provided the "never block outside      */
+/*    ThreadX while adopted" rule is kept inside bsdsocket.library, where */
+/*    it is one library's discipline rather than every application's.     */
 /*                                                                        */
 /**************************************************************************/
 
@@ -211,8 +200,8 @@ VOID        *stack_start;
     me =  FindTask((STRPTR) 0);
 
     /* The run signal must be allocated by the Task that will Wait() on it,
-       which is precisely why adoption has to happen on the caller's own
-       context and cannot be arranged on its behalf.  */
+       which is why adoption has to happen on the caller's own context and
+       cannot be arranged on its behalf.  */
     sig =  AllocSignal(-1);
     if (sig < 0)
     {
@@ -277,14 +266,14 @@ VOID        *stack_start;
 
 
 /*
- * Give the baton back and go dormant, keeping the TX_THREAD.
+ * Release the baton and go dormant, keeping the TX_THREAD.
  *
- * The order is the point.  The baton is dropped FIRST, so that by the time
- * _tx_thread_suspend() runs the thread is an ordinary ready thread rather than
- * the running one and _tx_thread_system_suspend() has nothing to switch away
- * from.  _tx_thread_system_state is raised across it for the same reason
- * tx_amiga_orphan_thread() raises it: a suspend that decides to switch would
- * do so on behalf of a Task that is no longer a ThreadX thread.
+ * The baton is dropped first, so that by the time _tx_thread_suspend() runs the
+ * thread is an ordinary ready thread rather than the running one and
+ * _tx_thread_system_suspend() has nothing to switch away from.
+ * _tx_thread_system_state is raised across it for the same reason
+ * tx_amiga_orphan_thread() raises it: a suspend that decides to switch would do
+ * so on behalf of a Task that is no longer a ThreadX thread.
  */
 UINT tx_amiga_adopt_suspend(TX_THREAD *thread_ptr)
 {
@@ -313,7 +302,7 @@ UINT         wake;
 
     sigmask =  thread_ptr -> tx_thread_amiga_run_signal;
 
-    /* Drop the baton before we stop being runnable.  */
+    /* Release the baton before we stop being runnable.  */
     if (_tx_thread_current_ptr == thread_ptr)
     {
         _tx_thread_current_ptr =  TX_NULL;
@@ -335,9 +324,9 @@ UINT         wake;
      * _tx_thread_execute_ptr == TX_NULL means no ThreadX thread is ready, so
      * the poke would wake the scheduler Task, have it find nothing and put it
      * back to sleep -- two Exec context switches, measured at 202 us on a
-     * 14 MHz 68020, which is a quarter of what this whole bracket used to
-     * cost.  Skipping it cannot lose a dispatch: every path that makes a
-     * thread ready afterwards wakes the scheduler itself, from an interrupt
+     * 14 MHz 68020, a quarter of what this bracket used to cost.  Skipping it
+     * cannot lose a dispatch: every path that makes a thread ready afterwards
+     * wakes the scheduler itself, from an interrupt
      * (tx_thread_context_restore.c) or from whoever holds the baton
      * (_tx_thread_system_return).  Read inside the Forbid() that lowers the
      * system state so the answer cannot be stale by the time it is used.
@@ -360,7 +349,7 @@ UINT         wake;
 
 
 /*
- * Come back out of dormancy and take the baton.  The tail of this is the same
+ * Come back out of dormancy and acquire the baton.  The tail is the same
  * fast-path-or-park as tx_amiga_adopt_thread(); only the registration is
  * skipped, because the thread is still registered.
  */
@@ -450,7 +439,7 @@ UINT tx_amiga_discard_thread(TX_THREAD *thread_ptr)
     }
 
     /* Somebody else's Task must not be left as the baton holder.  This should
-       be unreachable -- a dormant cached thread never is -- but a stale baton
+       be unreachable, since a dormant cached thread never is, but a stale baton
        stops the whole stack and costs nothing to rule out.  */
     if (_tx_thread_current_ptr == thread_ptr)
     {
@@ -520,7 +509,7 @@ UINT         wake;
         return(TX_SUCCESS);
     }
 
-    /* Drop the baton before we stop being a thread.  */
+    /* Release the baton before we stop being a thread.  */
     if (_tx_thread_current_ptr == thread_ptr)
     {
         _tx_thread_current_ptr =  TX_NULL;
@@ -541,7 +530,7 @@ UINT         wake;
     wake =  (_tx_thread_execute_ptr != TX_NULL) ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
     Permit();
 
-    /* Whoever is next may run now -- if there is anybody.  See the note in
+    /* Whoever is next may run now, if there is anybody.  See the note in
        tx_amiga_adopt_suspend() for why an empty execute pointer means the
        poke can be skipped, and what makes that safe.  */
     if (wake == (UINT) TX_TRUE)
@@ -549,7 +538,7 @@ UINT         wake;
         _tx_amiga_wake_scheduler();
     }
 
-    /* Drop anything that latched on the run signal, then give the bit back.  */
+    /* Drop anything that latched on the run signal, then free the bit.  */
     SetSignal(0UL, sigmask);
     sig =  _tx_amiga_sigbit(sigmask);
     if (sig >= 0)

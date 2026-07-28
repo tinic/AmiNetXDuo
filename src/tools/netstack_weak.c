@@ -1,17 +1,15 @@
 /*
  * AmiNetXDuo tools -- weak netstack_* stubs.
  *
- * src/netstack/ is being written by another workstream; include/aminetxduo/
- * netstack.h is the contract. These definitions are weak, so the real
- * implementation wins the moment it is linked in. Until then the tools link
- * and run on their own, and every stub fails in the way the tools already
- * handle: the stack is simply not up. That is also the state a user meets
- * first, so it is worth exercising.
+ * src/netstack/ is being written by another workstream; the declarations are in
+ * include/aminetxduo/netstack.h. These definitions are weak, so the real
+ * implementation wins the moment it is linked in. Until then the tools link and
+ * run on their own and every stub fails as "the stack is not up", which the
+ * tools already handle.
  *
  * Delete this file once src/netstack exists and is linked into the tools.
  *
- * The same trick, for the same reason, is used by
- * src/bsdsocket/netstack_weak.c.
+ * src/bsdsocket/netstack_weak.c uses the same trick.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -94,8 +92,8 @@ TOOL_WEAK LONG netstack_resolve_reverse(ULONG addr, char *name_out,
 /*
  * ThreadX's tx_kernel_enter() calls this, and the linker pulls
  * tx_initialize_kernel_enter.c in behind tx_amiga_kernel_running(). No tool
- * ever starts the kernel -- the stack does that -- so this exists only to
- * satisfy the reference, weakly, so that the stack's own definition wins.
+ * starts the kernel -- the stack does -- so this only satisfies the reference,
+ * weakly, letting the stack's own definition win.
  */
 TOOL_WEAK VOID tx_application_define(void *first_unused_memory)
 {

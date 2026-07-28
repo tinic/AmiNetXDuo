@@ -1,28 +1,27 @@
 /*
- * StatProbe -- does GetNetworkStatistics() report the stack that is running?
+ * StatProbe -- checks that GetNetworkStatistics() reports the running stack.
  *
- * The call hands back 4.4BSD's own kernel statistics structures by value, so
- * there are three separate things a build cannot check and this can:
+ * The call hands back 4.4BSD's own kernel statistics structures by value.
+ * Three things a build cannot check and this can:
  *
- *   1. THE RETURN VALUE IS A BYTE COUNT. Not zero-on-success and not an entry
- *      count -- the two other readings the prototype allows. A NULL
+ *   1. The return value is a byte count, not zero-on-success and not an entry
+ *      count -- the two other readings the prototype allows.  A NULL
  *      destination asks how much would be needed and copies nothing.
  *
- *   2. THE NUMBERS ARE THE RUNNING STACK'S. This machine got its address by
- *      DHCP over UDP, so udps_ipackets and ips_total cannot be zero. A stub
+ *   2. The numbers are the running stack's.  This machine got its address by
+ *      DHCP over UDP, so udps_ipackets and ips_total cannot be zero.  A stub
  *      returning a zeroed struct of the right size passes every structural
  *      check and fails these.
  *
- *   3. pcd_tcp_state IS 4.4BSD's ENUMERATION, NOT NetX Duo's, and A BSD
- *      listen() IS ONE ENTRY. Both halves are asserted by the same
- *      experiment. The enumerations agree up to CLOSE_WAIT and diverge after
- *      it. And this stack implements one listening descriptor as TWO
- *      NX_TCP_SOCKETs -- the descriptor's own, left in CLOSED, and a spare
+ *   3. pcd_tcp_state is 4.4BSD's enumeration, not NetX Duo's, and a BSD
+ *      listen() is one entry.  The enumerations agree up to CLOSE_WAIT and
+ *      diverge after it.  This stack implements one listening descriptor as
+ *      two NX_TCP_SOCKETs -- the descriptor's own, left in CLOSED, and a spare
  *      parked on the port in SYN_RECEIVED (src/bsdsocket/socket.c) -- so a
- *      literal report would show one listen() as two sockets, on one port,
- *      neither of them listening and one of them apparently mid-handshake
- *      with nobody. The probe listens on a port and asserts that exactly one
- *      entry appears and that its state is TCPS_LISTEN.
+ *      literal report would show one listen() as two sockets on one port,
+ *      neither listening and one apparently mid-handshake with nobody.  The
+ *      probe listens on a port and asserts that exactly one entry appears and
+ *      that its state is TCPS_LISTEN.
  *
  * Vectors are called by hand at their LVOs, the same way routeprobe.c and
  * ifprobe.c do: the NDK inlines assume a global SocketBase.
