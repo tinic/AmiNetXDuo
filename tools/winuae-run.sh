@@ -219,6 +219,19 @@ case "$MODEL" in
 esac
 [ -z "$CPU" ] || CPU_MODEL="$CPU"
 
+# Enforcer traps through a real MMU. A 68020 has none, and mmu_model=68020 is
+# not a thing WinUAE accepts, so its PMOVEs take an F-line exception and it
+# spins there: the log fills with `B-Trap F017` and nothing else runs. Move up
+# to the smallest CPU that has an MMU on board.
+WANT_ENFORCER="${AMINETXDUO_WINUAE_ENFORCER:-0}"
+if [ "$WANT_ENFORCER" = "1" ]; then
+    case "$CPU_MODEL" in
+        68030|68040|68060) ;;
+        *) echo "==> Enforcer needs an MMU: $CPU_MODEL -> 68030"
+           CPU_MODEL=68030; [ "$FPU_MODEL" = 0 ] && FPU_MODEL=68882 ;;
+    esac
+fi
+
 # ---------------------------------------------------------------- boot ROM --
 #
 # Kickstart first, AROS as the fallback -- the reverse of what CI wants, and
@@ -276,6 +289,29 @@ mkdir -p "$HD/s" "$HD/c" "$HD/env" "$HD/envarc" "$HD/t" "$HD/clips" "$ROOT/build
 
 cp "$EXE" "$HD/$EXE_NAME"
 cp "$EXE" "$HD/c/$EXE_NAME"
+
+# AMINETXDUO_WINUAE_ENFORCER=1 installs Enforcer before the executable and
+# turns the MMU on below.  FS-UAE cannot bridge, so tools/enforcer-run.sh
+# cannot watch a run on a real network; WinUAE emulates the 68030 MMU, so this
+# is the only way to put Enforcer on a bridged fault.
+ENFORCER_BIN="${AMINETXDUO_ENFORCER:-$HOME/amiga-os-src/os-source/v40/aug/bin/enforcer}"
+if [ "$WANT_ENFORCER" = "1" ]; then
+    [ -f "$ENFORCER_BIN" ] || {
+        echo "Enforcer not found at $ENFORCER_BIN; set AMINETXDUO_ENFORCER=<path>." >&2
+        exit 2; }
+    cp "$ENFORCER_BIN" "$HD/c/enforcer"
+
+    # Enforcer is a resident tool started with `run`; without a wait after it
+    # the program under test starts before it has installed.
+    WAITSECS="$ROOT/build/waitsecs"
+    if [ ! -x "$WAITSECS" ] || [ "$ROOT/tools/enforcer/waitsecs.c" -nt "$WAITSECS" ]; then
+        AMIGA_TOOLCHAIN_QUIET=1 . "$ROOT/tools/amiga-toolchain.sh"
+        "$AMIGA_GCC" -O2 -m68020 -I"$AMIGA_NDK" -o "$WAITSECS" \
+            "$ROOT/tools/enforcer/waitsecs.c" \
+            || { echo "failed to build waitsecs" >&2; exit 2; }
+    fi
+    cp "$WAITSECS" "$HD/c/waitsecs"
+fi
 for extra in "$@"; do
     cp -R "$extra" "$HD/"
 done
@@ -311,9 +347,24 @@ QUIT_LINE=""
 # bsdsocket.library rather than linking the stack -- wants an
 # AddNetInterface here, and the library and DEVS:NetInterfaces staged as
 # extra files.
+# Enforcer needs a real MMU and no JIT cache: it traps through the MMU tables,
+# and a cached translation would let a bad access through unseen.
+ENFORCER_MMU=""
+if [ "$WANT_ENFORCER" = "1" ]; then
+    ENFORCER_MMU="mmu_model=$CPU_MODEL
+cachesize=0"
+fi
+
+ENFORCER_LINES=""
+if [ "$WANT_ENFORCER" = "1" ]; then
+    ENFORCER_LINES="run >NIL: <NIL: c:enforcer FSPACE
+c:waitsecs 5"
+fi
+
 cat > "$HD/s/Startup-Sequence" <<EOF
 failat 9999
 c:envsetup
+$ENFORCER_LINES
 ${AMINETXDUO_GUEST_PRECMD:-}
 $EXE_NAME $GUEST_ARGS >DH0:stdout.txt
 echo >DH0:.done "\$RC"
@@ -335,6 +386,7 @@ cat <<EOF
 cpu_type=$CPU_MODEL
 cpu_model=$CPU_MODEL
 fpu_model=$FPU_MODEL
+${ENFORCER_MMU:-}
 cpu_24bit_addressing=false
 chipset=$CHIPSET
 chipset_compatible=$COMPAT
@@ -431,6 +483,13 @@ scp -q "$HOST:$RRUN_FWD/serial.log" "$SERIAL" 2>/dev/null || : > "$SERIAL"
 
 REASON=$(printf '%s' "$RESULT" | sed -n 's/.*reason=\([a-z]*\).*/\1/p')
 RC=$(printf '%s' "$RESULT" | sed -n 's/.*rc=\([0-9-]*\).*/\1/p')
+EXITCODE=$(printf '%s' "$RESULT" | sed -n 's/.*exit=\(0x[0-9A-Fa-f]*\).*/\1/p')
+[ -n "$EXITCODE" ] || EXITCODE="an exception Windows would not report"
+
+winuae_log_tail() {
+    echo "---- WinUAE log (faults and warnings) ----"
+    ssh "$HOST" "findstr /i \"illegal exception guru trap error unknown\" \"C:\\Users\\Public\\Documents\\Amiga Files\\WinUAE\\winuaelog.txt\"" 2>/dev/null | tail -15 || echo "(none logged)"
+}
 
 echo "---- serial ($SERIAL) ----"
 if [ -s "$SERIAL" ]; then cat "$SERIAL"; else echo "(empty -- no ami_log output reached the serial port)"; fi
@@ -445,9 +504,33 @@ done
 [ -f "$HD/crash.txt" ] && { echo "---- CRASH ----"; cat "$HD/crash.txt"; }
 
 case "$REASON" in
-    done|quit)
+    done)
         status=${RC:-0}
         echo "==> exit status $status ($RESULT)"
+        ;;
+    quit)
+        # UAEquit is the normal end, so RC is there. Without it the emulator
+        # went away before the guest finished, and reporting the empty RC as 0
+        # turns that into a pass -- which is how a WinUAE that died mid-suite
+        # read as a truncated but successful run for three attempts.
+        if [ -n "$RC" ]; then
+            status=$RC
+            echo "==> exit status $status ($RESULT)"
+        else
+            echo "!! WinUAE exited before the guest wrote DH0:.done [$RESULT]" >&2
+            winuae_log_tail
+            status=125
+        fi
+        ;;
+    crash)
+        # The guest did not reset: the emulator process took a Windows
+        # exception. docs/RESEARCH.md 63.4 has the one that bites here, a
+        # frame larger than 4000 bytes arriving on a bridged A2065.
+        echo "!! WinUAE died with $EXITCODE; the guest did not reset [$RESULT]" >&2
+        echo "!! see docs/RESEARCH.md 63.4 -- on a bridged run this is usually an oversized" >&2
+        echo "!! receive frame, and the Windows Application event log names winuae64.exe" >&2
+        winuae_log_tail
+        status=125
         ;;
     busy)
         echo "!! another WinUAE run holds the machine and did not release it in time" >&2
@@ -459,8 +542,7 @@ case "$REASON" in
         ;;
     *)
         echo "==> TIMEOUT after ${TIMEOUT}s (no DH0:.done) [$RESULT]"
-        echo "---- WinUAE log (faults and warnings) ----"
-        ssh "$HOST" "findstr /i \"illegal exception guru trap error unknown\" \"C:\\Users\\Public\\Documents\\Amiga Files\\WinUAE\\winuaelog.txt\"" 2>/dev/null | tail -15 || echo "(none logged)"
+        winuae_log_tail
         status=124
         ;;
 esac

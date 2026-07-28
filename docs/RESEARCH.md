@@ -16677,7 +16677,7 @@ Also `nx_tcp_packet_process.c` (four `dereference of NULL 'source_ip'`),
 `nx_crypto_drbg.c:200` uninitialised `temp[]`, an overlapping `memcpy` reached from
 `_nx_secure_session_keys_set`, and two `deref-before-check`.
 
-## 63. A bridged network, and the two defects it found (2026-07-28)
+## 63. A bridged network, and what it found (2026-07-28)
 
 FS-UAE cannot bridge: its A2065 has three backends, all SLIRP or nothing, and
 `uae_slirp_redir` is an empty function in every slirp it ships (60). WinUAE on
@@ -16713,12 +16713,10 @@ host tier: asked for 320, still reports 256. Nothing to do with the network.
 Fixed: `BSD_MAX_DTABLESIZE` was 256, so the resize refused anything above the
 default. The ceiling is now 1024 and the table grows for real.
 
-**The guest hard-resets at the first bulk transfer over the bridge.** Test 39,
-`tcp_network_64k`: connect to the helper's echo service and push 8 x 8 KB.
-`Reset at 00000000, hardreset, memory cleared` in the WinUAE log, nothing on
-the serial line, no `DH0:.done`. Reproduced three times. The helper records the
-control connection and is never asked to dial back, so the guest dies in its
-own setup rather than in the inbound path, and no `RECEIVE BUFFER ERROR`
+**The run dies at the first bulk transfer over the bridge.** Test 39,
+`tcp_network_64k`: connect to the helper's echo service and push 8 x 8 KB. The
+TAP log stops after test 15, nothing more reaches the serial line, and no
+`DH0:.done` is written. Reproduced three times. No `RECEIVE BUFFER ERROR`
 accompanies it -- the obvious guess, that the Lance receive ring overruns on a
 fast link, is not supported.
 
@@ -16727,10 +16725,89 @@ with the host tier is 18/19 dialling out to 10.0.2.2, so the host tier alone is
 fine; its one failure is the helper dialling back, which SLIRP cannot do. The
 crash needs both.
 
-### Why this is awkward to debug
+### 63.4 The guest never reset -- WinUAE did
+
+Two things sent this one the wrong way for three runs.
+
+`Reset at 00000000. Chipset mask = 00000007` and `hardreset, memory cleared`
+are the power-on reset. They are at lines 114 and 175 of a fresh
+`winuaelog.txt`; the A2065 is not autoconfigured until line 181. There is no
+second reset, and after the crash the log simply stops.
+
+And the harness called it a pass. `run.ps1` reported `reason=quit` for any
+emulator that was no longer running, `winuae-run.sh` read the missing rc as 0,
+and a run that ended with the emulator dead printed `exit status 0`. Both are
+fixed: a process that is gone before `DH0:.done` exists is `reason=crash` and
+the run fails.
+
+What actually happens is that `winuae64.exe` 6.0.3 takes an access violation.
+Windows Application event log, once per attempt:
+
+    Faulting application name: winuae64.exe, version: 6.0.3.0
+    Exception code: 0xc0000005   Fault offset: 0x00000000016043c7
+
+`pktmon` on the bridged adapter, filtered to the helper, says why. Among ~600
+normal frames the echo service sends these:
+
+    BC-24-11-7C-B9-B6 > 00-80-10-49-00-01, IPv4, length 11734:
+      192.168.1.184.8701 > 192.168.1.133.52483: Flags [P.], length 11680
+
+11680 is 8 x 1460 -- eight TCP segments delivered as one frame. WinUAE 6.0.3's
+A2065 receive callback is `gotfunc2()` in `a2065.cpp`, and it starts
+
+    uae_u8 tmp[MAX_PACKET_SIZE];   /* MAX_PACKET_SIZE is 4000 */
+    ...
+    memcpy (tmp, databuf, len);
+
+with no bound on `len` anywhere on the path, then appends four more bytes of
+FCS. 11734 bytes into a 4000-byte stack buffer ends the process.
+
+The frames are a virtual-network artefact. `playhouse2` is a container whose
+`eth0` is a veth, `winbuilder` is a VM on a virtio adapter, and between them
+the path is veth -> bridge -> virtio, where Linux GSO segments are carried
+whole. Neither obvious remedy helps: disabling Receive Segment Coalescing on
+the Windows adapter changes nothing, and moving the helper to a physical
+machine on the wire changes nothing either -- frames up to 32858 bytes still
+arrive.
+
+**The discriminator: a different stack, same everything else.** Roadshow 4.364
+staged in place of ours -- same `bsdsocktest` binary, same emulator, same
+bridge, same helper -- dies at the same test, and the event log records the
+same fault offset `0x16043c7`. `# bsdsocket.library: Roadshow 4.364 (1.9.2023)
+DEMO` in its TAP log. Nothing of ours is on the failing path; the frame is
+destroyed before any guest code sees it.
+
+Our own receive path was checked while the emulator was under suspicion and is
+bounded: `ami_sana2_copy_to_buff()` rejects `len > slot->capacity` and
+`ami_sana2_rx_complete()` rejects the same on `ios2_DataLength`.
+
+Upstream fixed it after 6.0.3, in `8da8821d49` (2026-05-30), which adds
+
+    if (len <= 0 || len > MAX_PACKET_SIZE)
+        return;
+
+to `gotfunc()`. No release carries it: 6.0.3 is the latest, and the published
+beta binary is older than the release.
+
+**The constraint this leaves.** On a bridged WinUAE 6.0.3, the host tier's bulk
+tests cannot run at all if the Windows adapter delivers coalesced frames. Tests
+that stay under 4000 bytes per frame are unaffected, which is why bridged
+without the host tier is 141/142. A WinUAE built from master lifts the crash
+but not the drops, so the tier is blocked on a host that does not coalesce
+rather than on a WinUAE version.
+
+### Why this was awkward to debug
 
 Enforcer needs an MMU and runs under FS-UAE, which cannot bridge -- so the one
 configuration that crashes is the one configuration Enforcer cannot watch.
 WinUAE's own SLIRP does not expose the host at 10.0.2.2 the way FS-UAE's does,
 so the obvious bisect (same emulator, different network) could not be run
 either: the suite reports `Bail out! Could not connect to host helper`.
+
+`AMINETXDUO_WINUAE_ENFORCER=1` now puts Enforcer on a bridged run, which is the
+gap that left. Two things it needs: a CPU with an MMU, because the conformance
+profile is an A1200 and `mmu_model=68020` makes every `PMOVE` take an F-line
+exception -- thousands of `B-Trap F017` and nothing else runs -- and `waitsecs`
+staged, so a resident tool started with `run` has installed before the program
+under test starts. It reported no hits here, which is correct: the fault is on
+the host side of the emulator.

@@ -26,6 +26,13 @@
 # rpcap:// prefix.  Without it this runs on SLIRP and the HOST tier cannot
 # pass.
 #
+# THE HOST TIER'S BULK TESTS DO NOT RUN ON A HOST THAT COALESCES RECEIVES.
+# WinUAE 6.0.3 copies a captured frame into a 4000-byte buffer without
+# checking its length, so the first coalesced frame -- 11734 bytes on
+# winbuilder, where both ends of the LAN are virtual -- kills the emulator
+# mid-suite.  Roadshow dies identically, so this is not ours; docs/RESEARCH.md
+# 63.4 has the measurement and the upstream commit that fixes it.
+#
 # -b (or AMINETXDUO_BUILD) picks the build tree the library comes from, so the
 # floor build and an -DAMINETXDUO_IPV6=ON build can both be measured.
 #

@@ -18,6 +18,11 @@
 # same reason FS-UAE's harness does it that way: WinUAE's own exit code says
 # nothing about the program under test.
 #
+# There is a fourth way: WinUAE dies of its own unhandled exception, which
+# leaves the same "process is gone" the normal path leaves and no DH0:.done.
+# That is reported as reason=crash, with the NTSTATUS Windows put in the exit
+# code, so the caller does not read it as a guest that finished quietly.
+#
 # SPDX-License-Identifier: MIT
 
 param(
@@ -94,6 +99,18 @@ while ($sw.Elapsed.TotalSeconds -lt $Timeout) {
 # directory filesystem a moment before deciding it was never written.
 if ($reason -eq "quit" -and -not (Test-Path $done)) { Start-Sleep -Milliseconds 1500 }
 
+# Gone before DH0:.done was written means the emulator died, not that the run
+# finished; without this the caller reads the missing rc as 0 and reports a
+# pass. Windows leaves the NTSTATUS in the exit code when it was an unhandled
+# exception, 0xC0000005 for an access violation, but does not always let us
+# read it back off a process we did not start.
+$exitstr = "?"
+if ($emu.HasExited) {
+    $ec = $emu.ExitCode
+    if ($null -ne $ec) { $exitstr = "0x{0:X8}" -f $ec }
+    if (-not (Test-Path $done)) { $reason = "crash" }
+}
+
 if (-not $emu.HasExited) {
     Stop-Process -Id $emu.Id -Force -ErrorAction SilentlyContinue
     # A killed emulator leaves the serial collector blocked on a socket that
@@ -104,6 +121,6 @@ if (-not $emu.HasExited) {
 
 $rc = ""
 if (Test-Path $done) { $rc = (Get-Content -Raw $done).Trim() }
-Write-Output ("WINUAE-RESULT reason={0} rc={1} seconds={2:N1}" -f $reason, $rc, $sw.Elapsed.TotalSeconds)
+Write-Output ("WINUAE-RESULT reason={0} rc={1} seconds={2:N1} exit={3}" -f $reason, $rc, $sw.Elapsed.TotalSeconds, $exitstr)
 
 $mutex.ReleaseMutex()
