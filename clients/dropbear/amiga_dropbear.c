@@ -1119,7 +1119,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
         if (amiga_sock_init() != 0)
             return -1;
 
-        if (other_ready > 0)
+        if (other_ready > 0 || con_readable())
         {
             tv_zero.tv_sec  = 0;
             tv_zero.tv_usec = 0;
@@ -1131,14 +1131,19 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
         }
 
         /* Wait on the console keystroke signal alongside the sockets, so a key
-           wakes the same WaitSelect() the socket does -- the whole point.  Take
-           Ctrl-C as a USER signal too: keeping it out of the break mask stops
-           WaitSelect from returning EINTR and the library reposting it, which is
-           the spin that locked the session up.  During an interactive session
-           Ctrl-C is a keystroke for the remote, not a local abort. */
+           wakes the same WaitSelect() the socket does -- the whole point.
+           ALWAYS include it while watching the console, never conditionally on
+           the ring being empty: a byte can land between the readiness check
+           above and here, and excluding the signal then would block with the
+           byte already queued and its wake-up not in the mask -- a lost wakeup
+           that hangs until some other signal (Ctrl-C) happens to arrive.  A
+           stale signal only costs one harmless spurious wakeup.
+           Ctrl-C rides the same USER mask: kept out of the break mask, it is
+           consumed here rather than returning EINTR and being reposted (the
+           spin that locked up), and fed to the remote as ^C. */
         sigs = 0;
-        if (con_watch && !con_readable()) sigs |= con_reader->cr_DataSig;
-        if (con_active())                 sigs |= SIGBREAKF_CTRL_C;
+        if (con_watch)    sigs |= con_reader->cr_DataSig;
+        if (con_active()) sigs |= SIGBREAKF_CTRL_C;
 
         rc = nx_waitselect(sock_n, &sock_r, &sock_w, NULL, (APTR)tv, &sigs);
         if (rc < 0)
