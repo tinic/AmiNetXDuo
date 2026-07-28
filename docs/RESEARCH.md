@@ -15885,6 +15885,11 @@ of this shape GCC 15.2 is not leaving instruction selection on the table, and
 the disassembly agrees: 25 `MULU.L` where the algorithm says 25, and 75
 rotates in the ChaCha20 object.
 
+**That last paragraph did not survive the move to `-Os`.** Instruction *selection*
+was never the question -- register *allocation* was, and §57 measured the cipher
+losing 22.3% to it. §58 is the ChaCha20 block function in assembly and the 33% it
+gave back. Poly1305's half of the claim still stands.
+
 ### 54.4 The record framing, which is where the work actually was
 
 RFC 7905 is **not** the GCM framing with a different cipher underneath it.
@@ -16194,3 +16199,111 @@ and `__ashrdi3` are now all provided, rather than only the one that happened to 
 which of them an `-Os` build needs is a property of the code the optimiser happens to see,
 and finding the next one as a link failure in an unrelated commit is not worth two
 functions.
+
+## 58. ChaCha20, hand-scheduled: sixteen words, fifteen registers and EXG (2026-07-27)
+
+§57 identified the cipher as the one place `-Os` cost something real and said the answer
+was to write the kernel. `src/crypto68k/c68k_chacha20.S` is that kernel, written here from
+RFC 8439 §2.3 as the C beside it was, and it beats the `-O3` C as well as the `-Os` C.
+
+### The whole problem is which words are in registers
+
+A quarter-round is four `ADD.L`, four `EOR.L` and four rotates, and **all four operands
+must be in DATA registers**. Not three and an address register: `EOR` has no `An` source
+and no `An` destination and neither do the rotates, and `a` -- which is only ever added to
+-- is still read by `d ^= a`. So the eight data registers hold exactly two quarter-rounds,
+a double round is four such groups,
+
+    G1  QR(0,4,8,12)  QR(1,5,9,13)      G3  QR(0,5,10,15) QR(1,6,11,12)
+    G2  QR(2,6,10,14) QR(3,7,11,15)     G4  QR(2,7,8,13)  QR(3,4,9,14)
+
+and the exchange count is forced by the cipher rather than chosen: G1 and G2 are disjoint,
+so are G3 and G4, and *every* diagonal quarter-round takes one word from each column
+quarter-round, so any column pair and any diagonal pair share exactly four words however
+the four are paired. 8 + 4 + 8 + 4 = **24 word exchanges a double round**, and no
+scheduling beats it.
+
+### Where the other eight words live, which is the measurement that decided it
+
+Three new rows in `c68k_bulk_kernels.S`, because this was not obvious:
+
+| | cycles |
+|---|---:|
+| `MOVE.L Dm,d16(An)` + `MOVE.L d16(An),Dm` -- a stack spill, round trip | 13.80 |
+| `MOVEA.L Dn,An` + `MOVE.L An,Dn` | 4.00 |
+| **`EXG Dn,An`** | **4.01** |
+
+The seven address registers are the store, at a third of what the stack costs. But the
+pair of MOVEs **cannot be used**: there is no ninth data register to stage the outgoing
+word through. `EXG` is the entire exchange in one instruction at the price of the two
+MOVEs and with no temporary -- it retires the word a data register has finished with and
+produces the next one in the same register, which is exactly the primitive the schedule
+wants. That does not happen often.
+
+Eight data plus seven address registers is fifteen homes for sixteen words, so one word is
+on the stack at any moment, and **which one is chosen rather than left to chance**. A word
+resident in adjacent groups is exchanged once a double round; a word resident in G1 and G3,
+or G2 and G4, twice. There are two once-only words to place -- x15 (in G2 and G3, so on the
+stack across G4 and G1) and x9 (the reverse) -- and they hand over in `d6`, the one data
+register that touches memory inside the loop. That is what turns 24 exchanges into **22
+`EXG`, one store and one load**: 115.6 cycles of state traffic against 336 of arithmetic,
+where at `-O3` the spills roughly doubled the arithmetic.
+
+The map repeats every double round, which it has to for the body to be a loop:
+
+    d0 x0  d1 x4  d2 x8  d3 x12  d4 x1   d5 x5   d6 x9   d7 x13
+    a0 x2  a1 x3  a2 x6  a3 x7   a4 x10  a5 x11  a6 x14   stack x15
+
+It was derived on paper, then simulated register by register against RFC 8439 §2.3.2
+before a line of assembly was typed.
+
+### The sixth of the cipher that was not the cipher
+
+The block exclusive-or is seven instructions a word -- load, the three-instruction byte
+reversal, load, `EOR`, store -- and at `-O3` that is what it compiled to. At `-Os` GCC gave
+every word **two `LEA`s, a reloaded `moveq #64` and the 68020's full-extension
+double-indexed addressing for both the load and the store**: about 64 cycles a word where
+37 buys the same four bytes. Post-increment addressing is the whole fix and there is
+nothing to schedule; it is in the same file because it was a sixth of the cipher, not
+because it is interesting.
+
+### What it did
+
+`tests/crypto68k/crypto68k_bulk`, cycle-accurate 68020, same run as §57:
+
+| | -O3 C | -Os C | **-Os + assembly** | vs -Os | vs -O3 |
+|---|---:|---:|---:|---:|---:|
+| **ChaCha20 alone** | 132,847 | 162,413 | **109,305** | **-32.7%** | **-17.7%** |
+| Poly1305 alone (still C) | 182,297 | 193,691 | 194,167 | — | — |
+| **AEAD, one whole record** | 316,156 | 358,142 | **304,696** | **-14.9%** | **-3.6%** |
+
+The cipher is 145 KB/s where it was 97, the `-Os` regression is gone, and the record path
+is faster than it ever was at `-O3`. **A buffer starting one byte in still costs 1.3%**
+(110,717 against 109,305), which is the alignment a TLS record's payload actually has and
+the misaligned `MOVE.L` doing its job.
+
+### Two things this does not claim
+
+The body is **270 bytes against a 256-byte instruction cache**, and it overhangs. It is not
+unrolled further for that reason -- two double rounds would be 540 bytes -- but the
+overhang is real on hardware and **this emulator does not charge for it**: the cache sweep
+in section 1 reports a 2048-byte straight-line body at 144.5 ns per `ADD.L` against a
+256-byte body's 150.0, which is the wrong way round and says instruction fetch is close to
+free in the model. Every figure above is therefore a lower bound on a real 68EC020.
+
+And **the C core stays compiled and reachable in the assembly build**, which is the point
+of `c68k_chacha20_core_c()` being in the header. `crypto68k_bulk` now runs both over eight
+consecutive blocks and compares them before it times either -- RFC 8439's vectors check one
+block and one keystream, and an assembly bug that only appeared once the counter had
+advanced would pass those.
+
+### Poly1305 is next, and it is a smaller win than it looks
+
+Poly1305 is now **64% of the record** (194,167 of 304,696). It is worth the same treatment,
+but not the same expectations: §54 counted **25 `MULU.L` per 16-byte block** and this
+emulator charges 32 cycles for each where a 68020 charges 43, so on real hardware roughly
+1,075 of about 2,900 cycles a block are a single instruction nobody can schedule away. What
+is addressable is the other two thirds -- the 130-bit accumulate, where the part has
+`ADDX.L` and the `MULU.L Dy,Dh:Dl` 64-bit product in a register pair, and C can only reach
+either through `unsigned long long` and this toolchain's zero-byte `libgcc.a`. Expect
+20-30%, not the third ChaCha20 gave up.

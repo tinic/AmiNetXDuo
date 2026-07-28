@@ -128,11 +128,12 @@ set(CRYPTO68K_SOURCES
     c68k_p256_table.c
     c68k_aes.c
     c68k_sha256.c
-    # ChaCha20-Poly1305, the AEAD record path.  No assembly counterpart and
-    # none planned: the cipher is add, rotate and exclusive-or on 32-bit words
-    # and the authenticator is MULU.L, which is to say both are already the
-    # instructions 18.4 established this GCC picks well.  See
-    # docs/RESEARCH.md 54.
+    # ChaCha20-Poly1305, the AEAD record path.  The cipher's block function
+    # has a 68020 counterpart in c68k_chacha20.S -- sixteen state words against
+    # eight data registers is a scheduling problem and 57 measured what leaving
+    # it to the compiler costs.  The C core stays compiled in the assembly
+    # build as the reference the tests compare against.  Poly1305 has no
+    # counterpart: it is MULU.L, which 18.4 established this GCC picks well.
     c68k_chacha20.c
     c68k_poly1305.c
     # X25519 and Ed25519.  No assembly counterpart: the win is the field
@@ -144,7 +145,7 @@ set(CRYPTO68K_SOURCES
 
 if(AMINETXDUO_CRYPTO68K_ASM)
     list(APPEND CRYPTO68K_SOURCES
-         c68k_prim.S c68k_p256.S c68k_aes.S)
+         c68k_prim.S c68k_p256.S c68k_aes.S c68k_chacha20.S)
 endif()
 
 add_library(crypto68k STATIC ${CRYPTO68K_SOURCES})
@@ -165,7 +166,7 @@ if(AMINETXDUO_CRYPTO68K_ASM)
     # nothing else in the tree changes behaviour.
     target_compile_definitions(crypto68k PRIVATE C68K_ASM=1)
     set_source_files_properties(
-        c68k_prim.S c68k_p256.S c68k_aes.S PROPERTIES
+        c68k_prim.S c68k_p256.S c68k_aes.S c68k_chacha20.S PROPERTIES
         COMPILE_DEFINITIONS C68K_ASM=1
         COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
 endif()

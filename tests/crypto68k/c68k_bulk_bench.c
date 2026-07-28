@@ -134,6 +134,9 @@ extern VOID bk_ror8(ULONG reps);
 extern VOID bk_rorreg(ULONG reps);
 extern VOID bk_lsr3(ULONG reps);
 extern VOID bk_addself(ULONG reps);
+extern VOID bk_exg_da(ULONG reps);
+extern VOID bk_movel_ad(ULONG reps);
+extern VOID bk_movel_da(ULONG reps);
 extern VOID bk_idx1k(APTR table, ULONG reps);
 extern VOID bk_idx4k(APTR table, ULONG reps);
 extern VOID bk_idxb(APTR table, ULONG reps);
@@ -283,6 +286,9 @@ static VOID b_bench_kernels(VOID)
     b_report_ps("ROR.L  #8,Dn            ", b_time_reg(bk_ror8, B_KERNEL_REPS));
     b_report_ps("ROR.L  Dm,Dn  (count 13)", b_time_reg(bk_rorreg, B_KERNEL_REPS));
     b_report_ps("LSR.L  #3,Dn            ", b_time_reg(bk_lsr3, B_KERNEL_REPS));
+    b_report_ps("EXG    Dn,An            ", b_time_reg(bk_exg_da, B_KERNEL_REPS));
+    b_report_ps("MOVE.L An,Dn            ", b_time_reg(bk_movel_ad, B_KERNEL_REPS));
+    b_report_ps("MOVEA.L Dn,An           ", b_time_reg(bk_movel_da, B_KERNEL_REPS));
 
     if (b_table != NULL)
     {
@@ -966,6 +972,56 @@ UINT            i;
     b_check("RFC 8439 2.8.2 tag on decrypt", b_tag, b_aead_tag, 16uL);
 }
 
+/*
+ * The block function this build ships against the portable C one, eight
+ * blocks deep.  RFC 8439's vectors check one block and a keystream; this
+ * checks that the register schedule in c68k_chacha20.S is still the same
+ * function after the counter has advanced, which is what an assembly bug
+ * that only appeared on the second block would look like.  It costs nothing
+ * on a build with no assembly, where it compares the C against itself.
+ */
+#define B_CC_BLOCKS     8u
+
+static VOID b_chacha_check_core(VOID)
+{
+
+static UCHAR    got[B_CC_BLOCKS * 64u];
+static UCHAR    want[B_CC_BLOCKS * 64u];
+ULONG           st[16];
+ULONG           ks[16];
+UINT            b;
+UINT            i;
+UINT            o;
+
+
+    c68k_chacha20_initialize(&b_cc, b_aead_key, b_aead_nonce, 1uL);
+    c68k_chacha20_keystream(&b_cc, got, (ULONG)(B_CC_BLOCKS * 64u));
+
+    c68k_chacha20_initialize(&b_cc, b_aead_key, b_aead_nonce, 1uL);
+    for (b = 0u; b < B_CC_BLOCKS; b++)
+    {
+        for (i = 0u; i < 16u; i++)
+        {
+            st[i] = b_cc.c68k_chacha20_state[i];
+        }
+        st[12] += (ULONG)b;
+
+        c68k_chacha20_core_c(st, ks);
+
+        for (i = 0u; i < 16u; i++)
+        {
+            o = (b << 6) + (i << 2);
+            want[o]      = (UCHAR)(ks[i]);
+            want[o + 1u] = (UCHAR)(ks[i] >> 8);
+            want[o + 2u] = (UCHAR)(ks[i] >> 16);
+            want[o + 3u] = (UCHAR)(ks[i] >> 24);
+        }
+    }
+
+    b_check("block function against the portable C, 8 blocks",
+            got, want, (ULONG)(B_CC_BLOCKS * 64u));
+}
+
 static VOID b_bench_chacha(VOID)
 {
 
@@ -979,8 +1035,12 @@ ULONG   odd_us;
     c68k_log("");
     c68k_log("5. ChaCha20-Poly1305 over %lu bytes -- the AEAD record path",
              B_BULK_BYTES);
+    c68k_log("   block function: %s",
+             (LONG)(c68k_chacha20_core_is_asm() == (UINT)NX_CRYPTO_TRUE ?
+                    "68020 assembly" : "portable C"));
 
     b_chacha_check_vectors();
+    b_chacha_check_core();
 
     c68k_chacha20_initialize(&b_cc, b_cc_key, b_cc_nonce, 1uL);
     start = c68k_eclock();

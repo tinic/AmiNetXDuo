@@ -99,6 +99,44 @@ _bk_\name:
 
 
 | ---------------------------------------------------------------------------
+| Data-to-address register traffic.  VOID bk_xxx(ULONG reps).
+|
+| ChaCha20 is sixteen 32-bit words against eight data registers, so eight of
+| them are somewhere else at any moment and the question is where.  A spill to
+| the stack is MOVE.L Dm,d16(An) out and MOVE.L d16(An),Dm back, which the
+| rows above price at 8.8 and 5.0; an address register is a third home, and
+| EXG Dn,An is the exchange the schedule actually wants -- one instruction that
+| retires a live word and produces the next one in the same data register.
+|
+| These three rows decide src/crypto68k/c68k_chacha20.S's register allocation.
+| ---------------------------------------------------------------------------
+
+        .macro  BK_AREG name, op, args
+        .globl  _bk_\name
+_bk_\name:
+        movem.l d2-d3/a2,-(sp)
+        move.l  16(sp),d0
+        move.l  #0x5A3C71E9,d3
+        movea.l d3,a2
+        tst.l   d0
+        beq     .Lbk_\name\()_done
+.Lbk_\name\()_loop:
+        .rept   16
+        \op     \args
+        .endr
+        subq.l  #1,d0
+        bne     .Lbk_\name\()_loop
+.Lbk_\name\()_done:
+        movem.l (sp)+,d2-d3/a2
+        rts
+        .endm
+
+        BK_AREG exg_da,    exg,     "d3,a2"
+        BK_AREG movel_ad,  move.l,  "a2,d3"
+        BK_AREG movel_da,  move.l,  "d3,a2"
+
+
+| ---------------------------------------------------------------------------
 | Table kernels.  VOID bk_xxx(APTR table, ULONG reps).
 |
 | a0..a3 point at the four 1 KB quarters of the caller's 4 KB buffer, so

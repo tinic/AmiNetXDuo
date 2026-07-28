@@ -34,6 +34,12 @@
  *   at the same time -- which is the rare case where the compatible choice and
  *   the fast one are the same choice.
  *
+ *   The doubling was the compiler's spills and not a law: c68k_chacha20.S
+ *   keeps fifteen of the sixteen words in registers and exchanges them with
+ *   EXG, and the block function costs a third less than the C did.  What the
+ *   assembly cannot change is the 42 cycles, which are the cipher.  See
+ *   docs/RESEARCH.md 58 for the schedule and the measurement.
+ *
  * ENDIANNESS IS THE ONE TAX
  *
  *   ChaCha20 is defined little-endian and this is a big-endian machine, so
@@ -92,6 +98,22 @@ VOID c68k_chacha20_xor(C68K_CHACHA20 *ctx, const UCHAR *in, UCHAR *out,
 
 /* The keystream on its own, for deriving a one-time Poly1305 key. */
 VOID c68k_chacha20_keystream(C68K_CHACHA20 *ctx, UCHAR *out, ULONG length);
+
+
+/*
+ * The block function, RFC 8439 section 2.3: out[i] = round20(in)[i] + in[i],
+ * sixteen words each.  `in` and `out` may be the same array.
+ *
+ * Exposed for one reason: c68k_chacha20.S implements the same contract in
+ * 68020 assembly and the two have to be checkable against each other.  The
+ * calls above take whichever this build has -- ask which with
+ * c68k_chacha20_core_is_asm() -- but the C stays compiled either way, so a
+ * test can run both and compare.  tests/crypto68k/crypto68k_bulk does.
+ */
+VOID c68k_chacha20_core_c(const ULONG *in, ULONG *out);
+
+/* NX_CRYPTO_TRUE when this build's block function is the assembly. */
+UINT c68k_chacha20_core_is_asm(VOID);
 
 
 /* ------------------------------------------------------------- the AEAD -- */

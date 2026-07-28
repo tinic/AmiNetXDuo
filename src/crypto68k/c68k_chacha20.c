@@ -53,12 +53,19 @@ ULONG   v;
 /*
  * The core: twenty rounds over a copy of the state, then the original added
  * back in.  The state is an array rather than sixteen locals on purpose --
- * the part has eight data registers and a quarter-round needs four words plus
- * a temporary, so a compiler given sixteen live values spills them anyway and
- * an array lets it spill the ones it chooses.  docs/RESEARCH.md 18.1 is the
- * same finding from the AES side: on this machine the state lives in memory.
+ * the part has eight data registers and a quarter-round needs four of them,
+ * so a compiler given sixteen live values spills them anyway and an array
+ * lets it spill the ones it chooses.  docs/RESEARCH.md 18.1 is the same
+ * finding from the AES side: on this machine the state lives in memory.
+ *
+ * THIS IS THE REFERENCE, not the fast path.  c68k_chacha20.S does the same
+ * sixteen words in registers -- eight in d0-d7, seven in a0-a6 and one on the
+ * stack, exchanged with EXG -- and crypto68k_bulk checks the two against each
+ * other block for block before it times either.  It is deliberately still
+ * compiled and still reachable in the assembly build for exactly that reason;
+ * a fast implementation with nothing to check it against is not evidence.
  */
-static VOID c68k_chacha20_core(const ULONG *in, ULONG *out)
+VOID c68k_chacha20_core_c(const ULONG *in, ULONG *out)
 {
 
 ULONG   x[16];
@@ -94,6 +101,32 @@ UINT    i;
 
 
 /*
+ * Which one the rest of this file calls.  A macro rather than a wrapper so
+ * that the build without the assembly has no extra call at all, and rather
+ * than a variant switch like c68k_aes.c's because there is nothing here to
+ * choose between: the assembly is the same algorithm, faster, on every part
+ * that can run it.  AMINETXDUO_CRYPTO68K_ASM=OFF, the 68000 and the 68060
+ * take the C.
+ */
+#ifdef C68K_ASM
+extern VOID c68k_chacha20_core_asm(const ULONG *in, ULONG *out);
+#define C68K_CHACHA20_CORE  c68k_chacha20_core_asm
+#else
+#define C68K_CHACHA20_CORE  c68k_chacha20_core_c
+#endif
+
+UINT c68k_chacha20_core_is_asm(VOID)
+{
+
+#ifdef C68K_ASM
+    return((UINT)NX_CRYPTO_TRUE);
+#else
+    return((UINT)NX_CRYPTO_FALSE);
+#endif
+}
+
+
+/*
  * out = in XOR the little-endian serialisation of one keystream block.
  *
  * On a 68020 that is one MOVE.L in, a three-instruction byte reversal of the
@@ -101,7 +134,11 @@ UINT    i;
  * bytes.  Serialising the block to a byte array and exclusive-oring byte by
  * byte, which is what the portable form below has to do, is four times that
  * by the instruction table in docs/RESEARCH.md 18.1.
+ *
+ * The 68020 build takes the assembly instead, because this loop is a sixth of
+ * the cipher and -Os does not compile it to those seven instructions.
  */
+#ifndef C68K_ASM
 static VOID c68k_chacha20_xor_block(const ULONG *ks, const UCHAR *in,
                                     UCHAR *out)
 {
@@ -137,6 +174,14 @@ ULONG   k;
     }
 #endif
 }
+#else
+/* The same seven instructions a word, hand-written: see c68k_chacha20.S for
+   what -Os made of the loop above.  Same #ifndef/#ifdef shape as the limb
+   primitives in c68k_prim.c. */
+extern VOID c68k_chacha20_xor_block_asm(const ULONG *ks, const UCHAR *in,
+                                        UCHAR *out);
+#define c68k_chacha20_xor_block  c68k_chacha20_xor_block_asm
+#endif /* C68K_ASM */
 
 /* The same block, serialised rather than applied -- for the tail of a
    transfer, which has to be held until the next call asks for it. */
@@ -221,7 +266,7 @@ UINT    i;
 
     while (length >= C68K_CHACHA20_BLOCK_SIZE)
     {
-        c68k_chacha20_core(ctx -> c68k_chacha20_state, ks);
+        C68K_CHACHA20_CORE(ctx -> c68k_chacha20_state, ks);
         ctx -> c68k_chacha20_state[12]++;
 
         c68k_chacha20_xor_block(ks, in, out);
@@ -233,7 +278,7 @@ UINT    i;
 
     if (length != 0uL)
     {
-        c68k_chacha20_core(ctx -> c68k_chacha20_state, ks);
+        C68K_CHACHA20_CORE(ctx -> c68k_chacha20_state, ks);
         ctx -> c68k_chacha20_state[12]++;
 
         c68k_chacha20_store_block(ks, ctx -> c68k_chacha20_stream);
