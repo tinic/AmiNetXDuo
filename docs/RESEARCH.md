@@ -16382,8 +16382,21 @@ x86-64 artefact for CI and a macOS one besides, then revalidating codegen across
 conformance, the 68000 build and the emulator suite. Against that, the repair script is
 ~500 lines, runs in three seconds, is verified in six configurations, and fails the release
 loudly when it meets something it does not recognise — which it has now done twice,
-correctly. The cheap trigger for revisiting is one manifest query: if the layer digest
-moves, the bump becomes nearly free.
+correctly.
+
+**And the horizon is years, not months, so `fix-toolchain-crt0.py` is permanent
+infrastructure rather than a workaround waiting to be deleted.** An earlier version of this
+entry named the wrong trigger: "if the layer digest moves, the bump becomes nearly free".
+That is false, and the way it is false matters. A moved digest means the image was rebuilt;
+it says nothing about which compiler went into it. What the repair actually needs in order
+to become unnecessary is a *distributed artefact* carrying bebbo's `m68k_save_reg` fix
+(amiga15.2 at 168be3619 or later) — and prebuilt m68k-amigaos toolchains lag their upstream
+by a very long way. `amigadev/crosstools:m68k-amigaos-gcc10` is named for GCC 10 and was
+built 2025-11-09, eight months before either fix landed.
+
+"Fixed upstream" and "fixed in the thing people install" are different statements, and §53
+conflated them. Treat the script as load-bearing: keep it verified, keep its failure loud,
+and do not write anything that reads as though it is on its way out.
 
 ## 60. tcpdump: two bugs, and an investigation blinded by AmigaDOS (2026-07-28)
 
