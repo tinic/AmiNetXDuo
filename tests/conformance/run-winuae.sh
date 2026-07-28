@@ -71,9 +71,9 @@
 #      (DHCP lease, resolver) as the library is opened.
 #
 # Results land in:
-#   build/testhd-<tag>/bsdsocktest.log   the TAP log -- the actual result
-#   build/testhd-<tag>/conf-out.txt      the suite's console summary
-#   build/serial-<tag>.log               our ami_log output
+#   build/winuae-testhd-<tag>/bsdsocktest.log   the TAP log -- the result
+#   build/winuae-testhd-<tag>/conf-out.txt      the suite's console summary
+#   build/winuae-serial-<tag>.log               our ami_log output
 #
 # SPDX-License-Identifier: MIT
 
@@ -169,7 +169,7 @@ set -e
 
 echo "---- stack under test ----"
 ident=$(grep -m1 "^# bsdsocket.library:" \
-        "$ROOT/build/testhd-$TAG/bsdsocktest.log" 2>/dev/null || true)
+        "$ROOT/build/winuae-testhd-$TAG/bsdsocktest.log" 2>/dev/null || true)
 case "$ident" in
     *AmiNetXDuo*) echo "$ident  (ours)" ;;
     "")           echo "!! no stack identification in the TAP log" ;;
