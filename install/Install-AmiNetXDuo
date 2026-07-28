@@ -415,24 +415,21 @@
 
 (set S_LIBS (tackon S_LIBS CPUDIR))
 
-; A 68000 GETS NO ENCRYPTION, AND HAS TO BE TOLD SO.
+; A 68000 GETS NO ENCRYPTION, AND HAS TO BE TOLD SO -- ON THE LAST PAGE.
 ;
-; tls.library is built for 68020 and above only -- on a 7 MHz 68000 the
-; public-key arithmetic takes longer than the far end will wait, which is why
-; the archive carries no 68000 build of it.  The check below only ever looked
-; for bsdsocket.library, so such a machine installed cleanly, said nothing, and
+; tls.library is built for 68020 and above only: on a 7 MHz 68000 the
+; public-key arithmetic takes longer than the far end will wait, so the archive
+; carries no 68000 build of it.  The check below only ever looked for
+; bsdsocket.library, so such a machine installed cleanly, said nothing, and
 ; then answered `fetch https://...` with "needs LIBS:tls.library, and there is
 ; none" -- which reads as a broken download rather than as a decision.
 ;
-; Said here, once, while the user can still do something about it.
-(if (NOT (exists (tackon S_LIBS "tls.library") (noreq)))
-    (message "This machine is a " CPU ", and encrypted connections need a "
-             "68020 or better.\n\n"
-             "Everything else works: http://, name lookups, ping, telnet, "
-             "the whole tool set.  What will not work is https:// in fetch, "
-             "and curl and ssh.\n\n"
-             "Nothing is wrong with the download -- the encryption library is "
-             "simply too slow to be worth shipping for this processor."))
+; NOT a (message): at NOVICE level -- the default, and an A500 or A600 owner is
+; exactly who has a 68000 -- (message) prints NOTHING, so the people who most
+; need this would never see it.  See the header of this file.  The final page
+; is shown at every level, so the fact is recorded here and said there.
+(set NO_TLS 0)
+(if (NOT (exists (tackon S_LIBS "tls.library") (noreq))) (set NO_TLS 1))
 
 (if (NOT (exists (tackon S_LIBS "bsdsocket.library") (noreq)))
     (abort "This archive has no library for a " CPU ".\n\n"
@@ -1148,8 +1145,15 @@
     (set FINAL_START (F_START_YES START_IF))
     (set FINAL_START (F_START_NO  START_IF)))
 
+(if NO_TLS
+    (set FINAL_TLS
+      (cat "\nThis is a " CPU ", so https:// is not available -- the\n"
+           "encryption needs a 68020.  Everything else works.\n"))
+    (set FINAL_TLS ""))
+
 (exit
   "AmiNetXDuo is installed.\n\n"
   FINAL_START
   "\nShowNetStatus says whether it came up.  The guide in the\n"
-  "AmiNetXDuo drawer has the rest.\n")
+  "AmiNetXDuo drawer has the rest.\n"
+  FINAL_TLS)
