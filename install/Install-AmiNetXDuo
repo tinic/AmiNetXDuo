@@ -415,6 +415,25 @@
 
 (set S_LIBS (tackon S_LIBS CPUDIR))
 
+; A 68000 GETS NO ENCRYPTION, AND HAS TO BE TOLD SO.
+;
+; tls.library is built for 68020 and above only -- on a 7 MHz 68000 the
+; public-key arithmetic takes longer than the far end will wait, which is why
+; the archive carries no 68000 build of it.  The check below only ever looked
+; for bsdsocket.library, so such a machine installed cleanly, said nothing, and
+; then answered `fetch https://...` with "needs LIBS:tls.library, and there is
+; none" -- which reads as a broken download rather than as a decision.
+;
+; Said here, once, while the user can still do something about it.
+(if (NOT (exists (tackon S_LIBS "tls.library") (noreq)))
+    (message "This machine is a " CPU ", and encrypted connections need a "
+             "68020 or better.\n\n"
+             "Everything else works: http://, name lookups, ping, telnet, "
+             "the whole tool set.  What will not work is https:// in fetch, "
+             "and curl and ssh.\n\n"
+             "Nothing is wrong with the download -- the encryption library is "
+             "simply too slow to be worth shipping for this processor."))
+
 (if (NOT (exists (tackon S_LIBS "bsdsocket.library") (noreq)))
     (abort "This archive has no library for a " CPU ".\n\n"
            "It should contain Libs/" CPUDIR ", and that drawer is missing or "
