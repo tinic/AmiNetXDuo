@@ -279,6 +279,12 @@ cp "$INSTALL/Install-AmiNetXDuo.info"  "$TREE/"
 cp "$INSTALL/AmiNetXDuo.info"          "$TREE/"
 cp "$INSTALL/AmiNetXDuo.info"          "$OUTDIR/"
 
+# The Commodore Installer, bundled in the same drawer.  Install-AmiNetXDuo.info's
+# default tool is "Installer", so Workbench finds it here and a double-click just
+# works -- nothing to fetch or install first.
+cp "$INSTALL/Installer" "$TREE/Installer"
+chmod 755 "$TREE/Installer"
+
 cp -R "$INSTALL/devs/Internet/." "$TREE/Devs/Internet/"
 cp -R "$INSTALL/examples/."      "$TREE/Examples/"
 

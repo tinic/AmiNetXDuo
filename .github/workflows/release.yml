@@ -146,13 +146,15 @@ jobs:
           AMINETXDUO_SSH: build/dropbear/dbclient
         run: dist/make-dist.sh -b build/release
 
-      # A release that silently lost ssh would look fine. It rides in C: with
-      # the other commands now that the shim gives it a stack and an argv.
-      - name: ssh really is in the archive
+      # A release that silently lost ssh or the bundled Installer would look
+      # fine -- until someone tried to install with nothing to run the script.
+      - name: ssh and the Installer really are in the archive
         run: |
-          [ -f "build/dist/AmiNetXDuo/C/ssh" ] || {
-              echo "::error::C/ssh is missing from the archive"; exit 1; }
-          ls -l build/dist/AmiNetXDuo/C/ssh
+          for f in C/ssh Installer; do
+              [ -f "build/dist/AmiNetXDuo/$f" ] || {
+                  echo "::error::$f is missing from the archive"; exit 1; }
+          done
+          ls -l build/dist/AmiNetXDuo/C/ssh build/dist/AmiNetXDuo/Installer
 
       # And so would a release that lost a CPU drawer -- right up until
       # somebody with that machine ran the installer and it aborted.  The
