@@ -35,11 +35,28 @@
  *                              so inventing them produces an API nothing can
  *                              use and that silently disagrees with Roadshow.
  *                              The autodoc does not list the names either.
- *   the mbuf_* family          there is no mbuf allocator to expose. NetX
- *                              Duo allocates fixed-size NX_PACKETs from one
- *                              pool; an mbuf chain is a different shape, and
- *                              the eleven vectors would need an allocator
- *                              built to serve them alone.
+ *   the mbuf_* family          nothing we would ship has a caller. In the
+ *                              whole NDK a `struct mbuf` crosses this ABI in
+ *                              exactly ONE place that is not an mbuf_*
+ *                              prototype: IPFilterMsg.ifm_Packet
+ *                              (libraries/bsdsocket.h:1147), the packet the
+ *                              IP FILTER hook is handed -- so these eleven
+ *                              exist to let an ipf_* client read and rewrite
+ *                              it, and ipf_* is out of scope below.
+ *
+ *                              Not the monitor hooks, which is the natural
+ *                              guess: PacketMonitorMessage hands over flat
+ *                              pmm_PacketData + pmm_PacketSize, and the TCP,
+ *                              UDP and ICMP messages hand over parsed header
+ *                              pointers. netmonitor.c is complete without a
+ *                              single mbuf.
+ *
+ *                              Implementing them would also mean a real BSD
+ *                              mbuf allocator, since sys/mbuf.h pins the
+ *                              layout callers compile against -- next/len/
+ *                              data chains NetX Duo has no use for, as it
+ *                              allocates fixed-size NX_PACKETs from one
+ *                              pool. An allocator built to serve nothing.
  *   ChangeRouteTagList()       the NDK assigns it an offset and neither the
  *                              autodoc nor clib/bsdsocket_protos.h says what
  *                              it takes.
