@@ -102,6 +102,46 @@ static ULONG bsd_aam_round(ULONG size)
     return (size + 3UL) & ~3UL;
 }
 
+/*
+ * ADD ONE REGION TO THE RUNNING TOTAL, OR SAY THE SUM WILL NOT FIT.
+ *
+ * Every one of the seven size tags is a caller-supplied LONG that only has to
+ * be positive, so two of them at 0x7FFFFFFC sum to 0xFFFFFFF8 and the whole
+ * total wraps to something the message itself does not fit in. The allocation
+ * then SUCCEEDS at the wrapped size, the struct's own last fields are written
+ * past the end of it, and every carved pointer handed back to the caller
+ * points outside the block -- one of which bsd_aam_store_lease() later copies
+ * a DHCP-supplied host name into. On a machine with no MMU that is a silent
+ * corruption of whatever the allocator put next.
+ *
+ * `entries` is a count of ULONGs rather than a byte size for the three table
+ * tags, and that multiply can wrap on its own, so it is checked separately
+ * rather than being folded into the caller's argument.
+ *
+ * The answer to an over-large request is CAAME_Not_enough_memory, which is
+ * what the caller would have been told anyway had the arithmetic been done in
+ * a width that could hold it.
+ */
+static BOOL bsd_aam_add(ULONG *total, ULONG count, ULONG unit)
+{
+    ULONG bytes;
+
+    if (count == 0)
+        return TRUE;
+
+    if (count > (0xFFFFFFFFUL - 3UL) / unit)
+        return FALSE;
+
+    bytes = bsd_aam_round(count * unit);
+
+    if (bytes > 0xFFFFFFFFUL - *total)
+        return FALSE;
+
+    *total += bytes;
+
+    return TRUE;
+}
+
 LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
                                  register LONG protocol __asm("d1"),
                                  register STRPTR interface_name __asm("a0"),
@@ -263,16 +303,21 @@ LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
 
     /* ---- one block ------------------------------------------------------ */
 
-    total  = bsd_aam_round(sizeof(*aam));
-    total += bsd_aam_round((ULONG)want.baw_NAKMessage);
-    total += bsd_aam_round((ULONG)want.baw_RouterTable * sizeof(ULONG));
-    total += bsd_aam_round((ULONG)want.baw_DNSTable * sizeof(ULONG));
-    total += bsd_aam_round((ULONG)want.baw_StaticRouteTable * sizeof(ULONG));
-    total += bsd_aam_round((ULONG)want.baw_HostName);
-    total += bsd_aam_round((ULONG)want.baw_DomainName);
-    total += bsd_aam_round((ULONG)want.baw_BOOTPMessage);
-    total += want.baw_LeaseExpires ? bsd_aam_round(sizeof(struct DateStamp)) : 0;
-    total += (cid_len != 0) ? bsd_aam_round(cid_len + 1) : 0;
+    total = bsd_aam_round(sizeof(*aam));
+
+    if (!bsd_aam_add(&total, (ULONG)want.baw_NAKMessage,       1UL) ||
+        !bsd_aam_add(&total, (ULONG)want.baw_RouterTable,      sizeof(ULONG)) ||
+        !bsd_aam_add(&total, (ULONG)want.baw_DNSTable,         sizeof(ULONG)) ||
+        !bsd_aam_add(&total, (ULONG)want.baw_StaticRouteTable, sizeof(ULONG)) ||
+        !bsd_aam_add(&total, (ULONG)want.baw_HostName,         1UL) ||
+        !bsd_aam_add(&total, (ULONG)want.baw_DomainName,       1UL) ||
+        !bsd_aam_add(&total, (ULONG)want.baw_BOOTPMessage,     1UL) ||
+        !bsd_aam_add(&total, want.baw_LeaseExpires
+                                 ? (ULONG)sizeof(struct DateStamp) : 0UL, 1UL) ||
+        !bsd_aam_add(&total, (cid_len != 0) ? cid_len + 1 : 0UL, 1UL))
+    {
+        return CAAME_Not_enough_memory;
+    }
 
     aam = (struct AddressAllocationMessage *)ami_alloc(total);
     if (aam == NULL)

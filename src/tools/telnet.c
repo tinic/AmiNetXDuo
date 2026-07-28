@@ -90,7 +90,23 @@ enum
 static UBYTE tn_from_net[TN_CHUNK];
 static UBYTE tn_from_user[TN_CHUNK];
 static UBYTE tn_staged[TN_CHUNK * 2];   /* IAC and CR both double a byte */
-static UBYTE tn_clean[TN_CHUNK];
+
+/*
+ * ONE BYTE BIGGER THAN THE READ, AND THE ONE BYTE IS THE POINT.
+ *
+ * tn_demux() emits at most one byte per byte consumed -- except for the first,
+ * because a CR held back from the PREVIOUS segment (st->saw_cr, which survives
+ * between calls by design) resolves into a '\n' and then falls through to emit
+ * the byte that decided it as well. So a segment that ends on a bare CR
+ * followed by a full 4096-byte segment carrying no CR and no IAC produces 4097
+ * bytes, and the far end chooses both. That is a server-controlled one-byte
+ * write past the end of a static, which on a machine with no MMU lands in
+ * whichever static the linker put next.
+ *
+ * TN_CHUNK + 1 is exact rather than generous: no other path in the parser
+ * expands.
+ */
+static UBYTE tn_clean[TN_CHUNK + 1];
 
 /*
  * The negotiated state, both halves.  "him" is what the far end may do, "us"

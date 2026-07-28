@@ -804,11 +804,37 @@ static VOID nt_wire(struct Library *base, NtCap *cap, ULONG address,
         return;
     }
 
-    for (p = "GET "; *p != '\0'; p++) req[len++] = *p;
-    for (p = path;   *p != '\0'; p++) req[len++] = *p;
-    for (p = " HTTP/1.0\r\nHost: amiga\r\nConnection: close\r\n\r\n";
-         *p != '\0'; p++)
-        req[len++] = *p;
+    /*
+     * PATH comes off the command line, and `req` is on the caller's stack --
+     * which a Shell command gets four kilobytes of. Copying it unbounded meant
+     * any PATH longer than 462 characters wrote over this frame's return
+     * address, silently, because there is no MMU to say so. The trailer is
+     * appended only if it still fits, so a truncated request is refused by the
+     * server rather than sent as something else.
+     */
+    {
+        static const char nt_head[]  = "GET ";
+        static const char nt_tail[]  =
+            " HTTP/1.0\r\nHost: amiga\r\nConnection: close\r\n\r\n";
+        const ULONG       room = (ULONG)sizeof(req) - (ULONG)sizeof(nt_tail);
+
+        for (p = nt_head; *p != '\0'; p++)
+            req[len++] = *p;
+
+        for (p = path; *p != '\0' && len < room; p++)
+            req[len++] = *p;
+
+        if (*p != '\0')
+        {
+            tool_error("the path is too long for a request buffer of %ld bytes",
+                       (LONG)sizeof(req));
+            (VOID)tool_sock_close(base, s);
+            return;
+        }
+
+        for (p = nt_tail; *p != '\0'; p++)
+            req[len++] = *p;
+    }
 
     if (tool_sock_send(base, s, req, (LONG)len) != (LONG)len)
     {

@@ -94,6 +94,20 @@ static const char ami_netdb_builtin_services[] =
  * Non-destructive first pass: an upper bound on the number of lines and of
  * whitespace-separated tokens. Overshooting is fine -- it costs a few hundred
  * bytes and saves parsing the file twice.
+ *
+ * IT IS AN ESTIMATE AND NOT A CONTRACT, which is why netdb_parse() below
+ * bounds every write against what was actually allocated rather than trusting
+ * this to have been generous. It counts a run of non-space characters as ONE
+ * token, and ami_cfg_tokenize() does not: scan_item() in config_text.c returns
+ * an empty, non-NULL token for every `""` pair, so the single 64-character run
+ * `""""..""` is one token here and thirty-two there. The line
+ *
+ *     1.2.3.4 host """"""""""""""""""""""""""""""""
+ *
+ * in DEVS:Internet/hosts therefore used to write twenty-nine pointers past the
+ * end of alias_pool, and repeating it filled the file's whole size in stray
+ * pointers over the heap -- silently, on a machine with no MMU. Found by the
+ * host sanitizer fuzz driver.
  */
 static VOID netdb_measure(const char *buf, ULONG *lines, ULONG *tokens)
 {
@@ -123,20 +137,49 @@ static VOID netdb_measure(const char *buf, ULONG *lines, ULONG *tokens)
 
 /* -------------------------------------------------------------- one table */
 
+/*
+ * Copy one entry's aliases into the pool and terminate the vector, or answer
+ * FALSE when the pool cannot hold them. Every alias write in this file goes
+ * through here: the sizing pass above is an estimate, and the one place a
+ * wrong estimate must not reach is a pointer store.
+ */
+static BOOL netdb_aliases(NetdbTable *table, ULONG pool_size, ULONG *alias_pos,
+                          AmiNetdbEntry *entry, char **row, ULONG count,
+                          ULONG first_alias)
+{
+    ULONG have = (count > first_alias) ? (count - first_alias) : 0;
+    ULONG i;
+
+    /* The aliases plus the NULL that ends the vector. */
+    if (have + 1 > pool_size - *alias_pos)
+        return FALSE;
+
+    for (i = 0; i < have; i++)
+        table->alias_pool[*alias_pos + i] = row[first_alias + i];
+
+    entry->aliases = &table->alias_pool[*alias_pos];
+    *alias_pos += have;
+    table->alias_pool[(*alias_pos)++] = NULL;
+
+    return TRUE;
+}
+
 static BOOL netdb_parse(NetdbTable *table, NetdbKind kind, char *buf)
 {
     ULONG  max_lines;
     ULONG  max_tokens;
+    ULONG  pool_size;
     ULONG  alias_pos = 0;
     char  *cursor    = buf;
     char  *line;
 
     netdb_measure(buf, &max_lines, &max_tokens);
 
+    pool_size = max_tokens + max_lines + 1;
+
     table->entries = (AmiNetdbEntry *)ami_alloc(max_lines * sizeof(AmiNetdbEntry));
     /* Every entry needs a NULL terminator, hence + max_lines. */
-    table->alias_pool =
-        (const char **)ami_alloc((max_tokens + max_lines + 1) * sizeof(char *));
+    table->alias_pool = (const char **)ami_alloc(pool_size * sizeof(char *));
 
     if (table->entries == NULL || table->alias_pool == NULL)
     {
@@ -152,7 +195,6 @@ static BOOL netdb_parse(NetdbTable *table, NetdbKind kind, char *buf)
         char          *tokens[AMI_NETDB_MAX_TOKENS];
         ULONG          count;
         ULONG          first_alias;
-        ULONG          i;
         AmiNetdbEntry *entry;
 
         /* '#' may start a comment anywhere on the line; ';' is not a comment
@@ -166,6 +208,10 @@ static BOOL netdb_parse(NetdbTable *table, NetdbKind kind, char *buf)
         count = ami_cfg_tokenize(line, tokens, AMI_NETDB_MAX_TOKENS);
         if (count < 2)
             continue;
+
+        /* Same rule as the pool: the estimate is checked, not trusted. */
+        if (table->count >= max_lines)
+            break;
 
         entry = &table->entries[table->count];
         ami_cfg_zero(entry, sizeof(*entry));
@@ -191,11 +237,11 @@ static BOOL netdb_parse(NetdbTable *table, NetdbKind kind, char *buf)
             entry->name  = row[1];
             entry->value = addr;
             first_alias  = 2;
-            for (i = 0; i + first_alias < count; i++)
-                table->alias_pool[alias_pos + i] = row[first_alias + i];
-            entry->aliases = &table->alias_pool[alias_pos];
-            alias_pos += (count - first_alias);
-            table->alias_pool[alias_pos++] = NULL;
+
+            if (!netdb_aliases(table, pool_size, &alias_pos, entry, row,
+                               count, first_alias))
+                break;
+
             table->count++;
             continue;
         }
@@ -237,11 +283,9 @@ static BOOL netdb_parse(NetdbTable *table, NetdbKind kind, char *buf)
         entry->name = tokens[0];
         first_alias = 2;
 
-        for (i = 0; i + first_alias < count; i++)
-            table->alias_pool[alias_pos + i] = tokens[first_alias + i];
-        entry->aliases = &table->alias_pool[alias_pos];
-        alias_pos += (count - first_alias);
-        table->alias_pool[alias_pos++] = NULL;
+        if (!netdb_aliases(table, pool_size, &alias_pos, entry, tokens,
+                           count, first_alias))
+            break;
 
         table->count++;
     }

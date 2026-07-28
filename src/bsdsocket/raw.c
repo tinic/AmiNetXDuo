@@ -518,10 +518,20 @@ VOID bsd_raw_source(NX_PACKET *packet, NXD_ADDRESS *addr)
     if (packet == NX_NULL)
         return;
 
-    /* The datagram starts at its own IP header -- see the file comment. The
-       source address is bytes 12..15, in network order, which on m68k is the
-       order it is wanted in. */
-    if (packet->nx_packet_length < 20)
+    /*
+     * The datagram starts at its own IP header -- see the file comment. The
+     * source address is bytes 12..15, in network order, which on m68k is the
+     * order it is wanted in.
+     *
+     * The bound is the FIRST fragment's contiguous run and not
+     * nx_packet_length, which is the whole chain: an NX_PACKET is a chain, and
+     * a twenty-byte total says nothing about how many of those twenty bytes
+     * are at prepend_ptr. The pool's payload is far wider than an IP header so
+     * this cannot bite today, but the assumption is the one that does not
+     * survive a pool resize.
+     */
+    if ((ULONG)(packet->nx_packet_append_ptr -
+                packet->nx_packet_prepend_ptr) < 20UL)
         return;
 
     ip_hdr = packet->nx_packet_prepend_ptr;
