@@ -16307,3 +16307,69 @@ is addressable is the other two thirds -- the 130-bit accumulate, where the part
 `ADDX.L` and the `MULU.L Dy,Dh:Dl` 64-bit product in a register pair, and C can only reach
 either through `unsigned long long` and this toolchain's zero-byte `libgcc.a`. Expect
 20-30%, not the third ChaCha20 gave up.
+
+## 59. Three items closed by deciding, not by building (2026-07-28)
+
+Written down because "not done" and "decided against" look identical in a source tree six
+months later, and only one of them is a defect.
+
+### 59.1 AAMP_SLOWAUTO, AAMP_FASTAUTO and AAMP_BOOTP stay AAMR_Ignored
+
+§47.12 records these as a gap, phrased as "what is not there is any way to tell the two
+flavours apart, since the autodoc distinguishes them only by timeout lengths it does not
+give". That reads as an obstacle waiting to be cleared. It is not the real reason, and the
+real reason is a decision:
+
+* **BOOTP** is a different wire protocol. NetX Duo ships DHCP and nothing here speaks
+  BOOTP. Writing a client for a protocol DHCP replaced in 1993, for one Roadshow entry
+  point, is not a good use of anyone's time.
+* **SLOWAUTO / FASTAUTO** are RFC 3927 self-assignment, and we do have that: `NX_AUTO_IP`
+  is in the build and drives the `LINKLOCAL` configuration type. What is missing is not
+  the protocol but the *plumbing* — AutoIP is driven entirely inside `netstack.c` and
+  there is no public quartet for it the way there is for DHCP
+  (`netstack_interface_dhcp_start/_state/_lease/_stop`), and `NX_AUTO_IP` is a single
+  instance rather than one per interface. Building that quartet, and making a single
+  AutoIP instance safe to start on an arbitrary interface on demand, is real netstack work
+  for a Roadshow call essentially nobody makes.
+
+`AAMP_DHCP` — the one that matters, and the one every real caller uses — takes a genuine
+lease through a worker Process. The other three answer `AAMR_Ignored`, which is literally
+accurate.
+
+### 59.2 The four monitor hooks stay refused, for now, and the timing is the reason
+
+§50 scoped `MHT_ICMP`, `MHT_UDP`, `MHT_TCP_Connect` and `MHT_Packet` thoroughly enough to
+decide with, and the decision is to wait. Not because the work is unclear — §50 is a good
+plan — but because of what it touches:
+
+* it replaces `nx_ip_packet_filter_extended`, which **every inbound packet** passes
+  through, and which BPF already occupies, so step one is a filter *chain*;
+* §50.2 needs a lock safe from the IP thread and cheap enough to take per packet, where
+  the existing dispatcher uses `Forbid()`;
+* §50.4's `MA_DropWithReset` means emitting an RST from inside a receive filter, which
+  NetX Duo exposes no entry point for.
+
+That is a change to the hot receive path, and the receive path is currently being measured
+under packet loss for the first time in this project's life. Landing it now would risk
+those measurements and be measured wrong by them. It is worth doing after, with the
+impaired-link results in hand, and worth doing without `MA_DropWithReset` first —
+`MA_Drop` is honest and needs no RST.
+
+### 59.3 The toolchain pin stays where it is
+
+§53 wanted to retire `tools/fix-toolchain-crt0.py` by moving the pin forward, since both
+crt0 bugs are fixed upstream. The registry says no:
+
+* the `amigadev/crosstools:m68k-amigaos-gcc10` tag still serves **the exact layer we pin**
+  (`c63033fd…`, layer 8, 93 MB), and the image was built **2025-11-09** — eight months
+  before either fix landed;
+* there is no prebuilt m68k-amigaos GCC for macOS at all, so the development machine is
+  already outside the pin and building its own.
+
+So moving the pin means **becoming a toolchain vendor**: building and hosting a Linux
+x86-64 artefact for CI and a macOS one besides, then revalidating codegen across
+conformance, the 68000 build and the emulator suite. Against that, the repair script is
+~500 lines, runs in three seconds, is verified in six configurations, and fails the release
+loudly when it meets something it does not recognise — which it has now done twice,
+correctly. The cheap trigger for revisiting is one manifest query: if the layer digest
+moves, the bump becomes nearly free.
