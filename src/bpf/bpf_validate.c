@@ -2,12 +2,12 @@
  * AmiNetXDuo -- BPF program validator.
  *
  * Runs at BIOCSETF time, on a program that came from an application over an
- * LVO, on a machine with no memory protection. Strict by design: anything the
- * interpreter in bpf_filter.c does not implement is refused here rather than
- * left to reject packets silently at run time. 4.4BSD's bpf_validate is more
- * permissive -- it lets several undefined encodings through on the grounds
- * that the interpreter treats them as no-ops -- which is a bad trade when the
- * cost of being wrong is the whole machine.
+ * LVO, on a machine with no memory protection. Anything the interpreter in
+ * bpf_filter.c does not implement is refused here rather than left to reject
+ * packets silently at run time. 4.4BSD's bpf_validate is more permissive: it
+ * lets several undefined encodings through because the interpreter treats them
+ * as no-ops, which is a bad trade when the cost of being wrong is the whole
+ * machine.
  *
  * Rejected:
  *   - an empty program, or one longer than BPF_MAXINSNS;

@@ -93,10 +93,10 @@ VOID ami_cfg_join3(char *dst, ULONG dstlen, const char *a, const char *b,
 /* ------------------------------------------------------------ diagnostics */
 
 /*
- * One reporter, one current file. The configuration is read from one task,
- * once, at startup -- there is nothing here to make thread-safe, and a
- * per-parser context argument would have to be threaded through code the host
- * test drives directly.
+ * One reporter, one current file. The configuration is read once, from one
+ * task, at startup, so nothing here needs to be thread-safe; a per-parser
+ * context argument would have to be threaded through code the host test drives
+ * directly.
  */
 static AmiCfgReporter   ami_cfg_reporter;
 static APTR             ami_cfg_reporter_user;
@@ -603,13 +603,11 @@ VOID ami_config_format_ip(ULONG addr, char *buf, ULONG buflen)
 /* ------------------------------------------------------------------ IPv6 -- */
 
 /*
- * Compiled only in an AMINETXDUO_IPV6 build.
- *
- * The guard is not cosmetic: config_text.c is one object, so the linker pulls
- * the whole of it in for any caller of ami_cfg_trim(), and leaving these two
- * functions unguarded put 3.4 KB of IPv6 text conversion into a floor build
- * that has no IPv6 to convert. Measured, not assumed -- netstack_test grew
- * from 162,936 to 166,316 bytes of .text with them in.
+ * Compiled only in an AMINETXDUO_IPV6 build. config_text.c is one object, so
+ * the linker pulls all of it in for any caller of ami_cfg_trim(); leaving
+ * these two functions unguarded put 3.4 KB of IPv6 text conversion into a
+ * floor build with no IPv6 to convert. netstack_test grew from 162,936 to
+ * 166,316 bytes of .text with them in.
  */
 #ifdef AMINETXDUO_IPV6
 
@@ -617,19 +615,17 @@ VOID ami_config_format_ip(ULONG addr, char *buf, ULONG buflen)
 /*
  * RFC 4291 §2.2 text form.  Written from the grammar rather than adapted from
  * a BSD inet_pton(), because the two callers want slightly different dialects
- * (see the contract in include/aminetxduo/config.h) and because this file is
- * deliberately free of libc.
+ * (see include/aminetxduo/config.h) and this file uses no libc.
  *
- * The awkward parts of the format, and how they are handled:
+ * The awkward parts of the format:
  *
  *   - "::" stands for one or more groups of zeroes and may appear at most
- *     once.  Groups are collected into a flat array as they are read; the
- *     position of "::" is remembered and the array is shifted to the right at
- *     the end.  That is simpler and smaller than trying to place them as they
- *     arrive, and it makes "::" at either end fall out for free.
+ *     once.  Groups are collected into a flat array as they are read, the
+ *     position of "::" is remembered, and the array is shifted right at the
+ *     end.  This is smaller than placing them as they arrive and makes "::" at
+ *     either end fall out for free.
  *   - a trailing dotted quad ("::ffff:192.168.1.1") occupies the last two
- *     groups.  It is only legal in the last position, and only when four
- *     octets are present.
+ *     groups.  Legal only in the last position, and only with four octets.
  *   - a group is one to four hex digits.  Five is an error, not a truncation.
  */
 
@@ -872,12 +868,11 @@ VOID ami_config_format_ip6(const ULONG addr[AMI_CFG_IP6_WORDS],
         best_at = -1;
 
     /*
-     * The colon bookkeeping is the classic BSD/glibc inet_ntop6 shape, which
-     * is worth copying rather than re-deriving: ONE colon is emitted where the
-     * elided run starts, the separator in front of the group that follows the
-     * run supplies the second, and a run that reaches the end of the address
-     * gets its second colon added afterwards. That handles "::", "::1", "1::"
-     * and "fe80::1" with no special cases.
+     * The colon bookkeeping follows the BSD/glibc inet_ntop6 shape: one colon
+     * is emitted where the elided run starts, the separator in front of the
+     * group that follows the run supplies the second, and a run that reaches
+     * the end of the address gets its second colon added afterwards. That
+     * handles "::", "::1", "1::" and "fe80::1" with no special cases.
      */
     for (i = 0; i < 8; i++)
     {

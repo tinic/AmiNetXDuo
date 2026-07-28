@@ -1,10 +1,10 @@
 /*
  * AmiNetXDuo -- name resolution.
  *
- * DEVS:Internet/hosts wins over the network, the way every BSD resolver has
- * always done it, and only then does the query go to NetX Duo's addons/dns.
- * The DNS client owns its own packet pool (NX_DNS_CLIENT_USER_CREATE_PACKET_POOL
- * is not defined upstream), so nothing here competes with the stack pool.
+ * DEVS:Internet/hosts wins over the network, as in any BSD resolver; only then
+ * does the query go to NetX Duo's addons/dns. The DNS client creates its own
+ * packet pool (NX_DNS_CLIENT_USER_CREATE_PACKET_POOL is not defined upstream),
+ * so nothing here competes with the stack pool.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -51,13 +51,11 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
 
 #ifdef NX_DNS_CACHE_ENABLE
     /*
-     * The answer cache. NX_DNS_CACHE_ENABLE compiles the code in; this call is
-     * what makes it do anything -- nx_dns_create() leaves nx_dns_cache NULL and
-     * a NULL cache is checked for on every path, so without this the feature is
-     * present and inert. AMI_DNS_CACHE_BYTES says how the size was chosen.
+     * NX_DNS_CACHE_ENABLE only compiles the code in; nx_dns_create() leaves
+     * nx_dns_cache NULL and every path checks for NULL, so without this call
+     * the feature is inert. See AMI_DNS_CACHE_BYTES for the size.
      *
-     * A failure here is not fatal and must not be: every lookup still works,
-     * it just goes to the wire, which is what this stack did until now.
+     * Failure is not fatal: lookups still work, they just go to the wire.
      */
     status = nx_dns_cache_initialize(&ns->ns_Dns, ns->ns_DnsCache,
                                      (UINT)sizeof(ns->ns_DnsCache));
@@ -119,14 +117,11 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
                          (unsigned long)(server & 0xFFUL));
 
                 /*
-                 * Record it in the configuration as well, not just in the DNS
-                 * client. Everything that reports which name servers are in
-                 * use -- ShowNetStatus, ObtainDomainNameServerList() -- reads
-                 * the configuration, so without this a DHCP machine shows the
-                 * servers from the file (or "none configured") while resolving
-                 * happily through the ones the lease supplied. That is the
-                 * kind of disagreement that makes a working machine look
-                 * broken.
+                 * Record it in the configuration as well as in the DNS client.
+                 * ShowNetStatus and ObtainDomainNameServerList() report from
+                 * the configuration, so without this a DHCP machine lists the
+                 * servers from the file (or none) while resolving through the
+                 * ones the lease supplied.
                  */
                 {
                     AmiResolverConfig *r     = &ns->ns_Config.resolver;
@@ -159,13 +154,10 @@ VOID ami_netstack_dns_stop(AmiNetStack *ns)
 }
 
 /*
- * A NetX Duo DNS status, turned into something a person can act on.
- *
- * The distinction that matters is between "your machine is not set up to look
- * names up" (no server, no answer) and "that name does not exist" (a typo).
- * Reporting the second as a device failure -- which this used to do, for
- * every failure alike -- sends the reader to check cables over a mistyped
- * host name.
+ * Map a NetX Duo DNS status onto an actionable error. The distinction is
+ * between "no resolver configured or reachable" and "that name does not
+ * exist"; reporting the second as a device failure sends the reader to check
+ * cables over a mistyped host name.
  */
 static LONG ami_ns_dns_error(UINT status)
 {
@@ -183,11 +175,8 @@ static LONG ami_ns_dns_error(UINT status)
         case NX_DNS_MISMATCHED_RESPONSE:
         case NX_DNS_BAD_ID_ERROR:
         case NX_DNS_SERVER_AUTH_ERROR:
-            /*
-             * The servers were asked and none of them has the name. That is
-             * what a wrong name looks like from here, and it is much the
-             * likeliest cause.
-             */
+            /* The servers were asked and none has the name; a mistyped name
+               is the likeliest cause. */
             return AMI_NET_ERR_NONAME;
 
         case NX_DNS_PARAM_ERROR:
@@ -229,26 +218,19 @@ LONG netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks)
 
 #ifdef AMINETXDUO_MDNS
     /*
-     * ".local" IS mDNS, and it is not a fallback.
+     * RFC 6762 6.7 requires a name ending in ".local" to be sent to
+     * 224.0.0.251 and never to a unicast DNS server. Many home routers answer
+     * any name with their own NXDOMAIN-substitute search page, and some
+     * forward .local to the internet where somebody else's server answers, so
+     * the branch is exclusive: no mDNS answer means the name does not exist.
      *
-     * RFC 6762 6.7 is explicit that a name ending in ".local" must be sent to
-     * 224.0.0.251 and NEVER to a unicast DNS server -- and it is not merely a
-     * matter of taste. A great many home routers answer any name at all with
-     * their own NXDOMAIN-substitute search page, and a few forward .local to
-     * the internet, where somebody else's server answers. So the branch is
-     * exclusive on purpose: no mDNS answer means the name does not exist,
-     * which is the truth, and asking the unicast servers afterwards could only
-     * produce a wrong one.
+     * The check lives here rather than in a new command because every name an
+     * AmigaOS program looks up arrives at this function -- gethostbyname() and
+     * getaddrinfo() in src/bsdsocket/ both route through it -- so
+     * `host amiga.local`, `ping amiga.local` and `fetch http://amiga.local/`
+     * work unchanged, as does any Roadshow-era program.
      *
-     * Doing it HERE rather than in a new command is what makes this reach the
-     * whole tree. Every name any AmigaOS program looks up arrives at this
-     * function -- gethostbyname() and getaddrinfo() in src/bsdsocket/ both
-     * route through it -- so `host amiga.local`, `ping amiga.local` and
-     * `fetch http://amiga.local/` all work with no change to any of them, and
-     * so does somebody else's program that was written for Roadshow.
-     *
-     * The hosts file above still wins, deliberately: a name pinned in
-     * DEVS:Internet/hosts is an instruction from the machine's owner and
+     * The hosts file above still wins: a name pinned in DEVS:Internet/hosts
      * outranks anything the network claims, .local included.
      */
     if (ami_netstack_mdns_is_local(name))
@@ -330,16 +312,13 @@ LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)
         return AMI_NET_ERR_CONFIG;
 
     /*
-     * DEVS:Internet/hosts is NOT consulted here, and that is a real gap rather
-     * than an oversight: src/config/netdb.c parses a hosts entry's address
-     * with ami_config_parse_ip(), which only understands dotted quads, so the
-     * store cannot hold an IPv6 address to find. Making it able to is a change
-     * to the netdb schema (a second value field, or a family tag on every
-     * entry) that touches get{host,net}by* as well, and it belongs with that
-     * work rather than being smuggled in here.
-     *
-     * The practical consequence: an IPv6 literal in DEVS:Internet/hosts is
-     * ignored, and an IPv6-only name has to be resolvable by DNS.
+     * DEVS:Internet/hosts is not consulted here: src/config/netdb.c parses a
+     * hosts entry's address with ami_config_parse_ip(), which only understands
+     * dotted quads, so the store cannot hold an IPv6 address. Fixing that
+     * means a netdb schema change (a second value field, or a family tag per
+     * entry) touching get{host,net}by* as well. Until then an IPv6 literal in
+     * DEVS:Internet/hosts is ignored and an IPv6-only name must be resolvable
+     * by DNS.
      */
     if (ns == NULL || !ns->ns_DnsCreated)
         return AMI_NET_ERR_STATE;
@@ -371,16 +350,14 @@ LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)
 
 /*
  * Roadshow lets a program add and remove name servers while the stack is
- * running -- AddDomainNameServer() and friends -- and its own AddNetInterface
- * uses that to hand over the servers from a lease it obtained itself. Until
- * these existed, that command configured an interface perfectly and then
- * returned failure on the last step (docs/RESEARCH.md 55).
+ * running (AddDomainNameServer() and friends), and its own AddNetInterface
+ * uses that to pass on the servers from a lease it obtained itself. Without
+ * these, that command configured an interface and then failed on the last step
+ * (docs/RESEARCH.md 55).
  *
- * A server has to land in TWO places or it only half works: in the NetX Duo
- * DNS client, which is what actually resolves, and in ns_Config.resolver,
- * which is what every report reads -- ShowNetStatus, ObtainDomainNameServerList
- * and CheckNetConfig all describe the configuration rather than the resolver.
- * The DHCP path above already does exactly this, for the same reason.
+ * A server has to land in two places: the NetX Duo DNS client, which resolves,
+ * and ns_Config.resolver, which ShowNetStatus, ObtainDomainNameServerList and
+ * CheckNetConfig read. The DHCP path above does the same.
  */
 
 LONG netstack_dns_server_add(ULONG address)

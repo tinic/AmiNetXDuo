@@ -8,15 +8,15 @@
  *   3. Above that longword sits the exception frame: SR.w, PC.l, and on 68010+
  *      a format/vector word.
  *
- * Our handler saves the registers, records the frame, then rewrites the return
+ * The handler saves the registers, records the frame, then rewrites the return
  * PC in the frame to point at a user-mode bail-out routine before executing
- * RTE. The processor drops back to user mode running our recovery code instead
+ * RTE. The processor drops back to user mode running the recovery code instead
  * of re-executing the faulting instruction, so the process can report and exit
  * rather than taking the machine down.
  *
- * Caveat: this assumes the exception happened in user mode. If SR in the frame
- * has the supervisor bit set we do not attempt recovery -- there is nothing
- * safe to return to.
+ * This assumes the exception happened in user mode. If SR in the frame has the
+ * supervisor bit set there is nothing safe to return to, so no recovery is
+ * attempted.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -238,17 +238,16 @@ const AmiCrashInfo *ami_crash_info(VOID)
 /* ------------------------------------------------------- exec Alert hook -- */
 
 /*
- * A Guru is NOT a CPU exception. When Exec detects corruption it calls its own
+ * A Guru is not a CPU exception. When Exec detects corruption it calls its own
  * Alert() -- LVO -108, with the alert number in d7 -- which never goes near
- * tc_TrapCode. So the trap handler above cannot see a double free, a corrupt
- * memory list or a reused IORequest, which are exactly the failures a stack
- * with no memory protection produces.
+ * tc_TrapCode, so the trap handler above cannot see a double free, a corrupt
+ * memory list or a reused IORequest.
  *
  * SetFunction() on exec's Alert vector catches them. The trampoline logs and
  * then tail-jumps to the original, so normal Guru behaviour is unchanged.
  *
- * This patches Exec machine-wide, so it is a debugging aid: install it in tests
- * and tools under the emulator, and always remove it before exiting.
+ * This patches Exec machine-wide, so it is a debugging aid: install it in
+ * tests and tools under the emulator, and always remove it before exiting.
  */
 
 static APTR ami_alert_old;

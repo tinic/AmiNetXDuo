@@ -40,64 +40,53 @@
 #define AMI_POOL_MEM_DIVISOR        16
 
 /*
- * The DNS answer cache, and how this number was picked.
+ * DNS answer cache size.
  *
  * NetX Duo's cache is one buffer with resource records growing up from the
  * bottom and the strings they name growing down from the top.  On this target
  * an NX_DNS_RR is 20 bytes and a name costs ((len & ~3) + 8) in the string
- * table, so a cached A record for a typical host name -- "www.example.com",
- * 15 characters -- is 20 + 20 = 40 bytes, and eight bytes of the buffer are
- * the two end pointers.  2048 bytes is therefore about FIFTY cached names.
+ * table, so a cached A record for a 15-character host name such as
+ * "www.example.com" is 20 + 20 = 40 bytes; eight bytes of the buffer are the
+ * two end pointers.  2048 bytes is therefore about fifty cached names.
  *
- * Fifty against what?  A shell session resolves one host and then talks to it;
- * `fetch` following redirects resolves two or three; the whole tests/curl
- * suite names one peer.  The largest real consumer is not forward lookups at
- * all but the reverse ones ShowNetStatus NAMES and netstat do, one per peer
- * address on screen, and that is bounded by TOOL_MAX_SOCK (32).  Fifty covers
- * both at once with room left, and there is no workload on an Amiga that
- * wants five hundred.
+ * Real workloads are far smaller: a shell session resolves one host, `fetch`
+ * following redirects two or three, the tests/curl suite one peer.  The
+ * largest consumer is the reverse lookups ShowNetStatus NAMES and netstat do,
+ * one per peer address on screen, bounded by TOOL_MAX_SOCK (32).
  *
- * Being wrong is cheap in one direction and not the other, which is why the
- * number leans small.  Too small costs a DNS query -- exactly what happened
- * before the cache existed, so the worst case is the old behaviour; NetX Duo
- * replaces the least recently used record rather than failing.  Too large
- * costs resident memory on a 4 MB machine forever.  2048 bytes is 0.05% of
- * the floor target's RAM, and a fifth of the 9,792-byte packet pool the DNS
- * client already carries inside the same NX_DNS (10,112 bytes) for its own
- * queries -- measured on this toolchain, not estimated.
+ * Undersizing costs only a DNS query, since NetX Duo replaces the least
+ * recently used record rather than failing; oversizing costs resident memory
+ * forever.  2048 bytes is 0.05% of the 4 MB floor target, and a fifth of the
+ * 9,792-byte packet pool the DNS client already carries inside the same
+ * NX_DNS (10,112 bytes) for its own queries, measured on this toolchain.
  */
 #define AMI_DNS_CACHE_BYTES         2048
 
 #ifdef AMINETXDUO_MDNS
 /*
- * THE TWO mDNS CACHES, and how these numbers were picked.
+ * The two mDNS cache sizes.
  *
- * The module keeps records in the same layout the DNS answer cache above
- * describes: fixed records growing up from the bottom of one buffer, the
- * strings they name growing down from the top, the two end pointers in
- * between.  An NX_MDNS_RR is larger than an NX_DNS_RR -- it carries the
- * record's state machine, its retransmit counters and its interface index as
- * well as the data -- so the arithmetic is not the same, but the shape is.
+ * Same layout as the DNS answer cache above: fixed records growing up from the
+ * bottom of one buffer, the strings they name growing down from the top, the
+ * two end pointers in between.  An NX_MDNS_RR is larger than an NX_DNS_RR --
+ * it carries the record's state machine, its retransmit counters and its
+ * interface index as well as the data -- so the arithmetic differs.
  *
- * LOCAL holds what this machine CLAIMS.  That is exactly one thing today: the
- * A record for <host>.local, per interface.  It is sized for a handful so that
- * adding a service later (a PTR, an SRV and a TXT, which is what one service
- * costs) does not send somebody back here, and it is the cache in which a
- * failure actually matters -- if it will not hold our own name, the machine
- * does not have a name.
+ * The local cache holds what this machine claims, today just the A record for
+ * <host>.local per interface.  It is sized for a handful so that adding a
+ * service later (a PTR, an SRV and a TXT per service) does not need a revisit.
+ * If it will not hold our own name, the machine has no name.
  *
- * PEER holds what has been LEARNT, and is a cache in the ordinary sense: full
- * means the oldest record goes, not that anything fails.  Every .local lookup
- * lands here, so it is sized against the same workload AMI_DNS_CACHE_BYTES is
- * -- a shell session resolves one or two names, the reverse lookups behind
- * `netstat` and ShowNetStatus NAMES are bounded by TOOL_MAX_SOCK (32) -- and
- * being wrong is cheap in the same direction: too small costs a query on the
- * wire, which is what a machine without the cache does every time.
+ * The peer cache holds what has been learnt; full means the oldest record is
+ * evicted, nothing fails.  Every .local lookup lands here, so it is sized
+ * against the same workload as AMI_DNS_CACHE_BYTES -- one or two names per
+ * shell session, reverse lookups behind `netstat` and ShowNetStatus NAMES
+ * bounded by TOOL_MAX_SOCK (32) -- and undersizing costs only a query on the
+ * wire.
  *
- * Both are inside the AmiNetStack rather than separately allocated, for the
- * reason ns_DnsCache is: identical lifetime, small, and an allocation that
- * could fail would need a "no mDNS" path for no benefit.  Together they are
- * 3 KB -- 0.07% of the 4 MB floor target.
+ * Both are inline in the AmiNetStack for the reason ns_DnsCache is: identical
+ * lifetime, small, and an allocation that could fail would need a "no mDNS"
+ * path.  Together they are 3 KB, 0.07% of the 4 MB floor target.
  */
 #define AMI_MDNS_LOCAL_CACHE_BYTES  1024
 #define AMI_MDNS_PEER_CACHE_BYTES   2048
@@ -108,21 +97,18 @@
 #define AMI_LINK_TIMEOUT_TICKS      (10UL * (ULONG)NX_IP_PERIODIC_RATE)
 
 /*
- * And how long after the RFC 3927 fallback fires. The whole probe/announce
+ * How long to wait after the RFC 3927 fallback fires. The probe/announce
  * sequence is PROBE_WAIT (0-1 s) + PROBE_NUM probes (1-2 s each) + a claim,
- * so 15 s is generous; the previous code waited another AMI_DHCP_TIMEOUT_TICKS
- * here, which is thirty seconds of nothing after a thirty-second wait that
- * had already failed.
+ * so 15 s is ample.
  */
 #define AMI_AUTOIP_TIMEOUT_TICKS    (15UL * (ULONG)NX_IP_PERIODIC_RATE)
 
 /*
- * Granularity of the "has anything got an address yet?" poll, and therefore
- * how much of a DHCP lease's arrival is spent asleep after it has arrived.
- * A tenth of a second was 67 ms of a 980 ms AddNetInterface once the client's
- * startup delay had gone; one tick is the floor, and the poll it repeats is
- * two loads and a compare per interface, so a full thirty-second wait for a
- * server that never answers costs 1,500 of them.
+ * Granularity of the address-arrival poll, and so how long a DHCP lease sits
+ * unnoticed after it arrives. A tenth of a second cost 67 ms of a 980 ms
+ * AddNetInterface once the client's startup delay had gone. One tick is the
+ * floor; each poll is two loads and a compare per interface, so a full
+ * thirty-second wait for a server that never answers costs 1,500 of them.
  */
 #define AMI_ADDRESS_POLL_TICKS      1UL
 
@@ -152,10 +138,9 @@ struct AmiNetStack
     BOOL                ns_DhcpStarted;
 
     /*
-     * The last DHCP state seen per interface, and the last address seen on
-     * it. Both exist so the notification callbacks can say what CHANGED --
-     * "the lease was lost" is a transition, not a state, and NetX Duo's
-     * callbacks report only the new value.
+     * Last DHCP state and last address seen per interface. NetX Duo's
+     * callbacks report only the new value, so the previous one is kept here to
+     * let the notifications report transitions such as a lost lease.
      */
     UBYTE               ns_DhcpState[AMI_CFG_MAX_INTERFACES];
     ULONG               ns_LastAddress[AMI_CFG_MAX_INTERFACES];
@@ -163,8 +148,6 @@ struct AmiNetStack
     /*
      * Posted by ami_ns_address_changed() when an interface gains or loses an
      * address, so ami_ns_wait_for_address() can block instead of polling.
-     * NetX Duo already calls that notification; this only gives it somewhere
-     * to wake somebody up.
      */
     TX_SEMAPHORE        ns_AddrArrived;
     BOOL                ns_AddrArrivedReady;
@@ -177,28 +160,27 @@ struct AmiNetStack
     NX_DNS              ns_Dns;
     BOOL                ns_DnsCreated;
 #ifdef NX_DNS_CACHE_ENABLE
-    /* Inline rather than a separate allocation: it is small, it has the same
-       lifetime as the NX_DNS it belongs to, and an allocation that can fail
-       would need a "no cache" path for no benefit.  Explicitly aligned because
-       nx_dns_cache_initialize() rejects a buffer that is not longword aligned
-       and m68k gives a ULONG only two bytes by default. */
+    /* Inline rather than separately allocated: small, same lifetime as the
+       NX_DNS it belongs to, and an allocation that can fail would need a "no
+       cache" path.  Explicitly aligned because nx_dns_cache_initialize()
+       rejects a buffer that is not longword aligned and m68k gives a ULONG
+       only two-byte alignment by default. */
     ULONG               ns_DnsCache[AMI_DNS_CACHE_BYTES / sizeof(ULONG)]
                             __attribute__((aligned(4)));
 #endif
 
 #ifdef AMINETXDUO_MDNS
     /*
-     * The responder, its thread stack and its two caches. Sized and justified
-     * in netstack_mdns.c; both caches are inline for the reason ns_DnsCache
-     * is, and longword-aligned because the module lays resource records out
-     * from both ends of the buffer and m68k gives a UCHAR array no alignment
-     * at all.
+     * The responder, its thread stack and its two caches. Sized in
+     * netstack_mdns.c; both caches are inline for the reason ns_DnsCache is,
+     * and longword-aligned because the module lays resource records out from
+     * both ends of the buffer and m68k gives a UCHAR array no alignment.
      */
     NX_MDNS             ns_Mdns;
     APTR                ns_MdnsStack;
     BOOL                ns_MdnsCreated;
     BOOL                ns_MdnsClaimed;     /* probing finished, name is ours */
-    char                ns_MdnsLabel[NX_MDNS_HOST_NAME_MAX];  /* as CONFIGURED */
+    char                ns_MdnsLabel[NX_MDNS_HOST_NAME_MAX];  /* as configured */
     UCHAR               ns_MdnsLocalCache[AMI_MDNS_LOCAL_CACHE_BYTES]
                             __attribute__((aligned(4)));
     UCHAR               ns_MdnsPeerCache[AMI_MDNS_PEER_CACHE_BYTES]
@@ -221,22 +203,22 @@ VOID ami_netstack_ipv6_configure(AmiNetStack *ns);
 
 /*
  * Registered with the SANA-II shim through ami_sana2_set_block_hooks(). See
- * netstack_baton.c -- these are what make it legal for a ThreadX thread to
- * block in exec Wait() for an IORequest.
+ * netstack_baton.c: these make it safe for a ThreadX thread to block in exec
+ * Wait() for an IORequest.
  */
 VOID ami_netstack_baton_release(VOID);
 VOID ami_netstack_baton_acquire(VOID);
 
 /* ---------------------------------------------------------- adoption glue --
  *
- * AmiNetCaller / ami_netstack_enter() / ami_netstack_leave() are PUBLIC --
- * they live in include/aminetxduo/netstack.h so bsdsocket.library and the
- * tools share this bracket rather than growing their own.
+ * AmiNetCaller / ami_netstack_enter() / ami_netstack_leave() are public; they
+ * live in include/aminetxduo/netstack.h so bsdsocket.library and the tools
+ * share this bracket rather than growing their own.
  */
 
 #ifdef AMINETXDUO_BPF
 /* netstack_capture.c -- registers the interfaces with src/bpf/ and installs
-   the IP-level filter that is the only way loopback can be traced. */
+   the IP-level filter, the only way to trace loopback. */
 VOID ami_netstack_capture_start(AmiNetStack *ns);
 VOID ami_netstack_capture_stop(AmiNetStack *ns);
 

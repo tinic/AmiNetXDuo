@@ -2,8 +2,8 @@
  * AmiNetXDuo -- BPF capture channels: the buffers, the record format, the
  * ioctls and the six data-path vectors.
  *
- * RECORD FORMAT. This is the part consumers actually depend on, so it is worth
- * being explicit. Every captured frame is stored as
+ * Record format, which is what consumers depend on. Every captured frame is
+ * stored as
  *
  *     offset  0  bh_tstamp.tv_sec    ULONG
  *     offset  4  bh_tstamp.tv_usec   ULONG
@@ -14,23 +14,23 @@
  *     offset 20  bh_caplen bytes of frame
  *
  * and the next record starts at BPF_WORDALIGN(bh_hdrlen + bh_caplen) from the
- * start of this one. The trailing alignment of the LAST record in a read is
- * not included in the returned byte count -- 4.4BSD does the same, and a
- * consumer that walks records by stride would otherwise read one record too
- * many. The six fields are written individually at the offsets above rather
- * than by storing a `struct bpf_hdr`, so no compiler's idea of padding can
- * change what goes on the wire.
+ * start of this one. The trailing alignment of the last record in a read is
+ * not included in the returned byte count, as in 4.4BSD; otherwise a consumer
+ * that walks records by stride reads one record too many. The six fields are
+ * written individually at the offsets above rather than by storing a
+ * `struct bpf_hdr`, so no compiler's idea of padding can change what goes on
+ * the wire.
  *
- * BUFFERING. Two buffers per channel. The tap appends to `store`; the reader
- * drains `hold`; they swap when the reader asks for data and `hold` is empty.
- * That is 4.4BSD's design and it exists for the same reason here: the reader's
- * copy-out can be the whole buffer, and doing that inside the critical section
- * the tap also needs would hold off the SANA-II reader threads for
- * milliseconds and cost real packets. So the copy-out happens outside the
- * lock, protected by the fact that the tap only ever rotates when `hold` is
- * empty, plus a `reading` flag for the (unexpected) case of two readers.
+ * Buffering: two buffers per channel. The tap appends to `store`, the reader
+ * drains `hold`, and they swap when the reader asks for data and `hold` is
+ * empty. This is 4.4BSD's design, for the same reason: the reader's copy-out
+ * can be the whole buffer, and doing that inside the critical section the tap
+ * needs would hold off the SANA-II reader threads for milliseconds and cost
+ * packets. The copy-out therefore happens outside the lock, protected by the
+ * tap only rotating when `hold` is empty, plus a `reading` flag for the
+ * unexpected case of two readers.
  *
- * No AmigaOS calls here -- see bpf_internal.h.
+ * No AmigaOS calls here; see bpf_internal.h.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -83,10 +83,9 @@ VOID ami_bpf_zero_bytes(void *dst, ULONG len)
 }
 
 /*
- * Record fields are native-order ULONG/UWORD, because that is how a consumer's
- * `struct bpf_hdr` reads them. Going through a byte copy of the value's own
- * representation keeps that true without assuming the record is aligned or
- * that the compiler will not reorder the access.
+ * Record fields are native-order ULONG/UWORD, matching how a consumer's
+ * `struct bpf_hdr` reads them. Copying the value's own representation byte by
+ * byte keeps that true without assuming the record is aligned.
  */
 VOID ami_bpf_put32(UBYTE *p, ULONG value)
 {
@@ -189,7 +188,7 @@ VOID ami_bpf_cleanup(VOID)
     }
 }
 
-/* Free the buffers and the filter. Called with the lock NOT held. */
+/* Free the buffers and the filter. Called with the lock not held. */
 static VOID ami_bpf_chan_release(AmiBpfChan *ch)
 {
     APTR bufbase;
@@ -212,13 +211,11 @@ static VOID ami_bpf_chan_release(AmiBpfChan *ch)
 }
 
 /*
- * A NEGATIVE channel means "any free one", and the channel actually claimed
- * is the return value. That is not a convenience invented here: Roadshow's
- * own libpcap calls bpf_open(-1) and then passes the returned value straight
- * back in d0 as the channel for bpf_set_interrupt_mask() and every bpf_ioctl()
- * that follows (docs/RESEARCH.md 55). A client cannot know which channels some
- * other program already holds, so asking by number is the exception and asking
- * for one is the rule.
+ * A negative channel means any free one, and the channel claimed is the return
+ * value. Roadshow's own libpcap calls bpf_open(-1) and passes the returned
+ * value back in d0 as the channel for bpf_set_interrupt_mask() and every
+ * bpf_ioctl() that follows (docs/RESEARCH.md 55). A client cannot know which
+ * channels other programs hold, so asking by number is the exception.
  */
 LONG ami_bpf_open(LONG channel)
 {
@@ -505,8 +502,8 @@ LONG ami_bpf_read(LONG channel, APTR buffer, LONG len)
 
     if (end == ch->hold_pos)
     {
-        /* Not even one record fits. Consuming nothing is the only honest
-           answer: a partial record would desynchronise the consumer. */
+        /* Not even one record fits, so consume nothing: a partial record would
+           desynchronise the consumer. */
         ami_bpf_unlock();
         return -1;
     }
@@ -646,8 +643,8 @@ LONG ami_bpf_set_interrupt_mask(LONG channel, ULONG signal_mask)
 /*
  * Dispatch on direction + group + number, dropping the parameter-length field
  * of the encoding. BIOCGBLEN and BIOCSBLEN share a number and differ only in
- * direction, so direction has to stay; the length must go, or a caller built
- * against a differently sized struct ifreq reaches no handler at all.
+ * direction, so direction stays; the length must go, or a caller built against
+ * a differently sized struct ifreq reaches no handler at all.
  */
 #define AMI_BPF_CMD(c)  ((ULONG)(c) & (IOC_DIRMASK | 0x0000FFFFUL))
 
@@ -727,7 +724,7 @@ static LONG ami_bpf_ioctl_setf(AmiBpfChan *ch, const struct bpf_program *prog)
             return -1;
 
         /*
-         * Copy BEFORE validating. Validating the caller's array and then
+         * Copy before validating. Validating the caller's array and then
          * running from it would leave a window in which another task could
          * rewrite it into something the validator rejected.
          */

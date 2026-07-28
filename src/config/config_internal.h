@@ -1,11 +1,11 @@
 /*
  * AmiNetXDuo -- internal helpers for the configuration/netdb parsers.
  *
- * Split so that the pure text handling (config_text.c), the file-format
- * parsers (config_parse.c) and the netdb store (netdb.c) contain no
- * dos.library calls at all: every byte they see arrives through the
- * ami_cfg_read_file() hook implemented in config_file.c. That lets the host
- * test (test/test_config.c) exercise the same code with a stdio-backed hook.
+ * Split so that the text handling (config_text.c), the file-format parsers
+ * (config_parse.c) and the netdb store (netdb.c) make no dos.library calls:
+ * every byte they see arrives through the ami_cfg_read_file() hook implemented
+ * in config_file.c. The host test (test/test_config.c) exercises the same code
+ * with a stdio-backed hook.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -33,9 +33,9 @@ extern "C" {
 #define AMI_CFG_FILE_SERVICES       AMI_CFG_DIR_INTERNET "/services"
 
 /*
- * Roadshow truncates the interface name (which is the config file's name) to
- * 15 characters; ShowNetStatus and friends display that truncated form, so we
- * match it rather than the 63 characters AMI_CFG_NAME_LEN would allow.
+ * Roadshow truncates the interface name (the config file's name) to 15
+ * characters and ShowNetStatus displays that truncated form, so match it
+ * rather than the 63 characters AMI_CFG_NAME_LEN would allow.
  */
 #define AMI_CFG_IFNAME_MAX          15
 
@@ -58,9 +58,9 @@ APTR ami_cfg_read_file(const char *path, ULONG *size_out);
 
 /*
  * Name the file that subsequent ami_cfg_problem() calls are about. The
- * configuration is loaded from one file at a time on one task, so a single
- * "current file" is enough and it keeps the parsers' signatures unchanged.
- * Passing NULL restores "the configuration".
+ * configuration is loaded one file at a time on one task, so a single current
+ * file is enough and the parsers' signatures stay unchanged. Passing NULL
+ * restores "the configuration".
  */
 VOID ami_cfg_problem_file(const char *path);
 
@@ -76,8 +76,8 @@ VOID ami_cfg_problem(ULONG line, UWORD severity, const char *text,
 BOOL ami_cfg_problems_wanted(VOID);
 
 /*
- * Build "<a><b><c>" (any of which may be NULL) into dst. For the one-off
- * message strings the parsers assemble; there is no sprintf() here.
+ * Build "<a><b><c>" (any of which may be NULL) into dst, for the one-off
+ * message strings the parsers assemble. There is no sprintf() here.
  */
 VOID ami_cfg_join3(char *dst, ULONG dstlen, const char *a, const char *b,
                    const char *c);
@@ -162,9 +162,9 @@ VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
 VOID ami_cfg_parse_gateway(char *buf, ULONG *out);
 
 /*
- * There is no gethostent() in the bsdsocket LVO table, so this is not in the
- * public header -- but the hosts table is iterable all the same, and
- * ami_config_load() uses it to guess the local host name.
+ * Iterate the hosts table. Not in the public header, since the bsdsocket LVO
+ * table has no gethostent(); ami_config_load() uses this to guess the local
+ * host name.
  */
 const AmiNetdbEntry *ami_netdb_host_entry(ULONG index);
 

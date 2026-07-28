@@ -1,8 +1,8 @@
 /*
  * AmiNetXDuo -- shared AmigaOS glue.
  *
- * Deliberately dependency-free beyond exec.library and timer.device: this code
- * runs inside a shared library, so it must not drag in newlib's stdio.
+ * Dependency-free beyond exec.library and timer.device: this code runs inside
+ * a shared library, so it must not drag in newlib's stdio.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -172,8 +172,7 @@ static BOOL ami_timer_init(VOID)
     /*
      * Scale to ticks-per-millisecond up front: a 64-bit divide would pull
      * __udivdi3 out of libgcc, which a shared library should not need.
-     * ~709 ticks/ms PAL, ~716 NTSC -- a ~0.1% rounding error, which is well
-     * inside what anything here cares about.
+     * ~709 ticks/ms PAL, ~716 NTSC, a ~0.1% rounding error.
      */
     rate = ReadEClock(&ev);
     ami_eclock_per_ms = rate / 1000UL;

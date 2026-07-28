@@ -151,9 +151,9 @@ LONG ami_config_load_interface(const char *name, AmiIfConfig *out)
 
 /*
  * Roadshow processes the interface files in alphabetical order (a PRI tooltype
- * can override that; we do not read icons). Keeping the array sorted makes the
- * first interface deterministic, which matters because it is the one whose
- * gateway becomes the default route when no routes file exists.
+ * can override that; icons are not read here). Keeping the array sorted makes
+ * the first interface deterministic, and its gateway becomes the default route
+ * when no routes file exists.
  */
 static VOID insert_interface(AmiConfig *cfg, const AmiIfConfig *iface)
 {

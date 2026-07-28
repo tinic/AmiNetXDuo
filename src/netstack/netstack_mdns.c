@@ -1,40 +1,29 @@
 /*
  * AmiNetXDuo -- mDNS (RFC 6762), the responder and the ".local" resolver.
  *
- * Why this exists, and why it lands next to the RFC 3927 work.
+ * A machine that fell back to an RFC 3927 link-local address has 169.254.x.y
+ * and nothing on the network knows how to reach it: no DHCP server, so no
+ * router client list and no local DNS zone carrying its name, and the address
+ * was drawn at random and changes on the next boot. mDNS makes it findable --
+ * `ping amiga.local` works from any Mac, any Linux box running Avahi and any
+ * Windows since 10, with no server on that network. On an ordinary DHCP LAN it
+ * saves looking up whichever address the router handed out this week.
  *
- * A machine that fell back to a link-local address has 169.254.x.y and nothing
- * on the network knows how to reach it. There is no DHCP server, so there is
- * no router client list and no local DNS zone with its name in it; the address
- * itself was drawn at random and changes on the next boot. RFC 3927 made the
- * machine reachable. This is what makes it FINDABLE -- `ping amiga.local` from
- * any Mac, any Linux box running Avahi, and any Windows since 10, without a
- * server of any kind existing on that network.
+ * One host name and its A record: <HOSTNAME>.local, with whatever address the
+ * interface currently has. HOSTNAME is the same string DHCP option 12 sends
+ * (docs/RESEARCH.md 27); src/config/config_file.c resolves it from the config,
+ * then ENV:HOSTNAME, then DEVS:Internet/hosts, and only then falls back to
+ * "amiga". That is the single source of truth for the name, not this file.
  *
- * It is worth having on an ordinary DHCP LAN too, for the plainer reason that
- * "amiga.local" is easier to say than whichever address the router handed out
- * this week.
+ * No services are advertised. AmiNetXDuo ships clients -- fetch, ftp, telnet,
+ * tftp, nc, sntp, whois -- and no servers, so a _ftp._tcp or _telnet._tcp
+ * record would point at nothing and a browser that believed it would hang on a
+ * connection nothing will accept. When a server does exist,
+ * nx_mdns_service_add() is one call and goes here.
  *
- * One host name and its A record: <HOSTNAME>.local, address whatever the
- * interface currently has. HOSTNAME is the SAME string DHCP option 12 sends
- * (docs/RESEARCH.md 27) -- src/config/config_file.c resolves it from the
- * config, then ENV:HOSTNAME, then DEVS:Internet/hosts, and only then falls
- * back to "amiga". Two names for one machine would be worse than none, so
- * there is exactly one source of truth and this is not it.
- *
- * No services are advertised, deliberately. AmiNetXDuo ships clients: fetch,
- * ftp, telnet, tftp, nc, sntp, whois. There is no FTP server and no telnet
- * server on this machine, so a _ftp._tcp or _telnet._tcp record would be an
- * advertisement for something that is not there -- and a browser that believed
- * it would hang on a connection nothing will accept. src/tools/tftp.c already
- * settles the general question for this tree: "a mode that is announced and
- * not honoured is worse than one that is absent." When a server does exist,
- * nx_mdns_service_add() is one call and this is where it goes.
- *
- * RFC 6762 9: probe three times before claiming a name, and on a conflict
- * pick another. The vendored module does both, and ami_ns_mdns_probing()
- * below reports what it settled on -- see the comment there for the one place
- * its choice of new name is not what a Unix machine would have picked.
+ * RFC 6762 9: probe three times before claiming a name, and rename on a
+ * conflict. The vendored module does both; ami_ns_mdns_probing() below reports
+ * what it settled on.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -44,12 +33,11 @@
 #include <proto/exec.h>
 
 /*
- * The mDNS thread is a background responder: it wakes on a query, walks two
- * small caches and answers. It must sit BELOW the IP thread (1) so an inbound
- * burst still drains, and below the SANA-II readers (2) for the same reason,
- * but above an adopted application task (16) -- a responder that only ran when
- * nothing else wanted the CPU would answer after the querier had given up.
- * Next to AutoIP (3), which has the same shape and the same urgency.
+ * The mDNS thread wakes on a query, walks two small caches and answers. It
+ * sits below the IP thread (1) and the SANA-II readers (2) so an inbound burst
+ * still drains, but above an adopted application task (16), since a responder
+ * that ran only when nothing else wanted the CPU would answer after the
+ * querier gave up. Next to AutoIP (3), which has the same urgency.
  */
 #define AMI_MDNS_PRIORITY           4
 #define AMI_MDNS_STACK_SIZE         4096
@@ -57,19 +45,17 @@
 /* --------------------------------------------------------- the host label */
 
 /*
- * mDNS wants ONE DNS label, and HOSTNAME may not be one.
+ * mDNS wants a single DNS label; HOSTNAME may not be one.
  *
  * src/config/config_file.c's last resort before "amiga" is the first
  * non-loopback name in DEVS:Internet/hosts, and a hosts file conventionally
- * carries fully-qualified names -- "amiga.home.lan" is a perfectly ordinary
- * entry. Handing that to nx_mdns_create() would claim the name
- * "amiga.home.lan.local", which is not what anybody meant and is not a name
- * any querier will ask for.
+ * carries fully-qualified names such as "amiga.home.lan". Handing that to
+ * nx_mdns_create() would claim "amiga.home.lan.local", which no querier asks
+ * for.
  *
- * So: everything up to the first dot, and nothing else is changed. In
- * particular the case is left alone -- mDNS name comparison is
- * case-insensitive (RFC 6762 16) and lowercasing a name the user chose would
- * only make the log disagree with the configuration file.
+ * So: everything up to the first dot, unchanged otherwise. The case is left
+ * alone; mDNS name comparison is case-insensitive (RFC 6762 16) and
+ * lowercasing would make the log disagree with the configuration file.
  */
 static VOID ami_ns_mdns_label(const AmiNetStack *ns, char *out, ULONG size)
 {
@@ -113,26 +99,19 @@ static BOOL ami_ns_mdns_differs(const char *a, const char *b)
 /* ------------------------------------------------------ what was claimed */
 
 /*
- * Called by the module at the end of probing, per record.
+ * Called by the module at the end of probing, per record. A failure state
+ * means the name was contested NX_MDNS_CONFLICT_COUNT times and the module
+ * gave up; before that it renames and re-probes on its own (RFC 6762 9), so
+ * this callback normally only reports success.
  *
- * The state that matters is FAILURE, and what it means is precise: the name
- * was contested NX_MDNS_CONFLICT_COUNT times and the module gave up. Before
- * that it renames and re-probes on its own, which is RFC 6762 9's prescription
- * and is why this callback usually only ever reports success.
- *
- * ONE WART, Recorded rather than patched. The vendored renamer appends the
- * RFC 6763 service-instance suffix -- "amiga" becomes "amiga (2)" -- and for a
- * SERVICE instance that is correct and is what Bonjour shows in a browser. For
- * a HOST name it is not: RFC 6762 9's own example is "PrinterOne-2.local.",
- * and a host label containing a space and parentheses is one that no user will
- * successfully type at a shell. The rename function is `static` in
- * nxd_mdns.c, so neither a symbol override nor -Wl,--wrap can reach it, and
- * this project does not patch vendored source (docs/RESEARCH.md 13.2). What
- * is done instead is the useful half: say loudly which name was actually
- * claimed, and say what to do about it. Setting HOSTNAME fixes it permanently
- * and is the right fix anyway -- a network with two machines both called
- * "amiga" has a naming problem that renaming one of them at random does not
- * solve.
+ * Known wart: the vendored renamer appends the RFC 6763 service-instance
+ * suffix, so "amiga" becomes "amiga (2)". That is correct for a service
+ * instance but not for a host name -- RFC 6762 9's example is
+ * "PrinterOne-2.local." -- and a label with a space and parentheses is hard to
+ * type at a shell. The rename function is `static` in nxd_mdns.c, so neither a
+ * symbol override nor -Wl,--wrap can reach it, and this project does not patch
+ * vendored source (docs/RESEARCH.md 13.2). Instead the claimed name is logged
+ * along with the fix: set HOSTNAME.
  */
 static VOID ami_ns_mdns_probing(NX_MDNS *mdns_ptr, UCHAR *name, UINT state)
 {
@@ -150,10 +129,9 @@ static VOID ami_ns_mdns_probing(NX_MDNS *mdns_ptr, UCHAR *name, UINT state)
                  (const char *)ns->ns_Mdns.nx_mdns_domain_name);
 
         /*
-         * The module renames in place, so nx_mdns_host_name is the name that
-         * was actually claimed and ns_MdnsLabel is the one that was asked
-         * for. They differ only after a collision, and that is worth a line
-         * of its own rather than being left for somebody to spot.
+         * The module renames in place, so nx_mdns_host_name is the claimed
+         * name and ns_MdnsLabel the requested one. They differ only after a
+         * collision, which gets its own log line.
          */
         if (name != NULL && ami_ns_mdns_differs((const char *)name,
                                                 ns->ns_MdnsLabel))
@@ -204,11 +182,10 @@ LONG ami_netstack_mdns_start(AmiNetStack *ns)
     }
 
     /*
-     * The module's own packet pool is the stack pool, unlike the DNS client
-     * which carries a private one. That is the right way round here: an mDNS
-     * response is one small datagram and the stack pool is sized from
-     * AvailMem(), so a second fixed-size pool would be memory reserved
-     * against a load this never has.
+     * The module uses the stack pool, unlike the DNS client which carries a
+     * private one. An mDNS response is one small datagram and the stack pool
+     * is sized from AvailMem(), so a second fixed-size pool would reserve
+     * memory against a load this never sees.
      */
     status = nx_mdns_create(&ns->ns_Mdns, &ns->ns_Ip, &ns->ns_Pool,
                             AMI_MDNS_PRIORITY,
@@ -231,15 +208,14 @@ LONG ami_netstack_mdns_start(AmiNetStack *ns)
     ns->ns_MdnsCreated = TRUE;
 
     /*
-     * Per interface, not once. nx_mdns_enable() joins 224.0.0.251 on that
-     * interface and starts probing there; a machine with Ethernet and PPP
-     * should answer on both, and the module keeps a separate record set per
-     * interface index for exactly this.
+     * Per interface. nx_mdns_enable() joins 224.0.0.251 on that interface and
+     * starts probing there; the module keeps a separate record set per
+     * interface index, so a machine with two interfaces answers on both.
      *
      * An interface with no address yet is still enabled: the module registers
      * for address changes (nx_ip_address_change_notify_internal) and fills the
-     * A record in when one arrives, which is precisely the DHCP-then-AutoIP
-     * sequence this stack's startup performs.
+     * A record in when one arrives, which is the DHCP-then-AutoIP sequence
+     * this stack's startup performs.
      */
     for (i = 0; i < ns->ns_IfaceCount; i++)
     {
@@ -273,11 +249,10 @@ VOID ami_netstack_mdns_stop(AmiNetStack *ns)
         return;
 
     /*
-     * Disable before delete, and per interface, because that is what sends the
-     * RFC 6762 10.1 goodbye: the same records re-announced with a TTL of zero,
-     * so every cache on the network drops this machine's name the moment it
-     * goes away rather than two minutes later. A stack that shut down silently
-     * would leave `ping amiga.local` answering into a hole.
+     * Disable before delete, per interface: that is what sends the RFC 6762
+     * 10.1 goodbye, the same records re-announced with a TTL of zero, so every
+     * cache on the network drops this machine's name immediately rather than
+     * two minutes later.
      */
     for (i = 0; i < ns->ns_IfaceCount; i++)
         (VOID)nx_mdns_disable(&ns->ns_Mdns, (UINT)i);
@@ -296,15 +271,13 @@ VOID ami_netstack_mdns_stop(AmiNetStack *ns)
 /* ------------------------------------------------------------- resolving */
 
 /*
- * Is `name` in the .local domain?
+ * Test whether `name` is in the .local domain.
  *
- * Case-insensitive, because DNS is (RFC 4343) and because a user who types
- * "AMIGA.LOCAL" has not made a mistake. A trailing dot is accepted for the
- * same reason every resolver accepts it: "amiga.local." is the fully-qualified
- * spelling of the same name.
+ * Case-insensitive, as DNS is (RFC 4343). A trailing dot is accepted:
+ * "amiga.local." is the fully-qualified spelling of the same name.
  *
- * The bare name "local" is NOT in the .local domain -- it is a single label
- * with no domain at all, and sending it to mDNS would claim a top-level name.
+ * The bare name "local" is not in the .local domain -- it is a single label
+ * with no domain, and sending it to mDNS would claim a top-level name.
  */
 BOOL ami_netstack_mdns_is_local(const char *name)
 {
@@ -343,11 +316,11 @@ BOOL ami_netstack_mdns_is_local(const char *name)
 }
 
 /*
- * Strip the domain, because nx_mdns_host_address_get() wants the host label
- * and appends the domain itself. "amiga.local." and "amiga.local" both become
+ * Strip the domain: nx_mdns_host_address_get() wants the host label and
+ * appends the domain itself. "amiga.local." and "amiga.local" both become
  * "amiga"; "printer.study.local" becomes "printer.study", which the module
- * will ask for verbatim and nothing will answer -- correctly, because a
- * multi-label name under .local is not a host name.
+ * asks for verbatim and nothing answers, since a multi-label name under .local
+ * is not a host name.
  */
 static BOOL ami_ns_mdns_strip(const char *name, char *out, ULONG size)
 {
@@ -389,18 +362,17 @@ LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
 
     /*
      * The caller is already a ThreadX thread: netstack_resolve() brackets the
-     * whole lookup, mDNS branch included, so that one adoption covers both
-     * resolvers rather than each doing its own.
+     * whole lookup, mDNS branch included, so one adoption covers both
+     * resolvers.
      *
-     * NULL for ipv6_address, and it is not a detail. The module treats that
-     * argument as "also ask for AAAA", and it asks SERIALLY: a full A timeout
-     * and then a full AAAA timeout. Passing a buffer therefore doubled the
-     * wire traffic of every successful lookup and doubled the wall time of
-     * every failed one -- measured, `host nosuchbox.local TIMEOUT 5` spent
-     * fifteen seconds retrying and the second half of it was for a record
-     * this build cannot use. This is the IPv4 entry point, the module's IPv6
-     * half is not enabled (see CMakeLists.txt), and netstack_resolve6() would
-     * be the place to ask if it ever is.
+     * NULL for ipv6_address. A non-NULL buffer makes the module also ask for
+     * AAAA, and it does so serially: a full A timeout followed by a full AAAA
+     * timeout. That doubles the wire traffic of every successful lookup and
+     * the wall time of every failed one -- `host nosuchbox.local TIMEOUT 5`
+     * spent fifteen seconds retrying, half of it for a record this build
+     * cannot use. This is the IPv4 entry point and the module's IPv6 half is
+     * not enabled (see CMakeLists.txt); netstack_resolve6() is where to ask if
+     * it ever is.
      */
     status = nx_mdns_host_address_get(&ns->ns_Mdns, (UCHAR *)label, &v4,
                                       NX_NULL, timeout_ticks);
@@ -423,9 +395,8 @@ const char *netstack_mdns_hostname(VOID)
         return NULL;
 
     /*
-     * The CLAIMED name, not the configured one. After a collision they differ,
-     * and everything that displays this -- a log line, ShowNetStatus, whatever
-     * comes next -- must show what the network will actually answer to.
+     * The claimed name rather than the configured one; after a collision they
+     * differ, and callers must show what the network answers to.
      */
     return (const char *)ns->ns_Mdns.nx_mdns_host_name;
 }

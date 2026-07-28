@@ -1,9 +1,9 @@
 /*
  * AmiNetXDuo -- SANA-II shim internals.
  *
- * Not part of the public surface: everything here is private to src/sana2/.
- * Include "tx_api.h" and "nx_api.h" BEFORE any exec header -- exec/types.h
- * turns VOID into a macro, which breaks tx_port.h's `typedef void VOID`.
+ * Private to src/sana2/. Include "tx_api.h" and "nx_api.h" before any exec
+ * header: exec/types.h turns VOID into a macro, which breaks tx_port.h's
+ * `typedef void VOID`.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -28,20 +28,18 @@
  * floor. Each outstanding read therefore pins one NX_PACKET for its whole
  * life, so depth trades pool occupancy against loss under burst.
  *
- * THE IPv4 Depth is the receive window, IN FRAMES, And four was too few.
+ * The IPv4 depth is the receive window in frames, and four is too few.
+ * Measured with tests/curl/run-curlverify.sh -p: sixteen concurrent HTTP
+ * transfers through curl's multi interface lost six, twenty-four lost seven,
+ * forty lost fifteen -- all as `curl: (7) Could not connect` after about
+ * thirteen seconds, on connections the host had already accepted. The SYN went
+ * out, the peer answered, and the SYN/ACK arrived in a burst with no read
+ * outstanding to catch it. At depth eight, forty concurrent transfers lost
+ * none.
  *
- *   Measured with tests/curl/run-curlverify.sh -p: sixteen concurrent HTTP
- *   transfers through curl's multi interface lost six of them, twenty-four
- *   lost seven, forty lost fifteen -- all as `curl: (7) Could not connect`
- *   after about thirteen seconds, and all of them connections the HOST had
- *   already accepted.  The SYN went out, the peer answered, and the SYN/ACK
- *   arrived in a burst with no read outstanding to catch it.  With the depth
- *   at eight, forty concurrent transfers lost none.
- *
- *   So the floor below is a floor and not the answer.  ami_sana2_rx_start()
- *   sizes the IPv4 reader from the packet pool instead -- see the comment
- *   there -- because the pool is itself sized from AvailMem(), and how many
- *   frames a machine can afford to have in flight is a memory question.
+ * The value below is therefore a floor. ami_sana2_rx_start() sizes the IPv4
+ * reader from the packet pool instead (see the comment there), since the pool
+ * is itself sized from AvailMem().
  *
  * The 4 MB / 68020 floor (docs/RESEARCH.md §9) gives a pool as small as
  * AMI_POOL_MIN_PACKETS (16), and pinning a quarter of that would starve
@@ -69,9 +67,8 @@
 
 /*
  * How long a reader waits for the device to give its queued CMD_READs back
- * once it has asked. 25 x 2 ticks is one second, which is generous for a
- * driver that honours AbortIO() and irrelevant for one that does not -- the
- * point is that it is BOUNDED. It used to be WaitIO(), with no bound at all.
+ * once it has asked. 25 x 2 ticks is one second: generous for a driver that
+ * honours AbortIO(), and bounded for one that does not.
  */
 #ifndef AMI_SANA2_RX_REAP_TRIES
 #define AMI_SANA2_RX_REAP_TRIES     25
@@ -115,8 +112,8 @@
 
 /*
  * Two bytes of slack in front of the synthesised Ethernet header so the IP
- * header lands on a 4-byte boundary -- NetX Duo's NX_PHYSICAL_HEADER is 16 for
- * exactly this reason, and the 68020 pays for misaligned longword reads.
+ * header lands on a 4-byte boundary. NetX Duo's NX_PHYSICAL_HEADER is 16 for
+ * the same reason, and the 68020 pays for misaligned longword reads.
  */
 #define AMI_SANA2_RX_PAD            2
 
@@ -127,7 +124,7 @@
 struct AmiSana2Rx;
 
 /*
- * One outstanding CMD_READ. `req` MUST stay first: completed requests come
+ * One outstanding CMD_READ. `req` must stay first: completed requests come
  * back as struct Message * from GetMsg() and are cast straight back to the
  * slot.
  */
@@ -158,9 +155,9 @@ typedef struct AmiSana2Rx
     ULONG               wake_mask;
 
     /*
-     * TX reaping duty. Exactly one reader carries it -- see the comment on
-     * ami_sana2_tx_reap_bind() -- and only that reader has a nonzero
-     * reap_mask, which is the signal the TX reply port raises on completion.
+     * TX reaping duty. Exactly one reader carries it (see
+     * ami_sana2_tx_reap_bind()), and only that reader has a nonzero reap_mask,
+     * the signal the TX reply port raises on completion.
      */
     BOOL                reap_tx;        /* this reader has the duty         */
     BYTE                reap_sigbit;    /* -1 when none is held             */
@@ -172,9 +169,8 @@ typedef struct AmiSana2Rx
     volatile BOOL       failed;
 
     /* Reads the device would not give back at teardown. Nonzero means this
-       reader's slots, its pinned packets and its reply port are all still
-       reachable by the device, so none of them may be freed -- see
-       ami_sana2_rx_teardown(). */
+       reader's slots, pinned packets and reply port are still reachable by the
+       device, so none may be freed -- see ami_sana2_rx_teardown(). */
     volatile UWORD      orphans;
 
     AmiRxSlot           slot[AMI_SANA2_RX_MAX_DEPTH];
@@ -182,7 +178,7 @@ typedef struct AmiSana2Rx
 
 /* --------------------------------------------------------------- TX slots */
 
-/* `req` MUST stay first -- same GetMsg() cast as AmiRxSlot. */
+/* `req` must stay first -- same GetMsg() cast as AmiRxSlot. */
 typedef struct AmiTxSlot
 {
     struct IOSana2Req   req;
@@ -216,7 +212,7 @@ struct AmiSana2If
     ULONG               bps;
     ULONG               hw_type;
     UWORD               addr_bits;
-    UWORD               addr_bytes;     /* 6 for Ethernet, 0 for PPP/SLIP  */
+    UWORD               addr_bytes;     /* 6 for Ethernet, 0 if addressless */
 
     BOOL                online;
     BOOL                raw_supported;

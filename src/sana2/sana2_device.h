@@ -7,9 +7,9 @@
  * revision 2 autodocs). Command numbers, structure layouts and error codes are
  * wire-and-ABI facts of the protocol, not implementation.
  *
- * The include guard deliberately matches Commodore's, so that if a future NDK
- * does provide <devices/sana2.h> only one of the two definitions is ever seen.
- * The AmiNetXDuo-specific extras below sit outside that guard.
+ * The include guard matches Commodore's, so that if a future NDK does provide
+ * <devices/sana2.h> only one of the two definitions is ever seen. The
+ * AmiNetXDuo-specific extras below sit outside that guard.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -198,11 +198,11 @@ struct Sana2DeviceStats
  * length up to an even number of bytes, so the destination must tolerate one
  * spare byte.
  *
- * These tag numbers are NOT present in any header shipped with this toolchain
- * or in the Commodore SANA-II sources, so they are unverified here. Offering a
- * mis-numbered buffer-management hook to a device is a correctness hazard, not
- * merely a lost optimisation, so AMI_SANA2_OFFER_COPY16 defaults to 0 and the
- * cooked/raw paths never depend on it.
+ * These tag numbers are not present in any header shipped with this toolchain
+ * or in the Commodore SANA-II sources, so they are unverified. A mis-numbered
+ * buffer-management hook offered to a device is a correctness hazard, so
+ * AMI_SANA2_OFFER_COPY16 defaults to 0 and the cooked/raw paths never depend
+ * on it.
  */
 #ifndef S2_CopyToBuff16
 #define S2_CopyToBuff16         (S2_Dummy + 4)

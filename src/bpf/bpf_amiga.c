@@ -15,15 +15,14 @@
 
 /*
  * Forbid()/Permit(), not Disable()/Enable(). The taps run on the SANA-II
- * reader threads and on whatever thread happens to be inside
- * nx_tcp_socket_send, and the vectors run on application tasks, so the channel
- * table is genuinely shared -- but nothing here runs at interrupt level, and
- * long Disable() regions break serial, floppy and audio (docs/RESEARCH.md 6.2).
+ * reader threads and on whatever thread is inside nx_tcp_socket_send, and the
+ * vectors run on application tasks, so the channel table is shared; but
+ * nothing here runs at interrupt level, and long Disable() regions break
+ * serial, floppy and audio (docs/RESEARCH.md 6.2).
  *
- * The one place this is nearly long enough to matter is ami_bpf_capture(),
- * which copies the captured prefix of a frame inside the bracket. That is
- * bounded by the snap length and is why bpf_read()'s copy-out -- which can be
- * a whole 32 KB buffer -- was moved outside it instead.
+ * The longest bracket is ami_bpf_capture(), which copies the captured prefix
+ * of a frame inside it, bounded by the snap length. bpf_read()'s copy-out,
+ * which can be a whole 32 KB buffer, is done outside the bracket.
  */
 VOID ami_bpf_lock(VOID)
 {
@@ -58,11 +57,10 @@ VOID ami_bpf_notify(APTR task, ULONG mask)
  * the 1970s.
  *
  * TimerBase is opened by src/common/compat.c for its EClock millisecond
- * counter; calling ami_millis() once is what forces that open. If it failed,
- * fall back to milliseconds since stack startup: monotonic and correctly
- * spaced, but with an epoch of "whenever the stack came up", which a capture
- * viewer will render as 1970. Wrong absolute time is a cosmetic problem;
- * refusing to capture would not be.
+ * counter; calling ami_millis() once forces that open. If it failed, fall back
+ * to milliseconds since stack startup: monotonic and correctly spaced, but
+ * with an epoch of whenever the stack came up, which a capture viewer renders
+ * as 1970. That is cosmetic, where refusing to capture would not be.
  */
 extern struct Device *TimerBase;
 
