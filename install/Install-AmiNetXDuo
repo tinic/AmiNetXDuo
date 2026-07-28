@@ -458,6 +458,7 @@
 
 (set OLD_BSD (if (exists "LIBS:bsdsocket.library" (noreq)) 1 0))
 (set OLD_UG  (if (exists "LIBS:usergroup.library"  (noreq)) 1 0))
+(set OLD_TLS (if (exists "LIBS:tls.library"        (noreq)) 1 0))
 
 (set OLD_BSD_VER 0)
 (if OLD_BSD (set OLD_BSD_VER (/ (getversion "LIBS:bsdsocket.library") 65536)))
@@ -816,6 +817,24 @@
 
 (if (exists (tackon S_LIBS "tls.library") (noreq))
   (
+    ; Replace tls.library the same way bsdsocket.library is -- rename the old
+    ; one aside first -- rather than leaving it to copylib's version check.
+    ; copylib copies only when the source romtag is NEWER, so an old
+    ; tls.library whose version never moved would be left in place beside a
+    ; freshly installed bsdsocket.library: exactly the mismatched pair the note
+    ; above rules out, and how a stale CBC-only TLS survived a stack upgrade.
+    ; Renaming aside also lets the copy succeed when the library is held open.
+    (if OLD_TLS
+      (
+        (if (exists "LIBS:tls.library.old" (noreq))
+            (delete "LIBS:tls.library.old"
+                    (prompt "Removing the previous LIBS:tls.library.old")
+                    (help @copyfiles-help)
+                    (optional "force" "nofail")))
+        (rename "LIBS:tls.library" "LIBS:tls.library.old"
+                (prompt "Renaming the old LIBS:tls.library out of the way")
+                (help H_REPLACELIB))
+      ))
     (copylib
       (prompt (cat "Installing tls.library into LIBS:\n\n"
                    "This lets programs make encrypted (https:) connections.  "
