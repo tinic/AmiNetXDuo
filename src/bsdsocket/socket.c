@@ -1675,15 +1675,56 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
  * interrupted by Ctrl-C; see transfer.c bsd_recv_once for why they are global
  * rather than static, and select.c for why the wait is sliced at all.
  */
+/*
+ * Is the socket parked on a listener holding a connection accept() can hand
+ * over?
+ *
+ * The handshake having finished is what matters, not the connection still
+ * being open. A peer that connects, writes and closes in one breath leaves the
+ * parked socket in CLOSE_WAIT long before an Amiga application gets round to
+ * accept(): the connection did happen, the bytes it sent are still queued, and
+ * BSD accept() returns it so recv() can drain them and then report end of
+ * file. Test 41 of the conformance suite is exactly that peer.
+ *
+ * The states are named rather than compared with >, for the reason given in
+ * select.c bsd_readable(). NX_TCP_CLOSED is left out: it is also the state of
+ * a socket that was never connected, so it cannot tell the two apart. Only
+ * CLOSE_WAIT is reachable here in practice -- the FIN_WAIT states need a FIN
+ * we have not sent -- but the whole post-established set costs nothing.
+ */
+BOOL bsd_incoming_ready(const AmiSocket *incoming)
+{
+    UINT state;
+
+    if (incoming == NULL)
+        return FALSE;
+
+    state = incoming->as_Nx.tcp.nx_tcp_socket_state;
+
+    return (state == NX_TCP_ESTABLISHED || state == NX_TCP_CLOSE_WAIT ||
+            state == NX_TCP_CLOSING || state == NX_TCP_TIMED_WAIT ||
+            state == NX_TCP_LAST_ACK);
+}
+
 typedef struct
 {
-    NX_TCP_SOCKET *tcp;
+    AmiSocket *incoming;
 } BsdAcceptArgs;
 
 UINT bsd_accept_once(VOID *arg, ULONG wait)
 {
-    BsdAcceptArgs *a      = (BsdAcceptArgs *)arg;
-    UINT           status = nx_tcp_server_socket_accept(a->tcp, wait);
+    BsdAcceptArgs *a = (BsdAcceptArgs *)arg;
+    UINT           status;
+
+    /* nx_tcp_server_socket_accept() answers NX_NOT_LISTEN_STATE for anything
+       past ESTABLISHED, which would turn a completed connection whose peer
+       already closed into a failed accept(). Its ESTABLISHED path does no
+       bookkeeping -- it reports success and nothing else -- so answering for
+       it here gives up nothing. */
+    if (bsd_incoming_ready(a->incoming))
+        return NX_SUCCESS;
+
+    status = nx_tcp_server_socket_accept(&a->incoming->as_Nx.tcp, wait);
 
     /* "Not connected yet" and "still handshaking" both mean keep waiting, so
        fold them onto NX_NO_PACKET -- the status bsd_wait_sliced() slices on. */
@@ -1760,7 +1801,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
         BsdAcceptArgs args;
         BOOL          aborted;
 
-        args.tcp = &incoming->as_Nx.tcp;
+        args.incoming = incoming;
 
         status = bsd_wait_sliced(SocketBase,
                                  bsd_wait_option(sock, sock->as_RcvTimeout),

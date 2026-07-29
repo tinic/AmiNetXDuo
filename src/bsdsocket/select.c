@@ -363,15 +363,17 @@ BOOL bsd_readable(AmiSocket *sock)
         {
             /*
              * "Readable" on a listener means accept() will not block, so the
-             * test is ESTABLISHED and nothing weaker. The parked socket sits
-             * in SYN_RECEIVED from the moment bsd_listen() arms it (see
-             * socket.c), and ASF_ACCEPTPEND is set by the listen callback when
-             * the SYN lands -- both are true well before the handshake
+             * test is a finished handshake and nothing weaker. The parked
+             * socket sits in SYN_RECEIVED from the moment bsd_listen() arms it
+             * (see socket.c), and ASF_ACCEPTPEND is set by the listen callback
+             * when the SYN lands -- both are true well before the handshake
              * finishes, so neither can stand in for readiness.
+             *
+             * Nothing stronger either: bsd_incoming_ready() counts a peer that
+             * has already closed, because accept() hands that connection over
+             * as well.
              */
-            return (sock->as_Incoming != NULL &&
-                    sock->as_Incoming->as_Nx.tcp.nx_tcp_socket_state ==
-                        NX_TCP_ESTABLISHED);
+            return bsd_incoming_ready(sock->as_Incoming);
         }
 
         /* A closed or half-closed connection returns end-of-file. */

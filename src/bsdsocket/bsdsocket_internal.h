@@ -550,6 +550,11 @@ VOID       bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock);
    called inside a bsd_nx_enter() bracket; a no-op when the list is empty. */
 VOID       bsd_closing_sweep(VOID);
 
+/* socket.c -- TRUE when the socket parked on a listener holds a connection
+   accept() can return, including one whose peer has already closed. Shared
+   with select.c, which uses it for listener readability. */
+BOOL       bsd_incoming_ready(const AmiSocket *incoming);
+
 LONG       bsd_table_resize(struct AmiSocketBase *base, LONG size);
 
 /* socket.c -- the table size this base reports, before the table has been

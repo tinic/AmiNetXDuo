@@ -16877,6 +16877,73 @@ FS-UAE fails on SLIRP.
 `CATEGORY socket NOPAGE` bridged is 23/23 `reason=done rc=0` on the new binary,
 as it was on 6.0.3, so nothing regressed.
 
+### 63.6 Test 18: a connection that arrives already closed
+
+That last failure was ours, and it took a real LAN to expose it. Test 18 binds
+INADDR_ANY, listens, asks the helper over the control connection to dial back,
+`WaitSelect()`s for 5 seconds and accepts. It failed with no diagnostic, which
+narrows it to the `WaitSelect()` branch: the listener never came up readable.
+
+The helper's log settles what happened on the wire. Run with `--verbose`,
+`third_party/bsdsocktest/host/bsdsocktest_helper.py` logs every connect-back,
+and it says:
+
+    [helper] CONNECT to 192.168.1.134:7861
+    [helper] CONNECT to 192.168.1.134:7861 completed
+
+The handshake finished and 30 bytes went out. So the SYN, the SYN+ACK, the ACK
+and the data were all fine, and the failure was entirely on the guest side of
+`accept()`. That also rules out the addressing theories: the helper takes the
+guest's address from the peer of the control connection, so there is nothing
+for the guest to advertise and nothing to get wrong.
+
+What the helper does next is the whole story. `_handle_connect()` is
+
+    s.connect(...); s.sendall(b"BSDSOCKTEST HELLO FROM HELPER\n"); s.close()
+
+-- close immediately, no lingering. On a LAN the FIN lands on the guest a
+handful of milliseconds behind the handshake, and the guest is a 68020 running
+an emulated Amiga: the parked socket is in CLOSE_WAIT long before the
+application's `WaitSelect()` gets a look at it.
+
+Both halves of our accept path insisted on ESTABLISHED exactly.
+`bsd_readable()` reported a listener readable only while
+`as_Incoming->...nx_tcp_socket_state == NX_TCP_ESTABLISHED`, so the listener
+was never readable and `WaitSelect()` slept out its full 5 seconds. Had it
+returned, `accept()` would have failed too: `nx_tcp_server_socket_accept()`
+returns NX_NOT_LISTEN_STATE for any state that is neither ESTABLISHED nor
+LISTEN nor SYN_RECEIVED, and CLOSE_WAIT is one of those.
+
+Neither is right. A completed connection whose peer has closed is still a
+connection: the bytes it sent are queued on the socket, and BSD `accept()`
+hands it over so `recv()` can drain them and then report end of file. NetX Duo
+agrees at the layer below -- `nx_tcp_socket_receive()` returns queued packets
+in CLOSE_WAIT and only answers NX_NOT_CONNECTED once the queue is empty -- so
+the data was there the whole time, behind a readiness test that would not admit
+it.
+
+The test that proved it before any code changed: patch the helper to hold the
+socket open for three seconds before closing, change nothing else, and the tier
+goes 19/19. Put the sleep back and it is 18/19 again.
+
+The fix is one predicate, `bsd_incoming_ready()` in `src/bsdsocket/socket.c`,
+used by both halves: ESTABLISHED or any post-established state that still holds
+the connection (CLOSE_WAIT, CLOSING, TIMED_WAIT, LAST_ACK). NX_TCP_CLOSED stays
+out -- it is also the state of a socket that was never connected, so it cannot
+tell a finished connection from an unused one. `bsd_accept_once()` checks it
+before calling `nx_tcp_server_socket_accept()` and answers NX_SUCCESS itself
+when it holds; that gives up nothing, because the ESTABLISHED path of
+`nx_tcp_server_socket_accept()` does no bookkeeping either, it just returns
+NX_SUCCESS.
+
+Nothing about this is emulator-specific. Any peer that connects, writes and
+closes in one breath -- `curl` against a small server, a health-check probe, a
+port scanner that sends a banner -- hits the same window on real hardware; it
+took a real LAN only because SLIRP has no inbound path to try it with. The
+loopback accept tests never caught it because their peer stays open.
+
+Bridged host tier with the fix: 142 ok, 0 not ok, 0 skipped, all categories.
+
 ## 64. The 68020 is CPU-bound, and the window has nothing left to give (2026-07-28)
 
 AmiTCP_NG 4.1.2–4.1.4 shipped a round of speed work — link-speed-aware TCP
