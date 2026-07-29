@@ -327,12 +327,10 @@ static BOOL wants_ip6(const LONG *args)
 }
 
 /*
- * "fd00:9::/64%eth0" taken apart. The address itself goes through the
- * library's inet_pton(): ami_config_parse_ip6() is compiled only into an
- * AMINETXDUO_IPV6 build and these commands are one binary for either.
+ * "fd00:9::/64%eth0" taken apart. The zone and the prefix length are cut off
+ * here because tool_parse_ip6() takes neither.
  */
-static BOOL parse_address6(struct Library *base, const char *text,
-                           NrAddr6 *out)
+static BOOL parse_address6(const char *text, NrAddr6 *out)
 {
     char  copy[64];
     ULONG i     = 0;
@@ -398,7 +396,7 @@ static BOOL parse_address6(struct Library *base, const char *text,
         out->have_prefix = TRUE;
     }
 
-    return tool_parse_ip6(base, copy, out->addr);
+    return tool_parse_ip6(copy, out->addr);
 }
 
 static VOID explain_bad_address6(const char *what, const char *text)
@@ -448,12 +446,12 @@ static BOOL same_prefix6(const ULONG a[4], const ULONG b[4], ULONG bits)
 }
 
 /* "fd00:9::/64", or a bare address when the length is 128. */
-static VOID format_route6(struct Library *base, const ULONG addr[4],
-                          ULONG bits, char *buf, ULONG buflen)
+static VOID format_route6(const ULONG addr[4], ULONG bits,
+                          char *buf, ULONG buflen)
 {
     ULONG pos = 0;
 
-    tool_format_ip6(base, addr, buf, buflen);
+    tool_format_ip6(addr, buf, buflen);
 
     while (buf[pos] != '\0')
         pos++;
@@ -1015,7 +1013,7 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
     {
         given = (const char *)args[ARG_DEFAULT];
 
-        if (!parse_address6(base, given, &via))
+        if (!parse_address6(given, &via))
         {
             explain_bad_address6("DEFAULTGATEWAY", given);
             tool_netstatus_close(base);
@@ -1032,7 +1030,7 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
             return RETURN_ERROR;
         }
 
-        tool_format_ip6(base, via.addr, gw_text, sizeof(gw_text));
+        tool_format_ip6(via.addr, gw_text, sizeof(gw_text));
 
 #ifdef TOOL_DELETE
         /* No interface is needed to remove one: the address identifies it,
@@ -1129,7 +1127,7 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
 #ifdef TOOL_DELETE
     given = (const char *)args[ARG_DST];
 
-    if (!parse_address6(base, given, &via))
+    if (!parse_address6(given, &via))
     {
         explain_bad_address6("DESTINATION", given);
         tool_netstatus_close(base);
@@ -1145,7 +1143,7 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
 
     if (find_prefix6(base, via.addr, bits, via.have_prefix, &bits) < 0)
     {
-        format_route6(base, via.addr, via.prefix, text, sizeof(text));
+        format_route6(via.addr, via.prefix, text, sizeof(text));
         tool_error("no IPv6 route to %s was added by hand, so there is none "
                    "to delete", (LONG)text);
         explain6(ROUTE_ENOENT, NULL);
@@ -1159,7 +1157,7 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
     ctl.nsc_Destination6[3] = via.addr[3];
     ctl.nsc_PrefixLength    = bits;
 
-    format_route6(base, via.addr, bits, text, sizeof(text));
+    format_route6(via.addr, bits, text, sizeof(text));
 
     if (tool_netstatus_control(base, NETCTRL_ROUTE6_DELETE, &ctl, &err) != 0)
     {
@@ -1179,7 +1177,7 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
     else
         given = (const char *)args[ARG_DST];
 
-    if (!parse_address6(base, given, &via))
+    if (!parse_address6(given, &via))
     {
         explain_bad_address6("DESTINATION", given);
         tool_netstatus_close(base);
@@ -1202,7 +1200,7 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
 
     if (args[ARG_VIA] != 0)
     {
-        format_route6(base, via.addr, bits, text, sizeof(text));
+        format_route6(via.addr, bits, text, sizeof(text));
         tool_error("the route to %s was not added", (LONG)text);
         explain6(ROUTE_ENOSYS, NULL);
         tool_netstatus_close(base);
@@ -1226,7 +1224,7 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
     ctl.nsc_Destination6[3] = via.addr[3];
     ctl.nsc_PrefixLength    = bits;
 
-    format_route6(base, via.addr, bits, text, sizeof(text));
+    format_route6(via.addr, bits, text, sizeof(text));
 
     if (tool_netstatus_control(base, NETCTRL_ROUTE6_ADD, &ctl, &err) != 0)
     {

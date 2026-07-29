@@ -213,6 +213,25 @@ static BOOL is_written_as_ip6(const char *text)
     return FALSE;
 }
 
+/* Whether the running library has IPv6 in it at all, the same question
+   AddNetRoute asks before it touches the IPv6 lists. */
+static BOOL stack_has_ipv6(struct Library *base)
+{
+    struct
+    {
+        NetStatusHeader hdr;
+        NetStatusSystem sys;
+    } answer;
+
+    if (tool_netstatus_query(base, NETSTATUS_SYSTEM, &answer, sizeof(answer),
+                             sizeof(NetStatusSystem)) <= 0)
+    {
+        return FALSE;
+    }
+
+    return (answer.sys.nss_Flags & NETSTATUS_SYS_IPV6) ? TRUE : FALSE;
+}
+
 static BOOL same_address6(const ULONG a[4], const ULONG b[4])
 {
     return (BOOL)(a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3]);
@@ -555,32 +574,49 @@ int main(int argc, char **argv)
 
     if (address_text != NULL && is_written_as_ip6(address_text))
     {
-        /*
-         * An IPv6 literal is parsed by the library, because a command built
-         * from an IPv4-only tree has no parser of its own and is the same
-         * binary either way. That needs the library open, which needs the
-         * stack running -- and arp has nothing to say about a stack that is
-         * not, so the order costs nothing.
-         */
-        struct Library *pb = tool_netstatus_open(quiet);
-        BOOL            ok;
+        struct Library *pb;
+        BOOL            has6;
 
-        if (pb == NULL)
-        {
-            FreeArgs(rda);
-            return RETURN_ERROR;
-        }
-
-        ok = tool_parse_ip6(pb, address_text, want6);
-        tool_netstatus_close(pb);
-
-        if (!ok)
+        if (!tool_parse_ip6(address_text, want6))
         {
             tool_error("\"%s\" is not an address", (LONG)address_text);
             tool_advise("It has a colon in it, so it was read as an IPv6 "
                         "address -- fe80::1, or fd00::10.");
             FreeArgs(rda);
             return RETURN_ERROR;
+        }
+
+        /*
+         * A well-formed address the running stack still has no cache for.
+         * Asked before anything is printed, because every later answer would
+         * be "not in the cache" and read as a fact about the address.
+         * Opening never starts the stack, and arp has nothing to say about
+         * one that is not running.
+         */
+        pb = tool_netstatus_open(quiet);
+        if (pb == NULL)
+        {
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
+        has6 = stack_has_ipv6(pb);
+        tool_netstatus_close(pb);
+
+        if (!has6)
+        {
+            tool_error("the running stack has no IPv6");
+            tool_advise_blank();
+            tool_advise("That is a well-formed IPv6 address, but the running");
+            tool_advise("stack was built without IPv6, so it has no IPv6");
+            tool_advise("neighbours and no cache of them. That is a build");
+            tool_advise("option and not anything that can be switched on");
+            tool_advise("from here.");
+            tool_advise_blank();
+            tool_advise("Run  arp  with no address for the ARP cache this");
+            tool_advise("machine does keep.");
+            FreeArgs(rda);
+            return RETURN_FAIL;
         }
 
         want_one6 = TRUE;

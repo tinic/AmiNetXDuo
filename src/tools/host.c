@@ -13,8 +13,11 @@
  *     the name servers        DEVS:Internet/name_resolution, or the DHCP lease
  *
  * A dotted quad is looked up backwards and anything else forwards, as the Unix
- * tool of the same name does. TIMEOUT is accepted and ignored: the timeout is
- * the resolver's, set in DEVS:Internet/name_resolution.
+ * tool of the same name does. An IPv6 literal is refused with the reason: it
+ * is an address, so it would be looked up backwards, and no call this command
+ * can reach reverses one. nslookup does, by writing the ip6.arpa query itself.
+ * TIMEOUT is accepted and ignored: the timeout is the resolver's, set in
+ * DEVS:Internet/name_resolution.
  *
  * A forward lookup goes through getaddrinfo() with AF_UNSPEC, so a name with
  * an AAAA record reports it. gethostbyname() cannot: its hostent carries one
@@ -70,6 +73,7 @@ int main(int argc, char **argv)
     char            text[HOST_NAME_MAX];
     ToolAddrInfo    hints;
     ToolAddrInfo   *list = NULL;
+    ULONG           v6[4];
 
     (VOID)argv;
 
@@ -89,6 +93,33 @@ int main(int argc, char **argv)
     }
 
     name = (const char *)args[ARG_NAME];
+
+    /*
+     * An IPv6 literal, in either build. host answers through the machine's
+     * resolver, and the resolver reverses IPv4 addresses only -- there is no
+     * ip6.arpa call behind gethostbyaddr() or getnameinfo() to ask. Handing
+     * the literal to the forward path instead is what used to produce
+     * "cannot resolve", with advice about spelling and name servers that has
+     * nothing to do with an address.
+     *
+     * Checked before the library is opened, so a question host cannot answer
+     * does not start the network to say so. A dotted quad never gets here:
+     * the IPv6 grammar does not accept one on its own.
+     */
+    if (tool_parse_ip6(name, v6))
+    {
+        tool_error("\"%s\" is an address, not a name", (LONG)name);
+        tool_advise_blank();
+        tool_advise("An address is looked up backwards, and this machine's");
+        tool_advise("resolver does that for IPv4 addresses only. It has no");
+        tool_advise("call that reverses an IPv6 address.");
+        tool_advise_blank();
+        tool_advise("nslookup builds that question itself -- give it the");
+        tool_advise("same address and it asks the DNS for the ip6.arpa");
+        tool_advise("record.");
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
 
     /*
      * Starts the stack if nothing else has. The base is not closed: that open

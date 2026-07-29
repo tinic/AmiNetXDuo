@@ -112,12 +112,6 @@ static char  nsl_qname[NSL_TEXT_MAX];
 static char  nsl_text[NSL_TEXT_MAX];
 static char  nsl_text2[NSL_TEXT_MAX];
 
-/*
- * The open library, for the one place that needs it below the argument
- * parsing: an AAAA is sixteen bytes and the only RFC 5952 formatter on the
- * machine is bsdsocket.library's inet_ntop().
- */
-static struct Library *nsl_sb;
 static AmiConfig nsl_config;
 
 /*
@@ -461,14 +455,28 @@ static VOID nsl_print_record(const UBYTE *msg, ULONG len, UWORD type,
             break;
 
         case NSL_T_AAAA:
+        {
+            /* Not the library's inet_ntop(): an AAAA is a legitimate answer
+               to ask an IPv4-only machine for, and that vector refuses
+               AF_INET6 there. */
+            ULONG words[4];
+            ULONG i;
+
             if (rdlen != 16)
                 break;
-            addr[0] = '\0';
-            if (tool_sock_ntop(nsl_sb, TOOL_AF_INET6, &msg[rdata], addr,
-                               (LONG)sizeof(addr)) == NULL)
-                break;
+
+            for (i = 0; i < 4UL; i++)
+            {
+                words[i] = ((ULONG)msg[rdata + i * 4UL + 0] << 24) |
+                           ((ULONG)msg[rdata + i * 4UL + 1] << 16) |
+                           ((ULONG)msg[rdata + i * 4UL + 2] <<  8) |
+                            (ULONG)msg[rdata + i * 4UL + 3];
+            }
+
+            tool_format_ip6(words, addr, sizeof(addr));
             tool_printf("  address    %s\n", (LONG)addr);
             break;
+        }
 
         case NSL_T_PTR:
             if (nsl_decode_name(msg, len, rdata, nsl_text,
@@ -838,21 +846,44 @@ int main(int argc, char **argv)
         timeout = NSL_DEFAULT_TIMEOUT;
 
     /*
-     * Opened before the argument work rather than after it: telling an IPv6
-     * literal from a name needs the library's inet_pton(), the only parser for
-     * one on a machine whose commands were built from an IPv4-only tree.
+     * Which of the three the argument is, before anything is opened.
+     *
+     * tool_parse_ip6() rather than the library's inet_pton(): an IPv4-only
+     * library answers EAFNOSUPPORT for AF_INET6, and a command that took that
+     * for "not an address" asked the DNS for a name spelt "::1" and reported
+     * NXDOMAIN. Nothing about a PTR question needs IPv6 to carry it -- the
+     * ip6.arpa query travels to the name server over whatever this machine
+     * has, and the answer is the same either way.
      */
+    is_v4 = ami_config_parse_ip(name, &address) ? TRUE : FALSE;
+    is_v6 = FALSE;
+
+    if (!is_v4)
+    {
+        ULONG words[4];
+
+        if (tool_parse_ip6(name, words))
+        {
+            ULONG i;
+
+            for (i = 0; i < 4UL; i++)
+            {
+                v6[i * 4UL + 0] = (UBYTE)((words[i] >> 24) & 0xffUL);
+                v6[i * 4UL + 1] = (UBYTE)((words[i] >> 16) & 0xffUL);
+                v6[i * 4UL + 2] = (UBYTE)((words[i] >>  8) & 0xffUL);
+                v6[i * 4UL + 3] = (UBYTE)(words[i] & 0xffUL);
+            }
+
+            is_v6 = TRUE;
+        }
+    }
+
     sb = tool_socket_open();
     if (sb == NULL)
     {
         FreeArgs(rda);
         return RETURN_FAIL;
     }
-    nsl_sb = sb;
-
-    is_v4 = ami_config_parse_ip(name, &address) ? TRUE : FALSE;
-    is_v6 = (!is_v4 &&
-             tool_sock_pton(sb, TOOL_AF_INET6, name, v6) == 1) ? TRUE : FALSE;
 
     if (args[ARG_TYPE] != 0)
     {

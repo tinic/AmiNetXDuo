@@ -190,7 +190,7 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
         a6->state    = src->nsn_State;
         a6->prefix   = src->nsn_PrefixLength;
 
-        tool_format_ip6(base, src->nsn_Address, a6->text, sizeof(a6->text));
+        tool_format_ip6(src->nsn_Address, a6->text, sizeof(a6->text));
 
         out->addr6_count = (UWORD)(i + 1);
     }
@@ -628,11 +628,11 @@ LONG tool_routes6(ToolRoutes6 *out)
             const NetStatusRoute6 *src = &nx_answer.route6.e[i];
             ToolRoute6            *r   = &out->route[i];
 
-            tool_format_ip6(base, src->nsr6_Destination, r->dest,
+            tool_format_ip6(src->nsr6_Destination, r->dest,
                             sizeof(r->dest));
 
             if (src->nsr6_Flags & NETSTATUS_RT6_GATEWAY)
-                tool_format_ip6(base, src->nsr6_NextHop, r->next_hop,
+                tool_format_ip6(src->nsr6_NextHop, r->next_hop,
                                 sizeof(r->next_hop));
             else
                 r->next_hop[0] = '\0';
@@ -757,7 +757,7 @@ LONG tool_neighbours(ToolNeighbours *out)
             const NetStatusNeighbour *src = &nx_answer.nd.e[i];
             ToolNeighbour            *e   = &out->entry[i];
 
-            tool_format_ip6(base, src->nsn6_Address, e->text, sizeof(e->text));
+            tool_format_ip6(src->nsn6_Address, e->text, sizeof(e->text));
 
             e->addr[0] = src->nsn6_Address[0];
             e->addr[1] = src->nsn6_Address[1];

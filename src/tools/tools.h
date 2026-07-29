@@ -243,20 +243,14 @@ VOID            tool_netstatus_close(struct Library *base);
  * nsh_Available comes back regardless of nsh_Count.
  */
 /*
- * An IPv6 address, four host-order ULONGs, in RFC 5952 text.  Through the
- * library's inet_ntop(), because a command built from an IPv4-only tree has
- * no formatter of its own and still has to print what a dual-stack library
- * reports.  Writes "" when the library has no such vector.
+ * An IPv6 address, four host-order ULONGs, in RFC 5952 text, and the same
+ * text back to four ULONGs.  Both answer the same on a library with IPv6 and
+ * one without: they convert text, and whether the machine can reach the
+ * address is a separate question each caller asks for itself.  Neither needs
+ * the library open.  A "/N" suffix is a syntax error, as inet_pton() has it.
  */
-VOID tool_format_ip6(struct Library *base, const ULONG addr[4],
-                     char *buf, ULONG buflen);
-
-/*
- * The other direction, through the library's inet_pton().  TRUE when `text`
- * is an IPv6 literal and the library can parse one; FALSE otherwise, which is
- * also the answer on a library with no IPv6 in it.
- */
-BOOL tool_parse_ip6(struct Library *base, const char *text, ULONG out[4]);
+VOID tool_format_ip6(const ULONG addr[4], char *buf, ULONG buflen);
+BOOL tool_parse_ip6(const char *text, ULONG out[4]);
 
 LONG tool_netstatus_query(struct Library *base, ULONG what,
                           APTR buffer, ULONG size, ULONG entry_size);

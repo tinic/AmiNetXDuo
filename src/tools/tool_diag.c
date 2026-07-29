@@ -1012,115 +1012,31 @@ static LONG tool_call_netstatus_control(struct Library *base, ULONG op,
 }
 
 /*
- * inet_ntop(), LVO -0x258, register assignment (d0,a0,a1,d1) from the NDK
- * pragma.  The library's is the only RFC 5952 IPv6 formatter on the machine:
- * one set of commands serves a library built either way, so a command built
- * from an IPv4-only tree still has to print an address a dual-stack library
- * handed it.
+ * The two IPv6 text conversions, through src/config/config_text6.c.
+ *
+ * Not through the library's inet_ntop() / inet_pton(): those answer
+ * EAFNOSUPPORT for AF_INET6 on an IPv4-only library, and one set of commands
+ * serves a library built either way.  A command has to tell "::1" from a typo
+ * whether the machine can route to it or not -- see the head of
+ * config_text6.c.  Neither needs the library open.
  */
-VOID tool_format_ip6(struct Library *base, const ULONG addr[4],
-                     char *buf, ULONG buflen)
+VOID tool_format_ip6(const ULONG addr[4], char *buf, ULONG buflen)
 {
-    UBYTE bytes[16];
-    ULONG i;
-
     if (buflen == 0)
         return;
 
     buf[0] = '\0';
 
-    if (base == NULL || (ULONG)base->lib_NegSize < 0x25eUL)
-        return;
-
-    for (i = 0; i < 4UL; i++)
-    {
-        bytes[i * 4UL + 0] = (UBYTE)((addr[i] >> 24) & 0xff);
-        bytes[i * 4UL + 1] = (UBYTE)((addr[i] >> 16) & 0xff);
-        bytes[i * 4UL + 2] = (UBYTE)((addr[i] >>  8) & 0xff);
-        bytes[i * 4UL + 3] = (UBYTE)(addr[i] & 0xff);
-    }
-
-    /* Registers loaded last, with nothing between them and the jsr; see the
-       note above tool_sock_pton() in toolsock.c. */
-    {
-        register struct Library *a6  __asm("a6") = base;
-        register LONG            d0  __asm("d0") = 23;     /* AF_INET6 */
-        register CONST_APTR      a0  __asm("a0") = (CONST_APTR)bytes;
-        register APTR            a1  __asm("a1") = (APTR)buf;
-        register LONG            d1  __asm("d1") = (LONG)buflen;
-        register char           *res __asm("d0");
-        register LONG _clob_d1 __asm("d1");
-        register LONG _clob_a0 __asm("a0");
-        register LONG _clob_a1 __asm("a1");
-
-        __asm __volatile ("jsr a6@(-600:W)"
-                          : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
-                            "=r" (_clob_a1)
-                          : "r" (a6), "r" (d0), "r" (a0), "r" (a1), "r" (d1)
-                          : "cc", "memory");
-
-        if (res == NULL)
-            buf[0] = '\0';
-    }
+    if (addr != NULL)
+        ami_config_format_ip6(addr, buf, buflen);
 }
 
-/*
- * inet_pton(), LVO -0x25e, the other direction, for the same reason: a command
- * built from an IPv4-only tree has no IPv6 parser of its own -- ami_config_parse_ip6()
- * is compiled only in an AMINETXDUO_IPV6 build -- and still has to take an
- * address a user typed.
- *
- * Writes the four host-order words NETSTATUS_* speaks. A library whose vector
- * table stops short of -0x25e answers FALSE, which reads as "not an address
- * this machine can use" and is the right answer on one that has no IPv6.
- *
- * The vector test comes before the register variables; see the note above
- * tool_sock_pton() in toolsock.c.
- */
-BOOL tool_parse_ip6(struct Library *base, const char *text, ULONG out[4])
+BOOL tool_parse_ip6(const char *text, ULONG out[4])
 {
-    UBYTE bytes[16];
-    LONG  res;
-    ULONG i;
-
-    if (base == NULL || text == NULL || out == NULL)
-        return FALSE;
-    if ((ULONG)base->lib_NegSize < 0x25eUL)
+    if (text == NULL || out == NULL)
         return FALSE;
 
-    for (i = 0; i < 16UL; i++)
-        bytes[i] = 0;
-
-    {
-        register struct Library *a6  __asm("a6") = base;
-        register LONG            d0  __asm("d0") = 23;     /* AF_INET6 */
-        register CONST_APTR      a0  __asm("a0") = (CONST_APTR)text;
-        register APTR            a1  __asm("a1") = (APTR)bytes;
-        register LONG            r   __asm("d0");
-        register LONG _clob_d1 __asm("d1");
-        register LONG _clob_a0 __asm("a0");
-        register LONG _clob_a1 __asm("a1");
-
-        __asm __volatile ("jsr a6@(-606:W)"
-                          : "=r" (r), "=r" (_clob_d1), "=r" (_clob_a0),
-                            "=r" (_clob_a1)
-                          : "r" (a6), "r" (d0), "r" (a0), "r" (a1)
-                          : "cc", "memory");
-        res = r;
-    }
-
-    if (res != 1)
-        return FALSE;
-
-    for (i = 0; i < 4UL; i++)
-    {
-        out[i] = ((ULONG)bytes[i * 4UL + 0] << 24) |
-                 ((ULONG)bytes[i * 4UL + 1] << 16) |
-                 ((ULONG)bytes[i * 4UL + 2] <<  8) |
-                  (ULONG)bytes[i * 4UL + 3];
-    }
-
-    return TRUE;
+    return ami_config_parse_ip6(text, out, NULL);
 }
 
 /* Errno(), LVO -0x0a2: what the two above leave behind on failure. */
