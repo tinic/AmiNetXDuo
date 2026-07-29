@@ -17675,3 +17675,122 @@ Regression set, all on the same tree: default build warning-clean, `ctest`
 `ipv6_link_test` 6/0; conformance loopback tier 130 passed, 0 failed, 12
 skipped, unchanged, with test 132 (raw ICMP ping over 127.0.0.1) still green;
 `tests/tools/run-livetools.sh` 24/24 and `tests/tools/run-nettools.sh` rc 0.
+
+## 68. The last argument that function dropped (2026-07-28)
+
+67 fixed two of the three things `_nxd_ip_raw_packet_source_send()` did to an
+IPv6 caller. This is the third, and the last one in that function.
+
+### 68.1 The defect
+
+The function takes a `tos` argument. Its own header block calls it "Value for
+tos or traffic class and flow label". The IPv4 branch applies it; the IPv6
+branch, four lines below, does not:
+
+    /* IPv4 */
+    _nx_ip_packet_send(ip_ptr, packet_ptr, destination_ip -> nxd_ip_address.v4,
+                       (tos & 0xFF) << 16, (ttl & 0xFF), protocol << 16,
+                       NX_FRAGMENT_OKAY, next_hop_address);
+
+    /* IPv6 */
+    status = _nxd_ipv6_raw_packet_send_internal(ip_ptr, packet_ptr,
+                                                destination_ip, protocol);
+
+Same shape as the hop limit, and worse in one way: the hop limit could at
+least be forwarded once the internal function grew a parameter, because
+`_nx_ipv6_packet_send()` already had somewhere to put it. Nothing below this
+call could carry a traffic class at all. `_nx_ipv6_packet_send()` and
+`_nx_ipv6_header_add()` have no such argument, and `nx_ipv6_header_add.c:228`
+writes the word that holds it as a constant:
+
+    /* bits 31-28: IP version.  Bits 27-20: Traffic Class.  Bits 19-00: Flow Lable */
+    ip_header_ptr -> nx_ip_header_word_0 = (ULONG)(6 << 28);
+
+`grep -rn traffic_class common/inc/*.h` returned nothing. Every IPv6 packet
+NetX Duo sends leaves with traffic class zero and no caller can ask otherwise.
+
+That the one `tos` argument is right for both families is not an analogy: RFC
+2474 section 3 renames the IPv4 TOS octet and the IPv6 traffic class octet to
+the same DS field with the same layout. So DSCP marking a raw socket worked on
+IPv4 and silently did nothing on IPv6.
+
+### 68.2 A parameter, not a packet field
+
+Two ways to carry it. A field on `NX_PACKET` touches no call site;
+a parameter on `_nx_ipv6_packet_send()` and `_nx_ipv6_header_add()` touches
+16, measured.
+
+The parameter won. `NX_PACKET` is the structure every buffer in the system is
+built from, and the cost of the field is not only its bytes: it puts
+correctness on every allocation, copy and fragmentation path remembering to
+initialise or propagate it, where one that forgets emits a wrong byte on the
+wire rather than failing to build. The 16 call sites are mechanical, they pass
+the value they were already getting, and an out-of-tree caller that has not
+been updated fails to compile instead of sending whatever was on the stack.
+It is also what IPv4 already does: `_nx_ip_packet_send()` and
+`_nx_ip_header_add()` take `type_of_service` as an argument.
+
+`_nx_ipv6_header_add()` masks — `(traffic_class & 0xFF) << 20` — so the
+argument cannot reach the version nibble or the flow label whatever a caller
+passes.
+
+### 68.3 Flow label stays out
+
+The flow label is the other 20 bits of the same word, equally unreachable, and
+it is not in the patch.
+
+It is not the same defect. No argument for it is being discarded, and RFC 6437
+section 2 makes zero the correct value for a packet that is not labelled — so
+the current output is right, not wrong. The same RFC requires a flow label to
+stay constant for the lifetime of a flow and to be hard to guess, which is a
+property of an allocator sitting on the socket layer, not of a per-packet
+argument to a raw send. A `flow_label` parameter here would mostly make
+non-conformant senders easy to write.
+
+What did change is the header block, which claimed `tos` set the flow label.
+It never did, and now it will not.
+
+### 68.4 Carrying it up
+
+`IPV6_TCLASS` (RFC 3542) joins `IPV6_V6ONLY` and `IPV6_UNICAST_HOPS` in
+`src/bsdsocket/in6.c`, on the same `as_Tos` that `IP_TOS` uses, for 68.1's
+reason: one DS field, one setting.
+
+The option number needed the same decision `IPV6_V6ONLY` needed. BSD numbers
+it 61, Linux 67, and both are accepted as the existing pair are. Darwin's 36
+is refused on purpose: Apple kept that value for binary compatibility with its
+own past, and 36 is `IPV6_RECVPKTINFO` in BSD and `IPV6_HDRINCL` in Linux, so
+it names something else in both lineages this NDK could belong to. 61 is
+Linux's `IPV6_PATHMTU`, which this library does not offer, so accepting it
+costs nothing.
+
+`traceroute`'s `TOS` argument stops being refused on an IPv6 target. 67.3
+refused it for a reason that was true when it was written and is not any more.
+
+### 68.5 Measured
+
+The wire, from the emulated A2065's frame log through
+`tests/trace/a2065pcap.py`. Three ICMPv6 echo requests from the same
+`traceroute`, differing only in the traffic class asked for:
+
+    IP6 (hlim 1, ...)             fe80::280:10ff:fe32:3334 > fe80::2: [icmp6 sum ok] echo request
+    IP6 (class 0xb8, hlim 1, ...) fe80::280:10ff:fe32:3334 > fe80::2: [icmp6 sum ok] echo request
+    IP6 (class 0x20, hlim 1, ...) fe80::280:10ff:fe32:3334 > fe80::2: [icmp6 sum ok] echo request
+
+Header word 0 is `60 00 00 00`, `6B 80 00 00` and `62 00 00 00` — version 6,
+the requested traffic class, flow label 0 in all three — and each drew a
+reply. Every other IPv6 frame in the same capture is still `60 00 00 00`:
+neighbour solicitation, neighbour advertisement, router solicitation, and
+`ping`'s own echo request, which does not go through the raw path at all.
+
+The mask is not on that list. `traceroute` refuses a `TOS` above 255 before
+the socket is opened, so the wire cannot show a value being truncated; the
+`& 0xFF` in `_nx_ipv6_header_add()` is there so no caller can reach the
+version nibble or the flow label, and the flow label reading 0 on a marked
+frame is as much of it as a capture can show.
+
+Regression set, all on the same tree: default build warning-clean, `ctest`
+11/11; IPv6 build warning-clean, `ipv6_test` 78/0, `ipv6_socket_test` 54/0,
+`ipv6_link_test` 6/0; `tests/ipv6/run-tools-fsuae.sh -s` PASS with nothing
+pending; conformance loopback tier 130 passed, 0 failed, 12 skipped;
+`tests/tools/run-livetools.sh` 24/24 and `tests/tools/run-nettools.sh` rc 0.
