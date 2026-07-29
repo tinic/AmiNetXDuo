@@ -75,6 +75,14 @@ static const char version_tag[] __attribute__((used)) =
    gone.  At 50 Hz a stale tick gets ~400 chances to jump into freed memory. */
 #define SURVIVE_TICKS   400L
 
+/* Anything under this is rounding, not a leak. */
+#define LEAK_TOLERANCE  8192UL
+
+/* How long a memory check waits for a teardown to finish before believing what
+   it reads.  40 * 5 ticks is four seconds at 50 Hz. */
+#define SETTLE_TRIES    40
+#define SETTLE_TICKS    5L
+
 static LONG checks, failures;
 
 /* ---- the child's ThreadX objects ---------------------------------------- */
@@ -105,6 +113,37 @@ static void checkv(const char *what, BOOL ok, LONG value)
         failures++;
     Printf((CONST_STRPTR)"  %s %s (%ld)\n", (LONG)(ok ? "ok  " : "FAIL"), (LONG)what, value);
     AMI_ERROR("  %s %s (%ld)", (LONG)(ok ? "ok  " : "FAIL"), (LONG)what, value);
+}
+
+/*
+ * How much of `before` is still out, once the machine has stopped handing it
+ * back.  Freeing is not synchronous with the call that causes it -- a Task's
+ * stack and MemList go back when exec reaps it, and a Process's stack, CLI and
+ * Process structure go back after System() has already returned to its caller
+ * -- so a single AvailMem() taken at the moment of interest reads whatever
+ * teardown happens to still be in flight.  Measured on a run that leaked
+ * nothing: 18936 bytes out at the instant System() returned, 72 five ticks
+ * later.
+ *
+ * So sample until the number falls under the tolerance, or until the wait runs
+ * out.  A real leak never comes back and still fails, four seconds later.
+ */
+static ULONG settled_bytes_out(ULONG before)
+{
+    ULONG out = 0;
+    int   n;
+
+    for (n = 0; n < SETTLE_TRIES; n++)
+    {
+        ULONG now = AvailMem(MEMF_PUBLIC);
+
+        out = (before > now) ? (before - now) : 0UL;
+        if (out < LEAK_TOLERANCE)
+            break;
+        Delay(SETTLE_TICKS);
+    }
+
+    return out;
 }
 
 
@@ -215,7 +254,7 @@ static BOOL clock_ran(ULONG ticks)
 static int child_main(void)
 {
     UINT  status;
-    ULONG mem_before, mem_after;
+    ULONG mem_before, mem_out;
     ULONG zombies;
     int   i;
 
@@ -396,10 +435,9 @@ static int child_main(void)
      * stacks, two 32 KB kernel memory blocks, plus a Task and a MemList for
      * every thread.  If stop leaked any of it, it shows up here.
      */
-    mem_after = AvailMem(MEMF_PUBLIC);
+    mem_out = settled_bytes_out(mem_before);
     checkv("public memory came back (bytes still out)",
-           (mem_before <= mem_after) || ((mem_before - mem_after) < 8192UL),
-           (LONG)(mem_before - mem_after));
+           mem_out < LEAK_TOLERANCE, (LONG)mem_out);
 
     Printf((CONST_STRPTR)"child: %ld checks, %ld failure(s)\n", checks, failures);
     AMI_ERROR("=== KernelStop CHILD done: %ld checks, %ld failures",
@@ -471,7 +509,7 @@ static int parent_main(void)
     APTR            old_window;
     BPTR            fh;
     LONG            rc;
-    ULONG           mem_before, mem_after;
+    ULONG           mem_before, mem_out;
 
     Printf((CONST_STRPTR)"AmiNetXDuo -- tx_amiga_kernel_stop() lifecycle\n");
     AMI_ERROR("=== KernelStop PARENT, hunk at %08lx", (LONG)parent_main);
@@ -526,10 +564,15 @@ static int parent_main(void)
     check("no ThreadX System Timer Task outlived the child",
           FindTask((STRPTR)"System Timer Thread") == NULL);
 
-    mem_after = AvailMem(MEMF_PUBLIC);
+    /*
+     * SystemTags() returns when the child's shell replies, which is before
+     * AmigaDOS has freed the child Process, its stack and its CLI -- so this
+     * has to settle.  Under host contention the deficit here reads 18936 and
+     * is back to 72 within five ticks, on both CPU tiers.
+     */
+    mem_out = settled_bytes_out(mem_before);
     checkv("the child gave its memory back (bytes still out)",
-           (mem_before <= mem_after) || ((mem_before - mem_after) < 8192UL),
-           (LONG)(mem_before - mem_after));
+           mem_out < LEAK_TOLERANCE, (LONG)mem_out);
 
     /* ---- survive the child ---------------------------------------------- */
 
