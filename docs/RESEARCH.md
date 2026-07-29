@@ -14116,7 +14116,7 @@ attributable.
 | `common/src/nx_tcp_server_socket_accept.c` | in the submodule: the mutex moved above both checks |
 | `src/` | unchanged, deliberately — see 43.4 |
 
-## 44. WinUAE, driven from a Mac over SSH, and the seven ethernet cards we have no drivers for (2026-07-26)
+## 44. WinUAE, driven from a Mac over SSH, and the nine ethernet cards it emulates (2026-07-26)
 
 `tools/fsuae-run.sh` has been the only way to run this code on an Amiga, and it
 has two limits that are not going to move: FS-UAE emulates exactly one ethernet
@@ -14267,25 +14267,52 @@ dump on the A3000 profile on 2026-07-26. All of them come up on SLIRP without
 being asked to — `slirp` is WinUAE's default network device — so there is no
 per-board backend setting in the harness.
 
-| config line | card the guest sees | chip | SANA-II driver needed | have it? |
-|---|---|---|---|---|
-| `a2065=slirp` | `A2065` | Am7990 | `a2065.device` | **yes** |
-| `ariadne_rom_file=:ENABLED` | `Ariadne` | Am7990 | `ariadne.device` | no |
-| `ariadne2_rom_file=:ENABLED` | `Ariadne II` | NE2000 | `ariadne2.device` | no |
-| `hydra_rom_file=:ENABLED` | `AmigaNet` | NE2000 | `amiganet.device` | no |
-| `eb920_rom_file=:ENABLED` | `LAN Rover/EB920` | NE2000 | ASDG's own | no |
-| `xsurf_rom_file=:ENABLED` | `X-Surf` | NE2000 | `x-surf.device` | no |
-| `xsurf100z2_rom_file=:ENABLED` | `X-Surf-100 Z2` | NE2000 | `x-surf-100.device` | **yes** |
-| `xsurf100z3_rom_file=:ENABLED` | `X-Surf-100 Z3` | NE2000 | `x-surf-100.device` | **yes** |
+**Every driver name below was read off a binary that has since driven its card
+under this harness**, which is not where they started: three of the eight were
+guesses and three of those guesses were wrong. The card's marketing name is not
+the driver's name. Hydra Systems' card is called AmigaNet and its driver is
+`hydra.device`. Village Tronic wrote the Ariadne II's driver as
+`ariadne_ii.device`, with an underscore and roman numerals, and there is no
+`ariadne2.device` anywhere.
 
-Two entries in our installer's list have no hardware here at all. **`cnet.device`
-has no card in WinUAE.** And the **PCMCIA NE2000 could not be brought up**:
-`ne2000_pcmcia=slirp`, `ne2000pcmcia_rom_file=:ENABLED`, `pcmcia=true` and
-`pcmcia_mb_rom_file=:ENABLED` were tried on the A1200 profile in every
-combination and none of them logged the card. The Gayle PCMCIA address windows
-are mapped on that profile whether or not a card is asked for, and PCMCIA is not
-autoconfig, so their presence proves nothing either way. With no PCMCIA SANA-II
-driver to hand there was nothing to probe it with. Unresolved, not ruled out.
+| config line | card the guest sees | chip | SANA-II driver | where the driver comes from |
+|---|---|---|---|---|
+| `a2065=slirp` | `A2065` | Am7990 | `a2065.device` 2.16 | Commodore; Aminet `driver/net/a2065v216a.lha` has 2.16a |
+| `ariadne_rom_file=:ENABLED` | `Ariadne` | Am7990 | `ariadne.device` 1.50 | `amiga.resource.cx/install/Ariadne_v150.lha` |
+| `ariadne2_rom_file=:ENABLED` | `Ariadne II` | NE2000 | `ariadne_ii.device` 43.12 | `amiga.resource.cx/install/AriadneII_43_12.lha` |
+| `hydra_rom_file=:ENABLED` | `AmigaNet` | NE2000 | `hydra.device` 1.44 | Aminet `driver/net/HydraDriver144.lha` |
+| `eb920_rom_file=:ENABLED` | `LAN Rover/EB920` | NE2000 | `eb920.device` 1.23 | Aminet `driver/net/eb920-sanaII.lha`, int2 and int6 builds |
+| `xsurf_rom_file=:ENABLED` | `X-Surf` | NE2000 | `x-surf.device` 1.16 | iComp wiki, `X-surf-1.16.lha` |
+| `xsurf100z2_rom_file=:ENABLED` | `X-Surf-100 Z2` | NE2000 | `x-surf-100.device` 1.16 | same archive |
+| `xsurf100z3_rom_file=:ENABLED` | `X-Surf-100 Z3` | NE2000 | `x-surf-100.device` 1.16 | same archive |
+| `ne2000_pcmcia=slirp` | RTL8019 PCMCIA | NE2000 | `cnet.device` 1.9 | Aminet `driver/net/cnetdevice.lha` |
+
+None of these is redistributable and none is in this repository;
+`AMINETXDUO_SANA2_DRIVER=<path>` names a local copy.
+
+**`cnet.device` has a card here after all, and the earlier note saying otherwise
+was wrong.** WinUAE's `ne2000pcmcia` board is an RTL8019 PC Card behind Gayle,
+and `cnet.device` is exactly the driver written for that hardware. Two things
+have to be right before it appears, and neither is obvious:
+
+* `ne2000pcmcia_rom_options=inserted=true`. `pcmcia=true` and
+  `ne2000pcmcia_rom_file=:ENABLED` between them build a slot and leave it
+  empty. `gayle.cpp` only calls `initpcmcia()` for a board whose
+  `roms[0].inserted` is set, so without that option WinUAE logs nothing, the
+  card is not in the machine, and Kickstart's `card.resource` never
+  initialises. The driver's own message for that is `cnet: initRoutine could
+  not open card.resource`, which reads like a missing driver and is a missing
+  card.
+* No more than 4 MB of Zorro II Fast RAM. The credit-card window is at
+  `$600000` and 8 MB at `$200000` runs over it, so `card.resource` declines and
+  the driver says the same thing again. This is not emulation: a real A1200
+  with 8 MB of Z2 Fast loses its PCMCIA slot for the same reason.
+  `tools/winuae-run.sh` moves the excess to Zorro III on this board, because
+  simply dropping it left the guest short enough that `curl` would not start.
+
+The board is `BOARD_NONAUTOCONFIG_BEFORE`, so it never appears in the
+autoconfig board list however well it is working. A driver opening it is the
+only proof it is there.
 
 ### 44.8 The one thing that stops this being useful, and it is not the emulator
 
@@ -14304,14 +14331,13 @@ emulated; the driver is a third-party binary nobody in this tree has. The
 `ariadne.device` in `build/testhd-ux4/devs/Networks/` is an 18-byte file reading
 `not a real driver` — an installer-detection fixture, not a driver.
 
-**Superseded on 2026-07-29 by 44.9**: a second driver has now been run, and
-the sentence below about `a2065.device` no longer holds. Everything else here
-does — the paragraph is kept because it is what the Ariadne run still shows.
-
-*What changed is that the hardware for seven more is now one config line away,
-and `AMINETXDUO_SANA2_DRIVER=<path> tests/netstack/run-winuae.sh -N <board>`
-will exercise any of them the moment a driver binary turns up. Acquiring those
-is a licensing question, not an engineering one.*
+**Superseded on 2026-07-29 by 44.11.** Every card in 44.7 now has a driver and
+every one of them has been run. The transcript above is what the Ariadne
+printed when nobody had `ariadne.device`; it is kept because it is still what a
+missing driver looks like, and because `AMINETXDUO_SANA2_DRIVER` being unset is
+the ordinary way to get it. The claim it was making — that acquiring the
+drivers is a licensing question rather than an engineering one — turned out to
+be wrong in the easy direction. Seven of the eight were a search away.
 
 ### 44.9 The X-Surf-100, and the bug it found in us
 
@@ -14422,7 +14448,15 @@ card is fitted and the driver is loaded and points at the serial log.
 | `tools/winuae/run.ps1` | Windows side: mutex, PsExec launch, poll, reap |
 | `tools/winuae/sercap.ps1` | drains the serial TCP socket into a file |
 | `tools/winuae/AmiNetXDuo-A3000.uae` | a config to open in the GUI and use by hand |
-| `tests/netstack/run-winuae.sh` | the netstack test, on any of the eight cards |
+| `tools/sana2-stage.sh` | board to driver, and staging that driver into a DEVS: tree |
+| `tests/netstack/run-winuae.sh` | the netstack test, on any of the nine cards |
+| `tests/conformance/run-winuae.sh` | the conformance suite, `-N` for the card |
+| `tests/compare/run-legacy-client.sh` | the throughput measurement, `-N` for the card |
+
+The three test harnesses share `tools/sana2-stage.sh` rather than each keeping
+a board-to-driver table. They had drifted apart once already: the netstack
+runner's table said `amiganet.device` and `ariadne2.device`, and neither name
+exists.
 
 One-time host setup is `tools/winuae-run.sh --setup`, which extracts PSTools and
 reports whether WinUAE and PsExec are where they need to be. Both halves of the
@@ -14432,6 +14466,125 @@ truth and nothing has to be maintained by hand on `winbuilder`.
 Not automated, deliberately: nothing here runs in `tools/ci.sh`. It needs a
 Windows host with a logged-in console session and a Kickstart ROM, which is a
 description of one machine on one desk.
+
+### 44.11 All nine cards, driven (2026-07-29)
+
+Eight more drivers were found and every card WinUAE emulates has now been run.
+Seven of the eight came off Aminet's `driver/net` or `amiga.resource.cx`; none
+of them is redistributable and none is in this repository.
+
+Each card was taken through the netstack bring-up test twice — once with
+`DEVICE=` set to the bare driver name and once with the full
+`DEVS:Networks/<name>` — then through the conformance suite's `sendrecv`
+category, then through three 300 KB HTTP transfers checked byte for byte
+against what the peer meant to send.
+
+| card | driver | board appears | bare name | full path | DHCP | ping | DNS | 300 KB bulk | `sendrecv` |
+|---|---|---|---|---|---|---|---|---|---|
+| A2065 | `a2065.device` 2.16 | autoconfig | yes | yes | 10.0.2.15 | 3/3 | yes | verified | 17/19 |
+| Ariadne | `ariadne.device` 1.50 | autoconfig | yes | yes | 10.0.2.15 | 3/3 | yes | verified | 17/19 |
+| Ariadne II | `ariadne_ii.device` 43.12 | autoconfig | yes | yes | 10.0.2.15 | 3/3 | yes | verified | 17/19 |
+| AmigaNet | `hydra.device` 1.44 | autoconfig | yes | yes | 10.0.2.15 | 3/3 | yes | verified | 17/19 |
+| LAN Rover/EB920 | `eb920.device` 1.23 | autoconfig | yes | yes | 10.0.2.15 | 3/3 | yes | **hangs** | **hangs at 16** |
+| X-Surf | `x-surf.device` 1.16 | autoconfig | yes | yes | 10.0.2.15 | 3/3 | yes | verified | 17/19 |
+| X-Surf-100 Z2 | `x-surf-100.device` 1.16 | autoconfig | yes | yes | 10.0.2.15 | 3/3 | yes | verified | 17/19 |
+| X-Surf-100 Z3 | `x-surf-100.device` 1.16 | autoconfig | yes | yes | 10.0.2.15 | 3/3 | yes | verified | 17/19 |
+| RTL8019 PCMCIA | `cnet.device` 1.9 | never — see 44.7 | yes | yes | 10.0.2.15 | 3/3 | yes | verified | 17/19 |
+
+**17/19 is the ceiling on SLIRP and is not a property of any card.** Test 18
+needs the helper to dial back into the guest and test 19 echoes 256 KB; both
+fail identically on the A2065, which is the reference. Bridged, they pass
+(63.5).
+
+**The `Networks/` fallback holds on eight more drivers.** 44.9 fixed the bare
+name with one card and one driver in hand. Every third-party driver here
+installs in `DEVS:Networks` and every one of them opens by bare name, so the
+fallback in `ami_sana2_open_device()` is doing what it was written for rather
+than papering over one vendor's layout.
+
+**Throughput.** Six 300 KB transfers per card, one A1200 profile, one peer, the
+Aminet curl, everything else held still. These are not comparable with the
+~98 KB/s that the same client measures under FS-UAE: WinUAE runs in warp and
+the peer is across a LAN rather than on the loopback of the emulator's own
+host.
+
+| card | mean KB/s | min | max |
+|---|---|---|---|
+| A2065 | 231.6 | 220.8 | 237.5 |
+| Hydra AmigaNet | 223.8 | 214.6 | 228.2 |
+| X-Surf-100 Z3 | 216.9 | 214.4 | 220.9 |
+| PCMCIA NE2000 | 206.2 | 179.3 | 223.6 |
+| Ariadne II | 205.8 | 174.8 | 213.0 |
+| X-Surf-100 Z2 | 192.1 | 161.0 | 217.0 |
+| Ariadne | 169.4 | 136.8 | 196.2 |
+| X-Surf | 145.4 | 35.4 | 214.4 |
+| LAN Rover/EB920 | — | — | — |
+
+The spread is worth more than the ordering. Six cards sit inside a band a
+couple of runs wide and the ranking between them moves between sessions.
+**X-Surf is the one real outlier**: two of its six transfers took 8.5 seconds
+instead of 1.4, so the mean is a stall rate rather than a rate. It recovers —
+every transfer completed and every one verified — but roughly a third of them
+stall first.
+
+**The EB920 does not survive a sustained receive, and that is the only card
+that fails anything.** It brings the interface up, leases, pings, resolves, and
+moves 8 KB over HTTP at 40 KB/s. It then wedges the guest on the first larger
+transfer, and stays wedged: the run never reaches the next command and ends on
+the harness timeout. Reproduced four times, two harnesses, both machine
+profiles:
+
+| run | result |
+|---|---|
+| 8 KB HTTP GET | 8192 bytes, `http=200` |
+| 64 KB HTTP GET | no reply; peer logged the connection reset at 22 s, guest never continued |
+| 300 KB HTTP GET | same |
+| `sendrecv`, A1200 | tests 1-15 pass, including a 16 KB send; hangs in 16, the first 64 KB one |
+| `sendrecv`, A3000 | identical |
+
+So the boundary is between 16 KB and 64 KB, it is not the machine profile, and
+it is not our SANA-II layer — the same code moves 300 KB through eight other
+drivers. The card's own README says it ships in an int2 and an int6 build and
+that the hardware has no ethernet address of its own. WinUAE's LAN Rover has an
+`irq` setting to match, and `AMINETXDUO_WINUAE_BOARD_OPTIONS=irq=6` with the
+int6 driver is worse, not better: the guest produces no serial output at all
+and never reaches the first command. Written up and left there.
+
+**The iComp defect pair is a lineage, not a slip.** 44.9 found
+`x-surf-100.device` filling the `Sana2DeviceQuery` block and leaving
+`SizeSupplied` at zero, and refusing every multicast join because it tests bit
+7 of the address where the Ethernet group bit is bit 0. `x-surf.device` 1.16
+does both, identically:
+
+```
+[WARN] sana2: short S2_DEVICEQUERY (0 bytes)
+[WARN] sana2: multicast cmd 14 failed (5/10)
+[WARN] sana2: multicast join not honoured by x-surf.device
+(xsurf 5) multicast address not found!
+```
+
+**No other driver does either.** `a2065.device`, `ariadne.device`,
+`ariadne_ii.device`, `hydra.device`, `eb920.device` and `cnet.device` all run
+with a silent serial log. Both defects belong to the two binaries Individual
+Computers built from one source tree, and our reader being forgiving about
+`SizeSupplied` and our multicast join swallowing a refusal are what carry them.
+
+**The AmiTCP bypass is the same shape, and 7b90081 holds against it.** Only
+those two drivers contain the string `AMITCP`; none of the other six does, so
+there is no bypass to trip in them. For the two that do, the exposed case is a
+driver opened while the port exists, which a cold boot never produces. Probed
+directly — `AddNetInterface eth1` on a stack already carrying `eth0`, with
+`DEBUGLEV 5` set so the driver would say `AmiTCP optimizations enabled` if it
+had taken the path:
+
+| driver | second open | bypass announced | 64 KB before | 64 KB after |
+|---|---|---|---|---|
+| `x-surf.device` 1.16 | `DevOpen Count=2` | no | verified | verified |
+| `x-surf-100.device` 1.16 | `DevOpen Count=2` | no | verified | verified |
+
+Both transfers on both drivers match the reference bytes exactly. The port
+suspend around `OpenDevice()` is doing its job on the card it was written for
+and on the other one in the family.
 
 ## 45. Three CPUs, and the one instruction that made a 68000 a port (2026-07-26)
 
