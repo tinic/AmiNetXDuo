@@ -1887,7 +1887,7 @@ The IPv6 tables in `NX_IP` are tuned down from NetX Duo's defaults in
 `port/netxduo-amiga/inc/nx_user.h` (neighbour cache 16 → 8, destination table 8 → 4,
 default routers 8 → 2, prefix list 8 → 4).
 
-#### Gaps recorded honestly
+#### Gaps
 
 - **`sin6_scope_id` is preserved but not honoured.** `bind()`/`connect()` record it and
   `getsockname()`/`getpeername()` report it back, but it does not select an outgoing
