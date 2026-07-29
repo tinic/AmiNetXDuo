@@ -560,13 +560,13 @@
 
                               @{b}IPv6@{ub}
 
-  IPv6 is a build option. Ordinary builds of AmiNetXDuo are IPv4 only,
-  and in those builds everything in this node is read, recognised and
-  then ignored -- so an interface file with IPv6 keywords in it is safe
-  to use on either build.
+  AmiNetXDuo speaks IPv6, and an ordinary build has it. A build made
+  without it reads and recognises everything in this node and then
+  ignores it, so an interface file with IPv6 keywords in it is safe to
+  use on either build.
 
-  In a build made with IPv6 turned on, the interface file takes three
-  extra keywords, each the IPv4 keyword with a 6 on the end:
+  The interface file takes three extra keywords, each the IPv4 keyword
+  with a 6 on the end:
 
     @{b}DEVS:NetInterfaces/eth0@{ub}
       DEVICE     = a2065.device
@@ -591,13 +591,17 @@
 
   What works: ICMPv6, neighbour discovery, duplicate address detection,
   stateless autoconfiguration from router advertisements, TCP and UDP
-  over IPv6, and AF_INET6 sockets through bsdsocket.library.
+  over IPv6, and AF_INET6 sockets through bsdsocket.library. The
+  commands take an IPv6 address wherever they take a host -- ping,
+  traceroute, nc, telnet, tftp, whois, fetch, sntp, nslookup and host.
+  ShowNetStatus and netstat show the addresses an interface holds, the
+  routes and the neighbours; AddNetRoute and DeleteNetRoute change
+  them; and arp lists the neighbour cache beside the ARP cache. The
+  scope-id suffix form (fe80::1%eth0) is understood where a link-local
+  router is named.
 
-  What does not: @{b}the commands in this guide are IPv4 only@{ub}. ping,
-  netstat and ShowNetStatus will not show you an IPv6 address or ping
-  an IPv6 host, whichever build you are running. IPv6 multicast group
-  membership is not available to programs, and the scope-id suffix form
-  (fe80::1%eth0) is not understood.
+  What does not: IPv6 multicast group membership is not available to
+  programs.
 
 @endnode
 
@@ -1892,8 +1896,7 @@
 
   @{b}IPv6@{ub}
 
-  IPv6 is a build option and is off in ordinary builds. Even in a build
-  that has it, the commands in this guide are IPv4 only. See
+  IPv6 multicast group membership is not available to programs. See
   @{"IPv6" link IPV6}.
 
   @{b}Generally@{ub}

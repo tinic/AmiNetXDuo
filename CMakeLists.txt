@@ -33,7 +33,7 @@ set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG"
 
 # ---------------------------------------------------------------- options ---
 
-option(AMINETXDUO_IPV6 "Build the IPv6 dual stack"                    OFF)
+option(AMINETXDUO_IPV6 "Build the IPv6 dual stack"                    ON)
 
 # AMINETXDUO_IPV6 is GLOBAL, deliberately, and must stay that way.
 #

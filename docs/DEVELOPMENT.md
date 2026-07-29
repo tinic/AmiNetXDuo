@@ -199,7 +199,7 @@ tests/conformance/run-fsuae.sh -a "LOOPBACK NOPAGE"
 | ThreadX-on-Exec soak | 98 checks, 4+ adopted tasks, Enforcer-clean on 68030 |
 | TCP throughput, 13.9 MHz 68020 | **518 KB/s** loopback, **394 KB/s** to a host over SLIRP, both through the library (was 454 / 381 before the nest-counter critical section and the loopback checksum, and 261 / 312 before `src/net68k/`) |
 | TCP throughput, 24.5 MHz 68020 | **636 KB/s** through the library, 1.78× for a 1.76× clock; conformance unchanged |
-| IPv6 (`-DAMINETXDUO_IPV6=ON`) | ICMPv6 + TCP + UDP between two `NX_IP` instances (78 checks); `AF_INET6` sockets over `::1` through the library ABI; ICMPv6 to the host across an emulated A2065, with a router advertisement and stateless autoconfiguration; `SOCK_RAW`/`AF_INET6`, so `ping` and `traceroute` take an IPv6 target (docs/RESEARCH.md 67) |
+| IPv6 (default; `-DAMINETXDUO_IPV6=OFF` to omit) | ICMPv6 + TCP + UDP between two `NX_IP` instances (78 checks); `AF_INET6` sockets over `::1` through the library ABI; ICMPv6 to the host across an emulated A2065, with a router advertisement and stateless autoconfiguration; `SOCK_RAW`/`AF_INET6`, so `ping` and `traceroute` take an IPv6 target (docs/RESEARCH.md 67) |
 
 Verified on 68020 and 68030. **The loopback tier has no failures**, and it
 cannot reach Roadshow's number by construction: nine of the 142 need a remote
@@ -271,7 +271,7 @@ beyond a network connection.
 | | |
 |---|---|
 | toolchain | `tools/fetch-toolchain.sh` retrieves GCC 15.2 with NDK 3.9 from this repository's toolchain mirror release, verified against the asset's sha256, with the upstream Docker layer (pinned by its content digest) as a fallback; cached between runs |
-| cross builds | default, `-DAMINETXDUO_IPV6=ON`, `-DAMINETXDUO_TLS=OFF` and `-DAMINETXDUO_CRYPTO68K_ASM=OFF`; all four are built, because each of them has broken at some point while the others still worked |
+| cross builds | default, `-DAMINETXDUO_IPV6=OFF`, `-DAMINETXDUO_TLS=OFF` and `-DAMINETXDUO_CRYPTO68K_ASM=OFF`; all four are built, because each of them has broken at some point while the others still worked |
 | warnings | `-Wall -Wextra -Werror` on our own sources, with vendored code exempt (`cmake/ci-warnings.cmake`) |
 | host tests | 5 suites through `ctest`: config parsers (157 checks), mbuf chains (206), BPF filter VM (201), crypto68k vectors (5,724, being RSA-2048 known-answer tests, a differential comparison against the vendored bignum code, and the AES, SHA-256 and RFC 8439 record-path vectors), and net68k checksum (10,030, a differential comparison against the vendored checksum across every length, alignment and packet chain) |
 | host compilers | GCC on Linux and clang on macOS, so that neither becomes the only one that works |

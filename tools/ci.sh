@@ -49,9 +49,9 @@ JOBS="${AMINETXDUO_CI_JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl 
 # nx_crypto, and AMINETXDUO_CRYPTO68K_ASM=OFF swaps the hand-written 68020
 # limb primitives for the portable C.  Each has broken while the others built.
 #
-# TLS is ON by default now, so `default` covers the TLS build and the entry
-# here is the OFF one -- the configuration a user gets by asking for a smaller
-# stack, and the one that would otherwise stop being compiled at all.
+# TLS and IPv6 are both ON by default now, so `default` covers them and the
+# entries here are the OFF ones -- the configurations a user gets by asking for
+# a smaller stack, and the ones that would otherwise stop being compiled at all.
 #
 # The last three are the CPU targets.  They are not "the same build with a
 # different -m flag": each one changes what the compiler may emit and what the
@@ -71,7 +71,7 @@ JOBS="${AMINETXDUO_CI_JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl 
 # a break here is a break in something a user downloads.
 CROSS_CONFIGS=(
     "default:"
-    "ipv6:-DAMINETXDUO_IPV6=ON"
+    "noipv6:-DAMINETXDUO_IPV6=OFF"
     "notls:-DAMINETXDUO_TLS=OFF"
     "noasm:-DAMINETXDUO_CRYPTO68K_ASM=OFF"
     "m68000:-DAMINETXDUO_CPU=68000"
