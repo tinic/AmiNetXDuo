@@ -61,6 +61,16 @@
 # than 4000 bytes, and master does not.  Recipe and detail in docs/RESEARCH.md
 # section 63.5.
 #
+# AMINETXDUO_WINUAE_ARGS passes WinUAE's own command line through, and every
+# run brings the emulator log back as build/winuae-emulog-<tag>.txt.  With
+# -a2065log2 that log holds every ethernet frame in both directions, which is
+# the host-side view FS-UAE gives for free and the only one a bridged run has.
+# tests/trace/a2065pcap.py --winuae turns it into a pcap.
+#
+# A bridged run that has to configure IPv6 needs one more thing on top of
+# master: tools/winuae/a2065-multicast-loopback.patch, or the guest hears its
+# own neighbour solicitations and configures no IPv6 address at all.
+#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -473,13 +483,20 @@ fi
 [ "$ACCURATE" = "1" ] && echo "==> cycle accounting on, warp off (fidelity UNVERIFIED -- see the header)"
 echo "==> boot ROM $(basename "$KICK")"
 
+# AMINETXDUO_WINUAE_ARGS is WinUAE's own command line, space separated.
+# -a2065log2 is the one that matters here: the A2065 then dumps every frame it
+# handles, both directions, as hex into the emulator log, which comes back as
+# build/winuae-emulog-<tag>.txt and feeds tests/trace/a2065pcap.py.  That is
+# the host-side view FS-UAE gives unconditionally.
+EMULOG="$ROOT/build/winuae-emulog-$TAG.txt"
+
 ssh "$HOST" "if exist $RRUN rmdir /s /q $RRUN" >/dev/null 2>&1 || true
 ssh "$HOST" "mkdir $RRUN" >/dev/null 2>&1 || true
 scp -q -r "$HD" "$HOST:$RRUN_FWD/hd"
 scp -q "$CFG" "$HOST:$RRUN_FWD/config.uae"
 scp -q "$ROOT/tools/winuae/run.ps1" "$ROOT/tools/winuae/sercap.ps1" "$HOST:$RROOT_FWD/tools/"
 
-RESULT=$(ssh "$HOST" "powershell -NoProfile -ExecutionPolicy Bypass -File $RROOT\\tools\\run.ps1 -Config $RRUN\\config.uae -Hd $RRUN\\hd -Timeout $TIMEOUT -SerialPort $PORT -Serial $RRUN\\serial.log -WinUAE \"$WINUAE_EXE\" -PsExec $RROOT\\pstools\\PsExec64.exe -Tools $RROOT\\tools -Session $SESSION" 2>/dev/null | tr -d '\r' | grep '^WINUAE-RESULT' || true)
+RESULT=$(ssh "$HOST" "powershell -NoProfile -ExecutionPolicy Bypass -File $RROOT\\tools\\run.ps1 -Config $RRUN\\config.uae -Hd $RRUN\\hd -Timeout $TIMEOUT -SerialPort $PORT -Serial $RRUN\\serial.log -WinUAE \"$WINUAE_EXE\" -PsExec $RROOT\\pstools\\PsExec64.exe -Tools $RROOT\\tools -Session $SESSION -ExtraArgs \"${AMINETXDUO_WINUAE_ARGS:-}\"" 2>/dev/null | tr -d '\r' | grep '^WINUAE-RESULT' || true)
 
 # Everything the guest wrote comes back, so DH0: behaves the way it does under
 # FS-UAE: a test reports results simply by writing a file.
@@ -487,6 +504,8 @@ SERIAL="$ROOT/build/winuae-serial-$TAG.log"
 rm -rf "$HD"
 scp -q -r "$HOST:$RRUN_FWD/hd" "$HD" 2>/dev/null || mkdir -p "$HD"
 scp -q "$HOST:$RRUN_FWD/serial.log" "$SERIAL" 2>/dev/null || : > "$SERIAL"
+rm -f "$EMULOG"
+scp -q "$HOST:$RRUN_FWD/emulog.txt" "$EMULOG" 2>/dev/null || true
 
 REASON=$(printf '%s' "$RESULT" | sed -n 's/.*reason=\([a-z]*\).*/\1/p')
 RC=$(printf '%s' "$RESULT" | sed -n 's/.*rc=\([0-9-]*\).*/\1/p')

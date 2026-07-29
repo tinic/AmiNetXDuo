@@ -1,0 +1,51 @@
+The emulated A2065 hands the guest back its own multicast frames, and IPv6
+never gets an address.
+
+WinUAE's receive filter already drops a frame the card itself sent when the
+destination is a unicast address ("not for me2") or the broadcast address
+("not for me3"). Multicast is not covered, so on a bridged run every frame the
+guest sends to a multicast destination that the host link reflects arrives
+back at the card and is delivered.
+
+For IPv4 that is invisible: a reflected mDNS query is answered by nobody and
+dropped. For IPv6 it is fatal. Duplicate address detection works by sending a
+neighbour solicitation for the tentative address to its solicited-node
+multicast group, and a solicitation for that address arriving from elsewhere
+is exactly what a duplicate looks like. The guest hears its own, withdraws the
+address, and does that for the link-local one as well -- so it configures no
+IPv6 address at all, has no source to send from, and every command answers
+"there is no route to that network". Measured on winbuilder 2026-07-28: five
+multicast frames sent, five received back, none of the broadcast or unicast
+ones. The stack cannot tell the difference, because the solicitation is
+correct in every respect and RFC 4861 forbids the source link-layer address
+option on it -- the only evidence is the ethernet source address, which the IP
+layer never sees.
+
+Real hardware on a real switch does not do this, and neither does SLIRP, which
+is why nothing found it before a bridged run.
+
+Apply to a WinUAE checkout (C:\winuae-src on winbuilder) before building; the
+build recipe is in docs/RESEARCH.md 63.5.
+
+SPDX-License-Identifier: MIT
+
+--- a/a2065.cpp
++++ b/a2065.cpp
+@@ -384,6 +384,17 @@
+ 		return;
+ 	}
+ 
++	// dst = multicast and src = me? our own frame, reflected back by the
++	// host link. The two tests above catch that for unicast and broadcast
++	// and nothing catches it here, which breaks IPv6 duplicate address
++	// detection: the guest reads its own solicitation as another node
++	// claiming the address.
++	if ((dstmac[0] & 0x01) && memcmp (srcmac, realmac, sizeof realmac) == 0) {
++		if (log_a2065 > 1)
++			write_log (_T("not for me4\n"));
++		return;
++	}
++
+ 	if (log_a2065 > 1) {
+ 		if (!memcmp(dstmac, realmac, sizeof realmac)) {
+ 			write_log(_T("DST = ME. SRC = %02X.%02X.%02X.%02X.%02X.%02X\n"), srcmac[6], srcmac[7], srcmac[8], srcmac[9], srcmac[10], srcmac[11]);

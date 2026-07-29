@@ -35,7 +35,8 @@ param(
     [string]$PsExec = "C:\aminetxduo\pstools\PsExec64.exe",
     [string]$Tools = "C:\aminetxduo\tools",
     [int]$Session = 1,
-    [int]$LockWait = 1200
+    [int]$LockWait = 1200,
+    [string]$ExtraArgs = ""
 )
 
 $ErrorActionPreference = "Continue"
@@ -71,11 +72,21 @@ if ($SerialPort -gt 0 -and $Serial -ne "") {
 # PowerShell.  Anything that was not running before the launch is ours.
 $before = @(Get-Process winuae64 -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
 
+# The emulator appends to its log, so a stale one from the previous run would
+# be read back as this run's frames.  Truncate before launching, and leave a
+# copy beside the run directory for the caller to fetch.
+$emulog = Join-Path $env:PUBLIC "Documents\Amiga Files\WinUAE\winuaelog.txt"
+$emucopy = Join-Path (Split-Path $Hd -Parent) "emulog.txt"
+Remove-Item -Force -ErrorAction SilentlyContinue $emulog
+Remove-Item -Force -ErrorAction SilentlyContinue $emucopy
+
 # -ArgumentList joins with spaces and does NOT quote, so the one path with a
-# space in it gets its quotes here.
-Start-Process -FilePath $PsExec -NoNewWindow -Wait -ArgumentList @(
-    "-accepteula", "-nobanner", "-i", $Session, "-d", ('"' + $WinUAE + '"'),
-    "-f", $Config) 2>$null | Out-Null
+# space in it gets its quotes here.  $ExtraArgs is WinUAE's own command line,
+# space separated, e.g. "-a2065log2".
+$psargs = @("-accepteula", "-nobanner", "-i", $Session, "-d",
+            ('"' + $WinUAE + '"'), "-f", $Config)
+if ($ExtraArgs -ne "") { $psargs += $ExtraArgs.Split(" ") }
+Start-Process -FilePath $PsExec -NoNewWindow -Wait -ArgumentList $psargs 2>$null | Out-Null
 
 $emu = $null
 $spin = [System.Diagnostics.Stopwatch]::StartNew()
@@ -117,6 +128,10 @@ if (-not $emu.HasExited) {
     # will never close cleanly; it times out on its own, but not before the
     # caller has copied the log back. Give the reset a moment to land.
     Start-Sleep -Milliseconds 750
+}
+
+if (Test-Path $emulog) {
+    Copy-Item -Force $emulog $emucopy -ErrorAction SilentlyContinue
 }
 
 $rc = ""
