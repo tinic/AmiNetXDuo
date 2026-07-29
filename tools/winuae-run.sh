@@ -54,6 +54,13 @@
 # C:\aminetxduo\pstools.  --setup does the PsExec half from a PSTools.zip in
 # the jenkins Downloads folder.
 #
+# AMINETXDUO_WINUAE_EXE picks the emulator; it defaults to the packaged
+# C:\Program Files\WinUAE\winuae64.exe.  winbuilder also carries a build from
+# WinUAE master at C:\winuae-patched\winuae64.exe, which is the one to use for
+# anything bridged: 6.0.3 takes an access violation on an ethernet frame larger
+# than 4000 bytes, and master does not.  Recipe and detail in docs/RESEARCH.md
+# section 63.5.
+#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail

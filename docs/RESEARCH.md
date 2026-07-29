@@ -16792,9 +16792,7 @@ beta binary is older than the release.
 **The constraint this leaves.** On a bridged WinUAE 6.0.3, the host tier's bulk
 tests cannot run at all if the Windows adapter delivers coalesced frames. Tests
 that stay under 4000 bytes per frame are unaffected, which is why bridged
-without the host tier is 141/142. A WinUAE built from master lifts the crash
-but not the drops, so the tier is blocked on a host that does not coalesce
-rather than on a WinUAE version.
+without the host tier is 141/142. 63.5 builds master and the tier runs.
 
 ### Why this was awkward to debug
 
@@ -16811,6 +16809,70 @@ exception -- thousands of `B-Trap F017` and nothing else runs -- and `waitsecs`
 staged, so a resident tool started with `run` has installed before the program
 under test starts. It reported no hits here, which is correct: the fault is on
 the host side of the emulator.
+
+### 63.5 A WinUAE built from master
+
+The guard is in master and in no release, so the emulator was built on
+`winbuilder`. It takes about a minute. The source stays outside this repository
+at `C:\winuae-src`.
+
+Three things the README does not make obvious. The generated sources
+(`cpuemu_*.cpp`, `cpustbl.cpp`, `blitfunc.cpp`, `blittable.cpp`) are committed
+upstream, so none of the `build68k` / `gencpu` / `genblitter` / `genlinetoscr`
+helper projects has to be built first, and `winuae_msvc.vcxproj` has no
+`ProjectReference` to them. Building that one project rather than the solution
+also avoids `resourcedll.vcxproj`, which `winuae_msvc.sln` names but the
+repository does not carry. And `OutDir` in the project file is `d:\amiga\`,
+which on `winbuilder` is the CD-ROM drive, so it is overridden on the command
+line.
+
+One source change is needed. `od-win32/win32.h` has `WINUAEPUBLICBETA 1` on
+master, and that puts a modal "this is unstable beta software" requester up
+before the emulator starts. Under PsExec nobody clicks it: the process stays
+alive for the whole timeout, writes no log, and sends nothing to the serial
+port, which reads exactly like a guest that never booted. Set it to 0.
+
+Prerequisites, once:
+
+* `winuaeinclibs.zip` from `https://download.abime.net/winuae/files/b/` unpacked
+  into `C:\dev`, giving `C:\dev\include` and `C:\dev\lib`.
+* NASM in `C:\tools\nasm`; `fpux64_80.asm` goes through a custom build step.
+* Visual Studio 2026 Community, which supplies the `v145` toolset the project
+  asks for, and a Windows 10 SDK for `fxc.exe`.
+
+The build:
+
+    sed -i 's/^#define WINUAEPUBLICBETA 1$/#define WINUAEPUBLICBETA 0/' od-win32/win32.h
+    call "C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat" -arch=amd64 -host_arch=amd64
+    set PATH=C:\tools\nasm;%PATH%
+    cd /d C:\winuae-src
+    msbuild /m /p:Platform=x64 /p:Configuration=FullRelease /p:OutDir=C:\winuae-build\ ^
+        od-win32\winuae_msvc15\winuae_msvc.vcxproj
+
+62 seconds, 0 errors. The result is copied to `C:\winuae-patched\winuae64.exe`
+and reports version 6.1.0; the packaged 6.0.3 in `C:\Program Files\WinUAE` is
+left alone. `AMINETXDUO_WINUAE_EXE` picks between them and defaults to the
+packaged one, so nothing changes for anyone who has not built it.
+
+**What it does.** The run that killed 6.0.3 --
+
+    AMINETXDUO_WINUAE_EXE='C:\winuae-patched\winuae64.exe' \
+    AMINETXDUO_WINUAE_A2065='\Device\NPF_{...}' \
+      tests/conformance/run-winuae.sh -T patched -t 400 \
+      -a "HOST 192.168.1.184 CATEGORY sendrecv NOPAGE"
+
+-- now finishes at 18/19, `reason=done rc=0`, in 15 seconds. Not merely
+survives: the bulk tests pass. 64 KB and 256 KB TCP echo both verify byte for
+byte, at 14 KB/s. The expectation going in was that the guard would keep the
+process alive and drop the oversized frames, leaving the tier starved; the
+upstream commit does more than bound the copy, it queues received frames and
+drains them from the device hsync handler instead of injecting them from the
+host callback thread, and the coalesced frames go through. The one failure left
+is test 18, the helper dialling back into the guest, which is the same test
+FS-UAE fails on SLIRP.
+
+`CATEGORY socket NOPAGE` bridged is 23/23 `reason=done rc=0` on the new binary,
+as it was on 6.0.3, so nothing regressed.
 
 ## 64. The 68020 is CPU-bound, and the window has nothing left to give (2026-07-28)
 
