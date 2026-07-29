@@ -17,11 +17,15 @@
 #
 #   control   IPv4 and the machine itself.  A failure here is a defect, and it
 #             is the half that says an IPv6 change broke something that worked.
-#   v6        IPv6 through the commands.  Reported as pending while the
-#             toolsock conversion is in flight, as failures under -s.
+#   v6        IPv6 through the commands.  Asserted since the toolsock
+#             conversion; a failure here is a regression.
 #   display   66's acceptance test: a configured ADDRESS6 shown by a command.
-#             Pending until the display work; written now so it is not
-#             forgotten, and it fails today on purpose.
+#             Asserted since the NETSTATUS_ADDRESSES6 work.
+#
+# What is still pending is ping and traceroute over IPv6.  Both build their own
+# ICMP on SOCK_RAW and bsdsocket.library offers SOCK_RAW for AF_INET only, so
+# they refuse an IPv6 target and say why.  The refusal is asserted; the replies
+# are not.
 #
 # Exit 0 all clear, 1 a control or -s failure, 3 nothing but pending work.
 #
@@ -204,8 +208,8 @@ have() { block "$1" | grep -qiF -- "$2"; }
 # want CASE PHRASE WHY / deny CASE PHRASE WHY, and the _soon pair for the
 # work that is not in yet.
 want()      { if have "$1" "$2"; then ok   "$3"; else bad  "$3"; fi; }
+deny()      { if have "$1" "$2"; then bad  "$3"; else ok   "$3"; fi; }
 want_soon() { if have "$1" "$2"; then ok   "$3"; else soon "$3"; fi; }
-deny_soon() { if have "$1" "$2"; then soon "$3"; else ok   "$3"; fi; }
 
 # ---- control: one boot, not a reset dressed up as a hang (RESEARCH 25) ----
 if [ -s "$SERIAL" ]; then
@@ -262,47 +266,60 @@ do
     short=${short%% *}
     addr=$(printf '%s\n' "$c" | awk '{ for (i = 1; i <= NF; i++)
                                            if ($i ~ /:.*:/) { print $i; exit } }')
-    deny_soon "$c" "cannot resolve"   "$short does not try to resolve $addr"
-    deny_soon "$c" "name servers"     "$short does not blame the name servers for $addr"
-    deny_soon "$c" "Check the spelling" "$short does not blame the spelling of $addr"
+    deny "$c" "cannot resolve"     "$short does not try to resolve $addr"
+    deny "$c" "name servers"       "$short does not blame the name servers for $addr"
+    deny "$c" "Check the spelling" "$short does not blame the spelling of $addr"
 done
 
 # ---- v6: and the traffic actually moved ----------------------------------
+if [ -f "$HD/nc-v6srv.txt" ] &&
+   tr -d '\r' < "$HD/nc-v6srv.txt" | grep -qF "hello from the amiga"; then
+    ok "nc over ::1 delivered the greeting"
+else
+    bad "nc over ::1 did not deliver the greeting"
+fi
+
+want "SYS:tftp ::1 GET nosuchfile PORT 7095 TIMEOUT 5" "from ::1" \
+     "tftp reached ::1 and reported the transfer, not the name"
+
+# ---- v6: ping and traceroute refuse, and say why ------------------------
+#
+# Asserted rather than pending: whatever they do with an IPv6 target, it must
+# not be the resolver message the deny() block above deleted, and it must
+# name the reason.  The replies below stay pending until the library offers a
+# raw ICMPv6 socket.
+for c in "SYS:ping ::1 -c 2 -t 20" "SYS:traceroute ::1 -m 2 -q 1 -w 3 -n"; do
+    want "$c" "raw socket" "$(printf '%s' "${c#SYS:}" | cut -d' ' -f1) says it needs a raw socket"
+done
+
 want_soon "SYS:ping ::1 -c 2 -t 20"        "2 received" "ping ::1 got both replies"
 want_soon "SYS:ping fd00::10 -c 2 -t 20"   "2 received" \
           "ping fd00::10 answered -- the configured ADDRESS6 is live"
 want_soon "SYS:ping fe80::2 -c 2 -t 20"    "2 received" \
           "ping fe80::2 crossed the wire to SLIRP's router"
 
-if [ -f "$HD/nc-v6srv.txt" ] &&
-   tr -d '\r' < "$HD/nc-v6srv.txt" | grep -qF "hello from the amiga"; then
-    ok "nc over ::1 delivered the greeting"
-else
-    soon "nc over ::1 did not deliver the greeting (nc -l may still bind v4 only)"
-fi
-
-# 2001:db8:: is the documentation prefix and nothing answers it. The point is
-# the SHAPE of the failure: unreachable, not unresolvable.
-want_soon "SYS:ping 2001:db8::1 -c 1 -t 5" "unreachable" \
-          "an unreachable v6 literal fails as a network error"
-
-# ---- display: 66's acceptance test, failing on purpose ------------------
+# ---- display: 66's acceptance test --------------------------------------
 #
 # The stack really does configure this -- an INFO-level library prints
-# "netstack: eth0 fd00::10/64" in the same boot -- and no shipped command
-# shows it.  Until one does, a user cannot tell whether ADDRESS6 took.
-want_soon "SYS:ShowNetStatus ALL"        "fd00::10" \
-          "ShowNetStatus ALL shows the configured fd00::10"
-want_soon "SYS:ShowNetStatus INTERFACES" "fd00::"   \
-          "ShowNetStatus INTERFACES shows an IPv6 address"
-want_soon "SYS:netstat -i"               "fd00::"   \
-          "netstat -i shows an IPv6 address"
-want_soon "SYS:ShowNetStatus ALL"        "fe80::"   \
-          "ShowNetStatus ALL shows the link-local address"
+# "netstack: eth0 fd00::10/64" in the same boot -- and until NETSTATUS_ADDRESSES6
+# no shipped command showed it, so a user could not tell whether ADDRESS6 took.
+want "SYS:ShowNetStatus ALL"        "fd00::10" \
+     "ShowNetStatus ALL shows the configured fd00::10"
+want "SYS:ShowNetStatus INTERFACES" "fd00::"   \
+     "ShowNetStatus INTERFACES shows an IPv6 address"
+want "SYS:netstat -i"               "fd00::"   \
+     "netstat -i shows an IPv6 address"
+want "SYS:ShowNetStatus ALL"        "fe80::"   \
+     "ShowNetStatus ALL shows the link-local address"
 
 # ---- v6: nslookup on a literal ------------------------------------------
-deny_soon "SYS:nslookup ::1" "there is no such name" \
-          "nslookup treats ::1 as an address, not a name"
+#
+# ::1 must become an ip6.arpa question, not a name the server has never heard
+# of.  SLIRP's resolver answers this one with "localhost".
+deny "SYS:nslookup ::1" "there is no such name" \
+     "nslookup treats ::1 as an address, not a name"
+want "SYS:nslookup ::1" "ip6.arpa" \
+     "nslookup asked ip6.arpa for ::1"
 
 # --------------------------------------------------------------- verdict ---
 

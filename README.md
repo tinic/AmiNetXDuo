@@ -26,7 +26,11 @@ commercial and closed.
 AmiNetXDuo is MIT-licensed throughout, with no 4.4BSD or GPL-derived code
 anywhere in it. It speaks the same socket API and reads the same configuration
 files as Roadshow, so existing software and existing habits carry over. It
-supports **IPv6**, which is off by default.
+supports **IPv6**, which is off by default. On a build that has it, the
+commands that take a host take an IPv6 address — `nc`, `telnet`, `tftp`,
+`whois`, `fetch`, `sntp`, `nslookup` and `host` — and `ShowNetStatus` and
+`netstat -i` show the IPv6 addresses an interface holds. `ping` and
+`traceroute` are IPv4 only.
 
 ## Requirements
 

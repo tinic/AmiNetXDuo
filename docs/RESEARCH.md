@@ -17421,3 +17421,98 @@ And 1.10's open question is still open, now with a reason: no IPv6 traffic has
 crossed SLIRP's NAT to the outside world, and with the tools as they are there
 is nothing on the machine that could send any. Confirming it needs a test
 binary, not a command.
+
+### 66.5 Closing it: one resolver, and a table that reports the addresses (2026-07-28)
+
+Done on branch `ipv6-tools`. 66.4's first two items are in; the fourth is in;
+`ping`, `traceroute`, `AddNetRoute` and the neighbour cache are not.
+
+**`tool_sock_resolve()` now returns a `ToolAddr` and goes through the library's
+own `getaddrinfo` with `AF_UNSPEC`.** That was the whole of the fix for seven
+commands. Three points made it cheap:
+
+* `getaddrinfo` ships in both build configurations (`src/bsdsocket/addrinfo.c`
+  says so at the top), and the commands are one binary that talks to whatever
+  `bsdsocket.library` is installed — so no `#ifdef` reached `src/tools/` at
+  all. Nothing in the IPv4-only build changed.
+* `AI_ADDRCONFIG` is implied and cannot be turned off, so `AF_UNSPEC` on a
+  machine without IPv6 never returns an AAAA. A name that resolved to IPv4
+  before still resolves to IPv4, and there is no dual-stack regression to
+  manage.
+* A library whose vector table stops short of `getaddrinfo` — AmiTCP, an old
+  Roadshow — is detected from `lib_NegSize` and falls back to
+  `gethostbyname()`. `tool_sock_have_lvo()` is the test.
+
+The sockaddr side is a `ToolSockAddrAny` union and the length follows the
+family rather than `sizeof`. That works because byte 0 disambiguates: a
+`sockaddr_in` starts with its length, 16, and this NDK's `sockaddr_in6` has no
+length field and starts with the family, 23. `bsd_sa_family()` already decided
+the same way from the other side.
+
+Adopted by `nc`, `telnet`, `tftp`, `whois`, `NetTrace`, `nslookup`, `sntp`,
+`fetch`, `ping` and `traceroute`. `fetch` and `sntp` had open-coded their own
+`gethostbyname` and now link `toolsock.c`; `fetch` parses `[::1]` in a URL.
+`host` reports AAAA, through `getaddrinfo` directly, because a `hostent`
+carries one address family and this library only ever fills it with IPv4.
+
+**`NETSTATUS_ADDRESSES6`** is a new selector, one entry per address per
+interface, answered with an empty table rather than an error in a build
+without IPv6 — so the commands need no build-time test either. `ShowNetStatus
+ALL` and `INTERFACES` and `netstat -i` print them. The text is made in
+`tool_nx.c` while the library is open: `bsdsocket.library`'s `inet_ntop()` is
+the only RFC 5952 formatter on a machine whose commands came out of an
+IPv4-only tree, and `ami_config_format_ip6()` is compiled only in an IPv6 one.
+
+`nslookup` takes `TYPE=AAAA` and reverses an IPv6 literal through `ip6.arpa`.
+
+#### What ping and traceroute do instead
+
+Both build their own ICMP on `SOCK_RAW`, and `bsd_socket()` offers `SOCK_RAW`
+for `AF_INET` only. Two things in NetX Duo would have to change before it
+could offer more, and neither is a wrapper:
+
+* `_nxd_ipv6_raw_packet_send_internal()` ignores the `ttl` argument and sends
+  with `ip_ptr->nx_ipv6_hop_limit`, so traceroute could not vary the hop limit;
+* `_nxd_ip_raw_packet_source_send()` is called with `address_index` 0, so the
+  source address would be `nx_ipv6_address[0]` rather than the one RFC 6724
+  selection picks — and an ICMPv6 checksum covers the source address, so a
+  wrong one is a dropped packet rather than a cosmetic fault.
+
+So they refuse an IPv6 target and say that is the reason. The message a user
+gets is the one thing 66 was actually about:
+
+    ping: this command cannot do IPv6
+
+      It builds its own ICMP on a raw socket, and bsdsocket.library
+      offers raw sockets for IPv4 only.  nc, telnet, tftp and fetch
+      all reach an IPv6 address.
+
+#### A register hazard, for the third time
+
+`tool_sock_pton()` was first written with its "does this library have the
+vector" guard *after* the local register variables. A local register variable
+is loaded where its initialiser is, and the call in the guard reused the
+registers, so `inet_pton()` arrived with a family it had never been given and
+`nslookup ::1` went on asking the DNS about the literal. Same class as
+RESEARCH 42's `IoctlSocket(FIONBIO)`. The rule is now written above the
+function: nothing between the declarations and the `jsr`.
+
+#### Measured
+
+`tests/ipv6/run-tools-fsuae.sh` is the probe, and its pending assertions are
+now assertions:
+
+| | before | after |
+|---|---|---|
+| a literal never reaches the resolver (18 cases over 6 commands) | 0/18 | 18/18 |
+| `nc` over `::1` delivers | — | ok |
+| `tftp ::1` reports the transfer, not the name | fail | ok |
+| `ShowNetStatus ALL` / `INTERFACES`, `netstat -i` show `fd00::10` and `fe80::` | 0/4 | 4/4 |
+| `nslookup ::1` asks `ip6.arpa` | fail | ok, answers `localhost` |
+| `ping`/`traceroute` name the reason they cannot | — | ok |
+| `ping ::1`, `fd00::10`, `fe80::2` reply | fail | still pending |
+
+Regression set, all on the same tree: default build warning-clean, `ctest`
+11/11; IPv6 build warning-clean, `ipv6_test` 78/0, `ipv6_socket_test` 54/0,
+`ipv6_link_test` 6/0; conformance `-T v6reg -a NOPAGE` 142 total, 130 passed,
+0 failed, 12 skipped.
