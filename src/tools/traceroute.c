@@ -335,23 +335,26 @@ static ToolHostEnt *tr_gethostbyaddr(struct Library *base, const UBYTE *addr,
  * default since -n turns it off, and runs once per distinct hop rather than
  * once per probe.
  */
-static VOID tr_show_address(struct Library *sb, ULONG address, BOOL numeric)
+static VOID tr_show_address(struct Library *sb, const ToolAddr *address,
+                            BOOL numeric)
 {
-    char dotted[16];
+    char dotted[TOOL_ADDR_STRLEN];
 
-    ami_config_format_ip(address, dotted, sizeof(dotted));
+    tool_addr_text(sb, address, dotted, sizeof(dotted));
 
     if (!numeric)
     {
-        UBYTE quad[4];
+        UBYTE        quad[4];
         ToolHostEnt *he;
 
-        quad[0] = (UBYTE)((address >> 24) & 0xff);
-        quad[1] = (UBYTE)((address >> 16) & 0xff);
-        quad[2] = (UBYTE)((address >>  8) & 0xff);
-        quad[3] = (UBYTE)(address & 0xff);
+        quad[0] = (UBYTE)((address->ta_V4 >> 24) & 0xff);
+        quad[1] = (UBYTE)((address->ta_V4 >> 16) & 0xff);
+        quad[2] = (UBYTE)((address->ta_V4 >>  8) & 0xff);
+        quad[3] = (UBYTE)(address->ta_V4 & 0xff);
 
-        he = tr_gethostbyaddr(sb, quad, 4L, (LONG)TOOL_AF_INET);
+        he = TOOL_ADDR_IS6(address)
+                 ? NULL
+                 : tr_gethostbyaddr(sb, quad, 4L, (LONG)TOOL_AF_INET);
         if (he != NULL && he->h_name != NULL && he->h_name[0] != '\0')
         {
             tool_printf(" %s (%s)", (LONG)he->h_name, (LONG)dotted);
@@ -376,9 +379,9 @@ int main(int argc, char **argv)
     LONG            args[ARG_COUNT];
     struct RDArgs  *rda;
     struct Library *sb;
-    ToolSockAddr    dest;
+    ToolSockAddrAny dest;
     const char     *host;
-    ULONG           address = 0;
+    ToolAddr        address;
     ULONG           maxttl;
     ULONG           queries;
     ULONG           wait;
@@ -395,7 +398,7 @@ int main(int argc, char **argv)
     BOOL            done = FALSE;
     BOOL            interrupted = FALSE;
     ULONG           i;
-    char            dotted[16];
+    char            dotted[TOOL_ADDR_STRLEN];
 
     (VOID)argv;
 
@@ -463,6 +466,13 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
+    if (!tool_sock_raw_ok(&address))
+    {
+        CloseLibrary(sb);
+        FreeArgs(rda);
+        return RETURN_FAIL;
+    }
+
     sock = tool_sock_socket(sb, TOOL_AF_INET, TOOL_SOCK_RAW,
                             TOOL_IPPROTO_ICMP);
     if (sock < 0)
@@ -521,15 +531,15 @@ int main(int argc, char **argv)
     if (ident == 0)
         ident = 1;
 
-    tool_sock_addr(&dest, address, 0);
-    ami_config_format_ip(address, dotted, sizeof(dotted));
+    (VOID)tool_sock_addr(&dest, &address, 0);
+    tool_addr_text(sb, &address, dotted, sizeof(dotted));
 
     tool_printf("traceroute to %s (%s), %lu hops max, %lu byte packets\n",
                 (LONG)host, (LONG)dotted, maxttl, packetsize);
 
     for (ttl = 1; ttl <= maxttl && !done; ttl++)
     {
-        ULONG last_shown = 0;           /* the address already printed      */
+        ToolAddr last_shown;            /* the address already printed      */
         BOOL  shown = FALSE;
         LONG  ttlval = (LONG)ttl;
         ULONG q;
@@ -559,7 +569,7 @@ int main(int argc, char **argv)
             ULONG deadline;
             LONG  verdict = TR_OTHER;
             UBYTE code = 0;
-            ULONG from_addr = 0;
+            ToolAddr from_addr;
             ULONG elapsed = 0;
             BOOL  bailed = FALSE;
 
@@ -589,9 +599,9 @@ int main(int argc, char **argv)
 
             while (verdict == TR_OTHER)
             {
-                ToolFdSet    readfds;
-                ToolTimeval  tv;
-                ToolSockAddr from;
+                ToolFdSet       readfds;
+                ToolTimeval     tv;
+                ToolSockAddrAny from;
                 ULONG        now = tr_now();
                 ULONG        left;
                 LONG         ready;
@@ -639,7 +649,7 @@ int main(int argc, char **argv)
                 verdict = tr_classify(tr_reply, (ULONG)n, ident, seq, &code);
                 if (verdict != TR_OTHER)
                 {
-                    from_addr = from.sin_addr;
+                    (VOID)tool_sock_addr_get(&from, &from_addr);
                     elapsed   = tr_now() - t0;
                 }
                 else if (verbose)
@@ -651,9 +661,9 @@ int main(int argc, char **argv)
                      * that otherwise look identical.
                      */
                     ULONG hlen = (ULONG)(tr_reply[0] & 0x0f) * 4UL;
-                    char  who[16];
+                    char  who[TOOL_ADDR_STRLEN];
 
-                    ami_config_format_ip(from.sin_addr, who, sizeof(who));
+                    tool_sock_addr_text(sb, &from, who, sizeof(who));
                     tool_printf(" (%s sent ICMP type %ld)", (LONG)who,
                                 (hlen + 1 <= (ULONG)n)
                                     ? (LONG)tr_reply[hlen] : -1L);
@@ -669,9 +679,9 @@ int main(int argc, char **argv)
                 continue;
             }
 
-            if (!shown || from_addr != last_shown)
+            if (!shown || !tool_addr_same(&from_addr, &last_shown))
             {
-                tr_show_address(sb, from_addr, numeric);
+                tr_show_address(sb, &from_addr, numeric);
                 last_shown = from_addr;
                 shown = TRUE;
             }

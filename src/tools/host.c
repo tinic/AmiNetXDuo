@@ -16,6 +16,10 @@
  * tool of the same name does. TIMEOUT is accepted and ignored: the timeout is
  * the resolver's, set in DEVS:Internet/name_resolution.
  *
+ * A forward lookup goes through getaddrinfo() with AF_UNSPEC, so a name with
+ * an AAAA record reports it. gethostbyname() cannot: its hostent carries one
+ * address family and this library only ever fills it with IPv4.
+ *
  * nslookup differs in that it bypasses the resolver: it builds a DNS query and
  * sends it to a name server itself, so it reports what that server said -- no
  * hosts file, no mDNS, no cache -- and can ask for record types the resolver has
@@ -64,6 +68,8 @@ int main(int argc, char **argv)
     ULONG           addr = 0;
     BOOL            ok;
     char            text[HOST_NAME_MAX];
+    ToolAddrInfo    hints;
+    ToolAddrInfo   *list = NULL;
 
     (VOID)argv;
 
@@ -103,6 +109,44 @@ int main(int argc, char **argv)
             tool_printf("%s is %s\n", (LONG)name, (LONG)text);
         else
             tool_error("no name for %s", (LONG)name);
+    }
+    else if (tool_sock_have_lvo(sbase, 0x330UL))
+    {
+        hints.ai_flags     = 0;
+        hints.ai_family    = TOOL_AF_UNSPEC;
+        hints.ai_socktype  = TOOL_SOCK_STREAM;
+        hints.ai_protocol  = 0;
+        hints.ai_addrlen   = 0;
+        hints.ai_addr      = NULL;
+        hints.ai_canonname = NULL;
+        hints.ai_next      = NULL;
+
+        ok = FALSE;
+
+        if (tool_sock_getaddrinfo(sbase, name, NULL, &hints, &list) == 0)
+        {
+            ToolAddrInfo *ai;
+
+            for (ai = list; ai != NULL; ai = ai->ai_next)
+            {
+                ToolAddr found;
+
+                if (ai->ai_addr == NULL ||
+                    !tool_sock_addr_get(ai->ai_addr, &found))
+                    continue;
+
+                tool_addr_text(sbase, &found, text, sizeof(text));
+                tool_printf("%s has %saddress %s\n", (LONG)name,
+                            (LONG)(TOOL_ADDR_IS6(&found) ? "IPv6 " : ""),
+                            (LONG)text);
+                ok = TRUE;
+            }
+
+            tool_sock_freeaddrinfo(sbase, list);
+        }
+
+        if (!ok)
+            tool_error("cannot resolve \"%s\"", (LONG)name);
     }
     else
     {

@@ -153,8 +153,8 @@ static BOOL parse_range(const char *text, UWORD *lo, UWORD *hi)
  */
 #define NC_TIMED_OUT    (-2)
 
-static LONG nc_connect(struct Library *sb, LONG sock, const ToolSockAddr *sa,
-                       ULONG timeout, LONG *why)
+static LONG nc_connect(struct Library *sb, LONG sock,
+                       const ToolSockAddrAny *sa, ULONG timeout, LONG *why)
 {
     ToolFdSet   writefds;
     ToolTimeval tv;
@@ -440,17 +440,17 @@ static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
  * in TIME-WAIT, and without it the next `nc -l` on the same port fails with
  * "address already in use" for two minutes.
  */
-static LONG nc_listen(struct Library *sb, const NcOptions *opt, ULONG bindaddr,
-                      UWORD port, LONG *accepted)
+static LONG nc_listen(struct Library *sb, const NcOptions *opt,
+                      const ToolAddr *bindaddr, UWORD port, LONG *accepted)
 {
-    ToolSockAddr sa;
-    ToolSockAddr from;
-    LONG         lsock;
-    LONG         one = 1;
-    ULONG        waited;
-    char         dotted[16];
+    ToolSockAddrAny sa;
+    ToolSockAddrAny from;
+    LONG            lsock;
+    LONG            one = 1;
+    ULONG           waited;
+    char            dotted[TOOL_ADDR_STRLEN];
 
-    lsock = tool_sock_socket(sb, TOOL_AF_INET,
+    lsock = tool_sock_socket(sb, (LONG)bindaddr->ta_Family,
                              opt->udp ? TOOL_SOCK_DGRAM : TOOL_SOCK_STREAM, 0);
     if (lsock < 0)
     {
@@ -462,7 +462,7 @@ static LONG nc_listen(struct Library *sb, const NcOptions *opt, ULONG bindaddr,
     (VOID)tool_sock_setsockopt(sb, lsock, TOOL_SOL_SOCKET, TOOL_SO_REUSEADDR,
                                &one, (LONG)sizeof(one));
 
-    tool_sock_addr(&sa, bindaddr, port);
+    (VOID)tool_sock_addr(&sa, bindaddr, port);
 
     if (tool_sock_bind(sb, lsock, &sa) != 0)
     {
@@ -506,9 +506,9 @@ static LONG nc_listen(struct Library *sb, const NcOptions *opt, ULONG bindaddr,
 
         if (opt->verbose)
         {
-            ami_config_format_ip(from.sin_addr, dotted, sizeof(dotted));
+            tool_sock_addr_text(sb, &from, dotted, sizeof(dotted));
             tool_printf("datagram from %s port %ld\n",
-                        (LONG)dotted, (LONG)from.sin_port);
+                        (LONG)dotted, (LONG)tool_sock_addr_port(&from));
         }
 
         if (n > 0 && tool_output_write(nc_from_net, n) != n)
@@ -604,9 +604,9 @@ static LONG nc_listen(struct Library *sb, const NcOptions *opt, ULONG bindaddr,
 
     if (opt->verbose)
     {
-        ami_config_format_ip(from.sin_addr, dotted, sizeof(dotted));
+        tool_sock_addr_text(sb, &from, dotted, sizeof(dotted));
         tool_printf("connection from %s port %ld\n",
-                    (LONG)dotted, (LONG)from.sin_port);
+                    (LONG)dotted, (LONG)tool_sock_addr_port(&from));
     }
 
     /* One caller, then done: the listening socket has no further use, and
@@ -619,22 +619,22 @@ static LONG nc_listen(struct Library *sb, const NcOptions *opt, ULONG bindaddr,
 
 /* ----------------------------------------------------------------- scan --- */
 
-static LONG nc_scan(struct Library *sb, const NcOptions *opt, ULONG address,
-                    UWORD lo, UWORD hi)
+static LONG nc_scan(struct Library *sb, const NcOptions *opt,
+                    const ToolAddr *address, UWORD lo, UWORD hi)
 {
     ULONG open_ports = 0;
     ULONG tried = 0;
     ULONG port;
     LONG  why = 0;
-    char  dotted[16];
+    char  dotted[TOOL_ADDR_STRLEN];
 
-    ami_config_format_ip(address, dotted, sizeof(dotted));
+    tool_addr_text(sb, address, dotted, sizeof(dotted));
 
     for (port = lo; port <= (ULONG)hi; port++)
     {
-        ToolSockAddr sa;
-        LONG         sock;
-        LONG         result;
+        ToolSockAddrAny sa;
+        LONG            sock;
+        LONG            result;
 
         if (tool_break())
         {
@@ -644,7 +644,7 @@ static LONG nc_scan(struct Library *sb, const NcOptions *opt, ULONG address,
 
         tried++;
 
-        sock = tool_sock_socket(sb, TOOL_AF_INET,
+        sock = tool_sock_socket(sb, (LONG)address->ta_Family,
                                 opt->udp ? TOOL_SOCK_DGRAM : TOOL_SOCK_STREAM,
                                 0);
         if (sock < 0)
@@ -654,7 +654,7 @@ static LONG nc_scan(struct Library *sb, const NcOptions *opt, ULONG address,
             return RETURN_FAIL;
         }
 
-        tool_sock_addr(&sa, address, (UWORD)port);
+        (VOID)tool_sock_addr(&sa, address, (UWORD)port);
 
         result = nc_connect(sb, sock, &sa, opt->timeout, &why);
 
@@ -695,8 +695,8 @@ int main(int argc, char **argv)
     NcOptions       opt;
     const char     *host;
     const char     *portspec;
-    ToolSockAddr    sa;
-    ULONG           address = 0;
+    ToolSockAddrAny sa;
+    ToolAddr        address;
     UWORD           port = 0;
     LONG            sock = -1;
     LONG            why = 0;
@@ -709,6 +709,9 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
 
     tool_break_arm();
+
+    /* No host in listen mode means every address, which is IPv4's wildcard. */
+    tool_addr_v4(&address, 0);
 
     for (i = 0; i < (ULONG)ARG_COUNT; i++)
         args[i] = 0;
@@ -810,7 +813,7 @@ int main(int argc, char **argv)
             return RETURN_ERROR;
         }
 
-        rc = nc_scan(sb, &opt, address, lo, hi);
+        rc = nc_scan(sb, &opt, &address, lo, hi);
         CloseLibrary(sb);
         FreeArgs(rda);
         return (int)rc;
@@ -827,7 +830,7 @@ int main(int argc, char **argv)
             return RETURN_ERROR;
         }
 
-        if (nc_listen(sb, &opt, address, port, &sock) != 0)
+        if (nc_listen(sb, &opt, &address, port, &sock) != 0)
         {
             CloseLibrary(sb);
             FreeArgs(rda);
@@ -847,7 +850,7 @@ int main(int argc, char **argv)
             return RETURN_ERROR;
         }
 
-        sock = tool_sock_socket(sb, TOOL_AF_INET,
+        sock = tool_sock_socket(sb, (LONG)address.ta_Family,
                                 opt.udp ? TOOL_SOCK_DGRAM : TOOL_SOCK_STREAM,
                                 0);
         if (sock < 0)
@@ -863,13 +866,28 @@ int main(int argc, char **argv)
            written against. */
         if (opt.localport != 0)
         {
-            ToolSockAddr local;
-            LONG         one = 1;
+            ToolSockAddrAny local;
+            ToolAddr        any;
+            LONG            one = 1;
 
             (VOID)tool_sock_setsockopt(sb, sock, TOOL_SOL_SOCKET,
                                        TOOL_SO_REUSEADDR, &one,
                                        (LONG)sizeof(one));
-            tool_sock_addr(&local, 0, opt.localport);
+            /* The wildcard of the family being connected to. */
+            any = address;
+            if (TOOL_ADDR_IS6(&any))
+            {
+                ULONG b;
+
+                for (b = 0; b < 16UL; b++)
+                    any.ta_V6[b] = 0;
+            }
+            else
+            {
+                any.ta_V4 = 0;
+            }
+
+            (VOID)tool_sock_addr(&local, &any, opt.localport);
 
             if (tool_sock_bind(sb, sock, &local) != 0)
             {
@@ -883,14 +901,14 @@ int main(int argc, char **argv)
             }
         }
 
-        tool_sock_addr(&sa, address, port);
+        (VOID)tool_sock_addr(&sa, &address, port);
 
         result = nc_connect(sb, sock, &sa, opt.timeout, &why);
         if (result != 0)
         {
-            char dotted[16];
+            char dotted[TOOL_ADDR_STRLEN];
 
-            ami_config_format_ip(address, dotted, sizeof(dotted));
+            tool_addr_text(sb, &address, dotted, sizeof(dotted));
 
             if (result == NC_TIMED_OUT)
                 tool_error("%s port %ld did not answer within %lu seconds",
@@ -907,9 +925,9 @@ int main(int argc, char **argv)
 
         if (opt.verbose)
         {
-            char dotted[16];
+            char dotted[TOOL_ADDR_STRLEN];
 
-            ami_config_format_ip(address, dotted, sizeof(dotted));
+            tool_addr_text(sb, &address, dotted, sizeof(dotted));
             tool_printf("connected to %s port %ld\n", (LONG)dotted, (LONG)port);
         }
 

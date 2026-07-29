@@ -29,7 +29,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "tools.h"
+#include "toolsock.h"
 
 #include <exec/execbase.h>   /* SysBase->AttnFlags, AFF_68020 */
 #include <exec/memory.h>
@@ -92,31 +92,12 @@ static ULONG fetch_readfds[8];
  * assume a global SocketBase.  Same reasoning as src/tools/tool_diag.c.
  */
 
-struct FetchSockAddrIn
-{
-    UBYTE   sin_len;
-    UBYTE   sin_family;
-    UWORD   sin_port;               /* network order == our order on m68k */
-    ULONG   sin_addr;
-    UBYTE   sin_zero[8];
-};
-
-struct FetchHostEnt
-{
-    char   *h_name;
-    char  **h_aliases;
-    LONG    h_addrtype;
-    LONG    h_length;
-    char  **h_addr_list;
-};
-
 struct FetchTimeval
 {
     LONG    tv_secs;
     LONG    tv_micro;
 };
 
-#define FETCH_AF_INET       2
 #define FETCH_SOCK_STREAM   1
 
 static LONG sock_socket(struct Library *base, LONG domain, LONG type, LONG proto)
@@ -224,21 +205,6 @@ static LONG sock_waitselect(struct Library *base, LONG nfds, APTR readfds,
     return res;
 }
 
-static struct FetchHostEnt *sock_gethostbyname(struct Library *base,
-                                               const char *name)
-{
-    register struct Library     *a6  __asm("a6") = base;
-    register const char         *a0  __asm("a0") = name;
-    register struct FetchHostEnt *res __asm("d0");
-    register LONG _clob_a0 __asm("a0");
-
-    __asm __volatile ("jsr a6@(-210:W)"
-                      : "=r" (res), "=r" (_clob_a0)
-                      : "r" (a6), "r" (a0)
-                      : "d1", "a1", "cc", "memory");
-    return res;
-}
-
 static LONG sock_errno(struct Library *base)
 {
     register struct Library *a6  __asm("a6") = base;
@@ -338,18 +304,47 @@ static BOOL url_parse(const char *url, FetchUrl *out)
         p = sep + 2;
     }
 
-    /* host[:port] */
+    /*
+     * host[:port].  An IPv6 literal is written in brackets, RFC 3986 style,
+     * because its own colons would otherwise be read as the port separator.
+     * The brackets are kept: tool_sock_resolve() strips them, and the Host:
+     * header carries them.
+     */
     i = 0;
-    while (p[0] != '\0' && p[0] != '/' && p[0] != ':' &&
-           p[0] != '?' && p[0] != '#')
+    if (p[0] == '[')
     {
-        if (i + 1 >= (ULONG)FETCH_HOST_MAX)
+        while (p[0] != '\0' && p[0] != ']')
         {
-            tool_error("the host name in that URL is too long");
+            if (i + 2 >= (ULONG)FETCH_HOST_MAX)
+            {
+                tool_error("the host name in that URL is too long");
+                return FALSE;
+            }
+            out->host[i++] = p[0];
+            p++;
+        }
+
+        if (p[0] != ']')
+        {
+            tool_error("the address in that URL has no closing bracket");
             return FALSE;
         }
-        out->host[i++] = p[0];
-        p++;
+
+        out->host[i++] = *p++;
+    }
+    else
+    {
+        while (p[0] != '\0' && p[0] != '/' && p[0] != ':' &&
+               p[0] != '?' && p[0] != '#')
+        {
+            if (i + 1 >= (ULONG)FETCH_HOST_MAX)
+            {
+                tool_error("the host name in that URL is too long");
+                return FALSE;
+            }
+            out->host[i++] = p[0];
+            p++;
+        }
     }
     out->host[i] = '\0';
 
@@ -613,7 +608,6 @@ static LONG fetch_run(VOID)
     ULONG                 timeout = fetch_init_timeout;
     struct Library       *sbase = NULL;
     struct Library       *tbase = NULL;
-    struct FetchHostEnt  *he;
     ULONG                 hop;
     LONG                  rc = RETURN_OK;
     LONG                  status = 0;
@@ -638,16 +632,16 @@ static LONG fetch_run(VOID)
 
     for (hop = 0; hop <= (ULONG)FETCH_MAX_HOPS; hop++)
     {
-        FetchIO     io;
-        struct FetchSockAddrIn sin;
-        ULONG       address = 0;
+        FetchIO         io;
+        ToolSockAddrAny sa;
+        ToolAddr        address;
+        LONG            salen;
         ULONG       head_len = 0;
         BOOL        in_head = TRUE;
         BOOL        head_trunc = FALSE;
         char        head_tail[4] = { 0, 0, 0, 0 };
         LONG        n;
         LONG        why = TLS_OK;
-        ULONG       i;
 
         io.sbase   = sbase;
         io.tbase   = NULL;
@@ -709,34 +703,18 @@ static LONG fetch_run(VOID)
 
         /* ---- resolve ----------------------------------------------------- */
 
-        if (!ami_config_parse_ip(u.host, &address))
+        if (!tool_sock_resolve(sbase, u.host, &address))
         {
-            he = sock_gethostbyname(sbase, u.host);
-            if (he == NULL || he->h_addr_list == NULL ||
-                he->h_addr_list[0] == NULL || he->h_length != 4)
-            {
-                tool_error("cannot resolve \"%s\"", (LONG)u.host);
-                tool_explain_resolve(u.host, AMI_NET_ERR_NONAME);
-                rc = RETURN_ERROR;
-                break;
-            }
-
-            for (i = 0; i < 4UL; i++)
-                address = (address << 8) |
-                          (ULONG)(UBYTE)he->h_addr_list[0][i];
+            rc = RETURN_ERROR;
+            break;
         }
 
         /* ---- connect ----------------------------------------------------- */
 
-        for (i = 0; i < (ULONG)sizeof(sin.sin_zero); i++)
-            sin.sin_zero[i] = 0;
+        salen = tool_sock_addr(&sa, &address, u.port);
 
-        sin.sin_len    = (UBYTE)sizeof(sin);
-        sin.sin_family = (UBYTE)FETCH_AF_INET;
-        sin.sin_port   = u.port;
-        sin.sin_addr   = address;
-
-        io.sock = sock_socket(sbase, FETCH_AF_INET, FETCH_SOCK_STREAM, 0);
+        io.sock = sock_socket(sbase, (LONG)address.ta_Family,
+                              FETCH_SOCK_STREAM, 0);
         if (io.sock < 0)
         {
             tool_error("no socket (errno %ld)", (LONG)sock_errno(sbase));
@@ -744,13 +722,14 @@ static LONG fetch_run(VOID)
             break;
         }
 
-        if (sock_connect(sbase, io.sock, (APTR)&sin, (LONG)sizeof(sin)) != 0)
+        if (sock_connect(sbase, io.sock, (APTR)&sa, salen) != 0)
         {
-            char dotted[16];
+            LONG err = sock_errno(sbase);
+            char dotted[TOOL_ADDR_STRLEN];
 
-            ami_config_format_ip(address, dotted, sizeof(dotted));
+            tool_addr_text(sbase, &address, dotted, sizeof(dotted));
             tool_error("cannot connect to %s port %ld (errno %ld)",
-                       (LONG)dotted, (LONG)u.port, (LONG)sock_errno(sbase));
+                       (LONG)dotted, (LONG)u.port, (LONG)err);
             (VOID)sock_close(sbase, io.sock);
             rc = RETURN_ERROR;
             break;

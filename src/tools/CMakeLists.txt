@@ -208,7 +208,7 @@ aminetxduo_add_tool(tool_arp     arp      NX SOURCES arp.c)
 # at run time, so ONE binary serves both -DAMINETXDUO_TLS=ON and OFF builds --
 # the https: path opens LIBS:tls.library and says something legible when there
 # is none.  Nothing here is conditional on the build option, deliberately.
-aminetxduo_add_tool(tool_fetch   fetch    SOURCES fetch.c)
+aminetxduo_add_tool(tool_fetch   fetch    SOURCES fetch.c toolsock.c)
 
 # nc and telnet are config-only in the same sense as fetch, and share
 # toolsock.c: bsdsocket.library through its published vectors, including the
@@ -241,7 +241,7 @@ aminetxduo_add_tool(tool_whois   whois    SOURCES whois.c toolsock.c)
 # SNTP add-on, and the comment at the top of sntp.c says why -- the short
 # version is that the add-on wants a running ThreadX, and a Shell command's
 # copy of ThreadX is not the one the stack is using.
-aminetxduo_add_tool(tool_sntp    sntp     SOURCES sntp.c)
+aminetxduo_add_tool(tool_sntp    sntp     SOURCES sntp.c toolsock.c)
 
 aminetxduo_add_tool(tool_shownetstatus ShowNetStatus NX
     SOURCES shownetstatus.c ${TOOLS_DEVDIAG})

@@ -489,16 +489,16 @@ int main(int argc, char **argv)
     LONG            args[ARG_COUNT];
     struct RDArgs  *rda;
     struct Library *sb;
-    ToolSockAddr    sa;
+    ToolSockAddrAny sa;
     ToolInput       in;
     TnState         st;
     const char     *host;
-    ULONG           address = 0;
+    ToolAddr        address;
     UWORD           port;
     BOOL            quiet;
     LONG            rc = RETURN_OK;
     ULONG           i;
-    char            dotted[16];
+    char            dotted[TOOL_ADDR_STRLEN];
 
     (VOID)argv;
 
@@ -563,12 +563,13 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    ami_config_format_ip(address, dotted, sizeof(dotted));
+    tool_addr_text(sb, &address, dotted, sizeof(dotted));
 
     if (!quiet)
         tool_printf("Trying %s port %ld...\n", (LONG)dotted, (LONG)port);
 
-    st.sock = tool_sock_socket(sb, TOOL_AF_INET, TOOL_SOCK_STREAM, 0);
+    st.sock = tool_sock_socket(sb, (LONG)address.ta_Family,
+                               TOOL_SOCK_STREAM, 0);
     if (st.sock < 0)
     {
         tool_error("no socket: %s",
@@ -578,11 +579,11 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    tool_sock_addr(&sa, address, port);
+    (VOID)tool_sock_addr(&sa, &address, port);
 
     if (tool_sock_connect(sb, st.sock, &sa) != 0)
     {
-        tool_sock_fail(sb, "connect to", address, port);
+        tool_sock_fail(sb, "connect to", &address, port);
         (VOID)tool_sock_close(sb, st.sock);
         CloseLibrary(sb);
         FreeArgs(rda);

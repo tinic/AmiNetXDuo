@@ -223,9 +223,9 @@ int main(int argc, char **argv)
     struct Library *sb;
     const char     *host;
     const char     *shown;
-    ToolSockAddr    to;
+    ToolSockAddrAny to;
     LONG            sock = -1;
-    ULONG           target = 0;
+    ToolAddr        target;
     ULONG           count;
     ULONG           interval;
     ULONG           preload;
@@ -246,7 +246,8 @@ int main(int argc, char **argv)
     BOOL            expired = FALSE;
     LONG            rc = RETURN_OK;
     ULONG           i;
-    char            addrtext[16];
+    ULONG           parsed = 0;
+    char            addrtext[TOOL_ADDR_STRLEN];
     char            hostname[AMI_CFG_NAME_LEN];
 
     (VOID)argv;
@@ -305,7 +306,8 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    if (!numeric && ami_config_parse_ip(host, &target))
+    if (!numeric && !TOOL_ADDR_IS6(&target) &&
+        ami_config_parse_ip(host, &parsed))
     {
         /*
          * A numeric address can only get a name from a reverse lookup, and
@@ -322,7 +324,7 @@ int main(int argc, char **argv)
 
         (VOID)ami_netdb_load();
 
-        local = ami_netdb_host_by_addr(target);
+        local = ami_netdb_host_by_addr(parsed);
         if (local != NULL && local->name != NULL && local->name[0] != '\0')
         {
             tool_copy_string(hostname, sizeof(hostname), local->name);
@@ -330,7 +332,14 @@ int main(int argc, char **argv)
         }
     }
 
-    ami_config_format_ip(target, addrtext, sizeof(addrtext));
+    tool_addr_text(sb, &target, addrtext, sizeof(addrtext));
+
+    if (!tool_sock_raw_ok(&target))
+    {
+        CloseLibrary(sb);
+        FreeArgs(rda);
+        return RETURN_FAIL;
+    }
 
     sock = tool_sock_socket(sb, TOOL_AF_INET, TOOL_SOCK_RAW,
                             TOOL_IPPROTO_ICMP);
@@ -383,7 +392,7 @@ int main(int argc, char **argv)
         }
     }
 
-    tool_sock_addr(&to, target, 0);
+    (VOID)tool_sock_addr(&to, &target, 0);
 
     /*
      * The identifier tells this command's replies from another raw reader's:
@@ -470,12 +479,12 @@ int main(int argc, char **argv)
 
         while (!answered)
         {
-            ToolFdSet    readfds;
-            ToolTimeval  tv;
-            ToolSockAddr from;
-            ULONG        now = ami_millis();
-            ULONG        left;
-            LONG         ready;
+            ToolFdSet       readfds;
+            ToolTimeval     tv;
+            ToolSockAddrAny from;
+            ULONG           now = ami_millis();
+            ULONG           left;
+            LONG            ready;
 
             if (tool_break())
             {
@@ -514,8 +523,8 @@ int main(int argc, char **argv)
                 continue;
 
             if (ping_is_reply(ping_reply, (ULONG)n, ident,
-                              (UWORD)(i & 0xffffUL), from.sin_addr, target,
-                              &got_bytes))
+                              (UWORD)(i & 0xffffUL), from.in.sin_addr,
+                              target.ta_V4, &got_bytes))
             {
                 rtt      = ami_millis() - t0;
                 answered = TRUE;

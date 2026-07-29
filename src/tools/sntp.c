@@ -61,7 +61,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "tools.h"
+#include "toolsock.h"
 
 #include <exec/io.h>
 #include <devices/timer.h>
@@ -111,31 +111,12 @@ enum
  * docs/RESEARCH.md 3.2.
  */
 
-struct SntpSockAddr
-{
-    UBYTE   sin_len;
-    UBYTE   sin_family;
-    UWORD   sin_port;               /* network order == our order on m68k */
-    ULONG   sin_addr;
-    UBYTE   sin_zero[8];
-};
-
-struct SntpHostEnt
-{
-    char   *h_name;
-    char  **h_aliases;
-    LONG    h_addrtype;
-    LONG    h_length;
-    char  **h_addr_list;
-};
-
 struct SntpTimeval
 {
     LONG    tv_secs;
     LONG    tv_micro;
 };
 
-#define SNTP_AF_INET        2
 #define SNTP_SOCK_DGRAM     2
 
 static LONG sock_socket(struct Library *base, LONG domain, LONG type, LONG proto)
@@ -252,21 +233,6 @@ static LONG sock_errno(struct Library *base)
                       : "=r" (res)
                       : "r" (a6)
                       : "d1", "a0", "a1", "cc", "memory");
-    return res;
-}
-
-static struct SntpHostEnt *sock_gethostbyname(struct Library *base,
-                                              const char *name)
-{
-    register struct Library    *a6  __asm("a6") = base;
-    register const char        *a0  __asm("a0") = name;
-    register struct SntpHostEnt *res __asm("d0");
-    register LONG _clob_a0 __asm("a0");
-
-    __asm __volatile ("jsr a6@(-210:W)"
-                      : "=r" (res), "=r" (_clob_a0)
-                      : "r" (a6), "r" (a0)
-                      : "d1", "a1", "cc", "memory");
     return res;
 }
 
@@ -690,7 +656,7 @@ int main(int argc, char **argv)
     ULONG           timeout;
     BOOL            show;
     BOOL            quiet;
-    ULONG           target = 0;
+    ToolAddr        target;
     LONG            sock = -1;
     SntpReply       reply;
     LONG            gmt_west = 0;
@@ -701,7 +667,7 @@ int main(int argc, char **argv)
     ULONG           new_local;
     ULONG           new_micro;
     LONG            rc = RETURN_OK;
-    char            addrtext[16];
+    char            addrtext[TOOL_ADDR_STRLEN];
     SntpDateText    when;
 
     (VOID)argv;
@@ -755,40 +721,15 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    /* A dotted quad is used as it stands; anything else goes to the resolver. */
-    if (!ami_config_parse_ip(server, &target))
+    if (!tool_sock_resolve(sbase, server, &target))
     {
-        struct SntpHostEnt *he = sock_gethostbyname(sbase, server);
-
-        /*
-         * h_length is checked as well as the pointers: a resolver that answers
-         * with a hostent it could not fill gives a plausible record whose
-         * address is four bytes of nothing, which an earlier version reported
-         * as "could not send the request".  fetch.c checks the same three.
-         */
-        if (he == NULL || he->h_addr_list == NULL ||
-            he->h_addr_list[0] == NULL || he->h_length != 4)
-        {
-            tool_error("cannot resolve \"%s\"", (LONG)server);
-            tool_explain_resolve(server, AMI_NET_ERR_NONAME);
-            rc = RETURN_ERROR;
-            goto done;
-        }
-
-        target = be32((const UBYTE *)he->h_addr_list[0]);
-    }
-
-    if (target == 0)
-    {
-        tool_error("\"%s\" is not an address a request can be sent to",
-                   (LONG)server);
         rc = RETURN_ERROR;
         goto done;
     }
 
-    ami_config_format_ip(target, addrtext, sizeof(addrtext));
+    tool_addr_text(sbase, &target, addrtext, sizeof(addrtext));
 
-    sock = sock_socket(sbase, SNTP_AF_INET, SNTP_SOCK_DGRAM, 0);
+    sock = sock_socket(sbase, (LONG)target.ta_Family, SNTP_SOCK_DGRAM, 0);
     if (sock < 0)
     {
         tool_error("no socket was available");
@@ -797,22 +738,15 @@ int main(int argc, char **argv)
     }
 
     {
-        struct SntpSockAddr sa;
-        ULONG               i;
-
-        sa.sin_len    = (UBYTE)sizeof(sa);
-        sa.sin_family = SNTP_AF_INET;
-        sa.sin_port   = (UWORD)SNTP_PORT;
-        sa.sin_addr   = target;
-        for (i = 0; i < 8UL; i++)
-            sa.sin_zero[i] = 0;
+        ToolSockAddrAny sa;
+        LONG            salen = tool_sock_addr(&sa, &target, (UWORD)SNTP_PORT);
 
         /*
          * connect() on a datagram socket sets the peer, which makes send/recv
          * usable and makes the stack drop every datagram that did not come
          * from the server, so no source check is needed.
          */
-        if (sock_connect(sbase, sock, &sa, (LONG)sizeof(sa)) != 0)
+        if (sock_connect(sbase, sock, &sa, salen) != 0)
         {
             tool_error("could not reach %s (errno %ld)", (LONG)addrtext,
                        (LONG)sock_errno(sbase));

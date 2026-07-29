@@ -584,7 +584,7 @@ typedef struct NtResult
 static VOID nt_loopback(struct Library *base, NtCap *cap, ULONG want,
                         NtResult *res)
 {
-    ToolSockAddr sa;
+    ToolSockAddrAny sa;
     ToolFdSet    rd;
     ToolFdSet    wr;
     ToolTimeval  tv;
@@ -617,7 +617,7 @@ static VOID nt_loopback(struct Library *base, NtCap *cap, ULONG want,
     (VOID)tool_sock_setsockopt(base, lst, TOOL_SOL_SOCKET, TOOL_SO_REUSEADDR,
                                &one, (LONG)sizeof(one));
 
-    tool_sock_addr(&sa, 0x7F000001UL, 0);
+    (VOID)tool_sock_addr_v4(&sa, 0x7F000001UL, 0);
     if (tool_sock_bind(base, lst, &sa) < 0 ||
         tool_sock_listen(base, lst, 1) < 0 ||
         tool_sock_getsockname(base, lst, &sa) < 0)
@@ -743,10 +743,10 @@ done:
  * trace covers the shutdown as well, and there is no chunk parser here.  The
  * bytes are counted, not kept; tests/curl checks payloads byte for byte.
  */
-static VOID nt_wire(struct Library *base, NtCap *cap, ULONG address,
+static VOID nt_wire(struct Library *base, NtCap *cap, const ToolAddr *address,
                     UWORD port, const char *path, NtResult *res)
 {
-    ToolSockAddr sa;
+    ToolSockAddrAny sa;
     ToolFdSet    rd;
     ToolTimeval  tv;
     LONG         s;
@@ -764,7 +764,8 @@ static VOID nt_wire(struct Library *base, NtCap *cap, ULONG address,
     res->ticks = 0;
     res->ok    = FALSE;
 
-    s = tool_sock_socket(base, TOOL_AF_INET, TOOL_SOCK_STREAM, 0);
+    s = tool_sock_socket(base, (LONG)address->ta_Family, TOOL_SOCK_STREAM,
+                         0);
     if (s < 0)
     {
         tool_error("socket() failed: %s",
@@ -772,7 +773,7 @@ static VOID nt_wire(struct Library *base, NtCap *cap, ULONG address,
         return;
     }
 
-    tool_sock_addr(&sa, address, port);
+    (VOID)tool_sock_addr(&sa, address, port);
 
     start = ami_millis();
 
@@ -925,7 +926,7 @@ int main(int argc, char **argv)
     ULONG           snaplen;
     ULONG           blen;
     ULONG           bytes;
-    ULONG           address = 0;
+    ToolAddr        address;
     UWORD           port    = 80;
     BOOL            wire;
     BOOL            capture;
@@ -1001,12 +1002,13 @@ int main(int argc, char **argv)
 
     if (wire)
     {
-        nt_say("NetTrace: GET %s from %lu.%lu.%lu.%lu port %lu, "
-                    "capturing %s\n", (LONG)path,
-                    (LONG)((address >> 24) & 0xFF), (LONG)((address >> 16) & 0xFF),
-                    (LONG)((address >> 8) & 0xFF), (LONG)(address & 0xFF),
-                    (LONG)port, (LONG)(capture ? iface : "nothing"));
-        nt_wire(base, &nt_cap, address, port, path, &result);
+        char text[TOOL_ADDR_STRLEN];
+
+        tool_addr_text(base, &address, text, sizeof(text));
+        nt_say("NetTrace: GET %s from %s port %lu, capturing %s\n",
+                    (LONG)path, (LONG)text, (LONG)port,
+                    (LONG)(capture ? iface : "nothing"));
+        nt_wire(base, &nt_cap, &address, port, path, &result);
         nt_report("wire", &result);
     }
     else

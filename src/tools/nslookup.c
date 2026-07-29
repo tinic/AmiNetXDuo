@@ -578,8 +578,9 @@ static LONG nsl_print_answers(const UBYTE *msg, ULONG len)
  * waiting on a dead server. An accepted datagram must come from the server
  * asked, be a response, and carry the identifier sent.
  */
-static LONG nsl_exchange(struct Library *sb, LONG sock, const ToolSockAddr *srv,
-                         const UBYTE *q, LONG qlen, UWORD id, ULONG secs)
+static LONG nsl_exchange(struct Library *sb, LONG sock,
+                         const ToolSockAddrAny *srv, const UBYTE *q, LONG qlen,
+                         UWORD id, ULONG secs)
 {
     ULONG per   = secs / (ULONG)NSL_ATTEMPTS;
     ULONG tries;
@@ -604,11 +605,11 @@ static LONG nsl_exchange(struct Library *sb, LONG sock, const ToolSockAddr *srv,
 
         for (i = 0; i < slices; i++)
         {
-            ToolSockAddr from;
-            ToolFdSet    readfds;
-            ToolTimeval  tv;
-            LONG         ready;
-            LONG         n;
+            ToolSockAddrAny from;
+            ToolFdSet       readfds;
+            ToolTimeval     tv;
+            LONG            ready;
+            LONG            n;
 
             if (tool_break())
                 return NSL_BREAK;
@@ -629,8 +630,9 @@ static LONG nsl_exchange(struct Library *sb, LONG sock, const ToolSockAddr *srv,
             if (ready == 0)
                 continue;
 
-            from.sin_addr = 0;
-            from.sin_port = 0;
+            from.in.sin_family = 0;
+            from.in.sin_addr   = 0;
+            from.in.sin_port   = 0;
 
             n = tool_sock_recvfrom(sb, sock, nsl_reply,
                                    (LONG)sizeof(nsl_reply), &from);
@@ -641,7 +643,7 @@ static LONG nsl_exchange(struct Library *sb, LONG sock, const ToolSockAddr *srv,
                 return NSL_BROKEN;
             }
 
-            if (from.sin_addr != srv->sin_addr || from.sin_port != srv->sin_port)
+            if (!tool_sock_addr_same(&from, srv))
                 continue;                       /* not the server we asked  */
 
             if (n < NSL_HDR)
@@ -693,22 +695,26 @@ static VOID nsl_print_types(VOID)
  * ObtainDomainNameServerList(), since DHCP-supplied name servers appear in no
  * file on disk. DEVS:Internet/name_resolution second, for a static setup.
  */
-static BOOL nsl_default_server(ULONG *out)
+static BOOL nsl_default_server(ToolAddr *out)
 {
     char  servers[4][16];
+    ULONG address = 0;
     ULONG count = tool_stack_name_servers(servers, 4UL);
     ULONG i;
 
     for (i = 0; i < count; i++)
     {
-        if (ami_config_parse_ip(servers[i], out))
+        if (ami_config_parse_ip(servers[i], &address))
+        {
+            tool_addr_v4(out, address);
             return TRUE;
+        }
     }
 
     if (ami_config_load(&nsl_config) == AMI_CFG_OK &&
         nsl_config.resolver.nameserver_count > 0)
     {
-        *out = nsl_config.resolver.nameserver[0];
+        tool_addr_v4(out, nsl_config.resolver.nameserver[0]);
         return TRUE;
     }
 
@@ -736,9 +742,9 @@ int main(int argc, char **argv)
     LONG            args[ARG_COUNT];
     struct RDArgs  *rda;
     struct Library *sb;
-    ToolSockAddr    srv;
+    ToolSockAddrAny srv;
     const char     *name;
-    ULONG           server = 0;
+    ToolAddr        server;
     ULONG           address = 0;
     ULONG           timeout;
     ULONG           qlen;
@@ -750,7 +756,7 @@ int main(int argc, char **argv)
     LONG            printed;
     LONG            rc = RETURN_OK;
     ULONG           i;
-    char            dotted[16];
+    char            dotted[TOOL_ADDR_STRLEN];
 
     (VOID)argv;
 
@@ -848,7 +854,7 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    ami_config_format_ip(server, dotted, sizeof(dotted));
+    tool_addr_text(sb, &server, dotted, sizeof(dotted));
 
     id   = nsl_id();
     qlen = nsl_build(nsl_qname, type, id);
@@ -861,7 +867,7 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    sock = tool_sock_socket(sb, TOOL_AF_INET, TOOL_SOCK_DGRAM, 0);
+    sock = tool_sock_socket(sb, (LONG)server.ta_Family, TOOL_SOCK_DGRAM, 0);
     if (sock < 0)
     {
         tool_error("no socket: %s",
@@ -871,7 +877,7 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    tool_sock_addr(&srv, server, (UWORD)NSL_PORT);
+    (VOID)tool_sock_addr(&srv, &server, (UWORD)NSL_PORT);
 
     n = nsl_exchange(sb, sock, &srv, nsl_query, (LONG)qlen, id, timeout);
 

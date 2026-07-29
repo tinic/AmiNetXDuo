@@ -158,7 +158,8 @@ static VOID tftp_report_error(const UBYTE *buf, LONG len)
 }
 
 /* RFC 1350's answer to a packet from the wrong port. */
-static VOID tftp_stray(struct Library *sb, LONG sock, const ToolSockAddr *who)
+static VOID tftp_stray(struct Library *sb, LONG sock,
+                       const ToolSockAddrAny *who)
 {
     static const char msg[] = "unknown transfer ID";
     UBYTE packet[4 + sizeof(msg)];
@@ -205,7 +206,7 @@ static ULONG tftp_build_request(UWORD opcode, const char *name)
  * cut into 200 ms slices so a break is noticed while waiting on a dead server.
  */
 static LONG tftp_wait(struct Library *sb, LONG sock, ULONG secs,
-                      ToolSockAddr *from)
+                      ToolSockAddrAny *from)
 {
     ULONG slices = (secs * 1000UL) / 200UL;
     ULONG i;
@@ -245,13 +246,6 @@ static LONG tftp_wait(struct Library *sb, LONG sock, ULONG secs,
     return 0;
 }
 
-/* Address and port together are the transfer. */
-static BOOL tftp_same(const ToolSockAddr *a, const ToolSockAddr *b)
-{
-    return (a->sin_addr == b->sin_addr && a->sin_port == b->sin_port)
-               ? TRUE : FALSE;
-}
-
 /*
  * Everything both directions share. `last` is whatever was last sent -- the
  * request, an ACK or a DATA block -- since TFTP's entire reliability mechanism
@@ -261,7 +255,7 @@ typedef struct TftpXfer
 {
     struct Library *sb;
     LONG            sock;
-    ToolSockAddr    peer;               /* server:69 until the first reply  */
+    ToolSockAddrAny peer;               /* server:69 until the first reply  */
     BOOL            have_peer;
     ULONG           timeout;
     UBYTE           last[TFTP_BLOCK + 4];
@@ -319,9 +313,9 @@ static LONG tftp_await(TftpXfer *x, UWORD want_op, UWORD want_block)
 
     for (;;)
     {
-        ToolSockAddr from;
-        LONG         n = tftp_wait(x->sb, x->sock, x->timeout, &from);
-        UWORD        op;
+        ToolSockAddrAny from;
+        LONG            n = tftp_wait(x->sb, x->sock, x->timeout, &from);
+        UWORD           op;
 
         if (n == TFTP_BREAK || n == TFTP_BROKEN)
             return n;
@@ -338,7 +332,7 @@ static LONG tftp_await(TftpXfer *x, UWORD want_op, UWORD want_block)
         }
 
         /* Somebody else's transfer, or a stray from an old one. */
-        if (x->have_peer && !tftp_same(&from, &x->peer))
+        if (x->have_peer && !tool_sock_addr_same(&from, &x->peer))
         {
             tftp_stray(x->sb, x->sock, &from);
             continue;
@@ -590,14 +584,14 @@ int main(int argc, char **argv)
     const char     *as;
     const char     *local;
     const char     *remote;
-    ULONG           address = 0;
+    ToolAddr        address;
     ULONG           port;
     ULONG           t0;
     ULONG           elapsed;
     LONG            sock = -1;
     LONG            rc;
     ULONG           i;
-    char            dotted[16];
+    char            dotted[TOOL_ADDR_STRLEN];
 
     (VOID)argv;
 
@@ -686,7 +680,7 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    sock = tool_sock_socket(sb, TOOL_AF_INET, TOOL_SOCK_DGRAM, 0);
+    sock = tool_sock_socket(sb, (LONG)address.ta_Family, TOOL_SOCK_DGRAM, 0);
     if (sock < 0)
     {
         tool_error("no socket: %s",
@@ -698,9 +692,9 @@ int main(int argc, char **argv)
 
     x.sb   = sb;
     x.sock = sock;
-    tool_sock_addr(&x.peer, address, (UWORD)port);
+    (VOID)tool_sock_addr(&x.peer, &address, (UWORD)port);
 
-    ami_config_format_ip(address, dotted, sizeof(dotted));
+    tool_addr_text(sb, &address, dotted, sizeof(dotted));
 
     if (!x.quiet)
     {

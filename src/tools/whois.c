@@ -167,13 +167,13 @@ static BOOL whois_referral_from(const char *line, char *out, ULONG outlen)
 static LONG whois_ask(struct Library *sb, const char *server, UWORD port,
                       const char *query, BOOL *referred)
 {
-    ToolSockAddr sa;
-    ULONG        address = 0;
-    LONG         sock;
-    LONG         len = 0;
-    ULONG        fill = 0;
-    ULONG        i;
-    LONG         n;
+    ToolSockAddrAny sa;
+    ToolAddr        address;
+    LONG            sock;
+    LONG            len = 0;
+    ULONG           fill = 0;
+    ULONG           i;
+    LONG            n;
 
     *referred = FALSE;
     whois_referral[0] = '\0';
@@ -181,7 +181,7 @@ static LONG whois_ask(struct Library *sb, const char *server, UWORD port,
     if (!tool_sock_resolve(sb, server, &address))
         return RETURN_ERROR;
 
-    sock = tool_sock_socket(sb, TOOL_AF_INET, TOOL_SOCK_STREAM, 0);
+    sock = tool_sock_socket(sb, (LONG)address.ta_Family, TOOL_SOCK_STREAM, 0);
     if (sock < 0)
     {
         tool_error("no socket: %s",
@@ -189,11 +189,11 @@ static LONG whois_ask(struct Library *sb, const char *server, UWORD port,
         return RETURN_FAIL;
     }
 
-    tool_sock_addr(&sa, address, port);
+    (VOID)tool_sock_addr(&sa, &address, port);
 
     if (tool_sock_connect(sb, sock, &sa) != 0)
     {
-        tool_sock_fail(sb, "reach", address, port);
+        tool_sock_fail(sb, "reach", &address, port);
         (VOID)tool_sock_close(sb, sock);
         return RETURN_ERROR;
     }

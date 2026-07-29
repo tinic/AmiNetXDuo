@@ -86,13 +86,26 @@ LONG tool_sock_socket(struct Library *base, LONG domain, LONG type, LONG proto)
     return res;
 }
 
+/*
+ * How long a sockaddr is on the wire, from the sockaddr itself.
+ *
+ * A sockaddr_in starts with its own length, 16.  This NDK's sockaddr_in6 has
+ * no length byte and starts with the family, 23.  So byte 0 tells the two
+ * apart and there is no third case to get wrong.
+ */
+static LONG tool_sock_len(const ToolSockAddrAny *sa)
+{
+    return (sa->in6.sin6_family == (UBYTE)TOOL_AF_INET6)
+               ? (LONG)sizeof(ToolSockAddr6) : (LONG)sizeof(ToolSockAddr);
+}
+
 /* LVO -0x024 */
-LONG tool_sock_bind(struct Library *base, LONG s, const ToolSockAddr *sa)
+LONG tool_sock_bind(struct Library *base, LONG s, const ToolSockAddrAny *sa)
 {
     register struct Library *a6  __asm("a6") = base;
     register LONG            d0  __asm("d0") = s;
     register CONST_APTR      a0  __asm("a0") = (CONST_APTR)sa;
-    register LONG            d1  __asm("d1") = (LONG)sizeof(*sa);
+    register LONG            d1  __asm("d1") = tool_sock_len(sa);
     register LONG            res __asm("d0");
     register LONG _clob_d1 __asm("d1");
     register LONG _clob_a0 __asm("a0");
@@ -121,7 +134,7 @@ LONG tool_sock_listen(struct Library *base, LONG s, LONG backlog)
 }
 
 /* LVO -0x030 */
-LONG tool_sock_accept(struct Library *base, LONG s, ToolSockAddr *from)
+LONG tool_sock_accept(struct Library *base, LONG s, ToolSockAddrAny *from)
 {
     LONG namelen = (LONG)sizeof(*from);
 
@@ -141,12 +154,12 @@ LONG tool_sock_accept(struct Library *base, LONG s, ToolSockAddr *from)
 }
 
 /* LVO -0x036 */
-LONG tool_sock_connect(struct Library *base, LONG s, const ToolSockAddr *sa)
+LONG tool_sock_connect(struct Library *base, LONG s, const ToolSockAddrAny *sa)
 {
     register struct Library *a6  __asm("a6") = base;
     register LONG            d0  __asm("d0") = s;
     register CONST_APTR      a0  __asm("a0") = (CONST_APTR)sa;
-    register LONG            d1  __asm("d1") = (LONG)sizeof(*sa);
+    register LONG            d1  __asm("d1") = tool_sock_len(sa);
     register LONG            res __asm("d0");
     register LONG _clob_d1 __asm("d1");
     register LONG _clob_a0 __asm("a0");
@@ -160,7 +173,7 @@ LONG tool_sock_connect(struct Library *base, LONG s, const ToolSockAddr *sa)
 
 /* LVO -0x03c */
 LONG tool_sock_sendto(struct Library *base, LONG s, const void *buf, LONG len,
-                      const ToolSockAddr *to)
+                      const ToolSockAddrAny *to)
 {
     register struct Library *a6  __asm("a6") = base;
     register LONG            d0  __asm("d0") = s;
@@ -168,7 +181,7 @@ LONG tool_sock_sendto(struct Library *base, LONG s, const void *buf, LONG len,
     register LONG            d1  __asm("d1") = len;
     register LONG            d2  __asm("d2") = 0;
     register CONST_APTR      a1  __asm("a1") = (CONST_APTR)to;
-    register LONG            d3  __asm("d3") = (LONG)sizeof(*to);
+    register LONG            d3  __asm("d3") = tool_sock_len(to);
     register LONG            res __asm("d0");
     register LONG _clob_d1 __asm("d1");
     register LONG _clob_a0 __asm("a0");
@@ -203,7 +216,7 @@ LONG tool_sock_send(struct Library *base, LONG s, const void *buf, LONG len)
 
 /* LVO -0x048 */
 LONG tool_sock_recvfrom(struct Library *base, LONG s, void *buf, LONG len,
-                        ToolSockAddr *from)
+                        ToolSockAddrAny *from)
 {
     LONG namelen = (LONG)sizeof(*from);
 
@@ -308,7 +321,7 @@ LONG tool_sock_getsockopt(struct Library *base, LONG s, LONG level, LONG name,
 }
 
 /* LVO -0x066 */
-LONG tool_sock_getsockname(struct Library *base, LONG s, ToolSockAddr *sa)
+LONG tool_sock_getsockname(struct Library *base, LONG s, ToolSockAddrAny *sa)
 {
     LONG namelen = (LONG)sizeof(*sa);
 
@@ -429,47 +442,427 @@ ToolServEnt *tool_sock_getservbyname(struct Library *base, const char *name,
     return res;
 }
 
+/*
+ * The three at the far end of the table.  Register assignment comes from the
+ * NDK pragma, not from the C prototype:
+ *
+ *   pragmas/bsdsocket_pragmas.h  inet_ntop(d0,a0,a1,d1)
+ *                                freeaddrinfo(a0)
+ *                                getaddrinfo(a0,a1,a2,a3)
+ */
+
+/* LVO -0x258 */
+char *tool_sock_ntop(struct Library *base, LONG af, const void *src,
+                     char *dst, LONG size)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register LONG            d0  __asm("d0") = af;
+    register CONST_APTR      a0  __asm("a0") = (CONST_APTR)src;
+    register APTR            a1  __asm("a1") = (APTR)dst;
+    register LONG            d1  __asm("d1") = size;
+    register char           *res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
+
+    __asm __volatile ("jsr a6@(-600:W)"
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
+                        "=r" (_clob_a1)
+                      : "r" (a6), "r" (d0), "r" (a0), "r" (a1), "r" (d1)
+                      : "cc", "memory");
+    return res;
+}
+
+/* LVO -0x324 */
+VOID tool_sock_freeaddrinfo(struct Library *base, ToolAddrInfo *ai)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register APTR            a0  __asm("a0") = (APTR)ai;
+    register LONG _clob_d0 __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
+
+    __asm __volatile ("jsr a6@(-804:W)"
+                      : "=r" (_clob_d0), "=r" (_clob_d1), "=r" (_clob_a0),
+                        "=r" (_clob_a1)
+                      : "r" (a6), "r" (a0)
+                      : "cc", "memory");
+}
+
+/* LVO -0x32a */
+LONG tool_sock_getaddrinfo(struct Library *base, const char *node,
+                           const char *service, const ToolAddrInfo *hints,
+                           ToolAddrInfo **res)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register CONST_APTR      a0  __asm("a0") = (CONST_APTR)node;
+    register CONST_APTR      a1  __asm("a1") = (CONST_APTR)service;
+    register CONST_APTR      a2  __asm("a2") = (CONST_APTR)hints;
+    register APTR            a3  __asm("a3") = (APTR)res;
+    register LONG            ret __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
+
+    __asm __volatile ("jsr a6@(-810:W)"
+                      : "=r" (ret), "=r" (_clob_d1), "=r" (_clob_a0),
+                        "=r" (_clob_a1)
+                      : "r" (a6), "r" (a0), "r" (a1), "r" (a2), "r" (a3)
+                      : "cc", "memory");
+    return ret;
+}
+
 /* ------------------------------------------------------------- helpers ---- */
 
-VOID tool_sock_addr(ToolSockAddr *sa, ULONG address, UWORD port)
+BOOL tool_sock_have_lvo(struct Library *base, ULONG lvo)
+{
+    return (base != NULL && (ULONG)base->lib_NegSize >= lvo) ? TRUE : FALSE;
+}
+
+BOOL tool_sock_have_ipv6(struct Library *base)
+{
+    LONG s = tool_sock_socket(base, TOOL_AF_INET6, TOOL_SOCK_DGRAM, 0);
+
+    if (s < 0)
+        return FALSE;
+
+    (VOID)tool_sock_close(base, s);
+
+    return TRUE;
+}
+
+VOID tool_addr_v4(ToolAddr *addr, ULONG v4)
 {
     ULONG i;
 
-    for (i = 0; i < (ULONG)sizeof(sa->sin_zero); i++)
-        sa->sin_zero[i] = 0;
+    addr->ta_Family  = (UWORD)TOOL_AF_INET;
+    addr->ta_Pad     = 0;
+    addr->ta_V4      = v4;
+    addr->ta_ScopeId = 0;
 
-    sa->sin_len    = (UBYTE)sizeof(*sa);
-    sa->sin_family = (UBYTE)TOOL_AF_INET;
-    sa->sin_port   = port;              /* big-endian host: already network */
-    sa->sin_addr   = address;
+    for (i = 0; i < 16UL; i++)
+        addr->ta_V6[i] = 0;
 }
 
-BOOL tool_sock_resolve(struct Library *base, const char *host, ULONG *out)
+LONG tool_sock_addr(ToolSockAddrAny *sa, const ToolAddr *addr, UWORD port)
 {
-    ToolHostEnt *he;
-    ULONG        address = 0;
-    ULONG        i;
+    ULONG i;
 
-    if (ami_config_parse_ip(host, &address))
+    if (TOOL_ADDR_IS6(addr))
     {
-        *out = address;
+        sa->in6.sin6_family   = (UBYTE)TOOL_AF_INET6;
+        sa->in6.sin6_pad      = 0;
+        sa->in6.sin6_port     = port;   /* big-endian host: already network */
+        sa->in6.sin6_flowinfo = 0;
+        sa->in6.sin6_scope_id = addr->ta_ScopeId;
+
+        for (i = 0; i < 16UL; i++)
+            sa->in6.sin6_addr[i] = addr->ta_V6[i];
+
+        return (LONG)sizeof(ToolSockAddr6);
+    }
+
+    for (i = 0; i < (ULONG)sizeof(sa->in.sin_zero); i++)
+        sa->in.sin_zero[i] = 0;
+
+    sa->in.sin_len    = (UBYTE)sizeof(ToolSockAddr);
+    sa->in.sin_family = (UBYTE)TOOL_AF_INET;
+    sa->in.sin_port   = port;
+    sa->in.sin_addr   = addr->ta_V4;
+
+    return (LONG)sizeof(ToolSockAddr);
+}
+
+LONG tool_sock_addr_v4(ToolSockAddrAny *sa, ULONG v4, UWORD port)
+{
+    ToolAddr addr;
+
+    tool_addr_v4(&addr, v4);
+
+    return tool_sock_addr(sa, &addr, port);
+}
+
+BOOL tool_sock_addr_get(const ToolSockAddrAny *sa, ToolAddr *out)
+{
+    ULONG i;
+
+    if (sa->in6.sin6_family == (UBYTE)TOOL_AF_INET6)
+    {
+        out->ta_Family  = (UWORD)TOOL_AF_INET6;
+        out->ta_Pad     = 0;
+        out->ta_V4      = 0;
+        out->ta_ScopeId = sa->in6.sin6_scope_id;
+
+        for (i = 0; i < 16UL; i++)
+            out->ta_V6[i] = sa->in6.sin6_addr[i];
+
         return TRUE;
     }
 
-    he = tool_sock_gethostbyname(base, host);
+    if (sa->in.sin_family != (UBYTE)TOOL_AF_INET)
+        return FALSE;
+
+    tool_addr_v4(out, sa->in.sin_addr);
+
+    return TRUE;
+}
+
+UWORD tool_sock_addr_port(const ToolSockAddrAny *sa)
+{
+    return (sa->in6.sin6_family == (UBYTE)TOOL_AF_INET6)
+               ? sa->in6.sin6_port : sa->in.sin_port;
+}
+
+BOOL tool_addr_same(const ToolAddr *a, const ToolAddr *b)
+{
+    ULONG i;
+
+    if (a->ta_Family != b->ta_Family)
+        return FALSE;
+
+    if (!TOOL_ADDR_IS6(a))
+        return (a->ta_V4 == b->ta_V4) ? TRUE : FALSE;
+
+    for (i = 0; i < 16UL; i++)
+    {
+        if (a->ta_V6[i] != b->ta_V6[i])
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
+BOOL tool_sock_addr_same(const ToolSockAddrAny *a, const ToolSockAddrAny *b)
+{
+    ToolAddr x;
+    ToolAddr y;
+
+    if (tool_sock_addr_port(a) != tool_sock_addr_port(b))
+        return FALSE;
+
+    if (!tool_sock_addr_get(a, &x) || !tool_sock_addr_get(b, &y))
+        return FALSE;
+
+    return tool_addr_same(&x, &y);
+}
+
+VOID tool_addr_text(struct Library *base, const ToolAddr *addr,
+                    char *buf, ULONG buflen)
+{
+    if (buflen == 0)
+        return;
+
+    if (!TOOL_ADDR_IS6(addr))
+    {
+        ami_config_format_ip(addr->ta_V4, buf, buflen);
+        return;
+    }
+
+    /*
+     * Through the library rather than a formatter of our own: an IPv6 address
+     * only ever gets here from a library that produced it, so the one that
+     * knows RFC 5952 is the one that has it.
+     */
+    buf[0] = '\0';
+    if (!tool_sock_have_lvo(base, 0x25eUL) ||
+        tool_sock_ntop(base, TOOL_AF_INET6, addr->ta_V6, buf, (LONG)buflen)
+            == NULL)
+    {
+        tool_copy_string(buf, buflen, "?");
+    }
+}
+
+VOID tool_sock_addr_text(struct Library *base, const ToolSockAddrAny *sa,
+                         char *buf, ULONG buflen)
+{
+    ToolAddr addr;
+
+    if (!tool_sock_addr_get(sa, &addr))
+    {
+        tool_copy_string(buf, buflen, "?");
+        return;
+    }
+
+    tool_addr_text(base, &addr, buf, buflen);
+}
+
+BOOL tool_sock_raw_ok(const ToolAddr *addr)
+{
+    if (!TOOL_ADDR_IS6(addr))
+        return TRUE;
+
+    tool_error("this command cannot do IPv6");
+    tool_advise_blank();
+    tool_advise("It builds its own ICMP on a raw socket, and bsdsocket.library");
+    tool_advise("offers raw sockets for IPv4 only.  nc, telnet, tftp and fetch");
+    tool_advise("all reach an IPv6 address.");
+
+    return FALSE;
+}
+
+const char *tool_host_unbracket(const char *host, char *buf, ULONG buflen)
+{
+    ULONG len = 0;
+    ULONG i;
+
+    if (host == NULL || host[0] != '[')
+        return host;
+
+    while (host[len + 1] != '\0' && host[len + 1] != ']')
+        len++;
+
+    if (host[len + 1] != ']' || host[len + 2] != '\0' || len + 1 >= buflen)
+        return host;
+
+    for (i = 0; i < len; i++)
+        buf[i] = host[i + 1];
+    buf[len] = '\0';
+
+    return buf;
+}
+
+/* An address with a colon in it can only be meant as an IPv6 literal. */
+static BOOL tool_looks_v6(const char *host)
+{
+    ULONG i;
+
+    for (i = 0; host[i] != '\0'; i++)
+    {
+        if (host[i] == ':')
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+static VOID tool_no_ipv6(struct Library *base, const char *host)
+{
+    if (!tool_sock_have_lvo(base, 0x330UL))
+    {
+        tool_error("cannot use \"%s\": the bsdsocket.library on this machine "
+                   "has no getaddrinfo", (LONG)host);
+        return;
+    }
+
+    if (tool_sock_have_ipv6(base))
+    {
+        tool_error("\"%s\" is not an address this command can read",
+                   (LONG)host);
+        return;
+    }
+
+    tool_error("cannot use \"%s\": this machine's network has no IPv6",
+               (LONG)host);
+    tool_advise_blank();
+    tool_advise("IPv6 needs a bsdsocket.library built with it, and CONFIGURE6");
+    tool_advise("in DEVS:NetInterfaces/<name>.  ShowNetStatus ALL says which");
+    tool_advise("addresses this machine has.");
+}
+
+/* gethostbyname(), for a library whose table stops short of getaddrinfo. */
+static BOOL tool_resolve_old(struct Library *base, const char *host,
+                             ToolAddr *out)
+{
+    ToolHostEnt *he = tool_sock_gethostbyname(base, host);
+    ULONG        address = 0;
+    ULONG        i;
+
     if (he == NULL || he->h_addr_list == NULL ||
         he->h_addr_list[0] == NULL || he->h_length != 4)
-    {
-        tool_error("cannot resolve \"%s\"", (LONG)host);
-        tool_explain_resolve(host, AMI_NET_ERR_NONAME);
         return FALSE;
-    }
 
     for (i = 0; i < 4UL; i++)
         address = (address << 8) | (ULONG)(UBYTE)he->h_addr_list[0][i];
 
-    *out = address;
+    tool_addr_v4(out, address);
+
     return TRUE;
+}
+
+BOOL tool_sock_resolve_af(struct Library *base, const char *host, LONG want,
+                          ToolAddr *out)
+{
+    char          unbracketed[TOOL_ADDR_STRLEN];
+    ToolAddrInfo  hints;
+    ToolAddrInfo *list = NULL;
+    ToolAddrInfo *ai;
+    ULONG         address = 0;
+    BOOL          literal;
+    BOOL          got = FALSE;
+
+    host = tool_host_unbracket(host, unbracketed, sizeof(unbracketed));
+
+    if (want != TOOL_AF_INET6 && ami_config_parse_ip(host, &address))
+    {
+        tool_addr_v4(out, address);
+        return TRUE;
+    }
+
+    literal = tool_looks_v6(host);
+
+    if (!tool_sock_have_lvo(base, 0x330UL))
+    {
+        /*
+         * No getaddrinfo in this library's table.  A name can still be looked
+         * up the old way; an IPv6 literal cannot be used at all.
+         */
+        if (!literal && want != TOOL_AF_INET6 &&
+            tool_resolve_old(base, host, out))
+            return TRUE;
+
+        if (literal)
+            tool_no_ipv6(base, host);
+        else
+        {
+            tool_error("cannot resolve \"%s\"", (LONG)host);
+            tool_explain_resolve(host, AMI_NET_ERR_NONAME);
+        }
+
+        return FALSE;
+    }
+
+    hints.ai_flags     = literal ? TOOL_AI_NUMERICHOST : 0;
+    hints.ai_family    = want;
+    hints.ai_socktype  = TOOL_SOCK_STREAM;
+    hints.ai_protocol  = 0;
+    hints.ai_addrlen   = 0;
+    hints.ai_addr      = NULL;
+    hints.ai_canonname = NULL;
+    hints.ai_next      = NULL;
+
+    if (tool_sock_getaddrinfo(base, host, NULL, &hints, &list) == 0)
+    {
+        /* The library orders IPv6 first, so the first usable answer wins. */
+        for (ai = list; ai != NULL && !got; ai = ai->ai_next)
+        {
+            if (ai->ai_addr == NULL)
+                continue;
+
+            got = tool_sock_addr_get(ai->ai_addr, out);
+        }
+
+        tool_sock_freeaddrinfo(base, list);
+    }
+
+    if (got)
+        return TRUE;
+
+    if (literal)
+    {
+        tool_no_ipv6(base, host);
+        return FALSE;
+    }
+
+    tool_error("cannot resolve \"%s\"", (LONG)host);
+    tool_explain_resolve(host, AMI_NET_ERR_NONAME);
+
+    return FALSE;
+}
+
+BOOL tool_sock_resolve(struct Library *base, const char *host, ToolAddr *out)
+{
+    return tool_sock_resolve_af(base, host, TOOL_AF_UNSPEC, out);
 }
 
 UWORD tool_sock_port(struct Library *base, const char *text, const char *proto)
@@ -586,15 +979,15 @@ const char *tool_sock_errstr(LONG err)
     }
 }
 
-VOID tool_sock_fail(struct Library *base, const char *what, ULONG address,
-                    UWORD port)
+VOID tool_sock_fail(struct Library *base, const char *what,
+                    const ToolAddr *addr, UWORD port)
 {
     LONG err = tool_sock_errno(base);
-    char dotted[16];
+    char text[TOOL_ADDR_STRLEN];
 
-    ami_config_format_ip(address, dotted, sizeof(dotted));
+    tool_addr_text(base, addr, text, sizeof(text));
 
-    tool_error("cannot %s %s port %ld: %s", (LONG)what, (LONG)dotted,
+    tool_error("cannot %s %s port %ld: %s", (LONG)what, (LONG)text,
                (LONG)port, (LONG)tool_sock_errstr(err));
 }
 
