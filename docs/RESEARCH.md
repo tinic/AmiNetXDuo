@@ -17318,3 +17318,106 @@ The transfer is 1.2 MB through SLIRP on a host loopback, so this is the
 CPU-bound regime of 64 and not a link-bound one; it prices per-packet cost on
 a 68020, not window behaviour. And curl copies: 24 records the same wire at
 161–179 KB/s through `NetTrace`, which does not.
+
+## 66. The stack speaks IPv6 and not one command does (2026-07-28)
+
+`-DAMINETXDUO_IPV6=ON` still builds a working dual stack at `0.11.1`, three
+days after M8 said so. Nothing regressed. What the retest found is a gap on
+the other side of the library: **zero of the 28 commands in `src/tools/` have
+a line of IPv6 in them**, and on a machine whose interface has just
+autoconfigured two IPv6 addresses, no shipped command will show you either.
+
+### 66.1 The library, retested at HEAD
+
+Clean build, no warnings, and all three routes rerun as 1.10 documents them:
+
+| | checks | result |
+|---|---:|---|
+| `ipv6_test` — two `NX_IP` instances over a RAM driver | 78 | 0 failures |
+| `ipv6_socket_test` — `AF_INET6` over `::1` through the LVOs | 54 | 0 failures |
+| `ipv6_link_test` — A2065 + SLIRP, real 0x86DD on the wire | 6 | 0 failures |
+
+The link test still finds SLIRP's router at `fe80::2`, still gets a router
+advertisement, still autoconfigures `fd00::/64`, and still passes duplicate
+address detection. `ff02::2` and `fec0::2` are still unanswered.
+
+### 66.2 What every command does with an IPv6 argument
+
+One boot on the A1200 profile, the IPv6 library, the interface up on
+`10.0.2.15`, commands run through `ToolsSmoke`:
+
+| command | result |
+|---|---|
+| `ping ::1`, `ping fe80::2`, `ping fd00::2` | `cannot resolve "::1"` |
+| `telnet ::1 23`, `tftp ::1 GET foo`, `whois … SERVER ::1`, `sntp ::1`, `nc ::1 80`, `traceroute ::1` | same message, same rc 10 |
+| `host ipv6.google.com` | `cannot resolve` — an AAAA-only name looks exactly like one that does not exist |
+| `nslookup … TYPE=AAAA` | `"AAAA" is not a record type I know` |
+| `nslookup ipv6.google.com` | answers with the CNAME `ipv6.l.google.com` and no address |
+| `fetch http://[::1]/index.html` | `the port number in that URL is not a number` |
+| `AddNetRoute DST fd00::/64` | `not an address this command can use … write it as four numbers with dots between them` |
+| `ShowNetStatus ALL`, `netstat -i`, `netstat -a`, `GetNetStatus`, `arp` | IPv4 only; no IPv6 line anywhere |
+| `ping 10.0.2.2`, `nslookup`, `arp`, `CheckNetConfig` | all fine — nothing here is broken, it is absent |
+
+The message every host-taking command gives is wrong in two ways, and it is
+one message because it is one function:
+
+    ping: cannot resolve "::1"
+      The name servers were asked and none of them knows "::1".
+      Check the spelling. If it is right, the name may simply not
+      exist -- nothing is wrong with this machine's network.
+
+`::1` is a literal, not a name, so asking a name server about it was never
+going to work; and the advice sends the reader to check their spelling and
+their DNS when the real answer is that this command does not do IPv6.
+
+The cause is structural rather than 28 separate omissions.
+`tool_sock_resolve()` in `src/tools/toolsock.c` returns a `ULONG`, rejects any
+`hostent` whose `h_length != 4`, and hands it to `tool_sock_addr()`, which
+fills a `sockaddr_in`. Every command that takes a host goes through it. The
+library's own `getaddrinfo` — which `ipv6_socket_test` exercises and which
+returns IPv6 first — is not called by a single command.
+
+### 66.3 The configuration keyword nothing can confirm
+
+`src/config/config_parse.c` accepts `CONFIGURE6` and `ADDRESS6` on an
+interface file. With
+
+    CONFIGURE6=STATIC
+    ADDRESS6=fd00::10/64
+
+added to `DEVS:NetInterfaces/eth0`, `CheckNetConfig VERBOSE` reads the file
+and reports "the network configuration has nothing wrong with it",
+`AddNetInterface eth0` brings the interface up and says only
+`eth0: online, address 10.0.2.15`, and `ShowNetStatus ALL` prints the IPv4
+address, netmask, broadcast, MAC, MTU, lease and name server — and no IPv6.
+
+The address is really there. A library built with
+`-DAMINETXDUO_LOG_LEVEL=2` says so on the serial port in the same boot:
+
+    [INFO] netstack: IPv6 enabled (ICMPv6, neighbour discovery, ::1)
+    [INFO] netstack: eth0 fe80::280:10ff:fe32:3334/64
+    [INFO] netstack: eth0 fd00::10/64
+
+So both addresses exist, both passed DAD, and the only way to see either is a
+debug build and a serial console. A user who configures `ADDRESS6` has no
+supported way to find out whether it took.
+
+### 66.4 What this leaves
+
+Nothing here is a defect in the stack; it is a missing half of the shipped
+surface, and it is worth writing down as a list rather than a feeling:
+
+* `tool_sock_resolve()` returning a `ULONG` is the single thing to change
+  first — an `AF_UNSPEC` `getaddrinfo` behind the same signature would carry
+  `ping`, `nc`, `telnet`, `traceroute`, `tftp`, `whois` and `NetTrace` at once;
+* `ShowNetStatus` and `netstat` have no line for a second address family, and
+  `arp` has no neighbour-discovery cache to show;
+* `nslookup` has no `AAAA` and no `ip6.arpa` reverse (`nslookup fd00::10`
+  answers "there is no such name");
+* `fetch` does not parse a bracketed literal in a URL;
+* `AddNetRoute` and `DeleteNetRoute` take dotted quads only.
+
+And 1.10's open question is still open, now with a reason: no IPv6 traffic has
+crossed SLIRP's NAT to the outside world, and with the tools as they are there
+is nothing on the machine that could send any. Confirming it needs a test
+binary, not a command.
