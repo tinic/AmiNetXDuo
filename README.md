@@ -1,3 +1,5 @@
+[![CodeQL](https://github.com/tinic/AmiNetXDuo/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/tinic/AmiNetXDuo/actions/workflows/github-code-scanning/codeql)
+
 # AmiNetXDuo
 
 An IPv4+IPv6 TCP/IP stack for classic AmigaOS, and the networking commands to go with it.
