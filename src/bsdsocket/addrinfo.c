@@ -341,7 +341,10 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     /* ---- numeric literals ---------------------------------------------- */
 
 #ifdef AMINETXDUO_IPV6
-    if (family == AF_UNSPEC || family == AF_INET6)
+    /* No family guard out here: an IPv6 literal asked for with an AF_INET hint
+     * has to reach the check below and be told the family is wrong. Guarding
+     * the block made that check unreachable, so the literal fell through to
+     * the resolver and was looked up as a name. Same shape as the IPv4 block. */
     {
         ULONG words[4];
 

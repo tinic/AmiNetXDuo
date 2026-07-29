@@ -936,6 +936,14 @@ APTR                p;
     (VOID)t_check((BOOL)(rc == -9),
                   "a dotted quad with AF_INET6 is EAI_ADDRFAMILY", rc);
 
+    /* The mirror of it. Without AI_NUMERICHOST, so a wrong answer here means
+       the literal reached the resolver and was looked up as a name. */
+    t_bzero(&hints, sizeof(hints));
+    hints.ai_family = T_AF_INET;
+    rc = bsd_getaddrinfo((APTR)"::1", NULL, &hints, &res);
+    (VOID)t_check((BOOL)(rc == -9),
+                  "an IPv6 literal with AF_INET is EAI_ADDRFAMILY", rc);
+
     /* gai_strerror takes its argument in a0. If that were wrong this would
        return the wrong string, or garbage. */
     p = bsd_gai_strerror(-2);
