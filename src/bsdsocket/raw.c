@@ -216,7 +216,7 @@ static UINT bsd_raw_filter(NX_IP *ip_ptr, ULONG protocol, NX_PACKET *packet_ptr)
             continue;
 
         /* A datagram belongs to the family its socket was opened in. */
-        if ((((sock->as_Flags & ASF_INET6) != 0) ? TRUE : FALSE) != is_v6)
+        if (((sock->as_Flags & ASF_INET6) != 0) != (is_v6 != FALSE))
             continue;
 
         if (sock->as_RawCount >= sock->as_RawMax)
