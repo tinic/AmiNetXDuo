@@ -17794,3 +17794,240 @@ Regression set, all on the same tree: default build warning-clean, `ctest`
 `ipv6_link_test` 6/0; `tests/ipv6/run-tools-fsuae.sh -s` PASS with nothing
 pending; conformance loopback tier 130 passed, 0 failed, 12 skipped;
 `tests/tools/run-livetools.sh` 24/24 and `tests/tools/run-nettools.sh` rc 0.
+
+## 69. The two lists IPv6 routes by, and the cache nothing showed (2026-07-28)
+
+66.4's list had five items. Four were closed the same day. These are the last
+two: `AddNetRoute`/`DeleteNetRoute` took dotted quads only, and the neighbour
+cache — which this port already tunes, `NX_IPV6_NEIGHBOR_CACHE_SIZE` 16 → 8 in
+`port/netxduo-amiga/inc/nx_user.h` — had no reader anywhere on the machine.
+
+### 69.1 There is no IPv6 routing table
+
+The obvious shape for the first item is wrong, and it is worth writing down
+before the shape that is right. `AddNetRoute DST <prefix> VIA <gateway>` is
+what the IPv4 half does and it cannot be done for IPv6, because nothing in
+NetX Duo maps a prefix to a next hop. `_nx_ipv6_packet_send()` asks three
+things and no others:
+
+    status = _nx_icmpv6_dest_table_find(ip_ptr, dest_address, &dest_entry_ptr, 0, 0);
+    if (status != NX_SUCCESS)
+    {
+        if (_nxd_ipv6_search_onlink(ip_ptr, dest_address))          /* on link */
+            COPY_IPV6_ADDRESS(dest_address, next_hop_address);
+        else if (_nxd_ipv6_router_lookup(ip_ptr, if_ptr, next_hop_address,
+                                         (void **)&NDCacheEntry) == NX_SUCCESS)
+            ;                                                       /* a router */
+    }
+
+The first is a per-destination cache, not a route. So there are two lists to
+write, and they are `nx_ipv6_prefix_list_ptr` and
+`nx_ipv6_default_router_table`. `nx_ip_static_route_add()` has no IPv6
+counterpart and `grep -rn ipv6.*static_route common/src` finds nothing to
+wrap.
+
+That is not a limitation to route around. It is what the protocol looks like
+without a routing daemon: RFC 4861 gives a host a prefix list and a default
+router list and nothing else, and everything finer than that arrives as an
+ICMPv6 redirect into the destination cache. So the commands write those two,
+and a prefix given a next hop is refused with the reason rather than accepted
+and dropped:
+
+    AddNetRoute: the route to fd00:9::/64 was not added
+
+      IPv6 has no table that maps a prefix to a next hop --
+      not in this stack and not in the protocol as NetX Duo
+      implements it. A packet is either sent straight to a
+      prefix that is on this link, or handed to a default
+      router, and those are the two things to write:
+
+         AddNetRoute DESTINATION fd00:9::/64
+         AddNetRoute DEFAULTGATEWAY fe80::1%eth0
+
+The template is still Roadshow's — no keyword was added. Which family is meant
+is decided by whether the address has a colon in it, which no host name and no
+dotted quad can, so the IPv4 half is reached by exactly the texts that reached
+it before, including the ones it refuses and the point in the run where it
+refuses them.
+
+Three things follow from the interface being per router rather than per route.
+A link-local next hop needs the zone — `fe80::1%eth0` — because `fe80::/64`
+exists on every interface at once and `nxd_ipv6_default_router_add()` takes an
+interface index; with one interface up the command supplies it and says so
+when it cannot. A global next hop needs no zone: the interface is the one
+holding an address whose prefix covers it, which is the same test the NetX Duo
+call applies before it will store the entry, so asking first turns an
+unexplained `NX_IP_ADDRESS_ERROR` into a sentence. And a prefix takes no
+interface at all, because `nx_ipv6_prefix_list_ptr` hangs off the `NX_IP` and
+not off an interface.
+
+### 69.2 A route accepted and never used
+
+Two things would have made a route that reads back correctly and moves no
+packet, and both had to be fixed rather than documented.
+
+**The destination cache.** `_nx_icmpv6_dest_table_find()` is consulted before
+either list, and an entry in it survives a change to both. A machine that had
+sent one packet to an address before the route existed would keep sending to
+the old next hop afterwards — the route in the table, the traffic on the old
+path. `netstack_ipv6_route_add()` and `_delete()` invalidate the whole
+destination table, which is four slots and what NetX Duo's own
+`_nx_invalidate_destination_entry()` does one entry at a time when a router
+goes away.
+
+**The router lifetime.** `nxd_ipv6_default_router_add()` takes a lifetime in
+seconds as a `USHORT`, and `nxd_ipv6_prefix_router_timer_tick.c` reads it once
+a second:
+
+    if (rt_entry -> nx_ipv6_default_router_entry_life_time == 0)
+    {
+        ...
+        rt_entry -> nx_ipv6_default_router_entry_flag = 0;      /* gone */
+    }
+    else if (rt_entry -> nx_ipv6_default_router_entry_life_time != 0xFFFF)
+    {
+        rt_entry -> nx_ipv6_default_router_entry_life_time--;
+    }
+
+Zero is not infinite, it is expired. `0xFFFF` is the value that tick treats as
+a static entry. `src/netstack/netstack_ipv6.c` had been passing 0 for
+`GATEWAY6` since it was written, with a comment saying "lifetime 0 means never
+expires" — so a statically configured IPv6 default router was invalidated
+within one second of bring-up, and nothing could have noticed because no
+command could show the router table. The two defects were each other's cover.
+
+Both halves now go through one `netstack_ipv6_route_add()`: what
+`DEVS:NetInterfaces/<name>`'s `GATEWAY6` asks for and what `AddNetRoute` asks
+for are the same call, so the lifetime cannot be right in one and wrong in the
+other. The harness asserts the router three seconds after adding it, which is
+three chances for the tick to have taken it away.
+
+### 69.3 Proving a route moved a packet
+
+Reading the table back proves nothing about where traffic goes. The
+observable that does is the neighbour cache, because the next-hop decision is
+exactly the address a neighbour solicitation is sent to.
+
+`2001:db8::1` is off link on the test machine, so packets for it are handed to
+SLIRP's router and neighbour discovery never asks about the address itself.
+Before the route, in the same boot:
+
+    ===== SYS:arp =====
+    Address          Hardware address
+      10.0.2.2         52:55:0a:00:02:02  eth0
+      10.0.2.3         52:55:0a:00:02:03  eth0
+
+    Neighbour                 Hardware address
+      fe80::2                   52:56:00:00:00:02  STALE  eth0  router
+      fd00::2                   52:56:00:00:00:02  STALE  eth0
+
+      STALE       answered once; not checked since
+
+Then `AddNetRoute DESTINATION 2001:db8::/64`, and a connection attempt to it:
+
+    ===== SYS:arp 2001:db8::1 =====
+    Neighbour                 Hardware address
+      2001:db8::1               no reply after 3 requests  INCOMPLETE  eth0  3 packets waiting
+
+      INCOMPLETE  asked, nothing back yet
+
+The three packets are `nc`'s SYN and its retransmissions, queued on a
+solicitation for `2001:db8::1` itself rather than delivered to the router's
+MAC. `ping 2001:db8::1` had already run earlier in the same boot, before the
+route existed, so this is also the destination-cache flush: without it the
+entry from that first ping would still be pointing at `fe80::2` and no
+neighbour entry for the destination would ever appear.
+
+The sample has to be taken while the attempt is running. An unanswered entry
+is deleted by `_nx_nd_cache_delete_internal()` after its third solicitation,
+about three seconds, so the harness backgrounds the connection and reads the
+cache underneath it.
+
+### 69.4 The neighbour cache goes in `arp`, not beside it
+
+`arp` is the wrong name for it — there is no address resolution protocol in
+IPv6 — and it is still the right place, for three reasons, in order of weight.
+
+Every command in this suite that grew IPv6 grew it inside itself. One
+`ping` takes either family, one `nslookup` answers `A` and `AAAA`, one
+`netstat -i` prints both address families of an interface. A separate `ndp`
+would be the first place where the suite asks a user to know which family
+their problem is in before they can ask about it — and the whole point of the
+cache is to answer "is that machine there", which is asked before the answer
+is known.
+
+The command already carries what the section needs and a new one would
+duplicate it: the interface-name lookup, the "that address is off this network
+and will never appear here" explanation, and the rule about not starting the
+stack in order to report on it.
+
+And the two are read together far more often than separately. `arp` with no
+arguments prints the ARP cache and then the neighbour cache; `arp <address>`
+looks in whichever one can hold that address, which is decided by the address.
+Nothing about the IPv4 output changed — on a library without IPv6 the
+neighbour query answers with an empty table and not one byte is printed.
+
+What the section adds over the ARP one is the state, which is the reason it is
+worth having at all. An ARP entry has answered or it has not. A neighbour
+entry says what the stack currently believes and what it is doing about it,
+and the RFC 4861 names are meaningless to a reader who has not read the RFC,
+so each state that appears is spelled out under the list — `INCOMPLETE` asked,
+nothing back yet; `STALE` answered once, not checked since; `PROBE` being
+checked now. `router` marks a neighbour the stack is using as one, from
+`nx_nd_cache_is_router`, and the packet count is what is queued waiting for the
+resolution.
+
+`SET` and `DELETE` follow the same address test and reach
+`nxd_nd_cache_entry_set()` and `nxd_nd_cache_entry_delete()`, so the command is
+not asymmetric about the two caches.
+
+### 69.5 The ABI
+
+Two selectors and four operations. `NETSTATUS_ROUTES6` and
+`NETSTATUS_NEIGHBOURS` follow `NETSTATUS_ADDRESSES6`: an IPv4-only build
+answers with an empty table rather than an error, so no `#ifdef` reached
+`src/tools/` for these either.
+
+`AMI_NETSTATUS_VERSION` goes 2 → 3, because `NetStatusControl` grew — an IPv6
+route needs a destination, a prefix length and a next hop, which is 36 bytes
+against the 16 its reserved words had. That is a real break: a version-2
+command and a version-3 library refuse each other on every call, including the
+IPv4 ones, which is what the header has always said would happen and why the
+commands and the library ship together. The refusal is `-1` with the buffer
+untouched, so it degrades into "the network is up, but it would not report on
+itself" rather than into a guru.
+
+`NETSTATUS_ROUTES6` reports the prefix list before the manual addresses'
+prefixes, because that is the order `_nxd_ipv6_search_onlink()` matches in, and
+reports a prefix in both once. `fe80::/64` is in neither: that function answers
+1 for every link-local address before it looks at any list, so there is no
+entry to show and none to remove. A stateless-autoconfigured address is not
+reported from its own prefix — an advertisement may set `A` without `L`, in
+which case the address exists and the prefix is not on link, and if it did set
+`L` the prefix list already holds it.
+
+    Destination                              Next hop                       Flags  Interface
+    fd00::/64                                *                              U      eth0
+    2001:db8::/64                            *                              US     eth0
+    ::/0                                     fe80::2                        UG     eth0
+
+`::/0` rather than a Netmask column of colons: an IPv6 default route is a
+router in a list and not a masked destination, and writing it the other way
+would misdescribe how the stack decides.
+
+### 69.6 Measured
+
+`tests/ipv6/run-tools-fsuae.sh -s` gained twenty-one assertions across both
+items and stays PASS with nothing pending. The IPv4-only build was checked
+separately on the same commands: `arp` prints the ARP cache and no neighbour
+section, `netstat -r` and `ShowNetStatus ROUTES` print the IPv4 table alone,
+`AddNetRoute DEFAULTGATEWAY fd00::99` answers "the running stack has no IPv6"
+with the reason, and every IPv4 message is unchanged.
+
+Regression set, all on the same tree: default build warning-clean, `ctest`
+11/11; IPv6 build warning-clean, `ipv6_test` 78/0, `ipv6_socket_test` 54/0,
+`ipv6_link_test` 6/0; conformance loopback tier 130 passed, 0 failed, 12
+skipped; `tests/tools/run-livetools.sh` PASSED and
+`tests/tools/run-nettools.sh` rc 0.
+
+66.4's list is now empty.

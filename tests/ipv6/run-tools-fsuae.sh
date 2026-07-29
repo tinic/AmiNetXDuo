@@ -21,6 +21,12 @@
 #             conversion; a failure here is a regression.
 #   display   66's acceptance test: a configured ADDRESS6 shown by a command.
 #             Asserted since the NETSTATUS_ADDRESSES6 work.
+#   routes    AddNetRoute/DeleteNetRoute over IPv6, and the neighbour cache in
+#             arp.  The last two of 66.4's list.  A route accepted and never
+#             used would pass a test that only read the table back, so the
+#             assertion that matters is the one on the neighbour cache: adding
+#             an on-link prefix changes which address the next packet is
+#             solicited for.
 #
 # ping and traceroute joined the v6 group once bsdsocket.library grew an
 # AF_INET6 raw socket (RESEARCH 67); their replies are asserted, not pending.
@@ -64,7 +70,7 @@ TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
 STAGED_TOOLS="AddNetInterface ShowNetStatus netstat ping nc telnet whois \
-              tftp traceroute NetTrace nslookup"
+              tftp traceroute NetTrace nslookup arp AddNetRoute DeleteNetRoute"
 
 for t in $STAGED_TOOLS ToolsSmoke; do
     [ -f "$TOOLS/$t" ] || { echo "missing $TOOLS/$t -- build $BUILD first" >&2
@@ -150,6 +156,21 @@ SYS:traceroute ::1 -m 2 -q 1 -w 3 -n
 SYS:NetTrace LOOPBACK NOCAPTURE BYTES=65536
 SYS:nslookup ::1
 SYS:nc no.such.host.invalid 80
+SYS:AddNetRoute DEFAULTGATEWAY fd00::99
+wait 3
+SYS:netstat -r
+SYS:DeleteNetRoute DEFAULTGATEWAY fd00::99
+SYS:arp
+SYS:AddNetRoute DESTINATION fd00:9::/64 GATEWAY fe80::2
+SYS:AddNetRoute DESTINATION 2001:db8::/64
+SYS:ShowNetStatus ROUTES
+&SYS:nc 2001:db8::1 80 -v -w 14 >DH0:nc-onlink.txt
+wait 3
+SYS:arp 2001:db8::1
+wait 14
+SYS:DeleteNetRoute DESTINATION 2001:db8::/64
+SYS:arp 2001:db8::2
+SYS:AddNetRoute DEFAULTGATEWAY fe80::1
 EOF
 
 # ------------------------------------------------------------------- run ---
@@ -201,13 +222,17 @@ block() {
     ' "$REPORT"
 }
 
-have() { block "$1" | grep -qiF -- "$2"; }
+have()    { block "$1" | grep -qiF -- "$2"; }
+have_re() { block "$1" | grep -qE  -- "$2"; }
 
 # want CASE PHRASE WHY / deny CASE PHRASE WHY, and the _soon pair for the
 # work that is not in yet.
 want()      { if have "$1" "$2"; then ok   "$3"; else bad  "$3"; fi; }
 deny()      { if have "$1" "$2"; then bad  "$3"; else ok   "$3"; fi; }
 want_soon() { if have "$1" "$2"; then ok   "$3"; else soon "$3"; fi; }
+# The same, matching a set rather than one string: a neighbour's state depends
+# on how long ago it last answered, and every one of them is a pass.
+want_re()   { if have_re "$1" "$2"; then ok "$3"; else bad "$3"; fi; }
 
 # ---- control: one boot, not a reset dressed up as a hang (RESEARCH 25) ----
 if [ -s "$SERIAL" ]; then
@@ -314,6 +339,82 @@ deny "SYS:nslookup ::1" "there is no such name" \
      "nslookup treats ::1 as an address, not a name"
 want "SYS:nslookup ::1" "ip6.arpa" \
      "nslookup asked ip6.arpa for ::1"
+
+# ---- routes: AddNetRoute / DeleteNetRoute take an IPv6 prefix ------------
+#
+# 66.4's last item.  Two mechanisms and no third: NetX Duo has no
+# destination-to-next-hop table for IPv6, so a default router and an on-link
+# prefix are what there is to write, and a prefix given a next hop must be
+# refused with the reason rather than accepted and dropped.
+
+deny "SYS:AddNetRoute DEFAULTGATEWAY fd00::99" "four numbers with dots" \
+     "AddNetRoute no longer answers an IPv6 literal with the IPv4 advice"
+want "SYS:AddNetRoute DEFAULTGATEWAY fd00::99" "fd00::99" \
+     "AddNetRoute set an IPv6 default router"
+# Three seconds after it was added, which is the point: the once-a-second tick
+# in nxd_ipv6_prefix_router_timer_tick.c reads lifetime 0 as expired and drops
+# the entry, so a router asked for with the wrong constant is gone before any
+# command can print it.  This is the same call CONFIGURE6's GATEWAY6 makes.
+want "SYS:netstat -r" "fd00::99" \
+     "the IPv6 default route is still there three seconds later"
+want "SYS:netstat -r" "::/0" \
+     "netstat -r writes an IPv6 default route as ::/0"
+want "SYS:netstat -r" "fd00::/64" \
+     "netstat -r shows the on-link IPv6 prefix"
+want "SYS:netstat -r" "10.0.2.0" \
+     "netstat -r still shows the IPv4 table beside it"
+want "SYS:DeleteNetRoute DEFAULTGATEWAY fd00::99" "is gone" \
+     "DeleteNetRoute removed the IPv6 default router"
+
+want "SYS:AddNetRoute DESTINATION fd00:9::/64 GATEWAY fe80::2" \
+     "no table that maps a prefix to a next hop" \
+     "AddNetRoute says why a per-prefix IPv6 next hop cannot be stored"
+
+want "SYS:AddNetRoute DESTINATION 2001:db8::/64" "go straight there" \
+     "AddNetRoute added an on-link IPv6 prefix"
+want "SYS:ShowNetStatus ROUTES" "2001:db8::/64" \
+     "ShowNetStatus ROUTES shows the prefix that was added"
+want "SYS:DeleteNetRoute DESTINATION 2001:db8::/64" "is gone" \
+     "DeleteNetRoute removed the on-link prefix"
+
+want "SYS:AddNetRoute DEFAULTGATEWAY fe80::1" "fe80::1" \
+     "AddNetRoute took a link-local router with one interface up"
+
+# ---- the route changed where the packet went ----------------------------
+#
+# This is the assertion the rest of the route work is for.  2001:db8::1 is not
+# on this link until the prefix above says it is, so packets for it are handed
+# to a router and neighbour discovery never asks about the address itself.
+# Once it is on link the stack solicits 2001:db8::1 directly, nothing answers,
+# and the cache gains an entry that did not exist before.
+#
+# Two things make this a test of the route rather than of the cache.  The
+# earlier `ping 2001:db8::1` sent to that address long before the route
+# existed, so a stack that did not discard its IPv6 destination cache would
+# still be handing the packets to the router and no entry would ever appear.
+# And the sample is taken while `nc` is still trying: an unanswered neighbour
+# entry is deleted after its third solicitation, so the connection attempt is
+# left running across the `arp` that reads it.
+deny "SYS:arp" "2001:db8::1" \
+     "before the route there is no neighbour entry for 2001:db8::1"
+want "SYS:arp 2001:db8::1" "INCOMPLETE" \
+     "after the route the stack solicited 2001:db8::1 itself"
+want "SYS:arp 2001:db8::1" "no reply" \
+     "and nothing answered, which is what an unreachable neighbour looks like"
+
+# ---- arp: the neighbour cache -------------------------------------------
+want "SYS:arp" "Neighbour" "arp has a neighbour section"
+want "SYS:arp" "fe80::2"   "arp lists SLIRP's router as a neighbour"
+want "SYS:arp" "router"    "arp says which neighbour is a router"
+want_re "SYS:arp" "(INCOMPLETE|REACHABLE|STALE|DELAY|PROBE|CREATED)" \
+     "arp names the neighbour discovery state"
+want_re "SYS:arp" "^  (INCOMPLETE|REACHABLE|STALE|DELAY|PROBE|CREATED) +[a-z]" \
+     "arp spells out what that state means"
+want "SYS:arp" "Address          Hardware address" \
+     "arp still prints the ARP cache above it"
+want "SYS:arp" "10.0.2.2"  "arp still lists the IPv4 entries"
+want "SYS:arp 2001:db8::2" "reached through a router" \
+     "arp explains an address neighbour discovery can never reach"
 
 # --------------------------------------------------------------- verdict ---
 

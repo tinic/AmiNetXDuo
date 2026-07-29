@@ -30,6 +30,8 @@ supports **IPv6**, which is off by default. On a build that has it, the
 commands that take a host take an IPv6 address — `ping`, `traceroute`, `nc`,
 `telnet`, `tftp`, `whois`, `fetch`, `sntp`, `nslookup` and `host` — and
 `ShowNetStatus` and `netstat -i` show the IPv6 addresses an interface holds.
+`netstat -r` shows the IPv6 routes, `AddNetRoute` and `DeleteNetRoute` change
+them, and `arp` lists the neighbours an IPv6 network is reached through.
 
 ## Requirements
 
