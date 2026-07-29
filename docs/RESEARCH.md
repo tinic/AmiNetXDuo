@@ -16861,7 +16861,10 @@ packaged one, so nothing changes for anyone who has not built it.
       tests/conformance/run-winuae.sh -T patched -t 400 \
       -a "HOST 192.168.1.184 CATEGORY sendrecv NOPAGE"
 
--- now finishes at 18/19, `reason=done rc=0`, in 15 seconds. Not merely
+-- now finishes at 18/19, `reason=done rc=0`, in 15 seconds. The same command
+without `AMINETXDUO_WINUAE_EXE`, run back to back with it, still dies on 6.0.3:
+`reason=crash` at 8.1 seconds, after test 15 and during test 16, the first one
+that moves 64 KB. Not merely
 survives: the bulk tests pass. 64 KB and 256 KB TCP echo both verify byte for
 byte, at 14 KB/s. The expectation going in was that the guard would keep the
 process alive and drop the oversized frames, leaving the tier starved; the
