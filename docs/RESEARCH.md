@@ -18031,3 +18031,184 @@ skipped; `tests/tools/run-livetools.sh` PASSED and
 `tests/tools/run-nettools.sh` rc 0.
 
 66.4's list is now empty.
+
+## 70. The configuration everybody gets, and the three commands that lied to it (2026-07-29)
+
+IPv6 is `-DAMINETXDUO_IPV6=ON` and off by default, so what ships is a library
+with no IPv6 and a set of commands that support it unconditionally — the tools
+are one binary talking to whatever library is installed, and there is no
+`#ifdef` in `src/tools/` to make them agree. That combination had no test.
+`tests/ipv6/run-tools-fsuae.sh` refused to start against a build whose cache
+did not say `ON`, on the reasonable-looking ground that `::1` does not exist
+there and every case would fail for a reason that is not the commands.
+
+The unreasonable part is what that hid. "This address is valid and this
+machine cannot use it" is a question only the IPv4-only build asks, and it is
+the question every user's machine asks. Nineteen commands were run by hand
+against it. Nothing crashed and most degraded well — `AddNetRoute` is the
+standard:
+
+    AddNetRoute: the running stack has no IPv6
+
+      The running stack was built without IPv6, so it has no IPv6
+      routes and no address to reach one from. That is a build
+      option and not anything that can be switched on from here.
+
+      Run  ShowNetStatus INTERFACES  to see which addresses this
+      machine actually has.
+
+Three did not.
+
+### 70.1 One parser, in the wrong place
+
+All three share a cause. Telling `::1` from a typo went through the library's
+`inet_pton()`, and `bsd_inet_pton()`'s `AF_INET6` branch is inside
+`#ifdef AMINETXDUO_IPV6` — an IPv4-only library answers `EAFNOSUPPORT`. Every
+caller read that as "not an address", which is a different statement from
+"an address this machine cannot reach" and led each command somewhere wrong:
+
+    host: cannot resolve "::1"
+
+      The name servers were asked and none of them knows
+      "::1".
+
+      Check the spelling. If it is right, the name may
+      simply not exist -- nothing is wrong with this
+      machine's network.
+      nslookup will say whether the name servers answer.
+
+    nslookup: ::1: there is no such name
+
+    arp: "::1" is not an address
+      It has a colon in it, so it was read as an IPv6 address -- fe80::1, or fd00::10.
+
+`host` is 66's exact defect, surviving in the one build 66 never ran. `arp`
+contradicts itself in consecutive lines. `nslookup` had an assertion for this
+since the toolsock conversion — "nslookup treats `::1` as an address, not a
+name" — which passed in the build that could not fail it.
+
+`ami_config_parse_ip6()` and `ami_config_format_ip6()` are the machine's only
+other IPv6 text conversions, and they were guarded the same way, for a measured
+reason: `config_text.c` is one object, the linker pulls it whole for any caller
+of `ami_cfg_trim()`, and leaving them unguarded cost a floor build 3.4 KB
+(`netstack_test` .text 162,936 → 166,316). Both halves of that are fixable at
+once by moving them to `src/config/config_text6.c` and compiling it always: a
+pulled archive member is kept whole, but an archive member nothing refers to is
+never pulled. Nothing in an IPv4-only library refers to them, and the built
+`bsdsocket.library` is byte-for-byte identical before and after — same MD5. The
+commands that do refer to them grow about 1.3 KB each.
+
+`tool_parse_ip6()` and `tool_format_ip6()` then lose their `struct Library *`
+and their LVO probes and become what they always claimed to be: text
+conversion, with "can this machine reach it" left to the caller. `nslookup`'s
+AAAA printing goes the same way — an AAAA is a legitimate question to ask an
+IPv4-only machine, and `inet_ntop()` refuses `AF_INET6` there, so a record it
+did receive would have printed as `?`. `tool_sock_pton()` had no callers left
+and is gone.
+
+### 70.2 host and nslookup: refuse, or answer?
+
+Both are name-service commands, and a machine with no IPv6 transport can still
+ask a name server an IPv6 question over IPv4. So neither should get the
+`AddNetRoute` wording by reflex. They diverge:
+
+**nslookup answers.** It is a DNS client rather than a caller of one: it builds
+the query and sends the datagram itself. An `ip6.arpa` PTR is an ordinary
+question that travels to `10.0.2.3` over IPv4, and the answer does not depend
+on what this machine can route to. It now gives the same answer in both builds,
+which is also what makes the assertion meaningful — the same two lines are
+asserted in both modes of the test:
+
+    1.0.0. ... .0.ip6.arpa from 10.0.2.3 (authoritative)
+      name       localhost.local.tinic.net
+      name       localhost
+
+**host refuses**, and not for the IPv6 reason. `host` answers through the
+machine's resolver, deliberately — that is the whole difference between it and
+`nslookup`, and it is why comparing the two is a diagnosis. The resolver has no
+reverse call for IPv6 in *either* build: `bsd_getnameinfo()` resolves
+`NX_IP_VERSION_V4` only, and there is no "ask this PTR" entry point behind
+`gethostbyaddr()` to reach. So the message is about the resolver, is the same
+on a dual-stack machine, and hands the question to the command that can ask it:
+
+    host: "::1" is an address, not a name
+
+      An address is looked up backwards, and this machine's
+      resolver does that for IPv4 addresses only. It has no
+      call that reverses an IPv6 address.
+
+      nslookup builds that question itself -- give it the
+      same address and it asks the DNS for the ip6.arpa
+      record.
+
+Checked before `tool_socket_open()`, so a question `host` will not answer no
+longer starts the network in order to say so.
+
+**arp refuses**, with the IPv6 reason, because the neighbour cache is the
+stack's and an IPv4-only stack has none. It grants the address first — a typo
+still gets "is not an address", and the test asserts both, so the build cannot
+become an excuse for `fe80::zz`:
+
+    arp: the running stack has no IPv6
+
+      That is a well-formed IPv6 address, but the running
+      stack was built without IPv6, so it has no IPv6
+      neighbours and no cache of them. That is a build
+      option and not anything that can be switched on
+      from here.
+
+      Run  arp  with no address for the ARP cache this
+      machine does keep.
+
+The detection is `AddNetRoute`'s: `NETSTATUS_SYS_IPV6` out of
+`NETSTATUS_SYSTEM`, asked before anything is printed, because every later
+answer would be "not in the cache" and read as a fact about the address.
+
+### 70.3 The part that keeps it fixed
+
+Three strings is not the fix. `tests/ipv6/run-tools-fsuae.sh` now picks its
+mode from the build directory's `CMakeCache.txt` instead of refusing:
+`AMINETXDUO_IPV6=ON` runs what it always ran, anything else runs the
+degradation. Both are real configurations and both are asserted.
+
+The IPv4-only mode asks the same questions of every command that takes a host —
+`ping`, `traceroute`, `nc`, `telnet`, `tftp`, `whois`, `sntp`, `fetch`, `host`,
+`nslookup` — plus `arp`, `netstat`, `ShowNetStatus` and
+`AddNetRoute`/`DeleteNetRoute`. Every degraded case is asserted three ways at
+once, and the first is the one that matters:
+
+    degrades() {
+        failed "$1" "... refuses rather than appearing to have an answer"
+        want "$1" "IPv6"               "... gives IPv6 as the reason"
+        deny "$1" "cannot resolve"     "... does not hand the literal to the resolver"
+        deny "$1" "name servers"       "... does not blame the name servers"
+        deny "$1" "Check the spelling" "... does not blame the spelling"
+    }
+
+Negative assertions alone can be satisfied by printing nothing, which is why
+each set carries a positive one and a return code beside it. The same reason
+the IPv6 mode has always kept `nc no.such.host.invalid 80`: a command that
+answers every failure with the same sentence is not an improvement.
+
+The IPv4 controls are in the same run rather than a separate one — the leased
+address, `ping 10.0.2.2`, `nc` over `127.0.0.1`, an IPv4 route added and
+removed through `AddNetRoute`, and both tables printed with no hole where IPv6
+would be. `netstat -i` shows no `fe80::`, `arp` prints no empty neighbour
+section, and `ShowNetStatus ALL` still ends "No problems found".
+
+### 70.4 Measured
+
+`tests/ipv6/run-tools-fsuae.sh -b build/cm -s`: 106 assertions, PASS, nothing
+pending — a mode that previously exited 2 without booting.
+`tests/ipv6/run-tools-fsuae.sh -s` on `build/v6`: 75 assertions (69 before,
+plus the six shared `host` ones), PASS, nothing pending. Its default timeout
+goes 420 s → 540 s; the ipv6 list spends most of its budget on `wait` lines and
+one deliberate 30 s resolver timeout, and 420 had no headroom left.
+
+Regression set, all on the same tree: default build warning-clean, `ctest`
+11/11 — and `config_parsers` now exercises the IPv6 text conversions in the
+IPv4 host build, which it could not before; IPv6 build warning-clean,
+`ipv6_test` 78/0, `ipv6_socket_test` 54/0, `ipv6_link_test` 6/0; conformance
+loopback tier 130 passed, 0 failed, 12 skipped; `tests/tools/run-livetools.sh`
+PASSED and `tests/tools/run-nettools.sh` rc 0. `bsdsocket.library` from the
+default build is byte-identical to the one before the change.
