@@ -1210,18 +1210,15 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
     if (type == SOCK_RAW)
     {
         /*
-         * IPv4 only, and the protocol number is mandatory: it is the
-         * demultiplex key raw.c matches an inbound datagram's IP protocol byte
-         * against, and it is what goes into the header of everything the
-         * socket sends. BSD reports EPROTONOSUPPORT for
-         * socket(AF_INET, SOCK_RAW, 0) for the same reason.
+         * The protocol number is mandatory: it is the demultiplex key raw.c
+         * matches an inbound datagram's IP protocol byte against, and it is
+         * what goes into the header of everything the socket sends. BSD
+         * reports EPROTONOSUPPORT for socket(AF_INET, SOCK_RAW, 0) for the
+         * same reason.
          *
          * Not EACCES: bsdsocktest skips this test when it sees EACCES, and
          * there is no privilege model here to justify that errno.
          */
-        if (domain != AF_INET)
-            return bsd_fail(SocketBase, AMI_EAFNOSUPPORT);
-
         if (protocol <= 0 || protocol > 255)
             return bsd_fail(SocketBase, AMI_EPROTONOSUPPORT);
     }

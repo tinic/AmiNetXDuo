@@ -152,8 +152,7 @@ if [ "$UPDATE" = 1 ]; then
 #   * NX_ASSERT, which is a no-op under NDEBUG.  cppcheck reads the assert as
 #     the NULL test it then says is redundant -- n68k_checksum.c and the
 #     rfc7905 copy, both of which mirror vendored NetX Duo code.
-#   * dead under this configuration, live under another: socket.c's second
-#     domain check is reachable with AMINETXDUO_IPV6, and c68k_crt.c's last
+#   * dead under this configuration, live under another: c68k_crt.c's last
 #     scratch advance is the vendored carving kept deliberately intact.
 #   * a bound cppcheck cannot prove: c68k_chacha20.c's n is 1..15 by
 #     construction, ami_udivdi3.c shifts a 32-bit value by at most 31 (legal,

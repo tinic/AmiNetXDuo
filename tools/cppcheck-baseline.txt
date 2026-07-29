@@ -10,8 +10,7 @@
 #   * NX_ASSERT, which is a no-op under NDEBUG.  cppcheck reads the assert as
 #     the NULL test it then says is redundant -- n68k_checksum.c and the
 #     rfc7905 copy, both of which mirror vendored NetX Duo code.
-#   * dead under this configuration, live under another: socket.c's second
-#     domain check is reachable with AMINETXDUO_IPV6, and c68k_crt.c's last
+#   * dead under this configuration, live under another: c68k_crt.c's last
 #     scratch advance is the vendored carving kept deliberately intact.
 #   * a bound cppcheck cannot prove: c68k_chacha20.c's n is 1..15 by
 #     construction, ami_udivdi3.c shifts a 32-bit value by at most 31 (legal,
@@ -22,9 +21,8 @@
 #
 # count<TAB>file<TAB>finding
 1	port/threadx-amiga/src/tx_initialize_low_level.c	error: uninitvar: Uninitialized variable: end.ev_lo
-1	src/bsdsocket/socket.c	warning: identicalConditionAfterEarlyExit: Identical condition 'domain!=2', second condition is always false
 1	src/common/ami_random.c	error: autoVariables: Address of local auto-variable assigned to a function parameter.
-1	src/common/ami_udivdi3.c	warning: shiftTooManyBitsSigned: Shifting signed 32-bit value by 31 bits is undefined behaviour. See condition at line 590.
+1	src/common/ami_udivdi3.c	warning: shiftTooManyBitsSigned: Shifting signed 32-bit value by 31 bits is undefined behaviour. See condition at line 579.
 1	src/crypto68k/c68k_chacha20.c	warning: uninitvar: Uninitialized variable: zeros
 1	src/crypto68k/c68k_crt.c	warning: uselessAssignmentPtrArg: Assignment of function parameter has no effect outside the function. Did you forget dereferencing it?
 1	src/net68k/n68k_checksum.c	warning: nullPointerRedundantCheck: Either the condition 'dest_ip_addr!=0' is redundant or there is possible null pointer dereference: dest_ip_short.

@@ -197,7 +197,10 @@ BOOL bsd_addr_normalise(const AmiSocket *sock, NXD_ADDRESS *addr)
  *       -- ancillary data.  recvmsg() here reports msg_controllen == 0 always
  *          and cannot do otherwise; see the note in transfer.c.
  *   IPV6_CHECKSUM
- *       -- raw sockets only, and there are none.
+ *       -- names the offset of a checksum field the stack should fill in for
+ *          an arbitrary raw protocol.  ICMPv6's is filled in unconditionally
+ *          (raw.c) because RFC 4443 makes it mandatory and the sender cannot
+ *          compute it; nothing else raw.c carries has one to place.
  */
 
 static LONG bsd_v6only_option(LONG optname)

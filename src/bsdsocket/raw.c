@@ -37,18 +37,29 @@
  * machine with none pays a single NULL test per inbound packet, inside a
  * branch NetX Duo already had.
  *
- * A read delivers a whole IP datagram, header included, as 4.4BSD does:
+ * An IPv4 read delivers a whole IP datagram, header included, as 4.4BSD does:
  * callers parse `(buf[0] & 0x0F) * 4` to find the ICMP header.  The IP header
  * is still physically in the buffer when the filter runs --
  * nx_ipv4_packet_receive.c only advances nx_packet_prepend_ptr past it and
  * leaves nx_packet_ip_header pointing at it -- so the copy is taken with the
  * pointer wound back and the original restored before declining.
  *
+ * An IPv6 read does not include the header, which is RFC 3542's rule and the
+ * reason the two halves of the filter differ: the copy starts where the
+ * prepend pointer already is.  nx_packet_copy() carries nx_packet_ip_header
+ * over into the copy either way, so bsd_raw_source() still finds the peer.
+ *
  * Transmit is the mirror image and is not header-included: the caller writes
  * the protocol payload (an ICMP message, say) and nxd_ip_raw_packet_send()
  * prepends the IP header with the socket's protocol, TTL and TOS.  That is
  * BSD's default too -- IP_HDRINCL is the opt-in, and NetX Duo's core has no
  * equivalent (see docs/RESEARCH.md 17).
+ *
+ * An ICMPv6 transmit carries one more obligation: the checksum covers the
+ * IPv6 pseudo-header, so it cannot be computed until the source address is
+ * known, and the source address is chosen by the stack.  Both happen in
+ * bsd_raw_send_v6() below, in that order, and the send then names the address
+ * it chose so the two cannot disagree.
  *
  * The filter runs on the NetX Duo IP thread, which holds nx_ip_protection for
  * the whole of its event loop (nx_ip_thread_entry.c).  The registry and the
@@ -62,6 +73,11 @@
  */
 
 #include "bsdsocket_vectors.h"
+
+#ifdef AMINETXDUO_IPV6
+#include "nx_ip.h"
+#include "nx_ipv6.h"
+#endif
 
 #include <proto/exec.h>
 
@@ -79,6 +95,9 @@
 
 /* Bytes of IPv4 header we are prepared to wind back over (5..15 words). */
 #define BSD_RAW_MAX_IPHDR       60
+
+/* The fixed IPv6 header; extension headers sit behind it and are not read. */
+#define BSD_RAW_IPV6_HDR        40
 
 /*
  * Every open raw descriptor on the machine, in one list.
@@ -137,12 +156,20 @@ static UINT bsd_raw_filter(NX_IP *ip_ptr, ULONG protocol, NX_PACKET *packet_ptr)
 {
     NX_PACKET_POOL *pool;
     AmiSocket      *sock;
+    ULONG           behind;
     ULONG           hdr_len;
+    BOOL            is_v6;
 
     if (packet_ptr == NX_NULL || bsd_raw_list == NULL)
         return NX_NOT_SUCCESSFUL;
 
-    /* IPv4 only. An AF_INET6 raw socket is not offered (see bsd_raw_open). */
+    is_v6 = FALSE;
+
+#ifdef AMINETXDUO_IPV6
+    if (packet_ptr->nx_packet_ip_version == NX_IP_VERSION_V6)
+        is_v6 = TRUE;
+    else
+#endif
     if (packet_ptr->nx_packet_ip_version != NX_IP_VERSION_V4)
         return NX_NOT_SUCCESSFUL;
 
@@ -154,10 +181,25 @@ static UINT bsd_raw_filter(NX_IP *ip_ptr, ULONG protocol, NX_PACKET *packet_ptr)
         packet_ptr->nx_packet_prepend_ptr < packet_ptr->nx_packet_ip_header)
         return NX_NOT_SUCCESSFUL;
 
-    hdr_len = (ULONG)(packet_ptr->nx_packet_prepend_ptr -
-                      packet_ptr->nx_packet_ip_header);
-    if (hdr_len == 0 || hdr_len > BSD_RAW_MAX_IPHDR)
-        return NX_NOT_SUCCESSFUL;
+    behind = (ULONG)(packet_ptr->nx_packet_prepend_ptr -
+                     packet_ptr->nx_packet_ip_header);
+
+    if (is_v6)
+    {
+        /* Not wound back: IPv6 delivers the payload alone. The bound is what
+           bsd_raw_source() needs to read the source out of. */
+        if (behind < BSD_RAW_IPV6_HDR)
+            return NX_NOT_SUCCESSFUL;
+
+        hdr_len = 0;
+    }
+    else
+    {
+        if (behind == 0 || behind > BSD_RAW_MAX_IPHDR)
+            return NX_NOT_SUCCESSFUL;
+
+        hdr_len = behind;
+    }
 
     pool = netstack_pool();
     if (pool == NULL)
@@ -171,6 +213,10 @@ static UINT bsd_raw_filter(NX_IP *ip_ptr, ULONG protocol, NX_PACKET *packet_ptr)
         UINT       status;
 
         if ((ULONG)sock->as_Protocol != protocol)
+            continue;
+
+        /* A datagram belongs to the family its socket was opened in. */
+        if ((((sock->as_Flags & ASF_INET6) != 0) ? TRUE : FALSE) != is_v6)
             continue;
 
         if (sock->as_RawCount >= sock->as_RawMax)
@@ -325,6 +371,90 @@ VOID bsd_raw_close(AmiSocket *sock)
 
 /* ------------------------------------------------------------------- send -- */
 
+#ifdef AMINETXDUO_IPV6
+
+/*
+ * The ICMPv6 checksum, which RFC 4443 makes mandatory and RFC 3542 makes the
+ * stack's job on a raw socket. It covers the pseudo-header, so the caller
+ * cannot compute it: nothing above this line knows which of the machine's
+ * addresses the packet will leave with.
+ */
+static VOID bsd_raw_icmpv6_checksum(NX_PACKET *packet, ULONG *source,
+                                    ULONG *dest)
+{
+    UBYTE *icmp = packet->nx_packet_prepend_ptr;
+    USHORT sum;
+
+    if ((ULONG)(packet->nx_packet_append_ptr - icmp) < 4UL)
+        return;
+
+    icmp[2] = 0;
+    icmp[3] = 0;
+
+    /* The version decides how much of the pseudo-header goes into the sum:
+       _nx_ip_checksum_compute() folds in four bytes of each address unless the
+       packet says IPv6. The send path sets this again on its way out. */
+    packet->nx_packet_ip_version = NX_IP_VERSION_V6;
+
+    sum = _nx_ip_checksum_compute(packet, NX_PROTOCOL_ICMPV6,
+                                  (UINT)packet->nx_packet_length,
+                                  source, dest);
+    sum = (USHORT)~sum;
+
+    icmp[2] = (UBYTE)(sum >> 8);
+    icmp[3] = (UBYTE)(sum & 0xFF);
+}
+
+/*
+ * The source address is picked first and then named on the send, rather than
+ * left to nxd_ip_raw_packet_send() to pick again: the checksum above has
+ * already been computed over it, and a second independent choice could differ.
+ * _nxd_ipv6_interface_find() is the stack's own RFC 6724 selection and is what
+ * nx_icmp_ping6() uses for the same reason.
+ */
+static LONG bsd_raw_send_v6(struct AmiSocketBase *base, NX_IP *ip,
+                            NX_PACKET *packet, NXD_ADDRESS *dest,
+                            ULONG protocol, UINT hops, ULONG tos)
+{
+    NXD_IPV6_ADDRESS *source = NX_NULL;
+    UINT              status;
+
+    tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+    status = _nxd_ipv6_interface_find(ip, dest->nxd_ip_address.v6, &source,
+                                      NX_NULL);
+    tx_mutex_put(&ip->nx_ip_protection);
+
+    if (status != NX_SUCCESS || source == NX_NULL)
+    {
+        nx_packet_release(packet);
+        return bsd_fail(base, AMI_ENETUNREACH);
+    }
+
+    if (protocol == (ULONG)NX_PROTOCOL_ICMPV6)
+    {
+        bsd_raw_icmpv6_checksum(packet, source->nxd_ipv6_address,
+                                dest->nxd_ip_address.v6);
+    }
+
+    status = nxd_ip_raw_packet_source_send(ip, packet, dest,
+                                           (UINT)source->nxd_ipv6_address_index,
+                                           protocol, hops, tos);
+    if (status != NX_SUCCESS)
+    {
+        nx_packet_release(packet);
+
+        return bsd_fail(base,
+                        (status == NX_IP_ADDRESS_ERROR ||
+                         status == NX_NO_INTERFACE_ADDRESS)
+                            ? AMI_ENETUNREACH
+                            : bsd_errno_from_nx(status));
+    }
+
+    return 0;
+}
+
+#endif /* AMINETXDUO_IPV6 */
+
 LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
                          NX_PACKET *packet, const NXD_ADDRESS *addr)
 {
@@ -341,6 +471,11 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
         nx_packet_release(packet);
         return bsd_fail(base, AMI_ENETDOWN);
     }
+
+#ifdef AMINETXDUO_IPV6
+    if (dest.nxd_ip_version == NX_IP_VERSION_V6)
+        return bsd_raw_send_v6(base, ip, handed, &dest, protocol, ttl, tos);
+#endif
 
     /*
      * IP_HDRINCL is translated rather than passed through.
@@ -507,6 +642,26 @@ VOID bsd_raw_source(NX_PACKET *packet, NXD_ADDRESS *addr)
 
     if (packet == NX_NULL)
         return;
+
+#ifdef AMINETXDUO_IPV6
+    /*
+     * An IPv6 datagram does not start at its header, so the source comes from
+     * where nx_packet_copy() recorded it: bytes 8..23 of the fixed header.
+     */
+    if (packet->nx_packet_ip_version == NX_IP_VERSION_V6)
+    {
+        const UBYTE *v6_hdr = packet->nx_packet_ip_header;
+
+        if (v6_hdr == NX_NULL ||
+            (ULONG)(packet->nx_packet_prepend_ptr - v6_hdr) < BSD_RAW_IPV6_HDR)
+            return;
+
+        addr->nxd_ip_version = NX_IP_VERSION_V6;
+        bsd_in6_to_words(&v6_hdr[8], addr->nxd_ip_address.v6);
+
+        return;
+    }
+#endif
 
     /*
      * The datagram starts at its own IP header -- see the file comment. The

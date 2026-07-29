@@ -445,6 +445,14 @@ static LONG bsd_send_raw(struct AmiSocketBase *base, AmiSocket *sock,
     if (pool == NULL)
         return bsd_fail(base, AMI_ENETDOWN);
 
+#ifdef AMINETXDUO_IPV6
+    if (addr->nxd_ip_version == NX_IP_VERSION_V6)
+    {
+        if ((sock->as_Flags & ASF_INET6) == 0)
+            return bsd_fail(base, AMI_EAFNOSUPPORT);
+    }
+    else
+#endif
     if (addr->nxd_ip_version != NX_IP_VERSION_V4 ||
         addr->nxd_ip_address.v4 == 0)
         return bsd_fail(base, AMI_EDESTADDRREQ);
@@ -750,9 +758,10 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
 }
 
 /*
- * One raw datagram in, whole IP header included -- what 4.4BSD delivers on a
- * raw read and what ping and traceroute parse; see the header of raw.c. As
- * with UDP, whatever does not fit the caller's buffers is discarded.
+ * One raw datagram in. IPv4 includes the IP header, which is what 4.4BSD
+ * delivers and what ping and traceroute parse; IPv6 does not, per RFC 3542.
+ * See the header of raw.c. As with UDP, whatever does not fit the caller's
+ * buffers is discarded.
  */
 static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags,
