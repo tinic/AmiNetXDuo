@@ -11,9 +11,25 @@
 # resolver, a real name failure must still say so, and the addresses the stack
 # configures must be visible through a shipped command.
 #
-# Needs a build with -DAMINETXDUO_IPV6=ON; ::1 does not exist otherwise.
+# TWO MODES, PICKED FROM THE BUILD
 #
-# THREE GROUPS, AND WHY THE SCRIPT DOES NOT TREAT THEM ALIKE
+# The build directory's CMakeCache decides which run this is.  Both are real
+# configurations and both are tested.
+#
+#   ipv6   -DAMINETXDUO_IPV6=ON.  ::1 exists, and the commands are asked to
+#          use it.  Default, build/v6.
+#   ipv4   the shipping default, IPv6 off.  ::1 does not exist, and the
+#          commands are asked the same questions anyway.  This is the half
+#          that was never run: the tools support IPv6 unconditionally and the
+#          library they talk to is built either way, so "what does this
+#          command say when the address is valid and the machine cannot use
+#          it" is a question only the IPv4-only build asks.  It found three
+#          commands giving the wrong answer -- `host ::1` blamed the spelling,
+#          `nslookup ::1` reported NXDOMAIN for a literal, and `arp ::1`
+#          called a valid address "not an address".  This mode used to refuse
+#          to start.
+#
+# THREE GROUPS, AND WHY THE SCRIPT DOES NOT TREAT THEM ALIKE (ipv6 mode)
 #
 #   control   IPv4 and the machine itself.  A failure here is a defect, and it
 #             is the half that says an IPv6 change broke something that worked.
@@ -52,7 +68,9 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
 MODEL=A1200
-TIMEOUT=420
+# The ipv6 list spends about seven minutes of it on `wait` lines, unreachable
+# addresses and one deliberate 30 s resolver timeout, so 420 left no headroom.
+TIMEOUT=540
 BUILD="${AMINETXDUO_BUILD:-build/v6}"
 STRICT=0
 
@@ -70,7 +88,8 @@ TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
 STAGED_TOOLS="AddNetInterface ShowNetStatus netstat ping nc telnet whois \
-              tftp traceroute NetTrace nslookup arp AddNetRoute DeleteNetRoute"
+              tftp traceroute NetTrace nslookup arp AddNetRoute DeleteNetRoute \
+              host fetch sntp"
 
 for t in $STAGED_TOOLS ToolsSmoke; do
     [ -f "$TOOLS/$t" ] || { echo "missing $TOOLS/$t -- build $BUILD first" >&2
@@ -78,14 +97,14 @@ for t in $STAGED_TOOLS ToolsSmoke; do
 done
 [ -f "$BSD" ] || { echo "missing $BSD" >&2; exit 2; }
 
-# A build without IPv6 has no ::1 to talk to, and every v6 case would fail for
-# a reason that is not the commands.  Say so rather than produce that.
+# Which run this is.  A cache that does not say ON is the shipping default,
+# and the ipv4 mode below is written for exactly that library.
+MODE=ipv4
+TAG=v4
 CACHE="$ROOT/$BUILD/CMakeCache.txt"
-if [ -f "$CACHE" ] && ! grep -q "^AMINETXDUO_IPV6:BOOL=ON" "$CACHE"; then
-    echo "$BUILD was configured without IPv6. Configure one:" >&2
-    echo "  cmake -S . -B build/v6 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \\" >&2
-    echo "        -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_IPV6=ON" >&2
-    exit 2
+if [ -f "$CACHE" ] && grep -q "^AMINETXDUO_IPV6:BOOL=ON" "$CACHE"; then
+    MODE=ipv6
+    TAG=v6
 fi
 
 A2065="${AMINETXDUO_A2065:-}"
@@ -102,7 +121,7 @@ fi
 
 # --------------------------------------------------------------- staging ---
 
-STAGE="$ROOT/build/v6tools-stage"
+STAGE="$ROOT/build/${TAG}tools-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
@@ -113,6 +132,10 @@ for t in $STAGED_TOOLS; do cp "$TOOLS/$t" "$STAGE/$t"; done
 # DHCP for v4 as every other test has it, plus a static v6 address of our own.
 # STATIC rather than AUTO because an address this file names is one the test
 # can then look for by name; a SLAAC address depends on the MAC.
+#
+# The same file in both modes, deliberately: an IPv4-only library reads
+# CONFIGURE6 and ADDRESS6 as keys it has no build for, and the interface has
+# to come up on IPv4 regardless.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<'EOF'
 DEVICE=a2065.device
 UNIT=0
@@ -125,6 +148,7 @@ printf 'hello from the amiga\n' > "$STAGE/greeting.txt"
 
 # A background listener's output must be redirected by its own line: a
 # detached process shares no console and its Output() is NIL: (toolssmoke.c).
+if [ "$MODE" = ipv6 ]; then
 cat > "$STAGE/commands.txt" <<'EOF'
 SYS:AddNetInterface eth0
 SYS:ShowNetStatus INTERFACES
@@ -155,6 +179,7 @@ SYS:tftp ::1 GET nosuchfile PORT 7095 TIMEOUT 5
 SYS:traceroute ::1 -m 2 -q 1 -w 3 -n
 SYS:NetTrace LOOPBACK NOCAPTURE BYTES=65536
 SYS:nslookup ::1
+SYS:host ::1
 SYS:nc no.such.host.invalid 80
 SYS:AddNetRoute DEFAULTGATEWAY fd00::99
 wait 3
@@ -172,13 +197,54 @@ SYS:DeleteNetRoute DESTINATION 2001:db8::/64
 SYS:arp 2001:db8::2
 SYS:AddNetRoute DEFAULTGATEWAY fe80::1
 EOF
+else
+# Every command that takes a host, asked for an address this machine has no
+# transport for, plus the four that read or write the stack's own tables.
+# Nothing here waits on a peer: an address that cannot be reached is refused
+# before a socket is made, so the whole run is as fast as its two IPv4 cases.
+cat > "$STAGE/commands.txt" <<'EOF'
+SYS:AddNetInterface eth0
+SYS:ShowNetStatus INTERFACES
+SYS:ShowNetStatus ALL
+SYS:netstat -i
+SYS:ping 10.0.2.2 -c 2 -t 20
+&SYS:nc -l 7098 -v -w 25 -N >DH0:nc-v4srv.txt
+wait 4
+SYS:nc 127.0.0.1 7098 -v -w 10 -N <DH0:greeting.txt
+wait 4
+SYS:ping ::1 -c 2 -t 20
+SYS:ping fe80::2 -c 2 -t 20
+SYS:traceroute ::1 -m 2 -q 1 -w 3 -n
+SYS:nc ::1 7099 -v -w 10 -N
+SYS:telnet ::1 7097 QUIET
+SYS:tftp ::1 GET nosuchfile PORT 7095 TIMEOUT 5
+SYS:whois example.com SERVER ::1 PORT 7096
+SYS:sntp fd00::10 TIMEOUT 5
+SYS:fetch http://[::1]/index.html
+SYS:host ::1
+SYS:nslookup ::1
+SYS:nslookup 10.0.2.3
+SYS:nc no.such.host.invalid 80
+SYS:arp
+SYS:arp ::1
+SYS:arp fe80::zz
+SYS:arp 10.0.2.2
+SYS:AddNetRoute DEFAULTGATEWAY fd00::99
+SYS:AddNetRoute DESTINATION fd00:9::/64
+SYS:DeleteNetRoute DEFAULTGATEWAY fd00::99
+SYS:AddNetRoute DESTINATION 192.168.77.0/24 GATEWAY 10.0.2.2
+SYS:netstat -r
+SYS:ShowNetStatus ROUTES
+SYS:DeleteNetRoute DESTINATION 192.168.77.0/24
+EOF
+fi
 
 # ------------------------------------------------------------------- run ---
 
-export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-v6tools}"
+export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-${TAG}tools}"
 HD="$ROOT/build/testhd-$AMINETXDUO_RUN_TAG"
 
-echo "==> $BUILD on $MODEL, A2065 on SLIRP, eth0 with ADDRESS6=fd00::10/64"
+echo "==> $BUILD ($MODE) on $MODEL, A2065 on SLIRP, eth0 with ADDRESS6=fd00::10/64"
 set +e
 "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
@@ -192,7 +258,7 @@ RAW="$HD/tools.txt"
 [ -f "$RAW" ] || { echo "FAIL: the guest wrote no $RAW (run rc=$RUN_RC)" >&2
                    exit 1; }
 
-REPORT="$ROOT/build/v6tools-report.txt"
+REPORT="$ROOT/build/${TAG}tools-report.txt"
 tr -d '\r' < "$RAW" > "$REPORT"
 
 echo
@@ -222,6 +288,16 @@ block() {
     ' "$REPORT"
 }
 
+# And the return code ToolsSmoke printed below it.  "?" when the command never
+# ran, which must not read as a pass.
+code() {
+    awk -v want="===== $1 =====" '
+        index($0, want) == 1 { inb = 1; next }
+        inb && /^----- rc /   { print $3; found = 1; exit }
+        END { if (!found) print "?" }
+    ' "$REPORT"
+}
+
 have()    { block "$1" | grep -qiF -- "$2"; }
 have_re() { block "$1" | grep -qE  -- "$2"; }
 
@@ -233,6 +309,11 @@ want_soon() { if have "$1" "$2"; then ok   "$3"; else soon "$3"; fi; }
 # The same, matching a set rather than one string: a neighbour's state depends
 # on how long ago it last answered, and every one of them is a pass.
 want_re()   { if have_re "$1" "$2"; then ok "$3"; else bad "$3"; fi; }
+
+# failed CASE WHY / worked CASE WHY -- the return code, for the cases where a
+# command must refuse rather than appear to have an answer.
+failed() { if [ "$(code "$1")" != "0" ]; then ok "$2"; else bad "$2"; fi; }
+worked() { if [ "$(code "$1")" =  "0" ]; then ok "$2"; else bad "$2"; fi; }
 
 # ---- control: one boot, not a reset dressed up as a hang (RESEARCH 25) ----
 if [ -s "$SERIAL" ]; then
@@ -251,7 +332,7 @@ else
     bad "no start found in $BOOT_SRC -- the run did not get far enough to judge"
 fi
 
-# ---- control: IPv4 still works -------------------------------------------
+# ---- control: IPv4 still works, in both modes ----------------------------
 want "SYS:AddNetInterface eth0" "10.0.2.15"       "the interface leased 10.0.2.15"
 want "SYS:ping 10.0.2.2 -c 2 -t 20" "2 received"  "ping 10.0.2.2 got both replies"
 if [ -f "$HD/nc-v4srv.txt" ] &&
@@ -260,8 +341,6 @@ if [ -f "$HD/nc-v4srv.txt" ] &&
 else
     bad "nc over 127.0.0.1 did not deliver the greeting -- IPv4 loopback broke"
 fi
-want "SYS:NetTrace LOOPBACK NOCAPTURE BYTES=65536" "65536" \
-     "NetTrace moved 65536 bytes over loopback"
 
 # ---- control: a real name failure must still name the resolver -----------
 #
@@ -270,6 +349,39 @@ want "SYS:NetTrace LOOPBACK NOCAPTURE BYTES=65536" "65536" \
 # "connection refused" is not an improvement.
 want "SYS:nc no.such.host.invalid 80" "cannot resolve" \
      "a name that does not exist is still reported as a name failure"
+
+# ---- both modes: host refuses a literal, for the reason that is true ------
+#
+# `host` answers through the machine's resolver, and no build has a call that
+# reverses an IPv6 address -- so the message is the same on both, and both
+# assert it.  It used to say "cannot resolve", then blame the spelling.
+failed "SYS:host ::1" "host ::1 fails"
+want "SYS:host ::1" "is an address, not a name" \
+     "host says ::1 is an address rather than looking it up as a name"
+want "SYS:host ::1" "nslookup" \
+     "host names the command that can ask the question"
+deny "SYS:host ::1" "cannot resolve" \
+     "host does not hand the literal to the resolver"
+deny "SYS:host ::1" "name servers" \
+     "host does not blame the name servers for a literal"
+deny "SYS:host ::1" "Check the spelling" \
+     "host does not blame the spelling of a literal"
+
+# ---- both modes: nslookup asks ip6.arpa, whatever carries the query -------
+#
+# A PTR question about an IPv6 address is an ordinary DNS question and needs no
+# IPv6 to carry it.  Telling the literal from a name used to go through the
+# library's inet_pton(), which answers EAFNOSUPPORT on an IPv4-only library --
+# so this passed in one build and reported NXDOMAIN in the other.
+deny "SYS:nslookup ::1" "there is no such name" \
+     "nslookup treats ::1 as an address, not a name"
+want "SYS:nslookup ::1" "ip6.arpa" \
+     "nslookup asked ip6.arpa for ::1"
+
+if [ "$MODE" = ipv6 ]; then
+
+want "SYS:NetTrace LOOPBACK NOCAPTURE BYTES=65536" "65536" \
+     "NetTrace moved 65536 bytes over loopback"
 
 # ---- v6: a literal must not be handed to the resolver -------------------
 #
@@ -330,15 +442,6 @@ want "SYS:netstat -i"               "fd00::"   \
      "netstat -i shows an IPv6 address"
 want "SYS:ShowNetStatus ALL"        "fe80::"   \
      "ShowNetStatus ALL shows the link-local address"
-
-# ---- v6: nslookup on a literal ------------------------------------------
-#
-# ::1 must become an ip6.arpa question, not a name the server has never heard
-# of.  SLIRP's resolver answers this one with "localhost".
-deny "SYS:nslookup ::1" "there is no such name" \
-     "nslookup treats ::1 as an address, not a name"
-want "SYS:nslookup ::1" "ip6.arpa" \
-     "nslookup asked ip6.arpa for ::1"
 
 # ---- routes: AddNetRoute / DeleteNetRoute take an IPv6 prefix ------------
 #
@@ -415,6 +518,129 @@ want "SYS:arp" "Address          Hardware address" \
 want "SYS:arp" "10.0.2.2"  "arp still lists the IPv4 entries"
 want "SYS:arp 2001:db8::2" "reached through a router" \
      "arp explains an address neighbour discovery can never reach"
+
+else # ------------------------------------------------------ ipv4 mode ----
+
+# ---- the shape every degraded answer has to have -------------------------
+#
+# Three things at once, and the first is what stops a command passing by going
+# quiet: it must refuse, it must give IPv6 as the reason, and it must not
+# reach for the resolver's vocabulary.  A command that printed nothing, or
+# that failed for a reason it kept to itself, fails here.
+degrades() {
+    failed "$1" "$2 refuses rather than appearing to have an answer"
+    want "$1" "IPv6"              "$2 gives IPv6 as the reason"
+    deny "$1" "cannot resolve"    "$2 does not hand the literal to the resolver"
+    deny "$1" "name servers"      "$2 does not blame the name servers"
+    deny "$1" "Check the spelling" "$2 does not blame the spelling"
+}
+
+# ---- every command that takes a host ------------------------------------
+degrades "SYS:ping ::1 -c 2 -t 20"                       "ping ::1"
+degrades "SYS:ping fe80::2 -c 2 -t 20"                   "ping fe80::2"
+degrades "SYS:traceroute ::1 -m 2 -q 1 -w 3 -n"          "traceroute ::1"
+degrades "SYS:nc ::1 7099 -v -w 10 -N"                   "nc ::1"
+degrades "SYS:telnet ::1 7097 QUIET"                     "telnet ::1"
+degrades "SYS:tftp ::1 GET nosuchfile PORT 7095 TIMEOUT 5" "tftp ::1"
+degrades "SYS:whois example.com SERVER ::1 PORT 7096"    "whois SERVER ::1"
+degrades "SYS:sntp fd00::10 TIMEOUT 5"                   "sntp fd00::10"
+degrades "SYS:fetch http://[::1]/index.html"             "fetch of an IPv6 URL"
+
+# The eight above share tool_sock_resolve(), so one of them proves the exact
+# words rather than only their shape.
+want "SYS:ping ::1 -c 2 -t 20" "this machine's network has no IPv6" \
+     "the shared refusal names the machine's network, not the address"
+
+# ---- nslookup: the lookup this machine can still do ----------------------
+#
+# An ip6.arpa PTR travels over IPv4 like any other question, so this is not a
+# degradation case at all -- it is the same answer the IPv6 build gives, and
+# the assertions above are shared with it.  Asserted here as well: it fails
+# for a wholly different reason than the commands above, and that is the point.
+# The dotted quad beside it, so the two reverse forms are asserted together.
+# Whether the server has a PTR for 10.0.2.3 is SLIRP's business and not this
+# test's: what is asserted is the question, which the command builds itself.
+want "SYS:nslookup 10.0.2.3" "in-addr.arpa" \
+     "nslookup asked in-addr.arpa for 10.0.2.3"
+deny "SYS:nslookup 10.0.2.3" "is not a name the DNS can be asked about" \
+     "nslookup read 10.0.2.3 as an address too"
+
+# ---- arp: a valid address the stack has no cache for ---------------------
+failed "SYS:arp ::1" "arp ::1 refuses"
+want "SYS:arp ::1" "the running stack has no IPv6" \
+     "arp says the stack has no IPv6, in AddNetRoute's words"
+want "SYS:arp ::1" "well-formed IPv6 address" \
+     "arp grants that the address itself is good"
+deny "SYS:arp ::1" "is not an address" \
+     "arp no longer calls a valid IPv6 address invalid"
+deny "SYS:arp ::1" "cannot resolve" \
+     "arp does not reach for the resolver"
+
+# A typo is still a typo, and must not be excused by the build.
+failed "SYS:arp fe80::zz" "arp fe80::zz refuses"
+want "SYS:arp fe80::zz" "is not an address" \
+     "arp still rejects an IPv6 address that is not one"
+deny "SYS:arp fe80::zz" "the running stack has no IPv6" \
+     "arp does not blame the build for a malformed address"
+
+worked "SYS:arp 10.0.2.2" "arp still answers about an IPv4 address"
+want "SYS:arp" "Address          Hardware address" \
+     "arp prints the ARP cache"
+want "SYS:arp" "10.0.2.3" "arp lists the IPv4 entries"
+deny "SYS:arp" "Neighbour" \
+     "arp prints no empty neighbour section on a machine with no neighbours"
+
+# ---- the tables: IPv4 alone, with no hole where IPv6 would be ------------
+want "SYS:netstat -i" "10.0.2.15" "netstat -i shows the leased address"
+deny "SYS:netstat -i" "fd00::"    "netstat -i shows no IPv6 address"
+deny "SYS:netstat -i" "fe80::"    "netstat -i shows no link-local address"
+want "SYS:netstat -r" "10.0.2.0"  "netstat -r shows the IPv4 table"
+deny "SYS:netstat -r" "::/0"      "netstat -r shows no IPv6 default route"
+deny "SYS:netstat -r" "fd00::/64" "netstat -r shows no IPv6 prefix"
+
+want "SYS:ShowNetStatus ALL" "10.0.2.15" \
+     "ShowNetStatus ALL shows the leased address"
+want "SYS:ShowNetStatus ALL" "No problems found" \
+     "ShowNetStatus ALL still finds nothing wrong"
+deny "SYS:ShowNetStatus ALL" "fd00::" \
+     "ShowNetStatus ALL claims no address the machine does not have"
+deny "SYS:ShowNetStatus INTERFACES" "fe80::" \
+     "ShowNetStatus INTERFACES claims no link-local address"
+# The interface file asks for ADDRESS6 and the interface comes up anyway.
+want "SYS:AddNetInterface eth0" "online" \
+     "AddNetInterface brings eth0 up despite an ADDRESS6 it cannot honour"
+
+# ---- AddNetRoute / DeleteNetRoute: the standard the other three match ----
+for c in "SYS:AddNetRoute DEFAULTGATEWAY fd00::99" \
+         "SYS:AddNetRoute DESTINATION fd00:9::/64" \
+         "SYS:DeleteNetRoute DEFAULTGATEWAY fd00::99"
+do
+    short=${c#SYS:}
+    short=${short%% *}
+    failed "$c" "$short refuses an IPv6 route"
+    want "$c" "the running stack has no IPv6" \
+         "$short says the stack has no IPv6"
+    want "$c" "can be switched on" \
+         "$short says it is a build option and not a setting"
+    want "$c" "ShowNetStatus INTERFACES" \
+         "$short says where to look for the addresses this machine has"
+    deny "$c" "four numbers with dots" \
+         "$short does not answer an IPv6 literal with the IPv4 advice"
+    deny "$c" "cannot resolve" \
+         "$short does not hand the literal to the resolver"
+done
+
+# ---- control: the IPv4 half of the same commands still works ------------
+worked "SYS:AddNetRoute DESTINATION 192.168.77.0/24 GATEWAY 10.0.2.2" \
+       "AddNetRoute still adds an IPv4 route"
+want "SYS:netstat -r" "192.168.77.0" \
+     "netstat -r shows the IPv4 route that was added"
+want "SYS:ShowNetStatus ROUTES" "192.168.77.0" \
+     "ShowNetStatus ROUTES shows it too"
+want "SYS:DeleteNetRoute DESTINATION 192.168.77.0/24" "is gone" \
+     "DeleteNetRoute removed the IPv4 route"
+
+fi
 
 # --------------------------------------------------------------- verdict ---
 
