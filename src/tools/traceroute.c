@@ -26,6 +26,9 @@
  *
  * IPv6 works the same way over IPV6_UNICAST_HOPS, once NetX Duo stopped
  * dropping the argument on the IPv6 side of that call (docs/RESEARCH.md 67).
+ * TOS travels the same route: RFC 2474 gives the IPv4 TOS octet and the IPv6
+ * traffic class octet the same meaning, so IPV6_TCLASS carries it
+ * (docs/RESEARCH.md 68).
  *
  * A raw ICMP socket sees the whole ICMP input: TIME_EXCEEDED from each router,
  * ECHOREPLY from the destination, and any ICMP belonging to another program's
@@ -549,18 +552,6 @@ int main(int argc, char **argv)
         size = packetsize - headers;
     }
 
-    /*
-     * TOS is IPv4's. The IPv6 traffic class is not a field the raw send path
-     * carries, so accepting the option there would misreport what went out.
-     */
-    if (v6 && tos != 0)
-    {
-        tool_error("TOS is IPv4 only");
-        CloseLibrary(sb);
-        FreeArgs(rda);
-        return RETURN_ERROR;
-    }
-
     sock = tool_sock_socket(sb,
                             v6 ? TOOL_AF_INET6 : TOOL_AF_INET, TOOL_SOCK_RAW,
                             v6 ? TOOL_IPPROTO_ICMPV6 : TOOL_IPPROTO_ICMP);
@@ -590,7 +581,9 @@ int main(int argc, char **argv)
      * the raw send path hands it to nxd_ip_raw_packet_send() with the TTL.
      */
     if (tos != 0 &&
-        tool_sock_setsockopt(sb, sock, TOOL_IPPROTO_IP, TOOL_IP_TOS, &tos,
+        tool_sock_setsockopt(sb, sock,
+                             v6 ? TOOL_IPPROTO_IPV6 : TOOL_IPPROTO_IP,
+                             v6 ? TOOL_IPV6_TCLASS : TOOL_IP_TOS, &tos,
                              (LONG)sizeof(tos)) != 0)
     {
         tool_error("this stack will not set the type of service: %s",
