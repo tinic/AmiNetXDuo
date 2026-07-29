@@ -14353,7 +14353,10 @@ stack's in `src/sana2/sana2_device.c` and the diagnostic probe's in
 command that explains a failure agrees with the stack about whether it did. A
 name that already carries a `/` or a `:` is taken literally and never retried.
 
-**The AmiTCP hypothesis was wrong, and here is why it was worth checking.** The
+**The AmiTCP hypothesis was wrong, and here is why it was worth checking.**
+(**Withdrawn — see §71.3.** The hypothesis was right; these three experiments
+could not reach the mechanism, because the driver decides once in its
+`initRoutine` and this stack opens the device before it creates the port.) The
 release notes advertise routines that "replace AmiTCP's mbuf copy routines",
 and the driver detects AmiTCP by `FindPort("AMITCP")` — a port
 `src/netstack/netstack.c` creates under exactly that name. Every `mbuf_*` vector
@@ -18312,3 +18315,526 @@ IPv4 host build, which it could not before; IPv6 build warning-clean,
 loopback tier 130 passed, 0 failed, 12 skipped; `tests/tools/run-livetools.sh`
 PASSED and `tests/tools/run-nettools.sh` rc 0. `bsdsocket.library` from the
 default build is byte-identical to the one before the change.
+
+## 71. The X-Surf-100 driver, read rather than run (2026-07-29)
+
+§44.9 asked whether `x-surf-100.device`'s advertised "AmiTCP optimizations"
+could reach this stack, and answered no, from three experiments on a running
+machine. The answer was right about that machine and wrong about the driver.
+This is the static pass that settles it: `x-surf-100.device` v1.16 (3-Sep-2018,
+17,388 bytes, © 1999-2000 H. Prüssing, 2007-2018 iComp GmbH), disassembled end
+to end, with `x-surf.device` of the same date read alongside it. Neither binary
+is redistributable and neither is in this repository.
+
+**Every claim below carries a code-hunk offset so it can be re-checked.** Where
+something is an inference rather than a decode, it says so.
+
+### 71.1 Getting to the code
+
+Standard AmigaOS HUNK: `HUNK_HEADER`, three hunks — code 0x105f longwords, data
+0x2b, BSS 0x1c8 — then one `HUNK_RELOC32SHORT` block (type 0x3f7) carrying 58
+self-references, 67 into the data hunk and 60 into BSS. The code hunk's payload
+starts at file offset 0x28, and every offset in this section is relative to it.
+
+```
+dd if=x-surf-100.device of=xs.code bs=1 skip=40 count=16764
+m68k-amigaos-objdump -D -b binary -m m68k --start-address=0x... --stop-address=0x... xs.code
+```
+
+`vobjdump` is not installed; the toolchain `objdump` under
+`/Users/turo/amigaos/tools/m68k-amigaos-gcc/bin/` handles the raw slice. One
+trap worth recording, because getting it wrong moves the unit table by 30 bytes:
+objdump prints the displacement of a *simple* `d16(An)` operand in decimal and
+the displacement of an *indexed* `(d8,An,Xn)` operand in **hex, unprefixed**.
+`moveal a6@(56,d0:l),a4` is `a6 + 0x56 + d0`.
+
+`RTF_AUTOINIT`, `NT_DEVICE`. Function table at 0xa4: Open 0x2818, Close 0x2bac,
+Expunge 0x2c48, Null 0xde, BeginIO 0x3d0c, AbortIO 0x2d3c. `initRoutine` 0x2470,
+`dataSize` 0x1bb.
+
+Five globals live in the data hunk and their initial contents are in the file:
+`+0` ExpansionBase, `+4` `DEBUGLEV` (word), **`+8` the AmiTCP flag (word, initial
+value 1)**, `+0xc` UtilityBase, `+0x10` DOSBase. The 36-byte string at `+0x60`
+and the `"AmAm"` block at `+0x84` are the card memory test pattern; the table at
+`+0x14` drives `S2_DEVICEQUERY`.
+
+The `IOSana2Req` offsets the driver uses are the NDK ones, confirmed against the
+binary three ways rather than assumed: `S2_CONFIGINTERFACE` writes
+`S2WERR_IS_CONFIGURED` to `a3@(32)` (0x3444), `S2_GETSTATIONADDRESS` writes six
+bytes each at `a3@(40)` and `a3@(56)` (0x33e0, 0x33ee), and `S2_DEVICEQUERY`
+takes its buffer from `a3@(80)` (0x3310). So the base is `struct IORequest`
+(32 bytes), `SANA2_MAX_ADDR_BYTES` is 16, and `ios2_DataLength` / `ios2_Data` /
+`ios2_StatData` / `ios2_BufferManagement` sit at 72 / 76 / 80 / 84. **`sizeof` is
+88.** Hold on to the 88.
+
+### 71.2 The AmiTCP path, and what it does to `ios2_Data`
+
+The flag at data+8 is written in exactly one function, `initRoutine`:
+
+```
+25d2:  moveal 0x4,a0            ; SysBase
+25da:  movew a0@(296),d0        ; AttnFlags
+25de:  andl #2,d0               ; AFF_68020
+25e6:  beqs 0x25f0
+25e8:  moveq #1,d4 ...          ; 68020+: leave the flag alone
+25f0:  moveq #2,d4 ...
+25f6:  clrw 0x8                 ; 68000/68010: AmiTCP path OFF
+
+261c:  clrl sp@- / pea %pc@(0x275c)   ; "NOAMITCPOPT"
+2626:  jsr %pc@(0x21a8)               ; read ENV:sana2/x-surf-100.config
+2630:  bnes 0x2640                    ; key set -> off
+2632:  pea %pc@(0x2768)               ; "AMITCP"
+2636:  jsr %pc@(0x4124)               ; exec/FindPort, LVO -390
+263e:  bnes 0x2646                    ; found -> leave it on
+2640:  clrw 0x8                       ; not found -> off
+2646:  tstw 0x8 ...                   ; -> "AmiTCP optimizations enabled", level 5
+```
+
+**The flag defaults to enabled and is switched off, not on.** It is read in five
+places — 0x13d0, 0x1718, 0x174a, 0x17a6 on transmit and **0x1a52** on receive —
+and in every one a set flag routes around the client's buffer-management
+callbacks entirely.
+
+Receive, at 0x1a52. The two branches sit side by side and the second is the one
+SANA-II documents:
+
+```
+1a52:  tstw 0x8
+1a58:  beqs 0x1a7c
+1a5a:  moveal d3,a0 / movel a0@(72),sp@-   ; ios2_DataLength
+1a64:  push d6                             ; FIFO offset
+1a68:  movel a0@(76),sp@-                  ; ios2_Data
+1a6c:  push a5                             ; unit
+1a6e:  jsr %pc@(0x2278)                    ; <-- the mbuf walk
+1a7a:  bras 0x1a96
+1a7c:  moveal d3,a3 / moveal a3@(72),a3    ; ios2_DataLength
+1a82:  moveal d3,a1 / moveal a1@(76),a1    ; ios2_Data
+1a88:  moveal a6@(12),a2                   ; BufferManagement+12 = S2_CopyToBuff
+1a8c:  moveal a1,a0 / moveal d4,a1 / movel a3,d0
+1a92:  jsr a2@                             ; CopyToBuff(to=A0, from=A1, n=D0)
+```
+
+0x2278 is the receive-side filler, and there is no ambiguity about what it
+believes `ios2_Data` points at:
+
+```
+2288:  moveal sp@(36),a3        ; a3 = ios2_Data
+228c:  moveal a3@(96),a2        ; +96  -> free chain head
+2296:  clrl a3@(100)            ; +100 -> completed packet
+229c:  movel a2,a3@(100)
+22a4:  movel a2@(8),d4          ; m_len
+22b0:  movel d4,a2@(8)          ;   trimmed and written back
+22bc:  movel a2@(12),sp@-       ; m_data -> destination of the FIFO read
+22c8:  jsr %pc@(0x1018)         ; card -> memory
+22e6:  moveal a2@,a2            ; m_next
+22f0:  moveal a3@(100),a0
+22f4:  movel d5,a0@(20)         ; m_pkthdr.len
+22f8:  movel a1,a3@(96)         ; leftovers back on the free chain
+```
+
+Transmit, 0x2218, is the mirror: `a1 = ios2_Data`, `a2 = a1@(100)`, walk
+`+8`/`+12`/`+0`, `jsr 0x1100` memory → card.
+
+**That is AmiTCP's `struct IOIPReq` and AmiTCP's mbuf, byte for byte.** From
+AmiTCP 3.0b2 and AmiTCP_NG 4.1.3a `net/if_sana.h` and `sys/mbuf.h`: `ioip_s2` is
+the embedded `IOSana2Req` (88 bytes), `ioip_reserved` — the pre-allocated receive
+chain — is at **+96**, `ioip_packet` at **+100**, and AmiTCP's mbuf puts `m_next`
+at 0, **`m_len` at 8, `m_data` at 12** (the reverse of 4.4BSD-lite and of
+Roadshow) with `m_pkthdr.len` at 20. AmiTCP sets `ios2_Data = req` once when it
+builds its request pool and never touches it again; its own `sana2.i` comments
+the field "not touched by driver!".
+
+So the mechanism is: **detect the `AMITCP` port, then assume `ios2_Data` is an
+`IOIPReq` and reach past the end of the `IOSana2Req` into AmiTCP's private
+fields.** There is no negotiation, no version check and no second signal.
+Nothing in `ios2_BufferManagement` is consulted on that path at all.
+
+### 71.3 What that would do to us
+
+`ios2_Data` in this stack is the slot, not a buffer — `sana2_rx.c:181` and
+`sana2_tx.c:433` both set `slot->req.ios2_Data = slot`, and the hooks in
+`src/sana2/sana2_copy.c` cast it back. `struct IOSana2Req req` is the first
+member of both slots and is 88 bytes, so the driver's +96 and +100 land on real
+fields of ours:
+
+| driver reads | `AmiRxSlot` (`sana2_internal.h:131`) | `AmiTxSlot` (`:182`) |
+|---|---|---|
+| `ios2_Data + 96` | `dst` — `UCHAR *` into an `NX_PACKET` | `cursor` — `NX_PACKET *` |
+| `ios2_Data + 100` | `capacity` — `ULONG`, ~1552 | `cursor_off` — `ULONG`, 0 |
+
+Receive is the dangerous direction, because it writes. With the flag set, one
+inbound frame does this, with `dst` valid because `ami_sana2_rx_arm()` re-arms it
+before every post:
+
+* `slot->capacity` ← `(ULONG)slot->dst`, so the capacity field becomes a pointer;
+* `d4` ← `*(ULONG *)(dst + 8)`, clamped to the remaining length, taken as an
+  mbuf's free space;
+* **`d4` bytes of the arriving frame are PIO-copied from the card FIFO to
+  `*(ULONG *)(dst + 12)`** (0x22bc, 0x22c8);
+* `a2` ← `*(ULONG *)(dst + 0)` and repeat while bytes remain;
+* `*(ULONG *)(dst + 20)` ← the total length; `slot->dst` ← the chain tail.
+
+`dst` points into an `NX_PACKET` payload. NetX Duo does not clear payloads on
+release, so bytes 8..15 of that buffer are **the previous frame's contents at the
+same offset** — which is to say the destination address of a write of up to 1500
+bytes is chosen by whoever sent the previous packet. On a never-used pool block
+it is uninitialised allocator memory instead. This is remotely triggerable
+arbitrary-address memory corruption, not a compatibility wart.
+
+Transmit is read-only by comparison and merely useless: `cursor_off` is 0, so
+0x2236 reads `*(ULONG *)8` — the 68k bus-error vector — as a length and
+`*(ULONG *)12` as the source, and every outbound frame carries Kickstart bytes.
+
+**Why §44.9 saw none of this.** The detection runs in `initRoutine`, which exec
+runs **once**, at `InitResident` time — on the first `OpenDevice()` of the device
+in a boot, not on every open. `netstack_startup()` opens its interfaces at
+`netstack.c:476` and creates the `AMITCP` port at `netstack.c:1288`, *after*. So
+on the tested path the port does not exist when the driver initialises, the flag
+is cleared, and everything §44.9 measured follows: no behaviour change from
+`NOAMITCPOPT`, and `AddNetInterface eth1` on an already-running stack working
+fine, because that open does not re-run `initRoutine`. **Those experiments could
+not reach the mechanism.** The §44.9 conclusion that the hypothesis "was wrong"
+is withdrawn: the hypothesis was right and the ordering was lucky.
+
+The luck runs out in an ordinary case: **the stack comes up on some other
+interface, the `AMITCP` port goes in, and `x-surf-100.device` is opened for the
+first time afterwards.** `ami_ns_add_interface()` (`netstack.c:2079`) is exactly
+that call, and so is `tool_device_probe()` (`tool_diag.c:274`) — a status probe
+run once while the stack is up poisons the flag for every later open in that
+boot, and only a reboot clears it. It needs a 68020 or better, which every
+machine that takes a Zorro X-Surf-100 has.
+
+There is a one-line check for it. With `DEBUGLEV 5` in
+`ENV:sana2/x-surf-100.config`, a poisoned boot prints
+`(xs100 5) AmiTCP optimizations enabled` on the serial port at init and a clean
+one does not.
+
+Inference, not decode: nothing in the binary limits this to us. Any stack that
+publishes a port named `AMITCP` without implementing `IOIPReq` gets the same
+treatment.
+
+### 71.4 The open path, condition by condition
+
+`Open` is 0x2818, entered with `a1` = request, `d0` = unit, `d1` = flags.
+
+```
+2826:  moveal a6@(56,d0:l),a4   ; unit table at devbase+0x56, unit*4
+2866:  moveq #1,d0 / andl a4@(60),d0
+286c:  beqs 0x2888              ; unit flag bit0 -> "already open in exclusive mode"
+2888:  moveq #1,d0 / andl d3,d0 ; SANA2OPF_MINE
+288e:  tstw a4@(36)             ; unit open count
+2892:  bnes 0x289e              ; nonzero -> "you are not 1st opener"
+28b8:  moveq #2,d0 / andl d3,d0 ; SANA2OPF_PROM
+28c0:  moveq #1,d0 / andl d3,d0
+28c2:  beqs 0x28ce              ; PROM without MINE -> "promisc is only possible..."
+28e8:  moveq #8,d0 / cmpl d2,d0 / blsw 0x2a28   ; unit >= 8 -> fail
+28f0:  movel a6@(184),d0 / cmpl d2,d0 / blsw    ; unit >= cards found -> fail
+```
+
+The three refusals share a trick: each sets `d2` — which started life as the unit
+number — to 50, so the `unit >= 8` guard at 0x28e8 catches all of them. The
+messages are logged, not returned; the caller gets `io_Error = -1`
+(`IOERR_OPENFAIL`) with `io_Device` and `io_Unit` set to -1 at 0x2a44.
+
+| condition | trigger |
+|---|---|
+| `already open in exclusive mode` | someone holds `SANA2OPF_MINE`; **every** open fails, exclusive or not |
+| `you are not 1st opener` | you asked for `SANA2OPF_MINE` and the unit open count is nonzero |
+| `promisc is only possible in exclusive mode` | you asked for `SANA2OPF_PROM` without `SANA2OPF_MINE` |
+| no message | unit ≥ 8, or ≥ the number of cards found — one card means unit 0 only |
+
+**We pass `io_Flags = 0` and unit 0** (`compat.c:219`, `sana2_device.c:530`), so
+none of the three can fire and both range checks pass. What would break us:
+opening unit 1, or ever setting `SANA2OPF_PROM` — which `bpf_channel.c:809`
+currently records and does not honour, and which here would need
+`SANA2OPF_MINE` alongside it and would then lock every other opener out of the
+card.
+
+The open does **not** require the buffer-management tags. `tool_diag.c:259`
+passes stub hooks because other devices need them; this one would open without.
+
+Two things `Close` (0x2bac) does that are worth knowing: it clears the unit's
+exclusive and promiscuous bits unconditionally at 0x2bf4, for any closer rather
+than the one that set them, and it does not take the unit offline. The hardware
+runs until `Expunge` (0x2c48), which walks the unit table and issues `S2_OFFLINE`
+itself.
+
+The hardware-side refusals, all inside `initRoutine`:
+
+| message | offset | condition |
+|---|---|---|
+| `X-Surf-100 found, but not activated, not enough config space!` | 0x2546 | `FindConfigDev(NULL, 4626, 100)` succeeded but `cd_BoardAddr` has bit 31 set |
+| `Please set swap jumper on Mediator logic board.` | 0x256a | ...and `FindConfigDev(NULL, 2206, 33)` finds an Elbox Mediator |
+| `Please try swapping cards around.` | 0x259c | ...and it does not |
+| `No ethernet card found or initialization failed` | 0x2668 | `FindConfigDev` found nothing at all |
+
+### 71.5 The command set
+
+`BeginIO` (0x3d0c) clears `io_Error`, forces `ln_Type = NT_MESSAGE`,
+special-cases `CMD_READ` and `CMD_WRITE`, then `subq #8` / `cmpw #18` / `bhi`
+into a 19-entry longword table at 0x3d44 covering 8..26. Commands 0..7 wrap the
+unsigned compare and land on the unknown path with everything else.
+
+Better than reading the table: **the driver ships its own list.** 0x4000 is
+`NSCMD_DEVICEQUERY`, and its handler at 0x3a80 fills an `NSDeviceQueryResult`
+— `SizeAvailable` 16, `DeviceType` 7 (`NSDEVTYPE_SANA2`), `SubType` 0 — whose
+`SupportedCommands` points at a NUL-terminated `UWORD` array at 0x3f78:
+
+```
+0002 0003 0008 0009 000a 000b 000e 000f 0010 0011
+0012 0013 0016 0017 0018 0019 001a 0109 4000 0000
+```
+
+| cmd | name | handler | notes |
+|---:|---|---|---|
+| 2 | `CMD_READ` | 0x3234 | needs the unit online and a non-NULL `ios2_BufferManagement`, else `S2ERR_BAD_ARGUMENT`/`S2WERR_NULL_POINTER`; queues on the opener's own list |
+| 3 | `CMD_WRITE` | 0x3040 | `ios2_DataLength > 1500` → `S2ERR_MTU_EXCEEDED` |
+| 8 | `CMD_FLUSH` | 0x2e9c | aborts **every** opener's read queue plus the write and event queues, not only the caller's |
+| 9 | `S2_DEVICEQUERY` | 0x3308 | see below |
+| 10 | `S2_GETSTATIONADDRESS` | 0x33d4 | six bytes into both `ios2_SrcAddr` and `ios2_DstAddr` |
+| 11 | `S2_CONFIGINTERFACE` | 0x3410 | second call → `S2ERR_BAD_STATE`/`S2WERR_IS_CONFIGURED`; brings the unit online on success |
+| 12, 13 | — | 0x3d90 | the reserved `S2_START+3/+4` gap, correctly unimplemented |
+| 14 | `S2_ADDMULTICASTADDRESS` | 0x37a0 | the bit-7 bug of §44.9, at 0x37b4 |
+| 15 | `S2_DELMULTICASTADDRESS` | 0x3874 | refcounted in a **UBYTE** at entry+14; does not re-check the group bit |
+| 16 | `S2_MULTICAST` | 0x3040 | plain `CMD_WRITE`, no address validation at all |
+| 17 | `S2_BROADCAST` | 0x3040 | fills `ios2_DstAddr[0..5]` with 0xFF at 0x305c first |
+| 18 | `S2_TRACKTYPE` | 0x3468 | duplicate → `S2WERR_ALREADY_TRACKED`; a failed `AllocMem` is **silently ignored** |
+| 19 | `S2_UNTRACKTYPE` | 0x34f0 | not tracked → `S2WERR_NOT_TRACKED` |
+| 20 | `S2_GETTYPESTATS` | 0x3568 | implemented but **absent from the NSD list**; does not null-check `ios2_StatData` |
+| 21 | `S2_GETSPECIALSTATS` | 0x39a0 | implemented but **absent from the NSD list** |
+| 22 | `S2_GETGLOBALSTATS` | 0x3618 | null-checks `ios2_StatData` properly |
+| 23 | `S2_ONEVENT` | 0x3680 | only `S2EVENT_ONLINE` and `S2EVENT_OFFLINE`; any other mask queues forever instead of returning `S2WERR_BAD_EVENT` |
+| 24 | `S2_READORPHAN` | 0x32b0 | |
+| 25 | `S2_ONLINE` | 0x30dc | not configured → `S2ERR_BAD_STATE`/`S2WERR_NOT_CONFIGURED`; already online is a silent success |
+| 26 | `S2_OFFLINE` | 0x31b0 | aborts every queued read with `S2ERR_OUTOFSERVICE` |
+| 0x109 | iComp private | 0x3adc | a tag-list query; `ios2_Data` is the `TagItem *` |
+| 0x4000 | `NSCMD_DEVICEQUERY` | 0x3a80 | returns the list above |
+
+Everything else, including the whole SANA-II Rev 6 `0xC000` range, falls to
+0x3ef0: log `unknown cmd %ld` at level 5, `io_Error = -3` (`IOERR_NOCMD`).
+
+Command 0x109 takes four private tags off `ios2_Data`, each pointing at a
+`{APTR buffer; LONG length; LONG result;}` triple: `0x800B0101` returns
+`"individual Computers GmbH"` (0x3ce4), `0x800B0102` returns `"X-Surf-100"`
+(0x3d00), and `0x800B0103` / `0x800B0104` return link and speed state from a PHY
+shadow at unit+194. A NULL buffer returns the required length, so it is a
+two-call idiom. It is not a SANA-II number in any header available here.
+
+**`AbortIO` (0x2d3c) only knows five commands** — 2, 3, 17, 23, 24, at
+0x2d5a-0x2d6e. An `S2_MULTICAST` (16) sits on the same queue as `CMD_WRITE` and
+cannot be aborted: it returns -3 and logs `Cannot abort IOReq!`. It also returns
+0 immediately for any request whose `ln_Type` is already `NT_REPLYMSG`.
+
+Against all that, this stack issues eleven commands — `CMD_READ`, `CMD_WRITE`,
+`CMD_FLUSH`, `S2_DEVICEQUERY`, `S2_GETSTATIONADDRESS`, `S2_CONFIGINTERFACE`,
+`S2_ONLINE`, `S2_OFFLINE`, `S2_GETGLOBALSTATS`, `S2_ADDMULTICASTADDRESS`,
+`S2_DELMULTICASTADDRESS`. **Every one is implemented here**, and the only one
+that fails is the multicast join, for the reason §44.9 already recorded. Nothing
+we send gets `IOERR_NOCMD`.
+
+**Why `S2_DEVICEQUERY` leaves `SizeSupplied` at zero.** §44.9 recorded the
+symptom; this is the mechanism. The handler walks a descriptor table at data+0x14
+— eight 8-byte records `{UWORD tag; UWORD size; ULONG value}` — writing each
+field into `ios2_StatData` starting at **offset 0**, so the first two records
+write zeros over `SizeAvailable` and `SizeSupplied` themselves. Only then:
+
+```
+33b6:  moveq #8,d0
+33b8:  cmpl a2@,d0              ; a2@ = SizeAvailable ... which it just zeroed
+33ba:  bhis 0x33c0              ; 8 > 0, so skip
+33bc:  movel d5,a2@(4)          ; never reached
+```
+
+The values it reports are otherwise right: `AddrFieldSize` 48 (data+0x3a),
+`MTU` 1500 (0x3388), `BPS` 100,000,000 (0x3398), `HardwareType` 1 (data+0x50).
+Our forgiving reader takes them, which is the right call and should stay.
+
+### 71.6 The buffer-management contract
+
+At open, 0x292c-0x29c0, the driver calls `FindTagItem` on **exactly three tags**:
+
+| tag | stored at | default if absent |
+|---|---|---|
+| `S2_CopyToBuff` 0x800B0001 | BM+12 | `&devbase[126]` |
+| `S2_CopyFromBuff` 0x800B0002 | BM+8 | `&devbase[126]` |
+| `S2_PacketFilter` 0x800B0003 | BM+16 | `&devbase[118]` |
+
+It never looks at `S2_CopyToBuff16`/`FromBuff16` (0x800B0004/5), the 32-bit
+variants, the DMA variants or `S2_Log` — those constants appear nowhere in the
+binary. **So `AMI_SANA2_OFFER_COPY16` is moot for this device, and nothing we
+omit is required.**
+
+`devbase+118` is a `struct Hook` embedded in the device base whose `h_Entry` (at
++126) `initRoutine` points at a `moveq #1,d0 / rts` stub at 0x246c — an
+accept-everything filter. It is invoked by the book at 0x1a38-0x1a4a: `a0` =
+hook, `a2` = object, `a1` = message, entry from `hook+8`. Passing no
+`S2_PacketFilter` is safe and is what we do.
+
+The two copy defaults are not safe, and this is a latent driver bug rather than
+anything we hit: `lea a6@(126),a1` (0x29aa, 0x29b8) stores the **address of the
+`h_Entry` slot** where a plain function pointer belongs, so a client that omits
+the copy tags gets a jump into the device base on its first packet. We pass both,
+so it never arises — but it is why "the driver will default sensibly" is not a
+safe general assumption.
+
+The allocation is 32 bytes (`AllocMem(0x20, MEMF_PUBLIC|MEMF_CLEAR)`, 0x2914):
+`ln_Succ`/`ln_Pred` at 0/4, `CopyFromBuff` 8, `CopyToBuff` 12, `PacketFilter` 16,
+and a 12-byte `MinList` of that opener's pending reads at 20. It is linked onto a
+per-unit list at unit+100 and freed in `Close`.
+
+Receive delivery (0x18a0, 0x19b4) does the conventional thing and two
+unconventional ones. Conventional: it walks every opener's list and gives the
+frame to the first request in each whose `ios2_PacketType` matches, with the usual
+escape that a request asking for a type ≤ 1500 matches any frame whose type field
+is ≤ 1500 (0x1904-0x1914). Unconventional: on a broadcast or multicast frame it
+sets **both** `SANA2IOF_BCAST` and `SANA2IOF_MCAST` (`orl #96`, 0x1ab2), so a
+client cannot tell them apart; and frames shorter than 64 bytes on the wire are
+dropped with `oops, pkt size is < 46!` (0x13fe).
+
+**One defect in the raw path, and it is the driver's.** At 0x19fe the handler
+tests `io_Flags & SANA2IOF_RAW` and, when set, adds 14 to `ios2_DataLength` and
+takes the copy source from `lea sp@(48),a0` — the **address of its own stack slot
+holding the frame pointer** — where the cooked branch two instructions later does
+`movel sp@(48),d4 / addl #14,d4` and gets the pointer itself. A `SANA2IOF_RAW`
+read therefore receives stack contents rather than the frame. We set that flag in
+two places: `sana2_device.c:312`, the raw probe, which is harmless because
+`ami_raw_probe_slot.packet` is NULL and our hook returns `FALSE` before copying;
+and `sana2_rx.c:176` when raw mode is on, which `AMI_SANA2_RAW_DEFAULT` keeps off.
+This is a decode of a single branch and deserves a WinUAE confirmation before
+being treated as settled; the two instructions are unambiguous but the
+consequence is worth seeing.
+
+### 71.7 Everything else the binary says
+
+**Config.** `ENV:sana2/x-surf-100.config` (string at 0x3f48), parsed at 0x1e80.
+Keys: `DEBUGLEV` (0x24ea), `NOAMITCPOPT` (0x261c), `Unit0.Duplex` / `.Speed` /
+`.MDIX` / `.Negotiation` / `.FlowControl` (0x0960-0x09d0, with consistency checks
+at 0x08d6 and 0x0918). The `Unit` prefix is built from the unit number, so
+`Unit1.*` would work if a second card existed.
+
+**`DEBUGLEV` is inverted from its own documentation.** Output goes through
+`RawDoFmt` + `RawPutChar` at 0x2320, gated at each call site by
+`cmpiw #N, DEBUGLEV / bgt skip` — a message of level N prints when
+`DEBUGLEV <= N`. `initRoutine` defaults the key to **100** when it is absent
+(0x2506), and that is what turns logging off. The shipped `x-surf-100.txt` says
+"0=off"; `DEBUGLEV 0` in fact prints everything, identically to `DEBUGLEV 1`.
+Anything above 10 is silent.
+
+**`S2_GETSPECIALSTATS`** reports four `{ULONG Type; ULONG Count; STRPTR String;}`
+records: `Transmit Error` (0x3a44), `CopyToBufCnt` (0x3a54), `DeviceOpenCnt`
+(0x3a64, the library open count) and `UnitOpenCnt` (0x3a74). A caller whose
+`RecordCountMax` is under 4 gets **success with nothing filled in and
+`RecordCountSupplied` untouched** (0x39b8) — worth knowing before believing its
+output.
+
+**The data-cache freeze.** After configuring the card the driver writes the
+36-byte pattern from data+0x60 into card memory, reads it back and `memcmp`s it
+(0xc80-0xcd4, again at 0xd28). On mismatch it enables a workaround and retries,
+logging `Datacache freeze enabled 1` or `2`; if the retry also fails,
+`Memory test failed!` and the unit is rejected. The workaround is a nesting
+counter **self-modified inside the code hunk** at 0x104 (initially 0xFFFF = off,
+cleared to arm it), acquire at 0x106 and release at 0x13e:
+
+```
+118:  moveal 0x4,a6 / jsr a6@(-120)      ; Disable()
+124:  jsr a6@(-648)                      ; CacheControl(0,0) -> read CACR
+12e:  orl #8704,d0                       ; CACRF_FreezeD | CACRF_WriteAllocate
+136:  jsr a6@(-648)                      ; CacheControl(new, -1)
+```
+
+So on a card that fails the read-back test, **every register access runs with
+interrupts disabled and the data cache frozen, system-wide**. That is what
+`Datacache freeze enabled` costs, and it is a good reason to read the serial log
+once on any machine where this card feels slow.
+
+The remaining diagnostics: `PIOWriteMem timeout!` (0x123a) in the card write
+loop, `RX header corrupt!` (0x157c) and `TransmitterInt still registered!`
+(0x15c4) in the interrupt handler, `multicast address still in use count=%ld`
+(0x393c) and `multicast address not found!` (0x3974) on delete, `not
+constructed!` (0x3a8), `Cannot abort IOReq!` (0x2df4) and `Device expunged`
+(0x2d1c).
+
+### 71.8 `x-surf.device`, for contrast
+
+The plain X-Surf driver of the same date is **the same source tree with a
+different chip back-end**. Its code hunk is 0x4718 bytes at file 0x28; Open
+0x2e18, Close 0x31ac, Expunge 0x3248, BeginIO 0x42b0, AbortIO 0x333c,
+`initRoutine` 0x2bc4, and the same `dataSize` 0x1bb.
+
+Everything a SANA-II client can see is identical: the same `subq #8` / `cmpw #18`
+dispatch into a 19-entry table at 0x42e8, the same commands implemented and the
+same 12/13 gap, the same `NSCMD_DEVICEQUERY` with the same `SupportedCommands`
+list at 0x4514 — including the same omission of 20 and 21 — the same three
+buffer-management tags and none of the 16/32/DMA ones, the same broken
+`lea`-instead-of-`move` copy defaults, the same `AbortIO` gap for `S2_MULTICAST`,
+the same 8-unit ceiling, the same `d2 = 50` poison trick, and the three
+open-refusal strings word for word with an `(xsurf %ld)` prefix instead of
+`(xs100 %ld)`. The special-stat names are the same four.
+
+**The AmiTCP bypass is there too, and it is worse.** Same global word at data+8
+with the same initial value 1, cleared at 0x2cfc, read at 0x1464 / 0x17ac /
+0x17de / 0x183a / 0x1ae6, with the same two walkers at 0x2578 (transmit) and
+0x25d8 (receive) reading `ios2_Data@(100)` and `ios2_Data@(96)` and the same
+`+0`/`+8`/`+12`/`+20` mbuf offsets. The difference: **`x-surf.device` has no
+`AFF_68020` gate.** The only two things that turn it off are `NOAMITCPOPT` and
+`FindPort("AMITCP")` failing, so a 68000 or 68010 X-Surf is exposed as well.
+
+The deltas are all below the SANA-II line: `env:sana2/x-surf.config` instead,
+one extra per-unit key `CardType` (0x828) selecting a hardware variant, and
+`Doesn't look like a RTL8019!` / `No PNP card found` in place of the Mediator and
+config-space messages. Which is the useful conclusion: **this is house style, not
+one card's quirk.** Treat the `AMITCP` port as a hazard for the whole iComp
+driver line, and by inference for any other driver that gained a merged "_a"
+fast path in the same era.
+
+### 71.9 What AmiNetXDuo should change
+
+Ordered by what it buys, with an honest size for each. **None of these are in
+`src/` yet; this section is the input to that work, not a record of it.**
+
+**1. Do not let a third-party SANA-II device initialise while our `AMITCP` port
+is up. Small — about 20 lines and one new pair of functions.** This is the whole
+of 71.2, 71.3 and 71.8. `ami_ns_port_create()` / `ami_ns_port_delete()` in
+`netstack.c:89-137` already do the work; expose a suspend/resume pair and bracket
+the `OpenDevice()` in `ami_sana2_open_device()` (`compat.c:210-243`) with it,
+under `Forbid()`. The port is `PA_IGNORE` with a NULL `mp_SigTask` and nothing
+ever sends to it, so removing and re-adding it across one `OpenDevice()` costs
+nothing. That closes the `AddNetInterface`-after-startup case and the
+`tool_device_probe()`-poisons-the-flag case together, and it generalises to any
+driver keying an ABI assumption off that name. Startup ordering already happens
+to be right and stays right.
+
+**2. Say so in the diagnostic. Small — a few lines in `tool_diag.c`.** Once the
+flag is set it stays set for the boot, and nothing we do at open time can undo
+it; recovery is a reboot or `NOAMITCPOPT 1` in the driver's config file. When the
+`AMITCP` port is up and an iComp driver is resident, the diagnostic is where a
+user would find that out, and `DEBUGLEV 5` is how they would confirm it.
+
+**3. Leave raw mode off on this card, and record why. Trivial — a comment.**
+71.6's raw-path defect means `AMI_SANA2_RAW_DEFAULT` must not be flipped for
+x-surf-100 without a WinUAE check first. `ami_sana2_probe_raw()` is safe as
+written, and its NULL-`packet` guard is now load-bearing for a reason it was not
+designed for.
+
+**4. `CMD_FLUSH` at teardown is antisocial here. Small — one call site.**
+`sana2_rx.c:345` issues it as a second-stage abort. On this driver (0x2e9c) it
+aborts every *other* opener's pending reads as well as ours. We already
+`AbortIO()` each slot individually at `sana2_rx.c:431`, which is the correct and
+sufficient step; the `CMD_FLUSH` is belt-and-braces that costs other software its
+queued reads. Worth making conditional on the individual aborts having failed, or
+dropping.
+
+**5. Nothing to do about the tags. Zero.** The driver reads three, we pass two
+plus a documented-safe omission. `AMI_SANA2_OFFER_COPY16` can stay at 0 with one
+more reason recorded: this device would ignore those tags anyway.
+
+**6. Nothing to do about the command set. Zero.** All eleven commands we issue
+are implemented. The multicast refusal is understood and already swallowed by
+`sana2_driver.c`.
+
+**7. The stale user docs, noticed in passing. Trivial.**
+`docs/user/ReadMe:152` and `docs/user/AmiNetXDuo.guide:1950` both still say this
+stack creates no `AMITCP` port and that `WaitForPort AMITCP` will time out.
+`netstack.c:1288` has created one since the same commit that wrote those
+paragraphs. Given 71.3, the honest version of that text says the port exists and
+what it implies.
