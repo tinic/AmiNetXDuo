@@ -65,8 +65,9 @@ TIMEOUT=400
 PORT="${AMINETXDUO_FITZ_PORT:-17712}"
 SLIRP=0
 ACCURATE=0
+ROADSHOW=""
 
-while getopts "H:A:m:c:b:k:C:r:T:t:p:sx" opt; do
+while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:" opt; do
     case "$opt" in
         H) PEER="$OPTARG" ;;
         A) PEER_ADDR="$OPTARG" ;;
@@ -81,9 +82,10 @@ while getopts "H:A:m:c:b:k:C:r:T:t:p:sx" opt; do
         p) PORT="$OPTARG" ;;
         s) SLIRP=1 ;;
         x) ACCURATE=1 ;;
+        R) ROADSHOW="${OPTARG:-/tmp/rsdemo/Roadshow-Demo-1.15/Workbench}" ;;
         *) echo "usage: $0 [-H user@host] [-A addr] [-m model] [-c cpu]" \
                 "[-b build] [-k KB] [-C chunk] [-r reps] [-T tag] [-t secs]" \
-                "[-p port] [-s] [-x]" >&2
+                "[-p port] [-s] [-x] [-R roadshowdir]" >&2
            exit 2 ;;
     esac
 done
@@ -156,10 +158,22 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
-cp "$BSD"   "$STAGE/libs/bsdsocket.library"
-[ -f "$UG" ] && cp "$UG" "$STAGE/libs/usergroup.library"
-cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
-cp "$TOOLS/NetStat" "$STAGE/NetStat" 2>/dev/null || cp "$TOOLS/netstat" "$STAGE/NetStat"
+# -R swaps the whole stack, library and starter both.  It is the discriminator
+# for "is this rig or is this us": a figure Roadshow also cannot beat on the
+# same emulator, the same bridge and the same peer is not ours to fix.
+if [ -n "$ROADSHOW" ]; then
+    [ -f "$ROADSHOW/Libs/bsdsocket.library" ] || {
+        echo "no Roadshow at $ROADSHOW" >&2; exit 2; }
+    cp "$ROADSHOW/Libs/bsdsocket.library" "$STAGE/libs/bsdsocket.library"
+    cp "$ROADSHOW/Libs/usergroup.library" "$STAGE/libs/usergroup.library"
+    cp "$ROADSHOW/C/AddNetInterface"      "$STAGE/AddNetInterface"
+    cp "$ROADSHOW/C/GetNetStatus"         "$STAGE/NetStat"
+else
+    cp "$BSD"   "$STAGE/libs/bsdsocket.library"
+    [ -f "$UG" ] && cp "$UG" "$STAGE/libs/usergroup.library"
+    cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
+fi
+[ -n "$ROADSHOW" ] || cp "$TOOLS/netstat" "$STAGE/NetStat"
 cp "$FITZ"  "$STAGE/fitz"
 cp "$BENCH" "$STAGE/FitzBench"
 
@@ -168,14 +182,16 @@ cp "$BENCH" "$STAGE/FitzBench"
 # arm is last and deliberately in the same boot -- it prices this program,
 # AmigaDOS and the emulator's current mood with no network under any of it, and
 # a network figure is only worth reading beside it.
+STATARGS="-s"
+[ -z "$ROADSHOW" ] || STATARGS=""
+
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
 wait 6
 &SYS:fitz mount $SERVER_ADDR:$PORT FITZ:
 wait 10
 SYS:FitzBench FITZ: KB=$KB CHUNK=$CHUNK REPS=$REPS
-SYS:NetStat -s
-SYS:NetStat -i
+SYS:NetStat $STATARGS
 SYS:FitzBench RAM: KB=$KB CHUNK=$CHUNK REPS=$REPS
 EOF
 

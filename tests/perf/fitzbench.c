@@ -390,6 +390,16 @@ int main(VOID)
 
     fb_fill();
 
+    /*
+     * One untimed pass first.  The first read of a freshly written file is
+     * consistently an order of magnitude slower than the ones after it -- 36
+     * KB/s against 344 on the same boot -- and averaging that in measures the
+     * first exchange rather than the transfer.  It is a real effect and worth
+     * its own investigation; it is not what a throughput number is for.
+     */
+    (VOID)fb_write_once((CONST_STRPTR)file, total);
+    (VOID)fb_read_once((CONST_STRPTR)file, total);
+
     fb_printf("fitzbench: file=%s bytes=%lu chunk=%lu reps=%lu eclock=%lu\n",
               (LONG)file, total, fb_chunk, reps, fb_rate);
 
