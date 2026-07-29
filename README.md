@@ -1,6 +1,6 @@
 # AmiNetXDuo
 
-A IPv4+IPv6 TCP/IP stack for classic AmigaOS, and the networking commands to go with it.
+An IPv4+IPv6 TCP/IP stack for classic AmigaOS, and the networking commands to go with it.
 It provides `bsdsocket.library` — the socket API that Amiga network software
 already speaks — on top of
 [Eclipse ThreadX NetX Duo](https://github.com/eclipse-threadx/netxduo), and it
