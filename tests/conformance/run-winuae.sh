@@ -40,6 +40,9 @@
 # prints rc and errno for every call, which is how you find out *why* a
 # category collapsed.
 #
+# AMINETXDUO_CONF_HELPER=<user@host> restarts the suite's helper on that
+# machine first, which the network tier needs; see the block that does it.
+#
 # -a is the suite's own ReadArgs line, e.g.
 #      -a "LOOPBACK NOPAGE"
 #      -a "CATEGORY socket NOPAGE VERBOSE"
@@ -148,6 +151,43 @@ printf '%s\n' "$ARGS" > "$STAGE/conf-args"
 # WinUAE's own bsdsocket.library emulation is off unless bsdsocket_emu is
 # set, and tools/winuae-run.sh never sets it, so there is nothing to disable
 # here -- the FS-UAE runner needs a Host.fs-uae for exactly that reason.
+
+# ------------------------------------------------------------- the helper --
+#
+# AMINETXDUO_CONF_HELPER=<user@host> stages the vendored helper there and
+# restarts it before the run.
+#
+# Not a convenience.  A helper left running across runs wedges, and the run
+# after it fails in one of two ways that both look like the stack: `Bail out!
+# Could not connect to host helper`, 0/142, or a suite that stops dead after
+# test 41 -- the one where the helper dials back into the guest -- and times
+# out.  Measured 2026-07-28 on both the floor and the IPv6 build, three of six
+# runs each way, and gone once every run got a fresh helper.
+#
+# The restart goes through a script file rather than `ssh <host> <command>`.
+# `pkill -f` sees the whole remote command line, so a pkill and the python it
+# is about to start cannot share one: the pattern matches ssh's own shell and
+# kills it before anything is launched.  In a file, only the helper matches.
+if [ -n "${AMINETXDUO_CONF_HELPER:-}" ]; then
+    HELPER_SRC="$ROOT/third_party/bsdsocktest/host/bsdsocktest_helper.py"
+    [ -f "$HELPER_SRC" ] || { echo "missing $HELPER_SRC" >&2; exit 2; }
+    HELPER_SH="$ROOT/build/conf-helper-start.sh"
+    cat > "$HELPER_SH" <<'EOF'
+#!/bin/sh
+pkill -f bsdsocktest_helper 2>/dev/null
+sleep 1
+setsid nohup python3 /tmp/bsdsocktest_helper.py -v --bind 0.0.0.0 \
+    > /tmp/helper.log 2>&1 < /dev/null &
+sleep 2
+pgrep -f bsdsocktest_helper > /dev/null
+EOF
+    echo "==> restarting the helper on $AMINETXDUO_CONF_HELPER"
+    scp -q "$HELPER_SRC" "$AMINETXDUO_CONF_HELPER:/tmp/bsdsocktest_helper.py"
+    scp -q "$HELPER_SH" "$AMINETXDUO_CONF_HELPER:/tmp/anxd-conf-helper.sh"
+    ssh "$AMINETXDUO_CONF_HELPER" 'sh /tmp/anxd-conf-helper.sh' \
+        || { echo "the helper did not start on $AMINETXDUO_CONF_HELPER" >&2
+             exit 2; }
+fi
 
 export AMINETXDUO_RUN_TAG="$TAG"
 
