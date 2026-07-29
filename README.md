@@ -18,7 +18,7 @@ drives the SANA-II network cards you already have.
 > 795 KB/s reading and 939 KB/s writing over Fitz, and found two bugs that are
 > fixed.
 >
-> Note that if you want to try IPv6 under WinUAE you will need a patch (d9df1d8)
+> Note that if you want to try IPv6 under WinUAE you will need a patch [(tinic/winuae@d9df1d8)](https://github.com/tonioni/WinUAE/commit/d9df1d8357ade4f9631491cf9f482e159554bfeb)
 
 ## How this was written
 
