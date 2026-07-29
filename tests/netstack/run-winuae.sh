@@ -9,12 +9,11 @@
 # -m defaults to A3000, because that is the machine this project is aimed at
 # and the one FS-UAE cannot emulate the CPU of with any timing meaning.
 #
-# -N picks the card.  a2065 is the default and the only one we have a driver
-# for; the rest are listed in tools/winuae-run.sh and all of them come up in
-# WinUAE, but the SANA-II driver for each is a third-party binary that is not
-# in this repository.  Passing -N ariadne without an ariadne.device in
-# DEVS: gets you a machine with an Ariadne in it and a test that cannot open
-# it -- which is a useful thing to see once, and nothing more.
+# -N picks the card; the boards are listed in tools/winuae-run.sh and the
+# driver each one wants is in tools/sana2-stage.sh.  Every driver except
+# a2065.device is a third-party binary that is not in this repository, so
+# AMINETXDUO_SANA2_DRIVER=<path> has to name one.  Without it the card is in
+# the machine and nothing can open it, which the run then shows.
 #
 # The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
 # or drop a copy in build/a2065.device.
@@ -48,18 +47,7 @@ EXE="$ROOT/$BUILD/tests/netstack/netstack_test"
 # The driver name in DEVS:NetInterfaces/eth0 has to match the card, so the
 # interface file is rewritten for anything other than the A2065.  Nothing else
 # about the test changes: SANA-II is SANA-II.
-# The driver name is not the board key: Individual Computers ship
-# x-surf-100.device, not xsurf100z2.device, and Hydra's card is amiganet.device.
-case "$BOARD" in
-    a2065)                 DRIVER=a2065.device ;;
-    ariadne)               DRIVER=ariadne.device ;;
-    ariadne2)              DRIVER=ariadne2.device ;;
-    hydra)                 DRIVER=amiganet.device ;;
-    xsurf)                 DRIVER=x-surf.device ;;
-    xsurf100z2|xsurf100z3) DRIVER=x-surf-100.device ;;
-    *)                     DRIVER="$BOARD.device" ;;
-esac
-DRIVER="${AMINETXDUO_SANA2_DRIVER_NAME:-$DRIVER}"
+. "$ROOT/tools/sana2-stage.sh"
 
 A2065="${AMINETXDUO_A2065:-}"
 if [ -z "$A2065" ] && [ "$BOARD" = "a2065" ]; then
@@ -79,24 +67,10 @@ STAGE="$ROOT/build/winuae-netstack-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 cp -R "$HERE/devs" "$STAGE/devs"
-[ -n "$A2065" ] && cp "$A2065" "$STAGE/devs/a2065.device"
+[ -z "$A2065" ] || cp "$A2065" "$STAGE/devs/a2065.device"
 
-if [ "$DRIVER" != "a2065.device" ]; then
-    sed "s/^DEVICE=.*/DEVICE=$DRIVER/" "$HERE/devs/NetInterfaces/eth0" \
-        > "$STAGE/devs/NetInterfaces/eth0"
-    DRV="${AMINETXDUO_SANA2_DRIVER:-}"
-    if [ -n "$DRV" ] && [ -f "$DRV" ]; then
-        # DEVS:Networks and not DEVS:, because that is where a third-party
-        # driver is really installed and OpenDevice does not look there by
-        # itself -- see docs/RESEARCH.md 44.9.
-        mkdir -p "$STAGE/devs/Networks"
-        cp "$DRV" "$STAGE/devs/Networks/$DRIVER"
-    else
-        echo "!! no $DRIVER staged: set AMINETXDUO_SANA2_DRIVER=<path> to one." >&2
-        echo "!! The card will be in the machine and nothing will be able to" >&2
-        echo "!! open it, which is what this run will show." >&2
-    fi
-fi
+sana2_stage "$BOARD" "$STAGE/devs"
+echo "==> $BOARD: $SANA2_DRIVER, opened as '$SANA2_DEVICE'"
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-netstack-winuae}"
 

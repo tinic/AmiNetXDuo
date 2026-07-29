@@ -127,17 +127,25 @@ shift $((OPTIND - 1))
 # or on the machine that wrote this, so a card being listed here means the
 # hardware is available, not that we can drive it.
 #
-#   key           card                         driver needed
-#   a2065         Commodore A2065 (Am7990)      a2065.device      <- have it
-#   ariadne       Village Tronic Ariadne        ariadne.device
-#   ariadne2      Village Tronic Ariadne II     ariadne2.device
-#   hydra         Hydra Systems AmigaNet        amiganet.device
-#   eb920         ASDG LAN Rover / EB920        (ASDG's own)
-#   xsurf         Individual Computers X-Surf   xsurf.device
-#   xsurf100z2    X-Surf-100 Zorro II           xsurf100.device
-#   xsurf100z3    X-Surf-100 Zorro III          xsurf100.device
+# The driver each one wants is in tools/sana2-stage.sh; none of them except
+# a2065.device is in this repository.
 #
-# cnet.device has no hardware here: WinUAE emulates no C-Net card.
+#   key             card                              driver needed
+#   a2065           Commodore A2065 (Am7990)          a2065.device
+#   ariadne         Village Tronic Ariadne            ariadne.device
+#   ariadne2        Village Tronic Ariadne II         ariadne_ii.device
+#   hydra           Hydra Systems AmigaNet            hydra.device
+#   eb920           ASDG LAN Rover / EB920            eb920.device
+#   xsurf           Individual Computers X-Surf       x-surf.device
+#   xsurf100z2      X-Surf-100 Zorro II               x-surf-100.device
+#   xsurf100z3      X-Surf-100 Zorro III              x-surf-100.device
+#   ne2000_pcmcia   RTL8019 PCMCIA (NE2000)           cnet.device
+#
+# ne2000_pcmcia is the odd one.  It is a PC Card behind Gayle, so it needs
+# pcmcia=true and a machine that has a Gayle -- an A1200, not the A3000
+# default -- and it is BOARD_NONAUTOCONFIG_BEFORE in WinUAE, so it never
+# appears in the autoconfig board list however well it is working.  The only
+# proof it is there is a driver opening it.
 #
 # The A2065 keeps its own legacy config key; everything else is an expansion
 # board and is switched on with <name>_rom_file=:ENABLED.  All of them come up
@@ -179,7 +187,21 @@ a2065=rpcap://$_a2065" ;;
         esac
         ;;
     ariadne|ariadne2|hydra|eb920|xsurf|xsurf100z2|xsurf100z3)
-               BOARD_LINE="${BOARD}_rom_file=:ENABLED" ;;
+               # AMINETXDUO_WINUAE_BOARD_OPTIONS is WinUAE's own per-board
+               # settings string, e.g. irq=6 for the LAN Rover, whose driver
+               # ships in an int2 and an int6 build and hangs on the wrong one.
+               BOARD_LINE="${BOARD}_rom_file=:ENABLED"
+               [ -z "${AMINETXDUO_WINUAE_BOARD_OPTIONS:-}" ] || BOARD_LINE="$BOARD_LINE
+${BOARD}_rom_options=$AMINETXDUO_WINUAE_BOARD_OPTIONS" ;;
+    ne2000_pcmcia)
+               # inserted=true is what actually puts the card in the slot.
+               # Without it WinUAE maps the Gayle windows, logs nothing, and
+               # Kickstart's card.resource never initialises -- which reads
+               # from the guest as a driver that cannot find its hardware.
+               BOARD_LINE="pcmcia=true
+ne2000pcmcia_rom_file=:ENABLED
+ne2000pcmcia_rom_options=inserted=true
+ne2000_pcmcia=${AMINETXDUO_WINUAE_A2065:-slirp}" ;;
     *)         echo "unknown network board $BOARD" >&2; exit 2 ;;
 esac
 
@@ -235,6 +257,17 @@ case "$MODEL" in
         echo "unknown model $MODEL (want A3000, A4000 or A1200)" >&2; exit 2 ;;
 esac
 [ -z "$CPU" ] || CPU_MODEL="$CPU"
+
+# The A1200's PCMCIA credit-card window starts at $600000, and 8 MB of Zorro II
+# Fast RAM at $200000 runs straight over it.  Kickstart's card.resource then
+# declines to initialise and every PCMCIA driver reports that it cannot find
+# its hardware -- which is what a real A1200 with 8 MB of Z2 Fast does too.
+# 4 MB stops short of the window; the rest comes back as Zorro III, out of the
+# way, so a run on this board has as much memory as a run on any other.
+Z3MEM=0
+if [ "$BOARD" = ne2000_pcmcia ] && [ "$FASTMEM" -gt 4 ]; then
+    Z3MEM=$((FASTMEM - 4)); FASTMEM=4
+fi
 
 # Enforcer traps through a real MMU. A 68020 has none, and mmu_model=68020 is
 # not a thing WinUAE accepts, so its PMOVEs take an F-line exception and it
@@ -422,7 +455,7 @@ chipmem_size=$CHIPMEM
 bogomem_size=0
 fastmem_size=$FASTMEM
 a3000mem_size=$MBMEM
-z3mem_size=0
+z3mem_size=$Z3MEM
 rtc=MSM6242B
 nr_floppies=0
 floppy0type=-1

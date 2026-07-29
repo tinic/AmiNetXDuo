@@ -96,7 +96,9 @@ TAG="${AMINETXDUO_RUN_TAG:-conformance}"
 ARGS="NOPAGE"
 PROBE=0
 
-while getopts "m:c:t:T:a:b:p" opt; do
+BOARD=a2065
+
+while getopts "m:c:t:T:a:b:N:p" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
@@ -104,9 +106,10 @@ while getopts "m:c:t:T:a:b:p" opt; do
         T) TAG="$OPTARG" ;;
         a) ARGS="$OPTARG" ;;
         b) AMINETXDUO_BUILD="$OPTARG" ;;
+        N) BOARD="$OPTARG" ;;
         p) PROBE=1 ;;
         *) echo "usage: $0 [-m model] [-c cpu] [-t secs] [-T tag] [-a args]" \
-                "[-b builddir] [-p]" >&2
+                "[-b builddir] [-N board] [-p]" >&2
            exit 2 ;;
     esac
 done
@@ -124,25 +127,29 @@ for f in "$BSD" "$UG"; do
     [ -f "$f" ] || { echo "missing $f -- build bsdsocket_library usergroup_library" >&2; exit 2; }
 done
 
+. "$ROOT/tools/sana2-stage.sh"
+
 A2065="${AMINETXDUO_A2065:-}"
-if [ -z "$A2065" ]; then
+if [ -z "$A2065" ] && [ "$BOARD" = a2065 ]; then
     for candidate in \
         "$ROOT/build/a2065.device" \
         "$HOME/amiga-os-src/os-source/other_networking/sana2/bin/devs/a2065.device"
     do
         [ -f "$candidate" ] && { A2065="$candidate"; break; }
     done
+    [ -n "$A2065" ] && [ -f "$A2065" ] || {
+        echo "No a2065.device found. Set AMINETXDUO_A2065=<path>." >&2
+        exit 2
+    }
 fi
-[ -n "$A2065" ] && [ -f "$A2065" ] || {
-    echo "No a2065.device found. Set AMINETXDUO_A2065=<path>." >&2
-    exit 2
-}
 
 STAGE="$ROOT/build/conf-stage-$TAG"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
-cp "$A2065" "$STAGE/devs/a2065.device"
+[ -z "$A2065" ] || cp "$A2065" "$STAGE/devs/a2065.device"
+sana2_stage "$BOARD" "$STAGE/devs"
+echo "==> $BOARD: $SANA2_DRIVER, opened as '$SANA2_DEVICE'"
 cp "$BSD" "$STAGE/libs/bsdsocket.library"
 cp "$UG"  "$STAGE/libs/usergroup.library"
 cp "$SUITE" "$STAGE/bsdsocktest"
@@ -195,13 +202,13 @@ set +e
 if [ "$PROBE" = "1" ]; then
     # The probe needs no arguments and no big stack, so it is run directly
     # instead of through the launcher.
-    "$ROOT/tools/winuae-run.sh" -n -m "$MODEL" ${CPU:+-c "$CPU"} -t "$TIMEOUT" \
+    "$ROOT/tools/winuae-run.sh" -N "$BOARD" -m "$MODEL" ${CPU:+-c "$CPU"} -t "$TIMEOUT" \
         "$ROOT/build/bsdsocktest/conf_probe" "$STAGE/devs" "$STAGE/libs"
     status=$?
     set -e
     exit "$status"
 fi
-"$ROOT/tools/winuae-run.sh" -n -m "$MODEL" ${CPU:+-c "$CPU"} -t "$TIMEOUT" \
+"$ROOT/tools/winuae-run.sh" -N "$BOARD" -m "$MODEL" ${CPU:+-c "$CPU"} -t "$TIMEOUT" \
     "$LAUNCHER" "$STAGE/devs" "$STAGE/libs" "$STAGE/bsdsocktest" \
     "$STAGE/conf-args"
 status=$?

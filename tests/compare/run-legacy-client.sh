@@ -15,6 +15,15 @@
 #   -m MODEL emulator profile (default A1200, the only timing profile)
 #   -E       run under Enforcer instead of plain FS-UAE (68030, no timings)
 #   -I       also run the one case that needs the internet and DNS
+#   -W       run under WinUAE instead of FS-UAE
+#   -N BOARD network card, WinUAE only (see tools/winuae-run.sh)
+#
+# -W is what measures a card other than the A2065.  FS-UAE emulates one NIC;
+# WinUAE emulates nine, so a throughput number per card comes from there.  The
+# peer then has to be somewhere the guest can reach: under FS-UAE it is the
+# host at 10.0.2.2, under WinUAE the emulator is on another machine and the
+# peer is on this one, so AMINETXDUO_PEER_IP has to name this machine's LAN
+# address and the peer has to bind on all interfaces.
 #
 # The client is somebody else's binary, taken out of the archive it ships in.
 # It is IPv4-only by construction -- the Aminet curl is configured
@@ -47,8 +56,10 @@ TIMEOUT=600
 MODEL=A1200
 ENFORCE=0
 INTERNET=0
+WINUAE=0
+BOARD=a2065
 
-while getopts "b:A:x:a:P:B:T:t:m:EI" opt; do
+while getopts "b:A:x:a:P:B:T:t:m:N:EIW" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         A) ARCHIVE="$OPTARG" ;;
@@ -59,11 +70,24 @@ while getopts "b:A:x:a:P:B:T:t:m:EI" opt; do
         T) TAG="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
+        N) BOARD="$OPTARG"; WINUAE=1 ;;
         E) ENFORCE=1 ;;
         I) INTERNET=1 ;;
+        W) WINUAE=1 ;;
         *) sed -n '3,30p' "$0" >&2; exit 2 ;;
     esac
 done
+
+# The peer's address as the guest sees it.  10.0.2.2 is SLIRP's host under
+# FS-UAE; under WinUAE the emulator runs elsewhere and has to come back over
+# the LAN.
+if [ "$WINUAE" = "1" ]; then
+    PEER_IP="${AMINETXDUO_PEER_IP:?-W needs AMINETXDUO_PEER_IP set to the LAN address of this machine}"
+    PEER_BIND=0.0.0.0
+else
+    PEER_IP="${AMINETXDUO_PEER_IP:-10.0.2.2}"
+    PEER_BIND=127.0.0.1
+fi
 
 case "$BUILD" in /*) ;; *) BUILD="$ROOT/$BUILD" ;; esac
 [ -n "$TAG" ] || TAG="legacy-$(basename "$BUILD")"
@@ -101,15 +125,17 @@ for f in "$BSD" "$ADDIF"; do
     [ -f "$f" ] || { echo "missing $f" >&2; exit 2; }
 done
 
+. "$ROOT/tools/sana2-stage.sh"
+
 A2065="${AMINETXDUO_A2065:-}"
-if [ -z "$A2065" ]; then
+if [ -z "$A2065" ] && [ "$BOARD" = a2065 ]; then
     for c in "$ROOT/build/a2065.device" \
              "$HOME/amiga-os-src/os-source/other_networking/sana2/bin/devs/a2065.device"; do
         [ -f "$c" ] && { A2065="$c"; break; }
     done
+    [ -n "$A2065" ] && [ -f "$A2065" ] || {
+        echo "No a2065.device found. Set AMINETXDUO_A2065=<path>." >&2; exit 2; }
 fi
-[ -n "$A2065" ] && [ -f "$A2065" ] || {
-    echo "No a2065.device found. Set AMINETXDUO_A2065=<path>." >&2; exit 2; }
 
 . "$ROOT/tools/amiga-toolchain.sh"
 DRIVER="$ROOT/build/compare/CheckRunner"
@@ -126,12 +152,13 @@ STAGE="$ROOT/build/legacy-stage-$TAG"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs" "$STAGE/d" "$STAGE/w"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
-cp "$A2065" "$STAGE/devs/a2065.device"
+[ -z "$A2065" ] || cp "$A2065" "$STAGE/devs/a2065.device"
+sana2_stage "$BOARD" "$STAGE/devs"
 
 # The name the client is asked to resolve.  A hosts entry keeps the run off the
 # internet and still goes through gethostbyname(), which is the call that would
 # hand a 16-byte address to a client expecting 4.
-printf '%s\t%s peer\n' "10.0.2.2" "$HOSTNAME_ALIAS" >> "$STAGE/devs/Internet/hosts"
+printf '%s\t%s peer\n' "$PEER_IP" "$HOSTNAME_ALIAS" >> "$STAGE/devs/Internet/hosts"
 
 cp "$BSD" "$STAGE/libs/bsdsocket.library"
 [ -f "$UG" ] && cp "$UG" "$STAGE/libs/usergroup.library"
@@ -168,7 +195,7 @@ fi
 
 W='-w "http=%{http_code} size=%{size_download} time=%{time_total} speed=%{speed_download} ip=%{remote_ip}:%{remote_port}\n"'
 CURL="DH0:curl -s -S --max-time 120"
-HOSTPORT="10.0.2.2:$BASE_PORT"
+HOSTPORT="$PEER_IP:$BASE_PORT"
 NAMEPORT="$HOSTNAME_ALIAS:$BASE_PORT"
 
 PLAN="$STAGE/checks.txt"
@@ -183,7 +210,12 @@ PLAN="$STAGE/checks.txt"
            "$CURL" "$W" "$HOSTPORT" "$SMALL"
     printf 'lit_bulk\t%s %s -o DH0:d/lit_bulk http://%s/bytes/%s\n' \
            "$CURL" "$W" "$HOSTPORT" "$BULK"
+    # Three bulk transfers, not one.  Run-to-run spread on the same build is
+    # about a percent, which is smaller than the gap between some cards, so a
+    # single sample cannot be compared against another card's single sample.
     printf 'lit_bulk2\t%s %s -o DH0:d/lit_bulk2 http://%s/bytes/%s\n' \
+           "$CURL" "$W" "$HOSTPORT" "$BULK"
+    printf 'lit_bulk3\t%s %s -o DH0:d/lit_bulk3 http://%s/bytes/%s\n' \
            "$CURL" "$W" "$HOSTPORT" "$BULK"
     printf 'name_small\t%s %s -o DH0:d/name_small http://%s/bytes/%s\n' \
            "$CURL" "$W" "$NAMEPORT" "$SMALL"
@@ -213,6 +245,7 @@ cleanup() { [ -z "$PEER_PID" ] || kill -TERM "$PEER_PID" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM HUP
 
 python3 "$ROOT/tests/peer/httppeer.py" --base-port "$BASE_PORT" \
+        --bind "$PEER_BIND" --advertise "$PEER_IP" \
         --log "$ROOT/build/legacypeer-$TAG.log" \
         --seconds "$((TIMEOUT + 300))" \
         > "$ROOT/build/legacypeer-$TAG.out" 2>&1 &
@@ -239,12 +272,16 @@ EOF
 
 echo "==> library: $BSD"
 echo "==> client:  $CLIENT"
-echo "==> peer:    127.0.0.1:$BASE_PORT, guest sees 10.0.2.2"
+echo "==> peer:    $PEER_BIND:$BASE_PORT, guest sees $PEER_IP"
+[ "$WINUAE" = "0" ] || echo "==> card:    $BOARD, $SANA2_DRIVER"
 echo "==> plan:"
 sed 's/^/      /' "$PLAN"
 
 set +e
-if [ "$ENFORCE" = "1" ]; then
+if [ "$WINUAE" = "1" ]; then
+    "$ROOT/tools/winuae-run.sh" -N "$BOARD" -m "$MODEL" -t "$TIMEOUT" \
+        "$DRIVER" "${STAGED[@]}" > "$ROOT/build/legacy-$TAG.log" 2>&1
+elif [ "$ENFORCE" = "1" ]; then
     "$ROOT/tools/enforcer-run.sh" -n -t "$TIMEOUT" -T "$TAG" \
         "$DRIVER" "${STAGED[@]}" > "$ROOT/build/legacy-$TAG.log" 2>&1
 else
@@ -259,7 +296,11 @@ PEER_PID=""
 
 # ---------------------------------------------------------------- verdict ---
 
-HD="$ROOT/build/testhd-$TAG"
+if [ "$WINUAE" = "1" ]; then
+    HD="$ROOT/build/winuae-testhd-$TAG"
+else
+    HD="$ROOT/build/testhd-$TAG"
+fi
 
 echo
 echo "================ $TAG ================"
@@ -282,7 +323,8 @@ from httppeer import master
 
 d, small, bulk = sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
 want = {"lit_small": small, "name_small": small, "iface": small,
-        "lit_bulk": bulk, "lit_bulk2": bulk, "name_bulk": bulk}
+        "lit_bulk": bulk, "lit_bulk2": bulk, "lit_bulk3": bulk,
+        "name_bulk": bulk}
 bad = 0
 for name, n in sorted(want.items()):
     path = os.path.join(d, name)
