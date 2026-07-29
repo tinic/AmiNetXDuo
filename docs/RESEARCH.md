@@ -17516,3 +17516,162 @@ Regression set, all on the same tree: default build warning-clean, `ctest`
 11/11; IPv6 build warning-clean, `ipv6_test` 78/0, `ipv6_socket_test` 54/0,
 `ipv6_link_test` 6/0; conformance `-T v6reg -a NOPAGE` 142 total, 130 passed,
 0 failed, 12 skipped.
+
+## 67. ping and traceroute over IPv6, and the two NetX Duo defects in the way (2026-07-28)
+
+66 closed with `ping` and `traceroute` refusing an IPv6 target and naming the
+reason: `bsdsocket.library` offered `SOCK_RAW` for `AF_INET` only, and two
+things in NetX Duo would have had to change before it could offer more. Both
+are now fixed upstream-first, on the `amiga-ipv6-raw-hop-limit` branch of the
+fork, and the refusal is gone.
+
+### 67.1 The two defects, side by side in one function
+
+`_nxd_ip_raw_packet_source_send()` documents its `ttl` parameter as "Value for
+ttl or hop limit" and applies it to IPv4 only. The two branches are eight
+lines apart:
+
+    /* IPv4 */
+    _nx_ip_packet_send(ip_ptr, packet_ptr, destination_ip -> nxd_ip_address.v4,
+                       (tos & 0xFF) << 16, (ttl & 0xFF), protocol << 16,
+                       NX_FRAGMENT_OKAY, next_hop_address);
+
+    /* IPv6 */
+    status = _nxd_ipv6_raw_packet_send_internal(ip_ptr, packet_ptr,
+                                                destination_ip, protocol);
+
+`ttl` is not a parameter of `_nxd_ipv6_raw_packet_send_internal()` at all; it
+passes `ip_ptr->nx_ipv6_hop_limit` to `_nx_ipv6_packet_send()`. No IPv6 raw
+packet could carry a hop limit the caller chose, which is the whole of an IPv6
+traceroute.
+
+The source address is the same shape of asymmetry. The IPv4 branch asks
+`_nx_ip_route_find()` for an outgoing interface; the IPv6 branch takes
+`&(ip_ptr->nx_ipv6_address[address_index])` as given, and both entry points
+that do not name a source — `_nxd_ip_raw_packet_send()` and
+`_nxde_ip_raw_packet_send()` — hardcode index 0. Slot 0 is whichever address
+was configured first, not one chosen for the destination.
+`_nxd_ipv6_interface_find()` already exists and is what `_nx_icmp_ping6()`
+calls; `nxd_ipv6_raw_packet_send_internal.c` even lists it under CALLS while
+never calling it.
+
+The second one is not neatness. An ICMPv6 checksum covers the IPv6
+pseudo-header, so a source address chosen without regard for the destination
+produces a checksum the peer discards, and the request draws no reply with
+nothing to see from the application's side.
+
+The patch adds a `hop_limit` parameter to the internal function (zero keeps
+meaning `nx_ipv6_hop_limit`, so no existing caller moves), makes
+`_nxd_ip_raw_packet_send()` select a source with `_nxd_ipv6_interface_find()`
+and pass that address's `nxd_ipv6_address_index`, and routes
+`_nxde_ip_raw_packet_send()` through it rather than duplicating the hardcoded
+0. `_nxd_ip_raw_packet_source_send()` still honours an explicit
+`address_index` exactly; only the calls that never had a source to honour now
+choose one.
+
+Two things checked rather than assumed. `_nxd_ipv6_raw_packet_send_internal()`
+takes `nx_ip_protection` while `_nxd_ip_raw_packet_source_send()` already
+holds it: that nests because `tx_mutex_get.c:170` increments
+`tx_mutex_ownership_count` when the owner is the calling thread, and
+`TX_NO_INHERIT` in `nx_ip_create.c:203` is about priority inheritance, not
+recursion. And `_nxde_ip_raw_packet_send()` discarded the status of the send
+it made and returned `NX_SUCCESS` unconditionally, with the caller's packet
+pointer already cleared — fixed in the same commit, because routing it through
+the corrected entry point meant handling the return anyway.
+
+### 67.2 The raw socket, both families
+
+`bsd_socket()` no longer refuses `AF_INET6` for `SOCK_RAW`. The two halves of
+`src/bsdsocket/raw.c` differ in three places and agree everywhere else.
+
+**Receive.** An IPv4 read delivers the IP header, as 4.4BSD does; an IPv6 read
+does not, which is RFC 3542's rule. That falls out of the existing filter
+rather than needing a second path: the IPv4 copy is taken with the prepend
+pointer wound back over the header, and the IPv6 copy is taken where the
+pointer already is. `nx_packet_copy()` carries `nx_packet_ip_header` into the
+copy either way (`nx_packet_copy.c:203`), so `bsd_raw_source()` still finds
+the peer — bytes 8..23 of the fixed IPv6 header. A datagram is teed only to
+sockets of its own family.
+
+**Transmit.** The source address is selected before the packet is built and
+then named on the send:
+
+    _nxd_ipv6_interface_find(ip, dest->nxd_ip_address.v6, &source, NX_NULL);
+    ... checksum over source ...
+    nxd_ip_raw_packet_source_send(ip, packet, dest,
+                                  source->nxd_ipv6_address_index, ...);
+
+Not `nxd_ip_raw_packet_send()`, which would select again: two independent
+selections could differ and the checksum would then be over an address the
+header does not carry. This is exactly why 67.1's fix had to leave
+`_nxd_ip_raw_packet_source_send()` honouring an explicit index.
+
+**Checksum.** RFC 4443 makes the ICMPv6 checksum mandatory and RFC 3542 makes
+it the stack's job on a raw socket, for the reason above: the application
+cannot know its own source address. `bsd_raw_icmpv6_checksum()` zeroes the
+field and calls `_nx_ip_checksum_compute()`.
+
+One trap there cost a debugging round. `_nx_ip_checksum_compute()` folds four
+bytes of each address into the pseudo-header sum and only extends to sixteen
+`if (packet_ptr->nx_packet_ip_version == NX_IP_VERSION_V6)` — a field the send
+path sets *after* it would have been read. Setting it before the call is the
+fix, and the failure it produced was precisely diagnostic: `ping ::1` worked
+and `ping fd00::10` did not. The loopback interface claims every checksum
+capability (`nx_ip_create.c:169`, under `NX_ENABLE_INTERFACE_CAPABILITY`), so
+`::1` never verifies one; a self-send to `fd00::10` loops back through the
+*ethernet* interface, which offloads nothing, and verified it.
+
+`IPV6_UNICAST_HOPS` needed no work — `in6.c` already mapped it onto the same
+`as_Ttl` the IPv4 `IP_TTL` uses — but until 67.1 it reached the wire on
+neither family for IPv6.
+
+### 67.3 The commands
+
+`ping` and `traceroute` pick the family from the resolved address. ICMPv6
+renumbers everything they read: echo 128/129 rather than 8/0, time exceeded 3
+rather than 11, destination unreachable 1 rather than 3, and the quoted
+datagram inside an error message is a fixed 40-byte header with the next
+header at offset 6 rather than a variable one with the protocol at 9.
+`traceroute`'s unreachable annotations follow the KAME set — `!N` `!P` `!S`
+`!A` — and `PACKETSIZE` counts 48 bytes of headers rather than 28.
+
+Neither command computes an ICMPv6 checksum, for 67.2's reason. `TOS` is
+refused on an IPv6 target rather than accepted and dropped: the IPv6 traffic
+class is not a field the raw send path carries.
+
+`tool_sock_raw_ok()` — the function that printed the refusal — is deleted.
+
+### 67.4 Measured
+
+The three pending assertions in `tests/ipv6/run-tools-fsuae.sh` are
+assertions, and two more were added for `traceroute`:
+
+| | before | after |
+|---|---|---|
+| `ping ::1` | pending | 2 received, 9 ms |
+| `ping fd00::10` | pending | 2 received |
+| `ping fe80::2` (SLIRP's router) | pending | 2 received |
+| `traceroute ::1` timed a hop, and reached it | — | ok |
+
+The wire, from the emulated A2065's frame log through
+`tests/trace/a2065pcap.py`, is the part that shows both defects fixed at once:
+
+    hlim 1,   fd00::280:10ff:fe32:3334 > 2001:4860:4860::8888  echo request, seq 1
+    hlim 2,   fd00::280:10ff:fe32:3334 > 2001:4860:4860::8888  echo request, seq 2
+    hlim 3,   fd00::280:10ff:fe32:3334 > 2001:4860:4860::8888  echo request, seq 3
+    hlim 4,   fd00::280:10ff:fe32:3334 > 2001:4860:4860::8888  echo request, seq 4
+    hlim 128, fd00::280:10ff:fe32:3334 > 2001:4860:4860::8888  echo request, seq 0
+    hlim 128, fe80::280:10ff:fe32:3334 > fe80::2               echo request, seq 0
+
+A traceroute ramp on the first four, the socket default on `ping`, a global
+source for a global destination and a link-local source for a link-local one,
+and `tcpdump` reports `icmp6 sum ok` on every one of them. FS-UAE's SLIRP
+forwards nothing beyond itself — `traceroute 8.8.8.8` is `*` at every hop too
+— so a multi-hop trace cannot be run here; the hop-limit ramp on the wire is
+the evidence, not the hop list.
+
+Regression set, all on the same tree: default build warning-clean, `ctest`
+11/11; IPv6 build warning-clean, `ipv6_test` 78/0, `ipv6_socket_test` 54/0,
+`ipv6_link_test` 6/0; conformance loopback tier 130 passed, 0 failed, 12
+skipped, unchanged, with test 132 (raw ICMP ping over 127.0.0.1) still green;
+`tests/tools/run-livetools.sh` 24/24 and `tests/tools/run-nettools.sh` rc 0.

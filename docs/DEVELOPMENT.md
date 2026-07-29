@@ -199,7 +199,7 @@ tests/conformance/run-fsuae.sh -a "LOOPBACK NOPAGE"
 | ThreadX-on-Exec soak | 98 checks, 4+ adopted tasks, Enforcer-clean on 68030 |
 | TCP throughput, 13.9 MHz 68020 | **518 KB/s** loopback, **394 KB/s** to a host over SLIRP, both through the library (was 454 / 381 before the nest-counter critical section and the loopback checksum, and 261 / 312 before `src/net68k/`) |
 | TCP throughput, 24.5 MHz 68020 | **636 KB/s** through the library, 1.78× for a 1.76× clock; conformance unchanged |
-| IPv6 (`-DAMINETXDUO_IPV6=ON`) | ICMPv6 + TCP + UDP between two `NX_IP` instances (78 checks); `AF_INET6` sockets over `::1` through the library ABI; ICMPv6 to the host across an emulated A2065, with a router advertisement and stateless autoconfiguration |
+| IPv6 (`-DAMINETXDUO_IPV6=ON`) | ICMPv6 + TCP + UDP between two `NX_IP` instances (78 checks); `AF_INET6` sockets over `::1` through the library ABI; ICMPv6 to the host across an emulated A2065, with a router advertisement and stateless autoconfiguration; `SOCK_RAW`/`AF_INET6`, so `ping` and `traceroute` take an IPv6 target (docs/RESEARCH.md 67) |
 
 Verified on 68020 and 68030. **The loopback tier has no failures**, and it
 cannot reach Roadshow's number by construction: nine of the 142 need a remote
