@@ -16811,3 +16811,257 @@ exception -- thousands of `B-Trap F017` and nothing else runs -- and `waitsecs`
 staged, so a resident tool started with `run` has installed before the program
 under test starts. It reported no hits here, which is correct: the fault is on
 the host side of the emulator.
+
+## 64. The 68020 is CPU-bound, and the window has nothing left to give (2026-07-28)
+
+AmiTCP_NG 4.1.2–4.1.4 shipped a round of speed work — link-speed-aware TCP
+windows, a 200 ms → 40 ms delayed ACK, MSS from the egress MTU, receive-ring
+tiering — and the question was how much of it transfers here. The answer is
+that the window is the wrong lever on this machine, and the two things that
+were worth taking are somewhere else entirely: the critical section and the
+loopback checksum, together **+14% through `bsdsocket.library`**.
+
+Everything below is the A1200 profile, 68020, cycle accounting on, unless a
+line says otherwise. `tests/perf/perf_test.c` runs in 13 s of host wall clock
+and reproduces to the KB/s across separate emulator sessions, so the arms are
+three runs each and the spread is quoted.
+
+### 64.1 Where a megabyte goes, measured rather than argued
+
+`perf_test` prices every primitive and then runs the same transfer end to end.
+With `src/net68k/` in place, 256 KB:
+
+| | loopback, drain | loopback, +extract | simulated wire |
+|---|---:|---:|---:|
+| shipping before this section | 584 KB/s | 520 | 217 |
+| every checksum compiled out | 782 | 673 | 248 |
+
+So the checksum is 34% of loopback and 15% of the wire, and it is already
+2.65 cycles/byte of `add.l (a0)+,d0` / `addx.l d2,d0` — the published cost of
+those two instructions is 2.25, and `movem.l` does not beat it because the
+adds still cost two cycles each whatever loaded them. There is nothing left in
+that loop.
+
+Nor is there anything left in a copy loop. The alignment census says every
+pointer the stack hands a copy routine is longword aligned, `memcpy` runs at
+183 ns/B against `n68k_copy_bytes`'s 181, and the two portable-C routines that
+still show above it — `nx_packet_data_extract_offset` at 203 ns/B and
+`nx_packet_copy` at 271 — are `memcpy` plus per-packet allocator overhead,
+not slow inner loops. **No per-byte loop is left in portable C.**
+
+What is left is per-packet cost. On the wire arm the identified per-byte work
+is about a quarter of the elapsed time; the rest is 386 packets at roughly
+2.5 ms each.
+
+### 64.2 Two counters, and the one that was worth acting on
+
+A temporary counter in `_tx_thread_interrupt_disable()` and in
+`_tx_thread_schedule()`, read across each end-to-end case:
+
+| | TX_DISABLE pairs | baton dispatches |
+|---|---:|---:|
+| loopback, 256 KB | 2,537 | 270 |
+| simulated wire, 256 KB | 10,042 | 695 |
+
+That is 26 critical sections per packet on the wire, and `perf_test` prices a
+`Forbid()`/`Permit()` pair at **9,923 ns** on this profile — two indirect jumps
+through a library vector table that is not in the same memory as the caller.
+10,042 × 9.9 µs is 100 ms of an 1,181 ms transfer.
+
+`Forbid()` is `ADDQ.B #1,TDNestCnt(A6)`. `Permit()` is the matching `SUBQ.B`
+plus three tests, and Exec's own Permit does nothing beyond the decrement
+unless all three say a reschedule is due — the count went below zero, no
+interrupt is in progress, and the attention word is non-zero. The port now
+does the arithmetic itself and calls the library only for that third case,
+where it puts the nesting back first so the reschedule path stays Exec's.
+
+Three runs per arm, out of one tree, nothing else changed:
+
+| | library calls | nest counter | |
+|---|---|---|---:|
+| loopback, drain | 584 / 585 / 585 | 603 / 603 / 603 | **+3.2%** |
+| loopback, +extract | 520 / 521 / 521 | 534 / 535 / 535 | **+2.7%** |
+| simulated wire | 217 / 221 / 221 | 229 / 229 / 228 | **+4.3%** |
+
+`_nx_packet_allocate` + `_nx_packet_release`, which is two of those pairs on
+the hottest call in the stack, goes from 80 µs to 63.
+
+The dispatch counter did not lead anywhere this session. 695 baton handoffs
+for 386 packets is 1.8 per packet, and reducing it is scheduler surgery rather
+than a constant to remove.
+
+### 64.3 The checksum a loopback packet does not need
+
+`NX_ENABLE_INTERFACE_CAPABILITY` reads as a checksum-offload switch, and the
+old note in `nx_user.h` rejected it on the grounds that no SANA-II device
+offers offload. That is true and it is not what the define does here:
+`nx_ip_create.c:169` sets every checksum bit on `NX_LOOPBACK_INTERFACE` under
+that define **and only under it**. On 127.0.0.1 the sender computes a checksum
+over a buffer and the receiver verifies it against the same bytes in the same
+RAM, having crossed nothing that could have changed them.
+
+One of the two goes, not both — `_nx_ip_driver_packet_send()` fills the field
+in on the looped-back copy so the packet is well formed, and it is the
+verification that is skipped. 316 checksum calls over 518 KB become 158 over
+259 KB for the same transfer.
+
+| | off | on | |
+|---|---:|---:|---:|
+| loopback, drain | 603 | 682 KB/s | **+13.1%** |
+| loopback, +extract | 535 | 595 | **+11.2%** |
+| simulated wire | 229 | 224 | **−2.2%** |
+
+The wire loses because the branches are compiled in everywhere while the flag
+is zero on every real interface, and because `NX_PACKET` grows by the
+capability field. That is the trade, and it is taken: on the real path through
+`bsdsocket.library` the two changes together are +3% on the wire, so the 2.2%
+is inside what the critical section gives back.
+
+### 64.4 What it is worth through the library
+
+`bsdsocktest`, same host, same session, the throughput category. Loopback tier
+three runs after and two before; network tier over SLIRP to the suite's own
+Python host helper, one run each.
+
+| | before | after | |
+|---|---|---|---:|
+| TCP loopback, 512 KB | 451 / 452 | 514 / 515 / 515 | **+14.0%** |
+| TCP sustained loopback, 1 MB | 454 / 453 | 518 / 518 / 518 | **+14.2%** |
+| TCP network, 512 KB | 380 | 391 | **+2.9%** |
+| TCP sustained network, 1 MB | 381 | 394 | **+3.4%** |
+| Network 256 KB echo | 93 | 94 | +1.1% |
+
+Loopback tier stays 130 passed / 0 failed / 12 skipped. Network tier stays
+141 passed / 1 failed, the same `accept(): incoming connection from remote
+host` that SLIRP has never been able to satisfy.
+
+### 64.5 The receive window: the curve, not a point
+
+`perf_test` grew a sweep, because a single window figure cannot tell "the
+default is right" from "nothing here responds to the window at all". 128 KB
+per point, `NX_TCP_ACK_EVERY_N_PACKETS 2` already in place throughout —
+§28 established that raising a window without it is actively harmful.
+
+| window | loopback | simulated wire |
+|---:|---:|---:|
+| 2,048 | 246 KB/s | 168 KB/s |
+| 4,096 | 354 | 205 |
+| 8,192 | **531** | 210 |
+| 16,384 | 514 | 215 |
+| 32,768 | 561 | 222 |
+| 65,535 | 549 | 211 |
+
+**The knee is at 8 KB on loopback and 4 KB on the wire, and the shipped floor
+is 8 KB.** Above it the curve is flat to within its own run-to-run spread, and
+65,535 — the largest window a socket can be created with while window scaling
+is off — is no better than 8,192.
+
+This is the same conclusion §51 reached from the other direction (32 KB pinned
+was 25–75% *worse* through curl) with the mechanism now visible: it is not
+that a big window hurts, it is that above the knee the window is not what the
+transfer is waiting for.
+
+### 64.6 The regime question, and what a zero-latency link cannot answer
+
+AmiTCP_NG's link-speed-aware window is reported to have roughly doubled a
+single stream on a real 100 Mbit link. The obvious objection — we move
+2.9 Mbit/s on a 13.9 MHz 68020, nowhere near link capacity — is right for
+*this* machine and says nothing about a PiStorm or a Vampire, which run the
+68040/68060 builds this project ships and where the CPU is not the bottleneck.
+The regime matters, so both regimes were run.
+
+**CPU-bound is measured, not assumed.** Two clocks, `-k 25` against the
+default, same binary, same window (16,384), cycle accounting on for both:
+
+| | 13.93 MHz | 24.48 MHz | ratio |
+|---|---:|---:|---:|
+| loopback, drain | 587 KB/s | 1,044 | 1.78× |
+| loopback, +extract | 521 | 934 | 1.79× |
+| simulated wire | 219 | 389 | 1.78× |
+
+**1.78× throughput for a 1.76× clock, at a fixed window.** Throughput on this
+machine is a linear function of clock rate and a flat function of window
+above 8 KB. That is what CPU-bound means, stated as two measurements rather
+than as an argument, and it agrees with the 1.78× §29 recorded for the library.
+
+**With the CPU unlocked the curve does not change shape.** FS-UAE's A1200
+model in warp (`accuracy = -1`, `uae_cpu_speed = max`,
+`uae_cpu_cycle_exact = false`) reports an implied clock of 568 MHz and charges
+`MULU.L` 2.64 cycles where the cycle-accurate model charges 32 — `cpucal`
+measures this, and no absolute figure from that mode is quotable. The sweep in
+it:
+
+| window | loopback | simulated wire |
+|---:|---:|---:|
+| 2,048 | 18,285 KB/s | 11,636 KB/s |
+| 4,096 | 32,000 | 16,000 |
+| 8,192 | 42,666 | 16,000 |
+| 16,384 | 42,666 | 16,000 |
+| 32,768 | 64,000 | 16,000 |
+| 65,535 | 42,666 | 16,000 |
+
+Same knee, same flat top, 70× the absolute numbers. **A window sweep on a
+zero-latency link cannot show a bandwidth-delay-product benefit, whatever the
+CPU is doing**, because the delay term is zero: loopback delivers into the
+receive queue inside the send call, and the RAM driver's `NX_LINK_PACKET_SEND`
+copies the packet and calls `_nx_ip_packet_deferred_receive()` directly. Both
+of the instruments this project owns for a window sweep have a BDP of nearly
+nothing, which is why neither has ever been able to answer the question.
+
+Settling it needs a fast CPU **and** a link with real latency at once. That is
+`tools/winuae-run.sh` with the bridged A2065 of §63 and the CPU unlocked, and
+it is the one measurement here that cannot be taken locally. The result that
+would settle it: sweep the pinned window on the bridged link and see whether
+throughput responds. If it climbs with the window, link-speed-aware sizing is
+worth building and RFC 7323 scaling has to come off the bench with it, since
+anything above 65,535 needs the option. If it is flat, the limit is the SANA-II
+receive ring, the pool or ACK pacing, and the window is settled for every
+target this project has.
+
+### 64.7 Four of theirs, weighed
+
+**MSS from the egress MTU** — already the case, and not by our doing:
+NetX Duo derives the MSS from `nx_interface_ip_mtu_size` and the sweep shows
+it, 193 IP packets for 256 KB across the simulated wire, 1,359 bytes each.
+`BSD_DEFAULT_MSS` (536) in `src/bsdsocket/transfer.c` is only the fallback for
+a socket whose MSS is not yet known, not a fixed 512.
+
+**Receive-ring tiering** — already the case and better argued:
+`ami_sana2_rx_ipv4_depth()` derives the IPv4 read queue from the packet pool,
+which is itself derived from `AvailMem()`, with a floor and a ceiling. A 4 MB
+machine gets the floor and an 8 MB one the ceiling.
+
+**Delayed ACK, 200 ms → 40 ms** — measured, and rejected. It needs
+`NX_TCP_FAST_TIMER_RATE` raised alongside `NX_TCP_ACK_TIMER_RATE`, because the
+fast periodic is what decrements the timeout, and that walks the whole socket
+list 2.5× as often. 592 / 524 / 224 KB/s against 603 / 535 / 229: a 2% cost
+across the board for latency that `NX_TCP_ACK_EVERY_N_PACKETS 2` has already
+bought — §28 measured ACK delay at a 2.0 ms median with it.
+
+**Link-speed-aware windows** — not applicable at any window this stack can
+offer, on the evidence of 64.5 and 64.6, and unanswerable for the fast-CPU
+regime without the bridged link. Their shape is still the right shape for a
+project whose targets run from a 4 MB 68000 to a PiStorm: RAM sets a ceiling,
+the link sets a target, the smaller wins. What is missing is a measurement
+saying the target term does anything, and the ~512 KB they quote is two orders
+of magnitude past what a 256-packet pool can fund and needs window scaling to
+be expressible at all.
+
+### 64.8 Three more, tried and rejected with numbers
+
+**`NX_DISABLE_ERROR_CHECKING`.** The `_nxe_` wrappers are 30% of an
+`nx_packet_allocate`/`release` pair — 90 µs against 63 — and worth nothing end
+to end: 580 / 216 KB/s against 584 / 216. NetX Duo's own internals call `_nx_`
+and never see a wrapper, so only our own call sites pay, and there are not
+enough of them per megabyte to matter. The bring-up milestones keep their
+error checking.
+
+**`NX_TCP_MAXIMUM_TX_QUEUE 16`.** Twice the in-flight depth: 592 / 528 / 224
+against 603 / 535 / 229. On a machine that is CPU-bound rather than
+window-bound, more packets in flight is more pool held for the same
+throughput.
+
+**A faster checksum inner loop.** Priced before writing anything: the two
+instructions per longword already cost what the MC68020UM says they cost, and
+a `movem.l`-fed version needs the same two-cycle adds afterwards. There is no
+version of this loop that is meaningfully faster on a 68020.

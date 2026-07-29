@@ -197,7 +197,7 @@ tests/conformance/run-fsuae.sh -a "LOOPBACK NOPAGE"
 | conformance, network tier | **141/142** (1 fail, 0 skip) — Roadshow 4.364 scores 138 |
 | client access patterns | **94/94** (`tests/clients`) — the call sequences curl, wget, nc, ftp and telnet actually issue, each group named for the program and file it came from |
 | ThreadX-on-Exec soak | 98 checks, 4+ adopted tasks, Enforcer-clean on 68030 |
-| TCP throughput, 13.9 MHz 68020 | **356 KB/s** loopback, **368 KB/s** to a host over SLIRP (was 261 / 312 before `src/net68k/`) |
+| TCP throughput, 13.9 MHz 68020 | **518 KB/s** loopback, **394 KB/s** to a host over SLIRP, both through the library (was 454 / 381 before the nest-counter critical section and the loopback checksum, and 261 / 312 before `src/net68k/`) |
 | TCP throughput, 24.5 MHz 68020 | **636 KB/s** through the library, 1.78× for a 1.76× clock; conformance unchanged |
 | IPv6 (`-DAMINETXDUO_IPV6=ON`) | ICMPv6 + TCP + UDP between two `NX_IP` instances (78 checks); `AF_INET6` sockets over `::1` through the library ABI; ICMPv6 to the host across an emulated A2065, with a router advertisement and stateless autoconfiguration |
 
@@ -216,6 +216,39 @@ Roadshow 4.364 scores 138 with four known deviations of its own and no skips,
 which places it on the network tier with a helper connected and a working
 `SOCK_RAW` — so the figure to have compared against all along was our 133, not
 our loopback score.
+
+### Measuring throughput
+
+`tests/perf/perf_test` is the instrument: it prices every primitive on the data
+path, counts how often the path touches each one, and then runs the same
+transfer end to end over loopback and over a simulated wire. It takes 13 s of
+host wall clock and reproduces to the KB/s between emulator sessions, so an
+A/B is two builds and two runs.
+
+```sh
+cmake --build build/cm --parallel --target perf_test
+AMINETXDUO_RUN_TAG=perf ./tools/fsuae-run.sh -t 900 build/cm/tests/perf/perf_test
+```
+
+Its last section sweeps the TCP receive window, because a single figure cannot
+tell "this default is right" from "nothing here responds to the window". Read
+the header of `perf_test.c` before quoting anything it prints.
+
+Two things decide whether a number from it means anything:
+
+* **Only the 68020 profiles have cycle accounting.** `-k MHZ` moves that
+  model's clock without losing it; a 68030 or anything above is a correctness
+  profile and not a timing one. `tests/perf/cpucal` measures which is which.
+* **An unlocked CPU is for regime testing, never for absolute figures.**
+  `AMINETXDUO_FSUAE_EXTRA="accuracy = -1;uae_cpu_speed = max;uae_cpu_cycle_exact = false"`
+  gives a machine where the CPU is not the bottleneck, which is the only way
+  to ask "would this be different on a PiStorm?". `cpucal` in that mode reports
+  an implied 568 MHz and charges `MULU.L` 2.64 cycles against a real 68020's
+  43. Nothing measured there is a claim about hardware.
+
+Throughput on the floor target is a linear function of clock — 1.78× for a
+1.76× clock — and a flat function of receive window above 8 KB. The working
+out is [RESEARCH 64](RESEARCH.md#64-the-68020-is-cpu-bound-and-the-window-has-nothing-left-to-give-2026-07-28).
 
 ## Continuous integration
 
