@@ -1951,10 +1951,10 @@
 
       WaitForPort AMITCP
 
-  as a way of waiting for the stack to be ready. AmiNetXDuo does not
-  create that port, so such a line will time out. Remove it, and rely
-  on AddNetInterface in S:User-Startup having finished instead --
-  AddNetInterface does not return until the stack is up.
+  as a way of waiting for the stack to be ready. AmiNetXDuo creates
+  that port, so such a line works. AddNetInterface does not return
+  until the stack is up either, so a script that has already run it
+  needs nothing further.
 
 @endnode
 

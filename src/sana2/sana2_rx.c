@@ -410,7 +410,10 @@ static UWORD ami_sana2_rx_reap(AmiSana2Rx *rx, UWORD tries)
  *      device; a2065.device 2.16 ignores it.
  *   2. CMD_FLUSH, which exec defines as "abort all queued requests for this
  *      unit" and SANA-II carries forward. Unit-wide rather than per-request,
- *      hence second.
+ *      hence second: x-surf-100.device returns every opener's reads, not just
+ *      ours. That is accepted rather than overlooked -- the alternative is
+ *      step 3, and another program losing its posted reads is recoverable
+ *      where writing into memory we have freed is not.
  *   3. Give up and report it, having freed nothing the device can still write
  *      into. Freeing the reply port, releasing the pinned packets or letting
  *      ami_sana2_close() free the interface while the device still holds

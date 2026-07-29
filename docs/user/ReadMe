@@ -137,20 +137,15 @@ commands with examples, and troubleshooting.
 THINGS IT DOES NOT DO
 ---------------------
 
-  * Only the default route -- there is no route command, and specific
-    routes in DEVS:Internet/routes are ignored.
-  * At most two interfaces are attached.
+  * At most four interfaces are attached.
   * Only Ethernet-style SANA-II drivers have been tested; PPP and SLIP
     should be treated as unsupported.
-  * No raw sockets (SOCK_RAW), and no out-of-band TCP data (MSG_OOB).
-  * No TLS, so no HTTPS: one TLS handshake measures over three minutes on
-    a 68020, so it is switched off.
-  * IPv6 is a build option, off in ordinary builds, and the commands above
-    are IPv4 only in every build.
+  * A first HTTPS handshake to a busy host may not finish inside the far
+    end's timeout on a 68020. It usually succeeds on the next attempt,
+    because the session is cached. TLS is off on a 68000.
+  * IPv6 multicast group membership is not available to programs.
   * The Roadshow interface-list, routing and statistics library calls
     return ENOSYS.
-  * There is no AMITCP public message port, so an install script
-    containing "WaitForPort AMITCP" will time out. Remove that line.
 
 The guide has the full list with explanations.
 
