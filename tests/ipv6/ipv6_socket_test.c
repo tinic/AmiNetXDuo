@@ -588,7 +588,8 @@ static VOID t_make_any6(struct t_sockaddr_in6 *sa, UWORD port)
 
 static VOID t_test_conversions(VOID)
 {
-struct t_in6_addr   addr;
+/* Zeroed so the byte checks below fail if inet_pton writes nothing. */
+struct t_in6_addr   addr = { { 0 } };
 char                text[64];
 APTR                p;
 LONG                rc;
