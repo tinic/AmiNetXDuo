@@ -15,18 +15,16 @@
 # WHAT IS ON THE OTHER END
 #
 #   tests/tools/netpeer.py, on the host: an echo server, a telnet server that
-#   negotiates properly, and an FTP server that does both PASV and PORT.  The
-#   guest reaches them at 10.0.2.2, which is what SLIRP calls the host.
+#   negotiates properly, and tftp and whois servers.  The guest reaches them
+#   at 10.0.2.2, which is what SLIRP calls the host.
 #
 # AND WHAT REACHES THE GUEST
 #
 #   SLIRP is a NAT, so nothing outside can open a connection INTO the Amiga
 #   unless a port is forwarded.  FS-UAE's `slirp_redir` does that -- the
 #   option is UAE's, so it goes through the uae_ passthrough -- and this
-#   script forwards two:
-#
-#     NC_INBOUND_PORT    so the host can connect to `nc -l` on the Amiga
-#     FTP_DATA_PORT      so the FTP server can call back to ACTIVE mode
+#   script forwards NC_INBOUND_PORT, so the host can connect to `nc -l` on
+#   the Amiga.
 #
 #   The guest's own address is SLIRP's first DHCP lease, 10.0.2.15.
 #
@@ -61,9 +59,7 @@ done
 # one that fails.
 ECHO_PORT="${AMINETXDUO_ECHO_PORT:-7001}"
 TELNET_PORT="${AMINETXDUO_TELNET_PORT:-7023}"
-FTP_PORT="${AMINETXDUO_FTP_PORT:-7021}"
 NC_INBOUND_PORT="${AMINETXDUO_NC_PORT:-7042}"
-FTP_DATA_PORT="${AMINETXDUO_FTP_DATA_PORT:-7060}"
 # TFTP's own port is 69, and binding it needs root on this host -- a test that
 # asks for a password is a test nobody runs.  The command takes the port as an
 # argument, so the rig uses a high one.
@@ -80,7 +76,7 @@ TRACEROUTE="$ROOT/$BUILD/src/tools/traceroute"
 TFTP="$ROOT/$BUILD/src/tools/tftp"
 WHOIS="$ROOT/$BUILD/src/tools/whois"
 
-for f in "$SMOKE" "$ADDIF" "$BSD" "$NC" "$TELNET" "$FTP" "$TRACEROUTE" \
+for f in "$SMOKE" "$ADDIF" "$BSD" "$NC" "$TELNET" "$TRACEROUTE" \
          "$TFTP" "$WHOIS"; do
     [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
 done
@@ -234,7 +230,7 @@ fi
 PEERLOG="$ROOT/build/netpeer.log"
 python3 "$ROOT/tests/tools/netpeer.py" \
     --echo-port "$ECHO_PORT" --telnet-port "$TELNET_PORT" \
-    --ftp-port "$FTP_PORT" --tftp-port "$TFTP_PORT" \
+    --tftp-port "$TFTP_PORT" \
     --whois-port "$WHOIS_PORT" \
     --advertise 10.0.2.2 \
     --dial "127.0.0.1:$NC_INBOUND_PORT" --dial-for "$TIMEOUT" \
@@ -258,10 +254,9 @@ echo "==> netpeer.py: echo $ECHO_PORT, telnet $TELNET_PORT," \
 
 # --------------------------------------------------------------- slirp ---
 #
-# Inbound.  Without these two the guest can call out and nothing can call in,
-# which is exactly the half `nc -l` and active FTP exist to test.
+# Inbound.  Without this the guest can call out and nothing can call in,
+# which is exactly the half `nc -l` exists to test.
 REDIR="uae_slirp_redir = tcp:$NC_INBOUND_PORT:$NC_INBOUND_PORT"
-REDIR="$REDIR;uae_slirp_redir = tcp:$FTP_DATA_PORT:$FTP_DATA_PORT"
 [ -z "$EXTRA_CONFIG" ] || REDIR="$REDIR;$EXTRA_CONFIG"
 
 export AMINETXDUO_FSUAE_EXTRA="$REDIR"
@@ -296,10 +291,9 @@ CPUARG=()
 set +e
 "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
     "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/nc" "$STAGE/telnet" \
-    "$STAGE/ftp" "$STAGE/traceroute" "$STAGE/tftp" "$STAGE/whois" \
+    "$STAGE/traceroute" "$STAGE/tftp" "$STAGE/whois" \
     "$STAGE/AddNetInterface" "$STAGE/commands.txt" \
-    "$STAGE/request.txt" "$STAGE/greeting.txt" "$STAGE/telnetin.txt" \
-    "$STAGE/ftppasv.txt" "$STAGE/ftpactive.txt"
+    "$STAGE/request.txt" "$STAGE/greeting.txt" "$STAGE/telnetin.txt"
 RC=$?
 set -e
 

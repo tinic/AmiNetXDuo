@@ -445,7 +445,7 @@ def main():
                     help="TCP port for the daytime server -- a finite stream "
                          "that closes; 0 leaves it off")
     ap.add_argument("--advertise", default="10.0.2.2",
-                    help="address to put in the 227 PASV reply -- what the "
+                    help="address substituted into whois records -- what the "
                          "guest must dial, not what we are bound to")
     ap.add_argument("--log")
     ap.add_argument("--seconds", type=int, default=600)
@@ -497,7 +497,7 @@ def main():
         log("start", "will dial into %s for up to %d s"
             % (args.dial, args.dial_for))
 
-    log("start", "pid %d, advertising %s for PASV%s"
+    log("start", "pid %d, advertising %s"
         % (os.getpid(), args.advertise))
 
     try:
