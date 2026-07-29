@@ -1064,6 +1064,65 @@ VOID tool_format_ip6(struct Library *base, const ULONG addr[4],
     }
 }
 
+/*
+ * inet_pton(), LVO -0x25e, the other direction, for the same reason: a command
+ * built from an IPv4-only tree has no IPv6 parser of its own -- ami_config_parse_ip6()
+ * is compiled only in an AMINETXDUO_IPV6 build -- and still has to take an
+ * address a user typed.
+ *
+ * Writes the four host-order words NETSTATUS_* speaks. A library whose vector
+ * table stops short of -0x25e answers FALSE, which reads as "not an address
+ * this machine can use" and is the right answer on one that has no IPv6.
+ *
+ * The vector test comes before the register variables; see the note above
+ * tool_sock_pton() in toolsock.c.
+ */
+BOOL tool_parse_ip6(struct Library *base, const char *text, ULONG out[4])
+{
+    UBYTE bytes[16];
+    LONG  res;
+    ULONG i;
+
+    if (base == NULL || text == NULL || out == NULL)
+        return FALSE;
+    if ((ULONG)base->lib_NegSize < 0x25eUL)
+        return FALSE;
+
+    for (i = 0; i < 16UL; i++)
+        bytes[i] = 0;
+
+    {
+        register struct Library *a6  __asm("a6") = base;
+        register LONG            d0  __asm("d0") = 23;     /* AF_INET6 */
+        register CONST_APTR      a0  __asm("a0") = (CONST_APTR)text;
+        register APTR            a1  __asm("a1") = (APTR)bytes;
+        register LONG            r   __asm("d0");
+        register LONG _clob_d1 __asm("d1");
+        register LONG _clob_a0 __asm("a0");
+        register LONG _clob_a1 __asm("a1");
+
+        __asm __volatile ("jsr a6@(-606:W)"
+                          : "=r" (r), "=r" (_clob_d1), "=r" (_clob_a0),
+                            "=r" (_clob_a1)
+                          : "r" (a6), "r" (d0), "r" (a0), "r" (a1)
+                          : "cc", "memory");
+        res = r;
+    }
+
+    if (res != 1)
+        return FALSE;
+
+    for (i = 0; i < 4UL; i++)
+    {
+        out[i] = ((ULONG)bytes[i * 4UL + 0] << 24) |
+                 ((ULONG)bytes[i * 4UL + 1] << 16) |
+                 ((ULONG)bytes[i * 4UL + 2] <<  8) |
+                  (ULONG)bytes[i * 4UL + 3];
+    }
+
+    return TRUE;
+}
+
 /* Errno(), LVO -0x0a2: what the two above leave behind on failure. */
 static LONG tool_call_errno(struct Library *base)
 {

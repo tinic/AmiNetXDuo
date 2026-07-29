@@ -31,6 +31,8 @@ static union
     struct { NetStatusHeader hdr; NetStatusSocket    e[TOOL_MAX_SOCK]; } sock;
     struct { NetStatusHeader hdr; NetStatusDhcp      e[TOOL_MAX_IF]; }   dhcp;
     struct { NetStatusHeader hdr; NetStatusAddress6  e[TOOL_MAX_ADDR6]; } addr6;
+    struct { NetStatusHeader hdr; NetStatusRoute6    e[TOOL_MAX_ROUTE6]; } route6;
+    struct { NetStatusHeader hdr; NetStatusNeighbour e[TOOL_MAX_ND]; }     nd;
 } nx_answer;
 
 /*
@@ -589,6 +591,233 @@ VOID tool_print_routes(const ToolRoutes *routes, const AmiConfig *cfg,
 
     if (routes->truncated)
         tool_printf("(more routes than this command can hold)\n");
+}
+
+/* ----------------------------------------------------------- IPv6 routes -- */
+
+LONG tool_routes6(ToolRoutes6 *out)
+{
+    struct Library *base;
+    LONG            n;
+    LONG            i;
+
+    if (out == NULL)
+        return -1;
+
+    out->count     = 0;
+    out->truncated = FALSE;
+
+    base = nx_open();
+    if (base == NULL)
+        return -1;
+
+    /*
+     * A library without IPv6 answers with no entries and one too old to know
+     * the selector answers -1. Both mean this machine has no IPv6 route to
+     * report, which prints nothing and is not a failure.
+     */
+    n = tool_netstatus_query(base, NETSTATUS_ROUTES6, &nx_answer,
+                             sizeof(nx_answer.route6), sizeof(NetStatusRoute6));
+    if (n > 0)
+    {
+        if (nx_answer.route6.hdr.nsh_Available > nx_answer.route6.hdr.nsh_Count)
+            out->truncated = TRUE;
+
+        for (i = 0; i < n && i < (LONG)TOOL_MAX_ROUTE6; i++)
+        {
+            const NetStatusRoute6 *src = &nx_answer.route6.e[i];
+            ToolRoute6            *r   = &out->route[i];
+
+            tool_format_ip6(base, src->nsr6_Destination, r->dest,
+                            sizeof(r->dest));
+
+            if (src->nsr6_Flags & NETSTATUS_RT6_GATEWAY)
+                tool_format_ip6(base, src->nsr6_NextHop, r->next_hop,
+                                sizeof(r->next_hop));
+            else
+                r->next_hop[0] = '\0';
+
+            r->dest_words[0] = src->nsr6_Destination[0];
+            r->dest_words[1] = src->nsr6_Destination[1];
+            r->dest_words[2] = src->nsr6_Destination[2];
+            r->dest_words[3] = src->nsr6_Destination[3];
+
+            r->prefix   = src->nsr6_PrefixLength;
+            r->lifetime = src->nsr6_Lifetime;
+            r->flags    = src->nsr6_Flags;
+            r->nx_index = src->nsr6_Interface;
+
+            out->count = (UWORD)(i + 1);
+        }
+    }
+
+    tool_netstatus_close(base);
+
+    return 0;
+}
+
+/*
+ * The IPv6 table, next to the IPv4 one and not merged with it: there is no
+ * netmask column to fill, a default router has a lifetime where a gateway has
+ * none, and "::/0" in a Netmask column would be a lie about how the stack
+ * decides.
+ */
+VOID tool_print_routes6(const ToolRoutes6 *routes, const AmiConfig *cfg)
+{
+    UWORD i;
+
+    if (routes == NULL || routes->count == 0)
+        return;
+
+    tool_printf("\nDestination                              "
+                "Next hop                       Flags  Interface\n");
+
+    for (i = 0; i < routes->count; i++)
+    {
+        const ToolRoute6 *r = &routes->route[i];
+        char              dest[56];
+        char              flags[6];
+        UWORD             f = 0;
+        ULONG             pos;
+
+        /* A default router is ::/0 and is written that way, so the table says
+           where the packets with nowhere better to go are sent. */
+        if (r->flags & NETSTATUS_RT6_GATEWAY)
+        {
+            tool_copy_string(dest, sizeof(dest), "::/0");
+        }
+        else
+        {
+            tool_copy_string(dest, sizeof(dest), r->dest);
+
+            pos = 0;
+            while (dest[pos] != '\0')
+                pos++;
+
+            if (pos + 5 < sizeof(dest))
+            {
+                dest[pos++] = '/';
+                if (r->prefix >= 100UL)
+                    dest[pos++] = (char)('0' + (r->prefix / 100UL));
+                if (r->prefix >= 10UL)
+                    dest[pos++] = (char)('0' + ((r->prefix / 10UL) % 10UL));
+                dest[pos++] = (char)('0' + (r->prefix % 10UL));
+                dest[pos]   = '\0';
+            }
+        }
+
+        if (r->flags & NETSTATUS_RT6_UP)
+            flags[f++] = 'U';
+        if (r->flags & NETSTATUS_RT6_GATEWAY)
+            flags[f++] = 'G';
+        if (r->flags & NETSTATUS_RT6_HOST)
+            flags[f++] = 'H';
+        if (r->flags & NETSTATUS_RT6_STATIC)
+            flags[f++] = 'S';
+        flags[f] = '\0';
+
+        tool_printf("%-40s %-30s %-6s %s\n",
+                    (LONG)dest,
+                    (LONG)((r->next_hop[0] != '\0') ? r->next_hop : "*"),
+                    (LONG)flags, (LONG)tool_iface_name(cfg, r->nx_index));
+    }
+
+    if (routes->truncated)
+        tool_printf("(more IPv6 routes than this command can hold)\n");
+}
+
+/* ------------------------------------------------------------ neighbours -- */
+
+LONG tool_neighbours(ToolNeighbours *out)
+{
+    struct Library *base;
+    LONG            n;
+    LONG            i;
+    LONG            j;
+
+    if (out == NULL)
+        return -1;
+
+    out->count     = 0;
+    out->truncated = FALSE;
+
+    base = nx_open();
+    if (base == NULL)
+        return -1;
+
+    n = tool_netstatus_query(base, NETSTATUS_NEIGHBOURS, &nx_answer,
+                             sizeof(nx_answer.nd), sizeof(NetStatusNeighbour));
+    if (n > 0)
+    {
+        if (nx_answer.nd.hdr.nsh_Available > nx_answer.nd.hdr.nsh_Count)
+            out->truncated = TRUE;
+
+        for (i = 0; i < n && i < (LONG)TOOL_MAX_ND; i++)
+        {
+            const NetStatusNeighbour *src = &nx_answer.nd.e[i];
+            ToolNeighbour            *e   = &out->entry[i];
+
+            tool_format_ip6(base, src->nsn6_Address, e->text, sizeof(e->text));
+
+            e->addr[0] = src->nsn6_Address[0];
+            e->addr[1] = src->nsn6_Address[1];
+            e->addr[2] = src->nsn6_Address[2];
+            e->addr[3] = src->nsn6_Address[3];
+
+            for (j = 0; j < (LONG)AMI_ETH_ADDR_SIZE; j++)
+                e->mac[j] = src->nsn6_HwAddress[j];
+
+            e->state         = src->nsn6_State;
+            e->flags         = src->nsn6_Flags;
+            e->nx_index      = src->nsn6_Interface;
+            e->solicitations = src->nsn6_Solicitations;
+            e->queued        = src->nsn6_Queued;
+
+            out->count = (UWORD)(i + 1);
+        }
+    }
+
+    tool_netstatus_close(base);
+
+    return 0;
+}
+
+const char *tool_nd_state_name(UWORD state)
+{
+    switch (state)
+    {
+        case NETSTATUS_ND_INCOMPLETE:   return "INCOMPLETE";
+        case NETSTATUS_ND_REACHABLE:    return "REACHABLE";
+        case NETSTATUS_ND_STALE:        return "STALE";
+        case NETSTATUS_ND_DELAY:        return "DELAY";
+        case NETSTATUS_ND_PROBE:        return "PROBE";
+        case NETSTATUS_ND_CREATED:      return "CREATED";
+        default:                        return "UNKNOWN";
+    }
+}
+
+/*
+ * The state names are RFC 4861's and mean nothing to somebody who has not
+ * read it, so each carries the one thing a reader wants: whether the address
+ * is usable, and whether the stack is doing anything about it.
+ */
+const char *tool_nd_state_note(UWORD state)
+{
+    switch (state)
+    {
+        case NETSTATUS_ND_INCOMPLETE:
+            return "asked, nothing back yet";
+        case NETSTATUS_ND_STALE:
+            return "answered once; not checked since";
+        case NETSTATUS_ND_DELAY:
+            return "sent something; about to check again";
+        case NETSTATUS_ND_PROBE:
+            return "being checked now";
+        case NETSTATUS_ND_CREATED:
+            return "known of, never asked about";
+        default:
+            return NULL;            /* REACHABLE needs no comment */
+    }
 }
 
 const char *tool_iface_name(const AmiConfig *cfg, UWORD index)

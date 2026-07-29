@@ -161,6 +161,51 @@ typedef struct ToolArpEntry
     UWORD   nx_index;                /* the interface it was learnt on       */
 } ToolArpEntry;
 
+/* ------------------------------------------------------- neighbours -- */
+
+/*
+ * The IPv6 half of the address cache. There is no ARP in IPv6: neighbour
+ * discovery does the same job and NetX Duo keeps its answers in a separate
+ * table, so this is a separate snapshot rather than more rows in the one
+ * above.
+ *
+ * The address arrives as text for ToolAddr6Info's reason: the library's
+ * inet_ntop() is the only RFC 5952 formatter a command built from an
+ * IPv4-only tree can reach.
+ *
+ * Empty on a machine whose library has no IPv6, and on one too old to know
+ * the selector. Neither is a failure.
+ */
+
+#define TOOL_MAX_ND     16
+
+typedef struct ToolNeighbour
+{
+    char    text[48];
+    ULONG   addr[4];                 /* the same address, for comparing      */
+    UBYTE   mac[AMI_ETH_ADDR_SIZE];
+    UWORD   state;                   /* NETSTATUS_ND_*                       */
+    UWORD   flags;                   /* NETSTATUS_ND_STATIC / _ROUTER        */
+    UWORD   nx_index;
+    UWORD   solicitations;           /* sent while unresolved                */
+    UWORD   queued;                  /* packets held for the answer          */
+} ToolNeighbour;
+
+typedef struct ToolNeighbours
+{
+    ToolNeighbour   entry[TOOL_MAX_ND];
+    UWORD           count;
+    BOOL            truncated;
+} ToolNeighbours;
+
+LONG tool_neighbours(ToolNeighbours *out);
+
+/* "REACHABLE", "STALE"; never NULL. */
+const char *tool_nd_state_name(UWORD state);
+
+/* What that state means, one sentence, or NULL when it needs no comment. */
+const char *tool_nd_state_note(UWORD state);
+
 typedef struct ToolStats
 {
     BOOL            have_ip;
@@ -298,6 +343,42 @@ typedef struct ToolRoutes
 } ToolRoutes;
 
 LONG tool_routes(ToolRoutes *out);
+
+/*
+ * The IPv6 routes: the on-link prefixes and the default routers, in the order
+ * the stack consults them. Separate from ToolRoutes because IPv6 has no
+ * netmask and no single default gateway -- there may be several default
+ * routers, each with its own lifetime.
+ *
+ * Text rather than words, for ToolAddr6Info's reason.
+ */
+#define TOOL_MAX_ROUTE6 12
+
+typedef struct ToolRoute6
+{
+    char    dest[48];
+    char    next_hop[48];            /* empty = on link, no next hop         */
+    /* The same destination in words, because text cannot be masked and a
+       caller asking "is this address inside this prefix" needs to. */
+    ULONG   dest_words[4];
+    ULONG   prefix;
+    ULONG   lifetime;                /* NETSTATUS_RT6_FOREVER = never expires */
+    UWORD   flags;                   /* NETSTATUS_RT6_*                      */
+    UWORD   nx_index;
+} ToolRoute6;
+
+typedef struct ToolRoutes6
+{
+    ToolRoute6  route[TOOL_MAX_ROUTE6];
+    UWORD       count;
+    BOOL        truncated;
+} ToolRoutes6;
+
+LONG tool_routes6(ToolRoutes6 *out);
+
+/* The IPv6 table, printed. Prints nothing at all when there are no routes,
+   so an IPv4-only machine's report is unchanged. */
+VOID tool_print_routes6(const ToolRoutes6 *routes, const AmiConfig *cfg);
 
 /*
  * The table, printed. Both commands that print one call this, so they cannot

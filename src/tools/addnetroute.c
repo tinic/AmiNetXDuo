@@ -50,6 +50,37 @@
  * A prefix length written into the address -- 10.1.2.0/24 -- overrides all of
  * that. It is not a new keyword, so the template is still Roadshow's.
  *
+ * IPv6 uses the same keywords and a different pair of mechanisms, because NetX
+ * Duo has no IPv6 equivalent of the static routing table -- nothing anywhere in
+ * it maps a prefix to a next hop. _nx_ipv6_packet_send() asks two lists and
+ * nothing else, so those two are what these commands write:
+ *
+ *   DEFAULTGATEWAY fe80::1%eth0    the default-router list. Everything with
+ *                                  nowhere better to go is handed to a router
+ *                                  on it. Unlike IPv4 there may be more than
+ *                                  one, and each is per interface -- which is
+ *                                  why a link-local next hop needs the zone
+ *                                  after the '%': fe80::/64 exists on every
+ *                                  interface and the address alone does not
+ *                                  say which one is meant.
+ *
+ *   DESTINATION fd00:9::/64        the on-link prefix list: this prefix is
+ *   (with no GATEWAY)              reachable directly, so packets for it get a
+ *                                  neighbour solicitation rather than being
+ *                                  handed to a router.
+ *
+ *   DESTINATION ... GATEWAY ...    refused. There is nowhere in the stack to
+ *                                  put a per-prefix next hop, and a command
+ *                                  that accepted one would be storing nothing.
+ *
+ * An IPv6 destination needs its prefix length written in; there is no
+ * equivalent of "the octets that are not zero" to infer one from, and a bare
+ * address is a single machine (/128).
+ *
+ * Both halves flush the IPv6 destination cache, which remembers where each
+ * destination went last time and would otherwise keep sending packets the old
+ * way after the route deciding it has changed.
+ *
  * DeleteNetRoute infers nothing. It reads the live routing table and deletes
  * the entry whose destination matches, with the netmask that entry really has,
  * so a route added with any mask can be removed by naming where it goes.
@@ -107,6 +138,7 @@ enum
 /* The errno numbers this command names, as bsdsocket.library reports them
    (src/bsdsocket/bsdsocket_internal.h). */
 #define ROUTE_ENOENT        2
+#define ROUTE_EEXIST       17
 #define ROUTE_EINVAL       22
 #define ROUTE_ENOBUFS      55
 #define ROUTE_ENOSYS       78
@@ -114,6 +146,19 @@ enum
 /* As many routes as the stack can report: one per interface, the static
    table, and the default gateway. */
 #define NR_MAX_ROUTES   (NX_MAX_PHYSICAL_INTERFACES + NX_IP_ROUTING_TABLE_SIZE + 1)
+
+/*
+ * The IPv6 tables are sized by constants that exist only in an
+ * AMINETXDUO_IPV6 build of nx_user.h, and this command is one binary for
+ * either library, so these are its own. Comfortably above what the shipped
+ * library can report (prefix list 4, routers 2, three addresses per
+ * interface); a stack with more says so through nsh_Available.
+ */
+#define NR_MAX_ROUTES6      16
+#define NR_MAX_ADDRS6       12
+
+/* An interface index that was not given. */
+#define NR_NO_ZONE          0xFFFFU
 
 /* ---------------------------------------------------------------- output -- */
 
@@ -137,6 +182,8 @@ static union
     struct { NetStatusHeader hdr; NetStatusSystem    e; } system;
     struct { NetStatusHeader hdr; NetStatusRoute     e[NR_MAX_ROUTES]; } route;
     struct { NetStatusHeader hdr; NetStatusInterface e[NX_MAX_PHYSICAL_INTERFACES]; } iface;
+    struct { NetStatusHeader hdr; NetStatusRoute6    e[NR_MAX_ROUTES6]; } route6;
+    struct { NetStatusHeader hdr; NetStatusAddress6  e[NR_MAX_ADDRS6]; } addr6;
 } nr_answer;
 
 /* ------------------------------------------------------------- addresses -- */
@@ -222,6 +269,205 @@ static VOID explain_bad_address(const char *what, const char *text)
     tool_advise("example 192.168.1.1, optionally with a prefix length after a");
     tool_advise("slash. A name works too, if it is in DEVS:Internet/hosts or");
     tool_advise("the name servers know it.");
+}
+
+/* ------------------------------------------------------------------ IPv6 -- */
+
+/*
+ * An IPv6 address as it was written: the address, the prefix length if one was
+ * given, and the zone after a '%' if one was.
+ */
+typedef struct NrAddr6
+{
+    ULONG   addr[4];
+    ULONG   prefix;
+    BOOL    have_prefix;
+    char    zone[NETSTATUS_NAME_LEN];
+    BOOL    have_zone;
+} NrAddr6;
+
+/*
+ * A colon is the whole test. No host name has one, and neither has a dotted
+ * quad, so a text with one is meant as an IPv6 literal and nothing else --
+ * which is what lets the IPv4 half below stay exactly as it was, including
+ * when and how it refuses.
+ */
+static BOOL is_written_as_ip6(const char *text)
+{
+    if (text == NULL)
+        return FALSE;
+
+    while (*text != '\0')
+    {
+        if (*text == ':')
+            return TRUE;
+        text++;
+    }
+
+    return FALSE;
+}
+
+/* Any of the addresses this run was given, written the IPv6 way. */
+static BOOL wants_ip6(const LONG *args)
+{
+    if (is_written_as_ip6((const char *)args[ARG_DST]))
+        return TRUE;
+    if (is_written_as_ip6((const char *)args[ARG_DEFAULT]))
+        return TRUE;
+#ifndef TOOL_DELETE
+    if (is_written_as_ip6((const char *)args[ARG_HOSTDST]))
+        return TRUE;
+    if (is_written_as_ip6((const char *)args[ARG_NETDST]))
+        return TRUE;
+    if (is_written_as_ip6((const char *)args[ARG_VIA]))
+        return TRUE;
+#endif
+
+    return FALSE;
+}
+
+/*
+ * "fd00:9::/64%eth0" taken apart. The address itself goes through the
+ * library's inet_pton(): ami_config_parse_ip6() is compiled only into an
+ * AMINETXDUO_IPV6 build and these commands are one binary for either.
+ */
+static BOOL parse_address6(struct Library *base, const char *text,
+                           NrAddr6 *out)
+{
+    char  copy[64];
+    ULONG i     = 0;
+    LONG  slash = -1;
+    LONG  pct   = -1;
+
+    out->prefix      = 128;
+    out->have_prefix = FALSE;
+    out->have_zone   = FALSE;
+    out->zone[0]     = '\0';
+
+    if (text == NULL || *text == '\0')
+        return FALSE;
+
+    while (text[i] != '\0' && i + 1 < (ULONG)sizeof(copy))
+    {
+        if (text[i] == '/')
+            slash = (LONG)i;
+        else if (text[i] == '%' && pct < 0)
+            pct = (LONG)i;
+        copy[i] = text[i];
+        i++;
+    }
+    if (text[i] != '\0')
+        return FALSE;
+    copy[i] = '\0';
+
+    /* The zone comes after the prefix length if both are there, so it is cut
+       off first and the slash it may have moved past is re-found below. */
+    if (pct >= 0)
+    {
+        if (copy[pct + 1] == '\0')
+            return FALSE;
+
+        tool_copy_string(out->zone, sizeof(out->zone), &copy[pct + 1]);
+        out->have_zone = TRUE;
+        copy[pct]      = '\0';
+
+        if (slash > pct)
+            slash = -1;
+    }
+
+    if (slash >= 0)
+    {
+        ULONG bits = 0;
+        ULONG j;
+
+        copy[slash] = '\0';
+
+        if (copy[slash + 1] == '\0')
+            return FALSE;
+
+        for (j = (ULONG)slash + 1; copy[j] != '\0'; j++)
+        {
+            if (copy[j] < '0' || copy[j] > '9')
+                return FALSE;
+            bits = bits * 10UL + (ULONG)(copy[j] - '0');
+            if (bits > 128UL)
+                return FALSE;
+        }
+
+        out->prefix      = bits;
+        out->have_prefix = TRUE;
+    }
+
+    return tool_parse_ip6(base, copy, out->addr);
+}
+
+static VOID explain_bad_address6(const char *what, const char *text)
+{
+    tool_error("%s: \"%s\" is not an address this command can use",
+               (LONG)what, (LONG)text);
+    tool_advise_blank();
+    tool_advise("It has a colon in it, so it was read as an IPv6 address --");
+    tool_advise("fd00:9::/64 for a network, 2001:db8::1 for one machine. A");
+    tool_advise("link-local address needs the interface after a '%' sign, as");
+    tool_advise("fe80::1%eth0 does.");
+}
+
+#ifndef TOOL_DELETE
+/* Add half only: nothing on the delete path takes a next hop. */
+static BOOL is_link_local6(const ULONG addr[4])
+{
+    return (BOOL)((addr[0] & 0xFFC00000UL) == 0xFE800000UL);
+}
+#endif
+
+static BOOL same_address6(const ULONG a[4], const ULONG b[4])
+{
+    return (BOOL)(a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3]);
+}
+
+/* The first `bits` of both, compared. */
+static BOOL same_prefix6(const ULONG a[4], const ULONG b[4], ULONG bits)
+{
+    ULONG i;
+
+    for (i = 0; i < 4UL; i++)
+    {
+        ULONG left = (bits > i * 32UL) ? (bits - i * 32UL) : 0UL;
+        ULONG mask;
+
+        if (left == 0UL)
+            break;
+
+        mask = (left >= 32UL) ? 0xFFFFFFFFUL : (0xFFFFFFFFUL << (32UL - left));
+
+        if ((a[i] & mask) != (b[i] & mask))
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
+/* "fd00:9::/64", or a bare address when the length is 128. */
+static VOID format_route6(struct Library *base, const ULONG addr[4],
+                          ULONG bits, char *buf, ULONG buflen)
+{
+    ULONG pos = 0;
+
+    tool_format_ip6(base, addr, buf, buflen);
+
+    while (buf[pos] != '\0')
+        pos++;
+
+    if (bits == 128UL || pos + 5 >= buflen)
+        return;
+
+    buf[pos++] = '/';
+    if (bits >= 100UL)
+        buf[pos++] = (char)('0' + (bits / 100UL));
+    if (bits >= 10UL)
+        buf[pos++] = (char)('0' + ((bits / 10UL) % 10UL));
+    buf[pos++] = (char)('0' + (bits % 10UL));
+    buf[pos]   = '\0';
 }
 
 #ifndef TOOL_DELETE
@@ -448,6 +694,256 @@ static VOID explain(LONG err, ULONG gateway)
     }
 }
 
+/* --------------------------------------------------- IPv6, the live stack -- */
+
+/* TRUE when the running library has IPv6 in it at all. */
+static BOOL stack_has_ipv6(struct Library *base)
+{
+    if (tool_netstatus_query(base, NETSTATUS_SYSTEM, &nr_answer,
+                             sizeof(nr_answer.system),
+                             sizeof(NetStatusSystem)) <= 0)
+    {
+        return FALSE;
+    }
+
+    return (nr_answer.system.e.nss_Flags & NETSTATUS_SYS_IPV6) ? TRUE : FALSE;
+}
+
+static VOID explain_no_ipv6(VOID)
+{
+    tool_advise_blank();
+    tool_advise("The running stack was built without IPv6, so it has no IPv6");
+    tool_advise("routes and no address to reach one from. That is a build");
+    tool_advise("option and not anything that can be switched on from here.");
+    tool_advise_blank();
+    tool_advise("Run  ShowNetStatus INTERFACES  to see which addresses this");
+    tool_advise("machine actually has.");
+}
+
+#ifndef TOOL_DELETE
+/* "eth0", or the bare slot number the tables use. */
+static BOOL zone_matches(const NetStatusInterface *nsi, const char *zone)
+{
+    ULONG value = 0;
+    ULONG i;
+
+    if (tool_stricmp(nsi->nsi_Name, zone) == 0)
+        return TRUE;
+
+    for (i = 0; zone[i] != '\0'; i++)
+    {
+        if (zone[i] < '0' || zone[i] > '9')
+            return FALSE;
+        value = value * 10UL + (ULONG)(zone[i] - '0');
+    }
+
+    return (BOOL)(i != 0 && value == (ULONG)nsi->nsi_Index);
+}
+
+/*
+ * Which interface a next hop is reached through, which the default-router
+ * list needs and the address alone does not always give.
+ *
+ * A zone was written: that. A link-local next hop with none: only a machine
+ * with one interface up can say, since fe80::/64 is on every interface at
+ * once. Anything else: the interface holding an address whose prefix covers
+ * it, which is also the test nxd_ipv6_default_router_add() applies before it
+ * will store the entry -- so failing here gives the reason instead of an
+ * unexplained refusal from the stack.
+ */
+static BOOL interface_for_next_hop(struct Library *base, const NrAddr6 *gw,
+                                   UWORD *out, UWORD *attached_out)
+{
+    LONG  n;
+    LONG  i;
+    UWORD attached = 0;
+    UWORD only     = 0;
+
+    n = tool_netstatus_query(base, NETSTATUS_INTERFACES, &nr_answer,
+                             sizeof(nr_answer.iface),
+                             sizeof(NetStatusInterface));
+
+    for (i = 0; i < n; i++)
+    {
+        const NetStatusInterface *nsi = &nr_answer.iface.e[i];
+
+        if (!(nsi->nsi_Flags & NETSTATUS_IF_ATTACHED))
+            continue;
+
+        if (gw->have_zone)
+        {
+            if (zone_matches(nsi, gw->zone))
+            {
+                *out = nsi->nsi_Index;
+                if (attached_out != NULL)
+                    *attached_out = 1;
+                return TRUE;
+            }
+            continue;
+        }
+
+        attached++;
+        only = nsi->nsi_Index;
+    }
+
+    if (attached_out != NULL)
+        *attached_out = attached;
+
+    if (gw->have_zone)
+        return FALSE;
+
+    if (is_link_local6(gw->addr))
+    {
+        if (attached != 1)
+            return FALSE;
+
+        *out = only;
+        return TRUE;
+    }
+
+    n = tool_netstatus_query(base, NETSTATUS_ADDRESSES6, &nr_answer,
+                             sizeof(nr_answer.addr6),
+                             sizeof(NetStatusAddress6));
+
+    for (i = 0; i < n; i++)
+    {
+        const NetStatusAddress6 *a = &nr_answer.addr6.e[i];
+
+        if (a->nsn_State == NETSTATUS_IP6_TENTATIVE)
+            continue;
+        if (is_link_local6(a->nsn_Address))
+            continue;
+
+        if (same_prefix6(a->nsn_Address, gw->addr, a->nsn_PrefixLength))
+        {
+            *out = a->nsn_Interface;
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+#endif /* !TOOL_DELETE */
+
+/* The live default router with this address, or -1. */
+static LONG find_router6(struct Library *base, const ULONG addr[4])
+{
+    LONG n;
+    LONG i;
+
+    n = tool_netstatus_query(base, NETSTATUS_ROUTES6, &nr_answer,
+                             sizeof(nr_answer.route6), sizeof(NetStatusRoute6));
+
+    for (i = 0; i < n; i++)
+    {
+        const NetStatusRoute6 *r = &nr_answer.route6.e[i];
+
+        if (!(r->nsr6_Flags & NETSTATUS_RT6_GATEWAY))
+            continue;
+
+        if (same_address6(r->nsr6_NextHop, addr))
+            return i;
+    }
+
+    return -1;
+}
+
+#ifdef TOOL_DELETE
+/*
+ * The live on-link prefix `addr` falls in. With `bits` given only that exact
+ * length matches; without, the first covering entry does -- the table is kept
+ * longest prefix first, so that is the one the stack would use.
+ *
+ * Delete half only: the add path lets the stack answer EEXIST rather than
+ * asking first.
+ */
+static LONG find_prefix6(struct Library *base, const ULONG addr[4],
+                         ULONG bits, BOOL exact, ULONG *bits_out)
+{
+    LONG n;
+    LONG i;
+
+    n = tool_netstatus_query(base, NETSTATUS_ROUTES6, &nr_answer,
+                             sizeof(nr_answer.route6), sizeof(NetStatusRoute6));
+
+    for (i = 0; i < n; i++)
+    {
+        const NetStatusRoute6 *r = &nr_answer.route6.e[i];
+
+        if (r->nsr6_Flags & NETSTATUS_RT6_GATEWAY)
+            continue;
+
+        if (exact && r->nsr6_PrefixLength != bits)
+            continue;
+
+        if (!same_prefix6(r->nsr6_Destination, addr, r->nsr6_PrefixLength))
+            continue;
+
+        if (bits_out != NULL)
+            *bits_out = r->nsr6_PrefixLength;
+
+        return i;
+    }
+
+    return -1;
+}
+#endif /* TOOL_DELETE */
+
+/* The stack said no to an IPv6 route. */
+static VOID explain6(LONG err, const char *gateway_text)
+{
+    switch (err)
+    {
+        case ROUTE_ENOSYS:
+            tool_advise_blank();
+            tool_advise("IPv6 has no table that maps a prefix to a next hop --");
+            tool_advise("not in this stack and not in the protocol as NetX Duo");
+            tool_advise("implements it. A packet is either sent straight to a");
+            tool_advise("prefix that is on this link, or handed to a default");
+            tool_advise("router, and those are the two things to write:");
+            tool_advise_blank();
+            tool_advise("   AddNetRoute DESTINATION fd00:9::/64");
+            tool_advise("   AddNetRoute DEFAULTGATEWAY fe80::1%eth0");
+            break;
+
+        case ROUTE_ENOBUFS:
+            tool_advise_blank();
+            tool_advise("There is no room for another. Run  netstat -r  to see");
+            tool_advise("what is there and DeleteNetRoute to make room.");
+            break;
+
+        case ROUTE_EEXIST:
+            tool_advise_blank();
+            tool_advise("That prefix is already on the list. Run  netstat -r");
+            tool_advise("to see it.");
+            break;
+
+        case ROUTE_ENOENT:
+            tool_advise_blank();
+            tool_advise("Run  netstat -r  to see the IPv6 routes there are.");
+            break;
+
+        case ROUTE_EINVAL:
+            tool_advise_blank();
+            if (gateway_text != NULL)
+            {
+                tool_printf("  %s is not on any network this machine has an\n",
+                            (LONG)gateway_text);
+                tool_advise("interface on, so nothing here can reach it to use");
+                tool_advise("it as a next hop. Run  ShowNetStatus INTERFACES");
+                tool_advise("for the addresses this machine has.");
+            }
+            else
+            {
+                tool_advise("The stack would not accept that route.");
+            }
+            break;
+
+        default:
+            break;
+    }
+}
+
 static VOID usage(VOID)
 {
 #ifdef TOOL_DELETE
@@ -458,6 +954,294 @@ static VOID usage(VOID)
                "[DEFAULTGATEWAY <address>] [QUIET]",
                "Add a route, or set the address everything else goes to.");
 #endif
+}
+
+static VOID say_no_stack(VOID)
+{
+    tool_error("the network is not running, so it has no routes");
+    tool_advise_blank();
+    tool_advise("Routes belong to a running stack and are not remembered");
+    tool_advise("across a reboot. Start the network first with");
+    tool_advise("AddNetInterface, and put this command after it in");
+    tool_advise("S:User-Startup if it should happen at every boot.");
+}
+
+/* ------------------------------------------------------------- the IPv6 run -- */
+
+/*
+ * Reached when any address on the command line was written with a colon in
+ * it. Everything below this point talks to the two IPv6 lists and nothing to
+ * the IPv4 routing table, so the IPv4 path above is untouched -- including
+ * which of its refusals come before the library is opened.
+ */
+static LONG run_ipv6(const LONG *args, BOOL have_default)
+{
+    struct Library  *base;
+    NetStatusControl ctl;
+    NrAddr6          via;
+    char             text[64];
+    char             gw_text[64];
+    const char      *given;
+    ULONG            bits     = 128;
+    LONG             err      = 0;
+#ifndef TOOL_DELETE
+    UWORD            index    = 0;
+    UWORD            attached = 0;
+#endif
+
+    if (!tool_stack_library_running())
+    {
+        say_no_stack();
+        return RETURN_ERROR;
+    }
+
+    base = tool_netstatus_open(nr_quiet);
+    if (base == NULL)
+        return RETURN_FAIL;
+
+    if (!stack_has_ipv6(base))
+    {
+        tool_error("the running stack has no IPv6");
+        explain_no_ipv6();
+        tool_netstatus_close(base);
+        return RETURN_FAIL;
+    }
+
+    zero_control(&ctl);
+
+    /* ---- the default route ---------------------------------------------- */
+
+    if (have_default)
+    {
+        given = (const char *)args[ARG_DEFAULT];
+
+        if (!parse_address6(base, given, &via))
+        {
+            explain_bad_address6("DEFAULTGATEWAY", given);
+            tool_netstatus_close(base);
+            return RETURN_ERROR;
+        }
+
+        if (via.have_prefix)
+        {
+            tool_error("DEFAULTGATEWAY is one router, not a prefix");
+            tool_advise_blank();
+            tool_advise("Give the router's own address, with no length after");
+            tool_advise("it. A prefix goes in DESTINATION instead.");
+            tool_netstatus_close(base);
+            return RETURN_ERROR;
+        }
+
+        tool_format_ip6(base, via.addr, gw_text, sizeof(gw_text));
+
+#ifdef TOOL_DELETE
+        /* No interface is needed to remove one: the address identifies it,
+           and requiring the zone would make a router unremovable once the
+           interface it was on had gone. */
+        if (find_router6(base, via.addr) < 0)
+        {
+            tool_error("there is no default route through %s", (LONG)gw_text);
+            explain6(ROUTE_ENOENT, NULL);
+            tool_netstatus_close(base);
+            return RETURN_ERROR;
+        }
+
+        ctl.nsc_Gateway6[0] = via.addr[0];
+        ctl.nsc_Gateway6[1] = via.addr[1];
+        ctl.nsc_Gateway6[2] = via.addr[2];
+        ctl.nsc_Gateway6[3] = via.addr[3];
+
+        if (tool_netstatus_control(base, NETCTRL_ROUTE6_DELETE, &ctl,
+                                   &err) != 0)
+        {
+            tool_error("the default route through %s would not go away",
+                       (LONG)gw_text);
+            explain6(err, NULL);
+            tool_netstatus_close(base);
+            return RETURN_FAIL;
+        }
+
+        say("The default route through %s is gone.\n", (LONG)gw_text);
+#else
+        if (find_router6(base, via.addr) >= 0)
+        {
+            say("The default route through %s is already there.\n",
+                (LONG)gw_text);
+            tool_netstatus_close(base);
+            return RETURN_OK;
+        }
+
+        if (!interface_for_next_hop(base, &via, &index, &attached))
+        {
+            tool_error("the default route was not set to %s", (LONG)gw_text);
+
+            if (via.have_zone)
+            {
+                tool_advise_blank();
+                tool_printf("  This machine has no interface called \"%s\".\n",
+                            (LONG)via.zone);
+                tool_advise("Run  ShowNetStatus INTERFACES  for the ones it");
+                tool_advise("has.");
+            }
+            else if (is_link_local6(via.addr))
+            {
+                tool_advise_blank();
+                tool_advise("An fe80:: address exists on every interface at");
+                tool_advise("once, so with more than one up the address does");
+                tool_advise("not say which router is meant. Write the");
+                tool_advise("interface after a '%' sign:");
+                tool_printf("     AddNetRoute DEFAULTGATEWAY %s%ceth0\n",
+                            (LONG)gw_text, (LONG)'%');
+            }
+            else
+            {
+                explain6(ROUTE_EINVAL, gw_text);
+            }
+
+            tool_netstatus_close(base);
+            return RETURN_ERROR;
+        }
+
+        ctl.nsc_Index       = index;
+        ctl.nsc_Gateway6[0] = via.addr[0];
+        ctl.nsc_Gateway6[1] = via.addr[1];
+        ctl.nsc_Gateway6[2] = via.addr[2];
+        ctl.nsc_Gateway6[3] = via.addr[3];
+
+        if (tool_netstatus_control(base, NETCTRL_ROUTE6_ADD, &ctl, &err) != 0)
+        {
+            tool_error("the default route was not set to %s", (LONG)gw_text);
+            explain6(err, gw_text);
+            tool_netstatus_close(base);
+            return RETURN_FAIL;
+        }
+
+        say("IPv6 packets with nowhere better to go now leave through\n");
+        say("%s.\n", (LONG)gw_text);
+#endif
+
+        tool_netstatus_close(base);
+        return RETURN_OK;
+    }
+
+    /* ---- a prefix on this link ------------------------------------------ */
+
+#ifdef TOOL_DELETE
+    given = (const char *)args[ARG_DST];
+
+    if (!parse_address6(base, given, &via))
+    {
+        explain_bad_address6("DESTINATION", given);
+        tool_netstatus_close(base);
+        return RETURN_ERROR;
+    }
+
+    /*
+     * The length comes out of the live table when none was written, so a
+     * prefix added with any length can be removed by naming somewhere inside
+     * it. An explicit one still wins.
+     */
+    bits = via.prefix;
+
+    if (find_prefix6(base, via.addr, bits, via.have_prefix, &bits) < 0)
+    {
+        format_route6(base, via.addr, via.prefix, text, sizeof(text));
+        tool_error("no IPv6 route to %s was added by hand, so there is none "
+                   "to delete", (LONG)text);
+        explain6(ROUTE_ENOENT, NULL);
+        tool_netstatus_close(base);
+        return RETURN_ERROR;
+    }
+
+    ctl.nsc_Destination6[0] = via.addr[0];
+    ctl.nsc_Destination6[1] = via.addr[1];
+    ctl.nsc_Destination6[2] = via.addr[2];
+    ctl.nsc_Destination6[3] = via.addr[3];
+    ctl.nsc_PrefixLength    = bits;
+
+    format_route6(base, via.addr, bits, text, sizeof(text));
+
+    if (tool_netstatus_control(base, NETCTRL_ROUTE6_DELETE, &ctl, &err) != 0)
+    {
+        tool_error("the route to %s was not deleted", (LONG)text);
+        explain6(err, NULL);
+        tool_netstatus_close(base);
+        return RETURN_FAIL;
+    }
+
+    say("The route to %s is gone. Packets for it go to a router again.\n",
+        (LONG)text);
+#else
+    if (args[ARG_HOSTDST] != 0)
+        given = (const char *)args[ARG_HOSTDST];
+    else if (args[ARG_NETDST] != 0)
+        given = (const char *)args[ARG_NETDST];
+    else
+        given = (const char *)args[ARG_DST];
+
+    if (!parse_address6(base, given, &via))
+    {
+        explain_bad_address6("DESTINATION", given);
+        tool_netstatus_close(base);
+        return RETURN_ERROR;
+    }
+
+    bits = via.prefix;                  /* 128 unless a length was written */
+
+    if (args[ARG_NETDST] != 0 && !via.have_prefix)
+    {
+        tool_error("%s is not a network address", (LONG)given);
+        tool_advise_blank();
+        tool_advise("An IPv6 network is written with its prefix length, as");
+        tool_advise("fd00:9::/64 is. There is nothing in the address itself");
+        tool_advise("to work one out from. Use HOSTDESTINATION for a single");
+        tool_advise("machine.");
+        tool_netstatus_close(base);
+        return RETURN_ERROR;
+    }
+
+    if (args[ARG_VIA] != 0)
+    {
+        format_route6(base, via.addr, bits, text, sizeof(text));
+        tool_error("the route to %s was not added", (LONG)text);
+        explain6(ROUTE_ENOSYS, NULL);
+        tool_netstatus_close(base);
+        return RETURN_FAIL;
+    }
+
+    if (bits == 0)
+    {
+        tool_error("::/0 is not a prefix on this link, it is the default "
+                   "route");
+        tool_advise_blank();
+        tool_advise("Name the router it should go to:");
+        tool_advise("   AddNetRoute DEFAULTGATEWAY fe80::1%eth0");
+        tool_netstatus_close(base);
+        return RETURN_ERROR;
+    }
+
+    ctl.nsc_Destination6[0] = via.addr[0];
+    ctl.nsc_Destination6[1] = via.addr[1];
+    ctl.nsc_Destination6[2] = via.addr[2];
+    ctl.nsc_Destination6[3] = via.addr[3];
+    ctl.nsc_PrefixLength    = bits;
+
+    format_route6(base, via.addr, bits, text, sizeof(text));
+
+    if (tool_netstatus_control(base, NETCTRL_ROUTE6_ADD, &ctl, &err) != 0)
+    {
+        tool_error("the route to %s was not added", (LONG)text);
+        explain6(err, NULL);
+        tool_netstatus_close(base);
+        return RETURN_FAIL;
+    }
+
+    say("Packets for %s now go straight there rather than to a router.\n",
+        (LONG)text);
+#endif
+
+    tool_netstatus_close(base);
+    return RETURN_OK;
 }
 
 /* --------------------------------------------------------------- the run -- */
@@ -520,6 +1304,17 @@ int main(int argc, char **argv)
     if (have_default && have_dest)
         say("%s: DEFAULTGATEWAY was given, so the destination is ignored.\n",
             (LONG)tool_name);
+
+    /* One binary, both families: how the address was written decides which
+       half runs, and a text with no colon in it reaches the IPv4 half exactly
+       as it did before there was another one. */
+    if (wants_ip6(args))
+    {
+        LONG rc = run_ipv6(args, have_default);
+
+        FreeArgs(rda);
+        return rc;
+    }
 
     /* ---- what was asked for --------------------------------------------- */
 
@@ -641,12 +1436,7 @@ int main(int argc, char **argv)
 
     if (!tool_stack_library_running())
     {
-        tool_error("the network is not running, so it has no routes");
-        tool_advise_blank();
-        tool_advise("Routes belong to a running stack and are not remembered");
-        tool_advise("across a reboot. Start the network first with");
-        tool_advise("AddNetInterface, and put this command after it in");
-        tool_advise("S:User-Startup if it should happen at every boot.");
+        say_no_stack();
         FreeArgs(rda);
         return RETURN_ERROR;
     }

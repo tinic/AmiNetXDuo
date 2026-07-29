@@ -251,6 +251,13 @@ VOID            tool_netstatus_close(struct Library *base);
 VOID tool_format_ip6(struct Library *base, const ULONG addr[4],
                      char *buf, ULONG buflen);
 
+/*
+ * The other direction, through the library's inet_pton().  TRUE when `text`
+ * is an IPv6 literal and the library can parse one; FALSE otherwise, which is
+ * also the answer on a library with no IPv6 in it.
+ */
+BOOL tool_parse_ip6(struct Library *base, const char *text, ULONG out[4]);
+
 LONG tool_netstatus_query(struct Library *base, ULONG what,
                           APTR buffer, ULONG size, ULONG entry_size);
 

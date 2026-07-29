@@ -257,7 +257,8 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
  */
 static VOID show_routes(const AmiConfig *cfg)
 {
-    static ToolRoutes routes;
+    static ToolRoutes  routes;
+    static ToolRoutes6 routes6;
 
     tool_printf("\nRouting table\n");
 
@@ -265,6 +266,10 @@ static VOID show_routes(const AmiConfig *cfg)
         return;
 
     tool_print_routes(&routes, cfg, NULL);
+
+    /* Prints nothing on a machine with no IPv6 routes. */
+    if (tool_routes6(&routes6) == 0)
+        tool_print_routes6(&routes6, cfg);
 }
 
 static VOID show_connections(const ToolSnapshot *snap)

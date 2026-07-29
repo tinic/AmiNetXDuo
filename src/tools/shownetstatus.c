@@ -604,8 +604,9 @@ static VOID show_arp(const AmiConfig *cfg, const ToolStats *st)
 
 static VOID show_routes(const AmiConfig *cfg, BOOL have_live)
 {
-    static ToolRoutes routes;
-    char              gw[AMI_CFG_NAME_LEN];
+    static ToolRoutes  routes;
+    static ToolRoutes6 routes6;
+    char               gw[AMI_CFG_NAME_LEN];
 
     tool_printf("\nRoutes\n");
 
@@ -639,6 +640,11 @@ static VOID show_routes(const AmiConfig *cfg, BOOL have_live)
         return;
 
     tool_print_routes(&routes, cfg, address_text);
+
+    /* Prints nothing on a machine with no IPv6 routes; no NAMES here, because
+       there is no reverse lookup for an IPv6 address in this report. */
+    if (tool_routes6(&routes6) == 0)
+        tool_print_routes6(&routes6, cfg);
 }
 
 static VOID show_resolver(const AmiResolverConfig *r, BOOL from_files)
