@@ -22,10 +22,8 @@
 #   display   66's acceptance test: a configured ADDRESS6 shown by a command.
 #             Asserted since the NETSTATUS_ADDRESSES6 work.
 #
-# What is still pending is ping and traceroute over IPv6.  Both build their own
-# ICMP on SOCK_RAW and bsdsocket.library offers SOCK_RAW for AF_INET only, so
-# they refuse an IPv6 target and say why.  The refusal is asserted; the replies
-# are not.
+# ping and traceroute joined the v6 group once bsdsocket.library grew an
+# AF_INET6 raw socket (RESEARCH 67); their replies are asserted, not pending.
 #
 # Exit 0 all clear, 1 a control or -s failure, 3 nothing but pending work.
 #
@@ -282,21 +280,17 @@ fi
 want "SYS:tftp ::1 GET nosuchfile PORT 7095 TIMEOUT 5" "from ::1" \
      "tftp reached ::1 and reported the transfer, not the name"
 
-# ---- v6: ping and traceroute refuse, and say why ------------------------
-#
-# Asserted rather than pending: whatever they do with an IPv6 target, it must
-# not be the resolver message the deny() block above deleted, and it must
-# name the reason.  The replies below stay pending until the library offers a
-# raw ICMPv6 socket.
-for c in "SYS:ping ::1 -c 2 -t 20" "SYS:traceroute ::1 -m 2 -q 1 -w 3 -n"; do
-    want "$c" "raw socket" "$(printf '%s' "${c#SYS:}" | cut -d' ' -f1) says it needs a raw socket"
-done
+# ---- v6: ping and traceroute answer -------------------------------------
+want "SYS:ping ::1 -c 2 -t 20"        "2 received" "ping ::1 got both replies"
+want "SYS:ping fd00::10 -c 2 -t 20"   "2 received" \
+     "ping fd00::10 answered -- the configured ADDRESS6 is live"
+want "SYS:ping fe80::2 -c 2 -t 20"    "2 received" \
+     "ping fe80::2 crossed the wire to SLIRP's router"
 
-want_soon "SYS:ping ::1 -c 2 -t 20"        "2 received" "ping ::1 got both replies"
-want_soon "SYS:ping fd00::10 -c 2 -t 20"   "2 received" \
-          "ping fd00::10 answered -- the configured ADDRESS6 is live"
-want_soon "SYS:ping fe80::2 -c 2 -t 20"    "2 received" \
-          "ping fe80::2 crossed the wire to SLIRP's router"
+want "SYS:traceroute ::1 -m 2 -q 1 -w 3 -n" " ms" \
+     "traceroute ::1 timed a hop"
+deny "SYS:traceroute ::1 -m 2 -q 1 -w 3 -n" "did not answer" \
+     "traceroute ::1 reached its destination"
 
 # ---- display: 66's acceptance test --------------------------------------
 #

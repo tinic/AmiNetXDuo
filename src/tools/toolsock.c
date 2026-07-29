@@ -720,20 +720,6 @@ VOID tool_sock_addr_text(struct Library *base, const ToolSockAddrAny *sa,
     tool_addr_text(base, &addr, buf, buflen);
 }
 
-BOOL tool_sock_raw_ok(const ToolAddr *addr)
-{
-    if (!TOOL_ADDR_IS6(addr))
-        return TRUE;
-
-    tool_error("this command cannot do IPv6");
-    tool_advise_blank();
-    tool_advise("It builds its own ICMP on a raw socket, and bsdsocket.library");
-    tool_advise("offers raw sockets for IPv4 only.  nc, telnet, tftp and fetch");
-    tool_advise("all reach an IPv6 address.");
-
-    return FALSE;
-}
-
 const char *tool_host_unbracket(const char *host, char *buf, ULONG buflen)
 {
     ULONG len = 0;

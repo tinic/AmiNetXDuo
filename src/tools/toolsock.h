@@ -302,14 +302,6 @@ BOOL tool_sock_resolve_af(struct Library *base, const char *host, LONG want,
 BOOL tool_sock_resolve(struct Library *base, const char *host, ToolAddr *out);
 
 /*
- * ping and traceroute build their own ICMP over SOCK_RAW, and this library
- * offers SOCK_RAW for AF_INET only -- NetX Duo's raw IPv6 send fixes the hop
- * limit and picks the source address itself, so an ICMPv6 probe cannot be
- * built on it.  Prints why and returns FALSE when the target is IPv6.
- */
-BOOL tool_sock_raw_ok(const ToolAddr *addr);
-
-/*
  * Strip one layer of brackets from an IPv6 literal written the URL way.
  * "[::1]" becomes "::1"; anything else is returned unchanged.  The result
  * points either into `host` or into `buf`.

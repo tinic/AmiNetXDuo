@@ -85,9 +85,11 @@ enum
 #define PING_DEFAULT_INTERVAL   1UL         /* seconds                        */
 #define PING_REPLY_WAIT         5UL         /* seconds to wait for one reply  */
 
-/* ICMP, the two types this command reads. */
+/* ICMP, the two types this command reads. ICMPv6 renumbered both. */
 #define ICMP_ECHOREPLY          0
 #define ICMP_ECHO               8
+#define ICMP6_ECHO              128
+#define ICMP6_ECHOREPLY         129
 
 /* Static rather than automatic: a Shell command gets the Shell's stack, 4 KB
    on a stock 3.1. */
@@ -117,7 +119,9 @@ static UWORD ping_get16(const UBYTE *p)
 }
 
 /* The 16-bit one's-complement sum. Nothing below this command computes the
-   ICMP checksum: the raw send path prepends the IP header and nothing else. */
+   ICMP checksum: the raw send path prepends the IP header and nothing else.
+   ICMPv6 is the exception -- its checksum covers the IPv6 pseudo-header, so
+   the source address decides it and only the stack knows that. */
 static UWORD ping_checksum(const UBYTE *data, ULONG len)
 {
     ULONG sum = 0;
@@ -135,14 +139,14 @@ static UWORD ping_checksum(const UBYTE *data, ULONG len)
     return (UWORD)(~sum & 0xffffUL);
 }
 
-static ULONG ping_build(UWORD ident, UWORD seq, ULONG payload)
+static ULONG ping_build(BOOL v6, UWORD ident, UWORD seq, ULONG payload)
 {
     ULONG total = 8UL + payload;
     ULONG i;
 
-    ping_probe[0] = ICMP_ECHO;
+    ping_probe[0] = v6 ? ICMP6_ECHO : ICMP_ECHO;
     ping_probe[1] = 0;
-    ping_put16(&ping_probe[2], 0);          /* checksum, filled in below */
+    ping_put16(&ping_probe[2], 0);          /* checksum */
     ping_put16(&ping_probe[4], ident);
     ping_put16(&ping_probe[6], seq);
 
@@ -150,7 +154,8 @@ static ULONG ping_build(UWORD ident, UWORD seq, ULONG payload)
     for (i = 0; i < payload; i++)
         ping_probe[8 + i] = (UBYTE)(i & 0xff);
 
-    ping_put16(&ping_probe[2], ping_checksum(ping_probe, total));
+    if (!v6)
+        ping_put16(&ping_probe[2], ping_checksum(ping_probe, total));
 
     return total;
 }
@@ -160,7 +165,7 @@ static ULONG ping_build(UWORD ident, UWORD seq, ULONG payload)
  *
  * A raw ICMP socket sees every inbound ICMP datagram -- src/bsdsocket/raw.c
  * filters on the IP protocol number, not on the type -- so the checks have to
- * be strict, and recvfrom() hands back the IP header too.
+ * be strict. An IPv4 read hands back the IP header too; an IPv6 read does not.
  *
  * `seq == 0` is accepted alongside the expected number because FS-UAE's SLIRP
  * zeroes the sequence on a proxied reply while preserving the identifier
@@ -169,29 +174,45 @@ static ULONG ping_build(UWORD ident, UWORD seq, ULONG payload)
  * exactly one probe outstanding at a time. traceroute has three per hop and
  * cannot do the same.
  */
-static BOOL ping_is_reply(const UBYTE *buf, ULONG len, UWORD ident, UWORD seq,
-                          ULONG from, ULONG target, ULONG *payload_out)
+static BOOL ping_is_reply(BOOL v6, const UBYTE *buf, ULONG len, UWORD ident,
+                          UWORD seq, const ToolAddr *from,
+                          const ToolAddr *target, ULONG *payload_out)
 {
-    ULONG hlen;
+    const UBYTE *icmp;
+    ULONG        icmp_len;
 
-    if (len < 20)
+    if (v6)
+    {
+        /* No IP header: a raw IPv6 read starts at the ICMPv6 header. */
+        icmp     = buf;
+        icmp_len = len;
+    }
+    else
+    {
+        ULONG hlen;
+
+        if (len < 20 || (buf[0] >> 4) != 4)
+            return FALSE;
+
+        hlen = (ULONG)(buf[0] & 0x0f) * 4UL;
+        if (hlen < 20 || len < hlen + 8)
+            return FALSE;
+
+        icmp     = buf + hlen;
+        icmp_len = len - hlen;
+    }
+
+    if (icmp_len < 8)
         return FALSE;
 
-    if ((buf[0] >> 4) != 4)
+    if (icmp[0] != (v6 ? ICMP6_ECHOREPLY : ICMP_ECHOREPLY))
         return FALSE;
 
-    hlen = (ULONG)(buf[0] & 0x0f) * 4UL;
-    if (hlen < 20 || len < hlen + 8)
-        return FALSE;
-
-    if (buf[hlen] != ICMP_ECHOREPLY)
-        return FALSE;
-
-    if (ping_get16(&buf[hlen + 4]) != ident)
+    if (ping_get16(&icmp[4]) != ident)
         return FALSE;
 
     {
-        UWORD got = ping_get16(&buf[hlen + 6]);
+        UWORD got = ping_get16(&icmp[6]);
 
         if (got != seq && got != 0)
             return FALSE;
@@ -199,11 +220,11 @@ static BOOL ping_is_reply(const UBYTE *buf, ULONG len, UWORD ident, UWORD seq,
 
     /* A reply from another address is not an answer from the host that was
        asked about; SLIRP's proxied replies do carry the destination's. */
-    if (from != target)
+    if (!tool_addr_same(from, target))
         return FALSE;
 
     if (payload_out != NULL)
-        *payload_out = len - hlen - 8UL;
+        *payload_out = icmp_len - 8UL;
 
     return TRUE;
 }
@@ -232,6 +253,7 @@ int main(int argc, char **argv)
     ULONG           size;
     ULONG           timeout;
     UWORD           ident;
+    BOOL            v6;
     BOOL            numeric;
     BOOL            onereply;
     BOOL            quiet;
@@ -334,15 +356,11 @@ int main(int argc, char **argv)
 
     tool_addr_text(sb, &target, addrtext, sizeof(addrtext));
 
-    if (!tool_sock_raw_ok(&target))
-    {
-        CloseLibrary(sb);
-        FreeArgs(rda);
-        return RETURN_FAIL;
-    }
+    v6 = TOOL_ADDR_IS6(&target);
 
-    sock = tool_sock_socket(sb, TOOL_AF_INET, TOOL_SOCK_RAW,
-                            TOOL_IPPROTO_ICMP);
+    sock = tool_sock_socket(sb,
+                            v6 ? TOOL_AF_INET6 : TOOL_AF_INET, TOOL_SOCK_RAW,
+                            v6 ? TOOL_IPPROTO_ICMPV6 : TOOL_IPPROTO_ICMP);
     if (sock < 0)
     {
         LONG err = tool_sock_errno(sb);
@@ -448,7 +466,7 @@ int main(int argc, char **argv)
                 wait = timeout - elapsed;
         }
 
-        total = ping_build(ident, (UWORD)(i & 0xffffUL), size);
+        total = ping_build(v6, ident, (UWORD)(i & 0xffffUL), size);
 
         t0 = ami_millis();
         n  = tool_sock_sendto(sb, sock, ping_probe, (LONG)total, &to);
@@ -482,6 +500,7 @@ int main(int argc, char **argv)
             ToolFdSet       readfds;
             ToolTimeval     tv;
             ToolSockAddrAny from;
+            ToolAddr        from_addr;
             ULONG           now = ami_millis();
             ULONG           left;
             LONG            ready;
@@ -522,9 +541,12 @@ int main(int argc, char **argv)
             if (n <= 0)
                 continue;
 
-            if (ping_is_reply(ping_reply, (ULONG)n, ident,
-                              (UWORD)(i & 0xffffUL), from.in.sin_addr,
-                              target.ta_V4, &got_bytes))
+            if (!tool_sock_addr_get(&from, &from_addr))
+                continue;
+
+            if (ping_is_reply(v6, ping_reply, (ULONG)n, ident,
+                              (UWORD)(i & 0xffffUL), &from_addr, &target,
+                              &got_bytes))
             {
                 rtt      = ami_millis() - t0;
                 answered = TRUE;

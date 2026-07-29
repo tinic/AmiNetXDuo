@@ -24,6 +24,9 @@
  * wire; docs/RESEARCH.md 19 has the capture. nxd_ip_raw_packet_send() takes
  * the socket's TTL as an argument, so the ICMP path honours it.
  *
+ * IPv6 works the same way over IPV6_UNICAST_HOPS, once NetX Duo stopped
+ * dropping the argument on the IPv6 side of that call (docs/RESEARCH.md 67).
+ *
  * A raw ICMP socket sees the whole ICMP input: TIME_EXCEEDED from each router,
  * ECHOREPLY from the destination, and any ICMP belonging to another program's
  * ping. Probes are matched by identifier and sequence -- ours in the echo
@@ -85,15 +88,24 @@ enum
 #define TR_DEFAULT_PACKET   60UL
 #define TR_MIN_PACKET       28UL        /* 20 IP + 8 ICMP                   */
 #define TR_MAX_PACKET       1400UL
-#define TR_HEADERS          28UL
+#define TR_HEADERS          28UL        /* 20 IP + 8 ICMP                   */
+#define TR_HEADERS6         48UL        /* 40 IPv6 + 8 ICMPv6               */
 #define TR_MAX_SIZE         (TR_MAX_PACKET - TR_HEADERS)
 #define TR_CEILING_HOPS     255UL
 
-/* ICMP, the four types this command reads. */
+/* ICMP, the four types this command reads. ICMPv6 renumbered all four. */
 #define ICMP_ECHOREPLY      0
 #define ICMP_UNREACH        3
 #define ICMP_ECHO           8
 #define ICMP_TIMXCEED       11
+
+#define ICMP6_UNREACH       1
+#define ICMP6_TIMXCEED      3
+#define ICMP6_ECHO          128
+#define ICMP6_ECHOREPLY     129
+
+/* The fixed IPv6 header a router quotes back inside an error message. */
+#define TR_IPV6_HDR         40UL
 
 /* Static rather than automatic: a Shell command gets whatever stack the Shell
    has, 4 KB on a stock 3.1. */
@@ -180,22 +192,27 @@ static UWORD tr_get16(const UBYTE *p)
     return (UWORD)(((UWORD)p[0] << 8) | (UWORD)p[1]);
 }
 
-/* An ICMP echo request, checksummed, ready for the raw socket. */
-static ULONG tr_build_echo(UWORD ident, UWORD seq, ULONG payload)
+/*
+ * An ICMP echo request ready for the raw socket. IPv4 is checksummed here;
+ * ICMPv6's checksum covers the IPv6 pseudo-header, so only the stack can
+ * compute it and src/bsdsocket/raw.c does.
+ */
+static ULONG tr_build_echo(BOOL v6, UWORD ident, UWORD seq, ULONG payload)
 {
     ULONG total = 8UL + payload;
     ULONG i;
 
-    tr_probe[0] = ICMP_ECHO;
+    tr_probe[0] = v6 ? ICMP6_ECHO : ICMP_ECHO;
     tr_probe[1] = 0;
-    tr_put16(&tr_probe[2], 0);              /* checksum, filled in below */
+    tr_put16(&tr_probe[2], 0);              /* checksum */
     tr_put16(&tr_probe[4], ident);
     tr_put16(&tr_probe[6], seq);
 
     for (i = 0; i < payload; i++)
         tr_probe[8 + i] = (UBYTE)(i & 0xff);
 
-    tr_put16(&tr_probe[2], tr_checksum(tr_probe, total));
+    if (!v6)
+        tr_put16(&tr_probe[2], tr_checksum(tr_probe, total));
 
     return total;
 }
@@ -215,26 +232,43 @@ enum
     TR_UNREACH          /* DEST_UNREACHABLE: the path ends here            */
 };
 
-static LONG tr_classify(const UBYTE *buf, ULONG len, UWORD ident, UWORD seq,
-                        UBYTE *code_out)
+static LONG tr_classify(BOOL v6, const UBYTE *buf, ULONG len, UWORD ident,
+                        UWORD seq, UBYTE *code_out)
 {
-    ULONG ip_hlen;
     ULONG icmp_len;
     const UBYTE *icmp;
+    UBYTE reply_type   = v6 ? ICMP6_ECHOREPLY : ICMP_ECHOREPLY;
+    UBYTE echo_type    = v6 ? ICMP6_ECHO      : ICMP_ECHO;
+    UBYTE exceeded     = v6 ? ICMP6_TIMXCEED  : ICMP_TIMXCEED;
+    UBYTE unreachable  = v6 ? ICMP6_UNREACH   : ICMP_UNREACH;
 
     *code_out = 0;
 
-    if (len < 20 || (buf[0] >> 4) != 4)
+    if (v6)
+    {
+        /* No IP header: a raw IPv6 read starts at the ICMPv6 header. */
+        icmp     = buf;
+        icmp_len = len;
+    }
+    else
+    {
+        ULONG ip_hlen;
+
+        if (len < 20 || (buf[0] >> 4) != 4)
+            return TR_OTHER;
+
+        ip_hlen = (ULONG)(buf[0] & 0x0f) * 4UL;
+        if (ip_hlen < 20 || ip_hlen + 8 > len)
+            return TR_OTHER;
+
+        icmp     = buf + ip_hlen;
+        icmp_len = len - ip_hlen;
+    }
+
+    if (icmp_len < 8)
         return TR_OTHER;
 
-    ip_hlen = (ULONG)(buf[0] & 0x0f) * 4UL;
-    if (ip_hlen < 20 || ip_hlen + 8 > len)
-        return TR_OTHER;
-
-    icmp     = buf + ip_hlen;
-    icmp_len = len - ip_hlen;
-
-    if (icmp[0] == ICMP_ECHOREPLY)
+    if (icmp[0] == reply_type)
     {
         if (tr_get16(&icmp[4]) != ident || tr_get16(&icmp[6]) != seq)
             return TR_OTHER;
@@ -242,35 +276,53 @@ static LONG tr_classify(const UBYTE *buf, ULONG len, UWORD ident, UWORD seq,
         return TR_ARRIVED;
     }
 
-    if (icmp[0] == ICMP_TIMXCEED || icmp[0] == ICMP_UNREACH)
+    if (icmp[0] == exceeded || icmp[0] == unreachable)
     {
         /*
-         * RFC 792: the message quotes the offending datagram's IP header and
-         * the first 64 bits after it, which for our probe is the echo header
-         * including identifier and sequence. Anything quoting less than that
+         * RFC 792 quotes the offending datagram's IP header and the first 64
+         * bits after it; RFC 4443 quotes as much of it as fits an unfragmented
+         * 1280-byte reply. Either way our probe's echo header, identifier and
+         * sequence included, is in there. Anything quoting less than that
          * cannot be attributed.
          */
         const UBYTE *orig = icmp + 8;
         ULONG        orig_hlen;
+        UBYTE        orig_proto;
 
-        if (icmp_len < 8 + 20)
+        if (v6)
+        {
+            if (icmp_len < 8 + TR_IPV6_HDR)
+                return TR_OTHER;
+
+            orig_hlen  = TR_IPV6_HDR;
+            orig_proto = orig[6];       /* next header */
+        }
+        else
+        {
+            if (icmp_len < 8 + 20)
+                return TR_OTHER;
+
+            orig_hlen = (ULONG)(orig[0] & 0x0f) * 4UL;
+            if (orig_hlen < 20)
+                return TR_OTHER;
+
+            orig_proto = orig[9];
+        }
+
+        if (8 + orig_hlen + 8 > icmp_len)
             return TR_OTHER;
 
-        orig_hlen = (ULONG)(orig[0] & 0x0f) * 4UL;
-        if (orig_hlen < 20 || (ULONG)(8 + orig_hlen + 8) > icmp_len)
+        if (orig_proto != (v6 ? TOOL_IPPROTO_ICMPV6 : TOOL_IPPROTO_ICMP))
             return TR_OTHER;
 
-        if (orig[9] != TOOL_IPPROTO_ICMP)
-            return TR_OTHER;
-
-        if (orig[orig_hlen] != ICMP_ECHO ||
+        if (orig[orig_hlen] != echo_type ||
             tr_get16(&orig[orig_hlen + 4]) != ident ||
             tr_get16(&orig[orig_hlen + 6]) != seq)
             return TR_OTHER;
 
         *code_out = icmp[1];
 
-        return (icmp[0] == ICMP_TIMXCEED) ? TR_HOP : TR_UNREACH;
+        return (icmp[0] == exceeded) ? TR_HOP : TR_UNREACH;
     }
 
     return TR_OTHER;
@@ -280,11 +332,24 @@ static LONG tr_classify(const UBYTE *buf, ULONG len, UWORD ident, UWORD seq,
  * The one-letter annotations traceroute has printed since 1988 for an
  * unreachable. Codes not in the list print as their number.
  */
-static VOID tr_print_unreach(UBYTE code)
+static VOID tr_print_unreach(BOOL v6, UBYTE code)
 {
     static char other[8];
 
-    switch (code)
+    if (v6)
+    {
+        /* RFC 4443 codes, annotated as traceroute6 has since KAME. */
+        switch (code)
+        {
+            case 0: tool_printf(" !N"); return;  /* no route to destination */
+            case 1: tool_printf(" !P"); return;  /* administratively barred */
+            case 2: tool_printf(" !S"); return;  /* beyond scope of source  */
+            case 3: tool_printf(" !A"); return;  /* address unreachable     */
+            case 4: tool_printf(" !");  return;  /* port: we have arrived   */
+            default: break;
+        }
+    }
+    else switch (code)
     {
         case 0:  tool_printf(" !N"); return;     /* network unreachable    */
         case 1:  tool_printf(" !H"); return;     /* host unreachable       */
@@ -388,6 +453,7 @@ int main(int argc, char **argv)
     ULONG           packetsize;
     ULONG           size;
     LONG            tos;
+    BOOL            v6;
     BOOL            numeric;
     BOOL            verbose;
     LONG            sock = -1;
@@ -450,8 +516,6 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    size = packetsize - TR_HEADERS;     /* what is left for the payload */
-
     sb = tool_socket_open();
     if (sb == NULL)
     {
@@ -466,15 +530,40 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    if (!tool_sock_raw_ok(&address))
+    v6 = TOOL_ADDR_IS6(&address);
+
+    /* PACKETSIZE is the whole datagram, and an IPv6 header is twice an IPv4
+       one, so what is left for the payload depends on the family. */
     {
-        CloseLibrary(sb);
-        FreeArgs(rda);
-        return RETURN_FAIL;
+        ULONG headers = v6 ? TR_HEADERS6 : TR_HEADERS;
+
+        if (packetsize < headers)
+        {
+            tool_error("PACKETSIZE must be at least %lu bytes for this host",
+                       headers);
+            CloseLibrary(sb);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
+        size = packetsize - headers;
     }
 
-    sock = tool_sock_socket(sb, TOOL_AF_INET, TOOL_SOCK_RAW,
-                            TOOL_IPPROTO_ICMP);
+    /*
+     * TOS is IPv4's. The IPv6 traffic class is not a field the raw send path
+     * carries, so accepting the option there would misreport what went out.
+     */
+    if (v6 && tos != 0)
+    {
+        tool_error("TOS is IPv4 only");
+        CloseLibrary(sb);
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
+    sock = tool_sock_socket(sb,
+                            v6 ? TOOL_AF_INET6 : TOOL_AF_INET, TOOL_SOCK_RAW,
+                            v6 ? TOOL_IPPROTO_ICMPV6 : TOOL_IPPROTO_ICMP);
     if (sock < 0)
     {
         LONG err = tool_sock_errno(sb);
@@ -552,7 +641,9 @@ int main(int argc, char **argv)
 
         tool_printf("%2ld ", (LONG)ttl);
 
-        if (tool_sock_setsockopt(sb, sock, TOOL_IPPROTO_IP, TOOL_IP_TTL,
+        if (tool_sock_setsockopt(sb, sock,
+                                 v6 ? TOOL_IPPROTO_IPV6 : TOOL_IPPROTO_IP,
+                                 v6 ? TOOL_IPV6_UNICAST_HOPS : TOOL_IP_TTL,
                                  &ttlval, (LONG)sizeof(ttlval)) != 0)
         {
             tool_printf("\n");
@@ -579,7 +670,7 @@ int main(int argc, char **argv)
                 break;
             }
 
-            probe_len = tr_build_echo(ident, ++seq, size);
+            probe_len = tr_build_echo(v6, ident, ++seq, size);
 
             t0 = tr_now();
 
@@ -646,7 +737,8 @@ int main(int argc, char **argv)
                 if (n <= 0)
                     continue;
 
-                verdict = tr_classify(tr_reply, (ULONG)n, ident, seq, &code);
+                verdict = tr_classify(v6, tr_reply, (ULONG)n, ident, seq,
+                                      &code);
                 if (verdict != TR_OTHER)
                 {
                     (VOID)tool_sock_addr_get(&from, &from_addr);
@@ -660,7 +752,8 @@ int main(int argc, char **argv)
                      * way and nothing coming back at all are different faults
                      * that otherwise look identical.
                      */
-                    ULONG hlen = (ULONG)(tr_reply[0] & 0x0f) * 4UL;
+                    ULONG hlen = v6 ? 0UL
+                                    : (ULONG)(tr_reply[0] & 0x0f) * 4UL;
                     char  who[TOOL_ADDR_STRLEN];
 
                     tool_sock_addr_text(sb, &from, who, sizeof(who));
@@ -694,7 +787,7 @@ int main(int argc, char **argv)
              * the others.
              */
             if (verdict == TR_UNREACH)
-                tr_print_unreach(code);
+                tr_print_unreach(v6, code);
 
             if (verdict == TR_UNREACH || verdict == TR_ARRIVED)
                 done = TRUE;
