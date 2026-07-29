@@ -69,6 +69,14 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_connection_reset.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_block_cleanup.c")
 
+    # Built without IPv6 whatever the tree default is.  This links six TCP
+    # sources to test retransmit timing; the IPv6 send path in those same files
+    # reaches nx_ipv6_packet_send, which reaches the ICMPv6 destination table
+    # and neighbour solicitation, so honouring the default here would mean
+    # listing most of the stack.  -U comes after the directory -D, so nx_user.h
+    # sees no AMINETXDUO_IPV6 and defines NX_DISABLE_IPV6.
+    target_compile_options(test_tcp_retries PRIVATE -UAMINETXDUO_IPV6)
+
     target_include_directories(test_tcp_retries PRIVATE
         "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
         "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h

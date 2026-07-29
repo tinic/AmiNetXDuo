@@ -50,6 +50,7 @@ set(AMINETXDUO_FUZZ_CASES "2000" CACHE STRING
 add_executable(fuzz_config
     fuzz_config.c
     "${CMAKE_SOURCE_DIR}/src/config/config_text.c"
+    "${CMAKE_SOURCE_DIR}/src/config/config_text6.c"
     "${CMAKE_SOURCE_DIR}/src/config/config_parse.c"
     "${CMAKE_SOURCE_DIR}/src/config/netdb.c")
 
