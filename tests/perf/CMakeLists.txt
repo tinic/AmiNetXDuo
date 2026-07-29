@@ -62,6 +62,28 @@ endif()
 endif() # CMAKE_CROSSCOMPILING
 
 
+# ------------------------------------------------------------- FitzBench --
+#
+# Bulk file throughput over a mounted share.  Links against nothing of ours --
+# it is AmigaDOS Read()/Write() and timer.device -- so the library under test
+# is whatever is in LIBS:, which is what makes an A/B of two builds possible
+# without rebuilding the benchmark.
+#
+#   cmake --build build/cm --parallel --target fitzbench
+#   tests/perf/run-fitzbench.sh -H 192.168.1.184
+
+if(CMAKE_CROSSCOMPILING)
+
+    add_executable(fitzbench fitzbench.c)
+    set_target_properties(fitzbench PROPERTIES OUTPUT_NAME "FitzBench")
+
+    if(AMIGA_NDK_INCLUDE)
+        target_include_directories(fitzbench PRIVATE "${AMIGA_NDK_INCLUDE}")
+    endif()
+
+endif()
+
+
 # ------------------------------------------------------- the bracket probe --
 #
 # What one tx_amiga_adopt_thread()/tx_amiga_orphan_thread() pair costs, and
