@@ -17093,6 +17093,28 @@ was 25–75% *worse* through curl) with the mechanism now visible: it is not
 that a big window hurts, it is that above the knee the window is not what the
 transfer is waiting for.
 
+The same question asked on a link that does have latency, `bsdsocktest`'s
+network tier over SLIRP to the host helper, with the window pinned by
+`-DAMINETXDUO_TCP_WINDOW` so it is floor and ceiling both:
+
+| pinned window | TCP network | TCP sustained network | TCP loopback |
+|---:|---:|---:|---:|
+| 8,192 | 392 KB/s | 394 | 409 |
+| 32,768 | 392 | 393 | 568 |
+| shipped, pool-derived | 391 | 394 | 514 |
+
+**Four times the window, and the wire figure does not move by a kilobyte.**
+Loopback does, because pinning also raises what the loopback socket gets and
+that path has an enormous MSS; the wire does not, because it is not waiting
+for a window.
+
+One thing to know before repeating this: `-DAMINETXDUO_TCP_WINDOW=4096`, below
+the 8,192 floor, hangs the suite at test 25 on the network tier and never
+finishes. It does so identically on a library built before this section's
+changes, so it is not a regression from them, and no shipped configuration can
+reach it -- `ami_bsd_tcp_window()` clamps to the floor. It is recorded here so
+the next person to sweep the window does not debug it as one.
+
 ### 64.6 The regime question, and what a zero-latency link cannot answer
 
 AmiTCP_NG's link-speed-aware window is reported to have roughly doubled a
