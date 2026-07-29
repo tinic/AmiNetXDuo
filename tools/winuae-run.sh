@@ -333,6 +333,17 @@ for extra in "$@"; do
     cp -R "$extra" "$HD/"
 done
 
+# ENV: is DH0:env, which the extras loop cannot write into: cp -R of a
+# directory called `env' would land in DH0:env/env.  Drivers that read their
+# settings from ENV: -- x-surf-100.device reads ENV:sana2/ -- need the contents
+# merged instead.
+if [ -n "${AMINETXDUO_GUEST_ENVDIR:-}" ]; then
+    [ -d "${AMINETXDUO_GUEST_ENVDIR}" ] || {
+        echo "AMINETXDUO_GUEST_ENVDIR is not a directory: ${AMINETXDUO_GUEST_ENVDIR}" >&2
+        exit 2; }
+    cp -R "${AMINETXDUO_GUEST_ENVDIR}/." "$HD/env/"
+fi
+
 # Same reasoning as the FS-UAE harness: a bare directory hard drive has none of
 # the assigns a Workbench boot makes, and anything calling GetVar()/SetVar()
 # fails without them.  envsetup builds them through dos.library.

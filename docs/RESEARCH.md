@@ -14274,9 +14274,9 @@ per-board backend setting in the harness.
 | `ariadne2_rom_file=:ENABLED` | `Ariadne II` | NE2000 | `ariadne2.device` | no |
 | `hydra_rom_file=:ENABLED` | `AmigaNet` | NE2000 | `amiganet.device` | no |
 | `eb920_rom_file=:ENABLED` | `LAN Rover/EB920` | NE2000 | ASDG's own | no |
-| `xsurf_rom_file=:ENABLED` | `X-Surf` | NE2000 | `xsurf.device` | no |
-| `xsurf100z2_rom_file=:ENABLED` | `X-Surf-100 Z2` | NE2000 | `xsurf100.device` | no |
-| `xsurf100z3_rom_file=:ENABLED` | `X-Surf-100 Z3` | NE2000 | `xsurf100.device` | no |
+| `xsurf_rom_file=:ENABLED` | `X-Surf` | NE2000 | `x-surf.device` | no |
+| `xsurf100z2_rom_file=:ENABLED` | `X-Surf-100 Z2` | NE2000 | `x-surf-100.device` | **yes** |
+| `xsurf100z3_rom_file=:ENABLED` | `X-Surf-100 Z3` | NE2000 | `x-surf-100.device` | **yes** |
 
 Two entries in our installer's list have no hardware here at all. **`cnet.device`
 has no card in WinUAE.** And the **PCMCIA NE2000 could not be brought up**:
@@ -14304,14 +14304,114 @@ emulated; the driver is a third-party binary nobody in this tree has. The
 `ariadne.device` in `build/testhd-ux4/devs/Networks/` is an 18-byte file reading
 `not a real driver` — an installer-detection fixture, not a driver.
 
-**Device coverage is unchanged: `a2065.device` is still
-the only SANA-II driver this project has ever run.** What changed is that the
-hardware for seven more is now one config line away, and
-`AMINETXDUO_SANA2_DRIVER=<path> tests/netstack/run-winuae.sh -N <board>` will
-exercise any of them the moment a driver binary turns up. Acquiring those is a
-licensing question, not an engineering one.
+**Superseded on 2026-07-29 by 44.9**: a second driver has now been run, and
+the sentence below about `a2065.device` no longer holds. Everything else here
+does — the paragraph is kept because it is what the Ariadne run still shows.
 
-### 44.9 What is in the tree
+*What changed is that the hardware for seven more is now one config line away,
+and `AMINETXDUO_SANA2_DRIVER=<path> tests/netstack/run-winuae.sh -N <board>`
+will exercise any of them the moment a driver binary turns up. Acquiring those
+is a licensing question, not an engineering one.*
+
+### 44.9 The X-Surf-100, and the bug it found in us
+
+Individual Computers publish the X-Surf-100 SANA-II driver, so the second card
+this project has ever driven is an `xsurf100z2` on SLIRP under WinUAE:
+`AddNetInterface` brings `eth0` up, DHCP leases 10.0.2.15, and `ping`, DNS and
+the conformance path all work. The driver is not redistributable and is not in
+this repository; it is staged from a local copy with
+`AMINETXDUO_SANA2_DRIVER=<path> AMINETXDUO_GUEST_ENVDIR=<dir>`.
+
+Two names in 44.7 were wrong and are corrected above. The Z2 and Z3 boards both
+want **`x-surf-100.device`**, not `xsurf100.device`, and the plain X-Surf wants
+`x-surf.device`. `tests/netstack/run-winuae.sh` no longer derives the driver
+name from the board key; it has a table.
+
+**The bug, and it is ours.** The card presented as
+`x-surf-100.device is installed (DEVS:Networks) but unit 0 would not open`, and
+that message was true — the open really did fail, in the stack and again in the
+diagnostic's own probe. It failed because **`DEVS:Networks` is not on the search
+path a bare device name reaches.** Exec hands an unqualified name to DOS, which
+loads `DEVS:<name>`; every third-party SANA-II driver since 1994 is installed
+one directory below that. Our A2065 tests never caught it because they stage
+`a2065.device` in `DEVS:` itself.
+
+Proven three ways in one afternoon, one emulator boot each, nothing else
+changed between them:
+
+| `DEVICE=` in `DEVS:NetInterfaces/eth0` | result |
+|---|---|
+| `x-surf-100.device` | `cannot open ... (-1)`, no driver output at all |
+| `DEVS:Networks/x-surf-100.device` | online, 10.0.2.15, 3/3 pings |
+| `Networks/x-surf-100.device` | online, 10.0.2.15, 3/3 pings |
+
+The third line is the fix: `ami_sana2_open_device()` in `src/common/compat.c`
+tries the name as given and then retries `Networks/<name>`, which reaches DOS
+as `DEVS:Networks/<name>`. Both SANA-II opens in the tree go through it — the
+stack's in `src/sana2/sana2_device.c` and the diagnostic probe's in
+`src/tools/tool_diag.c` — so a driver in the conventional place opens, and the
+command that explains a failure agrees with the stack about whether it did. A
+name that already carries a `/` or a `:` is taken literally and never retried.
+
+**The AmiTCP hypothesis was wrong, and here is why it was worth checking.** The
+release notes advertise routines that "replace AmiTCP's mbuf copy routines",
+and the driver detects AmiTCP by `FindPort("AMITCP")` — a port
+`src/netstack/netstack.c` creates under exactly that name. Every `mbuf_*` vector
+in our `bsdsocket.library` is `bsd_enosys`, so the theory had a mechanism. It is
+not what happened:
+
+* The failing run produced **no driver debug output whatsoever** on the serial
+  port with `DEBUGLEV 1` set, while a working run prints `(xs100 5) DevOpen
+  Count=1` on the first line. The device image was never loaded, so no code in
+  it ran.
+* `NOAMITCPOPT 1` versus unset is **byte-for-byte identical** in the serial log
+  and in every command's output. That switch short-circuits the detection
+  before `FindPort`, so it is a clean A/B on precisely this mechanism.
+* Opening the device on an **already-running** stack, where the `AMITCP` port
+  does exist — `AddNetInterface eth1` after `eth0` is up — works, and traffic
+  through it works.
+
+The driver contains no `bsdsocket.library` string. Nothing in this project's
+`mbuf_*` stubs is reached by it. The earlier conclusion that nothing uses them
+stands.
+
+**Two defects in the driver, neither of them ours.**
+
+`S2_DEVICEQUERY` fills the `Sana2DeviceQuery` block and then leaves
+`SizeSupplied` at zero, which is why every open logs
+`[WARN] sana2: short S2_DEVICEQUERY (0 bytes)`. Our reader is forgiving and
+takes the fields anyway; the MTU, wire type and address size that come back are
+right, and the address the interface ends up with is the card's.
+
+Every multicast join is refused with `S2ERR_BAD_ADDRESS`/`S2WERR_BAD_MULTICAST`
+and no address could avoid it. From the driver's own code, at 0x37b2 in the
+1.16 code hunk:
+
+```
+37b4:  moveb a3@(40),d0        ; ios2_SrcAddr[0]
+37b8:  andl #128,d0            ; bit 7
+37be:  beqw 0x3854             ; -> io_Error=5, ios2_WireError=10
+```
+
+The Ethernet group bit is **bit 0** of the first octet, not bit 7. `33:33:...`
+and `01:00:5e:...` both have bit 7 clear, so v1.16 rejects every legal Ethernet
+multicast address there is. `src/sana2/sana2_driver.c` already logs and swallows
+a refused join because "many SANA-II devices answer S2ERR_NOT_SUPPORTED here and
+pass multicast through anyway", and that is what saves this: IPv6 picks up its
+link-local address and the interface works. Setting `ios2_DstAddr` to the same
+address was tried, on the theory that the driver routed the single-address
+command through the range one and read a zero upper bound; it changes nothing
+and was reverted.
+
+**What this run also fixed in the message.** `ami_sana2_open()` answered
+`AMI_NET_ERR_NODEV` both for a failed `OpenDevice()` and for an open that
+succeeded and then failed `S2_DEVICEQUERY`, `S2_GETSTATIONADDRESS` or
+`S2_CONFIGINTERFACE`, and all three printed "unit 0 would not open" followed by
+advice about seating and unit numbers. The second case now returns
+`AMI_NET_ERR_DEVBAD` and gets `tool_explain_device_refused()`, which says the
+card is fitted and the driver is loaded and points at the serial log.
+
+### 44.10 What is in the tree
 
 | | |
 |---|---|

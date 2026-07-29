@@ -48,8 +48,18 @@ EXE="$ROOT/$BUILD/tests/netstack/netstack_test"
 # The driver name in DEVS:NetInterfaces/eth0 has to match the card, so the
 # interface file is rewritten for anything other than the A2065.  Nothing else
 # about the test changes: SANA-II is SANA-II.
-DRIVER="$BOARD.device"
-[ "$BOARD" = "a2065" ] && DRIVER="a2065.device"
+# The driver name is not the board key: Individual Computers ship
+# x-surf-100.device, not xsurf100z2.device, and Hydra's card is amiganet.device.
+case "$BOARD" in
+    a2065)                 DRIVER=a2065.device ;;
+    ariadne)               DRIVER=ariadne.device ;;
+    ariadne2)              DRIVER=ariadne2.device ;;
+    hydra)                 DRIVER=amiganet.device ;;
+    xsurf)                 DRIVER=x-surf.device ;;
+    xsurf100z2|xsurf100z3) DRIVER=x-surf-100.device ;;
+    *)                     DRIVER="$BOARD.device" ;;
+esac
+DRIVER="${AMINETXDUO_SANA2_DRIVER_NAME:-$DRIVER}"
 
 A2065="${AMINETXDUO_A2065:-}"
 if [ -z "$A2065" ] && [ "$BOARD" = "a2065" ]; then
@@ -76,7 +86,11 @@ if [ "$DRIVER" != "a2065.device" ]; then
         > "$STAGE/devs/NetInterfaces/eth0"
     DRV="${AMINETXDUO_SANA2_DRIVER:-}"
     if [ -n "$DRV" ] && [ -f "$DRV" ]; then
-        cp "$DRV" "$STAGE/devs/$DRIVER"
+        # DEVS:Networks and not DEVS:, because that is where a third-party
+        # driver is really installed and OpenDevice does not look there by
+        # itself -- see docs/RESEARCH.md 44.9.
+        mkdir -p "$STAGE/devs/Networks"
+        cp "$DRV" "$STAGE/devs/Networks/$DRIVER"
     else
         echo "!! no $DRIVER staged: set AMINETXDUO_SANA2_DRIVER=<path> to one." >&2
         echo "!! The card will be in the machine and nothing will be able to" >&2
