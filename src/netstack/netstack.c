@@ -137,6 +137,27 @@ static VOID ami_ns_port_delete(VOID)
     ami_ns_port = NULL;
 }
 
+/*
+ * iComp's SANA-II drivers read the AMITCP port as "this stack hands AmiTCP
+ * mbufs to the copy callbacks", and on finding it they stop calling the
+ * callbacks and walk ios2_Data as an IOIPReq instead -- into our slot, which
+ * is not one (docs/RESEARCH.md 71). Their flag is sampled once per OpenDevice
+ * and defaults to on, so the port is taken down across the open and put back
+ * after. A cold bring-up opens interfaces before the port exists and was never
+ * exposed; adding an interface to a running stack is.
+ */
+static VOID ami_ns_port_suspend(VOID)
+{
+    if (ami_ns_port != NULL)
+        RemPort(ami_ns_port);
+}
+
+static VOID ami_ns_port_resume(VOID)
+{
+    if (ami_ns_port != NULL)
+        AddPort(ami_ns_port);
+}
+
 /* ----------------------------------------------------------- adoption glue */
 
 LONG ami_netstack_enter(AmiNetCaller *caller)
@@ -1286,6 +1307,7 @@ static LONG ami_ns_bring_up(VOID)
     /* The stack exists from here on, address or not, so this releases anything
        waiting for `WaitForPort AMITCP`. */
     ami_ns_port_create();
+    ami_sana2_set_open_hooks(ami_ns_port_suspend, ami_ns_port_resume);
 
     if (status != AMI_NET_OK)
     {
@@ -1361,7 +1383,9 @@ VOID netstack_shutdown(VOID)
 
     ami_ns = NULL;
 
-    /* Take the barrier down before the stack behind it goes. */
+    /* Take the barrier down before the stack behind it goes. The hooks point
+       at the port that is about to be freed, so they go first. */
+    ami_sana2_set_open_hooks(NULL, NULL);
     ami_ns_port_delete();
 
     /*

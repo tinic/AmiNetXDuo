@@ -207,6 +207,37 @@ ULONG ami_millis(VOID)
 #define AMI_SANA2_DEVS_SUBDIR   "Networks/"
 #define AMI_SANA2_NAME_MAX      128
 
+/*
+ * Set by the netstack when it owns the AMITCP port. compat.c is linked into
+ * commands that have no netstack, so this cannot be a direct call.
+ */
+static VOID (*ami_sana2_quiesce)(VOID);
+static VOID (*ami_sana2_restore)(VOID);
+
+VOID ami_sana2_set_open_hooks(VOID (*quiesce)(VOID), VOID (*restore)(VOID))
+{
+    ami_sana2_quiesce = quiesce;
+    ami_sana2_restore = restore;
+}
+
+static LONG ami_sana2_open_once(const char *name, ULONG unit,
+                                struct IORequest *req)
+{
+    LONG status;
+
+    /* An iComp driver samples the AMITCP port here and bypasses our copy
+       callbacks if it finds one -- see ami_ns_port_suspend(). */
+    if (ami_sana2_quiesce != NULL)
+        ami_sana2_quiesce();
+
+    status = (LONG)(BYTE)OpenDevice((CONST_STRPTR)name, unit, req, 0);
+
+    if (ami_sana2_restore != NULL)
+        ami_sana2_restore();
+
+    return status;
+}
+
 LONG ami_sana2_open_device(const char *name, ULONG unit, struct IORequest *req)
 {
     char  path[sizeof(AMI_SANA2_DEVS_SUBDIR) + AMI_SANA2_NAME_MAX];
@@ -216,7 +247,7 @@ LONG ami_sana2_open_device(const char *name, ULONG unit, struct IORequest *req)
     if (name == NULL || *name == '\0' || req == NULL)
         return -1;
 
-    status = (LONG)(BYTE)OpenDevice((CONST_STRPTR)name, unit, req, 0);
+    status = ami_sana2_open_once(name, unit, req);
     if (status == 0)
         return 0;
 
@@ -240,5 +271,5 @@ LONG ami_sana2_open_device(const char *name, ULONG unit, struct IORequest *req)
     req->io_Device = NULL;
     req->io_Unit   = NULL;
 
-    return (LONG)(BYTE)OpenDevice((CONST_STRPTR)path, unit, req, 0);
+    return ami_sana2_open_once(path, unit, req);
 }

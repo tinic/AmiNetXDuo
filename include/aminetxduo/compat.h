@@ -87,6 +87,11 @@ ULONG ami_millis(VOID);
 struct IORequest;
 LONG ami_sana2_open_device(const char *name, ULONG unit, struct IORequest *req);
 
+/* Called around every SANA-II OpenDevice. The netstack registers a pair that
+   takes the AMITCP port down and puts it back; a command that has no netstack
+   registers nothing and the open is unchanged. */
+VOID ami_sana2_set_open_hooks(VOID (*quiesce)(VOID), VOID (*restore)(VOID));
+
 #ifdef __cplusplus
 }
 #endif
