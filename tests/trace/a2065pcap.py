@@ -46,6 +46,13 @@ import struct
 import sys
 
 PRE_RE = re.compile(r"^(pre|post):\s*(\d+):\s*(.*)$")
+
+# WinUAE's own A2065 dump, from -a2065log2 (tools/winuae-run.sh brings the log
+# back).  `7990*>` is a frame that crossed outbound and `7990<*` one the card
+# accepted; the `->` and `<!` lines are the same frames one step earlier, so
+# taking only the starred pair counts each frame once.  Every header line is
+# followed by the frame as one unbroken hex string.
+WU_RE = re.compile(r"7990(\*>|<\*)DST:.*\sS=(\d+)")
 MAC_RE = re.compile(r"^A2065:\s*'\w+'\s*([0-9A-Fa-f:]{17})")
 INIT_RE = re.compile(r"^A2065:\s.*\s([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})\s*$")
 
@@ -65,6 +72,27 @@ def parse_hex(text):
         except ValueError:
             break
     return bytes(out)
+
+
+def read_winuae_frames(path):
+    """[(frame_bytes, wire_length), ...] from a WinUAE log."""
+    frames = []
+    want = None
+
+    with open(path, "r", encoding="latin-1", errors="replace") as fh:
+        for line in fh:
+            m = WU_RE.search(line)
+            if m:
+                want = int(m.group(2))
+                continue
+            if want is None:
+                continue
+            hexpart = line.rsplit(":", 1)[-1].strip()
+            if re.fullmatch(r"[0-9A-Fa-f]{28,}", hexpart):
+                frames.append((bytes.fromhex(hexpart), want))
+            want = None
+
+    return frames, set()
 
 
 def read_frames(path):
@@ -114,17 +142,25 @@ def macstr(raw):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("log", help="fs-uae.log.txt")
+    ap.add_argument("log", help="fs-uae.log.txt, or a WinUAE log with --winuae")
+    ap.add_argument("--winuae", action="store_true",
+                    help="read WinUAE's -a2065log2 dump instead of FS-UAE's")
     ap.add_argument("-o", "--out", required=True, help="pcap to write")
     ap.add_argument("--snap", type=int, default=0,
                     help="truncate each frame to this many bytes (0 = whole)")
     args = ap.parse_args()
 
-    frames, guest_macs = read_frames(args.log)
+    if args.winuae:
+        frames, guest_macs = read_winuae_frames(args.log)
+    else:
+        frames, guest_macs = read_frames(args.log)
 
     if not frames:
         print("a2065pcap: no A2065 frame dumps in %s" % args.log)
-        print("           (was the run made with tools/fsuae-run.sh -n ?)")
+        if args.winuae:
+            print("           (did the run set AMINETXDUO_WINUAE_ARGS=-a2065log2 ?)")
+        else:
+            print("           (was the run made with tools/fsuae-run.sh -n ?)")
         return 1
 
     # The MAC the A2065 announces has zeroes where the initialisation block
