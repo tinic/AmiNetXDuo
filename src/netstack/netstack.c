@@ -479,10 +479,20 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
             /* The serial log is also what a user is asked to send in, so it
                says what to do as well as what happened. The console version,
                with a device probe behind it, is in src/tools/tool_diag.c. */
-            AMI_ERROR("netstack: interface '%s' would not open: %s unit %lu "
-                      "did not answer -- is the driver in DEVS:Networks/ and "
-                      "is the card installed on that unit?",
-                      cfg->name, cfg->device, (unsigned long)cfg->unit);
+            if (status == AMI_NET_ERR_DEVBAD)
+            {
+                AMI_ERROR("netstack: interface '%s' would not start: %s unit "
+                          "%lu opened and then refused a SANA-II command",
+                          cfg->name, cfg->device, (unsigned long)cfg->unit);
+            }
+            else
+            {
+                AMI_ERROR("netstack: interface '%s' would not open: %s unit "
+                          "%lu did not answer -- is the driver in "
+                          "DEVS:Networks/ and is the card installed on that "
+                          "unit?",
+                          cfg->name, cfg->device, (unsigned long)cfg->unit);
+            }
             err = status;
             continue;
         }
@@ -2069,9 +2079,11 @@ LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
     iface = ami_sana2_open(slot_cfg, &err);
     if (iface == NULL)
     {
-        AMI_ERROR("netstack: interface \'%s\' would not open: %s unit %lu did "
-                  "not answer", slot_cfg->name, slot_cfg->device,
-                  (unsigned long)slot_cfg->unit);
+        AMI_ERROR("netstack: interface \'%s\' would not start: %s unit %lu %s",
+                  slot_cfg->name, slot_cfg->device,
+                  (unsigned long)slot_cfg->unit,
+                  (err == AMI_NET_ERR_DEVBAD) ? "refused a SANA-II command"
+                                              : "did not answer");
         slot_cfg->configured = FALSE;
         return (err != AMI_NET_OK) ? err : AMI_NET_ERR_NODEV;
     }

@@ -49,6 +49,14 @@ typedef struct AmiNetStack AmiNetStack;
 #define AMI_NET_ERR_BUSY       (-9)   /* still carrying connections           */
 
 /*
+ * The device opened and then would not answer S2_DEVICEQUERY,
+ * S2_GETSTATIONADDRESS or S2_CONFIGINTERFACE. Separate from AMI_NET_ERR_NODEV
+ * because the advice is the opposite: the card is present and the driver is
+ * loaded, so seating and unit numbers are not the thing to check.
+ */
+#define AMI_NET_ERR_DEVBAD    (-10)
+
+/*
  * Bring the stack up (idempotent, reference-counted). Reads the config, starts
  * ThreadX, creates the packet pool and NX_IP, attaches interfaces, runs DHCP
  * where configured. Blocks until the first interface has an address or the

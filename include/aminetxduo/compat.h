@@ -76,6 +76,17 @@ VOID ami_signal_free(BYTE sig);
 /* Milliseconds since stack startup, from EClock. Monotonic, wraps at 2^32. */
 ULONG ami_millis(VOID);
 
+/*
+ * OpenDevice() for a SANA-II driver, with the DEVS:Networks retry.
+ *
+ * A bare device name reaches DOS as DEVS:<name>, and DEVS:Networks -- where
+ * every third-party SANA-II driver is installed -- is not on that path. The
+ * name is tried as given first, so an absolute or already-resident one is
+ * unaffected. 0 on success, otherwise the OpenDevice() error.
+ */
+struct IORequest;
+LONG ami_sana2_open_device(const char *name, ULONG unit, struct IORequest *req);
+
 #ifdef __cplusplus
 }
 #endif

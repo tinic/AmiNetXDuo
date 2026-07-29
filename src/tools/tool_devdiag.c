@@ -197,6 +197,21 @@ const ToolDevice *tool_scan_device(ULONG index)
     return &diag_found[index];
 }
 
+VOID tool_explain_device_refused(const char *device, ULONG unit)
+{
+    tool_advise_blank();
+    tool_printf("  %s unit %lu opened, then refused a SANA-II command.\n",
+                (LONG)device, unit);
+    tool_advise_blank();
+    tool_advise("The card is fitted and the driver is loaded, so neither the");
+    tool_advise("unit number nor the seating is what to look at. The driver");
+    tool_advise("would not report its capabilities or take a station address,");
+    tool_advise("which usually means the card is held by another network stack");
+    tool_advise("or the driver needs settings it has not been given.");
+    tool_advise_blank();
+    tool_advise("The serial debug log names the command that was refused.");
+}
+
 VOID tool_explain_device(const char *device, ULONG unit)
 {
     const char *where = tool_device_where(device);
@@ -260,6 +275,18 @@ VOID tool_explain_device(const char *device, ULONG unit)
         tool_advise_blank();
         tool_printf("  Unit 0 opens. Almost every card is unit 0: change the UNIT\n");
         tool_printf("  line in DEVS:NetInterfaces to 0, or run NetSetup again.\n");
+        return;
+    }
+
+    /* DEVS: and DEVS:Networks are the two places a bare device name reaches.
+       Anywhere else has to be named in full in DEVS:NetInterfaces. */
+    if (where[0] == 'S' && where[1] == 'Y' && where[2] == 'S' && where[3] == ':')
+    {
+        tool_advise_blank();
+        tool_printf("  A driver in %s cannot be opened by name alone.\n",
+                    (LONG)where);
+        tool_advise("Move it to DEVS:Networks/, or write the whole path on the");
+        tool_advise("DEVICE line in DEVS:NetInterfaces.");
         return;
     }
 

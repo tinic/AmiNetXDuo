@@ -67,6 +67,10 @@ static VOID explain_startup_failure(LONG err, const AmiIfConfig *ifc)
             tool_explain_device(ifc->device, ifc->unit);
             break;
 
+        case AMI_NET_ERR_DEVBAD:
+            tool_explain_device_refused(ifc->device, ifc->unit);
+            break;
+
         case AMI_NET_ERR_CONFIG:
             /*
              * The stack came up but no interface got an address. For DHCP

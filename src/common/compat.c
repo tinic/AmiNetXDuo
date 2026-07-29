@@ -201,3 +201,44 @@ ULONG ami_millis(VOID)
 
     return ticks / ami_eclock_per_ms;
 }
+
+/* ---------------------------------------------------------- SANA-II opens */
+
+#define AMI_SANA2_DEVS_SUBDIR   "Networks/"
+#define AMI_SANA2_NAME_MAX      128
+
+LONG ami_sana2_open_device(const char *name, ULONG unit, struct IORequest *req)
+{
+    char  path[sizeof(AMI_SANA2_DEVS_SUBDIR) + AMI_SANA2_NAME_MAX];
+    LONG  status;
+    ULONG i;
+
+    if (name == NULL || *name == '\0' || req == NULL)
+        return -1;
+
+    status = (LONG)(BYTE)OpenDevice((CONST_STRPTR)name, unit, req, 0);
+    if (status == 0)
+        return 0;
+
+    /* A name that already carries a path was meant literally. */
+    for (i = 0; name[i] != '\0'; i++)
+    {
+        if (name[i] == '/' || name[i] == ':')
+            return status;
+    }
+    if (i >= AMI_SANA2_NAME_MAX)
+        return status;
+
+    for (i = 0; AMI_SANA2_DEVS_SUBDIR[i] != '\0'; i++)
+        path[i] = AMI_SANA2_DEVS_SUBDIR[i];
+    for (; *name != '\0'; name++)
+        path[i++] = *name;
+    path[i] = '\0';
+
+    /* OpenDevice leaves io_Device set on a failed open of a device that does
+       exist; the retry must not be read as a success against the old one. */
+    req->io_Device = NULL;
+    req->io_Unit   = NULL;
+
+    return (LONG)(BYTE)OpenDevice((CONST_STRPTR)path, unit, req, 0);
+}

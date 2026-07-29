@@ -615,6 +615,8 @@ int main(int argc, char **argv)
 
         if (err == AMI_NET_ERR_NODEV)
             tool_explain_device(ifc.device, ifc.unit);
+        else if (err == AMI_NET_ERR_DEVBAD)
+            tool_explain_device_refused(ifc.device, ifc.unit);
 
         FreeArgs(rda);
         return RETURN_FAIL;

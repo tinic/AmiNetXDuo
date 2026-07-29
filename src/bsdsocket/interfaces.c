@@ -1160,6 +1160,7 @@ LONG bsd_AddInterfaceTagList(register STRPTR name __asm("a0"),
         switch (rc)
         {
             case AMI_NET_ERR_NODEV:  return bsd_fail(SocketBase, AMI_ENXIO);
+            case AMI_NET_ERR_DEVBAD: return bsd_fail(SocketBase, AMI_EIO);
             case AMI_NET_ERR_NOMEM:  return bsd_fail(SocketBase, AMI_ENOBUFS);
             case AMI_NET_ERR_CONFIG: return bsd_fail(SocketBase, AMI_EEXIST);
             /* No free slot: NX_MAX_PHYSICAL_INTERFACES is 2, so a user can

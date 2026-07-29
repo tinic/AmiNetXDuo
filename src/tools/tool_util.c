@@ -160,6 +160,7 @@ const char *tool_net_error(LONG err)
         case AMI_NET_OK:            return "no error";
         case AMI_NET_ERR_NOMEM:     return "out of memory";
         case AMI_NET_ERR_NODEV:     return "the SANA-II device would not open";
+        case AMI_NET_ERR_DEVBAD:    return "the SANA-II device opened but would not answer";
         case AMI_NET_ERR_CONFIG:    return "the configuration is not usable";
         case AMI_NET_ERR_KERNEL:    return "the network kernel would not start";
         case AMI_NET_ERR_STATE:     return "the network stack is not running";

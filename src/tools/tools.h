@@ -154,6 +154,7 @@ VOID tool_config_unwatch(VOID);
 /* The explainers. Each prints a block; none of them exits. */
 VOID tool_explain_interface_file(const char *name);   /* file missing        */
 VOID tool_explain_device(const char *device, ULONG unit);
+VOID tool_explain_device_refused(const char *device, ULONG unit);
 VOID tool_explain_no_interfaces(VOID);                /* nothing configured  */
 VOID tool_explain_dhcp(const char *name);             /* nobody answered     */
 VOID tool_explain_resolve(const char *name, LONG err); /* a lookup failed    */

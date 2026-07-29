@@ -304,8 +304,7 @@ LONG tool_device_probe(const char *device, ULONG unit)
     req->ios2_Req.io_Message.mn_ReplyPort    = port;
     req->ios2_BufferManagement               = tags;
 
-    status = (LONG)(BYTE)OpenDevice((CONST_STRPTR)device, unit,
-                                    (struct IORequest *)req, 0);
+    status = ami_sana2_open_device(device, unit, (struct IORequest *)req);
     if (status == 0)
         CloseDevice((struct IORequest *)req);
 

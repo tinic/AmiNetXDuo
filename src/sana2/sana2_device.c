@@ -385,7 +385,14 @@ LONG ami_sana2_multicast(AmiSana2If *iface, UWORD command,
     struct IOSana2Req req = iface->templ;
     LONG              err;
 
-    /* The spec puts the multicast address in ios2_SrcAddr for both commands. */
+    /*
+     * The spec puts the multicast address in ios2_SrcAddr for both commands.
+     *
+     * x-surf-100.device 1.16 answers S2ERR_BAD_ADDRESS/S2WERR_BAD_MULTICAST to
+     * every join, and no address we could pass would change that: it tests bit
+     * 7 of ios2_SrcAddr[0] where the Ethernet group bit is bit 0. See
+     * docs/RESEARCH.md 44.9 -- there is nothing to work around here.
+     */
     req.ios2_SrcAddr[0] = (UBYTE)(addr_msw >> 8);
     req.ios2_SrcAddr[1] = (UBYTE)(addr_msw);
     req.ios2_SrcAddr[2] = (UBYTE)(addr_lsw >> 24);
@@ -557,8 +564,8 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
 
         iface->templ.ios2_Req.io_Message.mn_ReplyPort = port;
 
-        status = (LONG)(BYTE)OpenDevice((STRPTR)iface->device, iface->unit,
-                                        (struct IORequest *)&iface->templ, 0);
+        status = ami_sana2_open_device(iface->device, iface->unit,
+                                       (struct IORequest *)&iface->templ);
 
         /* The template is never sent again -- everything is cloned from it. */
         iface->templ.ios2_Req.io_Message.mn_ReplyPort = NULL;
@@ -577,11 +584,24 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
 
     iface->device_open = TRUE;
 
-    if (ami_sana2_query(iface) != 0 || ami_sana2_configure(iface) != 0)
+    /* The open worked, so a failure past here is a driver that answered badly
+       and not a missing card. AMI_NET_ERR_DEVBAD keeps the two apart all the
+       way out to what the user is told. */
+    if (ami_sana2_query(iface) != 0)
+    {
+        AMI_ERROR("sana2: %s unit %ld opened but S2_DEVICEQUERY failed",
+                  iface->device, (long)iface->unit);
+        ami_sana2_close(iface);
+        if (err != NULL)
+            *err = AMI_NET_ERR_DEVBAD;
+        return NULL;
+    }
+
+    if (ami_sana2_configure(iface) != 0)
     {
         ami_sana2_close(iface);
         if (err != NULL)
-            *err = AMI_NET_ERR_NODEV;
+            *err = AMI_NET_ERR_DEVBAD;
         return NULL;
     }
 
