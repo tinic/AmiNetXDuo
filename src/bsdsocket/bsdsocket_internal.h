@@ -173,6 +173,16 @@
 #define AMI_IPV6_UNICAST_HOPS_BSD    4
 #define AMI_IPV6_UNICAST_HOPS_LINUX 16
 
+/*
+ * IPV6_TCLASS: 61 in BSD, 67 in Linux. Darwin's 36 is deliberately not
+ * accepted -- Apple kept it for binary compatibility, and 36 is
+ * IPV6_RECVPKTINFO in BSD and IPV6_HDRINCL in Linux, so it names something
+ * else in both lineages this header set could belong to. 61 is Linux's
+ * IPV6_PATHMTU, which this library does not offer.
+ */
+#define AMI_IPV6_TCLASS_BSD         61
+#define AMI_IPV6_TCLASS_LINUX       67
+
 /* INET6_ADDRSTRLEN: "0:0:0:0:0:ffff:255.255.255.255" plus NUL. */
 #define AMI_INET6_ADDRSTRLEN        46
 

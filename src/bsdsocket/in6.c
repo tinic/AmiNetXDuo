@@ -193,9 +193,10 @@ BOOL bsd_addr_normalise(const AmiSocket *sock, NXD_ADDRESS *addr)
  *       -- IPv6 multicast membership needs NX_ENABLE_IPV6_MULTICAST, which the
  *          floor-target tuning leaves off (port/netxduo-amiga/inc/nx_user.h).
  *          A join that never happens is worse than a refused one.
- *   IPV6_RECVPKTINFO / IPV6_PKTINFO and the rest of RFC 3542
- *       -- ancillary data.  recvmsg() here reports msg_controllen == 0 always
- *          and cannot do otherwise; see the note in transfer.c.
+ *   IPV6_RECVPKTINFO / IPV6_PKTINFO and the other ancillary-data options of
+ *   RFC 3542
+ *       -- recvmsg() here reports msg_controllen == 0 always and cannot do
+ *          otherwise; see the note in transfer.c.
  *   IPV6_CHECKSUM
  *       -- names the offset of a checksum field the stack should fill in for
  *          an arbitrary raw protocol.  ICMPv6's is filled in unconditionally
@@ -213,6 +214,12 @@ static LONG bsd_hops_option(LONG optname)
 {
     return (optname == AMI_IPV6_UNICAST_HOPS_BSD ||
             optname == AMI_IPV6_UNICAST_HOPS_LINUX);
+}
+
+static LONG bsd_tclass_option(LONG optname)
+{
+    return (optname == AMI_IPV6_TCLASS_BSD ||
+            optname == AMI_IPV6_TCLASS_LINUX);
 }
 
 LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
@@ -267,6 +274,22 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
         return 0;
     }
 
+    if (bsd_tclass_option(optname))
+    {
+        /*
+         * RFC 2474 renamed the IPv4 TOS octet and the IPv6 traffic class
+         * octet to the same DS field, and NetX Duo's raw send takes one tos
+         * argument for both, so IP_TOS and IPV6_TCLASS are the same setting
+         * here.  -1 means "use the default", per RFC 3542.
+         */
+        if (value < -1 || value > 255)
+            return bsd_fail(base, AMI_EINVAL);
+
+        sock->as_Tos = (value < 0) ? 0 : value;
+
+        return 0;
+    }
+
     return bsd_fail(base, AMI_ENOPROTOOPT);
 }
 
@@ -285,6 +308,8 @@ LONG bsd_getsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
         value = ((sock->as_Flags & ASF_V6ONLY) != 0) ? 1 : 0;
     else if (bsd_hops_option(optname))
         value = sock->as_Ttl;
+    else if (bsd_tclass_option(optname))
+        value = sock->as_Tos;
     else
         return bsd_fail(base, AMI_ENOPROTOOPT);
 
