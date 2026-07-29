@@ -18991,3 +18991,195 @@ stack creates no `AMITCP` port and that `WaitForPort AMITCP` will time out.
 `netstack.c:1288` has created one since the same commit that wrote those
 paragraphs. Given 71.3, the honest version of that text says the port exists and
 what it implies.
+
+## 72. The one machine that could not see its own share (2026-07-29)
+
+A user on an A3000 with Fitz 1.21 ran the two commands the manual gives:
+
+```
+Shell 1 # fitz serve ram: name ramdisk
+Shell 2 # fitz query
+```
+
+and `fitz query` printed `(no named services found on LAN)`. A Linux box on
+the same LAN listed the share correctly. Throughput on the A3000 was 795 KB/s
+read and 939 KB/s write, so nothing about the network was down. Only the
+machine's view of itself was missing.
+
+### 72.1 What `fitz query` actually does
+
+`fitz query` with no host reaches `fitz_pms_list_udp()`
+(`fitz-common-client.c:607`), which is four lines of BSD:
+
+```c
+setsockopt(s, SOL_SOCKET, SO_BROADCAST, (void *) &one, sizeof one);
+bcast.sin_port = htons((uint16_t) FITZ_PMS_PORT);       /* 17710 */
+bcast.sin_addr.s_addr = INADDR_BROADCAST;               /* 255.255.255.255 */
+sendto(s, "LIST\n", 5, 0, (struct sockaddr *) &bcast, sizeof bcast);
+```
+
+and then selects for replies. The server half binds the same port on
+`INADDR_ANY` and says why in a comment — "a unicast-bound socket won't receive
+broadcasts" (`amiga-server.c:2207`). So this is an IPv4 limited broadcast and
+not multicast, which matters: the multicast branch of the code below already
+has a loopback switch, and if Fitz had used multicast the answer would have
+been "call `nx_igmp_loopback_enable()`" and nothing else.
+
+Fitz also carries a `ROADSHOW_SONDERLOCKE` path that detects Roadshow by
+`FindPort("TCP/IP Control")` and, when it finds it, adds a TCP query against
+its own hostname to the broadcast results. That is compiled into the released
+binary. It is direct evidence that Roadshow has the same gap — and it does not
+fire for us, because this stack creates an `AMITCP` port and not a `TCP/IP
+Control` one, so we take the plain broadcast path.
+
+### 72.2 Three destination classes, two loopbacks
+
+`_nx_ip_driver_packet_send()` (`nx_ip_driver_packet_send.c`) sorts an outgoing
+IPv4 datagram on an interface that needs address mapping into three cases:
+
+| destination | `loopback` | goes on the wire |
+| --- | --- | --- |
+| limited or directed broadcast (`:107`) | never set | yes |
+| our own interface address (`:118`) | always | no (interface cleared) |
+| joined class D group (`:124`) | if `nx_igmp_loopback_enable()` | yes |
+
+`if (loopback == NX_TRUE)` further down does `_nx_packet_copy()` plus
+`_nx_ip_packet_deferred_receive()`. The broadcast branch builds an
+`NX_LINK_PACKET_BROADCAST` request with `0xFFFF/0xFFFFFFFF` and never touches
+the flag, so the copy is never made and a broadcast this host sends is
+delivered to every host on the link except this one.
+
+Ethernet is simplex: the card does not receive its own transmission. Every
+general-purpose stack therefore makes the copy in software — 4.4BSD in
+`ether_output()`, which `m_copy()`s a frame carrying `M_BCAST` to the loopback
+input routine, and Linux in `ip_mc_output()`, which `skb_clone()`s a route
+carrying `RTCF_BROADCAST` to `dev_loopback_xmit()`. Neither has a socket
+option for it. Our own `interfaces.c:1322` already reports `IFF_SIMPLEX` on
+every SANA-II interface, which is exactly the flag BSD keys the copy off.
+
+### 72.3 Why nothing upstream caught it
+
+NetX Duo's regression suite runs on a simulated driver, and that driver models
+a real card correctly: `nx_ram_network_driver_test_1500.c:1608` reads "Skip the
+interface from which the packet was sent". Every broadcast test in the suite
+has a second IP instance to answer it, so the case where the sender *is* the
+receiver has no coverage and can only appear on a device.
+
+### 72.4 The fix, and why it is opt-in
+
+`third_party/netxduo`, branch `amiga-ipv4-broadcast-loopback` off `473d1928`,
+one commit (`16a5c30c`), merged into `amiga-integration` at `55f65495`. It sets
+`loopback` in the broadcast branch under a new `NX_ENABLE_IP_BROADCAST_LOOPBACK`
+and leaves the driver interface in the request, so the datagram still goes out
+on the wire and the local copy is in addition to it. `nx_user_sample.h`
+documents the define.
+
+Default off, decided against making it unconditional. Two things settled it.
+
+The suite that would break is upstream's own. `netx_icmp_ping_test.c:178` and
+`netx_icmp_broadcast_ping_test.c:155` ping `255.255.255.255`, and without
+`NX_ENABLE_ICMP_ADDRESS_CHECK` a host answers a broadcast echo request. With
+loopback on by default `ip_0` answers its own request and the
+`ping_responses_received` count `nx_icmp_info_get()` reports stops matching
+what those tests assert. Beyond the suite, any application that binds the port
+it broadcasts to would start seeing its own datagrams — which is the behaviour
+we want, but not one to hand an existing embedded application without asking.
+
+And opt-in is what the function already does. The only unconditional loopback
+there is the unicast to our own address, which has nowhere else to go. The
+multicast loopback, which also transmits, is opt-in and defaults to off. A
+broadcast belongs with the second, not the first.
+
+A runtime service — `nx_ip_broadcast_loopback_enable()`, mirroring
+`nx_igmp_loopback_enable()` — was considered and dropped: a field in `NX_IP`,
+two services, their `_nxe_` wrappers and documentation, for a switch an
+application sets once at startup.
+
+`port/netxduo-amiga/inc/nx_user.h` turns it on for us.
+
+### 72.5 What it costs
+
+One `_nx_packet_copy()` from the default pool per broadcast sent, taken with
+`NX_NO_WAIT` — an `AMI_POOL_PAYLOAD` packet (1568 bytes plus the `NX_PACKET`
+header) held until the receive side is done with it, and a memcpy of the
+datagram. Broadcasts on this machine are name lookups, DHCP and ARP-adjacent
+discovery, not a data path. If the pool is empty the copy is skipped,
+`nx_ip_send_packets_dropped` and `nx_ip_transmit_resource_errors` are counted
+as they already are for the other two branches, and the wire transmission is
+unaffected.
+
+Code size, `bsdsocket.library` text, A1200 profile: 247,832 bytes with the
+define off and 247,828 with it on. Four bytes *less*, which is codegen noise
+around a single store, not a saving.
+
+No ICMP consequence. A looped-back broadcast reaching a port nothing is bound
+to does not produce an ICMP port-unreachable:
+`_nx_icmpv4_send_error_message()` returns early for the limited broadcast
+(`:129`) and for a directed broadcast of the receiving interface's prefix
+(`:136`), per RFC 1122 §3.2.2.
+
+### 72.6 Nothing was needed on our side
+
+`src/bsdsocket/` was read for anything that could drop a broadcast on the way
+in, and there is nothing. `bsd_recv_udp()` (`transfer.c:672`) extracts the
+source with `nxd_udp_source_extract()` and copies the payload; it does not
+filter on address. `nx_udp_socket_bind()` binds a port and not an address, so
+`INADDR_ANY` and a specific address behave identically. The capture filter
+(`netstack_capture.c:112`) returns `NX_SUCCESS` unconditionally by design.
+
+`SO_BROADCAST` sets and clears `ASF_BROADCAST` (`options.c:115`) and nothing
+reads it — it gates neither send nor receive. That is a divergence from BSD,
+which returns `EACCES` on a broadcast `sendto()` from a socket without the
+option, but it is a permissiveness and not a drop, so it is not what this
+report was about. Left alone.
+
+One thing worth knowing for later: the looped-back copy is injected at the IP
+layer and never touches SANA-II, so `tcpdump` on the interface sees the frame
+leave and does not see the copy arrive.
+
+### 72.7 Verification
+
+`tests/netstack/host/test_bcast_loopback_host.c`, registered as `ctest`
+`bcast_loopback`, compiles the real path from `nx_udp_socket_send()` to
+`nx_udp_socket_receive()` — including `nx_ip_packet_send.c`,
+`nx_ip_driver_packet_send.c`, `nx_packet_copy.c`, `nx_ipv4_packet_receive.c`,
+`nx_ip_dispatch_process.c` and the `_nxe_` wrappers — behind a link driver that
+releases the frame without echoing it. Two UDP sockets on one IP instance, one
+bound to 17710 and one sending to it:
+
+| destination | before | after | frames on the wire |
+| --- | --- | --- | --- |
+| 255.255.255.255 | 0 received | 1 | 1 (unchanged) |
+| 10.0.0.255 | 0 received | 1 | 1 (unchanged) |
+| 10.0.0.17 (ours) | 1 received | 1 | 0 (unchanged) |
+| 10.0.0.42 | 0 received | 0 | queued for ARP |
+
+17 checks / 2 failures before the patch, 19 checks / 0 failures after.
+
+`tests/netstack/run-fitzquery.sh` runs the reporter's two commands on the
+released Fitz binary in FS-UAE with the A2065 on SLIRP — no host peer, both
+halves in the guest. With the define off:
+
+```
+===== SYS:fitz query =====
+(no named services found on LAN)
+```
+
+which is the report, verbatim. With it on:
+
+```
+===== SYS:fitz query =====
+10.0.2.15:
+  ramdisk 17711 2
+```
+
+which is the reporter's expected output, with SLIRP's address and no reverse
+DNS. Both queries are asserted on, because one query racing the server's bind
+would look the same as a broadcast that never comes back.
+
+The rest, all on the fixed tree: fresh `build/host`, default configuration,
+warning-clean, `ctest` 12/12 (11 before this test). `-fanalyzer` 13 known
+findings and no new ones. Conformance `LOOPBACK`: 130 passed, 0 failed, 12
+skipped. `tests/ipv6/run-tools-fsuae.sh -s` PASS on both `build/v6` and
+`build/cm`. `tests/tools/run-livetools.sh` PASSED. All seven cross
+configurations built clean.

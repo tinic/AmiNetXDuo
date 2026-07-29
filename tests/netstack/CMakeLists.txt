@@ -91,4 +91,70 @@ if(NOT CMAKE_CROSSCOMPILING)
     include(CTest)
     add_test(NAME tcp_retries COMMAND test_tcp_retries)
 
+    # Whether a broadcast this host sends is delivered to this host's own
+    # sockets.  Same shim as above, and the same reason for -UAMINETXDUO_IPV6:
+    # this is an IPv4 question and the v6 halves of these files reach the
+    # neighbour cache.  It links the whole UDP send and receive path so the
+    # assertion is "the datagram arrived at a bound socket" rather than "a
+    # flag was set"; the link driver and the IP thread are the only stubs.
+    add_executable(test_bcast_loopback
+        host/test_bcast_loopback_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_driver_packet_send.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_packet_send.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_header_add.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_route_find.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_checksum_compute.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_packet_checksum_compute.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ipv4_packet_receive.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ipv4_option_process.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_dispatch_process.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv4_send_error_message.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_igmp_multicast_check.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_initialize.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_enable.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_create.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_bind.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_bind_cleanup.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_free_port_find.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_send.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxd_udp_socket_send.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_packet_receive.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_receive.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_receive_cleanup.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_create.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_cleanup.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_allocate.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_copy.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_data_append.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_length_get.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_release.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_transmit_release.c"
+        # The _nxe_ wrappers, because bsdsocket.library calls through them and
+        # they are where a bad argument is caught.
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_packet_pool_create.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_packet_allocate.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_packet_data_append.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_packet_length_get.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_packet_release.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_enable.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_socket_create.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_socket_bind.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_socket_send.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_socket_receive.c")
+
+    target_compile_options(test_bcast_loopback PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_bcast_loopback PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_bcast_loopback PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME bcast_loopback COMMAND test_bcast_loopback)
+
 endif()

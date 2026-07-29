@@ -622,6 +622,34 @@
  */
 #define NX_ENABLE_INTERFACE_CAPABILITY
 
+/*
+ * Deliver a broadcast this host sends to this host's own sockets too.
+ *
+ * Ethernet is simplex: a card does not hear its own transmissions, so a
+ * broadcast leaving the A2065 reaches every machine on the LAN except this
+ * one.  4.4BSD copies it back in ether_output() and Linux in ip_mc_output(),
+ * which is why a discovery protocol that broadcasts a query and answers it
+ * from a server on the same machine works everywhere else.  Fitz is one:
+ * `fitz query` broadcasts LIST to 255.255.255.255:17710 and its own
+ * `fitz serve` binds that port, so without this the machine running both is
+ * the one machine that cannot see its own share.
+ *
+ * Upstream NetX Duo only loops back a unicast to our own address and, if the
+ * application asked for it with nx_igmp_loopback_enable(), a multicast.  The
+ * define is ours (third_party/netxduo, branch amiga-ipv4-broadcast-loopback)
+ * and is off upstream, so nothing else changes by enabling it here.
+ *
+ * Cost: one _nx_packet_copy() from the default pool per broadcast sent, held
+ * until the receive side is done with it -- an AMI_POOL_PAYLOAD packet, 1568
+ * bytes of payload plus the NX_PACKET header, and a memcpy of the datagram.
+ * Broadcasts are name lookups and DHCP, not a data path.  On a copy failure
+ * the packet still goes out on the wire and only the local copy is lost.
+ *
+ * It does not change the layout of NX_IP or NX_PACKET, but the switch belongs
+ * with the rest of the stack's configuration rather than on one target.
+ */
+#define NX_ENABLE_IP_BROADCAST_LOOPBACK
+
 
 /*
  * Not set, and why:
