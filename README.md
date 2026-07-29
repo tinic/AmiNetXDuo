@@ -17,6 +17,8 @@ drives the SANA-II network cards you already have.
 > on real hardware — an A3000/060 with an X-Surf-100, where a user measured
 > 795 KB/s reading and 939 KB/s writing over Fitz, and found two bugs that are
 > fixed.
+>
+> Note that if you want to try IPv6 under WinUAE you will need a patch (d9df1d8)
 
 ## How this was written
 
