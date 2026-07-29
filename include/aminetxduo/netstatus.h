@@ -67,7 +67,12 @@ extern "C" {
 #define AMI_NETSTATUS_CONTROL_LVO   (-0x36c)
 
 #define AMI_NETSTATUS_MAGIC         0x414E5351UL    /* 'ANSQ' */
-#define AMI_NETSTATUS_VERSION       2
+/*
+ * 3 since NetStatusControl grew the IPv6 route fields. A caller and a library
+ * that disagree fail every call rather than half of them, which is why the
+ * commands and the library ship together.
+ */
+#define AMI_NETSTATUS_VERSION       3
 
 /* Fixed widths every record shares.  Up here rather than beside the first
    record that uses one, because NetStatusSystem needs NETSTATUS_NAME_LEN and
@@ -107,6 +112,8 @@ extern "C" {
 #define NETSTATUS_SOCKETS       6   /* NetStatusSocket[]                     */
 #define NETSTATUS_DHCP          7   /* NetStatusDhcp[]                       */
 #define NETSTATUS_ADDRESSES6    8   /* NetStatusAddress6[]                   */
+#define NETSTATUS_ROUTES6       9   /* NetStatusRoute6[]                     */
+#define NETSTATUS_NEIGHBOURS   10   /* NetStatusNeighbour[]                  */
 
 /*
  * Every buffer starts with this. The caller fills nsh_Magic and nsh_Version;
@@ -360,6 +367,46 @@ typedef struct NetStatusArp
     UWORD   nsa_Interface;              /* the interface it was learnt on    */
 } NetStatusArp;
 
+/* ----------------------------------------------- NETSTATUS_NEIGHBOURS --- */
+
+/*
+ * IPv6's answer to the ARP cache.  There is no ARP: RFC 4861 neighbour
+ * discovery does the same job over ICMPv6, and NetX Duo keeps its result in
+ * nx_ipv6_nd_cache[], NX_IPV6_NEIGHBOR_CACHE_SIZE entries
+ * (port/netxduo-amiga/inc/nx_user.h).
+ *
+ * The state is the part worth reporting.  An ARP entry is resolved or it is
+ * not; a neighbour entry says how the stack currently believes the address
+ * behaves, and the five states separate "nobody has answered" from "it
+ * answered once and we have not checked since" from "we are checking now".
+ *
+ * An IPv4-only build answers with no entries rather than an error.
+ */
+
+/* nsn6_State -- ND_CACHE_STATE_*, spelled out so a caller need not include
+   nx_nd_cache.h.  INVALID entries are not reported at all. */
+#define NETSTATUS_ND_INCOMPLETE 1   /* asked, nothing back yet              */
+#define NETSTATUS_ND_REACHABLE  2   /* answered within the reachable time   */
+#define NETSTATUS_ND_STALE      3   /* answered once, not checked since     */
+#define NETSTATUS_ND_DELAY      4   /* something was sent; waiting to probe */
+#define NETSTATUS_ND_PROBE      5   /* being re-checked now                 */
+#define NETSTATUS_ND_CREATED    6   /* the slot exists, nothing asked yet   */
+
+/* nsn6_Flags */
+#define NETSTATUS_ND_STATIC     0x0001  /* configured, never times out       */
+#define NETSTATUS_ND_ROUTER     0x0002  /* it is a router for this machine   */
+
+typedef struct NetStatusNeighbour
+{
+    ULONG   nsn6_Address[4];            /* host byte order, four words       */
+    UBYTE   nsn6_HwAddress[NETSTATUS_MAC_SIZE];
+    UWORD   nsn6_State;                 /* NETSTATUS_ND_*                    */
+    UWORD   nsn6_Flags;
+    UWORD   nsn6_Interface;             /* the interface it was learnt on    */
+    UWORD   nsn6_Solicitations;         /* sent while unresolved             */
+    UWORD   nsn6_Queued;                /* packets held for the answer       */
+} NetStatusNeighbour;
+
 /* --------------------------------------------------- NETSTATUS_ROUTES --- */
 
 /* nsr_Flags -- the BSD spelling, because that is what netstat -r prints. */
@@ -376,6 +423,52 @@ typedef struct NetStatusRoute
     UWORD   nsr_Flags;
     UWORD   nsr_Interface;
 } NetStatusRoute;
+
+/* -------------------------------------------------- NETSTATUS_ROUTES6 --- */
+
+/*
+ * IPv6 has no destination-to-next-hop table.  NetX Duo decides where a packet
+ * goes from two lists, and this selector reports both in the order
+ * _nx_ipv6_packet_send() consults them:
+ *
+ *   1. the on-link prefixes -- nx_ipv6_prefix_list_ptr, plus the prefix of
+ *      every manually configured address, which is what _nxd_ipv6_search_onlink()
+ *      looks at.  A destination inside one of these is reached directly and
+ *      nsr6_NextHop is all zero.
+ *   2. the default routers -- nx_ipv6_default_router_table, destination ::/0.
+ *      Everything with nowhere better to go is handed to one of these.
+ *
+ * A stateless-autoconfigured address is deliberately NOT reported from its own
+ * prefix: a router advertisement may set A without L, in which case the address
+ * exists and the prefix is not on link.  The prefix-list entry the same
+ * advertisement makes is reported instead, so this table says where packets go
+ * rather than which addresses exist.
+ *
+ * fe80::/64 is not in it either.  _nxd_ipv6_search_onlink() answers 1 for every
+ * link-local address before it looks at any list, so there is no entry to
+ * report and none to remove.
+ *
+ * An IPv4-only build answers with no entries rather than an error.
+ */
+
+/* nsr6_Flags -- the same bits and the same letters as nsr_Flags. */
+#define NETSTATUS_RT6_UP        0x0001
+#define NETSTATUS_RT6_GATEWAY   0x0002  /* nsr6_NextHop is a next hop        */
+#define NETSTATUS_RT6_HOST      0x0004  /* a /128                            */
+#define NETSTATUS_RT6_STATIC    0x0008  /* added by hand, not advertised     */
+
+/* nsr6_Lifetime for an entry nothing will time out. */
+#define NETSTATUS_RT6_FOREVER   0xFFFFFFFFUL
+
+typedef struct NetStatusRoute6
+{
+    ULONG   nsr6_Destination[4];        /* host byte order, four words       */
+    ULONG   nsr6_PrefixLength;
+    ULONG   nsr6_NextHop[4];            /* all zero = on link                */
+    ULONG   nsr6_Lifetime;              /* seconds left                      */
+    UWORD   nsr6_Flags;
+    UWORD   nsr6_Interface;             /* NX_IP interface index             */
+} NetStatusRoute6;
 
 /* -------------------------------------------------- NETSTATUS_SOCKETS --- */
 
@@ -436,6 +529,32 @@ typedef struct NetStatusSocket
 #define NETCTRL_ARP_DELETE      8   /* nsc_Destination                       */
 #define NETCTRL_ARP_FLUSH       9   /* --                                    */
 
+/*
+ * The IPv6 pair. One operation covers both of the mechanisms NETSTATUS_ROUTES6
+ * reports, because a caller writes the same thing either way -- a destination,
+ * a prefix length and somewhere to send it:
+ *
+ *   nsc_PrefixLength 0 with a next hop        a default router
+ *   any prefix length with no next hop        an on-link prefix
+ *   any prefix length with a next hop         refused: EINVAL. NetX Duo has
+ *                                             no destination-to-next-hop table
+ *                                             for IPv6 and cannot store one.
+ *
+ * nsc_Index names the interface. It is required for a link-local next hop --
+ * fe80::/64 exists on every interface, so the address alone does not say which
+ * -- and ignored for a prefix, which is a property of the machine's whole
+ * prefix list rather than of one interface.
+ *
+ * Both invalidate the IPv6 destination cache, which is a per-destination
+ * memory of where packets went last time and would otherwise keep sending
+ * them the old way after the route that decided it has changed.
+ */
+#define NETCTRL_ROUTE6_ADD     10   /* nsc_Destination6/PrefixLength/Gateway6/Index */
+#define NETCTRL_ROUTE6_DELETE  11   /* nsc_Destination6/PrefixLength/Gateway6 */
+
+#define NETCTRL_ND_ADD         12   /* nsc_Destination6, nsc_HwAddress, Index */
+#define NETCTRL_ND_DELETE      13   /* nsc_Destination6                      */
+
 typedef struct NetStatusControl
 {
     ULONG   nsc_Magic;                  /* in: AMI_NETSTATUS_MAGIC           */
@@ -446,6 +565,9 @@ typedef struct NetStatusControl
     ULONG   nsc_Gateway;
     UBYTE   nsc_HwAddress[NETSTATUS_MAC_SIZE];
     UWORD   nsc_Pad;
+    ULONG   nsc_Destination6[4];        /* host byte order, four words       */
+    ULONG   nsc_Gateway6[4];            /* all zero = no next hop            */
+    ULONG   nsc_PrefixLength;
     ULONG   nsc_Reserved[4];
 } NetStatusControl;
 

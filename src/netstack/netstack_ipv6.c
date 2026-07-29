@@ -240,20 +240,9 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
 
     if (cfg->have_gateway6)
     {
-        NXD_ADDRESS router;
+        static const ULONG any[4] = { 0, 0, 0, 0 };
 
-        router.nxd_ip_version       = NX_IP_VERSION_V6;
-        router.nxd_ip_address.v6[0] = cfg->gateway6[0];
-        router.nxd_ip_address.v6[1] = cfg->gateway6[1];
-        router.nxd_ip_address.v6[2] = cfg->gateway6[2];
-        router.nxd_ip_address.v6[3] = cfg->gateway6[3];
-
-        /*
-         * Lifetime 0 means never expires, correct for a statically configured
-         * router; one learned from an advertisement carries the lifetime that
-         * advertisement gave it.
-         */
-        status = nxd_ipv6_default_router_add(&ns->ns_Ip, &router, 0, (UINT)i);
+        status = netstack_ipv6_route_add(any, 0, cfg->gateway6, i);
         if (status != NX_SUCCESS)
             AMI_WARN("netstack: %s: GATEWAY6 rejected (%ld)",
                      cfg->name, (long)status);
@@ -332,6 +321,212 @@ BOOL netstack_ipv6_address_get(UWORD interface_index, UWORD slot,
     }
 
     return FALSE;
+}
+
+/* ---------------------------------------------------------------- routes -- */
+
+/*
+ * The lifetime the once-a-second tick in nxd_ipv6_prefix_router_timer_tick.c
+ * treats as "never expires". Not zero: zero is the value that tick reads as
+ * already expired, so a router added with it is invalidated within the second
+ * and GATEWAY6 configured nothing that outlived the boot.
+ */
+#define AMI_NS6_ROUTER_FOREVER  0xFFFFU
+#define AMI_NS6_PREFIX_FOREVER  0xFFFFFFFFUL
+
+static BOOL ami_ns6_is_any(const ULONG addr[4])
+{
+    return (BOOL)((addr[0] | addr[1] | addr[2] | addr[3]) == 0);
+}
+
+static VOID ami_ns6_copy(const ULONG src[4], ULONG dst[4])
+{
+    dst[0] = src[0];
+    dst[1] = src[1];
+    dst[2] = src[2];
+    dst[3] = src[3];
+}
+
+/*
+ * The destination cache remembers the next hop each destination was last sent
+ * to, and _nx_ipv6_packet_send() consults it before either list. Left alone, a
+ * route added or removed here would not move a packet already going somewhere
+ * until the entry aged out, so the caller would see the route in the table and
+ * the traffic still on the old path.
+ *
+ * Marking the slots invalid is what NetX Duo's own _nx_invalidate_destination_entry()
+ * does; the ND cache entries the slots point at are left alone.
+ */
+static VOID ami_ns6_forget_destinations(AmiNetStack *ns)
+{
+    UINT i;
+
+    for (i = 0; i < (UINT)NX_IPV6_DESTINATION_TABLE_SIZE; i++)
+        ns->ns_Ip.nx_ipv6_destination_table[i].nx_ipv6_destination_entry_valid = 0;
+
+    ns->ns_Ip.nx_ipv6_destination_table_size = 0;
+}
+
+/* The prefix list entry for exactly this prefix and length, or NX_NULL. */
+static NX_IPV6_PREFIX_ENTRY *ami_ns6_prefix_find(AmiNetStack *ns,
+                                                 const ULONG prefix[4],
+                                                 ULONG prefix_len)
+{
+    NX_IPV6_PREFIX_ENTRY *entry = ns->ns_Ip.nx_ipv6_prefix_list_ptr;
+
+    while (entry != NX_NULL)
+    {
+        if (entry->nx_ipv6_prefix_entry_prefix_length == prefix_len &&
+            entry->nx_ipv6_prefix_entry_network_address[0] == prefix[0] &&
+            entry->nx_ipv6_prefix_entry_network_address[1] == prefix[1] &&
+            entry->nx_ipv6_prefix_entry_network_address[2] == prefix[2] &&
+            entry->nx_ipv6_prefix_entry_network_address[3] == prefix[3])
+        {
+            return entry;
+        }
+
+        entry = entry->nx_ipv6_prefix_entry_next;
+    }
+
+    return NX_NULL;
+}
+
+/* The host bits a prefix of this length does not cover. */
+static VOID ami_ns6_mask(ULONG addr[4], ULONG prefix_len)
+{
+    UINT i;
+
+    for (i = 0; i < 4U; i++)
+    {
+        ULONG bits = (prefix_len > (ULONG)(i * 32U))
+                         ? (prefix_len - (ULONG)(i * 32U)) : 0UL;
+
+        if (bits >= 32UL)
+            continue;
+
+        addr[i] &= (bits == 0UL) ? 0UL : (0xFFFFFFFFUL << (32UL - bits));
+    }
+}
+
+UINT netstack_ipv6_route_add(const ULONG dest[4], ULONG prefix_len,
+                             const ULONG next_hop[4], UWORD interface_index)
+{
+    AmiNetStack *ns = ami_netstack_raw();
+    ULONG        prefix[4];
+    UINT         status;
+
+    if (ns == NULL || !ns->ns_IpCreated || !ns->ns_Ipv6Enabled)
+        return NX_NOT_ENABLED;
+
+    if (dest == NULL || prefix_len > 128UL)
+        return NX_IP_ADDRESS_ERROR;
+
+    if (next_hop != NULL && !ami_ns6_is_any(next_hop))
+    {
+        NXD_ADDRESS router;
+
+        /* Anything but the default route: there is nowhere to store it. */
+        if (prefix_len != 0UL || !ami_ns6_is_any(dest))
+            return NX_NOT_SUPPORTED;
+
+        if (interface_index >= (UWORD)NX_MAX_PHYSICAL_INTERFACES)
+            return NX_INVALID_INTERFACE;
+
+        router.nxd_ip_version = NX_IP_VERSION_V6;
+        ami_ns6_copy(next_hop, router.nxd_ip_address.v6);
+
+        status = nxd_ipv6_default_router_add(&ns->ns_Ip, &router,
+                                             AMI_NS6_ROUTER_FOREVER,
+                                             (UINT)interface_index);
+    }
+    else
+    {
+        ami_ns6_copy(dest, prefix);
+        ami_ns6_mask(prefix, prefix_len);
+
+        /* _nx_ipv6_prefix_list_add_entry() is called from router advertisement
+           processing, which already holds the protection mutex; nothing here
+           does. */
+        tx_mutex_get(&ns->ns_Ip.nx_ip_protection, TX_WAIT_FOREVER);
+
+        if (ami_ns6_prefix_find(ns, prefix, prefix_len) != NX_NULL)
+            status = NX_DUPLICATED_ENTRY;
+        else
+            status = _nx_ipv6_prefix_list_add_entry(&ns->ns_Ip, prefix,
+                                                    prefix_len,
+                                                    AMI_NS6_PREFIX_FOREVER);
+
+        if (status == NX_SUCCESS)
+            ami_ns6_forget_destinations(ns);
+
+        tx_mutex_put(&ns->ns_Ip.nx_ip_protection);
+
+        return status;
+    }
+
+    if (status == NX_SUCCESS)
+    {
+        tx_mutex_get(&ns->ns_Ip.nx_ip_protection, TX_WAIT_FOREVER);
+        ami_ns6_forget_destinations(ns);
+        tx_mutex_put(&ns->ns_Ip.nx_ip_protection);
+    }
+
+    return status;
+}
+
+UINT netstack_ipv6_route_delete(const ULONG dest[4], ULONG prefix_len,
+                                const ULONG next_hop[4])
+{
+    AmiNetStack *ns = ami_netstack_raw();
+    ULONG        prefix[4];
+    UINT         status;
+
+    if (ns == NULL || !ns->ns_IpCreated || !ns->ns_Ipv6Enabled)
+        return NX_NOT_ENABLED;
+
+    if (dest == NULL || prefix_len > 128UL)
+        return NX_IP_ADDRESS_ERROR;
+
+    if (next_hop != NULL && !ami_ns6_is_any(next_hop))
+    {
+        NXD_ADDRESS router;
+
+        router.nxd_ip_version = NX_IP_VERSION_V6;
+        ami_ns6_copy(next_hop, router.nxd_ip_address.v6);
+
+        status = nxd_ipv6_default_router_delete(&ns->ns_Ip, &router);
+
+        if (status == NX_SUCCESS)
+        {
+            tx_mutex_get(&ns->ns_Ip.nx_ip_protection, TX_WAIT_FOREVER);
+            ami_ns6_forget_destinations(ns);
+            tx_mutex_put(&ns->ns_Ip.nx_ip_protection);
+        }
+
+        return status;
+    }
+
+    ami_ns6_copy(dest, prefix);
+    ami_ns6_mask(prefix, prefix_len);
+
+    /* _nx_ipv6_prefix_list_delete() returns nothing, so the lookup is what
+       tells a caller whether there was anything to remove. */
+    tx_mutex_get(&ns->ns_Ip.nx_ip_protection, TX_WAIT_FOREVER);
+
+    if (ami_ns6_prefix_find(ns, prefix, prefix_len) == NX_NULL)
+    {
+        status = NX_ENTRY_NOT_FOUND;
+    }
+    else
+    {
+        _nx_ipv6_prefix_list_delete(&ns->ns_Ip, prefix, (INT)prefix_len);
+        ami_ns6_forget_destinations(ns);
+        status = NX_SUCCESS;
+    }
+
+    tx_mutex_put(&ns->ns_Ip.nx_ip_protection);
+
+    return status;
 }
 
 BOOL netstack_ipv6_source_for(const ULONG dest[4], ULONG addr_out[4])

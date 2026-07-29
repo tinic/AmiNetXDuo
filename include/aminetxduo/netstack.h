@@ -262,6 +262,32 @@ BOOL netstack_ipv6_source_for(const ULONG dest[4], ULONG addr_out[4]);
 LONG netstack_resolve6(const char *name, ULONG addr_out[4],
                        ULONG timeout_ticks);
 
+/* ------------------------------------------------------------ routing ---
+ *
+ * Where an IPv6 packet goes is decided by two lists and no routing table:
+ * the on-link prefixes, and the default routers.  There is nothing in NetX
+ * Duo that maps a prefix to a next hop, so these take one or the other:
+ *
+ *   next_hop given, prefix_len 0, dest ::   a default router on
+ *                                           `interface_index`
+ *   next_hop NULL or ::                     an on-link prefix; the packet goes
+ *                                           straight to the destination
+ *   next_hop given with a prefix            NX_NOT_SUPPORTED -- there is
+ *                                           nowhere to put it
+ *
+ * These return NetX Duo's own status rather than an AMI_NET_* code because
+ * every caller has a different word for each of NX_ENTRY_NOT_FOUND,
+ * NX_DUPLICATED_ENTRY, NX_NO_MORE_ENTRIES and NX_IP_ADDRESS_ERROR.
+ *
+ * Both are what CONFIGURE6/GATEWAY6 goes through at bring-up, so a route
+ * asked for in DEVS:NetInterfaces and one asked for by AddNetRoute are the
+ * same call.
+ */
+UINT netstack_ipv6_route_add(const ULONG dest[4], ULONG prefix_len,
+                             const ULONG next_hop[4], UWORD interface_index);
+UINT netstack_ipv6_route_delete(const ULONG dest[4], ULONG prefix_len,
+                                const ULONG next_hop[4]);
+
 #endif /* AMINETXDUO_IPV6 */
 
 /*

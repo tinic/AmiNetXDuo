@@ -44,6 +44,11 @@
 #include "aminetxduo/config.h"
 #include "aminetxduo/netstack.h"
 
+#ifdef AMINETXDUO_IPV6
+/* ND_CACHE_STATE_*, which nx_api.h does not carry. */
+#include "nx_nd_cache.h"
+#endif
+
 /*
  * The wire values in netstatus.h must be NetX Duo's own, because the socket
  * table copies them straight across. If a NetX Duo update renumbers them the
@@ -59,6 +64,19 @@ _Static_assert(NETSTATUS_IP6_DEPRECATED == NX_IPV6_ADDR_STATE_DEPRECATED,
                "IPv6 address state ABI");
 _Static_assert(NETSTATUS_IP6_VALID      == NX_IPV6_ADDR_STATE_VALID,
                "IPv6 address state ABI");
+
+_Static_assert(NETSTATUS_ND_INCOMPLETE == ND_CACHE_STATE_INCOMPLETE,
+               "neighbour state ABI");
+_Static_assert(NETSTATUS_ND_REACHABLE  == ND_CACHE_STATE_REACHABLE,
+               "neighbour state ABI");
+_Static_assert(NETSTATUS_ND_STALE      == ND_CACHE_STATE_STALE,
+               "neighbour state ABI");
+_Static_assert(NETSTATUS_ND_DELAY      == ND_CACHE_STATE_DELAY,
+               "neighbour state ABI");
+_Static_assert(NETSTATUS_ND_PROBE      == ND_CACHE_STATE_PROBE,
+               "neighbour state ABI");
+_Static_assert(NETSTATUS_ND_CREATED    == ND_CACHE_STATE_CREATED,
+               "neighbour state ABI");
 #endif
 
 _Static_assert(NETSTATUS_TCP_CLOSED       == NX_TCP_CLOSED,        "TCP state ABI");
@@ -400,6 +418,262 @@ static VOID ns_fill_addresses6(NsWriter *w)
 #endif
 }
 
+/* Which nx_ip_interface[] slot a route or a neighbour points at, 0 when it
+   points nowhere. */
+static UWORD ns_interface_index(NX_IP *ip, const NX_INTERFACE *nxif)
+{
+    UINT i;
+
+    if (nxif == NX_NULL)
+        return 0;
+
+    for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        if (nxif == &ip->nx_ip_interface[i])
+            return (UWORD)i;
+    }
+
+    return 0;
+}
+
+/*
+ * Where IPv6 packets go, in the order _nx_ipv6_packet_send() decides it: the
+ * on-link prefixes first, the default routers last.
+ *
+ * The on-link half has two sources and needs both, because _nxd_ipv6_search_onlink()
+ * looks at both: the prefix list, which router advertisements fill, and the
+ * prefix of each MANUAL address, which they do not. In that order, which is
+ * why the prefix list is walked first here. A prefix in both -- an address
+ * configured by hand on a prefix a router also advertises -- is one on-link
+ * route and is reported once.
+ *
+ * A stateless-autoconfigured address is not reported from its own prefix: an
+ * advertisement may set A without L, in which case the address exists and the
+ * prefix is not on link, and if it did set L the prefix list already has it.
+ */
+#ifdef AMINETXDUO_IPV6
+static BOOL ns_prefix_listed(NX_IP *ip, const ULONG prefix[4], ULONG bits)
+{
+    const NX_IPV6_PREFIX_ENTRY *e;
+
+    for (e = ip->nx_ipv6_prefix_list_ptr; e != NX_NULL;
+         e = e->nx_ipv6_prefix_entry_next)
+    {
+        if (e->nx_ipv6_prefix_entry_prefix_length == bits &&
+            e->nx_ipv6_prefix_entry_network_address[0] == prefix[0] &&
+            e->nx_ipv6_prefix_entry_network_address[1] == prefix[1] &&
+            e->nx_ipv6_prefix_entry_network_address[2] == prefix[2] &&
+            e->nx_ipv6_prefix_entry_network_address[3] == prefix[3])
+        {
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+#endif
+
+static VOID ns_fill_routes6(NX_IP *ip, NsWriter *w)
+{
+#ifdef AMINETXDUO_IPV6
+    NX_IPV6_PREFIX_ENTRY *prefix;
+    UINT                  i;
+
+    if (!netstack_ipv6_enabled())
+        return;
+
+    /* Longest prefix first: _nx_ipv6_prefix_list_add_entry() keeps the list
+       in that order, which is the order the search matches in. */
+    for (prefix = ip->nx_ipv6_prefix_list_ptr; prefix != NX_NULL;
+         prefix = prefix->nx_ipv6_prefix_entry_next)
+    {
+        NetStatusRoute6 *out = (NetStatusRoute6 *)ns_writer_next(w);
+
+        if (out == NULL)
+            continue;
+
+        out->nsr6_Destination[0] = prefix->nx_ipv6_prefix_entry_network_address[0];
+        out->nsr6_Destination[1] = prefix->nx_ipv6_prefix_entry_network_address[1];
+        out->nsr6_Destination[2] = prefix->nx_ipv6_prefix_entry_network_address[2];
+        out->nsr6_Destination[3] = prefix->nx_ipv6_prefix_entry_network_address[3];
+        out->nsr6_PrefixLength   = prefix->nx_ipv6_prefix_entry_prefix_length;
+        out->nsr6_Lifetime       = prefix->nx_ipv6_prefix_entry_valid_lifetime;
+        out->nsr6_Flags          = NETSTATUS_RT6_UP;
+
+        /* A lifetime nothing counts down is one somebody set by hand: an
+           advertised prefix always carries the advertisement's own. */
+        if (out->nsr6_Lifetime == NETSTATUS_RT6_FOREVER)
+            out->nsr6_Flags |= NETSTATUS_RT6_STATIC;
+
+        if (out->nsr6_PrefixLength == 128UL)
+            out->nsr6_Flags |= NETSTATUS_RT6_HOST;
+    }
+
+    for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        NXD_IPV6_ADDRESS *addr =
+            ip->nx_ip_interface[i].nxd_interface_ipv6_address_list_head;
+
+        while (addr != NX_NULL)
+        {
+            NetStatusRoute6 *out;
+            ULONG            bits;
+            ULONG            network[4];
+            UINT             word;
+
+            if (!addr->nxd_ipv6_address_valid ||
+                addr->nxd_ipv6_address_ConfigurationMethod !=
+                    NX_IPV6_ADDRESS_MANUAL_CONFIG)
+            {
+                addr = addr->nxd_ipv6_address_next;
+                continue;
+            }
+
+            /* fe80::/64 is on link without any list saying so, so there is no
+               entry here to add or remove. */
+            if (IPv6_Address_Type(addr->nxd_ipv6_address) &
+                IPV6_ADDRESS_LINKLOCAL)
+            {
+                addr = addr->nxd_ipv6_address_next;
+                continue;
+            }
+
+            bits = (ULONG)addr->nxd_ipv6_address_prefix_length;
+
+            for (word = 0; word < 4U; word++)
+            {
+                ULONG left = (bits > (ULONG)(word * 32U))
+                                 ? (bits - (ULONG)(word * 32U)) : 0UL;
+                ULONG mask = (left >= 32UL) ? 0xFFFFFFFFUL
+                           : (left == 0UL)  ? 0UL
+                           : (0xFFFFFFFFUL << (32UL - left));
+
+                network[word] = addr->nxd_ipv6_address[word] & mask;
+            }
+
+            if (ns_prefix_listed(ip, network, bits))
+            {
+                addr = addr->nxd_ipv6_address_next;
+                continue;
+            }
+
+            out = (NetStatusRoute6 *)ns_writer_next(w);
+            if (out != NULL)
+            {
+                out->nsr6_Destination[0] = network[0];
+                out->nsr6_Destination[1] = network[1];
+                out->nsr6_Destination[2] = network[2];
+                out->nsr6_Destination[3] = network[3];
+                out->nsr6_PrefixLength   = bits;
+                out->nsr6_Lifetime       = NETSTATUS_RT6_FOREVER;
+                out->nsr6_Flags          = NETSTATUS_RT6_UP;
+                out->nsr6_Interface      = (UWORD)i;
+
+                if (bits == 128UL)
+                    out->nsr6_Flags |= NETSTATUS_RT6_HOST;
+            }
+
+            addr = addr->nxd_ipv6_address_next;
+        }
+    }
+
+    for (i = 0; i < (UINT)NX_IPV6_DEFAULT_ROUTER_TABLE_SIZE; i++)
+    {
+        const NX_IPV6_DEFAULT_ROUTER_ENTRY *e = &ip->nx_ipv6_default_router_table[i];
+        NetStatusRoute6                    *out;
+
+        if ((e->nx_ipv6_default_router_entry_flag & NX_IPV6_ROUTE_TYPE_VALID) == 0)
+            continue;
+
+        out = (NetStatusRoute6 *)ns_writer_next(w);
+        if (out == NULL)
+            continue;
+
+        /* ::/0 -- the destination is everything the lists above did not claim. */
+        out->nsr6_NextHop[0] = e->nx_ipv6_default_router_entry_router_address[0];
+        out->nsr6_NextHop[1] = e->nx_ipv6_default_router_entry_router_address[1];
+        out->nsr6_NextHop[2] = e->nx_ipv6_default_router_entry_router_address[2];
+        out->nsr6_NextHop[3] = e->nx_ipv6_default_router_entry_router_address[3];
+        out->nsr6_Flags      = NETSTATUS_RT6_UP | NETSTATUS_RT6_GATEWAY;
+        out->nsr6_Interface  =
+            ns_interface_index(ip, e->nx_ipv6_default_router_entry_interface_ptr);
+
+        if (e->nx_ipv6_default_router_entry_flag & NX_IPV6_ROUTE_TYPE_STATIC)
+            out->nsr6_Flags |= NETSTATUS_RT6_STATIC;
+
+        out->nsr6_Lifetime =
+            (e->nx_ipv6_default_router_entry_life_time == 0xFFFFU)
+                ? NETSTATUS_RT6_FOREVER
+                : (ULONG)e->nx_ipv6_default_router_entry_life_time;
+    }
+#else
+    (VOID)ip;
+    (VOID)w;
+#endif
+}
+
+/*
+ * The neighbour cache: a flat array, unlike the ARP table's hash of circular
+ * lists, so the walk is a loop over the slots.
+ */
+static VOID ns_fill_neighbours(NX_IP *ip, NsWriter *w)
+{
+#ifdef AMINETXDUO_IPV6
+    UINT i;
+
+    if (!netstack_ipv6_enabled())
+        return;
+
+    for (i = 0; i < (UINT)NX_IPV6_NEIGHBOR_CACHE_SIZE; i++)
+    {
+        const ND_CACHE_ENTRY *e = &ip->nx_ipv6_nd_cache[i];
+        NetStatusNeighbour   *out;
+        UINT                  j;
+
+        if (e->nx_nd_cache_nd_status == ND_CACHE_STATE_INVALID)
+            continue;
+
+        out = (NetStatusNeighbour *)ns_writer_next(w);
+        if (out == NULL)
+            continue;
+
+        out->nsn6_Address[0] = e->nx_nd_cache_dest_ip[0];
+        out->nsn6_Address[1] = e->nx_nd_cache_dest_ip[1];
+        out->nsn6_Address[2] = e->nx_nd_cache_dest_ip[2];
+        out->nsn6_Address[3] = e->nx_nd_cache_dest_ip[3];
+        out->nsn6_State      = (UWORD)e->nx_nd_cache_nd_status;
+        out->nsn6_Queued     = (UWORD)e->nx_nd_cache_packet_waiting_queue_length;
+
+        for (j = 0; j < (UINT)NETSTATUS_MAC_SIZE; j++)
+            out->nsn6_HwAddress[j] = (UBYTE)e->nx_nd_cache_mac_addr[j];
+
+        if (e->nx_nd_cache_is_static)
+            out->nsn6_Flags |= NETSTATUS_ND_STATIC;
+        if (e->nx_nd_cache_is_router != NX_NULL)
+            out->nsn6_Flags |= NETSTATUS_ND_ROUTER;
+
+        out->nsn6_Interface = ns_interface_index(ip,
+                                                 e->nx_nd_cache_interface_ptr);
+
+        /*
+         * nx_nd_cache_num_solicit counts down from NX_MAX_MULTICAST_SOLICIT,
+         * so the number a caller wants -- how many times this machine has
+         * asked -- is the difference, and the constant is only known here.
+         */
+        if (e->nx_nd_cache_nd_status == ND_CACHE_STATE_INCOMPLETE &&
+            e->nx_nd_cache_num_solicit <= (UCHAR)NX_MAX_MULTICAST_SOLICIT)
+        {
+            out->nsn6_Solicitations =
+                (UWORD)((UCHAR)NX_MAX_MULTICAST_SOLICIT -
+                        e->nx_nd_cache_num_solicit);
+        }
+    }
+#else
+    (VOID)ip;
+    (VOID)w;
+#endif
+}
+
 static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
 {
     UINT i;
@@ -600,23 +874,6 @@ static VOID ns_fill_arp(NX_IP *ip, NsWriter *w)
  * NETSTATUS_SYS_ROUTING in the SYSTEM query tells a caller which kind of build
  * it is talking to, so this file compiles and reports correctly either way.
  */
-/* Which nx_ip_interface[] slot a route points at, 0 when it points nowhere. */
-static UWORD ns_interface_index(NX_IP *ip, const NX_INTERFACE *nxif)
-{
-    UINT i;
-
-    if (nxif == NX_NULL)
-        return 0;
-
-    for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
-    {
-        if (nxif == &ip->nx_ip_interface[i])
-            return (UWORD)i;
-    }
-
-    return 0;
-}
-
 static VOID ns_fill_routes(NX_IP *ip, NsWriter *w)
 {
     ULONG gateway = 0;
@@ -795,6 +1052,8 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         case NETSTATUS_SOCKETS:     need = 0;                        break;
         case NETSTATUS_DHCP:        need = 0;                        break;
         case NETSTATUS_ADDRESSES6:  need = 0;                        break;
+        case NETSTATUS_ROUTES6:     need = 0;                        break;
+        case NETSTATUS_NEIGHBOURS:  need = 0;                        break;
         default:                    return bsd_fail(SocketBase, AMI_EINVAL);
     }
 
@@ -865,6 +1124,20 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             ns_writer_finish(&w);
             break;
 
+        case NETSTATUS_ROUTES6:
+            ns_writer_init(&w, hdr, size, NETSTATUS_ROUTES6,
+                           sizeof(NetStatusRoute6));
+            ns_fill_routes6(ip, &w);
+            ns_writer_finish(&w);
+            break;
+
+        case NETSTATUS_NEIGHBOURS:
+            ns_writer_init(&w, hdr, size, NETSTATUS_NEIGHBOURS,
+                           sizeof(NetStatusNeighbour));
+            ns_fill_neighbours(ip, &w);
+            ns_writer_finish(&w);
+            break;
+
         default:    /* NETSTATUS_SOCKETS; the switch above rejected the rest */
             ns_writer_init(&w, hdr, size, NETSTATUS_SOCKETS,
                            sizeof(NetStatusSocket));
@@ -888,6 +1161,10 @@ static LONG ns_map_status(struct AmiSocketBase *SocketBase, UINT status)
     switch (status)
     {
         case NX_NOT_ENABLED:        return bsd_fail(SocketBase, AMI_ENOSYS);
+        /* No table to hold it, as against a table that is full. IPv6 answers
+           this to a prefix given a next hop. */
+        case NX_NOT_SUPPORTED:      return bsd_fail(SocketBase, AMI_ENOSYS);
+        case NX_DUPLICATED_ENTRY:   return bsd_fail(SocketBase, AMI_EEXIST);
         case NX_ENTRY_NOT_FOUND:    return bsd_fail(SocketBase, AMI_ENOENT);
         case NX_NO_MORE_ENTRIES:    return bsd_fail(SocketBase, AMI_ENOBUFS);
         case NX_IP_ADDRESS_ERROR:   return bsd_fail(SocketBase, AMI_EINVAL);
@@ -1011,6 +1288,57 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
         case NETCTRL_ARP_FLUSH:
             status = nx_arp_dynamic_entries_invalidate(ip);
             rc = ns_map_status(SocketBase, status);
+            break;
+
+        /*
+         * The IPv6 four go through src/netstack rather than straight to NetX
+         * Duo, for the reason INTERFACE_UP does: a route is configured at
+         * bring-up from GATEWAY6 as well as from a command, and one function
+         * is what keeps the two from disagreeing about the router lifetime or
+         * about flushing the destination cache. In a build without IPv6 they
+         * are not compiled and answer ENOSYS.
+         */
+        case NETCTRL_ROUTE6_ADD:
+#ifdef AMINETXDUO_IPV6
+            status = netstack_ipv6_route_add(ctl->nsc_Destination6,
+                                             ctl->nsc_PrefixLength,
+                                             ctl->nsc_Gateway6,
+                                             ctl->nsc_Index);
+            rc = ns_map_status(SocketBase, status);
+#else
+            rc = bsd_fail(SocketBase, AMI_ENOSYS);
+#endif
+            break;
+
+        case NETCTRL_ROUTE6_DELETE:
+#ifdef AMINETXDUO_IPV6
+            status = netstack_ipv6_route_delete(ctl->nsc_Destination6,
+                                                ctl->nsc_PrefixLength,
+                                                ctl->nsc_Gateway6);
+            rc = ns_map_status(SocketBase, status);
+#else
+            rc = bsd_fail(SocketBase, AMI_ENOSYS);
+#endif
+            break;
+
+        case NETCTRL_ND_ADD:
+#ifdef AMINETXDUO_IPV6
+            status = nxd_nd_cache_entry_set(ip, ctl->nsc_Destination6,
+                                            (UINT)ctl->nsc_Index,
+                                            (CHAR *)ctl->nsc_HwAddress);
+            rc = ns_map_status(SocketBase, status);
+#else
+            rc = bsd_fail(SocketBase, AMI_ENOSYS);
+#endif
+            break;
+
+        case NETCTRL_ND_DELETE:
+#ifdef AMINETXDUO_IPV6
+            status = nxd_nd_cache_entry_delete(ip, ctl->nsc_Destination6);
+            rc = ns_map_status(SocketBase, status);
+#else
+            rc = bsd_fail(SocketBase, AMI_ENOSYS);
+#endif
             break;
 
         default:
