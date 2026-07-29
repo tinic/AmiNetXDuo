@@ -473,6 +473,39 @@ char *tool_sock_ntop(struct Library *base, LONG af, const void *src,
     return res;
 }
 
+/*
+ * LVO -0x25e.
+ *
+ * The vector test is done before the register variables are set up, not after.
+ * A local register variable is loaded where its initialiser is, and any call
+ * between that and the `jsr` may reuse the register -- so a guard written
+ * after the declarations silently passed inet_pton() a family it never set.
+ * Same rule as the clobber list in the file header.
+ */
+LONG tool_sock_pton(struct Library *base, LONG af, const char *src, void *dst)
+{
+    if (!tool_sock_have_lvo(base, 0x25eUL))
+        return 0;
+
+    {
+        register struct Library *a6  __asm("a6") = base;
+        register LONG            d0  __asm("d0") = af;
+        register CONST_APTR      a0  __asm("a0") = (CONST_APTR)src;
+        register APTR            a1  __asm("a1") = (APTR)dst;
+        register LONG            res __asm("d0");
+        register LONG _clob_d1 __asm("d1");
+        register LONG _clob_a0 __asm("a0");
+        register LONG _clob_a1 __asm("a1");
+
+        __asm __volatile ("jsr a6@(-606:W)"
+                          : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
+                            "=r" (_clob_a1)
+                          : "r" (a6), "r" (d0), "r" (a0), "r" (a1)
+                          : "cc", "memory");
+        return res;
+    }
+}
+
 /* LVO -0x324 */
 VOID tool_sock_freeaddrinfo(struct Library *base, ToolAddrInfo *ai)
 {

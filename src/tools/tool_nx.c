@@ -30,6 +30,7 @@ static union
     struct { NetStatusHeader hdr; NetStatusRoute     e[TOOL_MAX_ROUTE]; } route;
     struct { NetStatusHeader hdr; NetStatusSocket    e[TOOL_MAX_SOCK]; } sock;
     struct { NetStatusHeader hdr; NetStatusDhcp      e[TOOL_MAX_IF]; }   dhcp;
+    struct { NetStatusHeader hdr; NetStatusAddress6  e[TOOL_MAX_ADDR6]; } addr6;
 } nx_answer;
 
 /*
@@ -90,6 +91,7 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
             info->mac[j] = 0;
     }
     out->iface_count    = 0;
+    out->addr6_count    = 0;
     out->sock_count     = 0;
     out->sock_truncated = FALSE;
     out->gateway        = 0;
@@ -169,6 +171,28 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
         }
     }
 
+    /*
+     * A library without IPv6 answers with no entries and one too old to know
+     * the selector answers -1.  Both mean "this machine has no IPv6 address to
+     * report", which is not a failure and prints nothing.
+     */
+    n = tool_netstatus_query(base, NETSTATUS_ADDRESSES6, &nx_answer,
+                             sizeof(nx_answer.addr6),
+                             sizeof(NetStatusAddress6));
+    for (i = 0; i < n && i < (LONG)TOOL_MAX_ADDR6; i++)
+    {
+        const NetStatusAddress6 *src = &nx_answer.addr6.e[i];
+        ToolAddr6Info           *a6  = &out->addr6[i];
+
+        a6->nx_index = src->nsn_Interface;
+        a6->state    = src->nsn_State;
+        a6->prefix   = src->nsn_PrefixLength;
+
+        tool_format_ip6(base, src->nsn_Address, a6->text, sizeof(a6->text));
+
+        out->addr6_count = (UWORD)(i + 1);
+    }
+
     if (want_sockets)
     {
         n = tool_netstatus_query(base, NETSTATUS_SOCKETS, &nx_answer,
@@ -200,6 +224,16 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
     tool_netstatus_close(base);
 
     return 0;
+}
+
+const char *tool_addr6_state(UWORD state)
+{
+    switch (state)
+    {
+        case NETSTATUS_IP6_TENTATIVE:   return "tentative";
+        case NETSTATUS_IP6_DEPRECATED:  return "deprecated";
+        default:                        return NULL;
+    }
 }
 
 /* ---------------------------------------------------- protocol counters -- */

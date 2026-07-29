@@ -233,6 +233,7 @@ LONG  tool_sock_getaddrinfo(struct Library *base, const char *node,
 VOID  tool_sock_freeaddrinfo(struct Library *base, ToolAddrInfo *ai);
 char *tool_sock_ntop(struct Library *base, LONG af, const void *src,
                      char *dst, LONG size);
+LONG  tool_sock_pton(struct Library *base, LONG af, const char *src, void *dst);
 
 /*
  * TRUE when the library's vector table reaches `lvo`, given as the positive

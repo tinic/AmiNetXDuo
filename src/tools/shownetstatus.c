@@ -324,7 +324,41 @@ static VOID show_lease(const ToolDhcpInfo *d)
         offered_line(&first, "the name   ", NULL, 0, d->host_name);
 }
 
+/*
+ * The interface's IPv6 addresses, under its IPv4 line.  A machine with none
+ * prints nothing, so an IPv4-only stack reads exactly as it did.
+ *
+ * An interface with IPv6 running always has a link-local fe80::/64 address it
+ * gave itself; a global one comes from CONFIGURE6.  Until this, the only way
+ * to see either was a debug build and a serial console.
+ */
+static VOID show_addresses6(const ToolSnapshot *snap, const ToolIfInfo *live)
+{
+    UWORD i;
+
+    if (snap == NULL || live == NULL)
+        return;
+
+    for (i = 0; i < snap->addr6_count; i++)
+    {
+        const ToolAddr6Info *a6 = &snap->addr6[i];
+        const char          *note;
+
+        if (a6->nx_index != live->nx_index || a6->text[0] == '\0')
+            continue;
+
+        note = tool_addr6_state(a6->state);
+
+        if (note != NULL)
+            tool_printf("  address6    %s/%lu (%s)\n", (LONG)a6->text,
+                        a6->prefix, (LONG)note);
+        else
+            tool_printf("  address6    %s/%lu\n", (LONG)a6->text, a6->prefix);
+    }
+}
+
 static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
+                           const ToolSnapshot *snap,
                            const ToolDhcpInfo *lease,
                            BOOL up, BOOL stats, BOOL stack_running,
                            BOOL readable)
@@ -402,6 +436,8 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
         if (live->bps != 0)
             tool_printf("        %lu bits/s", live->bps);
         tool_printf("\n");
+
+        show_addresses6(snap, live);
     }
     else if (cfg->iptype == AMI_IPTYPE_DHCP)
     {
@@ -455,6 +491,24 @@ static BOOL iface_online(const ToolIfInfo *live)
     return live->link_up;
 }
 
+static VOID list_addresses6(const ToolSnapshot *snap, const ToolIfInfo *live)
+{
+    UWORD i;
+
+    if (snap == NULL || live == NULL)
+        return;
+
+    for (i = 0; i < snap->addr6_count; i++)
+    {
+        const ToolAddr6Info *a6 = &snap->addr6[i];
+
+        if (a6->nx_index != live->nx_index || a6->text[0] == '\0')
+            continue;
+
+        tool_printf("%-33s %s/%lu\n", (LONG)"", (LONG)a6->text, a6->prefix);
+    }
+}
+
 static VOID show_interface_list(const AmiConfig *cfg, const ToolSnapshot *snap,
                                 BOOL have_live, BOOL readable)
 {
@@ -489,6 +543,10 @@ static VOID show_interface_list(const AmiConfig *cfg, const ToolSnapshot *snap,
                     (LONG)(live != NULL && live->attached
                                ? (live->link_up ? "up" : "down") : "?"),
                     (LONG)addr);
+
+        /* Indented under the line they belong to; a machine with no IPv6
+           prints none and the table is unchanged. */
+        list_addresses6(snap, live);
     }
 }
 
@@ -1096,7 +1154,7 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
             if (have_live && i < snap.iface_count)
                 live = &snap.iface[i];
 
-            show_interface(&cfg->interfaces[i], live,
+            show_interface(&cfg->interfaces[i], live, &snap,
                            (have_lease && i < (LONG)dhcp.count)
                                ? &dhcp.iface[i] : NULL,
                            iface_online(live), detailed,

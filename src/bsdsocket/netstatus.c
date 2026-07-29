@@ -50,6 +50,17 @@
  * build stops here rather than at a user reading "ESTABLISHED" off a socket
  * that is closing.
  */
+#ifdef AMINETXDUO_IPV6
+_Static_assert(NETSTATUS_IP6_TENTATIVE  == NX_IPV6_ADDR_STATE_TENTATIVE,
+               "IPv6 address state ABI");
+_Static_assert(NETSTATUS_IP6_PREFERRED  == NX_IPV6_ADDR_STATE_PREFERRED,
+               "IPv6 address state ABI");
+_Static_assert(NETSTATUS_IP6_DEPRECATED == NX_IPV6_ADDR_STATE_DEPRECATED,
+               "IPv6 address state ABI");
+_Static_assert(NETSTATUS_IP6_VALID      == NX_IPV6_ADDR_STATE_VALID,
+               "IPv6 address state ABI");
+#endif
+
 _Static_assert(NETSTATUS_TCP_CLOSED       == NX_TCP_CLOSED,        "TCP state ABI");
 _Static_assert(NETSTATUS_TCP_LISTEN       == NX_TCP_LISTEN_STATE,  "TCP state ABI");
 _Static_assert(NETSTATUS_TCP_SYN_SENT     == NX_TCP_SYN_SENT,      "TCP state ABI");
@@ -335,6 +346,58 @@ static const AmiIfConfig *ns_config_for(UINT nx_index)
         return NULL;
 
     return &cfg->interfaces[nx_index];
+}
+
+/*
+ * The IPv6 addresses, one entry per address per interface.
+ *
+ * netstack_ipv6_address_get() walks the interface's own list rather than the
+ * flat nx_ipv6_address[] array, which is shared between interfaces and the
+ * loopback ::1 entry.  It reads memory and nothing else, so it is safe under
+ * the bracket bsd_NetStackQuery() already holds.
+ *
+ * In a build without AMINETXDUO_IPV6 there are no addresses and the answer is
+ * an empty table, which is what a caller compiled against the same header
+ * expects: no entries, not an error.
+ */
+static VOID ns_fill_addresses6(NsWriter *w)
+{
+#ifdef AMINETXDUO_IPV6
+    UWORD i;
+
+    if (!netstack_ipv6_enabled())
+        return;
+
+    for (i = 0; i < (UWORD)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        UWORD slot;
+
+        for (slot = 0; ; slot++)
+        {
+            ULONG              addr[4];
+            ULONG              prefix = 0;
+            ULONG              state = 0;
+            NetStatusAddress6 *out;
+
+            if (!netstack_ipv6_address_get(i, slot, addr, &prefix, &state))
+                break;
+
+            out = (NetStatusAddress6 *)ns_writer_next(w);
+            if (out == NULL)
+                continue;
+
+            out->nsn_Interface    = i;
+            out->nsn_State        = (UWORD)state;
+            out->nsn_Address[0]   = addr[0];
+            out->nsn_Address[1]   = addr[1];
+            out->nsn_Address[2]   = addr[2];
+            out->nsn_Address[3]   = addr[3];
+            out->nsn_PrefixLength = prefix;
+        }
+    }
+#else
+    (VOID)w;
+#endif
 }
 
 static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
@@ -731,6 +794,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         case NETSTATUS_ROUTES:      need = 0;                        break;
         case NETSTATUS_SOCKETS:     need = 0;                        break;
         case NETSTATUS_DHCP:        need = 0;                        break;
+        case NETSTATUS_ADDRESSES6:  need = 0;                        break;
         default:                    return bsd_fail(SocketBase, AMI_EINVAL);
     }
 
@@ -791,6 +855,13 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             ns_writer_init(&w, hdr, size, NETSTATUS_DHCP,
                            sizeof(NetStatusDhcp));
             ns_fill_dhcp(&w);
+            ns_writer_finish(&w);
+            break;
+
+        case NETSTATUS_ADDRESSES6:
+            ns_writer_init(&w, hdr, size, NETSTATUS_ADDRESSES6,
+                           sizeof(NetStatusAddress6));
+            ns_fill_addresses6(&w);
             ns_writer_finish(&w);
             break;
 

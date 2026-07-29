@@ -4,6 +4,7 @@
  *     nslookup NAME/A,SERVER,TYPE/K,TIMEOUT/N/K
  *
  *   TYPE=A       the address                     (the default)
+ *   TYPE=AAAA    the IPv6 address
  *   TYPE=PTR     the name of an address
  *   TYPE=CNAME   what this name is an alias for
  *   TYPE=NS      the servers authoritative for a zone
@@ -12,7 +13,8 @@
  *   TYPE=SRV     a service: priority, weight, port and host
  *   TYPE=SOA     the start of authority for a zone
  *
- * A dotted quad with no TYPE is looked up backwards, as `host` does.
+ * An address with no TYPE is looked up backwards, as `host` does: a dotted
+ * quad through in-addr.arpa and an IPv6 literal through ip6.arpa.
  *
  * This is a DNS client rather than a caller of one: a UDP socket, an RFC 1035
  * query built here and the answer section parsed here. bsdsocket.library
@@ -86,6 +88,7 @@ enum
 #define NSL_T_MX                15
 #define NSL_T_TXT               16
 #define NSL_T_SRV               33
+#define NSL_T_AAAA              28
 #define NSL_C_IN                1
 
 /* Header flags. */
@@ -108,6 +111,13 @@ static UBYTE nsl_reply[NSL_REPLY_MAX];
 static char  nsl_qname[NSL_TEXT_MAX];
 static char  nsl_text[NSL_TEXT_MAX];
 static char  nsl_text2[NSL_TEXT_MAX];
+
+/*
+ * The open library, for the one place that needs it below the argument
+ * parsing: an AAAA is sixteen bytes and the only RFC 5952 formatter on the
+ * machine is bsdsocket.library's inet_ntop().
+ */
+static struct Library *nsl_sb;
 static AmiConfig nsl_config;
 
 /*
@@ -129,7 +139,8 @@ static const NslType nsl_types[] =
     { "MX",     NSL_T_MX    },
     { "TXT",    NSL_T_TXT   },
     { "SRV",    NSL_T_SRV   },
-    { "SOA",    NSL_T_SOA   }
+    { "SOA",    NSL_T_SOA   },
+    { "AAAA",   NSL_T_AAAA  }
 };
 
 /* ------------------------------------------------------------- bytes ----- */
@@ -224,6 +235,35 @@ static ULONG nsl_encode_name(const char *name, UBYTE *out, ULONG outlen)
     out[o++] = 0;
 
     return o;
+}
+
+/*
+ * "::1" -> "1.0.0. ... .0.ip6.arpa" -- RFC 3596's reverse form: the thirty-two
+ * nibbles of the address, lowest first, one per label.
+ */
+static VOID nsl_reverse_name6(const UBYTE *addr, char *out, ULONG outlen)
+{
+    static const char hex[]    = "0123456789abcdef";
+    static const char suffix[] = "ip6.arpa";
+    ULONG o = 0;
+    LONG  i;
+    ULONG j;
+
+    for (i = 15; i >= 0; i--)
+    {
+        if (o + 4 >= outlen)
+            break;
+
+        out[o++] = hex[addr[i] & 0x0f];
+        out[o++] = '.';
+        out[o++] = hex[(addr[i] >> 4) & 0x0f];
+        out[o++] = '.';
+    }
+
+    for (j = 0; suffix[j] != '\0' && o + 1 < outlen; j++)
+        out[o++] = suffix[j];
+
+    out[o] = '\0';
 }
 
 /* "10.0.2.3" -> "3.2.0.10.in-addr.arpa", which is how a PTR is asked for. */
@@ -407,7 +447,7 @@ static UWORD nsl_id(VOID)
 static VOID nsl_print_record(const UBYTE *msg, ULONG len, UWORD type,
                              ULONG rdata, ULONG rdlen)
 {
-    char addr[16];
+    char addr[TOOL_ADDR_STRLEN];
     LONG e1;
     LONG e2;
 
@@ -417,6 +457,16 @@ static VOID nsl_print_record(const UBYTE *msg, ULONG len, UWORD type,
             if (rdlen != 4)
                 break;
             ami_config_format_ip(nsl_get32(&msg[rdata]), addr, sizeof(addr));
+            tool_printf("  address    %s\n", (LONG)addr);
+            break;
+
+        case NSL_T_AAAA:
+            if (rdlen != 16)
+                break;
+            addr[0] = '\0';
+            if (tool_sock_ntop(nsl_sb, TOOL_AF_INET6, &msg[rdata], addr,
+                               (LONG)sizeof(addr)) == NULL)
+                break;
             tool_printf("  address    %s\n", (LONG)addr);
             break;
 
@@ -756,6 +806,9 @@ int main(int argc, char **argv)
     LONG            printed;
     LONG            rc = RETURN_OK;
     ULONG           i;
+    BOOL            is_v4;
+    BOOL            is_v6;
+    UBYTE           v6[16];
     char            dotted[TOOL_ADDR_STRLEN];
 
     (VOID)argv;
@@ -784,6 +837,23 @@ int main(int argc, char **argv)
     if (timeout == 0)
         timeout = NSL_DEFAULT_TIMEOUT;
 
+    /*
+     * Opened before the argument work rather than after it: telling an IPv6
+     * literal from a name needs the library's inet_pton(), the only parser for
+     * one on a machine whose commands were built from an IPv4-only tree.
+     */
+    sb = tool_socket_open();
+    if (sb == NULL)
+    {
+        FreeArgs(rda);
+        return RETURN_FAIL;
+    }
+    nsl_sb = sb;
+
+    is_v4 = ami_config_parse_ip(name, &address) ? TRUE : FALSE;
+    is_v6 = (!is_v4 &&
+             tool_sock_pton(sb, TOOL_AF_INET6, name, v6) == 1) ? TRUE : FALSE;
+
     if (args[ARG_TYPE] != 0)
     {
         if (nsl_type_from_name((const char *)args[ARG_TYPE], &type) != 0)
@@ -791,20 +861,25 @@ int main(int argc, char **argv)
             tool_error("\"%s\" is not a record type I know",
                        (LONG)args[ARG_TYPE]);
             nsl_print_types();
+            CloseLibrary(sb);
             FreeArgs(rda);
             return RETURN_ERROR;
         }
     }
-    else if (ami_config_parse_ip(name, &address))
+    else if (is_v4 || is_v6)
     {
         /* Same rule as host: an address typed on its own means "who is this". */
         type = NSL_T_PTR;
     }
 
     /* A PTR is asked for by name, whichever way this command was told to. */
-    if (type == NSL_T_PTR && ami_config_parse_ip(name, &address))
+    if (type == NSL_T_PTR && is_v4)
     {
         nsl_reverse_name(address, nsl_qname, sizeof(nsl_qname));
+    }
+    else if (type == NSL_T_PTR && is_v6)
+    {
+        nsl_reverse_name6(v6, nsl_qname, sizeof(nsl_qname));
     }
     else
     {
@@ -817,18 +892,12 @@ int main(int argc, char **argv)
         if (i >= sizeof(nsl_qname))
         {
             tool_error("that name is too long for the DNS");
+            CloseLibrary(sb);
             FreeArgs(rda);
             return RETURN_ERROR;
         }
 
         tool_copy_string(nsl_qname, sizeof(nsl_qname), name);
-    }
-
-    sb = tool_socket_open();
-    if (sb == NULL)
-    {
-        FreeArgs(rda);
-        return RETURN_FAIL;
     }
 
     if (args[ARG_SERVER] != 0)

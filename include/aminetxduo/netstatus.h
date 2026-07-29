@@ -106,6 +106,7 @@ extern "C" {
 #define NETSTATUS_ROUTES        5   /* NetStatusRoute[]                      */
 #define NETSTATUS_SOCKETS       6   /* NetStatusSocket[]                     */
 #define NETSTATUS_DHCP          7   /* NetStatusDhcp[]                       */
+#define NETSTATUS_ADDRESSES6    8   /* NetStatusAddress6[]                   */
 
 /*
  * Every buffer starts with this. The caller fills nsh_Magic and nsh_Version;
@@ -206,6 +207,37 @@ typedef struct NetStatusInterface
     ULONG   nsi_RxErrors;
     ULONG   nsi_AllocFailures;
 } NetStatusInterface;
+
+/* ----------------------------------------------- NETSTATUS_ADDRESSES6 --- */
+
+/*
+ * The IPv6 addresses each interface holds, one entry per address, in the
+ * order NetX Duo keeps them on the interface's own list.  An interface with
+ * IPv6 running always has at least its fe80::/64 link-local address; a global
+ * one arrives from CONFIGURE6, by advertisement or by hand.
+ *
+ * An IPv4-only build answers this selector with no entries rather than an
+ * error, so a caller needs no build-time test to ask.
+ *
+ * The address is four host-order ULONGs, NetX Duo's own form, which is what
+ * netstack_ipv6_address_get() and ami_config_format_ip6() both speak.
+ */
+
+/* nsn_State -- NX_IPV6_ADDR_STATE_*, spelled out so a caller need not include
+   nx_api.h.  A TENTATIVE address is still running duplicate address detection
+   and must not be used as a source. */
+#define NETSTATUS_IP6_TENTATIVE     1
+#define NETSTATUS_IP6_PREFERRED     2
+#define NETSTATUS_IP6_DEPRECATED    3
+#define NETSTATUS_IP6_VALID         4
+
+typedef struct NetStatusAddress6
+{
+    UWORD   nsn_Interface;              /* NX_IP interface index             */
+    UWORD   nsn_State;                  /* NETSTATUS_IP6_*                   */
+    ULONG   nsn_Address[4];             /* host byte order, four words       */
+    ULONG   nsn_PrefixLength;
+} NetStatusAddress6;
 
 /* ----------------------------------------------------- NETSTATUS_DHCP --- */
 

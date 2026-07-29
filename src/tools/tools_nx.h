@@ -45,6 +45,13 @@ VOID tool_nx_quiet(BOOL quiet);
 #define TOOL_MAX_IF     NX_MAX_PHYSICAL_INTERFACES
 #define TOOL_MAX_SOCK   32
 
+/*
+ * IPv6 addresses across all interfaces.  Each gets a link-local one and may
+ * hold a configured or advertised global one alongside it, so two per
+ * interface plus room to see a third arrive.
+ */
+#define TOOL_MAX_ADDR6  (TOOL_MAX_IF * 3)
+
 typedef struct ToolIfInfo
 {
     UWORD           nx_index;
@@ -72,6 +79,25 @@ typedef struct ToolIfInfo
     AmiSana2Stats   stats;
 } ToolIfInfo;
 
+/*
+ * One IPv6 address of one interface, already in text.
+ *
+ * The text is made while the library is open, because the only RFC 5952
+ * formatter on the machine is bsdsocket.library's inet_ntop() -- a command
+ * built from an IPv4-only tree has none of its own, and the tools are one
+ * binary whichever way the library was built.
+ */
+typedef struct ToolAddr6Info
+{
+    UWORD   nx_index;
+    UWORD   state;                   /* NETSTATUS_IP6_*                      */
+    ULONG   prefix;
+    char    text[48];
+} ToolAddr6Info;
+
+/* "valid", "tentative"; NULL when the state needs no comment. */
+const char *tool_addr6_state(UWORD state);
+
 typedef struct ToolSockInfo
 {
     BOOL    is_tcp;
@@ -86,6 +112,13 @@ typedef struct ToolSnapshot
 {
     ToolIfInfo      iface[TOOL_MAX_IF];
     UWORD           iface_count;
+    /*
+     * Empty on a machine whose library has no IPv6, and empty on one that has
+     * it but has brought no interface up.  A library too old to know the
+     * selector answers with an error, which is also empty and not a failure.
+     */
+    ToolAddr6Info   addr6[TOOL_MAX_ADDR6];
+    UWORD           addr6_count;
     ToolSockInfo    sock[TOOL_MAX_SOCK];
     UWORD           sock_count;
     BOOL            sock_truncated;

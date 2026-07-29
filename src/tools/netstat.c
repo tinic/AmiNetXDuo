@@ -39,6 +39,32 @@ enum
 /* Static: an AmiConfig is far too big for a Shell command's 4 KB stack. */
 static AmiConfig netstat_config;
 
+/*
+ * The IPv6 addresses of one interface, under its line.  Nothing is printed on
+ * a machine that has none, so an IPv4-only stack looks exactly as it did.
+ */
+static VOID show_addresses6(const ToolSnapshot *snap, UWORD nx_index)
+{
+    UWORD i;
+
+    for (i = 0; i < snap->addr6_count; i++)
+    {
+        const ToolAddr6Info *a6 = &snap->addr6[i];
+        const char          *note;
+
+        if (a6->nx_index != nx_index || a6->text[0] == '\0')
+            continue;
+
+        note = tool_addr6_state(a6->state);
+
+        if (note != NULL)
+            tool_printf("        inet6 %s/%lu (%s)\n", (LONG)a6->text,
+                        a6->prefix, (LONG)note);
+        else
+            tool_printf("        inet6 %s/%lu\n", (LONG)a6->text, a6->prefix);
+    }
+}
+
 static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
 {
     char  addr[16];
@@ -76,6 +102,8 @@ static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
 
         tool_format_mac(info->mac, mac, sizeof(mac));
         tool_printf("        hardware %s\n", (LONG)mac);
+
+        show_addresses6(snap, info->nx_index);
     }
 }
 

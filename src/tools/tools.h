@@ -242,6 +242,15 @@ VOID            tool_netstatus_close(struct Library *base);
  * A buffer that holds the header but no entries asks how many there are:
  * nsh_Available comes back regardless of nsh_Count.
  */
+/*
+ * An IPv6 address, four host-order ULONGs, in RFC 5952 text.  Through the
+ * library's inet_ntop(), because a command built from an IPv4-only tree has
+ * no formatter of its own and still has to print what a dual-stack library
+ * reports.  Writes "" when the library has no such vector.
+ */
+VOID tool_format_ip6(struct Library *base, const ULONG addr[4],
+                     char *buf, ULONG buflen);
+
 LONG tool_netstatus_query(struct Library *base, ULONG what,
                           APTR buffer, ULONG size, ULONG entry_size);
 
