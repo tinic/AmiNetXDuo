@@ -283,7 +283,8 @@ static void test_ip(void)
 }
 
 
-#ifdef AMINETXDUO_IPV6
+/* The text conversions are compiled either way (src/config/config_text6.c),
+   so they are tested either way. */
 
 /* Four host-order ULONGs from eight groups, for the expectations below. */
 #define IP6(a, b, c, d, e, f, g, h)                                          \
@@ -442,6 +443,10 @@ static void test_ip6(void)
 }
 
 /* ---- CONFIGURE6 / ADDRESS6 / GATEWAY6 in an interface file ------------- */
+/* Still IPv6-only: config_parse.c reads these keys in an AMINETXDUO_IPV6
+   build alone. */
+
+#ifdef AMINETXDUO_IPV6
 
 static const char dual_stack_net[] =
     "device     = a2065.device\n"
@@ -1028,8 +1033,8 @@ int main(int argc, char **argv)
 
     test_text_helpers();
     test_ip();
-#ifdef AMINETXDUO_IPV6
     test_ip6();
+#ifdef AMINETXDUO_IPV6
     test_interface_ipv6();
 #endif
     test_interface_roadshow();
