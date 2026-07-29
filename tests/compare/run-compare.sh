@@ -255,8 +255,14 @@ if [ -n "${EXTRALIBS:-}" ]; then
     cp -R "$EXTRALIBS"/* "$STAGE/libs/"
 fi
 
+# build/amissl-mathlibs first, and it has to be: the two have to be a matched
+# pair or a clib2 client sits there forever, and tools/amissl-run.sh says why.
+# Loose in build/ they are not a pair -- the doubtrans there is the -os one and
+# the doubbas is not -- so taking them from a directory that holds both is the
+# difference between a client that runs and a run that times out.
 for lib in mathieeedoubbas mathieeedoubtrans; do
-    for cand in "$ROOT/build/$lib-os.library" "$ROOT/build/$lib.library"; do
+    for cand in "$ROOT/build/amissl-mathlibs/$lib.library" \
+                "$ROOT/build/$lib-os.library" "$ROOT/build/$lib.library"; do
         [ -f "$cand" ] && { cp "$cand" "$STAGE/libs/$lib.library"; break; }
     done
 done

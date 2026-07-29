@@ -727,17 +727,25 @@ def main():
 
     # FTP, out of tests/tools/netpeer.py.  Its in-memory file set gains one
     # deterministic blob so a download can be hash-checked like every other.
-    netpeer.FILES["blob.bin"] = master(args.ftp_blob)
-    netpeer.FILES["big.bin"] = master(512 * 1024)
-    ftp = netpeer.Threaded((args.bind, base + 10), netpeer.FtpHandler)
-    ftp.advertise = args.advertise
-    ftp.active_via_loopback = True
-    threading.Thread(target=ftp.serve_forever, daemon=True).start()
-    log("start", "%-11s on %s:%d (blob.bin %d B, big.bin %d B)"
-        % ("ftp", args.bind, base + 10, args.ftp_blob, 512 * 1024))
+    # The ftp removal took FtpHandler with it, so this is skipped rather than
+    # fatal -- without the guard every caller of this peer, http included,
+    # dies here on an AttributeError before it serves a byte.
+    ftp_up = 0
+    if hasattr(netpeer, "FtpHandler"):
+        netpeer.FILES["blob.bin"] = master(args.ftp_blob)
+        netpeer.FILES["big.bin"] = master(512 * 1024)
+        ftp = netpeer.Threaded((args.bind, base + 10), netpeer.FtpHandler)
+        ftp.advertise = args.advertise
+        ftp.active_via_loopback = True
+        threading.Thread(target=ftp.serve_forever, daemon=True).start()
+        ftp_up = 1
+        log("start", "%-11s on %s:%d (blob.bin %d B, big.bin %d B)"
+            % ("ftp", args.bind, base + 10, args.ftp_blob, 512 * 1024))
+    else:
+        log("start", "netpeer has no FtpHandler: the ftp port is NOT open")
 
     log("start", "pid %d, %d listeners, nothing on %d (refused case)"
-        % (os.getpid(), len(listeners) + 1, base + 99))
+        % (os.getpid(), len(listeners) + ftp_up, base + 99))
     print("ready", flush=True)
 
     try:

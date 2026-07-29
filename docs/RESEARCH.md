@@ -17219,3 +17219,102 @@ throughput.
 instructions per longword already cost what the MC68020UM says they cost, and
 a `movem.l`-fed version needs the same two-cycle adds afterwards. There is no
 version of this loop that is meaningfully faster on a 68020.
+
+## 65. One foreign curl, three stacks, one afternoon (2026-07-28)
+
+A sanity comparison, not a study: the same third-party Aminet `curl` binary
+fetching the same fixed-size file over plain `http://` against three
+`bsdsocket.library` implementations on the same emulated machine, back to
+back in one session. One number per stack.
+
+| stack | throughput | runs |
+|---|---:|---|
+| **AmiNetXDuo** `f905707`, `build/cm` | **120.1 KB/s** | 6 fetches, 119.9–120.2 KB/s per boot |
+| **Roadshow 4.364 (1.9.2023) demo 1.15** | **126.5 KB/s** | 6 fetches, 125.2–129.0 KB/s per boot |
+| **AmiTCP_NG 4.1.3a**, 68020 build | — | would not start |
+
+Roadshow is **5.4% ahead**. The figure is curl's own `%{speed_download}`,
+bytes per second, divided by 1024; each boot did two fetches and each stack
+was booted three times.
+
+### 65.1 What was held fixed
+
+Transfer: 1,200,000 bytes from `tests/peer/httppeer.py`'s `/bytes/1200000`,
+one host peer process started once and left running across all six boots. All
+twelve completed fetches wrote exactly 1,200,000 bytes.
+
+| | |
+|---|---|
+| client | Aminet `curl.020` 8.22.0-DEV-210726, clib2 + AmiSSL, GCC 13.2.0 `-O0 -msoft-float`, built by somebody with no stake in the result |
+| machine | FS-UAE A1200 profile, 68020, Kickstart 3.1, bare directory hard drive |
+| NIC | one `a2065.device` on SLIRP, 10.0.2.0/24, staged in both `DEVS:` and `DEVS:Networks/` |
+| driver | `tests/compare/checkrunner.c`, 512 KB stack per command, records rc and ticks |
+| interface | `DEVICE=a2065.device`, `UNIT=0`, `CONFIGURE=DHCP` for ours and Roadshow; AmiTCP_NG got its own `Storage/NetInterfaces/A2065` and its own `db/` behind an `AmiTCP:` assign |
+| UAE's own emulation | `bsdsocket_library = 0`, so there is no fourth stack in the room |
+| host | macOS, `build/.fsuae.lock` held for every run, one emulator at a time |
+
+Each stack supplied only its own `bsdsocket.library` and `AddNetInterface`.
+AmiTCP_NG ships no `usergroup.library` and borrowed ours (`-U`), which the
+clib2 client opens before `main()`.
+
+Run with the harness's generic hooks, no workload of curl's own:
+
+    tests/compare/run-compare.sh -s ours -w diag \
+        -C /tmp/cmpcurl/cmds -X /tmp/cmpcurl/plan.txt -T curlcmp-ours-1
+
+`-C` stages the binary at `DH0:`, `-X` appends the two fetch lines. curl is
+not in this tree and did not enter it.
+
+### 65.2 AmiTCP_NG 4.1.3a still does not start here
+
+Same failure as 29.6 recorded for 4.1.1, byte for byte:
+
+    eth0: AddInterface failed, errno 43
+
+`OpenLibrary` succeeds and `socket()` then returns `EPROTONOSUPPORT`, which
+is what BSD returns when the INET domain was never attached. Their own
+interface file, their own `db/` staged behind an `AmiTCP:` assign made before
+the first library call, and their 68020 build rather than the generic one —
+all as 29.6 already tried, all identical. Their project documents validation
+on AmigaOS 3.2 under Amiberry and this harness boots Kickstart 3.1 with no
+Workbench install, which remains the most likely gap. Reported as "did not
+run here", not as a defect.
+
+One thing worth not repeating: `GetNetStatus` opens `CON://///AUTO/CLOSE/WAIT`
+and so never returns when its output is redirected to a file, which takes the
+whole boot with it. 29.6 says this about `ShowNetStatus`; it is true of both.
+
+### 65.3 Two things in the harness that had to be fixed first
+
+Neither is in `src/` and neither changes what was measured.
+
+`tests/peer/httppeer.py` died on startup for every caller — the ftp removal
+took `netpeer.FtpHandler` with it and the peer still referenced it, so it
+raised an `AttributeError` before serving a byte. The ftp listener is now
+skipped when there is no handler.
+
+`run-compare.sh` staged a **mismatched** pair of IEEE maths libraries. It
+took `mathieeedoubbas` and `mathieeedoubtrans` from loose files in `build/`,
+where the doubtrans is the `-os` one and the doubbas is not, and a clib2
+client with a mismatched pair sits there forever rather than saying anything
+— the failure `tools/amissl-run.sh` spends a paragraph warning about.
+`build/amissl-mathlibs/`, which holds both halves of one pair, is now searched
+first.
+
+### 65.4 What would make this unfair
+
+The builds are not comparable and that is stated rather than hidden: ours is
+`m68k-amigaos-gcc` 15.2.0, libraries `-O3` and `-m68020`; Roadshow's is a
+shipped binary with undisclosed flags; the client is `-O0` for everybody.
+Neither foreign stack was tuned and both ran as shipped.
+
+Roadshow's first fetch of each boot is consistently faster than its second
+(133.4 / 134.7 / 132.7 KB/s against 123.0 / 129.5 / 124.3), and ours is flat
+across both. So Roadshow's spread is 9% and ours is 2%, and quoting either
+stack's best fetch rather than its mean would move the gap by several points
+in either direction. The means above are over all six.
+
+The transfer is 1.2 MB through SLIRP on a host loopback, so this is the
+CPU-bound regime of 64 and not a link-bound one; it prices per-packet cost on
+a 68020, not window behaviour. And curl copies: 24 records the same wire at
+161–179 KB/s through `NetTrace`, which does not.
