@@ -13,8 +13,24 @@ drives the SANA-II network cards you already have.
 > [`bsdsocktest`](https://github.com/tbdye/bsdsocktest) conformance suite, where
 > Roadshow scores 138. Dropbear's `dbclient` runs on it, so the Amiga can `ssh`.
 >
-> Everything here has been measured under emulation. It has not run on real
-> hardware.
+> Most of what is measured here was measured under emulation. It has since run
+> on real hardware — an A3000/060 with an X-Surf-100, where a user measured
+> 795 KB/s reading and 939 KB/s writing over Fitz, and found two bugs that are
+> fixed.
+
+## How this was written
+
+Claude (Anthropic's Opus 5) wrote the code, under human direction and testing.
+Every commit says so in its `Co-Authored-By` line, and
+[docs/RESEARCH.md](docs/RESEARCH.md) is the engineering record kept as the work
+happened — what was measured, what was tried and abandoned, and the conclusions
+that later turned out to be wrong.
+
+Whether that is worth trusting is a question about evidence rather than about
+authorship, so the evidence is the part worth checking: an independent
+conformance suite, seven build configurations in continuous integration, a
+triaged static-analysis baseline, fuzzers, and every bug a user has reported
+recorded with its fix and a test that reproduces it.
 
 ## Why
 
@@ -150,12 +166,26 @@ the test suites, continuous integration and how everything is measured, and
 
 ## Licence
 
-AmiNetXDuo is an independent implementation of a published ABI. No AmiTCP,
-AROSTCP, Miami or Roadshow code has been used, copied or disassembled. Olaf
-Barthel's freely distributable Roadshow SDK headers and autodocs are used
-solely as an ABI reference.
+AmiNetXDuo is an independent implementation of a published ABI. No
+implementation code from AmiTCP, AROSTCP, Miami or Roadshow has been used,
+copied or disassembled.
+
+The ABI itself comes from interface definitions and documentation that exist to
+be read, and naming them is more useful than a blanket denial: Olaf Barthel's
+freely distributable Roadshow SDK headers and autodocs, the NDK's
+`pragmas/bsdsocket_pragmas.h`, and the `.fd`/`.sfd` function-descriptor files
+AmiTCP and Roadshow publish — `usergroup.library`'s 39 vectors, for instance,
+were settled by reading AmiTCP's `fd/usergroup_lib.fd` against Roadshow's
+`sfd/usergroup_lib.sfd` and the NDK pragma, all three agreeing.
+[docs/RESEARCH.md](docs/RESEARCH.md) names the source behind each vector table.
 
 MIT. ThreadX and NetX Duo are MIT-licensed as well (© Microsoft and the Eclipse
-ThreadX contributors) and are consumed as unmodified git submodules. The one
-exception is the CA root set in `DEVS:Internet/certificates`, which is
+ThreadX contributors). ThreadX is an unmodified submodule. **NetX Duo is not** —
+it is a fork carrying seven patches, each on its own branch off upstream
+`473d1928` and each written as a standalone change to submit upstream:
+`amiga-mdns-big-endian`, `amiga-tcp-isn-entropy`, `amiga-tcp-accept-race`,
+`amiga-tcp-retry-limit`, `amiga-ipv6-raw-hop-limit`,
+`amiga-ipv6-raw-traffic-class` and `amiga-ipv4-broadcast-loopback`. What each
+one fixes is in the engineering record. The one further exception is the CA root
+set in `DEVS:Internet/certificates`, which is
 Mozilla's, under MPL 2.0 — file-scoped, and affecting nothing else here.
