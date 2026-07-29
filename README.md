@@ -14,7 +14,7 @@ drives the SANA-II network cards you already have.
 > Roadshow scores 138. Dropbear's `dbclient` runs on it, so the Amiga can `ssh`.
 >
 > Most of what is measured here was measured under emulation. It has since run
-> on real hardware — an A3000/060 with an X-Surf-100, where a user measured
+> on real hardware — an A3000 with an X-Surf-100, where a user measured
 > 795 KB/s reading and 939 KB/s writing over Fitz, and found two bugs that are
 > fixed.
 >
