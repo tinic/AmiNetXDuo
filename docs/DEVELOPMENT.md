@@ -194,7 +194,7 @@ tests/conformance/run-fsuae.sh -a "LOOPBACK NOPAGE"
 | | |
 |---|---|
 | conformance, loopback tier | **130/142** (0 fail, 12 skip) |
-| conformance, network tier | **141/142** (1 fail, 0 skip) — Roadshow 4.364 scores 138 |
+| conformance, network tier | **142/142** (0 fail, 0 skip) on a bridged real network — Roadshow 4.364 scores 138. Over FS-UAE's SLIRP it is 141/142: that emulator has no inbound path, so the accept-from-remote test cannot run there at all |
 | client access patterns | **94/94** (`tests/clients`) — the call sequences curl, wget, nc, ftp and telnet actually issue, each group named for the program and file it came from |
 | ThreadX-on-Exec soak | 98 checks, 4+ adopted tasks, Enforcer-clean on 68030 |
 | TCP throughput, 13.9 MHz 68020 | **518 KB/s** loopback, **394 KB/s** to a host over SLIRP, both through the library (was 454 / 381 before the nest-counter critical section and the loopback checksum, and 261 / 312 before `src/net68k/`) |
@@ -206,11 +206,21 @@ cannot reach Roadshow's number by construction: nine of the 142 need a remote
 peer, so 133 is that tier's ceiling and the comparison has to be made on the
 network tier.
 
-The one remaining red anywhere is test 41, `accept(): incoming connection from
-remote host`, and it is the emulator rather than us. `uae_slirp_redir` reaches
-FS-UAE and is echoed in its log; with the guest booted, `lsof` finds no
-listening socket at all. FS-UAE 3.2.35 opens no inbound path whatever the
-configuration says.
+Test 41, `accept(): incoming connection from remote host`, was the last red and
+was carried for a long time as "the emulator rather than us". That was wrong on
+both counts. It was ours: the helper connects, writes and closes in one breath,
+so on a real network the connection is already in `CLOSE_WAIT` by the time the
+application looks at it, and both halves of the accept path demanded
+`NX_TCP_ESTABLISHED` exactly. `bsd_readable()` never reported the listener
+readable, `WaitSelect()` slept out its timeout, and the test failed with no
+diagnostic — while the connection was complete and its 30 bytes sat queued the
+whole time. Fixed in `bsd_incoming_ready()`; docs/RESEARCH.md 63.6.
+
+It took a bridged network only because FS-UAE cannot provide one: `uae_slirp_redir`
+is accepted and echoed in its log, and `uae_slirp_redir()` is an empty function
+in every slirp backend it ships, so no inbound path exists there whatever the
+configuration says. Any peer that connects, writes and closes in one breath hits
+the same window on real hardware.
 
 Roadshow 4.364 scores 138 with four known deviations of its own and no skips,
 which places it on the network tier with a helper connected and a working

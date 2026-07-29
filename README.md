@@ -7,8 +7,8 @@ already speaks — on top of
 drives the SANA-II network cards you already have.
 
 > It gets a DHCP lease, answers ARP, pings its gateway, resolves DNS, moves TCP
-> in both directions, does HTTPS, and listens for incoming connections. It
-> scores **141 of 142** on the independent
+> in both directions, does HTTPS, and accepts incoming connections from other
+> machines. It scores **142 of 142** on the independent
 > [`bsdsocktest`](https://github.com/tbdye/bsdsocktest) conformance suite, where
 > Roadshow scores 138. Dropbear's `dbclient` runs on it, so the Amiga can `ssh`.
 >
