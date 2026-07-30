@@ -507,7 +507,6 @@ static ULONG st_mark(VOID)
  */
 #define ST_PEER_STACK   16384UL
 
-static struct MsgPort *st_peer_ready;
 static volatile LONG   st_peer_port;
 static volatile LONG   st_peer_stop;
 
