@@ -150,6 +150,29 @@ LONG ami_netstack_enter_cached(AmiNetCaller *caller);
 VOID ami_netstack_leave_cached(AmiNetCaller *caller);
 VOID ami_netstack_release(AmiNetCaller *caller);
 
+/*
+ * Bracket counters. A freeze in here leaves nothing behind -- no Enforcer hit,
+ * and a log that never reached disk -- so the evidence has to survive in memory
+ * for a debugger or NETSTATUS_HEALTH to pick up.
+ *
+ *   bs_Live / bs_LiveMax   tasks inside a bracket now, and the most ever
+ *   bs_Full                times the table had no slot (the fail-open path)
+ *   bs_Transitions         release/acquire pairs completed
+ *   bs_StateMax            highest _tx_thread_system_state seen on entry
+ *   bs_BatonMoved          times release() found the baton was not ours
+ */
+typedef struct AmiBatonStats
+{
+    ULONG bs_Live;
+    ULONG bs_LiveMax;
+    ULONG bs_Full;
+    ULONG bs_Transitions;
+    ULONG bs_StateMax;
+    ULONG bs_BatonMoved;
+} AmiBatonStats;
+
+extern AmiBatonStats ami_baton_stats;
+
 /* Accessors -- all return NULL when the stack is down. */
 NX_IP          *netstack_ip(VOID);
 NX_PACKET_POOL *netstack_pool(VOID);

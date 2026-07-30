@@ -114,6 +114,7 @@ extern "C" {
 #define NETSTATUS_ADDRESSES6    8   /* NetStatusAddress6[]                   */
 #define NETSTATUS_ROUTES6       9   /* NetStatusRoute6[]                     */
 #define NETSTATUS_NEIGHBOURS   10   /* NetStatusNeighbour[]                  */
+#define NETSTATUS_HEALTH       11   /* one NetStatusHealth                   */
 
 /*
  * Every buffer starts with this. The caller fills nsh_Magic and nsh_Version;
@@ -351,6 +352,36 @@ typedef struct NetStatusStats
     ULONG   nsx_ArpAgedEntries;
     ULONG   nsx_ArpInvalidMessages;
 } NetStatusStats;
+
+/* --------------------------------------------------- NETSTATUS_HEALTH --- */
+
+/*
+ * Whether the machine was ever held, rather than how much traffic moved.
+ * These are the ThreadX tick task's own accounting and the baton bracket's
+ * counters; neither touches NetX Duo, so this selector answers with the stack
+ * up or down.
+ *
+ * nsl_TickWorstStallMs large next to nsl_TickWorstServiceUs small says the
+ * tick task was not dispatched, not that it was slow.  nsl_BatonMoved or
+ * nsl_BatonFull non-zero says the bracket lost track of a thread.
+ */
+typedef struct NetStatusHealth
+{
+    ULONG   nsl_TickTicks;
+    ULONG   nsl_TickClipped;
+    ULONG   nsl_TickLost;
+    ULONG   nsl_TickServiceUs;
+    ULONG   nsl_TickUptimeMs;
+    ULONG   nsl_TickWorstStallMs;
+    ULONG   nsl_TickWorstServiceUs;
+
+    ULONG   nsl_BatonLive;
+    ULONG   nsl_BatonLiveMax;
+    ULONG   nsl_BatonFull;
+    ULONG   nsl_BatonTransitions;
+    ULONG   nsl_BatonStateMax;
+    ULONG   nsl_BatonMoved;
+} NetStatusHealth;
 
 /* ------------------------------------------------------ NETSTATUS_ARP --- */
 

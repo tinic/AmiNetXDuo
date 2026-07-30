@@ -44,6 +44,9 @@
 #include "aminetxduo/config.h"
 #include "aminetxduo/netstack.h"
 
+/* tx_amiga_tick_stats(), for NETSTATUS_HEALTH. */
+#include "tx_amiga.h"
+
 #ifdef AMINETXDUO_IPV6
 /* ND_CACHE_STATE_*, which nx_api.h does not carry. */
 #include "nx_nd_cache.h"
@@ -796,6 +799,33 @@ static VOID ns_fill_stats(NX_IP *ip, NetStatusStats *out)
 }
 
 /*
+ * Neither half of this touches NetX Duo, so the caller does not take the
+ * baton to read it -- which matters, because taking the baton to ask whether
+ * the baton is stuck would be the one query that cannot answer.
+ */
+static VOID ns_fill_health(NetStatusHealth *out)
+{
+    TX_AMIGA_TICK_STATS tick;
+
+    tx_amiga_tick_stats(&tick);
+
+    out->nsl_TickTicks          = tick.tx_amiga_tick_delivered;
+    out->nsl_TickClipped        = tick.tx_amiga_tick_clipped;
+    out->nsl_TickLost           = tick.tx_amiga_tick_lost;
+    out->nsl_TickServiceUs      = tick.tx_amiga_tick_service_us;
+    out->nsl_TickUptimeMs       = tick.tx_amiga_tick_uptime_ms;
+    out->nsl_TickWorstStallMs   = tick.tx_amiga_tick_worst_stall_ms;
+    out->nsl_TickWorstServiceUs = tick.tx_amiga_tick_worst_service_us;
+
+    out->nsl_BatonLive        = ami_baton_stats.bs_Live;
+    out->nsl_BatonLiveMax     = ami_baton_stats.bs_LiveMax;
+    out->nsl_BatonFull        = ami_baton_stats.bs_Full;
+    out->nsl_BatonTransitions = ami_baton_stats.bs_Transitions;
+    out->nsl_BatonStateMax    = ami_baton_stats.bs_StateMax;
+    out->nsl_BatonMoved       = ami_baton_stats.bs_BatonMoved;
+}
+
+/*
  * The ARP cache is a hash table of circular lists -- nx_arp_active_next of the
  * last entry in a bucket points back at the bucket head, not at NX_NULL -- so
  * the walk needs the head comparison below. Without it the loop spins inside
@@ -1035,8 +1065,8 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
      * The one-entry answers are written straight into the caller's buffer, so
      * the size check happens before the walk rather than inside it.
      *
-     * It also makes the two unchecked ns_writer_next() results below safe:
-     * `need != 0` for SYSTEM and STATS, so size >= header + entry_size, so
+     * It also makes the unchecked ns_writer_next() results below safe:
+     * `need != 0` for SYSTEM, STATS and HEALTH, so size >= header + entry_size, so
      * ns_writer_init() computes room >= 1 and the first slot exists. GCC's
      * -fanalyzer reports those two as "dereference of NULL 'out'" because that
      * chain goes through a division it will not reason about. A NULL test at
@@ -1054,6 +1084,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         case NETSTATUS_ADDRESSES6:  need = 0;                        break;
         case NETSTATUS_ROUTES6:     need = 0;                        break;
         case NETSTATUS_NEIGHBOURS:  need = 0;                        break;
+        case NETSTATUS_HEALTH:      need = sizeof(NetStatusHealth);  break;
         default:                    return bsd_fail(SocketBase, AMI_EINVAL);
     }
 
@@ -1065,6 +1096,17 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
     hdr->nsh_Available = 0;
     hdr->nsh_EntrySize = 0;
     hdr->nsh_Reserved  = 0;
+
+    /* Answered before the stack is looked for, and without the baton: it reads
+       the tick task and the bracket's own counters, not NetX Duo. */
+    if (what == NETSTATUS_HEALTH)
+    {
+        ns_writer_init(&w, hdr, size, NETSTATUS_HEALTH,
+                       sizeof(NetStatusHealth));
+        ns_fill_health((NetStatusHealth *)ns_writer_next(&w));
+        ns_writer_finish(&w);
+        return (LONG)hdr->nsh_Count;
+    }
 
     ip = netstack_ip();
     if (ip == NULL)
