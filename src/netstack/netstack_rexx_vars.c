@@ -910,6 +910,11 @@ static LONG ami_rx_routes(NX_IP *ip, struct CSource *args, const char **errstr,
     UWORD       i;
     LONG        rc = RETURN_OK;
 
+    /* AmiTCP opens getvalue(), setvalue() and parseroute() with this line, and
+       it is load-bearing: ReadItem() leaves the buffer alone when there is
+       nothing to read, and the error paths below name what they read. */
+    buf[0] = '\0';
+
     if (ReadItem((STRPTR)buf, (LONG)sizeof(buf), args) <= 0)
     {
         *errstr = ami_rx_err_syntax;
@@ -1086,6 +1091,8 @@ LONG ami_rx_getvalue(struct CSource *args, const char **errstr, AmiRxReply *r)
         const char        *text;
         char               scratch[AMI_CFG_NAME_LEN];
 
+        buf[0] = '\0';
+
         item = ReadItem((STRPTR)buf, (LONG)sizeof(buf), args);
         if (item <= 0)
             break;
@@ -1228,6 +1235,8 @@ LONG ami_rx_setvalue(struct CSource *args, const char **errstr, AmiRxReply *r)
 {
     char buf[RX_KEYWORDLEN];
     LONG var;
+
+    buf[0] = '\0';
 
     if (ReadItem((STRPTR)buf, (LONG)sizeof(buf), args) <= 0)
     {

@@ -278,8 +278,14 @@ static VOID ami_rx_service(struct RexxMsg *rmsg)
             rmsg->rm_Result2 =
                 (LONG)CreateArgstring((STRPTR)errstr, ami_rx_strlen(errstr));
     }
-    else if ((rmsg->rm_Action & RXFF_RESULT) != 0 && reply.rr_Used != 0)
+    else if ((rmsg->rm_Action & RXFF_RESULT) != 0)
     {
+        /*
+         * Even when the reply is empty, which is AmiTCP's behaviour and matters:
+         * `QUERY CONNECTIONS` on a machine with no sockets succeeds with nothing
+         * to say, and a script that reads RESULT afterwards must see "" rather
+         * than the uninitialised variable's own name.
+         */
         /* STRPTR, not CONST_STRPTR: the pinned NDK types this parameter
            `const STRPTR`, which is UBYTE *const -- a const pointer, not a
            pointer to const -- so CONST_STRPTR discards a qualifier there and
