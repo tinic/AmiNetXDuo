@@ -109,11 +109,7 @@ The installer copies all of them into `C:`.
 
 The archive also carries `ssh`, a ported Unix program rather than a command we
 wrote — it is Dropbear's `dbclient` under a shorter name, connecting to an
-ordinary modern server with a key or a password. The installer puts it in `C:`
-with the other commands: it brings its own stack and parses its own arguments,
-so the `stack 200000` ritual the earlier ported clients needed is gone. It does
-still want **`mathieeedoubbas.library` in `LIBS:`** — Commodore's, so not in the
-archive, but every Workbench installation has one.
+ordinary modern server with a key or a password.
 
 ## Finding the machine by name
 
