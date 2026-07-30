@@ -93,14 +93,16 @@ if [ -z "$REXXDIR" ]; then
         [ -f "$candidate/RX" ] && { REXXDIR="$candidate"; break; }
     done
 fi
-for f in RexxMast RX WaitForPort rexxsyslib.library; do
+for f in RexxMast RX WaitForPort rexxsyslib.library \
+         mathieeedoubbas.library mathieeedoubtrans.library; do
     [ -f "$REXXDIR/$f" ] || {
         cat >&2 <<EOF
 No AmigaOS ARexx found. This run's whole point is that the REAL interpreter is
 satisfied by our host, so it will not substitute anything of ours for it.
 
   export AMINETXDUO_AMIGA_REXX=<a directory containing RexxMast, RX,
-                                WaitForPort and rexxsyslib.library>
+                                WaitForPort, rexxsyslib.library and the
+                                mathieeedoub* libraries>
 
 Workbench 3.1 keeps them in System/, Rexxc/ and Libs/ on the Workbench disk.
 (looked in "${REXXDIR:-<nothing>}", missing $f)
@@ -132,8 +134,14 @@ cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$REXXDIR/rexxsyslib.library" "$STAGE/libs/rexxsyslib.library"
-[ -f "$REXXDIR/rexxsupport.library" ] && \
-    cp "$REXXDIR/rexxsupport.library" "$STAGE/libs/rexxsupport.library"
+# ARexx is a floating-point language: RexxMast opens mathieeedoubbas and
+# mathieeedoubtrans at startup and exits with returncode 20 without them. On a
+# bare directory boot there is no LIBS: full of Workbench, so they are staged
+# with the rest.
+for opt in rexxsupport.library mathieeedoubbas.library \
+           mathieeedoubtrans.library mathieeesingtrans.library; do
+    [ -f "$REXXDIR/$opt" ] && cp "$REXXDIR/$opt" "$STAGE/libs/$opt"
+done
 cp "$REXXDIR/RexxMast"    "$STAGE/RexxMast"
 cp "$REXXDIR/RX"          "$STAGE/RX"
 cp "$REXXDIR/WaitForPort" "$STAGE/WaitForPort"
