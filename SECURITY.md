@@ -83,7 +83,7 @@ this document names its untested parts rather than only its tested ones.
   on its own seed corpus with the UB that patch removed.
 - **Static analysis** — GCC `-fanalyzer` over the whole tree against a triaged
   baseline of 13 findings, in CI, warnings fatal. cppcheck against a separate
-  baseline of 16, run locally rather than in CI because its output moves between
+  baseline of 18, run locally rather than in CI because its output moves between
   its own releases.
 - **Seven build configurations** in CI, including 68000, 68040 and 68060, and the
   builds with IPv6 and with TLS turned off.
