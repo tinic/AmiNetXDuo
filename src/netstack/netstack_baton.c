@@ -64,6 +64,20 @@ typedef struct AmiBatonSlot
 
 static AmiBatonSlot ami_baton_slot[AMI_BATON_SLOTS];
 
+/*
+ * What the bracket actually did, for the freeze hunt.  A hard lockup leaves no
+ * Enforcer hit and no log, so the numbers have to be readable from outside
+ * afterwards rather than printed as they happen.  All of these are touched
+ * only under the Forbid() the callers already hold.
+ *
+ *   bs_Live / bs_LiveMax   tasks inside a bracket now, and the most ever
+ *   bs_Full                times the table had no slot (the fail-open path)
+ *   bs_Transitions         release/acquire pairs completed
+ *   bs_StateMax            highest _tx_thread_system_state seen on entry
+ *   bs_BatonMoved          times release() found the baton was not ours
+ */
+AmiBatonStats ami_baton_stats;
+
 /* Callers hold Forbid() around both of these. */
 static AmiBatonSlot *ami_baton_find(struct Task *task)
 {
@@ -133,12 +147,19 @@ VOID ami_netstack_baton_release(VOID)
     {
         /* Out of slots. Leave the thread running rather than suspend one we
            cannot track, and warn. */
+        ami_baton_stats.bs_Full++;
         Permit();
         AMI_WARN("netstack: baton table full; '%s' will block holding the baton",
                  (thread->tx_thread_name != TX_NULL) ? thread->tx_thread_name
                                                      : (CHAR *)"?");
         return;
     }
+
+    ami_baton_stats.bs_Live++;
+    if (ami_baton_stats.bs_Live > ami_baton_stats.bs_LiveMax)
+        ami_baton_stats.bs_LiveMax = ami_baton_stats.bs_Live;
+    if ((ULONG)_tx_thread_system_state > ami_baton_stats.bs_StateMax)
+        ami_baton_stats.bs_StateMax = (ULONG)_tx_thread_system_state;
 
     slot->bs_Thread  = thread;
     slot->bs_Nesting = 1;
@@ -159,6 +180,13 @@ VOID ami_netstack_baton_release(VOID)
     {
         _tx_thread_current_ptr = TX_NULL;
         _tx_timer_time_slice   = (ULONG)0;
+    }
+    else
+    {
+        /* The baton is not ours to clear, so it stays pointing at a thread we
+           have just suspended and the scheduler has nobody to dispatch. If this
+           is ever non-zero after a freeze, that is the freeze. */
+        ami_baton_stats.bs_BatonMoved++;
     }
 
     _tx_thread_system_state--;
@@ -202,6 +230,9 @@ VOID ami_netstack_baton_acquire(VOID)
     }
 
     _tx_thread_system_state++;
+    if (ami_baton_stats.bs_Live > 0)
+        ami_baton_stats.bs_Live--;
+    ami_baton_stats.bs_Transitions++;
 
     Permit();
 
