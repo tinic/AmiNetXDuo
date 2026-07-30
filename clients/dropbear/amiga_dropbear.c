@@ -596,7 +596,18 @@ static void (*sigchld_handler)(int);
  * returns and a plain global would race the next spawn.  The child waits before
  * it looks.
  */
-#define DB_RUNNER_STACK   (16UL * 1024UL)
+/*
+ * 64 KB, which is the project's floor for a spawned Process and not a guess at
+ * this one's own depth.  A bsdsocket LVO call runs NetX Duo on the CALLER's
+ * stack -- ami_netstack_enter() takes the baton and descends from there -- so
+ * any Process that might touch a socket carries the whole TCP/IP call depth.
+ * TCP_SESSION_STACK is 16 KB, BSD_STARTUP_STACK is 64 KB and every harness in
+ * the tree uses 64 KB or more; docs/RESEARCH.md 16.9 records what too little
+ * looks like, which is an F-line trap and a reboot loop the harness reports as
+ * a timeout.  This one only holds SystemTagList() and two Close()s today, and
+ * sizing it for that would be sizing it for what it does now.
+ */
+#define DB_RUNNER_STACK   (64UL * 1024UL)
 
 typedef struct
 {
@@ -1550,7 +1561,10 @@ static void con_reader_start(BPTR handle)
        two, so the parent always gets the CPU back. */
     tags[0].ti_Tag = NP_Entry;     tags[0].ti_Data = (ULONG)con_child;
     tags[1].ti_Tag = NP_Name;      tags[1].ti_Data = (ULONG)"AmiNetXDuo ssh console";
-    tags[2].ti_Tag = NP_StackSize; tags[2].ti_Data = 8192UL;
+    /* 64 KB, not the 8 KB this was.  It reads the console and touches no
+       socket, but 8 KB is the size docs/RESEARCH.md 16.9's reboot loop came
+       from, and a reader that traps takes the session with it. */
+    tags[2].ti_Tag = NP_StackSize; tags[2].ti_Data = 64UL * 1024UL;
     tags[3].ti_Tag = NP_Priority;  tags[3].ti_Data = (ULONG)0;
     tags[4].ti_Tag = TAG_END;      tags[4].ti_Data = 0;
 
