@@ -329,7 +329,7 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
          * onto a peer advertising less than that transferred NOTHING and
          * answered EWOULDBLOCK, and the next attempt was the same 16,412
          * bytes.  Measured: 1,595 consecutive refusals in one SSH session,
-         * docs/RESEARCH.md 74.6.  BSD requires a non-blocking send to take
+         * docs/RESEARCH.md 77.6.  BSD requires a non-blocking send to take
          * what fits and report the rest short; this is what makes it do that.
          *
          * Bounding a segment by the packet payload rather than by the window

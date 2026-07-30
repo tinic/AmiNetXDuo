@@ -13427,18 +13427,18 @@ failed in the *key exchange*, before `spawn_command()` exists to be called:
 | server: `Exit before auth: Error writing: Invalid argument` | in the same second as the connection |
 | both ends hang until the harness times out | after `Child connection from`, no auth line |
 
-**Corrected 2026-07-30 (§74.6, §74.7). What this section said next was that
+**Corrected 2026-07-30 (§77.6, §77.7). What this section said next was that
 every one of these runs shared the emulator with two others, and that
 `tools/fsuae-run.sh` names contention as a known cause of exactly this — so the
 next reader should not go looking in the Dropbear port. That was wrong twice
 over, and it is the kind of wrong that costs somebody a day.**
 
-Contention is not the cause. §74 took eleven loopback connections on the
+Contention is not the cause. §77 took fourteen loopback connections on the
 **exclusive** lane, with the machine to itself, and three of them failed: two
 with `Error writing: Invalid argument` and one wedged in the key exchange for
 fourteen minutes. Same one-in-three, no other emulator running.
 
-The `EINVAL` is also not random, and it is not size. §74.6 put a diagnostic on
+The `EINVAL` is also not random, and it is not size. §77.6 put a diagnostic on
 `bsd_send_tcp()`'s failure paths and read the status out: it is **17,
 `NX_CALLER_ERROR`, on a 44-byte write**, which NetX Duo returns only when the
 ThreadX system state is non-zero or there is no current thread, and which
@@ -20362,6 +20362,7 @@ NE2000, so a driver written for the real card is not expected to drive that
 core. Fetching it is legitimate; whether the emulator gives it anything to
 talk to is a separate question and is not claimed here.
 ## 74. The SSH server, measured (2026-07-30)
+## 77. The SSH server, measured (2026-07-30)
 
 §38 got a public-key login into the Amiga and §40 got a command to run over it.
 Neither put a number on either, and the numbers are what decide whether `scp`
@@ -20375,10 +20376,15 @@ session costs about 1.5 MB. The gate figure is the 28 KB/s: 5.7× slower than th
 159 KB/s the same card does unencrypted on this profile, which is neither the 2×
 that would have been comfortable nor the 10× that would have settled it.**
 
-**Two things the measurement found rather than went looking for.** The server's
-channel write fails outright above one packet, so no bulk data has ever left
-this server. And every connection costs about a megabyte that never comes back,
-which on the 4 MB floor is three logins and then nothing.
+**Three things the measurement found rather than went looking for**, and the
+throughput figure above is a *client* figure because of the first of them.
+**No bulk data has ever left this server**: a channel write larger than one TCP
+window transferred nothing and was retried unchanged 1,595 times in one session,
+because `bsd_send_tcp()` clamps a segment to an MSS that is 65,495 on loopback.
+**A small write also fails outright**, with `NX_CALLER_ERROR` from NetX Duo's
+thread check, which is the `Error writing: Invalid argument` §40.9 blamed on
+emulator contention. And **every connection costs about a megabyte that never
+comes back**, which on the 4 MB floor is three logins and then nothing.
 
 **And the premise this work was started on is wrong.** It was expected that SSH
 would beat TLS here because TLS is RSA-2048 and SSH is 25519. It does not:
@@ -20387,7 +20393,7 @@ would beat TLS here because TLS is RSA-2048 and SSH is 25519. It does not:
 — `src/crypto68k/` has hand-written 68020 assembly for P-256 and none at all for
 25519.
 
-### 74.1 What phase 1 already was
+### 77.1 What phase 1 already was
 
 Nothing here had to be built to get a login. `clients/dropbear/build.sh -P
 "dbclient dropbear"` builds the server from the same unpatched submodule,
@@ -20401,7 +20407,7 @@ One thing did have to be fixed to measure anything: `-p` had not linked since
 `dbprofile.c` defined the same symbol. `dbprofile.c` had already armed two other
 exits for its report, so its wrapper is gone and `atexit()` carries it.
 
-### 74.2 The handshake
+### 77.2 The handshake
 
 `SSHProbe`, new in `clients/dropbear/`, is what makes the rest of this section
 possible: `SSHProbe mem` run *over the channel* reports `AvailMem` with the
@@ -20464,7 +20470,7 @@ the same host costs the same 12.3 s as the first. `LoginGraceTime` is not the
 problem it was in §31 — 12.3 s is 10% of a stock server's 120 s — but a login
 that takes twelve seconds is a login somebody waits for.
 
-### 74.3 Throughput: 28 KB/s, and two thirds of it is the cipher
+### 77.3 Throughput: 28 KB/s, and two thirds of it is the cipher
 
 Measured by difference, so that everything except the bytes cancels: the same
 command with no payload and with 160 KB of payload, in one run, same binary,
@@ -20505,7 +20511,7 @@ Encryption does not halve this machine's network and it does not cost an order
 of magnitude either. The honest way to say what 28 KB/s means is that a 1 MB
 file is 36 seconds.
 
-### 74.4 The 68k crypto is half on the path, and the half that is missing is the half throughput needs
+### 77.4 The 68k crypto is half on the path, and the half that is missing is the half throughput needs
 
 The question was whether the handshake is running `src/crypto68k/` or portable
 C. Read out of the linked binary with `m68k-amigaos-nm` rather than assumed:
@@ -20547,7 +20553,7 @@ vector 61 on every limb multiply), so wiring it into a client that ships as one
 binary needs a runtime switch that the CMake build currently makes at configure
 time.
 
-### 74.5 Memory: the session fits and the leak does not
+### 77.5 Memory: the session fits and the leak does not
 
 `AvailMem` through one run, every figure taken by `SSHProbe` inside the guest,
 the middle one from a process the *server* started over the channel:
@@ -20587,7 +20593,7 @@ process allocated outside newlib's arena rather than at a socket.
 **The consequence is concrete.** DEBUG_NOFORK means one process per connection,
 so this is per login. A 4 MB machine gets **three**.
 
-### 74.6 Two defects behind one message, and neither is the cipher
+### 77.6 Two defects behind one message, and neither is the cipher
 
 `SSHProbe bulk 8` over loopback returns 8 KB and `rc 0`. 32 KB and 160 KB do
 not:
@@ -20647,6 +20653,15 @@ a peer that never reads, so the first writes fit and the eventual
 than one window in one call on an interface whose MSS exceeds it.** That is the
 regression test this needs and does not have.
 
+**What the fix is shown to do, and what it is not.** With the clamp in, the same
+three transfers produce **zero** of those warnings where the previous run
+produced 1,595, so it does what it was aimed at. It does **not** produce a
+completed bulk transfer, because the second defect below then kills the session
+first — so "the server can send bulk" is still unproven, and the clamp is in the
+tree on the strength of a measured BSD-semantics violation rather than on a
+working transfer. The conformance loopback tier is the gate it was taken
+against.
+
 #### The other one: `NX_CALLER_ERROR` on a 44-byte write
 
 The single `EINVAL` that actually kills the session is a **44-byte** send
@@ -20667,10 +20682,10 @@ round from how this section started: the `EINVAL` has nothing to do with size.
 It arrives on a 44-byte write, and §40.9's arrived during a key exchange, where
 every write is small. It is not fixed here. It is a thread-state defect in the
 bracket rather than anything in the send path, it is the likeliest cause of the
-wedge in §74.7 as well — a listener with no listen request left is a connection
+wedge in §77.7 as well — a listener with no listen request left is a connection
 that never completes — and it is the first thing phase 3 should look at.
 
-### 74.7 The loopback harness is unreliable, and it is not contention
+### 77.7 The loopback harness is unreliable, and it is not contention
 
 Fourteen loopback connections were taken across this work, on the **exclusive**
 lane (`-x`), with the machine to itself. Four did not complete: three with the
@@ -20679,10 +20694,10 @@ connection from` and stayed there for fourteen minutes until the harness timed
 out.
 
 That is §40.9's own "one run in three", reproduced with its stated cause removed.
-That section is corrected in place, and §74.6 names a status that would produce
+That section is corrected in place, and §77.6 names a status that would produce
 exactly this if it landed on a listener instead of on a channel write.
 
-### 74.8 The 68030, and why there is no number for it
+### 77.8 The 68030, and why there is no number for it
 
 `tools/fsuae-run.sh` says it before the run does: FS-UAE turns cycle accounting
 off for every CPU above a 68020, so `-m A3000` exercises the code on a 68030 —
@@ -20695,7 +20710,7 @@ clock**, so a 25 MHz 68030 is ~7 s for a client handshake and ~50 KB/s on the
 channel, before whatever the 32-bit bus and the caches are worth. The A3000 run
 was taken and does what it can prove: it authenticates and runs a command.
 
-### 74.9 Is it worth continuing
+### 77.9 Is it worth continuing
 
 **On the numbers, yes, with one condition and two repairs.**
 
