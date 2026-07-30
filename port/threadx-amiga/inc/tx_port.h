@@ -356,6 +356,7 @@ void    _tx_amiga_start_interrupts(void);
 
 #ifndef TX_AMIGA_TIMER_MAX_CATCHUP
 #define TX_AMIGA_TIMER_MAX_CATCHUP              8UL
+#endif
 
 /* Milliseconds of a tick period the tick task may spend delivering, before it
    abandons the rest of a catch-up burst.  The burst runs under Forbid(), so
@@ -363,6 +364,8 @@ void    _tx_amiga_start_interrupts(void);
    machine.  Half of 20 ms leaves the other half for everyone else.  Ticks
    dropped this way are counted in tx_amiga_tick_lost, the same as the ones the
    catch-up cap drops.  */
+
+#ifndef TX_AMIGA_TIMER_BUDGET_MS
 #define TX_AMIGA_TIMER_BUDGET_MS                10UL
 #endif
 
