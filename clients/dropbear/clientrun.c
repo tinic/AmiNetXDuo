@@ -51,6 +51,7 @@
 #include <dos/dostags.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <string.h>            /* strchr() -- see the redirection note below */
 
 static const char version_tag[] __attribute__((used)) =
     "$VER: ClientRun 1.0 (25.7.2026)";
@@ -271,9 +272,18 @@ int main(int argc, char **argv)
 
         report("\n--- %s\n", (LONG)lines[i]);
 
+        /*
+         * A line carrying its own redirection keeps it, and gets none appended.
+         * Two input or two output redirections on one Shell line is not
+         * something AmigaDOS takes well, and a command fed from a file is the
+         * only way to drive a protocol that expects one -- which is what an scp
+         * test is.  Such a line's output goes wherever the line says, so it does
+         * not appear in DH0:client.txt; the file it wrote is the result.
+         */
         used = 0;
         used = append(command, (ULONG)sizeof(command), used, lines[i]);
-        used = append(command, (ULONG)sizeof(command), used, REDIRECT);
+        if (strchr(lines[i], '<') == NULL && strchr(lines[i], '>') == NULL)
+            used = append(command, (ULONG)sizeof(command), used, REDIRECT);
         (VOID)used;
 
         t0 = now_ticks();

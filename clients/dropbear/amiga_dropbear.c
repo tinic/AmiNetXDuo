@@ -55,10 +55,12 @@
  * switch onto SetMode().  A non-console fd still returns ENOTTY, so
  * `dbclient -T user@host command` still asks the server for no pty.
  *
- * pipe() works in the small way a program with no second process needs: a byte
- * written to one end can be read from the other, and a read end may instead be
- * pointed at a DOS file.  That second form carries a command's output back to
- * an SSH channel; see spawn_command() below.
+ * pipe() is a ring buffer between two of this program's own descriptors, and it
+ * has a second form: either end can instead be a struct FileHandle whose
+ * fh_Type is a MsgPort of ours, so a spawned command's Read() and Write() are
+ * DOS packets this process answers.  That is what carries a conversation --
+ * scp's protocol is one -- between an SSH channel and an AmigaDOS command with
+ * no PIPE: handler on the volume.  See db_pipe_fh() and the runner below.
  *
  * dbutil.c's spawn_command() is three pipe()s and a fork(), and the child
  * branch redirects the pipes onto 0/1/2 and calls execv().  There is no fork()
@@ -97,6 +99,7 @@
 #include <signal.h>
 #include <sys/stat.h>           /* chmod() */
 #include <sys/wait.h>           /* waitpid() */
+
 #include <grp.h>                /* getgrnam() */
 
 #include "aminetxduo/random.h"
@@ -197,39 +200,487 @@ static int exec_capturing;
  * write(), close() and select() all come first in the file and all four have
  * to see it.
  *
- * Three kinds of pipe are needed; they are the same object with different
- * fields set:
+ * Two kinds of pipe are needed; they are the same object with different fields
+ * set:
  *
- *   a wakeup pipe   ses.signal_pipe: one byte in, one byte out.  `buf` is it.
- *                   It never has more than a couple of bytes in flight, so
- *                   the buffer is a compacting queue rather than a ring.
- *   a file source   the read end drains `src` and reports end of file when
- *                   the file does.  This is how a command's output reaches an
- *                   SSH channel; the file is deleted when the read end closes.
- *   a sink          everything written to it is discarded.  This is the
- *                   command's stdin, which is NIL:.  It has to succeed rather
- *                   than fill up: a full pipe leaves data pending on the
- *                   channel forever and the channel then never closes.
+ *   a wakeup pipe   ses.signal_pipe: one byte in, one byte out.  Lossy, because
+ *                   a second byte says nothing the first did not and refusing
+ *                   one would stall the writer instead.
+ *   a DOS pipe      the far end is a struct FileHandle held by a spawned
+ *                   command, and this process answers its ACTION_READ and
+ *                   ACTION_WRITE packets out of `buf`.  Flow-controlled, since a
+ *                   command's bytes are not droppable.  This is the one that
+ *                   makes scp work; see the block comment above db_pipe_fh().
+ *
+ * There used to be a third, a file source: the command's output was collected in
+ * a T: file and the read end drained it after the command had exited.  That is
+ * what a synchronous SystemTagList() forces and it cannot carry a conversation,
+ * so it is gone along with the sink that was the command's stdin.
+ *
+ * `buf` is a ring, not the compacting queue it was: fine for a wakeup pipe
+ * carrying one byte, quadratic for a DOS pipe carrying a file, because every
+ * Read() memmove()d the remainder down.
+ *
+ * 4 KB because scp's protocol writes in blocks and a ring smaller than a block
+ * turns one Write() into several packet round trips.  Eight pairs of it is 32 KB
+ * of BSS.
  */
-#define DB_PIPE_BUF     128
+#define DB_PIPE_BUF     4096
 
 struct db_pipe
 {
     unsigned      taken   : 1;
     unsigned      rclosed : 1;      /* the read end has been close()d */
     unsigned      wclosed : 1;      /* the write end has been close()d */
-    unsigned      sink    : 1;      /* writes are discarded, never buffered */
-    BPTR          src;              /* the read end drains this file, or 0 */
-    char          srcname[64];      /* deleted with the read end, if set */
-    int           len;
-    int           pos;
+    unsigned      lossy   : 1;      /* overflow drops rather than refuses */
+    unsigned      dosread : 1;      /* the DOS end reads (command's stdin) */
+    unsigned      doswrite: 1;      /* the DOS end writes (command's stdout) */
+    unsigned      dosend  : 1;      /* the DOS end has sent ACTION_END */
+    struct DosPacket *held;         /* a packet this pipe cannot answer yet */
+    int           count;            /* bytes in the ring */
+    int           rd;               /* ring read cursor  */
+    int           wr;               /* ring write cursor */
     unsigned char buf[DB_PIPE_BUF];
 };
 
 static struct db_pipe db_pipes[DB_PIPE_PAIRS];
 
 #define PIPE_PAIR(fd)       (&db_pipes[((fd) - DB_PIPE_BASE) / 2])
+#define PIPE_INDEX(fd)      (((fd) - DB_PIPE_BASE) / 2)
 #define PIPE_IS_READ(fd)    ((((fd) - DB_PIPE_BASE) & 1) == 0)
+
+/* ------------------------------------------------------------- the ring --- */
+
+static int ring_used(const struct db_pipe *p)  { return p->count; }
+static int ring_free(const struct db_pipe *p)  { return DB_PIPE_BUF - p->count; }
+
+static int ring_put(struct db_pipe *p, const unsigned char *src, int n)
+{
+    int done = 0;
+
+    if (n > ring_free(p))
+        n = ring_free(p);
+
+    while (done < n)
+    {
+        int run = DB_PIPE_BUF - p->wr;
+
+        if (run > n - done)
+            run = n - done;
+        memcpy(p->buf + p->wr, src + done, (size_t)run);
+        p->wr = (p->wr + run) % DB_PIPE_BUF;
+        done += run;
+    }
+    p->count += done;
+
+    return done;
+}
+
+static int ring_get(struct db_pipe *p, unsigned char *dst, int n)
+{
+    int done = 0;
+
+    if (n > ring_used(p))
+        n = ring_used(p);
+
+    while (done < n)
+    {
+        int run = DB_PIPE_BUF - p->rd;
+
+        if (run > n - done)
+            run = n - done;
+        memcpy(dst + done, p->buf + p->rd, (size_t)run);
+        p->rd = (p->rd + run) % DB_PIPE_BUF;
+        done += run;
+    }
+    p->count -= done;
+
+    return done;
+}
+
+/* ---------------------------------------------------------- the DOS pipe --- */
+
+/*
+ * A pipe a spawned command can use as its stdin or stdout, with no PIPE:
+ * handler on the boot volume and no second process to run it.
+ *
+ * AmigaDOS I/O is packets.  Read() on a file handle sends ACTION_READ to the
+ * MsgPort in fh_Type and sleeps until somebody replies; Write() sends
+ * ACTION_WRITE.  Nothing says that port has to belong to a filesystem, so this
+ * process answers them itself: AllocDosObject(DOS_FILEHANDLE) gives a handle,
+ * fh_Type points at one port of ours and fh_Arg1 carries the db_pipe index, and
+ * a command handed that handle by SystemTagList() is talking to the ring above.
+ * src/bsdsocket/tcp_handler.c does the same for TCP:; the difference is that
+ * this one needs no session process, because a ring buffer never blocks the way
+ * a name lookup does.
+ *
+ * A packet is answered when it can be and not before -- that is what makes it a
+ * pipe rather than a file.  An ACTION_READ on an empty ring, or an ACTION_WRITE
+ * on a full one, is parked in p->held and retried whenever the other side moves
+ * bytes (db_pipe_retry) or closes.  One held packet per pipe is enough: the
+ * command is one process and it is inside one Read() at a time.
+ *
+ * Servicing happens from __wrap_select(), which is where Dropbear waits anyway,
+ * and the port's signal goes into the same WaitSelect() mask as the socket. So a
+ * command's Read() wakes the session loop exactly as channel data does.
+ */
+static struct MsgPort *db_pipe_port;
+
+static int db_pipe_dos_open(const struct db_pipe *p)
+{
+    return (p->dosread || p->doswrite) && !p->dosend;
+}
+
+static struct MsgPort *db_pipe_port_get(VOID)
+{
+    if (db_pipe_port == NULL)
+    {
+        db_pipe_port = CreateMsgPort();
+        if (db_pipe_port == NULL)
+            return NULL;
+    }
+    return db_pipe_port;
+}
+
+/* The signal WaitSelect() has to include so an arriving packet wakes us. */
+static ULONG db_pipe_sigmask(VOID)
+{
+    if (db_pipe_port == NULL)
+        return 0;
+    return 1UL << (ULONG)db_pipe_port->mp_SigBit;
+}
+
+/*
+ * Reply a packet.  Not ReplyPkt(): dp_Port has to name the port the packet
+ * comes back to us on, which is ours, and ReplyPkt() stamps it with the
+ * current process's pr_MsgPort.  The same reason tcp_handler.c has its own.
+ */
+static VOID db_pipe_reply(struct DosPacket *pkt, LONG res1, LONG res2)
+{
+    struct MsgPort *reply = pkt->dp_Port;
+
+    pkt->dp_Res1 = res1;
+    pkt->dp_Res2 = res2;
+    pkt->dp_Port = db_pipe_port;
+    PutMsg(reply, pkt->dp_Link);
+}
+
+/* Try to answer whatever this pipe has parked.  Called after either side moves
+   bytes or closes, and from the service loop. */
+static VOID db_pipe_retry(struct db_pipe *p)
+{
+    struct DosPacket *pkt = p->held;
+    LONG              n;
+
+    if (pkt == NULL)
+        return;
+
+    /*
+     * A pipe with a DOS end has only that end on the far side: the local fd
+     * facing the command is left open and unused, so exactly one of wclosed and
+     * rclosed can ever be set and each means what it says.  A command reading
+     * (its stdin) ends at wclosed, Dropbear having stopped writing; a command
+     * writing (its stdout) fails at rclosed, Dropbear having stopped reading.
+     */
+    if (pkt->dp_Type == ACTION_READ)
+    {
+        if (ring_used(p) > 0)
+        {
+            n = (LONG)ring_get(p, (unsigned char *)pkt->dp_Arg2,
+                               (int)pkt->dp_Arg3);
+        }
+        else if (p->wclosed)
+        {
+            n = 0;                      /* end of file */
+        }
+        else
+        {
+            return;                     /* still nothing; keep waiting */
+        }
+    }
+    else                                /* ACTION_WRITE */
+    {
+        if (ring_free(p) > 0)
+        {
+            n = (LONG)ring_put(p, (const unsigned char *)pkt->dp_Arg2,
+                               (int)pkt->dp_Arg3);
+        }
+        else if (p->rclosed)
+        {
+            /* Nobody will ever read it.  -1 with a real error, so a command
+               writing into a closed channel fails rather than looping. */
+            p->held = NULL;
+            db_pipe_reply(pkt, -1, ERROR_INVALID_LOCK);
+            return;
+        }
+        else
+        {
+            return;
+        }
+    }
+
+    p->held = NULL;
+    db_pipe_reply(pkt, n, 0);
+}
+
+/*
+ * Drain the port.  Every packet either gets answered now or is parked; a second
+ * packet arriving for a pipe that already has one parked is a protocol error on
+ * the command's side (one process, one Read() at a time) and is refused rather
+ * than overwriting the first.
+ */
+static VOID db_pipe_service(VOID)
+{
+    struct Message *msg;
+
+    if (db_pipe_port == NULL)
+        return;
+
+    while ((msg = GetMsg(db_pipe_port)) != NULL)
+    {
+        struct DosPacket *pkt = (struct DosPacket *)msg->mn_Node.ln_Name;
+        struct db_pipe   *p;
+        LONG              idx;
+
+        /*
+         * Only READ, WRITE and END carry fh_Arg1 in dp_Arg1.  The rest carry
+         * something else entirely -- ACTION_WAIT_CHAR's dp_Arg1 is a timeout in
+         * microseconds -- so they are answered without looking at a pipe at all.
+         * That is the limitation one port for many handles brings and the reason
+         * src/bsdsocket/tcp_handler.c gives a port to each of its sessions; here
+         * nothing needs a per-file answer to any of them.
+         */
+        switch (pkt->dp_Type)
+        {
+            case ACTION_READ:
+            case ACTION_WRITE:
+            case ACTION_END:
+                break;
+
+            /* A pipe is not a filesystem and has no position. */
+            case ACTION_IS_FILESYSTEM:
+                db_pipe_reply(pkt, DOSFALSE, 0);
+                continue;
+
+            case ACTION_SEEK:
+                db_pipe_reply(pkt, -1, ERROR_SEEK_ERROR);
+                continue;
+
+            /* Cannot say which handle is being asked about, so the answer is
+               "no character waiting" and the caller comes back with a Read().
+               Nothing a spawned command does depends on it. */
+            case ACTION_WAIT_CHAR:
+                db_pipe_reply(pkt, DOSFALSE, 0);
+                continue;
+
+            case ACTION_FLUSH:
+            case ACTION_SET_FILE_SIZE:
+                db_pipe_reply(pkt, DOSTRUE, 0);
+                continue;
+
+            default:
+                db_pipe_reply(pkt, DOSFALSE, ERROR_ACTION_NOT_KNOWN);
+                continue;
+        }
+
+        idx = pkt->dp_Arg1;
+        if (idx < 0 || idx >= DB_PIPE_PAIRS)
+        {
+            db_pipe_reply(pkt, DOSFALSE, ERROR_INVALID_LOCK);
+            continue;
+        }
+        p = &db_pipes[idx];
+
+        switch (pkt->dp_Type)
+        {
+            case ACTION_READ:
+            case ACTION_WRITE:
+                if (p->held != NULL)
+                {
+                    db_pipe_reply(pkt, -1, ERROR_OBJECT_IN_USE);
+                    break;
+                }
+                p->held = pkt;
+                db_pipe_retry(p);
+                break;
+
+            case ACTION_END:
+                p->dosend = 1;
+                /* Whatever this end had parked can never be answered now. */
+                if (p->held != NULL)
+                {
+                    struct DosPacket *held = p->held;
+
+                    p->held = NULL;
+                    db_pipe_reply(held, -1, ERROR_INVALID_LOCK);
+                }
+                db_pipe_reply(pkt, DOSTRUE, 0);
+                if (p->rclosed && p->wclosed)
+                    memset(p, 0, sizeof(*p));
+                break;
+
+            default:                    /* unreachable: filtered above */
+                db_pipe_reply(pkt, DOSFALSE, ERROR_ACTION_NOT_KNOWN);
+                break;
+        }
+    }
+}
+
+/*
+ * A DOS file handle on one end of pipe `idx`.  `for_read` means the COMMAND
+ * reads it, so it is the command's stdin and Dropbear holds the write end.
+ *
+ * fh_Arg1 is the pipe index and fh_Type this process's port, which is all
+ * db_pipe_service() needs to route a packet.  DOS frees the handle when it is
+ * closed, so this must not be freed here.
+ */
+static BPTR db_pipe_fh(int idx, int for_read)
+{
+    struct FileHandle *fh;
+
+    if (db_pipe_port_get() == NULL)
+        return (BPTR)0;
+
+    fh = (struct FileHandle *)AllocDosObject(DOS_FILEHANDLE, NULL);
+    if (fh == NULL)
+        return (BPTR)0;
+
+    fh->fh_Type = db_pipe_port;
+    fh->fh_Arg1 = (LONG)idx;
+
+    if (for_read)
+        db_pipes[idx].dosread = 1;
+    else
+        db_pipes[idx].doswrite = 1;
+
+    db_pipes[idx].lossy = 0;        /* a command's data is not droppable */
+
+    return MKBADDR(fh);
+}
+
+extern void dropbear_log(int priority, const char *format, ...);
+
+/* The few things the runner and the pipe service need before they are
+   defined; the rest of each subject stays with its own section. */
+#define DB_CMD_MAX      512
+#define DB_CMD_STACK    (256UL * 1024UL)
+static pid_t child_pid;                 /* 0 when there is nothing to report */
+static int   child_status;
+static void (*sigchld_handler)(int);
+
+
+#define DB_LOG_WARNING  4
+#define DB_LOG_INFO     6
+
+#define DB_SUCCESS      0
+#define DB_FAILURE      (-1)
+
+/* --------------------------------------------------------- the runner --- */
+
+/*
+ * SystemTagList() does not return until the command has finished, and the
+ * command cannot finish until somebody answers its Read() -- which is this
+ * process.  Calling it inline was therefore fine for a command that only ever
+ * wrote (its output went to a file and was read back afterwards) and is a
+ * deadlock for anything conversational, scp being the whole point.
+ *
+ * So the synchronous call moves to a Process of its own whose only job is to
+ * hold it.  Dropbear returns to its session loop, answers the command's packets
+ * from __wrap_select() as they arrive, and learns the return code when the
+ * runner signals.  Both file handles are closed by the runner rather than here:
+ * closing them is what sends ACTION_END, which is how this side learns the
+ * command has stopped reading and stopped writing.
+ *
+ * The record is handed over through the child's tc_UserData, with SIGF_SINGLE
+ * as the handshake, because the child starts running the moment CreateNewProc()
+ * returns and a plain global would race the next spawn.  The child waits before
+ * it looks.
+ */
+#define DB_RUNNER_STACK   (16UL * 1024UL)
+
+typedef struct
+{
+    struct Task *rn_Parent;
+    BPTR         rn_In;                 /* the command's stdin  */
+    BPTR         rn_Out;                /* the command's stdout */
+    LONG         rn_Rc;
+    volatile LONG rn_Done;
+    char         rn_Cmd[DB_CMD_MAX];
+} DbRunner;
+
+static DbRunner *db_runner;             /* the one in flight, or NULL */
+static int       child_ready;           /* child_status is a real exit code */
+
+static VOID db_runner_main(VOID)
+{
+    struct Process *me = (struct Process *)FindTask(NULL);
+    DbRunner       *r;
+    struct Task    *parent;
+    struct TagItem  tags[4];
+    int             nt = 0;
+
+    /* The parent is filling tc_UserData; it signals when it is done. */
+    (VOID)Wait(SIGF_SINGLE);
+
+    r = (DbRunner *)me->pr_Task.tc_UserData;
+    if (r == NULL)
+        return;
+
+    tags[nt].ti_Tag = SYS_Input;    tags[nt++].ti_Data = (ULONG)r->rn_In;
+    tags[nt].ti_Tag = SYS_Output;   tags[nt++].ti_Data = (ULONG)r->rn_Out;
+    tags[nt].ti_Tag = NP_StackSize; tags[nt++].ti_Data = DB_CMD_STACK;
+    tags[nt].ti_Tag = TAG_END;      tags[nt].ti_Data   = 0;
+
+    r->rn_Rc = SystemTagList((CONST_STRPTR)r->rn_Cmd, tags);
+
+    /* System() does not close handles it was given, and here that is the point:
+       these two closes are the command's end of file in both directions. */
+    Close(r->rn_In);
+    Close(r->rn_Out);
+
+    /* rn_Done is published last, and nothing in the record is read after it:
+       the parent frees the record the moment it sees the flag. */
+    parent = r->rn_Parent;
+    r->rn_Done = 1;
+    Signal(parent, SIGBREAKF_CTRL_E);
+}
+
+/*
+ * Has the command finished?  Called from __wrap_select() once a pass.  Raising
+ * SIGCHLD's handler here is the same sequence a real signal would produce: it
+ * writes to ses.signal_pipe, the session loop calls svr_chansess_checksignal(),
+ * and waitpid() hands over the status.
+ */
+static VOID db_runner_poll(VOID)
+{
+    DbRunner *r = db_runner;
+
+    if (r == NULL || r->rn_Done == 0)
+        return;
+
+    if (r->rn_Rc == -1)
+    {
+        /* System() could not start a Shell at all -- not the command failing,
+           which comes back as that command's rc.  127 is what a Unix shell
+           reports for the same thing and the only number a client can act on. */
+        dropbear_log(DB_LOG_WARNING, "amiga: could not run a shell (IoErr %ld)",
+                     (long)IoErr());
+        r->rn_Rc = 127;
+    }
+
+    child_status = (int)((r->rn_Rc & 0xFF) << 8);
+    child_ready  = 1;
+
+    /* The runner has published rn_Done and reads nothing further, so the record
+       is ours to give back.  Missing this cost 576 bytes a command. */
+    db_runner = NULL;
+    FreeVec(r);
+
+    if (sigchld_handler != NULL)
+        sigchld_handler(SIGCHLD);
+}
+
+
 
 static int pipe_readable(int fd)
 {
@@ -238,10 +689,23 @@ static int pipe_readable(int fd)
     if (!PIPE_IS_READ(fd))
         return 0;
 
-    /* A file is always readable: Read() returns data or zero, and zero is end
-       of file, which is progress.  A pipe whose write end is closed is
-       readable for the same reason. */
-    return p->pos < p->len || p->src != (BPTR)0 || p->wclosed;
+    /* A pipe whose writer has closed is readable: Read() returns 0, and 0 is
+       end of file, which is progress. */
+    return ring_used(p) > 0 || p->wclosed || (p->doswrite && p->dosend);
+}
+
+/* Writable when there is room, or when nothing is ever going to read it. */
+static int pipe_writable(int fd)
+{
+    const struct db_pipe *p = PIPE_PAIR(fd);
+
+    if (PIPE_IS_READ(fd))
+        return 0;
+
+    if (p->lossy)
+        return 1;
+
+    return ring_free(p) > 0 || p->rclosed || (p->dosread && p->dosend);
 }
 
 static int pipe_read(int fd, void *buf, size_t len)
@@ -250,28 +714,16 @@ static int pipe_read(int fd, void *buf, size_t len)
 
     if (!PIPE_IS_READ(fd)) { errno = EBADF; return -1; }
 
-    if (p->pos < p->len)
+    if (ring_used(p) > 0)
     {
-        int n = p->len - p->pos;
+        int n = ring_get(p, (unsigned char *)buf, (int)len);
 
-        if ((size_t)n > len)
-            n = (int)len;
-        memcpy(buf, p->buf + p->pos, (size_t)n);
-        p->pos += n;
-        if (p->pos == p->len)
-            p->pos = p->len = 0;
+        /* Room appeared, so a command blocked in Write() can be answered. */
+        db_pipe_retry(p);
         return n;
     }
 
-    if (p->src != (BPTR)0)
-    {
-        LONG n = Read(p->src, (APTR)buf, (LONG)len);
-
-        if (n < 0) { errno = EIO; return -1; }
-        return (int)n;                  /* 0 is end of file */
-    }
-
-    if (p->wclosed)
+    if (p->wclosed || (p->doswrite && p->dosend))
         return 0;
 
     errno = EAGAIN;
@@ -281,33 +733,34 @@ static int pipe_read(int fd, void *buf, size_t len)
 static int pipe_write(int fd, const void *buf, size_t len)
 {
     struct db_pipe *p = PIPE_PAIR(fd);
-    int space;
+    int n;
 
     if (PIPE_IS_READ(fd)) { errno = EBADF; return -1; }
 
-    if (p->sink)
+    /* The command that was going to read this has closed its handle.  Report
+       the bytes written rather than stall: nothing is ever going to take them,
+       and a channel with data pending forever never closes. */
+    if (p->dosread && p->dosend)
         return (int)len;
 
-    if (p->pos > 0)
+    n = ring_put(p, (const unsigned char *)buf, (int)len);
+
+    if (n > 0)
+        db_pipe_retry(p);           /* a command blocked in Read() can go */
+
+    /* A lossy pipe drops the overflow rather than refusing it.  That is the
+       wakeup pipe, where a second byte says nothing the first did not and
+       refusing would stall the writer instead. */
+    if (p->lossy)
+        return (int)len;
+
+    if (n == 0)
     {
-        memmove(p->buf, p->buf + p->pos, (size_t)(p->len - p->pos));
-        p->len -= p->pos;
-        p->pos = 0;
+        errno = EAGAIN;
+        return -1;
     }
 
-    /* What does not fit is dropped rather than refused.  The only buffered
-       pipe here is the wakeup one, where a second byte says nothing the first
-       did not, and refusing would stall the writer instead. */
-    space = DB_PIPE_BUF - p->len;
-    if (space > 0)
-    {
-        int n = ((size_t)space < len) ? space : (int)len;
-
-        memcpy(p->buf + p->len, buf, (size_t)n);
-        p->len += n;
-    }
-
-    return (int)len;
+    return n;                       /* a short write is reported short */
 }
 
 static int pipe_close(int fd)
@@ -317,23 +770,22 @@ static int pipe_close(int fd)
     if (PIPE_IS_READ(fd))
     {
         p->rclosed = 1;
-        if (p->src != (BPTR)0)
-        {
-            Close(p->src);
-            p->src = (BPTR)0;
-            if (p->srcname[0] != '\0')
-                DeleteFile((CONST_STRPTR)p->srcname);
-        }
     }
     else
     {
         p->wclosed = 1;
     }
 
+    /* A command asleep on this pipe has to be woken, or it waits for a reply
+       that is never coming and the runner never returns.  db_pipe_retry() sees
+       the closed flag and answers with end of file. */
+    db_pipe_retry(p);
+
     /* Released only once both ends are closed.  Dropbear closes one end and
        keeps the other, so freeing on the first close would hand the live end
-       to the next caller. */
-    if (p->rclosed && p->wclosed)
+       to the next caller.  A pipe with a DOS end open is not free either: its
+       FileHandle still names this slot. */
+    if (p->rclosed && p->wclosed && !db_pipe_dos_open(p))
         memset(p, 0, sizeof(*p));
 
     return 0;
@@ -1276,8 +1728,15 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
     int   have_sockets = 0;
     int   con_watch = 0;              /* the interactive console is in readfds */
     int   con_fd = -1;
+    int   pipe_watch = 0;             /* a spawned command is on a pipe */
     int   fd;
     LONG  rc;
+
+    /* Answer whatever a spawned command has asked for, so the readiness this
+       pass reports is current rather than one pass stale, and notice a command
+       that has finished. */
+    db_pipe_service();
+    db_runner_poll();
 
     FD_ZERO(&sock_r);
     FD_ZERO(&sock_w);
@@ -1310,7 +1769,13 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
         if (IS_PIPE(fd))
         {
             if (want_r && pipe_readable(fd)) { FD_SET(fd, &out_r); other_ready++; }
-            if (want_w)                      { FD_SET(fd, &out_w); other_ready++; }
+            if (want_w && pipe_writable(fd)) { FD_SET(fd, &out_w); other_ready++; }
+
+            /* A pipe with a command on the far end can become ready without
+               anything on this side happening, so its port has to be in the
+               wait mask below.  One with no DOS end never does. */
+            if (db_pipe_dos_open(PIPE_PAIR(fd)))
+                pipe_watch = 1;
             continue;
         }
 
@@ -1361,6 +1826,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
         sigs = 0;
         if (con_watch)    sigs |= con_reader->cr_DataSig;
         if (con_active()) sigs |= SIGBREAKF_CTRL_C;
+        if (pipe_watch)   sigs |= db_pipe_sigmask();
 
         rc = nx_waitselect(sock_n, &sock_r, &sock_w, NULL, (APTR)tv, &sigs);
         if (rc < 0)
@@ -1392,6 +1858,31 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
             FD_SET(con_fd, &out_r);
             ready++;
         }
+
+        /* A command's packet may have arrived while we were in there.  Service
+           it and re-read the pipes, or the readiness reported is the one from
+           before the wait and Dropbear spins until the next timeout. */
+        if (pipe_watch)
+        {
+            db_pipe_service();
+
+            for (fd = DB_PIPE_BASE; fd < nfds && fd < DB_PIPE_LIMIT; fd++)
+            {
+                int want_r = (readfds  != NULL) && FD_ISSET(fd, readfds);
+                int want_w = (writefds != NULL) && FD_ISSET(fd, writefds);
+
+                if (want_r && pipe_readable(fd) && !FD_ISSET(fd, &out_r))
+                {
+                    FD_SET(fd, &out_r);
+                    ready++;
+                }
+                if (want_w && pipe_writable(fd) && !FD_ISSET(fd, &out_w))
+                {
+                    FD_SET(fd, &out_w);
+                    ready++;
+                }
+            }
+        }
     }
     else if (con_watch && !con_readable())
     {
@@ -1413,8 +1904,41 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
             ticks = (ULONG)timeout->tv_sec * TICKS_PER_SECOND
                   + (ULONG)(timeout->tv_usec / (1000000L / TICKS_PER_SECOND));
 
-        if (ticks > 0)
+        /* A command on a pipe and no socket in the set: wait on its packets
+           rather than the clock, since the packet is the only thing that can
+           make progress.  With a timeout, the Delay() is still bounded and the
+           next pass services whatever arrived -- latency, not a stall. */
+        if (pipe_watch && timeout == NULL)
+        {
+            (VOID)Wait(db_pipe_sigmask());
+            db_pipe_service();
+        }
+        else if (ticks > 0)
+        {
             Delay(ticks);
+        }
+
+        if (pipe_watch)
+        {
+            db_pipe_service();
+
+            for (fd = DB_PIPE_BASE; fd < nfds && fd < DB_PIPE_LIMIT; fd++)
+            {
+                int want_r = (readfds  != NULL) && FD_ISSET(fd, readfds);
+                int want_w = (writefds != NULL) && FD_ISSET(fd, writefds);
+
+                if (want_r && pipe_readable(fd) && !FD_ISSET(fd, &out_r))
+                {
+                    FD_SET(fd, &out_r);
+                    other_ready++;
+                }
+                if (want_w && pipe_writable(fd) && !FD_ISSET(fd, &out_w))
+                {
+                    FD_SET(fd, &out_w);
+                    other_ready++;
+                }
+            }
+        }
     }
 
     ready += other_ready;
@@ -1454,6 +1978,11 @@ int pipe(int fds[2])
         {
             memset(&db_pipes[i], 0, sizeof(db_pipes[i]));
             db_pipes[i].taken = 1;
+            /* Lossy until something makes it a DOS pipe.  That is the wakeup
+               pipe's behaviour and it was every pipe's before there were DOS
+               ones: a full ring drops rather than refusing, because refusing
+               would stall a writer that only ever says "wake up". */
+            db_pipes[i].lossy = 1;
             fds[0] = DB_PIPE_BASE + 2 * i;
             fds[1] = DB_PIPE_BASE + 2 * i + 1;
             return 0;
@@ -1539,13 +2068,11 @@ pid_t setsid(void) { errno = ENOSYS; return -1; }
  * there.
  */
 
-#define DB_CMD_MAX      512
 
 /* 256 KB.  A Shell gives a command 4,096 bytes and every ported program on this
    machine needs far more than that (clientrun.c allocates 512 KB for the same
    reason).  A command arriving over SSH is exactly as likely to be
    a ported program as one typed at a Shell prompt. */
-#define DB_CMD_STACK    (256UL * 1024UL)
 
 static jmp_buf exec_jump;
 static int     exec_have_cmd;
@@ -1661,6 +2188,8 @@ int chown(const char *path, uid_t uid, gid_t gid)
     return -1;
 }
 
+
+
 /*
  * There is a child now -- SystemTagList()'s, already finished by the time
  * anybody asks -- so this reports it once and ECHILD after that.
@@ -1671,14 +2200,16 @@ int chown(const char *path, uid_t uid, gid_t gid)
  * is ever killed by a signal, so WIFSIGNALED() is never true and the client
  * always sees an exit status rather than an exit signal.
  */
-static pid_t child_pid;                 /* 0 when there is nothing to report */
-static int   child_status;
 
 pid_t waitpid(pid_t pid, int *status, int options)
 {
     (void)pid; (void)options;
 
-    if (child_pid != 0)
+    /* Not until the runner says so.  It used to be unconditional because the
+       command had already finished by the time spawn_command() returned; now it
+       runs alongside this process and reporting early would send the client an
+       exit status before the command had produced its output. */
+    if (child_pid != 0 && child_ready)
     {
         pid_t done = child_pid;
 
@@ -1711,7 +2242,6 @@ pid_t waitpid(pid_t pid, int *status, int options)
  * oldact is zeroed rather than left alone, so a caller that saves and later
  * restores gets a defined value instead of stack contents.
  */
-static void (*sigchld_handler)(int);
 
 int sigaction(int sig, const struct sigaction *act, struct sigaction *oldact)
 {
@@ -1736,42 +2266,6 @@ int sigaction(int sig, const struct sigaction *act, struct sigaction *oldact)
  * stderr; the numbers are the syslog ones so that a build which did have one
  * would file them correctly.
  */
-extern void dropbear_log(int priority, const char *format, ...);
-
-#define DB_LOG_WARNING  4
-#define DB_LOG_INFO     6
-
-#define DB_SUCCESS      0
-#define DB_FAILURE      (-1)
-
-/*
- * Where a command's output is parked between the Shell writing it and the
- * channel reading it.  T: is the AmigaOS scratch assign; a machine without one
- * gets the current directory, which execchild() has just made the user's home.
- */
-static BPTR spawn_outfile(char *name, size_t namelen)
-{
-    static ULONG serial;
-    static const char *const dirs[] = { "T:", "" };
-    unsigned i;
-
-    for (i = 0; i < sizeof(dirs) / sizeof(dirs[0]); i++)
-    {
-        BPTR fh;
-
-        snprintf(name, namelen, "%sdbssh-%lx-%lu.out", dirs[i],
-                 (unsigned long)(ULONG)FindTask(NULL), (unsigned long)serial);
-
-        fh = Open((CONST_STRPTR)name, MODE_NEWFILE);
-        if (fh != (BPTR)0)
-        {
-            serial++;
-            return fh;
-        }
-    }
-
-    return (BPTR)0;
-}
 
 int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
                          const void *exec_data,
@@ -1782,12 +2276,12 @@ int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
                                            "no command has run on this
                                            channel" */
 
-    struct TagItem cmd_tags[4];
-    char  outname[64];
-    int   in[2], out[2], err[2];
-    int   nt;
-    LONG  rc;
-    BPTR  fh, cmd_in, cmd_out;
+    struct TagItem   run_tags[4];
+    struct Process  *proc;
+    DbRunner        *runner;
+    int              in[2], out[2], err[2];
+    BPTR             cmd_in  = (BPTR)0;
+    BPTR             cmd_out = (BPTR)0;
 
     /*
      * Dropbear's own child path, run in this process to the point where it
@@ -1817,111 +2311,99 @@ int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
         return DB_FAILURE;
     }
 
-    cmd_out = spawn_outfile(outname, sizeof(outname));
-    if (cmd_out == (BPTR)0)
-    {
-        dropbear_log(DB_LOG_WARNING, "amiga: cannot create an output file");
-        return DB_FAILURE;
-    }
-
     if (pipe(in) != 0)
-    {
-        Close(cmd_out);
         return DB_FAILURE;
-    }
     if (pipe(out) != 0)
     {
         (void)__wrap_close(in[0]); (void)__wrap_close(in[1]);
-        Close(cmd_out);
         return DB_FAILURE;
     }
     if (pipe(err) != 0)
     {
         (void)__wrap_close(in[0]);  (void)__wrap_close(in[1]);
         (void)__wrap_close(out[0]); (void)__wrap_close(out[1]);
-        Close(cmd_out);
         return DB_FAILURE;
     }
 
-    /* Only one end of each pair is ever handed out; closing the other is what
-       upstream's parent branch does too, and here it is also what makes the
-       output and stderr pipes report end of file. */
-    (void)__wrap_close(in[0]);
-    (void)__wrap_close(out[1]);
+    /*
+     * stderr keeps the old shape: closing the write end makes it report end of
+     * file at once.  The Shell's own errors go to its Output(), which is the
+     * stdout pipe, so nothing is lost -- see the SYS_Output note below.
+     */
     (void)__wrap_close(err[1]);
 
-    PIPE_PAIR(in[1])->sink = 1;         /* the command's stdin is NIL: */
+    /*
+     * in and out do NOT get their far local end closed.  Each has a DOS end
+     * instead -- the FileHandle the command is given -- and that end is the
+     * authority on whether anybody is still reading or writing.  Closing the
+     * unused local fd as well would set rclosed/wclosed and make the pipe report
+     * end of file to the command before it had read a byte.
+     */
+    cmd_in  = db_pipe_fh(PIPE_INDEX(in[0]),  1);    /* command reads this  */
+    cmd_out = db_pipe_fh(PIPE_INDEX(out[1]), 0);    /* command writes this */
+
+    if (cmd_in == (BPTR)0 || cmd_out == (BPTR)0)
+    {
+        dropbear_log(DB_LOG_WARNING, "amiga: cannot make a pipe for the command");
+        goto fail;
+    }
 
     /*
-     * SYS_Input and SYS_Output rather than "<NIL: >file" appended to the
-     * command line, for two reasons.
+     * SYS_Input and SYS_Output rather than a redirection appended to the command
+     * line, for two reasons that both still hold now the targets are pipes.
      *
      * The Shell's own messages go to its Output(), and a redirection in the
      * command line applies to the command, not to them.  So `NoSuchCommand`
      * printed "Unknown command" onto the server's stderr and the client got an
      * empty transfer with a return code of 10 and no explanation.  With the
-     * handle passed in, the Shell's Output() is the file and everything lands
-     * in it.
+     * handle passed in, the Shell's Output() is the channel and everything
+     * lands there.
      *
      * The command line also stays the user's: a command containing its own
      * redirection is not fighting one appended to it.
      *
-     * Handing over a handle is safe here because dos.library says so, in
-     * System()'s own autodoc: "The input and output filehandles will not be
-     * closed by System, you must close them (if needed) after System returns".
-     * Only SYS_Asynch takes ownership.  Closing cmd_out below is therefore
-     * both required and what flushes the file before it is read back.
-     *
-     * SYS_Input is omitted rather than passed as 0 when NIL: cannot be opened;
-     * the tag's presence is what dos reads, so a zero would be a broken
-     * handle rather than "use the default".
+     * Handing over a handle is safe because dos.library says so, in System()'s
+     * own autodoc: "The input and output filehandles will not be closed by
+     * System, you must close them (if needed) after System returns".  The runner
+     * closes both, and those two closes are what tell this side the command has
+     * finished reading and finished writing.
      */
-    cmd_in = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
-
-    nt = 0;
-    cmd_tags[nt].ti_Tag = SYS_Output;   cmd_tags[nt++].ti_Data = (ULONG)cmd_out;
-    if (cmd_in != (BPTR)0)
+    runner = (DbRunner *)AllocVec(sizeof(DbRunner), MEMF_PUBLIC | MEMF_CLEAR);
+    if (runner == NULL)
     {
-        cmd_tags[nt].ti_Tag = SYS_Input; cmd_tags[nt++].ti_Data = (ULONG)cmd_in;
+        dropbear_log(DB_LOG_WARNING, "amiga: out of memory for the command");
+        goto fail;
     }
-    cmd_tags[nt].ti_Tag = NP_StackSize; cmd_tags[nt++].ti_Data = DB_CMD_STACK;
-    cmd_tags[nt].ti_Tag = TAG_END;      cmd_tags[nt].ti_Data   = 0;
+
+    runner->rn_Parent = FindTask(NULL);
+    runner->rn_In     = cmd_in;
+    runner->rn_Out    = cmd_out;
+    snprintf(runner->rn_Cmd, sizeof(runner->rn_Cmd), "%s", exec_cmd);
 
     dropbear_log(DB_LOG_INFO, "amiga: running '%s'", exec_cmd);
-    rc = SystemTagList((CONST_STRPTR)exec_cmd, cmd_tags);
 
-    Close(cmd_out);
-    if (cmd_in != (BPTR)0)
-        Close(cmd_in);
+    run_tags[0].ti_Tag = NP_Entry;      run_tags[0].ti_Data = (ULONG)db_runner_main;
+    run_tags[1].ti_Tag = NP_Name;       run_tags[1].ti_Data = (ULONG)"dbssh command";
+    run_tags[2].ti_Tag = NP_StackSize;  run_tags[2].ti_Data = DB_RUNNER_STACK;
+    run_tags[3].ti_Tag = TAG_END;       run_tags[3].ti_Data = 0;
 
-    if (rc == -1)
+    proc = CreateNewProc(run_tags);
+    if (proc == NULL)
     {
-        /* System() could not start a Shell at all -- not the command failing,
-           which comes back as that command's rc with its complaint in the
-           output file.  127 is what a Unix shell reports for the same thing,
-           and it is the only number a client can act on. */
-        dropbear_log(DB_LOG_WARNING, "amiga: could not run a shell (IoErr %ld)",
-                     (long)IoErr());
-        rc = 127;
+        dropbear_log(DB_LOG_WARNING, "amiga: cannot start a process for '%s'",
+                     exec_cmd);
+        FreeVec(runner);
+        goto fail;
     }
 
-    fh = Open((CONST_STRPTR)outname, MODE_OLDFILE);
-    if (fh != (BPTR)0)
-    {
-        struct db_pipe *p = PIPE_PAIR(out[0]);
+    /* The runner is parked in Wait(SIGF_SINGLE) until this pair happens. */
+    proc->pr_Task.tc_UserData = (APTR)runner;
+    Signal((struct Task *)proc, SIGF_SINGLE);
 
-        p->src = fh;
-        snprintf(p->srcname, sizeof(p->srcname), "%s", outname);
-    }
-    else
-    {
-        /* wclosed above already makes this end of file, so the channel closes
-           cleanly with no output rather than hanging. */
-        dropbear_log(DB_LOG_WARNING, "amiga: cannot read back %s", outname);
-    }
-
+    db_runner    = runner;
+    child_ready  = 0;
     child_pid    = next_pid++;
-    child_status = (int)((rc & 0xFF) << 8);
+    child_status = 0;
 
     *ret_writefd = in[1];
     *ret_readfd  = out[0];
@@ -1931,17 +2413,22 @@ int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
         *ret_pid = child_pid;
 
     /*
-     * The child has already exited, so raise SIGCHLD's handler now.  It writes
-     * to ses.signal_pipe, the session loop notices on its next pass and calls
-     * svr_chansess_checksignal(), and waitpid() above hands over the status --
-     * the same sequence a real signal would have produced.  noptycommand() has
-     * not yet called addchildpid(), so the reap lands in svr_ses.lastexit, the
-     * race upstream already handles two lines later.
+     * SIGCHLD is not raised here any more: the command is still running.
+     * db_runner_poll(), called once per pass of __wrap_select(), raises it when
+     * the runner reports the exit code -- the same sequence, at the point a real
+     * signal would have arrived rather than before the command started.
      */
-    if (sigchld_handler != NULL)
-        sigchld_handler(SIGCHLD);
-
     return DB_SUCCESS;
+
+fail:
+    if (cmd_in != (BPTR)0)
+        Close(cmd_in);
+    if (cmd_out != (BPTR)0)
+        Close(cmd_out);
+    (void)__wrap_close(in[0]);  (void)__wrap_close(in[1]);
+    (void)__wrap_close(out[0]); (void)__wrap_close(out[1]);
+    (void)__wrap_close(err[0]);
+    return DB_FAILURE;
 }
 
 /*
