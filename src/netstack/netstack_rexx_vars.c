@@ -7,9 +7,9 @@
  * kern/amiga_cstat.c for the three formatted answers (CONNECTIONS, ICMPHIST,
  * ROUTES). Nothing here is guessed from documentation.
  *
- * What this exists for is AmiTCP's own `netstat`, which is the one program in
- * the 2,149-archive corpus that reads the variable space rather than just
- * sending KILL (docs/RESEARCH.md 75.7). It asks for, in this order:
+ * Two programs in the corpus read the variable space rather than just sending
+ * KILL (docs/DEVELOPMENT.md has the whole tally). AmiTCP's own `netstat` asks
+ * for, in this order:
  *
  *     QUERY CONNECTIONS
  *     Q ICMP CHksum ICMP COde ...              8 names
@@ -18,6 +18,11 @@
  *     Q UDP Bcnoport UDP Chksum ...            9 names
  *     Q ICMPHIST
  *     QUERY ROUTES ALL
+ *
+ * and `rx.fingerd` sends `QUERY CONNECTIONS` alone, walking the answer eight
+ * words at a time looking for a local port of 79. Both parse positionally,
+ * which is why every field is fixed-width and every list has all its entries
+ * whether or not they moved.
  *
  * A counter this stack does not keep answers 0, which is what AmiTCP answered
  * for a counter that had not moved -- there is no way to say "unmeasured" in a
@@ -694,8 +699,12 @@ static UWORD ami_rx_collect_sockets(NX_IP *ip, AmiRxSocket *out, UWORD room)
     return used;
 }
 
-/* Every socket the stack can have at once, so the collection above never has
-   to report a partial list. */
+/*
+ * NetX Duo puts no ceiling on created sockets, so this is generous rather than
+ * exact: past it the list is truncated, and the walk stops cleanly. AmiTCP
+ * counted first and allocated exactly, which it could do because its counting
+ * and its copying were both inside one splnet().
+ */
 #define RX_MAX_SOCKETS  64
 
 static LONG ami_rx_connections(NX_IP *ip, const char **errstr, AmiRxReply *r)
@@ -787,7 +796,21 @@ typedef struct AmiRxRoute
 #define RX_RT_GATEWAY   0x0002
 #define RX_RT_HOST      0x0004
 
-#define RX_MAX_ROUTES   (NX_MAX_PHYSICAL_INTERFACES + 32)
+/* src/bsdsocket/routing.c's own bound, minus its ARP entries: an interface's
+   attached prefix each, the whole static table, and the default gateway.
+   AmiTCP's netstat has no column for an ARP entry. */
+#ifdef NX_ENABLE_IP_STATIC_ROUTING
+#define RX_ROUTE_STATIC_MAX     NX_IP_ROUTING_TABLE_SIZE
+#else
+#define RX_ROUTE_STATIC_MAX     0
+#endif
+
+#define RX_MAX_ROUTES   (NX_MAX_PHYSICAL_INTERFACES + RX_ROUTE_STATIC_MAX + 1)
+
+/* AmiTCP sized this 90, allowing 32 for the interface name; ours can be
+   AMI_CFG_NAME_LEN. 45 is the fixed part -- six hex fields, the eight-column
+   flag field and their separators. */
+#define RX_ROUTELEN     (45 + AMI_CFG_NAME_LEN + 1)
 
 static UWORD ami_rx_collect_routes(NX_IP *ip, AmiRxRoute *out, UWORD room)
 {
@@ -915,7 +938,8 @@ static LONG ami_rx_routes(NX_IP *ip, struct CSource *args, const char **errstr,
 
     count = ami_rx_collect_routes(ip, mem, RX_MAX_ROUTES);
 
-    if (count != 0 && !ami_rx_reply_room(r, r->rr_Used + (LONG)count * 90 + 1))
+    if (count != 0
+        && !ami_rx_reply_room(r, r->rr_Used + (LONG)count * RX_ROUTELEN + 1))
     {
         FreeVec(mem);
         *errstr = ami_rx_err_memory;
@@ -1185,16 +1209,20 @@ LONG ami_rx_getvalue(struct CSource *args, const char **errstr, AmiRxReply *r)
 
 /*
  * SET. AmiTCP had fourteen writeable variables and three more writeable only
- * while it was reading its configuration file; every one of them wrote a
- * kernel global that this stack does not have. Its debug switches, log console,
- * log file, mbuf chunk sizes and socket buffer defaults have no counterpart --
- * the receive window here is computed per socket from the live packet pool
- * (src/bsdsocket/socket.c), so there is no tcp_recvspace to assign to -- and
- * HOSTNAME comes from the configuration file, which is read once at startup.
+ * while it was reading its configuration file; every one of them wrote a kernel
+ * global that this stack does not have. Its debug switches, log console, log
+ * file and mbuf chunk sizes have no counterpart, the receive window is computed
+ * per socket from the live packet pool (src/bsdsocket/socket.c) so there is no
+ * tcp_recvspace to assign to, and HOSTNAME comes from the configuration file.
  *
- * So the writeable set is empty, and a recognised name is refused with
- * AmiTCP's own ERR_NOWRITE rather than reported unknown. TCP_Start_Stop's
- * startnet sends `SET HOSTNAME '<name>'` and that is the answer it gets.
+ * So the writeable set is empty, and a recognised name is refused with AmiTCP's
+ * own ERR_NOWRITE rather than reported unknown.
+ *
+ * One archive sends a SET: TCP_Start_Stop's startnet, twice, both `SET
+ * HOSTNAME`, and it is a PPP dial-up front end -- the value it wants to install
+ * is the name the dial-up's local address resolves to. Its other branch sets
+ * the name to the one already in the configuration file, and both calls discard
+ * the return code. So there is nothing here for a writeable HOSTNAME to fix.
  */
 LONG ami_rx_setvalue(struct CSource *args, const char **errstr, AmiRxReply *r)
 {

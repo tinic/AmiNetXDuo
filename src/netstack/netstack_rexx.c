@@ -227,8 +227,8 @@ static LONG ami_rx_execute(const char *line, const char **errstr,
          * and parseroute() "ROUTE not implemented." with the working body
          * #if 0'ed out around an INCOMPLETE marker. ADD and RESET edit the net
          * database AmiTCP kept in memory (its kern/amiga_netdb.c), which this
-         * stack does not have -- docs/AREXX.md sizes what adding one would
-         * mean.
+         * stack does not have -- docs/DEVELOPMENT.md sizes what adding one
+         * would mean.
          *
          * Recognised so the caller is told "not implemented" rather than
          * "unknown command", which is the difference between a stack that has
