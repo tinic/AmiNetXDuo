@@ -50,6 +50,12 @@ int nanosleep(const struct timespec *req, struct timespec *rem);
    toolchain.  newlib's own clearenv() touches the _environ array directly. */
 int clearenv(void);
 
+/* The same shape as clearenv(): libc.a defines vasprintf() and <stdio.h> keeps
+   the declaration behind a visibility guard this toolchain does not set.
+   scpmisc.c calls it, so scp does not compile without this. */
+struct __va_list_tag;
+int vasprintf(char **strp, const char *fmt, __builtin_va_list ap);
+
 #ifdef __cplusplus
 }
 #endif

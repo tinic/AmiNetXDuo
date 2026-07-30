@@ -178,6 +178,42 @@ fi
 cp "$ADDIF"    "$STAGE/AddNetInterface"
 cp "$PROBE"    "$STAGE/SSHProbe"
 
+# scp, when the build made one.  Staged unconditionally rather than behind a
+# flag: it is 130 KB, and the server invokes it by name from a command the
+# client sends, so it has to be on the volume before anything asks for it.
+if [ -f "$ROOT/$DB_BUILD/scp" ]; then
+    cp "$ROOT/$DB_BUILD/scp" "$STAGE/scp"
+    SCPBIN="$STAGE/scp"
+    echo "==> scp staged as SYS:scp ($(wc -c < "$STAGE/scp" | tr -d ' ') bytes)"
+else
+    SCPBIN=""
+fi
+
+# A file for scp to send, and an SCP protocol stream for it to receive.  Both
+# are built here rather than in the guest: the point is to compare what arrives
+# against a known input, and generating it on the Amiga would compare the guest
+# with itself.  The stream is exactly what a host scp sends to `scp -t`:
+#   C<mode> <size> <name>\n  then the bytes  then one NUL
+mkdir -p "$STAGE"
+printf 'scp over a 14 MHz 68020, one line at a time.\n' > "$STAGE/scpsend.txt"
+SCPSIZE=$(wc -c < "$STAGE/scpsend.txt" | tr -d ' ')
+{ printf 'C0644 %s scprecv.txt\n' "$SCPSIZE"; cat "$STAGE/scpsend.txt"; printf '\000'; } \
+    > "$STAGE/scpproto.bin"
+
+# The same pair again at 64 KB, for throughput by difference: the small transfer
+# and the large one differ only in the bytes, so subtracting the two wall clocks
+# removes the handshake and everything else that is the same in both.
+: > "$STAGE/scpbig.txt"
+i=0
+while [ "$i" -lt 1024 ]; do
+    printf '%s\n' "012345678901234567890123456789012345678901234567890123456789012" \
+        >> "$STAGE/scpbig.txt"
+    i=$((i + 1))
+done
+SCPBIGSIZE=$(wc -c < "$STAGE/scpbig.txt" | tr -d ' ')
+{ printf 'C0644 %s scpbigrecv.txt\n' "$SCPBIGSIZE"; cat "$STAGE/scpbig.txt"; printf '\000'; } \
+    > "$STAGE/scpbigproto.bin"
+
 if [ -f "$KEYFILE" ]; then
     cp "$KEYFILE" "$STAGE/id_amiga"
     echo "==> client key staged: $KEYFILE ($(wc -c < "$KEYFILE" | tr -d ' ') bytes)"
@@ -335,4 +371,6 @@ exec "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
      "$STAGE/AddNetInterface" "$STAGE/SSHProbe" "$STAGE/id_amiga" \
      ${ECDSAKEY:+"$STAGE/id_amiga_ecdsa"} \
      ${DB_SERVER:+"$STAGE/dropbear" "$STAGE/hostkey" "$STAGE/.ssh"} \
+     ${SCPBIN:+"$SCPBIN" "$STAGE/scpsend.txt" "$STAGE/scpproto.bin"} \
+     ${SCPBIN:+"$STAGE/scpbig.txt" "$STAGE/scpbigproto.bin"} \
      "$STAGE/commands.txt"

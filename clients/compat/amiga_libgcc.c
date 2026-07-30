@@ -12,8 +12,10 @@
  *     __floatdidf      curl_off_t -> double, the progress meter
  *     __fixdfdi        double -> curl_off_t, --max-filesize and friends
  *     __atomic_exchange_4   the once-only guard in curl_global_init()
+ *     __fixunsdfdi     double -> unsigned 64-bit, scp's progress meter
+ *     __unordsf2       float unordered compare, ditto
  *
- * This file is those five and nothing else.  It does not redefine the division
+ * This file is those seven and nothing else.  It does not redefine the division
  * helpers: there is one copy of those in the tree (src/common/ami_udivdi3.c)
  * and clients/amiga-client.sh compiles that same file.
  *
@@ -46,6 +48,8 @@ int __popcountdi2(u64 x);
 double __floatdidf(s64 x);
 s64 __fixdfdi(double x);
 u32 __atomic_exchange_4(volatile void *ptr, u32 val, int memorder);
+u64 __fixunsdfdi(double x);
+int __unordsf2(float a, float b);
 
 
 /* Count trailing zeros.  GCC leaves x == 0 undefined and every caller in a
@@ -167,4 +171,33 @@ u32 __atomic_exchange_4(volatile void *ptr, u32 val, int memorder)
     Enable();
 
     return old;
+}
+
+
+/* double -> unsigned 64-bit.  Negative and NaN are undefined for the real
+   helper; zero is the useful answer for a byte count. */
+u64 __fixunsdfdi(double x)
+{
+    if (x <= 0.0)
+        return 0;
+
+    if (x >= 18446744073709551616.0)            /* 2^64 */
+        return ~(u64)0;
+
+    {
+        u32 hi = (u32)(x / 4294967296.0);       /* 2^32 */
+        double rest = x - ((double)hi * 4294967296.0);
+
+        if (rest < 0.0)
+            rest = 0.0;
+
+        return ((u64)hi << 32) | (u32)rest;
+    }
+}
+
+/* Non-zero when either operand is NaN.  A NaN is the one value that compares
+   unequal to itself, which is the whole test and needs no bit twiddling. */
+int __unordsf2(float a, float b)
+{
+    return (a != a) || (b != b);
 }

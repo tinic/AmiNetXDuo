@@ -25,9 +25,12 @@
  *                    asks _isatty() what kind of thing the descriptor is, and
  *                    measures a regular file with _lseek().
  *   ftruncate()      SetFileSize() needs a BPTR and only a newlib descriptor
- *                    is available, so this fails with EINVAL.  curl calls it
- *                    in one place -- truncating a partially written --output
- *                    file after a failed resume -- and handles the failure.
+ *                    is available, so SHORTENING a file fails with EINVAL.
+ *                    curl calls it in one place -- truncating a partially
+ *                    written --output file after a failed resume -- and handles
+ *                    the failure.  A request for the length the file already has
+ *                    succeeds, because there is nothing to do and scp's sink
+ *                    asks for exactly that after writing the announced size.
  *   link()           AmigaOS has MakeLink(), but hard links are a filesystem
  *                    option most Amiga volumes do not have.  ENOSYS.
  *   gettimeofday()   DateStamp().  Resolution is one tick (1/50 s), and the
@@ -276,8 +279,15 @@ int mkdir(const char *path, mode_t mode)
  */
 int ftruncate(int fd, off_t length)
 {
-    (void)fd;
-    (void)length;
+    struct stat st;
+
+    /* Already that long: nothing to do, and saying so is not a lie.  scp's sink
+       writes exactly the number of bytes its protocol header announced and then
+       truncates to that same number, so this is the whole of what it needs.
+       Shortening still fails -- see the note at the top of the file. */
+    if (fstat(fd, &st) == 0 && st.st_size == (off_t)length)
+        return 0;
+
     errno = EINVAL;
     return -1;
 }

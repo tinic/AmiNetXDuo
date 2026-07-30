@@ -392,11 +392,84 @@ for p in $PROGRAMS; do
     done
 done
 
+DB_LDFLAGS="$AMIGA_CLIENT_LDFLAGS -Wl,--wrap=open,--wrap=read,--wrap=write,--wrap=close,--wrap=spawn_command,--wrap=getenv,--wrap=ioctl,--wrap=signal$FAST_WRAPS$PROF_WRAPS"
+DB_LIBS="${SHIM_OBJS[*]} $PROF_LIBS -Wl,--start-group -lamigaclient -lc -Wl,--end-group"
+
+# scp is linked here rather than by make.
+#
+# Makefile.in:233 says "scp doesn't use the libs so is special" and its rule is
+# $(CC) $(LDFLAGS) -o scp $(SCPOBJS) -- no $(LIBS).  On a hosted build that is
+# true; here $(LIBS) is where the shim, libamigaclient and libc live, so an
+# unmodified rule leaves read/write/close/exit and every libgcc helper
+# undefined.  third_party/dropbear stays unpatched, so make is asked for the
+# objects and the link happens below.
+# progressmeter.o is absent because nothing references it: PROGRESS_METER is not
+# defined for this build, so scp.c has no progress meter compiled in.
+SCP_OBJS="obj/scp.o obj/atomicio.o obj/scpmisc.o obj/compat.o obj/dbctype.o"
+
+# ...and these five are compiled with newlib's INTEGER-only printf family, the
+# same substitution tests/conformance/build.sh makes and for the same reason:
+# the float-capable printf puts _MathIeeeDoubTransBase in the crt0's library
+# list, so the binary dies with "mathieeedoubtrans.library failed to load"
+# before main() -- a library that is not in Kickstart 3.1 ROM, for
+# transcendental functions scp has no use for.  With the progress meter gone scp
+# formats no floats at all, so the two are exactly equivalent here.
+#
+# Passed through CC rather than CFLAGS: the Makefile builds its flags with += and
+# a command-line CFLAGS would replace the lot.  CC is a plain override.
+SCP_INT_PRINTF="-Dprintf=iprintf -Dfprintf=fiprintf -Dsprintf=siprintf"
+SCP_INT_PRINTF="$SCP_INT_PRINTF -Dsnprintf=sniprintf -Dvfprintf=vfiprintf"
+SCP_INT_PRINTF="$SCP_INT_PRINTF -Dvsnprintf=vsniprintf -Dvasprintf=vasiprintf"
+# ...and the scanf family with it.  scp.c parses the protocol header with
+# sscanf("%5o %lld"), and newlib's float-capable scanf calls strtod(), which is
+# the one object in libc.a that references _MathIeeeDoubTransBase.  Only the
+# printf half of this is what tests/conformance/build.sh needed; scp needs both.
+SCP_INT_PRINTF="$SCP_INT_PRINTF -Dscanf=iscanf -Dfscanf=fiscanf -Dsscanf=siscanf"
+SCP_INT_PRINTF="$SCP_INT_PRINTF -Dvfscanf=vfiscanf -Dvsscanf=vsiscanf"
+MAKE_PROGRAMS=""
+WANT_SCP=0
+for p in $PROGRAMS; do
+    if [ "$p" = "scp" ]; then WANT_SCP=1; else MAKE_PROGRAMS="$MAKE_PROGRAMS $p"; fi
+done
+MAKE_PROGRAMS="${MAKE_PROGRAMS# }"
+
 echo "==> building $PROGRAMS"
 make -C "$OUT" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" \
-     PROGRAMS="$PROGRAMS" \
-     LDFLAGS="$AMIGA_CLIENT_LDFLAGS -Wl,--wrap=open,--wrap=read,--wrap=write,--wrap=close,--wrap=spawn_command,--wrap=getenv,--wrap=ioctl,--wrap=signal$FAST_WRAPS$PROF_WRAPS" \
-     LIBS="${SHIM_OBJS[*]} $PROF_LIBS -Wl,--start-group -lamigaclient -lc -Wl,--end-group"
+     PROGRAMS="$MAKE_PROGRAMS" \
+     ${MAKE_PROGRAMS:+$MAKE_PROGRAMS} \
+     LDFLAGS="$DB_LDFLAGS" \
+     LIBS="$DB_LIBS"
+
+if [ "$WANT_SCP" = 1 ]; then
+    # Without the socket shim and without Dropbear's --wraps.  scp opens no
+    # socket: in -t/-f it is stdin and stdout and nothing else, and those are
+    # newlib's fd 0 and 1 talking to whatever DOS handles it was given -- the
+    # pipe in clients/dropbear/amiga_dropbear.c when the server started it.
+    # Linking the shim in would drag dropbear_log(), the entropy pool and
+    # sha512 into a program that wants none of them, and would route its
+    # read()/write() through a descriptor map it is not part of.
+    #
+    # --wrap=main and --wrap=exit stay: scp parses argv, and argv plus the
+    # 256 KB stack is what clients/compat/amiga_argv.c is for.
+    # Rebuilt every time, because the integer-printf objects and make's own
+    # float ones live at the same paths and make cannot tell them apart.
+    ( cd "$OUT" && rm -f $SCP_OBJS )
+    make -C "$OUT" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" \
+         $SCP_OBJS CC="$AMIGA_GCC $SCP_INT_PRINTF"
+
+    SCP_SHIM="$ROOT/build/clients/obj/db-amiga_scp.o"
+    if [ ! -f "$SCP_SHIM" ] || [ "$ROOT/clients/dropbear/amiga_scp.c" -nt "$SCP_SHIM" ]; then
+        echo "  CC amiga_scp.c"
+        "$AMIGA_GCC" $DB_CFLAGS $SCP_INT_PRINTF -Wall -Wextra -c -o "$SCP_SHIM" \
+                     "$ROOT/clients/dropbear/amiga_scp.c"
+    fi
+    echo "  LD scp"
+    #   -Wl,--wrap=open   so /dev/null can be answered with NIL:.  scp's
+    #                     sanitise_stdfd() exits if that open fails.
+    ( cd "$OUT" && "$AMIGA_GCC" $AMIGA_CLIENT_LDFLAGS -Wl,--wrap=open \
+        -o scp $SCP_OBJS "$SCP_SHIM" \
+        -Wl,--start-group -lamigaclient -lc -Wl,--end-group )
+fi
 
 echo
 for p in $PROGRAMS; do
