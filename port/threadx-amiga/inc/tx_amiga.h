@@ -185,6 +185,14 @@ typedef struct TX_AMIGA_TICK_STATS_STRUCT
 
 VOID    tx_amiga_tick_stats(TX_AMIGA_TICK_STATS *stats);
 
+/*
+ * The same counters where they live, for a reader that cannot make the call
+ * above: a debugger on a frozen machine, or the published anchor that points
+ * at them (include/aminetxduo/health.h).  Anything running should still call
+ * tx_amiga_tick_stats(), which returns one consistent snapshot.
+ */
+TX_AMIGA_TICK_STATS *tx_amiga_tick_stats_live(VOID);
+
 
 /* ------------------------------------------------------------------------ */
 /* Thread adoption                                                           */

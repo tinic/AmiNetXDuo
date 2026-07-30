@@ -34,6 +34,9 @@
 
 #include "tx_thread.h"
 #include "tx_timer.h"
+#include "tx_amiga.h"
+
+#include "aminetxduo/health.h"
 
 #include <exec/tasks.h>
 #include <proto/exec.h>
@@ -64,19 +67,60 @@ typedef struct AmiBatonSlot
 
 static AmiBatonSlot ami_baton_slot[AMI_BATON_SLOTS];
 
-/*
- * What the bracket actually did, for the freeze hunt.  A hard lockup leaves no
- * Enforcer hit and no log, so the numbers have to be readable from outside
- * afterwards rather than printed as they happen.  All of these are touched
- * only under the Forbid() the callers already hold.
- *
- *   bs_Live / bs_LiveMax   tasks inside a bracket now, and the most ever
- *   bs_Full                times the table had no slot (the fail-open path)
- *   bs_Transitions         release/acquire pairs completed
- *   bs_StateMax            highest _tx_thread_system_state seen on entry
- *   bs_BatonMoved          times release() found the baton was not ours
- */
+/* Fields in aminetxduo/netstack.h. Touched only under the Forbid() the callers
+   already hold. */
 AmiBatonStats ami_baton_stats;
+
+/*
+ * The public anchor for those counters and the tick task's, so a debugger on a
+ * frozen machine can find them without the stack's help.  Rationale and the
+ * three ways in are in include/aminetxduo/health.h.
+ *
+ * It points at the live counters rather than copying them, so there is nothing
+ * to keep up to date and nothing to be stale at the moment it matters.
+ */
+static AmiHealthMark ami_health_mark;
+static char          ami_health_name[] = AMI_HEALTH_NAME;
+static BOOL          ami_health_up;
+
+VOID ami_netstack_health_publish(VOID)
+{
+    if (ami_health_up)
+        return;
+
+    ami_health_mark.hm_Magic   = AMI_HEALTH_MAGIC;
+    ami_health_mark.hm_Version = (UWORD)AMI_HEALTH_VERSION;
+    ami_health_mark.hm_Size    = (UWORD)sizeof(AmiHealthMark);
+    ami_health_mark.hm_Tick    = (APTR)tx_amiga_tick_stats_live();
+    ami_health_mark.hm_Baton   = (APTR)&ami_baton_stats;
+
+    InitSemaphore(&ami_health_mark.hm_Semaphore);
+    ami_health_mark.hm_Semaphore.ss_Link.ln_Name = ami_health_name;
+    ami_health_mark.hm_Semaphore.ss_Link.ln_Pri  = 0;
+
+    /* Second stack on one machine: the first one's mark stays, and this one
+       goes unpublished rather than giving FindSemaphore() two answers. */
+    Forbid();
+    if (FindSemaphore((STRPTR)ami_health_name) == NULL)
+    {
+        AddSemaphore(&ami_health_mark.hm_Semaphore);
+        ami_health_up = TRUE;
+    }
+    Permit();
+}
+
+VOID ami_netstack_health_unpublish(VOID)
+{
+    if (!ami_health_up)
+        return;
+
+    /* Before the counters can go: a reader holds Forbid() across find and
+       copy, so this cannot take the mark out from under one. */
+    Forbid();
+    RemSemaphore(&ami_health_mark.hm_Semaphore);
+    ami_health_up = FALSE;
+    Permit();
+}
 
 /* Callers hold Forbid() around both of these. */
 static AmiBatonSlot *ami_baton_find(struct Task *task)

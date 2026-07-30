@@ -1068,6 +1068,13 @@ VOID tx_amiga_tick_stats(TX_AMIGA_TICK_STATS *stats)
 }
 
 
+TX_AMIGA_TICK_STATS *tx_amiga_tick_stats_live(VOID)
+{
+
+    return &_tx_amiga_tick;
+}
+
+
 /* -------------------------------------------------- library-style start -- */
 
 static VOID _tx_amiga_kernel_task_entry(VOID)

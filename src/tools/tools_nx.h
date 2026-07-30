@@ -270,6 +270,26 @@ typedef struct ToolStats
     ULONG           pool_empty_requests;
     ULONG           pool_empty_suspensions;
     ULONG           pool_invalid_releases;
+
+    /* NETSTATUS_HEALTH: whether the machine was ever held, not how much moved.
+       FALSE against a library that predates the selector. health_mark is the
+       address these came from when tool_health_mark() read them, and 0 when the
+       library answered instead. */
+    BOOL            have_health;
+    ULONG           health_mark;
+    ULONG           tick_ticks;
+    ULONG           tick_clipped;
+    ULONG           tick_lost;
+    ULONG           tick_service_us;
+    ULONG           tick_uptime_ms;
+    ULONG           tick_worst_stall_ms;
+    ULONG           tick_worst_service_us;
+    ULONG           baton_live;
+    ULONG           baton_live_max;
+    ULONG           baton_full;
+    ULONG           baton_transitions;
+    ULONG           baton_state_max;
+    ULONG           baton_moved;
 } ToolStats;
 
 /*
@@ -277,6 +297,13 @@ typedef struct ToolStats
  * code after printing a message.
  */
 LONG tool_stats(ToolStats *out);
+
+/*
+ * Only the health fields, and off the published mark rather than through the
+ * library: no OpenLibrary(), no allocation, no lock taken, so it answers on a
+ * machine that is already in trouble. TRUE if the mark was there.
+ */
+BOOL tool_health_mark(ToolStats *out);
 
 /* --------------------------------------------------------------- DHCP -- */
 

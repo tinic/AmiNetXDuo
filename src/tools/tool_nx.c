@@ -16,6 +16,10 @@
 
 #include "tools_nx.h"
 
+/* tool_health_mark(): the published mark, and the tick counters it points at. */
+#include "aminetxduo/health.h"
+#include "tx_amiga.h"
+
 /*
  * Static rather than automatic: a Shell command starts with a 4 KB stack and
  * the socket table alone is 512 bytes of answer. Each command runs one of
@@ -33,6 +37,7 @@ static union
     struct { NetStatusHeader hdr; NetStatusAddress6  e[TOOL_MAX_ADDR6]; } addr6;
     struct { NetStatusHeader hdr; NetStatusRoute6    e[TOOL_MAX_ROUTE6]; } route6;
     struct { NetStatusHeader hdr; NetStatusNeighbour e[TOOL_MAX_ND]; }     nd;
+    struct { NetStatusHeader hdr; NetStatusHealth    e; }      health;
 } nx_answer;
 
 /*
@@ -254,6 +259,8 @@ LONG tool_stats(ToolStats *out)
     /* Zeroed field by field rather than with memset: these tools link no libc. */
     out->have_ip = out->have_icmp = out->have_tcp = FALSE;
     out->have_udp = out->have_arp = out->have_pool = FALSE;
+    out->have_health   = FALSE;
+    out->health_mark   = 0;
     out->arp_count     = 0;
     out->arp_truncated = FALSE;
 
@@ -383,9 +390,100 @@ LONG tool_stats(ToolStats *out)
         }
     }
 
+    /* A library older than this selector fails the call rather than answering
+       zeroes, so have_health stays FALSE and nothing is printed. */
+    if (tool_netstatus_query(base, NETSTATUS_HEALTH, &nx_answer,
+                             sizeof(nx_answer.health),
+                             sizeof(NetStatusHealth)) > 0)
+    {
+        const NetStatusHealth *h = &nx_answer.health.e;
+
+        out->have_health             = TRUE;
+        out->tick_ticks              = h->nsl_TickTicks;
+        out->tick_clipped            = h->nsl_TickClipped;
+        out->tick_lost               = h->nsl_TickLost;
+        out->tick_service_us         = h->nsl_TickServiceUs;
+        out->tick_uptime_ms          = h->nsl_TickUptimeMs;
+        out->tick_worst_stall_ms     = h->nsl_TickWorstStallMs;
+        out->tick_worst_service_us   = h->nsl_TickWorstServiceUs;
+        out->baton_live              = h->nsl_BatonLive;
+        out->baton_live_max          = h->nsl_BatonLiveMax;
+        out->baton_full              = h->nsl_BatonFull;
+        out->baton_transitions       = h->nsl_BatonTransitions;
+        out->baton_state_max         = h->nsl_BatonStateMax;
+        out->baton_moved             = h->nsl_BatonMoved;
+    }
+
     tool_netstatus_close(base);
 
     return 0;
+}
+
+/* ------------------------------------------------------------- the mark -- */
+
+/*
+ * The same numbers as NETSTATUS_HEALTH, off the published mark instead
+ * (aminetxduo/health.h).  Nothing is opened and nothing is obtained, so this
+ * answers on a machine where the library would not -- which is the machine
+ * this whole block of counters exists for.
+ *
+ * Forbid() rather than ObtainSemaphore(): the stack removes the mark under
+ * Forbid() before the memory holding the counters can go, so a reader that
+ * holds it across the find and the copy cannot be reading a freed one.
+ * Obtaining it would mean blocking on the machine being diagnosed.
+ */
+BOOL tool_health_mark(ToolStats *out)
+{
+    const AmiHealthMark *mark;
+    TX_AMIGA_TICK_STATS  tick;
+    AmiBatonStats        baton;
+    BOOL                 ok = FALSE;
+
+    if (out == NULL)
+        return FALSE;
+
+    out->have_health = FALSE;
+    out->health_mark = 0;
+
+    Forbid();
+
+    /* (STRPTR): NDK 3.9 declares FindSemaphore(STRPTR), 3.2 CONST_STRPTR. */
+    mark = (const AmiHealthMark *)FindSemaphore((STRPTR)AMI_HEALTH_NAME);
+
+    if (mark != NULL &&
+        mark->hm_Magic   == AMI_HEALTH_MAGIC &&
+        mark->hm_Version == (UWORD)AMI_HEALTH_VERSION &&
+        mark->hm_Size    == (UWORD)sizeof(AmiHealthMark) &&
+        mark->hm_Tick    != NULL &&
+        mark->hm_Baton   != NULL)
+    {
+        tick  = *(const TX_AMIGA_TICK_STATS *)mark->hm_Tick;
+        baton = *(const AmiBatonStats *)mark->hm_Baton;
+        out->health_mark = (ULONG)mark;
+        ok = TRUE;
+    }
+
+    Permit();
+
+    if (!ok)
+        return FALSE;
+
+    out->have_health           = TRUE;
+    out->tick_ticks            = tick.tx_amiga_tick_delivered;
+    out->tick_clipped          = tick.tx_amiga_tick_clipped;
+    out->tick_lost             = tick.tx_amiga_tick_lost;
+    out->tick_service_us       = tick.tx_amiga_tick_service_us;
+    out->tick_uptime_ms        = tick.tx_amiga_tick_uptime_ms;
+    out->tick_worst_stall_ms   = tick.tx_amiga_tick_worst_stall_ms;
+    out->tick_worst_service_us = tick.tx_amiga_tick_worst_service_us;
+    out->baton_live            = baton.bs_Live;
+    out->baton_live_max        = baton.bs_LiveMax;
+    out->baton_full            = baton.bs_Full;
+    out->baton_transitions     = baton.bs_Transitions;
+    out->baton_state_max       = baton.bs_StateMax;
+    out->baton_moved           = baton.bs_BatonMoved;
+
+    return TRUE;
 }
 
 /* ------------------------------------------------------------------ DHCP -- */

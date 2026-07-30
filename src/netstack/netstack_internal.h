@@ -215,21 +215,12 @@ VOID ami_netstack_baton_release(VOID);
 VOID ami_netstack_baton_acquire(VOID);
 
 /*
- * Bracket counters. A freeze in here leaves nothing behind -- no Enforcer hit,
- * and a log that never reached disk -- so the evidence has to survive in memory
- * for a debugger or a later reader to pick up.
+ * The public anchor for the baton counters and the tick task's, published for
+ * as long as the stack is up. netstack_baton.c, and
+ * include/aminetxduo/health.h for what reads it.
  */
-typedef struct AmiBatonStats
-{
-    ULONG bs_Live;
-    ULONG bs_LiveMax;
-    ULONG bs_Full;
-    ULONG bs_Transitions;
-    ULONG bs_StateMax;
-    ULONG bs_BatonMoved;
-} AmiBatonStats;
-
-extern AmiBatonStats ami_baton_stats;
+VOID ami_netstack_health_publish(VOID);
+VOID ami_netstack_health_unpublish(VOID);
 
 /* ---------------------------------------------------------- adoption glue --
  *
