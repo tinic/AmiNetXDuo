@@ -387,7 +387,23 @@ __attribute__((constructor)) static void amiga_no_requesters(void)
  */
 struct Library *SocketBase = NULL;
 
-static void amiga_sock_cleanup(void)
+/*
+ * A destructor and not atexit().
+ *
+ * This toolchain's exit() is the crt0's, not newlib's -- crt0.o defines _exit,
+ * __exit and exit as one symbol, so libc's exit.o is never even pulled in -- and
+ * all it runs is the __EXIT_LIST__.  Nothing in libc.a puts __call_exitprocs()
+ * on that list (the only entries are __exitcommandline, __exit_fh and malloc's
+ * __free_all), so an atexit() handler in a linked client never runs at all.
+ * The DTOR list does: it is what makes dbprofile.c's report appear.
+ *
+ * Missing this cost 2,776 bytes per process and rather more than that in
+ * consequences: with no CloseLibrary() the library never runs
+ * bsd_child_destroy(), so the base, its descriptor table, every socket the
+ * process opened and its cached ThreadX registration all outlive it -- the last
+ * of those pointing at a dead task's stack.  docs/RESEARCH.md 78.2.
+ */
+__attribute__((destructor)) static void amiga_sock_cleanup(void)
 {
     if (SocketBase != NULL)
     {
@@ -416,7 +432,6 @@ static int amiga_sock_init(void)
     tags[1].ti_Data = 0;
     (void)nx_socketbasetaglist(tags);
 
-    atexit(amiga_sock_cleanup);
     return 0;
 }
 
