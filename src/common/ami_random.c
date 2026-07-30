@@ -86,9 +86,20 @@ static const ULONG sha256_k[64] =
 
 #define ROR32(x, n)     (((x) >> (n)) | ((x) << (32 - (n))))
 
+/*
+ * The message schedule is a 16-word ring, not the w[64] the specification is
+ * written with. Round i only reads w[i-16], w[i-15], w[i-7] and w[i-2], so the
+ * other 48 words are dead the moment they are produced and w[i&15] can be
+ * updated in place. Bit-identical, and 256 bytes of stack instead of 64.
+ *
+ * That matters here because this is the deepest frame under NX_RAND, and
+ * NX_RAND is on the caller's stack: an ephemeral port, a TCP ISN and a DNS
+ * query ID are all drawn inside a bsdsocket.library vector, and an AmigaDOS
+ * Shell gives 4 KB with no guard page.
+ */
 static VOID sha256_compress(Sha256 *ctx, const UBYTE *block)
 {
-    ULONG w[64];
+    ULONG w[16];
     ULONG a, b, c, d, e, f, g, h;
     int   i;
 
@@ -99,25 +110,32 @@ static VOID sha256_compress(Sha256 *ctx, const UBYTE *block)
                ((ULONG)block[i * 4 + 2] <<  8) |
                ((ULONG)block[i * 4 + 3]);
     }
-    for (i = 16; i < 64; i++)
-    {
-        ULONG s0 = ROR32(w[i - 15], 7) ^ ROR32(w[i - 15], 18) ^ (w[i - 15] >> 3);
-        ULONG s1 = ROR32(w[i - 2], 17) ^ ROR32(w[i - 2], 19) ^ (w[i - 2] >> 10);
-
-        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
-    }
 
     a = ctx->state[0]; b = ctx->state[1]; c = ctx->state[2]; d = ctx->state[3];
     e = ctx->state[4]; f = ctx->state[5]; g = ctx->state[6]; h = ctx->state[7];
 
     for (i = 0; i < 64; i++)
     {
-        ULONG s1  = ROR32(e, 6) ^ ROR32(e, 11) ^ ROR32(e, 25);
-        ULONG ch  = (e & f) ^ ((~e) & g);
-        ULONG t1  = h + s1 + ch + sha256_k[i] + w[i];
-        ULONG s0  = ROR32(a, 2) ^ ROR32(a, 13) ^ ROR32(a, 22);
-        ULONG maj = (a & b) ^ (a & c) ^ (b & c);
-        ULONG t2  = s0 + maj;
+        ULONG s0, s1, ch, maj, t1, t2;
+
+        if (i >= 16)
+        {
+            ULONG x = w[(i +  1) & 15];         /* w[i-15] */
+            ULONG y = w[(i + 14) & 15];         /* w[i-2]  */
+
+            s0 = ROR32(x, 7) ^ ROR32(x, 18) ^ (x >> 3);
+            s1 = ROR32(y, 17) ^ ROR32(y, 19) ^ (y >> 10);
+
+            /* w[i&15] is w[i-16]; w[(i+9)&15] is w[i-7]. */
+            w[i & 15] += s0 + w[(i + 9) & 15] + s1;
+        }
+
+        s1  = ROR32(e, 6) ^ ROR32(e, 11) ^ ROR32(e, 25);
+        ch  = (e & f) ^ ((~e) & g);
+        t1  = h + s1 + ch + sha256_k[i] + w[i & 15];
+        s0  = ROR32(a, 2) ^ ROR32(a, 13) ^ ROR32(a, 22);
+        maj = (a & b) ^ (a & c) ^ (b & c);
+        t2  = s0 + maj;
 
         h = g; g = f; f = e; e = d + t1;
         d = c; c = b; b = a; a = t1 + t2;
@@ -548,21 +566,29 @@ static ULONG gather_clock(EntropySample *s)
 /* ================================================================ collection */
 
 /*
- * ~460 bytes of EntropySample on the stack, plus 256 for SHA-256's message
- * schedule: under a kilobyte, which matters because this is reached from
- * bsd_lib_init() on the caller's task stack.
+ * The sample is static, not a local: at 460 bytes it was the largest single
+ * frame anywhere below a bsdsocket.library vector, and a vector runs on the
+ * caller's stack -- 4 KB from an AmigaDOS Shell, with no guard page and no
+ * MMU, so the overflow is silent and kills the machine somewhere else later.
+ * -fstack-usage put random_gather at 516 bytes and it sat under send(),
+ * connect() and every DNS lookup, since ami_random_bytes() seeds on first use.
+ *
+ * One writer: bsd_runtime_open() calls ami_random_init() from InitResident(),
+ * before the first socket exists, so nothing races the collection.
  */
+static EntropySample random_sample;
+
 static VOID random_gather(VOID)
 {
-    EntropySample s;
-    ULONG         credit = 0;
+    EntropySample   *s = &random_sample;
+    ULONG            credit = 0;
     struct EClockVal ev;
-    UBYTE        *p = (UBYTE *)&s;
-    ULONG         i;
+    UBYTE           *p = (UBYTE *)s;
+    ULONG            i;
 
-    /* Zero the whole struct rather than harvesting uninitialised stack: an
-     * uninitialised read is undefined behaviour the compiler may exploit. */
-    for (i = 0; i < sizeof(s); i++)
+    /* Zero the whole struct rather than harvesting whatever was there before:
+     * an uninitialised read is undefined behaviour the compiler may exploit. */
+    for (i = 0; i < sizeof(*s); i++)
         p[i] = 0;
 
     /* Forces compat.c to open timer.device if it is not open yet. */
@@ -571,17 +597,22 @@ static VOID random_gather(VOID)
     if (TimerBase != NULL)
     {
         ReadEClock(&ev);
-        s.eclock_lo = ev.ev_lo;
-        s.eclock_hi = ev.ev_hi;
+        s->eclock_lo = ev.ev_lo;
+        s->eclock_hi = ev.ev_hi;
     }
 
-    credit += gather_clock(&s);
-    credit += gather_exec(&s);
-    credit += gather_memory(&s);
-    credit += gather_tasks(&s);
-    credit += gather_jitter(&s);
+    credit += gather_clock(s);
+    credit += gather_exec(s);
+    credit += gather_memory(s);
+    credit += gather_tasks(s);
+    credit += gather_jitter(s);
 
-    pool_mix(&s, sizeof(s), credit);
+    pool_mix(s, sizeof(*s), credit);
+
+    /* Nothing else reads it, and leaving a machine fingerprint sitting in the
+       library's BSS is free to avoid. */
+    for (i = 0; i < sizeof(*s); i++)
+        p[i] = 0;
 }
 
 VOID ami_random_init(VOID)
