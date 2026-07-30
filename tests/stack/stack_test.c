@@ -77,14 +77,19 @@
 /* Enough passes that a per-call leak of stack shows up as a deeper mark, few
    enough that the emulator tier is not waiting on it. */
 #ifndef ST_ROUNDS
-#define ST_ROUNDS       64UL
+#define ST_ROUNDS       32UL
 #endif
 
 #define ST_PORT         7460
 #define ST_CHUNK        512UL
 #define ST_PATTERN      0xA5C3A5C3UL
 
-#define ST_TIMEOUT_TICKS (90 * 50)      /* 90 s at 50 ticks/s */
+/*
+ * Generous because the resolver calls are meant to fail and BSD_RESOLVE_TIMEOUT
+ * is 30 s each (src/bsdsocket/resolver.c). Waiting one out is the point -- the
+ * depth reached on the way to the timeout is the measurement.
+ */
+#define ST_TIMEOUT_TICKS (300 * 50)     /* 300 s at 50 ticks/s */
 
 /* The signal the worker sends the parent when it is done. */
 #define ST_DONE_SIGNAL  SIGBREAKB_CTRL_F
@@ -382,6 +387,53 @@ static APTR s_getservbyname(struct Library *base, const char *name,
     return res;
 }
 
+static LONG s_getaddrinfo(struct Library *base, const char *node,
+                          const char *service, APTR hints, APTR *res_out)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register APTR            a0  __asm("a0") = (APTR)node;
+    register APTR            a1  __asm("a1") = (APTR)service;
+    register APTR            a2  __asm("a2") = hints;
+    register APTR            a3  __asm("a3") = res_out;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
+
+    __asm __volatile ("jsr a6@(-810:W)"
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
+                        "=r" (_clob_a1)
+                      : "r" (a6), "r" (a0), "r" (a1), "r" (a2), "r" (a3)
+                      : "cc", "memory");
+    return res;
+}
+
+static LONG s_getnameinfo(struct Library *base, StAddr *sa, LONG salen,
+                          char *host, LONG hostlen, char *serv, LONG servlen,
+                          LONG flags)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register APTR            a0  __asm("a0") = sa;
+    register LONG            d0  __asm("d0") = salen;
+    register APTR            a1  __asm("a1") = host;
+    register LONG            d1  __asm("d1") = hostlen;
+    register APTR            a2  __asm("a2") = serv;
+    register LONG            d2  __asm("d2") = servlen;
+    register LONG            d3  __asm("d3") = flags;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
+
+    __asm __volatile ("jsr a6@(-822:W)"
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
+                        "=r" (_clob_a1)
+                      : "r" (a6), "r" (a0), "r" (d0), "r" (a1), "r" (d1),
+                        "r" (a2), "r" (d2), "r" (d3)
+                      : "cc", "memory");
+    return res;
+}
+
 static LONG s_getdtablesize(struct Library *base)
 {
     register struct Library *a6  __asm("a6") = base;
@@ -403,7 +455,8 @@ static LONG s_getdtablesize(struct Library *base)
  */
 typedef struct StResult
 {
-    ULONG   sr_Stack;               /* what the worker was given         */
+    ULONG   sr_Asked;               /* NP_StackSize we passed             */
+    ULONG   sr_Stack;               /* tc_SPUpper - tc_SPLower, measured   */
     ULONG   sr_Deepest;             /* bytes below tc_SPUpper ever used   */
     ULONG   sr_Untouched;           /* what the pattern still holds       */
     LONG    sr_Checks;
@@ -488,6 +541,14 @@ static ULONG st_mark(VOID)
 
     if (lo == NULL || hi == NULL)
         return 0;
+
+    /*
+     * The stack that arrived, not the one asked for. AROS rounds NP_StackSize
+     * up to its own floor -- 16 KB under the ROM the emulator tier boots -- so
+     * a run that reports 4096 without checking would be measuring something
+     * else and calling it the Shell default.
+     */
+    st_result.sr_Stack = (ULONG)((UBYTE *)hi - (UBYTE *)lo);
 
     for (p = lo; p < hi; p++)
         if (*p != ST_PATTERN)
@@ -629,24 +690,61 @@ static VOID st_worker_entry(VOID)
 
     /*
      * The resolver first, and before any socket: measurement puts
-     * gethostbyname and its relatives at three times the depth of send/recv,
-     * because they reach the DNS and mDNS clients and the DRBG under them.
-     * "localhost" comes out of DEVS:Internet/hosts without a query; the second
-     * name is expected to fail, which is the path that goes furthest.
+     * gethostbyname and its relatives at three times the depth of
+     * send/recv/WaitSelect, because they reach the DNS and mDNS clients and
+     * the DRBG under those.
+     *
+     * The names are chosen to MISS. "localhost" is answered out of
+     * DEVS:Internet/hosts before netstack_resolve() enters the bracket at all,
+     * so a run that only asked for that would report the shallow path and call
+     * it a pass. A name under .invalid (RFC 2606, guaranteed never to resolve)
+     * goes the whole way to the DNS client, and one under .local goes down the
+     * mDNS branch instead -- which is the deeper of the two.
+     *
+     * Failure is the expected answer and is not checked; the depth reached on
+     * the way to it is the measurement.
      */
     (VOID)s_gethostbyname(base, "localhost");
-    st_check(1, "gethostbyname returned", 0);
+    (VOID)s_gethostbyname(base, "no-such-host.invalid");
+    (VOID)s_gethostbyname(base, "no-such-host.local");
+    st_check(1, "gethostbyname reached the resolver three ways", 0);
 
     {
         UBYTE quad[4];
 
-        quad[0] = 127; quad[1] = 0; quad[2] = 0; quad[3] = 1;
+        /* TEST-NET-1 (RFC 5737): routed nowhere, so the reverse lookup takes
+           the long way round rather than answering from the hosts file. */
+        quad[0] = 192; quad[1] = 0; quad[2] = 2; quad[3] = 1;
         (VOID)s_gethostbyaddr(base, quad, 4, S_AF_INET);
         st_check(1, "gethostbyaddr returned", 0);
     }
 
     (VOID)s_getservbyname(base, "telnet", "tcp");
     st_check(1, "getservbyname returned", 0);
+
+    {
+        APTR list = NULL;
+
+        (VOID)s_getaddrinfo(base, "no-such-host.invalid", NULL, NULL, &list);
+        st_check(1, "getaddrinfo returned", 0);
+    }
+
+    {
+        char   host[64];
+        char   serv[16];
+        StAddr sa;
+
+        for (i = 0; i < sizeof(sa); i++)
+            ((UBYTE *)&sa)[i] = 0;
+        sa.sin_len    = (UBYTE)sizeof(sa);
+        sa.sin_family = S_AF_INET;
+        sa.sin_port   = (UWORD)23;
+        sa.sin_addr   = 0xC0000201UL;           /* 192.0.2.1 */
+
+        (VOID)s_getnameinfo(base, &sa, (LONG)sizeof(sa), host,
+                            (LONG)sizeof(host), serv, (LONG)sizeof(serv), 0);
+        st_check(1, "getnameinfo returned", 0);
+    }
 
     for (round = 0; round < ST_ROUNDS; round++)
     {
@@ -740,7 +838,7 @@ int main(int argc, char **argv)
     (VOID)argv;
 
     st_parent = FindTask(NULL);
-    st_result.sr_Stack = ST_STACK;
+    st_result.sr_Asked = ST_STACK;
 
     st_log("stack: the API from %lu bytes, which is the Shell default\n",
            (LONG)ST_STACK);
@@ -804,28 +902,49 @@ int main(int argc, char **argv)
     Delay(150);
 
     st_log("\n");
-    st_log("stack given     %lu bytes\n", (LONG)st_result.sr_Stack);
+    st_log("stack asked for %lu bytes\n", (LONG)st_result.sr_Asked);
+    st_log("stack granted   %lu bytes\n", (LONG)st_result.sr_Stack);
     st_log("deepest touched %lu bytes\n", (LONG)st_result.sr_Deepest);
     st_log("still unpainted %lu bytes of headroom\n",
            (LONG)st_result.sr_Untouched);
     st_log("bytes echoed    %ld\n", st_result.sr_Bytes);
 
-    if (st_result.sr_Deepest >= st_result.sr_Stack)
-        st_check(0, "the mark fits the stack it was given",
-                 (LONG)st_result.sr_Deepest);
-    else
-        st_check(1, "the mark fits the stack it was given",
-                 (LONG)st_result.sr_Deepest);
+    /*
+     * Reported, not asserted. AROS rounds NP_StackSize up to 16 KB, so under
+     * the ROM the emulator tier boots the worker never gets the 4 KB it asked
+     * for and the mark is measured against what it did get. On Kickstart the
+     * two agree; a reader has to be able to tell which run this was.
+     */
+    if (st_result.sr_Stack > st_result.sr_Asked)
+        st_log("note: this ROM rounded the request up, so the headroom below "
+               "is against %lu, not %lu\n",
+               (LONG)st_result.sr_Stack, (LONG)st_result.sr_Asked);
+
+    st_check(st_result.sr_Deepest < st_result.sr_Stack,
+             "the mark fits the stack that was granted",
+             (LONG)st_result.sr_Deepest);
+
+    /*
+     * The number the report is really about: what the deepest call cost,
+     * against the 4 KB a Shell command gets, whatever this ROM handed out.
+     */
+    st_check(st_result.sr_Deepest < ST_STACK,
+             "the mark fits 4 KB, which is what a Shell command has",
+             (LONG)st_result.sr_Deepest);
 
     /*
      * Headroom, not just survival. A run that touched all but a few dozen
      * bytes passed by luck: the next Enforcer hit or a slightly different
-     * interrupt on the way through would have gone over. An eighth of the
+     * interrupt on the way through would have gone over. An eighth of a Shell
      * stack is the bar.
      */
-    st_check(st_result.sr_Untouched >= (st_result.sr_Stack / 8),
-             "an eighth of the stack was never touched",
-             (LONG)st_result.sr_Untouched);
+    {
+        ULONG spare = (st_result.sr_Deepest < ST_STACK)
+                          ? (ST_STACK - st_result.sr_Deepest) : 0;
+
+        st_check(spare >= (ST_STACK / 8),
+                 "an eighth of a Shell stack was still spare", (LONG)spare);
+    }
 
     st_log("\nstack: %ld checks, %ld failures\n",
            st_result.sr_Checks, st_result.sr_Failures);
