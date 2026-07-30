@@ -354,6 +354,9 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                 return bsd_fail(base, AMI_EPIPE);
             }
 
+            AMI_WARN("bsdsocket: nx_tcp_socket_send %ld failed, nx status %ld,"
+                     " mss %ld, wait %ld", (LONG)filled, (LONG)status,
+                     (LONG)mss, (LONG)wait);
             return bsd_fail(base, bsd_wait_errno(wait, status));
         }
 
@@ -365,7 +368,15 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
     }
 
     if (sent == 0 && len > 0)
+    {
+        /* Which NetX Duo status the errno came from.  Half a dozen of them map
+           to EINVAL, and an application only ever sees the EINVAL -- which is
+           how `Error writing: Invalid argument` sat unattributed in
+           docs/RESEARCH.md 40.9. */
+        AMI_WARN("bsdsocket: send of %ld failed, nx status %ld, mss %ld, wait %ld",
+                 (LONG)len, (LONG)why, (LONG)mss, (LONG)wait);
         return bsd_fail(base, bsd_wait_errno(wait, why));
+    }
 
     return sent;
 }
