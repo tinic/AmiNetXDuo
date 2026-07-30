@@ -33,6 +33,7 @@ static union
     struct { NetStatusHeader hdr; NetStatusAddress6  e[TOOL_MAX_ADDR6]; } addr6;
     struct { NetStatusHeader hdr; NetStatusRoute6    e[TOOL_MAX_ROUTE6]; } route6;
     struct { NetStatusHeader hdr; NetStatusNeighbour e[TOOL_MAX_ND]; }     nd;
+    struct { NetStatusHeader hdr; NetStatusHealth    e; }      health;
 } nx_answer;
 
 /*
@@ -254,6 +255,7 @@ LONG tool_stats(ToolStats *out)
     /* Zeroed field by field rather than with memset: these tools link no libc. */
     out->have_ip = out->have_icmp = out->have_tcp = FALSE;
     out->have_udp = out->have_arp = out->have_pool = FALSE;
+    out->have_health   = FALSE;
     out->arp_count     = 0;
     out->arp_truncated = FALSE;
 
@@ -381,6 +383,30 @@ LONG tool_stats(ToolStats *out)
             out->pool_empty_suspensions  = sys->nss_PoolEmptySuspensions;
             out->pool_invalid_releases   = sys->nss_PoolInvalidReleases;
         }
+    }
+
+    /* A library older than this selector fails the call rather than answering
+       zeroes, so have_health stays FALSE and nothing is printed. */
+    if (tool_netstatus_query(base, NETSTATUS_HEALTH, &nx_answer,
+                             sizeof(nx_answer.health),
+                             sizeof(NetStatusHealth)) > 0)
+    {
+        const NetStatusHealth *h = &nx_answer.health.e;
+
+        out->have_health             = TRUE;
+        out->tick_ticks              = h->nsl_TickTicks;
+        out->tick_clipped            = h->nsl_TickClipped;
+        out->tick_lost               = h->nsl_TickLost;
+        out->tick_service_us         = h->nsl_TickServiceUs;
+        out->tick_uptime_ms          = h->nsl_TickUptimeMs;
+        out->tick_worst_stall_ms     = h->nsl_TickWorstStallMs;
+        out->tick_worst_service_us   = h->nsl_TickWorstServiceUs;
+        out->baton_live              = h->nsl_BatonLive;
+        out->baton_live_max          = h->nsl_BatonLiveMax;
+        out->baton_full              = h->nsl_BatonFull;
+        out->baton_transitions       = h->nsl_BatonTransitions;
+        out->baton_state_max         = h->nsl_BatonStateMax;
+        out->baton_moved             = h->nsl_BatonMoved;
     }
 
     tool_netstatus_close(base);

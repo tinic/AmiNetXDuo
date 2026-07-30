@@ -194,6 +194,22 @@ static VOID show_protocol_stats(const ToolStats *st)
     {
         tool_printf("\tno packet pool\n");
     }
+
+    /* A worst stall in the hundreds of milliseconds beside a service cost in
+       the hundreds of microseconds says the tick task was not dispatched. */
+    if (st->have_health)
+    {
+        tool_printf("\nscheduler:\n");
+        tool_printf("\t%lu ticks in %lu ms, %lu clipped, %lu lost\n",
+                    st->tick_ticks, st->tick_uptime_ms,
+                    st->tick_clipped, st->tick_lost);
+        tool_printf("\tworst stall %lu ms, service %lu us at the time\n",
+                    st->tick_worst_stall_ms, st->tick_worst_service_us);
+        tool_printf("\tbaton: %lu transitions, %lu at once at the peak\n",
+                    st->baton_transitions, st->baton_live_max);
+        tool_printf("\tbaton: %lu table full, %lu moved, state max %lu\n",
+                    st->baton_full, st->baton_moved, st->baton_state_max);
+    }
 }
 
 /*

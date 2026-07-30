@@ -64,18 +64,8 @@ typedef struct AmiBatonSlot
 
 static AmiBatonSlot ami_baton_slot[AMI_BATON_SLOTS];
 
-/*
- * What the bracket actually did, for the freeze hunt.  A hard lockup leaves no
- * Enforcer hit and no log, so the numbers have to be readable from outside
- * afterwards rather than printed as they happen.  All of these are touched
- * only under the Forbid() the callers already hold.
- *
- *   bs_Live / bs_LiveMax   tasks inside a bracket now, and the most ever
- *   bs_Full                times the table had no slot (the fail-open path)
- *   bs_Transitions         release/acquire pairs completed
- *   bs_StateMax            highest _tx_thread_system_state seen on entry
- *   bs_BatonMoved          times release() found the baton was not ours
- */
+/* Fields in aminetxduo/netstack.h. Touched only under the Forbid() the callers
+   already hold. */
 AmiBatonStats ami_baton_stats;
 
 /* Callers hold Forbid() around both of these. */
