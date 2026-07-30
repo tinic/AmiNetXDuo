@@ -105,12 +105,6 @@ Configuration follows Roadshow's layout — `DEVS:NetInterfaces/<name>`,
 
 The installer copies all of them into `C:`.
 
-## ssh
-
-The archive also carries `ssh`, a ported Unix program rather than a command we
-wrote — it is Dropbear's `dbclient` under a shorter name, connecting to an
-ordinary modern server with a key or a password.
-
 ## Finding the machine by name
 
 The Amiga answers to **`<hostname>.local`** on the local network, so another
