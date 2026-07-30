@@ -36,6 +36,17 @@ sana2_driver_for() {
     esac
 }
 
+# Where a hand-placed driver lives.  Most of these cannot be fetched -- the
+# licences in docs/RESEARCH.md 77 permit two of eight -- so the rest arrive by
+# somebody putting the file there, and that store is the supported way to do
+# it.  Echoes the path, or nothing.
+sana2_local_driver() {
+    for _d in ${AMINETXDUO_SANA2_STORE:-} "$HOME/amiga-assets/devs"; do
+        [ -f "$_d/$1" ] && { echo "$_d/$1"; return 0; }
+    done
+    return 0
+}
+
 # Stage the driver for $1 into $2 and point DEVS:NetInterfaces/eth0 at it.
 # Echoes a warning and returns 0 when there is no driver to stage: the card is
 # then in the machine with nothing able to open it, which is a result.
