@@ -123,18 +123,25 @@ static VOID argv_leave_stack(int status)
 {
     struct Task *self;
 
-    if (!argv_on_swapped)
+    self = FindTask(NULL);
+
+    /*
+     * Nothing here belongs to any task but the one that swapped.  A client may
+     * have started Processes of its own out of this same code image -- Dropbear's
+     * console reader does -- and they share these statics; restoring the swapping
+     * task's stack bounds onto one of them would leave it advertising a stack it
+     * is not on, and clearing argv_on_swapped on its behalf would cost the real
+     * owner both its bounds and its FreeMem().  So this is checked before
+     * anything is written, and everyone else falls through to __real_exit().
+     */
+    if (!argv_on_swapped || argv_owner != self)
         return;
 
-    self              = FindTask(NULL);
     argv_on_swapped   = FALSE;
     self->tc_SPLower  = argv_sss.stk_Lower;
     self->tc_SPUpper  = (APTR)argv_sss.stk_Upper;
 
-    /* Only the task that swapped may jump: a client may have started processes
-       of its own out of this same code image (Dropbear's console reader does),
-       and their exit() must not land on somebody else's stack. */
-    if (argv_exit_armed && argv_owner == self)
+    if (argv_exit_armed)
     {
         argv_result     = status;
         argv_exit_armed = FALSE;
