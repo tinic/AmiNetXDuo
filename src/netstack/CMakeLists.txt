@@ -8,7 +8,8 @@ set(NETSTACK_SOURCES
     netstack.c
     netstack_baton.c
     netstack_dns.c
-    netstack_rexx.c)
+    netstack_rexx.c
+    netstack_rexx_vars.c)
 
 # The floor build never compiles this file, so IPv6 costs it nothing at all --
 # not even a branch on a "is IPv6 on" flag.
