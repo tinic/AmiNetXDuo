@@ -20089,3 +20089,214 @@ the same reason they are missing on winbuilder, and until that is solved the
 nightly tier is one card wide. What Amiberry buys immediately is that the tier
 can exist at all on the machine CI already owns, and that the A2065 leg of it
 actually reaches a network — which, on this host, the current emulator does not.
+
+## 77. What the SANA-II driver licences actually say (2026-07-30)
+
+§76 ends on the finding that eight of the nine emulated cards fail at
+`netstack_startup() (0xFFFFFFFE)` for one reason only: the third-party SANA-II
+driver is not there. This section is the licence question that gates fetching
+them, settled per driver, with the sentence that settles it. It is recorded here
+so it does not get re-litigated: the answers are mostly "no", and the reasons
+are specific rather than general caution.
+
+Vendoring is not on the table for any of them. Aminet's upload terms grant
+distribution *via Aminet*, which is a licence for Aminet to serve the file, not
+a licence for this repository to carry it onward. So the only question ever
+asked below is whether a script may **download** the file, never whether we may
+ship it.
+
+### 77.1 The table
+
+| driver | terms | verdict |
+| --- | --- | --- |
+| `cnet.device` | Public Domain, explicitly, by all three authors | **fetch** |
+| `hydra.device` | `Distribution: Aminet`, with the rights holders named | **fetch** |
+| `x-surf.device`, `x-surf-100.device` | iComp wiki: no reproduction elsewhere | user downloads by hand |
+| `ariadne.device` | "All rights reserved" | no |
+| `ariadne_ii.device` | no licence text of any kind | no |
+| `eb920.device` | no licence text of any kind | no |
+| `a2065.device` | Commodore's, no public grant | no |
+
+### 77.2 cnet.device — public domain, and it says so
+
+`aminet.net/driver/net/cnetdevice.lha` (v1.9, sha256 `65580fae…`) carries
+`cnetdevice/cnet.guide`, whose "Legal Mush" node quotes the original author:
+
+> To encourage further development in PC-CARD devices for the Amiga, I am
+> placing the source code for this project into the Public Domain. You can
+> freely use or abuse it as you wish. I have also included some other authors'
+> code for reference purposes, please respect their copyrights.
+
+— Bruce Abbott, `cnetdevice/cnet.guide` node `legal`, repeated verbatim in
+`cnetdevice/readme`. The two later maintainers extend it in the same node:
+
+> Special thanks go to Bruce Abbott for making cnet.device public domain. This
+> `legal mush' quote still applies, although I tried to remove as many bugs as
+> I could. cnet.device v1.2 - v1.8 is still public domain and full source code
+> is included. Enjoy!
+>
+> - Harry "Piru" Sintonen, 27th Oct 2002.
+> - Rolf Anders, 5th Jan 2007.
+
+Rolf Anders is the v1.9 author and co-signs that node in the v1.9 archive, so
+the declaration covers the version we fetch. The archive ships full assembler
+source alongside the binaries, which is consistent with the claim rather than
+merely asserting it. This is the one driver of the eight where redistribution
+would also have been fine; we still only fetch it, because there is no reason
+to hold a binary we can get from its own publisher.
+
+`cnet.device` is the NE2000 PCMCIA driver, and `ne2000_pcmcia` is emulated as
+an actual PCMCIA NE2000, so this is also the one most likely to *work* — which
+77.5 confirms it does.
+
+### 77.3 hydra.device — a real grant, from the people entitled to give it
+
+The binary's own version string is
+`Copyright © 1992-1994 by JMP-Electronics / Bits & Chips, Finland`, so this is
+not abandoned-in-fact-so-assume-yes. What makes it fetchable is that the
+rights holders said so. `aminet.net/driver/net/HydraDriver145src.readme`:
+
+> Distribution: Aminet
+
+and, in the body:
+
+> Thanks to the following people for giving their permission to upload this
+> source code:
+>
+> - Graham Heggie, the creator of the Amiganet hardware
+> - Jukka Marin, the owner of JMP Electronics
+> - Teemu Rossi, Timo's brother
+
+The hardware's creator, the owner of the company in the copyright string, and
+the late author's estate — that is the full set. The same text ships inside the
+archive as `HydraDriver145src/hydrasrc.readme`, so the grant travels with the
+files rather than living only in Aminet's metadata.
+
+The grant is to distribute **via Aminet**, and that is exactly what a fetch
+from Aminet is. It is not a licence to mirror, so the script does not.
+
+Note which archive this is. `HydraDriver144.lha` is the plain binary release and
+has **no** `Distribution:` line and no `Type:` line at all — on its own it would
+be a "no". `HydraDriver145src.lha` is the source release, it carries the grant,
+and it contains `HydraDriver145src/hydra.device`, the last released 1.44 binary.
+So the archive with the licence is also the archive with the driver, and the
+one that looks like the obvious download is the one that cannot be justified.
+
+### 77.4 The four refusals, and the one in between
+
+**`ariadne.device` — no.** `Ariadne_v150.lha` from the Amiga Hardware Database
+contains `ariadne.device.readme`, which is Village Tronic's own, and its second
+line is:
+
+> Copyright © 1994-1996 Village Tronic Marketing GmbH
+> All rights reserved
+
+"All rights reserved" is an explicit reservation, not an absence of a statement.
+The company is gone, which changes who could grant permission, not whether
+permission was granted. Aminet has no Ariadne driver at all — searching for it
+returns only `docs/rview/Ariadne.readme`, a comp.sys.amiga.reviews review — so
+there is no second source with better terms.
+
+**`ariadne_ii.device` — no.** `AriadneII_43_12.lha` contains exactly two files,
+`ariadne_ii.device` and `Ariadne2Info`, and no licence text of any kind. The
+binary's version string is `ariadne_ii 43.12 (15.1.99)` with no copyright line
+at all. Same vendor as above, no grant found anywhere. Terms that cannot be
+established are a "no", so this is one.
+
+**`eb920.device` — no.** `aminet.net/driver/net/eb920-sanaII.readme` names
+`ASDG, Inc.` as author and a third party as uploader, has **no**
+`Distribution:` field, and its body is a bug workaround rather than a licence:
+
+> It seems many owners of the EB920/Lan Rover Ethernet Card has experienced
+> problems of getting the card working with tcp/ip. Due to ASDG not supporting
+> this card anymore, I present the drivers and my solution to the problem.
+
+"Due to ASDG not supporting this card anymore" is the uploader's reason for
+posting it, and it is not a grant from ASDG. The archive is the original 1996
+install disk — `sanaII/devs_i2/eb920.device`, `sanaII/devs_i6/eb920.device`,
+Commodore's `Installer`, and a `sanaII/ReadMe` that is entirely about setting
+the station address on cards with an empty ROM socket. No licence text
+anywhere in it.
+
+**`a2065.device` — no, confirmed.** This was already recorded at
+`docs/DEVELOPMENT.md:309` and `tools/ci.sh:92` as Commodore's and not
+redistributable; the point of re-checking was to not take our own word for it.
+Nothing found changes it. The Amiga Hardware Database page for the A2065 offers
+only `A2065.pdf`, the German manual — no driver. Aminet's nearest thing is
+`driver/net/a2065v216a.lha`, which is not Commodore's driver but a third party's
+patch of it, and is self-describing on the point:
+
+> Based on the a2065.device source code v2.16, I corrected the non standard way
+> the Commodore driver "speaks" Ethernet.
+
+A derivative of Commodore's source, with no `Distribution:` field and no
+licence text, inherits the problem rather than solving it. `a2065.device`
+remains a bring-your-own file, which is what `AMINETXDUO_A2065` is for.
+
+**`x-surf.device` and `x-surf-100.device` — download them yourself.** These are
+the in-between case, and the only one where the answer is not simply no.
+Individual Computers publish `X-surf-1.16.lha` for free on their own wiki, no
+registration and no click-through, and it contains both drivers plus
+`x-surf-100.txt`. That text file has no copyright line, no licence and no
+distribution statement — it is purely configuration and version history. The
+terms therefore come from the site, and `wiki.icomp.de/wiki/IndividualComputers:Copyrights`
+says:
+
+> Unless expressed otherwise, the contents of the iComp Wiki are (C) individual
+> Computers Jens Schönfeld GmbH and may not be reproduced anywhere else without
+> written permission.
+
+with the footer of every page reading "Content is available under copyright
+restrictions unless otherwise noted." So the terms *are* established, and what
+they establish is a reservation. A person who owns an X-Surf clicking the link
+on the vendor's own page is doing what the page is for. A CI job pulling the
+same file on every run is neither that person nor covered by anything on that
+page, and it spends the vendor's bandwidth to do it.
+
+So the script does not fetch these, and says why when asked, pointing at the
+wiki page. Once downloaded by hand, `AMINETXDUO_SANA2_DRIVER=<path>` stages
+them exactly as it already did — no new mechanism, and §44.9's X-Surf-100
+results were obtained that way in the first place.
+
+### 77.5 tools/fetch-sana2-drivers.sh, and cnet.device bringing up an interface
+
+The script follows `tools/fetch-toolchain.sh`: sha256 on every download,
+refusal rather than fallback on a mismatch, and a cache under
+`~/.cache/aminetxduo/sana2-drivers/<sha12>/`. It fetches the two archives 77.2
+and 77.3 permit, extracts only the `.device` members, and deletes the archives.
+Nothing it writes is inside the working tree.
+
+Asked for a refused driver it names the reason rather than saying "unknown
+driver", so a user who wonders why the X-Surf column is empty learns it from
+the tool instead of from this file:
+
+```
+$ tools/fetch-sana2-drivers.sh --print-path x-surf-100.device
+!! x-surf-100.device is not fetched automatically.
+   Individual Computers publish it, but wiki.icomp.de's copyright page
+   reserves reproduction elsewhere without written permission, so a CI
+   fetch is not covered.
+   Download X-surf-1.16.lha by hand:  https://wiki.icomp.de/wiki/X-Surf-100
+   Then:  AMINETXDUO_SANA2_DRIVER=<path>/x-surf-100.device
+```
+
+**It unblocks a card.** `ne2000_pcmcia` is emulated as a real PCMCIA NE2000 and
+`cnet.device` is a real PCMCIA NE2000 driver, so the pairing is not a
+coincidence of names. Staged with `tools/sana2-stage.sh` into `DEVS:Networks`
+and run under Amiberry, `netstack_test` goes from §76.3's
+
+```
+FAIL netstack_startup() (0xFFFFFFFE)
+```
+
+to a DHCP lease and a resolved name, which is the same result the A2065 gets.
+That is one of the eight cards moved from blocked to covered by fetching a file,
+and it is the first evidence that the eight were blocked *only* on the drivers
+rather than on anything about the boards.
+
+`hydra.device` is fetched on the same terms but is a different matter
+technically: §76.3 records the emulated `hydra` board logging
+`Card 5: Z2 0x00e90000 64K IO NE2000`, and the real Hydra/AmigaNet is not an
+NE2000, so a driver written for the real card is not expected to drive that
+core. Fetching it is legitimate; whether the emulator gives it anything to
+talk to is a separate question and is not claimed here.
