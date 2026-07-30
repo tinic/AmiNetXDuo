@@ -34,6 +34,9 @@
 
 #include "tx_thread.h"
 #include "tx_timer.h"
+#include "tx_amiga.h"
+
+#include "aminetxduo/health.h"
 
 #include <exec/tasks.h>
 #include <proto/exec.h>
@@ -63,6 +66,61 @@ typedef struct AmiBatonSlot
 } AmiBatonSlot;
 
 static AmiBatonSlot ami_baton_slot[AMI_BATON_SLOTS];
+
+/* Fields in aminetxduo/netstack.h. Touched only under the Forbid() the callers
+   already hold. */
+AmiBatonStats ami_baton_stats;
+
+/*
+ * The public anchor for those counters and the tick task's, so a debugger on a
+ * frozen machine can find them without the stack's help.  Rationale and the
+ * three ways in are in include/aminetxduo/health.h.
+ *
+ * It points at the live counters rather than copying them, so there is nothing
+ * to keep up to date and nothing to be stale at the moment it matters.
+ */
+static AmiHealthMark ami_health_mark;
+static char          ami_health_name[] = AMI_HEALTH_NAME;
+static BOOL          ami_health_up;
+
+VOID ami_netstack_health_publish(VOID)
+{
+    if (ami_health_up)
+        return;
+
+    ami_health_mark.hm_Magic   = AMI_HEALTH_MAGIC;
+    ami_health_mark.hm_Version = (UWORD)AMI_HEALTH_VERSION;
+    ami_health_mark.hm_Size    = (UWORD)sizeof(AmiHealthMark);
+    ami_health_mark.hm_Tick    = (APTR)tx_amiga_tick_stats_live();
+    ami_health_mark.hm_Baton   = (APTR)&ami_baton_stats;
+
+    InitSemaphore(&ami_health_mark.hm_Semaphore);
+    ami_health_mark.hm_Semaphore.ss_Link.ln_Name = ami_health_name;
+    ami_health_mark.hm_Semaphore.ss_Link.ln_Pri  = 0;
+
+    /* Second stack on one machine: the first one's mark stays, and this one
+       goes unpublished rather than giving FindSemaphore() two answers. */
+    Forbid();
+    if (FindSemaphore((STRPTR)ami_health_name) == NULL)
+    {
+        AddSemaphore(&ami_health_mark.hm_Semaphore);
+        ami_health_up = TRUE;
+    }
+    Permit();
+}
+
+VOID ami_netstack_health_unpublish(VOID)
+{
+    if (!ami_health_up)
+        return;
+
+    /* Before the counters can go: a reader holds Forbid() across find and
+       copy, so this cannot take the mark out from under one. */
+    Forbid();
+    RemSemaphore(&ami_health_mark.hm_Semaphore);
+    ami_health_up = FALSE;
+    Permit();
+}
 
 /* Callers hold Forbid() around both of these. */
 static AmiBatonSlot *ami_baton_find(struct Task *task)
@@ -133,12 +191,19 @@ VOID ami_netstack_baton_release(VOID)
     {
         /* Out of slots. Leave the thread running rather than suspend one we
            cannot track, and warn. */
+        ami_baton_stats.bs_Full++;
         Permit();
         AMI_WARN("netstack: baton table full; '%s' will block holding the baton",
                  (thread->tx_thread_name != TX_NULL) ? thread->tx_thread_name
                                                      : (CHAR *)"?");
         return;
     }
+
+    ami_baton_stats.bs_Live++;
+    if (ami_baton_stats.bs_Live > ami_baton_stats.bs_LiveMax)
+        ami_baton_stats.bs_LiveMax = ami_baton_stats.bs_Live;
+    if ((ULONG)_tx_thread_system_state > ami_baton_stats.bs_StateMax)
+        ami_baton_stats.bs_StateMax = (ULONG)_tx_thread_system_state;
 
     slot->bs_Thread  = thread;
     slot->bs_Nesting = 1;
@@ -159,6 +224,13 @@ VOID ami_netstack_baton_release(VOID)
     {
         _tx_thread_current_ptr = TX_NULL;
         _tx_timer_time_slice   = (ULONG)0;
+    }
+    else
+    {
+        /* The baton is not ours to clear, so it stays pointing at a thread we
+           have just suspended and the scheduler has nobody to dispatch. If this
+           is ever non-zero after a freeze, that is the freeze. */
+        ami_baton_stats.bs_BatonMoved++;
     }
 
     _tx_thread_system_state--;
@@ -202,6 +274,9 @@ VOID ami_netstack_baton_acquire(VOID)
     }
 
     _tx_thread_system_state++;
+    if (ami_baton_stats.bs_Live > 0)
+        ami_baton_stats.bs_Live--;
+    ami_baton_stats.bs_Transitions++;
 
     Permit();
 

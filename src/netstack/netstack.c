@@ -1282,6 +1282,7 @@ static LONG ami_ns_bring_up(VOID)
     /* The stack exists from here on, address or not, so this releases anything
        waiting for `WaitForPort AMITCP`. */
     ami_ns_port_create();
+    ami_netstack_health_publish();
     ami_sana2_set_open_hooks(ami_netstack_rexx_suspend,
                              ami_netstack_rexx_resume);
 
@@ -1363,6 +1364,7 @@ VOID netstack_shutdown(VOID)
        at the port that is about to be freed, so they go first. */
     ami_sana2_set_open_hooks(NULL, NULL);
     ami_ns_port_delete();
+    ami_netstack_health_unpublish();
 
     /*
      * Teardown suspends the calling thread inside NetX Duo (nx_ip_delete()

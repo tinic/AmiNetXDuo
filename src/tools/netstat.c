@@ -1,14 +1,20 @@
 /*
  * netstat -- interfaces, routes and connections.
  *
- *     netstat INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S
+ *     netstat INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S,HEALTH=-h/S
  *
  * Every switch carries its Unix spelling as a ReadArgs alias, so "netstat -r"
  * and "netstat ROUTES" do the same thing and "netstat ?" shows both. With no
- * switches it prints everything.
+ * switches it prints everything except -h.
  *
  * -s is per-protocol statistics followed by the SANA-II per-interface counters;
  * no other switch shows the driver's own numbers.
+ *
+ * -h is the scheduler block on its own, and takes a different route to it: the
+ * published mark (aminetxduo/health.h) rather than a library call, so it opens
+ * nothing, allocates nothing and cannot block. That is what makes it usable on
+ * a machine that is halfway into the fault it is meant to describe, and it is
+ * why it is the one switch that works without a stack answering for itself.
  *
  * This command covers the same ground as ShowNetStatus: that one has named
  * categories and a diagnosis, this one has switches and columns. Neither reads
@@ -25,7 +31,7 @@ const char *const tool_name = "netstat";
 static const char version_tag[] __attribute__((used)) =
     "$VER: netstat 1.1 (26.7.2026)";
 
-#define TEMPLATE    "INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S"
+#define TEMPLATE    "INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S,HEALTH=-h/S"
 
 enum
 {
@@ -33,6 +39,7 @@ enum
     ARG_ROUTES,
     ARG_ALL,
     ARG_STATS,
+    ARG_HEALTH,
     ARG_COUNT
 };
 
@@ -105,6 +112,31 @@ static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
 
         show_addresses6(snap, info->nx_index);
     }
+}
+
+/*
+ * A worst stall in the hundreds of milliseconds beside a service cost in the
+ * hundreds of microseconds says the tick task was not dispatched, rather than
+ * that it was slow. Anything but zero on the last line is a defect.
+ */
+static VOID show_scheduler(const ToolStats *st)
+{
+    if (!st->have_health)
+        return;
+
+    tool_printf("\nscheduler:\n");
+    tool_printf("\t%lu ticks in %lu ms, %lu clipped, %lu lost\n",
+                st->tick_ticks, st->tick_uptime_ms,
+                st->tick_clipped, st->tick_lost);
+    tool_printf("\tworst stall %lu ms, service %lu us at the time\n",
+                st->tick_worst_stall_ms, st->tick_worst_service_us);
+    tool_printf("\tbaton: %lu transitions, %lu at once at the peak\n",
+                st->baton_transitions, st->baton_live_max);
+    tool_printf("\tbaton: %lu table full, %lu moved, state max %lu\n",
+                st->baton_full, st->baton_moved, st->baton_state_max);
+
+    if (st->health_mark != 0)
+        tool_printf("\tmark at 0x%08lx\n", st->health_mark);
 }
 
 /*
@@ -194,6 +226,8 @@ static VOID show_protocol_stats(const ToolStats *st)
     {
         tool_printf("\tno packet pool\n");
     }
+
+    show_scheduler(st);
 }
 
 /*
@@ -338,6 +372,7 @@ int main(int argc, char **argv)
     BOOL             want_routes;
     BOOL             want_conn;
     BOOL             want_stats;
+    BOOL             want_health;
 
     (VOID)argv;
 
@@ -350,6 +385,7 @@ int main(int argc, char **argv)
     args[ARG_ROUTES]     = 0;
     args[ARG_ALL]        = 0;
     args[ARG_STATS]      = 0;
+    args[ARG_HEALTH]     = 0;
 
     rda = ReadArgs((CONST_STRPTR)TEMPLATE, args, NULL);
     if (rda == NULL)
@@ -362,9 +398,33 @@ int main(int argc, char **argv)
     want_routes = (args[ARG_ROUTES] != 0) ? TRUE : FALSE;
     want_conn   = (args[ARG_ALL] != 0) ? TRUE : FALSE;
     want_stats  = (args[ARG_STATS] != 0) ? TRUE : FALSE;
+    want_health = (args[ARG_HEALTH] != 0) ? TRUE : FALSE;
 
-    if (!want_if && !want_routes && !want_conn && !want_stats)
+    if (!want_if && !want_routes && !want_conn && !want_stats && !want_health)
         want_if = want_routes = want_conn = TRUE;
+
+    /*
+     * -h on its own reads the mark and stops. Nothing below this runs: the
+     * snapshot would open bsdsocket.library and take the stack's own locks,
+     * which is exactly what a command asking whether the stack is stuck must
+     * not do.
+     */
+    if (want_health && !want_if && !want_routes && !want_conn && !want_stats)
+    {
+        BOOL got = tool_health_mark(&stats);
+
+        FreeArgs(rda);
+
+        if (!got)
+        {
+            tool_error("no AmiNetXDuo stack is running, so there is nothing "
+                       "to report on");
+            return RETURN_WARN;
+        }
+
+        show_scheduler(&stats);
+        return RETURN_OK;
+    }
 
     /*
      * Straight to the running library. Do not add a tool_require_stack() call:
@@ -407,6 +467,10 @@ int main(int argc, char **argv)
         show_routes(cfg);
     if (want_conn)
         show_connections(&snap);
+
+    /* -h alongside something else: -s has already printed it. */
+    if (want_health && !want_stats && tool_health_mark(&stats))
+        show_scheduler(&stats);
 
     FreeArgs(rda);
     return RETURN_OK;

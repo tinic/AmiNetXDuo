@@ -907,6 +907,16 @@ UINT                 armed;
                     ticks - (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP;
                 _tx_amiga_tick.tx_amiga_tick_clipped++;
 
+                /* Kept for every stall, not just the three that get logged. */
+                if ((ULONG) (delta / eclock_per_ms) >
+                    _tx_amiga_tick.tx_amiga_tick_worst_stall_ms)
+                {
+                    _tx_amiga_tick.tx_amiga_tick_worst_stall_ms =
+                        (ULONG) (delta / eclock_per_ms);
+                    _tx_amiga_tick.tx_amiga_tick_worst_service_us =
+                        (last_service * 1000UL) / eclock_per_ms;
+                }
+
                 if (_tx_amiga_tick.tx_amiga_tick_clipped <= 3UL)
                 {
                     /* The previous wakeup's service cost is in the message
@@ -1032,6 +1042,13 @@ VOID tx_amiga_tick_stats(TX_AMIGA_TICK_STATS *stats)
     Forbid();
     *stats =  _tx_amiga_tick;
     Permit();
+}
+
+
+TX_AMIGA_TICK_STATS *tx_amiga_tick_stats_live(VOID)
+{
+
+    return &_tx_amiga_tick;
 }
 
 
