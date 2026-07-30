@@ -20797,7 +20797,8 @@ megabyte: it is measured four different ways and its cause is not named.
 **§78 names both defects and corrects this section on two points.** The megabyte
 is not one leak but three costs, none of them where 77.5 looked, and the server
 process it attributes them to was never exiting — so the per-primitive server
-table it is owed was never going to print either. `NX_CALLER_ERROR` is not
+table it is owed was never going to print either -- it does now, and 78.5
+confirms this section's derivation to 0.15%. `NX_CALLER_ERROR` is not
 confined to the calls that reported it: the same defect let two Exec Tasks into
 NetX Duo at once for every call that did *not* report it, which is where 77.7's
 wedges and 77.3's throughput went.
@@ -21041,7 +21042,38 @@ all twelve skips are `host helper not connected` — the bridged tier, as always
 thread for its own socket goes faster. The two figures were not taken in one
 session, so treat the size of the gap as approximate and the sign as solid.
 
-### 78.5 What phase 4 starts on
+### 78.5 The server's own table, and why §77.2 never got one
+
+§77.2 owed a per-primitive profile from the *server* process and said nobody knew
+why `dbprofile.c` printed from `dbclient` and never from `dropbear`. §78.3 is why:
+the server never exited, so neither its `atexit()` list nor its DTOR list ever
+ran. It prints now. Both ends of one loopback login, `-p` on both:
+
+| primitive | calls | server ms | client ms |
+|---|---:|---:|---:|
+| curve25519 scalar multiply | 2 | 2,649 | 2,674 |
+| ed25519 sign | 1 | 2,646 | 2,656 |
+| ed25519 verify | 1 | 5,190 | 5,178 |
+| `sha512_process` *(nested in the two above)* | 9 | 6 | 18 |
+| `sha256_process` | 40 / 35 | 5 | 6 |
+| `chacha_crypt` | 62 / 64 | 86 | 47 |
+| `poly1305_process` | 18 | 11 | 11 |
+| **public-key subtotal** | | **10,590** | **10,574** |
+| whole process | | 34,404 | 22,326 |
+
+**§77.2's derivation was right to 0.15%.** It argued from the symmetry of the
+protocol that "a server on this machine costs the same arithmetic as a client,
+and no more" — two scalar multiplications, one sign, one verify, ≈10.5 s — and
+flagged it as arithmetic rather than measurement. 10,590 against 10,574 ms, in
+one run, on one CPU. Every individual row matches too, within 1% on the three
+that matter.
+
+The server's 34,404 ms whole-process figure is not a handshake: it includes the
+twelve seconds it spent listening before the client arrived, which is why
+`select()` is 67% of it against the client's 50%. The public-key subtotal is the
+row to read, and it is the client's.
+
+### 78.6 What phase 4 starts on
 
 **`scp` is not built, and the blocker is one thing.** Dropbear vendors OpenSSH's
 `scp.c` (`third_party/dropbear/src/scp.c`), so the server side of both directions
@@ -21061,3 +21093,11 @@ its own `MsgPort`. A pipe for a spawned command is the same object with a ring
 buffer behind it instead of a socket, it needs no `PIPE:` mount on the boot
 volume, and it makes every interactive command work over a channel rather than
 only `scp`.
+
+**`scp.c` itself is four functions short and nothing else**, which is worth
+recording because it is much less than the file's 1,500 lines suggest. Compiled
+with the server's own flags and `localoptions.h`, `scpmisc.c` is clean and
+`scp.c` wants `opendir()`, `readdir()`, `closedir()` — `rsource()`, so `-r` only
+— and `nanosleep()`, for the `-l` bandwidth limit. The Amiga-as-*client*
+direction is a separate problem again: `do_cmd()` is a `fork()` plus `execvp()`
+of `ssh` across two pipes, and the shim answers both with `ENOSYS` on purpose.
