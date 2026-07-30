@@ -117,7 +117,7 @@ while [ $# -gt 0 ]; do
         --check)      MODE="check" ;;
         --print-path) MODE="printpath"; WANT_NAME="${2:-}"; shift ;;
         --force)      FORCE=1 ;;
-        -h|--help)    sed -n '2,79p' "$0"; exit 0 ;;
+        -h|--help)    sed -n '2,67p' "$0"; exit 0 ;;
         -*) echo "usage: $0 [--list|--print-dir|--print-sha|--check|--print-path NAME] [--force] [driver...]" >&2; exit 2 ;;
         *)  SELECTED+=("$1") ;;
     esac
