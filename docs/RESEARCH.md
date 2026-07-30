@@ -20505,3 +20505,391 @@ WinUAE matrix and above nothing: `tests/netstack/run-amiberry.sh` on SLIRP is
 already a CI-shaped test (no capability, no LAN, 11 seconds), and the `-B ens18`
 form is the nightly. Splitting them that way means the common case stays
 hermetic and the bridged case is where the interesting failures live.
+
+## 79. Every hop a packet takes through Amiberry, and the four places they are thrown away (2026-07-30)
+
+An EAB user freezes a real Amiga solid during a filesystem copy — no Enforcer
+hit, no MungWall hit, no log line, several CTRL-Amiga-Amiga to get out — while
+`ttcp` on the same machine is clean at 850 KB/s both directions. The difference
+between those two workloads is not bytes, it is packet operations per byte: a
+filesystem does small round trips where `ttcp` does 8 KB streaming writes. If
+what drives our `Forbid()` duty cycle towards 100% is packet rate, then the
+reproduction needs an emulator that can be flooded, and the standing suspicion
+was that ours cannot be.
+
+This is the whole path, both directions, measured rather than argued, and then
+held at saturation for five minutes to see what the stack does when it can
+never keep up.
+
+### 79.1 The rig, and what in it is a fork
+
+`~/amiberry` on playhouse3 is upstream `0fd577e`, and it was clean before this
+work and clean after — checked both times. **The instrumented tree is a
+separate fork**, `~/amiberry-rig`, branch `anxd-packet-rate-rig` off the same
+commit, built into its own `build/`. Nothing here is proposed for upstream and
+nothing in the repository depends on it. It exists because the numbers below
+cannot be obtained any other way (79.4), and because another agent was running
+benchmarks against `~/amiberry/build/amiberry` at the time.
+
+The fork adds one atomic counter at each hop, a knob for each of the three
+constants that bound the path, and a once-a-second line in the emulator log:
+
+```
+ANXD dt=1.000 hsync=15628 hz=15628 | RX pcap=578335 uq_enq=48084 uq_drop=530251
+ uq_deq=48084 uq_max=51 poll=15628 | a2065 got=48084 ringfull=15899 drain=47814
+ hitlim=8 nofit=0 nospace=47251 deliv=32186 ringmax=255 | TX chk=15628 do=15628
+ frames=3 nodesc=15625 busy=0
+```
+
+Guest side: an A1200, 68020, real Kickstart 3.1 (40.68), `a2065.device`, the
+A2065 bound to `ens18` through `uaenet_pcap`, DHCP lease from the real LAN.
+The guest program is a scratch build of `tests/netstack/netstack_test.c` that
+brings the stack up and then reports `nx_ip_info_get()`, `TX_AMIGA_TICK_STATS`
+and `AmiBatonStats` every five seconds; it is built from `origin/baton-freeze`
+(`658f546`) and lives in `/tmp`, not in the repository. Load comes from
+playhouse2 (192.168.1.184, 24 cores) as 100-byte UDP to a closed port, which is
+142 bytes on the wire.
+
+One trap worth writing down: **the host cannot flood its own guest.** Frames
+the emulator sends go out through `pcap_sendpacket()`
+(`osdep/amiberry_uaenet.cpp:732`), which injects below the host's own receive
+path, so the host never sees the guest's ARP replies and its own packets to the
+guest are dropped at an unresolved neighbour entry. The first attempt sent
+26 million datagrams at 932 k/s and the guest received three. The flood has to
+come from a different machine on the LAN.
+
+### 79.2 The clock: one handler per scanline, and only PAL/NTSC moves it
+
+Every hop below is paced by `devices_hsync()`, called from `hsync_handler_pre()`
+at `custom.cpp:5560`, which runs `execute_device_items(device_hsyncs, ...)`
+(`devices.cpp:346`) — once per emulated scanline. The A2065 registers into that
+list at `a2065.cpp:1369`.
+
+Measured, by counting handler entries against `CLOCK_MONOTONIC`, ten one-second
+samples per configuration:
+
+| configuration | median Hz |
+| --- | --- |
+| PAL, defaults | **15,628** |
+| `ntsc=true` | 15,899 |
+| `cpu_cycle_exact=true; blitter_cycle_exact=true` | 15,617 |
+| `cachesize=16384; cpu_speed=max` (JIT) | 15,623 |
+| `cpu_speed=max; cpu_multiplier=0` | 15,622 |
+| superhires, line-doubled | 15,628 |
+
+So the handler rate is the emulated line rate, paced against real time, and
+**nothing but the video standard changes it**: not cycle-exactness, not JIT,
+not CPU speed, not screen mode. 313 lines × 50 Hz is 15,650, and 15,628 is that
+within the sampling error. This matters because it is the denominator of every
+other figure here, and because it means a faster host does not buy a faster
+packet path.
+
+### 79.3 Receive, host to guest, hop by hop
+
+| # | what | where | thread | bounded? |
+| --- | --- | --- | --- | --- |
+| 1 | pcap handle, promiscuous, 10 ms read timeout | `osdep/amiberry_uaenet.cpp:552` | — | — |
+| 2 | BPF filter: to our MAC, broadcast or multicast, not from our MAC | `amiberry_uaenet.cpp:566-585` | kernel | — |
+| 3 | `pcap_next_ex()` in a loop with no sleep, one frame per call | `amiberry_uaenet.cpp:330,346` | **pcap worker** | unbounded |
+| 4 | GRO/GSO splitter: >1514-byte IPv4/TCP re-segmented at MSS, checksums recomputed | `amiberry_uaenet.cpp:176-281` | pcap worker | — |
+| 5 | `uaenet_queue_one()` — malloc-per-frame linked list under `queue_sem` | `amiberry_uaenet.cpp:142-169` | pcap worker | **cap 51** |
+| 6 | `uaenet_receive_poll()` — `while (uaenet_checkpacket(ud));` | `amiberry_uaenet.cpp:674-681` | **emulation** | drain until empty |
+| 7 | called from the A2065 hsync handler, every scanline | `a2065.cpp:797` | emulation | 15,628/s |
+| 8 | `gotfunc()` — copy into a 256-slot × 4000-byte ring | `a2065.cpp:605-627` | emulation | **256 slots** |
+| 9 | `device_add_main_thread_callback(receive_queue_drain)` runs **inline** here | `a2065.cpp:626`, `devices.cpp:144-147` | emulation | — |
+| 10 | `receive_queue_drain()` — up to `RECEIVE_DRAIN_LIMIT` frames | `a2065.cpp:582-604` | emulation | **16 per call** |
+| 11 | `gotfunc2()` — MAC filter, FCS append, DMA into the LANCE descriptor ring | `a2065.cpp:326-504` | emulation | ring |
+| 12 | `csr[0] \|= CSR0_RINT`, `rethink_a2065()`, `safe_interrupt_set(IRQ_SOURCE_A2065,...)` → Amiga level 2 | `a2065.cpp:302,258,275` | emulation | per frame |
+| 13 | `a2065.device` interrupt server satisfies a pending SANA-II `CMD_READ`; our reader threads copy into `NX_PACKET`s | `src/sana2/sana2_rx.c` | guest | see 79.7 |
+
+Two things in that table are not what a reading of the hsync handler suggests.
+
+**Hop 6 is not one frame per poll and not a batch — it drains until empty.**
+`uaenet_receive_poll()` is a `while` loop with no counter. Measured: `poll`
+tracks `hsync` exactly (15,628 both), and `got` reached 48,084/s through those
+same 15,628 polls — a mean of 3.1 frames per poll and no ceiling in the loop
+itself.
+
+**Hop 9 makes hop 10 run far more often than once per scanline.** Because
+`gotfunc()` is reached from the emulation thread on this backend,
+`device_add_main_thread_callback()` takes the `is_mainthread()` branch and calls
+`receive_queue_drain()` *inline*, once per frame, in addition to the hsync
+handler's own unconditional call at `a2065.cpp:798`. Measured: 47,814 drain
+calls/s against 15,628 hsyncs. So `RECEIVE_DRAIN_LIMIT = 16` is 16 frames per
+*drain call*, not per scanline, and the drain call rate is `hsync + frames`.
+
+The consequence is that **`RECEIVE_DRAIN_LIMIT` is not the throttle.** Under
+five minutes of maximum flood the limit was reached 8 times a second out of
+47,814 calls, and raising it to 256 changed the delivered rate by less than 2%
+(3,252/s against 3,200/s at a 5,000/s offered load). It cannot be the throttle:
+16 × 47,814 is 765 k frames/s of drain capacity against a 10 Mbit wire rate of
+14,880.
+
+### 79.4 The four places a frame is discarded, and how visible each one is
+
+| where | condition | logged? | measured drop rate at saturation |
+| --- | --- | --- | --- |
+| uaenet queue | `packetsinbuffer > 50` (`amiberry_uaenet.cpp:150`) | **no log, no counter, nothing** | **530,251/s (91.7% of offered)** |
+| A2065 ring | ring full (`a2065.cpp:616-621`) | `write_log` gated behind `log_a2065` | **15,899/s (33.1% of what got past the first)** |
+| A2065 drain | frame can never fit the RX ring (`a2065.cpp:590-596`, via `receive_packet_can_fit()` `:545`) | gated behind `log_a2065` | 0 |
+| LANCE ring | `receive_space_available()` false (`a2065.cpp:562`) — **not a drop**, the frame stays queued | — | 47,251 stalls/s |
+
+The first of those is the important one and it is invisible by construction:
+`amiberry_uaenet.cpp:150-153` posts the semaphore and returns, with no log line,
+no counter, and no error to the caller. Fifty-one frames is about 3.4 ms of
+buffering at 10 Mbit wire rate. Anything that keeps the emulation thread away
+from `uaenet_receive_poll()` for longer than that loses frames, silently.
+
+**`log_a2065` cannot be turned on from a config file.** It is
+`int log_a2065 = 0;` at `a2065.cpp:30` and the only other references in the tree
+are the tests that read it, plus `extern int log_a2065;` in
+`qemuvga/ne2000.cpp:47`. There is no `cfgfile` parse, no debugger command, no
+environment variable. Making the A2065's own drop logging visible is a source
+edit and a rebuild — which is most of why the fork in 79.1 exists.
+
+### 79.5 Transmit, guest to host, and why `cnt = 15` is not a throttle
+
+The guest writes its descriptors and sets `CSR0_TDMD` through `chip_wput()`;
+that write **only sets the bit** (`a2065.cpp:919-927`) — no transmit happens at
+register-write time. Everything else is the hsync handler:
+
+```c
+cnt--;
+if (cnt < 0 || transmitnow || (csr[0] & CSR0_TDMD)) {
+        check_transmit();
+        cnt = 15;
+}
+```
+(`a2065.cpp:800-804`)
+
+`check_transmit()` (`:767`) returns early if a frame is still staged, else calls
+`do_transmit()` (`:649`), which sends **exactly one frame**: it reads the
+descriptor at `tdr_offset`, returns immediately if `TX_OWN` or `TX_STP` is clear
+(`:671-676`), and the `for(;;)` at `:683` walks only the chained buffers of a
+single frame, breaking at `TX_ENP`. Then `ethernet_trigger()` (`:754`) →
+`uaenet_trigger()` (`amiberry_uaenet.cpp:705`) → `getfunc()` (`a2065.cpp:629`),
+which copies the frame out, zeroes `transmitlen`, and **sets `transmitnow = 1`**
+(`:645`) → `pcap_sendpacket()` (`amiberry_uaenet.cpp:732`), return value
+discarded.
+
+So `cnt = 15` looks like a divide-by-16 and is not one, for two independent
+reasons:
+
+1. `getfunc()` sets `transmitnow` on every successful frame, so a guest with
+   work queued re-arms the condition on the very next scanline.
+2. The empty-ring path returns at `a2065.cpp:671-676`, which is *before* the
+   `if (!found) csr[0] &= ~CSR0_TDMD;` at `:762`. Once the guest latches TDMD it
+   is never cleared on that path, so the condition is permanently true.
+
+Measured, in every loaded run: `chk` = `do` = 15,628/s, exactly the scanline
+rate, with `nodesc` = 15,625/s — one transmit *attempt* per scanline, almost all
+of them finding an empty ring. Forcing the period to 1 or to 64 with the fork's
+knob changed the guest's achieved send rate by 0.2% (14,007 / 14,008 / 14,014
+datagrams in the same 15-second window), and an 8-frame burst per check changed
+nothing at all. **The transmit ceiling is one frame per scanline — 15,628
+frames/s, 23.7 MB/s at 1514 bytes** — and no measured workload has come within
+4% of it.
+
+### 79.6 The ceiling, as numbers
+
+Offered load swept from a second machine, peak-second deltas from the emulator's
+own counters:
+
+| offered (seen by pcap) | into uaenet queue | dropped there | into A2065 ring | ring full drops | into LANCE ring | LANCE ring stalls |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2,000 | 2,000 | 0 | 2,000 | 0 | 2,000 | 2,070 |
+| 5,061 | 3,251 | 1,810 | 3,200 | 0 | 3,200 | 4,292 |
+| 30,321 | 3,817 | 26,504 | 3,868 | 0 | 3,833 | 5,165 |
+| 160,321 | 21,621 | 138,700 | 21,621 | 6,816 | 14,805 | 20,444 |
+| 645,786 | 53,198 | 592,588 | 53,198 | 19,880 | **33,326** | 48,985 |
+
+Receive: **33,326 frames/s into the guest's descriptor ring at peak, 32,186/s
+sustained over four minutes — 4.57 MB/s at 142-byte frames.** That is 2.2× the
+14,880 frames/s a real 10 Mbit A2065 can see, so the emulated card is not the
+thing that stops us reaching a real-hardware packet-rate regime.
+
+Transmit: **15,628 frames/s**, one per scanline (79.5).
+
+Neither number is set by `RECEIVE_DRAIN_LIMIT`, and neither is set by the
+256-frame queue. Receive is set by how fast the guest hands descriptors back —
+`receive_space_available()` was false 47,251 times a second at saturation, which
+is once for every frame waiting.
+
+### 79.7 Five minutes at saturation: the queue is full, and the stack sees 0.7 packets a second
+
+Four senders, unthrottled, 300 seconds. Mean per second over the middle 240:
+
+```
+offered (pcap)     578,335 /s
+into uaenet queue   48,084 /s      dropped there  530,251 /s   (91.69%)
+into A2065 ring     48,084 /s      dropped there   15,899 /s   (33.06%)
+into LANCE ring     32,186 /s   =  4.57 MB/s
+LANCE ring stalls   47,251 /s
+drain calls         47,814 /s      hit the 16 limit        8 /s
+transmit attempts   15,628 /s      frames actually sent    3 /s
+A2065 queue depth      255 (full)  uaenet queue depth     51 (full)
+```
+
+Both queues sat at their caps for the whole five minutes and 4,898,418 frames
+were dropped from the A2065 ring alone. **The receive path was full at all
+times, continuously, for 300 seconds** — that is the regime, and it is
+reproducible on demand.
+
+What our stack did in it is the finding:
+
+- `nx_ip_info_get()` counted **816 packets received in 300 seconds** while
+  9,701,174 frames were written into the descriptor ring. 0.008%.
+- The three `sana2 rx` threads were `SUSPENDED` in every watchdog dump.
+- The guest did **not** freeze. Reports kept arriving every five seconds, the
+  five-second sleeps overran by about 48%, and the emulator's own scanline rate
+  never moved off 15,6xx — so nothing stopped the machine.
+- Baton counters were clean throughout: `full=0`, `moved=0`, `statemax=0`,
+  `live` 2-3 against a `max` of 4. **No baton defect appears under saturation.**
+- The tick task's worst stall was **1,476 ms — beside a worst service of
+  1,475,964 µs.** The stall and the service are the same event to within 36 µs,
+  so that second and a half was spent *inside* the tick task's own service call,
+  not waiting for someone else's `Forbid()`. Three stalls were logged in the
+  whole run (183 ms, 1,074 ms, 340 ms), each with a matching service cost, all
+  during bring-up and the onset of the flood; the steady state settled to about
+  1.9% duty (100 ms of service per 5.3 s of uptime) after the first 45 seconds.
+
+So under sustained inbound saturation the machine is **starved, not
+backlogged**: 32,186 frames/s reach the descriptor ring, `a2065.device` recycles
+descriptors fast enough to keep taking them, and almost none reach our reader —
+consistent with one outstanding `CMD_READ` per protocol and a wake-up latency
+that collapses under the interrupt load, though which of those it is has not yet
+been isolated. The duty-cycle theory is **not** supported by this run: the one
+event large enough to freeze a machine was the tick task's own service call, and
+it did not recur once the flood was steady.
+
+### 79.8 Which knob moves the number
+
+All three constants were made settable at run time in the fork and swept at a
+5,000/s offered load, where the unmodified build drops 1,810 frames/s:
+
+| change | delivered into the LANCE ring | dropped at the uaenet queue |
+| --- | ---: | ---: |
+| unmodified | 3,200 /s | 1,810 /s |
+| `RECEIVE_DRAIN_LIMIT` 16 → 256 | 3,252 /s | 1,774 /s |
+| uaenet queue cap 50 → 2000 | **5,083 /s** | **0** |
+| both, plus the A2065 ring 256 → 2048 | 5,045 /s | 0 |
+
+**The queue cap at `amiberry_uaenet.cpp:150` is the only one of the three that
+moves anything.** Raising it turns silent loss into buffering and the delivered
+rate becomes the offered rate, up to whatever the guest can absorb. Raising
+`RECEIVE_DRAIN_LIMIT` does not help because the drain already runs three times
+per scanline; raising the A2065 ring does not help because the frames are
+already being taken out of it.
+
+What a rig with the queue cap raised is trustworthy for: offered-load control,
+because what you offer is what the guest is given. What it is not trustworthy
+for: anything about burst behaviour or loss, because a real A2065 on a real
+10 Mbit wire has no such buffer, and a 2000-frame queue lets the emulation
+thread stall for 130 ms without losing a frame where the real card would have
+lost 1,900. Timing measurements taken on a raised rig do not transfer.
+
+### 79.9 The NE2000 / PCMCIA path is a different machine, and one hop of it is missing
+
+Read, not run — this section is source only.
+
+The PCMCIA "cnet" card is `ne2000_pci_board_pcmcia` (`qemuvga/ne2000.cpp:1400`),
+instantiated from `gayle.cpp:1585-1602`, and it shares file-scope state with the
+PCI and Ariadne2 front-ends. Its pump is `gayle_hsync()` (`gayle.cpp:2157`,
+registered `:2250`) → `ne2000->hsync(...)` (`:2160`) →
+`ne2000_receive_check()` (`ne2000.cpp:1217`), which moves **exactly one frame
+per call** (`ne2000_receive_check2()`, `:1164-1177`, no loop) and refuses to
+move any at all while `ISR.PRX` is still set (`:1167-1168`). So where the A2065
+drains until empty and averages 3.1 frames per poll, this card is hard-limited
+to one frame per scanline *and* gated on the guest acknowledging the previous
+interrupt.
+
+Three differences fall out of the trace and explain symptoms we already have:
+
+**Nothing calls `ethernet_receive_poll()` for this card.** The whole tree has
+four references: the declaration (`include/ethernet.h:37`), the definition
+(`ethernet.cpp:120`), and two call sites — `a2065.cpp:797` and `sana2.cpp:1847`
+— each using its own `td`/`sysdata`. `ne2000.cpp` allocates its own `sysdata` at
+`:1334` and never polls it. On a pcap or TAP backend, `uaenet_checkpacket()` is
+therefore unreachable for this card, its `gotfunc` (`:1192`) is never called,
+and **host→guest receive is dead while transmit still works** — the same defect
+that was fixed for the A2065, with the fix comment still in place at
+`a2065.cpp:790-795`. SLIRP is unaffected because `slirp_output()`
+(`ethernet.cpp:75`) calls `gotfunc` directly.
+
+**`RXCR` starts at zero, so broadcast is dropped.** `ne2000_canreceive()`
+(`ne2000.cpp:296-338`) returns false for a broadcast destination unless
+`RXCR & 0x04`, and the QEMU default of `0x0c` that would have set it lives
+inside an `#if 0` at `:947-997`. The only write is `EN0_RXCR` at `:584-586`.
+Until the guest driver programs it, ARP and DHCP replies are discarded before
+they reach the ring — which is exactly the broadcast DHCP failure we saw.
+
+**`0x00a20000` is not where the card's registers are.** Gayle maps the whole
+PCMCIA window at `0xA00000-0xA7FFFF` (`gayle.cpp:1923`), split into attribute
+memory below `0xA20000` and the I/O window above it, and
+`get_pcmcmia_ne2000_reg()` (`gayle.cpp:1047-1058`) subtracts an I/O base of
+`0x300` and returns −1 for anything below it. The NE2000 register file is at
+**`0xA20300-0xA2031F`**; the PCMCIA configuration register is at **`0xA003F8`**,
+in *attribute* space (`gayle.cpp:1218-1220`). A probe at `0xA20000` reads
+`pcmcia_attrs[0x20000]`, a zero byte — or nothing at all if `cs_pcmcia` is off,
+the slot is empty, or `ne2000->init()` failed, in which case
+`gayle_map_pcmcia()` maps `dummy_bank` over the range (`:1919`) and an access
+there is genuinely unmapped. So the guest's complaint is the guest looking
+0x300 low and in the wrong window, on a card whose receive path was never going
+to work over pcap anyway.
+
+### 79.10 SLIRP along the same path
+
+Read, not run.
+
+`ethernet_receive_poll()` has no `UAENET_SLIRP` case (`ethernet.cpp:120-137`),
+so the A2065's call to it at `a2065.cpp:797` is a **complete no-op** under
+SLIRP. Delivery is a push instead: the `slirp-receive` thread
+(`slirp_uae.cpp:141-186`, started `:207`) runs `slirp_select_poll()` and reaches
+`slirp_output()` (`ethernet.cpp:69-77`), which calls `gotfunc` directly. That
+means `gotfunc` runs **off** the emulation thread, so
+`device_add_main_thread_callback()` takes the other branch
+(`devices.cpp:148-153`) — queue plus `SPCFLAG_CALLBACK` — and because
+`add_device_item()` de-duplicates (`devices.cpp:93-103`), N arrivals coalesce
+into one drain of at most 16. Under SLIRP the A2065 drain really is 16 frames
+per pump; under pcap it is not (79.3).
+
+The differences that matter to a number:
+
+- **`TCP_SNDSPACE` / `TCP_RCVSPACE` are 8192 bytes** (`slirp/tcp.h:45-46`).
+  SLIRP terminates TCP, so that is the window the guest sees regardless of what
+  the far end offered. Bridged pcap is layer 2 and the real windows apply.
+- The SLIRP thread's timer floor is **2 ms** (`slirp/slirp.cpp:400-401`), and a
+  failed 500 ms semaphore acquire silently discards a whole poll round
+  (`slirp_uae.cpp:155-158, 177-179`).
+- Guest→host transmit runs the entire SLIRP TCP/IP stack, including `send()`
+  and `connect()`, synchronously on the emulation thread under `slirp_sem2`
+  (`ethernet.cpp:99-101`). Bridged transmit is one `pcap_sendpacket()`.
+- SLIRP's output queue is unbounded (`if_thresh` is dead code, commented out at
+  `slirp/ip_output.cpp:84`) and `slirp_can_output()` is hardwired to 1
+  (`slirp_uae.cpp:188-191`), so `if_start()` drains the whole queue in one burst
+  (`slirp/if.cpp:312-313`) and can overrun the A2065's 256 slots in a single go.
+- `if_encap()` drops anything over 1600 bytes silently and unlogged
+  (`slirp/slirp.cpp:710, 713-714`).
+
+### 79.11 What the earlier numbers are worth
+
+Every throughput figure this project took before bridging came from SLIRP, and
+therefore through an 8 KB TCP window, a 2 ms poll floor, a stack running on the
+emulation thread, and a coalesced 16-frame drain. None of those apply to the
+bridged path. They are not comparable to each other and neither is comparable
+to real hardware.
+
+The bridged figures are better but come with their own caveat, which is the
+whole point of 79.4: **frames disappear at `amiberry_uaenet.cpp:150` with no
+log, no counter and no error.** Any measurement that offered more than about
+3,000 frames/s was losing frames without saying so — at a 5,000/s offer, 36% of
+them. A throughput number taken under those conditions is a measurement of the
+queue cap, not of the stack, and the only way to know which is to count at both
+ends.
+
+The practical result is a rig that can hold the guest's receive path full
+indefinitely, and the finding that when it does, our stack is not backlogged —
+it is starved, at 816 packets in five minutes out of 9.7 million offered to it,
+with the baton counters clean and nothing holding the machine. That is a
+different problem from the one we went looking for, and it is the next thing to
+chase.
