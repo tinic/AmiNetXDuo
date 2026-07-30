@@ -117,7 +117,7 @@ It needs no separate command. `ping`, `host`, `fetch` and any older program
 that resolves a name all get it, because the lookup happens inside the resolver
 everything already uses.
 
-## HTTPS
+## HTTPS / SSH
 
 `fetch` handles `https://` URLs, and certificates are properly checked against
 the usual set of root authorities.
