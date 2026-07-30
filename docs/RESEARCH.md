@@ -20361,8 +20361,9 @@ technically: §76.3 records the emulated `hydra` board logging
 NE2000, so a driver written for the real card is not expected to drive that
 core. Fetching it is legitimate; whether the emulator gives it anything to
 talk to is a separate question and is not claimed here.
-## 74. The SSH server, measured (2026-07-30)
-## 77. The SSH server, measured (2026-07-30)
+---
+
+## 78. The SSH server, measured (2026-07-30)
 
 §38 got a public-key login into the Amiga and §40 got a command to run over it.
 Neither put a number on either, and the numbers are what decide whether `scp`
@@ -20394,7 +20395,7 @@ would beat TLS here because TLS is RSA-2048 and SSH is 25519. It does not:
 — `src/crypto68k/` has hand-written 68020 assembly for P-256 and none at all for
 25519.
 
-### 77.1 What phase 1 already was
+### 78.1 What phase 1 already was
 
 Nothing here had to be built to get a login. `clients/dropbear/build.sh -P
 "dbclient dropbear"` builds the server from the same unpatched submodule,
@@ -20408,7 +20409,7 @@ One thing did have to be fixed to measure anything: `-p` had not linked since
 `dbprofile.c` defined the same symbol. `dbprofile.c` had already armed two other
 exits for its report, so its wrapper is gone and `atexit()` carries it.
 
-### 77.2 The handshake
+### 78.2 The handshake
 
 `SSHProbe`, new in `clients/dropbear/`, is what makes the rest of this section
 possible: `SSHProbe mem` run *over the channel* reports `AvailMem` with the
@@ -20471,7 +20472,7 @@ the same host costs the same 12.3 s as the first. `LoginGraceTime` is not the
 problem it was in §31 — 12.3 s is 10% of a stock server's 120 s — but a login
 that takes twelve seconds is a login somebody waits for.
 
-### 77.3 Throughput: 28 KB/s, and two thirds of it is the cipher
+### 78.3 Throughput: 28 KB/s, and two thirds of it is the cipher
 
 Measured by difference, so that everything except the bytes cancels: the same
 command with no payload and with 160 KB of payload, in one run, same binary,
@@ -20525,7 +20526,7 @@ Encryption does not halve this machine's network and it does not cost an order
 of magnitude either. The honest way to say what 28 KB/s means is that a 1 MB
 file is 36 seconds.
 
-### 77.4 The 68k crypto is half on the path, and the half that is missing is the half throughput needs
+### 78.4 The 68k crypto is half on the path, and the half that is missing is the half throughput needs
 
 The question was whether the handshake is running `src/crypto68k/` or portable
 C. Read out of the linked binary with `m68k-amigaos-nm` rather than assumed:
@@ -20567,7 +20568,7 @@ vector 61 on every limb multiply), so wiring it into a client that ships as one
 binary needs a runtime switch that the CMake build currently makes at configure
 time.
 
-### 77.5 Memory: the session fits and the leak does not
+### 78.5 Memory: the session fits and the leak does not
 
 `AvailMem` through one run, every figure taken by `SSHProbe` inside the guest,
 the middle one from a process the *server* started over the channel:
@@ -20607,7 +20608,7 @@ process allocated outside newlib's arena rather than at a socket.
 **The consequence is concrete.** DEBUG_NOFORK means one process per connection,
 so this is per login. A 4 MB machine gets **three**.
 
-### 77.6 Two defects behind one message, and neither is the cipher
+### 78.6 Two defects behind one message, and neither is the cipher
 
 `SSHProbe bulk 8` over loopback returns 8 KB and `rc 0`. 32 KB and 160 KB do
 not:
@@ -20722,10 +20723,10 @@ round from how this section started: the `EINVAL` has nothing to do with size.
 It arrives on a 44-byte write, and §40.9's arrived during a key exchange, where
 every write is small. It is not fixed here. It is a thread-state defect in the
 bracket rather than anything in the send path, it is the likeliest cause of the
-wedge in §77.7 as well — a listener with no listen request left is a connection
+wedge in §78.7 as well — a listener with no listen request left is a connection
 that never completes — and it is the first thing phase 3 should look at.
 
-### 77.7 The loopback harness is unreliable, and it is not contention
+### 78.7 The loopback harness is unreliable, and it is not contention
 
 Seventeen loopback connections were taken across this work, on the **exclusive**
 lane (`-x`), with the machine to itself. Ten did not complete. Most of those were
@@ -20735,10 +20736,10 @@ for fourteen minutes until the harness timed out. After the fix the A1200 arm is
 two of three, and the one that failed failed that way.
 
 That is §40.9's own "one run in three", reproduced with its stated cause removed.
-That section is corrected in place, and §77.6 names a status that would produce
+That section is corrected in place, and §78.6 names a status that would produce
 exactly this if it landed on a listener instead of on a channel write.
 
-### 77.8 The 68030, and why there is no number for it
+### 78.8 The 68030, and why there is no number for it
 
 `tools/fsuae-run.sh` says it before the run does: FS-UAE turns cycle accounting
 off for every CPU above a 68020, so `-m A3000` exercises the code on a 68030 —
@@ -20753,10 +20754,10 @@ channel, before whatever the 32-bit bus and the caches are worth.
 The A3000 run was taken and does what it *can* prove, which turned out to be
 more than expected: it authenticates, runs a command, and **moves 32 KB through
 the channel with every byte intact** — the first bulk payload out of this server
-(§77.6). Every second in its report is the emulator's and none of them is
+(§78.6). Every second in its report is the emulator's and none of them is
 quoted.
 
-### 77.9 Is it worth continuing
+### 78.9 Is it worth continuing
 
 **On the numbers, yes, with one condition and two repairs.**
 
@@ -20794,20 +20795,20 @@ than one window in one call on an interface whose MSS exceeds it — the suite h
 no such case, which is why the livelock survived every green run. And the
 megabyte: it is measured four different ways and its cause is not named.
 
-**§78 names both defects and corrects this section on two points.** The megabyte
-is not one leak but three costs, none of them where 77.5 looked, and the server
+**§79 names both defects and corrects this section on two points.** The megabyte
+is not one leak but three costs, none of them where 78.5 looked, and the server
 process it attributes them to was never exiting — so the per-primitive server
-table it is owed was never going to print either -- it does now, and 78.5
-confirms this section's derivation to 0.15%. `NX_CALLER_ERROR` is not
-confined to the calls that reported it: the same defect let two Exec Tasks into
-NetX Duo at once for every call that did *not* report it, which is where 77.7's
-wedges and 77.3's throughput went.
+table it is owed was never going to print either. It does now, and 79.5 confirms
+this section's derivation to 0.15%. `NX_CALLER_ERROR` is not confined to the
+calls that reported it: the same defect let two Exec Tasks into NetX Duo at once
+for every call that did *not* report it, which is where 78.7's wedges and 78.3's
+throughput went.
 
-## 78. The two defects §77 named, found (2026-07-30)
+## 79. The two defects §78 named, found (2026-07-30)
 
-§77 left phase 3 two repairs and an order to do them in: a megabyte per login
+§78 left phase 3 two repairs and an order to do them in: a megabyte per login
 that nobody had located, and `NX_CALLER_ERROR` on a 44-byte write. Both are
-found here and **neither is what §77 guessed**.
+found here and **neither is what §78 guessed**.
 
 **A login now costs zero bytes.** The megabyte was three things, and only the
 first two are leaks in the ordinary sense: 262,144 bytes of `StackSwap()` stack
@@ -20829,7 +20830,7 @@ acquiring the baton**. Three of three loopback logins now succeed where none
 did, and loopback TCP went from 401 to **517 KB/s**: the sender had been racing
 the IP thread all along.
 
-### 78.1 The 262,144 bytes: `exit()` is not `return`
+### 79.1 The 262,144 bytes: `exit()` is not `return`
 
 `clients/compat/amiga_argv.c` runs a ported client on a 256 KB stack of its own
 and frees it after `__real_main()` returns. Its own header says the thing that
@@ -20850,7 +20851,7 @@ the process from everything else:
 | after a third | 8,214,768 | **0** |
 
 262,144 is `AMIGA_ARGV_STACK` exactly; the first one costs 5,200 more because it
-is also the first time that process grows its heap. This is §77.5's "268 KB per
+is also the first time that process grows its heap. This is §78.5's "268 KB per
 client-only connection", on a binary that never reaches the network.
 
 **The repair is `setjmp()`, and the obvious repair does not work.**
@@ -20869,7 +20870,7 @@ Only the task that swapped may jump. A client that started Processes of its own
 out of the same code image — Dropbear's console reader does — has their `exit()`
 fall through to `__real_exit()` as before.
 
-### 78.2 `atexit()` never runs, and it was holding a socket open
+### 79.2 `atexit()` never runs, and it was holding a socket open
 
 Probing every step rather than every cycle separates the remaining costs.
 `&SYS:dropbear` is asynchronous, so the probe after it measures a listening
@@ -20909,7 +20910,7 @@ the last of those pointing at a dead task's stack, which is the hazard
 `port/threadx-amiga/inc/tx_amiga.h` warns about in as many words. And one of
 those sockets is the SSH connection, which brings us to the megabyte.
 
-### 78.3 The 1,209,256 bytes: the server was waiting for a FIN nobody sent
+### 79.3 The 1,209,256 bytes: the server was waiting for a FIN nobody sent
 
 1,209,256 is not an allocation to reclaim. It is what a live `dropbear` on this
 machine *is*: a 512 KB process stack from `ClientRun`, the 256 KB swapped stack,
@@ -20924,14 +20925,14 @@ client collected the output and the exit status and returned 0 in 22.5 s — and
 before the exit.
 
 **It was parked in `svr_remoteclosed()`'s absence.** `dbclient` exited without
-`CloseLibrary()` (§78.2), so `bsd_close_all()` never ran and the client's TCP
+`CloseLibrary()` (§79.2), so `bsd_close_all()` never ran and the client's TCP
 connection was never torn down. No `FIN` reached the server. Dropbear's session
 loop calls `svr_remoteclosed()` "when the remote side closes the connection", and
 that is the only path to `dropbear_close("Exited normally")` for a session that
 ends cleanly. The remote side had gone without closing anything, so the server
 waited for it, holding 1.2 MB, until the machine ran out of logins.
 
-Fixing §78.2 fixes this. Same command list, three connections to one port:
+Fixing §79.2 fixes this. Same command list, three connections to one port:
 
 | | total | largest |
 |---|---:|---:|
@@ -20950,10 +20951,10 @@ later attempts on the same port are refused, which is `DEBUG_NOFORK` behaving as
 `Exit (amiga) from <127.0.0.1:61718>: Exited normally`. Six probes across a
 login read the same two numbers.
 
-§77.9 called the megabyte disqualifying and it was right to. It is gone, and
-none of the three parts of it was where §77.5 looked.
+§78.9 called the megabyte disqualifying and it was right to. It is gone, and
+none of the three parts of it was where §78.5 looked.
 
-### 78.4 `NX_CALLER_ERROR`: one baton, read as though there were many
+### 79.4 `NX_CALLER_ERROR`: one baton, read as though there were many
 
 `_tx_thread_current_ptr` is ThreadX's "currently running thread". On a target
 that is a per-CPU fact. In this port it is **the baton**: one global pointer
@@ -20977,14 +20978,14 @@ Task. `nc_Live` was never set either, so the server's base never acquired a
 cached thread and repeated the mistake on every call for as long as the client
 was busy — which, during a key exchange, is always.
 
-**Every status-17 line in §77.6 is this, and so is §40.9's.** The generic caller
+**Every status-17 line in §78.6 is this, and so is §40.9's.** The generic caller
 check could only sometimes tell: `_tx_thread_current_ptr` was non-`NULL`, so it
 passed the call through, and only the calls whose timing left the pointer `NULL`
 or the system state raised came back `NX_CALLER_ERROR`. The 44-byte write, the
 `relisten()`, the `socket_delete()` and `Error writing: Invalid argument` are one
 defect with an intermittent symptom. **The rest of the time it did not fail. It
 ran two Exec Tasks inside NetX Duo at once**, which is the state the baton
-exists to prevent, and that explains §77.7's three wedged key exchanges and
+exists to prevent, and that explains §78.7's three wedged key exchanges and
 §40.9's "one run in three" better than either section managed.
 
 **It was never only a two-process problem, and that is where the throughput
@@ -21025,12 +21026,12 @@ logins:**
 `0.0.0.0:0` is the same defect in the same line of log:
 `nx_tcp_socket_peer_info_get()` is on the thread-only list too, so the server
 never learnt who had connected to it. The three handshake figures reproduce
-§77.2's 22.0 s, so nothing here bought its correctness with latency.
+§78.2's 22.0 s, so nothing here bought its correctness with latency.
 
-**And the conformance tier, which is the number §77.6 warned would hide a
+**And the conformance tier, which is the number §78.6 warned would hide a
 regression:**
 
-| | §77.6 | here |
+| | §78.6 | here |
 |---|---:|---:|
 | TCP loopback | 401 KB/s | **517 KB/s** |
 | TCP sustained loopback | 403 KB/s | **518 KB/s** |
@@ -21042,10 +21043,10 @@ all twelve skips are `host helper not connected` — the bridged tier, as always
 thread for its own socket goes faster. The two figures were not taken in one
 session, so treat the size of the gap as approximate and the sign as solid.
 
-### 78.5 The server's own table, and why §77.2 never got one
+### 79.5 The server's own table, and why §78.2 never got one
 
-§77.2 owed a per-primitive profile from the *server* process and said nobody knew
-why `dbprofile.c` printed from `dbclient` and never from `dropbear`. §78.3 is why:
+§78.2 owed a per-primitive profile from the *server* process and said nobody knew
+why `dbprofile.c` printed from `dbclient` and never from `dropbear`. §79.3 is why:
 the server never exited, so neither its `atexit()` list nor its DTOR list ever
 ran. It prints now. Both ends of one loopback login, `-p` on both:
 
@@ -21061,7 +21062,7 @@ ran. It prints now. Both ends of one loopback login, `-p` on both:
 | **public-key subtotal** | | **10,590** | **10,574** |
 | whole process | | 34,404 | 22,326 |
 
-**§77.2's derivation was right to 0.15%.** It argued from the symmetry of the
+**§78.2's derivation was right to 0.15%.** It argued from the symmetry of the
 protocol that "a server on this machine costs the same arithmetic as a client,
 and no more" — two scalar multiplications, one sign, one verify, ≈10.5 s — and
 flagged it as arithmetic rather than measurement. 10,590 against 10,574 ms, in
@@ -21073,7 +21074,7 @@ twelve seconds it spent listening before the client arrived, which is why
 `select()` is 67% of it against the client's 50%. The public-key subtotal is the
 row to read, and it is the client's.
 
-### 78.6 What phase 4 starts on
+### 79.6 What phase 4 starts on
 
 **`scp` is not built, and the blocker is one thing.** Dropbear vendors OpenSSH's
 `scp.c` (`third_party/dropbear/src/scp.c`), so the server side of both directions
