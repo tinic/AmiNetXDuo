@@ -20749,9 +20749,22 @@ floor — the ChaCha20 and Poly1305 assembly already in this tree is worth about
 server that dies on its third connection, and that is disqualifying in a way
 that slowness is not.
 
-**The two repairs are the write failure and the wedge**, and the first of them
-is not optional for `scp` in particular: `scp` *from* the Amiga is the server
-sending bulk, which is exactly the path that has never worked.
+**One of the two repairs is done and the other is not.** The window livelock is
+fixed, and it was not optional for `scp` in particular: `scp` *from* the Amiga is
+the server sending bulk, which is exactly the path that had never worked. What is
+left is `NX_CALLER_ERROR` — a 44-byte write, a `relisten()` and a
+`socket_delete()` all refused by NetX Duo's thread check in the same second — and
+it is the likeliest cause of the wedge as well. It is a thread-state defect in
+`bsd_nx_enter()`'s bracket, it is not in the Dropbear port, and it is the first
+thing to look at.
 
-Phase 3 should be those three things before any of the SCP layer, because all
-three are on the path it would be built on.
+**Phase 3 is the leak and `NX_CALLER_ERROR`, in that order, before any of the SCP
+layer** — both are on the path it would be built on, and a `scp` written over
+them would spend its life being blamed for them.
+
+**Three things this section is owed and did not get.** A per-primitive table
+from the *server* process, because `dbprofile.c` reports from `dbclient` and not
+from `dropbear` and nobody knows why yet. A conformance case that sends more
+than one window in one call on an interface whose MSS exceeds it — the suite has
+no such case, which is why the livelock survived every green run. And the
+megabyte: it is measured four different ways and its cause is not named.
