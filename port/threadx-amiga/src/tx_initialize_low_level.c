@@ -959,6 +959,29 @@ UINT                 armed;
             for (i = 0UL; i < ticks; i++)
             {
 
+                /* Half the period is the tick's, at most.  _tx_thread_context_save()
+                   holds Forbid() for the whole of _tx_timer_interrupt(), so every
+                   tick delivered here is time no other task in the machine runs.
+                   A catch-up burst on a machine where each tick is expensive can
+                   hold it for the whole period and then some, which starves the
+                   rest of the system for as long as the arrears last.  Checked
+                   between ticks rather than inside one: a tick is not
+                   interruptible, so this bounds the burst, not the tick.  */
+                if (i > 0UL)
+                {
+                    struct EClockVal budget_now;
+
+                    (VOID) ReadEClock(&budget_now);
+                    if ((ULONG) (budget_now.ev_lo - now.ev_lo) >
+                        (eclock_per_ms * (ULONG) TX_AMIGA_TIMER_BUDGET_MS))
+                    {
+                        _tx_amiga_tick.tx_amiga_tick_over_budget++;
+                        _tx_amiga_tick.tx_amiga_tick_lost +=  ticks - i;
+                        ticks =  i;
+                        break;
+                    }
+                }
+
                 /* Enter "interrupt" context, run the tick, leave it.  */
                 _tx_thread_context_save();
                 _tx_timer_interrupt();

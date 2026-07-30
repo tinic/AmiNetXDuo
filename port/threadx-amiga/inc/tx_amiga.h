@@ -178,6 +178,9 @@ typedef struct TX_AMIGA_TICK_STATS_STRUCT
        hundreds of microseconds, means something else held the machine. */
     ULONG   tx_amiga_tick_worst_stall_ms;
     ULONG   tx_amiga_tick_worst_service_us;
+    /* Catch-up bursts abandoned at TX_AMIGA_TIMER_BUDGET_MS.  Non-zero means
+       the machine was being held long enough for the cap to matter. */
+    ULONG   tx_amiga_tick_over_budget;
 } TX_AMIGA_TICK_STATS;
 
 VOID    tx_amiga_tick_stats(TX_AMIGA_TICK_STATS *stats);

@@ -356,6 +356,14 @@ void    _tx_amiga_start_interrupts(void);
 
 #ifndef TX_AMIGA_TIMER_MAX_CATCHUP
 #define TX_AMIGA_TIMER_MAX_CATCHUP              8UL
+
+/* Milliseconds of a tick period the tick task may spend delivering, before it
+   abandons the rest of a catch-up burst.  The burst runs under Forbid(), so
+   this is the ceiling on how long one wakeup can stop every other task in the
+   machine.  Half of 20 ms leaves the other half for everyone else.  Ticks
+   dropped this way are counted in tx_amiga_tick_lost, the same as the ones the
+   catch-up cap drops.  */
+#define TX_AMIGA_TIMER_BUDGET_MS                10UL
 #endif
 
 /* Startup validation window for the wakeup source, in milliseconds, and the
