@@ -144,11 +144,16 @@ static void fzw_patch16(FzwBuf *w, size_t at, unsigned v)
 
 /* --------------------------------------------------------------- random --- */
 
-static unsigned long fzw_state = 1;
+/* unsigned long long, not unsigned long: fuzz_mdns is built -m32 (NetX Duo's
+   mDNS cache keeps pointers in ULONG slots, so it needs sizeof(void*) == 4),
+   where unsigned long is 32 bits -- the multiplier would truncate and the
+   shift would be undefined. Fixing the width also makes a seed mean the same
+   sequence on a 32- and a 64-bit host. */
+static unsigned long long fzw_state = 1;
 
 static unsigned fzw_rand(void)
 {
-    fzw_state = fzw_state * 6364136223846793005UL + 1442695040888963407UL;
+    fzw_state = fzw_state * 6364136223846793005ULL + 1442695040888963407ULL;
     return (unsigned)(fzw_state >> 33);
 }
 
