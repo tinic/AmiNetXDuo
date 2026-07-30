@@ -20596,3 +20596,154 @@ not depend on it.
 So they are `run-*.sh` harnesses in the shape of `tests/leak/run-leak.sh`, run
 by hand or by a self-hosted runner that has the ROM and the drivers, and not
 added to `EMULATOR_TESTS`.
+
+### 78.9 The interactive side, and the terminal size is right
+
+Everything above is bulk transfer. `run-bebbossh.sh -I` is the other half: a
+login session with a real AmigaDOS console, which is where terminal handling
+lives and where our own Dropbear shim spent its effort.
+
+It needs a console, and that is not a detail. BebboSSH decides it has a
+terminal by asking `IsInteractive()` about its own input, and raw mode, the
+size in `pty-req` and whether it watches for resizes at all follow from that
+one answer. Redirected from `NIL:` none of it runs, so a harness that never
+opens a `CON:` cannot say anything about any of it. `clients/dropbear/
+clientrun.c` grew a `>` command form that opens a `CON:` as `SYS_Input` and
+leaves output going to the report file, so the terminal is real and every byte
+still lands on the host.
+
+**Sizes match exactly, and both sides were measured.** ClientRun asks the
+console its own size with CSI `0 q` -- the Window Bounds Report, the same
+question `console.cpp` asks -- and the remote runs `stty size` and
+`os.get_terminal_size(0)`, i.e. `TIOCGWINSZ` on the pty:
+
+| CON: window | the console says | remote `stty size` | remote `TIOCGWINSZ` |
+|---|---|---|---|
+| `0/0/512/128` | 12 x 49 | 12 x 49 | 12 x 49 |
+| `0/0/720/232` | 24 x 61 | 24 x 61 | 24 x 61 |
+
+Two deliberately odd sizes, because 640x200 in topaz-8 is so close to 80x24
+that a test using it could not tell a working implementation from one that
+answers a constant.
+
+`tput cols` says 80x24 in both, which is not a BebboSSH fault and not a real
+disagreement: `xterm-amiga.src` declares `cols#80, lines#24` statically, and in
+the probe `tput`'s stdout is a file, so ncurses cannot measure the terminal and
+falls back on the entry. An application on a real terminal uses `TIOCGWINSZ`,
+and that column is right.
+
+**Resize propagates.** ClientRun starts the session asynchronously, waits, and
+calls `ChangeWindowBox()` on the console's own window -- found through
+`ACTION_DISK_INFO` to the console handler, because `fh_Arg1` is *not* the
+Window and reading it gives a pointer whose Width and Height come back as 35
+and 9572. The remote samples its size either side:
+
+| | window, pixels | remote sees |
+|---|---|---|
+| before | 448 x 104 | 10 x 42 |
+| after | 608 x 176 | 18 x 58 |
+
+**That test was wrong the first three times, and the way it was wrong is worth
+keeping.** A client turns console resize reporting on by *writing* an escape
+sequence -- BebboSSH writes `\x1b[2;11;12{` to its stdout. Point stdout at a
+file and the sequence lands in the file, the console is never asked to report
+anything, and the window can then be resized all day with nothing to notice.
+That produced a confident "resize is not propagated" three runs running, and it
+was the harness. The resize arm now gives the child a second handle on the same
+window for output, via `Open("*")` with `pr_ConsoleTask` pointed at that
+console; its session output is therefore not captured, which does not matter
+because the probe writes its answers on the host.
+
+**The termios block arrives and is applied.** `pty-req` carries VINTR ^C,
+VERASE ^H and VEOF ^D. The remote's `stty -a` reports `intr = ^C`, `erase =
+^H`, `eof = ^D` -- and a host's own default erase is `^?`, so `^H` is proof the
+block was parsed rather than ignored. That is the Ctrl-C question answered at
+the protocol level. Delivering a live Ctrl-C *keystroke* is not tested: it
+needs somebody at the console, and injecting one into a `CON:` under a headless
+emulator is not something this harness can do.
+
+`-T` behaves: `stty: stdin isn't a terminal`, `tty` says `not a tty`. `TERM`
+arrives as `xterm-amiga` and a real pty is allocated (`/dev/ttys008`).
+
+### 78.10 A shell session, and it is a shell session
+
+Driven from a file rather than a console -- BebboSSH's other input path, which
+reads the whole file and sends it, and is how a script gets piped into a
+session. Against the host's `sshd` and zsh, all five lines ran and the session
+ended by itself:
+
+    echo SHELL-SESSION-START   ->  SHELL-SESSION-START
+    id -un                     ->  turo
+    pwd                        ->  /Users/turo
+    echo $((6*7))              ->  42
+    exit                       ->  rc 0
+
+with the prompt, the command echo, bracketed-paste markers and the window-title
+sequences all coming back intact. This is a working interactive session, not a
+pipe that happens to carry bytes.
+
+### 78.11 Logging IN to the Amiga, and where bebbosshd stops
+
+`-I -L` puts `bebbosshd` in the guest and `bebbossh` in the guest, since SLIRP
+gives no way in from outside. Login by public key, a remote command through
+`exec`, and an interactive Shell all work:
+
+    Echo AMIGA-EXEC-OK  ->  AMIGA-EXEC-OK          rc 0, 10.04 s
+    Ram Disk:> Echo "SHELL-SESSION-START"
+    SHELL-SESSION-START
+    Ram Disk:> CD DH0:
+    DH0:>
+
+That is a real AmigaDOS Shell: the prompt tracks the current directory, and it
+arrives wrapped in its own colour sequences, which is the clearest single sign
+the Shell believes it is writing to a terminal. The server's log shows it
+starting and ending a task per command.
+
+**It stops after the second command of a piped script.** A four-line script got
+through `Echo` and `CD`, printed the new prompt, and then nothing: the server
+kept reading the remaining bytes off the socket -- its log records
+`SSH_MSG_CHANNEL_DATA ... consumed 84 of 84` once a minute -- and never ran
+them, and the client waited for a prompt that never came until the harness
+timed out at fifteen minutes.
+
+**That is bebbosshd's shell channel, not the client's send path.** The same
+client, reading the same kind of file, drove a five-line session against
+OpenSSH to a clean exit (§78.10). The arm is now one command plus `EndCLI` so
+it terminates; the longer case is left recorded rather than worked around.
+
+Note also that no `pty-req` appears in the server's log at `-v6`, where every
+other channel request does. Either the level numbering does not reach TRACE at
+6 or the request is not arriving; it was not chased further, and the outbound
+direction is where terminal size actually had to be proved.
+
+### 78.12 None of it touches our ABI
+
+The expectation was that terminal size comes from the AmigaDOS console and not
+from the socket, and that is exactly what happens: CSI `0 q` to `CON:`,
+`ChangeWindowBox()`, `IsInteractive()`, `SetMode()`. Not one of them is ours.
+
+Confirmed rather than assumed. Across every interactive run the serial log
+contains one line and it is our own `AMITCP: no rexxsyslib.library` notice --
+no `ENOSYS`, nothing about an unserviced `SocketBaseTagList` tag, nothing at
+session setup and nothing at resize. The socket calls are the same short list
+as §78.2; the terminal work happens entirely above them.
+
+A full interactive run under `tools/enforcer-run.sh -m` -- two sized sessions,
+the `-T` session, the piped shell and the resize -- reports **0 Enforcer hits
+and 0 MungWall wall hits.**
+
+### 78.13 What this means for the Dropbear shim
+
+Our shim fabricates a termios for `tcgetattr()`/`tcsetattr()` and maps
+Dropbear's ICANON switch onto `SetMode(handle, 1)`, answering `ENOTTY` for a
+non-console fd. BebboSSH does not need any of that: it is written for AmigaOS,
+so it calls `SetMode()` directly and asks the console its size in the console's
+own language.
+
+On the evidence here the interactive side is not a weak spot. Size is exact in
+both directions and follows a resize, the termios block is negotiated and
+applied, `-T` does the right thing, a piped script runs against a normal
+server, and logging in to the Amiga gives a real Shell. **Nothing here argues
+for keeping the shim on interactive grounds.** The one thing not demonstrated
+is a live Ctrl-C keystroke, and that is a limit of a headless harness rather
+than an observation about BebboSSH.

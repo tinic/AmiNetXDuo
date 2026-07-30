@@ -3,12 +3,15 @@
 # BebboSSH against this stack, under FS-UAE.
 #
 #   tests/bebbossh/run-bebbossh.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#                                  [-k MHZ] [-x] [-E] [-L] [-C FILE]
+#                                  [-k MHZ] [-x] [-E] [-L] [-I] [-C FILE]
 #
 #   -x  take the emulator alone.  EVERY timing needs it: a transfer measured
 #       while another FS-UAE shares the host is fiction, and this project has
 #       already had one set of figures corrupted that way.
 #   -C  a command list to stage instead of the default twelve transfers.
+#   -I  the INTERACTIVE arm: `bebbossh` with a real AmigaDOS console, testing
+#       the terminal path rather than bulk transfer.  Combines with -L, which
+#       points it at bebbosshd in the guest instead of the host's sshd.
 #   -L  the LOOPBACK arm: run bebbosshd in the guest as well and point bebboscp
 #       at 127.0.0.1, so BOTH ends of the connection are on the one emulated
 #       CPU.  That is the arrangement the Dropbear figures on the
@@ -79,8 +82,9 @@ PERF=0
 COMMANDS=""
 ENFORCE=0
 LOOPBACK=0
+INTERACTIVE=0
 
-while getopts "m:t:b:k:xELC:" opt; do
+while getopts "m:t:b:k:xELIC:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
@@ -89,8 +93,9 @@ while getopts "m:t:b:k:xELC:" opt; do
         x) PERF=1 ;;
         E) ENFORCE=1 ;;
         L) LOOPBACK=1 ;;
+        I) INTERACTIVE=1 ;;
         C) COMMANDS="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t secs] [-b builddir] [-k MHz] [-x] [-E] [-L] [-C file]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-m model] [-t secs] [-b builddir] [-k MHz] [-x] [-E] [-L] [-I] [-C file]" >&2; exit 2 ;;
     esac
 done
 
@@ -266,6 +271,46 @@ fi
 USER_NAME="${AMINETXDUO_SSH_USER:-$(id -un)}"
 HOST="${AMINETXDUO_SSH_HOST:-10.0.2.2}"
 
+# ---------------------------------------------------- the interactive arm ---
+#
+# THE WINDOW SIZES ARE THE MEASUREMENT.
+#
+# BebboSSH asks the AmigaDOS console for its size with CSI '0 q' -- the Window
+# Bounds Report -- and puts the answer in pty-req.  So the check is whether the
+# remote end's `stty size` matches what the console itself says, and both
+# numbers have to be collected: ClientRun prints the console's own answer, the
+# remote command writes its answer into a file on the host.
+#
+# CON: takes PIXELS, so two windows of deliberately different and non-default
+# sizes are used.  A test that only ever asked for 640x200 could not tell a
+# correct implementation from one that returns a hardcoded 80x24 -- 640x200 in
+# topaz-8 is very close to exactly that.
+CONW1="CON:0/0/512/128/BebboSSH-A/CLOSE"
+CONW2="CON:0/0/720/232/BebboSSH-B/CLOSE"
+# The window the resize arm starts in.  ClientRun changes it to 608x176 while
+# the session runs; both numbers are unlike A and B so "did it change" and
+# "changed to the right thing" stay separate questions.
+CONW3="CON:0/0/448/104/BebboSSH-R/CLOSE"
+
+if [ "$INTERACTIVE" = "1" ]; then
+    # The terminal BebboSSH names in pty-req is `xterm-amiga`, which no host
+    # has.  Without it `tput` answers "unknown terminal type" -- which looks
+    # like a BebboSSH defect and is not one.  Its own terminfo source ships in
+    # the archive; compiling it here means the `tput` column tests what
+    # BebboSSH intends rather than what a stock host happens to know.
+    TI="$ROOT/build/bebbossh-test/terminfo"
+    if command -v tic >/dev/null 2>&1; then
+        mkdir -p "$TI"
+        tic -o "$TI" "$BEB/xterm-amiga.src" >/dev/null 2>&1 \
+            && echo "==> xterm-amiga terminfo compiled into $TI" \
+            || echo "!! tic could not compile xterm-amiga.src; tput will be unknown-terminal" >&2
+    else
+        echo "!! no tic on this host; the tput column will say unknown terminal" >&2
+    fi
+    RES="$ROOT/build/bebbossh-test/term"
+    rm -rf "$RES"; mkdir -p "$RES"
+fi
+
 # FS-UAE's own bsdsocket emulation off, as every other harness here does it, so
 # a result cannot be the host-socket shim answering instead of ours.
 BASEDIR="$ROOT/build/fsuae-base-$TAG"
@@ -295,6 +340,121 @@ echo "==> host key pre-trusted: $(cat "$STAGE/envarc/.ssh/known_hosts")"
 if [ -n "$COMMANDS" ]; then
     cp "$COMMANDS" "$STAGE/commands.txt"
     echo "==> command list: $COMMANDS"
+elif [ "$INTERACTIVE" = "1" ] && [ "$LOOPBACK" = "1" ]; then
+    # bebbosshd in the guest, and the client logging in to it.  There is no
+    # `stty` on the other end -- the other end is an AmigaDOS Shell -- so this
+    # arm asks a different question from the outbound one: does logging IN to
+    # the Amiga give a working shell, and does the server accept the pty
+    # dimensions the client sends.  -v6 on the server is what prints the
+    # dimensions it received.
+    printf '%s\n%s\n' "$CONW1" "$CONW2" > "$STAGE/console.txt"
+    SSH="SYS:bebbossh -v3 -i DH0:id_ed25519 -p $PORT"
+    TGT="$USER_NAME@127.0.0.1"
+
+cat > "$STAGE/commands.txt" <<EOF
+SYS:AddNetInterface eth0
+&SYS:bebbosshd -v6 -p $PORT
+wait 10
+>$SSH $TGT "Echo AMIGA-EXEC-OK"
+EOF
+
+    # A shell session, piped.  Echo is a Shell built-in, so this needs nothing
+    # staged in C: -- which matters, because the boot drive here has only what
+    # the harness put there.
+    #
+    # ONE command and then EndCLI, on purpose.  A four-line script executed its
+    # first two and then stopped, with the server reading the remaining bytes
+    # off the socket and never running them, and the client waiting for a
+    # prompt that never came until the harness timed out.  The same client
+    # reading the same kind of file drove a five-line session against OpenSSH
+    # to a clean exit, so that is bebbosshd's shell channel and not the send
+    # path -- see docs/RESEARCH.md 78.11.  Kept short so this arm terminates.
+cat > "$STAGE/stdin.txt" <<EOF
+Echo "SHELL-SESSION-START"
+EndCLI
+EOF
+    echo "<$SSH $TGT" >> "$STAGE/commands.txt"
+elif [ "$INTERACTIVE" = "1" ]; then
+    # Two console sizes, in the order ClientRun consumes them.
+    printf '%s\n%s\n%s\n' "$CONW1" "$CONW2" "$CONW3" > "$STAGE/console.txt"
+
+    SSH="SYS:bebbossh -v3 -i DH0:id_ed25519 -p $PORT"
+    TGT="$USER_NAME@$HOST"
+
+    # The probe is a script ON THE HOST taking one argument, not a semicolon
+    # chain on the command line.  ClientRun's line limit is 320 characters and
+    # the chain was longer than that, which does not fail -- it silently
+    # becomes several commands, three of which are not commands.  Everything
+    # the remote learns is written on the host, because capturing it on the
+    # Amiga would mean capturing the console, and the console is the thing
+    # under test.
+    #
+    # `stty size` reads the pty's dimensions from the kernel and needs no
+    # terminfo, so it is the primary evidence.  `stty -a` is the second and
+    # sharper one: BebboSSH's pty-req carries a termios block setting VERASE to
+    # ^H, and a host's own default is ^? -- so `erase = ^H` on the remote side
+    # is proof the block was parsed and applied rather than ignored.
+    # The output directory and the terminfo tree are baked in rather than
+    # passed, so the remote command line carries ONE absolute path instead of
+    # three.  That is not tidiness: ClientRun truncates a long line, and a
+    # truncated line does not fail -- its tail becomes the next "command",
+    # which runs, returns 10 and reads as the program refusing an argument.
+    cat > "$RES/probe.sh" <<PROBE
+#!/bin/sh
+# Written by tests/bebbossh/run-bebbossh.sh.  \$1 names the arm.
+arm="\$1"
+out="$RES"
+ti="$TI"
+stty size              > "\$out/\$arm.stty"   2>&1
+stty -a                > "\$out/\$arm.stty_a" 2>&1
+tty                    > "\$out/\$arm.tty"    2>&1
+printf '%s\\n' "\$TERM" > "\$out/\$arm.term"
+TERMINFO="\$ti" tput cols  > "\$out/\$arm.cols"  2>&1
+TERMINFO="\$ti" tput lines > "\$out/\$arm.lines" 2>&1
+# TIOCGWINSZ on the terminal itself, which is what an application asks and what
+# vi and less use.  fd 0 rather than 1, because tput's and this program's
+# stdout is a file here -- which is also why the tput columns fall back on the
+# terminfo entry's static cols#80 lines#24 and say nothing about the pty.
+python3 -c 'import os;s=os.get_terminal_size(0);print(s.lines,s.columns)' \\
+                       > "\$out/\$arm.winsz" 2>&1
+echo SESSION-OK
+PROBE
+    chmod +x "$RES/probe.sh"
+    P="$RES/probe.sh"
+
+: > "$STAGE/commands.txt"
+cat >> "$STAGE/commands.txt" <<EOF
+SYS:AddNetInterface eth0
+>$SSH $TGT "$P a"
+>$SSH $TGT "$P b"
+$SSH -T $TGT "$P nopty"
+EOF
+
+    # A real shell session, driven from a file rather than a console.  This is
+    # BebboSSH's other input path: it reads the whole file and sends it, which
+    # is how a script gets piped into a session.  `exit` is the last line, so a
+    # session that ends cleanly ends by itself and one that does not shows up
+    # as a timeout on this command alone.
+cat > "$STAGE/stdin.txt" <<EOF
+echo SHELL-SESSION-START
+id -un
+pwd
+echo \$((6*7))
+exit
+EOF
+    echo "<$SSH $TGT" >> "$STAGE/commands.txt"
+
+    # The resize arm.  The remote samples its own size, waits long enough for
+    # ClientRun to move the window under it, and samples again.
+cat > "$RES/resize.sh" <<RESIZE
+#!/bin/sh
+"$RES/probe.sh" r1
+sleep 22
+"$RES/probe.sh" r2
+echo RESIZE-ARM-DONE
+RESIZE
+    chmod +x "$RES/resize.sh"
+    echo "R$SSH $TGT \"$RES/resize.sh\"" >> "$STAGE/commands.txt"
 else
     # Both AEADs, because the comparison needs both.  BebboSSH's default order
     # is aes128-gcm first, which is what a user gets; docs/RESEARCH.md 80
@@ -372,6 +532,8 @@ STAGED=("$STAGE/devs" "$STAGE/libs" "$STAGE/envarc" "$STAGE/up"
         "$STAGE/bebboscp" "$STAGE/bebbossh"
         "$STAGE/AddNetInterface" "$STAGE/id_ed25519" "$STAGE/commands.txt")
 [ "$LOOPBACK" = "1" ] && STAGED+=("$STAGE/bebbosshd")
+[ -f "$STAGE/console.txt" ] && STAGED+=("$STAGE/console.txt")
+[ -f "$STAGE/stdin.txt" ]   && STAGED+=("$STAGE/stdin.txt")
 
 set +e
 if [ "$ENFORCE" = "1" ]; then
@@ -402,7 +564,11 @@ echo ""
 # In the loopback arm the "remote" end wrote into DH0: as well, so both
 # directions are compared against the staged originals in one place.
 set +e
-if [ "$LOOPBACK" = "1" ]; then
+if [ "$INTERACTIVE" = "1" ] && [ "$LOOPBACK" = "1" ]; then
+    "$ROOT/tests/bebbossh/check-amigashell.sh" "$HD"
+elif [ "$INTERACTIVE" = "1" ]; then
+    "$ROOT/tests/bebbossh/check-term.sh" "$HD" "$RES"
+elif [ "$LOOPBACK" = "1" ]; then
     "$ROOT/tests/bebbossh/check.sh" "$HD" "$XFER" "$HD"
 else
     "$ROOT/tests/bebbossh/check.sh" "$HD" "$XFER"

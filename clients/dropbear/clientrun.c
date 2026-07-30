@@ -31,17 +31,49 @@
  *                  long-running process writing while the next command
  *                  writes does not interleave two streams into one file.
  *     wait <n>     Delay(n seconds).
+ *     ><command>   run it with a real AmigaDOS console as its INPUT.
+ *     R<command>   the same, and RESIZE that console part-way through.
+ *     <<command>   run it with DH0:stdin.txt as its input.
  *
- * Both exist for running a server and a client in the same guest.  FS-UAE's
- * SLIRP has no inbound path, so a server on the Amiga cannot be reached from
- * the host, and the only way to make it accept a connection is to make the
- * connection from inside -- dropbear listening on 127.0.0.1 and dbclient
- * connecting to it.  That needs one command running while another starts,
- * which a list of synchronous SystemTagList() calls cannot express.
+ * The first two exist for running a server and a client in the same guest.
+ * FS-UAE's SLIRP has no inbound path, so a server on the Amiga cannot be
+ * reached from the host, and the only way to make it accept a connection is to
+ * make the connection from inside.  That needs one command running while
+ * another starts, which a list of synchronous SystemTagList() calls cannot
+ * express.
  *
  * SYS_Asynch means the child, not us, closes SYS_Input and SYS_Output, so they
  * are opened fresh for each async command and never handed the same handle
  * twice.
+ *
+ * WHY A CONSOLE IS ITS OWN KIND OF COMMAND
+ *
+ * An SSH client decides whether it has a terminal by asking IsInteractive()
+ * about its own input, and everything downstream follows: raw mode, the size it
+ * puts in pty-req, whether it listens for resize events at all.  Redirected
+ * from NIL: it is not interactive and none of that runs, so a run that never
+ * opens a console cannot say anything about terminal handling.
+ *
+ * '>' opens CON: as SYS_Input and leaves SYS_Output pointing at the report, so
+ * the terminal is real and every byte the session prints still lands in a file
+ * on the host.  The window spec comes from DH0:console.txt, one per '>'
+ * command in order, so the harness picks the size without rebuilding this.
+ *
+ * Before handing the console over it asks the console its own size -- CSI '0 q'
+ * is the AmigaDOS Window Bounds Report -- and writes the answer to the report.
+ * That is the number the remote end's `stty size` has to agree with, and
+ * without it a comparison has only one side.
+ *
+ * WHY RESIZE IS HERE AND NOT IN A HELPER
+ *
+ * An SSH client is supposed to notice its window changing and send
+ * window-change.  Nobody can drag a window in a headless emulator, so the
+ * resize has to be programmatic -- and the process that opened CON: is the one
+ * holding the handle whose fh_Arg1 is the Intuition Window, so it is the one
+ * that can do it without guessing.  'R' starts the command asynchronously,
+ * waits RESIZE_DELAY seconds, calls ChangeWindowBox(), reports the console's
+ * new size and waits for the command to finish.  The remote end samples its
+ * own size either side of that, and the two pairs have to agree.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -49,19 +81,47 @@
 #include <exec/types.h>
 #include <dos/dos.h>
 #include <dos/dostags.h>
+#include <dos/dosextens.h>
+#include <exec/memory.h>
+#include <intuition/intuition.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <proto/intuition.h>
 
 static const char version_tag[] __attribute__((used)) =
     "$VER: ClientRun 1.0 (25.7.2026)";
 
 #define REPORT      "DH0:client.txt"
 
+/* One CON: specification per line, consumed in order by the '>' commands.
+   Absent, empty or exhausted, CONSOLE_DEFAULT is used. */
+#define CONSOLES    "DH0:console.txt"
+#define CONSOLE_DEFAULT "CON:0/0/640/200/AmiNetXDuo/CLOSE"
+
+/* Fed to a '<' command as its input. */
+#define STDIN_FILE  "DH0:stdin.txt"
+
+/* Seconds before and after a programmatic resize.  Generous: the session has to
+   be up and the remote's first sample taken before the window moves, and this
+   is a 14 MHz machine whose SSH handshake alone is several seconds. */
+#define RESIZE_DELAY    18
+#define RESIZE_SETTLE   20
+
+/* The window a 'R' command resizes to, in pixels.  Deliberately unlike the
+   sizes in DH0:console.txt so that "did it change" and "did it change to the
+   right thing" are different questions. */
+#define RESIZE_W        608
+#define RESIZE_H        176
+
 /* A separate file for async output.  Sharing REPORT would interleave a
    server's log with the client's, in a file both have open for append. */
 #define ASYNC_REPORT "DH0:server.txt"
 #define COMMANDS    "DH0:commands.txt"
 #define REDIRECT    " <NIL: >>DH0:client.txt"
+
+/* The console and stdin-file forms redirect output only: input comes from the
+   handle in SYS_Input, and a "<" in the command string would override it. */
+#define OUT_ONLY    " >>DH0:client.txt"
 
 /*
  * 512 KB.  curl's own stack use is not published and is not small: the URL
@@ -80,7 +140,14 @@ static const char version_tag[] __attribute__((used)) =
 #define CLIENT_STACK    (512UL * 1024UL)
 
 #define MAX_COMMANDS    24
-#define MAX_LINE        320
+
+/* 512, not 320.  A command carrying an absolute host path -- which anything
+   running something on the other end of an SSH session does -- goes past 320
+   easily, and copy_bounded() then drops the line and the NEXT one starts a
+   command in the middle of a quoted string.  That does not fail loudly: it
+   runs, returns 10, and looks like the program under test refusing an
+   argument. */
+#define MAX_LINE        512
 
 /* System() hands unrecognised tags to CreateNewProc(), which is how a child
    of a 4 KB Shell gets a stack a ported program can survive on. */
@@ -101,6 +168,30 @@ static struct TagItem async_tags[] =
     { NP_StackSize, CLIENT_STACK },
     { TAG_END,      0            }
 };
+
+/* SYS_Input is filled in per command.  System() takes ownership of it, which
+   is why a fresh handle is opened for every console rather than one being
+   reused.  No SYS_Output: the child's output goes where every other command's
+   does, so the input is a terminal and the output is still a file on the host. */
+static struct TagItem console_tags[] =
+{
+    { SYS_Input,    0            },
+    { NP_StackSize, CLIENT_STACK },
+    { TAG_END,      0            }
+};
+
+/* Asynchronous form of console_tags: SYS_Asynch means the child closes
+   SYS_Input, so nothing here closes the console after handing it over. */
+static struct TagItem console_async_tags[] =
+{
+    { SYS_Asynch,   DOSTRUE      },
+    { SYS_Input,    0            },
+    { SYS_Output,   0            },
+    { NP_StackSize, CLIENT_STACK },
+    { TAG_END,      0            }
+};
+
+struct IntuitionBase *IntuitionBase;
 
 static char  lines[MAX_COMMANDS][MAX_LINE];
 static char  command[MAX_LINE + 64];
@@ -190,6 +281,138 @@ static VOID read_commands(VOID)
     Close(in);
 }
 
+/* Console specs, read once, handed out in order. */
+static char  consoles[8][160];
+static ULONG console_count;
+static ULONG console_next;
+
+static VOID read_consoles(VOID)
+{
+    BPTR  in;
+    char  buf[160];
+    ULONG i;
+
+    in = Open((CONST_STRPTR)CONSOLES, MODE_OLDFILE);
+    if (in == (BPTR)0)
+        return;
+
+    while (console_count < 8 &&
+           FGets(in, (STRPTR)buf, (ULONG)sizeof(buf)) != NULL)
+    {
+        for (i = 0; buf[i] != '\0'; i++)
+        {
+            if (buf[i] == '\n' || buf[i] == '\r')
+            {
+                buf[i] = '\0';
+                break;
+            }
+        }
+        if (buf[0] == '\0' || buf[0] == '#')
+            continue;
+        if (copy_bounded(consoles[console_count], 160UL, buf))
+            console_count++;
+    }
+
+    Close(in);
+}
+
+/*
+ * The Intuition Window behind a CON: filehandle.
+ *
+ * fh_Arg1 is NOT it -- tried, and it yields a pointer whose Width and Height
+ * read 35 and 9572, which is somebody else's memory.  On a machine with no
+ * protection, calling ChangeWindowBox() through that is a wild write.
+ *
+ * The documented route is ACTION_DISK_INFO to the console handler, which fills
+ * an InfoData whose id_VolumeNode is the Window.  The result is still sanity
+ * checked before anything is written through it: a plausible window is at
+ * least a character wide and no larger than any screen this machine can open.
+ */
+static struct Window *console_window(BPTR con)
+{
+    struct InfoData   *id;
+    struct MsgPort    *port;
+    struct Window     *win = NULL;
+
+    port = ((struct FileHandle *)BADDR(con))->fh_Type;
+    if (port == NULL)
+        return NULL;
+
+    id = (struct InfoData *)AllocMem((ULONG)sizeof(struct InfoData),
+                                     MEMF_PUBLIC | MEMF_CLEAR);
+    if (id == NULL)
+        return NULL;
+
+    if (DoPkt(port, ACTION_DISK_INFO, MKBADDR(id), 0, 0, 0, 0))
+        win = (struct Window *)id->id_VolumeNode;
+
+    FreeMem(id, (ULONG)sizeof(struct InfoData));
+
+    if (win == NULL)
+        return NULL;
+
+    if (win->Width < 16 || win->Width > 2048 ||
+        win->Height < 16 || win->Height > 1024)
+        return NULL;
+
+    return win;
+}
+
+/*
+ * Ask the console how big it is and record the answer.
+ *
+ * CSI '0 q' is the AmigaDOS Window Bounds Report; the console replies
+ * CSI '1;1;<rows>;<cols>' ' r'.  Raw mode first, because the reply is a
+ * character stream nobody typed and a cooked console would hold it until a
+ * newline that never comes.
+ *
+ * WaitForChar has a timeout on every read, so a console that answers nothing
+ * costs a fifth of a second and reports "no reply" rather than hanging the run.
+ */
+static VOID report_console_size(BPTR con)
+{
+    UBYTE buf[32];
+    ULONG used = 0;
+    LONG  rows = 0;
+    LONG  cols = 0;
+    ULONG i;
+
+    SetMode(con, 1);
+    Write(con, (APTR)"\x9b" "0 q", 4);
+
+    while (used < (ULONG)sizeof(buf) - 1 &&
+           WaitForChar(con, 200000) == DOSTRUE)
+    {
+        if (Read(con, &buf[used], 1) != 1)
+            break;
+        if (buf[used] == 'r')       /* the report ends with ' r' */
+        {
+            used++;
+            break;
+        }
+        used++;
+    }
+    buf[used] = '\0';
+
+    if (used < 6)
+    {
+        report("--- console: no window bounds report (%ld bytes)\n", (LONG)used);
+        return;
+    }
+
+    /* CSI 1 ; 1 ; rows ; cols SPACE r -- five bytes of preamble, exactly as
+       BebboSSH's own console.cpp skips them. */
+    i = 5;
+    for (; i < used && buf[i] != ';'; i++)
+        rows = rows * 10 + (buf[i] - '0');
+    i++;
+    for (; i < used && buf[i] != ' '; i++)
+        cols = cols * 10 + (buf[i] - '0');
+
+    report("--- console rows %ld", rows);
+    report(", cols %ld\n", cols);
+}
+
 int main(int argc, char **argv)
 {
     BPTR  out;
@@ -210,7 +433,13 @@ int main(int argc, char **argv)
     if (out != (BPTR)0)
         Close(out);
 
+    /* Only the 'R' form needs it, and a machine without it simply cannot be
+       asked to resize a window -- which is reported rather than fatal. */
+    IntuitionBase = (struct IntuitionBase *)
+        OpenLibrary((CONST_STRPTR)"intuition.library", 37);
+
     read_commands();
+    read_consoles();
 
     if (line_count == 0)
     {
@@ -269,6 +498,182 @@ int main(int argc, char **argv)
             continue;
         }
 
+        /*
+         * Rcommand -- console input, and the window changes size under the
+         * command while it runs.
+         *
+         * The child is started asynchronously so this process is still awake
+         * to move the window.  fh_Arg1 of a CON: filehandle is its Intuition
+         * Window; that is how the resize happens without guessing which window
+         * on the screen belongs to us.
+         */
+        if (lines[i][0] == 'R')
+        {
+            const char *spec;
+            BPTR        in;
+            BPTR        nil;
+            BPTR        out;
+            struct Window *win;
+
+            spec = (console_next < console_count)
+                 ? consoles[console_next] : CONSOLE_DEFAULT;
+            console_next++;
+
+            report("\n--- %s\n", (LONG)&lines[i][1]);
+            report("--- input: %s\n", (LONG)spec);
+
+            in = Open((CONST_STRPTR)spec, MODE_OLDFILE);
+            if (in == (BPTR)0)
+            {
+                report("--- could not open it\n", 0);
+                continue;
+            }
+
+            report_console_size(in);
+
+            win = console_window(in);
+            if (IntuitionBase == NULL || win == NULL)
+            {
+                report("--- no window behind the console; cannot resize\n", 0);
+                Close(in);
+                continue;
+            }
+
+            /*
+             * OUTPUT HAS TO BE THE CONSOLE TOO, and that is the whole reason
+             * this arm exists in this shape.
+             *
+             * An SSH client turns console resize reporting ON by WRITING an
+             * escape sequence -- BebboSSH writes "\x1b[2;11;12{" to its
+             * stdout.  Point stdout at a file and that sequence lands in the
+             * file, the console is never told to report anything, and the
+             * window can then be resized all day with nothing to notice it.
+             * The first attempt here did exactly that and produced a confident
+             * "resize is not propagated" which was this harness's fault.
+             *
+             * A second handle on the SAME window comes from Open("*") with
+             * pr_ConsoleTask pointing at that console -- two handles the child
+             * can close independently, one window.  Opening the CON: spec
+             * twice would give two windows.
+             *
+             * The session's own output is therefore not captured for this arm.
+             * It does not need to be: the probe on the other end writes its
+             * answers into files on the build host.
+             */
+            nil = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+            (VOID)nil;
+            {
+                struct Process *me = (struct Process *)FindTask(NULL);
+                APTR oldct = me->pr_ConsoleTask;
+
+                me->pr_ConsoleTask = ((struct FileHandle *)BADDR(in))->fh_Type;
+                out = Open((CONST_STRPTR)"*", MODE_OLDFILE);
+                me->pr_ConsoleTask = oldct;
+            }
+            if (out == (BPTR)0)
+            {
+                report("--- could not open a second handle on the console\n", 0);
+                Close(in);
+                continue;
+            }
+            if (out != (BPTR)0)
+                Seek(out, 0, OFFSET_END);
+            console_async_tags[1].ti_Data = (ULONG)in;
+            console_async_tags[2].ti_Data = (ULONG)out;
+
+            t0 = now_ticks();
+            rc = SystemTagList((CONST_STRPTR)&lines[i][1], console_async_tags);
+            if (rc != 0)
+            {
+                report("--- could not start it: rc %ld\n", rc);
+                Close(in);
+                if (out != (BPTR)0) Close(out);
+                continue;
+            }
+
+            Delay((ULONG)RESIZE_DELAY * TICKS_PER_SECOND);
+
+            /* The window still belongs to the console, which is still open
+               because the child holds the handle.  ChangeWindowBox() is
+               asynchronous and Intuition clamps it to the window's limits, so
+               the size that matters is the one the console reports afterwards
+               and not the one asked for here. */
+            report("--- window before: %ld", (LONG)win->Width);
+            report("x%ld pixels\n", (LONG)win->Height);
+
+            ChangeWindowBox(win, win->LeftEdge, win->TopEdge,
+                            RESIZE_W, RESIZE_H);
+
+            /* ChangeWindowBox() is a request, not a change: Intuition performs
+               it when it next runs and clamps it to the window's own limits.
+               So the window is measured again afterwards, and THAT is what
+               says whether anything moved.  Without it, "the remote size did
+               not change" cannot be told apart from "the window did not
+               change". */
+            Delay(2 * TICKS_PER_SECOND);
+            report("--- window after:  %ld", (LONG)win->Width);
+            report("x%ld pixels\n", (LONG)win->Height);
+
+            Delay((ULONG)RESIZE_SETTLE * TICKS_PER_SECOND);
+            elapsed = now_ticks() - t0;
+
+            report("--- waited %ld", elapsed / TICKS_PER_SECOND);
+            report(".%02ld s\n", (elapsed % TICKS_PER_SECOND) * 2);
+            continue;
+        }
+
+        /* >command -- a real console as its input, so IsInteractive() is
+           true and the terminal path in the program under test runs. */
+        if (lines[i][0] == '>' || lines[i][0] == '<')
+        {
+            BOOL        console = (lines[i][0] == '>');
+            const char *spec;
+            BPTR        in;
+
+            if (console)
+            {
+                spec = (console_next < console_count)
+                     ? consoles[console_next] : CONSOLE_DEFAULT;
+                console_next++;
+            }
+            else
+            {
+                spec = STDIN_FILE;
+            }
+
+            report("\n--- %s\n", (LONG)&lines[i][1]);
+            report("--- input: %s\n", (LONG)spec);
+
+            in = Open((CONST_STRPTR)spec, MODE_OLDFILE);
+            if (in == (BPTR)0)
+            {
+                report("--- could not open it\n", 0);
+                continue;
+            }
+
+            if (console)
+                report_console_size(in);
+
+            /* SYS_Input only.  SYS_Output stays unset so the child's output
+               goes where every other command's does -- the report file on the
+               host -- and the terminal under test is still a terminal. */
+            console_tags[0].ti_Data = (ULONG)in;
+
+            used = 0;
+            used = append(command, (ULONG)sizeof(command), used, &lines[i][1]);
+            used = append(command, (ULONG)sizeof(command), used, OUT_ONLY);
+            (VOID)used;
+
+            t0 = now_ticks();
+            rc = SystemTagList((CONST_STRPTR)command, console_tags);
+            elapsed = now_ticks() - t0;
+
+            report("--- rc %ld", rc);
+            report(", %ld", elapsed / TICKS_PER_SECOND);
+            report(".%02ld s\n", (elapsed % TICKS_PER_SECOND) * 2);
+            continue;
+        }
+
         report("\n--- %s\n", (LONG)lines[i]);
 
         used = 0;
@@ -290,6 +695,9 @@ int main(int argc, char **argv)
         report(", %ld", elapsed / TICKS_PER_SECOND);
         report(".%02ld s\n", (elapsed % TICKS_PER_SECOND) * 2);
     }
+
+    if (IntuitionBase != NULL)
+        CloseLibrary((struct Library *)IntuitionBase);
 
     return RETURN_OK;
 }

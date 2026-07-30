@@ -336,6 +336,8 @@ linked; they are separate programs we install and run.
 
     tests/bebbossh/run-bebbossh.sh -x      # six transfers each way, two ciphers
     tests/bebbossh/run-bebbossh.sh -x -L   # ... with both ends in the guest
+    tests/bebbossh/run-bebbossh.sh -x -I   # a login session, on a real console
+    tests/bebbossh/run-bebbossh.sh -x -I -L  # ... logging IN to bebbosshd
     tests/bebbossh/run-bebbossh.sh -E      # the same under Enforcer + MungWall
     tests/bebboget/run-bebboget.sh -x -1   # bebboget beside our own fetch
 
@@ -343,6 +345,13 @@ linked; they are separate programs we install and run.
 `bebbosshd` in the guest too, so both ends of the connection are on the one
 emulated CPU. Without it only the client half of the crypto is, and the number
 is about twice as large for that reason alone.
+
+`-I` is the terminal arm. It opens a real `CON:` as the client's input, because
+an SSH client decides it has a terminal by asking `IsInteractive()` and none of
+the terminal handling runs if the answer is no. It compares the size the Amiga
+console reports against the size the remote `stty size` sees, resizes the window
+mid-session to check that `window-change` follows, and reads back the termios
+the `pty-req` asked for. docs/RESEARCH.md §78.9 has the numbers.
 
 These stay out of CI at either tier. They need `a2065.device`, they need a
 Workbench `locale.library` — without which BebboSSH does not start at all, and

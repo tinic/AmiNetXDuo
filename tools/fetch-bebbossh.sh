@@ -84,6 +84,11 @@ BEBBOSSH_FILES=(
   "bebbossh/libcryptossh.library|libcryptossh.library|aeade147a244f4269c115d108cfed16245f6fbc758c437695001b5c2ba1a6b75"
   "bebbossh/libcryptossh.library020|libcryptossh.library020|106844e95629d630434046393ccf09a1ce1580526a70200b33df1dcb59f38970"
   "bebbossh/libcryptossh.library060|libcryptossh.library060|bfc9db19c2c8d88fca2da942d9a9b725c87271e72e15d2e0a3a6132def41e9b2"
+  # The terminfo source for the terminal bebbossh names in pty-req.  A host
+  # that does not have it answers `tput cols` with "unknown terminal type",
+  # which looks like a BebboSSH bug and is not one -- so the interactive
+  # harness compiles this with tic and points the remote end at it.
+  "bebbossh/xterm-amiga.src|xterm-amiga.src|ca16d1465718e6109a3d4077e590d227ce6e7a313f353f17fc770272eaeacad7"
 )
 
 # ---------------------------------------------------------------- options ----
