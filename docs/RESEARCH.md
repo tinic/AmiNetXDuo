@@ -20501,6 +20501,19 @@ costs more than the cipher.** That is the same shape §58 found in
 `src/crypto68k/` — Poly1305 became 64% of an AEAD record there once ChaCha20 had
 been hand-scheduled — arrived at from the opposite direction.
 
+**The server direction, now that it works.** Both ends on one CPU over
+loopback, same difference method:
+
+| | wall |
+|---|---:|
+| 8 KB through the channel | 23.00 s |
+| 32 KB through the channel | 24.52 s |
+| **difference — 24,576 bytes** | **1.52 s → 16.2 KB/s** |
+
+16.2 against the client's 28 is what one 14 MHz CPU doing *both* the encryption
+and the decryption should cost, and it is not the figure a real `scp` would see:
+a remote peer does its own half. The client figure is the one to plan with.
+
 **Against the wire, like for like.** §24.4 ran `NetTrace` over 524,288 bytes on
 this exact profile: **159 KB/s** over the A2065, 283 KB/s over loopback. The SSH
 figure here is over the A2065 too, so the comparison is 28 against 159 —
