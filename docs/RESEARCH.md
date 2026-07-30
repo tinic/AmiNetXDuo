@@ -20378,13 +20378,14 @@ that would have been comfortable nor the 10× that would have settled it.**
 
 **Three things the measurement found rather than went looking for**, and the
 throughput figure above is a *client* figure because of the first of them.
-**No bulk data has ever left this server**: a channel write larger than one TCP
+**No bulk data had ever left this server**: a channel write larger than one TCP
 window transferred nothing and was retried unchanged 1,595 times in one session,
-because `bsd_send_tcp()` clamps a segment to an MSS that is 65,495 on loopback.
-**A small write also fails outright**, with `NX_CALLER_ERROR` from NetX Duo's
-thread check, which is the `Error writing: Invalid argument` §40.9 blamed on
-emulator contention. And **every connection costs about a megabyte that never
-comes back**, which on the 4 MB floor is three logins and then nothing.
+because `bsd_send_tcp()` clamped a segment to an MSS that is 65,495 on loopback.
+That one is fixed here and 32 KB now arrives intact. **A small write also fails
+outright**, with `NX_CALLER_ERROR` from NetX Duo's thread check, which is the
+`Error writing: Invalid argument` §40.9 blamed on emulator contention; that one
+is not fixed. And **every connection costs about a megabyte that never comes
+back**, which on the 4 MB floor is three logins and then nothing.
 
 **And the premise this work was started on is wrong.** It was expected that SSH
 would beat TLS here because TLS is RSA-2048 and SSH is 25519. It does not:
@@ -20638,11 +20639,29 @@ That is why 8 KB works and 32 KB does not: it is not a size threshold in the
 send, it is whether one SSH packet fits one TCP window.
 
 **BSD requires a non-blocking send to take what fits and report the rest
-short**, and this one takes nothing. The fix is to bound a segment by the
-packet's payload as well as by the MSS, which is below any window a real peer
-advertises and is what Ethernet — MSS 1,460 — has been doing all along. It also
-skips `nx_tcp_socket_send()`'s re-segmentation of a chained packet, which copies
-every byte.
+short**, and this one takes nothing.
+
+**The fix took three attempts and only the third is free**, which is worth the
+table because the first two look obviously right. Bounding a segment at one
+packet is what Ethernet's 1,460-byte MSS effectively does, so it reads as
+harmless — and it costs a *non-blocking loopback sender that was never failing*
+more than half its throughput, because that sender's 16 KB segments were the
+reason it was fast. Gating that on `NX_NO_WAIT` changes nothing, because the
+conformance suite's own sender is non-blocking too. Bounding at
+`min(advertised, congestion) − outstanding`, which is what
+`_nx_tcp_socket_send_internal()` computes for the same decision, leaves a wide
+window alone and only shrinks the segment that would otherwise make no progress:
+
+| | conformance TCP loopback | the livelock |
+|---|---:|---|
+| no clamp | 395 / 399 KB/s | 1,595 refusals |
+| clamp to one packet | **183 / 184 KB/s** | gone |
+| clamp to one packet, only when `NX_NO_WAIT` | **183 / 184 KB/s** | gone |
+| **clamp to the peer's usable window** | **401 / 403 KB/s** | **gone** |
+
+The loopback tier reads 130 passed, 0 failed, 12 skipped on every one of those —
+§39.9's baseline — so the suite would not have caught the 54%. Only its
+throughput figure does, and only if somebody reads it.
 
 **Ethernet cannot reach this**, which is why nothing found it: a 1,460-byte
 segment always fits. And the conformance suite cannot reach it either, although
@@ -20653,14 +20672,11 @@ a peer that never reads, so the first writes fit and the eventual
 than one window in one call on an interface whose MSS exceeds it.** That is the
 regression test this needs and does not have.
 
-**What the fix is shown to do, and what it is not.** With the clamp in, the same
-three transfers produce **zero** of those warnings where the previous run
-produced 1,595, so it does what it was aimed at. It does **not** produce a
-completed bulk transfer, because the second defect below then kills the session
-first — so "the server can send bulk" is still unproven, and the clamp is in the
-tree on the strength of a measured BSD-semantics violation rather than on a
-working transfer. The conformance loopback tier is the gate it was taken
-against.
+**And it moves bulk data, which nothing had done before.** On the A3000 profile,
+`SSHProbe bulk 32` through the server returns `rc 0` and **all 32,768 bytes
+arrive** — 512 payload lines, each with the CR the console write path adds, which
+is what makes the arithmetic check out to the byte. That is the first bulk
+payload ever to leave this server.
 
 #### The other one: `NX_CALLER_ERROR` on a 44-byte write
 
@@ -20707,8 +20723,13 @@ implied 323 MHz clock. **Any seconds figure from that profile would be the
 emulator's, not a 68030's**, and the honest 68030 answer is arithmetic on the
 14 MHz numbers: §24 and §29 both measured this stack at **1.78× for a 1.76×
 clock**, so a 25 MHz 68030 is ~7 s for a client handshake and ~50 KB/s on the
-channel, before whatever the 32-bit bus and the caches are worth. The A3000 run
-was taken and does what it can prove: it authenticates and runs a command.
+channel, before whatever the 32-bit bus and the caches are worth.
+
+The A3000 run was taken and does what it *can* prove, which turned out to be
+more than expected: it authenticates, runs a command, and **moves 32 KB through
+the channel with every byte intact** — the first bulk payload out of this server
+(§77.6). Every second in its report is the emulator's and none of them is
+quoted.
 
 ### 77.9 Is it worth continuing
 
