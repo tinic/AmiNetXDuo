@@ -20685,11 +20685,22 @@ a peer that never reads, so the first writes fit and the eventual
 than one window in one call on an interface whose MSS exceeds it.** That is the
 regression test this needs and does not have.
 
-**And it moves bulk data, which nothing had done before.** On the A3000 profile,
-`SSHProbe bulk 32` through the server returns `rc 0` and **all 32,768 bytes
-arrive** — 512 payload lines, each with the CR the console write path adds, which
-is what makes the arithmetic check out to the byte. That is the first bulk
-payload ever to leave this server.
+**And it moves bulk data, which nothing had done before.** `SSHProbe bulk 32`
+through the server returns `rc 0` and **all 32,768 bytes arrive** — 512 payload
+lines, each with the CR the console write path adds, which is what makes the
+arithmetic check out to the byte. On the A3000 profile first, and then on the
+14 MHz A1200 where every previous attempt had failed:
+
+| A1200, after the fix | | payload |
+|---|---:|---|
+| `SSHProbe bulk 8` | rc 0, 23.00 s | 128 lines, exact |
+| `SSHProbe bulk 32` | rc 0, 24.52 s | 512 lines, exact |
+| `SSHProbe bulk 160` | wedged in the key exchange | — |
+
+Two of three, byte-exact, and the third failed *before* `spawn_command()` exists
+— the residual failure is the one below, not this one. The serial log carries
+**zero** window-overflow warnings across the whole run where the previous one
+carried 1,595.
 
 #### The other one: `NX_CALLER_ERROR` on a 44-byte write
 
@@ -20716,11 +20727,12 @@ that never completes — and it is the first thing phase 3 should look at.
 
 ### 77.7 The loopback harness is unreliable, and it is not contention
 
-Fourteen loopback connections were taken across this work, on the **exclusive**
-lane (`-x`), with the machine to itself. Four did not complete: three with the
-write failures above, and one that wedged in the key exchange after `Child
-connection from` and stayed there for fourteen minutes until the harness timed
-out.
+Seventeen loopback connections were taken across this work, on the **exclusive**
+lane (`-x`), with the machine to itself. Ten did not complete. Most of those were
+the window livelock, which is fixed — but not all: **three wedged in the key
+exchange**, after `Child connection from` and before any auth line, one of them
+for fourteen minutes until the harness timed out. After the fix the A1200 arm is
+two of three, and the one that failed failed that way.
 
 That is §40.9's own "one run in three", reproduced with its stated cause removed.
 That section is corrected in place, and §77.6 names a status that would produce
