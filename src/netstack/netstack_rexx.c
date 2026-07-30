@@ -51,7 +51,6 @@ struct Library *ami_rx_rexxbase;
 /* ----------------------------------------------------------------- names -- */
 
 static char ami_rx_port_name[]  = "AMITCP";
-static char ami_rx_error_name[] = "AMITCP.LASTERROR";
 
 /*
  * AmiTCP's own keyword list and its order; the enum has to match.
@@ -89,7 +88,6 @@ static const char ami_rx_err_var[]      = "unknown variable\n";
 static const char ami_rx_err_nowrite[]  = "Variable is not writeable\n";
 static const char ami_rx_err_unimpl[]   = "Not implemented\n";
 static const char ami_rx_err_state[]    = "No active stack\n";
-static const char ami_rx_err_closed[]   = "99: Port Closed!";
 
 /* AmiTCP: KEYWORDLEN 24, REPLYBUFLEN 255 (amiga_config.h). */
 #define RX_KEYWORDLEN   24
@@ -115,26 +113,15 @@ static AmiRexxBoot     *ami_rx_boot;
 
 /* ------------------------------------------------------- rexxsyslib calls --
  *
- * SetRexxVarFromMsg() -- the only way to set AMITCP.LASTERROR without
- * amiga.lib's SetRexxVar(), which a shared library cannot reach -- is
- * rexxsyslib V45, so OS 3.9 and later only. On an older rexxsyslib the variable
- * is simply not set: rm_Result1, which is what a script reads as RC, is
- * unaffected, and nothing in the 31-archive corpus reads LASTERROR at all
- * (docs/RESEARCH.md 75.7). Gated rather than assumed, because calling a vector
- * that is not there on 3.1 would take the machine with it.
+ * AmiTCP also set an ARexx variable, AMITCP.LASTERROR, alongside the return
+ * code. That is not done here. SetRexxVarFromMsg() is the only way to reach it
+ * from a shared library -- amiga.lib's SetRexxVar() needs a base we do not have
+ * -- and only some NDKs declare it, so building against it makes the result
+ * depend on which NDK is installed. Nothing in the 31-archive corpus reads
+ * LASTERROR (docs/RESEARCH.md 75.7); what a script reads as RC is rm_Result1,
+ * which is set, and an error string comes back in rm_Result2 when the caller
+ * asked for a result.
  */
-#define RX_LASTERROR_VERSION    45
-
-static BOOL ami_rx_can_set_var;
-
-static VOID ami_rx_set_error(struct RexxMsg *rmsg, const char *text)
-{
-    if (!ami_rx_can_set_var)
-        return;
-
-    (VOID)SetRexxVarFromMsg((CONST_STRPTR)ami_rx_error_name, rmsg,
-                            (CONST_STRPTR)text);
-}
 
 /* --------------------------------------------------------------- commands -- */
 
@@ -370,14 +357,20 @@ static VOID ami_rx_service(struct RexxMsg *rmsg)
 
     if (rc != RETURN_OK)
     {
-        if (errstr != NULL)
-            ami_rx_set_error(rmsg, errstr);
         rmsg->rm_Result1 = rc;
+        if (errstr != NULL && (rmsg->rm_Action & RXFF_RESULT) != 0)
+            rmsg->rm_Result2 =
+                (LONG)CreateArgstring((STRPTR)errstr, ami_rx_strlen(errstr));
     }
     else if ((rmsg->rm_Action & RXFF_RESULT) != 0 && result[0] != '\0')
     {
+        /* STRPTR, not CONST_STRPTR: the pinned NDK types this parameter
+           `const STRPTR`, which is UBYTE *const -- a const pointer, not a
+           pointer to const -- so CONST_STRPTR discards a qualifier there and
+           builds only against an NDK that spells it CONST_STRPTR. result is a
+           local buffer, so handing it over non-const costs nothing. */
         rmsg->rm_Result2 =
-            (LONG)CreateArgstring((CONST_STRPTR)result, ami_rx_strlen(result));
+            (LONG)CreateArgstring((STRPTR)result, ami_rx_strlen(result));
     }
 
     ReplyMsg((struct Message *)rmsg);
@@ -404,8 +397,9 @@ static VOID ami_rx_drain(BOOL closing)
         {
             struct RexxMsg *rmsg = (struct RexxMsg *)msg;
 
-            /* AmiTCP's rexx_deinit() values, exactly. */
-            ami_rx_set_error(rmsg, ami_rx_err_closed);
+            /* AmiTCP's rexx_deinit() values, exactly. It also set LASTERROR
+               to "99: Port Closed!" here; that string is the one thing lost by
+               not setting the variable at all. */
             rmsg->rm_Result2 = 0;
             rmsg->rm_Result1 = 100;
             ReplyMsg(msg);
@@ -473,9 +467,6 @@ static VOID ami_rx_main(VOID)
     if (ami_rx_rexxbase == NULL)
         AMI_WARN("AMITCP: no rexxsyslib.library; messages will be replied to "
                  "but not interpreted");
-    else
-        ami_rx_can_set_var =
-            (ami_rx_rexxbase->lib_Version >= RX_LASTERROR_VERSION) ? TRUE : FALSE;
 
     AMI_INFO("AMITCP: ARexx host started");
 
@@ -507,8 +498,7 @@ static VOID ami_rx_main(VOID)
     if (ami_rx_rexxbase != NULL)
     {
         CloseLibrary(ami_rx_rexxbase);
-        ami_rx_rexxbase   = NULL;
-        ami_rx_can_set_var = FALSE;
+        ami_rx_rexxbase = NULL;
     }
 
     AMI_INFO("AMITCP: ARexx host stopped");

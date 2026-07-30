@@ -136,6 +136,19 @@ stage_toolchain() {
     fi
     . tools/amiga-toolchain.sh
     export AMIGA_TOOLCHAIN_ROOT
+
+    # A locally installed toolchain is not the toolchain CI builds with, and the
+    # difference is not only the compiler: NDK header sets diverge.  A green
+    # cross build here against an NDK that declares SetRexxVarFromMsg said
+    # nothing about CI, whose pinned NDK does not -- which is how v0.13.0 got
+    # tagged on code that did not compile.  Warn rather than override: building
+    # against what you have installed is usually what you want locally.
+    local pinned
+    pinned=$(tools/fetch-toolchain.sh --print-root 2>/dev/null || true)
+    if [ -n "$pinned" ] && [ "$AMIGA_TOOLCHAIN_ROOT" != "$pinned" ]; then
+        note "NOT the pinned toolchain CI uses ($pinned)"
+        note "  NDK header sets differ -- a green build here can still fail CI"
+    fi
 }
 
 # ------------------------------------------------------------------ host ----
