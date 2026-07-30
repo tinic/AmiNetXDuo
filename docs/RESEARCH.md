@@ -19214,3 +19214,88 @@ findings and no new ones. Conformance `LOOPBACK`: 130 passed, 0 failed, 12
 skipped. `tests/ipv6/run-tools-fsuae.sh -s` PASS on both `build/v6` and
 `build/cm`. `tests/tools/run-livetools.sh` PASSED. All seven cross
 configurations built clean.
+
+---
+
+## 73. A Snyk pass, triaged by reachability (2026-07-30)
+
+Snyk Code over the whole tree: roughly 9 HIGH, 30 MEDIUM, 60 LOW. **Every
+finding that touches code we compile and ship is a false positive.** Recorded
+so the pass does not have to be repeated blind, and because "a SAST tool was
+run and every finding was triaged" is a checkable claim where "the code is
+careful" is not.
+
+The tool sorts by pattern severity, which is not the same as reachability. Four
+questions decide each finding: is the file compiled at all, is it reachable from
+the network, is the guard already there, and does the threat model apply.
+
+### 73.1 The only shipped-code MEDIUM, and why it is wrong
+
+`nxd_ipv6_router_lookup.c:132` and `:162` -- "a pointer is possibly assigned to
+NULL then used". That file *is* compiled into `bsdsocket.library`, and the
+router table it reads is populated from router advertisements, so it is
+network-reachable. Worth taking seriously for those two reasons alone.
+
+Both lines do `*nd_cache_entry = ...entry_neighbor_cache_ptr` and return
+`NX_SUCCESS`, and the field genuinely can be NULL -- `nxd_ipv6_prefix_router_timer_tick.c`
+nulls it on router expiry, which 69 already had reason to read closely. But both
+callers handle it:
+
+- `nx_ipv6_packet_send.c:315` tests for it explicitly, with a comment naming the
+  case: "If the default router did not has a reachable ND_CACHE_ENTRY" ->
+  `if ((status == NX_SUCCESS) && !NDCacheEntry)`, substituting the destination
+  table's entry.
+- `nx_icmpv6_process_redirect.c:182` uses the call only as a boolean -- is there
+  a default router -- and sets `error = 1` when there is not.
+
+### 73.2 Every HIGH is uncompiled
+
+Skipjack, XTEA, RC5, SEED, RC2, Blowfish, CAST5, DES, MD4, MD5, SHA1, and
+hardcoded keys in `.java` test vectors -- all in `third_party/dropbear/libtomcrypt/`.
+The tool is flagging that a cipher implementation exists in a crypto library,
+not that anything uses it. `third_party/dropbear/src/default_options.h` decides:
+`DROPBEAR_AES128 1`, `DROPBEAR_AES256 1`, `DROPBEAR_3DES 0`,
+`DROPBEAR_SHA1_96_HMAC 0`, and DES/Blowfish/Twofish/CAST/RC4 are not in the
+defaults at all. `clients/dropbear/localoptions.h` does not re-enable any of
+them. None is compiled into `dbclient`.
+
+Same for the `scp.c` double-free and use-after-free cluster: we build
+`dbclient`, not `scp`.
+
+### 73.3 Guards the tool did not read
+
+- `clients/compat/amiga_posix.c:113` -- `strcpy`, and shipped. Two lines above:
+  `if (head + strlen(colon + 2) + 1 > sizeof(amiga_path_buf)) return path;`,
+  which bounds exactly the `memcpy` of `head` plus the `strcpy` of
+  `strlen + 1` that follow.
+- `tools/fix-toolchain-crt0.py:181` -- reported as an environment variable
+  reaching a shell command. `subprocess.run([str(c), "-d", str(sample)])` is a
+  list argv with no `shell=True`; the variable becomes `argv[0]`, an executable
+  path, which is what `AMINETXDUO_OBJDUMP` exists to let a developer choose.
+
+### 73.4 Where the threat model does not apply
+
+About forty "path traversal" findings in `tools/`, `tests/`, `install/` and
+`dist/` Python: a command-line argument reaching `open()`. These are build and
+test scripts, and the party supplying the argument is the developer running
+their own script on their own machine. `tests/tools/netpeer.py:222` binding
+`0.0.0.0` is likewise deliberate -- it is a test peer that guests reach over
+SLIRP, and a comment saying so would be an improvement over a suppression.
+
+The rest is `third_party/{threadx,netxduo,bsdsocktest}/test*` and libtomcrypt's
+`demos/`, `tests/`, `testprof/` and `notes/` -- none of it compiled here.
+
+### 73.5 What is actually left
+
+Two, both test-only and neither a defect in anything shipped:
+
+- `tests/perf/fitzbench.c:367` -- a `strcpy` in the unfinished Fitz benchmark,
+  worth bounding when that work resumes.
+- `tests/tools/netpeer.py:222` -- wants the comment described above.
+
+The findings this pass did *not* produce are worth noting too: nothing in
+`src/netstack/`, `src/sana2/` or `src/bsdsocket/`, which is where bytes off the
+wire are parsed. That is not evidence those are clean -- a SAST tool reasons
+about patterns, and 66's DNS and mDNS response parsers are still the largest
+stated gap in SECURITY.md. It is evidence that the pattern-matchable mistakes
+are not there.
