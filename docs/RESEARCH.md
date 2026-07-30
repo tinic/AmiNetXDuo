@@ -19299,3 +19299,56 @@ wire are parsed. That is not evidence those are clean -- a SAST tool reasons
 about patterns, and 66's DNS and mDNS response parsers are still the largest
 stated gap in SECURITY.md. It is evidence that the pattern-matchable mistakes
 are not there.
+
+### 73.6 The GitHub CodeQL alerts: 16 of 19 are one cause
+
+CodeQL raised 19 alerts. **Sixteen come from a single fact: it analyses this
+tree without the AmigaOS NDK headers, so the Amiga type names do not expand.**
+
+`exec/types.h` in the m68k NDK:
+
+```
+:56   #define VOID void
+:87   typedef long        LONG;      /* the default branch */
+:113  typedef int32_t     LONG;      /* only #ifdef __use_amiga_stdc_c99 */
+```
+
+Nothing in this tree defines `__use_amiga_stdc_c99`, so every real build takes
+line 87 and `LONG` is `long`.
+
+**Thirteen HIGH, `cpp/wrong-type-format-argument`**, all on `ami_log` calls in
+`port/threadx-amiga/src/tx_initialize_low_level.c`. CodeQL reports "this format
+specifier for type 'long' does not match the argument type 'signed int'" --
+which means it resolved line 113, where `LONG` is `int32_t`, i.e. `int` on a
+target whose `int` and `long` are both 32 bits.
+
+Doubly wrong, because `ami_log` is not printf. `include/aminetxduo/compat.h:44`
+says formatting goes through exec's `RawDoFmt` and that **every** argument must
+be cast to `LONG`, strings included -- `ami_log(..., "%s", (LONG)str)` -- and
+that a bare `%d` consumes a *word* where the C caller pushes a longword, so
+every argument after one is silently misaligned. The casts CodeQL objects to are
+what makes those calls correct.
+
+**Three MEDIUM, `cpp/too-few-arguments`**, on `t_karatsuba()`, `t_division()`
+and `t_bulk()` in `tests/crypto68k/host/test_c68k_host.c`. All three are
+declared and defined `static VOID f(VOID)`, which expands to
+`static void f(void)` -- no parameters, called with none. Without `exec/types.h`
+the extractor meets `VOID` as an unknown identifier inside a parameter list and
+recovers by reading it as an old-style parameter *name* of implicit `int` type.
+One parameter declared, none passed.
+
+The remaining three were real and are fixed: `emulator.yml` was the last
+workflow without a `permissions` block, so `aros`, `kickstart` and `gate` ran
+with the default token. It boots an emulator and publishes nothing;
+`contents: read` now.
+
+The two `py/bind-socket-all-network-interfaces` alerts are the test peers of
+73.4.
+
+**Worth acting on beyond dismissal.** These sixteen regenerate on every
+`ami_log` site with a `%s` and every `VOID`-declared static in a host test,
+which is most of them. A scanner that reliably produces a dozen HIGH false
+positives teaches people to skip it, and that costs more than the alerts do. A
+`.github/codeql/codeql-config.yml` that either gives the extractor the NDK
+include path or excludes these queries for `port/` and `tests/` keeps the signal
+usable.
