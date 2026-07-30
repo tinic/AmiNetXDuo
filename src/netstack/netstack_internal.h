@@ -247,6 +247,19 @@ LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
                                ULONG timeout_ticks);
 #endif
 
+/* ------------------------------------------------------------ AMITCP port --
+ *
+ * netstack_rexx.c -- the AMITCP public port and the ARexx host servicing it.
+ * The port is what `WaitForPort AMITCP` waits on; the host is why a script that
+ * addresses it gets an answer instead of blocking (docs/RESEARCH.md 75.7).
+ */
+VOID ami_netstack_rexx_start(VOID);
+VOID ami_netstack_rexx_stop(VOID);
+
+/* Called around every SANA-II OpenDevice, via ami_sana2_set_open_hooks(). */
+VOID ami_netstack_rexx_suspend(VOID);
+VOID ami_netstack_rexx_resume(VOID);
+
 /* The singleton, without the "is it up" filtering the public accessor does. */
 AmiNetStack *ami_netstack_raw(VOID);
 

@@ -1,0 +1,648 @@
+/*
+ * AmiNetXDuo -- the AMITCP public port, and the ARexx host behind it.
+ *
+ * The port exists so `WaitForPort AMITCP` in a startup script returns once the
+ * stack is up. That is not all it is, which is what this file is for: AMITCP is
+ * AmiTCP's *ARexx host port*, and 31 of the 2,149 Aminet comm/ archives
+ * surveyed in docs/RESEARCH.md 75 send commands to it -- AmiTCP's own
+ * bin/stopnet and bin/netstat, Genesis's copies of both, SLIPCall, Netdial,
+ * TCPFront, netbeginner, interinstall, TCP_Start_Stop, rx.fingerd.
+ *
+ * A port with PA_IGNORE and no signal task answers none of them. RexxSysLib
+ * finds the port, PutMsg()es a RexxMsg and waits for a reply that never comes,
+ * so the script hangs -- where with no port at all it would have failed at once
+ * with "host environment not found". So the port has to be serviced, and every
+ * message replied to, including the ones we do not implement: an error reply is
+ * what restores the behaviour the port's absence used to give.
+ *
+ * The command set is AmiTCP 3.0b2's, from src/amitcp/kern/amiga_config.h:
+ *
+ *     #define REXXKEYWORDS "Q=QUERY,S=SET,READ,ROUTE,ADD,RESET,KILL"
+ *
+ * parsed the way AmiTCP parsed it -- ReadItem() then FindArg() -- so
+ * abbreviation and quoting behave identically without us reimplementing them.
+ * What each keyword does here, and why, is at ami_rx_execute().
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "netstack_internal.h"
+
+#include <exec/ports.h>
+#include <dos/dos.h>
+#include <dos/dosextens.h>
+#include <dos/dostags.h>
+#include <dos/rdargs.h>
+#include <rexx/storage.h>
+
+#include <proto/dos.h>
+#include <proto/exec.h>
+
+/* ----------------------------------------------------------------- names -- */
+
+static char ami_rx_port_name[]  = "AMITCP";
+static char ami_rx_error_name[] = "AMITCP.LASTERROR";
+
+/*
+ * AmiTCP's own keyword list and its order; the enum has to match.
+ * "ROUTE is currently not implemented" is AmiTCP's comment on its own line 95.
+ */
+static const char ami_rx_keywords[] = "Q=QUERY,S=SET,READ,ROUTE,ADD,RESET,KILL";
+
+/* The variable names QUERY and SET accept, in AmiTCP's own form: a FindArg()
+   template, so abbreviation and case-insensitivity come from DOS. AmiTCP's list
+   is ~150 names long (its variables.src); see ami_rx_query() for why this one
+   is not. */
+static const char ami_rx_variables[] = "HOSTNAME";
+
+enum
+{
+    RX_VAR_HOSTNAME = 0
+};
+
+enum
+{
+    RX_KEY_QUERY = 0,
+    RX_KEY_SET,
+    RX_KEY_READ,
+    RX_KEY_ROUTE,
+    RX_KEY_ADD,
+    RX_KEY_RESET,
+    RX_KEY_KILL
+};
+
+/* AmiTCP's amiga_config.c strings, so a script that prints them sees what it
+   would have seen from AmiTCP. AmiTCP terminates each with a newline. */
+static const char ami_rx_err_unknown[]  = "Unknown command\n";
+static const char ami_rx_err_syntax[]   = "Syntax error\n";
+static const char ami_rx_err_var[]      = "unknown variable\n";
+static const char ami_rx_err_nowrite[]  = "Variable is not writeable\n";
+static const char ami_rx_err_unimpl[]   = "Not implemented\n";
+static const char ami_rx_err_state[]    = "No active stack\n";
+static const char ami_rx_err_closed[]   = "99: Port Closed!";
+
+/* AmiTCP: KEYWORDLEN 24, REPLYBUFLEN 255 (amiga_config.h). */
+#define RX_KEYWORDLEN   24
+#define RX_REPLYBUFLEN  255
+#define RX_CMDLEN       256
+
+#define RX_STACK        4096
+#define RX_PRIORITY     0
+
+/* ----------------------------------------------------------------- state -- */
+
+typedef struct AmiRexxBoot
+{
+    struct Task *rb_Parent;
+    BOOL         rb_Ok;
+} AmiRexxBoot;
+
+static struct MsgPort  *ami_rx_port;        /* the AMITCP port itself       */
+static struct Process  *ami_rx_proc;
+static struct MsgPort  *ami_rx_death;       /* parent's; the child posts here */
+static struct Message   ami_rx_death_msg;
+static AmiRexxBoot     *ami_rx_boot;
+static struct Library  *ami_rx_rexxbase;
+
+/* ------------------------------------------------------- rexxsyslib calls --
+ *
+ * SetRexxVarFromMsg() is a rexxsyslib LVO, not the amiga.lib SetRexxVar() a
+ * shared library cannot reach. IsRexxMsg(), CreateArgstring() and
+ * LengthArgstring() likewise, so opening rexxsyslib.library is all this needs.
+ */
+
+static BOOL ami_rx_is_rexx(struct Message *msg)
+{
+    extern BOOL IsRexxMsg(const struct RexxMsg *);
+
+    if (ami_rx_rexxbase == NULL)
+        return FALSE;
+
+    return IsRexxMsg((const struct RexxMsg *)msg);
+}
+
+static VOID ami_rx_set_error(struct RexxMsg *rmsg, const char *text)
+{
+    extern LONG SetRexxVarFromMsg(const char *, struct RexxMsg *, const char *);
+
+    if (ami_rx_rexxbase == NULL)
+        return;
+
+    (VOID)SetRexxVarFromMsg(ami_rx_error_name, rmsg, text);
+}
+
+static char *ami_rx_make_result(const char *text, ULONG len)
+{
+    extern UBYTE *CreateArgstring(const UBYTE *, unsigned long);
+
+    if (ami_rx_rexxbase == NULL)
+        return NULL;
+
+    return (char *)CreateArgstring((const UBYTE *)text, (unsigned long)len);
+}
+
+/* --------------------------------------------------------------- commands -- */
+
+static ULONG ami_rx_strlen(const char *s)
+{
+    ULONG n = 0;
+
+    while (s[n] != '\0')
+        n++;
+
+    return n;
+}
+
+/*
+ * KILL. AmiTCP's was Signal(AmiTCP_Task, SIGBREAKF_CTRL_C) -- the stack task
+ * exited and the library went with it. Ours cannot: bsdsocket.library is a
+ * singleton that lives until reboot once anything has opened it, which
+ * src/tools/netshutdown.c documents at length. What is stoppable is the
+ * traffic, so KILL does what NetShutdown does and takes every interface down
+ * through the same netstack_interface_down() that Offline calls.
+ *
+ * The port stays. `stopnet`'s optional FLUSH branch tests Show(ports, AMITCP)
+ * before flushing memory, so it correctly declines to flush -- the stack really
+ * is still resident.
+ */
+static LONG ami_rx_kill(void)
+{
+    AmiNetStack *ns = ami_netstack_raw();
+    UWORD        i;
+    LONG         worst = RETURN_OK;
+
+    if (ns == NULL)
+        return RETURN_ERROR;
+
+    AMI_INFO("AMITCP: KILL -- taking every interface down");
+
+    for (i = 0; i < ns->ns_IfaceCount; i++)
+    {
+        if (netstack_interface_down(i) != AMI_NET_OK)
+            worst = RETURN_WARN;
+    }
+
+    return worst;
+}
+
+/*
+ * QUERY. AmiTCP's variable space is ~150 names (its variables.src), almost all
+ * of them protocol counters reached as `Q TCP Accepts TCP CAttem ...`. None of
+ * that is implemented here: this stack publishes its counters through
+ * GetNetworkStatistics() and its own `netstat`, and an ARexx mirror of a
+ * different stack's counter names is a separate piece of work.
+ *
+ * HOSTNAME is answered because it costs nothing and it is the one variable a
+ * survey script is likely to want. Everything else gets AmiTCP's own
+ * "unknown variable", which is what AmiTCP returns for a name it does not know
+ * -- an error the caller already has to handle.
+ */
+static LONG ami_rx_query(struct CSource *cs, const char **errstr,
+                         char *result, ULONG result_size)
+{
+    char buf[RX_KEYWORDLEN];
+    LONG item = ReadItem((STRPTR)buf, (LONG)sizeof(buf), cs);
+
+    if (item <= 0)
+    {
+        *errstr = ami_rx_err_syntax;
+        return RETURN_WARN;
+    }
+
+    if (FindArg((CONST_STRPTR)ami_rx_variables, (CONST_STRPTR)buf)
+        == RX_VAR_HOSTNAME)
+    {
+        const AmiConfig *cfg = netstack_config();
+        const char      *name;
+        ULONG            i;
+
+        name = (cfg != NULL && cfg->hostname[0] != '\0') ? cfg->hostname
+                                                         : "amiga";
+
+        for (i = 0; name[i] != '\0' && i + 1 < result_size; i++)
+            result[i] = name[i];
+        result[i] = '\0';
+
+        return RETURN_OK;
+    }
+
+    *errstr = ami_rx_err_var;
+    return RETURN_ERROR;
+}
+
+/*
+ * SET. HOSTNAME is recognised and refused rather than reported unknown:
+ * TCP_Start_Stop's startnet sends `SET HOSTNAME '<name>'`, and the honest
+ * answer is that this stack takes its host name from its configuration file.
+ * AmiTCP has the same distinction and the same error for it -- ERR_NOWRITE,
+ * "Variable %s is not writeable", for variables that are VF_READ only.
+ */
+static LONG ami_rx_set(struct CSource *cs, const char **errstr)
+{
+    char buf[RX_KEYWORDLEN];
+    LONG item = ReadItem((STRPTR)buf, (LONG)sizeof(buf), cs);
+
+    if (item <= 0)
+    {
+        *errstr = ami_rx_err_syntax;
+        return RETURN_WARN;
+    }
+
+    if (FindArg((CONST_STRPTR)ami_rx_variables, (CONST_STRPTR)buf)
+        == RX_VAR_HOSTNAME)
+    {
+        *errstr = ami_rx_err_nowrite;
+        return RETURN_ERROR;
+    }
+
+    *errstr = ami_rx_err_var;
+    return RETURN_ERROR;
+}
+
+/*
+ * One command line. Mirrors AmiTCP's parseline(): an empty line is not an
+ * error, an unreadable one is a syntax error, an unrecognised keyword is
+ * "Unknown command", and anything else dispatches on the keyword index.
+ */
+static LONG ami_rx_execute(const char *line, const char **errstr,
+                           char *result, ULONG result_size)
+{
+    char           cmd[RX_CMDLEN + 2];
+    struct CSource cs;
+    char           buf[RX_KEYWORDLEN];
+    LONG           item;
+    LONG           key;
+    ULONG          len = 0;
+
+    result[0] = '\0';
+    *errstr   = NULL;
+
+    while (line[len] != '\0' && len < RX_CMDLEN)
+    {
+        cmd[len] = line[len];
+        len++;
+    }
+    if (line[len] != '\0')
+    {
+        *errstr = ami_rx_err_syntax;
+        return RETURN_WARN;
+    }
+
+    /* ReadItem() wants a sentinel it can stop on; AmiTCP uses '\n' too, but
+       writes it into the caller's argstring. This is our copy. */
+    cmd[len]     = '\n';
+    cmd[len + 1] = '\0';
+
+    cs.CS_Buffer = (STRPTR)cmd;
+    cs.CS_Length = (LONG)len + 1;
+    cs.CS_CurChr = 0;
+
+    item = ReadItem((STRPTR)buf, (LONG)sizeof(buf), &cs);
+    if (item == 0)
+        return RETURN_OK;           /* empty line: AmiTCP returns OK as well */
+    if (item < 0)
+    {
+        *errstr = ami_rx_err_syntax;
+        return RETURN_WARN;
+    }
+
+    key = FindArg((CONST_STRPTR)ami_rx_keywords, (CONST_STRPTR)buf);
+    if (key < 0)
+    {
+        *errstr = ami_rx_err_unknown;
+        return RETURN_WARN;
+    }
+
+    if (ami_netstack_raw() == NULL)
+    {
+        *errstr = ami_rx_err_state;
+        return RETURN_ERROR;
+    }
+
+    switch (key)
+    {
+        case RX_KEY_QUERY:
+            return ami_rx_query(&cs, errstr, result, result_size);
+
+        case RX_KEY_SET:
+            return ami_rx_set(&cs, errstr);
+
+        case RX_KEY_KILL:
+            return ami_rx_kill();
+
+        /*
+         * READ, ROUTE, ADD and RESET. AmiTCP itself answers two of these with
+         * an error -- readfile() returns "readfile() is currently
+         * unimplemented" and the ROUTE comment says the same -- and the other
+         * two edit a net database this stack does not keep in that shape.
+         * Recognised so the caller is told "not implemented" rather than
+         * "unknown command", which is the difference between a stack that has
+         * no such feature and a stack that has never heard of it.
+         */
+        case RX_KEY_READ:
+        case RX_KEY_ROUTE:
+        case RX_KEY_ADD:
+        case RX_KEY_RESET:
+        default:
+            *errstr = ami_rx_err_unimpl;
+            return RETURN_ERROR;
+    }
+}
+
+/* -------------------------------------------------------- message handling -- */
+
+/*
+ * One RexxMsg, answered. rm_Result1 is the return code the script sees as RC;
+ * rm_Result2 is a result string, but only when the script asked for one with
+ * OPTIONS RESULTS -- creating one otherwise leaks an argstring the interpreter
+ * will not free.
+ */
+static VOID ami_rx_service(struct RexxMsg *rmsg)
+{
+    char        result[RX_REPLYBUFLEN + 1];
+    const char *errstr = NULL;
+    const char *line;
+    LONG        rc;
+
+    line = (const char *)ARG0(rmsg);
+    if (line == NULL)
+        line = "";
+
+    rmsg->rm_Result1 = 0;
+    rmsg->rm_Result2 = 0;
+
+    rc = ami_rx_execute(line, &errstr, result, (ULONG)sizeof(result));
+
+    if (rc != RETURN_OK)
+    {
+        if (errstr != NULL)
+            ami_rx_set_error(rmsg, errstr);
+        rmsg->rm_Result1 = rc;
+    }
+    else if ((rmsg->rm_Action & RXFF_RESULT) != 0 && result[0] != '\0')
+    {
+        rmsg->rm_Result2 = (LONG)ami_rx_make_result(result,
+                                                   ami_rx_strlen(result));
+    }
+
+    ReplyMsg((struct Message *)rmsg);
+}
+
+/*
+ * Everything queued, replied to. A message that is not a RexxMsg is replied
+ * unchanged: rm_Result1 lies past the end of a plain struct Message, so writing
+ * it would scribble on the sender.
+ */
+static VOID ami_rx_drain(BOOL closing)
+{
+    struct Message *msg;
+
+    while ((msg = GetMsg(ami_rx_port)) != NULL)
+    {
+        if (!ami_rx_is_rexx(msg))
+        {
+            ReplyMsg(msg);
+            continue;
+        }
+
+        if (closing)
+        {
+            struct RexxMsg *rmsg = (struct RexxMsg *)msg;
+
+            /* AmiTCP's rexx_deinit() values, exactly. */
+            ami_rx_set_error(rmsg, ami_rx_err_closed);
+            rmsg->rm_Result2 = 0;
+            rmsg->rm_Result1 = 100;
+            ReplyMsg(msg);
+            continue;
+        }
+
+        ami_rx_service((struct RexxMsg *)msg);
+    }
+}
+
+/* ----------------------------------------------------------- the process -- */
+
+static VOID ami_rx_main(VOID)
+{
+    AmiRexxBoot    *boot = ami_rx_boot;
+    struct MsgPort *port;
+    struct MsgPort *death;
+    ULONG           portmask;
+    BOOL            running = TRUE;
+
+    port = CreateMsgPort();
+    if (port != NULL)
+    {
+        port->mp_Node.ln_Name = ami_rx_port_name;
+        port->mp_Node.ln_Pri  = 0;
+
+        /*
+         * Another stack owns the name: leave it alone and start nothing. The
+         * check and the AddPort() are one atomic step, or two stacks coming up
+         * together could both pass it.
+         */
+        Forbid();
+        if (FindPort((CONST_STRPTR)ami_rx_port_name) != NULL)
+        {
+            Permit();
+            DeleteMsgPort(port);
+            port = NULL;
+            AMI_WARN("AMITCP: a port of that name already exists; not adding ours");
+        }
+        else
+        {
+            AddPort(port);
+            Permit();
+        }
+    }
+
+    ami_rx_port = port;
+
+    if (boot != NULL)
+    {
+        boot->rb_Ok = (port != NULL) ? TRUE : FALSE;
+        Signal(boot->rb_Parent, SIGF_SINGLE);
+    }
+
+    if (port == NULL)
+        return;
+
+    /*
+     * rexxsyslib is what makes a reply meaningful -- without it we can still
+     * reply, which is what stops the hang, but not set rm_Result1 (the message
+     * cannot be confirmed to be a RexxMsg) or hand back a result string.
+     * Nothing can send us a RexxMsg without it either, so this is theoretical.
+     */
+    ami_rx_rexxbase = OpenLibrary((CONST_STRPTR)"rexxsyslib.library", 0);
+    if (ami_rx_rexxbase == NULL)
+        AMI_WARN("AMITCP: no rexxsyslib.library; commands will be refused");
+
+    AMI_INFO("AMITCP: ARexx host started");
+
+    portmask = 1UL << port->mp_SigBit;
+
+    while (running)
+    {
+        ULONG sigs = Wait(portmask | SIGBREAKF_CTRL_C);
+
+        ami_rx_drain(FALSE);
+
+        if ((sigs & SIGBREAKF_CTRL_C) != 0)
+            running = FALSE;
+    }
+
+    /*
+     * Off the public list first so nothing new can find the name, then answer
+     * whatever arrived in the meantime.
+     */
+    Forbid();
+    RemPort(port);
+    ami_rx_port = NULL;
+    Permit();
+
+    ami_rx_drain(TRUE);
+
+    DeleteMsgPort(port);
+
+    if (ami_rx_rexxbase != NULL)
+    {
+        CloseLibrary(ami_rx_rexxbase);
+        ami_rx_rexxbase = NULL;
+    }
+
+    AMI_INFO("AMITCP: ARexx host stopped");
+
+    death = ami_rx_death;
+
+    /*
+     * The parent is waiting on this message to know the library segment is free
+     * of us. Forbid() and no Permit(): the epilogue after this call is still
+     * our code, and the parent must not run until this process has left it.
+     * The task's Forbid nesting dies with the task.
+     */
+    Forbid();
+    if (death != NULL)
+        PutMsg(death, &ami_rx_death_msg);
+}
+
+/* ---------------------------------------------------------------- the API -- */
+
+VOID ami_netstack_rexx_start(VOID)
+{
+    AmiRexxBoot     boot;
+    struct TagItem  tags[6];
+    struct Task    *me = FindTask(NULL);
+
+    if (ami_rx_proc != NULL)
+        return;
+
+    /* CreateNewProc() needs a Process to inherit from, the same requirement
+       bsd_tcp_handler_start() has. A bare Task gets no port rather than a
+       crash -- and no port is the failure mode that was always safe. */
+    if (me == NULL || me->tc_Node.ln_Type != NT_PROCESS)
+    {
+        AMI_WARN("AMITCP: opener is not a Process; no ARexx host");
+        return;
+    }
+
+    ami_rx_death = CreateMsgPort();
+    if (ami_rx_death == NULL)
+        return;
+
+    ami_rx_death_msg.mn_Node.ln_Type = NT_MESSAGE;
+    ami_rx_death_msg.mn_ReplyPort    = NULL;
+    ami_rx_death_msg.mn_Length       = (UWORD)sizeof(ami_rx_death_msg);
+
+    boot.rb_Parent = me;
+    boot.rb_Ok     = FALSE;
+    ami_rx_boot    = &boot;
+
+    tags[0].ti_Tag  = NP_Entry;
+    tags[0].ti_Data = (ULONG)ami_rx_main;
+    tags[1].ti_Tag  = NP_Name;
+    tags[1].ti_Data = (ULONG)"AmiNetXDuo ARexx";
+    tags[2].ti_Tag  = NP_StackSize;
+    tags[2].ti_Data = RX_STACK;
+    tags[3].ti_Tag  = NP_Priority;
+    tags[3].ti_Data = (ULONG)RX_PRIORITY;
+    tags[4].ti_Tag  = NP_Cli;
+    tags[4].ti_Data = FALSE;
+    tags[5].ti_Tag  = TAG_DONE;
+    tags[5].ti_Data = 0;
+
+    SetSignal(0, SIGF_SINGLE);
+
+    ami_rx_proc = CreateNewProc(tags);
+    if (ami_rx_proc == NULL)
+    {
+        ami_rx_boot = NULL;
+        DeleteMsgPort(ami_rx_death);
+        ami_rx_death = NULL;
+        AMI_ERROR("AMITCP: cannot start the ARexx host process");
+        return;
+    }
+
+    /* Bounded: the host signals before it does anything that can block, and
+       `boot` is on this stack. */
+    Wait(SIGF_SINGLE);
+    ami_rx_boot = NULL;
+
+    if (!boot.rb_Ok)
+    {
+        /* It added no port and has already returned. Nothing to stop. */
+        ami_rx_proc = NULL;
+        DeleteMsgPort(ami_rx_death);
+        ami_rx_death = NULL;
+    }
+}
+
+VOID ami_netstack_rexx_stop(VOID)
+{
+    if (ami_rx_proc == NULL)
+        return;
+
+    Signal((struct Task *)ami_rx_proc, SIGBREAKF_CTRL_C);
+
+    WaitPort(ami_rx_death);
+    (VOID)GetMsg(ami_rx_death);
+
+    DeleteMsgPort(ami_rx_death);
+    ami_rx_death = NULL;
+    ami_rx_proc  = NULL;
+}
+
+/*
+ * iComp's SANA-II drivers read the AMITCP port as "this stack hands AmiTCP
+ * mbufs to the copy callbacks", and on finding it they stop calling the
+ * callbacks and walk ios2_Data as an IOIPReq instead -- into our slot, which is
+ * not one (docs/RESEARCH.md 71). Their flag is sampled once per OpenDevice and
+ * defaults to on, so the port is taken down across the open and put back after.
+ *
+ * The host process needs no part in this. RemPort() only unlinks the port from
+ * Exec's public list: the port structure, its message list and its signal are
+ * untouched, so a message already queued is still serviced and a PutMsg()
+ * through a pointer someone found earlier still arrives and still signals. The
+ * window hides the name from FindPort(), which is the whole point, and changes
+ * nothing about delivery -- so there is no state to share and no lock between
+ * the suspending task and the host.
+ *
+ * What does matter is that the port is not *freed* under the host: suspend and
+ * resume are bracketed inside one OpenDevice() call, and teardown clears these
+ * hooks before ami_netstack_rexx_stop() is called.
+ */
+VOID ami_netstack_rexx_suspend(VOID)
+{
+    Forbid();
+    if (ami_rx_port != NULL)
+        RemPort(ami_rx_port);
+    Permit();
+}
+
+VOID ami_netstack_rexx_resume(VOID)
+{
+    Forbid();
+    if (ami_rx_port != NULL)
+        AddPort(ami_rx_port);
+    Permit();
+}

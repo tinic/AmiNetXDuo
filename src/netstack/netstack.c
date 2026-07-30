@@ -70,7 +70,7 @@ AmiNetStack *ami_netstack_raw(VOID)
 /* ------------------------------------------------- the "is it up?" barrier */
 
 /*
- * The AMITCP public message port (docs/RESEARCH.md 3.3 and 6.6).
+ * The AMITCP public message port (docs/RESEARCH.md 3.3, 6.6 and 75.7).
  *
  * `WaitForPort AMITCP` in S:User-Startup is the conventional Amiga way to wait
  * until the network exists, and every stack since AmiTCP has created it. It is
@@ -78,84 +78,20 @@ AmiNetStack *ami_netstack_raw(VOID)
  * is running: the singleton is private to whichever binary holds it, but the
  * port is visible to everyone.
  *
- * PA_IGNORE with no signal task: nothing is meant to send here, the port is
- * only a flag. mp_SigTask would have to be the task that brought the stack up,
- * usually a Shell command that exits seconds later, leaving anything that did
- * PutMsg() signalling a dead task.
+ * It is not only a flag, which this comment used to claim. AMITCP is AmiTCP's
+ * ARexx host port, and 31 of the 2,149 archives surveyed in 75 send commands to
+ * it -- AmiTCP's own stopnet and netstat among them. A port nobody services
+ * turns their clean "host environment not found" into a hang, so netstack_rexx.c
+ * runs a process that answers, and the port lives and dies with it.
  */
-static char             ami_ns_port_name[] = "AMITCP";
-static struct MsgPort  *ami_ns_port;
-
 static VOID ami_ns_port_create(VOID)
 {
-    struct MsgPort *port;
-
-    if (ami_ns_port != NULL)
-        return;
-
-    Forbid();
-    port = FindPort((CONST_STRPTR)ami_ns_port_name);
-    Permit();
-
-    if (port != NULL)
-    {
-        /* Another TCP/IP stack is already on this machine. */
-        AMI_WARN("netstack: an AMITCP port already exists; not adding ours");
-        return;
-    }
-
-    port = (struct MsgPort *)ami_alloc((ULONG)sizeof(struct MsgPort));
-    if (port == NULL)
-        return;
-
-    port->mp_Node.ln_Type = NT_MSGPORT;
-    port->mp_Node.ln_Pri  = 0;
-    port->mp_Node.ln_Name = ami_ns_port_name;
-    port->mp_Flags        = PA_IGNORE;
-    port->mp_SigBit       = 0;
-    port->mp_SigTask      = NULL;
-
-    /* NewList() lives in amiga.lib, which a shared library cannot reach. */
-    port->mp_MsgList.lh_Head     = (struct Node *)&port->mp_MsgList.lh_Tail;
-    port->mp_MsgList.lh_Tail     = NULL;
-    port->mp_MsgList.lh_TailPred = (struct Node *)&port->mp_MsgList.lh_Head;
-    port->mp_MsgList.lh_Type     = NT_MESSAGE;
-
-    AddPort(port);
-    ami_ns_port = port;
-
-    AMI_INFO("netstack: AMITCP port added");
+    ami_netstack_rexx_start();
 }
 
 static VOID ami_ns_port_delete(VOID)
 {
-    if (ami_ns_port == NULL)
-        return;
-
-    RemPort(ami_ns_port);
-    ami_free(ami_ns_port);
-    ami_ns_port = NULL;
-}
-
-/*
- * iComp's SANA-II drivers read the AMITCP port as "this stack hands AmiTCP
- * mbufs to the copy callbacks", and on finding it they stop calling the
- * callbacks and walk ios2_Data as an IOIPReq instead -- into our slot, which
- * is not one (docs/RESEARCH.md 71). Their flag is sampled once per OpenDevice
- * and defaults to on, so the port is taken down across the open and put back
- * after. A cold bring-up opens interfaces before the port exists and was never
- * exposed; adding an interface to a running stack is.
- */
-static VOID ami_ns_port_suspend(VOID)
-{
-    if (ami_ns_port != NULL)
-        RemPort(ami_ns_port);
-}
-
-static VOID ami_ns_port_resume(VOID)
-{
-    if (ami_ns_port != NULL)
-        AddPort(ami_ns_port);
+    ami_netstack_rexx_stop();
 }
 
 /* ----------------------------------------------------------- adoption glue */
@@ -1307,7 +1243,8 @@ static LONG ami_ns_bring_up(VOID)
     /* The stack exists from here on, address or not, so this releases anything
        waiting for `WaitForPort AMITCP`. */
     ami_ns_port_create();
-    ami_sana2_set_open_hooks(ami_ns_port_suspend, ami_ns_port_resume);
+    ami_sana2_set_open_hooks(ami_netstack_rexx_suspend,
+                             ami_netstack_rexx_resume);
 
     if (status != AMI_NET_OK)
     {
