@@ -83,6 +83,7 @@
 #define ST_PORT         7460
 #define ST_CHUNK        512UL
 #define ST_PATTERN      0xA5C3A5C3UL
+#define ST_PHASES       11
 
 /*
  * Generous because the resolver calls are meant to fail and BSD_RESOLVE_TIMEOUT
@@ -463,7 +464,32 @@ typedef struct StResult
     LONG    sr_Failures;
     LONG    sr_Finished;
     LONG    sr_Bytes;               /* echoed over loopback               */
+    LONG    sr_Phase;               /* how far the worker got             */
+    ULONG   sr_Mark[ST_PHASES];     /* the mark as each phase ended       */
 } StResult;
+
+/*
+ * The worker cannot report for itself. A Process made by CreateNewProc with no
+ * NP_Output has no Output() to Printf to, so everything it "logs" goes nowhere
+ * -- and a worker that overflows its stack could not be trusted to say so
+ * anyway. It writes a phase number into the shared struct instead, and the
+ * parent prints the phase names, including on the timeout path where the last
+ * phase reached IS the failure report.
+ */
+static const char * const st_phase_name[ST_PHASES] =
+{
+    "before OpenLibrary",
+    "OpenLibrary + getdtablesize",
+    "gethostbyname localhost (hosts file, shallow)",
+    "gethostbyname .invalid (DNS)",
+    "gethostbyname .local (mDNS)",
+    "gethostbyaddr 192.0.2.1 (reverse DNS)",
+    "getservbyname",
+    "getaddrinfo .invalid",
+    "getnameinfo 192.0.2.1",
+    "loopback connect/send/WaitSelect/recv rounds",
+    "CloseLibrary"
+};
 
 static StResult st_result;
 static struct Task *st_parent;
@@ -557,6 +583,19 @@ static ULONG st_mark(VOID)
     st_result.sr_Untouched = (ULONG)((UBYTE *)p - (UBYTE *)lo);
 
     return (ULONG)((UBYTE *)hi - (UBYTE *)p);
+}
+
+/*
+ * Record that a phase finished, and what the mark was when it did. The
+ * per-phase marks are what turn "976 bytes somewhere" into "the resolver cost
+ * this much and the send loop cost that much".
+ */
+static VOID st_phase(LONG which)
+{
+    st_result.sr_Phase = which;
+
+    if (which >= 0 && which < ST_PHASES)
+        st_result.sr_Mark[which] = st_mark();
 }
 
 /* ------------------------------------------------------------- the server -- */
@@ -675,6 +714,7 @@ static VOID st_worker_entry(VOID)
     ULONG           i;
 
     st_paint();
+    st_phase(0);
 
     base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
     st_check(base != NULL, "OpenLibrary on a 4 KB stack", 0);
@@ -687,6 +727,7 @@ static VOID st_worker_entry(VOID)
     }
 
     st_check(s_getdtablesize(base) > 0, "getdtablesize", 0);
+    st_phase(1);
 
     /*
      * The resolver first, and before any socket: measurement puts
@@ -705,8 +746,11 @@ static VOID st_worker_entry(VOID)
      * the way to it is the measurement.
      */
     (VOID)s_gethostbyname(base, "localhost");
+    st_phase(2);
     (VOID)s_gethostbyname(base, "no-such-host.invalid");
+    st_phase(3);
     (VOID)s_gethostbyname(base, "no-such-host.local");
+    st_phase(4);
     st_check(1, "gethostbyname reached the resolver three ways", 0);
 
     {
@@ -716,16 +760,19 @@ static VOID st_worker_entry(VOID)
            the long way round rather than answering from the hosts file. */
         quad[0] = 192; quad[1] = 0; quad[2] = 2; quad[3] = 1;
         (VOID)s_gethostbyaddr(base, quad, 4, S_AF_INET);
+        st_phase(5);
         st_check(1, "gethostbyaddr returned", 0);
     }
 
     (VOID)s_getservbyname(base, "telnet", "tcp");
+    st_phase(6);
     st_check(1, "getservbyname returned", 0);
 
     {
         APTR list = NULL;
 
         (VOID)s_getaddrinfo(base, "no-such-host.invalid", NULL, NULL, &list);
+        st_phase(7);
         st_check(1, "getaddrinfo returned", 0);
     }
 
@@ -743,6 +790,7 @@ static VOID st_worker_entry(VOID)
 
         (VOID)s_getnameinfo(base, &sa, (LONG)sizeof(sa), host,
                             (LONG)sizeof(host), serv, (LONG)sizeof(serv), 0);
+        st_phase(8);
         st_check(1, "getnameinfo returned", 0);
     }
 
@@ -815,10 +863,13 @@ static VOID st_worker_entry(VOID)
         (VOID)s_closesocket(base, fd);
     }
 
+    st_phase(9);
+
     st_check(st_result.sr_Bytes > 0, "loopback round trips completed",
              st_result.sr_Bytes);
 
     CloseLibrary(base);
+    st_phase(10);
 
     st_result.sr_Deepest  = st_mark();
     st_result.sr_Finished = 1;
@@ -897,6 +948,27 @@ int main(int argc, char **argv)
     st_check((SetSignal(0UL, 0UL) & ST_DONE_MASK) != 0,
              "the worker came back", (LONG)waited);
     st_check(st_result.sr_Finished != 0, "the worker ran to the end", 0);
+
+    /*
+     * The per-phase marks. On a timeout this is the whole report: the last
+     * phase that completed is where the worker is stuck or died, and the
+     * worker has no Output() of its own to say so.
+     */
+    st_log("\nmark after each phase (bytes of stack used):\n");
+    {
+        LONG ph;
+
+        for (ph = 0; ph < ST_PHASES; ph++)
+        {
+            if (ph > st_result.sr_Phase)
+            {
+                st_log("  ----  %s   NOT REACHED\n", (LONG)st_phase_name[ph]);
+                continue;
+            }
+            st_log("  %4lu  %s\n", (LONG)st_result.sr_Mark[ph],
+                   (LONG)st_phase_name[ph]);
+        }
+    }
 
     /* Let the peer notice the stop flag and close its listener. */
     Delay(150);
