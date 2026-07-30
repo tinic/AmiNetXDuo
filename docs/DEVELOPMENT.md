@@ -564,15 +564,23 @@ CONNECTIONS, ICMPHIST and ROUTES, `kern/amiga_netdb.c` for ADD and RESET.
 ### What the corpus actually sends
 
 Re-scanned `comm/tcp` + `comm/net` -- 1,024 archives, each downloaded,
-extracted, grepped and deleted. Fourteen send `ADDRESS AMITCP`, and between them
-they send six distinct commands:
+extracted, grepped and deleted; 1,002 were actually read (21 over a 2 MB cap, one
+404). Fifteen send `ADDRESS AMITCP`, and between them they send six distinct
+commands:
+
+One caveat on the method, because it bit once. The first pass filtered with
+`grep --binary-files=without-match`, and AmigaDOS scripts often carry high-bit
+bytes, so grep called them binary and skipped them -- which is how SLIPShuttle's
+`startnet` was missed. Every archive §75.7 names was then re-fetched and read
+with `grep -a`, including the compiled ones: SLIPCall and SLIPShuttle carry the
+command in a binary string table, and it is `KILL` in both.
 
 | Command | Archives | Sent by |
 |---|---|---|
 | `KILL` | 13 | `stopnet` in AmiTCP 2.3 / 3.0b2 / 4.0 / 4.3, Genesis's copy, CobbWeb's patched copy, `AmiTCP_session` 1.0 and 1.1, `AmiTCP_dialup/hangup.rexx`, Netdial 4.0, Patch2AmiTCP43, TCP_Start_Stop |
 | the variable space, wholesale | 1 | AmiTCP's own `bin/netstat` |
 | `QUERY CONNECTIONS` alone | 1 | `rx.fingerd` |
-| `ADD HOST <address> <name> [alias...]` | 3 | CobbWeb's patched `startnet`; AmiTCP 4.0's `HowToInstall` and AmiTCP 2.0's `usertext.txt`, both as documentation examples |
+| `ADD HOST <address> <name> [alias...]` | 4 | CobbWeb's patched `startnet` and SLIPShuttle's `startnet`; AmiTCP 4.0's `HowToInstall` and AmiTCP 2.0's `usertext.txt`, both as documentation examples |
 | `SET HOSTNAME` | 1 | TCP_Start_Stop's `startnet`, twice |
 | `RESET` | 2 | TCP_Start_Stop's `startnet`; AmiTCP 2.0's `usertext.txt` as an example |
 
@@ -588,8 +596,9 @@ fixed-width and in AmiTCP's order, not merely present.
 
 The three commands with a consumer that is **not** implemented are `SET
 HOSTNAME`, `ADD HOST` and `RESET`, and all three have the same shape of
-consumer: TCP_Start_Stop and CobbWeb are PPP dial-up front ends installing the
-address a dial-up was just assigned, under a name. Both discard the return code.
+consumer: TCP_Start_Stop, CobbWeb and SLIPShuttle are dial-up front ends
+installing the address a SLIP or PPP link was just assigned, under a name. All
+discard the return code.
 That scenario is ruled out here, and the remaining sightings are documentation.
 
 Two of AmiTCP's own limits had to go, because both break `netstat` on AmiTCP
