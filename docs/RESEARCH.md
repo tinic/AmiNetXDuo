@@ -13438,12 +13438,16 @@ Contention is not the cause. §74 took eleven loopback connections on the
 with `Error writing: Invalid argument` and one wedged in the key exchange for
 fourteen minutes. Same one-in-three, no other emulator running.
 
-The `EINVAL` is also not random. In §74.6 it is deterministic and it is a
-function of size — a 1 KB channel write succeeds and 32 KB and 160 KB both fail
-in the first second — so there is a real defect in the send path, reachable only
-over the loopback interface, and it is `src/bsdsocket/`'s rather than the
-Dropbear port's. That much of the original advice survives; the reason given for
-it does not.
+The `EINVAL` is also not random, and it is not size. §74.6 put a diagnostic on
+`bsd_send_tcp()`'s failure paths and read the status out: it is **17,
+`NX_CALLER_ERROR`, on a 44-byte write**, which NetX Duo returns only when the
+ThreadX system state is non-zero or there is no current thread, and which
+`src/bsdsocket/errno.c` maps to `EINVAL`. The same status came back from
+`nx_tcp_server_socket_relisten()` and `nx_tcp_socket_delete()` on the same port
+in the same second. So it is a real defect in `src/bsdsocket/`'s thread bracket
+rather than anything in the Dropbear port — which is where the original advice
+pointed, for the wrong reason. A key exchange writes small packets, so a defect
+that lands on a 44-byte write is exactly what this section was looking at.
 
 **And the family this section proposed does not exist.** It grouped these with
 §34.6's `accept()` that did not return and §37's socket that never came back, on
@@ -20583,47 +20587,100 @@ process allocated outside newlib's arena rather than at a socket.
 **The consequence is concrete.** DEBUG_NOFORK means one process per connection,
 so this is per login. A 4 MB machine gets **three**.
 
-### 74.6 The server cannot write more than one packet, and it never could
+### 74.6 Two defects behind one message, and neither is the cipher
 
-`SSHProbe bulk 1` over loopback returns 1 KB and `rc 0`. `SSHProbe bulk 32` and
-`SSHProbe bulk 160` both do this, within one second of the command starting:
+`SSHProbe bulk 8` over loopback returns 8 KB and `rc 0`. 32 KB and 160 KB do
+not:
 
 ```
-[2723640] amiga: running 'SYS:SSHProbe bulk 32'
-[2723640] Exit (amiga) from <127.0.0.1:53848>: Error writing: Invalid argument
-```
+--- SYS:dbclient ... -p 2272 amiga@127.0.0.1 "SYS:SSHProbe bulk 32"
+SYS:dbclient: Connection to amiga@127.0.0.1:2272 exited: Error decrypting
+--- rc 1, 23.50 s
 
-with the client seeing `Error decrypting` — a truncated stream, not a cipher
-fault — and `rc 1`.
+--- SYS:dbclient ... -p 2273 amiga@127.0.0.1 "SYS:SSHProbe bulk 160"
+SYS:dbclient: Connection to amiga@127.0.0.1:2273 exited: Error writing: Invalid argument
+--- rc 1, 37.88 s
+```
 
 **It is the send, not the direction and not the cipher.** The same binary as a
 *client* takes 160 KB from a host OpenSSH over the same `bsdsocket.library` in
-the same run without trouble, twice. `packet.c`'s `write_packet()` reaches
-`write()` (this build has no `writev`), which is `__wrap_write()` onto `send()`,
-and `EINVAL` at that layer is one of a dozen NetX Duo statuses
-`src/bsdsocket/errno.c` collapses onto it. `src/bsdsocket/transfer.c` now logs
-which one on the failure path, because an application only ever sees the
-`EINVAL`.
+the same run without trouble, twice.
 
-**What it is not.** The obvious explanation is that the loopback interface has
-an MTU of 65535 (`nx_ip_create.c`: "there is actually no MTU limit for the
-loopback interface"), so `bsd_send_tcp()`'s clamp to the MSS does not bound a
-chunk at all and `nx_packet_data_append()` builds a packet chain that Ethernet
-never produces. That was tried as a one-line cap and **reverted**, because the
-conformance suite already covers the shape: `test_sendrecv.c` case 25 is an
-8,192-byte loopback transfer and case 34 is a non-blocking loopback send loop,
-and both pass today. A chained loopback send works. Something narrower is wrong.
+`src/bsdsocket/errno.c` collapses a dozen NetX Duo statuses onto `EINVAL`, so an
+application only ever sees the `EINVAL`. `bsd_send_tcp()` now names the status on
+its failure paths, and the answer is that there are **two** defects wearing one
+message. One session produced 1,596 lines of it:
+
+| count | length | NX status | wait |
+|---:|---:|---|---:|
+| 1,595 | 16,412 | **57 — `NX_WINDOW_OVERFLOW`** | 0 |
+| 1 | 44 | **17 — `NX_CALLER_ERROR`** | 0 |
+
+#### The livelock: 1,595 refusals of the same 16,412 bytes
+
+`nx_tcp_socket_send()` refuses a packet longer than the peer's current window
+**outright**, and on a non-blocking socket it cannot suspend to wait for room.
+`bsd_send_tcp()` clamps a chunk to the MSS and nothing else, and the MSS on the
+loopback interface is **65,495** — `nx_ip_create.c` sets it to 65535 because
+"there is actually no MTU limit for the loopback interface". So Dropbear's
+16,412-byte channel packet goes down as one segment, the window is smaller than
+that, `sent` comes back 0, and `send()` answers `EWOULDBLOCK` — correctly.
+`select()` then says the socket is writable, Dropbear tries the same 16,412
+bytes, and nothing ever moves.
+
+That is why 8 KB works and 32 KB does not: it is not a size threshold in the
+send, it is whether one SSH packet fits one TCP window.
+
+**BSD requires a non-blocking send to take what fits and report the rest
+short**, and this one takes nothing. The fix is to bound a segment by the
+packet's payload as well as by the MSS, which is below any window a real peer
+advertises and is what Ethernet — MSS 1,460 — has been doing all along. It also
+skips `nx_tcp_socket_send()`'s re-segmentation of a chained packet, which copies
+every byte.
+
+**Ethernet cannot reach this**, which is why nothing found it: a 1,460-byte
+segment always fits. And the conformance suite cannot reach it either, although
+it looks as though it should. `test_sendrecv.c` case 34 is a non-blocking
+loopback send loop, and it passes — because it sends 8,192 bytes at a time into
+a peer that never reads, so the first writes fit and the eventual
+`EWOULDBLOCK` is the answer the test wants. **Nothing in the suite sends more
+than one window in one call on an interface whose MSS exceeds it.** That is the
+regression test this needs and does not have.
+
+#### The other one: `NX_CALLER_ERROR` on a 44-byte write
+
+The single `EINVAL` that actually kills the session is a **44-byte** send
+returning status 17. NetX Duo's `_nxe_` layer returns `NX_CALLER_ERROR` only
+when the ThreadX system state is non-zero or there is no current thread — a call
+made outside what `bsd_nx_enter()` is supposed to guarantee — and
+`src/bsdsocket/errno.c` maps it to `EINVAL`. The previous run has the same status
+from two other calls, on the same port, in the same second:
+
+```
+[WARN] bsdsocket: relisten on port 2252 failed (17); rebuilding the listen request
+[WARN] bsdsocket: port 2252 has no listen request left (17); the next accept() will try again
+[WARN] bsdsocket: nx_tcp_socket_delete refused (17) state 1 flags 0x40401 port 2252
+```
+
+**This is the one §40.9 saw**, and it settles the size question the wrong way
+round from how this section started: the `EINVAL` has nothing to do with size.
+It arrives on a 44-byte write, and §40.9's arrived during a key exchange, where
+every write is small. It is not fixed here. It is a thread-state defect in the
+bracket rather than anything in the send path, it is the likeliest cause of the
+wedge in §74.7 as well — a listener with no listen request left is a connection
+that never completes — and it is the first thing phase 3 should look at.
 
 ### 74.7 The loopback harness is unreliable, and it is not contention
 
-Eleven loopback connections were taken across this work, on the **exclusive**
-lane (`-x`), with the machine to itself. Three did not complete: two with the
-write failure above, and one that wedged in the key exchange after `Child
+Fourteen loopback connections were taken across this work, on the **exclusive**
+lane (`-x`), with the machine to itself. Four did not complete: three with the
+write failures above, and one that wedged in the key exchange after `Child
 connection from` and stayed there for fourteen minutes until the harness timed
 out.
 
 That is §40.9's own "one run in three", reproduced with its stated cause removed.
-That section is corrected in place.
+That section is corrected in place, and §74.6 names a status that would produce
+exactly this if it landed on a listener instead of on a channel write.
 
 ### 74.8 The 68030, and why there is no number for it
 

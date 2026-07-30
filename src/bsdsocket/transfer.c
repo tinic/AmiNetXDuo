@@ -317,6 +317,35 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
             break;
         }
 
+        /*
+         * A segment also has to fit in one packet, and that is not tidiness.
+         *
+         * The clamp above is to the MSS, which is 1460 on Ethernet and 65495
+         * on the loopback interface -- nx_ip_create.c sets that one to 65535
+         * because "there is actually no MTU limit for the loopback interface".
+         * nx_tcp_socket_send() refuses a packet longer than the peer's current
+         * window OUTRIGHT, with NX_WINDOW_OVERFLOW, and on a non-blocking
+         * socket it cannot suspend to wait for room -- so a 16,412-byte write
+         * onto a peer advertising less than that transferred NOTHING and
+         * answered EWOULDBLOCK, and the next attempt was the same 16,412
+         * bytes.  Measured: 1,595 consecutive refusals in one SSH session,
+         * docs/RESEARCH.md 74.6.  BSD requires a non-blocking send to take
+         * what fits and report the rest short; this is what makes it do that.
+         *
+         * Bounding a segment by the packet payload rather than by the window
+         * keeps it out of NetX Duo's internals, is below any window a real
+         * peer advertises, and is what Ethernet has been doing all along.  It
+         * also skips nx_tcp_socket_send()'s re-segmentation, which copies
+         * every byte of a chained packet into freshly allocated ones.
+         */
+        {
+            ULONG room = (ULONG)(packet->nx_packet_data_end -
+                                 packet->nx_packet_append_ptr);
+
+            if (chunk > room)
+                chunk = room;
+        }
+
         filled = bsd_packet_append_iov(packet, cur, chunk, pool, wait, &why);
         if (filled <= 0)
         {
