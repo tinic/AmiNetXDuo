@@ -60,9 +60,10 @@ this document names its untested parts rather than only its tested ones.
   someone else. 142/142 on a bridged real network; 130/142 with 12 skipped on
   loopback, where the skipped tests need a second machine. Roadshow scores 138.
 - **Fuzzing** — `fuzz_config` over the configuration parsers, `fuzz_bpf` over the
-  filter VM, and `fuzz_dns` over DNS responses, all under ASan and UBSan on the
-  host and all in `ctest`. Every parser that reads a file out of `DEVS:` is in
-  `fuzz_config`, including `DEVS:Internet/service_discovery`, which additionally
+  filter VM, `fuzz_dns` over DNS responses and `fuzz_mdns` over mDNS, all under
+  ASan and UBSan on the host and all in `ctest`. Every parser that reads a file
+  out of `DEVS:` is in `fuzz_config`, including
+  `DEVS:Internet/service_discovery`, which additionally
   gets its own sweep on its own seed so a failure names the parser.
   `fuzz_dns` drives the real client through
   `_nx_dns_response_receive()`, the name unencoder and the resource walk, with
@@ -70,6 +71,16 @@ this document names its untested parts rather than only its tested ones.
   datagram: 250,128 datagrams across two seeds, no undefined behaviour. The one
   UB found during that work was in the harness — a packet pool aligned to the
   target's 4 bytes on a host needing 8 — not in a parser.
+  `fuzz_mdns` enters at `_nx_mdns_thread_entry()`, so the module's own receive
+  loop, interface lookup and `_nx_mdns_packet_process()` run for real: queries,
+  answers, cache-flush records, conflicts and goodbyes, 500,250 datagrams across
+  five seeds, clean. It needs a 32-bit build, because NetX Duo's mDNS cache
+  stores pointers in single `ULONG` slots and spins inside `nx_mdns_enable()`
+  where they are 8 bytes wide; `tools/ci.sh host32` is that build, and it counts
+  the tests it ran so a 64-bit configuration cannot report a green stage that
+  registered none. This one can fail: reverting netxduo `6baec373`, which fixed a
+  signed shift on the first byte of every A record, makes `fuzz_mdns -s` abort
+  on its own seed corpus with the UB that patch removed.
 - **Static analysis** — GCC `-fanalyzer` over the whole tree against a triaged
   baseline of 13 findings, in CI, warnings fatal. cppcheck against a separate
   baseline of 16, run locally rather than in CI because its output moves between
@@ -85,16 +96,8 @@ this document names its untested parts rather than only its tested ones.
 
 Stated because a security policy that lists only its strengths is not much use.
 
-- **The mDNS response parser is not fuzzed.** It reads unauthenticated multicast
-  that any host on the segment can send unprompted, with no query first, which
-  makes it the most exposed parser here. A harness exists
-  (`tests/fuzz/fuzz_mdns.c`) and builds, but cannot run on a 64-bit host: NetX
-  Duo's mDNS cache stores pointers in single `ULONG` slots, so it is coherent
-  only where `sizeof(void*) == sizeof(ULONG) == 4`, and it spins inside
-  `nx_mdns_enable()` before a datagram arrives. It needs a 32-bit build to run
-  in. This is the largest known gap.
 - **No audit against published Eclipse ThreadX advisories.** The vendored
-  NetX Duo and ThreadX are 6.5.1, plus seven local patches; whether any known
+  NetX Duo and ThreadX are 6.5.1, plus eight local patches; whether any known
   advisory touches the paths compiled here has not been checked.
 - **`SO_BROADCAST` is permissive.** It is recorded on the socket and read by
   nothing, so a broadcast `sendto()` without it succeeds where 4.4BSD returns

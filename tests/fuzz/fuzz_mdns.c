@@ -589,6 +589,11 @@ static void fzm_query_compressed(FzwBuf *w, const char *qname)
     fzw_u16(w, FZW_CLASS_IN);
 }
 
+/* The A records below carry 169.254.1.2, and the high first octet is load
+ * bearing: a byte >= 128 is what makes NX_MDNS_GET_ULONG_DATA's shift overflow
+ * reachable (netxduo 6baec373). Reverting that patch fails `fuzz_mdns -s` on
+ * this seed. A 10.x address here would still parse and would test less. */
+
 /* Somebody else answering to this machine's name: the conflict path. */
 static void fzm_conflict(FzwBuf *w, const char *qname)
 {
