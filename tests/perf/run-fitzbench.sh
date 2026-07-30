@@ -283,39 +283,55 @@ grep "fitzbench: RESULT\|fitzbench: file=" "$REPORT" | sed 's/^/    /'
 # 16th hsync (src/a2065.cpp), so there is a ceiling on frames/sec that has
 # nothing to do with how fast the guest's TCP is.
 #
-# The rate is derived from the MEAN FRAME SIZE across the bracketing NetStat
-# pair rather than by dividing the packet delta by the transfer time: the
-# bracket also contains FitzBench's verify read and the mount's own chatter,
-# so the delta over-counts the timed window while the mean size does not.
+# The bracket holds both directions, the warm-up pair and the verify read, so
+# what comes out of it is a count and a mean size over the whole network arm,
+# not a per-direction rate.  A per-direction rate wants a capture: the mean
+# frame size here mixes a write's full segments with the read's bare ACKs.
+#
+# ONLY THE ip: BLOCK IS READ.  NetStat prints "packets sent" three times per
+# run -- under ip:, under tcp: and again in the SANA-II interface statistics --
+# and taking them positionally reads the driver's counter as the second run's
+# IP counter, which comes out negative.
 echo
-awk '
-    /^===== / { cmd = $0; if (cmd ~ /FitzBench FITZ:/) infitz = 1; else infitz = 0 }
-    cmd ~ /NetStat/ && /packets sent/     { b = $4; gsub(/[()]/, "", b)
-                                            ns[n_s++] = $1 + 0; nb[n_b++] = b + 0 }
-    cmd ~ /NetStat/ && /packets received/ { b = $4; gsub(/[()]/, "", b)
-                                            nr[n_r++] = $1 + 0; nrb[n_rb++] = b + 0 }
+awk -v kb="$KB" -v reps="$REPS" '
+    /^===== / { cmd = $0; infitz = (cmd ~ /FitzBench FITZ:/); inip = 0; inif = 0 }
+
+    cmd ~ /NetStat/ && /^ip:/    { inip = 1; next }
+    cmd ~ /NetStat/ && /^eth[0-9]/ { inif = 1; next }
+    /^[^\t ]/                    { inip = 0; inif = 0 }
+
+    inip && /packets sent/     { b = $4; gsub(/[()]/, "", b)
+                                 ns[n_s++] = $1 + 0; nb[n_s - 1] = b + 0 }
+    inip && /packets received/ { b = $4; gsub(/[()]/, "", b)
+                                 nr[n_r++] = $1 + 0; nrb[n_r - 1] = b + 0 }
+    inif && /packets received/ { fr[n_f] = $3 + 0; fs[n_f++] = $6 + 0 }
+
     infitz && /RESULT write kbs_mean=/ { sub(/.*kbs_mean=/, ""); wkbs = $1 + 0 }
     infitz && /RESULT read kbs_mean=/  { sub(/.*kbs_mean=/, ""); rkbs = $1 + 0 }
+
     END {
-        # Each NetStat prints "packets sent" twice, under ip: and then under
-        # tcp:, so the two ip lines are index 0 and index 2.  Fewer than three
-        # means a NetStat did not run.
-        if (n_s < 3 || n_r < 3 || wkbs == 0) { exit 0 }
-        dps = ns[2] - ns[0];  dbs = nb[2] - nb[0]
-        dpr = nr[2] - nr[0];  dbr = nrb[2] - nrb[0]
-        printf "==> packet rate (from the NetStat pair around the network arm)\n"
-        printf "    tx %lu packets / %lu bytes over the bracket", dps, dbs
-        if (dps > 0) printf ", mean frame %d bytes", dbs / dps
+        if (n_s < 2 || n_r < 2 || wkbs == 0) { exit 0 }
+        dps = ns[1] - ns[0];  dbs = nb[1] - nb[0]
+        dpr = nr[1] - nr[0];  dbr = nrb[1] - nrb[0]
+        printf "==> what crossed the wire (NetStat pair around the network arm)\n"
+        printf "    ip tx %d packets / %d bytes", dps, dbs
+        if (dps > 0) printf ", mean %d bytes", dbs / dps
         printf "\n"
-        printf "    rx %lu packets / %lu bytes over the bracket", dpr, dbr
-        if (dpr > 0) printf ", mean frame %d bytes", dbr / dpr
+        printf "    ip rx %d packets / %d bytes", dpr, dbr
+        if (dpr > 0) printf ", mean %d bytes", dbr / dpr
         printf "\n"
-        if (dps > 0)
-            printf "    write %d KB/s = %d packets/s at that frame size\n",
-                   wkbs, (wkbs * 1024) / (dbs / dps)
-        if (dpr > 0 && rkbs > 0)
-            printf "    read  %d KB/s = %d packets/s at that frame size\n",
-                   rkbs, (rkbs * 1024) / (dbr / dpr)
+        if (n_f >= 2)
+            printf "    a2065 frames: %d sent, %d received\n",
+                   fs[1] - fs[0], fr[1] - fr[0]
+        # FitzBench moves KB each way once to warm up and then once per rep, so
+        # the bytes in the bracket are known and the measured rates turn them
+        # into the seconds they took.  Both directions ran back to back, so
+        # this is the frame rate the card sustained across the arm rather than
+        # either direction on its own.
+        secs = (reps + 1) * (kb / wkbs + kb / rkbs) + 64 / rkbs
+        if (secs > 0 && n_f >= 2)
+            printf "    ~%d frames/s sustained over ~%.1f s of transfer\n",
+                   ((fs[1] - fs[0]) + (fr[1] - fr[0])) / secs, secs
     }
 ' "$REPORT"
 
