@@ -19,10 +19,17 @@
 # Commodore's and not redistributable, so this cannot run in public CI for the
 # same reason bsdsocktest and netstack_test cannot.
 #
-# It also needs a real ROM to mean what it says. AROS rounds NP_StackSize up to
-# 16 KB, so under the AROS ROM the worker never gets the 4 KB it asked for; the
-# harness reports the granted size and measures the mark against 4096 anyway,
-# but the interesting run is on Kickstart.
+# It also needs a real ROM to mean what it says, for two reasons measured here:
+#
+#   * AROS rounds NP_StackSize up to 16 KB, so under the AROS ROM the worker
+#     never gets the 4 KB it asked for. The harness reports the granted size and
+#     holds the bar at 4096 anyway, but it is not measuring a Shell stack.
+#   * the reverse lookup (getnameinfo on an unroutable address) has not been
+#     seen to return under AROS on SLIRP -- 600 s and still waiting -- where on
+#     Kickstart 3.1 it comes back and is the deepest phase of the run. An AROS
+#     run therefore fails at that phase whatever the library does.
+#
+# Kickstart 3.1 under Enforcer + MungWall (-e) is the run that means something.
 #
 # SPDX-License-Identifier: MIT
 
