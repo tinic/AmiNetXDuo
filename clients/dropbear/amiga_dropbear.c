@@ -1738,6 +1738,26 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
     db_pipe_service();
     db_runner_poll();
 
+    /*
+     * Whether any pipe still has a command on the far end -- asked of the whole
+     * table, not of the descriptors in this call's fd_set.
+     *
+     * Tying it to the fd_set deadlocks.  Dropbear drops a pipe from its set once
+     * it has seen end of file on it, and the runner is meanwhile inside Close()
+     * on the OTHER pipe, waiting for an ACTION_END that only this process can
+     * answer.  With the port out of the wait mask, nothing wakes to answer it,
+     * the runner never publishes its exit code, and the session waits for a
+     * status that is never sent.
+     */
+    for (fd = 0; fd < DB_PIPE_PAIRS; fd++)
+    {
+        if (db_pipes[fd].taken && db_pipe_dos_open(&db_pipes[fd]))
+        {
+            pipe_watch = 1;
+            break;
+        }
+    }
+
     FD_ZERO(&sock_r);
     FD_ZERO(&sock_w);
     FD_ZERO(&out_r);
@@ -1771,11 +1791,6 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
             if (want_r && pipe_readable(fd)) { FD_SET(fd, &out_r); other_ready++; }
             if (want_w && pipe_writable(fd)) { FD_SET(fd, &out_w); other_ready++; }
 
-            /* A pipe with a command on the far end can become ready without
-               anything on this side happening, so its port has to be in the
-               wait mask below.  One with no DOS end never does. */
-            if (db_pipe_dos_open(PIPE_PAIR(fd)))
-                pipe_watch = 1;
             continue;
         }
 
@@ -1911,7 +1926,6 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
         if (pipe_watch && timeout == NULL)
         {
             (VOID)Wait(db_pipe_sigmask());
-            db_pipe_service();
         }
         else if (ticks > 0)
         {

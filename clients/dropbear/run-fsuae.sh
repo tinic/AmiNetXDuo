@@ -214,6 +214,12 @@ SCPBIGSIZE=$(wc -c < "$STAGE/scpbig.txt" | tr -d ' ')
 { printf 'C0644 %s scpbigrecv.txt\n' "$SCPBIGSIZE"; cat "$STAGE/scpbig.txt"; printf '\000'; } \
     > "$STAGE/scpbigproto.bin"
 
+# What a client sends `scp -f`: a NUL to say "go ahead", and one more after each
+# message it receives.  scp -f sends nothing until the first one arrives, so a
+# source-mode test with no stdin waits forever rather than failing.  Four is more
+# than the two exchanges one file needs; the surplus is never read.
+printf '\000\000\000\000' > "$STAGE/scpack.bin"
+
 if [ -f "$KEYFILE" ]; then
     cp "$KEYFILE" "$STAGE/id_amiga"
     echo "==> client key staged: $KEYFILE ($(wc -c < "$KEYFILE" | tr -d ' ') bytes)"
@@ -372,5 +378,5 @@ exec "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
      ${ECDSAKEY:+"$STAGE/id_amiga_ecdsa"} \
      ${DB_SERVER:+"$STAGE/dropbear" "$STAGE/hostkey" "$STAGE/.ssh"} \
      ${SCPBIN:+"$SCPBIN" "$STAGE/scpsend.txt" "$STAGE/scpproto.bin"} \
-     ${SCPBIN:+"$STAGE/scpbig.txt" "$STAGE/scpbigproto.bin"} \
+     ${SCPBIN:+"$STAGE/scpbig.txt" "$STAGE/scpbigproto.bin" "$STAGE/scpack.bin"} \
      "$STAGE/commands.txt"
