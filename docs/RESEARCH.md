@@ -13416,7 +13416,7 @@ and it stays that.
 * **The host key is still generated on the host.** §38's entropy finding is
   unchanged and is the reason the server is not in the shipped archive.
 
-### 40.9 The loopback test is flaky, and it is not this code
+### 40.9 The loopback test is flaky — and the reason given here was wrong
 
 Nine runs were taken. Six did what is quoted above; three did not, and all three
 failed in the *key exchange*, before `spawn_command()` exists to be called:
@@ -13427,13 +13427,34 @@ failed in the *key exchange*, before `spawn_command()` exists to be called:
 | server: `Exit before auth: Error writing: Invalid argument` | in the same second as the connection |
 | both ends hang until the harness times out | after `Child connection from`, no auth line |
 
-A `send()` on an established loopback socket returning `EINVAL`, and a session
-that stops with neither end noticing, are the same family as §34.6's `accept()`
-that did not return and §37's socket that never came back. Every one of these
-runs shared the emulator with two others, which `tools/fsuae-run.sh` names as a
-known cause of exactly this. It is written down here so that the next person to
-see it does not go looking in the Dropbear port, and because "one run in three"
-is the number to beat if anybody takes the underlying wakeup seriously.
+**Corrected 2026-07-30 (§74.6, §74.7). What this section said next was that
+every one of these runs shared the emulator with two others, and that
+`tools/fsuae-run.sh` names contention as a known cause of exactly this — so the
+next reader should not go looking in the Dropbear port. That was wrong twice
+over, and it is the kind of wrong that costs somebody a day.**
+
+Contention is not the cause. §74 took eleven loopback connections on the
+**exclusive** lane, with the machine to itself, and three of them failed: two
+with `Error writing: Invalid argument` and one wedged in the key exchange for
+fourteen minutes. Same one-in-three, no other emulator running.
+
+The `EINVAL` is also not random. In §74.6 it is deterministic and it is a
+function of size — a 1 KB channel write succeeds and 32 KB and 160 KB both fail
+in the first second — so there is a real defect in the send path, reachable only
+over the loopback interface, and it is `src/bsdsocket/`'s rather than the
+Dropbear port's. That much of the original advice survives; the reason given for
+it does not.
+
+**And the family this section proposed does not exist.** It grouped these with
+§34.6's `accept()` that did not return and §37's socket that never came back, on
+no evidence beyond all three being intermittent. Both of those have since been
+explained and repaired separately and by different mechanisms: §34.6's was a
+wakeup, fixed by waiting on the listener with `WaitSelect()` and then accepting
+in a call that cannot block, and §37's was the `FIN_WAIT_2` leak that §41 traced
+to `nx_tcp_socket_disconnect()` doing nothing for five TCP states. Neither has
+anything in common with a `send()` returning `EINVAL` on an established socket
+that is being read at the other end. Three symptoms are not one bug because they
+were all annoying in the same week.
 
 A second server on the same port inside one run does not work either: the second
 `bind()` gets `Address already in use` five seconds after the first server
@@ -20336,3 +20357,295 @@ technically: §76.3 records the emulated `hydra` board logging
 NE2000, so a driver written for the real card is not expected to drive that
 core. Fetching it is legitimate; whether the emulator gives it anything to
 talk to is a separate question and is not claimed here.
+## 74. The SSH server, measured (2026-07-30)
+
+§38 got a public-key login into the Amiga and §40 got a command to run over it.
+Neither put a number on either, and the numbers are what decide whether `scp`
+is worth building: what a login costs, what a byte costs, and what a session
+costs in RAM. This is that measurement, on the emulated 14 MHz 68EC020, with
+`clients/dropbear/build.sh -p` linked into both ends.
+
+**A login is 22.0 s with both halves on one CPU and 12.3 s for a client alone.
+An established channel moves 28 KB/s, two thirds of which is the cipher. A live
+session costs about 1.5 MB. The gate figure is the 28 KB/s: eight times slower
+than the 230 KB/s the same card does unencrypted, which is neither the 2× that
+would have been comfortable nor the 10× that would have settled it.**
+
+**Two things the measurement found rather than went looking for.** The server's
+channel write fails outright above one packet, so no bulk data has ever left
+this server. And every connection costs about a megabyte that never comes back,
+which on the 4 MB floor is three logins and then nothing.
+
+**And the premise this work was started on is wrong.** It was expected that SSH
+would beat TLS here because TLS is RSA-2048 and SSH is 25519. It does not:
+`tls.library` completes a real TLS 1.2 handshake in **5.0–6.8 s** (§14, §17) and
+`dbclient` takes **12.3 s**. The reason is in this tree and not in the protocols
+— `src/crypto68k/` has hand-written 68020 assembly for P-256 and none at all for
+25519.
+
+### 74.1 What phase 1 already was
+
+Nothing here had to be built to get a login. `clients/dropbear/build.sh -P
+"dbclient dropbear"` builds the server from the same unpatched submodule,
+`clients/dropbear/run-fsuae.sh -S` stages it with a host-generated host key, and
+§38 and §40 already carried it from `accept()` through public-key
+authentication to a command with its exit status. Phase 1 was done before this
+started; what follows is phase 2.
+
+One thing did have to be fixed to measure anything: `-p` had not linked since
+`clients/compat/amiga_argv.c` grew a `__wrap_exit()` of its own, because
+`dbprofile.c` defined the same symbol. `dbprofile.c` had already armed two other
+exits for its report, so its wrapper is gone and `atexit()` carries it.
+
+### 74.2 The handshake
+
+`SSHProbe`, new in `clients/dropbear/`, is what makes the rest of this section
+possible: `SSHProbe mem` run *over the channel* reports `AvailMem` with the
+server, the session and the client all live, and `SSHProbe bulk <kb>` is a
+payload of a stated size, so two transfers in one run subtract the handshake out
+of a throughput figure.
+
+One connection to a host OpenSSH over SLIRP, `dbclient` timing itself on the
+E-Clock:
+
+| primitive | calls | ms | % wall |
+|---|---:|---:|---:|
+| curve25519 scalar multiply | 2 | 2,665 | 21% |
+| ed25519 sign — the client's auth signature | 1 | 2,650 | 21% |
+| **ed25519 verify — the host key** | 1 | **5,163** | **42%** |
+| `sha512_process` *(nested in the two above)* | 9 | 14 | 0% |
+| `sha256_process` | 35 | 7 | 0% |
+| `chacha_crypt` | 80 | 72 | 0% |
+| `poly1305_process` | 22 | 23 | 0% |
+| `select()` — waiting for the network | 42 | 1,255 | 10% |
+| **public-key subtotal** | | **10,583** | **86%** |
+| whole process | | 12,273 | 100% |
+
+That reproduces §35 to within 1.5% on every row, three weeks and a good deal of
+unrelated change later, which is the first thing worth saying about it.
+
+**Both halves on one CPU is 22.0 s**, and it is 22.0 s every time — 22.44,
+22.40, 22.52 and 22.56 s across four loopback connections here, against §38's
+22.02 s. The server's own log brackets it independently: `Child connection from
+127.0.0.1` at 01:50:33 and `Pubkey auth succeeded` at 01:50:54, **21 s** between
+them.
+
+**The server's half is the client's half, and that is not a guess about the
+code.** Each end does two curve25519 scalar multiplications, one ed25519 sign
+and one ed25519 verify — the client signs its authentication and verifies the
+host key, the server signs the exchange hash and verifies the authentication.
+Same three rows, so ≈10.5 s, and 10.58 + 10.5 = 21.1 s is the 21 s the server
+logged. A server on this machine costs the same arithmetic as a client, and no
+more.
+
+**Against TLS, which is the comparison that was expected to be flattering and is
+not:**
+
+| | |
+|---|---:|
+| TLS 1.2, RSA chain, real server, through `tls.library` | 5.0–6.8 s |
+| TLS 1.2, resumed session | 0.62 s |
+| **SSH, client only** | **12.3 s** |
+| **SSH, both ends on one CPU** | **22.0 s** |
+
+TLS also has session resumption and SSH has none, so the second connection to
+the same host costs the same 12.3 s as the first. `LoginGraceTime` is not the
+problem it was in §31 — 12.3 s is 10% of a stock server's 120 s — but a login
+that takes twelve seconds is a login somebody waits for.
+
+### 74.3 Throughput: 28 KB/s, and two thirds of it is the cipher
+
+Measured by difference, so that everything except the bytes cancels: the same
+command with no payload and with 160 KB of payload, in one run, same binary,
+same server.
+
+| | wall |
+|---|---:|
+| `echo HOST` | 12.58 s |
+| 160 KB through the channel | 18.48 s |
+| **difference — 163,840 bytes** | **5.90 s → 27.8 KB/s** |
+
+A second, independent pair from an earlier run — 32 KB in 13.68 s and 160 KB in
+18.26 s — gives 131,072 bytes in 4.58 s, **28.6 KB/s**. Two runs, two payload
+pairs, 3% apart.
+
+The profiler says where it goes. Over the same 160 KB:
+
+| | calls | ms | alone |
+|---|---:|---:|---:|
+| `chacha_crypt` | 167 | 1,890 | 86.7 KB/s |
+| `poly1305_process` | 47 | 2,088 | 78.5 KB/s |
+| **the AEAD together** | | **3,978** | **41.2 KB/s** |
+| everything else in the extra 5.90 s | | 1,917 | |
+
+**Two thirds of a transferred byte is ChaCha20-Poly1305, and the authenticator
+costs more than the cipher.** That is the same shape §58 found in
+`src/crypto68k/` — Poly1305 became 64% of an AEAD record there once ChaCha20 had
+been hand-scheduled — arrived at from the opposite direction.
+
+**Against the wire.** The A2065 under bridged WinUAE does 230 KB/s and a real
+A3000/060 over Fitz does 795–939 KB/s (§29, §72). 28 KB/s is **8×** below the
+first of those. Encryption does not halve this machine's network; it takes an
+order of magnitude off it, and the honest way to say what that means is that a
+1 MB file is 36 seconds.
+
+### 74.4 The 68k crypto is half on the path, and the half that is missing is the half throughput needs
+
+The question was whether the handshake is running `src/crypto68k/` or portable
+C. Read out of the linked binary with `m68k-amigaos-nm` rather than assumed:
+
+| | |
+|---|---|
+| `_c68k_x25519`, `_c68k_ed25519_sign`, `_c68k_ed25519_verify` | present, and `___wrap_dropbear_curve25519_scalarmult` routes to them |
+| `_c68k_chacha20_*`, `_c68k_poly1305_*` | **absent** |
+| `_chacha_crypt`, `_poly1305_process` | present — libtomcrypt's, portable C |
+
+So the *handshake* is ours and the *record path* is not, and the numbers agree
+with the symbol table: the three public-key rows match §35's `crypto68k` column
+to within 1.5%, and 86.7 KB/s for ChaCha20 is below the 97 KB/s §58 measured for
+`crypto68k`'s own C at `-Os`, let alone the 145 KB/s of its assembly.
+
+Two things follow, and the second is the useful one.
+
+**"Hand-written 68k crypto" is doing two different jobs in this tree.**
+`c68k_25519.c` contains no assembly at all — `grep -c '__asm__' ` is 0 — and
+§35.4 says why: its win is the field *representation*, eight 32-bit limbs
+instead of TweetNaCl's sixteen 16-bit limbs in 64-bit slots. The files that
+*are* 68020 assembly — `c68k_prim.S`, `c68k_p256.S`, `c68k_aes.S`,
+`c68k_chacha20.S`, `c68k_poly1305.S` — are built by `src/crypto68k/CMakeLists.txt`
+for the TLS stack and **not one of them is linked into either Dropbear binary**.
+`clients/dropbear/build.sh` compiles exactly one file out of `src/crypto68k/`,
+and it is the one with no assembly in it.
+
+**There is a known, costed lever on the throughput figure and nobody has pulled
+it.** §58 measured `c68k_chacha20.S` at 145 KB/s against portable C, and priced
+`c68k_poly1305.S` at a further 20–30%. Applied here that is roughly
+
+    ChaCha20  86.7 -> 145 KB/s      Poly1305  78.5 -> ~100 KB/s
+    AEAD      41.2 -> ~59 KB/s      channel   28 -> ~35 KB/s
+
+which is worth having and is not a different answer. **It is also not free of a
+trap**: `src/crypto68k/CMakeLists.txt` refuses the assembly on 68000 (the
+instructions do not exist) and on 68060 (`MULU.L`'s 32×32→64 form traps to
+vector 61 on every limb multiply), so wiring it into a client that ships as one
+binary needs a runtime switch that the CMake build currently makes at configure
+time.
+
+### 74.5 Memory: the session fits and the leak does not
+
+`AvailMem` through one run, every figure taken by `SSHProbe` inside the guest,
+the middle one from a process the *server* started over the channel:
+
+| | total | largest |
+|---|---:|---:|
+| after `AddNetInterface`, nothing else | 8,749,320 | 6,578,240 |
+| server listening, idle | 7,535,224 | 5,267,504 |
+| **server + one session + the client, from inside the session** | **6,646,288** | **4,441,584** |
+
+A listening server is **1.19 MB** and a live session adds **0.87 MB** — but that
+0.87 includes the loopback client, which on a real server is somebody else's
+machine. `dbclient` is a 350 KB binary on a 512 KB stack, so most of the 0.87 is
+the client and a session is a few hundred KB. **Against the 4 MB floor a server
+with one connection fits**, at roughly 1.2–1.5 MB.
+
+**What does not fit is what happens next.**
+
+| | total |
+|---|---:|
+| start of run | 8,749,320 |
+| after four connect / authenticate / run / exit cycles | 4,734,568 |
+
+**4,014,752 bytes gone over four connections, 1.00 MB each, and all of it Fast
+RAM** — `MEMF_CHIP` reads 2,074,168 at every single sample. A second run with a
+probe after every connection gives 268 KB per *client-only* connection and
+1.48 MB for a client-and-server cycle, so both halves lose memory and the server
+loses more.
+
+This is not the socket leak §41 fixed, and the serial log says so in the one
+place it is small enough to name: `nx_tcp_socket_delete refused (17) state 1
+flags 0x40401 port 2252; leaking 552 bytes`. 552 bytes is not a megabyte. What
+loses the megabyte has not been found, and the shape of it — a whole process
+exits and the memory does not come back — points at something the exiting
+process allocated outside newlib's arena rather than at a socket.
+
+**The consequence is concrete.** DEBUG_NOFORK means one process per connection,
+so this is per login. A 4 MB machine gets **three**.
+
+### 74.6 The server cannot write more than one packet, and it never could
+
+`SSHProbe bulk 1` over loopback returns 1 KB and `rc 0`. `SSHProbe bulk 32` and
+`SSHProbe bulk 160` both do this, within one second of the command starting:
+
+```
+[2723640] amiga: running 'SYS:SSHProbe bulk 32'
+[2723640] Exit (amiga) from <127.0.0.1:53848>: Error writing: Invalid argument
+```
+
+with the client seeing `Error decrypting` — a truncated stream, not a cipher
+fault — and `rc 1`.
+
+**It is the send, not the direction and not the cipher.** The same binary as a
+*client* takes 160 KB from a host OpenSSH over the same `bsdsocket.library` in
+the same run without trouble, twice. `packet.c`'s `write_packet()` reaches
+`write()` (this build has no `writev`), which is `__wrap_write()` onto `send()`,
+and `EINVAL` at that layer is one of a dozen NetX Duo statuses
+`src/bsdsocket/errno.c` collapses onto it. `src/bsdsocket/transfer.c` now logs
+which one on the failure path, because an application only ever sees the
+`EINVAL`.
+
+**What it is not.** The obvious explanation is that the loopback interface has
+an MTU of 65535 (`nx_ip_create.c`: "there is actually no MTU limit for the
+loopback interface"), so `bsd_send_tcp()`'s clamp to the MSS does not bound a
+chunk at all and `nx_packet_data_append()` builds a packet chain that Ethernet
+never produces. That was tried as a one-line cap and **reverted**, because the
+conformance suite already covers the shape: `test_sendrecv.c` case 25 is an
+8,192-byte loopback transfer and case 34 is a non-blocking loopback send loop,
+and both pass today. A chained loopback send works. Something narrower is wrong.
+
+### 74.7 The loopback harness is unreliable, and it is not contention
+
+Eleven loopback connections were taken across this work, on the **exclusive**
+lane (`-x`), with the machine to itself. Three did not complete: two with the
+write failure above, and one that wedged in the key exchange after `Child
+connection from` and stayed there for fourteen minutes until the harness timed
+out.
+
+That is §40.9's own "one run in three", reproduced with its stated cause removed.
+That section is corrected in place.
+
+### 74.8 The 68030, and why there is no number for it
+
+`tools/fsuae-run.sh` says it before the run does: FS-UAE turns cycle accounting
+off for every CPU above a 68020, so `-m A3000` exercises the code on a 68030 —
+MMU, caches, 32-bit addressing — and produces no timing. `tests/perf/cpucal` on
+that profile reports `MULU.L` at 3.2 cycles against a real 68030's 44 and an
+implied 323 MHz clock. **Any seconds figure from that profile would be the
+emulator's, not a 68030's**, and the honest 68030 answer is arithmetic on the
+14 MHz numbers: a 25 MHz 68030 is 1.78× the clock (§24), so ~7 s for a client
+handshake and ~50 KB/s on the channel, before whatever the 32-bit bus and the
+caches are worth.
+
+### 74.9 Is it worth continuing
+
+**On the numbers, yes, with one condition and two repairs.**
+
+The handshake is not the problem. Twelve seconds for a client and twenty-two for
+both ends is slow and it is not a wall; it is inside every server's grace period
+and it is a one-off per session. That it is twice a TLS handshake is a fact
+about `src/crypto68k/` having no 25519 assembly, not about SSH.
+
+28 KB/s is the number to decide on, and it is a real cost: `scp` of anything
+above a few hundred KB is a wait rather than an operation. It is also not the
+floor — the ChaCha20 and Poly1305 assembly already in this tree is worth about
+35 KB/s and is a wiring job, not a research one.
+
+**The condition is the leak.** A megabyte per login on a 4 MB machine is a
+server that dies on its third connection, and that is disqualifying in a way
+that slowness is not.
+
+**The two repairs are the write failure and the wedge**, and the first of them
+is not optional for `scp` in particular: `scp` *from* the Amiga is the server
+sending bulk, which is exactly the path that has never worked.
+
+Phase 3 should be those three things before any of the SCP layer, because all
+three are on the path it would be built on.
