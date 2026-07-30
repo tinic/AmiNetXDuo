@@ -173,6 +173,26 @@ One caveat that applies to the faithful model as well: `MULU.L` is charged 32
 cycles where a 68020 charges 43, which mildly flatters the crypto assembly in
 `src/crypto68k/`.
 
+`tools/amiberry-run.sh` is the same idea under Amiberry on Linux, and it is the
+only harness that can put the guest on a real network. `-N` takes WinUAE's board
+keys, so all nine ethernet cards are available rather than only the A2065, and
+`-B <interface>` bridges the card onto a host NIC through libpcap instead of
+SLIRP — the guest then takes a lease from the real DHCP server and answers pings
+from other machines. That needs `sudo setcap cap_net_admin,cap_net_raw=eip` on
+the Amiberry binary, reapplied after every relink, and the binary must not live
+on a `nosuid` mount. `tests/netstack/run-amiberry.sh` is the bring-up test on
+top of it:
+
+```sh
+tests/netstack/run-amiberry.sh                        # A2065 on SLIRP
+tests/netstack/run-amiberry.sh -N ne2000_pcmcia -B ens18
+```
+
+A bridged run that quietly fell back to SLIRP passes every check and proves
+nothing, so the harness reads the backend out of the emulator log and fails the
+run if it is not the one asked for. docs/RESEARCH.md 78 is the write-up,
+including the three ways to ask for a bridge and silently not get one.
+
 `tools/smoke/` holds six diagnostic probes, built by the `smoke_probes` target
 and deliberately not registered with `ctest`: a harness self-test, an entropy
 pool probe, a ThreadX task lifecycle probe, a kernel-stop survival test, and two
