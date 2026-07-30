@@ -210,6 +210,7 @@
     @{"DEVS:Internet/routes          " link ROUTES} the default gateway
     @{"DEVS:Internet/hosts           " link NETDB} names you want to work without DNS
     @{"DEVS:Internet/services        " link NETDB} port numbers by name
+    @{"DEVS:Internet/service_discovery" link DNSSD} servers running on this machine
 
   All of these share the same simple rules:
 
@@ -229,6 +230,7 @@
     @{"The default gateway" link ROUTES}
     @{"hosts, services, protocols, networks" link NETDB}
     @{"Your machine's name" link HOSTNAME}
+    @{"Being found by name, and announcing servers" link DNSSD}
     @{"IPv6" link IPV6}
 
 @endnode
@@ -525,7 +527,7 @@
 @node HOSTNAME "Your machine's name"
 @toc CONFIG
 @prev NETDB
-@next IPV6
+@next DNSSD
 
                       @{b}Your machine's name@{ub}
 
@@ -554,9 +556,90 @@
 @endnode
 
 
-@node IPV6 "IPv6"
+@node DNSSD "Being found by name, and announcing servers"
 @toc CONFIG
 @prev HOSTNAME
+@next IPV6
+
+           @{b}Being found by name, and announcing servers@{ub}
+
+  This Amiga answers to its own name on the local network, with no
+  server and nothing to configure. If its host name is bigbox, then
+
+    ping bigbox.local
+
+  works from any Mac, from any Linux machine running Avahi, and from
+  Windows 10 or later. It works the other way too: this machine
+  resolves @{b}other@{ub} machines' .local names, so
+
+    host mymac.local
+
+  answers here. The name is the @{"host name" link HOSTNAME} up to the
+  first dot, so a host name of bigbox.home.lan is announced as
+  bigbox.local.
+
+  This matters most when there is no DHCP server. A machine that fell
+  back to a 169.254.x.x address has one nothing else can guess, and it
+  changes at the next boot; the name does not.
+
+  If the name is already taken, this machine claims a different one and
+  says so in @{"ShowNetStatus" link SHOWNETSTATUS}. The cure is to give
+  it a name of its own with HOSTNAME.
+
+                   @{b}Announcing a server you run@{ub}
+
+  AmiNetXDuo is clients only, so it has nothing of its own to announce.
+  If you have installed a server -- an FTP daemon, a web server, a file
+  server -- you can list it, and other machines will find it by
+  browsing rather than by being told a port number.
+
+  @{b}DEVS:Internet/service_discovery@{ub}
+
+      _ftp._tcp     21
+      _http._tcp    80    Amiga web server    txt=path=/
+
+  Note that this is @{b}not@{ub} DEVS:Internet/services. That file is the
+  standard table of port numbers by name, for every machine. This one
+  says which servers are running on @{b}this@{ub} machine.
+
+  One line per service:
+
+    <type>  <port>  [name]  [txt=key=value;key=value]
+
+  @{b}type@{ub}   what kind of server it is: an underscore, up to fifteen
+         letters, digits or hyphens, then ._tcp or ._udp. Some common
+         ones are _ftp._tcp, _http._tcp, _telnet._tcp, _ssh._tcp,
+         _smb._tcp and _afpovertcp._tcp.
+
+  @{b}port@{ub}   the port the server is really listening on.
+
+  @{b}name@{ub}   what the service is called in the other machine's list. It
+         may contain spaces and runs to the end of the line. Leave it
+         out and this machine's host name is used.
+
+  @{b}txt=@{ub}   extra settings that some clients look for, separated by
+         semicolons. Optional, and usually not needed.
+
+  '#' starts a comment anywhere on a line, and a ';' at the start of a
+  line is a comment too -- but not one in the middle of a line, because
+  ';' separates txt= settings.
+
+  Only list a server that is really running. A port announced with
+  nothing behind it is worse than nothing: the other machine lists it,
+  connects, and hangs. Nothing here checks the port for you.
+
+  A line with a mistake in it is reported and skipped, and the rest of
+  the file and the network come up as usual. At most eight services are
+  announced.
+
+  There is a commented example in the Examples drawer.
+
+@endnode
+
+
+@node IPV6 "IPv6"
+@toc CONFIG
+@prev DNSSD
 @next STARTING
 
                               @{b}IPv6@{ub}
@@ -1990,6 +2073,8 @@
       DEVS:Internet/services          local service names
       DEVS:Internet/protocols         protocol numbers
       DEVS:Internet/networks          network names
+      DEVS:Internet/service_discovery servers running here, announced
+                                      to the local network
       DEVS:Internet/passwd            optional, for usergroup.library
       DEVS:Internet/group             optional, for usergroup.library
 

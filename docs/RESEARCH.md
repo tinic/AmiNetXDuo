@@ -19352,3 +19352,267 @@ positives teaches people to skip it, and that costs more than the alerts do. A
 `.github/codeql/codeql-config.yml` that either gives the extractor the NDK
 include path or excludes these queries for `port/` and `tests/` keeps the signal
 usable.
+
+---
+
+## 74. Advertising services nobody wrote for us (2026-07-30)
+
+`src/netstack/netstack_mdns.c` opened with an argument for advertising
+nothing:
+
+> No services are advertised. AmiNetXDuo ships clients -- fetch, ftp, telnet,
+> tftp, nc, sntp, whois -- and no servers, so a `_ftp._tcp` or `_telnet._tcp`
+> record would point at nothing and a browser that believed it would hang on a
+> connection nothing will accept.
+
+That is right about our own binaries and wrong about the machine. An Amiga
+running AmiNetXDuo may well also be running AmiFTPd, or a web server, or a
+file server. Those are somebody else's binaries and they will never be
+recompiled against an API of ours, so the obvious answer — export
+`nx_mdns_service_add()` and let servers call it — reaches nothing that exists.
+
+What the user can do is say what is listening. That is exactly the assertion a
+`_ftp._tcp` record makes, and it makes it the user's claim rather than ours.
+AmiTCP already established the convention: `db/inetd.conf` is a file that says
+"these services run on this machine".
+
+### 74.1 The name that was already taken
+
+The obvious name, `DEVS:Internet/services`, is the netdb file — the
+`/etc/services` equivalent, `<name> <port>/<proto> [alias...]`, parsed in
+`src/config/netdb.c` and backing `getservbyname()`. Two files a directory
+apart with the same name and unrelated formats would be a trap for every
+reader, and worse for anyone dropping a real `/etc` tree in.
+
+`DEVS:Internet/service_discovery`, in the two-word-underscore style of
+`name_resolution` and `default_gateway`, and named after what it does. The
+collision is called out in `config_internal.h` next to both defines so the
+next person does not rediscover it.
+
+### 74.2 The format
+
+```
+<type>  <port>  [instance name]  [txt=key=value;key=value]
+```
+
+```
+_ftp._tcp     21
+_http._tcp    80    Amiga web server    txt=path=/
+```
+
+The instance name runs to the end of the line or to the `txt=` field, so a
+multi-word name needs no quotes — RFC 6763 §4.1.1 allows rich text and a name
+like "Amiga web server" is the normal case, not the exotic one. Quotes are
+accepted anyway, since the tokeniser already understands them.
+
+Left out, the instance name defaults to the host name — the same string
+`src/config/config_file.c` resolves from the config, then `ENV:HOSTNAME`, then
+`DEVS:Internet/hosts`, then "amiga". There is no second source of truth: the
+netstack passes `ns_MdnsLabel`, which is what the responder already claimed.
+
+Comment characters are `#` anywhere and `;` only as the first character of a
+line. `;` cannot be a mid-line comment here because it is the separator
+between key/value pairs inside a TXT record, and eating it would silently
+truncate one — a failure mode with no diagnostic.
+
+### 74.3 The four constants, decided rather than defaulted
+
+`nx_mdns_service_add()` takes a TTL, a priority, a weight and a uniqueness
+flag. Each was chosen and each has a reason.
+
+**TTL: pass 0.** Not "no TTL" — the module reads zero as "use the RFC's own
+values" and then uses 120 seconds for the SRV and 4500 for the TXT and the
+PTRs, which is what RFC 6762 §10 asks for. The SRV is short because it names a
+host whose address can change; the PTR is long because the service either
+exists or does not. Passing a single number would flatten all three into one
+and lose the distinction.
+
+**Priority and weight: 0 and 0.** RFC 2782 uses them to choose between several
+hosts offering one service. There is one host here. Avahi and mDNSResponder
+put zero there for the same reason, and the wire capture below confirms ours
+does.
+
+**Unique, not shared.** RFC 6763 §4.1.1 makes the instance name the thing that
+must not clash, and marking the SRV and TXT unique is what makes the module
+probe them before claiming and rename on a conflict (RFC 6762 §8.1). This is
+also where the renaming wart already noted in `netstack_mdns.c` stops being
+one: the vendored renamer appends " (2)", which is wrong for a host name and
+is precisely the RFC 6763 spelling for a second service instance. The two PTRs
+stay shared, which the module does on its own.
+
+**TXT: supported.** The module writes a TXT record either way — RFC 6763 §6.1
+requires one and it emits a single empty string when none is given — so the
+choice was never "TXT or no TXT" but "our empty one or the user's". The field
+is bounded at the module's own `NX_MDNS_NAME_MAX` of 255 and the separator is
+the `;` the module's encoder already expects, so it costs one optional field
+and no new encoding.
+
+### 74.4 The parser, written against §104 of netdb.c
+
+`src/config/netdb.c:104` records an overflow found by fuzzing: a sizing pass
+counted a run of non-whitespace as one token where the parse pass saw one per
+`""` pair, and one line wrote 29 pointers past a 48-byte block.
+
+The lesson taken is not "count more carefully" but "do not have two passes".
+`ami_cfg_parse_dnssd()` allocates nothing, has no sizing pass, writes into a
+fixed array the caller owns, and checks `*count` against `max` before every
+write. `AMI_CFG_MAX_SD_SERVICES` is 8.
+
+Nothing can be truncated on the way in either. The type grammar — `_` then 1
+to 15 characters of letters, digits and hyphens, then `._tcp` or `._udp` — is
+RFC 6763 §7's, and 15 is where the module's `NX_MDNS_TYPE_MAX` of 21 comes
+from, so a type the parser accepts always fits `AMI_CFG_SD_TYPE_LEN`. An
+instance name is rejected if it leaves less than four characters of headroom
+for the module's " (2)", and rejected if it contains a dot: the module builds
+`<name>.<type>.local` as text and encodes it by splitting on dots, so
+"My.Server" would claim a name nothing asked for.
+
+Every malformed line is reported through `ami_cfg_problem()` — so
+`CheckNetConfig` shows it with a file name and a line number, at no cost,
+because it already installs a reporter around `ami_config_load()` — and then
+skipped. A typo in one service does not stop the network coming up.
+
+`fuzz_config` covers it, and covers it in a way that can fail: the driver
+hands the parser a heap array of exactly `max` entries, so ASan's redzone sits
+immediately after the last slot, and starts the count at a non-zero value
+because the contract is "append from `*count`". It also has its own ctest entry
+on its own seed, `fuzz_dnssd_sweep`, so a failure names this parser rather
+than "the config".
+
+### 74.5 What the local cache had to grow to
+
+`AMI_MDNS_LOCAL_CACHE_BYTES` was 1024, sized for one A record per interface.
+A service is four records — SRV, TXT, a PTR from the type to the instance, and
+a PTR from `_services._dns-sd._udp` — plus the names they point at. An
+`NX_MDNS_RR` is 56 bytes and the names run to about 90 more, so the constant is
+now `1024 + AMI_CFG_MAX_SD_SERVICES * 384`, written as that arithmetic so the
+relationship cannot drift. If the cache will not hold a service,
+`nx_mdns_service_add()` fails, that service is not advertised, and
+`ami_ns_mdns_services()` says which.
+
+### 74.6 The enumeration PTR is registered and never announced
+
+`_nx_mdns_service_add()` adds four records, and only three of them reach the
+announcement. The missing one is the `_services._dns-sd._udp.local` PTR that
+lets a browser enumerate types it does not already know.
+
+This is the module's design and not a gap in the integration.
+`nxd_mdns.c:6603` is the announcing state machine: when a SRV announces, it
+walks the local cache and sets the send flag on a PTR only when (`:6605`)
+
+```c
+p1 -> nx_mdns_rr_rdata.nx_mdns_rr_rdata_ptr.nx_mdns_rr_ptr_name == p -> nx_mdns_rr_name
+```
+
+— the PTR's rdata is the announcing SRV's own name. That is true of the type
+PTR, whose rdata is the instance name, and false of the enumeration PTR, whose
+rdata is the type. The record is in the cache and the query path in
+`_nx_mdns_packet_process()` (`nxd_mdns.c:7340`, the name match at `:7526`)
+answers it, so a `dns-sd -B _services._dns-sd._udp` from a real peer is
+served. RFC 6763 §9 requires the
+meta-query to be answered, not announced, and Avahi and mDNSResponder behave
+the same way.
+
+It cannot be proved either way from `tests/tools/run-mdns.sh`: a query from the
+host crosses FS-UAE's SLIRP with the host's real LAN address on it, and RFC
+6762 §11 makes the module drop an off-link unicast mDNS response. The run notes
+the absence and explains it rather than asserting on it.
+
+### 74.7 On the wire
+
+`tests/tools/run-mdns.sh` now writes a `service_discovery` file into the staged
+`DEVS:` with a deliberately broken line in the middle, and reads the result out
+of the emulated A2065's own frame log — below every line of our code — with
+`tcpdump`. Three services chosen to separate three things that could each be
+wrong on their own: `_ftp._tcp` with no name (must take the *derived* host
+label, not the fully-qualified HOSTNAME), `_http._tcp` with a multi-word name
+and a `txt=` field, and `_telnet._udp` (the transport comes from the file).
+
+The file:
+
+```
+_ftp._tcp     21
+_nope 21                                    # no transport -- must be skipped
+_http._tcp    80    Amiga web server    txt=path=/
+_telnet._udp  23
+```
+
+The serial log, in full:
+
+```
+[WARN] config: service_discovery: bad type '_nope'
+```
+
+The probe, which is where `is_unique` shows: all three instance names are
+probed before being claimed, alongside the host name.
+
+```
+10.0.2.15.5353 > 224.0.0.251.5353: 0 [4q] [7n]
+    ANY (QM)? amigatest.local.
+    ANY (QM)? amigatest._ftp._tcp.local.
+    ANY (QM)? Amiga web server._http._tcp.local.
+    ANY (QM)? amigatest._telnet._udp.local.
+```
+
+The announcement, 14 records in one 866-byte datagram:
+
+```
+10.0.2.15.5353 > 224.0.0.251.5353: 0*- [0q] 14/0/0
+    (Cache flush) A 10.0.2.15,
+    (Cache flush) NSEC,
+    (Cache flush) SRV amigatest.local.:21 0 0,
+    (Cache flush) TXT "",
+    PTR amigatest._ftp._tcp.local.,
+    (Cache flush) NSEC,
+    (Cache flush) SRV amigatest.local.:80 0 0,
+    (Cache flush) TXT "path=/",
+    PTR Amiga web server._http._tcp.local.,
+    (Cache flush) NSEC,
+    (Cache flush) SRV amigatest.local.:23 0 0,
+    (Cache flush) TXT "",
+    PTR amigatest._telnet._udp.local.,
+    (Cache flush) NSEC
+```
+
+Everything the file said is in there and nothing else is. The ports are 21, 80
+and 23; the priority and weight are `0 0`; the SRV target is
+`amigatest.local.` and not `amigatest.home.lan.local.`; the instance name with
+no name given is the derived label; "Amiga web server" survived the parser
+whole, spaces included; `path=/` is in its TXT record and the other two TXTs
+are the empty string RFC 6763 §6.1 asks for; and `_nope` is absent.
+
+The same records reached the host's real network through SLIRP, which is the
+only evidence available that anything outside the emulator can see them.
+`tests/tools/mdnswatch.py` had to learn to decode the answer section to show
+it — an announcement carries no questions at all, so a summary that stopped at
+the question section printed `response an=14` and nothing about what was
+announced:
+
+```
+192.168.1.193:51443  response id=0x0000 qd=0 an=14 ns=0 ar=0
+    A=amigatest.local NSEC=amigatest.local
+    SRV=amigatest._ftp._tcp.local TXT=amigatest._ftp._tcp.local
+    PTR=_ftp._tcp.local NSEC=amigatest._ftp._tcp.local
+    SRV=Amiga web server._http._tcp.local TXT=Amiga web server._http._tcp.local
+    PTR=_http._tcp.local NSEC=Amiga web server._http._tcp.local
+    SRV=amigatest._telnet._udp.local TXT=amigatest._telnet._udp.local
+    PTR=_telnet._udp.local NSEC=amigatest._telnet._udp.local
+```
+
+### 74.8 Measured
+
+Fresh `build/host`, default configuration, warning-clean. `ctest` 14/14 —
+13 before, plus `fuzz_dnssd_sweep`; the new parser's unit tests are inside the
+existing `config_parsers`, which went from 242 to 271 checks. `-fanalyzer` 13
+known findings and no new ones. `tests/tools/run-mdns.sh` PASSED, 27 checks
+against 16 before this work. Conformance `LOOPBACK` 130 passed, 0 failed, 12
+skipped. `tests/tools/run-livetools.sh` PASSED. `tests/ipv6/run-tools-fsuae.sh
+-s` PASS on `build/cm` and on `build/v6` — the first `build/v6` attempt hung
+inside `telnet ::1 7097` and hit the 540-second timeout, which the same test
+has done before this work (`FAILED: 3 assertion(s)` in an earlier session's
+log, `PASS` in the two either side of it); it is the emulator, not this
+change, and it passed on the retry. The build with `AMINETXDUO_MDNS=OFF` and
+the IPv4-only build both
+compile clean and never open the file: `load_dnssd()` is `#ifdef
+AMINETXDUO_MDNS`, while the `AmiSdService` fields exist in every build, which
+is the arrangement the IPv6 interface fields already use.

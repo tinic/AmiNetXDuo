@@ -96,6 +96,17 @@ every boot:
 
   C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET
 
+If you run a server on this machine -- an FTP daemon, a web server --
+list it in DEVS:Internet/service_discovery and other machines on the
+network will find it by browsing:
+
+  DEVS:Internet/service_discovery
+    _ftp._tcp     21
+    _http._tcp    80    Amiga web server
+
+Only list a server that is really running. There is a commented example
+in the Examples drawer, and the guide has the full description.
+
 
 IS IT WORKING?
 --------------
@@ -108,6 +119,12 @@ The first of those to fail is where the problem is. AmiNetXDuo.guide has a
 troubleshooting section covering the usual causes: the wrong device name,
 no DHCP server answering, a cable or driver problem, a missing interface
 file, and a stack that is up while DNS is not.
+
+From another machine on the same network, this Amiga also answers to its
+own name with .local on the end -- "ping amiga.local" from a Mac, from
+Linux with Avahi, or from Windows 10 or later. Nothing has to be set up
+for that, and it keeps working when there is no DHCP server to hand out
+an address anyone could guess.
 
 
 THE COMMANDS
