@@ -31,6 +31,8 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 
+#include <setjmp.h>
+
 extern int __real_main(int argc, char **argv);
 
 /* Generous, and static: this runs before the client's main() sets anything up,
@@ -56,6 +58,10 @@ static struct StackSwapStruct argv_sss;
 static int                    argv_argc;
 static int                    argv_result;
 static BOOL                   argv_on_swapped;   /* TRUE between the swaps */
+static APTR                   argv_stack;        /* the swapped stack, to free */
+static jmp_buf                argv_exit_jmp;
+static BOOL                   argv_exit_armed;   /* the jump target is live */
+static struct Task           *argv_owner;        /* whose stack argv_sss is */
 
 /*
  * Run __real_main() on the swapped stack.  No locals, no arguments, and
@@ -78,44 +84,73 @@ static __attribute__((noinline)) VOID argv_run_on_stack(VOID)
  *
  * A client that ends by calling exit() rather than returning from main() --
  * Dropbear always, curl on some paths -- never comes back to
- * argv_run_on_stack(), so its second StackSwap() does not run.  The crt0's exit
- * restores the stack pointer from its own saved copy, but not tc_SPLower/
- * tc_SPUpper: the task is left advertising the swapped, about-to-be-abandoned
- * stack as its bounds, and the next stack check sees the pointer outside them
- * and traps with an illegal instruction right at the end, after everything
- * appeared to work.
+ * argv_run_on_stack(), so its second StackSwap() does not run.  Two things are
+ * then left behind.
  *
- * StackSwap() cannot put them back from here: it moves its own return address
- * onto the stack it swaps to, and the frames between an exit() call site and
- * this point live on the stack being abandoned, so the returns would unwind
- * through the wrong memory.  Restore the two bounds directly instead, from what
- * the first StackSwap() saved into argv_sss; the pointer itself is the crt0's
- * to restore.  -Wl,--wrap=exit,--wrap=_exit routes both here.
+ * The task's stack bounds.  The crt0's exit restores the stack pointer from its
+ * own saved copy, but not tc_SPLower/tc_SPUpper: the task is left advertising
+ * the swapped, about-to-be-abandoned stack as its bounds, and the next stack
+ * check sees the pointer outside them and traps with an illegal instruction
+ * right at the end, after everything appeared to work.
+ *
+ * And the stack itself -- 256 KB of Fast RAM per process that never comes back,
+ * because the FreeMem() in __wrap_main() is below a call that never returns.
+ * That is the megabyte docs/RESEARCH.md 77.5 measured across four SSH logins: a
+ * client and a server are two processes and both end in exit().
+ *
+ * StackSwap() cannot put either right from here: it moves its own return
+ * address onto the stack it swaps to, and the frames between an exit() call
+ * site and this point live on the stack being abandoned.  setjmp() can.
+ * __wrap_main() arms a jump target before the first swap, on the caller's
+ * stack, and its frame is still live all the way down, so a longjmp() lands
+ * back there with the stack pointer where the crt0 left it.  From there the
+ * stack is an ordinary allocation to free and exit(status) is `return status`:
+ * the crt0 calls its own __exit() on a returning main() with the same list of
+ * exit functions, in the same order, on the same stack it would always have
+ * used for a client that returned.
+ *
+ * The bounds still have to be restored by hand, and before the jump, since
+ * longjmp() itself moves the pointer out of them.
+ *
+ * -Wl,--wrap=exit,--wrap=_exit routes both here.  On this toolchain exit(),
+ * _exit() and the crt0's __exit() are one symbol, so the two wrappers are one
+ * behaviour.
  */
 extern void __real_exit(int status);
 extern void __real__exit(int status);
 
-static VOID argv_restore_bounds(VOID)
+static VOID argv_leave_stack(int status)
 {
-    if (argv_on_swapped)
-    {
-        struct Task *self = FindTask(NULL);
+    struct Task *self;
 
-        argv_on_swapped   = FALSE;
-        self->tc_SPLower  = argv_sss.stk_Lower;
-        self->tc_SPUpper  = (APTR)argv_sss.stk_Upper;
+    if (!argv_on_swapped)
+        return;
+
+    self              = FindTask(NULL);
+    argv_on_swapped   = FALSE;
+    self->tc_SPLower  = argv_sss.stk_Lower;
+    self->tc_SPUpper  = (APTR)argv_sss.stk_Upper;
+
+    /* Only the task that swapped may jump: a client may have started processes
+       of its own out of this same code image (Dropbear's console reader does),
+       and their exit() must not land on somebody else's stack. */
+    if (argv_exit_armed && argv_owner == self)
+    {
+        argv_result     = status;
+        argv_exit_armed = FALSE;
+        longjmp(argv_exit_jmp, 1);
     }
 }
 
 void __wrap_exit(int status)
 {
-    argv_restore_bounds();
+    argv_leave_stack(status);
     __real_exit(status);
 }
 
 void __wrap__exit(int status)
 {
-    argv_restore_bounds();
+    argv_leave_stack(status);
     __real__exit(status);
 }
 
@@ -131,7 +166,6 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
     int             argc = 0;
     ULONG           w = 0;              /* write cursor into argv_buf   */
     ULONG           r;                  /* read cursor into args        */
-    APTR            stack;
 
     (void)argc_ignored;
     (void)argv_ignored;
@@ -208,17 +242,28 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
      * Run the client on a stack of our own.  On a machine too short of memory
      * to spare 256 KB, fall back to the caller's stack rather than refuse: a
      * small program may still fit.
+     *
+     * argv_stack rather than a local: exit() comes back through setjmp(), and a
+     * local written before it and read after it is not guaranteed to survive.
      */
-    stack = AllocMem(AMIGA_ARGV_STACK, MEMF_ANY);
-    if (stack != NULL)
+    argv_stack = AllocMem(AMIGA_ARGV_STACK, MEMF_ANY);
+    if (argv_stack != NULL)
     {
-        argv_sss.stk_Lower   = stack;
-        argv_sss.stk_Upper   = (ULONG)stack + AMIGA_ARGV_STACK;
-        argv_sss.stk_Pointer = (APTR)((ULONG)stack + AMIGA_ARGV_STACK);
+        argv_sss.stk_Lower   = argv_stack;
+        argv_sss.stk_Upper   = (ULONG)argv_stack + AMIGA_ARGV_STACK;
+        argv_sss.stk_Pointer = (APTR)((ULONG)argv_stack + AMIGA_ARGV_STACK);
 
-        argv_run_on_stack();
+        argv_owner      = FindTask(NULL);
+        argv_exit_armed = TRUE;
 
-        FreeMem(stack, AMIGA_ARGV_STACK);
+        /* Either __real_main() returns, or the client's exit() lands here. */
+        if (setjmp(argv_exit_jmp) == 0)
+            argv_run_on_stack();
+
+        argv_exit_armed = FALSE;
+
+        FreeMem(argv_stack, AMIGA_ARGV_STACK);
+        argv_stack = NULL;
     }
     else
     {

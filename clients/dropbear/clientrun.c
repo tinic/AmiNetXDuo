@@ -79,7 +79,7 @@ static const char version_tag[] __attribute__((used)) =
  */
 #define CLIENT_STACK    (512UL * 1024UL)
 
-#define MAX_COMMANDS    24
+#define MAX_COMMANDS    40
 #define MAX_LINE        320
 
 /* System() hands unrecognised tags to CreateNewProc(), which is how a child
