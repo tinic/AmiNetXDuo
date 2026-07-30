@@ -19,7 +19,15 @@
 #      cache without a packet, which is what makes this half testable under an
 #      emulator whose network is a NAT.
 #
-#   3. WHAT ACTUALLY LEFT THE MACHINE, taken from the emulated A2065's own
+#   3. THE SERVICES DECLARED IN DEVS:Internet/service_discovery ARE ON THE
+#      WIRE, as records and not as a parse.  A service is four records --
+#      PTR, SRV, TXT and the _services._dns-sd._udp enumeration PTR -- and a
+#      browser needs all of them, so each is asserted separately.  The file
+#      written below has a deliberately broken line in it, because "a typo in
+#      one service must not stop the network coming up" is a claim about what
+#      happens to the OTHER lines.
+#
+#   4. WHAT ACTUALLY LEFT THE MACHINE, taken from the emulated A2065's own
 #      frame log -- below every line of our code -- and read with tcpdump.  An
 #      mDNS probe is a specific thing: UDP 5353 to 224.0.0.251, at the
 #      Ethernet layer to 01:00:5e:00:00:fb.  If that is not on the wire, the
@@ -92,6 +100,18 @@ fi
 CFG_HOSTNAME="amigatest.home.lan"
 MDNS_LABEL="amigatest"
 
+# What DEVS:Internet/service_discovery declares.  Three services, chosen to
+# separate three things that could each be got wrong on their own:
+#
+#   _ftp._tcp with no instance name  -- must be announced under the DERIVED
+#       host label, not under the fully-qualified HOSTNAME.
+#   _http._tcp with a multi-word name and a txt= field -- must arrive as one
+#       instance name with spaces in it, and as a TXT record with content
+#       rather than the empty one the module writes when none is given.
+#   _telnet._udp -- the transport is taken from the file and not assumed.
+SD_HTTP_NAME="Amiga web server"
+SD_HTTP_TXT="path=/"
+
 # What the host-side watcher will answer for, IF anything ever reaches it.
 PEER_LABEL="mdnspeer"
 PEER_ADDR="10.0.2.2"
@@ -112,6 +132,17 @@ done
 # that used it verbatim would claim "amigatest.home.lan.local" and fail the
 # assertion below rather than passing by accident.
 echo "hostname $CFG_HOSTNAME" >> "$STAGE/devs/Internet/name_resolution"
+
+# The services.  A deliberately broken line in the middle: the assertion is
+# that it is skipped and the two good lines after it still arrive, because a
+# typo in one service must not stop the network coming up.
+cat > "$STAGE/devs/Internet/service_discovery" <<EOF
+# written by tests/tools/run-mdns.sh
+_ftp._tcp     21
+_nope 21                                    # no transport -- must be skipped
+_http._tcp    80    $SD_HTTP_NAME    txt=$SD_HTTP_TXT
+_telnet._udp  23
+EOF
 
 {
     echo "SYS:AddNetInterface eth0"
@@ -248,7 +279,7 @@ else
     fail "example.com did not resolve -- the .local branch broke ordinary DNS"
 fi
 
-# ---- 3: the wire ---------------------------------------------------------
+# ---- 3 + 4: the services, and the wire they went out on ------------------
 
 if [ -f "$FSLOG" ]; then
     python3 "$ROOT/tests/trace/a2065pcap.py" "$FSLOG" -o "$HD/host.pcap" \
@@ -306,6 +337,92 @@ if [ -s "$HD/host.pcap" ]; then
     else
         fail "$AAAA AAAA queries went out; ipv6_address is not NULL"
     fi
+
+    # ---- the services, record by record ---------------------------------
+    #
+    # This is the part that a "the file parsed" test cannot reach.  RFC 6763
+    # says a service is FOUR records and a browser needs all of them: a PTR
+    # from the type to the instance, an SRV giving the port and target host,
+    # a TXT, and a PTR from _services._dns-sd._udp so that a browser which
+    # does not already know the type can enumerate it.  tcpdump names them
+    # individually, so each is asserted on its own rather than counted.
+    #
+    # -A prints the packet body, which is where the instance name and the TXT
+    # content are; the summary line only names the record.
+    tcpdump -r "$HD/host.pcap" -n -A "udp port 5353" 2>/dev/null \
+        > "$HD/mdns-full.txt" || true
+
+    echo
+    echo "  the service records, as tcpdump reads them off the A2065:"
+    grep -Ei "PTR|SRV|TXT" "$HD/mdns.txt" | head -20 | sed 's/^/       /'
+
+    for rec in "_ftp._tcp.local" "_http._tcp.local" "_telnet._udp.local"; do
+        if grep -q "$rec" "$HD/mdns.txt"; then
+            pass "$rec is on the wire"
+        else
+            fail "$rec was declared and never announced"
+        fi
+    done
+
+    # The SRV, exactly: the target host, the port from the file, and the
+    # priority and weight netstack_mdns.c passes as zero.
+    for port in 21 80 23; do
+        if grep -q "SRV $MDNS_LABEL.local.:$port 0 0" "$HD/mdns.txt"; then
+            pass "SRV -> $MDNS_LABEL.local:$port, priority 0 weight 0"
+        else
+            fail "no SRV for port $port pointing at $MDNS_LABEL.local"
+        fi
+    done
+
+    if grep -q "TXT" "$HD/mdns.txt"; then
+        pass "TXT records are announced alongside (RFC 6763 6.1)"
+    else
+        fail "no TXT record"
+    fi
+
+    # The _services._dns-sd._udp.local enumeration PTR is registered by
+    # nx_mdns_service_add() and answered when something queries for it, but it
+    # is NOT in the announcement, and that is the module's design rather than
+    # a gap here: the announcing state machine flags a PTR for sending only
+    # when its rdata is the announcing SRV's own name, which is true of the
+    # type PTR and not of the enumeration PTR whose rdata is the type.  RFC
+    # 6763 9 requires the meta-query to be ANSWERED, not announced, and Avahi
+    # and mDNSResponder do the same.  It cannot be proved from here either
+    # way: a query from the host arrives through SLIRP with an off-link source
+    # and RFC 6762 11 makes the module drop it, as the trailer below says.
+    if grep -q "_services._dns-sd._udp.local" "$HD/mdns.txt"; then
+        note "the _services._dns-sd._udp PTR was announced as well"
+    else
+        note "no _services._dns-sd._udp PTR in the announcement -- expected;"
+        note "    it is answered on query, not announced (RFC 6763 9)"
+    fi
+
+    # The instance name with no name= in the file must be the DERIVED label.
+    if grep -q "$MDNS_LABEL\._ftp\._tcp\.local" "$HD/mdns.txt"; then
+        pass "_ftp._tcp took the host label '$MDNS_LABEL' as its instance name"
+    else
+        fail "_ftp._tcp did not default its instance name to the host label"
+    fi
+
+    # And the multi-word one arrived whole, spaces and all.
+    if grep -q "$SD_HTTP_NAME" "$HD/mdns-full.txt"; then
+        pass "'$SD_HTTP_NAME' arrived as one instance name, spaces included"
+    else
+        fail "the multi-word instance name did not survive the parser"
+    fi
+
+    if grep -q "$SD_HTTP_TXT" "$HD/mdns-full.txt"; then
+        pass "the txt= field reached the TXT record as '$SD_HTTP_TXT'"
+    else
+        fail "the txt= field is not in the TXT record"
+    fi
+
+    # The malformed line must have been skipped and nothing else.
+    if grep -q "_nope" "$HD/mdns.txt"; then
+        fail "the malformed line was announced anyway"
+    else
+        pass "the malformed line was skipped and the good ones still went out"
+    fi
 else
     fail "no host-side capture at $HD/host.pcap -- the wire was not observed"
 fi
@@ -343,6 +460,11 @@ else
         note "          (with the source port rewritten -- :5353 became :NNNNN)"
     else
         note "OUTBOUND: nothing carrying '$MDNS_LABEL' reached the host LAN"
+    fi
+
+    if grep -q "_ftp._tcp" "$WATCHLOG"; then
+        note "          and the service records came with it -- the host's own"
+        note "          network saw _ftp._tcp.local, not just the A record"
     fi
 
     # INBOUND, which is three questions and not one: did the reply cross the

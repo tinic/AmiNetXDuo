@@ -80,8 +80,21 @@ def parse_name(data, offset, depth=0):
     return labels, offset
 
 
+RRTYPE = {1: "A", 12: "PTR", 16: "TXT", 28: "AAAA", 33: "SRV", 47: "NSEC"}
+
+
+def rrname(rrtype):
+    return RRTYPE.get(rrtype, "type %d" % rrtype)
+
+
 def summarise(data):
-    """One line describing an mDNS message, without a full parser."""
+    """One line describing an mDNS message, without a full parser.
+
+    The answer section is walked as well as the question section: an
+    announcement carries no questions at all, so a summary that stopped at the
+    questions would print "response an=8" and nothing about WHAT was announced
+    -- which is the whole thing a service test wants to read.
+    """
     if len(data) < 12:
         return "short packet (%d bytes)" % len(data)
     xid, flags, qd, an, ns, ar = struct.unpack(">HHHHHH", data[:12])
@@ -94,7 +107,21 @@ def summarise(data):
             break
         qtype, _qclass = struct.unpack(">HH", data[offset:offset + 4])
         offset += 4
-        names.append("%s(type %d)" % (".".join(labels), qtype))
+        names.append("%s(%s)" % (".".join(labels), rrname(qtype)))
+
+    # Answers, authority and additional all share the resource-record layout,
+    # so one walk covers them; rdata is skipped by its own length.
+    for _ in range(min(an + ns + ar, 16)):
+        labels, offset = parse_name(data, offset)
+        if offset + 10 > len(data):
+            break
+        rrtype, _cls, _ttl, rdlen = struct.unpack(">HHIH",
+                                                  data[offset:offset + 10])
+        offset += 10 + rdlen
+        if offset > len(data):
+            break
+        names.append("%s=%s" % (rrname(rrtype), ".".join(labels)))
+
     return "%s id=0x%04x qd=%d an=%d ns=%d ar=%d %s" % (
         kind, xid, qd, an, ns, ar, " ".join(names))
 
