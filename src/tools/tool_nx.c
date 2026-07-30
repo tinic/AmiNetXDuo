@@ -447,7 +447,8 @@ BOOL tool_health_mark(ToolStats *out)
 
     Forbid();
 
-    mark = (const AmiHealthMark *)FindSemaphore((CONST_STRPTR)AMI_HEALTH_NAME);
+    /* (STRPTR): NDK 3.9 declares FindSemaphore(STRPTR), 3.2 CONST_STRPTR. */
+    mark = (const AmiHealthMark *)FindSemaphore((STRPTR)AMI_HEALTH_NAME);
 
     if (mark != NULL &&
         mark->hm_Magic   == AMI_HEALTH_MAGIC &&

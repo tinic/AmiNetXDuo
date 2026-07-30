@@ -101,7 +101,7 @@ VOID ami_netstack_health_publish(VOID)
     /* Second stack on one machine: the first one's mark stays, and this one
        goes unpublished rather than giving FindSemaphore() two answers. */
     Forbid();
-    if (FindSemaphore((CONST_STRPTR)ami_health_name) == NULL)
+    if (FindSemaphore((STRPTR)ami_health_name) == NULL)
     {
         AddSemaphore(&ami_health_mark.hm_Semaphore);
         ami_health_up = TRUE;
