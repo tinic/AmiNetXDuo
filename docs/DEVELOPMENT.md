@@ -335,8 +335,14 @@ with every file pinned by sha256. Both are GPLv3+ and neither is vendored or
 linked; they are separate programs we install and run.
 
     tests/bebbossh/run-bebbossh.sh -x      # six transfers each way, two ciphers
+    tests/bebbossh/run-bebbossh.sh -x -L   # ... with both ends in the guest
     tests/bebbossh/run-bebbossh.sh -E      # the same under Enforcer + MungWall
     tests/bebboget/run-bebboget.sh -x -1   # bebboget beside our own fetch
+
+`-L` is the arm whose throughput can be set beside our own SSH figures: it runs
+`bebbosshd` in the guest too, so both ends of the connection are on the one
+emulated CPU. Without it only the client half of the crypto is, and the number
+is about twice as large for that reason alone.
 
 These stay out of CI at either tier. They need `a2065.device`, they need a
 Workbench `locale.library` — without which BebboSSH does not start at all, and

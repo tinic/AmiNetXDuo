@@ -2,13 +2,13 @@
 #
 # Score a BebboSSH run: compare every byte, then derive the throughput.
 #
-#   tests/bebbossh/check.sh <testhd-dir> <xfer-dir>
+#   tests/bebbossh/check.sh <testhd-dir> <xfer-dir> [upload-dir]
 #
 # WHY EVERY BYTE
 #
-#   docs/RESEARCH.md 79.6 records a shim bug that put a CR in front of every LF
-#   in a transferred file: 64 KB came back the RIGHT LENGTH and the wrong
-#   bytes, and a 45-byte case never showed it because the payload had one LF.
+#   The Dropbear work on the `ssh-server-perf` branch found a shim bug that put
+#   a CR in front of every LF in a transferred file: 64 KB came back the RIGHT
+#   LENGTH and the wrong bytes, and a 45-byte case never showed it.
 #   A size check is not a check.
 #
 # WHY THE SLOPE AND NOT THE TOTAL
@@ -31,8 +31,12 @@
 
 set -uo pipefail
 
-HD="${1:?usage: check.sh <testhd-dir> <xfer-dir>}"
-XFER="${2:?usage: check.sh <testhd-dir> <xfer-dir>}"
+HD="${1:?usage: check.sh <testhd-dir> <xfer-dir> [upload-dir]}"
+XFER="${2:?usage: check.sh <testhd-dir> <xfer-dir> [upload-dir]}"
+# Where the "Amiga -> host" files landed.  The same as <xfer-dir> against a
+# server on the build host; DH0: itself in the loopback arm, where the server
+# is in the guest and wrote there.
+UPDIR="${3:-$XFER}"
 
 REPORT="$HD/client.txt"
 FAIL=0
@@ -93,7 +97,7 @@ for suf in "${ARMS[@]}"; do
     for sz in tiny:"45 B" mid:"64 KB" big:"256 KB"; do
         k="${sz%%:*}"; label="${sz##*:}"
         check_pair "$(name_of "$suf") h->A $label" "$HD/dn$p$k.bin"   "$XFER/$k.bin"
-        check_pair "$(name_of "$suf") A->h $label" "$XFER/up$p$k.bin" "$XFER/$k.bin"
+        check_pair "$(name_of "$suf") A->h $label" "$UPDIR/up$p$k.bin" "$XFER/$k.bin"
     done
 done
 

@@ -3,12 +3,18 @@
 # BebboSSH against this stack, under FS-UAE.
 #
 #   tests/bebbossh/run-bebbossh.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#                                  [-k MHZ] [-x] [-E] [-C FILE]
+#                                  [-k MHZ] [-x] [-E] [-L] [-C FILE]
 #
 #   -x  take the emulator alone.  EVERY timing needs it: a transfer measured
 #       while another FS-UAE shares the host is fiction, and this project has
 #       already had one set of figures corrupted that way.
 #   -C  a command list to stage instead of the default twelve transfers.
+#   -L  the LOOPBACK arm: run bebbosshd in the guest as well and point bebboscp
+#       at 127.0.0.1, so BOTH ends of the connection are on the one emulated
+#       CPU.  That is the arrangement the Dropbear figures on the
+#       `ssh-server-perf` branch used, and it is the only one comparable to
+#       them.  It has to be loopback: FS-UAE's SLIRP is outbound-only, so
+#       nothing on the host can open a connection INTO the guest.
 #   -E  run under Enforcer + MungWall instead.  NOT A TIMING RUN: Enforcer
 #       needs an MMU, so tools/enforcer-run.sh boots a 68030 and FS-UAE turns
 #       cycle accounting off above a 68020.  Use it to ask whether BebboSSH
@@ -43,15 +49,16 @@
 # WHAT IT MEASURES
 #
 #   Three sizes -- 45 B, 64 KB and 256 KB -- in each direction, which is the
-#   shape docs/RESEARCH.md 80 used for Dropbear so the two are comparable.  Two
+#   shape the Dropbear work used, so the two are comparable.  Two
 #   sizes give a slope with the handshake cancelled out; three give two slopes
 #   that must agree, which is what says a figure is a per-byte cost and not a
 #   window or a round-trip count.
 #
-#   ONE END ONLY.  The far end here is an OpenSSH server on the build host, so
-#   only the client's half of the crypto runs on the 68020.  docs/RESEARCH.md
-#   80 put BOTH ends on the emulated CPU.  The two are not the same
-#   measurement and must not be put in one column.
+#   ONE END ONLY, without -L.  The far end is an OpenSSH server on the build
+#   host, so only the client's half of the crypto runs on the 68020.  The
+#   Dropbear figures put BOTH ends on the emulated CPU.  The two are not the
+#   same measurement and must not be put in one column; -L is the one that
+#   compares.
 #
 # SCORING
 #
@@ -71,8 +78,9 @@ BUILD="${AMINETXDUO_BUILD:-build/cm}"
 PERF=0
 COMMANDS=""
 ENFORCE=0
+LOOPBACK=0
 
-while getopts "m:t:b:k:xEC:" opt; do
+while getopts "m:t:b:k:xELC:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
@@ -80,8 +88,9 @@ while getopts "m:t:b:k:xEC:" opt; do
         k) CLOCK="$OPTARG" ;;
         x) PERF=1 ;;
         E) ENFORCE=1 ;;
+        L) LOOPBACK=1 ;;
         C) COMMANDS="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t secs] [-b builddir] [-k MHz] [-x] [-E] [-C file]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-m model] [-t secs] [-b builddir] [-k MHz] [-x] [-E] [-L] [-C file]" >&2; exit 2 ;;
     esac
 done
 
@@ -151,7 +160,14 @@ fi
 
 SRV="$ROOT/tests/bebbossh/sshd.sh"
 PORT="${AMINETXDUO_BEBBOSSH_PORT:-2223}"
-"$SRV" status >/dev/null 2>&1 || "$SRV" start
+# The loopback arm has its server in the guest and needs no listener here.  The
+# key pair is still made by sshd.sh, since it is the same OpenSSH-format
+# ed25519 key either way.
+if [ "$LOOPBACK" = "1" ]; then
+    [ -f "$ROOT/build/bebbossh-test/id_ed25519" ] || "$SRV" start >/dev/null
+else
+    "$SRV" status >/dev/null 2>&1 || "$SRV" start
+fi
 XFER="$ROOT/build/bebbossh-test/xfer"
 KEY="$ROOT/build/bebbossh-test/id_ed25519"
 
@@ -194,6 +210,59 @@ cp "$BEB/bebbossh" "$STAGE/bebbossh"
 cp "$KEY" "$STAGE/id_ed25519"
 cp "$XFER/tiny.bin" "$XFER/mid.bin" "$XFER/big.bin" "$STAGE/up/"
 
+# ------------------------------------------------------- the loopback arm ---
+#
+# bebbosshd reads ENVARC:ssh/sshd_config, its host key from
+# ENVARC:ssh/ssh_host_ed25519_key and the authorised keys from
+# ENVARC:.ssh/authorized_keys -- the client's own directory, since one machine
+# is both ends here.
+#
+# The host key is generated on the BUILD HOST.  bebbosshkeygen would run in the
+# guest in about a second, which is not the objection: the objection is that a
+# host key regenerated every run cannot be pre-trusted in known_hosts, and
+# BebboSSH's ReadMe describes its own random source as "rand() pimped with time
+# and vpos".  ssh-keygen writes plain `openssl-key-v1`, which is exactly what
+# src/loaded25519key.cpp parses.
+#
+# Its public key is what the client must already trust, and the fingerprint
+# BebboSSH stores is base64(SHA-256(the host key blob)) -- OpenSSH's own
+# SHA256: display with the '=' padding ssh-keygen omits.
+if [ "$LOOPBACK" = "1" ]; then
+    cp "$BEB/bebbosshd" "$STAGE/bebbosshd"
+    mkdir -p "$STAGE/envarc/ssh"
+
+    HK="$ROOT/build/bebbossh-test/hostkey_amiga_ed25519"
+    if [ ! -f "$HK" ]; then
+        echo "==> host key for the in-guest server (made on the host)"
+        ssh-keygen -t ed25519 -f "$HK" -N "" -q -C bebbosshd-amiga
+    fi
+    cp "$HK" "$STAGE/envarc/ssh/ssh_host_ed25519_key"
+
+    # Stack 20000 is the template's own value and is not enough here: a
+    # bsdsocket call runs NetX Duo on the CALLER's stack, and 64 KB is this
+    # tree's floor for any process that touches a socket.  docs/RESEARCH.md
+    # 16.9 records that too little of it is an F-line trap and a reboot loop
+    # the harness reports as a timeout.
+    cat > "$STAGE/envarc/ssh/sshd_config" <<EOF
+DebugLevel Warn
+Port $PORT
+ListenAddress 127.0.0.1
+HostKey ENVARC:ssh/ssh_host_ed25519_key
+Passwords ENVARC:ssh/passwd
+SendNoop Off
+Stack 65536
+HomeDir RAM:
+EOF
+
+    # Present because the config names it and an unreadable file is one more
+    # thing to rule out; public-key auth is what is actually used, and the
+    # client cannot do passwords without a console to read one from.
+    printf '# user password
+' > "$STAGE/envarc/ssh/passwd"
+
+    cp "$KEY.pub" "$STAGE/envarc/.ssh/authorized_keys"
+fi
+
 USER_NAME="${AMINETXDUO_SSH_USER:-$(id -un)}"
 HOST="${AMINETXDUO_SSH_HOST:-10.0.2.2}"
 
@@ -212,7 +281,15 @@ EOF
 
 # Always, including for a -C list: a run whose host key is untrusted stops at a
 # stdin prompt that NIL: never answers, and reads as a handshake failure.
-"$SRV" knownhosts "$HOST" > "$STAGE/envarc/.ssh/known_hosts"
+if [ "$LOOPBACK" = "1" ]; then
+    HOST=127.0.0.1
+    fp=$(ssh-keygen -lf "$HK.pub" \
+         | awk '{print $2}' | sed 's/^SHA256://; s/$/=/')
+    printf '%s:%s ssh-ed25519 %s\n' "$HOST" "$PORT" "$fp" \
+        > "$STAGE/envarc/.ssh/known_hosts"
+else
+    "$SRV" knownhosts "$HOST" > "$STAGE/envarc/.ssh/known_hosts"
+fi
 echo "==> host key pre-trusted: $(cat "$STAGE/envarc/.ssh/known_hosts")"
 
 if [ -n "$COMMANDS" ]; then
@@ -231,14 +308,31 @@ else
     # measured window -- that measures the logger.
     : > "$STAGE/commands.txt"
     echo "SYS:AddNetInterface eth0" >> "$STAGE/commands.txt"
+    if [ "$LOOPBACK" = "1" ]; then
+        # & starts it and does not wait; its output goes to DH0:server.txt so
+        # a server logging while a client logs does not interleave two streams
+        # into one file.  The wait is generous because the server has to open
+        # bsdsocket.library, read a host key and bind before the first client
+        # arrives, and a client that connects too early gets a refusal that
+        # looks exactly like a broken listener.
+        echo "&SYS:bebbosshd -v3 -p $PORT" >> "$STAGE/commands.txt"
+        echo "wait 10" >> "$STAGE/commands.txt"
+    fi
     for c in 1 2; do
         [ "$c" = "1" ] && suf="gcm" || suf="cha"
         SCP="SYS:bebboscp -v3 --ciphers $c -i DH0:id_ed25519 -p $PORT"
+        # In the loopback arm both ends are the Amiga, so the "remote" paths
+        # are Amiga paths and the results land in DH0: for the host to compare.
+        if [ "$LOOPBACK" = "1" ]; then
+            RSRC="DH0:up"; RDST="DH0:"
+        else
+            RSRC="$XFER"; RDST="$XFER/"
+        fi
         for sz in tiny mid big; do
-            echo "$SCP $USER_NAME@$HOST:$XFER/$sz.bin DH0:dn-$suf-$sz.bin" >> "$STAGE/commands.txt"
+            echo "$SCP $USER_NAME@$HOST:$RSRC/$sz.bin DH0:dn-$suf-$sz.bin" >> "$STAGE/commands.txt"
         done
         for sz in tiny mid big; do
-            echo "$SCP DH0:up/$sz.bin $USER_NAME@$HOST:$XFER/up-$suf-$sz.bin" >> "$STAGE/commands.txt"
+            echo "$SCP DH0:up/$sz.bin $USER_NAME@$HOST:${RDST}up-$suf-$sz.bin" >> "$STAGE/commands.txt"
         done
     done
 fi
@@ -277,6 +371,7 @@ CPUARG=()
 STAGED=("$STAGE/devs" "$STAGE/libs" "$STAGE/envarc" "$STAGE/up"
         "$STAGE/bebboscp" "$STAGE/bebbossh"
         "$STAGE/AddNetInterface" "$STAGE/id_ed25519" "$STAGE/commands.txt")
+[ "$LOOPBACK" = "1" ] && STAGED+=("$STAGE/bebbosshd")
 
 set +e
 if [ "$ENFORCE" = "1" ]; then
@@ -297,10 +392,21 @@ HD="$ROOT/build/testhd-$TAG"
 echo ""
 echo "==> DH0:client.txt"
 cat "$HD/client.txt" 2>/dev/null || echo "(none)"
+if [ "$LOOPBACK" = "1" ]; then
+    echo ""
+    echo "==> DH0:server.txt (bebbosshd)"
+    cat "$HD/server.txt" 2>/dev/null || echo "(none)"
+fi
 echo ""
 
+# In the loopback arm the "remote" end wrote into DH0: as well, so both
+# directions are compared against the staged originals in one place.
 set +e
-"$ROOT/tests/bebbossh/check.sh" "$HD" "$XFER"
+if [ "$LOOPBACK" = "1" ]; then
+    "$ROOT/tests/bebbossh/check.sh" "$HD" "$XFER" "$HD"
+else
+    "$ROOT/tests/bebbossh/check.sh" "$HD" "$XFER"
+fi
 VERDICT=$?
 set -e
 

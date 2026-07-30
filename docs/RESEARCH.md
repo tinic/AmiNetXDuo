@@ -20387,10 +20387,14 @@ break mask is `SBT_RW` in `errno.c` and is serviced.
 twenty-four transfers and eight HTTPS fetches. The serial log across every run
 contains one line, and it is our own `AMITCP: no rexxsyslib.library` notice.
 
-`bebbosshd` — the server — additionally calls `getservbyname`, `getprotoent`
-and `ReleaseCopyOfSocket`, none of which the client half needs. It has not been
-run here; FS-UAE's SLIRP has no inbound path, so a server in the guest can only
-be reached from inside the guest, and that arm is not built yet.
+`bebbosshd` — the server — adds `bind`, `listen`, `accept` and
+`setsockopt(SO_REUSEADDR)`, and §78.4 runs it. Twenty-four sessions, and the
+only thing it ever complained about was its own teardown: two lines per session,
+`failed to send N bytes on socket 1: sent -1, errno=32` then `errno=57`. That is
+EPIPE and then ENOTCONN, from writing to a socket the client has already closed,
+and EPIPE on the first write after the peer has gone with ENOTCONN on the next
+is what AmiTCP does. `mysend()` retries only on EAGAIN, so it logs and gives up,
+which is correct. Nothing there is ours to fix.
 
 Under Enforcer with MungWall, on the network, doing a 64 KB transfer each way:
 **0 Enforcer hits, 0 MungWall wall hits.**
@@ -20422,28 +20426,61 @@ the ReadMe instructs. Staging the 68000 file that ships under that name would
 have measured the wrong binary — worth roughly 2× on ChaCha20 by the author's
 figures.
 
-### 78.4 Against our Dropbear numbers, and the comparison is only half fair
+### 78.4 Against our Dropbear numbers, and it took a second arm to be fair
 
-The Dropbear port on the `ssh-server-perf` branch measured `scp` at **27.57 KB/s** host→Amiga and **23.51** Amiga→host on
-ChaCha20-Poly1305, and a **22.5 s** handshake. Same emulated 14 MHz 68EC020,
-same three sizes, same slope method, both sets `cmp`ed.
+The Dropbear port on the `ssh-server-perf` branch measured `scp` at **27.57
+KB/s** host→Amiga and **23.51** Amiga→host on ChaCha20-Poly1305, and a **22.0 s**
+handshake. Same emulated 14 MHz 68EC020, same three sizes, same slope method,
+both sets `cmp`ed.
 
-**One difference makes a straight comparison wrong, and it favours BebboSSH.**
-That work put *both ends* of the connection on the emulated CPU — our Dropbear client
-talking to our Dropbear server over loopback — so that 68020 was doing the
-encrypting *and* the decrypting. The figures above have an OpenSSH server on
-the build host, so only the client's half runs on the Amiga. Roughly half the
-crypto is missing from our side of the comparison, and that branch measured eight to nine tenths of a
-transferred byte to be the AEAD.
+**§78.3's figures are not comparable to those.** That work put *both ends* of
+the connection on the emulated CPU, so that 68020 was doing the encrypting *and*
+the decrypting; §78.3 has an OpenSSH server on the build host, so only the
+client's half runs on the Amiga. Roughly half the crypto is missing, and that
+branch measured eight to nine tenths of a transferred byte to be the AEAD.
 
-What can be said without the caveat is the **handshake: 5.7 s against 22.5 s,
-4× faster**, and both are one client on one CPU talking to a server elsewhere.
-That gap is real and is not an artefact of where the server ran.
+`run-bebbossh.sh -L` is the arm that compares. It runs `bebbosshd` in the guest
+and points `bebboscp` at `127.0.0.1` — the same arrangement, and the only one
+possible, since FS-UAE's SLIRP is outbound-only and nothing on the host can open
+a connection *into* the guest. Two runs, `-x`, 24/24 byte-identical:
 
-Making the throughput comparison honest needs `bebbosshd` running in the guest
-with `bebboscp` connecting to `127.0.0.1`, which is the same arrangement that branch
-used and is the obvious next run. Until then the two throughput columns should
-not be put in one table.
+| both ends on one 14 MHz 68EC020 | 45 B | 64 KB | 256 KB | 64K→256K |
+|---|---:|---:|---:|---:|
+| **aes128-gcm**, one way | 9.78 s | 14.32 | 27.82 | **14.22 KB/s** |
+| **aes128-gcm**, the other | 9.76 | 14.30 | 28.00 | **14.01** |
+| **chacha20-poly1305**, one way | 9.66 | 12.42 | 20.54 | **23.65** |
+| **chacha20-poly1305**, the other | 9.66 | 12.38 | 20.72 | **23.02** |
+
+Reproducible to within 1% on the repeat (14.26 / 14.12 / 23.53 / 23.08), every
+slope pair agreeing to under 4%, and the two directions agreeing with each other
+to under 3% — which is what one CPU doing both halves should look like.
+
+So, ChaCha20-Poly1305, both ends on the one CPU, same sizes, same method:
+
+| | host → Amiga | Amiga → host | handshake |
+|---|---:|---:|---:|
+| ours, Dropbear + `src/crypto68k` | **27.57 KB/s** | 23.51 KB/s | 22.0 s |
+| BebboSSH 1.45 + `libcryptossh.library020` | 23.65 | 23.02 | **9.7 s** |
+
+**We are 17% ahead in one direction and level in the other; he is 2.3× ahead on
+the handshake.** Both sides are hand-written 68020 assembly against hand-written
+68020 assembly, so this is a real comparison and not optimised-against-portable.
+The bulk figures are close enough that the honest summary is a draw on
+throughput and a clear loss on connection setup.
+
+The handshake gap is the more interesting number, because it is four curve25519
+and ed25519 operations and nothing else — it says `src/crypto68k/c68k_25519.c`
+has about 2× left in it. His own log breaks it down: 0.98 s for the X25519 key
+pair, 0.98 s for the shared secret, 1.34 s to verify the server's signature and
+1.00 s to sign the auth request.
+
+AES-128-GCM is his slower cipher, 14.1 KB/s against ChaCha20's 23.3. We do not
+implement GCM at all, so there is nothing to compare it against.
+
+Note that §78.3's one-ended figures — 28.2 KB/s on AES-GCM, 44.9 on ChaCha20 —
+are roughly double these, which is the arithmetic working: take one of the two
+halves of the crypto off the 68020 and the remaining half goes about twice as
+fast.
 
 ### 78.5 A repeatable stall in the download direction, unattributed
 
@@ -20462,16 +20499,23 @@ consistent 1.5 s more than the 256 KB upload on both ciphers.
 `windowSize` at 0x20000000 and adjusts in 0x10000000 steps, so nothing in that
 layer has a boundary at 64 KB.
 
-**It is probably not our receive path either**, on the evidence available:
-`bebboget` and our own `fetch` both pulled 256 KB down the same interface in
-the same session without it, and `fetch` at 61.94 KB/s would have shown a 1.5 s
-pause plainly. But `bebboget` produced one comparable outlier of its own
-(§78.7), so this is an observation and not a verdict.
+**It is probably not our receive path either**, on three pieces of evidence.
+`bebboget` and our own `fetch` both pulled 256 KB down the same interface in the
+same session without it, and `fetch` at 61.94 KB/s would have shown a 1.5 s
+pause plainly. And §78.4's loopback arm — the same `bebboscp` binary, the same
+sizes, the same 256 KB downloads, but the server inside the guest — has every
+slope pair agreeing to under 4% and no stall anywhere, in four arms across two
+runs.
+
+That last one is the strongest and it points away from both programs: what the
+stalling runs have and the clean ones do not is **the path through SLIRP to a
+server on the build host**. But `bebboget` produced one comparable outlier over
+that same path (§78.7), so this stays an observation rather than a verdict.
 
 The reduced case worth building is a `recv()` loop against our library with no
-SSH at all, reading a 256 KB stream and timestamping every return, to see
-whether anything stalls at 64 KB received. That is a test against our library
-and is worth more than any workaround.
+SSH at all, reading a 256 KB stream over SLIRP and timestamping every return, to
+see whether anything stalls at 64 KB received. That is a test against our
+library and is worth more than any workaround.
 
 ### 78.6 bebboget, and our fetch, on one server in one run
 
@@ -20536,7 +20580,8 @@ fix:
    explain to somebody whose run just hangs.
 3. The BebboSSH arm needs an `sshd` **and** an `sftp-server` on the build host.
    `bebboscp` is an SFTP client, not an `scp -f`/`-t` one, so a server without
-   the subsystem fails at the channel request with nothing in its log.
+   the subsystem fails at the channel request with nothing in its log. The
+   `-L` arm needs neither, since both ends are in the guest.
 4. A full run is five minutes of *exclusive* emulator. `EMULATOR_TESTS` in
    `tools/ci.sh` scores by the runner's exit status, and a2065.device 2.16
    never honours `AbortIO()` on a pending `CMD_READ`, so a completed run can
