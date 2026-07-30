@@ -210,8 +210,14 @@ static void p_report(void)
  * away with it because it touches only dos.library.
  *
  * Registration therefore happens on the first wrapped call, which is inside
- * main() by construction.  Three exits are then armed and p_reported makes
- * them idempotent: atexit(), the toolchain's own DTOR list, and --wrap=exit.
+ * main() by construction.  Two exits are then armed and p_reported makes them
+ * idempotent: atexit() and the toolchain's own DTOR list.
+ *
+ * There was a third, a __wrap_exit() here.  clients/compat/amiga_argv.c now
+ * defines that symbol -- it has to put the task's stack bounds back before a
+ * client exits off the swapped stack -- and two definitions of it is a link
+ * error.  Nothing is lost: that wrapper ends in __real_exit(), which is
+ * newlib's, which runs the atexit list.
  */
 static void p_arm(void)
 {
@@ -224,14 +230,6 @@ static void p_arm(void)
 __attribute__((destructor)) static void p_fini(void)
 {
     p_report();
-}
-
-extern void __real_exit(int status);
-void __wrap_exit(int status);
-void __wrap_exit(int status)
-{
-    p_report();
-    __real_exit(status);
 }
 
 /*

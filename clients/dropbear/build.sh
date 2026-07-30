@@ -260,7 +260,8 @@ if [ "$PROFILE" = "1" ]; then
     prof_opt DROPBEAR_RSA        DBPROF_RSA        mp_exptmod
     PROF_WRAPS="$PROF_WRAPS,--wrap=sha512_process,--wrap=sha256_process"
     PROF_WRAPS="$PROF_WRAPS,--wrap=chacha_crypt,--wrap=poly1305_process,--wrap=select"
-    PROF_WRAPS="$PROF_WRAPS,--wrap=exit"
+    # exit is already wrapped by clients/amiga-client.sh, for amiga_argv.c's
+    # stack bounds.  dbprofile.c reports from atexit() behind it.
 
     PROF_O="$ROOT/build/clients/obj/db-dbprofile-$(basename "$BUILD").o"
     echo "  CC dbprofile.c"
