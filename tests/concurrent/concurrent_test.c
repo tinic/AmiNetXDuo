@@ -42,6 +42,13 @@
  * reason tests/leak/CMakeLists.txt gives: linking src/netstack would get a
  * second set of NetX Duo globals and measure the wrong stack.
  *
+ * Reading a run: the verdict line is the result, and it is printed before the
+ * last CloseLibrary(), which hangs in the a2065 teardown and stops the run from
+ * ever writing DH0:.done. A trailing timeout under a verdict is expected;
+ * run-concurrent.sh scores the verdict and says so. A timeout with no verdict
+ * is a real failure, and the last [ct] line in the serial log is how far it
+ * got.
+ *
  * SPDX-License-Identifier: MIT
  */
 
