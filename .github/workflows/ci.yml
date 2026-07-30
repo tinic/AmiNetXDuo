@@ -160,6 +160,7 @@ jobs:
             tools/fetch-toolchain.sh \
             tools/package-toolchain-mirror.sh \
             tools/fetch-aros-rom.sh \
+            tools/fetch-sana2-drivers.sh \
             tools/amiga-toolchain.sh \
             tools/fsuae-run.sh \
             tools/enforcer-run.sh \

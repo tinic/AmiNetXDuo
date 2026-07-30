@@ -79,3 +79,11 @@ build/cm/
 # Python bytecode from the host-side test servers (tests/tools, tests/tls).
 __pycache__/
 *.pyc
+
+# Third-party SANA-II drivers.  tools/fetch-sana2-drivers.sh caches these under
+# ~/.cache/aminetxduo, and a2065.device is brought in by hand; none of them are
+# ours to redistribute, so nothing driver-shaped may be committed by accident.
+*.device
+*.lha
+*.lzh
+*.dms
