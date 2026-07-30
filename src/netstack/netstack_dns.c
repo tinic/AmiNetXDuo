@@ -195,7 +195,7 @@ LONG netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks)
 {
     AmiNetStack         *ns = ami_netstack_raw();
     const AmiNetdbEntry *entry;
-    AmiNetCaller         caller;
+    AmiNetCaller         *caller;
     ULONG                address = 0;
     UINT                 status;
 
@@ -213,7 +213,8 @@ LONG netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks)
     if (ns == NULL || !ns->ns_DnsCreated)
         return AMI_NET_ERR_STATE;
 
-    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
         return AMI_NET_ERR_KERNEL;
 
 #ifdef AMINETXDUO_MDNS
@@ -237,7 +238,7 @@ LONG netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks)
     {
         LONG err = ami_netstack_mdns_resolve(name, &address, timeout_ticks);
 
-        ami_netstack_leave(&caller);
+        ami_netstack_leave_free(caller);
 
         if (err != AMI_NET_OK)
         {
@@ -253,7 +254,7 @@ LONG netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks)
     status = nx_dns_host_by_name_get(&ns->ns_Dns, (UCHAR *)name, &address,
                                      timeout_ticks);
 
-    ami_netstack_leave(&caller);
+    ami_netstack_leave_free(caller);
 
     if (status != NX_SUCCESS)
     {
@@ -272,7 +273,7 @@ LONG netstack_resolve_reverse(ULONG addr, char *name_out, ULONG name_len,
 {
     AmiNetStack         *ns = ami_netstack_raw();
     const AmiNetdbEntry *entry;
-    AmiNetCaller         caller;
+    AmiNetCaller         *caller;
     UINT                 status;
 
     if (name_out == NULL || name_len == 0)
@@ -288,13 +289,14 @@ LONG netstack_resolve_reverse(ULONG addr, char *name_out, ULONG name_len,
     if (ns == NULL || !ns->ns_DnsCreated)
         return AMI_NET_ERR_STATE;
 
-    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
         return AMI_NET_ERR_KERNEL;
 
     status = nx_dns_host_by_address_get(&ns->ns_Dns, addr, (UCHAR *)name_out,
                                         (UINT)name_len, timeout_ticks);
 
-    ami_netstack_leave(&caller);
+    ami_netstack_leave_free(caller);
 
     return (status == NX_SUCCESS) ? AMI_NET_OK : ami_ns_dns_error(status);
 }
@@ -303,7 +305,7 @@ LONG netstack_resolve_reverse(ULONG addr, char *name_out, ULONG name_len,
 LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)
 {
     AmiNetStack        *ns = ami_netstack_raw();
-    AmiNetCaller        caller;
+    AmiNetCaller        *caller;
     NX_DNS_IPV6_ADDRESS answer[1];
     UINT                count = 0;
     UINT                status;
@@ -323,14 +325,15 @@ LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)
     if (ns == NULL || !ns->ns_DnsCreated)
         return AMI_NET_ERR_STATE;
 
-    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
         return AMI_NET_ERR_KERNEL;
 
     status = nxd_dns_ipv6_address_by_name_get(&ns->ns_Dns, (UCHAR *)name,
                                               answer, (UINT)sizeof(answer),
                                               &count, timeout_ticks);
 
-    ami_netstack_leave(&caller);
+    ami_netstack_leave_free(caller);
 
     if (status != NX_SUCCESS)
         return ami_ns_dns_error(status);
@@ -363,7 +366,7 @@ LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)
 LONG netstack_dns_server_add(ULONG address)
 {
     AmiNetStack  *ns = netstack_get();
-    AmiNetCaller  caller;
+    AmiNetCaller  *caller;
     UINT          status;
     UWORD         i;
 
@@ -380,10 +383,11 @@ LONG netstack_dns_server_add(ULONG address)
     if (ns->ns_Config.resolver.nameserver_count >= AMI_CFG_MAX_NAMESERVERS)
         return AMI_NET_ERR_NOMEM;
 
-    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
         return AMI_NET_ERR_STATE;
     status = nx_dns_server_add(&ns->ns_Dns, address);
-    ami_netstack_leave(&caller);
+    ami_netstack_leave_free(caller);
 
     if (status != NX_SUCCESS)
         return AMI_NET_ERR_CONFIG;
@@ -404,7 +408,7 @@ LONG netstack_dns_server_add(ULONG address)
 LONG netstack_dns_server_remove(ULONG address)
 {
     AmiNetStack  *ns = netstack_get();
-    AmiNetCaller  caller;
+    AmiNetCaller  *caller;
     UINT          status;
     UWORD         i;
     UWORD         at;
@@ -424,10 +428,11 @@ LONG netstack_dns_server_remove(ULONG address)
     if (at >= (UWORD)AMI_CFG_MAX_NAMESERVERS)
         return AMI_NET_ERR_NONAME;
 
-    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
         return AMI_NET_ERR_STATE;
     status = nx_dns_server_remove(&ns->ns_Dns, address);
-    ami_netstack_leave(&caller);
+    ami_netstack_leave_free(caller);
 
     if (status != NX_SUCCESS)
         return AMI_NET_ERR_CONFIG;
