@@ -90,7 +90,7 @@ static const ULONG sha256_k[64] =
  * The message schedule is a 16-word ring, not the w[64] the specification is
  * written with. Round i only reads w[i-16], w[i-15], w[i-7] and w[i-2], so the
  * other 48 words are dead the moment they are produced and w[i&15] can be
- * updated in place. Bit-identical, and 256 bytes of stack instead of 64.
+ * updated in place. Bit-identical, and 64 bytes of schedule instead of 256.
  *
  * That matters here because this is the deepest frame under NX_RAND, and
  * NX_RAND is on the caller's stack: an ephemeral port, a TCP ISN and a DNS
