@@ -63,12 +63,16 @@ EXE="$ROOT/$BUILD/tests/netstack/netstack_test"
 
 . "$ROOT/tools/sana2-stage.sh"
 
-# A driver the fetch script is allowed to download is used without being asked
-# for, so the common case is one command.  An explicit AMINETXDUO_SANA2_DRIVER
-# still wins, and a board whose driver cannot be fetched is left to say so.
+# A driver that is already on the machine is used without being asked for, so
+# the common case is one command.  The local store first: it is the only source
+# for six of the eight, and someone who put a file there meant that file.  Then
+# the fetch script, for the two whose licences permit downloading.  An explicit
+# AMINETXDUO_SANA2_DRIVER still wins over both.
 if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
     _want=$(sana2_driver_for "$BOARD")
-    _have=$("$ROOT/tools/fetch-sana2-drivers.sh" --print-path "$_want" 2>/dev/null || true)
+    _have=$(sana2_local_driver "$_want")
+    [ -n "$_have" ] || _have=$("$ROOT/tools/fetch-sana2-drivers.sh" \
+                               --print-path "$_want" 2>/dev/null || true)
     [ -n "$_have" ] && [ -f "$_have" ] && export AMINETXDUO_SANA2_DRIVER="$_have"
 fi
 
