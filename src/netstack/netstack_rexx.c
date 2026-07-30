@@ -26,6 +26,13 @@
  * SPDX-License-Identifier: MIT
  */
 
+/*
+ * A private rexxsyslib base, the way src/tls/tls_amiga.c takes a private
+ * TimerBase: the NDK inlines are parameterised for it, and with -fno-common a
+ * conventional `RexxSysBase` here would collide with anything else defining one.
+ */
+#define REXXSYSLIB_BASE_NAME ami_rx_rexxbase
+
 #include "netstack_internal.h"
 
 #include <exec/ports.h>
@@ -37,6 +44,9 @@
 
 #include <proto/dos.h>
 #include <proto/exec.h>
+#include <proto/rexxsyslib.h>
+
+struct Library *ami_rx_rexxbase;
 
 /* ----------------------------------------------------------------- names -- */
 
@@ -102,43 +112,28 @@ static struct Process  *ami_rx_proc;
 static struct MsgPort  *ami_rx_death;       /* parent's; the child posts here */
 static struct Message   ami_rx_death_msg;
 static AmiRexxBoot     *ami_rx_boot;
-static struct Library  *ami_rx_rexxbase;
 
 /* ------------------------------------------------------- rexxsyslib calls --
  *
- * SetRexxVarFromMsg() is a rexxsyslib LVO, not the amiga.lib SetRexxVar() a
- * shared library cannot reach. IsRexxMsg(), CreateArgstring() and
- * LengthArgstring() likewise, so opening rexxsyslib.library is all this needs.
+ * SetRexxVarFromMsg() -- the only way to set AMITCP.LASTERROR without
+ * amiga.lib's SetRexxVar(), which a shared library cannot reach -- is
+ * rexxsyslib V45, so OS 3.9 and later only. On an older rexxsyslib the variable
+ * is simply not set: rm_Result1, which is what a script reads as RC, is
+ * unaffected, and nothing in the 31-archive corpus reads LASTERROR at all
+ * (docs/RESEARCH.md 75.7). Gated rather than assumed, because calling a vector
+ * that is not there on 3.1 would take the machine with it.
  */
+#define RX_LASTERROR_VERSION    45
 
-static BOOL ami_rx_is_rexx(struct Message *msg)
-{
-    extern BOOL IsRexxMsg(const struct RexxMsg *);
-
-    if (ami_rx_rexxbase == NULL)
-        return FALSE;
-
-    return IsRexxMsg((const struct RexxMsg *)msg);
-}
+static BOOL ami_rx_can_set_var;
 
 static VOID ami_rx_set_error(struct RexxMsg *rmsg, const char *text)
 {
-    extern LONG SetRexxVarFromMsg(const char *, struct RexxMsg *, const char *);
-
-    if (ami_rx_rexxbase == NULL)
+    if (!ami_rx_can_set_var)
         return;
 
-    (VOID)SetRexxVarFromMsg(ami_rx_error_name, rmsg, text);
-}
-
-static char *ami_rx_make_result(const char *text, ULONG len)
-{
-    extern UBYTE *CreateArgstring(const UBYTE *, unsigned long);
-
-    if (ami_rx_rexxbase == NULL)
-        return NULL;
-
-    return (char *)CreateArgstring((const UBYTE *)text, (unsigned long)len);
+    (VOID)SetRexxVarFromMsg((CONST_STRPTR)ami_rx_error_name, rmsg,
+                            (CONST_STRPTR)text);
 }
 
 /* --------------------------------------------------------------- commands -- */
@@ -381,8 +376,8 @@ static VOID ami_rx_service(struct RexxMsg *rmsg)
     }
     else if ((rmsg->rm_Action & RXFF_RESULT) != 0 && result[0] != '\0')
     {
-        rmsg->rm_Result2 = (LONG)ami_rx_make_result(result,
-                                                   ami_rx_strlen(result));
+        rmsg->rm_Result2 =
+            (LONG)CreateArgstring((CONST_STRPTR)result, ami_rx_strlen(result));
     }
 
     ReplyMsg((struct Message *)rmsg);
@@ -399,7 +394,7 @@ static VOID ami_rx_drain(BOOL closing)
 
     while ((msg = GetMsg(ami_rx_port)) != NULL)
     {
-        if (!ami_rx_is_rexx(msg))
+        if (ami_rx_rexxbase == NULL || !IsRexxMsg((struct RexxMsg *)msg))
         {
             ReplyMsg(msg);
             continue;
@@ -476,7 +471,11 @@ static VOID ami_rx_main(VOID)
      */
     ami_rx_rexxbase = OpenLibrary((CONST_STRPTR)"rexxsyslib.library", 0);
     if (ami_rx_rexxbase == NULL)
-        AMI_WARN("AMITCP: no rexxsyslib.library; commands will be refused");
+        AMI_WARN("AMITCP: no rexxsyslib.library; messages will be replied to "
+                 "but not interpreted");
+    else
+        ami_rx_can_set_var =
+            (ami_rx_rexxbase->lib_Version >= RX_LASTERROR_VERSION) ? TRUE : FALSE;
 
     AMI_INFO("AMITCP: ARexx host started");
 
@@ -508,7 +507,8 @@ static VOID ami_rx_main(VOID)
     if (ami_rx_rexxbase != NULL)
     {
         CloseLibrary(ami_rx_rexxbase);
-        ami_rx_rexxbase = NULL;
+        ami_rx_rexxbase   = NULL;
+        ami_rx_can_set_var = FALSE;
     }
 
     AMI_INFO("AMITCP: ARexx host stopped");
