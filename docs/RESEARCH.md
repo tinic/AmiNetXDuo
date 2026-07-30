@@ -19912,3 +19912,180 @@ specific program is reported failing *and* its failure is decoded to a bare
 The `AMITCP` ARexx-port question in §75.7 is the item that should be opened instead.
 It costs a hang in software we otherwise support, and unlike the Miami question it
 has 31 measured callers.
+
+## 76. Amiberry as the Linux emulator, and the nine-card matrix (2026-07-30)
+
+The nine-card network matrix runs only on winbuilder, under a hand-built WinUAE,
+which makes it a manual exercise rather than a CI tier. FS-UAE, which CI does
+use, has the A2065 and nothing else. This is what Amiberry does about that,
+measured on playhouse2 (Debian 13, x86-64, 24 cores) against Amiberry at
+`25e20b3` built from source with `-DUSE_UAENET_PCAP=ON -DUSE_UAENET_TAP=ON`.
+
+Everything in 76.1 to 76.5 was run. 76.6 is the part that could only be read.
+
+### 76.1 It is headless, and headless is a config option
+
+`headless=true` is a first-class preference — `cfgfile.cpp:3973` parses it into
+`p->headless`, and `gfx_window.cpp` skips `SDL_CreateWindow` entirely on it,
+with matching early returns in `amiberry_gfx.cpp`, `opengl_renderer.cpp`,
+`vulkan_renderer.cpp`, `gl_overlays.cpp` and `file_dialog.cpp`. No `DISPLAY`,
+no Xvfb, no `SDL_VIDEODRIVER=dummy`; the emulator never asks SDL for a video
+device at all. A boot to `DH0:.done` on the AROS ROM took 4.43 seconds, three
+runs, no variance.
+
+FS-UAE on the same host needs `xvfb-run`. `SDL_VIDEODRIVER=dummy` kills it in
+GLAD, exactly as `tools/fsuae-run.sh` already says, and on this machine that
+means the CI path today is a virtual X server that Amiberry does not need.
+
+### 76.2 The pcap backend is shared, and there is a TAP backend too
+
+This is the question that decides whether winbuilder can be retired, and the
+answer is that every card reaches the same backend. `a2065.cpp:1328` and
+`qemuvga/ne2000.cpp:1308` both call `ethernet_enumerate(&td, romtype)` and then
+`ethernet_open()`, which is the same pair `sana2.cpp:459` calls. `ethernet.cpp`
+dispatches on `ndd->type` — `UAENET_SLIRP`, `UAENET_SLIRP_INBOUND`,
+`UAENET_PCAP`, `UAENET_TAP` — with no branch on which card asked. The
+`# Add libpcap for uaenet` comment in `cmake/Dependencies.cmake` names the
+backend module, `osdep/amiberry_uaenet.cpp`, not sana2's virtual card, and
+reading it as the latter is what makes the arrangement look card-specific.
+
+There is also a TAP backend, which an earlier look missed by searching for
+`tap_uae` rather than `uaenet_tap`. `USE_UAENET_TAP` defaults ON on Linux,
+`uaenet_tap_create()` will make a tap and enslave it to a named bridge, and
+`uaenet_tap_open_existing()` will attach to one somebody else made. That is a
+route to real-network bridging that does not need libpcap, and WinUAE has no
+equivalent.
+
+### 76.3 All nine boards come up; eight of them have nothing to drive them
+
+Every board in the matrix instantiated and bound a backend before the guest ran
+a single instruction. Amiberry takes WinUAE's config keys unchanged, so
+`tools/winuae-run.sh`'s board table transfers as it stands:
+
+```
+ariadne_rom_file=:ENABLED
+ariadne_rom_options=netmode=slirp
+```
+
+| board | what the emulator logged |
+| --- | --- |
+| `a2065` | `Card 5: Z2 0x00e90000 64K IO 7990 Ethernet`, `7990: 'slirp' 00:80:10:32:33:34` |
+| `ariadne` | `7990 Ethernet`, `'slirp' 00:60:30:32:33:34` |
+| `ariadne2`, `hydra`, `eb920`, `xsurf`, `xsurf100z2` | `Card 5: Z2 0x00e90000 64K IO NE2000` |
+| `xsurf100z3` | `Card 06: 'X-Surf-100 Z3'`, `NE2000: 'slirp' 52:54:05:32:33:34` |
+| `ne2000_pcmcia` | PCMCIA, NE2000 core, bound to slirp |
+
+The A2065 then passed the whole bring-up test: `netstack_test` 14 checks and 0
+failures, address 10.0.2.15 from DHCP, gateway 10.0.2.2, ICMP to the gateway,
+and `example.com` resolved to a real address through the host's own network.
+
+The other eight stopped at `FAIL netstack_startup() (0xFFFFFFFE)`, exit 20 —
+nothing could open the device, because no SANA-II driver was staged. That is
+not an Amiberry limitation and Amiberry does not improve it. The boards need no
+ROM (`ROMTYPE_NOT`, switched on with `:ENABLED`), but `ariadne.device`,
+`ariadne_ii.device`, `hydra.device`, `eb920.device`, `x-surf.device`,
+`x-surf-100.device` and `cnet.device` are third-party binaries this repository
+does not carry, exactly as `tools/sana2-stage.sh` says. The driver question is
+the CI blocker for eight of the nine cards, it is the same blocker on
+winbuilder, and moving to Linux does not touch it.
+
+### 76.4 The harness contract, and the one thing missing from it
+
+`tools/fsuae-run.sh` needs a generated config, a directory hard drive as `DH0:`,
+serial captured to a file, a `s/Startup-Sequence` that writes `DH0:.done`, host
+polling, and raw config-line injection. All of it maps except serial.
+
+| need | FS-UAE | Amiberry |
+| --- | --- | --- |
+| directory HD | `hard_drive_0` + `hard_drive_0_label` | `uaehf0=dir,rw,DH0:DH0:<path>,0` |
+| kickstart | `kickstart_file`, `kickstart_ext_file` | `kickstart_rom_file`, `kickstart_ext_rom_file` |
+| model | `amiga_model=A1200` | `quickstart=A1200,0` |
+| fast RAM | `fast_memory=8192` (KB) | `fastmem_size=8` (MB) |
+| no window | `SDL_VIDEODRIVER=dummy`, which fails | `headless=true`, `use_gui=no` |
+| raw injection | `AMINETXDUO_FSUAE_EXTRA` appends lines | appended lines, or `-s key=value` on the command line |
+| board | `network_card` + `uae_a2065` | `<board>_rom_file` + `<board>_rom_options`, i.e. WinUAE's |
+
+Guest writes to `DH0:` land on the host directly, so `.done` and `stdout.txt`
+work unchanged, and `-s` reaches the config parser (`-s fastmem_size=16` was
+rejected with `Unsupported fastmem size 16777216`, which is the parser talking).
+
+Serial is the gap. `openser()` in `osdep/amiberry_serial.cpp` accepts a `TCP:`
+or `tcp://` URI, a libserialport port name, `INTERNAL_SERIAL` or
+`LOOPBACK_SERIAL`. A plain file path is not among them, so FS-UAE's
+`serial_port = build/serial.log` has no equivalent. The replacement is a
+listening socket:
+
+```
+serial_port=tcp://127.0.0.1:7777/wait
+```
+
+`/wait` blocks the emulator until something connects, so nothing is lost to a
+startup race, and `nc 127.0.0.1 7777 > serial.log` is the whole host side. It
+was verified to carry both AROS's own boot output and our `ami_log()` lines —
+`[WARN] tick: timer.device unit 1 woke at 23.80 Hz` came through it. This is a
+few lines of shell, not a redesign.
+
+### 76.5 Four at once, and what they share
+
+Four concurrent runs of the A2065 bring-up test all passed with 14 checks and
+each took its own 10.0.2.15 lease, in 9.66 seconds wall against 9.46 for one
+alone. FS-UAE needs a per-run `base_dir` and the two-lane lock in
+`tools/fsuae-run.sh` to survive that, and none of it was needed here.
+
+Two shared things are still worth watching before trusting a nine-way matrix:
+Amiberry opens one `/run/user/1000/amiberry.sock` for its IPC, and it logged
+`Found already existing serial port shared memory` on a run that had never
+asked for `INTERNAL_SERIAL`. Neither caused a failure in four-way testing; both
+are single-name resources, so nine-way should be measured rather than assumed.
+
+### 76.6 Speed, and an FS-UAE result that is not about speed
+
+On the trivial boot Amiberry is slower: 4.43 seconds against 3.22, consistent
+across three runs each. Roughly a second of fixed startup, which a nightly
+matrix multiplies by nine and can afford.
+
+On the bring-up test the figures are 9.46 seconds against 114.1, and that is
+not a throughput measurement. FS-UAE never got a DHCP lease: it fell back to
+RFC 3927, came up on 169.254.78.15 with no gateway, skipped the wire test, and
+failed the DNS lookup — 11 checks where Amiberry reported 13 — and the missing
+100 seconds is the DHCP timeout plus the AutoIP fallback. This reproduced under
+this repository's own unmodified `tests/netstack/run-fsuae.sh` (1m55s,
+169.254.78.15), so it is not an artefact of a config written for this
+investigation.
+
+playhouse2 carries Debian's FS-UAE 3.1.66, older than the 3.2.35 this project
+measures on macOS, so the cause may be the version or the packaging rather than
+FS-UAE on Linux generally. That was not chased. What it means for the decision
+is narrower and still holds: on the Linux host CI actually uses, the A2065 on
+SLIRP does not reach a network under FS-UAE today, and does under Amiberry.
+
+### 76.7 What could not be tested here
+
+The bridged backends. playhouse2 is an LXC container with no `/dev/net/tun`,
+and sudo there is limited to `apt`, `apt-get` and `perf`, so neither pcap
+(`CAP_NET_RAW`) nor TAP (`CAP_NET_ADMIN`) could be opened. That 76.2's dispatch
+is shared is read from the code and is not in doubt; that a bridged capture
+works for an Ariadne II on a Linux CI runner is not yet measured.
+
+One behaviour found while trying: `netmode=eth0`, naming a host interface that
+could not be opened, did not fail. `ethernet_getselectionname()` returns
+`slirp` for any index it cannot match, so the run silently came up on SLIRP and
+passed with a 10.0.2.15 lease. A harness that offers bridged mode must assert
+the backend from the emulator log, or it will report a bridged pass that was
+never bridged.
+
+### 76.8 Recommendation
+
+Pursue it. Amiberry is WinUAE's core, it runs genuinely headless on Linux with
+one config line, all nine boards instantiate and bind their backend, the A2065
+passes the bring-up test end to end, four runs go in parallel without the
+locking FS-UAE needs, and the config keys for the boards are WinUAE's own — so
+`tools/winuae-run.sh`'s board table is the port, not a rewrite. The only new
+code the harness needs is a socket instead of a file for serial.
+
+It does not, however, deliver the nine-card matrix by itself. Eight of the nine
+cards are blocked on third-party SANA-II drivers that are missing on Linux for
+the same reason they are missing on winbuilder, and until that is solved the
+nightly tier is one card wide. What Amiberry buys immediately is that the tier
+can exist at all on the machine CI already owns, and that the A2065 leg of it
+actually reaches a network — which, on this host, the current emulator does not.
