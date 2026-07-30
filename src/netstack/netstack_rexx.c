@@ -387,11 +387,24 @@ static VOID ami_rx_service(struct RexxMsg *rmsg)
  * unchanged: rm_Result1 lies past the end of a plain struct Message, so writing
  * it would scribble on the sender.
  */
-static VOID ami_rx_drain(BOOL closing)
+/*
+ * The port is a parameter, not read from ami_rx_port: the closing drain runs
+ * after RemPort() has already cleared the global, so reading it there was
+ * GetMsg(NULL) -- two Enforcer hits (a NULL MsgPort's mp_MsgList is at offset
+ * 0x14, and then through the head at 0), and worse, the drain that is supposed
+ * to answer whatever arrived between RemPort() and here answered nothing. A
+ * sender that got its message in during that window waited for a reply that
+ * never came, which is the hang the header comment says this code exists to
+ * prevent. Found by tests/stack under Enforcer.
+ */
+static VOID ami_rx_drain(struct MsgPort *port, BOOL closing)
 {
     struct Message *msg;
 
-    while ((msg = GetMsg(ami_rx_port)) != NULL)
+    if (port == NULL)
+        return;
+
+    while ((msg = GetMsg(port)) != NULL)
     {
         if (ami_rx_rexxbase == NULL || !IsRexxMsg((struct RexxMsg *)msg))
         {
@@ -482,7 +495,7 @@ static VOID ami_rx_main(VOID)
     {
         ULONG sigs = Wait(portmask | SIGBREAKF_CTRL_C);
 
-        ami_rx_drain(FALSE);
+        ami_rx_drain(port, FALSE);
 
         if ((sigs & SIGBREAKF_CTRL_C) != 0)
             running = FALSE;
@@ -497,7 +510,7 @@ static VOID ami_rx_main(VOID)
     ami_rx_port = NULL;
     Permit();
 
-    ami_rx_drain(TRUE);
+    ami_rx_drain(port, TRUE);
 
     DeleteMsgPort(port);
 
