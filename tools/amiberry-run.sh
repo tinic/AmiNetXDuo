@@ -97,6 +97,14 @@ fi
 
 KICKSTART="${AMINETXDUO_KICKSTART:-}"
 KICKSTART_EXT="${AMINETXDUO_KICKSTART_EXT:-}"
+
+# quickstart=A3000 selects the machine, not the ROM, so an A1200 Kickstart
+# boots on A3000 hardware and the mismatch shows up later as a device that
+# will not open.  AMINETXDUO_KICKSTART_A3000 is what the asset store exports
+# for exactly this.
+if [ "$MODEL" = A3000 ] && [ -n "${AMINETXDUO_KICKSTART_A3000:-}" ]; then
+    KICKSTART="$AMINETXDUO_KICKSTART_A3000"
+fi
 [ -n "$KICKSTART" ] && [ -f "$KICKSTART" ] || {
     cat >&2 <<'EOF'
 No boot ROM.  Either:
