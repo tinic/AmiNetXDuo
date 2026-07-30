@@ -16,13 +16,14 @@
 #
 #   toolchain    resolve, or download, the pinned m68k-amigaos-gcc
 #   host         the parser / mbuf / BPF VM / crypto68k vector tests, ctest
+#   host32       the mDNS fuzz driver, which needs a 32-bit build to run in
 #   cross        every build configuration, warnings fatal
 #   analyze      GCC -fanalyzer over our own sources vs a triaged baseline
 #   conformance  build the bsdsocktest suite for m68k (running it needs tier 2)
 #   emulator     tier 2 -- boots FS-UAE, needs a ROM
 #
-# `tools/ci.sh` with no arguments runs toolchain, host, cross, analyze and
-# conformance: everything that needs neither an emulator nor a licensed ROM.
+# `tools/ci.sh` with no arguments runs toolchain, host, host32, cross, analyze
+# and conformance: everything that needs neither an emulator nor a licensed ROM.
 #
 # ENVIRONMENT
 #
@@ -162,6 +163,41 @@ stage_host() {
         fail "only $n tests registered, expected at least ${#HOST_TEST_TARGETS[@]}"
         return 1
     fi
+}
+
+# --------------------------------------------------------------- host32 ----
+
+# The mDNS fuzz driver, which needs a 32-bit host: NetX Duo's mDNS cache keeps
+# pointers in ULONG slots, so it is only coherent where sizeof(void*) == 4.
+# That parser reads unauthenticated multicast, which makes it worth a build of
+# its own rather than leaving it unexercised.
+stage_host32() {
+    hr "host tests (32-bit: mDNS fuzz)"
+
+    if ! (echo 'int main(void){return 0;}' > "$BUILD/m32probe.c" &&
+          "${CC:-cc}" -m32 "$BUILD/m32probe.c" -o "$BUILD/m32probe") 2>/dev/null; then
+        note "no -m32 on this host (needs gcc-multilib on Debian/Ubuntu) -- skipped"
+        return 0
+    fi
+
+    cmake -S . -B "$BUILD/host32" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_FLAGS=-m32 -DCMAKE_CXX_FLAGS=-m32 -DCMAKE_EXE_LINKER_FLAGS=-m32 \
+        > "$BUILD/host32-configure.log" 2>&1 || {
+            tail -30 "$BUILD/host32-configure.log"; fail "host32 configure"; return 1; }
+
+    cmake --build "$BUILD/host32" --parallel "$JOBS" --target fuzz_mdns \
+        || { fail "host32 build"; return 1; }
+
+    ( cd "$BUILD/host32" && ctest --output-on-failure -R mdns ) \
+        || { fail "host32 ctest"; return 1; }
+
+    # A 64-bit build registers no mDNS tests at all, so an empty run here would
+    # otherwise pass as a green stage that tested nothing.
+    local n
+    n=$( (cd "$BUILD/host32" && ctest -N -R mdns 2>/dev/null | sed -n 's/^Total Tests: //p') )
+    note "$n mDNS test(s) registered"
+    [ "${n:-0}" -ge 2 ] || { fail "host32 registered $n mDNS tests, expected 2"; return 1; }
 }
 
 # ----------------------------------------------------------------- cross ----
@@ -327,7 +363,7 @@ stage_emulator() {
 mkdir -p "$BUILD"
 
 WANT=("$@")
-[ ${#WANT[@]} -gt 0 ] || WANT=(host cross analyze conformance)
+[ ${#WANT[@]} -gt 0 ] || WANT=(host host32 cross analyze conformance)
 
 stage_submodules
 
@@ -342,6 +378,7 @@ for s in "${WANT[@]}"; do
     case "$s" in
         toolchain)   [ -n "${AMIGA_TOOLCHAIN_ROOT:-}" ] || stage_toolchain ;;
         host)        stage_host || true ;;
+        host32)      stage_host32 || true ;;
         cross)       stage_cross ;;
         analyze)     stage_analyze || true ;;
         conformance) stage_conformance || true ;;

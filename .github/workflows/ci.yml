@@ -93,8 +93,16 @@ jobs:
           echo "AMIGA_TOOLCHAIN_ROOT=$AMIGA_TOOLCHAIN_ROOT" >> "$GITHUB_ENV"
           "$AMIGA_GCC" --version | head -1
 
+      # gcc-multilib is for the host32 stage alone: the mDNS fuzz driver only
+      # runs where sizeof(void*) == 4. Without it that stage skips itself and
+      # the parser goes untested, which is a silent gap rather than a red build.
+      - name: 32-bit host libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-multilib
+
       - name: tools/ci.sh
-        run: tools/ci.sh host cross analyze conformance
+        run: tools/ci.sh host host32 cross analyze conformance
 
       # The logs are where a failure is diagnosed, and they are the only thing
       # that survives the runner.

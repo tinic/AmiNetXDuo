@@ -198,16 +198,25 @@ add_test(NAME fuzz_config_sweep
 # sharing them with four netdb files.
 add_test(NAME fuzz_dnssd_sweep
          COMMAND fuzz_config -s -r 3 ${AMINETXDUO_FUZZ_CASES})
-# fuzz_mdns is built but deliberately NOT registered: NetX Duo's mDNS cache
-# stores pointers in single ULONG slots, so it is only coherent when
-# sizeof(void*) == sizeof(ULONG) == 4 and it spins inside nx_mdns_enable() on
-# a 64-bit host. Register it when there is a -m32 build to run it in.
 add_test(NAME fuzz_dns_sweep
          COMMAND fuzz_dns -r 1 ${AMINETXDUO_FUZZ_CASES})
 
 add_test(NAME fuzz_bpf_sweep
          COMMAND fuzz_bpf -r 1 ${AMINETXDUO_FUZZ_CASES})
 
+# fuzz_mdns only runs in a 32-bit build. NetX Duo's mDNS cache stores pointers
+# in single ULONG slots, so it is coherent only where sizeof(void*) == 4; on a
+# 64-bit host it spins inside nx_mdns_enable() before a datagram arrives.
+# tools/ci.sh host32 configures that build; `cmake -DCMAKE_C_FLAGS=-m32` by
+# hand does the same.
+if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    add_test(NAME fuzz_mdns_seeds
+             COMMAND fuzz_mdns -s)
+    add_test(NAME fuzz_mdns_sweep
+             COMMAND fuzz_mdns -r 1 ${AMINETXDUO_FUZZ_CASES})
+    set_tests_properties(fuzz_mdns_sweep PROPERTIES TIMEOUT 1800)
+endif()
+
 # A soak set by AMINETXDUO_FUZZ_CASES needs longer than ctest's default.
-set_tests_properties(fuzz_config_sweep fuzz_dnssd_sweep fuzz_bpf_sweep
-                     PROPERTIES TIMEOUT 1800)
+set_tests_properties(fuzz_config_sweep fuzz_dnssd_sweep fuzz_dns_sweep
+                     fuzz_bpf_sweep PROPERTIES TIMEOUT 1800)
