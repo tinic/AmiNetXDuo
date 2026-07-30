@@ -172,6 +172,12 @@ typedef struct TX_AMIGA_TICK_STATS_STRUCT
     ULONG   tx_amiga_tick_lost;             /* ticks dropped by those clips   */
     ULONG   tx_amiga_tick_service_us;       /* total time IN the task, us     */
     ULONG   tx_amiga_tick_uptime_ms;        /* E-Clock ms since the tick began*/
+    /* The worst stall ever seen, kept because only the first few are logged
+       and a machine that then freezes never flushes the log anyway. A priority
+       20 task not dispatched for this long, next to a service cost in the
+       hundreds of microseconds, means something else held the machine. */
+    ULONG   tx_amiga_tick_worst_stall_ms;
+    ULONG   tx_amiga_tick_worst_service_us;
 } TX_AMIGA_TICK_STATS;
 
 VOID    tx_amiga_tick_stats(TX_AMIGA_TICK_STATS *stats);
