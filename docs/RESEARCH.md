@@ -14830,8 +14830,39 @@ and it silently destroys the version tag — which is why
 `cmake/check-version-tag.cmake` exists. That guard caught it within a minute.
 
 **`-flto` is the one to revisit.** It is the only mechanism that acts before
-section assignment, and it is a toolchain limitation rather than a target one,
-so a future image with the plugin would make all of this moot.
+section assignment.
+
+**Corrected 2026-07-30: it is a TARGET limitation, not a toolchain one, and a
+future image will not fix it.** A custom bebbo `amiga16.1` toolchain was built
+with `--disable-plugins` removed. Result: `liblto_plugin.so` installed, `ld`
+with plugin support compiled in, and the plugin symlinked into
+`/opt/amiga/lib/bfd-plugins` where `ld` auto-loads it -- and the error is
+byte-identical, `plugin needed to handle lto object`.
+
+The reason is the object format. `m68k-amigaos-objdump -f` reports **`file
+format amiga`** for both plain and `-flto` objects, and the plugin's
+`claim_file` handler reaches libiberty's `simple-object`, which implements ELF,
+COFF, Mach-O and XCOFF. There is no hunk backend, so the plugin loads, declines
+to claim, and `ld` reports the same thing with the plugin sitting right there.
+That is also why bebbo's Makefile guards `--disable-plugins` behind
+`ifneq (m68k-elf,$(TARGET))`.
+
+Two failure modes, one cause: the commands fail loudly because `crt0.o` is a
+real object demanding `main` and `main` exists only as IR; `bsdsocket.library`
+fails **silently** because it links `-nostartfiles`, so nothing demands
+anything and `ld` emits a structurally valid hunk file of symbols and IR with
+no code -- 1,089,004 bytes that `strip --strip-unneeded` reduces to 196.
+
+Enabling it would need a hunk backend in libiberty `simple-object`, which
+serves both the plugin claim path and `lto1`'s section read-back. Before that
+is worth attempting, note that every LVO here is declared
+`register ULONG x __asm("d0")` and that register assignment IS the ABI:
+whether GCC preserves it through IR streaming and repartitioning on this
+backend is unproven, and a silent violation links cleanly and returns garbage.
+
+`-fwhole-program` on a per-image unity build reaches the same
+pre-section-assignment DCE on the stock pinned toolchain, which is the cheaper
+route to what 46.1 is actually about.
 
 ### 46.3 What was done instead
 
