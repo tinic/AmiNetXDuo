@@ -214,6 +214,14 @@ VOID ami_netstack_ipv6_configure(AmiNetStack *ns);
 VOID ami_netstack_baton_release(VOID);
 VOID ami_netstack_baton_acquire(VOID);
 
+/*
+ * The public anchor for the baton counters and the tick task's, published for
+ * as long as the stack is up. netstack_baton.c, and
+ * include/aminetxduo/health.h for what reads it.
+ */
+VOID ami_netstack_health_publish(VOID);
+VOID ami_netstack_health_unpublish(VOID);
+
 /* ---------------------------------------------------------- adoption glue --
  *
  * AmiNetCaller / ami_netstack_enter() / ami_netstack_leave() are public; they
