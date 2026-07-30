@@ -20793,3 +20793,271 @@ from `dropbear` and nobody knows why yet. A conformance case that sends more
 than one window in one call on an interface whose MSS exceeds it — the suite has
 no such case, which is why the livelock survived every green run. And the
 megabyte: it is measured four different ways and its cause is not named.
+
+**§78 names both defects and corrects this section on two points.** The megabyte
+is not one leak but three costs, none of them where 77.5 looked, and the server
+process it attributes them to was never exiting — so the per-primitive server
+table it is owed was never going to print either. `NX_CALLER_ERROR` is not
+confined to the calls that reported it: the same defect let two Exec Tasks into
+NetX Duo at once for every call that did *not* report it, which is where 77.7's
+wedges and 77.3's throughput went.
+
+## 78. The two defects §77 named, found (2026-07-30)
+
+§77 left phase 3 two repairs and an order to do them in: a megabyte per login
+that nobody had located, and `NX_CALLER_ERROR` on a 44-byte write. Both are
+found here and **neither is what §77 guessed**.
+
+**A login now costs zero bytes.** The megabyte was three things, and only the
+first two are leaks in the ordinary sense: 262,144 bytes of `StackSwap()` stack
+that `exit()` skipped the `FreeMem()` for, 2,776 bytes of `bsdsocket.library`
+base that was never closed because **this toolchain's `exit()` does not run
+`atexit()` handlers at all**, and 1,209,256 bytes that were not leaked but held
+— the live footprint of a `dropbear` server that never terminated, because the
+client that had just disconnected never closed its socket, so the server sat
+waiting for a `FIN` that was never going to arrive. One missing `CloseLibrary()`
+is the second and the third.
+
+**`NX_CALLER_ERROR` is two lines, and it is not a race, not contention and not
+in the Dropbear port.** `ami_netstack_enter()` asked `tx_thread_identify()`
+whether the caller was already inside the bracket. That returns
+`_tx_thread_current_ptr`, which in this port is a **global baton** and not a
+per-caller answer, so any task arriving while somebody else held it read
+"already a thread", skipped adoption, and entered NetX Duo **without ever
+acquiring the baton**. Three of three loopback logins now succeed where none
+did, and loopback TCP went from 401 to **517 KB/s**: the sender had been racing
+the IP thread all along.
+
+### 78.1 The 262,144 bytes: `exit()` is not `return`
+
+`clients/compat/amiga_argv.c` runs a ported client on a 256 KB stack of its own
+and frees it after `__real_main()` returns. Its own header says the thing that
+makes that unreachable — "a client that ends by calling `exit()` rather than
+returning from `main()` -- **Dropbear always** -- never comes back to
+`argv_run_on_stack()`" — and the `FreeMem()` sits below that call anyway.
+
+`AvailMem` around runs of `dbclient -V`, which opens no socket and so isolates
+the process from everything else:
+
+| | total | Δ |
+|---|---:|---:|
+| after `AddNetInterface`, nothing else | 8,744,256 | |
+| after one pre-fix `dbclient -V` | 8,476,912 | **−267,344** |
+| after a second | 8,214,768 | **−262,144** |
+| after a fixed `dbclient -V` | 8,214,768 | **0** |
+| after a second | 8,214,768 | **0** |
+| after a third | 8,214,768 | **0** |
+
+262,144 is `AMIGA_ARGV_STACK` exactly; the first one costs 5,200 more because it
+is also the first time that process grows its heap. This is §77.5's "268 KB per
+client-only connection", on a binary that never reaches the network.
+
+**The repair is `setjmp()`, and the obvious repair does not work.**
+`StackSwap()` cannot get a caller back off the swapped stack from inside
+`exit()`: it moves its own return address onto the stack it swaps to, and every
+frame between an `exit()` call site and the shim lives on the stack being
+abandoned. `__wrap_main()`'s frame does not — it is on the caller's stack, live
+the whole way down — so a jump target armed there before the first swap is
+reachable from anywhere inside the client. `exit()` restores the task's stack
+bounds, `longjmp()`s to it, frees the stack as an ordinary allocation and
+returns the status from `__wrap_main()`; the crt0 then calls its own `__exit()`
+exactly as it does for a client that returned from `main()`, with the same exit
+list in the same order. `exit()` becomes `return`, which is what it means.
+
+Only the task that swapped may jump. A client that started Processes of its own
+out of the same code image — Dropbear's console reader does — has their `exit()`
+fall through to `__real_exit()` as before.
+
+### 78.2 `atexit()` never runs, and it was holding a socket open
+
+Probing every step rather than every cycle separates the remaining costs.
+`&SYS:dropbear` is asynchronous, so the probe after it measures a listening
+server with nothing connected yet; a client refused on a closed port measures a
+process that opened the library, made a socket and had no session:
+
+| | total | largest | Δ total |
+|---|---:|---:|---:|
+| after `AddNetInterface` | 8,744,256 | 6,573,176 | |
+| a client refused | 8,736,280 | 6,048,880 | −7,976 |
+| the same again | 8,733,504 | 6,048,880 | **−2,776** |
+| **`dropbear` listening, nothing connected** | **7,524,248** | 4,917,368 | **−1,209,256** |
+| a whole session, both ends done | 7,521,472 | 4,917,368 | −2,776 |
+| **a second `dropbear` listening** | **6,312,216** | 3,785,856 | **−1,209,256** |
+| its session, both ends done | 6,309,440 | 3,785,856 | −2,776 |
+
+1,209,256 + 2,776 = 1,212,032, which is exactly what a three-cycle run lost per
+cycle, three times over, to the byte. The arithmetic closes, so those are the
+only two terms.
+
+**2,776 is one `bsdsocket.library` child base and what hangs off it, and the
+reason it leaked invalidates a mechanism several things in this tree rely on.**
+`amiga_dropbear.c` closed the library from an `atexit()` handler. **On this
+toolchain an `atexit()` handler in a linked client never runs.** `crt0.o` defines
+`_exit`, `__exit` and `exit` as one symbol at one address, so libc's own
+`exit.o` is never pulled into the link, and all that symbol does is walk
+`__EXIT_LIST__`. Nothing in `libc.a` puts `__call_exitprocs()` on that list — the
+three entries are `__exitcommandline`, `__exit_fh` and malloc's `__free_all`,
+which is why the heap does come back. `__attribute__((destructor))` does run; it
+is what makes `dbprofile.c`'s report appear, and `dbprofile.c` arms both and
+calls them "idempotent" without noticing that only one of them ever fires.
+
+**The bytes were the smallest part of it.** With no `CloseLibrary()` the library
+never runs `bsd_child_destroy()`, so the base, its descriptor table, every socket
+the process opened and its cached ThreadX registration all outlive the process —
+the last of those pointing at a dead task's stack, which is the hazard
+`port/threadx-amiga/inc/tx_amiga.h` warns about in as many words. And one of
+those sockets is the SSH connection, which brings us to the megabyte.
+
+### 78.3 The 1,209,256 bytes: the server was waiting for a FIN nobody sent
+
+1,209,256 is not an allocation to reclaim. It is what a live `dropbear` on this
+machine *is*: a 512 KB process stack from `ClientRun`, the 256 KB swapped stack,
+a 411 KB segment and a heap. **The defect was that it was still there.**
+
+`DEBUG_NOFORK` means one connection and then exit, and `AvailMem` said otherwise
+three ways: the server's memory never returned, `largest` did not move by a byte
+across a whole session, and a second server cost the same 1,209,256 again rather
+than reusing the first's. Its log stopped at `amiga: running '<command>'` and
+never reached `svr_dropbear_exit()`, so it was parked *after* all the work — the
+client collected the output and the exit status and returned 0 in 22.5 s — and
+before the exit.
+
+**It was parked in `svr_remoteclosed()`'s absence.** `dbclient` exited without
+`CloseLibrary()` (§78.2), so `bsd_close_all()` never ran and the client's TCP
+connection was never torn down. No `FIN` reached the server. Dropbear's session
+loop calls `svr_remoteclosed()` "when the remote side closes the connection", and
+that is the only path to `dropbear_close("Exited normally")` for a session that
+ends cleanly. The remote side had gone without closing anything, so the server
+waited for it, holding 1.2 MB, until the machine ran out of logins.
+
+Fixing §78.2 fixes this. Same command list, three connections to one port:
+
+| | total | largest |
+|---|---:|---:|
+| after `AddNetInterface` | 8,744,256 | 6,573,176 |
+| a client refused | 8,739,056 | 6,048,880 |
+| refused again | 8,739,056 | 6,048,880 |
+| and again | 8,739,056 | 6,048,880 |
+| `dropbear` listening | 7,530,360 | 5,179,808 |
+| **a full session, both ends done** | **8,739,056** | **6,048,880** |
+| the same port again — `rc 1`, refused | 8,739,056 | 6,048,880 |
+| and again — `rc 1` | 8,739,056 | 6,048,880 |
+
+**Every byte comes back, `largest` included, and the server is gone**: the two
+later attempts on the same port are refused, which is `DEBUG_NOFORK` behaving as
+`clients/dropbear/build.sh` always said it did. The server's own log now ends
+`Exit (amiga) from <127.0.0.1:61718>: Exited normally`. Six probes across a
+login read the same two numbers.
+
+§77.9 called the megabyte disqualifying and it was right to. It is gone, and
+none of the three parts of it was where §77.5 looked.
+
+### 78.4 `NX_CALLER_ERROR`: one baton, read as though there were many
+
+`_tx_thread_current_ptr` is ThreadX's "currently running thread". On a target
+that is a per-CPU fact. In this port it is **the baton**: one global pointer
+naming the single Exec Task allowed inside ThreadX at all
+(`port/threadx-amiga/src/tx_amiga_adopt.c`). Those are not the same thing, and
+`tx_thread_identify()` returns the second while every caller reads it as the
+first.
+
+`ami_netstack_enter()` and `ami_netstack_enter_cached()` both opened with
+
+```c
+    if (tx_thread_identify() != TX_NULL)
+        return AMI_NET_OK;                  /* nested */
+```
+
+which is right for a task genuinely re-entering its own bracket and wrong for
+everything else. When `dbclient` held the baton and `dropbear` called
+`accept()`, the server read "already a thread", **skipped
+`tx_amiga_adopt_thread()` altogether** and made its NetX Duo call as a plain Exec
+Task. `nc_Live` was never set either, so the server's base never acquired a
+cached thread and repeated the mistake on every call for as long as the client
+was busy — which, during a key exchange, is always.
+
+**Every status-17 line in §77.6 is this, and so is §40.9's.** The generic caller
+check could only sometimes tell: `_tx_thread_current_ptr` was non-`NULL`, so it
+passed the call through, and only the calls whose timing left the pointer `NULL`
+or the system state raised came back `NX_CALLER_ERROR`. The 44-byte write, the
+`relisten()`, the `socket_delete()` and `Error writing: Invalid argument` are one
+defect with an intermittent symptom. **The rest of the time it did not fail. It
+ran two Exec Tasks inside NetX Duo at once**, which is the state the baton
+exists to prevent, and that explains §77.7's three wedged key exchanges and
+§40.9's "one run in three" better than either section managed.
+
+**It was never only a two-process problem, and that is where the throughput
+went.** The IP thread holds the baton constantly during a transfer, so a
+*single* process sending on loopback also read "already a thread" and ran
+unbracketed alongside it. The conformance suite's own sender had been doing that
+on every green run since the bracket was written.
+
+**The caller check is now the port's own question.**
+`NX_THREADS_ONLY_CALLER_CHECKING` asked
+`_tx_thread_system_state == 0 && _tx_thread_current_ptr != NULL`; it now asks
+`tx_amiga_caller_is_thread()` — is the *calling* Task the baton holder. That is
+strictly more accurate here and it rejects everything the generic form rejected:
+the tick task, the scheduler task and any Task ThreadX never adopted all fail it,
+because none of them backs `_tx_thread_current_ptr`. It also stops one task
+failing another's check, because `_tx_thread_system_state` is a single global
+counter that the port raises around `_tx_thread_terminate()` /
+`_tx_thread_delete()` with task switching enabled — it has to, the reaper
+underneath can `Wait()`. `tx_amiga_adopt_resume()` and
+`tx_amiga_adopt_suspend()` now keep the core lock across their own raised window
+instead of dropping it, which closes the frequent half of that for the two checks
+that still read the counter; nothing under `_tx_thread_suspend()` or
+`_tx_thread_resume()` can `Wait()` while it is raised, because every
+`_tx_thread_system_return()` in both vendor files is behind
+`TX_THREAD_SYSTEM_RETURN_CHECK`, which tests exactly that counter.
+
+**Before and after, same command list, same 14 MHz A1200, three loopback
+logins:**
+
+| | before | after |
+|---|---|---|
+| `Child connection from` | `0.0.0.0:0` | `127.0.0.1:52429` |
+| sessions completed | 0 of 3 | **3 of 3** |
+| serial-log warnings | 4, including the fatal send | **0** |
+| handshake | — | 22.54 / 24.56 / 22.46 s |
+| `SSHProbe bulk 32` | — | 512 lines, byte-exact |
+
+`0.0.0.0:0` is the same defect in the same line of log:
+`nx_tcp_socket_peer_info_get()` is on the thread-only list too, so the server
+never learnt who had connected to it. The three handshake figures reproduce
+§77.2's 22.0 s, so nothing here bought its correctness with latency.
+
+**And the conformance tier, which is the number §77.6 warned would hide a
+regression:**
+
+| | §77.6 | here |
+|---|---:|---:|
+| TCP loopback | 401 KB/s | **517 KB/s** |
+| TCP sustained loopback | 403 KB/s | **518 KB/s** |
+| loopback tier | 130 / 0 / 12 | **130 / 0 / 12** |
+
+Ten sustained segments between 500 and 546 KB/s, so it is not one lucky run, and
+all twelve skips are `host helper not connected` — the bridged tier, as always.
+**+29%**, and the direction is the argument: a sender that stops racing the IP
+thread for its own socket goes faster. The two figures were not taken in one
+session, so treat the size of the gap as approximate and the sign as solid.
+
+### 78.5 What phase 4 starts on
+
+**`scp` is not built, and the blocker is one thing.** Dropbear vendors OpenSSH's
+`scp.c` (`third_party/dropbear/src/scp.c`), so the server side of both directions
+is `scp -t` for a sink and `scp -f` for a source, each talking the SCP protocol
+over its own stdin and stdout. `__wrap_spawn_command()` cannot host that:
+it runs the command through `SystemTagList()` **synchronously**, hands it `NIL:`
+for stdin and reads its stdout back out of a `T:` file **after** it has exited
+(`clients/dropbear/amiga_dropbear.c`). SCP is a strict request/response
+ping-pong, so it needs both handles live and the command running alongside
+Dropbear's main loop. Both directions block on the same thing, so there is no
+cheap one-way win.
+
+The shape of the fix is already in this tree and proven:
+`src/bsdsocket/tcp_handler.c` is a Process that answers `ACTION_READ` /
+`ACTION_WRITE` / `ACTION_END` on a `struct FileHandle` whose `fh_Type` points at
+its own `MsgPort`. A pipe for a spawned command is the same object with a ring
+buffer behind it instead of a socket, it needs no `PIPE:` mount on the boot
+volume, and it makes every interactive command work over a channel rather than
+only `scp`.
