@@ -30,6 +30,10 @@
 
 name: Emulator
 
+# Read-only: this tier boots an emulator and reports. It publishes nothing.
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
     inputs:
