@@ -27,7 +27,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 HERE="$ROOT/tests/netstack"
-MODEL=A1200
+MODEL=""
 TIMEOUT=0
 CPU=""
 BOARD=a2065
@@ -45,6 +45,17 @@ while getopts "m:t:c:b:N:B:" opt; do
         *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-b builddir] [-N board] [-B backend]" >&2; exit 2 ;;
     esac
 done
+
+# The board decides the machine when -m did not.  A Zorro III card in an A1200
+# is not a configuration that exists: the bus is not there, the card never
+# autoconfigs, and the run fails as netstack_startup() 0xFFFFFFFE -- which
+# reads exactly like a missing driver and is not one.
+if [ -z "$MODEL" ]; then
+    case "$BOARD" in
+        xsurf100z3) MODEL=A3000 ;;
+        *)          MODEL=A1200 ;;
+    esac
+fi
 
 # cnet.device dumps every PCMCIA CIS tuple it walks to the serial port -- about
 # 127,000 lines of it, since it reads attribute memory to the end and most of it
