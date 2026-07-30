@@ -143,9 +143,14 @@ stage_toolchain() {
     # nothing about CI, whose pinned NDK does not -- which is how v0.13.0 got
     # tagged on code that did not compile.  Warn rather than override: building
     # against what you have installed is usually what you want locally.
-    local pinned
+    # Resolved with pwd -P, because the pinned tree is normally reached through
+    # a `current` symlink: comparing the strings reports the pinned toolchain as
+    # not pinned, and a warning that fires when nothing is wrong gets ignored.
+    local pinned have
     pinned=$(tools/fetch-toolchain.sh --print-root 2>/dev/null || true)
-    if [ -n "$pinned" ] && [ "$AMIGA_TOOLCHAIN_ROOT" != "$pinned" ]; then
+    [ -d "$pinned" ] && pinned=$(cd "$pinned" && pwd -P)
+    have=$(cd "$AMIGA_TOOLCHAIN_ROOT" && pwd -P)
+    if [ -n "$pinned" ] && [ "$have" != "$pinned" ]; then
         note "NOT the pinned toolchain CI uses ($pinned)"
         note "  NDK header sets differ -- a green build here can still fail CI"
     fi
