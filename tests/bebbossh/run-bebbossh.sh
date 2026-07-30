@@ -3,12 +3,16 @@
 # BebboSSH against this stack, under FS-UAE.
 #
 #   tests/bebbossh/run-bebbossh.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#                                  [-k MHZ] [-x] [-C FILE]
+#                                  [-k MHZ] [-x] [-E] [-C FILE]
 #
 #   -x  take the emulator alone.  EVERY timing needs it: a transfer measured
 #       while another FS-UAE shares the host is fiction, and this project has
 #       already had one set of figures corrupted that way.
-#   -C  a command list to stage instead of the default six transfers.
+#   -C  a command list to stage instead of the default twelve transfers.
+#   -E  run under Enforcer + MungWall instead.  NOT A TIMING RUN: Enforcer
+#       needs an MMU, so tools/enforcer-run.sh boots a 68030 and FS-UAE turns
+#       cycle accounting off above a 68020.  Use it to ask whether BebboSSH
+#       touches memory it should not, and take the numbers from a plain -x run.
 #
 # WHY THIS EXISTS
 #
@@ -66,16 +70,18 @@ CLOCK=""
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 PERF=0
 COMMANDS=""
+ENFORCE=0
 
-while getopts "m:t:b:k:xC:" opt; do
+while getopts "m:t:b:k:xEC:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
         k) CLOCK="$OPTARG" ;;
         x) PERF=1 ;;
+        E) ENFORCE=1 ;;
         C) COMMANDS="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t secs] [-b builddir] [-k MHz] [-x] [-C file]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-m model] [-t secs] [-b builddir] [-k MHz] [-x] [-E] [-C file]" >&2; exit 2 ;;
     esac
 done
 
@@ -268,11 +274,22 @@ CPUARG=()
 [ -z "$CLOCK" ] || CPUARG+=(-k "$CLOCK")
 [ "$PERF" = "1" ] && CPUARG+=(-x)
 
+STAGED=("$STAGE/devs" "$STAGE/libs" "$STAGE/envarc" "$STAGE/up"
+        "$STAGE/bebboscp" "$STAGE/bebbossh"
+        "$STAGE/AddNetInterface" "$STAGE/id_ed25519" "$STAGE/commands.txt")
+
 set +e
-"$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" ${CPUARG[@]+"${CPUARG[@]}"} \
-    "$RUNNER" "$STAGE/devs" "$STAGE/libs" "$STAGE/envarc" "$STAGE/up" \
-    "$STAGE/bebboscp" "$STAGE/bebbossh" \
-    "$STAGE/AddNetInterface" "$STAGE/id_ed25519" "$STAGE/commands.txt"
+if [ "$ENFORCE" = "1" ]; then
+    # -m stacks MungWall under Enforcer, which is the order mungwall.doc
+    # requires.  The model argument is not passed on: enforcer-run.sh overrides
+    # the CPU to a 68030 because Enforcer WEDGES on a bare 68020 rather than
+    # saying it has no MMU.
+    "$ROOT/tools/enforcer-run.sh" -n -m -t "$TIMEOUT" -T "$TAG" \
+        "$RUNNER" "${STAGED[@]}"
+else
+    "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" ${CPUARG[@]+"${CPUARG[@]}"} \
+        "$RUNNER" "${STAGED[@]}"
+fi
 RC=$?
 set -e
 
