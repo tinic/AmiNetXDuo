@@ -31,7 +31,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
 MODEL="A1200"
-TIMEOUT=420
+TIMEOUT=900
 BUILD="build/ci/default"
 ENFORCE=0
 

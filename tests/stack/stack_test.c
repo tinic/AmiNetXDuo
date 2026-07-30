@@ -86,11 +86,13 @@
 #define ST_PHASES       11
 
 /*
- * Generous because the resolver calls are meant to fail and BSD_RESOLVE_TIMEOUT
- * is 30 s each (src/bsdsocket/resolver.c). Waiting one out is the point -- the
- * depth reached on the way to the timeout is the measurement.
+ * Generous because the resolver calls are meant to fail and each one waits out
+ * BSD_RESOLVE_TIMEOUT (src/bsdsocket/resolver.c). Waiting them out is the
+ * point -- the depth reached on the way to the timeout is the measurement --
+ * and under SLIRP a lookup with nowhere to go has been seen to take
+ * substantially longer than the 30 s nominal.
  */
-#define ST_TIMEOUT_TICKS (300 * 50)     /* 300 s at 50 ticks/s */
+#define ST_TIMEOUT_TICKS (600 * 50)     /* 600 s at 50 ticks/s */
 
 /* The signal the worker sends the parent when it is done. */
 #define ST_DONE_SIGNAL  SIGBREAKB_CTRL_F
@@ -480,14 +482,14 @@ static const char * const st_phase_name[ST_PHASES] =
 {
     "before OpenLibrary",
     "OpenLibrary + getdtablesize",
+    "socket/connect/getsockname",
+    "loopback send/WaitSelect/recv rounds",
     "gethostbyname localhost (hosts file, shallow)",
     "gethostbyname .invalid (DNS)",
     "gethostbyname .local (mDNS)",
-    "gethostbyaddr 192.0.2.1 (reverse DNS)",
     "getservbyname",
     "getaddrinfo .invalid",
-    "getnameinfo 192.0.2.1",
-    "loopback connect/send/WaitSelect/recv rounds",
+    "getnameinfo 192.0.2.1 (reverse DNS)",
     "CloseLibrary"
 };
 
@@ -729,71 +731,6 @@ static VOID st_worker_entry(VOID)
     st_check(s_getdtablesize(base) > 0, "getdtablesize", 0);
     st_phase(1);
 
-    /*
-     * The resolver first, and before any socket: measurement puts
-     * gethostbyname and its relatives at three times the depth of
-     * send/recv/WaitSelect, because they reach the DNS and mDNS clients and
-     * the DRBG under those.
-     *
-     * The names are chosen to MISS. "localhost" is answered out of
-     * DEVS:Internet/hosts before netstack_resolve() enters the bracket at all,
-     * so a run that only asked for that would report the shallow path and call
-     * it a pass. A name under .invalid (RFC 2606, guaranteed never to resolve)
-     * goes the whole way to the DNS client, and one under .local goes down the
-     * mDNS branch instead -- which is the deeper of the two.
-     *
-     * Failure is the expected answer and is not checked; the depth reached on
-     * the way to it is the measurement.
-     */
-    (VOID)s_gethostbyname(base, "localhost");
-    st_phase(2);
-    (VOID)s_gethostbyname(base, "no-such-host.invalid");
-    st_phase(3);
-    (VOID)s_gethostbyname(base, "no-such-host.local");
-    st_phase(4);
-    st_check(1, "gethostbyname reached the resolver three ways", 0);
-
-    {
-        UBYTE quad[4];
-
-        /* TEST-NET-1 (RFC 5737): routed nowhere, so the reverse lookup takes
-           the long way round rather than answering from the hosts file. */
-        quad[0] = 192; quad[1] = 0; quad[2] = 2; quad[3] = 1;
-        (VOID)s_gethostbyaddr(base, quad, 4, S_AF_INET);
-        st_phase(5);
-        st_check(1, "gethostbyaddr returned", 0);
-    }
-
-    (VOID)s_getservbyname(base, "telnet", "tcp");
-    st_phase(6);
-    st_check(1, "getservbyname returned", 0);
-
-    {
-        APTR list = NULL;
-
-        (VOID)s_getaddrinfo(base, "no-such-host.invalid", NULL, NULL, &list);
-        st_phase(7);
-        st_check(1, "getaddrinfo returned", 0);
-    }
-
-    {
-        char   host[64];
-        char   serv[16];
-        StAddr sa;
-
-        for (i = 0; i < sizeof(sa); i++)
-            ((UBYTE *)&sa)[i] = 0;
-        sa.sin_len    = (UBYTE)sizeof(sa);
-        sa.sin_family = S_AF_INET;
-        sa.sin_port   = (UWORD)23;
-        sa.sin_addr   = 0xC0000201UL;           /* 192.0.2.1 */
-
-        (VOID)s_getnameinfo(base, &sa, (LONG)sizeof(sa), host,
-                            (LONG)sizeof(host), serv, (LONG)sizeof(serv), 0);
-        st_phase(8);
-        st_check(1, "getnameinfo returned", 0);
-    }
-
     for (round = 0; round < ST_ROUNDS; round++)
     {
         UBYTE     buf[64];
@@ -827,6 +764,9 @@ static VOID st_worker_entry(VOID)
 
             (VOID)s_getsockname(base, fd, &sa, &len);
         }
+
+        if (round == 0)
+            st_phase(2);
 
         for (i = 0; i < sizeof(buf); i++)
             buf[i] = (UBYTE)(round + i);
@@ -863,10 +803,77 @@ static VOID st_worker_entry(VOID)
         (VOID)s_closesocket(base, fd);
     }
 
-    st_phase(9);
-
     st_check(st_result.sr_Bytes > 0, "loopback round trips completed",
              st_result.sr_Bytes);
+
+    st_phase(3);
+
+    /*
+     * The resolver last, because it is the part that can hang.
+     *
+     * These lookups are meant to MISS -- "localhost" is answered out of
+     * DEVS:Internet/hosts before netstack_resolve() enters the bracket at all,
+     * so a run that only asked for that would measure the shallow path and
+     * call it a pass. A name under .invalid (RFC 2606, guaranteed never to
+     * resolve) goes the whole way to the DNS client and one under .local goes
+     * down the mDNS branch, which is the deeper of the two. getnameinfo on an
+     * unroutable address (RFC 5737 TEST-NET-1) takes netstack_resolve_reverse
+     * the same way, and it is the deepest entry point measured.
+     *
+     * Failure is the expected answer; the depth reached on the way to it is
+     * the measurement. Each miss waits out BSD_RESOLVE_TIMEOUT, which is why
+     * this is minutes rather than seconds and why it runs after the loopback
+     * rounds instead of before them -- a resolver that never comes back must
+     * not take the send/recv/WaitSelect figures with it.
+     */
+    (VOID)s_gethostbyname(base, "localhost");
+    st_phase(4);
+    (VOID)s_gethostbyname(base, "no-such-host.invalid");
+    st_phase(5);
+    (VOID)s_gethostbyname(base, "no-such-host.local");
+    st_phase(6);
+    st_check(1, "gethostbyname reached the resolver three ways", 0);
+
+    {
+        UBYTE quad[4];
+
+        /* 127.0.0.1, which DEVS:Internet/hosts answers: this is here for the
+           entry point's own frame, not for the resolver below it -- the deep
+           reverse path is getnameinfo's, and paying the timeout twice buys
+           nothing. */
+        quad[0] = 127; quad[1] = 0; quad[2] = 0; quad[3] = 1;
+        (VOID)s_gethostbyaddr(base, quad, 4, S_AF_INET);
+        st_check(1, "gethostbyaddr returned", 0);
+    }
+
+    (VOID)s_getservbyname(base, "telnet", "tcp");
+    st_phase(7);
+    st_check(1, "getservbyname returned", 0);
+
+    {
+        APTR list = NULL;
+
+        (VOID)s_getaddrinfo(base, "no-such-host.invalid", NULL, NULL, &list);
+        st_phase(8);
+        st_check(1, "getaddrinfo returned", 0);
+    }
+
+    {
+        char   host[64];
+        char   serv[16];
+
+        for (i = 0; i < sizeof(sa); i++)
+            ((UBYTE *)&sa)[i] = 0;
+        sa.sin_len    = (UBYTE)sizeof(sa);
+        sa.sin_family = S_AF_INET;
+        sa.sin_port   = (UWORD)23;
+        sa.sin_addr   = 0xC0000201UL;           /* 192.0.2.1 */
+
+        (VOID)s_getnameinfo(base, &sa, (LONG)sizeof(sa), host,
+                            (LONG)sizeof(host), serv, (LONG)sizeof(serv), 0);
+        st_phase(9);
+        st_check(1, "getnameinfo returned", 0);
+    }
 
     CloseLibrary(base);
     st_phase(10);
@@ -890,6 +897,7 @@ int main(int argc, char **argv)
 
     st_parent = FindTask(NULL);
     st_result.sr_Asked = ST_STACK;
+    st_result.sr_Phase = -1;            /* not even phase 0 yet */
 
     st_log("stack: the API from %lu bytes, which is the Shell default\n",
            (LONG)ST_STACK);
@@ -905,8 +913,22 @@ int main(int argc, char **argv)
     if (peer == NULL)
         return RETURN_FAIL;
 
-    /* The peer signals once it is listening, or once it has given up. */
-    Wait(ST_DONE_MASK);
+    /*
+     * The peer signals once it is listening, or once it has given up. Waited
+     * on with a bound rather than Wait(): a peer that died on the way would
+     * otherwise hang the whole harness with nothing printed, which is the one
+     * failure mode a test about crashes must not have.
+     */
+    while ((SetSignal(0UL, 0UL) & ST_DONE_MASK) == 0)
+    {
+        Delay(10);
+        waited += 10;
+
+        if (waited >= ST_TIMEOUT_TICKS)
+            break;
+    }
+    waited = 0;
+
     st_check(st_peer_port > 0, "the peer is listening", st_peer_port);
     if (st_peer_port <= 0)
     {

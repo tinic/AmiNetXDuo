@@ -94,7 +94,13 @@ static const char ami_rx_err_state[]    = "No active stack\n";
 #define RX_REPLYBUFLEN  255
 #define RX_CMDLEN       256
 
-#define RX_STACK        4096
+/*
+ * 8 KB, not 4 KB: the command handlers reach netstack_interface_*() and the
+ * resolver, whose worst chain the call graph puts at 948 bytes on top of a
+ * 256-byte command buffer and a 255-byte reply. That fits, but the margin was
+ * being spent on a saving nobody asked for.
+ */
+#define RX_STACK        8192
 #define RX_PRIORITY     0
 
 /* ----------------------------------------------------------------- state -- */
