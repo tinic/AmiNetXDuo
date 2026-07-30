@@ -20367,9 +20367,9 @@ costs in RAM. This is that measurement, on the emulated 14 MHz 68EC020, with
 
 **A login is 22.0 s with both halves on one CPU and 12.3 s for a client alone.
 An established channel moves 28 KB/s, two thirds of which is the cipher. A live
-session costs about 1.5 MB. The gate figure is the 28 KB/s: eight times slower
-than the 230 KB/s the same card does unencrypted, which is neither the 2× that
-would have been comfortable nor the 10× that would have settled it.**
+session costs about 1.5 MB. The gate figure is the 28 KB/s: 5.7× slower than the
+159 KB/s the same card does unencrypted on this profile, which is neither the 2×
+that would have been comfortable nor the 10× that would have settled it.**
 
 **Two things the measurement found rather than went looking for.** The server's
 channel write fails outright above one packet, so no bulk data has ever left
@@ -20430,13 +20430,20 @@ unrelated change later, which is the first thing worth saying about it.
 127.0.0.1` at 01:50:33 and `Pubkey auth succeeded` at 01:50:54, **21 s** between
 them.
 
-**The server's half is the client's half, and that is not a guess about the
-code.** Each end does two curve25519 scalar multiplications, one ed25519 sign
-and one ed25519 verify — the client signs its authentication and verifies the
-host key, the server signs the exchange hash and verifies the authentication.
-Same three rows, so ≈10.5 s, and 10.58 + 10.5 = 21.1 s is the 21 s the server
-logged. A server on this machine costs the same arithmetic as a client, and no
-more.
+**The server's half is the client's half.** Each end does two curve25519 scalar
+multiplications, one ed25519 sign and one ed25519 verify — the client signs its
+authentication and verifies the host key, the server signs the exchange hash and
+verifies the authentication. Same three rows, so ≈10.5 s, and 10.58 + 10.5 =
+21.1 s is the 21 s the server logged. A server on this machine costs the same
+arithmetic as a client, and no more.
+
+**That is a derivation and not a measurement, because the instrument does not
+report from the server.** `dbprofile.c`'s table prints from `dbclient` and never
+from `dropbear`, in the same run, from the same link line, with the server's own
+`dropbear_log()` output arriving on the same handle — so `atexit()` is not
+running there and the reason has not been found. The derivation is checked
+against the server's own two log timestamps rather than left as arithmetic, but a
+per-primitive server table is still owed.
 
 **Against TLS, which is the comparison that was expected to be flattering and is
 not:**
@@ -20483,11 +20490,16 @@ costs more than the cipher.** That is the same shape §58 found in
 `src/crypto68k/` — Poly1305 became 64% of an AEAD record there once ChaCha20 had
 been hand-scheduled — arrived at from the opposite direction.
 
-**Against the wire.** The A2065 under bridged WinUAE does 230 KB/s and a real
-A3000/060 over Fitz does 795–939 KB/s (§29, §72). 28 KB/s is **8×** below the
-first of those. Encryption does not halve this machine's network; it takes an
-order of magnitude off it, and the honest way to say what that means is that a
-1 MB file is 36 seconds.
+**Against the wire, like for like.** §24.4 ran `NetTrace` over 524,288 bytes on
+this exact profile: **159 KB/s** over the A2065, 283 KB/s over loopback. The SSH
+figure here is over the A2065 too, so the comparison is 28 against 159 —
+**5.7×**. (A real A3000/060 over Fitz does 795–939 KB/s, §72, which is a
+different machine and is quoted only so 28 is not read as a ceiling of the
+design.)
+
+Encryption does not halve this machine's network and it does not cost an order
+of magnitude either. The honest way to say what 28 KB/s means is that a 1 MB
+file is 36 seconds.
 
 ### 74.4 The 68k crypto is half on the path, and the half that is missing is the half throughput needs
 
@@ -20621,9 +20633,10 @@ MMU, caches, 32-bit addressing — and produces no timing. `tests/perf/cpucal` o
 that profile reports `MULU.L` at 3.2 cycles against a real 68030's 44 and an
 implied 323 MHz clock. **Any seconds figure from that profile would be the
 emulator's, not a 68030's**, and the honest 68030 answer is arithmetic on the
-14 MHz numbers: a 25 MHz 68030 is 1.78× the clock (§24), so ~7 s for a client
-handshake and ~50 KB/s on the channel, before whatever the 32-bit bus and the
-caches are worth.
+14 MHz numbers: §24 and §29 both measured this stack at **1.78× for a 1.76×
+clock**, so a 25 MHz 68030 is ~7 s for a client handshake and ~50 KB/s on the
+channel, before whatever the 32-bit bus and the caches are worth. The A3000 run
+was taken and does what it can prove: it authenticates and runs a command.
 
 ### 74.9 Is it worth continuing
 
