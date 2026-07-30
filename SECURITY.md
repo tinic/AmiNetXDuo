@@ -59,8 +59,14 @@ this document names its untested parts rather than only its tested ones.
 - **`bsdsocktest`** — an independent conformance suite written for this ABI by
   someone else. 142/142 on a bridged real network; 130/142 with 12 skipped on
   loopback, where the skipped tests need a second machine. Roadshow scores 138.
-- **Fuzzing** — `fuzz_config` over the configuration parsers and `fuzz_bpf` over
-  the filter VM, both with sanitisers on the host.
+- **Fuzzing** — `fuzz_config` over the configuration parsers, `fuzz_bpf` over the
+  filter VM, and `fuzz_dns` over DNS responses, all under ASan and UBSan on the
+  host and all in `ctest`. `fuzz_dns` drives the real client through
+  `_nx_dns_response_receive()`, the name unencoder and the resource walk, with
+  compression pointers that point at themselves, cycle, or run past the
+  datagram: 250,128 datagrams across two seeds, no undefined behaviour. The one
+  UB found during that work was in the harness — a packet pool aligned to the
+  target's 4 bytes on a host needing 8 — not in a parser.
 - **Static analysis** — GCC `-fanalyzer` over the whole tree against a triaged
   baseline of 13 findings, in CI, warnings fatal. cppcheck against a separate
   baseline of 16, run locally rather than in CI because its output moves between
@@ -76,10 +82,14 @@ this document names its untested parts rather than only its tested ones.
 
 Stated because a security policy that lists only its strengths is not much use.
 
-- **The DNS and mDNS response parsers are not fuzzed.** They parse
-  attacker-controlled bytes and they are the two most exposed pieces of code
-  written for this project. DNS compression pointers are a well-known source of
-  loops and over-reads. This is the largest known gap.
+- **The mDNS response parser is not fuzzed.** It reads unauthenticated multicast
+  that any host on the segment can send unprompted, with no query first, which
+  makes it the most exposed parser here. A harness exists
+  (`tests/fuzz/fuzz_mdns.c`) and builds, but cannot run on a 64-bit host: NetX
+  Duo's mDNS cache stores pointers in single `ULONG` slots, so it is coherent
+  only where `sizeof(void*) == sizeof(ULONG) == 4`, and it spins inside
+  `nx_mdns_enable()` before a datagram arrives. It needs a 32-bit build to run
+  in. This is the largest known gap.
 - **No audit against published Eclipse ThreadX advisories.** The vendored
   NetX Duo and ThreadX are 6.5.1, plus seven local patches; whether any known
   advisory touches the paths compiled here has not been checked.
