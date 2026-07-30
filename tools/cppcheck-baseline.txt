@@ -18,8 +18,8 @@
 #     uninitialised local for entropy and never reads it.  netstack_rexx.c is
 #     the same shape from the other end: ami_rx_service() substitutes "" when
 #     ARG0 is NULL, so cppcheck models the parameter as char[1] and then reads
-#     the copy loop's len < 256 against it -- but "" stops that loop at len 0,
-#     and index 256 is unreachable on the only path that makes it char[1].
+#     the copy loop's len < 1024 against it -- but "" stops that loop at len 0,
+#     and index 1024 is unreachable on the only path that makes it char[1].
 #   * tests/tls/tls_resume.c: a static tag array pointing at an automatic that
 #     is alive for the whole call and rebuilt on the next one.
 #
@@ -31,7 +31,7 @@
 1	src/crypto68k/c68k_crt.c	warning: uselessAssignmentPtrArg: Assignment of function parameter has no effect outside the function. Did you forget dereferencing it?
 1	src/net68k/n68k_checksum.c	warning: nullPointerRedundantCheck: Either the condition 'dest_ip_addr!=0' is redundant or there is possible null pointer dereference: dest_ip_short.
 1	src/net68k/n68k_checksum.c	warning: nullPointerRedundantCheck: Either the condition 'src_ip_addr!=0' is redundant or there is possible null pointer dereference: src_ip_short.
-1	src/netstack/netstack_rexx.c	warning: arrayIndexOutOfBoundsCond: Either the condition 'len<256' is redundant or the array 'line[1]' is accessed at index 256, which is out of bounds.
+1	src/netstack/netstack_rexx.c	warning: arrayIndexOutOfBoundsCond: Either the condition 'len<1024' is redundant or the array 'line[1]' is accessed at index 1024, which is out of bounds.
 1	src/tls/rfc7905/nx_secure_tls_record_payload_decrypt.c	warning: nullPointerRedundantCheck: Either the condition 'decrypted_packet!=0' is redundant or there is possible null pointer dereference: decrypted_packet.
 1	src/tlslib/tls_time.c	error: uninitvar: Uninitialized variable: ds.ds_Days
 1	src/usergroup/ug_misc.c	error: uninitvar: Uninitialized variable: c

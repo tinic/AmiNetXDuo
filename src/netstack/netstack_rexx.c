@@ -21,7 +21,8 @@
  *
  * parsed the way AmiTCP parsed it -- ReadItem() then FindArg() -- so
  * abbreviation and quoting behave identically without us reimplementing them.
- * What each keyword does here, and why, is at ami_rx_execute().
+ * What each keyword does here, and why, is at ami_rx_execute();
+ * netstack_rexx_vars.c has QUERY and SET's variable space.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -34,6 +35,7 @@
 #define REXXSYSLIB_BASE_NAME ami_rx_rexxbase
 
 #include "netstack_internal.h"
+#include "netstack_rexx.h"
 
 #include <exec/ports.h>
 #include <dos/dos.h>
@@ -58,17 +60,6 @@ static char ami_rx_port_name[]  = "AMITCP";
  */
 static const char ami_rx_keywords[] = "Q=QUERY,S=SET,READ,ROUTE,ADD,RESET,KILL";
 
-/* The variable names QUERY and SET accept, in AmiTCP's own form: a FindArg()
-   template, so abbreviation and case-insensitivity come from DOS. AmiTCP's list
-   is ~150 names long (its variables.src); see ami_rx_query() for why this one
-   is not. */
-static const char ami_rx_variables[] = "HOSTNAME";
-
-enum
-{
-    RX_VAR_HOSTNAME = 0
-};
-
 enum
 {
     RX_KEY_QUERY = 0,
@@ -80,26 +71,13 @@ enum
     RX_KEY_KILL
 };
 
-/* AmiTCP's amiga_config.c strings, so a script that prints them sees what it
-   would have seen from AmiTCP. AmiTCP terminates each with a newline. */
-static const char ami_rx_err_unknown[]  = "Unknown command\n";
-static const char ami_rx_err_syntax[]   = "Syntax error\n";
-static const char ami_rx_err_var[]      = "unknown variable\n";
-static const char ami_rx_err_nowrite[]  = "Variable is not writeable\n";
-static const char ami_rx_err_unimpl[]   = "Not implemented\n";
-static const char ami_rx_err_state[]    = "No active stack\n";
+/* The error strings and the two buffer sizes are in netstack_rexx.h, which the
+   variable space shares. AmiTCP's command line was one CONFIGLINELEN at most;
+   this is the length of the longest QUERY netstat sends, rounded up. */
+#define RX_CMDLEN       1024
 
-/* AmiTCP: KEYWORDLEN 24, REPLYBUFLEN 255 (amiga_config.h). */
-#define RX_KEYWORDLEN   24
-#define RX_REPLYBUFLEN  255
-#define RX_CMDLEN       256
-
-/*
- * 8 KB, not 4 KB: the command handlers reach netstack_interface_*() and the
- * resolver, whose worst chain the call graph puts at 948 bytes on top of a
- * 256-byte command buffer and a 255-byte reply. That fits, but the margin was
- * being spent on a saving nobody asked for.
- */
+/* One command line (RX_CMDLEN) and one reply (RX_REPLYBUFLEN) are both on this
+   stack while a QUERY runs, and netstat's TCP query fills most of both. */
 #define RX_STACK        8192
 #define RX_PRIORITY     0
 
@@ -174,86 +152,12 @@ static LONG ami_rx_kill(void)
 }
 
 /*
- * QUERY. AmiTCP's variable space is ~150 names (its variables.src), almost all
- * of them protocol counters reached as `Q TCP Accepts TCP CAttem ...`. None of
- * that is implemented here: this stack publishes its counters through
- * GetNetworkStatistics() and its own `netstat`, and an ARexx mirror of a
- * different stack's counter names is a separate piece of work.
- *
- * HOSTNAME is answered because it costs nothing and it is the one variable a
- * survey script is likely to want. Everything else gets AmiTCP's own
- * "unknown variable", which is what AmiTCP returns for a name it does not know
- * -- an error the caller already has to handle.
- */
-static LONG ami_rx_query(struct CSource *cs, const char **errstr,
-                         char *result, ULONG result_size)
-{
-    char buf[RX_KEYWORDLEN];
-    LONG item = ReadItem((STRPTR)buf, (LONG)sizeof(buf), cs);
-
-    if (item <= 0)
-    {
-        *errstr = ami_rx_err_syntax;
-        return RETURN_WARN;
-    }
-
-    if (FindArg((CONST_STRPTR)ami_rx_variables, (CONST_STRPTR)buf)
-        == RX_VAR_HOSTNAME)
-    {
-        const AmiConfig *cfg = netstack_config();
-        const char      *name;
-        ULONG            i;
-
-        name = (cfg != NULL && cfg->hostname[0] != '\0') ? cfg->hostname
-                                                         : "amiga";
-
-        for (i = 0; name[i] != '\0' && i + 1 < result_size; i++)
-            result[i] = name[i];
-        result[i] = '\0';
-
-        return RETURN_OK;
-    }
-
-    *errstr = ami_rx_err_var;
-    return RETURN_ERROR;
-}
-
-/*
- * SET. HOSTNAME is recognised and refused rather than reported unknown:
- * TCP_Start_Stop's startnet sends `SET HOSTNAME '<name>'`, and the honest
- * answer is that this stack takes its host name from its configuration file.
- * AmiTCP has the same distinction and the same error for it -- ERR_NOWRITE,
- * "Variable %s is not writeable", for variables that are VF_READ only.
- */
-static LONG ami_rx_set(struct CSource *cs, const char **errstr)
-{
-    char buf[RX_KEYWORDLEN];
-    LONG item = ReadItem((STRPTR)buf, (LONG)sizeof(buf), cs);
-
-    if (item <= 0)
-    {
-        *errstr = ami_rx_err_syntax;
-        return RETURN_WARN;
-    }
-
-    if (FindArg((CONST_STRPTR)ami_rx_variables, (CONST_STRPTR)buf)
-        == RX_VAR_HOSTNAME)
-    {
-        *errstr = ami_rx_err_nowrite;
-        return RETURN_ERROR;
-    }
-
-    *errstr = ami_rx_err_var;
-    return RETURN_ERROR;
-}
-
-/*
  * One command line. Mirrors AmiTCP's parseline(): an empty line is not an
  * error, an unreadable one is a syntax error, an unrecognised keyword is
  * "Unknown command", and anything else dispatches on the keyword index.
  */
 static LONG ami_rx_execute(const char *line, const char **errstr,
-                           char *result, ULONG result_size)
+                           AmiRxReply *reply)
 {
     char           cmd[RX_CMDLEN + 2];
     struct CSource cs;
@@ -262,8 +166,7 @@ static LONG ami_rx_execute(const char *line, const char **errstr,
     LONG           key;
     ULONG          len = 0;
 
-    result[0] = '\0';
-    *errstr   = NULL;
+    *errstr = NULL;
 
     while (line[len] != '\0' && len < RX_CMDLEN)
     {
@@ -310,19 +213,23 @@ static LONG ami_rx_execute(const char *line, const char **errstr,
     switch (key)
     {
         case RX_KEY_QUERY:
-            return ami_rx_query(&cs, errstr, result, result_size);
+            return ami_rx_getvalue(&cs, errstr, reply);
 
         case RX_KEY_SET:
-            return ami_rx_set(&cs, errstr);
+            return ami_rx_setvalue(&cs, errstr, reply);
 
         case RX_KEY_KILL:
             return ami_rx_kill();
 
         /*
-         * READ, ROUTE, ADD and RESET. AmiTCP itself answers two of these with
-         * an error -- readfile() returns "readfile() is currently
-         * unimplemented" and the ROUTE comment says the same -- and the other
-         * two edit a net database this stack does not keep in that shape.
+         * READ, ROUTE, ADD and RESET. Two of them AmiTCP never implemented
+         * either: readfile() returned "readfile() is currently unimplemented"
+         * and parseroute() "ROUTE not implemented." with the working body
+         * #if 0'ed out around an INCOMPLETE marker. ADD and RESET edit the net
+         * database AmiTCP kept in memory (its kern/amiga_netdb.c), which this
+         * stack does not have -- docs/DEVELOPMENT.md sizes what adding one
+         * would mean.
+         *
          * Recognised so the caller is told "not implemented" rather than
          * "unknown command", which is the difference between a stack that has
          * no such feature and a stack that has never heard of it.
@@ -347,7 +254,8 @@ static LONG ami_rx_execute(const char *line, const char **errstr,
  */
 static VOID ami_rx_service(struct RexxMsg *rmsg)
 {
-    char        result[RX_REPLYBUFLEN + 1];
+    char        buffer[RX_REPLYBUFLEN + 1];
+    AmiRxReply  reply;
     const char *errstr = NULL;
     const char *line;
     LONG        rc;
@@ -359,7 +267,9 @@ static VOID ami_rx_service(struct RexxMsg *rmsg)
     rmsg->rm_Result1 = 0;
     rmsg->rm_Result2 = 0;
 
-    rc = ami_rx_execute(line, &errstr, result, (ULONG)sizeof(result));
+    ami_rx_reply_init(&reply, (STRPTR)buffer, RX_REPLYBUFLEN);
+
+    rc = ami_rx_execute(line, &errstr, &reply);
 
     if (rc != RETURN_OK)
     {
@@ -368,16 +278,26 @@ static VOID ami_rx_service(struct RexxMsg *rmsg)
             rmsg->rm_Result2 =
                 (LONG)CreateArgstring((STRPTR)errstr, ami_rx_strlen(errstr));
     }
-    else if ((rmsg->rm_Action & RXFF_RESULT) != 0 && result[0] != '\0')
+    else if ((rmsg->rm_Action & RXFF_RESULT) != 0)
     {
+        /*
+         * Even when the reply is empty, which is AmiTCP's behaviour and matters:
+         * `QUERY CONNECTIONS` on a machine with no sockets succeeds with nothing
+         * to say, and a script that reads RESULT afterwards must see "" rather
+         * than the uninitialised variable's own name.
+         */
         /* STRPTR, not CONST_STRPTR: the pinned NDK types this parameter
            `const STRPTR`, which is UBYTE *const -- a const pointer, not a
            pointer to const -- so CONST_STRPTR discards a qualifier there and
-           builds only against an NDK that spells it CONST_STRPTR. result is a
-           local buffer, so handing it over non-const costs nothing. */
+           builds only against an NDK that spells it CONST_STRPTR. The reply is
+           our own buffer, so handing it over non-const costs nothing. */
         rmsg->rm_Result2 =
-            (LONG)CreateArgstring((STRPTR)result, ami_rx_strlen(result));
+            (LONG)CreateArgstring(reply.rr_Buffer, (LONG)reply.rr_Used);
     }
+
+    /* After CreateArgstring(), which copies: an error string may point into the
+       reply buffer, so nothing may free it before both are read. */
+    ami_rx_reply_done(&reply);
 
     ReplyMsg((struct Message *)rmsg);
 }

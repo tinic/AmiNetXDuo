@@ -2056,19 +2056,33 @@
 
   AMITCP is also AmiTCP's ARexx host port, and a few older programs
   send commands to it -- AmiTCP's own stopnet and netstat, and some
-  dialers and install scripts. Those commands are answered:
+  dialers and install scripts. QUERY, SET and KILL are answered:
 
-      ADDRESS AMITCP 'QUERY HOSTNAME'   this machine's name
       ADDRESS AMITCP 'KILL'             every interface off the network
+      ADDRESS AMITCP 'QUERY HOSTNAME'   this machine's name
 
   KILL is what stopnet sends. It does the same as running
   @{"Offline" link OFFLINE} for each interface; it does not unload the
   stack, which nothing can do short of a reboot.
 
-  Every other command AmiTCP accepted is recognised and answered with
-  an error, which is what such a script already has to cope with. The
-  point of answering at all is that a script sending a command to a
-  port that nobody is listening on waits for a reply for ever.
+  QUERY answers the names AmiTCP answered: the connection list, the
+  routing table, the ICMP, IP, TCP and UDP counters by name, and the
+  single settings such as HOSTNAME. AmiTCP's own netstat script runs
+  against it unchanged. Counters this stack does not keep read as
+  zero, and names describing parts AmiTCP had and this stack does not
+  -- its memory-buffer settings, its log console, its debug switches
+  -- are answered with an error rather than a made-up number.
+
+  SET changes nothing. Every setting comes from the configuration
+  files, so a script that tries to set one is told the name is not
+  writeable.
+
+  ADD, RESET, READ and ROUTE are recognised and answered "not
+  implemented". READ and ROUTE were never implemented in AmiTCP
+  either.
+
+  The point of answering at all is that a script sending a command to
+  a port that nobody is listening on waits for a reply for ever.
 
 @endnode
 

@@ -570,3 +570,91 @@ to 5.00 s, **+3.9 s on every boot**, to guard against a server handing out an
 address somebody else already holds. Not worth it here. Enabling it is one
 `#define` in `port/netxduo-amiga/inc/nx_user.h`, and the RFC 3927 test activates
 its declined-address phase automatically if you do.
+
+## The AMITCP ARexx host, and what ADD/RESET would cost
+
+`src/netstack/netstack_rexx.c` services the port; `netstack_rexx_vars.c` is
+QUERY and SET. Everything in both comes from AmiTCP/IP 3.0b2's own source, which
+is on Aminet as `comm/net/AmiTCP-src-30b2.lha`: `kern/variables.src` for the
+name space, `kern/config_var.awk` to turn it into the exact `FindArg()`
+templates (`awk -v TARGETTI=C -f config_var.awk variables.src`),
+`kern/amiga_config.c` for the parser and error strings, `kern/amiga_cstat.c` for
+CONNECTIONS, ICMPHIST and ROUTES, `kern/amiga_netdb.c` for ADD and RESET.
+
+### What the corpus actually sends
+
+Re-scanned `comm/tcp` + `comm/net` -- 1,024 archives, each downloaded,
+extracted, grepped and deleted; 1,002 were actually read (21 over a 2 MB cap, one
+404). Fifteen send `ADDRESS AMITCP`, and between them they send six distinct
+commands:
+
+One caveat on the method, because it bit once. The first pass filtered with
+`grep --binary-files=without-match`, and AmigaDOS scripts often carry high-bit
+bytes, so grep called them binary and skipped them -- which is how SLIPShuttle's
+`startnet` was missed. Every archive §75.7 names was then re-fetched and read
+with `grep -a`, including the compiled ones: SLIPCall and SLIPShuttle carry the
+command in a binary string table, and it is `KILL` in both.
+
+| Command | Archives | Sent by |
+|---|---|---|
+| `KILL` | 13 | `stopnet` in AmiTCP 2.3 / 3.0b2 / 4.0 / 4.3, Genesis's copy, CobbWeb's patched copy, `AmiTCP_session` 1.0 and 1.1, `AmiTCP_dialup/hangup.rexx`, Netdial 4.0, Patch2AmiTCP43, TCP_Start_Stop |
+| the variable space, wholesale | 1 | AmiTCP's own `bin/netstat` |
+| `QUERY CONNECTIONS` alone | 1 | `rx.fingerd` |
+| `ADD HOST <address> <name> [alias...]` | 4 | CobbWeb's patched `startnet` and SLIPShuttle's `startnet`; AmiTCP 4.0's `HowToInstall` and AmiTCP 2.0's `usertext.txt`, both as documentation examples |
+| `SET HOSTNAME` | 1 | TCP_Start_Stop's `startnet`, twice |
+| `RESET` | 2 | TCP_Start_Stop's `startnet`; AmiTCP 2.0's `usertext.txt` as an example |
+
+Nothing in the corpus sends `READ` or `ROUTE`, which is consistent with AmiTCP
+never having implemented either.
+
+`netstat` is why the variable space is implemented. It sends
+`QUERY CONNECTIONS`, then 8 ICMP + 20 IP + 46 TCP + 9 UDP counters by
+abbreviated name, then `Q ICMPHIST`, then `QUERY ROUTES ALL`. `rx.fingerd`
+confirms the format matters independently: it walks `QUERY CONNECTIONS`'s answer
+eight words at a time looking for a local port of 79, so the fields have to be
+fixed-width and in AmiTCP's order, not merely present.
+
+The three commands with a consumer that is **not** implemented are `SET
+HOSTNAME`, `ADD HOST` and `RESET`, and all three have the same shape of
+consumer: TCP_Start_Stop, CobbWeb and SLIPShuttle are dial-up front ends
+installing the address a SLIP or PPP link was just assigned, under a name. All
+discard the return code.
+That scenario is ruled out here, and the remaining sightings are documentation.
+
+Two of AmiTCP's own limits had to go, because both break `netstat` on AmiTCP
+itself: `CONFIGLINELEN`/our command buffer at 256 bytes cannot hold netstat's
+~600-byte TCP query, and `REPLYBUFLEN` at 255 cannot hold 46 counters once any
+of them has reached ten digits. They are 1024 here.
+
+### ADD and RESET
+
+`RESET` is cheap and `ADD` is not, and the reason is the same for both.
+
+AmiTCP kept a `struct NetDataBase` of `MinList`s -- hosts, networks, services,
+protocols, nameservers, domains, access rules -- built from `AmiTCP:db/netdb`
+and mutable at runtime under a read/write lock. `ADD` appended a node to one
+list; `RESET` built a whole second database from the file and swapped the lists
+into the live one.
+
+`src/config/netdb.c` keeps the same data in a different shape: four
+`NetdbTable`s, each one flat `AmiNetdbEntry` array whose `name`, `aliases` and
+`proto` pointers all point into a single tokenised copy of the file text, plus a
+shared alias pool. It is built once by `ami_netdb_load()` and **immutable
+afterwards, which is why no lock exists** -- eight lookup entry points and three
+iterators read it from any task with no synchronisation at all.
+
+So:
+
+- **`RESET`** is `ami_netdb_free()` then `ami_netdb_load()`, which already
+  exists. The work is not the reload, it is that making the table mutable means
+  every one of those eleven readers now needs the lock, and `AmiNetdbEntry`
+  pointers handed out to `gethostbyname()` callers currently outlive the call.
+- **`ADD`** needs a second, separately allocated store for runtime entries,
+  consulted by all eleven readers under that same lock, with its own string
+  storage (it cannot point into the file buffer). Plus the `ReadArgs()` template
+  `"$NAME$/A,$ENTRY$/A,$ALIAS$/M"` and seven entry-type parsers, of which only
+  HOST has a corpus consumer.
+
+Neither is built, for the reason in the table above: the running code that sends
+them is dial-up front ends naming a freshly assigned PPP address, and it ignores
+what it gets back.
