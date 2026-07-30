@@ -82,6 +82,104 @@ target_compile_definitions(fuzz_bpf PRIVATE AMI_BPF_REPLICA)
 target_compile_options(fuzz_bpf PRIVATE -Wall -Wextra ${_fuzz_san})
 target_link_options(fuzz_bpf PRIVATE ${_fuzz_san})
 
+
+# ---------------------------------------------------------------------------
+# The two parsers that read bytes off the network from whoever sent them.
+#
+# DNS responses arrive from whatever answered; mDNS is unauthenticated
+# multicast, so any host on the segment can send one unprompted. Both walk
+# name-compression pointers, which is where DNS parsers historically break --
+# a pointer to itself, two that cycle, one past the end of the datagram.
+#
+# These drive the real entry points through a real NX_IP with a non-echoing
+# driver, not a reimplementation of the parser: the assertion is "the stack
+# survived this datagram", which is only worth something if the datagram took
+# the path a real one takes. tests/perf/host/shim's tx_port.h gives a 32-bit
+# ULONG so the length and TTL arithmetic is the m68k's; pointers stay 64-bit,
+# so a name walk that would wrap a 32-bit pointer cannot be reached here.
+# ---------------------------------------------------------------------------
+
+set(_fuzz_nx_src
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_driver_packet_send.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_packet_send.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_header_add.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_route_find.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_checksum_compute.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_packet_checksum_compute.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ipv4_packet_receive.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ipv4_option_process.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_dispatch_process.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv4_send_error_message.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_igmp_multicast_check.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_initialize.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_enable.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_bind_cleanup.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_free_port_find.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_packet_receive.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_receive_cleanup.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_create.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_cleanup.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_packet_allocate.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_packet_copy.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_packet_data_append.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_packet_data_extract_offset.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_packet_length_get.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_packet_release.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_packet_transmit_release.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nxe_packet_pool_create.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nxe_packet_allocate.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nxe_packet_data_append.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nxe_packet_length_get.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nxe_packet_release.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_enable.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_socket_create.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_socket_bind.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_socket_send.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_socket_receive.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_delete.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nxe_packet_pool_delete.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_utility.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/fuzz_nxstub.c")
+
+set(_fuzz_nx_inc
+    "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"          # tx_port.h, first
+    "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"         # nx_port.h
+    "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"        # nx_user.h -- ours
+    "${AMINETXDUO_NETXDUO}/common/inc"
+    "${AMINETXDUO_THREADX}/common/inc")
+
+# NX_PACKET_ALIGNMENT defaults to sizeof(ULONG), and the shim makes ULONG the
+# target's 32 bits -- so the pool would align packets to 4 while this host's
+# NX_PACKET holds 64-bit pointers and needs 8. Misaligned on every second
+# packet, before any datagram is parsed. On m68k, 4 is right and correct.
+set(_fuzz_nx_def
+    NX_PACKET_ALIGNMENT=8
+    NX_INCLUDE_USER_DEFINE_FILE
+    AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+# nx_udp_socket_send is here and not in _fuzz_nx_src because fuzz_mdns
+# supplies its own; the two drivers intercept the wire at different depths.
+add_executable(fuzz_dns
+    fuzz_dns.c
+    "${AMINETXDUO_NETXDUO}/addons/dns/nxd_dns.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_send.c"
+    ${_fuzz_nx_src})
+target_include_directories(fuzz_dns PRIVATE
+    "${AMINETXDUO_NETXDUO}/addons/dns" ${_fuzz_nx_inc})
+target_compile_definitions(fuzz_dns PRIVATE FUZZ_HAS_EVENT_FLAGS ${_fuzz_nx_def})
+target_compile_options(fuzz_dns PRIVATE -UAMINETXDUO_IPV6 ${_fuzz_san})
+target_link_options(fuzz_dns PRIVATE ${_fuzz_san})
+
+add_executable(fuzz_mdns
+    fuzz_mdns.c
+    "${AMINETXDUO_NETXDUO}/addons/mdns/nxd_mdns.c"
+    ${_fuzz_nx_src})
+target_include_directories(fuzz_mdns PRIVATE
+    "${AMINETXDUO_NETXDUO}/addons/mdns" ${_fuzz_nx_inc})
+target_compile_definitions(fuzz_mdns PRIVATE ${_fuzz_nx_def})
+target_compile_options(fuzz_mdns PRIVATE -UAMINETXDUO_IPV6 ${_fuzz_san})
+target_link_options(fuzz_mdns PRIVATE ${_fuzz_san})
+
 include(CTest)
 
 # The known case, first and always. If this ever passes silently the whole

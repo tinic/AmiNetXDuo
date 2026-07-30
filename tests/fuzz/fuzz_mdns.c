@@ -80,8 +80,14 @@ static NX_PACKET_POOL   fz_wire_pool;
  * arithmetic, and a static array's neighbour is valid memory that a stride
  * error would silently land in.
  */
-#define FZ_LOCAL_CACHE_BYTES    1024
-#define FZ_PEER_CACHE_BYTES     2048
+/* Scaled up from the 1024/2048 src/netstack ships, because an NX_MDNS_RR is
+   built from pointers and this is a host build where those are 64 bits: the
+   target's byte counts hold roughly half as many records here, and
+   _nx_mdns_cache_add_string() spins rather than failing when it runs out
+   during nx_mdns_enable(). The sizes are a host-side capacity question, not
+   part of what is under test. */
+#define FZ_LOCAL_CACHE_BYTES    4096
+#define FZ_PEER_CACHE_BYTES     8192
 static ULONG           *fz_local_cache;
 static ULONG           *fz_peer_cache;
 static ULONG            fz_stack[1024];

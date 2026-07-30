@@ -57,7 +57,13 @@ static NX_DNS           fz_dns;
    pool carries 512-byte payloads and a sender is not held to that. */
 #define FZ_WIRE_PAYLOAD (FZW_MAX + 64)
 #define FZ_WIRE_PACKETS 8
-static ULONG            fz_wire_area[((FZ_WIRE_PAYLOAD + sizeof(NX_PACKET) +
+/* _Alignas because the pool is carved into NX_PACKETs and this is a HOST
+   build: NX_PACKET holds 64-bit pointers and wants 8-byte alignment, while the
+   shim's ULONG is the target's 32 bits, so a plain ULONG array is only aligned
+   to 4 and every second packet lands misaligned. On m68k the requirement is 4
+   and the question does not arise. */
+static _Alignas(NX_PACKET) ULONG
+                        fz_wire_area[((FZ_WIRE_PAYLOAD + sizeof(NX_PACKET) +
                                       32) * FZ_WIRE_PACKETS) / sizeof(ULONG)];
 static NX_PACKET_POOL   fz_wire_pool;
 
