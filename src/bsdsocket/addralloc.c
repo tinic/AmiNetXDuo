@@ -475,7 +475,16 @@ VOID bsd_DeleteAddrAllocMessage(register struct AddressAllocationMessage *aam __
 /* Defined below, with the rest of BeginInterfaceConfig()'s reporting. */
 static VOID bsd_aam_reply(struct AddressAllocationMessage *aam, LONG result);
 
-#define BSD_AAM_STACK       4096
+/*
+ * 8 KB, not the 4 KB this used to be. -fstack-usage plus the call graph put
+ * bsd_aam_worker's worst chain at 1,936 bytes -- 47% of a 4 KB stack before
+ * anything the analysis cannot see, and it cannot see much here: the SANA-II
+ * calls below go through the driver's own IO handling on this stack, and that
+ * driver is somebody else's code. The chain is 1,136 now, but a stack we
+ * choose ourselves is not the place to be economical, and there is one of
+ * these per interface being configured.
+ */
+#define BSD_AAM_STACK       8192
 #define BSD_AAM_PRI         0
 
 /* How often the worker looks at the DHCP state. Ten times a second is much

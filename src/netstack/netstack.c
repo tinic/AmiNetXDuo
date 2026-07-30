@@ -142,6 +142,34 @@ VOID ami_netstack_leave(AmiNetCaller *caller)
     }
 }
 
+/* The same bracket with the TX_THREAD off the caller's stack -- see the note
+   in <aminetxduo/netstack.h>. */
+AmiNetCaller *ami_netstack_enter_alloc(VOID)
+{
+    AmiNetCaller *caller = (AmiNetCaller *)AllocMem(sizeof(AmiNetCaller),
+                                                    MEMF_PUBLIC | MEMF_CLEAR);
+
+    if (caller == NULL)
+        return NULL;
+
+    if (ami_netstack_enter(caller) != AMI_NET_OK)
+    {
+        FreeMem(caller, sizeof(AmiNetCaller));
+        return NULL;
+    }
+
+    return caller;
+}
+
+VOID ami_netstack_leave_free(AmiNetCaller *caller)
+{
+    if (caller == NULL)
+        return;
+
+    ami_netstack_leave(caller);
+    FreeMem(caller, sizeof(AmiNetCaller));
+}
+
 /*
  * The same bracket, with the TX_THREAD kept between calls. Registration is the
  * expensive part and it is repeatable, so the same task gets the same thread
@@ -1415,20 +1443,21 @@ UWORD netstack_interface_count(VOID)
 LONG netstack_interface_up(UWORD index)
 {
     AmiNetStack  *ns = ami_ns;
-    AmiNetCaller  caller;
+    AmiNetCaller *caller;
     ULONG         value = 0;
     UINT          status;
 
     if (ns == NULL || !ns->ns_IpCreated || index >= ns->ns_IfaceCount)
         return AMI_NET_ERR_STATE;
 
-    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
         return AMI_NET_ERR_KERNEL;
 
     status = nx_ip_driver_interface_direct_command(&ns->ns_Ip, NX_LINK_ENABLE,
                                                    (UINT)index, &value);
 
-    ami_netstack_leave(&caller);
+    ami_netstack_leave_free(caller);
 
     return (status == NX_SUCCESS) ? AMI_NET_OK : AMI_NET_ERR_NODEV;
 }
@@ -1436,20 +1465,21 @@ LONG netstack_interface_up(UWORD index)
 LONG netstack_interface_down(UWORD index)
 {
     AmiNetStack  *ns = ami_ns;
-    AmiNetCaller  caller;
+    AmiNetCaller *caller;
     ULONG         value = 0;
     UINT          status;
 
     if (ns == NULL || !ns->ns_IpCreated || index >= ns->ns_IfaceCount)
         return AMI_NET_ERR_STATE;
 
-    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
         return AMI_NET_ERR_KERNEL;
 
     status = nx_ip_driver_interface_direct_command(&ns->ns_Ip, NX_LINK_DISABLE,
                                                    (UINT)index, &value);
 
-    ami_netstack_leave(&caller);
+    ami_netstack_leave_free(caller);
 
     return (status == NX_SUCCESS) ? AMI_NET_OK : AMI_NET_ERR_NODEV;
 }
@@ -1518,7 +1548,7 @@ static UWORD ami_ns_interface_users(AmiNetStack *ns, UWORD index)
 LONG netstack_interface_remove(UWORD index, BOOL force)
 {
     AmiNetStack  *ns = ami_ns;
-    AmiNetCaller  caller;
+    AmiNetCaller *caller;
     AmiSana2If   *iface;
     UWORD         users;
     UINT          status;
@@ -1529,12 +1559,13 @@ LONG netstack_interface_remove(UWORD index, BOOL force)
 
     iface = ns->ns_Iface[index];
 
-    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
         return AMI_NET_ERR_KERNEL;
 
     users = ami_ns_interface_users(ns, index);
 
-    ami_netstack_leave(&caller);
+    ami_netstack_leave_free(caller);
 
     if (users != 0 && !force)
     {
@@ -1585,7 +1616,8 @@ LONG netstack_interface_remove(UWORD index, BOOL force)
        being reachable before the memory goes. */
     ami_netstack_capture_detach_one(ns, index);
 
-    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
         return AMI_NET_ERR_KERNEL;
 
     /*
@@ -1598,7 +1630,7 @@ LONG netstack_interface_remove(UWORD index, BOOL force)
      */
     status = nx_ip_interface_detach(&ns->ns_Ip, (UINT)index);
 
-    ami_netstack_leave(&caller);
+    ami_netstack_leave_free(caller);
 
     if (status != NX_SUCCESS)
     {
@@ -1691,7 +1723,7 @@ static LONG ami_ns_dhcp_ensure(AmiNetStack *ns)
 LONG netstack_interface_dhcp_start(UWORD index, ULONG requested_address)
 {
     AmiNetStack  *ns = ami_ns;
-    AmiNetCaller  caller;
+    AmiNetCaller *caller;
     UINT          status;
     LONG          rc;
 
@@ -1699,13 +1731,14 @@ LONG netstack_interface_dhcp_start(UWORD index, ULONG requested_address)
         index >= (UWORD)AMI_CFG_MAX_INTERFACES || ns->ns_Iface[index] == NULL)
         return AMI_NET_ERR_STATE;
 
-    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
         return AMI_NET_ERR_KERNEL;
 
     rc = ami_ns_dhcp_ensure(ns);
     if (rc != AMI_NET_OK)
     {
-        ami_netstack_leave(&caller);
+        ami_netstack_leave_free(caller);
         return rc;
     }
 
@@ -1719,14 +1752,14 @@ LONG netstack_interface_dhcp_start(UWORD index, ULONG requested_address)
      */
     if (netstack_interface_dhcp_state(index) == AMI_DHCP_WORKING)
     {
-        ami_netstack_leave(&caller);
+        ami_netstack_leave_free(caller);
         return AMI_NET_ERR_BUSY;
     }
 
     status = nx_dhcp_interface_enable(&ns->ns_Dhcp, (UINT)index);
     if (status != NX_SUCCESS && status != NX_DHCP_INTERFACE_ALREADY_ENABLED)
     {
-        ami_netstack_leave(&caller);
+        ami_netstack_leave_free(caller);
         AMI_WARN("netstack: DHCP would not enable interface %ld (%ld)",
                  (long)index, (long)status);
         return AMI_NET_ERR_STATE;
@@ -1749,7 +1782,7 @@ LONG netstack_interface_dhcp_start(UWORD index, ULONG requested_address)
     if (status == NX_SUCCESS)
         ami_ns_dhcp_discover_now(&ns->ns_Dhcp);
 
-    ami_netstack_leave(&caller);
+    ami_netstack_leave_free(caller);
 
     if (status != NX_SUCCESS)
     {
@@ -1858,7 +1891,7 @@ static VOID ami_ns_dhcp_text(AmiNetStack *ns, UWORD index, UINT option,
 LONG netstack_interface_dhcp_lease(UWORD index, AmiDhcpLease *out)
 {
     AmiNetStack  *ns = ami_ns;
-    AmiNetCaller  caller;
+    AmiNetCaller *caller;
     UCHAR         buffer[8];
     UINT          size;
     ULONG         addr = 0;
@@ -1876,7 +1909,8 @@ LONG netstack_interface_dhcp_lease(UWORD index, AmiDhcpLease *out)
     if (netstack_interface_dhcp_state(index) != AMI_DHCP_BOUND)
         return AMI_NET_ERR_STATE;
 
-    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
         return AMI_NET_ERR_KERNEL;
 
     /* The address and mask come from the interface rather than the options:
@@ -1919,7 +1953,7 @@ LONG netstack_interface_dhcp_lease(UWORD index, AmiDhcpLease *out)
     ami_ns_dhcp_text(ns, index, AMI_DHCP_OPTION_DOMAIN,
                      out->adl_DomainName, sizeof(out->adl_DomainName));
 
-    ami_netstack_leave(&caller);
+    ami_netstack_leave_free(caller);
 
     return AMI_NET_OK;
 }
@@ -1927,13 +1961,14 @@ LONG netstack_interface_dhcp_lease(UWORD index, AmiDhcpLease *out)
 LONG netstack_interface_dhcp_stop(UWORD index, BOOL release)
 {
     AmiNetStack  *ns = ami_ns;
-    AmiNetCaller  caller;
+    AmiNetCaller *caller;
 
     if (ns == NULL || !ns->ns_DhcpCreated ||
         index >= (UWORD)AMI_CFG_MAX_INTERFACES)
         return AMI_NET_ERR_STATE;
 
-    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
         return AMI_NET_ERR_KERNEL;
 
     /* Releasing tells the server the address is free again: right when an
@@ -1946,7 +1981,7 @@ LONG netstack_interface_dhcp_stop(UWORD index, BOOL release)
 
     ns->ns_DhcpState[index] = NX_DHCP_STATE_NOT_STARTED;
 
-    ami_netstack_leave(&caller);
+    ami_netstack_leave_free(caller);
 
     return AMI_NET_OK;
 }
@@ -2007,7 +2042,7 @@ static LONG ami_ns_free_interface_slot(AmiNetStack *ns)
 LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
 {
     AmiNetStack  *ns = ami_ns;
-    AmiNetCaller  caller;
+    AmiNetCaller *caller;
     AmiIfConfig  *slot_cfg;
     AmiSana2If   *iface;
     LONG          slot;
@@ -2062,7 +2097,8 @@ LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
 
     ns->ns_Iface[slot] = iface;
 
-    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
     {
         ami_sana2_close(iface);
         ns->ns_Iface[slot] = NULL;
@@ -2073,7 +2109,7 @@ LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
     /* The binding first, for the reason in ami_ns_free_interface_slot(). */
     if (ami_sana2_attach(iface, &ns->ns_Ip, (UINT)slot) != AMI_NET_OK)
     {
-        ami_netstack_leave(&caller);
+        ami_netstack_leave_free(caller);
         ami_sana2_close(iface);
         ns->ns_Iface[slot] = NULL;
         slot_cfg->configured = FALSE;
@@ -2094,7 +2130,7 @@ LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
         ns->ns_Ip.nx_ip_interface[slot].nx_interface_valid == 0)
         status = NX_INVALID_INTERFACE;
 
-    ami_netstack_leave(&caller);
+    ami_netstack_leave_free(caller);
 
     if (status != NX_SUCCESS)
     {

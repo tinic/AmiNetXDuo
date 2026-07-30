@@ -218,6 +218,17 @@
 #define BSD_DEFAULT_DTABLESIZE 256
 #define BSD_MAX_DTABLESIZE     1024
 
+/* Moved here from select.c: sb_SelIn below needs the type. */
+#define BSD_FD_BITS         32
+#define BSD_FD_WORDS        ((BSD_MAX_DTABLESIZE + BSD_FD_BITS - 1) / BSD_FD_BITS)
+
+typedef struct
+{
+    ULONG   read[BSD_FD_WORDS];
+    ULONG   write[BSD_FD_WORDS];
+    ULONG   except[BSD_FD_WORDS];
+} BsdFdSets;
+
 /* NetX Duo's listen queue depth for a bound port. */
 #define BSD_MAX_BACKLOG          8
 
@@ -305,6 +316,19 @@ struct AmiSocketBase
      * most one vector at a time.
      */
     AmiNetCaller            sb_NxCaller;
+
+    /*
+     * WaitSelect()'s input sets, here for the reason above and then some: they
+     * are sized to BSD_MAX_DTABLESIZE rather than to the caller's nfds, so on
+     * the stack they cost 384 bytes of the CALLER's stack on every call
+     * whether it is watching two descriptors or a thousand. An Amiga caller may
+     * have 4 KB and no guard page, and a program that sits in WaitSelect() in a
+     * loop is the normal shape of a network client -- measured at 864 bytes for
+     * the whole frame before this moved (-fstack-usage), which real hardware
+     * reported as freezes under sustained TCP.
+     */
+    BsdFdSets               sb_SelIn;
+    BsdFdSets               sb_SelReady;   /* and its result sets    */
     LONG                    sb_NxNest;      /* bracket depth, 0 == outside   */
 
 #ifdef AMINETXDUO_NXCENSUS

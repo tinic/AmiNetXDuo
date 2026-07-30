@@ -104,6 +104,22 @@ typedef struct AmiNetCaller
 LONG ami_netstack_enter(AmiNetCaller *caller);
 VOID ami_netstack_leave(AmiNetCaller *caller);
 
+/*
+ * The same pair with the AmiNetCaller allocated rather than declared.
+ *
+ * A TX_THREAD is ~230 bytes and these brackets sit under bsdsocket.library
+ * vectors, which run on the CALLER's stack: an AmigaDOS Shell gives 4 KB, with
+ * no guard page and no MMU, so an oversized frame does not fault -- it
+ * overwrites what is below it and the machine dies later somewhere unrelated.
+ * A file-scope AmiNetCaller would not do, because two tasks can be inside the
+ * bracket at once and each needs its own registration.
+ *
+ * Returns NULL if the kernel is not running or memory is short; the AllocMem
+ * is invisible next to the network round trip every user of this pair makes.
+ */
+AmiNetCaller *ami_netstack_enter_alloc(VOID);
+VOID          ami_netstack_leave_free(AmiNetCaller *caller);
+
 /* --------------------------------------------------- the cached bracket ---
  *
  * The pair above adopts on enter and orphans on leave, which is right for a
