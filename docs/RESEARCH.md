@@ -20336,3 +20336,218 @@ technically: §76.3 records the emulated `hydra` board logging
 NE2000, so a driver written for the real card is not expected to drive that
 core. Fetching it is legitimate; whether the emulator gives it anything to
 talk to is a separate question and is not claimed here.
+
+## 78. Somebody else's SSH and somebody else's TLS, on this library (2026-07-30)
+
+BebboSSH and bebboget are Stefan "Bebbo" Franke's — the author of the
+`m68k-amigaos-gcc` this tree is built with. Neither is a port of anything:
+BebboSSH is an independent SSH2 implementation and bebboget carries its own
+TLS. Both open `bsdsocket.library` version 4 and need nothing else from us, and
+neither author has ever seen our source. That is the property that matters:
+our own tests share an author with the code they test, and two of this week's
+released defects came from third-party programs instead.
+
+`tools/fetch-bebbossh.sh` and `tools/fetch-bebboget.sh` pin the Aminet releases
+by sha256 — the archive and every extracted file. Nothing is vendored and
+nothing is linked: both are GPLv3+, this tree is MIT, and the clean arrangement
+for a GPL program that talks to an MIT library is that it stays a separate
+program. `bebboget`'s archive carries `lib/libbebboget.a`, which is the one
+file somebody might link; it is deliberately not extracted.
+
+### 78.1 It does not start without locale.library, and that cost an hour
+
+The first four runs looked like a client that connects to nothing and hangs.
+It was not the network. `bebboscp -?` — no arguments, no sockets, our library
+not even opened — prints
+
+    locale.library failed to load
+
+and then wedges. Kickstart 3.1 and the AROS ROM alike; neither carries
+`locale.library`, which lives in Workbench's `LIBS:`. Under
+`tools/enforcer-run.sh -m` it is six illegal accesses, `LONG-READ from
+00000028`, `LONG-READ from 00000018`, `LONG-WRITE to 00000018` and `LONG-WRITE
+to 00000000`, all with the PC inside ROM and the string "locale.library failed
+to load" still on the stack: a library base that was never checked. The message
+is not in BebboSSH's source or in ours — it comes from the runtime's automatic
+library opening.
+
+Staging one Workbench 3.1 `locale.library` fixed it completely. Both harnesses
+locate one and refuse with an explanation when they cannot, because the symptom
+otherwise reads exactly like a stack bug and there is nothing to distinguish it
+from one.
+
+### 78.2 What it needs from the ABI, and it is a small list
+
+`socket`, `connect`, `send`, `recv`, `CloseSocket`, `WaitSelect`, `Errno`,
+`IoctlSocket(FIONBIO)`, `setsockopt(SO_REUSEADDR)`, `gethostbyname`, and
+`SocketBaseTags(SBTM_SETVAL(SBTC_BREAKMASK), 0)`. Every one is implemented; the
+break mask is `SBT_RW` in `errno.c` and is serviced.
+
+**No `ENOSYS` was reached and no `SocketBaseTagList` tag went unserviced**, over
+twenty-four transfers and eight HTTPS fetches. The serial log across every run
+contains one line, and it is our own `AMITCP: no rexxsyslib.library` notice.
+
+`bebbosshd` — the server — additionally calls `getservbyname`, `getprotoent`
+and `ReleaseCopyOfSocket`, none of which the client half needs. It has not been
+run here; FS-UAE's SLIRP has no inbound path, so a server in the guest can only
+be reached from inside the guest, and that arm is not built yet.
+
+Under Enforcer with MungWall, on the network, doing a 64 KB transfer each way:
+**0 Enforcer hits, 0 MungWall wall hits.**
+
+### 78.3 Throughput, and every byte compared
+
+`tests/bebbossh/run-bebbossh.sh -x`, A1200 profile, `AMINETXDUO_PERF=1`, every
+run announcing "the machine is quiet". Three sizes so there are two slopes and
+the second is free of the handshake, and **every transfer was `cmp`ed against
+its source** — the Dropbear work on the `ssh-server-perf` branch
+records a shim bug that returned the right length and the wrong bytes, and a
+45-byte case never showed it. 24/24 byte-identical across two runs, every `rc 0`.
+
+| | 45 B | 64 KB | 256 KB | 45B→64K | 64K→256K |
+|---|---:|---:|---:|---:|---:|
+| **aes128-gcm**, host → Amiga | 5.84 s | 8.04 | 14.82 | 29.07 KB/s | **28.32 KB/s** |
+| **aes128-gcm**, Amiga → host | 5.82 | 8.08 | 14.90 | 28.30 | **28.15** |
+| **chacha20-poly1305**, host → Amiga | 5.72 | 7.14 | 12.94 | 45.04 | 33.10 |
+| **chacha20-poly1305**, Amiga → host | 5.76 | 7.14 | 11.42 | 46.34 | **44.86** |
+
+The 45 B column is the handshake: connect, curve25519 twice, an ed25519 verify
+and an ed25519 sign, **5.7–5.8 s** and flat to 2% across all four arms. The
+author's own note budgets about a minute on an unaccelerated machine and 0.9 s
+per X25519 key pair on an A3000; our debug log records 0.98 s for the key pair,
+0.98 s for the shared secret, 1.34 s to verify and 1.00 s to sign.
+
+The 68020 build of `libcryptossh.library` is staged, under the plain name, as
+the ReadMe instructs. Staging the 68000 file that ships under that name would
+have measured the wrong binary — worth roughly 2× on ChaCha20 by the author's
+figures.
+
+### 78.4 Against our Dropbear numbers, and the comparison is only half fair
+
+The Dropbear port on the `ssh-server-perf` branch measured `scp` at **27.57 KB/s** host→Amiga and **23.51** Amiga→host on
+ChaCha20-Poly1305, and a **22.5 s** handshake. Same emulated 14 MHz 68EC020,
+same three sizes, same slope method, both sets `cmp`ed.
+
+**One difference makes a straight comparison wrong, and it favours BebboSSH.**
+That work put *both ends* of the connection on the emulated CPU — our Dropbear client
+talking to our Dropbear server over loopback — so that 68020 was doing the
+encrypting *and* the decrypting. The figures above have an OpenSSH server on
+the build host, so only the client's half runs on the Amiga. Roughly half the
+crypto is missing from our side of the comparison, and that branch measured eight to nine tenths of a
+transferred byte to be the AEAD.
+
+What can be said without the caveat is the **handshake: 5.7 s against 22.5 s,
+4× faster**, and both are one client on one CPU talking to a server elsewhere.
+That gap is real and is not an artefact of where the server ran.
+
+Making the throughput comparison honest needs `bebbosshd` running in the guest
+with `bebboscp` connecting to `127.0.0.1`, which is the same arrangement that branch
+used and is the obvious next run. Until then the two throughput columns should
+not be put in one table.
+
+### 78.5 A repeatable stall in the download direction, unattributed
+
+In the `host → Amiga` direction the progress output shows a one-off pause of
+about 1.5 s, and in both runs it lands in the same place: the interval that
+carries the transfer from 32 KB to 64 KB received.
+
+    64 KB, run 2:   49% 32KB 28.8KB/s   98% 64KB 11.8KB/s
+    256 KB, run 2:  12% 32KB 28.8KB/s   24% 64KB 12.5KB/s   36% 96KB 30.4KB/s
+
+Everything before and after runs at 28–30 KB/s. The same code sending the same
+sizes in the other direction shows nothing, and the 256 KB download costs a
+consistent 1.5 s more than the 256 KB upload on both ciphers.
+
+**It is probably not the SSH channel window.** `clientchannel.cpp` opens with
+`windowSize` at 0x20000000 and adjusts in 0x10000000 steps, so nothing in that
+layer has a boundary at 64 KB.
+
+**It is probably not our receive path either**, on the evidence available:
+`bebboget` and our own `fetch` both pulled 256 KB down the same interface in
+the same session without it, and `fetch` at 61.94 KB/s would have shown a 1.5 s
+pause plainly. But `bebboget` produced one comparable outlier of its own
+(§78.7), so this is an observation and not a verdict.
+
+The reduced case worth building is a `recv()` loop against our library with no
+SSH at all, reading a 256 KB stream and timestamping every return, to see
+whether anything stalls at 64 KB received. That is a test against our library
+and is worth more than any workaround.
+
+### 78.6 bebboget, and our fetch, on one server in one run
+
+`tests/bebboget/run-bebboget.sh` runs both in a single emulator session against
+one local HTTPS server, so the two arms share the host's load, the SLIRP
+scheduling and the server process and the only difference is which TLS stack is
+working. A public URL was rejected on purpose: it makes the test depend on the
+network being up and on a CDN's cipher preference, and a first handshake at
+14 MHz can outlast a busy front end's patience (§11.8) — which would arrive as
+a flake rather than as the finding it is.
+
+Both arms skip certificate verification (`--sloppy`, `NOVERIFY`) because the
+server's certificate is generated here. That measures the record layer and the
+transport, and not either program's trust store.
+
+12/12 downloads byte-identical over two runs, every `rc 0`.
+
+### 78.7 Two TLS stacks, and they agree on almost nothing
+
+Left alone the two negotiate different crypto entirely, which the server now
+logs per request:
+
+| | version and suite | 45 B | 64 KB | 256 KB | 64K→256K |
+|---|---|---:|---:|---:|---:|
+| bebboget | TLS 1.3 `TLS_AES_256_GCM_SHA384` | 4.98 s | 7.80 | 16.38 | **22.38 KB/s** |
+| our `fetch` | TLS 1.2 `ECDHE-RSA-CHACHA20-POLY1305` | 1.10 | 2.18 | 5.28 | **61.94 KB/s** |
+
+Both are real — they are what each program does against a normal server — but
+the difference is partly the algorithm. `src/tls/ami_tls_crypto.c` offers
+0xC023, 0xC027, 0xCCA8, 0xCCA9 and two RSA CBC suites; bebboget's ChaCha20 is
+the TLS 1.3 suite 0x1303 and not 0xCCA8, so **the two stacks share no AEAD at
+all**. The whole intersection is TLS 1.2 `ECDHE-RSA-AES128-CBC-SHA256` (0xC027)
+plus two plain-RSA CBC suites.
+
+`-1` pins the server to 0xC027, which leaves both clients no choice:
+
+| pinned to 0xC027 | 45 B | 64 KB | 256 KB | 64K→256K |
+|---|---:|---:|---:|---:|
+| bebboget | 4.04 s | 7.52 | 18.02 | **18.29 KB/s** |
+| our `fetch` | 1.16 | 3.90 | 11.98 | **23.76 KB/s** |
+
+**On identical crypto we are about 30% faster, and the handshake is 3.5×
+faster.** The first pinned run reported 42.29 KB/s for bebboget off a 64 KB
+sample that had stalled by about 6 s; the 256 KB figure was identical in both
+runs (18.04 s and 18.02 s) and the second run's two slopes agree to 0.5%, so the
+second run is the one that means anything. That outlier is the one referred to
+in §78.5.
+
+The other thing the pinned table says is about us: our own `fetch` does 23.76
+KB/s on AES-128-CBC + HMAC-SHA256 and 61.94 KB/s on ChaCha20-Poly1305 — **2.6×,
+and that is `src/crypto68k`'s 68020 assembly against the portable CBC path.**
+
+### 78.8 Which tier this belongs in
+
+**Tier 2, local, not public CI**, on four counts, and only the last is ours to
+fix:
+
+1. `a2065.device` is Commodore's and cannot be fetched — the same reason
+   `bsdsocktest` is out of public CI.
+2. `locale.library` is Commodore's too, and §78.1 is what its absence looks
+   like. That is a second non-redistributable dependency, and a harder one to
+   explain to somebody whose run just hangs.
+3. The BebboSSH arm needs an `sshd` **and** an `sftp-server` on the build host.
+   `bebboscp` is an SFTP client, not an `scp -f`/`-t` one, so a server without
+   the subsystem fails at the channel request with nothing in its log.
+4. A full run is five minutes of *exclusive* emulator. `EMULATOR_TESTS` in
+   `tools/ci.sh` scores by the runner's exit status, and a2065.device 2.16
+   never honours `AbortIO()` on a pending `CMD_READ`, so a completed run can
+   hang at the last `CloseLibrary()` and be reported as a timeout.
+
+Point 4 is handled rather than tolerated: `tests/bebbossh/check.sh` and
+`tests/bebboget/check.sh` **print a verdict line and score on that**, ignoring
+what the emulator exited with. In practice every run here exited 0 — both
+clients close their sockets and their library cleanly — but the harness does
+not depend on it.
+
+So they are `run-*.sh` harnesses in the shape of `tests/leak/run-leak.sh`, run
+by hand or by a self-hosted runner that has the ROM and the drivers, and not
+added to `EMULATOR_TESTS`.
