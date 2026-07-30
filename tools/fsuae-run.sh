@@ -296,16 +296,43 @@ shared_run_warning() {
 }
 
 # Reclaim anything whose owner is gone, so a killed run cannot wedge the queue.
+#
+# And kill that owner's emulator, which is the part this used to miss. The trap
+# below covers TERM, INT, HUP and a normal exit, but SIGKILL cannot be trapped:
+# `kill -9` on this script leaves fs-uae reparented to init, holding a CPU
+# forever. Deleting the lock without reaping the emulator let the next run start
+# alongside the orphan -- the "SHARED the machine" state that reads as a crash
+# in the code under test. Seven of them once accumulated for an hour and a half.
 reap_stale() {
-    local d owner
+    local d owner emu
     for d in "$LOCKDIR" "$PERFWAIT" "$SLOTDIR"/*; do
         [ -d "$d" ] || continue
         owner=$(cat "$d/pid" 2>/dev/null || echo "")
         if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
+            emu=$(cat "$d/emupid" 2>/dev/null || echo "")
+            if [ -n "$emu" ] && kill -0 "$emu" 2>/dev/null; then
+                echo "==> orphaned emulator $emu from dead pid $owner; killing it" >&2
+                kill -TERM "$emu" 2>/dev/null || true
+                sleep 1
+                kill -KILL "$emu" 2>/dev/null || true
+            fi
             echo "==> reclaiming $(basename "$d") from dead pid $owner" >&2
             rm -rf "$d" 2>/dev/null || true
         fi
     done
+}
+
+# Where this run's own lock lives, so the emulator pid can be recorded next to
+# the owner pid a later reap_stale() will test.
+held_dir() {
+    if [ -n "$SLOT_HELD" ]; then
+        echo "$SLOT_HELD"
+    elif [ "$LOCK_HELD" = "1" ]; then
+        echo "$LOCKDIR"
+    fi
+    # Explicit, because a bare if/elif that matches neither arm exits non-zero
+    # and this runs under set -e.
+    return 0
 }
 
 slots_busy() { set -- "$SLOTDIR"/*/; [ -d "$1" ] && ls -d "$SLOTDIR"/*/ 2>/dev/null | wc -l || echo 0; }
@@ -561,6 +588,12 @@ WALL_START=$(date +%s)
 #   disposition off this script, whose own pipelines want the default.
 ( trap '' PIPE; exec "$FSUAE" "$CFG" ) >"$ROOT/build/fsuae$TAG.log" 2>&1 &
 FSUAE_PID=$!
+
+# Recorded so that if this script is SIGKILLed -- the one signal the trap
+# cannot see -- the next run's reap_stale() kills the emulator instead of
+# quietly sharing the machine with it.
+_held=$(held_dir)
+[ -n "$_held" ] && echo "$FSUAE_PID" > "$_held/emupid" 2>/dev/null || true
 
 # cleanup_emulator() clears FSUAE_PID, so keep a copy for the wait below --
 # otherwise the exit status is the shell complaining about an empty pid.

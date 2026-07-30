@@ -13,6 +13,7 @@ add_subdirectory(tcpdrill)
 # that read bytes we did not write. Nothing to build when cross-compiling.
 add_subdirectory(fuzz)
 add_subdirectory(leak)
+add_subdirectory(concurrent)
 if(AMINETXDUO_IPV6)
     add_subdirectory(ipv6)
 endif()
