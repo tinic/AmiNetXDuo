@@ -201,13 +201,15 @@ jobs:
             echo "archive: drop it on a Workbench window and run \`Install-AmiNetXDuo\`."
             echo
             echo "**What this build was tested with.** Tier 1 only -- host tests, all"
-            echo "four cross configurations and the conformance suite build. The"
+            echo "seven cross configurations and the conformance suite build. The"
             echo "on-Amiga tiers need a Kickstart ROM and \`a2065.device\`, neither of"
             echo "which is redistributable, so they do not run here. The conformance"
             echo "score, throughput and anything measured under emulation come from a"
             echo "machine that has them; see the README."
             echo
-            echo "Nothing in this project has yet run on real hardware."
+            echo "This particular archive has not been run on real hardware. The stack"
+            echo "has: an A3000/060 with an X-Surf-100, by a user, which is where two"
+            echo "bugs were found that emulation had not."
           } > "$notes"
 
           gh release create "${GITHUB_REF#refs/tags/}" \
