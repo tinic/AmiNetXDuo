@@ -343,6 +343,32 @@ static VOID load_gateway(AmiConfig *cfg)
     }
 }
 
+#ifdef AMINETXDUO_MDNS
+/*
+ * Only in an mDNS build. The AmiSdService fields exist in both, so nothing
+ * else has to change, but a build with no responder in it should not open a
+ * file it can do nothing with.
+ */
+static VOID load_dnssd(AmiConfig *cfg)
+{
+    char *buf = (char *)ami_cfg_read_file(AMI_CFG_FILE_DNSSD, NULL);
+
+    if (buf == NULL)
+        return;
+
+    ami_cfg_problem_file(AMI_CFG_FILE_DNSSD);
+    ami_cfg_parse_dnssd(buf, cfg->sd_services, AMI_CFG_MAX_SD_SERVICES,
+                        &cfg->sd_service_count);
+    ami_cfg_problem_file(NULL);
+
+    /* Every field was copied into cfg, so the text goes back now. */
+    ami_free(buf);
+
+    AMI_INFO("config: %lu service(s) to advertise",
+             (unsigned long)cfg->sd_service_count);
+}
+#endif
+
 static VOID load_hostname(AmiConfig *cfg)
 {
     ULONG index;
@@ -399,6 +425,9 @@ LONG ami_config_load(AmiConfig *cfg)
     load_interfaces(cfg);
     load_resolver(cfg);
     load_gateway(cfg);
+#ifdef AMINETXDUO_MDNS
+    load_dnssd(cfg);
+#endif
 
     ami_netdb_load();
     load_hostname(cfg);

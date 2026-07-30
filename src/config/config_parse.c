@@ -957,3 +957,265 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
             *out = gateway;
     }
 }
+
+/* ---------------------------------------------------- service_discovery */
+
+/*
+ * DEVS:Internet/service_discovery, one service per line:
+ *
+ *     <type>  <port>  [instance name]  [txt=key=value;key=value]
+ *
+ * The file exists because the alternative does not reach anyone. AmiNetXDuo
+ * ships clients only, so an API for a server to call would be an API no
+ * server calls -- the servers an Amiga runs are AmiFTPd and its kind, already
+ * built, and they will not be recompiled against ours. What the user can do
+ * is say what is listening, which is exactly the assertion a _ftp._tcp record
+ * makes. AmiTCP's db/inetd.conf declares the same thing the same way.
+ *
+ * The instance name may contain spaces (RFC 6763 4.1.1 allows rich text) and
+ * runs to the end of the line or to the txt= field, so it needs no quotes;
+ * quotes are accepted anyway, since ami_cfg_unquote() costs nothing here.
+ *
+ * '#' starts a comment anywhere, as in the netdb files. ';' is a comment only
+ * as the first character of a line, because ';' is the separator between
+ * key=value pairs inside a TXT record and eating it mid-line would silently
+ * truncate one.
+ */
+
+/* One whitespace-delimited word, NUL-terminated in place. No quoting: neither
+ * a service type nor a port number can contain a space. */
+static char *dnssd_word(char **cursor)
+{
+    char *p = *cursor;
+    char *start;
+
+    while (*p == ' ' || *p == '\t')
+        p++;
+
+    if (*p == '\0')
+    {
+        *cursor = p;
+        return NULL;
+    }
+
+    start = p;
+    while (*p != '\0' && *p != ' ' && *p != '\t')
+        p++;
+
+    if (*p != '\0')
+        *p++ = '\0';
+
+    *cursor = p;
+
+    return start;
+}
+
+/*
+ * RFC 6763 7: "_" then 1..15 characters of letters, digits and hyphens, then
+ * "._tcp" or "._udp". The 15 is where NX_MDNS_TYPE_MAX's 21 comes from, so a
+ * type this accepts always fits AMI_CFG_SD_TYPE_LEN and the module's own
+ * limit, and no accepted line can be truncated on the way in.
+ */
+static BOOL dnssd_type_ok(const char *s)
+{
+    ULONG n = 0;
+
+    if (*s++ != '_')
+        return FALSE;
+
+    while (*s != '\0' && *s != '.')
+    {
+        if (!((*s >= 'a' && *s <= 'z') || (*s >= 'A' && *s <= 'Z') ||
+              (*s >= '0' && *s <= '9') || *s == '-'))
+            return FALSE;
+        s++;
+        n++;
+    }
+
+    if (n == 0 || n > 15)
+        return FALSE;
+
+    return (BOOL)(ami_cfg_stricmp(s, "._tcp") == 0 ||
+                  ami_cfg_stricmp(s, "._udp") == 0);
+}
+
+/*
+ * Find the txt= field: "txt=" at a word boundary, case-insensitive. The &&
+ * chain stops at the first mismatch, so a string ending mid-keyword is never
+ * read past its NUL.
+ */
+static char *dnssd_txt_field(char *rest)
+{
+    char *p = rest;
+
+    for (;;)
+    {
+        if ((p == rest || p[-1] == ' ' || p[-1] == '\t') &&
+            (p[0] == 't' || p[0] == 'T') &&
+            (p[1] == 'x' || p[1] == 'X') &&
+            (p[2] == 't' || p[2] == 'T') &&
+            p[3] == '=')
+            return p;
+
+        if (*p == '\0')
+            return NULL;
+        p++;
+    }
+}
+
+#define CFG_HINT_DNSSD \
+    "A line is <type> <port>, for example:  _ftp._tcp  21.  The type is an " \
+    "RFC 6763 name: an underscore, up to fifteen letters, digits or hyphens, " \
+    "then ._tcp or ._udp."
+
+VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count)
+{
+    char *cursor = buf;
+    char *line;
+    ULONG lineno = 0;
+    BOOL  full   = FALSE;
+
+    if (buf == NULL || out == NULL || count == NULL)
+        return;
+
+    while ((line = ami_cfg_next_line(&cursor)) != NULL)
+    {
+        AmiSdService *svc;
+        char         *rest;
+        char         *type;
+        char         *port_text;
+        char         *txt = NULL;
+        ULONG         port = 0;
+        ULONG         namelen;
+
+        lineno++;
+
+        ami_cfg_strip_comment(line, "#");
+        line = ami_cfg_trim(line);
+        if (*line == '\0' || *line == ';')
+            continue;
+
+        rest      = line;
+        type      = dnssd_word(&rest);
+        port_text = dnssd_word(&rest);
+
+        if (type == NULL)
+            continue;
+
+        if (!dnssd_type_ok(type))
+        {
+            AMI_WARN("config: service_discovery: bad type '%s'", type);
+            report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "the service type",
+                             type, CFG_HINT_DNSSD "  The line was ignored.");
+            continue;
+        }
+
+        if (port_text == NULL || !ami_cfg_parse_ulong(port_text, &port) ||
+            port == 0 || port > 65535UL)
+        {
+            AMI_WARN("config: service_discovery: bad port for '%s'", type);
+            report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "the port",
+                             (port_text != NULL) ? port_text : "",
+                             "A port is a number from 1 to 65535, and it is "
+                             "the port the server is really listening on.  "
+                             "The line was ignored.");
+            continue;
+        }
+
+        /* Split the remainder into the instance name and the txt= field. */
+        rest = ami_cfg_trim(rest);
+        txt  = dnssd_txt_field(rest);
+        if (txt != NULL)
+        {
+            char *end = txt;
+
+            while (end > rest && (end[-1] == ' ' || end[-1] == '\t'))
+                end--;
+
+            *end = '\0';    /* the name now ends where the field began */
+            txt += 4;
+        }
+
+        ami_cfg_unquote(rest);
+        if (txt != NULL)
+            ami_cfg_unquote(txt);
+
+        /*
+         * A dot in the instance name would become a label boundary: the module
+         * builds "<name>.<type>.local" as text and encodes it by splitting on
+         * dots, so "My.Server" would claim a name nothing asked for. Say so
+         * rather than quietly renaming it.
+         */
+        namelen = ami_cfg_strlen(rest);
+        if (namelen > 0)
+        {
+            const char *p;
+
+            for (p = rest; *p != '\0'; p++)
+            {
+                if (*p == '.')
+                {
+                    AMI_WARN("config: service_discovery: '%s' has a dot", rest);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
+                                     "the service name", rest,
+                                     "A service name is one label, so it "
+                                     "cannot contain a dot.  The line was "
+                                     "ignored.");
+                    break;
+                }
+            }
+            if (*p == '.')
+                continue;
+        }
+
+        /* 4 characters of headroom: the module appends " (2)" on a collision. */
+        if (namelen + 4 >= (ULONG)AMI_CFG_NAME_LEN)
+        {
+            AMI_WARN("config: service_discovery: name too long on line %lu",
+                     (unsigned long)lineno);
+            ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN,
+                            "the service name is too long",
+                            "Keep it under sixty characters.  The line was "
+                            "ignored.");
+            continue;
+        }
+
+        if (txt != NULL && ami_cfg_strlen(txt) >= (ULONG)AMI_CFG_SD_TXT_LEN)
+        {
+            AMI_WARN("config: service_discovery: txt too long on line %lu",
+                     (unsigned long)lineno);
+            ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN,
+                            "the txt= field is too long",
+                            "A TXT record holds at most 255 characters.  The "
+                            "line was ignored.");
+            continue;
+        }
+
+        if (*count >= max)
+        {
+            /* Once, however many lines follow. */
+            if (!full)
+            {
+                full = TRUE;
+                AMI_WARN("config: more than %ld services, ignoring the rest",
+                         (long)max);
+                ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN,
+                                "there are more services here than can be "
+                                "advertised",
+                                "At most eight are announced; the ones after "
+                                "that were ignored.");
+            }
+            continue;
+        }
+
+        svc = &out[*count];
+        ami_cfg_zero(svc, sizeof(*svc));
+        ami_cfg_copy_string(svc->type, sizeof(svc->type), type);
+        ami_cfg_copy_string(svc->name, sizeof(svc->name), rest);
+        if (txt != NULL)
+            ami_cfg_copy_string(svc->txt, sizeof(svc->txt), txt);
+        svc->port = (UWORD)port;
+
+        (*count)++;
+    }
+}

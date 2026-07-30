@@ -61,7 +61,10 @@ this document names its untested parts rather than only its tested ones.
   loopback, where the skipped tests need a second machine. Roadshow scores 138.
 - **Fuzzing** — `fuzz_config` over the configuration parsers, `fuzz_bpf` over the
   filter VM, and `fuzz_dns` over DNS responses, all under ASan and UBSan on the
-  host and all in `ctest`. `fuzz_dns` drives the real client through
+  host and all in `ctest`. Every parser that reads a file out of `DEVS:` is in
+  `fuzz_config`, including `DEVS:Internet/service_discovery`, which additionally
+  gets its own sweep on its own seed so a failure names the parser.
+  `fuzz_dns` drives the real client through
   `_nx_dns_response_receive()`, the name unencoder and the resource walk, with
   compression pointers that point at themselves, cycle, or run past the
   datagram: 250,128 datagrams across two seeds, no undefined behaviour. The one

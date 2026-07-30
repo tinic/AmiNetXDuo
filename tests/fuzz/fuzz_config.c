@@ -8,6 +8,9 @@
  * netdb.c, config_text.c and config_parse.c can be driven with malformed
  * input under -fsanitize=address,undefined.
  *
+ * Every parser that reads a file out of DEVS: belongs here, including
+ * DEVS:Internet/service_discovery -- see SECURITY.md.
+ *
  * Build (see fuzz.sh):
  *   cc -fsanitize=address,undefined -g -std=c99 -Iinclude \
  *      -Isrc/config/test/shim fuzz_config.c \
@@ -16,6 +19,7 @@
  * Usage:
  *   fuzz_config < case            one case, every file fed the same bytes
  *   fuzz_config -f N < case       feed only file N (0..3 netdb, 4..6 config)
+ *   fuzz_config -s [< case]       the service_discovery parser alone
  *   fuzz_config -r SEED COUNT     built-in random generator, no corpus needed
  */
 
@@ -112,6 +116,34 @@ static const char *const fz_files[] =
 #define FZ_NFILES (int)(sizeof(fz_files) / sizeof(fz_files[0]))
 
 /*
+ * DEVS:Internet/service_discovery, in its own function so that `-s` can sweep
+ * it alone and a crash names this parser rather than "the config".
+ *
+ * The array is exactly `max` entries and on the heap, so ASan's redzone sits
+ * immediately after the last slot: a parser that trusted its own count instead
+ * of checking it against max faults here rather than scribbling on slack.  The
+ * count starts non-zero because the contract is "append from *count", not
+ * "fill from zero".
+ */
+static void fz_run_dnssd(const char *data, size_t len)
+{
+    UWORD         max   = AMI_CFG_MAX_SD_SERVICES - 1;
+    UWORD         count = 1;
+    AmiSdService *svc   = (AmiSdService *)calloc(max, sizeof(*svc));
+    char         *scratch = (char *)malloc(len + 1);
+
+    if (svc != NULL && scratch != NULL)
+    {
+        memcpy(scratch, data, len);
+        scratch[len] = '\0';
+        ami_cfg_parse_dnssd(scratch, svc, max, &count);
+    }
+
+    free(svc);
+    free(scratch);
+}
+
+/*
  * One pass over everything a file's bytes can reach.  Each parser is driven
  * on its own so a crash names the parser rather than "the config".
  */
@@ -182,6 +214,8 @@ static void fz_run_once(char *data, size_t len, int which)
     (void)ami_cfg_parse_ulong(scratch, &value);
     (void)ami_cfg_parse_net_number(scratch, &value);
     free(scratch);
+
+    fz_run_dnssd(data, len);
 }
 
 /* ------------------------------------------------------- random generator */
@@ -205,7 +239,10 @@ static const char *const fz_atoms[] =
     "\\", "/", "=", ".", ":", "-", "a", "Z", "0", "9", "127.0.0.1",
     "255.255.255.255", "HOST", "NAMESERVER", "DOMAIN", "SEARCH", "domain",
     "21/tcp", "0x", "4294967296", "-1", "eth0", "localhost", "\"a b\"",
-    "\"unterminated", "%s", "\x7f", "\x80", "\xff"
+    "\"unterminated", "%s", "\x7f", "\x80", "\xff",
+    /* service_discovery: the type grammar, the txt= field and its separator. */
+    "_ftp._tcp", "_http._tcp", "_x._udp", "._tcp", "_", "txt=", "TXT=",
+    "txt", "path=/", "Amiga web server", "65536", "80"
 };
 
 static size_t fz_generate(char *out, size_t cap)
@@ -233,6 +270,7 @@ int main(int argc, char **argv)
 {
     static char buf[65536];
     int         which = -1;
+    int         dnssd = 0;
     int         i;
 
     for (i = 1; i < argc; i++)
@@ -240,6 +278,10 @@ int main(int argc, char **argv)
         if (strcmp(argv[i], "-f") == 0 && i + 1 < argc)
         {
             which = atoi(argv[++i]);
+        }
+        else if (strcmp(argv[i], "-s") == 0)
+        {
+            dnssd = 1;
         }
         else if (strcmp(argv[i], "-r") == 0 && i + 2 < argc)
         {
@@ -254,6 +296,12 @@ int main(int argc, char **argv)
                 size_t len = fz_generate(buf, sizeof(buf));
                 int    f;
 
+                if (dnssd)
+                {
+                    fz_run_dnssd(buf, len);
+                    continue;
+                }
+
                 for (f = 0; f < FZ_NFILES; f++)
                     fz_run_once(buf, len, f);
             }
@@ -267,7 +315,10 @@ int main(int argc, char **argv)
     {
         size_t len = fread(buf, 1, sizeof(buf), stdin);
 
-        fz_run_once(buf, len, which);
+        if (dnssd)
+            fz_run_dnssd(buf, len);
+        else
+            fz_run_once(buf, len, which);
     }
 
     printf("fuzz_config: one case, clean\n");

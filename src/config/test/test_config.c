@@ -1026,6 +1026,130 @@ static void test_netdb_garbage(void)
     CHECK(ami_alloc_count() == 0);
 }
 
+static void test_service_discovery(void)
+{
+    AmiSdService svc[AMI_CFG_MAX_SD_SERVICES];
+    UWORD        count;
+    char        *buf;
+
+    printf("service_discovery\n");
+
+    memset(svc, 0, sizeof(svc));
+    count = 0;
+
+    buf = dup_text(
+        "# DEVS:Internet/service_discovery\n"
+        "; a leading semicolon is a comment too\n"
+        "\n"
+        "_ftp._tcp\t21\n"
+        "  _http._tcp   80    Amiga web server\n"
+        "_smb._tcp 139 \"Quoted Name\"\n"
+        "_http._udp 8080 txt=path=/;u=guest\n"
+        "_ssh._tcp 22 Shell txt=v=2\n"
+        "_daap._tcp 3689 # a comment after the line\n");
+    ami_cfg_parse_dnssd(buf, svc, AMI_CFG_MAX_SD_SERVICES, &count);
+    free(buf);
+
+    CHECK(count == 6);
+
+    CHECK_STR(svc[0].type, "_ftp._tcp");
+    CHECK(svc[0].port == 21);
+    CHECK_STR(svc[0].name, "");         /* empty: the host name is used */
+    CHECK_STR(svc[0].txt, "");
+
+    /* An unquoted instance name runs to the end of the line, spaces and all. */
+    CHECK_STR(svc[1].type, "_http._tcp");
+    CHECK(svc[1].port == 80);
+    CHECK_STR(svc[1].name, "Amiga web server");
+
+    CHECK_STR(svc[2].name, "Quoted Name");
+
+    /* txt= takes the rest of the line, ';' included -- it is the separator. */
+    CHECK_STR(svc[3].type, "_http._udp");
+    CHECK(svc[3].port == 8080);
+    CHECK_STR(svc[3].name, "");
+    CHECK_STR(svc[3].txt, "path=/;u=guest");
+
+    CHECK_STR(svc[4].name, "Shell");
+    CHECK_STR(svc[4].txt, "v=2");
+
+    CHECK_STR(svc[5].type, "_daap._tcp");
+    CHECK(svc[5].port == 3689);
+    CHECK_STR(svc[5].name, "");
+
+    /* Every kind of malformed line: reported, skipped, never fatal. */
+    memset(svc, 0, sizeof(svc));
+    count = 0;
+
+    buf = dup_text(
+        "ftp._tcp 21\n"              /* no leading underscore              */
+        "_ftp 21\n"                  /* no transport                       */
+        "_ftp._sctp 21\n"            /* not a transport we know            */
+        "_f*tp._tcp 21\n"            /* illegal character in the type      */
+        "_thisnameiswaytoolong._tcp 21\n"
+        "__._tcp 21\n"               /* empty service label                */
+        "_ftp._tcp\n"                /* no port                            */
+        "_ftp._tcp 0\n"
+        "_ftp._tcp 65536\n"
+        "_ftp._tcp notanumber\n"
+        "_ftp._tcp 21 My.Server\n"   /* a dot would become a label break   */
+        "_good._tcp 22\n");
+    ami_cfg_parse_dnssd(buf, svc, AMI_CFG_MAX_SD_SERVICES, &count);
+    free(buf);
+
+    CHECK(count == 1);
+    CHECK_STR(svc[0].type, "_good._tcp");
+    CHECK(svc[0].port == 22);
+
+    /* More lines than slots: the first ones are kept and nothing overruns. */
+    memset(svc, 0, sizeof(svc));
+    count = 0;
+
+    buf = dup_text(
+        "_a._tcp 1\n_b._tcp 2\n_c._tcp 3\n_d._tcp 4\n_e._tcp 5\n"
+        "_f._tcp 6\n_g._tcp 7\n_h._tcp 8\n_i._tcp 9\n_j._tcp 10\n");
+    ami_cfg_parse_dnssd(buf, svc, AMI_CFG_MAX_SD_SERVICES, &count);
+    free(buf);
+
+    CHECK(count == AMI_CFG_MAX_SD_SERVICES);
+    CHECK_STR(svc[AMI_CFG_MAX_SD_SERVICES - 1].type, "_h._tcp");
+
+    /* A max below the array size, and a count that does not start at zero. */
+    memset(svc, 0, sizeof(svc));
+    count = 2;
+
+    buf = dup_text("_a._tcp 1\n_b._tcp 2\n_c._tcp 3\n_d._tcp 4\n");
+    ami_cfg_parse_dnssd(buf, svc, 3, &count);
+    free(buf);
+
+    CHECK(count == 3);
+    CHECK_STR(svc[0].type, "");
+    CHECK_STR(svc[2].type, "_a._tcp");
+    CHECK_STR(svc[3].type, "");
+
+    /* A name that leaves no room for the module's " (2)" rename suffix. */
+    {
+        char  line[AMI_CFG_NAME_LEN + 32];
+        int   i;
+
+        strcpy(line, "_ftp._tcp 21 ");
+        for (i = 0; i < AMI_CFG_NAME_LEN; i++)
+            strcat(line, "x");
+        strcat(line, "\n");
+
+        memset(svc, 0, sizeof(svc));
+        count = 0;
+        buf = dup_text(line);
+        ami_cfg_parse_dnssd(buf, svc, AMI_CFG_MAX_SD_SERVICES, &count);
+        free(buf);
+
+        CHECK(count == 0);
+    }
+
+    /* Nothing here allocates, so nothing here can leak. */
+    CHECK(ami_alloc_count() == 0);
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 1 && strcmp(argv[1], "-v") == 0)
@@ -1047,6 +1171,7 @@ int main(int argc, char **argv)
     test_netdb();
     test_netdb_missing_files();
     test_netdb_garbage();
+    test_service_discovery();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
 

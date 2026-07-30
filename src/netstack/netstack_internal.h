@@ -72,10 +72,14 @@
  * it carries the record's state machine, its retransmit counters and its
  * interface index as well as the data -- so the arithmetic differs.
  *
- * The local cache holds what this machine claims, today just the A record for
- * <host>.local per interface.  It is sized for a handful so that adding a
- * service later (a PTR, an SRV and a TXT per service) does not need a revisit.
- * If it will not hold our own name, the machine has no name.
+ * The local cache holds what this machine claims: the A record for
+ * <host>.local per interface, plus four records per declared service -- an
+ * SRV, a TXT and two PTRs, one of them the _services._dns-sd._udp enumeration
+ * -- and the names they point at.  An NX_MDNS_RR is 56 bytes and the names run
+ * to about 90 more, so 384 per service covers it with room over; the base
+ * kilobyte is the host's own name.  If it will not hold our own name, the
+ * machine has no name; if it will not hold a service, that service is not
+ * advertised and ami_ns_mdns_services() says which.
  *
  * The peer cache holds what has been learnt; full means the oldest record is
  * evicted, nothing fails.  Every .local lookup lands here, so it is sized
@@ -86,9 +90,10 @@
  *
  * Both are inline in the AmiNetStack for the reason ns_DnsCache is: identical
  * lifetime, small, and an allocation that could fail would need a "no mDNS"
- * path.  Together they are 3 KB, 0.07% of the 4 MB floor target.
+ * path.  Together they are 6 KB.
  */
-#define AMI_MDNS_LOCAL_CACHE_BYTES  1024
+#define AMI_MDNS_LOCAL_CACHE_BYTES  \
+    (1024 + AMI_CFG_MAX_SD_SERVICES * 384)
 #define AMI_MDNS_PEER_CACHE_BYTES   2048
 #endif
 

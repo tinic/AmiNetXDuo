@@ -33,6 +33,16 @@ extern "C" {
 #define AMI_CFG_FILE_SERVICES       AMI_CFG_DIR_INTERNET "/services"
 
 /*
+ * DNS-SD advertisements, and NOT "/services": that name is the netdb file
+ * above, the /etc/services equivalent that maps a name to a port number for
+ * getservbyname(). The two would be confused by every reader and by anyone
+ * migrating a real /etc tree, so this one is named after what it does --
+ * service discovery -- in the same two-word-underscore style as
+ * name_resolution and default_gateway.
+ */
+#define AMI_CFG_FILE_DNSSD          AMI_CFG_DIR_INTERNET "/service_discovery"
+
+/*
  * Roadshow truncates the interface name (the config file's name) to 15
  * characters and ShowNetStatus displays that truncated form, so match it
  * rather than the 63 characters AMI_CFG_NAME_LEN would allow.
@@ -153,6 +163,16 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out);
  */
 VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
                             char *hostname, ULONG hostname_len);
+
+/*
+ * Parse DEVS:Internet/service_discovery into out[0..max-1], appending from
+ * *count. `buf` is modified in place, but every accepted field is copied into
+ * the caller's array, so the buffer can be freed straight after.
+ *
+ * There is no allocation and no sizing pass: one bounded array, and *count is
+ * checked against max before every write.
+ */
+VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count);
 
 /*
  * Parse DEVS:Internet/default_gateway (DEVICE/UNIT/GATEWAY) or

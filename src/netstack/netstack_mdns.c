@@ -15,11 +15,16 @@
  * then ENV:HOSTNAME, then DEVS:Internet/hosts, and only then falls back to
  * "amiga". That is the single source of truth for the name, not this file.
  *
- * No services are advertised. AmiNetXDuo ships clients -- fetch, ftp, telnet,
- * tftp, nc, sntp, whois -- and no servers, so a _ftp._tcp or _telnet._tcp
- * record would point at nothing and a browser that believed it would hang on a
- * connection nothing will accept. When a server does exist,
- * nx_mdns_service_add() is one call and goes here.
+ * Services are advertised only when the user declares them, in
+ * DEVS:Internet/service_discovery. AmiNetXDuo ships clients -- fetch, ftp,
+ * telnet, tftp, nc, sntp, whois -- and no servers, so nothing here may invent
+ * a _ftp._tcp record: it would point at nothing and a browser that believed it
+ * would hang on a connection nothing will accept. What the machine may well be
+ * running is somebody else's server -- AmiFTPd and its kind -- and those
+ * binaries will never be recompiled to call an API of ours, so an API would
+ * reach nothing that exists. A file the user writes does, and it is the user's
+ * claim rather than ours. AmiTCP's db/inetd.conf says the same thing the same
+ * way. Nothing below connects to the port to check it.
  *
  * RFC 6762 9: probe three times before claiming a name, and rename on a
  * conflict. The vendored module does both; ami_ns_mdns_probing() below reports
@@ -157,6 +162,56 @@ static VOID ami_ns_mdns_probing(NX_MDNS *mdns_ptr, UCHAR *name, UINT state)
     }
 }
 
+/* --------------------------------------------------------- the services */
+
+/*
+ * Register what DEVS:Internet/service_discovery declared, on one interface.
+ *
+ * ttl 0 is "the RFC's own values", not "no TTL": the module then uses 120
+ * seconds for the SRV and 4500 for the TXT and PTRs, per RFC 6762 10. One
+ * number would flatten all three.
+ *
+ * priority and weight 0, because RFC 2782 uses them to choose between several
+ * hosts offering one service and there is one host here.
+ *
+ * Unique rather than shared, because RFC 6763 4.1.1 makes the instance name
+ * the thing that must not clash: the module then probes the SRV and TXT and
+ * renames on a conflict. That is also where the renaming wart noted above
+ * stops being one -- " (2)" is the RFC 6763 spelling for a second service
+ * instance, and wrong only for a host name.
+ *
+ * A TXT record goes out either way (RFC 6763 6.1; the module writes one empty
+ * string when none is given), so txt= chooses its content, not its existence.
+ */
+static VOID ami_ns_mdns_services(AmiNetStack *ns, UINT index)
+{
+    UWORD i;
+
+    for (i = 0; i < ns->ns_Config.sd_service_count; i++)
+    {
+        AmiSdService *svc  = &ns->ns_Config.sd_services[i];
+        char         *name = (svc->name[0] != '\0') ? svc->name
+                                                    : ns->ns_MdnsLabel;
+        UCHAR        *txt  = (svc->txt[0] != '\0') ? (UCHAR *)svc->txt
+                                                   : NX_NULL;
+        UINT          status;
+
+        status = nx_mdns_service_add(&ns->ns_Mdns, (UCHAR *)name,
+                                     (UCHAR *)svc->type, NX_NULL, txt,
+                                     0UL, 0, 0, svc->port,
+                                     NX_MDNS_RR_SET_UNIQUE, index);
+        if (status != NX_SUCCESS)
+        {
+            AMI_WARN("netstack: '%s' on port %ld is not advertised (%ld)",
+                     svc->type, (long)svc->port, (long)status);
+            continue;
+        }
+
+        AMI_INFO("netstack: advertising %s port %ld as '%s'",
+                 svc->type, (long)svc->port, name);
+    }
+}
+
 /* ------------------------------------------------------------- lifecycle */
 
 LONG ami_netstack_mdns_start(AmiNetStack *ns)
@@ -227,6 +282,13 @@ LONG ami_netstack_mdns_start(AmiNetStack *ns)
             continue;
         }
         enabled++;
+
+        /*
+         * After nx_mdns_enable(), because the module keeps a record set per
+         * interface index and a service added to an interface that is not
+         * enabled would never be announced.
+         */
+        ami_ns_mdns_services(ns, (UINT)i);
     }
 
     if (enabled == 0)
@@ -235,8 +297,10 @@ LONG ami_netstack_mdns_start(AmiNetStack *ns)
         return AMI_NET_ERR_NODEV;
     }
 
-    AMI_INFO("netstack: mDNS probing for '%s.local' on %ld interface(s)",
-             ns->ns_MdnsLabel, (long)enabled);
+    AMI_INFO("netstack: mDNS probing for '%s.local' on %ld interface(s), "
+             "%ld service(s)",
+             ns->ns_MdnsLabel, (long)enabled,
+             (long)ns->ns_Config.sd_service_count);
 
     return AMI_NET_OK;
 }

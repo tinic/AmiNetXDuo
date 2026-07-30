@@ -25,6 +25,22 @@ extern "C" {
 #define AMI_CFG_NAME_LEN            64
 #define AMI_CFG_PATH_LEN            128
 
+/*
+ * DNS-SD services declared in DEVS:Internet/service_discovery.
+ *
+ * Eight is the cap because a machine advertising more than eight servers is
+ * not the machine this stack runs on, and because everything the mDNS module
+ * is handed has to fit a fixed local record cache.
+ *
+ * The type is bounded at RFC 6763 7's grammar -- "_" + at most 15 characters
+ * + "._tcp" -- which is 21, so a type the parser accepts always fits the
+ * module's NX_MDNS_TYPE_MAX. The TXT field is bounded at the module's
+ * NX_MDNS_NAME_MAX of 255.
+ */
+#define AMI_CFG_MAX_SD_SERVICES     8
+#define AMI_CFG_SD_TYPE_LEN         22
+#define AMI_CFG_SD_TXT_LEN          256
+
 typedef enum {
     AMI_IPTYPE_STATIC = 0,
     AMI_IPTYPE_DHCP,
@@ -89,12 +105,33 @@ typedef struct AmiResolverConfig {
     UWORD   search_count;
 } AmiResolverConfig;
 
+/*
+ * One service the user says is listening on this machine. AmiNetXDuo ships no
+ * servers, so this is always somebody else's -- an AmiFTPd, a web server, a
+ * Samba-alike -- and the file is the user's claim that it is running. Nothing
+ * here connects to the port to check.
+ */
+typedef struct AmiSdService {
+    char    type[AMI_CFG_SD_TYPE_LEN];  /* "_ftp._tcp"                          */
+    char    name[AMI_CFG_NAME_LEN];     /* instance name; empty = the host name */
+    char    txt[AMI_CFG_SD_TXT_LEN];    /* "key=value;key=value"; empty = none  */
+    UWORD   port;
+} AmiSdService;
+
 typedef struct AmiConfig {
     AmiIfConfig         interfaces[AMI_CFG_MAX_INTERFACES];
     UWORD               interface_count;
     AmiResolverConfig   resolver;
     char                hostname[AMI_CFG_NAME_LEN];
     ULONG               default_gateway;     /* 0 = none / from DHCP             */
+
+    /*
+     * Present in every build, like the IPv6 interface fields above: one
+     * AmiConfig serves a build with AMINETXDUO_MDNS and one without, and only
+     * the loader and the netstack act on these.
+     */
+    AmiSdService        sd_services[AMI_CFG_MAX_SD_SERVICES];
+    UWORD               sd_service_count;
 } AmiConfig;
 
 /*

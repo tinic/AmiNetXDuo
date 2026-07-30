@@ -191,6 +191,13 @@ add_test(NAME fuzz_netdb_regression
 
 add_test(NAME fuzz_config_sweep
          COMMAND fuzz_config -r 1 ${AMINETXDUO_FUZZ_CASES})
+
+# DEVS:Internet/service_discovery, alone and on its own seed. It is in the
+# sweep above as well; this one exists so that a failure names the parser, and
+# so that the service-discovery grammar gets its own run of cases rather than
+# sharing them with four netdb files.
+add_test(NAME fuzz_dnssd_sweep
+         COMMAND fuzz_config -s -r 3 ${AMINETXDUO_FUZZ_CASES})
 # fuzz_mdns is built but deliberately NOT registered: NetX Duo's mDNS cache
 # stores pointers in single ULONG slots, so it is only coherent when
 # sizeof(void*) == sizeof(ULONG) == 4 and it spins inside nx_mdns_enable() on
@@ -202,4 +209,5 @@ add_test(NAME fuzz_bpf_sweep
          COMMAND fuzz_bpf -r 1 ${AMINETXDUO_FUZZ_CASES})
 
 # A soak set by AMINETXDUO_FUZZ_CASES needs longer than ctest's default.
-set_tests_properties(fuzz_config_sweep fuzz_bpf_sweep PROPERTIES TIMEOUT 1800)
+set_tests_properties(fuzz_config_sweep fuzz_dnssd_sweep fuzz_bpf_sweep
+                     PROPERTIES TIMEOUT 1800)
