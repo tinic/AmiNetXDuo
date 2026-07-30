@@ -15,21 +15,23 @@ PLEASE READ THIS FIRST
 
 AmiNetXDuo works, and it is not finished.
 
-It gets a DHCP lease, answers ARP, pings its gateway, resolves names and
-moves TCP in both directions, and it scores 125 of 142 on the bsdsocktest
-conformance suite. It has been tested under emulation on Kickstart 3.1
-with a 68020 and a 68030.
+It gets a DHCP lease, configures itself by SLAAC, answers ARP and
+neighbour discovery, pings its gateway, resolves names and moves TCP in
+both directions, and it scores 142 of 142 on the bsdsocktest conformance
+suite. It has been tested under emulation on Kickstart 3.1 with a 68020
+and a 68030, and on a real A3000 with an X-Surf-100.
 
-It has NOT been run on real hardware, and it is not yet something to trust
-with data you care about. Classic AmigaOS has no memory protection, so a
-fault in a network stack takes the machine with it. Save your work before
-experimenting.
+Classic AmigaOS has no memory protection, so a fault in a network stack
+takes the machine with it. Save your work before experimenting.
 
 
 WHAT YOU NEED
 -------------
 
-  * A 68020 or better, AmigaOS 3.0 or 3.1, about 4 MB of Fast RAM
+  * Any 68000 or better, AmigaOS 3.1 or newer, about 4 MB of Fast RAM.
+    The archive carries a separate build for the 68000, the 68020-68040
+    and the 68060, and the Installer picks the right one. Encrypted
+    (https:) connections need a 68020 or better.
   * A network card with a SANA-II driver installed in DEVS:
     (a2065.device, ariadne.device, x-surf.device, uaenet.device, ...)
     Drivers are not part of this archive; use the one for your card.
