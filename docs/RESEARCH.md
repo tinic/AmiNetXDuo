@@ -20289,10 +20289,46 @@ and run under Amiberry, `netstack_test` goes from §76.3's
 FAIL netstack_startup() (0xFFFFFFFE)
 ```
 
-to a DHCP lease and a resolved name, which is the same result the A2065 gets.
+to a pass. Measured on playhouse2, Amiberry 8.2.2, A1200/68020, AROS ROM,
+`pcmcia=true ne2000pcmcia_rom_options=inserted=true ne2000_pcmcia=slirp`:
+
+```
+  ok   netstack_startup()
+  cfg[0] 'eth0' cnet.device unit 0 iptype 1
+  ok   interface 0 link is up
+  address 10.0.2.15   netmask 255.255.255.0   gateway 10.0.2.2
+  ping gateway: reply, 10 bytes, attempt 1
+  example.com resolves to 172.66.147.243
+13 checks, 0 failures -- PASS
+14 checks, 0 failures after teardown -- PASS
+```
+
+Exit status 0, and the same 14 checks the A2065 passes. The serial log shows
+`cnet.device` walking the PCMCIA CIS tuple chain before any of it, which is the
+part worth noting: the driver is talking to Gayle and the card's attribute
+memory, not to a generic NE2000 register file, so this exercises the emulated
+PC Card path rather than accidentally working.
+
 That is one of the eight cards moved from blocked to covered by fetching a file,
 and it is the first evidence that the eight were blocked *only* on the drivers
-rather than on anything about the boards.
+rather than on anything about the boards. It is also the answer to §76.3's
+`ne2000_pcmcia` row, which is the one board WinUAE never lists in its
+autoconfig output -- a driver opening it was always going to be the only proof
+it was there, and now there is one.
+
+The A2065 was re-run the same way as a control, `a2065_rom_file=:ENABLED` with
+`netmode=slirp` on an A1200, and passes its own 14 checks with the same lease.
+So the new driver did not come at the old one's expense, which is the only way
+the fetch could have made things worse.
+
+Two things about the harness are worth writing down, because both cost time and
+neither is obvious. `serial_port=tcp://…/wait` blocks the emulator until
+something connects, so the host's `nc` has to **retry** until the listener is
+up: a single attempt sometimes loses the race, and the failure mode is not a
+missing serial log but an emulator that waits forever and a run that times out
+with no `DH0:.done`. And Amiberry's `IPC: Default socket in use, using instance
+1` is a hint that a previous headless run is still alive — §76.5 flagged the
+single-name socket, and it shows up first as instance numbers climbing.
 
 `hydra.device` is fetched on the same terms but is a different matter
 technically: §76.3 records the emulated `hydra` board logging
