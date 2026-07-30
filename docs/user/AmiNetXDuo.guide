@@ -2052,6 +2052,24 @@
   until the stack is up either, so a script that has already run it
   needs nothing further.
 
+  @{b}Scripts that send ARexx commands to AMITCP@{ub}
+
+  AMITCP is also AmiTCP's ARexx host port, and a few older programs
+  send commands to it -- AmiTCP's own stopnet and netstat, and some
+  dialers and install scripts. Those commands are answered:
+
+      ADDRESS AMITCP 'QUERY HOSTNAME'   this machine's name
+      ADDRESS AMITCP 'KILL'             every interface off the network
+
+  KILL is what stopnet sends. It does the same as running
+  @{"Offline" link OFFLINE} for each interface; it does not unload the
+  stack, which nothing can do short of a reboot.
+
+  Every other command AmiTCP accepted is recognised and answered with
+  an error, which is what such a script already has to cope with. The
+  point of answering at all is that a script sending a command to a
+  port that nobody is listening on waits for a reply for ever.
+
 @endnode
 
 
