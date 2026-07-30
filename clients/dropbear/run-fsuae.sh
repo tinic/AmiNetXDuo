@@ -116,6 +116,16 @@ if [ ! -x "$RUNNER" ] || [ "$ROOT/clients/dropbear/clientrun.c" -nt "$RUNNER" ];
                  -o "$RUNNER" "$ROOT/clients/dropbear/clientrun.c"
 fi
 
+# SSHProbe, staged always because it is 3 KB and because a command list that
+# wants it cannot add a file to the run.  What it is for is in its own header:
+# AvailMem taken from inside a live session, and a payload of a stated size.
+PROBE="$ROOT/build/clients/SSHProbe"
+if [ ! -x "$PROBE" ] || [ "$ROOT/clients/dropbear/sshprobe.c" -nt "$PROBE" ]; then
+    echo "==> building SSHProbe"
+    "$AMIGA_GCC" -O2 -m68020 -fomit-frame-pointer -Wall -Wextra -I"$AMIGA_NDK" \
+                 -o "$PROBE" "$ROOT/clients/dropbear/sshprobe.c"
+fi
+
 # ------------------------------------------------------------- a2065 -------
 
 A2065="${AMINETXDUO_A2065:-}"
@@ -166,6 +176,7 @@ if [ -n "$DB_BUILD2" ]; then
     echo "==> second client staged as SYS:dbclient2: $DB_BUILD2"
 fi
 cp "$ADDIF"    "$STAGE/AddNetInterface"
+cp "$PROBE"    "$STAGE/SSHProbe"
 
 if [ -f "$KEYFILE" ]; then
     cp "$KEYFILE" "$STAGE/id_amiga"
@@ -321,7 +332,7 @@ if [ "$PERF" = "1" ]; then CPUARG+=(-x); fi
 exec "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
      "$RUNNER" "$STAGE/devs" "$STAGE/libs" "$STAGE/dbclient" \
      ${DB_BUILD2:+"$STAGE/dbclient2"} \
-     "$STAGE/AddNetInterface" "$STAGE/id_amiga" \
+     "$STAGE/AddNetInterface" "$STAGE/SSHProbe" "$STAGE/id_amiga" \
      ${ECDSAKEY:+"$STAGE/id_amiga_ecdsa"} \
      ${DB_SERVER:+"$STAGE/dropbear" "$STAGE/hostkey" "$STAGE/.ssh"} \
      "$STAGE/commands.txt"
