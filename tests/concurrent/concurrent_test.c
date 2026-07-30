@@ -745,14 +745,12 @@ static struct Process *ct_spawn(CtApp *a, const char *name)
 
 /* --------------------------------------------------------------- the main -- */
 
-int main(int argc, char **argv)
+static VOID ct_main_body(VOID)
 {
     struct Library *base;
     UWORD           i;
     ULONG           waited = 0;
     UWORD           live   = 0;
-
-    (VOID)argc; (VOID)argv;
 
     ct_log("concurrent: %ld applications, %ld pairs, %ld bytes each way\n",
            (LONG)CT_APPS, (LONG)CT_PAIRS, (LONG)CT_BYTES);
@@ -782,7 +780,7 @@ int main(int argc, char **argv)
     {
         ct_log("%ld checks, %ld failures -- FAIL\n",
                (LONG)ct_checks, (LONG)ct_failures);
-        return 20;
+        return;
     }
 
     for (i = 0; i < CT_APPS; i++)
@@ -950,7 +948,80 @@ int main(int argc, char **argv)
         }
     }
 
+    /*
+     * The parent's is the last base, so this is what shuts the stack down --
+     * and bsd_lib_close() runs netstack_shutdown() on the CALLER's stack.
+     * Startup does not: bsd_lib_open() hands it to a 64 KB Process precisely
+     * because an opener's stack cannot carry it. That asymmetry is why this
+     * whole function runs on a spawned Process rather than on main()'s, which
+     * a Kickstart 3.1 Shell gives 4,096 bytes.
+     */
+    ct_trace("parent: CloseLibrary (last base -- this stops the stack)");
     CloseLibrary(base);
+    ct_trace("parent: stack stopped");
+}
+
+/*
+ * main() does nothing but hand the work to a Process with a real stack.
+ *
+ * A Shell command gets 4,096 bytes on Kickstart 3.1 and this toolchain's crt0
+ * exports no __stack hook to ask for more (RESEARCH 11.5), so every harness
+ * here that touches the library does its work on a spawned Process instead --
+ * tests/crypto68k, tests/compare, ClientRun. This one is an application like
+ * the eight it spawns, and it has the same reason to be one.
+ */
+static struct Task *ct_launcher;
+static volatile UWORD ct_main_done;
+
+static VOID ct_main_entry(VOID)
+{
+    Wait(SIGF_SINGLE);
+    ct_main_body();
+    ct_main_done = 1U;
+    Signal(ct_launcher, SIGF_SINGLE);
+}
+
+int main(int argc, char **argv)
+{
+    struct Process *p;
+
+    (VOID)argc; (VOID)argv;
+
+    ct_launcher = FindTask((STRPTR)0);
+
+    Forbid();
+    p = CreateNewProcTags(NP_Entry,     (ULONG)ct_main_entry,
+                          NP_Name,      (ULONG)"anxd-conc-main",
+                          NP_Priority,  (ULONG)0,
+                          NP_StackSize, CT_STACK,
+                          NP_Cli,       (ULONG)FALSE,
+                          /* Safe to share here, unlike the eight: this one
+                             does all the ct_log() and main() is inside Wait()
+                             for its whole life, so the FileHandle has one
+                             writer at a time. */
+                          NP_Output,    (ULONG)Output(),
+                          NP_CloseOutput, (ULONG)FALSE,
+                          TAG_DONE);
+    Permit();
+
+    if (p == NULL)
+    {
+        ct_log("concurrent: cannot spawn the main Process -- FAIL\n");
+        ct_trace("cannot spawn the main Process");
+        return 20;
+    }
+
+    Signal(&p->pr_Task, SIGF_SINGLE);
+
+    while (ct_main_done == 0U)
+        Wait(SIGF_SINGLE);
+
+    /* It signalled from inside ct_main_entry(), so it has not yet returned
+       through dos.library's Process teardown. Leaving now would unload the
+       segment it is still executing. */
+    Delay(25);
+
+    ct_trace("returning %ld", (LONG)((ct_failures == 0UL) ? 0 : 20));
 
     return (ct_failures == 0UL) ? 0 : 20;
 }

@@ -98,5 +98,36 @@ EOF
 
 export AMINETXDUO_RUN_TAG="$TAG"
 
-exec "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
-     "$EXE" "$STAGE/devs" "$STAGE/libs"
+# SCORED FROM THE VERDICT LINE, NOT FROM THE EXIT STATUS
+#
+# The last CloseLibrary() drops the final netstack reference and tears the
+# stack down, and that hangs: on Commodore's a2065.device 2.16 an AbortIO() on
+# a pending SANA-II CMD_READ is never honoured, so the reader's WaitIO() never
+# returns. tests/libraries/library_test.c hit the same wall and documents it.
+#
+# So the harness never returns, s/Startup-Sequence never writes DH0:.done, and
+# fsuae-run.sh reports a timeout no matter how the test went. The harness
+# prints its verdict BEFORE closing for exactly this reason; that line is the
+# result, and a timeout with a verdict above it is the expected shape of a
+# passing run rather than a failure.
+#
+# A timeout with NO verdict is a real failure and still scores as one.
+OUT=$("$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
+      "$EXE" "$STAGE/devs" "$STAGE/libs" 2>&1) && rc=0 || rc=$?
+printf '%s\n' "$OUT"
+
+VERDICT=$(printf '%s\n' "$OUT" | grep -E '^[0-9]+ checks, [0-9]+ failures' | tail -1)
+
+echo
+if [ -z "$VERDICT" ]; then
+    echo "==> NO VERDICT -- the harness did not reach its summary."
+    echo "==> Read the serial trace above: the last [ct] line is how far it got."
+    exit "${rc:-1}"
+fi
+
+echo "==> $VERDICT"
+case "$VERDICT" in
+    *PASS) echo "==> PASS (the trailing timeout is the a2065 teardown hang above)"
+           exit 0 ;;
+    *)     exit 20 ;;
+esac
