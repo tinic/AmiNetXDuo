@@ -33,6 +33,13 @@ set(CONCURRENT_PAIRS "4" CACHE STRING
 set(CONCURRENT_BYTES "32768" CACHE STRING
     "Bytes each way per pair")
 
+# The harness runs two of these back to back, so run-concurrent.sh has to give
+# it at least 2x this plus the boot it does not control. Both ends print the
+# arithmetic, so a -t that is too short says so instead of looking like a hang.
+set(CONCURRENT_DEADLINE "60" CACHE STRING
+    "Seconds each of the harness's two internal deadlines allows")
+
 target_compile_definitions(concurrent_test PRIVATE
     CT_PAIRS=${CONCURRENT_PAIRS}
-    CT_BYTES=${CONCURRENT_BYTES}UL)
+    CT_BYTES=${CONCURRENT_BYTES}UL
+    CT_DEADLINE_SECS=${CONCURRENT_DEADLINE})
