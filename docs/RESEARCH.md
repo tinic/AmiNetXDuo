@@ -19616,3 +19616,299 @@ the IPv4-only build both
 compile clean and never open the file: `load_dnssd()` is `#ifdef
 AMINETXDUO_MDNS`, while the `AmiSdService` fields exist in every build, which
 is the arrangement the IPv6 interface fields already use.
+
+---
+
+## 75. What Amiga network software actually checks for, over 2,149 archives (2026-07-30)
+
+Sextant ships a `miami.library` stub whose only job is to answer `MiamiIsOnline()`
+so that Miami-gated software runs. We ship none. The question is whether anything
+needs one, and the assumption going in was "this is rare". **It is rare in the way
+that matters and not in the way that was assumed**: `miami.library` appears in a
+shipped binary in 63 of 2,149 archives -- 2.9%, more than expected -- and in **none
+of them would a stub that answers "yes" turn a broken program into a working one.**
+For twelve of them a stub would make things worse.
+
+The second reason to look was §71: `x-surf-100.device` does `FindPort("AMITCP")`,
+concludes AmiTCP is running and switches to a buffer contract we do not implement.
+Knowing what else sniffs for a stack tells us what else may conclude wrongly about
+us. That produced one finding that has nothing to do with Miami and is the most
+actionable thing in this section -- §75.7.
+
+### 75.1 Method, sample, and what it excludes
+
+Aminet's `info/index/` trees are gone (every documented index path 404s), and
+`/tree?path=` ignores its argument, but `https://aminet.net/comm/<dir>` with
+`?page=N` still serves plain listings. 61 listing pages gave an inventory of
+**2,904 packages** across `comm/tcp`, `comm/net`, `comm/www`, `comm/mail`,
+`comm/irc` and `comm/misc`.
+
+Of those, **2,149 were downloaded, extracted, scanned and deleted**, one at a time,
+0.5 s apart, single connection, identifying User-Agent. **Zero fetch failures**;
+the archive was never asked to rate-limit us. Total 299 MB, about 100 minutes.
+
+What that sample excludes, and why:
+
+- **`comm/misc` entirely (666 archives, 97 MB).** Mostly modem, fax and serial
+  utilities. Skipped for scope, not for cost.
+- **Anything over 2 MB (84 archives).** Whole-CD and MUI-bundle uploads; the
+  binaries in them recur in smaller packages.
+- **The rest of Aminet.** `util/`, `dev/`, `biz/` and `game/` all contain network
+  clients. Nothing here is a claim about them.
+- **Nested archives.** An `.lha` inside an `.lha` was not descended into.
+
+An "Amiga binary" is a file starting `00 00 03 F3` (AmigaOS HUNK) or `7F E L F`
+(OS4/MorphOS). **4,654 binaries in 1,256 archives**; the other 893 archives are
+source, docs, scripts and icons. Everything is counted per *archive*, and matches
+in binaries are counted separately from matches in documentation, because a README
+that says "works with Miami" constrains nothing.
+
+Counts are of *string presence*, which is an upper bound on use. Every claim about
+what a program *does* with a name comes from disassembling the call site with
+`m68k-amigaos-objdump` after loading and relocating the hunks; those are marked as
+decoded. Anything not decoded is marked as inferred.
+
+### 75.2 The counts
+
+| What | In a binary | Docs only |
+|---|---|---|
+| `bsdsocket.library` | **481** | 93 |
+| `socket.library` (AS225/I-Net 225, not bsd-) | 83 | 39 |
+| `usergroup.library` | 106 | 28 |
+| **`miami.library`** | **63** | 13 |
+| `amissl.library` / `amisslmaster.library` | 20 | 1 |
+| `inet.library` | 1 | 4 |
+| `roadshow.library` | **0** | 0 |
+| `amitcp.library` | **0** (7 hits, all false) | 0 |
+| port `AMITCP` | 24 | 86 |
+| port `MIAMI` | 40 | 88 |
+| port `GENESIS` | 9 | 2 |
+| port `TCP/IP Control` | **2** | 1 |
+| `Miami<Capital>` symbols | 45 | 147 |
+| `AmiTCP:` assign | 105 | 193 |
+| `Miami:` assign | 32 | 76 |
+| `INET:` assign | 6 | 15 |
+| `AmiTCP/db` | 3 | 0 |
+| `ENV:AmiTCP` | **0** | 1 |
+| `DEVS:Internet` | 1 | 4 |
+| "Roadshow" as a word | 3 | 34 |
+| "TermiteTCP" | 11 | 43 |
+| "AS225" | 19 | 72 |
+
+Three of those rows are worth reading twice.
+
+**`roadshow.library` and `amitcp.library` do not exist as probed names.** All seven
+`amitcp.library` hits are substring accidents -- `ibamitcp.library` (IBrowse's
+transport plugin, six archives) and `awebamitcp.library`. Neither stack ever
+exposed a library under its own name, so nothing probes for one. `bsdsocket.library`
+is the entire interface.
+
+**`ENV:AmiTCP` is not a thing.** Nor is `MiamiDir:`. The file-and-environment probes
+the brief asked about are essentially absent: what software actually uses is the
+`AmiTCP:` assign (105) as a path prefix for `AmiTCP:db/...` and `AmiTCP:bin/...`,
+not as a detector. We already read `AmiTCP:db/passwd`, which is the right end of
+this.
+
+**`socket.library` at 83 is not a competitor to `bsdsocket.library`.** It is the
+AS225/I-Net 225 name, and it appears as one arm of a "try each stack in turn"
+cascade in mid-90s clients. Nothing in this sample opens it first.
+
+### 75.3 The 63 `miami.library` archives, sorted by what a stub would do
+
+Fifty-seven of the 63 also open `bsdsocket.library` in the same binary. Miami is an
+addition to the socket API in 90% of cases, not a replacement for it.
+
+| Group | Archives | What a "yes" stub does |
+|---|---|---|
+| Miami itself (2.1a, 3.2b, MiamiDx, its GUIs) | 11 | nothing; it *is* the library |
+| Tools that only exist for Miami -- MiLoad, MiSpeedMeter, MiamiGraph, MiamiMonitor, MiamiSSL, three MUI MiamiPanels, gelbesPanel, tcpautostart, Skully | 12 | lets them start, then they fail on the real API |
+| MorphOS MOSNet -- ships its *own* `miami.library` | 2 | n/a, this is the precedent (§75.6) |
+| Needs Miami's packet filter -- QueSO, Sniffy | 2 | lets them start, then they fail |
+| Uses it only as a TLS provider -- AWeb ×5, IBrowse ×4, Voyager, HTTPResume, Charon | 12 | **actively harmful** (§75.5) |
+| Optional online-check with a working fallback | 19 | nothing; they already work |
+| `rxsocket.library` / `rxlibnet.library`, reports the stack to ARexx | 5 | changes what a script is told |
+
+Nothing lands in the column the stub was proposed for.
+
+### 75.4 The `MiamiIsOnline` idiom, decoded
+
+`MiamiIsOnline` is **LVO -210**, established from MOSNet's `miami.library`, which is
+an unstripped PowerPC ELF whose function table relocations name every vector.
+
+`vapor_toolkit.library` -- Vaporware's shared toolkit, present in nine archives
+(AmIRC ×2, AmTelnet, AmTalk, MetalWEB, FreeDB, NetInfo, amrss ×2) -- has one
+online-check entry point, and it is the whole pattern in 41 instructions:
+
+```
+1045c8:  lea a4@(1880),a1        ; "miami.library"
+1045d0:  moveq #9,d0
+1045d2:  jsr a6@(-552)           ; OpenLibrary
+1045d8:  moveq #1,d7             ; default answer: online
+1045e0:  beqs 0x104630           ; no Miami -> fall through
+1045e2:  lea a4@(1894),a0        ; "VAPOR/VAT_ISONLINE_MIAMIDEVICE"
+1045f8:  jsr a6@(-906)           ; GetVar; default "mi0" if unset
+104612:  jsr a6@(-210)           ; MiamiIsOnline(device)
+10461e:  movel d4,d7             ; d4 = 0, so: offline
+104630:  lea a4@(1930),a1        ; "genesis.library"
+10463a:  jsr a6@(-552)           ; OpenLibrary(3)
+104646:  beqs 0x104664           ; neither -> return d7, still 1
+```
+
+Miami, then Genesis, then **assume online**. Every other member of this group that
+was decoded does the same three-step: YGM (`miami.library` v10 → `genesis.library` v1
+→ `bsdsocket.library` v2, answer 1), and by strings SMSEngineerMUI, SMSMasterMUI and
+AmiComSys carry the identical `bsdsocket.library`/`miami.library`/`genesis.library`/`mi0`
+quadruple. The fallback is not incidental; it is what the idiom is.
+
+Two decoded programs use the open purely as a *presence test* and change behaviour
+on the answer rather than refusing:
+
+- **`ascan`** opens `miami.library` v0, closes it immediately, and sets a flag when
+  it is **absent**; the flag later clamps a count to 64. We take the clamped path.
+- **`mFinger`** does the same with v3 and sets its flag when Miami is **present**.
+- **`GoPortscan`** opens v0, and on failure logs the literal string `"No Miami"` and
+  continues to the next library.
+
+The three archives that genuinely refuse to start all need something a stub cannot
+provide. **QueSO** requires `miami.library` v6 and jumps to the same exit path as a
+failed `bsdsocket.library` open; it is an OS fingerprinter that needs Miami's packet
+filter. **Sniffy** requires v6 *and* `miami:libs/miamipcap.library`; it is a packet
+sniffer. **Skully** puts up "Couldn't open miami.library / initialisation error"; it
+is a client for Miami's DANA RAS. A library that answers "yes, online" and nothing
+else gets all three past the door and no further.
+
+### 75.5 Why the stub is not merely useless
+
+Twelve archives -- **AWeb (5), IBrowse (4), Voyager, HTTPResume, Charon** -- open
+`miami.library` for exactly one thing: `MiamiOpenSSL` at LVO -150. It is their TLS
+back end, and each has an alternative. AWeb's own message says so: *"connections are
+only supported when using AmiSSL or MiamiSSL"*.
+
+AWeb, decoded:
+
+```
+142a4c:  lea 0x18096c,a1         ; "miami.library"
+142a58:  moveq #7,d0
+142a5a:  jsr a6@(-552)           ; OpenLibrary
+142a62:  beqs 0x142a82           ; absent -> use the other back end
+142a64:  subal a0,a0
+142a68:  jsr a6@(-150)           ; MiamiOpenSSL(NULL)
+142a70:  bnes 0x142a82           ; failed -> CloseLibrary, NULL it out
+```
+
+Voyager is the same shape with `voyager_ssleay.vlib` tried first. **A present but
+non-functional `miami.library` moves these programs off the branch that works.**
+They would open the stub, call `MiamiOpenSSL`, and -- depending on what the stub
+returned -- either fail HTTPS or take a null SSL context into their transport. Today
+they miss the branch and use AmiSSL. That is the correct outcome and we get it by
+not existing.
+
+IBrowse's `https.library` shows the fuller cascade, and it is the good news in this
+section: `bsdsocket.library` (type 1) → `inet:libs/socket.library` (2) →
+`tsocket.library` (4) → `miami.library` (3), first one that opens wins. We are the
+first branch. The same file is in `gopher.library` and `ftp.library`.
+
+### 75.6 MorphOS already built this stub, and that is an argument both ways
+
+`comm/tcp/MOSNet-Base.lha` ships `Libs/miami.library` -- 29 KB, `13.3 (15.12.06)`,
+PowerPC, part of MorphOS's own TCP/IP stack. So the exact thing being proposed has
+been shipped before by a stack that is not Miami.
+
+It is also not a stub. Its unstripped symbol table is 57 vectors, and they are not
+the "answer yes" subset:
+
+```
+-30  MiamiSysCtl        -96  MiamiPFAddHook     -150 MiamiOpenSSL
+-36  SetSysLogPort      -102 MiamiPFRemoveHook  -156 MiamiCloseSSL
+-42  QueryInterfaceTagList                      -198 MiamiSetSocksConn
+-60  gethostent         -108 MiamiGetHardwareLen
+-66  MiamiDisallowDNS   -126 AddDynNameServ     -210 MiamiIsOnline
+-78  MiamiGetPid        -132 AddDynDomain       -216 MiamiOnOffline
+                        -138 sethostname        -228 inet_ntop … -294 if_freenameindex
+                                                -300 MiamiSupportsIPV6
+                                                -324 MiamiSupportedCPUs
+                                                -348 MiamiGetCredentials
+```
+
+Packet-filter hooks, SSL, SOCKS, the resolver, the whole POSIX address-conversion and
+`if_nameindex` set. MOSNet did not build a compatibility flag; it reimplemented
+Miami's API on top of its own stack. **The precedent is for the expensive version,
+and even that one cannot help QueSO or Sniffy without a real packet filter.** The
+cheap version -- return TRUE from -210 and stub the rest -- has no measured
+beneficiary and twelve measured victims.
+
+### 75.7 The AMITCP port is an ARexx host port, and ours is a trap
+
+This was not what the survey was looking for.
+
+`ADDRESS AMITCP` appears in **31 of the 221 archives** re-scanned for it: AmiTCP's
+own `bin/stopnet` and `bin/netstat`, the Genesis demo's copies of the same, and
+third-party dialers and front-ends -- SLIPCall, Netdial 4.0, TCPFront, SLIPShuttle,
+TCP_Start_Stop, netbeginner, interinstall, iNTERiNSTALL, CobbWeb, `rx.fingerd`.
+`WaitForPort AMITCP` appears in 32. AmiTCP's own binary carries `AMITCP`,
+`AMITCP.LASTERROR` and `rexxsyslib.library` adjacent in its string table.
+
+So the `AMITCP` public port was never only a flag. **It is AmiTCP's ARexx host
+port**, and `src/netstack/netstack.c:82` says the opposite:
+
+> PA_IGNORE with no signal task: nothing is meant to send here, the port is only a
+> flag.
+
+**Inferred, not tested:** with no stack installed, `ADDRESS AMITCP` fails
+immediately -- RexxSysLib's `FindPort` misses and the script gets "Host environment
+not found". With AmiNetXDuo installed, `FindPort` *succeeds*, RexxSysLib `PutMsg()`s
+a `RexxMsg` to a `PA_IGNORE` port with `mp_SigTask == NULL`, and waits on its reply
+port for a `ReplyMsg()` that nothing will ever send. The script hangs rather than
+erroring. That is a worse failure than not having the port, and it is the same shape
+as the §71 bug: we assert an identity and something else acts on it.
+
+Three ways out, none of them investigated further here: give the port a real task
+and reply to (or reject) every message; rename it and lose `WaitForPort AMITCP`; or
+keep it and answer the handful of commands `stopnet`/`netstat` actually send. This
+belongs on the list either way.
+
+### 75.8 Roadshow detection: two archives, and we already pass one
+
+`FindPort("TCP/IP Control")` is in exactly **two** binaries, and one is Fitz, as
+expected. Decoded:
+
+```
+105500:  lea 0x1055c0,a1         ; "bsdsocket.library"
+105508:  jsr a6@(-552)           ; OpenLibrary(3); fail -> return error string
+105520:  lea 0x1055f4,a1         ; "TCP/IP Control"
+105526:  jsr a6@(-390)           ; FindPort
+10552c:  beqs 0x10555e           ; absent -> skip
+105540:  oriw #16,a0@            ; present -> set behaviour bit 4
+10554e:  jsr a6@(-282)           ; gethostname()
+```
+
+We do not create that port, so Fitz takes the non-Roadshow path -- which is the
+path it takes on AmiTCP, and the one it was written for first. The other hit is
+`perch_os4`, an OS4 FTPMount extension.
+
+The more interesting Roadshow detector does not use a port at all. **NetMon** issues
+`SocketBaseTagList(SBTM_GETREF(SBTC_HAVE_INTERFACE_API))` -- tag `0x8000805E`,
+code 47 -- and if the call fails or the answer is zero it prints *"This TCP/IP stack
+seems not to be Roadshow! Found: %s"* with `lib_IdString`. `src/bsdsocket/errno.c:408`
+answers that tag `TRUE`, so NetMon takes the Roadshow path against us and never
+prints it. That is capability probing done right, and it is the pattern to encourage:
+NetMon asks what the stack *can do*, not what it is called.
+
+`rxsocket.library` (5 archives, incl. Hserv, GetIt, Amitory, Aminet.awnp) is the
+opposite extreme -- an ARexx function `ISLIBON <SOCKET|MIAMI|AMITCP|TTCP|USERGROUP>`
+and a string table reading `Miami / TermiteTCP / AmiTCP for Genesis / AmiTCP
+compatible`. Against us it will report "AmiTCP compatible", which is true.
+
+### 75.9 Recommendation
+
+**Do not build a `miami.library` stub.** Measured: 63 archives name it in a binary;
+25 are Miami itself or Miami-only tools; 12 use it as a TLS provider and would be
+made *worse* by a non-functional one; 19 already fall back to "assume online"; 5
+merely report the stack name; 2 need a packet filter no stub provides. **Zero
+archives in a 2,149-archive sample would be fixed by one.** Revisit only if a
+specific program is reported failing *and* its failure is decoded to a bare
+`OpenLibrary("miami.library")` with no fallback -- none was found here.
+
+The `AMITCP` ARexx-port question in §75.7 is the item that should be opened instead.
+It costs a hang in software we otherwise support, and unlike the Miami question it
+has 31 measured callers.

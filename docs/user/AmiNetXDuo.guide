@@ -1998,13 +1998,26 @@
 
                      @{b}Running network software@{ub}
 
-  Amiga network programs do not need to know which TCP/IP stack is
-  installed. They open bsdsocket.library and call it, so a program
+  Almost all Amiga network programs open bsdsocket.library and call
+  it, without caring which TCP/IP stack is behind it, so a program
   written for AmiTCP, Miami or Roadshow should work with AmiNetXDuo
   unchanged.
 
   AmiNetXDuo provides bsdsocket.library version 4, so software that
   asks for version 3 or version 4 will open it.
+
+  @{b}Software that needs one particular stack@{ub}
+
+  A few programs go beyond bsdsocket.library and use something only
+  one stack offers. Those need that stack and will not run here.
+  On Aminet this is about one program in thirty, and almost all of
+  them are Miami's own control panels and monitors.
+
+  The ones that matter are the packet capture and low-level tools --
+  a sniffer or a port scanner that reads raw packets through Miami's
+  packet filter, for example. A web browser that lists MiamiSSL for
+  secure pages is not in this group: those all fall back to AmiSSL,
+  which works here.
 
   @{b}usergroup.library@{ub}
 
