@@ -191,6 +191,13 @@ add_test(NAME fuzz_netdb_regression
 
 add_test(NAME fuzz_config_sweep
          COMMAND fuzz_config -r 1 ${AMINETXDUO_FUZZ_CASES})
+# fuzz_mdns is built but deliberately NOT registered: NetX Duo's mDNS cache
+# stores pointers in single ULONG slots, so it is only coherent when
+# sizeof(void*) == sizeof(ULONG) == 4 and it spins inside nx_mdns_enable() on
+# a 64-bit host. Register it when there is a -m32 build to run it in.
+add_test(NAME fuzz_dns_sweep
+         COMMAND fuzz_dns -r 1 ${AMINETXDUO_FUZZ_CASES})
+
 add_test(NAME fuzz_bpf_sweep
          COMMAND fuzz_bpf -r 1 ${AMINETXDUO_FUZZ_CASES})
 
