@@ -266,6 +266,14 @@ UINT    tx_amiga_discard_thread(TX_THREAD *thread_ptr);
 /* The TX_THREAD the calling Exec Task was adopted as, or TX_NULL.  */
 TX_THREAD *tx_amiga_adopted_thread(VOID);
 
+/*
+ * TX_TRUE if the calling Exec Task is the ThreadX baton holder -- the port's
+ * answer to "is a thread calling me", which on a hosted port is not the same
+ * question as "is _tx_thread_system_state zero".  NetX Duo's caller-checking
+ * macros use it; port/netxduo-amiga/inc/nx_port.h says why.
+ */
+UINT    tx_amiga_caller_is_thread(VOID);
+
 #ifdef __cplusplus
 }
 #endif

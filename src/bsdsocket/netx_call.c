@@ -2,8 +2,8 @@
  * bsdsocket.library -- putting the calling task into ThreadX context.
  *
  * NetX Duo checks who is calling. Roughly forty of its entry points are wrapped
- * in NX_THREADS_ONLY_CALLER_CHECKING and return NX_CALLER_ERROR unless
- * tx_thread_identify() is non-NULL: bind, listen, unlisten, accept, relisten,
+ * in NX_THREADS_ONLY_CALLER_CHECKING and return NX_CALLER_ERROR unless the
+ * caller holds the ThreadX baton: bind, listen, unlisten, accept, relisten,
  * unaccept, the client bind/unbind/connect, disconnect, send, receive,
  * bytes_available, peer_info_get, port_get and both socket_delete flavours. An
  * Exec Task that ThreadX has never adopted fails all of them, and

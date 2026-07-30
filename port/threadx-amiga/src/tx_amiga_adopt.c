@@ -130,6 +130,42 @@ BYTE    bit;
 }
 
 
+/*
+ * TX_TRUE if the calling Task is the ThreadX baton holder.
+ *
+ * NetX Duo's caller checks ask "is a thread calling me" and the generic answer
+ * is _tx_thread_system_state == 0, which on a target means "no ISR is running"
+ * -- a property of the CPU, and therefore the same answer for everybody.  Here
+ * interrupt context is a Task holding the core lock, and the teardown paths in
+ * this file raise the counter with switching enabled because
+ * _tx_thread_delete() can Wait() in the reaper.  So the generic answer is
+ * whatever some other Task happens to be doing.
+ *
+ * This is the question the port can answer exactly, and it rejects everything
+ * the generic one rejects: the tick task, the scheduler task and any Task
+ * ThreadX has never adopted all fail it, because none of them backs
+ * _tx_thread_current_ptr.  See port/netxduo-amiga/inc/nx_port.h.
+ */
+UINT tx_amiga_caller_is_thread(VOID)
+{
+
+TX_THREAD   *current;
+UINT         answer;
+
+
+    Forbid();
+
+    current =  _tx_thread_current_ptr;
+    answer  =  ((current != TX_NULL) &&
+                (current -> tx_thread_amiga_task == (VOID *) FindTask((STRPTR) 0)))
+               ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
+
+    Permit();
+
+    return(answer);
+}
+
+
 TX_THREAD *tx_amiga_adopted_thread(VOID)
 {
 
@@ -311,11 +347,16 @@ UINT         wake;
 
     _tx_thread_system_state++;
 
-    Permit();
-
+    /* The core lock stays held across the suspend.  _tx_thread_system_state is
+       one global counter and every Task reads it, NetX Duo's caller checks
+       included, so a window in which it is raised with task switching enabled
+       makes every other Task look like an ISR -- and a socket call in flight on
+       one comes back NX_CALLER_ERROR.  Nothing under _tx_thread_suspend() can
+       Wait() while it is raised: every _tx_thread_system_return() in
+       tx_thread_system_suspend.c is behind TX_THREAD_SYSTEM_RETURN_CHECK, which
+       tests exactly this counter.  */
     (VOID) _tx_thread_suspend(thread_ptr);
 
-    Forbid();
     _tx_thread_system_state--;
 
     /*
@@ -328,8 +369,8 @@ UINT         wake;
      * cannot lose a dispatch: every path that makes a thread ready afterwards
      * wakes the scheduler itself, from an interrupt
      * (tx_thread_context_restore.c) or from whoever holds the baton
-     * (_tx_thread_system_return).  Read inside the Forbid() that lowers the
-     * system state so the answer cannot be stale by the time it is used.
+     * (_tx_thread_system_return).  Read under the core lock so the answer cannot
+     * be stale by the time it is used.
      */
     wake =  (_tx_thread_execute_ptr != TX_NULL) ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
 
@@ -385,11 +426,9 @@ struct Task *me;
 
     _tx_thread_system_state++;
 
-    Permit();
-
+    /* Held across the resume, for the reason tx_amiga_adopt_suspend() gives.  */
     (VOID) _tx_thread_resume(thread_ptr);
 
-    Forbid();
     _tx_thread_system_state--;
 
     /* The same free-baton fast path tx_amiga_adopt_thread() takes.  */

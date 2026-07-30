@@ -135,16 +135,46 @@ extern void ami_random_srand(unsigned int seed);
 #endif
 
 
-/* Define several macros for the error checking shell in NetX.  */
+/*
+ * The error-checking shell's caller checks.
+ *
+ * The generic ones read _tx_thread_system_state, which on a target is "an ISR is
+ * running" -- one CPU-wide fact, so it is the same answer for every caller.  Here
+ * interrupt context is an Exec Task holding the core lock, and the ThreadX port
+ * raises that same counter around _tx_thread_terminate()/_tx_thread_delete()
+ * with task switching enabled, because the reaper underneath can Wait().  During
+ * that window every other Task reads a non-zero counter and fails a check it
+ * should pass.  Two processes sharing bsdsocket.library is enough to hit it:
+ * docs/RESEARCH.md 77.6 has a 44-byte write returning NX_CALLER_ERROR in a
+ * loopback SSH session, mapped to EINVAL, killing the session -- while the same
+ * binary against a remote server never failed, because only one process was
+ * bracketing.
+ *
+ * tx_amiga_caller_is_thread() asks whether the calling Task is the ThreadX baton
+ * holder, which is what "a thread is calling" means on this port and cannot be
+ * perturbed by another Task.  It rejects the tick task, the scheduler task and
+ * any Task ThreadX never adopted, so the thread-only checks lose nothing.
+ *
+ * The two that admit non-thread callers by design keep the counter test: their
+ * job is to reject an ISR, not to identify a thread, and NX_INIT_AND_THREADS in
+ * particular has to let a plain Exec Task through during bring-up.  They are
+ * still exposed to the teardown window, on nx_*_socket_create() only.
+ *
+ * TX_TIMER_PROCESS_IN_ISR is never defined for this port (timer callbacks run on
+ * _tx_timer_thread so they may take mutexes -- see tx_port.h), so there is one
+ * set of definitions rather than the vendor's two.
+ */
 
-#ifndef TX_TIMER_PROCESS_IN_ISR
+/* At file scope, not only in NX_CALLER_CHECKING_EXTERNS: several addons expand
+   the checks without placing that macro (nx_auto_ip.c among them) and take the
+   ThreadX globals from tx_api.h instead. */
+extern  UINT    tx_amiga_caller_is_thread(void);
 
 #define NX_CALLER_CHECKING_EXTERNS          extern  TX_THREAD           *_tx_thread_current_ptr; \
                                             extern  TX_THREAD           _tx_timer_thread; \
                                             extern  volatile ULONG      _tx_thread_system_state;
 
-#define NX_THREADS_ONLY_CALLER_CHECKING     if ((_tx_thread_system_state) || \
-                                                (_tx_thread_current_ptr == TX_NULL) || \
+#define NX_THREADS_ONLY_CALLER_CHECKING     if ((tx_amiga_caller_is_thread() == ((UINT) 0)) || \
                                                 (_tx_thread_current_ptr == &_tx_timer_thread)) \
                                                 return(NX_CALLER_ERROR);
 
@@ -156,29 +186,9 @@ extern void ami_random_srand(unsigned int seed);
                                                 return(NX_CALLER_ERROR);
 
 #define NX_THREAD_WAIT_CALLER_CHECKING      if ((wait_option) && \
-                                               ((_tx_thread_current_ptr == NX_NULL) || (_tx_thread_system_state) || (_tx_thread_current_ptr == &_tx_timer_thread))) \
+                                               ((tx_amiga_caller_is_thread() == ((UINT) 0)) || \
+                                                (_tx_thread_current_ptr == &_tx_timer_thread))) \
                                             return(NX_CALLER_ERROR);
-
-#else
-
-#define NX_CALLER_CHECKING_EXTERNS          extern  TX_THREAD           *_tx_thread_current_ptr; \
-                                            extern  volatile ULONG      _tx_thread_system_state;
-
-#define NX_THREADS_ONLY_CALLER_CHECKING     if ((_tx_thread_system_state) || \
-                                                (_tx_thread_current_ptr == TX_NULL)) \
-                                                return(NX_CALLER_ERROR);
-
-#define NX_INIT_AND_THREADS_CALLER_CHECKING if (((_tx_thread_system_state) && (_tx_thread_system_state < ((ULONG) 0xF0F0F0F0)))) \
-                                                return(NX_CALLER_ERROR);
-
-#define NX_NOT_ISR_CALLER_CHECKING          if ((_tx_thread_system_state) && (_tx_thread_system_state < ((ULONG) 0xF0F0F0F0))) \
-                                                return(NX_CALLER_ERROR);
-
-#define NX_THREAD_WAIT_CALLER_CHECKING      if ((wait_option) && \
-                                               ((_tx_thread_current_ptr == NX_NULL) || (_tx_thread_system_state))) \
-                                            return(NX_CALLER_ERROR);
-
-#endif
 
 
 /* Define the version ID of NetX.  */

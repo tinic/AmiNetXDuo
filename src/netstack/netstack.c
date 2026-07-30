@@ -105,9 +105,19 @@ LONG ami_netstack_enter(AmiNetCaller *caller)
     if (tx_amiga_kernel_running() != TX_TRUE)
         return AMI_NET_ERR_STATE;
 
-    /* Already a ThreadX thread (an adopted task deeper in the call chain, or
-       a thread ThreadX created)? Then nothing to do. */
-    if (tx_thread_identify() != TX_NULL)
+    /*
+     * Already inside -- an adopted task deeper in the call chain, or a thread
+     * ThreadX created? Then nothing to do.
+     *
+     * tx_thread_identify() cannot answer that here, and asking it was the
+     * defect docs/RESEARCH.md 77.6 recorded as NX_CALLER_ERROR. It returns
+     * _tx_thread_current_ptr, which on this port is the global baton holder and
+     * not the caller. A second Task arriving while the first holds the baton
+     * therefore reads "already a thread", skips the adoption and goes straight
+     * into NetX Duo without ever acquiring the baton -- two Tasks inside the
+     * stack at once. Two processes sharing bsdsocket.library is all it takes.
+     */
+    if (tx_amiga_caller_is_thread() != (UINT) TX_FALSE)
         return AMI_NET_OK;
 
     status = tx_amiga_adopt_thread(&caller->nc_Thread, (CHAR *)"aminetxduo caller",
@@ -152,7 +162,8 @@ LONG ami_netstack_enter_cached(AmiNetCaller *caller)
     if (tx_amiga_kernel_running() != TX_TRUE)
         return AMI_NET_ERR_STATE;
 
-    if (tx_thread_identify() != TX_NULL)
+    /* Ours, not merely somebody's -- see ami_netstack_enter(). */
+    if (tx_amiga_caller_is_thread() != (UINT) TX_FALSE)
         return AMI_NET_OK;                  /* nested */
 
     me = FindTask(NULL);

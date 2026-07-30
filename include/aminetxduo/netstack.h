@@ -73,18 +73,21 @@ AmiNetStack   *netstack_get(VOID);
 /* ------------------------------------------------------ the ThreadX bracket
  *
  * NetX Duo checks who is calling: roughly forty of its entry points are wrapped
- * in NX_THREADS_ONLY_CALLER_CHECKING and return NX_CALLER_ERROR unless
- * tx_thread_identify() is non-NULL. An Exec Task that ThreadX has never adopted
- * fails every one of them, so everything that touches a NetX Duo API -- the
- * netstack itself, bsdsocket.library, the tools -- has to bracket the call.
+ * in NX_THREADS_ONLY_CALLER_CHECKING and return NX_CALLER_ERROR unless the
+ * caller is the ThreadX baton holder (port/netxduo-amiga/inc/nx_port.h). An Exec
+ * Task that ThreadX has never adopted fails every one of them, so everything
+ * that touches a NetX Duo API -- the netstack itself, bsdsocket.library, the
+ * tools -- has to bracket the call.
  *
  * This is public rather than private to src/netstack/ so there is exactly one
  * bracket: bsdsocket.library used to carry a second, equivalent implementation
  * on the port's tx_amiga.h because it could not reach this one.
  *
  * `caller` is caller-supplied storage that must stay valid until
- * ami_netstack_leave(). Brackets nest: a nested enter() finds the task is
- * already a ThreadX thread, borrows the context and leaves it alone.
+ * ami_netstack_leave(). Brackets nest: a nested enter() finds the calling task
+ * already holds the baton, borrows the context and leaves it alone. "Already
+ * holds" and not "somebody holds" -- the baton is one global pointer, so a
+ * second task must acquire it rather than read another's as its own.
  *
  * Nothing inside a bracket may block on anything except ThreadX. An adopted
  * task holds the ThreadX baton, so an exec Wait() inside one stops the IP
