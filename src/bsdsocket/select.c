@@ -27,8 +27,6 @@
 #include <proto/exec.h>
 #include <proto/timer.h>
 
-#define BSD_FD_BITS         32
-#define BSD_FD_WORDS        ((BSD_MAX_DTABLESIZE + BSD_FD_BITS - 1) / BSD_FD_BITS)
 
 /* fd_set is an array of 32-bit words, bit (fd % 32) of word (fd / 32). */
 #define BSD_FD_WORD(fd)     ((ULONG)(fd) / BSD_FD_BITS)
@@ -507,12 +505,6 @@ static BOOL bsd_timer_open(struct AmiSocketBase *base)
 
 /* ------------------------------------------------------------- WaitSelect -- */
 
-typedef struct
-{
-    ULONG   read[BSD_FD_WORDS];
-    ULONG   write[BSD_FD_WORDS];
-    ULONG   except[BSD_FD_WORDS];
-} BsdFdSets;
 
 /*
  * One readiness sweep, inside a ThreadX context bracket.
@@ -605,10 +597,11 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
                     register ULONG *signals           __asm("d1"),
                     register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    ULONG      in_read[BSD_FD_WORDS];
-    ULONG      in_write[BSD_FD_WORDS];
-    ULONG      in_except[BSD_FD_WORDS];
-    BsdFdSets  ready;
+    /* In the base, not on the caller's stack -- see sb_SelIn. */
+    ULONG     *in_read   = SocketBase->sb_SelIn.read;
+    ULONG     *in_write  = SocketBase->sb_SelIn.write;
+    ULONG     *in_except = SocketBase->sb_SelIn.except;
+    BsdFdSets *ready     = &SocketBase->sb_SelReady;
     LONG       words, fd, count = 0;
     ULONG      user_mask   = (signals != NULL) ? *signals : 0;
     ULONG      break_mask  = SocketBase->sb_BreakMask & ~user_mask;
@@ -719,7 +712,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
         SetSignal(0, SocketBase->sb_EventSigMask);
 
         count = bsd_poll_sets(SocketBase, nfds, in_read, in_write, in_except,
-                              &ready);
+                              ready);
         if (count < 0)
         {
             /* The kernel is not running; nothing can ever become ready. */
@@ -767,7 +760,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
             /* One last look before giving up on the timeout. */
             SetSignal(0, SocketBase->sb_EventSigMask);
             count = bsd_poll_sets(SocketBase, nfds, in_read, in_write,
-                                  in_except, &ready);
+                                  in_except, ready);
             break;
         }
     }
@@ -779,11 +772,11 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
     }
 
     if (count <= 0)
-        bsd_bzero(&ready, sizeof(ready));
+        bsd_bzero(ready, sizeof(*ready));
 
-    bsd_fdset_out(read_fds,   ready.read,   words);
-    bsd_fdset_out(write_fds,  ready.write,  words);
-    bsd_fdset_out(except_fds, ready.except, words);
+    bsd_fdset_out(read_fds,   ready->read,   words);
+    bsd_fdset_out(write_fds,  ready->write,  words);
+    bsd_fdset_out(except_fds, ready->except, words);
 
     if (signals != NULL)
         *signals = got_signals;
