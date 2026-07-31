@@ -71,9 +71,10 @@
  * NX_INTERFACE fields needs no such thing.
  *
  * What the baton would buy, if taken, is exclusion against the other ThreadX
- * threads. Every writer of nx_ip_interface[] is one: nx_ip_interface_attach(),
- * nx_ip_interface_detach(), nx_ip_interface_address_set() from the DHCP client,
- * and nx_interface_link_up from the SANA-II reader. And there are no torn reads
+ * threads. Every writer of nx_ip_interface[] while the stack is up is one:
+ * nx_ip_interface_attach(), nx_ip_interface_detach(),
+ * nx_ip_interface_address_set() from the DHCP client, and nx_interface_link_up
+ * from the SANA-II reader. And there are no torn reads
  * to protect against in the first place -- one CPU, and Exec switches tasks
  * only between instructions, so every aligned load here is atomic.
  *
@@ -328,7 +329,11 @@ struct List *bsd_ObtainInterfaceList(
     out->bil_List.lh_TailPred = (struct Node *)&out->bil_List.lh_Head;
     out->bil_List.lh_Type     = NT_UNKNOWN;
 
-    for (i = 0; ip != NULL && i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+    /* Nothing running is nothing to list, which is the empty list. */
+    if (ip == NULL)
+        return &out->bil_List;
+
+    for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
     {
         struct Node *node = &out->bil_Node[i];
 
