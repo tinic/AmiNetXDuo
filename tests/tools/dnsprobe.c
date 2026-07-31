@@ -23,6 +23,18 @@
  *      library, so the probe asks each the same strings and prints both
  *      answers side by side -- a shared parser shows up as agreement.
  *
+ *   4. gethostname() into a buffer that is too small.  "The returned name is
+ *      null-terminated unless insufficient space is provided", and the ERRORS
+ *      list is EFAULT and EPERM -- a short buffer is not a failure at all.
+ *      The probe asks byte by byte and prints what came back and whether it
+ *      was terminated; only a stack with a real name can answer that.
+ *
+ *   5. h_name is the OFFICIAL name.  A DEVS:Internet/hosts entry matches on
+ *      its aliases too, so asking for an alias must answer with the entry's
+ *      own name and list the alias in h_aliases.  The staged hosts file gives
+ *      this machine's own address a name and an alias for exactly this, which
+ *      also drives gethostname()'s host-database step.
+ *
  * The resolver phase needs a real name server.  Under SLIRP that is 10.0.2.3
  * forwarding to the host's, which is what tests/tools/run-dns.sh arranges.
  *
@@ -202,6 +214,22 @@ static struct probe_hostent *p_gethostbyname(struct Library *base,
     return res;
 }
 
+static LONG p_gethostname(struct Library *base, char *buffer, LONG size)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register APTR            a0  __asm("a0") = (APTR)buffer;
+    register LONG            d0  __asm("d0") = size;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+
+    __asm __volatile ("jsr a6@(-282:W)"     /* gethostname -0x11a */
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
+                      : "r" (a6), "r" (a0), "r" (d0)
+                      : "a1", "cc", "memory");
+    return res;
+}
+
 /* ----------------------------------------------------------- little helpers */
 
 static VOID p_dotted(ULONG net_addr, char *out)
@@ -367,6 +395,117 @@ static VOID p_pton_phase(struct Library *base)
     }
 }
 
+/* ------------------------------------------------------ the hostname phase - */
+
+static VOID p_lookup(struct Library *base, const char *name, const char *label)
+{
+    struct probe_hostent *he = p_gethostbyname(base, name);
+
+    if (he == NULL || he->h_addr_list == NULL || he->h_addr_list[0] == NULL)
+    {
+        Printf((CONST_STRPTR)"%s \"%s\": FAILED\n", (LONG)label, (LONG)name);
+        return;
+    }
+
+    {
+        ULONG addr;
+        char  text[16];
+
+        /* h_addr_list[0] is four bytes in network order, not aligned by the
+           published interface. */
+        addr = ((ULONG)(UBYTE)he->h_addr_list[0][0] << 24) |
+               ((ULONG)(UBYTE)he->h_addr_list[0][1] << 16) |
+               ((ULONG)(UBYTE)he->h_addr_list[0][2] <<  8) |
+                (ULONG)(UBYTE)he->h_addr_list[0][3];
+
+        p_dotted(addr, text);
+        Printf((CONST_STRPTR)"%s \"%s\": %s\n", (LONG)label, (LONG)name,
+               (LONG)text);
+    }
+}
+
+/*
+ * A truncated name may legitimately come back without a terminator, so the
+ * buffer is filled with a sentinel first, only the n bytes the call owns are
+ * examined, and byte n is stamped with a NUL afterwards purely so Printf has
+ * something it can walk.
+ */
+static VOID p_hostname_size(struct Library *base, LONG n)
+{
+    char  buf[64];
+    LONG  rc;
+    LONG  i;
+    BOOL  term = FALSE;
+
+    for (i = 0; i < (LONG)sizeof(buf); i++)
+        buf[i] = '#';
+
+    rc = p_gethostname(base, buf, n);
+
+    for (i = 0; i < n; i++)
+        if (buf[i] == '\0')
+            term = TRUE;
+
+    buf[n] = '\0';
+
+    Printf((CONST_STRPTR)"hostname %ld: rc %ld errno %ld \"%s\" term %s\n",
+           n, rc, p_errno(base), (LONG)buf, (LONG)(term ? "yes" : "no"));
+}
+
+/* h_name must be the entry's own name however the caller spelled it. */
+static VOID p_official(struct Library *base, const char *name)
+{
+    struct probe_hostent *he = p_gethostbyname(base, name);
+
+    if (he == NULL)
+    {
+        Printf((CONST_STRPTR)"official \"%s\": FAILED\n", (LONG)name);
+        return;
+    }
+
+    Printf((CONST_STRPTR)"official \"%s\": name \"%s\" alias \"%s\"\n",
+           (LONG)name,
+           (LONG)((he->h_name != NULL) ? he->h_name : "?"),
+           (LONG)((he->h_aliases != NULL && he->h_aliases[0] != NULL)
+                      ? he->h_aliases[0] : ""));
+}
+
+static VOID p_hostname_phase(struct Library *base, const char *self_name,
+                             const char *self_alias)
+{
+    char buf[300];
+    LONG rc;
+    LONG i;
+
+    for (i = 0; i < (LONG)sizeof(buf); i++)
+        buf[i] = '#';
+
+    rc = p_gethostname(base, buf, (LONG)sizeof(buf));
+    Printf((CONST_STRPTR)"hostname full: rc %ld \"%s\"\n", rc, (LONG)buf);
+
+    /* Not a buffer at all: EFAULT, the one error the autodoc does list. */
+    Printf((CONST_STRPTR)"hostname null: rc %ld errno %ld\n",
+           p_gethostname(base, NULL, 32L), p_errno(base));
+
+    for (i = 1; i <= 8; i++)
+        p_hostname_size(base, i);
+
+    /* The two lengths that matter: exactly the name, where the terminator is
+       what has to go, and one more, where it fits. */
+    for (i = 0; self_name[i] != '\0'; i++)
+        ;
+    p_hostname_size(base, i);
+    p_hostname_size(base, i + 1);
+
+    /* The alias and the official name of the same entry. */
+    p_official(base, self_alias);
+    p_official(base, self_name);
+
+    /* INADDR_NONE is a valid broadcast address (autodoc BUGS): a literal, not
+       a name to look up. */
+    p_lookup(base, "255.255.255.255", "broadcast");
+}
+
 /* ------------------------------------------------------- the nesting phase - */
 
 /*
@@ -421,33 +560,6 @@ static VOID p_nesting_phase(struct Library *base, const char *file_server)
 }
 
 /* -------------------------------------------------- the default-domain phase */
-
-static VOID p_lookup(struct Library *base, const char *name, const char *label)
-{
-    struct probe_hostent *he = p_gethostbyname(base, name);
-
-    if (he == NULL || he->h_addr_list == NULL || he->h_addr_list[0] == NULL)
-    {
-        Printf((CONST_STRPTR)"%s \"%s\": FAILED\n", (LONG)label, (LONG)name);
-        return;
-    }
-
-    {
-        ULONG addr;
-        char  text[16];
-
-        /* h_addr_list[0] is four bytes in network order, not aligned by the
-           published interface. */
-        addr = ((ULONG)(UBYTE)he->h_addr_list[0][0] << 24) |
-               ((ULONG)(UBYTE)he->h_addr_list[0][1] << 16) |
-               ((ULONG)(UBYTE)he->h_addr_list[0][2] <<  8) |
-                (ULONG)(UBYTE)he->h_addr_list[0][3];
-
-        p_dotted(addr, text);
-        Printf((CONST_STRPTR)"%s \"%s\": %s\n", (LONG)label, (LONG)name,
-               (LONG)text);
-    }
-}
 
 static VOID p_domain_phase(struct Library *base, const char *host,
                            const char *domain)
@@ -527,6 +639,10 @@ int main(int argc, char **argv)
     const char     *file_server = "10.0.2.3";
     const char     *host        = "www";
     const char     *domain      = "example.com";
+    /* The name and alias run-dns.sh gives this machine's own address in the
+       staged DEVS:Internet/hosts. */
+    const char     *self_name   = "amiga-probe.localdomain";
+    const char     *self_alias  = "amiga-probe";
 
     if (argc > 1)
         file_server = argv[1];
@@ -534,6 +650,10 @@ int main(int argc, char **argv)
         host = argv[2];
     if (argc > 3)
         domain = argv[3];
+    if (argc > 4)
+        self_name = argv[4];
+    if (argc > 5)
+        self_alias = argv[5];
 
     base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
     if (base == NULL)
@@ -543,6 +663,7 @@ int main(int argc, char **argv)
     }
 
     p_pton_phase(base);
+    p_hostname_phase(base, self_name, self_alias);
     p_nesting_phase(base, file_server);
     p_domain_phase(base, host, domain);
 

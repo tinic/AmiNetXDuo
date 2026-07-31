@@ -32,7 +32,9 @@ extern "C" {
 /* The default domain gets its own cap: SetDefaultDomainName()'s autodoc says
    "cannot be longer than 255 characters", and AMI_CFG_NAME_LEN also sizes the
    interface names, the host name and the DNS-SD instance names, none of which
-   wants 256 bytes. */
+   wants 256 bytes. A CONFIGURED host name is therefore capped at 63
+   characters, where gethostname()'s BUGS entry cites MAXHOSTNAMELEN (256); a
+   name gethostname() derives by reverse resolution is not. */
 #define AMI_CFG_DOMAIN_LEN          256
 
 /*

@@ -40,10 +40,36 @@
 #      the probe asks both calls the same strings and this script asserts they
 #      DISAGREE.
 #
+#   5. A SHORT BUFFER TRUNCATES.  "The returned name is null-terminated unless
+#      insufficient space is provided" (gethostname), and its ERRORS are
+#      EFAULT and EPERM -- there is no error for a name that does not fit.
+#      This stack answered -1/ENAMETOOLONG and wrote nothing, so a caller that
+#      sized its buffer from the autodoc got a failure the autodoc does not
+#      list.  The script asks one byte at a time and checks each prefix,
+#      including the length at which the terminator has to be dropped.
+#
+#   6. gethostname() DERIVES A NAME.  Its NOTES chain is the first online
+#      interface's address in the host database, then reverse resolution, then
+#      HOSTNAME, then "localhost".  Nothing names the guest, so the staged
+#      hosts file names its own address and that is what must come back --
+#      "amiga", which this stack used to invent, is in the autodoc nowhere.
+#
+#   7. h_name IS THE OFFICIAL NAME.  A hosts entry matches on its aliases, so
+#      gethostbyname(alias) must answer with the entry's own name and list the
+#      alias in h_aliases.  It used to echo whatever the caller passed.
+#
+#   8. 255.255.255.255 IS A LITERAL.  "INADDR_NONE ... is a valid broadcast
+#      address, but inet_addr() cannot return that value without indicating
+#      failure" (autodoc BUGS).  The literal test was inet_addr(), so the
+#      broadcast address went to a name server as though it were a host name.
+#
 # THE ONE EXTERNAL DEPENDENCY, stated rather than hidden: SLIRP's DNS server
 # at 10.0.2.3 forwards to the host's resolver, so the domain phase needs this
 # host to be able to resolve www.example.com.  If the fully qualified lookup
 # fails the script says so and fails, rather than passing on a dead resolver.
+#
+# The guest's own address is SLIRP's first lease, 10.0.2.15.  On another
+# backend, set AMINETXDUO_DNS_SELF to whatever it gets instead.
 #
 # The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
 # or drop a copy in build/a2065.device.
@@ -107,6 +133,14 @@ STATIC_DNS="${AMINETXDUO_DNS_STATIC:-10.0.2.3}"
 HOST="${AMINETXDUO_DNS_HOST:-www}"
 DOMAIN="${AMINETXDUO_DNS_DOMAIN:-example.com}"
 
+# The guest's own address, and the name the staged hosts file gives it. Both
+# gethostname()'s host-database step and the official-name assertions key off
+# this pair; nothing else in the tree does, so it is staged rather than added
+# to tests/netstack/devs.
+SELF="${AMINETXDUO_DNS_SELF:-10.0.2.15}"
+SELF_NAME=amiga-probe.localdomain
+SELF_ALIAS=amiga-probe
+
 # ------------------------------------------------------------- staging ---
 
 STAGE="$ROOT/build/dns-stage"
@@ -118,9 +152,11 @@ cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
 cp "$PROBE" "$STAGE/DnsProbe"
 
+printf '%s %s %s\n' "$SELF" "$SELF_NAME" "$SELF_ALIAS" >> "$STAGE/devs/Internet/hosts"
+
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
-SYS:DnsProbe $STATIC_DNS $HOST $DOMAIN
+SYS:DnsProbe $STATIC_DNS $HOST $DOMAIN $SELF_NAME $SELF_ALIAS
 EOF
 
 # ------------------------------------------------------------------ run ---
@@ -213,6 +249,74 @@ if grep -q "^pton family 99 rc -1$" "$REPORT"; then
     pass "inet_pton(bad family) is -1, distinct from a malformed address"
 else
     fail "inet_pton(bad family) did not answer -1"
+fi
+
+# ---- gethostname ---------------------------------------------------------
+
+# Nothing in the guest's configuration names it, so the answer can only have
+# come from the address of the interface AddNetInterface just brought up,
+# looked up in the staged hosts file.
+if grep -q "^hostname full: rc 0 \"$SELF_NAME\"$" "$REPORT"; then
+    pass "gethostname derived \"$SELF_NAME\" from $SELF in the host database"
+else
+    fail "gethostname did not derive the name from the interface address"
+    grep "^hostname full:" "$REPORT" >&2 || true
+fi
+
+# 14 is EFAULT: "the name or namelen parameter gave an invalid address".
+if grep -q "^hostname null: rc -1 errno 14$" "$REPORT"; then
+    pass "gethostname(NULL) is -1 with EFAULT"
+else
+    fail "gethostname(NULL) did not answer -1/EFAULT"
+    grep "^hostname null:" "$REPORT" >&2 || true
+fi
+
+# THE REGRESSION. Each of these used to be -1/ENAMETOOLONG with the buffer
+# untouched. A truncated name is not terminated -- that is the only way the
+# caller can tell it was cut.
+for n in 1 2 3 4 5 6 7 8; do
+    WANT=$(printf '%s' "$SELF_NAME" | cut -c "1-$n")
+    if grep -Eq "^hostname $n: rc 0 errno [-0-9]+ \"$WANT\" term no\$" "$REPORT"; then
+        pass "gethostname into $n bytes gives \"$WANT\", unterminated, rc 0"
+    else
+        fail "gethostname into $n bytes did not truncate to \"$WANT\""
+        grep "^hostname $n:" "$REPORT" >&2 || true
+    fi
+done
+
+NLEN=${#SELF_NAME}
+if grep -Eq "^hostname $NLEN: rc 0 errno [-0-9]+ \"$SELF_NAME\" term no\$" "$REPORT"; then
+    pass "the whole name in exactly its own length -- and no terminator"
+else
+    fail "gethostname into $NLEN bytes did not give the bare name"
+    grep "^hostname $NLEN:" "$REPORT" >&2 || true
+fi
+
+if grep -Eq "^hostname $((NLEN + 1)): rc 0 errno [-0-9]+ \"$SELF_NAME\" term yes\$" "$REPORT"; then
+    pass "one byte more and the name is terminated"
+else
+    fail "gethostname into $((NLEN + 1)) bytes did not terminate the name"
+    grep "^hostname $((NLEN + 1)):" "$REPORT" >&2 || true
+fi
+
+# ---- the official name ---------------------------------------------------
+
+for asked in "$SELF_ALIAS" "$SELF_NAME"; do
+    if grep -q "^official \"$asked\": name \"$SELF_NAME\" alias \"$SELF_ALIAS\"$" "$REPORT"; then
+        pass "gethostbyname(\"$asked\") answers with the official name and the alias"
+    else
+        fail "gethostbyname(\"$asked\") did not answer \"$SELF_NAME\"/\"$SELF_ALIAS\""
+        grep "^official \"$asked\":" "$REPORT" >&2 || true
+    fi
+done
+
+# ---- the broadcast literal -----------------------------------------------
+
+if grep -q "^broadcast \"255.255.255.255\": 255.255.255.255$" "$REPORT"; then
+    pass "255.255.255.255 is read as a literal, not sent to a name server"
+else
+    fail "gethostbyname(\"255.255.255.255\") did not answer the broadcast address"
+    grep "^broadcast " "$REPORT" >&2 || true
 fi
 
 # ---- the nesting count ---------------------------------------------------

@@ -372,10 +372,18 @@ static VOID load_dnssd(AmiConfig *cfg)
 }
 #endif
 
+/*
+ * The name an administrator gave this machine, or nothing.
+ *
+ * load_resolver() has already taken a HOSTNAME or HOST line from
+ * DEVS:Internet/name_resolution; ENV:HOSTNAME is the last place a name is
+ * configured. Nothing is invented after that: gethostname() derives one from
+ * the interface address instead (bsdsocket.doc NOTES), and the two consumers
+ * that need a network label whatever happens -- DHCP option 12 and the mDNS
+ * host label -- carry their own default.
+ */
 static VOID load_hostname(AmiConfig *cfg)
 {
-    ULONG index;
-
     if (cfg->hostname[0] == '\0')
     {
         char *buf = (char *)ami_cfg_read_file("ENV:HOSTNAME", NULL);
@@ -394,26 +402,6 @@ static VOID load_hostname(AmiConfig *cfg)
             ami_free(buf);
         }
     }
-
-    if (cfg->hostname[0] != '\0')
-        return;
-
-    /* Last resort: the first non-loopback name in the hosts file. */
-    for (index = 0; ; index++)
-    {
-        const AmiNetdbEntry *entry = ami_netdb_host_entry(index);
-
-        if (entry == NULL)
-            break;
-        if ((entry->value >> 24) == 127UL || entry->value == 0)
-            continue;
-
-        ami_cfg_copy_string(cfg->hostname, sizeof(cfg->hostname), entry->name);
-        break;
-    }
-
-    if (cfg->hostname[0] == '\0')
-        ami_cfg_copy_string(cfg->hostname, sizeof(cfg->hostname), "amiga");
 }
 
 /* -------------------------------------------------------------------- API */
@@ -438,7 +426,7 @@ LONG ami_config_load(AmiConfig *cfg)
     AMI_INFO("config: %lu interface(s), %lu name server(s), host '%s'",
              (unsigned long)cfg->interface_count,
              (unsigned long)cfg->resolver.nameserver_count,
-             cfg->hostname);
+             (cfg->hostname[0] != '\0') ? cfg->hostname : "(unnamed)");
 
     return AMI_CFG_OK;
 }

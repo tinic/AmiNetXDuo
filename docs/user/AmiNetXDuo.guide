@@ -539,8 +539,9 @@
     2.  a HOST line in that file, in AmiTCP style, whose address is not
         a loopback address
     3.  the environment variable HOSTNAME
-    4.  the first non-loopback name in DEVS:Internet/hosts
-    5.  the name "amiga"
+    4.  the name DEVS:Internet/hosts gives this machine's own address
+    5.  the name a reverse lookup of that address gives
+    6.  the name "localhost"
 
   The simplest way to set it is the resolver file:
 
