@@ -82,22 +82,6 @@ was wrong for a day.
   reaches the driver and no report is ever sent, and a querying switch stops
   forwarding the group. The reasoning is beside the define in
   `port/netxduo-amiga/inc/nx_user.h`.
-- **A browse reports the whole peer cache, not the browse window.**
-  `netstack_mdns_browse_collect()` walks `nx_mdns_service_lookup()` by index,
-  which is the whole peer cache, and nothing ages entries from our side -- the
-  module expires them by TTL, and an unplugged machine sends none of RFC 6762
-  §10.1's goodbyes. That part is mDNS working as designed and needs no fix.
-  The claim it made was wrong and is fixed: the output said "what answered in
-  the window", true on a cold cache and false on a warm one, and now says what
-  the machine has heard recently and that a listing may have gone. What is left
-  is the behaviour -- filter to entries actually refreshed inside the window.
-  `nx_mdns_rr_elapsed_time` and `nx_mdns_rr_remaining_ticks` carry the
-  freshness, but `NX_MDNS_SERVICE` does not, so it means walking the RR cache
-  instead of the public lookup. Not worth that trade until someone reports a
-  switched-off machine lingering, which every other mDNS browser does too.
-  Still true after the address chasing and `ALL` landed: neither of them needed
-  an RR walk, so nothing is written that this would reuse.
-
 - **Ship a Developer drawer: the NDK addendum.** SHIPPED 2026-07-31 for RFC
   3493 section 4. `developer/` holds the SFD and the generated
   clib/inline/proto/pragmas/lvo set; `tools/stage-developer.sh` assembles the
@@ -200,6 +184,23 @@ was wrong for a day.
   the same bound and is right to -- a zone only ever qualifies a link-local.
 
 ## Decided against — do not "fix"
+
+- **A browse reports the whole peer cache, not the browse window**, and stays that way, 2026-07-31.
+  `netstack_mdns_browse_collect()` walks `nx_mdns_service_lookup()` by index,
+  which is the whole peer cache, and nothing ages entries from our side -- the
+  module expires them by TTL, and an unplugged machine sends none of RFC 6762
+  §10.1's goodbyes. That part is mDNS working as designed and needs no fix.
+  The claim it made was wrong and is fixed: the output said "what answered in
+  the window", true on a cold cache and false on a warm one, and now says what
+  the machine has heard recently and that a listing may have gone. What is left
+  is the behaviour -- filter to entries actually refreshed inside the window.
+  `nx_mdns_rr_elapsed_time` and `nx_mdns_rr_remaining_ticks` carry the
+  freshness, but `NX_MDNS_SERVICE` does not, so it means walking the RR cache
+  instead of the public lookup. Not worth that trade until someone reports a
+  switched-off machine lingering, which every other mDNS browser does too.
+  Still true after the address chasing and `ALL` landed: neither of them needed
+  an RR walk, so nothing is written that this would reuse.
+
 
 - **RFC 3678 source filtering stays out**, 2026-07-31. `IP_ADD_SOURCE_MEMBERSHIP`,
   `IP_BLOCK_SOURCE` and the `MCAST_*` family need IGMPv3, which the vendored NetX
