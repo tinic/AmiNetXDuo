@@ -24,30 +24,15 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   leaks a reader stack when a driver ignores `AbortIO` (Commodore's
   a2065.device 2.16 does), which emulation will not reproduce. Raised in
   external review 2026-07-31.
-- **`bind()` to a specific local address is a silent no-op.** `socket.c` records
-  it in `as_LocalAddr` so `getsockname()` reports it, and nothing enforces it --
-  the comment there has said so for a long time, but it never reached this file.
-  This is the one place the codebase breaks its own refuse-don't-ignore rule,
-  and the worst shape of it: a tool binding a listener to 127.0.0.1 gets an
-  all-interfaces listener while `getsockname()` confirms the lie. It also
-  silently defeats every `-b` / `--interface` / `-s` flag (curl, nc, dig, ntp).
-
-  NetX has no address-taking bind, so enforcement is ours to build, and the two
-  directions differ:
-  - **Outbound is already possible.** `nxd_udp_socket_source_send()` is wired
-    into `transfer.c` as of 2026-07-31 for RFC 4007 zones; honouring a bound
-    source address on UDP send is the same call with the index taken from
-    `as_LocalAddr` instead of the zone. Cheap now.
-  - **Inbound needs a filter**: check the arrival address in the UDP receive
-    notify against `as_LocalAddr` and drop mismatches; for TCP, check the
-    accepted connection's local address and reset mismatches.
-  - **Interim, if enforcement lags**: refuse with `EADDRNOTAVAIL` rather than
-    lie. Accept ANY, loopback, and -- wider than the obvious rule -- the
-    machine's own interface address when it has one interface, since that is
-    unambiguous and is what an `--interface` flag usually resolves to.
-
-  A listener that claims loopback and answers the LAN is a security lie, so
-  that direction should fail loudly even before the filter exists.
+- **`bind()` outbound source selection is not done.** Inbound is: a completed
+  TCP connection that arrived on another interface is reset in `bsd_accept()`,
+  and a datagram that did is released in `bsd_recv_udp()`, both through
+  `bsd_bind_wants_interface()`, so `nc -l 127.0.0.1` means what it says and a
+  specific address is no longer refused. What is left is the send direction --
+  a socket bound to one address should send *from* it, and today NetX picks by
+  route. `nxd_udp_socket_source_send()` is already wired for RFC 4007 zones
+  and takes the same kind of index, so UDP is small; TCP has no source-send
+  equivalent and needs a decision, the same one RFC 4007 needs.
 - **IPv4 multicast is absent** -- no `IP_ADD_MEMBERSHIP`, `IP_MULTICAST_IF`,
   `IP_MULTICAST_TTL`, `IP_MULTICAST_LOOP`, no `ip_mreq`. Reopened 2026-07-31:
   it had been closed on the grounds that "nothing in the tree needs the
