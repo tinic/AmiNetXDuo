@@ -99,6 +99,16 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   first card, so it is untestable, and the complexity is not worth a rare case.
   Recovery SHA `d22a33e`.
 
+- **A Kickstart 1.3 build**, dropped 2026-07-31: TheWire13 already covers that
+  platform. Our side was closer than expected -- tag walking is hand-rolled so
+  `utility.library` is never needed, the library's DOS surface is all V33, and
+  the 68000 build ships -- but `ReadEClock` is V36 and everything 0.14.0 did for
+  clock correctness rests on it; a 1.3 fallback is the 50 Hz CIA/VBlank source,
+  exactly one tick of resolution, which retires the timer budget. The tools are
+  the volume (`ReadArgs` 27 sites, `FreeArgs` 191, `VPrintf` 12). Never
+  established whether any SANA-II driver runs under V34 at all, which was the
+  gating question.
+
 ## Environment and tooling
 
 - **`playhouse2` is unusable as a network peer** until `ethtool -K <iface> tx off`.
