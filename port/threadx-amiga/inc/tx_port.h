@@ -366,15 +366,17 @@ void    _tx_amiga_start_interrupts(void);
 /* Milliseconds of a tick period the tick task may spend delivering, before it
    gives the machine back and finishes the backlog at the next wakeup.  The
    burst runs under Forbid(), so this is the ceiling on how long one wakeup can
-   stop every other task in the machine.  Half of 20 ms leaves the other half
-   for everyone else.
+   stop every other task in the machine.  A fifth of 20 ms leaves the rest for
+   everyone else, and 4 ms is well inside the ~27 ms an A2065's 32 KB ring holds
+   at 10 Mbit -- the real deadline, since a hold longer than that costs packets
+   on hardware whatever the tick does.
 
    Nothing is lost here: the wheel is walked a slot at a time and gets every one
    of the deferred ticks, late.  tx_amiga_tick_over_budget counts the yields and
    tx_amiga_tick_deferred the ticks put off.  */
 
 #ifndef TX_AMIGA_TIMER_BUDGET_MS
-#define TX_AMIGA_TIMER_BUDGET_MS                10UL
+#define TX_AMIGA_TIMER_BUDGET_MS                4UL
 #endif
 
 /* Startup validation window for the wakeup source, in milliseconds, and the
