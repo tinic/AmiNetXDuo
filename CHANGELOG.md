@@ -4,6 +4,8 @@ User-visible changes, newest first. Internal work is in the git log.
 
 ## 0.15.1
 
+- A browsed service whose address did not arrive with it is now asked for, so a row that said "no address" gives one. Only the rows that need it wait, and the whole listing spends at most two seconds on it
+- `ShowNetServices ALL` lists every instance of every type answering, rather than only the types. It costs one more listening window, not one per type
 - Two programs adding an interface at the same moment can no longer be given the same one: the slot was picked and then the device opened, which takes long enough for the second to pick it again
 - `STATE=down` in `DEVS:NetInterfaces` is honoured. It was read from the file and then ignored, so an interface configured down came up anyway; `Online` brings it up as usual
 - `GetRouteInfo()` reports the interface each route belongs to. Static routes and the default gateway reported none at all, and the rest counted from 0 where the convention is to count from 1, so a program matching a route to an interface was off by one

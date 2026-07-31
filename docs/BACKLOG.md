@@ -46,18 +46,6 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   weighed against. RFC 1112 membership is the target; RFC 3678 source filtering
   is not, and can wait indefinitely. `NX_ENABLE_IPV6_MULTICAST` is the same
   argument on the v6 side, for a non-floor tier.
-- **`ShowNetServices` cannot browse every type at once.** With no type it runs the
-  RFC 6763 §9 meta-query and lists the types present; listing every instance of
-  every type would mean starting one continuous query per type found. They would
-  all run concurrently, so it costs one more window rather than one per type — but
-  it multiplies what lands in the peer cache, and the cache size was already the
-  thing that decided whether an answer had an address in it or not.
-- **A browse answer with no address is not chased.** When the PTR and SRV arrive
-  without the A record in the same response, the row prints the target host and
-  "no address" — the vendored module fills `service_ipv4` only from an A record
-  already in the cache and never asks for one. Raising the peer cache to 32 KB
-  made it rare on the LAN it was measured against, which is a mitigation rather
-  than a fix: the right answer is to resolve the SRV target when the A is absent.
 - **A browse reports the whole peer cache, not the browse window.**
   `netstack_mdns_browse_collect()` walks `nx_mdns_service_lookup()` by index,
   which is the whole peer cache, and nothing ages entries from our side -- the
@@ -71,6 +59,8 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   freshness, but `NX_MDNS_SERVICE` does not, so it means walking the RR cache
   instead of the public lookup. Not worth that trade until someone reports a
   switched-off machine lingering, which every other mDNS browser does too.
+  Still true after the address chasing and `ALL` landed: neither of them needed
+  an RR walk, so nothing is written that this would reuse.
 
 - **RFC 4007 §11 is done for UDP; TCP and the config keys are not.**
   Done: the text layer (`ami_config_parse_ip6_zone` /
