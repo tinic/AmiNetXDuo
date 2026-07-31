@@ -827,6 +827,7 @@ static VOID ns_fill_health(NetStatusHealth *out)
     out->nsl_BatonTransitions = ami_baton_stats.bs_Transitions;
     out->nsl_BatonStateMax    = ami_baton_stats.bs_StateMax;
     out->nsl_BatonMoved       = ami_baton_stats.bs_BatonMoved;
+    out->nsl_BatonStateShared = ami_baton_stats.bs_StateShared;
 }
 
 /*

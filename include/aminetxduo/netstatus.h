@@ -370,6 +370,12 @@ typedef struct NetStatusStats
  * tick task was not dispatched, not that it was slow.  nsl_BatonMoved or
  * nsl_BatonFull non-zero says the bracket lost track of a thread.
  *
+ * nsl_BatonStateShared counts the times a task inside the bracket found
+ * _tx_thread_system_state already raised by another one. That window makes
+ * every other task look like an ISR to ThreadX, so a blocking service
+ * entered on one returns without blocking and leaves the caller linked into
+ * a suspension list it is no longer on. It must stay zero.
+ *
  * nsl_TickSkew is how far behind real time the timer wheel is, in ticks: what
  * it has yet to be given plus what nsl_TickLost took off it for good. The
  * ThreadX clock is not in it -- that comes from the E-Clock and is true either
@@ -400,6 +406,7 @@ typedef struct NetStatusHealth
     ULONG   nsl_BatonTransitions;
     ULONG   nsl_BatonStateMax;
     ULONG   nsl_BatonMoved;
+    ULONG   nsl_BatonStateShared;
 } NetStatusHealth;
 
 /* ------------------------------------------------------ NETSTATUS_ARP --- */

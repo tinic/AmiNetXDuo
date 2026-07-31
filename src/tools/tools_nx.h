@@ -294,6 +294,7 @@ typedef struct ToolStats
     ULONG           baton_transitions;
     ULONG           baton_state_max;
     ULONG           baton_moved;
+    ULONG           baton_state_shared;
 } ToolStats;
 
 /*

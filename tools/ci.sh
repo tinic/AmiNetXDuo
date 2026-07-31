@@ -97,6 +97,7 @@ HOST_TEST_TARGETS=(test_config test_mbuf test_bpf test_crypto68k test_crypto68k_
 # fault deliberately, so a nonzero exit is their success condition and this
 # loop would read it as a failure.
 EMULATOR_TESTS=(
+    "tests/bracket/bracket_invariants:150"
     "tools/smoke/smoke:90"
     "tools/smoke/lifecycle:120"
     "tools/smoke/KernelStop:150"
