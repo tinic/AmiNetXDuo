@@ -183,5 +183,18 @@ const APTR BsdVectorTable[] =
     /* -0x36c [145] bsd_NetStackControl -- PRIVATE: interfaces, routes and the ARP cache -- netstatus.h */
     (APTR)bsd_NetStackControl,
 
+    /*
+     * -0x372 [146] onward -- RFC 3493 section 4, PUBLIC, revision 3 and up.
+     *
+     * The first extension past the end of the NDK's table. Deliberately not
+     * the ==reserve 6 block at -0x33c..-0x35a ([137]..[142] above): that is
+     * what a regenerated SFD fills first, and six slots do not hold an
+     * extension that will grow. docs/NDK-ADDENDUM.md.
+     */
+    (APTR)bsd_if_nametoindex,            /* -0x372 [146] if_nametoindex */
+    (APTR)bsd_if_indextoname,            /* -0x378 [147] if_indextoname */
+    (APTR)bsd_if_nameindex,              /* -0x37e [148] if_nameindex */
+    (APTR)bsd_if_freenameindex,          /* -0x384 [149] if_freenameindex */
+
     (APTR)-1
 };

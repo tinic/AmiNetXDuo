@@ -200,8 +200,10 @@
  *   0  v0.2.0 and earlier
  *   1  NetStackQuery/NetStackControl at -0x366/-0x36c
  *   2  NetStatusControl grew nsc_Name (AMI_NETSTATUS_VERSION 6)
+ *   3  RFC 3493 if_nametoindex/if_indextoname/if_nameindex/if_freenameindex
+ *      at -0x372..-0x384, the first slots past the end of the NDK's table
  */
-#define BSD_LIB_REVISION    2
+#define BSD_LIB_REVISION    3
 
 /* SBTC_LOGFACILITY's documented default. The NDK's <sys/syslog.h> ships the
    priority codes only, so the BSD facility value is spelled out here. */

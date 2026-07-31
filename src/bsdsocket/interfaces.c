@@ -117,6 +117,7 @@
 #include <sys/sockio.h>
 
 #include "aminetxduo/bpf.h"   /* AMI_STATIC_ASSERT */
+#include "aminetxduo/ifindex.h"
 
 #include <proto/exec.h>
 
@@ -1640,4 +1641,127 @@ LONG bsd_if_ioctl(ULONG req, APTR argp,
     }
 
     return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+/* ------------------------------------------- RFC 3493 4: interface names -- */
+
+/*
+ * Indices here are 1-based, as the RFC requires and as GetRouteInfo()'s
+ * rtm_index now is. bsd_if_index_of() answers in NetX's 0-based array terms,
+ * so every crossing between the two is a +1 or a -1 and there are only the
+ * four below. include/aminetxduo/ifindex.h is the published half.
+ */
+
+ULONG bsd_if_nametoindex(register const char *ifname __asm("a0"),
+                         register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    NX_IP *ip = netstack_ip();
+    LONG   index;
+
+    (VOID)SocketBase;
+
+    /* "otherwise, it shall return zero. No errors are defined." -- so no
+       bsd_fail() anywhere in here, not even for a NULL name. */
+    if (ifname == NULL || ip == NULL)
+        return 0UL;
+
+    index = bsd_if_index_of(ip, ifname);
+
+    return (index < 0) ? 0UL : (ULONG)(index + 1);
+}
+
+char *bsd_if_indextoname(register ULONG ifindex __asm("d0"),
+                         register char *ifname __asm("a0"),
+                         register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    NX_IP *ip = netstack_ip();
+
+    if (ifname == NULL)
+    {
+        (VOID)bsd_fail(SocketBase, AMI_EFAULT);
+        return NULL;
+    }
+
+    if (ip == NULL)
+    {
+        (VOID)bsd_fail(SocketBase, AMI_ENXIO);
+        return NULL;
+    }
+
+    /* 0 is not an interface, and the ceiling keeps the -1 below in range. */
+    if (ifindex == 0UL || ifindex > (ULONG)NX_MAX_PHYSICAL_INTERFACES)
+    {
+        (VOID)bsd_fail(SocketBase, AMI_ENXIO);
+        return NULL;
+    }
+
+    if (!bsd_if_name_of(ip, (UINT)(ifindex - 1UL), ifname, (ULONG)IF_NAMESIZE))
+    {
+        (VOID)bsd_fail(SocketBase, AMI_ENXIO);
+        return NULL;
+    }
+
+    return ifname;
+}
+
+/*
+ * One allocation, as ObtainInterfaceList() and ObtainDomainNameServerList()
+ * do: the terminator needs a slot of its own, and the names sit in the same
+ * block so if_freenameindex() -- which is given only the array pointer -- can
+ * be a single free.
+ */
+typedef struct BsdIfNameIndex
+{
+    struct if_nameindex bin_Entry[NX_MAX_PHYSICAL_INTERFACES + 1];
+    char                bin_Name[NX_MAX_PHYSICAL_INTERFACES][IF_NAMESIZE];
+} BsdIfNameIndex;
+
+struct if_nameindex *bsd_if_nameindex(register struct AmiSocketBase *SocketBase
+                                          __asm("a6"))
+{
+    NX_IP          *ip = netstack_ip();
+    BsdIfNameIndex *out;
+    UWORD           used = 0;
+    UINT            i;
+
+    if (ip == NULL)
+    {
+        (VOID)bsd_fail(SocketBase, AMI_ENXIO);
+        return NULL;
+    }
+
+    out = (BsdIfNameIndex *)ami_alloc(sizeof(BsdIfNameIndex));
+    if (out == NULL)
+    {
+        (VOID)bsd_fail(SocketBase, AMI_ENOMEM);
+        return NULL;
+    }
+
+    for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        if (!bsd_if_name_of(ip, i, out->bin_Name[used], (ULONG)IF_NAMESIZE))
+            continue;
+
+        out->bin_Entry[used].if_index = (ULONG)(i + 1);
+        out->bin_Entry[used].if_name  = out->bin_Name[used];
+        used++;
+    }
+
+    /* "an if_index of 0 and an if_name of NULL". ami_alloc() zeroes, so this
+       is already true of every slot past `used`; written out because the
+       terminator is contract, not a side effect of the allocator. */
+    out->bin_Entry[used].if_index = 0UL;
+    out->bin_Entry[used].if_name  = NULL;
+
+    return out->bin_Entry;
+}
+
+VOID bsd_if_freenameindex(register struct if_nameindex *ptr __asm("a0"),
+                          register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)SocketBase;
+
+    /* bin_Entry is the first member, so the array pointer is the block. */
+    if (ptr != NULL)
+        ami_free(ptr);
 }

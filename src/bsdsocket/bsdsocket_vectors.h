@@ -560,6 +560,26 @@ LONG bsd_NetStackControl(
         register ULONG                 size       __asm("d2"),
         register struct AmiSocketBase *SocketBase __asm("a6"));
 
+/* -0x372..-0x384 -- RFC 3493 section 4, PUBLIC. The first LVO extension past
+   the end of the NDK's table; revision 3 and up. aminetxduo/ifindex.h. */
+struct if_nameindex;
+
+ULONG bsd_if_nametoindex(
+        register const char           *ifname     __asm("a0"),
+        register struct AmiSocketBase *SocketBase __asm("a6"));
+
+char *bsd_if_indextoname(
+        register ULONG                 ifindex    __asm("d0"),
+        register char                 *ifname     __asm("a0"),
+        register struct AmiSocketBase *SocketBase __asm("a6"));
+
+struct if_nameindex *bsd_if_nameindex(
+        register struct AmiSocketBase *SocketBase __asm("a6"));
+
+VOID bsd_if_freenameindex(
+        register struct if_nameindex  *ptr        __asm("a0"),
+        register struct AmiSocketBase *SocketBase __asm("a6"));
+
 
 /* The vector table itself, terminated by (APTR)-1, as MakeLibrary wants it. */
 extern const APTR BsdVectorTable[];
