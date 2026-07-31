@@ -345,6 +345,46 @@ still come from a machine with a Kickstart ROM.
 tier, and Enforcer with MungWall for `tools/enforcer-run.sh`. None of these can
 be distributed with the source.
 
+### Third-party clients
+
+Two programs by Stefan "Bebbo" Franke open this library and were written
+without reference to our source, which is why they are worth running: BebboSSH
+(`bebbossh`, `bebboscp`) and bebboget, an HTTPS downloader with its own TLS.
+`tools/fetch-bebbossh.sh` and `tools/fetch-bebboget.sh` fetch them from Aminet
+with every file pinned by sha256. Both are GPLv3+ and neither is vendored or
+linked; they are separate programs we install and run.
+
+    tests/bebbossh/run-bebbossh.sh -x      # six transfers each way, two ciphers
+    tests/bebbossh/run-bebbossh.sh -x -L   # ... with both ends in the guest
+    tests/bebbossh/run-bebbossh.sh -x -I   # a login session, on a real console
+    tests/bebbossh/run-bebbossh.sh -x -I -L  # ... logging IN to bebbosshd
+    tests/bebbossh/run-bebbossh.sh -E      # the same under Enforcer + MungWall
+    tests/bebboget/run-bebboget.sh -x -1   # bebboget beside our own fetch
+
+`-L` is the arm whose throughput can be set beside our own SSH figures: it runs
+`bebbosshd` in the guest too, so both ends of the connection are on the one
+emulated CPU. Without it only the client half of the crypto is, and the number
+is about twice as large for that reason alone.
+
+`-I` is the terminal arm. It opens a real `CON:` as the client's input, because
+an SSH client decides it has a terminal by asking `IsInteractive()` and none of
+the terminal handling runs if the answer is no. It compares the size the Amiga
+console reports against the size the remote `stty size` sees, resizes the window
+mid-session to check that `window-change` follows, and reads back the termios
+the `pty-req` asked for. docs/RESEARCH.md §78.9 has the numbers.
+
+These stay out of CI at either tier. They need `a2065.device`, they need a
+Workbench `locale.library` — without which BebboSSH does not start at all, and
+the way it fails looks exactly like a bug in this stack — and the BebboSSH arm
+needs an `sshd` *and* an `sftp-server` on the build host, since `bebboscp`
+speaks SFTP rather than the old `scp -f`/`-t` protocol. Set
+`AMINETXDUO_LOCALE_LIBRARY` if `install/test/run-workbench-fsuae.sh` has not
+already unpacked a Workbench 3.1 set into `build/wb31-sys`.
+
+Both harnesses print a verdict line and score on that rather than on the
+emulator's exit status, and both compare every transferred byte against its
+source. docs/RESEARCH.md §78 has the results.
+
 ## Debugging
 
 There is no memory protection, so a bad pointer will take the machine down

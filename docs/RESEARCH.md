@@ -20893,3 +20893,413 @@ it is starved, at 816 packets in five minutes out of 9.7 million offered to it,
 with the baton counters clean and nothing holding the machine. That is a
 different problem from the one we went looking for, and it is the next thing to
 chase.
+## 80. Somebody else's SSH and somebody else's TLS, on this library (2026-07-30)
+
+BebboSSH and bebboget are Stefan "Bebbo" Franke's — the author of the
+`m68k-amigaos-gcc` this tree is built with. Neither is a port of anything:
+BebboSSH is an independent SSH2 implementation and bebboget carries its own
+TLS. Both open `bsdsocket.library` version 4 and need nothing else from us, and
+neither author has ever seen our source. That is the property that matters:
+our own tests share an author with the code they test, and two of this week's
+released defects came from third-party programs instead.
+
+`tools/fetch-bebbossh.sh` and `tools/fetch-bebboget.sh` pin the Aminet releases
+by sha256 — the archive and every extracted file. Nothing is vendored and
+nothing is linked: both are GPLv3+, this tree is MIT, and the clean arrangement
+for a GPL program that talks to an MIT library is that it stays a separate
+program. `bebboget`'s archive carries `lib/libbebboget.a`, which is the one
+file somebody might link; it is deliberately not extracted.
+
+### 80.1 It does not start without locale.library, and that cost an hour
+
+The first four runs looked like a client that connects to nothing and hangs.
+It was not the network. `bebboscp -?` — no arguments, no sockets, our library
+not even opened — prints
+
+    locale.library failed to load
+
+and then wedges. Kickstart 3.1 and the AROS ROM alike; neither carries
+`locale.library`, which lives in Workbench's `LIBS:`. Under
+`tools/enforcer-run.sh -m` it is six illegal accesses, `LONG-READ from
+00000028`, `LONG-READ from 00000018`, `LONG-WRITE to 00000018` and `LONG-WRITE
+to 00000000`, all with the PC inside ROM and the string "locale.library failed
+to load" still on the stack: a library base that was never checked. The message
+is not in BebboSSH's source or in ours — it comes from the runtime's automatic
+library opening.
+
+Staging one Workbench 3.1 `locale.library` fixed it completely. Both harnesses
+locate one and refuse with an explanation when they cannot, because the symptom
+otherwise reads exactly like a stack bug and there is nothing to distinguish it
+from one.
+
+### 80.2 What it needs from the ABI, and it is a small list
+
+`socket`, `connect`, `send`, `recv`, `CloseSocket`, `WaitSelect`, `Errno`,
+`IoctlSocket(FIONBIO)`, `setsockopt(SO_REUSEADDR)`, `gethostbyname`, and
+`SocketBaseTags(SBTM_SETVAL(SBTC_BREAKMASK), 0)`. Every one is implemented; the
+break mask is `SBT_RW` in `errno.c` and is serviced.
+
+**No `ENOSYS` was reached and no `SocketBaseTagList` tag went unserviced**, over
+twenty-four transfers and eight HTTPS fetches. The serial log across every run
+contains one line, and it is our own `AMITCP: no rexxsyslib.library` notice.
+
+`bebbosshd` — the server — adds `bind`, `listen`, `accept` and
+`setsockopt(SO_REUSEADDR)`, and §80.4 runs it. Twenty-four sessions, and the
+only thing it ever complained about was its own teardown: two lines per session,
+`failed to send N bytes on socket 1: sent -1, errno=32` then `errno=57`. That is
+EPIPE and then ENOTCONN, from writing to a socket the client has already closed,
+and EPIPE on the first write after the peer has gone with ENOTCONN on the next
+is what AmiTCP does. `mysend()` retries only on EAGAIN, so it logs and gives up,
+which is correct. Nothing there is ours to fix.
+
+Under Enforcer with MungWall, on the network, doing a 64 KB transfer each way:
+**0 Enforcer hits, 0 MungWall wall hits.**
+
+### 80.3 Throughput, and every byte compared
+
+`tests/bebbossh/run-bebbossh.sh -x`, A1200 profile, `AMINETXDUO_PERF=1`, every
+run announcing "the machine is quiet". Three sizes so there are two slopes and
+the second is free of the handshake, and **every transfer was `cmp`ed against
+its source** — the Dropbear work on the `ssh-server-perf` branch
+records a shim bug that returned the right length and the wrong bytes, and a
+45-byte case never showed it. 24/24 byte-identical across two runs, every `rc 0`.
+
+| | 45 B | 64 KB | 256 KB | 45B→64K | 64K→256K |
+|---|---:|---:|---:|---:|---:|
+| **aes128-gcm**, host → Amiga | 5.84 s | 8.04 | 14.82 | 29.07 KB/s | **28.32 KB/s** |
+| **aes128-gcm**, Amiga → host | 5.82 | 8.08 | 14.90 | 28.30 | **28.15** |
+| **chacha20-poly1305**, host → Amiga | 5.72 | 7.14 | 12.94 | 45.04 | 33.10 |
+| **chacha20-poly1305**, Amiga → host | 5.76 | 7.14 | 11.42 | 46.34 | **44.86** |
+
+The 45 B column is the handshake: connect, curve25519 twice, an ed25519 verify
+and an ed25519 sign, **5.7–5.8 s** and flat to 2% across all four arms. The
+author's own note budgets about a minute on an unaccelerated machine and 0.9 s
+per X25519 key pair on an A3000; our debug log records 0.98 s for the key pair,
+0.98 s for the shared secret, 1.34 s to verify and 1.00 s to sign.
+
+The 68020 build of `libcryptossh.library` is staged, under the plain name, as
+the ReadMe instructs. Staging the 68000 file that ships under that name would
+have measured the wrong binary — worth roughly 2× on ChaCha20 by the author's
+figures.
+
+### 80.4 Against our Dropbear numbers, and it took a second arm to be fair
+
+The Dropbear port on the `ssh-server-perf` branch measured `scp` at **27.57
+KB/s** host→Amiga and **23.51** Amiga→host on ChaCha20-Poly1305, and a **22.0 s**
+handshake. Same emulated 14 MHz 68EC020, same three sizes, same slope method,
+both sets `cmp`ed.
+
+**§80.3's figures are not comparable to those.** That work put *both ends* of
+the connection on the emulated CPU, so that 68020 was doing the encrypting *and*
+the decrypting; §80.3 has an OpenSSH server on the build host, so only the
+client's half runs on the Amiga. Roughly half the crypto is missing, and that
+branch measured eight to nine tenths of a transferred byte to be the AEAD.
+
+`run-bebbossh.sh -L` is the arm that compares. It runs `bebbosshd` in the guest
+and points `bebboscp` at `127.0.0.1` — the same arrangement, and the only one
+possible, since FS-UAE's SLIRP is outbound-only and nothing on the host can open
+a connection *into* the guest. Two runs, `-x`, 24/24 byte-identical:
+
+| both ends on one 14 MHz 68EC020 | 45 B | 64 KB | 256 KB | 64K→256K |
+|---|---:|---:|---:|---:|
+| **aes128-gcm**, one way | 9.78 s | 14.32 | 27.82 | **14.22 KB/s** |
+| **aes128-gcm**, the other | 9.76 | 14.30 | 28.00 | **14.01** |
+| **chacha20-poly1305**, one way | 9.66 | 12.42 | 20.54 | **23.65** |
+| **chacha20-poly1305**, the other | 9.66 | 12.38 | 20.72 | **23.02** |
+
+Reproducible to within 1% on the repeat (14.26 / 14.12 / 23.53 / 23.08), every
+slope pair agreeing to under 4%, and the two directions agreeing with each other
+to under 3% — which is what one CPU doing both halves should look like.
+
+So, ChaCha20-Poly1305, both ends on the one CPU, same sizes, same method:
+
+| | host → Amiga | Amiga → host | handshake |
+|---|---:|---:|---:|
+| ours, Dropbear + `src/crypto68k` | **27.57 KB/s** | 23.51 KB/s | 22.0 s |
+| BebboSSH 1.45 + `libcryptossh.library020` | 23.65 | 23.02 | **9.7 s** |
+
+**We are 17% ahead in one direction and level in the other; he is 2.3× ahead on
+the handshake.** Both sides are hand-written 68020 assembly against hand-written
+68020 assembly, so this is a real comparison and not optimised-against-portable.
+The bulk figures are close enough that the honest summary is a draw on
+throughput and a clear loss on connection setup.
+
+The handshake gap is the more interesting number, because it is four curve25519
+and ed25519 operations and nothing else — it says `src/crypto68k/c68k_25519.c`
+has about 2× left in it. His own log breaks it down: 0.98 s for the X25519 key
+pair, 0.98 s for the shared secret, 1.34 s to verify the server's signature and
+1.00 s to sign the auth request.
+
+AES-128-GCM is his slower cipher, 14.1 KB/s against ChaCha20's 23.3. We do not
+implement GCM at all, so there is nothing to compare it against.
+
+Note that §80.3's one-ended figures — 28.2 KB/s on AES-GCM, 44.9 on ChaCha20 —
+are roughly double these, which is the arithmetic working: take one of the two
+halves of the crypto off the 68020 and the remaining half goes about twice as
+fast.
+
+### 80.5 A repeatable stall in the download direction, unattributed
+
+In the `host → Amiga` direction the progress output shows a one-off pause of
+about 1.5 s, and in both runs it lands in the same place: the interval that
+carries the transfer from 32 KB to 64 KB received.
+
+    64 KB, run 2:   49% 32KB 28.8KB/s   98% 64KB 11.8KB/s
+    256 KB, run 2:  12% 32KB 28.8KB/s   24% 64KB 12.5KB/s   36% 96KB 30.4KB/s
+
+Everything before and after runs at 28–30 KB/s. The same code sending the same
+sizes in the other direction shows nothing, and the 256 KB download costs a
+consistent 1.5 s more than the 256 KB upload on both ciphers.
+
+**It is probably not the SSH channel window.** `clientchannel.cpp` opens with
+`windowSize` at 0x20000000 and adjusts in 0x10000000 steps, so nothing in that
+layer has a boundary at 64 KB.
+
+**It is probably not our receive path either**, on three pieces of evidence.
+`bebboget` and our own `fetch` both pulled 256 KB down the same interface in the
+same session without it, and `fetch` at 61.94 KB/s would have shown a 1.5 s
+pause plainly. And §80.4's loopback arm — the same `bebboscp` binary, the same
+sizes, the same 256 KB downloads, but the server inside the guest — has every
+slope pair agreeing to under 4% and no stall anywhere, in four arms across two
+runs.
+
+That last one is the strongest and it points away from both programs: what the
+stalling runs have and the clean ones do not is **the path through SLIRP to a
+server on the build host**. But `bebboget` produced one comparable outlier over
+that same path (§80.7), so this stays an observation rather than a verdict.
+
+The reduced case worth building is a `recv()` loop against our library with no
+SSH at all, reading a 256 KB stream over SLIRP and timestamping every return, to
+see whether anything stalls at 64 KB received. That is a test against our
+library and is worth more than any workaround.
+
+### 80.6 bebboget, and our fetch, on one server in one run
+
+`tests/bebboget/run-bebboget.sh` runs both in a single emulator session against
+one local HTTPS server, so the two arms share the host's load, the SLIRP
+scheduling and the server process and the only difference is which TLS stack is
+working. A public URL was rejected on purpose: it makes the test depend on the
+network being up and on a CDN's cipher preference, and a first handshake at
+14 MHz can outlast a busy front end's patience (§11.8) — which would arrive as
+a flake rather than as the finding it is.
+
+Both arms skip certificate verification (`--sloppy`, `NOVERIFY`) because the
+server's certificate is generated here. That measures the record layer and the
+transport, and not either program's trust store.
+
+12/12 downloads byte-identical over two runs, every `rc 0`.
+
+### 80.7 Two TLS stacks, and they agree on almost nothing
+
+Left alone the two negotiate different crypto entirely, which the server now
+logs per request:
+
+| | version and suite | 45 B | 64 KB | 256 KB | 64K→256K |
+|---|---|---:|---:|---:|---:|
+| bebboget | TLS 1.3 `TLS_AES_256_GCM_SHA384` | 4.98 s | 7.80 | 16.38 | **22.38 KB/s** |
+| our `fetch` | TLS 1.2 `ECDHE-RSA-CHACHA20-POLY1305` | 1.10 | 2.18 | 5.28 | **61.94 KB/s** |
+
+Both are real — they are what each program does against a normal server — but
+the difference is partly the algorithm. `src/tls/ami_tls_crypto.c` offers
+0xC023, 0xC027, 0xCCA8, 0xCCA9 and two RSA CBC suites; bebboget's ChaCha20 is
+the TLS 1.3 suite 0x1303 and not 0xCCA8, so **the two stacks share no AEAD at
+all**. The whole intersection is TLS 1.2 `ECDHE-RSA-AES128-CBC-SHA256` (0xC027)
+plus two plain-RSA CBC suites.
+
+`-1` pins the server to 0xC027, which leaves both clients no choice:
+
+| pinned to 0xC027 | 45 B | 64 KB | 256 KB | 64K→256K |
+|---|---:|---:|---:|---:|
+| bebboget | 4.04 s | 7.52 | 18.02 | **18.29 KB/s** |
+| our `fetch` | 1.16 | 3.90 | 11.98 | **23.76 KB/s** |
+
+**On identical crypto we are about 30% faster, and the handshake is 3.5×
+faster.** The first pinned run reported 42.29 KB/s for bebboget off a 64 KB
+sample that had stalled by about 6 s; the 256 KB figure was identical in both
+runs (18.04 s and 18.02 s) and the second run's two slopes agree to 0.5%, so the
+second run is the one that means anything. That outlier is the one referred to
+in §80.5.
+
+The other thing the pinned table says is about us: our own `fetch` does 23.76
+KB/s on AES-128-CBC + HMAC-SHA256 and 61.94 KB/s on ChaCha20-Poly1305 — **2.6×,
+and that is `src/crypto68k`'s 68020 assembly against the portable CBC path.**
+
+### 80.8 Which tier this belongs in
+
+**Tier 2, local, not public CI**, on four counts, and only the last is ours to
+fix:
+
+1. `a2065.device` is Commodore's and cannot be fetched — the same reason
+   `bsdsocktest` is out of public CI.
+2. `locale.library` is Commodore's too, and §80.1 is what its absence looks
+   like. That is a second non-redistributable dependency, and a harder one to
+   explain to somebody whose run just hangs.
+3. The BebboSSH arm needs an `sshd` **and** an `sftp-server` on the build host.
+   `bebboscp` is an SFTP client, not an `scp -f`/`-t` one, so a server without
+   the subsystem fails at the channel request with nothing in its log. The
+   `-L` arm needs neither, since both ends are in the guest.
+4. A full run is five minutes of *exclusive* emulator. `EMULATOR_TESTS` in
+   `tools/ci.sh` scores by the runner's exit status, and a2065.device 2.16
+   never honours `AbortIO()` on a pending `CMD_READ`, so a completed run can
+   hang at the last `CloseLibrary()` and be reported as a timeout.
+
+Point 4 is handled rather than tolerated: `tests/bebbossh/check.sh` and
+`tests/bebboget/check.sh` **print a verdict line and score on that**, ignoring
+what the emulator exited with. In practice every run here exited 0 — both
+clients close their sockets and their library cleanly — but the harness does
+not depend on it.
+
+So they are `run-*.sh` harnesses in the shape of `tests/leak/run-leak.sh`, run
+by hand or by a self-hosted runner that has the ROM and the drivers, and not
+added to `EMULATOR_TESTS`.
+
+### 80.9 The interactive side, and the terminal size is right
+
+Everything above is bulk transfer. `run-bebbossh.sh -I` is the other half: a
+login session with a real AmigaDOS console, which is where terminal handling
+lives and where our own Dropbear shim spent its effort.
+
+It needs a console, and that is not a detail. BebboSSH decides it has a
+terminal by asking `IsInteractive()` about its own input, and raw mode, the
+size in `pty-req` and whether it watches for resizes at all follow from that
+one answer. Redirected from `NIL:` none of it runs, so a harness that never
+opens a `CON:` cannot say anything about any of it. `clients/dropbear/
+clientrun.c` grew a `>` command form that opens a `CON:` as `SYS_Input` and
+leaves output going to the report file, so the terminal is real and every byte
+still lands on the host.
+
+**Sizes match exactly, and both sides were measured.** ClientRun asks the
+console its own size with CSI `0 q` -- the Window Bounds Report, the same
+question `console.cpp` asks -- and the remote runs `stty size` and
+`os.get_terminal_size(0)`, i.e. `TIOCGWINSZ` on the pty:
+
+| CON: window | the console says | remote `stty size` | remote `TIOCGWINSZ` |
+|---|---|---|---|
+| `0/0/512/128` | 12 x 49 | 12 x 49 | 12 x 49 |
+| `0/0/720/232` | 24 x 61 | 24 x 61 | 24 x 61 |
+
+Two deliberately odd sizes, because 640x200 in topaz-8 is so close to 80x24
+that a test using it could not tell a working implementation from one that
+answers a constant.
+
+`tput cols` says 80x24 in both, which is not a BebboSSH fault and not a real
+disagreement: `xterm-amiga.src` declares `cols#80, lines#24` statically, and in
+the probe `tput`'s stdout is a file, so ncurses cannot measure the terminal and
+falls back on the entry. An application on a real terminal uses `TIOCGWINSZ`,
+and that column is right.
+
+**Resize propagates.** ClientRun starts the session asynchronously, waits, and
+calls `ChangeWindowBox()` on the console's own window -- found through
+`ACTION_DISK_INFO` to the console handler, because `fh_Arg1` is *not* the
+Window and reading it gives a pointer whose Width and Height come back as 35
+and 9572. The remote samples its size either side:
+
+| | window, pixels | remote sees |
+|---|---|---|
+| before | 448 x 104 | 10 x 42 |
+| after | 608 x 176 | 18 x 58 |
+
+**That test was wrong the first three times, and the way it was wrong is worth
+keeping.** A client turns console resize reporting on by *writing* an escape
+sequence -- BebboSSH writes `\x1b[2;11;12{` to its stdout. Point stdout at a
+file and the sequence lands in the file, the console is never asked to report
+anything, and the window can then be resized all day with nothing to notice.
+That produced a confident "resize is not propagated" three runs running, and it
+was the harness. The resize arm now gives the child a second handle on the same
+window for output, via `Open("*")` with `pr_ConsoleTask` pointed at that
+console; its session output is therefore not captured, which does not matter
+because the probe writes its answers on the host.
+
+**The termios block arrives and is applied.** `pty-req` carries VINTR ^C,
+VERASE ^H and VEOF ^D. The remote's `stty -a` reports `intr = ^C`, `erase =
+^H`, `eof = ^D` -- and a host's own default erase is `^?`, so `^H` is proof the
+block was parsed rather than ignored. That is the Ctrl-C question answered at
+the protocol level. Delivering a live Ctrl-C *keystroke* is not tested: it
+needs somebody at the console, and injecting one into a `CON:` under a headless
+emulator is not something this harness can do.
+
+`-T` behaves: `stty: stdin isn't a terminal`, `tty` says `not a tty`. `TERM`
+arrives as `xterm-amiga` and a real pty is allocated (`/dev/ttys008`).
+
+### 80.10 A shell session, and it is a shell session
+
+Driven from a file rather than a console -- BebboSSH's other input path, which
+reads the whole file and sends it, and is how a script gets piped into a
+session. Against the host's `sshd` and zsh, all five lines ran and the session
+ended by itself:
+
+    echo SHELL-SESSION-START   ->  SHELL-SESSION-START
+    id -un                     ->  turo
+    pwd                        ->  /Users/turo
+    echo $((6*7))              ->  42
+    exit                       ->  rc 0
+
+with the prompt, the command echo, bracketed-paste markers and the window-title
+sequences all coming back intact. This is a working interactive session, not a
+pipe that happens to carry bytes.
+
+### 80.11 Logging IN to the Amiga, and where bebbosshd stops
+
+`-I -L` puts `bebbosshd` in the guest and `bebbossh` in the guest, since SLIRP
+gives no way in from outside. Login by public key, a remote command through
+`exec`, and an interactive Shell all work:
+
+    Echo AMIGA-EXEC-OK  ->  AMIGA-EXEC-OK          rc 0, 10.04 s
+    Ram Disk:> Echo "SHELL-SESSION-START"
+    SHELL-SESSION-START
+    Ram Disk:> CD DH0:
+    DH0:>
+
+That is a real AmigaDOS Shell: the prompt tracks the current directory, and it
+arrives wrapped in its own colour sequences, which is the clearest single sign
+the Shell believes it is writing to a terminal. The server's log shows it
+starting and ending a task per command.
+
+**It stops after the second command of a piped script.** A four-line script got
+through `Echo` and `CD`, printed the new prompt, and then nothing: the server
+kept reading the remaining bytes off the socket -- its log records
+`SSH_MSG_CHANNEL_DATA ... consumed 84 of 84` once a minute -- and never ran
+them, and the client waited for a prompt that never came until the harness
+timed out at fifteen minutes.
+
+**That is bebbosshd's shell channel, not the client's send path.** The same
+client, reading the same kind of file, drove a five-line session against
+OpenSSH to a clean exit (§80.10). The arm is now one command plus `EndCLI` so
+it terminates; the longer case is left recorded rather than worked around.
+
+Note also that no `pty-req` appears in the server's log at `-v6`, where every
+other channel request does. Either the level numbering does not reach TRACE at
+6 or the request is not arriving; it was not chased further, and the outbound
+direction is where terminal size actually had to be proved.
+
+### 80.12 None of it touches our ABI
+
+The expectation was that terminal size comes from the AmigaDOS console and not
+from the socket, and that is exactly what happens: CSI `0 q` to `CON:`,
+`ChangeWindowBox()`, `IsInteractive()`, `SetMode()`. Not one of them is ours.
+
+Confirmed rather than assumed. Across every interactive run the serial log
+contains one line and it is our own `AMITCP: no rexxsyslib.library` notice --
+no `ENOSYS`, nothing about an unserviced `SocketBaseTagList` tag, nothing at
+session setup and nothing at resize. The socket calls are the same short list
+as §80.2; the terminal work happens entirely above them.
+
+A full interactive run under `tools/enforcer-run.sh -m` -- two sized sessions,
+the `-T` session, the piped shell and the resize -- reports **0 Enforcer hits
+and 0 MungWall wall hits.**
+
+### 80.13 What this means for the Dropbear shim
+
+Our shim fabricates a termios for `tcgetattr()`/`tcsetattr()` and maps
+Dropbear's ICANON switch onto `SetMode(handle, 1)`, answering `ENOTTY` for a
+non-console fd. BebboSSH does not need any of that: it is written for AmigaOS,
+so it calls `SetMode()` directly and asks the console its size in the console's
+own language.
+
+On the evidence here the interactive side is not a weak spot. Size is exact in
+both directions and follows a resize, the termios block is negotiated and
+applied, `-T` does the right thing, a piped script runs against a normal
+server, and logging in to the Amiga gives a real Shell. **Nothing here argues
+for keeping the shim on interactive grounds.** The one thing not demonstrated
+is a live Ctrl-C keystroke, and that is a limit of a headless harness rather
+than an observation about BebboSSH.
