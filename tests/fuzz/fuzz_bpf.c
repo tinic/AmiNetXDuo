@@ -28,6 +28,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Channel ownership is a library base on the Amiga; here it is just a token. */
+static char t_bpf_base_a;
+#define T_BPF_OWNER  ((APTR)&t_bpf_base_a)
+
 /* ------------------------------------------------------------------ stubs */
 
 static ULONG stub_outstanding;
@@ -227,14 +231,14 @@ int main(int argc, char **argv)
         ami_bpf_init();
         (void)ami_bpf_attach_interface("fz0", cookie, DLT_EN10MB, 1500, NULL);
 
-        chan = ami_bpf_open(0);
+        chan = ami_bpf_open(T_BPF_OWNER, 0);
         if (chan >= 0)
         {
             blen = (ULONG)fz_below(4096) + 1;
 
-            (void)ami_bpf_ioctl(chan, BIOCSBLEN, &blen);
-            (void)ami_bpf_ioctl(chan, BIOCSETIF, "fz0");
-            (void)ami_bpf_ioctl(chan, BIOCSETF, &bp);
+            (void)ami_bpf_ioctl(T_BPF_OWNER, chan, BIOCSBLEN, &blen);
+            (void)ami_bpf_ioctl(T_BPF_OWNER, chan, BIOCSETIF, "fz0");
+            (void)ami_bpf_ioctl(T_BPF_OWNER, chan, BIOCSETF, &bp);
 
             /* Several frames, so the ring rotates and the reader path runs. */
             for (j = 0; j < 8; j++)
@@ -243,11 +247,11 @@ int main(int argc, char **argv)
             {
                 static UBYTE out[8192];
 
-                (void)ami_bpf_read(chan, out,
+                (void)ami_bpf_read(T_BPF_OWNER, chan, out,
                                    (LONG)fz_below((unsigned)sizeof(out)));
             }
 
-            (void)ami_bpf_close(chan);
+            (void)ami_bpf_close(T_BPF_OWNER, chan);
         }
 
         ami_bpf_detach_interface(cookie);

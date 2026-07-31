@@ -402,6 +402,27 @@ LONG ami_bpf_validate(const struct bpf_insn *insns, ULONG count);
 LONG ami_bpf_init(VOID);
 VOID ami_bpf_cleanup(VOID);
 
+/* ------------------------------------------------------------ status codes */
+
+/*
+ * What the channel calls return on failure. Negative throughout, so a caller
+ * that only tests `< 0` is unaffected, and -1 stays the catch-all so an
+ * unannotated failure still means EINVAL. src/bsdsocket/bpf.c turns these into
+ * the errno the autodoc specifies for each call; nothing outside that mapping
+ * should look at the value.
+ *
+ * AMI_BPF_EINTR has no producer while bpf_read() is non-blocking. It is in the
+ * set because the autodoc lists it, and a blocking read would return it.
+ */
+#define AMI_BPF_EINVAL      (-1)
+#define AMI_BPF_ENXIO       (-2)
+#define AMI_BPF_EPERM       (-3)
+#define AMI_BPF_EBUSY       (-4)
+#define AMI_BPF_EINTR       (-5)
+#define AMI_BPF_EIO         (-6)
+#define AMI_BPF_ENOBUFS     (-7)
+#define AMI_BPF_EMSGSIZE    (-8)
+
 /* ------------------------------------------------------- the eight vectors */
 
 /*
@@ -423,28 +444,43 @@ VOID ami_bpf_cleanup(VOID);
  * pragma and the .fd agree, so it is real and not a typo in one source. The
  * generated vector must not tidy it.
  *
- * Return values are 0 for success and -1 for failure throughout, except
- * bpf_open (the channel claimed), bpf_read (bytes copied), bpf_write (bytes
- * accepted) and bpf_data_waiting (bytes available). No bsdsocket autodoc
- * covering the bpf_* group could be found on this machine, so the exact failure
- * codes Roadshow returns are unconfirmed; bpf_open's convention is confirmed,
- * because Roadshow's own libpcap uses it (below).
+ * Return values are 0 for success and a negative status for failure
+ * throughout, except bpf_open (the channel claimed), bpf_read (bytes copied)
+ * and bpf_write (bytes accepted). The LVOs report -1 for all of them.
+ *
+ * Every call takes an `owner`: an opaque token identifying the caller, which
+ * for the LVOs is the per-opener SocketBase. The autodoc says the channel "will
+ * be associated with the library base ... It will be automatically closed when
+ * the library is closed", and specifies EPERM for every call made on someone
+ * else's channel, so the token is compared on each one and
+ * ami_bpf_close_owner() runs when a base goes away. A token of NULL is an owner
+ * like any other, which is what the host tests use.
  */
 
 /*
  * Claim a channel: 0..AMI_BPF_MAX_CHANNELS-1 for a particular one, negative
- * for any free one. Returns the channel claimed, or -1 if it is out of range,
- * already open, or there are none left. A channel captures nothing until
+ * for any free one. Returns the channel claimed, AMI_BPF_ENXIO if the number
+ * is out of range, or AMI_BPF_EBUSY if that channel -- or, for the negative
+ * form, every channel -- is already open. A channel captures nothing until
  * BIOCSETIF.
  *
  * Roadshow's libpcap is the reference client for the negative form: it calls
  * bpf_open(-1) and then uses the return value as the channel for every call
- * that follows (docs/RESEARCH.md 55).
+ * that follows (docs/RESEARCH.md 55). That is also why channel 0 is a valid
+ * handle here although the autodoc says "A channel handle > 0".
  */
-LONG ami_bpf_open(LONG channel);
+LONG ami_bpf_open(APTR owner, LONG channel);
 
 /* Release the channel, its buffers and its filter. */
-LONG ami_bpf_close(LONG channel);
+LONG ami_bpf_close(APTR owner, LONG channel);
+
+/*
+ * Close every channel this owner still holds. Called when a library base
+ * closes, so a program that exits without bpf_close() does not strand a
+ * channel for the life of the stack. Frees memory and takes the channel lock;
+ * it does not block.
+ */
+VOID ami_bpf_close_owner(APTR owner);
 
 /*
  * Copy out whole capture records. Non-blocking: returns 0 when nothing is
@@ -454,11 +490,11 @@ LONG ami_bpf_close(LONG channel);
  *
  * Only complete records are ever returned, so a consumer can walk the buffer
  * with BPF_WORDALIGN(bh_hdrlen + bh_caplen) without bounds surprises. If the
- * caller's buffer is too small for even the first pending record, -1 is
- * returned and nothing is consumed: ask BIOCGBLEN and size the buffer to match,
- * as capture libraries do.
+ * caller's buffer is too small for even the first pending record,
+ * AMI_BPF_EINVAL is returned and nothing is consumed: ask BIOCGBLEN and size
+ * the buffer to match, as capture libraries do.
  */
-LONG ami_bpf_read(LONG channel, APTR buffer, LONG len);
+LONG ami_bpf_read(APTR owner, LONG channel, APTR buffer, LONG len);
 
 /*
  * Inject one frame. For DLT_EN10MB the buffer must start with a 14-byte
@@ -466,13 +502,14 @@ LONG ami_bpf_read(LONG channel, APTR buffer, LONG len);
  * the remainder goes out as the SANA-II payload, because in cooked mode the
  * device builds the header itself and would otherwise duplicate it.
  *
- * Returns the number of bytes accepted, or -1. Requires the interface to have
- * been registered with an injector; see ami_bpf_attach_interface().
+ * Returns the number of bytes accepted, AMI_BPF_EMSGSIZE past the MTU,
+ * AMI_BPF_ENOBUFS if the interface refused it, or AMI_BPF_ENXIO if the channel
+ * has no interface with an injector; see ami_bpf_attach_interface().
  */
-LONG ami_bpf_write(LONG channel, APTR buffer, LONG len);
+LONG ami_bpf_write(APTR owner, LONG channel, APTR buffer, LONG len);
 
 /* Signals sent to the calling task when a record lands. 0 disables. */
-LONG ami_bpf_set_notify_mask(LONG channel, ULONG signal_mask);
+LONG ami_bpf_set_notify_mask(APTR owner, LONG channel, ULONG signal_mask);
 
 /*
  * The interrupt-time counterpart. The tap runs at task level in this
@@ -480,24 +517,24 @@ LONG ami_bpf_set_notify_mask(LONG channel, ULONG signal_mask);
  * it), so this mask is delivered by the same Signal() from the same context as
  * the notify mask. It is honoured, not ignored, but means nothing extra here.
  */
-LONG ami_bpf_set_interrupt_mask(LONG channel, ULONG signal_mask);
+LONG ami_bpf_set_interrupt_mask(APTR owner, LONG channel, ULONG signal_mask);
 
 /*
  * AMI_BPF_FIONREAD, BIOCGBLEN, BIOCSBLEN, BIOCSETF, BIOCFLUSH, BIOCPROMISC,
  * BIOCGDLT, BIOCGETIF, BIOCSETIF, BIOCSRTIMEOUT, BIOCGRTIMEOUT, BIOCGSTATS,
- * BIOCIMMEDIATE, BIOCVERSION. Anything else returns -1.
+ * BIOCIMMEDIATE, BIOCVERSION. Anything else is AMI_BPF_EINVAL.
  *
  * Dispatch ignores the length field of the ioctl encoding and keys on
  * direction + group + number, so a caller built against a differently sized
  * struct ifreq still reaches the right handler.
  */
-LONG ami_bpf_ioctl(LONG channel, ULONG command, APTR buffer);
+LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer);
 
 /*
- * 1 if anything is buffered, 0 if not, -1 on a bad channel. The autodoc is
- * explicit that this is a flag; for the byte count use AMI_BPF_FIONREAD.
+ * 1 if anything is buffered, 0 if not, negative on a bad channel. The autodoc
+ * is explicit that this is a flag; for the byte count use AMI_BPF_FIONREAD.
  */
-LONG ami_bpf_data_waiting(LONG channel);
+LONG ami_bpf_data_waiting(APTR owner, LONG channel);
 
 /*
  * How many channels are currently bound to an interface, i.e. whether tapping

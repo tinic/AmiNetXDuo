@@ -268,6 +268,11 @@ static VOID bsd_child_destroy(struct AmiSocketBase *child)
 
     bsd_close_all(child);
 
+    /* The capture channels this base opened go with it, as the bpf_open()
+       autodoc says. Frees and Forbid()/Permit() only -- nothing that could
+       wait, which is what the close path cannot afford (544398f). */
+    bsd_bpf_close_all(child);
+
     if (child->sb_TimerOpen)
     {
         CloseDevice((struct IORequest *)&child->sb_TimerReq);

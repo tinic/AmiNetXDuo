@@ -34,6 +34,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Channel ownership is a library base on the Amiga; here it is just a token,
+   with a second one to prove a stranger gets EPERM. */
+static char t_bpf_base_a;
+static char t_bpf_base_b;
+#define T_BPF_OWNER  ((APTR)&t_bpf_base_a)
+#define T_BPF_OTHER  ((APTR)&t_bpf_base_b)
+
 /* ------------------------------------------------------------------ stubs */
 
 static ULONG stub_outstanding;
@@ -643,54 +650,54 @@ static void test_channel_basics(void)
     CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
                                    test_inject) == 0);
 
-    CHECK(ami_bpf_open(0) == 0);
-    CHECK(ami_bpf_open(0) == -1);                   /* already open          */
-    CHECK(ami_bpf_open(AMI_BPF_MAX_CHANNELS) == -1);
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == AMI_BPF_EBUSY);
+    CHECK(ami_bpf_open(T_BPF_OWNER, AMI_BPF_MAX_CHANNELS) == AMI_BPF_ENXIO);
 
     /* "Any free one" skips the channel already taken and names the one it
        claimed -- the form Roadshow's libpcap uses. */
-    CHECK(ami_bpf_open(-1) == 1);
-    CHECK(ami_bpf_close(1) == 0);
-    CHECK(ami_bpf_ioctl(1, BIOCFLUSH, NULL) == -1); /* not open              */
+    CHECK(ami_bpf_open(T_BPF_OWNER, -1) == 1);
+    CHECK(ami_bpf_close(T_BPF_OWNER, 1) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 1, BIOCFLUSH, NULL) == AMI_BPF_ENXIO);
 
-    CHECK(ami_bpf_ioctl(0, BIOCGBLEN, &value) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCGBLEN, &value) == 0);
     CHECK(value == AMI_BPF_DEFAULT_BLEN);
 
     /* Clamped to the documented range and word-aligned. */
     value = 7;
-    CHECK(ami_bpf_ioctl(0, BIOCSBLEN, &value) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSBLEN, &value) == 0);
     CHECK(value == (ULONG)BPF_MINBUFSIZE);
     value = 0x10000;
-    CHECK(ami_bpf_ioctl(0, BIOCSBLEN, &value) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSBLEN, &value) == 0);
     CHECK(value == (ULONG)BPF_MAXBUFSIZE);
     value = 256;
-    CHECK(ami_bpf_ioctl(0, BIOCSBLEN, &value) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSBLEN, &value) == 0);
     CHECK(value == 256);
 
-    CHECK(ami_bpf_ioctl(0, BIOCVERSION, &value) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCVERSION, &value) == 0);
 
     /* Not bound yet. */
-    CHECK(ami_bpf_ioctl(0, BIOCGETIF, name) == -1);
-    CHECK(ami_bpf_data_waiting(0) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCGETIF, name) == AMI_BPF_EINVAL);
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) == 0);
 
-    CHECK(ami_bpf_ioctl(0, BIOCSETIF, "nosuch") == -1);
-    CHECK(ami_bpf_ioctl(0, BIOCSETIF, "eth0") == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "nosuch") == AMI_BPF_EINVAL);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0") == 0);
 
-    CHECK(ami_bpf_ioctl(0, BIOCGETIF, name) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCGETIF, name) == 0);
     CHECK(strcmp(name, "eth0") == 0);
 
-    CHECK(ami_bpf_ioctl(0, BIOCGDLT, &value) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCGDLT, &value) == 0);
     CHECK(value == DLT_EN10MB);
 
     /* Refused once the buffers exist, as in 4.4BSD. */
     value = 512;
-    CHECK(ami_bpf_ioctl(0, BIOCSBLEN, &value) == -1);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSBLEN, &value) == AMI_BPF_EINVAL);
 
-    CHECK(ami_bpf_ioctl(0, BIOCPROMISC, NULL) == 0);
-    CHECK(ami_bpf_ioctl(0, 0xDEADBEEFUL, &value) == -1);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCPROMISC, NULL) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, 0xDEADBEEFUL, &value) == AMI_BPF_EINVAL);
 
-    CHECK(ami_bpf_close(0) == 0);
-    CHECK(ami_bpf_close(0) == -1);
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == AMI_BPF_ENXIO);
     ami_bpf_detach_interface(iface_cookie);
     CHECK(ami_alloc_count() == 0);
 }
@@ -712,8 +719,8 @@ static void test_capture_records(void)
     CHECK(ami_bpf_init() == 0);
     CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
                                    test_inject) == 0);
-    CHECK(ami_bpf_open(0) == 0);
-    CHECK(ami_bpf_ioctl(0, BIOCSETIF, "eth0") == 0);
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0") == 0);
 
     /* No filter installed: everything is captured. */
     len = make_tcp(frame, 1234, 80, 5, 0, 6);       /* 60 bytes */
@@ -727,9 +734,9 @@ static void test_capture_records(void)
     stub_clock_sec = 222;
     ami_bpf_tap_rx(iface_cookie, frame, 61);
 
-    CHECK(ami_bpf_data_waiting(0) > 0);
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) > 0);
 
-    got = ami_bpf_read(0, out, (LONG)sizeof(out));
+    got = ami_bpf_read(T_BPF_OWNER, 0, out, (LONG)sizeof(out));
 
     /* Record 0. */
     read_rec(out, &r0);
@@ -755,11 +762,11 @@ static void test_capture_records(void)
     CHECK(got == (LONG)(r0.stride + r1.hdrlen + r1.caplen));
     CHECK(got == 80 + 81);
 
-    CHECK(ami_bpf_read(0, out, (LONG)sizeof(out)) == 0);
-    CHECK(ami_bpf_data_waiting(0) == 0);
+    CHECK(ami_bpf_read(T_BPF_OWNER, 0, out, (LONG)sizeof(out)) == 0);
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) == 0);
 
     /* Statistics: two frames seen, none dropped. */
-    CHECK(ami_bpf_ioctl(0, BIOCGSTATS, &st) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCGSTATS, &st) == 0);
     CHECK(st.bs_recv == 2);
     CHECK(st.bs_drop == 0);
 
@@ -771,10 +778,10 @@ static void test_capture_records(void)
 
         prog.bf_len   = NELEM(snap);
         prog.bf_insns = (struct bpf_insn *)snap;
-        CHECK(ami_bpf_ioctl(0, BIOCSETF, &prog) == 0);
+        CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETF, &prog) == 0);
 
         ami_bpf_tap_rx(iface_cookie, frame, len);
-        got = ami_bpf_read(0, out, (LONG)sizeof(out));
+        got = ami_bpf_read(T_BPF_OWNER, 0, out, (LONG)sizeof(out));
         read_rec(out, &r0);
         CHECK(r0.caplen  == 30);
         CHECK(r0.datalen == 60);
@@ -786,17 +793,17 @@ static void test_capture_records(void)
     {
         prog.bf_len   = NELEM(prog_arp);
         prog.bf_insns = (struct bpf_insn *)prog_arp;
-        CHECK(ami_bpf_ioctl(0, BIOCSETF, &prog) == 0);
-        CHECK(ami_bpf_ioctl(0, BIOCFLUSH, NULL) == 0);
+        CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETF, &prog) == 0);
+        CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCFLUSH, NULL) == 0);
 
         ami_bpf_tap_rx(iface_cookie, frame, len);           /* IPv4: no    */
-        CHECK(ami_bpf_data_waiting(0) == 0);
+        CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) == 0);
 
         len = make_arp(frame);
         ami_bpf_tap_rx(iface_cookie, frame, len);           /* ARP: yes    */
-        CHECK(ami_bpf_data_waiting(0) > 0);
+        CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) > 0);
 
-        CHECK(ami_bpf_ioctl(0, BIOCGSTATS, &st) == 0);
+        CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCGSTATS, &st) == 0);
         CHECK(st.bs_recv == 2);
         CHECK(st.bs_drop == 0);
     }
@@ -804,8 +811,8 @@ static void test_capture_records(void)
     /* Installing a filter discards what is buffered. */
     prog.bf_len   = 0;
     prog.bf_insns = NULL;
-    CHECK(ami_bpf_ioctl(0, BIOCSETF, &prog) == 0);
-    CHECK(ami_bpf_data_waiting(0) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETF, &prog) == 0);
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) == 0);
 
     /* A program the validator rejects must not be installed. */
     {
@@ -816,37 +823,38 @@ static void test_capture_records(void)
 
         prog.bf_len   = NELEM(bad);
         prog.bf_insns = (struct bpf_insn *)bad;
-        CHECK(ami_bpf_ioctl(0, BIOCSETF, &prog) == -1);
+        CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETF, &prog) == AMI_BPF_EINVAL);
 
         prog.bf_len   = (ULONG)BPF_MAXINSNS + 1;
         prog.bf_insns = (struct bpf_insn *)prog_ip;
-        CHECK(ami_bpf_ioctl(0, BIOCSETF, &prog) == -1);
+        CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETF, &prog) == AMI_BPF_EINVAL);
     }
 
     /* A caller's buffer too small for even the first record: nothing is
        consumed, so the next properly sized read still gets it. */
     len = make_tcp(frame, 1234, 80, 5, 0, 6);
     ami_bpf_tap_rx(iface_cookie, frame, len);
-    CHECK(ami_bpf_read(0, out, 8) == -1);
-    CHECK(ami_bpf_data_waiting(0) > 0);
-    CHECK(ami_bpf_read(0, out, (LONG)sizeof(out)) == (LONG)(AMI_BPF_HDRLEN + 60));
+    CHECK(ami_bpf_read(T_BPF_OWNER, 0, out, 8) == AMI_BPF_EINVAL);
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) > 0);
+    CHECK(ami_bpf_read(T_BPF_OWNER, 0, out, (LONG)sizeof(out)) ==
+          (LONG)(AMI_BPF_HDRLEN + 60));
 
     /* Partial drain: whole records only, and the rest survives. */
     ami_bpf_tap_rx(iface_cookie, frame, len);
     ami_bpf_tap_rx(iface_cookie, frame, len);
-    got = ami_bpf_read(0, out, 80);                 /* room for exactly one  */
+    got = ami_bpf_read(T_BPF_OWNER, 0, out, 80);    /* room for exactly one */
     CHECK(got == (LONG)(AMI_BPF_HDRLEN + 60));
     read_rec(out, &r0);
     CHECK(r0.caplen == 60);
-    got = ami_bpf_read(0, out, (LONG)sizeof(out));
+    got = ami_bpf_read(T_BPF_OWNER, 0, out, (LONG)sizeof(out));
     CHECK(got == (LONG)(AMI_BPF_HDRLEN + 60));
-    CHECK(ami_bpf_data_waiting(0) == 0);
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) == 0);
 
     value = 0;
-    CHECK(ami_bpf_ioctl(0, BIOCGBLEN, &value) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCGBLEN, &value) == 0);
     CHECK(value == AMI_BPF_DEFAULT_BLEN);
 
-    CHECK(ami_bpf_close(0) == 0);
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == 0);
     ami_bpf_detach_interface(iface_cookie);
     CHECK(ami_alloc_count() == 0);
 }
@@ -864,16 +872,16 @@ static void test_overflow_and_signals(void)
     CHECK(ami_bpf_init() == 0);
     CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
                                    test_inject) == 0);
-    CHECK(ami_bpf_open(0) == 0);
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
 
     /* 128-byte buffers hold exactly one 80-byte record each. */
     value = 128;
-    CHECK(ami_bpf_ioctl(0, BIOCSBLEN, &value) == 0);
-    CHECK(ami_bpf_ioctl(0, BIOCSETIF, "eth0") == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSBLEN, &value) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0") == 0);
 
-    CHECK(ami_bpf_set_notify_mask(0, 1UL << 12) == 0);
+    CHECK(ami_bpf_set_notify_mask(T_BPF_OWNER, 0, 1UL << 12) == 0);
     value = 1;
-    CHECK(ami_bpf_ioctl(0, BIOCIMMEDIATE, &value) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCIMMEDIATE, &value) == 0);
 
     stub_signalled_task = NULL;
     stub_signalled_mask = 0;
@@ -888,20 +896,22 @@ static void test_overflow_and_signals(void)
     ami_bpf_tap_rx(iface_cookie, frame, len);   /* both full -> drop        */
     ami_bpf_tap_rx(iface_cookie, frame, len);   /* drop                     */
 
-    CHECK(ami_bpf_ioctl(0, BIOCGSTATS, &st) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCGSTATS, &st) == 0);
     CHECK(st.bs_recv == 4);
     CHECK(st.bs_drop == 2);
 
     /* Draining lets capture resume. */
-    CHECK(ami_bpf_read(0, out, (LONG)sizeof(out)) == (LONG)(AMI_BPF_HDRLEN + 60));
-    CHECK(ami_bpf_read(0, out, (LONG)sizeof(out)) == (LONG)(AMI_BPF_HDRLEN + 60));
-    CHECK(ami_bpf_read(0, out, (LONG)sizeof(out)) == 0);
+    CHECK(ami_bpf_read(T_BPF_OWNER, 0, out, (LONG)sizeof(out)) ==
+          (LONG)(AMI_BPF_HDRLEN + 60));
+    CHECK(ami_bpf_read(T_BPF_OWNER, 0, out, (LONG)sizeof(out)) ==
+          (LONG)(AMI_BPF_HDRLEN + 60));
+    CHECK(ami_bpf_read(T_BPF_OWNER, 0, out, (LONG)sizeof(out)) == 0);
 
     ami_bpf_tap_rx(iface_cookie, frame, len);
-    CHECK(ami_bpf_data_waiting(0) > 0);
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) > 0);
 
     /* A frame larger than the whole buffer is truncated, not dropped. */
-    CHECK(ami_bpf_ioctl(0, BIOCFLUSH, NULL) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCFLUSH, NULL) == 0);
     {
         UBYTE big[1024];
         Rec   r;
@@ -909,13 +919,13 @@ static void test_overflow_and_signals(void)
         memset(big, 0x5A, sizeof(big));
         memcpy(big, frame, ETH_HDR);
         ami_bpf_tap_rx(iface_cookie, big, (ULONG)sizeof(big));
-        CHECK(ami_bpf_read(0, out, (LONG)sizeof(out)) == 128);
+        CHECK(ami_bpf_read(T_BPF_OWNER, 0, out, (LONG)sizeof(out)) == 128);
         read_rec(out, &r);
         CHECK(r.caplen  == 128 - AMI_BPF_HDRLEN);
         CHECK(r.datalen == 1024);
     }
 
-    CHECK(ami_bpf_close(0) == 0);
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == 0);
     ami_bpf_detach_interface(iface_cookie);
     CHECK(ami_alloc_count() == 0);
 }
@@ -928,21 +938,21 @@ static void test_write_and_binding(void)
     printf("bpf: write splits the link header, and late binding works\n");
 
     CHECK(ami_bpf_init() == 0);
-    CHECK(ami_bpf_open(0) == 0);
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
 
     /* Binding before the interface exists fails... */
-    CHECK(ami_bpf_ioctl(0, BIOCSETIF, "eth0") == -1);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0") == AMI_BPF_EINVAL);
 
     CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
                                    test_inject) == 0);
-    CHECK(ami_bpf_ioctl(0, BIOCSETIF, "eth0") == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0") == 0);
 
     len = make_tcp(frame, 1234, 80, 5, 0, 6);
 
     inject_result = 0;
     inject_type   = 0;
     inject_len    = 0;
-    CHECK(ami_bpf_write(0, frame, (LONG)len) == (LONG)len);
+    CHECK(ami_bpf_write(T_BPF_OWNER, 0, frame, (LONG)len) == (LONG)len);
     CHECK(inject_cookie == iface_cookie);
     CHECK(inject_type == 0x0800);
     CHECK(memcmp(inject_dst, mac_a, 6) == 0);
@@ -950,12 +960,14 @@ static void test_write_and_binding(void)
     CHECK(memcmp(inject_payload, frame + ETH_HDR, 16) == 0);
 
     /* Shorter than a link header, or longer than the MTU. */
-    CHECK(ami_bpf_write(0, frame, 13) == -1);
-    CHECK(ami_bpf_write(0, frame, 0) == -1);
-    CHECK(ami_bpf_write(0, NULL, 20) == -1);
+    CHECK(ami_bpf_write(T_BPF_OWNER, 0, frame, 13) == AMI_BPF_EINVAL);
+    CHECK(ami_bpf_write(T_BPF_OWNER, 0, frame, 0) == AMI_BPF_EINVAL);
+    CHECK(ami_bpf_write(T_BPF_OWNER, 0, NULL, 20) == AMI_BPF_EINVAL);
+    CHECK(ami_bpf_write(T_BPF_OWNER, 0, frame, 1500 + ETH_HDR + 1) ==
+          AMI_BPF_EMSGSIZE);
 
     inject_result = -1;
-    CHECK(ami_bpf_write(0, frame, (LONG)len) == -1);
+    CHECK(ami_bpf_write(T_BPF_OWNER, 0, frame, (LONG)len) == AMI_BPF_ENOBUFS);
     inject_result = 0;
 
     /*
@@ -964,15 +976,15 @@ static void test_write_and_binding(void)
      * That is what lets a capture survive an interface going offline and back.
      */
     ami_bpf_detach_interface(iface_cookie);
-    CHECK(ami_bpf_write(0, frame, (LONG)len) == -1);
+    CHECK(ami_bpf_write(T_BPF_OWNER, 0, frame, (LONG)len) == AMI_BPF_ENXIO);
     ami_bpf_tap_rx(iface_cookie, frame, len);
-    CHECK(ami_bpf_data_waiting(0) == 0);
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) == 0);
 
     CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
                                    test_inject) == 0);
     ami_bpf_tap_rx(iface_cookie, frame, len);
-    CHECK(ami_bpf_data_waiting(0) > 0);
-    CHECK(ami_bpf_write(0, frame, (LONG)len) == (LONG)len);
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) > 0);
+    CHECK(ami_bpf_write(T_BPF_OWNER, 0, frame, (LONG)len) == (LONG)len);
 
     /* An interface with no injector accepts capture but refuses write. */
     {
@@ -980,12 +992,12 @@ static void test_write_and_binding(void)
 
         CHECK(ami_bpf_attach_interface("eth1", other, DLT_EN10MB, 1500,
                                        NULL) == 0);
-        CHECK(ami_bpf_open(1) == 1);
-        CHECK(ami_bpf_ioctl(1, BIOCSETIF, "eth1") == 0);
-        CHECK(ami_bpf_write(1, frame, (LONG)len) == -1);
+        CHECK(ami_bpf_open(T_BPF_OWNER, 1) == 1);
+        CHECK(ami_bpf_ioctl(T_BPF_OWNER, 1, BIOCSETIF, "eth1") == 0);
+        CHECK(ami_bpf_write(T_BPF_OWNER, 1, frame, (LONG)len) == AMI_BPF_ENXIO);
         ami_bpf_tap_rx(other, frame, len);
-        CHECK(ami_bpf_data_waiting(1) > 0);
-        CHECK(ami_bpf_close(1) == 0);
+        CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 1) > 0);
+        CHECK(ami_bpf_close(T_BPF_OWNER, 1) == 0);
         ami_bpf_detach_interface(other);
     }
 
@@ -993,6 +1005,70 @@ static void test_write_and_binding(void)
     ami_bpf_tap_rx((APTR)"stranger", frame, len);
 
     ami_bpf_cleanup();
+    ami_bpf_detach_interface(iface_cookie);
+    CHECK(ami_alloc_count() == 0);
+}
+
+/*
+ * "The packet filter channel you allocate will be associated with the library
+ * base ... It will be automatically closed when the library is closed", and
+ * EPERM for every call from anyone else.
+ */
+static void test_channel_ownership(void)
+{
+    UBYTE frame[128];
+    ULONG value;
+    ULONG len;
+    char  name[IFNAMSIZ];
+
+    printf("bpf: channels belong to the base that opened them\n");
+
+    CHECK(ami_bpf_init() == 0);
+    CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
+                                   test_inject) == 0);
+
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0") == 0);
+
+    /* A stranger sees the channel exists but may not touch it. */
+    CHECK(ami_bpf_close(T_BPF_OTHER, 0) == AMI_BPF_EPERM);
+    CHECK(ami_bpf_read(T_BPF_OTHER, 0, frame, (LONG)sizeof(frame)) ==
+          AMI_BPF_EPERM);
+    CHECK(ami_bpf_write(T_BPF_OTHER, 0, frame, 60) == AMI_BPF_EPERM);
+    CHECK(ami_bpf_ioctl(T_BPF_OTHER, 0, BIOCGETIF, name) == AMI_BPF_EPERM);
+    CHECK(ami_bpf_data_waiting(T_BPF_OTHER, 0) == AMI_BPF_EPERM);
+    CHECK(ami_bpf_set_notify_mask(T_BPF_OTHER, 0, 1UL << 5) == AMI_BPF_EPERM);
+    CHECK(ami_bpf_set_interrupt_mask(T_BPF_OTHER, 0, 1UL << 5) ==
+          AMI_BPF_EPERM);
+
+    /* An unopened channel is ENXIO for everyone, owner or not: the handle
+       comes first, so a stranger cannot probe which channels are taken. */
+    CHECK(ami_bpf_ioctl(T_BPF_OTHER, 1, BIOCGBLEN, &value) == AMI_BPF_ENXIO);
+
+    /* The stranger's own channel is its own. */
+    CHECK(ami_bpf_open(T_BPF_OTHER, 1) == 1);
+    CHECK(ami_bpf_ioctl(T_BPF_OTHER, 1, BIOCSETIF, "eth0") == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 1, BIOCGBLEN, &value) == AMI_BPF_EPERM);
+
+    len = make_tcp(frame, 1234, 80, 5, 0, 6);
+    ami_bpf_tap_rx(iface_cookie, frame, len);
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) > 0);
+    CHECK(ami_bpf_data_waiting(T_BPF_OTHER, 1) > 0);
+
+    /* Closing one base releases its channels and leaves the other's alone. */
+    ami_bpf_close_owner(T_BPF_OWNER);
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) == AMI_BPF_ENXIO);
+    CHECK(ami_bpf_data_waiting(T_BPF_OTHER, 1) > 0);
+    CHECK(ami_bpf_capturing() == 1);
+
+    /* The channel is free again, and lands with whoever asks next. */
+    CHECK(ami_bpf_open(T_BPF_OTHER, -1) == 0);
+    CHECK(ami_bpf_close(T_BPF_OTHER, 0) == 0);
+
+    ami_bpf_close_owner(T_BPF_OTHER);
+    CHECK(ami_bpf_capturing() == 0);
+    CHECK(ami_bpf_data_waiting(T_BPF_OTHER, 1) == AMI_BPF_ENXIO);
+
     ami_bpf_detach_interface(iface_cookie);
     CHECK(ami_alloc_count() == 0);
 }
@@ -1015,6 +1091,7 @@ int main(int argc, char **argv)
     test_capture_records();
     test_overflow_and_signals();
     test_write_and_binding();
+    test_channel_ownership();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
 

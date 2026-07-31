@@ -44,6 +44,13 @@
 #include <stdarg.h>
 #include <stddef.h>
 
+/* Channel ownership is a library base on the Amiga; here it is just a token,
+   with a second one to prove a stranger gets EPERM. */
+static char t_bpf_base_a;
+static char t_bpf_base_b;
+#define T_BPF_OWNER  ((APTR)&t_bpf_base_a)
+#define T_BPF_OTHER  ((APTR)&t_bpf_base_b)
+
 
 /* ------------------------------------------------------------- logging --- */
 
@@ -826,19 +833,22 @@ ULONG            sigmask = 0;
     CHECK(ami_bpf_init() == 0, "bpf init");
     CHECK(ami_bpf_attach_interface("eth0", t_iface_cookie, DLT_EN10MB, 1500,
                                    NULL) == 0, "interface attached");
-    CHECK(ami_bpf_open(0) == 0,                             "channel open");
-    CHECK(ami_bpf_ioctl(0, BIOCSETIF, (APTR) "eth0") == 0,  "BIOCSETIF");
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0, "channel open");
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, (APTR) "eth0") == 0,
+          "BIOCSETIF");
 
     sigbit = AllocSignal(-1);
     if (sigbit != -1)
     {
         sigmask = 1UL << (ULONG) sigbit;
         (VOID) SetSignal(0UL, sigmask);
-        CHECK(ami_bpf_set_notify_mask(0, sigmask) == 0, "notify mask set");
+        CHECK(ami_bpf_set_notify_mask(T_BPF_OWNER, 0, sigmask) == 0,
+              "notify mask set");
         {
             ULONG one = 1;
 
-            CHECK(ami_bpf_ioctl(0, BIOCIMMEDIATE, &one) == 0, "BIOCIMMEDIATE");
+            CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCIMMEDIATE, &one) == 0,
+                  "BIOCIMMEDIATE");
         }
     }
 
@@ -854,9 +864,9 @@ ULONG            sigmask = 0;
         FreeSignal(sigbit);
     }
 
-    CHECK(ami_bpf_data_waiting(0) > 0, "data waiting");
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) > 0, "data waiting");
 
-    got = ami_bpf_read(0, out, (LONG) sizeof(out));
+    got = ami_bpf_read(T_BPF_OWNER, 0, out, (LONG) sizeof(out));
 
     rec     = out;
     caplen  = *(const ULONG *) (const void *) (rec + AMI_BPF_OFF_CAPLEN);
@@ -909,9 +919,10 @@ ULONG            sigmask = 0;
               "read returned both records with no trailing pad");
     }
 
-    CHECK(ami_bpf_read(0, out, (LONG) sizeof(out)) == 0, "nothing left to read");
+    CHECK(ami_bpf_read(T_BPF_OWNER, 0, out, (LONG) sizeof(out)) == 0,
+          "nothing left to read");
 
-    CHECK(ami_bpf_ioctl(0, BIOCGSTATS, &st) == 0, "BIOCGSTATS");
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCGSTATS, &st) == 0, "BIOCGSTATS");
     CHECK(st.bs_recv == 2,  "two frames seen");
     CHECK(st.bs_drop == 0,  "none dropped");
 
@@ -921,20 +932,77 @@ ULONG            sigmask = 0;
 
         prog.bf_len   = T_TCP80_LEN;
         prog.bf_insns = (struct bpf_insn *) t_prog_tcp80;
-        CHECK(ami_bpf_ioctl(0, BIOCSETF, &prog) == 0, "BIOCSETF");
+        CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETF, &prog) == 0, "BIOCSETF");
 
         len = t_make_tcp(frame, 4444, 22);
         ami_bpf_tap_rx(t_iface_cookie, frame, len);
-        CHECK(ami_bpf_data_waiting(0) == 0, "filtered frame not captured");
+        CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) == 0,
+              "filtered frame not captured");
 
         len = t_make_tcp(frame, 1234, 80);
         ami_bpf_tap_rx(t_iface_cookie, frame, len);
-        CHECK(ami_bpf_data_waiting(0) > 0,  "matching frame captured");
-        CHECK(ami_bpf_read(0, out, (LONG) sizeof(out)) == (LONG) (20 + 60),
-              "one record read back");
+        CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) > 0,
+              "matching frame captured");
+        CHECK(ami_bpf_read(T_BPF_OWNER, 0, out, (LONG) sizeof(out)) ==
+              (LONG) (20 + 60), "one record read back");
     }
 
-    CHECK(ami_bpf_close(0) == 0, "channel closed");
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == 0, "channel closed");
+    ami_bpf_detach_interface(t_iface_cookie);
+}
+
+/*
+ * "The packet filter channel you allocate will be associated with the library
+ * base ... It will be automatically closed when the library is closed", plus
+ * EPERM for anyone else. Under real Forbid()/Permit(), unlike src/bpf/test/.
+ */
+static VOID t_test_bpf_ownership(VOID)
+{
+
+UBYTE frame[128];
+UBYTE out[256];
+ULONG len;
+ULONG value;
+
+
+    t_log("bpf: a channel belongs to the base that opened it");
+
+    CHECK(ami_bpf_init() == 0, "bpf init");
+    CHECK(ami_bpf_attach_interface("eth0", t_iface_cookie, DLT_EN10MB, 1500,
+                                   NULL) == 0, "interface attached");
+
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0, "owner opens channel 0");
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, (APTR) "eth0") == 0,
+          "BIOCSETIF");
+
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == AMI_BPF_EBUSY,
+          "reopening an open channel is EBUSY");
+    CHECK(ami_bpf_open(T_BPF_OWNER, AMI_BPF_MAX_CHANNELS) == AMI_BPF_ENXIO,
+          "a channel number out of range is ENXIO");
+
+    CHECK(ami_bpf_close(T_BPF_OTHER, 0) == AMI_BPF_EPERM,
+          "another base cannot close it");
+    CHECK(ami_bpf_read(T_BPF_OTHER, 0, out, (LONG) sizeof(out)) ==
+          AMI_BPF_EPERM, "another base cannot read it");
+    CHECK(ami_bpf_ioctl(T_BPF_OTHER, 0, BIOCGBLEN, &value) == AMI_BPF_EPERM,
+          "another base cannot configure it");
+    CHECK(ami_bpf_data_waiting(T_BPF_OTHER, 0) == AMI_BPF_EPERM,
+          "another base cannot poll it");
+    CHECK(ami_bpf_set_notify_mask(T_BPF_OTHER, 0, 1UL << 5) == AMI_BPF_EPERM,
+          "another base cannot take the notify signal");
+
+    len = t_make_tcp(frame, 1234, 80);
+    ami_bpf_tap_rx(t_iface_cookie, frame, len);
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) > 0, "the owner still reads it");
+
+    /* What bsd_child_destroy() runs: the base goes, the channel goes. */
+    ami_bpf_close_owner(T_BPF_OWNER);
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) == AMI_BPF_ENXIO,
+          "closing the base closed the channel");
+    CHECK(ami_bpf_capturing() == 0, "nothing is bound any more");
+    CHECK(ami_bpf_open(T_BPF_OTHER, 0) == 0, "the channel is free again");
+    CHECK(ami_bpf_close(T_BPF_OTHER, 0) == 0, "and closes normally");
+
     ami_bpf_detach_interface(t_iface_cookie);
 }
 
@@ -965,8 +1033,9 @@ static const UBYTE our_mac[6] = { 0x00, 0x80, 0x10, 0x44, 0x55, 0x66 };
     CHECK(ami_bpf_init() == 0, "bpf init");
     CHECK(ami_bpf_attach_interface("eth0", t_iface_cookie, DLT_EN10MB, 1500,
                                    NULL) == 0, "interface attached");
-    CHECK(ami_bpf_open(0) == 0,                            "channel open");
-    CHECK(ami_bpf_ioctl(0, BIOCSETIF, (APTR) "eth0") == 0, "BIOCSETIF");
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0, "channel open");
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, (APTR) "eth0") == 0,
+          "BIOCSETIF");
 
     t_ramp(payload, (ULONG) sizeof(payload), 90);
 
@@ -974,7 +1043,7 @@ static const UBYTE our_mac[6] = { 0x00, 0x80, 0x10, 0x44, 0x55, 0x66 };
     CHECK(status == NX_SUCCESS, "packet allocated");
     if (status != NX_SUCCESS)
     {
-        (VOID) ami_bpf_close(0);
+        (VOID) ami_bpf_close(T_BPF_OWNER, 0);
         ami_bpf_detach_interface(t_iface_cookie);
         return;
     }
@@ -994,7 +1063,7 @@ static const UBYTE our_mac[6] = { 0x00, 0x80, 0x10, 0x44, 0x55, 0x66 };
                    0x10112233UL,            /* 10:11:22:33 */
                    our_mac);
 
-    got = ami_bpf_read(0, out, (LONG) sizeof(out));
+    got = ami_bpf_read(T_BPF_OWNER, 0, out, (LONG) sizeof(out));
 
     hdrlen = *(const UWORD *) (const void *) (out + AMI_BPF_OFF_HDRLEN);
     caplen = *(const ULONG *) (const void *) (out + AMI_BPF_OFF_CAPLEN);
@@ -1037,7 +1106,7 @@ static const UBYTE our_mac[6] = { 0x00, 0x80, 0x10, 0x44, 0x55, 0x66 };
 
     nx_packet_release(packet);
 
-    CHECK(ami_bpf_close(0) == 0, "channel closed");
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == 0, "channel closed");
     ami_bpf_detach_interface(t_iface_cookie);
 }
 
@@ -1089,6 +1158,7 @@ TX_THREAD   main_thread;
     t_test_bpf_vm();
     t_test_bpf_hostile();
     t_test_bpf_capture();
+    t_test_bpf_ownership();
 
     status =  tx_amiga_kernel_start();
     if (status != TX_SUCCESS)

@@ -50,6 +50,7 @@ typedef struct AmiBpfIf
 typedef struct AmiBpfChan
 {
     BOOL             open;
+    APTR             owner;                     /* the base that opened it  */
 
     AmiBpfIf        *iface;                     /* NULL until BIOCSETIF     */
     char             ifname[AMI_BPF_IFNAMSIZ];  /* remembered across detach */
