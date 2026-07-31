@@ -37,30 +37,24 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   instead of the public lookup. Not worth that trade until someone reports a
   switched-off machine lingering, which every other mDNS browser does too.
 
-- **RFC 4007 §11: the output side is done, the input side is deliberately not.**
-  Done: `ami_config_parse_ip6_zone()` / `ami_config_format_ip6_zone()` handle
-  `fe80::1%eth0` (covered in `test_config.c`), `ami_config_parse_ip6()` refuses
-  a zone rather than dropping it, and `getnameinfo()` prints one for a
-  link-local address -- only link-local, per §11.1.
+- **RFC 4007 §11 is done for UDP; TCP and the config keys are not.**
+  Done: the text layer (`ami_config_parse_ip6_zone` /
+  `ami_config_format_ip6_zone`, covered in `test_config.c`), `getnameinfo()`
+  printing a zone for link-local, `getaddrinfo()` accepting one as a number or
+  an interface name, and `send`/`sendto`/`sendmsg` honouring it --
+  `bsd_ip6_zone_source()` maps the interface index to the `nx_ipv6_address[]`
+  index `nxd_udp_socket_source_send()` wants.
 
-  **Held back on purpose:** `getaddrinfo()` still does not *accept* a zone, and
-  it must not until the send path honours one. Parsing `fe80::1%eth0` into
-  `sin6_scope_id` while nothing reads that field would make `ping fe80::1%eth0`
-  look supported and quietly leave on whichever interface the stack picked --
-  the same wrong-destination failure the parser refuses a zone to avoid, only
-  harder to see.
-
-  So the order is: send path first, then `getaddrinfo()`.
-  - `as_ScopeId` is stored by `connect()`/`sendto()` and read only by
-    `getsockname()`/`getpeername()`. Nothing selects an interface with it.
-  - The NetX call is `nxd_udp_socket_source_send()` (`nx_api.h`), which takes an
-    **address index**, not an interface index -- so `scope_id` (an interface,
-    1-based) has to map to that interface's link-local entry in
-    `nx_ipv6_address[]`. That mapping is the actual work.
-  - TCP has no source-send equivalent, so decide what `connect()` to a zoned
-    link-local address does before promising it.
-  - `DEVS:NetInterfaces` keys (`GATEWAY6`, `ADDRESS6`) still use the plain
-    parser, so a zoned value there is a clean refusal today.
+  Left:
+  - **TCP.** There is no `nxd_tcp_socket_source_send()`, so `connect()` to a
+    zoned link-local address stores `as_ScopeId` and then routes normally.
+    Decide what it should do -- refuse, or bind the source address first --
+    before claiming TCP support.
+  - **Raw** (`bsd_send_raw`) ignores the zone the same way.
+  - `DEVS:NetInterfaces` keys (`GATEWAY6`, `ADDRESS6`) still call the plain
+    parser, so a zoned value there is a clean refusal.
+  - No emulator coverage: the UDP path is verified only by the host parser
+    tests. It wants two interfaces to be meaningful, and the lab guest has one.
 - **Ship a Developer drawer: the NDK addendum.** ACCEPTED 2026-07-31. The
   archive ships no headers, so nothing we add past the NDK's 0..143 range can
   be reached by anyone else's code. Plan and the three permanent ABI decisions
