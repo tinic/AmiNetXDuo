@@ -2,6 +2,13 @@
 
 User-visible changes, newest first. Internal work is in the git log.
 
+## 0.14.1
+
+- Fixed a scheduler-state window that corrupted ThreadX suspension lists and produced Enforcer hits under load
+- Fixed `ping` failing with error 9 in non-Release builds, which also affected `bind` and `connect`
+- Re-adding an interface now keeps its netmask and restores the default route
+- An interface whose device does not open no longer leaves another interface using its address
+
 ## 0.14.0
 
 - System clock now derives from the E-Clock, so time stays true when ticks are not delivered
