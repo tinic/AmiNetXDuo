@@ -986,8 +986,8 @@ UINT                 armed;
                        in the ordinary hundreds of microseconds means somebody
                        else held the machine and the tick was not dispatched. */
                     ami_log(AMI_LOG_WARN,
-                            "tick: stalled %ld ms, wheel skips %ld of %ld ticks "
-                            "(cap %ld, previous service %ld us)",
+                            "tick: %ld ms since the last wakeup, wheel skips %ld "
+                            "of %ld owed (cap %ld, previous service %ld us)",
                             (LONG) (delta / eclock_per_ms),
                             (LONG) (backlog - (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP),
                             (LONG) backlog, (LONG) TX_AMIGA_TIMER_MAX_CATCHUP,
