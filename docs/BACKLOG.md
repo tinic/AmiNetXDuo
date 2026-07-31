@@ -37,13 +37,19 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   instead of the public lookup. Not worth that trade until someone reports a
   switched-off machine lingering, which every other mDNS browser does too.
 
-- **RFC 4007 §11 scope-ID text (`fe80::1%eth0`) is not supported.** `sin6_scope_id`
-  is carried in the sockaddr and round-tripped through `getsockname()`, but no
-  parser or formatter handles the `%zone` suffix, so there is no way to say
-  which interface a link-local destination is on. RFC 4007 makes it a SHOULD and
-  asks for at least numeric indices. Latent while a machine has one NIC, which
-  is nearly all of them; it bites at two, and `AMI_CFG_MAX_INTERFACES` is 2.
-  Wanted by `ping fe80::1%eth0` and by a link-local `GATEWAY6`.
+- **RFC 4007 §11 scope-ID text: the text layer is done, the wiring is not.**
+  `ami_config_parse_ip6_zone()` and `ami_config_format_ip6_zone()` handle
+  `fe80::1%eth0` and are covered in `test_config.c`; `ami_config_parse_ip6()`
+  refuses a zone rather than dropping it. What still ignores zones entirely:
+  - `DEVS:NetInterfaces` keys (`GATEWAY6`, `ADDRESS6`) still call the plain
+    parser, so a zoned gateway is now a clean refusal instead of a wrong
+    destination -- better, but not accepted.
+  - `getaddrinfo()` with `AI_NUMERICHOST` does not read a zone, and
+    `getnameinfo()` never writes one, so `sin6_scope_id` still only ever
+    round-trips through `getsockname()`.
+  - Nothing resolves a zone *name* to an index yet, though `if_nametoindex()`
+    (revision 3) is now there to do it, and nothing uses `sin6_scope_id` to
+    choose an interface on send.
 - **Ship a Developer drawer: the NDK addendum.** ACCEPTED 2026-07-31. The
   archive ships no headers, so nothing we add past the NDK's 0..143 range can
   be reached by anyone else's code. Plan and the three permanent ABI decisions
