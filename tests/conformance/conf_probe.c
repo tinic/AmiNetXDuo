@@ -17,6 +17,7 @@
  */
 
 #include <exec/types.h>
+#include <exec/memory.h>
 #include <dos/dos.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -267,6 +268,158 @@ static VOID probe_doc_edges(VOID)
     CloseSocket(fd);
 }
 
+/* ---- 6. the socket-layer audit fixes ----------------------------------- */
+
+static VOID probe_audit_fixes(VOID)
+{
+    struct sockaddr_in sa;
+    struct timeval     tv;
+    socklen_t          sl;
+    LONG               fd, lst, rc, mask;
+    UBYTE             *big;
+
+    Printf((STRPTR)"=== 6. socket-layer audit fixes ===\n");
+
+    /* socket()'s ERRORS list has no ESOCKTNOSUPPORT; the only "not supported"
+       code in it is "[EPROTONOSUPPORT] The protocol type or the specified
+       protocol is not supported within this domain." */
+    rc = socket(AF_INET, SOCK_SEQPACKET, 0);
+    p("socket(SOCK_SEQPACKET)       [EPROTONOSUPPORT 43]", rc);
+    if (rc >= 0)
+        CloseSocket(rc);
+
+    rc = socket(AF_INET, SOCK_RDM, 0);
+    p("socket(SOCK_RDM)             [EPROTONOSUPPORT 43]", rc);
+    if (rc >= 0)
+        CloseSocket(rc);
+
+    /* "[EOPNOTSUPP] The referenced socket is not of type SOCK_STREAM." */
+    fd = socket(AF_INET, SOCK_DGRAM, 0);
+    rc = accept(fd, NULL, NULL);
+    p("accept(udp socket)           [EOPNOTSUPP 45]", rc);
+    CloseSocket(fd);
+
+    /* A stream socket that never listened is the other failure, and BSD keeps
+       it separate: EINVAL, not EOPNOTSUPP. */
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    rc = accept(fd, NULL, NULL);
+    p("accept(tcp, never listened)  [EINVAL 22]", rc);
+    CloseSocket(fd);
+
+    /* "[EFAULT] The addr parameter is not in a writable part of the user
+       address space." addrlen says how much room addr has. */
+    lst = socket(AF_INET, SOCK_STREAM, 0);
+    addr_in(&sa, INADDR_LOOPBACK, PORT + 4);
+    rc = bind(lst, (struct sockaddr *)&sa, sizeof(sa));
+    p("bind(127.0.0.1:7704)", rc);
+    rc = listen(lst, 1);
+    p("listen(1)", rc);
+    rc = accept(lst, (struct sockaddr *)&sa, NULL);
+    p("accept(addr, addrlen=NULL)   [EFAULT 14]", rc);
+    CloseSocket(lst);
+
+    /* "The 'nfds' parameter may be truncated if it covers more sockets than
+       are currently in use." -- clamped, not EINVAL. */
+    tv.tv_secs = 0; tv.tv_micro = 0;
+    rc = WaitSelect(getdtablesize() + 64, NULL, NULL, NULL, &tv, NULL);
+    p("WaitSelect(nfds > table)     [0, truncated]", rc);
+
+    /*
+     * "If the message is too long to pass atomically through the underlying
+     * protocol, the error EMSGSIZE is returned, and the message is not
+     * transmitted."  The ceiling is per interface: NetX Duo's loopback carries
+     * a 65535-byte MTU, so 65507 is the largest datagram it takes and 65508 is
+     * the first refused.  An Ethernet interface at MTU 1500 refuses from 1473.
+     */
+    big = (UBYTE *)AllocMem(65536UL + 16UL, MEMF_ANY | MEMF_CLEAR);
+    if (big != NULL)
+    {
+        fd = socket(AF_INET, SOCK_DGRAM, 0);
+        addr_in(&sa, INADDR_LOOPBACK, PORT + 5);
+
+        rc = sendto(fd, big, 65507, 0, (struct sockaddr *)&sa, sizeof(sa));
+        p("sendto(65507 to loopback)    [not EMSGSIZE]", rc);
+
+        rc = sendto(fd, big, 65508, 0, (struct sockaddr *)&sa, sizeof(sa));
+        p("sendto(65508 to loopback)    [EMSGSIZE 40]", rc);
+
+        /* The same boundary off-box, where the MTU is the Ethernet 1500 and
+           the ceiling is therefore 1472. The destination only has to route:
+           nothing has to answer. */
+        {
+            ULONG gateway = inet_addr((STRPTR)"10.0.2.2");
+
+            if (gateway != INADDR_NONE)
+            {
+                memset(&sa, 0, sizeof(sa));
+                sa.sin_family = AF_INET;
+                sa.sin_port   = htons(PORT + 5);
+                sa.sin_addr.s_addr = gateway;
+
+                rc = sendto(fd, big, 1472, 0, (struct sockaddr *)&sa,
+                            sizeof(sa));
+                p("sendto(1472 off-box)         [not EMSGSIZE]", rc);
+
+                rc = sendto(fd, big, 1473, 0, (struct sockaddr *)&sa,
+                            sizeof(sa));
+                p("sendto(1473 off-box)         [EMSGSIZE 40]", rc);
+            }
+        }
+
+        CloseSocket(fd);
+        FreeMem(big, 65536UL + 16UL);
+    }
+
+    /*
+     * "When this event is found, the 'errno' variable will be set to the error
+     * code associated with the socket which triggered the error event. The
+     * error code associated with the socket is not cleared."
+     *
+     * A non-blocking connect to a port nothing listens on is refused on
+     * loopback almost at once; the FD_ERROR event follows.
+     */
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    mask = FD_CONNECT | FD_ERROR;
+    rc = setsockopt(fd, SOL_SOCKET, SO_EVENTMASK, &mask, sizeof(mask));
+    p("setsockopt(SO_EVENTMASK)", rc);
+
+    rc = IoctlSocket(fd, FIONBIO, (APTR)&mask);   /* mask != 0: non-blocking */
+    p("IoctlSocket(FIONBIO)", rc);
+
+    addr_in(&sa, INADDR_LOOPBACK, PORT + 6);
+    rc = connect(fd, (struct sockaddr *)&sa, sizeof(sa));
+    p("connect(dead port, non-block)[refused on loopback]", rc);
+
+    {
+        LONG  tries;
+        ULONG events = 0;
+
+        for (tries = 0; tries < 50; tries++)
+        {
+            tv.tv_secs = 0; tv.tv_micro = 100000;
+            (VOID)WaitSelect(0, NULL, NULL, NULL, &tv, NULL);
+
+            bsd_errno = 0;
+            rc = GetSocketEvents(&events);
+            if (rc >= 0)
+                break;
+        }
+
+        Printf((STRPTR)"%-44s rc=%-6ld errno=%ld events=0x%lx\n",
+               (LONG)"GetSocketEvents(FD_ERROR)    [errno ECONNREFUSED 61]",
+               rc, bsd_errno, events);
+
+        /* The second half of the contract: this read did not clear it. */
+        sl = sizeof(rc);
+        rc = 0;
+        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &rc, &sl) == 0)
+            Printf((STRPTR)"%-44s SO_ERROR=%ld\n",
+                   (LONG)"getsockopt(SO_ERROR) after it", rc);
+    }
+
+    CloseSocket(fd);
+}
+
 int main(VOID)
 {
     SocketBase = OpenLibrary((STRPTR)"bsdsocket.library", 4);
@@ -285,6 +438,7 @@ int main(VOID)
     probe_churn();
     probe_args();
     probe_doc_edges();
+    probe_audit_fixes();
 
     CloseLibrary(SocketBase);
     return RETURN_OK;
