@@ -540,6 +540,12 @@ UWORD ami_bpf_capturing(VOID)
 
 /* ------------------------------------------------------ bpf_data_waiting */
 
+/* Bytes buffered across both buffers. Caller holds the lock. */
+static ULONG ami_bpf_buffered(const AmiBpfChan *ch)
+{
+    return (ch->hold_len - ch->hold_pos) + ch->store_len;
+}
+
 LONG ami_bpf_data_waiting(LONG channel)
 {
     AmiBpfChan *ch = ami_bpf_chan_get(channel);
@@ -549,10 +555,12 @@ LONG ami_bpf_data_waiting(LONG channel)
         return -1;
 
     ami_bpf_lock();
-    n = (ch->hold_len - ch->hold_pos) + ch->store_len;
+    n = ami_bpf_buffered(ch);
     ami_bpf_unlock();
 
-    return (LONG)n;
+    /* "A return value of 0 indicates that there is no data waiting to be read,
+       a 1 that there is data waiting." The byte count is FIONREAD's answer. */
+    return (n != 0) ? 1 : 0;
 }
 
 /* ------------------------------------------------------------ bpf_write */
@@ -762,6 +770,14 @@ LONG ami_bpf_ioctl(LONG channel, ULONG command, APTR buffer)
 
     switch (AMI_BPF_CMD(command))
     {
+    case AMI_BPF_CMD(AMI_BPF_FIONREAD):
+        if (buffer == NULL)
+            return -1;
+        ami_bpf_lock();
+        *(ULONG *)buffer = ami_bpf_buffered(ch);
+        ami_bpf_unlock();
+        return 0;
+
     case AMI_BPF_CMD(BIOCGBLEN):
         if (buffer == NULL)
             return -1;

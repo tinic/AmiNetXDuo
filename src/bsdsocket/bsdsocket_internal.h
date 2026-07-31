@@ -201,6 +201,10 @@
  */
 #define BSD_LIB_REVISION    1
 
+/* SBTC_LOGFACILITY's documented default. The NDK's <sys/syslog.h> ships the
+   priority codes only, so the BSD facility value is spelled out here. */
+#define BSD_LOG_USER        (1L << 3)
+
 /*
  * 256, matching Roadshow's documented default. <sys/types.h> makes FD_SETSIZE
  * 256, so `WaitSelect(FD_SETSIZE, ...)` -- common in ported code -- failed
@@ -355,11 +359,23 @@ struct AmiSocketBase
     ULONG                   sb_SigUrgMask;  /* SBTC_SIGURGMASK               */
     ULONG                   sb_SigEventMask;/* SBTC_SIGEVENTMASK             */
 
+    /* SBTC_SIG_ADDRESS_CHANGE_MASK. Stored, not yet delivered: the change
+       point is ami_ns_address_changed() in src/netstack/. Default 0 = no
+       notification, so an opener that never sets it sees no difference. */
+    ULONG                   sb_SigAddressChangeMask;
+
+    /* SBTC_CAN_SHARE_LIBRARY_BASES. Recorded only -- this library never
+       restricts a base to its opening task, so sharing already works. */
+    ULONG                   sb_CanShareBases;
+
     STRPTR                  sb_LogTag;      /* SBTC_LOGTAGPTR                */
     LONG                    sb_LogStat;
-    LONG                    sb_LogFacility;
-    LONG                    sb_LogMask;
+    LONG                    sb_LogFacility; /* SBTC_LOGFACILITY, BSD_LOG_USER*/
+    LONG                    sb_LogMask;     /* SBTC_LOGMASK, 0xFF            */
     LONG                  (*sb_FDCallback)(LONG fd, LONG action);
+
+    /* SBTC_ERROR_HOOK: called on every errno/h_errno change. */
+    struct Hook            *sb_ErrorHook;
 
     /*
      * Wakeup plumbing. sb_EventSignal is allocated by the opening task in

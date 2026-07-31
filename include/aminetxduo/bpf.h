@@ -143,6 +143,9 @@ struct bpf_version {
 #define IFNAMSIZ            16
 #define AMI_BPF_IFREQ_SIZE  32
 
+/* <sys/filio.h>: the byte count bpf_data_waiting() does not return. */
+#define AMI_BPF_FIONREAD    _IOC(IOC_OUT,   'f', 127, 4)
+
 #define BIOCGBLEN           _IOC(IOC_OUT,   'B', 102, 4)
 #define BIOCSBLEN           _IOC(IOC_INOUT, 'B', 102, 4)
 #define BIOCSETF            _IOC(IOC_IN,    'B', 103, 8)
@@ -475,8 +478,8 @@ LONG ami_bpf_set_notify_mask(LONG channel, ULONG signal_mask);
 LONG ami_bpf_set_interrupt_mask(LONG channel, ULONG signal_mask);
 
 /*
- * BIOCGBLEN, BIOCSBLEN, BIOCSETF, BIOCFLUSH, BIOCPROMISC, BIOCGDLT,
- * BIOCGETIF, BIOCSETIF, BIOCSRTIMEOUT, BIOCGRTIMEOUT, BIOCGSTATS,
+ * AMI_BPF_FIONREAD, BIOCGBLEN, BIOCSBLEN, BIOCSETF, BIOCFLUSH, BIOCPROMISC,
+ * BIOCGDLT, BIOCGETIF, BIOCSETIF, BIOCSRTIMEOUT, BIOCGRTIMEOUT, BIOCGSTATS,
  * BIOCIMMEDIATE, BIOCVERSION. Anything else returns -1.
  *
  * Dispatch ignores the length field of the ioctl encoding and keys on
@@ -485,7 +488,10 @@ LONG ami_bpf_set_interrupt_mask(LONG channel, ULONG signal_mask);
  */
 LONG ami_bpf_ioctl(LONG channel, ULONG command, APTR buffer);
 
-/* Bytes buffered across both the hold and store buffers. -1 on a bad channel. */
+/*
+ * 1 if anything is buffered, 0 if not, -1 on a bad channel. The autodoc is
+ * explicit that this is a flag; for the byte count use AMI_BPF_FIONREAD.
+ */
 LONG ami_bpf_data_waiting(LONG channel);
 
 /*

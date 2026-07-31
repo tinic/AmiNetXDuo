@@ -10,6 +10,8 @@
 
 #include "bsdsocket_vectors.h"
 
+#include "aminetxduo/version.h"
+
 #ifdef AMINETXDUO_BPF
 #include "aminetxduo/bpf.h"
 #endif
@@ -19,9 +21,47 @@
 
 /* ------------------------------------------------------------------ errno -- */
 
+/*
+ * SBTC_ERROR_HOOK. "Install or remove a hook which is called whenever the
+ * global 'errno' or 'h_errno' variables are changed. The hook is always called
+ * on the context of the caller." The register shape is the autodoc's:
+ * error = hookfunc(hook, reserved, ehm) in A0, A2, A1, reserved NULL.
+ *
+ * The union is netmonitor.c's, for the same reason: utility/hooks.h declares
+ * h_Entry with no parameters, and a plain cast trips -Wcast-function-type.
+ */
+typedef LONG (*BsdErrorHookFn)(register struct Hook *hook __asm("a0"),
+                               register APTR reserved __asm("a2"),
+                               register struct ErrorHookMsg *ehm __asm("a1"));
+
+typedef union BsdErrorHookEntry
+{
+    ULONG          (*behe_Raw)(VOID);
+    BsdErrorHookFn   behe_Fn;
+} BsdErrorHookEntry;
+
+static VOID bsd_error_hook(struct AmiSocketBase *base, ULONG action, LONG code)
+{
+    struct Hook        *hook = base->sb_ErrorHook;
+    struct ErrorHookMsg ehm;
+    BsdErrorHookEntry   entry;
+
+    if (hook == NULL || hook->h_Entry == NULL)
+        return;
+
+    ehm.ehm_Size   = (ULONG)sizeof(ehm);
+    ehm.ehm_Action = action;
+    ehm.ehm_Code   = code;
+
+    entry.behe_Raw = hook->h_Entry;
+    (VOID)entry.behe_Fn(hook, NULL, &ehm);
+}
+
 VOID bsd_set_errno(struct AmiSocketBase *base, LONG code)
 {
     base->sb_Errno = code;
+
+    bsd_error_hook(base, EHMA_Set_errno, code);
 
     if (base->sb_ErrnoPtr == NULL)
         return;
@@ -38,6 +78,8 @@ VOID bsd_set_errno(struct AmiSocketBase *base, LONG code)
 VOID bsd_set_herrno(struct AmiSocketBase *base, LONG code)
 {
     base->sb_HErrno = code;
+
+    bsd_error_hook(base, EHMA_Set_h_errno, code);
 
     if (base->sb_HErrnoPtr != NULL)
         *base->sb_HErrnoPtr = code;
@@ -341,7 +383,18 @@ static const BsdSimpleTag bsd_simple_tags[] =
     { SBTC_LOGSTAT,      SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_LogStat)      },
     { SBTC_LOGFACILITY,  SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_LogFacility)  },
     { SBTC_LOGMASK,      SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_LogMask)      },
-    { SBTC_FDCALLBACK,   SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_FDCallback)   }
+    { SBTC_FDCALLBACK,   SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_FDCallback)   },
+    { SBTC_ERROR_HOOK,   SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_ErrorHook)    },
+    /*
+     * Both of these are per-opener state a caller may set and read back. They
+     * are here rather than among the constants because refusing a documented
+     * SET returns the tag's index and discards every tag after it in the same
+     * call -- which is how an errno link in the next slot goes missing.
+     */
+    { SBTC_SIG_ADDRESS_CHANGE_MASK, SBT_RW,
+      (UWORD)offsetof(struct AmiSocketBase, sb_SigAddressChangeMask) },
+    { SBTC_CAN_SHARE_LIBRARY_BASES, SBT_RW,
+      (UWORD)offsetof(struct AmiSocketBase, sb_CanShareBases) }
 };
 
 /* Read-only capability answers, so Roadshow-aware callers can probe us. */
@@ -407,7 +460,6 @@ static const BsdConstTag bsd_const_tags[] =
      */
     { SBTC_HAVE_INTERFACE_API,          TRUE  },
     { SBTC_HAVE_MONITORING_API,         FALSE },
-    { SBTC_CAN_SHARE_LIBRARY_BASES,     FALSE },
     /*
      * TRUE since netstats.c: GetNetworkStatistics() is all this tag gates.
      * Four of its ten types are refused with EOPNOTSUPP, which the caller
@@ -515,8 +567,10 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
             bsd_tag_store(item, by_ref, (ULONG)"SANA-II device error");
             return TRUE;
 
+        /* "the protocol stack's name and version information string" -- the
+           name alone was neither half of that. */
         case SBTC_RELEASESTRPTR:
-            bsd_tag_store(item, by_ref, (ULONG)"AmiNetXDuo");
+            bsd_tag_store(item, by_ref, (ULONG)AMINETXDUO_VERSION_LONG);
             return TRUE;
 
         /* The errno-mirror pointers read back as well as write. The width tags
