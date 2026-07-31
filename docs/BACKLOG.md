@@ -11,18 +11,6 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
 
 ## Open — no decision taken
 
-- **Two tasks adding an interface at once can pick the same slot.**
-  `netstack_interface_add()` reads `ami_ns_free_interface_slot()`, then opens the
-  SANA-II device — Exec I/O, and long — before anything records the slot as
-  taken. `ami_ns_lock` guards only startup and shutdown, and the ThreadX bracket
-  cannot serve: `netstack_interface_add()`/`_remove()` run most of their work
-  outside it on purpose, `ami_sana2_close()`'s `ami_free()` included. Found while
-  auditing the interface reads (see the header of `src/bsdsocket/interfaces.c`);
-  the fix is to take `ami_ns_lock` across both functions, which nests cleanly
-  because nothing holds the ThreadX baton when it is taken.
-- **`AmiIfConfig.up` is write-only.** `config_parse.c` records `STATE=down` from
-  `DEVS:NetInterfaces` and nothing ever reads it, so the interface comes up
-  anyway.
 - **`vsyslog` is `ENOSYS`.** `LOGSTAT`/`LOGMASK`/`LOGFACILITY`/`LOGTAGPTR` are
   stored and never read, which costs a caller nothing. Implementing syslog is
   the open part; the two tags below are not.
@@ -39,8 +27,6 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   both are stubbed.
 - **`AAMR_AddressInUse` / `AAMR_MaskChangeFailed` never produced**;
   `AAMP_BOOTP`/`SLOWAUTO`/`FASTAUTO` answer `AAMR_Ignored`.
-- **`GetRouteInfo`** emits `rtm_index = 0` for static and default-gateway routes,
-  and uses NetX's 0-based interface indices where BSD's are 1-based.
 - **`IFQ_MaxReadRequests` / `MaxWriteRequests` unanswered.** The doc types them
   `(LONG)` where all 40 neighbours are `(LONG *)` — almost certainly a doc typo,
   and writing through a scalar would corrupt a caller.
@@ -133,6 +119,9 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   gating question.
 
 ## Environment and tooling
+
+- **`STATE=down` has no harness.** It is honoured as of 2026-07-31 but only the
+  config parser is covered; no emulator run boots an interface configured down.
 
 - **`playhouse2` had uncomputed TX checksums**; `ethtool -K eth0 tx off` was applied
   2026-07-31 and verified (`/usr/sbin/ethtool -k eth0` -> `tx-checksumming: off`;
