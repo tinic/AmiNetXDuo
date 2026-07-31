@@ -639,6 +639,14 @@ static LONG p_count_interfaces(struct Library *base, const char *want,
  * S2_DEVICEQUERY at open time, so a re-added interface that reports the same
  * MAC went all the way down to the device and back; one that reports zeroes,
  * or the previous value out of memory that was never freed, did not.
+ *
+ * The netmask is the other half, and it is the one that was wrong.  The
+ * interface used to come back with the classful mask for its address -- a /8
+ * where it had a /24 -- because the add path overwrote the machine's stored
+ * configuration with the empty one AddInterfaceTagList() can express, and
+ * ConfigureInterfaceTagList() then guessed from the address class as it is
+ * documented to when an interface has no mask at all.  The default route went
+ * the same way and is asserted by the harness, which can run netstat.
  */
 static VOID p_addremove_phase(struct Library *base, const char *name,
                               const char *device, LONG unit)
@@ -647,6 +655,9 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
     UBYTE          mac_after[8];
     struct TagItem tags[3];
     BOOL           present;
+    ULONG          mask_before;
+    ULONG          mask_after;
+    char           mask_text[16];
     LONG           before;
     LONG           after;
     LONG           rc;
@@ -654,6 +665,8 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
 
     p_poison(mac_before, sizeof(mac_before));
     p_poison(mac_after, sizeof(mac_after));
+
+    mask_before = p_read_address(base, name, IFQ_NetMask);
 
     tags[0].ti_Tag  = IFQ_HardwareAddress;
     tags[0].ti_Data = (ULONG)mac_before;
@@ -764,6 +777,20 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
                (LONG)((p_read_long(base, name, IFQ_State) == SM_Up)
                           ? " -- up again, correctly" : " -- STILL DOWN, WRONG"));
     }
+
+    /*
+     * The mask it came back with, against the one it left with.  The
+     * reconfigure above passes IFC_Address and no IFC_NetMask on purpose:
+     * that is the tag list a caller writes, and the mask has to survive it.
+     */
+    mask_after = p_read_address(base, name, IFQ_NetMask);
+    p_dotted(mask_after, mask_text);
+
+    Printf((CONST_STRPTR)"netmask after the round trip: %s%s\n",
+           (LONG)mask_text,
+           (LONG)((mask_after == mask_before)
+                      ? " -- the mask it had, correctly"
+                      : " -- NOT THE MASK IT HAD, WRONG"));
 }
 
 /* ------------------------------------------------------------------ main -- */
