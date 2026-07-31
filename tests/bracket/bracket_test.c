@@ -218,6 +218,38 @@ static struct Task *bt_spawn(BtTask *bt, VOID (*entry)(VOID), const char *name,
     return task;
 }
 
+/*
+ * A spawned Task's last act.  RemTask() rather than falling off the end of the
+ * entry point, and the flag and the Signal go inside the Forbid() that ends in
+ * it.
+ *
+ * Returning instead lets Exec's default finaliser remove the task some
+ * instructions later, and in those instructions main() has already seen
+ * bt_Done, run bt_reap() and FreeMem()ed the stack the dying task is still
+ * standing on -- and then handed that same block to the next Task it spawns.
+ * The machine resets: the entry point returns through a stack that now belongs
+ * to somebody else, and the PC lands in the middle of a struct Task.  100%
+ * reproducible on Kickstart 3.1 under both Amiberry and FS-UAE, and it is what
+ * "17/17 checks passed" was hiding -- the checks that print are the ones before
+ * the first reap.
+ *
+ * Exec discards the forbid nesting of a task it removes, so the flag, the
+ * Signal and the removal are one indivisible step: main cannot see bt_Done set
+ * and still find this Task alive.  port/threadx-amiga's _tx_amiga_task_destroy()
+ * has the same shape for the same reason.
+ */
+static VOID bt_finish(BtTask *bt)
+{
+    Forbid();
+    bt->bt_Done = 1U;
+    Signal(bt->bt_Parent, BT_SIG_GO);
+    RemTask(NULL);
+
+    /* Unreachable.  */
+    for (;;)
+        Wait(0UL);
+}
+
 /* ------------------------------------------------------- the holder rendezvous -- */
 
 /*
@@ -236,9 +268,7 @@ static VOID bt_holder_entry(VOID)
         != TX_SUCCESS)
     {
         bt->bt_Failures++;
-        bt->bt_Done = 1U;
-        Signal(bt->bt_Parent, BT_SIG_GO);
-        return;
+        bt_finish(bt);
     }
 
     /* Adopted: from here until the orphan below, this Task is the baton. */
@@ -254,8 +284,7 @@ static VOID bt_holder_entry(VOID)
     bt_mark = 2UL;
     (VOID)tx_amiga_orphan_thread(&bt->bt_Thread);
     bt_mark = 3UL;
-    bt->bt_Done = 1U;
-    Signal(bt->bt_Parent, BT_SIG_GO);
+    bt_finish(bt);
 }
 
 /* ------------------------------------------------------------ the churn body -- */
@@ -320,8 +349,7 @@ static VOID bt_worker_entry(VOID)
         bt->bt_Rounds = i + 1;
     }
 
-    bt->bt_Done = 1U;
-    Signal(bt->bt_Parent, BT_SIG_GO);
+    bt_finish(bt);
 }
 
 /* ------------------------------------------ the shared interrupt state -- */
@@ -388,9 +416,7 @@ static VOID bt_probe_entry(VOID)
             DeleteIORequest((struct IORequest *)tr);
         if (port != NULL)
             DeleteMsgPort(port);
-        bt->bt_Done = 1U;
-        Signal(bt->bt_Parent, BT_SIG_GO);
-        return;
+        bt_finish(bt);
     }
 
     while (bt_phase_stop == 0U)
@@ -418,8 +444,7 @@ static VOID bt_probe_entry(VOID)
     DeleteIORequest((struct IORequest *)tr);
     DeleteMsgPort(port);
 
-    bt->bt_Done = 1U;
-    Signal(bt->bt_Parent, BT_SIG_GO);
+    bt_finish(bt);
 }
 
 /*
@@ -439,9 +464,7 @@ static VOID bt_baton_entry(VOID)
         != TX_SUCCESS)
     {
         bt->bt_Failures++;
-        bt->bt_Done = 1U;
-        Signal(bt->bt_Parent, BT_SIG_GO);
-        return;
+        bt_finish(bt);
     }
 
     while (bt_phase_stop == 0U)
@@ -464,8 +487,7 @@ static VOID bt_baton_entry(VOID)
 
     (VOID)tx_amiga_orphan_thread(&bt->bt_Thread);
 
-    bt->bt_Done = 1U;
-    Signal(bt->bt_Parent, BT_SIG_GO);
+    bt_finish(bt);
 }
 
 /*
