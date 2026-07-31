@@ -57,12 +57,11 @@ them, and `arp` lists the neighbours an IPv6 network is reached through.
 
 ## Requirements
 
-Any 68000 or better, AmigaOS 2.04 or newer, and 4 MB of RAM — so an A500 or
-A600 needs a memory expansion. A SANA-II network card: `a2065.device`,
-`ariadne.device`, `ariadne2.device`, `amiganet.device`, `xsurf.device`,
-`xsurf100.device`, `cnet.device`, the PCMCIA drivers and `uaenet.device` for
-emulators are all offered by name in the installer, and anything else can be
-typed in.
+Any 68000 or better, AmigaOS 2.04 or newer, and 1 MB of RAM. A SANA-II network
+card: `a2065.device`, `ariadne.device`, `ariadne2.device`, `amiganet.device`,
+`xsurf.device`, `xsurf100.device`, `cnet.device`, the PCMCIA drivers and
+`uaenet.device` for emulators are all offered by name in the installer, and
+anything else can be typed in.
 
 The archive carries a separate build for the 68000, the 68020–68040 and the
 68060, and the installer works out which one your machine wants. Encrypted

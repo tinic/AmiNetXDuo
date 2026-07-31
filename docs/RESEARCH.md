@@ -21062,3 +21062,138 @@ server, and logging in to the Amiga gives a real Shell. **Nothing here argues
 for keeping the shim on interactive grounds.** The one thing not demonstrated
 is a live Ctrl-C keystroke, and that is a limit of a headless harness rather
 than an observation about BebboSSH.
+
+---
+
+## 81. The memory floor, measured (2026-07-30)
+
+§9 decision 1 said "68020 + OS 3.1, 4 MB". Two thirds of that were disproved
+earlier today — seven boards pass on a 68000, and the stack runs on Kickstart
+2.04. The 4 MB was never examined. Nothing in the tree enforces it: the packet
+pool is sized from `AvailMem()` and clamped to 16..256 packets, so the number
+was a design assumption that outlived its evidence.
+
+It was also inconsistent in what we shipped. `README.md` said 4 MB,
+`dist/ReadMe` said "about 1 MB of free memory once it is up, and 4 MB in the
+machine", and `docs/user/ReadMe` said "about 4 MB of Fast RAM" — three
+different claims, one of them naming the wrong kind of RAM.
+
+### 81.1 What the machine actually loses
+
+The pool arithmetic is the small half. The dominant cost is the library
+segment, which is resident from `OpenLibrary()` and which no heuristic adapts
+away. Built sizes for this measurement:
+
+| | 68000 build | 68020 build |
+|---|---|---|
+| `bsdsocket.library` | 328,232 | 323,124 |
+| `usergroup.library` | 11,384 | 11,016 |
+| `tls.library` | not built | 224,968 |
+
+`AvailMem(MEMF_PUBLIC)` across one lifecycle on a 1 MB A2000, 68000 build,
+Kickstart 2.04, `a2065.device`, from a cold `OpenLibrary()`:
+
+| point | free |
+|---|---|
+| before `OpenLibrary()` | 905,080 |
+| stack up, DHCP done | 437,576 |
+| `usergroup.library` also open | 425,152 |
+
+467,504 bytes for the whole stack including a 22-packet pool. The same probe
+on the same machine with 8 MB of Fast RAM added spends 856,872 — the
+difference is almost exactly the pool, 256 packets against 22. Subtract it
+either way and the fixed cost lands at **432–439 KB**: the segment, ThreadX,
+the NX_IP instance and the thread stacks.
+
+### 81.2 1 MB works, through the shipped library
+
+An A2000 with 1 MB of Chip RAM and no Fast RAM at all — a stock machine —
+running `AddNetInterface eth0` and then the shipped tools:
+
+```
+== netstat -h (idle)
+	21 allocations outstanding, 21 at the peak, 0 refused
+	0 sockets open, 0 at the peak, 1 program has the library open
+	9 of 17 packets free, 8 fewest ever, 1568 bytes each
+	0 found the pool empty, 0 waited, 0 released twice
+	371680 bytes of system memory free, 344248 in the largest block
+```
+
+`netstat -i`, `-r` and `-h`, `ping` (3/3), `nslookup` and `host` against the
+real resolver, and a 200,000-byte HTTP transfer to disk all work. After the
+transfer:
+
+```
+	9 of 17 packets free, 1 fewest ever, 1568 bytes each
+	0 found the pool empty, 0 waited, 0 released twice
+	371680 bytes of system memory free, 344176 in the largest block
+```
+
+**One free packet at the low-water mark, and nothing ever waited on the pool.**
+That is the tight resource at 1 MB, and it held. `tests/netstack/run-amiberry.sh`
+passes 14 of 14 on the same machine, four runs out of four, with the pool at 22
+packets — the test binary is smaller than the library, so it sizes slightly
+larger.
+
+### 81.3 512 KB refuses, cleanly
+
+At 512 KB the pool, IP stack and ARP cache cannot all be allocated, and
+`netstack_startup()` fails at step 3:
+
+```
+[ERR ] netstack: out of memory sizing the stack
+[ERR ] bsdsocket: netstack_startup failed
+```
+
+`AddNetInterface` reports that the network would not start and exits 5 after 19
+seconds; the machine stays up and `netstat` says nothing is running. So the
+failure is a refusal, not a wedge.
+
+**The diagnosis it prints is wrong, though.** `AddNetInterface`'s failure text
+walks a decision tree that ends at "The card is fine, so what failed was
+getting an address: nothing answered. Check the cable" — it has no branch for
+running out of memory, so it blames the network. Worth a branch.
+
+`tests/netstack/netstack_test` at 512 KB behaves differently and worse: it is
+250 KB smaller than the library, so it gets past sizing, fails later at
+`[ERR ] sana2: no memory for reader stack` (4 KB), comes up with no receiver,
+and blocks in DHCP until the harness times out at 240 s. The shipped path is
+the library one, but this is what the failure looks like when the shortfall
+lands a few allocations later.
+
+### 81.4 The 68020 build is bounded by the hardware, not by us
+
+There is no 68020 Amiga with less than 2 MB. Measured on an A1200 with 2 MB
+Chip and no Fast RAM, Kickstart 3.1, 68020 build with TLS: everything above
+works, plus a real TLS 1.2 handshake (ChaCha20-Poly1305, 3.4 s) and an HTTPS
+fetch. 1,361,520 bytes free idle with a 57-packet pool; 1,135,888 after the
+handshake, so **`tls.library` and one session cost 213,016 bytes** and stay
+resident. 2 MB is not tight for this build.
+
+### 81.5 A bug this turned up, unrelated to memory
+
+`CloseLibrary()` on the **last** handle to `bsdsocket.library` hangs. The close
+path calls `netstack_shutdown()` (`src/bsdsocket/library.c`), and it never
+returns:
+
+```
+MEM closing usergroup.library
+MEM ugclosed public=8424640 largest=7362272
+MEM closing bsdsocket.library
+<nothing>
+```
+
+Reproduced at 1 MB and at 8 MB, so it is not the floor. It does not show in
+normal use because `AddNetInterface` holds a reference for the life of the
+machine — but a tool run on a machine where nothing else has the library open
+(`ping` on its own) hangs on exit for the same reason. `netstack_shutdown()`
+called directly, which `tests/netstack` does, returns fine; the library close
+wrapper is what does not.
+
+### 81.6 The claim
+
+**1 MB, for both builds.** The 68000 build is the one that reaches it; the
+68020 build cannot be given less than 2 MB by any machine that exists, and is
+comfortable there. `README.md`, `dist/ReadMe` and `docs/user/ReadMe` now say
+so, and the source comments that cited "the 4 MB floor" cite this section
+instead.

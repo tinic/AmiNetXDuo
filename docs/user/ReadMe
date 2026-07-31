@@ -28,7 +28,7 @@ takes the machine with it. Save your work before experimenting.
 WHAT YOU NEED
 -------------
 
-  * Any 68000 or better, AmigaOS 2.04 or newer, about 4 MB of Fast RAM.
+  * Any 68000 or better, AmigaOS 2.04 or newer, 1 MB of RAM.
     The archive carries a separate build for the 68000, the 68020-68040
     and the 68060, and the Installer picks the right one. Encrypted
     (https:) connections need a 68020 or better.

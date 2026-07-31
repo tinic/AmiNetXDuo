@@ -19,7 +19,7 @@
  *      the published header, so a caller may use it. That only works if every
  *      mbuf is MSIZE-aligned and its data lives inside itself. Data pointing
  *      into an NX_PACKET payload would make dtom() return garbage.
- *   2. NX_PACKETs are a pinned, fixed-count pool resource sized for the 4 MB
+ *   2. NX_PACKETs are a pinned, fixed-count pool resource sized for the 1 MB
  *      floor (AMI_POOL_MIN_PACKETS is 16, and the SANA-II readers already pin
  *      6-8 of them). Handing one to an application that may never free it
  *      would starve the receive path.

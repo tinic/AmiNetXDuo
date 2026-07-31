@@ -24,7 +24,9 @@ You need:
   *  AmigaOS 2.04 or newer.
   *  Any 68000 or better.  Encrypted (https:) connections need a 68020; on a
      68000 they are left out and everything else works as normal.
-  *  About 1 MB of free memory once it is up, and 4 MB in the machine.
+  *  1 MB of memory.  The stack takes about 520 KB of that once it is up and
+     sizes its packet buffers from what is left, so more memory means more of
+     them.  Encryption adds about 210 KB the first time it is used.
   *  A network card, and that card's SANA-II driver -- a file whose name ends
      in ".device", which came with the card.  Put it in DEVS: before you
      install, and the installer will find it and pre-select your card for

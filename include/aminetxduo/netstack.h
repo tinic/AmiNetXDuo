@@ -202,9 +202,9 @@ const AmiConfig *netstack_config(VOID);
 VOID netstack_pool_sample(VOID);
 
 /*
- * Packet pool sizing. NetX Duo's embedded defaults do not suit the 68020/4 MB
- * floor (docs/RESEARCH.md §9), so these are computed from AvailMem() at startup
- * and clamped to the range below.
+ * Packet pool sizing. NetX Duo's embedded defaults do not suit the 1 MB floor
+ * (docs/RESEARCH.md §81), so these are computed from AvailMem() at startup and
+ * clamped to the range below.
  */
 #define AMI_POOL_PAYLOAD        1568        /* 1500 MTU + 14 eth + slack, 4-aligned */
 #define AMI_POOL_MIN_PACKETS    16

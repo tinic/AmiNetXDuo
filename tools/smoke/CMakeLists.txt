@@ -21,6 +21,8 @@
 #   AMINETXDUO_RUN_TAG=kstop ./tools/fsuae-run.sh -t 120 build/cm/tools/smoke/KernelStop
 #   AMINETXDUO_RUN_TAG=rand1 ./tools/fsuae-run.sh -t 120 build/cm/tools/smoke/randtest
 #   AMINETXDUO_RUN_TAG=tick  ./tools/fsuae-run.sh -t 120 build/cm/tools/smoke/tickclock
+#   AMINETXDUO_RUN_TAG=mem   ./tools/fsuae-run.sh -t 300 build/cm/tools/smoke/memprobe \
+#                                                        <staged libs/> <staged devs/>
 #
 # SPDX-License-Identifier: MIT
 
@@ -49,6 +51,13 @@
 #              failure modes, and writes its first 32 output bytes to
 #              DH0:randtest.txt so two cold-boot runs can be diffed.  Does not
 #              crash anything.
+# memprobe     AvailMem() before OpenLibrary("bsdsocket.library"), with the
+#              stack up, and after the last close.  It is what §81 measured the
+#              memory floor with: netstat -h reads the same AvailMem but needs a
+#              running stack, so it has no baseline to subtract.  Needs
+#              bsdsocket.library in LIBS: and a driver in DEVS:.  DOES NOT
+#              REACH ITS LAST TWO REPORTS: the final CloseLibrary() hangs
+#              (§81.5), which is the bug rather than the probe.
 # tickclock    holds the machine in Forbid() past TX_AMIGA_TIMER_MAX_CATCHUP and
 #              compares how far tx_time_get() moved against the E-Clock, which
 #              says whether the ThreadX clock is derived or counted.  Does not
@@ -60,7 +69,8 @@ set(SMOKE_PROBES
     lifecycle   lifecycle.c
     KernelStop  kernelstop.c
     randtest    randtest.c
-    tickclock   tickclock.c)
+    tickclock   tickclock.c
+    memprobe    memprobe.c)
 
 add_custom_target(smoke_probes)
 

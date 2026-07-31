@@ -41,7 +41,7 @@
  * reader from the packet pool instead (see the comment there), since the pool
  * is itself sized from AvailMem().
  *
- * The 4 MB / 68020 floor (docs/RESEARCH.md §9) gives a pool as small as
+ * The 1 MB floor (docs/RESEARCH.md §81) gives a pool of 17 packets, close to
  * AMI_POOL_MIN_PACKETS (16), and pinning a quarter of that would starve
  * transmit, so such a machine keeps the four and cannot absorb the burst.
  * ARP and IPv6 ND are low-rate and stay shallow.

@@ -6,8 +6,8 @@
  *   1. config          -- AmigaDOS file I/O, so it must happen on a Process
  *                         and before this task becomes a ThreadX thread.
  *   2. SANA-II opens   -- OpenDevice()/DoIO(), same reason.
- *   3. sizing          -- AvailMem() decides the packet pool; the 4 MB floor
- *                         (docs/RESEARCH.md 9) means NetX Duo's own defaults
+ *   3. sizing          -- AvailMem() decides the packet pool; the 1 MB floor
+ *                         (docs/RESEARCH.md 81) means NetX Duo's own defaults
  *                         are not usable.
  *   4. ThreadX         -- tx_amiga_kernel_start() returns once the scheduler
  *                         is live, unlike tx_kernel_enter().
