@@ -146,6 +146,13 @@ typedef struct BtTask
 static BtTask bt_worker[BT_WORKERS];
 static BtTask bt_holder;
 
+/*
+ * How far the holder got. It runs as a plain Task, so it cannot print -- and a
+ * bounded wait that says nothing is no better than the unbounded one it
+ * replaced.
+ */
+static volatile ULONG bt_mark;
+
 static VOID bt_newlist(struct List *l)
 {
     l->lh_Head     = (struct Node *)&l->lh_Tail;
@@ -241,9 +248,12 @@ static VOID bt_holder_entry(VOID)
     bt->bt_Ready = 1U;
     Signal(bt->bt_Parent, BT_SIG_GO);
 
+    bt_mark = 1UL;
     Wait(BT_SIG_GO);                    /* held until main has looked */
 
+    bt_mark = 2UL;
     (VOID)tx_amiga_orphan_thread(&bt->bt_Thread);
+    bt_mark = 3UL;
     bt->bt_Done = 1U;
     Signal(bt->bt_Parent, BT_SIG_GO);
 }
@@ -470,6 +480,28 @@ VOID tx_application_define(VOID *first_unused_memory)
 
 /* ------------------------------------------------------------------- the main -- */
 
+/*
+ * Poll a flag with a deadline rather than Wait() on a signal. Signals are bits:
+ * two set before the first Wait() arrive as one, and the second Wait() then
+ * blocks for ever on a wake that already happened. Reporting how far the holder
+ * got is the difference between a diagnosis and a harness that stops.
+ */
+static VOID bt_wait_for(volatile UWORD *flag, const char *what)
+{
+    ULONG waited = 0;
+
+    while (*flag == 0U)
+    {
+        if (waited >= (ULONG)(30 * 50))
+        {
+            t_check(0, what, (LONG)bt_mark);
+            return;
+        }
+        Delay(5);
+        waited += 5;
+    }
+}
+
 static VOID bt_reap(BtTask *bt)
 {
     if (bt->bt_Stack != NULL)
@@ -518,7 +550,7 @@ int main(int argc, char **argv)
     if (bt_holder.bt_Task != NULL)
     {
         Signal(bt_holder.bt_Task, BT_SIG_GO);
-        Wait(BT_SIG_GO);                /* until it is adopted and holding */
+        bt_wait_for(&bt_holder.bt_Ready, "the holder to adopt");
 
         t_check(bt_holder.bt_Ready != 0U, "holder adopted a thread", 0);
 
@@ -535,7 +567,7 @@ int main(int argc, char **argv)
                 "we are not handed somebody else's TX_THREAD", 0);
 
         Signal(bt_holder.bt_Task, BT_SIG_GO);   /* release it */
-        Wait(BT_SIG_GO);
+        bt_wait_for(&bt_holder.bt_Done, "the holder to orphan");
 
         t_check(bt_holder.bt_Failures == 0, "holder saw itself as the baton",
                 bt_holder.bt_Failures);
