@@ -5,7 +5,10 @@
  * No new LVOs: everything here is a socket option number, a struct shape or a
  * macro, and the calls that move it are the ones already in the table.
  *
- * WHAT THE NDK ALREADY HAS, and it is more than the backlog assumed:
+ * WHAT THE NDK ALREADY HAS, which is more than it looks like from a grep --
+ * ndk-include is Latin-1, so `grep -r` reads it as binary and finds nothing.
+ * `LC_ALL=C grep -a`.
+ *
  * <sys/socket.h> defines `struct cmsghdr` (socklen_t + two __LONGs, 12 bytes),
  * CMSG_DATA, CMSG_FIRSTHDR and CMSG_NXTHDR, and <netinet/in.h> defines
  * IP_RECVDSTADDR as 7.  Two of those three macros are unusable as shipped:
