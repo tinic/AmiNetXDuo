@@ -84,6 +84,42 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
 
   Bump `BSD_LIB_REVISION` and `AMI_NETSTATUS_MIN_REVISION` together, per the
   rule in `netstatus.h`.
+- **RFC 3542 (Advanced Sockets API for IPv6) is absent.** Assessed 2026-07-31.
+  Feasible without patching NetX Duo, and cheaper than the `if_*` four because
+  it needs **no new LVOs** -- it rides `sendmsg`/`recvmsg`, which exist, and
+  `struct msghdr` is already the 28-byte 4.4BSD shape with `msg_control` at
+  offset 16.
+
+  What has to be invented is *header* ABI: `struct cmsghdr` and
+  `CMSG_FIRSTHDR`/`NXTHDR`/`DATA`/`LEN`/`SPACE` are **not in the NDK at all**.
+  Defining them means fixing `CMSG_ALIGN` for m68k, and every later caller is
+  stuck with whatever we pick -- so pick it once, deliberately, and record why.
+
+  Feasibility checked: `NX_PACKET` carries `nx_packet_ip_interface` (the arrival
+  interface) and `nx_packet_ip_header` (from which the hop limit reads), so both
+  options worth having can be filled from what NetX already hands us.
+
+  Worth implementing, in this order:
+  - `IPV6_RECVPKTINFO` / `IPV6_PKTINFO` (`struct in6_pktinfo`: `ipi6_addr`,
+    `ipi6_ifindex`) -- which interface and local address a datagram arrived on,
+    and which to send from. Lets a responder answer on the interface a query
+    came in on; starts to matter at two interfaces.
+  - `IPV6_RECVHOPLIMIT` / `IPV6_HOPLIMIT` -- `traceroute6`, and an mDNS
+    responder checking the arriving hop limit (RFC 6762's source-address check;
+    confirm the exact requirement before relying on it).
+  - `ICMP6_FILTER` with `struct icmp6_filter` and its six macros (RFC 3542
+    §3.2) -- `ping6`/`traceroute6` filtering ICMPv6 by type on a raw socket.
+
+  Not worth it: `IPV6_RTHDR`, `HOPOPTS`, `DSTOPTS`, `RTHDRDSTOPTS`, `PATHMTU`,
+  `RECVPATHMTU`, `USE_MIN_MTU`, `DONTFRAG`, `TCLASS`, `NEXTHOP`.
+
+  `in6.c` refuses these options because `recvmsg()` always reports
+  `msg_controllen == 0`, which stays correct until this is built. The
+  `transfer.c` comment that justified it reasoned about SCM_RIGHTS -- the wrong
+  RFC -- and was corrected in 625e5df.
+
+## Decided against — do not "fix"
+
 - **RFC 6724 default address selection**, 2026-07-31: does not apply here. It
   sorts a list of candidate destinations, and `getaddrinfo()` returns at most
   one address per family (the resolver under it answers with a single address,
