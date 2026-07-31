@@ -397,10 +397,24 @@ static const BsdSimpleTag bsd_simple_tags[] =
       (UWORD)offsetof(struct AmiSocketBase, sb_CanShareBases) }
 };
 
-/* Read-only capability answers, so Roadshow-aware callers can probe us. */
+/*
+ * Fixed answers, so Roadshow-aware callers can probe us.
+ *
+ * `settable` marks the ones the autodoc describes as "for querying and
+ * changing". A SET on those is accepted when the value asked for is the value
+ * already in force and refused when it is a real change: configuration code
+ * routinely reads a tunable and writes it straight back, and refusing that
+ * returns the tag's index and discards every tag after it in the same call --
+ * which is how an SBTC_ERRNOPTR in the next slot goes missing. A caller
+ * genuinely trying to turn IP forwarding on still gets told.
+ *
+ * The capability tags are query-only in the document and stay so: nothing can
+ * be set about whether an API exists.
+ */
 typedef struct
 {
     UWORD   code;
+    UWORD   settable;   /* SBT_RO / SBT_RW */
     ULONG   value;
 } BsdConstTag;
 
@@ -420,7 +434,7 @@ typedef struct
 
 static const BsdConstTag bsd_const_tags[] =
 {
-    { SBTC_NUM_PACKET_FILTER_CHANNELS,  BSD_PACKET_FILTER_CHANNELS },
+    { SBTC_NUM_PACKET_FILTER_CHANNELS, SBT_RO, BSD_PACKET_FILTER_CHANNELS },
 
     /*
      * The tunables. SocketBaseTagList() is documented to return the index of
@@ -433,40 +447,48 @@ static const BsdConstTag bsd_const_tags[] =
      * Every value below is what this stack does; where the answer is "no", it
      * says no.
      */
-    { SBTC_UDP_CHECKSUM,        TRUE                  }, /* always computed  */
-    { SBTC_IP_FORWARDING,       FALSE                 }, /* we are a host    */
-    { SBTC_IP_DEFAULT_TTL,      NX_IP_TIME_TO_LIVE    },
-    { SBTC_ICMP_MASK_REPLY,     FALSE                 }, /* not answered     */
-    { SBTC_ICMP_SEND_REDIRECTS, FALSE                 }, /* we do not route  */
+    { SBTC_UDP_CHECKSUM,        SBT_RW, TRUE               }, /* always computed */
+    { SBTC_IP_FORWARDING,       SBT_RW, FALSE              }, /* we are a host   */
+    { SBTC_IP_DEFAULT_TTL,      SBT_RW, NX_IP_TIME_TO_LIVE },
+    { SBTC_ICMP_MASK_REPLY,     SBT_RW, FALSE              }, /* not answered    */
+    { SBTC_ICMP_SEND_REDIRECTS, SBT_RW, FALSE              }, /* we do not route */
     /* IR_Process (0) / IR_Ignore (1). Echo is answered, so ping works.
        Timestamp is not implemented by NetX Duo, so it is ignored. */
-    { SBTC_ICMP_PROCESS_ECHO,   0                     },
-    { SBTC_ICMP_PROCESS_TSTAMP, 1                     },
+    { SBTC_ICMP_PROCESS_ECHO,   SBT_RW, 0 },
+    { SBTC_ICMP_PROCESS_TSTAMP, SBT_RW, 1 },
     /* IDNCS_ASCII. No IDN support here; host names go on the wire as ASCII. */
-    { SBTC_IDN_DEFAULT_CHARACTER_SET, 0               },
+    { SBTC_IDN_DEFAULT_CHARACTER_SET, SBT_RW, 0 },
     /*
      * TRUE since routing.c: AddRouteTagList(), DeleteRouteTagList(),
      * GetRouteInfo() and FreeRouteInfo() are the whole routing API the autodoc
      * documents. ChangeRouteTagList() has an LVO and no documentation, so it
      * is not covered by this tag.
      */
-    { SBTC_HAVE_ROUTING_API,            TRUE  },
+    { SBTC_HAVE_ROUTING_API,            SBT_RO, TRUE  },
     /*
      * TRUE since interfaces.c: the tag asks whether the interface API is
-     * present, and ObtainInterfaceList(), ReleaseInterfaceList() and
-     * QueryInterfaceTagList() are. The configuration half still answers
-     * ENOSYS, which a caller reads out of errno; FALSE here would stop a
-     * monitor asking for the three that work.
+     * present, and ObtainInterfaceList(), ReleaseInterfaceList(),
+     * QueryInterfaceTagList(), ConfigureInterfaceTagList(),
+     * AddInterfaceTagList() and RemoveInterface() are. Individual tags this
+     * stack cannot honour are refused there, which a caller reads out of
+     * errno; FALSE here would stop it asking at all.
      */
-    { SBTC_HAVE_INTERFACE_API,          TRUE  },
-    { SBTC_HAVE_MONITORING_API,         FALSE },
+    { SBTC_HAVE_INTERFACE_API,          SBT_RO, TRUE  },
+    /*
+     * TRUE since netmonitor.c: AddNetMonitorHookTagList() and
+     * RemoveNetMonitorHook() are what this tag names, and they work for
+     * MHT_Connect, MHT_Bind and MHT_Send. The four in-stack types answer the
+     * documented EINVAL, which the caller reads out of errno; FALSE here would
+     * stop it asking for the three that install.
+     */
+    { SBTC_HAVE_MONITORING_API,         SBT_RO, TRUE  },
     /*
      * TRUE since netstats.c: GetNetworkStatistics() is all this tag gates.
      * Four of its ten types are refused with EOPNOTSUPP, which the caller
      * reads out of errno; FALSE here would stop it asking about the six that
      * answer.
      */
-    { SBTC_HAVE_STATUS_API,             TRUE  },
+    { SBTC_HAVE_STATUS_API,             SBT_RO, TRUE  },
     /*
      * TRUE since roadshow.c gained AddDomainNameServer(),
      * RemoveDomainNameServer() and SetDefaultDomainName(); the list and its
@@ -476,8 +498,8 @@ static const BsdConstTag bsd_const_tags[] =
      * ShowNetStatus -- interfaces, routes, DNS, IP, ICMP, TCP, UDP, sockets,
      * all ten -- refuses outright when it reads FALSE (docs/RESEARCH.md 55).
      */
-    { SBTC_HAVE_DNS_API,                TRUE  },
-    { SBTC_IPF_API_VERSION,             0     },
+    { SBTC_HAVE_DNS_API,                SBT_RO, TRUE  },
+    { SBTC_IPF_API_VERSION,             SBT_RO, 0     },
     /*
      * TRUE since netdb.c: the tag names setnetent() and getprotoent(), and all
      * nine of set/get/end {net,proto,serv}ent are there over the DEVS:Internet
@@ -485,12 +507,12 @@ static const BsdConstTag bsd_const_tags[] =
      * of the SBTC_HAVE_DNS_API bug in docs/RESEARCH.md 55 -- there we claimed
      * an API we did not have, here we denied one we do.
      */
-    { SBTC_HAVE_LOCAL_DATABASE_API,     TRUE  },
-    { SBTC_HAVE_ADDRESS_CONVERSION_API, TRUE  },
-    { SBTC_HAVE_KERNEL_MEMORY_API,      FALSE },
-    { SBTC_HAVE_SERVER_API,             FALSE },
-    { SBTC_HAVE_ROADSHOWDATA_API,       FALSE },
-    { SBTC_HAVE_GETHOSTADDR_R_API,      TRUE  }
+    { SBTC_HAVE_LOCAL_DATABASE_API,     SBT_RO, TRUE  },
+    { SBTC_HAVE_ADDRESS_CONVERSION_API, SBT_RO, TRUE  },
+    { SBTC_HAVE_KERNEL_MEMORY_API,      SBT_RO, FALSE },
+    { SBTC_HAVE_SERVER_API,             SBT_RO, FALSE },
+    { SBTC_HAVE_ROADSHOWDATA_API,       SBT_RO, FALSE },
+    { SBTC_HAVE_GETHOSTADDR_R_API,      SBT_RO, TRUE  }
 };
 
 static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
@@ -737,6 +759,17 @@ static BOOL bsd_tag_set(struct AmiSocketBase *base, struct TagItem *item,
             bsd_set_herrno(base, (LONG)value);
 
         return TRUE;
+    }
+
+    /* A SET of a fixed tunable to the value it already holds. See BsdConstTag:
+       the caller has changed nothing, so there is nothing to refuse. */
+    for (i = 0; i < sizeof(bsd_const_tags) / sizeof(bsd_const_tags[0]); i++)
+    {
+        if (bsd_const_tags[i].code != code)
+            continue;
+
+        return (bsd_const_tags[i].settable == SBT_RW &&
+                bsd_const_tags[i].value == value) ? TRUE : FALSE;
     }
 
     switch (code)

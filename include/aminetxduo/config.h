@@ -87,6 +87,7 @@ typedef struct AmiIfConfig {
     ULONG       mtu;                         /* 0 = ask the driver               */
     BOOL        up;                          /* bring online at startup          */
     BOOL        configured;                  /* slot in use                      */
+    BOOL        down_goes_offline;           /* IFA_DownGoesOffline; default FALSE */
 
     /*
      * IPv6. These fields exist in both build configurations so that one config

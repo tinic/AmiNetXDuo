@@ -77,6 +77,21 @@ static VOID p_remove_hook(struct Library *base, struct Hook *hook)
                       : "a1", "cc", "memory");
 }
 
+static LONG p_socketbase(struct Library *base, struct TagItem *tags)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register APTR            a0  __asm("a0") = (APTR)tags;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+
+    __asm __volatile ("jsr a6@(-294:W)"     /* SocketBaseTagList -0x126 */
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
+                      : "r" (a6), "r" (a0)
+                      : "a1", "cc", "memory");
+    return res;
+}
+
 static LONG p_socket(struct Library *base, LONG domain, LONG type, LONG proto)
 {
     register struct Library *a6  __asm("a6") = base;
@@ -364,6 +379,74 @@ static VOID probe_hook_init(struct Hook *hook, ProbeState *st)
     probe_state_reset(st);
 }
 
+/* -------------------------------------------- the capability probe ------- *
+ *
+ * A conforming client asks SocketBaseTagList() whether the monitoring API is
+ * there before it calls any of it: "this tag must be used prior to calling any
+ * of the interface API functions, such as AddNetMonitorHookTagList()".  A
+ * library that answers FALSE and then installs hooks is never asked.
+ *
+ * The tunables are the other half of the same call.  SocketBaseTagList()
+ * "returns the index of the first tag it could not service" AND STOPS, so a
+ * refused tag silently discards every tag after it in the same list.  The two
+ * assertions below are about that: writing a tunable back at the value it
+ * already holds is not a change and must not cost the caller the rest of its
+ * list, while a real change to something this stack does not implement must
+ * still be refused and named.
+ */
+static VOID p_capability_phase(struct Library *base)
+{
+    struct TagItem tags[4];
+    ULONG          have  = 0;
+    ULONG          ttl   = 0;
+    ULONG          errno_after = 0;
+    LONG           rc;
+
+    tags[0].ti_Tag  = SBTM_GETREF(SBTC_HAVE_MONITORING_API);
+    tags[0].ti_Data = (ULONG)&have;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+
+    rc = p_socketbase(base, tags);
+    Printf((CONST_STRPTR)"SBTC_HAVE_MONITORING_API: rc %ld value %ld%s\n",
+           rc, (LONG)have,
+           (LONG)((rc == 0 && have != 0) ? " -- TRUE, correctly"
+                                         : " -- FALSE, WRONG"));
+
+    /* Read a tunable, write it straight back, and read something after it. */
+    tags[0].ti_Tag  = SBTM_GETREF(SBTC_IP_DEFAULT_TTL);
+    tags[0].ti_Data = (ULONG)&ttl;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+    (VOID)p_socketbase(base, tags);
+
+    tags[0].ti_Tag  = SBTM_SETVAL(SBTC_IP_DEFAULT_TTL);
+    tags[0].ti_Data = ttl;
+    tags[1].ti_Tag  = SBTM_GETREF(SBTC_ERRNO);
+    tags[1].ti_Data = (ULONG)&errno_after;
+    tags[2].ti_Tag  = TAG_DONE;
+    tags[2].ti_Data = 0;
+
+    errno_after = 0xA5A5A5A5UL;
+    rc = p_socketbase(base, tags);
+    Printf((CONST_STRPTR)"set IP_DEFAULT_TTL to its own value (%ld): rc %ld%s\n",
+           (LONG)ttl, rc,
+           (LONG)((rc == 0 && errno_after != 0xA5A5A5A5UL)
+                      ? " -- accepted and the next tag was serviced, correctly"
+                      : " -- REFUSED, WRONG"));
+
+    /* A real change to something this stack does not do. */
+    tags[0].ti_Tag  = SBTM_SETVAL(SBTC_IP_FORWARDING);
+    tags[0].ti_Data = 1;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+
+    rc = p_socketbase(base, tags);
+    Printf((CONST_STRPTR)"turn IP forwarding on: rc %ld%s\n", rc,
+           (LONG)((rc == 1) ? " -- refused at tag 1, correctly"
+                            : " -- ACCEPTED, WRONG"));
+}
+
 /* ------------------------------------------------------------------ main -- */
 
 #define P_AF_INET       2
@@ -390,6 +473,8 @@ int main(void)
         Printf((CONST_STRPTR)"MonProbe: no bsdsocket.library\n");
         return RETURN_FAIL;
     }
+
+    p_capability_phase(base);
 
     probe_hook_init(&hook_a, &state_a);
     probe_hook_init(&hook_b, &state_b);

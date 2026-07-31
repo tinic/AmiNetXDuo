@@ -42,9 +42,23 @@
  * indistinguishable from a measured zero. Each such tag is listed at its case
  * below with the reason.
  *
- * On the configure side, a tag this stack cannot honour fails the whole call
- * with EOPNOTSUPP and nothing in the list is applied; ignoring it would
- * report success for a change that never happened.
+ * On the configure and add sides there are two classes of tag this stack does
+ * not implement, and they are answered differently. Both functions are "a
+ * simplified, specialized front end to the underlying interface socket API",
+ * and the autodoc documents no error for an unsupported tag at all:
+ *
+ *   Advisory -- it tunes how the stack goes about its work and changes nothing
+ *   a caller can observe through this API or on the wire. Accepted and
+ *   ignored: refusing would fail the whole call over a tag whose only effect
+ *   is one this stack was never going to have, and real callers pass these as
+ *   a matter of course.
+ *
+ *   Behavioural -- its whole purpose is to change what the interface does, so
+ *   a caller that saw success would be misled. Refused with EOPNOTSUPP, and
+ *   nothing in the list is applied. A value that names what this stack already
+ *   does is not a change, and is accepted.
+ *
+ * Each tag is filed under one of the two at its case below.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -838,39 +852,54 @@ static LONG bsd_if_parse_config(struct AmiSocketBase *SocketBase,
                  */
                 break;
 
+            /*
+             * Behavioural, and BOOL. FALSE asks for nothing, which is what
+             * happens here, so it is accepted; TRUE asks for something this
+             * stack does not do.
+             *
+             *   IFC_SetDebugMode        there is no per-interface debug mode.
+             *                           IFQ_GetDebugMode answers FALSE for the
+             *                           same reason.
+             *   IFC_GetPeerAddress      a point-to-point partner, over the
+             *   IFC_GetDNS              SANA-IIR4 extensions the autodoc itself
+             *                           warns few drivers have. The shim is
+             *                           Ethernet-shaped throughout.
+             *   IFC_AssociatedRoute     these mark an interface so that going
+             *   IFC_AssociatedDNS       down tears something else down with it.
+             *                           A mark nothing reads is not the mark.
+             *   IFC_ReleaseAddress      the DHCP client has no release path;
+             *                           accepting would leave the lease held.
+             */
             case IFC_SetDebugMode:
-                /* There is no per-interface debug mode, so turning it off is
-                   possible and turning it on is not. IFQ_GetDebugMode answers
-                   FALSE for the same reason. */
+            case IFC_GetPeerAddress:
+            case IFC_GetDNS:
+            case IFC_AssociatedRoute:
+            case IFC_AssociatedDNS:
+            case IFC_ReleaseAddress:
                 if (item->ti_Data != 0)
                     return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
                 break;
 
             /*
              * ---------------------------------------------------------------
-             * Refused, each because this stack has nothing to configure.
-             * EOPNOTSUPP and not ENOSYS: the vector exists and works.
+             * Behavioural, and there is no value that means "no change", so
+             * refused outright. EOPNOTSUPP and not ENOSYS: the vector exists
+             * and works.
              *
-             *   IFC_DestinationAddress  a point-to-point partner. The SANA-II
-             *   IFC_GetPeerAddress      shim is Ethernet-shaped throughout and
-             *                           these need SANA-IIR4 besides, which
-             *                           the autodoc itself warns about.
-             *   IFC_GetDNS              same.
+             *   IFC_DestinationAddress  the far end of a point-to-point link,
+             *                           which none of these interfaces is.
              *   IFC_BroadcastAddress    NetX Duo derives the broadcast address
              *                           from the address and the mask; there
-             *                           is no separate one to set.
+             *                           is no separate one to set, and
+             *                           IFQ_BroadcastAddress would contradict
+             *                           whatever was accepted here.
              *   IFC_AddAliasAddress     one IPv4 address per interface.
              *   IFC_DeleteAliasAddress
-             *   IFC_Metric              no routing protocol, so no cost for
-             *                           one to carry.
-             *   IFC_AssociatedRoute     these mark an interface so that going
-             *   IFC_AssociatedDNS       down tears something else down with
-             *                           it. Accepting the mark without the
-             *                           teardown would be a flag nothing
-             *                           reads.
-             *   IFC_ReleaseAddress      the DHCP client has no release path;
-             *                           accepting this would leave the lease
-             *                           held on the server.
+             *   IFC_Metric              a cost for choosing between routes.
+             *                           There is no routing protocol to spend
+             *                           it, and IFQ_Metric answers 0, so a
+             *                           caller that set one would read back a
+             *                           different number.
              * ---------------------------------------------------------------
              */
             case IFC_DestinationAddress:
@@ -878,11 +907,6 @@ static LONG bsd_if_parse_config(struct AmiSocketBase *SocketBase,
             case IFC_Metric:
             case IFC_AddAliasAddress:
             case IFC_DeleteAliasAddress:
-            case IFC_GetPeerAddress:
-            case IFC_GetDNS:
-            case IFC_AssociatedRoute:
-            case IFC_AssociatedDNS:
-            case IFC_ReleaseAddress:
                 return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
 
             default:
@@ -930,6 +954,18 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
     sana = (AmiSana2If *)nxif->nx_interface_additional_link_info;
 
     /* --- pass two, in the order a configuration has to happen in --------- */
+
+    /*
+     * SM_Online goes first, alone among the states. "If the command succeeds,
+     * the other necessary configuration operations will take place. If it
+     * fails, then this function will return with an error code set and no
+     * further configuration will have been done" -- so the S2_ONLINE has to be
+     * tried before anything else is changed, or a device that refuses it
+     * leaves behind an MTU and an address the call reported as a failure.
+     */
+    if (req.bcr_HaveState && req.bcr_State == SM_Online &&
+        netstack_interface_up((UWORD)index) != AMI_NET_OK)
+        return bsd_fail(SocketBase, AMI_ENXIO);
 
     if (req.bcr_HaveMTU)
     {
@@ -979,27 +1015,33 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
             return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
     }
 
-    if (req.bcr_HaveState)
+    if (req.bcr_HaveState && req.bcr_State != SM_Online)
     {
         LONG rc;
 
         /*
          * Last, so that {IFC_Address, IFC_State SM_Up} does what it reads
-         * like. netstack_interface_up()/down() take the ThreadX bracket
-         * themselves and stop the SANA-II readers as well as telling NetX Duo,
-         * so they are called outside ours -- the same rule netstatus.c follows
-         * for NETCTRL_INTERFACE_UP.
+         * like. netstack_interface_*() take the ThreadX bracket themselves and
+         * stop the SANA-II readers as well as telling NetX Duo, so they are
+         * called outside ours -- the same rule netstatus.c follows for
+         * NETCTRL_INTERFACE_UP.
          *
-         * SM_Up and SM_Online, and SM_Down and SM_Offline, do the same thing
-         * here. The autodoc's distinction is whether the SANA-II device is
-         * told S2_ONLINE/S2_OFFLINE as well as the stack; this driver's
-         * NX_LINK_ENABLE already issues S2_ONLINE and starts the readers, and
-         * NX_LINK_DISABLE issues S2_OFFLINE. There is no way to move the
-         * stack's view without moving the device's, so the two spellings
-         * describe one transition.
+         * The four states are three transitions. SM_Up and SM_Online both
+         * bring the link up, and NX_LINK_ENABLE issues the S2_ONLINE either
+         * way: a device that is not on the network cannot carry the stack's
+         * traffic, so there is no useful "up but offline".
+         *
+         * Down and offline really are different, and the autodoc says so:
+         * SM_Down is "the stack will no longer attempt to transmit messages
+         * through this interface. However, the underlying SANA-II device
+         * driver may still be connected to the network", where SM_Offline is
+         * "same as 'SM_Down', but also sends an 'S2_OFFLINE' command". A unit
+         * shared with Envoy or ACS stays on the wire for them.
          */
-        if (req.bcr_State == SM_Up || req.bcr_State == SM_Online)
+        if (req.bcr_State == SM_Up)
             rc = netstack_interface_up((UWORD)index);
+        else if (req.bcr_State == SM_Down)
+            rc = netstack_interface_stack_down((UWORD)index);
         else
             rc = netstack_interface_down((UWORD)index);
 
@@ -1023,10 +1065,8 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
  * that got only the first half would be invisible to netstack_shutdown() and
  * its device would never be closed.
  *
- * Tags that describe something this stack has are honoured; the rest are
- * refused, for the same reason ConfigureInterfaceTagList() refuses its own.
- * An interface brought up with a silently ignored packet filter mode or
- * read-request count is not the interface the caller asked for.
+ * The tag policy is the file header's. Roadshow callers pass the tuning tags
+ * as a matter of course, so refusing them refused the interface itself.
  */
 static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
                              struct TagItem *tags, AmiIfConfig *cfg)
@@ -1046,9 +1086,16 @@ static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
                 cfg->mtu = (ULONG)item->ti_Data;
                 break;
 
+            case IFA_DownGoesOffline:
+                /* "bringing the interface 'down' ... will cause the associated
+                   SANA-II device driver to be switched offline. Default is
+                   FALSE." Honoured either way; see IFC_State's SM_Down. */
+                cfg->down_goes_offline = (item->ti_Data != 0) ? TRUE : FALSE;
+                break;
+
             case IFA_SetDebugMode:
-                /* There is no debug mode, so turning it off is possible and
-                   turning it on is not. */
+                /* Behavioural, BOOL: there is no debug mode, so turning it off
+                   is possible and turning it on is not. */
                 if (item->ti_Data != 0)
                     return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
                 break;
@@ -1087,38 +1134,56 @@ static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
                     return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
                 break;
 
+            case IFA_PacketFilterMode:
+                /*
+                 * Behavioural: the mode decides what a capture can see, and a
+                 * tcpdump told it was promiscuous while it sees local traffic
+                 * only reports a quiet wire. PFM_Local is both the documented
+                 * default and what src/bpf/ does -- it taps what the stack
+                 * sees. The two promiscuous modes need the device opened
+                 * exclusively, which the shim never does, and PFM_Nothing asks
+                 * for capture to be off on this interface, which there is no
+                 * way to arrange.
+                 */
+                if ((LONG)item->ti_Data != PFM_Local)
+                    return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+                break;
+
+            case IFA_HardwareAddress:
+                /* Behavioural, and the most visible kind: the station address
+                   is what every other host on the segment sees. The shim reads
+                   it from S2_DEVICEQUERY and does not set one. */
+                return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+
             /*
              * -----------------------------------------------------------
-             * Refused, each because the thing it configures does not exist
-             * here:
+             * Advisory. Each of these tunes how the work is done and leaves
+             * nothing for a caller to observe through this API or on the wire,
+             * so they are accepted and ignored. Roadshow tools pass them as a
+             * matter of course, and refusing meant no interface at all.
              *
-             *   IFA_NumReadRequests         the RX depth is computed from the
-             *   IFA_NumWriteRequests        packet pool at open time
+             *   IFA_NumReadRequests         queue depths. The RX depth is sized
+             *   IFA_NumWriteRequests        from the packet pool at open time
              *   IFA_NumARPRequests          (sana2_rx.c) and the TX ring is a
-             *                               compile-time array.
-             *   IFA_PacketFilterMode        src/bpf/ captures what the stack
-             *                               sees; there is no promiscuous
-             *                               mode to select.
-             *   IFA_DownGoesOffline         down always goes offline here
-             *                               (NX_LINK_DISABLE issues
-             *                               S2_OFFLINE), so FALSE cannot be
-             *                               honoured and TRUE is not a choice.
-             *   IFA_RequiresInitDelay       no settle delay is implemented.
-             *   IFA_CopyMode                the copy hooks are chosen by what
-             *                               the device asked for.
-             *   IFA_HardwareAddress         the shim reads the station
-             *                               address; it does not set one.
+             *                               compile-time array; a different
+             *                               depth is throughput under burst,
+             *                               not behaviour.
+             *   IFA_CopyMode                CM_FastWordCopy is "the faster data
+             *                               copying code"; the bytes that come
+             *                               out are the same either way.
+             *   IFA_RequiresInitDelay       a settle delay for devices that
+             *                               lose the first frame. Defaults to
+             *                               TRUE and has never been implemented
+             *                               here, so refusing TRUE would refuse
+             *                               the documented default.
              * -----------------------------------------------------------
              */
             case IFA_NumReadRequests:
             case IFA_NumWriteRequests:
             case IFA_NumARPRequests:
-            case IFA_PacketFilterMode:
-            case IFA_DownGoesOffline:
-            case IFA_RequiresInitDelay:
             case IFA_CopyMode:
-            case IFA_HardwareAddress:
-                return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+            case IFA_RequiresInitDelay:
+                break;
 
             default:
                 break;

@@ -216,7 +216,11 @@ VOID netstack_pool_sample(VOID);
  */
 UWORD   netstack_interface_count(VOID);
 LONG    netstack_interface_up(UWORD index);
+/* Down and offline are two states, not one: down stops the stack, offline also
+   sends S2_OFFLINE and takes the wire away from every other client of the
+   device. Roadshow's SM_Down/SM_Offline, and Online/Offline in the tools. */
 LONG    netstack_interface_down(UWORD index);
+LONG    netstack_interface_stack_down(UWORD index);
 BOOL    netstack_interface_is_up(UWORD index);
 
 /* ------------------------------------------------- interfaces at run time --

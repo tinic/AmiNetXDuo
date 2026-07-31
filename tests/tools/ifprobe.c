@@ -477,6 +477,35 @@ static VOID p_config_phase(struct Library *base, const char *name)
            rc, p_errno(base),
            (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
 
+    /* ---- the BOOL tags at FALSE, which ask for nothing --------------------
+     *
+     * IFC_AssociatedRoute and IFC_SetDebugMode name behaviour this stack does
+     * not have, but FALSE is not a request for it, and refusing a whole
+     * configuration over a tag that asked for nothing is how a Roadshow tool
+     * fails to configure an interface at all.  TRUE is still refused.
+     */
+    tags[0].ti_Tag  = IFC_AssociatedRoute;
+    tags[0].ti_Data = FALSE;
+    tags[1].ti_Tag  = IFC_SetDebugMode;
+    tags[1].ti_Data = FALSE;
+    tags[2].ti_Tag  = TAG_DONE;
+    tags[2].ti_Data = 0;
+
+    rc = p_configure_interface(base, name, tags);
+    Printf((CONST_STRPTR)"config: BOOL tags at FALSE: rc %ld (errno %ld)%s\n",
+           rc, p_errno(base),
+           (LONG)((rc == 0) ? " -- accepted, correctly" : " -- REFUSED, WRONG"));
+
+    tags[0].ti_Tag  = IFC_AssociatedRoute;
+    tags[0].ti_Data = TRUE;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+
+    rc = p_configure_interface(base, name, tags);
+    Printf((CONST_STRPTR)"config: IFC_AssociatedRoute TRUE: rc %ld (errno %ld)%s\n",
+           rc, p_errno(base),
+           (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
+
     /* ---- the MTU, down and back ------------------------------------------ */
     tags[0].ti_Tag  = IFC_LimitMTU;
     tags[0].ti_Data = 576;
@@ -654,7 +683,7 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
 {
     UBYTE          mac_before[8];
     UBYTE          mac_after[8];
-    struct TagItem tags[4];
+    struct TagItem tags[5];
     BOOL           present;
     ULONG          mask_before;
     ULONG          mask_after;
@@ -708,9 +737,13 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
      * With a tag this stack refuses in the list, first: AddInterfaceTagList
      * must fail as a whole and leave nothing half-created, or the retry below
      * would hit "an interface of that name already exists".
+     *
+     * PFM_Everything is the refusable kind of tag -- it asks for promiscuous
+     * capture, and a caller told it got that while seeing local traffic only
+     * would read a busy wire as a quiet one.
      */
-    tags[0].ti_Tag  = IFA_NumReadRequests;
-    tags[0].ti_Data = 64;
+    tags[0].ti_Tag  = IFA_PacketFilterMode;
+    tags[0].ti_Data = PFM_Everything;
     tags[1].ti_Tag  = TAG_DONE;
     tags[1].ti_Data = 0;
 
@@ -719,7 +752,26 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
            rc, p_errno(base),
            (LONG)((rc != 0) ? " -- refused, correctly" : " -- ACCEPTED, WRONG"));
 
-    rc = p_add_interface(base, name, device, unit, NULL);
+    /*
+     * And with the tuning tags a Roadshow caller passes as a matter of course.
+     * None of them is implemented here and every one of them must be accepted:
+     * they change nothing this API or the wire can show, and refusing one
+     * refused the interface itself.
+     */
+    tags[0].ti_Tag  = IFA_NumReadRequests;
+    tags[0].ti_Data = 64;
+    tags[1].ti_Tag  = IFA_CopyMode;
+    tags[1].ti_Data = CM_FastWordCopy;
+    tags[2].ti_Tag  = IFA_PacketFilterMode;
+    tags[2].ti_Data = PFM_Local;
+    /* Honoured rather than ignored, and FALSE is the documented default, so
+       the SM_Down below this run leaves the device on the network. */
+    tags[3].ti_Tag  = IFA_DownGoesOffline;
+    tags[3].ti_Data = FALSE;
+    tags[4].ti_Tag  = TAG_DONE;
+    tags[4].ti_Data = 0;
+
+    rc = p_add_interface(base, name, device, unit, tags);
     Printf((CONST_STRPTR)"add %s (%s unit %ld): rc %ld (errno %ld)%s\n",
            (LONG)name, (LONG)device, unit, rc, p_errno(base),
            (LONG)((rc == 0) ? " -- added, correctly" : " -- REFUSED, WRONG"));
@@ -818,20 +870,117 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
 
 /* ------------------------------------------------------------------ main -- */
 
-int main(void)
+/*
+ * `IfProbe DOWN|OFFLINE|UP` moves the first interface to that state and does
+ * nothing else, so that `netstat` can be run after it.  SM_Down and SM_Offline
+ * both report IFQ_State == SM_Down -- the difference between them is whether
+ * the SANA-II device is still on the network, which the published API has no
+ * way to ask.  netstat prints it, so the harness reads it from there.
+ *
+ * `word` is the first letter of the argument, read by ReadArgs before the
+ * library is opened.  argv is not used: the startup this builds against does
+ * not fill it in, which ClockSet documents by taking its own argument through
+ * ReadArgs and casting argv to void.
+ */
+static LONG p_state_only(struct Library *base, char word)
+{
+    struct List    *list = p_obtain_interface_list(base);
+    struct TagItem  tags[2];
+    struct Node    *node;
+    const char     *name  = NULL;
+    const char     *label;
+    LONG            state;
+    LONG            rc;
+
+    if (list == NULL)
+        return RETURN_FAIL;
+
+    node = list->lh_Head;
+    if (node->ln_Succ != NULL)
+        name = (const char *)node->ln_Name;
+
+    if (name == NULL)
+    {
+        p_release_interface_list(base, list);
+        Printf((CONST_STRPTR)"state: no interface\n");
+        return RETURN_FAIL;
+    }
+
+    if (word == 'D' || word == 'd')
+    {
+        state = SM_Down;
+        label = "DOWN";
+    }
+    else if (word == 'O' || word == 'o')
+    {
+        state = SM_Offline;
+        label = "OFFLINE";
+    }
+    else
+    {
+        state = SM_Up;
+        label = "UP";
+    }
+
+    tags[0].ti_Tag  = IFC_State;
+    tags[0].ti_Data = (ULONG)state;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+
+    rc = p_configure_interface(base, name, tags);
+
+    Printf((CONST_STRPTR)"state %s: rc %ld (errno %ld), IFQ_State now %ld\n",
+           (LONG)label, rc, p_errno(base),
+           p_read_long(base, name, IFQ_State));
+
+    p_release_interface_list(base, list);
+
+    return (rc == 0) ? RETURN_OK : RETURN_FAIL;
+}
+
+int main(int argc, char **argv)
 {
     struct Library *base;
     struct List    *list;
     struct Node    *node;
     char            first[16];
+    char            state_word = '\0';
     LONG            count = 0;
     LONG            rc;
+
+    (VOID)argv;
+
+    /* Before the library is opened: opening it starts the whole stack, and
+       ReadArgs wants the command line as the Shell left it. */
+    if (argc != 0)
+    {
+        struct RDArgs *rda;
+        LONG           args[1];
+
+        args[0] = 0;
+
+        rda = ReadArgs((CONST_STRPTR)"STATE", args, NULL);
+        if (rda != NULL)
+        {
+            if (args[0] != 0)
+                state_word = *(const char *)args[0];
+
+            FreeArgs(rda);
+        }
+    }
 
     base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4);
     if (base == NULL)
     {
         Printf((CONST_STRPTR)"IfProbe: no bsdsocket.library\n");
         return RETURN_FAIL;
+    }
+
+    if (state_word != '\0')
+    {
+        rc = p_state_only(base, state_word);
+        CloseLibrary(base);
+        return rc;
     }
 
     first[0] = '\0';
