@@ -84,6 +84,13 @@ typedef enum {
 /* Longest RFC 5952 text form plus NUL: "0:0:0:0:0:ffff:255.255.255.255". */
 #define AMI_CFG_IP6_STRLEN          46
 
+/*
+ * RFC 4007 11's "<address>%<zone_id>". 46 for the address, the '%', and a
+ * zone as long as an interface name (IF_NAMESIZE, terminator included).
+ */
+#define AMI_CFG_IP6_ZONE_LEN        16
+#define AMI_CFG_IP6_ZONE_STRLEN     (AMI_CFG_IP6_STRLEN + 1 + AMI_CFG_IP6_ZONE_LEN)
+
 typedef struct AmiIfConfig {
     char        name[AMI_CFG_NAME_LEN];      /* interface name, e.g. "eth0"      */
     char        device[AMI_CFG_PATH_LEN];    /* SANA-II device, e.g. "a2065.device" */
@@ -228,6 +235,21 @@ VOID  ami_config_format_ip(ULONG addr, char *buf, ULONG buflen);
  * (leftmost wins a tie), and the IPv4 dotted form for v4-mapped addresses.
  * `buflen` must be at least AMI_CFG_IP6_STRLEN; anything shorter yields "".
  */
+/*
+ * The RFC 4007 forms. ami_config_parse_ip6() refuses a "%zone" rather than
+ * dropping it: an address whose zone went missing names a different
+ * destination. _zone() takes it as text and leaves resolving a name to an
+ * index to the caller, which is the layer that can call if_nametoindex().
+ * ami_config_format_ip6_zone() appends one when `zone` is non-empty; deciding
+ * whether an address should carry a zone at all is the caller's, since RFC
+ * 4007 11.1 excludes global scope and loopback.
+ */
+BOOL  ami_config_parse_ip6_zone(const char *text, ULONG out[AMI_CFG_IP6_WORDS],
+                                ULONG *prefix_out, char *zone_out,
+                                ULONG zone_len);
+VOID  ami_config_format_ip6_zone(const ULONG addr[AMI_CFG_IP6_WORDS],
+                                 const char *zone, char *buf, ULONG buflen);
+
 BOOL  ami_config_parse_ip6(const char *text, ULONG out[AMI_CFG_IP6_WORDS],
                            ULONG *prefix_out);
 VOID  ami_config_format_ip6(const ULONG addr[AMI_CFG_IP6_WORDS],

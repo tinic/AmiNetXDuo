@@ -53,8 +53,10 @@ static BOOL ip6_hex_digit(char c, ULONG *value)
     return TRUE;
 }
 
-BOOL ami_config_parse_ip6(const char *text, ULONG out[AMI_CFG_IP6_WORDS],
-                          ULONG *prefix_out)
+static BOOL ami_cfg_parse_ip6_inner(const char *text,
+                                    ULONG out[AMI_CFG_IP6_WORDS],
+                                    ULONG *prefix_out,
+                                    char *zone_out, ULONG zone_len)
 {
     UWORD       group[8];
     const char *s = text;
@@ -79,7 +81,7 @@ BOOL ami_config_parse_ip6(const char *text, ULONG out[AMI_CFG_IP6_WORDS],
         s += 2;
     }
 
-    while (*s != '\0' && *s != '/' && *s != ' ' && *s != '\t')
+    while (*s != '\0' && *s != '/' && *s != '%' && *s != ' ' && *s != '\t')
     {
         ULONG value  = 0;
         ULONG digits = 0;
@@ -92,6 +94,7 @@ BOOL ami_config_parse_ip6(const char *text, ULONG out[AMI_CFG_IP6_WORDS],
             const char *look = s;
 
             while (*look != '\0' && *look != ':' && *look != '/' &&
+                   *look != '%' &&
                    *look != ' ' && *look != '\t' && *look != '.')
                 look++;
 
@@ -101,7 +104,7 @@ BOOL ami_config_parse_ip6(const char *text, ULONG out[AMI_CFG_IP6_WORDS],
                 char  quad[16];
                 ULONG n = 0;
 
-                while (s[n] != '\0' && s[n] != '/' && s[n] != ' ' &&
+                while (s[n] != '\0' && s[n] != '/' && s[n] != '%' && s[n] != ' ' &&
                        s[n] != '\t')
                 {
                     if (n >= sizeof(quad) - 1)
@@ -154,13 +157,45 @@ BOOL ami_config_parse_ip6(const char *text, ULONG out[AMI_CFG_IP6_WORDS],
             s++;
 
             /* "1::" ends here; anything else continues with a group. */
-            if (*s == '\0' || *s == '/' || *s == ' ' || *s == '\t')
+            if (*s == '\0' || *s == '/' || *s == '%' || *s == ' ' || *s == '\t')
                 break;
         }
-        else if (*s == '\0' || *s == '/' || *s == ' ' || *s == '\t')
+        else if (*s == '\0' || *s == '/' || *s == '%' || *s == ' ' || *s == '\t')
         {
             return FALSE;           /* a trailing single ':' */
         }
+    }
+
+    /*
+     * RFC 4007 11: "<address>%<zone_id>", before any prefix. A caller that
+     * cannot carry a zone refuses one rather than dropping it -- a link-local
+     * address whose zone was silently discarded names a different destination,
+     * and would be sent on whichever interface the stack guessed.
+     *
+     * The zone is handed back as text, not resolved: this file is the
+     * standalone text layer and has no library base to call if_nametoindex()
+     * through. "SHOULD support at least numerical indices ... MAY support
+     * other kinds of non-null strings", so the caller decides which it takes.
+     */
+    if (*s == '%')
+    {
+        ULONG n = 0;
+
+        if (zone_out == NULL || zone_len == 0)
+            return FALSE;
+
+        s++;
+        while (*s != '\0' && *s != '/' && *s != ' ' && *s != '\t')
+        {
+            if (n + 1 >= zone_len)
+                return FALSE;       /* truncation would name another zone */
+            zone_out[n++] = *s++;
+        }
+
+        if (n == 0)
+            return FALSE;           /* "%" with nothing after it */
+
+        zone_out[n] = '\0';
     }
 
     if (*s == '/')
@@ -222,6 +257,57 @@ BOOL ami_config_parse_ip6(const char *text, ULONG out[AMI_CFG_IP6_WORDS],
         *prefix_out = prefix;
 
     return TRUE;
+}
+
+BOOL ami_config_parse_ip6(const char *text, ULONG out[AMI_CFG_IP6_WORDS],
+                          ULONG *prefix_out)
+{
+    /* No zone buffer, so a zoned address is refused rather than shortened. */
+    return ami_cfg_parse_ip6_inner(text, out, prefix_out, NULL, 0);
+}
+
+BOOL ami_config_parse_ip6_zone(const char *text, ULONG out[AMI_CFG_IP6_WORDS],
+                               ULONG *prefix_out, char *zone_out,
+                               ULONG zone_len)
+{
+    if (zone_out != NULL && zone_len > 0)
+        zone_out[0] = '\0';
+
+    return ami_cfg_parse_ip6_inner(text, out, prefix_out, zone_out, zone_len);
+}
+
+VOID ami_config_format_ip6_zone(const ULONG addr[AMI_CFG_IP6_WORDS],
+                                const char *zone, char *buf, ULONG buflen)
+{
+    ULONG used;
+    ULONG i;
+
+    if (buf == NULL || buflen == 0)
+        return;
+
+    if (zone == NULL || zone[0] == '\0')
+    {
+        ami_config_format_ip6(addr, buf, buflen);
+        return;
+    }
+
+    if (buflen < AMI_CFG_IP6_ZONE_STRLEN)
+    {
+        buf[0] = '\0';
+        return;
+    }
+
+    ami_config_format_ip6(addr, buf, buflen);
+    if (buf[0] == '\0')
+        return;
+
+    for (used = 0; buf[used] != '\0'; used++)
+        ;
+
+    buf[used++] = '%';
+    for (i = 0; zone[i] != '\0' && used + 1 < buflen; i++)
+        buf[used++] = zone[i];
+    buf[used] = '\0';
 }
 
 VOID ami_config_format_ip6(const ULONG addr[AMI_CFG_IP6_WORDS],

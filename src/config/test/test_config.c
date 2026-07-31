@@ -440,6 +440,66 @@ static void test_ip6(void)
         }
     }
 
+    /* ---- RFC 4007 11: <address>%<zone_id> ------------------------------ */
+    {
+        static const ULONG ll[4] = IP6(0xfe80, 0, 0, 0, 0, 0, 0, 1);
+        char  zone[AMI_CFG_IP6_ZONE_LEN];
+        char  wide[AMI_CFG_IP6_ZONE_STRLEN];
+        ULONG got[4];
+
+        /* A name and a numeric index are both accepted; RFC 4007 asks for
+           at least the numbers and allows the names. */
+        CHECK(ami_config_parse_ip6_zone("fe80::1%eth0", got, NULL,
+                                        zone, sizeof(zone)));
+        CHECK(ip6_equal(got, ll));
+        CHECK_STR(zone, "eth0");
+
+        CHECK(ami_config_parse_ip6_zone("fe80::1%1", got, NULL,
+                                        zone, sizeof(zone)));
+        CHECK_STR(zone, "1");
+
+        /* No zone leaves the buffer empty rather than stale. */
+        CHECK(ami_config_parse_ip6_zone("fe80::1", got, NULL,
+                                        zone, sizeof(zone)));
+        CHECK_STR(zone, "");
+
+        /* A zone in front of a prefix, which is where it goes. */
+        {
+            ULONG pfx = 0;
+
+            CHECK(ami_config_parse_ip6_zone("fe80::1%eth0/64", got, &pfx,
+                                            zone, sizeof(zone)));
+            CHECK(pfx == 64);
+            CHECK_STR(zone, "eth0");
+        }
+
+        /* Malformed: nothing after the '%', and a zone too long to hold --
+           truncating one would name a different interface. */
+        CHECK(!ami_config_parse_ip6_zone("fe80::1%", got, NULL,
+                                         zone, sizeof(zone)));
+        CHECK(!ami_config_parse_ip6_zone("fe80::1%averylonginterfacename",
+                                         got, NULL, zone, sizeof(zone)));
+
+        /* The plain parser refuses a zone rather than dropping it. */
+        CHECK(!ami_config_parse_ip6("fe80::1%eth0", got, NULL));
+
+        /* Formatting, and the round trip through it. */
+        ami_config_format_ip6_zone(ll, "eth0", wide, sizeof(wide));
+        CHECK_STR(wide, "fe80::1%eth0");
+
+        ami_config_format_ip6_zone(ll, "", wide, sizeof(wide));
+        CHECK_STR(wide, "fe80::1");
+
+        CHECK(ami_config_parse_ip6_zone(wide, got, NULL, zone, sizeof(zone)));
+        CHECK(ip6_equal(got, ll));
+
+        /* A buffer that cannot hold the zoned form yields "", as the plain
+           formatter does, never a bare address that would parse back as a
+           different destination. */
+        ami_config_format_ip6_zone(ll, "eth0", text, sizeof(text));
+        CHECK_STR(text, "");
+    }
+
     /* Round trip: everything the formatter writes, the parser must read. */
     {
         static const ULONG probe[4] =
