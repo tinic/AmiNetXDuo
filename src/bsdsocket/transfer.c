@@ -523,17 +523,13 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_ENOBUFS);
     }
 
-    if (source == BSD_SOURCE_INDEX)
-        status = nxd_udp_socket_source_send(&sock->as_Nx.udp, packet,
-                                            (NXD_ADDRESS *)addr, port,
-                                            source_index);
-    else
-        /* nxd_, not nx_: the v4 wrapper wraps the address and calls this. */
-        status = nxd_udp_socket_send(&sock->as_Nx.udp, packet,
-                                     (NXD_ADDRESS *)addr, port);
-#endif
 #ifdef AMINETXDUO_MULTICAST
-    /* IP_MULTICAST_IF named an interface, so the route does not choose. */
+    /*
+     * IP_MULTICAST_IF named an interface, so the route does not choose. It
+     * wins over a bound source or a zone: bsd_mcast_prepare_send() answers
+     * anything but -1 only for a group destination with the option set, which
+     * is the more specific of the two requests.
+     */
     if (mcast_if >= 0)
     {
         status = nx_udp_socket_source_send(&sock->as_Nx.udp, packet,
@@ -542,9 +538,14 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     }
     else
 #endif
-    /* nxd_, not nx_: the v4 wrapper wraps the address and calls this. */
-    status = nxd_udp_socket_send(&sock->as_Nx.udp, packet,
-                                 (NXD_ADDRESS *)addr, port);
+    if (source == BSD_SOURCE_INDEX)
+        status = nxd_udp_socket_source_send(&sock->as_Nx.udp, packet,
+                                            (NXD_ADDRESS *)addr, port,
+                                            source_index);
+    else
+        /* nxd_, not nx_: the v4 wrapper wraps the address and calls this. */
+        status = nxd_udp_socket_send(&sock->as_Nx.udp, packet,
+                                     (NXD_ADDRESS *)addr, port);
     if (status != NX_SUCCESS)
     {
         nx_packet_release(packet);
