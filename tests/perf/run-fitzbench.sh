@@ -61,7 +61,19 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
-PEER="${AMINETXDUO_FITZ_PEER:-turo@playhouse2}"
+# NOT playhouse2, whatever its convenience: it is an LXC container on a veth,
+# so its SYN-ACK carries an uncomputed TX-offload checksum that no NIC ever
+# fixes up.  Our stack rejects it -- correctly -- and the run reads as "1
+# connection made, 6 bad packets, 6 checksum errors" and no transfer, which
+# looks like our defect and is not.  The peer must also be a THIRD machine:
+# a frame the emulator's own host sends to the guest's MAC never comes back to
+# that NIC's pcap capture (63).
+PEER="${AMINETXDUO_FITZ_PEER:-}"
+[ -n "$PEER" ] || {
+    echo "set AMINETXDUO_FITZ_PEER=<user@host> -- a third machine on real" >&2
+    echo "hardware, not this emulator's host and not an LXC container" >&2
+    exit 2
+}
 PEER_ADDR="${AMINETXDUO_FITZ_PEER_ADDR:-192.168.1.184}"
 PEER_DIR="${AMINETXDUO_FITZ_PEER_DIR:-/tmp/fitzbench-share}"
 PEER_BIN="${AMINETXDUO_FITZ_PEER_BIN:-\$HOME/fitzsrc/fitz-serve}"
