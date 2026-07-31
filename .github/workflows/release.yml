@@ -200,16 +200,19 @@ jobs:
             echo "\`AmiNetXDuo-$(tools/version.sh --product).lha\` is the Aminet-layout"
             echo "archive: drop it on a Workbench window and run \`Install-AmiNetXDuo\`."
             echo
-            echo "**What this build was tested with.** Tier 1 only -- host tests, all"
-            echo "seven cross configurations and the conformance suite build. The"
-            echo "on-Amiga tiers need a Kickstart ROM and \`a2065.device\`, neither of"
-            echo "which is redistributable, so they do not run here. The conformance"
-            echo "score, throughput and anything measured under emulation come from a"
-            echo "machine that has them; see the README."
-            echo
-            echo "This particular archive has not been run on real hardware. The stack"
-            echo "has: an A3000/060 with an X-Surf-100, by a user, which is where two"
-            echo "bugs were found that emulation had not."
+
+            # This release's section of CHANGELOG.md, verbatim: from its own
+            # heading to the next one.  A missing section is a release that
+            # would ship with no summary, so it fails rather than publishes.
+            ver=$(tools/version.sh --product)
+            awk -v v="## $ver" '
+                $0 == v {found = 1; next}
+                found && /^## / {exit}
+                found {print}
+            ' CHANGELOG.md > "$notes.body"
+            [ -s "$notes.body" ] || {
+                echo "::error::CHANGELOG.md has no '## $ver' section"; exit 1; }
+            cat "$notes.body"
           } > "$notes"
 
           gh release create "${GITHUB_REF#refs/tags/}" \
