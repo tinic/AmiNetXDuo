@@ -107,6 +107,19 @@ if(AMINETXDUO_MDNS)
     add_compile_definitions(AMINETXDUO_MDNS)
 endif()
 
+# RFC 1112 IPv4 multicast: nx_igmp_enable() and the five IPPROTO_IP socket
+# options that go with it.  On by default, because the programs this stack
+# exists to run -- SSDP/UPnP clients, a ported mDNS -- open their own multicast
+# sockets and get ENOPROTOOPT without it.  Global: src/netstack/ calls
+# nx_igmp_enable() and src/bsdsocket/ carries the per-socket state, and the two
+# must agree about whether the membership exists.
+#
+# Off is the floor tier's answer (dist/make-dist.sh's 68000-minimal drawer).
+option(AMINETXDUO_MULTICAST "Build IPv4 multicast membership (IGMP)" ON)
+if(AMINETXDUO_MULTICAST)
+    add_compile_definitions(AMINETXDUO_MULTICAST)
+endif()
+
 option(AMINETXDUO_TESTS "Build the on-Amiga test harnesses"           ON)
 
 # The SANA-II raw-framing probe posts a CMD_READ with SANA2IOF_RAW and takes it
@@ -399,3 +412,4 @@ message(STATUS "  IPv6 .......... ${AMINETXDUO_IPV6}")
 message(STATUS "  TLS ........... ${AMINETXDUO_TLS}")
 message(STATUS "  BPF ........... ${AMINETXDUO_BPF}")
 message(STATUS "  mDNS .......... ${AMINETXDUO_MDNS}")
+message(STATUS "  multicast ..... ${AMINETXDUO_MULTICAST}")

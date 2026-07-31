@@ -514,6 +514,20 @@ typedef struct AmiSocket
      */
     LONG                    as_HdrIncl;
 
+#ifdef AMINETXDUO_MULTICAST
+    /*
+     * IP_MULTICAST_TTL / _LOOP / _IF, kept per socket because BSD keeps them
+     * there and NetX Duo does not: the TTL is a field on the NX_UDP_SOCKET
+     * shared with unicast, and the loopback flag is one switch on the whole
+     * NX_IP. mcast.c is where the two are reconciled.
+     *
+     * as_McastIf is a NetX interface index, or -1 for "let the route decide".
+     */
+    LONG                    as_McastTtl;
+    LONG                    as_McastLoop;
+    LONG                    as_McastIf;
+#endif
+
     /*
      * Listening state. NetX Duo hands an incoming connection to a specific
      * socket, so a listening descriptor keeps a spare socket parked on the
@@ -722,6 +736,29 @@ LONG       bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
 NX_PACKET *bsd_raw_receive(AmiSocket *sock, ULONG wait, UINT *why);
 VOID       bsd_raw_source(NX_PACKET *packet, NXD_ADDRESS *addr);
 ULONG      bsd_raw_available(AmiSocket *sock);
+
+#ifdef AMINETXDUO_MULTICAST
+/* mcast.c -- RFC 1112 group membership and the IPPROTO_IP multicast options.
+ *
+ * bsd_mcast_setopt()/bsd_mcast_getopt() answer IP_ADD_MEMBERSHIP,
+ * IP_DROP_MEMBERSHIP, IP_MULTICAST_IF, IP_MULTICAST_TTL and
+ * IP_MULTICAST_LOOP; options.c dispatches those five and nothing else here.
+ * Both take their own bsd_nx_enter() bracket where they need one.
+ *
+ * bsd_mcast_close() drops every membership the socket still holds, as BSD
+ * does on close. It runs from bsd_socket_destroy(), inside the bracket.
+ *
+ * bsd_mcast_prepare_send() is the send path: it puts the socket's multicast
+ * TTL on the NX_UDP_SOCKET and answers with the interface index the datagram
+ * must leave by, or -1 for the route's choice.
+ */
+LONG bsd_mcast_setopt(struct AmiSocketBase *base, AmiSocket *sock,
+                      LONG optname, APTR optval, socklen_t optlen);
+LONG bsd_mcast_getopt(struct AmiSocketBase *base, AmiSocket *sock,
+                      LONG optname, APTR optval, socklen_t *optlen);
+VOID bsd_mcast_close(AmiSocket *sock);
+LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr);
+#endif
 
 /* select.c -- event plumbing.
  *

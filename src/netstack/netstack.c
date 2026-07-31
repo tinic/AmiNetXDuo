@@ -619,6 +619,23 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
     if (status != NX_SUCCESS)
         AMI_WARN("netstack: nx_udp_enable failed (%ld)", (long)status);
 
+#ifdef AMINETXDUO_MULTICAST
+    /*
+     * RFC 1112 group membership. Without this call every _nxe_igmp_multicast_
+     * *_join() returns NX_NOT_ENABLED, so setsockopt(IP_ADD_MEMBERSHIP) has
+     * nothing to do -- the option surface in src/bsdsocket/mcast.c is useless
+     * on its own.
+     *
+     * It also starts the periodic that answers a router's membership query;
+     * without an answer a querying switch stops forwarding the group after
+     * its own timeout, so joining and never reporting works only until the
+     * first query.
+     */
+    status = nx_igmp_enable(&ns->ns_Ip);
+    if (status != NX_SUCCESS)
+        AMI_WARN("netstack: nx_igmp_enable failed (%ld)", (long)status);
+#endif
+
 #ifdef AMINETXDUO_IPV6
     /*
      * nxd_icmp_enable() covers ICMPv4 as well, so it replaces the

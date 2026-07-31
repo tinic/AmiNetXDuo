@@ -2,6 +2,12 @@
 
 User-visible changes, newest first. Internal work is in the git log.
 
+## Unreleased
+
+- IPv4 multicast works: `IP_ADD_MEMBERSHIP`, `IP_DROP_MEMBERSHIP`, `IP_MULTICAST_IF`, `IP_MULTICAST_TTL` and `IP_MULTICAST_LOOP`, so a program that discovers things on the local network -- SSDP, UPnP, a ported mDNS -- can open the socket it expects instead of getting "Protocol not available"
+- `bind()` to a multicast group address is accepted, which is how a program listening for a group is written
+- The `68000-minimal` drawer leaves multicast out along with the other optional features, which is 3,888 bytes
+
 ## 0.15.1
 
 - Two programs adding an interface at the same moment can no longer be given the same one: the slot was picked and then the device opened, which takes long enough for the second to pick it again

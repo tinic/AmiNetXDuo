@@ -33,19 +33,14 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   route. `nxd_udp_socket_source_send()` is already wired for RFC 4007 zones
   and takes the same kind of index, so UDP is small; TCP has no source-send
   equivalent and needs a decision, the same one RFC 4007 needs.
-- **IPv4 multicast is absent** -- no `IP_ADD_MEMBERSHIP`, `IP_MULTICAST_IF`,
-  `IP_MULTICAST_TTL`, `IP_MULTICAST_LOOP`, no `ip_mreq`. Reopened 2026-07-31:
-  it had been closed on the grounds that "nothing in the tree needs the
-  socket-level API", which is the wrong test -- the point of the project is
-  running other people's tools, and SSDP/UPnP and any ported mDNS open their
-  own multicast sockets. The vendored NetX mDNS covers `.local` for us and
-  covers nothing for them.
-
-  Not purely exposure work: `nx_igmp_enable()` is never called, so IGMP has to
-  be turned on first, which is a memory cost the 1 MB floor tier has to be
-  weighed against. RFC 1112 membership is the target; RFC 3678 source filtering
-  is not, and can wait indefinitely. `NX_ENABLE_IPV6_MULTICAST` is the same
-  argument on the v6 side, for a non-floor tier.
+- **IPv6 group membership (`IPV6_JOIN_GROUP`) is absent.** The IPv4 side is
+  done (below); this is not, and is a separate decision because the numbers are
+  worse. `NX_ENABLE_IPV6_MULTICAST` grows every `NX_IP` by 172 bytes whether or
+  not anything joins, where `nx_igmp_enable()` grows it by nothing, and there is
+  no MLD anywhere in the vendored tree -- no `nx_mld_*.c` exists, so a join
+  reaches the driver and no report is ever sent, and a querying switch stops
+  forwarding the group. The reasoning is beside the define in
+  `port/netxduo-amiga/inc/nx_user.h`.
 - **`ShowNetServices` cannot browse every type at once.** With no type it runs the
   RFC 6763 §9 meta-query and lists the types present; listing every instance of
   every type would mean starting one continuous query per type found. They would
@@ -141,6 +136,21 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
 
 ## Decided against — do not "fix"
 
+- **RFC 3678 source filtering stays out**, 2026-07-31. `IP_ADD_SOURCE_MEMBERSHIP`,
+  `IP_BLOCK_SOURCE` and the `MCAST_*` family need IGMPv3, which the vendored NetX
+  Duo does not implement -- it speaks IGMPv2 and the source lists have nowhere to
+  go. RFC 1112 membership is what shipped (`src/bsdsocket/mcast.c`) and is what
+  SSDP, UPnP and a ported mDNS actually call.
+- **IPv4 multicast**, done 2026-07-31, entry kept for the cost. `IP_ADD_MEMBERSHIP`,
+  `IP_DROP_MEMBERSHIP`, `IP_MULTICAST_IF`, `IP_MULTICAST_TTL` and
+  `IP_MULTICAST_LOOP` over `nx_igmp_enable()`, in `src/bsdsocket/mcast.c`;
+  `bind()` to a class D address is accepted, which it was not, because that is how
+  an SSDP receiver is written. Measured: **3,888 bytes** on the floor build (3,696
+  of code, 192 of membership table) and 3,532 on the default one, plus 12 bytes per
+  open socket. No packet-pool or `NX_IP` growth at all -- `nx_ipv4_multicast_entry[7]`
+  is unconditional in `NX_IP` and `nx_igmp_enable()` only fills in three function
+  pointers. On by default; `-DAMINETXDUO_MULTICAST=OFF` in the `68000-minimal`
+  drawer, with the other four optional features.
 - **RFC 6724 default address selection**, 2026-07-31: does not apply here. It
   sorts a list of candidate destinations, and `getaddrinfo()` returns at most
   one address per family (the resolver under it answers with a single address,
