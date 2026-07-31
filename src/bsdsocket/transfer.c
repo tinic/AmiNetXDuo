@@ -1326,11 +1326,18 @@ LONG bsd_recvfrom(register LONG sock_fd          __asm("d0"),
 /* ------------------------------------------------------ sendmsg / recvmsg -- */
 
 /*
- * msg_control is ignored on send and reported as empty on receive. The only
- * thing a BSD stack passes through SCM_RIGHTS is a file descriptor, and
- * AmigaOS has no descriptor passing over a socket -- handing a socket to
- * another task is ObtainSocket()/ReleaseSocket() (handoff.c). Nothing can
- * legitimately arrive in msg_control, so MSG_CTRUNC is never set.
+ * msg_control is ignored on send and reported as empty on receive.
+ *
+ * SCM_RIGHTS is genuinely meaningless here: it passes a file descriptor, and
+ * handing a socket to another task on AmigaOS is ObtainSocket()/ReleaseSocket()
+ * (handoff.c). But that is not the only thing ancillary data carries. RFC 3542
+ * puts IPV6_PKTINFO, IPV6_HOPLIMIT and IPV6_TCLASS through the same field, and
+ * those are not descriptor passing -- so "nothing can legitimately arrive in
+ * msg_control", which this comment used to say, is only true of the 4.4BSD set.
+ * Nothing arrives today because none of RFC 3542 is implemented, which is a
+ * decision recorded in docs/BACKLOG.md, not a property of the platform.
+ *
+ * MSG_CTRUNC is therefore never set: there is nothing to truncate yet.
  */
 LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
                  register struct msghdr *msg  __asm("a0"),
