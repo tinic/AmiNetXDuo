@@ -143,9 +143,6 @@ struct bpf_version {
 #define IFNAMSIZ            16
 #define AMI_BPF_IFREQ_SIZE  32
 
-/* <sys/filio.h>: the byte count bpf_data_waiting() does not return. */
-#define AMI_BPF_FIONREAD    _IOC(IOC_OUT,   'f', 127, 4)
-
 #define BIOCGBLEN           _IOC(IOC_OUT,   'B', 102, 4)
 #define BIOCSBLEN           _IOC(IOC_INOUT, 'B', 102, 4)
 #define BIOCSETF            _IOC(IOC_IN,    'B', 103, 8)
@@ -276,6 +273,14 @@ struct bpf_insn {
 #define AMI_BPF_IFREQ_SIZE  ((ULONG)sizeof(struct ifreq))
 
 #endif /* AMI_BPF_REPLICA */
+
+/*
+ * <sys/filio.h>'s FIONREAD, spelled out here because the BIOC* encodings come
+ * from <net/bpf.h> and that header does not reach the file ioctls. This is the
+ * bpf_ioctl() request that reports the buffered byte count; bpf_data_waiting()
+ * is a 0/1 flag and not a count.
+ */
+#define AMI_BPF_FIONREAD    _IOC(IOC_OUT, 'f', 127, 4)
 
 /* --------------------------------------------------- pinned record layout */
 
