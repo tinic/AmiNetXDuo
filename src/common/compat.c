@@ -138,7 +138,10 @@ struct Device             *TimerBase;
 static struct timerequest  ami_timer_req;
 static struct MsgPort      ami_timer_port;
 static ULONG               ami_eclock_per_ms;
-static struct EClockVal    ami_eclock_base;
+/* Running total and the reading it was last advanced from; ami_millis(). */
+static struct EClockVal    ami_eclock_last;
+static ULONG               ami_eclock_ms;
+static ULONG               ami_eclock_rem;
 
 static BOOL ami_timer_init(VOID)
 {
@@ -178,7 +181,9 @@ static BOOL ami_timer_init(VOID)
     ami_eclock_per_ms = rate / 1000UL;
     if (ami_eclock_per_ms == 0)
         ami_eclock_per_ms = 1;
-    ami_eclock_base = ev;
+    ami_eclock_last = ev;
+    ami_eclock_ms   = 0UL;
+    ami_eclock_rem  = 0UL;
 
     return TRUE;
 }
@@ -186,20 +191,37 @@ static BOOL ami_timer_init(VOID)
 ULONG ami_millis(VOID)
 {
     struct EClockVal ev;
-    ULONG            ticks;
+    ULONG            delta;
+    ULONG            ms;
 
     if (!ami_timer_init())
         return 0;
 
-    ReadEClock(&ev);
-
     /*
-     * 32-bit low word is enough: at ~710 kHz it wraps every ~100 minutes, and
-     * the subtraction below stays correct across a single wrap.
+     * Accumulated, not measured from a fixed base.  ev_lo is 32 bits at
+     * ~710 kHz and wraps every ~100 minutes, so subtracting a base captured at
+     * init is right once and wrong afterwards -- a machine up two hours would
+     * report a few minutes.  Each call adds the interval since the last one,
+     * which is correct across a wrap, and carries the sub-millisecond
+     * remainder so the rounding does not accumulate either.
+     *
+     * The one thing it cannot survive is two calls more than ~100 minutes
+     * apart, which loses a whole wrap.  Anything watching a clock calls more
+     * often than that.
      */
-    ticks = ev.ev_lo - ami_eclock_base.ev_lo;
+    Forbid();
 
-    return ticks / ami_eclock_per_ms;
+    ReadEClock(&ev);
+    delta            = ev.ev_lo - ami_eclock_last.ev_lo;
+    ami_eclock_last  = ev;
+    ami_eclock_rem  += delta;
+    ami_eclock_ms   += ami_eclock_rem / ami_eclock_per_ms;
+    ami_eclock_rem  %= ami_eclock_per_ms;
+    ms               = ami_eclock_ms;
+
+    Permit();
+
+    return ms;
 }
 
 /* ---------------------------------------------------------- SANA-II opens */

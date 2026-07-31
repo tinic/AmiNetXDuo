@@ -589,7 +589,8 @@ ULONG                frac;
 ULONG                carry;
 ULONG                advance;
 ULONG                last_lo;
-ULONG                start_lo;
+ULONG                up_lo;      /* last reading the uptime was advanced from */
+ULONG                up_rem;     /* E-Clock ticks not yet worth a millisecond */
 ULONG                backlog;
 ULONG                measured;
 ULONG                delta;
@@ -845,8 +846,9 @@ UINT                 armed;
     backlog      =  0UL;
     last_service =  0UL;
     ReadEClock(&now);
-    last_lo  =  now.ev_lo;
-    start_lo =  now.ev_lo;
+    last_lo =  now.ev_lo;
+    up_lo   =  now.ev_lo;
+    up_rem  =  0UL;
 
     if (armed == TX_FALSE)
     {
@@ -889,8 +891,14 @@ UINT                 armed;
         armed =  TX_TRUE;
 
         _tx_amiga_tick.tx_amiga_tick_wakeups++;
-        _tx_amiga_tick.tx_amiga_tick_uptime_ms =
-            ((ULONG) (now.ev_lo - start_lo)) / eclock_per_ms;
+
+        /* Accumulated, because ev_lo wraps every ~100 minutes and a machine up
+           longer than that would otherwise report a few minutes.  The tick runs
+           50 times a second, so it never misses a wrap.  */
+        up_rem  +=  (ULONG) (now.ev_lo - up_lo);
+        up_lo    =  now.ev_lo;
+        _tx_amiga_tick.tx_amiga_tick_uptime_ms += up_rem / eclock_per_ms;
+        up_rem  %=  eclock_per_ms;
 
         delta    =  (ULONG) (now.ev_lo - last_lo); /* correct across one wrap */
         measured =  delta / eclock_per_tick;
