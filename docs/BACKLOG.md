@@ -48,50 +48,9 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   archive ships no headers, so nothing we add past the NDK's 0..143 range can
   be reached by anyone else's code. Plan and the three permanent ABI decisions
   (LVO slots, `CMSG_ALIGN` for m68k, `IPV6_*` option numbers) are in
-  `docs/NDK-ADDENDUM.md`. Blocks the two items below from being useful to
-  anyone but us.
-- **RFC 3493 §4: add `if_nametoindex`, `if_indextoname`, `if_nameindex`,
-  `if_freenameindex`.** ACCEPTED 2026-07-31 -- the first LVO extension in 15
-  years, on the footing that we are the reference now.
-
-  Slots **146-149** at **-0x372, -0x378, -0x37e, -0x384**, continuing past the
-  end of the SFD as [143]-[145] already do. Do **not** take [137]-[142]
-  (-0x33c..-0x35a): that is Commodore's `==reserve 6` block, the space set aside
-  for its own expansion, and a Roadshow that filled it would send every binary
-  built against our meaning into someone else's function. See
-  `docs/NDK-ADDENDUM.md`.
-
-  ```c
-  unsigned int         if_nametoindex(const char *ifname);
-  char                *if_indextoname(unsigned int ifindex, char *ifname);
-  struct if_nameindex *if_nameindex(void);
-  void                 if_freenameindex(struct if_nameindex *ptr);
-
-  struct if_nameindex { unsigned int if_index; char *if_name; };
-  ```
-
-  - `IF_NAMESIZE` is 16 and includes the terminator; `ifname` must be at least
-    that.
-  - `if_nametoindex()` returns 0 on failure and **defines no errors**.
-  - `if_indextoname()` returns `ifname`, or NULL with `ENXIO` for no such
-    interface and `ENOMEM` for a system error.
-  - The `if_nameindex()` array is terminated by an entry with `if_index == 0`
-    and `if_name == NULL`, and is freed only by `if_freenameindex()`. Use
-    `addrinfo.c`'s pattern: one allocation holding the structs and their name
-    bytes, so the free is a single call and no name is freed separately.
-  - **Indices are 1-based**, matching `rtm_index` as of 2026-07-31. That fix
-    and this share a convention -- a caller comparing `GetRouteInfo`'s
-    `rtm_index` against `if_nametoindex()` must agree, so change neither alone.
-
-  Unlike -0x360/-0x366/-0x36c, which are private and reached through a constant
-  in our own header, these are meant to be called by **other people's programs**.
-  That means publishing linkable glue, not just an offset: an FD/SFD entry and
-  the generated proto/pragma/inline set, so an ordinary
-  `#include <proto/bsdsocket.h>` call site links. Without it the vectors exist
-  and nothing can reach them.
-
-  Bump `BSD_LIB_REVISION` and `AMI_NETSTATUS_MIN_REVISION` together, per the
-  rule in `netstatus.h`.
+  `docs/NDK-ADDENDUM.md`. The four RFC 3493 vectors exist as of revision 3 and
+  are verified on the guest, but nothing outside this tree can reach them until
+  the drawer ships -- that is what this item is.
 - **RFC 3542 (Advanced Sockets API for IPv6) is absent.** Assessed 2026-07-31.
   Feasible without patching NetX Duo, and cheaper than the `if_*` four because
   it needs **no new LVOs** -- it rides `sendmsg`/`recvmsg`, which exist, and
