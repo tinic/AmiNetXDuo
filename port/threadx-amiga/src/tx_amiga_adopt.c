@@ -488,13 +488,15 @@ UINT tx_amiga_discard_thread(TX_THREAD *thread_ptr)
 
     _tx_thread_system_state++;
 
-    Permit();
-
+    /* The core lock stays held, for the reason tx_amiga_adopt_suspend() gives.
+       _tx_amiga_reap() is the one thing under delete that Wait()s, and it
+       returns at its first test for an adopted thread -- which this is, checked
+       above -- so nothing here blocks.  */
     (VOID) _tx_thread_terminate(thread_ptr);
     (VOID) _tx_thread_delete(thread_ptr);
 
-    Forbid();
     _tx_thread_system_state--;
+
     Permit();
 
     _tx_amiga_wake_scheduler();
@@ -556,15 +558,13 @@ UINT         wake;
     }
 
     /* Interrupt context again: terminate/delete must not try to switch on our
-       behalf now that we are nobody.  */
+       behalf now that we are nobody.  The core lock stays held across it, same
+       rule and same reasoning as tx_amiga_discard_thread().  */
     _tx_thread_system_state++;
-
-    Permit();
 
     (VOID) _tx_thread_terminate(thread_ptr);
     (VOID) _tx_thread_delete(thread_ptr);
 
-    Forbid();
     _tx_thread_system_state--;
     wake =  (_tx_thread_execute_ptr != TX_NULL) ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
     Permit();

@@ -154,6 +154,35 @@ static AmiBatonSlot *ami_baton_claim(struct Task *task)
     return NULL;
 }
 
+/*
+ * _tx_thread_system_state is one global counter and every Task reads it.  A
+ * window in which it is raised with task switching enabled makes every other
+ * Task look like an ISR, and a blocking ThreadX service entered on one comes
+ * back without blocking -- after it has already linked the caller into the
+ * object's suspension list and bumped the object's suspended count.  The list
+ * and the count then disagree, and the next _tx_event_flags_set() walks off the
+ * end of the list into whatever offset 0x80 of address zero holds.
+ *
+ * So the counter may only be raised under an unbroken Forbid(), which is what
+ * tx_thread_context_save.c and tx_amiga_adopt.c already do.  Nothing under
+ * tx_thread_suspend()/tx_thread_resume() can Wait() while it is raised: every
+ * _tx_thread_system_return() in tx_thread_system_{suspend,resume}.c is behind
+ * TX_THREAD_SYSTEM_RETURN_CHECK, which tests exactly this counter.
+ *
+ * Sampled here, under Forbid() and before this bracket raises anything: a
+ * non-zero reading means some other Task has it raised while we are running,
+ * which is the defect itself.  netstat -h reports both numbers.
+ */
+static VOID ami_baton_observe_state(VOID)
+{
+    ULONG state = (ULONG)_tx_thread_system_state;
+
+    if (state > ami_baton_stats.bs_StateMax)
+        ami_baton_stats.bs_StateMax = state;
+    if (state != 0)
+        ami_baton_stats.bs_StateShared++;
+}
+
 VOID ami_netstack_baton_release(VOID)
 {
     struct Task   *me = FindTask(NULL);
@@ -202,8 +231,7 @@ VOID ami_netstack_baton_release(VOID)
     ami_baton_stats.bs_Live++;
     if (ami_baton_stats.bs_Live > ami_baton_stats.bs_LiveMax)
         ami_baton_stats.bs_LiveMax = ami_baton_stats.bs_Live;
-    if ((ULONG)_tx_thread_system_state > ami_baton_stats.bs_StateMax)
-        ami_baton_stats.bs_StateMax = (ULONG)_tx_thread_system_state;
+    ami_baton_observe_state();
 
     slot->bs_Thread  = thread;
     slot->bs_Nesting = 1;
@@ -212,13 +240,10 @@ VOID ami_netstack_baton_release(VOID)
        for us -- we are about to leave ThreadX entirely. */
     _tx_thread_system_state++;
 
-    Permit();
-
     /* Off the ready list. With the system state raised this returns here
-       rather than ending in _tx_thread_system_return(). */
+       rather than ending in _tx_thread_system_return(). The Forbid() is held
+       across it -- see the note above ami_baton_observe_state(). */
     (VOID)tx_thread_suspend(thread);
-
-    Forbid();
 
     if (_tx_thread_current_ptr == thread)
     {
@@ -273,17 +298,18 @@ VOID ami_netstack_baton_acquire(VOID)
         return;
     }
 
+    ami_baton_observe_state();
+
     _tx_thread_system_state++;
     if (ami_baton_stats.bs_Live > 0)
         ami_baton_stats.bs_Live--;
     ami_baton_stats.bs_Transitions++;
 
-    Permit();
-
+    /* Held across the resume, same rule as release(). */
     (VOID)tx_thread_resume(thread);
 
-    Forbid();
     _tx_thread_system_state--;
+
     Permit();
 
     _tx_amiga_wake_scheduler();

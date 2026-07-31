@@ -144,6 +144,8 @@ static VOID show_scheduler(const ToolStats *st)
                 st->baton_transitions, st->baton_live_max);
     tool_printf("\tbaton: %lu table full, %lu moved, state max %lu\n",
                 st->baton_full, st->baton_moved, st->baton_state_max);
+    tool_printf("\tbaton: %lu shared interrupt states\n",
+                st->baton_state_shared);
 
     if (st->health_mark != 0)
         tool_printf("\tmark at 0x%08lx\n", st->health_mark);

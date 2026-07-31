@@ -160,6 +160,8 @@ VOID ami_netstack_release(AmiNetCaller *caller);
  *   bs_Transitions         release/acquire pairs completed
  *   bs_StateMax            highest _tx_thread_system_state seen on entry
  *   bs_BatonMoved          times release() found the baton was not ours
+ *   bs_StateShared         times another task had the interrupt state raised
+ *                          while this one was running; must stay zero
  */
 typedef struct AmiBatonStats
 {
@@ -169,6 +171,7 @@ typedef struct AmiBatonStats
     ULONG bs_Transitions;
     ULONG bs_StateMax;
     ULONG bs_BatonMoved;
+    ULONG bs_StateShared;
 } AmiBatonStats;
 
 extern AmiBatonStats ami_baton_stats;

@@ -416,6 +416,7 @@ LONG tool_stats(ToolStats *out)
         out->baton_transitions       = h->nsl_BatonTransitions;
         out->baton_state_max         = h->nsl_BatonStateMax;
         out->baton_moved             = h->nsl_BatonMoved;
+        out->baton_state_shared      = h->nsl_BatonStateShared;
     }
 
     tool_netstatus_close(base);
@@ -490,6 +491,7 @@ BOOL tool_health_mark(ToolStats *out)
     out->baton_transitions     = baton.bs_Transitions;
     out->baton_state_max       = baton.bs_StateMax;
     out->baton_moved           = baton.bs_BatonMoved;
+    out->baton_state_shared    = baton.bs_StateShared;
 
     return TRUE;
 }
