@@ -55,17 +55,17 @@ memory:
 	0 sockets open, 0 at the peak, 1 programs have it open
 	219 of 256 packets free, 219 fewest ever, 1568 bytes each
 	0 found the pool empty, 0 waited, 0 released twice
-	9408184 bytes of system memory free, 7297264 in the largest block
+	9408160 bytes of system memory free, 7297264 in the largest block
 
 scheduler:
-	158 ticks in 3176 ms, 0 clipped, 0 lost
+	158 ticks in 3173 ms, 0 clipped, 0 lost
 	0 over budget, 0 ticks deferred
 	timer wheel 0 ticks late, worst 1
 	worst stall 0 ms, service 0 us at the time
 	baton: 12 transitions, 4 at once at the peak
 	baton: 0 table full, 0 moved, state max 0
 	baton: 0 shared interrupt states
-	mark at 0x0026A954
+	mark at 0x0026A96C
 ```
 
 The same machine after ninety seconds of a workload that opened and closed
@@ -75,7 +75,7 @@ about two hundred sockets, and then stopped:
 memory:
 	21 allocations outstanding, 92 at the peak, 0 refused
 	0 sockets open, 70 at the peak, 1 programs have it open
-	216 of 256 packets free, 215 fewest ever, 1568 bytes each
+	220 of 256 packets free, 215 fewest ever, 1568 bytes each
 	0 found the pool empty, 0 waited, 0 released twice
 ```
 
@@ -127,10 +127,11 @@ capacity problem.
 it can be read next to ours. Falling while our numbers stay flat means the leak
 is not the network's.
 
-The pool figures on `netstat -h` are as of the last thing the stack did and can
-be a packet or two behind. `netstat -s -h` and `ShowNetStatus MEMORY` go through
-the library and take a fresh reading, so a small disagreement between them is
-expected and is not a fault.
+The pool figures on `netstat -h` are as of the last thing the stack did, since
+reading them for real would mean entering the stack this command exists to stay
+out of. `netstat -s -h` and `ShowNetStatus MEMORY` do enter it and take a fresh
+reading, so a packet or two of disagreement between them is expected and is not
+a fault.
 
 ## The scheduler block
 
