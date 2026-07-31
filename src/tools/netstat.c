@@ -167,11 +167,11 @@ static VOID show_memory(const ToolStats *st)
  * on a machine where nothing was ever clipped. Deferred ticks reach the wheel
  * late; lost ones never reach it.
  *
- * The one function both routes print through -- -h off the published mark and
- * -s -h through the library -- so the two cannot disagree about what they
- * found.
+ * Memory first, then the scheduler.  The one function both routes print
+ * through -- -h off the published mark and -s -h through the library -- so the
+ * two cannot disagree about what they found.
  */
-static VOID show_scheduler(const ToolStats *st)
+static VOID show_health(const ToolStats *st)
 {
     if (!st->have_health)
         return;
@@ -276,7 +276,7 @@ static VOID show_protocol_stats(const ToolStats *st)
 
     /* The packet pool is reported by show_memory(), below, where the other two
        things that can run out are. */
-    show_scheduler(st);
+    show_health(st);
 }
 
 /*
@@ -471,7 +471,7 @@ int main(int argc, char **argv)
             return RETURN_WARN;
         }
 
-        show_scheduler(&stats);
+        show_health(&stats);
         return RETURN_OK;
     }
 
@@ -519,7 +519,7 @@ int main(int argc, char **argv)
 
     /* -h alongside something else: -s has already printed it. */
     if (want_health && !want_stats && tool_health_mark(&stats))
-        show_scheduler(&stats);
+        show_health(&stats);
 
     FreeArgs(rda);
     return RETURN_OK;

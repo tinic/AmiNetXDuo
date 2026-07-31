@@ -1384,6 +1384,8 @@ VOID netstack_shutdown(VOID)
     ami_sana2_set_open_hooks(NULL, NULL);
     ami_ns_port_delete();
     ami_netstack_baton_set_sampler(NULL);
+    /* The next stack gets its own low-water mark, not this one's. */
+    ami_mem_stats()->ms_PoolTotal = 0UL;
     ami_netstack_health_unpublish();
 
     /*
