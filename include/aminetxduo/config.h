@@ -19,7 +19,11 @@
 extern "C" {
 #endif
 
-#define AMI_CFG_MAX_INTERFACES      4
+/* Two, matching NX_MAX_PHYSICAL_INTERFACES in port/netxduo-amiga/inc/nx_user.h.
+   It was 4, which the stack could parse and NetX Duo could not attach: a third
+   interface would have been accepted from the config and then had nowhere to
+   go. */
+#define AMI_CFG_MAX_INTERFACES      2
 #define AMI_CFG_MAX_NAMESERVERS     4
 #define AMI_CFG_MAX_SEARCH          6
 #define AMI_CFG_NAME_LEN            64
