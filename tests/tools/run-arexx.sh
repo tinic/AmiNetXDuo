@@ -175,6 +175,21 @@ SAY 'case empty:                      rc=' RC
 'Q HOSTNAME'
 SAY 'case abbrev:  Q HOSTNAME         rc=' RC ' result=' RESULT
 
+/* SERVICES blocks for its collection window, which is the one command here
+   that can wedge the host rather than answer it. One second, because what is
+   being asserted is that it comes back and the script continues -- nothing on
+   SLIRP answers an mDNS query, so an empty result is the expected answer and
+   a full one would mean the emulator had grown a network. */
+RESULT = 'NONE'
+'QUERY SERVICES ALL 1'
+SAY 'case browse:  QUERY SERVICES ALL rc=' RC ' bytes=' LENGTH(RESULT)
+
+'QUERY SERVICES _http._tcp 1'
+SAY 'case browse1: QUERY SERVICES typ rc=' RC
+
+'QUERY SERVICES'
+SAY 'case browsex: QUERY SERVICES     rc=' RC
+
 'KILL'
 SAY 'case kill:    KILL               rc=' RC
 
@@ -292,6 +307,28 @@ if grep -qE "case abbrev:.*rc= *0 " "$SCRIPTOUT"; then
     note "PASS: 'Q' is accepted as QUERY"
 else
     note "FAIL: the AmiTCP abbreviation 'Q' was not accepted"
+    fails=$((fails + 1))
+fi
+
+# SERVICES is the only command that blocks. The assertion is that it comes
+# back at all -- what it found is a property of the network the emulator is on,
+# and on SLIRP the answer is nothing.
+for case_name in browse browse1; do
+    if grep -qE "case $case_name:.*rc= *0" "$SCRIPTOUT"; then
+        note "PASS: $case_name returned from its collection window"
+    else
+        note "FAIL: $case_name did not return rc=0"
+        fails=$((fails + 1))
+    fi
+done
+
+# The type argument is mandatory, for the reason ROUTES' is: getvalue() reads
+# names until the line ends and could not tell an optional one from the next
+# variable.
+if grep -qE "case browsex:.*rc= *[1-9]" "$SCRIPTOUT"; then
+    note "PASS: SERVICES with no type is a syntax error"
+else
+    note "FAIL: SERVICES with no type was accepted"
     fails=$((fails + 1))
 fi
 

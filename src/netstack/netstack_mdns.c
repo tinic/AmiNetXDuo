@@ -449,6 +449,313 @@ LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
     return AMI_NET_OK;
 }
 
+/* -------------------------------------------------------------- browsing */
+
+/*
+ * Discovery, which is the query half of the same module and until now unused.
+ *
+ * A browse is a subscription, not a call: nx_mdns_service_continuous_query()
+ * registers a query record, the module's thread sends it and re-sends it on the
+ * RFC 6762 5.2 backoff, and answers land in the peer cache whenever they
+ * arrive. There is no completion -- a responder that boots in ten minutes will
+ * answer then. So these three do not wait for anything, and the caller decides
+ * how long it is prepared to listen; ShowNetServices and the ARexx host sleep
+ * on their own tasks, outside the bracket, because a wait taken while holding
+ * the ThreadX baton would stop the stack for the duration.
+ *
+ * type NULL asks _services._dns-sd._udp.local (RFC 6763 9), which enumerates
+ * the service TYPES present rather than instances of one. The module supports
+ * it directly rather than needing the name spelled out: a NULL type in
+ * _nx_mdns_service_continuous_query() selects that name and a PTR query, and
+ * _nx_mdns_service_lookup() resolves the answers back through the same path as
+ * an instance -- with a NULL service_name, which is how a type-only row is told
+ * from an instance below.
+ */
+
+/*
+ * How many rows one collect will walk. The peer cache holds about twenty
+ * services and nx_mdns_service_lookup() is indexed, so this is the loop's
+ * termination and not a policy about how many services a network may have.
+ */
+#define AMI_MDNS_BROWSE_MAX     64
+
+static UCHAR *ami_ns_mdns_type_arg(const char *type)
+{
+    return (type != NULL && type[0] != '\0') ? (UCHAR *)type : NX_NULL;
+}
+
+/*
+ * Is this SRV target this machine? The target is a full name -- "amiga.local"
+ * -- and nx_mdns_host_name is the label alone, so the comparison is against the
+ * first label, case-insensitively (RFC 6762 16). mDNS probing makes that label
+ * unique on the link, so matching it is enough to be sure.
+ */
+static BOOL ami_ns_mdns_is_ours(const char *target, const char *label)
+{
+    ULONG i = 0;
+
+    if (target == NULL || label == NULL || label[0] == '\0')
+        return FALSE;
+
+    while (label[i] != '\0')
+    {
+        char a = target[i];
+        char b = label[i];
+
+        if (a >= 'A' && a <= 'Z')
+            a = (char)(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z')
+            b = (char)(b - 'A' + 'a');
+
+        if (a != b)
+            return FALSE;
+
+        i++;
+    }
+
+    return (target[i] == '.' || target[i] == '\0') ? TRUE : FALSE;
+}
+
+static VOID ami_ns_mdns_copy(char *dst, ULONG size, const UCHAR *src,
+                             BOOL *truncated)
+{
+    ULONG i = 0;
+
+    if (truncated != NULL)
+        *truncated = FALSE;
+
+    if (size == 0)
+        return;
+
+    if (src != NULL)
+    {
+        while (src[i] != '\0' && i + 1 < size)
+        {
+            dst[i] = (char)src[i];
+            i++;
+        }
+
+        if (truncated != NULL && src[i] != '\0')
+            *truncated = TRUE;
+    }
+
+    dst[i] = '\0';
+}
+
+LONG netstack_mdns_browse_start(const char *type)
+{
+    AmiNetStack  *ns = ami_netstack_raw();
+    AmiNetCaller *caller;
+    UINT          status;
+
+    if (ns == NULL || !ns->ns_MdnsCreated)
+        return AMI_NET_ERR_STATE;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return AMI_NET_ERR_STATE;
+
+    status = nx_mdns_service_continuous_query(&ns->ns_Mdns, NX_NULL,
+                                              ami_ns_mdns_type_arg(type),
+                                              NX_NULL);
+
+    ami_netstack_leave_free(caller);
+
+    return (status == NX_MDNS_SUCCESS) ? AMI_NET_OK : AMI_NET_ERR_KERNEL;
+}
+
+/*
+ * Stopping is not housekeeping. An unretired query is re-sent for as long as
+ * the stack is up, and its record occupies the peer cache the answers have to
+ * land in.
+ *
+ * NX_MDNS_ERROR here means there was no such query to retire, which a caller
+ * that stops twice will see and which is not a failure worth a message.
+ */
+LONG netstack_mdns_browse_stop(const char *type)
+{
+    AmiNetStack  *ns = ami_netstack_raw();
+    AmiNetCaller *caller;
+    UINT          status;
+
+    if (ns == NULL || !ns->ns_MdnsCreated)
+        return AMI_NET_ERR_STATE;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return AMI_NET_ERR_STATE;
+
+    status = nx_mdns_service_query_stop(&ns->ns_Mdns, NX_NULL,
+                                        ami_ns_mdns_type_arg(type), NX_NULL);
+
+    ami_netstack_leave_free(caller);
+
+    return (status == NX_MDNS_SUCCESS) ? AMI_NET_OK : AMI_NET_ERR_NONAME;
+}
+
+/*
+ * What has arrived so far.
+ *
+ * nx_mdns_service_lookup() answers by index and walks both caches from the top
+ * each time, so this is quadratic -- in a cache that holds about twenty
+ * services, which is the size the loop is against.
+ *
+ * The NX_MDNS_SERVICE it fills is 600-odd bytes and this runs on an ARexx host
+ * with an 8 KB stack, so it is allocated rather than declared. It is also
+ * reused across the loop: the module memsets it per call.
+ *
+ * *available counts what the cache had, so a caller with a smaller array can
+ * tell a truncated list from a complete one. The cache is live -- the responder
+ * thread is still writing to it -- so two calls a second apart legitimately
+ * disagree, and neither is wrong.
+ */
+
+/* Both scratch buffers in one block: an NX_MDNS_SERVICE is 600-odd bytes and
+   the row it is unpacked into is another 350, which is most of an ARexx host's
+   stack between them. */
+typedef struct AmiMdnsScratch
+{
+    NX_MDNS_SERVICE ams_Raw;
+    AmiMdnsService  ams_Row;
+} AmiMdnsScratch;
+
+/*
+ * Already listed?
+ *
+ * RFC 6763 4.1.1 makes instance plus type the identity of a service, so that
+ * is the comparison. It is needed because the answers repeat: a responder
+ * re-announces, and each announcement of the same PTR lands in the cache as a
+ * record of its own -- five cameras on a real network came back as seven rows,
+ * three of them the same camera. nx_mdns_service_lookup() only merges
+ * duplicates for the meta-query, and not for a named type.
+ */
+static BOOL ami_ns_mdns_listed(const AmiMdnsService *rows, UWORD count,
+                               const AmiMdnsService *row)
+{
+    UWORD i;
+
+    for (i = 0; i < count; i++)
+    {
+        if (ami_ns_mdns_differs(rows[i].ams_Name, row->ams_Name))
+            continue;
+        if (ami_ns_mdns_differs(rows[i].ams_Type, row->ams_Type))
+            continue;
+
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+UWORD netstack_mdns_browse_collect(const char *type, AmiMdnsService *out,
+                                   UWORD max, UWORD *available)
+{
+    AmiNetStack    *ns = ami_netstack_raw();
+    AmiNetCaller   *caller;
+    AmiMdnsScratch *scratch;
+    AmiMdnsService *row;
+    UWORD           written = 0;
+    UINT            i;
+
+    if (available != NULL)
+        *available = 0;
+
+    if (ns == NULL || !ns->ns_MdnsCreated || out == NULL || max == 0)
+        return 0;
+
+    scratch = (AmiMdnsScratch *)ami_alloc_flags((ULONG)sizeof(AmiMdnsScratch),
+                                                MEMF_PUBLIC | MEMF_CLEAR);
+    if (scratch == NULL)
+        return 0;
+
+    row = &scratch->ams_Row;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+    {
+        ami_free(scratch);
+        return 0;
+    }
+
+    /*
+     * Bounded by the index rather than by the return code alone: the cache can
+     * grow under the loop, and "keep asking until it says no more" against a
+     * cache something else is filling has no reason to end.
+     */
+    for (i = 0; i < (UINT)AMI_MDNS_BROWSE_MAX; i++)
+    {
+        NX_MDNS_SERVICE *svc = &scratch->ams_Raw;
+        BOOL             cut = FALSE;
+
+        if (nx_mdns_service_lookup(&ns->ns_Mdns, NX_NULL,
+                                   ami_ns_mdns_type_arg(type), NX_NULL, i,
+                                   svc) != NX_MDNS_SUCCESS)
+            break;
+
+        row->ams_Index   = (UWORD)svc->interface_index;
+        row->ams_Port    = svc->service_port;
+        row->ams_Address = svc->service_ipv4;
+        row->ams_TextCut = FALSE;
+
+        /*
+         * service_name is NULL for a row that came from the meta-query: the
+         * PTR pointed at "_http._tcp.local", which resolves to a type and a
+         * domain with no instance in front of them.
+         */
+        ami_ns_mdns_copy(row->ams_Name, (ULONG)sizeof(row->ams_Name),
+                         svc->service_name, NULL);
+        ami_ns_mdns_copy(row->ams_Type, (ULONG)sizeof(row->ams_Type),
+                         svc->service_type, NULL);
+        ami_ns_mdns_copy(row->ams_Host, (ULONG)sizeof(row->ams_Host),
+                         svc->service_host, NULL);
+
+        if (svc->service_text_valid)
+        {
+            ami_ns_mdns_copy(row->ams_Text, (ULONG)sizeof(row->ams_Text),
+                             svc->service_text, &cut);
+            row->ams_TextCut = cut;
+        }
+        else
+        {
+            row->ams_Text[0] = '\0';
+        }
+
+        /*
+         * Whether this is our own advertisement. The module searches the local
+         * cache before the peer cache and does not say which one answered, so
+         * it is decided by the name: a service whose host is the name this
+         * machine claimed is this machine's.
+         */
+        row->ams_Local =
+            ns->ns_MdnsClaimed
+                ? ami_ns_mdns_is_ours(row->ams_Host,
+                                      (const char *)
+                                          ns->ns_Mdns.nx_mdns_host_name)
+                : FALSE;
+
+        if (ami_ns_mdns_listed(out, written, row))
+            continue;
+
+        /*
+         * Past the caller's array the row is still counted, so a list that
+         * had to stop can say so. It cannot be compared against for the
+         * duplicate test, so the count past `max` is a lower bound.
+         */
+        if (written < max)
+            out[written] = *row;
+
+        written++;
+    }
+
+    ami_netstack_leave_free(caller);
+    ami_free(scratch);
+
+    if (available != NULL)
+        *available = written;
+
+    return (written < max) ? written : max;
+}
+
 /* -------------------------------------------------------------- public API */
 
 const char *netstack_mdns_hostname(VOID)

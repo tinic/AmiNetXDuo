@@ -87,6 +87,7 @@ Configuration follows Roadshow's layout — `DEVS:NetInterfaces/<name>`,
 | `NetSetup` | set up an interface by answering questions -- start here |
 | `AddNetInterface`, `Online`, `Offline` | bring an interface up and take it down |
 | `ShowNetStatus`, `netstat` | interface state, routes, connections |
+| `ShowNetServices` | what else on this network is offering something |
 | `ping`, `host` | reachability and name lookups |
 | `nslookup` | ask the DNS for one kind of record, from a server of your choosing |
 | `arp` | which machines on this network have answered, and what they are |
@@ -115,6 +116,20 @@ and is still reachable.
 It needs no separate command. `ping`, `host`, `fetch` and any older program
 that resolves a name all get it, because the lookup happens inside the resolver
 everything already uses.
+
+The same machinery finds what everything else is offering. `ShowNetServices`
+with nothing after it lists the kinds of service answering on the network, and
+naming one lists the machines behind it with their addresses and ports:
+
+```
+ShowNetServices
+ShowNetServices _http._tcp
+```
+
+Printers, NAS boxes, media players and anything running Bonjour or Avahi turn
+up without being configured anywhere. The list is what answered in a few
+seconds rather than an inventory of the network — nothing on a `.local` network
+can say when the answers have stopped coming.
 
 ## HTTPS / SSH
 

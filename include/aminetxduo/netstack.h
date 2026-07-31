@@ -403,6 +403,53 @@ LONG    netstack_resolve_reverse(ULONG addr, char *name_out, ULONG name_len,
  * what was asked for.
  */
 const char *netstack_mdns_hostname(VOID);
+
+/*
+ * The widths of one browse result.  They match NETSTATUS_SVC_*_LEN in
+ * <aminetxduo/netstatus.h>, which src/bsdsocket/netstatus.c holds them to with
+ * a _Static_assert.
+ */
+#define AMI_MDNS_SVC_NAME_LEN       64
+#define AMI_MDNS_SVC_TYPE_LEN       24
+#define AMI_MDNS_SVC_HOST_LEN       64
+#define AMI_MDNS_SVC_TXT_LEN        192
+
+/*
+ * One row of a browse, in the stack's own terms; src/bsdsocket/netstatus.c
+ * copies it into the NetStatusService a command sees.  Two structures rather
+ * than one because a field added to the published ABI must not silently change
+ * what the responder fills in.
+ *
+ * ams_Name empty means the row is a service type from the DNS-SD meta-query,
+ * with no instance behind it yet.
+ */
+typedef struct AmiMdnsService
+{
+    UWORD   ams_Index;                  /* interface it was heard on         */
+    UWORD   ams_Port;
+    ULONG   ams_Address;                /* host order, 0 when not known      */
+    BOOL    ams_Local;                  /* our own advertisement             */
+    BOOL    ams_TextCut;
+    char    ams_Name[AMI_MDNS_SVC_NAME_LEN];
+    char    ams_Type[AMI_MDNS_SVC_TYPE_LEN];
+    char    ams_Host[AMI_MDNS_SVC_HOST_LEN];
+    char    ams_Text[AMI_MDNS_SVC_TXT_LEN];
+} AmiMdnsService;
+
+/*
+ * Browsing.  Start registers a continuous query and returns; collect reads
+ * whatever has arrived since; stop retires the query.  `type` is a DNS-SD
+ * service type such as "_http._tcp", or NULL for the
+ * _services._dns-sd._udp.local meta-query that enumerates the types present.
+ *
+ * Each brackets itself, and none of them waits: mDNS answers arrive over
+ * seconds and there is no completion to wait for, so the caller owns the
+ * collection window -- and must not be holding the ThreadX baton across it.
+ */
+LONG    netstack_mdns_browse_start(const char *type);
+LONG    netstack_mdns_browse_stop(const char *type);
+UWORD   netstack_mdns_browse_collect(const char *type, AmiMdnsService *out,
+                                     UWORD max, UWORD *available);
 #endif
 
 #ifdef __cplusplus

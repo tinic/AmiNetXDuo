@@ -243,6 +243,13 @@ aminetxduo_add_tool(tool_whois   whois    SOURCES whois.c toolsock.c)
 # copy of ThreadX is not the one the stack is using.
 aminetxduo_add_tool(tool_sntp    sntp     SOURCES sntp.c toolsock.c)
 
+# ShowNetServices browses for mDNS services.  Config-only: it starts and stops
+# the browse through NETCTRL_MDNS_BROWSE and reads the answers through
+# NETSTATUS_SERVICES, and never touches an NX_IP -- the collection window is a
+# Delay() on its own task, which is the whole reason it does not need one.
+aminetxduo_add_tool(tool_shownetservices ShowNetServices
+    SOURCES shownetservices.c)
+
 aminetxduo_add_tool(tool_shownetstatus ShowNetStatus NX
     SOURCES shownetstatus.c ${TOOLS_DEVDIAG})
 aminetxduo_add_tool(tool_netstat       netstat       NX SOURCES netstat.c)

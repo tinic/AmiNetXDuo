@@ -68,16 +68,16 @@ extern "C" {
 
 #define AMI_NETSTATUS_MAGIC         0x414E5351UL    /* 'ANSQ' */
 /*
- * 5 since NetStatusHealth grew the memory counters. A caller and a library that
- * disagree fail every call rather than half of them, which is why the commands
- * and the library ship together.
+ * 6 since NetStatusControl grew nsc_Name for the mDNS browse. A caller and a
+ * library that disagree fail every call rather than half of them, which is why
+ * the commands and the library ship together.
  *
  * This is the compatibility mechanism for a record that grows. The size check in
  * bsd_NetStackQuery() is not: it rejects a buffer too small for the record, and
  * a caller that agrees on the version agrees on the record, so a matched caller
  * never meets it. It is there for the arrival that agreed on nothing.
  */
-#define AMI_NETSTATUS_VERSION       5
+#define AMI_NETSTATUS_VERSION       6
 
 /* Fixed widths every record shares.  Up here rather than beside the first
    record that uses one, because NetStatusSystem needs NETSTATUS_NAME_LEN and
@@ -85,6 +85,22 @@ extern "C" {
 #define NETSTATUS_NAME_LEN      32
 #define NETSTATUS_DEVICE_LEN    32
 #define NETSTATUS_MAC_SIZE      6
+
+/*
+ * The DNS-SD widths, from RFC 6763 and the mDNS module's own limits: a service
+ * type is "<sn>._tcp" with <sn> up to 15 characters, an instance name is one
+ * DNS label, a target host is a name, and a TXT record is a set of key=value
+ * strings the module hands back semicolon-separated.
+ *
+ * NETSTATUS_SVC_TXT_LEN is shorter than a TXT record may legally be. A record
+ * past it is truncated rather than dropped, and NETSTATUS_SVC_TXTCUT says so,
+ * because a printer that publishes 400 bytes of options is still a printer and
+ * the interesting keys are at the front.
+ */
+#define NETSTATUS_SVC_NAME_LEN  64
+#define NETSTATUS_SVC_TYPE_LEN  24
+#define NETSTATUS_SVC_HOST_LEN  64
+#define NETSTATUS_SVC_TXT_LEN   192
 
 /*
  * The library revision that first had these slots, and the one check a caller
@@ -120,6 +136,7 @@ extern "C" {
 #define NETSTATUS_ROUTES6       9   /* NetStatusRoute6[]                     */
 #define NETSTATUS_NEIGHBOURS   10   /* NetStatusNeighbour[]                  */
 #define NETSTATUS_HEALTH       11   /* one NetStatusHealth                   */
+#define NETSTATUS_SERVICES     12   /* NetStatusService[]                    */
 
 /*
  * Every buffer starts with this. The caller fills nsh_Magic and nsh_Version;
@@ -588,6 +605,49 @@ typedef struct NetStatusSocket
 #define NETSTATUS_TCP_TIMED_WAIT    10
 #define NETSTATUS_TCP_LAST_ACK      11
 
+/* ------------------------------------------------- NETSTATUS_SERVICES --
+ *
+ * What a browse has heard so far. This is a read of the mDNS cache, not a
+ * question put on the wire: NETCTRL_MDNS_BROWSE starts the query, answers
+ * arrive on the responder's own thread over the following seconds, and this
+ * selector says what has landed by the time it is called. Calling it twice
+ * gives two different answers, and neither is "everything on the network" --
+ * mDNS has no end of results.
+ *
+ * It answers with the WHOLE cache, of every type, and not with the type the
+ * caller last browsed for: one cache, any number of readers, so a filter here
+ * would depend on who else was running. Match on nsv_Type.
+ *
+ * Empty on a build without AMINETXDUO_MDNS, which NETSTATUS_SYS_MDNS reports.
+ */
+
+/* nsv_Flags */
+/*
+ * Clear means this row is a service TYPE and nothing more: the answer came
+ * from the _services._dns-sd._udp.local enumeration, so something on the
+ * network offers that type but no instance of it has been asked for yet.
+ * nsv_Name, nsv_Host, nsv_Address, nsv_Port and nsv_Text are then empty.
+ */
+#define NETSTATUS_SVC_INSTANCE  0x0001
+#define NETSTATUS_SVC_ADDRESS   0x0002  /* nsv_Address is an answer, not zero */
+#define NETSTATUS_SVC_TXT       0x0004  /* a TXT record was seen              */
+#define NETSTATUS_SVC_TXTCUT    0x0008  /* and it did not fit nsv_Text        */
+/* This machine's own advertisement, read back out of the local cache. */
+#define NETSTATUS_SVC_LOCAL     0x0010
+
+typedef struct NetStatusService
+{
+    UWORD   nsv_Flags;
+    UWORD   nsv_Index;                  /* interface it was heard on         */
+    UWORD   nsv_Port;                   /* SRV port, host order              */
+    UWORD   nsv_Pad;
+    ULONG   nsv_Address;                /* IPv4, host order                  */
+    char    nsv_Name[NETSTATUS_SVC_NAME_LEN];   /* instance, RFC 6763 4.1.1  */
+    char    nsv_Type[NETSTATUS_SVC_TYPE_LEN];   /* "_http._tcp"              */
+    char    nsv_Host[NETSTATUS_SVC_HOST_LEN];   /* SRV target, with .local   */
+    char    nsv_Text[NETSTATUS_SVC_TXT_LEN];    /* "key=value;key=value"     */
+} NetStatusService;
+
 /* ------------------------------------------------------------- control --
  *
  * NetStackControl() is the mutating half, on a separate LVO from the reading
@@ -641,6 +701,27 @@ typedef struct NetStatusSocket
 #define NETCTRL_ND_ADD         12   /* nsc_Destination6, nsc_HwAddress, Index */
 #define NETCTRL_ND_DELETE      13   /* nsc_Destination6                      */
 
+/*
+ * The mDNS browse pair, nsc_Name naming a service type such as "_http._tcp".
+ * An empty nsc_Name is the RFC 6763 9 meta-query: it asks what service types
+ * exist rather than for instances of one, and is how a browser finds out what
+ * there is to browse for.
+ *
+ * BROWSE registers a continuous query (RFC 6762 5.2, exponential backoff) and
+ * returns at once -- it does not wait for an answer, because mDNS has none to
+ * wait for. The caller sleeps for as long as it is prepared to wait, then reads
+ * NETSTATUS_SERVICES.
+ *
+ * BROWSE_STOP retires the query. A caller that forgets leaves the machine
+ * asking the network the same question every few minutes for as long as the
+ * stack is up, so it is not optional; the query also occupies the peer cache
+ * that the answers have to land in.
+ *
+ * ENOSYS on a build without AMINETXDUO_MDNS.
+ */
+#define NETCTRL_MDNS_BROWSE      14 /* nsc_Name, empty for the meta-query    */
+#define NETCTRL_MDNS_BROWSE_STOP 15 /* nsc_Name, the same one                */
+
 typedef struct NetStatusControl
 {
     ULONG   nsc_Magic;                  /* in: AMI_NETSTATUS_MAGIC           */
@@ -654,6 +735,7 @@ typedef struct NetStatusControl
     ULONG   nsc_Destination6[4];        /* host byte order, four words       */
     ULONG   nsc_Gateway6[4];            /* all zero = no next hop            */
     ULONG   nsc_PrefixLength;
+    char    nsc_Name[NETSTATUS_SVC_TYPE_LEN];
     ULONG   nsc_Reserved[4];
 } NetStatusControl;
 

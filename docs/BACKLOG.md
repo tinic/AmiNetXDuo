@@ -53,6 +53,23 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   reproduced locally — our emulator cannot reach the packet rate.
 - **We ingest 816 packets of 9.7M under saturation**, readers suspended. Found by
   the flood rig; nothing is chasing it.
+- **`ShowNetServices` cannot browse every type at once.** With no type it runs the
+  RFC 6763 §9 meta-query and lists the types present; listing every instance of
+  every type would mean starting one continuous query per type found. They would
+  all run concurrently, so it costs one more window rather than one per type — but
+  it multiplies what lands in the peer cache, and the cache size was already the
+  thing that decided whether an answer had an address in it or not.
+- **A browse answer with no address is not chased.** When the PTR and SRV arrive
+  without the A record in the same response, the row prints the target host and
+  "no address" — the vendored module fills `service_ipv4` only from an A record
+  already in the cache and never asks for one. Raising the peer cache to 32 KB
+  made it rare on the LAN it was measured against, which is a mitigation rather
+  than a fix: the right answer is to resolve the SRV target when the A is absent.
+- **Nothing ages entries out of the mDNS peer cache from our side.** A service
+  that has gone away stays listed until its TTL expires or the cache evicts it,
+  so two browses a minute apart can report a machine that has since been switched
+  off. RFC 6762 §10.1 goodbye packets are honoured by the module; a machine that
+  is unplugged sends none.
 
 ## Decided against — do not "fix"
 

@@ -97,6 +97,21 @@ _Static_assert(NETSTATUS_TCP_LAST_ACK     == NX_TCP_LAST_ACK,      "TCP state AB
 /* The header is copied by hand below; its size is part of the ABI. */
 _Static_assert(sizeof(NetStatusHeader) == 16, "NetStatusHeader ABI");
 
+#ifdef AMINETXDUO_MDNS
+/*
+ * ns_fill_services() copies field for field between the two, so a width that
+ * drifted would silently truncate a name rather than fail to build.
+ */
+_Static_assert(NETSTATUS_SVC_NAME_LEN == AMI_MDNS_SVC_NAME_LEN, "service ABI");
+_Static_assert(NETSTATUS_SVC_TYPE_LEN == AMI_MDNS_SVC_TYPE_LEN, "service ABI");
+_Static_assert(NETSTATUS_SVC_HOST_LEN == AMI_MDNS_SVC_HOST_LEN, "service ABI");
+_Static_assert(NETSTATUS_SVC_TXT_LEN  == AMI_MDNS_SVC_TXT_LEN,  "service ABI");
+
+/* NETCTRL_MDNS_BROWSE carries a service type in the same width. */
+_Static_assert(sizeof(((NetStatusControl *)0)->nsc_Name)
+                   == NETSTATUS_SVC_TYPE_LEN, "service ABI");
+#endif
+
 /* ------------------------------------------------------------- plumbing -- */
 
 static VOID ns_zero(APTR mem, ULONG len)
@@ -1050,6 +1065,104 @@ static VOID ns_fill_sockets(NX_IP *ip, NsWriter *w)
     }
 }
 
+#ifdef AMINETXDUO_MDNS
+/*
+ * The mDNS service cache, as of now: everything in it, of every type.
+ *
+ * Not the type the caller last browsed for. There is one cache and any number
+ * of commands that might be reading it, so a selector that answered "the
+ * current browse" would answer a different question depending on who else was
+ * running. The caller knows what it asked for and filters on nsv_Type, and
+ * gets a stable meaning out of the selector in exchange: this is the cache.
+ *
+ * Outside the bracket, unlike every other walk here: netstack_mdns_browse_
+ * collect() takes its own, and it allocates -- an NX_MDNS_SERVICE is 600-odd
+ * bytes and belongs on neither this stack nor the module's. Rule 2 at the top
+ * of this file says no allocation while adopted, and this is how it is kept.
+ *
+ * The rows are read into one array and copied out, rather than filled through
+ * the NsWriter, because the count is not known until the walk has run and a
+ * caller with a small buffer must still be told what it was.
+ */
+#define NS_SERVICE_MAX      48
+
+static VOID ns_fill_services(NsWriter *w)
+{
+    AmiMdnsService *rows;
+    UWORD           count;
+    UWORD           available = 0;
+    UWORD           i;
+
+    rows = (AmiMdnsService *)ami_alloc(
+               (ULONG)sizeof(AmiMdnsService) * NS_SERVICE_MAX);
+    if (rows == NULL)
+        return;
+
+    count = netstack_mdns_browse_collect(NULL, rows, NS_SERVICE_MAX,
+                                         &available);
+
+    for (i = 0; i < count; i++)
+    {
+        const AmiMdnsService *in  = &rows[i];
+        NetStatusService     *out = (NetStatusService *)ns_writer_next(w);
+
+        if (out == NULL)
+            continue;
+
+        out->nsv_Index   = in->ams_Index;
+        out->nsv_Port    = in->ams_Port;
+        out->nsv_Address = in->ams_Address;
+
+        if (in->ams_Name[0] != '\0')
+            out->nsv_Flags |= NETSTATUS_SVC_INSTANCE;
+        if (in->ams_Address != 0UL)
+            out->nsv_Flags |= NETSTATUS_SVC_ADDRESS;
+        if (in->ams_Text[0] != '\0')
+            out->nsv_Flags |= NETSTATUS_SVC_TXT;
+        if (in->ams_TextCut)
+            out->nsv_Flags |= NETSTATUS_SVC_TXTCUT;
+        if (in->ams_Local)
+            out->nsv_Flags |= NETSTATUS_SVC_LOCAL;
+
+        ns_copy_name(out->nsv_Name, sizeof(out->nsv_Name), in->ams_Name);
+        ns_copy_name(out->nsv_Type, sizeof(out->nsv_Type), in->ams_Type);
+        ns_copy_name(out->nsv_Host, sizeof(out->nsv_Host), in->ams_Host);
+        ns_copy_name(out->nsv_Text, sizeof(out->nsv_Text), in->ams_Text);
+    }
+
+    /*
+     * What the cache held, which is larger than `count` when the cache holds
+     * more than NS_SERVICE_MAX. ns_writer_next() has counted only the rows
+     * offered to it.
+     */
+    if (available > w->available)
+        w->available = available;
+
+    ami_free(rows);
+}
+
+/*
+ * The service type a browse was asked for, terminated whatever the caller sent.
+ * Empty is the DNS-SD meta-query and comes back NULL, which is what the module
+ * wants for it. Anything else the module validates itself -- it has to assemble
+ * "<type>.local" and fails on what it cannot.
+ */
+static const char *ns_service_type(const NetStatusControl *ctl,
+                                   char buf[NETSTATUS_SVC_TYPE_LEN])
+{
+    UWORD i = 0;
+
+    while (i + 1 < NETSTATUS_SVC_TYPE_LEN && ctl->nsc_Name[i] != '\0')
+    {
+        buf[i] = ctl->nsc_Name[i];
+        i++;
+    }
+    buf[i] = '\0';
+
+    return (i == 0) ? NULL : buf;
+}
+#endif /* AMINETXDUO_MDNS */
+
 /* ---------------------------------------------------------- NetStackQuery */
 
 /*
@@ -1110,6 +1223,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         case NETSTATUS_ROUTES6:     need = 0;                        break;
         case NETSTATUS_NEIGHBOURS:  need = 0;                        break;
         case NETSTATUS_HEALTH:      need = sizeof(NetStatusHealth);  break;
+        case NETSTATUS_SERVICES:    need = 0;                        break;
         default:                    return bsd_fail(SocketBase, AMI_EINVAL);
     }
 
@@ -1129,6 +1243,21 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         ns_writer_init(&w, hdr, size, NETSTATUS_HEALTH,
                        sizeof(NetStatusHealth));
         ns_fill_health((NetStatusHealth *)ns_writer_next(&w));
+        ns_writer_finish(&w);
+        return (LONG)hdr->nsh_Count;
+    }
+
+    /*
+     * Also outside the bracket, for the reason ns_fill_services() gives: it
+     * takes its own and allocates inside it.
+     */
+    if (what == NETSTATUS_SERVICES)
+    {
+        ns_writer_init(&w, hdr, size, NETSTATUS_SERVICES,
+                       sizeof(NetStatusService));
+#ifdef AMINETXDUO_MDNS
+        ns_fill_services(&w);
+#endif
         ns_writer_finish(&w);
         return (LONG)hdr->nsh_Count;
     }
@@ -1279,6 +1408,37 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
         case NETCTRL_INTERFACE_DOWN:
             return (netstack_interface_down(ctl->nsc_Index) == AMI_NET_OK)
                        ? 0 : bsd_fail(SocketBase, AMI_ENXIO);
+
+        /*
+         * The browse pair, outside the bracket for the same reason: both take
+         * their own, and neither goes near an NX_IP -- so neither needs the
+         * netstack_ip() check the rest of this function opens with, and both
+         * answer on a stack whose interfaces are all down.
+         */
+        case NETCTRL_MDNS_BROWSE:
+        case NETCTRL_MDNS_BROWSE_STOP:
+        {
+#ifdef AMINETXDUO_MDNS
+            char        buf[NETSTATUS_SVC_TYPE_LEN];
+            const char *type = ns_service_type(ctl, buf);
+            LONG        st;
+
+            st = (op == NETCTRL_MDNS_BROWSE)
+                     ? netstack_mdns_browse_start(type)
+                     : netstack_mdns_browse_stop(type);
+
+            if (st == AMI_NET_OK)
+                return 0;
+
+            /* No responder running, against a query the module would not take
+               or, for STOP, one that was not there to retire. */
+            return bsd_fail(SocketBase,
+                            (st == AMI_NET_ERR_STATE) ? AMI_ENETDOWN
+                                                      : AMI_EINVAL);
+#else
+            return bsd_fail(SocketBase, AMI_ENOSYS);
+#endif
+        }
 
         default:
             break;

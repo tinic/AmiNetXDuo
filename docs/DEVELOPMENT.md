@@ -622,6 +622,26 @@ templates (`awk -v TARGETTI=C -f config_var.awk variables.src`),
 `kern/amiga_config.c` for the parser and error strings, `kern/amiga_cstat.c` for
 CONNECTIONS, ICMPHIST and ROUTES, `kern/amiga_netdb.c` for ADD and RESET.
 
+One name is ours: `QUERY SERVICES <type|ALL> [<seconds>]`, appended to the
+variable space so every index below it keeps the value `FindArg()` has always
+returned. AmiTCP had no service discovery, so there was nothing to copy. It is
+the only command here that blocks -- an mDNS browse is a subscription with no
+completion, so the verb holds a collection window open and returns what
+answered. The window is three seconds by default and capped at thirty, because
+the host services one message at a time: a script that browses stops the port
+for the duration, and that is a cost the caller has to be able to bound. The
+wait is `Delay()` on the host's own task with no ThreadX bracket held;
+`netstack_mdns_browse_start()` and `_collect()` each take and release their
+own, so nothing waits while holding the baton and nothing waits on a `MsgPort`
+belonging to another Process (544398f).
+
+The answer is one service per line, TAB between fields -- instance, type,
+host, address, port, TXT -- rather than the fixed-width hex the AmiTCP answers
+use. RFC 6763 §4.1.1 instance names are free text with spaces in them, so
+positional parsing cannot survive contact with a real network. A line whose
+instance is empty is a service *type* from the meta-query with no instance
+behind it.
+
 ### What the corpus actually sends
 
 Re-scanned `comm/tcp` + `comm/net` -- 1,024 archives, each downloaded,

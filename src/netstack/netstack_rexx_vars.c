@@ -7,6 +7,10 @@
  * kern/amiga_cstat.c for the three formatted answers (CONNECTIONS, ICMPHIST,
  * ROUTES). Nothing here is guessed from documentation.
  *
+ * One name is not AmiTCP's: SERVICES, which browses for mDNS services and is
+ * documented at ami_rx_services(). AmiTCP had no discovery to have a name for,
+ * so there was nothing to copy.
+ *
  * Two programs in the corpus read the variable space rather than just sending
  * KILL (docs/DEVELOPMENT.md has the whole tally). AmiTCP's own `netstat` asks
  * for, in this order:
@@ -70,7 +74,13 @@ static const char ami_rx_vars[] =
     "NTH=NTHBASE,DBSANA=DEBUGSANA,DBICMP=DEBUGICMP,DBIP=DEBUGIP,"
     "GTW=GATEWAY,REDIR=IPSENDREDIRECTS,USENS=USENAMESERVER,"
     "ULO=USELOOPBACK,TCPSND=TCP_SENDSPACE,TCPRCV=TCP_RECVSPACE,"
-    "CON=CONSOLENAME,LOGF=LOGFILENAME";
+    "CON=CONSOLENAME,LOGF=LOGFILENAME,"
+    /*
+     * Ours, and the only name here that is not AmiTCP's -- appended so every
+     * index above it keeps the value FindArg() has always returned for it.
+     * AmiTCP had no service discovery to have a name for; see ami_rx_services().
+     */
+    "SVC=SERVICES";
 
 enum
 {
@@ -100,6 +110,7 @@ enum
     RXV_TCP_RECVSPACE,
     RXV_CONSOLENAME,
     RXV_LOGFILENAME,
+    RXV_SERVICES,
     RXV_COUNT
 };
 
@@ -210,7 +221,12 @@ static const AmiRxVarDef ami_rx_vardefs[RXV_COUNT] =
     /* TCP_SENDSPACE       */ { NULL,                  0,              FALSE },
     /* TCP_RECVSPACE       */ { NULL,                  0,              FALSE },
     /* CONSOLENAME         */ { NULL,                  0,              FALSE },
-    /* LOGFILENAME         */ { NULL,                  0,              FALSE }
+    /* LOGFILENAME         */ { NULL,                  0,              FALSE },
+#ifdef AMINETXDUO_MDNS
+    /* SERVICES            */ { NULL,                  0,              TRUE  }
+#else
+    /* SERVICES            */ { NULL,                  0,              FALSE }
+#endif
 };
 
 /* ------------------------------------------------------------- the reply -- */
@@ -993,6 +1009,212 @@ static LONG ami_rx_routes(NX_IP *ip, struct CSource *args, const char **errstr,
     return rc;
 }
 
+/* -------------------------------------------------------------- services -- */
+
+#ifdef AMINETXDUO_MDNS
+
+/*
+ * QUERY SERVICES <type|ALL> [<seconds>]
+ *
+ * ALL is the DNS-SD meta-query: it answers with the service TYPES something on
+ * the network offers, which is what a script asks first when it does not
+ * already know what to look for. A type -- "_http._tcp" -- answers with the
+ * instances of it.
+ *
+ * The argument is mandatory for the reason ROUTES' is: getvalue() reads names
+ * until the line ends, so an optional first argument could not be told from the
+ * next variable. The seconds are optional because they can: a number is not a
+ * variable name, so the CSource is rewound when the next item is not one.
+ *
+ * WHY THIS BLOCKS
+ *
+ *   mDNS answers arrive over seconds and a browse never completes, so there is
+ *   nothing to return immediately and nothing to poll for that would not be the
+ *   same wait moved into the script. The alternative -- one verb to start and
+ *   another to read -- makes every caller write the sleep itself and leaves a
+ *   query running when a script exits between the two.
+ *
+ *   The host services one message at a time and always has, so a script that
+ *   sends this stops the port for the window. That is why the window is capped
+ *   and why the default is short: three seconds is longer than a responder on
+ *   the same wire takes to answer and short enough that a second script waiting
+ *   behind this one does not read as a hang.
+ *
+ *   The wait is Delay() on the host's own task, taken with no ThreadX bracket
+ *   held -- browse_start() and browse_collect() each take and release their
+ *   own. A wait taken while adopted would stop the whole stack for the window,
+ *   and a handshake through a MsgPort here is the shape of the death-port hang
+ *   this file already fixed once.
+ */
+
+#define RX_SVC_MAX          48
+#define RX_SVC_SECONDS      3
+#define RX_SVC_SECONDS_MAX  30
+
+/* Instance TAB type TAB host TAB address TAB port TAB txt, one per line.  TABs
+   rather than the fixed-width hex the AmiTCP answers use, because an instance
+   name is free text with spaces in it and positional parsing cannot survive
+   that.  A type-only row has an empty instance, host and address and a port of
+   0.  Roughly: 64 + 24 + 64 + 16 + 6 + 192 + 6 separators. */
+#define RX_SVCLEN           380
+
+static BOOL ami_rx_put_dotted(AmiRxReply *r, ULONG addr)
+{
+    return ami_rx_put_dec(r, (addr >> 24) & 0xFFUL)
+           && ami_rx_put(r, ".", 1)
+           && ami_rx_put_dec(r, (addr >> 16) & 0xFFUL)
+           && ami_rx_put(r, ".", 1)
+           && ami_rx_put_dec(r, (addr >> 8) & 0xFFUL)
+           && ami_rx_put(r, ".", 1)
+           && ami_rx_put_dec(r, addr & 0xFFUL);
+}
+
+/*
+ * A TXT record is whatever the responder put in it. Control characters would
+ * break the line format this answer is parsed with, and a TAB inside a field
+ * would shift every field after it, so both become '.' -- the record is still
+ * legible and the row still parses.
+ */
+static BOOL ami_rx_put_txt(AmiRxReply *r, const char *text)
+{
+    LONG i;
+
+    for (i = 0; text[i] != '\0'; i++)
+    {
+        char c = text[i];
+
+        if (c < ' ' || c == 0x7F)
+            c = '.';
+
+        if (!ami_rx_put(r, &c, 1))
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
+/* The optional collection window. Digits only, and the CSource is left where
+   it was when the next item is not one -- it is the next variable then. */
+static ULONG ami_rx_svc_seconds(struct CSource *args)
+{
+    char  buf[RX_KEYWORDLEN];
+    LONG  mark = args->CS_CurChr;
+    ULONG value = 0;
+    LONG  i;
+
+    buf[0] = '\0';
+
+    if (ReadItem((STRPTR)buf, (LONG)sizeof(buf), args) <= 0)
+    {
+        args->CS_CurChr = mark;
+        return RX_SVC_SECONDS;
+    }
+
+    for (i = 0; buf[i] != '\0'; i++)
+    {
+        if (buf[i] < '0' || buf[i] > '9')
+        {
+            args->CS_CurChr = mark;
+            return RX_SVC_SECONDS;
+        }
+
+        value = (value * 10UL) + (ULONG)(buf[i] - '0');
+
+        if (value > RX_SVC_SECONDS_MAX)
+            return RX_SVC_SECONDS_MAX;
+    }
+
+    return (value == 0UL) ? RX_SVC_SECONDS : value;
+}
+
+static LONG ami_rx_services(struct CSource *args, const char **errstr,
+                            AmiRxReply *r)
+{
+    char            buf[RX_KEYWORDLEN];
+    AmiMdnsService *rows;
+    const char     *type;
+    ULONG           seconds;
+    UWORD           count;
+    UWORD           i;
+    LONG            rc = RETURN_OK;
+
+    buf[0] = '\0';
+
+    if (ReadItem((STRPTR)buf, (LONG)sizeof(buf), args) <= 0)
+    {
+        *errstr = ami_rx_err_syntax;
+        return RETURN_ERROR;
+    }
+
+    /* ALL is the meta-query, which the module asks for with no type at all. */
+    type = (FindArg((CONST_STRPTR)"ALL", (CONST_STRPTR)buf) == 0) ? NULL : buf;
+
+    seconds = ami_rx_svc_seconds(args);
+
+    rows = AllocVec((ULONG)sizeof(AmiMdnsService) * RX_SVC_MAX, MEMF_ANY);
+    if (rows == NULL)
+    {
+        *errstr = ami_rx_err_memory;
+        return RETURN_FAIL;
+    }
+
+    if (netstack_mdns_browse_start(type) != AMI_NET_OK)
+    {
+        FreeVec(rows);
+        *errstr = ami_rx_err_state;
+        return RETURN_ERROR;
+    }
+
+    Delay(seconds * 50UL);
+
+    count = netstack_mdns_browse_collect(type, rows, RX_SVC_MAX, NULL);
+
+    (VOID)netstack_mdns_browse_stop(type);
+
+    if (count != 0
+        && !ami_rx_reply_room(r, r->rr_Used + (LONG)count * RX_SVCLEN + 1))
+    {
+        FreeVec(rows);
+        *errstr = ami_rx_err_memory;
+        return RETURN_FAIL;
+    }
+
+    for (i = 0; i < count; i++)
+    {
+        const AmiMdnsService *e = &rows[i];
+        BOOL                  ok;
+
+        ok = ami_rx_put_str(r, e->ams_Name)
+             && ami_rx_put(r, "\t", 1)
+             && ami_rx_put_str(r, e->ams_Type)
+             && ami_rx_put(r, "\t", 1)
+             && ami_rx_put_str(r, e->ams_Host)
+             && ami_rx_put(r, "\t", 1);
+
+        if (ok && e->ams_Address != 0UL)
+            ok = ami_rx_put_dotted(r, e->ams_Address);
+
+        ok = ok
+             && ami_rx_put(r, "\t", 1)
+             && ami_rx_put_dec(r, (ULONG)e->ams_Port)
+             && ami_rx_put(r, "\t", 1)
+             && ami_rx_put_txt(r, e->ams_Text)
+             && ami_rx_put(r, "\n", 1);
+
+        if (!ok)
+        {
+            *errstr = ami_rx_err_too_long;
+            rc      = RETURN_ERROR;
+            break;
+        }
+    }
+
+    FreeVec(rows);
+
+    return rc;
+}
+#endif /* AMINETXDUO_MDNS */
+
 /* --------------------------------------------------------------- scalars -- */
 
 /* AmiTCP's boolean_enum, and its answer is the first name of the pair. */
@@ -1121,9 +1343,9 @@ LONG ami_rx_getvalue(struct CSource *args, const char **errstr, AmiRxReply *r)
         }
 
         /*
-         * The three formatted answers write the whole reply themselves and are
-         * not space-separated from a neighbour, which is AmiTCP's VAR_FUNC
-         * path: it wrote through the same CSource and skipped the separator.
+         * The formatted answers write the whole reply themselves and are not
+         * space-separated from a neighbour, which is AmiTCP's VAR_FUNC path:
+         * it wrote through the same CSource and skipped the separator.
          */
         switch (var)
         {
@@ -1156,6 +1378,18 @@ LONG ami_rx_getvalue(struct CSource *args, const char **errstr, AmiRxReply *r)
                 any = TRUE;
                 continue;
             }
+
+#ifdef AMINETXDUO_MDNS
+            case RXV_SERVICES:
+            {
+                LONG rc = ami_rx_services(args, errstr, r);
+
+                if (rc != RETURN_OK)
+                    return rc;
+                any = TRUE;
+                continue;
+            }
+#endif
 
             default:
                 break;

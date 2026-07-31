@@ -73,6 +73,11 @@ JOBS="${AMINETXDUO_CI_JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl 
 CROSS_CONFIGS=(
     "default:"
     "noipv6:-DAMINETXDUO_IPV6=OFF"
+    # mDNS off is a real code path and not only a smaller library: the browse
+    # reaches src/netstack through calls that are not compiled here, and
+    # ShowNetServices and the ARexx host's SERVICES both have to build and
+    # answer sensibly without them.
+    "nomdns:-DAMINETXDUO_MDNS=OFF"
     "notls:-DAMINETXDUO_TLS=OFF"
     "noasm:-DAMINETXDUO_CRYPTO68K_ASM=OFF"
     "m68000:-DAMINETXDUO_CPU=68000"

@@ -82,19 +82,32 @@
  * advertised and ami_ns_mdns_services() says which.
  *
  * The peer cache holds what has been learnt; full means the oldest record is
- * evicted, nothing fails.  Every .local lookup lands here, so it is sized
- * against the same workload as AMI_DNS_CACHE_BYTES -- one or two names per
- * shell session, reverse lookups behind `netstat` and ShowNetStatus NAMES
- * bounded by TOOL_MAX_SOCK (32) -- and undersizing costs only a query on the
- * wire.
+ * evicted, nothing fails.  Two workloads land here.  Name resolution is the
+ * small one -- one or two names per shell session, reverse lookups behind
+ * `netstat` and ShowNetStatus NAMES bounded by TOOL_MAX_SOCK (32), and
+ * undersizing costs only a query on the wire.
+ *
+ * Browsing is the one that sizes it.  ShowNetServices holds a continuous query
+ * open (itself a record here) and every instance it hears about arrives as
+ * four -- PTR, SRV, TXT and A -- plus the names they point at, around 400
+ * bytes together.
+ *
+ * 32 KB, and it is measured rather than chosen.  A browse of one ordinary
+ * house LAN -- five cameras, two printers, a 3D printer, an amplifier, a Hue
+ * bridge, several Macs -- turns up over twenty service types and more than
+ * thirty instances.  At 2 KB most of them were evicted before the window
+ * closed; at 8 KB they were listed but two thirds of them printed "no address",
+ * because the PTR and SRV records survived and the A record they pointed at
+ * had been thrown out from under them.  A cache that is too small does not
+ * report a smaller network, which would be honest -- it reports the same
+ * network with the answers hollowed out.
  *
  * Both are inline in the AmiNetStack for the reason ns_DnsCache is: identical
- * lifetime, small, and an allocation that could fail would need a "no mDNS"
- * path.  Together they are 6 KB.
+ * lifetime, and an allocation that could fail would need a "no mDNS" path.
  */
 #define AMI_MDNS_LOCAL_CACHE_BYTES  \
     (1024 + AMI_CFG_MAX_SD_SERVICES * 384)
-#define AMI_MDNS_PEER_CACHE_BYTES   2048
+#define AMI_MDNS_PEER_CACHE_BYTES   32768
 #endif
 
 /* How long netstack_startup() blocks waiting for the first address. */
@@ -268,6 +281,7 @@ VOID ami_netstack_mdns_stop(AmiNetStack *ns);
 BOOL ami_netstack_mdns_is_local(const char *name);
 LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
                                ULONG timeout_ticks);
+/* The browse is public to bsdsocket.library; see <aminetxduo/netstack.h>. */
 #endif
 
 /* ------------------------------------------------------------ AMITCP port --
