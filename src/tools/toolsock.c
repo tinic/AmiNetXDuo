@@ -17,6 +17,17 @@
  * `_clob_*` dummies bound to those registers and listed as outputs are the
  * NDK's own idiom, from inline/macros.h.
  *
+ * Hazard, the other half: nothing may be CALLED between the first register
+ * variable and the `jsr`.  A local register variable lives in its hard
+ * register from its initialiser onwards, and GCC does not reload it after a
+ * call, so a call in a later initialiser returns having clobbered d0/d1/a0/a1
+ * -- the earlier arguments -- and the library is entered with the callee's
+ * leftovers.  bind(), connect() and sendto() each computed the sockaddr
+ * length that way.  At -Os tool_sock_len() inlines and nothing shows; at -O0
+ * it is a real `jsr` and sendto() went to the library with d0 holding 16
+ * instead of the descriptor, which the stack answered with EBADF.  Compute
+ * anything that needs a call into a plain local FIRST.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -102,10 +113,12 @@ static LONG tool_sock_len(const ToolSockAddrAny *sa)
 /* LVO -0x024 */
 LONG tool_sock_bind(struct Library *base, LONG s, const ToolSockAddrAny *sa)
 {
+    LONG salen = tool_sock_len(sa);     /* a call, so it goes first */
+
     register struct Library *a6  __asm("a6") = base;
     register LONG            d0  __asm("d0") = s;
     register CONST_APTR      a0  __asm("a0") = (CONST_APTR)sa;
-    register LONG            d1  __asm("d1") = tool_sock_len(sa);
+    register LONG            d1  __asm("d1") = salen;
     register LONG            res __asm("d0");
     register LONG _clob_d1 __asm("d1");
     register LONG _clob_a0 __asm("a0");
@@ -156,10 +169,12 @@ LONG tool_sock_accept(struct Library *base, LONG s, ToolSockAddrAny *from)
 /* LVO -0x036 */
 LONG tool_sock_connect(struct Library *base, LONG s, const ToolSockAddrAny *sa)
 {
+    LONG salen = tool_sock_len(sa);
+
     register struct Library *a6  __asm("a6") = base;
     register LONG            d0  __asm("d0") = s;
     register CONST_APTR      a0  __asm("a0") = (CONST_APTR)sa;
-    register LONG            d1  __asm("d1") = tool_sock_len(sa);
+    register LONG            d1  __asm("d1") = salen;
     register LONG            res __asm("d0");
     register LONG _clob_d1 __asm("d1");
     register LONG _clob_a0 __asm("a0");
@@ -175,13 +190,15 @@ LONG tool_sock_connect(struct Library *base, LONG s, const ToolSockAddrAny *sa)
 LONG tool_sock_sendto(struct Library *base, LONG s, const void *buf, LONG len,
                       const ToolSockAddrAny *to)
 {
+    LONG tolen = tool_sock_len(to);
+
     register struct Library *a6  __asm("a6") = base;
     register LONG            d0  __asm("d0") = s;
     register CONST_APTR      a0  __asm("a0") = (CONST_APTR)buf;
     register LONG            d1  __asm("d1") = len;
     register LONG            d2  __asm("d2") = 0;
     register CONST_APTR      a1  __asm("a1") = (CONST_APTR)to;
-    register LONG            d3  __asm("d3") = tool_sock_len(to);
+    register LONG            d3  __asm("d3") = tolen;
     register LONG            res __asm("d0");
     register LONG _clob_d1 __asm("d1");
     register LONG _clob_a0 __asm("a0");
