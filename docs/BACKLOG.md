@@ -24,15 +24,23 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   leaks a reader stack when a driver ignores `AbortIO` (Commodore's
   a2065.device 2.16 does), which emulation will not reproduce. Raised in
   external review 2026-07-31.
-- **`bind()` outbound source selection is not done.** Inbound is: a completed
-  TCP connection that arrived on another interface is reset in `bsd_accept()`,
-  and a datagram that did is released in `bsd_recv_udp()`, both through
-  `bsd_bind_wants_interface()`, so `nc -l 127.0.0.1` means what it says and a
-  specific address is no longer refused. What is left is the send direction --
-  a socket bound to one address should send *from* it, and today NetX picks by
-  route. `nxd_udp_socket_source_send()` is already wired for RFC 4007 zones
-  and takes the same kind of index, so UDP is small; TCP has no source-send
-  equivalent and needs a decision, the same one RFC 4007 needs.
+- **TCP cannot be made to send from a bound address, only checked.** The rest
+  of `bind()` source selection is done: `bsd_source_select()` (socket.c) maps a
+  bound address or an RFC 4007 zone to the index `nxd_udp_socket_source_send()`
+  and `nxd_ip_raw_packet_source_send()` take, so UDP and raw leave from the
+  address that was asked for. TCP has no such call --
+  `_nxd_tcp_client_socket_connect()` runs its own route lookup with no hint and
+  sends the SYN before it returns -- so `connect()` runs the same two lookups
+  first and refuses (`EADDRNOTAVAIL`) when the answer is not the bound source.
+  What that costs is the case BSD allows and we do not: source on one
+  interface, route out of the other. Closing it means a
+  `nxd_tcp_socket_source_send()` in the NetX fork, which is a submodule change
+  and a fourth upstream PR.
+
+  Not verified on hardware or in emulation: it needs two interfaces and the lab
+  guest has one. Single-interface paths are unchanged by construction (one
+  addressed interface means the route agrees with the bind), which is what the
+  conformance suite covers.
 - **IPv4 multicast is absent** -- no `IP_ADD_MEMBERSHIP`, `IP_MULTICAST_IF`,
   `IP_MULTICAST_TTL`, `IP_MULTICAST_LOOP`, no `ip_mreq`. Reopened 2026-07-31:
   it had been closed on the grounds that "nothing in the tree needs the
@@ -72,24 +80,21 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   instead of the public lookup. Not worth that trade until someone reports a
   switched-off machine lingering, which every other mDNS browser does too.
 
-- **RFC 4007 §11 is done for UDP; TCP and the config keys are not.**
+- **RFC 4007 §11 is done for the socket API; the config keys are not.**
   Done: the text layer (`ami_config_parse_ip6_zone` /
   `ami_config_format_ip6_zone`, covered in `test_config.c`), `getnameinfo()`
   printing a zone for link-local, `getaddrinfo()` accepting one as a number or
-  an interface name, and `send`/`sendto`/`sendmsg` honouring it --
-  `bsd_ip6_zone_source()` maps the interface index to the `nx_ipv6_address[]`
-  index `nxd_udp_socket_source_send()` wants.
+  an interface name, and `send`/`sendto`/`sendmsg` honouring it on UDP and raw
+  alike -- `bsd_source_select()` maps the interface index to the
+  `nx_ipv6_address[]` index the `source_send()` calls want. `connect()` on TCP
+  checks the zone against the route and refuses rather than ignoring it; see
+  the TCP entry above for why it cannot do better.
 
   Left:
-  - **TCP.** There is no `nxd_tcp_socket_source_send()`, so `connect()` to a
-    zoned link-local address stores `as_ScopeId` and then routes normally.
-    Decide what it should do -- refuse, or bind the source address first --
-    before claiming TCP support.
-  - **Raw** (`bsd_send_raw`) ignores the zone the same way.
   - `DEVS:NetInterfaces` keys (`GATEWAY6`, `ADDRESS6`) still call the plain
     parser, so a zoned value there is a clean refusal.
-  - No emulator coverage: the UDP path is verified only by the host parser
-    tests. It wants two interfaces to be meaningful, and the lab guest has one.
+  - No emulator coverage: verified only by the host parser tests. It wants two
+    interfaces to be meaningful, and the lab guest has one.
 - **Ship a Developer drawer: the NDK addendum.** ACCEPTED 2026-07-31. The
   archive ships no headers, so nothing we add past the NDK's 0..143 range can
   be reached by anyone else's code. Plan and the three permanent ABI decisions

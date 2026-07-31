@@ -708,9 +708,9 @@ BOOL  bsd_oob_take(AmiSocket *sock, UBYTE *out);
  * and removes the filter again when the last one goes.
  *
  * bsd_raw_send_packet() hands a packet the caller has already filled to
- * nxd_ip_raw_packet_send(), which prepends the IP header. The packet is
- * consumed either way -- released here on failure -- so the caller must not
- * touch it again.
+ * nxd_ip_raw_packet_send(), which prepends the IP header. `scope` is the
+ * sockaddr_in6 zone, 0 for none. The packet is consumed either way --
+ * released here on failure -- so the caller must not touch it again.
  *
  * bsd_raw_receive() dequeues one whole IP datagram, header included, or NULL.
  * The caller owns it and must nx_packet_release() it.
@@ -718,7 +718,8 @@ BOOL  bsd_oob_take(AmiSocket *sock, UBYTE *out);
 LONG       bsd_raw_open(struct AmiSocketBase *base, AmiSocket *sock);
 VOID       bsd_raw_close(AmiSocket *sock);
 LONG       bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
-                               NX_PACKET *packet, const NXD_ADDRESS *addr);
+                               NX_PACKET *packet, const NXD_ADDRESS *addr,
+                               ULONG scope);
 NX_PACKET *bsd_raw_receive(AmiSocket *sock, ULONG wait, UINT *why);
 VOID       bsd_raw_source(NX_PACKET *packet, NXD_ADDRESS *addr);
 ULONG      bsd_raw_available(AmiSocket *sock);
@@ -776,5 +777,22 @@ VOID  bsd_bcopy(const APTR src, APTR dst, ULONG size);
  * datagrams with it, accept() filters completed connections.
  */
 BOOL bsd_bind_wants_interface(const AmiSocket *sock, const NX_INTERFACE *nxif);
+
+/*
+ * The send direction of the same question: which source must a datagram from
+ * this socket leave with? socket.c owns it; transfer.c and raw.c use it to
+ * pick the nxd_*_source_send() index, connect() to decide whether TCP can
+ * honour the request at all.
+ */
+typedef enum
+{
+    BSD_SOURCE_ROUTE = 0,   /* nothing pinned: NetX may route as it likes  */
+    BSD_SOURCE_INDEX,       /* pinned; *index is what source_send() wants  */
+    BSD_SOURCE_REFUSE,      /* pinned to something absent: EADDRNOTAVAIL   */
+    BSD_SOURCE_UNREACH      /* pinned, but no route from there: ENETUNREACH */
+} BsdSourceKind;
+
+BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
+                                ULONG scope, UINT *index);
 
 #endif /* AMINETXDUO_BSDSOCKET_INTERNAL_H */
