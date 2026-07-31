@@ -614,6 +614,10 @@ LONG       bsd_table_size(struct AmiSocketBase *base);
 
 VOID       bsd_close_all(struct AmiSocketBase *base);
 
+/* bpf.c -- release the capture channels this base opened. A no-op in a build
+   without AMINETXDUO_BPF. Never blocks; bsd_child_destroy() calls it. */
+VOID       bsd_bpf_close_all(struct AmiSocketBase *base);
+
 /* socket.c -- the receive window this machine can afford right now. */
 ULONG      ami_bsd_tcp_window(VOID);
 
