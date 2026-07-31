@@ -284,6 +284,10 @@ typedef struct ToolStats
     ULONG           tick_uptime_ms;
     ULONG           tick_worst_stall_ms;
     ULONG           tick_worst_service_us;
+    ULONG           tick_over_budget;
+    ULONG           tick_deferred;
+    ULONG           tick_skew;
+    ULONG           tick_skew_peak;
     ULONG           baton_live;
     ULONG           baton_live_max;
     ULONG           baton_full;

@@ -68,11 +68,16 @@ extern "C" {
 
 #define AMI_NETSTATUS_MAGIC         0x414E5351UL    /* 'ANSQ' */
 /*
- * 3 since NetStatusControl grew the IPv6 route fields. A caller and a library
- * that disagree fail every call rather than half of them, which is why the
- * commands and the library ship together.
+ * 4 since NetStatusHealth grew the tick skew and over-budget counters. A caller
+ * and a library that disagree fail every call rather than half of them, which is
+ * why the commands and the library ship together.
+ *
+ * This is the compatibility mechanism for a record that grows. The size check in
+ * bsd_NetStackQuery() is not: it rejects a buffer too small for the record, and
+ * a caller that agrees on the version agrees on the record, so a matched caller
+ * never meets it. It is there for the arrival that agreed on nothing.
  */
-#define AMI_NETSTATUS_VERSION       3
+#define AMI_NETSTATUS_VERSION       4
 
 /* Fixed widths every record shares.  Up here rather than beside the first
    record that uses one, because NetStatusSystem needs NETSTATUS_NAME_LEN and
@@ -364,6 +369,16 @@ typedef struct NetStatusStats
  * nsl_TickWorstStallMs large next to nsl_TickWorstServiceUs small says the
  * tick task was not dispatched, not that it was slow.  nsl_BatonMoved or
  * nsl_BatonFull non-zero says the bracket lost track of a thread.
+ *
+ * nsl_TickSkew is how far behind real time the timer wheel is, in ticks: what
+ * it has yet to be given plus what nsl_TickLost took off it for good. The
+ * ThreadX clock is not in it -- that comes from the E-Clock and is true either
+ * way -- so this is a measure of how late timers are running and of nothing
+ * else. nsl_TickSkewPeak is sampled before a backlog is worked off, so it moves
+ * on a machine where nothing was ever lost.
+ *
+ * nsl_TickDeferred is ticks the budget put off to a later wakeup, which the
+ * wheel does get. nsl_TickLost is ticks it never gets.
  */
 typedef struct NetStatusHealth
 {
@@ -374,6 +389,10 @@ typedef struct NetStatusHealth
     ULONG   nsl_TickUptimeMs;
     ULONG   nsl_TickWorstStallMs;
     ULONG   nsl_TickWorstServiceUs;
+    ULONG   nsl_TickOverBudget;
+    ULONG   nsl_TickDeferred;
+    ULONG   nsl_TickSkew;
+    ULONG   nsl_TickSkewPeak;
 
     ULONG   nsl_BatonLive;
     ULONG   nsl_BatonLiveMax;
