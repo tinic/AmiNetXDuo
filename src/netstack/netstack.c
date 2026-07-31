@@ -493,8 +493,26 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
             continue;
         }
 
+        /*
+         * Move the configuration down with its slot.  ns_Iface[k] and
+         * interfaces[k] are one interface everywhere else -- ns_DhcpState[],
+         * ns_LastAddress[], the attach loops, ami_ns_create_ip()'s cfg0.  The
+         * two indices diverge the moment a device fails to open, and then the
+         * machine comes up on the surviving card wearing the failed one's
+         * address, with no DHCP and no gateway.
+         */
+        if (opened != i)
+            ns->ns_Config.interfaces[opened] = *cfg;
+
         opened++;
     }
+
+    /* Interfaces that did not open are not interfaces.  Leaving them counted
+       would show a card that is not there, and leave a stale duplicate of a
+       moved entry behind the last live one. */
+    for (i = opened; i < ns->ns_Config.interface_count; i++)
+        ns->ns_Config.interfaces[i].configured = FALSE;
+    ns->ns_Config.interface_count = opened;
 
     ns->ns_IfaceCount = opened;
 
