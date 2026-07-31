@@ -33,9 +33,8 @@
  * the wire cannot produce; handing it a fixed 16 KB would be looser and would
  * report nothing.
  *
- * FR_KNOWN_SLOP EXISTS BECAUSE ONE OF THESE PARSERS IS ALREADY BROKEN.
- * See the comment on it below. It is 3 bytes, it is not a fudge factor, and
- * it comes out when nx_secure is fixed.
+ * FR_KNOWN_SLOP is 0. It was 3 while two of these parsers over-read; both are
+ * fixed in the fork now, so the driver sees the true end of the buffer again.
  *
  * The ciphersuite table is the driver's own, carrying the six suite IDs
  * ami_tls_crypto.c offers and nothing else, so a lookup succeeds for exactly
@@ -67,26 +66,25 @@ TX_MUTEX _nx_secure_tls_protection;
 #define FR_HDR          NX_SECURE_TLS_RECORD_HEADER_SIZE
 
 /*
- * Two vendored parsers already read past the message they were given. Both
- * were found by this driver at FR_KNOWN_SLOP 0, both are recorded in
- * docs/BACKLOG.md, and neither is fixed here -- the fix belongs in nx_secure.
+ * Padding placed after the record so the driver can tolerate a known over-read
+ * without re-reporting it on every mutation. It is 0, and it stays 0: the two
+ * that needed it are fixed.
  *
- *   _nx_secure_tls_process_serverhello() reads the ciphersuite and the
- *   compression method unchecked. After the session ID it has verified only
- *   35 + session_id_length <= message_length, then reads three more bytes; a
- *   38-byte ServerHello with session_id_length 2 or 3 walks off the end.
+ *   _nx_secure_tls_process_serverhello() read the ciphersuite and compression
+ *   method after checking only the session ID -- a 38-byte ServerHello with a
+ *   session_id_length of 3 left length at exactly 38 and the next three bytes
+ *   came from past the message.
  *
- *   _nx_secure_tls_process_certificate_request() reads the certificate-type
- *   count before testing message_length, so a zero-length CertificateRequest
- *   reads one byte past.
+ *   _nx_secure_tls_process_certificate_request() read the certificate-type
+ *   count with nothing establishing the message had a byte in it; the guard
+ *   above it is inside the TLS 1.3 arm.
  *
- * Three bytes of slop keep the sweep on the bugs nobody has found yet rather
- * than re-reporting those two on every mutation. It costs the driver the
- * ability to see any OTHER over-read of one to three bytes at the very end of
- * a record, which is a real loss and the reason this is temporary. Set it to 0
- * to reproduce either: `fuzz_tls_record -r 1 500000` finds both.
+ * Both were found by this driver at 0 and fixed on the fork's
+ * amiga-nx-secure-bounds. Raising this again hides any over-read of one to
+ * three bytes at the end of a record, so raise it only to isolate a new one,
+ * and put it back.
  */
-#define FR_KNOWN_SLOP   3
+#define FR_KNOWN_SLOP   0
 
 typedef struct
 {

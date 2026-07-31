@@ -11,31 +11,20 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
 
 ## Open — no decision taken
 
-- **Three nx_secure parsers read past the buffer they were given.** All three
-  were found by `fuzz_tls_record` and `fuzz_tls_x509`, all three are reachable
-  from a hostile server before any key exists, and none is fixed -- the fix
-  belongs in `third_party/netxduo` and is a submodule bump. Each driver
-  allocates a few bytes of documented slop so the sweep is not stuck
-  re-reporting them; set `FR_KNOWN_SLOP` / `FX_KNOWN_SLOP` to 0 to reproduce.
+- **Three nx_secure over-reads: FIXED 2026-07-31 on the fork.**
+  `_nx_secure_x509_asn1_tlv_block_parse()` loaded the ASN.1 tag before the
+  length check; `_nx_secure_tls_process_serverhello()` read the ciphersuite and
+  compression method having bounded only the session ID; and
+  `_nx_secure_tls_process_certificate_request()` read the certificate-type
+  count with the only guard sitting inside the TLS 1.3 arm. All three were
+  reachable from the wire, all found by `fuzz_tls_record` / `fuzz_tls_x509` at
+  zero slop, all confirmed under ASan.
 
-  - `_nx_secure_x509_asn1_tlv_block_parse()` does `current_tag = buffer[0]` one
-    statement before it tests `*buffer_length < 1`, so every caller that runs
-    out of data over-reads by one byte. A two-byte certificate through
-    `_nx_secure_x509_certificate_parse()` reaches it, and so does
-    `tls_store.c`'s issuer walk. `fuzz_tls_x509 -r 1 20000`.
-  - `_nx_secure_tls_process_serverhello()` reads the ciphersuite and the
-    compression method without bounding them: after the session ID it has
-    checked only `35 + session_id_length <= message_length` and then reads
-    three more bytes. A 38-byte ServerHello with `session_id_length` 2 or 3
-    walks off the end. `fuzz_tls_record -r 1 500000`.
-  - `_nx_secure_tls_process_certificate_request()` reads the certificate-type
-    count before testing `message_length`, so a zero-length
-    CertificateRequest reads one byte past. Same sweep.
-
-  On the target `packet_buffer` is `tls_conn.c`'s `tc_RecordBuffer`, a heap
-  allocation holding one record, so a record that fills it turns each of these
-  into a read past a heap block on a machine with nothing to catch it.
-  Found 2026-07-31.
+  Fixed on `tinic/netxduo` branch `amiga-nx-secure-bounds`, merged to
+  `amiga-integration` as `a1036f03`, submodule bumped. Both drivers now run at
+  `FR_KNOWN_SLOP` / `FX_KNOWN_SLOP` 0 -- 200k mutations each, clean -- which is
+  the proof, since they needed 3 and 1 bytes of padding to tolerate the reads
+  before. Commits are unsigned; DCO is the author's to add before submission.
 - **TLS parsers that need crypto have no fuzz driver.** `fuzz_tls_record` and
   `fuzz_tls_x509` cover the record header, the handshake header, ServerHello
   and its extensions, CertificateRequest, the Certificate message and the
