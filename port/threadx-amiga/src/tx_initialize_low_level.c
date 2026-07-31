@@ -587,6 +587,7 @@ ULONG                eclock_per_tick;
 ULONG                eclock_rem;
 ULONG                frac;
 ULONG                carry;
+ULONG                advance;
 ULONG                last_lo;
 ULONG                start_lo;
 ULONG                backlog;
@@ -919,9 +920,10 @@ UINT                 armed;
              * division, so only the carry can overshoot, and only when the
              * division came out exact.
              */
-            frac  +=  measured * eclock_rem;
-            carry  =  frac / (ULONG) TX_TIMER_TICKS_PER_SECOND;
-            if (((measured * eclock_per_tick) + carry) > delta)
+            advance  =  measured * eclock_per_tick;
+            frac    +=  measured * eclock_rem;
+            carry    =  frac / (ULONG) TX_TIMER_TICKS_PER_SECOND;
+            if ((advance + carry) > delta)
             {
                 carry =  0UL;
             }
@@ -929,7 +931,7 @@ UINT                 armed;
             {
                 frac -=  carry * (ULONG) TX_TIMER_TICKS_PER_SECOND;
             }
-            last_lo +=  (measured * eclock_per_tick) + carry;
+            last_lo +=  advance + carry;
 
             /* The clock, and the only thing that sets it.  Real elapsed time,
                whatever the wheel below is or is not given.  */
