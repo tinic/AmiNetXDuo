@@ -431,10 +431,16 @@ static ULONG count_tasks(VOID)
 /*
  * `base` NULL means the library is not open right now: the Exec numbers are
  * still read, and they are the only ones that survive an expunge.
+ *
+ * Struct assignment rather than zero(): -fanalyzer does not follow a byte loop
+ * through a caller's struct and reports every field the caller then reads as
+ * uninitialised.
  */
 static VOID sample(struct Library *base, Sample *out)
 {
-    zero(out, sizeof(*out));
+    static const Sample empty;
+
+    *out = empty;
 
     out->free_mem = AvailMem(MEMF_ANY);
     out->sigs     = own_signals();
@@ -586,10 +592,11 @@ static VOID copy_str(char *dst, const char *src, ULONG len)
    re-add, which is exactly what this drill puts it through. */
 static VOID if_look(struct Library *base, const char *want, IfInfo *out)
 {
+    static const IfInfo empty;      /* see the note in sample() */
     LONG n;
     LONG i;
 
-    zero(out, sizeof(*out));
+    *out = empty;
 
     zero(&q_ifaces, sizeof(q_ifaces));
     q_ifaces.hdr.nsh_Magic   = AMI_NETSTATUS_MAGIC;
