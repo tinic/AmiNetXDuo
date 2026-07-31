@@ -89,10 +89,14 @@ _Static_assert(sizeof(struct icmp6_filter) == 32, "icmp6_filter is not 256 bits"
 /* ------------------------------------------------------------- the packet -- */
 
 /*
- * The arriving IP header, or NULL when at least `need` bytes of it do not sit
- * in front of the payload.  Bounding against nx_packet_prepend_ptr rather
- * than trusting the version tag: a copy taken by raw.c's filter has both
- * pointers rewritten, and a truncated one must not be read past.
+ * The arriving IP header, or NULL when `need` bytes of it are not readable.
+ *
+ * Bounded against nx_packet_append_ptr, not nx_packet_prepend_ptr: on a raw
+ * IPv4 socket the two are the same address, because raw.c hands the datagram
+ * over starting at its own header, and bounding on the prepend pointer would
+ * report "no header" for exactly the case where it is most obviously there.
+ * The header is always in the first fragment, so the first fragment's append
+ * pointer is the right end of the run.
  */
 static const UBYTE *bsd_cmsg_iphdr(NX_PACKET *packet, ULONG need)
 {
@@ -103,10 +107,10 @@ static const UBYTE *bsd_cmsg_iphdr(NX_PACKET *packet, ULONG need)
 
     hdr = (const UBYTE *)packet->nx_packet_ip_header;
 
-    if (packet->nx_packet_prepend_ptr < hdr)
+    if (packet->nx_packet_append_ptr < hdr)
         return NULL;
 
-    if ((ULONG)(packet->nx_packet_prepend_ptr - hdr) < need)
+    if ((ULONG)(packet->nx_packet_append_ptr - hdr) < need)
         return NULL;
 
     return hdr;
@@ -395,11 +399,13 @@ LONG bsd_cmsg_parse(struct AmiSocketBase *base, AmiSocket *sock,
     socklen_t    total;
     socklen_t    at;
 
-    bsd_bzero(out, sizeof(*out));
-
-    /* The sticky IPV6_PKTINFO is the default a per-datagram one overrides. */
-    if ((sock->as_CmsgWant & ACW_STICKY6) != 0)
-        *out = sock->as_CmsgSticky;
+    /*
+     * The sticky IPV6_PKTINFO is the default a per-datagram one overrides.
+     * Copied whether or not ACW_STICKY6 is set, because clearing the option
+     * zeroes the record: cs_Have is the authority, and send()/sendto() -- which
+     * never come through here -- read the same field directly.
+     */
+    *out = sock->as_CmsgSticky;
 
     if (msg->msg_control == NULL ||
         msg->msg_controllen < (socklen_t)sizeof(struct cmsghdr))
