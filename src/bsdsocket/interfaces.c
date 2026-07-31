@@ -479,14 +479,21 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
 
             case IFQ_HardwareAddress:
                 /* "these are bytes, not a NUL-terminated string", at most
-                   sixteen. An Ethernet address is six, which is what the shim
-                   keeps. */
+                   sixteen. "Other network interfaces may use hardware
+                   addresses which could be shorter than six bytes", so only as
+                   many bytes as IFQ_HardwareAddressSize reports: a caller that
+                   sized its buffer from that tag has no more room. Ethernet
+                   says 48 bits and gets the six the shim keeps. */
                 if (info.bii_HaveSana)
                 {
-                    UBYTE *out = (UBYTE *)bsd_tag_storage(item);
+                    UBYTE *out   = (UBYTE *)bsd_tag_storage(item);
+                    ULONG  bytes = info.bii_Info.address_bits / 8;
 
-                    if (out != NULL)
-                        bsd_bcopy(info.bii_HwAddress, out, AMI_ETH_ADDR_SIZE);
+                    if (bytes > (ULONG)AMI_ETH_ADDR_SIZE)
+                        bytes = (ULONG)AMI_ETH_ADDR_SIZE;
+
+                    if (out != NULL && bytes != 0)
+                        bsd_bcopy(info.bii_HwAddress, out, bytes);
                 }
                 break;
 
@@ -1060,13 +1067,31 @@ static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
                 break;
 
             /*
+             * Three more that "override" a default this stack already has. The
+             * documented default is what happens here, so asking for it is a
+             * request that is met; anything else is not available.
+             */
+            case IFA_IPType:            /* "Default is 2048." */
+                if ((ULONG)item->ti_Data != (ULONG)AMI_ETHERTYPE_IPV4)
+                    return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+                break;
+
+            case IFA_ARPType:           /* "Default is 2054." */
+                if ((ULONG)item->ti_Data != (ULONG)AMI_ETHERTYPE_ARP)
+                    return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+                break;
+
+            case IFA_ReportOffline:     /* "Default is FALSE." Nothing
+                                           notifies, so FALSE it is. */
+                if (item->ti_Data != 0)
+                    return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+                break;
+
+            /*
              * -----------------------------------------------------------
              * Refused, each because the thing it configures does not exist
              * here:
              *
-             *   IFA_IPType, IFA_ARPType     the shim's EtherTypes are the
-             *                               RFC 894 ones and are not
-             *                               configurable.
              *   IFA_NumReadRequests         the RX depth is computed from the
              *   IFA_NumWriteRequests        packet pool at open time
              *   IFA_NumARPRequests          (sana2_rx.c) and the TX ring is a
@@ -1078,7 +1103,6 @@ static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
              *                               (NX_LINK_DISABLE issues
              *                               S2_OFFLINE), so FALSE cannot be
              *                               honoured and TRUE is not a choice.
-             *   IFA_ReportOffline           nothing notifies.
              *   IFA_RequiresInitDelay       no settle delay is implemented.
              *   IFA_CopyMode                the copy hooks are chosen by what
              *                               the device asked for.
@@ -1086,14 +1110,11 @@ static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
              *                               address; it does not set one.
              * -----------------------------------------------------------
              */
-            case IFA_IPType:
-            case IFA_ARPType:
             case IFA_NumReadRequests:
             case IFA_NumWriteRequests:
             case IFA_NumARPRequests:
             case IFA_PacketFilterMode:
             case IFA_DownGoesOffline:
-            case IFA_ReportOffline:
             case IFA_RequiresInitDelay:
             case IFA_CopyMode:
             case IFA_HardwareAddress:
@@ -1145,6 +1166,15 @@ LONG bsd_AddInterfaceTagList(register STRPTR name __asm("a0"),
     cfg.unit   = (ULONG)unit;
     cfg.iptype = AMI_IPTYPE_STATIC;
     cfg.up     = FALSE;
+
+#ifdef AMINETXDUO_IPV6
+    /* This tag list has no IPv6 tag, which is the same case as a
+       DEVS:NetInterfaces file with no CONFIGURE6 line, so it gets the same
+       answer config_parse.c gives that case. A bzeroed AmiIfConfig would say
+       OFF, and the interface would come up with no link-local address at all. */
+    cfg.ip6type = AMI_IP6TYPE_AUTO;
+    cfg.prefix6 = 64;
+#endif
 
     /*
      * No address is set here, and none can be: this call's tag list has no
