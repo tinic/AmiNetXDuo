@@ -11,13 +11,13 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
 
 ## Open — no decision taken
 
-- **DHCP and TLS have no fuzz driver.** `tests/fuzz/` covers bpf, config, dns
-  and mdns; the two parsers an attacker reaches most directly are missing.
-  DHCP option parsing runs on every boot against whatever the LAN answers, and
-  the TLS record layer and X.509 path are the headline feature. With no MMU a
-  parser bug is not a crashed process, it is arbitrary code execution with the
-  machine's privileges. The harness pattern already exists, so this is cheap
-  relative to what it covers. Raised in external review 2026-07-31.
+- **TLS has no fuzz driver.** `tests/fuzz/` now covers bpf, config, dns, mdns
+  and dhcp; the record layer and the X.509 path are the ones left, and they are
+  the headline feature. With no MMU a parser bug is not a crashed process, it
+  is arbitrary code execution with the machine's privileges. `fuzz_dhcp.c` is
+  the closest pattern to copy -- it #includes the vendored translation unit to
+  reach a static parser and stubs the ThreadX surface in `fuzz_txstub.c`.
+  Raised in external review 2026-07-31.
 - **No open/expunge/reopen drill.** The soak suite covers steady state; what
   historically kills long-lived Amiga stacks is cycling -- Online/Offline
   bounces and library expunge/reopen. `sana2_rx.c`'s last-resort path still

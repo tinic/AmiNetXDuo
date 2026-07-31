@@ -170,6 +170,37 @@ target_compile_definitions(fuzz_dns PRIVATE FUZZ_HAS_EVENT_FLAGS ${_fuzz_nx_def}
 target_compile_options(fuzz_dns PRIVATE -UAMINETXDUO_IPV6 ${_fuzz_san})
 target_link_options(fuzz_dns PRIVATE ${_fuzz_san})
 
+# The DHCP client's option walk. Its parser is static, so fuzz_dhcp.c #includes
+# the translation unit rather than linking it -- the .c must NOT be listed here
+# as well, or it is compiled twice.
+add_executable(fuzz_dhcp
+    fuzz_dhcp.c
+    fuzz_txstub.c
+    "${AMINETXDUO_NETXDUO}/common/src/nxd_udp_socket_send.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_create.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_delete.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_bind.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_unbind.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_receive.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_receive_notify.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_send.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_source_send.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_gateway_address_get.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_gateway_address_clear.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_interface_address_get.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_interface_address_set.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_packet_deferred_receive.c"
+    ${_fuzz_nx_src})
+target_include_directories(fuzz_dhcp PRIVATE
+    "${AMINETXDUO_NETXDUO}/addons/dhcp" ${_fuzz_nx_inc})
+# The nxe_/txe_ error-checking wrappers are a second copy of every entry point
+# and pull in the whole ThreadX object surface for a driver that starts no
+# threads. Disabled here so the client binds straight to the _nx_ functions.
+target_compile_definitions(fuzz_dhcp PRIVATE
+    NX_DISABLE_ERROR_CHECKING TX_DISABLE_ERROR_CHECKING ${_fuzz_nx_def})
+target_compile_options(fuzz_dhcp PRIVATE -UAMINETXDUO_IPV6 ${_fuzz_san})
+target_link_options(fuzz_dhcp PRIVATE ${_fuzz_san})
+
 add_executable(fuzz_mdns
     fuzz_mdns.c
     "${AMINETXDUO_NETXDUO}/addons/mdns/nxd_mdns.c"
@@ -204,6 +235,11 @@ add_test(NAME fuzz_dns_sweep
 add_test(NAME fuzz_bpf_sweep
          COMMAND fuzz_bpf -r 1 ${AMINETXDUO_FUZZ_CASES})
 
+add_test(NAME fuzz_dhcp_seeds
+         COMMAND fuzz_dhcp -s)
+add_test(NAME fuzz_dhcp_sweep
+         COMMAND fuzz_dhcp -r 1 ${AMINETXDUO_FUZZ_CASES})
+
 # fuzz_mdns only runs in a 32-bit build. NetX Duo's mDNS cache stores pointers
 # in single ULONG slots, so it is coherent only where sizeof(void*) == 4; on a
 # 64-bit host it spins inside nx_mdns_enable() before a datagram arrives.
@@ -219,4 +255,4 @@ endif()
 
 # A soak set by AMINETXDUO_FUZZ_CASES needs longer than ctest's default.
 set_tests_properties(fuzz_config_sweep fuzz_dnssd_sweep fuzz_dns_sweep
-                     fuzz_bpf_sweep PROPERTIES TIMEOUT 1800)
+                     fuzz_bpf_sweep fuzz_dhcp_sweep PROPERTIES TIMEOUT 1800)
