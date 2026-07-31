@@ -199,9 +199,13 @@ struct AmiNetStack
 
 #ifdef AMINETXDUO_IPV6
 /* netstack_ipv6.c -- run from ami_ns_create_ip()/ami_ns_configure_addresses()
-   at the points marked there, and from nowhere else. */
+   at the points marked there, and from netstack_interface_add() for an
+   interface that arrives after startup. Both callers must hold a ThreadX
+   bracket. _configure_one() is idempotent: an interface that already has its
+   link-local is left alone. */
 LONG ami_netstack_ipv6_enable(AmiNetStack *ns);
 VOID ami_netstack_ipv6_configure(AmiNetStack *ns);
+VOID ami_netstack_ipv6_configure_one(AmiNetStack *ns, UWORD index);
 #endif
 
 /* ------------------------------------------------------------- baton hooks */

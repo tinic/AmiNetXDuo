@@ -2388,6 +2388,30 @@ LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
 
     ami_netstack_capture_attach_one(ns, (UWORD)slot);
 
+#ifdef AMINETXDUO_IPV6
+    /*
+     * IPv6, which startup does once in ami_ns_configure_addresses() for the
+     * interfaces the file named. Without this an interface added here has no
+     * link-local address at all -- RFC 4291 requires one -- and no
+     * solicited-node multicast membership, so neighbour discovery cannot reach
+     * it. nx_ip_interface_detach() zeroes the interface's whole IPv6 address
+     * list, so a remove/add pair loses it and nothing else puts it back.
+     *
+     * After the capture attach, for the reason startup starts capture before
+     * addressing: the duplicate address detection this sends belongs inside
+     * the trace.
+     *
+     * The bracket is this function's third and last. Duplicate address
+     * detection is waited for inside, and that wait is a tx_thread_sleep().
+     */
+    caller = ami_netstack_enter_alloc();
+    if (caller != NULL)
+    {
+        ami_netstack_ipv6_configure_one(ns, (UWORD)slot);
+        ami_netstack_leave_free(caller);
+    }
+#endif
+
     if (index_out != NULL)
         *index_out = (UWORD)slot;
 

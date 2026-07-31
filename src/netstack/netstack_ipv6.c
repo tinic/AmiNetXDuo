@@ -103,9 +103,11 @@ static VOID ami_ns6_log(const char *what, const ULONG addr[4], ULONG prefix)
 /*
  * Wait for duplicate address detection to move an address out of TENTATIVE.
  * A TENTATIVE address cannot be used as a source, so a connect() issued before
- * DAD completes either picks a different source or fails. The wait is bounded
- * and only happens at startup. With NX_DISABLE_IPV6_DAD the address is
- * PREFERRED immediately and this returns on the first look.
+ * DAD completes either picks a different source or fails. The wait is bounded,
+ * and costs about three seconds each time an interface is configured -- once
+ * per interface at startup, and once per AddInterfaceTagList(). With
+ * NX_DISABLE_IPV6_DAD the address is PREFERRED immediately and this returns on
+ * the first look.
  */
 static BOOL ami_ns6_wait_ready(AmiNetStack *ns, UINT index)
 {
@@ -158,6 +160,18 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
      * (src/sana2/sana2_driver.c); neighbour discovery still works on them.
      */
     status = nxd_ipv6_address_set(&ns->ns_Ip, (UINT)i, NX_NULL, 10, &index);
+    if (status == NX_DUPLICATED_ENTRY)
+    {
+        /*
+         * The interface already carries its link-local, so it has been through
+         * here and everything below it was done then. Not an error: this runs
+         * once per boot and again for every interface added at run time, and
+         * an interface that was never detached is still holding what the first
+         * pass gave it. `index` is not usable after this -- the duplicate
+         * check happens after the free slot has been picked.
+         */
+        return;
+    }
     if (status != NX_SUCCESS)
     {
         AMI_ERROR("netstack: %s: link-local address failed (%ld)",
@@ -260,6 +274,14 @@ VOID ami_netstack_ipv6_configure(AmiNetStack *ns)
 
     for (i = 0; i < ns->ns_IfaceCount; i++)
         ami_ns6_configure_interface(ns, i);
+}
+
+VOID ami_netstack_ipv6_configure_one(AmiNetStack *ns, UWORD i)
+{
+    if (!ns->ns_Ipv6Enabled || i >= (UWORD)NX_MAX_PHYSICAL_INTERFACES)
+        return;
+
+    ami_ns6_configure_interface(ns, i);
 }
 
 /* ---------------------------------------------------------------- the API -- */

@@ -206,6 +206,104 @@ static const ULONG t_loopback6[4]     = { 0, 0, 0, 1UL };
 static const ULONG t_allrouters6[4]   = { 0xFF020000UL, 0, 0, 2UL };
 
 
+/* A usable fe80::/64 on this interface: present, and past DAD. */
+static UINT t_has_linklocal(UWORD index)
+{
+
+ULONG   addr[4];
+ULONG   prefix =  0;
+ULONG   state  =  0;
+UWORD   slot;
+
+    for (slot = 0; slot < 8; slot++)
+    {
+        if (!netstack_ipv6_address_get(index, slot, addr, &prefix, &state))
+        {
+            break;
+        }
+
+        if (((addr[0] & 0xFFC00000UL) == 0xFE800000UL) &&
+            (state != NX_IPV6_ADDR_STATE_TENTATIVE))
+        {
+            t_log_addr6("  link-local", addr);
+            return(TX_TRUE);
+        }
+    }
+
+    return(TX_FALSE);
+}
+
+static VOID t_setstr(char *dst, ULONG size, const char *src)
+{
+
+ULONG   i;
+
+    for (i = 0; (i + 1UL) < size && src[i] != '\0'; i++)
+    {
+        dst[i] =  src[i];
+    }
+    dst[i] =  '\0';
+}
+
+/*
+ * RemoveInterface()/AddInterfaceTagList() at run time, which is what an
+ * operator does to change a card's parameters, and what tests/tools/ifprobe.c
+ * exercises from the library side.
+ *
+ * nx_ip_interface_detach() memsets every NXD_IPV6_ADDRESS on the interface
+ * (nx_ip_interface_detach.c), so the address configuration startup did is gone
+ * and only the add path can put it back. An interface that comes back without
+ * its link-local has no IPv6 at all: RFC 4291 requires one, it is the source
+ * address every on-link IPv6 send picks, and its solicited-node multicast
+ * membership is what makes the interface answer neighbour solicitations.
+ */
+static VOID t_readd(VOID)
+{
+
+AmiIfConfig     cfg;
+UBYTE          *raw =  (UBYTE *)&cfg;
+ULONG           i;
+UWORD           index =  0xFFFFU;
+LONG            rc;
+
+    t_log("remove and re-add interface 0:");
+
+    for (i = 0; i < (ULONG)sizeof(cfg); i++)
+    {
+        raw[i] =  0;
+    }
+
+    /* The tag list AddInterfaceTagList() can express: a name, a device and a
+       unit. Everything else is the machine's own record of the interface. */
+    t_setstr(cfg.name,   sizeof(cfg.name),   "eth0");
+    t_setstr(cfg.device, sizeof(cfg.device), "a2065.device");
+    cfg.unit   =  0UL;
+    cfg.iptype =  AMI_IPTYPE_STATIC;
+    cfg.up     =  FALSE;
+
+    rc =  netstack_interface_remove(0, TRUE);
+    if (!t_check((UINT)(rc == AMI_NET_OK), "RemoveInterface(eth0)", (ULONG)rc))
+    {
+        return;
+    }
+
+    (VOID)t_check((UINT)(t_has_linklocal(0) == TX_FALSE),
+                  "the removed interface kept no IPv6 address", 0UL);
+
+    rc =  netstack_interface_add(&cfg, &index);
+    if (!t_check((UINT)(rc == AMI_NET_OK && index == 0),
+                 "AddInterfaceTagList(eth0) put it back", (ULONG)rc))
+    {
+        return;
+    }
+
+    (VOID)t_check(t_has_linklocal(0),
+                  "the re-added interface has a usable fe80::/64 address",
+                  0UL);
+
+    (VOID)netstack_interface_up(0);
+}
+
 static VOID t_run(VOID)
 {
 
@@ -341,6 +439,10 @@ UWORD            slot;
               t_ping6(ip, t_slirp_ll6, "fe80::2"));
     t_finding("SLIRP answered fec0::2",
               t_ping6(ip, t_slirp_host6, "fec0::2"));
+
+    /* ---- and the same interface, added after startup --------------------- */
+
+    t_readd();
 
     (VOID)tx_amiga_orphan_thread(&t_main_thread);
 }
