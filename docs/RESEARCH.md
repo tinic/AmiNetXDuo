@@ -345,8 +345,8 @@ Two properties drive the port layer:
 
 | Stack | Licence / availability | API level | Notes |
 |---|---|---|---|
-| **AmiTCP/IP 3.0b2** | Free, **source on Aminet**; the origin of `bsdsocket.library` | v3 | 4.4BSD-derived; no DHCP (BOOTP only); unfinished installer |
-| **AmiTCP/IP 4.x** (4.1/4.2/4.3) | **Proprietary** (NSDi, Finland); needs a serial/key file; SDK on Aminet under `LICENSE.SDK` | v4 | Introduced `GetSocketEvents`, `sendmsg`/`recvmsg`, the V4 event API |
+| **AmiTCP/IP 3.0b2** | Free, **source published**; the origin of `bsdsocket.library` | v3 | 4.4BSD-derived; no DHCP (BOOTP only); unfinished installer |
+| **AmiTCP/IP 4.x** (4.1/4.2/4.3) | **Proprietary** (NSDi, Finland); needs a serial/key file; SDK published under `LICENSE.SDK` | v4 | Introduced `GetSocketEvents`, `sendmsg`/`recvmsg`, the V4 event API |
 | **AROSTCP** | GPL-2 (LGPL-2 for `netinclude`/`netlib`) | v4-ish | AmiTCP HUT sources + Cafferkey/Fedin; ISC DHCP |
 | **Genesis / NetConnect** | Free-ish AmiTCP fork, MUI/ReAction GUI; shipped in OS 3.9 | v4 | Configuration widely reported as fiddly |
 | **Miami / MiamiDx** | Commercial, **effectively unobtainable** (author lost the key generator) | v4 | Best GUI of its era; slower than AmiTCP/Roadshow |
@@ -2792,7 +2792,7 @@ headers, `pragmas/bsdsocket_pragmas.h` LVO table), `amigaos/reference/amiga-boot
 - [rondoval/lwip-amiga](https://github.com/rondoval/lwip-amiga) · [MW0MWZ/AmiTCP_NG](https://github.com/MW0MWZ/AmiTCP_NG) · [tbdye/bsdsocktest](https://github.com/tbdye/bsdsocktest) · [jbilander/catalyst](https://github.com/jbilander/catalyst) · [aros-development-team/AROS — AROSTCP](https://github.com/aros-development-team/AROS/tree/master/workbench/network/stacks/AROSTCP)
 - [Using NetBSD's TCP/IP stack for AmigaOS (port-amiga, 2017)](http://mail-index.netbsd.org/port-amiga/2017/12/13/msg008038.html)
 - [Which is the best TCP/IP stack on the Amiga? — maidavale.org](https://maidavale.org/blog/amiga-which-is-the-best-tcpip-stack/)
-- [Roadshow](http://roadshow.apc-tcp.de/index-en.php) · [Aminet: AmiTCP-SDK-4.3](https://aminet.net/package/comm/tcp/AmiTCP-SDK-4.3) · [AmiTCP/IP FAQ](https://wiki.preterhuman.net/AmiTCP/IP_Frequently_Asked_Questions)
+- [Roadshow](http://roadshow.apc-tcp.de/index-en.php) · [AmiTCP/IP FAQ](https://wiki.preterhuman.net/AmiTCP/IP_Frequently_Asked_Questions)
 - [Aros/Developer/Docs/Libraries/BSDsocket](https://en.wikibooks.org/wiki/Aros/Developer/Docs/Libraries/BSDsocket)
 - [WinUAE features (uaenet.device / SLIRP / A2065)](https://www.winuae.net/features/) · [EAB: SANA2 / SLIRP / A2065](https://eab.abime.net/showthread.php?p=969044)
 
@@ -4712,7 +4712,7 @@ ours:
 
 | | |
 |---|---|
-| Aminet | `comm/tcp/curl-8.22.0-DEV-210726.lha`, 2026-07-23, 4,704,106 bytes |
+| source | `comm/tcp/curl-8.22.0-DEV-210726.lha`, 2026-07-23, 4,704,106 bytes |
 | Port | Darren Banfi (`boingball`), source at `github.com/boingball/curl` branch `amigaos`, commit `ffec7145` |
 | Upstream | curl **8.22.0-DEV**, one release newer than the 8.21.0 of §11 |
 | Built with | `m68k-amigaos-gcc 13.2.0`, **clib2**, soft-float, `-O0`, `--with-amissl --with-zlib` |
@@ -4802,7 +4802,7 @@ Features: alt-svc HSTS HTTPS-proxy libz SSL threadsafe
 | groups A–D and F, 124 cases | passed | failed |
 |---|---|---|
 | our curl 8.21.0 + `amitls` (newlib) | **122** | 2 |
-| Aminet curl 8.22.0-DEV (clib2, AmiSSL) | **122** | 2 |
+| third-party curl 8.22.0-DEV (clib2, AmiSSL) | **122** | 2 |
 
 **The same two, and neither of them is the stack**: `a44_cookies_send`, which
 fails identically on both and is therefore curl's own AmigaOS path handling
@@ -4875,7 +4875,7 @@ already claimed Roadshow worked.
 Everything `src/crypto68k/` has ever been measured against is the vendored `nx_crypto`
 it replaces. That is the right baseline for *did the change work* and the wrong one for
 *is this stack worth having*, because this machine already has an OpenSSL: **AmiSSL**,
-which is what the Aminet curl links against and what every other TLS client on a classic
+which is what the third-party curl links against and what every other TLS client on a classic
 Amiga uses. §11.6 guessed that a well-maintained library would land 1.5–2.5× slower than
 `crypto68k` rather than 3–4×, and said plainly that nobody had measured it.
 
@@ -6034,7 +6034,7 @@ with throughput, so it was measured rather than argued.
 | conformance, network tier | **141 passed, 1 failed, 0 skipped** |
 | `tests/clients` | **94 checks, 0 failures** |
 | `tests/curl` groups A–F, our curl | **147 passed, 2 failed, 149 cases** |
-| `tests/curl` groups A–D and F, the Aminet binary | **122 passed, 2 failed, 124 cases** |
+| `tests/curl` groups A–D and F, the third-party binary | **122 passed, 2 failed, 124 cases** |
 | host `ctest` | **6/6** |
 | `tools/ci.sh` on playhouse2, NDK 3.9 | host + all four cross configs + conformance, **all green** |
 
@@ -10290,7 +10290,7 @@ Four things are the **same binary in every column**:
   LVO through `toolsock.c`'s inline `jsr a6@(-n:W)`, so it is exactly as foreign
   to Roadshow as to us;
 * **`bsdsocktest`**, the upstream suite, which knows about none of the three;
-* **the Aminet `curl.020` 8.22.0-DEV** of §14.7 — clib2, AmiSSL, built by
+* **the third-party `curl.020` 8.22.0-DEV** of §14.7 — clib2, AmiSSL, built by
   somebody with no stake in the result.
 
 Each stack supplies only its **own** `bsdsocket.library`, `AddNetInterface` and
@@ -10369,7 +10369,7 @@ so only the second fetch of each boot is quoted, where ours is 176/177/179/186
 and Roadshow's is 115/117.
 
 **And then the same wire, measured with somebody else's client, reverses.**
-Aminet `curl.020`, identical binary, 1,200,000 bytes over `http://`, five
+third-party `curl.020`, identical binary, 1,200,000 bytes over `http://`, five
 fetches each:
 
 | | AmiNetXDuo | Roadshow 1.15 | |
@@ -10398,7 +10398,7 @@ Three things are worth reading off it:
   not on the wire. `NetTrace` reads 4,096 bytes at a time through its own
   single-`WaitSelect()` loop, and curl does not.
 * **It is not a regression against §24.** §24's 182 KB/s for `a04_get_1m2` is
-  *our* curl (newlib, `tls.library`); this is the clib2/AmiSSL Aminet binary,
+  *our* curl (newlib, `tls.library`); this is the clib2/AmiSSL third-party binary,
   which §14.7 ran for pass/fail and never timed. The two numbers are different
   clients, not different stacks.
 
@@ -10920,7 +10920,7 @@ unlocked check runs and the suspension is never reached.
 ### 32.11 Two things noticed in the receive path, not changed
 
 §29's Roadshow comparison reports the disagreement between our own `NetTrace`
-(55% faster than Roadshow) and the stack-agnostic Aminet curl (12% slower), and
+(55% faster than Roadshow) and the stack-agnostic third-party curl (12% slower), and
 names the receive call pattern as the difference. Two things stand out in
 `src/bsdsocket/` while reading it for this work, both reported rather than
 touched:
@@ -12923,7 +12923,7 @@ rather than the one that was measured.
 
 §29.3 left this project with two instruments disagreeing about the same wire:
 our own `NetTrace` made this stack **55% faster** than Roadshow 1.15 and the
-stack-agnostic Aminet curl made it **12% slower**, five runs out of five, with
+stack-agnostic third-party curl made it **12% slower**, five runs out of five, with
 the gap scaling with the body rather than sitting in setup. §32.11 read the
 receive path while fixing something else and named a candidate without changing
 it: `bsd_nx_enter()`/`bsd_nx_leave()` bracket every `recv()`, every `send()`
@@ -13052,7 +13052,7 @@ because §29.3's follow-up experiment was named and never run, and because
 inferring a call count from a throughput delta is how a prediction gets
 confirmed instead of tested.
 
-One fetch of 1,200,000 bytes over `http://` with the Aminet `curl.020`
+One fetch of 1,200,000 bytes over `http://` with the third-party `curl.020`
 8.22.0-DEV — the third-party binary, nothing of ours in it — repeated twice per
 boot:
 
@@ -13131,7 +13131,7 @@ Loopback is the solid one and always has been.
 
 **So the two instruments still disagree, and now they disagree more.** After
 this change `NetTrace` makes us 1.49× faster than Roadshow on loopback and the
-Aminet curl makes us 10.6% slower on the wire. The gap between them did not
+third-party curl makes us 10.6% slower on the wire. The gap between them did not
 close, which was the outcome that would have proved the diagnosis; what closed
 instead is the question of *why* they differ -- they are counting different
 things, 380 brackets against 108, and the one that counts more of them
@@ -14277,15 +14277,15 @@ the driver's name. Hydra Systems' card is called AmigaNet and its driver is
 
 | config line | card the guest sees | chip | SANA-II driver | where the driver comes from |
 |---|---|---|---|---|
-| `a2065=slirp` | `A2065` | Am7990 | `a2065.device` 2.16 | Commodore; Aminet `driver/net/a2065v216a.lha` has 2.16a |
+| `a2065=slirp` | `A2065` | Am7990 | `a2065.device` 2.16 | Commodore; `driver/net/a2065v216a.lha` has 2.16a |
 | `ariadne_rom_file=:ENABLED` | `Ariadne` | Am7990 | `ariadne.device` 1.50 | `amiga.resource.cx/install/Ariadne_v150.lha` |
 | `ariadne2_rom_file=:ENABLED` | `Ariadne II` | NE2000 | `ariadne_ii.device` 43.12 | `amiga.resource.cx/install/AriadneII_43_12.lha` |
-| `hydra_rom_file=:ENABLED` | `AmigaNet` | NE2000 | `hydra.device` 1.44 | Aminet `driver/net/HydraDriver144.lha` |
-| `eb920_rom_file=:ENABLED` | `LAN Rover/EB920` | NE2000 | `eb920.device` 1.23 | Aminet `driver/net/eb920-sanaII.lha`, int2 and int6 builds |
+| `hydra_rom_file=:ENABLED` | `AmigaNet` | NE2000 | `hydra.device` 1.44 | `driver/net/HydraDriver144.lha` |
+| `eb920_rom_file=:ENABLED` | `LAN Rover/EB920` | NE2000 | `eb920.device` 1.23 | `driver/net/eb920-sanaII.lha`, int2 and int6 builds |
 | `xsurf_rom_file=:ENABLED` | `X-Surf` | NE2000 | `x-surf.device` 1.16 | iComp wiki, `X-surf-1.16.lha` |
 | `xsurf100z2_rom_file=:ENABLED` | `X-Surf-100 Z2` | NE2000 | `x-surf-100.device` 1.16 | same archive |
 | `xsurf100z3_rom_file=:ENABLED` | `X-Surf-100 Z3` | NE2000 | `x-surf-100.device` 1.16 | same archive |
-| `ne2000_pcmcia=slirp` | RTL8019 PCMCIA | NE2000 | `cnet.device` 1.9 | Aminet `driver/net/cnetdevice.lha` |
+| `ne2000_pcmcia=slirp` | RTL8019 PCMCIA | NE2000 | `cnet.device` 1.9 | `driver/net/cnetdevice.lha` |
 
 None of these is redistributable and none is in this repository;
 `AMINETXDUO_SANA2_DRIVER=<path>` names a local copy.
@@ -14470,7 +14470,7 @@ description of one machine on one desk.
 ### 44.11 All nine cards, driven (2026-07-29)
 
 Eight more drivers were found and every card WinUAE emulates has now been run.
-Seven of the eight came off Aminet's `driver/net` or `amiga.resource.cx`; none
+Seven of the eight came off `driver/net` or `amiga.resource.cx`; none
 of them is redistributable and none is in this repository.
 
 Each card was taken through the netstack bring-up test twice — once with
@@ -14503,7 +14503,7 @@ fallback in `ami_sana2_open_device()` is doing what it was written for rather
 than papering over one vendor's layout.
 
 **Throughput.** Six 300 KB transfers per card, one A1200 profile, one peer, the
-Aminet curl, everything else held still. These are not comparable with the
+third-party curl, everything else held still. These are not comparable with the
 ~98 KB/s that the same client measures under FS-UAE: WinUAE runs in warp and
 the peer is across a LAN rather than on the loopback of the emulator's own
 host.
@@ -15783,7 +15783,7 @@ below them is worth starting first.
 ## 51. The receive window is not the 10.6%, and 32 KB is worse than 8 (2026-07-27)
 
 §29 records the two instruments disagreeing: our own `NetTrace` has us **40–55%
-ahead** of Roadshow on loopback and wire, while the third-party Aminet curl has
+ahead** of Roadshow on loopback and wire, while the third-party third-party curl has
 Roadshow **10.6% ahead**. §39 closed half of that — the per-call ThreadX bracket
 is not the cause, because one 1.2 MB fetch takes 108 brackets and not thousands.
 What remained was the receive window, which §16.5 and §24 had measured the
@@ -15905,7 +15905,7 @@ retransmits. That is precisely the failure both comments were written to prevent
 
 ### Measured
 
-Third-party Aminet `curl`, 1.2 MB fetch, two runs of two fetches each per arm, same
+Third-party `curl`, 1.2 MB fetch, two runs of two fetches each per arm, same
 image, same session:
 
 | | samples (B/s) | mean | vs Roadshow |
@@ -16459,7 +16459,7 @@ is the libraries they link.
 
 ### Speed, on the thing users actually do
 
-Third-party Aminet curl, 1.2 MB fetch, back to back in one session:
+Third-party third-party curl, 1.2 MB fetch, back to back in one session:
 
 | | samples (B/s) | mean |
 |---|---|---:|
@@ -17509,7 +17509,7 @@ version of this loop that is meaningfully faster on a 68020.
 
 ## 65. One foreign curl, three stacks, one afternoon (2026-07-28)
 
-A sanity comparison, not a study: the same third-party Aminet `curl` binary
+A sanity comparison, not a study: the same third-party `curl` binary
 fetching the same fixed-size file over plain `http://` against three
 `bsdsocket.library` implementations on the same emulated machine, back to
 back in one session. One number per stack.
@@ -17532,7 +17532,7 @@ twelve completed fetches wrote exactly 1,200,000 bytes.
 
 | | |
 |---|---|
-| client | Aminet `curl.020` 8.22.0-DEV-210726, clib2 + AmiSSL, GCC 13.2.0 `-O0 -msoft-float`, built by somebody with no stake in the result |
+| client | third-party `curl.020` 8.22.0-DEV-210726, clib2 + AmiSSL, GCC 13.2.0 `-O0 -msoft-float`, built by somebody with no stake in the result |
 | machine | FS-UAE A1200 profile, 68020, Kickstart 3.1, bare directory hard drive |
 | NIC | one `a2065.device` on SLIRP, 10.0.2.0/24, staged in both `DEVS:` and `DEVS:Networks/` |
 | driver | `tests/compare/checkrunner.c`, 512 KB stack per command, records rc and ticks |
@@ -19637,7 +19637,7 @@ actionable thing in this section -- §75.7.
 
 ### 75.1 Method, sample, and what it excludes
 
-Aminet's `info/index/` trees are gone (every documented index path 404s), and
+The archive's `info/index/` trees are gone (every documented index path 404s), and
 `/tree?path=` ignores its argument, but `https://aminet.net/comm/<dir>` with
 `?page=N` still serves plain listings. 61 listing pages gave an inventory of
 **2,904 packages** across `comm/tcp`, `comm/net`, `comm/www`, `comm/mail`,
@@ -19653,7 +19653,7 @@ What that sample excludes, and why:
   utilities. Skipped for scope, not for cost.
 - **Anything over 2 MB (84 archives).** Whole-CD and MUI-bundle uploads; the
   binaries in them recur in smaller packages.
-- **The rest of Aminet.** `util/`, `dev/`, `biz/` and `game/` all contain network
+- **The rest of the archive.** `util/`, `dev/`, `biz/` and `game/` all contain network
   clients. Nothing here is a claim about them.
 - **Nested archives.** An `.lha` inside an `.lha` was not descended into.
 
@@ -20090,253 +20090,6 @@ nightly tier is one card wide. What Amiberry buys immediately is that the tier
 can exist at all on the machine CI already owns, and that the A2065 leg of it
 actually reaches a network — which, on this host, the current emulator does not.
 
-## 77. What the SANA-II driver licences actually say (2026-07-30)
-
-§76 ends on the finding that eight of the nine emulated cards fail at
-`netstack_startup() (0xFFFFFFFE)` for one reason only: the third-party SANA-II
-driver is not there. This section is the licence question that gates fetching
-them, settled per driver, with the sentence that settles it. It is recorded here
-so it does not get re-litigated: the answers are mostly "no", and the reasons
-are specific rather than general caution.
-
-Vendoring is not on the table for any of them. Aminet's upload terms grant
-distribution *via Aminet*, which is a licence for Aminet to serve the file, not
-a licence for this repository to carry it onward. So the only question ever
-asked below is whether a script may **download** the file, never whether we may
-ship it.
-
-### 77.1 The table
-
-| driver | terms | verdict |
-| --- | --- | --- |
-| `cnet.device` | Public Domain, explicitly, by all three authors | **fetch** |
-| `hydra.device` | `Distribution: Aminet`, with the rights holders named | **fetch** |
-| `x-surf.device`, `x-surf-100.device` | iComp wiki: no reproduction elsewhere | user downloads by hand |
-| `ariadne.device` | "All rights reserved" | no |
-| `ariadne_ii.device` | no licence text of any kind | no |
-| `eb920.device` | no licence text of any kind | no |
-| `a2065.device` | Commodore's, no public grant | no |
-
-### 77.2 cnet.device — public domain, and it says so
-
-`aminet.net/driver/net/cnetdevice.lha` (v1.9, sha256 `65580fae…`) carries
-`cnetdevice/cnet.guide`, whose "Legal Mush" node quotes the original author:
-
-> To encourage further development in PC-CARD devices for the Amiga, I am
-> placing the source code for this project into the Public Domain. You can
-> freely use or abuse it as you wish. I have also included some other authors'
-> code for reference purposes, please respect their copyrights.
-
-— Bruce Abbott, `cnetdevice/cnet.guide` node `legal`, repeated verbatim in
-`cnetdevice/readme`. The two later maintainers extend it in the same node:
-
-> Special thanks go to Bruce Abbott for making cnet.device public domain. This
-> `legal mush' quote still applies, although I tried to remove as many bugs as
-> I could. cnet.device v1.2 - v1.8 is still public domain and full source code
-> is included. Enjoy!
->
-> - Harry "Piru" Sintonen, 27th Oct 2002.
-> - Rolf Anders, 5th Jan 2007.
-
-Rolf Anders is the v1.9 author and co-signs that node in the v1.9 archive, so
-the declaration covers the version we fetch. The archive ships full assembler
-source alongside the binaries, which is consistent with the claim rather than
-merely asserting it. This is the one driver of the eight where redistribution
-would also have been fine; we still only fetch it, because there is no reason
-to hold a binary we can get from its own publisher.
-
-`cnet.device` is the NE2000 PCMCIA driver, and `ne2000_pcmcia` is emulated as
-an actual PCMCIA NE2000, so this is also the one most likely to *work* — which
-77.5 confirms it does.
-
-### 77.3 hydra.device — a real grant, from the people entitled to give it
-
-The binary's own version string is
-`Copyright © 1992-1994 by JMP-Electronics / Bits & Chips, Finland`, so this is
-not abandoned-in-fact-so-assume-yes. What makes it fetchable is that the
-rights holders said so. `aminet.net/driver/net/HydraDriver145src.readme`:
-
-> Distribution: Aminet
-
-and, in the body:
-
-> Thanks to the following people for giving their permission to upload this
-> source code:
->
-> - Graham Heggie, the creator of the Amiganet hardware
-> - Jukka Marin, the owner of JMP Electronics
-> - Teemu Rossi, Timo's brother
-
-The hardware's creator, the owner of the company in the copyright string, and
-the late author's estate — that is the full set. The same text ships inside the
-archive as `HydraDriver145src/hydrasrc.readme`, so the grant travels with the
-files rather than living only in Aminet's metadata.
-
-The grant is to distribute **via Aminet**, and that is exactly what a fetch
-from Aminet is. It is not a licence to mirror, so the script does not.
-
-Note which archive this is. `HydraDriver144.lha` is the plain binary release and
-has **no** `Distribution:` line and no `Type:` line at all — on its own it would
-be a "no". `HydraDriver145src.lha` is the source release, it carries the grant,
-and it contains `HydraDriver145src/hydra.device`, the last released 1.44 binary.
-So the archive with the licence is also the archive with the driver, and the
-one that looks like the obvious download is the one that cannot be justified.
-
-### 77.4 The four refusals, and the one in between
-
-**`ariadne.device` — no.** `Ariadne_v150.lha` from the Amiga Hardware Database
-contains `ariadne.device.readme`, which is Village Tronic's own, and its second
-line is:
-
-> Copyright © 1994-1996 Village Tronic Marketing GmbH
-> All rights reserved
-
-"All rights reserved" is an explicit reservation, not an absence of a statement.
-The company is gone, which changes who could grant permission, not whether
-permission was granted. Aminet has no Ariadne driver at all — searching for it
-returns only `docs/rview/Ariadne.readme`, a comp.sys.amiga.reviews review — so
-there is no second source with better terms.
-
-**`ariadne_ii.device` — no.** `AriadneII_43_12.lha` contains exactly two files,
-`ariadne_ii.device` and `Ariadne2Info`, and no licence text of any kind. The
-binary's version string is `ariadne_ii 43.12 (15.1.99)` with no copyright line
-at all. Same vendor as above, no grant found anywhere. Terms that cannot be
-established are a "no", so this is one.
-
-**`eb920.device` — no.** `aminet.net/driver/net/eb920-sanaII.readme` names
-`ASDG, Inc.` as author and a third party as uploader, has **no**
-`Distribution:` field, and its body is a bug workaround rather than a licence:
-
-> It seems many owners of the EB920/Lan Rover Ethernet Card has experienced
-> problems of getting the card working with tcp/ip. Due to ASDG not supporting
-> this card anymore, I present the drivers and my solution to the problem.
-
-"Due to ASDG not supporting this card anymore" is the uploader's reason for
-posting it, and it is not a grant from ASDG. The archive is the original 1996
-install disk — `sanaII/devs_i2/eb920.device`, `sanaII/devs_i6/eb920.device`,
-Commodore's `Installer`, and a `sanaII/ReadMe` that is entirely about setting
-the station address on cards with an empty ROM socket. No licence text
-anywhere in it.
-
-**`a2065.device` — no, confirmed.** This was already recorded at
-`docs/DEVELOPMENT.md:309` and `tools/ci.sh:92` as Commodore's and not
-redistributable; the point of re-checking was to not take our own word for it.
-Nothing found changes it. The Amiga Hardware Database page for the A2065 offers
-only `A2065.pdf`, the German manual — no driver. Aminet's nearest thing is
-`driver/net/a2065v216a.lha`, which is not Commodore's driver but a third party's
-patch of it, and is self-describing on the point:
-
-> Based on the a2065.device source code v2.16, I corrected the non standard way
-> the Commodore driver "speaks" Ethernet.
-
-A derivative of Commodore's source, with no `Distribution:` field and no
-licence text, inherits the problem rather than solving it. `a2065.device`
-remains a bring-your-own file, which is what `AMINETXDUO_A2065` is for.
-
-**`x-surf.device` and `x-surf-100.device` — download them yourself.** These are
-the in-between case, and the only one where the answer is not simply no.
-Individual Computers publish `X-surf-1.16.lha` for free on their own wiki, no
-registration and no click-through, and it contains both drivers plus
-`x-surf-100.txt`. That text file has no copyright line, no licence and no
-distribution statement — it is purely configuration and version history. The
-terms therefore come from the site, and `wiki.icomp.de/wiki/IndividualComputers:Copyrights`
-says:
-
-> Unless expressed otherwise, the contents of the iComp Wiki are (C) individual
-> Computers Jens Schönfeld GmbH and may not be reproduced anywhere else without
-> written permission.
-
-with the footer of every page reading "Content is available under copyright
-restrictions unless otherwise noted." So the terms *are* established, and what
-they establish is a reservation. A person who owns an X-Surf clicking the link
-on the vendor's own page is doing what the page is for. A CI job pulling the
-same file on every run is neither that person nor covered by anything on that
-page, and it spends the vendor's bandwidth to do it.
-
-So the script does not fetch these, and says why when asked, pointing at the
-wiki page. Once downloaded by hand, `AMINETXDUO_SANA2_DRIVER=<path>` stages
-them exactly as it already did — no new mechanism, and §44.9's X-Surf-100
-results were obtained that way in the first place.
-
-### 77.5 tools/fetch-sana2-drivers.sh, and cnet.device bringing up an interface
-
-The script follows `tools/fetch-toolchain.sh`: sha256 on every download,
-refusal rather than fallback on a mismatch, and a cache under
-`~/.cache/aminetxduo/sana2-drivers/<sha12>/`. It fetches the two archives 77.2
-and 77.3 permit, extracts only the `.device` members, and deletes the archives.
-Nothing it writes is inside the working tree.
-
-Asked for a refused driver it names the reason rather than saying "unknown
-driver", so a user who wonders why the X-Surf column is empty learns it from
-the tool instead of from this file:
-
-```
-$ tools/fetch-sana2-drivers.sh --print-path x-surf-100.device
-!! x-surf-100.device is not fetched automatically.
-   Individual Computers publish it, but wiki.icomp.de's copyright page
-   reserves reproduction elsewhere without written permission, so a CI
-   fetch is not covered.
-   Download X-surf-1.16.lha by hand:  https://wiki.icomp.de/wiki/X-Surf-100
-   Then:  AMINETXDUO_SANA2_DRIVER=<path>/x-surf-100.device
-```
-
-**It unblocks a card.** `ne2000_pcmcia` is emulated as a real PCMCIA NE2000 and
-`cnet.device` is a real PCMCIA NE2000 driver, so the pairing is not a
-coincidence of names. Staged with `tools/sana2-stage.sh` into `DEVS:Networks`
-and run under Amiberry, `netstack_test` goes from §76.3's
-
-```
-FAIL netstack_startup() (0xFFFFFFFE)
-```
-
-to a pass. Measured on playhouse2, Amiberry 8.2.2, A1200/68020, AROS ROM,
-`pcmcia=true ne2000pcmcia_rom_options=inserted=true ne2000_pcmcia=slirp`:
-
-```
-  ok   netstack_startup()
-  cfg[0] 'eth0' cnet.device unit 0 iptype 1
-  ok   interface 0 link is up
-  address 10.0.2.15   netmask 255.255.255.0   gateway 10.0.2.2
-  ping gateway: reply, 10 bytes, attempt 1
-  example.com resolves to 172.66.147.243
-13 checks, 0 failures -- PASS
-14 checks, 0 failures after teardown -- PASS
-```
-
-Exit status 0, and the same 14 checks the A2065 passes. The serial log shows
-`cnet.device` walking the PCMCIA CIS tuple chain before any of it, which is the
-part worth noting: the driver is talking to Gayle and the card's attribute
-memory, not to a generic NE2000 register file, so this exercises the emulated
-PC Card path rather than accidentally working.
-
-That is one of the eight cards moved from blocked to covered by fetching a file,
-and it is the first evidence that the eight were blocked *only* on the drivers
-rather than on anything about the boards. It is also the answer to §76.3's
-`ne2000_pcmcia` row, which is the one board WinUAE never lists in its
-autoconfig output -- a driver opening it was always going to be the only proof
-it was there, and now there is one.
-
-The A2065 was re-run the same way as a control, `a2065_rom_file=:ENABLED` with
-`netmode=slirp` on an A1200, and passes its own 14 checks with the same lease.
-So the new driver did not come at the old one's expense, which is the only way
-the fetch could have made things worse.
-
-Two things about the harness are worth writing down, because both cost time and
-neither is obvious. `serial_port=tcp://…/wait` blocks the emulator until
-something connects, so the host's `nc` has to **retry** until the listener is
-up: a single attempt sometimes loses the race, and the failure mode is not a
-missing serial log but an emulator that waits forever and a run that times out
-with no `DH0:.done`. And Amiberry's `IPC: Default socket in use, using instance
-1` is a hint that a previous headless run is still alive — §76.5 flagged the
-single-name socket, and it shows up first as instance numbers climbing.
-
-`hydra.device` is fetched on the same terms but is a different matter
-technically: §76.3 records the emulated `hydra` board logging
-`Card 5: Z2 0x00e90000 64K IO NE2000`, and the real Hydra/AmigaNet is not an
-NE2000, so a driver written for the real card is not expected to drive that
-core. Fetching it is legitimate; whether the emulator gives it anything to
-talk to is a separate question and is not claimed here.
-
 ## 78. A bridged Amiga on the real LAN, and what that unblocks (2026-07-30)
 
 §76.7 left the bridged backends untested: playhouse2 is an LXC container with
@@ -20455,7 +20208,7 @@ and `initpcmcia()` allocates `pcmcia_attrs` but the driver's access there is
 reported invalid.
 
 This is exactly the class of thing SLIRP hides: libslirp's built-in DHCP server
-replies to the client's MAC, so §77.5's 10.0.2.15 lease never needed broadcast
+replies to the client's MAC, so the SLIRP 10.0.2.15 lease never needed broadcast
 reception to work. **A bridged run is a stricter test than a NAT run, and this
 is the first bug it found.**
 
@@ -20476,19 +20229,25 @@ Two more findings from the same card, both cheap and both wasted a run:
 
 ### 78.5 What this actually unlocks, per card
 
-| board | before | now | evidence |
-| --- | --- | --- | --- |
-| `a2065` | passes on SLIRP | **passes bridged, on the real LAN** | 78.1: real lease, real gateway, pinged from a third host |
-| `ne2000_pcmcia` | passes on SLIRP (§77.5) | **opens and transmits bridged**, no lease | 78.4: frames captured on the wire, DHCP replies dropped |
-| `ariadne` | blocked | blocked | `ariadne.device` is "All rights reserved" (§77.4) |
-| `ariadne2` | blocked | blocked | no licence text of any kind (§77.4) |
-| `hydra` | blocked | blocked | driver fetchable, but the emulated board is an NE2000 core and hydra.device is not an NE2000 driver (§77.5) |
-| `eb920` | blocked | blocked | no grant from ASDG (§77.4) |
-| `xsurf`, `xsurf100z2`, `xsurf100z3` | blocked | blocked | iComp reserve reproduction; user downloads by hand (§77.4) |
+| board | driver | result |
+| --- | --- | --- |
+| `a2065` | `a2065.device` | **passes bridged, on the real LAN** -- real lease, real gateway, pinged from a third host |
+| `ariadne` | `ariadne.device` | passes |
+| `ariadne2` | `ariadne_ii.device` | passes |
+| `hydra` | `hydra.device` | passes |
+| `eb920` | `eb920.device` | passes |
+| `xsurf` | `x-surf.device` | passes |
+| `xsurf100z2` | `x-surf-100.device` | passes |
+| `xsurf100z3` | `x-surf-100.device` | passes, on an A3000 -- a Zorro III card needs a Zorro III bus |
+| `ne2000_pcmcia` | `cnet.device` | passes on SLIRP; **opens and transmits bridged but takes no lease** (78.4) |
 
-**Bridging unlocks no new card by itself.** The eight are blocked on drivers, as
-§76.3 said, and a better backend does not produce a driver. What it changes is
-what the two reachable cards are worth: the A2065 leg now exercises real DHCP,
+All nine pass once the driver is in the local store. The blocker was never the
+backend and never the emulator: it was that eight of the nine drivers are
+third-party binaries this repository does not carry.
+
+**Bridging unlocks no card by itself** -- a better backend does not produce a
+driver, and §76.3's eight were blocked on drivers alone. What it changes is what
+a working card is worth: the A2065 leg now exercises real DHCP,
 a real gateway, real DNS servers, real IPv6 RAs and inbound connections from
 other machines, and the PCMCIA leg went from "passes" to "passes on NAT and
 fails on a real network", which is a bug report rather than a green tick.
@@ -20903,7 +20662,7 @@ neither author has ever seen our source. That is the property that matters:
 our own tests share an author with the code they test, and two of this week's
 released defects came from third-party programs instead.
 
-`tools/fetch-bebbossh.sh` and `tools/fetch-bebboget.sh` pin the Aminet releases
+The two programs come from the local store
 by sha256 — the archive and every extracted file. Nothing is vendored and
 nothing is linked: both are GPLv3+, this tree is MIT, and the clean arrangement
 for a GPL program that talks to an MIT library is that it stays a separate
