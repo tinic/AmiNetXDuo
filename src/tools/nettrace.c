@@ -11,7 +11,7 @@
  *   megabyte at 1460 bytes a segment is well over a thousand records.
  *
  *   Nothing from src/.  Every call below is a published bsdsocket.library LVO,
- *   including the eight bpf_* ones.  Before this existed the capture path in
+ *   including the bpf_* ones.  Before this existed the capture path in
  *   src/bpf/ had 201 unit-test checks, no caller anywhere in the product, and
  *   all eight vectors pointing at bsd_enosys().
  *
@@ -66,6 +66,7 @@ enum
     ((ULONG)(io) | ((((ULONG)(l)) & 0x1fffUL) << 16) | \
      (((ULONG)(g)) << 8) | (ULONG)(n))
 
+#define FIONREAD_       IOC_(IOC_OUT_,   'f', 127, 4)
 #define BIOCGBLEN_      IOC_(IOC_OUT_,   'B', 102, 4)
 #define BIOCSBLEN_      IOC_(IOC_INOUT_, 'B', 102, 4)
 #define BIOCSETF_       IOC_(IOC_IN_,    'B', 103, 8)
@@ -169,20 +170,6 @@ static LONG nt_bpf_ioctl(struct Library *base, LONG channel, ULONG cmd,
                       : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (d1), "r" (a0)
                       : "a1", "cc", "memory");
-    return res;
-}
-
-/* LVO -0x198 */
-static LONG nt_bpf_data_waiting(struct Library *base, LONG channel)
-{
-    register struct Library *a6  __asm("a6") = base;
-    register LONG            d0  __asm("d0") = channel;
-    register LONG            res __asm("d0");
-
-    __asm __volatile ("jsr a6@(-408:W)"
-                      : "=r" (res)
-                      : "r" (a6), "r" (d0)
-                      : "d1", "a0", "a1", "cc", "memory");
     return res;
 }
 
@@ -514,7 +501,7 @@ static BOOL nt_cap_start(NtCap *cap, struct Library *base, const char *iface,
 static VOID nt_cap_stop(NtCap *cap)
 {
     NtStat st;
-    LONG   left;
+    ULONG  left = 0UL;
 
     if (!cap->open)
         return;
@@ -526,8 +513,9 @@ static VOID nt_cap_stop(NtCap *cap)
     (VOID)nt_bpf_ioctl(cap->base, cap->channel, BIOCGSTATS_, &st);
 
     /* Nothing should still be buffered after the drain above; if it is, the
-       trace stops short of the last few frames. */
-    left = nt_bpf_data_waiting(cap->base, cap->channel);
+       trace stops short of the last few frames. FIONREAD rather than
+       bpf_data_waiting(), which the autodoc defines as a 0/1 flag. */
+    (VOID)nt_bpf_ioctl(cap->base, cap->channel, FIONREAD_, &left);
 
     nt_out_close(&cap->out);
 
@@ -543,8 +531,8 @@ static VOID nt_cap_stop(NtCap *cap)
         tool_error("%lu frames were seen and NOT written: the trace has holes",
                    (LONG)st.bs_drop);
 
-    if (left > 0)
-        tool_error("%ld bytes were still buffered at the end of the trace",
+    if (left != 0UL)
+        tool_error("%lu bytes were still buffered at the end of the trace",
                    (LONG)left);
 
     if (cap->buf != NULL)

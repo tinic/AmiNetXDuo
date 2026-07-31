@@ -212,11 +212,19 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     child->sb_SigUrgMask   = 0;
     child->sb_SigEventMask = 0;
 
+    child->sb_SigAddressChangeMask = 0;   /* "Default for this mask is 0" */
+    child->sb_CanShareBases        = FALSE;
+
+    /* The autodoc's defaults: LOG_USER and 0xFF, not zero. LOG_USER is 1<<3
+       -- the NDK's <sys/syslog.h> ships the priorities and not the facility
+       codes -- and a mask of 0 would suppress every message rather than pass
+       them all. */
     child->sb_LogTag      = NULL;
     child->sb_LogStat     = 0;
-    child->sb_LogFacility = 0;
-    child->sb_LogMask     = 0;
+    child->sb_LogFacility = BSD_LOG_USER;
+    child->sb_LogMask     = 0xFF;
     child->sb_FDCallback  = NULL;
+    child->sb_ErrorHook   = NULL;
 
     child->sb_TimerOpen = FALSE;
 
