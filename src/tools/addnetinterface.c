@@ -55,8 +55,27 @@ enum
 /* Seconds. Both the default and the floor -- see the note at the top. */
 #define ADDIF_TIMEOUT       10UL
 
-/* The figure explain_status() already quotes for AMI_NET_ERR_NOMEM. */
+/*
+ * Below this much free, a failed start is a memory problem and no other
+ * explanation is worth printing. It is not what the stack costs -- 81 measured
+ * that at 432-439 KB resident plus the packet pool. A 512 KB machine reads
+ * about 73 KB here, measured, so the line sits well clear of both.
+ */
 #define ADDNETIF_MIN_FREE   (200UL * 1024UL)
+
+/*
+ * Out of memory, in the same words from both explainers below. `freemem` is
+ * the AvailMem() the caller already tested, so the number printed is the one
+ * that was judged.
+ */
+static VOID advise_out_of_memory(ULONG freemem)
+{
+    tool_advise_blank();
+    tool_advise("There is not enough free memory to start the network.");
+    tool_printf("  %lu bytes are free; the stack needs about 450K.\n", freemem);
+    tool_advise("Close some programs and try again. A machine with less than");
+    tool_advise("1 MB of RAM cannot run it at all.");
+}
 
 /*
  * Turn a stack error code into advice. `ifc` is the interface file already
@@ -97,10 +116,7 @@ static VOID explain_startup_failure(LONG err, const AmiIfConfig *ifc)
             break;
 
         case AMI_NET_ERR_NOMEM:
-            tool_advise_blank();
-            tool_advise("There was not enough free memory to start the network.");
-            tool_advise("Close some programs and try again; the stack needs");
-            tool_advise("roughly 200K free before it will start.");
+            advise_out_of_memory(AvailMem(MEMF_PUBLIC));
             break;
 
         case AMI_NET_ERR_KERNEL:
@@ -131,20 +147,17 @@ static VOID explain_library_failure(const AmiIfConfig *ifc)
 
     /*
      * Before blaming the interface. A 512 KB machine fails here: the stack
-     * logs "netstack: out of memory sizing the stack" to the serial port and
-     * puts nothing on screen, and the cable branch below would then send
-     * someone with no free memory to go and look at their wiring.
+     * logs its refusal to the serial port and puts nothing on screen, and the
+     * cable branch below would then send someone with no free memory to go and
+     * look at their wiring. tests/tools/run-oommsg.sh is the run that proves
+     * this branch is reached.
      */
     {
         ULONG freemem = AvailMem(MEMF_PUBLIC);
 
         if (freemem < ADDNETIF_MIN_FREE)
         {
-            tool_advise_blank();
-            tool_advise("There is not enough free memory to start the network.");
-            tool_printf("  %lu bytes are free; the stack needs roughly 200K.\n",
-                        freemem);
-            tool_advise("Close some programs and try again.");
+            advise_out_of_memory(freemem);
             return;
         }
     }

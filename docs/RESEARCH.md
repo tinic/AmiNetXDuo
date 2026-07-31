@@ -21154,6 +21154,24 @@ walks a decision tree that ends at "The card is fine, so what failed was
 getting an address: nothing answered. Check the cable" — it has no branch for
 running out of memory, so it blames the network. Worth a branch.
 
+Since fixed and, on this machine, read:
+
+```
+AddNetInterface: the network would not start
+
+  There is not enough free memory to start the network.
+  73248 bytes are free; the stack needs about 450K.
+  Close some programs and try again. A machine with less than
+  1 MB of RAM cannot run it at all.
+```
+
+73,248 bytes free, exit 20. The 200 KB the branch tests is a separator, not a
+requirement: the failed `OpenLibrary()` leaves the segment resident, so what is
+left at the moment `explain_library_failure()` reads `AvailMem()` is nowhere
+near either the 905 KB this machine starts with or the 432–439 KB the stack
+needs. `tests/tools/run-oommsg.sh` is the run; it needed
+`tools/amiberry-run.sh -a`, which did not exist when this was written — see 82.
+
 `tests/netstack/netstack_test` at 512 KB behaves differently and worse: it is
 250 KB smaller than the library, so it gets past sizing, fails later at
 `[ERR ] sana2: no memory for reader stack` (4 KB), comes up with no receiver,
@@ -21197,3 +21215,37 @@ wrapper is what does not.
 comfortable there. `README.md`, `dist/ReadMe` and `docs/user/ReadMe` now say
 so, and the source comments that cited "the 4 MB floor" cite this section
 instead.
+
+## 82. The harnesses could not pass an argument (2026-07-31)
+
+Every emulator harness wrote the same `s/Startup-Sequence`:
+
+```
+failat 9999
+c:envsetup
+<executable> >DH0:stdout.txt
+echo >DH0:.done "$RC"
+```
+
+The executable ran bare. So no command that takes a parameter could be put
+under test through `tools/fsuae-run.sh` or `tools/amiberry-run.sh` — which is
+most of them. The workarounds are all over the tree:
+`clients/dropbear/clientrun.c` exists to be a no-argument shim around a client
+that needs arguments, and `tests/tools` drives `AddNetInterface`, `netstat`,
+`ping`, `nc` and the rest through `ToolsSmoke`, an interpreter that reads a
+`commands.txt` and `Execute()`s each line. That is a reasonable rig for a
+scripted session of a dozen commands, and far too much machinery for "run this
+one command with this one argument and read what it says".
+
+81.3 is what it cost: the out-of-memory branch it asked for was written, built
+clean in all seven cross configs, passed the analyser — and could not be run,
+because reaching it means typing `AddNetInterface eth0` on a 512 KB machine.
+It shipped in v0.14.3 having never executed once.
+
+`tools/winuae-run.sh` already read `AMINETXDUO_GUEST_ARGS` and interpolated it
+into that line; the other two did not. All three now do, plus `-a` on the
+command line for the same string. An empty one writes the line these scripts
+always wrote, byte for byte — verified against a real no-argument run.
+
+`tests/tools/run-oommsg.sh` is the first test to use it, and the assertions
+were checked against 81.3's pre-fix transcript: all four fire on it.
