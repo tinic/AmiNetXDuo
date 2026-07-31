@@ -7,7 +7,7 @@
 #                                  [-t SECONDS] [-s SMALL_KB] [-g BIG_KB]
 #                                  [-S SAMPLE] [-w MASK] [-T TAG] [-b BUILD]
 #                                  [-B IFACE] [-N BOARD] [-p PORT] [-M RAM_MB]
-#                                  [-r] [-k]
+#                                  [-D DEADLINE] [-r] [-k]
 #
 # WHAT IT RUNS
 #
@@ -38,6 +38,15 @@
 #   an LXC container on a veth: its SYN-ACK carries an uncomputed TX-offload
 #   checksum that no NIC fixes up, our stack rejects it correctly, and the run
 #   reads as our defect.  This script checks both before it starts.
+#
+# TWO CLOCKS
+#
+#   The workload's clock is the GUEST's.  Under this load the emulated A3000
+#   runs at half real time -- measured, twice, at exactly 0.5 -- so -t 5400
+#   costs about three hours of wall clock.  The emulator deadline is sized for
+#   that (2x plus a margin) and -D overrides it; a deadline that assumed 1:1
+#   killed a run two thirds of the way through and made a healthy machine
+#   report as one that never finished.
 #
 # SIZES
 #
@@ -72,10 +81,11 @@ IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
 BOARD=a2065
 PORT="${AMINETXDUO_FITZ_PORT:-17713}"
 RAM_MB=64
+DEADLINE=""
 RELEASED=0
 KEEP=0
 
-while getopts "H:A:m:t:s:g:S:w:c:T:b:B:N:p:M:rk" opt; do
+while getopts "H:A:m:t:s:g:S:w:c:T:b:B:N:p:M:D:rk" opt; do
     case "$opt" in
         H) PEER="$OPTARG" ;;
         A) PEER_ADDR="$OPTARG" ;;
@@ -92,12 +102,13 @@ while getopts "H:A:m:t:s:g:S:w:c:T:b:B:N:p:M:rk" opt; do
         N) BOARD="$OPTARG" ;;
         p) PORT="$OPTARG" ;;
         M) RAM_MB="$OPTARG" ;;
+        D) DEADLINE="$OPTARG" ;;
         r) RELEASED=1 ;;
         k) KEEP=1 ;;
         *) echo "usage: $0 [-H user@host] [-A addr] [-m model] [-t secs]" \
                 "[-s small_kb] [-g big_kb] [-S sample] [-w mask] [-c every]" \
                 "[-T tag] [-b build] [-B iface] [-N board] [-p port]" \
-                "[-M ram_mb] [-r] [-k]" >&2
+                "[-M ram_mb] [-D deadline] [-r] [-k]" >&2
            exit 2 ;;
     esac
 done
@@ -287,12 +298,18 @@ export AMINETXDUO_RUN_TAG="$TAG"
 # by asking for the memory rather than by shrinking the test.
 export AMINETXDUO_AMIBERRY_EXTRA="z3mem_size=$RAM_MB${AMINETXDUO_AMIBERRY_EXTRA:+;$AMINETXDUO_AMIBERRY_EXTRA}"
 
-# The emulator must outlive the workload by enough to unwind and write the last
-# block; -t is a deadline on DH0:.done, not on the test.  A run that wedges
-# never writes .done at all, and the timeout IS the result.
-DEADLINE=$((SECONDS_RUN + 900))
+# The emulator must outlive the workload, and the workload is counted in GUEST
+# seconds while this deadline is in HOST seconds.  Under four concurrent copies
+# the emulated A3000 runs at half real time here, so the factor is 2 and not 1:
+# with 1, a run asked for three hours of Amiga time was killed at t=5500 with
+# every counter healthy, and reported as a machine that never finished.
+#
+# -t is a deadline on DH0:.done, not on the test.  A run that wedges never
+# writes .done at all, and the timeout IS the result -- which is exactly why
+# a deadline that fires for any other reason has to be ruled out first.
+DEADLINE="${DEADLINE:-$((SECONDS_RUN * 2 + 1800))}"
 
-echo "==> $SECONDS_RUN s workload, $DEADLINE s emulator deadline"
+echo "==> $SECONDS_RUN s of GUEST time, $DEADLINE s of host deadline"
 echo "==> $MODEL, ${RAM_MB} MB Zorro III, $BOARD on $IFACE"
 echo "==> small ${SMALL_KB} KB, big ${BIG_KB} KB, workers mask $WORKERS"
 echo "==> fitz: $(basename "$AMIGA_FITZ")"
@@ -343,6 +360,18 @@ if [ -f "$HD/stress-summary.txt" ]; then
     sed 's/^/  /' "$HD/stress-summary.txt"
 else
     echo "  (no summary -- the supervisor never got that far)"
+fi
+
+
+# Guest seconds against host seconds.  It is not a curiosity: everything the
+# stack sees -- timers, retransmit backoff, keepalive -- runs on the guest's
+# clock, and everything scheduling this run runs on the host's.
+WALL=$(grep -o "after [0-9]* s of host wall clock" \
+       "$ROOT/build/stress-$TAG-run.log" 2>/dev/null | grep -o "[0-9]*" || true)
+GUEST=$(awk "/^seconds /{print \$2}" "$HD/stress-summary.txt" 2>/dev/null || true)
+if [ -n "$WALL" ] && [ -n "$GUEST" ] && [ "$WALL" -gt 0 ]; then
+    echo "  $GUEST s of guest time in $WALL s of host wall clock" \
+         "($(awk "BEGIN{printf \"%.2f\", $GUEST / $WALL}")x real time)"
 fi
 
 echo
