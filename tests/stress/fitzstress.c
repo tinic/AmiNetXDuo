@@ -479,10 +479,10 @@ static VOID fs_join_num(char *out, const char *base, const char *stem, ULONG n)
 /*
  * One file, source to destination, through the worker's own buffer.
  *
- * `checkoff >= 0` means the source is supposed to carry the pattern from that
- * offset, and every buffer that comes off it is checked before it is written
- * on.  `fill` means there is no source file at all: the buffer is generated,
- * which is how the RAM: side is seeded without a network in the way.
+ * `check` means the source is supposed to carry the pattern, and every buffer
+ * that comes off it is checked before it is written on.  `fill` means there is
+ * no source file at all: the buffer is generated, which is how the RAM: side
+ * is seeded without a network in the way.
  *
  * Returns the bytes moved, or -1 on an I/O error (IoErr() is left set).
  */
@@ -533,9 +533,11 @@ static LONG fs_copy_file(StressWorker *w, const char *src, const char *dst,
                 goto out;
             if (got == 0)
             {
-                /* Short source: not an I/O error, but not what was asked
-                   for either, and it must not pass for a clean copy. */
-                SetIoErr(ERROR_OBJECT_NOT_FOUND);
+                /* End of file before the length that was asked for.  Not an
+                   I/O error, so IoErr() says nothing -- and a copy that
+                   stopped early must not pass for a clean one, which is why
+                   it is recorded here rather than left to the caller. */
+                fs_event(w->w_Role, "short", (LONG)off, (LONG)bytes);
                 goto out;
             }
 
@@ -1063,6 +1065,10 @@ static VOID fs_body_tree(StressWorker *w)
         {
             w->w_Errs++;
             fs_event(w->w_Role, "tree", (LONG)tc.tc_Errs, (LONG)slot);
+            /* A share that has gone away fails every entry instantly, and a
+               loop with no pause in it fills the event file with the same
+               line for as long as the run has left. */
+            Delay(50UL);
         }
         else
         {

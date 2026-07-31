@@ -292,6 +292,28 @@ echo "==> $MODEL, ${RAM_MB} MB Zorro III, $BOARD on $IFACE"
 echo "==> small ${SMALL_KB} KB, big ${BIG_KB} KB, workers mask $WORKERS"
 echo "==> fitz: $(basename "$AMIGA_FITZ")"
 
+# The single-connection claim, measured from the OTHER end and sampled
+# throughout rather than only at the brackets.  The guest's own netstat could
+# in principle be wrong about what it has open; `ss` on the server cannot be
+# wrong about what is connected to it.  Its per-socket counters come back too:
+# rwnd_limited is the share of the server's busy time spent blocked on the
+# Amiga's receive window, which is the number this workload exists to move.
+CONNLOG="$ROOT/build/stress-$TAG-conn.log"
+ssh "$PEER" "for i in \$(seq 1 $((DEADLINE / 30))); do
+                 printf 'C %s ' \"\$(date +%s)\"
+                 ss -tn state established \"( sport = :$PORT )\" |
+                     tail -n +2 | wc -l
+                 if [ \$((i % 10)) = 1 ]; then
+                     ss -tnie state established \"( sport = :$PORT )\" |
+                         tr '\n' ' ' | sed 's/^/D /'
+                     echo
+                 fi
+                 sleep 30
+             done" > "$CONNLOG" 2>&1 &
+CONN_PID=$!
+cleanup_all() { kill -TERM "$CONN_PID" 2>/dev/null || true; cleanup_peer; }
+trap cleanup_all EXIT INT TERM HUP
+
 set +e
 "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
     -t "$DEADLINE" \
@@ -370,6 +392,23 @@ awk -v addr="$PEER_ADDR:$PORT" '
     on && /ESTABLISHED/ && index($0, addr) { n++; ports = ports " " $2 }
     END { if (on) print "  bracket: " n " to " addr " (" ports ")" }
 ' "$HD/tools.txt" 2>/dev/null || echo "  (no netstat -a output)"
+
+kill -TERM "$CONN_PID" 2>/dev/null || true
+if [ -s "$CONNLOG" ]; then
+    awk '/^C /  { n[$3]++; if ($3 > max) max = $3; t++ }
+         END    { printf "  peer side: %d samples, most at once %d\n", t, max
+                  for (k in n)
+                      printf "    %s connection(s): %d samples\n", k, n[k] }
+        ' "$CONNLOG" | sort
+    # What the server's own socket says about the guest's window.  A large
+    # rwnd_limited share is the server sitting on data it is not allowed to
+    # send, which is the receive window and not the link.
+    grep '^D ' "$CONNLOG" | tail -1 | tr ' ' '\n' |
+        grep -E '^(snd_wnd|rcv_wnd|rwnd_limited|retrans|bytes_retrans|rto|rtt|cwnd|delivery_rate|rcv_ooopack):' |
+        sed 's/^/    /' || true
+else
+    echo "  peer side: no samples"
+fi
 
 echo
 echo "==== errors ==========================================================="
