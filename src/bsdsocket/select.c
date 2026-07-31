@@ -28,6 +28,9 @@
 #include <proto/timer.h>
 
 
+/* The largest timeout WaitSelect() accepts, from the autodoc. */
+#define BSD_SELECT_MAX_SECS 100000000UL
+
 /* fd_set is an array of 32-bit words, bit (fd % 32) of word (fd / 32). */
 #define BSD_FD_WORD(fd)     ((ULONG)(fd) / BSD_FD_BITS)
 #define BSD_FD_MASK(fd)     (1UL << ((ULONG)(fd) % BSD_FD_BITS))
@@ -615,7 +618,11 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
 
     if (timeout != NULL)
     {
-        if ((ULONG)timeout->tv_micro >= 1000000UL)
+        /* "the number of microseconds must be smaller than 1000000 and the
+           number of seconds must not be larger than 100000000" -- the seconds
+           bound catches a negative tv_secs too, since the field is unsigned. */
+        if ((ULONG)timeout->tv_micro >= 1000000UL ||
+            (ULONG)timeout->tv_secs > BSD_SELECT_MAX_SECS)
             return bsd_fail(SocketBase, AMI_EINVAL);
 
         poll_only = ((ULONG)timeout->tv_secs == 0 &&

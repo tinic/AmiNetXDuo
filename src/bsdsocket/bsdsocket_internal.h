@@ -86,6 +86,7 @@
 #define AMI_EINVAL             22
 #define AMI_ENFILE             23
 #define AMI_EMFILE             24
+#define AMI_ENOTTY             25
 #define AMI_ENOSPC             28
 #define AMI_EPIPE              32
 #define AMI_ERANGE             34
