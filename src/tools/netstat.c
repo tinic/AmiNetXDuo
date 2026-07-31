@@ -135,8 +135,9 @@ static VOID show_memory(const ToolStats *st)
     tool_printf("\nmemory:\n");
     tool_printf("\t%lu allocations outstanding, %lu at the peak, %lu refused\n",
                 st->alloc_live, st->alloc_peak, st->alloc_refused);
-    tool_printf("\t%lu sockets open, %lu at the peak, %lu programs have it "
-                "open\n", st->sockets, st->sockets_peak, st->opens);
+    tool_printf("\t%lu sockets open, %lu at the peak, %lu %s the library "
+                "open\n", st->sockets, st->sockets_peak, st->opens,
+                (st->opens == 1UL) ? "program has" : "programs have");
 
     if (st->have_pool)
     {
