@@ -499,6 +499,10 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     UINT            status;
 
     (VOID)flags;
+#ifndef AMINETXDUO_IPV6
+    /* No v6, so no zones; the parameter stays so there is one signature. */
+    (VOID)scope;
+#endif
 
     if (pool == NULL)
         return bsd_fail(base, AMI_ENETDOWN);
