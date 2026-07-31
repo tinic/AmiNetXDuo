@@ -204,7 +204,12 @@ LONG bsd_AddDomainNameServer(register STRPTR address __asm("a0"),
 {
     ULONG addr;
 
-    if (address == NULL || !ami_config_parse_ip((const char *)address, &addr))
+    /* The autodoc splits these: a bad parameter is EFAULT, a parameter that is
+       not a valid IP address is EINVAL. */
+    if (address == NULL)
+        return bsd_fail(SocketBase, AMI_EFAULT);
+
+    if (!ami_config_parse_ip((const char *)address, &addr))
         return bsd_fail(SocketBase, AMI_EINVAL);
 
     switch (netstack_dns_server_add(addr))
@@ -221,14 +226,17 @@ LONG bsd_RemoveDomainNameServer(register STRPTR address __asm("a0"),
 {
     ULONG addr;
 
-    if (address == NULL || !ami_config_parse_ip((const char *)address, &addr))
+    if (address == NULL)
+        return bsd_fail(SocketBase, AMI_EFAULT);
+
+    if (!ami_config_parse_ip((const char *)address, &addr))
         return bsd_fail(SocketBase, AMI_EINVAL);
 
     switch (netstack_dns_server_remove(addr))
     {
         case AMI_NET_OK:          return 0;
-        /* Removing one that was never there is ESRCH, not a parse failure. */
-        case AMI_NET_ERR_NONAME:  return bsd_fail(SocketBase, AMI_ESRCH);
+        /* "[ENOENT] The IP address to remove was not found" -- autodoc. */
+        case AMI_NET_ERR_NONAME:  return bsd_fail(SocketBase, AMI_ENOENT);
         case AMI_NET_ERR_STATE:   return bsd_fail(SocketBase, AMI_ENETDOWN);
         default:                  return bsd_fail(SocketBase, AMI_EINVAL);
     }

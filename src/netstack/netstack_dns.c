@@ -463,14 +463,19 @@ LONG netstack_set_domain_name(const char *name)
         return AMI_NET_OK;
     }
 
-    for (i = 0; i + 1 < (UWORD)sizeof(ns->ns_Config.resolver.domain) &&
-                name[i] != '\0'; i++)
+    /* Truncating a domain name silently would produce wrong lookups, so the
+       length is checked before anything is stored -- writing the truncated
+       form and then reporting failure left the resolver on a domain the caller
+       was told had been refused. */
+    for (i = 0; name[i] != '\0'; i++)
+    {
+        if (i + 1 >= (UWORD)sizeof(ns->ns_Config.resolver.domain))
+            return AMI_NET_ERR_CONFIG;
+    }
+
+    for (i = 0; name[i] != '\0'; i++)
         ns->ns_Config.resolver.domain[i] = name[i];
     ns->ns_Config.resolver.domain[i] = '\0';
-
-    /* Truncating a domain name silently would produce wrong lookups. */
-    if (name[i] != '\0')
-        return AMI_NET_ERR_CONFIG;
 
     return AMI_NET_OK;
 }
