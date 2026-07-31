@@ -2,6 +2,13 @@
 
 User-visible changes, newest first. Internal work is in the git log.
 
+## 0.15.1
+
+- Two programs adding an interface at the same moment can no longer be given the same one: the slot was picked and then the device opened, which takes long enough for the second to pick it again
+- `STATE=down` in `DEVS:NetInterfaces` is honoured. It was read from the file and then ignored, so an interface configured down came up anyway; `Online` brings it up as usual
+- `GetRouteInfo()` reports the interface each route belongs to. Static routes and the default gateway reported none at all, and the rest counted from 0 where the convention is to count from 1, so a program matching a route to an interface was off by one
+- `ShowNetServices` no longer says the list is what answered just now. It is what this machine has heard recently, and something listed may since have gone
+
 ## 0.15.0
 
 - New command `ShowNetServices`: what else on the local network is offering something. With nothing after it, the kinds of service answering; naming one -- `ShowNetServices _http._tcp` -- lists the machines behind it with their addresses, ports and, with `TXT`, their advertised settings. Printers, NAS boxes and media players turn up without being configured anywhere. The list is what answered in a few seconds and says so, since nothing on a `.local` network can say when the answers have stopped
