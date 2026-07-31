@@ -2347,6 +2347,10 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
  * on one interface, route out of the other -- and that case is exactly the one
  * we cannot implement.
  *
+ * Two refusals, and which one fires says why: ENETUNREACH when the bound
+ * address has no route to the destination at all, EADDRNOTAVAIL when it has
+ * one and the stack would still leave by somewhere else.
+ *
  * Zero to go ahead, -1 with the errno filed.
  */
 static LONG bsd_tcp_source_check(struct AmiSocketBase *SocketBase,

@@ -476,6 +476,12 @@ int main(int argc, char **argv)
              * and the bind names the interface address.  TCP has no
              * source-send, so this is refused rather than connected from the
              * wrong address.
+             *
+             * ENETUNREACH and not EADDRNOTAVAIL: the bound address exists, it
+             * just has no route to the destination.  EADDRNOTAVAIL is the
+             * other refusal -- the bound address can reach it and the stack
+             * would still leave by a different interface -- which takes two
+             * interfaces on one subnet to produce and cannot be reached here.
              */
             s = p_socket(base, P_AF_INET, P_SOCK_STREAM, 0);
             if (s >= 0)
@@ -489,9 +495,9 @@ int main(int argc, char **argv)
                 p_addr(&sa, P_LOOPBACK, PORT_TCP_LOOP);
                 rc = p_connect(base, s, &sa);
                 (VOID)p_check((BOOL)(rc == -1 &&
-                                     p_errno(base) == P_EADDRNOTAVAIL),
+                                     p_errno(base) == P_ENETUNREACH),
                               "connect to 127.0.0.1 from the interface "
-                              "address is EADDRNOTAVAIL",
+                              "address is ENETUNREACH",
                               p_errno(base));
                 (VOID)p_close(base, s);
             }

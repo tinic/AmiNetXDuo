@@ -5,7 +5,7 @@ User-visible changes, newest first. Internal work is in the git log.
 ## 0.15.1
 
 - A socket bound to one of the machine's addresses now sends from it. UDP and raw datagrams leave with the bound address as their source; a `connect()` that would have had to leave from another one is refused with `EADDRNOTAVAIL` instead of connecting from it and reporting the bound address back
-- A destination the bound address cannot reach is refused with `ENETUNREACH`. Such a datagram used to be handed to the stack and dropped inside it with the send already reported as successful
+- A destination the bound address cannot reach is refused with `ENETUNREACH`, on `connect()` as well as on a datagram. Such a datagram used to be handed to the stack and dropped inside it with the send already reported as successful
 - `sendto()` and `sendmsg()` on a raw socket honour an IPv6 zone -- `fe80::1%2` leaves by interface 2 -- as a UDP socket already did
 - Two programs adding an interface at the same moment can no longer be given the same one: the slot was picked and then the device opened, which takes long enough for the second to pick it again
 - `STATE=down` in `DEVS:NetInterfaces` is honoured. It was read from the file and then ignored, so an interface configured down came up anyway; `Online` brings it up as usual

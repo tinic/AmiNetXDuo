@@ -17,10 +17,13 @@
 #   returning len -- the send returned len before any of this existed, with
 #   whatever source NetX picked.
 #
-#   It also holds the two refusals: a destination the bound address cannot
-#   reach is ENETUNREACH, which used to be a datagram dropped inside
-#   _nx_ip_packet_send() with the send already reported successful; and a TCP
-#   connect() that would leave by another interface is EADDRNOTAVAIL.
+#   It also holds the refusals.  A destination the bound address cannot reach
+#   is ENETUNREACH -- for a datagram, which used to be dropped inside
+#   _nx_ip_packet_send() with the send already reported successful, and for a
+#   connect(), before the SYN.  The other refusal, EADDRNOTAVAIL, is a bound
+#   address that CAN reach the destination while the stack would still leave
+#   by a different interface; that takes two interfaces on one subnet and is
+#   not reachable here.
 #
 # WHAT IT DOES NOT PROVE.  The interesting case is two interfaces -- source on
 # one, route out of the other -- and the guest here has one.  What is measured
@@ -166,7 +169,7 @@ for want in \
     "an unbound datagram still leaves by the route" \
     "sending to loopback from the interface address is ENETUNREACH" \
     "connect to 127.0.0.1 from 127.0.0.1" \
-    "connect to 127.0.0.1 from the interface address is EADDRNOTAVAIL" \
+    "connect to 127.0.0.1 from the interface address is ENETUNREACH" \
     "bind to a foreign address is EADDRNOTAVAIL"
 do
     if grep -Fq "  ok   $want" "$REPORT"; then

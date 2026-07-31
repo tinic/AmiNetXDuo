@@ -37,10 +37,14 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   `nxd_tcp_socket_source_send()` in the NetX fork, which is a submodule change
   and a fourth upstream PR.
 
-  Not verified on hardware or in emulation: it needs two interfaces and the lab
-  guest has one. Single-interface paths are unchanged by construction (one
-  addressed interface means the route agrees with the bind), which is what the
-  conformance suite covers.
+  What a one-interface guest can show is shown, by `tests/tools/run-srcsel.sh`
+  (13 checks, green under Amiberry on SLIRP): the bound address really is the
+  source the receiver sees, on the interface and on loopback, and both
+  refusals fire. What it cannot show is the disagreement this is about --
+  source on one interface, route out of the other -- and one arm of the TCP
+  check goes with it: `EADDRNOTAVAIL`, for a bound address that *can* reach the
+  destination while the stack would still leave by somewhere else, needs two
+  interfaces on one subnet to produce. Reasoned about, not measured.
 - **IPv4 multicast is absent** -- no `IP_ADD_MEMBERSHIP`, `IP_MULTICAST_IF`,
   `IP_MULTICAST_TTL`, `IP_MULTICAST_LOOP`, no `ip_mreq`. Reopened 2026-07-31:
   it had been closed on the grounds that "nothing in the tree needs the
@@ -93,8 +97,9 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   Left:
   - `DEVS:NetInterfaces` keys (`GATEWAY6`, `ADDRESS6`) still call the plain
     parser, so a zoned value there is a clean refusal.
-  - No emulator coverage: verified only by the host parser tests. It wants two
-    interfaces to be meaningful, and the lab guest has one.
+  - No emulator coverage for the zone itself: verified only by the host parser
+    tests. It wants two interfaces to be meaningful, and the lab guest has one.
+    `tests/tools/run-srcsel.sh` covers the IPv4 half of the same machinery.
 - **Ship a Developer drawer: the NDK addendum.** ACCEPTED 2026-07-31. The
   archive ships no headers, so nothing we add past the NDK's 0..143 range can
   be reached by anyone else's code. Plan and the three permanent ABI decisions
