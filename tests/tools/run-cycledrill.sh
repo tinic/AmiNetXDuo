@@ -323,12 +323,13 @@ fi
 
 # ---- memory not given back by an expunge ----------------------------------
 #
-# The drill reports the difference in AvailMem() between two identical points
-# of two different expunge cycles, so anything paid once cancels and what is
-# left is per-cycle.  The budget is here rather than compiled into the guest
-# because it is a recorded measurement, not a property: see the note in
-# docs/BACKLOG.md.  Measured 2026-07-31 on Amiberry/A1200/a2065-on-SLIRP as
-# 12,568 to 12,640 bytes per cycle over eight cycles, dead linear.
+# The drill reports AvailMem() at the same instant of the first and the last
+# expunge cycle, divided by the cycles between them, so anything paid once
+# cancels and what is left is per-cycle.  The budget is here rather than
+# compiled into the guest because it is a recorded measurement, not a
+# property: see the note in docs/BACKLOG.md.  Measured 2026-07-31 on
+# Amiberry/A1200/a2065-on-SLIRP as 12,612 bytes per cycle over eight cycles,
+# dead linear.
 LEAKLINE=$(grep -E "^expunge leak: -?[0-9]+ bytes per cycle" "$REPORT" | tail -1 || true)
 LEAK_BUDGET="${AMINETXDUO_CYCLE_LEAK_BUDGET:-13312}"
 if [ -n "$LEAKLINE" ]; then
