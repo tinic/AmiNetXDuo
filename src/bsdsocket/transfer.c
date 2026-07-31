@@ -438,9 +438,57 @@ static LONG bsd_udp_maxdgram(NX_IP *ip, const NXD_ADDRESS *addr)
     return (LONG)(iface->nx_interface_ip_mtu_size - overhead);
 }
 
+#ifdef AMINETXDUO_IPV6
+/*
+ * RFC 4007's zone, as NetX wants it. sin6_scope_id names an interface counting
+ * from 1 (see aminetxduo/ifindex.h); nxd_udp_socket_source_send() wants an
+ * index into nx_ipv6_address[], so the two are not the same number and this is
+ * the map between them.
+ *
+ * The link-local address on that interface is the one wanted: a zone only
+ * qualifies a link-local destination, so the source has to be the address that
+ * shares its scope. -1 when the interface has none yet, which is the honest
+ * answer while DAD is still running -- the caller refuses the send rather than
+ * letting NetX pick an interface, because picking is exactly what the zone was
+ * given to prevent.
+ */
+static LONG bsd_ip6_zone_source(NX_IP *ip, ULONG scope)
+{
+    UINT i;
+
+    if (ip == NULL || scope == 0UL ||
+        scope > (ULONG)NX_MAX_PHYSICAL_INTERFACES)
+        return -1;
+
+    for (i = 0; i < (UINT)NX_MAX_IPV6_ADDRESSES; i++)
+    {
+        const NXD_IPV6_ADDRESS *a = &ip->nx_ipv6_address[i];
+
+        if (a->nxd_ipv6_address_valid == 0)
+            continue;
+        if (a->nxd_ipv6_address_state != NX_IPV6_ADDR_STATE_VALID)
+            continue;
+        if (a->nxd_ipv6_address_attached != &ip->nx_ip_interface[scope - 1UL])
+            continue;
+        if ((a->nxd_ipv6_address[0] & 0xFFC00000UL) != 0xFE800000UL)
+            continue;
+
+        return (LONG)a->nxd_ipv6_address_index;
+    }
+
+    return -1;
+}
+
+/* fe80::/10 -- the only scope the zone notation qualifies (RFC 4007 11.1). */
+static BOOL bsd_ip6_is_linklocal(const ULONG v6[4])
+{
+    return ((v6[0] & 0xFFC00000UL) == 0xFE800000UL) ? TRUE : FALSE;
+}
+#endif
+
 static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags,
-                         const NXD_ADDRESS *addr, UINT port)
+                         const NXD_ADDRESS *addr, UINT port, ULONG scope)
 {
     NX_PACKET_POOL *pool   = netstack_pool();
     NX_IP          *ip     = netstack_ip();
@@ -497,6 +545,29 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_ENOBUFS);
     }
 
+#ifdef AMINETXDUO_IPV6
+    /*
+     * A zoned link-local destination leaves by the interface the zone names,
+     * not by whichever one NetX would route to. Refused rather than guessed
+     * when that interface has no usable link-local address of its own.
+     */
+    if (addr->nxd_ip_version == NX_IP_VERSION_V6 && scope != 0UL &&
+        bsd_ip6_is_linklocal(addr->nxd_ip_address.v6))
+    {
+        LONG source = bsd_ip6_zone_source(ip, scope);
+
+        if (source < 0)
+        {
+            nx_packet_release(packet);
+            return bsd_fail(base, AMI_EADDRNOTAVAIL);
+        }
+
+        status = nxd_udp_socket_source_send(&sock->as_Nx.udp, packet,
+                                            (NXD_ADDRESS *)addr, port,
+                                            (UINT)source);
+    }
+    else
+#endif
     /* nxd_, not nx_: the v4 wrapper wraps the address and calls this. */
     status = nxd_udp_socket_send(&sock->as_Nx.udp, packet,
                                  (NXD_ADDRESS *)addr, port);
@@ -933,7 +1004,8 @@ static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
    recv/recvfrom/recvmsg cannot drift apart. */
 static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
                          const struct iovec *iov, LONG iovcnt, LONG len,
-                         LONG flags, const NXD_ADDRESS *addr, UINT port)
+                         LONG flags, const NXD_ADDRESS *addr, UINT port,
+                         ULONG scope)
 {
     BsdIovCursor cur;
     LONG         result;
@@ -948,7 +1020,8 @@ static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
     else if ((sock->as_Flags & ASF_TCP) != 0)
         result = bsd_send_tcp(base, sock, &cur, len, flags);
     else
-        result = bsd_send_udp(base, sock, &cur, len, flags, addr, port);
+        result = bsd_send_udp(base, sock, &cur, len, flags, addr, port,
+                              scope);
 
     bsd_nx_leave(base);
 
@@ -1201,8 +1274,10 @@ LONG bsd_send(register LONG sock_fd __asm("d0"),
     iov.iov_base = buf;
     iov.iov_len  = (size_t)len;
 
+    /* Connected: the zone is the one connect() was given. */
     return bsd_send_iov(SocketBase, sock, &iov, 1, len, flags,
-                        &sock->as_PeerAddr, sock->as_PeerPort);
+                        &sock->as_PeerAddr, sock->as_PeerPort,
+                        sock->as_ScopeId);
 }
 
 LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
@@ -1216,7 +1291,8 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
     AmiSocket    *sock = bsd_lookup(SocketBase, sock_fd);
     struct iovec  iov;
     NXD_ADDRESS   addr;
-    UINT          port = 0;
+    UINT          port  = 0;
+    ULONG         scope = 0;
 
     if (bsd_transfer_check(SocketBase, sock, len, flags) != 0)
         return -1;
@@ -1233,6 +1309,7 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
     }
 
     bsd_addr_from_v4(&addr, 0UL);
+    scope = 0UL;
 
     if ((flags & MSG_OOB) != 0)
         return bsd_send_oob(SocketBase, sock, (const UBYTE *)buf, len);
@@ -1245,11 +1322,12 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
             if ((sock->as_Flags & ASF_CONNECTED) == 0)
                 return bsd_fail(SocketBase, AMI_EDESTADDRREQ);
 
-            addr = sock->as_PeerAddr;
-            port = sock->as_PeerPort;
+            addr  = sock->as_PeerAddr;
+            port  = sock->as_PeerPort;
+            scope = sock->as_ScopeId;
         }
         else if (bsd_sockaddr_get(SocketBase, to, tolen, &addr, &port,
-                                  NULL) != 0)
+                                  &scope) != 0)
         {
             return -1;
         }
@@ -1262,7 +1340,8 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
     iov.iov_base = buf;
     iov.iov_len  = (size_t)len;
 
-    return bsd_send_iov(SocketBase, sock, &iov, 1, len, flags, &addr, port);
+    return bsd_send_iov(SocketBase, sock, &iov, 1, len, flags, &addr, port,
+                        scope);
 }
 
 LONG bsd_recv(register LONG sock_fd __asm("d0"),
@@ -1346,7 +1425,8 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
 {
     AmiSocket  *sock = bsd_lookup(SocketBase, sock_fd);
     NXD_ADDRESS addr;
-    UINT        port = 0;
+    UINT        port  = 0;
+    ULONG       scope = 0;
     LONG        total;
 
     if (bsd_transfer_check(SocketBase, sock, 0, flags) != 0)
@@ -1384,13 +1464,14 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
             if ((sock->as_Flags & ASF_CONNECTED) == 0)
                 return bsd_fail(SocketBase, AMI_EDESTADDRREQ);
 
-            addr = sock->as_PeerAddr;
-            port = sock->as_PeerPort;
+            addr  = sock->as_PeerAddr;
+            port  = sock->as_PeerPort;
+            scope = sock->as_ScopeId;
         }
         else if (bsd_sockaddr_get(SocketBase,
                                   (const struct sockaddr *)msg->msg_name,
                                   (socklen_t)msg->msg_namelen,
-                                  &addr, &port, NULL) != 0)
+                                  &addr, &port, &scope) != 0)
         {
             return -1;
         }
@@ -1401,7 +1482,8 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
     }
 
     return bsd_send_iov(SocketBase, sock, msg->msg_iov,
-                        (LONG)msg->msg_iovlen, total, flags, &addr, port);
+                        (LONG)msg->msg_iovlen, total, flags, &addr, port,
+                        scope);
 }
 
 LONG bsd_recvmsg(register LONG sock_fd        __asm("d0"),
