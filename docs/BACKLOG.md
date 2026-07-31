@@ -11,28 +11,6 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
 
 ## Open — no decision taken
 
-- **`vsyslog` is `ENOSYS`.** `LOGSTAT`/`LOGMASK`/`LOGFACILITY`/`LOGTAGPTR` are
-  stored and never read, which costs a caller nothing. Implementing syslog is
-  the open part; the two tags below are not.
-- **`SIOCGIFADDR` missing from `bpf_ioctl`.** Needs a setter, not a wider attach
-  call — the address changes over a DHCP lease.
-- **`bpf_read()` never blocks.** Gate on a non-zero `BIOCSRTIMEOUT`, as 4.4BSD
-  does; `bpf_set_interrupt_mask` gives `EINTR` a producer. The wait must be on the
-  *calling* task's signals — never a `MsgPort` made on another Process (544398f).
-- **Multicast socket options absent** — `IP_MULTICAST_TTL/IF/LOOP`,
-  `IP_ADD_MEMBERSHIP`, plus `IP_OPTIONS` and `IP_RECVDSTADDR`. Wanted eventually
-  for Bonjour. Also `SO_RCVLOWAT`, which `recv()`'s documented behaviour depends
-  on, and `SO_DEBUG`/`SO_DONTROUTE`/`SO_SNDLOWAT`.
-- **`SBTC_IP_FILTER_HOOK` unserviced** — needs the `mbuf_*` family, which is why
-  both are stubbed.
-- **`AAMR_AddressInUse` / `AAMR_MaskChangeFailed` never produced**;
-  `AAMP_BOOTP`/`SLOWAUTO`/`FASTAUTO` answer `AAMR_Ignored`.
-- **`IFQ_MaxReadRequests` / `MaxWriteRequests` unanswered.** The doc types them
-  `(LONG)` where all 40 neighbours are `(LONG *)` — almost certainly a doc typo,
-  and writing through a scalar would corrupt a caller.
-- **The freeze is explained but not proven.** The scheduler-state defect (`4a1ad30`)
-  accounts for the Enforcer hits; the link to the hang is reasoning. Never
-  reproduced locally — our emulator cannot reach the packet rate.
 - **`ShowNetServices` cannot browse every type at once.** With no type it runs the
   RFC 6763 §9 meta-query and lists the types present; listing every instance of
   every type would mean starting one continuous query per type found. They would
@@ -60,6 +38,40 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   switched-off machine lingering, which every other mDNS browser does too.
 
 ## Decided against — do not "fix"
+
+- **`vsyslog()` stays `ENOSYS`**, 2026-07-31. The two tags that aim it,
+  `SBTC_LOG_FILE_NAME` and `SBTC_LOG_HOOK`, are refused (above), so a syslog
+  that reached only the serial debug log would give a caller no way to direct
+  its output or read it back. `LOGSTAT`/`LOGMASK`/`LOGFACILITY`/`LOGTAGPTR`
+  stay stored and unread, which costs a caller nothing. If syslog is ever
+  wanted it is those three together, not the call on its own.
+- **`AAMR_AddressInUse` / `AAMR_MaskChangeFailed` are never produced**,
+  2026-07-31. Answering the first truthfully means duplicate address detection
+  -- probing for the address before committing to it -- which is the real
+  feature and a change in what the stack puts on the wire, needing a second
+  machine holding the address to test against. The result code is downstream
+  of that, and inventing one without the probe would be a worse answer than
+  `AAMR_Ignored`. Raise it as DAD if it is wanted, not as a code.
+
+- **`SBTC_IP_FILTER_HOOK` and the `mbuf_*` family**, 2026-07-31. The hook hands
+  a filter an mbuf chain, so servicing it means synthesising BSD mbufs around
+  NX_PACKETs for every IP packet in and out -- a packet-buffer abstraction the
+  stack does not otherwise have, on the hot path, for a facility whose only
+  real caller is a firewall nobody has asked for. Both stay stubbed together.
+- **`IFQ_MaxReadRequests` / `IFQ_MaxWriteRequests` stay unanswered**,
+  2026-07-31. The autodoc types them `(LONG)` where all 40 neighbours are
+  `(LONG *)`, and on a query a bare `LONG` has nowhere to put the answer, so it
+  is almost certainly a typo -- but writing through a `ti_Data` that a caller
+  passed as a scalar would corrupt its memory, and there is no way to tell the
+  two apart at the call. They fall to the `default:` branch, which ignores
+  unknown tags rather than refusing them, so nothing else in the list is lost.
+  The same reasoning is in `src/bsdsocket/interfaces.c` beside the tag.
+
+- **Multicast socket options**, 2026-07-31: `IP_MULTICAST_TTL/IF/LOOP`,
+  `IP_ADD_MEMBERSHIP`, `IP_OPTIONS`, `IP_RECVDSTADDR`, `SO_RCVLOWAT`,
+  `SO_DEBUG`/`SO_DONTROUTE`/`SO_SNDLOWAT`. The one caller that wanted them was
+  Bonjour, and the mDNS module joins its own groups through NetX directly, so
+  nothing in the tree needs the socket-level API.
 
 - **`SBTC_LOG_FILE_NAME` and `SBTC_LOG_HOOK` are refused**, 2026-07-31. The
   autodoc sanctions it in their own entries: "This tag is an extension to the
