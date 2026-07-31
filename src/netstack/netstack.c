@@ -1677,9 +1677,11 @@ LONG netstack_interface_remove(UWORD index, BOOL force)
     if (ns->ns_DhcpCreated)
         (VOID)netstack_interface_dhcp_stop(index, TRUE);
 
+#ifdef AMINETXDUO_BPF
     /* src/bpf/ holds the AmiSana2If as an opaque cookie, so it has to stop
        being reachable before the memory goes. */
     ami_netstack_capture_detach_one(ns, index);
+#endif
 
     caller = ami_netstack_enter_alloc();
     if (caller == NULL)
@@ -2234,7 +2236,9 @@ LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
     if ((UWORD)slot >= ns->ns_IfaceCount)
         ns->ns_IfaceCount = (UWORD)(slot + 1);
 
+#ifdef AMINETXDUO_BPF
     ami_netstack_capture_attach_one(ns, (UWORD)slot);
+#endif
 
 #ifdef AMINETXDUO_IPV6
     /*
