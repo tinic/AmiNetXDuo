@@ -2,7 +2,7 @@
 
 User-visible changes, newest first. Internal work is in the git log.
 
-## Unreleased
+## 0.14.3
 
 - Fixed closing the last `bsdsocket.library` handle never returning, so a program that opens the library, uses it and exits no longer hangs
 - `AddNetInterface` now says when the network could not start for want of memory, instead of sending you to check the cable
