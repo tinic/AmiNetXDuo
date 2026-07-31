@@ -77,6 +77,18 @@ set(want 0)          # words still needed to complete a displacement
 set(words "")
 set(bad "")
 
+# The highest address objdump printed, for the second data discriminator
+# below.  One pre-pass, because the walk needs the answer from its first line.
+set(max_addr 0)
+foreach(line IN LISTS dis_lines)
+    if(line MATCHES "^ +([0-9a-fA-F]+):\t")
+        math(EXPR a "0x${CMAKE_MATCH_1}")
+        if(a GREATER max_addr)
+            set(max_addr "${a}")
+        endif()
+    endif()
+endforeach()
+
 # DATA READ AS CODE.
 #
 # On m68k-amigaos there is no .rodata: string literals live in the plain .text
@@ -90,11 +102,19 @@ set(bad "")
 # string elsewhere in the library shifted the bytes onto an even address and
 # started failing the build.
 #
-# The discriminator is that the m68k fetches instructions on even addresses
-# ONLY.  A computed target that is odd cannot be a branch destination on any
-# 68k, so the bytes were data.  The real defect this check exists for lands
-# twelve bytes short of a function -- even, and inside a function -- so
-# nothing it was written to catch is lost.
+# The first discriminator is that the m68k fetches instructions on even
+# addresses ONLY.  A computed target that is odd cannot be a branch destination
+# on any 68k, so the bytes were data.
+#
+# The second is range: a target outside the disassembled code cannot be a
+# branch destination either.  The 68k has no code there to reach.  A switch
+# dispatch table in bsdsocket.library hit exactly this -- {UWORD case, ULONG
+# target} pairs whose second half read as 60FF at an even line start, giving a
+# 393216-byte displacement to an address past the end of the image.
+#
+# The real defect this check exists for lands twelve bytes short of a function
+# -- even, and inside the code -- so neither rule loses anything it was written
+# to catch.
 #
 # Attributing the data to a symbol does not help: objdump counts it as part of
 # whatever function precedes it, so the run has no boundary to detect.
@@ -135,6 +155,8 @@ foreach(line IN LISTS dis_lines)
                 math(EXPR odd "${target} % 2")
                 if(odd EQUAL 1)
                     # Data, not an instruction -- see the note above.
+                elseif(target LESS 0 OR target GREATER max_addr)
+                    # Ditto: nothing to branch to out there.
                 elseif(NOT target IN_LIST code_addrs)
                     list(APPEND bad
                          "0x${branch_hex}: branch by ${disp} bytes lands inside a function, not on one")
