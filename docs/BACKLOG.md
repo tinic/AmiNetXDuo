@@ -11,13 +11,44 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
 
 ## Open — no decision taken
 
-- **TLS has no fuzz driver.** `tests/fuzz/` now covers bpf, config, dns, mdns
-  and dhcp; the record layer and the X.509 path are the ones left, and they are
-  the headline feature. With no MMU a parser bug is not a crashed process, it
-  is arbitrary code execution with the machine's privileges. `fuzz_dhcp.c` is
-  the closest pattern to copy -- it #includes the vendored translation unit to
-  reach a static parser and stubs the ThreadX surface in `fuzz_txstub.c`.
-  Raised in external review 2026-07-31.
+- **Three nx_secure parsers read past the buffer they were given.** All three
+  were found by `fuzz_tls_record` and `fuzz_tls_x509`, all three are reachable
+  from a hostile server before any key exists, and none is fixed -- the fix
+  belongs in `third_party/netxduo` and is a submodule bump. Each driver
+  allocates a few bytes of documented slop so the sweep is not stuck
+  re-reporting them; set `FR_KNOWN_SLOP` / `FX_KNOWN_SLOP` to 0 to reproduce.
+
+  - `_nx_secure_x509_asn1_tlv_block_parse()` does `current_tag = buffer[0]` one
+    statement before it tests `*buffer_length < 1`, so every caller that runs
+    out of data over-reads by one byte. A two-byte certificate through
+    `_nx_secure_x509_certificate_parse()` reaches it, and so does
+    `tls_store.c`'s issuer walk. `fuzz_tls_x509 -r 1 20000`.
+  - `_nx_secure_tls_process_serverhello()` reads the ciphersuite and the
+    compression method without bounding them: after the session ID it has
+    checked only `35 + session_id_length <= message_length` and then reads
+    three more bytes. A 38-byte ServerHello with `session_id_length` 2 or 3
+    walks off the end. `fuzz_tls_record -r 1 500000`.
+  - `_nx_secure_tls_process_certificate_request()` reads the certificate-type
+    count before testing `message_length`, so a zero-length
+    CertificateRequest reads one byte past. Same sweep.
+
+  On the target `packet_buffer` is `tls_conn.c`'s `tc_RecordBuffer`, a heap
+  allocation holding one record, so a record that fills it turns each of these
+  into a read past a heap block on a machine with nothing to catch it.
+  Found 2026-07-31.
+- **TLS parsers that need crypto have no fuzz driver.** `fuzz_tls_record` and
+  `fuzz_tls_x509` cover the record header, the handshake header, ServerHello
+  and its extensions, CertificateRequest, the Certificate message and the
+  X.509 DER walk. ServerKeyExchange, CertificateVerify and Finished are not
+  covered: all three dispatch on a negotiated ciphersuite into
+  `NX_CRYPTO_METHOD` entries, so a driver has to link `nx_crypto` and
+  `ami_tls_crypto.c` -- and `ami_tls_crypto.c` includes `exec/types.h` and
+  casts pointers to a 32-bit `ULONG`, so it needs a 32-bit host build the way
+  `fuzz_mdns` does. Neither is `tls_resume_take_ticket()`, which is what parses
+  a TLS 1.2 NewSessionTicket (nx_secure only parses one under TLS 1.3, which is
+  off), nor `tls_store.c`'s issuer-name walk; both live in files that include
+  `proto/dos.h` and do not build on a host. The header comment in
+  `tests/fuzz/CMakeLists.txt` is the current list.
 - **No open/expunge/reopen drill.** The soak suite covers steady state; what
   historically kills long-lived Amiga stacks is cycling -- Online/Offline
   bounces and library expunge/reopen. `sana2_rx.c`'s last-resort path still
