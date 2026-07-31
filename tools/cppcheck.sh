@@ -169,6 +169,21 @@ HDR
     exit 0
 fi
 
+# Findings from a different cppcheck are not comparable with these -- versions
+# differ by hundreds of syntaxError lines on files nobody touched, and diffing
+# them buries a real regression in noise.  Say so and stop rather than report a
+# failure that means nothing: the stage has been red on the gate host for a
+# while for exactly this reason, and a stage nobody believes is worse than one
+# that does not run.
+BASE_VER=$(sed -n 's/^# Produced by Cppcheck \(.*\)\.$/\1/p' "$BASELINE")
+HAVE_VER=$(cppcheck --version 2>/dev/null | sed 's/^Cppcheck //')
+if [ -n "$BASE_VER" ] && [ "$BASE_VER" != "$HAVE_VER" ]; then
+    printf '\033[33mcppcheck %s here, baseline from %s -- not comparable, skipping.\033[0m\n' \
+           "${HAVE_VER:-unknown}" "$BASE_VER"
+    echo "Install $BASE_VER, or regenerate with tools/cppcheck.sh --update."
+    exit 0
+fi
+
 grep -v '^#' "$BASELINE" | grep -v '^$' | sort > "$WORK/base" || true
 NEW=$(comm -23 "$WORK/found" "$WORK/base" || true)
 GONE=$(comm -13 "$WORK/found" "$WORK/base" || true)
