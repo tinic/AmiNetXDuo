@@ -20336,3 +20336,172 @@ technically: §76.3 records the emulated `hydra` board logging
 NE2000, so a driver written for the real card is not expected to drive that
 core. Fetching it is legitimate; whether the emulator gives it anything to
 talk to is a separate question and is not claimed here.
+
+## 78. A bridged Amiga on the real LAN, and what that unblocks (2026-07-30)
+
+§76.7 left the bridged backends untested: playhouse2 is an LXC container with
+no `/dev/net/tun` and no capability to grant. playhouse3 is a KVM guest, so
+this is that section's missing measurement. Amiberry master `0fd577e`, SDL3,
+Debian 13, `cap_net_admin,cap_net_raw=eip` on the binary, host NIC `ens18` on
+192.168.1.0/24.
+
+**It works, over libpcap, and the guest is a machine on the LAN in every sense
+that matters.** `tools/amiberry-run.sh` and `tests/netstack/run-amiberry.sh`
+are the harness.
+
+### 78.1 The evidence, because "it got an address" is not enough
+
+```
+7990: 'ens18' 00:80:10:49:00:01
+  address 192.168.1.134   netmask 255.255.255.0   gateway 192.168.1.1
+  hostname 'amiga', 1 interface(s), 2 name server(s)
+13 checks, 0 failures -- PASS
+```
+
+From a `tcpdump` on the host, filtered to the emulated card's MAC:
+
+| what | frame |
+| --- | --- |
+| the guest asks the real DHCP server | `00:80:10:49:00:01 > ff:ff:ff:ff:ff:ff … BOOTP/DHCP, Request` |
+| it ARPs for the real gateway | `Request who-has 192.168.1.1 tell 192.168.1.134` |
+| the real router answers | `Reply 192.168.1.1 is-at e4:3a:6e:03:d5:ba` |
+| it pings the real gateway | `192.168.1.134 > 192.168.1.1: ICMP echo request` … `reply` |
+| the real router sends it an IPv6 RA | `fe80::e63a:6eff:fe03:d5ba > fe80::280:10ff:fe49:1: ICMP6, router advertisement` |
+
+And from **another host on the LAN** (a Mac at 192.168.1.193, unrelated to the
+emulator), thirty pings, thirty replies:
+
+```
+64 bytes from 192.168.1.134: icmp_seq=0 ttl=128 time=13.580 ms
+? (192.168.1.134) at 0:80:10:49:0:1 on en0 ifscope [ethernet]
+```
+
+The ARP cache entry is the part worth keeping: a third machine resolved the
+Amiga's IP to the emulated A2065's own MAC. That cannot happen through NAT.
+
+The IPv6 router advertisement is a bonus nobody asked for. A bridged guest sees
+real SLAAC and a real /64, which is a network `tests/ipv6` has never had.
+
+### 78.2 Three traps, all of which pass silently
+
+**`netmode=<name>` is wrong and does nothing.** The board option is an
+`EXPANSIONBOARD_MULTI`, and `cfgfile_read_rom_settings()` picks the item by
+looking for each candidate *as an option of its own* — so the name goes in
+bare, `a2065_rom_options=mac=…,ens18`. Written as `netmode=ens18` it parses as
+an option called `netmode`, matches no item, and selects index 0, which is
+slirp. §76.3's spelling therefore appeared to work because the value it was
+"selecting" was the default anyway. WinUAE's own saved configs write the bare
+name, which is what `tools/winuae-run.sh` already does.
+
+**`headless=true` does not make it headless enough.**
+`osdep_platform_init_sdl()` calls `SDL_Init(SDL_INIT_VIDEO | …)` before any
+config is read and aborts the process when there is no driver. §76.1's
+measurement was taken through an X11-forwarded ssh session without anyone
+noticing; the same command fails on a runner with `SDL could not initialize!
+SDL_Error: No available video device`. `SDL_VIDEODRIVER=dummy` and a cleared
+`DISPLAY` are what make it reproducible, and the harness sets both.
+
+**The emulator's log is not on stdout.** `write_log()` goes to Amiberry's own
+`amiberry_log.txt`, which is off by default; without `--log` the process prints
+one line about an IPC socket. Since the backend assertion is read out of that
+log, `--log` is load-bearing rather than diagnostic.
+
+The assertion itself is the point. `ethernet_getselectionname()` returns
+"slirp" for any name it cannot match, so every one of the three mistakes above
+produces a run that gets 10.0.2.15, passes fourteen checks, and proves nothing.
+`tools/amiberry-run.sh` refuses a bridged run that did not log
+`UAENET: '<name>' open successful`.
+
+### 78.3 TAP cannot be used on this host, and it is not Amiberry's fault
+
+`uaenet_tap_enumerate()` lists only bridges and existing tap devices from
+`/sys/class/net`; playhouse3 has `ens18` and `lo`. Creating either needs
+`CAP_NET_ADMIN` on `ip`, and making a bridge *useful* means enslaving `ens18`
+to it — which moves the host's only address off the interface it is reachable
+on. Asked for a bridge that does not exist, the run came up on SLIRP and the
+assertion caught it:
+
+```
+!! ASKED FOR 'br0' AND DID NOT GET IT.
+7990: 'slirp' 00:80:10:49:00:01
+```
+
+So pcap is the backend on a host whose networking is not ours to reconfigure,
+and TAP is the backend on a host where somebody has already made a bridge.
+Nothing measured here says TAP does not work; it says this host has nothing to
+attach it to.
+
+### 78.4 cnet.device, bridged: the card comes up, the lease does not
+
+`ne2000_pcmcia` + `cnet.device` on `ens18` reaches `12 checks, 0 failures` with
+a link-local address and no gateway. The driver opens, the stack comes up, and
+the guest is demonstrably transmitting on the real LAN — DHCP, ARP, mDNS for
+`amiga.local`, IPv6 router solicitation — all sourced from the card's MAC. The
+real router answered its IPv6 solicitation. What it never gets is a DHCP lease.
+
+**The server does answer.** Captured on the host, five times, one per retry:
+
+```
+52:54:05:00:00:00 > ff:ff:ff:ff:ff:ff  0.0.0.0.68 > 255.255.255.255.67: BOOTP/DHCP, Request
+e4:3a:6e:03:d5:ba > ff:ff:ff:ff:ff:ff  192.168.1.1.67 > 255.255.255.255.68: BOOTP/DHCP, Reply
+```
+
+Every reply is **broadcast**, and none of them reaches the guest, while the
+unicast IPv6 RA does. `ne2000_canreceive()` drops a broadcast frame unless
+`RXCR & 0x04` (accept-broadcast) is set, so the card is being left without that
+bit. Consistent with it: the guest logs `getbyte from invalid address 00a20000`
+twice — the card configuration registers live in attribute memory at 0x20000,
+and `initpcmcia()` allocates `pcmcia_attrs` but the driver's access there is
+reported invalid.
+
+This is exactly the class of thing SLIRP hides: libslirp's built-in DHCP server
+replies to the client's MAC, so §77.5's 10.0.2.15 lease never needed broadcast
+reception to work. **A bridged run is a stricter test than a NAT run, and this
+is the first bug it found.**
+
+Two more findings from the same card, both cheap and both wasted a run:
+
+- **8 MB of Zorro II Fast RAM hides the PCMCIA slot.** 0x200000-0x9fffff covers
+  the A1200's PCMCIA common window at 0x600000. That is true of the real
+  machine too, but under emulation nothing says so: the card logs as
+  `inserted=1`, the backend opens, and the driver returns
+  `cannot open cnet.device unit 0 (-1)`. `tools/amiberry-run.sh` drops to 4 MB
+  for this board.
+- **The MAC cannot be set on this board.** `initpcmcia()` calls
+  `ne2000->init(state, NULL)` with no `autoconfig_info`, so
+  `ne2000_init_2()` gets a NULL config string, `ethernet_getmac()` fails, and
+  the address is always `52:54:05:00:00:00`. Not the cause of the lease
+  failure — an A2065 forced to `00:80:10:00:00:00` gets a lease fine — but it
+  means the card cannot hold a DHCP reservation.
+
+### 78.5 What this actually unlocks, per card
+
+| board | before | now | evidence |
+| --- | --- | --- | --- |
+| `a2065` | passes on SLIRP | **passes bridged, on the real LAN** | 78.1: real lease, real gateway, pinged from a third host |
+| `ne2000_pcmcia` | passes on SLIRP (§77.5) | **opens and transmits bridged**, no lease | 78.4: frames captured on the wire, DHCP replies dropped |
+| `ariadne` | blocked | blocked | `ariadne.device` is "All rights reserved" (§77.4) |
+| `ariadne2` | blocked | blocked | no licence text of any kind (§77.4) |
+| `hydra` | blocked | blocked | driver fetchable, but the emulated board is an NE2000 core and hydra.device is not an NE2000 driver (§77.5) |
+| `eb920` | blocked | blocked | no grant from ASDG (§77.4) |
+| `xsurf`, `xsurf100z2`, `xsurf100z3` | blocked | blocked | iComp reserve reproduction; user downloads by hand (§77.4) |
+
+**Bridging unlocks no new card by itself.** The eight are blocked on drivers, as
+§76.3 said, and a better backend does not produce a driver. What it changes is
+what the two reachable cards are worth: the A2065 leg now exercises real DHCP,
+a real gateway, real DNS servers, real IPv6 RAs and inbound connections from
+other machines, and the PCMCIA leg went from "passes" to "passes on NAT and
+fails on a real network", which is a bug report rather than a green tick.
+
+### 78.6 Which tier the harness belongs in
+
+Not `EMULATOR_TESTS`. Public CI has no ROM and no driver, and a bridged run
+additionally needs a capability on the binary, a host NIC it may capture on, and
+a LAN with a DHCP server that will hand out an extra lease. None of that is
+reproducible on a hosted runner.
+
+It belongs in a **self-hosted nightly** on playhouse3, one tier below the
+WinUAE matrix and above nothing: `tests/netstack/run-amiberry.sh` on SLIRP is
+already a CI-shaped test (no capability, no LAN, 11 seconds), and the `-B ens18`
+form is the nightly. Splitting them that way means the common case stays
+hermetic and the bridged case is where the interesting failures live.
