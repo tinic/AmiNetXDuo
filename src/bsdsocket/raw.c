@@ -411,23 +411,45 @@ static VOID bsd_raw_icmpv6_checksum(NX_PACKET *packet, ULONG *source,
  * already been computed over it, and a second independent choice could differ.
  * _nxd_ipv6_interface_find() is the stack's own RFC 6724 selection and is what
  * nx_icmp_ping6() uses for the same reason.
+ *
+ * A bound address or a zone overrides that selection, since either is the
+ * caller having made the choice already.
  */
-static LONG bsd_raw_send_v6(struct AmiSocketBase *base, NX_IP *ip,
-                            NX_PACKET *packet, NXD_ADDRESS *dest,
-                            ULONG protocol, UINT hops, ULONG tos)
+static LONG bsd_raw_send_v6(struct AmiSocketBase *base, AmiSocket *sock,
+                            NX_IP *ip, NX_PACKET *packet, NXD_ADDRESS *dest,
+                            ULONG protocol, UINT hops, ULONG tos, ULONG scope)
 {
     NXD_IPV6_ADDRESS *source = NX_NULL;
+    UINT              src_index = 0;
     UINT              status;
 
-    tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
-    status = _nxd_ipv6_interface_find(ip, dest->nxd_ip_address.v6, &source,
-                                      NX_NULL);
-    tx_mutex_put(&ip->nx_ip_protection);
-
-    if (status != NX_SUCCESS || source == NX_NULL)
+    switch (bsd_source_select(sock, dest, scope, &src_index))
     {
-        nx_packet_release(packet);
-        return bsd_fail(base, AMI_ENETUNREACH);
+        case BSD_SOURCE_INDEX:
+            source = &ip->nx_ipv6_address[src_index];
+            break;
+
+        case BSD_SOURCE_ROUTE:
+            tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+            status = _nxd_ipv6_interface_find(ip, dest->nxd_ip_address.v6,
+                                              &source, NX_NULL);
+            tx_mutex_put(&ip->nx_ip_protection);
+
+            if (status != NX_SUCCESS || source == NX_NULL)
+            {
+                nx_packet_release(packet);
+                return bsd_fail(base, AMI_ENETUNREACH);
+            }
+            break;
+
+        case BSD_SOURCE_UNREACH:
+            nx_packet_release(packet);
+            return bsd_fail(base, AMI_ENETUNREACH);
+
+        case BSD_SOURCE_REFUSE:
+        default:
+            nx_packet_release(packet);
+            return bsd_fail(base, AMI_EADDRNOTAVAIL);
     }
 
     if (protocol == (ULONG)NX_PROTOCOL_ICMPV6)
@@ -456,15 +478,23 @@ static LONG bsd_raw_send_v6(struct AmiSocketBase *base, NX_IP *ip,
 #endif /* AMINETXDUO_IPV6 */
 
 LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
-                         NX_PACKET *packet, const NXD_ADDRESS *addr)
+                         NX_PACKET *packet, const NXD_ADDRESS *addr,
+                         ULONG scope)
 {
-    NX_IP      *ip     = netstack_ip();
-    NX_PACKET  *handed = packet;
-    NXD_ADDRESS dest   = *addr;
-    UINT        status;
-    ULONG       protocol = (ULONG)(sock->as_Protocol & 0xFF);
-    UINT        ttl      = (UINT)(sock->as_Ttl & 0xFF);
-    ULONG       tos      = (ULONG)(sock->as_Tos & 0xFF);
+    NX_IP        *ip     = netstack_ip();
+    NX_PACKET    *handed = packet;
+    NXD_ADDRESS   dest   = *addr;
+    BsdSourceKind source;
+    UINT          src_index = 0;
+    UINT          status;
+    ULONG         protocol = (ULONG)(sock->as_Protocol & 0xFF);
+    UINT          ttl      = (UINT)(sock->as_Ttl & 0xFF);
+    ULONG         tos      = (ULONG)(sock->as_Tos & 0xFF);
+
+#ifndef AMINETXDUO_IPV6
+    /* No v6, so no zones; the parameter stays so there is one signature. */
+    (VOID)scope;
+#endif
 
     if (ip == NULL)
     {
@@ -474,7 +504,8 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
 
 #ifdef AMINETXDUO_IPV6
     if (dest.nxd_ip_version == NX_IP_VERSION_V6)
-        return bsd_raw_send_v6(base, ip, handed, &dest, protocol, ttl, tos);
+        return bsd_raw_send_v6(base, sock, ip, handed, &dest, protocol, ttl,
+                               tos, scope);
 #endif
 
     /*
@@ -539,7 +570,24 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
         handed->nx_packet_length      -= ihl;
     }
 
-    status = nxd_ip_raw_packet_send(ip, handed, &dest, protocol, ttl, tos);
+    /*
+     * After the IP_HDRINCL parse, which can move the destination -- and the
+     * destination is what decides whether the bound address can reach it.
+     */
+    source = bsd_source_select(sock, &dest, 0UL, &src_index);
+    if (source == BSD_SOURCE_REFUSE || source == BSD_SOURCE_UNREACH)
+    {
+        nx_packet_release(handed);
+        return bsd_fail(base, (source == BSD_SOURCE_UNREACH)
+                                  ? AMI_ENETUNREACH
+                                  : AMI_EADDRNOTAVAIL);
+    }
+
+    if (source == BSD_SOURCE_INDEX)
+        status = nxd_ip_raw_packet_source_send(ip, handed, &dest, src_index,
+                                               protocol, ttl, tos);
+    else
+        status = nxd_ip_raw_packet_send(ip, handed, &dest, protocol, ttl, tos);
 
     if (status != NX_SUCCESS)
     {

@@ -20,6 +20,13 @@
 /* For _nx_tcp_packet_send_fin() -- see bsd_tcp_send_fin() below. */
 #include "nx_tcp.h"
 
+/* For _nx_ip_route_find() / _nxd_ipv6_interface_find(): connect() runs the
+   route lookup itself to see whether a bound source can be honoured. */
+#include "nx_ip.h"
+#ifdef AMINETXDUO_IPV6
+#include "nx_ipv6.h"
+#endif
+
 #include "aminetxduo/random.h"
 
 #include <proto/exec.h>
@@ -1974,6 +1981,155 @@ static BOOL bsd_bind_accepts(const AmiSocket *listener, NX_TCP_SOCKET *conn)
                                     conn->nx_tcp_socket_connect_interface);
 }
 
+/* ---------------------------------------------------- outbound source -- */
+
+#ifdef AMINETXDUO_IPV6
+/* fe80::/10 -- the only scope the zone notation qualifies (RFC 4007 11.1). */
+static BOOL bsd_v6_is_linklocal(const ULONG v6[4])
+{
+    return ((v6[0] & 0xFFC00000UL) == 0xFE800000UL) ? TRUE : FALSE;
+}
+#endif
+
+/*
+ * Which source a send from this socket has to use.
+ *
+ * bind() names an address and RFC 4007's zone names an interface. Both say
+ * "leave by this one", and both come out here as the index the
+ * nxd_*_source_send() calls take -- an nx_ip_interface[] index for IPv4, an
+ * nx_ipv6_address[] index for IPv6, which are not the same number.
+ *
+ * Nothing bound and no zone is BSD_SOURCE_ROUTE, which is every ordinary
+ * socket: NetX picks, which is what the caller asked for by not asking. A
+ * source that was asked for and is not there is refused rather than quietly
+ * replaced with one that works.
+ */
+BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
+                                ULONG scope, UINT *index)
+{
+    NX_IP             *ip    = netstack_ip();
+    const NXD_ADDRESS *local = &sock->as_LocalAddr;
+    BOOL               bound;
+    UINT               i;
+
+    *index = 0;
+
+    if (ip == NULL)
+        return BSD_SOURCE_REFUSE;
+
+    /* A bind of the wrong family cannot name the source of this send; the
+       only way to get one is a v4-mapped bind on a dual-stack socket. */
+    bound = (!bsd_addr_is_unspecified(local) &&
+             local->nxd_ip_version == dest->nxd_ip_version) ? TRUE : FALSE;
+
+#ifdef AMINETXDUO_IPV6
+    if (dest->nxd_ip_version == NX_IP_VERSION_V6)
+    {
+        const NX_INTERFACE *zoned = NX_NULL;
+
+        if (scope != 0UL && bsd_v6_is_linklocal(dest->nxd_ip_address.v6))
+        {
+            if (scope > (ULONG)NX_MAX_PHYSICAL_INTERFACES)
+                return BSD_SOURCE_REFUSE;
+
+            zoned = &ip->nx_ip_interface[scope - 1UL];
+        }
+
+        if (!bound && zoned == NX_NULL)
+            return BSD_SOURCE_ROUTE;
+
+        /* One past NX_MAX_IPV6_ADDRESSES is where nxd_ipv6_enable() puts ::1,
+           so a bind to it is found here and needs no special case. */
+        for (i = 0;
+             i < (UINT)(NX_MAX_IPV6_ADDRESSES + NX_LOOPBACK_IPV6_ENABLED);
+             i++)
+        {
+            const NXD_IPV6_ADDRESS *a = &ip->nx_ipv6_address[i];
+
+            if (a->nxd_ipv6_address_valid == 0 ||
+                a->nxd_ipv6_address_state != NX_IPV6_ADDR_STATE_VALID)
+                continue;
+
+            if (zoned != NX_NULL)
+            {
+                if (a->nxd_ipv6_address_attached != zoned)
+                    continue;
+
+                /* A zone names a link, so an unbound socket's source is the
+                   address that shares the destination's scope. */
+                if (!bound && !bsd_v6_is_linklocal(a->nxd_ipv6_address))
+                    continue;
+            }
+
+            if (bound &&
+                (a->nxd_ipv6_address[0] != local->nxd_ip_address.v6[0] ||
+                 a->nxd_ipv6_address[1] != local->nxd_ip_address.v6[1] ||
+                 a->nxd_ipv6_address[2] != local->nxd_ip_address.v6[2] ||
+                 a->nxd_ipv6_address[3] != local->nxd_ip_address.v6[3]))
+                continue;
+
+            *index = (UINT)a->nxd_ipv6_address_index;
+            return BSD_SOURCE_INDEX;
+        }
+
+        /* Bound to an address that is gone, or zoned to an interface with no
+           usable link-local address -- DAD still running, say. */
+        return BSD_SOURCE_REFUSE;
+    }
+#else
+    (VOID)scope;
+#endif
+
+    if (!bound)
+        return BSD_SOURCE_ROUTE;
+
+    /* Loopback by identity, as bsd_bind_wants_interface() does it: NetX gives
+       the loopback interface one address out of 127/8, so matching on the
+       address would miss a bind to 127.0.0.2. */
+    if (bsd_addr_is_loopback(local))
+    {
+        *index = (UINT)NX_LOOPBACK_INTERFACE;
+    }
+    else
+    {
+        for (i = 0; i < (UINT)NX_MAX_IP_INTERFACES; i++)
+        {
+            if (ip->nx_ip_interface[i].nx_interface_valid != 0 &&
+                ip->nx_ip_interface[i].nx_interface_ip_address ==
+                    local->nxd_ip_address.v4)
+                break;
+        }
+
+        if (i == (UINT)NX_MAX_IP_INTERFACES)
+            return BSD_SOURCE_REFUSE;
+
+        *index = i;
+    }
+
+    /*
+     * _nx_ip_route_find() takes a non-null interface as a constraint rather
+     * than a starting point, so this asks whether the pinned interface can
+     * reach the destination, not which one would.
+     *
+     * Asked here because NetX will not ask: nxd_udp_socket_source_send()
+     * passes the same hint down, and when it fails _nx_ip_packet_send() drops
+     * the datagram on a zero next hop and the send still returns NX_SUCCESS.
+     */
+    {
+        NX_INTERFACE *nxif     = &ip->nx_ip_interface[*index];
+        ULONG         next_hop = 0;
+
+        tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+        (VOID)_nx_ip_route_find(ip, dest->nxd_ip_address.v4, &nxif, &next_hop);
+        tx_mutex_put(&ip->nx_ip_protection);
+
+        if (nxif != &ip->nx_ip_interface[*index] || next_hop == 0)
+            return BSD_SOURCE_UNREACH;
+    }
+
+    return BSD_SOURCE_INDEX;
+}
+
 LONG bsd_accept(register LONG sock_fd          __asm("d0"),
                 register struct sockaddr *addr __asm("a0"),
                 register socklen_t *addrlen    __asm("a1"),
@@ -2172,6 +2328,100 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
     return fd;
 }
 
+/*
+ * Can TCP send from the source this socket asked for?
+ *
+ * It cannot be made to. There is no nxd_tcp_socket_source_send():
+ * _nxd_tcp_client_socket_connect() runs its own route lookup with no hint,
+ * writes the answer to nx_tcp_socket_connect_interface (and, for v6,
+ * nx_tcp_socket_ipv6_addr) and every segment of the connection leaves by it,
+ * SYN included. Nothing between bind() and connect() can steer that, and the
+ * SYN is on the wire before the call returns, so checking afterwards would be
+ * checking after the lie.
+ *
+ * So the choice is to check first. The two lookups here are the ones connect()
+ * is about to run, against the same IP state, so they give the same answer;
+ * when it is the source that was asked for, connect() proceeds and the source
+ * is right by construction. When it is not, the connect is refused and nothing
+ * is sent. Refusing costs the multihomed case that BSD would allow -- source
+ * on one interface, route out of the other -- and that case is exactly the one
+ * we cannot implement.
+ *
+ * Two refusals, and which one fires says why: ENETUNREACH when the bound
+ * address has no route to the destination at all, EADDRNOTAVAIL when it has
+ * one and the stack would still leave by somewhere else.
+ *
+ * Zero to go ahead, -1 with the errno filed.
+ */
+static LONG bsd_tcp_source_check(struct AmiSocketBase *SocketBase,
+                                 AmiSocket *sock, const NXD_ADDRESS *addr)
+{
+    NX_IP        *ip    = netstack_ip();
+    NXD_ADDRESS   dest  = *addr;
+    UINT          src_index = 0;
+
+    switch (bsd_source_select(sock, addr, sock->as_ScopeId, &src_index))
+    {
+        case BSD_SOURCE_ROUTE:
+            return 0;
+
+        case BSD_SOURCE_UNREACH:
+            return bsd_fail(SocketBase, AMI_ENETUNREACH);
+
+        case BSD_SOURCE_INDEX:
+            break;
+
+        case BSD_SOURCE_REFUSE:
+        default:
+            return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
+    }
+
+    if (ip == NULL)
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+#ifdef AMINETXDUO_IPV6
+    if (dest.nxd_ip_version == NX_IP_VERSION_V6)
+    {
+        NXD_IPV6_ADDRESS *chosen = NX_NULL;
+        UINT              status;
+
+        tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+        status = _nxd_ipv6_interface_find(ip, dest.nxd_ip_address.v6, &chosen,
+                                          NX_NULL);
+        tx_mutex_put(&ip->nx_ip_protection);
+
+        if (status != NX_SUCCESS || chosen == NX_NULL)
+            return bsd_fail(SocketBase, AMI_ENETUNREACH);
+
+        /* Address, not interface: an interface carries several and the one
+           NetX prefers for this destination need not be the bound one. */
+        if (chosen != &ip->nx_ipv6_address[src_index])
+            return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
+
+        return 0;
+    }
+#endif
+
+    {
+        NX_INTERFACE *nxif     = NX_NULL;
+        ULONG         next_hop = 0;
+
+        tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+        (VOID)_nx_ip_route_find(ip, dest.nxd_ip_address.v4, &nxif, &next_hop);
+        tx_mutex_put(&ip->nx_ip_protection);
+
+        if (nxif == NX_NULL || next_hop == 0)
+            return bsd_fail(SocketBase, AMI_ENETUNREACH);
+
+        /* One IPv4 address per interface, so agreeing on the interface is
+           agreeing on the source address. */
+        if (nxif != &ip->nx_ip_interface[src_index])
+            return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
+    }
+
+    return 0;
+}
+
 /* The body of connect(), run inside a ThreadX context bracket. */
 static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
                                AmiSocket *sock, const NXD_ADDRESS *addr,
@@ -2234,6 +2484,11 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
 
         return bsd_fail(SocketBase, AMI_EALREADY);
     }
+
+    /* Before the port is claimed and before the SYN: a connect that cannot
+       leave from the bound address fails without touching the wire. */
+    if (bsd_tcp_source_check(SocketBase, sock, addr) != 0)
+        return -1;
 
     if ((sock->as_Flags & ASF_NXBOUND) == 0)
     {
