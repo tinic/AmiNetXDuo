@@ -180,3 +180,17 @@ endif()
 target_compile_options(test_v6only PRIVATE -Wall -Wextra)
 set_target_properties(test_v6only PROPERTIES OUTPUT_NAME "V6Only")
 add_dependencies(test_v6only developer_drawer)
+
+# CycleDrill cycles the library and the interface rather than using them:
+# OpenLibrary/CloseLibrary including the last-close expunge, Online/Offline
+# through NETCTRL_INTERFACE_UP/DOWN, RemoveInterface/AddInterfaceTagList with
+# sockets open over the top, and an expunge attempted while it still holds the
+# library.  It reads NETSTATUS_HEALTH between cycles, which is where
+# allocations outstanding, sockets alive and packet buffers free already live.
+add_executable(test_cycledrill cycledrill.c)
+target_include_directories(test_cycledrill PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_cycledrill PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_cycledrill PRIVATE -Wall -Wextra)
+set_target_properties(test_cycledrill PROPERTIES OUTPUT_NAME "CycleDrill")
