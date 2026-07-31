@@ -11,6 +11,19 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
 
 ## Open — no decision taken
 
+- **DHCP and TLS have no fuzz driver.** `tests/fuzz/` covers bpf, config, dns
+  and mdns; the two parsers an attacker reaches most directly are missing.
+  DHCP option parsing runs on every boot against whatever the LAN answers, and
+  the TLS record layer and X.509 path are the headline feature. With no MMU a
+  parser bug is not a crashed process, it is arbitrary code execution with the
+  machine's privileges. The harness pattern already exists, so this is cheap
+  relative to what it covers. Raised in external review 2026-07-31.
+- **No open/expunge/reopen drill.** The soak suite covers steady state; what
+  historically kills long-lived Amiga stacks is cycling -- Online/Offline
+  bounces and library expunge/reopen. `sana2_rx.c`'s last-resort path still
+  leaks a reader stack when a driver ignores `AbortIO` (Commodore's
+  a2065.device 2.16 does), which emulation will not reproduce. Raised in
+  external review 2026-07-31.
 - **`bind()` to a specific local address is a silent no-op.** `socket.c` records
   it in `as_LocalAddr` so `getsockname()` reports it, and nothing enforces it --
   the comment there has said so for a long time, but it never reached this file.
