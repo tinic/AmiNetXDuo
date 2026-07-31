@@ -29,11 +29,12 @@
  *
  * It works with the stack down, which is the state that most needs explaining.
  *
- * Three categories the interface carries elsewhere are absent because there
- * is nothing behind them here: IGMP (this stack does not call
- * nx_igmp_enable(), so there is no group membership and no counters),
- * MULTICASTROUTING (no multicast router to have statistics about) and ROUTING
- * as a statistics category (NetX Duo keeps no routing counters, and
+ * Three categories the interface carries elsewhere are absent: IGMP (the
+ * groups are joined and reported, but only four of igmpstat's nine members
+ * have anything behind them -- see NETSTATUS_igmp in src/bsdsocket/
+ * netstats.c), MULTICASTROUTING (no multicast router to have statistics
+ * about) and ROUTING as a statistics category (NetX Duo keeps no routing
+ * counters, and
  * NX_ENABLE_IP_STATIC_ROUTING is off, so the routing table is the connected
  * routes plus the default gateway -- what ROUTES prints).
  *

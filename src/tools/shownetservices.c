@@ -1,7 +1,7 @@
 /*
  * ShowNetServices -- what else on this network is offering something.
  *
- *     ShowNetServices [TYPE] [SECONDS=<n>] [TXT/S] [QUIET/S]
+ *     ShowNetServices [TYPE] [ALL] [SECONDS=<n>] [TXT/S] [QUIET/S]
  *
  * The other half of mDNS. netstack_mdns.c makes this machine findable by name
  * and advertises whatever DEVS:Internet/service_discovery declares; this asks
@@ -36,6 +36,21 @@
  *   command does when asked for nothing in particular -- a user does not know
  *   that a network printer is _ipp._tcp until something tells them.
  *
+ * WITH ALL
+ *
+ *   The types, and then every instance of every one of them. It costs one more
+ *   window and not one per type: a continuous query per type is registered and
+ *   they all run at once, so a machine answers whichever of them apply to it
+ *   in a single response.
+ *
+ *   What it does cost is peer cache. Four records land per instance and the
+ *   queries themselves take a record each, and when the cache fills the module
+ *   evicts the least recently used record rather than refusing the new one --
+ *   which used to mean an SRV outliving the A record it points at, and a row
+ *   printing "no address". That is now chased: netstack_mdns_browse_collect()
+ *   asks for an address the browse did not carry. SVC_TYPES_MAX bounds the
+ *   rest.
+ *
  * WHAT IT DOES NOT DO
  *
  *   It does not connect to anything it finds. An SRV record is a claim by the
@@ -51,11 +66,12 @@ const char *const tool_name = "ShowNetServices";
 static const char version_tag[] __attribute__((used)) =
     "$VER: ShowNetServices 1.0 (31.7.2026)";
 
-#define TEMPLATE    "TYPE,SECONDS/K/N,TXT/S,QUIET/S"
+#define TEMPLATE    "TYPE,ALL/S,SECONDS/K/N,TXT/S,QUIET/S"
 
 enum
 {
     ARG_TYPE = 0,
+    ARG_ALL,
     ARG_SECONDS,
     ARG_TXT,
     ARG_QUIET,
@@ -76,11 +92,22 @@ enum
  */
 #define SVC_MAX             48
 
+/*
+ * How many types ALL will browse at once. Each is a query record in the peer
+ * cache, and each brings back four more records for every instance behind it,
+ * so this is what stops a network offering a hundred types from evicting the
+ * answers to the first ninety. A house LAN offers around twenty.
+ */
+#define SVC_TYPES_MAX       32
+
 static struct
 {
     NetStatusHeader  hdr;
     NetStatusService entry[SVC_MAX];
 } svc_answer;
+
+/* Off the stack for the same reason svc_answer is. */
+static char svc_types[SVC_TYPES_MAX][NETSTATUS_SVC_TYPE_LEN];
 
 /* ------------------------------------------------------------------ types -- */
 
@@ -276,6 +303,93 @@ static BOOL type_already_shown(UWORD upto, const char *type)
     return FALSE;
 }
 
+/* --------------------------------------------------------------- every type -- */
+
+/*
+ * The types the meta-query turned up, so that one continuous query can be
+ * started per type. They are collected from the instances as well as from the
+ * bare rows, for the reason type_already_shown() gives.
+ *
+ * Returns how many were taken; *capped says the network offered more than
+ * SVC_TYPES_MAX and the rest were left alone.
+ */
+static UWORD collect_types(UWORD count, BOOL *capped)
+{
+    UWORD taken = 0;
+    UWORD i;
+    UWORD j;
+
+    *capped = FALSE;
+
+    for (i = 0; i < count; i++)
+    {
+        const char *type = svc_answer.entry[i].nsv_Type;
+        BOOL        seen = FALSE;
+
+        if (type[0] == '\0')
+            continue;
+
+        for (j = 0; j < taken; j++)
+        {
+            if (same_name(svc_types[j], type))
+            {
+                seen = TRUE;
+                break;
+            }
+        }
+
+        if (seen)
+            continue;
+
+        if (taken == (UWORD)SVC_TYPES_MAX)
+        {
+            *capped = TRUE;
+            break;
+        }
+
+        for (j = 0; j + 1 < (UWORD)NETSTATUS_SVC_TYPE_LEN && type[j] != '\0';
+             j++)
+        {
+            svc_types[taken][j] = type[j];
+        }
+        svc_types[taken][j] = '\0';
+        taken++;
+    }
+
+    return taken;
+}
+
+/* The instances of one type, under its own heading. Returns how many. */
+static UWORD print_type(UWORD count, const char *type, BOOL want_txt)
+{
+    UWORD shown = 0;
+    UWORD i;
+
+    for (i = 0; i < count; i++)
+    {
+        const NetStatusService *e = &svc_answer.entry[i];
+
+        if (!(e->nsv_Flags & NETSTATUS_SVC_INSTANCE))
+            continue;
+        if (!same_name(e->nsv_Type, type))
+            continue;
+
+        if (shown == 0)
+        {
+            put_safe(type);
+            tool_printf("\n\n");
+        }
+
+        print_instance(e, want_txt);
+        shown++;
+    }
+
+    if (shown != 0)
+        tool_printf("\n");
+
+    return shown;
+}
+
 /* ------------------------------------------------------------------ browse -- */
 
 /*
@@ -314,20 +428,52 @@ static VOID fill_control(NetStatusControl *ctl, const char *type)
         ctl->nsc_Name[i] = type[i];
 }
 
+/* NULL is the meta-query, here as everywhere below. */
+static LONG browse_start(struct Library *base, const char *type, LONG *err)
+{
+    NetStatusControl ctl;
+
+    fill_control(&ctl, type);
+
+    return tool_netstatus_control(base, NETCTRL_MDNS_BROWSE, &ctl, err);
+}
+
+/*
+ * Always, and before anything is printed. A query left registered is re-sent
+ * for as long as the stack is up, and it occupies the cache the next browse's
+ * answers have to land in.
+ */
+static VOID browse_stop(struct Library *base, const char *type)
+{
+    NetStatusControl ctl;
+
+    fill_control(&ctl, type);
+    (VOID)tool_netstatus_control(base, NETCTRL_MDNS_BROWSE_STOP, &ctl, NULL);
+}
+
+static LONG read_services(struct Library *base)
+{
+    return tool_netstatus_query(base, NETSTATUS_SERVICES, &svc_answer,
+                                sizeof(svc_answer), sizeof(NetStatusService));
+}
+
 int main(int argc, char **argv)
 {
     LONG              args[ARG_COUNT];
     struct RDArgs    *rda;
     struct Library   *base;
-    NetStatusControl  ctl;
+    UBYTE             had[SVC_TYPES_MAX] = { 0 };
     const char       *type    = NULL;
     ULONG             seconds = SVC_SECONDS;
     BOOL              want_txt;
     BOOL              quiet;
+    BOOL              all;
+    BOOL              capped  = FALSE;
     BOOL              broke   = FALSE;
     LONG              err     = 0;
     LONG              count;
     LONG              rc      = RETURN_OK;
+    UWORD             ntypes  = 0;
     UWORD             shown   = 0;
     UWORD             i;
 
@@ -350,11 +496,19 @@ int main(int argc, char **argv)
 
     quiet    = (BOOL)(args[ARG_QUIET] != 0);
     want_txt = (BOOL)(args[ARG_TXT] != 0);
+    all      = (BOOL)(args[ARG_ALL] != 0);
     type     = (const char *)args[ARG_TYPE];
 
     if (type != NULL && !type_is_wellformed(type))
     {
         explain_type(type);
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
+    if (all && type != NULL)
+    {
+        tool_error("ALL browses every type, so it takes no type");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -393,8 +547,7 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    fill_control(&ctl, type);
-    if (tool_netstatus_control(base, NETCTRL_MDNS_BROWSE, &ctl, &err) < 0)
+    if (browse_start(base, type, &err) < 0)
     {
         tool_error("cannot ask the network: %s", (LONG)tool_net_error(err));
         tool_netstatus_close(base);
@@ -416,16 +569,50 @@ int main(int argc, char **argv)
        run out first. The query is retired either way, below. */
     broke = tool_delay_ticks(seconds * 50UL);
 
-    count = tool_netstatus_query(base, NETSTATUS_SERVICES, &svc_answer,
-                                 sizeof(svc_answer), sizeof(NetStatusService));
+    count = read_services(base);
 
     /*
-     * Always, and before anything is printed. A query left registered is
-     * re-sent for as long as the stack is up, and it occupies the cache the
-     * next browse's answers have to land in.
+     * ALL is two windows, not one per type. The first is the meta-query above,
+     * which says which types are here; the second asks after all of them at
+     * once, since RFC 6762 5.2 queries run concurrently and a machine answers
+     * whichever of them apply to it in one response.
+     *
+     * The meta-query is retired first: it has said what it had to say, and its
+     * record and its answers are peer cache the instances now need.
+     *
+     * Ctrl-C in the first window drops back to listing the types, which is what
+     * that window collected. Starting a second round of queries to stop them
+     * again is not what the key was pressed for.
      */
-    fill_control(&ctl, type);
-    (VOID)tool_netstatus_control(base, NETCTRL_MDNS_BROWSE_STOP, &ctl, NULL);
+    if (all && broke)
+        all = FALSE;
+
+    if (all && count > 0)
+    {
+        browse_stop(base, NULL);
+
+        ntypes = collect_types((UWORD)count, &capped);
+
+        for (i = 0; i < ntypes; i++)
+            (VOID)browse_start(base, svc_types[i], NULL);
+
+        if (!quiet)
+            tool_printf("Asking after %lu kind%s of service, listening %lu "
+                        "second%s...\n", (LONG)ntypes, (LONG)plural(ntypes),
+                        (LONG)seconds, (LONG)plural(seconds));
+
+        if (!broke)
+            broke = tool_delay_ticks(seconds * 50UL);
+
+        count = read_services(base);
+
+        for (i = 0; i < ntypes; i++)
+            browse_stop(base, svc_types[i]);
+    }
+    else
+    {
+        browse_stop(base, type);
+    }
 
     tool_netstatus_close(base);
 
@@ -439,7 +626,16 @@ int main(int argc, char **argv)
     if (!quiet)
         tool_printf("\n");
 
-    for (i = 0; i < (UWORD)count; i++)
+    /* ALL prints by type, in the order the meta-query turned them up. */
+    for (i = 0; all && i < ntypes; i++)
+    {
+        UWORD n = print_type((UWORD)count, svc_types[i], want_txt);
+
+        had[i]  = (UBYTE)((n != 0) ? 1 : 0);
+        shown  += n;
+    }
+
+    for (i = 0; !all && i < (UWORD)count; i++)
     {
         const NetStatusService *e = &svc_answer.entry[i];
 
@@ -500,6 +696,13 @@ int main(int argc, char **argv)
                 tool_advise("Run ShowNetServices with no type to see which");
                 tool_advise("types this network is offering at all.");
             }
+            else if (all && ntypes != 0)
+            {
+                tool_advise_blank();
+                tool_advise("Types answered, instances did not. Run");
+                tool_advise("ShowNetServices ALL SECONDS=10 for a longer look");
+                tool_advise("at each of them.");
+            }
         }
 
         rc = RETURN_WARN;
@@ -522,10 +725,47 @@ int main(int argc, char **argv)
         tool_advise("since have gone. Ask again for a longer look with");
         tool_advise("SECONDS=10.");
 
-        if (type == NULL)
+        if (type == NULL && !all)
         {
             tool_advise_blank();
             tool_advise("Browse one of them:  ShowNetServices _http._tcp");
+            tool_advise("Or all of them:      ShowNetServices ALL");
+        }
+
+        /*
+         * A type the meta-query turned up and no instance answered for. The
+         * machine behind it did not reply inside the window, so naming the
+         * types keeps that separate from their not being there.
+         */
+        if (all)
+        {
+            BOOL first = TRUE;
+
+            for (i = 0; i < ntypes; i++)
+            {
+                if (had[i])
+                    continue;
+
+                if (first)
+                {
+                    tool_advise_blank();
+                    tool_printf("No instance answered for:");
+                    first = FALSE;
+                }
+
+                tool_printf(" ");
+                put_safe(svc_types[i]);
+            }
+
+            if (!first)
+                tool_printf("\n");
+
+            if (capped)
+            {
+                tool_advise_blank();
+                tool_advise("More than 32 types answered; the rest were not");
+                tool_advise("browsed.");
+            }
         }
 
         if (svc_answer.hdr.nsh_Available > svc_answer.hdr.nsh_Count)

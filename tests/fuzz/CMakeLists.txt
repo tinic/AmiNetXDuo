@@ -211,6 +211,125 @@ target_compile_definitions(fuzz_mdns PRIVATE ${_fuzz_nx_def})
 target_compile_options(fuzz_mdns PRIVATE -UAMINETXDUO_IPV6 ${_fuzz_san})
 target_link_options(fuzz_mdns PRIVATE ${_fuzz_san})
 
+
+# ---------------------------------------------------------------------------
+# TLS: the record layer, the plaintext handshake, and the X.509 path.
+#
+# Every byte these parse is a byte the server chose, and all of it is parsed
+# before there is any key to authenticate it with -- so "the peer had to
+# complete a handshake first" protects none of it. It is also the headline
+# feature, which means it is what a hostile host gets pointed at.
+#
+# The two drivers split the way the code does: fuzz_tls_record stops at the
+# handshake message boundary, fuzz_tls_x509 starts at the Certificate message
+# and goes down through the DER walk. Both list their nx_secure sources
+# explicitly rather than linking the `nx_secure` target -- that target's
+# dependency chain reaches aminetxduo_common, which is AmigaOS code and does
+# not build on a host.
+#
+# NX_SECURE_ENABLE_AEAD_CIPHER matches src/tls/CMakeLists.txt, where it is set
+# PUBLIC on nx_secure. It changes structure layouts in nx_secure_tls.h, so a
+# driver built without it would be fuzzing a different NX_SECURE_TLS_SESSION
+# than the one that ships.
+#
+# NOT COVERED, and why:
+#
+#   The TLS 1.2 NewSessionTicket. nx_secure only parses one under
+#   NX_SECURE_TLS_TLS_1_3_ENABLED, which is off; the TLS 1.2 ticket is read by
+#   tls_resume_take_ticket() in src/tlslib/tls_resume.c. That file includes
+#   proto/dos.h and proto/exec.h and cannot be compiled on a host.
+#
+#   tls_store.c's issuer-name walk, for the same reason -- tls_internal.h pulls
+#   in the AmigaOS library ABI. It calls the same vendored TLV parser this
+#   driver does drive, so the parser underneath it is covered; the four-field
+#   walk on top of it is not.
+#
+#   ServerKeyExchange, CertificateVerify and Finished. All three dispatch on a
+#   negotiated ciphersuite and call into NX_CRYPTO_METHOD entries, so driving
+#   them means linking nx_crypto and ami_tls_crypto.c -- and ami_tls_crypto.c
+#   includes exec/types.h and casts pointers to a 32-bit ULONG. They are the
+#   obvious next driver and they need a 32-bit host build, like fuzz_mdns.
+#
+#   The record decrypt path. It runs after keys exist, on bytes that have
+#   already failed or passed a MAC, and reaching it needs a full key schedule.
+
+set(_fuzz_tls_inc
+    ${_fuzz_nx_inc}
+    "${AMINETXDUO_NETXDUO}/nx_secure/inc"
+    "${AMINETXDUO_NETXDUO}/nx_secure/ports"
+    "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
+
+set(_fuzz_tls_def
+    ${_fuzz_nx_def}
+    NX_DISABLE_ERROR_CHECKING
+    TX_DISABLE_ERROR_CHECKING
+    NX_SECURE_ENABLE_AEAD_CIPHER)
+
+set(_fuzz_secure_src "${AMINETXDUO_NETXDUO}/nx_secure/src")
+
+# The record header off the wire, then the handshake messages inside it.
+add_executable(fuzz_tls_record
+    fuzz_tls_record.c
+    "${_fuzz_secure_src}/nx_secure_tls_process_header.c"
+    "${_fuzz_secure_src}/nx_secure_tls_process_handshake_header.c"
+    "${_fuzz_secure_src}/nx_secure_tls_process_serverhello.c"
+    "${_fuzz_secure_src}/nx_secure_tls_process_serverhello_extensions.c"
+    "${_fuzz_secure_src}/nx_secure_tls_process_certificate_request.c"
+    "${_fuzz_secure_src}/nx_secure_tls_ciphersuite_lookup.c"
+    "${_fuzz_secure_src}/nx_secure_tls_check_protocol_version.c"
+    "${_fuzz_secure_src}/nx_secure_tls_newest_supported_version.c"
+    "${_fuzz_secure_src}/nx_secure_x509_local_device_certificate_get.c"
+    "${_fuzz_secure_src}/nx_secure_x509_certificate_list_find.c"
+    "${_fuzz_secure_src}/nx_secure_x509_distinguished_name_compare.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_packet_data_extract_offset.c")
+target_include_directories(fuzz_tls_record PRIVATE ${_fuzz_tls_inc})
+target_compile_definitions(fuzz_tls_record PRIVATE ${_fuzz_tls_def})
+target_compile_options(fuzz_tls_record PRIVATE -UAMINETXDUO_IPV6 ${_fuzz_san})
+target_link_options(fuzz_tls_record PRIVATE ${_fuzz_san})
+
+# The Certificate message and everything under it. Both stub files: fuzz_nxstub
+# has the mutex the X.509 store takes, fuzz_txstub has the tx_thread_sleep the
+# certificate list walk can reach. They define disjoint sets, so linking both
+# is not a duplicate.
+add_executable(fuzz_tls_x509
+    fuzz_tls_x509.c
+    fuzz_nxstub.c
+    fuzz_txstub.c
+    "${_fuzz_secure_src}/nx_secure_x509.c"
+    "${_fuzz_secure_src}/nx_secure_x509_asn1_tlv_block_parse.c"
+    "${_fuzz_secure_src}/nx_secure_x509_certificate_initialize.c"
+    "${_fuzz_secure_src}/nx_secure_x509_certificate_list_add.c"
+    "${_fuzz_secure_src}/nx_secure_x509_certificate_list_find.c"
+    "${_fuzz_secure_src}/nx_secure_x509_certificate_list_remove.c"
+    "${_fuzz_secure_src}/nx_secure_x509_common_name_dns_check.c"
+    "${_fuzz_secure_src}/nx_secure_x509_distinguished_name_compare.c"
+    "${_fuzz_secure_src}/nx_secure_x509_distinguished_name_parse.c"
+    "${_fuzz_secure_src}/nx_secure_x509_ec_private_key_parse.c"
+    "${_fuzz_secure_src}/nx_secure_x509_expiration_check.c"
+    "${_fuzz_secure_src}/nx_secure_x509_extended_key_usage_extension_parse.c"
+    "${_fuzz_secure_src}/nx_secure_x509_extension_find.c"
+    "${_fuzz_secure_src}/nx_secure_x509_free_certificate_get.c"
+    "${_fuzz_secure_src}/nx_secure_x509_key_usage_extension_parse.c"
+    "${_fuzz_secure_src}/nx_secure_x509_oid_parse.c"
+    "${_fuzz_secure_src}/nx_secure_x509_pkcs1_rsa_private_key_parse.c"
+    "${_fuzz_secure_src}/nx_secure_x509_remote_endpoint_certificate_get.c"
+    "${_fuzz_secure_src}/nx_secure_x509_store_certificate_add.c"
+    "${_fuzz_secure_src}/nx_secure_x509_store_certificate_remove.c"
+    "${_fuzz_secure_src}/nx_secure_x509_subject_alt_names_find.c"
+    "${_fuzz_secure_src}/nx_secure_x509_wildcard_compare.c"
+    "${_fuzz_secure_src}/nx_secure_tls_process_remote_certificate.c"
+    "${_fuzz_secure_src}/nx_secure_tls_remote_certificate_free.c"
+    "${_fuzz_secure_src}/nx_secure_tls_remote_certificate_free_all.c"
+    "${_fuzz_secure_src}/nx_secure_tls_remote_certificate_verify.c")
+# tests/tls is on the path for the seed corpus: the sample leaf and CA from
+# tls_test_certs.h and the ISRG Root X1 from tls_root_isrg_x1.h. Real DER, so
+# the sweep mutates certificates rather than the author's idea of one.
+target_include_directories(fuzz_tls_x509 PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests/tls" ${_fuzz_tls_inc})
+target_compile_definitions(fuzz_tls_x509 PRIVATE ${_fuzz_tls_def})
+target_compile_options(fuzz_tls_x509 PRIVATE -UAMINETXDUO_IPV6 ${_fuzz_san})
+target_link_options(fuzz_tls_x509 PRIVATE ${_fuzz_san})
+
 include(CTest)
 
 # The known case, first and always. If this ever passes silently the whole
@@ -240,6 +359,16 @@ add_test(NAME fuzz_dhcp_seeds
 add_test(NAME fuzz_dhcp_sweep
          COMMAND fuzz_dhcp -r 1 ${AMINETXDUO_FUZZ_CASES})
 
+add_test(NAME fuzz_tls_record_seeds
+         COMMAND fuzz_tls_record -s)
+add_test(NAME fuzz_tls_record_sweep
+         COMMAND fuzz_tls_record -r 1 ${AMINETXDUO_FUZZ_CASES})
+
+add_test(NAME fuzz_tls_x509_seeds
+         COMMAND fuzz_tls_x509 -s)
+add_test(NAME fuzz_tls_x509_sweep
+         COMMAND fuzz_tls_x509 -r 1 ${AMINETXDUO_FUZZ_CASES})
+
 # fuzz_mdns only runs in a 32-bit build. NetX Duo's mDNS cache stores pointers
 # in single ULONG slots, so it is coherent only where sizeof(void*) == 4; on a
 # 64-bit host it spins inside nx_mdns_enable() before a datagram arrives.
@@ -255,4 +384,6 @@ endif()
 
 # A soak set by AMINETXDUO_FUZZ_CASES needs longer than ctest's default.
 set_tests_properties(fuzz_config_sweep fuzz_dnssd_sweep fuzz_dns_sweep
-                     fuzz_bpf_sweep fuzz_dhcp_sweep PROPERTIES TIMEOUT 1800)
+                     fuzz_bpf_sweep fuzz_dhcp_sweep
+                     fuzz_tls_record_sweep fuzz_tls_x509_sweep
+                     PROPERTIES TIMEOUT 1800)

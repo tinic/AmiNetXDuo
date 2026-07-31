@@ -118,12 +118,14 @@ that resolves a name all get it, because the lookup happens inside the resolver
 everything already uses.
 
 The same machinery finds what everything else is offering. `ShowNetServices`
-with nothing after it lists the kinds of service answering on the network, and
-naming one lists the machines behind it with their addresses and ports:
+with nothing after it lists the kinds of service answering on the network,
+naming one lists the machines behind it with their addresses and ports, and
+`ALL` lists every instance of every kind:
 
 ```
 ShowNetServices
 ShowNetServices _http._tcp
+ShowNetServices ALL
 ```
 
 Printers, NAS boxes, media players and anything running Bonjour or Avahi turn

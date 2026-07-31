@@ -1079,6 +1079,9 @@ static VOID ns_fill_sockets(NX_IP *ip, NsWriter *w)
  * collect() takes its own, and it allocates -- an NX_MDNS_SERVICE is 600-odd
  * bytes and belongs on neither this stack nor the module's. Rule 2 at the top
  * of this file says no allocation while adopted, and this is how it is kept.
+ * The same call also waits, for the address of a service whose SRV came without
+ * one; that is a ThreadX suspension inside its own bracket, so the baton is
+ * handed on, and it is bounded at two seconds for the whole walk.
  *
  * The rows are read into one array and copied out, rather than filled through
  * the NsWriter, because the count is not known until the walk has run and a

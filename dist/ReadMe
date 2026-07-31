@@ -181,6 +181,21 @@ host; with none set it is "amiga".
      SetEnv SAVE USER me
 
 
+WRITING PROGRAMS AGAINST IT
+---------------------------
+
+The Developer drawer holds the headers for what bsdsocket.library has that the
+NDK does not declare: the RFC 3493 interface calls -- if_nametoindex() and its
+three companions -- and the AF_INET6 names, from IPPROTO_IPV6 and IPV6_V6ONLY
+to the IN6_IS_ADDR_* macros.  The installer does not copy it, because where
+headers go is a property of the compiler rather than of the machine; put it
+wherever the NDK is.  Developer/ReadMe explains the rest, and
+Developer/examples holds two programs that work.
+
+Nothing else needs it.  Everything the NDK already declares is reached the way
+it always was.
+
+
 UNINSTALLING
 ------------
 

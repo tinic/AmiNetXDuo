@@ -478,7 +478,11 @@ LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
          *                   onto the other would report free clusters that do
          *                   not exist. The mbuf_* vectors are stubs for the
          *                   same reason.
-         *   NETSTATUS_igmp  IGMP is not enabled in this build.
+         *   NETSTATUS_igmp  IGMP runs (src/bsdsocket/mcast.c), but NetX Duo
+         *                   counts five things and 4.4BSD's igmpstat has
+         *                   nine. Four map -- badsum, queries, snd_reports
+         *                   and part of tooshort -- and the other five are
+         *                   unknown rather than zero.
          *   NETSTATUS_mrt   no multicast routing.
          *   NETSTATUS_rt    three of rtstat's five members would be genuinely
          *                   zero -- this stack creates no dynamic routes and

@@ -36,6 +36,8 @@
 #       Devs/Internet/               protocols, services, networks
 #       Docs/  Docs.info             whatever docs/ holds
 #       Examples/  Examples.info     commented configuration files
+#       Developer/  Developer.info   headers and glue for the vectors past
+#                                    the end of the NDK's SFD
 #
 # Compression: a real `lha a` is used when one is on the PATH.  Homebrew's
 # `lha` is Lhasa, which can only extract, so the fallback is dist/lhapack.py
@@ -137,10 +139,14 @@ declare -A CPU_BUILD=(
     [68060]="${AMINETXDUO_BUILD_68060:-$BUILD-68060}"
 )
 
-# 68000-minimal is the same stack with IPv6, mDNS, the packet filter and TLS
-# compiled out, stripped: 222 KB against the 68000 drawer's 326 KB.  On the
-# 1 MB machine 81 measured, that is 104 KB back out of the 371 KB the stack
-# leaves free -- a 28% increase in what is left for programs.
+# 68000-minimal is the same stack with IPv6, mDNS, the packet filter, TLS and
+# IPv4 multicast compiled out, stripped: 222 KB against the 68000 drawer's
+# 326 KB.  On the 1 MB machine 81 measured, that is 104 KB back out of the
+# 371 KB the stack leaves free -- a 28% increase in what is left for programs.
+#
+# Multicast is the cheapest of the five at 3,888 bytes (3,696 of code and the
+# 192-byte membership table) and is out for the same reason the others are:
+# this drawer is what somebody installs having measured their machine.
 #
 # NOT what the installer picks.  It is here for somebody who has measured
 # their machine and decided, which is why it is a drawer rather than a
@@ -304,6 +310,20 @@ cp "$ROOT/dist/ReadMe" "$TREE/ReadMe"
 cp "$INSTALL/Document.info" "$TREE/ReadMe.info"
 cp "$INSTALL/Drawer.info"   "$TREE/Docs.info"
 cp "$INSTALL/Drawer.info"   "$TREE/Examples.info"
+
+# ----------------------------------------------------------- the Developer --
+#
+# The headers and compiler glue for what bsdsocket.library has past the end of
+# the NDK's SFD.  Staged by the same script the build uses, so what a
+# downloader gets is what tests/tools' IfNames was compiled against.
+#
+# NOT installed by Install-AmiNetXDuo: where headers belong is a property of
+# the compiler someone has, not of this machine, so copying them to a fixed
+# place would be a guess.  They are in the archive, to be put wherever the
+# NDK is.
+"$ROOT/tools/stage-developer.sh" "$TREE/Developer"
+cp "$INSTALL/Drawer.info"   "$TREE/Developer.info"
+cp "$INSTALL/Document.info" "$TREE/Developer/ReadMe.info"
 
 # ---------------------------------------------------------------- the docs --
 #

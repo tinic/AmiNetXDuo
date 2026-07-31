@@ -2,8 +2,16 @@
 
 User-visible changes, newest first. Internal work is in the git log.
 
-## 0.15.2
+## Unreleased
 
+- A browsed service whose address did not arrive with it is now asked for, so a row that said "no address" gives one. Only the rows that need it wait, and the whole listing spends at most two seconds on it
+- `ShowNetServices ALL` lists every instance of every type answering, rather than only the types. It costs one more listening window, not one per type
+- A socket bound to one of the machine's addresses now sends from it. UDP and raw datagrams leave with the bound address as their source; a `connect()` that would have had to leave from another one is refused with `EADDRNOTAVAIL` instead of connecting from it and reporting the bound address back
+- A destination the bound address cannot reach is refused with `ENETUNREACH`, on `connect()` as well as on a datagram. Such a datagram used to be handed to the stack and dropped inside it with the send already reported as successful
+- `sendto()` and `sendmsg()` on a raw socket honour an IPv6 zone -- `fe80::1%2` leaves by interface 2 -- as a UDP socket already did
+- IPv4 multicast works: `IP_ADD_MEMBERSHIP`, `IP_DROP_MEMBERSHIP`, `IP_MULTICAST_IF`, `IP_MULTICAST_TTL` and `IP_MULTICAST_LOOP`, so a program that discovers things on the local network -- SSDP, UPnP, a ported mDNS -- can open the socket it expects instead of getting "Protocol not available"
+- `bind()` to a multicast group address is accepted, which is how a program listening for a group is written
+- The `68000-minimal` drawer leaves multicast out along with the other optional features, which is 3,888 bytes
 - `recvmsg()` can now report which interface and local address a datagram arrived on, and its hop limit: `IPV6_RECVPKTINFO`, `IPV6_RECVHOPLIMIT` and, for IPv4, `IP_PKTINFO` and `IP_RECVDSTADDR`. A server on a machine with more than one address could not previously tell which of them a query was sent to, so it could only answer from whichever the routing table preferred
 - `sendmsg()` can name the source address and outgoing interface for one datagram, and `setsockopt(IPV6_PKTINFO)` sets a standing one, so a server can answer on the interface a query came in on. An interface or address the machine does not have is refused rather than quietly replaced
 - Raw ICMPv6 sockets take an `ICMP6_FILTER`, so a program watching for one kind of ICMPv6 message is no longer handed every neighbour solicitation on the network as well
@@ -11,6 +19,7 @@ User-visible changes, newest first. Internal work is in the git log.
 
 ## 0.15.1
 
+- New `Developer` drawer in the archive: the headers and compiler glue for what bsdsocket.library has that the NDK does not declare. `if_nametoindex()`, `if_indextoname()`, `if_nameindex()` and `if_freenameindex()`; and the AF_INET6 names -- `IPPROTO_IPV6`, `PF_INET6`, `INET6_ADDRSTRLEN`, `IPV6_V6ONLY`, `IPV6_UNICAST_HOPS`, `IPV6_TCLASS`, `IN6ADDR_ANY_INIT`, `IN6ADDR_LOOPBACK_INIT`, the `IN6_IS_ADDR_*` macros, `struct sockaddr_storage` and `AI_ADDRCONFIG`. Put its `include` on the compiler's include path, `#include <proto/aminetxduo.h>`, and open `bsdsocket.library` as usual; there is no second library and no link library. `Developer/examples/` has two working programs and `Developer/ReadMe` has the rest -- including the warning that this NDK's `struct sockaddr_in6` keeps its family byte at a different offset from `struct sockaddr_in`, so the two cannot be cast through `struct sockaddr *`
 - Two programs adding an interface at the same moment can no longer be given the same one: the slot was picked and then the device opened, which takes long enough for the second to pick it again
 - `STATE=down` in `DEVS:NetInterfaces` is honoured. It was read from the file and then ignored, so an interface configured down came up anyway; `Online` brings it up as usual
 - `GetRouteInfo()` reports the interface each route belongs to. Static routes and the default gateway reported none at all, and the rest counted from 0 where the convention is to count from 1, so a program matching a route to an interface was off by one

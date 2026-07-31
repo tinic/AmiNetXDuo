@@ -275,6 +275,16 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 sock->as_Tos = value;
                 return 0;
 
+#ifdef AMINETXDUO_MULTICAST
+            case IP_ADD_MEMBERSHIP:
+            case IP_DROP_MEMBERSHIP:
+            case IP_MULTICAST_IF:
+            case IP_MULTICAST_TTL:
+            case IP_MULTICAST_LOOP:
+                return bsd_mcast_setopt(SocketBase, sock, optname, optval,
+                                        optlen);
+#endif
+
             default:
                 return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
         }
@@ -439,6 +449,16 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
 
             case IP_TOS:
                 return bsd_opt_get_long(SocketBase, optval, optlen, sock->as_Tos);
+
+#ifdef AMINETXDUO_MULTICAST
+            case IP_ADD_MEMBERSHIP:
+            case IP_DROP_MEMBERSHIP:
+            case IP_MULTICAST_IF:
+            case IP_MULTICAST_TTL:
+            case IP_MULTICAST_LOOP:
+                return bsd_mcast_getopt(SocketBase, sock, optname, optval,
+                                        optlen);
+#endif
 
             default:
                 return bsd_fail(SocketBase, AMI_ENOPROTOOPT);

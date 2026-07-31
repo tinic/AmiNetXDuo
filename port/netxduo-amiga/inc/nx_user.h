@@ -565,9 +565,25 @@
  *                                   _nx_ipv6_multicast_join() from
  *                                   nxd_ipv6_address_set(), which reaches the
  *                                   driver as NX_LINK_MULTICAST_JOIN either
- *                                   way.  Nothing in bsdsocket.library exposes
- *                                   IPv6 multicast membership yet, so this
- *                                   would be code with no caller.
+ *                                   way.  Still nothing in bsdsocket.library
+ *                                   exposes IPV6_JOIN_GROUP, so this would be
+ *                                   code with no caller -- the IPv4 side got
+ *                                   its membership surface (src/bsdsocket/
+ *                                   mcast.c) and this did not.
+ *
+ *                                   Costed rather than assumed, because the
+ *                                   shape differs from the IPv4 switch.  It
+ *                                   grows NX_IP by nx_ipv6_multicast_entry[7]
+ *                                   plus a count -- 172 bytes, spent whether
+ *                                   or not anything ever joins -- where
+ *                                   nx_igmp_enable() grows it by nothing, the
+ *                                   IPv4 table being unconditional already.
+ *                                   And there is no MLD in this tree: no
+ *                                   nx_mld_*.c exists, so a join reaches the
+ *                                   driver and no report is ever sent, and a
+ *                                   querying switch stops forwarding the
+ *                                   group.  Worse ratio than the IPv4 one,
+ *                                   and a separate decision.
  *   NX_ENABLE_IPV6_PATH_MTU_DISCOVERY -- adds a periodic sweep of the
  *                                   destination table for a benefit that only
  *                                   appears on paths with a smaller MTU than

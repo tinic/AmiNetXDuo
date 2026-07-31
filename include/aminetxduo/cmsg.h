@@ -44,9 +44,21 @@
 #ifndef AMINETXDUO_CMSG_H
 #define AMINETXDUO_CMSG_H
 
+/*
+ * Self-sufficient, unlike aminetxduo/in6.h next door, and for a reason it does
+ * not have: everything here is built out of `struct cmsghdr`, `struct in6_addr`
+ * and `struct in_addr`, so there is no version of this header that leaves the
+ * include order to its includer.  <sys/socket.h> uses size_t and ssize_t
+ * without declaring them, hence the two before it.
+ */
 #include <exec/types.h>
+#include <stddef.h>
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+
+/* IPPROTO_IPV6 and the sockaddr_in6 warning live there; one copy of each. */
+#include "aminetxduo/in6.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -89,10 +101,8 @@ extern "C" {
 
 /* ------------------------------------------------------------ the levels -- */
 
-/* Neither is in the NDK: it stops at IPPROTO_RAW.  IANA numbers. */
-#ifndef IPPROTO_IPV6
-#define IPPROTO_IPV6                41
-#endif
+/* IPPROTO_IPV6 comes from in6.h above.  The NDK's list stops at IPPROTO_RAW,
+   so this one is ours too -- the IANA number. */
 #ifndef IPPROTO_ICMPV6
 #define IPPROTO_ICMPV6              58
 #endif

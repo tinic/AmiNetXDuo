@@ -617,12 +617,17 @@ typedef struct NetStatusSocket
 
 /* ------------------------------------------------- NETSTATUS_SERVICES --
  *
- * What a browse has heard so far. This is a read of the mDNS cache, not a
- * question put on the wire: NETCTRL_MDNS_BROWSE starts the query, answers
- * arrive on the responder's own thread over the following seconds, and this
- * selector says what has landed by the time it is called. Calling it twice
- * gives two different answers, and neither is "everything on the network" --
- * mDNS has no end of results.
+ * What a browse has heard so far. This is a read of the mDNS cache:
+ * NETCTRL_MDNS_BROWSE starts the query, answers arrive on the responder's own
+ * thread over the following seconds, and this selector says what has landed by
+ * the time it is called. Calling it twice gives two different answers, and
+ * neither is "everything on the network" -- mDNS has no end of results.
+ *
+ * One thing it does put on the wire: a service whose SRV record arrived without
+ * an address record beside it has its target resolved here, because a row with
+ * a host name and no address is a service that cannot be used. That is the only
+ * reason this selector can take a moment, and it is bounded at two seconds
+ * however many such rows the cache holds.
  *
  * It answers with the WHOLE cache, of every type, and not with the type the
  * caller last browsed for: one cache, any number of readers, so a filter here

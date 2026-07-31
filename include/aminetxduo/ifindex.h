@@ -17,6 +17,11 @@
  *     if (b != NULL && b->lib_Revision >= AMI_IFINDEX_MIN_REVISION)
  *         ... if_nametoindex() and friends are safe to call ...
  *
+ * This header is the types and the constants; the glue that reaches the
+ * vectors is generated from developer/sfd/aminetxduo_lib.sfd, and a caller
+ * outside this tree includes <proto/aminetxduo.h>, which brings both. The
+ * two ship together in the archive's Developer drawer.
+ *
  * Indices are 1-based, as RFC 3493 requires ("1, 2, ..."), and are the same
  * numbers GetRouteInfo() reports in rtm_index. The two conventions are one
  * decision: a caller matching a route to an interface compares them directly,

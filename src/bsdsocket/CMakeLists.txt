@@ -55,6 +55,13 @@ if(AMINETXDUO_TLS)
     list(APPEND BSDSOCKET_SOURCES nxcontext.c)
 endif()
 
+# mcast.c is the RFC 1112 membership surface. It is the only thing that calls
+# NetX Duo's IGMP services, so leaving it out is what keeps the nx_igmp_*
+# objects out of the link -- see the floor tier in dist/make-dist.sh.
+if(AMINETXDUO_MULTICAST)
+    list(APPEND BSDSOCKET_SOURCES mcast.c)
+endif()
+
 add_library(aminetxduo_bsdsocket STATIC ${BSDSOCKET_SOURCES})
 
 target_include_directories(aminetxduo_bsdsocket PUBLIC

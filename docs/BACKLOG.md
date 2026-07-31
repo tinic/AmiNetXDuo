@@ -7,32 +7,81 @@ the memory-floor and stress work.
 The autodoc is at `NDK3.2/SANA+RoadshowTCP-IP/doc/bsdsocket.doc`. **`grep` silently
 fails on it** — `file` misidentifies it as "GTA in-game text". Read it with python.
 
+**The NDK headers have the same trap.** `m68k-amigaos/ndk-include` is Latin-1 and
+carries a `©`, so a plain `grep -r` reads those files as binary and finds nothing
+— an empty result there means "not read", not "not present". Use `LC_ALL=C grep -a`.
+This entry's own RFC 3542 assessment was built on one of those empty results and
+was wrong for a day.
+
 ---
 
 ## Open — no decision taken
 
-- **TLS has no fuzz driver.** `tests/fuzz/` now covers bpf, config, dns, mdns
-  and dhcp; the record layer and the X.509 path are the ones left, and they are
-  the headline feature. With no MMU a parser bug is not a crashed process, it
-  is arbitrary code execution with the machine's privileges. `fuzz_dhcp.c` is
-  the closest pattern to copy -- it #includes the vendored translation unit to
-  reach a static parser and stubs the ThreadX surface in `fuzz_txstub.c`.
-  Raised in external review 2026-07-31.
+- **Three nx_secure parsers read past the buffer they were given.** All three
+  were found by `fuzz_tls_record` and `fuzz_tls_x509`, all three are reachable
+  from a hostile server before any key exists, and none is fixed -- the fix
+  belongs in `third_party/netxduo` and is a submodule bump. Each driver
+  allocates a few bytes of documented slop so the sweep is not stuck
+  re-reporting them; set `FR_KNOWN_SLOP` / `FX_KNOWN_SLOP` to 0 to reproduce.
+
+  - `_nx_secure_x509_asn1_tlv_block_parse()` does `current_tag = buffer[0]` one
+    statement before it tests `*buffer_length < 1`, so every caller that runs
+    out of data over-reads by one byte. A two-byte certificate through
+    `_nx_secure_x509_certificate_parse()` reaches it, and so does
+    `tls_store.c`'s issuer walk. `fuzz_tls_x509 -r 1 20000`.
+  - `_nx_secure_tls_process_serverhello()` reads the ciphersuite and the
+    compression method without bounding them: after the session ID it has
+    checked only `35 + session_id_length <= message_length` and then reads
+    three more bytes. A 38-byte ServerHello with `session_id_length` 2 or 3
+    walks off the end. `fuzz_tls_record -r 1 500000`.
+  - `_nx_secure_tls_process_certificate_request()` reads the certificate-type
+    count before testing `message_length`, so a zero-length
+    CertificateRequest reads one byte past. Same sweep.
+
+  On the target `packet_buffer` is `tls_conn.c`'s `tc_RecordBuffer`, a heap
+  allocation holding one record, so a record that fills it turns each of these
+  into a read past a heap block on a machine with nothing to catch it.
+  Found 2026-07-31.
+- **TLS parsers that need crypto have no fuzz driver.** `fuzz_tls_record` and
+  `fuzz_tls_x509` cover the record header, the handshake header, ServerHello
+  and its extensions, CertificateRequest, the Certificate message and the
+  X.509 DER walk. ServerKeyExchange, CertificateVerify and Finished are not
+  covered: all three dispatch on a negotiated ciphersuite into
+  `NX_CRYPTO_METHOD` entries, so a driver has to link `nx_crypto` and
+  `ami_tls_crypto.c` -- and `ami_tls_crypto.c` includes `exec/types.h` and
+  casts pointers to a 32-bit `ULONG`, so it needs a 32-bit host build the way
+  `fuzz_mdns` does. Neither is `tls_resume_take_ticket()`, which is what parses
+  a TLS 1.2 NewSessionTicket (nx_secure only parses one under TLS 1.3, which is
+  off), nor `tls_store.c`'s issuer-name walk; both live in files that include
+  `proto/dos.h` and do not build on a host. The header comment in
+  `tests/fuzz/CMakeLists.txt` is the current list.
 - **No open/expunge/reopen drill.** The soak suite covers steady state; what
   historically kills long-lived Amiga stacks is cycling -- Online/Offline
   bounces and library expunge/reopen. `sana2_rx.c`'s last-resort path still
   leaks a reader stack when a driver ignores `AbortIO` (Commodore's
   a2065.device 2.16 does), which emulation will not reproduce. Raised in
   external review 2026-07-31.
-- **`bind()` outbound source selection is not done.** Inbound is: a completed
-  TCP connection that arrived on another interface is reset in `bsd_accept()`,
-  and a datagram that did is released in `bsd_recv_udp()`, both through
-  `bsd_bind_wants_interface()`, so `nc -l 127.0.0.1` means what it says and a
-  specific address is no longer refused. What is left is the send direction --
-  a socket bound to one address should send *from* it, and today NetX picks by
-  route. `nxd_udp_socket_source_send()` is already wired for RFC 4007 zones
-  and takes the same kind of index, so UDP is small; TCP has no source-send
-  equivalent and needs a decision, the same one RFC 4007 needs.
+- **TCP cannot be made to send from a bound address, only checked.** The rest
+  of `bind()` source selection is done: `bsd_source_select()` (socket.c) maps a
+  bound address or an RFC 4007 zone to the index `nxd_udp_socket_source_send()`
+  and `nxd_ip_raw_packet_source_send()` take, so UDP and raw leave from the
+  address that was asked for. TCP has no such call --
+  `_nxd_tcp_client_socket_connect()` runs its own route lookup with no hint and
+  sends the SYN before it returns -- so `connect()` runs the same two lookups
+  first and refuses (`EADDRNOTAVAIL`) when the answer is not the bound source.
+  What that costs is the case BSD allows and we do not: source on one
+  interface, route out of the other. Closing it means a
+  `nxd_tcp_socket_source_send()` in the NetX fork, which is a submodule change
+  and a fourth upstream PR.
+
+  What a one-interface guest can show is shown, by `tests/tools/run-srcsel.sh`
+  (13 checks, green under Amiberry on SLIRP): the bound address really is the
+  source the receiver sees, on the interface and on loopback, and both
+  refusals fire. What it cannot show is the disagreement this is about --
+  source on one interface, route out of the other -- and one arm of the TCP
+  check goes with it: `EADDRNOTAVAIL`, for a bound address that *can* reach the
+  destination while the stack would still leave by somewhere else, needs two
+  interfaces on one subnet to produce. Reasoned about, not measured.
 - **IPv4 multicast is absent** -- no `IP_ADD_MEMBERSHIP`, `IP_MULTICAST_IF`,
   `IP_MULTICAST_TTL`, `IP_MULTICAST_LOOP`, no `ip_mreq`. Reopened 2026-07-31:
   it had been closed on the grounds that "nothing in the tree needs the
@@ -46,6 +95,23 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   weighed against. RFC 1112 membership is the target; RFC 3678 source filtering
   is not, and can wait indefinitely. `NX_ENABLE_IPV6_MULTICAST` is the same
   argument on the v6 side, for a non-floor tier.
+- **`bind()` outbound source selection is not done.** Inbound is: a completed
+  TCP connection that arrived on another interface is reset in `bsd_accept()`,
+  and a datagram that did is released in `bsd_recv_udp()`, both through
+  `bsd_bind_wants_interface()`, so `nc -l 127.0.0.1` means what it says and a
+  specific address is no longer refused. What is left is the send direction --
+  a socket bound to one address should send *from* it, and today NetX picks by
+  route. `nxd_udp_socket_source_send()` is already wired for RFC 4007 zones
+  and takes the same kind of index, so UDP is small; TCP has no source-send
+  equivalent and needs a decision, the same one RFC 4007 needs.
+- **IPv6 group membership (`IPV6_JOIN_GROUP`) is absent.** The IPv4 side is
+  done (below); this is not, and is a separate decision because the numbers are
+  worse. `NX_ENABLE_IPV6_MULTICAST` grows every `NX_IP` by 172 bytes whether or
+  not anything joins, where `nx_igmp_enable()` grows it by nothing, and there is
+  no MLD anywhere in the vendored tree -- no `nx_mld_*.c` exists, so a join
+  reaches the driver and no report is ever sent, and a querying switch stops
+  forwarding the group. The reasoning is beside the define in
+  `port/netxduo-amiga/inc/nx_user.h`.
 - **`ShowNetServices` cannot browse every type at once.** With no type it runs the
   RFC 6763 §9 meta-query and lists the types present; listing every instance of
   every type would mean starting one continuous query per type found. They would
@@ -71,32 +137,61 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   freshness, but `NX_MDNS_SERVICE` does not, so it means walking the RR cache
   instead of the public lookup. Not worth that trade until someone reports a
   switched-off machine lingering, which every other mDNS browser does too.
+  Still true after the address chasing and `ALL` landed: neither of them needed
+  an RR walk, so nothing is written that this would reuse.
 
-- **RFC 4007 §11 is done for UDP; TCP and the config keys are not.**
+- **RFC 4007 §11 is done for the socket API; the config keys are not.**
   Done: the text layer (`ami_config_parse_ip6_zone` /
   `ami_config_format_ip6_zone`, covered in `test_config.c`), `getnameinfo()`
   printing a zone for link-local, `getaddrinfo()` accepting one as a number or
-  an interface name, and `send`/`sendto`/`sendmsg` honouring it --
-  `bsd_ip6_zone_source()` maps the interface index to the `nx_ipv6_address[]`
-  index `nxd_udp_socket_source_send()` wants.
+  an interface name, and `send`/`sendto`/`sendmsg` honouring it on UDP and raw
+  alike -- `bsd_source_select()` maps the interface index to the
+  `nx_ipv6_address[]` index the `source_send()` calls want. `connect()` on TCP
+  checks the zone against the route and refuses rather than ignoring it; see
+  the TCP entry above for why it cannot do better.
 
   Left:
-  - **TCP.** There is no `nxd_tcp_socket_source_send()`, so `connect()` to a
-    zoned link-local address stores `as_ScopeId` and then routes normally.
-    Decide what it should do -- refuse, or bind the source address first --
-    before claiming TCP support.
-  - **Raw** (`bsd_send_raw`) ignores the zone the same way.
   - `DEVS:NetInterfaces` keys (`GATEWAY6`, `ADDRESS6`) still call the plain
     parser, so a zoned value there is a clean refusal.
-  - No emulator coverage: the UDP path is verified only by the host parser
+  - No emulator coverage for the zone itself: verified only by the host parser
     tests. It wants two interfaces to be meaningful, and the lab guest has one.
-- **Ship a Developer drawer: the NDK addendum.** ACCEPTED 2026-07-31. The
-  archive ships no headers, so nothing we add past the NDK's 0..143 range can
-  be reached by anyone else's code. Plan and the three permanent ABI decisions
-  (LVO slots, `CMSG_ALIGN` for m68k, `IPV6_*` option numbers) are in
-  `docs/NDK-ADDENDUM.md`. The four RFC 3493 vectors exist as of revision 3 and
-  are verified on the guest, but nothing outside this tree can reach them until
-  the drawer ships -- that is what this item is.
+    `tests/tools/run-srcsel.sh` covers the IPv4 half of the same machinery.
+- **Ship a Developer drawer: the NDK addendum.** SHIPPED 2026-07-31 for RFC
+  3493 section 4. `developer/` holds the SFD and the generated
+  clib/inline/proto/pragmas/lvo set; `tools/stage-developer.sh` assembles the
+  drawer and both `dist/make-dist.sh` and the CMake build call it, so the
+  archive's copy is the one `tests/tools`' `IfNames` was compiled against --
+  against the staged drawer alone, with no path into `include/`.
+  `tools/gen-developer.sh --check` runs in `ci.sh`'s cross stage wherever the
+  toolchain has an `sfdc`.
+
+  Widened the same day to carry every definition we make that the NDK lacks,
+  not only the new vectors. `include/aminetxduo/in6.h` is the second published
+  header: `IPPROTO_IPV6`, `PF_INET6`, `INET6_ADDRSTRLEN`, the three `IPV6_*`
+  options, `IN6ADDR_*_INIT`, the `IN6_IS_ADDR_*` macros,
+  `struct sockaddr_storage`, `AI_ADDRCONFIG`, and the `sockaddr_in6` offset
+  trap written out for callers. `bsdsocket_internal.h` includes it and aliases
+  its `AMI_IPV6_*_BSD` names to it, so there is one copy of each number.
+  `AI_V4MAPPED` is deliberately left undefined and `sockaddr_storage`
+  deliberately has no `ss_family`; `docs/NDK-ADDENDUM.md` has both reasons.
+
+  Left:
+  - **RFC 3542** is in it as of the same day: `include/aminetxduo/cmsg.h`, the
+    third published header. It adds no vectors, so the drawer's shape did not
+    change.
+  - **IPv6 multicast** (`IPV6_JOIN_GROUP`, `IPV6_LEAVE_GROUP`,
+    `struct ipv6_mreq`) is absent from the NDK and would belong in `in6.h`.
+    IPv4 multicast needs nothing: the NDK has the whole set.
+  - **`NetStackQuery`/`NetStackControl` are still private.** Recommendation:
+    publish them, because they are what a third-party `netstat` needs and
+    `ShowNetStatus`, `netstat` and `arp` already depend on them being stable.
+    Not done here: publishing freezes `NetStatusHeader` and every
+    `NETCTRL_*` request struct, and that is the owner's call. Adding them is
+    two lines -- `netstatus.h` to `PUBLIC_HEADERS` in
+    `tools/stage-developer.sh`, and an `AMI_NETSTATUS_MIN_REVISION` beside
+    the existing magic.
+  - No `.info` for the drawer's own contents beyond `ReadMe.info`; the
+    headers are for a cross-compiler, not for Workbench.
 - **RFC 3542: the subset worth having is built; the send half of
   `IPV6_HOPLIMIT` is not.** Assessed and implemented 2026-07-31. No new LVOs:
   it rides `sendmsg`/`recvmsg`, and `struct msghdr` was already the 28-byte
@@ -174,6 +269,21 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
 
 ## Decided against — do not "fix"
 
+- **RFC 3678 source filtering stays out**, 2026-07-31. `IP_ADD_SOURCE_MEMBERSHIP`,
+  `IP_BLOCK_SOURCE` and the `MCAST_*` family need IGMPv3, which the vendored NetX
+  Duo does not implement -- it speaks IGMPv2 and the source lists have nowhere to
+  go. RFC 1112 membership is what shipped (`src/bsdsocket/mcast.c`) and is what
+  SSDP, UPnP and a ported mDNS actually call.
+- **IPv4 multicast**, done 2026-07-31, entry kept for the cost. `IP_ADD_MEMBERSHIP`,
+  `IP_DROP_MEMBERSHIP`, `IP_MULTICAST_IF`, `IP_MULTICAST_TTL` and
+  `IP_MULTICAST_LOOP` over `nx_igmp_enable()`, in `src/bsdsocket/mcast.c`;
+  `bind()` to a class D address is accepted, which it was not, because that is how
+  an SSDP receiver is written. Measured: **3,888 bytes** on the floor build (3,696
+  of code, 192 of membership table) and 3,532 on the default one, plus 12 bytes per
+  open socket. No packet-pool or `NX_IP` growth at all -- `nx_ipv4_multicast_entry[7]`
+  is unconditional in `NX_IP` and `nx_igmp_enable()` only fills in three function
+  pointers. On by default; `-DAMINETXDUO_MULTICAST=OFF` in the `68000-minimal`
+  drawer, with the other four optional features.
 - **RFC 6724 default address selection**, 2026-07-31: does not apply here. It
   sorts a list of candidate destinations, and `getaddrinfo()` returns at most
   one address per family (the resolver under it answers with a single address,

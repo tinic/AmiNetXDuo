@@ -64,6 +64,13 @@
 #include "aminetxduo/netstack.h"
 #include "aminetxduo/cmsg.h"
 
+/*
+ * The AF_INET6 names the NDK lacks. Published -- it ships in the archive's
+ * Developer drawer -- so the numbers below are derived from it rather than
+ * restated: two copies of an ABI constant is one copy too many.
+ */
+#include "aminetxduo/in6.h"
+
 /* ------------------------------------------------------------------ errno --
  *
  * AmiTCP/Roadshow errno values are 4.4BSD's, not what the newlib headers
@@ -137,30 +144,35 @@
  *                                              sin6_flowinfo, sin6_addr,
  *                                              sin6_scope_id
  *
- * What it does not define, and therefore what is defined here: IPPROTO_IPV6,
- * every IPV6_* socket option, INET6_ADDRSTRLEN, in6addr_any, IN6ADDR_*_INIT,
- * the IN6_IS_ADDR_* macros, sockaddr_storage, PF_INET6, AI_V4MAPPED and
- * AI_ADDRCONFIG. An application built against this NDK cannot name any of
- * them, so it will have spelled the numbers out itself; the values below must
- * match what everyone else uses.
+ * What it does not define is in aminetxduo/in6.h, included above: IPPROTO_IPV6,
+ * every IPV6_* socket option, INET6_ADDRSTRLEN, IN6ADDR_*_INIT, the
+ * IN6_IS_ADDR_* macros, sockaddr_storage, PF_INET6 and AI_ADDRCONFIG. That
+ * header is PUBLISHED -- it ships in the archive's Developer drawer -- and the
+ * BSD numbers below are aliases of it, not second copies. An application built
+ * against this NDK cannot name any of them, so it will have spelled them out
+ * itself, which is why in6.h #ifndef-guards every one.
  *
- * struct sockaddr_in6 is a trap. `struct sockaddr_in` in this header is
- * 4.4BSD's, with sin_len at offset 0 and sin_family at offset 1.
- * `struct sockaddr_in6` right below it is the Linux one -- pasted in verbatim,
- * comment about "Scope ID (new in 2.4)" and all -- with sin6_family at offset
- * 0 and no sin6_len. The two are not interchangeable through
- * `struct sockaddr *`: reading sa->sa_family out of a sockaddr_in6 reads its
- * padding byte. (Same class of hazard as ndk-include/pwd.h being newlib's
- * 10-field struct passwd rather than the Amiga's 7-field one.) So
- * bsd_sa_family() below decides the family from the bytes and the length
- * rather than from a struct member, and in6.c pins every offset with
- * _Static_assert.
+ * The BSD/Linux pairs are here rather than there because accepting both
+ * numberings is behaviour, not ABI: in6.h publishes the one number a caller
+ * should use, and these are what setsockopt() matches against.
+ *
+ * struct sockaddr_in6 is a trap, and in6.h carries the warning in full for
+ * the callers who need it: `struct sockaddr_in` here is 4.4BSD's, sin_len at
+ * offset 0 and sin_family at 1, while `struct sockaddr_in6` right below it is
+ * the Linux one -- pasted in verbatim, comment about "Scope ID (new in 2.4)"
+ * and all -- with sin6_family at offset 0 and no sin6_len. Reading
+ * sa->sa_family out of a sockaddr_in6 reads its padding byte. (Same class of
+ * hazard as ndk-include/pwd.h being newlib's 10-field struct passwd rather
+ * than the Amiga's 7-field one.) So bsd_sa_family() below decides the family
+ * from the bytes and the length rather than from a struct member, and in6.c
+ * pins every offset with _Static_assert.
  */
 
 /*
- * IPPROTO_IPV6 and IPPROTO_ICMPV6 -- the IANA numbers, the NDK stopping at
- * IPPROTO_RAW -- are in aminetxduo/cmsg.h with the RFC 3542 options, because
- * a caller has to be able to name a level as well as an option.
+ * IPPROTO_IPV6 comes from aminetxduo/in6.h and IPPROTO_ICMPV6 from
+ * aminetxduo/cmsg.h -- a caller has to be able to name a level as well as an
+ * option. The AMI_IPPROTO_IPV6 alias is gone rather than kept pointing at the
+ * published name: nothing used it once options.c stopped.
  *
  * IPV6_V6ONLY has two numberings in the wild and the NDK picks neither:
  * 27 in KAME and the BSDs (netinet6/in6.h), 26 in Linux. This header set is
@@ -169,11 +181,11 @@
  * to both. No collision risk: 26 is IPV6_CHECKSUM in BSD (raw sockets, which
  * this library does not offer) and 27 is IPV6_JOIN_ANYCAST in Linux (likewise).
  */
-#define AMI_IPV6_V6ONLY_BSD         27
+#define AMI_IPV6_V6ONLY_BSD         IPV6_V6ONLY
 #define AMI_IPV6_V6ONLY_LINUX       26
 
 /* IPV6_UNICAST_HOPS: 4 in BSD, 16 in Linux. Same argument, same treatment. */
-#define AMI_IPV6_UNICAST_HOPS_BSD    4
+#define AMI_IPV6_UNICAST_HOPS_BSD   IPV6_UNICAST_HOPS
 #define AMI_IPV6_UNICAST_HOPS_LINUX 16
 
 /*
@@ -183,11 +195,10 @@
  * else in both lineages this header set could belong to. 61 is Linux's
  * IPV6_PATHMTU, which this library does not offer.
  */
-#define AMI_IPV6_TCLASS_BSD         61
+#define AMI_IPV6_TCLASS_BSD         IPV6_TCLASS
 #define AMI_IPV6_TCLASS_LINUX       67
 
-/* INET6_ADDRSTRLEN: "0:0:0:0:0:ffff:255.255.255.255" plus NUL. */
-#define AMI_INET6_ADDRSTRLEN        46
+#define AMI_INET6_ADDRSTRLEN        INET6_ADDRSTRLEN
 
 /* --------------------------------------------------------------- library -- */
 
@@ -548,6 +559,20 @@ typedef struct AmiSocket
      */
     LONG                    as_HdrIncl;
 
+#ifdef AMINETXDUO_MULTICAST
+    /*
+     * IP_MULTICAST_TTL / _LOOP / _IF, kept per socket because BSD keeps them
+     * there and NetX Duo does not: the TTL is a field on the NX_UDP_SOCKET
+     * shared with unicast, and the loopback flag is one switch on the whole
+     * NX_IP. mcast.c is where the two are reconciled.
+     *
+     * as_McastIf is a NetX interface index, or -1 for "let the route decide".
+     */
+    LONG                    as_McastTtl;
+    LONG                    as_McastLoop;
+    LONG                    as_McastIf;
+#endif
+
     /*
      * RFC 3542 (cmsg.c). as_CmsgWant is the ACW_ set above; as_CmsgSticky is
      * the source a setsockopt(IPV6_PKTINFO) named, which a per-datagram cmsg
@@ -790,9 +815,9 @@ BOOL  bsd_oob_take(AmiSocket *sock, UBYTE *out);
  * and removes the filter again when the last one goes.
  *
  * bsd_raw_send_packet() hands a packet the caller has already filled to
- * nxd_ip_raw_packet_send(), which prepends the IP header. The packet is
- * consumed either way -- released here on failure -- so the caller must not
- * touch it again.
+ * nxd_ip_raw_packet_send(), which prepends the IP header. `scope` is the
+ * sockaddr_in6 zone, 0 for none. The packet is consumed either way --
+ * released here on failure -- so the caller must not touch it again.
  *
  * bsd_raw_receive() dequeues one whole IP datagram, header included, or NULL.
  * The caller owns it and must nx_packet_release() it.
@@ -800,10 +825,34 @@ BOOL  bsd_oob_take(AmiSocket *sock, UBYTE *out);
 LONG       bsd_raw_open(struct AmiSocketBase *base, AmiSocket *sock);
 VOID       bsd_raw_close(AmiSocket *sock);
 LONG       bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
-                               NX_PACKET *packet, const NXD_ADDRESS *addr);
+                               NX_PACKET *packet, const NXD_ADDRESS *addr,
+                               ULONG scope);
 NX_PACKET *bsd_raw_receive(AmiSocket *sock, ULONG wait, UINT *why);
 VOID       bsd_raw_source(NX_PACKET *packet, NXD_ADDRESS *addr);
 ULONG      bsd_raw_available(AmiSocket *sock);
+
+#ifdef AMINETXDUO_MULTICAST
+/* mcast.c -- RFC 1112 group membership and the IPPROTO_IP multicast options.
+ *
+ * bsd_mcast_setopt()/bsd_mcast_getopt() answer IP_ADD_MEMBERSHIP,
+ * IP_DROP_MEMBERSHIP, IP_MULTICAST_IF, IP_MULTICAST_TTL and
+ * IP_MULTICAST_LOOP; options.c dispatches those five and nothing else here.
+ * Both take their own bsd_nx_enter() bracket where they need one.
+ *
+ * bsd_mcast_close() drops every membership the socket still holds, as BSD
+ * does on close. It runs from bsd_socket_destroy(), inside the bracket.
+ *
+ * bsd_mcast_prepare_send() is the send path: it puts the socket's multicast
+ * TTL on the NX_UDP_SOCKET and answers with the interface index the datagram
+ * must leave by, or -1 for the route's choice.
+ */
+LONG bsd_mcast_setopt(struct AmiSocketBase *base, AmiSocket *sock,
+                      LONG optname, APTR optval, socklen_t optlen);
+LONG bsd_mcast_getopt(struct AmiSocketBase *base, AmiSocket *sock,
+                      LONG optname, APTR optval, socklen_t *optlen);
+VOID bsd_mcast_close(AmiSocket *sock);
+LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr);
+#endif
 
 /* select.c -- event plumbing.
  *
@@ -858,5 +907,22 @@ VOID  bsd_bcopy(const APTR src, APTR dst, ULONG size);
  * datagrams with it, accept() filters completed connections.
  */
 BOOL bsd_bind_wants_interface(const AmiSocket *sock, const NX_INTERFACE *nxif);
+
+/*
+ * The send direction of the same question: which source must a datagram from
+ * this socket leave with? socket.c owns it; transfer.c and raw.c use it to
+ * pick the nxd_*_source_send() index, connect() to decide whether TCP can
+ * honour the request at all.
+ */
+typedef enum
+{
+    BSD_SOURCE_ROUTE = 0,   /* nothing pinned: NetX may route as it likes  */
+    BSD_SOURCE_INDEX,       /* pinned; *index is what source_send() wants  */
+    BSD_SOURCE_REFUSE,      /* pinned to something absent: EADDRNOTAVAIL   */
+    BSD_SOURCE_UNREACH      /* pinned, but no route from there: ENETUNREACH */
+} BsdSourceKind;
+
+BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
+                                ULONG scope, UINT *index);
 
 #endif /* AMINETXDUO_BSDSOCKET_INTERNAL_H */
