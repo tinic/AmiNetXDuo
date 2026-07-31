@@ -6,25 +6,11 @@
 #
 # TWO ROMS, TWO JOBS
 #
-#   `aros`      the AROS m68k ROM -- open source (APL 1.1), downloadable, and
-#               verified 2026-07-25 to run these harnesses with the SAME check
-#               counts as Kickstart 3.1 40.68.  Runs in public CI, no secrets.
-#
 #   `kickstart` a real Kickstart 3.1 ROM plus Commodore's a2065.device.  Both
 #               are copyrighted and neither may be redistributed, so this job
 #               only runs on a self-hosted runner that already has them.  It is
 #               the only tier that can run the SANA-II network tests and the
 #               bsdsocktest conformance suite, because those need a driver.
-#
-# WHAT AROS CANNOT DO, MEASURED
-#
-#   OpenLibrary("usergroup.library") works.  OpenLibrary("bsdsocket.library")
-#   does not, and not because of AROS: bringing the stack up needs an entry in
-#   DEVS:NetInterfaces naming a SANA-II device, and the only driver FS-UAE's
-#   emulated hardware has is a2065.device.  AROS ships no a2065.device.  It
-#   does ship prm-rtl8029.device, which may pair with FS-UAE's NE2000-based
-#   cards -- untried, and the obvious next thing to try if you want the
-#   conformance suite in public CI.
 #
 # SPDX-License-Identifier: MIT
 
@@ -42,8 +28,7 @@ on:
         type: boolean
         default: false
   schedule:
-    # Nightly.  The AROS ROM is a nightly build too, so this doubles as an
-    # early warning that the pin in tools/fetch-aros-rom.sh has rotted.
+    # Nightly.
     - cron: "17 4 * * *"
   # Deliberately NOT on push. This tier boots an emulator and takes 7-20
   # minutes, so on an active day it is cancelled by the next push before it
@@ -59,93 +44,6 @@ concurrency:
 
 jobs:
 
-  # ------------------------------------------------------------------------
-  # Public tier: FS-UAE on the free AROS ROM.
-  # ------------------------------------------------------------------------
-  aros:
-    name: FS-UAE on the AROS m68k ROM
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      # Same key as ci.yml, and read from the same place, so the two workflows
-      # share one cache entry instead of racing to fill two.
-      - name: Toolchain pin
-        id: pin
-        run: echo "sha=$(tools/fetch-toolchain.sh --print-sha)" >> "$GITHUB_OUTPUT"
-
-      # The key carries a hash of the crt0 repair as well as the toolchain
-      # pin: the cached tree is a REPAIRED tree, so it is only reusable by a
-      # build whose repair is the same one. Bumping a hand-written suffix was
-      # the first attempt and it went stale immediately -- a cache saved by
-      # the 4-file version of the script was restored by the 11-file version,
-      # which correctly refused to build on it.
-      - name: Cache the pinned m68k toolchain
-        id: toolchain-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/aminetxduo/toolchain
-          key: m68k-amigaos-gcc-15.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py') }}
-
-      - name: Fetch the toolchain
-        if: steps.toolchain-cache.outputs.cache-hit != 'true'
-        run: tools/fetch-toolchain.sh
-
-      # A cache restored from before the crt0 repair existed contains the
-      # BROKEN crt0, and the fetch above does not run on a hit -- so this is
-      # not belt-and-braces, it is the only thing standing between a warm
-      # cache and shipping commands that crash on return to the Shell. The
-      # key is versioned too, so an old cache is not reused in the first
-      # place; this catches the case where it is restored anyway.
-      - name: The toolchain's crt0 is repaired
-        run: tools/fetch-toolchain.sh --check-crt0
-
-      # FS-UAE needs a real OpenGL context -- SDL_VIDEODRIVER=dummy makes it
-      # die with "[GLAD] Failed to initialize OpenGL context" -- so it gets a
-      # virtual X server rather than a headless SDL driver.
-      - name: Install FS-UAE
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq fs-uae xvfb mesa-utils libgl1
-          fs-uae --version | head -1
-
-      # 108 MB of boot ISO for 1 MB of ROM, so it is worth caching.  The key is
-      # the ROM's own sha256, which is the pin.
-      - name: Cache the AROS ROM
-        id: aros-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/aminetxduo/aros-rom
-          key: aros-m68k-rom-b6ba153943490f813b9ff5705b54c943431d2d8ec584d4cba6f5311b95e0898e
-
-      - name: Fetch the AROS ROM
-        if: steps.aros-cache.outputs.cache-hit != 'true'
-        run: tools/fetch-aros-rom.sh
-
-      - name: Build the default and 68000 configurations
-        run: AMINETXDUO_CI_CROSS="default m68000" tools/ci.sh cross
-
-      - name: Run the on-Amiga harnesses
-        run: xvfb-run -a tools/ci.sh emulator
-
-      - name: Upload emulator logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: emulator-logs-aros
-          path: |
-            build/ci/emu-*.log
-            build/serial*.log
-            build/fsuae*.log
-          if-no-files-found: ignore
-          retention-days: 14
-
-  # ------------------------------------------------------------------------
-  # Kickstart tier.  Gated on a repository variable AND a self-hosted runner,
-  # because the material cannot be shipped to a hosted one.  Absent either, it
-  # does not run -- and the `gate` job below says so out loud.
   # ------------------------------------------------------------------------
   kickstart:
     name: FS-UAE on Kickstart 3.1 (self-hosted)
@@ -168,7 +66,6 @@ jobs:
           if [ ! -f "$AMINETXDUO_KICKSTART" ]; then
             echo "::error::AMINETXDUO_KICKSTART is set to '$AMINETXDUO_KICKSTART'," \
                  "which does not exist on this runner. Refusing to fall back to" \
-                 "the AROS ROM -- that would report a Kickstart pass that never" \
                  "happened."
             exit 1
           fi
@@ -206,7 +103,7 @@ jobs:
   gate:
     name: tier report
     runs-on: ubuntu-latest
-    needs: [aros, kickstart]
+    needs: [kickstart]
     if: always()
     steps:
       - name: Report
@@ -216,7 +113,6 @@ jobs:
             echo
             echo "| tier | ROM | result |"
             echo "|---|---|---|"
-            echo "| AROS m68k | free, fetched | ${{ needs.aros.result }} |"
             echo "| Kickstart 3.1 | self-hosted only | ${{ needs.kickstart.result }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -234,8 +130,3 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-          # The AROS tier is not optional: if it did not pass, this fails.
-          case "${{ needs.aros.result }}" in
-            success) ;;
-            *) echo "::error::The AROS emulator tier did not pass."; exit 1 ;;
-          esac

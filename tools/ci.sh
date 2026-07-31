@@ -5,7 +5,7 @@
 #   tools/ci.sh                      # tier 1: host tests + every cross config
 #   tools/ci.sh host                 # just the host tests
 #   tools/ci.sh cross                # just the cross builds
-#   tools/ci.sh emulator             # tier 2: FS-UAE on the AROS ROM
+#   tools/ci.sh emulator             # tier 2: FS-UAE, needs a boot ROM
 #   tools/ci.sh host cross emulator  # pick and choose
 #
 # .github/workflows/ci.yml and emulator.yml call THIS -- they add caching,
@@ -32,7 +32,7 @@
 #   AMINETXDUO_CI_JOBS     parallel jobs (default: all cores)
 #   AMINETXDUO_CI_CROSS    space-separated subset of the cross configs to
 #                          build, e.g. "default" (default: all of them)
-#   AMINETXDUO_KICKSTART   emulator stage: boot ROM.  Unset means fetch AROS.
+#   AMINETXDUO_KICKSTART   emulator stage: boot ROM.  Required.
 #
 # SPDX-License-Identifier: MIT
 
@@ -87,7 +87,7 @@ CROSS_CONFIGS=(
 HOST_TEST_TARGETS=(test_config test_mbuf test_bpf test_crypto68k test_crypto68k_25519 test_net68k_checksum
                    test_tcp_retries test_bcast_loopback fuzz_config fuzz_bpf fuzz_dns)
 
-# The on-Amiga harnesses the AROS ROM can run.  Verified 2026-07-25 against
+# The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against
 # Kickstart 3.1 -- identical check counts on both.  Deliberately NOT here:
 #   netstack_test, and the bsdsocktest conformance suite, both of which need
 #   DEVS:a2065.device -- Commodore's driver, not redistributable, so those
@@ -315,8 +315,8 @@ stage_emulator() {
     if [ -n "${AMINETXDUO_KICKSTART:-}" ]; then
         note "boot ROM: $AMINETXDUO_KICKSTART (supplied)"
     else
-        note "no AMINETXDUO_KICKSTART -- fetching the AROS m68k ROM"
-        eval "$(tools/fetch-aros-rom.sh --export)"
+        fail "no AMINETXDUO_KICKSTART -- this stage needs a boot ROM"
+        return 1
     fi
     export AMINETXDUO_KICKSTART
     export AMINETXDUO_KICKSTART_EXT="${AMINETXDUO_KICKSTART_EXT:-}"

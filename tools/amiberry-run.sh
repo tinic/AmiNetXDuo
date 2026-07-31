@@ -129,7 +129,6 @@ fi
     cat >&2 <<'EOF'
 No boot ROM.  Either:
 
-  eval "$(tools/fetch-aros-rom.sh --export)"   # free, what CI uses
   export AMINETXDUO_KICKSTART=<kickstart.rom>  # a real one, not redistributable
 EOF
     exit 2

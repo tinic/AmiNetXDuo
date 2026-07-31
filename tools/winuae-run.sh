@@ -15,7 +15,6 @@
 # harness gives you, so tests/netstack expectations carry over unchanged.
 # -N picks a different card; see the board table below.
 # -x turns warp mode off and asks for cycle accounting.  See the -x block.
-# -K forces the AROS ROM even when a Kickstart is available.
 #
 # WHY THIS EXISTS AT ALL, given that FS-UAE already works:
 #
@@ -88,7 +87,6 @@ MODEL=A3000
 CPU=""
 NETWORK=0
 ACCURATE=0
-FORCE_AROS=0
 SETUP=0
 
 for arg in "$@"; do
@@ -105,7 +103,7 @@ fi
 
 BOARD=a2065
 
-while getopts "t:m:c:nN:xK" opt; do
+while getopts "t:m:c:nN:x" opt; do
     case "$opt" in
         t) TIMEOUT="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
@@ -113,7 +111,6 @@ while getopts "t:m:c:nN:xK" opt; do
         n) NETWORK=1 ;;
         N) NETWORK=1; BOARD="$OPTARG" ;;
         x) ACCURATE=1 ;;
-        K) FORCE_AROS=1 ;;
         *) echo "usage: $0 [-t seconds] [-m A3000|A1200|A4000] [-c cpu] [-n] [-N board] [-x] [-K] <executable> [files...]" >&2; exit 2 ;;
     esac
 done
@@ -284,19 +281,12 @@ fi
 
 # ---------------------------------------------------------------- boot ROM --
 #
-# Kickstart first, AROS as the fallback -- the reverse of what CI wants, and
-# deliberately so.  This harness exists to run the code on the machine the
-# users have, and the A3000 Kickstart is that machine's ROM.  The AROS pair is
-# still here because it is free and because CI cannot have a Kickstart, and it
-# has been verified against the same probes (tools/fetch-aros-rom.sh).
+# This harness runs the code on the machine the users have, and the A3000
+# Kickstart is that machine's ROM.
 KICK="${AMINETXDUO_KICKSTART:-}"
 KICK_EXT="${AMINETXDUO_KICKSTART_EXT:-}"
 
-if [ "$FORCE_AROS" = "1" ]; then
-    KICK=""; KICK_EXT=""
-fi
-
-if [ -z "$KICK" ] && [ "$FORCE_AROS" = "0" ]; then
+if [ -z "$KICK" ]; then
     for name in "${ROM_NAMES[@]}"; do
         for dir in "$HOME/Downloads" "$HOME/amigaos/build/rom" "$ROOT/build"; do
             [ -f "$dir/$name" ] && { KICK="$dir/$name"; break 2; }
@@ -305,10 +295,8 @@ if [ -z "$KICK" ] && [ "$FORCE_AROS" = "0" ]; then
 fi
 
 if [ -z "$KICK" ]; then
-    echo "==> no $MODEL Kickstart found; using the AROS ROM pair"
-    eval "$("$ROOT/tools/fetch-aros-rom.sh" --export)"
-    KICK="$AMINETXDUO_KICKSTART"
-    KICK_EXT="$AMINETXDUO_KICKSTART_EXT"
+    echo "no $MODEL Kickstart found; set AMINETXDUO_KICKSTART=<path>" >&2
+    exit 2
 fi
 [ -f "$KICK" ] || { echo "boot ROM $KICK does not exist" >&2; exit 2; }
 

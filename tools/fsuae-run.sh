@@ -88,12 +88,7 @@ EXE_NAME=$(basename "$EXE")
 # ---------------------------------------------------------------- kickstart --
 
 # AMINETXDUO_KICKSTART_EXT loads a second ROM image as FS-UAE's extended ROM.
-# Kickstart 3.1 does not need one.  The AROS m68k ROM DOES: it ships as a pair
-# of 512 KB images, and booting only the first one dies in Exec Bootstrap with
-# "graphics.library could not open library hidd" before DOS ever starts.  With
-# both, FS-UAE reports "1MiB ROM detected" and everything here works exactly as
-# it does on 3.1 -- verified 2026-07-25 on the smoke, lifecycle and kernel-stop
-# probes, identical check counts.  tools/fetch-aros-rom.sh sets both variables.
+# Kickstart 3.1 does not need an extended ROM.
 KICKSTART="${AMINETXDUO_KICKSTART:-}"
 KICKSTART_EXT="${AMINETXDUO_KICKSTART_EXT:-}"
 
@@ -126,12 +121,10 @@ if [ -z "$KICKSTART" ]; then
 fi
 [ -n "$KICKSTART" ] && [ -f "$KICKSTART" ] || {
     cat >&2 <<'EOF'
-No boot ROM found.  This harness needs one of:
+No boot ROM found.  This harness needs a Kickstart ROM, which is
+copyrighted and not redistributable:
 
-  a Kickstart 3.1 ROM   -- copyrighted, not redistributable, not in CI:
-                           export AMINETXDUO_KICKSTART=<path>
-  the AROS m68k ROM     -- free (APL 1.1) and what CI uses:
-                           eval "$(tools/fetch-aros-rom.sh --export)"
+  export AMINETXDUO_KICKSTART=<path>
 EOF
     exit 2
 }
