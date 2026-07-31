@@ -478,7 +478,14 @@ static const BsdConstTag bsd_const_tags[] =
      */
     { SBTC_HAVE_DNS_API,                TRUE  },
     { SBTC_IPF_API_VERSION,             0     },
-    { SBTC_HAVE_LOCAL_DATABASE_API,     FALSE },
+    /*
+     * TRUE since netdb.c: the tag names setnetent() and getprotoent(), and all
+     * nine of set/get/end {net,proto,serv}ent are there over the DEVS:Internet
+     * store. This answered FALSE while they worked, which is the mirror image
+     * of the SBTC_HAVE_DNS_API bug in docs/RESEARCH.md 55 -- there we claimed
+     * an API we did not have, here we denied one we do.
+     */
+    { SBTC_HAVE_LOCAL_DATABASE_API,     TRUE  },
     { SBTC_HAVE_ADDRESS_CONVERSION_API, TRUE  },
     { SBTC_HAVE_KERNEL_MEMORY_API,      FALSE },
     { SBTC_HAVE_SERVER_API,             FALSE },
