@@ -15,10 +15,12 @@
  *   arrive over the following seconds from whatever is awake and listening,
  *   and there is no point at which mDNS says "that is all of them" -- a
  *   machine that boots in a minute will answer then. So this command listens
- *   for a fixed window and prints what answered inside it, which is a
- *   different thing from what is on the network, and it says so in the output.
- *   A user who reads a short list as "there is nothing else here" will file a
- *   bug about the wrong thing.
+ *   for a fixed window and then prints the peer cache, which is a different
+ *   thing from what is on the network in both directions: shorter, because
+ *   only what was awake has answered, and longer, because a cache entry
+ *   outlives the machine that put it there. The output says so. A user who
+ *   reads a short list as "there is nothing else here", or a listed machine as
+ *   one that is still up, will file a bug about the wrong thing.
  *
  *   The window is three seconds. A responder on the same wire answers in well
  *   under one -- RFC 6762 6 gives a shared record a 20-120 ms delay before it
@@ -508,11 +510,17 @@ int main(int argc, char **argv)
          * Said every time, not only when the list looks short. mDNS has no
          * complete answer to give and a list that did not say so would be read
          * as one.
+         *
+         * "heard recently" rather than "answered just now": the collect walks
+         * the whole peer cache, so a second browse inside the TTL still lists a
+         * machine that did not answer it. Claiming the window would be true
+         * only on a cold cache.
          */
         tool_advise_blank();
-        tool_advise("This is what answered in the window, not everything on");
-        tool_advise("the network -- mDNS has no end of results. Ask again for");
-        tool_advise("a longer look with SECONDS=10.");
+        tool_advise("This is what this machine has heard recently, not");
+        tool_advise("everything on the network, and something listed may");
+        tool_advise("since have gone. Ask again for a longer look with");
+        tool_advise("SECONDS=10.");
 
         if (type == NULL)
         {

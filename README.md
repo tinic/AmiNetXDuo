@@ -127,9 +127,10 @@ ShowNetServices _http._tcp
 ```
 
 Printers, NAS boxes, media players and anything running Bonjour or Avahi turn
-up without being configured anywhere. The list is what answered in a few
-seconds rather than an inventory of the network — nothing on a `.local` network
-can say when the answers have stopped coming.
+up without being configured anywhere. The list is what this machine has heard
+recently rather than an inventory of the network: nothing on a `.local` network
+can say when the answers have stopped coming, and something listed may since
+have gone.
 
 ## HTTPS / SSH
 
