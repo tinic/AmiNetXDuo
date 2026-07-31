@@ -128,12 +128,23 @@ CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ping netstat host
 # must not set it: the installer aborts on a machine whose drawer is absent,
 # which is the right behaviour for a damaged download and the wrong thing to
 # discover about your own archive.
-CPU_DIRS=(${AMINETXDUO_DIST_CPUS:-68000 68020-40 68060})
+CPU_DIRS=(${AMINETXDUO_DIST_CPUS:-68000 68000-minimal 68020-40 68060})
 declare -A CPU_BUILD=(
     [68000]="${AMINETXDUO_BUILD_68000:-$BUILD-68000}"
+    [68000-minimal]="${AMINETXDUO_BUILD_68000_MINIMAL:-$BUILD-68000-minimal}"
     [68020-40]="$BUILD"
     [68060]="${AMINETXDUO_BUILD_68060:-$BUILD-68060}"
 )
+
+# 68000-minimal is the same stack with IPv6, mDNS, the packet filter and TLS
+# compiled out, stripped: 222 KB against the 68000 drawer's 326 KB.  On the
+# 1 MB machine 81 measured, that is 104 KB back out of the 371 KB the stack
+# leaves free -- a 28% increase in what is left for programs.
+#
+# NOT what the installer picks.  It is here for somebody who has measured
+# their machine and decided, which is why it is a drawer rather than a
+# threshold: a stack that silently drops IPv6 and .local resolution on a
+# machine that could have run them is a support question, not a saving.
 
 # THE COMMANDS ARE BUILT ONCE, FOR THE 68000, and every machine runs that one
 # set.  They are not where the work happens: each is a few hundred lines around
