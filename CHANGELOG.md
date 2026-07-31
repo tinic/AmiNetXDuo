@@ -2,6 +2,11 @@
 
 User-visible changes, newest first. Internal work is in the git log.
 
+## Unreleased
+
+- Fixed closing the last `bsdsocket.library` handle never returning, so a program that opens the library, uses it and exits no longer hangs
+- `AddNetInterface` now says when the network could not start for want of memory, instead of sending you to check the cable
+
 ## 0.14.2
 
 - `netstat -h` now reports what the network owns -- allocations, sockets and packet buffers, each with a high-water mark -- so a suspected leak can be confirmed or refuted without a debugger

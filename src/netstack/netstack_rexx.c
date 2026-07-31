@@ -91,9 +91,28 @@ typedef struct AmiRexxBoot
 
 static struct MsgPort  *ami_rx_port;        /* the AMITCP port itself       */
 static struct Process  *ami_rx_proc;
-static struct MsgPort  *ami_rx_death;       /* parent's; the child posts here */
-static struct Message   ami_rx_death_msg;
 static AmiRexxBoot     *ami_rx_boot;
+
+/*
+ * The stop handshake, and why it is not a MsgPort.
+ *
+ * The host starts from netstack_startup() and stops from netstack_shutdown(),
+ * and those two run on different Tasks: bsdsocket brings the stack up on a
+ * throwaway Process (library.c, bsd_netstack_bringup) and tears it down on
+ * whichever task drops the last reference. A MsgPort cannot carry a handshake
+ * across that. CreateMsgPort() takes mp_SigBit from the creating task's signal
+ * allocation and points mp_SigTask at it, so the reply woke the bring-up
+ * Process -- gone by then -- while the stopper sat in WaitPort() on a bit
+ * nothing would ever set. That was CloseLibrary() never returning, and
+ * DeleteMsgPort() would have freed the signal out of the wrong task too.
+ *
+ * So the stopper supplies both: it allocates the signal in its own task and
+ * registers itself, and the host only sets a flag and pokes whatever is
+ * registered. Same shape as the port's _tx_amiga_stop_notify().
+ */
+static volatile ULONG   ami_rx_gone;
+static struct Task     *ami_rx_stopper;
+static ULONG            ami_rx_stop_sig;
 
 /* ------------------------------------------------------- rexxsyslib calls --
  *
@@ -355,7 +374,6 @@ static VOID ami_rx_main(VOID)
 {
     AmiRexxBoot    *boot = ami_rx_boot;
     struct MsgPort *port;
-    struct MsgPort *death;
     ULONG           portmask;
     BOOL            running = TRUE;
 
@@ -442,17 +460,16 @@ static VOID ami_rx_main(VOID)
 
     AMI_INFO("AMITCP: ARexx host stopped");
 
-    death = ami_rx_death;
-
     /*
-     * The parent is waiting on this message to know the library segment is free
-     * of us. Forbid() and no Permit(): the epilogue after this call is still
-     * our code, and the parent must not run until this process has left it.
-     * The task's Forbid nesting dies with the task.
+     * The stopper is waiting on this to know the library segment is free of us.
+     * Forbid() and no Permit(): the epilogue after this call is still our code,
+     * and the stopper must not run until this process has left it. The task's
+     * Forbid nesting dies with the task.
      */
     Forbid();
-    if (death != NULL)
-        PutMsg(death, &ami_rx_death_msg);
+    ami_rx_gone = 1UL;
+    if (ami_rx_stopper != NULL)
+        Signal(ami_rx_stopper, ami_rx_stop_sig);
 }
 
 /* ---------------------------------------------------------------- the API -- */
@@ -475,13 +492,8 @@ VOID ami_netstack_rexx_start(VOID)
         return;
     }
 
-    ami_rx_death = CreateMsgPort();
-    if (ami_rx_death == NULL)
-        return;
-
-    ami_rx_death_msg.mn_Node.ln_Type = NT_MESSAGE;
-    ami_rx_death_msg.mn_ReplyPort    = NULL;
-    ami_rx_death_msg.mn_Length       = (UWORD)sizeof(ami_rx_death_msg);
+    ami_rx_gone    = 0UL;
+    ami_rx_stopper = NULL;
 
     boot.rb_Parent = me;
     boot.rb_Ok     = FALSE;
@@ -506,8 +518,6 @@ VOID ami_netstack_rexx_start(VOID)
     if (ami_rx_proc == NULL)
     {
         ami_rx_boot = NULL;
-        DeleteMsgPort(ami_rx_death);
-        ami_rx_death = NULL;
         AMI_ERROR("AMITCP: cannot start the ARexx host process");
         return;
     }
@@ -521,24 +531,48 @@ VOID ami_netstack_rexx_start(VOID)
     {
         /* It added no port and has already returned. Nothing to stop. */
         ami_rx_proc = NULL;
-        DeleteMsgPort(ami_rx_death);
-        ami_rx_death = NULL;
     }
 }
 
 VOID ami_netstack_rexx_stop(VOID)
 {
+    BYTE  sig;
+    ULONG mask;
+
     if (ami_rx_proc == NULL)
         return;
 
+    /* Allocated here so the bit belongs to the task that waits on it. Not
+       SIGF_SINGLE: this runs from netstack_shutdown(), whose caller may still
+       be an adopted ThreadX thread, and the port uses SIGF_SINGLE as the thread
+       run-signal. */
+    sig  = (BYTE)AllocSignal(-1);
+    mask = (sig >= 0) ? (1UL << (ULONG)sig) : 0UL;
+
+    /* Register before the break, so the host cannot finish and find nobody. */
+    Forbid();
+    ami_rx_stopper  = FindTask(NULL);
+    ami_rx_stop_sig = mask;
     Signal((struct Task *)ami_rx_proc, SIGBREAKF_CTRL_C);
+    Permit();
 
-    WaitPort(ami_rx_death);
-    (VOID)GetMsg(ami_rx_death);
+    while (ami_rx_gone == 0UL)
+    {
+        if (mask != 0UL)
+            (VOID)Wait(mask);
+        else
+            Delay(1UL);         /* no signal to spare: poll instead */
+    }
 
-    DeleteMsgPort(ami_rx_death);
-    ami_rx_death = NULL;
-    ami_rx_proc  = NULL;
+    Forbid();
+    ami_rx_stopper  = NULL;
+    ami_rx_stop_sig = 0UL;
+    Permit();
+
+    if (sig >= 0)
+        FreeSignal(sig);
+
+    ami_rx_proc = NULL;
 }
 
 /*

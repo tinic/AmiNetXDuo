@@ -20,6 +20,8 @@
 #include <exec/execbase.h>
 #include <exec/libraries.h>
 #include <dos/dos.h>
+#include <dos/dosextens.h>
+#include <dos/dostags.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 
@@ -177,38 +179,37 @@ register LONG _clob_a0 __asm("a0");
 }
 
 
-/* ------------------------------------------------------------------ main -- */
+/* --------------------------------------------------- the bsdsocket phase -- */
 
-int main(void)
+/*
+ * Run in a Process of its own so main() can put a clock on it -- specifically
+ * on the CloseLibrary() at the end, which drops the last netstack reference and
+ * tears the stack down.  That close hung for ever: netstack_shutdown() stopped
+ * the ARexx host by waiting on a MsgPort created during bring-up, on a Task
+ * that no longer existed, so the signal went nowhere (netstack_rexx.c).  It is
+ * invisible in normal use because AddNetInterface keeps a reference; any
+ * program that opens the library, uses it and exits hits it.
+ *
+ * A wedged close cannot be unwedged, so a failing run leaves this Process
+ * parked in Exec while main() reports and exits.  It is parked in Wait(), not
+ * in this hunk, and the run is over either way.
+ */
+
+#define T_BRINGUP_LIMIT     900UL       /* 200 ms units: 180 s to come up   */
+#define T_CLOSE_LIMIT       300UL       /* 200 ms units: 60 s to close      */
+#define T_POLL_TICKS        10UL        /* Delay() units: 200 ms            */
+#define T_CHILD_STACK       65536UL
+
+static volatile ULONG   t_closing;
+static volatile ULONG   t_child_done;
+
+static VOID t_bsd_main(VOID)
 {
 
-struct Library  *ugbase;
 struct Library  *sbase;
 char             hostname[64];
 LONG             sock;
 
-
-    t_log("AmiNetXDuo -- shared library load test");
-
-    /* ---- usergroup.library ---------------------------------------------- */
-
-    ugbase =  OpenLibrary((CONST_STRPTR) "usergroup.library", 0UL);
-    if (t_check((BOOL) (ugbase != NULL), "OpenLibrary(usergroup.library)", 0UL))
-    {
-
-        t_log("  usergroup.library %ld.%ld: %s",
-              (ULONG) ugbase -> lib_Version, (ULONG) ugbase -> lib_Revision,
-              (ugbase -> lib_IdString != NULL) ? ugbase -> lib_IdString
-                                               : (STRPTR) "(no id)");
-
-        (VOID) t_check((BOOL) (ugbase -> lib_Version >= 4),
-                       "usergroup.library version >= 4",
-                       (ULONG) ugbase -> lib_Version);
-
-        CloseLibrary(ugbase);
-    }
-
-    /* ---- bsdsocket.library ---------------------------------------------- */
 
     /*
      * This is the whole stack: OpenLibrary() runs the romtag init, clones a
@@ -220,9 +221,8 @@ LONG             sock;
     sbase =  OpenLibrary((CONST_STRPTR) "bsdsocket.library", 4UL);
     if (!t_check((BOOL) (sbase != NULL), "OpenLibrary(bsdsocket.library)", 0UL))
     {
-        t_log("");
-        t_log("%ld checks, %ld failures -- FAIL", t_checks, t_failures);
-        return(20);
+        t_child_done =  1UL;
+        return;
     }
 
     SocketBase =  sbase;
@@ -260,21 +260,105 @@ LONG             sock;
     }
 
     t_log("");
-    t_log("%ld checks, %ld failures -- %s",
-          t_checks, t_failures, (t_failures == 0UL) ? "PASS" : "FAIL");
-
-    /*
-     * Reported last, and separately, because CloseLibrary() drops the final
-     * netstack reference and can hang in teardown: on Commodore's
-     * a2065.device 2.16 an AbortIO() on a pending SANA-II CMD_READ is never
-     * honoured, so the reader thread's WaitIO() never returns.
-     */
-    t_log("");
     t_log("closing bsdsocket.library (tears the stack down)");
 
     SocketBase =  NULL;
+    t_closing  =  1UL;
+
     CloseLibrary(sbase);
+
     t_log("  closed bsdsocket.library");
+    t_child_done =  1UL;
+}
+
+
+/* ------------------------------------------------------------------ main -- */
+
+int main(void)
+{
+
+struct Library  *ugbase;
+struct Process  *child;
+struct TagItem   tags[6];
+ULONG            waited;
+ULONG            closed_after;
+
+
+    t_log("AmiNetXDuo -- shared library load test");
+
+    /* ---- usergroup.library ---------------------------------------------- */
+
+    ugbase =  OpenLibrary((CONST_STRPTR) "usergroup.library", 0UL);
+    if (t_check((BOOL) (ugbase != NULL), "OpenLibrary(usergroup.library)", 0UL))
+    {
+
+        t_log("  usergroup.library %ld.%ld: %s",
+              (ULONG) ugbase -> lib_Version, (ULONG) ugbase -> lib_Revision,
+              (ugbase -> lib_IdString != NULL) ? ugbase -> lib_IdString
+                                               : (STRPTR) "(no id)");
+
+        (VOID) t_check((BOOL) (ugbase -> lib_Version >= 4),
+                       "usergroup.library version >= 4",
+                       (ULONG) ugbase -> lib_Version);
+
+        CloseLibrary(ugbase);
+    }
+
+    /* ---- bsdsocket.library, on a watched Process ------------------------- */
+
+    tags[0].ti_Tag  =  NP_Entry;      tags[0].ti_Data =  (ULONG) t_bsd_main;
+    tags[1].ti_Tag  =  NP_Name;       tags[1].ti_Data =  (ULONG) "library_test bsd";
+    tags[2].ti_Tag  =  NP_StackSize;  tags[2].ti_Data =  T_CHILD_STACK;
+    tags[3].ti_Tag  =  NP_Cli;        tags[3].ti_Data =  (ULONG) FALSE;
+    tags[4].ti_Tag  =  TAG_DONE;      tags[4].ti_Data =  0;
+
+    child =  CreateNewProc(tags);
+    if (!t_check((BOOL) (child != NULL), "CreateNewProc(bsdsocket phase)", 0UL))
+    {
+        t_log("");
+        t_log("%ld checks, %ld failures -- FAIL", t_checks, t_failures);
+        return(20);
+    }
+
+    closed_after =  0UL;
+    for (waited = 0UL; t_child_done == 0UL; waited++)
+    {
+        if (t_closing != 0UL)
+        {
+            closed_after++;
+            if (closed_after > T_CLOSE_LIMIT)
+            {
+                break;
+            }
+        }
+        else if (waited > T_BRINGUP_LIMIT)
+        {
+            break;
+        }
+
+        Delay(T_POLL_TICKS);
+    }
+
+    t_log("");
+    if (t_closing == 0UL)
+    {
+        (VOID) t_check(FALSE, "bsdsocket phase reached the close", waited / 5UL);
+    }
+    else
+    {
+        (VOID) t_check((BOOL) (t_child_done != 0UL),
+                       "CloseLibrary(bsdsocket.library) returned",
+                       closed_after / 5UL);
+        if (t_child_done == 0UL)
+        {
+            t_log("  the last close did not return in %ld s -- the teardown is "
+                  "stuck", T_CLOSE_LIMIT / 5UL);
+        }
+    }
+
+    t_log("");
+    t_log("%ld checks, %ld failures -- %s",
+          t_checks, t_failures, (t_failures == 0UL) ? "PASS" : "FAIL");
 
     return((t_failures == 0UL) ? 0 : 20);
 }

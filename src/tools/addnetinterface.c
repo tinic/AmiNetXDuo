@@ -55,6 +55,9 @@ enum
 /* Seconds. Both the default and the floor -- see the note at the top. */
 #define ADDIF_TIMEOUT       10UL
 
+/* The figure explain_status() already quotes for AMI_NET_ERR_NOMEM. */
+#define ADDNETIF_MIN_FREE   (200UL * 1024UL)
+
 /*
  * Turn a stack error code into advice. `ifc` is the interface file already
  * parsed, which lets the device explanation name the driver and unit.
@@ -124,6 +127,26 @@ static VOID explain_library_failure(const AmiIfConfig *ifc)
         tool_advise("LIBS:. The installer puts it there; if you copied files by");
         tool_advise("hand, LIBS:bsdsocket.library is the one that matters.");
         return;
+    }
+
+    /*
+     * Before blaming the interface. A 512 KB machine fails here: the stack
+     * logs "netstack: out of memory sizing the stack" to the serial port and
+     * puts nothing on screen, and the cable branch below would then send
+     * someone with no free memory to go and look at their wiring.
+     */
+    {
+        ULONG freemem = AvailMem(MEMF_PUBLIC);
+
+        if (freemem < ADDNETIF_MIN_FREE)
+        {
+            tool_advise_blank();
+            tool_advise("There is not enough free memory to start the network.");
+            tool_printf("  %lu bytes are free; the stack needs roughly 200K.\n",
+                        freemem);
+            tool_advise("Close some programs and try again.");
+            return;
+        }
     }
 
     tool_advise_blank();

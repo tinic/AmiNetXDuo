@@ -475,6 +475,14 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
 
         bsd_child_destroy(base);
 
+        /*
+         * The teardown runs with the lock held, and has to: the decrement that
+         * reaches zero and the shutdown it triggers are one step. Drop the lock
+         * between them and an opener arriving in that window sees sb_StackRefs
+         * at zero, calls netstack_startup(), and gets a reference to a stack
+         * that is being dismantled. Nothing on the teardown path takes this
+         * semaphore, so holding it only makes concurrent opens wait.
+         */
         ObtainSemaphore(&master->sb_Lock);
         if (master->sb_StackRefs > 0 && --master->sb_StackRefs == 0)
             netstack_shutdown();
