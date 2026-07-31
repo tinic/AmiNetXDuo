@@ -63,6 +63,13 @@
 #include "aminetxduo/compat.h"
 #include "aminetxduo/netstack.h"
 
+/*
+ * The AF_INET6 names the NDK lacks. Published -- it ships in the archive's
+ * Developer drawer -- so the numbers below are derived from it rather than
+ * restated: two copies of an ABI constant is one copy too many.
+ */
+#include "aminetxduo/in6.h"
+
 /* ------------------------------------------------------------------ errno --
  *
  * AmiTCP/Roadshow errno values are 4.4BSD's, not what the newlib headers
@@ -136,28 +143,31 @@
  *                                              sin6_flowinfo, sin6_addr,
  *                                              sin6_scope_id
  *
- * What it does not define, and therefore what is defined here: IPPROTO_IPV6,
- * every IPV6_* socket option, INET6_ADDRSTRLEN, in6addr_any, IN6ADDR_*_INIT,
- * the IN6_IS_ADDR_* macros, sockaddr_storage, PF_INET6, AI_V4MAPPED and
- * AI_ADDRCONFIG. An application built against this NDK cannot name any of
- * them, so it will have spelled the numbers out itself; the values below must
- * match what everyone else uses.
+ * What it does not define is in aminetxduo/in6.h, included above: IPPROTO_IPV6,
+ * every IPV6_* socket option, INET6_ADDRSTRLEN, IN6ADDR_*_INIT, the
+ * IN6_IS_ADDR_* macros, sockaddr_storage, PF_INET6 and AI_ADDRCONFIG. That
+ * header is PUBLISHED -- it ships in the archive's Developer drawer -- and the
+ * BSD numbers below are aliases of it, not second copies. An application built
+ * against this NDK cannot name any of them, so it will have spelled them out
+ * itself, which is why in6.h #ifndef-guards every one.
  *
- * struct sockaddr_in6 is a trap. `struct sockaddr_in` in this header is
- * 4.4BSD's, with sin_len at offset 0 and sin_family at offset 1.
- * `struct sockaddr_in6` right below it is the Linux one -- pasted in verbatim,
- * comment about "Scope ID (new in 2.4)" and all -- with sin6_family at offset
- * 0 and no sin6_len. The two are not interchangeable through
- * `struct sockaddr *`: reading sa->sa_family out of a sockaddr_in6 reads its
- * padding byte. (Same class of hazard as ndk-include/pwd.h being newlib's
- * 10-field struct passwd rather than the Amiga's 7-field one.) So
- * bsd_sa_family() below decides the family from the bytes and the length
- * rather than from a struct member, and in6.c pins every offset with
- * _Static_assert.
+ * The BSD/Linux pairs are here rather than there because accepting both
+ * numberings is behaviour, not ABI: in6.h publishes the one number a caller
+ * should use, and these are what setsockopt() matches against.
+ *
+ * struct sockaddr_in6 is a trap, and in6.h carries the warning in full for
+ * the callers who need it: `struct sockaddr_in` here is 4.4BSD's, sin_len at
+ * offset 0 and sin_family at 1, while `struct sockaddr_in6` right below it is
+ * the Linux one -- pasted in verbatim, comment about "Scope ID (new in 2.4)"
+ * and all -- with sin6_family at offset 0 and no sin6_len. Reading
+ * sa->sa_family out of a sockaddr_in6 reads its padding byte. (Same class of
+ * hazard as ndk-include/pwd.h being newlib's 10-field struct passwd rather
+ * than the Amiga's 7-field one.) So bsd_sa_family() below decides the family
+ * from the bytes and the length rather than from a struct member, and in6.c
+ * pins every offset with _Static_assert.
  */
 
-/* IPPROTO_IPV6. The IANA number; the NDK stops at IPPROTO_RAW 255. */
-#define AMI_IPPROTO_IPV6            41
+#define AMI_IPPROTO_IPV6            IPPROTO_IPV6
 
 /*
  * IPV6_V6ONLY has two numberings in the wild and the NDK picks neither:
@@ -167,11 +177,11 @@
  * to both. No collision risk: 26 is IPV6_CHECKSUM in BSD (raw sockets, which
  * this library does not offer) and 27 is IPV6_JOIN_ANYCAST in Linux (likewise).
  */
-#define AMI_IPV6_V6ONLY_BSD         27
+#define AMI_IPV6_V6ONLY_BSD         IPV6_V6ONLY
 #define AMI_IPV6_V6ONLY_LINUX       26
 
 /* IPV6_UNICAST_HOPS: 4 in BSD, 16 in Linux. Same argument, same treatment. */
-#define AMI_IPV6_UNICAST_HOPS_BSD    4
+#define AMI_IPV6_UNICAST_HOPS_BSD   IPV6_UNICAST_HOPS
 #define AMI_IPV6_UNICAST_HOPS_LINUX 16
 
 /*
@@ -181,11 +191,10 @@
  * else in both lineages this header set could belong to. 61 is Linux's
  * IPV6_PATHMTU, which this library does not offer.
  */
-#define AMI_IPV6_TCLASS_BSD         61
+#define AMI_IPV6_TCLASS_BSD         IPV6_TCLASS
 #define AMI_IPV6_TCLASS_LINUX       67
 
-/* INET6_ADDRSTRLEN: "0:0:0:0:0:ffff:255.255.255.255" plus NUL. */
-#define AMI_INET6_ADDRSTRLEN        46
+#define AMI_INET6_ADDRSTRLEN        INET6_ADDRSTRLEN
 
 /* --------------------------------------------------------------- library -- */
 

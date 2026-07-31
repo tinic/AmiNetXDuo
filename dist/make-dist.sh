@@ -36,6 +36,8 @@
 #       Devs/Internet/               protocols, services, networks
 #       Docs/  Docs.info             whatever docs/ holds
 #       Examples/  Examples.info     commented configuration files
+#       Developer/  Developer.info   headers and glue for the vectors past
+#                                    the end of the NDK's SFD
 #
 # Compression: a real `lha a` is used when one is on the PATH.  Homebrew's
 # `lha` is Lhasa, which can only extract, so the fallback is dist/lhapack.py
@@ -308,6 +310,20 @@ cp "$ROOT/dist/ReadMe" "$TREE/ReadMe"
 cp "$INSTALL/Document.info" "$TREE/ReadMe.info"
 cp "$INSTALL/Drawer.info"   "$TREE/Docs.info"
 cp "$INSTALL/Drawer.info"   "$TREE/Examples.info"
+
+# ----------------------------------------------------------- the Developer --
+#
+# The headers and compiler glue for what bsdsocket.library has past the end of
+# the NDK's SFD.  Staged by the same script the build uses, so what a
+# downloader gets is what tests/tools' IfNames was compiled against.
+#
+# NOT installed by Install-AmiNetXDuo: where headers belong is a property of
+# the compiler someone has, not of this machine, so copying them to a fixed
+# place would be a guess.  They are in the archive, to be put wherever the
+# NDK is.
+"$ROOT/tools/stage-developer.sh" "$TREE/Developer"
+cp "$INSTALL/Drawer.info"   "$TREE/Developer.info"
+cp "$INSTALL/Document.info" "$TREE/Developer/ReadMe.info"
 
 # ---------------------------------------------------------------- the docs --
 #
