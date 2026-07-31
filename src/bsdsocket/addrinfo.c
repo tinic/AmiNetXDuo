@@ -143,6 +143,48 @@ static LONG bsd_gai_service(const char *servname, LONG flags, LONG socktype,
  * carries no name and ai_canonname is set to `inherit`, which points into an
  * earlier node's block -- see the memory note at the top.
  */
+#ifdef AMINETXDUO_IPV6
+/*
+ * RFC 4007 §11's <zone_id>, as an interface index. "SHOULD support at least
+ * numerical indices ... MAY support other kinds of non-null strings", so both
+ * a number and an interface name are taken. 0 when it names nothing, which the
+ * caller turns into EAI_NONAME: a zone that resolves to no interface makes the
+ * whole address unusable, and guessing an interface is what the zone was given
+ * to prevent.
+ */
+static ULONG bsd_gai_zone_index(const char *zone)
+{
+    ULONG value  = 0;
+    BOOL  digits = TRUE;
+    ULONG i;
+
+    if (zone == NULL || zone[0] == '\0')
+        return 0;
+
+    for (i = 0; zone[i] != '\0'; i++)
+    {
+        if (zone[i] < '0' || zone[i] > '9')
+        {
+            digits = FALSE;
+            break;
+        }
+
+        value = value * 10UL + (ULONG)(zone[i] - '0');
+        if (value > (ULONG)NX_MAX_PHYSICAL_INTERFACES)
+            return 0;
+    }
+
+    if (digits)
+        return value;
+
+    {
+        LONG index = bsd_if_index_of(netstack_ip(), zone);
+
+        return (index < 0) ? 0UL : (ULONG)(index + 1);
+    }
+}
+#endif
+
 static BsdAddrInfoNode *bsd_gai_node(LONG family, LONG socktype, LONG protocol,
                                      const NXD_ADDRESS *addr, UINT port,
                                      const char *canon, char *inherit)
@@ -348,11 +390,23 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
      * the resolver and was looked up as a name. Same shape as the IPv4 block. */
     {
         ULONG words[4];
+        char  zone[AMI_CFG_IP6_ZONE_LEN];
 
-        if (ami_config_parse_ip6((const char *)nodename, words, NULL))
+        if (ami_config_parse_ip6_zone((const char *)nodename, words, NULL,
+                                      zone, sizeof(zone)))
         {
+            ULONG scope;
+
             if (family == AF_INET)
                 return EAI_ADDRFAMILY;
+
+            /* Safe to accept only because the send path honours it: see
+               bsd_ip6_zone_source() in transfer.c. Parsing a zone that
+               nothing then reads would make `ping fe80::1%eth0` look
+               supported while it left by whatever interface was routed to. */
+            scope = bsd_gai_zone_index(zone);
+            if (zone[0] != '\0' && scope == 0)
+                return EAI_NONAME;
 
             addr.nxd_ip_version       = NX_IP_VERSION_V6;
             addr.nxd_ip_address.v6[0] = words[0];
@@ -366,6 +420,8 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
                                 NULL);
             if (node == NULL)
                 return EAI_MEMORY;
+
+            node->addr.sin6.sin6_scope_id = scope;
 
             bsd_gai_append(&head, &tail, node);
             *res = head;
