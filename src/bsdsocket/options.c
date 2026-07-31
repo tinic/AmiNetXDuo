@@ -541,8 +541,11 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
         case SIOCGIFBRDADDR:
             return bsd_if_ioctl(req, argp, SocketBase);
 
+        /* The autodoc's errno for a request this object does not answer:
+           "[ENOTTY] The specified request does not apply to the kind of
+           object that the descriptor s references." */
         default:
-            return bsd_fail(SocketBase, AMI_ENOSYS);
+            return bsd_fail(SocketBase, AMI_ENOTTY);
     }
 }
 

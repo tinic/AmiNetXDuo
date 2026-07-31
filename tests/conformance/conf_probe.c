@@ -23,6 +23,7 @@
 
 #include <sys/socket.h>
 #include <sys/filio.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <libraries/bsdsocket.h>
 #include <proto/bsdsocket.h>
@@ -203,6 +204,69 @@ static VOID probe_args(VOID)
     rc = getdtablesize();                       p("getdtablesize()", rc);
 }
 
+/* ---- 5. edges the bsdsocket.doc names outright ------------------------- */
+
+static VOID probe_doc_edges(VOID)
+{
+    struct sockaddr_in sa;
+    struct timeval     tv;
+    socklen_t          sl;
+    LONG               fd, rc, val;
+
+    Printf((STRPTR)"=== 5. documented edge cases ===\n");
+
+    /* "the number of microseconds must be smaller than 1000000 and the number
+       of seconds must not be larger than 100000000" -> EINVAL (22). */
+    tv.tv_secs = 0; tv.tv_micro = 1000000;
+    rc = WaitSelect(0, NULL, NULL, NULL, &tv, NULL);
+    p("WaitSelect(tv_micro=1000000) [EINVAL 22]", rc);
+
+    tv.tv_secs = 100000001UL; tv.tv_micro = 0;
+    rc = WaitSelect(0, NULL, NULL, NULL, &tv, NULL);
+    p("WaitSelect(tv_secs>1e8)      [EINVAL 22]", rc);
+
+    fd = socket(AF_INET, SOCK_DGRAM, 0);        p("socket() udp", fd);
+
+    /* "[ENOTTY] The specified request does not apply to the kind of object
+       that the descriptor s references." */
+    val = 0;
+    rc = IoctlSocket(fd, 0x7fffffffUL, (APTR)&val);
+    p("IoctlSocket(bogus request)   [ENOTTY 25]", rc);
+
+    /* "Datagram sockets may dissolve the association by connecting to an
+       invalid address, such as a null address." */
+    addr_in(&sa, INADDR_LOOPBACK, PORT + 2);
+    rc = connect(fd, (struct sockaddr *)&sa, sizeof(sa));
+    p("connect(udp peer)", rc);
+    sl = sizeof(sa);
+    rc = getpeername(fd, (struct sockaddr *)&sa, &sl);
+    p("getpeername(connected udp)   [0]", rc);
+
+    memset(&sa, 0, sizeof(sa));
+    rc = connect(fd, (struct sockaddr *)&sa, sizeof(sa));
+    p("connect(udp null address)    [0]", rc);
+    sl = sizeof(sa);
+    rc = getpeername(fd, (struct sockaddr *)&sa, &sl);
+    p("getpeername(dissolved)       [ENOTCONN 57]", rc);
+
+    CloseSocket(fd);
+
+    /* "[EBADF] No socket with the given Id could be found." */
+    rc = ObtainSocket(0x4d4f4e45L, AF_INET, SOCK_STREAM, 0);
+    p("ObtainSocket(unknown id)     [EBADF 9]", rc);
+
+    /* "[EBADF] The socket descriptor number is not valid." */
+    rc = ReleaseSocket(99, UNIQUE_ID);
+    p("ReleaseSocket(99)            [EBADF 9]", rc);
+
+    /* The doc says shutdown() on an unconnected socket is [ENOTCONN]; this
+       library returns 0. Recorded, not asserted -- see the socket audit. */
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    rc = shutdown(fd, 2);
+    p("shutdown(unconnected)        [doc: ENOTCONN 57]", rc);
+    CloseSocket(fd);
+}
+
 int main(VOID)
 {
     SocketBase = OpenLibrary((STRPTR)"bsdsocket.library", 4);
@@ -220,6 +284,7 @@ int main(VOID)
     probe_udp();
     probe_churn();
     probe_args();
+    probe_doc_edges();
 
     CloseLibrary(SocketBase);
     return RETURN_OK;

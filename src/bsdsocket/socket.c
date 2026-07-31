@@ -2135,6 +2135,25 @@ LONG bsd_connect(register LONG sock_fd          __asm("d0"),
             return bsd_fail(SocketBase, denied);
     }
 
+    /*
+     * "Datagram sockets may dissolve the association by connecting to an
+     * invalid address, such as a null address." A zeroed sockaddr reads as
+     * AF_UNSPEC, which is the request; the socket goes back to unconnected,
+     * so getpeername() reports ENOTCONN and send() needs a destination again.
+     */
+    if ((sock->as_Flags & ASF_TCP) == 0 &&
+        bsd_sa_family(name, namelen) == AF_UNSPEC)
+    {
+        ULONG version = sock->as_PeerAddr.nxd_ip_version;
+
+        bsd_bzero(&sock->as_PeerAddr, sizeof(sock->as_PeerAddr));
+        sock->as_PeerAddr.nxd_ip_version = version;
+        sock->as_PeerPort = 0;
+        sock->as_Flags   &= ~ASF_CONNECTED;
+
+        return 0;
+    }
+
     if (bsd_sockaddr_get(SocketBase, name, namelen, &addr, &port, &scope) != 0)
         return -1;
 

@@ -164,9 +164,11 @@ static LONG bsd_handoff_park(struct AmiSocketBase *base, AmiSocket *sock,
     struct AmiSocketBase *master = bsd_master_of(base);
     BsdHandoff           *entry;
 
+    /* ENOMEM, not ENOBUFS: "[ENOMEM] There is not enough memory left to put
+       this socket onto the public list." */
     entry = (BsdHandoff *)ami_alloc(sizeof(BsdHandoff));
     if (entry == NULL)
-        return bsd_fail(base, AMI_ENOBUFS);
+        return bsd_fail(base, AMI_ENOMEM);
 
     ObtainSemaphore(&master->sb_Lock);
 
@@ -178,10 +180,11 @@ static LONG bsd_handoff_park(struct AmiSocketBase *base, AmiSocket *sock,
     {
         /* Only the >65535 range promises uniqueness, so only there is a
            duplicate an error. Below it, several sockets sharing one id is
-           documented behaviour. */
+           documented behaviour. The errno is the autodoc's: "[EINVAL] The Id
+           number requested is not unique." */
         ReleaseSemaphore(&master->sb_Lock);
         ami_free(entry);
-        return bsd_fail(base, AMI_EEXIST);
+        return bsd_fail(base, AMI_EINVAL);
     }
 
     entry->bh_Id     = id;
@@ -319,26 +322,17 @@ LONG bsd_ObtainSocket(register LONG id       __asm("d0"),
 
     ObtainSemaphore(&master->sb_Lock);
 
+    /* bsd_handoff_match() already refuses a socket whose domain/type/protocol
+       do not match what the caller asked for, so "no match" and "wrong kind"
+       are one answer: "[EBADF] No socket with the given Id could be found." */
     entry = bsd_handoff_match(master, id, domain, type, protocol);
     if (entry == NULL)
     {
         ReleaseSemaphore(&master->sb_Lock);
-        return bsd_fail(SocketBase, AMI_ENOENT);
+        return bsd_fail(SocketBase, AMI_EBADF);
     }
 
     sock = entry->bh_Socket;
-
-    /*
-     * The caller states what it expects. Refuse a mismatch: an inetd child
-     * that asks for a SOCK_STREAM and is handed a datagram socket would
-     * otherwise fail later and less clearly.
-     */
-    if (domain != (LONG)sock->as_Domain || type != (LONG)sock->as_Type ||
-        (protocol != 0 && protocol != sock->as_Protocol))
-    {
-        ReleaseSemaphore(&master->sb_Lock);
-        return bsd_fail(SocketBase, AMI_EINVAL);
-    }
 
     Remove((struct Node *)&entry->bh_Node);
 
