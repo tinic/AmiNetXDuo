@@ -162,7 +162,12 @@ PEERLOG="$ROOT/build/stress-$TAG-peer.log"
 # The bracket in the pattern is not decoration: pkill -f matches the remote
 # shell's own command line, which contains the pattern, so an unbracketed one
 # kills the connection that issued it.
-ssh "$PEER" "pkill -f '[f]itz-serve' || true" >/dev/null 2>&1 || true
+#
+# The share is in the pattern too, so that a second run against the same peer
+# kills its own server and not somebody else's: a bare '[f]itz-serve' takes
+# down every run on that machine, including a three-hour one an hour in.
+KILLPAT="[f]itz-serve $PEER_DIR "
+ssh "$PEER" "pkill -f \"$KILLPAT\" || true" >/dev/null 2>&1 || true
 
 # The server is the peer's own build, not one shipped from here: build/fitz
 # travels between a Mac and two Linux boxes and the binary travels with it.
@@ -190,7 +195,7 @@ grep -q fitz-serve "$PEERLOG" || {
 }
 
 cleanup_peer() {
-    ssh "$PEER" "pkill -f '[f]itz-serve' || true" >/dev/null 2>&1 || true
+    ssh "$PEER" "pkill -f \"$KILLPAT\" || true" >/dev/null 2>&1 || true
 }
 trap cleanup_peer EXIT INT TERM HUP
 
@@ -368,9 +373,9 @@ ssh "$PEER" "cd $PEER_DIR &&
 # the guest can see: a POSIX filesystem has no Amiga protection word.
 echo "  host-side tree compare (content only, $TREE_FILES files in the source):"
 python3 "$ROOT/tests/stress/treecheck.py" manifest "$TREE" > "$ROOT/build/stress-$TAG.manifest"
-scp -q "$ROOT/build/stress-$TAG.manifest" "$PEER:/tmp/stress.manifest" || true
+scp -q "$ROOT/build/stress-$TAG.manifest" "$PEER:/tmp/stress-$TAG.manifest" || true
 ssh "$PEER" "for s in $PEER_DIR/testsys*; do
-                 [ -d \$s ] && python3 /tmp/treecheck.py check /tmp/stress.manifest \$s
+                 [ -d \$s ] && python3 /tmp/treecheck.py check /tmp/stress-$TAG.manifest \$s
              done" 2>&1 | sed 's/^/    /' || true
 
 echo
