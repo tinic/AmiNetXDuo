@@ -21,11 +21,20 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 DEST="${1:?usage: stage-developer.sh <destdir>}"
 
-# The published half of include/aminetxduo/.  NOT netstatus.h: NetStackQuery
-# and NetStackControl work and are stable, but publishing them freezes their
-# request structures, and that is a decision to take deliberately rather than
-# by adding a line here.
-PUBLIC_HEADERS=(ifindex.h)
+# The published half of include/aminetxduo/.
+#
+#   ifindex.h  RFC 3493 section 4 -- the four LVOs at -0x372..-0x384.
+#   in6.h      the AF_INET6 names the NDK does not define.  No vectors: it is
+#              option numbers, address macros and the sockaddr_in6 warning.
+#
+# NOT netstatus.h: NetStackQuery and NetStackControl work and are stable, but
+# publishing them freezes their request structures, and that is a decision to
+# take deliberately rather than by adding a line here.  NOT bpf.h: the
+# application-facing BPF surface -- BIOC*, bpf_hdr, bpf_program, bpf_stat,
+# DLT_*, the BPF_* opcodes, FIONREAD, SIOCGIFADDR -- is already in the NDK's
+# net/bpf.h, sys/filio.h and sys/sockio.h, and everything AMI_BPF_* in ours is
+# implementation internals.
+PUBLIC_HEADERS=(ifindex.h in6.h)
 
 mkdir -p "$DEST/include/aminetxduo" "$DEST/sfd" "$DEST/examples"
 
@@ -38,3 +47,4 @@ cp -R "$ROOT/developer/include/." "$DEST/include/"
 cp "$ROOT/developer/sfd/aminetxduo_lib.sfd" "$DEST/sfd/"
 cp "$ROOT/developer/ReadMe"                 "$DEST/ReadMe"
 cp "$ROOT/developer/examples/IfNames.c"     "$DEST/examples/"
+cp "$ROOT/developer/examples/V6Only.c"      "$DEST/examples/"

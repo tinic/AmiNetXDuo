@@ -99,10 +99,23 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   `tools/gen-developer.sh --check` runs in `ci.sh`'s cross stage wherever the
   toolchain has an `sfdc`.
 
+  Widened the same day to carry every definition we make that the NDK lacks,
+  not only the new vectors. `include/aminetxduo/in6.h` is the second published
+  header: `IPPROTO_IPV6`, `PF_INET6`, `INET6_ADDRSTRLEN`, the three `IPV6_*`
+  options, `IN6ADDR_*_INIT`, the `IN6_IS_ADDR_*` macros,
+  `struct sockaddr_storage`, `AI_ADDRCONFIG`, and the `sockaddr_in6` offset
+  trap written out for callers. `bsdsocket_internal.h` includes it and aliases
+  its `AMI_IPV6_*_BSD` names to it, so there is one copy of each number.
+  `AI_V4MAPPED` is deliberately left undefined and `sockaddr_storage`
+  deliberately has no `ss_family`; `docs/NDK-ADDENDUM.md` has both reasons.
+
   Left:
   - **RFC 3542** is not in it. It adds no vectors, so it lands as another
     header beside `aminetxduo/ifindex.h` and the drawer's shape does not
     change; `developer/sfd/aminetxduo_lib.sfd` carries the marker saying so.
+  - **IPv6 multicast** (`IPV6_JOIN_GROUP`, `IPV6_LEAVE_GROUP`,
+    `struct ipv6_mreq`) is absent from the NDK and would belong in `in6.h`.
+    IPv4 multicast needs nothing: the NDK has the whole set.
   - **`NetStackQuery`/`NetStackControl` are still private.** Recommendation:
     publish them, because they are what a third-party `netstat` needs and
     `ShowNetStatus`, `netstat` and `arp` already depend on them being stable.
@@ -119,12 +132,23 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   `struct msghdr` is already the 28-byte 4.4BSD shape with `msg_control` at
   offset 16.
 
-  What has to be invented is *header* ABI: `struct cmsghdr` and
-  `CMSG_FIRSTHDR`/`NXTHDR`/`DATA`/`LEN`/`SPACE` are **not in the NDK at all**.
-  Defining them means fixing `CMSG_ALIGN` for m68k, and every later caller is
-  stuck with whatever we pick. **Decided 2026-07-31: 4 bytes.** It is what every
-  32-bit BSD used, it keeps `struct cmsghdr` at 12 bytes, and nothing about m68k
-  argues for more -- wider alignment would only waste buffer space.
+  What has to be invented is *header* ABI, but LESS of it than this entry first
+  said. Re-audited 2026-07-31 against `ndk-include` with `LC_ALL=C grep -a` --
+  a plain `grep -r` reads those headers as binary, because they are Latin-1
+  and carry a `©`, and silently finds nothing:
+
+  - **Already in `<sys/socket.h>`:** `struct cmsghdr` (12 bytes:
+    `socklen_t` + `LONG` + `LONG`), `CMSG_DATA`, `CMSG_FIRSTHDR`,
+    `CMSG_NXTHDR`. Do not define a second `struct cmsghdr`.
+  - **Missing:** `CMSG_LEN`, `CMSG_SPACE`, `CMSG_ALIGN`, and the bare
+    `ALIGN()` that the NDK's own `CMSG_NXTHDR` expands to and that nothing in
+    the NDK defines -- so `CMSG_NXTHDR` as shipped does not compile.
+
+  `CMSG_ALIGN` is still ours to fix and every later caller is stuck with it.
+  **Decided 2026-07-31: 4 bytes.** It is what every 32-bit BSD used, nothing
+  about m68k argues for more, and it agrees with the `struct cmsghdr` the NDK
+  already has -- 12 bytes needs no padding at 4 and would gain 4 wasted bytes
+  at 8.
 
   Feasibility checked: `NX_PACKET` carries `nx_packet_ip_interface` (the arrival
   interface) and `nx_packet_ip_header` (from which the hop limit reads), so both

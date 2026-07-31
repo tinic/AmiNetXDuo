@@ -13,6 +13,7 @@
 
 #include <exec/types.h>
 #include <aminetxduo/ifindex.h>
+#include <aminetxduo/in6.h>
 
 #ifdef __cplusplus
 extern "C" {

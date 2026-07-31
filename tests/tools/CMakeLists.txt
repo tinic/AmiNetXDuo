@@ -134,6 +134,15 @@ if(NOT _dev_stage_rc EQUAL 0)
     message(FATAL_ERROR "tools/stage-developer.sh failed (${_dev_stage_rc})")
 endif()
 
+# Again at build time, so editing a drawer header or example is not silently
+# compiled from a stale copy staged at the last configure.  It is a handful of
+# cp's; the targets below order themselves after it.
+add_custom_target(developer_drawer ALL
+    COMMAND "${CMAKE_SOURCE_DIR}/tools/stage-developer.sh"
+            "${AMINETXDUO_DEVELOPER_STAGE}"
+    COMMENT "staging the Developer drawer"
+    VERBATIM)
+
 add_executable(test_ifnames "${AMINETXDUO_DEVELOPER_STAGE}/examples/IfNames.c")
 target_include_directories(test_ifnames PRIVATE
                            "${AMINETXDUO_DEVELOPER_STAGE}/include")
@@ -142,3 +151,19 @@ if(AMIGA_NDK_INCLUDE)
 endif()
 target_compile_options(test_ifnames PRIVATE -Wall -Wextra)
 set_target_properties(test_ifnames PROPERTIES OUTPUT_NAME "IfNames")
+add_dependencies(test_ifnames developer_drawer)
+
+# V6Only is the other half of the same check, for the half of the drawer that
+# has no vectors: IPPROTO_IPV6, IPV6_V6ONLY, INET6_ADDRSTRLEN,
+# IN6ADDR_LOOPBACK_INIT, the IN6_IS_ADDR_* macros and sockaddr_storage, none
+# of which the NDK defines.  Same include path as IfNames -- the staged drawer
+# and the NDK, nothing else.
+add_executable(test_v6only "${AMINETXDUO_DEVELOPER_STAGE}/examples/V6Only.c")
+target_include_directories(test_v6only PRIVATE
+                           "${AMINETXDUO_DEVELOPER_STAGE}/include")
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_v6only PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_v6only PRIVATE -Wall -Wextra)
+set_target_properties(test_v6only PROPERTIES OUTPUT_NAME "V6Only")
+add_dependencies(test_v6only developer_drawer)

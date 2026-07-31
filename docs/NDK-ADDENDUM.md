@@ -165,6 +165,75 @@ marker where it does not go. Item 3 (`NetStackQuery`/`NetStackControl`) is
 recorded as a recommendation in `BACKLOG.md`, not taken -- publishing them
 freezes `NetStatusHeader` and every `NETCTRL_*` request struct.
 
+## The drawer is not only the vectors
+
+Added the same day, after the item was widened: a constant is as much of a
+wall as a vector. `include/aminetxduo/in6.h` is the second published header
+and carries what the NDK leaves out of AF_INET6 -- `IPPROTO_IPV6`,
+`PF_INET6`, `INET6_ADDRSTRLEN`, `IPV6_V6ONLY` / `IPV6_UNICAST_HOPS` /
+`IPV6_TCLASS`, `IN6ADDR_*_INIT`, the `IN6_IS_ADDR_*` macros,
+`struct sockaddr_storage` and `AI_ADDRCONFIG`. No vectors: the calls are
+`setsockopt()`, `socket()` and `getaddrinfo()`, which the NDK declares
+already, so there is no revision to check -- what a caller wants to know is
+whether `socket(AF_INET6, ...)` succeeds.
+
+It is the SINGLE definition. `bsdsocket_internal.h` now includes it and its
+`AMI_IPV6_*_BSD` names are aliases of the published ones rather than a second
+copy of the numbers; the `_LINUX` alternates stay internal, because accepting
+both numberings is behaviour and only one number should be published.
+
+Two decisions worth writing down:
+
+- **`AI_V4MAPPED` is deliberately not defined.** `getaddrinfo()` refuses any
+  bit outside the NDK's `AI_MASK` with `EAI_BADFLAGS`, and this library never
+  synthesises `::ffff:a.b.c.d`, so 0 would claim behaviour we do not have and
+  a real bit would be refused. Undefined makes it a compile error to fix.
+  `AI_ADDRCONFIG` is 0 for the mirror-image reason: the behaviour is
+  unconditional, so passing the flag is a truthful no-op.
+- **`sockaddr_storage` has no `ss_family`.** The family byte is at offset 1
+  for `AF_INET` and offset 0 for `AF_INET6` on this NDK, so a member at
+  either offset is right for one family and silently wrong for the other.
+  It is 128 aligned bytes; the returned length says what arrived.
+
+`developer/examples/V6Only.c` exercises all of it, compiled against the
+staged drawer alone like `IfNames.c`.
+
+## What the NDK actually has -- audited 2026-07-31
+
+Re-verified against `ndk-include` rather than taken from the comments, and
+two of the comments were wrong. (`grep -r` reads those headers as binary --
+they are Latin-1 and carry a `©` -- so it silently finds nothing. Use
+`LC_ALL=C grep -a`, or a negative result means nothing.)
+
+Absent, and therefore ours to define: `sockaddr_storage`, `PF_INET6`,
+`IPPROTO_IPV6`, every `IPV6_*`, `INET6_ADDRSTRLEN`, `in6addr_any`,
+`IN6ADDR_*_INIT`, `IN6_IS_ADDR_*`, `AI_V4MAPPED`, `AI_ADDRCONFIG`,
+`in6_pktinfo`, `icmp6_filter`, `CMSG_ALIGN`.
+
+**Present, contrary to what `BACKLOG.md` says about RFC 3542:**
+`struct cmsghdr`, `CMSG_DATA`, `CMSG_FIRSTHDR` and `CMSG_NXTHDR` are all in
+`<sys/socket.h>`, and `struct cmsghdr` is already the 12-byte
+`socklen_t`+`LONG`+`LONG` shape that `CMSG_ALIGN` = 4 implies -- so that
+decision is consistent with what is there, which is worth knowing before
+writing a second `struct cmsghdr`. What is genuinely missing is `CMSG_LEN`,
+`CMSG_SPACE`, `CMSG_ALIGN`, and the bare `ALIGN()` the NDK's own
+`CMSG_NXTHDR` expands to and which nothing in the NDK defines -- so
+`CMSG_NXTHDR` as shipped does not compile.
+
+**Present, so multicast needs no header work:** `IP_MULTICAST_IF`,
+`IP_MULTICAST_TTL`, `IP_MULTICAST_LOOP`, `IP_ADD_MEMBERSHIP`,
+`IP_DROP_MEMBERSHIP` and `struct ip_mreq` are in `<netinet/in.h>`. The IPv6
+equivalents (`IPV6_JOIN_GROUP`, `IPV6_LEAVE_GROUP`, `struct ipv6_mreq`) are
+absent and would belong in `in6.h`.
+
+**Present, so `bpf.h` has nothing to publish:** `BIOC*`, `struct bpf_hdr`,
+`struct bpf_program`, `struct bpf_stat`, `struct bpf_version`, `DLT_*`, the
+`BPF_*` opcodes and `BPF_WORDALIGN` are in `<net/bpf.h>`; `FIONREAD` is in
+`<sys/filio.h>` and `SIOCGIFADDR` in `<sys/sockio.h>`. Everything `AMI_BPF_*`
+in `include/aminetxduo/bpf.h` is implementation internals -- segment views,
+channel limits, internal error codes, the offsets the host-test replica
+pins -- and none of it is an application's business.
+
 ## What this does not cover
 
 RFC 4007's `%zone` text form is behaviour, not header -- it needs a parser and a

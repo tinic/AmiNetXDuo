@@ -19,8 +19,9 @@ What is in here
   include/pragmas/        SAS/C, DICE, StormC, Maxon, Aztec pragmas
   include/proto/          the one header to include; picks the two above
   include/lvo/            assembler EQUs
-  sfd/                    the SFD all of the above is generated from
+  sfd/                    the SFD the generated files come from
   examples/IfNames.c      a complete program
+  examples/V6Only.c       another, for the IPv6 names
 
 
 Using it
@@ -60,17 +61,21 @@ lib_Revision can:
     if (SocketBase != NULL && SocketBase->lib_Revision >= AMI_IFINDEX_MIN_REVISION)
         ... if_nametoindex() and friends are safe to call ...
 
-Every symbol in here carries the revision that introduced it, as a
-AMI_*_MIN_REVISION constant next to it.  Do this check.  These vectors are
-past the end of every published table, so an older bsdsocket.library has
-MakeLibrary()'s terminator in the slot and calling one is a guru, not a
-failure code.
+Every added VECTOR carries the revision that introduced it, as an
+AMI_*_MIN_REVISION constant next to it.  Do this check.  They are past the end
+of every published table, so an older bsdsocket.library has MakeLibrary()'s
+terminator in the slot and calling one is a guru, not a failure code.
+
+Definitions that are only types and constants -- everything in
+<aminetxduo/in6.h> -- need no such check: they name calls the NDK already
+declares, and nothing was added to the vector table for them.
 
 
 What it covers
 --------------
 
-RFC 3493 section 4, interface identification.  From revision 3:
+RFC 3493 section 4, interface identification, in <aminetxduo/ifindex.h>.
+Four new library vectors, from revision 3:
 
     ULONG                if_nametoindex(const char *ifname);
     char                *if_indextoname(ULONG ifindex, char *ifname);
@@ -80,11 +85,79 @@ RFC 3493 section 4, interface identification.  From revision 3:
 Indices start at 1 and are the same numbers GetRouteInfo() reports in
 rtm_index, so a route can be matched to an interface by comparing them.
 
-RFC 3542 -- the ancillary data macros, struct in6_pktinfo, struct
-icmp6_filter and the IPV6_* option numbers -- is not here yet.  It adds no
-vectors: it rides sendmsg(), recvmsg() and setsockopt(), so it will arrive as
-another header beside aminetxduo/ifindex.h and this drawer's shape does not
-change when it does.
+The AF_INET6 names the NDK leaves out, in <aminetxduo/in6.h>.  No vectors --
+the calls are setsockopt(), getsockopt(), socket() and getaddrinfo(), which
+the NDK already declares -- so lib_Revision has nothing to say about them.
+What a program wants to know is whether this build has IPv6 at all, and that
+is whether socket(AF_INET6, SOCK_STREAM, 0) succeeds.
+
+    IPPROTO_IPV6  PF_INET6  INET6_ADDRSTRLEN
+    IPV6_V6ONLY  IPV6_UNICAST_HOPS  IPV6_TCLASS
+    IN6ADDR_ANY_INIT  IN6ADDR_LOOPBACK_INIT
+    IN6_IS_ADDR_UNSPECIFIED / LOOPBACK / MULTICAST / LINKLOCAL /
+        SITELOCAL / V4MAPPED / V4COMPAT and the MC_ scopes
+    struct sockaddr_storage
+    AI_ADDRCONFIG
+
+Every one of them is #ifndef-guarded, because a program written against this
+NDK could not name them and will have spelled the numbers out for itself.
+Two of the option numbers have a second value in the Linux lineage; the
+library accepts both, and the header says which is which.
+
+AI_V4MAPPED is deliberately absent.  This library never synthesises
+::ffff:a.b.c.d from an A record, so no value for it would be truthful.  Code
+that wants both families asks for AF_UNSPEC, which returns the IPv6 results
+first.  Leaving the name undefined makes that a compile error to fix rather
+than a silent difference in what gets connected to.
+
+
+THE sockaddr_in6 TRAP
+---------------------
+
+Worth reading before writing any IPv6 code against this NDK.
+
+Its `struct sockaddr_in` is 4.4BSD's: sin_len at offset 0, sin_family at
+offset 1.  The `struct sockaddr_in6` immediately below it in the same header
+is the LINUX one, pasted in verbatim -- sin6_family at offset 0, and no
+sin6_len at all.  So:
+
+    ((struct sockaddr *)&sin6)->sa_family      /* reads the PADDING byte */
+
+sa_family lives at offset 1, and that is where sockaddr_in6 has the pad in
+front of sin6_port.  Decide the family from the length instead: 16 bytes is a
+sockaddr_in with its family at offset 1, 28 bytes is a sockaddr_in6 with its
+family at offset 0.  bsdsocket.library does exactly that.
+
+Never write a length byte into a sockaddr_in6.  On this NDK that byte is
+sin6_family.
+
+struct sockaddr_storage here has no ss_family for the same reason: there is
+no offset at which such a member would be right for both families, and one
+that is right for only one is the trap wearing a struct member's name.  It is
+128 aligned bytes to receive an address into, and the length says what
+arrived.
+
+
+What it does not cover
+----------------------
+
+RFC 3542 -- struct in6_pktinfo, struct icmp6_filter, the IPV6_* ancillary
+options and the missing CMSG_ macros -- is not here yet.  It adds no vectors,
+so it will arrive as another header beside the two above and this drawer does
+not change shape when it does.  Note for whoever writes it: the NDK already
+has struct cmsghdr, CMSG_DATA, CMSG_FIRSTHDR and CMSG_NXTHDR in
+<sys/socket.h>; what is missing is CMSG_LEN, CMSG_SPACE, CMSG_ALIGN and the
+ALIGN() its own CMSG_NXTHDR expands to.
+
+IPv4 multicast needs nothing from here: IP_MULTICAST_IF, IP_MULTICAST_TTL,
+IP_MULTICAST_LOOP, IP_ADD_MEMBERSHIP, IP_DROP_MEMBERSHIP and struct ip_mreq
+are all in the NDK's <netinet/in.h>.  IPv6 multicast -- IPV6_JOIN_GROUP,
+IPV6_LEAVE_GROUP, struct ipv6_mreq -- is not, and would belong here.
+
+The bpf_* capture path needs nothing from here either.  BIOC*, struct
+bpf_hdr, struct bpf_program, struct bpf_stat, DLT_*, the BPF_* opcodes,
+BPF_WORDALIGN, FIONREAD and SIOCGIFADDR are all declared by the NDK, in
+<net/bpf.h>, <sys/filio.h> and <sys/sockio.h>.
 
 NetStackQuery() and NetStackControl(), at -0x366 and -0x36c, are what
 ShowNetStatus, netstat and arp are written against.  They are not published
@@ -111,6 +184,8 @@ Building the example
 --------------------
 
     gcc -I Developer/include -o IfNames Developer/examples/IfNames.c
+    gcc -I Developer/include -o V6Only  Developer/examples/V6Only.c
 
-It prints one line per interface -- index and name -- and checks that every
-name maps back to its own index.
+IfNames prints one line per interface -- index and name -- and checks that
+every name maps back to its own index.  V6Only makes an IPv6 socket, sets
+IPV6_V6ONLY, binds to ::1 and prints what getsockname() gives back.

@@ -13,6 +13,7 @@
 ==public
 ==include <exec/types.h>
 ==include <aminetxduo/ifindex.h>
+==include <aminetxduo/in6.h>
 * RFC 3493 section 4 -- interface identification.  bsdsocket.library revision
 * 3 and up.  These four LVOs are fixed forever.
 ULONG if_nametoindex(const char *ifname) (a0)
