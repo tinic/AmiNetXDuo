@@ -961,19 +961,6 @@ static LONG p_state_only(struct Library *base, char word)
 
 struct probe_if_nameindex { ULONG if_index; char *if_name; };
 
-/* Byte compare rather than Stricmp(): this command does not open
-   utility.library, and both strings come from the same table anyway. */
-static BOOL p_same_name(const char *a, const char *b)
-{
-    while (*a != '\0' && *a == *b)
-    {
-        a++;
-        b++;
-    }
-
-    return (*a == *b) ? TRUE : FALSE;
-}
-
 static ULONG p_if_nametoindex(struct Library *base, const char *name)
 {
     register struct Library *a6  __asm("a6") = base;
