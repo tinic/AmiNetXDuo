@@ -1610,49 +1610,6 @@ static UWORD ami_ns_interface_users(AmiNetStack *ns, UWORD index)
     return users;
 }
 
-/*
- * The addressing an interface is carrying, copied into the AmiIfConfig that
- * describes it, so that a remove/add pair gives the interface back rather than
- * a bare one.
- *
- * The gateway is only this interface's if NetX Duo says so:
- * nx_ip_interface_detach() clears nx_ip_gateway_address exactly when
- * nx_ip_gateway_interface is the interface going away, so that same test
- * decides who has to remember it.
- *
- * Takes its own bracket, as netstack_interface_down() does. Both getters take
- * nx_ip_protection, and a ThreadX mutex may only be taken by a ThreadX thread:
- * an unadopted AmigaOS task that has to wait for it suspends something that is
- * not a thread and never comes back. If the bracket cannot be had, nothing is
- * written down and the interface comes back bare -- worse than it should be,
- * but not worse than failing the removal over it.
- */
-static VOID ami_ns_remember_interface(AmiNetStack *ns, UWORD index)
-{
-    AmiIfConfig  *cfg = &ns->ns_Config.interfaces[index];
-    AmiNetCaller *caller;
-    ULONG         addr = 0;
-    ULONG         mask = 0;
-    ULONG         gateway = 0;
-
-    caller = ami_netstack_enter_alloc();
-    if (caller == NULL)
-        return;
-
-    if (nx_ip_interface_address_get(&ns->ns_Ip, (UINT)index, &addr, &mask)
-            == NX_SUCCESS && addr != 0)
-    {
-        cfg->address = addr;
-        cfg->netmask = mask;
-    }
-
-    if (ns->ns_Ip.nx_ip_gateway_interface == &ns->ns_Ip.nx_ip_interface[index]
-        && nx_ip_gateway_address_get(&ns->ns_Ip, &gateway) == NX_SUCCESS)
-        cfg->gateway = gateway;
-
-    ami_netstack_leave_free(caller);
-}
-
 LONG netstack_interface_remove(UWORD index, BOOL force)
 {
     AmiNetStack  *ns = ami_ns;
@@ -1704,15 +1661,6 @@ LONG netstack_interface_remove(UWORD index, BOOL force)
                   ns->ns_Config.interfaces[index].name);
         return AMI_NET_ERR_STATE;
     }
-
-    /*
-     * What the interface had, into its own configuration slot, before the
-     * detach takes it. AddInterfaceTagList() carries a name, a device, a unit
-     * and an MTU and nothing else -- no address, no mask, no gateway -- so
-     * anything not written down here has no way back: DEVS:NetInterfaces is
-     * read at startup and never again, and a DHCP lease is released below.
-     */
-    ami_ns_remember_interface(ns, index);
 
     /*
      * Stop the DHCP client on this interface before the interface goes.
@@ -2156,60 +2104,11 @@ static LONG ami_ns_free_interface_slot(AmiNetStack *ns)
     return -1;
 }
 
-/*
- * The configuration this machine already holds for an interface of this name,
- * or NULL. Only a slot with nothing live in it counts: a name that is still in
- * use was refused before this is reached.
- *
- * `slot` is preferred when both it and another entry carry the name, so that
- * an interface returning to the slot it left reads its own entry rather than a
- * duplicate somewhere above it.
- */
-static AmiIfConfig *ami_ns_stored_config(AmiNetStack *ns, const char *name,
-                                         UWORD slot)
-{
-    AmiIfConfig *found = NULL;
-    UWORD        i;
-
-    for (i = 0; i < (UWORD)AMI_CFG_MAX_INTERFACES; i++)
-    {
-        AmiIfConfig *cfg = &ns->ns_Config.interfaces[i];
-
-        if (ns->ns_Iface[i] != NULL || cfg->name[0] == '\0')
-            continue;
-
-        if (!ami_ns_same_name(cfg->name, name))
-            continue;
-
-        if (i == slot)
-            return cfg;
-
-        if (found == NULL)
-            found = cfg;
-    }
-
-    return found;
-}
-
-static VOID ami_ns_copy_string(char *dst, ULONG size, const char *src)
-{
-    ULONG i;
-
-    if (size == 0)
-        return;
-
-    for (i = 0; i + 1 < size && src[i] != '\0'; i++)
-        dst[i] = src[i];
-
-    dst[i] = '\0';
-}
-
 LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
 {
     AmiNetStack  *ns = ami_ns;
     AmiNetCaller *caller;
     AmiIfConfig  *slot_cfg;
-    AmiIfConfig  *previous;
     AmiSana2If   *iface;
     LONG          slot;
     LONG          err = AMI_NET_OK;
@@ -2237,46 +2136,29 @@ LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
         return AMI_NET_ERR_STATE;
 
     /*
-     * A name this machine already has a configuration for is the same
-     * interface coming back, not a new one, so it comes back as it was.
-     * "RemoveInterface() tries to release all the resources associated with a
-     * networking interface, thus permitting it to be added again with new
-     * parameters" -- the new parameters this vector carries are the device,
-     * the unit and the MTU, and those are the ones that win below. The
-     * addressing is the machine's and there is no other copy of it left.
-     */
-    previous = ami_ns_stored_config(ns, cfg->name, (UWORD)slot);
-
-    /*
      * The configuration is copied into the netstack's own storage before the
      * device is opened and stays there: nx_ip_interface_attach() keeps the
      * name pointer rather than the name, so the string must outlive the
      * caller's tag list.
      */
     slot_cfg = &ns->ns_Config.interfaces[slot];
-
-    if (previous != NULL)
-    {
-        AmiIfConfig merged = *previous;
-
-        /* The moved-from slot must not keep a second copy of an interface
-           that now lives here; ns_Iface[] is NULL there either way. */
-        if (previous != slot_cfg)
-            ami_ns_zero(previous, sizeof(*previous));
-
-        ami_ns_copy_string(merged.device, sizeof(merged.device), cfg->device);
-        merged.unit = cfg->unit;
-        merged.mtu  = cfg->mtu;
-        merged.up   = cfg->up;
-
-        *slot_cfg = merged;
-    }
-    else
-    {
-        *slot_cfg = *cfg;
-    }
-
+    *slot_cfg = *cfg;
     slot_cfg->configured = TRUE;
+
+#ifdef AMINETXDUO_IPV6
+    /*
+     * AddInterfaceTagList() has no IPv6 tag, so a caller cannot express an
+     * IPv6 mode and arrives with the zero of the enum, which reads as OFF. An
+     * interface file with no CONFIGURE6 line is defaulted to AUTO
+     * (config_parse.c) and this is the same interface by another route: the
+     * link-local RFC 4291 requires is not addressing the caller supplies.
+     */
+    if (slot_cfg->ip6type == AMI_IP6TYPE_OFF)
+    {
+        slot_cfg->ip6type = AMI_IP6TYPE_AUTO;
+        slot_cfg->prefix6 = 64;
+    }
+#endif
 
     if ((UWORD)slot >= ns->ns_Config.interface_count)
         ns->ns_Config.interface_count = (UWORD)(slot + 1);
@@ -2315,24 +2197,18 @@ LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
     }
 
     /*
-     * An interface this machine knows comes back carrying what it had --
-     * ami_ns_remember_interface() wrote it down, DHCP's lease included --
-     * rather than being handed the file's static pair, which for a DHCP
-     * interface is nothing at all.
-     *
-     * The mask matters beyond the address: ConfigureInterfaceTagList() falls
-     * back to the classful mask only when the interface has none, so attaching
-     * with a zero mask is what turned a re-added 10.0.2.15/24 into a /8.
-     *
-     * A name this machine has not seen still arrives with no address unless
-     * the file gave it a static one, which is what the published API says.
+     * The address and mask the caller gave, and nothing else.
+     * AddInterfaceTagList() has no address, netmask, gateway or broadcast tag;
+     * "such as setting interface addresses, status and routing metrics" is
+     * ConfigureInterfaceTagList()'s sentence. So an interface added through
+     * that vector arrives bare and is addressed by the configure that follows,
+     * and only startup -- which reads DEVS:NetInterfaces -- reaches here with a
+     * static pair to attach with.
      */
     status = nx_ip_interface_attach(&ns->ns_Ip, (CHAR *)slot_cfg->name,
-                                    (previous != NULL ||
-                                     slot_cfg->iptype == AMI_IPTYPE_STATIC)
+                                    (slot_cfg->iptype == AMI_IPTYPE_STATIC)
                                         ? slot_cfg->address : 0UL,
-                                    (previous != NULL ||
-                                     slot_cfg->iptype == AMI_IPTYPE_STATIC)
+                                    (slot_cfg->iptype == AMI_IPTYPE_STATIC)
                                         ? slot_cfg->netmask : 0UL,
                                     ami_sana2_driver_entry);
 
@@ -2357,34 +2233,6 @@ LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
 
     if ((UWORD)slot >= ns->ns_IfaceCount)
         ns->ns_IfaceCount = (UWORD)(slot + 1);
-
-    /*
-     * And the default route, which nx_ip_interface_detach() took away with the
-     * interface it belonged to (nx_ip_interface_detach.c:211). Nothing else
-     * puts it back: the file is read at startup, DHCP set this one and its
-     * lease was released on the way out, and neither AddInterfaceTagList() nor
-     * ConfigureInterfaceTagList() has a tag for a gateway. Without this the
-     * machine loses every destination that is not on its own wire.
-     *
-     * Only when the stack has none. A gateway out of another interface is that
-     * interface's and is not this one's to replace. The set is refused if the
-     * address is not on the network just attached, which is the right answer:
-     * the gateway that was reachable through this interface no longer is.
-     */
-    if (slot_cfg->gateway != 0UL)
-    {
-        ULONG current = 0;
-
-        caller = ami_netstack_enter_alloc();
-        if (caller != NULL)
-        {
-            if (nx_ip_gateway_address_get(&ns->ns_Ip, &current) != NX_SUCCESS ||
-                current == 0UL)
-                (VOID)nx_ip_gateway_address_set(&ns->ns_Ip, slot_cfg->gateway);
-
-            ami_netstack_leave_free(caller);
-        }
-    }
 
     ami_netstack_capture_attach_one(ns, (UWORD)slot);
 

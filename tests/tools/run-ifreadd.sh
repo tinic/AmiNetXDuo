@@ -1,14 +1,32 @@
 #!/usr/bin/env bash
 #
-# THE REGRESSION TEST FOR "IfProbe takes the machine's network away".
+# THE REGRESSION TEST FOR "AddInterfaceTagList() gives back an interface that
+# is bare, and ConfigureInterfaceTagList() addresses it".
 #
 #   tests/tools/run-ifreadd.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
+#                              [-A [-N board] [-B backend]]
 #
-# WHAT WENT WRONG
+# WHAT THE PUBLISHED API SAYS
 #
-#   RemoveInterface() followed by AddInterfaceTagList() -- the round trip the
-#   autodoc describes as the point of the pair -- gave eth0 back with the
-#   CLASSFUL mask for its address and no default route.  `netstat -r` went from
+#   AddInterfaceTagList() -- "Make a new interface available for network
+#   access ... Each such device must be assigned a unique interface name and
+#   refer to a SANA-II device name and unit number."  Its whole tag set is
+#   device-facing: IFA_IPType, IFA_ARPType, IFA_Num*Requests,
+#   IFA_PacketFilterMode, IFA_PointToPoint, IFA_Multicast, IFA_DownGoesOffline,
+#   IFA_ReportOffline.  There is no address, netmask, gateway or broadcast tag.
+#
+#   ConfigureInterfaceTagList() -- "for changing the configuration of an
+#   interface previously added with AddInterfaceTagList(), such as setting
+#   interface addresses, status and routing metrics" -- IFC_Address,
+#   IFC_NetMask, IFC_DestinationAddress, IFC_BroadcastAddress.
+#
+#   So the add creates a bare interface and the configure addresses it.  An
+#   interface that comes back from a re-add with no address is the contract
+#   being kept, not a fault.
+#
+# WHAT THE ORIGINAL FAULT WAS, AND STILL IS
+#
+#   The routing table went from
 #
 #       10.0.2.0    *          255.255.255.0  U   eth0
 #       default     10.0.2.2   0.0.0.0        UG  eth0
@@ -17,30 +35,27 @@
 #
 #       10.0.0.0    *          255.0.0.0      U   eth0
 #
-#   so the machine kept its address and lost every destination that was not on
-#   its own wire.  Two causes with one shape: AddInterfaceTagList() carries a
-#   name, a device, a unit and an MTU and nothing else, and the add path copied
-#   that empty configuration over the machine's own -- the only record of the
-#   mask that was left, since DEVS:NetInterfaces is read at startup and never
-#   again.  ConfigureInterfaceTagList() then guessed the mask from the address
-#   class, which is what it is documented to do for an interface that has none.
-#   The gateway went with nx_ip_interface_detach(), which clears it when it
-#   belonged to the interface being detached, and nothing put it back.
+#   A SILENTLY WRONG CLASSFUL /8 where the machine had a /24.  That is the
+#   thing worth a regression test, and it is asserted here against the right
+#   expectation: IfProbe hands ConfigureInterfaceTagList() the address AND the
+#   mask, and the mask that comes out has to be the one it asked for rather
+#   than the class of the address.  A stack that guesses anyway reads /8 in
+#   `netstat -r` and in IFQ_NetMask, and both are checked.
+#
+#   The default route is a separate matter and is NOT put back by either
+#   vector: nx_ip_interface_detach() takes it with the interface it belonged
+#   to, and neither AddInterfaceTagList() nor ConfigureInterfaceTagList() has a
+#   tag for a gateway.  AddRouteTagList() is where a caller puts one back.  Its
+#   absence after the round trip is asserted too, so that anything reinstating
+#   it inside the library vector shows up here.
 #
 # WHY eth0 IS STATIC HERE, AND NOT DHCP
 #
-#   Because a static interface is the case where nothing on the machine could
-#   put the configuration back even in principle.  A DHCP interface has a client
-#   that may re-bind and write the address, the mask and the gateway back, so a
-#   transcript showing them is not evidence that the stack kept them -- it may
-#   be evidence that something else replaced them.  Under STATIC there is no
-#   second source, and what the routing table says after the round trip is what
-#   the remove-and-add did and nothing else.
-#
-#   It is also the configuration a user with a fixed address has, and the one
-#   where the loss is permanent: DEVS:NetInterfaces is read at startup and never
-#   again, so once the add path has overwritten the stored copy there is nothing
-#   left to read it back from.
+#   Because a static interface has no second source.  A DHCP interface has a
+#   client that may re-bind and write an address, a mask and a gateway back, so
+#   a transcript showing them proves nothing about what the remove-and-add
+#   did.  Under STATIC, what the routing table says afterwards is the round
+#   trip and IfProbe's own configure, and nothing else.
 #
 # WHY NOT IN run-ifquery.sh, WHICH ALSO RUNS IfProbe
 #
@@ -52,9 +67,11 @@
 #
 # WHAT IS ASSERTED
 #
-#   * the routing table before the round trip has the /24 and the default;
-#   * IfProbe's own IFQ_NetMask reads back the mask it started with;
-#   * the routing table after the round trip has both again.
+#   * the routing table before the round trip has the /24 and the default,
+#     so there is something to lose;
+#   * the freshly re-added interface carries NO address and NO mask;
+#   * IFQ_NetMask after the configure is the mask that was asked for;
+#   * the routing table afterwards has the /24 back and no default route.
 #
 #   The mask is asserted from both instruments because neither sees both
 #   halves: no published IFQ_ tag reaches the routing table, and netstat cannot
@@ -73,13 +90,21 @@ cd "$ROOT"
 MODEL=A1200
 TIMEOUT=300
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
+# FS-UAE needs an X server; on a headless Linux box it dies in GLAD before the
+# guest boots, so -A picks Amiberry, which runs genuinely headless.
+RUNNER="${AMINETXDUO_RUNNER:-fsuae}"
+BOARD=a2065
+IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
 
-while getopts "m:t:b:" opt; do
+while getopts "m:t:b:AN:B:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir]" >&2; exit 2 ;;
+        A) RUNNER=amiberry ;;
+        N) BOARD="$OPTARG" ;;
+        B) IFACE="$OPTARG" ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-A [-N board] [-B backend]]" >&2; exit 2 ;;
     esac
 done
 
@@ -115,9 +140,9 @@ cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
 
 # SLIRP's own numbers, taken statically rather than leased: 10.0.2.15 is the
-# address it would hand out, 10.0.2.2 is the gateway it answers on, and
-# tests/tools/ifprobe.c reconfigures with 10.0.2.15 after the re-add -- so the
-# probe puts back the address this file asked for and nothing else changes.
+# address it would hand out and 10.0.2.2 is the gateway it answers on.
+# tests/tools/ifprobe.c reconfigures with 10.0.2.15 and the mask the interface
+# left with, so the address and the mask below are the pair it asks for back.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<'IFEOF'
 DEVICE=a2065.device
 UNIT=0
@@ -143,14 +168,24 @@ EOF
 # ------------------------------------------------------------------ run ---
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-ifreadd}"
-HD="$ROOT/build/testhd-$AMINETXDUO_RUN_TAG"
 
-echo "==> booting $MODEL with the A2065 on SLIRP"
 set +e
-"$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
-    "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-    "$STAGE/AddNetInterface" "$STAGE/netstat" "$STAGE/NetShutdown" \
-    "$STAGE/IfProbe"
+if [ "$RUNNER" = "amiberry" ]; then
+    HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
+    echo "==> booting $MODEL under Amiberry, $BOARD on $IFACE"
+    "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
+        -t "$TIMEOUT" \
+        "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
+        "$STAGE/AddNetInterface" "$STAGE/netstat" "$STAGE/NetShutdown" \
+        "$STAGE/IfProbe"
+else
+    HD="$ROOT/build/testhd-$AMINETXDUO_RUN_TAG"
+    echo "==> booting $MODEL with the A2065 on SLIRP"
+    "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
+        "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
+        "$STAGE/AddNetInterface" "$STAGE/netstat" "$STAGE/NetShutdown" \
+        "$STAGE/IfProbe"
+fi
 RUN_RC=$?
 set -e
 
@@ -211,27 +246,48 @@ else
     printf '%s\n' "$BEFORE" | sed 's/^/       /' >&2
 fi
 
-# ---- and what it came back with ------------------------------------------
-if grep -q "^netmask after the round trip: .* -- the mask it had, correctly" "$REPORT"; then
-    pass "IFQ_NetMask reads back the mask it started with"
+# ---- bare, as the published API says -------------------------------------
+#
+# AddInterfaceTagList() has no address tag, so the interface it hands back must
+# be carrying nothing.  A library vector that put the old addressing back would
+# read as still addressed here -- and would also stop BeginInterfaceConfig()
+# from ever running a DHCP allocation on a re-added interface, which is how it
+# was found.
+if grep -q "^bare after add: address 0\.0\.0\.0 netmask 0\.0\.0\.0 -- bare, correctly" "$REPORT"; then
+    pass "the re-added interface came back with no address and no mask"
 else
-    fail "the re-added interface did not come back with the mask it had"
+    fail "the re-added interface came back already addressed"
+    grep -n "^bare after add:" "$REPORT" | sed 's/^/       /' >&2
+fi
+
+# ---- and the configure addressed it --------------------------------------
+#
+# IfProbe passes IFC_Address AND IFC_NetMask.  The mask that comes back has to
+# be the one it asked for: the classful fallback is for a caller that supplied
+# an address alone, and using it here is the /8 this file exists for.
+if grep -q "^netmask after the round trip: .* -- the mask it had, correctly" "$REPORT"; then
+    pass "IFQ_NetMask is the mask ConfigureInterfaceTagList() was given"
+else
+    fail "the configure did not honour IFC_NetMask -- the classful guess again"
     grep -n "^netmask after the round trip:" "$REPORT" | sed 's/^/       /' >&2
 fi
 
 AFTER=$(routes 2)
 if printf '%s\n' "$AFTER" | grep -Eq '^10\.0\.2\.0 +\* +255\.255\.255\.0 '; then
-    pass "the attached route is still the /24 afterwards"
+    pass "and the attached route is the /24 the configure asked for"
 else
     fail "the attached route came back as something else -- the classful mask"
     printf '%s\n' "$AFTER" | sed 's/^/       /' >&2
 fi
 
-if printf '%s\n' "$AFTER" | grep -Eq '^default +10\.0\.2\.2 '; then
-    pass "and the default route survived the remove-and-add"
-else
-    fail "the default route did not survive the remove-and-add"
+# The gateway went with nx_ip_interface_detach() and neither vector has a tag
+# for one, so it stays gone until a caller runs AddRouteTagList().  Asserted
+# rather than ignored: putting it back inside the add is what was wrong before.
+if printf '%s\n' "$AFTER" | grep -Eq '^default +'; then
+    fail "a default route reappeared on its own -- neither vector may install one"
     printf '%s\n' "$AFTER" | sed 's/^/       /' >&2
+else
+    pass "the default route is gone, as it must be -- AddRouteTagList() puts it back"
 fi
 
 echo
