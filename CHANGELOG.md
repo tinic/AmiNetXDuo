@@ -9,6 +9,9 @@ User-visible changes, newest first. Internal work is in the git log.
 - A socket bound to one of the machine's addresses now sends from it. UDP and raw datagrams leave with the bound address as their source; a `connect()` that would have had to leave from another one is refused with `EADDRNOTAVAIL` instead of connecting from it and reporting the bound address back
 - A destination the bound address cannot reach is refused with `ENETUNREACH`, on `connect()` as well as on a datagram. Such a datagram used to be handed to the stack and dropped inside it with the send already reported as successful
 - `sendto()` and `sendmsg()` on a raw socket honour an IPv6 zone -- `fe80::1%2` leaves by interface 2 -- as a UDP socket already did
+- IPv4 multicast works: `IP_ADD_MEMBERSHIP`, `IP_DROP_MEMBERSHIP`, `IP_MULTICAST_IF`, `IP_MULTICAST_TTL` and `IP_MULTICAST_LOOP`, so a program that discovers things on the local network -- SSDP, UPnP, a ported mDNS -- can open the socket it expects instead of getting "Protocol not available"
+- `bind()` to a multicast group address is accepted, which is how a program listening for a group is written
+- The `68000-minimal` drawer leaves multicast out along with the other optional features, which is 3,888 bytes
 
 ## 0.15.1
 

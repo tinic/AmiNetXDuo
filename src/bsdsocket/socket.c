@@ -441,6 +441,13 @@ static AmiSocket *bsd_socket_alloc(struct AmiSocketBase *base,
     sock->as_Protocol = protocol;
     sock->as_Ttl      = (LONG)NX_IP_TIME_TO_LIVE;
 
+#ifdef AMINETXDUO_MULTICAST
+    /* IP_DEFAULT_MULTICAST_TTL / _LOOP: one hop, and hear your own sends. */
+    sock->as_McastTtl  = 1;
+    sock->as_McastLoop = 1;
+    sock->as_McastIf   = -1;
+#endif
+
     switch (type)
     {
         case SOCK_STREAM: sock->as_Flags = ASF_TCP; break;
@@ -801,6 +808,13 @@ static BOOL bsd_socket_destroy(AmiSocket *sock)
 
     if ((sock->as_Flags & ASF_DELETED) != 0)
         return TRUE;
+
+#ifdef AMINETXDUO_MULTICAST
+    /* "Memberships are dropped when the socket is closed." Before the FIN,
+       because a socket that cannot be deleted is orphaned below and would
+       otherwise hold its groups until the stack goes down. */
+    bsd_mcast_close(sock);
+#endif
 
     /*
      * The FIN goes out before anything is discarded, because whether there is
@@ -1375,6 +1389,28 @@ static BOOL bsd_addr_is_loopback(const NXD_ADDRESS *addr)
     return ((addr->nxd_ip_address.v4 >> 24) == 127UL) ? TRUE : FALSE;
 }
 
+#ifdef AMINETXDUO_MULTICAST
+/*
+ * A class D address is not an interface address, so "does this machine have
+ * it" is the wrong question -- in_pcbbind() skips ifa_ifwithaddr() for one,
+ * and bind(239.255.255.250:1900) is how an SSDP receiver is written. It is
+ * also the reason the membership has to be joined separately: the bind alone
+ * selects nothing.
+ *
+ * IPv4 only. Nothing here joins an IPv6 group, so accepting a bind to one
+ * would promise a delivery that cannot happen.
+ */
+static BOOL bsd_addr_is_multicast(const NXD_ADDRESS *addr)
+{
+#ifdef AMINETXDUO_IPV6
+    if (addr->nxd_ip_version == NX_IP_VERSION_V6)
+        return FALSE;
+#endif
+    return ((addr->nxd_ip_address.v4 & 0xF0000000UL) == 0xE0000000UL)
+               ? TRUE : FALSE;
+}
+#endif
+
 static BsdBindKind bsd_bind_kind(const NXD_ADDRESS *addr)
 {
     NX_IP *ip = netstack_ip();
@@ -1384,6 +1420,11 @@ static BsdBindKind bsd_bind_kind(const NXD_ADDRESS *addr)
 
     if (bsd_addr_is_unspecified(addr) || bsd_addr_is_loopback(addr))
         return BSD_BIND_ANY;
+
+#ifdef AMINETXDUO_MULTICAST
+    if (bsd_addr_is_multicast(addr))
+        return BSD_BIND_ANY;
+#endif
 
     if (ip == NULL)
         return BSD_BIND_FOREIGN;
@@ -1932,6 +1973,13 @@ BOOL bsd_bind_wants_interface(const AmiSocket *listener,
     /* The wildcard takes everything, which is what it is for. */
     if (bsd_addr_is_unspecified(&listener->as_LocalAddr))
         return TRUE;
+
+#ifdef AMINETXDUO_MULTICAST
+    /* So does a group: the membership decided which interface already, and
+       comparing a class D address against an interface address drops the lot. */
+    if (bsd_addr_is_multicast(&listener->as_LocalAddr))
+        return TRUE;
+#endif
 
     if (nxif == NX_NULL || ip == NULL)
         return FALSE;

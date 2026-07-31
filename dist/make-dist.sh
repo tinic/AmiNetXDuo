@@ -137,10 +137,14 @@ declare -A CPU_BUILD=(
     [68060]="${AMINETXDUO_BUILD_68060:-$BUILD-68060}"
 )
 
-# 68000-minimal is the same stack with IPv6, mDNS, the packet filter and TLS
-# compiled out, stripped: 222 KB against the 68000 drawer's 326 KB.  On the
-# 1 MB machine 81 measured, that is 104 KB back out of the 371 KB the stack
-# leaves free -- a 28% increase in what is left for programs.
+# 68000-minimal is the same stack with IPv6, mDNS, the packet filter, TLS and
+# IPv4 multicast compiled out, stripped: 222 KB against the 68000 drawer's
+# 326 KB.  On the 1 MB machine 81 measured, that is 104 KB back out of the
+# 371 KB the stack leaves free -- a 28% increase in what is left for programs.
+#
+# Multicast is the cheapest of the five at 3,888 bytes (3,696 of code and the
+# 192-byte membership table) and is out for the same reason the others are:
+# this drawer is what somebody installs having measured their machine.
 #
 # NOT what the installer picks.  It is here for somebody who has measured
 # their machine and decided, which is why it is a drawer rather than a

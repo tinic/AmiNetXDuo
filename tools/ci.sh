@@ -79,6 +79,11 @@ CROSS_CONFIGS=(
     # answer sensibly without them.
     "nomdns:-DAMINETXDUO_MDNS=OFF"
     "notls:-DAMINETXDUO_TLS=OFF"
+    # The floor drawer's answer to IGMP. mcast.c is the only caller of NetX
+    # Duo's IGMP services, so this arm is what proves the rest of the tree
+    # still builds and binds without it -- bind() classifies a class D address
+    # here and not there.
+    "nomcast:-DAMINETXDUO_MULTICAST=OFF"
     "noasm:-DAMINETXDUO_CRYPTO68K_ASM=OFF"
     "m68000:-DAMINETXDUO_CPU=68000"
     "m68040:-DAMINETXDUO_CPU=68040"
@@ -92,6 +97,7 @@ CROSS_CONFIGS=(
 HOST_TEST_TARGETS=(test_config test_mbuf test_bpf test_crypto68k test_crypto68k_25519 test_net68k_checksum
                    test_tcp_retries test_bcast_loopback fuzz_config fuzz_bpf fuzz_dns
                    fuzz_dhcp fuzz_tls_record fuzz_tls_x509)
+                   fuzz_dhcp)
 
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against
 # Kickstart 3.1 -- identical check counts on both.  Deliberately NOT here:

@@ -451,6 +451,9 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     ULONG           wait;
     LONG            filled;
     UINT            status;
+#ifdef AMINETXDUO_MULTICAST
+    LONG            mcast_if;
+#endif
 
     (VOID)flags;
 
@@ -493,6 +496,16 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
         sock->as_Flags |= ASF_NXBOUND | ASF_BOUND;
     }
 
+#ifdef AMINETXDUO_MULTICAST
+    /*
+     * Puts IP_MULTICAST_TTL on the socket for this send and answers with the
+     * IP_MULTICAST_IF interface, or -1 when the route may choose. Called for
+     * every destination and not only a group, because it is also what puts
+     * the TTL back for a unicast one.
+     */
+    mcast_if = bsd_mcast_prepare_send(sock, addr);
+#endif
+
     wait = bsd_wait_option(sock, sock->as_SndTimeout);
 
     status = nx_packet_allocate(pool, &packet, NX_UDP_PACKET, wait);
@@ -518,6 +531,20 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
         /* nxd_, not nx_: the v4 wrapper wraps the address and calls this. */
         status = nxd_udp_socket_send(&sock->as_Nx.udp, packet,
                                      (NXD_ADDRESS *)addr, port);
+#endif
+#ifdef AMINETXDUO_MULTICAST
+    /* IP_MULTICAST_IF named an interface, so the route does not choose. */
+    if (mcast_if >= 0)
+    {
+        status = nx_udp_socket_source_send(&sock->as_Nx.udp, packet,
+                                           addr->nxd_ip_address.v4, port,
+                                           (UINT)mcast_if);
+    }
+    else
+#endif
+    /* nxd_, not nx_: the v4 wrapper wraps the address and calls this. */
+    status = nxd_udp_socket_send(&sock->as_Nx.udp, packet,
+                                 (NXD_ADDRESS *)addr, port);
     if (status != NX_SUCCESS)
     {
         nx_packet_release(packet);

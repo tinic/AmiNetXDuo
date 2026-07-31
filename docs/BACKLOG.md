@@ -89,6 +89,35 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   weighed against. RFC 1112 membership is the target; RFC 3678 source filtering
   is not, and can wait indefinitely. `NX_ENABLE_IPV6_MULTICAST` is the same
   argument on the v6 side, for a non-floor tier.
+- **`bind()` outbound source selection is not done.** Inbound is: a completed
+  TCP connection that arrived on another interface is reset in `bsd_accept()`,
+  and a datagram that did is released in `bsd_recv_udp()`, both through
+  `bsd_bind_wants_interface()`, so `nc -l 127.0.0.1` means what it says and a
+  specific address is no longer refused. What is left is the send direction --
+  a socket bound to one address should send *from* it, and today NetX picks by
+  route. `nxd_udp_socket_source_send()` is already wired for RFC 4007 zones
+  and takes the same kind of index, so UDP is small; TCP has no source-send
+  equivalent and needs a decision, the same one RFC 4007 needs.
+- **IPv6 group membership (`IPV6_JOIN_GROUP`) is absent.** The IPv4 side is
+  done (below); this is not, and is a separate decision because the numbers are
+  worse. `NX_ENABLE_IPV6_MULTICAST` grows every `NX_IP` by 172 bytes whether or
+  not anything joins, where `nx_igmp_enable()` grows it by nothing, and there is
+  no MLD anywhere in the vendored tree -- no `nx_mld_*.c` exists, so a join
+  reaches the driver and no report is ever sent, and a querying switch stops
+  forwarding the group. The reasoning is beside the define in
+  `port/netxduo-amiga/inc/nx_user.h`.
+- **`ShowNetServices` cannot browse every type at once.** With no type it runs the
+  RFC 6763 §9 meta-query and lists the types present; listing every instance of
+  every type would mean starting one continuous query per type found. They would
+  all run concurrently, so it costs one more window rather than one per type — but
+  it multiplies what lands in the peer cache, and the cache size was already the
+  thing that decided whether an answer had an address in it or not.
+- **A browse answer with no address is not chased.** When the PTR and SRV arrive
+  without the A record in the same response, the row prints the target host and
+  "no address" — the vendored module fills `service_ipv4` only from an A record
+  already in the cache and never asks for one. Raising the peer cache to 32 KB
+  made it rare on the LAN it was measured against, which is a mitigation rather
+  than a fix: the right answer is to resolve the SRV target when the A is absent.
 - **A browse reports the whole peer cache, not the browse window.**
   `netstack_mdns_browse_collect()` walks `nx_mdns_service_lookup()` by index,
   which is the whole peer cache, and nothing ages entries from our side -- the
@@ -172,6 +201,21 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
 
 ## Decided against — do not "fix"
 
+- **RFC 3678 source filtering stays out**, 2026-07-31. `IP_ADD_SOURCE_MEMBERSHIP`,
+  `IP_BLOCK_SOURCE` and the `MCAST_*` family need IGMPv3, which the vendored NetX
+  Duo does not implement -- it speaks IGMPv2 and the source lists have nowhere to
+  go. RFC 1112 membership is what shipped (`src/bsdsocket/mcast.c`) and is what
+  SSDP, UPnP and a ported mDNS actually call.
+- **IPv4 multicast**, done 2026-07-31, entry kept for the cost. `IP_ADD_MEMBERSHIP`,
+  `IP_DROP_MEMBERSHIP`, `IP_MULTICAST_IF`, `IP_MULTICAST_TTL` and
+  `IP_MULTICAST_LOOP` over `nx_igmp_enable()`, in `src/bsdsocket/mcast.c`;
+  `bind()` to a class D address is accepted, which it was not, because that is how
+  an SSDP receiver is written. Measured: **3,888 bytes** on the floor build (3,696
+  of code, 192 of membership table) and 3,532 on the default one, plus 12 bytes per
+  open socket. No packet-pool or `NX_IP` growth at all -- `nx_ipv4_multicast_entry[7]`
+  is unconditional in `NX_IP` and `nx_igmp_enable()` only fills in three function
+  pointers. On by default; `-DAMINETXDUO_MULTICAST=OFF` in the `68000-minimal`
+  drawer, with the other four optional features.
 - **RFC 6724 default address selection**, 2026-07-31: does not apply here. It
   sorts a list of candidate destinations, and `getaddrinfo()` returns at most
   one address per family (the resolver under it answers with a single address,
