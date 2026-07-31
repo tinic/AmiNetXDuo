@@ -115,3 +115,17 @@ if(AMIGA_NDK_INCLUDE)
 endif()
 target_compile_options(test_tcphandoff PRIVATE -Wall -Wextra)
 set_target_properties(test_tcphandoff PROPERTIES OUTPUT_NAME "TcpHandoff")
+
+# SrcProbe measures the send direction of bind(): a datagram bound to an
+# address has to arrive with that address as its source, and a TCP connect()
+# that would have to leave from another one has to be refused.  Neither is
+# reachable from a host build -- both read NX_IP's live interface table -- and
+# a send that merely returns len proves nothing, so the assertion is on the
+# source address the receiver saw.
+add_executable(test_srcprobe srcprobe.c)
+target_include_directories(test_srcprobe PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_srcprobe PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_srcprobe PRIVATE -Wall -Wextra)
+set_target_properties(test_srcprobe PROPERTIES OUTPUT_NAME "SrcProbe")
