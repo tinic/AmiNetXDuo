@@ -1322,6 +1322,109 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
     return fd;
 }
 
+/* ------------------------------------------------------- what bind() takes -- */
+
+/*
+ * NetX binds a socket to a port; no nx_*_socket_bind takes an address. So a
+ * bind to a particular local address cannot be enforced yet (docs/BACKLOG.md),
+ * and until it can, this decides which ones may be accepted without lying.
+ *
+ * The failure being avoided is specific: a listener bound to 127.0.0.1 that
+ * answers the LAN, with getsockname() reporting 127.0.0.1 back. Refusing is
+ * the portable answer -- EADDRNOTAVAIL is what BSD gives for an address the
+ * machine does not have, and a caller that checks it will fall back to ANY.
+ */
+typedef enum
+{
+    BSD_BIND_FOREIGN = 0,   /* not an address this machine has              */
+    BSD_BIND_ANY,           /* wildcard or loopback: nothing to enforce     */
+    BSD_BIND_SOLE,          /* ours, and the only addressed interface, so
+                               the socket ANY would give is the same one    */
+    BSD_BIND_SPECIFIC       /* ours, but one of several: cannot be honoured */
+} BsdBindKind;
+
+static BOOL bsd_addr_is_unspecified(const NXD_ADDRESS *addr)
+{
+#ifdef AMINETXDUO_IPV6
+    if (addr->nxd_ip_version == NX_IP_VERSION_V6)
+        return (addr->nxd_ip_address.v6[0] == 0 &&
+                addr->nxd_ip_address.v6[1] == 0 &&
+                addr->nxd_ip_address.v6[2] == 0 &&
+                addr->nxd_ip_address.v6[3] == 0) ? TRUE : FALSE;
+#endif
+    return (addr->nxd_ip_address.v4 == 0UL) ? TRUE : FALSE;
+}
+
+static BOOL bsd_addr_is_loopback(const NXD_ADDRESS *addr)
+{
+#ifdef AMINETXDUO_IPV6
+    if (addr->nxd_ip_version == NX_IP_VERSION_V6)
+        return (addr->nxd_ip_address.v6[0] == 0 &&
+                addr->nxd_ip_address.v6[1] == 0 &&
+                addr->nxd_ip_address.v6[2] == 0 &&
+                addr->nxd_ip_address.v6[3] == 1UL) ? TRUE : FALSE;
+#endif
+    /* 127.0.0.0/8, all of it, as BSD treats it. */
+    return ((addr->nxd_ip_address.v4 >> 24) == 127UL) ? TRUE : FALSE;
+}
+
+static BsdBindKind bsd_bind_kind(const NXD_ADDRESS *addr)
+{
+    NX_IP *ip = netstack_ip();
+    UWORD  matches = 0;
+    UWORD  addressed = 0;
+    UINT   i;
+
+    if (bsd_addr_is_unspecified(addr) || bsd_addr_is_loopback(addr))
+        return BSD_BIND_ANY;
+
+    if (ip == NULL)
+        return BSD_BIND_FOREIGN;
+
+#ifdef AMINETXDUO_IPV6
+    if (addr->nxd_ip_version == NX_IP_VERSION_V6)
+    {
+        for (i = 0; i < (UINT)NX_MAX_IPV6_ADDRESSES; i++)
+        {
+            const NXD_IPV6_ADDRESS *a = &ip->nx_ipv6_address[i];
+
+            if (a->nxd_ipv6_address_valid == 0)
+                continue;
+
+            addressed++;
+            if (a->nxd_ipv6_address[0] == addr->nxd_ip_address.v6[0] &&
+                a->nxd_ipv6_address[1] == addr->nxd_ip_address.v6[1] &&
+                a->nxd_ipv6_address[2] == addr->nxd_ip_address.v6[2] &&
+                a->nxd_ipv6_address[3] == addr->nxd_ip_address.v6[3])
+                matches++;
+        }
+    }
+    else
+#endif
+    {
+        for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+        {
+            const NX_INTERFACE *nxif = &ip->nx_ip_interface[i];
+
+            if (nxif->nx_interface_valid == 0 ||
+                nxif->nx_interface_ip_address == 0UL)
+                continue;
+
+            addressed++;
+            if (nxif->nx_interface_ip_address == addr->nxd_ip_address.v4)
+                matches++;
+        }
+    }
+
+    if (matches == 0)
+        return BSD_BIND_FOREIGN;
+
+    /* One addressed interface means binding to its address and binding to the
+       wildcard select the same packets, so accepting it promises nothing that
+       is not already true. */
+    return (addressed == 1) ? BSD_BIND_SOLE : BSD_BIND_SPECIFIC;
+}
+
 LONG bsd_bind(register LONG sock_fd            __asm("d0"),
               register struct sockaddr *name   __asm("a0"),
               register socklen_t namelen       __asm("d1"),
@@ -1396,6 +1499,27 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
      * getsockname reports it) but does not restrict what the socket receives.
      * A real gap, and the same one the IPv4 path has always had.
      */
+    switch (bsd_bind_kind(&addr))
+    {
+        case BSD_BIND_ANY:
+        case BSD_BIND_SOLE:
+            break;
+
+        case BSD_BIND_SPECIFIC:
+            /*
+             * Ours, but not the only one, so the socket would receive traffic
+             * for the others too. Refused rather than accepted-and-ignored:
+             * that is the whole point of the check. Lifting this is the
+             * enforcement work in docs/BACKLOG.md, not a wider accept here.
+             */
+            return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
+
+        case BSD_BIND_FOREIGN:
+        default:
+            /* What BSD returns for an address the machine does not have. */
+            return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
+    }
+
     sock->as_LocalAddr = addr;
     sock->as_LocalPort = port;
 
