@@ -273,6 +273,29 @@ endif()
 target_compile_options(tool_smoke PRIVATE ${TOOLS_WARNINGS} ${TOOLS_OPTIMISE})
 set_target_properties(tool_smoke PROPERTIES OUTPUT_NAME "ToolsSmoke")
 
+# ------------------------------------------------------- the LVO stubs ---
+#
+# toolsock.c enters bsdsocket.library with its arguments in local register
+# variables, and a call made after one of them is set clobbers the earlier
+# ones.  Compiled here at -O0 and disassembled, because -Os inlines the only
+# helper involved and hides it -- see cmake/check-lvo-stub-registers.cmake.
+#
+# A target of its own rather than a POST_BUILD on a command: the check wants
+# the file at an optimisation level no command is built at, and running it once
+# is enough for the nine commands that share the file.
+if(CMAKE_CROSSCOMPILING)
+    add_custom_target(tool_lvo_stub_check ALL
+        COMMAND "${CMAKE_COMMAND}"
+                "-DCC=${CMAKE_C_COMPILER}"
+                "-DCFLAGS=${CMAKE_C_FLAGS} -I$<JOIN:$<TARGET_PROPERTY:tool_ping,INCLUDE_DIRECTORIES>, -I>"
+                "-DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/toolsock.c"
+                "-DOBJDUMP=${CMAKE_OBJDUMP}"
+                "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/lvo-check"
+                -P "${CMAKE_SOURCE_DIR}/cmake/check-lvo-stub-registers.cmake"
+        COMMENT "toolsock.c enters the library with its own arguments"
+        VERBATIM)
+endif()
+
 add_custom_target(tools ALL)
 add_dependencies(tools
     tool_addnetinterface tool_checknetconfig
@@ -283,3 +306,6 @@ add_dependencies(tools
     tool_tftp tool_whois
     tool_sntp
     tool_shownetstatus tool_netstat tool_ping tool_smoke)
+if(CMAKE_CROSSCOMPILING)
+    add_dependencies(tools tool_lvo_stub_check)
+endif()
