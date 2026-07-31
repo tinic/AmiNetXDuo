@@ -494,6 +494,14 @@ LONG bsd_cmsg_parse(struct AmiSocketBase *base, AmiSocket *sock,
  * nx_ipv6_address[].  -1 when the source cannot be resolved, which the caller
  * turns into EADDRNOTAVAIL rather than letting NetX pick -- picking is what
  * the option was given to prevent.
+ *
+ * Not bsd_source_select() (socket.c), which produces the same kind of index
+ * and is deliberately left alone: it answers "where does this SOCKET send
+ * from", from the bound address and the RFC 4007 zone, both standing state.
+ * This answers "where does this DATAGRAM send from", and takes a bare
+ * interface index -- which a bind cannot express -- as well as an address.
+ * The one thing they must agree on is the +NX_LOOPBACK_IPV6_ENABLED bound
+ * below; both have it, and a comment at each.
  */
 LONG bsd_cmsg_source_index(NX_IP *ip, const BsdCmsgSource *src, BOOL v6)
 {
