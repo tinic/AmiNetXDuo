@@ -47,7 +47,12 @@ extern "C" {
 
 #define AMI_HEALTH_NAME     "AmiNetXDuo.Health"
 #define AMI_HEALTH_MAGIC    0x414E5848UL        /* 'ANXH' */
-#define AMI_HEALTH_VERSION  1
+/*
+ * 2 since TX_AMIGA_TICK_STATS grew the skew counters.  hm_Tick points at the
+ * live struct and a reader copies the whole of it, so a reader that disagrees
+ * about its shape must not read it: the version is what stops that.
+ */
+#define AMI_HEALTH_VERSION  2
 
 typedef struct AmiHealthMark
 {

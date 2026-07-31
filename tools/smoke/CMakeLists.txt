@@ -20,6 +20,7 @@
 #   AMINETXDUO_RUN_TAG=life  ./tools/fsuae-run.sh -t 120 build/cm/tools/smoke/lifecycle
 #   AMINETXDUO_RUN_TAG=kstop ./tools/fsuae-run.sh -t 120 build/cm/tools/smoke/KernelStop
 #   AMINETXDUO_RUN_TAG=rand1 ./tools/fsuae-run.sh -t 120 build/cm/tools/smoke/randtest
+#   AMINETXDUO_RUN_TAG=tick  ./tools/fsuae-run.sh -t 120 build/cm/tools/smoke/tickclock
 #
 # SPDX-License-Identifier: MIT
 
@@ -48,13 +49,18 @@
 #              failure modes, and writes its first 32 output bytes to
 #              DH0:randtest.txt so two cold-boot runs can be diffed.  Does not
 #              crash anything.
+# tickclock    holds the machine in Forbid() past TX_AMIGA_TIMER_MAX_CATCHUP and
+#              compares how far tx_time_get() moved against the E-Clock, which
+#              says whether the ThreadX clock is derived or counted.  Does not
+#              crash anything; the machine does stop for 750 ms at a time.
 set(SMOKE_PROBES
     smoke       smoke.c
     crashtest   crashtest.c
     gurutest    gurutest.c
     lifecycle   lifecycle.c
     KernelStop  kernelstop.c
-    randtest    randtest.c)
+    randtest    randtest.c
+    tickclock   tickclock.c)
 
 add_custom_target(smoke_probes)
 

@@ -153,6 +153,14 @@ VOID _tx_amiga_task_destroy(struct _tx_amiga_ctrl *ctrl);
 VOID _tx_amiga_thread_completed(VOID);
 
 
+/*
+ * Add `ticks` to _tx_timer_system_clock without walking the timer wheel
+ * (tx_timer_interrupt.c).  The only writer of the ThreadX clock in this port:
+ * _tx_timer_interrupt() walks the wheel and nothing else.
+ */
+VOID _tx_amiga_timer_clock_advance(ULONG ticks);
+
+
 /* Port globals defined in tx_initialize_low_level.c.  */
 extern volatile UINT    _tx_amiga_kernel_up;
 extern volatile UINT    _tx_amiga_timer_stop;

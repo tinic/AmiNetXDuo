@@ -384,10 +384,15 @@ VOID _tx_amiga_start_interrupts(void)
  * The wakeup source is not the time base.  The task parks on timer.device
  * UNIT_VBLANK, which costs a list insertion on an interrupt the machine takes
  * anyway, but it never counts those wakeups.  On each one it reads the E-Clock
- * and works out how many whole TX_TIMER_TICKS_PER_SECOND periods have elapsed,
- * then calls _tx_timer_interrupt() that many times.  A late or coalesced wakeup
- * pays its arrears, an early one delivers nothing, and the ThreadX clock tracks
- * real time regardless of what the display is doing.
+ * and works out how many whole TX_TIMER_TICKS_PER_SECOND periods have elapsed.
+ * That number is the clock.  It is also what it would like to deliver, but the
+ * two are separate: TX_AMIGA_TIMER_MAX_CATCHUP and TX_AMIGA_TIMER_BUDGET_MS bound
+ * how many _tx_timer_interrupt() calls one wakeup may make, and whatever they
+ * refuse is added to _tx_timer_system_clock directly instead.  So tx_time_get()
+ * is the E-Clock's answer whatever the display or the machine is doing, and only
+ * the timer wheel -- which must be walked a slot at a time or timers in the
+ * skipped slots go unseen for a whole revolution -- falls behind.  How far
+ * behind is tx_amiga_tick_skew.
  *
  * VBlank is 50 Hz PAL and 60 Hz NTSC, so a stack that counts frames (as the
  * AmiTCP lineage does, with a hardcoded 50) runs 20% fast on an NTSC machine.
@@ -581,14 +586,16 @@ ULONG                eclock_per_ms;
 ULONG                eclock_per_tick;
 ULONG                eclock_rem;
 ULONG                frac;
+ULONG                carry;
 ULONG                last_lo;
 ULONG                start_lo;
+ULONG                backlog;
+ULONG                measured;
 ULONG                delta;
 ULONG                service;
 ULONG                last_service;
 ULONG                rate_chz;
 ULONG                unit;
-ULONG                ticks;
 ULONG                i;
 UINT                 armed;
 
@@ -834,6 +841,7 @@ UINT                 armed;
     /* ---- the tick ------------------------------------------------------- */
 
     frac         =  0UL;
+    backlog      =  0UL;
     last_service =  0UL;
     ReadEClock(&now);
     last_lo  =  now.ev_lo;
@@ -883,10 +891,10 @@ UINT                 armed;
         _tx_amiga_tick.tx_amiga_tick_uptime_ms =
             ((ULONG) (now.ev_lo - start_lo)) / eclock_per_ms;
 
-        delta =  (ULONG) (now.ev_lo - last_lo);   /* correct across one wrap */
-        ticks =  delta / eclock_per_tick;
+        delta    =  (ULONG) (now.ev_lo - last_lo); /* correct across one wrap */
+        measured =  delta / eclock_per_tick;
 
-        if (ticks == 0UL)
+        if (measured == 0UL)
         {
 
             /* Woke early.  A 60 Hz NTSC VBlank against a 50 Hz tick does this
@@ -896,15 +904,64 @@ UINT                 armed;
         else
         {
 
-            if (ticks > (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP)
+            /*
+             * Advance the phase by exactly `measured` periods with the
+             * remainder carried, so the long-run rate is exactly
+             * TX_TIMER_TICKS_PER_SECOND whatever the E-Clock frequency.  Always
+             * by the full `measured`, whatever is delivered below: the anchor is
+             * the clock's, and what the wheel still owes is `backlog`.  Holding
+             * the anchor back to re-measure undelivered periods would be a
+             * second way of saying the same thing, and the two would drift.
+             *
+             * The carry is held over rather than applied when it would put the
+             * anchor past `now`, which the next wakeup would read as a wrap and
+             * a 100 minute stall.  measured * eclock_per_tick <= delta by the
+             * division, so only the carry can overshoot, and only when the
+             * division came out exact.
+             */
+            frac  +=  measured * eclock_rem;
+            carry  =  frac / (ULONG) TX_TIMER_TICKS_PER_SECOND;
+            if (((measured * eclock_per_tick) + carry) > delta)
+            {
+                carry =  0UL;
+            }
+            else
+            {
+                frac -=  carry * (ULONG) TX_TIMER_TICKS_PER_SECOND;
+            }
+            last_lo +=  (measured * eclock_per_tick) + carry;
+
+            /* The clock, and the only thing that sets it.  Real elapsed time,
+               whatever the wheel below is or is not given.  */
+            _tx_amiga_timer_clock_advance(measured);
+
+            /* What the wheel owes: this wakeup's periods on top of anything a
+               previous wakeup ran out of budget for.  */
+            backlog +=  measured;
+
+            /* Sampled here because this is the moment the wheel is furthest
+               behind the clock -- the whole backlog, plus everything dropped
+               for good earlier.  That is the worst lateness a timer sitting on
+               the wheel can have seen.  */
+            if ((backlog + _tx_amiga_tick.tx_amiga_tick_lost) >
+                _tx_amiga_tick.tx_amiga_tick_skew_peak)
+            {
+                _tx_amiga_tick.tx_amiga_tick_skew_peak =
+                    backlog + _tx_amiga_tick.tx_amiga_tick_lost;
+            }
+
+            if (backlog > (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP)
             {
 
-                /* Something held the machine for longer than the cap allows.
-                   Resync rather than pay the arrears off over the following
-                   seconds: a burst of thousands of timer callbacks under the
-                   core lock is worse for the stack than the lost time.  */
+                /* The ceiling on the backlog, and the only place a tick is
+                   thrown away.  The budget below defers rather than drops, so
+                   without this a machine that never catches up would grow an
+                   unbounded backlog and the wheel would fall further behind
+                   forever.  This is also the only path that skips a wheel slot,
+                   which hides the timers in it for a revolution -- so it is
+                   deliberately the pathological case and not the ordinary one. */
                 _tx_amiga_tick.tx_amiga_tick_lost +=
-                    ticks - (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP;
+                    backlog - (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP;
                 _tx_amiga_tick.tx_amiga_tick_clipped++;
 
                 /* Kept for every stall, not just the three that get logged. */
@@ -927,46 +984,38 @@ UINT                 armed;
                        in the ordinary hundreds of microseconds means somebody
                        else held the machine and the tick was not dispatched. */
                     ami_log(AMI_LOG_WARN,
-                            "tick: stalled %ld ms, dropping %ld of %ld ticks "
+                            "tick: stalled %ld ms, wheel skips %ld of %ld ticks "
                             "(cap %ld, previous service %ld us)",
                             (LONG) (delta / eclock_per_ms),
-                            (LONG) (ticks - (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP),
-                            (LONG) ticks, (LONG) TX_AMIGA_TIMER_MAX_CATCHUP,
+                            (LONG) (backlog - (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP),
+                            (LONG) backlog, (LONG) TX_AMIGA_TIMER_MAX_CATCHUP,
                             (LONG) ((last_service * 1000UL) / eclock_per_ms));
                 }
 
-                ticks   =  (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP;
-                last_lo =  now.ev_lo;
-                frac    =  0UL;
+                backlog =  (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP;
             }
-            else
+            else if (backlog > 1UL)
             {
-
-                /* Advance the phase by exactly `ticks` periods with the
-                   remainder carried, so the long-run delivered rate is exactly
-                   TX_TIMER_TICKS_PER_SECOND whatever the E-Clock frequency.  */
-                frac    +=  ticks * eclock_rem;
-                last_lo +=  (ticks * eclock_per_tick) +
-                            (frac / (ULONG) TX_TIMER_TICKS_PER_SECOND);
-                frac    %=  (ULONG) TX_TIMER_TICKS_PER_SECOND;
-
-                if (ticks > 1UL)
-                {
-                    _tx_amiga_tick.tx_amiga_tick_catchups++;
-                }
+                _tx_amiga_tick.tx_amiga_tick_catchups++;
             }
 
-            for (i = 0UL; i < ticks; i++)
+            for (i = 0UL; i < backlog; i++)
             {
 
-                /* Half the period is the tick's, at most.  _tx_thread_context_save()
-                   holds Forbid() for the whole of _tx_timer_interrupt(), so every
-                   tick delivered here is time no other task in the machine runs.
-                   A catch-up burst on a machine where each tick is expensive can
-                   hold it for the whole period and then some, which starves the
-                   rest of the system for as long as the arrears last.  Checked
-                   between ticks rather than inside one: a tick is not
-                   interruptible, so this bounds the burst, not the tick.  */
+                /* Half the period is the tick's, at most.  Every tick delivered
+                   here runs under the Forbid() _tx_thread_context_save() takes,
+                   so it is time no other task in the machine runs; a long
+                   catch-up would starve everything else for its whole length.
+                   Checked between ticks rather than inside one, because a tick
+                   is not interruptible: this bounds the burst, not the tick.
+
+                   The rest stays in `backlog` and is delivered at a later
+                   wakeup.  Dropping it would skip wheel slots, and a slot not
+                   walked hides its timers for a revolution.  Breaking out is the
+                   yield: the request was re-armed before any of this ran, so the
+                   Wait() at the top of the loop parks until the next wakeup
+                   without consuming a signal, and the Forbid() is
+                   _tx_thread_context_restore()'s to release and it already has. */
                 if (i > 0UL)
                 {
                     struct EClockVal budget_now;
@@ -976,8 +1025,7 @@ UINT                 armed;
                         (eclock_per_ms * (ULONG) TX_AMIGA_TIMER_BUDGET_MS))
                     {
                         _tx_amiga_tick.tx_amiga_tick_over_budget++;
-                        _tx_amiga_tick.tx_amiga_tick_lost +=  ticks - i;
-                        ticks =  i;
+                        _tx_amiga_tick.tx_amiga_tick_deferred +=  backlog - i;
                         break;
                     }
                 }
@@ -987,7 +1035,11 @@ UINT                 armed;
                 _tx_timer_interrupt();
                 _tx_thread_context_restore();
             }
-            _tx_amiga_tick.tx_amiga_tick_delivered +=  ticks;
+
+            backlog -=  i;
+            _tx_amiga_tick.tx_amiga_tick_delivered +=  i;
+            _tx_amiga_tick.tx_amiga_tick_skew =
+                backlog + _tx_amiga_tick.tx_amiga_tick_lost;
 
             /* Unconditionally poke the scheduler.  Only the idle case needs it,
                but one Signal() per tick is cheap insurance against a lost
@@ -1014,9 +1066,12 @@ UINT                 armed;
 
     if (_tx_amiga_tick.tx_amiga_tick_clipped != 0UL)
     {
-        ami_log(AMI_LOG_WARN, "tick: %ld stalls clipped, %ld ticks dropped in total",
+        ami_log(AMI_LOG_WARN,
+                "tick: %ld stalls clipped, wheel %ld ticks behind the clock "
+                "(worst %ld)",
                 (LONG) _tx_amiga_tick.tx_amiga_tick_clipped,
-                (LONG) _tx_amiga_tick.tx_amiga_tick_lost);
+                (LONG) _tx_amiga_tick.tx_amiga_tick_skew,
+                (LONG) _tx_amiga_tick.tx_amiga_tick_skew_peak);
     }
     ami_log(AMI_LOG_INFO,
             "tick: %ld wakeups -> %ld ticks in %ld ms (%ld empty, %ld caught up)",

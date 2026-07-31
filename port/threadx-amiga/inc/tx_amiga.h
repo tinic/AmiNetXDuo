@@ -152,7 +152,10 @@ ULONG   tx_amiga_zombie_tasks_live(VOID);
  *     numbers come from the same E-Clock, so this is the drift measurement.
  *   * wakeups / (wall seconds) is what the tick costs the machine.
  *   * clipped > 0 means something stalled the tick task for longer than
- *     TX_AMIGA_TIMER_MAX_CATCHUP ticks and the arrears were dropped.
+ *     TX_AMIGA_TIMER_MAX_CATCHUP ticks and the wheel was not given the arrears.
+ *     tx_time_get() still has them: the ThreadX clock comes from the E-Clock and
+ *     not from the number of ticks delivered, so a dropped tick costs timer
+ *     lateness and not timekeeping.  skew is how much lateness.
  *
  * Every field is a snapshot; the counters are cumulative from kernel start and
  * are allowed to wrap.  Safe to call from any Task.
@@ -178,9 +181,20 @@ typedef struct TX_AMIGA_TICK_STATS_STRUCT
        hundreds of microseconds, means something else held the machine. */
     ULONG   tx_amiga_tick_worst_stall_ms;
     ULONG   tx_amiga_tick_worst_service_us;
-    /* Catch-up bursts abandoned at TX_AMIGA_TIMER_BUDGET_MS.  Non-zero means
-       the machine was being held long enough for the cap to matter. */
+    /* Catch-up bursts that hit TX_AMIGA_TIMER_BUDGET_MS and gave the machine
+       back, and the ticks they put off to a later wakeup.  Deferred, not lost:
+       the wheel gets every one of them, late.  Non-zero means the tick was
+       being asked for more than half of its own period. */
     ULONG   tx_amiga_tick_over_budget;
+    ULONG   tx_amiga_tick_deferred;
+    /* How far behind real time the timer wheel is, in ticks: what it has yet to
+       be given, plus everything the clip above took off it for good.  The clock
+       is not in this -- it comes from the E-Clock and is true regardless -- so
+       this is a measure of how late timers are running and of nothing else.
+       The peak is sampled before a backlog is worked off, so it moves on a
+       machine where nothing was ever clipped or lost. */
+    ULONG   tx_amiga_tick_skew;
+    ULONG   tx_amiga_tick_skew_peak;
 } TX_AMIGA_TICK_STATS;
 
 VOID    tx_amiga_tick_stats(TX_AMIGA_TICK_STATS *stats);

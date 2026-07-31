@@ -118,6 +118,12 @@ static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
  * A worst stall in the hundreds of milliseconds beside a service cost in the
  * hundreds of microseconds says the tick task was not dispatched, rather than
  * that it was slow. Anything but zero on the last line is a defect.
+ *
+ * The skew line is the timers, not the clock: tx_time_get() comes from the
+ * E-Clock, so a tick the wheel never got made timers late and did not lose any
+ * time. The peak counts lateness that was subsequently made good, so it moves
+ * on a machine where nothing was ever clipped. Deferred ticks reach the wheel
+ * late; lost ones never reach it.
  */
 static VOID show_scheduler(const ToolStats *st)
 {
@@ -128,6 +134,10 @@ static VOID show_scheduler(const ToolStats *st)
     tool_printf("\t%lu ticks in %lu ms, %lu clipped, %lu lost\n",
                 st->tick_ticks, st->tick_uptime_ms,
                 st->tick_clipped, st->tick_lost);
+    tool_printf("\t%lu over budget, %lu ticks deferred\n",
+                st->tick_over_budget, st->tick_deferred);
+    tool_printf("\ttimer wheel %lu ticks late, worst %lu\n",
+                st->tick_skew, st->tick_skew_peak);
     tool_printf("\tworst stall %lu ms, service %lu us at the time\n",
                 st->tick_worst_stall_ms, st->tick_worst_service_us);
     tool_printf("\tbaton: %lu transitions, %lu at once at the peak\n",

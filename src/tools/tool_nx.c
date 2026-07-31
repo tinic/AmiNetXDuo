@@ -406,6 +406,10 @@ LONG tool_stats(ToolStats *out)
         out->tick_uptime_ms          = h->nsl_TickUptimeMs;
         out->tick_worst_stall_ms     = h->nsl_TickWorstStallMs;
         out->tick_worst_service_us   = h->nsl_TickWorstServiceUs;
+        out->tick_over_budget        = h->nsl_TickOverBudget;
+        out->tick_deferred           = h->nsl_TickDeferred;
+        out->tick_skew               = h->nsl_TickSkew;
+        out->tick_skew_peak          = h->nsl_TickSkewPeak;
         out->baton_live              = h->nsl_BatonLive;
         out->baton_live_max          = h->nsl_BatonLiveMax;
         out->baton_full              = h->nsl_BatonFull;
@@ -476,6 +480,10 @@ BOOL tool_health_mark(ToolStats *out)
     out->tick_uptime_ms        = tick.tx_amiga_tick_uptime_ms;
     out->tick_worst_stall_ms   = tick.tx_amiga_tick_worst_stall_ms;
     out->tick_worst_service_us = tick.tx_amiga_tick_worst_service_us;
+    out->tick_over_budget      = tick.tx_amiga_tick_over_budget;
+    out->tick_deferred         = tick.tx_amiga_tick_deferred;
+    out->tick_skew             = tick.tx_amiga_tick_skew;
+    out->tick_skew_peak        = tick.tx_amiga_tick_skew_peak;
     out->baton_live            = baton.bs_Live;
     out->baton_live_max        = baton.bs_LiveMax;
     out->baton_full            = baton.bs_Full;
