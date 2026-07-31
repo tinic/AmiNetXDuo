@@ -127,6 +127,36 @@ static LONG ami_ns_capture_inject(APTR cookie, UWORD ether_type,
 
 /* ------------------------------------------------------------- lifecycle */
 
+/*
+ * The address behind a capture cookie, for AMI_BPF_SIOCGIFADDR. Read from the
+ * live NX_INTERFACE every time it is asked for, so a DHCP lease that lands
+ * between two calls is reflected in the second.
+ */
+static ULONG ami_ns_capture_address(APTR cookie)
+{
+    AmiNetStack *ns = ami_netstack_raw();
+    UWORD        i;
+
+    if (cookie == (APTR)&ami_ns_lo_cookie)
+        return 0x7F000001UL;
+
+    if (ns == NULL || !ns->ns_IpCreated)
+        return 0;
+
+    for (i = 0; i < ns->ns_IfaceCount; i++)
+    {
+        if ((APTR)ns->ns_Iface[i] != cookie)
+            continue;
+
+        if (ns->ns_Ip.nx_ip_interface[i].nx_interface_valid == 0)
+            return 0;
+
+        return ns->ns_Ip.nx_ip_interface[i].nx_interface_ip_address;
+    }
+
+    return 0;
+}
+
 VOID ami_netstack_capture_start(AmiNetStack *ns)
 {
     UWORD i;
@@ -155,6 +185,8 @@ VOID ami_netstack_capture_start(AmiNetStack *ns)
     {
         AMI_WARN("netstack: bpf could not register " AMI_NS_LO_NAME);
     }
+
+    ami_bpf_set_address_hook(ami_ns_capture_address);
 
     ns->ns_Ip.nx_ip_packet_filter_extended = ami_ns_capture_filter;
 
@@ -205,6 +237,9 @@ VOID ami_netstack_capture_stop(AmiNetStack *ns)
      */
     if (ns->ns_IpCreated)
         ns->ns_Ip.nx_ip_packet_filter_extended = NX_NULL;
+
+    /* With the filter, and for the same reason: the hook reads ns_Ip. */
+    ami_bpf_set_address_hook(NULL);
 
     ami_bpf_detach_interface((APTR)&ami_ns_lo_cookie);
 

@@ -67,6 +67,21 @@ AmiBpfIf *ami_bpf_iface_by_name(const char *name)
     return NULL;
 }
 
+static AmiBpfAddrFn ami_bpf_addr_hook;
+
+VOID ami_bpf_set_address_hook(AmiBpfAddrFn fn)
+{
+    ami_bpf_addr_hook = fn;
+}
+
+ULONG ami_bpf_iface_address(const AmiBpfIf *ifp)
+{
+    if (ifp == NULL || ami_bpf_addr_hook == NULL || ifp->cookie == NULL)
+        return 0;
+
+    return ami_bpf_addr_hook(ifp->cookie);
+}
+
 LONG ami_bpf_attach_interface(const char *name, APTR cookie, ULONG dlt,
                               ULONG mtu, AmiBpfInjectFn inject)
 {

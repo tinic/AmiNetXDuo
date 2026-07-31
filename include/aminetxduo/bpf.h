@@ -157,6 +157,7 @@ struct bpf_version {
 #define BIOCIMMEDIATE       _IOC(IOC_IN,    'B', 112, 4)
 #define BIOCVERSION         _IOC(IOC_OUT,   'B', 113, 4)
 
+
 struct ami_bpf_timeval {
     ULONG tv_sec;
     ULONG tv_usec;
@@ -281,6 +282,15 @@ struct bpf_insn {
  * is a 0/1 flag and not a count.
  */
 #define AMI_BPF_FIONREAD    _IOC(IOC_OUT, 'f', 127, 4)
+
+/*
+ * libpcap asks a bpf handle for the interface's address, not a socket. Out
+ * here with FIONREAD rather than among the BIOC* codes: those are inside the
+ * host-test replica, and this one is needed by both builds. The encoding is
+ * 4.4BSD's _IOWR('i', 33, struct ifreq), which is what the real <sys/sockio.h>
+ * gives too, so the two agree in the bits AMI_BPF_CMD() keeps.
+ */
+#define AMI_BPF_SIOCGIFADDR _IOC(IOC_INOUT, 'i', 33, AMI_BPF_IFREQ_SIZE)
 
 /* --------------------------------------------------- pinned record layout */
 
@@ -562,6 +572,16 @@ typedef LONG (*AmiBpfInjectFn)(APTR cookie, UWORD ether_type,
 
 LONG ami_bpf_attach_interface(const char *name, APTR cookie, ULONG dlt,
                               ULONG mtu, AmiBpfInjectFn inject);
+
+/*
+ * What address the interface behind `cookie` has right now, host order, or 0
+ * if it has none. Asked rather than stored: a DHCP lease changes it, and a
+ * copy taken at attach would be stale the moment it did -- and every future
+ * path that moves an address would have to remember to update it.
+ */
+typedef ULONG (*AmiBpfAddrFn)(APTR cookie);
+
+VOID ami_bpf_set_address_hook(AmiBpfAddrFn fn);
 
 /* Unbinds any channel still pointing at it; the channels stay open. */
 VOID ami_bpf_detach_interface(APTR cookie);

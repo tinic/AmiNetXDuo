@@ -910,6 +910,36 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
         return 0;
     }
 
+    case AMI_BPF_CMD(AMI_BPF_SIOCGIFADDR):
+    {
+        /*
+         * struct ifreq: the name occupies the first IFNAMSIZ bytes and a
+         * sockaddr_in follows, which is why the request is 32 bytes. Written
+         * by hand rather than through a struct: this layer has no sockaddr,
+         * and the socket path's own SIOCGIFADDR fills the same 16 bytes.
+         */
+        UBYTE *sa = (UBYTE *)buffer + AMI_BPF_IFNAMSIZ;
+        ULONG  addr;
+
+        if (buffer == NULL)
+            return AMI_BPF_EINVAL;
+        if (ch->iface == NULL)
+            return AMI_BPF_EINVAL;
+
+        addr = ami_bpf_iface_address(ch->iface);
+
+        sa[0] = 16;                         /* sin_len                      */
+        sa[1] = 2;                          /* sin_family = AF_INET         */
+        sa[2] = 0; sa[3] = 0;               /* sin_port                     */
+        sa[4] = (UBYTE)(addr >> 24);        /* sin_addr, network order      */
+        sa[5] = (UBYTE)(addr >> 16);
+        sa[6] = (UBYTE)(addr >> 8);
+        sa[7] = (UBYTE)addr;
+        sa[8] = 0; sa[9] = 0; sa[10] = 0; sa[11] = 0;   /* sin_zero         */
+        sa[12] = 0; sa[13] = 0; sa[14] = 0; sa[15] = 0;
+        return 0;
+    }
+
     case AMI_BPF_CMD(BIOCSETIF):
         if (buffer == NULL)
             return AMI_BPF_EINVAL;
