@@ -1507,12 +1507,16 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
 
         case BSD_BIND_SPECIFIC:
             /*
-             * Ours, but not the only one, so the socket would receive traffic
-             * for the others too. Refused rather than accepted-and-ignored:
-             * that is the whole point of the check. Lifting this is the
-             * enforcement work in docs/BACKLOG.md, not a wider accept here.
+             * Ours, but not the only one, so the socket would see traffic for
+             * the others unless something stops it. For TCP something does:
+             * bsd_bind_accepts() checks each completed connection against this
+             * address and resets the ones that do not match. UDP has no such
+             * filter yet, so it is still refused rather than accepted and
+             * ignored -- see docs/BACKLOG.md.
              */
-            return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
+            if ((sock->as_Flags & ASF_TCP) == 0)
+                return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
+            break;
 
         case BSD_BIND_FOREIGN:
         default:
@@ -1904,6 +1908,69 @@ UINT bsd_connect_once(VOID *arg, ULONG wait)
     return NX_NO_PACKET;            /* still connecting: keep slicing */
 }
 
+/*
+ * Does a completed connection belong to the address the listener was bound to?
+ *
+ * Enforced here for the same reason IPV6_V6ONLY is, a few lines below: NetX
+ * registers a listen against a port, not an address, so a socket bound to
+ * 127.0.0.1 has a SYN from the LAN answered down in the TCP state machine and
+ * the handshake is finished by the time anything here can object. Refusing
+ * late still refuses -- the peer sees a connection accepted and immediately
+ * reset -- and is the difference between `nc -l 127.0.0.1` meaning what it
+ * says and quietly serving the whole network.
+ */
+static BOOL bsd_bind_accepts(const AmiSocket *listener, NX_TCP_SOCKET *conn)
+{
+    const NX_INTERFACE *nxif;
+    NX_IP              *ip = netstack_ip();
+
+    /* The wildcard takes everything, which is what it is for. */
+    if (bsd_addr_is_unspecified(&listener->as_LocalAddr))
+        return TRUE;
+
+    nxif = conn->nx_tcp_socket_connect_interface;
+    if (nxif == NX_NULL || ip == NULL)
+        return FALSE;
+
+    /*
+     * Loopback by identity rather than by address: 127.0.0.0/8 is a whole /8
+     * and NetX gives the loopback interface one address out of it, so
+     * comparing addresses would refuse a bind to 127.0.0.2 that arrived on the
+     * loopback it asked for.
+     */
+    if (bsd_addr_is_loopback(&listener->as_LocalAddr))
+        return (nxif == &ip->nx_ip_interface[NX_LOOPBACK_INTERFACE])
+                   ? TRUE : FALSE;
+
+#ifdef AMINETXDUO_IPV6
+    if (listener->as_LocalAddr.nxd_ip_version == NX_IP_VERSION_V6)
+    {
+        UINT i;
+
+        /* Whichever of this interface's addresses the bind named. */
+        for (i = 0; i < (UINT)NX_MAX_IPV6_ADDRESSES; i++)
+        {
+            const NXD_IPV6_ADDRESS *a = &ip->nx_ipv6_address[i];
+
+            if (a->nxd_ipv6_address_valid == 0 ||
+                a->nxd_ipv6_address_attached != nxif)
+                continue;
+
+            if (a->nxd_ipv6_address[0] == listener->as_LocalAddr.nxd_ip_address.v6[0] &&
+                a->nxd_ipv6_address[1] == listener->as_LocalAddr.nxd_ip_address.v6[1] &&
+                a->nxd_ipv6_address[2] == listener->as_LocalAddr.nxd_ip_address.v6[2] &&
+                a->nxd_ipv6_address[3] == listener->as_LocalAddr.nxd_ip_address.v6[3])
+                return TRUE;
+        }
+
+        return FALSE;
+    }
+#endif
+
+    return (nxif->nx_interface_ip_address ==
+            listener->as_LocalAddr.nxd_ip_address.v4) ? TRUE : FALSE;
+}
+
 LONG bsd_accept(register LONG sock_fd          __asm("d0"),
                 register struct sockaddr *addr __asm("a0"),
                 register socklen_t *addrlen    __asm("a1"),
@@ -2000,6 +2067,26 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
      * a sockaddr full of zeroes.
      */
     nxd_tcp_socket_peer_info_get(&incoming->as_Nx.tcp, &peer, &peer_port);
+
+    /*
+     * The bound address, before V6ONLY: a listener that named one is refusing
+     * on narrower grounds, and the reason it gives should be the narrower one.
+     */
+    if (!bsd_bind_accepts(sock, &incoming->as_Nx.tcp))
+    {
+        AMI_DEBUG("bsdsocket: listener bound elsewhere refused a peer on port %ld",
+                  (long)sock->as_ListenPort);
+
+        nx_tcp_socket_disconnect(&incoming->as_Nx.tcp, NX_NO_WAIT);
+        nx_tcp_server_socket_unaccept(&incoming->as_Nx.tcp);
+        nx_tcp_server_socket_relisten(ip, sock->as_ListenPort,
+                                      &incoming->as_Nx.tcp);
+        (VOID)nx_tcp_server_socket_accept(&incoming->as_Nx.tcp, NX_NO_WAIT);
+
+        bsd_nx_leave(SocketBase);
+
+        return bsd_fail(SocketBase, AMI_EWOULDBLOCK);
+    }
 
 #ifdef AMINETXDUO_IPV6
     /*

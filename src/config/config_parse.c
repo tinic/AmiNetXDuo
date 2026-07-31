@@ -361,6 +361,36 @@ static BOOL lookup_ip6type(const char *value, AmiIp6Type *out)
 
 #endif /* AMINETXDUO_IPV6 */
 
+
+#ifdef AMINETXDUO_IPV6
+/*
+ * RFC 4007 11's "%zone" in an interface file.
+ *
+ * The file already names the interface -- DEVS:NetInterfaces/eth0 -- so a zone
+ * on an address in it is either the same interface again, which is redundant
+ * and harmless, or a different one, which contradicts the file it is written
+ * in. Nothing is stored: there is no zone to remember that the file name does
+ * not already say.
+ *
+ * TRUE to use the address, FALSE to reject the line.
+ */
+static BOOL cfg_zone_ok(const AmiIfConfig *out, const char *key,
+                        const char *zone, const char *value)
+{
+    if (zone[0] == '\0')
+        return TRUE;
+
+    if (ami_cfg_stricmp(zone, out->name) == 0)
+        return TRUE;
+
+    AMI_WARN("config: %s: %s '%s' names interface '%s', not this one",
+             out->name, key, value, zone);
+
+    return FALSE;
+}
+#endif
+
+
 static BOOL lookup_iptype(const char *value, AmiIpType *out)
 {
     const struct IpTypeName *n;
@@ -615,22 +645,37 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                  * An ADDRESS6 with no CONFIGURE6 implies STATIC, the same way
                  * a Roadshow ADDRESS implies a static IPv4 interface.
                  */
-                if (!ami_config_parse_ip6(value, out->address6, &out->prefix6))
+            {
+                char zone[AMI_CFG_IP6_ZONE_LEN];
+
+                if (!ami_config_parse_ip6_zone(value, out->address6,
+                                               &out->prefix6, zone,
+                                               sizeof(zone)))
                 {
                     AMI_WARN("config: %s: bad ADDRESS6 '%s'", out->name, value);
+                }
+                else if (!cfg_zone_ok(out, "ADDRESS6", zone, value))
+                {
+                    /* Warned about above; the address is not taken. */
                 }
                 else if (!have_configure6)
                 {
                     out->ip6type = AMI_IP6TYPE_STATIC;
                 }
                 break;
+            }
 
             case IF_KEY_GATEWAY6:
-                if (ami_config_parse_ip6(value, out->gateway6, NULL))
-                    out->have_gateway6 = TRUE;
-                else
+            {
+                char zone[AMI_CFG_IP6_ZONE_LEN];
+
+                if (!ami_config_parse_ip6_zone(value, out->gateway6, NULL,
+                                               zone, sizeof(zone)))
                     AMI_WARN("config: %s: bad GATEWAY6 '%s'", out->name, value);
+                else if (cfg_zone_ok(out, "GATEWAY6", zone, value))
+                    out->have_gateway6 = TRUE;
                 break;
+            }
 
             case IF_KEY_CONFIGURE6:
             {
