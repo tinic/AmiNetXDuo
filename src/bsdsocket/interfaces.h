@@ -27,6 +27,12 @@
 /* The physical slot called `name`, or -1. */
 LONG bsd_if_index_of(NX_IP *ip, const char *name);
 
+/* The name of interface `index` counting from 1, as RFC 3493 and rtm_index do.
+   Sets no errno: display paths call it, and a caller checking errno after a
+   call that succeeded must not find it moved. FALSE and out[0]=0 if there is
+   no such interface. */
+BOOL bsd_if_name_by_index(NX_IP *ip, ULONG index, char *out, ULONG outlen);
+
 /*
  * SIOCGIFCONF and the SIOCGIF* family, for options.c's IoctlSocket().
  * Implemented in interfaces.c because answering them needs the naming rule and

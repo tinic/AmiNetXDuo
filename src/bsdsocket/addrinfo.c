@@ -40,6 +40,7 @@
 #include "bsdsocket_vectors.h"
 
 #include "aminetxduo/config.h"
+#include "interfaces.h"
 
 #include <proto/exec.h>
 
@@ -521,7 +522,8 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
                      register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     NXD_ADDRESS addr;
-    UINT        port = 0;
+    UINT        port  = 0;
+    ULONG       scope = 0;
     LONG        family;
 
     if (sa == NULL)
@@ -539,7 +541,7 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
         return EAI_FAMILY;
 
     if (bsd_sockaddr_get(SocketBase, sa, (socklen_t)salen, &addr, &port,
-                         NULL) != 0)
+                         &scope) != 0)
         return EAI_FAMILY;
 
     /* ---- the host half --------------------------------------------------- */
@@ -576,8 +578,29 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
 #ifdef AMINETXDUO_IPV6
             if (addr.nxd_ip_version == NX_IP_VERSION_V6)
             {
-                ami_config_format_ip6(addr.nxd_ip_address.v6, name,
-                                      sizeof(name));
+                char zone[AMI_CFG_IP6_ZONE_LEN];
+
+                /*
+                 * RFC 4007 11.1: the "%zone" notation is for addresses of
+                 * non-global scope. A scope_id sitting on a global address
+                 * names nothing, so it is not printed even when a caller has
+                 * set one -- printing it would produce a string that parses
+                 * back to a destination the caller never gave.
+                 *
+                 * bsd_if_name_by_index() rather than the if_indextoname()
+                 * vector: that one reports ENXIO, and getnameinfo() returning
+                 * 0 must not leave errno moved.
+                 */
+                zone[0] = '\0';
+                if (scope != 0 &&
+                    (addr.nxd_ip_address.v6[0] & 0xFFC00000UL) == 0xFE800000UL)
+                {
+                    (VOID)bsd_if_name_by_index(netstack_ip(), scope, zone,
+                                               sizeof(zone));
+                }
+
+                ami_config_format_ip6_zone(addr.nxd_ip_address.v6, zone, name,
+                                           sizeof(name));
             }
             else
 #endif

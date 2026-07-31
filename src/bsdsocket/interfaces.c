@@ -266,6 +266,18 @@ static BOOL bsd_name_equal(const char *a, const char *b)
     }
 }
 
+BOOL bsd_if_name_by_index(NX_IP *ip, ULONG index, char *out, ULONG outlen)
+{
+    if (outlen > 0)
+        out[0] = '\0';
+
+    if (ip == NULL || index == 0UL ||
+        index > (ULONG)NX_MAX_PHYSICAL_INTERFACES)
+        return FALSE;
+
+    return bsd_if_name_of(ip, (UINT)(index - 1UL), out, outlen);
+}
+
 /* The physical slot called `name`, or -1. Published in interfaces.h because
    addralloc.c asks the same question under the same naming rule. */
 LONG bsd_if_index_of(NX_IP *ip, const char *name)
@@ -1688,14 +1700,7 @@ char *bsd_if_indextoname(register ULONG ifindex __asm("d0"),
         return NULL;
     }
 
-    /* 0 is not an interface, and the ceiling keeps the -1 below in range. */
-    if (ifindex == 0UL || ifindex > (ULONG)NX_MAX_PHYSICAL_INTERFACES)
-    {
-        (VOID)bsd_fail(SocketBase, AMI_ENXIO);
-        return NULL;
-    }
-
-    if (!bsd_if_name_of(ip, (UINT)(ifindex - 1UL), ifname, (ULONG)IF_NAMESIZE))
+    if (!bsd_if_name_by_index(ip, ifindex, ifname, (ULONG)IF_NAMESIZE))
     {
         (VOID)bsd_fail(SocketBase, AMI_ENXIO);
         return NULL;
