@@ -591,6 +591,9 @@ ULONG                advance;
 ULONG                last_lo;
 ULONG                up_lo;      /* last reading the uptime was advanced from */
 ULONG                up_rem;     /* E-Clock ticks not yet worth a millisecond */
+ULONG                up_gain;
+ULONG                up_carry;   /* thousandths of a tick */
+ULONG                up_num;
 ULONG                backlog;
 ULONG                measured;
 ULONG                delta;
@@ -847,8 +850,9 @@ UINT                 armed;
     last_service =  0UL;
     ReadEClock(&now);
     last_lo =  now.ev_lo;
-    up_lo   =  now.ev_lo;
-    up_rem  =  0UL;
+    up_lo    =  now.ev_lo;
+    up_rem   =  0UL;
+    up_carry =  0UL;
 
     if (armed == TX_FALSE)
     {
@@ -894,11 +898,21 @@ UINT                 armed;
 
         /* Accumulated, because ev_lo wraps every ~100 minutes and a machine up
            longer than that would otherwise report a few minutes.  The tick runs
-           50 times a second, so it never misses a wrap.  */
+           50 times a second, so it never misses a wrap.  Divided by the rate,
+           not by a ticks-per-millisecond: 709379/1000 truncates to 709 and runs
+           0.05% fast, which reads as drift against an honest clock.  */
         up_rem  +=  (ULONG) (now.ev_lo - up_lo);
         up_lo    =  now.ev_lo;
-        _tx_amiga_tick.tx_amiga_tick_uptime_ms += up_rem / eclock_per_ms;
-        up_rem  %=  eclock_per_ms;
+        if (up_rem >= eclock_hz)
+        {
+            up_rem -=  eclock_hz;
+            _tx_amiga_tick.tx_amiga_tick_uptime_ms +=  1000UL;
+        }
+        up_gain  =  (up_rem * 1000UL) / eclock_hz;
+        _tx_amiga_tick.tx_amiga_tick_uptime_ms +=  up_gain;
+        up_num   =  up_gain * eclock_hz + up_carry;
+        up_rem  -=  up_num / 1000UL;
+        up_carry =  up_num % 1000UL;
 
         delta    =  (ULONG) (now.ev_lo - last_lo); /* correct across one wrap */
         measured =  delta / eclock_per_tick;

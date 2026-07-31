@@ -137,11 +137,12 @@ struct Device             *TimerBase;
 
 static struct timerequest  ami_timer_req;
 static struct MsgPort      ami_timer_port;
-static ULONG               ami_eclock_per_ms;
+static ULONG               ami_eclock_hz;
 /* Running total and the reading it was last advanced from; ami_millis(). */
 static struct EClockVal    ami_eclock_last;
 static ULONG               ami_eclock_ms;
 static ULONG               ami_eclock_rem;
+static ULONG               ami_eclock_carry;   /* thousandths of a tick */
 
 static BOOL ami_timer_init(VOID)
 {
@@ -178,12 +179,11 @@ static BOOL ami_timer_init(VOID)
      * ~709 ticks/ms PAL, ~716 NTSC, a ~0.1% rounding error.
      */
     rate = ReadEClock(&ev);
-    ami_eclock_per_ms = rate / 1000UL;
-    if (ami_eclock_per_ms == 0)
-        ami_eclock_per_ms = 1;
+    ami_eclock_hz = (rate != 0UL) ? rate : 709379UL;
     ami_eclock_last = ev;
     ami_eclock_ms   = 0UL;
     ami_eclock_rem  = 0UL;
+    ami_eclock_carry = 0UL;
 
     return TRUE;
 }
@@ -192,6 +192,8 @@ ULONG ami_millis(VOID)
 {
     struct EClockVal ev;
     ULONG            delta;
+    ULONG            gain;
+    ULONG            num;
     ULONG            ms;
 
     if (!ami_timer_init())
@@ -202,8 +204,11 @@ ULONG ami_millis(VOID)
      * ~710 kHz and wraps every ~100 minutes, so subtracting a base captured at
      * init is right once and wrong afterwards -- a machine up two hours would
      * report a few minutes.  Each call adds the interval since the last one,
-     * which is correct across a wrap, and carries the sub-millisecond
-     * remainder so the rounding does not accumulate either.
+     * which is correct across a wrap, and carries the remainder.
+     *
+     * Divided by the rate rather than by a ticks-per-millisecond, because
+     * 709379/1000 truncates to 709 and runs the clock 0.05% fast -- 46 seconds
+     * a day, which shows up as drift against anything honest.
      *
      * The one thing it cannot survive is two calls more than ~100 minutes
      * apart, which loses a whole wrap.  Anything watching a clock calls more
@@ -212,11 +217,27 @@ ULONG ami_millis(VOID)
     Forbid();
 
     ReadEClock(&ev);
-    delta            = ev.ev_lo - ami_eclock_last.ev_lo;
-    ami_eclock_last  = ev;
-    ami_eclock_rem  += delta;
-    ami_eclock_ms   += ami_eclock_rem / ami_eclock_per_ms;
-    ami_eclock_rem  %= ami_eclock_per_ms;
+    delta           = ev.ev_lo - ami_eclock_last.ev_lo;
+    ami_eclock_last = ev;
+
+    /* Whole seconds convert exactly and keep the fine step's operands small;
+       what is left is under one second, so rem * 1000 cannot overflow.  */
+    ami_eclock_ms  += (delta / ami_eclock_hz) * 1000UL;
+    ami_eclock_rem += delta % ami_eclock_hz;
+    if (ami_eclock_rem >= ami_eclock_hz)
+    {
+        ami_eclock_rem -= ami_eclock_hz;
+        ami_eclock_ms  += 1000UL;
+    }
+
+    gain             = (ami_eclock_rem * 1000UL) / ami_eclock_hz;
+    ami_eclock_ms   += gain;
+
+    /* The ticks those milliseconds consumed, to a thousandth of a tick: the
+       remainder is carried, or the truncation alone costs 3.5 s a day.  */
+    num              = gain * ami_eclock_hz + ami_eclock_carry;
+    ami_eclock_rem  -= num / 1000UL;
+    ami_eclock_carry = num % 1000UL;
     ms               = ami_eclock_ms;
 
     Permit();
