@@ -82,6 +82,17 @@ ULONG       ami_sana2_get_bps(const AmiSana2If *iface);
 BOOL        ami_sana2_is_online(const AmiSana2If *iface);
 
 /*
+ * Whether the stack has been told to use this interface, as opposed to whether
+ * the wire is there. NX_LINK_ENABLE sets it, the three disables clear it, and
+ * a cable pulled out from under a running interface does not -- that clears
+ * nx_interface_link_up from the reader (sana2_rx.c) and nothing else. IFQ_State
+ * is defined in these terms: "the stack will attempt to transmit messages
+ * through this interface. However, the underlying SANA-II device driver may not
+ * be connected to the network yet."
+ */
+BOOL        ami_sana2_admin_up(const AmiSana2If *iface);
+
+/*
  * Put one frame on the wire that the IP stack did not build.
  *
  * This exists for bpf_write(): a capture consumer hands over a complete

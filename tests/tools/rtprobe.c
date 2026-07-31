@@ -382,6 +382,30 @@ int main(void)
         rc = p_add_route(base, tags);
         Printf((CONST_STRPTR)"set the default gateway to %s again: rc %ld\n",
                (LONG)gw_text, rc);
+
+        /*
+         * Deleting it by naming a gateway that is not the installed one.  The
+         * tag is "the address of the default gateway all packets WERE
+         * forwarded to", so this names no entry and must not take the real one
+         * away -- which is what the read-back below checks.
+         */
+        tags[0].ti_Tag  = RTA_DefaultGateway;
+        tags[0].ti_Data = (ULONG)"10.99.99.99";
+        tags[1].ti_Tag  = TAG_DONE;
+        tags[1].ti_Data = 0;
+
+        rc = p_delete_route(base, tags);
+        Printf((CONST_STRPTR)"delete the default gateway by the wrong address: "
+                             "rc %ld (errno %ld)%s\n",
+               rc, p_errno(base),
+               (LONG)((rc != 0) ? " -- refused, correctly"
+                                : " -- ACCEPTED, WRONG"));
+
+        Printf((CONST_STRPTR)"default gateway after that: %s%s\n",
+               (LONG)gw_text,
+               (LONG)((p_default_gateway(base) == gateway)
+                          ? " -- still there, correctly"
+                          : " -- GONE, WRONG"));
     }
     else
     {

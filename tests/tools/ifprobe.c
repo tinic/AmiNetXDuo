@@ -439,11 +439,11 @@ static VOID p_config_phase(struct Library *base, const char *name)
 
     /* ---- a tag this stack refuses, and the atomicity that goes with it ---
      *
-     * IFC_Metric is documented and unsupported here, so the call must fail.
-     * The IFC_NetMask in front of it checks atomicity: the whole list is
-     * validated before any of it is applied, so the mask must not have
-     * changed.  A one-pass implementation passes the first half of this
-     * assertion and fails the second.
+     * A non-zero IFC_Metric asks for a routing cost this stack cannot spend,
+     * so the call must fail.  The IFC_NetMask in front of it checks atomicity:
+     * the whole list is validated before any of it is applied, so the mask
+     * must not have changed.  A one-pass implementation passes the first half
+     * of this assertion and fails the second.
      */
     p_dotted(0xFFFF0000UL, mask_text);          /* 255.255.0.0, not ours */
 
@@ -465,6 +465,18 @@ static VOID p_config_phase(struct Library *base, const char *name)
            (LONG)mask_text,
            (LONG)((seen == 0xFFFFFF00UL) ? " -- unchanged, correctly"
                                          : " -- CHANGED, WRONG"));
+
+    /* IFQ_Metric answers 0 for every interface here, so an IFC_Metric of 0
+       names what the stack already does and is not a change to refuse. */
+    tags[0].ti_Tag  = IFC_Metric;
+    tags[0].ti_Data = 0;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+
+    rc = p_configure_interface(base, name, tags);
+    Printf((CONST_STRPTR)"config: metric 0: rc %ld (errno %ld)%s\n",
+           rc, p_errno(base),
+           (LONG)((rc == 0) ? " -- accepted, correctly" : " -- REFUSED, WRONG"));
 
     /* ---- an address string that is neither dotted-quad nor a host --------- */
     tags[0].ti_Tag  = IFC_Address;

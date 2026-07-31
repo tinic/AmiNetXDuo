@@ -704,6 +704,11 @@ BOOL ami_sana2_is_online(const AmiSana2If *iface)
     return (iface != NULL) ? iface->online : FALSE;
 }
 
+BOOL ami_sana2_admin_up(const AmiSana2If *iface)
+{
+    return (iface != NULL) ? iface->admin_up : FALSE;
+}
+
 BOOL ami_sana2_orphaned(const AmiSana2If *iface)
 {
     return (iface != NULL) ? iface->rx_orphaned : FALSE;
