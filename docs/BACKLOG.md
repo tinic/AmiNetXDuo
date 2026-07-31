@@ -37,7 +37,37 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   instead of the public lookup. Not worth that trade until someone reports a
   switched-off machine lingering, which every other mDNS browser does too.
 
+- **RFC 4007 §11 scope-ID text (`fe80::1%eth0`) is not supported.** `sin6_scope_id`
+  is carried in the sockaddr and round-tripped through `getsockname()`, but no
+  parser or formatter handles the `%zone` suffix, so there is no way to say
+  which interface a link-local destination is on. RFC 4007 makes it a SHOULD and
+  asks for at least numeric indices. Latent while a machine has one NIC, which
+  is nearly all of them; it bites at two, and `AMI_CFG_MAX_INTERFACES` is 2.
+  Wanted by `ping fe80::1%eth0` and by a link-local `GATEWAY6`.
+- **RFC 3493's interface-identification four are absent** -- `if_nametoindex`,
+  `if_indextoname`, `if_nameindex`, `if_freenameindex`. Unlike the rest of that
+  RFC (which we have: `getaddrinfo`, `getnameinfo`, `freeaddrinfo`,
+  `gai_strerror`, `inet_ntop`/`inet_pton`, `IPV6_V6ONLY`, `sin6_scope_id`) these
+  have **no LVO in the NDK and no vector in our table**, which ends at
+  -0x36c [145]. Adding them means inventing ABI no Amiga header declares and no
+  existing binary can call -- a different exercise from conformance to a
+  published one. Pairs with the RFC 4007 item: a numeric zone ID is only useful
+  if something maps a name to it.
+
 ## Decided against — do not "fix"
+
+- **RFC 6724 default address selection**, 2026-07-31: does not apply here. It
+  sorts a list of candidate destinations, and `getaddrinfo()` returns at most
+  one address per family (the resolver under it answers with a single address,
+  not a set -- see `src/bsdsocket/addrinfo.c`). With two entries at most its
+  rules collapse to "which family first", which is answered deliberately:
+  IPv6 then IPv4. It would start to matter only if the resolver ever returned
+  address sets.
+- **RFC 5952 IPv6 text representation**: conformant, 2026-07-31, and now pinned.
+  §4.1 leading zeros, §4.2.1 maximum compression, §4.2.2 no `::` for a lone zero
+  group, §4.2.3 first of equal runs, §4.3 lowercase, §5 embedded IPv4 -- all
+  verified in `src/config/test/test_config.c`. §4.2.3 was the one previously
+  untested.
 
 - **`vsyslog()` stays `ENOSYS`**, 2026-07-31. The two tags that aim it,
   `SBTC_LOG_FILE_NAME` and `SBTC_LOG_HOOK`, are refused (above), so a syslog
