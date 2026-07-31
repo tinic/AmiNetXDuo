@@ -11,6 +11,43 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
 
 ## Open — no decision taken
 
+- **`bind()` to a specific local address is a silent no-op.** `socket.c` records
+  it in `as_LocalAddr` so `getsockname()` reports it, and nothing enforces it --
+  the comment there has said so for a long time, but it never reached this file.
+  This is the one place the codebase breaks its own refuse-don't-ignore rule,
+  and the worst shape of it: a tool binding a listener to 127.0.0.1 gets an
+  all-interfaces listener while `getsockname()` confirms the lie. It also
+  silently defeats every `-b` / `--interface` / `-s` flag (curl, nc, dig, ntp).
+
+  NetX has no address-taking bind, so enforcement is ours to build, and the two
+  directions differ:
+  - **Outbound is already possible.** `nxd_udp_socket_source_send()` is wired
+    into `transfer.c` as of 2026-07-31 for RFC 4007 zones; honouring a bound
+    source address on UDP send is the same call with the index taken from
+    `as_LocalAddr` instead of the zone. Cheap now.
+  - **Inbound needs a filter**: check the arrival address in the UDP receive
+    notify against `as_LocalAddr` and drop mismatches; for TCP, check the
+    accepted connection's local address and reset mismatches.
+  - **Interim, if enforcement lags**: refuse with `EADDRNOTAVAIL` rather than
+    lie. Accept ANY, loopback, and -- wider than the obvious rule -- the
+    machine's own interface address when it has one interface, since that is
+    unambiguous and is what an `--interface` flag usually resolves to.
+
+  A listener that claims loopback and answers the LAN is a security lie, so
+  that direction should fail loudly even before the filter exists.
+- **IPv4 multicast is absent** -- no `IP_ADD_MEMBERSHIP`, `IP_MULTICAST_IF`,
+  `IP_MULTICAST_TTL`, `IP_MULTICAST_LOOP`, no `ip_mreq`. Reopened 2026-07-31:
+  it had been closed on the grounds that "nothing in the tree needs the
+  socket-level API", which is the wrong test -- the point of the project is
+  running other people's tools, and SSDP/UPnP and any ported mDNS open their
+  own multicast sockets. The vendored NetX mDNS covers `.local` for us and
+  covers nothing for them.
+
+  Not purely exposure work: `nx_igmp_enable()` is never called, so IGMP has to
+  be turned on first, which is a memory cost the 1 MB floor tier has to be
+  weighed against. RFC 1112 membership is the target; RFC 3678 source filtering
+  is not, and can wait indefinitely. `NX_ENABLE_IPV6_MULTICAST` is the same
+  argument on the v6 side, for a non-floor tier.
 - **`ShowNetServices` cannot browse every type at once.** With no type it runs the
   RFC 6763 §9 meta-query and lists the types present; listing every instance of
   every type would mean starting one continuous query per type found. They would
@@ -71,7 +108,9 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   What has to be invented is *header* ABI: `struct cmsghdr` and
   `CMSG_FIRSTHDR`/`NXTHDR`/`DATA`/`LEN`/`SPACE` are **not in the NDK at all**.
   Defining them means fixing `CMSG_ALIGN` for m68k, and every later caller is
-  stuck with whatever we pick -- so pick it once, deliberately, and record why.
+  stuck with whatever we pick. **Decided 2026-07-31: 4 bytes.** It is what every
+  32-bit BSD used, it keeps `struct cmsghdr` at 12 bytes, and nothing about m68k
+  argues for more -- wider alignment would only waste buffer space.
 
   Feasibility checked: `NX_PACKET` carries `nx_packet_ip_interface` (the arrival
   interface) and `nx_packet_ip_header` (from which the hop limit reads), so both
@@ -87,6 +126,12 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
     confirm the exact requirement before relying on it).
   - `ICMP6_FILTER` with `struct icmp6_filter` and its six macros (RFC 3542
     §3.2) -- `ping6`/`traceroute6` filtering ICMPv6 by type on a raw socket.
+
+  **Do the IPv4 half in the same stroke**: `IP_PKTINFO` / `IP_RECVDSTADDR` is
+  the same cmsg plumbing, and it is what the dnsmasq / unbound / tftpd class of
+  UDP server actually requires -- a server that cannot tell which of its own
+  addresses a query arrived on answers from the wrong one. Accept both the
+  FreeBSD and Linux spellings, as `AMI_IPV6_V6ONLY_BSD`/`_LINUX` already do.
 
   Not worth it: `IPV6_RTHDR`, `HOPOPTS`, `DSTOPTS`, `RTHDRDSTOPTS`, `PATHMTU`,
   `RECVPATHMTU`, `USE_MIN_MTU`, `DONTFRAG`, `TCLASS`, `NEXTHOP`.
@@ -138,12 +183,6 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   two apart at the call. They fall to the `default:` branch, which ignores
   unknown tags rather than refusing them, so nothing else in the list is lost.
   The same reasoning is in `src/bsdsocket/interfaces.c` beside the tag.
-
-- **Multicast socket options**, 2026-07-31: `IP_MULTICAST_TTL/IF/LOOP`,
-  `IP_ADD_MEMBERSHIP`, `IP_OPTIONS`, `IP_RECVDSTADDR`, `SO_RCVLOWAT`,
-  `SO_DEBUG`/`SO_DONTROUTE`/`SO_SNDLOWAT`. The one caller that wanted them was
-  Bonjour, and the mDNS module joins its own groups through NetX directly, so
-  nothing in the tree needs the socket-level API.
 
 - **`SBTC_LOG_FILE_NAME` and `SBTC_LOG_HOOK` are refused**, 2026-07-31. The
   autodoc sanctions it in their own entries: "This tag is an extension to the
