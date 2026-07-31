@@ -668,6 +668,28 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
             AMI_WARN("netstack: gateway set failed (%ld)", (long)status);
     }
 
+    /*
+     * STATE=down in DEVS:NetInterfaces, honoured last because attaching is
+     * what brings an interface up: nx_ip_interface_attach() drives NX_LINK_
+     * ENABLE itself, so the only way to arrive down is to be taken down after.
+     * AMI_LINK_STACK_DISABLE and not NX_LINK_DISABLE, to match SM_Down --
+     * the device stays open and Online brings it back.
+     */
+    for (i = 0; i < ns->ns_IfaceCount; i++)
+    {
+        ULONG value = 0;
+
+        if (ns->ns_Config.interfaces[i].up)
+            continue;
+
+        status = nx_ip_driver_interface_direct_command(&ns->ns_Ip,
+                                                       AMI_LINK_STACK_DISABLE,
+                                                       (UINT)i, &value);
+        if (status != NX_SUCCESS)
+            AMI_WARN("netstack: interface '%s' would not stay down (%ld)",
+                     ns->ns_Config.interfaces[i].name, (long)status);
+    }
+
     return AMI_NET_OK;
 }
 
@@ -1632,7 +1654,7 @@ static UWORD ami_ns_interface_users(AmiNetStack *ns, UWORD index)
     return users;
 }
 
-LONG netstack_interface_remove(UWORD index, BOOL force)
+static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
 {
     AmiNetStack  *ns = ami_ns;
     AmiNetCaller *caller;
@@ -1738,6 +1760,19 @@ LONG netstack_interface_remove(UWORD index, BOOL force)
     AMI_INFO("netstack: interface %ld removed", (long)index);
 
     return AMI_NET_OK;
+}
+
+/* Paired with netstack_interface_add(); see the note there. */
+LONG netstack_interface_remove(UWORD index, BOOL force)
+{
+    LONG rc;
+
+    ami_ns_lock_init();
+    ObtainSemaphore(&ami_ns_lock);
+    rc = ami_ns_interface_remove_locked(index, force);
+    ReleaseSemaphore(&ami_ns_lock);
+
+    return rc;
 }
 
 /* ---------------------------------------------- DHCP on one interface ---- */
@@ -2128,7 +2163,8 @@ static LONG ami_ns_free_interface_slot(AmiNetStack *ns)
     return -1;
 }
 
-LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
+static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
+                                        UWORD *index_out)
 {
     AmiNetStack  *ns = ami_ns;
     AmiNetCaller *caller;
@@ -2293,4 +2329,25 @@ LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
              (long)slot);
 
     return AMI_NET_OK;
+}
+
+/*
+ * The slot is picked, then the SANA-II device is opened -- Exec I/O, and long
+ * -- before anything marks it taken, so two tasks adding at once could both
+ * leave with the same one. ami_ns_lock is the outer lock the startup and
+ * shutdown paths already use; the ThreadX bracket cannot serve here because
+ * add and remove deliberately run most of their work outside it. Exec
+ * semaphores nest per task, so a caller already holding it is not deadlocked
+ * by this.
+ */
+LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
+{
+    LONG rc;
+
+    ami_ns_lock_init();
+    ObtainSemaphore(&ami_ns_lock);
+    rc = ami_ns_interface_add_locked(cfg, index_out);
+    ReleaseSemaphore(&ami_ns_lock);
+
+    return rc;
 }

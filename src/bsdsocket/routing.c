@@ -437,6 +437,36 @@ static VOID bsd_route_sockaddr(struct sockaddr_in *sa, ULONG host_addr)
 }
 
 /*
+ * The interface a next hop leaves by: the one whose subnet contains it.
+ *
+ * BSD numbers interfaces from 1 and keeps 0 for "no interface", which is the
+ * right answer for a gateway that matches none. NetX numbers its array from 0,
+ * so every index handed to rtm_index is +1 -- a caller comparing rtm_index
+ * against an if_nametoindex() would otherwise be off by one on every route.
+ */
+static UWORD bsd_route_iface_for(NX_IP *ip, ULONG next_hop)
+{
+    UINT i;
+
+    if (next_hop == 0)
+        return 0;
+
+    for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        const NX_INTERFACE *nxif = &ip->nx_ip_interface[i];
+        ULONG               mask = nxif->nx_interface_ip_network_mask;
+
+        if (nxif->nx_interface_valid == 0 || nxif->nx_interface_ip_address == 0)
+            continue;
+
+        if ((next_hop & mask) == (nxif->nx_interface_ip_address & mask))
+            return (UWORD)(i + 1);
+    }
+
+    return 0;
+}
+
+/*
  * Fill one entry. `flags` is the caller's filter: "Flags which have to be set
  * in each routing table entry to be returned", so an entry is kept only when
  * it has all of them, and a filter of 0 keeps everything.
@@ -589,7 +619,7 @@ static UWORD bsd_route_fill_arp(NX_IP *ip, BsdRouteTable *table,
                 {
                     if (&ip->nx_ip_interface[i] == entry->nx_arp_ip_interface)
                     {
-                        index = (UWORD)i;
+                        index = (UWORD)(i + 1);
                         break;
                     }
                 }
@@ -637,7 +667,7 @@ static UWORD bsd_route_fill(NX_IP *ip, BsdRouteTable *table, LONG want_flags)
             flags |= RTF_HOST;
 
         if (bsd_route_emit(&table->brt_Entry[used], want_flags, flags,
-                           (UWORD)i, nxif->nx_interface_ip_mtu_size,
+                           (UWORD)(i + 1), nxif->nx_interface_ip_mtu_size,
                            nxif->nx_interface_ip_address &
                                nxif->nx_interface_ip_network_mask,
                            nxif->nx_interface_ip_network_mask, 0))
@@ -653,7 +683,9 @@ static UWORD bsd_route_fill(NX_IP *ip, BsdRouteTable *table, LONG want_flags)
         if (e->nx_ip_routing_net_mask == 0xFFFFFFFFUL)
             flags |= RTF_HOST;
 
-        if (bsd_route_emit(&table->brt_Entry[used], want_flags, flags, 0, 0,
+        if (bsd_route_emit(&table->brt_Entry[used], want_flags, flags,
+                           bsd_route_iface_for(ip,
+                               e->nx_ip_routing_next_hop_address), 0,
                            e->nx_ip_routing_dest_ip,
                            e->nx_ip_routing_net_mask,
                            e->nx_ip_routing_next_hop_address))
@@ -664,7 +696,8 @@ static UWORD bsd_route_fill(NX_IP *ip, BsdRouteTable *table, LONG want_flags)
     if (nx_ip_gateway_address_get(ip, &gateway) == NX_SUCCESS && gateway != 0)
     {
         if (bsd_route_emit(&table->brt_Entry[used], want_flags,
-                           RTF_UP | RTF_GATEWAY, 0, 0, 0, 0, gateway))
+                           RTF_UP | RTF_GATEWAY,
+                           bsd_route_iface_for(ip, gateway), 0, 0, 0, gateway))
             used++;
     }
 

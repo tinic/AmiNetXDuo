@@ -11,10 +11,6 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
 
 ## Open — no decision taken
 
-- **`SM_Online` failure leaves earlier tags applied.** Doc: *"if it fails … no
-  further configuration will have been done."* We apply `IFC_LimitMTU`, then
-  address/mask, then state, so an `S2_ONLINE` failure returns `ENXIO` with the MTU
-  and address already changed.
 - **Two tasks adding an interface at once can pick the same slot.**
   `netstack_interface_add()` reads `ami_ns_free_interface_slot()`, then opens the
   SANA-II device — Exec I/O, and long — before anything records the slot as
@@ -27,9 +23,9 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
 - **`AmiIfConfig.up` is write-only.** `config_parse.c` records `STATE=down` from
   `DEVS:NetInterfaces` and nothing ever reads it, so the interface comes up
   anyway.
-- **`vsyslog` is `ENOSYS`**, so `SBTC_LOG_FILE_NAME` and `SBTC_LOG_HOOK` are
-  unserviced and poison tag lists. `LOGSTAT`/`LOGMASK`/`LOGFACILITY`/`LOGTAGPTR`
-  are stored and never read.
+- **`vsyslog` is `ENOSYS`.** `LOGSTAT`/`LOGMASK`/`LOGFACILITY`/`LOGTAGPTR` are
+  stored and never read, which costs a caller nothing. Implementing syslog is
+  the open part; the two tags below are not.
 - **`SIOCGIFADDR` missing from `bpf_ioctl`.** Needs a setter, not a wider attach
   call — the address changes over a DHCP lease.
 - **`bpf_read()` never blocks.** Gate on a non-zero `BIOCSRTIMEOUT`, as 4.4BSD
@@ -93,6 +89,13 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
 
 ## Decided against — do not "fix"
 
+- **`SBTC_LOG_FILE_NAME` and `SBTC_LOG_HOOK` are refused**, 2026-07-31. The
+  autodoc sanctions it in their own entries: "This tag is an extension to the
+  AmiTCP V4 API and cannot be expected to be supported by older
+  'bsdsocket.library' versions." Neither constant is in the NDK headers either,
+  so a caller has to define it before it can pass one. Refusing costs a rare
+  caller a tag list it was told to expect to lose.
+
 - **`sendto()` with an address on a connected UDP socket.** Doc says `EISCONN`;
   everything portable dropped that rule.
 - **UDP send with no destination returns `EDESTADDRREQ`**, not `-udp-`'s
@@ -131,8 +134,10 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
 
 ## Environment and tooling
 
-- **`playhouse2` is unusable as a network peer** until `ethtool -K <iface> tx off`.
-  Same defect as playhouse4 had; `run-fitzbench.sh` now refuses it outright.
+- **`playhouse2` had uncomputed TX checksums**; `ethtool -K eth0 tx off` was applied
+  2026-07-31 and verified (`/usr/sbin/ethtool -k eth0` -> `tx-checksumming: off`;
+  `/usr/sbin` is not on a non-login ssh PATH, so query it by full path). Same defect
+  playhouse4 had. `run-fitzbench.sh` still refuses it outright and can be relaxed.
 - **`run-fitzbench.sh` prints a write figure that is not a rate** — it stops timing
   when the write call returns, not when data drains. Guest-timed 1718 KB/s against
   a measured wire rate of 364. Reads agree between clocks; writes diverge ~4.7x.
