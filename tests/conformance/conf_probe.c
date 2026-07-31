@@ -337,8 +337,34 @@ static VOID probe_audit_fixes(VOID)
         fd = socket(AF_INET, SOCK_DGRAM, 0);
         addr_in(&sa, INADDR_LOOPBACK, PORT + 5);
 
+        rc = sendto(fd, big, 65507, 0, (struct sockaddr *)&sa, sizeof(sa));
+        p("sendto(65507 to loopback)    [not EMSGSIZE]", rc);
+
         rc = sendto(fd, big, 65508, 0, (struct sockaddr *)&sa, sizeof(sa));
         p("sendto(65508 to loopback)    [EMSGSIZE 40]", rc);
+
+        /* The same boundary off-box, where the MTU is the Ethernet 1500 and
+           the ceiling is therefore 1472. The destination only has to route:
+           nothing has to answer. */
+        {
+            ULONG gateway = inet_addr((STRPTR)"10.0.2.2");
+
+            if (gateway != INADDR_NONE)
+            {
+                memset(&sa, 0, sizeof(sa));
+                sa.sin_family = AF_INET;
+                sa.sin_port   = htons(PORT + 5);
+                sa.sin_addr.s_addr = gateway;
+
+                rc = sendto(fd, big, 1472, 0, (struct sockaddr *)&sa,
+                            sizeof(sa));
+                p("sendto(1472 off-box)         [not EMSGSIZE]", rc);
+
+                rc = sendto(fd, big, 1473, 0, (struct sockaddr *)&sa,
+                            sizeof(sa));
+                p("sendto(1473 off-box)         [EMSGSIZE 40]", rc);
+            }
+        }
 
         CloseSocket(fd);
         FreeMem(big, 65536UL + 16UL);
@@ -362,7 +388,7 @@ static VOID probe_audit_fixes(VOID)
 
     addr_in(&sa, INADDR_LOOPBACK, PORT + 6);
     rc = connect(fd, (struct sockaddr *)&sa, sizeof(sa));
-    p("connect(dead port, non-block)[EINPROGRESS 36]", rc);
+    p("connect(dead port, non-block)[refused on loopback]", rc);
 
     {
         LONG  tries;
