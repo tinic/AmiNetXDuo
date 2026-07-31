@@ -613,8 +613,23 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
     BOOL       timer_running = FALSE;
     BOOL       poll_only     = FALSE;
 
-    if (nfds < 0 || nfds > bsd_table_size(SocketBase))
+    if (nfds < 0)
         return bsd_fail(SocketBase, AMI_EINVAL);
+
+    /*
+     * "The 'nfds' parameter may be truncated if it covers more sockets than
+     * are currently in use. This has the side-effect of filling in only as
+     * many socket bits in the fd_set parameters you provide as are currently
+     * in use, and not as many as you asked for." -- so an over-large nfds is
+     * clamped, not refused. It only bites a program that lowered
+     * SBTC_DTABLESIZE and still passes FD_SETSIZE; at the default table size
+     * of 256, which is FD_SETSIZE, nothing is truncated.
+     *
+     * Clamping also bounds `words` to BSD_FD_WORDS, since the table can never
+     * exceed BSD_MAX_DTABLESIZE.
+     */
+    if (nfds > bsd_table_size(SocketBase))
+        nfds = bsd_table_size(SocketBase);
 
     if (timeout != NULL)
     {
@@ -825,6 +840,19 @@ LONG bsd_GetSocketEvents(register ULONG *event_ptr __asm("a0"),
 
         sock->as_Events &= ~events;
         *event_ptr = events;
+
+        /*
+         * "When this event is found, the 'errno' variable will be set to the
+         * error code associated with the socket which triggered the error
+         * event. The error code associated with the socket is not cleared. Use
+         * the getsockopt(socket,SO_ERROR,..) function to do that, which will
+         * read and clear the error code."
+         *
+         * So this is a peek: as_SoError stays put, and getsockopt(SO_ERROR)
+         * remains the only read that clears it.
+         */
+        if ((events & FD_ERROR) != 0 && sock->as_SoError != 0)
+            bsd_set_errno(SocketBase, sock->as_SoError);
 
         return fd;
     }

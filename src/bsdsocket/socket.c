@@ -1221,8 +1221,16 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
         return bsd_fail(SocketBase, AMI_EAFNOSUPPORT);
 #endif
 
+    /*
+     * ESOCKTNOSUPPORT is what 4.4BSD reports for an unsupported type, but the
+     * autodoc's ERRORS list for socket() does not have it: the only "not
+     * supported" code there is "[EPROTONOSUPPORT] The protocol type or the
+     * specified protocol is not supported within this domain." The doc is the
+     * ABI, so SOCK_SEQPACKET and SOCK_RDM -- both listed as defined types,
+     * neither implemented -- report that.
+     */
     if (type != SOCK_STREAM && type != SOCK_DGRAM && type != SOCK_RAW)
-        return bsd_fail(SocketBase, AMI_ESOCKTNOSUPPORT);
+        return bsd_fail(SocketBase, AMI_EPROTONOSUPPORT);
 
     if (type == SOCK_RAW)
     {
@@ -1788,8 +1796,24 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
 
+    /* "[EFAULT] The addr parameter is not in a writable part of the user
+       address space." addrlen is the value-result that says how much room addr
+       has; without it the address cannot be written at all. */
+    if (addr != NULL && addrlen == NULL)
+        return bsd_fail(SocketBase, AMI_EFAULT);
+
     if (ip == NULL)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+    /*
+     * Two different failures, and ASF_LISTENING alone cannot tell them apart
+     * because it is unset on a UDP socket as well as on a stream socket that
+     * never called listen(). "[EOPNOTSUPP] The referenced socket is not of type
+     * SOCK_STREAM" is the wrong socket type; a stream socket that is simply not
+     * listening is EINVAL, as in BSD.
+     */
+    if ((sock->as_Flags & ASF_TCP) == 0)
+        return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
 
     if ((sock->as_Flags & ASF_LISTENING) == 0)
         return bsd_fail(SocketBase, AMI_EINVAL);
