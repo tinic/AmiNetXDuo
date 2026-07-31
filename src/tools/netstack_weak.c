@@ -64,6 +64,12 @@ TOOL_WEAK LONG netstack_interface_down(UWORD index)
     return AMI_NET_ERR_STATE;
 }
 
+TOOL_WEAK LONG netstack_interface_stack_down(UWORD index)
+{
+    (VOID)index;
+    return AMI_NET_ERR_STATE;
+}
+
 TOOL_WEAK BOOL netstack_interface_is_up(UWORD index)
 {
     (VOID)index;

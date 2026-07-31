@@ -83,8 +83,8 @@ STATPROBE="$ROOT/$BUILD/tests/tools/StatProbe"
 AAMPROBE="$ROOT/$BUILD/tests/tools/AamProbe"
 MONPROBE="$ROOT/$BUILD/tests/tools/MonProbe"
 
-for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$PROBE" "$STATPROBE" \
-         "$AAMPROBE" "$MONPROBE" "$BSD"; do
+for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/netstat" \
+         "$PROBE" "$STATPROBE" "$AAMPROBE" "$MONPROBE" "$BSD"; do
     [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
 done
 
@@ -111,6 +111,7 @@ cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
+cp "$TOOLS/netstat" "$STAGE/netstat"
 cp "$PROBE" "$STAGE/IfProbe"
 cp "$STATPROBE" "$STAGE/StatProbe"
 cp "$AAMPROBE" "$STAGE/AamProbe"
@@ -122,10 +123,25 @@ cp "$MONPROBE" "$STAGE/MonProbe"
 # ask, eth0 is already up.  It runs twice because obtaining and releasing the
 # list has to survive being done again: a block freed twice, or a Node still
 # linked into a freed list, shows up on the second pass and nowhere else.
+#
+# The three IfProbe runs with an argument park the interface in one state and
+# do nothing else, so that netstat can be asked about it afterwards.  SM_Down
+# and SM_Offline both report IFQ_State == SM_Down; the difference is whether
+# the SANA-II device is still on the network, which only netstat prints.
+#
+# They have to come after AddNetInterface: nothing else in the list keeps
+# bsdsocket.library open between commands, and netstat run on its own finds no
+# stack to report on.  AddNetInterface stays resident, so the interface is
+# still in the state the previous command left it in.
 cat > "$STAGE/commands.txt" <<'EOF'
 SYS:IfProbe
 SYS:AddNetInterface eth0
 SYS:IfProbe
+SYS:IfProbe DOWN
+SYS:netstat -s
+SYS:IfProbe OFFLINE
+SYS:netstat -s
+SYS:IfProbe UP
 SYS:StatProbe
 SYS:MonProbe
 SYS:AamProbe
@@ -142,15 +158,15 @@ if [ "$RUNNER" = "amiberry" ]; then
     "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
         -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-        "$STAGE/AddNetInterface" "$STAGE/IfProbe" "$STAGE/StatProbe" \
-        "$STAGE/AamProbe" "$STAGE/MonProbe"
+        "$STAGE/AddNetInterface" "$STAGE/netstat" "$STAGE/IfProbe" \
+        "$STAGE/StatProbe" "$STAGE/AamProbe" "$STAGE/MonProbe"
 else
     HD="$ROOT/build/testhd-$AMINETXDUO_RUN_TAG"
     echo "==> booting $MODEL with the A2065 on SLIRP"
     "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-        "$STAGE/AddNetInterface" "$STAGE/IfProbe" "$STAGE/StatProbe" \
-        "$STAGE/AamProbe" "$STAGE/MonProbe"
+        "$STAGE/AddNetInterface" "$STAGE/netstat" "$STAGE/IfProbe" \
+        "$STAGE/StatProbe" "$STAGE/AamProbe" "$STAGE/MonProbe"
 fi
 RUN_RC=$?
 set -e
@@ -311,6 +327,21 @@ else
     fail "the refused list changed the netmask -- the call is not atomic"
 fi
 
+# The other half of the same policy. A BOOL tag set FALSE asks for nothing, so
+# it cannot be a change this stack failed to make; refusing it failed the whole
+# configuration for a tool that merely spelled out a default.
+if grep -q "config: BOOL tags at FALSE: .* -- accepted, correctly" "$REPORT"; then
+    pass "IFC_AssociatedRoute and IFC_SetDebugMode at FALSE are accepted"
+else
+    fail "a BOOL configure tag set FALSE was refused"
+fi
+
+if grep -q "config: IFC_AssociatedRoute TRUE: .* -- refused, correctly" "$REPORT"; then
+    pass "and TRUE is still refused -- nothing here tears a route down"
+else
+    fail "IFC_AssociatedRoute TRUE was accepted although nothing acts on it"
+fi
+
 if grep -q "config: bad address: .* -- refused, correctly" "$REPORT"; then
     pass "an address string that is neither dotted-quad nor a host is refused"
 else
@@ -402,16 +433,25 @@ else
     fail "QueryInterfaceTagList still answers for a removed interface"
 fi
 
+# IFA_PacketFilterMode PFM_Everything asks for promiscuous capture. That is
+# the refusable kind: a caller told it succeeded would read a busy wire as a
+# quiet one. IFA_NumReadRequests used to be refused here and is now accepted --
+# see the next assertion and the tag policy in src/bsdsocket/interfaces.c.
 if grep -q "^add with an unsupported tag: .* -- refused, correctly" "$REPORT"; then
-    pass "AddInterfaceTagList refuses a tag it cannot honour"
+    pass "AddInterfaceTagList refuses a tag that would change what is seen"
 else
-    fail "AddInterfaceTagList accepted IFA_NumReadRequests"
+    fail "AddInterfaceTagList accepted IFA_PacketFilterMode PFM_Everything"
 fi
 
+# And the tuning tags a Roadshow caller passes as a matter of course --
+# IFA_NumReadRequests, IFA_CopyMode, IFA_PacketFilterMode PFM_Local -- are
+# accepted. None is implemented and none changes anything this API or the wire
+# can show; refusing one refused the interface itself, which is the likeliest
+# reason a third-party tool worked on Roadshow and not here.
 if grep -q "^add eth0 (a2065.device unit 0): rc 0 .* -- added, correctly" "$REPORT"; then
-    pass "AddInterfaceTagList put it back"
+    pass "AddInterfaceTagList accepts the advisory tuning tags and adds"
 else
-    fail "AddInterfaceTagList did not re-add the interface"
+    fail "AddInterfaceTagList refused a tuning tag and did not re-add"
 fi
 
 if grep -q "^after add: 1 interface(s), eth0 is there -- correctly" "$REPORT"; then
@@ -692,11 +732,65 @@ else
     fail "DeleteAddrAllocMessage tried to free a message it did not allocate"
 fi
 
+# ---- SM_Down is not SM_Offline -------------------------------------------
+#
+# "SM_Down -- the stack will no longer attempt to transmit messages through
+# this interface.  However, the underlying SANA-II device driver may still be
+# connected to the network", against "SM_Offline -- same as SM_Down, but also
+# sends an S2_OFFLINE command".  The document separates them so that a unit
+# shared with Envoy or ACS keeps working when this stack lets go of it.
+#
+# Both report IFQ_State == SM_Down, so the difference is invisible to the
+# published API.  netstat prints the device's own state, which is why it runs
+# after each of the two IfProbe state commands.
+if grep -Eq "^state DOWN: rc 0 .* IFQ_State now 2$" "$REPORT"; then
+    pass "SM_Down stopped the stack transmitting -- IFQ_State reports SM_Down"
+else
+    fail "IFC_State SM_Down did not report SM_Down"
+fi
+
+# netstat prints "eth0 (online)" / "eth0 (offline)" from the SANA-II shim's own
+# flag.  The first of the two must be online, the second offline.
+NETSTAT_STATES=$( { grep -Eo "^eth0 \((online|offline)\)$" "$REPORT" || true; } | tr '\n' ' ')
+if [ "$NETSTAT_STATES" = "eth0 (online) eth0 (offline) " ]; then
+    pass "SM_Down left the SANA-II device on the network, SM_Offline took it off"
+else
+    fail "the device state after SM_Down/SM_Offline was: $NETSTAT_STATES"
+fi
+
+if grep -Eq "^state UP: rc 0 .* IFQ_State now 3$" "$REPORT"; then
+    pass "and SM_Up brought it back"
+else
+    fail "SM_Up did not bring the interface back after SM_Offline"
+fi
+
 # ---- the monitoring hooks ------------------------------------------------
 #
 # The denying half is the half with consequences: a hook that returns an errno
 # must make bind() or connect() fail with exactly that errno, before the stack
 # has done anything.
+
+# A client asks whether the API is there before it calls any of it, so a FALSE
+# here means the hooks below are never reached by a conforming caller.
+if grep -q "^SBTC_HAVE_MONITORING_API: .* -- TRUE, correctly" "$REPORT"; then
+    pass "SBTC_HAVE_MONITORING_API answers TRUE for the three types that work"
+else
+    fail "SBTC_HAVE_MONITORING_API answers FALSE although hooks install"
+fi
+
+# SocketBaseTagList() stops at the first tag it refuses, so a SET of a tunable
+# to the value it already holds must not cost the caller the rest of its list.
+if grep -q "^set IP_DEFAULT_TTL to its own value.* -- accepted and the next tag was serviced, correctly" "$REPORT"; then
+    pass "writing a tunable back at its current value is not a change"
+else
+    fail "a no-op SET was refused and discarded the rest of the tag list"
+fi
+
+if grep -q "^turn IP forwarding on: .* -- refused at tag 1, correctly" "$REPORT"; then
+    pass "and a real change to something unimplemented is still refused"
+else
+    fail "SBTC_IP_FORWARDING was set although this stack does not forward"
+fi
 
 for case in "a NULL hook:EFAULT" "type 99:EINVAL"; do
     what=${case%%:*}

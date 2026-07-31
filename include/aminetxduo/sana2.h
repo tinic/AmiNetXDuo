@@ -55,6 +55,16 @@ typedef struct AmiSana2If AmiSana2If;
 VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req);
 
 /*
+ * NX_LINK_DISABLE without the S2_OFFLINE. Roadshow's SM_Down is "the stack
+ * will no longer attempt to transmit messages through this interface. However,
+ * the underlying SANA-II device driver may still be connected to the network",
+ * which NX_LINK_DISABLE cannot express: it takes the wire down for Envoy and
+ * ACS as well. Values past NX_LINK_USER_COMMAND are reserved for the
+ * application, which is what this is.
+ */
+#define AMI_LINK_STACK_DISABLE  (NX_LINK_USER_COMMAND + 1)
+
+/*
  * Open the SANA-II device named in cfg and prepare it for use. Does not bring
  * the link online -- NX_LINK_ENABLE does that. Returns NULL on failure and sets
  * *err to an AMI_NET_ERR_* code.

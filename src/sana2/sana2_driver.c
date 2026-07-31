@@ -237,6 +237,20 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
         ami_sana2_offline(iface);
         break;
 
+    /*
+     * SM_Down: "the stack will no longer attempt to transmit messages through
+     * this interface", and nothing more. The readers are left alone -- stopping
+     * them means S2_OFFLINE, because that is the only thing that returns a
+     * queued CMD_READ on a device which ignores AbortIO() (ami_sana2_rx_stop),
+     * and taking the wire away is what this command exists not to do. NetX Duo
+     * hands a link-down interface no packets to send; the readers keep feeding
+     * a stack that will not answer, and NX_LINK_ENABLE picks them back up.
+     */
+    case AMI_LINK_STACK_DISABLE:
+        interface_ptr->nx_interface_link_up = NX_FALSE;
+        ami_sana2_tx_drain(iface);
+        break;
+
     case NX_LINK_PACKET_SEND:
     case NX_LINK_PACKET_BROADCAST:
     case NX_LINK_ARP_SEND:

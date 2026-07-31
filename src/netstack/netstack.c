@@ -1527,7 +1527,7 @@ LONG netstack_interface_up(UWORD index)
     return (status == NX_SUCCESS) ? AMI_NET_OK : AMI_NET_ERR_NODEV;
 }
 
-LONG netstack_interface_down(UWORD index)
+static LONG ami_ns_interface_disable(UWORD index, UINT command)
 {
     AmiNetStack  *ns = ami_ns;
     AmiNetCaller *caller;
@@ -1541,12 +1541,34 @@ LONG netstack_interface_down(UWORD index)
     if (caller == NULL)
         return AMI_NET_ERR_KERNEL;
 
-    status = nx_ip_driver_interface_direct_command(&ns->ns_Ip, NX_LINK_DISABLE,
+    status = nx_ip_driver_interface_direct_command(&ns->ns_Ip, command,
                                                    (UINT)index, &value);
 
     ami_netstack_leave_free(caller);
 
     return (status == NX_SUCCESS) ? AMI_NET_OK : AMI_NET_ERR_NODEV;
+}
+
+LONG netstack_interface_down(UWORD index)
+{
+    return ami_ns_interface_disable(index, NX_LINK_DISABLE);
+}
+
+/*
+ * Roadshow's SM_Down: stop transmitting, leave the device on the network.
+ * IFA_DownGoesOffline turns this back into the offline path -- "bringing the
+ * interface 'down' ... will cause the associated SANA-II device driver to be
+ * switched offline". Default is FALSE, which is the bzero of the field.
+ */
+LONG netstack_interface_stack_down(UWORD index)
+{
+    AmiNetStack *ns = ami_ns;
+
+    if (ns != NULL && index < (UWORD)AMI_CFG_MAX_INTERFACES &&
+        ns->ns_Config.interfaces[index].down_goes_offline)
+        return netstack_interface_down(index);
+
+    return ami_ns_interface_disable(index, AMI_LINK_STACK_DISABLE);
 }
 
 BOOL netstack_interface_is_up(UWORD index)
