@@ -46,6 +46,21 @@
 #   requires this script to REJECT it.  If -n ever reports PASSED, the count
 #   gates below have stopped working and the normal run proves nothing.
 #
+# WHAT IT FOUND, AND WHY THAT IS A BUDGET AND NOT A PASS
+#
+#   An open/expunge/reopen cycle does not give all its memory back: 12,568 to
+#   12,640 bytes go missing per cycle, dead linear over eight cycles, measured
+#   on Amiberry/A1200/a2065-on-SLIRP.  Plain open and close leaks nothing --
+#   twenty-four nested pairs move AvailMem() by zero -- so it is the expunge
+#   and reload path specifically.  That is an open defect, recorded in
+#   docs/BACKLOG.md, not something this file may declare acceptable.
+#
+#   The gate below is therefore a regression budget against the recorded
+#   figure: it catches the leak GETTING WORSE, and it does not catch the leak
+#   itself.  Say so out loud rather than letting a green run imply otherwise.
+#   AMINETXDUO_CYCLE_LEAK_BUDGET moves it; the day it is fixed, drop it to
+#   something near zero and delete this paragraph.
+#
 # THE KNOWN DEFECT THIS CAN SEE
 #
 #   src/sana2/sana2_rx.c has a last-resort path that logs
@@ -304,6 +319,28 @@ if grep -q "cannot read it" "$REPORT"; then
     fail "netstat/ShowNetStatus could not read the stack the drill left up"
 else
     pass "netstat -h and ShowNetStatus read the stack the drill left running"
+fi
+
+# ---- memory not given back by an expunge ----------------------------------
+#
+# The drill reports the difference in AvailMem() between two identical points
+# of two different expunge cycles, so anything paid once cancels and what is
+# left is per-cycle.  The budget is here rather than compiled into the guest
+# because it is a recorded measurement, not a property: see the note in
+# docs/BACKLOG.md.  Measured 2026-07-31 on Amiberry/A1200/a2065-on-SLIRP as
+# 12,568 to 12,640 bytes per cycle over eight cycles, dead linear.
+LEAKLINE=$(grep -E "^expunge leak: -?[0-9]+ bytes per cycle" "$REPORT" | tail -1 || true)
+LEAK_BUDGET="${AMINETXDUO_CYCLE_LEAK_BUDGET:-13312}"
+if [ -n "$LEAKLINE" ]; then
+    LEAK=$(printf '%s' "$LEAKLINE" | sed -E 's/^expunge leak: (-?[0-9]+) .*/\1/')
+    echo "  -- $LEAKLINE (budget $LEAK_BUDGET)"
+    if [ "$LEAK" -le "$LEAK_BUDGET" ]; then
+        pass "the expunge cycle stayed inside its recorded memory budget"
+    else
+        fail "an expunge cycle lost $LEAK bytes, over the $LEAK_BUDGET budget"
+    fi
+elif [ "$EXPUNGES" -ge 2 ]; then
+    fail "the drill did not report a per-cycle expunge leak figure"
 fi
 
 # ---- the known SANA-II reader leak ----------------------------------------
