@@ -21,8 +21,9 @@ BEFORE YOU START
 
 You need:
 
-  *  AmigaOS 2.04 or newer.  It is developed and tested on 3.1.
-  *  A 68020 or better.  A plain 68000 will not run it.
+  *  AmigaOS 2.04 or newer.
+  *  Any 68000 or better.  Encrypted (https:) connections need a 68020; on a
+     68000 they are left out and everything else works as normal.
   *  About 1 MB of free memory once it is up, and 4 MB in the machine.
   *  A network card, and that card's SANA-II driver -- a file whose name ends
      in ".device", which came with the card.  Put it in DEVS: before you
@@ -203,7 +204,7 @@ in both directions and listens for incoming connections.  bsdsocket.library
 scores 141 of 142 on the bsdsocktest conformance suite.
 
 Everything above was measured on an emulated 68000, 68020 and 68030 under
-Kickstart 3.1.  It has not run on real hardware.
+Kickstart 2.04 and 3.1.  It has not run on real hardware.
 
 
 LICENCE

@@ -87,8 +87,8 @@
   SLAAC, answers ARP and neighbour discovery, pings its gateway,
   resolves names and moves TCP in both directions, and it scores 142 of
   142 on the bsdsocktest conformance suite for bsdsocket.library
-  implementations. It has been tested under emulation on Kickstart 3.1
-  with a 68020 and a 68030.
+  implementations. It has been tested under emulation on Kickstart 2.04
+  and 3.1 with a 68000, a 68020 and a 68030.
 
   It has @{b}not@{ub} been run on real hardware, and it is not yet something to
   trust with data you care about. There is no memory protection on
