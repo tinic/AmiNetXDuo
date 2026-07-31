@@ -456,10 +456,15 @@ LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
  * registers a query record, the module's thread sends it and re-sends it on the
  * RFC 6762 5.2 backoff, and answers land in the peer cache whenever they
  * arrive. There is no completion -- a responder that boots in ten minutes will
- * answer then. So these three do not wait for anything, and the caller decides
- * how long it is prepared to listen; ShowNetServices and the ARexx host sleep
- * on their own tasks, outside the bracket, because a wait taken while holding
- * the ThreadX baton would stop the stack for the duration.
+ * answer then. So start and stop do not wait for anything, and the caller
+ * decides how long it is prepared to listen; ShowNetServices and the ARexx host
+ * sleep on their own tasks, outside the bracket, because an Amiga Wait() taken
+ * while holding the ThreadX baton would stop the stack for the duration.
+ *
+ * Collect is the exception: it chases a missing address, which is a query and
+ * does wait, bounded (see AMI_MDNS_CHASE_BUDGET). That wait is a ThreadX
+ * suspension and not a Wait() -- it hands the baton on, as the mDNS branch of
+ * netstack_resolve() already does.
  *
  * type NULL asks _services._dns-sd._udp.local (RFC 6763 9), which enumerates
  * the service TYPES present rather than instances of one. The module supports
@@ -476,6 +481,25 @@ LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
  * termination and not a policy about how many services a network may have.
  */
 #define AMI_MDNS_BROWSE_MAX     64
+
+/*
+ * An SRV that arrived without its A record.
+ *
+ * The module fills service_ipv4 from an A record already in the cache and never
+ * asks for one, so a responder that answered with PTR and SRV and nothing else
+ * leaves a row carrying a host name and no address -- a service that cannot be
+ * used. nx_mdns_host_address_get() puts the question on the wire, and returns
+ * out of the cache without a packet when the record is already there, so the
+ * wait falls only on the rows that need it.
+ *
+ * Bounded twice. Per name, because the case that waits is a host that has gone
+ * while its SRV is still cached; and over the whole walk, so a cache holding a
+ * dozen of those cannot turn one collect into a dozen waits. Half a second
+ * covers a machine that is awake: RFC 6762 6 delays a shared answer 20-120 ms
+ * and the reply follows.
+ */
+#define AMI_MDNS_CHASE_TICKS    ((ULONG)NX_IP_PERIODIC_RATE / 2)
+#define AMI_MDNS_CHASE_BUDGET   ((ULONG)NX_IP_PERIODIC_RATE * 2)
 
 static UCHAR *ami_ns_mdns_type_arg(const char *type)
 {
@@ -606,6 +630,9 @@ LONG netstack_mdns_browse_stop(const char *type)
  * tell a truncated list from a complete one. The cache is live -- the responder
  * thread is still writing to it -- so two calls a second apart legitimately
  * disagree, and neither is wrong.
+ *
+ * A row whose SRV came without an A record has its address asked for here, so
+ * this can wait; AMI_MDNS_CHASE_BUDGET is the ceiling on how long.
  */
 
 /* Both scratch buffers in one block: an NX_MDNS_SERVICE is 600-odd bytes and
@@ -645,6 +672,50 @@ static BOOL ami_ns_mdns_listed(const AmiMdnsService *rows, UWORD count,
     return FALSE;
 }
 
+/*
+ * The address for one SRV target, asked for rather than waited on.
+ *
+ * Rows already written are searched first: several services on one machine
+ * share a target, so they cost one query between them, and a target that was
+ * asked about and did not answer is not asked about again.
+ *
+ * `budget` is decremented by what was actually spent, because
+ * nx_mdns_host_address_get() repeats the wait per enabled interface.
+ */
+static ULONG ami_ns_mdns_chase(AmiNetStack *ns, const AmiMdnsService *rows,
+                               UWORD count, const char *host,
+                               const UCHAR *target, ULONG *budget)
+{
+    ULONG v4 = 0;
+    ULONG wait;
+    ULONG start;
+    ULONG spent;
+    UWORD i;
+
+    for (i = 0; i < count; i++)
+    {
+        if (!ami_ns_mdns_differs(rows[i].ams_Host, host))
+            return rows[i].ams_Address;
+    }
+
+    if (*budget == 0UL)
+        return 0UL;
+
+    wait  = (*budget < AMI_MDNS_CHASE_TICKS) ? *budget : AMI_MDNS_CHASE_TICKS;
+    start = tx_time_get();
+
+    if (nx_mdns_host_address_get(&ns->ns_Mdns, (UCHAR *)target, &v4, NX_NULL,
+                                 (UINT)wait) != NX_MDNS_SUCCESS)
+    {
+        v4 = 0UL;
+    }
+
+    spent   = tx_time_get() - start;
+    *budget = (*budget > spent) ? (*budget - spent) : 0UL;
+
+    return v4;
+}
+
 UWORD netstack_mdns_browse_collect(const char *type, AmiMdnsService *out,
                                    UWORD max, UWORD *available)
 {
@@ -652,6 +723,7 @@ UWORD netstack_mdns_browse_collect(const char *type, AmiMdnsService *out,
     AmiNetCaller   *caller;
     AmiMdnsScratch *scratch;
     AmiMdnsService *row;
+    ULONG           budget = AMI_MDNS_CHASE_BUDGET;
     UWORD           written = 0;
     UINT            i;
 
@@ -682,8 +754,9 @@ UWORD netstack_mdns_browse_collect(const char *type, AmiMdnsService *out,
      */
     for (i = 0; i < (UINT)AMI_MDNS_BROWSE_MAX; i++)
     {
-        NX_MDNS_SERVICE *svc = &scratch->ams_Raw;
-        BOOL             cut = FALSE;
+        NX_MDNS_SERVICE *svc      = &scratch->ams_Raw;
+        BOOL             cut      = FALSE;
+        BOOL             host_cut = FALSE;
 
         if (nx_mdns_service_lookup(&ns->ns_Mdns, NX_NULL,
                                    ami_ns_mdns_type_arg(type), NX_NULL, i,
@@ -705,7 +778,7 @@ UWORD netstack_mdns_browse_collect(const char *type, AmiMdnsService *out,
         ami_ns_mdns_copy(row->ams_Type, (ULONG)sizeof(row->ams_Type),
                          svc->service_type, NULL);
         ami_ns_mdns_copy(row->ams_Host, (ULONG)sizeof(row->ams_Host),
-                         svc->service_host, NULL);
+                         svc->service_host, &host_cut);
 
         if (svc->service_text_valid)
         {
@@ -733,6 +806,18 @@ UWORD netstack_mdns_browse_collect(const char *type, AmiMdnsService *out,
 
         if (ami_ns_mdns_listed(out, written, row))
             continue;
+
+        /*
+         * The PTR and the SRV arrived, the A did not. A host name cut short to
+         * fit the row is not the name the responder gave, so it is not asked
+         * about -- the query would be about a different machine.
+         */
+        if (row->ams_Address == 0UL && row->ams_Host[0] != '\0' && !host_cut)
+        {
+            row->ams_Address =
+                ami_ns_mdns_chase(ns, out, (written < max) ? written : max,
+                                  row->ams_Host, svc->service_host, &budget);
+        }
 
         /*
          * Past the caller's array the row is still counted, so a list that

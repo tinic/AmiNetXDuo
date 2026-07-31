@@ -442,9 +442,15 @@ typedef struct AmiMdnsService
  * service type such as "_http._tcp", or NULL for the
  * _services._dns-sd._udp.local meta-query that enumerates the types present.
  *
- * Each brackets itself, and none of them waits: mDNS answers arrive over
+ * Each brackets itself.  Start and stop do not wait: mDNS answers arrive over
  * seconds and there is no completion to wait for, so the caller owns the
  * collection window -- and must not be holding the ThreadX baton across it.
+ *
+ * Collect does wait, for a bounded time and only when it has to.  A service
+ * whose SRV arrived without the A record beside it has its target resolved
+ * here, since a row with a host name and no address is a service that cannot
+ * be used; the whole walk spends at most two seconds on that, however many
+ * such rows the cache holds.
  */
 LONG    netstack_mdns_browse_start(const char *type);
 LONG    netstack_mdns_browse_stop(const char *type);
