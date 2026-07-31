@@ -37,19 +37,30 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   instead of the public lookup. Not worth that trade until someone reports a
   switched-off machine lingering, which every other mDNS browser does too.
 
-- **RFC 4007 §11 scope-ID text: the text layer is done, the wiring is not.**
-  `ami_config_parse_ip6_zone()` and `ami_config_format_ip6_zone()` handle
-  `fe80::1%eth0` and are covered in `test_config.c`; `ami_config_parse_ip6()`
-  refuses a zone rather than dropping it. What still ignores zones entirely:
-  - `DEVS:NetInterfaces` keys (`GATEWAY6`, `ADDRESS6`) still call the plain
-    parser, so a zoned gateway is now a clean refusal instead of a wrong
-    destination -- better, but not accepted.
-  - `getaddrinfo()` with `AI_NUMERICHOST` does not read a zone, and
-    `getnameinfo()` never writes one, so `sin6_scope_id` still only ever
-    round-trips through `getsockname()`.
-  - Nothing resolves a zone *name* to an index yet, though `if_nametoindex()`
-    (revision 3) is now there to do it, and nothing uses `sin6_scope_id` to
-    choose an interface on send.
+- **RFC 4007 §11: the output side is done, the input side is deliberately not.**
+  Done: `ami_config_parse_ip6_zone()` / `ami_config_format_ip6_zone()` handle
+  `fe80::1%eth0` (covered in `test_config.c`), `ami_config_parse_ip6()` refuses
+  a zone rather than dropping it, and `getnameinfo()` prints one for a
+  link-local address -- only link-local, per §11.1.
+
+  **Held back on purpose:** `getaddrinfo()` still does not *accept* a zone, and
+  it must not until the send path honours one. Parsing `fe80::1%eth0` into
+  `sin6_scope_id` while nothing reads that field would make `ping fe80::1%eth0`
+  look supported and quietly leave on whichever interface the stack picked --
+  the same wrong-destination failure the parser refuses a zone to avoid, only
+  harder to see.
+
+  So the order is: send path first, then `getaddrinfo()`.
+  - `as_ScopeId` is stored by `connect()`/`sendto()` and read only by
+    `getsockname()`/`getpeername()`. Nothing selects an interface with it.
+  - The NetX call is `nxd_udp_socket_source_send()` (`nx_api.h`), which takes an
+    **address index**, not an interface index -- so `scope_id` (an interface,
+    1-based) has to map to that interface's link-local entry in
+    `nx_ipv6_address[]`. That mapping is the actual work.
+  - TCP has no source-send equivalent, so decide what `connect()` to a zoned
+    link-local address does before promising it.
+  - `DEVS:NetInterfaces` keys (`GATEWAY6`, `ADDRESS6`) still use the plain
+    parser, so a zoned value there is a clean refusal today.
 - **Ship a Developer drawer: the NDK addendum.** ACCEPTED 2026-07-31. The
   archive ships no headers, so nothing we add past the NDK's 0..143 range can
   be reached by anyone else's code. Plan and the three permanent ABI decisions
