@@ -405,6 +405,17 @@ static void test_ip6(void)
             IP6(0x2001, 0, 0, 1, 0, 0, 0, 0),
             IP6(0, 0, 0, 0, 0, 0xffff, 0xc0a8, 0x0101),
             IP6(1, 2, 3, 4, 5, 6, 7, 8),
+            /* 4.2.3: equal runs, and the FIRST one is the one elided. The
+               rule most stacks get wrong, so both a middle and a leading
+               tie are pinned here. */
+            IP6(0x2001, 0x0db8, 0, 0, 1, 0, 0, 1),
+            IP6(0, 0, 1, 0, 0, 1, 2, 3),
+            /* 4.2.2 again, from the RFC's own example: a lone 16-bit zero
+               stays a "0" even with no longer run anywhere to prefer. */
+            IP6(0x2001, 0x0db8, 0, 1, 1, 1, 1, 1),
+            /* 4.1 + 4.3 together: every group needs trimming, and every
+               letter must come out lowercase. */
+            IP6(0x000a, 0x00bc, 0x0def, 0xfeed, 0x0001, 0x0020, 0x0300, 0x4000),
         };
         static const char *want[] = {
             "::",
@@ -415,6 +426,10 @@ static void test_ip6(void)
             "2001:0:0:1::",
             "::ffff:192.168.1.1",
             "1:2:3:4:5:6:7:8",
+            "2001:db8::1:0:0:1",
+            "::1:0:0:1:2:3",
+            "2001:db8:0:1:1:1:1:1",
+            "a:bc:def:feed:1:20:300:4000",
         };
         size_t i;
 
