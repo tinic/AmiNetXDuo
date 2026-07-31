@@ -950,6 +950,157 @@ static LONG p_state_only(struct Library *base, char word)
     return (rc == 0) ? RETURN_OK : RETURN_FAIL;
 }
 
+
+/* ---------------------------------------------- RFC 3493 4, revision 3 -- */
+/*
+ * -0x372..-0x384. No NDK glue names these, so they are called the same way
+ * everything else in this file is. A library older than revision 3 has
+ * MakeLibrary()'s (APTR)-1 in these slots, so lib_Revision is checked once
+ * before any of them is entered.
+ */
+
+struct probe_if_nameindex { ULONG if_index; char *if_name; };
+
+/* Byte compare rather than Stricmp(): this command does not open
+   utility.library, and both strings come from the same table anyway. */
+static BOOL p_same_name(const char *a, const char *b)
+{
+    while (*a != '\0' && *a == *b)
+    {
+        a++;
+        b++;
+    }
+
+    return (*a == *b) ? TRUE : FALSE;
+}
+
+static ULONG p_if_nametoindex(struct Library *base, const char *name)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register const char     *a0  __asm("a0") = name;
+    register ULONG           res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+
+    __asm __volatile ("jsr a6@(-882:W)"     /* if_nametoindex -0x372 */
+                      : "=r" (res), "=r" (_clob_d1)
+                      : "r" (a6), "r" (a0)
+                      : "d2", "d3", "a1", "cc", "memory");
+    return res;
+}
+
+static char *p_if_indextoname(struct Library *base, ULONG index, char *out)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register ULONG           d0  __asm("d0") = index;
+    register char           *a0  __asm("a0") = out;
+    register char           *res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+
+    __asm __volatile ("jsr a6@(-888:W)"     /* if_indextoname -0x378 */
+                      : "=r" (res), "=r" (_clob_d1)
+                      : "r" (a6), "r" (d0), "r" (a0)
+                      : "d2", "d3", "a1", "cc", "memory");
+    return res;
+}
+
+static struct probe_if_nameindex *p_if_nameindex(struct Library *base)
+{
+    register struct Library           *a6  __asm("a6") = base;
+    register struct probe_if_nameindex *res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+
+    __asm __volatile ("jsr a6@(-894:W)"     /* if_nameindex -0x37e */
+                      : "=r" (res), "=r" (_clob_d1)
+                      : "r" (a6)
+                      : "d2", "d3", "a0", "a1", "cc", "memory");
+    return res;
+}
+
+static VOID p_if_freenameindex(struct Library *base,
+                               struct probe_if_nameindex *ptr)
+{
+    register struct Library            *a6 __asm("a6") = base;
+    register struct probe_if_nameindex *a0 __asm("a0") = ptr;
+    register LONG _clob_d0 __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+
+    __asm __volatile ("jsr a6@(-900:W)"     /* if_freenameindex -0x384 */
+                      : "=r" (_clob_d0), "=r" (_clob_d1), "=r" (_clob_a0)
+                      : "r" (a6), "r" (a0)
+                      : "d2", "d3", "a1", "cc", "memory");
+}
+
+static VOID p_ifindex_phase(struct Library *base)
+{
+    struct probe_if_nameindex *ni;
+    char                       name[16];
+    ULONG                      n = 0;
+
+    if (base->lib_Revision < 3)
+    {
+        Printf((CONST_STRPTR)"ifindex: library revision %ld, need 3 -- skipped\n",
+               (LONG)base->lib_Revision);
+        return;
+    }
+
+    ni = p_if_nameindex(base);
+    if (ni == NULL)
+    {
+        Printf((CONST_STRPTR)"ifindex: if_nameindex returned NULL\n");
+        return;
+    }
+
+    for (n = 0; ni[n].if_name != NULL; n++)
+    {
+        ULONG back;
+        char *got;
+
+        Printf((CONST_STRPTR)"ifindex: %ld = '%s'\n",
+               (LONG)ni[n].if_index, (LONG)ni[n].if_name);
+
+        /* 1-based, and the same numbers GetRouteInfo puts in rtm_index. */
+        if (ni[n].if_index == 0)
+            Printf((CONST_STRPTR)"ifindex: FAIL index 0 in the list\n");
+
+        back = p_if_nametoindex(base, ni[n].if_name);
+        if (back != ni[n].if_index)
+            Printf((CONST_STRPTR)"ifindex: FAIL nametoindex('%s') = %ld want %ld\n",
+                   (LONG)ni[n].if_name, (LONG)back, (LONG)ni[n].if_index);
+
+        name[0] = '\0';
+        got = p_if_indextoname(base, ni[n].if_index, name);
+        if (got == NULL || got != name)
+            Printf((CONST_STRPTR)"ifindex: FAIL indextoname(%ld) did not return its buffer\n",
+                   (LONG)ni[n].if_index);
+        else if (!p_same_name(name, ni[n].if_name))
+            Printf((CONST_STRPTR)"ifindex: FAIL indextoname(%ld) = '%s' want '%s'\n",
+                   (LONG)ni[n].if_index, (LONG)name, (LONG)ni[n].if_name);
+    }
+
+    Printf((CONST_STRPTR)"ifindex: %ld interface(s), list terminated\n", (LONG)n);
+
+    /* "otherwise, it shall return zero. No errors are defined." */
+    if (p_if_nametoindex(base, "nosuchif0") != 0)
+        Printf((CONST_STRPTR)"ifindex: FAIL an unknown name did not answer 0\n");
+
+    /* 0 is not an interface; neither is one past the table. */
+    name[0] = '\0';
+    if (p_if_indextoname(base, 0, name) != NULL)
+        Printf((CONST_STRPTR)"ifindex: FAIL indextoname(0) answered\n");
+    if (p_if_indextoname(base, 9999, name) != NULL)
+        Printf((CONST_STRPTR)"ifindex: FAIL indextoname(9999) answered\n");
+
+    p_if_freenameindex(base, ni);
+    Printf((CONST_STRPTR)"ifindex: if_freenameindex returned\n");
+
+    /* Documented to do nothing rather than to fault, as ReleaseInterfaceList
+       is above. */
+    p_if_freenameindex(base, NULL);
+    Printf((CONST_STRPTR)"ifindex: if_freenameindex(NULL): returned\n");
+}
+
+
 int main(int argc, char **argv)
 {
     struct Library *base;
@@ -1074,6 +1225,8 @@ int main(int argc, char **argv)
     /* Documented to do nothing rather than to fault. */
     p_release_interface_list(base, NULL);
     Printf((CONST_STRPTR)"ReleaseInterfaceList(NULL): returned\n");
+
+    p_ifindex_phase(base);
 
     CloseLibrary(base);
 
