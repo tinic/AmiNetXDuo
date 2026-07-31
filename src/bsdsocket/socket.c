@@ -2215,6 +2215,13 @@ LONG bsd_shutdown(register LONG sock_fd __asm("d0"),
     if (how < 0 || how > 2)
         return bsd_fail(SocketBase, AMI_EINVAL);
 
+    /* "[ENOTCONN] The specified socket is not connected."  A caller that reads
+       shutdown() == 0 as "the connection was live" was told the wrong thing;
+       the FIN below was already conditional, so nothing on the wire changes.
+       A datagram socket has no connection to shut down either. */
+    if ((sock->as_Flags & ASF_CONNECTED) == 0)
+        return bsd_fail(SocketBase, AMI_ENOTCONN);
+
     if (how == 0 || how == 2)
         sock->as_Flags |= ASF_RDSHUT;
 
