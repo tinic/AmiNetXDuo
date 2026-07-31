@@ -201,13 +201,17 @@ jobs:
             echo "window and run \`Install-AmiNetXDuo\`."
             echo
 
-            # This release's section of CHANGELOG.md, verbatim: from its own
-            # heading to the next one.  A missing section is a release that
-            # would ship with no summary, so it fails rather than publishes.
+            # This release's section of CHANGELOG.md, plus every earlier
+            # section of the same minor -- somebody arriving at 0.14.2 wants
+            # what 0.14.1 and 0.14.0 changed too, not just the last patch.
+            # Its own heading is dropped (the version is already the title);
+            # the earlier ones are kept so the groups stay legible.  A missing
+            # section is a release that would ship with no summary, so it fails
+            # rather than publishes.
             ver=$(tools/version.sh --product)
-            awk -v v="## $ver" '
+            awk -v v="## $ver" -v pfx="## ${ver%.*}." '
                 $0 == v {found = 1; next}
-                found && /^## / {exit}
+                found && /^## / && index($0, pfx) != 1 {exit}
                 found {print}
             ' CHANGELOG.md > "$notes.body"
             [ -s "$notes.body" ] || {
