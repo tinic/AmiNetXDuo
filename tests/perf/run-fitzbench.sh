@@ -5,6 +5,7 @@
 #   tests/perf/run-fitzbench.sh [-H user@host] [-A addr] [-m MODEL] [-c CPU]
 #                               [-b BUILDDIR] [-k KB] [-C CHUNK] [-r REPS]
 #                               [-T TAG] [-t SECONDS] [-p PORT] [-s] [-x]
+#                               [-a] [-B IFACE] [-N BOARD]
 #
 # WHAT IT MEASURES
 #
@@ -14,24 +15,34 @@
 #   AmigaDOS with no network under it -- the control that says how much of the
 #   figure is ours.
 #
-# WHY BRIDGED WINUAE AND NOT FS-UAE
+# WHY A BRIDGED EMULATOR AND NOT FS-UAE
 #
 #   Every throughput conclusion this project drew before this script came from
 #   SLIRP, whose bandwidth-delay product is nearly zero, or from loopback,
 #   where it is exactly zero.  docs/RESEARCH.md 64.6 spells out what that makes
 #   unanswerable: a receive window cannot be shown to matter on a link with no
-#   delay term, whatever the CPU is doing.  WinUAE on winbuilder bridges the
-#   A2065 onto a real adapter, so the guest takes a real DHCP lease and the
-#   peer is a real machine several hops of real hardware away.
+#   delay term, whatever the CPU is doing.  A bridged emulator puts the A2065
+#   on a real adapter, so the guest takes a real DHCP lease and the peer is a
+#   real machine several hops of real hardware away.
+#
+#   -a is bridged AMIBERRY, run on the Linux host it is installed on -- the
+#   emulator is local, so this script has to BE on that machine.  -B names the
+#   host NIC (ens18) and tools/amiberry-run.sh reads the backend back out of the
+#   emulator log, so a run that quietly fell back to NAT fails rather than
+#   printing a number.
+#
+#   The default is bridged WINUAE over ssh to winbuilder, which is where this
+#   script started.
 #
 #   -s runs it on FS-UAE/SLIRP against a server on this Mac instead.  That is a
 #   smoke test for the harness, not a measurement: read nothing into the
 #   numbers it prints.
 #
-# THE PEER MUST BE A THIRD MACHINE.  A frame the Windows host sends to the
+# THE PEER MUST BE A THIRD MACHINE.  A frame the emulator's host sends to the
 # guest's MAC leaves its NIC and never comes back to that NIC's own pcap
-# capture, so a server on winbuilder is unreachable from the guest while being
-# reachable from everywhere else (docs/RESEARCH.md 63).
+# capture, so a server on the host is unreachable from the guest while being
+# reachable from everywhere else (docs/RESEARCH.md 63).  That holds for
+# Amiberry's uaenet_pcap exactly as it holds for WinUAE's.
 #
 # THE PATCHED WINUAE IS THE DEFAULT HERE.  6.0.3 copies a captured frame into a
 # 4000-byte buffer without checking its length and dies on the first coalesced
@@ -66,8 +77,11 @@ PORT="${AMINETXDUO_FITZ_PORT:-17712}"
 SLIRP=0
 ACCURATE=0
 ROADSHOW=""
+AMIBERRY=0
+IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
+BOARD=a2065
 
-while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:" opt; do
+while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:" opt; do
     case "$opt" in
         H) PEER="$OPTARG" ;;
         A) PEER_ADDR="$OPTARG" ;;
@@ -83,12 +97,18 @@ while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:" opt; do
         s) SLIRP=1 ;;
         x) ACCURATE=1 ;;
         R) ROADSHOW="${OPTARG:-/tmp/rsdemo/Roadshow-Demo-1.15/Workbench}" ;;
+        a) AMIBERRY=1 ;;
+        B) AMIBERRY=1; IFACE="$OPTARG" ;;
+        N) BOARD="$OPTARG" ;;
         *) echo "usage: $0 [-H user@host] [-A addr] [-m model] [-c cpu]" \
                 "[-b build] [-k KB] [-C chunk] [-r reps] [-T tag] [-t secs]" \
-                "[-p port] [-s] [-x] [-R roadshowdir]" >&2
+                "[-p port] [-s] [-x] [-R roadshowdir] [-a] [-B iface] [-N board]" >&2
            exit 2 ;;
     esac
 done
+
+[ "$AMIBERRY" = "0" ] || [ "$SLIRP" = "0" ] || {
+    echo "-a and -s are different emulators; pick one" >&2; exit 2; }
 
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
@@ -106,6 +126,7 @@ A2065="${AMINETXDUO_A2065:-}"
 if [ -z "$A2065" ]; then
     for candidate in \
         "$ROOT/build/a2065.device" \
+        "$HOME/amiga-assets/devs/a2065.device" \
         "$HOME/amiga-os-src/os-source/other_networking/sana2/bin/devs/a2065.device"
     do
         [ -f "$candidate" ] && { A2065="$candidate"; break; }
@@ -185,11 +206,16 @@ cp "$BENCH" "$STAGE/FitzBench"
 STATARGS="-s"
 [ -z "$ROADSHOW" ] || STATARGS=""
 
+# NetStat runs on BOTH sides of the network arm.  Its counters are cumulative,
+# so bytes/sec can be had from FitzBench alone but the PACKET rate cannot: only
+# the difference across the timed window divided by that window is a rate, and
+# the packet rate is the number the emulator's delivery pacing shows up in.
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
 wait 6
 &SYS:fitz mount $SERVER_ADDR:$PORT FITZ:
 wait 10
+SYS:NetStat $STATARGS
 SYS:FitzBench FITZ: KB=$KB CHUNK=$CHUNK REPS=$REPS
 SYS:NetStat $STATARGS
 SYS:FitzBench RAM: KB=$KB CHUNK=$CHUNK REPS=$REPS
@@ -210,6 +236,15 @@ set +e
 if [ "$SLIRP" = "1" ]; then
     HD="$ROOT/build/testhd-$TAG"
     "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+        "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
+        "$STAGE/AddNetInterface" "$STAGE/NetStat" "$STAGE/fitz" "$STAGE/FitzBench"
+elif [ "$AMIBERRY" = "1" ]; then
+    # Amiberry is local, so this branch only works ON the machine it is
+    # installed on -- there is no ssh half the way winuae-run.sh has one.
+    # amiberry-run.sh has no warp to drop, so -x has nothing to do here.
+    HD="$ROOT/build/amiberry-testhd-$TAG"
+    "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
+        -t "$TIMEOUT" ${CPU:+-c "$CPU"} \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
         "$STAGE/AddNetInterface" "$STAGE/NetStat" "$STAGE/fitz" "$STAGE/FitzBench"
 else
@@ -239,5 +274,75 @@ fi
 
 echo "==> results ($MODEL${CPU:+/$CPU}, $KB KB, chunk $CHUNK, $REPS reps)"
 grep "fitzbench: RESULT\|fitzbench: file=" "$REPORT" | sed 's/^/    /'
+
+# ------------------------------------------------------------ packet rate ---
+#
+# Bytes/sec is FitzBench's own figure.  Packets/sec is not derivable from it,
+# and it is the one the emulator's delivery pacing shows up in: Amiberry hands
+# the guest received frames from the hsync handler and looks at transmit every
+# 16th hsync (src/a2065.cpp), so there is a ceiling on frames/sec that has
+# nothing to do with how fast the guest's TCP is.
+#
+# The bracket holds both directions, the warm-up pair and the verify read, so
+# what comes out of it is a count and a mean size over the whole network arm,
+# not a per-direction rate.  A per-direction rate wants a capture: the mean
+# frame size here mixes a write's full segments with the read's bare ACKs.
+#
+# ONLY THE ip: BLOCK IS READ.  NetStat prints "packets sent" three times per
+# run -- under ip:, under tcp: and again in the SANA-II interface statistics --
+# and taking them positionally reads the driver's counter as the second run's
+# IP counter, which comes out negative.
+echo
+awk -v kb="$KB" -v reps="$REPS" '
+    /^===== / { cmd = $0; infitz = (cmd ~ /FitzBench FITZ:/); inip = 0; inif = 0 }
+
+    cmd ~ /NetStat/ && /^ip:/    { inip = 1; next }
+    cmd ~ /NetStat/ && /^eth[0-9]/ { inif = 1; next }
+    /^[^\t ]/                    { inip = 0; inif = 0 }
+
+    inip && /packets sent/     { b = $4; gsub(/[()]/, "", b)
+                                 ns[n_s++] = $1 + 0; nb[n_s - 1] = b + 0 }
+    inip && /packets received/ { b = $4; gsub(/[()]/, "", b)
+                                 nr[n_r++] = $1 + 0; nrb[n_r - 1] = b + 0 }
+    inif && /packets received/ { fr[n_f] = $3 + 0; fs[n_f++] = $6 + 0 }
+
+    infitz && /RESULT write kbs_mean=/ { sub(/.*kbs_mean=/, ""); wkbs = $1 + 0 }
+    infitz && /RESULT read kbs_mean=/  { sub(/.*kbs_mean=/, ""); rkbs = $1 + 0 }
+
+    END {
+        if (n_s < 2 || n_r < 2 || wkbs == 0) { exit 0 }
+        dps = ns[1] - ns[0];  dbs = nb[1] - nb[0]
+        dpr = nr[1] - nr[0];  dbr = nrb[1] - nrb[0]
+        printf "==> what crossed the wire (NetStat pair around the network arm)\n"
+        printf "    ip tx %d packets / %d bytes", dps, dbs
+        if (dps > 0) printf ", mean %d bytes", dbs / dps
+        printf "\n"
+        printf "    ip rx %d packets / %d bytes", dpr, dbr
+        if (dpr > 0) printf ", mean %d bytes", dbr / dpr
+        printf "\n"
+        if (n_f >= 2)
+            printf "    a2065 frames: %d sent, %d received\n",
+                   fs[1] - fs[0], fr[1] - fr[0]
+        # FitzBench moves KB each way once to warm up and then once per rep, so
+        # the bytes in the bracket are known and the measured rates turn them
+        # into the seconds they took.  Both directions ran back to back, so
+        # this is the frame rate the card sustained across the arm rather than
+        # either direction on its own.
+        secs = (reps + 1) * (kb / wkbs + kb / rkbs) + 64 / rkbs
+        if (secs > 0 && n_f >= 2)
+            printf "    ~%d frames/s sustained over ~%.1f s of transfer\n",
+                   ((fs[1] - fs[0]) + (fr[1] - fr[0])) / secs, secs
+    }
+' "$REPORT"
+
+# The scheduler block is only there against a library that has NETSTATUS_HEALTH.
+if grep -q "^scheduler:" "$REPORT"; then
+    echo
+    echo "==> was the machine ever held (last NetStat)"
+    awk '/^scheduler:/ { s = ""; g = 1; next }
+         g && /^\t/    { s = s $0 "\n"; next }
+         g             { g = 0; last = s }
+         END           { printf "%s", (g ? s : last) }' "$REPORT" | sed 's/^/  /'
+fi
 
 exit 0
