@@ -41,16 +41,18 @@
 #     * the guest really did the work: at least CYCLES*2 interface bounces,
 #       CYCLES interface round trips, and EXPUNGES completed expunges.
 #
-#   `-n` is the negative control for exactly that.  It runs the drill with
-#   CYCLES 1 EXPUNGE 0 -- a run in which every guest check still passes -- and
-#   requires this script to REJECT it.  If -n ever reports PASSED, the count
-#   gates below have stopped working and the normal run proves nothing.
+#   `-n` is the negative control for exactly that.  It asks the drill for
+#   CYCLES 1 EXPUNGE 0 while leaving the gates at the values they would have
+#   had -- a run in which every guest check still passes, and all four count
+#   gates have to fire -- and requires this script to REJECT it.  If -n ever
+#   reports PASSED, the gates have stopped gating and the normal run proves
+#   nothing.
 #
 # WHAT IT FOUND, AND WHY THAT IS A BUDGET AND NOT A PASS
 #
-#   An open/expunge/reopen cycle does not give all its memory back: 12,568 to
-#   12,640 bytes go missing per cycle, dead linear over eight cycles, measured
-#   on Amiberry/A1200/a2065-on-SLIRP.  Plain open and close leaks nothing --
+#   An open/expunge/reopen cycle does not give all its memory back: 12,612
+#   bytes go missing per cycle, dead linear over eight cycles, measured on
+#   Amiberry/A1200/a2065-on-SLIRP.  Plain open and close leaks nothing --
 #   twenty-four nested pairs move AvailMem() by zero -- so it is the expunge
 #   and reload path specifically.  That is an open defect, recorded in
 #   docs/BACKLOG.md, not something this file may declare acceptable.
@@ -79,6 +81,7 @@
 #   AMINETXDUO_CYCLE_EXPUNGES   expunges     (default 2)
 #   AMINETXDUO_CYCLE_SOCKETS    sockets held across each bounce (default 2)
 #   AMINETXDUO_CYCLE_ORPHAN_FATAL=1  a leaked reader stack fails the run
+#   AMINETXDUO_CYCLE_LEAK_BUDGET     bytes an expunge cycle may lose (13312)
 #
 #   The defaults keep this inside the normal suite.  A soak is
 #   AMINETXDUO_CYCLE_CYCLES=50 AMINETXDUO_CYCLE_EXPUNGES=10, the way
@@ -104,9 +107,14 @@ BOARD=a2065
 IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
 NEGATIVE=0
 
+# CYCLES and EXPUNGES are what the gates at the bottom demand; GUEST_* is what
+# the drill is actually asked for.  They are the same number in every run but
+# the negative control, which is the point of there being two.
 CYCLES="${AMINETXDUO_CYCLE_CYCLES:-3}"
 EXPUNGES="${AMINETXDUO_CYCLE_EXPUNGES:-2}"
 SOCKETS="${AMINETXDUO_CYCLE_SOCKETS:-2}"
+GUEST_CYCLES=""
+GUEST_EXPUNGES=""
 
 while getopts "m:t:b:AN:B:n" opt; do
     case "$opt" in
@@ -121,19 +129,25 @@ while getopts "m:t:b:AN:B:n" opt; do
     esac
 done
 
-# The negative control is a run that must be rejected, so it asks for less work
-# than the gates below require and nothing else changes.
 if [ "$NEGATIVE" = 1 ]; then
-    CYCLES=1
-    EXPUNGES=0
+    # The guest is asked for less than the gates below demand, and the gates
+    # are NOT lowered to match.  Lowering them would make the run
+    # self-consistent again and prove nothing: what is being tested is that a
+    # drill which passes every one of its own checks while doing almost no
+    # cycling still gets rejected, and all four count gates have to fire.
+    GUEST_CYCLES=1
+    GUEST_EXPUNGES=0
     echo "==> NEGATIVE CONTROL: this run must be REJECTED by the gates below"
 fi
+
+GUEST_CYCLES="${GUEST_CYCLES:-$CYCLES}"
+GUEST_EXPUNGES="${GUEST_EXPUNGES:-$EXPUNGES}"
 
 # Every cycle is a bounce, a socket round trip and an interface round trip;
 # every expunge is a full stack teardown and bring-up, which is the expensive
 # half.  These are ceilings, not waits: a passing run finishes well inside.
 if [ "$TIMEOUT" = 0 ]; then
-    TIMEOUT=$(( 180 + CYCLES * 20 + EXPUNGES * 60 ))
+    TIMEOUT=$(( 180 + GUEST_CYCLES * 20 + GUEST_EXPUNGES * 60 ))
 fi
 
 TOOLS="$ROOT/$BUILD/src/tools"
@@ -192,7 +206,7 @@ cp "$DRILL"                 "$STAGE/CycleDrill"
 # expunge needs lib_OpenCnt 0, and any earlier command would have taken it off
 # zero.  The two reports after it read the stack the drill left running.
 cat > "$STAGE/commands.txt" <<EOF
-SYS:CycleDrill CYCLES $CYCLES EXPUNGE $EXPUNGES SOCKETS $SOCKETS
+SYS:CycleDrill CYCLES $GUEST_CYCLES EXPUNGE $GUEST_EXPUNGES SOCKETS $SOCKETS
 SYS:netstat -h
 SYS:ShowNetStatus MEMORY
 SYS:NetShutdown
@@ -340,7 +354,7 @@ if [ -n "$LEAKLINE" ]; then
     else
         fail "an expunge cycle lost $LEAK bytes, over the $LEAK_BUDGET budget"
     fi
-elif [ "$EXPUNGES" -ge 2 ]; then
+elif [ "$GUEST_EXPUNGES" -ge 2 ]; then
     fail "the drill did not report a per-cycle expunge leak figure"
 fi
 
