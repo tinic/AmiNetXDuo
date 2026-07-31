@@ -44,15 +44,6 @@ was wrong for a day.
   `tests/tools/run-cycledrill.sh` gates it as a regression budget against the
   recorded figure, so it catches the leak getting worse and not the leak.
   Found 2026-07-31 on Amiberry/A1200/a2065-on-SLIRP.
-- **The `sana2_rx.c` reader orphan does not reproduce under emulation.**
-  `ami_sana2_rx_stop()`'s last-resort path logs `reader N did not stop;
-  leaking its stack` and leaks 32 KB when a SANA-II driver ignores `AbortIO`,
-  which Commodore's a2065.device 2.16 is documented to do. Thirteen full
-  teardowns under Amiberry with that driver logged it zero times, so the
-  emulated card returns its queued `CMD_READ`s where the real one may not.
-  `run-cycledrill.sh` greps the serial log for it on every run and prints the
-  count; `AMINETXDUO_CYCLE_ORPHAN_FATAL=1` makes it fail. Confirming it needs
-  real hardware. Checked 2026-07-31.
 - **TCP cannot be made to send from a bound address, only checked.** The rest
   of `bind()` source selection is done: `bsd_source_select()` (socket.c) maps a
   bound address or an RFC 4007 zone to the index `nxd_udp_socket_source_send()`
@@ -82,42 +73,6 @@ was wrong for a day.
   reaches the driver and no report is ever sent, and a querying switch stops
   forwarding the group. The reasoning is beside the define in
   `port/netxduo-amiga/inc/nx_user.h`.
-- **Ship a Developer drawer: the NDK addendum.** SHIPPED 2026-07-31 for RFC
-  3493 section 4. `developer/` holds the SFD and the generated
-  clib/inline/proto/pragmas/lvo set; `tools/stage-developer.sh` assembles the
-  drawer and both `dist/make-dist.sh` and the CMake build call it, so the
-  archive's copy is the one `tests/tools`' `IfNames` was compiled against --
-  against the staged drawer alone, with no path into `include/`.
-  `tools/gen-developer.sh --check` runs in `ci.sh`'s cross stage wherever the
-  toolchain has an `sfdc`.
-
-  Widened the same day to carry every definition we make that the NDK lacks,
-  not only the new vectors. `include/aminetxduo/in6.h` is the second published
-  header: `IPPROTO_IPV6`, `PF_INET6`, `INET6_ADDRSTRLEN`, the three `IPV6_*`
-  options, `IN6ADDR_*_INIT`, the `IN6_IS_ADDR_*` macros,
-  `struct sockaddr_storage`, `AI_ADDRCONFIG`, and the `sockaddr_in6` offset
-  trap written out for callers. `bsdsocket_internal.h` includes it and aliases
-  its `AMI_IPV6_*_BSD` names to it, so there is one copy of each number.
-  `AI_V4MAPPED` is deliberately left undefined and `sockaddr_storage`
-  deliberately has no `ss_family`; `docs/NDK-ADDENDUM.md` has both reasons.
-
-  Left:
-  - **RFC 3542** is in it as of the same day: `include/aminetxduo/cmsg.h`, the
-    third published header. It adds no vectors, so the drawer's shape did not
-    change.
-  - **IPv6 multicast** (`IPV6_JOIN_GROUP`, `IPV6_LEAVE_GROUP`,
-    `struct ipv6_mreq`) is absent from the NDK and would belong in `in6.h`.
-    IPv4 multicast needs nothing: the NDK has the whole set.
-  - **`NetStackQuery`/`NetStackControl` are still private.** Recommendation:
-    publish them, because they are what a third-party `netstat` needs and
-    `ShowNetStatus`, `netstat` and `arp` already depend on them being stable.
-    Not done here: publishing freezes `NetStatusHeader` and every
-    `NETCTRL_*` request struct, and that is the owner's call. Adding them is
-    two lines -- `netstatus.h` to `PUBLIC_HEADERS` in
-    `tools/stage-developer.sh`, and an `AMI_NETSTATUS_MIN_REVISION` beside
-    the existing magic.
-  - No `.info` for the drawer's own contents beyond `ReadMe.info`; the
-    headers are for a cross-compiler, not for Workbench.
 - **RFC 3542: the subset worth having is built; the send half of
   `IPV6_HOPLIMIT` is not.** Assessed and implemented 2026-07-31. No new LVOs:
   it rides `sendmsg`/`recvmsg`, and `struct msghdr` was already the 28-byte
@@ -183,6 +138,15 @@ was wrong for a day.
   address the machine plainly had. `bsd_ip6_zone_source()` in `transfer.c` has
   the same bound and is right to -- a zone only ever qualifies a link-local.
 
+- **Publish `NetStackQuery` / `NetStackControl`?** They are still private, at
+  -0x366/-0x36c. They are what a third-party `netstat` would need, and
+  `ShowNetStatus`, `netstat` and `arp` already depend on them being stable, so
+  the recommendation is to publish. Not done because publishing freezes
+  `NetStatusHeader` and every `NETCTRL_*` request struct, which is the owner's
+  call. Two lines when decided: `netstatus.h` into `PUBLIC_HEADERS` in
+  `tools/stage-developer.sh`, and an `AMI_NETSTATUS_MIN_REVISION` beside the
+  existing magic.
+
 ## Decided against — do not "fix"
 
 - **A browse reports the whole peer cache, not the browse window**, and stays that way, 2026-07-31.
@@ -200,7 +164,6 @@ was wrong for a day.
   switched-off machine lingering, which every other mDNS browser does too.
   Still true after the address chasing and `ALL` landed: neither of them needed
   an RR walk, so nothing is written that this would reuse.
-
 
 - **RFC 3678 source filtering stays out**, 2026-07-31. `IP_ADD_SOURCE_MEMBERSHIP`,
   `IP_BLOCK_SOURCE` and the `MCAST_*` family need IGMPv3, which the vendored NetX
@@ -302,6 +265,16 @@ was wrong for a day.
   gating question.
 
 ## Environment and tooling
+
+- **The `sana2_rx.c` reader orphan does not reproduce under emulation.**
+  `ami_sana2_rx_stop()`'s last-resort path logs `reader N did not stop;
+  leaking its stack` and leaks 32 KB when a SANA-II driver ignores `AbortIO`,
+  which Commodore's a2065.device 2.16 is documented to do. Thirteen full
+  teardowns under Amiberry with that driver logged it zero times, so the
+  emulated card returns its queued `CMD_READ`s where the real one may not.
+  `run-cycledrill.sh` greps the serial log for it on every run and prints the
+  count; `AMINETXDUO_CYCLE_ORPHAN_FATAL=1` makes it fail. Confirming it needs
+  real hardware. Checked 2026-07-31.
 
 - **`STATE=down` has no harness.** It is honoured as of 2026-07-31 but only the
   config parser is covered; no emulator run boots an interface configured down.
