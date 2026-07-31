@@ -2,9 +2,10 @@
 
 User-visible changes, newest first. Internal work is in the git log.
 
-## Unreleased
+## 0.14.2
 
 - `netstat -h` now reports what the network owns -- allocations, sockets and packet buffers, each with a high-water mark -- so a suspected leak can be confirmed or refuted without a debugger
+- It still answers on a machine that has stopped responding, so the numbers can be read from one that is stuck
 - `ShowNetStatus MEMORY` reports the fewest packet buffers ever free
 
 ## 0.14.1
