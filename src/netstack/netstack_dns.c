@@ -473,13 +473,24 @@ LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)
  * only on the first add and the last remove.
  */
 
-static LONG ami_ns_use_deepen(LONG use)
+/* A slot in use never stores 0; one that does predates the count and is the
+   file's own, as ObtainDomainNameServerList() also reads it. */
+static LONG ami_ns_use(LONG stored)
 {
+    return (stored != 0) ? stored : -1;
+}
+
+static LONG ami_ns_use_deepen(LONG stored)
+{
+    LONG use = ami_ns_use(stored);
+
     return (use < 0) ? (use - 1) : (use + 1);
 }
 
-static LONG ami_ns_use_shallow(LONG use)
+static LONG ami_ns_use_shallow(LONG stored)
 {
+    LONG use = ami_ns_use(stored);
+
     return (use < 0) ? (use + 1) : (use - 1);
 }
 
