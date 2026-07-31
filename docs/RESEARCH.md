@@ -21249,3 +21249,126 @@ always wrote, byte for byte — verified against a real no-argument run.
 
 `tests/tools/run-oommsg.sh` is the first test to use it, and the assertions
 were checked against 81.3's pre-fix transcript: all four fire on it.
+
+## 83. Chasing the address a browse answer did not carry (2026-07-31)
+
+`ShowNetServices _http._tcp` on a real LAN printed a row like
+
+    anxd chase
+        playhouse3.local  no address  port 8080
+
+and there was nothing more to be got from it: a service with a name, a port
+and no address is one nothing can connect to. 74 recorded the mitigation —
+raising the peer cache to 32 KB so the A record was less likely to be evicted
+from under the SRV that points at it — and left the real case open. The real
+case is not eviction at all. `_nx_mdns_service_addition_info_get()`
+(`nxd_mdns.c:10532`) fills `service_ipv4` by walking the cache for an A record
+whose interned name pointer equals the SRV target's, and **asks for nothing**.
+If the responder did not put the address in the same packet, the module never
+finds out what it is.
+
+### It is one call, and it is nearly free
+
+`nx_mdns_host_address_get()` takes a name that already carries its domain —
+`_nx_mdns_host_address_get()` sets `domain_flag` when it sees a dot and uses
+the string verbatim — so the SRV target goes in unchanged. Underneath,
+`_nx_mdns_one_shot_query()` calls `_nx_mdns_query_check()` first, and a record
+already in either cache comes back as `NX_MDNS_EXIST_SHARED_RR` **before any
+wait or any packet**. So the cost falls only on the rows that need it. With
+`wait_option` of zero it does not query at all, only probes the cache, which is
+why "register the question and come back later" is not available through this
+API and the chase has to be a blocking one-shot.
+
+That wait is a ThreadX suspension, not an Amiga `Wait()`, so it hands the baton
+on — the same thing the mDNS branch of `netstack_resolve()` has always done
+inside its bracket.
+
+### Two bounds, and why the second one matters
+
+Per name, half a second: RFC 6762 §6 delays a shared answer 20–120 ms and the
+reply follows, and `NX_MDNS_QUERY_DELAY_MIN`/`_RANGE` work out to 1–5 ticks on
+this port. Over the whole walk, two seconds — because the case that actually
+waits is a machine that has gone while its SRV is still cached, and a cache
+holding a dozen of those would otherwise turn one listing into a dozen full
+timeouts. Rows already written are searched by host name first, so several
+services on one machine cost one query between them and a target that did not
+answer is not asked about twice.
+
+A host name that had to be truncated to fit `AMI_MDNS_SVC_HOST_LEN` is not
+chased. `NX_MDNS_HOST_NAME_MAX` is 64 and the row holds 63, so it can only
+happen at exactly 64 characters — but the query would be about a different
+machine, and a wrong address printed as a fact is worse than none.
+
+### Measured, on the real LAN behind playhouse3
+
+Three services published from playhouse4 with `avahi-publish -s -H <host>`,
+which makes Avahi advertise an SRV whose target it does not own and therefore
+does not send an address for:
+
+| SRV target | before | after |
+| --- | --- | --- |
+| `playhouse2.local` | no address | **192.168.1.184** |
+| `nosuchbox.local` | no address | no address |
+| `playhouse3.local` | no address | no address |
+
+`tests/tools/mdnswatch.py` on playhouse4 has the wire:
+
+    [36821.15] 192.168.1.134:5353  query     ... playhouse2.local(A)
+    [36821.15] 192.168.1.184:5353  response  ... A=playhouse2.local
+    [36821.25] 192.168.1.134:5353  query     ... nosuchbox.local(A)
+    [36821.75] 192.168.1.134:5353  query     ... playhouse3.local(A)
+
+`nosuchbox.local` is the honest negative: the question was asked and nothing
+answered. **`playhouse3.local` is an emulation artefact and not a result.**
+playhouse3 is the machine running Amiberry, and a guest bridged onto `ens18`
+through libpcap injects its frames onto the wire without the host's own kernel
+receiving them — so avahi-daemon on playhouse3 never sees the query. The same
+log shows it answering that exact question for everybody else on the LAN
+(`192.168.1.191` asked, `192.168.1.136` replied). Any bridged-Amiberry test
+that needs a `.local` peer must therefore use a machine that is *not* the
+emulator host.
+
+### What it did not need
+
+No RR-cache walk. The freshness fields (`nx_mdns_rr_elapsed_time`,
+`nx_mdns_rr_remaining_ticks`) that filtering a browse to its own window would
+require are still not reachable through `NX_MDNS_SERVICE`, and nothing written
+here brings that any closer — see the backlog entry, which stands.
+
+## 84. Browsing every type at once (2026-07-31)
+
+With no type `ShowNetServices` runs the RFC 6763 §9 meta-query and lists the
+types present, which is where it stopped: it could say `_ipp._tcp` is here and
+not which printer. `ALL` now takes those types and starts one continuous query
+per type, all at once.
+
+**It costs one more window, not one per type.** RFC 6762 queries are
+subscriptions that run concurrently, and a machine answers whichever of them
+apply to it in a single response — a house LAN offering 22 types was fully
+listed in two five-second windows. Entirely in the command: `NETCTRL_MDNS_BROWSE`
+already takes a type and `NETSTATUS_SERVICES` already answers with the whole
+cache, so nothing in the library changed.
+
+### Whether it is safe for the peer cache, which was the open question
+
+Half of it is now closed and half is not, and they are different halves.
+
+The peer cache holds one record per registered query and four per instance
+behind it. When it fills, `_nx_mdns_cache_add_resource_record()` does not
+refuse the new record — it evicts the least recently used one
+(`nxd_mdns.c:10974`) and **does not call the cache-full notify**, which only
+fires from the string table. That eviction is how an SRV came to outlive the A
+record it points at, and it is exactly what §83 now repairs after the fact: the
+address is asked for rather than depended on. So the failure mode that made
+cache size decide whether an answer had an address in it no longer does.
+
+What is not repaired is a cache so full that the *reply* to the chase cannot
+land either. That is bounded rather than solved: `SVC_TYPES_MAX` is 32, and 22
+types with 40-odd instances behind them sat inside 32 KB with room left. A
+network past that is not silently truncated — the count of types is capped with
+a message, and `nsh_Available > nsh_Count` already reports a listing that had
+more in it than fit.
+
+`ALL` with a type is refused, and Ctrl-C in the first window drops back to
+listing the types rather than starting a second round of queries only to stop
+them again.
