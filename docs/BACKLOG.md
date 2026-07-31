@@ -140,11 +140,27 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
     `RECVPATHMTU`, `USE_MIN_MTU`, `DONTFRAG`, `NEXTHOP` -- extension headers and
     path-MTU state NetX Duo does not expose. Not planned.
 
+  **The loopback interface has no index, so `ipi6_ifindex` is 0 over `::1`.**
+  NetX Duo parks it at `nx_ip_interface[NX_MAX_PHYSICAL_INTERFACES]`, past the
+  end of the range this library numbers, so `if_indextoname()` cannot name it
+  and `rtm_index` does not report it either. `ipi6_addr` is still filled in, and
+  a datagram off a real interface reports 1 or 2. Giving loopback an index means
+  moving the `if_nametoindex()` / `rtm_index` convention, which
+  `aminetxduo/ifindex.h` says is one decision -- raise it as that, not here.
+
   Verification: the ABI is pinned with `_Static_assert` in `cmsg.c` (every
-  offset, and the `CMSG_*` arithmetic), and `tests/ipv6/ipv6_socket_test.c`
-  exercises the macros, the option round-trips and one datagram over `::1` with
-  both objects attached. That harness needs the emulator tier, so the numbers
-  are checked by CI and the behaviour is not.
+  offset, and the `CMSG_*` arithmetic), and `tests/ipv6/ipv6_socket_test.c` --
+  which links against none of our code -- runs 119 checks over the macros, the
+  option round-trips, a datagram over `::1` with both objects attached and the
+  answer sent back with an `IPV6_PKTINFO` source, and the IPv4 half over
+  127.0.0.1. Green on Kickstart 3.1 / 68020 under FS-UAE, 2026-07-31. That
+  harness is tier 2, so CI checks that it builds and not that it passes.
+
+  The emulator run is what found both loopback edges: the index above, and
+  `::1` living in `nx_ipv6_address[NX_MAX_IPV6_ADDRESSES]` rather than inside
+  the configurable range, which made naming it as a send source fail for an
+  address the machine plainly had. `bsd_ip6_zone_source()` in `transfer.c` has
+  the same bound and is right to -- a zone only ever qualifies a link-local.
 
 - **`bsd_bind_wants_interface()` is handed the wrong pointer for IPv6
   datagrams.** Found 2026-07-31 while writing the above, and deliberately not

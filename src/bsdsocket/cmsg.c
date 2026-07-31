@@ -116,7 +116,17 @@ static const UBYTE *bsd_cmsg_iphdr(NX_PACKET *packet, ULONG need)
     return hdr;
 }
 
-/* 1-based, as if_nametoindex() and rtm_index count.  0 when unknown. */
+/*
+ * 1-based, as if_nametoindex() and rtm_index count.  0 when unknown, which
+ * RFC 3542 6.6 defines as "unspecified".
+ *
+ * The loopback interface is one of the unknowns, and deliberately: NetX Duo
+ * parks it at nx_ip_interface[NX_MAX_PHYSICAL_INTERFACES], past the end of the
+ * range this library numbers, so it has no name from if_indextoname() and no
+ * rtm_index either.  Inventing one here would hand a caller an index that the
+ * rest of the library cannot resolve.  A datagram over ::1 therefore reports
+ * ipi6_addr and an ifindex of 0, which is the whole answer available.
+ */
 static ULONG bsd_cmsg_ifindex(NX_IP *ip, NX_PACKET *packet)
 {
     const NX_INTERFACE *nxif = NX_NULL;
@@ -503,7 +513,16 @@ LONG bsd_cmsg_source_index(NX_IP *ip, const BsdCmsgSource *src, BOOL v6)
             want = &ip->nx_ip_interface[src->cs_Ifindex - 1UL];
         }
 
-        for (i = 0; i < (UINT)NX_MAX_IPV6_ADDRESSES; i++)
+        /*
+         * The +NX_LOOPBACK_IPV6_ENABLED matters: nxd_ipv6_enable() parks ::1
+         * in the slot past the configurable ones, the same place the loopback
+         * interface sits past the physical ones.  Without it, naming ::1 as a
+         * source is refused for an address the machine plainly has.
+         * nxde_udp_socket_source_send() bounds the index the same way.
+         */
+        for (i = 0;
+             i < (UINT)(NX_MAX_IPV6_ADDRESSES + NX_LOOPBACK_IPV6_ENABLED);
+             i++)
         {
             const NXD_IPV6_ADDRESS *a = &ip->nx_ipv6_address[i];
 

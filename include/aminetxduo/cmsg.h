@@ -11,7 +11,8 @@
  * IP_RECVDSTADDR as 7.  Two of those three macros are unusable as shipped:
  *
  *   - CMSG_NXTHDR expands to ALIGN(), which no NDK header defines, so any
- *     translation unit that uses it fails to compile;
+ *     translation unit that uses it fails to compile ("implicit declaration of
+ *     function 'ALIGN'");
  *   - CMSG_FIRSTHDR returns msg_control without testing msg_controllen, which
  *     RFC 3542 section 20.3.1 calls out by name -- recvmsg() reports "no
  *     ancillary data" by setting msg_controllen to 0, and the unguarded macro
@@ -20,6 +21,17 @@
  * So both are replaced here, along with CMSG_LEN and CMSG_SPACE, which the NDK
  * does not have at all.  Including this header after <sys/socket.h> is what a
  * caller wants; it undefines what it replaces.
+ *
+ * Replaced rather than repaired by defining ALIGN: that name is unprefixed and
+ * common enough to collide with the caller's own code, and supplying it would
+ * still leave CMSG_NXTHDR refusing the NULL second argument RFC 3542 5.1
+ * requires.  CMSG_FIRSTHDR has to be replaced whatever happens, so one
+ * mechanism for both is the smaller surface.
+ *
+ * `struct cmsghdr` itself is NOT redefined here.  It is the NDK's, it is
+ * already the right shape, and a second definition would be an ODR-style trap
+ * for anyone who included the two headers in the other order.  cmsg.c pins
+ * every offset of it with _Static_assert instead.
  *
  * CMSG_ALIGN IS 4 BYTES, and that is ABI.  Every 32-bit BSD used 4, it keeps
  * struct cmsghdr at 12 bytes with no padding before the data, and nothing

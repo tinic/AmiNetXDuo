@@ -1285,9 +1285,15 @@ ULONG                   arrived_on = 0;
             (VOID)t_check((BOOL)(info.ipi6_addr.s6_addr[15] == 1),
                           "ipi6_addr is ::1, the address it was sent to",
                           info.ipi6_addr.s6_addr[15]);
-            (VOID)t_check((BOOL)(info.ipi6_ifindex != 0),
-                          "ipi6_ifindex names the arrival interface",
-                          (LONG)info.ipi6_ifindex);
+            /*
+             * 0, and correctly: this datagram came in over ::1, and NetX Duo
+             * parks the loopback interface past the end of the range this
+             * library numbers, so it has no index -- if_indextoname() cannot
+             * name it either.  A datagram off a real interface reports 1 or 2.
+             */
+            (VOID)t_check((BOOL)(info.ipi6_ifindex == 0),
+                          "ipi6_ifindex is 0 -- loopback is outside the "
+                          "if_nametoindex() range", (LONG)info.ipi6_ifindex);
 
             arrived_on = info.ipi6_ifindex;
         }
@@ -1312,10 +1318,12 @@ ULONG                   arrived_on = 0;
     (VOID)t_check(saw_hoplimit, "an IPV6_HOPLIMIT object arrived", 0);
 
     /*
-     * The other half, and the reason the option exists: answer on the
-     * interface the query came in on, named by the index the query reported.
+     * The other half, and the reason the option exists: answer from the
+     * address the query was sent to.  Over ::1 that is the address half of the
+     * in6_pktinfo rather than the index half, which loopback does not have --
+     * on a machine with two interfaces the index works the same way.
      */
-    if (saw_pktinfo && arrived_on != 0 && peer.sin6_port != 0)
+    if (saw_pktinfo && peer.sin6_port != 0)
     {
         struct in6_pktinfo  reply;
         static const char   answer[] = "answered on the arrival interface";
@@ -1324,7 +1332,8 @@ ULONG                   arrived_on = 0;
         t_bzero(&msg, sizeof(msg));
         t_bzero(&reply, sizeof(reply));
 
-        reply.ipi6_ifindex = arrived_on;
+        reply.ipi6_ifindex     = arrived_on;
+        reply.ipi6_addr.s6_addr[15] = 1;        /* ::1 */
 
         iov.iov_base = (APTR)answer;
         iov.iov_len  = sizeof(answer);
@@ -1446,6 +1455,136 @@ ULONG                   arrived_on = 0;
         (VOID)t_check((BOOL)((msg.msg_flags & MSG_CTRUNC) != 0),
                       "and reports MSG_CTRUNC", msg.msg_flags);
     }
+
+    (VOID)bsd_CloseSocket(server);
+    (VOID)bsd_CloseSocket(client);
+}
+
+/*
+ * The IPv4 half over 127.0.0.1.  This is the case the whole thing was built
+ * for: a UDP server that cannot tell which of its own addresses a query was
+ * sent to answers from the wrong one.
+ */
+static VOID t_test_cmsg_receive4(VOID)
+{
+LONG                server, client;
+LONG                rc;
+LONG                value;
+struct sockaddr_in  sa;
+static const char   datagram[] = "over 127.0.0.1";
+char                buffer[64];
+t_cbuf              cbuf;
+struct msghdr       msg;
+struct iovec        iov;
+struct cmsghdr     *c;
+BOOL                saw_pktinfo = FALSE;
+BOOL                saw_dstaddr = FALSE;
+
+    t_log("recvmsg with IP_PKTINFO and IP_RECVDSTADDR");
+
+    server = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    client = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(server >= 0 && client >= 0), "udp4 sockets",
+                 bsd_Errno()))
+    {
+        return;
+    }
+
+    t_bzero(&sa, sizeof(sa));
+    sa.sin_len    = sizeof(sa);
+    sa.sin_family = T_AF_INET;
+    sa.sin_port   = T_PORT + 4;
+
+    rc = bsd_bind(server, &sa, sizeof(sa));
+    if (!t_check((BOOL)(rc == 0), "udp4 server bind", bsd_Errno()))
+    {
+        (VOID)bsd_CloseSocket(server);
+        (VOID)bsd_CloseSocket(client);
+        return;
+    }
+
+    value = 1;
+    (VOID)bsd_setsockopt(server, IPPROTO_IP, IP_PKTINFO, &value,
+                         sizeof(value));
+    value = 1;
+    (VOID)bsd_setsockopt(server, IPPROTO_IP, IP_RECVDSTADDR, &value,
+                         sizeof(value));
+
+    sa.sin_addr.s_addr = 0x7F000001UL;          /* 127.0.0.1 */
+    rc = bsd_sendto(client, (APTR)datagram, sizeof(datagram), 0, &sa,
+                    sizeof(sa));
+    if (!t_check((BOOL)(rc == (LONG)sizeof(datagram)), "sendto 127.0.0.1", rc))
+    {
+        (VOID)bsd_CloseSocket(server);
+        (VOID)bsd_CloseSocket(client);
+        return;
+    }
+
+    t_bzero(buffer, sizeof(buffer));
+    t_bzero(&cbuf, sizeof(cbuf));
+    t_bzero(&msg, sizeof(msg));
+
+    iov.iov_base = buffer;
+    iov.iov_len  = sizeof(buffer);
+
+    msg.msg_iov        = &iov;
+    msg.msg_iovlen     = 1;
+    msg.msg_control    = cbuf.bytes;
+    msg.msg_controllen = sizeof(cbuf.bytes);
+
+    rc = bsd_recvmsg(server, &msg, 0);
+    if (!t_check((BOOL)(rc == (LONG)sizeof(datagram)), "recvmsg", rc))
+    {
+        (VOID)bsd_CloseSocket(server);
+        (VOID)bsd_CloseSocket(client);
+        return;
+    }
+
+    (VOID)t_check(t_streq(buffer, datagram), "datagram survived", 0);
+
+    for (c = CMSG_FIRSTHDR(&msg); c != NULL; c = CMSG_NXTHDR(&msg, c))
+    {
+        const UBYTE *src = CMSG_DATA(c);
+        ULONG        i;
+
+        if (c->cmsg_level != IPPROTO_IP)
+            continue;
+
+        if (c->cmsg_type == IP_PKTINFO)
+        {
+            struct in_pktinfo info;
+            UBYTE            *dst = (UBYTE *)&info;
+
+            saw_pktinfo = TRUE;
+
+            for (i = 0; i < sizeof(info); i++)
+                dst[i] = src[i];
+
+            (VOID)t_check((BOOL)(info.ipi_addr.s_addr == 0x7F000001UL),
+                          "ipi_addr is the 127.0.0.1 it was sent to",
+                          (LONG)info.ipi_addr.s_addr);
+            (VOID)t_check((BOOL)(info.ipi_spec_dst.s_addr != 0UL),
+                          "ipi_spec_dst is a local address",
+                          (LONG)info.ipi_spec_dst.s_addr);
+        }
+        else if (c->cmsg_type == IP_RECVDSTADDR)
+        {
+            struct in_addr addr;
+            UBYTE         *dst = (UBYTE *)&addr;
+
+            saw_dstaddr = TRUE;
+
+            for (i = 0; i < sizeof(addr); i++)
+                dst[i] = src[i];
+
+            (VOID)t_check((BOOL)(addr.s_addr == 0x7F000001UL),
+                          "IP_RECVDSTADDR is 127.0.0.1", (LONG)addr.s_addr);
+        }
+    }
+
+    (VOID)t_check(saw_pktinfo, "an IP_PKTINFO object arrived", 0);
+    (VOID)t_check(saw_dstaddr,
+                  "an IP_RECVDSTADDR object arrived alongside it", 0);
 
     (VOID)bsd_CloseSocket(server);
     (VOID)bsd_CloseSocket(client);
@@ -1573,6 +1712,7 @@ int main(void)
     t_test_cmsg_macros();
     t_test_cmsg_options();
     t_test_cmsg_receive();
+    t_test_cmsg_receive4();
     t_test_getaddrinfo();
 
     CloseLibrary(SocketBase);
