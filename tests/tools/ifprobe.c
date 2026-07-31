@@ -640,20 +640,21 @@ static LONG p_count_interfaces(struct Library *base, const char *want,
  * MAC went all the way down to the device and back; one that reports zeroes,
  * or the previous value out of memory that was never freed, did not.
  *
- * The netmask is the other half, and it is the one that was wrong.  The
- * interface used to come back with the classful mask for its address -- a /8
- * where it had a /24 -- because the add path overwrote the machine's stored
- * configuration with the empty one AddInterfaceTagList() can express, and
- * ConfigureInterfaceTagList() then guessed from the address class as it is
- * documented to when an interface has no mask at all.  The default route went
- * the same way and is asserted by the harness, which can run netstat.
+ * The addressing is the other half.  AddInterfaceTagList() has no address,
+ * netmask, gateway or broadcast tag, so the interface comes back BARE and the
+ * ConfigureInterfaceTagList() below is what addresses it -- "such as setting
+ * interface addresses, status and routing metrics".  Both halves are printed:
+ * what the freshly added interface is carrying, which must be nothing, and
+ * what it is carrying after the configure, which must be what was asked for
+ * and not the classful mask this stack falls back to when a caller supplies an
+ * address with no mask.
  */
 static VOID p_addremove_phase(struct Library *base, const char *name,
                               const char *device, LONG unit)
 {
     UBYTE          mac_before[8];
     UBYTE          mac_after[8];
-    struct TagItem tags[3];
+    struct TagItem tags[4];
     BOOL           present;
     ULONG          mask_before;
     ULONG          mask_after;
@@ -756,16 +757,38 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
                       ? " -- the device was reopened, correctly"
                       : " -- WRONG"));
 
+    /* ---- bare, as the published API says ---------------------------------- */
+    {
+        ULONG addr_now = p_read_address(base, name, IFQ_Address);
+        ULONG mask_now = p_read_address(base, name, IFQ_NetMask);
+        char  addr_now_text[16];
+        char  mask_now_text[16];
+
+        p_dotted(addr_now, addr_now_text);
+        p_dotted(mask_now, mask_now_text);
+
+        Printf((CONST_STRPTR)"bare after add: address %s netmask %s%s\n",
+               (LONG)addr_now_text, (LONG)mask_now_text,
+               (LONG)((addr_now == 0 && mask_now == 0)
+                          ? " -- bare, correctly"
+                          : " -- STILL ADDRESSED, WRONG"));
+    }
+
     /* ---- and it works again ----------------------------------------------- */
     {
         static char addr_text[16] = "10.0.2.15";
+        char        mask_arg[16];
+
+        p_dotted(mask_before, mask_arg);
 
         tags[0].ti_Tag  = IFC_Address;
         tags[0].ti_Data = (ULONG)addr_text;
-        tags[1].ti_Tag  = IFC_State;
-        tags[1].ti_Data = SM_Online;
-        tags[2].ti_Tag  = TAG_DONE;
-        tags[2].ti_Data = 0;
+        tags[1].ti_Tag  = IFC_NetMask;
+        tags[1].ti_Data = (ULONG)mask_arg;
+        tags[2].ti_Tag  = IFC_State;
+        tags[2].ti_Data = SM_Online;
+        tags[3].ti_Tag  = TAG_DONE;
+        tags[3].ti_Data = 0;
 
         rc = p_configure_interface(base, name, tags);
         Printf((CONST_STRPTR)"reconfigure and bring up: rc %ld (errno %ld)\n",
@@ -779,9 +802,9 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
     }
 
     /*
-     * The mask it came back with, against the one it left with.  The
-     * reconfigure above passes IFC_Address and no IFC_NetMask on purpose:
-     * that is the tag list a caller writes, and the mask has to survive it.
+     * The mask the configure put on it, against the one the interface left
+     * with, which is what IFC_NetMask asked for.  A stack that guessed the
+     * classful mask anyway reads /8 here where it was handed a /24.
      */
     mask_after = p_read_address(base, name, IFQ_NetMask);
     p_dotted(mask_after, mask_text);
