@@ -774,6 +774,10 @@ static void test_resolver(void)
     CHECK(res.nameserver_count == 2);
     CHECK_IP(res.nameserver[0], 8, 8, 8, 8);
     CHECK_IP(res.nameserver[1], 8, 8, 4, 4);
+    /* Negative use counts: ObtainDomainNameServerList() reports an entry that
+       came from the file as statically configured. */
+    CHECK(res.nameserver_use[0] == -1);
+    CHECK(res.nameserver_use[1] == -1);
     CHECK_STR(res.domain, "local");
     CHECK(res.search_count == 3);
     CHECK_STR(res.search[0], "local");
@@ -810,6 +814,28 @@ static void test_resolver(void)
     CHECK(res.nameserver_count == AMI_CFG_MAX_NAMESERVERS);
     CHECK_IP(res.nameserver[AMI_CFG_MAX_NAMESERVERS - 1], 4, 4, 4, 4);
     CHECK(res.search_count == AMI_CFG_MAX_SEARCH);
+
+    /* A 200-character DOMAIN. SetDefaultDomainName()'s autodoc allows 255 and
+       the store used to be AMI_CFG_NAME_LEN's 64. */
+    {
+        char line[AMI_CFG_DOMAIN_LEN + 16];
+        char expect[201];
+        int  i;
+
+        for (i = 0; i < 200; i++)
+            expect[i] = (i % 10 == 9) ? '.' : 'a';
+        expect[199] = 'z';
+        expect[200] = '\0';
+
+        sprintf(line, "domain %s\n", expect);
+
+        memset(&res, 0, sizeof(res));
+        buf = dup_text(line);
+        ami_cfg_parse_resolver(buf, &res, NULL, 0);
+        free(buf);
+
+        CHECK_STR(res.domain, expect);
+    }
 }
 
 static void test_gateway(void)

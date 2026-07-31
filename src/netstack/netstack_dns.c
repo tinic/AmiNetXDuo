@@ -13,6 +13,9 @@
 
 #include <proto/exec.h>
 
+/* RFC 1035 2.3.4: 255 octets of domain name, plus the NUL. */
+#define AMI_DNS_NAME_MAX    256
+
 static VOID ami_ns_copy_name(char *dst, const char *src, ULONG size)
 {
     ULONG i = 0;
@@ -135,7 +138,12 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
                     }
 
                     if (!known && r->nameserver_count < AMI_CFG_MAX_NAMESERVERS)
-                        r->nameserver[r->nameserver_count++] = server;
+                    {
+                        /* Positive: the lease put it here, not the file, so
+                           the count is the real one. */
+                        r->nameserver_use[r->nameserver_count] = 1;
+                        r->nameserver[r->nameserver_count++]   = server;
+                    }
                 }
             }
         }
@@ -191,16 +199,15 @@ static LONG ami_ns_dns_error(UINT status)
 
 /* -------------------------------------------------------------- public API */
 
-LONG netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks)
+/* One lookup of exactly the name given. */
+static LONG ami_ns_resolve_once(const char *name, ULONG *addr_out,
+                                ULONG timeout_ticks)
 {
     AmiNetStack         *ns = ami_netstack_raw();
     const AmiNetdbEntry *entry;
     AmiNetCaller         *caller;
     ULONG                address = 0;
     UINT                 status;
-
-    if (name == NULL || *name == '\0' || addr_out == NULL)
-        return AMI_NET_ERR_CONFIG;
 
     /* DEVS:Internet/hosts first -- it must work with the network down. */
     entry = ami_netdb_host_by_name(name);
@@ -266,6 +273,95 @@ LONG netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks)
     *addr_out = address;
 
     return AMI_NET_OK;
+}
+
+/* A name with no dot in it carries no domain, so the default domain applies. */
+static BOOL ami_ns_unqualified(const char *name)
+{
+    ULONG i;
+
+    for (i = 0; name[i] != '\0'; i++)
+        if (name[i] == '.')
+            return FALSE;
+
+    return TRUE;
+}
+
+/* "name" "." "domain", or FALSE if that does not fit. */
+static BOOL ami_ns_join_domain(char *dst, ULONG size, const char *name,
+                               const char *domain)
+{
+    ULONG n = 0;
+    ULONG i;
+
+    for (i = 0; name[i] != '\0'; i++)
+    {
+        if (n + 2 >= size)
+            return FALSE;
+        dst[n++] = name[i];
+    }
+
+    if (n + 2 >= size)
+        return FALSE;
+    dst[n++] = '.';
+
+    for (i = 0; domain[i] != '\0'; i++)
+    {
+        if (n + 1 >= size)
+            return FALSE;
+        dst[n++] = domain[i];
+    }
+
+    /* A trailing dot on the domain would give "host..", and an empty domain
+       would give "host." -- neither is the name the caller meant. */
+    if (dst[n - 1] == '.')
+        return FALSE;
+
+    dst[n] = '\0';
+
+    return TRUE;
+}
+
+LONG netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks)
+{
+    AmiNetStack *ns = ami_netstack_raw();
+    char         qualified[AMI_DNS_NAME_MAX];
+    LONG         err;
+
+    if (name == NULL || *name == '\0' || addr_out == NULL)
+        return AMI_NET_ERR_CONFIG;
+
+    err = ami_ns_resolve_once(name, addr_out, timeout_ticks);
+    if (err == AMI_NET_OK)
+        return err;
+
+    /*
+     * "If no domain name is part of a host name, a default domain name can be
+     * added to it if the host name lookup fails" -- GetDefaultDomainName().
+     * So `ping fileserver` reaches fileserver.lan.
+     *
+     * Only after a definite no: TIMEOUT and NOSERVER say nothing about the
+     * name, and a second query would just double the wait. ERR_STATE is worth
+     * a retry even so, because with the stack down the retry never reaches the
+     * network -- it can only hit DEVS:Internet/hosts, which costs nothing.
+     */
+    if (err != AMI_NET_ERR_NONAME && err != AMI_NET_ERR_STATE)
+        return err;
+
+    if (ns == NULL || ns->ns_Config.resolver.domain[0] == '\0')
+        return err;
+    if (!ami_ns_unqualified(name))
+        return err;
+    if (!ami_ns_join_domain(qualified, (ULONG)sizeof(qualified), name,
+                            ns->ns_Config.resolver.domain))
+        return err;
+
+    if (ami_ns_resolve_once(qualified, addr_out, timeout_ticks) == AMI_NET_OK)
+        return AMI_NET_OK;
+
+    /* The caller asked about the bare name. Whatever the speculative retry ran
+       into is not an answer about that name, so report the first failure. */
+    return err;
 }
 
 LONG netstack_resolve_reverse(ULONG addr, char *name_out, ULONG name_len,
@@ -363,6 +459,30 @@ LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)
  * CheckNetConfig read. The DHCP path above does the same.
  */
 
+/*
+ * AddDomainNameServer() nests: "adding the same address twice will require two
+ * calls RemoveDomainNameServer() to remove it again" (autodoc). Two programs
+ * can therefore share a server, and the first one to exit must not take the
+ * other one's resolver with it.
+ *
+ * nameserver_use[] carries the count, signed as ObtainDomainNameServerList()
+ * reports it -- negative for a server from DEVS:Internet/name_resolution,
+ * positive for one DHCP or this call put there. Adding to a static entry keeps
+ * it static and deepens it (-1 -> -2); the entry only leaves the list when the
+ * count reaches zero. NetX Duo's own list does not count, so it is touched
+ * only on the first add and the last remove.
+ */
+
+static LONG ami_ns_use_deepen(LONG use)
+{
+    return (use < 0) ? (use - 1) : (use + 1);
+}
+
+static LONG ami_ns_use_shallow(LONG use)
+{
+    return (use < 0) ? (use + 1) : (use - 1);
+}
+
 LONG netstack_dns_server_add(ULONG address)
 {
     AmiNetStack  *ns = netstack_get();
@@ -375,10 +495,14 @@ LONG netstack_dns_server_add(ULONG address)
     if (ns == NULL)
         return AMI_NET_ERR_STATE;
 
-    /* Already known is success: adding a server twice is not an error. */
+    /* Already known: count the reference and leave the resolver alone. */
     for (i = 0; i < ns->ns_Config.resolver.nameserver_count; i++)
         if (ns->ns_Config.resolver.nameserver[i] == address)
+        {
+            ns->ns_Config.resolver.nameserver_use[i] =
+                ami_ns_use_deepen(ns->ns_Config.resolver.nameserver_use[i]);
             return AMI_NET_OK;
+        }
 
     if (ns->ns_Config.resolver.nameserver_count >= AMI_CFG_MAX_NAMESERVERS)
         return AMI_NET_ERR_NOMEM;
@@ -394,6 +518,8 @@ LONG netstack_dns_server_add(ULONG address)
 
     ns->ns_Config.resolver.nameserver[ns->ns_Config.resolver.nameserver_count] =
         address;
+    ns->ns_Config.resolver.nameserver_use[ns->ns_Config.resolver.nameserver_count] =
+        1;
     ns->ns_Config.resolver.nameserver_count++;
 
     AMI_INFO("netstack: name server %lu.%lu.%lu.%lu added",
@@ -412,6 +538,7 @@ LONG netstack_dns_server_remove(ULONG address)
     UINT          status;
     UWORD         i;
     UWORD         at;
+    LONG          use;
 
     if (address == 0UL)
         return AMI_NET_ERR_CONFIG;
@@ -428,6 +555,14 @@ LONG netstack_dns_server_remove(ULONG address)
     if (at >= (UWORD)AMI_CFG_MAX_NAMESERVERS)
         return AMI_NET_ERR_NONAME;
 
+    /* Still referenced by somebody else: drop one and stop. */
+    use = ami_ns_use_shallow(ns->ns_Config.resolver.nameserver_use[at]);
+    if (use != 0)
+    {
+        ns->ns_Config.resolver.nameserver_use[at] = use;
+        return AMI_NET_OK;
+    }
+
     caller = ami_netstack_enter_alloc();
     if (caller == NULL)
         return AMI_NET_ERR_STATE;
@@ -439,11 +574,17 @@ LONG netstack_dns_server_remove(ULONG address)
 
     /* Close the gap: the order of the rest is the order they were added in. */
     for (i = at; i + 1 < ns->ns_Config.resolver.nameserver_count; i++)
+    {
         ns->ns_Config.resolver.nameserver[i] =
             ns->ns_Config.resolver.nameserver[i + 1];
+        ns->ns_Config.resolver.nameserver_use[i] =
+            ns->ns_Config.resolver.nameserver_use[i + 1];
+    }
     ns->ns_Config.resolver.nameserver_count--;
     ns->ns_Config.resolver.nameserver[ns->ns_Config.resolver.nameserver_count] =
         0UL;
+    ns->ns_Config.resolver.nameserver_use[ns->ns_Config.resolver.nameserver_count] =
+        0;
 
     return AMI_NET_OK;
 }

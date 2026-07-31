@@ -294,7 +294,10 @@ static VOID load_resolver(AmiConfig *cfg)
                 {
                     UWORD i;
                     for (i = 0; i < extra.nameserver_count; i++)
-                        cfg->resolver.nameserver[i] = extra.nameserver[i];
+                    {
+                        cfg->resolver.nameserver[i]     = extra.nameserver[i];
+                        cfg->resolver.nameserver_use[i] = extra.nameserver_use[i];
+                    }
                 }
             }
             if (cfg->resolver.domain[0] == '\0')

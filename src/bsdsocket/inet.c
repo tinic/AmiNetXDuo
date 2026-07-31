@@ -150,6 +150,67 @@ static BOOL bsd_inet_parse(const char *cp, ULONG *result, LONG *nparts,
     return TRUE;
 }
 
+/*
+ * inet_pton()'s parser, which is not inet_addr()'s. The autodoc pins the input
+ * to "the 'a.b.c.d' form, with 'a', 'b', 'c' and 'd', being numbers in the
+ * range 0..255": four parts, decimal only, no short forms.
+ *
+ * Sharing bsd_inet_parse() made inet_pton(AF_INET,"0177.0.0.1") succeed as
+ * 127.0.0.1 and "0x1.2.3.4" parse, which is the classic allow-list bypass --
+ * a caller that uses inet_pton() to decide whether a string is a literal
+ * address sees one string and the next resolver sees another. Leading zeros
+ * are refused rather than read as decimal for the same reason: "0177" must not
+ * be an address at all here.
+ *
+ * inet_addr() keeps the 4.3BSD radixes and short forms; that is its documented
+ * behaviour and other code depends on it.
+ */
+static BOOL bsd_inet_pton4(const char *cp, ULONG *result)
+{
+    ULONG addr = 0;
+    LONG  part;
+
+    if (cp == NULL)
+        return FALSE;
+
+    for (part = 0; part < 4; part++)
+    {
+        ULONG value  = 0;
+        LONG  digits = 0;
+
+        if (part > 0)
+        {
+            if (*cp != '.')
+                return FALSE;
+            cp++;
+        }
+
+        while (*cp >= '0' && *cp <= '9')
+        {
+            if (++digits > 3)
+                return FALSE;
+            value = value * 10 + (ULONG)(*cp - '0');
+            cp++;
+        }
+
+        if (digits == 0 || value > 255)
+            return FALSE;
+
+        /* "0" is a number; "01" and "007" are not decimal notation. */
+        if (digits > 1 && cp[-digits] == '0')
+            return FALSE;
+
+        addr = (addr << 8) | value;
+    }
+
+    if (*cp != '\0')
+        return FALSE;
+
+    *result = addr;
+
+    return TRUE;
+}
+
 /* Unsigned decimal, no libc. Returns the number of characters written. */
 static ULONG bsd_format_u8(char *dst, ULONG value)
 {
@@ -368,7 +429,6 @@ LONG bsd_inet_pton(register LONG af    __asm("d0"),
                    register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     ULONG addr;
-    LONG  parts = 0;
 
 #ifdef AMINETXDUO_IPV6
     if (af == AF_INET6)
@@ -405,8 +465,7 @@ LONG bsd_inet_pton(register LONG af    __asm("d0"),
         return -1;
     }
 
-    /* Unlike inet_addr(), inet_pton() accepts only strict dotted quads. */
-    if (!bsd_inet_parse((const char *)src, &addr, &parts, NULL) || parts != 4)
+    if (!bsd_inet_pton4((const char *)src, &addr))
         return 0;
 
     ((struct in_addr *)dst)->s_addr = (in_addr_t)BSD_HTONL(addr);

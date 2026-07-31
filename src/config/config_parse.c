@@ -768,7 +768,9 @@ VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
             }
             else
             {
-                out->nameserver[out->nameserver_count++] = addr;
+                /* Negative: statically configured, one reference. */
+                out->nameserver_use[out->nameserver_count] = -1;
+                out->nameserver[out->nameserver_count++]   = addr;
             }
         }
         else if (ami_cfg_stricmp(key, "domain") == 0)
