@@ -260,8 +260,14 @@ static LONG l_query(struct Library *base, ULONG what, APTR buf, ULONG size)
 typedef struct LeakSample
 {
     ULONG   ls_Avail;
-    ULONG   ls_Sockets;
+    ULONG   ls_Sockets;         /* NetX Duo sockets, NETSTATUS_SOCKETS       */
     ULONG   ls_PoolFree;
+    /* NETSTATUS_HEALTH: the stack's own memory counters, the ones netstat -h
+       reports.  An arm that leaks must show it here as well as in AvailMem,
+       or the counters are not measuring what they claim to. */
+    ULONG   ls_Alloc;           /* ami_alloc() blocks outstanding            */
+    ULONG   ls_Live;            /* AmiSocket structures alive                */
+    ULONG   ls_PoolLow;
     UWORD   ls_State[LEAK_STATES];
 } LeakSample;
 
@@ -276,6 +282,9 @@ static VOID leak_sample(struct Library *base, LeakSample *out)
     out->ls_Avail    = (ULONG)AvailMem(MEMF_PUBLIC);
     out->ls_Sockets  = 0UL;
     out->ls_PoolFree = 0UL;
+    out->ls_Alloc    = 0UL;
+    out->ls_Live     = 0UL;
+    out->ls_PoolLow  = 0UL;
 
     for (i = 0; i < LEAK_STATES; i++)
         out->ls_State[i] = 0;
@@ -308,6 +317,19 @@ static VOID leak_sample(struct Library *base, LeakSample *out)
         NetStatusSystem *sys = (NetStatusSystem *)NETSTATUS_ENTRIES(hdr);
 
         out->ls_PoolFree = sys->nss_PoolFree;
+    }
+
+    hdr->nsh_Magic   = AMI_NETSTATUS_MAGIC;
+    hdr->nsh_Version = AMI_NETSTATUS_VERSION;
+    if (l_query(base, NETSTATUS_HEALTH, leak_buf,
+                (ULONG)(sizeof(NetStatusHeader) + sizeof(NetStatusHealth)))
+        >= 0 && hdr->nsh_Count > 0)
+    {
+        NetStatusHealth *h = (NetStatusHealth *)NETSTATUS_ENTRIES(hdr);
+
+        out->ls_Alloc   = h->nsl_AllocLive;
+        out->ls_Live    = h->nsl_Sockets;
+        out->ls_PoolLow = h->nsl_PoolLow;
     }
 }
 
@@ -495,6 +517,16 @@ static VOID leak_report(const char *name, ULONG refused,
 
     VPrintf((CONST_STRPTR)"%s: fail %ld/%ld errno %ld | "
             "AvailMem %ld  sockets %ld  poolfree %ld\n", args);
+
+    /* The same arm through the counters netstat -h reports.  A clean arm
+       returns both to where it started; a leaking one does not. */
+    args[0] = (LONG)after->ls_Alloc - (LONG)before->ls_Alloc;
+    args[1] = (LONG)after->ls_Alloc;
+    args[2] = (LONG)after->ls_Live - (LONG)before->ls_Live;
+    args[3] = (LONG)after->ls_Live;
+    args[4] = (LONG)after->ls_PoolLow;
+    VPrintf((CONST_STRPTR)"    health: allocations %ld (now %ld)  "
+            "AmiSockets %ld (now %ld)  pool low %ld\n", args);
     (VOID)Flush(Output());
 
     for (i = 1; i < LEAK_STATES; i++)

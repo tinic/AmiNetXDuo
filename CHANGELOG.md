@@ -2,6 +2,11 @@
 
 User-visible changes, newest first. Internal work is in the git log.
 
+## Unreleased
+
+- `netstat -h` now reports what the network owns -- allocations, sockets and packet buffers, each with a high-water mark -- so a suspected leak can be confirmed or refuted without a debugger
+- `ShowNetStatus MEMORY` reports the fewest packet buffers ever free
+
 ## 0.14.1
 
 - Fixed a scheduler-state window that corrupted ThreadX suspension lists and produced Enforcer hits under load
