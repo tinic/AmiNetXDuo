@@ -673,7 +673,7 @@ static BOOL ami_ns_mdns_listed(const AmiMdnsService *rows, UWORD count,
 }
 
 /*
- * The address for one SRV target, asked for rather than waited on.
+ * The address for one SRV target.
  *
  * Rows already written are searched first: several services on one machine
  * share a target, so they cost one query between them, and a target that was
