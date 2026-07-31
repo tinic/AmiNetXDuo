@@ -115,3 +115,30 @@ if(AMIGA_NDK_INCLUDE)
 endif()
 target_compile_options(test_tcphandoff PRIVATE -Wall -Wextra)
 set_target_properties(test_tcphandoff PROPERTIES OUTPUT_NAME "TcpHandoff")
+
+# IfNames is the Developer drawer's own example, built here so the drawer
+# cannot ship incomplete.  The drawer is staged into the build tree and that
+# staged copy plus the NDK is the WHOLE include path -- no
+# AMINETXDUO_CORE_INCLUDES, so a type or a prototype that only exists in
+# include/aminetxduo/ and never reaches Developer/ fails to compile.
+#
+# It replaces ifprobe.c's hand-written `jsr a6@(-882:W)` for the four RFC 3493
+# vectors; ifprobe keeps its copy, and the two agreeing is the check that the
+# drawer's LVOs are the ones the library really uses.
+set(AMINETXDUO_DEVELOPER_STAGE "${CMAKE_BINARY_DIR}/Developer")
+execute_process(
+    COMMAND "${CMAKE_SOURCE_DIR}/tools/stage-developer.sh"
+            "${AMINETXDUO_DEVELOPER_STAGE}"
+    RESULT_VARIABLE _dev_stage_rc)
+if(NOT _dev_stage_rc EQUAL 0)
+    message(FATAL_ERROR "tools/stage-developer.sh failed (${_dev_stage_rc})")
+endif()
+
+add_executable(test_ifnames "${AMINETXDUO_DEVELOPER_STAGE}/examples/IfNames.c")
+target_include_directories(test_ifnames PRIVATE
+                           "${AMINETXDUO_DEVELOPER_STAGE}/include")
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_ifnames PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_ifnames PRIVATE -Wall -Wextra)
+set_target_properties(test_ifnames PROPERTIES OUTPUT_NAME "IfNames")

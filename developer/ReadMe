@@ -1,0 +1,116 @@
+AmiNetXDuo Developer drawer
+===========================
+
+What bsdsocket.library has that the NDK does not declare, and the glue to
+call it.  Nothing in here is needed to run AmiNetXDuo -- it is for writing
+programs against it.
+
+The NDK's bsdsocket interface stopped moving in 2006.  Everything in the
+0..143 vector range is declared by the NDK and is reached the usual way, with
+<proto/bsdsocket.h>.  This drawer covers what comes after that.
+
+
+What is in here
+---------------
+
+  include/aminetxduo/     the types and the constants
+  include/clib/           C prototypes
+  include/inline/         gcc inline macros
+  include/pragmas/        SAS/C, DICE, StormC, Maxon, Aztec pragmas
+  include/proto/          the one header to include; picks the two above
+  include/lvo/            assembler EQUs
+  sfd/                    the SFD all of the above is generated from
+  examples/IfNames.c      a complete program
+
+
+Using it
+--------
+
+Put include/ on the compiler's include path and include one header:
+
+    #include <proto/aminetxduo.h>
+
+That brings in the prototypes, the types, and the inline glue.  It does not
+replace or shadow any NDK header, so it can be included beside
+<proto/bsdsocket.h> in any order.
+
+The glue jumps through SocketBase, the same base variable bsdsocket.library
+already uses.  There is no second library to open and no link library to add:
+
+    struct Library *SocketBase;
+    ...
+    SocketBase = OpenLibrary("bsdsocket.library", 4);
+
+A program that already opens bsdsocket.library has done all of it.
+
+Standard spellings are deliberately not used.  RFC 3493 puts
+if_nametoindex() in <net/if.h>, and shipping a <net/if.h> would mean include
+order decides silently, per source file, whether the NDK's header or ours
+wins.  The path is <aminetxduo/ifindex.h> instead, and <proto/aminetxduo.h>
+finds it.
+
+
+Checking that the vectors are there
+-----------------------------------
+
+A header cannot tell whether the library in memory has them.  Only
+lib_Revision can:
+
+    SocketBase = OpenLibrary("bsdsocket.library", 4);
+    if (SocketBase != NULL && SocketBase->lib_Revision >= AMI_IFINDEX_MIN_REVISION)
+        ... if_nametoindex() and friends are safe to call ...
+
+Every symbol in here carries the revision that introduced it, as a
+AMI_*_MIN_REVISION constant next to it.  Do this check.  These vectors are
+past the end of every published table, so an older bsdsocket.library has
+MakeLibrary()'s terminator in the slot and calling one is a guru, not a
+failure code.
+
+
+What it covers
+--------------
+
+RFC 3493 section 4, interface identification.  From revision 3:
+
+    ULONG                if_nametoindex(const char *ifname);
+    char                *if_indextoname(ULONG ifindex, char *ifname);
+    struct if_nameindex *if_nameindex(void);
+    VOID                 if_freenameindex(struct if_nameindex *ptr);
+
+Indices start at 1 and are the same numbers GetRouteInfo() reports in
+rtm_index, so a route can be matched to an interface by comparing them.
+
+RFC 3542 -- the ancillary data macros, struct in6_pktinfo, struct
+icmp6_filter and the IPV6_* option numbers -- is not here yet.  It adds no
+vectors: it rides sendmsg(), recvmsg() and setsockopt(), so it will arrive as
+another header beside aminetxduo/ifindex.h and this drawer's shape does not
+change when it does.
+
+NetStackQuery() and NetStackControl(), at -0x366 and -0x36c, are what
+ShowNetStatus, netstat and arp are written against.  They are not published
+here.  They work, but publishing them freezes their request structures, and
+that is worth deciding on rather than drifting into.
+
+
+Regenerating
+------------
+
+The headers under include/clib, include/inline, include/pragmas,
+include/proto and include/lvo are generated from sfd/aminetxduo_lib.sfd and
+must not be edited.  In the source tree:
+
+    tools/gen-developer.sh
+
+sfd/aminetxduo_lib.sfd is a separate file from the NDK's
+bsdsocket_lib.sfd, not a patched copy of it.  Both declare the same base
+variable, so the two sets of generated headers mix, and neither has to be
+re-merged when the other moves.
+
+
+Building the example
+--------------------
+
+    gcc -I Developer/include -o IfNames Developer/examples/IfNames.c
+
+It prints one line per interface -- index and name -- and checks that every
+name maps back to its own index.

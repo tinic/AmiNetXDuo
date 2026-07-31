@@ -90,13 +90,29 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
     parser, so a zoned value there is a clean refusal.
   - No emulator coverage: the UDP path is verified only by the host parser
     tests. It wants two interfaces to be meaningful, and the lab guest has one.
-- **Ship a Developer drawer: the NDK addendum.** ACCEPTED 2026-07-31. The
-  archive ships no headers, so nothing we add past the NDK's 0..143 range can
-  be reached by anyone else's code. Plan and the three permanent ABI decisions
-  (LVO slots, `CMSG_ALIGN` for m68k, `IPV6_*` option numbers) are in
-  `docs/NDK-ADDENDUM.md`. The four RFC 3493 vectors exist as of revision 3 and
-  are verified on the guest, but nothing outside this tree can reach them until
-  the drawer ships -- that is what this item is.
+- **Ship a Developer drawer: the NDK addendum.** SHIPPED 2026-07-31 for RFC
+  3493 section 4. `developer/` holds the SFD and the generated
+  clib/inline/proto/pragmas/lvo set; `tools/stage-developer.sh` assembles the
+  drawer and both `dist/make-dist.sh` and the CMake build call it, so the
+  archive's copy is the one `tests/tools`' `IfNames` was compiled against --
+  against the staged drawer alone, with no path into `include/`.
+  `tools/gen-developer.sh --check` runs in `ci.sh`'s cross stage wherever the
+  toolchain has an `sfdc`.
+
+  Left:
+  - **RFC 3542** is not in it. It adds no vectors, so it lands as another
+    header beside `aminetxduo/ifindex.h` and the drawer's shape does not
+    change; `developer/sfd/aminetxduo_lib.sfd` carries the marker saying so.
+  - **`NetStackQuery`/`NetStackControl` are still private.** Recommendation:
+    publish them, because they are what a third-party `netstat` needs and
+    `ShowNetStatus`, `netstat` and `arp` already depend on them being stable.
+    Not done here: publishing freezes `NetStatusHeader` and every
+    `NETCTRL_*` request struct, and that is the owner's call. Adding them is
+    two lines -- `netstatus.h` to `PUBLIC_HEADERS` in
+    `tools/stage-developer.sh`, and an `AMI_NETSTATUS_MIN_REVISION` beside
+    the existing magic.
+  - No `.info` for the drawer's own contents beyond `ReadMe.info`; the
+    headers are for a cross-compiler, not for Workbench.
 - **RFC 3542 (Advanced Sockets API for IPv6) is absent.** Assessed 2026-07-31.
   Feasible without patching NetX Duo, and cheaper than the `if_*` four because
   it needs **no new LVOs** -- it rides `sendmsg`/`recvmsg`, which exist, and

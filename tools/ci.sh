@@ -228,6 +228,21 @@ stage_host32() {
 
 stage_cross() {
     local entry name opts
+
+    # The Developer drawer's inline/proto/pragma headers are committed, so
+    # packaging never needs sfdc -- which means nothing would notice them
+    # drifting from the SFD they came from.  This is what notices.
+    if [ -x "${AMIGA_TOOLCHAIN_ROOT:-}/bin/sfdc" ] || command -v sfdc >/dev/null; then
+        if tools/gen-developer.sh --check > "$BUILD/gen-developer.log" 2>&1; then
+            note "Developer drawer headers match developer/sfd/aminetxduo_lib.sfd"
+        else
+            cat "$BUILD/gen-developer.log"
+            fail "Developer drawer headers are stale (tools/gen-developer.sh)"
+        fi
+    else
+        note "no sfdc -- Developer drawer headers NOT checked against their SFD"
+    fi
+
     for entry in "${CROSS_CONFIGS[@]}"; do
         name="${entry%%:*}"
         opts="${entry#*:}"

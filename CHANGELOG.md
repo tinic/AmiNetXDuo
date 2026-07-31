@@ -4,6 +4,7 @@ User-visible changes, newest first. Internal work is in the git log.
 
 ## 0.15.1
 
+- New `Developer` drawer in the archive: the headers and compiler glue for `if_nametoindex()`, `if_indextoname()`, `if_nameindex()` and `if_freenameindex()`, which the NDK does not declare. Put its `include` on the compiler's include path, `#include <proto/aminetxduo.h>`, and open `bsdsocket.library` as usual; there is no second library and no link library. `Developer/examples/IfNames.c` is a complete program and `Developer/ReadMe` has the rest
 - Two programs adding an interface at the same moment can no longer be given the same one: the slot was picked and then the device opened, which takes long enough for the second to pick it again
 - `STATE=down` in `DEVS:NetInterfaces` is honoured. It was read from the file and then ignored, so an interface configured down came up anyway; `Online` brings it up as usual
 - `GetRouteInfo()` reports the interface each route belongs to. Static routes and the default gateway reported none at all, and the rest counted from 0 where the convention is to count from 1, so a program matching a route to an interface was off by one

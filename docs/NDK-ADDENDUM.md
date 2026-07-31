@@ -118,6 +118,53 @@ Order matters because (1) sets the slot precedent and (2) sets the alignment
 precedent, and (3) is the one that is purely a decision to publish what already
 works.
 
+## What shipped, 2026-07-31
+
+Item 1 of the three. The drawer exists and carries RFC 3493 §4 only.
+
+```
+developer/sfd/aminetxduo_lib.sfd   the source of truth
+developer/include/{clib,inline,proto,pragmas,lvo}/   generated, committed
+developer/examples/IfNames.c       the example, and the test
+developer/ReadMe                   the drawer's own documentation
+tools/gen-developer.sh             regenerate; --check for drift
+tools/stage-developer.sh           assemble the drawer into a destdir
+```
+
+`==bias 882` in the SFD is what puts the first entry at `-0x372`; sfdc emits
+`LP1(0x372, ...)` and `_LVOif_nametoindex EQU -882`, which is the number
+`tests/tools/ifprobe.c` reaches by hand.
+
+The generated headers are committed so that packaging never needs sfdc.
+`tools/gen-developer.sh --check` regenerates into a temp directory and diffs,
+and `ci.sh`'s cross stage runs it wherever the resolved toolchain has an
+`sfdc` -- which the pinned one does.
+
+`tools/stage-developer.sh` has one consumer too many to be inlined into
+either: `dist/make-dist.sh` stages the drawer into the archive, and
+`tests/tools/CMakeLists.txt` stages it into the build tree and compiles
+`IfNames.c` against **that alone** -- the staged include directory and the
+NDK, and nothing else. A type that only exists in `include/aminetxduo/` and
+never reaches the drawer is a compile error rather than a download.
+
+Its `PUBLIC_HEADERS` list is deliberately a list and not a wildcard:
+`include/aminetxduo/` holds the internal headers too, and being published is
+a per-file decision that freezes the file.
+
+One departure from the sketch above: `inline/`, `proto/` and `pragmas/` live
+*under* `include/` rather than beside it, so the drawer needs one `-I` and
+not two. The NDK's own `include_h/` is arranged the same way.
+
+`tests/tools/ifprobe.c` keeps its hand-written vectors. It is written to
+share nothing with the implementation, and now shares nothing with the
+drawer either, so the two arriving at the same four offsets independently is
+worth more than the deduplication.
+
+Still open: item 2 (RFC 3542) is on another branch and the SFD carries a
+marker where it does not go. Item 3 (`NetStackQuery`/`NetStackControl`) is
+recorded as a recommendation in `BACKLOG.md`, not taken -- publishing them
+freezes `NetStatusHeader` and every `NETCTRL_*` request struct.
+
 ## What this does not cover
 
 RFC 4007's `%zone` text form is behaviour, not header -- it needs a parser and a
