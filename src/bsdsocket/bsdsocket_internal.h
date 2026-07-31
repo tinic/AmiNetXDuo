@@ -62,6 +62,7 @@
 
 #include "aminetxduo/compat.h"
 #include "aminetxduo/netstack.h"
+#include "aminetxduo/cmsg.h"
 
 /* ------------------------------------------------------------------ errno --
  *
@@ -156,10 +157,11 @@
  * _Static_assert.
  */
 
-/* IPPROTO_IPV6. The IANA number; the NDK stops at IPPROTO_RAW 255. */
-#define AMI_IPPROTO_IPV6            41
-
 /*
+ * IPPROTO_IPV6 and IPPROTO_ICMPV6 -- the IANA numbers, the NDK stopping at
+ * IPPROTO_RAW -- are in aminetxduo/cmsg.h with the RFC 3542 options, because
+ * a caller has to be able to name a level as well as an option.
+ *
  * IPV6_V6ONLY has two numberings in the wild and the NDK picks neither:
  * 27 in KAME and the BSDs (netinet6/in6.h), 26 in Linux. This header set is
  * 4.4BSD everywhere except the pasted-in sockaddr_in6, which is Linux, so
@@ -443,6 +445,38 @@ struct AmiSocketBase
 #define ASF_OOBHAVE     (1UL << 23)   /* an urgent byte is waiting; oob.c   */
 #define ASF_CLOSING     (1UL << 24)   /* FIN sent, parked for a late reap   */
 
+/*
+ * as_CmsgWant -- which RFC 3542 ancillary objects this socket asked for, and
+ * in whose numbering. Its own word rather than more ASF_ bits: the numbering
+ * has to be remembered alongside each option, which doubles the bit count,
+ * and as_Flags is a hot field every path tests.
+ *
+ * The _LINUX bits are what a caller enabled the option with, and decide the
+ * cmsg_type it gets back -- see the note in aminetxduo/cmsg.h.
+ */
+#define ACW_RECVPKTINFO6    (1UL << 0)  /* IPV6_RECVPKTINFO                  */
+#define ACW_RECVHOPLIMIT    (1UL << 1)  /* IPV6_RECVHOPLIMIT                 */
+#define ACW_PKTINFO6_LINUX  (1UL << 2)
+#define ACW_HOPLIMIT_LINUX  (1UL << 3)
+#define ACW_PKTINFO4        (1UL << 4)  /* IP_PKTINFO                        */
+#define ACW_RECVDSTADDR4    (1UL << 5)  /* IP_RECVDSTADDR                    */
+#define ACW_STICKY6         (1UL << 6)  /* setsockopt IPV6_PKTINFO named one */
+
+#define ACW_RECV_ANY        (ACW_RECVPKTINFO6 | ACW_RECVHOPLIMIT | \
+                             ACW_PKTINFO4 | ACW_RECVDSTADDR4)
+
+/*
+ * A source a sendmsg() or a sticky IPV6_PKTINFO named. cs_Source is left at
+ * nxd_ip_version 0 when only an interface was given, and the other way round:
+ * RFC 3542 6.6 lets either half be unspecified and the stack fill it in.
+ */
+typedef struct BsdCmsgSource
+{
+    NXD_ADDRESS cs_Source;
+    ULONG       cs_Ifindex;     /* 1-based, as if_nametoindex() counts       */
+    BOOL        cs_Have;
+} BsdCmsgSource;
+
 typedef struct AmiSocket
 {
     /*
@@ -513,6 +547,23 @@ typedef struct AmiSocket
      * raw.c for what survives the translation.
      */
     LONG                    as_HdrIncl;
+
+    /*
+     * RFC 3542 (cmsg.c). as_CmsgWant is the ACW_ set above; as_CmsgSticky is
+     * the source a setsockopt(IPV6_PKTINFO) named, which a per-datagram cmsg
+     * on sendmsg() overrides.
+     */
+    ULONG                   as_CmsgWant;
+    BsdCmsgSource           as_CmsgSticky;
+
+#ifdef AMINETXDUO_IPV6
+    /*
+     * ICMP6_FILTER, one bit per ICMPv6 type. All ones until a caller installs
+     * one, which is RFC 3542 3.2's "pass everything" default; raw.c reads it
+     * on the IP thread.
+     */
+    ULONG                   as_Icmp6Filter[8];
+#endif
 
     /*
      * Listening state. NetX Duo hands an incoming connection to a specific
@@ -678,10 +729,41 @@ VOID  bsd_words_to_in6(const ULONG words[4], UBYTE bytes[16]);
 /* setsockopt/getsockopt for level IPPROTO_IPV6. Returns 0, or -1 with errno
    set; ENOPROTOOPT for an option this library does not implement. */
 LONG  bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
-                          LONG optname, APTR optval, socklen_t optlen);
+                          LONG level, LONG optname, APTR optval,
+                          socklen_t optlen);
 LONG  bsd_getsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
-                          LONG optname, APTR optval, socklen_t *optlen);
+                          LONG level, LONG optname, APTR optval,
+                          socklen_t *optlen);
 #endif /* AMINETXDUO_IPV6 */
+
+/* cmsg.c -- RFC 3542 ancillary data.
+ *
+ * bsd_cmsg_reset() puts a fresh socket in the documented default state: no
+ * ancillary data wanted, and an ICMPv6 filter that passes everything.
+ *
+ * bsd_cmsg_option() handles the set/get of every option that only means
+ * "attach this to recvmsg()". It answers for levels IPPROTO_IP, IPPROTO_IPV6
+ * and IPPROTO_ICMPV6, and returns 1 for an optname it does not own so the
+ * caller can carry on looking. 0 is done, -1 is done with errno set.
+ *
+ * bsd_cmsg_build() fills msg_control from the packet a datagram arrived in
+ * and sets msg_controllen; MSG_CTRUNC goes into msg_flags if the caller's
+ * buffer was too small. Safe with msg == NULL, which is every recv() and
+ * recvfrom().
+ *
+ * bsd_cmsg_parse() reads the caller's ancillary data on sendmsg(). Anything
+ * this library cannot honour is refused rather than ignored.
+ *
+ * bsd_cmsg_source_index() turns a named source into the address index
+ * nxd_udp_socket_source_send() wants, or -1 when nothing matches.
+ */
+VOID  bsd_cmsg_reset(AmiSocket *sock);
+LONG  bsd_cmsg_option(struct AmiSocketBase *base, AmiSocket *sock, LONG level,
+                      LONG optname, APTR optval, socklen_t *optlen, BOOL set);
+VOID  bsd_cmsg_build(AmiSocket *sock, NX_PACKET *packet, struct msghdr *msg);
+LONG  bsd_cmsg_parse(struct AmiSocketBase *base, AmiSocket *sock,
+                     const struct msghdr *msg, BsdCmsgSource *out);
+LONG  bsd_cmsg_source_index(NX_IP *ip, const BsdCmsgSource *src, BOOL v6);
 
 /* oob.c -- TCP urgent data (MSG_OOB, SIOCATMARK, SIGURG).
  *

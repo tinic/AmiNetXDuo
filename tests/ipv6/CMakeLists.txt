@@ -57,6 +57,12 @@ endif()
 
 add_executable(ipv6_socket_test ipv6_socket_test.c)
 
+# include/ for aminetxduo/cmsg.h -- RFC 3542 is struct shapes and macros, not
+# vectors, so the header is the only thing this program takes from us.  Having
+# it on the path here is also the check that it compiles standalone.
+target_include_directories(ipv6_socket_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/include")
+
 if(AMIGA_NDK_INCLUDE)
     target_include_directories(ipv6_socket_test PRIVATE "${AMIGA_NDK_INCLUDE}")
 endif()

@@ -14,6 +14,8 @@ set(BSDSOCKET_SOURCES
     raw.c                   # SOCK_RAW over the NetX Duo IP raw packet filter
     oob.c                   # MSG_OOB / SIOCATMARK: TCP urgent data
     transfer.c
+    cmsg.c                  # RFC 3542 ancillary data: PKTINFO, HOPLIMIT,
+                            # ICMP6_FILTER, and the IPv4 half of the same
     options.c
     select.c
     errno.c

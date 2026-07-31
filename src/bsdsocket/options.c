@@ -240,6 +240,15 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
 
     if (level == IPPROTO_IP)
     {
+        /* IP_PKTINFO / IP_RECVDSTADDR: RFC 3542's plumbing, IPv4 half.
+           `optlen` is a register variable, so the copy is not optional. */
+        socklen_t len   = optlen;
+        LONG      owned = bsd_cmsg_option(SocketBase, sock, level, optname,
+                                          optval, &len, TRUE);
+
+        if (owned <= 0)
+            return owned;
+
         switch (optname)
         {
             case IP_TTL:
@@ -272,8 +281,9 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
     }
 
 #ifdef AMINETXDUO_IPV6
-    if (level == AMI_IPPROTO_IPV6)
-        return bsd_setsockopt_ipv6(SocketBase, sock, optname, optval, optlen);
+    if (level == IPPROTO_IPV6 || level == IPPROTO_ICMPV6)
+        return bsd_setsockopt_ipv6(SocketBase, sock, level, optname, optval,
+                                   optlen);
 #endif
 
     return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
@@ -412,6 +422,12 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
 
     if (level == IPPROTO_IP)
     {
+        LONG owned = bsd_cmsg_option(SocketBase, sock, level, optname, optval,
+                                     optlen, FALSE);
+
+        if (owned <= 0)
+            return owned;
+
         switch (optname)
         {
             case IP_TTL:
@@ -430,8 +446,9 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
     }
 
 #ifdef AMINETXDUO_IPV6
-    if (level == AMI_IPPROTO_IPV6)
-        return bsd_getsockopt_ipv6(SocketBase, sock, optname, optval, optlen);
+    if (level == IPPROTO_IPV6 || level == IPPROTO_ICMPV6)
+        return bsd_getsockopt_ipv6(SocketBase, sock, level, optname, optval,
+                                   optlen);
 #endif
 
     return bsd_fail(SocketBase, AMI_ENOPROTOOPT);

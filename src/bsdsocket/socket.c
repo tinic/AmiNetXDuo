@@ -434,6 +434,9 @@ static AmiSocket *bsd_socket_alloc(struct AmiSocketBase *base,
     sock->as_Protocol = protocol;
     sock->as_Ttl      = (LONG)NX_IP_TIME_TO_LIVE;
 
+    /* Not just a zeroing: an ICMPv6 filter starts passing everything. */
+    bsd_cmsg_reset(sock);
+
     switch (type)
     {
         case SOCK_STREAM: sock->as_Flags = ASF_TCP; break;

@@ -193,10 +193,12 @@ BOOL bsd_addr_normalise(const AmiSocket *sock, NXD_ADDRESS *addr)
  *       -- IPv6 multicast membership needs NX_ENABLE_IPV6_MULTICAST, which the
  *          floor-target tuning leaves off (port/netxduo-amiga/inc/nx_user.h).
  *          A join that never happens is worse than a refused one.
- *   IPV6_RECVPKTINFO / IPV6_PKTINFO and the other ancillary-data options of
- *   RFC 3542
- *       -- recvmsg() here reports msg_controllen == 0 always and cannot do
- *          otherwise; see the note in transfer.c.
+ *   IPV6_RTHDR, HOPOPTS, DSTOPTS, RTHDRDSTOPTS, PATHMTU, RECVPATHMTU,
+ *   USE_MIN_MTU, DONTFRAG, NEXTHOP
+ *       -- the rest of RFC 3542.  The subset that is implemented -- PKTINFO,
+ *          HOPLIMIT and ICMP6_FILTER -- lives in cmsg.c and is dispatched
+ *          from here; these name IPv6 extension headers and path-MTU state
+ *          NetX Duo does not expose.
  *   IPV6_CHECKSUM
  *       -- names the offset of a checksum field the stack should fill in for
  *          an arbitrary raw protocol.  ICMPv6's is filled in unconditionally
@@ -223,12 +225,20 @@ static LONG bsd_tclass_option(LONG optname)
 }
 
 LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
-                         LONG optname, APTR optval, socklen_t optlen)
+                         LONG level, LONG optname, APTR optval,
+                         socklen_t optlen)
 {
     LONG value = 0;
+    LONG owned;
 
     if ((sock->as_Flags & ASF_INET6) == 0)
         return bsd_fail(base, AMI_ENOPROTOOPT);
+
+    /* RFC 3542's ancillary-data options, and the whole of level
+       IPPROTO_ICMPV6, belong to cmsg.c. */
+    owned = bsd_cmsg_option(base, sock, level, optname, optval, &optlen, TRUE);
+    if (owned <= 0)
+        return owned;
 
     if (optval == NULL)
         return bsd_fail(base, AMI_EFAULT);
@@ -294,12 +304,18 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
 }
 
 LONG bsd_getsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
-                         LONG optname, APTR optval, socklen_t *optlen)
+                         LONG level, LONG optname, APTR optval,
+                         socklen_t *optlen)
 {
     LONG value;
+    LONG owned;
 
     if ((sock->as_Flags & ASF_INET6) == 0)
         return bsd_fail(base, AMI_ENOPROTOOPT);
+
+    owned = bsd_cmsg_option(base, sock, level, optname, optval, optlen, FALSE);
+    if (owned <= 0)
+        return owned;
 
     if (optval == NULL || optlen == NULL)
         return bsd_fail(base, AMI_EFAULT);

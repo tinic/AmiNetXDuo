@@ -61,13 +61,30 @@ doing the same thing, and defining that space is what being the reference means.
 
 Once we hand out `-0x372` for `if_nametoindex`, it is that forever.
 
-**2. `CMSG_ALIGN` for m68k.** `struct cmsghdr` and the `CMSG_*` macros are not
-in the NDK. RFC 3542 leaves the alignment to the implementation, so we pick it,
-and every ancillary-data buffer any caller ever builds depends on the choice.
-Pick it once, write down why, and never move it.
+**2. `CMSG_ALIGN` for m68k.** SETTLED 2026-07-31: **4 bytes**, in
+`include/aminetxduo/cmsg.h`. RFC 3542 leaves the alignment to the
+implementation, so we pick it, and every ancillary-data buffer any caller ever
+builds depends on the choice.
+
+`struct cmsghdr` itself *is* in the NDK, and is 12 bytes -- the assessment that
+said otherwise was wrong. What is missing is `CMSG_LEN` and `CMSG_SPACE`; what
+is present but broken is `CMSG_NXTHDR`, which expands to an `ALIGN()` no NDK
+header defines, and `CMSG_FIRSTHDR`, which does not test `msg_controllen`. The
+addendum header replaces those two and adds the other two, so a caller that
+includes it after `<sys/socket.h>` gets one consistent set.
 
 **3. `IPV6_*` option numbers.** Also not in the NDK. They must not collide with
 anything Roadshow might assign. Same permanence.
+
+SETTLED 2026-07-31, and the rule is not "pick one": both the BSD and the Linux
+numbers are accepted, and **the numbering a caller enables an option with is the
+numbering it gets back as `cmsg_type`**. `IPV6_RECVPKTINFO` 36 yields
+`cmsg_type` `IPV6_PKTINFO` 46; 49 yields 50. Mixing them on one socket reads as
+whichever was set last.
+
+`IP_PKTINFO` takes 8, which this NDK spells `IP_RETOPTS` -- a 4.3BSD get/set of
+arriving IP options that no AmigaOS stack ever answered and this one refuses.
+That is the one place the addendum takes a number the NDK had already used.
 
 ## Shape of the addendum
 
@@ -106,10 +123,13 @@ caller to invent one.
 1. **RFC 3493 §4** -- `struct if_nameindex`, `IF_NAMESIZE`, and the four
    prototypes. New LVOs `[146]`..`[149]`. Indices are 1-based, matching
    `rtm_index`; change neither alone.
-2. **RFC 3542** -- `struct cmsghdr` + `CMSG_*`, `struct in6_pktinfo`,
-   `struct icmp6_filter` + its six macros, and the `IPV6_*` option numbers. No
-   new LVOs: it rides `sendmsg`/`recvmsg`, and `struct msghdr` is already the
-   28-byte 4.4BSD shape with `msg_control` at offset 16.
+2. **RFC 3542** -- WRITTEN, `include/aminetxduo/cmsg.h`: the `CMSG_*` macros,
+   `struct in6_pktinfo`, `struct in_pktinfo`, `struct icmp6_filter` + its six
+   macros, and the option numbers. No new LVOs: it rides `sendmsg`/`recvmsg`,
+   and `struct msghdr` is already the 28-byte 4.4BSD shape with `msg_control` at
+   offset 16. The header is on the include path of
+   `tests/ipv6/ipv6_socket_test.c`, which links against none of our code, so it
+   is already proved usable from outside -- what is left is shipping it.
 3. **What is already ours and private** -- `netstatus.h`'s `NetStackQuery` /
    `NetStackControl` at `-0x366`/`-0x36c`. Publishing these is what lets someone
    else write a `netstat`. Decide deliberately: published means frozen.

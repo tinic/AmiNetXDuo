@@ -97,47 +97,64 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   `docs/NDK-ADDENDUM.md`. The four RFC 3493 vectors exist as of revision 3 and
   are verified on the guest, but nothing outside this tree can reach them until
   the drawer ships -- that is what this item is.
-- **RFC 3542 (Advanced Sockets API for IPv6) is absent.** Assessed 2026-07-31.
-  Feasible without patching NetX Duo, and cheaper than the `if_*` four because
-  it needs **no new LVOs** -- it rides `sendmsg`/`recvmsg`, which exist, and
-  `struct msghdr` is already the 28-byte 4.4BSD shape with `msg_control` at
-  offset 16.
+- **RFC 3542: the subset worth having is built; the send half of
+  `IPV6_HOPLIMIT` is not.** Assessed and implemented 2026-07-31. No new LVOs:
+  it rides `sendmsg`/`recvmsg`, and `struct msghdr` was already the 28-byte
+  4.4BSD shape. `src/bsdsocket/cmsg.c` and `include/aminetxduo/cmsg.h`.
 
-  What has to be invented is *header* ABI: `struct cmsghdr` and
-  `CMSG_FIRSTHDR`/`NXTHDR`/`DATA`/`LEN`/`SPACE` are **not in the NDK at all**.
-  Defining them means fixing `CMSG_ALIGN` for m68k, and every later caller is
-  stuck with whatever we pick. **Decided 2026-07-31: 4 bytes.** It is what every
-  32-bit BSD used, it keeps `struct cmsghdr` at 12 bytes, and nothing about m68k
-  argues for more -- wider alignment would only waste buffer space.
+  Shipped: `IPV6_RECVPKTINFO`/`IPV6_PKTINFO` (receive *and* the sticky and
+  per-datagram send source), `IPV6_RECVHOPLIMIT` (receive), `ICMP6_FILTER` with
+  its six macros, and the IPv4 half -- `IP_PKTINFO` and `IP_RECVDSTADDR`.
+  `MSG_CTRUNC` now means what it says.
 
-  Feasibility checked: `NX_PACKET` carries `nx_packet_ip_interface` (the arrival
-  interface) and `nx_packet_ip_header` (from which the hop limit reads), so both
-  options worth having can be filled from what NetX already hands us.
+  **The assessment was wrong about the NDK.** `<sys/socket.h>` does define
+  `struct cmsghdr` (12 bytes) and `CMSG_DATA`/`FIRSTHDR`/`NXTHDR`, and
+  `<netinet/in.h>` defines `IP_RECVDSTADDR` as 7. Two of those three macros are
+  unusable as shipped: `CMSG_NXTHDR` expands to an `ALIGN()` no NDK header
+  defines, so any file that uses it fails to compile, and `CMSG_FIRSTHDR`
+  returns `msg_control` without testing `msg_controllen`, which RFC 3542 §20.3.1
+  calls out by name. Both are replaced in `aminetxduo/cmsg.h`, along with
+  `CMSG_LEN` and `CMSG_SPACE`, which are genuinely absent. **`CMSG_ALIGN` is 4
+  bytes**, as decided.
 
-  Worth implementing, in this order:
-  - `IPV6_RECVPKTINFO` / `IPV6_PKTINFO` (`struct in6_pktinfo`: `ipi6_addr`,
-    `ipi6_ifindex`) -- which interface and local address a datagram arrived on,
-    and which to send from. Lets a responder answer on the interface a query
-    came in on; starts to matter at two interfaces.
-  - `IPV6_RECVHOPLIMIT` / `IPV6_HOPLIMIT` -- `traceroute6`, and an mDNS
-    responder checking the arriving hop limit (RFC 6762's source-address check;
-    confirm the exact requirement before relying on it).
-  - `ICMP6_FILTER` with `struct icmp6_filter` and its six macros (RFC 3542
-    §3.2) -- `ping6`/`traceroute6` filtering ICMPv6 by type on a raw socket.
+  Two more numbering decisions, on the same terms `IPV6_V6ONLY` was:
+  - The IPv6 options answer to both the BSD and the Linux numbers, and
+    *whichever a caller enables an option with is the numbering it gets back as
+    `cmsg_type`*. Enabling with 36 gives `cmsg_type` 46; enabling with 49 gives
+    50.
+  - `IP_PKTINFO` takes 8, which is `IP_RETOPTS` in this NDK. That is a 4.3BSD
+    get/set of arriving IP options, refused here and never implemented by any
+    AmigaOS stack -- the same trade `IPV6_TCLASS` made against `IPV6_PATHMTU`.
 
-  **Do the IPv4 half in the same stroke**: `IP_PKTINFO` / `IP_RECVDSTADDR` is
-  the same cmsg plumbing, and it is what the dnsmasq / unbound / tftpd class of
-  UDP server actually requires -- a server that cannot tell which of its own
-  addresses a query arrived on answers from the wrong one. Accept both the
-  FreeBSD and Linux spellings, as `AMI_IPV6_V6ONLY_BSD`/`_LINUX` already do.
+  **Not implemented, and why:**
+  - **The send half of `IPV6_HOPLIMIT`.** A `sendmsg` carrying one is refused
+    with `EINVAL` rather than ignored. Nothing applies a per-socket TTL to a UDP
+    send today either -- `IP_TTL` and `IPV6_UNICAST_HOPS` are stored and read
+    back but never reach `nx_udp_socket_time_to_live` -- so a per-datagram hop
+    limit would be the only one of the three that worked, which is a worse
+    answer than a clean refusal. Do the sticky one first, then this.
+  - **A source on a raw or TCP socket.** A raw IPv6 send picks its own source
+    because the ICMPv6 checksum has already been computed over it (`raw.c`), and
+    TCP has no per-write source. Both refuse the cmsg.
+  - `IPV6_RTHDR`, `HOPOPTS`, `DSTOPTS`, `RTHDRDSTOPTS`, `PATHMTU`,
+    `RECVPATHMTU`, `USE_MIN_MTU`, `DONTFRAG`, `NEXTHOP` -- extension headers and
+    path-MTU state NetX Duo does not expose. Not planned.
 
-  Not worth it: `IPV6_RTHDR`, `HOPOPTS`, `DSTOPTS`, `RTHDRDSTOPTS`, `PATHMTU`,
-  `RECVPATHMTU`, `USE_MIN_MTU`, `DONTFRAG`, `TCLASS`, `NEXTHOP`.
+  Verification: the ABI is pinned with `_Static_assert` in `cmsg.c` (every
+  offset, and the `CMSG_*` arithmetic), and `tests/ipv6/ipv6_socket_test.c`
+  exercises the macros, the option round-trips and one datagram over `::1` with
+  both objects attached. That harness needs the emulator tier, so the numbers
+  are checked by CI and the behaviour is not.
 
-  `in6.c` refuses these options because `recvmsg()` always reports
-  `msg_controllen == 0`, which stays correct until this is built. The
-  `transfer.c` comment that justified it reasoned about SCM_RIGHTS -- the wrong
-  RFC -- and was corrected in 625e5df.
+- **`bsd_bind_wants_interface()` is handed the wrong pointer for IPv6
+  datagrams.** Found 2026-07-31 while writing the above, and deliberately not
+  fixed there. `bsd_recv_udp()` passes `packet->nx_packet_ip_interface`, but
+  that field is a union: `nx_ipv6_packet_receive.c:300` overwrites it with the
+  `NXD_IPV6_ADDRESS *` the datagram matched, so for an IPv6 datagram the
+  comparison against `nx_ip_interface[]` is between unrelated pointers and can
+  only fail. A socket bound to a specific IPv6 address therefore drops every
+  datagram; the wildcard bind is unaffected, which is why nothing has noticed.
+  `bsd_cmsg_ifindex()` in `cmsg.c` has the two-family dereference to copy.
 
 ## Decided against — do not "fix"
 
