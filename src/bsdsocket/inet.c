@@ -36,10 +36,12 @@
  * (leading 0) or hexadecimal (leading 0x), with the classic "a", "a.b",
  * "a.b.c" short forms. Returns FALSE on anything malformed.
  */
-static BOOL bsd_inet_parse(const char *cp, ULONG *result, LONG *nparts)
+static BOOL bsd_inet_parse(const char *cp, ULONG *result, LONG *nparts,
+                           ULONG parts_out[4])
 {
     ULONG parts[4];
     LONG  n = 0;
+    LONG  i;
 
     if (cp == NULL)
         return FALSE;
@@ -139,6 +141,12 @@ static BOOL bsd_inet_parse(const char *cp, ULONG *result, LONG *nparts)
     if (nparts != NULL)
         *nparts = n;
 
+    if (parts_out != NULL)
+    {
+        for (i = 0; i < n; i++)
+            parts_out[i] = parts[i];
+    }
+
     return TRUE;
 }
 
@@ -186,7 +194,7 @@ in_addr_t bsd_inet_addr(register STRPTR cp __asm("a0"),
 
     (VOID)SocketBase;
 
-    if (!bsd_inet_parse((const char *)cp, &addr, NULL))
+    if (!bsd_inet_parse((const char *)cp, &addr, NULL, NULL))
         return (in_addr_t)INADDR_NONE;
 
     return (in_addr_t)BSD_HTONL(addr);
@@ -200,7 +208,7 @@ LONG bsd_inet_aton(register STRPTR cp             __asm("a0"),
 
     (VOID)SocketBase;
 
-    if (!bsd_inet_parse((const char *)cp, &value, NULL))
+    if (!bsd_inet_parse((const char *)cp, &value, NULL, NULL))
         return 0;
 
     if (addr != NULL)
@@ -213,25 +221,26 @@ in_addr_t bsd_inet_network(register STRPTR cp __asm("a0"),
                            register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     ULONG addr;
-    LONG  parts = 0;
+    ULONG parts[4];
+    ULONG net = 0;
+    LONG  n = 0;
+    LONG  i;
 
     (VOID)SocketBase;
 
-    if (!bsd_inet_parse((const char *)cp, &addr, &parts))
+    if (!bsd_inet_parse((const char *)cp, &addr, &n, parts))
         return (in_addr_t)INADDR_NONE;
 
     /*
-     * inet_network() reads the parts as the *high* bytes of the value, unlike
-     * inet_addr() which right-aligns the last one.
+     * 4.3BSD: each part is one byte of the network number, packed left to
+     * right and right-aligned in the result -- "192.168.1" is 0x00C0A801, not
+     * an address with a zero host part. Same rule as
+     * ami_cfg_parse_net_number(), which reads DEVS:Internet/networks.
      */
-    switch (parts)
-    {
-        case 1:  return (in_addr_t)addr;
-        case 2:  return (in_addr_t)(((addr >> 24) & 0xff) << 8 |
-                                    ((addr & 0x00ffffff)));
-        case 3:  return (in_addr_t)(addr >> 8);
-        default: return (in_addr_t)addr;
-    }
+    for (i = 0; i < n; i++)
+        net = (net << 8) | (parts[i] & 0xff);
+
+    return (in_addr_t)net;
 }
 
 STRPTR bsd_Inet_NtoA(register in_addr_t ip __asm("d0"),
@@ -286,8 +295,10 @@ in_addr_t bsd_Inet_MakeAddr(register in_addr_t net  __asm("d0"),
         addr = (((ULONG)net) << 24) | (((ULONG)host) & 0x00ffffffUL);
     else if (net < 65536)
         addr = (((ULONG)net) << 16) | (((ULONG)host) & 0x0000ffffUL);
-    else
+    else if (net < 0x01000000UL)
         addr = (((ULONG)net) <<  8) | (((ULONG)host) & 0x000000ffUL);
+    else
+        addr = ((ULONG)net) | ((ULONG)host);    /* net is already a full address */
 
     return (in_addr_t)BSD_HTONL(addr);
 }
@@ -395,7 +406,7 @@ LONG bsd_inet_pton(register LONG af    __asm("d0"),
     }
 
     /* Unlike inet_addr(), inet_pton() accepts only strict dotted quads. */
-    if (!bsd_inet_parse((const char *)src, &addr, &parts) || parts != 4)
+    if (!bsd_inet_parse((const char *)src, &addr, &parts, NULL) || parts != 4)
         return 0;
 
     ((struct in_addr *)dst)->s_addr = (in_addr_t)BSD_HTONL(addr);

@@ -103,6 +103,38 @@ static struct hostent *bsd_hostent_pack(struct AmiSocketBase *base,
     return hp;
 }
 
+/*
+ * netstack error -> h_errno, per the autodoc's own definitions:
+ *
+ *   TRY_AGAIN       "usually a temporary error ... a retry at some later time
+ *                    may succeed"
+ *   HOST_NOT_FOUND  "no such host is known"
+ *   NO_RECOVERY     "some unexpected server failure ... non-recoverable"
+ *
+ * A timeout and an empty server list are both temporary, so neither may be
+ * reported as HOST_NOT_FOUND: a caller that retries on TRY_AGAIN would
+ * otherwise give up on the first missed answer.
+ */
+static LONG bsd_herrno_of(LONG status)
+{
+    switch (status)
+    {
+        case AMI_NET_ERR_NONAME:    return HOST_NOT_FOUND;
+
+        case AMI_NET_ERR_TIMEOUT:                   /* nobody answered      */
+        case AMI_NET_ERR_NOSERVER:                  /* nobody to ask, yet   */
+        case AMI_NET_ERR_STATE:                     /* stack not up, yet    */
+            return TRY_AGAIN;
+
+        case AMI_NET_ERR_CONFIG:
+        case AMI_NET_ERR_KERNEL:
+        case AMI_NET_ERR_NOMEM:
+            return NO_RECOVERY;
+
+        default:                    return HOST_NOT_FOUND;
+    }
+}
+
 /* Shared lookup: dotted quad first, then the resolver. */
 static LONG bsd_resolve_name(struct AmiSocketBase *base, const char *name,
                              ULONG *addr, LONG *he_out)
@@ -127,7 +159,7 @@ static LONG bsd_resolve_name(struct AmiSocketBase *base, const char *name,
     status = netstack_resolve(name, addr, BSD_RESOLVE_TIMEOUT);
     if (status != AMI_NET_OK)
     {
-        *he_out = (status == AMI_NET_ERR_STATE) ? TRY_AGAIN : HOST_NOT_FOUND;
+        *he_out = bsd_herrno_of(status);
         return -1;
     }
 
@@ -178,6 +210,8 @@ static LONG bsd_resolve_addr(struct AmiSocketBase *base, STRPTR addr_bytes,
                              LONG len, LONG type, ULONG *addr, char *name,
                              ULONG name_len, LONG *he_out)
 {
+    LONG status;
+
     if (type != AF_INET || len != 4 || addr_bytes == NULL)
     {
         *he_out = NO_RECOVERY;
@@ -191,10 +225,11 @@ static LONG bsd_resolve_addr(struct AmiSocketBase *base, STRPTR addr_bytes,
             ((ULONG)(UBYTE)addr_bytes[2] <<  8) |
              (ULONG)(UBYTE)addr_bytes[3];
 
-    if (netstack_resolve_reverse(*addr, name, name_len,
-                                 BSD_RESOLVE_TIMEOUT) != AMI_NET_OK)
+    status = netstack_resolve_reverse(*addr, name, name_len,
+                                      BSD_RESOLVE_TIMEOUT);
+    if (status != AMI_NET_OK)
     {
-        *he_out = HOST_NOT_FOUND;
+        *he_out = bsd_herrno_of(status);
         return -1;
     }
 

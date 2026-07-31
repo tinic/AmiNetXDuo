@@ -94,8 +94,11 @@ struct Library *SocketBase;
 #define LVO_socket          (-30)
 #define LVO_CloseSocket     (-120)
 #define LVO_Inet_NtoA       (-174)
+#define LVO_inet_addr       (-180)
+#define LVO_inet_network    (-204)
 #define LVO_gethostbyname   (-210)
 #define LVO_gethostname     (-282)
+#define LVO_inet_pton       (-606)
 
 static LONG bsd_socket(struct Library *base, LONG domain, LONG type, LONG proto)
 {
@@ -159,6 +162,58 @@ register char           *res __asm("d0");
                       : "=r" (res)
                       : "r" (a6), "r" (d0)
                       : "d1", "a0", "a1", "cc", "memory");
+    return(res);
+}
+
+static ULONG bsd_inet_addr(struct Library *base, const char *cp)
+{
+
+register struct Library *a6 __asm("a6") = base;
+register const char     *a0 __asm("a0") = cp;
+register ULONG           res __asm("d0");
+register LONG _clob_a0 __asm("a0");
+
+
+    __asm __volatile ("jsr a6@(-180:W)"
+                      : "=r" (res), "=r" (_clob_a0)
+                      : "r" (a6), "r" (a0)
+                      : "d1", "a1", "cc", "memory");
+    return(res);
+}
+
+static ULONG bsd_inet_network(struct Library *base, const char *cp)
+{
+
+register struct Library *a6 __asm("a6") = base;
+register const char     *a0 __asm("a0") = cp;
+register ULONG           res __asm("d0");
+register LONG _clob_a0 __asm("a0");
+
+
+    __asm __volatile ("jsr a6@(-204:W)"
+                      : "=r" (res), "=r" (_clob_a0)
+                      : "r" (a6), "r" (a0)
+                      : "d1", "a1", "cc", "memory");
+    return(res);
+}
+
+static LONG bsd_inet_pton(struct Library *base, LONG af, const char *src,
+                          APTR dst)
+{
+
+register struct Library *a6 __asm("a6") = base;
+register LONG            d0 __asm("d0") = af;
+register const char     *a0 __asm("a0") = src;
+register APTR            a1 __asm("a1") = dst;
+register LONG            res __asm("d0");
+register LONG _clob_a0 __asm("a0");
+register LONG _clob_a1 __asm("a1");
+
+
+    __asm __volatile ("jsr a6@(-606:W)"
+                      : "=r" (res), "=r" (_clob_a0), "=r" (_clob_a1)
+                      : "r" (a6), "r" (d0), "r" (a0), "r" (a1)
+                      : "d1", "cc", "memory");
     return(res);
 }
 
@@ -244,6 +299,47 @@ LONG             sock;
         t_log("  Inet_NtoA(10.0.2.15) = '%s'",
               (dotted != NULL) ? dotted : "(null)");
         (VOID) t_check((BOOL) (dotted != NULL), "Inet_NtoA()", 0UL);
+    }
+
+    /*
+     * The address conversions, against the NDK 3.2 autodoc's own rules: the
+     * short dotted forms, INADDR_NONE for anything malformed, and
+     * inet_network()'s byte pack -- "192.168.1" is the network number
+     * 0x00C0A801, not an address with a zero host part.
+     */
+    {
+        ULONG net;
+
+        (VOID) t_check((BOOL) (bsd_inet_addr(sbase, "192.168.1.1")
+                               == 0xC0A80101UL), "inet_addr(dotted quad)", 0UL);
+        (VOID) t_check((BOOL) (bsd_inet_addr(sbase, "10.1") == 0x0A000001UL),
+                       "inet_addr(two-part form)", 0UL);
+        (VOID) t_check((BOOL) (bsd_inet_addr(sbase, "") == 0xFFFFFFFFUL),
+                       "inet_addr(\"\") is INADDR_NONE", 0UL);
+        (VOID) t_check((BOOL) (bsd_inet_addr(sbase, "1.2.3.4x")
+                               == 0xFFFFFFFFUL),
+                       "inet_addr(trailing garbage) is INADDR_NONE", 0UL);
+
+        net =  bsd_inet_network(sbase, "192.168.1");
+        (VOID) t_check((BOOL) (net == 0x00C0A801UL),
+                       "inet_network(\"192.168.1\")", net);
+        (VOID) t_check((BOOL) (bsd_inet_network(sbase, "127") == 127UL),
+                       "inet_network(\"127\")", 0UL);
+    }
+
+    {
+        ULONG addr =  0UL;
+
+        (VOID) t_check((BOOL) (bsd_inet_pton(sbase, 2L, "1.2.3.4", &addr) == 1L
+                               && addr == 0x01020304UL),
+                       "inet_pton(AF_INET, dotted quad)", addr);
+        /* Only the full a.b.c.d form; a short form is 0, not 1. */
+        (VOID) t_check((BOOL) (bsd_inet_pton(sbase, 2L, "1.2.3", &addr) == 0L),
+                       "inet_pton(AF_INET, short form) is 0", 0UL);
+        /* An unknown family is -1, which is not the same answer as invalid. */
+        (VOID) t_check((BOOL) (bsd_inet_pton(sbase, 99L, "1.2.3.4", &addr)
+                               == -1L),
+                       "inet_pton(bad family) is -1", 0UL);
     }
 
     sock =  bsd_socket(sbase, 2L /* AF_INET */, 1L /* SOCK_STREAM */, 0L);
