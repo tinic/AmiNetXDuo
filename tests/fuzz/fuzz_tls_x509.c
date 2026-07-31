@@ -68,7 +68,18 @@
 #include "nx_secure_tls.h"
 #include "nx_secure_x509.h"
 
+/*
+ * tls_test_certs.h also carries the leaf's private key, which tls_handshake.c
+ * needs for its server side and this driver does not -- a private key is not
+ * something a peer supplies. GCC's -Wunused-variable would fail the build over
+ * the two symbols, so the push/pop is around the include alone; everything
+ * below the pop is under the full set.
+ */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
 #include "tls_test_certs.h"
+#pragma GCC diagnostic pop
+
 #include "tls_root_isrg_x1.h"
 
 /* The vendored code takes the TLS protection mutex around anything that can
