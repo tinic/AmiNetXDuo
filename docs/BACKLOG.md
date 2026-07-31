@@ -20,8 +20,11 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   reachable from the wire, all found by `fuzz_tls_record` / `fuzz_tls_x509` at
   zero slop, all confirmed under ASan.
 
-  Fixed on `tinic/netxduo` branch `amiga-nx-secure-bounds`, merged to
-  `amiga-integration` as `a1036f03`, submodule bumped. Both drivers now run at
+  Fixed on `tinic/netxduo` as three branches off `473d1928`, one per defect so
+  each is a PR: `amiga-x509-tlv-tag-overread`, `amiga-tls-serverhello-bounds`,
+  `amiga-tls-certreq-bounds`. Verified to apply in any order to the same tree,
+  and `amiga-integration` at `a1036f03` is exactly their union over the previous
+  tip. Submodule bumped. Commits are unsigned; DCO is the author's to add. Both drivers now run at
   `FR_KNOWN_SLOP` / `FX_KNOWN_SLOP` 0 -- 200k mutations each, clean -- which is
   the proof, since they needed 3 and 1 bytes of padding to tolerate the reads
   before. Commits are unsigned; DCO is the author's to add before submission.
