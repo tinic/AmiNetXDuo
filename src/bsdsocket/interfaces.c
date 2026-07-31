@@ -74,13 +74,13 @@
  * threads. Every writer of nx_ip_interface[] while the stack is up is one:
  * nx_ip_interface_attach(), nx_ip_interface_detach(),
  * nx_ip_interface_address_set() from the DHCP client, and nx_interface_link_up
- * from the SANA-II reader. And there are no torn reads
- * to protect against in the first place -- one CPU, and Exec switches tasks
- * only between instructions, so every aligned load here is atomic.
+ * from the SANA-II reader. And there are no torn reads to protect against in
+ * the first place -- one CPU, and Exec switches tasks only between
+ * instructions, so every aligned load here is atomic.
  *
  * What it would not buy is exclusion against interface add and removal, which
  * is the case that matters. netstack_interface_add() and
- * netstack_interface_remove() do most of their work OUTSIDE the baton on
+ * netstack_interface_remove() do most of their work outside the baton on
  * purpose, because opening and closing a SANA-II device is Exec I/O:
  * ami_sana2_close() -- which frees the AmiSana2If -- runs after the bracketed
  * detach, and ns_Iface[] and AmiIfConfig.configured are written outside it. A

@@ -326,7 +326,8 @@ LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
     if (req.brr_HaveDefault)
     {
         /*
-         * "The address of the default gateway all packets WERE forwarded to."
+         * "The address of the default gateway all packets were forwarded to"
+         * -- past tense, on the delete page.
          * The tag names the entry to remove, so it has to be the one installed:
          * clearing on any address at all would let `route delete default
          * 10.0.0.1` succeed on a machine whose default gateway is 192.168.1.1
