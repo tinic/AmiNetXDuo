@@ -325,6 +325,24 @@ LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
 
     if (req.brr_HaveDefault)
     {
+        /*
+         * "The address of the default gateway all packets WERE forwarded to."
+         * The tag names the entry to remove, so it has to be the one installed:
+         * clearing on any address at all would let `route delete default
+         * 10.0.0.1` succeed on a machine whose default gateway is 192.168.1.1
+         * and take that one away. ESRCH is the -route- page's code "if
+         * requested to delete a non-existent entry", and no gateway at all is
+         * the same condition.
+         */
+        ULONG installed = 0;
+
+        if (nx_ip_gateway_address_get(ip, &installed) != NX_SUCCESS ||
+            installed == 0 || installed != req.brr_Default)
+        {
+            bsd_nx_leave(SocketBase);
+            return bsd_fail(SocketBase, AMI_ESRCH);
+        }
+
         status = nx_ip_gateway_address_clear(ip);
     }
     else

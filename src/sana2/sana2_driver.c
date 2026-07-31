@@ -210,6 +210,7 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
         ami_sana2_tx_drain(iface);
         ami_sana2_offline(iface);
         interface_ptr->nx_interface_link_up = NX_FALSE;
+        iface->admin_up = FALSE;
         break;
 
     case NX_LINK_ENABLE:
@@ -227,11 +228,13 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
         }
 
         interface_ptr->nx_interface_link_up = NX_TRUE;
+        iface->admin_up = TRUE;
         ami_sana2_refresh_stats(iface);
         break;
 
     case NX_LINK_DISABLE:
         interface_ptr->nx_interface_link_up = NX_FALSE;
+        iface->admin_up = FALSE;
         ami_sana2_rx_stop(iface);
         ami_sana2_tx_drain(iface);
         ami_sana2_offline(iface);
@@ -248,6 +251,7 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
      */
     case AMI_LINK_STACK_DISABLE:
         interface_ptr->nx_interface_link_up = NX_FALSE;
+        iface->admin_up = FALSE;
         ami_sana2_tx_drain(iface);
         break;
 

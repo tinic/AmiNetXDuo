@@ -327,6 +327,21 @@ else
     fail "deleting an absent route reported success"
 fi
 
+# RTA_DefaultGateway names the gateway the route was installed with, so a
+# delete that names a different one has named no entry.  Clearing regardless
+# would take the machine's real default gateway away and report success.
+if grep -q "^delete the default gateway by the wrong address: .* -- refused, correctly" "$REPORT"; then
+    pass "deleting the default gateway by the wrong address is refused"
+else
+    fail "the default gateway was deleted by an address that is not the one installed"
+fi
+
+if grep -q "^default gateway after that: .* -- still there, correctly" "$REPORT"; then
+    pass "and the real default gateway survived it"
+else
+    fail "the default gateway went away"
+fi
+
 # The whole of it: delete has to derive the same prefix length add did, from
 # the same string and no mask, or the entries could never be found again.
 if grep -q "^counts: .* -- two added and two removed, correctly" "$REPORT"; then

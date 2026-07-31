@@ -15,18 +15,18 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   further configuration will have been done."* We apply `IFC_LimitMTU`, then
   address/mask, then state, so an `S2_ONLINE` failure returns `ENXIO` with the MTU
   and address already changed.
-- **`ObtainInterfaceList()` returns NULL when the stack is down.** The doc gives
-  NULL one meaning — out of memory — and says an empty list otherwise.
-- **`IFQ_State` reports link state, not administrative state.** An interface
-  configured up with the cable out reads `SM_Down`. Our own `bsd_if_flags()` for
-  libpcap already distinguishes the two, so the file disagrees with itself.
-- **`IFC_Metric` is refused while `IFQ_Metric` answers 0.**
-- **`DeleteRouteTagList` with `RTA_DefaultGateway`** parses the address, then
-  clears the gateway without checking it matches.
-- **Concurrency smell:** `bsd_if_index_of()` and `ObtainInterfaceList()` read
-  `nx_ip_interface[]` *outside* the ThreadX bracket that `QueryInterfaceTagList()`
-  takes for the same data. Worth more than its size — both hard bugs found on
-  2026-07-30/31 were cross-context ownership.
+- **Two tasks adding an interface at once can pick the same slot.**
+  `netstack_interface_add()` reads `ami_ns_free_interface_slot()`, then opens the
+  SANA-II device — Exec I/O, and long — before anything records the slot as
+  taken. `ami_ns_lock` guards only startup and shutdown, and the ThreadX bracket
+  cannot serve: `netstack_interface_add()`/`_remove()` run most of their work
+  outside it on purpose, `ami_sana2_close()`'s `ami_free()` included. Found while
+  auditing the interface reads (see the header of `src/bsdsocket/interfaces.c`);
+  the fix is to take `ami_ns_lock` across both functions, which nests cleanly
+  because nothing holds the ThreadX baton when it is taken.
+- **`AmiIfConfig.up` is write-only.** `config_parse.c` records `STATE=down` from
+  `DEVS:NetInterfaces` and nothing ever reads it, so the interface comes up
+  anyway.
 - **`vsyslog` is `ENOSYS`**, so `SBTC_LOG_FILE_NAME` and `SBTC_LOG_HOOK` are
   unserviced and poison tag lists. `LOGSTAT`/`LOGMASK`/`LOGFACILITY`/`LOGTAGPTR`
   are stored and never read.

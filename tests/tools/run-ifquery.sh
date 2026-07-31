@@ -327,6 +327,14 @@ else
     fail "the refused list changed the netmask -- the call is not atomic"
 fi
 
+# What made IFC_Metric unsupported is that IFQ_Metric would answer something
+# else.  Zero is what it answers, so zero is not a change to refuse.
+if grep -q "config: metric 0: .* -- accepted, correctly" "$REPORT"; then
+    pass "IFC_Metric 0 names what IFQ_Metric reports, and is accepted"
+else
+    fail "IFC_Metric 0 was refused even though IFQ_Metric answers 0"
+fi
+
 # The other half of the same policy. A BOOL tag set FALSE asks for nothing, so
 # it cannot be a change this stack failed to make; refusing it failed the whole
 # configuration for a tool that merely spelled out a default.
