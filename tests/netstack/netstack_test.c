@@ -427,6 +427,37 @@ UWORD            i;
 
 /* ------------------------------------------------------------------ main -- */
 
+/*
+ * What the tick task managed, over the whole run.  Reported rather than checked:
+ * the numbers that matter here depend on the machine, and a 7 MHz 68000 is
+ * expected to look different from a 68030.
+ *
+ * delivered / uptime is the real tick rate.  service / wakeups is what the tick
+ * costs.  A non-zero skew says the wheel ran late and by how much, which on a
+ * slow machine is the budget deferring rather than anything being wrong.
+ */
+static VOID t_tick_stats(VOID)
+{
+TX_AMIGA_TICK_STATS  s;
+
+    tx_amiga_tick_stats(&s);
+
+    t_log("");
+    t_log("tick: %lu delivered in %lu ms, %lu wakeups, %lu empty, %lu caught up",
+          s.tx_amiga_tick_delivered, s.tx_amiga_tick_uptime_ms,
+          s.tx_amiga_tick_wakeups, s.tx_amiga_tick_empty,
+          s.tx_amiga_tick_catchups);
+    t_log("tick: %lu us in-task, worst stall %lu ms with %lu us service",
+          s.tx_amiga_tick_service_us, s.tx_amiga_tick_worst_stall_ms,
+          s.tx_amiga_tick_worst_service_us);
+    t_log("tick: %lu clipped, %lu lost, %lu over budget, %lu deferred",
+          s.tx_amiga_tick_clipped, s.tx_amiga_tick_lost,
+          s.tx_amiga_tick_over_budget, s.tx_amiga_tick_deferred);
+    t_log("tick: wheel %lu ticks late, worst %lu",
+          s.tx_amiga_tick_skew, s.tx_amiga_tick_skew_peak);
+}
+
+
 int main(void)
 {
 
@@ -464,6 +495,8 @@ LONG    status;
     }
 
     t_run();
+
+    t_tick_stats();
 
     t_log("");
     t_log("%ld checks, %ld failures -- %s",
