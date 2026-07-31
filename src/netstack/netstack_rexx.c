@@ -3,7 +3,7 @@
  *
  * The port exists so `WaitForPort AMITCP` in a startup script returns once the
  * stack is up. That is not all it is, which is what this file is for: AMITCP is
- * AmiTCP's *ARexx host port*, and 31 of the 2,149 Aminet comm/ archives
+ * AmiTCP's *ARexx host port*, and 31 of the 2,149 comm/ archives
  * surveyed in docs/RESEARCH.md 75 send commands to it -- AmiTCP's own
  * bin/stopnet and bin/netstat, Genesis's copies of both, SLIPCall, Netdial,
  * TCPFront, netbeginner, interinstall, TCP_Start_Stop, rx.fingerd.

@@ -29,7 +29,7 @@
 #   OpenSSH, not libssh -- by the author of the m68k toolchain this project
 #   builds with.  It opens bsdsocket.library version 4, and it was written
 #   without ever seeing our source, so it tests the ABI rather than our idea of
-#   the ABI.  tools/fetch-bebbossh.sh gets it; nothing of it is vendored (it is
+#   the ABI.  The binaries live in the local store; nothing is vendored (it is
 #   GPLv3+, this tree is MIT) and nothing of it is linked into anything here.
 #
 # THE 68020 CRYPTO LIBRARY IS STAGED, NOT THE DEFAULT ONE
@@ -107,10 +107,13 @@ done
 
 # ------------------------------------------------------------- BebboSSH ----
 
-FETCH="$ROOT/tools/fetch-bebbossh.sh"
-BEB=$("$FETCH" --print-dir)
-"$FETCH" --check >/dev/null 2>&1 || "$FETCH" >/dev/null
-BEBVER=$("$FETCH" --print-version)
+# Not vendored and not downloaded: put the binaries in the local store.
+BEB="${AMINETXDUO_BEBBOSSH_DIR:-$HOME/amiga-assets/bebbossh}"
+[ -d "$BEB" ] || {
+    echo "no BebboSSH binaries in $BEB -- set AMINETXDUO_BEBBOSSH_DIR" >&2
+    exit 2
+}
+BEBVER=$(cat "$BEB/VERSION" 2>/dev/null || echo unknown)
 
 # -------------------------------------------------------- locale.library ---
 #

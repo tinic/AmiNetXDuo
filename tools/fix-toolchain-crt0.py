@@ -263,7 +263,7 @@ def functions(objdump, path):
 # WHY IT WENT UNNOTICED HERE. Our own commands take their arguments through
 # ReadArgs(), which reads the command line from the Shell and never touches
 # argv, so all of them work on a broken toolchain. Ported Unix programs do not:
-# curl and ssh parse argv and get garbage. The Aminet-built curl used for every
+# curl and ssh parse argv and get garbage. The prebuilt curl used for every
 # throughput measurement in docs/RESEARCH.md was built with someone else's
 # toolchain and is unaffected, which is why the benchmarks never showed it.
 #

@@ -67,7 +67,7 @@ and NDK 3.9 agree on, such as `struct timerequest` rather than 3.2's
 ### Versioning
 
 The version number is **compound**: ours, plus that of the stack we are built
-on. An `.lha` on Aminet and a CI artefact both have to state exactly what they
+on. A released `.lha` and a CI artefact both have to state exactly what they
 are, and "AmiNetXDuo 0.1.0" on its own does not answer the question "built
 against which NetX Duo?".
 
@@ -350,9 +350,10 @@ be distributed with the source.
 Two programs by Stefan "Bebbo" Franke open this library and were written
 without reference to our source, which is why they are worth running: BebboSSH
 (`bebbossh`, `bebboscp`) and bebboget, an HTTPS downloader with its own TLS.
-`tools/fetch-bebbossh.sh` and `tools/fetch-bebboget.sh` fetch them from Aminet
-with every file pinned by sha256. Both are GPLv3+ and neither is vendored or
-linked; they are separate programs we install and run.
+Both live in the local store -- `~/amiga-assets/bebbossh` and
+`~/amiga-assets/bebboget`, or `AMINETXDUO_BEBBOSSH_DIR` / `AMINETXDUO_BEBBOGET_DIR`.
+Both are GPLv3+ and neither is vendored or linked; they are separate programs we
+install and run.
 
     tests/bebbossh/run-bebbossh.sh -x      # six transfers each way, two ciphers
     tests/bebbossh/run-bebbossh.sh -x -L   # ... with both ends in the guest
@@ -615,7 +616,7 @@ its declined-address phase automatically if you do.
 
 `src/netstack/netstack_rexx.c` services the port; `netstack_rexx_vars.c` is
 QUERY and SET. Everything in both comes from AmiTCP/IP 3.0b2's own source, which
-is on Aminet as `comm/net/AmiTCP-src-30b2.lha`: `kern/variables.src` for the
+is published as `comm/net/AmiTCP-src-30b2.lha`: `kern/variables.src` for the
 name space, `kern/config_var.awk` to turn it into the exact `FindArg()`
 templates (`awk -v TARGETTI=C -f config_var.awk variables.src`),
 `kern/amiga_config.c` for the parser and error strings, `kern/amiga_cstat.c` for

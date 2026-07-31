@@ -6,7 +6,7 @@
 #
 # Produces, in OUTDIR (default build/dist):
 #
-#   AmiNetXDuo-<version>.lha   the archive, laid out the way Aminet expects
+#   AmiNetXDuo-<version>.lha   the archive, in the conventional layout
 #   AmiNetXDuo/                the same tree unpacked, for inspection
 #
 # The version comes from tools/version.sh, i.e. from project(AmiNetXDuo
@@ -17,7 +17,7 @@
 # by people.  The full compound is in the installer and in each binary's
 # version string.
 #
-# The Aminet convention is that an archive extracts into the directory it is
+# The convention is that an archive extracts into the directory it is
 # unpacked in as one drawer plus that drawer's icon, so that dropping it on a
 # Workbench window leaves one recognisable object rather than a scattering of
 # files:
@@ -324,7 +324,7 @@ fi
 # ------------------------------------------------------------ the archive --
 
 # Versioned filename, unversioned drawer: the .lha says which release it is,
-# and unpacking it still leaves one drawer called AmiNetXDuo the way Aminet
+# and unpacking it still leaves one drawer called AmiNetXDuo the way the
 # and Workbench expect.
 ARCHIVE_NAME="AmiNetXDuo-$VERSION.lha"
 ARCHIVE="$OUTDIR/$ARCHIVE_NAME"

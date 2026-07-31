@@ -4,7 +4,7 @@
  *   src/crypto68k/ has only ever been measured against the vendored nx_crypto
  *   it replaces, which answers "did the change work" but not "is this stack
  *   worth having": the Amiga already has an OpenSSL in AmiSSL, which the
- *   Aminet curl links against and every other TLS client on the machine uses.
+ *   prebuilt curl links against and every other TLS client on the machine uses.
  *   This program runs both on the same numbers, back to back, in one process,
  *   and checks that they agree before it believes any timing.
  *

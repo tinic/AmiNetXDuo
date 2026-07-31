@@ -197,8 +197,8 @@ jobs:
           {
             echo "$(tools/version.sh --long)"
             echo
-            echo "\`AmiNetXDuo-$(tools/version.sh --product).lha\` is the Aminet-layout"
-            echo "archive: drop it on a Workbench window and run \`Install-AmiNetXDuo\`."
+            echo "Drop \`AmiNetXDuo-$(tools/version.sh --product).lha\` on a Workbench"
+            echo "window and run \`Install-AmiNetXDuo\`."
             echo
 
             # This release's section of CHANGELOG.md, verbatim: from its own

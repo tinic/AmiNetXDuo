@@ -3,7 +3,7 @@
  *
  * docs/RESEARCH.md 29.3 records two instruments disagreeing about this stack's
  * throughput: our own NetTrace makes it 55% faster than Roadshow on the wire
- * and the stack-agnostic Aminet curl makes it 12% slower, five runs out of
+ * and the stack-agnostic prebuilt curl makes it 12% slower, five runs out of
  * five, with the gap scaling with the body rather than sitting in setup.
  * 32.11 named a candidate without changing it: bsd_nx_enter()/bsd_nx_leave()
  * bracket every recv(), every send() and every poll pass inside WaitSelect(),

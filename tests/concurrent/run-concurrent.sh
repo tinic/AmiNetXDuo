@@ -14,10 +14,9 @@
 # Commodore's and not redistributable, so this cannot run in public CI for the
 # same reason bsdsocktest and netstack_test cannot.
 #
-# tools/fetch-sana2-drivers.sh fetches two drivers whose licences do permit it
-# (cnet.device, hydra.device). cnet is PCMCIA and was brought up under Amiberry
-# rather than FS-UAE; making one of them work here is what would move this test
-# into CI, and it would take bsdsocktest with it.
+# cnet.device is PCMCIA and was brought up under Amiberry rather than FS-UAE;
+# making it work here is what would move this test into CI, and it would take
+# bsdsocktest with it.
 #
 # SPDX-License-Identifier: MIT
 

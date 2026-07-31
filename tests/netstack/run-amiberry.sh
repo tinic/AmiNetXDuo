@@ -20,9 +20,9 @@
 # boots it, which is AMINETXDUO_KICKSTART_A600 and friends.
 #
 # Every driver except a2065.device is a third-party binary this repository does
-# not carry.  tools/fetch-sana2-drivers.sh downloads the two whose licences
-# permit it; anything else needs AMINETXDUO_SANA2_DRIVER=<path>.  Without one
-# the card is in the machine and nothing can open it, which the run then shows.
+# not carry.  They are looked up in AMINETXDUO_SANA2_STORE and ~/amiga-assets/devs,
+# or named outright with AMINETXDUO_SANA2_DRIVER=<path>.  Without one the card is
+# in the machine and nothing can open it, which the run then shows.
 #
 # a2065.device is not ours to ship either: AMINETXDUO_A2065=<path>, or drop a
 # copy in build/a2065.device.
@@ -88,8 +88,6 @@ EXE="$ROOT/$BUILD/tests/netstack/netstack_test"
 if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
     _want=$(sana2_driver_for "$BOARD")
     _have=$(sana2_local_driver "$_want")
-    [ -n "$_have" ] || _have=$("$ROOT/tools/fetch-sana2-drivers.sh" \
-                               --print-path "$_want" 2>/dev/null || true)
     [ -n "$_have" ] && [ -f "$_have" ] && export AMINETXDUO_SANA2_DRIVER="$_have"
 fi
 

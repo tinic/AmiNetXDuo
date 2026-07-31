@@ -5,7 +5,7 @@
 #   tests/compare/run-legacy-client.sh -b BUILD [options]
 #
 #   -b DIR   build directory the library comes from (default build/cm)
-#   -A FILE  Aminet .lha holding the client (default the curl below)
+#   -A FILE  .lha holding the client (default the curl below)
 #   -x FILE  use this client binary instead of extracting one
 #   -a DIR   extracted AmiSSL-v5-OS3 AmiSSL/ directory
 #   -P PORT  base port for tests/peer/httppeer.py (default 7600)
@@ -26,7 +26,7 @@
 # address and the peer has to bind on all interfaces.
 #
 # The client is somebody else's binary, taken out of the archive it ships in.
-# It is IPv4-only by construction -- the Aminet curl is configured
+# It is IPv4-only by construction -- the packaged curl is configured
 # --disable-ipv6, so it resolves through gethostbyname() and connects through
 # struct sockaddr_in, which is the 1990s assumption an IPv6 library has to keep
 # working with.

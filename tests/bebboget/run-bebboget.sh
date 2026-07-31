@@ -123,10 +123,13 @@ command -v openssl >/dev/null 2>&1 || { echo "openssl is needed for the payloads
 
 # ------------------------------------------------------------- bebboget ----
 
-FETCHSH="$ROOT/tools/fetch-bebboget.sh"
-BEB=$("$FETCHSH" --print-dir)
-"$FETCHSH" --check >/dev/null 2>&1 || "$FETCHSH" >/dev/null
-BEBVER=$("$FETCHSH" --print-version)
+# Not vendored and not downloaded: put the binaries in the local store.
+BEB="${AMINETXDUO_BEBBOGET_DIR:-$HOME/amiga-assets/bebboget}"
+[ -d "$BEB" ] || {
+    echo "no bebboget binaries in $BEB -- set AMINETXDUO_BEBBOGET_DIR" >&2
+    exit 2
+}
+BEBVER=$(cat "$BEB/VERSION" 2>/dev/null || echo unknown)
 
 # -------------------------------------------------------- locale.library ---
 

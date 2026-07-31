@@ -80,7 +80,7 @@ build/cm/
 __pycache__/
 *.pyc
 
-# Third-party SANA-II drivers.  tools/fetch-sana2-drivers.sh caches these under
+# Third-party SANA-II drivers, cached under
 # ~/.cache/aminetxduo, and a2065.device is brought in by hand; none of them are
 # ours to redistribute, so nothing driver-shaped may be committed by accident.
 *.device

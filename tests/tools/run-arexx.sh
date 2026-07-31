@@ -7,7 +7,7 @@
 # WHAT IT IS PROVING, and why a unit test cannot
 #
 #   docs/RESEARCH.md 75.7: AMITCP is not a flag, it is AmiTCP's ARexx host port,
-#   and 31 of the 2,149 Aminet comm/ archives surveyed send commands to it. We
+#   and 31 of the 2,149 comm/ archives surveyed send commands to it. We
 #   published the port with PA_IGNORE and no signal task, so RexxSysLib found it,
 #   PutMsg()ed a RexxMsg and waited for a reply nothing would ever send. With no
 #   port at all the same script fails at once with "host environment not found",
