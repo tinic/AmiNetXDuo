@@ -17,23 +17,6 @@ was wrong for a day.
 
 ## Open — no decision taken
 
-- **Three nx_secure over-reads: FIXED 2026-07-31 on the fork.**
-  `_nx_secure_x509_asn1_tlv_block_parse()` loaded the ASN.1 tag before the
-  length check; `_nx_secure_tls_process_serverhello()` read the ciphersuite and
-  compression method having bounded only the session ID; and
-  `_nx_secure_tls_process_certificate_request()` read the certificate-type
-  count with the only guard sitting inside the TLS 1.3 arm. All three were
-  reachable from the wire, all found by `fuzz_tls_record` / `fuzz_tls_x509` at
-  zero slop, all confirmed under ASan.
-
-  Fixed on `tinic/netxduo` as three branches off `473d1928`, one per defect so
-  each is a PR: `amiga-x509-tlv-tag-overread`, `amiga-tls-serverhello-bounds`,
-  `amiga-tls-certreq-bounds`. Verified to apply in any order to the same tree,
-  and `amiga-integration` at `a1036f03` is exactly their union over the previous
-  tip. Submodule bumped. Commits are unsigned; DCO is the author's to add. Both drivers now run at
-  `FR_KNOWN_SLOP` / `FX_KNOWN_SLOP` 0 -- 200k mutations each, clean -- which is
-  the proof, since they needed 3 and 1 bytes of padding to tolerate the reads
-  before. Commits are unsigned; DCO is the author's to add before submission.
 - **TLS parsers that need crypto have no fuzz driver.** `fuzz_tls_record` and
   `fuzz_tls_x509` cover the record header, the handshake header, ServerHello
   and its extensions, CertificateRequest, the Certificate message and the
@@ -91,28 +74,6 @@ was wrong for a day.
   check goes with it: `EADDRNOTAVAIL`, for a bound address that *can* reach the
   destination while the stack would still leave by somewhere else, needs two
   interfaces on one subnet to produce. Reasoned about, not measured.
-- **IPv4 multicast is absent** -- no `IP_ADD_MEMBERSHIP`, `IP_MULTICAST_IF`,
-  `IP_MULTICAST_TTL`, `IP_MULTICAST_LOOP`, no `ip_mreq`. Reopened 2026-07-31:
-  it had been closed on the grounds that "nothing in the tree needs the
-  socket-level API", which is the wrong test -- the point of the project is
-  running other people's tools, and SSDP/UPnP and any ported mDNS open their
-  own multicast sockets. The vendored NetX mDNS covers `.local` for us and
-  covers nothing for them.
-
-  Not purely exposure work: `nx_igmp_enable()` is never called, so IGMP has to
-  be turned on first, which is a memory cost the 1 MB floor tier has to be
-  weighed against. RFC 1112 membership is the target; RFC 3678 source filtering
-  is not, and can wait indefinitely. `NX_ENABLE_IPV6_MULTICAST` is the same
-  argument on the v6 side, for a non-floor tier.
-- **`bind()` outbound source selection is not done.** Inbound is: a completed
-  TCP connection that arrived on another interface is reset in `bsd_accept()`,
-  and a datagram that did is released in `bsd_recv_udp()`, both through
-  `bsd_bind_wants_interface()`, so `nc -l 127.0.0.1` means what it says and a
-  specific address is no longer refused. What is left is the send direction --
-  a socket bound to one address should send *from* it, and today NetX picks by
-  route. `nxd_udp_socket_source_send()` is already wired for RFC 4007 zones
-  and takes the same kind of index, so UDP is small; TCP has no source-send
-  equivalent and needs a decision, the same one RFC 4007 needs.
 - **IPv6 group membership (`IPV6_JOIN_GROUP`) is absent.** The IPv4 side is
   done (below); this is not, and is a separate decision because the numbers are
   worse. `NX_ENABLE_IPV6_MULTICAST` grows every `NX_IP` by 172 bytes whether or
@@ -121,18 +82,6 @@ was wrong for a day.
   reaches the driver and no report is ever sent, and a querying switch stops
   forwarding the group. The reasoning is beside the define in
   `port/netxduo-amiga/inc/nx_user.h`.
-- **`ShowNetServices` cannot browse every type at once.** With no type it runs the
-  RFC 6763 §9 meta-query and lists the types present; listing every instance of
-  every type would mean starting one continuous query per type found. They would
-  all run concurrently, so it costs one more window rather than one per type — but
-  it multiplies what lands in the peer cache, and the cache size was already the
-  thing that decided whether an answer had an address in it or not.
-- **A browse answer with no address is not chased.** When the PTR and SRV arrive
-  without the A record in the same response, the row prints the target host and
-  "no address" — the vendored module fills `service_ipv4` only from an A record
-  already in the cache and never asks for one. Raising the peer cache to 32 KB
-  made it rare on the LAN it was measured against, which is a mitigation rather
-  than a fix: the right answer is to resolve the SRV target when the A is absent.
 - **A browse reports the whole peer cache, not the browse window.**
   `netstack_mdns_browse_collect()` walks `nx_mdns_service_lookup()` by index,
   which is the whole peer cache, and nothing ages entries from our side -- the
@@ -149,22 +98,6 @@ was wrong for a day.
   Still true after the address chasing and `ALL` landed: neither of them needed
   an RR walk, so nothing is written that this would reuse.
 
-- **RFC 4007 §11 is done for the socket API; the config keys are not.**
-  Done: the text layer (`ami_config_parse_ip6_zone` /
-  `ami_config_format_ip6_zone`, covered in `test_config.c`), `getnameinfo()`
-  printing a zone for link-local, `getaddrinfo()` accepting one as a number or
-  an interface name, and `send`/`sendto`/`sendmsg` honouring it on UDP and raw
-  alike -- `bsd_source_select()` maps the interface index to the
-  `nx_ipv6_address[]` index the `source_send()` calls want. `connect()` on TCP
-  checks the zone against the route and refuses rather than ignoring it; see
-  the TCP entry above for why it cannot do better.
-
-  Left:
-  - `DEVS:NetInterfaces` keys (`GATEWAY6`, `ADDRESS6`) still call the plain
-    parser, so a zoned value there is a clean refusal.
-  - No emulator coverage for the zone itself: verified only by the host parser
-    tests. It wants two interfaces to be meaningful, and the lab guest has one.
-    `tests/tools/run-srcsel.sh` covers the IPv4 half of the same machinery.
 - **Ship a Developer drawer: the NDK addendum.** SHIPPED 2026-07-31 for RFC
   3493 section 4. `developer/` holds the SFD and the generated
   clib/inline/proto/pragmas/lvo set; `tools/stage-developer.sh` assembles the
@@ -265,16 +198,6 @@ was wrong for a day.
   the configurable range, which made naming it as a send source fail for an
   address the machine plainly had. `bsd_ip6_zone_source()` in `transfer.c` has
   the same bound and is right to -- a zone only ever qualifies a link-local.
-
-- **`bsd_bind_wants_interface()` is handed the wrong pointer for IPv6
-  datagrams.** Found 2026-07-31 while writing the above, and deliberately not
-  fixed there. `bsd_recv_udp()` passes `packet->nx_packet_ip_interface`, but
-  that field is a union: `nx_ipv6_packet_receive.c:300` overwrites it with the
-  `NXD_IPV6_ADDRESS *` the datagram matched, so for an IPv6 datagram the
-  comparison against `nx_ip_interface[]` is between unrelated pointers and can
-  only fail. A socket bound to a specific IPv6 address therefore drops every
-  datagram; the wildcard bind is unaffected, which is why nothing has noticed.
-  `bsd_cmsg_ifindex()` in `cmsg.c` has the two-family dereference to copy.
 
 ## Decided against — do not "fix"
 
