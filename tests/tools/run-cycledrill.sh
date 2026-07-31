@@ -360,11 +360,18 @@ elif [ "$GUEST_EXPUNGES" -ge 2 ]; then
 fi
 
 # ---- the known SANA-II reader leak ----------------------------------------
+#
+# Only Amiberry keeps a serial log here, and ami_log() has no other sink, so
+# under FS-UAE this cannot be looked for at all.  Saying so beats printing a
+# zero that means "not checked".
 ORPHANS=0
-if [ -n "$SERIAL" ] && [ -f "$SERIAL" ]; then
+if [ -z "${SERIAL:-}" ] || [ ! -f "$SERIAL" ]; then
+    echo "  -- orphaned SANA-II reader stacks: NOT CHECKED (no serial log; use -A)"
+    ORPHANS=-1
+else
     ORPHANS=$(grep -c "did not stop; leaking its stack" "$SERIAL" || true)
+    echo "  -- orphaned SANA-II reader stacks logged: $ORPHANS"
 fi
-echo "  -- orphaned SANA-II reader stacks logged: $ORPHANS"
 if [ "$ORPHANS" -gt 0 ]; then
     echo "     (src/sana2/sana2_rx.c's last-resort path: a driver ignored AbortIO()."
     echo "      32 KB leaked per occurrence.  Known, not a regression.)"
