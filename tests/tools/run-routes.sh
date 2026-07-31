@@ -59,13 +59,21 @@ cd "$ROOT"
 MODEL=A1200
 TIMEOUT=240
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
+# FS-UAE needs an X server; on a headless Linux box it dies in GLAD before the
+# guest boots, so -A picks Amiberry, which runs genuinely headless.
+RUNNER="${AMINETXDUO_RUNNER:-fsuae}"
+BOARD=a2065
+IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
 
-while getopts "m:t:b:" opt; do
+while getopts "m:t:b:AN:B:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir]" >&2; exit 2 ;;
+        A) RUNNER=amiberry ;;
+        N) BOARD="$OPTARG" ;;
+        B) IFACE="$OPTARG" ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-A [-N board] [-B backend]]" >&2; exit 2 ;;
     esac
 done
 
@@ -123,15 +131,25 @@ EOF
 # ------------------------------------------------------------------ run ---
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-routes}"
-HD="$ROOT/build/testhd-$AMINETXDUO_RUN_TAG"
 FSLOG="$ROOT/build/fsuae-base-$AMINETXDUO_RUN_TAG/Cache/Logs/fs-uae.log.txt"
 
-echo "==> booting $MODEL with the A2065 on SLIRP"
 set +e
-"$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
-    "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-    "$STAGE/AddNetInterface" "$STAGE/netstat" "$STAGE/RouteProbe" \
-    "$STAGE/RtProbe"
+if [ "$RUNNER" = "amiberry" ]; then
+    HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
+    echo "==> booting $MODEL under Amiberry, $BOARD on $IFACE"
+    "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
+        -t "$TIMEOUT" \
+        "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
+        "$STAGE/AddNetInterface" "$STAGE/netstat" "$STAGE/RouteProbe" \
+        "$STAGE/RtProbe"
+else
+    HD="$ROOT/build/testhd-$AMINETXDUO_RUN_TAG"
+    echo "==> booting $MODEL with the A2065 on SLIRP"
+    "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
+        "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
+        "$STAGE/AddNetInterface" "$STAGE/netstat" "$STAGE/RouteProbe" \
+        "$STAGE/RtProbe"
+fi
 RUN_RC=$?
 set -e
 
