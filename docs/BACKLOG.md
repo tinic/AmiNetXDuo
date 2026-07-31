@@ -44,6 +44,12 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   asks for at least numeric indices. Latent while a machine has one NIC, which
   is nearly all of them; it bites at two, and `AMI_CFG_MAX_INTERFACES` is 2.
   Wanted by `ping fe80::1%eth0` and by a link-local `GATEWAY6`.
+- **Ship a Developer drawer: the NDK addendum.** ACCEPTED 2026-07-31. The
+  archive ships no headers, so nothing we add past the NDK's 0..143 range can
+  be reached by anyone else's code. Plan and the three permanent ABI decisions
+  (LVO slots, `CMSG_ALIGN` for m68k, `IPV6_*` option numbers) are in
+  `docs/NDK-ADDENDUM.md`. Blocks the two items below from being useful to
+  anyone but us.
 - **RFC 3493 §4: add `if_nametoindex`, `if_indextoname`, `if_nameindex`,
   `if_freenameindex`.** ACCEPTED 2026-07-31 -- the first LVO extension in 15
   years, on the footing that we are the reference now.
