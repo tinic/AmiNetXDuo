@@ -1153,28 +1153,40 @@ int main(VOID)
     if (expunge >= 2)
     {
         /*
-         * The same instant of two different expunge cycles, so anything paid
-         * once -- the packet pool, whatever RemLibrary() does or does not do
-         * with the seglist -- cancels, and only a trend is left.  Cycle 1 is
-         * not one of the two for the same reason: it also pays for the netdb
-         * and the DOS entry.
+         * The same instant of the first and the last expunge cycle, divided by
+         * the number of intervals between them.  Two choices in that sentence
+         * are the difference between a figure and a coin toss:
+         *
+         *   the FIRST and the LAST, not the last adjacent pair, because one
+         *   pair is one sample -- measured spread over five cycles was 12,568,
+         *   12,616, 12,592 and 21,104 bytes, so the last pair alone answers
+         *   anything from 12 KB to 21 KB;
+         *
+         *   the sample taken while the library is OPEN, not the one taken
+         *   after it has gone.  The post-expunge instant is a few
+         *   milliseconds after ACTION_DIE and a Process may still be on its
+         *   way out; the open one is taken with the stack fully up and is
+         *   quiet.  The 21,104 above is that, and only that.
+         *
+         * Anything paid once -- the packet pool, whatever RemLibrary() does
+         * with the seglist -- is in both samples and cancels.
          */
         LONG last  = expunge - 1;
-        LONG prev  = expunge - 2;
-        LONG delta = (LONG)exp_gone[last].free_mem -
-                     (LONG)exp_gone[prev].free_mem;
+        LONG total = (LONG)exp_open[0].free_mem -
+                     (LONG)exp_open[last].free_mem;
+        LONG per   = total / last;
 
-        say("free after expunge %ld: %lu, after %ld: %lu\n",
-            prev + 1, (LONG)exp_gone[prev].free_mem,
-            last + 1, (LONG)exp_gone[last].free_mem);
+        say("free at expunge 1: %lu, at %ld: %lu over %ld cycles\n",
+            (LONG)exp_open[0].free_mem, last + 1,
+            (LONG)exp_open[last].free_mem, last);
         /* The line run-cycledrill.sh reads.  Named, and on its own, so the
            budget lives in the shell where it can be raised for a soak rather
            than being compiled in here. */
-        say("expunge leak: %ld bytes per cycle\n", -delta, 0, 0, 0);
+        say("expunge leak: %ld bytes per cycle\n", per, 0, 0, 0);
 
-        check(exp_gone[last].tasks <= exp_gone[prev].tasks,
+        check(exp_open[last].tasks <= exp_open[0].tasks,
               "no Process was left behind by an expunge",
-              (LONG)exp_gone[prev].tasks, (LONG)exp_gone[last].tasks);
+              (LONG)exp_open[0].tasks, (LONG)exp_open[last].tasks);
     }
 
     /* ---- what actually happened ------------------------------------------- */
