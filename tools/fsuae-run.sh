@@ -2,8 +2,13 @@
 #
 # Run an AmigaOS executable under FS-UAE and capture its output.
 #
-#   tools/fsuae-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-k MHZ] [-n] [-x]
-#                      <executable> [extra files...]
+#   tools/fsuae-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-k MHZ] [-a ARGS]
+#                      [-n] [-x] <executable> [extra files...]
+#
+# -a passes arguments to the executable under test -- `-a 'eth0 QUIET'` -- which
+# is the only way to reach a command that takes a parameter.  It is the same
+# string as AMINETXDUO_GUEST_ARGS, which tools/winuae-run.sh already read; the
+# flag wins when both are set.
 #
 # -m selects the machine profile. A1200 (the default) is the project floor:
 # 68EC020 at 14 MHz with a 16-bit path to memory, and it is the ONLY profile
@@ -48,16 +53,18 @@ NETWORK=0
 CPU=""
 CLOCK=""
 PERF_RUN="${AMINETXDUO_PERF:-0}"
+GUEST_ARGS="${AMINETXDUO_GUEST_ARGS:-}"
 
-while getopts "xt:m:c:k:n" opt; do
+while getopts "xt:m:c:k:na:" opt; do
     case "$opt" in
         t) TIMEOUT="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
         k) CLOCK="$OPTARG" ;;
+        a) GUEST_ARGS="$OPTARG" ;;
         x) PERF_RUN=1 ;;
         n) NETWORK=1 ;;
-        *) echo "usage: $0 [-t seconds] [-m model] [-c cpu] [-k MHz] [-n] <executable> [files...]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-t seconds] [-m model] [-c cpu] [-k MHz] [-a args] [-n] <executable> [files...]" >&2; exit 2 ;;
     esac
 done
 
@@ -207,10 +214,14 @@ mkdir -p "$HD/env" "$HD/envarc" "$HD/t" "$HD/clips"
 # code at or above the fail level (10 by default), so without it any test that
 # exits nonzero never reaches the line that records its status -- the run just
 # times out and the failure looks like a hang.
+#
+# GUEST_ARGS goes in verbatim, so the AmigaDOS shell does the quoting -- which
+# is what a command with a ReadArgs template wants.  Empty by default, and then
+# the line is the one this script always wrote.
 cat > "$HD/s/Startup-Sequence" <<EOF
 failat 9999
 c:envsetup
-$EXE_NAME >DH0:stdout.txt
+$EXE_NAME${GUEST_ARGS:+ $GUEST_ARGS} >DH0:stdout.txt
 echo >DH0:.done "\$RC"
 EOF
 

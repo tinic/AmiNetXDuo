@@ -3,8 +3,11 @@
 # Run an AmigaOS executable under WinUAE on a remote Windows host and capture
 # its output.  The WinUAE counterpart of tools/fsuae-run.sh.
 #
-#   tools/winuae-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-n] [-x] [-K]
-#                       <executable> [extra files...]
+#   tools/winuae-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-a ARGS] [-n] [-x]
+#                       [-K] <executable> [extra files...]
+#
+# -a passes arguments to the executable under test -- `-a 'eth0 QUIET'`.  Same
+# string as AMINETXDUO_GUEST_ARGS; the flag wins when both are set.
 #
 # -m selects the machine.  A3000 is the default and the one that matters: a
 # real 68030 with 32-bit motherboard RAM, which is the machine the project is
@@ -102,16 +105,18 @@ if [ "$SETUP" = "1" ]; then
 fi
 
 BOARD=a2065
+GUEST_ARGS="${AMINETXDUO_GUEST_ARGS:-}"
 
-while getopts "t:m:c:nN:x" opt; do
+while getopts "t:m:c:nN:xa:" opt; do
     case "$opt" in
         t) TIMEOUT="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
         n) NETWORK=1 ;;
         N) NETWORK=1; BOARD="$OPTARG" ;;
+        a) GUEST_ARGS="$OPTARG" ;;
         x) ACCURATE=1 ;;
-        *) echo "usage: $0 [-t seconds] [-m A3000|A1200|A4000] [-c cpu] [-n] [-N board] [-x] [-K] <executable> [files...]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-t seconds] [-m A3000|A1200|A4000] [-c cpu] [-n] [-N board] [-a args] [-x] [-K] <executable> [files...]" >&2; exit 2 ;;
     esac
 done
 shift $((OPTIND - 1))
@@ -381,9 +386,6 @@ cp "$ENVSETUP" "$HD/c/envsetup"
 # rather than be killed: WinUAE exits on its own, flushes its log, and the host
 # never has to guess from a timer.  If it is missing the harness still works --
 # the host falls back to killing the emulator once DH0:.done appears.
-# AMINETXDUO_GUEST_ARGS is appended to the command the guest runs.
-GUEST_ARGS="${AMINETXDUO_GUEST_ARGS:-}"
-
 UAEQUIT="${AMINETXDUO_UAEQUIT:-$ROOT/build/uaequit}"
 if [ ! -f "$UAEQUIT" ]; then
     scp -q "$HOST:C:/Program\\ Files/WinUAE/Amiga\\ Programs/UAEquit" "$UAEQUIT" 2>/dev/null || true
@@ -415,7 +417,7 @@ failat 9999
 c:envsetup
 $ENFORCER_LINES
 ${AMINETXDUO_GUEST_PRECMD:-}
-$EXE_NAME $GUEST_ARGS >DH0:stdout.txt
+$EXE_NAME${GUEST_ARGS:+ $GUEST_ARGS} >DH0:stdout.txt
 echo >DH0:.done "\$RC"
 $QUIT_LINE
 EOF

@@ -3,7 +3,12 @@
 # Run an AmigaOS executable under Amiberry on Linux and capture its output.
 #
 #   tools/amiberry-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-N BOARD]
-#                         [-B BACKEND] <executable> [extra files...]
+#                         [-B BACKEND] [-a ARGS] <executable> [extra files...]
+#
+# -a passes arguments to the executable under test -- `-a 'eth0 QUIET'` -- which
+# is the only way to reach a command that takes a parameter.  It is the same
+# string as AMINETXDUO_GUEST_ARGS, which tools/winuae-run.sh already read; the
+# flag wins when both are set.
 #
 # The Linux counterpart of tools/fsuae-run.sh and tools/winuae-run.sh.  Amiberry
 # is WinUAE's core, so -N takes WinUAE's board keys unchanged and the board
@@ -76,20 +81,24 @@ MODEL=A1200
 CPU=""
 BOARD=""
 BACKEND="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
+GUEST_ARGS="${AMINETXDUO_GUEST_ARGS:-}"
 
-while getopts "t:m:c:N:B:" opt; do
+USAGE="usage: $0 [-t seconds] [-m model] [-c cpu] [-N board] [-B backend] [-a args] <executable> [files...]"
+
+while getopts "t:m:c:N:B:a:" opt; do
     case "$opt" in
         t) TIMEOUT="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
         N) BOARD="$OPTARG" ;;
         B) BACKEND="$OPTARG" ;;
-        *) echo "usage: $0 [-t seconds] [-m model] [-c cpu] [-N board] [-B backend] <executable> [files...]" >&2; exit 2 ;;
+        a) GUEST_ARGS="$OPTARG" ;;
+        *) echo "$USAGE" >&2; exit 2 ;;
     esac
 done
 shift $((OPTIND - 1))
 
-[ $# -ge 1 ] || { echo "usage: $0 [-t seconds] [-m model] [-N board] [-B backend] <executable> [files...]" >&2; exit 2; }
+[ $# -ge 1 ] || { echo "$USAGE" >&2; exit 2; }
 
 EXE="$1"; shift
 [ -f "$EXE" ] || { echo "no such executable: $EXE" >&2; exit 2; }
@@ -211,10 +220,14 @@ cp "$ENVSETUP" "$HD/c/envsetup"
 # failat is essential: AmigaDOS aborts a script the moment a command returns a
 # code at or above the fail level, so without it a test that exits nonzero
 # never reaches the line recording its status and the run merely times out.
+#
+# GUEST_ARGS goes in verbatim, so the AmigaDOS shell does the quoting -- which
+# is what a command with a ReadArgs template wants.  Empty by default, and then
+# the line is the one this script always wrote.
 cat > "$HD/s/Startup-Sequence" <<EOF
 failat 9999
 c:envsetup
-$EXE_NAME >DH0:stdout.txt
+$EXE_NAME${GUEST_ARGS:+ $GUEST_ARGS} >DH0:stdout.txt
 echo >DH0:.done "\$RC"
 EOF
 
