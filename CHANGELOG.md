@@ -2,6 +2,10 @@
 
 User-visible changes, newest first. Internal work is in the git log.
 
+## Unreleased
+
+- `AddInterfaceTagList()` leaves an interface bare again, as its documentation says: addressing it is `ConfigureInterfaceTagList()`'s job. This reverses part of 0.14.1, which had made a re-added interface keep its old address and so stopped `BeginInterfaceConfig()` ever running DHCP
+
 ## 0.14.3
 
 - Fixed closing the last `bsdsocket.library` handle never returning, so a program that opens the library, uses it and exits no longer hangs
