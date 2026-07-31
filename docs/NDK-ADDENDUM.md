@@ -26,24 +26,40 @@ NDK3.2/SANA+RoadshowTCP-IP/sfd/bsdsocket_lib.sfd
 `pragmas/bsdsocket_pragmas.h`. The inline form is a statement-expression macro
 that loads the argument registers and jumps through `SocketBase` at the LVO.
 
-LVO arithmetic, so the next person does not have to rederive it: entry *n* of
-the SFD is at `-(30 + 6n)`. Our vector array carries the four standard library
-vectors (Open/Close/Expunge/Reserved) at `-6..-24` before `socket`, so
+LVO arithmetic: entry *n* of the SFD is at `-(30 + 6n)`, and our vector array
+carries the four standard library vectors (Open/Close/Expunge/Reserved) at
+`-6..-24` before `socket`. Do not derive the mapping from the SFD by counting
+`==reserve` directives -- there are three of them (10, 2, 6) and they do not all
+consume callable slots. `src/bsdsocket/bsdsocket_vectors.c` is the authority.
+
+The layout that matters:
 
 ```
-array index = SFD entry + 4
+  -0x336 [136]  getnameinfo     last entry the NDK's SFD defines
+  -0x33c [137] ..
+  -0x35a [142]  the ==reserve 6 block -- Commodore's "six reserved
+                slots for future expansion", the last directive before ==end
+  -0x360 [143]  ObtainNetXDuoContext   ours, past the end of the SFD
+  -0x366 [144]  NetStackQuery          ours
+  -0x36c [145]  NetStackControl        ours
+  -0x372 [146]  first free
 ```
-
-The array ends at `[145]` = `-0x36c`. The next free slot is `[146]` = `-0x372`.
 
 ## Three decisions we are making for everyone
 
 These are the reason this needs planning rather than just doing.
 
-**1. LVO slots.** `[146]` onward. Do **not** take `[141]`/`[142]`: they are
-`bsd_enosys` *reserved* inside AmiTCP's own published range, and a future
-Roadshow may define them. Once we hand out `-0x372` for `if_nametoindex`, it is
-that forever.
+**1. LVO slots.** `[146]` onward, continuing past the end of the SFD as
+`[143]`-`[145]` already do.
+
+Do **not** take the `==reserve 6` block at `[137]`-`[142]`, tempting as six free
+slots inside the published range look. That range is what Commodore set aside
+for its own expansion; if Roadshow ever ships again and fills it, every binary
+compiled against our meaning of `-0x33c` jumps into a different function, and
+nothing diagnoses it. Past the end can only collide with another third party
+doing the same thing, and defining that space is what being the reference means.
+
+Once we hand out `-0x372` for `if_nametoindex`, it is that forever.
 
 **2. `CMSG_ALIGN` for m68k.** `struct cmsghdr` and the `CMSG_*` macros are not
 in the NDK. RFC 3542 leaves the alignment to the implementation, so we pick it,

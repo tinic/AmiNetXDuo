@@ -54,10 +54,12 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   `if_freenameindex`.** ACCEPTED 2026-07-31 -- the first LVO extension in 15
   years, on the footing that we are the reference now.
 
-  Slots **146-149** at **-0x372, -0x378, -0x37e, -0x384**. The table currently
-  ends at -0x36c [145]. Do **not** take 141/142: they are `bsd_enosys`
-  *reserved* inside AmiTCP's own published range, and a future Roadshow could
-  define them. Ours start at 143.
+  Slots **146-149** at **-0x372, -0x378, -0x37e, -0x384**, continuing past the
+  end of the SFD as [143]-[145] already do. Do **not** take [137]-[142]
+  (-0x33c..-0x35a): that is Commodore's `==reserve 6` block, the space set aside
+  for its own expansion, and a Roadshow that filled it would send every binary
+  built against our meaning into someone else's function. See
+  `docs/NDK-ADDENDUM.md`.
 
   ```c
   unsigned int         if_nametoindex(const char *ifname);
