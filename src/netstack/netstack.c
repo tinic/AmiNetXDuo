@@ -135,6 +135,10 @@ LONG ami_netstack_enter(AmiNetCaller *caller)
 
 VOID ami_netstack_leave(AmiNetCaller *caller)
 {
+    /* On the way out of every stack operation, so the packet-pool figures in
+       the health mark are as of the last thing the stack did. */
+    netstack_pool_sample();
+
     if (caller->nc_Adopted)
     {
         (VOID)tx_amiga_orphan_thread(&caller->nc_Thread);
@@ -252,6 +256,8 @@ LONG ami_netstack_enter_cached(AmiNetCaller *caller)
 
 VOID ami_netstack_leave_cached(AmiNetCaller *caller)
 {
+    netstack_pool_sample();             /* see ami_netstack_leave() */
+
     if (!caller->nc_Adopted)
         return;
 
@@ -1301,6 +1307,9 @@ static LONG ami_ns_bring_up(VOID)
        waiting for `WaitForPort AMITCP`. */
     ami_ns_port_create();
     ami_netstack_baton_set_sampler(netstack_pool_sample);
+    /* Once here, so the mark has the pool from the moment it is published
+       rather than from whenever the stack is next used. */
+    netstack_pool_sample();
     ami_netstack_health_publish();
     ami_sana2_set_open_hooks(ami_netstack_rexx_suspend,
                              ami_netstack_rexx_resume);

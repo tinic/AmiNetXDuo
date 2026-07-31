@@ -46,8 +46,8 @@ ULONG ami_alloc_count(VOID);          /* outstanding allocations */
  *
  * The pool fields are a sample, not a subscription: NetX Duo allocates packets
  * from its own internals as well as from ours, so there is no one place to
- * count them.  ami_netstack_pool_sample() refreshes them at every stack thread
- * transition and at every NETSTATUS_HEALTH.
+ * count them.  netstack_pool_sample() refreshes them; its header comment says
+ * where from.
  */
 typedef struct AmiMemStats
 {

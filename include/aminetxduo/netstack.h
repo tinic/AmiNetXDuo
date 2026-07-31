@@ -188,9 +188,14 @@ const AmiConfig *netstack_config(VOID);
  * A pool draining and a heap leak look the same from outside and want
  * different answers, so the two are counted separately.  There is no single
  * place to hook a packet allocation -- NetX Duo makes them from its own
- * internals as well as from ours -- so this samples instead: cheap enough for
- * the bracket to call on every transition, and called again by
- * NETSTATUS_HEALTH so a program that asks gets the figure as of the asking.
+ * internals as well as from ours -- so this samples instead: once at bring-up,
+ * on the way out of every stack operation, on every baton transition, and
+ * again from NETSTATUS_HEALTH so a program that asks gets the figure as of the
+ * asking.  A dozen loads, against a bracket that costs hundreds of
+ * microseconds.
+ *
+ * What netstat -h reads is therefore as of the last thing the stack did, which
+ * on the machine this exists for is the reading that matters.
  *
  * Does nothing when there is no pool.
  */

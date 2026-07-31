@@ -378,8 +378,8 @@ typedef struct NetStatusStats
  *
  * nsl_PoolFree and nsl_PoolLow are sampled rather than exact: NetX Duo
  * allocates packets from its own internals as well as from ours, so there is
- * no one place to count them.  netstack_pool_sample() refreshes them at every
- * stack thread transition, and this call refreshes them before answering.
+ * no one place to count them.  netstack_pool_sample() refreshes them on the way
+ * out of every stack operation, and this call refreshes them before answering.
  *
  * nsl_TickWorstStallMs large next to nsl_TickWorstServiceUs small says the
  * tick task was not dispatched, not that it was slow.  nsl_BatonMoved or
