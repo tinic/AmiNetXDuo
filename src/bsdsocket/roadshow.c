@@ -171,13 +171,17 @@ struct List *bsd_ObtainDomainNameServerList(
         node->dnsn_Address = (STRPTR)out->bdl_Text[i];
 
         /*
-         * "Negative values indicate statically-configured servers"
-         * (libraries/bsdsocket.h). Every server here comes from
-         * DEVS:Internet/name_resolution or from the DHCP lease that replaced
-         * it, and nothing in AmiNetXDuo reference-counts them, so report all
-         * of them as static rather than inventing a count.
+         * "How many times this server address has been added to the list so
+         * far. A negative value indicates that this server was configured
+         * statically in the 'DEVS:Internet/resolver' file" -- autodoc.
+         * netstack_dns_server_add() keeps both halves in nameserver_use[]:
+         * the sign says where the entry came from, the magnitude is the nest
+         * count. A slot in use is never 0, so that stands in for an
+         * AmiResolverConfig that predates the field.
          */
-        node->dnsn_UseCount = -1;
+        node->dnsn_UseCount = (cfg->resolver.nameserver_use[i] != 0)
+                                  ? cfg->resolver.nameserver_use[i]
+                                  : -1;
 
         AddTail((struct List *)&out->bdl_List, (struct Node *)&node->dnsn_MinNode);
     }

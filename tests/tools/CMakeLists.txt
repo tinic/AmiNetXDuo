@@ -90,6 +90,20 @@ endif()
 target_compile_options(test_monprobe PRIVATE -Wall -Wextra)
 set_target_properties(test_monprobe PROPERTIES OUTPUT_NAME "MonProbe")
 
+# DnsProbe drives AddDomainNameServer/RemoveDomainNameServer/
+# ObtainDomainNameServerList, Get/SetDefaultDomainName and inet_pton against a
+# running stack.  The nesting rule and dnsn_UseCount's sign only exist at run
+# time -- a server added twice and removed once has to still be there -- and
+# inet_pton()'s strictness is only visible next to inet_addr()'s laxity, which
+# is why the probe asks both the same strings.
+add_executable(test_dnsprobe dnsprobe.c)
+target_include_directories(test_dnsprobe PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_dnsprobe PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_dnsprobe PRIVATE -Wall -Wextra)
+set_target_properties(test_dnsprobe PROPERTIES OUTPUT_NAME "DnsProbe")
+
 # TcpHandoff runs the whole socket-to-file-handle sequence -- accept(),
 # ReleaseCopyOfSocket(), Open("TCP:OBTAIN="), SystemTagList() -- against two
 # stock AmigaDOS commands.  Linked against nothing of ours: it reaches

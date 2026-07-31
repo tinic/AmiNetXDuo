@@ -29,6 +29,12 @@ extern "C" {
 #define AMI_CFG_NAME_LEN            64
 #define AMI_CFG_PATH_LEN            128
 
+/* The default domain gets its own cap: SetDefaultDomainName()'s autodoc says
+   "cannot be longer than 255 characters", and AMI_CFG_NAME_LEN also sizes the
+   interface names, the host name and the DNS-SD instance names, none of which
+   wants 256 bytes. */
+#define AMI_CFG_DOMAIN_LEN          256
+
 /*
  * DNS-SD services declared in DEVS:Internet/service_discovery.
  *
@@ -101,10 +107,23 @@ typedef struct AmiIfConfig {
     BOOL        have_gateway6;
 } AmiIfConfig;
 
+/*
+ * nameserver_use[] is what ObtainDomainNameServerList() reports as
+ * dnsn_UseCount, in that call's own convention: negative means the server was
+ * configured statically in DEVS:Internet/name_resolution, positive means it
+ * was added at run time by DHCP or AddDomainNameServer(). The magnitude is the
+ * number of references either way, because AddDomainNameServer() nests -- see
+ * netstack_dns_server_add().
+ *
+ * A slot in use is never 0, so a zeroed AmiResolverConfig with a non-zero
+ * nameserver_count would be malformed; every writer of nameserver[] sets this
+ * alongside it.
+ */
 typedef struct AmiResolverConfig {
     ULONG   nameserver[AMI_CFG_MAX_NAMESERVERS];
+    LONG    nameserver_use[AMI_CFG_MAX_NAMESERVERS];
     UWORD   nameserver_count;
-    char    domain[AMI_CFG_NAME_LEN];
+    char    domain[AMI_CFG_DOMAIN_LEN];
     char    search[AMI_CFG_MAX_SEARCH][AMI_CFG_NAME_LEN];
     UWORD   search_count;
 } AmiResolverConfig;
