@@ -359,6 +359,7 @@ typedef struct Sample
     ULONG   pool_empty;
     ULONG   free_mem;       /* from Exec, not the library */
     ULONG   sigs;           /* signal bits held by this Process */
+    ULONG   tasks;          /* Tasks and Processes on the system lists */
 } Sample;
 
 static struct
@@ -402,8 +403,34 @@ static ULONG own_signals(VOID)
 }
 
 /*
- * `base` NULL means the library is not open right now: the two Exec numbers
- * are still read, and they are the only ones that survive an expunge.
+ * Tasks and Processes on the system lists.  A Process left running after an
+ * expunge is the worst of the failures this drill looks for -- it is executing
+ * out of a segment that has been handed back -- and it is also the cheapest
+ * explanation for a fixed amount of memory going missing every cycle, since a
+ * Process is its control block plus its stack.
+ *
+ * Forbid() rather than Disable(): the lists are only walked, and the running
+ * task is not on either of them, so the count is one short of the truth and
+ * consistently so.
+ */
+static ULONG count_tasks(VOID)
+{
+    struct Node *n;
+    ULONG        total = 0;
+
+    Forbid();
+    for (n = SysBase->TaskReady.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
+        total++;
+    for (n = SysBase->TaskWait.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
+        total++;
+    Permit();
+
+    return total;
+}
+
+/*
+ * `base` NULL means the library is not open right now: the Exec numbers are
+ * still read, and they are the only ones that survive an expunge.
  */
 static VOID sample(struct Library *base, Sample *out)
 {
@@ -411,6 +438,7 @@ static VOID sample(struct Library *base, Sample *out)
 
     out->free_mem = AvailMem(MEMF_ANY);
     out->sigs     = own_signals();
+    out->tasks    = count_tasks();
 
     if (base == NULL)
         return;
@@ -446,8 +474,8 @@ static VOID show(const char *label, LONG n, const Sample *s)
     say("           pool %lu of %lu low %lu empty %lu\n",
         (LONG)s->pool_free, (LONG)s->pool_total, (LONG)s->pool_low,
         (LONG)s->pool_empty);
-    say("           free %lu sigs %lu\n",
-        (LONG)s->free_mem, (LONG)s->sigs, 0, 0);
+    say("           free %lu sigs %lu tasks %lu\n",
+        (LONG)s->free_mem, (LONG)s->sigs, (LONG)s->tasks, 0);
 }
 
 /* ------------------------------------------------------------ the library -- */
@@ -1097,7 +1125,9 @@ int main(VOID)
         say("pool_free %lu to %lu, free %lu to %lu\n",
             (LONG)a->pool_free, (LONG)b->pool_free,
             (LONG)a->free_mem, (LONG)b->free_mem);
-        say("sigs %lu to %lu\n", (LONG)a->sigs, (LONG)b->sigs, 0, 0);
+        say("sigs %lu to %lu, tasks %lu to %lu\n",
+            (LONG)a->sigs, (LONG)b->sigs,
+            (LONG)a->tasks, (LONG)b->tasks);
 
         check(b->alloc_live <= a->alloc_live,
               "allocations outstanding did not grow over the cycles",
@@ -1111,6 +1141,9 @@ int main(VOID)
         check(b->sigs <= a->sigs,
               "no signal bits were leaked onto this Process",
               (LONG)a->sigs, (LONG)b->sigs);
+        check(b->tasks <= a->tasks,
+              "no Task or Process was left behind over the cycles",
+              (LONG)a->tasks, (LONG)b->tasks);
     }
     else
     {
@@ -1134,17 +1167,14 @@ int main(VOID)
         say("free after expunge %ld: %lu, after %ld: %lu\n",
             prev + 1, (LONG)exp_gone[prev].free_mem,
             last + 1, (LONG)exp_gone[last].free_mem);
-        say("  delta %ld bytes\n", delta, 0, 0, 0);
+        /* The line run-cycledrill.sh reads.  Named, and on its own, so the
+           budget lives in the shell where it can be raised for a soak rather
+           than being compiled in here. */
+        say("expunge leak: %ld bytes per cycle\n", -delta, 0, 0, 0);
 
-        /*
-         * 16 KB of slack.  Half an orphaned SANA-II reader stack, which is 32
-         * KB (src/sana2/sana2_rx.c), so the defect this drill exists to catch
-         * cannot hide under it; and wide enough that ordinary allocator
-         * fragmentation between two identical points does not read as a leak.
-         */
-        check(delta > -16384,
-              "free memory did not fall between two expunge cycles",
-              delta, 0);
+        check(exp_gone[last].tasks <= exp_gone[prev].tasks,
+              "no Process was left behind by an expunge",
+              (LONG)exp_gone[prev].tasks, (LONG)exp_gone[last].tasks);
     }
 
     /* ---- what actually happened ------------------------------------------- */
