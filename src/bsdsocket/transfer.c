@@ -438,6 +438,31 @@ static LONG bsd_udp_maxdgram(NX_IP *ip, const NXD_ADDRESS *addr)
     return (LONG)(iface->nx_interface_ip_mtu_size - overhead);
 }
 
+/*
+ * The interface a received datagram arrived on.
+ *
+ * nx_packet_ip_interface is one arm of a union, and the IPv6 receive path
+ * overwrites the other with the NXD_IPV6_ADDRESS the datagram matched --
+ * nx_ipv6_packet_receive.c, "Set the matching address to the packet address".
+ * Reading it as an NX_INTERFACE * after that dereferences an address structure
+ * as an interface, so the version has to decide which arm to read. Getting
+ * this wrong made a socket bound to a specific IPv6 address drop everything.
+ */
+static const NX_INTERFACE *bsd_packet_interface(const NX_PACKET *packet)
+{
+#ifdef AMINETXDUO_IPV6
+    if (packet->nx_packet_ip_version == NX_IP_VERSION_V6)
+    {
+        const NXD_IPV6_ADDRESS *a =
+            packet->nx_packet_address.nx_packet_ipv6_address_ptr;
+
+        return (a != NX_NULL) ? a->nxd_ipv6_address_attached : NX_NULL;
+    }
+#endif
+
+    return packet->nx_packet_ip_interface;
+}
+
 static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags,
                          const NXD_ADDRESS *addr, UINT port, ULONG scope)
@@ -845,7 +870,8 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
             if (status != NX_SUCCESS)
                 return bsd_fail(base, bsd_wait_errno(wait, status));
 
-            if (bsd_bind_wants_interface(sock, packet->nx_packet_ip_interface))
+            if (bsd_bind_wants_interface(sock,
+                                         bsd_packet_interface(packet)))
                 break;
 
             nx_packet_release(packet);
