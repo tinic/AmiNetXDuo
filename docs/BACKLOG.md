@@ -51,8 +51,20 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
 - **The freeze is explained but not proven.** The scheduler-state defect (`4a1ad30`)
   accounts for the Enforcer hits; the link to the hang is reasoning. Never
   reproduced locally — our emulator cannot reach the packet rate.
-- **We ingest 816 packets of 9.7M under saturation**, readers suspended. Found by
-  the flood rig; nothing is chasing it.
+- **We ingest 816 packets of 9.7M under saturation**, readers suspended (RESEARCH
+  §79). Nothing is chasing it, and the figure should be re-measured before
+  anything is built on it -- two confounds were found on 2026-07-31, both
+  eliminable in one run:
+  1. The run predates the baton fix (`4a1ad30` is not an ancestor of `4fb5eb2`),
+     so it carried the defect that corrupted ThreadX suspension lists -- and the
+     symptom recorded was suspended `sana2 rx` threads. The note's "baton
+     counters were clean" does not exonerate it: those count slot occupancy, not
+     the `_tx_thread_system_state` misuse `4a1ad30` fixed.
+  2. Load came from playhouse2, whose TX checksums are uncomputed and still are.
+     If the IP header checksum was among them, the flood was correctly dropped at
+     IP and 816 is unrelated LAN traffic rather than a starvation figure.
+  The rig survives at `/tmp/rig` + `/tmp/patch_rig.py` on playhouse3; the guest
+  reporter is not in the repository. Re-run against playhouse4, not playhouse2.
 - **`ShowNetServices` cannot browse every type at once.** With no type it runs the
   RFC 6763 §9 meta-query and lists the types present; listing every instance of
   every type would mean starting one continuous query per type found. They would
