@@ -19,6 +19,12 @@
 #include "bsdsocket_vectors.h"
 #include "netmonitor.h"
 
+#include "nx_ip.h"
+#include "nx_ipv4.h"
+#ifdef AMINETXDUO_IPV6
+#include "nx_ipv6.h"
+#endif
+
 #include <proto/exec.h>
 
 /* Fallback segment size if the socket has not negotiated an MSS yet. */
@@ -370,12 +376,76 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
     return sent;
 }
 
+/*
+ * The largest UDP payload that can leave here in one datagram, from the three
+ * things that fix it:
+ *
+ *   1. Nothing calls nx_ip_fragment_enable(), so nx_ip_fragment_processing is
+ *      NULL and _nx_ip_driver_packet_send() drops -- silently, after
+ *      nxd_udp_socket_send() has already returned NX_SUCCESS -- any packet
+ *      longer than the egress interface's nx_interface_ip_mtu_size.
+ *   2. That field is the IP-layer MTU, link header excluded: sana2_device.c
+ *      sets it from the SANA-II S2_GetGlobalStats MTU, defined the same way.
+ *   3. The IP and UDP headers in front of the payload are what NetX Duo's own
+ *      NX_IPv{4,6}_UDP_PACKET offsets reserve, less the NX_PHYSICAL_HEADER
+ *      they also carry: 28 bytes for IPv4, 48 for IPv6. No IPv4 options and no
+ *      IPv6 extension headers go on a UDP send, so both are exact.
+ *
+ * That is 1472 and 1452 on a 1500-byte Ethernet interface, 65507 on NetX Duo's
+ * loopback. The interface is found the way _nxd_udp_socket_send() finds it, so
+ * the MTU measured is the one the datagram will meet; -1 means no interface
+ * was found, and the send then reports the routing error itself.
+ */
+static LONG bsd_udp_maxdgram(NX_IP *ip, const NXD_ADDRESS *addr)
+{
+    NX_INTERFACE *iface = NX_NULL;
+    ULONG         overhead;
+
+    if (ip == NULL || addr == NULL)
+        return -1;
+
+#ifdef AMINETXDUO_IPV6
+    if (addr->nxd_ip_version == NX_IP_VERSION_V6)
+    {
+        NXD_IPV6_ADDRESS *source = NX_NULL;
+
+        overhead = (ULONG)NX_IPv6_UDP_PACKET - (ULONG)NX_PHYSICAL_HEADER;
+
+        tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+        if (_nxd_ipv6_interface_find(ip, (ULONG *)addr->nxd_ip_address.v6,
+                                     &source, NX_NULL) == NX_SUCCESS &&
+            source != NX_NULL)
+        {
+            iface = source->nxd_ipv6_address_attached;
+        }
+        tx_mutex_put(&ip->nx_ip_protection);
+    }
+    else
+#endif
+    {
+        ULONG next_hop = 0;
+
+        overhead = (ULONG)NX_IPv4_UDP_PACKET - (ULONG)NX_PHYSICAL_HEADER;
+
+        tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+        (VOID)_nx_ip_route_find(ip, addr->nxd_ip_address.v4, &iface, &next_hop);
+        tx_mutex_put(&ip->nx_ip_protection);
+    }
+
+    if (iface == NX_NULL || iface->nx_interface_ip_mtu_size <= overhead)
+        return -1;
+
+    return (LONG)(iface->nx_interface_ip_mtu_size - overhead);
+}
+
 static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags,
                          const NXD_ADDRESS *addr, UINT port)
 {
     NX_PACKET_POOL *pool   = netstack_pool();
+    NX_IP          *ip     = netstack_ip();
     NX_PACKET      *packet = NX_NULL;
+    LONG            maxdgram;
     ULONG           wait;
     LONG            filled;
     UINT            status;
@@ -387,6 +457,18 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
 
     if (port == 0)
         return bsd_fail(base, AMI_EDESTADDRREQ);
+
+    /*
+     * "If the message is too long to pass atomically through the underlying
+     * protocol, the error EMSGSIZE is returned, and the message is not
+     * transmitted." Tested before the packet is allocated, so a refused
+     * datagram sends nothing. It used to be assembled, handed over and dropped
+     * in the driver send path with NX_SUCCESS already returned, or to run the
+     * pool dry first and come back as ENOBUFS.
+     */
+    maxdgram = bsd_udp_maxdgram(ip, addr);
+    if (maxdgram >= 0 && len > maxdgram)
+        return bsd_fail(base, AMI_EMSGSIZE);
 
     if ((sock->as_Flags & ASF_NXBOUND) == 0)
     {

@@ -11,9 +11,10 @@
  *
  * One host name and its A record: <HOSTNAME>.local, with whatever address the
  * interface currently has. HOSTNAME is the same string DHCP option 12 sends
- * (docs/RESEARCH.md 27); src/config/config_file.c resolves it from the config,
- * then ENV:HOSTNAME, then DEVS:Internet/hosts, and only then falls back to
- * "amiga". That is the single source of truth for the name, not this file.
+ * (docs/RESEARCH.md 27); src/config/config_file.c resolves it from the config
+ * and then ENV:HOSTNAME. That is the single source of truth for the name, not
+ * this file. It can be empty -- nothing named the machine -- and a label is
+ * still needed, so "amiga" is the fallback here, as it is for option 12.
  *
  * Services are advertised only when the user declares them, in
  * DEVS:Internet/service_discovery. AmiNetXDuo ships clients -- fetch, ftp,
@@ -50,11 +51,8 @@
 /* --------------------------------------------------------- the host label */
 
 /*
- * mDNS wants a single DNS label; HOSTNAME may not be one.
- *
- * src/config/config_file.c's last resort before "amiga" is the first
- * non-loopback name in DEVS:Internet/hosts, and a hosts file conventionally
- * carries fully-qualified names such as "amiga.home.lan". Handing that to
+ * mDNS wants a single DNS label; HOSTNAME may not be one. A configured name
+ * is often fully qualified -- "amiga.home.lan" -- and handing that to
  * nx_mdns_create() would claim "amiga.home.lan.local", which no querier asks
  * for.
  *

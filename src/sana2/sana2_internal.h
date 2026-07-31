@@ -215,6 +215,9 @@ struct AmiSana2If
     UWORD               addr_bytes;     /* 6 for Ethernet, 0 if addressless */
 
     BOOL                online;
+    /* Administrative state: the stack's intent, not the wire's condition.
+       Only the driver entry's enable/disable cases write it. */
+    BOOL                admin_up;
     BOOL                raw_supported;
     BOOL                raw_mode;
 

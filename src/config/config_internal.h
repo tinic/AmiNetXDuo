@@ -181,13 +181,6 @@ VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count);
  */
 VOID ami_cfg_parse_gateway(char *buf, ULONG *out);
 
-/*
- * Iterate the hosts table. Not in the public header, since the bsdsocket LVO
- * table has no gethostent(); ami_config_load() uses this to guess the local
- * host name.
- */
-const AmiNetdbEntry *ami_netdb_host_entry(ULONG index);
-
 #ifdef __cplusplus
 }
 #endif

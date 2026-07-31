@@ -60,6 +60,49 @@
  *
  * Each tag is filed under one of the two at its case below.
  *
+ * ---------------------------------------------------------------------------
+ * Why bsd_if_index_of() and ObtainInterfaceList() read nx_ip_interface[]
+ * without the ThreadX bracket QueryInterfaceTagList() takes.
+ *
+ * The bracket is a ThreadX-context lock, not a lock on this array.
+ * bsd_nx_enter() adopts the calling Task and takes the ThreadX baton, which
+ * QueryInterfaceTagList() needs because bsd_if_gather() calls nx_ip_info_get()
+ * and nx_arp_info_get(), and those take the NX_IP protection mutex. Reading
+ * NX_INTERFACE fields needs no such thing.
+ *
+ * What the baton would buy, if taken, is exclusion against the other ThreadX
+ * threads. Every writer of nx_ip_interface[] while the stack is up is one:
+ * nx_ip_interface_attach(), nx_ip_interface_detach(),
+ * nx_ip_interface_address_set() from the DHCP client, and nx_interface_link_up
+ * from the SANA-II reader. And there are no torn reads to protect against in
+ * the first place -- one CPU, and Exec switches tasks only between
+ * instructions, so every aligned load here is atomic.
+ *
+ * What it would not buy is exclusion against interface add and removal, which
+ * is the case that matters. netstack_interface_add() and
+ * netstack_interface_remove() do most of their work outside the baton on
+ * purpose, because opening and closing a SANA-II device is Exec I/O:
+ * ami_sana2_close() -- which frees the AmiSana2If -- runs after the bracketed
+ * detach, and ns_Iface[] and AmiIfConfig.configured are written outside it. A
+ * bracket here would serialise against nothing that matters and cost ~270 us a
+ * call.
+ *
+ * So the reads stay unbracketed, and the two things that were genuinely wrong
+ * are fixed where they are:
+ *
+ *   - bsd_if_name_of() dereferenced nx_interface_name after testing
+ *     nx_interface_valid. A removal between the two left it NULL.
+ *   - ConfigureInterfaceTagList() read nx_interface_additional_link_info and
+ *     the address/mask pair outside the bracket and used them inside it. The
+ *     first is a use-after-free once the removal reaches ami_sana2_close(); the
+ *     second reverts whichever half of the pair a DHCP bind had just changed.
+ *     Both reads now happen inside the bracket that uses them.
+ *
+ * What remains is netstack.c's and is recorded in docs/BACKLOG.md: nothing
+ * serialises two tasks calling AddInterfaceTagList() at once, so both can pick
+ * the same free slot.
+ * ---------------------------------------------------------------------------
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -161,6 +204,7 @@ static BOOL bsd_if_name_of(NX_IP *ip, UINT index, char *out, ULONG outlen)
 {
     const NX_INTERFACE *nxif = &ip->nx_ip_interface[index];
     const AmiIfConfig  *cfg;
+    const char         *nxname;
 
     if (outlen > 0)
         out[0] = '\0';
@@ -171,9 +215,26 @@ static BOOL bsd_if_name_of(NX_IP *ip, UINT index, char *out, ULONG outlen)
     cfg = bsd_if_config(index);
 
     if (cfg != NULL && cfg->name[0] != '\0')
+    {
         bsd_strncpy(out, cfg->name, outlen);
-    else
-        bsd_strncpy(out, (const char *)nxif->nx_interface_name, outlen);
+        return (out[0] != '\0') ? TRUE : FALSE;
+    }
+
+    /*
+     * The fallback, and the one read in this file that a concurrent removal
+     * can invalidate. nx_ip_interface_detach() memsets the whole NX_INTERFACE,
+     * so nx_interface_name goes NULL; nx_ip_interface_attach() sets
+     * nx_interface_valid before it sets the name, so the reverse window exists
+     * too. Neither is closed by the ThreadX bracket -- see the file header --
+     * so the pointer is loaded once and tested. What it points at when it is
+     * not NULL is the netstack's own AmiIfConfig.name, which outlives every
+     * caller of this library.
+     */
+    nxname = (const char *)nxif->nx_interface_name;
+    if (nxname == NULL)
+        return FALSE;
+
+    bsd_strncpy(out, nxname, outlen);
 
     return (out[0] != '\0') ? TRUE : FALSE;
 }
@@ -245,17 +306,15 @@ struct List *bsd_ObtainInterfaceList(
     BsdIfList *out;
     UINT       i;
 
-    if (ip == NULL)
-    {
-        (VOID)bsd_fail(SocketBase, AMI_ENETDOWN);
-        return NULL;
-    }
-
     /*
      * "The result can be NULL if there was not enough memory available to
      * fill it. If no interfaces have been added yet, you will receive an
-     * empty list." An empty list is a success; NULL means the allocation
-     * failed. The block is allocated up front, before anything is counted.
+     * empty list." NULL has exactly one documented meaning here, so a stack
+     * that is not running gets the empty list rather than a second one: a
+     * caller that saw NULL could not tell "out of memory" from "nothing
+     * running", and the doc gives it no errno to ask with either.
+     *
+     * The block is allocated up front, before anything is counted.
      */
     out = (BsdIfList *)ami_alloc(sizeof(BsdIfList));
     if (out == NULL)
@@ -269,6 +328,10 @@ struct List *bsd_ObtainInterfaceList(
     out->bil_List.lh_Tail     = NULL;
     out->bil_List.lh_TailPred = (struct Node *)&out->bil_List.lh_Head;
     out->bil_List.lh_Type     = NT_UNKNOWN;
+
+    /* Nothing running is nothing to list, which is the empty list. */
+    if (ip == NULL)
+        return &out->bil_List;
 
     for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
     {
@@ -320,7 +383,8 @@ typedef struct BsdIfInfo
     ULONG           bii_HardwareMTU;
     ULONG           bii_BPS;
 
-    BOOL            bii_LinkUp;
+    BOOL            bii_LinkUp;         /* the wire */
+    BOOL            bii_AdminUp;        /* the stack's intent */
     BOOL            bii_HaveSana;
     LONG            bii_BindType;
 
@@ -386,6 +450,7 @@ static VOID bsd_if_gather(NX_IP *ip, UINT index, BsdIfInfo *info)
     if (sana != NULL)
     {
         info->bii_HaveSana    = TRUE;
+        info->bii_AdminUp     = ami_sana2_admin_up(sana);
         info->bii_HardwareMTU = ami_sana2_get_mtu(sana);
         info->bii_BPS         = ami_sana2_get_bps(sana);
 
@@ -645,9 +710,26 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
             /* -------------------------------------------------------- state */
 
             case IFQ_State:
-                /* "the values returned can be either 'SM_Down' or 'SM_Up'";
-                   SM_Online/SM_Offline are IFC_State's, not this tag's. */
-                bsd_put_long(item, info.bii_LinkUp ? SM_Up : SM_Down);
+                /*
+                 * "the values returned can be either 'SM_Down' or 'SM_Up'";
+                 * SM_Online/SM_Offline are IFC_State's, not this tag's.
+                 *
+                 * Administrative state, not link state. IFC_State defines the
+                 * two: SM_Up is "the stack will attempt to transmit messages
+                 * through this interface. However, the underlying SANA-II
+                 * device driver may not be connected to the network yet", and
+                 * SM_Down is the same sentence negated. So a cable pulled out
+                 * from under a configured interface is still SM_Up -- that
+                 * clears nx_interface_link_up (sana2_rx.c, on S2ERR_OUTOFSERVICE)
+                 * and nothing else, and it is IFF_RUNNING that reports it.
+                 *
+                 * An interface with no SANA-II shim has no recorded intent, so
+                 * the link is the only answer available.
+                 */
+                bsd_put_long(item,
+                             (info.bii_HaveSana ? info.bii_AdminUp
+                                                : info.bii_LinkUp)
+                                 ? SM_Up : SM_Down);
                 break;
 
             case IFQ_AddressBindType:
@@ -880,6 +962,19 @@ static LONG bsd_if_parse_config(struct AmiSocketBase *SocketBase,
                     return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
                 break;
 
+            case IFC_Metric:
+                /*
+                 * "The routing metric of this interface, as used by the routing
+                 * protocol." Same rule, one tag along: zero is what IFQ_Metric
+                 * reports and what every directly attached interface here
+                 * costs, so setting zero changes nothing and is accepted.
+                 * Anything else asks for a cost this stack has no routing
+                 * protocol to spend, and would read back as zero.
+                 */
+                if ((LONG)item->ti_Data != 0)
+                    return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+                break;
+
             /*
              * ---------------------------------------------------------------
              * Behavioural, and there is no value that means "no change", so
@@ -895,16 +990,10 @@ static LONG bsd_if_parse_config(struct AmiSocketBase *SocketBase,
              *                           whatever was accepted here.
              *   IFC_AddAliasAddress     one IPv4 address per interface.
              *   IFC_DeleteAliasAddress
-             *   IFC_Metric              a cost for choosing between routes.
-             *                           There is no routing protocol to spend
-             *                           it, and IFQ_Metric answers 0, so a
-             *                           caller that set one would read back a
-             *                           different number.
              * ---------------------------------------------------------------
              */
             case IFC_DestinationAddress:
             case IFC_BroadcastAddress:
-            case IFC_Metric:
             case IFC_AddAliasAddress:
             case IFC_DeleteAliasAddress:
                 return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
@@ -926,7 +1015,6 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
     NX_IP          *ip = netstack_ip();
     BsdIfConfigReq  req;
     NX_INTERFACE   *nxif;
-    AmiSana2If     *sana;
     LONG            index;
     UINT            status;
 
@@ -951,7 +1039,6 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
         return -1;
 
     nxif = &ip->nx_ip_interface[index];
-    sana = (AmiSana2If *)nxif->nx_interface_additional_link_info;
 
     /* --- pass two, in the order a configuration has to happen in --------- */
 
@@ -976,15 +1063,25 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
          * account means clamping to it: this tag can only make the MTU
          * smaller, and a request for more than the hardware can carry becomes
          * the hardware's own number rather than an error.
+         *
+         * The AmiSana2If is fetched inside the bracket and used inside the same
+         * one. Read outside it, a removal that had got as far as
+         * ami_sana2_close() would have freed it; inside, the interface cannot
+         * be detached under us, and a detach that already happened leaves
+         * nx_interface_additional_link_info NULL, which is the no-clamp case.
          */
-        ULONG limit = req.bcr_MTU;
-        ULONG hardware = (sana != NULL) ? ami_sana2_get_mtu(sana) : 0;
-
-        if (hardware != 0 && limit > hardware)
-            limit = hardware;
+        AmiSana2If *sana;
+        ULONG       limit = req.bcr_MTU;
+        ULONG       hardware;
 
         if (bsd_nx_enter(SocketBase) != 0)
             return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+        sana     = (AmiSana2If *)nxif->nx_interface_additional_link_info;
+        hardware = (sana != NULL) ? ami_sana2_get_mtu(sana) : 0;
+
+        if (hardware != 0 && limit > hardware)
+            limit = hardware;
 
         status = nx_ip_interface_mtu_set(ip, (UINT)index, limit);
 
@@ -996,16 +1093,22 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
 
     if (req.bcr_HaveAddress || req.bcr_HaveNetMask)
     {
-        ULONG address = req.bcr_HaveAddress ? req.bcr_Address
-                                            : nxif->nx_interface_ip_address;
-        ULONG mask    = req.bcr_HaveNetMask ? req.bcr_NetMask
-                                            : nxif->nx_interface_ip_network_mask;
+        ULONG address;
+        ULONG mask;
+
+        /* One tag of the pair leaves the other as it stands, so this is a
+           read-modify-write and both halves belong in one bracket: a DHCP bind
+           landing between them would be reverted by the write. */
+        if (bsd_nx_enter(SocketBase) != 0)
+            return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+        address = req.bcr_HaveAddress ? req.bcr_Address
+                                      : nxif->nx_interface_ip_address;
+        mask    = req.bcr_HaveNetMask ? req.bcr_NetMask
+                                      : nxif->nx_interface_ip_network_mask;
 
         if (mask == 0)
             mask = bsd_if_classful_mask(address);
-
-        if (bsd_nx_enter(SocketBase) != 0)
-            return bsd_fail(SocketBase, AMI_ENETDOWN);
 
         status = nx_ip_interface_address_set(ip, (UINT)index, address, mask);
 
@@ -1409,14 +1512,15 @@ static VOID bsd_if_put_addr(struct sockaddr *sa, ULONG addr)
  * What an interface looks like to code that thinks in BSD flags. UP is
  * "configured and meant to be carrying traffic", RUNNING is "the link is
  * actually there"; libpcap prints the difference, so the two are kept
- * distinct. Every interface here is a SANA-II Ethernet device, so BROADCAST
- * and MULTICAST are unconditional.
+ * distinct. Same pair IFQ_State reports on and IFF_RUNNING does not, and from
+ * the same two fields. Every interface here is a SANA-II Ethernet device, so
+ * BROADCAST and MULTICAST are unconditional.
  */
 static UWORD bsd_if_flags(const BsdIfInfo *info)
 {
     UWORD flags = (UWORD)(IFF_BROADCAST | IFF_MULTICAST | IFF_SIMPLEX);
 
-    if (info->bii_Address != 0)
+    if (info->bii_HaveSana ? info->bii_AdminUp : (info->bii_Address != 0))
         flags |= (UWORD)IFF_UP;
 
     if (info->bii_LinkUp)
