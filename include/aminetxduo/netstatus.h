@@ -117,9 +117,14 @@ extern "C" {
  * table, where MakeLibrary() put the (APTR)-1 terminator. That is a guru, which
  * is a worse answer than the message this interface exists to stop printing.
  *
- * Bump this and BSD_LIB_REVISION together whenever a slot is added.
+ * Bump this and BSD_LIB_REVISION together whenever a slot is added, and
+ * whenever AMI_NETSTATUS_VERSION moves. The version check inside the library
+ * catches a mismatched pair too, but only after the call, where it is
+ * indistinguishable from the feature being absent -- ShowNetServices read it
+ * as "this library has no mDNS" and told the reader to stop looking. This
+ * check runs before any call and says the true thing: finish the install.
  */
-#define AMI_NETSTATUS_MIN_REVISION  1
+#define AMI_NETSTATUS_MIN_REVISION  2
 
 /* ------------------------------------------------------------ selectors --
  *

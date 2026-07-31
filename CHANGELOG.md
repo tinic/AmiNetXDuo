@@ -30,6 +30,7 @@ User-visible changes, newest first. Internal work is in the git log.
 - A BPF channel now belongs to the library base that opened it: it is closed when that base closes, so a program that exits without closing one no longer strands it for the life of the stack, and one program can no longer read, reconfigure or close another's channel
 - `SBTC_HAVE_LOCAL_DATABASE_API` answers `TRUE`, which it always should have -- all nine of the network, protocol and service database calls are implemented
 - Added a `Libs/68000-minimal` drawer: the same library with every optional feature compiled out, for the smallest machines
+- Upgrading the commands without the library, or without rebooting so the new library is the one in memory, now says so. The reporting commands used to describe that half-installed pair as something else -- the stack refusing to report on itself, or a library built without service discovery
 
 ## 0.14.3
 
