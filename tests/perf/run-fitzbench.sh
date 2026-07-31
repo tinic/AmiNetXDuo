@@ -69,6 +69,13 @@ cd "$ROOT"
 # a frame the emulator's own host sends to the guest's MAC never comes back to
 # that NIC's pcap capture (63).
 PEER="${AMINETXDUO_FITZ_PEER:-}"
+case "$PEER" in
+    *playhouse2*)
+        echo "playhouse2 cannot serve this: VMs on one Proxmox host never cross" >&2
+        echo "a NIC, so its TX checksums are never computed and our stack rejects" >&2
+        echo "them -- it reads as 6 bad packets and no transfer.  Use another." >&2
+        exit 2 ;;
+esac
 [ -n "$PEER" ] || {
     echo "set AMINETXDUO_FITZ_PEER=<user@host> -- a third machine on real" >&2
     echo "hardware, not this emulator's host and not an LXC container" >&2
