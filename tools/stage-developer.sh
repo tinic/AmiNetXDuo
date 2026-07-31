@@ -26,6 +26,9 @@ DEST="${1:?usage: stage-developer.sh <destdir>}"
 #   ifindex.h  RFC 3493 section 4 -- the four LVOs at -0x372..-0x384.
 #   in6.h      the AF_INET6 names the NDK does not define.  No vectors: it is
 #              option numbers, address macros and the sockaddr_in6 warning.
+#   cmsg.h     RFC 3542 ancillary data.  No vectors either: it rides
+#              sendmsg/recvmsg.  Two of the NDK's own CMSG_* macros are
+#              replaced here, so a caller wants it AFTER <sys/socket.h>.
 #
 # NOT netstatus.h: NetStackQuery and NetStackControl work and are stable, but
 # publishing them freezes their request structures, and that is a decision to
@@ -34,7 +37,7 @@ DEST="${1:?usage: stage-developer.sh <destdir>}"
 # DLT_*, the BPF_* opcodes, FIONREAD, SIOCGIFADDR -- is already in the NDK's
 # net/bpf.h, sys/filio.h and sys/sockio.h, and everything AMI_BPF_* in ours is
 # implementation internals.
-PUBLIC_HEADERS=(ifindex.h in6.h)
+PUBLIC_HEADERS=(ifindex.h in6.h cmsg.h)
 
 mkdir -p "$DEST/include/aminetxduo" "$DEST/sfd" "$DEST/examples"
 

@@ -31,6 +31,21 @@
 
 #include <stdarg.h>
 
+/*
+ * The one header this program takes from us, and on purpose: RFC 3542's
+ * ancillary data is struct shapes and macros, not vectors, so a caller has to
+ * have them from somewhere.  Including it here is also the check that it
+ * compiles standalone against the NDK -- the CMSG_* macros it replaces are
+ * <sys/socket.h>'s own.
+ */
+#include <stddef.h>
+#include <sys/types.h>          /* ssize_t, which sys/socket.h uses but does
+                                   not pull in for itself */
+#include <sys/socket.h>
+#include <sys/uio.h>
+#include <netinet/in.h>
+#include "aminetxduo/cmsg.h"
+
 
 /* ------------------------------------------------------------- logging --- */
 
@@ -166,6 +181,7 @@ struct t_addrinfo
 #define T_AF_UNSPEC         0
 #define T_SOCK_STREAM       1
 #define T_SOCK_DGRAM        2
+#define T_SOCK_RAW          3
 #define T_IPPROTO_TCP       6
 #define T_IPPROTO_IPV6      41
 #define T_IPV6_V6ONLY_BSD   27
@@ -350,6 +366,39 @@ BSD_SCRATCH;
     __asm __volatile ("jsr a6@(-72:W)"
                       : BSD_SCRATCH_OUT, "=r" (res) : "r" (a6), "r" (d0), "r" (a0), "r" (d1),
                         "r" (d2), "r" (a1), "r" (a2)
+                      : "cc", "memory");
+    return(res);
+}
+
+/* -0x10e and -0x114: the RFC 3542 options ride these two and nothing else. */
+static LONG bsd_sendmsg(LONG fd, APTR msg, LONG flags)
+{
+register struct Library *a6  __asm("a6") = SocketBase;
+register LONG            d0  __asm("d0") = fd;
+register APTR            a0  __asm("a0") = msg;
+register LONG            d1  __asm("d1") = flags;
+register LONG            res __asm("d0");
+BSD_SCRATCH;
+
+    __asm __volatile ("jsr a6@(-270:W)"
+                      : BSD_SCRATCH_OUT, "=r" (res) : "r" (a6), "r" (d0), "r" (a0),
+                        "r" (d1)
+                      : "cc", "memory");
+    return(res);
+}
+
+static LONG bsd_recvmsg(LONG fd, APTR msg, LONG flags)
+{
+register struct Library *a6  __asm("a6") = SocketBase;
+register LONG            d0  __asm("d0") = fd;
+register APTR            a0  __asm("a0") = msg;
+register LONG            d1  __asm("d1") = flags;
+register LONG            res __asm("d0");
+BSD_SCRATCH;
+
+    __asm __volatile ("jsr a6@(-276:W)"
+                      : BSD_SCRATCH_OUT, "=r" (res) : "r" (a6), "r" (d0), "r" (a0),
+                        "r" (d1)
                       : "cc", "memory");
     return(res);
 }
@@ -867,6 +916,680 @@ char                    buffer[64];
     (VOID)bsd_CloseSocket(client);
 }
 
+/* --------------------------------------------------------- RFC 3542 ------ */
+
+/*
+ * A control buffer has to be aligned for a socklen_t, and a bare char array is
+ * not: on a 68000 an odd cmsg_len would be an address error rather than a
+ * wrong answer.  The union is what a portable caller writes, and this is the
+ * program that has to demonstrate it.
+ */
+#define T_CBUF_BYTES    (CMSG_SPACE(sizeof(struct in6_pktinfo)) + \
+                         CMSG_SPACE(sizeof(LONG)))
+
+typedef union
+{
+    struct cmsghdr  align;
+    UBYTE           bytes[T_CBUF_BYTES];
+} t_cbuf;
+
+/* The macros on their own -- no library involved, so a failure here is the
+   header being wrong rather than the stack. */
+static VOID t_test_cmsg_macros(VOID)
+{
+t_cbuf              cbuf;
+struct msghdr       msg;
+struct cmsghdr     *c;
+struct icmp6_filter filt;
+ULONG               seen = 0;
+
+    t_log("RFC 3542 macros");
+
+    (VOID)t_check((BOOL)(sizeof(struct cmsghdr) == 12),
+                  "struct cmsghdr is 12 bytes", (LONG)sizeof(struct cmsghdr));
+    (VOID)t_check((BOOL)(CMSG_ALIGN(1) == 4 && CMSG_ALIGN(4) == 4 &&
+                         CMSG_ALIGN(5) == 8),
+                  "CMSG_ALIGN rounds to 4", (LONG)CMSG_ALIGN(5));
+    (VOID)t_check((BOOL)(CMSG_LEN(4) == 16 && CMSG_SPACE(1) == 16),
+                  "CMSG_LEN and CMSG_SPACE", (LONG)CMSG_SPACE(1));
+    (VOID)t_check((BOOL)(sizeof(struct in6_pktinfo) == 20),
+                  "in6_pktinfo is 20 bytes",
+                  (LONG)sizeof(struct in6_pktinfo));
+    (VOID)t_check((BOOL)(sizeof(struct in_pktinfo) == 12),
+                  "in_pktinfo is 12 bytes", (LONG)sizeof(struct in_pktinfo));
+
+    /* CMSG_FIRSTHDR must answer NULL for the "no ancillary data" report. */
+    t_bzero(&msg, sizeof(msg));
+    msg.msg_control    = cbuf.bytes;
+    msg.msg_controllen = 0;
+    (VOID)t_check((BOOL)(CMSG_FIRSTHDR(&msg) == NULL),
+                  "CMSG_FIRSTHDR is NULL when msg_controllen is 0", 0);
+
+    /* Two objects, walked back out. */
+    t_bzero(&cbuf, sizeof(cbuf));
+    msg.msg_controllen = sizeof(cbuf.bytes);
+
+    c = CMSG_FIRSTHDR(&msg);
+    if (!t_check((BOOL)(c != NULL), "CMSG_FIRSTHDR found the first object", 0))
+        return;
+
+    c->cmsg_level = IPPROTO_IPV6;
+    c->cmsg_type  = IPV6_PKTINFO;
+    c->cmsg_len   = CMSG_LEN(sizeof(struct in6_pktinfo));
+
+    c = CMSG_NXTHDR(&msg, c);
+    if (!t_check((BOOL)(c != NULL), "CMSG_NXTHDR found the second object", 0))
+        return;
+
+    c->cmsg_level = IPPROTO_IPV6;
+    c->cmsg_type  = IPV6_HOPLIMIT;
+    c->cmsg_len   = CMSG_LEN(sizeof(LONG));
+
+    (VOID)t_check((BOOL)(CMSG_NXTHDR(&msg, c) == NULL),
+                  "CMSG_NXTHDR stops at the end of the buffer", 0);
+
+    for (c = CMSG_FIRSTHDR(&msg); c != NULL; c = CMSG_NXTHDR(&msg, c))
+        seen++;
+    (VOID)t_check((BOOL)(seen == 2), "the loop walks exactly two objects",
+                  (LONG)seen);
+
+    /* RFC 3542 3.2's six macros. */
+    ICMP6_FILTER_SETBLOCKALL(&filt);
+    (VOID)t_check((BOOL)(ICMP6_FILTER_WILLBLOCK(128, &filt) &&
+                         !ICMP6_FILTER_WILLPASS(128, &filt)),
+                  "SETBLOCKALL blocks everything", 0);
+
+    ICMP6_FILTER_SETPASS(129, &filt);
+    (VOID)t_check((BOOL)(ICMP6_FILTER_WILLPASS(129, &filt) &&
+                         ICMP6_FILTER_WILLBLOCK(128, &filt)),
+                  "SETPASS passes one type and no other", 0);
+
+    ICMP6_FILTER_SETPASSALL(&filt);
+    ICMP6_FILTER_SETBLOCK(1, &filt);
+    (VOID)t_check((BOOL)(ICMP6_FILTER_WILLBLOCK(1, &filt) &&
+                         ICMP6_FILTER_WILLPASS(0, &filt) &&
+                         ICMP6_FILTER_WILLPASS(255, &filt)),
+                  "SETPASSALL then SETBLOCK blocks one type and no other", 0);
+}
+
+/* The options, through the ABI: set, read back, and refuse where they must. */
+static VOID t_test_cmsg_options(VOID)
+{
+LONG                fd, raw;
+LONG                rc;
+LONG                value;
+ULONG               len;
+struct in6_pktinfo  info;
+struct icmp6_filter filt;
+
+    t_log("RFC 3542 socket options");
+
+    fd = bsd_socket(T_AF_INET6, T_SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(fd >= 0), "udp6 socket", bsd_Errno()))
+        return;
+
+    value = 0;
+    len   = sizeof(value);
+    rc = bsd_getsockopt(fd, IPPROTO_IPV6, IPV6_RECVPKTINFO, &value, &len);
+    (VOID)t_check((BOOL)(rc == 0 && value == 0),
+                  "IPV6_RECVPKTINFO defaults to off", value);
+
+    value = 1;
+    rc = bsd_setsockopt(fd, IPPROTO_IPV6, IPV6_RECVPKTINFO, &value,
+                        sizeof(value));
+    (VOID)t_check((BOOL)(rc == 0), "setsockopt IPV6_RECVPKTINFO=1",
+                  bsd_Errno());
+
+    value = 0;
+    len   = sizeof(value);
+    (VOID)bsd_getsockopt(fd, IPPROTO_IPV6, IPV6_RECVPKTINFO, &value, &len);
+    (VOID)t_check((BOOL)(value == 1), "IPV6_RECVPKTINFO reads back as 1",
+                  value);
+
+    /* The Linux numbering answers too, and is a separate option word. */
+    value = 1;
+    rc = bsd_setsockopt(fd, IPPROTO_IPV6, IPV6_RECVHOPLIMIT_LINUX, &value,
+                        sizeof(value));
+    (VOID)t_check((BOOL)(rc == 0), "setsockopt IPV6_RECVHOPLIMIT (Linux 51)",
+                  bsd_Errno());
+
+    value = 0;
+    len   = sizeof(value);
+    (VOID)bsd_getsockopt(fd, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &value, &len);
+    (VOID)t_check((BOOL)(value == 1),
+                  "and the BSD number reads the same option back", value);
+
+    /* Sticky IPV6_PKTINFO: what goes in comes out. */
+    t_bzero(&info, sizeof(info));
+    info.ipi6_ifindex = 1;
+    rc = bsd_setsockopt(fd, IPPROTO_IPV6, IPV6_PKTINFO, &info, sizeof(info));
+    (VOID)t_check((BOOL)(rc == 0), "setsockopt IPV6_PKTINFO (sticky)",
+                  bsd_Errno());
+
+    t_bzero(&info, sizeof(info));
+    len = sizeof(info);
+    rc  = bsd_getsockopt(fd, IPPROTO_IPV6, IPV6_PKTINFO, &info, &len);
+    (VOID)t_check((BOOL)(rc == 0 && len == sizeof(info) &&
+                         info.ipi6_ifindex == 1),
+                  "the sticky source reads back",
+                  (LONG)info.ipi6_ifindex);
+
+    /* All-zero clears it, per RFC 3542 6.6. */
+    t_bzero(&info, sizeof(info));
+    (VOID)bsd_setsockopt(fd, IPPROTO_IPV6, IPV6_PKTINFO, &info, sizeof(info));
+    len = sizeof(info);
+    (VOID)bsd_getsockopt(fd, IPPROTO_IPV6, IPV6_PKTINFO, &info, &len);
+    (VOID)t_check((BOOL)(info.ipi6_ifindex == 0),
+                  "an all-zero in6_pktinfo clears the sticky source",
+                  (LONG)info.ipi6_ifindex);
+
+    /* IPV6_HOPLIMIT is ancillary-only: it is not a sticky option. */
+    value = 8;
+    rc = bsd_setsockopt(fd, IPPROTO_IPV6, IPV6_HOPLIMIT, &value,
+                        sizeof(value));
+    (VOID)t_check((BOOL)(rc < 0), "setsockopt IPV6_HOPLIMIT is refused",
+                  bsd_Errno());
+
+    /* ICMP6_FILTER needs a raw ICMPv6 socket and nothing else. */
+    len = sizeof(filt);
+    rc  = bsd_getsockopt(fd, IPPROTO_ICMPV6, ICMP6_FILTER, &filt, &len);
+    (VOID)t_check((BOOL)(rc < 0),
+                  "ICMP6_FILTER is refused on a UDP socket", bsd_Errno());
+
+    (VOID)bsd_CloseSocket(fd);
+
+    raw = bsd_socket(T_AF_INET6, T_SOCK_RAW, IPPROTO_ICMPV6);
+    if (t_check((BOOL)(raw >= 0), "raw ICMPv6 socket", bsd_Errno()))
+    {
+        t_bzero(&filt, sizeof(filt));
+        len = sizeof(filt);
+        rc  = bsd_getsockopt(raw, IPPROTO_ICMPV6, ICMP6_FILTER, &filt, &len);
+        (VOID)t_check((BOOL)(rc == 0 && len == sizeof(filt) &&
+                             ICMP6_FILTER_WILLPASS(128, &filt) &&
+                             ICMP6_FILTER_WILLPASS(1, &filt)),
+                      "a new raw ICMPv6 socket passes every type", rc);
+
+        ICMP6_FILTER_SETBLOCKALL(&filt);
+        ICMP6_FILTER_SETPASS(129, &filt);
+        rc = bsd_setsockopt(raw, IPPROTO_ICMPV6, ICMP6_FILTER, &filt,
+                            sizeof(filt));
+        (VOID)t_check((BOOL)(rc == 0), "setsockopt ICMP6_FILTER", bsd_Errno());
+
+        t_bzero(&filt, sizeof(filt));
+        len = sizeof(filt);
+        (VOID)bsd_getsockopt(raw, IPPROTO_ICMPV6, ICMP6_FILTER, &filt, &len);
+        (VOID)t_check((BOOL)(ICMP6_FILTER_WILLPASS(129, &filt) &&
+                             ICMP6_FILTER_WILLBLOCK(128, &filt)),
+                      "the installed filter reads back", 0);
+
+        /* "In order to clear an installed filter the application can issue a
+           setsockopt for ICMP6_FILTER with a zero length." */
+        rc = bsd_setsockopt(raw, IPPROTO_ICMPV6, ICMP6_FILTER, &filt, 0);
+        (VOID)t_check((BOOL)(rc == 0), "a zero-length setsockopt clears it",
+                      bsd_Errno());
+
+        len = sizeof(filt);
+        (VOID)bsd_getsockopt(raw, IPPROTO_ICMPV6, ICMP6_FILTER, &filt, &len);
+        (VOID)t_check((BOOL)(ICMP6_FILTER_WILLPASS(128, &filt)),
+                      "and the default is back", 0);
+
+        (VOID)bsd_CloseSocket(raw);
+    }
+
+    /* The IPv4 half, on an AF_INET socket. */
+    fd = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    if (t_check((BOOL)(fd >= 0), "udp4 socket", bsd_Errno()))
+    {
+        value = 1;
+        rc = bsd_setsockopt(fd, IPPROTO_IP, IP_PKTINFO, &value, sizeof(value));
+        (VOID)t_check((BOOL)(rc == 0), "setsockopt IP_PKTINFO=1", bsd_Errno());
+
+        value = 1;
+        rc = bsd_setsockopt(fd, IPPROTO_IP, IP_RECVDSTADDR, &value,
+                            sizeof(value));
+        (VOID)t_check((BOOL)(rc == 0), "setsockopt IP_RECVDSTADDR=1",
+                      bsd_Errno());
+
+        value = 0;
+        len   = sizeof(value);
+        (VOID)bsd_getsockopt(fd, IPPROTO_IP, IP_PKTINFO, &value, &len);
+        (VOID)t_check((BOOL)(value == 1), "IP_PKTINFO reads back as 1", value);
+
+        /* They are separate options, not two spellings of one. */
+        value = 0;
+        (VOID)bsd_setsockopt(fd, IPPROTO_IP, IP_PKTINFO, &value,
+                             sizeof(value));
+        value = 0;
+        len   = sizeof(value);
+        (VOID)bsd_getsockopt(fd, IPPROTO_IP, IP_RECVDSTADDR, &value, &len);
+        (VOID)t_check((BOOL)(value == 1),
+                      "clearing IP_PKTINFO leaves IP_RECVDSTADDR alone",
+                      value);
+
+        (VOID)bsd_CloseSocket(fd);
+    }
+}
+
+/* One datagram over ::1, with the ancillary data attached to it. */
+static VOID t_test_cmsg_receive(VOID)
+{
+LONG                    server, client;
+LONG                    rc;
+LONG                    value;
+struct t_sockaddr_in6   sa;
+static const char       datagram[] = "with ancillary data";
+char                    buffer[64];
+t_cbuf                  cbuf;
+struct msghdr           msg;
+struct iovec            iov;
+struct cmsghdr         *c;
+struct t_sockaddr_in6   peer;
+BOOL                    saw_pktinfo = FALSE;
+BOOL                    saw_hoplimit = FALSE;
+ULONG                   arrived_on = 0;
+
+    t_log("recvmsg with IPV6_RECVPKTINFO and IPV6_RECVHOPLIMIT");
+
+    server = bsd_socket(T_AF_INET6, T_SOCK_DGRAM, 0);
+    client = bsd_socket(T_AF_INET6, T_SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(server >= 0 && client >= 0), "udp sockets",
+                 bsd_Errno()))
+    {
+        return;
+    }
+
+    t_make_any6(&sa, T_PORT + 3);
+    rc = bsd_bind(server, &sa, sizeof(sa));
+    if (!t_check((BOOL)(rc == 0), "udp server bind", bsd_Errno()))
+    {
+        (VOID)bsd_CloseSocket(server);
+        (VOID)bsd_CloseSocket(client);
+        return;
+    }
+
+    value = 1;
+    (VOID)bsd_setsockopt(server, IPPROTO_IPV6, IPV6_RECVPKTINFO, &value,
+                         sizeof(value));
+    value = 1;
+    (VOID)bsd_setsockopt(server, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &value,
+                         sizeof(value));
+
+    t_make_loopback6(&sa, T_PORT + 3);
+    rc = bsd_sendto(client, (APTR)datagram, sizeof(datagram), 0, &sa,
+                    sizeof(sa));
+    if (!t_check((BOOL)(rc == (LONG)sizeof(datagram)), "sendto ::1", rc))
+    {
+        (VOID)bsd_CloseSocket(server);
+        (VOID)bsd_CloseSocket(client);
+        return;
+    }
+
+    t_bzero(buffer, sizeof(buffer));
+    t_bzero(&cbuf, sizeof(cbuf));
+    t_bzero(&msg, sizeof(msg));
+    t_bzero(&peer, sizeof(peer));
+
+    iov.iov_base = buffer;
+    iov.iov_len  = sizeof(buffer);
+
+    msg.msg_name       = &peer;
+    msg.msg_namelen    = sizeof(peer);
+    msg.msg_iov        = &iov;
+    msg.msg_iovlen     = 1;
+    msg.msg_control    = cbuf.bytes;
+    msg.msg_controllen = sizeof(cbuf.bytes);
+
+    rc = bsd_recvmsg(server, &msg, 0);
+    if (!t_check((BOOL)(rc == (LONG)sizeof(datagram)), "recvmsg", rc))
+    {
+        (VOID)bsd_CloseSocket(server);
+        (VOID)bsd_CloseSocket(client);
+        return;
+    }
+
+    (VOID)t_check(t_streq(buffer, datagram), "datagram survived", 0);
+    (VOID)t_check((BOOL)((msg.msg_flags & MSG_CTRUNC) == 0),
+                  "MSG_CTRUNC is clear -- the buffer was big enough",
+                  msg.msg_flags);
+    (VOID)t_check((BOOL)(msg.msg_controllen > 0),
+                  "msg_controllen is no longer always zero",
+                  (LONG)msg.msg_controllen);
+
+    for (c = CMSG_FIRSTHDR(&msg); c != NULL; c = CMSG_NXTHDR(&msg, c))
+    {
+        if (c->cmsg_level != IPPROTO_IPV6)
+            continue;
+
+        if (c->cmsg_type == IPV6_PKTINFO)
+        {
+            struct in6_pktinfo info;
+
+            saw_pktinfo = TRUE;
+
+            (VOID)t_check((BOOL)(c->cmsg_len ==
+                                 CMSG_LEN(sizeof(struct in6_pktinfo))),
+                          "IPV6_PKTINFO cmsg_len is CMSG_LEN(in6_pktinfo)",
+                          (LONG)c->cmsg_len);
+
+            /* Copied out rather than read in place: CMSG_DATA is only
+               4-aligned and ipi6_ifindex is a ULONG. */
+            {
+                UBYTE       *dst = (UBYTE *)&info;
+                const UBYTE *src = CMSG_DATA(c);
+                ULONG        i;
+
+                for (i = 0; i < sizeof(info); i++)
+                    dst[i] = src[i];
+            }
+
+            (VOID)t_check((BOOL)(info.ipi6_addr.s6_addr[15] == 1),
+                          "ipi6_addr is ::1, the address it was sent to",
+                          info.ipi6_addr.s6_addr[15]);
+            /*
+             * 0, and correctly: this datagram came in over ::1, and NetX Duo
+             * parks the loopback interface past the end of the range this
+             * library numbers, so it has no index -- if_indextoname() cannot
+             * name it either.  A datagram off a real interface reports 1 or 2.
+             */
+            (VOID)t_check((BOOL)(info.ipi6_ifindex == 0),
+                          "ipi6_ifindex is 0 -- loopback is outside the "
+                          "if_nametoindex() range", (LONG)info.ipi6_ifindex);
+
+            arrived_on = info.ipi6_ifindex;
+        }
+        else if (c->cmsg_type == IPV6_HOPLIMIT)
+        {
+            LONG hops = 0;
+            UBYTE       *dst = (UBYTE *)&hops;
+            const UBYTE *src = CMSG_DATA(c);
+            ULONG        i;
+
+            saw_hoplimit = TRUE;
+
+            for (i = 0; i < sizeof(hops); i++)
+                dst[i] = src[i];
+
+            (VOID)t_check((BOOL)(hops > 0 && hops <= 255),
+                          "IPV6_HOPLIMIT is the arriving hop limit", hops);
+        }
+    }
+
+    (VOID)t_check(saw_pktinfo, "an IPV6_PKTINFO object arrived", 0);
+    (VOID)t_check(saw_hoplimit, "an IPV6_HOPLIMIT object arrived", 0);
+
+    /*
+     * The other half, and the reason the option exists: answer from the
+     * address the query was sent to.  Over ::1 that is the address half of the
+     * in6_pktinfo rather than the index half, which loopback does not have --
+     * on a machine with two interfaces the index works the same way.
+     */
+    if (saw_pktinfo && peer.sin6_port != 0)
+    {
+        struct in6_pktinfo  reply;
+        static const char   answer[] = "answered on the arrival interface";
+
+        t_bzero(&cbuf, sizeof(cbuf));
+        t_bzero(&msg, sizeof(msg));
+        t_bzero(&reply, sizeof(reply));
+
+        reply.ipi6_ifindex     = arrived_on;
+        reply.ipi6_addr.s6_addr[15] = 1;        /* ::1 */
+
+        iov.iov_base = (APTR)answer;
+        iov.iov_len  = sizeof(answer);
+
+        msg.msg_name       = &peer;
+        msg.msg_namelen    = sizeof(peer);
+        msg.msg_iov        = &iov;
+        msg.msg_iovlen     = 1;
+        msg.msg_control    = cbuf.bytes;
+        msg.msg_controllen = CMSG_SPACE(sizeof(reply));
+
+        c = CMSG_FIRSTHDR(&msg);
+        if (c != NULL)
+        {
+            UBYTE       *dst = CMSG_DATA(c);
+            const UBYTE *src = (const UBYTE *)&reply;
+            ULONG        i;
+
+            c->cmsg_level = IPPROTO_IPV6;
+            c->cmsg_type  = IPV6_PKTINFO;
+            c->cmsg_len   = CMSG_LEN(sizeof(reply));
+
+            for (i = 0; i < sizeof(reply); i++)
+                dst[i] = src[i];
+
+            rc = bsd_sendmsg(server, &msg, 0);
+
+            /* The receive below has no timeout, so it is only reached when
+               the send said the datagram went out. */
+            if (t_check((BOOL)(rc == (LONG)sizeof(answer)),
+                        "sendmsg with an IPV6_PKTINFO source", rc))
+            {
+                t_bzero(buffer, sizeof(buffer));
+                rc = bsd_recv(client, buffer, sizeof(buffer), 0);
+                (VOID)t_check((BOOL)(rc == (LONG)sizeof(answer) &&
+                                     t_streq(buffer, answer)),
+                              "the answer arrived", rc);
+            }
+        }
+
+        /* An interface that does not exist is refused, not silently routed. */
+        t_bzero(&cbuf, sizeof(cbuf));
+        t_bzero(&msg, sizeof(msg));
+        t_bzero(&reply, sizeof(reply));
+        reply.ipi6_ifindex = 250;
+
+        iov.iov_base       = (APTR)answer;
+        iov.iov_len        = sizeof(answer);
+        msg.msg_name       = &peer;
+        msg.msg_namelen    = sizeof(peer);
+        msg.msg_iov        = &iov;
+        msg.msg_iovlen     = 1;
+        msg.msg_control    = cbuf.bytes;
+        msg.msg_controllen = CMSG_SPACE(sizeof(reply));
+
+        c = CMSG_FIRSTHDR(&msg);
+        if (c != NULL)
+        {
+            UBYTE       *dst = CMSG_DATA(c);
+            const UBYTE *src = (const UBYTE *)&reply;
+            ULONG        i;
+
+            c->cmsg_level = IPPROTO_IPV6;
+            c->cmsg_type  = IPV6_PKTINFO;
+            c->cmsg_len   = CMSG_LEN(sizeof(reply));
+
+            for (i = 0; i < sizeof(reply); i++)
+                dst[i] = src[i];
+
+            rc = bsd_sendmsg(server, &msg, 0);
+            (VOID)t_check((BOOL)(rc < 0),
+                          "sendmsg refuses an interface index that has no "
+                          "address", bsd_Errno());
+        }
+
+        /* Ancillary data this library does not implement is refused too. */
+        t_bzero(&cbuf, sizeof(cbuf));
+        t_bzero(&msg, sizeof(msg));
+        iov.iov_base       = (APTR)answer;
+        iov.iov_len        = sizeof(answer);
+        msg.msg_name       = &peer;
+        msg.msg_namelen    = sizeof(peer);
+        msg.msg_iov        = &iov;
+        msg.msg_iovlen     = 1;
+        msg.msg_control    = cbuf.bytes;
+        msg.msg_controllen = CMSG_SPACE(sizeof(LONG));
+
+        c = CMSG_FIRSTHDR(&msg);
+        if (c != NULL)
+        {
+            c->cmsg_level = SOL_SOCKET;
+            c->cmsg_type  = SCM_RIGHTS;
+            c->cmsg_len   = CMSG_LEN(sizeof(LONG));
+
+            rc = bsd_sendmsg(server, &msg, 0);
+            (VOID)t_check((BOOL)(rc < 0),
+                          "sendmsg refuses SCM_RIGHTS rather than ignoring it",
+                          bsd_Errno());
+        }
+    }
+
+    /* A control buffer too small for both is MSG_CTRUNC, not a failure. */
+    t_make_loopback6(&sa, T_PORT + 3);
+    rc = bsd_sendto(client, (APTR)datagram, sizeof(datagram), 0, &sa,
+                    sizeof(sa));
+    if (rc == (LONG)sizeof(datagram))
+    {
+        t_bzero(&msg, sizeof(msg));
+        iov.iov_base       = buffer;
+        iov.iov_len        = sizeof(buffer);
+        msg.msg_iov        = &iov;
+        msg.msg_iovlen     = 1;
+        msg.msg_control    = cbuf.bytes;
+        msg.msg_controllen = CMSG_SPACE(sizeof(struct in6_pktinfo));
+
+        rc = bsd_recvmsg(server, &msg, 0);
+        (VOID)t_check((BOOL)(rc == (LONG)sizeof(datagram)),
+                      "recvmsg with a short control buffer still delivers", rc);
+        (VOID)t_check((BOOL)((msg.msg_flags & MSG_CTRUNC) != 0),
+                      "and reports MSG_CTRUNC", msg.msg_flags);
+    }
+
+    (VOID)bsd_CloseSocket(server);
+    (VOID)bsd_CloseSocket(client);
+}
+
+/*
+ * The IPv4 half over 127.0.0.1.  This is the case the whole thing was built
+ * for: a UDP server that cannot tell which of its own addresses a query was
+ * sent to answers from the wrong one.
+ */
+static VOID t_test_cmsg_receive4(VOID)
+{
+LONG                server, client;
+LONG                rc;
+LONG                value;
+struct sockaddr_in  sa;
+static const char   datagram[] = "over 127.0.0.1";
+char                buffer[64];
+t_cbuf              cbuf;
+struct msghdr       msg;
+struct iovec        iov;
+struct cmsghdr     *c;
+BOOL                saw_pktinfo = FALSE;
+BOOL                saw_dstaddr = FALSE;
+
+    t_log("recvmsg with IP_PKTINFO and IP_RECVDSTADDR");
+
+    server = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    client = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(server >= 0 && client >= 0), "udp4 sockets",
+                 bsd_Errno()))
+    {
+        return;
+    }
+
+    t_bzero(&sa, sizeof(sa));
+    sa.sin_len    = sizeof(sa);
+    sa.sin_family = T_AF_INET;
+    sa.sin_port   = T_PORT + 4;
+
+    rc = bsd_bind(server, &sa, sizeof(sa));
+    if (!t_check((BOOL)(rc == 0), "udp4 server bind", bsd_Errno()))
+    {
+        (VOID)bsd_CloseSocket(server);
+        (VOID)bsd_CloseSocket(client);
+        return;
+    }
+
+    value = 1;
+    (VOID)bsd_setsockopt(server, IPPROTO_IP, IP_PKTINFO, &value,
+                         sizeof(value));
+    value = 1;
+    (VOID)bsd_setsockopt(server, IPPROTO_IP, IP_RECVDSTADDR, &value,
+                         sizeof(value));
+
+    sa.sin_addr.s_addr = 0x7F000001UL;          /* 127.0.0.1 */
+    rc = bsd_sendto(client, (APTR)datagram, sizeof(datagram), 0, &sa,
+                    sizeof(sa));
+    if (!t_check((BOOL)(rc == (LONG)sizeof(datagram)), "sendto 127.0.0.1", rc))
+    {
+        (VOID)bsd_CloseSocket(server);
+        (VOID)bsd_CloseSocket(client);
+        return;
+    }
+
+    t_bzero(buffer, sizeof(buffer));
+    t_bzero(&cbuf, sizeof(cbuf));
+    t_bzero(&msg, sizeof(msg));
+
+    iov.iov_base = buffer;
+    iov.iov_len  = sizeof(buffer);
+
+    msg.msg_iov        = &iov;
+    msg.msg_iovlen     = 1;
+    msg.msg_control    = cbuf.bytes;
+    msg.msg_controllen = sizeof(cbuf.bytes);
+
+    rc = bsd_recvmsg(server, &msg, 0);
+    if (!t_check((BOOL)(rc == (LONG)sizeof(datagram)), "recvmsg", rc))
+    {
+        (VOID)bsd_CloseSocket(server);
+        (VOID)bsd_CloseSocket(client);
+        return;
+    }
+
+    (VOID)t_check(t_streq(buffer, datagram), "datagram survived", 0);
+
+    for (c = CMSG_FIRSTHDR(&msg); c != NULL; c = CMSG_NXTHDR(&msg, c))
+    {
+        const UBYTE *src = CMSG_DATA(c);
+        ULONG        i;
+
+        if (c->cmsg_level != IPPROTO_IP)
+            continue;
+
+        if (c->cmsg_type == IP_PKTINFO)
+        {
+            struct in_pktinfo info;
+            UBYTE            *dst = (UBYTE *)&info;
+
+            saw_pktinfo = TRUE;
+
+            for (i = 0; i < sizeof(info); i++)
+                dst[i] = src[i];
+
+            (VOID)t_check((BOOL)(info.ipi_addr.s_addr == 0x7F000001UL),
+                          "ipi_addr is the 127.0.0.1 it was sent to",
+                          (LONG)info.ipi_addr.s_addr);
+            (VOID)t_check((BOOL)(info.ipi_spec_dst.s_addr != 0UL),
+                          "ipi_spec_dst is a local address",
+                          (LONG)info.ipi_spec_dst.s_addr);
+        }
+        else if (c->cmsg_type == IP_RECVDSTADDR)
+        {
+            struct in_addr addr;
+            UBYTE         *dst = (UBYTE *)&addr;
+
+            saw_dstaddr = TRUE;
+
+            for (i = 0; i < sizeof(addr); i++)
+                dst[i] = src[i];
+
+            (VOID)t_check((BOOL)(addr.s_addr == 0x7F000001UL),
+                          "IP_RECVDSTADDR is 127.0.0.1", (LONG)addr.s_addr);
+        }
+    }
+
+    (VOID)t_check(saw_pktinfo, "an IP_PKTINFO object arrived", 0);
+    (VOID)t_check(saw_dstaddr,
+                  "an IP_RECVDSTADDR object arrived alongside it", 0);
+
+    (VOID)bsd_CloseSocket(server);
+    (VOID)bsd_CloseSocket(client);
+}
+
 static VOID t_test_getaddrinfo(VOID)
 {
 struct t_addrinfo   hints;
@@ -986,6 +1709,10 @@ int main(void)
     t_test_socket_basics();
     t_test_tcp_loopback();
     t_test_udp_loopback();
+    t_test_cmsg_macros();
+    t_test_cmsg_options();
+    t_test_cmsg_receive();
+    t_test_cmsg_receive4();
     t_test_getaddrinfo();
 
     CloseLibrary(SocketBase);

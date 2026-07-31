@@ -465,7 +465,8 @@ static const NX_INTERFACE *bsd_packet_interface(const NX_PACKET *packet)
 
 static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags,
-                         const NXD_ADDRESS *addr, UINT port, ULONG scope)
+                         const NXD_ADDRESS *addr, UINT port, ULONG scope,
+                         const BsdCmsgSource *src)
 {
     NX_PACKET_POOL *pool   = netstack_pool();
     NX_IP          *ip     = netstack_ip();
@@ -489,15 +490,37 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_EDESTADDRREQ);
 
     /*
-     * Which address this leaves from -- the bound one, the one the zone names,
-     * or NetX's pick. Settled before the packet is allocated so a send that
-     * cannot be honoured costs nothing and sends nothing.
+     * Which address this leaves from -- one an RFC 3542 PKTINFO named, the
+     * bound one, the one the zone names, or NetX's pick. Settled before the
+     * packet is allocated so a send that cannot be honoured costs nothing and
+     * sends nothing.
+     *
+     * PKTINFO wins over bind() and over the zone because it is the narrower
+     * statement: bind() is standing and this one was supplied for this
+     * datagram. A source the machine does not have is refused either way,
+     * rather than replaced by the stack's own choice -- refusing is what the
+     * option was given to do.
      */
-    source = bsd_source_select(sock, addr, scope, &source_index);
-    if (source == BSD_SOURCE_REFUSE)
-        return bsd_fail(base, AMI_EADDRNOTAVAIL);
-    if (source == BSD_SOURCE_UNREACH)
-        return bsd_fail(base, AMI_ENETUNREACH);
+    if (src != NULL && src->cs_Have)
+    {
+        LONG index = bsd_cmsg_source_index(
+                         ip, src,
+                         (BOOL)(addr->nxd_ip_version == NX_IP_VERSION_V6));
+
+        if (index < 0)
+            return bsd_fail(base, AMI_EADDRNOTAVAIL);
+
+        source       = BSD_SOURCE_INDEX;
+        source_index = (UINT)index;
+    }
+    else
+    {
+        source = bsd_source_select(sock, addr, scope, &source_index);
+        if (source == BSD_SOURCE_REFUSE)
+            return bsd_fail(base, AMI_EADDRNOTAVAIL);
+        if (source == BSD_SOURCE_UNREACH)
+            return bsd_fail(base, AMI_ENETUNREACH);
+    }
 
     /*
      * "If the message is too long to pass atomically through the underlying
@@ -548,13 +571,14 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_ENOBUFS);
     }
 
-#ifdef AMINETXDUO_MULTICAST
     /*
-     * IP_MULTICAST_IF named an interface, so the route does not choose. It
-     * wins over a bound source or a zone: bsd_mcast_prepare_send() answers
-     * anything but -1 only for a group destination with the option set, which
-     * is the more specific of the two requests.
+     * Three ways to name where this leaves from, most specific first.
+     * IP_MULTICAST_IF only ever answers for an IPv4 group --
+     * bsd_mcast_prepare_send() gives -1 for anything else -- so in practice it
+     * does not compete with the other two.
      */
+#ifdef AMINETXDUO_MULTICAST
+    /* IP_MULTICAST_IF named an interface, so the route does not choose. */
     if (mcast_if >= 0)
     {
         status = nx_udp_socket_source_send(&sock->as_Nx.udp, packet,
@@ -564,13 +588,18 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     else
 #endif
     if (source == BSD_SOURCE_INDEX)
+    {
         status = nxd_udp_socket_source_send(&sock->as_Nx.udp, packet,
                                             (NXD_ADDRESS *)addr, port,
                                             source_index);
+    }
     else
+    {
         /* nxd_, not nx_: the v4 wrapper wraps the address and calls this. */
         status = nxd_udp_socket_send(&sock->as_Nx.udp, packet,
                                      (NXD_ADDRESS *)addr, port);
+    }
+
     if (status != NX_SUCCESS)
     {
         nx_packet_release(packet);
@@ -826,7 +855,7 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
 static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags,
                          struct sockaddr *from, socklen_t *fromlen,
-                         BOOL *truncated)
+                         BOOL *truncated, struct msghdr *msg)
 {
     NX_PACKET  *packet = NX_NULL;
     NXD_ADDRESS src_ip;
@@ -914,6 +943,9 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
     if (from != NULL && fromlen != NULL)
         bsd_sockaddr_put(sock, from, fromlen, &src_ip, src_port);
 
+    /* Before the release below: everything it answers is in the packet. */
+    bsd_cmsg_build(sock, packet, msg);
+
     if (peek)
     {
         /* Keep the datagram queued for the next call. */
@@ -940,7 +972,7 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
 static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags,
                          struct sockaddr *from, socklen_t *fromlen,
-                         BOOL *truncated)
+                         BOOL *truncated, struct msghdr *msg)
 {
     NX_PACKET  *packet;
     NXD_ADDRESS src;
@@ -1004,6 +1036,8 @@ static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
     if (from != NULL && fromlen != NULL)
         bsd_sockaddr_put(sock, from, fromlen, &src, 0);
 
+    bsd_cmsg_build(sock, packet, msg);
+
     if (peek)
     {
         sock->as_RxPending = packet;
@@ -1026,7 +1060,7 @@ static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
 static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
                          const struct iovec *iov, LONG iovcnt, LONG len,
                          LONG flags, const NXD_ADDRESS *addr, UINT port,
-                         ULONG scope)
+                         ULONG scope, const BsdCmsgSource *src)
 {
     BsdIovCursor cur;
     LONG         result;
@@ -1042,7 +1076,7 @@ static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
         result = bsd_send_tcp(base, sock, &cur, len, flags);
     else
         result = bsd_send_udp(base, sock, &cur, len, flags, addr, port,
-                              scope);
+                              scope, src);
 
     bsd_nx_leave(base);
 
@@ -1052,7 +1086,8 @@ static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
 static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
                          const struct iovec *iov, LONG iovcnt, LONG len,
                          LONG flags, struct sockaddr *from,
-                         socklen_t *fromlen, BOOL *truncated)
+                         socklen_t *fromlen, BOOL *truncated,
+                         struct msghdr *msg)
 {
     BsdIovCursor cur;
     LONG         result;
@@ -1065,7 +1100,7 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
     if ((sock->as_Flags & ASF_RAW) != 0)
     {
         result = bsd_recv_raw(base, sock, &cur, len, flags, from, fromlen,
-                              truncated);
+                              truncated, msg);
     }
     else if ((sock->as_Flags & ASF_TCP) != 0)
     {
@@ -1075,11 +1110,15 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
                              sock->as_PeerPort);
         if (truncated != NULL)
             *truncated = FALSE;         /* a stream never truncates */
+
+        /* A stream has no per-datagram anything, so nothing to attach. */
+        if (msg != NULL)
+            msg->msg_controllen = 0;
     }
     else
     {
         result = bsd_recv_udp(base, sock, &cur, len, flags, from, fromlen,
-                              truncated);
+                              truncated, msg);
     }
 
     bsd_nx_leave(base);
@@ -1298,7 +1337,7 @@ LONG bsd_send(register LONG sock_fd __asm("d0"),
     /* Connected: the zone is the one connect() was given. */
     return bsd_send_iov(SocketBase, sock, &iov, 1, len, flags,
                         &sock->as_PeerAddr, sock->as_PeerPort,
-                        sock->as_ScopeId);
+                        sock->as_ScopeId, &sock->as_CmsgSticky);
 }
 
 LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
@@ -1362,7 +1401,7 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
     iov.iov_len  = (size_t)len;
 
     return bsd_send_iov(SocketBase, sock, &iov, 1, len, flags, &addr, port,
-                        scope);
+                        scope, &sock->as_CmsgSticky);
 }
 
 LONG bsd_recv(register LONG sock_fd __asm("d0"),
@@ -1390,7 +1429,7 @@ LONG bsd_recv(register LONG sock_fd __asm("d0"),
     iov.iov_len  = (size_t)len;
 
     return bsd_recv_iov(SocketBase, sock, &iov, 1, len, flags, NULL, NULL,
-                        NULL);
+                        NULL, NULL);
 }
 
 LONG bsd_recvfrom(register LONG sock_fd          __asm("d0"),
@@ -1420,35 +1459,36 @@ LONG bsd_recvfrom(register LONG sock_fd          __asm("d0"),
     iov.iov_len  = (size_t)len;
 
     return bsd_recv_iov(SocketBase, sock, &iov, 1, len, flags, addr, addrlen,
-                        NULL);
+                        NULL, NULL);
 }
 
 /* ------------------------------------------------------ sendmsg / recvmsg -- */
 
 /*
- * msg_control is ignored on send and reported as empty on receive.
+ * msg_control carries the RFC 3542 subset in cmsg.c: PKTINFO and HOPLIMIT in,
+ * PKTINFO out. That file has the shapes and the option numbers.
  *
- * SCM_RIGHTS is genuinely meaningless here: it passes a file descriptor, and
- * handing a socket to another task on AmigaOS is ObtainSocket()/ReleaseSocket()
- * (handoff.c). But that is not the only thing ancillary data carries. RFC 3542
- * puts IPV6_PKTINFO, IPV6_HOPLIMIT and IPV6_TCLASS through the same field, and
- * those are not descriptor passing -- so "nothing can legitimately arrive in
- * msg_control", which this comment used to say, is only true of the 4.4BSD set.
- * Nothing arrives today because none of RFC 3542 is implemented, which is a
- * decision recorded in docs/BACKLOG.md, not a property of the platform.
+ * SCM_RIGHTS is the one thing here that is genuinely meaningless: it passes a
+ * file descriptor, and handing a socket to another task on AmigaOS is
+ * ObtainSocket()/ReleaseSocket() (handoff.c). It is refused rather than
+ * ignored, along with every other ancillary type this library does not
+ * implement -- bsd_cmsg_parse() answers EINVAL, so a caller that asks for
+ * something it will not get is told so.
  *
- * MSG_CTRUNC is therefore never set: there is nothing to truncate yet.
+ * MSG_CTRUNC now means what it says: the caller's msg_control was too small
+ * for what was going into it.
  */
 LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
                  register struct msghdr *msg  __asm("a0"),
                  register LONG flags          __asm("d1"),
                  register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    AmiSocket  *sock = bsd_lookup(SocketBase, sock_fd);
-    NXD_ADDRESS addr;
-    UINT        port  = 0;
-    ULONG       scope = 0;
-    LONG        total;
+    AmiSocket    *sock = bsd_lookup(SocketBase, sock_fd);
+    NXD_ADDRESS   addr;
+    BsdCmsgSource src;
+    UINT          port  = 0;
+    ULONG         scope = 0;
+    LONG          total;
 
     if (bsd_transfer_check(SocketBase, sock, 0, flags) != 0)
         return -1;
@@ -1475,6 +1515,10 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
         if (denied > 0)
             return bsd_fail(SocketBase, denied);
     }
+
+    /* Ancillary data before anything is sent: it can refuse the whole call. */
+    if (bsd_cmsg_parse(SocketBase, sock, msg, &src) != 0)
+        return -1;
 
     bsd_addr_from_v4(&addr, 0UL);
 
@@ -1504,7 +1548,7 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
 
     return bsd_send_iov(SocketBase, sock, msg->msg_iov,
                         (LONG)msg->msg_iovlen, total, flags, &addr, port,
-                        scope);
+                        scope, &src);
 }
 
 LONG bsd_recvmsg(register LONG sock_fd        __asm("d0"),
@@ -1542,19 +1586,22 @@ LONG bsd_recvmsg(register LONG sock_fd        __asm("d0"),
        input and must not survive. */
     msg->msg_flags = 0;
 
+    /* bsd_cmsg_build() rewrites msg_controllen, which is value-result: it
+       arrives as the size of the caller's buffer and leaves as what was
+       written. A path that attaches nothing leaves it 0. */
     result = bsd_recv_iov(SocketBase, sock, msg->msg_iov,
                           (LONG)msg->msg_iovlen, total, flags,
                           from, (from != NULL) ? &fromlen : NULL,
-                          &truncated);
+                          &truncated, msg);
 
     if (result < 0)
+    {
+        msg->msg_controllen = 0;
         return result;
+    }
 
     if (from != NULL)
         msg->msg_namelen = (socklen_t)fromlen;
-
-    /* No ancillary data exists on this platform -- see the note above. */
-    msg->msg_controllen = 0;
 
     if (truncated)
         msg->msg_flags |= MSG_TRUNC;

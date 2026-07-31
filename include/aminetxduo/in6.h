@@ -112,10 +112,11 @@ extern "C" {
  * RFC 3542's ancillary-data options -- IPV6_PKTINFO, IPV6_RECVPKTINFO,
  * IPV6_HOPLIMIT, IPV6_RECVHOPLIMIT, ICMP6_FILTER -- and struct in6_pktinfo,
  * struct icmp6_filter and the CMSG_ macros the NDK is missing are NOT here.
- * They arrive as aminetxduo/cmsg.h.  Worth knowing before writing it: the NDK
- * DOES define struct cmsghdr, CMSG_DATA, CMSG_FIRSTHDR and CMSG_NXTHDR in
- * <sys/socket.h>; what it is missing is CMSG_LEN, CMSG_SPACE, CMSG_ALIGN, and
- * the ALIGN() its own CMSG_NXTHDR expands to and nothing defines.
+ * They are in aminetxduo/cmsg.h, which includes this header for IPPROTO_IPV6.
+ * The NDK does define struct cmsghdr, CMSG_DATA, CMSG_FIRSTHDR and
+ * CMSG_NXTHDR in <sys/socket.h>; what it is missing is CMSG_LEN, CMSG_SPACE,
+ * CMSG_ALIGN, and the ALIGN() its own CMSG_NXTHDR expands to and nothing
+ * defines -- so cmsg.h replaces the last two rather than adding to them.
  *
  * IPv4 multicast is not here either, and does not need to be: IP_MULTICAST_IF,
  * IP_MULTICAST_TTL, IP_MULTICAST_LOOP, IP_ADD_MEMBERSHIP, IP_DROP_MEMBERSHIP

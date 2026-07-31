@@ -441,6 +441,9 @@ static AmiSocket *bsd_socket_alloc(struct AmiSocketBase *base,
     sock->as_Protocol = protocol;
     sock->as_Ttl      = (LONG)NX_IP_TIME_TO_LIVE;
 
+    /* Not just a zeroing: an ICMPv6 filter starts passing everything. */
+    bsd_cmsg_reset(sock);
+
 #ifdef AMINETXDUO_MULTICAST
     /* IP_DEFAULT_MULTICAST_TTL / _LOOP: one hop, and hear your own sends. */
     sock->as_McastTtl  = 1;

@@ -222,6 +222,25 @@ static UINT bsd_raw_filter(NX_IP *ip_ptr, ULONG protocol, NX_PACKET *packet_ptr)
         if (sock->as_RawCount >= sock->as_RawMax)
             continue;                   /* the reader is not keeping up */
 
+#ifdef AMINETXDUO_IPV6
+        /*
+         * ICMP6_FILTER, RFC 3542 3.2.  The type is the first byte of the
+         * ICMPv6 message, which for a v6 packet is where prepend_ptr already
+         * points -- the copy below does not wind back over the IP header.
+         * Filtering here rather than at recv() is the point of the option:
+         * a blocked type never becomes a packet copy.
+         */
+        if (is_v6 && protocol == (ULONG)NX_PROTOCOL_ICMPV6 &&
+            packet_ptr->nx_packet_append_ptr > packet_ptr->nx_packet_prepend_ptr)
+        {
+            ULONG icmp_type = (ULONG)packet_ptr->nx_packet_prepend_ptr[0];
+
+            if ((sock->as_Icmp6Filter[icmp_type >> 5] &
+                 (1UL << (icmp_type & 31))) == 0UL)
+                continue;
+        }
+#endif
+
         /*
          * Wind back over the IP header for the duration of the copy, then
          * restore it exactly: this packet is declined, so the stack goes on to

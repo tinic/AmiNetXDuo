@@ -12,6 +12,10 @@ User-visible changes, newest first. Internal work is in the git log.
 - IPv4 multicast works: `IP_ADD_MEMBERSHIP`, `IP_DROP_MEMBERSHIP`, `IP_MULTICAST_IF`, `IP_MULTICAST_TTL` and `IP_MULTICAST_LOOP`, so a program that discovers things on the local network -- SSDP, UPnP, a ported mDNS -- can open the socket it expects instead of getting "Protocol not available"
 - `bind()` to a multicast group address is accepted, which is how a program listening for a group is written
 - The `68000-minimal` drawer leaves multicast out along with the other optional features, which is 3,888 bytes
+- `recvmsg()` can now report which interface and local address a datagram arrived on, and its hop limit: `IPV6_RECVPKTINFO`, `IPV6_RECVHOPLIMIT` and, for IPv4, `IP_PKTINFO` and `IP_RECVDSTADDR`. A server on a machine with more than one address could not previously tell which of them a query was sent to, so it could only answer from whichever the routing table preferred
+- `sendmsg()` can name the source address and outgoing interface for one datagram, and `setsockopt(IPV6_PKTINFO)` sets a standing one, so a server can answer on the interface a query came in on. An interface or address the machine does not have is refused rather than quietly replaced
+- Raw ICMPv6 sockets take an `ICMP6_FILTER`, so a program watching for one kind of ICMPv6 message is no longer handed every neighbour solicitation on the network as well
+- New header `aminetxduo/cmsg.h` with the structures and `CMSG_*` macros the above needs. The NDK's own `CMSG_NXTHDR` cannot be compiled -- it uses an `ALIGN()` no NDK header defines -- and its `CMSG_FIRSTHDR` returns a pointer where it should return `NULL`; both are replaced, and `CMSG_LEN` and `CMSG_SPACE` added
 
 ## 0.15.1
 
