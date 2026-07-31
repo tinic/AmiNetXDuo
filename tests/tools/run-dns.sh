@@ -306,6 +306,14 @@ else
     fail "the default domain store is still too small for the documented 255"
 fi
 
+# "success -- FALSE if the default domain name is not set" (autodoc).
+if grep -q "^domain cleared: rc 0$" "$REPORT"; then
+    pass "GetDefaultDomainName is FALSE once the domain is cleared"
+else
+    fail "GetDefaultDomainName did not answer FALSE for a cleared domain"
+    grep "^domain cleared:" "$REPORT" >&2 || true
+fi
+
 echo
 if [ "$FAILED" -ne 0 ]; then
     echo "dns: FAILED" >&2

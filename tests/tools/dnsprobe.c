@@ -140,6 +140,12 @@ static VOID p_release_dns_list(struct Library *base, struct List *list)
                       : "d0", "d1", "a1", "cc", "memory");
 }
 
+/*
+ * This one returns BOOL, which is a 16-bit short: the answer is D0.w and the
+ * top half of D0 is whatever the callee left there. Reading all 32 bits gets
+ * a number like 2621440 for FALSE, so the probe takes the word the ABI
+ * defines -- as any caller compiled against the published prototype does.
+ */
 static LONG p_get_domain(struct Library *base, char *buffer, LONG size)
 {
     register struct Library *a6  __asm("a6") = base;
@@ -153,7 +159,7 @@ static LONG p_get_domain(struct Library *base, char *buffer, LONG size)
                       : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (a0), "r" (d0)
                       : "a1", "cc", "memory");
-    return res;
+    return (LONG)(WORD)res;
 }
 
 static VOID p_set_domain(struct Library *base, const char *name)
