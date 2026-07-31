@@ -806,8 +806,14 @@ static VOID ns_fill_stats(NX_IP *ip, NetStatusStats *out)
 static VOID ns_fill_health(NetStatusHealth *out)
 {
     TX_AMIGA_TICK_STATS tick;
+    const AmiMemStats  *mem;
 
     tx_amiga_tick_stats(&tick);
+
+    /* Before the copy, so a program that asks gets the pool as of the asking
+       rather than as of the last time a stack thread moved. */
+    netstack_pool_sample();
+    mem = ami_mem_stats();
 
     out->nsl_TickTicks          = tick.tx_amiga_tick_delivered;
     out->nsl_TickClipped        = tick.tx_amiga_tick_clipped;
@@ -828,6 +834,20 @@ static VOID ns_fill_health(NetStatusHealth *out)
     out->nsl_BatonStateMax    = ami_baton_stats.bs_StateMax;
     out->nsl_BatonMoved       = ami_baton_stats.bs_BatonMoved;
     out->nsl_BatonStateShared = ami_baton_stats.bs_StateShared;
+
+    out->nsl_AllocLive       = mem->ms_Live;
+    out->nsl_AllocPeak       = mem->ms_LiveMax;
+    out->nsl_AllocRefused    = mem->ms_Refused;
+    out->nsl_Sockets         = mem->ms_Sockets;
+    out->nsl_SocketsPeak     = mem->ms_SocketsMax;
+    out->nsl_Opens           = mem->ms_Opens;
+    out->nsl_PoolTotal       = mem->ms_PoolTotal;
+    out->nsl_PoolFree        = mem->ms_PoolFree;
+    out->nsl_PoolLow         = mem->ms_PoolLow;
+    out->nsl_PoolPayload     = mem->ms_PoolPayload;
+    out->nsl_PoolEmpty       = mem->ms_PoolEmpty;
+    out->nsl_PoolWaited      = mem->ms_PoolWaited;
+    out->nsl_PoolBadRelease  = mem->ms_PoolBadRelease;
 }
 
 /*

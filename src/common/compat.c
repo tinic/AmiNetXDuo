@@ -26,7 +26,8 @@
 
 /* ------------------------------------------------------------------ memory */
 
-static ULONG ami_outstanding;
+/* The record the health mark points at; aminetxduo/compat.h. */
+static AmiMemStats ami_mem;
 
 APTR ami_alloc_flags(ULONG size, ULONG memf)
 {
@@ -36,12 +37,19 @@ APTR ami_alloc_flags(ULONG size, ULONG memf)
         return NULL;
 
     p = AllocVec(size, memf);
+
+    Forbid();
     if (p != NULL)
     {
-        Forbid();
-        ami_outstanding++;
-        Permit();
+        ami_mem.ms_Live++;
+        if (ami_mem.ms_Live > ami_mem.ms_LiveMax)
+            ami_mem.ms_LiveMax = ami_mem.ms_Live;
     }
+    else
+    {
+        ami_mem.ms_Refused++;
+    }
+    Permit();
 
     return p;
 }
@@ -59,13 +67,44 @@ VOID ami_free(APTR ptr)
     FreeVec(ptr);
 
     Forbid();
-    ami_outstanding--;
+    ami_mem.ms_Live--;
     Permit();
 }
 
 ULONG ami_alloc_count(VOID)
 {
-    return ami_outstanding;
+    return ami_mem.ms_Live;
+}
+
+AmiMemStats *ami_mem_stats(VOID)
+{
+    return &ami_mem;
+}
+
+VOID ami_mem_socket_delta(LONG delta)
+{
+    Forbid();
+    if (delta > 0)
+    {
+        ami_mem.ms_Sockets += (ULONG)delta;
+        if (ami_mem.ms_Sockets > ami_mem.ms_SocketsMax)
+            ami_mem.ms_SocketsMax = ami_mem.ms_Sockets;
+    }
+    else if (ami_mem.ms_Sockets >= (ULONG)(-delta))
+    {
+        ami_mem.ms_Sockets -= (ULONG)(-delta);
+    }
+    Permit();
+}
+
+VOID ami_mem_open_delta(LONG delta)
+{
+    Forbid();
+    if (delta > 0)
+        ami_mem.ms_Opens += (ULONG)delta;
+    else if (ami_mem.ms_Opens >= (ULONG)(-delta))
+        ami_mem.ms_Opens -= (ULONG)(-delta);
+    Permit();
 }
 
 /* ----------------------------------------------------------------- logging */

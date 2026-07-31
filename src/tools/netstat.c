@@ -10,11 +10,13 @@
  * -s is per-protocol statistics followed by the SANA-II per-interface counters;
  * no other switch shows the driver's own numbers.
  *
- * -h is the scheduler block on its own, and takes a different route to it: the
- * published mark (aminetxduo/health.h) rather than a library call, so it opens
- * nothing, allocates nothing and cannot block. That is what makes it usable on
- * a machine that is halfway into the fault it is meant to describe, and it is
- * why it is the one switch that works without a stack answering for itself.
+ * -h is the memory and scheduler blocks on their own, and takes a different
+ * route to them: the published mark (aminetxduo/health.h) rather than a library
+ * call, so it opens nothing, allocates nothing and cannot block. That is what
+ * makes it usable on a machine that is halfway into the fault it is meant to
+ * describe, and it is why it is the one switch that works without a stack
+ * answering for itself. It is the command to ask for in a fault report, for a
+ * freeze and for a suspected leak alike -- docs/FREEZE-DIAGNOSTIC.md.
  *
  * This command covers the same ground as ShowNetStatus: that one has named
  * categories and a diagnosis, this one has switches and columns. Neither reads
@@ -115,6 +117,46 @@ static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
 }
 
 /*
+ * What the stack owns, and the most it has ever owned.
+ *
+ * This is the half of -h that answers "I think it leaks". Each of the three
+ * counts is a different fault with a different fix, which is why they are not
+ * one number: allocations are the general heap, sockets are the structure
+ * docs/RESEARCH.md 37.5 lost 776 of, and packets are a fixed pool that starves
+ * rather than grows. The peak beside each is what makes a single reading worth
+ * anything -- a count on its own cannot say whether it is climbing.
+ *
+ * AvailMem is read here rather than carried in ToolStats so both routes into
+ * this function report the same machine at the same moment. It is the number a
+ * user is already watching, and it is only interpretable next to ours.
+ */
+static VOID show_memory(const ToolStats *st)
+{
+    tool_printf("\nmemory:\n");
+    tool_printf("\t%lu allocations outstanding, %lu at the peak, %lu refused\n",
+                st->alloc_live, st->alloc_peak, st->alloc_refused);
+    tool_printf("\t%lu sockets open, %lu at the peak, %lu programs have it "
+                "open\n", st->sockets, st->sockets_peak, st->opens);
+
+    if (st->have_pool)
+    {
+        tool_printf("\t%lu of %lu packets free, %lu fewest ever, %lu bytes "
+                    "each\n", st->pool_free, st->pool_total, st->pool_low,
+                    st->pool_payload);
+        tool_printf("\t%lu found the pool empty, %lu waited, %lu released "
+                    "twice\n", st->pool_empty_requests,
+                    st->pool_empty_suspensions, st->pool_invalid_releases);
+    }
+    else
+    {
+        tool_printf("\tno packet pool\n");
+    }
+
+    tool_printf("\t%lu bytes of system memory free, %lu in the largest block\n",
+                AvailMem(MEMF_PUBLIC), AvailMem(MEMF_PUBLIC | MEMF_LARGEST));
+}
+
+/*
  * A worst stall in the hundreds of milliseconds beside a service cost in the
  * hundreds of microseconds says the tick task was not dispatched, rather than
  * that it was slow. Anything but zero on the last line is a defect.
@@ -124,11 +166,17 @@ static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
  * time. The peak counts lateness that was subsequently made good, so it moves
  * on a machine where nothing was ever clipped. Deferred ticks reach the wheel
  * late; lost ones never reach it.
+ *
+ * The one function both routes print through -- -h off the published mark and
+ * -s -h through the library -- so the two cannot disagree about what they
+ * found.
  */
 static VOID show_scheduler(const ToolStats *st)
 {
     if (!st->have_health)
         return;
+
+    show_memory(st);
 
     tool_printf("\nscheduler:\n");
     tool_printf("\t%lu ticks in %lu ms, %lu clipped, %lu lost\n",
@@ -226,19 +274,8 @@ static VOID show_protocol_stats(const ToolStats *st)
         tool_printf("\tnot enabled\n");
     }
 
-    tool_printf("\npacket pool:\n");
-    if (st->have_pool)
-    {
-        tool_printf("\t%lu packets of %lu bytes, %lu free\n",
-                    st->pool_total, st->pool_payload, st->pool_free);
-        tool_printf("\t%lu requests found it empty, %lu waited\n",
-                    st->pool_empty_requests, st->pool_empty_suspensions);
-    }
-    else
-    {
-        tool_printf("\tno packet pool\n");
-    }
-
+    /* The packet pool is reported by show_memory(), below, where the other two
+       things that can run out are. */
     show_scheduler(st);
 }
 

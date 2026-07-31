@@ -417,6 +417,27 @@ LONG tool_stats(ToolStats *out)
         out->baton_state_max         = h->nsl_BatonStateMax;
         out->baton_moved             = h->nsl_BatonMoved;
         out->baton_state_shared      = h->nsl_BatonStateShared;
+
+        out->alloc_live              = h->nsl_AllocLive;
+        out->alloc_peak              = h->nsl_AllocPeak;
+        out->alloc_refused           = h->nsl_AllocRefused;
+        out->sockets                 = h->nsl_Sockets;
+        out->sockets_peak            = h->nsl_SocketsPeak;
+        out->opens                   = h->nsl_Opens;
+
+        /* The health half is read after NETSTATUS_SYSTEM and wins: it is the
+           record -h reads too, and it carries the low-water mark. */
+        if (h->nsl_PoolTotal != 0)
+        {
+            out->have_pool              = TRUE;
+            out->pool_total             = h->nsl_PoolTotal;
+            out->pool_free              = h->nsl_PoolFree;
+            out->pool_low               = h->nsl_PoolLow;
+            out->pool_payload           = h->nsl_PoolPayload;
+            out->pool_empty_requests    = h->nsl_PoolEmpty;
+            out->pool_empty_suspensions = h->nsl_PoolWaited;
+            out->pool_invalid_releases  = h->nsl_PoolBadRelease;
+        }
     }
 
     tool_netstatus_close(base);
@@ -442,12 +463,14 @@ BOOL tool_health_mark(ToolStats *out)
     const AmiHealthMark *mark;
     TX_AMIGA_TICK_STATS  tick;
     AmiBatonStats        baton;
+    AmiMemStats          mem;
     BOOL                 ok = FALSE;
 
     if (out == NULL)
         return FALSE;
 
     out->have_health = FALSE;
+    out->have_pool   = FALSE;
     out->health_mark = 0;
 
     Forbid();
@@ -460,10 +483,12 @@ BOOL tool_health_mark(ToolStats *out)
         mark->hm_Version == (UWORD)AMI_HEALTH_VERSION &&
         mark->hm_Size    == (UWORD)sizeof(AmiHealthMark) &&
         mark->hm_Tick    != NULL &&
-        mark->hm_Baton   != NULL)
+        mark->hm_Baton   != NULL &&
+        mark->hm_Mem     != NULL)
     {
         tick  = *(const TX_AMIGA_TICK_STATS *)mark->hm_Tick;
         baton = *(const AmiBatonStats *)mark->hm_Baton;
+        mem   = *(const AmiMemStats *)mark->hm_Mem;
         out->health_mark = (ULONG)mark;
         ok = TRUE;
     }
@@ -492,6 +517,25 @@ BOOL tool_health_mark(ToolStats *out)
     out->baton_state_max       = baton.bs_StateMax;
     out->baton_moved           = baton.bs_BatonMoved;
     out->baton_state_shared    = baton.bs_StateShared;
+
+    out->alloc_live            = mem.ms_Live;
+    out->alloc_peak            = mem.ms_LiveMax;
+    out->alloc_refused         = mem.ms_Refused;
+    out->sockets               = mem.ms_Sockets;
+    out->sockets_peak          = mem.ms_SocketsMax;
+    out->opens                 = mem.ms_Opens;
+
+    if (mem.ms_PoolTotal != 0)
+    {
+        out->have_pool              = TRUE;
+        out->pool_total             = mem.ms_PoolTotal;
+        out->pool_free              = mem.ms_PoolFree;
+        out->pool_low               = mem.ms_PoolLow;
+        out->pool_payload           = mem.ms_PoolPayload;
+        out->pool_empty_requests    = mem.ms_PoolEmpty;
+        out->pool_empty_suspensions = mem.ms_PoolWaited;
+        out->pool_invalid_releases  = mem.ms_PoolBadRelease;
+    }
 
     return TRUE;
 }

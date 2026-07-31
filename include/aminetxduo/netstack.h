@@ -182,6 +182,21 @@ NX_PACKET_POOL *netstack_pool(VOID);
 const AmiConfig *netstack_config(VOID);
 
 /*
+ * Copy the packet pool's counters into AmiMemStats (aminetxduo/compat.h) and
+ * carry the low-water mark of what is free.
+ *
+ * A pool draining and a heap leak look the same from outside and want
+ * different answers, so the two are counted separately.  There is no single
+ * place to hook a packet allocation -- NetX Duo makes them from its own
+ * internals as well as from ours -- so this samples instead: cheap enough for
+ * the bracket to call on every transition, and called again by
+ * NETSTATUS_HEALTH so a program that asks gets the figure as of the asking.
+ *
+ * Does nothing when there is no pool.
+ */
+VOID netstack_pool_sample(VOID);
+
+/*
  * Packet pool sizing. NetX Duo's embedded defaults do not suit the 68020/4 MB
  * floor (docs/RESEARCH.md §9), so these are computed from AvailMem() at startup
  * and clamped to the range below.

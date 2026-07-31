@@ -1300,6 +1300,7 @@ static LONG ami_ns_bring_up(VOID)
     /* The stack exists from here on, address or not, so this releases anything
        waiting for `WaitForPort AMITCP`. */
     ami_ns_port_create();
+    ami_netstack_baton_set_sampler(netstack_pool_sample);
     ami_netstack_health_publish();
     ami_sana2_set_open_hooks(ami_netstack_rexx_suspend,
                              ami_netstack_rexx_resume);
@@ -1382,6 +1383,7 @@ VOID netstack_shutdown(VOID)
        at the port that is about to be freed, so they go first. */
     ami_sana2_set_open_hooks(NULL, NULL);
     ami_ns_port_delete();
+    ami_netstack_baton_set_sampler(NULL);
     ami_netstack_health_unpublish();
 
     /*
@@ -1444,6 +1446,38 @@ NX_PACKET_POOL *netstack_pool(VOID)
     AmiNetStack *ns = ami_ns;
 
     return (ns != NULL && ns->ns_PoolMemory != NULL) ? &ns->ns_Pool : NULL;
+}
+
+/*
+ * Plain loads of NetX Duo's own counters, with no baton taken: a diagnostic
+ * that blocked on the stack it is describing would be useless on the machine
+ * it exists for, and the same reasoning as the tick and baton counters the
+ * health mark already points at applies here.
+ */
+VOID netstack_pool_sample(VOID)
+{
+    NX_PACKET_POOL *pool = netstack_pool();
+    AmiMemStats    *m;
+    ULONG           now;
+
+    if (pool == NULL)
+        return;
+
+    m   = ami_mem_stats();
+    now = pool->nx_packet_pool_available;
+
+    /* First sample: nothing has ever been lower than what is free now. */
+    if (m->ms_PoolTotal == 0UL)
+        m->ms_PoolLow = now;
+    else if (now < m->ms_PoolLow)
+        m->ms_PoolLow = now;
+
+    m->ms_PoolTotal      = pool->nx_packet_pool_total;
+    m->ms_PoolFree       = now;
+    m->ms_PoolPayload    = pool->nx_packet_pool_payload_size;
+    m->ms_PoolEmpty      = pool->nx_packet_pool_empty_requests;
+    m->ms_PoolWaited     = pool->nx_packet_pool_empty_suspensions;
+    m->ms_PoolBadRelease = pool->nx_packet_pool_invalid_releases;
 }
 
 const AmiConfig *netstack_config(VOID)

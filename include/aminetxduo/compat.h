@@ -31,7 +31,49 @@ extern "C" {
 APTR  ami_alloc(ULONG size);
 APTR  ami_alloc_flags(ULONG size, ULONG memf);
 VOID  ami_free(APTR ptr);
-ULONG ami_alloc_count(VOID);          /* debug: outstanding allocations */
+ULONG ami_alloc_count(VOID);          /* outstanding allocations */
+
+/*
+ * What the stack currently owns, and the most it has ever owned.  A suspected
+ * leak is answerable only against a number that belongs to us: AvailMem falls
+ * for every program on the machine, and a user watching it cannot say whose.
+ *
+ * One record, so the published health mark (aminetxduo/health.h) can point at
+ * it and a reader gets one instant.  It lives here because src/common is the
+ * one place every component links -- src/bsdsocket fills the socket and open
+ * counts, src/netstack samples the packet pool into it, and the bracket that
+ * publishes the mark links neither of those.
+ *
+ * The pool fields are a sample, not a subscription: NetX Duo allocates packets
+ * from its own internals as well as from ours, so there is no one place to
+ * count them.  ami_netstack_pool_sample() refreshes them at every stack thread
+ * transition and at every NETSTATUS_HEALTH.
+ */
+typedef struct AmiMemStats
+{
+    ULONG   ms_Live;            /* ami_alloc() blocks not yet freed          */
+    ULONG   ms_LiveMax;         /* the most there have ever been at once     */
+    ULONG   ms_Refused;         /* ami_alloc() calls that came back NULL     */
+
+    ULONG   ms_Sockets;         /* AmiSocket structures the library owns     */
+    ULONG   ms_SocketsMax;
+    ULONG   ms_Opens;           /* programs holding bsdsocket.library open   */
+
+    ULONG   ms_PoolTotal;       /* packets in the pool; 0 means no pool yet  */
+    ULONG   ms_PoolFree;        /* free at the last sample                   */
+    ULONG   ms_PoolLow;         /* fewest ever seen free                     */
+    ULONG   ms_PoolPayload;     /* bytes per packet                          */
+    ULONG   ms_PoolEmpty;       /* requests that found the pool empty        */
+    ULONG   ms_PoolWaited;      /* ... and suspended waiting for a packet    */
+    ULONG   ms_PoolBadRelease;  /* packets released that were not allocated  */
+} AmiMemStats;
+
+/* The live record, never NULL. */
+AmiMemStats *ami_mem_stats(VOID);
+
+/* +1 / -1 as a socket or a library open comes and goes.  Both keep a peak. */
+VOID ami_mem_socket_delta(LONG delta);
+VOID ami_mem_open_delta(LONG delta);
 
 /* ----------------------------------------------------------------- logging */
 

@@ -83,6 +83,16 @@ static AmiHealthMark ami_health_mark;
 static char          ami_health_name[] = AMI_HEALTH_NAME;
 static BOOL          ami_health_up;
 
+/* netstack_internal.h says why this is a pointer and not a call. */
+static VOID (*ami_baton_sampler)(VOID);
+
+VOID ami_netstack_baton_set_sampler(VOID (*fn)(VOID))
+{
+    Forbid();
+    ami_baton_sampler = fn;
+    Permit();
+}
+
 VOID ami_netstack_health_publish(VOID)
 {
     if (ami_health_up)
@@ -93,6 +103,7 @@ VOID ami_netstack_health_publish(VOID)
     ami_health_mark.hm_Size    = (UWORD)sizeof(AmiHealthMark);
     ami_health_mark.hm_Tick    = (APTR)tx_amiga_tick_stats_live();
     ami_health_mark.hm_Baton   = (APTR)&ami_baton_stats;
+    ami_health_mark.hm_Mem     = (APTR)ami_mem_stats();
 
     InitSemaphore(&ami_health_mark.hm_Semaphore);
     ami_health_mark.hm_Semaphore.ss_Link.ln_Name = ami_health_name;
@@ -181,6 +192,11 @@ static VOID ami_baton_observe_state(VOID)
         ami_baton_stats.bs_StateMax = state;
     if (state != 0)
         ami_baton_stats.bs_StateShared++;
+
+    /* A packet pool draining is the other thing that goes wrong here, and this
+       is where the driver paths pass often enough to catch it. */
+    if (ami_baton_sampler != NULL)
+        ami_baton_sampler();
 }
 
 VOID ami_netstack_baton_release(VOID)

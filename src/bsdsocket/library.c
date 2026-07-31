@@ -244,6 +244,11 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     AddTail((struct List *)&master->sb_Children, (struct Node *)&child->sb_Node);
     ReleaseSemaphore(&master->sb_Lock);
 
+    /* One child base per OpenLibrary(), so this is the number of programs
+       holding the network open -- the denominator for the socket count in the
+       health report. */
+    ami_mem_open_delta(1);
+
     return child;
 }
 
@@ -278,6 +283,8 @@ static VOID bsd_child_destroy(struct AmiSocketBase *child)
     ObtainSemaphore(&master->sb_Lock);
     Remove((struct Node *)&child->sb_Node);
     ReleaseSemaphore(&master->sb_Lock);
+
+    ami_mem_open_delta(-1);
 
     FreeMem((UBYTE *)child - neg, neg + pos);
 }

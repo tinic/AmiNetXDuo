@@ -68,16 +68,16 @@ extern "C" {
 
 #define AMI_NETSTATUS_MAGIC         0x414E5351UL    /* 'ANSQ' */
 /*
- * 4 since NetStatusHealth grew the tick skew and over-budget counters. A caller
- * and a library that disagree fail every call rather than half of them, which is
- * why the commands and the library ship together.
+ * 5 since NetStatusHealth grew the memory counters. A caller and a library that
+ * disagree fail every call rather than half of them, which is why the commands
+ * and the library ship together.
  *
  * This is the compatibility mechanism for a record that grows. The size check in
  * bsd_NetStackQuery() is not: it rejects a buffer too small for the record, and
  * a caller that agrees on the version agrees on the record, so a matched caller
  * never meets it. It is there for the arrival that agreed on nothing.
  */
-#define AMI_NETSTATUS_VERSION       4
+#define AMI_NETSTATUS_VERSION       5
 
 /* Fixed widths every record shares.  Up here rather than beside the first
    record that uses one, because NetStatusSystem needs NETSTATUS_NAME_LEN and
@@ -361,10 +361,25 @@ typedef struct NetStatusStats
 /* --------------------------------------------------- NETSTATUS_HEALTH --- */
 
 /*
- * Whether the machine was ever held, rather than how much traffic moved.
- * These are the ThreadX tick task's own accounting and the baton bracket's
- * counters; neither touches NetX Duo, so this selector answers with the stack
- * up or down.
+ * Whether the machine was ever held and what the stack currently owns, rather
+ * than how much traffic moved.  The tick and baton halves are the ThreadX tick
+ * task's own accounting and the baton bracket's counters; neither touches NetX
+ * Duo, so this selector answers with the stack up or down.  The memory half is
+ * AmiMemStats (aminetxduo/compat.h), which the published health mark points at
+ * as well, so `netstat -h` on a wedged machine and this call report the same
+ * record.
+ *
+ * The memory half is what makes a suspected leak answerable.  AvailMem falls
+ * for every program on the machine; nsl_AllocLive is ours alone, nsl_Sockets
+ * counts the AmiSocket structures the library owns (docs/RESEARCH.md 37.5 was
+ * 776 of them), and the nsl_Pool fields are the packet pool, which drains for
+ * different reasons and wants a different fix.  Each has a high-water mark
+ * beside it, because a single reading cannot say whether a number is climbing.
+ *
+ * nsl_PoolFree and nsl_PoolLow are sampled rather than exact: NetX Duo
+ * allocates packets from its own internals as well as from ours, so there is
+ * no one place to count them.  netstack_pool_sample() refreshes them at every
+ * stack thread transition, and this call refreshes them before answering.
  *
  * nsl_TickWorstStallMs large next to nsl_TickWorstServiceUs small says the
  * tick task was not dispatched, not that it was slow.  nsl_BatonMoved or
@@ -407,6 +422,20 @@ typedef struct NetStatusHealth
     ULONG   nsl_BatonStateMax;
     ULONG   nsl_BatonMoved;
     ULONG   nsl_BatonStateShared;
+
+    ULONG   nsl_AllocLive;          /* ami_alloc() blocks not yet freed      */
+    ULONG   nsl_AllocPeak;
+    ULONG   nsl_AllocRefused;       /* allocations that came back NULL       */
+    ULONG   nsl_Sockets;            /* AmiSocket structures alive            */
+    ULONG   nsl_SocketsPeak;
+    ULONG   nsl_Opens;              /* programs holding the library open     */
+    ULONG   nsl_PoolTotal;          /* packets in the pool; 0 = no pool      */
+    ULONG   nsl_PoolFree;
+    ULONG   nsl_PoolLow;            /* fewest ever seen free                 */
+    ULONG   nsl_PoolPayload;        /* bytes per packet                      */
+    ULONG   nsl_PoolEmpty;          /* requests that found the pool empty    */
+    ULONG   nsl_PoolWaited;         /* ... and suspended waiting             */
+    ULONG   nsl_PoolBadRelease;
 } NetStatusHealth;
 
 /* ------------------------------------------------------ NETSTATUS_ARP --- */

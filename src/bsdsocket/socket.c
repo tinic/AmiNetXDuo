@@ -475,7 +475,24 @@ static AmiSocket *bsd_socket_alloc(struct AmiSocketBase *base,
     }
 #endif
 
+    ami_mem_socket_delta(1);
+
     return sock;
+}
+
+/*
+ * The one way an AmiSocket goes back, so the live count in AmiMemStats cannot
+ * drift from the truth.  That count is what a user reports when they suspect a
+ * leak: docs/RESEARCH.md 37.5 was 776 of these, and nothing on the machine
+ * could say so at the time.
+ */
+static VOID bsd_socket_dispose(AmiSocket *sock)
+{
+    if (sock == NULL)
+        return;
+
+    ami_mem_socket_delta(-1);
+    ami_free(sock);
 }
 
 /* --------------------------------------------------------- orderly close --
@@ -695,7 +712,7 @@ VOID bsd_closing_sweep(VOID)
         }
 
         if (bsd_socket_destroy(sock))
-            ami_free(sock);
+            bsd_socket_dispose(sock);
     }
 }
 
@@ -959,12 +976,12 @@ VOID bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock)
     if (sock->as_Incoming != NULL)
     {
         if (bsd_socket_destroy(sock->as_Incoming))
-            ami_free(sock->as_Incoming);
+            bsd_socket_dispose(sock->as_Incoming);
         sock->as_Incoming = NULL;
     }
 
     if (bsd_socket_destroy(sock))
-        ami_free(sock);
+        bsd_socket_dispose(sock);
 }
 
 VOID bsd_close_all(struct AmiSocketBase *base)
@@ -1234,7 +1251,7 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
 
     if (bsd_nx_enter(SocketBase) != 0)
     {
-        ami_free(sock);
+        bsd_socket_dispose(sock);
         return bsd_fail(SocketBase, AMI_ENETDOWN);
     }
 
@@ -1247,7 +1264,7 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
         if (bsd_raw_open(SocketBase, sock) != 0)
         {
             bsd_nx_leave(SocketBase);
-            ami_free(sock);
+            bsd_socket_dispose(sock);
             return -1;                  /* bsd_raw_open set errno */
         }
 
@@ -1277,7 +1294,7 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
     if (status != NX_SUCCESS)
     {
         bsd_nx_leave(SocketBase);
-        ami_free(sock);
+        bsd_socket_dispose(sock);
         return bsd_fail(SocketBase, bsd_errno_from_nx(status));
     }
 
@@ -1287,7 +1304,7 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
     if (fd < 0)
     {
         if (bsd_socket_destroy(sock))
-            ami_free(sock);
+            bsd_socket_dispose(sock);
         bsd_nx_leave(SocketBase);
         return bsd_fail(SocketBase, AMI_EMFILE);
     }
@@ -1492,7 +1509,7 @@ static BOOL bsd_listen_rearm(struct AmiSocketBase *base, AmiSocket *sock)
                                   bsd_tcp_disconnect_callback);
     if (status != NX_SUCCESS)
     {
-        ami_free(spare);
+        bsd_socket_dispose(spare);
         return FALSE;
     }
 
@@ -1538,7 +1555,7 @@ static BOOL bsd_listen_rearm(struct AmiSocketBase *base, AmiSocket *sock)
                  (long)sock->as_ListenPort, (long)status);
 
         if (bsd_socket_destroy(spare))
-            ami_free(spare);
+            bsd_socket_dispose(spare);
 
         return FALSE;
     }
@@ -1597,7 +1614,7 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
 
     if (bsd_nx_enter(SocketBase) != 0)
     {
-        ami_free(incoming);
+        bsd_socket_dispose(incoming);
         return bsd_fail(SocketBase, AMI_ENETDOWN);
     }
 
@@ -1614,7 +1631,7 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
     if (status != NX_SUCCESS)
     {
         bsd_nx_leave(SocketBase);
-        ami_free(incoming);
+        bsd_socket_dispose(incoming);
         return bsd_fail(SocketBase, bsd_errno_from_nx(status));
     }
 
@@ -1629,7 +1646,7 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
     if (status != NX_SUCCESS)
     {
         if (bsd_socket_destroy(incoming))
-            ami_free(incoming);
+            bsd_socket_dispose(incoming);
         bsd_nx_leave(SocketBase);
         return bsd_fail(SocketBase, bsd_errno_from_nx(status));
     }

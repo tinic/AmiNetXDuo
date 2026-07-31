@@ -835,7 +835,8 @@ static VOID show_memory(const ToolStats *st)
 
     tool_printf("  packets           %10lu    free now          %10lu\n",
                 st->pool_total, st->pool_free);
-    tool_printf("  payload each      %10lu bytes\n", st->pool_payload);
+    tool_printf("  payload each      %10lu    fewest ever free  %10lu\n",
+                st->pool_payload, st->pool_low);
     tool_printf("  found empty       %10lu    waited for one    %10lu\n",
                 st->pool_empty_requests, st->pool_empty_suspensions);
     tool_printf("  bad releases      %10lu\n", st->pool_invalid_releases);

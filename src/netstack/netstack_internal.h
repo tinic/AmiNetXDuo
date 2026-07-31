@@ -222,6 +222,17 @@ VOID ami_netstack_baton_acquire(VOID);
 VOID ami_netstack_health_publish(VOID);
 VOID ami_netstack_health_unpublish(VOID);
 
+/*
+ * The bracket calls this on every transition so the packet-pool figures in the
+ * health mark are never much older than the last thing the stack did.
+ *
+ * Through a pointer rather than by name: tests/bracket compiles netstack_baton.c
+ * on its own against threadx_port, without the rest of the stack, and a direct
+ * call to netstack.c would not link there.  NULL until the pool exists, and
+ * NULL again before it goes.
+ */
+VOID ami_netstack_baton_set_sampler(VOID (*fn)(VOID));
+
 /* ---------------------------------------------------------- adoption glue --
  *
  * AmiNetCaller / ami_netstack_enter() / ami_netstack_leave() are public; they

@@ -22,9 +22,14 @@
  *   SysBase->SemaphoreList           a debugger with no OS left to call.
  *   a scan for hm_Magic              a debugger with no SysBase either.
  *
- * hm_Tick and hm_Baton point at the live counters rather than at copies, so
- * what is read at the moment of the freeze is what the stack had at the moment
- * of the freeze, with no staleness to allow for.
+ * Every hm_ pointer is at the live counters rather than at a copy, so what is
+ * read at the moment of the freeze is what the stack had at the moment of the
+ * freeze, with no staleness to allow for.
+ *
+ * hm_Mem is the other fault this answers: a suspected leak.  AvailMem falls
+ * for every program on the machine and cannot say whose; these are the stack's
+ * own allocations, sockets and packets, with a high-water mark on each, so a
+ * number that climbs and never comes back is visible without a debugger.
  *
  * Reading is a Forbid(), a magic check and a copy.  Nothing obtains the
  * semaphore: blocking on a machine that may already be wedged is the one thing
@@ -48,11 +53,13 @@ extern "C" {
 #define AMI_HEALTH_NAME     "AmiNetXDuo.Health"
 #define AMI_HEALTH_MAGIC    0x414E5848UL        /* 'ANXH' */
 /*
- * 2 since TX_AMIGA_TICK_STATS grew the skew counters.  hm_Tick points at the
- * live struct and a reader copies the whole of it, so a reader that disagrees
- * about its shape must not read it: the version is what stops that.
+ * 3 since the mark grew hm_Mem.  Each hm_ pointer is at a live struct that a
+ * reader copies whole, so a reader that disagrees about any of their shapes
+ * must not read any of them: the version is what stops that.  A reader that
+ * finds a version it does not know reports no stack rather than a wrong
+ * number, and the commands ship with the library.
  */
-#define AMI_HEALTH_VERSION  2
+#define AMI_HEALTH_VERSION  3
 
 typedef struct AmiHealthMark
 {
@@ -65,6 +72,7 @@ typedef struct AmiHealthMark
 
     APTR    hm_Tick;                    /* TX_AMIGA_TICK_STATS *, live       */
     APTR    hm_Baton;                   /* AmiBatonStats *, live             */
+    APTR    hm_Mem;                     /* AmiMemStats *, live               */
 } AmiHealthMark;
 
 #ifdef __cplusplus

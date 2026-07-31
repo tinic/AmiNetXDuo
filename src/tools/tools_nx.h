@@ -263,9 +263,13 @@ typedef struct ToolStats
     UWORD           arp_count;
     BOOL            arp_truncated;
 
+    /* NETSTATUS_SYSTEM fills these, and NETSTATUS_HEALTH fills them again from
+       the record the health mark points at, so -h and -s -h agree. pool_low is
+       only in the health half. */
     BOOL            have_pool;
     ULONG           pool_total;
     ULONG           pool_free;
+    ULONG           pool_low;
     ULONG           pool_payload;
     ULONG           pool_empty_requests;
     ULONG           pool_empty_suspensions;
@@ -295,6 +299,16 @@ typedef struct ToolStats
     ULONG           baton_state_max;
     ULONG           baton_moved;
     ULONG           baton_state_shared;
+
+    /* What the stack owns right now, and the most it ever owned. A suspected
+       leak is only answerable against these: AvailMem falls for every program
+       on the machine and cannot say whose. */
+    ULONG           alloc_live;
+    ULONG           alloc_peak;
+    ULONG           alloc_refused;
+    ULONG           sockets;
+    ULONG           sockets_peak;
+    ULONG           opens;
 } ToolStats;
 
 /*
