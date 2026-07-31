@@ -854,12 +854,31 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
         args.udp    = &sock->as_Nx.udp;
         args.packet = &packet;
 
-        status = bsd_wait_sliced(base, wait, bsd_recv_udp_once, &args,
-                                 &aborted);
-        if (aborted)
-            return bsd_fail(base, AMI_EINTR);
-        if (status != NX_SUCCESS)
-            return bsd_fail(base, bsd_wait_errno(wait, status));
+        /*
+         * A socket bound to one local address must not be handed datagrams
+         * that arrived for another. NetX binds a UDP socket to a port only, so
+         * the filter is here: a datagram that does not match the bind is
+         * released and the wait resumed, which is what the caller would have
+         * seen if it had never arrived.
+         *
+         * Looping rather than failing: a mismatch is not an error for this
+         * caller, it is someone else's traffic.
+         */
+        for (;;)
+        {
+            status = bsd_wait_sliced(base, wait, bsd_recv_udp_once, &args,
+                                     &aborted);
+            if (aborted)
+                return bsd_fail(base, AMI_EINTR);
+            if (status != NX_SUCCESS)
+                return bsd_fail(base, bsd_wait_errno(wait, status));
+
+            if (bsd_bind_wants_interface(sock, packet->nx_packet_ip_interface))
+                break;
+
+            nx_packet_release(packet);
+            packet = NX_NULL;
+        }
     }
 
     /* nxd_, not nx_: nx_udp_source_extract() reports 0.0.0.0 for a datagram

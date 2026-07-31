@@ -770,4 +770,11 @@ VOID  bsd_bcopy(const APTR src, APTR dst, ULONG size);
 #define BSD_HTONS(x)    ((UWORD)(x))
 #define BSD_NTOHS(x)    ((UWORD)(x))
 
+/*
+ * Would a socket bound to as_LocalAddr take traffic that arrived on `nxif`?
+ * TRUE for the wildcard. socket.c owns it; transfer.c filters received
+ * datagrams with it, accept() filters completed connections.
+ */
+BOOL bsd_bind_wants_interface(const AmiSocket *sock, const NX_INTERFACE *nxif);
+
 #endif /* AMINETXDUO_BSDSOCKET_INTERNAL_H */

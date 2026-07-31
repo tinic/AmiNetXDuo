@@ -1507,15 +1507,13 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
 
         case BSD_BIND_SPECIFIC:
             /*
-             * Ours, but not the only one, so the socket would see traffic for
-             * the others unless something stops it. For TCP something does:
-             * bsd_bind_accepts() checks each completed connection against this
-             * address and resets the ones that do not match. UDP has no such
-             * filter yet, so it is still refused rather than accepted and
-             * ignored -- see docs/BACKLOG.md.
+             * Ours, and not the only one -- so the socket would see traffic
+             * for the others if nothing stopped it. Two things do:
+             * bsd_bind_accepts() resets a completed TCP connection that came
+             * in on another interface, and bsd_recv_udp() releases a datagram
+             * that did. Both go through bsd_bind_wants_interface(), so there
+             * is one rule and not two.
              */
-            if ((sock->as_Flags & ASF_TCP) == 0)
-                return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
             break;
 
         case BSD_BIND_FOREIGN:
@@ -1919,16 +1917,15 @@ UINT bsd_connect_once(VOID *arg, ULONG wait)
  * reset -- and is the difference between `nc -l 127.0.0.1` meaning what it
  * says and quietly serving the whole network.
  */
-static BOOL bsd_bind_accepts(const AmiSocket *listener, NX_TCP_SOCKET *conn)
+BOOL bsd_bind_wants_interface(const AmiSocket *listener,
+                              const NX_INTERFACE *nxif)
 {
-    const NX_INTERFACE *nxif;
-    NX_IP              *ip = netstack_ip();
+    NX_IP *ip = netstack_ip();
 
     /* The wildcard takes everything, which is what it is for. */
     if (bsd_addr_is_unspecified(&listener->as_LocalAddr))
         return TRUE;
 
-    nxif = conn->nx_tcp_socket_connect_interface;
     if (nxif == NX_NULL || ip == NULL)
         return FALSE;
 
@@ -1969,6 +1966,12 @@ static BOOL bsd_bind_accepts(const AmiSocket *listener, NX_TCP_SOCKET *conn)
 
     return (nxif->nx_interface_ip_address ==
             listener->as_LocalAddr.nxd_ip_address.v4) ? TRUE : FALSE;
+}
+
+static BOOL bsd_bind_accepts(const AmiSocket *listener, NX_TCP_SOCKET *conn)
+{
+    return bsd_bind_wants_interface(listener,
+                                    conn->nx_tcp_socket_connect_interface);
 }
 
 LONG bsd_accept(register LONG sock_fd          __asm("d0"),
