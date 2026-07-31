@@ -942,7 +942,12 @@ BOOL tool_stack_query(ULONG *addr_out, char *host, ULONG hostlen)
     if (addr_out != NULL)
         *addr_out = tool_call_gethostid(base);
     if (host != NULL && hostlen > 0)
+    {
+        /* A name too long for the buffer comes back without a terminator
+           (bsdsocket.doc gethostname); the buffer's owner puts one back. */
         (VOID)tool_call_gethostname(base, host, hostlen);
+        host[hostlen - 1] = '\0';
+    }
 
     CloseLibrary(base);
 

@@ -521,13 +521,3 @@ const AmiNetdbEntry *ami_netdb_serv_entry(ULONG index)
 {
     return netdb_entry(NETDB_SERVICES, index);
 }
-
-/*
- * Not in the public header, since the bsdsocket LVO table has no gethostent().
- * The same store answers it, and ami_config_load() uses it to find a host
- * name.
- */
-const AmiNetdbEntry *ami_netdb_host_entry(ULONG index)
-{
-    return netdb_entry(NETDB_HOSTS, index);
-}
