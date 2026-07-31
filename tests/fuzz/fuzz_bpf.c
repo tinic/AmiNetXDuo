@@ -86,6 +86,9 @@ static APTR stub_task = (APTR)"task";
 
 APTR ami_bpf_current_task(VOID) { return stub_task; }
 
+VOID ami_bpf_sleep(ULONG ticks) { (VOID)ticks; }
+ULONG ami_bpf_signals_set(ULONG mask) { (VOID)mask; return 0UL; }
+
 VOID ami_bpf_notify(APTR task, ULONG mask)
 {
     (void)task;
