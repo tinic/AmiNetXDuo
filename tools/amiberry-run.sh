@@ -38,6 +38,18 @@
 #   if it is not the one asked for.  docs/RESEARCH.md 76.7 found that trap;
 #   this harness is what stops it costing anyone a day.
 #
+# -m PICKS THE MACHINE
+#
+#   Anything Amiberry's `quickstart=` accepts: A500, A600, A1200 (the default),
+#   A3000, A4000.  Two things follow from it rather than having to be set:
+#   the boot ROM, from AMINETXDUO_KICKSTART_<MODEL> if that is set, and the
+#   architecture envsetup is built for, because a 68020 binary stops a 68000
+#   machine with an illegal instruction before anything under test runs.
+#
+#   The executable under test is NOT rebuilt to match.  Pass one from a build
+#   configured for the machine -- `cmake -DAMINETXDUO_CPU=68000` for an A500 or
+#   an A600 -- or the run dies the same way for the same reason.
+#
 #   A host NIC needs CAP_NET_RAW on the amiberry binary (libpcap), a tap or
 #   bridge needs CAP_NET_ADMIN.  Both are cleared by every relink, so
 #   `sudo setcap cap_net_admin,cap_net_raw=eip <binary>` is a per-build step --
@@ -95,7 +107,15 @@ fi
 
 # ---------------------------------------------------------------- kickstart --
 
-KICKSTART="${AMINETXDUO_KICKSTART:-}"
+# AMINETXDUO_KICKSTART_<MODEL> beats AMINETXDUO_KICKSTART, because one ROM does
+# not boot every machine: an A600 wants 37.350 or 40.63, and the A1200's 40.68
+# leaves it at a black screen with nothing on the serial port to say why.  The
+# model name is uppercased and anything but a letter or digit becomes _, so
+# A500+ reads AMINETXDUO_KICKSTART_A500_.
+_ks_var="AMINETXDUO_KICKSTART_$(printf '%s' "$MODEL" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_')"
+_ks_var="${_ks_var%_}"
+
+KICKSTART="${!_ks_var:-${AMINETXDUO_KICKSTART:-}}"
 KICKSTART_EXT="${AMINETXDUO_KICKSTART_EXT:-}"
 [ -n "$KICKSTART" ] && [ -f "$KICKSTART" ] || {
     cat >&2 <<'EOF'
@@ -134,7 +154,7 @@ board_lines() {
         # inserted=true is what puts the card in the slot; without it Gayle's
         # windows are mapped, nothing is logged, and card.resource never
         # initialises -- which reads from the guest as a driver that cannot
-        # find its hardware.  Needs a machine with a Gayle, i.e. an A1200.
+        # find its hardware.  Needs a machine with a Gayle: an A600 or an A1200.
         ne2000_pcmcia) printf 'pcmcia=true\nne2000pcmcia_rom_file=:ENABLED\nne2000pcmcia_rom_options=inserted=true,mac=%s,%s\n' "$MAC" "$BACKEND" ;;
         *)             echo "unknown network board $1" >&2; exit 2 ;;
     esac

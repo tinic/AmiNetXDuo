@@ -13,6 +13,12 @@
 # from the real DHCP server -- see tools/amiberry-run.sh for what that needs
 # from the host.
 #
+# -m picks the machine, and the board picks it when -m is absent.  A 68000
+# machine -- A500, A600 -- needs a netstack_test built for one, so pass -b at
+# a build configured with -DAMINETXDUO_CPU=68000; a 68020 binary stops it with
+# an illegal instruction before the stack starts.  It also needs a ROM that
+# boots it, which is AMINETXDUO_KICKSTART_A600 and friends.
+#
 # Every driver except a2065.device is a third-party binary this repository does
 # not carry.  tools/fetch-sana2-drivers.sh downloads the two whose licences
 # permit it; anything else needs AMINETXDUO_SANA2_DRIVER=<path>.  Without one
