@@ -107,6 +107,9 @@ VOID ami_bpf_now(ULONG *sec, ULONG *usec)
 
 APTR ami_bpf_current_task(VOID) { return stub_task; }
 
+VOID ami_bpf_sleep(ULONG ticks) { (VOID)ticks; }
+ULONG ami_bpf_signals_set(ULONG mask) { (VOID)mask; return 0UL; }
+
 VOID ami_bpf_notify(APTR task, ULONG mask)
 {
     if (task == NULL || mask == 0)

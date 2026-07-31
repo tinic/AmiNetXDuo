@@ -500,6 +500,8 @@ LONG ami_bpf_read(APTR owner, LONG channel, APTR buffer, LONG len)
     ULONG        pos;
     ULONG        end;
     ULONG        nbytes;
+    ULONG        budget;
+    ULONG        waited = 0;
 
     if (ch == NULL)
         return status;
@@ -507,21 +509,45 @@ LONG ami_bpf_read(APTR owner, LONG channel, APTR buffer, LONG len)
     if (buffer == NULL || len < 0)
         return AMI_BPF_EINVAL;
 
-    ami_bpf_lock();
+    /*
+     * BIOCSRTIMEOUT as 4.4BSD reads it: zero is "do not wait", anything else
+     * is how long to wait for the first record. Waited by sleeping in slices
+     * on the calling task and looking again -- never on a MsgPort, which would
+     * belong to whichever Process happened to call in (544398f), and never
+     * while holding the lock the tap needs in order to deliver anything.
+     *
+     * With no timeout set the loop runs once and returns 0, which is what it
+     * did before there was a loop.
+     */
+    budget = ch->rtimeout_sec * AMI_BPF_TICKS_PER_SEC
+           + ch->rtimeout_usec / (1000000UL / AMI_BPF_TICKS_PER_SEC);
 
-    if (ch->reading)
+    for (;;)
     {
-        ami_bpf_unlock();
-        return 0;
-    }
+        ami_bpf_lock();
 
-    if (ch->hold_len == 0 && ch->store_len > 0)
-        ami_bpf_rotate(ch);
+        if (ch->reading)
+        {
+            ami_bpf_unlock();
+            return 0;
+        }
 
-    if (ch->hold_len == 0)
-    {
+        if (ch->hold_len == 0 && ch->store_len > 0)
+            ami_bpf_rotate(ch);
+
+        if (ch->hold_len != 0)
+            break;                  /* data, and the lock is still held */
+
         ami_bpf_unlock();
-        return 0;
+
+        if (waited >= budget)
+            return 0;
+
+        if (ami_bpf_signals_set(ch->irq_mask) != 0)
+            return AMI_BPF_EINTR;
+
+        ami_bpf_sleep(AMI_BPF_WAIT_SLICE);
+        waited += AMI_BPF_WAIT_SLICE;
     }
 
     /*
@@ -948,9 +974,8 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
     case AMI_BPF_CMD(BIOCSRTIMEOUT):
         if (buffer == NULL)
             return AMI_BPF_EINVAL;
-        /* Stored for BIOCGRTIMEOUT to hand back; unused, because bpf_read()
-           does not block. Two ULONGs, whichever timeval the caller compiled
-           against. */
+        /* How long bpf_read() waits for the first record; 0 is "do not
+           wait". Two ULONGs, whichever timeval the caller compiled against. */
         ch->rtimeout_sec  = ((const ULONG *)buffer)[0];
         ch->rtimeout_usec = ((const ULONG *)buffer)[1];
         return 0;

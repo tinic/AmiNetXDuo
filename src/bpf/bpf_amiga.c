@@ -10,6 +10,7 @@
 #include "bpf_internal.h"
 
 #include <devices/timer.h>
+#include <proto/dos.h>
 #include <proto/exec.h>
 #include <proto/timer.h>
 
@@ -45,6 +46,22 @@ VOID ami_bpf_notify(APTR task, ULONG mask)
         return;
 
     Signal((struct Task *)task, mask);
+}
+
+VOID ami_bpf_sleep(ULONG ticks)
+{
+    /* dos.library's Delay(), which waits on the calling Process's own timer.
+       Deliberately not a MsgPort of ours: one made on another Process leaves
+       mp_SigTask pointing at a task that may be gone (544398f). */
+    if (ticks != 0)
+        Delay((LONG)ticks);
+}
+
+ULONG ami_bpf_signals_set(ULONG mask)
+{
+    /* Read without consuming: the caller asked to be interrupted by these,
+       and clearing them here would swallow the wake-up it is waiting for. */
+    return (mask != 0) ? (SetSignal(0UL, 0UL) & mask) : 0UL;
 }
 
 /*

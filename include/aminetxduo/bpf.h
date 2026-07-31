@@ -421,8 +421,8 @@ VOID ami_bpf_cleanup(VOID);
  * the errno the autodoc specifies for each call; nothing outside that mapping
  * should look at the value.
  *
- * AMI_BPF_EINTR has no producer while bpf_read() is non-blocking. It is in the
- * set because the autodoc lists it, and a blocking read would return it.
+ * AMI_BPF_EINTR comes from bpf_read() waiting out a BIOCSRTIMEOUT and finding
+ * one of the caller's bpf_set_interrupt_mask() signals already set.
  */
 #define AMI_BPF_EINVAL      (-1)
 #define AMI_BPF_ENXIO       (-2)

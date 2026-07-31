@@ -136,4 +136,15 @@ APTR ami_bpf_current_task(VOID);
 /* Send `mask` to `task`. No-op when either is zero/NULL. */
 VOID ami_bpf_notify(APTR task, ULONG mask);
 
+/* Ticks per second for the BIOCSRTIMEOUT budget, and the slice bpf_read()
+   sleeps between looks. One tick keeps a capture responsive. */
+#define AMI_BPF_TICKS_PER_SEC   50UL
+#define AMI_BPF_WAIT_SLICE      1UL
+
+/* Sleep about `ticks` fiftieths of a second on the calling task. */
+VOID ami_bpf_sleep(ULONG ticks);
+
+/* Which of `mask` are already set on the calling task, without clearing any. */
+ULONG ami_bpf_signals_set(ULONG mask);
+
 #endif /* AMINETXDUO_BPF_INTERNAL_H */
