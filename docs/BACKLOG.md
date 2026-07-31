@@ -77,11 +77,18 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   already in the cache and never asks for one. Raising the peer cache to 32 KB
   made it rare on the LAN it was measured against, which is a mitigation rather
   than a fix: the right answer is to resolve the SRV target when the A is absent.
-- **Nothing ages entries out of the mDNS peer cache from our side.** A service
-  that has gone away stays listed until its TTL expires or the cache evicts it,
-  so two browses a minute apart can report a machine that has since been switched
-  off. RFC 6762 §10.1 goodbye packets are honoured by the module; a machine that
-  is unplugged sends none.
+- **A browse reports the cache, but says it reports the window.**
+  `netstack_mdns_browse_collect()` walks `nx_mdns_service_lookup()` by index,
+  which is the whole peer cache, and nothing ages entries from our side -- the
+  module expires them by TTL, and an unplugged machine sends none of RFC 6762
+  §10.1's goodbyes. That part is mDNS working as designed and needs no fix.
+  What needs one is the claim: `shownetservices.c:513` prints "This is what
+  answered in the window, not everything on the network", true on a cold cache
+  and false on a warm one, where the list includes machines that did not answer
+  this time. Either correct the wording (one line, preferred) or filter to
+  entries refreshed inside the window -- `nx_mdns_rr_elapsed_time` and
+  `nx_mdns_rr_remaining_ticks` carry the freshness, but `NX_MDNS_SERVICE` does
+  not, so that means walking the RR cache instead of the public lookup.
 
 ## Decided against — do not "fix"
 
