@@ -44,18 +44,46 @@ fails on it** — `file` misidentifies it as "GTA in-game text". Read it with py
   asks for at least numeric indices. Latent while a machine has one NIC, which
   is nearly all of them; it bites at two, and `AMI_CFG_MAX_INTERFACES` is 2.
   Wanted by `ping fe80::1%eth0` and by a link-local `GATEWAY6`.
-- **RFC 3493's interface-identification four are absent** -- `if_nametoindex`,
-  `if_indextoname`, `if_nameindex`, `if_freenameindex`. Unlike the rest of that
-  RFC (which we have: `getaddrinfo`, `getnameinfo`, `freeaddrinfo`,
-  `gai_strerror`, `inet_ntop`/`inet_pton`, `IPV6_V6ONLY`, `sin6_scope_id`) these
-  have **no LVO in the NDK and no vector in our table**, which ends at
-  -0x36c [145]. Adding them means inventing ABI no Amiga header declares and no
-  existing binary can call -- a different exercise from conformance to a
-  published one. Pairs with the RFC 4007 item: a numeric zone ID is only useful
-  if something maps a name to it.
+- **RFC 3493 §4: add `if_nametoindex`, `if_indextoname`, `if_nameindex`,
+  `if_freenameindex`.** ACCEPTED 2026-07-31 -- the first LVO extension in 15
+  years, on the footing that we are the reference now.
 
-## Decided against — do not "fix"
+  Slots **146-149** at **-0x372, -0x378, -0x37e, -0x384**. The table currently
+  ends at -0x36c [145]. Do **not** take 141/142: they are `bsd_enosys`
+  *reserved* inside AmiTCP's own published range, and a future Roadshow could
+  define them. Ours start at 143.
 
+  ```c
+  unsigned int         if_nametoindex(const char *ifname);
+  char                *if_indextoname(unsigned int ifindex, char *ifname);
+  struct if_nameindex *if_nameindex(void);
+  void                 if_freenameindex(struct if_nameindex *ptr);
+
+  struct if_nameindex { unsigned int if_index; char *if_name; };
+  ```
+
+  - `IF_NAMESIZE` is 16 and includes the terminator; `ifname` must be at least
+    that.
+  - `if_nametoindex()` returns 0 on failure and **defines no errors**.
+  - `if_indextoname()` returns `ifname`, or NULL with `ENXIO` for no such
+    interface and `ENOMEM` for a system error.
+  - The `if_nameindex()` array is terminated by an entry with `if_index == 0`
+    and `if_name == NULL`, and is freed only by `if_freenameindex()`. Use
+    `addrinfo.c`'s pattern: one allocation holding the structs and their name
+    bytes, so the free is a single call and no name is freed separately.
+  - **Indices are 1-based**, matching `rtm_index` as of 2026-07-31. That fix
+    and this share a convention -- a caller comparing `GetRouteInfo`'s
+    `rtm_index` against `if_nametoindex()` must agree, so change neither alone.
+
+  Unlike -0x360/-0x366/-0x36c, which are private and reached through a constant
+  in our own header, these are meant to be called by **other people's programs**.
+  That means publishing linkable glue, not just an offset: an FD/SFD entry and
+  the generated proto/pragma/inline set, so an ordinary
+  `#include <proto/bsdsocket.h>` call site links. Without it the vectors exist
+  and nothing can reach them.
+
+  Bump `BSD_LIB_REVISION` and `AMI_NETSTATUS_MIN_REVISION` together, per the
+  rule in `netstatus.h`.
 - **RFC 6724 default address selection**, 2026-07-31: does not apply here. It
   sorts a list of candidate destinations, and `getaddrinfo()` returns at most
   one address per family (the resolver under it answers with a single address,
