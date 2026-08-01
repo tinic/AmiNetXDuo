@@ -293,7 +293,9 @@ else
     # Two bounces per cycle: the standalone one and the one the sockets are
     # held across.
     # Phase E and phase L each open EXPUNGES times.
-    WANT_OPENS=$(( CYCLES * 8 + EXPUNGES * 2 + 1 ))
+    # The 4 is cycledrill.c's NEST_OPENS and has to track it: a base costs the
+    # calling Task signal bits, so the drill cannot nest more than a handful.
+    WANT_OPENS=$(( CYCLES * 4 + EXPUNGES * 2 + 1 ))
     WANT_BOUNCE=$(( CYCLES * 2 ))
 
     [ "$D_OPENS" -ge "$WANT_OPENS" ] \
