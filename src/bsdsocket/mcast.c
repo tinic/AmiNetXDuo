@@ -182,6 +182,13 @@ static LONG bsd_mcast_join(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_ENOBUFS);
     }
 
+    /* Claim the row inside the bracket. A free row is only free because
+       bm_Sock is NULL, so leaving it that way until after bsd_nx_leave() lets
+       a second base's join pick the same one. */
+    row->bm_Sock  = sock;
+    row->bm_Group = group;
+    row->bm_Iface = (UINT)iface;
+
     /* Read once, by the join, into the group's own entry. See the top. */
     if (sock->as_McastLoop != 0)
         (VOID)nx_igmp_loopback_enable(ip);
@@ -189,6 +196,9 @@ static LONG bsd_mcast_join(struct AmiSocketBase *base, AmiSocket *sock,
         (VOID)nx_igmp_loopback_disable(ip);
 
     status = nx_igmp_multicast_interface_join(ip, group, (UINT)iface);
+
+    if (status != NX_SUCCESS)
+        row->bm_Sock = NULL;            /* give the row back */
 
     bsd_nx_leave(base);
 
@@ -200,10 +210,6 @@ static LONG bsd_mcast_join(struct AmiSocketBase *base, AmiSocket *sock,
                                   ? AMI_ENOBUFS
                                   : bsd_errno_from_nx(status));
     }
-
-    row->bm_Sock  = sock;
-    row->bm_Group = group;
-    row->bm_Iface = (UINT)iface;
 
     return 0;
 }
@@ -669,7 +675,18 @@ static LONG bsd_mcast6_join(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_ENOBUFS);
     }
 
+    /* Claim the row inside the bracket -- see bsd_mcast_join(). */
+    row->bm_Sock = sock;
+    row->bm_Group[0] = group.nxd_ip_address.v6[0];
+    row->bm_Group[1] = group.nxd_ip_address.v6[1];
+    row->bm_Group[2] = group.nxd_ip_address.v6[2];
+    row->bm_Group[3] = group.nxd_ip_address.v6[3];
+    row->bm_Iface = (UINT)iface;
+
     status = nxd_ipv6_multicast_interface_join(ip, &group, (UINT)iface);
+
+    if (status != NX_SUCCESS)
+        row->bm_Sock = NULL;
 
     bsd_nx_leave(base);
 
@@ -683,13 +700,6 @@ static LONG bsd_mcast6_join(struct AmiSocketBase *base, AmiSocket *sock,
                                   ? AMI_ENOBUFS
                                   : bsd_errno_from_nx(status));
     }
-
-    row->bm_Sock = sock;
-    row->bm_Group[0] = group.nxd_ip_address.v6[0];
-    row->bm_Group[1] = group.nxd_ip_address.v6[1];
-    row->bm_Group[2] = group.nxd_ip_address.v6[2];
-    row->bm_Group[3] = group.nxd_ip_address.v6[3];
-    row->bm_Iface = (UINT)iface;
 
     return 0;
 }

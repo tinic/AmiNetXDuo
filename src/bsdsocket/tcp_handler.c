@@ -1031,7 +1031,12 @@ static VOID tcp_ctrl_main(VOID)
     Signal(tcp_boot->tb_Parent, SIGF_SINGLE);
 
     if (!ok)
+    {
+        /* tcp_ctrl_publish() has already undone whatever it managed; drop the
+           latch too, or no later open can retry. */
+        tcp_started = FALSE;
         return;
+    }
 
     AMI_INFO("TCP: handler ready");
 
@@ -1117,6 +1122,14 @@ static VOID tcp_ctrl_main(VOID)
                         tcp_reply(pkt, DOSTRUE, 0, port);
                         tcp_ctrl_port = NULL;
                         DeleteMsgPort(port);
+
+                        /* The segment may well stay loaded -- ACTION_DIE is
+                           accepted with openers still holding the library, and
+                           the expunge only runs once the last one goes. Leaving
+                           the latch set means every later OpenLibrary() gets a
+                           library with no TCP: device. Inside the Forbid(), so
+                           no opener can see the pair half-cleared. */
+                        tcp_started = FALSE;
                     }
 
                     running = FALSE;
@@ -1187,7 +1200,8 @@ VOID bsd_tcp_handler_start(struct AmiSocketBase *master)
     if (proc == NULL)
     {
         AMI_ERROR("TCP: cannot start the handler process");
-        tcp_boot = NULL;
+        tcp_boot    = NULL;
+        tcp_started = FALSE;
         return;
     }
 

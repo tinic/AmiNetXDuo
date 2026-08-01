@@ -276,9 +276,6 @@ static LONG ami_sana2_configure(AmiSana2If *iface)
 /* --------------------------------------------------------------- raw probe */
 
 #if AMI_SANA2_PROBE_RAW
-/* A slot with no packet: the copy hook rejects anything aimed at it. */
-static AmiRxSlot ami_raw_probe_slot;
-
 /*
  * There is no capability query for raw framing, so this posts one raw CMD_READ
  * and immediately takes it back. A device that does not implement the flag
@@ -295,10 +292,19 @@ static BOOL ami_sana2_probe_raw(AmiSana2If *iface)
 {
     struct MsgPort   *port;
     struct IOSana2Req req;
+    /* A slot with no packet: the copy hook rejects anything aimed at it. On
+       the stack, not at file scope -- it is per-probe, it lives only until the
+       WaitIO() below, and a shared one is a shared write target for any driver
+       that writes ios2_Data itself instead of calling the copy hooks. */
+    AmiRxSlot         slot;
     LONG              err;
+    ULONG             i;
 
     if (iface->hw_type != S2WireType_Ethernet)
         return FALSE;
+
+    for (i = 0; i < sizeof(slot); i++)
+        ((UBYTE *)&slot)[i] = 0;
 
     port = CreateMsgPort();
     if (port == NULL)
@@ -314,7 +320,7 @@ static BOOL ami_sana2_probe_raw(AmiSana2If *iface)
     req.ios2_WireError                      = 0;
     req.ios2_PacketType                     = AMI_ETHERTYPE_ARP;
     req.ios2_DataLength                     = 0;
-    req.ios2_Data                           = &ami_raw_probe_slot;
+    req.ios2_Data                           = &slot;
 
     SendIO((struct IORequest *)&req);
     AbortIO((struct IORequest *)&req);

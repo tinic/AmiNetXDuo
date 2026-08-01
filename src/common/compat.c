@@ -183,13 +183,34 @@ static ULONG               ami_eclock_ms;
 static ULONG               ami_eclock_rem;
 static ULONG               ami_eclock_carry;   /* thousandths of a tick */
 
+/*
+ * One IORequest and one accumulator for the machine, so the init has to be
+ * one-shot. Unguarded it was a plain test-then-act: two tasks reaching
+ * ami_millis() for the first time together both fell through and both
+ * OpenDevice()d the same &ami_timer_req -- Exec's "reuse of an active
+ * IORequest" -- and the second re-zeroed ami_eclock_ms under the first, which
+ * a caller measuring `ami_millis() - start` sees as an unsigned wrap.
+ *
+ * Forbid() rather than a semaphore: this is reached from the SANA-II receive
+ * path via ami_bpf_now(), where blocking is not allowed. timer.device's Open
+ * is a table lookup and does not Wait, so the Forbid holds across it.
+ */
 static BOOL ami_timer_init(VOID)
 {
     struct EClockVal ev;
     ULONG            rate;
+    BOOL             ok;
 
     if (TimerBase != NULL)
         return TRUE;
+
+    Forbid();
+
+    if (TimerBase != NULL)
+    {
+        Permit();
+        return TRUE;
+    }
 
     ami_timer_port.mp_Node.ln_Type = NT_MSGPORT;
     ami_timer_port.mp_Flags        = PA_IGNORE;
@@ -206,10 +227,17 @@ static BOOL ami_timer_init(VOID)
     ami_timer_req.tr_node.io_Message.mn_ReplyPort    = &ami_timer_port;
     ami_timer_req.tr_node.io_Message.mn_Length       = sizeof(ami_timer_req);
 
-    if (OpenDevice((STRPTR)TIMERNAME, UNIT_ECLOCK,
-                   (struct IORequest *)&ami_timer_req, 0) != 0)
+    ok = (OpenDevice((STRPTR)TIMERNAME, UNIT_ECLOCK,
+                     (struct IORequest *)&ami_timer_req, 0) == 0) ? TRUE : FALSE;
+    if (!ok)
+    {
+        Permit();
         return FALSE;
+    }
 
+    /* Before ReadEClock(), which is a proto/timer.h inline and calls through
+       this very base. Publishing it half-initialised is what the Forbid is
+       for -- no other task can observe the window. */
     TimerBase = ami_timer_req.tr_node.io_Device;
 
     /*
@@ -223,6 +251,8 @@ static BOOL ami_timer_init(VOID)
     ami_eclock_ms   = 0UL;
     ami_eclock_rem  = 0UL;
     ami_eclock_carry = 0UL;
+
+    Permit();
 
     return TRUE;
 }

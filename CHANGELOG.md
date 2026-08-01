@@ -4,17 +4,20 @@ User-visible changes, newest first. Internal work is in the git log.
 
 ## Unreleased
 
-<<<<<<< HEAD
 - Two `BeginInterfaceConfig()` calls for different interfaces at the same time no longer risk one of them never being answered, which left the program that made it waiting on its message forever
 - Starting a packet capture on a machine where the network had not yet read the clock no longer stops multitasking for the length of a device open, once for every frame captured
 - Opening `usergroup.library` while another program is reading `DEVS:passwd` no longer stops multitasking for the length of that disk access
-=======
 - `recvmsg()` and `sendmsg()` accept a control buffer declared with `CMSG_BUFFER()`. The macro did not give the buffer the alignment it exists to give it, and the library then refused about half of them -- `MSG_CTRUNC` with no ancillary data on receive, `EINVAL` on send -- depending on where the linker had put it
 - `gethostbyname_r()` and `gethostbyaddr_r()` accept a buffer that does not start on a longword boundary. On a 68000 the first write into it was an address error
 - `bpf_ioctl()` answers `EINVAL` for a buffer at an odd address rather than taking an address error on a 68000
 - New `docs/ALIGNMENT.md`: every unaligned-access site and every thread and process stack in the tree, with the measurements
->>>>>>> origin/agent/alignaudit
 
+- Two programs joining a multicast group at the same moment no longer take the same tracking row. The one that lost never left its group when it closed, and the one that won dropped a group it did not join
+- `TCP:` can be started again after `Status TCP: DIE`. Once it had been taken down, every program that opened the library afterwards got one with no `TCP:` device until the library was unloaded
+- Two programs asking for the time at the same moment no longer collide over one timer request, which could take the clock back to zero and make anything measuring elapsed time see about 49 days
+- Two programs configuring different interfaces at the same moment no longer swap each other's requests; the second is told the allocator is busy
+- Closing a TLS connection while another program is using one no longer risks reaching through the closed one
+- Closing a raw socket after the network has already gone down no longer leaves raw sockets unable to receive for the rest of the session
 - Fixed three ways a hostile or broken server could read past the end of a buffer during a TLS handshake, and two more in the code underneath it. A certificate two bytes long, a 38-byte ServerHello and a zero-length CertificateRequest each walked off the end of the record buffer; a signature length was checked against the wrong bound; and every RSA modulus tripped a signed shift. On a machine with no memory protection a read past a buffer is not a crash, it is whatever happened to be next
 - `ping`, `ShowNetStatus` and `AddNetRoute` give back the memory they read `DEVS:Internet` into. Each run lost about 12 KB until the next reboot, which on a 1 MB machine is roughly seventy runs
 - `connect()` from a socket bound to one of the machine's addresses now leaves from that address instead of being refused

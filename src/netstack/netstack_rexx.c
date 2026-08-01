@@ -399,11 +399,17 @@ static VOID ami_rx_main(VOID)
         else
         {
             AddPort(port);
+            /* Published and recorded in one step: ami_netstack_rexx_suspend()
+               reads ami_rx_port under this same Forbid, and a port that is on
+               Exec's list while the global is still NULL is one it would
+               silently decline to RemPort(). */
+            ami_rx_port = port;
             Permit();
         }
     }
 
-    ami_rx_port = port;
+    if (port == NULL)
+        ami_rx_port = NULL;
 
     if (boot != NULL)
     {
