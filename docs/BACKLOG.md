@@ -206,15 +206,6 @@ decided and shipped in 0.16.2; what its constants are frozen at is in
   `fix-toolchain-crt0.py` first hands ported clients `&__argv`. Found
   2026-07-31.
 
-- **`tests/ipv6/ipv6_socket_test.c` is not in CI.** 129 checks over the whole
-  RFC 3542 surface, green on an emulated A1200 on 2026-07-31. It is tier 2, so
-  `ci.sh` builds it and does not run it; it needs a Kickstart ROM, which only the
-  lab machine has. Run it with
-  `. ~/amiga-assets/env.sh && ./tests/ipv6/run-socket-fsuae.sh -A` on
-  playhouse3. It writes its results to the **serial log**, not to the guest's
-  `stdout.txt` -- that file holds unrelated bytes and reading it looks like a
-  crash.
-
 - **The two-interface source case is proved on a host, not on a guest.** TCP
   now leaves from the address `bind()` named --
   `nxd_tcp_client_socket_source_connect()` in the NetX fork -- and the case it
