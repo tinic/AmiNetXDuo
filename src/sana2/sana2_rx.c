@@ -118,6 +118,23 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet)
 
 /* ------------------------------------------------------------ slot arming */
 
+/*
+ * The pad is what makes every longword access above this line legal.
+ *
+ * nx_packet_data_start is a multiple of NX_PACKET_ALIGNMENT (4) --
+ * _nx_packet_pool_create() rounds it -- and the IP header sits at
+ * data_start + AMI_SANA2_RX_PAD + AMI_ETH_HEADER_SIZE in both modes.  If that
+ * sum is not a multiple of 4, every IP, TCP and UDP header field NetX Duo
+ * reads as a ULONG is misaligned, n68k_checksum.c's `long_ptr` walks the
+ * payload from an unaligned start (its end-pointer rounding assumes it does
+ * not), and on a 68000 an odd one is an address error rather than a slow path.
+ * 2 + 14 == 16 is not a coincidence and is not free to change.
+ */
+_Static_assert(((AMI_SANA2_RX_PAD + AMI_ETH_HEADER_SIZE) & 3) == 0,
+               "RX pad must land the IP header on a longword boundary");
+_Static_assert((NX_PACKET_ALIGNMENT % 4) == 0,
+               "packet payloads are not longword aligned");
+
 /* Position the packet and work out where the copy hook must write. */
 static VOID ami_sana2_rx_arm(AmiSana2If *iface, AmiRxSlot *slot)
 {

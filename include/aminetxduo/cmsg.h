@@ -119,14 +119,27 @@ extern "C" {
  *     msg.msg_control    = CMSG_BUFFER_PTR(cbuf);
  *     msg.msg_controllen = CMSG_BUFFER_LEN(cbuf);
  *
+ * THE ALIGNED ATTRIBUTE IS NOT DECORATION.  m68k gives every scalar an
+ * alignment of 2, not its width -- `__alignof__(long)` is 2 and so is
+ * `__alignof__(struct cmsghdr)` -- so a union over a cmsghdr lands on an even
+ * address and no better.  Half of them are 2 mod 4, which is what the library
+ * used to refuse.  Nothing in the language gets this union to 4; the attribute
+ * is the only mechanism, and cmsg.c asserts the result.
+ *
  * An odd msg_control is not faulted on either way: recvmsg() reports
  * MSG_CTRUNC and writes nothing, sendmsg() answers EINVAL.
  */
+#if defined(__GNUC__)
+#define CMSG_BUFFER_ALIGN4  __attribute__((aligned(4)))
+#else
+#define CMSG_BUFFER_ALIGN4
+#endif
+
 #define CMSG_BUFFER(name, bytes)                                    \
     union {                                                         \
         struct cmsghdr cmsgbuf_align;                               \
         UBYTE          cmsgbuf_bytes[bytes];                        \
-    } name
+    } CMSG_BUFFER_ALIGN4 name
 
 #define CMSG_BUFFER_PTR(name)   ((APTR)(name).cmsgbuf_bytes)
 #define CMSG_BUFFER_LEN(name)   ((socklen_t)sizeof((name).cmsgbuf_bytes))

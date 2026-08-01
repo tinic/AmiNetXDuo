@@ -58,6 +58,13 @@
 #              bsdsocket.library in LIBS: and a driver in DEVS:.  DOES NOT
 #              REACH ITS LAST TWO REPORTS: the final CloseLibrary() hangs
 #              (§81.5), which is the bug rather than the probe.
+# alignprobe   prints this machine's alignment rules -- alignof for a long and
+#              for struct cmsghdr, what CMSG_BUFFER() delivers on the stack and
+#              in static storage, what AllocVec() and AllocMem() return -- and
+#              reads a longword from an address 2 mod 4.  Run it on an A600 or
+#              an A500: a 68000 is the only CPU in the family that faults, so a
+#              pass on an A1200 says nothing.  Does not crash anything and does
+#              not provoke an address error.
 # tickclock    holds the machine in Forbid() past TX_AMIGA_TIMER_MAX_CATCHUP and
 #              compares how far tx_time_get() moved against the E-Clock, which
 #              says whether the ThreadX clock is derived or counted.  Does not
@@ -70,7 +77,8 @@ set(SMOKE_PROBES
     KernelStop  kernelstop.c
     randtest    randtest.c
     tickclock   tickclock.c
-    memprobe    memprobe.c)
+    memprobe    memprobe.c
+    alignprobe  alignprobe.c)
 
 add_custom_target(smoke_probes)
 
