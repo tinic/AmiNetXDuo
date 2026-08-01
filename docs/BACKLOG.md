@@ -18,14 +18,9 @@ empty results.
 
 ## Open — no decision taken
 
-- **Publish `NetStackQuery` / `NetStackControl`?** They are still private, at
-  -0x366/-0x36c. They are what a third-party `netstat` would need, and
-  `ShowNetStatus`, `netstat` and `arp` already depend on them being stable, so
-  the recommendation is to publish. Not done because publishing freezes
-  `NetStatusHeader` and every `NETCTRL_*` request struct, which is the owner's
-  call. Two lines when decided: `netstatus.h` into `PUBLIC_HEADERS` in
-  `tools/stage-developer.sh`, and an `AMI_NETSTATUS_MIN_REVISION` beside the
-  existing magic.
+Nothing. The last one, publishing `NetStackQuery` / `NetStackControl`, was
+decided and shipped in 0.16.2; what its constants are frozen at is in
+`docs/NDK-ADDENDUM.md` with the rest of the ABI.
 
 ## Decided against — do not "fix"
 
@@ -248,8 +243,14 @@ empty results.
   count; `AMINETXDUO_CYCLE_ORPHAN_FATAL=1` makes it fail. Confirming it needs
   real hardware. Checked 2026-07-31.
 
-- **`STATE=down` has no harness.** It is honoured as of 2026-07-31 but only the
-  config parser is covered; no emulator run boots an interface configured down.
+- **`STATE=down` is exercised but not asserted.**
+  `tests/tools/run-addifleak.sh` stages an interface configured down, because
+  that is how it reaches the failure it measures, so the path runs on every
+  invocation. What it does not check is the state itself -- that `IFQ_State`
+  reads `SM_Down` and that `Online` then brings it up. The `-D` flag added to
+  `run-ifquery.sh` does assert exactly that and passes both ways, but ten other
+  assertions in that harness assume a live interface and fail with it; they
+  need to become conditional first. Found 2026-08-01.
 
 - **`run-fitzbench.sh` refuses `playhouse2` outright** over the uncomputed TX
   checksums that `ethtool -K eth0 tx off` fixed there on 2026-07-31, and can be
