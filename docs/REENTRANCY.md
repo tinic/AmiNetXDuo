@@ -24,27 +24,33 @@ a plain `grep` reads them as binary and silently returns nothing.
 ## The census
 
 Counted against `origin/main`, over the seventy-five shipping `.c` files in the
-nine directories (`src/*/test/` excluded):
+nine directories (`src/*/test/` excluded). The tables below are the authority --
+one row per object, or per named group -- and these totals are read off them:
 
 | | |
 |---|---|
-| writable file-scope `static` | 101 |
+| writable file-scope `static` | 102 |
 | writable function-local `static` | 1 (`socket.c:196`) |
 | writable non-`static` file-scope global | 19 |
-| **writable, total** | **121** |
+| **writable, total** | **122** |
 | read-only file-scope `static const` | 38 |
 | read-only `const` file-scope global | 10 |
 | function-local `static const` | 11 |
 
-And the verdicts on the 121:
+And the verdicts on the 122:
 
 | Verdict | Count | Fixed here |
 |---|---|---|
-| 1 -- singleton, correctly guarded | 54 | -- |
-| 2 -- constant | 24 | -- |
+| 1 -- singleton, correctly guarded | 58 | -- |
+| 2 -- constant | 23 | -- |
 | 3 -- misplaced | 21 | 2 |
-| 4 -- unguarded | 21 | 19 |
+| 4 -- unguarded | 19 | 17 |
 | could not settle | 1 | -- |
+
+Two more were touched without changing class: `bsd_raw_list` and
+`bsd_raw_installed` are correctly guarded singletons that had one leak path.
+So twenty-one objects across eleven sites, and one new static
+(`pool_gathering`).
 
 Twelve of the twenty-one misplaced are crashguard, which is not linked into any
 shared library; five more are unreachable through any LVO. That leaves four live
