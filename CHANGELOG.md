@@ -2,10 +2,10 @@
 
 User-visible changes, newest first. Internal work is in the git log.
 
-## Unreleased
+## 0.16.2
 
 - `ShowNetStatus` reports which stack is running and which build of it, and `GetNetStatus VERSION` prints the same for a script. Both report the LIBRARY's version rather than their own: `C:` and `LIBS:` are updated separately, so a machine can have new commands over an older library and the one in memory is the one worth knowing about. Neither starts the network to find out
-- Every file says which release it is from. `Version full file C:ping` reads `ping 0.16.1 (31.7.2026) AmiNetXDuo e45d264`, and `bsdsocket.library` answers at all -- it carried no version string before, so there was no way to tell an installed copy apart. One number for the whole set instead of a private one per command, the date from the build rather than from whoever last edited the file, and the commit so two builds of the same release can be told apart. The name is in there because Roadshow ships commands called `AddNetInterface`, `ping`, `arp` and `netstat` too
+- Every file says which release it is from. `Version full file C:ping` reads `ping 0.16.2 (1.8.2026) AmiNetXDuo <commit>`, and `bsdsocket.library` answers at all -- it carried no version string before, so there was no way to tell an installed copy apart. One number for the whole set instead of a private one per command, the date from the build rather than from whoever last edited the file, and the commit so two builds of the same release can be told apart. The name is in there because Roadshow ships commands called `AddNetInterface`, `ping`, `arp` and `netstat` too
 - `STATE=down` on the only interface no longer stops the network library opening. It could not be undone from the machine it happened on: nothing could open the library, so there was no `Online` to bring the interface up with and no `ShowNetStatus` to see it -- editing the interface file was the only way out
 - `AddNetInterface` on an interface configured down says so, instead of advising a check of the cable
 - `NetStackQuery()` and `NetStackControl()` are published, at -0x366 and -0x36c, so a third-party `netstat` or `ifconfig` can be written. They are what `ShowNetStatus`, `netstat` and `arp` are built on and nothing else. `aminetxduo/netstatus.h` joins the Developer drawer, and a caller checks `lib_Revision` against `AMI_NETSTATUS_MIN_REVISION` before calling. Published means fixed: `NetStatusHeader` and every `NETCTRL_*` request structure are part of the interface from here on
