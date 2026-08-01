@@ -84,7 +84,7 @@ ones, and the serious one is `_nx_secure_tls_record_block_buffer`.
 `bsd_runtime_open()` runs from `InitResident()`, i.e. on the **first**
 `OpenLibrary()` only. `bsd_lib_open()` initialises the child base and nothing
 else. `bsd_lib_expunge()` is declined while the TCP: handler, an address
-allocation or a monitor hook is live (`library.c:537/550/563`).
+allocation or a monitor hook is live (`library.c:539/552/565`).
 
 **So a static is re-initialised only when the segment is reloaded.** Everything
 below keeps its value across any number of last-close-without-expunge cycles, and
@@ -506,7 +506,7 @@ mid-scan was a use-after-free. Both scans take the same `Forbid()` now.
 
 Two things remain, recorded: eight slots is a machine-wide limit, so the ninth
 concurrent connection loses certificate verification (it fails closed, at
-`tls_store.c:625`) and resumption; and a program that exits without `TLSClose()`
+`tls_store.c:639`) and resumption; and a program that exits without `TLSClose()`
 leaves a slot holding a dangling `TLSConnection *`.
 
 ### The two that are inert
