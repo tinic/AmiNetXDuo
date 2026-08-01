@@ -36,11 +36,12 @@
 #include <exec/tasks.h>
 
 #include "aminetxduo/tlslib.h"
+#include "aminetxduo/version.h"
 
 const char *const tool_name = "fetch";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: fetch 1.0 (25.7.2026)";
+    TOOL_VERSTAG("fetch");
 
 #define TEMPLATE    "URL/A,TO/K,HEADERS/S,QUIET/S,NOVERIFY/S,TIMEOUT/N/K"
 

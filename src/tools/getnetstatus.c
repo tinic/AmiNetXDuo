@@ -37,11 +37,12 @@
  */
 
 #include "tools_nx.h"
+#include "aminetxduo/version.h"
 
 const char *const tool_name = "GetNetStatus";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: GetNetStatus 1.0 (26.7.2026)";
+    TOOL_VERSTAG("GetNetStatus");
 
 #define TEMPLATE    "CHECK/K,QUIET/S"
 

@@ -46,11 +46,11 @@
 #ifdef TOOL_OFFLINE
 const char *const tool_name = "Offline";
 static const char version_tag[] __attribute__((used)) =
-    "$VER: Offline 2.0 (26.7.2026)";
+    TOOL_VERSTAG("Offline");
 #else
 const char *const tool_name = "Online";
 static const char version_tag[] __attribute__((used)) =
-    "$VER: Online 2.0 (26.7.2026)";
+    TOOL_VERSTAG("Online");
 #endif
 
 #define TEMPLATE    "NAME/A,UNIT/N,TIMEOUT/N"

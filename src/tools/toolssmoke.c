@@ -27,9 +27,10 @@
 #include <exec/memory.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include "aminetxduo/version.h"
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: ToolsSmoke 1.0 (24.7.2026)";
+    TOOL_VERSTAG("ToolsSmoke");
 
 #define REPORT      "DH0:tools.txt"
 /*

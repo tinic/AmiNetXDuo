@@ -42,11 +42,12 @@
 
 #include <devices/timer.h>
 #include <proto/timer.h>
+#include "aminetxduo/version.h"
 
 const char *const tool_name = "traceroute";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: traceroute 1.0 (26.7.2026)";
+    TOOL_VERSTAG("traceroute");
 
 /*
  * Roadshow options not implemented here:

@@ -17,6 +17,7 @@
 #include "netmonitor.h"
 
 #include "aminetxduo/config.h"
+#include "aminetxduo/version.h"
 
 #include <dos/dostags.h>
 #include <proto/exec.h>
@@ -36,7 +37,38 @@ asm("    .text                       \n"
     "    rts                         \n");
 
 static char bsd_lib_name[]  = BSD_LIB_NAME;
-static char bsd_lib_id[]    = "bsdsocket.library 4.0 (AmiNetXDuo)\r\n";
+/*
+ * What `Version` and `lib_IdString` say.
+ *
+ * The library had NO $VER: string at all, so `version full file
+ * LIBS:bsdsocket.library` had nothing to read -- reported by a user trying to
+ * tell which release was installed. It carries the project's, like every
+ * command (src/tools/tools.h, TOOL_VERSTAG).
+ *
+ * lib_Version and lib_Revision are a different thing and are not ours to
+ * choose: 4 is what AmiTCP-era software opens us by, and the revision is the
+ * vector-table revision a caller checks before reaching the RFC 3493 slots.
+ * They stay where the ABI needs them, and lib_IdString says both so that
+ * neither question needs the other answered first.
+ *
+ *   Version full file LIBS:bsdsocket.library
+ *   bsdsocket.library 0.16.1 (1.8.2026) AmiNetXDuo f75f058
+ *
+ * The name is in there because Roadshow's library is also bsdsocket.library
+ * and says "Roadshow 1.15 DEMO version" in the same place. Two stacks, one
+ * filename; the product name is what tells them apart.
+ */
+#define BSD_STR2(x)         #x
+#define BSD_STR(x)          BSD_STR2(x)
+#define BSD_LIB_ABI_TEXT    BSD_STR(BSD_LIB_VERSION) "." BSD_STR(BSD_LIB_REVISION)
+
+static const char bsd_lib_ver[] __attribute__((used)) =
+    "$VER: bsdsocket.library " AMINETXDUO_VERSION
+    " (" AMINETXDUO_VERSION_DATE ") AmiNetXDuo " AMINETXDUO_VERSION_HASH;
+
+static char bsd_lib_id[] =
+    "bsdsocket.library " AMINETXDUO_VERSION " (AmiNetXDuo, ABI "
+    BSD_LIB_ABI_TEXT ")\r\n";
 
 static struct AmiSocketBase *bsd_lib_init(
     register struct AmiSocketBase *base    __asm("d0"),

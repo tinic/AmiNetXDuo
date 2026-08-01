@@ -27,6 +27,18 @@
 #endif /* __MAXON__, __STORM__ or AZTEC_C */
 
 #ifdef __CLIB_PRAGMA_LIBCALL
+ #pragma libcall SocketBase NetStackQuery 366 281004
+#endif /* __CLIB_PRAGMA_LIBCALL */
+#ifdef __CLIB_PRAGMA_AMICALL
+ #pragma amicall(SocketBase, 0x366, NetStackQuery(d0,d1,a0,d2))
+#endif /* __CLIB_PRAGMA_AMICALL */
+#ifdef __CLIB_PRAGMA_LIBCALL
+ #pragma libcall SocketBase NetStackControl 36c 281004
+#endif /* __CLIB_PRAGMA_LIBCALL */
+#ifdef __CLIB_PRAGMA_AMICALL
+ #pragma amicall(SocketBase, 0x36c, NetStackControl(d0,d1,a0,d2))
+#endif /* __CLIB_PRAGMA_AMICALL */
+#ifdef __CLIB_PRAGMA_LIBCALL
  #pragma libcall SocketBase if_nametoindex 372 801
 #endif /* __CLIB_PRAGMA_LIBCALL */
 #ifdef __CLIB_PRAGMA_AMICALL

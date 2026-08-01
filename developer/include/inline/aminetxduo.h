@@ -20,6 +20,14 @@ typedef ULONG _sfdc_vararg;
 #define AMINETXDUO_BASE_NAME SocketBase
 #endif /* !AMINETXDUO_BASE_NAME */
 
+#define NetStackQuery(___magic, ___what, ___buffer, ___size) \
+      LP4(0x366, LONG, NetStackQuery , ULONG, ___magic, d0, ULONG, ___what, d1, APTR, ___buffer, a0, ULONG, ___size, d2,\
+      , AMINETXDUO_BASE_NAME)
+
+#define NetStackControl(___magic, ___op, ___arg, ___size) \
+      LP4(0x36c, LONG, NetStackControl , ULONG, ___magic, d0, ULONG, ___op, d1, APTR, ___arg, a0, ULONG, ___size, d2,\
+      , AMINETXDUO_BASE_NAME)
+
 #define if_nametoindex(___ifname) \
       LP1(0x372, ULONG, if_nametoindex , const char *, ___ifname, a0,\
       , AMINETXDUO_BASE_NAME)

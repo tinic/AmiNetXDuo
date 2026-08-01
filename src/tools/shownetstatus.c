@@ -44,11 +44,12 @@
 #include "tools_nx.h"
 
 #include <stdlib.h>   /* atexit */
+#include "aminetxduo/version.h"
 
 const char *const tool_name = "ShowNetStatus";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: ShowNetStatus 2.0 (26.7.2026)";
+    TOOL_VERSTAG("ShowNetStatus");
 
 #define TEMPLATE    "INTERFACE/M,INTERFACES/S,ARPCACHE=ARP/S,ROUTES/S," \
                     "DNS=DOMAINNAMESERVERS/S,ICMP/S,IP/S,MB=MEMORY/S," \

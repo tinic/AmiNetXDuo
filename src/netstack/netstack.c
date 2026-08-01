@@ -1193,6 +1193,43 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
                  (unsigned long)(mask & 0xFFUL));
     }
 
+    /*
+     * Every interface configured down is not a failure.
+     *
+     * STATE=down says "bring the stack up, leave this card alone", and a card
+     * that is down cannot be given an address -- so waiting for one and then
+     * calling its absence a configuration error refuses the exact thing that
+     * was asked for. bsd_lib_open() turns that into a NULL, so OpenLibrary()
+     * fails and NOTHING on the machine can open bsdsocket.library: no Online
+     * to bring the interface up with, no ShowNetStatus to see it, nothing.
+     *
+     * A stack with no address is a working stack that has no address. It is
+     * the same state a machine reaches when DHCP does not answer, which
+     * already returns OK for exactly this reason -- the difference is only
+     * that here it was deliberate.
+     */
+    if (!resolved)
+    {
+        UWORD i;
+        BOOL  wanted_up = FALSE;
+
+        for (i = 0; i < ns->ns_IfaceCount; i++)
+        {
+            if (ns->ns_Config.interfaces[i].up)
+            {
+                wanted_up = TRUE;
+                break;
+            }
+        }
+
+        if (!wanted_up)
+        {
+            AMI_INFO("netstack: no interface was configured up, so no address "
+                     "is expected -- the stack is running");
+            resolved = TRUE;
+        }
+    }
+
     return resolved ? AMI_NET_OK : AMI_NET_ERR_CONFIG;
 }
 

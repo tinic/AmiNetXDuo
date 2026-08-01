@@ -40,7 +40,7 @@
 const char *const tool_name = "CheckNetConfig";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: CheckNetConfig 1.0 (26.7.2026)";
+    TOOL_VERSTAG("CheckNetConfig");
 
 #define TEMPLATE    "QUIET/S,VERBOSE/S"
 

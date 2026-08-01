@@ -132,6 +132,9 @@ const char *tool_device_where(const char *device);
  * Open and immediately close a SANA-II device, to find out whether it really
  * works. 0 means it opened; anything else is the OpenDevice() error.
  */
+/* TOOL_VERSTAG, which every command uses for its $VER: string. */
+#include "aminetxduo/version.h"
+
 #define TOOL_PROBE_NO_NAME      (-100)
 #define TOOL_PROBE_NO_MEMORY    (-101)
 

@@ -44,11 +44,12 @@
 #include "toolsock.h"
 
 #include <stdlib.h>   /* atexit */
+#include "aminetxduo/version.h"
 
 const char *const tool_name = "nslookup";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: nslookup 1.0 (27.7.2026)";
+    TOOL_VERSTAG("nslookup");
 
 #define TEMPLATE    "NAME/A,SERVER,TYPE/K,TIMEOUT/N/K"
 

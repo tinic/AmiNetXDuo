@@ -2,6 +2,11 @@
 
 User-visible changes, newest first. Internal work is in the git log.
 
+## Unreleased
+
+- `NetStackQuery()` and `NetStackControl()` are published, at -0x366 and -0x36c, so a third-party `netstat` or `ifconfig` can be written. They are what `ShowNetStatus`, `netstat` and `arp` are built on and nothing else. `aminetxduo/netstatus.h` joins the Developer drawer, and a caller checks `lib_Revision` against `AMI_NETSTATUS_MIN_REVISION` before calling. Published means fixed: `NetStatusHeader` and every `NETCTRL_*` request structure are part of the interface from here on
+- Correction to 0.16.0: that release listed "Closing a TLS connection while another program is using one no longer risks reaching through the closed one". The change is real and stays, but it hardens something a program could not actually reach -- both writers of the connection registry already hold `Forbid()` across the whole update, and every lookup is a task asking for its own connection. It should not have been listed as a fault anyone could meet
+
 ## 0.16.1
 
 - `AddNetInterface` that cannot bring an interface up gives the machine its memory back. A failure after the card had opened -- a PCMCIA card in the slot that will not initialise, a cable that is not there, no DHCP answer -- left the network running with nobody using it, and the memory it holds was gone until the machine was switched off. Measured at 580,704 bytes on a machine with 8 MB free, and about 400 KB on a 1 MB one, which is most of what such a machine has

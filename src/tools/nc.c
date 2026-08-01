@@ -27,11 +27,12 @@
  */
 
 #include "toolsock.h"
+#include "aminetxduo/version.h"
 
 const char *const tool_name = "nc";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: nc 1.0 (25.7.2026)";
+    TOOL_VERSTAG("nc");
 
 #define TEMPLATE                                                        \
     "HOST,PORT,LISTEN=-l/S,UDP=-u/S,SCAN=-z/S,TIMEOUT=-w/N/K,"          \

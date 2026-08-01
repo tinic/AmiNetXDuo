@@ -104,7 +104,7 @@
 const char *const tool_name = "DeleteNetRoute";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: DeleteNetRoute 1.0 (26.7.2026)";
+    TOOL_VERSTAG("DeleteNetRoute");
 
 #define TEMPLATE    "QUIET/S,DST=DESTINATION/K,DEFAULT=DEFAULTGATEWAY/K"
 
@@ -119,7 +119,7 @@ enum
 const char *const tool_name = "AddNetRoute";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: AddNetRoute 1.0 (26.7.2026)";
+    TOOL_VERSTAG("AddNetRoute");
 
 #define TEMPLATE    "QUIET/S,DST=DESTINATION/K,HOSTDST=HOSTDESTINATION/K," \
                     "NETDST=NETDESTINATION/K,VIA=GATEWAY/K," \

@@ -64,7 +64,7 @@
 const char *const tool_name = "ShowNetServices";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: ShowNetServices 1.0 (31.7.2026)";
+    TOOL_VERSTAG("ShowNetServices");
 
 #define TEMPLATE    "TYPE,ALL/S,SECONDS/K/N,TXT/S,QUIET/S"
 
