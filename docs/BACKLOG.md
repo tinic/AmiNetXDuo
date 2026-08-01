@@ -18,9 +18,48 @@ empty results.
 
 ## Open — no decision taken
 
-Nothing. The last one, publishing `NetStackQuery` / `NetStackControl`, was
-decided and shipped in 0.16.2; what its constants are frozen at is in
-`docs/NDK-ADDENDUM.md` with the rest of the ABI.
+- **Receive is the slow direction, on every machine measured**, 2026-08-01.
+  bifat benchmarked four stacks on four machines, `timecmd copy` each way
+  against a mounted fileserver. We are first or second on send in all four and
+  third or fourth on receive in all four: A3000/060 + X-Surf-100 699 KB/s
+  against AmiTCP 4.6's 1103 (0.15.0); A500/1230-50 + X-Surf-500 389 against
+  569; A1200/060 + CNet16 400 against 454; A500 68000/14MHz + X-Surf-500 115
+  against 175. Send, same machines: 1044 (first), 346 (first), 580 (second),
+  142 (first). AmiTCP 4.6 is the exact mirror -- best receive, worst send,
+  everywhere -- so both stacks sit at opposite ends of one tradeoff rather than
+  one being slow.
+
+  The deficit grows with link speed. Worst on X-Surf-100 behind an 060 (-37%),
+  smallest on CNet16 where the card dominates and the stacks converge. A gap
+  that widens with packet rate is a per-packet cost, not a bandwidth-
+  proportional one.
+
+  Three sizing constants were the obvious suspects and all three are already
+  large enough on these machines -- checked by reading, not measured:
+
+  - The advertised window is not binding. `ami_bsd_tcp_window()` gives a lone
+    socket the `BSD_TCP_WINDOW_CEILING` 32768. Window limits throughput at
+    window/RTT, so 32 KB would have to meet a 47 ms RTT to cap 700 KB/s, and a
+    LAN is under 1 ms. Window is what limits the loopback and long-path cases
+    in `tests/trace/`; it is not what limits these.
+  - The packet pool is not it. `AMI_POOL_MAX_PACKETS` caps it at 256 whatever
+    `AvailMem()` says, so every machine here above roughly 8 MB gets the same
+    pool as every other.
+  - Nor is SANA-II read depth. That cap puts `ami_sana2_rx_start()` at
+    `AMI_SANA2_RX_MAX_DEPTH` 32 on the same machines, which is about 45 ms of
+    frames at X-Surf-100 rates. The depth-4 floor that lost SYN/ACKs under
+    `run-curlverify.sh -p` applies to the 1 MB machine, not to these.
+
+  So it is in the per-packet receive path -- copies through
+  `ami_sana2_copy_from_buff`, checksum, or the reader-to-IP-thread handoff --
+  and it needs measuring rather than more reading. `tests/tcpdrill` drives a
+  synthetic interface and can count what a receive costs without a card.
+
+  One caveat before treating our send figures as a win: a `copy` to a mounted
+  fileserver can be measuring buffer acceptance rather than throughput, the
+  same way `fitzbench`'s write figure does. It biases every stack the same way,
+  so the cross-stack *ranking* stands; what is less safe is the within-stack
+  read-versus-write asymmetry. Worth asking how large `largefile` was.
 
 ## Decided against — do not "fix"
 
