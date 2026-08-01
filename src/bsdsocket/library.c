@@ -570,6 +570,16 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
     neg     = base->sb_Lib.lib_NegSize;
     pos     = base->sb_Lib.lib_PosSize;
 
+    /*
+     * The DEVS:Internet tables are ami_alloc()ed once by the first open and
+     * held in file-scope statics in src/config/netdb.c. Those statics go away
+     * with the segment, so an expunge that does not free them first orphans
+     * every block: 12,616 bytes on a stock DEVS:Internet, gone for good and
+     * again on the next load. Nothing can be in a lookup here -- OpenCnt is
+     * zero and the checks above have ruled out our own Processes.
+     */
+    ami_netdb_free();
+
     bsd_runtime_close();
 
     Remove((struct Node *)base);

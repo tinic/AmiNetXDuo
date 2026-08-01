@@ -26,6 +26,16 @@
  *   expunge is about to hand back and holds no open count.  Sending it is the
  *   supported way down and is what makes the expunge reachable at all.
  *
+ *   Phase L is phase E without the expunge: open, last close, open again, and
+ *   the segment never unloaded.  It is the control that tells the two halves
+ *   of phase E apart.  A last close already runs the whole teardown --
+ *   netstack_shutdown(), the IP stack, the packet pool, the SANA-II readers,
+ *   ThreadX -- so a loss that shows in both phases is in the teardown, and a
+ *   loss that shows only in phase E is in the unload and reload, which is to
+ *   say in something whose only owner was a file-scope static in the segment.
+ *   Phase C cannot make this split: its pairs are nested inside the anchor and
+ *   never reach a last close.
+ *
  *   Phase C, the cycling proper, runs under ONE held reference so the stack
  *   stays up and the counters accumulate across cycles.  That is the only
  *   arrangement in which drift is measurable: an expunge resets every counter
@@ -1012,6 +1022,8 @@ static Sample baseline;
 static Sample cyc[MAX_CYCLES];
 static Sample exp_open[MAX_CYCLES];
 static Sample exp_gone[MAX_CYCLES];
+static Sample cold_open[MAX_CYCLES];
+static Sample cold_shut[MAX_CYCLES];
 
 int main(VOID)
 {
@@ -1068,6 +1080,32 @@ int main(VOID)
         phase_expunge_cycle(i + 1, iface, &exp_open[i], &exp_gone[i]);
         show("open ", i + 1, &exp_open[i]);
         show("gone ", i + 1, &exp_gone[i]);
+    }
+
+    /* ---- phase L: cold open/close, no expunge -----------------------------
+     *
+     * The split phase E cannot make.  Every iteration takes the stack all the
+     * way down (last close, sb_StackRefs 0, netstack_shutdown()) and back up
+     * again, but the library is never expunged and its segment is never
+     * unloaded.  Phase C's nested pairs run under the anchor, so they never
+     * reach a last close and say nothing about the teardown; this does.
+     */
+    say("\n-- cold open/close --\n", 0, 0, 0, 0);
+
+    for (i = 0; i < expunge; i++)
+    {
+        struct Library *cold = OpenLibrary((CONST_STRPTR)LIB_NAME, 4UL);
+
+        if (!check(cold != NULL, "the library opened cold", i + 1, 0))
+            break;
+
+        did_opens++;
+        sample(cold, &cold_open[i]);
+        CloseLibrary(cold);
+        sample(NULL, &cold_shut[i]);
+
+        show("cold ", i + 1, &cold_open[i]);
+        show("shut ", i + 1, &cold_shut[i]);
     }
 
     /* ---- phase C: cycling under one held reference ------------------------
@@ -1194,6 +1232,21 @@ int main(VOID)
         check(exp_open[last].tasks <= exp_open[0].tasks,
               "no Process was left behind by an expunge",
               (LONG)exp_open[0].tasks, (LONG)exp_open[last].tasks);
+
+        /*
+         * The same figure for phase L.  Reported next to the expunge one
+         * because the pair is what attributes a loss: equal means the cost is
+         * in the teardown a last close already does, and a loss here with none
+         * there means it is the unload and reload.  The 12,612 bytes an
+         * expunge used to lose read zero on this line, which is what said the
+         * orphan was the library's statics and not the stack.
+         */
+        say("free at cold 1: %lu, at %ld: %lu\n",
+            (LONG)cold_shut[0].free_mem, last + 1,
+            (LONG)cold_shut[last].free_mem, 0);
+        say("cold leak: %ld bytes per cycle\n",
+            ((LONG)cold_shut[0].free_mem -
+             (LONG)cold_shut[last].free_mem) / last, 0, 0, 0);
     }
 
     /* ---- what actually happened ------------------------------------------- */
