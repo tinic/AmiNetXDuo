@@ -47,6 +47,7 @@ User-visible changes, newest first. Internal work is in the git log.
 - The loopback interface has a name and a number, `lo0`, from `if_nametoindex()`, `if_indextoname()` and `if_nameindex()`. A datagram over `::1` or `127.0.0.1` reports it like any other arrival instead of reporting nothing, and a send can name it
 - New header `aminetxduo/cmsg.h` with the structures and `CMSG_*` macros the above needs. The NDK's own `CMSG_NXTHDR` cannot be compiled -- it uses an `ALIGN()` no NDK header defines -- and its `CMSG_FIRSTHDR` returns a pointer where it should return `NULL`; both are replaced, and `CMSG_LEN` and `CMSG_SPACE` added
 - `ssh` asks for 8 KB of stack instead of 256 KB, and gives it back. Its deepest measured use is 5,008 bytes; the old figure was a guess made for a program this never built. And every invocation used to lose the whole 256 KB of the machine's free memory until the next reboot
+- `ssh` closes `bsdsocket.library` when it finishes, and stops the console reader it started. Neither happened before: both are registered with `atexit()`, and on this compiler's startup code `exit()` ends the program without running anything registered that way. So every `ssh` left the network library with one more user than it had, which is enough to stop it ever being unloaded -- and an interactive session left a reader process running and two of the program's 32 signal bits gone until the machine is switched off. An `ssh` that connects and finishes now costs the machine nothing at all, measured; it used to cost 4,224 bytes
 
 ## 0.15.1
 

@@ -114,6 +114,22 @@ static VOID argv_paint(VOID)
     argv_painted = TRUE;
 }
 
+/*
+ * Where a run's memory goes, under the same variable.
+ *
+ * A ported client loses a constant amount per invocation that is not the stack
+ * -- 4,224 bytes for dbclient, the same for `dbclient -V`, which opens no
+ * socket.  Three readings bracket it: entering __wrap_main, the moment before
+ * __real_main, and after the stack has been freed.  Whatever is missing
+ * between the last of those and what the parent sees is the crt0's teardown
+ * rather than anything here.
+ */
+static VOID argv_mem(const char *where)
+{
+    if (argv_stackcheck_wanted())
+        Printf("[argv: mem %s %ld]\n", (LONG)where, (LONG)AvailMem(MEMF_ANY));
+}
+
 /* Called with the client finished and the stack not yet freed, on either the
    return or the longjmp path. */
 static VOID argv_report_high_water(VOID)
@@ -207,6 +223,27 @@ static VOID argv_restore_bounds(VOID)
     }
 }
 
+/*
+ * atexit() does nothing on this crt0, so run the handlers here.
+ *
+ * exit(), _exit() and __exit() are one function at one address (see below),
+ * and it terminates without walking the atexit list -- measured, not read: a
+ * Printf() put inside amiga_dropbear.c's amiga_sock_cleanup(), which is
+ * registered with atexit(), never appeared on any run.
+ *
+ * That is not cosmetic.  Dropbear registers two handlers that way.  One closes
+ * bsdsocket.library, so every ssh left a phantom opener the library could
+ * never expunge and lost 4,224 bytes of the machine until reboot; the other
+ * stops the console reader child, whose own comment says AmigaOS reclaims
+ * neither its structure nor its two signal bits.
+ *
+ * Nothing else calls them -- the leak was the same size before the longjmp
+ * below existed and the exit went straight through __real_exit() -- so calling
+ * them here runs each exactly once.  Newlib walks its own list and empties it,
+ * so a second call is a no-op regardless.
+ */
+extern void __call_exitprocs(int status, void *dso);
+
 /* Only the Task that ran setjmp() may jump back into its frame; the console
    reader child in clients/dropbear has its own.  Returns on a task that may
    not, and the caller then takes the real exit. */
@@ -215,7 +252,11 @@ static VOID argv_exit_via_main(int status)
     if (argv_exit_task == NULL || argv_exit_task != FindTask(NULL))
         return;
 
+    /* Before the flush: a handler may still write, and before the jump because
+       a handler wants the big stack rather than the caller's 4 KB. */
+    __call_exitprocs(status, NULL);
     fflush(NULL);
+
     argv_exit_task   = NULL;
     argv_exit_status = status;
     longjmp(argv_exit_jmp, 1);
@@ -248,6 +289,8 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
     ULONG           w = 0;              /* write cursor into argv_buf   */
     ULONG           r;                  /* read cursor into args        */
     int             exited;
+
+    argv_mem("enter");
 
     (void)argc_ignored;
     (void)argv_ignored;
@@ -339,6 +382,8 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
         if (argv_stackcheck_wanted())
             argv_paint();
 
+        argv_mem("pre-main");
+
         exited = setjmp(argv_exit_jmp);
         if (exited == 0)
         {
@@ -350,6 +395,7 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
         argv_report_high_water();
         FreeMem(argv_stack, AMIGA_ARGV_STACK);
         argv_stack = NULL;
+        argv_mem("post-main");
 
         /* Back from an exit(): everything newlib had left to do has been done
            on the big stack, so finish the termination rather than return a
@@ -361,6 +407,12 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
     {
         argv_result = __real_main(argv_argc, argv_vec);
     }
+
+    /* The other way out: a client that RETURNED from main() never went through
+       the exit wrappers, and the crt0 it returns into does not walk the atexit
+       list either.  Same call, and newlib empties the list as it runs it, so a
+       client that took both paths does not run a handler twice. */
+    __call_exitprocs(argv_result, NULL);
 
     return argv_result;
 }
