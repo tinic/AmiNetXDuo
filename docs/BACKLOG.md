@@ -162,15 +162,25 @@ empty results.
   now asks for four. A program that opens many bases and uses timeouts on all
   of them will meet this; nothing in the tree does.
 
-- **`tests/clients/run-argvexit.sh -A` times out, and the toolchain is not
-  why.** An earlier version of this entry read `fix-crt0`'s "matched 0 site(s)"
-  as the crt0 having moved out from under the script, and concluded that
-  `--wrap=main` might not be reached. That was wrong: 0 sites is the immune
-  case, which the script's own docstring says both defects reach once they are
-  fixed upstream. `--check` against the pinned toolchain on playhouse2 and
-  playhouse3 alike reports `11 ok, 1 skipped` for the frame skew and `2 call
-  site(s) already push __argv by value` for the argv indirection. The probe's
-  timeout is the harness. Found 2026-07-31.
+- **`tests/clients/run-argvexit.sh` is gone, and what it was for is measured
+  elsewhere.** It never completed a run. Under Amiberry on playhouse3 the guest
+  boots, `ToolsSmoke` starts, and `DH0:tools.txt` gets as far as the
+  `===== SYS:ArgvExit =====` header and then stops: no output, no return code,
+  no `.done`, deadline. So the plumbing works and `ArgvExit` itself never comes
+  back out of `SystemTagList()` -- making it run is a guest-side debug of the
+  probe, not a fix to a shell script. The toolchain was ruled out separately:
+  `tools/fix-toolchain-crt0.py --check` against the pinned toolchain on
+  playhouse2 and playhouse3 alike reports `11 ok, 1 skipped` for the frame skew
+  and `2 call site(s) already push __argv by value` for the argv indirection,
+  which is the immune case, not a missing patch site.
+
+  The 256 KB per-invocation stack leak it was written for is covered:
+  `clients/dropbear/run-fsuae.sh -A` runs `dbclient` six times in one boot and
+  `ClientRun` prints `AvailMem()` after every command, so a per-invocation leak
+  is a constant step down the list. That measurement found the leak
+  (266,368 bytes a run) and proved the fix (0). A harness that has never run
+  looks like coverage and is not, which is how the leak survived the first
+  time. Removed 2026-07-31.
 
 - **`/opt/amiga` on playhouse2 carries the argv bug in all eleven `crt0.o`.**
   Locally built, GCC 16.1.1b, and `--check` reports `11 buggy` -- it has the
