@@ -127,7 +127,12 @@ VOID ami_bpf_zero_bytes(void *dst, ULONG len);
 VOID ami_bpf_lock(VOID);
 VOID ami_bpf_unlock(VOID);
 
-/* Wall-clock time for bh_tstamp, seconds and microseconds since 1970. */
+/* Open whatever clock ami_bpf_now() reads. Called from ami_bpf_open(), outside
+   the lock, because doing it lazily inside one would block under Forbid(). */
+VOID ami_bpf_time_init(VOID);
+
+/* Wall-clock time for bh_tstamp, seconds and microseconds since 1970. Must not
+   block: ami_bpf_capture() calls it with the lock held. */
 VOID ami_bpf_now(ULONG *sec, ULONG *usec);
 
 /* The calling task, as an opaque token for ami_bpf_notify(). */

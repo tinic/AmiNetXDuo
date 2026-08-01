@@ -74,12 +74,22 @@ ULONG ami_bpf_signals_set(ULONG mask)
  * the 1970s.
  *
  * TimerBase is opened by src/common/compat.c for its EClock millisecond
- * counter; calling ami_millis() once forces that open. If it failed, fall back
- * to milliseconds since stack startup: monotonic and correctly spaced, but
- * with an epoch of whenever the stack came up, which a capture viewer renders
- * as 1970. That is cosmetic, where refusing to capture would not be.
+ * counter, and ami_bpf_time_init() forces that open from ami_bpf_open(). It has
+ * to happen there rather than here: ami_bpf_capture() calls ami_bpf_now() with
+ * the channel lock -- a Forbid() -- held, and ami_millis() reaches
+ * OpenDevice("timer.device") on the first call. That would have run on a
+ * SANA-II reader thread with task switching off, and once per captured frame
+ * for as long as the open kept failing.
+ *
+ * With no timer the capture still happens and only the timestamps are zero,
+ * which a viewer renders as 1970. Cosmetic, where refusing to capture is not.
  */
 extern struct Device *TimerBase;
+
+VOID ami_bpf_time_init(VOID)
+{
+    (VOID)ami_millis();
+}
 
 VOID ami_bpf_now(ULONG *sec, ULONG *usec)
 {
@@ -89,20 +99,14 @@ VOID ami_bpf_now(ULONG *sec, ULONG *usec)
        typedef for exactly this struct -- and both give it tv_secs/tv_micro. */
     struct timeval tv;
 
-    (VOID)ami_millis();
-
-    if (TimerBase != NULL)
+    if (TimerBase == NULL)
     {
-        GetSysTime(&tv);
-        *sec  = tv.tv_secs + AMI_BPF_AMIGA_EPOCH;
-        *usec = tv.tv_micro;
+        *sec  = 0UL;
+        *usec = 0UL;
         return;
     }
 
-    {
-        ULONG ms = ami_millis();
-
-        *sec  = ms / 1000UL;
-        *usec = (ms % 1000UL) * 1000UL;
-    }
+    GetSysTime(&tv);
+    *sec  = tv.tv_secs + AMI_BPF_AMIGA_EPOCH;
+    *usec = tv.tv_micro;
 }

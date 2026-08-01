@@ -76,6 +76,8 @@ VOID ami_log(int level, const char *fmt, ...)
 VOID ami_bpf_lock(VOID)   { }
 VOID ami_bpf_unlock(VOID) { }
 
+VOID ami_bpf_time_init(VOID) { }
+
 VOID ami_bpf_now(ULONG *sec, ULONG *usec)
 {
     *sec  = 1000;

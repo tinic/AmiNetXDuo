@@ -263,6 +263,11 @@ LONG ami_bpf_open(APTR owner, LONG channel)
     if (channel >= AMI_BPF_MAX_CHANNELS)
         return AMI_BPF_ENXIO;
 
+    /* Before the lock, and on the opener's own Process: ami_bpf_now() is called
+       from ami_bpf_capture() with the lock held, and getting the clock ready
+       there would mean an OpenDevice() under Forbid() on a reader thread. */
+    ami_bpf_time_init();
+
     ami_bpf_lock();
 
     if (channel < 0)

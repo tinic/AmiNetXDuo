@@ -118,6 +118,17 @@ typedef uint64_t                                ULONG64;
 #define TX_DISABLE_STACK_FILLING
 
 
+/* No notify callbacks.  _tx_thread_terminate() calls tx_thread_entry_exit_notify
+   from inside its TX_DISABLE, which here is a Forbid(), and
+   tx_amiga_discard_thread()/tx_amiga_orphan_thread() hold a Forbid() of their
+   own across the terminate with _tx_thread_system_state raised.  A registered
+   callback that blocked would break both at once.  Nothing in NetX Duo or this
+   stack registers one, so the call sites go rather than the hazard staying
+   latent.  docs/FORBID.md.  */
+
+#define TX_DISABLE_NOTIFY_CALLBACKS
+
+
 /* Define various constants for the port.  */
 
 #define TX_INT_DISABLE                          1           /* Forbid()  */

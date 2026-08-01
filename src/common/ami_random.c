@@ -253,6 +253,24 @@ static VOID pool_mix(const void *data, ULONG length, ULONG credit_bits)
 {
     Sha256 ctx;
     UBYTE  tag = DOMAIN_RESEED;
+    UBYTE  digest[AMI_RANDOM_KEY_BYTES];
+    BOOL   have_digest = FALSE;
+
+    /*
+     * The caller's material is folded to 32 bytes out here, not inside the
+     * Forbid(). ami_random_add_entropy() is public and its length is whatever
+     * the caller read out of a seed file: hashing it under Forbid() would hold
+     * the scheduler for a compression per 64 bytes -- around 100 ms for 16 KB
+     * on a 68020. What is left inside is a fixed 97 bytes, two compressions,
+     * the same cost random_refill() already pays.
+     */
+    if (data != NULL && length > 0)
+    {
+        sha256_init(&ctx);
+        sha256_update(&ctx, data, length);
+        sha256_final(&ctx, digest);
+        have_digest = TRUE;
+    }
 
     Forbid();
 
@@ -260,8 +278,8 @@ static VOID pool_mix(const void *data, ULONG length, ULONG credit_bits)
     sha256_update(&ctx, &tag, 1);
     sha256_update(&ctx, pool_key, sizeof(pool_key));
     sha256_update(&ctx, &pool_counter, sizeof(pool_counter));
-    if (data != NULL && length > 0)
-        sha256_update(&ctx, data, length);
+    if (have_digest)
+        sha256_update(&ctx, digest, sizeof(digest));
     sha256_final(&ctx, pool_key);
 
     pool_bits += credit_bits;
@@ -272,6 +290,14 @@ static VOID pool_mix(const void *data, ULONG length, ULONG credit_bits)
     pool_out_used = AMI_RANDOM_KEY_BYTES;
 
     Permit();
+
+    if (have_digest)
+    {
+        ULONG i;
+
+        for (i = 0; i < sizeof(digest); i++)
+            digest[i] = 0;
+    }
 }
 
 /* ============================================================ entropy sources

@@ -224,10 +224,18 @@ static struct UserGroupBase *ug_LibOpen(UG_A6)
 
     ug_context_init(child);
 
-    ObtainSemaphore(&master->ug_Global->lock);
+    /*
+     * Forbid(), not ug_Global->lock. Exec calls this vector with a Forbid()
+     * already held, and that lock is the database lock -- ug_db.c holds it
+     * across file reads and ug_dos() across an OpenLibrary(). Waiting for it
+     * here would break exec's Forbid for the length of a disk access, with the
+     * library list supposedly frozen. The list this guards is short and
+     * ugl_getcredentials() walks it under the same Forbid().
+     */
+    Forbid();
     AddTail((struct List *)&master->ug_Global->children,
             (struct Node *)&child->ug_Node);
-    ReleaseSemaphore(&master->ug_Global->lock);
+    Permit();
 
     master->lib.lib_OpenCnt++;
 
@@ -240,9 +248,10 @@ static BPTR ug_LibClose(UG_A6)
 
     if (master != NULL)
     {
-        ObtainSemaphore(&master->ug_Global->lock);
+        /* Forbid(), for the reason ug_LibOpen() gives. */
+        Forbid();
         Remove((struct Node *)&base->ug_Node);
-        ReleaseSemaphore(&master->ug_Global->lock);
+        Permit();
 
         ami_free((UBYTE *)base - base->lib.lib_NegSize);
     }

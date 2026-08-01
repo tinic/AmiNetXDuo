@@ -206,7 +206,10 @@ struct ug_credentials *ugl_getcredentials(UG_A6,
         return &base->ug_Cred;
     }
 
-    ObtainSemaphore(&g->lock);
+    /* Forbid(), not g->lock: the writers are the library Open/Close vectors,
+       which exec already calls forbidden, and this walk neither blocks nor
+       allocates. */
+    Forbid();
     for (node = g->children.mlh_Head; node->mln_Succ != NULL; node = node->mln_Succ)
     {
         struct UserGroupBase *other = (struct UserGroupBase *)
@@ -223,7 +226,7 @@ struct ug_credentials *ugl_getcredentials(UG_A6,
             break;
         }
     }
-    ReleaseSemaphore(&g->lock);
+    Permit();
 
     if (result == NULL)
         ug_set_err(base, UG_ESRCH);
