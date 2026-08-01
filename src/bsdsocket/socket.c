@@ -449,6 +449,12 @@ static AmiSocket *bsd_socket_alloc(struct AmiSocketBase *base,
     sock->as_McastTtl  = 1;
     sock->as_McastLoop = 1;
     sock->as_McastIf   = -1;
+#ifdef AMINETXDUO_IPV6
+    /* RFC 3493: one hop, same as IPv4. The NX_IP's own hop limit is 255, so
+       this is applied per send rather than inherited. */
+    sock->as_Mcast6Hops = 1;
+    sock->as_Mcast6If   = -1;
+#endif
 #endif
 
     switch (type)
@@ -1400,14 +1406,15 @@ static BOOL bsd_addr_is_loopback(const NXD_ADDRESS *addr)
  * also the reason the membership has to be joined separately: the bind alone
  * selects nothing.
  *
- * IPv4 only. Nothing here joins an IPv6 group, so accepting a bind to one
- * would promise a delivery that cannot happen.
+ * ff00::/8 is the same case: bind(ff02::fb:5353) is how a .local listener is
+ * written, and IPV6_JOIN_GROUP is what makes the delivery happen.
  */
 static BOOL bsd_addr_is_multicast(const NXD_ADDRESS *addr)
 {
 #ifdef AMINETXDUO_IPV6
     if (addr->nxd_ip_version == NX_IP_VERSION_V6)
-        return FALSE;
+        return ((addr->nxd_ip_address.v6[0] & 0xFF000000UL) == 0xFF000000UL)
+                   ? TRUE : FALSE;
 #endif
     return ((addr->nxd_ip_address.v4 & 0xF0000000UL) == 0xE0000000UL)
                ? TRUE : FALSE;
@@ -2072,6 +2079,18 @@ BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
        only way to get one is a v4-mapped bind on a dual-stack socket. */
     bound = (!bsd_addr_is_unspecified(local) &&
              local->nxd_ip_version == dest->nxd_ip_version) ? TRUE : FALSE;
+
+#ifdef AMINETXDUO_MULTICAST
+    /*
+     * A group address is nobody's source. Binding one is how a receiver is
+     * written -- bsd_bind_kind() accepts it for that reason -- and it says
+     * nothing about where sends leave from, so the choice goes back to
+     * IP_MULTICAST_IF or the route. Without this the loops below look for an
+     * interface carrying 239.255.255.250, find none, and refuse the send.
+     */
+    if (bound && bsd_addr_is_multicast(local))
+        bound = FALSE;
+#endif
 
 #ifdef AMINETXDUO_IPV6
     if (dest->nxd_ip_version == NX_IP_VERSION_V6)

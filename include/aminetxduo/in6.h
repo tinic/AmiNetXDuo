@@ -44,19 +44,23 @@
 #ifndef AMINETXDUO_IN6_H
 #define AMINETXDUO_IN6_H
 
+/*
+ * Self-sufficient, as aminetxduo/cmsg.h is.  It did not used to be: everything
+ * here was a macro, the IN6_IS_ADDR_* ones took a `const struct in6_addr *`
+ * the includer already had, and leaving the include order alone was free.
+ * `struct ipv6_mreq` below has a `struct in6_addr` member, so there is no
+ * longer a version of this header that can leave it alone.  The NDK's
+ * <sys/socket.h>, which <netinet/in.h> pulls in, uses size_t and ssize_t
+ * without declaring them, hence the two before it.
+ */
 #include <exec/types.h>
+#include <stddef.h>
+#include <sys/types.h>
+#include <netinet/in.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/*
- * IN6_IS_ADDR_* below take a `const struct in6_addr *`, and struct
- * sockaddr_in6 comes from <netinet/in.h>.  Not included from here: the NDK's
- * <sys/socket.h>, which <netinet/in.h> pulls in, uses size_t and ssize_t
- * without declaring them, so it has to follow <stddef.h> and <sys/types.h>
- * and a header that forced that order would be deciding it for its includer.
- */
 
 /* --------------------------------------------------------------- protocol */
 
@@ -120,10 +124,82 @@ extern "C" {
  *
  * IPv4 multicast is not here either, and does not need to be: IP_MULTICAST_IF,
  * IP_MULTICAST_TTL, IP_MULTICAST_LOOP, IP_ADD_MEMBERSHIP, IP_DROP_MEMBERSHIP
- * and struct ip_mreq are all in the NDK's <netinet/in.h>.  IPv6 multicast
- * (IPV6_JOIN_GROUP, IPV6_LEAVE_GROUP, struct ipv6_mreq) is absent from it and
- * would belong here.
+ * and struct ip_mreq are all in the NDK's <netinet/in.h>.  The IPv6 set is
+ * absent from it, so it is below.
  */
+
+/* -------------------------------------------------------------- multicast
+ *
+ * RFC 3493 section 5.2.  BSD 9/10/11/12/13, Linux 17/18/19/20/21; the BSD
+ * five are published and both are accepted, as above.
+ *
+ * Taking the BSD numbers costs the Linux names that sit on them --
+ * IPV6_NEXTHOP 9, IPV6_AUTHHDR 10 and IPV6_FLOWINFO 11, none of which this
+ * library offers; 12 and 13 are unassigned there.  Same trade
+ * IPV6_UNICAST_HOPS made against IPV6_2292DSTOPTS.
+ *
+ * WHAT A JOIN DOES AND DOES NOT DO.  There is no MLD in this stack: joining a
+ * group registers the 33:33:xx:xx:xx:xx address with the interface and makes
+ * the stack accept datagrams sent to it, and sends no Multicast Listener
+ * Report.  On a plain switch, and for the link-local groups that carry mDNS
+ * (ff02::fb), LLMNR (ff02::1:3) and SSDP (ff02::c), that is the whole
+ * transaction and it works.  A switch running MLD snooping with an active
+ * querier will prune the group, and no router will forward a wider-scope
+ * group here.  Link-local scope is what to rely on.
+ */
+
+/* BSD 9, Linux 17.  Both accepted.  Takes an interface index -- the
+   if_nametoindex() kind -- and 0 gives the choice back to the route. */
+#ifndef IPV6_MULTICAST_IF
+#define IPV6_MULTICAST_IF        9
+#endif
+
+/* BSD 10, Linux 18.  Both accepted.  0..255, or -1 for the default. */
+#ifndef IPV6_MULTICAST_HOPS
+#define IPV6_MULTICAST_HOPS     10
+#endif
+
+/*
+ * BSD 11, Linux 19.  Both accepted, and it always reads back 0: NetX Duo
+ * loops back IPv4 multicast and has no IPv6 equivalent, so a sender never
+ * hears its own group traffic here.  Setting it succeeds either way rather
+ * than failing a request for the behaviour already in force.
+ */
+#ifndef IPV6_MULTICAST_LOOP
+#define IPV6_MULTICAST_LOOP     11
+#endif
+
+/* BSD 12/13, Linux 20/21.  Both accepted.  Take a struct ipv6_mreq. */
+#ifndef IPV6_JOIN_GROUP
+#define IPV6_JOIN_GROUP         12
+#endif
+#ifndef IPV6_LEAVE_GROUP
+#define IPV6_LEAVE_GROUP        13
+#endif
+
+/* Linux's older spelling of the same two options. */
+#ifndef IPV6_ADD_MEMBERSHIP
+#define IPV6_ADD_MEMBERSHIP     IPV6_JOIN_GROUP
+#endif
+#ifndef IPV6_DROP_MEMBERSHIP
+#define IPV6_DROP_MEMBERSHIP    IPV6_LEAVE_GROUP
+#endif
+
+/*
+ * 20 bytes.  ipv6mr_interface is an interface index and not an address, which
+ * is the one structural difference from struct ip_mreq; 0 means "the
+ * interface the route would pick", as INADDR_ANY does there.
+ */
+#ifndef AMINETXDUO_HAVE_IPV6_MREQ
+#define AMINETXDUO_HAVE_IPV6_MREQ
+
+struct ipv6_mreq
+{
+    struct in6_addr ipv6mr_multiaddr;
+    ULONG           ipv6mr_interface;
+};
+
+#endif
 
 /* -------------------------------------------------------------- addresses
  *

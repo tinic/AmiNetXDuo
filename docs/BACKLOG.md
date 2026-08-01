@@ -18,6 +18,7 @@ was wrong for a day.
 ## Open — no decision taken
 ## Open — no decision taken
 ## Open — no decision taken
+## Open — no decision taken
 
 - **TLS parsers that need crypto have no fuzz driver.** `fuzz_tls_record` and
   `fuzz_tls_x509` cover the record header, the handshake header, ServerHello
@@ -32,14 +33,6 @@ was wrong for a day.
   off), nor `tls_store.c`'s issuer-name walk; both live in files that include
   `proto/dos.h` and do not build on a host. The header comment in
   `tests/fuzz/CMakeLists.txt` is the current list.
-- **IPv6 group membership (`IPV6_JOIN_GROUP`) is absent.** The IPv4 side is
-  done (below); this is not, and is a separate decision because the numbers are
-  worse. `NX_ENABLE_IPV6_MULTICAST` grows every `NX_IP` by 172 bytes whether or
-  not anything joins, where `nx_igmp_enable()` grows it by nothing, and there is
-  no MLD anywhere in the vendored tree -- no `nx_mld_*.c` exists, so a join
-  reaches the driver and no report is ever sent, and a querying switch stops
-  forwarding the group. The reasoning is beside the define in
-  `port/netxduo-amiga/inc/nx_user.h`.
 - **RFC 3542: the subset worth having is built, send halves included.**
   Assessed and implemented 2026-07-31, finished the same day. No new LVOs:
   it rides `sendmsg`/`recvmsg`, and `struct msghdr` was already the 28-byte

@@ -52,11 +52,11 @@
 #define AMINETXDUO_CMSG_H
 
 /*
- * Self-sufficient, unlike aminetxduo/in6.h next door, and for a reason it does
- * not have: everything here is built out of `struct cmsghdr`, `struct in6_addr`
- * and `struct in_addr`, so there is no version of this header that leaves the
- * include order to its includer.  <sys/socket.h> uses size_t and ssize_t
- * without declaring them, hence the two before it.
+ * Self-sufficient, as aminetxduo/in6.h next door now is: everything here is
+ * built out of `struct cmsghdr`, `struct in6_addr` and `struct in_addr`, so
+ * there is no version of this header that leaves the include order to its
+ * includer.  <sys/socket.h> uses size_t and ssize_t without declaring them,
+ * hence the two before it.
  */
 #include <exec/types.h>
 #include <stddef.h>

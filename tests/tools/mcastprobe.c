@@ -1,16 +1,25 @@
 /*
- * mcastprobe -- exercises RFC 1112 membership the way an SSDP client does.
+ * mcastprobe -- exercises group membership the way an SSDP client does.
  *
- * The order matters and is the point: an SSDP receiver binds the group, joins
- * it, and only then reads.  Each step is checked and reported, so a failure
- * says which one broke rather than "nothing arrived".
+ * Both families, one pass each.  The order matters and is the point: an SSDP
+ * receiver binds the group, joins it, and only then reads.  Each step is
+ * checked and reported, so a failure says which one broke rather than
+ * "nothing arrived".
  *
- *   1. IP_MULTICAST_TTL / _LOOP / _IF set and read back
- *   2. bind(239.255.255.250:1900) -- refused by every build before 0.15.2
- *   3. IP_ADD_MEMBERSHIP, then again (must be EADDRINUSE)
+ *   1. multicast TTL / hops, LOOP and IF set and read back
+ *   2. bind to the group -- refused by every build before 0.15.2
+ *   3. join, then again (must be EADDRINUSE)
  *   4. one M-SEARCH to the group
  *   5. read for a few seconds, printing whatever answers
- *   6. IP_DROP_MEMBERSHIP, then again (must be EADDRNOTAVAIL)
+ *   6. leave, then again (must be EADDRNOTAVAIL)
+ *
+ * IPv4 uses 239.255.255.250:1900, IPv6 the link-local ff02::c:1900.  The v6
+ * pass is skipped, not failed, on a build without IPv6: socket(AF_INET6)
+ * fails and there is nothing to test.
+ *
+ * IPV6_MULTICAST_LOOP reads back 0 whatever is set, on purpose -- this stack
+ * has no IPv6 multicast loopback, and the option says so rather than storing
+ * a value it will not honour.
  *
  * Step 5 needs something on the LAN that answers SSDP -- a router, a printer,
  * a TV.  Steps 1-4 and 6 do not, and are the ones that test this stack; the
@@ -19,6 +28,10 @@
  *   tests/trace/a2065pcap.py build/fsuae-base-<tag>/Cache/Logs/fs-uae.log.txt \
  *       -o mcast.pcap
  *   tcpdump -nr mcast.pcap -v      # IGMP v2 report for 239.255.255.250
+ *
+ * There is no MLD report to look for in that dump.  The v6 join reaches the
+ * driver as S2_ADDMULTICASTADDRESS and puts nothing on the wire; the stack
+ * has no MLD.
  *
  * A one-off probe rather than a command or a test, so it has no CMake entry.
  * Compile it by hand and stage it like any other executable:
@@ -49,12 +62,33 @@ typedef struct ProbeAddr
     UBYTE   sin_zero[8];
 } ProbeAddr;
 
+/*
+ * struct sockaddr_in6 on this NDK: 28 bytes, family at offset 0 and NO length
+ * byte.  See aminetxduo/in6.h -- it is not a sockaddr_in with a wider address.
+ */
+typedef struct ProbeAddr6
+{
+    UBYTE   sin6_family;
+    UBYTE   sin6_pad;
+    UWORD   sin6_port;
+    ULONG   sin6_flowinfo;
+    UBYTE   sin6_addr[16];
+    ULONG   sin6_scope_id;
+} ProbeAddr6;
+
 /* struct ip_mreq: two in_addr, group first. */
 typedef struct ProbeMreq
 {
     ULONG   imr_multiaddr;
     ULONG   imr_interface;
 } ProbeMreq;
+
+/* struct ipv6_mreq: the group, then an interface INDEX rather than address. */
+typedef struct ProbeMreq6
+{
+    UBYTE   ipv6mr_multiaddr[16];
+    ULONG   ipv6mr_interface;
+} ProbeMreq6;
 
 #define P_AF_INET           2
 #define P_SOCK_DGRAM        2
@@ -65,12 +99,27 @@ typedef struct ProbeMreq
 #define P_IP_ADD_MEMBERSHIP 12
 #define P_IP_DROP_MEMBERSHIP 13
 
+#define P_AF_INET6          23
+#define P_IPPROTO_IPV6      41
+#define P_IPV6_MULTICAST_IF   9
+#define P_IPV6_MULTICAST_HOPS 10
+#define P_IPV6_MULTICAST_LOOP 11
+#define P_IPV6_JOIN_GROUP     12
+#define P_IPV6_LEAVE_GROUP    13
+
 #define P_EADDRINUSE        48
 #define P_EADDRNOTAVAIL     49
 
 /* 239.255.255.250:1900 -- SSDP (RFC-less, but universally implemented). */
 #define P_SSDP_GROUP    ((239UL << 24) | (255UL << 16) | (255UL << 8) | 250UL)
 #define P_SSDP_PORT     1900
+
+/* ff02::c -- the link-local SSDP group.  Link-local scope is the one that
+   works without MLD, which is why the probe uses it and not ff05::c. */
+static const UBYTE p_ssdp6_group[16] =
+{
+    0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x0c
+};
 
 /* ------------------------------------------------------------- vectors ---- */
 
@@ -90,12 +139,12 @@ static LONG p_socket(struct Library *base, LONG domain, LONG type, LONG proto)
     return res;
 }
 
-static LONG p_bind(struct Library *base, LONG s, const ProbeAddr *name)
+static LONG p_bind(struct Library *base, LONG s, const void *name, LONG namelen)
 {
     register struct Library *a6  __asm("a6") = base;
     register LONG            d0  __asm("d0") = s;
     register CONST_APTR      a0  __asm("a0") = (CONST_APTR)name;
-    register LONG            d1  __asm("d1") = (LONG)sizeof(*name);
+    register LONG            d1  __asm("d1") = namelen;
     register LONG            res __asm("d0");
     register LONG _clob_d1 __asm("d1");
     register LONG _clob_a0 __asm("a0");
@@ -108,7 +157,7 @@ static LONG p_bind(struct Library *base, LONG s, const ProbeAddr *name)
 }
 
 static LONG p_sendto(struct Library *base, LONG s, const void *buf, LONG len,
-                     const ProbeAddr *to)
+                     const void *to, LONG tolen)
 {
     register struct Library *a6  __asm("a6") = base;
     register LONG            d0  __asm("d0") = s;
@@ -116,7 +165,7 @@ static LONG p_sendto(struct Library *base, LONG s, const void *buf, LONG len,
     register LONG            d1  __asm("d1") = len;
     register LONG            d2  __asm("d2") = 0;
     register CONST_APTR      a1  __asm("a1") = (CONST_APTR)to;
-    register LONG            d3  __asm("d3") = (LONG)sizeof(*to);
+    register LONG            d3  __asm("d3") = tolen;
     register LONG            res __asm("d0");
     register LONG _clob_d1 __asm("d1");
     register LONG _clob_a0 __asm("a0");
@@ -131,7 +180,7 @@ static LONG p_sendto(struct Library *base, LONG s, const void *buf, LONG len,
 }
 
 static LONG p_recvfrom(struct Library *base, LONG s, void *buf, LONG len,
-                       ProbeAddr *from, LONG *fromlen)
+                       void *from, LONG *fromlen)
 {
     register struct Library *a6  __asm("a6") = base;
     register LONG            d0  __asm("d0") = s;
@@ -263,6 +312,14 @@ static const char p_msearch[] =
     "ST: ssdp:all\r\n"
     "\r\n";
 
+static const char p_msearch6[] =
+    "M-SEARCH * HTTP/1.1\r\n"
+    "HOST: [ff02::c]:1900\r\n"
+    "MAN: \"ssdp:discover\"\r\n"
+    "MX: 2\r\n"
+    "ST: ssdp:all\r\n"
+    "\r\n";
+
 static UBYTE p_rxbuf[1500];
 
 static VOID p_step(const char *what, LONG rc, struct Library *sb, LONG want)
@@ -282,9 +339,8 @@ static VOID p_step(const char *what, LONG rc, struct Library *sb, LONG want)
            rc, err, want);
 }
 
-int main(void)
+static VOID p_probe_v4(struct Library *sb)
 {
-    struct Library *sb;
     ProbeAddr       group;
     ProbeMreq       mreq;
     LONG            s;
@@ -294,19 +350,13 @@ int main(void)
     ULONG           i;
     LONG            rounds;
 
-    sb = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
-    if (sb == NULL)
-    {
-        Printf((CONST_STRPTR)"no bsdsocket.library\n");
-        return RETURN_FAIL;
-    }
+    Printf((CONST_STRPTR)"IPv4 -- 239.255.255.250:1900\n");
 
     s = p_socket(sb, P_AF_INET, P_SOCK_DGRAM, 0);
     if (s < 0)
     {
-        Printf((CONST_STRPTR)"socket failed, errno %ld\n", p_errno(sb));
-        CloseLibrary(sb);
-        return RETURN_FAIL;
+        Printf((CONST_STRPTR)"  socket failed, errno %ld\n", p_errno(sb));
+        return;
     }
 
     Printf((CONST_STRPTR)"options:\n");
@@ -344,7 +394,8 @@ int main(void)
     group.sin_port   = P_SSDP_PORT;
     group.sin_addr   = P_SSDP_GROUP;
 
-    p_step("bind(239.255.255.250:1900)", p_bind(sb, s, &group), sb, 0);
+    p_step("bind(239.255.255.250:1900)",
+           p_bind(sb, s, &group, (LONG)sizeof(group)), sb, 0);
 
     mreq.imr_multiaddr = P_SSDP_GROUP;
     mreq.imr_interface = 0UL;
@@ -360,8 +411,9 @@ int main(void)
     Printf((CONST_STRPTR)"traffic:\n");
 
     p_step("sendto(M-SEARCH)",
-           (p_sendto(sb, s, p_msearch, (LONG)(sizeof(p_msearch) - 1), &group)
-                == (LONG)(sizeof(p_msearch) - 1)) ? 0 : -1, sb, 0);
+           (p_sendto(sb, s, p_msearch, (LONG)(sizeof(p_msearch) - 1), &group,
+                     (LONG)sizeof(group)) == (LONG)(sizeof(p_msearch) - 1))
+               ? 0 : -1, sb, 0);
 
     /* Four one-second passes, so a slow responder still lands inside. */
     for (rounds = 0; rounds < 4; rounds++)
@@ -415,6 +467,159 @@ int main(void)
                         (LONG)sizeof(mreq)), sb, P_EADDRNOTAVAIL);
 
     (VOID)p_close(sb, s);
+}
+
+/* --------------------------------------------------------------- IPv6 ----- */
+
+static VOID p_probe_v6(struct Library *sb)
+{
+    ProbeAddr6      group;
+    ProbeMreq6      mreq;
+    LONG            s;
+    LONG            value;
+    LONG            back;
+    LONG            backlen;
+    ULONG           i;
+    LONG            rounds;
+
+    Printf((CONST_STRPTR)"\nIPv6 -- ff02::c:1900\n");
+
+    s = p_socket(sb, P_AF_INET6, P_SOCK_DGRAM, 0);
+    if (s < 0)
+    {
+        Printf((CONST_STRPTR)"  no AF_INET6 in this build (errno %ld), "
+                             "skipped\n", p_errno(sb));
+        return;
+    }
+
+    Printf((CONST_STRPTR)"options:\n");
+
+    value = 2;
+    p_step("setsockopt(IPV6_MULTICAST_HOPS, 2)",
+           p_setsockopt(sb, s, P_IPPROTO_IPV6, P_IPV6_MULTICAST_HOPS, &value,
+                        (LONG)sizeof(value)), sb, 0);
+
+    back    = -1;
+    backlen = (LONG)sizeof(back);
+    p_step("getsockopt(IPV6_MULTICAST_HOPS)",
+           p_getsockopt(sb, s, P_IPPROTO_IPV6, P_IPV6_MULTICAST_HOPS, &back,
+                        &backlen), sb, 0);
+    Printf((CONST_STRPTR)"      reads back %ld, wanted 2\n", back);
+
+    value = 1;
+    p_step("setsockopt(IPV6_MULTICAST_LOOP, 1)",
+           p_setsockopt(sb, s, P_IPPROTO_IPV6, P_IPV6_MULTICAST_LOOP, &value,
+                        (LONG)sizeof(value)), sb, 0);
+
+    back    = -1;
+    backlen = (LONG)sizeof(back);
+    p_step("getsockopt(IPV6_MULTICAST_LOOP)",
+           p_getsockopt(sb, s, P_IPPROTO_IPV6, P_IPV6_MULTICAST_LOOP, &back,
+                        &backlen), sb, 0);
+    Printf((CONST_STRPTR)"      reads back %ld, wanted 0 -- no IPv6 "
+                         "multicast loopback in this stack\n", back);
+
+    /* 0: the route chooses, which is what a portable client sends. */
+    value = 0;
+    p_step("setsockopt(IPV6_MULTICAST_IF, 0)",
+           p_setsockopt(sb, s, P_IPPROTO_IPV6, P_IPV6_MULTICAST_IF, &value,
+                        (LONG)sizeof(value)), sb, 0);
+
+    Printf((CONST_STRPTR)"membership:\n");
+
+    group.sin6_family   = P_AF_INET6;
+    group.sin6_pad      = 0;
+    group.sin6_port     = P_SSDP_PORT;
+    group.sin6_flowinfo = 0UL;
+    group.sin6_scope_id = 0UL;
+    for (i = 0; i < 16UL; i++)
+        group.sin6_addr[i] = p_ssdp6_group[i];
+
+    p_step("bind(ff02::c:1900)",
+           p_bind(sb, s, &group, (LONG)sizeof(group)), sb, 0);
+
+    for (i = 0; i < 16UL; i++)
+        mreq.ipv6mr_multiaddr[i] = p_ssdp6_group[i];
+    mreq.ipv6mr_interface = 0UL;
+
+    p_step("IPV6_JOIN_GROUP",
+           p_setsockopt(sb, s, P_IPPROTO_IPV6, P_IPV6_JOIN_GROUP, &mreq,
+                        (LONG)sizeof(mreq)), sb, 0);
+
+    p_step("IPV6_JOIN_GROUP again",
+           p_setsockopt(sb, s, P_IPPROTO_IPV6, P_IPV6_JOIN_GROUP, &mreq,
+                        (LONG)sizeof(mreq)), sb, P_EADDRINUSE);
+
+    Printf((CONST_STRPTR)"traffic:\n");
+
+    p_step("sendto(M-SEARCH)",
+           (p_sendto(sb, s, p_msearch6, (LONG)(sizeof(p_msearch6) - 1), &group,
+                     (LONG)sizeof(group)) == (LONG)(sizeof(p_msearch6) - 1))
+               ? 0 : -1, sb, 0);
+
+    for (rounds = 0; rounds < 4; rounds++)
+    {
+        struct timeval tv;
+        ULONG          readfds = (1UL << s);
+        LONG           ready;
+
+        tv.tv_secs  = 1;
+        tv.tv_micro = 0;
+
+        ready = p_waitselect(sb, s + 1, &readfds, &tv);
+        if (ready <= 0)
+            continue;
+
+        {
+            ProbeAddr6 from;
+            LONG       fromlen = (LONG)sizeof(from);
+            LONG       got;
+
+            got = p_recvfrom(sb, s, p_rxbuf, (LONG)sizeof(p_rxbuf) - 1,
+                             &from, &fromlen);
+            if (got < 0)
+            {
+                Printf((CONST_STRPTR)"  recvfrom FAILED, errno %ld\n",
+                       p_errno(sb));
+                break;
+            }
+
+            Printf((CONST_STRPTR)"  %ld bytes from %lx:%lx:...:%lx port %ld\n",
+                   got,
+                   (LONG)(((ULONG)from.sin6_addr[0] << 8) | from.sin6_addr[1]),
+                   (LONG)(((ULONG)from.sin6_addr[2] << 8) | from.sin6_addr[3]),
+                   (LONG)(((ULONG)from.sin6_addr[14] << 8) | from.sin6_addr[15]),
+                   (LONG)from.sin6_port);
+        }
+    }
+
+    Printf((CONST_STRPTR)"leaving:\n");
+
+    p_step("IPV6_LEAVE_GROUP",
+           p_setsockopt(sb, s, P_IPPROTO_IPV6, P_IPV6_LEAVE_GROUP, &mreq,
+                        (LONG)sizeof(mreq)), sb, 0);
+
+    p_step("IPV6_LEAVE_GROUP again",
+           p_setsockopt(sb, s, P_IPPROTO_IPV6, P_IPV6_LEAVE_GROUP, &mreq,
+                        (LONG)sizeof(mreq)), sb, P_EADDRNOTAVAIL);
+
+    (VOID)p_close(sb, s);
+}
+
+int main(void)
+{
+    struct Library *sb;
+
+    sb = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    if (sb == NULL)
+    {
+        Printf((CONST_STRPTR)"no bsdsocket.library\n");
+        return RETURN_FAIL;
+    }
+
+    p_probe_v4(sb);
+    p_probe_v6(sb);
+
     CloseLibrary(sb);
 
     return RETURN_OK;

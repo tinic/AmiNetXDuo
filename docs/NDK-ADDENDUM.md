@@ -241,11 +241,15 @@ writing a second `struct cmsghdr`. What is genuinely missing is `CMSG_LEN`,
 `CMSG_NXTHDR` expands to and which nothing in the NDK defines -- so
 `CMSG_NXTHDR` as shipped does not compile.
 
-**Present, so multicast needs no header work:** `IP_MULTICAST_IF`,
+**Present, so IPv4 multicast needs no header work:** `IP_MULTICAST_IF`,
 `IP_MULTICAST_TTL`, `IP_MULTICAST_LOOP`, `IP_ADD_MEMBERSHIP`,
 `IP_DROP_MEMBERSHIP` and `struct ip_mreq` are in `<netinet/in.h>`. The IPv6
-equivalents (`IPV6_JOIN_GROUP`, `IPV6_LEAVE_GROUP`, `struct ipv6_mreq`) are
-absent and would belong in `in6.h`.
+equivalents are absent, so `in6.h` publishes `IPV6_JOIN_GROUP`,
+`IPV6_LEAVE_GROUP`, `IPV6_MULTICAST_IF`, `IPV6_MULTICAST_HOPS`,
+`IPV6_MULTICAST_LOOP` and `struct ipv6_mreq` -- BSD numbers published, Linux
+numbers accepted, as the other three options are. A join sends no MLD report,
+because there is none in the stack to send; link-local scope is what to rely
+on.
 
 **Present, so `bpf.h` has nothing to publish:** `BIOC*`, `struct bpf_hdr`,
 `struct bpf_program`, `struct bpf_stat`, `struct bpf_version`, `DLT_*`, the
