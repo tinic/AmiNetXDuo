@@ -117,8 +117,8 @@ Two statics were found to be wrong on precisely this point, `tcp_started` and
 | `netmonitor.c:79` `bsd_mon_count` | singleton | `Forbid()` |
 | `addralloc.c:508` `bsd_aam_jobs[]` | singleton | `Forbid()` on claim and on release; one row per interface |
 | `addralloc.c:509` `bsd_aam_workers` | singleton | `Forbid()` |
-| `addralloc.c:514` `bsd_aam_boot` | **unguarded -- FIXED** | see below |
-| `addralloc.c:515` `bsd_aam_boot_parent` | **misplaced -- FIXED** | moved into `BsdAamJob` |
+| `addralloc.c` `bsd_aam_boot` | **removed** | replaced by `PutMsg()`, see below |
+| `addralloc.c` `bsd_aam_boot_parent` | **removed** | moved into `BsdAamJob`, then with it |
 | `netdb.c:47` `bsd_no_aliases` | constant | never written; `char *[]` because the BSD ABI says `char **` |
 | `oob.c:122` `bsd_oob_mark` | singleton | the baton, with a documented degradation: a second OOB send that finds it armed sends its byte unmarked rather than racing |
 | `raw.c:110` `bsd_raw_list` | singleton | `ip->nx_ip_protection`, a recursive ThreadX mutex the IP thread already holds for its whole event loop. **One leak path fixed** |
@@ -195,11 +195,17 @@ interface -- could enter that window, take the `Forbid()`, and overwrite both.
 The first launcher then waited for a `SIGF_SINGLE` its worker had sent to the
 second launcher's task.
 
-The parent task moves into `BsdAamJob`, where it is per-request and cannot be
-overwritten by anyone. `bsd_aam_boot` is now claimed under the same `Forbid()`
-as the interface row, and a launch that finds it taken is answered `AAMR_Busy`
--- an error the API already defines. The window it can be refused in is bounded
-by the worker's first instructions, which do nothing that can block.
+**Neither variable exists any more.** The parent task moved into `BsdAamJob`,
+and then the slot itself was removed rather than guarded: the job is handed to
+its worker by `PutMsg()` to that Process's own `pr_MsgPort`, with the message
+and the job as one block (`addralloc.c:865`). There is no shared object left
+for a second launcher to overwrite, which is a stronger answer than making one
+safe.
+
+What remains, and is what the test below exercises, is the per-interface claim:
+`bsd_aam_jobs[index]` is taken under `Forbid()` alongside the interface row, and
+a launch that finds it taken is answered `AAMR_Busy` -- an error the API already
+defines.
 
 The per-interface half of that is tested. `AamProbe` forks a Process with a
 bsdsocket.library base of its own and has it ask for the same interface while the
