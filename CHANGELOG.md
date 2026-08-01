@@ -4,6 +4,12 @@ User-visible changes, newest first. Internal work is in the git log.
 
 ## Unreleased
 
+- Two programs joining a multicast group at the same moment no longer take the same tracking row. The one that lost never left its group when it closed, and the one that won dropped a group it did not join
+- `TCP:` can be started again after `Status TCP: DIE`. Once it had been taken down, every program that opened the library afterwards got one with no `TCP:` device until the library was unloaded
+- Two programs asking for the time at the same moment no longer collide over one timer request, which could take the clock back to zero and make anything measuring elapsed time see about 49 days
+- Two programs configuring different interfaces at the same moment no longer swap each other's requests; the second is told the allocator is busy
+- Closing a TLS connection while another program is using one no longer risks reaching through the closed one
+- Closing a raw socket after the network has already gone down no longer leaves raw sockets unable to receive for the rest of the session
 - Fixed three ways a hostile or broken server could read past the end of a buffer during a TLS handshake, and two more in the code underneath it. A certificate two bytes long, a 38-byte ServerHello and a zero-length CertificateRequest each walked off the end of the record buffer; a signature length was checked against the wrong bound; and every RSA modulus tripped a signed shift. On a machine with no memory protection a read past a buffer is not a crash, it is whatever happened to be next
 - `ping`, `ShowNetStatus` and `AddNetRoute` give back the memory they read `DEVS:Internet` into. Each run lost about 12 KB until the next reboot, which on a 1 MB machine is roughly seventy runs
 - `connect()` from a socket bound to one of the machine's addresses now leaves from that address instead of being refused
