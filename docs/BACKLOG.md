@@ -17,6 +17,7 @@ was wrong for a day.
 
 ## Open — no decision taken
 ## Open — no decision taken
+## Open — no decision taken
 
 - **TLS parsers that need crypto have no fuzz driver.** `fuzz_tls_record` and
   `fuzz_tls_x509` cover the record header, the handshake header, ServerHello
@@ -31,27 +32,6 @@ was wrong for a day.
   off), nor `tls_store.c`'s issuer-name walk; both live in files that include
   `proto/dos.h` and do not build on a host. The header comment in
   `tests/fuzz/CMakeLists.txt` is the current list.
-- **TCP cannot be made to send from a bound address, only checked.** The rest
-  of `bind()` source selection is done: `bsd_source_select()` (socket.c) maps a
-  bound address or an RFC 4007 zone to the index `nxd_udp_socket_source_send()`
-  and `nxd_ip_raw_packet_source_send()` take, so UDP and raw leave from the
-  address that was asked for. TCP has no such call --
-  `_nxd_tcp_client_socket_connect()` runs its own route lookup with no hint and
-  sends the SYN before it returns -- so `connect()` runs the same two lookups
-  first and refuses (`EADDRNOTAVAIL`) when the answer is not the bound source.
-  What that costs is the case BSD allows and we do not: source on one
-  interface, route out of the other. Closing it means a
-  `nxd_tcp_socket_source_send()` in the NetX fork, which is a submodule change
-  and a fourth upstream PR.
-
-  What a one-interface guest can show is shown, by `tests/tools/run-srcsel.sh`
-  (13 checks, green under Amiberry on SLIRP): the bound address really is the
-  source the receiver sees, on the interface and on loopback, and both
-  refusals fire. What it cannot show is the disagreement this is about --
-  source on one interface, route out of the other -- and one arm of the TCP
-  check goes with it: `EADDRNOTAVAIL`, for a bound address that *can* reach the
-  destination while the stack would still leave by somewhere else, needs two
-  interfaces on one subnet to produce. Reasoned about, not measured.
 - **IPv6 group membership (`IPV6_JOIN_GROUP`) is absent.** The IPv4 side is
   done (below); this is not, and is a separate decision because the numbers are
   worse. `NX_ENABLE_IPV6_MULTICAST` grows every `NX_IP` by 172 bytes whether or

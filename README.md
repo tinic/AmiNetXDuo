@@ -192,11 +192,9 @@ were settled by reading AmiTCP's `fd/usergroup_lib.fd` against Roadshow's
 
 MIT. ThreadX and NetX Duo are MIT-licensed as well (© Microsoft and the Eclipse
 ThreadX contributors). ThreadX is an unmodified submodule. **NetX Duo is not** —
-it is a fork carrying seven patches, each on its own branch off upstream
-`473d1928` and each written as a standalone change to submit upstream:
-`amiga-mdns-big-endian`, `amiga-tcp-isn-entropy`, `amiga-tcp-accept-race`,
-`amiga-tcp-retry-limit`, `amiga-ipv6-raw-hop-limit`,
-`amiga-ipv6-raw-traffic-class` and `amiga-ipv4-broadcast-loopback`. What each
-one fixes is in the engineering record. The one further exception is the CA root
+it is a fork carrying one patch per defect, each on its own branch off upstream
+`473d1928` and each written as a standalone change to submit upstream. The
+branches are at `github.com/tinic/netxduo` and what each one fixes is in the
+engineering record. The one further exception is the CA root
 set in `DEVS:Internet/certificates`, which is
 Mozilla's, under MPL 2.0 — file-scoped, and affecting nothing else here.
