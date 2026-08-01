@@ -46,7 +46,7 @@ amiga_client_prepare || { echo "no cross toolchain" >&2; exit 2; }
 OUT="$ROOT/build/argvexit"
 mkdir -p "$(dirname "$OUT")"
 # shellcheck disable=SC2086
-$AMIGA_CLIENT_CC $AMIGA_CLIENT_CFLAGS \
+"$AMIGA_GCC" $AMIGA_CLIENT_CFLAGS -I"$AMIGA_NDK" \
     "$ROOT/tests/clients/argvexit.c" \
     "$ROOT/clients/compat/amiga_argv.c" \
     -o "$OUT" $AMIGA_CLIENT_LDFLAGS
