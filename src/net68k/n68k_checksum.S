@@ -45,11 +45,12 @@
         .even
         .globl  _n68k_sum_longwords
 
-| a0 = p, d1 = count, d0 = accumulator, d2 = zero, d3 = scratch
+| a0 = p, d1 = count, d0 = accumulator, d2 = zero, d3 = scratch,
+| d4-d7/a2-a5 = the eight longwords movem.l brings in at a time.
 _n68k_sum_longwords:
-        movem.l d2-d3,sp@-
-        movea.l sp@(12),a0
-        move.l  sp@(16),d1
+        movem.l d2-d7/a2-a5,sp@-        | ten registers, 40 bytes
+        movea.l sp@(44),a0
+        move.l  sp@(48),d1
 
         moveq   #0,d0
         moveq   #0,d2
@@ -59,22 +60,30 @@ _n68k_sum_longwords:
         lsr.l   #3,d1                   | groups of eight
         beq     .Ltail
 
+| The loads come through movem.l rather than the add's own addressing mode.
+| add.l a0@+,d0 pays a full operand fetch per longword; movem.l fetches eight
+| for about half that each, which is why the copy next door uses it and is why
+| a read-and-write copy measured CHEAPER per byte than this read-only sum did
+| (183.65 vs 201.39 ns/B, tests/perf on a 68020).  The adds then run
+| register-to-register.  add.l An,Dn is a valid long add and sets X, so a3-a5
+| carry data here like any other register.
 .Loop8:
-        add.l   a0@+,d0
+        movem.l a0@+,d4-d7/a2-a5
+        add.l   d4,d0
         addx.l  d2,d0
-        add.l   a0@+,d0
+        add.l   d5,d0
         addx.l  d2,d0
-        add.l   a0@+,d0
+        add.l   d6,d0
         addx.l  d2,d0
-        add.l   a0@+,d0
+        add.l   d7,d0
         addx.l  d2,d0
-        add.l   a0@+,d0
+        add.l   a2,d0
         addx.l  d2,d0
-        add.l   a0@+,d0
+        add.l   a3,d0
         addx.l  d2,d0
-        add.l   a0@+,d0
+        add.l   a4,d0
         addx.l  d2,d0
-        add.l   a0@+,d0
+        add.l   a5,d0
         addx.l  d2,d0
         subq.l  #1,d1
         bne     .Loop8
@@ -90,7 +99,7 @@ _n68k_sum_longwords:
         bne     .Loop1
 
 .Ldone:
-        movem.l sp@+,d2-d3
+        movem.l sp@+,d2-d7/a2-a5
         rts
 
 #endif /* AMINETXDUO_NET68K_ASM */
