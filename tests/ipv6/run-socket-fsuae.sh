@@ -21,14 +21,23 @@ MODEL=A1200
 TIMEOUT=240
 CPU=""
 BUILD="${AMINETXDUO_BUILD:-build/v6}"
+# FS-UAE needs an X server; on a headless Linux box it dies in GLAD before the
+# guest boots, so -A picks Amiberry, which runs genuinely headless. Same block
+# run-fsuae.sh beside this one carries.
+RUNNER="${AMINETXDUO_RUNNER:-fsuae}"
+BOARD=a2065
+IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
 
-while getopts "m:t:c:b:" opt; do
+while getopts "m:t:c:b:AN:B:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-b builddir]" >&2
+        A) RUNNER=amiberry ;;
+        N) BOARD="$OPTARG" ;;
+        B) IFACE="$OPTARG" ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-b builddir] [-A [-N board] [-B backend]]" >&2
            exit 2 ;;
     esac
 done
@@ -67,6 +76,11 @@ export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-v6sock}"
 
 CPUARG=()
 [ -z "$CPU" ] || CPUARG=(-c "$CPU")
+
+if [ "$RUNNER" = "amiberry" ]; then
+    exec "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
+         -t "$TIMEOUT" "${CPUARG[@]}" "$EXE" "$STAGE/devs" "$STAGE/libs"
+fi
 
 exec "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
      "$EXE" "$STAGE/devs" "$STAGE/libs"
