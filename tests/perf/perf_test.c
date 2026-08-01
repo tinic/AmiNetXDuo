@@ -605,6 +605,45 @@ UINT    da, sa;
     ticks = p_elapsed(t0, p_now());
     p_report("n68k_copy_bytes d0 s0", ticks, reps, len);
 
+    /*
+     * The melded copy-and-sum, against the two operations it replaces.  The
+     * host tier cannot reach the assembly (tests/perf/host/shim), so this is
+     * where it is checked: the sum has to equal n68k_sum_longwords() over the
+     * same source and the copied bytes have to be identical, because a right
+     * sum over a wrongly-copied payload is the silent-corruption case.
+     */
+    {
+        ULONG   words = len / 4UL;
+        ULONG   want;
+        ULONG   got;
+        UINT    ok = 1U;
+
+        want = n68k_sum_longwords((const ULONG *)p_src_buf, words);
+        got  = n68k_copy_sum_longwords((ULONG *)p_dst_buf,
+                                       (const ULONG *)p_src_buf, words);
+
+        (VOID)p_check((UINT)(got == want), "copy_sum matches sum_longwords",
+                      got ^ want);
+
+        for (i = 0UL; i < words * 4UL; i++)
+        {
+            if (p_dst_buf[i] != p_src_buf[i])
+            {
+                ok = 0U;
+            }
+        }
+        (VOID)p_check(ok, "copy_sum copies exactly", 0UL);
+
+        t0 = p_now();
+        for (i = 0UL; i < reps; i++)
+        {
+            (VOID)n68k_copy_sum_longwords((ULONG *)p_dst_buf,
+                                          (const ULONG *)p_src_buf, words);
+        }
+        ticks = p_elapsed(t0, p_now());
+        p_report("n68k_copy_sum_longwords d0 s0", ticks, reps, words * 4UL);
+    }
+
     t0 = p_now();
     for (i = 0UL; i < reps; i++)
     {
