@@ -2,7 +2,7 @@
 
 User-visible changes, newest first. Internal work is in the git log.
 
-## Unreleased
+## 0.16.0
 
 - Two `BeginInterfaceConfig()` calls for different interfaces at the same time no longer risk one of them never being answered, which left the program that made it waiting on its message forever
 - Starting a packet capture on a machine where the network had not yet read the clock no longer stops multitasking for the length of a device open, once for every frame captured
