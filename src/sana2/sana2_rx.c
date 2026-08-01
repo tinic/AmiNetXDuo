@@ -704,10 +704,23 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
             return -1;
         }
 
-        if (tx_semaphore_create(&rx->ready, (CHAR *)"s2rxrdy", 0) != TX_SUCCESS ||
-            tx_semaphore_create(&rx->exited, (CHAR *)"s2rxend", 0) != TX_SUCCESS)
+        /*
+         * One at a time, not `a() || b()`: the control blocks live inside the
+         * ami_alloc()ed AmiSana2If, so a `ready` left created while `exited`
+         * failed would stay on ThreadX's created list after ami_sana2_close()
+         * freed the interface.
+         */
+        if (tx_semaphore_create(&rx->ready, (CHAR *)"s2rxrdy", 0) != TX_SUCCESS)
         {
             AMI_ERROR("sana2: cannot create reader semaphores");
+            ami_sana2_rx_stop(iface);
+            return -1;
+        }
+
+        if (tx_semaphore_create(&rx->exited, (CHAR *)"s2rxend", 0) != TX_SUCCESS)
+        {
+            AMI_ERROR("sana2: cannot create reader semaphores");
+            tx_semaphore_delete(&rx->ready);
             ami_sana2_rx_stop(iface);
             return -1;
         }
@@ -719,6 +732,8 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
                              TX_NO_TIME_SLICE, TX_AUTO_START) != TX_SUCCESS)
         {
             AMI_ERROR("sana2: cannot create reader thread");
+            tx_semaphore_delete(&rx->ready);
+            tx_semaphore_delete(&rx->exited);
             ami_sana2_rx_stop(iface);
             return -1;
         }
@@ -796,43 +811,51 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
     {
         AmiSana2Rx *rx = &iface->rx[i];
 
-        if (!rx->started)
-            continue;
-
-        if (tx_semaphore_get(&rx->exited, 5 * NX_IP_PERIODIC_RATE) != TX_SUCCESS)
+        if (rx->started)
         {
+            if (tx_semaphore_get(&rx->exited,
+                                 5 * NX_IP_PERIODIC_RATE) != TX_SUCCESS)
+            {
+                /*
+                 * The reader is still inside its own teardown, which has its own
+                 * deadline, so this should not happen. If it does, the thread is
+                 * running on `rx->stack` and the ThreadX control block is live,
+                 * so neither may be freed: leaking 4 KB is recoverable, a thread
+                 * executing freed memory is not.
+                 */
+                AMI_ERROR("sana2: reader %ld did not stop; leaking its stack "
+                          "rather than freeing memory it is running on", (long)i);
+                iface->rx_orphaned = TRUE;
+                continue;
+            }
+
             /*
-             * The reader is still inside its own teardown, which has its own
-             * deadline, so this should not happen. If it does, the thread is
-             * running on `rx->stack` and the ThreadX control block is live, so
-             * neither may be freed: leaking 32 KB is recoverable, a thread
-             * executing freed memory is not.
+             * Give the thread time to run off the end of its entry function
+             * before the control block and stack go away. This is the one place
+             * the shim relies on port behaviour it cannot yet verify
+             * (docs/RESEARCH.md §6.2).
              */
-            AMI_ERROR("sana2: reader %ld did not stop; leaking its stack "
-                      "rather than freeing memory it is running on", (long)i);
-            iface->rx_orphaned = TRUE;
-            continue;
+            tx_thread_sleep(5);
+
+            tx_thread_terminate(&rx->thread);
+            tx_thread_delete(&rx->thread);
+            tx_semaphore_delete(&rx->ready);
+            tx_semaphore_delete(&rx->exited);
+
+            /* The reader may have exited leaving reads the device would not give
+               back. Its slots, packets and reply port are inside this interface,
+               so the interface itself cannot be freed. */
+            if (rx->orphans != 0)
+                iface->rx_orphaned = TRUE;
         }
 
         /*
-         * Give the thread time to run off the end of its entry function before
-         * the control block and stack go away. This is the one place the shim
-         * relies on port behaviour it cannot yet verify
-         * (docs/RESEARCH.md §6.2).
+         * Outside the started gate. A reader whose semaphores or thread would
+         * not create has a stack and nothing else, and ami_sana2_rx_start()
+         * unwinds by calling this rather than by hand; before, that stack was
+         * lost, and again on every Online retry (sana2_driver.c, NX_LINK_ENABLE
+         * re-enters and overwrites the pointer).
          */
-        tx_thread_sleep(5);
-
-        tx_thread_terminate(&rx->thread);
-        tx_thread_delete(&rx->thread);
-        tx_semaphore_delete(&rx->ready);
-        tx_semaphore_delete(&rx->exited);
-
-        /* The reader may have exited leaving reads the device would not give
-           back. Its slots, packets and reply port are inside this interface,
-           so the interface itself cannot be freed. */
-        if (rx->orphans != 0)
-            iface->rx_orphaned = TRUE;
-
         if (rx->stack != NULL)
         {
             ami_free(rx->stack);
