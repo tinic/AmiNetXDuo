@@ -323,7 +323,9 @@ the ThreadX thread stack. So a library call does not switch stacks: NetX Duo,
 and with `tls.library` the whole of nx_secure and the bignum code, run on
 whatever the application had.
 
-Measured over all 111 LVO entry points, the deepest is **`bsd_sendmsg` at 1,208
+Measured over all 112 `bsd_*` symbols named in `bsdsocket_vectors.c` -- the
+whole vector table plus its `bsd_enosys` stubs -- the deepest is
+**`bsd_sendmsg` at 1,208
 bytes**, and the chain is the same one as above -- through
 `_nx_ipv6_packet_send` into `ami_sana2_driver_entry` and the BPF transmit tap.
 `bsd_sendto` is 1,192, `bsd_send` 1,156, `bsd_accept` 1,100, `bsd_socket` 1,044.
