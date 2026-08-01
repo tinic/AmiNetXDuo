@@ -63,6 +63,28 @@ empty results.
 
 ## Decided against — do not "fix"
 
+- **Feeding the checksum's adds from `movem.l` buys nothing**, 2026-08-01,
+  measured and reverted (82a188e, 941ee94). The reasoning that led there was
+  that `add.l a0@+,d0` pays a full operand fetch per longword while the copy
+  next door gets eight per `movem.l`, and that a read-and-write copy measuring
+  CHEAPER per byte than the read-only sum (183.65 vs 201.39 ns/B) meant the
+  loads were the difference. Rewritten to `movem.l a0@+,d4-d7/a2-a5` plus
+  register-to-register adds it measured 201.27 ns/B -- identical, and the
+  disassembly confirmed the new loop was what ran.
+
+  In cycles at 14.19 MHz the two are not comparable the way that suggested:
+  the copy is 83.4 cycles per 32 B for 16 bus accesses, 5.2 each; the checksum
+  is 91.4 cycles for 8 reads (41.7) plus 16 `add.l`/`addx.l` (49.7, about 3.1
+  each, right for 68020 register ops). It is half bus and half ALU, both forms
+  issue the same eight reads, and no arrangement of instructions removes an
+  add and a carry-fold per longword. **The checksum is at its floor.**
+
+  What this does establish is the price of melding the checksum INTO the copy,
+  which is the one thing that removes the second read: 174.8 cycles per 32 B
+  separate against 133.1 melded, a saving of 41.7 -- 23.9% of the pair, about
+  8.6% of the 1073.90 ns/B pipeline. That is worth having and is still open;
+  it is the redundant read pass and nothing else.
+
 - **RFC 3542's extension headers stay unimplemented.** `IPV6_RTHDR`,
   `HOPOPTS`, `DSTOPTS`, `RTHDRDSTOPTS`, `PATHMTU`, `RECVPATHMTU`,
   `USE_MIN_MTU`, `DONTFRAG` and `NEXTHOP` are extension-header and path-MTU
