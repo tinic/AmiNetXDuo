@@ -314,6 +314,19 @@ stage_conformance() {
 # -------------------------------------------------------------- analyse ----
 
 stage_analyze() {
+    #
+    # Off unless AMINETXDUO_ANALYZE=1. It is 2.5 minutes, its findings have not
+    # moved in weeks, and it was being run over and over by parallel agents who
+    # had been told to "run the full set once at the end" -- which is the wrong
+    # instruction and was mine. A refusal here holds whatever a brief says; the
+    # release workflow sets the variable, so nothing ships unanalysed.
+    #
+    if [ "${AMINETXDUO_ANALYZE:-0}" != "1" ]; then
+        hr "static analysis (cross)"
+        note "SKIPPED -- set AMINETXDUO_ANALYZE=1 to run it (the release does)"
+        return 0
+    fi
+
     hr "static analysis (cross)"
 
     export AMINETXDUO_ANALYZE_BUILD="$BUILD/analyze"
@@ -467,7 +480,7 @@ note "stages: ${STAGES_RUN[*]}"
 
 case " ${STAGES_RUN[*]} " in
     *" analyze "*) ;;
-    *) note "analyze NOT RUN -- name it to run it; the release workflow does" ;;
+    *) note "analyze NOT RUN -- AMINETXDUO_ANALYZE=1 tools/ci.sh analyze" ;;
 esac
 if [ ${#FAILED[@]} -eq 0 ]; then
     printf '\033[32mall green\033[0m\n'
