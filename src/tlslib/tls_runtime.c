@@ -30,6 +30,10 @@ BOOL tls_runtime_open(VOID)
 
 VOID tls_runtime_close(VOID)
 {
+    /* The E-Clock timerequest ami_tls_timer_open() opened is a file-scope
+       static in this segment, and expunge is about to UnLoadSeg() it. */
+    ami_tls_timer_close();
+
     if (DOSBase != NULL)
     {
         CloseLibrary((struct Library *)DOSBase);

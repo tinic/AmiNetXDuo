@@ -18,6 +18,7 @@
 #include <exec/io.h>
 #include <exec/lists.h>
 #include <exec/memory.h>
+#include <exec/semaphores.h>
 #include <devices/timer.h>
 #include <hardware/custom.h>
 #include <proto/exec.h>
@@ -33,6 +34,27 @@ static struct timerequest          ami_tls_req;
 static struct MsgPort              ami_tls_port;
 static ULONG                       ami_tls_hz;
 
+/*
+ * The open is lazy and the request is a file-scope static, so it has to be
+ * serialised: ami_tls_eclock(), ami_tls_eclock_hz() and ami_tls_eclock_micros()
+ * all reach it with no lock of their own from whatever task is doing crypto,
+ * and two racing the ami_tls_timer_base test both OpenDevice() the same
+ * timerequest. Same reasoning and same shape as src/common/compat.c.
+ */
+static struct SignalSemaphore      ami_tls_timer_lock;
+static volatile BOOL               ami_tls_timer_lock_ready;
+
+static VOID ami_tls_timer_lock_init(VOID)
+{
+    Forbid();
+    if (!ami_tls_timer_lock_ready)
+    {
+        InitSemaphore(&ami_tls_timer_lock);
+        ami_tls_timer_lock_ready = TRUE;
+    }
+    Permit();
+}
+
 BOOL ami_tls_timer_open(VOID)
 {
     struct EClockVal ev;
@@ -42,9 +64,20 @@ BOOL ami_tls_timer_open(VOID)
         return TRUE;
     }
 
+    ami_tls_timer_lock_init();
+    ObtainSemaphore(&ami_tls_timer_lock);
+
+    if (ami_tls_timer_base != NULL)
+    {
+        ReleaseSemaphore(&ami_tls_timer_lock);
+        return TRUE;
+    }
+
     ami_tls_port.mp_Node.ln_Type = NT_MSGPORT;
     ami_tls_port.mp_Flags        = PA_IGNORE;
-    ami_tls_port.mp_SigTask      = FindTask(NULL);
+    /* NULL, not FindTask(NULL): nothing reads mp_SigTask on a PA_IGNORE port,
+       and the task that opened first is gone long before tls.library is. */
+    ami_tls_port.mp_SigTask      = NULL;
 
     /* NewList() is amiga.lib; open-code it so this stays link-library free. */
     ami_tls_port.mp_MsgList.lh_Head     =
@@ -60,9 +93,12 @@ BOOL ami_tls_timer_open(VOID)
     if (OpenDevice((STRPTR)TIMERNAME, UNIT_ECLOCK,
                    (struct IORequest *)&ami_tls_req, 0) != 0)
     {
+        ReleaseSemaphore(&ami_tls_timer_lock);
         return FALSE;
     }
 
+    /* ReadEClock() needs the base, so it is published before the rate is
+       read; the lock is what keeps a second caller out until both are set. */
     ami_tls_timer_base = ami_tls_req.tr_node.io_Device;
 
     ami_tls_hz = ReadEClock(&ev);
@@ -70,6 +106,8 @@ BOOL ami_tls_timer_open(VOID)
     {
         ami_tls_hz = 709379UL;         /* PAL, if the device lies */
     }
+
+    ReleaseSemaphore(&ami_tls_timer_lock);
 
     return TRUE;
 }
@@ -88,8 +126,19 @@ VOID ami_tls_timer_close(VOID)
         return;
     }
 
-    CloseDevice((struct IORequest *)&ami_tls_req);
-    ami_tls_timer_base = NULL;
+    ami_tls_timer_lock_init();
+    ObtainSemaphore(&ami_tls_timer_lock);
+
+    if (ami_tls_timer_base != NULL)
+    {
+        ami_tls_timer_base = NULL;
+        CloseDevice((struct IORequest *)&ami_tls_req);
+        /* Or a reopen keeps a rate read through a base it no longer holds,
+           and ami_tls_eclock_micros()'s hz == 0 guard never re-arms. */
+        ami_tls_hz = 0UL;
+    }
+
+    ReleaseSemaphore(&ami_tls_timer_lock);
 }
 
 ULONG ami_tls_eclock(VOID)

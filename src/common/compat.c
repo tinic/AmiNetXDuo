@@ -10,6 +10,7 @@
 #include "aminetxduo/compat.h"
 
 #include <exec/execbase.h>
+#include <exec/semaphores.h>
 #include <devices/timer.h>
 #include <proto/exec.h>
 #include <proto/timer.h>
@@ -183,6 +184,32 @@ static ULONG               ami_eclock_ms;
 static ULONG               ami_eclock_rem;
 static ULONG               ami_eclock_carry;   /* thousandths of a tick */
 
+/*
+ * One request, one port, opened lazily -- so the open has to be serialised.
+ * ami_millis() is called from SANA-II reader Tasks (bpf_amiga.c) as well as
+ * from application tasks, and two of them racing the TimerBase test both
+ * OpenDevice() the same static timerequest: the second overwrites io_Device
+ * and timer.device is left one open up, with a request whose memory belongs to
+ * a segment that can be unloaded.
+ *
+ * A semaphore, not Forbid(): OpenDevice() may Wait, which breaks a Forbid and
+ * would make it a lock in name only. The semaphore's own one-time init is the
+ * Forbid-and-flag shape netstack.c uses for the same problem.
+ */
+static struct SignalSemaphore  ami_timer_lock;
+static volatile BOOL           ami_timer_lock_ready;
+
+static VOID ami_timer_lock_init(VOID)
+{
+    Forbid();
+    if (!ami_timer_lock_ready)
+    {
+        InitSemaphore(&ami_timer_lock);
+        ami_timer_lock_ready = TRUE;
+    }
+    Permit();
+}
+
 static BOOL ami_timer_init(VOID)
 {
     struct EClockVal ev;
@@ -191,9 +218,23 @@ static BOOL ami_timer_init(VOID)
     if (TimerBase != NULL)
         return TRUE;
 
+    ami_timer_lock_init();
+    ObtainSemaphore(&ami_timer_lock);
+
+    /* Again inside the lock: whoever was ahead of us has finished by now. */
+    if (TimerBase != NULL)
+    {
+        ReleaseSemaphore(&ami_timer_lock);
+        return TRUE;
+    }
+
     ami_timer_port.mp_Node.ln_Type = NT_MSGPORT;
     ami_timer_port.mp_Flags        = PA_IGNORE;
-    ami_timer_port.mp_SigTask      = FindTask(NULL);
+    /* NULL, not FindTask(NULL): exec never reads mp_SigTask on a PA_IGNORE
+       port, and whichever task happened to be first here exits long before the
+       library does. A stale pointer here is a Signal() into freed memory for
+       whoever next gives this port a reason to be signalled. */
+    ami_timer_port.mp_SigTask      = NULL;
 
     /* NewList() lives in amiga.lib; a shared library open-codes it. */
     ami_timer_port.mp_MsgList.lh_Head     =
@@ -208,9 +249,10 @@ static BOOL ami_timer_init(VOID)
 
     if (OpenDevice((STRPTR)TIMERNAME, UNIT_ECLOCK,
                    (struct IORequest *)&ami_timer_req, 0) != 0)
+    {
+        ReleaseSemaphore(&ami_timer_lock);
         return FALSE;
-
-    TimerBase = ami_timer_req.tr_node.io_Device;
+    }
 
     /*
      * Scale to ticks-per-millisecond up front: a 64-bit divide would pull
@@ -224,7 +266,37 @@ static BOOL ami_timer_init(VOID)
     ami_eclock_rem  = 0UL;
     ami_eclock_carry = 0UL;
 
+    /* Last: it is what every other caller tests, so publishing it before the
+       fields above are set would hand them a half-built timer. */
+    TimerBase = ami_timer_req.tr_node.io_Device;
+
+    ReleaseSemaphore(&ami_timer_lock);
+
     return TRUE;
+}
+
+/*
+ * Give timer.device its open back. Called from bsd_lib_expunge() by way of
+ * bsd_runtime_close(): the request and the port are file-scope statics, so
+ * without this the segment is handed to UnLoadSeg() with the device still
+ * open against memory inside it, and one more open every load/expunge cycle.
+ */
+VOID ami_timer_close(VOID)
+{
+    if (TimerBase == NULL)
+        return;
+
+    ami_timer_lock_init();
+    ObtainSemaphore(&ami_timer_lock);
+
+    if (TimerBase != NULL)
+    {
+        TimerBase = NULL;
+        CloseDevice((struct IORequest *)&ami_timer_req);
+        ami_eclock_hz = 0UL;
+    }
+
+    ReleaseSemaphore(&ami_timer_lock);
 }
 
 ULONG ami_millis(VOID)

@@ -118,6 +118,10 @@ VOID ami_signal_free(BYTE sig);
 /* Milliseconds since stack startup, from EClock. Monotonic, wraps at 2^32. */
 ULONG ami_millis(VOID);
 
+/* Hands timer.device back the open ami_millis() took lazily. A library must
+   call this before its segment is unloaded; a Shell command need not. */
+VOID ami_timer_close(VOID);
+
 /*
  * OpenDevice() for a SANA-II driver, with the DEVS:Networks retry.
  *

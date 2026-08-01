@@ -731,6 +731,25 @@ static const APTR tap_vectors[] =
     (APTR)-1
 };
 
+/*
+ * The timer half of the teardown, on its own because tap_install() acquires it
+ * before tap_dev is set and tap_remove() gates on tap_dev: both of the failure
+ * returns below used to leave the MsgPort and the open timer.device behind.
+ */
+static VOID tap_timer_close(VOID)
+{
+    if (tap_timer != NULL)
+    {
+        CloseDevice(&tap_timer_req);
+        tap_timer = NULL;
+    }
+    if (tap_timer_port != NULL)
+    {
+        DeleteMsgPort(tap_timer_port);
+        tap_timer_port = NULL;
+    }
+}
+
 LONG tap_install(const UBYTE *mac)
 {
     TapDevice *d;
@@ -760,7 +779,10 @@ LONG tap_install(const UBYTE *mac)
     d = (TapDevice *)MakeLibrary((APTR)tap_vectors, NULL, NULL,
                                  (ULONG)sizeof(TapDevice), (BPTR)0);
     if (d == NULL)
+    {
+        tap_timer_close();
         return -1;
+    }
 
     d->tx = (TapFrame *)AllocMem((ULONG)sizeof(TapFrame) * TAP_TX_SLOTS,
                                  MEMF_PUBLIC | MEMF_CLEAR);
@@ -769,6 +791,7 @@ LONG tap_install(const UBYTE *mac)
         FreeMem((APTR)((ULONG)d - d->dd.dd_Library.lib_NegSize),
                 (ULONG)(d->dd.dd_Library.lib_NegSize +
                         d->dd.dd_Library.lib_PosSize));
+        tap_timer_close();
         return -1;
     }
 
@@ -842,14 +865,5 @@ VOID tap_remove(VOID)
 
     tap_dev = NULL;
 
-    if (tap_timer != NULL)
-    {
-        CloseDevice(&tap_timer_req);
-        tap_timer = NULL;
-    }
-    if (tap_timer_port != NULL)
-    {
-        DeleteMsgPort(tap_timer_port);
-        tap_timer_port = NULL;
-    }
+    tap_timer_close();
 }

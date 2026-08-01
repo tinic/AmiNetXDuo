@@ -463,10 +463,17 @@ struct Task *me;
 UINT tx_amiga_discard_thread(TX_THREAD *thread_ptr)
 {
 
+struct Task *me;
+ULONG        sigmask;
+BYTE         sig;
+
+
     if (thread_ptr == TX_NULL)
     {
         return(TX_PTR_ERROR);
     }
+
+    me =  FindTask((STRPTR) 0);
 
     Forbid();
 
@@ -497,7 +504,32 @@ UINT tx_amiga_discard_thread(TX_THREAD *thread_ptr)
 
     _tx_thread_system_state--;
 
+    /* Discard exists for the case where somebody ELSE is tearing this down:
+       FreeSignal() only works on the Task that allocated the bit, so a foreign
+       caller can only drop the registration and leave the bit to die with its
+       owner.  When the owner is the one calling, the bit is recoverable and
+       leaving it is a permanent loss out of that Task's 32 -- netstack.c
+       reaches here on the owning Task from both ami_netstack_enter_cached()
+       and ami_netstack_release().  */
+    sigmask =  0UL;
+    if (thread_ptr -> tx_thread_amiga_signal_owner == (VOID *) me)
+    {
+        sigmask =  thread_ptr -> tx_thread_amiga_run_signal;
+        thread_ptr -> tx_thread_amiga_signal_owner =  (VOID *) 0;
+        thread_ptr -> tx_thread_amiga_run_signal   =  0UL;
+    }
+
     Permit();
+
+    if (sigmask != 0UL)
+    {
+        SetSignal(0UL, sigmask);
+        sig =  _tx_amiga_sigbit(sigmask);
+        if (sig >= 0)
+        {
+            FreeSignal(sig);
+        }
+    }
 
     _tx_amiga_wake_scheduler();
 
@@ -523,8 +555,7 @@ UINT         wake;
 
     Forbid();
 
-    if (((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED) == 0U) ||
-        (thread_ptr -> tx_thread_amiga_task != (VOID *) me))
+    if ((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED) == 0U)
     {
         Permit();
         return(TX_CALLER_ERROR);
@@ -532,13 +563,27 @@ UINT         wake;
 
     sigmask =  thread_ptr -> tx_thread_amiga_run_signal;
 
+    /* The already-torn-down case is tested BEFORE the tx_thread_amiga_task
+       check, and against tx_thread_amiga_signal_owner rather than against it.
+       _tx_amiga_reap() zeroes tx_thread_amiga_task for an adopted thread on the
+       way through _tx_thread_delete(), so a caller arriving here after that ran
+       failed the old ownership test, took TX_CALLER_ERROR, and this branch --
+       the one written to recover the bit -- could never be reached.  Thirty-two
+       adoptions of a torn-down thread on one Task and no adoption on it ever
+       succeeds again.  netstack.c's ami_netstack_enter_cached() is the path
+       that does exactly this.  */
     if (thread_ptr -> tx_thread_id != TX_THREAD_ID)
     {
 
-        /* Already torn down under us (someone called tx_thread_terminate()
-           plus tx_thread_delete()).  Just recover the signal.  */
-        thread_ptr -> tx_thread_amiga_task       =  (VOID *) 0;
-        thread_ptr -> tx_thread_amiga_run_signal =  0UL;
+        if (thread_ptr -> tx_thread_amiga_signal_owner != (VOID *) me)
+        {
+            Permit();
+            return(TX_CALLER_ERROR);
+        }
+
+        thread_ptr -> tx_thread_amiga_task         =  (VOID *) 0;
+        thread_ptr -> tx_thread_amiga_signal_owner =  (VOID *) 0;
+        thread_ptr -> tx_thread_amiga_run_signal   =  0UL;
         Permit();
 
         SetSignal(0UL, sigmask);
@@ -548,6 +593,12 @@ UINT         wake;
             FreeSignal(sig);
         }
         return(TX_SUCCESS);
+    }
+
+    if (thread_ptr -> tx_thread_amiga_task != (VOID *) me)
+    {
+        Permit();
+        return(TX_CALLER_ERROR);
     }
 
     /* Release the baton before we stop being a thread.  */
@@ -566,6 +617,12 @@ UINT         wake;
     (VOID) _tx_thread_delete(thread_ptr);
 
     _tx_thread_system_state--;
+
+    /* Inside the lock, and before the bit is freed below: the record is what
+       stops a second orphan of the same TX_THREAD from freeing it again.  */
+    thread_ptr -> tx_thread_amiga_signal_owner =  (VOID *) 0;
+    thread_ptr -> tx_thread_amiga_run_signal   =  0UL;
+
     wake =  (_tx_thread_execute_ptr != TX_NULL) ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
     Permit();
 

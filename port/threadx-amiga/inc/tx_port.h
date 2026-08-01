@@ -184,6 +184,15 @@ VOID   _tx_thread_interrupt_restore(UINT previous_posture);
                                    suspension path; this port only ever
                                    suspends threads at their own request.
    tx_thread_amiga_flags           TX_AMIGA_THREAD_* bits below
+   tx_thread_amiga_signal_owner    struct Task * that AllocSignal()d the run
+                                   signal, for adopted threads only
+
+   tx_thread_amiga_signal_owner is not a duplicate of tx_thread_amiga_task.
+   _tx_amiga_reap() clears tx_thread_amiga_task on teardown, deliberately, so
+   the scheduler cannot poke a Task that is no longer a thread -- but the run
+   signal outlives the TX_THREAD and only the Task that allocated it may call
+   FreeSignal() on it.  Losing that record is losing the bit: there are 32 per
+   Task and no way to recover one.  Cleared by whoever frees the signal.
 
    The teardown handshake does not live here: it is in the Exec Task's own
    control block (struct _tx_amiga_ctrl, tx_amiga_internal.h), so a task the
@@ -191,6 +200,7 @@ VOID   _tx_thread_interrupt_restore(UINT previous_posture);
    been deleted and its storage reused.                                      */
 
 #define TX_THREAD_EXTENSION_0                   VOID  *tx_thread_amiga_task; \
+                                                VOID  *tx_thread_amiga_signal_owner; \
                                                 ULONG  tx_thread_amiga_run_signal; \
                                                 UINT   tx_thread_amiga_suspension_type; \
                                                 UINT   tx_thread_amiga_flags;
