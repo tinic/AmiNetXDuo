@@ -28,8 +28,8 @@ sizeof(struct { char c; long l; })   6
 ```
 
 Everything follows from that. GCC never places a `long` at an odd offset in a
-struct, `AllocMem` is 8-byte aligned, `AllocVec` puts one longword in front of
-what it returns, and the 68000 keeps SP even in hardware. **So no
+struct, `AllocMem` is 8-byte aligned, `AllocVec` returns that minus a longword
+(measured: 4-aligned, never 8), and the 68000 keeps SP even in hardware. **So no
 compiler-placed or Exec-allocated object in this tree is ever at an odd
 address.** An Address Error here can only come from a pointer *we* computed --
 byte arithmetic over wire data, a carve out of a caller's buffer, or a cast of
@@ -181,21 +181,60 @@ hand, so refusing them would repeat the `& 3` mistake in a different file.
 
 `tools/smoke/alignprobe` reports, from a running machine: `__alignof__` for a
 `long`, a `short`, a pointer and a `struct cmsghdr`; the alignment
-`CMSG_BUFFER()` delivers on the stack and in static storage; what `AllocVec()`
-and `AllocMem()` return for three sizes; and a longword load from an address
-2 mod 4. It does not provoke an Address Error -- that is a Guru, not a test
-result, and whether the hazard is real was never the question.
+`CMSG_BUFFER()` delivers on the stack, in static storage and as a struct
+member; what `AllocVec()` and `AllocMem()` return for three sizes; and a
+longword load from an address 2 mod 4. It does not provoke an Address Error --
+that is a Guru, not a test result, and whether the hazard is real was never the
+question.
 
 ```
 cmake -B build/m0 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
       -DAMINETXDUO_CPU=68000
+cmake --build build/m0 --target smoke_alignprobe
 . ~/amiga-assets/env.sh
-tools/amiberry-run.sh -A -m A600 -t 60 build/m0/tools/smoke/alignprobe
+export AMINETXDUO_KICKSTART_A600=".../Kickstart v3.1 r40.63 (A500-A600-A2000).rom"
+tools/amiberry-run.sh -m A600 -t 90 build/m0/tools/smoke/alignprobe
 ```
 
 **`-m A600`.** An A1200 is a 68020 and tolerates everything this is about; a
 pass there proves nothing. The binary must come from a `-DAMINETXDUO_CPU=68000`
-build or the machine stops on an illegal instruction before `main` runs.
+build or the machine stops on an illegal instruction before `main` runs, and
+the A600 needs its own ROM -- 40.63 or 37.350. The A1200's 40.68 boots to a
+black screen with nothing on the serial port to say why.
+
+Run on an A600, Kickstart 40.63, from a `-DAMINETXDUO_CPU=68000` build, once
+with the fix and once with only `CMSG_BUFFER_ALIGN4` emptied out:
+
+```
+                                          before the fix     after
+ALIGN alignof long=2 short=2 ptr=2 cmsghdr=2               (both)
+ALIGN sizeof(struct{char;long;})=6                         (both)
+ALIGN cmsgbuf offset in a struct =              2              4
+ALIGN CMSG_BUFFER behind a UWORD             FAIL             ok
+ALIGN allocvec 00203164 002182A4 0021A674  ok  ok  ok  (both)
+ALIGN allocmem 00218028                                    (both)
+ALIGN longword load from an address 2 mod 4  ok             ok
+                                        ALIGNPROBE FAIL 1  PASS
+```
+
+Three things worth keeping out of that:
+
+- **`__alignof__(long)` really is 2 on the machine**, not only in the
+  compiler. Everything in Part 1 rests on it.
+- **The struct case is the one that answers the same way every run.** The stack
+  local passed both times: where the frame puts it is a coin flip, which is
+  exactly why the bug survived. A `CMSG_BUFFER` behind a `UWORD` in a struct is
+  at offset 2 with an alignment of 2 and at offset 4 with an alignment of 4, in
+  every instance, and that is the case the probe now turns on.
+- **`AllocVec()` returns 4-byte aligned memory and not 8.** `0x00203164`,
+  `0x002182A4`, `0x0021A674` are all 4 mod 8, and `AllocMem(1)` came back
+  `0x00218028`, which is 0 mod 8. `AllocVec` keeps the size in the longword in
+  front of what it hands out, so it is `AllocMem`'s 8 minus 4 -- every time,
+  not by luck. `docs/ALLOCATIONS.md` and `addralloc.c:90` both say "aligned
+  enough for anything" and are right for this tree, where nothing wants more
+  than 4; a future `double` or a 64-bit field in an `ami_alloc`ed struct would
+  not be, and on m68k would not care either, since `__alignof__(double)` is
+  also 2.
 
 ---
 
@@ -354,5 +393,11 @@ and `tftp.c:575` at 780 -- are worth knowing about before either grows.
 - **`clients/`, `tests/` and `tools/smoke/` stacks were not measured**, only
   enumerated.
 - **No Address Error was provoked.** `alignprobe` demonstrates the rules the
-  audit rests on; it does not demonstrate a crash, because the fixed sites are
-  fixed and the unfixed ones are unreachable from conforming code.
+  audit rests on, and the `CMSG_BUFFER` defect before and after; it does not
+  demonstrate a crash, because the fixed sites are fixed and the unfixed ones
+  are unreachable from conforming code.
+- **The library itself was not run on a 68000 in this pass**, only the probe.
+  Booting `bsdsocket.library` on an A600 needs a SANA-II driver staged and the
+  network harness, which is `tools/ci.sh emulator` and a different exercise. The
+  cross build for `-DAMINETXDUO_CPU=68000` is in the default CI set and is
+  green.
