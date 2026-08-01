@@ -881,7 +881,7 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
         break;
 
     default:
-        if (buffer != NULL && (((ULONG)buffer) & 1UL) != 0UL)
+        if (buffer != NULL && (((unsigned long)buffer) & 1UL) != 0UL)
             return AMI_BPF_EINVAL;
         break;
     }
