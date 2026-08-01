@@ -42,6 +42,8 @@
 #include <proto/dos.h>
 #include <proto/exec.h>
 
+#include <dos/dosextens.h>
+
 #include <dos/dostags.h>
 
 /*
@@ -491,8 +493,11 @@ static VOID bsd_aam_reply(struct AddressAllocationMessage *aam, LONG result);
    finer than DHCP moves and costs nothing next to the ten-second floor. */
 #define BSD_AAM_POLL_TICKS  5           /* Delay() ticks: 1/10th of a second */
 
+/* baj_Msg first: the job is handed to its worker by PutMsg() to the worker's
+   own pr_MsgPort, so the message and the job are the same block. */
 typedef struct BsdAamJob
 {
+    struct Message                   baj_Msg;
     struct AddressAllocationMessage *baj_Message;
     UWORD                            baj_Index;
     volatile BOOL                    baj_Abort;
@@ -507,12 +512,6 @@ typedef struct BsdAamJob
  */
 static BsdAamJob *bsd_aam_jobs[AMI_CFG_MAX_INTERFACES];
 static LONG       bsd_aam_workers;
-
-/* Hand-over to a freshly created Process, the same idiom tcp_handler.c uses:
-   a static slot plus a SIGF_SINGLE handshake, so the pointer cannot outlive
-   the launch. */
-static BsdAamJob *bsd_aam_boot;
-static struct Task *bsd_aam_boot_parent;
 
 BOOL bsd_aam_busy(VOID)
 {
@@ -605,20 +604,18 @@ static VOID bsd_aam_store_lease(struct AddressAllocationMessage *aam,
 static VOID bsd_aam_worker(VOID)
 {
     struct AddressAllocationMessage *aam;
+    struct Process *me = (struct Process *)FindTask(NULL);
     AmiDhcpLease lease;
     BsdAamJob   *job;
     LONG         deadline;
     LONG         result = AAMR_Timeout;
     LONG         rc;
 
-    /* Take the job from the hand-over slot, before anything that can block. */
-    Forbid();
-    job = bsd_aam_boot;
-    bsd_aam_boot = NULL;
-    Permit();
-
-    if (bsd_aam_boot_parent != NULL)
-        Signal(bsd_aam_boot_parent, SIGF_SINGLE);
+    /* The launcher PutMsg()ed the job here, the same way tcp_ctrl_find() hands
+       a FIND packet to a session. It is the only message that ever arrives on
+       this port, and it arrives whether or not we got here first. */
+    WaitPort(&me->pr_MsgPort);
+    job = (BsdAamJob *)GetMsg(&me->pr_MsgPort);
 
     if (job == NULL)
     {
@@ -824,12 +821,11 @@ static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
     bsd_aam_jobs[index] = job;
     bsd_aam_workers++;
 
-    /* The hand-over slot is guarded by the same Forbid() as the launch, so two
-       BeginInterfaceConfig() calls cannot swap each other's jobs. */
-    bsd_aam_boot        = job;
-    bsd_aam_boot_parent = me;
+    Permit();
 
-    SetSignal(0, SIGF_SINGLE);
+    job->baj_Msg.mn_Node.ln_Type = NT_MESSAGE;
+    job->baj_Msg.mn_ReplyPort    = NULL;
+    job->baj_Msg.mn_Length       = (UWORD)sizeof(*job);
 
     tags[0].ti_Tag  = NP_Entry;
     tags[0].ti_Data = (ULONG)bsd_aam_worker;
@@ -844,14 +840,21 @@ static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
     tags[5].ti_Tag  = TAG_DONE;
     tags[5].ti_Data = 0;
 
+    /*
+     * Outside the Forbid(). CreateNewProc() inherits the caller's current
+     * directory, which is a DupLock() -- a packet to a file system and a wait
+     * on the reply -- so a Forbid() held across it is broken for as long as it
+     * takes and protects nothing. The hand-over is a PutMsg() to the new
+     * Process's own port instead of a shared slot, so there is nothing left for
+     * that Forbid() to have been guarding.
+     */
     proc = CreateNewProc(tags);
 
     if (proc == NULL)
     {
+        Forbid();
         bsd_aam_jobs[index] = NULL;
         bsd_aam_workers--;
-        bsd_aam_boot        = NULL;
-        bsd_aam_boot_parent = NULL;
         Permit();
 
         ami_free(job);
@@ -859,16 +862,7 @@ static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
         return;
     }
 
-    Permit();
-
-    /*
-     * Short and bounded: the worker signals as the first thing it does,
-     * before anything that can block, because `job` must be out of the
-     * hand-over slot before this returns and a second request can use it.
-     */
-    Wait(SIGF_SINGLE);
-
-    bsd_aam_boot_parent = NULL;
+    PutMsg(&proc->pr_MsgPort, &job->baj_Msg);
 }
 
 VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __asm("a0"),
