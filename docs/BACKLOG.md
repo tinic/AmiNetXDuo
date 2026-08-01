@@ -19,20 +19,8 @@ was wrong for a day.
 ## Open — no decision taken
 ## Open — no decision taken
 ## Open — no decision taken
+## Open — no decision taken
 
-- **TLS parsers that need crypto have no fuzz driver.** `fuzz_tls_record` and
-  `fuzz_tls_x509` cover the record header, the handshake header, ServerHello
-  and its extensions, CertificateRequest, the Certificate message and the
-  X.509 DER walk. ServerKeyExchange, CertificateVerify and Finished are not
-  covered: all three dispatch on a negotiated ciphersuite into
-  `NX_CRYPTO_METHOD` entries, so a driver has to link `nx_crypto` and
-  `ami_tls_crypto.c` -- and `ami_tls_crypto.c` includes `exec/types.h` and
-  casts pointers to a 32-bit `ULONG`, so it needs a 32-bit host build the way
-  `fuzz_mdns` does. Neither is `tls_resume_take_ticket()`, which is what parses
-  a TLS 1.2 NewSessionTicket (nx_secure only parses one under TLS 1.3, which is
-  off), nor `tls_store.c`'s issuer-name walk; both live in files that include
-  `proto/dos.h` and do not build on a host. The header comment in
-  `tests/fuzz/CMakeLists.txt` is the current list.
 - **RFC 3542: the subset worth having is built, send halves included.**
   Assessed and implemented 2026-07-31, finished the same day. No new LVOs:
   it rides `sendmsg`/`recvmsg`, and `struct msghdr` was already the 28-byte

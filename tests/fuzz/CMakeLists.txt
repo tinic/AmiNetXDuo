@@ -220,10 +220,12 @@ target_link_options(fuzz_mdns PRIVATE ${_fuzz_san})
 # complete a handshake first" protects none of it. It is also the headline
 # feature, which means it is what a hostile host gets pointed at.
 #
-# The two drivers split the way the code does: fuzz_tls_record stops at the
+# The three drivers split the way the code does: fuzz_tls_record stops at the
 # handshake message boundary, fuzz_tls_x509 starts at the Certificate message
-# and goes down through the DER walk. Both list their nx_secure sources
-# explicitly rather than linking the `nx_secure` target -- that target's
+# and goes down through the DER walk, and fuzz_tls_crypto -- further down, in
+# the 32-bit build -- takes the three messages that dispatch through a
+# ciphersuite into NX_CRYPTO_METHOD entries. The first two list their nx_secure
+# sources explicitly rather than linking the `nx_secure` target -- that target's
 # dependency chain reaches aminetxduo_common, which is AmigaOS code and does
 # not build on a host.
 #
@@ -236,19 +238,14 @@ target_link_options(fuzz_mdns PRIVATE ${_fuzz_san})
 #
 #   The TLS 1.2 NewSessionTicket. nx_secure only parses one under
 #   NX_SECURE_TLS_TLS_1_3_ENABLED, which is off; the TLS 1.2 ticket is read by
-#   tls_resume_take_ticket() in src/tlslib/tls_resume.c. That file includes
-#   proto/dos.h and proto/exec.h and cannot be compiled on a host.
+#   tls_resume_take_ticket() in src/tlslib/tls_resume.c, which takes a
+#   TLSConnection * and so needs tls_internal.h -- the whole AmigaOS library
+#   ABI -- on a host. docs/BACKLOG.md has the reasoning and the by-inspection
+#   result.
 #
-#   tls_store.c's issuer-name walk, for the same reason -- tls_internal.h pulls
-#   in the AmigaOS library ABI. It calls the same vendored TLV parser this
-#   driver does drive, so the parser underneath it is covered; the four-field
-#   walk on top of it is not.
-#
-#   ServerKeyExchange, CertificateVerify and Finished. All three dispatch on a
-#   negotiated ciphersuite and call into NX_CRYPTO_METHOD entries, so driving
-#   them means linking nx_crypto and ami_tls_crypto.c -- and ami_tls_crypto.c
-#   includes exec/types.h and casts pointers to a 32-bit ULONG. They are the
-#   obvious next driver and they need a 32-bit host build, like fuzz_mdns.
+#   tls_store.c's issuer-name walk, for the same reason. It calls the same
+#   vendored TLV parser fuzz_tls_x509 drives, so the parser underneath it is
+#   covered; the four-field walk on top of it is not.
 #
 #   The record decrypt path. It runs after keys exist, on bytes that have
 #   already failed or passed a MAC, and reaching it needs a full key schedule.
@@ -330,6 +327,110 @@ target_compile_definitions(fuzz_tls_x509 PRIVATE ${_fuzz_tls_def})
 target_compile_options(fuzz_tls_x509 PRIVATE -UAMINETXDUO_IPV6 ${_fuzz_san})
 target_link_options(fuzz_tls_x509 PRIVATE ${_fuzz_san})
 
+# ---------------------------------------------------------------------------
+# TLS: the three handshake messages that dispatch through a ciphersuite into
+# the crypto -- ServerKeyExchange, CertificateVerify and Finished.
+#
+# 32-BIT ONLY, and not for fuzz_mdns's reason. ami_tls_crypto.c checks metadata
+# alignment with ((ULONG)crypto_metadata & 3), and
+# nx_secure_tls_process_certificate_verify.c bounds its signature with
+# ((ULONG)packet_buffer + message_length) < ((ULONG)received_signature +
+# length). ULONG is the target's 32 bits everywhere in this tree, so on an LP64
+# host both of those truncate a pointer -- and the second one is the bounds
+# check under test. tools/ci.sh's host32 stage is where this builds and runs;
+# `cmake -DCMAKE_C_FLAGS=-m32` by hand does the same.
+#
+# The nx_secure and nx_crypto halves are static libraries rather than an
+# explicit source list. The two 64-bit drivers can list their files because
+# their call graph is a dozen parsers; this one reaches session_create, the
+# X.509 store, the ECC curve table, the PRF and the whole huge-number layer,
+# and listing that would be a copy of both directories that goes stale on the
+# next submodule bump. A static library lets the linker pull what is reached
+# and nothing else, which is the same end state.
+if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+
+    file(GLOB _fuzz_secure_all "${_fuzz_secure_src}/*.c")
+    list(FILTER _fuzz_secure_all EXCLUDE REGEX "self_test")
+    list(FILTER _fuzz_secure_all EXCLUDE REGEX "/nx_secure_dtls")
+    # src/tls/CMakeLists.txt swaps these two for the rfc7905 copies, because
+    # ChaCha20-Poly1305 record framing cannot be supplied by an
+    # NX_CRYPTO_METHOD. Same swap here, so the driver links the objects that
+    # ship.
+    list(FILTER _fuzz_secure_all EXCLUDE REGEX
+         "/nx_secure_tls_record_payload_(en|de)crypt\\.c$")
+
+    add_library(fuzz_tls_nx_secure STATIC
+        ${_fuzz_secure_all}
+        "${CMAKE_SOURCE_DIR}/src/tls/rfc7905/nx_secure_tls_record_payload_encrypt.c"
+        "${CMAKE_SOURCE_DIR}/src/tls/rfc7905/nx_secure_tls_record_payload_decrypt.c")
+
+    file(GLOB _fuzz_crypto_all "${AMINETXDUO_NETXDUO}/crypto_libraries/src/*.c")
+    list(FILTER _fuzz_crypto_all EXCLUDE REGEX "self_test")
+    add_library(fuzz_tls_nx_crypto STATIC ${_fuzz_crypto_all})
+
+    # The NetX Duo surface underneath, without fuzz_nxstub.c -- the executable
+    # supplies that, and a stub inside an archive would be pulled or not
+    # depending on link order.
+    set(_fuzz_tls_netx_src ${_fuzz_nx_src})
+    list(REMOVE_ITEM _fuzz_tls_netx_src
+         "${CMAKE_CURRENT_SOURCE_DIR}/fuzz_nxstub.c")
+    add_library(fuzz_tls_netx STATIC ${_fuzz_tls_netx_src})
+
+    # src/crypto68k, compiled in rather than linked from the `crypto68k`
+    # target: that target's dependency chain reaches aminetxduo_common and
+    # therefore the NDK. Same pattern as tests/crypto68k's host tier. The
+    # portable C only -- the 68020 assembly cannot be assembled here.
+    set(_fuzz_c68k_src
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_prim.c"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_div.c"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_mont.c"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_powm.c"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_crt.c"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_p256.c"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_p256_table.c"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_aes.c"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_sha256.c"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_chacha20.c"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_poly1305.c")
+
+    # The Amiga half: the crypto tables and the module behind them. Its own
+    # archive so that the warning set below applies to the driver and not to
+    # code the cross build already compiles under the project's.
+    add_library(fuzz_tls_ami STATIC
+        "${CMAKE_SOURCE_DIR}/src/tls/ami_tls_crypto.c"
+        ${_fuzz_c68k_src})
+
+    add_executable(fuzz_tls_crypto
+        fuzz_tls_crypto.c
+        fuzz_nxstub.c
+        fuzz_txstub.c)
+
+    # src/config/test/shim carries the minimal <exec/types.h> that src/tls/tls.h
+    # needs; tests/tls carries the sample certificate and its private key.
+    set(_fuzz_tls_crypto_inc
+        ${_fuzz_tls_inc}
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"
+        "${CMAKE_SOURCE_DIR}/src/tls"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k"
+        "${CMAKE_SOURCE_DIR}/tests/tls")
+
+    foreach(_t fuzz_tls_nx_secure fuzz_tls_nx_crypto fuzz_tls_netx
+               fuzz_tls_ami fuzz_tls_crypto)
+        target_include_directories(${_t} PRIVATE ${_fuzz_tls_crypto_inc})
+        target_compile_definitions(${_t} PRIVATE ${_fuzz_tls_def})
+        target_compile_options(${_t} PRIVATE -UAMINETXDUO_IPV6 ${_fuzz_san})
+    endforeach()
+
+    target_compile_options(fuzz_tls_crypto PRIVATE -Wall -Wextra)
+    target_link_options(fuzz_tls_crypto PRIVATE ${_fuzz_san})
+    # Repeated because the archives reference each other's objects and a single
+    # pass over each resolves only one direction.
+    target_link_libraries(fuzz_tls_crypto PRIVATE
+        fuzz_tls_ami fuzz_tls_nx_secure fuzz_tls_nx_crypto fuzz_tls_netx
+        fuzz_tls_ami fuzz_tls_nx_secure fuzz_tls_nx_crypto fuzz_tls_netx)
+
+endif()
+
 include(CTest)
 
 # The known case, first and always. If this ever passes silently the whole
@@ -380,6 +481,18 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
     add_test(NAME fuzz_mdns_sweep
              COMMAND fuzz_mdns -r 1 ${AMINETXDUO_FUZZ_CASES})
     set_tests_properties(fuzz_mdns_sweep PROPERTIES TIMEOUT 1800)
+
+    # The TLS crypto driver is in the same build for the reason above the
+    # target, not because it has anything to do with mDNS. Every case here
+    # rebuilds a session, parses a certificate and can run an RSA public
+    # operation and a P-256 scalar multiplication, so it is the slowest case in
+    # the set at roughly 5 ms -- AMINETXDUO_FUZZ_CASES all the same, because a
+    # second knob is a second thing to remember to raise for a soak.
+    add_test(NAME fuzz_tls_crypto_seeds
+             COMMAND fuzz_tls_crypto -s)
+    add_test(NAME fuzz_tls_crypto_sweep
+             COMMAND fuzz_tls_crypto -r 1 ${AMINETXDUO_FUZZ_CASES})
+    set_tests_properties(fuzz_tls_crypto_sweep PROPERTIES TIMEOUT 1800)
 endif()
 
 # A soak set by AMINETXDUO_FUZZ_CASES needs longer than ctest's default.
