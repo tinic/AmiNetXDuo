@@ -208,9 +208,17 @@ to close it against.
 
 A `SignalSemaphore`, not `Forbid()`: `OpenDevice()` may `Wait()`, which breaks a
 `Forbid` and would make it a lock in name only. The semaphore's own one-time
-init is the `Forbid`-and-flag shape `netstack.c:54` already uses. `TimerBase` is
-published last, after the rate and the accumulator are set, so a caller that
-skips the lock on the fast path cannot see a half-built timer.
+init is the `Forbid`-and-flag shape `netstack.c:54` already uses.
+
+The fast path needed a flag of its own, and this is the part worth reading
+twice. The obvious answer is to publish `TimerBase` last, after the rate and the
+accumulator are set, so nobody on the fast path sees a half-built timer. It does
+not work: the NDK's `ReadEClock()` is an inline that resolves the library base
+*through* `TimerBase`, so `TimerBase` has to be set before the rate can be read,
+and it therefore cannot also be the "usable" flag. Both timers now have an
+explicit ready flag, set after the last field and cleared first on close, and
+both fast paths test that. `ami_tls_timer_is_open()` answers from it too, since
+`ami_tls_crypto.c:69` calls `ami_tls_eclock()` on the strength of that answer.
 
 **Neither had a `CloseDevice` on any path.** Both requests are statics in a
 library segment. `bsd_lib_expunge()` hands that segment to `UnLoadSeg()` with

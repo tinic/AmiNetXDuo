@@ -4,6 +4,11 @@ User-visible changes, newest first. Internal work is in the git log.
 
 ## Unreleased
 
+- A program that calls `WaitSelect()` with a timeout gets its signal bit back when it closes the library. Every open and close of `bsdsocket.library` used to cost the program one of the 32 signal bits it will ever have, so a program that opened and closed the network around each job stopped being able to allocate one after 32 of them
+- Closing the network no longer costs a signal bit on the calling task when a socket call had to be abandoned partway through
+- Expunging the library gives `timer.device` its open back, as does expunging `tls.library`
+- A SANA-II device that will not give back a queued write no longer has the memory it is about to write into freed underneath it, which is what already happened for a queued read
+- The raw-framing probe is off unless it is asked for, in a build that does not go through CMake as well as one that does. On a device that ignores `AbortIO()` -- Commodore's `a2065.device` among them -- it never returns
 - Fixed three ways a hostile or broken server could read past the end of a buffer during a TLS handshake, and two more in the code underneath it. A certificate two bytes long, a 38-byte ServerHello and a zero-length CertificateRequest each walked off the end of the record buffer; a signature length was checked against the wrong bound; and every RSA modulus tripped a signed shift. On a machine with no memory protection a read past a buffer is not a crash, it is whatever happened to be next
 - `ping`, `ShowNetStatus` and `AddNetRoute` give back the memory they read `DEVS:Internet` into. Each run lost about 12 KB until the next reboot, which on a 1 MB machine is roughly seventy runs
 - `connect()` from a socket bound to one of the machine's addresses now leaves from that address instead of being refused
