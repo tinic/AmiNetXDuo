@@ -257,7 +257,9 @@ LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr)
     if (addr->nxd_ip_version != NX_IP_VERSION_V4 ||
         !bsd_mcast_is_group(addr->nxd_ip_address.v4))
     {
-        sock->as_Nx.udp.nx_udp_socket_time_to_live = (UINT)NX_IP_TIME_TO_LIVE;
+        /* IP_TTL / IPV6_UNICAST_HOPS, not the NetX default: as_Ttl starts at
+           NX_IP_TIME_TO_LIVE and options.c and in6.c both write it. */
+        sock->as_Nx.udp.nx_udp_socket_time_to_live = (UINT)(sock->as_Ttl & 0xFF);
         return -1;
     }
 

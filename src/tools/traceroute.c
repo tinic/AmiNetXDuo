@@ -15,14 +15,14 @@
  * Names and short forms are Roadshow's. Three of Roadshow's options are
  * absent; they are listed with reasons above the argument template below.
  *
- * Probes are ICMP echo rather than the classic Unix UDP datagrams, because a
- * UDP probe cannot carry the TTL here. setsockopt(IPPROTO_IP, IP_TTL) records
- * the value on the socket, and only the raw send path reads it: a NetX Duo UDP
- * socket carries the TTL it was created with -- NX_IP_TIME_TO_LIVE, fixed at
- * nx_udp_socket_create() time -- so a UDP probe leaves with TTL 128 whatever
- * was asked for, and every hop reports as the destination. Measured on the
- * wire; docs/RESEARCH.md 19 has the capture. nxd_ip_raw_packet_send() takes
- * the socket's TTL as an argument, so the ICMP path honours it.
+ * Probes are ICMP echo rather than the classic Unix UDP datagrams. That began
+ * as a limitation -- a UDP probe left with the TTL nx_udp_socket_create() was
+ * given, NX_IP_TIME_TO_LIVE, whatever setsockopt(IPPROTO_IP, IP_TTL) said, so
+ * every hop reported as the destination (measured on the wire;
+ * docs/RESEARCH.md 19 has the capture). It is not one any more: IP_TTL,
+ * IPV6_UNICAST_HOPS and an RFC 3542 IPV6_HOPLIMIT all reach a UDP send now.
+ * The probe stays ICMP because a raw socket sees the TIME_EXCEEDED for its own
+ * probes without a second socket and without the port-unreachable convention.
  *
  * IPv6 works the same way over IPV6_UNICAST_HOPS, once NetX Duo stopped
  * dropping the argument on the IPv6 side of that call (docs/RESEARCH.md 67).

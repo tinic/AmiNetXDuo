@@ -72,6 +72,12 @@ struct if_nameindex
  *
  * if_nameindex(): every interface, or NULL. if_freenameindex() takes what it
  * returned, and does nothing with NULL.
+ *
+ * Loopback is in all three, called "lo0" and numbered last. It is the index an
+ * arriving datagram over ::1 or 127.0.0.1 reports in an RFC 3542 PKTINFO, and
+ * the one a send may name to leave that way. It is not in
+ * ObtainInterfaceList() or QueryInterfaceTagList(), which are about SANA-II
+ * interfaces a caller can configure.
  */
 ULONG                if_nametoindex(const char *ifname);
 char                *if_indextoname(ULONG ifindex, char *ifname);

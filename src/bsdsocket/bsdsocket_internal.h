@@ -477,15 +477,21 @@ struct AmiSocketBase
                              ACW_PKTINFO4 | ACW_RECVDSTADDR4)
 
 /*
- * A source a sendmsg() or a sticky IPV6_PKTINFO named. cs_Source is left at
- * nxd_ip_version 0 when only an interface was given, and the other way round:
- * RFC 3542 6.6 lets either half be unspecified and the stack fill it in.
+ * What a sendmsg()'s ancillary data, or the sticky options standing in for it,
+ * said about one datagram. cs_Source is left at nxd_ip_version 0 when only an
+ * interface was given, and the other way round: RFC 3542 6.6 lets either half
+ * be unspecified and the stack fill it in.
+ *
+ * cs_Hops is IPV6_HOPLIMIT (RFC 3542 6.3), which is ancillary-only -- there is
+ * no sticky spelling of it, so cs_HaveHops is FALSE in as_CmsgSticky always.
  */
 typedef struct BsdCmsgSource
 {
     NXD_ADDRESS cs_Source;
     ULONG       cs_Ifindex;     /* 1-based, as if_nametoindex() counts       */
+    LONG        cs_Hops;        /* 0..255, only when cs_HaveHops             */
     BOOL        cs_Have;
+    BOOL        cs_HaveHops;
 } BsdCmsgSource;
 
 typedef struct AmiSocket
@@ -816,8 +822,9 @@ BOOL  bsd_oob_take(AmiSocket *sock, UBYTE *out);
  *
  * bsd_raw_send_packet() hands a packet the caller has already filled to
  * nxd_ip_raw_packet_send(), which prepends the IP header. `scope` is the
- * sockaddr_in6 zone, 0 for none. The packet is consumed either way --
- * released here on failure -- so the caller must not touch it again.
+ * sockaddr_in6 zone, 0 for none; `src` is the RFC 3542 ancillary data of a
+ * sendmsg(), or NULL. The packet is consumed either way -- released here on
+ * failure -- so the caller must not touch it again.
  *
  * bsd_raw_receive() dequeues one whole IP datagram, header included, or NULL.
  * The caller owns it and must nx_packet_release() it.
@@ -826,7 +833,7 @@ LONG       bsd_raw_open(struct AmiSocketBase *base, AmiSocket *sock);
 VOID       bsd_raw_close(AmiSocket *sock);
 LONG       bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
                                NX_PACKET *packet, const NXD_ADDRESS *addr,
-                               ULONG scope);
+                               ULONG scope, const BsdCmsgSource *src);
 NX_PACKET *bsd_raw_receive(AmiSocket *sock, ULONG wait, UINT *why);
 VOID       bsd_raw_source(NX_PACKET *packet, NXD_ADDRESS *addr);
 ULONG      bsd_raw_available(AmiSocket *sock);
