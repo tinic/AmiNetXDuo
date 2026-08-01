@@ -98,6 +98,8 @@
 
 #include "tools.h"
 
+#include <stdlib.h>   /* atexit */
+
 #ifdef TOOL_DELETE
 const char *const tool_name = "DeleteNetRoute";
 
@@ -248,7 +250,16 @@ static BOOL resolve_address(const char *text, ULONG *addr, ULONG *mask,
     if (ami_config_parse_ip(copy, addr))
         return TRUE;
 
+    /*
+     * AmigaOS does not reclaim AllocVec() memory when a process exits, and
+     * ami_alloc() is AllocVec(), so the twelve blocks ami_netdb_load() builds
+     * out of DEVS:Internet outlive this command -- 12,616 bytes per run on a
+     * stock netdb, gone until reboot. atexit() rather than a free before each
+     * return: this command leaves main() from several places and the leak is
+     * one missed path away from coming back.
+     */
     (VOID)ami_netdb_load();
+    atexit(ami_netdb_free);
 
     entry = ami_netdb_host_by_name(copy);
     if (entry != NULL)

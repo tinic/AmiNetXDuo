@@ -43,6 +43,8 @@
 
 #include "tools_nx.h"
 
+#include <stdlib.h>   /* atexit */
+
 const char *const tool_name = "ShowNetStatus";
 
 static const char version_tag[] __attribute__((used)) =
@@ -125,7 +127,16 @@ static VOID names_prepare(BOOL wanted)
 
     if (wanted && !netdb_loaded)
     {
+        /*
+         * AmigaOS does not reclaim AllocVec() memory when a process exits, and
+         * ami_alloc() is AllocVec(), so the twelve blocks ami_netdb_load() builds
+         * out of DEVS:Internet outlive this command -- 12,616 bytes per run on a
+         * stock netdb, gone until reboot. atexit() rather than a free before each
+         * return: this command leaves main() from several places and the leak is
+         * one missed path away from coming back.
+         */
         (VOID)ami_netdb_load();
+        atexit(ami_netdb_free);
         netdb_loaded = TRUE;
     }
 }
