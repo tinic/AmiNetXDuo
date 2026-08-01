@@ -200,6 +200,16 @@ those empty results and was wrong for a day.
 
 ## Environment and tooling
 
+- **A task can hold about five library bases that use a `WaitSelect()`
+  timeout.** Each base takes an event signal from the calling task
+  (`library.c:244`), and the first timeout takes another for the timer
+  (`select.c:475`), out of the 32 bits a Task has. `OpenLibrary()` refuses once
+  they run out, which is the right answer -- better than succeeding and failing
+  the first `WaitSelect()`. Found 2026-07-31 when `run-cycledrill.sh` first
+  exercised a timeout on every nested base and eight opens got five. The drill
+  now asks for four. A program that opens many bases and uses timeouts on all
+  of them will meet this; nothing in the tree does.
+
 - **`fix-crt0` no longer patches the crt0, on either build host.** It reports
   `register-save patch matched 0 site(s)` and `no 'pea/move.l/jsr' main() call
   found -- copying crt0.o unchanged`, on playhouse2 and playhouse3 alike with

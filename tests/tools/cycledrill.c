@@ -130,7 +130,16 @@ enum
 
 /* Nested OpenLibrary()s per cycle.  Eight is past any plausible off-by-one in
    an open count and still cheap: only the first one starts a stack. */
-#define NEST_OPENS      8
+/*
+ * Four, not eight. A base costs the calling task signal bits -- one for its
+ * event signal and, the first time a caller passes a timeout, one more for the
+ * timer -- out of the 32 a Task has. With the drill's own bits already spent,
+ * eight nested bases each doing a timed WaitSelect() runs the Process out and
+ * OpenLibrary() correctly refuses the sixth. That ceiling is real and is
+ * recorded in docs/EXECRESOURCES.md; asserting past it tests the platform's
+ * limit rather than this library's behaviour.
+ */
+#define NEST_OPENS      4
 
 #define MAX_CYCLES      16
 #define MAX_IFACES      4
