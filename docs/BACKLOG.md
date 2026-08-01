@@ -210,19 +210,25 @@ those empty results and was wrong for a day.
   now asks for four. A program that opens many bases and uses timeouts on all
   of them will meet this; nothing in the tree does.
 
-- **`fix-crt0` no longer patches the crt0, on either build host.** It reports
-  `register-save patch matched 0 site(s)` and `no 'pea/move.l/jsr' main() call
-  found -- copying crt0.o unchanged`, on playhouse2 and playhouse3 alike with
-  toolchain 15.2.0, so it is the toolchain's crt0 having moved rather than
-  anything in this tree. Its own message says not to trust the build until argv
-  is checked. **Consequence: `--wrap=main` may not be reached, so every ported
-  client's argv and the 256 KB stack swap in `clients/compat/amiga_argv.c` are
-  unverified on the current toolchain.** `tests/clients/run-argvexit.sh -A`
-  times out with the guest never reaching the probe, which is consistent with
-  the binary never getting a working `main` and does **not** by itself
-  implicate the `longjmp` fix in `__wrap__exit()`. Establish whether the client
-  harnesses (`tests/bebbossh`, `tests/bebboget`) still pass before reading
-  anything else into it. Found 2026-07-31.
+- **`tests/clients/run-argvexit.sh -A` times out, and the toolchain is not
+  why.** An earlier version of this entry read `fix-crt0`'s "matched 0 site(s)"
+  as the crt0 having moved out from under the script, and concluded that
+  `--wrap=main` might not be reached. That was wrong: 0 sites is the immune
+  case, which the script's own docstring says both defects reach once they are
+  fixed upstream. `--check` against the pinned toolchain on playhouse2 and
+  playhouse3 alike reports `11 ok, 1 skipped` for the frame skew and `2 call
+  site(s) already push __argv by value` for the argv indirection, so a ported
+  client gets a correct `argv` and `--wrap=main` is reached. The probe's
+  timeout is the harness, and the `longjmp` fix in `__wrap__exit()` is still
+  unverified by measurement. Found 2026-07-31.
+
+- **`/opt/amiga` on playhouse2 carries the argv bug in all eleven `crt0.o`.**
+  Locally built, GCC 16.1.1b, and `--check` reports `11 buggy` -- it has the
+  compiler fix for the frame skew and not newlib's `120371e` for the argv
+  declaration. Nothing releases through it, so this is a note about the box
+  rather than about a build: anything built there against `-lc` without running
+  `fix-toolchain-crt0.py` first hands ported clients `&__argv`. Found
+  2026-07-31.
 
 - **`tests/ipv6/ipv6_socket_test.c` runs green but is not in CI.** 129 checks,
   0 failures, on an emulated A1200 under Amiberry on 2026-07-31 -- the whole
