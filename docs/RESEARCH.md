@@ -21493,9 +21493,10 @@ Amiberry does put two boards in the machine -- `a2065_rom_file=:ENABLED` plus
 an `ariadne_*` pair through `AMINETXDUO_AMIBERRY_EXTRA`, each with its own MAC
 -- and logs both, `Card 05: 'A2065'` and `Card 06: 'Ariadne'`, mapped into
 Zorro II at `0x00e90000` and `0x00ea0000`. What did not happen is the guest
-coming up on them. Three runs, on an A1200 with 8 MB of Zorro II Fast:
+coming up on them. Five runs, on an A1200 with 8 MB of Zorro II Fast:
 
 ```
+a2065 alone, bridged              eth0 online, 192.168.1.201     rc 0
 ariadne alone, bridged            eth0 online, 192.168.1.202     rc 0
 a2065 + ariadne, both bridged     AddNetInterface eth0 eth1 hangs, empty serial
 a2065 + ariadne, both bridged     AddNetInterface eth0 alone hangs, same

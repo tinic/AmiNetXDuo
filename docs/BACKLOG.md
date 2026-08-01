@@ -64,7 +64,7 @@ was wrong for a day.
   SANA-II drivers. Amiberry does put two cards in the machine -- `a2065` plus
   `ariadne`, both logged and mapped into Zorro II -- but with the second card
   present `AddNetInterface eth0` hangs on the A2065, which comes up on its own
-  every day, and the serial log is empty. It hangs with the second card on
+  in the same tree on the same run script, and the serial log is empty. It hangs with the second card on
   SLIRP as well as bridged, so it is the board and not the backend. The 8 MB of
   Zorro II Fast RAM sitting directly below both cards is the first suspect
   (RESEARCH.md 85, 76). `SrcProbe` already takes the second address and a
