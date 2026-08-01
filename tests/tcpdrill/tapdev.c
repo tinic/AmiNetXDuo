@@ -731,6 +731,11 @@ static const APTR tap_vectors[] =
     (APTR)-1
 };
 
+/*
+ * The timer half of the teardown, on its own because tap_install() acquires it
+ * before tap_dev is set and tap_remove() gates on tap_dev: both of the failure
+ * returns below used to leave the MsgPort and the open timer.device behind.
+ */
 static VOID tap_timer_close(VOID)
 {
     if (tap_timer != NULL)
@@ -775,8 +780,6 @@ LONG tap_install(const UBYTE *mac)
                                  (ULONG)sizeof(TapDevice), (BPTR)0);
     if (d == NULL)
     {
-        /* tap_remove() returns at once while tap_dev is NULL, so a failure
-           here is the only chance to give the timer back. */
         tap_timer_close();
         return -1;
     }

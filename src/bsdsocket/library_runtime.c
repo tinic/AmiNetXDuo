@@ -66,6 +66,10 @@ BOOL bsd_runtime_open(VOID)
 
 VOID bsd_runtime_close(VOID)
 {
+    /* ami_millis() opened timer.device against a timerequest that is a
+       file-scope static in this segment; expunge is about to UnLoadSeg() it. */
+    ami_timer_close();
+
     if (DOSBase != NULL)
     {
         CloseLibrary((struct Library *)DOSBase);

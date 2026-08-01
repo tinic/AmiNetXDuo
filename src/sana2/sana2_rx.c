@@ -704,6 +704,11 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
         rx->started     = FALSE;
         rx->reap_sigbit = -1;
         rx->reap_mask   = 0;
+        /* Stale from the previous run: ami_sana2_rx_stop() Signal()s this mask
+           at rx->task, and a reader that then fails to get a MsgPort would be
+           poked on a bit it does not hold. */
+        rx->wake_mask   = 0;
+        rx->orphans     = 0;
 
         /* The first reader carries the TX reaping duty. It is the IPv4 one,
            the reader that always exists, but nothing depends on which: any
@@ -847,6 +852,25 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
             }
 
             /*
+             * The reader exited, but ami_sana2_rx_teardown() kept its reply
+             * port because the device would not give every read back. That
+             * port's mp_SigTask is this thread's Task and exec will Signal()
+             * through it on the next matching frame, so the Task has to outlive
+             * the port: no terminate, no delete, no stack free. Its slots and
+             * packets are inside the interface, which rx_orphaned then keeps
+             * alive as well.
+             */
+            if (rx->orphans != 0)
+            {
+                AMI_ERROR("sana2: reader %ld left %ld read(s) with the device; "
+                          "leaking its thread and stack -- the reply port they "
+                          "will complete through signals that Task",
+                          (long)i, (long)rx->orphans);
+                iface->rx_orphaned = TRUE;
+                continue;
+            }
+
+            /*
              * Give the thread time to run off the end of its entry function
              * before the control block and stack go away. This is the one place
              * the shim relies on port behaviour it cannot yet verify
@@ -858,12 +882,6 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
             tx_thread_delete(&rx->thread);
             tx_semaphore_delete(&rx->ready);
             tx_semaphore_delete(&rx->exited);
-
-            /* The reader may have exited leaving reads the device would not give
-               back. Its slots, packets and reply port are inside this interface,
-               so the interface itself cannot be freed. */
-            if (rx->orphans != 0)
-                iface->rx_orphaned = TRUE;
         }
 
         /*

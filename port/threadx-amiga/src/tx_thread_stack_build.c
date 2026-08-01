@@ -49,6 +49,7 @@ CHAR        *name;
     thread_ptr -> tx_thread_amiga_suspension_type =  ((UINT) 0);
     thread_ptr -> tx_thread_amiga_flags           =  ((UINT) 0);
     thread_ptr -> tx_thread_amiga_task            =  (VOID *) 0;
+    thread_ptr -> tx_thread_amiga_signal_owner    =  (VOID *) 0;
     thread_ptr -> tx_thread_amiga_run_signal      =  0UL;
 
     /* Give the generic code a plausible stack pointer.  Nothing in this port
@@ -67,9 +68,12 @@ CHAR        *name;
     if (_tx_amiga_adopt_task != (VOID *) 0)
     {
 
-        thread_ptr -> tx_thread_amiga_task       =  _tx_amiga_adopt_task;
-        thread_ptr -> tx_thread_amiga_run_signal =  _tx_amiga_adopt_signal;
-        thread_ptr -> tx_thread_amiga_flags      =  TX_AMIGA_THREAD_ADOPTED;
+        thread_ptr -> tx_thread_amiga_task         =  _tx_amiga_adopt_task;
+        /* The same Task, recorded twice on purpose -- see tx_port.h.  Teardown
+           clears the first one and must not clear this one.  */
+        thread_ptr -> tx_thread_amiga_signal_owner =  _tx_amiga_adopt_task;
+        thread_ptr -> tx_thread_amiga_run_signal   =  _tx_amiga_adopt_signal;
+        thread_ptr -> tx_thread_amiga_flags        =  TX_AMIGA_THREAD_ADOPTED;
 
         _tx_amiga_adopt_task   =  (VOID *) 0;
         _tx_amiga_adopt_signal =  0UL;

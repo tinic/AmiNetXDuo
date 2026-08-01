@@ -93,6 +93,7 @@
 #include <exec/tasks.h>
 #include <dos/dos.h>
 #include <dos/dosextens.h>
+#include <devices/timer.h>      /* struct timeval, for WaitSelect */
 #include <utility/tagitem.h>
 
 /* <libraries/bsdsocket.h> pulls in <sys/socket.h>, which uses size_t and
@@ -212,6 +213,40 @@ static LONG p_getsockname(struct Library *base, LONG s, ProbeAddr *name,
                       : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
                         "=r" (_clob_a1)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (a1)
+                      : "cc", "memory");
+    return res;
+}
+
+/*
+ * WaitSelect(nfds, read, write, except, timeout, signals).
+ *
+ * Here for one reason: a timeout is what makes the library open timer.device
+ * and AllocSignal() a bit out of THIS Process, lazily, per base (select.c).
+ * A drill that never passes one never reaches that code, so the signal check
+ * below had nothing to check -- and the bit was leaked on every close.
+ */
+static LONG p_waitselect(struct Library *base, LONG nfds, ULONG *readfds,
+                         struct timeval *tv)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register LONG            d0  __asm("d0") = nfds;
+    register APTR            a0  __asm("a0") = (APTR)readfds;
+    register APTR            a1  __asm("a1") = NULL;
+    register APTR            a2  __asm("a2") = NULL;
+    register APTR            a3  __asm("a3") = (APTR)tv;
+    register APTR            d1  __asm("d1") = NULL;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
+    register LONG _clob_a2 __asm("a2");
+    register LONG _clob_a3 __asm("a3");
+
+    __asm __volatile ("jsr a6@(-126:W)"     /* WaitSelect -0x07e */
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
+                        "=r" (_clob_a1), "=r" (_clob_a2), "=r" (_clob_a3)
+                      : "r" (a6), "r" (d0), "r" (a0), "r" (a1), "r" (a2),
+                        "r" (a3), "r" (d1)
                       : "cc", "memory");
     return res;
 }
@@ -677,12 +712,31 @@ static LONG            socks[MAX_SOCKETS];
  * again redirects to the master (library.c) -- and nsl_Opens is the number
  * that says whether the library agrees about how many callers it has.
  */
+/*
+ * One WaitSelect() with a timeout on a freshly opened base, with nothing in the
+ * sets, so it does nothing but expire. The point is the side effect: the base
+ * opens timer.device and takes a signal bit out of this Process the first time
+ * a caller passes a timeout, and CloseLibrary() has to give that bit back.
+ */
+static VOID timed_wait(struct Library *base)
+{
+    struct timeval tv;
+
+    tv.tv_secs  = 0;
+    tv.tv_micro = 1000;
+
+    (VOID)p_waitselect(base, 0, NULL, &tv);
+}
+
 static VOID phase_opens(struct Library *anchor, ULONG opens_before)
 {
+    Sample   before;
     Sample   peak;
     Sample   after;
     LONG     i;
     LONG     got = 0;
+
+    sample(anchor, &before);
 
     for (i = 0; i < NEST_OPENS; i++)
     {
@@ -691,6 +745,7 @@ static VOID phase_opens(struct Library *anchor, ULONG opens_before)
         {
             got++;
             did_opens++;
+            timed_wait(nest[i]);
         }
     }
 
@@ -719,6 +774,16 @@ static VOID phase_opens(struct Library *anchor, ULONG opens_before)
     check(after.opens == opens_before,
           "nsl_Opens came back to where it started",
           (LONG)after.opens, (LONG)opens_before);
+
+    /*
+     * Exact, and inside one cycle rather than only in the drift table: each of
+     * those bases was made to open timer.device by the WaitSelect() above, and
+     * a bit not given back at CloseLibrary() is gone from this Process for
+     * good. Eight per cycle empties the 32 in four.
+     */
+    check(after.sigs == before.sigs,
+          "the nested opens gave every signal bit back",
+          (LONG)before.sigs, (LONG)after.sigs);
 }
 
 /*
@@ -993,6 +1058,8 @@ static VOID phase_expunge_cycle(LONG n, const char *iface, Sample *at_open,
     check(info.found, "the stack came up with the interface", n,
           (LONG)info.linkup);
 
+    timed_wait(base);
+
     sample(base, at_open);
 
     CloseLibrary(base);
@@ -1100,6 +1167,7 @@ int main(VOID)
             break;
 
         did_opens++;
+        timed_wait(cold);
         sample(cold, &cold_open[i]);
         CloseLibrary(cold);
         sample(NULL, &cold_shut[i]);
@@ -1247,6 +1315,10 @@ int main(VOID)
         say("cold leak: %ld bytes per cycle\n",
             ((LONG)cold_shut[0].free_mem -
              (LONG)cold_shut[last].free_mem) / last, 0, 0, 0);
+
+        check(cold_shut[last].sigs <= cold_shut[0].sigs,
+              "no signal bit was leaked by a cold open/close",
+              (LONG)cold_shut[0].sigs, (LONG)cold_shut[last].sigs);
     }
 
     /* ---- what actually happened ------------------------------------------- */

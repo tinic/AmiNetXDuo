@@ -650,15 +650,17 @@ VOID ami_sana2_close(AmiSana2If *iface)
         ami_sana2_offline(iface);
 
         /*
-         * A device that still owns one of these read requests must not be
-         * closed and this memory must not be freed: the request points into
-         * this allocation and into a reply port inside it, so the next
-         * matching frame would be written over whatever took their place.
+         * A device that still owns one of these requests must not be closed
+         * and this memory must not be freed: the request points into this
+         * allocation and into a reply port inside it, so the next completion
+         * would be written over whatever took their place. True of a queued
+         * CMD_WRITE as much as a CMD_READ -- tx_port and the tx ring are
+         * fields of AmiSana2If.
          */
-        if (iface->rx_orphaned)
+        if (iface->rx_orphaned || iface->tx_orphaned)
         {
             AMI_ERROR("sana2: leaking the interface -- the device still holds "
-                      "read requests inside it");
+                      "requests inside it");
             return;
         }
 
@@ -667,9 +669,9 @@ VOID ami_sana2_close(AmiSana2If *iface)
         iface->device_open = FALSE;
     }
 
-    if (iface->rx_orphaned)
+    if (iface->rx_orphaned || iface->tx_orphaned)
     {
-        AMI_ERROR("sana2: leaking the interface -- readers unreclaimed");
+        AMI_ERROR("sana2: leaking the interface -- requests unreclaimed");
         return;
     }
 
@@ -717,7 +719,10 @@ BOOL ami_sana2_admin_up(const AmiSana2If *iface)
 
 BOOL ami_sana2_orphaned(const AmiSana2If *iface)
 {
-    return (iface != NULL) ? iface->rx_orphaned : FALSE;
+    if (iface == NULL)
+        return FALSE;
+
+    return (iface->rx_orphaned || iface->tx_orphaned) ? TRUE : FALSE;
 }
 
 BOOL ami_sana2_raw_mode(const AmiSana2If *iface)
