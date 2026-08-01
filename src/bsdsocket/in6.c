@@ -188,11 +188,11 @@ BOOL bsd_addr_normalise(const AmiSocket *sock, NXD_ADDRESS *addr)
  * with ENOPROTOOPT rather than accepted and ignored, the same rule MSG_OOB is
  * held to in transfer.c.
  *
+ * IPV6_MULTICAST_HOPS/_IF/_LOOP, IPV6_JOIN_GROUP and IPV6_LEAVE_GROUP are
+ * mcast.c's, dispatched from here in an AMINETXDUO_MULTICAST build and
+ * ENOPROTOOPT without one -- the same arm the IPv4 five answer to.
+ *
  * Refused, and why:
- *   IPV6_MULTICAST_HOPS/_IF/_LOOP, IPV6_JOIN_GROUP, IPV6_LEAVE_GROUP
- *       -- IPv6 multicast membership needs NX_ENABLE_IPV6_MULTICAST, which the
- *          floor-target tuning leaves off (port/netxduo-amiga/inc/nx_user.h).
- *          A join that never happens is worse than a refused one.
  *   IPV6_RTHDR, HOPOPTS, DSTOPTS, RTHDRDSTOPTS, PATHMTU, RECVPATHMTU,
  *   USE_MIN_MTU, DONTFRAG, NEXTHOP
  *       -- the rest of RFC 3542.  The subset that is implemented -- PKTINFO,
@@ -239,6 +239,13 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
     owned = bsd_cmsg_option(base, sock, level, optname, optval, &optlen, TRUE);
     if (owned <= 0)
         return owned;
+
+#ifdef AMINETXDUO_MULTICAST
+    /* RFC 3493 section 5.2 belongs to mcast.c, which takes its own bracket
+       and reads a struct rather than an int. */
+    if (level == IPPROTO_IPV6 && bsd_mcast6_is_option(optname))
+        return bsd_mcast6_setopt(base, sock, optname, optval, optlen);
+#endif
 
     if (optval == NULL)
         return bsd_fail(base, AMI_EFAULT);
@@ -316,6 +323,11 @@ LONG bsd_getsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
     owned = bsd_cmsg_option(base, sock, level, optname, optval, optlen, FALSE);
     if (owned <= 0)
         return owned;
+
+#ifdef AMINETXDUO_MULTICAST
+    if (level == IPPROTO_IPV6 && bsd_mcast6_is_option(optname))
+        return bsd_mcast6_getopt(base, sock, optname, optval, optlen);
+#endif
 
     if (optval == NULL || optlen == NULL)
         return bsd_fail(base, AMI_EFAULT);

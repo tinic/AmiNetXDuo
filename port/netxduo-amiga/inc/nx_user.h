@@ -556,34 +556,45 @@
 #define NX_IPV6_STATELESS_AUTOCONFIG_CONTROL
 
 /*
+ * IPV6_JOIN_GROUP and IPV6_LEAVE_GROUP, over
+ * nxd_ipv6_multicast_interface_join()/_leave().  src/bsdsocket/mcast.c is the
+ * caller; AMINETXDUO_MULTICAST is the same switch the IPv4 side answers to, so
+ * the two families arrive and leave together and the floor drawer, which turns
+ * it off, is not asked to carry either.
+ *
+ * Neighbour discovery does not need this.  Solicited-node joins go through
+ * _nx_ipv6_multicast_join() from nxd_ipv6_address_set(), which reaches the
+ * driver as NX_LINK_MULTICAST_JOIN and never touches the table below.
+ *
+ * TWO NUMBERS AND WHAT THEY BUY.
+ *
+ * It grows NX_IP by nx_ipv6_multicast_entry[7] plus a count -- 172 bytes,
+ * spent whether or not anything joins -- where nx_igmp_enable() grows it by
+ * nothing, the IPv4 table being unconditional already.
+ *
+ * And there is still no MLD in this tree.  nx_mld.h exists and is a stub that
+ * declares nothing; no nx_mld_*.c exists; no Multicast Listener Report is ever
+ * built or sent.  So a join registers 33:33:xx:xx:xx:xx with the interface and
+ * tells the stack to accept the group, and announces nothing on the wire.
+ *
+ * What decided it was the third fact, which is that without this define the
+ * receive path drops every non-solicited-node IPv6 multicast datagram outright
+ * (nx_ipv6_packet_receive.c, the NX_ENABLE_IPV6_MULTICAST arm around the join
+ * list).  There is no partial capability to preserve: it is 172 bytes for
+ * group reception, or no group reception.  MLD would add reachability through
+ * a snooping switch with an active querier and through a router, neither of
+ * which applies to a link-local group -- ff02::fb, ff02::c, ff02::1:3 are what
+ * an Amiga program joins, and those are never forwarded by anything.  MLD is a
+ * protocol and belongs in the NetX fork if it is ever wanted; it is not a
+ * prerequisite for this.
+ */
+#ifdef AMINETXDUO_MULTICAST
+#define NX_ENABLE_IPV6_MULTICAST
+#endif
+
+/*
  * Not set, and why:
  *
- *   NX_ENABLE_IPV6_MULTICAST     -- the application-level
- *                                   nxd_ipv6_multicast_interface_join() API.
- *                                   Neighbour discovery does not need it:
- *                                   solicited-node group joins go through
- *                                   _nx_ipv6_multicast_join() from
- *                                   nxd_ipv6_address_set(), which reaches the
- *                                   driver as NX_LINK_MULTICAST_JOIN either
- *                                   way.  Still nothing in bsdsocket.library
- *                                   exposes IPV6_JOIN_GROUP, so this would be
- *                                   code with no caller -- the IPv4 side got
- *                                   its membership surface (src/bsdsocket/
- *                                   mcast.c) and this did not.
- *
- *                                   Costed rather than assumed, because the
- *                                   shape differs from the IPv4 switch.  It
- *                                   grows NX_IP by nx_ipv6_multicast_entry[7]
- *                                   plus a count -- 172 bytes, spent whether
- *                                   or not anything ever joins -- where
- *                                   nx_igmp_enable() grows it by nothing, the
- *                                   IPv4 table being unconditional already.
- *                                   And there is no MLD in this tree: no
- *                                   nx_mld_*.c exists, so a join reaches the
- *                                   driver and no report is ever sent, and a
- *                                   querying switch stops forwarding the
- *                                   group.  Worse ratio than the IPv4 one,
- *                                   and a separate decision.
  *   NX_ENABLE_IPV6_PATH_MTU_DISCOVERY -- adds a periodic sweep of the
  *                                   destination table for a benefit that only
  *                                   appears on paths with a smaller MTU than

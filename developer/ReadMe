@@ -93,6 +93,8 @@ is whether socket(AF_INET6, SOCK_STREAM, 0) succeeds.
 
     IPPROTO_IPV6  PF_INET6  INET6_ADDRSTRLEN
     IPV6_V6ONLY  IPV6_UNICAST_HOPS  IPV6_TCLASS
+    IPV6_JOIN_GROUP  IPV6_LEAVE_GROUP  struct ipv6_mreq
+    IPV6_MULTICAST_IF  IPV6_MULTICAST_HOPS  IPV6_MULTICAST_LOOP
     IN6ADDR_ANY_INIT  IN6ADDR_LOOPBACK_INIT
     IN6_IS_ADDR_UNSPECIFIED / LOOPBACK / MULTICAST / LINKLOCAL /
         SITELOCAL / V4MAPPED / V4COMPAT and the MC_ scopes
@@ -151,8 +153,16 @@ ALIGN() its own CMSG_NXTHDR expands to.
 
 IPv4 multicast needs nothing from here: IP_MULTICAST_IF, IP_MULTICAST_TTL,
 IP_MULTICAST_LOOP, IP_ADD_MEMBERSHIP, IP_DROP_MEMBERSHIP and struct ip_mreq
-are all in the NDK's <netinet/in.h>.  IPv6 multicast -- IPV6_JOIN_GROUP,
-IPV6_LEAVE_GROUP, struct ipv6_mreq -- is not, and would belong here.
+are all in the NDK's <netinet/in.h>.  The IPv6 five and struct ipv6_mreq are
+not, so in6.h carries them.
+
+A word on what an IPv6 join does.  There is no MLD in this stack: joining
+registers the group's 33:33 address with the interface and makes the library
+accept datagrams sent to it, and puts nothing on the wire.  The link-local
+groups -- ff02::fb for mDNS, ff02::1:3 for LLMNR, ff02::c for SSDP -- work on
+any segment.  A switch running MLD snooping with an active querier will stop
+forwarding the group, and no router will forward a wider scope here, so
+link-local scope is what to rely on.
 
 The bpf_* capture path needs nothing from here either.  BIOC*, struct
 bpf_hdr, struct bpf_program, struct bpf_stat, DLT_*, the BPF_* opcodes,

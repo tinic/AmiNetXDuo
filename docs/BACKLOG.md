@@ -74,14 +74,26 @@ was wrong for a day.
   check goes with it: `EADDRNOTAVAIL`, for a bound address that *can* reach the
   destination while the stack would still leave by somewhere else, needs two
   interfaces on one subnet to produce. Reasoned about, not measured.
-- **IPv6 group membership (`IPV6_JOIN_GROUP`) is absent.** The IPv4 side is
-  done (below); this is not, and is a separate decision because the numbers are
-  worse. `NX_ENABLE_IPV6_MULTICAST` grows every `NX_IP` by 172 bytes whether or
-  not anything joins, where `nx_igmp_enable()` grows it by nothing, and there is
-  no MLD anywhere in the vendored tree -- no `nx_mld_*.c` exists, so a join
-  reaches the driver and no report is ever sent, and a querying switch stops
-  forwarding the group. The reasoning is beside the define in
-  `port/netxduo-amiga/inc/nx_user.h`.
+- **MLD (RFC 2710/3810) does not exist in this stack.** IPv6 group membership
+  itself shipped -- `IPV6_JOIN_GROUP` and the rest are in `src/bsdsocket/
+  mcast.c` beside the IPv4 five -- and it joins without announcing anything.
+  Verified rather than assumed: `nx_mld.h` is in the vendored tree and is a
+  stub that declares nothing, no `nx_mld_*.c` exists, and `LC_ALL=C grep -a`
+  finds the token `MLD` in five files, all of them the join/leave/detach paths
+  naming their own struct members. So a join registers the group's 33:33
+  address with the interface and tells the stack to accept the group, and sends
+  no Multicast Listener Report.
+
+  What that costs: a switch running MLD snooping *with an active querier* will
+  prune the group, and no router will forward a wider-scope group here.
+  Link-local scope -- ff02::fb, ff02::c, ff02::1:3, which is what an Amiga
+  program joins -- is never forwarded by anything and is unaffected.
+
+  Not done, and it is a protocol rather than a socket option: it would be a
+  defect branch off `473d1928` in the NetX fork, an ICMPv6 type 130/131/132
+  handler plus a report timer per group entry, and it would want the query
+  path as well to be worth having. Only take it on for a wider-scope group
+  that has to cross a snooping switch.
 - **A browse reports the whole peer cache, not the browse window.**
   `netstack_mdns_browse_collect()` walks `nx_mdns_service_lookup()` by index,
   which is the whole peer cache, and nothing ages entries from our side -- the
@@ -121,9 +133,12 @@ was wrong for a day.
   - **RFC 3542** is in it as of the same day: `include/aminetxduo/cmsg.h`, the
     third published header. It adds no vectors, so the drawer's shape did not
     change.
-  - **IPv6 multicast** (`IPV6_JOIN_GROUP`, `IPV6_LEAVE_GROUP`,
-    `struct ipv6_mreq`) is absent from the NDK and would belong in `in6.h`.
-    IPv4 multicast needs nothing: the NDK has the whole set.
+  - **IPv6 multicast** is in `in6.h` as of 2026-07-31: `IPV6_JOIN_GROUP`,
+    `IPV6_LEAVE_GROUP`, `IPV6_MULTICAST_IF`, `IPV6_MULTICAST_HOPS`,
+    `IPV6_MULTICAST_LOOP` and `struct ipv6_mreq`, none of which the NDK has.
+    IPv4 multicast needs nothing: the NDK has the whole set. `in6.h` stopped
+    being header-only to carry `struct ipv6_mreq` and now includes
+    `<netinet/in.h>` itself, as `cmsg.h` already did.
   - **`NetStackQuery`/`NetStackControl` are still private.** Recommendation:
     publish them, because they are what a third-party `netstat` needs and
     `ShowNetStatus`, `netstat` and `arp` already depend on them being stable.

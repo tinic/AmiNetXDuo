@@ -479,6 +479,10 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     UINT            status;
 #ifdef AMINETXDUO_MULTICAST
     LONG            mcast_if;
+#ifdef AMINETXDUO_IPV6
+    LONG            mcast6_src;
+    ULONG           mcast6_hops;
+#endif
 #endif
 
     (VOID)flags;
@@ -552,13 +556,28 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
      * the TTL back for a unicast one.
      */
     mcast_if = bsd_mcast_prepare_send(sock, addr);
+#ifdef AMINETXDUO_IPV6
+    /*
+     * The v6 half. It answers with an ADDRESS index, not an interface one --
+     * IPV6_MULTICAST_IF names an interface and the source send wants the
+     * link-local address on it -- and it puts IPV6_MULTICAST_HOPS on the
+     * NX_IP, which bsd_mcast6_finish_send() takes back off below. Nothing
+     * between the two may return.
+     */
+    mcast6_src = bsd_mcast6_prepare_send(sock, addr, &mcast6_hops);
+#endif
 #endif
 
     wait = bsd_wait_option(sock, sock->as_SndTimeout);
 
     status = nx_packet_allocate(pool, &packet, NX_UDP_PACKET, wait);
     if (status != NX_SUCCESS)
+    {
+#if defined(AMINETXDUO_MULTICAST) && defined(AMINETXDUO_IPV6)
+        bsd_mcast6_finish_send(mcast6_hops);
+#endif
         return bsd_fail(base, bsd_wait_errno(wait, status));
+    }
 
     /* A zero-length datagram is legal and is sent as an empty packet. */
     filled = (len > 0)
@@ -568,14 +587,17 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     if (filled < len)
     {
         nx_packet_release(packet);
+#if defined(AMINETXDUO_MULTICAST) && defined(AMINETXDUO_IPV6)
+        bsd_mcast6_finish_send(mcast6_hops);
+#endif
         return bsd_fail(base, AMI_ENOBUFS);
     }
 
     /*
-     * Three ways to name where this leaves from, most specific first.
-     * IP_MULTICAST_IF only ever answers for an IPv4 group --
-     * bsd_mcast_prepare_send() gives -1 for anything else -- so in practice it
-     * does not compete with the other two.
+     * Four ways to name where this leaves from, most specific first. The two
+     * multicast ones only answer for a group of their own family -- the
+     * prepare calls give -1 for anything else -- so in practice neither
+     * competes with the other two, or with each other.
      */
 #ifdef AMINETXDUO_MULTICAST
     /* IP_MULTICAST_IF named an interface, so the route does not choose. */
@@ -586,6 +608,16 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
                                            (UINT)mcast_if);
     }
     else
+#ifdef AMINETXDUO_IPV6
+    /* IPV6_MULTICAST_IF, same statement one family over. */
+    if (mcast6_src >= 0)
+    {
+        status = nxd_udp_socket_source_send(&sock->as_Nx.udp, packet,
+                                            (NXD_ADDRESS *)addr, port,
+                                            (UINT)mcast6_src);
+    }
+    else
+#endif
 #endif
     if (source == BSD_SOURCE_INDEX)
     {
@@ -599,6 +631,10 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
         status = nxd_udp_socket_send(&sock->as_Nx.udp, packet,
                                      (NXD_ADDRESS *)addr, port);
     }
+
+#if defined(AMINETXDUO_MULTICAST) && defined(AMINETXDUO_IPV6)
+    bsd_mcast6_finish_send(mcast6_hops);
+#endif
 
     if (status != NX_SUCCESS)
     {

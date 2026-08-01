@@ -198,6 +198,23 @@
 #define AMI_IPV6_TCLASS_BSD         IPV6_TCLASS
 #define AMI_IPV6_TCLASS_LINUX       67
 
+/*
+ * RFC 3493 section 5.2: BSD 9..13, Linux 17..21. Same treatment again. The
+ * Linux names those BSD numbers displace are IPV6_NEXTHOP, IPV6_AUTHHDR,
+ * IPV6_FLOWINFO and two IPV6_2292 spellings, none of which this library
+ * offers.
+ */
+#define AMI_IPV6_MULTICAST_IF_BSD     IPV6_MULTICAST_IF
+#define AMI_IPV6_MULTICAST_IF_LINUX   17
+#define AMI_IPV6_MULTICAST_HOPS_BSD   IPV6_MULTICAST_HOPS
+#define AMI_IPV6_MULTICAST_HOPS_LINUX 18
+#define AMI_IPV6_MULTICAST_LOOP_BSD   IPV6_MULTICAST_LOOP
+#define AMI_IPV6_MULTICAST_LOOP_LINUX 19
+#define AMI_IPV6_JOIN_GROUP_BSD       IPV6_JOIN_GROUP
+#define AMI_IPV6_JOIN_GROUP_LINUX     20
+#define AMI_IPV6_LEAVE_GROUP_BSD      IPV6_LEAVE_GROUP
+#define AMI_IPV6_LEAVE_GROUP_LINUX    21
+
 #define AMI_INET6_ADDRSTRLEN        INET6_ADDRSTRLEN
 
 /* --------------------------------------------------------------- library -- */
@@ -571,6 +588,21 @@ typedef struct AmiSocket
     LONG                    as_McastTtl;
     LONG                    as_McastLoop;
     LONG                    as_McastIf;
+
+#ifdef AMINETXDUO_IPV6
+    /*
+     * IPV6_MULTICAST_HOPS / _IF. Separate from the IPv4 three because BSD
+     * keeps them separate and because NetX Duo puts the v6 hop limit
+     * somewhere else again -- on the NX_IP, not the socket. There is no
+     * as_Mcast6Loop: NetX Duo has no IPv6 multicast loopback, so the option
+     * reads back 0 whatever was set and has nothing to remember.
+     *
+     * as_Mcast6If is a NetX interface index, or -1 for "let the route
+     * decide". Callers name it the POSIX way, one higher.
+     */
+    LONG                    as_Mcast6Hops;
+    LONG                    as_Mcast6If;
+#endif
 #endif
 
     /*
@@ -852,6 +884,25 @@ LONG bsd_mcast_getopt(struct AmiSocketBase *base, AmiSocket *sock,
                       LONG optname, APTR optval, socklen_t *optlen);
 VOID bsd_mcast_close(AmiSocket *sock);
 LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr);
+
+#ifdef AMINETXDUO_IPV6
+/* The RFC 3493 section 5.2 half, same file and same shape. in6.c dispatches
+ * the five; bsd_mcast_close() drops both families' memberships.
+ *
+ * bsd_mcast6_prepare_send() answers with the IPv6 ADDRESS index to send from
+ * -- what nxd_udp_socket_source_send() wants -- or -1, and stores the NX_IP
+ * hop limit it overwrote in *saved. bsd_mcast6_finish_send() puts it back;
+ * the pair must bracket the send, and 0 in *saved means nothing changed.
+ */
+LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
+                       LONG optname, APTR optval, socklen_t optlen);
+LONG bsd_mcast6_getopt(struct AmiSocketBase *base, AmiSocket *sock,
+                       LONG optname, APTR optval, socklen_t *optlen);
+BOOL bsd_mcast6_is_option(LONG optname);
+LONG bsd_mcast6_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr,
+                             ULONG *saved);
+VOID bsd_mcast6_finish_send(ULONG saved);
+#endif
 #endif
 
 /* select.c -- event plumbing.

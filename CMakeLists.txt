@@ -107,15 +107,20 @@ if(AMINETXDUO_MDNS)
     add_compile_definitions(AMINETXDUO_MDNS)
 endif()
 
-# RFC 1112 IPv4 multicast: nx_igmp_enable() and the five IPPROTO_IP socket
-# options that go with it.  On by default, because the programs this stack
-# exists to run -- SSDP/UPnP clients, a ported mDNS -- open their own multicast
-# sockets and get ENOPROTOOPT without it.  Global: src/netstack/ calls
-# nx_igmp_enable() and src/bsdsocket/ carries the per-socket state, and the two
-# must agree about whether the membership exists.
+# Multicast group membership, both families: nx_igmp_enable() and the five
+# IPPROTO_IP socket options, plus NX_ENABLE_IPV6_MULTICAST and the five
+# IPPROTO_IPV6 ones in an AMINETXDUO_IPV6 build.  On by default, because the
+# programs this stack exists to run -- SSDP/UPnP clients, a ported mDNS -- open
+# their own multicast sockets and get ENOPROTOOPT without it.  Global:
+# src/netstack/ calls nx_igmp_enable(), port/netxduo-amiga/inc/nx_user.h reads
+# this to size NX_IP, and src/bsdsocket/ carries the per-socket state; all
+# three must agree about whether the membership exists.
+#
+# The v6 half joins without MLD, which there is none of in the vendored NetX
+# Duo.  port/netxduo-amiga/inc/nx_user.h says what that does and does not buy.
 #
 # Off is the floor tier's answer (dist/make-dist.sh's 68000-minimal drawer).
-option(AMINETXDUO_MULTICAST "Build IPv4 multicast membership (IGMP)" ON)
+option(AMINETXDUO_MULTICAST "Build multicast membership (IGMP, IPv6 groups)" ON)
 if(AMINETXDUO_MULTICAST)
     add_compile_definitions(AMINETXDUO_MULTICAST)
 endif()
