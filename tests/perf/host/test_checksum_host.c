@@ -359,6 +359,68 @@ int main(void)
         }
     }
 
+    /* ---- the melded copy ---------------------------------------------- */
+    /*
+     * n68k_copy_sum_longwords() has to return exactly what
+     * n68k_sum_longwords() returns over the same source AND leave the
+     * destination byte for byte identical.  Getting the sum right while
+     * copying wrong, or the reverse, both corrupt silently -- one hands NetX
+     * Duo a good checksum over a damaged payload.  So both are checked, on
+     * every count that exercises the 32-byte block loop, its 0..7 longword
+     * remainder, and the boundary between them.  A guard longword past the end
+     * catches a block loop that writes one too many.
+     */
+    {
+        static ULONG src[80];
+        static ULONG dst[81];
+
+        for (n = 0; n <= 72; n++)
+        {
+            ULONG   want;
+            ULONG   got;
+            UINT    bad = 0;
+
+            for (i = 0; i < n; i++)
+            {
+                src[i] = (h_rand() << 8) ^ h_rand();
+            }
+
+            for (i = 0; i <= n; i++)
+            {
+                dst[i] = 0xDEADBEEFUL;
+            }
+
+            want = n68k_sum_longwords(src, n);
+            got  = n68k_copy_sum_longwords(dst, src, n);
+
+            h_checks++;
+            if (got != want)
+            {
+                h_fail("copy_sum value", got, want, n);
+            }
+
+            for (i = 0; i < n; i++)
+            {
+                if (dst[i] != src[i])
+                {
+                    bad = 1;
+                }
+            }
+
+            h_checks++;
+            if (bad != 0)
+            {
+                h_fail("copy_sum payload", 1, 0, n);
+            }
+
+            h_checks++;
+            if (dst[n] != 0xDEADBEEFUL)
+            {
+                h_fail("copy_sum overrun", dst[n], 0xDEADBEEFUL, n);
+            }
+        }
+    }
+
     printf("%lu checks, %lu failures -- %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");
 

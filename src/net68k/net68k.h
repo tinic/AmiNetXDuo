@@ -32,6 +32,11 @@ extern "C" {
  */
 ULONG n68k_sum_longwords(const ULONG *p, ULONG count);
 
+/* Copy and sum in one pass: the same result as n68k_sum_longwords() over
+   `from`, with the copy paid for out of the loads it already does.  Both
+   pointers must be longword aligned. */
+ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count);
+
 /*
  * The replacement for _nx_ip_checksum_compute().  Same signature, semantics
  * and side effects (it zero-pads a trailing odd byte in the packet buffer

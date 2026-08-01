@@ -73,6 +73,36 @@ ULONG   acc = 0;
     return(acc);
 }
 
+/*
+ * The melded copy, in portable form.  The assembly is what earns anything
+ * here -- it feeds the adds from the movem.l the copy already does -- but the
+ * contract is the same either way: copy, and return what n68k_sum_longwords()
+ * would have returned over the source.
+ */
+ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count)
+{
+
+ULONG   acc = 0;
+
+
+    while (count != 0UL)
+    {
+    ULONG   w = *from++;
+
+        *to++ = w;
+
+        acc += w;
+        if (acc < w)
+        {
+            acc++;                      /* end-around carry */
+        }
+
+        count--;
+    }
+
+    return(acc);
+}
+
 #endif /* AMINETXDUO_NET68K_ASM */
 
 

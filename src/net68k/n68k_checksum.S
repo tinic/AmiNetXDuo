@@ -93,4 +93,73 @@ _n68k_sum_longwords:
         movem.l sp@+,d2-d3
         rts
 
+
+| ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count);
+|
+| Copies count longwords and returns the same sum n68k_sum_longwords() would
+| have returned over the source.  Both pointers must be longword aligned.
+|
+| The point is the second read.  Separately, a copy is 16 bus accesses per 32
+| bytes (83.4 cycles on a 14.19 MHz 68020) and the sum is 8 more reads plus 16
+| add.l/addx.l (91.4) -- 174.8 in total.  Melded, the loads the copy already
+| does feed the adds and the second pass over the payload disappears: 133.1
+| cycles, 23.9% off the pair.  See docs/BACKLOG.md; feeding the standalone sum
+| from movem.l instead was measured and bought nothing, because that pass is
+| half ALU and both spellings issue the same eight reads.
+|
+| a0 = to, a1 = from, d0 = accumulator, d1 = zero, d2 = count, d3 = blocks,
+| d4-d7/a2-a5 = the eight longwords in flight.
+        .globl  _n68k_copy_sum_longwords
+_n68k_copy_sum_longwords:
+        movem.l d2-d7/a2-a5,sp@-        | ten registers, 40 bytes
+        movea.l sp@(44),a0
+        movea.l sp@(48),a1
+        move.l  sp@(52),d2
+
+        moveq   #0,d0
+        moveq   #0,d1
+
+        move.l  d2,d3
+        lsr.l   #3,d3                   | blocks of eight longwords
+        beq     .Lcs_tail
+
+.Lcs_block:
+        movem.l a1@+,d4-d7/a2-a5
+        movem.l d4-d7/a2-a5,a0@
+        lea     a0@(32),a0              | MOVEM to memory has no (An)+ mode
+        add.l   d4,d0
+        addx.l  d1,d0
+        add.l   d5,d0
+        addx.l  d1,d0
+        add.l   d6,d0
+        addx.l  d1,d0
+        add.l   d7,d0
+        addx.l  d1,d0
+        add.l   a2,d0
+        addx.l  d1,d0
+        add.l   a3,d0
+        addx.l  d1,d0
+        add.l   a4,d0
+        addx.l  d1,d0
+        add.l   a5,d0
+        addx.l  d1,d0
+        subq.l  #1,d3
+        bne     .Lcs_block
+
+.Lcs_tail:
+        andi.l  #7,d2                   | the 0..7 longword remainder
+        beq     .Lcs_done
+
+.Lcs_one:
+        move.l  a1@+,d4
+        move.l  d4,a0@+
+        add.l   d4,d0
+        addx.l  d1,d0
+        subq.l  #1,d2
+        bne     .Lcs_one
+
+.Lcs_done:
+        movem.l sp@+,d2-d7/a2-a5
+        rts
+
 #endif /* AMINETXDUO_NET68K_ASM */
