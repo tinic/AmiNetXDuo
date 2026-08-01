@@ -56,6 +56,17 @@
  * an RSA private operation per case, so mutations of the signed region stop at
  * the verify by design. -r reports both counts, so "clean" says which.
  *
+ * WHO CAN SEND WHICH OF THESE
+ *
+ * ServerKeyExchange and Finished are what a server sends a client, so
+ * tls.library reaches both on any HTTPS fetch. CertificateVerify is the other
+ * direction -- only _nx_secure_tls_server_handshake() calls it -- and
+ * tls_conn.c only ever starts a client session, so nothing in the shipped
+ * library reaches it today. It is driven anyway: the function is linked into
+ * tls.library, the ciphersuite tables that reach it are ours, and a driver
+ * that skipped it would have to be written the day a server session appears.
+ * It is also where the first over-read this driver found was.
+ *
  * NOT COVERED HERE
  *
  *   The ECDSA signature arm of ServerKeyExchange, and the EC arm of
