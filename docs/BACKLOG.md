@@ -18,68 +18,6 @@ those empty results and was wrong for a day.
 
 ## Open — no decision taken
 
-- **RFC 3542: the subset worth having is built, send halves included.**
-  Assessed and implemented 2026-07-31, finished the same day. No new LVOs: it
-  rides `sendmsg`/`recvmsg`, and `struct msghdr` was already the 28-byte 4.4BSD
-  shape. `src/bsdsocket/cmsg.c` and `include/aminetxduo/cmsg.h`.
-
-  Shipped: `IPV6_RECVPKTINFO`/`IPV6_PKTINFO` (receive *and* the sticky and
-  per-datagram send source, on UDP and on raw), `IPV6_RECVHOPLIMIT` and
-  `IPV6_HOPLIMIT` in both directions, `ICMP6_FILTER` with its six macros, and
-  the IPv4 half -- `IP_PKTINFO` and `IP_RECVDSTADDR`. `MSG_CTRUNC` now means
-  what it says. A caller declares its control buffer with `CMSG_BUFFER()`,
-  which is the union a `char[]` cannot be.
-
-  **The assessment was wrong about the NDK.** `<sys/socket.h>` does define
-  `struct cmsghdr` (12 bytes) and `CMSG_DATA`/`FIRSTHDR`/`NXTHDR`, and
-  `<netinet/in.h>` defines `IP_RECVDSTADDR` as 7. Two of those three macros are
-  unusable as shipped: `CMSG_NXTHDR` expands to an `ALIGN()` no NDK header
-  defines, so any file that uses it fails to compile, and `CMSG_FIRSTHDR`
-  returns `msg_control` without testing `msg_controllen`, which RFC 3542
-  §20.3.1 calls out by name. Both are replaced in `aminetxduo/cmsg.h`, along
-  with `CMSG_LEN` and `CMSG_SPACE`, which are genuinely absent. **`CMSG_ALIGN`
-  is 4 bytes**, as decided.
-
-  Two more numbering decisions, on the same terms `IPV6_V6ONLY` was:
-  - The IPv6 options answer to both the BSD and the Linux numbers, and
-    *whichever a caller enables an option with is the numbering it gets back as
-    `cmsg_type`*. Enabling with 36 gives `cmsg_type` 46; enabling with 49 gives
-    50.
-  - `IP_PKTINFO` takes 8, which is `IP_RETOPTS` in this NDK. That is a 4.3BSD
-    get/set of arriving IP options, refused here and never implemented by any
-    AmigaOS stack -- the same trade `IPV6_TCLASS` made against `IPV6_PATHMTU`.
-
-  **The hop limit was a two-part fix, and the smaller part was ours.** The
-  reason the send half was first left out -- "nothing applies a per-socket TTL
-  to a UDP send either" -- was an argument for doing both, and both are done.
-  `bsd_mcast_prepare_send()` was writing `NX_IP_TIME_TO_LIVE` into
-  `nx_udp_socket_time_to_live` for every unicast destination, discarding
-  `as_Ttl`; it now writes `as_Ttl`, so `IP_TTL` and `IPV6_UNICAST_HOPS` reach
-  the wire on UDP as they already did on raw. That fixed IPv4 only, because
-  `_nxd_udp_socket_send()` honours the socket field on IPv4 and substitutes the
-  IP-wide `nx_ipv6_hop_limit` on IPv6, in the same function, three lines apart
-  -- the same asymmetry `amiga-ipv6-raw-hop-limit` fixed for raw.
-  `amiga-ipv6-udp-hop-limit` in the NetX fork is the other half; the PR body
-  there is the argument, including what it changes for an addon. A per-datagram
-  `IPV6_HOPLIMIT` on `sendmsg` then rides the same field, and -1 means "the
-  socket's own" as RFC 3542 §6.3 says.
-
-  **A source on a raw socket is honoured; on TCP it is refused and always will
-  be.** The checksum argument that refused raw was backwards:
-  `bsd_raw_send_v6()` selects the source *before* it computes the ICMPv6
-  checksum, so a named source is the one the checksum covers -- it feeds the
-  same `nxd_ip_raw_packet_source_send()` a bind already fed. TCP is different
-  in kind and not in degree: a stream's source is fixed when the SYN goes out
-  and every segment carries `nx_tcp_socket_connect_interface`, so there is
-  nothing per-write to name. Naming it at `connect()` is a real gap and a
-  separate one, closed in the fork by `nxd_tcp_client_socket_source_connect()`;
-  the per-write refusal in `bsd_cmsg_parse()` stands whatever `socket.c` does
-  with that.
-
-  **Loopback has an index now: `NX_LOOPBACK_INTERFACE + 1`, called `lo0`.** The
-  convention was already "NetX slot + 1" -- that is what `if_nametoindex()` and
-  `rtm_index` both count -- so loopback needed no new convention, only the two
-
 - **Publish `NetStackQuery` / `NetStackControl`?** They are still private, at
   -0x366/-0x36c. They are what a third-party `netstat` would need, and
   `ShowNetStatus`, `netstat` and `arp` already depend on them being stable, so
@@ -90,6 +28,36 @@ those empty results and was wrong for a day.
   existing magic.
 
 ## Decided against — do not "fix"
+
+- **RFC 3542, the decisions it fixed**, 2026-07-31. The subset worth having is
+  built (`src/bsdsocket/cmsg.c`, `include/aminetxduo/cmsg.h`); what follows is
+  the part that is permanent, not the part that is done.
+  - **`CMSG_ALIGN` is 4 bytes.** Every 32-bit BSD used it and the NDK's own
+    `struct cmsghdr` is already the 12-byte shape it implies. Every ancillary
+    buffer any caller ever builds depends on this; it does not move.
+  - **The NDK's `CMSG_NXTHDR` and `CMSG_FIRSTHDR` are unusable and are
+    replaced.** `CMSG_NXTHDR` expands to an `ALIGN()` no NDK header defines, so
+    a translation unit that uses it does not compile; `CMSG_FIRSTHDR` returns
+    `msg_control` without testing `msg_controllen`, which RFC 3542 §20.3.1
+    names. `CMSG_LEN` and `CMSG_SPACE` are genuinely absent. All four come from
+    `aminetxduo/cmsg.h`; do not reach for the NDK's.
+  - **Both the BSD and the Linux option numbers are accepted, and a reply uses
+    whichever the caller enabled with** -- enabling with 36 gives `cmsg_type`
+    46, enabling with 49 gives 50. Same terms as `IPV6_V6ONLY`.
+  - **`IP_PKTINFO` takes 8**, which is `IP_RETOPTS` in this NDK -- a 4.3BSD
+    option no AmigaOS stack implemented. The same trade `IPV6_TCLASS` made
+    against `IPV6_PATHMTU`.
+  - **A per-write source or hop limit on TCP is refused, permanently.** A
+    stream's source is fixed when the SYN goes out; there is nothing per-write
+    to name. Naming it at `connect()` was the real gap and is closed separately
+    by `nxd_tcp_client_socket_source_connect()` in the fork.
+  - **Loopback's index is its NetX slot + 1, named `lo0`**, and appears in the
+    RFC 3493 trio only. `ObtainInterfaceList()`, `QueryInterfaceTagList()` and
+    `SIOCGIFCONF` still do not list it: those are about SANA-II interfaces a
+    caller can configure.
+  - **Not implemented and not planned**: `IPV6_RTHDR`, `HOPOPTS`, `DSTOPTS`,
+    `RTHDRDSTOPTS`, `PATHMTU`, `RECVPATHMTU`, `USE_MIN_MTU`, `DONTFRAG`,
+    `NEXTHOP` -- extension headers and path-MTU state NetX Duo does not expose.
 
 - **A browse reports the whole peer cache, not the browse window**, and stays
   that way, 2026-07-31. `netstack_mdns_browse_collect()` walks
@@ -231,6 +199,13 @@ those empty results and was wrong for a day.
   the gating question.
 
 ## Environment and tooling
+
+- **`tests/ipv6/ipv6_socket_test.c` is tier 2: CI checks that it builds, not
+  that it passes.** It is the only thing that exercises the RFC 3542 surface
+  end to end -- the macros, the option round-trips, both objects on one
+  datagram, the arrival index through `if_indextoname()` and back. It was last
+  run by hand on 2026-07-31; the 119-check figure quoted elsewhere predates the
+  hop-limit and loopback-index checks.
 
 - **The two-interface source case is proved on a host, not on a guest.** TCP
   now leaves from the address `bind()` named --
