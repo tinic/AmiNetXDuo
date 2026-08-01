@@ -393,12 +393,17 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_chacha20.c"
         "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_poly1305.c")
 
+    # The Amiga half: the crypto tables and the module behind them. Its own
+    # archive so that the warning set below applies to the driver and not to
+    # code the cross build already compiles under the project's.
+    add_library(fuzz_tls_ami STATIC
+        "${CMAKE_SOURCE_DIR}/src/tls/ami_tls_crypto.c"
+        ${_fuzz_c68k_src})
+
     add_executable(fuzz_tls_crypto
         fuzz_tls_crypto.c
         fuzz_nxstub.c
-        fuzz_txstub.c
-        "${CMAKE_SOURCE_DIR}/src/tls/ami_tls_crypto.c"
-        ${_fuzz_c68k_src})
+        fuzz_txstub.c)
 
     # src/config/test/shim carries the minimal <exec/types.h> that src/tls/tls.h
     # needs; tests/tls carries the sample certificate and its private key.
@@ -410,18 +415,19 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         "${CMAKE_SOURCE_DIR}/tests/tls")
 
     foreach(_t fuzz_tls_nx_secure fuzz_tls_nx_crypto fuzz_tls_netx
-               fuzz_tls_crypto)
+               fuzz_tls_ami fuzz_tls_crypto)
         target_include_directories(${_t} PRIVATE ${_fuzz_tls_crypto_inc})
         target_compile_definitions(${_t} PRIVATE ${_fuzz_tls_def})
         target_compile_options(${_t} PRIVATE -UAMINETXDUO_IPV6 ${_fuzz_san})
     endforeach()
 
+    target_compile_options(fuzz_tls_crypto PRIVATE -Wall -Wextra)
     target_link_options(fuzz_tls_crypto PRIVATE ${_fuzz_san})
-    # Repeated because nx_secure and nx_crypto reference each other's objects
-    # and a single pass over each archive resolves only one direction.
+    # Repeated because the archives reference each other's objects and a single
+    # pass over each resolves only one direction.
     target_link_libraries(fuzz_tls_crypto PRIVATE
-        fuzz_tls_nx_secure fuzz_tls_nx_crypto fuzz_tls_netx
-        fuzz_tls_nx_secure fuzz_tls_nx_crypto fuzz_tls_netx)
+        fuzz_tls_ami fuzz_tls_nx_secure fuzz_tls_nx_crypto fuzz_tls_netx
+        fuzz_tls_ami fuzz_tls_nx_secure fuzz_tls_nx_crypto fuzz_tls_netx)
 
 endif()
 
