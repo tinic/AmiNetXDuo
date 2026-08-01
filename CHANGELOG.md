@@ -4,6 +4,11 @@ User-visible changes, newest first. Internal work is in the git log.
 
 ## Unreleased
 
+- Fixed three ways a hostile or broken server could read past the end of a buffer during a TLS handshake, and two more in the code underneath it. A certificate two bytes long, a 38-byte ServerHello and a zero-length CertificateRequest each walked off the end of the record buffer; a signature length was checked against the wrong bound; and every RSA modulus tripped a signed shift. On a machine with no memory protection a read past a buffer is not a crash, it is whatever happened to be next
+- `ping`, `ShowNetStatus` and `AddNetRoute` give back the memory they read `DEVS:Internet` into. Each run lost about 12 KB until the next reboot, which on a 1 MB machine is roughly seventy runs
+- `connect()` from a socket bound to one of the machine's addresses now leaves from that address instead of being refused
+- New `Developer` drawer in the archive: the headers and linkable glue for everything this stack offers that the NDK does not declare, so a program built against it can call `if_nametoindex()`, `if_indextoname()`, `if_nameindex()` and `if_freenameindex()`, and name the IPv6 constants, without writing the vector offsets out by hand
+
 - Expunging the library gives all its memory back. An open, close, expunge and reopen cycle used to lose 12,612 bytes of the machine's free memory every time, so repeatedly starting and stopping the network eventually ran it out
 - A browsed service whose address did not arrive with it is now asked for, so a row that said "no address" gives one. Only the rows that need it wait, and the whole listing spends at most two seconds on it
 - `ShowNetServices ALL` lists every instance of every type answering, rather than only the types. It costs one more listening window, not one per type
