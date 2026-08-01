@@ -64,7 +64,13 @@ static struct hostent *bsd_hostent_fill(struct AmiSocketBase *base,
  *
  *   char *addr_list[2] | char *aliases[1] | ULONG address | name
  *
- * all longword aligned, which is what m68k needs.
+ * all longword aligned, which is what m68k needs -- and which the caller's
+ * buffer does not supply.  `buf` is an APTR from an application; every field
+ * above is written through a pointer derived from it, so an odd `buf` is an
+ * address error on a 68000 at the first store.  The buffer is stepped up to a
+ * longword boundary here and the slack counted against buflen, so the shape
+ * above is true of the pointers actually used rather than of the ones the
+ * caller happened to pass.
  *
  * The alias vector stays empty here even when the non-reentrant call would
  * fill it: aliases would have to be copied into the caller's buffer, and the
@@ -77,7 +83,8 @@ static struct hostent *bsd_hostent_pack(struct AmiSocketBase *base,
 {
     UBYTE  *p = (UBYTE *)buf;
     ULONG   namelen = bsd_strlen(name) + 1;
-    ULONG   need    = 3 * sizeof(char *) + sizeof(ULONG) + namelen;
+    ULONG   slack;
+    ULONG   need;
     char  **addr_list;
     char  **aliases;
     ULONG  *address;
@@ -89,6 +96,10 @@ static struct hostent *bsd_hostent_pack(struct AmiSocketBase *base,
         bsd_set_errno(base, AMI_EFAULT);
         return NULL;
     }
+
+    slack = (ULONG)((0UL - (ULONG)p) & 3UL);
+    p    += slack;
+    need  = slack + 3 * sizeof(char *) + sizeof(ULONG) + namelen;
 
     if (buflen < need)
     {

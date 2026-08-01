@@ -29,9 +29,19 @@
  * cmsg_len is a socklen_t, which is a 32-bit load, and a 68000 takes an
  * address error on an odd one.  A caller's msg_control is whatever it handed
  * us -- a `char buf[CMSG_SPACE(n)]` is only byte-aligned as far as the
- * language is concerned -- so an unaligned buffer is reported as MSG_CTRUNC
- * with nothing written rather than faulted on.  cmsg.h's CMSG_BUFFER() is the
+ * language is concerned -- so an odd buffer is reported as MSG_CTRUNC with
+ * nothing written rather than faulted on.  cmsg.h's CMSG_BUFFER() is the
  * declaration that cannot be wrong.
+ *
+ * Odd, and not "not a multiple of 4".  The test used to be `& 3`, which is the
+ * alignment struct cmsghdr would have on a machine that aligns a long to its
+ * width.  m68k does not: __alignof__(long) is 2 there, so every m68k object
+ * this could describe -- a stack local, an AllocVec block, a CMSG_BUFFER --
+ * is even, and half of them are 2 mod 4.  `& 3` refused those, which meant it
+ * refused CMSG_BUFFER() itself about half the time it was used.  Two bytes
+ * short of a longword boundary is a perfectly good place to read a longword
+ * from on this machine; one byte is not.  The header now also asks for 4 so
+ * the loads are single-cycle on an 020, but the gate is the hardware's.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -72,6 +82,12 @@ _Static_assert(CMSG_SPACE(0) == 12 && CMSG_SPACE(1) == 16 &&
 /* No padding in front of the data: CMSG_DATA is the twelfth byte. */
 _Static_assert(CMSG_ALIGN(sizeof(struct cmsghdr)) == sizeof(struct cmsghdr),
                "struct cmsghdr needs padding before its data");
+
+/* CMSG_BUFFER() has to deliver what its name promises; m68k will not do it
+   from the union alone.  See the attribute in cmsg.h. */
+typedef CMSG_BUFFER(BsdCmsgProbe, 16);
+_Static_assert(__alignof__(BsdCmsgProbe) >= 4,
+               "CMSG_BUFFER() is not longword aligned");
 
 _Static_assert(sizeof(struct in_pktinfo) == 12, "in_pktinfo is not 12 bytes");
 _Static_assert(offsetof(struct in_pktinfo, ipi_ifindex)  == 0, "ipi_ifindex moved");
@@ -333,7 +349,7 @@ VOID bsd_cmsg_build(AmiSocket *sock, NX_PACKET *packet, struct msghdr *msg)
 
     /* See the header note: a 32-bit store through an odd pointer is an
        address error on a 68000, and this pointer is the caller's. */
-    if ((((ULONG)out.co_Base) & 3UL) != 0UL)
+    if ((((ULONG)out.co_Base) & 1UL) != 0UL)
     {
         msg->msg_flags |= MSG_CTRUNC;
         return;
@@ -465,7 +481,7 @@ LONG bsd_cmsg_parse(struct AmiSocketBase *base, AmiSocket *sock,
     base_ptr = (const UBYTE *)msg->msg_control;
     total    = (socklen_t)msg->msg_controllen;
 
-    if ((((ULONG)base_ptr) & 3UL) != 0UL)
+    if ((((ULONG)base_ptr) & 1UL) != 0UL)
         return bsd_fail(base, AMI_EINVAL);
 
     for (at = 0; total - at >= (socklen_t)sizeof(struct cmsghdr); )

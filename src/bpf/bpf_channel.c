@@ -865,6 +865,27 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
     if (ch == NULL)
         return status;
 
+    /*
+     * Every command below either reads or writes a ULONG or a UWORD through
+     * `buffer`, which is the caller's, and an odd one is an address error on a
+     * 68000. Refused rather than faulted on. The three ifreq commands are the
+     * exception -- they touch bytes only, including the sockaddr_in
+     * SIOCGIFADDR writes by hand -- and refusing an odd one would be a
+     * restriction with nothing behind it.
+     */
+    switch (AMI_BPF_CMD(command))
+    {
+    case AMI_BPF_CMD(BIOCGETIF):
+    case AMI_BPF_CMD(BIOCSETIF):
+    case AMI_BPF_CMD(AMI_BPF_SIOCGIFADDR):
+        break;
+
+    default:
+        if (buffer != NULL && (((ULONG)buffer) & 1UL) != 0UL)
+            return AMI_BPF_EINVAL;
+        break;
+    }
+
     switch (AMI_BPF_CMD(command))
     {
     case AMI_BPF_CMD(AMI_BPF_FIONREAD):

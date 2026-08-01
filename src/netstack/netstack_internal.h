@@ -34,7 +34,19 @@
 
 #define AMI_IP_STACK_SIZE           4096
 #define AMI_ARP_CACHE_SIZE          1024
-#define AMI_AUTOIP_STACK_SIZE       2048
+
+/*
+ * 4096 and not the 2048 NetX Duo's own samples use, because the AutoIP thread
+ * on this port is not the one those samples describe.  -fstack-usage over the
+ * m68000 build puts the deepest chain from _nx_auto_ip_thread_entry at 704
+ * bytes, and it gets there through _nx_ip_interface_status_check into
+ * ami_sana2_driver_entry -- so this thread reaches a SANA-II device and makes
+ * exec DoIO/SendIO calls, which run on whatever stack is current and are not
+ * in that 704.  1,344 bytes of headroom for an Exec device call, on a machine
+ * with no guard page and no fault, is not a margin worth defending; the other
+ * 2 KB is.  docs/ALIGNMENT.md has the measurements.
+ */
+#define AMI_AUTOIP_STACK_SIZE       4096
 
 /* Fraction of AvailMem() the packet pool may claim (1/AMI_POOL_MEM_DIVISOR). */
 #define AMI_POOL_MEM_DIVISOR        16
