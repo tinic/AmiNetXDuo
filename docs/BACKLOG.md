@@ -169,13 +169,8 @@ empty results.
   case, which the script's own docstring says both defects reach once they are
   fixed upstream. `--check` against the pinned toolchain on playhouse2 and
   playhouse3 alike reports `11 ok, 1 skipped` for the frame skew and `2 call
-  site(s) already push __argv by value` for the argv indirection, so a ported
-  client gets a correct `argv` and `--wrap=main` is reached. The probe's
-  timeout is the harness. `clients/dropbear/run-fsuae.sh -A` proves the client
-  path end to end -- four ssh connections, both ciphers -- so what is left
-  unmeasured is narrower than it looked: the `longjmp` fix in `__wrap__exit()`
-  gives the 256 KB stack back, and nothing counts free memory across runs to
-  show it. Found 2026-07-31.
+  site(s) already push __argv by value` for the argv indirection. The probe's
+  timeout is the harness. Found 2026-07-31.
 
 - **`/opt/amiga` on playhouse2 carries the argv bug in all eleven `crt0.o`.**
   Locally built, GCC 16.1.1b, and `--check` reports `11 buggy` -- it has the

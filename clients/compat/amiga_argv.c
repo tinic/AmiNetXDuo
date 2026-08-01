@@ -31,6 +31,7 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <setjmp.h>
+#include <stdio.h>
 
 extern int __real_main(int argc, char **argv);
 
@@ -106,11 +107,21 @@ static __attribute__((noinline)) VOID argv_run_on_stack(VOID)
  * That is 256 KB per invocation of every client that ends this way, gone until
  * reboot, on a machine whose supported floor is 1 MB.
  *
- * So __wrap__exit() longjmp()s back into __wrap_main(), which is still on the
- * caller's stack, and the free happens there.  _exit rather than exit: by then
- * newlib has run the atexit() handlers and flushed stdio, all of it on the big
- * stack, which is the reason for bringing one.  Nothing is left to run but the
- * crt0's return to DOS.
+ * So the exit wrappers longjmp() back into __wrap_main(), which is still on the
+ * caller's stack, and the free happens there.
+ *
+ * BOTH wrappers, not only __wrap__exit().  This crt0 defines exit(), _exit()
+ * and __exit() as three names for ONE function -- `nm` puts all three at the
+ * same address -- so a client that calls exit() never makes a second call that
+ * the linker can see and redirect.  --wrap=_exit gives a wrapper that is never
+ * reached, and an earlier version of this file put the longjmp only there:
+ * measured on an emulated A1200, every dbclient run still lost 266,368 bytes,
+ * the same figure five times running.
+ *
+ * stdio is flushed here rather than left to the crt0, because after the
+ * longjmp we are on the caller's stack -- 4 KB under a Shell -- and the flush
+ * wants the big one.  What is left to run then is the atexit() handlers and
+ * the return to DOS, which __real__exit() does from __wrap_main().
  */
 extern void __real_exit(int status);
 extern void __real__exit(int status);
@@ -127,25 +138,31 @@ static VOID argv_restore_bounds(VOID)
     }
 }
 
+/* Only the Task that ran setjmp() may jump back into its frame; the console
+   reader child in clients/dropbear has its own.  Returns on a task that may
+   not, and the caller then takes the real exit. */
+static VOID argv_exit_via_main(int status)
+{
+    if (argv_exit_task == NULL || argv_exit_task != FindTask(NULL))
+        return;
+
+    fflush(NULL);
+    argv_exit_task   = NULL;
+    argv_exit_status = status;
+    longjmp(argv_exit_jmp, 1);
+}
+
 void __wrap_exit(int status)
 {
     argv_restore_bounds();
+    argv_exit_via_main(status);
     __real_exit(status);
 }
 
 void __wrap__exit(int status)
 {
     argv_restore_bounds();
-
-    /* Only the Task that ran setjmp() may jump back into its frame; the
-       console reader child in clients/dropbear has its own. */
-    if (argv_exit_task != NULL && argv_exit_task == FindTask(NULL))
-    {
-        argv_exit_task   = NULL;
-        argv_exit_status = status;
-        longjmp(argv_exit_jmp, 1);
-    }
-
+    argv_exit_via_main(status);
     __real__exit(status);
 }
 

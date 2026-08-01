@@ -46,7 +46,7 @@ User-visible changes, newest first. Internal work is in the git log.
 - `sendmsg()` on a raw socket takes the same source address and interface a UDP one does
 - The loopback interface has a name and a number, `lo0`, from `if_nametoindex()`, `if_indextoname()` and `if_nameindex()`. A datagram over `::1` or `127.0.0.1` reports it like any other arrival instead of reporting nothing, and a send can name it
 - New header `aminetxduo/cmsg.h` with the structures and `CMSG_*` macros the above needs. The NDK's own `CMSG_NXTHDR` cannot be compiled -- it uses an `ALIGN()` no NDK header defines -- and its `CMSG_FIRSTHDR` returns a pointer where it should return `NULL`; both are replaced, and `CMSG_LEN` and `CMSG_SPACE` added
-- `ssh` gives back the 256 KB stack it runs on. Every invocation lost that much of the machine's free memory until the next reboot, because the program ends by calling `exit()` and the memory was given back after a call that never returns
+- `ssh` gives back the 256 KB stack it runs on. Every invocation lost that much of the machine's free memory until the next reboot -- measured at 266,368 bytes a run on an emulated A1200, five runs identical -- because the program ends by calling `exit()` and the memory was given back after a call that never returns. On a 1 MB machine that was about three runs
 
 ## 0.15.1
 
