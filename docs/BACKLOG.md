@@ -200,6 +200,20 @@ those empty results and was wrong for a day.
 
 ## Environment and tooling
 
+- **`fix-crt0` no longer patches the crt0, on either build host.** It reports
+  `register-save patch matched 0 site(s)` and `no 'pea/move.l/jsr' main() call
+  found -- copying crt0.o unchanged`, on playhouse2 and playhouse3 alike with
+  toolchain 15.2.0, so it is the toolchain's crt0 having moved rather than
+  anything in this tree. Its own message says not to trust the build until argv
+  is checked. **Consequence: `--wrap=main` may not be reached, so every ported
+  client's argv and the 256 KB stack swap in `clients/compat/amiga_argv.c` are
+  unverified on the current toolchain.** `tests/clients/run-argvexit.sh -A`
+  times out with the guest never reaching the probe, which is consistent with
+  the binary never getting a working `main` and does **not** by itself
+  implicate the `longjmp` fix in `__wrap__exit()`. Establish whether the client
+  harnesses (`tests/bebbossh`, `tests/bebboget`) still pass before reading
+  anything else into it. Found 2026-07-31.
+
 - **`tests/ipv6/ipv6_socket_test.c` runs green but is not in CI.** 129 checks,
   0 failures, on an emulated A1200 under Amiberry on 2026-07-31 -- the whole
   RFC 3542 surface end to end, including the checks that postdate the 119-check
