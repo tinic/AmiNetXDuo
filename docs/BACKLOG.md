@@ -206,23 +206,28 @@ decided and shipped in 0.16.2; what its constants are frozen at is in
   `fix-toolchain-crt0.py` first hands ported clients `&__argv`. Found
   2026-07-31.
 
-- **The two-interface source case is proved on a host, not on a guest.** TCP
-  now leaves from the address `bind()` named --
+- **The two-interface source case is proved on a host, and cannot be proved on
+  a guest.** TCP leaves from the address `bind()` named --
   `nxd_tcp_client_socket_source_connect()` in the NetX fork -- and the case it
-  exists for is two interfaces on one subnet, source on one and route out of
-  the other. That is asserted by
-  `tests/netstack/host/test_tcp_source_connect_host.c`, which compiles the real
-  connect, route lookup and SYN build against an `NX_IP` with two
-  `nx_ip_interface[]` entries filled in and checks the source address the SYN
-  carried. What is not shown is the same thing through two real SANA-II
-  drivers. Amiberry does put two cards in the machine -- `a2065` plus
-  `ariadne`, both logged and mapped into Zorro II -- but with the second card
-  present `AddNetInterface eth0` hangs on the A2065, which comes up on its own
-  in the same tree on the same run script, and the serial log is empty. It
-  hangs with the second card on SLIRP as well as bridged, so it is the board
-  and not the backend. The 8 MB of Zorro II Fast RAM sitting directly below
-  both cards is the first suspect (RESEARCH.md 85, 76). `SrcProbe` already
-  takes the second address and a destination for when this is fixed.
+  exists for is two interfaces on one subnet, source on one and route out of the
+  other. `tests/netstack/host/test_tcp_source_connect_host.c` asserts it against
+  an `NX_IP` with two `nx_ip_interface[]` entries filled in, compiling the real
+  connect, route lookup and SYN build and checking the source the SYN carried.
+
+  What cannot be shown is the same thing through two live SANA-II drivers, and
+  the reason recorded here was wrong. It said `AddNetInterface eth0` hangs with
+  a second card present. It does not: with `a2065` on Zorro and the NE2000 PC
+  Card on PCMCIA -- two different buses, and Fast RAM held to 4 MB so it stays
+  clear of the credit-card window at $600000 -- `AddNetInterface eth0 eth1`
+  returns 0, `eth0` leases an address, and `ShowNetStatus` lists both
+  interfaces with `eth1` offline and the right advice against it.
+
+  The real limit is that `cnet.device` will not open while the A2065 is
+  present, though it opens perfectly well on its own, and Amiberry offers
+  exactly two network boards -- `a2065` and `ne2000_pcmcia` -- so that is the
+  only pair there is. Two Zorro cards were the earlier attempt and are what the
+  hang belonged to. `SrcProbe` already takes a second address and a destination
+  for a machine that can host one. Measured 2026-08-01.
 
 - **The `sana2_rx.c` reader orphan does not reproduce under emulation.**
   `ami_sana2_rx_stop()`'s last-resort path logs `reader N did not stop; leaking
@@ -232,16 +237,11 @@ decided and shipped in 0.16.2; what its constants are frozen at is in
   returns its queued `CMD_READ`s where the real one may not.
   `run-cycledrill.sh` greps the serial log for it on every run and prints the
   count; `AMINETXDUO_CYCLE_ORPHAN_FATAL=1` makes it fail. Confirming it needs
-  real hardware. Checked 2026-07-31.
-
-- **`STATE=down` is exercised but not asserted.**
-  `tests/tools/run-addifleak.sh` stages an interface configured down, because
-  that is how it reaches the failure it measures, so the path runs on every
-  invocation. What it does not check is the state itself -- that `IFQ_State`
-  reads `SM_Down` and that `Online` then brings it up. The `-D` flag added to
-  `run-ifquery.sh` does assert exactly that and passes both ways, but ten other
-  assertions in that harness assume a live interface and fail with it; they
-  need to become conditional first. Found 2026-08-01.
+  real hardware. Checked 2026-07-31. Nothing is
+  outstanding in the code: the free sits outside the started gate where the
+  teardown owns it, and `run-cycledrill.sh` greps every run for the message and
+  can be made to fail on it. What is missing is a sighting, and only a driver
+  that really ignores `AbortIO()` can provide one.
 
 - **`run-fitzbench.sh` refuses `playhouse2` outright** over the uncomputed TX
   checksums that `ethtool -K eth0 tx off` fixed there on 2026-07-31, and can be
