@@ -4,6 +4,8 @@ User-visible changes, newest first. Internal work is in the git log.
 
 ## 0.16.2
 
+- The installer asks which build to install instead of only detecting one. The processor it finds is still the default and a novice install is unchanged, but a disk being prepared on one machine for another can now be given the right library. The choice names what the smallest build leaves out
+- The installer starts at the novice level rather than the intermediate one
 - `ShowNetStatus` reports which stack is running and which build of it, and `GetNetStatus VERSION` prints the same for a script. Both report the LIBRARY's version rather than their own: `C:` and `LIBS:` are updated separately, so a machine can have new commands over an older library and the one in memory is the one worth knowing about. Neither starts the network to find out
 - Every file says which release it is from. `Version full file C:ping` reads `ping 0.16.2 (1.8.2026) AmiNetXDuo <commit>`, and `bsdsocket.library` answers at all -- it carried no version string before, so there was no way to tell an installed copy apart. One number for the whole set instead of a private one per command, the date from the build rather than from whoever last edited the file, and the commit so two builds of the same release can be told apart. The name is in there because Roadshow ships commands called `AddNetInterface`, `ping`, `arp` and `netstat` too
 - `STATE=down` on the only interface no longer stops the network library opening. It could not be undone from the machine it happened on: nothing could open the library, so there was no `Online` to bring the interface up with and no `ShowNetStatus` to see it -- editing the interface file was the only way out

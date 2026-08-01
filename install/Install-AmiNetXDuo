@@ -415,6 +415,48 @@
 (if (patmatch "(68000|68010)" CPU) (set CPUDIR "68000"))
 (if (patmatch "68060"         CPU) (set CPUDIR "68060"))
 
+; What was detected, as an index into the list below, so the machine's own
+; answer is what the question defaults to.
+(set CPUPICK 2)
+(if (= CPUDIR "68000")   (set CPUPICK 1))
+(if (= CPUDIR "68060")   (set CPUPICK 3))
+
+; ASKED FOR, by a user who installs on one machine and moves the disk to
+; another: "I often install things on one machine and then take it to
+; another."  The detected processor is the right default and a wrong answer
+; for anyone doing that, so it is a default and not a decision.
+;
+; Nothing changes for a novice install.  At NOVICE every ask... returns its
+; (default) without showing anything, so the detected build is still what
+; goes on -- which is why the default has to be independently correct.
+(set CPUPICK
+  (askchoice
+    (prompt "Which build of the network library should be installed?\n\n")
+    (help "Every build does the same things at the same time; they differ "
+          "only in which processor instructions they were compiled for. The "
+          "one for this machine is already selected.\n\n"
+          "Pick another when the disk is going into a different machine "
+          "than the one it is being installed on.\n\n"
+          "The 68000 build runs on every Amiga, including an 020 or better. "
+          "It is the safe answer for a disk that moves around.\n\n"
+          "The minimal build is the 68000 one with IPv6, .local name "
+          "lookups, the packet filter, encrypted connections and IPv4 "
+          "multicast left out. It is about 104 KB smaller, which is worth "
+          "having on a 1 MB machine and worth nothing on a larger one.\n\n"
+          "Encrypted (https:) connections need a 68020 or better whichever "
+          "build is chosen: the cryptography takes longer than the other end "
+          "will wait on a 68000.")
+    (choices "Smallest -- 68000, no IPv6/mDNS/https:/filter/multicast"
+             "68000 -- runs on every Amiga"
+             "68020 to 68040"
+             "68060")
+    (default CPUPICK)))
+
+(if (= CPUPICK 0) (set CPUDIR "68000-minimal"))
+(if (= CPUPICK 1) (set CPUDIR "68000"))
+(if (= CPUPICK 2) (set CPUDIR "68020-40"))
+(if (= CPUPICK 3) (set CPUDIR "68060"))
+
 (set S_LIBS (tackon S_LIBS CPUDIR))
 
 ; A 68000 GETS NO ENCRYPTION, AND HAS TO BE TOLD SO -- ON THE LAST PAGE.
@@ -846,14 +888,23 @@
 ; A 68000 gets no tls.library, and saying nothing would leave the one machine
 ; that cannot have it wondering why https: does not work.  Not an error, and
 ; not a question -- the rest of the installation is unaffected.
-(if (AND (= CPUDIR "68000")
-         (NOT (exists (tackon S_LIBS "tls.library") (noreq))))
-    (message
-      "Encrypted (https:) connections are not installed on this machine.\n\n"
-      "The cryptography a secure connection needs takes minutes on a 68000, "
-      "which is long enough that the far end gives up first.  Everything "
-      "else -- the stack, the commands, ordinary http: -- works normally.\n\n"
-      "A machine with a 68020 or better gets it."))
+(if (NOT (exists (tackon S_LIBS "tls.library") (noreq)))
+    (if (= CPUDIR "68000-minimal")
+        ; Chosen, not imposed -- and worth restating, because what the smallest
+        ; build leaves out is easy to pick in one screen and be surprised by
+        ; later.
+        (message
+          "The smallest build was chosen, so several things are not "
+          "installed: encrypted (https:) connections, IPv6, .local name "
+          "lookups, the packet filter and IPv4 multicast.\n\n"
+          "The stack, the commands and ordinary http: work normally.  "
+          "Installing again and choosing another build brings the rest back.")
+        (message
+          "Encrypted (https:) connections are not installed on this machine.\n\n"
+          "The cryptography a secure connection needs takes minutes on a 68000, "
+          "which is long enough that the far end gives up first.  Everything "
+          "else -- the stack, the commands, ordinary http: -- works normally.\n\n"
+          "A machine with a 68020 or better gets it.")))
 
 (set @special-msg "")
 
