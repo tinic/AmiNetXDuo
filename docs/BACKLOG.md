@@ -172,6 +172,15 @@ empty results.
   site(s) already push __argv by value` for the argv indirection. The probe's
   timeout is the harness. Found 2026-07-31.
 
+- **A ported client still loses 4,224 bytes a run.** With the 256 KB stack
+  fixed (`clients/compat/amiga_argv.c`), `clients/dropbear/run-fsuae.sh -A`
+  measures dbclient at exactly 4,224 bytes an invocation, five runs identical,
+  `dbclient -V` included -- so it is the startup or exit path and not the
+  network or the crypto. Constant to the byte means a leak rather than
+  fragmentation. Not chased: unknown whether it is ours, newlib's or
+  Dropbear's, and the measurement to split them is one more `AvailMem()` inside
+  `__wrap_main()` on either side of `__real_main()`. Found 2026-07-31.
+
 - **`/opt/amiga` on playhouse2 carries the argv bug in all eleven `crt0.o`.**
   Locally built, GCC 16.1.1b, and `--check` reports `11 buggy` -- it has the
   compiler fix for the frame skew and not newlib's `120371e` for the argv
