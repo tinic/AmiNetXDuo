@@ -447,33 +447,49 @@ typedef struct TLSRegistrySlot
 
 static TLSRegistrySlot tls_registry[TLS_REGISTRY_SLOTS];
 
+/*
+ * The scans take the same Forbid() as the claim and the release. One registry
+ * for every opener, so a TLSClose() on another task can clear a slot and free
+ * the TLSConnection between the load of rs_Conn and the dereference below --
+ * which tls_conn_for_session() does, reading tc_Session through it.
+ */
 static TLSConnection *tls_conn_for_store(NX_SECURE_X509_CERTIFICATE_STORE *store)
 {
-    UWORD i;
+    TLSConnection *conn = NULL;
+    UWORD          i;
 
+    Forbid();
     for (i = 0; i < TLS_REGISTRY_SLOTS; i++)
     {
         if (tls_registry[i].rs_Store == store)
-            return tls_registry[i].rs_Conn;
+        {
+            conn = tls_registry[i].rs_Conn;
+            break;
+        }
     }
+    Permit();
 
-    return NULL;
+    return conn;
 }
 
 TLSConnection *tls_conn_for_session(const NX_SECURE_TLS_SESSION *session)
 {
-    UWORD i;
+    TLSConnection *conn = NULL;
+    UWORD          i;
 
+    Forbid();
     for (i = 0; i < TLS_REGISTRY_SLOTS; i++)
     {
         if (tls_registry[i].rs_Conn != NULL &&
             &tls_registry[i].rs_Conn->tc_Session == session)
         {
-            return tls_registry[i].rs_Conn;
+            conn = tls_registry[i].rs_Conn;
+            break;
         }
     }
+    Permit();
 
-    return NULL;
+    return conn;
 }
 
 static VOID tls_registry_remove(TLSConnection *conn)

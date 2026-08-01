@@ -242,6 +242,7 @@ static ULONG  pool_out_used = AMI_RANDOM_KEY_BYTES;   /* forces a first block */
 static ULONG  pool_counter;
 static ULONG  pool_bits;
 static BOOL   pool_started;
+static volatile BOOL pool_gathering;   /* one random_gather() at a time */
 
 /*
  * key <- SHA-256(DOMAIN_RESEED || key || counter || material)
@@ -615,10 +616,37 @@ static VOID random_gather(VOID)
         p[i] = 0;
 }
 
+/*
+ * Repeat calls still add, as the header promises -- what is excluded is two
+ * collections at once. random_gather() writes the ~800-byte file-scope
+ * random_sample from top to bottom, and the two lazy callers below are plain
+ * test-then-act on pool_started, so two tasks could both fall through and
+ * interleave two machine fingerprints into one buffer.
+ *
+ * A second caller that finds a collection in flight returns rather than waits:
+ * a re-seed concurrent with a re-seed is redundant, and waiting means holding
+ * the scheduler off for the 22 ms the collection costs.
+ *
+ * The residual is in docs/REENTRANCY.md: that caller can draw a block from a
+ * pool the first collection has not mixed yet. It does not arise in the shipped
+ * library -- bsd_runtime_open() seeds from InitResident(), before any opener
+ * exists.
+ */
 VOID ami_random_init(VOID)
 {
-    pool_started = TRUE;
+    Forbid();
+    if (pool_gathering)
+    {
+        Permit();
+        return;
+    }
+    pool_gathering = TRUE;
+    pool_started   = TRUE;
+    Permit();
+
     random_gather();
+
+    pool_gathering = FALSE;
 
     AMI_DEBUG("random: entropy credit %lu bits, is_seeded=%s",
               (LONG)pool_bits,

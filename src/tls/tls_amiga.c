@@ -33,12 +33,28 @@ static struct timerequest          ami_tls_req;
 static struct MsgPort              ami_tls_port;
 static ULONG                       ami_tls_hz;
 
+/*
+ * One IORequest for every opener, so the open has to be one-shot. The bare
+ * test-then-act let two tasks reaching ami_tls_eclock() together both fall
+ * through and both OpenDevice() the same &ami_tls_req, which is Exec's "reuse
+ * of an active IORequest" and leaks one device open. Same shape and the same
+ * fix as ami_timer_init() in src/common/compat.c; timer.device's Open does not
+ * Wait, so the Forbid holds across it.
+ */
 BOOL ami_tls_timer_open(VOID)
 {
     struct EClockVal ev;
 
     if (ami_tls_timer_base != NULL)
     {
+        return TRUE;
+    }
+
+    Forbid();
+
+    if (ami_tls_timer_base != NULL)
+    {
+        Permit();
         return TRUE;
     }
 
@@ -60,9 +76,13 @@ BOOL ami_tls_timer_open(VOID)
     if (OpenDevice((STRPTR)TIMERNAME, UNIT_ECLOCK,
                    (struct IORequest *)&ami_tls_req, 0) != 0)
     {
+        Permit();
         return FALSE;
     }
 
+    /* ReadEClock() needs the base, so it is set before the rate is read and
+       the two cannot be published as a pair. Harmless: ami_tls_hz is only ever
+       written to the same value, and every reader floors it. */
     ami_tls_timer_base = ami_tls_req.tr_node.io_Device;
 
     ami_tls_hz = ReadEClock(&ev);
@@ -70,6 +90,8 @@ BOOL ami_tls_timer_open(VOID)
     {
         ami_tls_hz = 709379UL;         /* PAL, if the device lies */
     }
+
+    Permit();
 
     return TRUE;
 }

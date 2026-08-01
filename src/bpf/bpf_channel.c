@@ -188,6 +188,16 @@ LONG ami_bpf_init(VOID)
     for (i = 0; i < AMI_BPF_MAX_CHANNELS; i++)
         ami_bpf_zero_bytes(&ami_bpf_chan[i], (ULONG)sizeof(AmiBpfChan));
     ami_bpf_bound_channels = 0;
+
+    /*
+     * The interface table too. Both are file-scope, so a detach the last
+     * teardown missed leaves a row with bi_Used set and a cookie into the
+     * AmiSana2If that went with the old stack -- which the next bring-up's
+     * ami_bpf_iface_by_cookie() would hand to an injector.
+     */
+    for (i = 0; i < AMI_BPF_MAX_IFACES; i++)
+        ami_bpf_zero_bytes(&ami_bpf_iface[i], (ULONG)sizeof(AmiBpfIf));
+
     ami_bpf_unlock();
 
     return 0;
