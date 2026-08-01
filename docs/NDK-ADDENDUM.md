@@ -45,7 +45,7 @@ The layout that matters:
   -0x372 [146]  first free
 ```
 
-## Three decisions we are making for everyone
+## Five decisions we are making for everyone
 
 These are the reason this needs planning rather than just doing.
 
@@ -85,6 +85,26 @@ whichever was set last.
 `IP_PKTINFO` takes 8, which this NDK spells `IP_RETOPTS` -- a 4.3BSD get/set of
 arriving IP options that no AmigaOS stack ever answered and this one refuses.
 That is the one place the addendum takes a number the NDK had already used.
+
+**4. Loopback's index is its NetX slot plus one, and it is called `lo0`.** It
+appears in `if_nametoindex()`, `if_indextoname()` and `if_nameindex()`, and in
+the `ipi6_ifindex` of a datagram that arrived over `::1` or `127.0.0.1`, which
+is what a server answering on the interface a query came in on needs.
+
+It is deliberately *not* in `ObtainInterfaceList()`, `QueryInterfaceTagList()`
+or `SIOCGIFCONF`. Those three are about SANA-II interfaces a caller can
+configure, bring online and take down, and loopback is none of those things; a
+tool that walks them to offer the user a choice would otherwise offer one that
+cannot be chosen.
+
+**5. A per-write source address or hop limit on TCP is refused, permanently.**
+`sendmsg()` on a stream socket takes no `IPV6_PKTINFO` and no `IPV6_HOPLIMIT`.
+A stream's source is fixed when the SYN goes out, so there is nothing per-write
+to name and accepting one would mean either ignoring it or lying about it.
+
+Naming the source at `connect()` was the real gap, and it is closed separately:
+`nxd_tcp_client_socket_source_connect()` in the fork, reached by binding the
+socket before connecting.
 
 ## Shape of the addendum
 

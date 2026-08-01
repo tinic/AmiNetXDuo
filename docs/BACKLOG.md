@@ -29,35 +29,12 @@ those empty results and was wrong for a day.
 
 ## Decided against — do not "fix"
 
-- **RFC 3542, the decisions it fixed**, 2026-07-31. The subset worth having is
-  built (`src/bsdsocket/cmsg.c`, `include/aminetxduo/cmsg.h`); what follows is
-  the part that is permanent, not the part that is done.
-  - **`CMSG_ALIGN` is 4 bytes.** Every 32-bit BSD used it and the NDK's own
-    `struct cmsghdr` is already the 12-byte shape it implies. Every ancillary
-    buffer any caller ever builds depends on this; it does not move.
-  - **The NDK's `CMSG_NXTHDR` and `CMSG_FIRSTHDR` are unusable and are
-    replaced.** `CMSG_NXTHDR` expands to an `ALIGN()` no NDK header defines, so
-    a translation unit that uses it does not compile; `CMSG_FIRSTHDR` returns
-    `msg_control` without testing `msg_controllen`, which RFC 3542 §20.3.1
-    names. `CMSG_LEN` and `CMSG_SPACE` are genuinely absent. All four come from
-    `aminetxduo/cmsg.h`; do not reach for the NDK's.
-  - **Both the BSD and the Linux option numbers are accepted, and a reply uses
-    whichever the caller enabled with** -- enabling with 36 gives `cmsg_type`
-    46, enabling with 49 gives 50. Same terms as `IPV6_V6ONLY`.
-  - **`IP_PKTINFO` takes 8**, which is `IP_RETOPTS` in this NDK -- a 4.3BSD
-    option no AmigaOS stack implemented. The same trade `IPV6_TCLASS` made
-    against `IPV6_PATHMTU`.
-  - **A per-write source or hop limit on TCP is refused, permanently.** A
-    stream's source is fixed when the SYN goes out; there is nothing per-write
-    to name. Naming it at `connect()` was the real gap and is closed separately
-    by `nxd_tcp_client_socket_source_connect()` in the fork.
-  - **Loopback's index is its NetX slot + 1, named `lo0`**, and appears in the
-    RFC 3493 trio only. `ObtainInterfaceList()`, `QueryInterfaceTagList()` and
-    `SIOCGIFCONF` still do not list it: those are about SANA-II interfaces a
-    caller can configure.
-  - **Not implemented and not planned**: `IPV6_RTHDR`, `HOPOPTS`, `DSTOPTS`,
-    `RTHDRDSTOPTS`, `PATHMTU`, `RECVPATHMTU`, `USE_MIN_MTU`, `DONTFRAG`,
-    `NEXTHOP` -- extension headers and path-MTU state NetX Duo does not expose.
+- **RFC 3542's extension headers stay unimplemented.** `IPV6_RTHDR`,
+  `HOPOPTS`, `DSTOPTS`, `RTHDRDSTOPTS`, `PATHMTU`, `RECVPATHMTU`,
+  `USE_MIN_MTU`, `DONTFRAG` and `NEXTHOP` are extension-header and path-MTU
+  state NetX Duo does not expose, so there is nothing under them to reach. The
+  rest of RFC 3542 is built; what its constants were fixed at, and why they
+  cannot move, is in `docs/NDK-ADDENDUM.md`.
 
 - **A browse reports the whole peer cache, not the browse window**, and stays
   that way, 2026-07-31. `netstack_mdns_browse_collect()` walks
