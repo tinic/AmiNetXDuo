@@ -82,6 +82,7 @@
 #include <dos/dos.h>
 #include <dos/dostags.h>
 #include <dos/dosextens.h>
+#include <dos/var.h>
 #include <exec/memory.h>
 #include <intuition/intuition.h>
 #include <proto/exec.h>
@@ -432,6 +433,14 @@ int main(int argc, char **argv)
     out = Open((CONST_STRPTR)ASYNC_REPORT, MODE_NEWFILE);
     if (out != (BPTR)0)
         Close(out);
+
+    /* Ask every client for its stack high-water mark.  DOS copies the local
+       variable list into each child, and clients/compat/amiga_argv.c paints
+       the 256 KB stack and reports the deepest word touched when it sees this.
+       Set here rather than in the guest's environment because envsetup builds
+       ENV: fresh on every boot and the test HD has no SetEnv to write it. */
+    (VOID)SetVar((CONST_STRPTR)"AMIGA_ARGV_STACKCHECK", (CONST_STRPTR)"1",
+                 -1, LV_VAR);
 
     /* Only the 'R' form needs it, and a machine without it simply cannot be
        asked to resize a window -- which is reported rather than fatal. */

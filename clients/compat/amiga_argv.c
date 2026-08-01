@@ -67,6 +67,62 @@ static struct Task           *argv_exit_task;    /* who set it, NULL when unset 
 static int                    argv_exit_status;
 
 /*
+ * How much of the stack the client actually used.
+ *
+ * 256 KB is a guess that has never been checked, and it is 25% of the smallest
+ * machine this runs on.  Painting the block with a pattern and finding the
+ * lowest word still holding it gives the high-water mark: the stack grows down
+ * from stk_Upper, so everything below the deepest frame is untouched.
+ *
+ * Off unless the environment variable is set, because it costs a pass over
+ * 256 KB at startup and a line of output that a client's caller did not ask
+ * for.  `setenv AMIGA_ARGV_STACKCHECK 1` turns it on for a Shell.
+ */
+#define ARGV_PAINT          0xA5A5A5A5UL
+#define ARGV_STACKCHECK_VAR "AMIGA_ARGV_STACKCHECK"
+
+static BOOL                   argv_painted;
+
+static BOOL argv_stackcheck_wanted(VOID)
+{
+    char one[2];
+
+    return (GetVar((CONST_STRPTR)ARGV_STACKCHECK_VAR, (STRPTR)one,
+                   (LONG)sizeof(one), 0) > 0) ? TRUE : FALSE;
+}
+
+static VOID argv_paint(VOID)
+{
+    ULONG *word = (ULONG *)argv_stack;
+    ULONG  left = AMIGA_ARGV_STACK / sizeof(ULONG);
+
+    while (left-- > 0)
+        *word++ = ARGV_PAINT;
+
+    argv_painted = TRUE;
+}
+
+/* Called with the client finished and the stack not yet freed, on either the
+   return or the longjmp path. */
+static VOID argv_report_high_water(VOID)
+{
+    const ULONG *word = (const ULONG *)argv_stack;
+    ULONG        left = AMIGA_ARGV_STACK / sizeof(ULONG);
+    ULONG        untouched = 0;
+
+    if (!argv_painted)
+        return;
+
+    argv_painted = FALSE;
+    while (untouched < left && word[untouched] == ARGV_PAINT)
+        untouched++;
+
+    Printf("[argv: stack high-water %ld of %ld bytes]\n",
+           (LONG)(AMIGA_ARGV_STACK - untouched * sizeof(ULONG)),
+           (LONG)AMIGA_ARGV_STACK);
+}
+
+/*
  * Run __real_main() on the swapped stack.  No locals, no arguments, and
  * noinline: between the two StackSwap() calls the stack pointer is the new
  * stack's, so anything this function touched on the old one would be the wrong
@@ -267,6 +323,9 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
            back to this frame -- on the caller's stack -- and the FreeMem()
            below runs either way.  argv_stack is static because a local
            written before setjmp() is not guaranteed to survive the longjmp. */
+        if (argv_stackcheck_wanted())
+            argv_paint();
+
         exited = setjmp(argv_exit_jmp);
         if (exited == 0)
         {
@@ -275,6 +334,7 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
         }
         argv_exit_task = NULL;
 
+        argv_report_high_water();
         FreeMem(argv_stack, AMIGA_ARGV_STACK);
         argv_stack = NULL;
 
