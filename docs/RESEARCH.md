@@ -21372,3 +21372,138 @@ more in it than fit.
 `ALL` with a type is refused, and Ctrl-C in the first window drops back to
 listing the types rather than starting a second round of queries only to stop
 them again.
+
+## 85. Connecting from an address nobody would have routed to (2026-07-31)
+
+`bind()` on a TCP socket named a source and the library could only check it.
+`bsd_tcp_source_check()` ran the two lookups `connect()` was about to run,
+compared the answers, and refused when they disagreed. That was honest and it
+was a hole: the disagreement it refused is the ordinary multihomed case, source
+on one interface and route out of the other, which BSD allows and we did not.
+
+The reason was that there was nothing to call.
+`_nxd_tcp_client_socket_connect()` runs its own route lookup with
+`outgoing_interface` still `NX_NULL`, writes the answer into
+`nx_tcp_socket_connect_interface`, and `_nx_tcp_packet_send_syn()` puts the SYN
+on the wire before the call returns. Every segment then takes its source from
+that field (`nx_tcp_packet_send_syn.c:101`,
+`nx_tcp_packet_send_control.c:285`), so nothing between `bind()` and
+`connect()` can steer it. UDP and raw have `nxd_udp_socket_source_send()` and
+`nxd_ip_raw_packet_source_send()`; TCP had no equivalent, and the checking was
+the shape you get when you cannot say what you mean.
+
+### The service, and why the constraint goes into the route lookup
+
+`nxd_tcp_client_socket_source_connect()` takes the `address_index`
+`nxd_udp_socket_source_send()` takes -- an `nx_ip_interface[]` index for IPv4,
+an `nx_ipv6_address[]` index for IPv6 -- and seeds `outgoing_interface` with it
+before `_nx_ip_route_find()`.
+
+That is the whole mechanism, and it works because `_nx_ip_route_find()` treats
+a non-null interface as a **filter and not a starting point**. Every loop in it
+reads
+
+```c
+if (*ip_interface_ptr == NX_NULL)      { *ip_interface_ptr = interface_ptr; }
+else if (*ip_interface_ptr != interface_ptr) { continue; }
+```
+
+so seeding it turns "which interface would reach this destination" into "does
+*this* interface reach it", and a source that cannot is `NX_IP_ADDRESS_ERROR`
+before any socket state moves. Both lookups run ahead of the protection mutex
+and ahead of `NX_TCP_SYN_SENT`, so a refusal leaves the socket closed with
+nothing sent.
+
+### The trap next door, closed on the way past
+
+`_nx_ip_route_find()` returning `NX_SUCCESS` with the next hop still zero is
+not a route. `_nx_ip_packet_send()` calls that "the specified interface is
+unreached" (`nx_ip_packet_send.c:350`) and then does one of two things, neither
+of which a caller can see: it drops the packet with only
+`nx_ip_invalid_transmit_packets` to show for it, or -- with forwarding enabled
+-- **re-runs `_nx_ip_route_find()` with no interface constraint at all** and
+sends from whatever it finds. The first is the shape §67 found on the UDP side,
+where the send still returned `NX_SUCCESS`; the second would take a named
+source and quietly replace it, which is worse. So the connect now treats a zero
+next hop as an error on both entry points. It is not reachable through the
+default routing table, which sets a next hop on every success -- it needs a
+static route with a zero gateway -- but the pinned path is what makes a
+mismatched constraint an application-reachable input.
+
+### bsdsocket.library stops comparing
+
+`connect()` now does what the datagram path does: `bsd_source_select()` maps
+the bound address or the RFC 4007 zone to an index, and the connect is
+`source_connect()` when there is one and the plain connect when there is not.
+The two refusals left are the ones `bsd_source_select()` produces on its own --
+`ENETUNREACH` for a bound address with no route out of its own interface,
+`EADDRNOTAVAIL` for one that is not on any interface. `EADDRNOTAVAIL` for "a
+different interface would be used" is gone, because that connection is now
+made.
+
+IPv6 keeps its reachability check in the library rather than in the fork.
+`bsd_source_select()`'s IPv6 arm validates that the address exists and is
+`NX_IPV6_ADDR_STATE_VALID`; it does not ask whether the destination is
+reachable from it, because for IPv6 that question is
+`_nxd_ipv6_interface_find()`'s and not the routing table's. So
+`bsd_tcp_source_check()` calls it with the pinned address's interface as the
+constraint, which is the same question `_nx_ip_route_find()` answers for IPv4,
+and an unreachable destination is `ENETUNREACH` rather than a SYN that times
+out. The fork takes the named IPv6 address as given, exactly as
+`_nxd_udp_socket_source_send()` does.
+
+### Two interfaces, without a second card
+
+The lab guest has one SANA-II card and the case is about two, so
+`tests/netstack/host/test_tcp_source_connect_host.c` builds the topology out of
+two filled-in `nx_ip_interface[]` entries and drives the real connect against
+it: `nxd_tcp_client_socket_connect.c`,
+`nxd_tcp_client_socket_source_connect.c`, `nx_ip_route_find.c`,
+`nx_tcp_packet_send_syn.c` and `nx_tcp_packet_send_control.c` are compiled into
+the binary, and the driver is the only stub. The assertion is the source
+address the SYN carried, taken out of the TCP pseudo-header the send path built
+with it. 19 checks:
+
+```
+10.0.0.1 on if0, 10.0.0.2 on if1, both /24, peer 10.0.0.9
+
+unnamed                    -> if0, source 10.0.0.1     (what the route says)
+source_connect(index 1)    -> if1, source 10.0.0.2     (what the bind says)
+source_connect(index 0)    -> if0, source 10.0.0.1
+if1 moved to 192.168.9.2   -> NX_IP_ADDRESS_ERROR, no SYN, socket closed
+   ... plus a gateway on ITS network -> connects, next hop the gateway
+if1 link down              -> NX_NO_INTERFACE_ADDRESS, no SYN
+if1 not valid              -> NX_NO_INTERFACE_ADDRESS
+unnamed, after all of it   -> if0 again
+```
+
+The first and second rows together are the whole point: the same call, the same
+routing table, and the source is the one that was asked for rather than the one
+that would have been chosen.
+
+On the guest, `tests/tools/run-srcsel.sh` covers what one interface reaches --
+a pinned connect on loopback, a pinned connect on the physical interface with
+the accepting end asked what source it saw, an unbound connect alongside it,
+and the `ENETUNREACH` refusal. Its two-interface arm exists (`SrcProbe` takes
+an optional second local address and a destination) and is not wired into the
+harness, because nothing runs it.
+
+**A two-card guest was attempted and is not the reason this is believed.**
+Amiberry does put two boards in the machine -- `a2065_rom_file=:ENABLED` plus
+an `ariadne_*` pair through `AMINETXDUO_AMIBERRY_EXTRA`, both bridged to
+`ens18` with different MACs, logged as `Card 05: 'A2065'` and
+`Card 06: 'Ariadne'` and both mapped into Zorro II space. What did not happen
+is the guest coming up on them: `AddNetInterface eth0 eth1` was entered and
+never returned, with an empty serial log, and the run hit its timeout. Not
+diagnosed.
+
+### Where it is
+
+`tinic/netxduo`, branch `amiga-tcp-source-connect`, off `473d1928`, merged into
+`amiga-integration` which the submodule tracks. `_nxd_tcp_client_socket_connect()`
+becomes a call to `_nxd_tcp_client_socket_connect_internal()` with
+`NX_TCP_SOURCE_ADDRESS_ANY` and is unchanged in behaviour; only the two source
+lookups differ when an index is given. No IPv4-only
+`nx_tcp_client_socket_source_connect()` wrapper: the UDP pair exists because
+`_nx_udp_socket_source_send()` predates the duo API, and there is no such
+history here.

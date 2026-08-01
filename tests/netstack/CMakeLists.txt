@@ -157,4 +157,40 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME bcast_loopback COMMAND test_bcast_loopback)
 
+    # Whether a TCP connect leaves from the source it was named, on a machine
+    # with two interfaces on one subnet -- the topology the lab guest cannot
+    # boot, built here out of two filled-in nx_ip_interface[] entries.  Links
+    # the real connect, the real route lookup and the real SYN build, so the
+    # assertion is the source address the SYN carried.  -UAMINETXDUO_IPV6 for
+    # the same reason as above: this is an IPv4 question.
+    add_executable(test_tcp_source_connect
+        host/test_tcp_source_connect_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nxd_tcp_client_socket_connect.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxd_tcp_client_socket_source_connect.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_route_find.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_packet_send_syn.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_packet_send_control.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_create.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_create.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_initialize.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_cleanup.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_allocate.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_release.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_transmit_release.c")
+
+    target_compile_options(test_tcp_source_connect PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_tcp_source_connect PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_tcp_source_connect PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME tcp_source_connect COMMAND test_tcp_source_connect)
+
 endif()

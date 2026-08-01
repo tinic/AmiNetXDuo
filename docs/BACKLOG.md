@@ -53,6 +53,19 @@ was wrong for a day.
   `run-cycledrill.sh` greps the serial log for it on every run and prints the
   count; `AMINETXDUO_CYCLE_ORPHAN_FATAL=1` makes it fail. Confirming it needs
   real hardware. Checked 2026-07-31.
+- **The two-interface source case is proved on a host, not on a guest.** TCP
+  now leaves from the address `bind()` named --
+  `nxd_tcp_client_socket_source_connect()` in the NetX fork -- and the case it
+  exists for is two interfaces on one subnet, source on one and route out of
+  the other. That is asserted by `tests/netstack/host/test_tcp_source_connect_host.c`,
+  which compiles the real connect, route lookup and SYN build against an
+  `NX_IP` with two `nx_ip_interface[]` entries filled in and checks the source
+  address the SYN carried. What is not shown is the same thing through two real
+  SANA-II drivers. Amiberry does put two cards in the machine -- `a2065` plus
+  `ariadne`, both bridged, both logged and mapped -- but `AddNetInterface eth0
+  eth1` never returned and the serial log was empty; `ariadne` alone comes up
+  fine. Undiagnosed. `SrcProbe` already takes the second address and a
+  destination for when it is.
 - **IPv6 group membership (`IPV6_JOIN_GROUP`) is absent.** The IPv4 side is
   done (below); this is not, and is a separate decision because the numbers are
   worse. `NX_ENABLE_IPV6_MULTICAST` grows every `NX_IP` by 172 bytes whether or

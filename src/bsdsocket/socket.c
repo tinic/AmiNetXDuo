@@ -20,8 +20,8 @@
 /* For _nx_tcp_packet_send_fin() -- see bsd_tcp_send_fin() below. */
 #include "nx_tcp.h"
 
-/* For _nx_ip_route_find() / _nxd_ipv6_interface_find(): connect() runs the
-   route lookup itself to see whether a bound source can be honoured. */
+/* For _nx_ip_route_find() / _nxd_ipv6_interface_find(): the send path asks
+   whether a bound source can reach the destination before it uses it. */
 #include "nx_ip.h"
 #ifdef AMINETXDUO_IPV6
 #include "nx_ipv6.h"
@@ -2400,10 +2400,12 @@ static LONG bsd_tcp_source_check(struct AmiSocketBase *SocketBase,
                                  AmiSocket *sock, const NXD_ADDRESS *addr,
                                  UINT *index, BOOL *pinned)
 {
+    NX_IP *ip = netstack_ip();
+
     *index  = 0;
     *pinned = FALSE;
 
-    if (netstack_ip() == NULL)
+    if (ip == NULL)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 
     switch (bsd_source_select(sock, addr, sock->as_ScopeId, index))
@@ -2413,7 +2415,7 @@ static LONG bsd_tcp_source_check(struct AmiSocketBase *SocketBase,
 
         case BSD_SOURCE_INDEX:
             *pinned = TRUE;
-            return 0;
+            break;
 
         case BSD_SOURCE_UNREACH:
             return bsd_fail(SocketBase, AMI_ENETUNREACH);
@@ -2422,6 +2424,38 @@ static LONG bsd_tcp_source_check(struct AmiSocketBase *SocketBase,
         default:
             return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
     }
+
+#ifdef AMINETXDUO_IPV6
+    /*
+     * bsd_source_select()'s reachability arm is IPv4's route lookup; the IPv6
+     * index it returns says only that the address exists.  Ask the source
+     * selection whether the pinned address's interface has any source for this
+     * destination -- the same question _nx_ip_route_find() answers for IPv4 --
+     * so an unreachable destination is ENETUNREACH rather than a SYN that
+     * times out.
+     */
+    if (addr->nxd_ip_version == NX_IP_VERSION_V6)
+    {
+        NXD_IPV6_ADDRESS *chosen = NX_NULL;
+        NX_INTERFACE     *nxif   =
+            ip->nx_ipv6_address[*index].nxd_ipv6_address_attached;
+        UINT              status;
+
+        if (nxif == NX_NULL)
+            return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
+
+        tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+        status = _nxd_ipv6_interface_find(ip,
+                                          (ULONG *)addr->nxd_ip_address.v6,
+                                          &chosen, nxif);
+        tx_mutex_put(&ip->nx_ip_protection);
+
+        if (status != NX_SUCCESS)
+            return bsd_fail(SocketBase, AMI_ENETUNREACH);
+    }
+#endif
+
+    return 0;
 }
 
 /* The body of connect(), run inside a ThreadX context bracket. */

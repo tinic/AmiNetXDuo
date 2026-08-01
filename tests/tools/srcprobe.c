@@ -25,6 +25,14 @@
  * argv[1] is the guest's own address (SLIRP's first lease, 10.0.2.15, by
  * default) and argv[2] a destination on the same link (SLIRP's gateway).
  *
+ * argv[3] and argv[4] are the two-interface arm and are optional: the guest's
+ * address on its SECOND interface, and a host on the same subnet with a
+ * listener on port 7805.  Given both, the probe connects from the second
+ * address to that host -- the case a one-interface guest cannot reach, where
+ * the bound address is on one interface and the unconstrained route leaves by
+ * the other.  It is the RECEIVER that has to be asked what source it saw; all
+ * the guest can say is that the connect was made.
+ *
  * The vectors are called by hand at the LVOs docs/RESEARCH.md 3.2 lists, for
  * the reason src/tools/toolsock.c gives: the NDK inlines assume a global
  * SocketBase.
@@ -62,6 +70,7 @@ typedef struct ProbeAddr
 #define PORT_UDP_LOOP       7802
 #define PORT_TCP_LOOP       7803
 #define PORT_TCP_LAN        7804
+#define PORT_TCP_ALT        7805
 
 /* ------------------------------------------------------------- vectors ---- */
 
@@ -392,12 +401,16 @@ int main(int argc, char **argv)
     ProbeAddr       name;
     ULONG           self;
     ULONG           peer;
+    ULONG           alt;
+    ULONG           dest;
     LONG            s;
     LONG            listener;
     LONG            rc;
 
     self = p_parse((argc > 1) ? argv[1] : NULL, 0x0A00020FUL);  /* 10.0.2.15 */
     peer = p_parse((argc > 2) ? argv[2] : NULL, 0x0A000202UL);  /* 10.0.2.2  */
+    alt  = (argc > 3) ? p_parse(argv[3], 0) : 0;
+    dest = (argc > 4) ? p_parse(argv[4], 0) : 0;
 
     base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4);
     if (base == NULL)
@@ -591,6 +604,44 @@ int main(int argc, char **argv)
             }
         }
         (VOID)p_close(base, listener);
+    }
+
+    /* ---- TCP: source on one interface, route out of the other ---------- */
+
+    /*
+     * The case the source connect exists for, and the only one that needs a
+     * second interface.  alt is an address on it and dest is reachable from
+     * both, so the unconstrained route leaves by the first interface while
+     * the bind names the second: before nxd_tcp_client_socket_source_connect()
+     * this was EADDRNOTAVAIL.  What source the SYN carried is for the
+     * receiver to say.
+     */
+    if (alt != 0 && dest != 0)
+    {
+        s = p_socket(base, P_AF_INET, P_SOCK_STREAM, 0);
+        if (s >= 0)
+        {
+            p_addr(&sa, alt, 0);
+            rc = p_bind(base, s, &sa);
+            if (p_check((BOOL)(rc == 0), "bind to the second interface's "
+                        "address", p_errno(base)))
+            {
+                p_addr(&sa, dest, PORT_TCP_ALT);
+                rc = p_connect(base, s, &sa);
+                if (p_check((BOOL)(rc == 0),
+                            "connect from the second interface's address",
+                            p_errno(base)))
+                {
+                    name.sin_addr = 0;
+                    (VOID)p_getsockname(base, s, &name);
+                    (VOID)p_check((BOOL)(name.sin_addr == alt),
+                                  "getsockname reports the second interface's "
+                                  "address",
+                                  (LONG)name.sin_addr);
+                }
+            }
+            (VOID)p_close(base, s);
+        }
     }
 
     /* ---- an address the machine does not have -------------------------- */
