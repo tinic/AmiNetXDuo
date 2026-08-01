@@ -15,11 +15,12 @@
 #
 # THE MACHINE, AND WHY THIS ONE
 #
-#   An A600 with 1 MB of chip RAM and a PCMCIA card, on a 68000.  That is the
-#   supported floor -- README says 68000, OS 2.04, 1 MB -- and it is the machine
-#   the arithmetic matters on: bsdsocket.library is around 350 KB, so a copy
-#   that stays resident after a failure is better than a third of the machine.
-#   On an 8 MB A1200 the same defect is invisible.
+#   An A1200 with a PCMCIA card.  NOT an A600, tempting as the supported floor
+#   is: Amiberry's A600 PCMCIA emulation does not work for ANY stack -- the
+#   Roadshow 1.15 demo fails there with "Input/output error" on the same card
+#   that it and we both drive to a DHCP lease on an A1200.  An A600 run would
+#   fail for a reason that has nothing to do with this code, which is the worst
+#   kind of green.  docs/BACKLOG.md records the measurements.
 #
 #   The card is cnet.device on the emulated PCMCIA slot, because THE FAILURE
 #   MODE IS THE POINT.  A device that does not exist fails at OpenDevice(),
@@ -121,10 +122,23 @@ mkdir -p "$STAGE/libs" "$STAGE/devs/NetInterfaces"
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$CNET"  "$STAGE/devs/cnet.device"
 cp "$ADDIF" "$STAGE/AddNetInterface"
+# STATE=down is what makes this test the RIGHT failure.
+#
+# The card works on this machine, so a plain configuration comes up and there
+# is no failure to measure. Configured down, the device still OPENS -- the
+# packet pool, the NX_IP and the ThreadX threads are all made -- and bring-up
+# fails afterwards, on the DHCP wait, with no address. That is the state that
+# strands a stack: netstack_startup() keeps ns_Refs at 1 "because a live stack
+# has an owner" when bsd_lib_open() is about to return NULL and there will
+# never be one.
+#
+# A device that never opens cannot show it. Nothing has been allocated yet, so
+# there is nothing to leave behind, and the run passes on a broken build.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<'EOF'
 DEVICE=cnet.device
 UNIT=0
 CONFIGURE=DHCP
+STATE=down
 EOF
 
 : > "$STAGE/commands.txt"
@@ -144,9 +158,9 @@ export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-addifleak}"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 SER="$ROOT/build/amiberry-serial-$AMINETXDUO_RUN_TAG.log"
 
-echo "==> booting a 1 MB A600 on a 68000, cnet.device on the PCMCIA slot"
+echo "==> booting an A1200 with cnet.device on the PCMCIA slot"
 set +e
-"$ROOT/tools/amiberry-run.sh" -m A600 -c 68000 -N ne2000_pcmcia -t "$TIMEOUT" \
+"$ROOT/tools/amiberry-run.sh" -N ne2000_pcmcia -t "$TIMEOUT" \
     "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/AddNetInterface" \
     "$STAGE/commands.txt"
 RUN_RC=$?
@@ -183,8 +197,12 @@ pass "all $RUNS runs reported"
 
 # The command has to have FAILED; a leak test against a run that worked proves
 # nothing, and a card that unexpectedly comes up would do exactly that.
+# Without the fix, run 1 fails and runs 2 and 3 report SUCCESS: the stranded
+# stack is still standing, so the next OpenLibrary() finds it and hands back a
+# working base for a network that never came up. That is a sharper signal than
+# the memory arithmetic and needs no subtraction, so it is checked first.
 if grep -q 'rc 0,' "$REPORT"; then
-    fail "a run returned 0 -- the card came up, so nothing here was tested"
+    fail "a run returned 0 -- a failed AddNetInterface left a stack running"
 fi
 
 FIRST="${FREE[1]}"

@@ -182,6 +182,27 @@ empty results.
   looks like coverage and is not, which is how the leak survived the first
   time. Removed 2026-07-31.
 
+- **Amiberry's A600 PCMCIA emulation does not work, for any stack.** On an
+  A1200 with `-N ne2000_pcmcia` the emulated RTL8019 and Rolf Anders'
+  `cnet.device` drive a full DHCP lease -- ours reports `eth0: online, address
+  10.0.2.15` and the Roadshow 1.15 demo reports the same address from the same
+  card. Move the identical staging to `-m A600` and both fail: ours cannot open
+  the device, Roadshow says `Could not add interface "eth0" (Input/output
+  error)`. Not a memory limit -- the failing A600 run had 4.6 MB free. So a
+  PCMCIA test has to run on the A1200 profile, and an A600 failure says nothing
+  about the code. The Roadshow demo is the control that establishes this and
+  lives in `~/amiga-assets/stacks/` on playhouse3, reached by
+  `AMINETXDUO_CMP_ROADSHOW`. Found 2026-08-01.
+
+  Not memory either, which was the other candidate: an A1200 given
+  `chipmem_size=2;bogomem_size=0;fastmem_size=0` -- 1 MB of chip and nothing
+  else, the supported floor -- brings the same card up and leases an address,
+  with 374,760 bytes still free afterwards. Every A600 run was also a 1 MB run,
+  so the two were confounded until that was measured separately. It is also the
+  first time the README's 1 MB floor has been shown with a live interface
+  rather than inferred; `run-oommsg.sh` only proves the other end, that 512 KB
+  cannot start the stack.
+
 - **`/opt/amiga` on playhouse2 carries the argv bug in all eleven `crt0.o`.**
   Locally built, GCC 16.1.1b, and `--check` reports `11 buggy` -- it has the
   compiler fix for the frame skew and not newlib's `120371e` for the argv
