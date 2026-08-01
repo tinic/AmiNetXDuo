@@ -4,7 +4,12 @@
 #
 #   clients/dropbear/run-fsuae.sh [-m MODEL] [-t SECONDS] [-c CPU] [-k MHZ]
 #                                 [-b STACKBUILD] [-D DBBUILD] [-i KEYFILE]
-#                                 [-x] [-C COMMANDS]
+#                                 [-x] [-C COMMANDS] [-A]
+#
+#   -A  Amiberry instead of FS-UAE, which is what a headless box needs: FS-UAE
+#       wants an X server and dies in GLAD before the guest boots.  Its slirp
+#       is the same 10.0.2.0/24 with the host at 10.0.2.2, so the target does
+#       not move.  NOT a timing lane -- -x is FS-UAE's.
 #
 #   -x  take the emulator alone (tools/fsuae-run.sh's measurement lane).  EVERY
 #       timing here needs it: a handshake measured while two other FS-UAE
@@ -78,8 +83,14 @@ KEYFILE="${AMINETXDUO_DBCLIENT_KEY:-$ROOT/build/sshd-test/id_amiga}"
 
 PERF=0
 COMMANDS="${AMINETXDUO_DB_COMMANDS:-}"
+# FS-UAE needs an X server and dies in GLAD on a headless box, so -A picks
+# Amiberry.  Its slirp puts the host at 10.0.2.2 as well, so DBHOST is the
+# same either way and the default command list needs no change.
+RUNNER_KIND="${AMINETXDUO_RUNNER:-fsuae}"
+BOARD=a2065
+BACKEND="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
 
-while getopts "m:t:c:k:b:D:E:i:xC:S:" opt; do
+while getopts "m:t:c:k:b:D:E:i:xC:S:AN:B:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
@@ -92,7 +103,10 @@ while getopts "m:t:c:k:b:D:E:i:xC:S:" opt; do
         x) PERF=1 ;;
         C) COMMANDS="$OPTARG" ;;
         S) DB_SERVER="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-k MHz] [-b stackbuild] [-D dbbuild] [-i key] [-x] [-C commands] [-E dbbuild2] [-S srvbuild]" >&2; exit 2 ;;
+        A) RUNNER_KIND=amiberry ;;
+        N) BOARD="$OPTARG" ;;
+        B) BACKEND="$OPTARG" ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-k MHz] [-b stackbuild] [-D dbbuild] [-i key] [-x] [-C commands] [-E dbbuild2] [-S srvbuild] [-A [-N board] [-B backend]]" >&2; exit 2 ;;
     esac
 done
 
@@ -318,10 +332,17 @@ CPUARG=()
 [ -z "$CLOCK" ] || CPUARG+=(-k "$CLOCK")
 if [ "$PERF" = "1" ]; then CPUARG+=(-x); fi
 
+STAGED=("$STAGE/devs" "$STAGE/libs" "$STAGE/dbclient")
+[ -z "$DB_BUILD2" ] || STAGED+=("$STAGE/dbclient2")
+STAGED+=("$STAGE/AddNetInterface" "$STAGE/id_amiga")
+[ -z "${ECDSAKEY:-}" ] || STAGED+=("$STAGE/id_amiga_ecdsa")
+[ -z "$DB_SERVER" ] || STAGED+=("$STAGE/dropbear" "$STAGE/hostkey" "$STAGE/.ssh")
+STAGED+=("$STAGE/commands.txt")
+
+if [ "$RUNNER_KIND" = "amiberry" ]; then
+    exec "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$BACKEND" -m "$MODEL" \
+         -t "$TIMEOUT" ${CPU:+-c "$CPU"} "$RUNNER" "${STAGED[@]}"
+fi
+
 exec "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
-     "$RUNNER" "$STAGE/devs" "$STAGE/libs" "$STAGE/dbclient" \
-     ${DB_BUILD2:+"$STAGE/dbclient2"} \
-     "$STAGE/AddNetInterface" "$STAGE/id_amiga" \
-     ${ECDSAKEY:+"$STAGE/id_amiga_ecdsa"} \
-     ${DB_SERVER:+"$STAGE/dropbear" "$STAGE/hostkey" "$STAGE/.ssh"} \
-     "$STAGE/commands.txt"
+     "$RUNNER" "${STAGED[@]}"
