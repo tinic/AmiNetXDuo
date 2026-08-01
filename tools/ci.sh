@@ -407,8 +407,20 @@ stage_emulator() {
 
 mkdir -p "$BUILD"
 
+#
+# analyze is NOT in the default set. It is 2.5 minutes of the roughly four a
+# default run takes, and its findings do not move between commits the way a
+# build break does -- the baseline has sat at 13 for weeks. Naming it runs it:
+#
+#     tools/ci.sh analyze                  just it
+#     tools/ci.sh host host32 cross analyze conformance    the release set
+#
+# The release workflow names it, so nothing ships unanalysed. A default run
+# says out loud that it skipped, because a stage that goes quiet reads as
+# coverage it is not providing.
+#
 WANT=("$@")
-[ ${#WANT[@]} -gt 0 ] || WANT=(host host32 cross analyze conformance)
+[ ${#WANT[@]} -gt 0 ] || WANT=(host host32 cross conformance)
 
 stage_submodules
 
@@ -438,6 +450,11 @@ hr "summary"
 # re-checks the recorded NetX Duo/ThreadX versions against third_party/.
 note "version: $(tools/version.sh --long 2>&1 || echo 'version.sh FAILED -- see above')"
 note "stages: ${STAGES_RUN[*]}"
+
+case " ${STAGES_RUN[*]} " in
+    *" analyze "*) ;;
+    *) note "analyze NOT RUN -- name it to run it; the release workflow does" ;;
+esac
 if [ ${#FAILED[@]} -eq 0 ]; then
     printf '\033[32mall green\033[0m\n'
     exit 0

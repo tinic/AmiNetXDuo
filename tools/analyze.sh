@@ -153,12 +153,24 @@ run_one() {
     echo "$src" >> "$WORK/fellback"
 }
 
+#
+# A pool, not batches. `wait` every JOBS units made each batch cost its slowest
+# member: 240 units averaging 1.25 s took 253 s wall, because a handful of slow
+# files landed in different batches and 23 idle cores waited for each one. With
+# `wait -n` a finished slot is refilled immediately, so the floor is the single
+# slowest unit rather than the sum of ten worst-in-batch.
+#
 i=0
+running=0
 : > "$WORK/fellback"
 while IFS= read -r cmd; do
     i=$((i + 1))
     run_one "$cmd" "$WORK/log.$i" &
-    [ $((i % JOBS)) -eq 0 ] && wait
+    running=$((running + 1))
+    if [ "$running" -ge "$JOBS" ]; then
+        wait -n
+        running=$((running - 1))
+    fi
 done < "$WORK/cmds"
 wait
 
