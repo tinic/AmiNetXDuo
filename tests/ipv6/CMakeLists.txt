@@ -55,13 +55,23 @@ endif()
 #
 #   AMINETXDUO_RUN_TAG=v6sock ./tests/ipv6/run-socket-fsuae.sh -b build/v6
 
-add_executable(ipv6_socket_test ipv6_socket_test.c)
+# tapdev.c gives this test its own interface, so it needs no a2065.device and
+# runs anywhere tier 2 runs.  It links nothing from src/; it includes
+# src/sana2/sana2_device.h for the SANA-II command numbers and structures
+# alone, which are protocol facts and whose alternative is a second copy of
+# them -- the same trade tests/tcpdrill states for itself.  What the test's own
+# code takes from this tree is still <aminetxduo/cmsg.h> and nothing else.
+add_executable(ipv6_socket_test
+    ipv6_socket_test.c
+    "${CMAKE_SOURCE_DIR}/tests/tcpdrill/tapdev.c")
 
 # include/ for aminetxduo/cmsg.h -- RFC 3542 is struct shapes and macros, not
 # vectors, so the header is the only thing this program takes from us.  Having
 # it on the path here is also the check that it compiles standalone.
 target_include_directories(ipv6_socket_test PRIVATE
-    "${CMAKE_SOURCE_DIR}/include")
+    "${CMAKE_SOURCE_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/tests/tcpdrill"
+    "${CMAKE_SOURCE_DIR}/src/sana2")
 
 if(AMIGA_NDK_INCLUDE)
     target_include_directories(ipv6_socket_test PRIVATE "${AMIGA_NDK_INCLUDE}")

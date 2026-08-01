@@ -46,6 +46,9 @@
 #include <netinet/in.h>
 #include "aminetxduo/cmsg.h"
 
+/* The synthetic SANA-II device this test brings the stack up on. */
+#include "tapdev.h"
+
 
 /* ------------------------------------------------------------- logging --- */
 
@@ -1863,6 +1866,36 @@ APTR                p;
 int main(void)
 {
     t_log("AmiNetXDuo -- AF_INET6 through bsdsocket.library");
+
+    /*
+     * An interface, without needing anyone's driver.
+     *
+     * Every check below talks over ::1 and nothing else, but the library will
+     * not bring a stack up with no interface to put it on -- so this used to
+     * need Commodore's a2065.device, which is not ours to ship and which
+     * therefore pinned the whole test to the one CI runner that had a copy.
+     *
+     * tests/tcpdrill/tapdev.c is a SANA-II device made at run time with
+     * MakeLibrary()/AddDevice(), so OpenDevice() finds it in ExecBase's list
+     * and never looks in DEVS:. src/sana2/ opens, configures and runs its
+     * readers against it through exactly the same code as a real card.
+     *
+     * It has to be installed by THIS process: the device lives in the
+     * installer's address space and dies with it, so a launcher cannot do it.
+     * That is also why tapdev.c is linked here rather than the test staying a
+     * single translation unit -- it takes nothing from this tree either, only
+     * NDK headers, so what the test itself uses of ours is still just
+     * <aminetxduo/cmsg.h>.
+     */
+    {
+        static const UBYTE tap_mac[6] = { 0x02, 0x41, 0x4d, 0x49, 0x00, 0x06 };
+
+        if (tap_install(tap_mac) != 0)
+        {
+            Printf((STRPTR)"cannot install the test interface\n");
+            return(20);
+        }
+    }
 
     SocketBase = OpenLibrary((STRPTR)"bsdsocket.library", 4);
     if (!t_check((BOOL)(SocketBase != NULL), "OpenLibrary(bsdsocket.library, 4)",

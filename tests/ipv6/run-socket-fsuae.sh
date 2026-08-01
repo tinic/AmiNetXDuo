@@ -4,13 +4,17 @@
 #
 #   tests/ipv6/run-socket-fsuae.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
 #
-# Stages LIBS:bsdsocket.library, LIBS:usergroup.library, DEVS:a2065.device and
-# the DEVS: config, exactly as tests/libraries does -- the test itself talks
-# only over ::1, but the library still needs an interface to bring the netstack
-# up on.
+# Stages LIBS:bsdsocket.library, LIBS:usergroup.library and the DEVS: config.
 #
-# The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.
+# NO DRIVER.  The test talks only over ::1, but the library will not bring a
+# stack up with no interface to put it on -- so the test installs one itself,
+# tests/tcpdrill/tapdev.c, made at run time with MakeLibrary()/AddDevice().
+# DEVS:NetInterfaces/tap0 names it and src/sana2/ brings it up through exactly
+# the code a real card goes through.
+#
+# That is what lets this run anywhere tier 2 runs.  It used to need Commodore's
+# a2065.device, which is not ours to ship, so the whole IPv6 surface was pinned
+# to the one CI runner that had a copy.
 #
 # SPDX-License-Identifier: MIT
 
@@ -50,25 +54,12 @@ for f in "$EXE" "$BSD" "$UG"; do
     [ -f "$f" ] || { echo "missing $f (build with -DAMINETXDUO_IPV6=ON)" >&2; exit 2; }
 done
 
-A2065="${AMINETXDUO_A2065:-}"
-if [ -z "$A2065" ]; then
-    for candidate in \
-        "$ROOT/build/a2065.device" \
-        "$HOME/amiga-os-src/os-source/other_networking/sana2/bin/devs/a2065.device"
-    do
-        [ -f "$candidate" ] && { A2065="$candidate"; break; }
-    done
-fi
-[ -n "$A2065" ] && [ -f "$A2065" ] || {
-    echo "No a2065.device found. Set AMINETXDUO_A2065=<path>." >&2
-    exit 2
-}
-
 STAGE="$ROOT/build/ipv6-socket-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
-cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
-cp "$A2065" "$STAGE/devs/a2065.device"
+# tests/tcpdrill's devs, not tests/netstack's: its NetInterfaces/tap0 names the
+# device the test creates for itself, so nothing here needs a driver on disk.
+cp -R "$ROOT/tests/tcpdrill/devs" "$STAGE/devs"
 cp "$BSD" "$STAGE/libs/bsdsocket.library"
 cp "$UG"  "$STAGE/libs/usergroup.library"
 

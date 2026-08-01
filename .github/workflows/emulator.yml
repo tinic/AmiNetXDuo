@@ -90,16 +90,15 @@ jobs:
       # ran green by hand from the day it was written and nothing re-ran it,
       # which is the state every regression starts in.
       #
-      # Here rather than in ci.sh's EMULATOR_TESTS because it needs a driver:
-      # the test itself only ever talks over ::1, but bsdsocket.library will not
-      # bring a stack up with no interface to put it on, and the tests in that
-      # list deliberately need nothing but a ROM.
+      # NOT gated on AMINETXDUO_A2065, unlike the conformance step above: the
+      # test installs its own SANA-II device (tests/tcpdrill/tapdev.c) before it
+      # opens the library, so it needs no driver anyone has to supply. A ROM is
+      # the whole requirement.
       #
       # -A because this runner is headless and FS-UAE dies in GLAD before the
       # guest boots. The results are on the SERIAL log, not the guest's
       # stdout.txt -- the harness prints the verdict either way.
       - name: IPv6 socket surface
-        if: env.AMINETXDUO_A2065 != ''
         run: tests/ipv6/run-socket-fsuae.sh -A -b build/ci/default
 
       - name: Upload emulator logs
