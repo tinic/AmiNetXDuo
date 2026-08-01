@@ -11,8 +11,8 @@ with python.
 **The NDK headers have the same trap.** `m68k-amigaos/ndk-include` is Latin-1
 and carries a `©`, so a plain `grep -r` reads those files as binary and finds
 nothing — an empty result there means "not read", not "not present". Use
-`LC_ALL=C grep -a`. This entry's own RFC 3542 assessment was built on one of
-those empty results and was wrong for a day.
+`LC_ALL=C grep -a`. A whole RFC 3542 assessment was once written on one of those
+empty results.
 
 ---
 
@@ -38,20 +38,13 @@ those empty results and was wrong for a day.
 
 - **A browse reports the whole peer cache, not the browse window**, and stays
   that way, 2026-07-31. `netstack_mdns_browse_collect()` walks
-  `nx_mdns_service_lookup()` by index, which is the whole peer cache, and
-  nothing ages entries from our side -- the module expires them by TTL, and an
-  unplugged machine sends none of RFC 6762 §10.1's goodbyes. That part is mDNS
-  working as designed and needs no fix. The claim it made was wrong and is
-  fixed: the output said "what answered in the window", true on a cold cache
-  and false on a warm one, and now says what the machine has heard recently and
-  that a listing may have gone. What is left is the behaviour -- filter to
-  entries actually refreshed inside the window. `nx_mdns_rr_elapsed_time` and
-  `nx_mdns_rr_remaining_ticks` carry the freshness, but `NX_MDNS_SERVICE` does
-  not, so it means walking the RR cache instead of the public lookup. Not worth
-  that trade until someone reports a switched-off machine lingering, which
-  every other mDNS browser does too. Still true after the address chasing and
-  `ALL` landed: neither of them needed an RR walk, so nothing is written that
-  this would reuse.
+  `nx_mdns_service_lookup()` by index, which is the whole cache, and nothing
+  ages entries from our side -- the module expires them by TTL, and an unplugged
+  machine sends none of RFC 6762 §10.1's goodbyes. Filtering to entries actually
+  refreshed inside the window means walking the RR cache instead of the public
+  lookup: `nx_mdns_rr_elapsed_time` and `nx_mdns_rr_remaining_ticks` carry the
+  freshness and `NX_MDNS_SERVICE` does not. Not worth that until someone reports
+  a switched-off machine lingering, which every other mDNS browser does too.
 
 - **RFC 3678 source filtering stays out**, 2026-07-31.
   `IP_ADD_SOURCE_MEMBERSHIP`, `IP_BLOCK_SOURCE` and the `MCAST_*` family need
@@ -60,18 +53,6 @@ those empty results and was wrong for a day.
   (`src/bsdsocket/mcast.c`) and is what SSDP, UPnP and a ported mDNS actually
   call.
 
-- **IPv4 multicast**, done 2026-07-31, entry kept for the cost.
-  `IP_ADD_MEMBERSHIP`, `IP_DROP_MEMBERSHIP`, `IP_MULTICAST_IF`,
-  `IP_MULTICAST_TTL` and `IP_MULTICAST_LOOP` over `nx_igmp_enable()`, in
-  `src/bsdsocket/mcast.c`; `bind()` to a class D address is accepted, which it
-  was not, because that is how an SSDP receiver is written. Measured: **3,888
-  bytes** on the floor build (3,696 of code, 192 of membership table) and 3,532
-  on the default one, plus 12 bytes per open socket. No packet-pool or `NX_IP`
-  growth at all -- `nx_ipv4_multicast_entry[7]` is unconditional in `NX_IP` and
-  `nx_igmp_enable()` only fills in three function pointers. On by default;
-  `-DAMINETXDUO_MULTICAST=OFF` in the `68000-minimal` drawer, with the other
-  four optional features.
-
 - **RFC 6724 default address selection**, 2026-07-31: does not apply here. It
   sorts a list of candidate destinations, and `getaddrinfo()` returns at most
   one address per family (the resolver under it answers with a single address,
@@ -79,12 +60,6 @@ those empty results and was wrong for a day.
   rules collapse to "which family first", which is answered deliberately: IPv6
   then IPv4. It would start to matter only if the resolver ever returned
   address sets.
-
-- **RFC 5952 IPv6 text representation**: conformant, 2026-07-31, and now
-  pinned. §4.1 leading zeros, §4.2.1 maximum compression, §4.2.2 no `::` for a
-  lone zero group, §4.2.3 first of equal runs, §4.3 lowercase, §5 embedded IPv4
-  -- all verified in `src/config/test/test_config.c`. §4.2.3 was the one
-  previously untested.
 
 - **`vsyslog()` stays `ENOSYS`**, 2026-07-31. The two tags that aim it,
   `SBTC_LOG_FILE_NAME` and `SBTC_LOG_HOOK`, are refused (above), so a syslog
@@ -196,8 +171,11 @@ those empty results and was wrong for a day.
   playhouse3 alike reports `11 ok, 1 skipped` for the frame skew and `2 call
   site(s) already push __argv by value` for the argv indirection, so a ported
   client gets a correct `argv` and `--wrap=main` is reached. The probe's
-  timeout is the harness, and the `longjmp` fix in `__wrap__exit()` is still
-  unverified by measurement. Found 2026-07-31.
+  timeout is the harness. `clients/dropbear/run-fsuae.sh -A` proves the client
+  path end to end -- four ssh connections, both ciphers -- so what is left
+  unmeasured is narrower than it looked: the `longjmp` fix in `__wrap__exit()`
+  gives the 256 KB stack back, and nothing counts free memory across runs to
+  show it. Found 2026-07-31.
 
 - **`/opt/amiga` on playhouse2 carries the argv bug in all eleven `crt0.o`.**
   Locally built, GCC 16.1.1b, and `--check` reports `11 buggy` -- it has the
@@ -207,19 +185,15 @@ those empty results and was wrong for a day.
   `fix-toolchain-crt0.py` first hands ported clients `&__argv`. Found
   2026-07-31.
 
-- **`tests/ipv6/ipv6_socket_test.c` runs green but is not in CI.** 129 checks,
-  0 failures, on an emulated A1200 under Amiberry on 2026-07-31 -- the whole
-  RFC 3542 surface end to end, including the checks that postdate the 119-check
-  figure quoted elsewhere: `IP_PKTINFO` and `IP_RECVDSTADDR` arriving on one
-  datagram, `ipi_spec_dst`, both hop-limit paths read off the wire, and the
-  arrival index through `if_indextoname()` and back. It is tier 2, so `ci.sh`
-  builds it and does not run it; it needs a Kickstart ROM, which only the lab
-  machine has. Run it with
+- **`tests/ipv6/ipv6_socket_test.c` is not in CI.** 129 checks over the whole
+  RFC 3542 surface, green on an emulated A1200 on 2026-07-31. It is tier 2, so
+  `ci.sh` builds it and does not run it; it needs a Kickstart ROM, which only the
+  lab machine has. Run it with
   `. ~/amiga-assets/env.sh && ./tests/ipv6/run-socket-fsuae.sh -A` on
-  playhouse3 -- FS-UAE cannot boot headless there, which is why the harness
-  gained `-A`. The test writes its results to the **serial log**, not to the
-  guest's `stdout.txt`; that file holds unrelated bytes and reading it looks
-  like a crash.
+  playhouse3. It writes its results to the **serial log**, not to the guest's
+  `stdout.txt` -- that file holds unrelated bytes and reading it looks like a
+  crash.
+
 - **The two-interface source case is proved on a host, not on a guest.** TCP
   now leaves from the address `bind()` named --
   `nxd_tcp_client_socket_source_connect()` in the NetX fork -- and the case it
@@ -251,11 +225,10 @@ those empty results and was wrong for a day.
 - **`STATE=down` has no harness.** It is honoured as of 2026-07-31 but only the
   config parser is covered; no emulator run boots an interface configured down.
 
-- **`playhouse2` had uncomputed TX checksums**; `ethtool -K eth0 tx off` was
-  applied 2026-07-31 and verified (`/usr/sbin/ethtool -k eth0` ->
-  `tx-checksumming: off`; `/usr/sbin` is not on a non-login ssh PATH, so query
-  it by full path). Same defect playhouse4 had. `run-fitzbench.sh` still
-  refuses it outright and can be relaxed.
+- **`run-fitzbench.sh` refuses `playhouse2` outright** over the uncomputed TX
+  checksums that `ethtool -K eth0 tx off` fixed there on 2026-07-31, and can be
+  relaxed. Query the setting by full path -- `/usr/sbin` is not on a non-login
+  ssh PATH.
 
 - **`run-fitzbench.sh` prints a write figure that is not a rate** — it stops
   timing when the write call returns, not when data drains. Guest-timed 1718

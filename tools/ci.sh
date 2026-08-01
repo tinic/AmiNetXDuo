@@ -113,6 +113,10 @@ EMULATOR_TESTS=(
     "tools/smoke/smoke:90"
     "tools/smoke/lifecycle:120"
     "tools/smoke/KernelStop:150"
+    # The 68000 arm below is the whole point of this one: it is the only machine
+    # in the matrix that raises an Address Error rather than tolerating an
+    # unaligned word, so it is the only one where the alignment fixes can fail.
+    "tools/smoke/alignprobe:90"
     "tests/ram_driver/ram_driver_test:120"
     "tests/mbuf_bpf/mbuf_bpf_test:180"
     "tests/soak/soak_test:240"
