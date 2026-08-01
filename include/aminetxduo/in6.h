@@ -134,9 +134,9 @@ extern "C" {
  * five are published and both are accepted, as above.
  *
  * Taking the BSD numbers costs the Linux names that sit on them --
- * IPV6_NEXTHOP 9, IPV6_AUTHHDR 10, IPV6_FLOWINFO 11, IPV6_2292NAME 12 and 13
- * -- none of which this library offers, the same trade IPV6_UNICAST_HOPS made
- * against IPV6_2292DSTOPTS.
+ * IPV6_NEXTHOP 9, IPV6_AUTHHDR 10 and IPV6_FLOWINFO 11, none of which this
+ * library offers; 12 and 13 are unassigned there.  Same trade
+ * IPV6_UNICAST_HOPS made against IPV6_2292DSTOPTS.
  *
  * WHAT A JOIN DOES AND DOES NOT DO.  There is no MLD in this stack: joining a
  * group registers the 33:33:xx:xx:xx:xx address with the interface and makes
@@ -148,7 +148,7 @@ extern "C" {
  * group here.  Link-local scope is what to rely on.
  */
 
-/* BSD 9, Linux 17.  Both accepted.  Takes a UINT interface index -- the
+/* BSD 9, Linux 17.  Both accepted.  Takes an interface index -- the
    if_nametoindex() kind -- and 0 gives the choice back to the route. */
 #ifndef IPV6_MULTICAST_IF
 #define IPV6_MULTICAST_IF        9

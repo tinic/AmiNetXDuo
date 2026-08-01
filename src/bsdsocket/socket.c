@@ -2080,6 +2080,18 @@ BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
     bound = (!bsd_addr_is_unspecified(local) &&
              local->nxd_ip_version == dest->nxd_ip_version) ? TRUE : FALSE;
 
+#ifdef AMINETXDUO_MULTICAST
+    /*
+     * A group address is nobody's source. Binding one is how a receiver is
+     * written -- bsd_bind_kind() accepts it for that reason -- and it says
+     * nothing about where sends leave from, so the choice goes back to
+     * IP_MULTICAST_IF or the route. Without this the loops below look for an
+     * interface carrying 239.255.255.250, find none, and refuse the send.
+     */
+    if (bound && bsd_addr_is_multicast(local))
+        bound = FALSE;
+#endif
+
 #ifdef AMINETXDUO_IPV6
     if (dest->nxd_ip_version == NX_IP_VERSION_V6)
     {

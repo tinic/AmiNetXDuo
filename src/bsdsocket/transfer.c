@@ -481,7 +481,7 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     LONG            mcast_if;
 #ifdef AMINETXDUO_IPV6
     LONG            mcast6_src;
-    ULONG           mcast6_hops;
+    ULONG           mcast6_hops = 0UL;
 #endif
 #endif
 
