@@ -102,7 +102,12 @@ Non-Ethernet SANA-II devices do not break it: raw mode is only probed for
 | `port/netxduo-amiga/inc/nx_port.h` | `NX_CHANGE_USHORT_ENDIAN` at `nxd_mdns.c:8489`, `*(USHORT *)(prepend + 2)` | clean -- offset 2 from a 4-aligned prepend is even |
 | vendored NetX Duo, whole tree | `(ULONG *)ptr + N` in `nx_tcp_packet_send_control.c:252` and three others | clean -- element arithmetic, not byte arithmetic. No wide cast at an odd byte offset exists in the vendored source |
 
-Nineteen categories, five defects, five fixed.
+Twenty-six groups covering every wide cast in `src/`, `port/` and the compiled
+part of `third_party/netxduo` -- around seventy individual lines. Four rows are
+marked fixed and they are three defects, since `CMSG_BUFFER()` not aligning and
+the gate that refused what it produced are two halves of one. A fourth change,
+the `_Static_assert` on the packet identity, hardens something that was already
+correct.
 
 ### `CMSG_BUFFER()` did not align anything (FIXED)
 
