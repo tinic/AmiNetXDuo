@@ -55,6 +55,7 @@
 (set SRCDIR (pathonly @icon))
 
 (set S_LIBS  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Libs")     "Libs"))
+(set S_LIBSBASE S_LIBS)
 (set S_C     (if (> (strlen SRCDIR) 0) (tackon SRCDIR "C")        "C"))
 (set S_DEVS  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Devs")     "Devs"))
 (set S_DOCS  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Docs")     "Docs"))
@@ -421,43 +422,7 @@
 (if (= CPUDIR "68000")   (set CPUPICK 1))
 (if (= CPUDIR "68060")   (set CPUPICK 3))
 
-; ASKED FOR, by a user who installs on one machine and moves the disk to
-; another: "I often install things on one machine and then take it to
-; another."  The detected processor is the right default and a wrong answer
-; for anyone doing that, so it is a default and not a decision.
-;
-; Nothing changes for a novice install.  At NOVICE every ask... returns its
-; (default) without showing anything, so the detected build is still what
-; goes on -- which is why the default has to be independently correct.
-(set CPUPICK
-  (askchoice
-    (prompt "Which build of the network library should be installed?\n\n")
-    (help "Every build does the same things at the same time; they differ "
-          "only in which processor instructions they were compiled for. The "
-          "one for this machine is already selected.\n\n"
-          "Pick another when the disk is going into a different machine "
-          "than the one it is being installed on.\n\n"
-          "The 68000 build runs on every Amiga, including an 020 or better. "
-          "It is the safe answer for a disk that moves around.\n\n"
-          "The minimal build is the 68000 one with IPv6, .local name "
-          "lookups, the packet filter, encrypted connections and IPv4 "
-          "multicast left out. It is about 104 KB smaller, which is worth "
-          "having on a 1 MB machine and worth nothing on a larger one.\n\n"
-          "Encrypted (https:) connections need a 68020 or better whichever "
-          "build is chosen: the cryptography takes longer than the other end "
-          "will wait on a 68000.")
-    (choices "Smallest -- 68000, no IPv6/mDNS/https:/filter/multicast"
-             "68000 -- runs on every Amiga"
-             "68020 to 68040"
-             "68060")
-    (default CPUPICK)))
-
-(if (= CPUPICK 0) (set CPUDIR "68000-minimal"))
-(if (= CPUPICK 1) (set CPUDIR "68000"))
-(if (= CPUPICK 2) (set CPUDIR "68020-40"))
-(if (= CPUPICK 3) (set CPUDIR "68060"))
-
-(set S_LIBS (tackon S_LIBS CPUDIR))
+(set S_LIBS (tackon S_LIBSBASE CPUDIR))
 
 ; A 68000 GETS NO ENCRYPTION, AND HAS TO BE TOLD SO -- ON THE LAST PAGE.
 ;
@@ -534,18 +499,6 @@
 
 (set CARD_DEFAULT (if (>= DET_INDEX 0) DET_INDEX 0))
 
-; A novice run makes no decisions of its own, so if there is nothing to
-; detect and no existing configuration to keep, there is no honest default to
-; fall back on.  Say so instead of writing a guess.
-
-(if (AND (= @user-level 0) (AND (< DET_INDEX 0) (= HAVE_OLD 0)))
-    (abort "The installer could not find a network card driver in DEVS: or "
-           "DEVS:Networks, and in Novice mode it cannot ask which card is "
-           "installed.\n\n"
-           "Either copy the card's .device driver into DEVS: first, or "
-           "start this installer again and choose \"Intermediate User\" so "
-           "so that the card can be picked from a list.\n\n"
-           "Nothing has been changed."))
 
 ; ==========================================================================
 ;  3.  Welcome
@@ -560,6 +513,58 @@
 ;  4.  Questions.  All of them, before anything is written.
 ; ==========================================================================
 
+; ASKED FOR, by a user who installs on one machine and moves the disk to
+; another: "I often install things on one machine and then take it to
+; another."  The detected processor is the right default and a wrong answer
+; for anyone doing that, so it is a default and not a decision.
+;
+; Nothing changes for a novice install.  At NOVICE every ask... returns its
+; (default) without showing anything, so the detected build is still what
+; goes on -- which is why the default has to be independently correct.
+(set CPUPICK
+  (askchoice
+    (prompt "Which build of the network library should be installed?\n\n")
+    (help "Every build does the same things at the same time; they differ "
+          "only in which processor instructions they were compiled for. The "
+          "one for this machine is already selected.\n\n"
+          "Pick another when the disk is going into a different machine "
+          "than the one it is being installed on.\n\n"
+          "The 68000 build runs on every Amiga, including an 020 or better. "
+          "It is the safe answer for a disk that moves around.\n\n"
+          "The minimal build is the 68000 one with IPv6, .local name "
+          "lookups, the packet filter, encrypted connections and IPv4 "
+          "multicast left out. It is about 104 KB smaller, which is worth "
+          "having on a 1 MB machine and worth nothing on a larger one.\n\n"
+          "Encrypted (https:) connections need a 68020 or better whichever "
+          "build is chosen: the cryptography takes longer than the other end "
+          "will wait on a 68000.")
+    ; 22 characters is the limit -- install/tools/checkscript.py enforces it,
+    ; because a longer gadget is dropped from the page without a word. So the
+    ; two omissions a user is most likely to miss go here and the full list is
+    ; in the help above, and in the message after installing.
+    (choices "68000, no IPv6/https:"
+             "68000, everything"
+             "68020 to 68040"
+             "68060")
+    (default CPUPICK)))
+
+(if (= CPUPICK 0) (set CPUDIR "68000-minimal"))
+(if (= CPUPICK 1) (set CPUDIR "68000"))
+(if (= CPUPICK 2) (set CPUDIR "68020-40"))
+(if (= CPUPICK 3) (set CPUDIR "68060"))
+
+; From the base again, not from the detected path -- the answer above may not
+; be the machine's own build, which is the point of asking.  The drawer is
+; checked here as well as earlier: the first check was that the archive has
+; something for THIS machine, and this one is that it has what was asked for.
+(set S_LIBS (tackon S_LIBSBASE CPUDIR))
+
+(if (NOT (exists (tackon S_LIBS "bsdsocket.library") (noreq)))
+    (abort "This archive has no Libs/" CPUDIR " drawer.\n\n"
+           "The download is incomplete, or was unpacked with a tool that "
+           "dropped the subdrawers.\n\n"
+           "Nothing has been changed."))
+
 ; --- where the drawer of documentation goes ------------------------------
 
 (set DOCPARENT
@@ -570,6 +575,29 @@
     (default @default-dest)))
 
 (set DOCDIR (tackon DOCPARENT "AmiNetXDuo"))
+
+; A novice run makes no decisions of its own, so with nothing detected and no
+; existing configuration to keep, there is no honest default to fall back on.
+;
+; AFTER THE WELCOME, and that is the whole point. This used to sit up in the
+; detection section, which runs before (welcome) -- so it fired on the level
+; the icon happened to default to, the welcome page never appeared, and its own
+; advice to "start this installer again and choose Intermediate User" named a
+; page the user had never been shown and could not reach. Reported as "the
+; warning is the first thing I see and I cannot select mode", with a screenshot
+; of exactly that.
+;
+; Here, @user-level is what the user picked, so a novice who wants the card
+; question can simply pick another level on the page they have just seen.
+
+(if (AND (= @user-level 0) (AND (< DET_INDEX 0) (= HAVE_OLD 0)))
+    (abort "The installer could not find a network card driver in DEVS: or "
+           "DEVS:Networks, and in Novice mode it cannot ask which card is "
+           "installed.\n\n"
+           "Either copy the card's .device driver into DEVS: first, or start "
+           "this installer again and choose \"Intermediate User\", which "
+           "lets the card be picked from a list.\n\n"
+           "Nothing has been changed."))
 
 ; --- keep or replace an existing configuration ---------------------------
 
@@ -582,6 +610,23 @@
         (help H_KEEPOLD)
         (choices "Keep them" "Set them up again")
         (default 1))))
+
+; Kept settings are not checked, and saying so is the only honest option.
+;
+; Everything below -- the card question, and with it the warning that the named
+; driver is not in DEVS: or DEVS:Networks -- is inside (= KEEP_OLD 0). So an
+; interface file that survives from an earlier install goes untouched and
+; unexamined, and a driver that has since been removed is never noticed.
+;
+; It cannot be examined: the Installer language cannot read the DEVICE= line
+; back out of the file, so there is no name to look for. Reported by a user who
+; took the drivers away, installed again and was told nothing.
+(if (AND HAVE_OLD KEEP_OLD)
+    (message
+      "The existing settings for \"" OLD_IF "\" are being kept as they are.\n\n"
+      "They are not checked -- if the card or its driver has changed since "
+      "they were written, the network will not come up.  Installing again and "
+      "choosing \"Set them up again\" asks the questions afresh."))
 
 ; --- the card ------------------------------------------------------------
 
