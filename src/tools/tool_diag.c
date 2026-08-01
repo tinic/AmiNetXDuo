@@ -305,8 +305,30 @@ LONG tool_device_probe(const char *device, ULONG unit)
     req->ios2_BufferManagement               = tags;
 
     status = ami_sana2_open_device(device, unit, (struct IORequest *)req);
+
     if (status == 0)
+    {
+        /*
+         * Opening proves the driver and the unit; it does not prove the card.
+         * src/sana2/sana2_device.c calls S2_DEVICEQUERY straight after its own
+         * open and reports a refusal as AMI_NET_ERR_DEVBAD, so ask the same
+         * question here -- otherwise a card that opens and then answers
+         * nothing is reported as "opens perfectly well", which is true and
+         * useless.
+         */
+        struct Sana2DeviceQuery query;
+
+        query.SizeAvailable = (ULONG)sizeof(query);
+        query.SizeSupplied  = 0UL;
+
+        req->ios2_Req.io_Command = S2_DEVICEQUERY;
+        req->ios2_StatData       = &query;
+
+        if (DoIO((struct IORequest *)req) != 0 || query.SizeSupplied == 0UL)
+            status = TOOL_PROBE_REFUSED;
+
         CloseDevice((struct IORequest *)req);
+    }
 
     ami_free(req);
     DeleteMsgPort(port);

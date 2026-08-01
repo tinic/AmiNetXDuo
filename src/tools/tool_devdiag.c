@@ -232,6 +232,20 @@ VOID tool_explain_device(const char *device, ULONG unit)
      */
     probe = tool_device_probe(device, unit);
 
+    /*
+     * Opened and then refused a SANA-II command. The driver is installed, the
+     * unit is right and the card answered -- so none of the advice below about
+     * missing files or wrong unit numbers applies, wherever the file turned out
+     * to be. This is the case AddNetInterface reaches when a PCMCIA card is in
+     * the slot and will not initialise, and it used to print "there is no
+     * <driver> on this machine" at someone whose driver had just run.
+     */
+    if (probe == TOOL_PROBE_REFUSED)
+    {
+        tool_explain_device_refused(device, unit);
+        return;
+    }
+
     if (where == NULL && probe == 0)
     {
         tool_printf("  %s unit %lu opens, and no driver file was found in the\n",

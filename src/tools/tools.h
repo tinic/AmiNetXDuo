@@ -134,6 +134,13 @@ const char *tool_device_where(const char *device);
  */
 #define TOOL_PROBE_NO_NAME      (-100)
 #define TOOL_PROBE_NO_MEMORY    (-101)
+
+/* The device opened and then refused S2_DEVICEQUERY -- the driver is there and
+   the card answered the open, so neither the unit number nor a missing file is
+   what to look at. Same distinction the library draws as AMI_NET_ERR_DEVBAD;
+   the probe has to derive it because a failed OpenLibrary() carries no status
+   back to a command. */
+#define TOOL_PROBE_REFUSED      (-102)
 LONG tool_device_probe(const char *device, ULONG unit);
 
 /* Indented advice under an error line, and a blank separator. */
