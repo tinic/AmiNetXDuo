@@ -559,6 +559,19 @@ static struct Library *lib_find(VOID)
  * 1 the handler answered and went, 0 it refused (a session is running),
  * -1 there was no TCP: to begin with.
  */
+/* Is there a TCP: device in the DOS list right now? */
+static BOOL tcp_present(VOID)
+{
+    struct DosList *dl;
+    BOOL            found;
+
+    dl    = LockDosList(LDF_DEVICES | LDF_READ);
+    found = (FindDosEntry(dl, (STRPTR)"TCP", LDF_DEVICES) != NULL);
+    UnLockDosList(LDF_DEVICES | LDF_READ);
+
+    return found;
+}
+
 static LONG tcp_die(VOID)
 {
     struct DosList *dl;
@@ -1092,6 +1105,49 @@ static VOID phase_expunge_cycle(LONG n, const char *iface, Sample *at_open,
     sample(NULL, at_gone);
 }
 
+/*
+ * TCP: comes back for the NEXT opener, after an ACTION_DIE that did not
+ * expunge.
+ *
+ * tcp_started was set on the first bring-up and never cleared, so once TCP:
+ * had been taken down every OpenLibrary() afterwards got a library that
+ * answered every vector and had no TCP: device -- until the last close let the
+ * segment go and the static reset itself.
+ *
+ * Which is why this phase holds a base open across the ACTION_DIE.  The
+ * expunge cycle above cannot see the defect: it takes TCP: down with nothing
+ * else holding the library, so the reload does the clearing that the code
+ * failed to do, and a broken build passes.
+ */
+static VOID phase_tcp_restart(VOID)
+{
+    struct Library *holder;
+    struct Library *next;
+    LONG            died;
+
+    holder = OpenLibrary((CONST_STRPTR)LIB_NAME, 4UL);
+    if (!check(holder != NULL, "the library opened for the TCP: restart", 0, 0))
+        return;
+
+    check(tcp_present(), "TCP: is there before ACTION_DIE", 0, 0);
+
+    died = tcp_die();
+    check(died > 0, "TCP: answered the restart ACTION_DIE", died, 0);
+    check(!tcp_present(), "TCP: went away when told to", 0, 0);
+
+    /* The opener the defect was about.  holder is still open, so nothing has
+       been unloaded and nothing has been reinitialised. */
+    next = OpenLibrary((CONST_STRPTR)LIB_NAME, 4UL);
+    if (check(next != NULL, "the library opened again with TCP: down", 0, 0))
+    {
+        check(tcp_present(),
+              "TCP: is back for an opener that arrived after ACTION_DIE", 0, 0);
+        CloseLibrary(next);
+    }
+
+    CloseLibrary(holder);
+}
+
 /* ------------------------------------------------------------------ main -- */
 
 static Sample baseline;
@@ -1157,6 +1213,10 @@ int main(VOID)
         show("open ", i + 1, &exp_open[i]);
         show("gone ", i + 1, &exp_gone[i]);
     }
+
+    /* After the expunge phase, so it starts from a fully unloaded library and
+       brings its own up. */
+    phase_tcp_restart();
 
     /* ---- phase L: cold open/close, no expunge -----------------------------
      *
