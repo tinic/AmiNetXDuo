@@ -220,10 +220,12 @@ target_link_options(fuzz_mdns PRIVATE ${_fuzz_san})
 # complete a handshake first" protects none of it. It is also the headline
 # feature, which means it is what a hostile host gets pointed at.
 #
-# The two drivers split the way the code does: fuzz_tls_record stops at the
+# The three drivers split the way the code does: fuzz_tls_record stops at the
 # handshake message boundary, fuzz_tls_x509 starts at the Certificate message
-# and goes down through the DER walk. Both list their nx_secure sources
-# explicitly rather than linking the `nx_secure` target -- that target's
+# and goes down through the DER walk, and fuzz_tls_crypto -- further down, in
+# the 32-bit build -- takes the three messages that dispatch through a
+# ciphersuite into NX_CRYPTO_METHOD entries. The first two list their nx_secure
+# sources explicitly rather than linking the `nx_secure` target -- that target's
 # dependency chain reaches aminetxduo_common, which is AmigaOS code and does
 # not build on a host.
 #
@@ -236,17 +238,14 @@ target_link_options(fuzz_mdns PRIVATE ${_fuzz_san})
 #
 #   The TLS 1.2 NewSessionTicket. nx_secure only parses one under
 #   NX_SECURE_TLS_TLS_1_3_ENABLED, which is off; the TLS 1.2 ticket is read by
-#   tls_resume_take_ticket() in src/tlslib/tls_resume.c. That file includes
-#   proto/dos.h and proto/exec.h and cannot be compiled on a host.
+#   tls_resume_take_ticket() in src/tlslib/tls_resume.c, which takes a
+#   TLSConnection * and so needs tls_internal.h -- the whole AmigaOS library
+#   ABI -- on a host. docs/BACKLOG.md has the reasoning and the by-inspection
+#   result.
 #
-#   tls_store.c's issuer-name walk, for the same reason -- tls_internal.h pulls
-#   in the AmigaOS library ABI. It calls the same vendored TLV parser this
-#   driver does drive, so the parser underneath it is covered; the four-field
-#   walk on top of it is not.
-#
-#   ServerKeyExchange, CertificateVerify and Finished are covered, but not
-#   here: they dispatch through NX_CRYPTO_METHOD entries and need the real
-#   crypto tables, so they are fuzz_tls_crypto below, in the 32-bit build.
+#   tls_store.c's issuer-name walk, for the same reason. It calls the same
+#   vendored TLV parser fuzz_tls_x509 drives, so the parser underneath it is
+#   covered; the four-field walk on top of it is not.
 #
 #   The record decrypt path. It runs after keys exist, on bytes that have
 #   already failed or passed a MAC, and reaching it needs a full key schedule.
@@ -477,21 +476,16 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
              COMMAND fuzz_mdns -r 1 ${AMINETXDUO_FUZZ_CASES})
     set_tests_properties(fuzz_mdns_sweep PROPERTIES TIMEOUT 1800)
 
-    # The crypto drivers are in the same build for the reason above the target,
-    # not because they have anything to do with mDNS.
-    #
-    # AMINETXDUO_TLS_CRYPTO_CASES is its own number rather than
-    # AMINETXDUO_FUZZ_CASES: every case here rebuilds a TLS session, parses a
-    # certificate and can run an RSA public operation and a P-256 scalar
-    # multiplication, so a case costs milliseconds where a DNS case costs
-    # microseconds. Raise it for a soak the same way.
-    set(AMINETXDUO_TLS_CRYPTO_CASES "300" CACHE STRING
-        "Random cases for the TLS crypto fuzz driver under ctest")
-
+    # The TLS crypto driver is in the same build for the reason above the
+    # target, not because it has anything to do with mDNS. Every case here
+    # rebuilds a session, parses a certificate and can run an RSA public
+    # operation and a P-256 scalar multiplication, so it is the slowest case in
+    # the set at roughly 5 ms -- AMINETXDUO_FUZZ_CASES all the same, because a
+    # second knob is a second thing to remember to raise for a soak.
     add_test(NAME fuzz_tls_crypto_seeds
              COMMAND fuzz_tls_crypto -s)
     add_test(NAME fuzz_tls_crypto_sweep
-             COMMAND fuzz_tls_crypto -r 1 ${AMINETXDUO_TLS_CRYPTO_CASES})
+             COMMAND fuzz_tls_crypto -r 1 ${AMINETXDUO_FUZZ_CASES})
     set_tests_properties(fuzz_tls_crypto_sweep PROPERTIES TIMEOUT 1800)
 endif()
 

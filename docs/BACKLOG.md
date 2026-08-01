@@ -17,19 +17,33 @@ was wrong for a day.
 
 ## Open — no decision taken
 
-- **TLS parsers that need crypto have no fuzz driver.** `fuzz_tls_record` and
-  `fuzz_tls_x509` cover the record header, the handshake header, ServerHello
-  and its extensions, CertificateRequest, the Certificate message and the
-  X.509 DER walk. ServerKeyExchange, CertificateVerify and Finished are not
-  covered: all three dispatch on a negotiated ciphersuite into
-  `NX_CRYPTO_METHOD` entries, so a driver has to link `nx_crypto` and
-  `ami_tls_crypto.c` -- and `ami_tls_crypto.c` includes `exec/types.h` and
-  casts pointers to a 32-bit `ULONG`, so it needs a 32-bit host build the way
-  `fuzz_mdns` does. Neither is `tls_resume_take_ticket()`, which is what parses
-  a TLS 1.2 NewSessionTicket (nx_secure only parses one under TLS 1.3, which is
-  off), nor `tls_store.c`'s issuer-name walk; both live in files that include
-  `proto/dos.h` and do not build on a host. The header comment in
-  `tests/fuzz/CMakeLists.txt` is the current list.
+- **Two TLS parsers in `src/tlslib` are still unfuzzed, and both need the
+  AmigaOS library ABI to reach.** `fuzz_tls_record`, `fuzz_tls_x509` and
+  `fuzz_tls_crypto` now cover everything a TLS server sends in the clear:
+  the record header, the handshake header, ServerHello and its extensions,
+  CertificateRequest, the Certificate message, the X.509 DER walk,
+  ServerKeyExchange, CertificateVerify and Finished. What is left is ours,
+  not nx_secure's:
+  - `tls_resume_take_ticket()` in `src/tlslib/tls_resume.c`, which parses the
+    TLS 1.2 NewSessionTicket (nx_secure only parses one under TLS 1.3, which is
+    off). It takes a `TLSConnection *`, so reaching it means compiling
+    `tls_internal.h` -- `exec/libraries.h`, `exec/semaphores.h`, `dos/dos.h`,
+    `proto/dos.h`, `aminetxduo/{netstack,nxcontext,tlslib}.h` -- on a host.
+    That is a shim of the whole library ABI for a 25-line function. By
+    inspection it is bounded at every step: `length < 6` before the header is
+    read, `6 + ticket_length > length` before the body, `ticket_length >
+    TLS_RESUME_TICKET_MAX` before the copy, and `tc_Ticket` is exactly
+    `TLS_RESUME_TICKET_MAX` bytes. Left alone deliberately.
+  - `tls_store.c`'s `tls_issuer_name_der()`, the four-field walk to the issuer
+    Name. Same reason -- `tls_store.c` includes `tls_internal.h` -- and it
+    takes only an `NX_SECURE_X509_CERT *`, so the surgery would be moving it
+    to its own translation unit rather than shimming. It adds no bounds
+    arithmetic of its own beyond `header_length + tlv_length > avail`, checked
+    before every advance, and the TLV parser underneath it is already driven by
+    `fuzz_tls_x509`. Worth doing if that file is being split for another
+    reason; not worth splitting it for this.
+
+  The header comment in `tests/fuzz/CMakeLists.txt` is the current list.
 - **An expunge/reopen cycle loses about 12.6 KB.** Found by the drill below:
   eight `OpenLibrary` / last-`CloseLibrary` / `ACTION_DIE` to `TCP:` /
   `RemLibrary` / reopen cycles lose 12,612 bytes each, dead linear, measured
