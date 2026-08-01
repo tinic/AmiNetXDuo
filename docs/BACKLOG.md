@@ -90,7 +90,48 @@ empty results.
   122.56 ns/B of the 1073.90 pipeline is 11.4%, so the implied ceiling moves
   909 -> about 1026 KB/s. That applies wherever a copy and a checksum cross the
   same bytes, which on receive is `ami_sana2_copy_to_buff()` followed by the
-  TCP checksum. Wiring it into that path is what remains.
+  TCP checksum.
+
+  WIRING IT IN IS WHAT REMAINS, and it is the delicate half: every hazard below
+  ends in silently accepting a corrupt packet, which is worse than being slow.
+  The plan is a 16-byte stash (magic, start, length, sum) in the packet's tail
+  slack -- `AMI_POOL_PAYLOAD` is 1568 against a 1514-byte frame, so there are
+  54 bytes past any real one -- read back by `n68k_ip_checksum_compute()` after
+  it has built the pseudo header and instead of its payload walk.
+
+  NOT `NX_ENABLE_INTERFACE_CAPABILITY`, which is the obvious route and the
+  wrong one here. It changes behaviour in 41 vendored files, and its check is
+  PER-INTERFACE rather than per-packet: once the flag is set every packet on
+  that interface is trusted, so the glue owns verifying all of them, including
+  reassembled fragments arriving as chained packets whose per-fragment sums
+  would have to be combined. There is no per-packet way to decline.
+  Substituting `_nx_ip_checksum_compute()` -- which `n68k_checksum_hook.c`
+  already does, so the mechanism is in the tree -- gives exactly that: an
+  unrecognised stash falls through to computing normally, and every awkward
+  case takes the old path. There is also no way to hand a raw sum back for the
+  stack to finish; NetX Duo assumed MAC-level checksum offload, so it has no
+  CHECKSUM_COMPLETE-style field, which is why the capability machinery is
+  all-or-nothing in the first place.
+
+  What the fixup has to get right:
+
+  - The stash covers `[dst, dst+len)` but the TCP checksum is asked for
+    `[prepend, prepend+data_length)` AFTER IP has stripped its header, so a
+    prefix (the IP header) and a suffix (Ethernet padding, zero on a full
+    frame) must come off. One's-complement subtraction is `+ (0xFFFF - fold)`.
+  - Parity only works out because the IP header is a multiple of 4 and the
+    Ethernet header is 14, both even, so the 16-bit word grids line up. An odd
+    prefix would need the sum byte-swapped.
+  - A frame whose length is not a multiple of 4 has a partial trailing
+    longword. The vendored code zero-writes the pad byte; the bytes past `len`
+    in our packet are the PREVIOUS frame, so summing whole longwords blind
+    folds garbage into the result.
+  - `n68k_ip_checksum_compute()` walks a chain. One stash describes one
+    buffer, so a chained packet has to fall through.
+
+  Validation is not optional here: `tests/tcpdrill` feeding frames with
+  deliberately corrupted payloads, confirming they are still rejected, before
+  any of it is trusted.
 
 - **RFC 3542's extension headers stay unimplemented.** `IPV6_RTHDR`,
   `HOPOPTS`, `DSTOPTS`, `RTHDRDSTOPTS`, `PATHMTU`, `RECVPATHMTU`,
