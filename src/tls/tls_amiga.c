@@ -44,6 +44,14 @@ static ULONG                       ami_tls_hz;
 static struct SignalSemaphore      ami_tls_timer_lock;
 static volatile BOOL               ami_tls_timer_lock_ready;
 
+/*
+ * "Safe to use", and not ami_tls_timer_base, because that one cannot be both:
+ * ReadEClock() is an inline that resolves the library base through it, so it
+ * has to be set before the rate is read, and a caller on the fast path would
+ * otherwise see a live base with ami_tls_hz still at zero.
+ */
+static volatile BOOL               ami_tls_timer_ready;
+
 static VOID ami_tls_timer_lock_init(VOID)
 {
     Forbid();
@@ -59,7 +67,7 @@ BOOL ami_tls_timer_open(VOID)
 {
     struct EClockVal ev;
 
-    if (ami_tls_timer_base != NULL)
+    if (ami_tls_timer_ready)
     {
         return TRUE;
     }
@@ -67,7 +75,7 @@ BOOL ami_tls_timer_open(VOID)
     ami_tls_timer_lock_init();
     ObtainSemaphore(&ami_tls_timer_lock);
 
-    if (ami_tls_timer_base != NULL)
+    if (ami_tls_timer_ready)
     {
         ReleaseSemaphore(&ami_tls_timer_lock);
         return TRUE;
@@ -98,7 +106,7 @@ BOOL ami_tls_timer_open(VOID)
     }
 
     /* ReadEClock() needs the base, so it is published before the rate is
-       read; the lock is what keeps a second caller out until both are set. */
+       read; ami_tls_timer_ready is what a second caller tests. */
     ami_tls_timer_base = ami_tls_req.tr_node.io_Device;
 
     ami_tls_hz = ReadEClock(&ev);
@@ -106,6 +114,8 @@ BOOL ami_tls_timer_open(VOID)
     {
         ami_tls_hz = 709379UL;         /* PAL, if the device lies */
     }
+
+    ami_tls_timer_ready = TRUE;
 
     ReleaseSemaphore(&ami_tls_timer_lock);
 
@@ -115,13 +125,15 @@ BOOL ami_tls_timer_open(VOID)
 BOOL ami_tls_timer_is_open(VOID)
 {
 
-    return((BOOL)(ami_tls_timer_base != NULL));
+    /* The ready flag, not the base: ami_tls_crypto.c calls ami_tls_eclock()
+       on the strength of this answer. */
+    return((BOOL)(ami_tls_timer_ready ? TRUE : FALSE));
 }
 
 VOID ami_tls_timer_close(VOID)
 {
 
-    if (ami_tls_timer_base == NULL)
+    if (!ami_tls_timer_ready)
     {
         return;
     }
@@ -129,13 +141,16 @@ VOID ami_tls_timer_close(VOID)
     ami_tls_timer_lock_init();
     ObtainSemaphore(&ami_tls_timer_lock);
 
-    if (ami_tls_timer_base != NULL)
+    if (ami_tls_timer_ready)
     {
-        ami_tls_timer_base = NULL;
+        /* Unpublish first, so nobody enters on the fast path between the
+           CloseDevice() and the base going away. */
+        ami_tls_timer_ready = FALSE;
         CloseDevice((struct IORequest *)&ami_tls_req);
+        ami_tls_timer_base  = NULL;
         /* Or a reopen keeps a rate read through a base it no longer holds,
            and ami_tls_eclock_micros()'s hz == 0 guard never re-arms. */
-        ami_tls_hz = 0UL;
+        ami_tls_hz          = 0UL;
     }
 
     ReleaseSemaphore(&ami_tls_timer_lock);

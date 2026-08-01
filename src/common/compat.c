@@ -199,6 +199,16 @@ static ULONG               ami_eclock_carry;   /* thousandths of a tick */
 static struct SignalSemaphore  ami_timer_lock;
 static volatile BOOL           ami_timer_lock_ready;
 
+/*
+ * The "it is safe to use" flag, and not TimerBase, because TimerBase cannot be
+ * both. The NDK's ReadEClock() inline resolves the library base through it, so
+ * it has to be set BEFORE the rate is read -- which leaves a window where a
+ * caller taking the fast path below sees a non-NULL TimerBase and an
+ * ami_eclock_hz still at zero, and ami_millis() divides by it. This is set
+ * after the last field and is what the fast path tests.
+ */
+static volatile BOOL           ami_timer_ready;
+
 static VOID ami_timer_lock_init(VOID)
 {
     Forbid();
@@ -215,14 +225,14 @@ static BOOL ami_timer_init(VOID)
     struct EClockVal ev;
     ULONG            rate;
 
-    if (TimerBase != NULL)
+    if (ami_timer_ready)
         return TRUE;
 
     ami_timer_lock_init();
     ObtainSemaphore(&ami_timer_lock);
 
     /* Again inside the lock: whoever was ahead of us has finished by now. */
-    if (TimerBase != NULL)
+    if (ami_timer_ready)
     {
         ReleaseSemaphore(&ami_timer_lock);
         return TRUE;
@@ -254,6 +264,9 @@ static BOOL ami_timer_init(VOID)
         return FALSE;
     }
 
+    /* Before ReadEClock(), which is an inline that goes through it. */
+    TimerBase = ami_timer_req.tr_node.io_Device;
+
     /*
      * Scale to ticks-per-millisecond up front: a 64-bit divide would pull
      * __udivdi3 out of libgcc, which a shared library should not need.
@@ -266,9 +279,7 @@ static BOOL ami_timer_init(VOID)
     ami_eclock_rem  = 0UL;
     ami_eclock_carry = 0UL;
 
-    /* Last: it is what every other caller tests, so publishing it before the
-       fields above are set would hand them a half-built timer. */
-    TimerBase = ami_timer_req.tr_node.io_Device;
+    ami_timer_ready = TRUE;
 
     ReleaseSemaphore(&ami_timer_lock);
 
@@ -283,17 +294,20 @@ static BOOL ami_timer_init(VOID)
  */
 VOID ami_timer_close(VOID)
 {
-    if (TimerBase == NULL)
+    if (!ami_timer_ready)
         return;
 
     ami_timer_lock_init();
     ObtainSemaphore(&ami_timer_lock);
 
-    if (TimerBase != NULL)
+    if (ami_timer_ready)
     {
-        TimerBase = NULL;
+        /* Unpublish first: a caller on the fast path must not enter ami_millis()
+           between the CloseDevice() and the base going away. */
+        ami_timer_ready = FALSE;
         CloseDevice((struct IORequest *)&ami_timer_req);
-        ami_eclock_hz = 0UL;
+        TimerBase       = NULL;
+        ami_eclock_hz   = 0UL;
     }
 
     ReleaseSemaphore(&ami_timer_lock);
