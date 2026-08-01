@@ -740,6 +740,37 @@ VOID bsd_closing_sweep(VOID)
 }
 
 /*
+ * The same list, emptied without waiting for anything.
+ *
+ * The sweep above leaves a FIN that is still in flight parked for the next
+ * program to collect, which is why the list is global. On the last
+ * CloseLibrary() there is no next program: netstack_shutdown() runs a moment
+ * later and ami_free()s the AmiNetStack the NX_IP is embedded in, so anything
+ * still parked becomes a block nothing can reach again -- sizeof(AmiSocket) per
+ * connection, until reboot -- holding an nx_tcp_socket_ip_ptr into freed
+ * memory. A later opener's sweep would then run bsd_tcp_abort() through that
+ * pointer.
+ *
+ * ASF_CLOSING is already set on everything here, so bsd_socket_destroy() skips
+ * bsd_tcp_close_start() and nothing can be parked again underneath the loop.
+ */
+VOID bsd_closing_drain(VOID)
+{
+    AmiSocket *sock;
+
+    while ((sock = bsd_closing_head) != NULL)
+    {
+        bsd_closing_head     = sock->as_ClosingNext;
+        sock->as_ClosingNext = NULL;
+
+        bsd_tcp_abort(&sock->as_Nx.tcp);
+
+        if (bsd_socket_destroy(sock))
+            bsd_socket_dispose(sock);
+    }
+}
+
+/*
  * Start the close. TRUE means the socket is finished with and the caller may
  * delete it now; FALSE means the FIN is in flight and the block has been
  * parked, so it is no longer the caller's to free.
@@ -1047,6 +1078,15 @@ VOID bsd_close_all(struct AmiSocketBase *base)
      * ago -- which is why the list is global and outlives the base.
      */
     bsd_closing_sweep();
+
+    /*
+     * Last opener: nothing will ever sweep again, and library.c takes the stack
+     * down as soon as this returns. Same test bsd_lib_close() uses to decide
+     * bsd_handoff_flush(), and for the same reason -- still inside the bracket,
+     * with the base alive.
+     */
+    if (base->sb_Master != NULL && base->sb_Master->sb_StackRefs <= 1)
+        bsd_closing_drain();
 
     bsd_nx_leave(base);
 }
