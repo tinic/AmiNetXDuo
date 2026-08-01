@@ -74,6 +74,7 @@ typedef struct
     NX_PACKET   pkt[H_MAX_PACKETS];
     UCHAR       buf[H_MAX_PACKETS][H_BUF];
     UCHAR       saved[H_MAX_PACKETS][H_BUF];
+    UCHAR       wire[H_BUF];    /* what the device's buffer holds */
     UINT        count;
 } h_chain;
 
@@ -167,6 +168,49 @@ static const ULONG h_protocols[3] =
 };
 
 static h_chain h_c;
+
+#ifdef AMINETXDUO_RX_COPY_SUM
+/*
+ * A frame in the device's buffer.  Pattern 0 and 1 are the uniform fills that
+ * reach the one's-complement zeros; 2 is random.
+ */
+static void h_wire(UINT pattern)
+{
+    UINT i;
+
+    for (i = 0; i < H_BUF; i++)
+    {
+        h_c.wire[i] = (pattern == 0) ? 0x00 :
+                      (pattern == 1) ? 0xFF : (UCHAR)h_rand();
+    }
+}
+
+/*
+ * Take the frame the way sana2_rx.c has the device take it -- data_start + 2 +
+ * 14, where the _Static_assert there puts the IP header -- through the same
+ * n68k_rx_copy_stash() the interrupt hook calls.  Repeated before every
+ * comparison, because a stash is consumed by the call that reads it.
+ */
+static void h_stash(UINT len, UINT ihl)
+{
+    memset(&h_c.pkt[0], 0, sizeof(NX_PACKET));
+
+    h_c.count = 1;
+    h_c.pkt[0].nx_packet_data_start = h_c.buf[0];
+    h_c.pkt[0].nx_packet_data_end   = h_c.buf[0] + H_BUF;
+    h_c.pkt[0].nx_packet_next       = NX_NULL;
+#ifdef FEATURE_NX_IPV6
+    h_c.pkt[0].nx_packet_ip_version = NX_IP_VERSION_V4;
+#endif
+
+    n68k_rx_copy_stash(&h_c.pkt[0], h_c.buf[0] + 16, h_c.wire, len);
+
+    h_c.pkt[0].nx_packet_prepend_ptr = h_c.buf[0] + 16 + ihl;
+    h_c.pkt[0].nx_packet_append_ptr  = h_c.buf[0] + 16 + len;
+
+    memcpy(h_c.saved, h_c.buf, sizeof(h_c.saved));
+}
+#endif /* AMINETXDUO_RX_COPY_SUM */
 
 int main(void)
 {
@@ -420,6 +464,146 @@ int main(void)
             }
         }
     }
+
+#ifdef AMINETXDUO_RX_COPY_SUM
+    /* ---- the receive short-circuit ------------------------------------- */
+    /*
+     * The same differential, over packets that carry a stash: ours takes the
+     * short-circuit, the reference walks the payload, and the two answers have
+     * to be the same 16 bits -- 0x0000 and 0xFFFF included, which are
+     * different answers to the callers that complement them.
+     *
+     * The frame is laid out the way sana2_rx.c lays one out (data_start + 2 +
+     * 14, which is where the _Static_assert there puts the IP header), copied
+     * in by the same n68k_rx_copy_stash() the interrupt hook calls, and then
+     * read at every IHL a header can have.  `len % 4` is walked over every
+     * residue because the trailing 1-3 bytes are where a wrong answer would
+     * be built out of the previous frame's bytes.
+     */
+    {
+        static const UINT big[] =
+        {
+            536, 537, 538, 539, 1024, 1025, 1026, 1027,
+            1460, 1461, 1462, 1463, 1511, 1512, 1513, 1514
+        };
+        static const UINT ihls[4] = { 20, 24, 40, 60 };
+
+        for (i = 0; i < 3; i++)
+        {
+            h_wire(i);
+
+            for (trial = 0;
+                 trial < 101 + (UINT)(sizeof(big) / sizeof(big[0]));
+                 trial++)
+            {
+                UINT k;
+
+                /* 20..120 covers every residue and every remainder of the
+                   32-byte block loop; the rest are frame-sized. */
+                len = (trial < 101) ? (20 + trial) : big[trial - 101];
+
+                for (k = 0; k < 4; k++)
+                {
+                    UINT ihl = ihls[k];
+
+                    if (ihl >= len)
+                    {
+                        continue;
+                    }
+
+                    h_stash(len, ihl);
+
+                    h_checks++;
+                    if (h_c.pkt[0].nx_packet_packet_pad[1] !=
+                        (N68K_RX_STASH_MAGIC ^ (ULONG)len))
+                    {
+                        h_fail("rx stash not written",
+                               h_c.pkt[0].nx_packet_packet_pad[1],
+                               N68K_RX_STASH_MAGIC ^ (ULONG)len, len);
+                    }
+
+                    for (p = 0; p < 3; p++)
+                    {
+                        h_stash(len, ihl);      /* consumed by the last run */
+                        h_compare(&h_c, h_protocols[p], len - ihl,
+                                  h_src, h_dst, "rx stash");
+                    }
+
+                    /* TCP takes it and clears it as it goes. */
+                    h_stash(len, ihl);
+                    (void)n68k_ip_checksum_compute(&h_c.pkt[0],
+                                                   NX_PROTOCOL_TCP,
+                                                   len - ihl, h_src, h_dst);
+                    h_checks++;
+                    if (h_c.pkt[0].nx_packet_packet_pad[1] != 0UL)
+                    {
+                        h_fail("rx stash not consumed",
+                               h_c.pkt[0].nx_packet_packet_pad[1], 0, len);
+                    }
+
+                    /*
+                     * Ethernet padding.  The frame the device copied is longer
+                     * than the datagram inside it, so the length the stash
+                     * covers and the length this call adds up to disagree.
+                     * Summing the padding would be the silent wrong answer.
+                     */
+                    if (len >= ihl + 8)
+                    {
+                        h_stash(len, ihl);
+                        h_c.pkt[0].nx_packet_append_ptr =
+                            h_c.buf[0] + 16 + len - 4;
+                        memcpy(h_c.saved, h_c.buf, sizeof(h_c.saved));
+
+                        for (p = 0; p < 3; p++)
+                        {
+                            h_compare(&h_c, h_protocols[p], len - ihl - 4,
+                                      h_src, h_dst, "rx stash, padded frame");
+                        }
+
+                        h_checks++;
+                        if (h_c.pkt[0].nx_packet_packet_pad[1] == 0UL)
+                        {
+                            h_fail("rx stash consumed by a padded frame",
+                                   0, N68K_RX_STASH_MAGIC ^ (ULONG)len, len);
+                        }
+                    }
+
+                    /*
+                     * A chain.  Reassembly links fragments through
+                     * nx_packet_next and their sums would have to be combined
+                     * rather than read, so the head's stash must be declined
+                     * whatever it says.
+                     */
+                    if (len >= ihl + 8)
+                    {
+                        h_stash(len, ihl);
+                        h_c.pkt[0].nx_packet_next = &h_c.pkt[1];
+                        h_c.pkt[0].nx_packet_append_ptr =
+                            h_c.buf[0] + 16 + len;
+
+                        memset(&h_c.pkt[1], 0, sizeof(NX_PACKET));
+                        h_c.pkt[1].nx_packet_data_start   = h_c.buf[1];
+                        h_c.pkt[1].nx_packet_data_end     = h_c.buf[1] + H_BUF;
+                        h_c.pkt[1].nx_packet_prepend_ptr  = h_c.buf[1];
+                        h_c.pkt[1].nx_packet_append_ptr   = h_c.buf[1] + 8;
+                        h_c.pkt[1].nx_packet_next         = NX_NULL;
+#ifdef FEATURE_NX_IPV6
+                        h_c.pkt[1].nx_packet_ip_version   = NX_IP_VERSION_V4;
+#endif
+                        h_c.count = 2;
+                        memcpy(h_c.saved, h_c.buf, sizeof(h_c.saved));
+
+                        for (p = 0; p < 3; p++)
+                        {
+                            h_compare(&h_c, h_protocols[p], len - ihl + 8,
+                                      h_src, h_dst, "rx stash, chain");
+                        }
+                    }
+                }
+            }
+        }
+    }
+#endif /* AMINETXDUO_RX_COPY_SUM */
 
     printf("%lu checks, %lu failures -- %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");

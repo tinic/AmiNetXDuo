@@ -56,6 +56,101 @@ USHORT n68k_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
  */
 VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len);
 
+
+#ifdef AMINETXDUO_RX_COPY_SUM
+
+/*
+ * The receive stash.  ami_sana2_copy_to_buff() has to move the frame out of
+ * the device's buffer anyway, and n68k_copy_sum_longwords() sums it out of the
+ * loads that copy already does; it leaves the answer here and
+ * n68k_ip_checksum_compute() returns it instead of walking the payload again.
+ *
+ * The three longwords are NX_PACKET_HEADER_PAD's, turned on in
+ * port/netxduo-amiga/inc/nx_user.h.  It is NetX Duo's own extension point and
+ * nothing in the vendored tree touches the field.
+ *
+ *   sum      the one's-complement sum over [start, start+bytes), zero padded
+ *            at the end, in the 32-bit end-around-carry form
+ *            n68k_sum_longwords() produces.
+ *   sentinel MAGIC ^ bytes.  The reader derives what `bytes` would have to be
+ *            from the call in front of it and compares, so one load answers
+ *            both "is this ours" and "is it the same run of bytes", and a
+ *            length that does not agree cannot look like a magic that does.
+ *   start    the first byte the copy wrote.  The reader is asked about a
+ *            suffix -- the frame less its IP header -- and subtracts the
+ *            prefix it names.
+ *
+ * A frame the copy hook could not take gets a zero sentinel written anyway --
+ * MAGIC ^ length can never be zero for any length a frame can have -- so
+ * nothing can inherit one.  The sentinel is also cleared as it is consumed,
+ * and n68k_packet_allocate_hook.c clears it on every packet leaving the pool,
+ * because a transmit packet is a receive packet's buffer reissued and TX calls
+ * this same function to INSERT a checksum rather than verify one.
+ */
+#define N68K_RX_STASH_MAGIC     0x6E36384BUL    /* 'n68K' */
+
+#define N68K_RX_SUM(pkt)        ((pkt)->nx_packet_packet_pad[0])
+#define N68K_RX_SENTINEL(pkt)   ((pkt)->nx_packet_packet_pad[1])
+#define N68K_RX_START(pkt)      ((pkt)->nx_packet_packet_pad[2])
+
+/*
+ * A pointer as the pad field can hold it.  The two are the same width on the
+ * 68k; on the host, where the differential test runs, the truncation is the
+ * same for both operands of the one subtraction that uses it, and the
+ * subtraction is what the reader wants.  It never reconstructs a pointer from
+ * the field -- it walks back from the prepend pointer by the difference.
+ */
+#define N68K_RX_ADDR(p)         ((ULONG)(ALIGN_TYPE)(p))
+
+/*
+ * Copy `len` bytes of freshly received frame and leave the stash behind.
+ * `to` and `from` must be longword aligned; ami_sana2_copy_to_buff() decides
+ * that, because it is a fact about the frame in front of it.  Nothing here
+ * looks at what the frame contains -- the reader has the IP header's length
+ * in its own arguments and needs no second opinion about it.
+ *
+ * Here rather than in src/sana2/ because the trailing 1-3 bytes have to be
+ * folded in exactly the way the walk in n68k_checksum.c folds them, and the
+ * two have to be read side by side to see that they are.  tests/perf/host/
+ * calls this one, not a copy of it.
+ */
+VOID n68k_rx_copy_stash(NX_PACKET *packet, UCHAR *to, const UCHAR *from,
+                        ULONG len);
+
+/* Nothing to stash: leave the packet unable to answer for one. */
+VOID n68k_rx_stash_invalidate(NX_PACKET *packet);
+
+/*
+ * Where the fast path went.  A stash that is never taken and a stash that is
+ * taken and saves nothing look exactly alike in a throughput figure, and the
+ * conditions are strict enough that the first is the likelier of the two, so
+ * they are counted rather than reasoned about.  Not per interface and not
+ * locked: they are read once at teardown and an increment lost to a race
+ * costs nothing but the last digit.
+ *
+ * `used + miss_*` counts every call to n68k_ip_checksum_compute(), transmit
+ * and IP header included, so `miss_none` and `miss_protocol` are large by
+ * construction and mean nothing on their own.  What matters is `stamped`
+ * against `used`.
+ */
+typedef struct N68kRxStats
+{
+    ULONG   stamped;            /* frames summed inside the copy            */
+    ULONG   skip_dst;           /* raw mode: dst is data_start + 2          */
+    ULONG   skip_from;          /* the device's buffer was not aligned      */
+
+    ULONG   used;               /* checksum calls answered from a stash     */
+    ULONG   miss_none;          /* no stash on the packet                   */
+    ULONG   miss_chained;       /* reassembled: sums would have to combine  */
+    ULONG   miss_protocol;      /* not TCP/UDP, or no pseudo-header address */
+    ULONG   miss_prefix;        /* prefix negative or not a multiple of 4   */
+    ULONG   miss_length;        /* the stash covered a different run        */
+} N68kRxStats;
+
+extern N68kRxStats n68k_rx_stats;
+
+#endif /* AMINETXDUO_RX_COPY_SUM */
+
 #ifdef __cplusplus
 }
 #endif

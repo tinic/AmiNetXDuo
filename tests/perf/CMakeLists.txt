@@ -180,4 +180,31 @@ if(NOT CMAKE_CROSSCOMPILING)
     include(CTest)
     add_test(NAME net68k_checksum COMMAND test_net68k_checksum)
 
+    # The same test again with the receive short-circuit compiled in, so the
+    # differential covers it on every push whatever AMINETXDUO_RX_COPY_SUM is
+    # set to.  Validation of a switch has no business being switchable, and
+    # the two binaries differ by one define.
+    add_executable(test_net68k_rx_copy_sum
+        host/test_checksum_host.c
+        "${CMAKE_SOURCE_DIR}/src/net68k/n68k_checksum.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_checksum_compute.c")
+
+    target_include_directories(test_net68k_rx_copy_sum PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${CMAKE_SOURCE_DIR}/src/net68k")
+
+    # The pad defines by hand: this build takes the vendored linux nx_port.h,
+    # which does not reach port/netxduo-amiga/inc/nx_user.h where they live.
+    target_compile_definitions(test_net68k_rx_copy_sum PRIVATE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h"
+        _nx_ip_checksum_compute=n68k_checksum_reference
+        AMINETXDUO_RX_COPY_SUM
+        NX_PACKET_HEADER_PAD
+        NX_PACKET_HEADER_PAD_SIZE=3)
+
+    add_test(NAME net68k_rx_copy_sum COMMAND test_net68k_rx_copy_sum)
+
 endif()

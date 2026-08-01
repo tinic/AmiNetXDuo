@@ -654,6 +654,28 @@
 #define NX_ENABLE_INTERFACE_CAPABILITY
 
 /*
+ * Three spare longwords in every NX_PACKET, for the receive checksum that
+ * ami_sana2_copy_to_buff() computes inside the copy the device asks for: the
+ * sum, a sentinel bound to the length it covers, and where it starts.  See
+ * src/net68k/net68k.h.
+ *
+ * NX_PACKET_HEADER_PAD is NetX Duo's own extension point and nothing in
+ * third_party/netxduo/common/src/ reads or writes the field, so the three
+ * longwords are ours alone -- no dependence on a frame leaving slack at the
+ * end of the payload, and nothing else in the stack can clobber them.
+ *
+ * It changes the size of NX_PACKET, so AMINETXDUO_RX_COPY_SUM is not a purely
+ * additive switch: every translation unit has to agree, which is why the flag
+ * is set globally by the top-level CMakeLists and read here.  NX_PACKET is
+ * also part of the pool stride (src/netstack/netstack.c), so 12 bytes here is
+ * about 0.7% fewer packets for the same memory.
+ */
+#ifdef AMINETXDUO_RX_COPY_SUM
+#define NX_PACKET_HEADER_PAD
+#define NX_PACKET_HEADER_PAD_SIZE               3
+#endif
+
+/*
  * Deliver a broadcast this host sends to this host's own sockets too.
  *
  * Ethernet is simplex: a card does not hear its own transmissions, so a

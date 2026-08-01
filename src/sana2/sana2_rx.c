@@ -31,6 +31,8 @@
 
 #include "sana2_internal.h"
 
+#include "net68k.h"
+
 #include "nx_ip.h"
 #ifndef NX_DISABLE_IPV4
 #include "nx_arp.h"
@@ -151,6 +153,12 @@ static VOID ami_sana2_rx_arm(AmiSana2If *iface, AmiRxSlot *slot)
 
     slot->capacity = (ULONG)(packet->nx_packet_data_end - slot->dst);
     slot->copied   = 0;
+
+#ifdef AMINETXDUO_RX_COPY_SUM
+    /* Nothing left over from an earlier frame may still be readable, even
+       though the copy hook will write a sentinel of its own either way. */
+    n68k_rx_stash_invalidate(packet);
+#endif
 }
 
 /* Post every idle slot that has, or can get, a packet. Returns how many reads

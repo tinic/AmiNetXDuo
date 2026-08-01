@@ -87,6 +87,7 @@ static const UBYTE peer_mac[6]  = { 0x02, 0x00, 0x44, 0x52, 0x4C, 0x02 };
 
 #define ETYPE_IP        0x0800
 #define ETYPE_ARP       0x0806
+#define ETYPE_IPV6      0x86DD
 #define ETH_HDR         14
 
 /* --------------------------------------------------------------- sockets -- */
@@ -749,6 +750,21 @@ static VOID pump(VOID)
             continue;
         }
 
+        /*
+         * IPv6 is the same thing one EtherType along, and it is not optional
+         * traffic: stateless autoconfiguration solicits a router and its own
+         * address as soon as the interface comes up, and duplicate-address
+         * detection repeats on a timer.  Nothing here is scripted in v6, so
+         * the whole EtherType is background.  Without this the first case in
+         * a file catches the startup burst and a later one catches a
+         * retransmission, which is a failure that moves when the timing does.
+         */
+        if (ether == ETYPE_IPV6)
+        {
+            n_background++;
+            continue;
+        }
+
         if (pend_count >= PEND_MAX)
         {
             /* Dropping here would leave every later assertion one frame out
@@ -804,11 +820,24 @@ typedef struct Inject
     UWORD   urg;
     ULONG   dlen;
     LONG    mss;
+    LONG    corrupt;            /* payload byte to flip after the checksum */
+    ULONG   pad;                /* Ethernet padding past the datagram      */
+    BOOL    unaligned;          /* hand the device an odd buffer           */
 } Inject;
+
+/*
+ * The frame is built inside a longword-aligned buffer and handed over at an
+ * offset, because where it starts decides whether the IP header the device
+ * copies out is longword aligned -- and src/sana2/sana2_copy.c takes its
+ * copy-and-sum path only when it is.  Offset 2 is the aligned case, which is
+ * what a driver that positions its receive buffer for the stack produces;
+ * offset 0 is the other one, which SANA-II equally allows.
+ */
+static ULONG f_aligned[(TAP_FRAME_MAX / 4) + 2];
 
 static VOID build_and_inject(const Inject *in)
 {
-    static UBYTE f[TAP_FRAME_MAX];
+    UBYTE *f   = ((UBYTE *)f_aligned) + (in->unaligned ? 0 : 2);
     UBYTE *ip  = &f[ETH_HDR];
     UBYTE *tcp;
     UWORD  opt = (in->mss >= 0) ? 4 : 0;
@@ -816,7 +845,7 @@ static VOID build_and_inject(const Inject *in)
     ULONG  i;
     ULONG  iplen;
 
-    zero(f, (ULONG)sizeof(f));
+    zero((UBYTE *)f_aligned, (ULONG)sizeof(f_aligned));
 
     cp(&f[0], local_mac, 6);
     cp(&f[6], peer_mac, 6);
@@ -869,7 +898,18 @@ static VOID build_and_inject(const Inject *in)
         wr16(&tcp[16], (UWORD)(~sum));
     }
 
-    if (tap_rx_put(f, ETH_HDR + iplen) != 0)
+    /*
+     * After the checksum, so the segment is exactly what a damaged one on the
+     * wire looks like: the bytes and the checksum disagree, and nothing else
+     * about the frame is wrong.  The stack has to reject it whether it summed
+     * the payload in a pass of its own or inside the copy.
+     */
+    if ((in->corrupt >= 0) && ((ULONG)in->corrupt < in->dlen))
+    {
+        tcp[thl + in->corrupt] ^= 0xFF;
+    }
+
+    if (tap_rx_put(f, ETH_HDR + iplen + in->pad) != 0)
     {
         say("  !! injection dropped -- no CMD_READ outstanding for 0x0800");
         cs.fails++;
@@ -932,6 +972,9 @@ typedef struct Expect
     BOOL    have_mss;   LONG mss;
     BOOL    have_within; LONG within;
     BOOL    have_after;  LONG after;
+    BOOL    have_corrupt; LONG corrupt;
+    BOOL    have_pad;    LONG pad;
+    BOOL    have_unaligned;
 } Expect;
 
 static UWORD parse_flags(const char *s)
@@ -997,6 +1040,9 @@ static const char *parse_keys(const char *p, Expect *e)
             else if (streq(key, "mss"))   { e->have_mss = TRUE;    e->mss = to_num(eq + 1); }
             else if (streq(key, "within")){ e->have_within = TRUE; e->within = to_num(eq + 1); }
             else if (streq(key, "after")) { e->have_after = TRUE;  e->after = to_num(eq + 1); }
+            else if (streq(key, "corrupt")) { e->have_corrupt = TRUE; e->corrupt = to_num(eq + 1); }
+            else if (streq(key, "pad"))   { e->have_pad = TRUE;   e->pad = to_num(eq + 1); }
+            else if (streq(key, "unaligned")) { e->have_unaligned = (to_num(eq + 1) != 0) ? TRUE : FALSE; }
         }
         p = next;
     }
@@ -1252,6 +1298,9 @@ static VOID do_rx(const char *args, const char *raw)
     in.urg   = (UWORD)(e.have_urg ? e.urg : 0);
     in.dlen  = (ULONG)(e.have_len ? e.len : 0);
     in.mss   = e.have_mss ? e.mss : -1;
+    in.corrupt   = e.have_corrupt ? e.corrupt : -1;
+    in.pad       = (ULONG)(e.have_pad ? e.pad : 0);
+    in.unaligned = e.have_unaligned;
 
     /* Give the stack a moment to post its reads before the very first
        injection of a case; after that they are always outstanding. */
@@ -1527,6 +1576,67 @@ static VOID do_recv(const char *args, const char *raw)
         *w = '\0';
         fail(raw, why);
     }
+}
+
+/*
+ * recv N bytes and check that they are the bytes that were sent.  A count is
+ * not enough for the copy path: src/sana2/sana2_copy.c moves the frame and
+ * sums it in one pass, and a right checksum over a wrongly-copied payload
+ * would satisfy every other assertion in this file.  build_and_inject() fills
+ * the data with 'a' + i % 26 from the start of the segment, so this is for a
+ * case with one segment outstanding.
+ */
+static VOID do_recvpat(const char *args, const char *raw)
+{
+    char tok[24];
+    LONG want;
+    LONG rc;
+    LONG i;
+
+    (VOID)token(args, tok, sizeof(tok));
+    want = to_num(tok);
+
+    if (want > (LONG)sizeof(payload))
+        want = (LONG)sizeof(payload);
+
+    rc = s_recv(cs.sock, payload, want, 0);
+
+    if (rc != want)
+    {
+        char  why[110];
+        char *w = why;
+        const char *t = "recv() returned ";
+
+        while (*t) *w++ = *t++;
+        fmt_num(&w, (ULONG)rc, 10, 0, TRUE);
+        t = ", wanted "; while (*t) *w++ = *t++;
+        fmt_num(&w, (ULONG)want, 10, 0, TRUE);
+        *w = '\0';
+        fail(raw, why);
+        return;
+    }
+
+    for (i = 0; i < rc; i++)
+    {
+        if (payload[i] != (UBYTE)('a' + (i % 26)))
+        {
+            char  why[110];
+            char *w = why;
+            const char *t = "byte ";
+
+            while (*t) *w++ = *t++;
+            fmt_num(&w, (ULONG)i, 10, 0, FALSE);
+            t = " is 0x"; while (*t) *w++ = *t++;
+            fmt_num(&w, (ULONG)payload[i], 16, 2, FALSE);
+            t = ", expected 0x"; while (*t) *w++ = *t++;
+            fmt_num(&w, (ULONG)('a' + (i % 26)), 16, 2, FALSE);
+            *w = '\0';
+            fail(raw, why);
+            return;
+        }
+    }
+
+    pass(raw);
 }
 
 static VOID do_select(const char *args, const char *raw, BOOL write_set)
@@ -1892,6 +2002,7 @@ static VOID run_line(char *line)
     else if (streq(verb, "send"))     do_send(args, raw);
     else if (streq(verb, "oob"))      do_oob(args, raw);
     else if (streq(verb, "recv"))     do_recv(args, raw);
+    else if (streq(verb, "recvpat"))  do_recvpat(args, raw);
     else if (streq(verb, "readable")) do_select(args, raw, FALSE);
     else if (streq(verb, "writable")) do_select(args, raw, TRUE);
     else if (streq(verb, "shutdown")) do_shutdown(args, raw);

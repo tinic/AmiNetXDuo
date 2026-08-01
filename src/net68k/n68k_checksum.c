@@ -117,6 +117,81 @@ static ULONG n68k_fold(ULONG sum)
 }
 
 
+/* ----------------------------------------------------------- the stash --- */
+
+#ifdef AMINETXDUO_RX_COPY_SUM
+
+N68kRxStats  n68k_rx_stats;
+
+VOID n68k_rx_stash_invalidate(NX_PACKET *packet)
+{
+
+    N68K_RX_SENTINEL(packet) =  0UL;
+}
+
+VOID n68k_rx_copy_stash(NX_PACKET *packet, UCHAR *to, const UCHAR *from,
+                        ULONG len)
+{
+
+ULONG   words =  len >> 2;
+ULONG   tail  =  len & 3UL;
+ULONG   sum;
+
+
+    sum =  n68k_copy_sum_longwords((ULONG *)to, (const ULONG *)from, words);
+
+    if (tail != 0UL)
+    {
+
+    const UCHAR    *s =  from + (words << 2);
+    UCHAR          *d =  to + (words << 2);
+    ULONG           i;
+
+    union
+    {
+        ULONG   l;
+        UCHAR   b[4];
+    } w;
+
+
+        /*
+         * What lies past `len` in the device's buffer is the previous frame,
+         * not zeroes, so the last longword is built out of the bytes that
+         * actually arrived and padded with zeroes -- which is what the walk
+         * below does with a partial trailing longword, for all three of its
+         * lengths.
+         *
+         * Assembled through the byte array rather than by shifting: the walk
+         * sums whole longwords in host order and byte swaps once at the end,
+         * so what matters is where the bytes sit in memory, not what they are
+         * worth.  The two agree on the 68k either way and disagree on a
+         * little-endian host, which is where the differential runs.
+         */
+        w.l =  0UL;
+
+        for (i = 0UL; i < tail; i++)
+        {
+            d[i]    =  s[i];
+            w.b[i]  =  s[i];
+        }
+
+        sum +=  w.l;
+        if (sum < w.l)
+        {
+            sum++;                      /* end-around carry */
+        }
+    }
+
+    N68K_RX_SUM(packet)      =  sum;
+    N68K_RX_START(packet)    =  N68K_RX_ADDR(to);
+    N68K_RX_SENTINEL(packet) =  N68K_RX_STASH_MAGIC ^ len;
+
+    n68k_rx_stats.stamped++;
+}
+
+#endif /* AMINETXDUO_RX_COPY_SUM */
+
+
 /* --------------------------------------------------------- the compute --- */
 
 USHORT n68k_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
@@ -182,6 +257,100 @@ UINT        i;
         NX_CHANGE_USHORT_ENDIAN(tmp);
         checksum =  tmp;
     }
+
+#ifdef AMINETXDUO_RX_COPY_SUM
+
+    /*
+     * The receive short-circuit.  ami_sana2_copy_to_buff() summed this frame
+     * while copying it out of the device's buffer, so the walk below would be
+     * a second pass over the same bytes.  The pseudo header above is still
+     * this function's own work -- only the payload pass is skipped.
+     *
+     * TCP and UDP only.  The IPv4 header's own checksum comes through here
+     * with no addresses at all and falls through on that; ICMP and ICMPv6 are
+     * declined by the protocol, which also means the running checksum is
+     * never zero at this point -- the pseudo header carries at least a
+     * protocol number and a length -- and that is what makes one's-complement
+     * -0 and +0 the same answer here rather than an accept against a drop.
+     *
+     * A chain is rejected outright: reassembly links fragments through
+     * nx_packet_next (nx_ip_fragment_assembly.c), and their sums would have
+     * to be combined rather than read.
+     *
+     * Consumed on the way out.  A packet is checksummed once on receive, and
+     * clearing it here is what stops the same sentinel answering a transmit
+     * call after the buffer has been round the pool.
+     */
+    if (N68K_RX_SENTINEL(packet_ptr) == 0UL)
+    {
+        n68k_rx_stats.miss_none++;
+    }
+#ifndef NX_DISABLE_PACKET_CHAIN
+    else if (packet_ptr -> nx_packet_next != NX_NULL)
+    {
+        n68k_rx_stats.miss_chained++;
+    }
+#endif
+    else if (((protocol != NX_PROTOCOL_TCP) && (protocol != NX_PROTOCOL_UDP)) ||
+             (src_ip_addr == NX_NULL) || (dest_ip_addr == NX_NULL))
+    {
+        n68k_rx_stats.miss_protocol++;
+    }
+    else
+    {
+
+    /*
+     * The stash covers the frame from the IP header on and this call covers a
+     * suffix of it, so the answer is the stash's sum less the sum of the
+     * prefix in front of the prepend pointer.  `start` is longword aligned
+     * and a header length is a multiple of 4, so the two runs share one
+     * longword grid and ceil(bytes/4) - prefix/4 is exactly
+     * ceil(data_length/4): one subtraction, no parity case, no byte swap.
+     *
+     * `bytes` is not stored twice.  It is what the stash would have to have
+     * covered for this call to be the suffix, and the sentinel says whether
+     * it was -- which is also the check that a frame carrying Ethernet
+     * padding fails, its copied length being longer than its datagram.
+     */
+    ULONG   prefix =  N68K_RX_ADDR(packet_ptr -> nx_packet_prepend_ptr) -
+                      N68K_RX_START(packet_ptr);
+    ULONG   ahead  =  (ULONG)(packet_ptr -> nx_packet_prepend_ptr -
+                              packet_ptr -> nx_packet_data_start);
+
+
+        if (((prefix & 3UL) != 0UL) || (prefix > ahead))
+        {
+            n68k_rx_stats.miss_prefix++;
+        }
+        else if (N68K_RX_SENTINEL(packet_ptr) !=
+                 (N68K_RX_STASH_MAGIC ^ (prefix + (ULONG)data_length)))
+        {
+            n68k_rx_stats.miss_length++;
+        }
+        else
+        {
+
+        ULONG   head =  n68k_sum_longwords(
+                            (const ULONG *)(packet_ptr -> nx_packet_prepend_ptr -
+                                            prefix), prefix >> 2);
+
+
+            N68K_RX_SENTINEL(packet_ptr) =  0UL;
+            n68k_rx_stats.used++;
+
+            checksum +=  n68k_fold(N68K_RX_SUM(packet_ptr)) +
+                         (0xFFFFUL - n68k_fold(head));
+
+            checksum =   n68k_fold(checksum);
+
+            tmp =  (USHORT)checksum;
+            NX_CHANGE_USHORT_ENDIAN(tmp);
+
+            return(tmp);
+        }
+    }
+
+#endif /* AMINETXDUO_RX_COPY_SUM */
 
     long_ptr       =  (ULONG *)packet_ptr -> nx_packet_prepend_ptr;
     current_packet =  packet_ptr;

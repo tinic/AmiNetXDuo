@@ -279,6 +279,41 @@ if(AMINETXDUO_NET68K_CHECKSUM)
     list(FILTER NETXDUO_SOURCES EXCLUDE REGEX "/nx_ip_checksum_compute\\.c$")
 endif()
 
+# The receive checksum, computed inside the copy the SANA-II device asks for
+# rather than in a pass of its own.  Melded, the pair costs 256 ns/B on a
+# 68020 against 378.56 for the two done separately.
+#
+# OFF, and off is byte for byte the build that shipped: the whole of it is
+# #ifdef'd, including the two vendored files it moves around, so the option
+# can land before the end-to-end validation is finished.  It needs the
+# checksum replacement, because the short-circuit lives inside it.
+#
+# It also takes nx_packet_allocate.c out of the core -- see
+# src/net68k/n68k_packet_allocate_hook.c for the stale stash that makes that
+# necessary and what it costs (one store per packet).
+option(AMINETXDUO_RX_COPY_SUM
+       "Compute the receive checksum inside the SANA-II copy" OFF)
+
+if(AMINETXDUO_RX_COPY_SUM)
+    if(NOT AMINETXDUO_NET68K_CHECKSUM)
+        message(FATAL_ERROR
+            "AMINETXDUO_RX_COPY_SUM needs AMINETXDUO_NET68K_CHECKSUM")
+    endif()
+
+    add_compile_definitions(AMINETXDUO_RX_COPY_SUM)
+
+    # The allocator is wrapped rather than replaced: the vendored file keeps
+    # its logic and loses only its name, and net68k's wrapper carries it.
+    # Both stay inside libnetxduo.a, because the vendored one calls
+    # _nx_packet_pool_cleanup() in the core and the core calls the wrapper --
+    # two archives would need each other in both directions.
+    set_source_files_properties(
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_allocate.c" PROPERTIES
+        COMPILE_DEFINITIONS _nx_packet_allocate=n68k_packet_allocate_vendored)
+    list(APPEND NETXDUO_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/net68k/n68k_packet_allocate_hook.c")
+endif()
+
 add_library(threadx STATIC ${THREADX_SOURCES})
 target_include_directories(threadx PUBLIC
     ${AMINETXDUO_PORT_INCLUDES} "${AMINETXDUO_THREADX}/common/inc")
@@ -287,6 +322,11 @@ add_library(netxduo STATIC ${NETXDUO_SOURCES})
 target_include_directories(netxduo PUBLIC
     ${AMINETXDUO_CORE_INCLUDES})
 target_link_libraries(netxduo PUBLIC threadx)
+
+if(AMINETXDUO_RX_COPY_SUM)
+    target_include_directories(netxduo PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/net68k")
+endif()
 
 # NetX Duo add-ons we actually use.
 set(NETXDUO_ADDON_SOURCES

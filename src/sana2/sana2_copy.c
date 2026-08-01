@@ -67,6 +67,35 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
     if (slot->packet == NULL || slot->dst == NULL || len > slot->capacity)
         return FALSE;
 
+#ifdef AMINETXDUO_RX_COPY_SUM
+    /*
+     * Sum the frame inside the copy, so n68k_ip_checksum_compute() does not
+     * have to walk it again. Cooked mode lands dst on data_start + 2 + 14, a
+     * longword boundary -- there is a _Static_assert on it in sana2_rx.c --
+     * and raw mode lands on data_start + 2, which never qualifies. SANA-II
+     * promises nothing at all about the device's buffer, so that end is
+     * checked too.
+     *
+     * The `else` writes a dead sentinel rather than leaving the field alone:
+     * a packet that took the plain copy must not be able to answer for a
+     * stash, whatever was in it before.
+     */
+    if ((((ALIGN_TYPE)slot->dst | (ALIGN_TYPE)from) & 3) == 0)
+    {
+        n68k_rx_copy_stash(slot->packet, slot->dst, (const UCHAR *)from, len);
+        slot->copied = len;
+
+        return TRUE;
+    }
+
+    if (((ALIGN_TYPE)slot->dst & 3) != 0)
+        n68k_rx_stats.skip_dst++;      /* raw mode: data_start + 2 */
+    else
+        n68k_rx_stats.skip_from++;     /* the device's own buffer */
+
+    n68k_rx_stash_invalidate(slot->packet);
+#endif
+
     ami_sana2_copy_bytes(slot->dst, (const UCHAR *)from, len);
     slot->copied = len;
 

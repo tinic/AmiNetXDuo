@@ -830,6 +830,87 @@ ULONG       len = 1460UL;
     }
 }
 
+#ifdef AMINETXDUO_RX_COPY_SUM
+/*
+ * The receive path, both ways.
+ *
+ * What a received frame costs before the protocol sees it is one copy out of
+ * the device's buffer plus one checksum over the segment.  With
+ * AMINETXDUO_RX_COPY_SUM the sum falls out of the copy and the checksum is a
+ * subtraction, so these two rows are the whole of what the switch changes,
+ * per byte of frame, on the machine.
+ *
+ * A 1514-byte frame with a 20-byte IP header, laid out where sana2_rx.c lays
+ * one out: the packet's data_start + 2 + 14, so the IP header is longword
+ * aligned and the copy is the aligned case.  The end-to-end runs below cannot
+ * show this at all -- they go NX_IP to NX_IP over the RAM driver and never
+ * enter src/sana2/.
+ */
+static VOID p_bench_rx_sum(VOID)
+{
+ULONG       t0, ticks, reps, i;
+NX_PACKET  *pkt;
+UCHAR      *dst;
+ULONG       len =  1514UL;
+ULONG       ihl =  20UL;
+ULONG       src =  P_IP0_ADDRESS;
+ULONG       dst_ip = P_IP1_ADDRESS;
+USHORT      a, b;
+
+    if (nx_packet_allocate(&p_pool, &pkt, NX_RECEIVE_PACKET, NX_NO_WAIT)
+            != NX_SUCCESS)
+    {
+        p_log("  rx path: no packet");
+        return;
+    }
+
+    dst =  pkt -> nx_packet_data_start + 2UL + 14UL;
+    reps = 200UL;
+
+    /* The two have to agree before either is timed. */
+    n68k_copy_bytes(dst, p_src_buf, len);
+    N68K_RX_SENTINEL(pkt) =  0UL;
+    pkt -> nx_packet_prepend_ptr =  dst + ihl;
+    pkt -> nx_packet_append_ptr  =  dst + len;
+    pkt -> nx_packet_length      =  len - ihl;
+    a =  n68k_ip_checksum_compute(pkt, NX_PROTOCOL_TCP, (UINT)(len - ihl),
+                                  &src, &dst_ip);
+
+    n68k_rx_copy_stash(pkt, dst, p_src_buf, len);
+    pkt -> nx_packet_prepend_ptr =  dst + ihl;
+    b =  n68k_ip_checksum_compute(pkt, NX_PROTOCOL_TCP, (UINT)(len - ihl),
+                                  &src, &dst_ip);
+
+    (VOID)p_check((UINT)(a == b), "rx copy-sum agrees with the walk",
+                  (ULONG)(a ^ b));
+
+    t0 = p_now();
+    for (i = 0UL; i < reps; i++)
+    {
+        N68K_RX_SENTINEL(pkt) =  0UL;
+        n68k_copy_bytes(dst, p_src_buf, len);
+        pkt -> nx_packet_prepend_ptr =  dst + ihl;
+        (VOID)n68k_ip_checksum_compute(pkt, NX_PROTOCOL_TCP,
+                                       (UINT)(len - ihl), &src, &dst_ip);
+    }
+    ticks = p_elapsed(t0, p_now());
+    p_report("rx copy + checksum, separately", ticks, reps, len);
+
+    t0 = p_now();
+    for (i = 0UL; i < reps; i++)
+    {
+        n68k_rx_copy_stash(pkt, dst, p_src_buf, len);
+        pkt -> nx_packet_prepend_ptr =  dst + ihl;
+        (VOID)n68k_ip_checksum_compute(pkt, NX_PROTOCOL_TCP,
+                                       (UINT)(len - ihl), &src, &dst_ip);
+    }
+    ticks = p_elapsed(t0, p_now());
+    p_report("rx copy + checksum, melded", ticks, reps, len);
+
+    (VOID)nx_packet_release(pkt);
+}
+#endif /* AMINETXDUO_RX_COPY_SUM */
+
 /*
  * The pipeline ceiling: every operation a loopback TCP segment pays for, in
  * order, with no protocol, no scheduler and no timers in the way:
@@ -1484,6 +1565,12 @@ ULONG   actual;
     p_bench_packets();
 
     p_scratch_free();
+
+#ifdef AMINETXDUO_RX_COPY_SUM
+    p_log("");
+    p_log("-- receive path -----------------------------------------------");
+    p_bench_rx_sum();
+#endif
 
     p_log("");
     p_log("-- pipeline ceiling (no protocol) -----------------------------");

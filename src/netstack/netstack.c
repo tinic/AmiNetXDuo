@@ -25,6 +25,10 @@
 
 #include "tx_amiga.h"
 
+#ifdef AMINETXDUO_RX_COPY_SUM
+#include "net68k.h"
+#endif
+
 #include "aminetxduo/random.h"
 
 #include <exec/memory.h>
@@ -363,6 +367,28 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
 
     if (ns == NULL)
         return;
+
+#ifdef AMINETXDUO_RX_COPY_SUM
+    /*
+     * Where the receive fast path went, once, on the way out. A stash that is
+     * never taken and a stash that is taken and saves nothing look the same in
+     * a throughput figure, so the split is printed rather than inferred.
+     * `used` counts checksum calls answered from a stash; the misses count
+     * every other call this stack made, transmit and IP header included.
+     */
+    AMI_INFO("net68k rx: stamped %lu, skipped %lu dst / %lu from; "
+             "used %lu, missed %lu none / %lu chain / %lu proto / "
+             "%lu prefix / %lu length",
+             (unsigned long)n68k_rx_stats.stamped,
+             (unsigned long)n68k_rx_stats.skip_dst,
+             (unsigned long)n68k_rx_stats.skip_from,
+             (unsigned long)n68k_rx_stats.used,
+             (unsigned long)n68k_rx_stats.miss_none,
+             (unsigned long)n68k_rx_stats.miss_chained,
+             (unsigned long)n68k_rx_stats.miss_protocol,
+             (unsigned long)n68k_rx_stats.miss_prefix,
+             (unsigned long)n68k_rx_stats.miss_length);
+#endif
 
 #ifdef AMINETXDUO_BPF
     /* Before anything is deleted: the taps run on the SANA-II reader threads
