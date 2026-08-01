@@ -191,7 +191,7 @@ LONG ami_bpf_init(VOID)
 
     /*
      * The interface table too. Both are file-scope, so a detach the last
-     * teardown missed leaves a row with bi_Used set and a cookie into the
+     * teardown missed leaves a row with `used` set and a cookie into the
      * AmiSana2If that went with the old stack -- which the next bring-up's
      * ami_bpf_iface_by_cookie() would hand to an injector.
      */
