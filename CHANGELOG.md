@@ -2,6 +2,14 @@
 
 User-visible changes, newest first. Internal work is in the git log.
 
+## 0.16.1
+
+- `AddNetInterface` that cannot bring an interface up gives the machine its memory back. A failure after the card had opened -- a PCMCIA card in the slot that will not initialise, a cable that is not there, no DHCP answer -- left the network running with nobody using it, and the memory it holds was gone until the machine was switched off. Measured at 580,704 bytes on a machine with 8 MB free, and about 400 KB on a 1 MB one, which is most of what such a machine has
+- `AddNetInterface` no longer says an interface came up when it did not. After one failure of the kind above, every later run reported success against the network the failed one had left behind, so a machine with nothing on the wire looked configured
+- The network can be started again after a failed attempt. Once one had failed, the count of who was using the stack could never reach zero, so it could not be taken down and could not be restarted; a reboot was the only way out
+- A card that is fitted and will not answer is no longer reported as a missing driver. `AddNetInterface` said "There is no cnet.device on this machine" at a machine whose cnet.device had just opened, because it looked for the driver file in four directories instead of asking the card. It now asks, and says that the driver and the unit number are not what to look at
+- `AddNetInterface` gives back the library it opened when it finds another TCP/IP stack installed
+
 ## 0.16.0
 
 - Two `BeginInterfaceConfig()` calls for different interfaces at the same time no longer risk one of them never being answered, which left the program that made it waiting on its message forever
