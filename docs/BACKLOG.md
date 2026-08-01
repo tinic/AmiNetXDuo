@@ -172,18 +172,6 @@ empty results.
   site(s) already push __argv by value` for the argv indirection. The probe's
   timeout is the harness. Found 2026-07-31.
 
-- **`AMIGA_ARGV_STACK` is 256 KB and dbclient uses 5 KB of it.** Measured with
-  `AMIGA_ARGV_STACKCHECK` set, which paints the block and reports the deepest
-  word touched: 4,940 to 5,008 bytes across six invocations, a full key exchange
-  no deeper than `dbclient -V`. Credible -- Dropbear targets routers and
-  libtommath keeps bignum digits on the heap. **Do not shrink the constant on
-  that alone.** The comment that chose 256 KB names curl first, and curl goes
-  through `tls.library`, where `tx_amiga_adopt.c` hands ThreadX the caller's
-  stack region so NetX Duo, nx_secure and the bignum code all run on it.
-  Dropbear carries its own crypto and never enters that path, so it cannot
-  speak for the case the size was chosen for. Measure curl the same way before
-  touching it. Found 2026-07-31.
-
 - **A ported client still loses 4,224 bytes a run.** With the 256 KB stack
   fixed (`clients/compat/amiga_argv.c`), `clients/dropbear/run-fsuae.sh -A`
   measures dbclient at exactly 4,224 bytes an invocation, five runs identical,

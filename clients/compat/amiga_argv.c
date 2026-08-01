@@ -6,9 +6,9 @@
  * is the whole raw argument string (and, before tools/fix-toolchain-crt0.py
  * repaired the indirection, the address of that pointer rather than the
  * pointer).  AmiNetXDuo's own commands never noticed -- they read their
- * arguments through ReadArgs() and only look at argc -- but curl and Dropbear
- * parse argv and nothing else, so every invocation comes back as "no URL" /
- * "no host", or dereferences the garbage and crashes.
+ * arguments through ReadArgs() and only look at argc -- but Dropbear parses
+ * argv and nothing else, so every invocation comes back as "no host", or
+ * dereferences the garbage and crashes.
  *
  * -Wl,--wrap=main (clients/amiga-client.sh) routes the crt0's call to main()
  * through here, leaving the client's real main() reachable as __real_main().
@@ -47,12 +47,24 @@ static char  argv_buf[AMIGA_ARGV_BUFSIZE];
 static char *argv_vec[AMIGA_ARGV_MAX + 1];
 
 /*
- * A ported client needs far more stack than the Shell's 4 KB default -- curl's
- * TLS work and Dropbear's bignum key exchange both run deep -- so the same
- * shim that fixes argv also brings the stack, and the user never has to type
- * `stack 200000` first.  256 KB covers both.
+ * A ported client needs more stack than the Shell's 4 KB default, so the same
+ * shim that fixes argv also brings the stack and the user never has to type
+ * `stack 200000` first.
+ *
+ * 8 KB, measured rather than guessed: AMIGA_ARGV_STACKCHECK below paints the
+ * block and reports the deepest word touched, and dbclient's high-water is
+ * 5,008 bytes -- a full key exchange no deeper than `dbclient -V`, because
+ * Dropbear targets routers and libtommath keeps bignum digits on the heap.
+ *
+ * It was 256 KB, sized by a comment that named curl first.  Nothing here has
+ * ever built curl; clients/ holds dropbear and this directory.  Our own fetch
+ * is a command in src/tools, allocates its own 64 KB and never comes through
+ * here.  So dbclient is the only client this number serves, and 256 KB was a
+ * quarter of the smallest supported machine held for the length of every ssh.
+ *
+ * Re-measure before adding a second client, and the check is one variable.
  */
-#define AMIGA_ARGV_STACK    (256UL * 1024UL)
+#define AMIGA_ARGV_STACK    (8UL * 1024UL)
 
 static struct StackSwapStruct argv_sss;
 static int                    argv_argc;
@@ -69,13 +81,13 @@ static int                    argv_exit_status;
 /*
  * How much of the stack the client actually used.
  *
- * 256 KB is a guess that has never been checked, and it is 25% of the smallest
- * machine this runs on.  Painting the block with a pattern and finding the
- * lowest word still holding it gives the high-water mark: the stack grows down
- * from stk_Upper, so everything below the deepest frame is untouched.
+ * What sized AMIGA_ARGV_STACK, and what has to re-size it for a new client.
+ * Painting the block and finding the lowest word still holding the pattern
+ * gives the high-water mark: the stack grows down from stk_Upper, so
+ * everything below the deepest frame is untouched.
  *
- * Off unless the environment variable is set, because it costs a pass over
- * 256 KB at startup and a line of output that a client's caller did not ask
+ * Off unless the environment variable is set, because it costs a pass over the
+ * block at startup and a line of output that a client's caller did not ask
  * for.  `setenv AMIGA_ARGV_STACKCHECK 1` turns it on for a Shell.
  */
 #define ARGV_PAINT          0xA5A5A5A5UL
@@ -142,7 +154,7 @@ static __attribute__((noinline)) VOID argv_run_on_stack(VOID)
  * exit() unwinds through the swapped stack.
  *
  * A client that ends by calling exit() rather than returning from main() --
- * Dropbear always, curl on some paths -- never comes back to
+ * Dropbear always -- never comes back to
  * argv_run_on_stack(), so its second StackSwap() does not run.  The crt0's exit
  * restores the stack pointer from its own saved copy, but not tc_SPLower/
  * tc_SPUpper: the task is left advertising the swapped, about-to-be-abandoned
@@ -160,8 +172,9 @@ static __attribute__((noinline)) VOID argv_run_on_stack(VOID)
  * The same path also loses the stack itself.  AmigaOS does not reclaim
  * AllocMem() memory when a process exits, and the FreeMem() in __wrap_main()
  * sits after argv_run_on_stack() returns -- which it never does on an exit().
- * That is 256 KB per invocation of every client that ends this way, gone until
- * reboot, on a machine whose supported floor is 1 MB.
+ * That is one stack per invocation of every client that ends this way, gone
+ * until reboot, on a machine whose supported floor is 1 MB.  It was 256 KB a
+ * run when this was found.
  *
  * So the exit wrappers longjmp() back into __wrap_main(), which is still on the
  * caller's stack, and the free happens there.
@@ -308,9 +321,9 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
     argv_argc      = argc;
 
     /*
-     * Run the client on a stack of our own.  On a machine too short of memory
-     * to spare 256 KB, fall back to the caller's stack rather than refuse: a
-     * small program may still fit.
+     * Run the client on a stack of our own.  On a machine that cannot spare
+     * even this, fall back to the caller's stack rather than refuse: a small
+     * program may still fit.
      */
     argv_stack = AllocMem(AMIGA_ARGV_STACK, MEMF_ANY);
     if (argv_stack != NULL)

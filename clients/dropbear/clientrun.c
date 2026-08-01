@@ -125,18 +125,16 @@ static const char version_tag[] __attribute__((used)) =
 #define OUT_ONLY    " >>DH0:client.txt"
 
 /*
- * 512 KB.  curl's own stack use is not published and is not small: the URL
- * parser, the multi state machine and the printf family all recurse a little.
- * It is a Fast RAM allocation on a machine assumed to have four megabytes, and
- * it lasts only as long as the command.
+ * 512 KB, and deliberately far more than any client needs.
  *
- * It was 256 KB before the TLS backend.  A program that opens tls.library is
- * adopted into ThreadX on its own stack (port/threadx-amiga/src/
- * tx_amiga_adopt.c hands _tx_thread_create() the caller's stack region), so
- * NetX Duo, nx_secure and the bignum code all run on whatever this process has
- * left, which is why src/tools/fetch.c allocates 64 KB and StackSwap()s onto
- * it before its own TLSOpen().  curl cannot do that; it has no idea it is on
- * AmigaOS.  So the budget has to be here.
+ * This is the harness, not the product: a client that runs out of stack here
+ * fails in a way that looks like the thing under test, so the number is set to
+ * make that impossible rather than to be right.  DOS frees it with the process,
+ * so it costs nothing between commands.
+ *
+ * The real budget is AMIGA_ARGV_STACK in clients/compat/amiga_argv.c, which
+ * every client swaps onto and which a user gets on a bare Shell.  That one is
+ * measured; see AMIGA_ARGV_STACKCHECK, which main() below turns on.
  */
 #define CLIENT_STACK    (512UL * 1024UL)
 
