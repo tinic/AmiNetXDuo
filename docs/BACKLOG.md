@@ -30,20 +30,16 @@ was wrong for a day.
   off), nor `tls_store.c`'s issuer-name walk; both live in files that include
   `proto/dos.h` and do not build on a host. The header comment in
   `tests/fuzz/CMakeLists.txt` is the current list.
-- **An expunge/reopen cycle loses about 12.6 KB.** Found by the drill below:
-  eight `OpenLibrary` / last-`CloseLibrary` / `ACTION_DIE` to `TCP:` /
-  `RemLibrary` / reopen cycles lose 12,612 bytes each, dead linear, measured
-  at the same fully-settled instant of each cycle. Plain open and close leaks
-  nothing at all -- twenty-four nested pairs per cycle move `AvailMem()` by
-  zero -- so it is the expunge-and-reload path specifically and not the
-  library's ordinary lifetime. `nsl_AllocLive` reads 21 at every reopen and
-  `NETSTATUS_HEALTH` shows no growth anywhere, so it is *not* going through
-  `ami_alloc()`: it is raw `AllocMem`, a `CreateNewProc` stack, or something
-  DOS holds. No Task or Process is left behind (the drill counts them), which
-  rules out the most alarming explanation. Not yet attributed.
-  `tests/tools/run-cycledrill.sh` gates it as a regression budget against the
-  recorded figure, so it catches the leak getting worse and not the leak.
-  Found 2026-07-31 on Amiberry/A1200/a2065-on-SLIRP.
+- **A command that reads the netdb leaks it on the way out.** `ping`,
+  `ShowNetStatus` and `AddNetRoute` call `ami_netdb_load()` and never call
+  `ami_netdb_free()`. Each links its own copy of `src/config/netdb.c`, and
+  `ami_alloc()` is `AllocVec()`, which a Shell command's exit does not reclaim
+  -- so every invocation costs the same 12,616 bytes the library's expunge
+  used to (fixed there by freeing the tables in `bsd_lib_expunge()`). What
+  makes it more than a one-line change is where to put the call: `AddNetRoute`
+  alone returns from `main()` in twenty-eight places and none of the three has
+  a single exit to hang cleanup on. By inspection, not measured: the drill
+  cycles the library, not the commands.
 - **The `sana2_rx.c` reader orphan does not reproduce under emulation.**
   `ami_sana2_rx_stop()`'s last-resort path logs `reader N did not stop;
   leaking its stack` and leaks 32 KB when a SANA-II driver ignores `AbortIO`,

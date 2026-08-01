@@ -4,6 +4,7 @@ User-visible changes, newest first. Internal work is in the git log.
 
 ## Unreleased
 
+- Expunging the library gives all its memory back. An open, close, expunge and reopen cycle used to lose 12,612 bytes of the machine's free memory every time, so repeatedly starting and stopping the network eventually ran it out
 - A browsed service whose address did not arrive with it is now asked for, so a row that said "no address" gives one. Only the rows that need it wait, and the whole listing spends at most two seconds on it
 - `ShowNetServices ALL` lists every instance of every type answering, rather than only the types. It costs one more listening window, not one per type
 - A socket bound to one of the machine's addresses now sends from it. UDP and raw datagrams leave with the bound address as their source; a `connect()` that would have had to leave from another one is refused with `EADDRNOTAVAIL` instead of connecting from it and reporting the bound address back

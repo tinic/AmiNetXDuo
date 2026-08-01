@@ -48,20 +48,14 @@
 #   reports PASSED, the gates have stopped gating and the normal run proves
 #   nothing.
 #
-# WHAT IT FOUND, AND WHY THAT IS A BUDGET AND NOT A PASS
+# WHAT IT FOUND
 #
-#   An open/expunge/reopen cycle does not give all its memory back: 12,612
-#   bytes go missing per cycle, dead linear over eight cycles, measured on
-#   Amiberry/A1200/a2065-on-SLIRP.  Plain open and close leaks nothing --
-#   twenty-four nested pairs move AvailMem() by zero -- so it is the expunge
-#   and reload path specifically.  That is an open defect, recorded in
-#   docs/BACKLOG.md, not something this file may declare acceptable.
-#
-#   The gate below is therefore a regression budget against the recorded
-#   figure: it catches the leak GETTING WORSE, and it does not catch the leak
-#   itself.  Say so out loud rather than letting a green run imply otherwise.
-#   AMINETXDUO_CYCLE_LEAK_BUDGET moves it; the day it is fixed, drop it to
-#   something near zero and delete this paragraph.
+#   An open/expunge/reopen cycle used to lose 12,612 bytes, dead linear over
+#   eight cycles.  It was the DEVS:Internet netdb: ami_netdb_load() fills four
+#   ami_alloc()ed tables held in file-scope statics, the statics went away with
+#   the segment, and bsd_lib_expunge() never freed them.  The phase L control
+#   is what named it -- a close/reopen cycle, same teardown, segment left
+#   loaded, lost nothing -- and the gate below now reads zero on both phases.
 #
 # THE KNOWN DEFECT THIS CAN SEE
 #
@@ -81,7 +75,7 @@
 #   AMINETXDUO_CYCLE_EXPUNGES   expunges     (default 2)
 #   AMINETXDUO_CYCLE_SOCKETS    sockets held across each bounce (default 2)
 #   AMINETXDUO_CYCLE_ORPHAN_FATAL=1  a leaked reader stack fails the run
-#   AMINETXDUO_CYCLE_LEAK_BUDGET     bytes an expunge cycle may lose (14336)
+#   AMINETXDUO_CYCLE_LEAK_BUDGET     bytes a cycle may lose (1024)
 #
 #   The defaults keep this inside the normal suite.  A soak is
 #   AMINETXDUO_CYCLE_CYCLES=50 AMINETXDUO_CYCLE_EXPUNGES=10, the way
@@ -298,7 +292,8 @@ else
 
     # Two bounces per cycle: the standalone one and the one the sockets are
     # held across.
-    WANT_OPENS=$(( CYCLES * 8 + EXPUNGES + 1 ))
+    # Phase E and phase L each open EXPUNGES times.
+    WANT_OPENS=$(( CYCLES * 8 + EXPUNGES * 2 + 1 ))
     WANT_BOUNCE=$(( CYCLES * 2 ))
 
     [ "$D_OPENS" -ge "$WANT_OPENS" ] \
@@ -335,29 +330,30 @@ else
     pass "netstat -h and ShowNetStatus read the stack the drill left running"
 fi
 
-# ---- memory not given back by an expunge ----------------------------------
+# ---- memory not given back by a cycle -------------------------------------
 #
 # The drill reports AvailMem() at the same instant of the first and the last
-# expunge cycle, divided by the cycles between them, so anything paid once
-# cancels and what is left is per-cycle.  The budget is here rather than
-# compiled into the guest because it is a recorded measurement, not a
-# property: see the note in docs/BACKLOG.md.  Measured 2026-07-31 on
-# Amiberry/A1200/a2065-on-SLIRP as 12,612 bytes per cycle over eight cycles,
-# dead linear.  Ten runs spread 12,568 to 12,696, so the budget is 14 KB: a
-# regression gate that flaps on its own spread is a gate nobody keeps.
-LEAKLINE=$(grep -E "^expunge leak: -?[0-9]+ bytes per cycle" "$REPORT" | tail -1 || true)
-LEAK_BUDGET="${AMINETXDUO_CYCLE_LEAK_BUDGET:-14336}"
-if [ -n "$LEAKLINE" ]; then
-    LEAK=$(printf '%s' "$LEAKLINE" | sed -E 's/^expunge leak: (-?[0-9]+) .*/\1/')
-    echo "  -- $LEAKLINE (budget $LEAK_BUDGET)"
-    if [ "$LEAK" -le "$LEAK_BUDGET" ]; then
-        pass "the expunge cycle stayed inside its recorded memory budget"
-    else
-        fail "an expunge cycle lost $LEAK bytes, over the $LEAK_BUDGET budget"
+# cycle of phase E and of phase L, divided by the cycles between them, so
+# anything paid once cancels and what is left is per-cycle.  Both read zero:
+# an expunge/reopen cycle and a close/reopen cycle each give back everything
+# they took.  Three runs of eight cycles spread -6 to +3 bytes, which is
+# allocator fragmentation and not a trend, so the budget is 1 KB.
+LEAK_BUDGET="${AMINETXDUO_CYCLE_LEAK_BUDGET:-1024}"
+for phase in expunge cold; do
+    LEAKLINE=$(grep -E "^$phase leak: -?[0-9]+ bytes per cycle" "$REPORT" \
+               | tail -1 || true)
+    if [ -n "$LEAKLINE" ]; then
+        LEAK=$(printf '%s' "$LEAKLINE" | sed -E 's/^[a-z]+ leak: (-?[0-9]+) .*/\1/')
+        echo "  -- $LEAKLINE (budget $LEAK_BUDGET)"
+        if [ "$LEAK" -le "$LEAK_BUDGET" ]; then
+            pass "a $phase cycle gave its memory back"
+        else
+            fail "a $phase cycle lost $LEAK bytes, over the $LEAK_BUDGET budget"
+        fi
+    elif [ "$GUEST_EXPUNGES" -ge 2 ]; then
+        fail "the drill did not report a per-cycle $phase leak figure"
     fi
-elif [ "$GUEST_EXPUNGES" -ge 2 ]; then
-    fail "the drill did not report a per-cycle expunge leak figure"
-fi
+done
 
 # ---- the known SANA-II reader leak ----------------------------------------
 #
