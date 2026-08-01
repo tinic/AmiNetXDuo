@@ -568,7 +568,7 @@ BSD ABI's fault, not this code's, and copying on return is a different change.
 
 ## The constants
 
-Forty-one file-scope `static const` objects across the nine directories: the
+Thirty-eight file-scope `static const` objects across the nine directories: the
 errno and status maps (`errno.c`), the TCP state names (`netstats.c`), the
 built-in netdb text (`config/netdb.c`), the interface and address-type keyword
 tables (`config_parse.c`), the ARexx variable definitions
@@ -582,8 +582,8 @@ Eleven more are function-local `static const` -- log prefixes, hex digit strings
 boolean word lists, the mDNS `.local` suffix. Same verdict.
 
 The writable objects that are constants in practice are named in the tables
-above. Eight of them cannot be `const` because an Exec or NetX Duo struct field
-is typed `char *`: the three library names and three ID strings, the two socket
+above. Ten of them cannot be `const` because an Exec or NetX Duo struct field is
+typed `char *`: the three library names, the three ID strings, the two socket
 names, `ami_health_name` and `ami_rx_port_name`. `bsd_no_aliases`,
 `ug_def_members` and the five `ug_def_*` strings are the same story with the BSD
 ABI. `ami_cfg_empty` is the one that could genuinely be `const` if
