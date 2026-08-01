@@ -219,6 +219,32 @@ VOID tool_explain_device(const char *device, ULONG unit)
 
     tool_advise_blank();
 
+    /*
+     * Ask the machine before saying the driver is not on it.
+     *
+     * tool_device_where() is a file scan over four directories plus a check of
+     * the device list, and a driver can be openable without being in any of
+     * them: loaded from a card's own ROM, reached through an assign, or sitting
+     * somewhere this list does not know. Deciding on the scan alone printed
+     * "There is no cnet.device on this machine" at someone whose cnet.device
+     * had just opened and then failed to initialise, which sent them looking
+     * for a driver they already had.
+     */
+    probe = tool_device_probe(device, unit);
+
+    if (where == NULL && probe == 0)
+    {
+        tool_printf("  %s unit %lu opens, and no driver file was found in the\n",
+                    (LONG)device, unit);
+        tool_advise("usual places -- so it is loaded from somewhere else: a card");
+        tool_advise("ROM, an assign, or a directory this command does not scan.");
+        tool_advise_blank();
+        tool_advise("The driver is not what to look at. Something else has the");
+        tool_advise("card open, or it opened and then would not answer; the");
+        tool_advise("serial debug log records which.");
+        return;
+    }
+
     if (where == NULL)
     {
         tool_printf("  There is no %s on this machine.\n", (LONG)device);
@@ -247,13 +273,9 @@ VOID tool_explain_device(const char *device, ULONG unit)
         return;
     }
 
-    /*
-     * The driver is there, so ask it directly rather than guessing: that
-     * distinguishes "would not open" from "the card is on unit 0, not unit 1",
-     * which is the usual mistake.
-     */
-    probe = tool_device_probe(device, unit);
-
+    /* Probed above, before the absence branch: what it answered distinguishes
+       "would not open" from "the card is on unit 0, not unit 1", which is the
+       usual mistake. */
     if (probe == 0)
     {
         tool_printf("  %s unit %lu opens perfectly well on its own, so the\n",

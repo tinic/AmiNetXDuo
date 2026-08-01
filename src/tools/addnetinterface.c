@@ -480,6 +480,17 @@ int main(int argc, char **argv)
                 tool_error("another TCP/IP stack is installed on this machine");
                 tool_explain_foreign_stack(base);
             }
+
+            /*
+             * Closed, unlike the success path below.
+             *
+             * tool_stack_start() leaks its reference on purpose, because that
+             * is what keeps OUR network up after this command exits. None of
+             * that applies to somebody else's stack: nothing here is going to
+             * use it, and holding a reference to a library we are about to
+             * complain about only stops its owner unloading it.
+             */
+            CloseLibrary(base);
             FreeArgs(rda);
             return RETURN_WARN;
         }

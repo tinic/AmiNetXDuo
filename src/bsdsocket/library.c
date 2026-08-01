@@ -345,6 +345,35 @@ static VOID bsd_netstack_boot_main(VOID)
        after it returns -- the parent Wait()s the whole time and `boot` lives
        on its stack until then. */
     b->nb_Result = netstack_startup();
+
+    /*
+     * A failed startup can still leave a stack standing: netstack_startup()
+     * sets ns_Refs to 1 when ami_ns_bring_up() fails with the NX_IP already
+     * made, on the grounds that a live stack has an owner. Here it has none --
+     * bsd_lib_open() is about to return NULL, so no base will ever be closed
+     * to give that reference back.
+     *
+     * Left alone it is permanent. sb_StackRefs was never incremented, so the
+     * next successful open takes ns_Refs to 2 and the last close only ever
+     * returns it to 1: the stack can never be freed and never be shut down
+     * again.
+     *
+     * The cost is not only the packet pool. A live stack has ThreadX threads
+     * running out of this segment, so the library can never be expunged
+     * either -- measured at about 400 KB kept on a 1 MB machine, which is the
+     * segment plus the pool at its AMI_POOL_MIN_PACKETS floor plus the NX_IP
+     * and the thread stacks. On the supported 1 MB floor that is most of the
+     * machine, held by a command that printed an error and exited.
+     *
+     * Given back here rather than in bsd_lib_open() because nx_ip_delete()
+     * waits for the IP thread, and this Process has 64 KB where the opener may
+     * be a Shell command with 4 KB. netstack_shutdown() returns at once when
+     * there is no stack, so the case where bring-up failed before allocating
+     * anything costs nothing.
+     */
+    if (b->nb_Result != AMI_NET_OK)
+        netstack_shutdown();
+
     Signal(b->nb_Parent, b->nb_SigMask);
 }
 

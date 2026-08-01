@@ -255,8 +255,25 @@ case "$MODEL" in
         ROM_NAMES=("Kickstart v3.1 r40.68 (1993)(Commodore)(A1200)[!].rom"
                    "Kickstart v3.1 rev 40.68 (1993)(Commodore)(A1200)[!].rom")
         ;;
+    A600)
+        # The supported floor, and the machine a PCMCIA card actually lives in.
+        # 1 MB of chip and nothing else: chipmem_size counts 512 KB units, so 2
+        # is the megabyte, and no Fast RAM at all is what keeps the credit-card
+        # window at $600000 clear (see the note below -- an A1200 with 8 MB of
+        # Z2 Fast cannot see its own PCMCIA slot, and neither can a real one).
+        #
+        # Kickstart 2.05 rather than 3.1: 37.350 is the A600HD ROM and carries
+        # card.device, which is what a PCMCIA driver opens before it can find
+        # anything. Without card services cnet.device fails at OpenDevice() and
+        # every failure path downstream of that goes untested.
+        CPU_MODEL=68000; FPU_MODEL=0; CHIPSET=ecs; COMPAT=A600
+        CHIPMEM=2; MBMEM=0; FASTMEM=0
+        ROM_NAMES=("Kickstart v2.05 r37.350 (1992)(Commodore)(A600HD)[!].rom"
+                   "Kickstart v2.05 rev 37.350 (1992)(Commodore)(A600HD)[!].rom"
+                   "Kickstart v3.1 r40.63 (1993)(Commodore)(A500-A600-A2000)[!].rom")
+        ;;
     *)
-        echo "unknown model $MODEL (want A3000, A4000 or A1200)" >&2; exit 2 ;;
+        echo "unknown model $MODEL (want A3000, A4000, A1200 or A600)" >&2; exit 2 ;;
 esac
 [ -z "$CPU" ] || CPU_MODEL="$CPU"
 
