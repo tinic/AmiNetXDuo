@@ -227,11 +227,21 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
     }
 }
 
-/* Abort anything still in flight and reap it. Used on shutdown. */
+/*
+ * Abort anything still in flight and reap it. Used on shutdown.
+ *
+ * The deadline is the same admission ami_sana2_rx_teardown() makes: AbortIO()
+ * is a request and a driver may decline it. What the reader path already
+ * understood and this one did not is what a refusal costs -- slot->req and its
+ * mn_ReplyPort both live inside AmiSana2If, so a device still holding a
+ * CMD_WRITE writes into this allocation whenever it finishes. tx_orphaned is
+ * what stops ami_sana2_close() from freeing it, exactly as rx_orphaned does.
+ */
 VOID ami_sana2_tx_drain(AmiSana2If *iface)
 {
     UWORD i;
     UWORD spins;
+    UWORD busy = 0;
 
     for (i = 0; i < AMI_SANA2_TX_SLOTS; i++)
     {
@@ -241,23 +251,31 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
 
     for (spins = 0; spins < 64; spins++)
     {
-        BOOL any = FALSE;
-
         ami_sana2_tx_reap(iface);
 
+        busy = 0;
         for (i = 0; i < AMI_SANA2_TX_SLOTS; i++)
         {
             if (iface->tx[i].busy)
-                any = TRUE;
+                busy++;
         }
 
-        if (!any)
-            return;
+        if (busy == 0)
+            break;
 
         tx_thread_sleep(1);
     }
 
-    AMI_WARN("sana2: TX ring did not drain");
+    /* Assigned, not or'ed: a later drain that gets everything back clears it,
+       which is what lets an interface bounce recover. */
+    iface->tx_orphaned = (busy != 0) ? TRUE : FALSE;
+
+    if (busy != 0)
+    {
+        AMI_ERROR("sana2: %ld write(s) still owned by the device; leaking the "
+                  "interface rather than freeing memory it writes into",
+                  (long)busy);
+    }
 }
 
 static AmiTxSlot *ami_sana2_tx_claim(AmiSana2If *iface)

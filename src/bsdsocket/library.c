@@ -226,7 +226,9 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     child->sb_FDCallback  = NULL;
     child->sb_ErrorHook   = NULL;
 
-    child->sb_TimerOpen = FALSE;
+    child->sb_TimerOpen    = FALSE;
+    child->sb_TimerSignal  = -1;
+    child->sb_TimerSigMask = 0;
 
     /* The netdb iterators (netdb.c) start at the top of each table. */
     child->sb_ServCursor  = 0;
@@ -273,10 +275,16 @@ static VOID bsd_child_destroy(struct AmiSocketBase *child)
        wait, which is what the close path cannot afford (544398f). */
     bsd_bpf_close_all(child);
 
+    /* The timer signal is the opener's, not the library's: WaitSelect() takes
+       it out of the caller's 32 bits and there is no way to recover one, so an
+       open/close cycle that forgot it cost the caller a bit for good. */
     if (child->sb_TimerOpen)
     {
         CloseDevice((struct IORequest *)&child->sb_TimerReq);
         child->sb_TimerOpen = FALSE;
+        ami_signal_free(child->sb_TimerSignal);
+        child->sb_TimerSignal  = -1;
+        child->sb_TimerSigMask = 0;
     }
 
     if (child->sb_Table != NULL)

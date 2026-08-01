@@ -133,7 +133,9 @@ option(AMINETXDUO_TESTS "Build the on-Amiga test harnesses"           ON)
 # framing is off by default anyway (AMI_SANA2_RAW_DEFAULT), so the probe buys
 # nothing but a hang; leave it off unless you are working on the raw path.
 option(AMINETXDUO_SANA2_PROBE_RAW "Probe SANA-II devices for raw framing" OFF)
-if(NOT AMINETXDUO_SANA2_PROBE_RAW)
+if(AMINETXDUO_SANA2_PROBE_RAW)
+    add_compile_definitions(AMI_SANA2_PROBE_RAW=1)
+else()
     add_compile_definitions(AMI_SANA2_PROBE_RAW=0)
 endif()
 

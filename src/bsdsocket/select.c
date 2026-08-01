@@ -497,7 +497,11 @@ static BOOL bsd_timer_open(struct AmiSocketBase *base)
     if (OpenDevice((STRPTR)TIMERNAME, UNIT_MICROHZ,
                    (struct IORequest *)&base->sb_TimerReq, 0) != 0)
     {
+        /* Half-built: give the bit back and unpublish it, or the next open
+           finds a mask naming a signal this task no longer holds. */
         ami_signal_free(sig);
+        base->sb_TimerSignal  = -1;
+        base->sb_TimerSigMask = 0;
         return FALSE;
     }
 

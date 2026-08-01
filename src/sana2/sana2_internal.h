@@ -88,9 +88,17 @@
 #define AMI_SANA2_TX_WAIT_TICKS     4
 #endif
 
-/* Probe for raw-frame support at open time (see ami_sana2_probe_raw). */
+/*
+ * Probe for raw-frame support at open time (see ami_sana2_probe_raw).
+ *
+ * Off, and the default has to be off rather than the build's job: the probe's
+ * WaitIO() has no deadline and a2065.device 2.16 does not answer the AbortIO()
+ * before it, so ami_sana2_open() never returns. CMakeLists.txt names the same
+ * answer in both directions; this is what a build that does not go through it
+ * gets.
+ */
 #ifndef AMI_SANA2_PROBE_RAW
-#define AMI_SANA2_PROBE_RAW         1
+#define AMI_SANA2_PROBE_RAW         0
 #endif
 
 /* Use raw framing when the probe says it is available. Off: see sana2_device.c. */
@@ -241,6 +249,11 @@ struct AmiSana2If
        the device kept its CMD_READs. The whole interface is then unfreeable
        and unrestartable, because the device holds pointers into it. */
     BOOL                rx_orphaned;
+
+    /* Same on the transmit side: set while ami_sana2_tx_drain() has left the
+       device holding a CMD_WRITE. Those requests and their reply port are
+       inside this allocation too. Cleared by a later drain that succeeds. */
+    BOOL                tx_orphaned;
 
     AmiSana2Stats       stats;
 };
