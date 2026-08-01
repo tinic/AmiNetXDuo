@@ -231,6 +231,32 @@ was wrong for a day.
   is unconditional in `NX_IP` and `nx_igmp_enable()` only fills in three function
   pointers. On by default; `-DAMINETXDUO_MULTICAST=OFF` in the `68000-minimal`
   drawer, with the other four optional features.
+- **IPv6 multicast**, done 2026-07-31, entry kept for the cost. `IPV6_JOIN_GROUP`,
+  `IPV6_LEAVE_GROUP`, `IPV6_MULTICAST_IF`, `IPV6_MULTICAST_HOPS` and
+  `IPV6_MULTICAST_LOOP` over `nxd_ipv6_multicast_interface_join()`/`_leave()`,
+  in the same `src/bsdsocket/mcast.c`, under the same `AMINETXDUO_MULTICAST`
+  switch. `struct ipv6_mreq` and the five numbers are in
+  `include/aminetxduo/in6.h`, which stopped being header-only to carry the
+  struct. No MLD -- see the entry above under "MLD does not exist in this
+  stack" for what that does and does not cost.
+
+  Measured, stripped `bsdsocket.library`, against the parent commit:
+
+  | | code | RAM |
+  |---|---|---|
+  | default drawer (68020, IPv6 on) | 302,108 -> 305,396, **+3,288** | **+556** fixed, +8 per open socket |
+  | `68000-minimal` drawer | unchanged, **0** | **0** |
+
+  The RAM is 172 bytes of `NX_IP` (`nx_ipv6_multicast_entry[7]` at 24 each plus
+  a `ULONG` count, which `NX_ENABLE_IPV6_MULTICAST` adds whether or not
+  anything joins) and 384 bytes of membership table (16 rows of socket, group
+  and interface). The floor drawer pays neither: it builds with
+  `-DAMINETXDUO_IPV6=OFF` *and* `-DAMINETXDUO_MULTICAST=OFF`, and either one
+  alone compiles all of it out -- verified by preprocessing `nx_api.h`, which
+  has `nx_ipv6_multicast_entry` in `NX_IP` only when both are defined.
+
+  Both families together now cost 6,948 bytes on the default drawer and 4,076
+  on a floor-tier build with multicast switched back on.
 - **RFC 6724 default address selection**, 2026-07-31: does not apply here. It
   sorts a list of candidate destinations, and `getaddrinfo()` returns at most
   one address per family (the resolver under it answers with a single address,

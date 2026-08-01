@@ -566,11 +566,15 @@
  * _nx_ipv6_multicast_join() from nxd_ipv6_address_set(), which reaches the
  * driver as NX_LINK_MULTICAST_JOIN and never touches the table below.
  *
- * TWO NUMBERS AND WHAT THEY BUY.
+ * WHAT IT COSTS.
  *
  * It grows NX_IP by nx_ipv6_multicast_entry[7] plus a count -- 172 bytes,
  * spent whether or not anything joins -- where nx_igmp_enable() grows it by
- * nothing, the IPv4 table being unconditional already.
+ * nothing, the IPv4 table being unconditional already.  With the 384-byte
+ * membership table in mcast.c that is 556 bytes, and the whole feature is
+ * 3,288 bytes of code on the default drawer, measured stripped.  The floor
+ * drawer pays nothing: it has this switch off and AMINETXDUO_IPV6 off, and
+ * either alone compiles all of it out.
  *
  * And there is still no MLD in this tree.  nx_mld.h exists and is a stub that
  * declares nothing; no nx_mld_*.c exists; no Multicast Listener Report is ever
