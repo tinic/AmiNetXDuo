@@ -1410,6 +1410,15 @@ int main(int argc, char **argv)
         (VOID)ami_config_load(from_disk);
         tool_config_unwatch();
 
+        /*
+         * ami_config_load() loads the netdb too (src/config/config_file.c), and
+         * this branch is taken on every run -- netstack_config() above is the
+         * weak stub in netstack_weak.c and is always NULL in a command. So the
+         * twelve blocks leak without NAMES as well as with it; names_prepare()
+         * covers only its own load.
+         */
+        atexit(ami_netdb_free);
+
         cfg = from_disk;
     }
 

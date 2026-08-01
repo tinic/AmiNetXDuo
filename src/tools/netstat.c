@@ -28,6 +28,8 @@
 
 #include "tools_nx.h"
 
+#include <stdlib.h>   /* atexit */
+
 const char *const tool_name = "netstat";
 
 static const char version_tag[] __attribute__((used)) =
@@ -505,6 +507,15 @@ int main(int argc, char **argv)
     cfg = (ami_config_load(&netstat_config) == AMI_CFG_OK) ? &netstat_config
                                                            : NULL;
     tool_config_unwatch();
+
+    /*
+     * ami_config_load() loads the netdb (src/config/config_file.c) and
+     * ami_alloc() is AllocVec(), which AmigaOS does not reclaim when a process
+     * exits -- 12,616 bytes per run on a stock DEVS:Internet, gone until
+     * reboot. atexit() rather than a free before each return: this command
+     * leaves main() from several places.
+     */
+    atexit(ami_netdb_free);
 
     if (want_if)
         show_interfaces(cfg, &snap);
