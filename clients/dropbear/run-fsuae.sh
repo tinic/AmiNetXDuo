@@ -158,6 +158,7 @@ MATH="${AMINETXDUO_MATHIEEEDOUBBAS:-}"
 if [ -z "$MATH" ]; then
     for candidate in \
         "$ROOT/build/mathieeedoubbas.library" \
+        "$HOME/amiga-assets/libs/mathieeedoubbas.library" \
         "$HOME/amigaos/libs/mathieeedoubbas.library"
     do
         [ -f "$candidate" ] && { MATH="$candidate"; break; }
@@ -214,9 +215,13 @@ if [ -n "$MATH" ] && [ -f "$MATH" ]; then
     cp "$MATH" "$STAGE/libs/mathieeedoubbas.library"
     echo "==> mathieeedoubbas.library staged ($(wc -c < "$MATH" | tr -d ' ') bytes)"
 else
+    # Fatal, not a warning.  Without it every dbclient in the list exits 20 on
+    # "mathieeedoubbas.library failed to load" before it opens a socket, and
+    # the run took eighteen seconds and reported success having tested nothing.
     echo "!! NO mathieeedoubbas.library staged." >&2
     echo "   dbclient references it and it is not in Kickstart 3.1 ROM." >&2
     echo "   Set AMINETXDUO_MATHIEEEDOUBBAS=<path> or drop one in build/." >&2
+    exit 2
 fi
 
 # ------------------------------------------------------------- the server --
@@ -339,10 +344,46 @@ STAGED+=("$STAGE/AddNetInterface" "$STAGE/id_amiga")
 [ -z "$DB_SERVER" ] || STAGED+=("$STAGE/dropbear" "$STAGE/hostkey" "$STAGE/.ssh")
 STAGED+=("$STAGE/commands.txt")
 
+TRANSCRIPT="$ROOT/build/dropbear-run.log"
+
 if [ "$RUNNER_KIND" = "amiberry" ]; then
-    exec "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$BACKEND" -m "$MODEL" \
-         -t "$TIMEOUT" ${CPU:+-c "$CPU"} "$RUNNER" "${STAGED[@]}"
+    "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$BACKEND" -m "$MODEL" \
+        -t "$TIMEOUT" ${CPU:+-c "$CPU"} "$RUNNER" "${STAGED[@]}" \
+        2>&1 | tee "$TRANSCRIPT" || true
+else
+    "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+        "$RUNNER" "${STAGED[@]}" 2>&1 | tee "$TRANSCRIPT" || true
 fi
 
-exec "$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
-     "$RUNNER" "${STAGED[@]}"
+# ------------------------------------------------------------- verdict ----
+#
+# The emulator exits 0 whatever the guest did, and ClientRun exits 0 having
+# printed six "failed returncode 20" lines.  A run where every connection was
+# refused therefore looked exactly like a passing one, which is how a missing
+# disk library went unnoticed for a whole run.  So score the markers, out of
+# the transcript rather than DH0:stdout.txt: the guest's own console goes to
+# the serial port, and the runner prints both.
+#
+# Only the four commands that pass -i are pass cases.  The no-key one is in
+# the list to prove the ReadMe's "use -i" is not folklore and is expected to
+# fail; the version banner is not a connection at all.
+
+[ -z "$COMMANDS" ] || { echo "==> custom command list: no verdict"; exit 0; }
+
+echo
+echo "==> verdict"
+fails=0
+for marker in AMIGA-SSH-OK "second connection" aes128-ctr chacha20; do
+    if grep -q "^$marker" "$TRANSCRIPT"; then
+        echo "  ok   $marker"
+    else
+        echo "  FAIL $marker"
+        fails=$((fails + 1))
+    fi
+done
+
+if [ "$fails" != 0 ]; then
+    echo "dropbear: FAILED ($fails of 4) -- $TRANSCRIPT"
+    exit 1
+fi
+echo "dropbear: PASSED"
