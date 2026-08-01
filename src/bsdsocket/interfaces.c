@@ -201,6 +201,31 @@ static const AmiIfConfig *bsd_if_config(UINT index)
  * characters, where the API caps a name at fifteen, so
  * QueryInterfaceTagList() would reject the name it was just handed.
  */
+/*
+ * Loopback, in RFC 3493 terms.
+ *
+ * NetX Duo parks it at nx_ip_interface[NX_LOOPBACK_INTERFACE], one past the
+ * physical slots, and this library numbers an interface by its slot plus one --
+ * the convention if_nametoindex() and GetRouteInfo()'s rtm_index already use.
+ * So loopback is NX_LOOPBACK_INTERFACE + 1 and nothing else has to move.
+ *
+ * The name is ours, not NetX Duo's: its own is "Internal IP Loopback", twenty
+ * characters where IF_NAMESIZE allows fifteen.  "lo0" is what BSD calls it and
+ * what a program that hardcodes a loopback name will try.
+ *
+ * This is the RFC 3493 trio only.  ObtainInterfaceList(),
+ * QueryInterfaceTagList() and SIOCGIFCONF are about SANA-II interfaces a
+ * caller can configure, loopback is not one, and bsd_if_name_of() and
+ * bsd_if_index_of() below stay physical-only for them.
+ */
+#if (NX_MAX_IP_INTERFACES > NX_MAX_PHYSICAL_INTERFACES)
+#define BSD_HAVE_LOOPBACK_IF    1
+#define BSD_LOOPBACK_IFINDEX    (NX_LOOPBACK_INTERFACE + 1)
+#define BSD_LOOPBACK_IFNAME     "lo0"
+#else
+#define BSD_HAVE_LOOPBACK_IF    0
+#endif
+
 static BOOL bsd_if_name_of(NX_IP *ip, UINT index, char *out, ULONG outlen)
 {
     const NX_INTERFACE *nxif = &ip->nx_ip_interface[index];
@@ -271,8 +296,21 @@ BOOL bsd_if_name_by_index(NX_IP *ip, ULONG index, char *out, ULONG outlen)
     if (outlen > 0)
         out[0] = '\0';
 
-    if (ip == NULL || index == 0UL ||
-        index > (ULONG)NX_MAX_PHYSICAL_INTERFACES)
+    if (ip == NULL || index == 0UL)
+        return FALSE;
+
+#if BSD_HAVE_LOOPBACK_IF
+    if (index == (ULONG)BSD_LOOPBACK_IFINDEX)
+    {
+        if (ip->nx_ip_interface[NX_LOOPBACK_INTERFACE].nx_interface_valid == 0)
+            return FALSE;
+
+        bsd_strncpy(out, BSD_LOOPBACK_IFNAME, outlen);
+        return (out[0] != '\0') ? TRUE : FALSE;
+    }
+#endif
+
+    if (index > (ULONG)NX_MAX_PHYSICAL_INTERFACES)
         return FALSE;
 
     return bsd_if_name_of(ip, (UINT)(index - 1UL), out, outlen);
@@ -1662,6 +1700,9 @@ LONG bsd_if_ioctl(ULONG req, APTR argp,
  * rtm_index now is. bsd_if_index_of() answers in NetX's 0-based array terms,
  * so every crossing between the two is a +1 or a -1 and there are only the
  * four below. include/aminetxduo/ifindex.h is the published half.
+ *
+ * Loopback is in this trio and in nothing else -- see BSD_LOOPBACK_IFINDEX at
+ * the top of the file for why, and for why its name is "lo0".
  */
 
 ULONG bsd_if_nametoindex(register const char *ifname __asm("a0"),
@@ -1676,6 +1717,12 @@ ULONG bsd_if_nametoindex(register const char *ifname __asm("a0"),
        bsd_fail() anywhere in here, not even for a NULL name. */
     if (ifname == NULL || ip == NULL)
         return 0UL;
+
+#if BSD_HAVE_LOOPBACK_IF
+    if (bsd_name_equal(BSD_LOOPBACK_IFNAME, ifname) &&
+        ip->nx_ip_interface[NX_LOOPBACK_INTERFACE].nx_interface_valid != 0)
+        return (ULONG)BSD_LOOPBACK_IFINDEX;
+#endif
 
     index = bsd_if_index_of(ip, ifname);
 
@@ -1717,8 +1764,8 @@ char *bsd_if_indextoname(register ULONG ifindex __asm("d0"),
  */
 typedef struct BsdIfNameIndex
 {
-    struct if_nameindex bin_Entry[NX_MAX_PHYSICAL_INTERFACES + 1];
-    char                bin_Name[NX_MAX_PHYSICAL_INTERFACES][IF_NAMESIZE];
+    struct if_nameindex bin_Entry[NX_MAX_IP_INTERFACES + 1];
+    char                bin_Name[NX_MAX_IP_INTERFACES][IF_NAMESIZE];
 } BsdIfNameIndex;
 
 struct if_nameindex *bsd_if_nameindex(register struct AmiSocketBase *SocketBase
@@ -1751,6 +1798,17 @@ struct if_nameindex *bsd_if_nameindex(register struct AmiSocketBase *SocketBase
         out->bin_Entry[used].if_name  = out->bin_Name[used];
         used++;
     }
+
+#if BSD_HAVE_LOOPBACK_IF
+    /* Last, as it is in the array and as `ifconfig -a` prints it. */
+    if (ip->nx_ip_interface[NX_LOOPBACK_INTERFACE].nx_interface_valid != 0)
+    {
+        bsd_strncpy(out->bin_Name[used], BSD_LOOPBACK_IFNAME, IF_NAMESIZE);
+        out->bin_Entry[used].if_index = (ULONG)BSD_LOOPBACK_IFINDEX;
+        out->bin_Entry[used].if_name  = out->bin_Name[used];
+        used++;
+    }
+#endif
 
     /* "an if_index of 0 and an if_name of NULL". ami_alloc() zeroes, so this
        is already true of every slot past `used`; written out because the

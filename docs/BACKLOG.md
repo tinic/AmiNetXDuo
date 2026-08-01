@@ -134,15 +134,17 @@ was wrong for a day.
     the existing magic.
   - No `.info` for the drawer's own contents beyond `ReadMe.info`; the
     headers are for a cross-compiler, not for Workbench.
-- **RFC 3542: the subset worth having is built; the send half of
-  `IPV6_HOPLIMIT` is not.** Assessed and implemented 2026-07-31. No new LVOs:
+- **RFC 3542: the subset worth having is built, send halves included.**
+  Assessed and implemented 2026-07-31, finished the same day. No new LVOs:
   it rides `sendmsg`/`recvmsg`, and `struct msghdr` was already the 28-byte
   4.4BSD shape. `src/bsdsocket/cmsg.c` and `include/aminetxduo/cmsg.h`.
 
   Shipped: `IPV6_RECVPKTINFO`/`IPV6_PKTINFO` (receive *and* the sticky and
-  per-datagram send source), `IPV6_RECVHOPLIMIT` (receive), `ICMP6_FILTER` with
-  its six macros, and the IPv4 half -- `IP_PKTINFO` and `IP_RECVDSTADDR`.
-  `MSG_CTRUNC` now means what it says.
+  per-datagram send source, on UDP and on raw), `IPV6_RECVHOPLIMIT` and
+  `IPV6_HOPLIMIT` in both directions, `ICMP6_FILTER` with its six macros, and
+  the IPv4 half -- `IP_PKTINFO` and `IP_RECVDSTADDR`. `MSG_CTRUNC` now means
+  what it says. A caller declares its control buffer with `CMSG_BUFFER()`,
+  which is the union a `char[]` cannot be.
 
   **The assessment was wrong about the NDK.** `<sys/socket.h>` does define
   `struct cmsghdr` (12 bytes) and `CMSG_DATA`/`FIRSTHDR`/`NXTHDR`, and
@@ -163,41 +165,71 @@ was wrong for a day.
     get/set of arriving IP options, refused here and never implemented by any
     AmigaOS stack -- the same trade `IPV6_TCLASS` made against `IPV6_PATHMTU`.
 
+  **The hop limit was a two-part fix, and the smaller part was ours.** The
+  reason the send half was first left out -- "nothing applies a per-socket TTL
+  to a UDP send either" -- was an argument for doing both, and both are done.
+  `bsd_mcast_prepare_send()` was writing `NX_IP_TIME_TO_LIVE` into
+  `nx_udp_socket_time_to_live` for every unicast destination, discarding
+  `as_Ttl`; it now writes `as_Ttl`, so `IP_TTL` and `IPV6_UNICAST_HOPS` reach
+  the wire on UDP as they already did on raw. That fixed IPv4 only, because
+  `_nxd_udp_socket_send()` honours the socket field on IPv4 and substitutes the
+  IP-wide `nx_ipv6_hop_limit` on IPv6, in the same function, three lines apart
+  -- the same asymmetry `amiga-ipv6-raw-hop-limit` fixed for raw.
+  `amiga-ipv6-udp-hop-limit` in the NetX fork is the other half; the PR body
+  there is the argument, including what it changes for an addon. A per-datagram
+  `IPV6_HOPLIMIT` on `sendmsg` then rides the same field, and -1 means "the
+  socket's own" as RFC 3542 §6.3 says.
+
+  **A source on a raw socket is honoured; on TCP it is refused and always will
+  be.** The checksum argument that refused raw was backwards:
+  `bsd_raw_send_v6()` selects the source *before* it computes the ICMPv6
+  checksum, so a named source is the one the checksum covers -- it feeds the
+  same `nxd_ip_raw_packet_source_send()` a bind already fed. TCP is different in
+  kind and not in degree: a stream's source is fixed when the SYN goes out and
+  every segment carries `nx_tcp_socket_connect_interface`, so there is nothing
+  per-write to name. Naming it at `connect()` is a real gap and a separate one,
+  closed in the fork by `nxd_tcp_client_socket_source_connect()`; the per-write
+  refusal in `bsd_cmsg_parse()` stands whatever `socket.c` does with that.
+
+  **Loopback has an index now: `NX_LOOPBACK_INTERFACE + 1`, called `lo0`.** The
+  convention was already "NetX slot + 1" -- that is what `if_nametoindex()` and
+  `rtm_index` both count -- so loopback needed no new convention, only the two
+  bounds that stopped at `NX_MAX_PHYSICAL_INTERFACES` widened to
+  `NX_MAX_IP_INTERFACES`. It is in the RFC 3493 trio and in nothing else:
+  `if_indextoname()` names it, `if_nametoindex("lo0")` takes it back,
+  `if_nameindex()` lists it last, and `ObtainInterfaceList()` /
+  `QueryInterfaceTagList()` / `SIOCGIFCONF` do not, because those are about
+  SANA-II interfaces a caller can configure and loopback is not one. The name is
+  ours: NetX Duo calls it "Internal IP Loopback", twenty characters where
+  `IF_NAMESIZE` allows fifteen.
+
   **Not implemented, and why:**
-  - **The send half of `IPV6_HOPLIMIT`.** A `sendmsg` carrying one is refused
-    with `EINVAL` rather than ignored. Nothing applies a per-socket TTL to a UDP
-    send today either -- `IP_TTL` and `IPV6_UNICAST_HOPS` are stored and read
-    back but never reach `nx_udp_socket_time_to_live` -- so a per-datagram hop
-    limit would be the only one of the three that worked, which is a worse
-    answer than a clean refusal. Do the sticky one first, then this.
-  - **A source on a raw or TCP socket.** A raw IPv6 send picks its own source
-    because the ICMPv6 checksum has already been computed over it (`raw.c`), and
-    TCP has no per-write source. Both refuse the cmsg.
   - `IPV6_RTHDR`, `HOPOPTS`, `DSTOPTS`, `RTHDRDSTOPTS`, `PATHMTU`,
     `RECVPATHMTU`, `USE_MIN_MTU`, `DONTFRAG`, `NEXTHOP` -- extension headers and
     path-MTU state NetX Duo does not expose. Not planned.
-
-  **The loopback interface has no index, so `ipi6_ifindex` is 0 over `::1`.**
-  NetX Duo parks it at `nx_ip_interface[NX_MAX_PHYSICAL_INTERFACES]`, past the
-  end of the range this library numbers, so `if_indextoname()` cannot name it
-  and `rtm_index` does not report it either. `ipi6_addr` is still filled in, and
-  a datagram off a real interface reports 1 or 2. Giving loopback an index means
-  moving the `if_nametoindex()` / `rtm_index` convention, which
-  `aminetxduo/ifindex.h` says is one decision -- raise it as that, not here.
+  - A per-write source or hop limit on TCP, above.
 
   Verification: the ABI is pinned with `_Static_assert` in `cmsg.c` (every
   offset, and the `CMSG_*` arithmetic), and `tests/ipv6/ipv6_socket_test.c` --
-  which links against none of our code -- runs 119 checks over the macros, the
-  option round-trips, a datagram over `::1` with both objects attached and the
-  answer sent back with an `IPV6_PKTINFO` source, and the IPv4 half over
-  127.0.0.1. Green on Kickstart 3.1 / 68020 under FS-UAE, 2026-07-31. That
-  harness is tier 2, so CI checks that it builds and not that it passes.
+  which links against none of our code -- runs the macros, the option
+  round-trips, a datagram over `::1` with both objects attached, the answer sent
+  back with an `IPV6_PKTINFO` source, the arrival index resolved through
+  `if_indextoname()` and back, a socket hop limit and a per-datagram one both
+  read off the wire by the receiver, and the IPv4 half over 127.0.0.1. That
+  harness is tier 2, so CI checks that it builds and not that it passes; the
+  119-check figure predates the hop-limit and loopback-index checks.
 
   The emulator run is what found both loopback edges: the index above, and
   `::1` living in `nx_ipv6_address[NX_MAX_IPV6_ADDRESSES]` rather than inside
   the configurable range, which made naming it as a send source fail for an
-  address the machine plainly had. `bsd_ip6_zone_source()` in `transfer.c` has
-  the same bound and is right to -- a zone only ever qualifies a link-local.
+  address the machine plainly had. `bsd_source_select()` (socket.c) and
+  `bsd_cmsg_source_index()` (cmsg.c) are the two that walk
+  `nx_ipv6_address[]` for a named source and both carry the
+  `+NX_LOOPBACK_IPV6_ENABLED` bound. The other two walks of that array,
+  `bsd_bind_kind()` and `bsd_bind_wants_interface()`, do not and must not: both
+  return on `bsd_addr_is_loopback()` before the loop. `bsd_ip6_zone_source()`,
+  named by a comment in `addrinfo.c`, never existed; that comment now names
+  `bsd_source_select()`.
 
 ## Decided against — do not "fix"
 

@@ -401,7 +401,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
                 return EAI_ADDRFAMILY;
 
             /* Safe to accept only because the send path honours it: see
-               bsd_ip6_zone_source() in transfer.c. Parsing a zone that
+               bsd_source_select() in socket.c. Parsing a zone that
                nothing then reads would make `ping fe80::1%eth0` look
                supported while it left by whatever interface was routed to. */
             scope = bsd_gai_zone_index(zone);

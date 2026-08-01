@@ -552,7 +552,15 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
      * the TTL back for a unicast one.
      */
     mcast_if = bsd_mcast_prepare_send(sock, addr);
+#else
+    /* What bsd_mcast_prepare_send() does for a unicast destination when
+       multicast is compiled in: IP_TTL and IPV6_UNICAST_HOPS reach the wire. */
+    sock->as_Nx.udp.nx_udp_socket_time_to_live = (UINT)(sock->as_Ttl & 0xFF);
 #endif
+
+    /* RFC 3542 6.3: this datagram's hop limit, over the socket's own. */
+    if (src != NULL && src->cs_HaveHops)
+        sock->as_Nx.udp.nx_udp_socket_time_to_live = (UINT)src->cs_Hops;
 
     wait = bsd_wait_option(sock, sock->as_SndTimeout);
 
@@ -617,7 +625,7 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
  */
 static LONG bsd_send_raw(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, const NXD_ADDRESS *addr,
-                         ULONG scope)
+                         ULONG scope, const BsdCmsgSource *src)
 {
     NX_PACKET_POOL *pool   = netstack_pool();
     NX_PACKET      *packet = NX_NULL;
@@ -657,7 +665,7 @@ static LONG bsd_send_raw(struct AmiSocketBase *base, AmiSocket *sock,
     }
 
     /* Consumes the packet either way. */
-    if (bsd_raw_send_packet(base, sock, packet, addr, scope) != 0)
+    if (bsd_raw_send_packet(base, sock, packet, addr, scope, src) != 0)
         return -1;
 
     return len;
@@ -1071,7 +1079,7 @@ static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_ENETDOWN);
 
     if ((sock->as_Flags & ASF_RAW) != 0)
-        result = bsd_send_raw(base, sock, &cur, len, addr, scope);
+        result = bsd_send_raw(base, sock, &cur, len, addr, scope, src);
     else if ((sock->as_Flags & ASF_TCP) != 0)
         result = bsd_send_tcp(base, sock, &cur, len, flags);
     else

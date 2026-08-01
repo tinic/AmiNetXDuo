@@ -30,8 +30,8 @@
  * address error on an odd one.  A caller's msg_control is whatever it handed
  * us -- a `char buf[CMSG_SPACE(n)]` is only byte-aligned as far as the
  * language is concerned -- so an unaligned buffer is reported as MSG_CTRUNC
- * with nothing written rather than faulted on.  cmsg.h tells a caller to
- * declare the buffer through a union with a struct cmsghdr.
+ * with nothing written rather than faulted on.  cmsg.h's CMSG_BUFFER() is the
+ * declaration that cannot be wrong.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -120,12 +120,14 @@ static const UBYTE *bsd_cmsg_iphdr(NX_PACKET *packet, ULONG need)
  * 1-based, as if_nametoindex() and rtm_index count.  0 when unknown, which
  * RFC 3542 6.6 defines as "unspecified".
  *
- * The loopback interface is one of the unknowns, and deliberately: NetX Duo
- * parks it at nx_ip_interface[NX_MAX_PHYSICAL_INTERFACES], past the end of the
- * range this library numbers, so it has no name from if_indextoname() and no
- * rtm_index either.  Inventing one here would hand a caller an index that the
- * rest of the library cannot resolve.  A datagram over ::1 therefore reports
- * ipi6_addr and an ifindex of 0, which is the whole answer available.
+ * Loopback is numbered here too, and is the whole of NX_MAX_IP_INTERFACES
+ * rather than NX_MAX_PHYSICAL_INTERFACES below.  NetX Duo parks it at
+ * nx_ip_interface[NX_LOOPBACK_INTERFACE], one past the physical slots, and the
+ * convention this library settled on is slot + 1 -- so loopback is
+ * NX_LOOPBACK_INTERFACE + 1 and nothing else has to move.  if_indextoname()
+ * names it and if_nametoindex() takes the name back, so the number a datagram
+ * over ::1 reports is one a caller can resolve and one bsd_cmsg_source_index()
+ * accepts on the way out.
  */
 static ULONG bsd_cmsg_ifindex(NX_IP *ip, NX_PACKET *packet)
 {
@@ -153,7 +155,7 @@ static ULONG bsd_cmsg_ifindex(NX_IP *ip, NX_PACKET *packet)
     if (nxif == NX_NULL)
         return 0UL;
 
-    for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+    for (i = 0; i < (UINT)NX_MAX_IP_INTERFACES; i++)
     {
         if (nxif == &ip->nx_ip_interface[i])
             return (ULONG)i + 1UL;
@@ -283,7 +285,7 @@ static VOID bsd_cmsg_build_v4(AmiSocket *sock, NX_IP *ip, NX_PACKET *packet,
          * which for a broadcast or multicast one is not the header's
          * destination.  The arrival interface's own address is that answer.
          */
-        if (index > 0UL && index <= (ULONG)NX_MAX_PHYSICAL_INTERFACES)
+        if (index > 0UL && index <= (ULONG)NX_MAX_IP_INTERFACES)
         {
             info.ipi_spec_dst.s_addr =
                 ip->nx_ip_interface[index - 1UL].nx_interface_ip_address;
@@ -385,6 +387,39 @@ static LONG bsd_cmsg_pktinfo6(struct AmiSocketBase *base, const UBYTE *data,
 }
 #endif /* AMINETXDUO_IPV6 */
 
+#ifdef AMINETXDUO_IPV6
+/*
+ * RFC 3542 6.3.  "The interpretation of the received hop limit ... -1: use
+ * kernel default; 0 to 255: use this value; other: return EINVAL."  -1 puts
+ * the socket's own IPV6_UNICAST_HOPS back for this datagram, which is what
+ * cs_HaveHops being FALSE means.
+ */
+static LONG bsd_cmsg_hoplimit(struct AmiSocketBase *base, const UBYTE *data,
+                              socklen_t len, BsdCmsgSource *out)
+{
+    LONG hops;
+
+    if (len < (socklen_t)sizeof(LONG))
+        return bsd_fail(base, AMI_EINVAL);
+
+    hops = *(const LONG *)(const VOID *)data;
+
+    if (hops == -1)
+    {
+        out->cs_HaveHops = FALSE;
+        return 0;
+    }
+
+    if (hops < 0 || hops > 255)
+        return bsd_fail(base, AMI_EINVAL);
+
+    out->cs_Hops     = hops;
+    out->cs_HaveHops = TRUE;
+
+    return 0;
+}
+#endif /* AMINETXDUO_IPV6 */
+
 static LONG bsd_cmsg_pktinfo4(struct AmiSocketBase *base, const UBYTE *data,
                               socklen_t len, BsdCmsgSource *out)
 {
@@ -414,8 +449,14 @@ LONG bsd_cmsg_parse(struct AmiSocketBase *base, AmiSocket *sock,
      * Copied whether or not ACW_STICKY6 is set, because clearing the option
      * zeroes the record: cs_Have is the authority, and send()/sendto() -- which
      * never come through here -- read the same field directly.
+     *
+     * cs_HaveHops is not part of it: IPV6_HOPLIMIT is ancillary-only, so the
+     * sticky record can never carry one and send()/sendto() get FALSE from the
+     * same zeroed field.
      */
     *out = sock->as_CmsgSticky;
+    out->cs_Hops     = 0;
+    out->cs_HaveHops = FALSE;
 
     if (msg->msg_control == NULL ||
         msg->msg_controllen < (socklen_t)sizeof(struct cmsghdr))
@@ -443,11 +484,20 @@ LONG bsd_cmsg_parse(struct AmiSocketBase *base, AmiSocket *sock,
         step = CMSG_ALIGN(hdr->cmsg_len);
 
         /*
-         * A source can only be honoured on a datagram socket: TCP has no
-         * per-write source, and a raw send picks its own so the checksum it
-         * has already computed cannot disagree (raw.c).
+         * TCP is the one socket that cannot carry any of this, and not for want
+         * of a call: a stream's source is fixed when the SYN goes out and every
+         * segment after it carries nx_tcp_socket_connect_interface, so there is
+         * nothing per-write to name.  Naming it at connect() is a different
+         * question and a different file (socket.c, over the fork's
+         * nxd_tcp_client_socket_source_connect()).  Per-write is refused here
+         * whatever happens there.
+         *
+         * Raw is allowed, and the checksum argument that used to refuse it does
+         * not survive: bsd_raw_send_v6() picks the source first and computes the
+         * ICMPv6 checksum over it afterwards, so a named source is the one the
+         * checksum covers.
          */
-        if ((sock->as_Flags & (ASF_TCP | ASF_RAW)) != 0)
+        if ((sock->as_Flags & ASF_TCP) != 0)
             return bsd_fail(base, AMI_EINVAL);
 
         if (hdr->cmsg_level == IPPROTO_IP && hdr->cmsg_type == IP_PKTINFO)
@@ -467,15 +517,20 @@ LONG bsd_cmsg_parse(struct AmiSocketBase *base, AmiSocket *sock,
             if (bsd_cmsg_pktinfo6(base, data, len, out) != 0)
                 return -1;
         }
+        else if (hdr->cmsg_level == IPPROTO_IPV6 &&
+                 (hdr->cmsg_type == IPV6_HOPLIMIT ||
+                  hdr->cmsg_type == IPV6_HOPLIMIT_LINUX))
+        {
+            if ((sock->as_Flags & ASF_INET6) == 0)
+                return bsd_fail(base, AMI_EINVAL);
+            if (bsd_cmsg_hoplimit(base, data, len, out) != 0)
+                return -1;
+        }
 #endif
         else
         {
-            /*
-             * Refused rather than ignored, the rule the whole library is held
-             * to: a caller asking for a hop limit it will not get is better
-             * told so.  IPV6_HOPLIMIT lands here -- see docs/BACKLOG.md for
-             * why the send half of it is not implemented.
-             */
+            /* Refused rather than ignored, the rule the whole library is held
+               to: a caller asking for something it will not get is told so. */
             return bsd_fail(base, AMI_EINVAL);
         }
 
@@ -489,11 +544,12 @@ LONG bsd_cmsg_parse(struct AmiSocketBase *base, AmiSocket *sock,
 }
 
 /*
- * The address index nxd_udp_socket_source_send() wants.  It is not the same
- * number in the two families: for IPv4 it indexes nx_ip_interface[], for IPv6
- * nx_ipv6_address[].  -1 when the source cannot be resolved, which the caller
- * turns into EADDRNOTAVAIL rather than letting NetX pick -- picking is what
- * the option was given to prevent.
+ * The address index nxd_udp_socket_source_send() and
+ * nxd_ip_raw_packet_source_send() want.  It is not the same number in the two
+ * families: for IPv4 it indexes nx_ip_interface[], for IPv6 nx_ipv6_address[].
+ * -1 when the source cannot be resolved, which the caller turns into
+ * EADDRNOTAVAIL rather than letting NetX pick -- picking is what the option
+ * was given to prevent.
  *
  * Not bsd_source_select() (socket.c), which produces the same kind of index
  * and is deliberately left alone: it answers "where does this SOCKET send
@@ -514,9 +570,11 @@ LONG bsd_cmsg_source_index(NX_IP *ip, const BsdCmsgSource *src, BOOL v6)
         const NX_INTERFACE *want = NX_NULL;
         UINT                i;
 
+        /* NX_MAX_IP_INTERFACES, not NX_MAX_PHYSICAL_INTERFACES: loopback is
+           the last slot and bsd_cmsg_ifindex() hands its number out. */
         if (src->cs_Ifindex > 0UL)
         {
-            if (src->cs_Ifindex > (ULONG)NX_MAX_PHYSICAL_INTERFACES)
+            if (src->cs_Ifindex > (ULONG)NX_MAX_IP_INTERFACES)
                 return -1;
             want = &ip->nx_ip_interface[src->cs_Ifindex - 1UL];
         }
@@ -559,7 +617,7 @@ LONG bsd_cmsg_source_index(NX_IP *ip, const BsdCmsgSource *src, BOOL v6)
 
     if (src->cs_Ifindex > 0UL)
     {
-        if (src->cs_Ifindex > (ULONG)NX_MAX_PHYSICAL_INTERFACES)
+        if (src->cs_Ifindex > (ULONG)NX_MAX_IP_INTERFACES)
             return -1;
 
         return (LONG)(src->cs_Ifindex - 1UL);
@@ -569,6 +627,12 @@ LONG bsd_cmsg_source_index(NX_IP *ip, const BsdCmsgSource *src, BOOL v6)
         src->cs_Source.nxd_ip_address.v4 != 0UL)
     {
         UINT i;
+
+        /* 127/8 by identity, as bsd_source_select() does it: NetX gives the
+           loopback interface one address out of the block, so 127.0.0.2 would
+           miss on the address compare below. */
+        if ((src->cs_Source.nxd_ip_address.v4 >> 24) == 127UL)
+            return (LONG)NX_LOOPBACK_INTERFACE;
 
         for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
         {

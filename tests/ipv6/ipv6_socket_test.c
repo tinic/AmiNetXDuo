@@ -482,6 +482,35 @@ BSD_SCRATCH;
     return(res);
 }
 
+/* RFC 3493 section 4, revision 3 vectors. Here because an ifindex is only
+   useful if something can turn it back into a name. */
+static ULONG bsd_if_nametoindex(const char *name)
+{
+register struct Library *a6  __asm("a6") = SocketBase;
+register const char     *a0  __asm("a0") = name;
+register ULONG           res __asm("d0");
+BSD_SCRATCH;
+
+    __asm __volatile ("jsr a6@(-882:W)"
+                      : BSD_SCRATCH_OUT, "=r" (res) : "r" (a6), "r" (a0)
+                      : "cc", "memory");
+    return(res);
+}
+
+static char *bsd_if_indextoname(ULONG index, char *name)
+{
+register struct Library *a6  __asm("a6") = SocketBase;
+register ULONG           d0  __asm("d0") = index;
+register char           *a0  __asm("a0") = name;
+register char           *res __asm("d0");
+BSD_SCRATCH;
+
+    __asm __volatile ("jsr a6@(-888:W)"
+                      : BSD_SCRATCH_OUT, "=r" (res) : "r" (a6), "r" (d0), "r" (a0)
+                      : "cc", "memory");
+    return(res);
+}
+
 static LONG bsd_Errno(VOID)
 {
 register struct Library *a6  __asm("a6") = SocketBase;
@@ -921,23 +950,18 @@ char                    buffer[64];
 /*
  * A control buffer has to be aligned for a socklen_t, and a bare char array is
  * not: on a 68000 an odd cmsg_len would be an address error rather than a
- * wrong answer.  The union is what a portable caller writes, and this is the
- * program that has to demonstrate it.
+ * wrong answer.  CMSG_BUFFER() is the declaration that cannot be wrong, and
+ * this is the program that has to demonstrate it -- it is a caller of the
+ * published header and nothing else.
  */
 #define T_CBUF_BYTES    (CMSG_SPACE(sizeof(struct in6_pktinfo)) + \
                          CMSG_SPACE(sizeof(LONG)))
-
-typedef union
-{
-    struct cmsghdr  align;
-    UBYTE           bytes[T_CBUF_BYTES];
-} t_cbuf;
 
 /* The macros on their own -- no library involved, so a failure here is the
    header being wrong rather than the stack. */
 static VOID t_test_cmsg_macros(VOID)
 {
-t_cbuf              cbuf;
+CMSG_BUFFER(cbuf, T_CBUF_BYTES);
 struct msghdr       msg;
 struct cmsghdr     *c;
 struct icmp6_filter filt;
@@ -960,14 +984,14 @@ ULONG               seen = 0;
 
     /* CMSG_FIRSTHDR must answer NULL for the "no ancillary data" report. */
     t_bzero(&msg, sizeof(msg));
-    msg.msg_control    = cbuf.bytes;
+    msg.msg_control    = CMSG_BUFFER_PTR(cbuf);
     msg.msg_controllen = 0;
     (VOID)t_check((BOOL)(CMSG_FIRSTHDR(&msg) == NULL),
                   "CMSG_FIRSTHDR is NULL when msg_controllen is 0", 0);
 
     /* Two objects, walked back out. */
     t_bzero(&cbuf, sizeof(cbuf));
-    msg.msg_controllen = sizeof(cbuf.bytes);
+    msg.msg_controllen = CMSG_BUFFER_LEN(cbuf);
 
     c = CMSG_FIRSTHDR(&msg);
     if (!t_check((BOOL)(c != NULL), "CMSG_FIRSTHDR found the first object", 0))
@@ -1170,6 +1194,49 @@ struct icmp6_filter filt;
     }
 }
 
+/*
+ * The IPV6_HOPLIMIT of the next datagram on `fd`, or -1.  The socket must have
+ * IPV6_RECVHOPLIMIT set; there is no timeout, so only call it when the send
+ * that fills it said it went out.
+ */
+static LONG t_recv_hoplimit(LONG fd, char *buffer, LONG buflen)
+{
+CMSG_BUFFER(cbuf, T_CBUF_BYTES);
+struct msghdr   msg;
+struct iovec    iov;
+struct cmsghdr *c;
+
+    t_bzero(&cbuf, sizeof(cbuf));
+    t_bzero(&msg, sizeof(msg));
+
+    iov.iov_base       = buffer;
+    iov.iov_len        = (ULONG)buflen;
+    msg.msg_iov        = &iov;
+    msg.msg_iovlen     = 1;
+    msg.msg_control    = CMSG_BUFFER_PTR(cbuf);
+    msg.msg_controllen = CMSG_BUFFER_LEN(cbuf);
+
+    if (bsd_recvmsg(fd, &msg, 0) < 0)
+        return -1;
+
+    for (c = CMSG_FIRSTHDR(&msg); c != NULL; c = CMSG_NXTHDR(&msg, c))
+    {
+        LONG         hops = 0;
+        const UBYTE *src  = CMSG_DATA(c);
+        ULONG        i;
+
+        if (c->cmsg_level != IPPROTO_IPV6 || c->cmsg_type != IPV6_HOPLIMIT)
+            continue;
+
+        for (i = 0; i < sizeof(hops); i++)
+            ((UBYTE *)&hops)[i] = src[i];
+
+        return hops;
+    }
+
+    return -1;
+}
+
 /* One datagram over ::1, with the ancillary data attached to it. */
 static VOID t_test_cmsg_receive(VOID)
 {
@@ -1179,7 +1246,7 @@ LONG                    value;
 struct t_sockaddr_in6   sa;
 static const char       datagram[] = "with ancillary data";
 char                    buffer[64];
-t_cbuf                  cbuf;
+CMSG_BUFFER(cbuf, T_CBUF_BYTES);
 struct msghdr           msg;
 struct iovec            iov;
 struct cmsghdr         *c;
@@ -1236,8 +1303,8 @@ ULONG                   arrived_on = 0;
     msg.msg_namelen    = sizeof(peer);
     msg.msg_iov        = &iov;
     msg.msg_iovlen     = 1;
-    msg.msg_control    = cbuf.bytes;
-    msg.msg_controllen = sizeof(cbuf.bytes);
+    msg.msg_control    = CMSG_BUFFER_PTR(cbuf);
+    msg.msg_controllen = CMSG_BUFFER_LEN(cbuf);
 
     rc = bsd_recvmsg(server, &msg, 0);
     if (!t_check((BOOL)(rc == (LONG)sizeof(datagram)), "recvmsg", rc))
@@ -1286,14 +1353,29 @@ ULONG                   arrived_on = 0;
                           "ipi6_addr is ::1, the address it was sent to",
                           info.ipi6_addr.s6_addr[15]);
             /*
-             * 0, and correctly: this datagram came in over ::1, and NetX Duo
-             * parks the loopback interface past the end of the range this
-             * library numbers, so it has no index -- if_indextoname() cannot
-             * name it either.  A datagram off a real interface reports 1 or 2.
+             * Loopback has an index like anything else: NetX Duo parks it one
+             * past the physical interfaces and this library numbers a slot by
+             * slot + 1, so it is the last one and if_indextoname() names it.
+             * A datagram off a real interface reports 1 or 2.
              */
-            (VOID)t_check((BOOL)(info.ipi6_ifindex == 0),
-                          "ipi6_ifindex is 0 -- loopback is outside the "
-                          "if_nametoindex() range", (LONG)info.ipi6_ifindex);
+            (VOID)t_check((BOOL)(info.ipi6_ifindex != 0),
+                          "ipi6_ifindex names the arrival interface, loopback "
+                          "included", (LONG)info.ipi6_ifindex);
+
+            {
+                char name[16];
+
+                name[0] = '\0';
+                (VOID)t_check((BOOL)(bsd_if_indextoname(info.ipi6_ifindex,
+                                                        name) != NULL &&
+                                     name[0] != '\0'),
+                              "if_indextoname() resolves the index a PKTINFO "
+                              "reported", (LONG)info.ipi6_ifindex);
+                (VOID)t_check((BOOL)(bsd_if_nametoindex(name) ==
+                                     info.ipi6_ifindex),
+                              "and if_nametoindex() takes the name back",
+                              (LONG)bsd_if_nametoindex(name));
+            }
 
             arrived_on = info.ipi6_ifindex;
         }
@@ -1342,7 +1424,7 @@ ULONG                   arrived_on = 0;
         msg.msg_namelen    = sizeof(peer);
         msg.msg_iov        = &iov;
         msg.msg_iovlen     = 1;
-        msg.msg_control    = cbuf.bytes;
+        msg.msg_control    = CMSG_BUFFER_PTR(cbuf);
         msg.msg_controllen = CMSG_SPACE(sizeof(reply));
 
         c = CMSG_FIRSTHDR(&msg);
@@ -1386,7 +1468,7 @@ ULONG                   arrived_on = 0;
         msg.msg_namelen    = sizeof(peer);
         msg.msg_iov        = &iov;
         msg.msg_iovlen     = 1;
-        msg.msg_control    = cbuf.bytes;
+        msg.msg_control    = CMSG_BUFFER_PTR(cbuf);
         msg.msg_controllen = CMSG_SPACE(sizeof(reply));
 
         c = CMSG_FIRSTHDR(&msg);
@@ -1418,7 +1500,7 @@ ULONG                   arrived_on = 0;
         msg.msg_namelen    = sizeof(peer);
         msg.msg_iov        = &iov;
         msg.msg_iovlen     = 1;
-        msg.msg_control    = cbuf.bytes;
+        msg.msg_control    = CMSG_BUFFER_PTR(cbuf);
         msg.msg_controllen = CMSG_SPACE(sizeof(LONG));
 
         c = CMSG_FIRSTHDR(&msg);
@@ -1433,6 +1515,91 @@ ULONG                   arrived_on = 0;
                           "sendmsg refuses SCM_RIGHTS rather than ignoring it",
                           bsd_Errno());
         }
+
+        /*
+         * RFC 3542 6.3, both halves of it: the socket's own hop limit reaches
+         * the wire, and a per-datagram one overrides it.  Neither used to --
+         * IPV6_UNICAST_HOPS was stored and read back and never applied.
+         */
+        value = 1;
+        (VOID)bsd_setsockopt(client, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &value,
+                             sizeof(value));
+
+        value = 33;
+        rc = bsd_setsockopt(server, IPPROTO_IPV6, IPV6_UNICAST_HOPS, &value,
+                            sizeof(value));
+        (VOID)t_check((BOOL)(rc == 0), "setsockopt IPV6_UNICAST_HOPS=33",
+                      bsd_Errno());
+
+        rc = bsd_sendto(server, (APTR)answer, sizeof(answer), 0, &peer,
+                        sizeof(peer));
+        if (t_check((BOOL)(rc == (LONG)sizeof(answer)),
+                    "sendto with IPV6_UNICAST_HOPS set", rc))
+        {
+            (VOID)t_check((BOOL)(t_recv_hoplimit(client, buffer,
+                                                 sizeof(buffer)) == 33),
+                          "the hop limit on the wire is the socket's own", 33);
+        }
+
+        t_bzero(&cbuf, sizeof(cbuf));
+        t_bzero(&msg, sizeof(msg));
+        iov.iov_base       = (APTR)answer;
+        iov.iov_len        = sizeof(answer);
+        msg.msg_name       = &peer;
+        msg.msg_namelen    = sizeof(peer);
+        msg.msg_iov        = &iov;
+        msg.msg_iovlen     = 1;
+        msg.msg_control    = CMSG_BUFFER_PTR(cbuf);
+        msg.msg_controllen = CMSG_SPACE(sizeof(LONG));
+
+        c = CMSG_FIRSTHDR(&msg);
+        if (c != NULL)
+        {
+            LONG  want = 7;
+            UBYTE *dst = CMSG_DATA(c);
+            ULONG  i;
+
+            c->cmsg_level = IPPROTO_IPV6;
+            c->cmsg_type  = IPV6_HOPLIMIT;
+            c->cmsg_len   = CMSG_LEN(sizeof(want));
+
+            for (i = 0; i < sizeof(want); i++)
+                dst[i] = ((const UBYTE *)&want)[i];
+
+            rc = bsd_sendmsg(server, &msg, 0);
+            if (t_check((BOOL)(rc == (LONG)sizeof(answer)),
+                        "sendmsg with an IPV6_HOPLIMIT is no longer refused",
+                        rc))
+            {
+                (VOID)t_check((BOOL)(t_recv_hoplimit(client, buffer,
+                                                     sizeof(buffer)) == 7),
+                              "and the datagram carries that hop limit", 7);
+            }
+
+            /* Out of range is EINVAL; -1 is "the socket's own", not an error. */
+            want = 256;
+            for (i = 0; i < sizeof(want); i++)
+                dst[i] = ((const UBYTE *)&want)[i];
+
+            rc = bsd_sendmsg(server, &msg, 0);
+            (VOID)t_check((BOOL)(rc < 0),
+                          "sendmsg refuses a hop limit above 255",
+                          bsd_Errno());
+
+            want = -1;
+            for (i = 0; i < sizeof(want); i++)
+                dst[i] = ((const UBYTE *)&want)[i];
+
+            rc = bsd_sendmsg(server, &msg, 0);
+            if (t_check((BOOL)(rc == (LONG)sizeof(answer)),
+                        "sendmsg takes -1 as the socket default", rc))
+            {
+                (VOID)t_check((BOOL)(t_recv_hoplimit(client, buffer,
+                                                     sizeof(buffer)) == 33),
+                              "and the datagram is back at the socket's 33",
+                              33);
+            }
+        }
     }
 
     /* A control buffer too small for both is MSG_CTRUNC, not a failure. */
@@ -1446,7 +1613,7 @@ ULONG                   arrived_on = 0;
         iov.iov_len        = sizeof(buffer);
         msg.msg_iov        = &iov;
         msg.msg_iovlen     = 1;
-        msg.msg_control    = cbuf.bytes;
+        msg.msg_control    = CMSG_BUFFER_PTR(cbuf);
         msg.msg_controllen = CMSG_SPACE(sizeof(struct in6_pktinfo));
 
         rc = bsd_recvmsg(server, &msg, 0);
@@ -1473,7 +1640,7 @@ LONG                value;
 struct sockaddr_in  sa;
 static const char   datagram[] = "over 127.0.0.1";
 char                buffer[64];
-t_cbuf              cbuf;
+CMSG_BUFFER(cbuf, T_CBUF_BYTES);
 struct msghdr       msg;
 struct iovec        iov;
 struct cmsghdr     *c;
@@ -1529,8 +1696,8 @@ BOOL                saw_dstaddr = FALSE;
 
     msg.msg_iov        = &iov;
     msg.msg_iovlen     = 1;
-    msg.msg_control    = cbuf.bytes;
-    msg.msg_controllen = sizeof(cbuf.bytes);
+    msg.msg_control    = CMSG_BUFFER_PTR(cbuf);
+    msg.msg_controllen = CMSG_BUFFER_LEN(cbuf);
 
     rc = bsd_recvmsg(server, &msg, 0);
     if (!t_check((BOOL)(rc == (LONG)sizeof(datagram)), "recvmsg", rc))

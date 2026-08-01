@@ -426,23 +426,46 @@ static VOID bsd_raw_icmpv6_checksum(NX_PACKET *packet, ULONG *source,
 
 /*
  * The source address is picked first and then named on the send, rather than
- * left to nxd_ip_raw_packet_send() to pick again: the checksum above has
- * already been computed over it, and a second independent choice could differ.
+ * left to nxd_ip_raw_packet_send() to pick again: the checksum below is
+ * computed over it, and a second independent choice could differ.
  * _nxd_ipv6_interface_find() is the stack's own RFC 6724 selection and is what
  * nx_icmp_ping6() uses for the same reason.
  *
- * A bound address or a zone overrides that selection, since either is the
- * caller having made the choice already.
+ * An RFC 3542 PKTINFO, a bound address or a zone overrides that selection,
+ * each being the caller having made the choice already, and in that order --
+ * the cmsg was supplied for this datagram where the other two are standing
+ * state. Because the choice happens here and the checksum after it, a named
+ * source is the source the checksum covers.
  */
 static LONG bsd_raw_send_v6(struct AmiSocketBase *base, AmiSocket *sock,
                             NX_IP *ip, NX_PACKET *packet, NXD_ADDRESS *dest,
-                            ULONG protocol, UINT hops, ULONG tos, ULONG scope)
+                            ULONG protocol, UINT hops, ULONG tos, ULONG scope,
+                            const BsdCmsgSource *src)
 {
     NXD_IPV6_ADDRESS *source = NX_NULL;
     UINT              src_index = 0;
     UINT              status;
+    BsdSourceKind     kind;
 
-    switch (bsd_source_select(sock, dest, scope, &src_index))
+    if (src != NULL && src->cs_Have)
+    {
+        LONG index = bsd_cmsg_source_index(ip, src, TRUE);
+
+        if (index < 0)
+        {
+            nx_packet_release(packet);
+            return bsd_fail(base, AMI_EADDRNOTAVAIL);
+        }
+
+        src_index = (UINT)index;
+        kind      = BSD_SOURCE_INDEX;
+    }
+    else
+    {
+        kind = bsd_source_select(sock, dest, scope, &src_index);
+    }
+
+    switch (kind)
     {
         case BSD_SOURCE_INDEX:
             source = &ip->nx_ipv6_address[src_index];
@@ -498,7 +521,7 @@ static LONG bsd_raw_send_v6(struct AmiSocketBase *base, AmiSocket *sock,
 
 LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
                          NX_PACKET *packet, const NXD_ADDRESS *addr,
-                         ULONG scope)
+                         ULONG scope, const BsdCmsgSource *src)
 {
     NX_IP        *ip     = netstack_ip();
     NX_PACKET    *handed = packet;
@@ -509,6 +532,11 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
     ULONG         protocol = (ULONG)(sock->as_Protocol & 0xFF);
     UINT          ttl      = (UINT)(sock->as_Ttl & 0xFF);
     ULONG         tos      = (ULONG)(sock->as_Tos & 0xFF);
+
+    /* RFC 3542 6.3, over IPV6_UNICAST_HOPS; IPv6 only, which is where
+       bsd_cmsg_parse() already refuses it for an AF_INET socket. */
+    if (src != NULL && src->cs_HaveHops)
+        ttl = (UINT)src->cs_Hops;
 
 #ifndef AMINETXDUO_IPV6
     /* No v6, so no zones; the parameter stays so there is one signature. */
@@ -524,7 +552,7 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
 #ifdef AMINETXDUO_IPV6
     if (dest.nxd_ip_version == NX_IP_VERSION_V6)
         return bsd_raw_send_v6(base, sock, ip, handed, &dest, protocol, ttl,
-                               tos, scope);
+                               tos, scope, src);
 #endif
 
     /*
@@ -593,7 +621,24 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
      * After the IP_HDRINCL parse, which can move the destination -- and the
      * destination is what decides whether the bound address can reach it.
      */
-    source = bsd_source_select(sock, &dest, 0UL, &src_index);
+    if (src != NULL && src->cs_Have)
+    {
+        LONG index = bsd_cmsg_source_index(ip, src, FALSE);
+
+        if (index < 0)
+        {
+            nx_packet_release(handed);
+            return bsd_fail(base, AMI_EADDRNOTAVAIL);
+        }
+
+        source    = BSD_SOURCE_INDEX;
+        src_index = (UINT)index;
+    }
+    else
+    {
+        source = bsd_source_select(sock, &dest, 0UL, &src_index);
+    }
+
     if (source == BSD_SOURCE_REFUSE || source == BSD_SOURCE_UNREACH)
     {
         nx_packet_release(handed);

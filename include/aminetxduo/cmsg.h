@@ -31,6 +31,10 @@
  * requires.  CMSG_FIRSTHDR has to be replaced whatever happens, so one
  * mechanism for both is the smaller surface.
  *
+ * CMSG_BUFFER() is ours and has no BSD counterpart: a control buffer has to be
+ * aligned for a socklen_t and the usual `char buf[CMSG_SPACE(n)]` is not, so
+ * the union every portable program writes by hand is written once here.
+ *
  * `struct cmsghdr` itself is NOT redefined here.  It is the NDK's, it is
  * already the right shape, and a second definition would be an ODR-style trap
  * for anyone who included the two headers in the other order.  cmsg.c pins
@@ -102,6 +106,31 @@ extern "C" {
         : (struct cmsghdr *)((UBYTE *)(cmsg) + \
               CMSG_ALIGN(((struct cmsghdr *)(cmsg))->cmsg_len))))
 
+/* ------------------------------------------------------------ the buffer --
+ *
+ * cmsg_len is a socklen_t, so reading one is a 32-bit load, and a 68000 takes
+ * an address error on an odd address.  `char buf[CMSG_SPACE(n)]` does not
+ * promise more than byte alignment, so it is the wrong way to declare a
+ * control buffer and compiles anyway.  CMSG_BUFFER() is the right way and is
+ * the same three lines every caller would otherwise write:
+ *
+ *     CMSG_BUFFER(cbuf, CMSG_SPACE(sizeof(struct in6_pktinfo)));
+ *
+ *     msg.msg_control    = CMSG_BUFFER_PTR(cbuf);
+ *     msg.msg_controllen = CMSG_BUFFER_LEN(cbuf);
+ *
+ * An odd msg_control is not faulted on either way: recvmsg() reports
+ * MSG_CTRUNC and writes nothing, sendmsg() answers EINVAL.
+ */
+#define CMSG_BUFFER(name, bytes)                                    \
+    union {                                                         \
+        struct cmsghdr cmsgbuf_align;                               \
+        UBYTE          cmsgbuf_bytes[bytes];                        \
+    } name
+
+#define CMSG_BUFFER_PTR(name)   ((APTR)(name).cmsgbuf_bytes)
+#define CMSG_BUFFER_LEN(name)   ((socklen_t)sizeof((name).cmsgbuf_bytes))
+
 /* ------------------------------------------------------------ the levels -- */
 
 /* IPPROTO_IPV6 comes from in6.h above.  The NDK's list stops at IPPROTO_RAW,
@@ -130,6 +159,12 @@ extern "C" {
 #define IPV6_PKTINFO                46
 #define IPV6_PKTINFO_LINUX          50
 
+/*
+ * IPV6_HOPLIMIT is ancillary only, in both directions: a LONG in a cmsg, never
+ * a setsockopt -- IPV6_UNICAST_HOPS is the sticky spelling and answers that.
+ * On sendmsg it is 0..255, or -1 for "whatever IPV6_UNICAST_HOPS says"; any
+ * other value is EINVAL.
+ */
 #define IPV6_RECVHOPLIMIT           37
 #define IPV6_RECVHOPLIMIT_LINUX     51
 #define IPV6_HOPLIMIT               47
@@ -161,9 +196,12 @@ extern "C" {
  * RFC 3542 section 6.6.  On receive, ipi6_addr is the destination address out
  * of the arriving header -- which may be a multicast address, not one of this
  * machine's -- and ipi6_ifindex is the arrival interface, numbered as
- * if_nametoindex() numbers it.  On send, ipi6_addr picks the source address
- * and ipi6_ifindex the outgoing interface; either may be zero to leave that
- * half to the stack.
+ * if_nametoindex() numbers it, loopback ("lo0") included.  On send, ipi6_addr
+ * picks the source address and ipi6_ifindex the outgoing interface; either may
+ * be zero to leave that half to the stack.
+ *
+ * On a datagram or raw socket.  A stream's source is fixed when the connection
+ * opens, so a TCP sendmsg() carrying one is EINVAL.
  */
 struct in6_pktinfo
 {

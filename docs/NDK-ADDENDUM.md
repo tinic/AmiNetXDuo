@@ -124,6 +124,7 @@ caller to invent one.
    prototypes. New LVOs `[146]`..`[149]`. Indices are 1-based, matching
    `rtm_index`; change neither alone.
 2. **RFC 3542** -- WRITTEN, `include/aminetxduo/cmsg.h`: the `CMSG_*` macros,
+   `CMSG_BUFFER()` for the aligned control buffer a `char[]` cannot be,
    `struct in6_pktinfo`, `struct in_pktinfo`, `struct icmp6_filter` + its six
    macros, and the option numbers. No new LVOs: it rides `sendmsg`/`recvmsg`,
    and `struct msghdr` is already the 28-byte 4.4BSD shape with `msg_control` at
@@ -228,7 +229,7 @@ they are Latin-1 and carry a `©` -- so it silently finds nothing. Use
 Absent, and therefore ours to define: `sockaddr_storage`, `PF_INET6`,
 `IPPROTO_IPV6`, every `IPV6_*`, `INET6_ADDRSTRLEN`, `in6addr_any`,
 `IN6ADDR_*_INIT`, `IN6_IS_ADDR_*`, `AI_V4MAPPED`, `AI_ADDRCONFIG`,
-`in6_pktinfo`, `icmp6_filter`, `CMSG_ALIGN`.
+`in6_pktinfo`, `icmp6_filter`, `CMSG_ALIGN`, `CMSG_BUFFER`.
 
 **Present, contrary to what `BACKLOG.md` says about RFC 3542:**
 `struct cmsghdr`, `CMSG_DATA`, `CMSG_FIRSTHDR` and `CMSG_NXTHDR` are all in
