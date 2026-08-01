@@ -33,10 +33,15 @@
 (set APPNAME     "AmiNetXDuo")
 
 ; dist/make-dist.sh rewrites this line as it copies the script into the
-; archive, from tools/version.sh -- so what the installer tells the user and
-; what the .lha is called cannot disagree.  The value here is only what you
-; see running the script straight out of the source tree.
-(set VERSION_STR "0.1.0")
+; archive, from tools/version.sh -- so what the installer reports and what the
+; .lha is called cannot disagree, and it fails the build if the line is not
+; there to stamp.
+;
+; Deliberately not a real-looking number.  It was "0.1.0" and stayed there for
+; eleven releases: harmless, because no archive ever carries it, and it still
+; reads as a version rather than as a placeholder to anyone running the script
+; straight out of the source tree.
+(set VERSION_STR "0.0.0-source")
 
 ; --------------------------------------------------------------------------
 ; Where we are reading from.
@@ -1133,8 +1138,13 @@
 ; never affect them, on the one page they read once; and the user who DOES
 ; type one is told by `fetch' itself, at the moment it matters, in words that
 ; fit their machine.  fetch tests AttnFlags for exactly this.
+; The version is on the last screen as well as the first.  The welcome is
+; gone by the time anything has been written, and this is the line that stays
+; up -- and the one a user quotes when reporting something.  Every installed
+; file answers `Version' with the same number, so the two agree.
 (exit
-  "AmiNetXDuo is installed.\n\n"
+  "AmiNetXDuo " VERSION_STR " is installed.\n\n"
   FINAL_START
   "\nShowNetStatus reports whether it came up.  The ReadMe in the "
-  "AmiNetXDuo drawer covers the rest.\n")
+  "AmiNetXDuo drawer covers the rest.  Version, on any of the installed "
+  "files, reports " VERSION_STR " as well.\n")
