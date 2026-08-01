@@ -200,13 +200,19 @@ those empty results and was wrong for a day.
 
 ## Environment and tooling
 
-- **`tests/ipv6/ipv6_socket_test.c` is tier 2: CI checks that it builds, not
-  that it passes.** It is the only thing that exercises the RFC 3542 surface
-  end to end -- the macros, the option round-trips, both objects on one
-  datagram, the arrival index through `if_indextoname()` and back. It was last
-  run by hand on 2026-07-31; the 119-check figure quoted elsewhere predates the
-  hop-limit and loopback-index checks.
-
+- **`tests/ipv6/ipv6_socket_test.c` runs green but is not in CI.** 129 checks,
+  0 failures, on an emulated A1200 under Amiberry on 2026-07-31 -- the whole
+  RFC 3542 surface end to end, including the checks that postdate the 119-check
+  figure quoted elsewhere: `IP_PKTINFO` and `IP_RECVDSTADDR` arriving on one
+  datagram, `ipi_spec_dst`, both hop-limit paths read off the wire, and the
+  arrival index through `if_indextoname()` and back. It is tier 2, so `ci.sh`
+  builds it and does not run it; it needs a Kickstart ROM, which only the lab
+  machine has. Run it with
+  `. ~/amiga-assets/env.sh && ./tests/ipv6/run-socket-fsuae.sh -A` on
+  playhouse3 -- FS-UAE cannot boot headless there, which is why the harness
+  gained `-A`. The test writes its results to the **serial log**, not to the
+  guest's `stdout.txt`; that file holds unrelated bytes and reading it looks
+  like a crash.
 - **The two-interface source case is proved on a host, not on a guest.** TCP
   now leaves from the address `bind()` named --
   `nxd_tcp_client_socket_source_connect()` in the NetX fork -- and the case it
