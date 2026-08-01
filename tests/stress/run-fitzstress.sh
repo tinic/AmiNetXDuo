@@ -378,6 +378,24 @@ echo
 echo "  last heartbeats (serial; the machine was executing when it wrote one)"
 grep "^FS t=" "$SER" 2>/dev/null | tail -5 | sed 's/^/    /' || echo "    (none)"
 
+# The verdict, spelled out, because "seemed fine" is not a result and a
+# duration is what makes a null one worth anything.  A stuck worker is the
+# freeze; a deadline with no stuck worker is this harness being mis-sized,
+# which has happened and must not be read as the fault it looks like.
+STUCK=$(awk '/^stuck_workers /{print $2}' "$HD/stress-summary.txt" 2>/dev/null || true)
+echo
+if [ "${STUCK:-}" = "0" ] && [ "$RUN_RC" != "124" ]; then
+    echo "  VERDICT: no freeze in ${GUEST:-?} s of guest time."
+elif [ -n "${STUCK:-}" ] && [ "${STUCK:-0}" != "0" ]; then
+    echo "  VERDICT: FROZE -- $STUCK worker(s) never came back.  The phase and"
+    echo "  stamp above name the DOS call each was in; health.log's last block"
+    echo "  is netstat -h at the time."
+else
+    echo "  VERDICT: inconclusive -- the supervisor did not write a summary."
+    echo "  Check whether the heartbeat above stopped (a freeze) or merely ran"
+    echo "  out of host deadline with the counters still moving (-D)."
+fi
+
 echo
 echo "==== was the data correct? ============================================="
 if [ -f "$HD/compare.log" ]; then
