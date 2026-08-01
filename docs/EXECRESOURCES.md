@@ -34,13 +34,14 @@ the deliberate 4 KB leak there are what that cost.
 and a plain `grep` reads them as binary and silently returns nothing.
 
 Counted across `src/`, `port/threadx-amiga/src/`, `tools/smoke/`, `tests/` and
-`clients/`: 18 `AllocSignal`, 22 `CreateMsgPort` plus 6 statically built ports,
-11 `CreateIORequest`, 27 `OpenDevice`, and 59 `SendIO`/`DoIO`/`WaitIO`/
-`AbortIO`/`CheckIO`. **Nine defects; all nine are fixed here.**
+`clients/`: 16 `AllocSignal`, 22 `CreateMsgPort` plus 5 open-coded ports, 11
+`CreateIORequest`, 21 `OpenDevice`, and 54
+`SendIO`/`DoIO`/`WaitIO`/`AbortIO`/`CheckIO`. **Ten defects; all ten are fixed
+here.**
 
 ---
 
-## The nine
+## The ten
 
 | # | Site | What went wrong | Fixed by |
 |---|---|---|---|
@@ -52,7 +53,8 @@ Counted across `src/`, `port/threadx-amiga/src/`, `tools/smoke/`, `tests/` and
 | 6 | `port/threadx-amiga/src/tx_amiga_adopt.c:535` | the branch written to recover an adopted thread's run signal was unreachable | `tx_thread_amiga_signal_owner` |
 | 7 | `port/threadx-amiga/src/tx_amiga_adopt.c:463` | `tx_amiga_discard_thread()` dropped a recoverable bit when the owner called it | frees it when the caller is the owner |
 | 8 | `src/common/compat.c:186`, `src/tls/tls_amiga.c:36` | two lazy `OpenDevice`s with no lock and no close, in library segments that get unloaded | semaphore + `ami_timer_close()` / wired-up `ami_tls_timer_close()` |
-| 9 | `tests/tcpdrill/tapdev.c:743` | timer port and device acquired before `tap_dev`, teardown gated on `tap_dev` | `tap_timer_close()` on both failure returns |
+| 9 | `src/common/compat.c`, `src/tls/tls_amiga.c` | the device base doubled as the "usable" flag, so the fast path could see a live base and a zero rate | an explicit ready flag, set last |
+| 10 | `tests/tcpdrill/tapdev.c:743` | timer port and device acquired before `tap_dev`, teardown gated on `tap_dev` | `tap_timer_close()` on both failure returns |
 
 ---
 
