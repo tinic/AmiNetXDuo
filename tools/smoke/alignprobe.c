@@ -35,6 +35,7 @@
 #include <proto/dos.h>
 
 #include <stdarg.h>
+#include <stddef.h>
 
 #include "aminetxduo/cmsg.h"
 
@@ -72,6 +73,21 @@ static VOID a_check(const char *what, BOOL ok, ULONG value)
 
 /* Static storage gets the attribute too, and lands somewhere else entirely. */
 CMSG_BUFFER(a_static_cbuf, CMSG_SPACE(16));
+
+/*
+ * The deterministic case, and the one that made this a bug rather than a coin
+ * flip: a control buffer inside a struct, behind something two bytes wide.
+ * Where the union's alignment is 2 -- which is all m68k gives it without the
+ * attribute -- the compiler puts the buffer at offset 2 and every instance of
+ * this struct has it 2 mod 4.  Where it is 4, the compiler pads and the offset
+ * is 4.  A stack local's address depends on the frame; a struct member's does
+ * not, so this is the half of the probe that answers the same way every run.
+ */
+typedef struct
+{
+    UWORD  before;
+    CMSG_BUFFER(cbuf, CMSG_SPACE(16));
+} AlignHeldBuffer;
 
 /*
  * A longword read from an address 2 mod 4.  Legal on every 68k, and the case
@@ -116,6 +132,12 @@ UWORD   i;
     a_check("CMSG_BUFFER in static storage is longword aligned",
             (((ULONG) CMSG_BUFFER_PTR(a_static_cbuf)) & 3UL) == 0UL,
             ((ULONG) CMSG_BUFFER_PTR(a_static_cbuf)) & 3UL);
+
+    a_log("ALIGN cmsgbuf offset in a struct = %lu",
+          (ULONG) offsetof(AlignHeldBuffer, cbuf));
+    a_check("CMSG_BUFFER behind a UWORD is longword aligned",
+            (offsetof(AlignHeldBuffer, cbuf) & 3UL) == 0UL,
+            (ULONG) (offsetof(AlignHeldBuffer, cbuf) & 3UL));
 
     /*
      * What AllocVec() actually guarantees.  AllocMem() is documented as 8-byte
