@@ -170,6 +170,18 @@ if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
         ERROR_QUIET)
 endif()
 
+# Which CPU build this is.  The archive ships four, they are not
+# interchangeable in speed -- the 68000 one links the `.` multilib, where every
+# 32-bit multiply and divide is a subroutine call -- and until now nothing in
+# the binary said which one was installed.  A throughput report against another
+# stack cannot be read without it: the same release is a different program on
+# each of the four.  "host" off target, so the field is never empty and the
+# string never grows a double space.
+set(AMINETXDUO_VERSION_CPU "host")
+if(CMAKE_CROSSCOMPILING AND DEFINED AMINETXDUO_CPU)
+    set(AMINETXDUO_VERSION_CPU "${AMINETXDUO_CPU}")
+endif()
+
 # --------------------------------------------------------------- header -----
 
 configure_file(
