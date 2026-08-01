@@ -693,7 +693,17 @@ int main(int argc, char **argv)
          */
         report("--- rc %ld", rc);
         report(", %ld", elapsed / TICKS_PER_SECOND);
-        report(".%02ld s\n", (elapsed % TICKS_PER_SECOND) * 2);
+        report(".%02ld s", (elapsed % TICKS_PER_SECOND) * 2);
+
+        /*
+         * AmigaOS reclaims nothing when a process exits, so anything a client
+         * allocated and did not free is gone until the next reboot -- and a
+         * ported client leaves through exit(), which is a longjmp() away from
+         * the frame that owns its 256 KB stack.  Printing the free total after
+         * every command turns this list into the measurement: a leak shows as
+         * the same step down, run after run, and nothing else does.
+         */
+        report(", free %ld\n", (LONG)AvailMem(MEMF_ANY));
     }
 
     if (IntuitionBase != NULL)
