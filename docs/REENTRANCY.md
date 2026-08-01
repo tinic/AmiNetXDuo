@@ -152,6 +152,21 @@ identically.
 
 Both now claim the row inside the bracket and give it back if the join fails.
 
+`tests/tools/run-mcastrace.sh` is the test. One process cannot reach this -- a
+base serialises itself on its own nesting counter -- so `McastRace` runs two,
+with a base each. The window is a handful of instructions and is aimed at rather
+than waited for: `bsd_nx_leave()` pokes the ThreadX scheduler Task, which runs at
+Exec priority 1 and preempts a priority-0 caller *at that instruction*, so a
+second Process parked on the baton is dispatched inside the window. The assertion
+is the only thing the loser can see, which is its own `IP_DROP_MEMBERSHIP` refused
+with `EADDRNOTAVAIL` on a group it is holding. Moving the three stores back below
+`bsd_nx_leave()` takes it from 0 lost memberships in 200 to 63.
+
+Receiving a datagram is deliberately *not* the assertion. NetX Duo refcounts
+membership per `NX_IP`, so two joins for one group leave the count at 2 and one
+spurious leave still leaves the group live for the other opener. What the defect
+destroys is this library's own socket-to-group mapping.
+
 `bsd_mcast_close()` walks the tables with no bracket of its own; that is fine.
 Its only caller is `bsd_socket_destroy()` (`socket.c:856`), and every path into
 that -- `bsd_socket_release`, `bsd_close_all`, `bsd_closing_sweep`,
@@ -185,6 +200,21 @@ overwritten by anyone. `bsd_aam_boot` is now claimed under the same `Forbid()`
 as the interface row, and a launch that finds it taken is answered `AAMR_Busy`
 -- an error the API already defines. The window it can be refused in is bounded
 by the worker's first instructions, which do nothing that can block.
+
+The per-interface half of that is tested. `AamProbe` forks a Process with a
+bsdsocket.library base of its own and has it ask for the same interface while the
+first allocation is in flight -- the case `AAMR_Busy` exists for, and one no
+single caller can reach, since the caller holding the job is the one that would
+ask again. `tests/tools/run-ifquery.sh` asserts it.
+
+The result code alone would not have caught it. `AAMR_Busy` is answered twice
+over: at the door by `bsd_aam_jobs[index]`, and -- if that guard is gone and the
+worker starts anyway -- by `netstack_interface_dhcp_start()` refusing a second
+DHCP client on one interface, which `bsd_aam_worker()` also reports as
+`AAMR_Busy`. Deleting the guard still produces an 11, measured. What changes is
+*when*: a refusal is replied inside `BeginInterfaceConfig()`, the other answer
+costs a `CreateNewProc()` and a worker's first DHCP call and arrived ten ticks
+later. So the probe asserts the message beat the call's return.
 
 ### `bsd_raw_close()` with the stack already down (FIXED)
 

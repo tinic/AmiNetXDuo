@@ -712,6 +712,40 @@ else
     fail "the allocation did not stay in flight"
 fi
 
+# ---- and only one of them at a time --------------------------------------
+#
+# "AAMR_Busy -- Address allocation is already in progress for this interface."
+# bsd_aam_launch() claims bsd_aam_jobs[index] under Forbid() and refuses a
+# launch that finds it taken.  Nothing one process does can reach that guard:
+# BeginInterfaceConfig() is asynchronous, but the caller holding the job is the
+# one that would ask again, so the second request has to come from an unrelated
+# program with a base of its own.  The probe forks one, during the window above
+# in which a worker is certainly running.
+#
+# THE RESULT CODE ALONE WOULD NOT CATCH IT.  AAMR_Busy is answered twice over:
+# at the door by that guard, and -- if the guard is gone and the worker starts
+# anyway -- by netstack_interface_dhcp_start() refusing a second DHCP client on
+# one interface, which bsd_aam_worker() also reports as AAMR_Busy.  Measured:
+# with the guard deleted the second caller is STILL told 11.  What changes is
+# when.  A refusal comes back inside BeginInterfaceConfig(); the other answer
+# costs a CreateNewProc() and a worker's first DHCP call, and arrived ~10 ticks
+# later.  So the probe reports whether the message beat the call's return, and
+# that is what is asserted here.
+#
+# NEGATIVE CONTROL, measured: delete the `if (bsd_aam_jobs[index] != NULL)`
+# branch from src/bsdsocket/addralloc.c and this line reads "REPLIED LATE, so a
+# worker was started".  The collateral is worth knowing too -- the second
+# launch overwrites bsd_aam_jobs[index], so the FIRST caller's
+# AbortInterfaceConfig() can no longer find its own job and the three `slow:`
+# assertions below fail with it.
+if grep -q "^busy: .* -- refused at the door with AAMR_Busy, correctly" "$REPORT"; then
+    pass "a second process asking for an interface already being configured is refused AAMR_Busy"
+elif grep -q "^busy: .* -- NOT TESTED" "$REPORT"; then
+    fail "the second process never got as far as asking -- AAMR_Busy is UNTESTED"
+else
+    fail "the second request got a worker of its own -- bsd_aam_jobs[] did not refuse it at the door, and the first caller's job is no longer the one in the table"
+fi
+
 if grep -q "^slow: abort replied after .* -- AAMR_Aborted, correctly" "$REPORT"; then
     pass "AbortInterfaceConfig stopped one in flight, replied AAMR_Aborted"
 else

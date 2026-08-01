@@ -23,6 +23,7 @@
 #include <exec/types.h>
 #include <exec/ports.h>
 #include <dos/dos.h>
+#include <dos/dostags.h>
 #include <utility/tagitem.h>
 
 /* <libraries/bsdsocket.h> pulls in <sys/socket.h>, which uses size_t and
@@ -224,6 +225,233 @@ static VOID p_begin_and_collect(struct Library *base, struct MsgPort *port,
                                              : "replied SOMETHING ELSE"),
            (LONG)((got == &aam->aam_Message && aam->aam_Result == expect)
                       ? " -- correctly" : " -- WRONG"));
+}
+
+/* ------------------------------------------------------- the second caller */
+
+/*
+ * "AAMR_Busy -- Address allocation is already in progress for this interface."
+ *
+ * bsd_aam_launch() claims bsd_aam_jobs[index] under Forbid() and answers
+ * AAMR_Busy to a launch that finds it taken.  That guard cannot be reached
+ * from one Process: BeginInterfaceConfig() is asynchronous, but the caller
+ * that already owns the interface is the one holding the job, so a second call
+ * has to come from somewhere else while the first is still in flight.
+ *
+ * So this is a Process of its own with a bsdsocket.library base of its own --
+ * an unrelated program asking for the same interface, which is the case the
+ * autodoc's AAMR_Busy exists for.  It prints nothing (NP_Cli FALSE, no
+ * Output()); everything it saw goes back in the block below and the parent
+ * reports it.
+ *
+ * The interface it asks about is the one the parent has a DHCP worker running
+ * on, with no address and the link down, so every check ahead of the guard --
+ * version, name, broadcast type, address not already known, protocol -- passes
+ * for it exactly as it did for the parent.  A result that is not AAMR_Busy is
+ * therefore the guard, and not one of those.
+ *
+ * WHY THE RESULT CODE ALONE IS NOT THE ASSERTION
+ *
+ *   AAMR_Busy is answered in two places, and only one of them is the guard.
+ *   bsd_aam_launch() refuses at the door.  If it did not, the worker would be
+ *   created, and netstack_interface_dhcp_start() would then refuse the SECOND
+ *   client on an interface that already has one -- AMI_NET_ERR_BUSY, which
+ *   bsd_aam_worker() also reports as AAMR_Busy.  Deleting the guard therefore
+ *   still produces AAMR_Busy, measured, so a probe that read only the result
+ *   code would pass a build with no guard in it at all.
+ *
+ *   What separates them is WHEN.  A refusal is replied inside
+ *   BeginInterfaceConfig(), so the message is on the port before the call
+ *   returns.  The other answer costs a CreateNewProc(), a PutMsg() and a
+ *   worker getting as far as its first DHCP call -- it is never there yet.  So
+ *   the first GetMsg() is the assertion and the result code only says which
+ *   refusal it was.
+ */
+static struct
+{
+    struct Task *sc_Parent;
+    ULONG        sc_Signal;
+    char         sc_Interface[16];
+    LONG         sc_OpenFailed;
+    LONG         sc_PortFailed;
+    LONG         sc_CreateRc;
+    LONG         sc_Result;
+    LONG         sc_Replied;
+    LONG         sc_AtOnce;     /* back before BeginInterfaceConfig returned */
+} second;
+
+static VOID p_second_caller(VOID)
+{
+    struct Library                  *sb;
+    struct MsgPort                  *port;
+    struct AddressAllocationMessage *aam = NULL;
+    struct Message                  *got;
+    struct TagItem                   tags[2];
+
+    second.sc_Result  = AAMR_Ignored;
+    second.sc_Replied = 0;
+
+    sb = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4);
+    if (sb == NULL)
+    {
+        second.sc_OpenFailed = 1;
+    }
+    else
+    {
+        port = CreateMsgPort();
+        if (port == NULL)
+        {
+            second.sc_PortFailed = 1;
+        }
+        else
+        {
+            tags[0].ti_Tag  = CAAMTA_ReplyPort;
+            tags[0].ti_Data = (ULONG)port;
+            tags[1].ti_Tag  = TAG_DONE;
+            tags[1].ti_Data = 0;
+
+            second.sc_CreateRc = p_create_aam(sb, AAM_VERSION, AAMP_DHCP,
+                                              second.sc_Interface, &aam, tags);
+
+            if (second.sc_CreateRc == CAAME_Success && aam != NULL)
+            {
+                aam->aam_Result = AAMR_Ignored;
+
+                p_begin_config(sb, aam);
+
+                /*
+                 * This GetMsg() is the assertion -- see the note above the
+                 * block.  A refusal is replied inside the call; a worker that
+                 * was allowed to start cannot have got anywhere yet.
+                 */
+                got = GetMsg(port);
+                second.sc_AtOnce = (got == &aam->aam_Message) ? 1 : 0;
+
+                /* And then long enough for the other answer to arrive, so that
+                   a build with no guard is reported rather than hung on. */
+                if (got == NULL)
+                {
+                    ULONG waited;
+
+                    for (waited = 0; got == NULL && waited < 15UL * 50UL;
+                         waited += 5)
+                    {
+                        Delay(5);
+                        got = GetMsg(port);
+                    }
+                }
+
+                second.sc_Replied = (got == &aam->aam_Message) ? 1 : 0;
+                second.sc_Result  = aam->aam_Result;
+
+                /*
+                 * A worker that really started is still holding this message.
+                 * Abort it rather than free it under the worker's feet: the
+                 * broken build is the one that gets here, and it must not take
+                 * the machine down before the parent can report why.
+                 */
+                if (second.sc_Replied == 0)
+                {
+                    p_abort_config(sb, aam);
+                    for (;;)
+                    {
+                        got = GetMsg(port);
+                        if (got != NULL)
+                            break;
+                        Delay(10);
+                    }
+                }
+
+                p_delete_aam(sb, aam);
+            }
+
+            DeleteMsgPort(port);
+        }
+
+        CloseLibrary(sb);
+    }
+
+    Signal(second.sc_Parent, second.sc_Signal);
+}
+
+/*
+ * Run it, and say what it was told.  Called with a DHCP worker in flight on
+ * the same interface: the only correct answer is AAMR_Busy, replied.
+ */
+static VOID p_ask_again_from_another_process(const char *ifname)
+{
+    struct Process *proc;
+    struct TagItem  tags[6];
+    BYTE            sig;
+    ULONG           i;
+
+    for (i = 0; i + 1 < sizeof(second.sc_Interface) && ifname[i] != '\0'; i++)
+        second.sc_Interface[i] = ifname[i];
+    second.sc_Interface[i] = '\0';
+
+    sig = AllocSignal(-1);
+    if (sig == -1)
+    {
+        Printf((CONST_STRPTR)"busy: no signal for the handshake -- NOT TESTED\n");
+        return;
+    }
+
+    second.sc_Parent = FindTask(NULL);
+    second.sc_Signal = 1UL << sig;
+    SetSignal(0UL, second.sc_Signal);
+
+    tags[0].ti_Tag  = NP_Entry;
+    tags[0].ti_Data = (ULONG)p_second_caller;
+    tags[1].ti_Tag  = NP_Name;
+    tags[1].ti_Data = (ULONG)"AamProbe second caller";
+    tags[2].ti_Tag  = NP_StackSize;
+    tags[2].ti_Data = 8192;
+    tags[3].ti_Tag  = NP_Priority;
+    tags[3].ti_Data = 0;
+    tags[4].ti_Tag  = NP_Cli;
+    tags[4].ti_Data = FALSE;
+    tags[5].ti_Tag  = TAG_DONE;
+    tags[5].ti_Data = 0;
+
+    proc = CreateNewProc(tags);
+    if (proc == NULL)
+    {
+        Printf((CONST_STRPTR)"busy: CreateNewProc failed -- NOT TESTED\n");
+        FreeSignal(sig);
+        return;
+    }
+
+    Wait(second.sc_Signal);
+    FreeSignal(sig);
+
+    if (second.sc_OpenFailed != 0)
+    {
+        Printf((CONST_STRPTR)"busy: the second process got no base -- NOT TESTED\n");
+        return;
+    }
+    if (second.sc_PortFailed != 0)
+    {
+        Printf((CONST_STRPTR)"busy: the second process got no port -- NOT TESTED\n");
+        return;
+    }
+    if (second.sc_CreateRc != CAAME_Success)
+    {
+        Printf((CONST_STRPTR)"busy: the second process could not build a "
+                             "message (%ld) -- NOT TESTED\n",
+               second.sc_CreateRc);
+        return;
+    }
+
+    Printf((CONST_STRPTR)"busy: a second process asked for %s while the first "
+                         "allocation was running: result %ld, %s%s\n",
+           (LONG)second.sc_Interface, second.sc_Result,
+           (LONG)(second.sc_AtOnce  ? "replied before the call returned"
+                : second.sc_Replied ? "REPLIED LATE, so a worker was started"
+                                    : "NOT REPLIED"),
+           (LONG)((second.sc_AtOnce && second.sc_Result == AAMR_Busy)
+                      ? " -- refused at the door with AAMR_Busy, correctly"
+                      : " -- WRONG, the second request was not refused where "
+                        "it had to be"));
 }
 
 /* ------------------------------------------------------------------ main -- */
@@ -688,6 +916,16 @@ int main(void)
             Printf((CONST_STRPTR)"slow: still running after a second: %s%s\n",
                    (LONG)((got == NULL) ? "yes" : "NO, already replied"),
                    (LONG)((got == NULL) ? " -- correctly" : " -- WRONG"));
+
+            /*
+             * The only window in this file in which a worker is certainly
+             * running: the interface is down, so DISCOVER goes unanswered and
+             * the job sits in bsd_aam_jobs[] until the ten-second floor.  What
+             * a second caller is told during it is the AAMR_Busy guard, and
+             * nothing else in this probe reaches it.
+             */
+            if (got == NULL)
+                p_ask_again_from_another_process(ifname);
 
             p_abort_config(base, slow);
 
