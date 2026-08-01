@@ -21490,12 +21490,28 @@ harness, because nothing runs it.
 
 **A two-card guest was attempted and is not the reason this is believed.**
 Amiberry does put two boards in the machine -- `a2065_rom_file=:ENABLED` plus
-an `ariadne_*` pair through `AMINETXDUO_AMIBERRY_EXTRA`, both bridged to
-`ens18` with different MACs, logged as `Card 05: 'A2065'` and
-`Card 06: 'Ariadne'` and both mapped into Zorro II space. What did not happen
-is the guest coming up on them: `AddNetInterface eth0 eth1` was entered and
-never returned, with an empty serial log, and the run hit its timeout. Not
-diagnosed.
+an `ariadne_*` pair through `AMINETXDUO_AMIBERRY_EXTRA`, each with its own MAC
+-- and logs both, `Card 05: 'A2065'` and `Card 06: 'Ariadne'`, mapped into
+Zorro II at `0x00e90000` and `0x00ea0000`. What did not happen is the guest
+coming up on them. Three runs, on an A1200 with 8 MB of Zorro II Fast:
+
+```
+ariadne alone, bridged            eth0 online, 192.168.1.202     rc 0
+a2065 + ariadne, both bridged     AddNetInterface eth0 eth1 hangs, empty serial
+a2065 + ariadne, both bridged     AddNetInterface eth0 alone hangs, same
+a2065 bridged + ariadne on SLIRP  AddNetInterface eth0 alone hangs, same
+```
+
+So it is the presence of the second board and not the backend, and it is the
+FIRST interface that stops -- the A2065 that comes up on its own every day in
+this lab. The serial log is empty, which means the library never got as far as
+its first warning. Not diagnosed.
+
+The 8 MB of Zorro II Fast RAM is the first thing to look at: it covers
+`0x200000-0x9fffff`, the two cards land immediately above it, and §76 already
+records that this machine's PCMCIA windows collide with that same 8 MB and
+produce exactly this shape -- a card logged as present and a driver that
+cannot find it.
 
 ### Where it is
 

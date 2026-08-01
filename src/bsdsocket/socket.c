@@ -2436,6 +2436,7 @@ static LONG bsd_tcp_source_check(struct AmiSocketBase *SocketBase,
      */
     if (addr->nxd_ip_version == NX_IP_VERSION_V6)
     {
+        NXD_ADDRESS       dest   = *addr;   /* the lookup takes it non-const */
         NXD_IPV6_ADDRESS *chosen = NX_NULL;
         NX_INTERFACE     *nxif   =
             ip->nx_ipv6_address[*index].nxd_ipv6_address_attached;
@@ -2445,8 +2446,7 @@ static LONG bsd_tcp_source_check(struct AmiSocketBase *SocketBase,
             return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
 
         tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
-        status = _nxd_ipv6_interface_find(ip,
-                                          (ULONG *)addr->nxd_ip_address.v6,
+        status = _nxd_ipv6_interface_find(ip, dest.nxd_ip_address.v6,
                                           &chosen, nxif);
         tx_mutex_put(&ip->nx_ip_protection);
 

@@ -62,10 +62,13 @@ was wrong for a day.
   `NX_IP` with two `nx_ip_interface[]` entries filled in and checks the source
   address the SYN carried. What is not shown is the same thing through two real
   SANA-II drivers. Amiberry does put two cards in the machine -- `a2065` plus
-  `ariadne`, both bridged, both logged and mapped -- but `AddNetInterface eth0
-  eth1` never returned and the serial log was empty; `ariadne` alone comes up
-  fine. Undiagnosed. `SrcProbe` already takes the second address and a
-  destination for when it is.
+  `ariadne`, both logged and mapped into Zorro II -- but with the second card
+  present `AddNetInterface eth0` hangs on the A2065, which comes up on its own
+  every day, and the serial log is empty. It hangs with the second card on
+  SLIRP as well as bridged, so it is the board and not the backend. The 8 MB of
+  Zorro II Fast RAM sitting directly below both cards is the first suspect
+  (RESEARCH.md 85, 76). `SrcProbe` already takes the second address and a
+  destination for when this is fixed.
 - **IPv6 group membership (`IPV6_JOIN_GROUP`) is absent.** The IPv4 side is
   done (below); this is not, and is a separate decision because the numbers are
   worse. `NX_ENABLE_IPV6_MULTICAST` grows every `NX_IP` by 172 bytes whether or
