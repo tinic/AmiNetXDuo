@@ -14,6 +14,8 @@
 
 #include "tls_internal.h"
 
+#include "tls.h"                /* ami_tls_timer_close() */
+
 #include <exec/memory.h>
 #include <dos/dosextens.h>
 #include <proto/exec.h>
