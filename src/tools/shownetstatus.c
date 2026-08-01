@@ -1102,6 +1102,21 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
         tool_printf("\nNetwork stack:  %s\n",
                     (LONG)(stack_running ? "running" : "not started"));
 
+        /*
+         * Which stack, and which build of it. Asked for by a user who could
+         * not tell installed versions apart: C: and LIBS: are updated
+         * separately, so the library in memory is the one worth reporting and
+         * it is not necessarily the same age as this command. Nothing is said
+         * when no library is loaded -- there is no version to report, and the
+         * line above has already said the stack is not started.
+         */
+        {
+            char id[64];
+
+            if (tool_stack_version(id, sizeof(id)))
+                tool_printf("Stack version:  %s\n", (LONG)id);
+        }
+
         if (ext_host[0] != '\0')
             tool_printf("Host name:      %s\n", (LONG)ext_host);
         else if (cfg->hostname[0] != '\0')

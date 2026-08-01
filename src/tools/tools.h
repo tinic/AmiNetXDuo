@@ -194,6 +194,7 @@ struct Library *tool_stack_start(VOID);
  * stack will hand out somebody else's.
  */
 BOOL tool_stack_is_ours(struct Library *base);
+BOOL tool_stack_version(char *buf, ULONG len);
 VOID tool_explain_foreign_stack(struct Library *base);
 
 /*

@@ -636,6 +636,56 @@ BOOL tool_stack_library_running(VOID)
     return running;
 }
 
+/*
+ * What the LOADED library says it is, copied out without opening it.
+ *
+ * The version that matters to someone asking "what am I running" is the
+ * library's, not the command's: C: and LIBS: are updated separately, and a
+ * machine with new commands over an old library is exactly the case worth
+ * reporting. Reading lib_IdString answers for the copy actually in memory.
+ *
+ * Looking, not opening, for the reason tool_stack_library_running() gives --
+ * a status command must not start the network as a side effect of being asked
+ * a question. Copied rather than returned by pointer, because the library can
+ * expunge the moment Forbid() ends and the string goes with it.
+ *
+ * FALSE when no library is loaded, which is not an error: nothing has opened
+ * it yet, and the caller says so in its own words.
+ */
+BOOL tool_stack_version(char *buf, ULONG len)
+{
+    struct Library *lib;
+    BOOL            got = FALSE;
+
+    if (buf == NULL || len == 0UL)
+        return FALSE;
+
+    buf[0] = '\0';
+
+    Forbid();
+
+    lib = (struct Library *)FindName(&SysBase->LibList,
+                                     (CONST_STRPTR)"bsdsocket.library");
+    if (lib != NULL && lib->lib_IdString != NULL)
+    {
+        const char *id = (const char *)lib->lib_IdString;
+        ULONG       i;
+
+        /* lib_IdString ends "\r\n" by convention; neither belongs in a line
+           this command is composing itself. */
+        for (i = 0; i + 1UL < len && id[i] != '\0' &&
+                    id[i] != '\r' && id[i] != '\n'; i++)
+            buf[i] = id[i];
+
+        buf[i] = '\0';
+        got    = (BOOL)(i > 0UL);
+    }
+
+    Permit();
+
+    return got;
+}
+
 BOOL tool_stack_installed(VOID)
 {
     return (BOOL)(tool_exists("LIBS:bsdsocket.library") ||
