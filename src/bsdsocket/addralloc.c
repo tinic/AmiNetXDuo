@@ -494,6 +494,7 @@ static VOID bsd_aam_reply(struct AddressAllocationMessage *aam, LONG result);
 typedef struct BsdAamJob
 {
     struct AddressAllocationMessage *baj_Message;
+    struct Task                     *baj_Parent;   /* who is in the Wait()   */
     UWORD                            baj_Index;
     volatile BOOL                    baj_Abort;
     volatile BOOL                    baj_Done;
@@ -508,11 +509,22 @@ typedef struct BsdAamJob
 static BsdAamJob *bsd_aam_jobs[AMI_CFG_MAX_INTERFACES];
 static LONG       bsd_aam_workers;
 
-/* Hand-over to a freshly created Process, the same idiom tcp_handler.c uses:
-   a static slot plus a SIGF_SINGLE handshake, so the pointer cannot outlive
-   the launch. */
+/*
+ * Hand-over to a freshly created Process: one slot plus a SIGF_SINGLE
+ * handshake, so the pointer cannot outlive the launch.
+ *
+ * One slot for the whole machine, and the launcher has to Permit() before it
+ * can Wait(), so a second BeginInterfaceConfig() -- legal, on another
+ * interface -- could otherwise overwrite it in that window and leave the first
+ * launcher waiting for a signal its worker sent to the second. So the slot is
+ * claimed under the same Forbid() as the interface row and a launch that finds
+ * it taken is told AAMR_Busy. The window is bounded by the worker's first
+ * instructions, which do nothing that can block.
+ *
+ * The parent task travels in the job rather than beside it: it is per-request,
+ * and a second static would only reproduce the same race one field along.
+ */
 static BsdAamJob *bsd_aam_boot;
-static struct Task *bsd_aam_boot_parent;
 
 BOOL bsd_aam_busy(VOID)
 {
@@ -617,8 +629,8 @@ static VOID bsd_aam_worker(VOID)
     bsd_aam_boot = NULL;
     Permit();
 
-    if (bsd_aam_boot_parent != NULL)
-        Signal(bsd_aam_boot_parent, SIGF_SINGLE);
+    if (job != NULL && job->baj_Parent != NULL)
+        Signal(job->baj_Parent, SIGF_SINGLE);
 
     if (job == NULL)
     {
@@ -802,6 +814,7 @@ static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
     }
 
     job->baj_Message = aam;
+    job->baj_Parent  = me;
     job->baj_Index   = index;
     job->baj_Abort   = FALSE;
     job->baj_Done    = FALSE;
@@ -821,13 +834,18 @@ static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
         return;
     }
 
+    /* A launch already handed over and not yet collected. See the slot. */
+    if (bsd_aam_boot != NULL)
+    {
+        Permit();
+        ami_free(job);
+        bsd_aam_reply(aam, AAMR_Busy);
+        return;
+    }
+
     bsd_aam_jobs[index] = job;
     bsd_aam_workers++;
-
-    /* The hand-over slot is guarded by the same Forbid() as the launch, so two
-       BeginInterfaceConfig() calls cannot swap each other's jobs. */
     bsd_aam_boot        = job;
-    bsd_aam_boot_parent = me;
 
     SetSignal(0, SIGF_SINGLE);
 
@@ -851,7 +869,6 @@ static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
         bsd_aam_jobs[index] = NULL;
         bsd_aam_workers--;
         bsd_aam_boot        = NULL;
-        bsd_aam_boot_parent = NULL;
         Permit();
 
         ami_free(job);
@@ -867,8 +884,6 @@ static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
      * hand-over slot before this returns and a second request can use it.
      */
     Wait(SIGF_SINGLE);
-
-    bsd_aam_boot_parent = NULL;
 }
 
 VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __asm("a0"),

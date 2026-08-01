@@ -374,7 +374,32 @@ VOID bsd_raw_close(AmiSocket *sock)
     }
     else
     {
-        /* The stack is gone; the packets went with it. */
+        /*
+         * The stack is gone; the packets went with it. The registry is not the
+         * stack's, though -- it is a file-scope static that outlives any
+         * NX_IP. Leaving this socket linked would hand the next bring-up a
+         * list into freed memory and a bsd_raw_installed that never returns to
+         * zero, which is the filter never being installed again. Forbid()
+         * rather than nx_ip_protection: the mutex lives inside the NX_IP that
+         * has just been freed.
+         */
+        Forbid();
+
+        for (link = &bsd_raw_list; *link != NULL; link = &(*link)->as_RawNext)
+        {
+            if (*link == sock)
+            {
+                *link = sock->as_RawNext;
+
+                if (bsd_raw_installed > 0)
+                    bsd_raw_installed--;
+
+                break;
+            }
+        }
+
+        Permit();
+
         sock->as_RawHead  = NX_NULL;
         sock->as_RawTail  = NX_NULL;
         sock->as_RawCount = 0;
