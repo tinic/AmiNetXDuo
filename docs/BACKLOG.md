@@ -229,6 +229,23 @@ was wrong for a day.
 
 ## Environment and tooling
 
+- **The two-interface source case is proved on a host, not on a guest.** TCP
+  now leaves from the address `bind()` named --
+  `nxd_tcp_client_socket_source_connect()` in the NetX fork -- and the case it
+  exists for is two interfaces on one subnet, source on one and route out of
+  the other. That is asserted by `tests/netstack/host/test_tcp_source_connect_host.c`,
+  which compiles the real connect, route lookup and SYN build against an
+  `NX_IP` with two `nx_ip_interface[]` entries filled in and checks the source
+  address the SYN carried. What is not shown is the same thing through two real
+  SANA-II drivers. Amiberry does put two cards in the machine -- `a2065` plus
+  `ariadne`, both logged and mapped into Zorro II -- but with the second card
+  present `AddNetInterface eth0` hangs on the A2065, which comes up on its own
+  in the same tree on the same run script, and the serial log is empty. It hangs with the second card on
+  SLIRP as well as bridged, so it is the board and not the backend. The 8 MB of
+  Zorro II Fast RAM sitting directly below both cards is the first suspect
+  (RESEARCH.md 85, 76). `SrcProbe` already takes the second address and a
+  destination for when this is fixed.
+
 - **The `sana2_rx.c` reader orphan does not reproduce under emulation.**
   `ami_sana2_rx_stop()`'s last-resort path logs `reader N did not stop;
   leaking its stack` and leaks 32 KB when a SANA-II driver ignores `AbortIO`,
