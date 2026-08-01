@@ -80,10 +80,17 @@ empty results.
   add and a carry-fold per longword. **The checksum is at its floor.**
 
   What this does establish is the price of melding the checksum INTO the copy,
-  which is the one thing that removes the second read: 174.8 cycles per 32 B
-  separate against 133.1 melded, a saving of 41.7 -- 23.9% of the pair, about
-  8.6% of the 1073.90 ns/B pipeline. That is worth having and is still open;
-  it is the redundant read pass and nothing else.
+  which is the one thing that removes the second read. Predicted from the model
+  at 23.9% of the pair; built as `n68k_copy_sum_longwords()` and MEASURED at
+  32.4% -- 177.21 + 201.35 = 378.56 ns/B separate against 256.00 melded, on the
+  same run. The model under-predicted because it charged the melded loop full
+  price for its sixteen bus accesses, and the `movem.l` store in fact pairs
+  with the adds better than the two separate loops did.
+
+  122.56 ns/B of the 1073.90 pipeline is 11.4%, so the implied ceiling moves
+  909 -> about 1026 KB/s. That applies wherever a copy and a checksum cross the
+  same bytes, which on receive is `ami_sana2_copy_to_buff()` followed by the
+  TCP checksum. Wiring it into that path is what remains.
 
 - **RFC 3542's extension headers stay unimplemented.** `IPV6_RTHDR`,
   `HOPOPTS`, `DSTOPTS`, `RTHDRDSTOPTS`, `PATHMTU`, `RECVPATHMTU`,
