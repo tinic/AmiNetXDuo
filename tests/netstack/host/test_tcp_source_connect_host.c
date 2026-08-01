@@ -175,26 +175,31 @@ VOID _nx_tcp_socket_thread_suspend(TX_THREAD **suspension_list_head,
 
 VOID _nx_tcp_connect_cleanup(TX_THREAD *thread_ptr NX_CLEANUP_PARAMETER)
 {
+    NX_CLEANUP_EXTENSION
     (void)thread_ptr;
 }
 
 VOID _nx_tcp_disconnect_cleanup(TX_THREAD *thread_ptr NX_CLEANUP_PARAMETER)
 {
+    NX_CLEANUP_EXTENSION
     (void)thread_ptr;
 }
 
 VOID _nx_tcp_receive_cleanup(TX_THREAD *thread_ptr NX_CLEANUP_PARAMETER)
 {
+    NX_CLEANUP_EXTENSION
     (void)thread_ptr;
 }
 
 VOID _nx_tcp_transmit_cleanup(TX_THREAD *thread_ptr NX_CLEANUP_PARAMETER)
 {
+    NX_CLEANUP_EXTENSION
     (void)thread_ptr;
 }
 
 VOID _nx_tcp_cleanup_deferred(TX_THREAD *thread_ptr NX_CLEANUP_PARAMETER)
 {
+    NX_CLEANUP_EXTENSION
     (void)thread_ptr;
 }
 
