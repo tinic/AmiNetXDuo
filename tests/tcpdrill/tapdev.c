@@ -731,6 +731,20 @@ static const APTR tap_vectors[] =
     (APTR)-1
 };
 
+static VOID tap_timer_close(VOID)
+{
+    if (tap_timer != NULL)
+    {
+        CloseDevice(&tap_timer_req);
+        tap_timer = NULL;
+    }
+    if (tap_timer_port != NULL)
+    {
+        DeleteMsgPort(tap_timer_port);
+        tap_timer_port = NULL;
+    }
+}
+
 LONG tap_install(const UBYTE *mac)
 {
     TapDevice *d;
@@ -760,7 +774,12 @@ LONG tap_install(const UBYTE *mac)
     d = (TapDevice *)MakeLibrary((APTR)tap_vectors, NULL, NULL,
                                  (ULONG)sizeof(TapDevice), (BPTR)0);
     if (d == NULL)
+    {
+        /* tap_remove() returns at once while tap_dev is NULL, so a failure
+           here is the only chance to give the timer back. */
+        tap_timer_close();
         return -1;
+    }
 
     d->tx = (TapFrame *)AllocMem((ULONG)sizeof(TapFrame) * TAP_TX_SLOTS,
                                  MEMF_PUBLIC | MEMF_CLEAR);
@@ -769,6 +788,7 @@ LONG tap_install(const UBYTE *mac)
         FreeMem((APTR)((ULONG)d - d->dd.dd_Library.lib_NegSize),
                 (ULONG)(d->dd.dd_Library.lib_NegSize +
                         d->dd.dd_Library.lib_PosSize));
+        tap_timer_close();
         return -1;
     }
 
@@ -842,14 +862,5 @@ VOID tap_remove(VOID)
 
     tap_dev = NULL;
 
-    if (tap_timer != NULL)
-    {
-        CloseDevice(&tap_timer_req);
-        tap_timer = NULL;
-    }
-    if (tap_timer_port != NULL)
-    {
-        DeleteMsgPort(tap_timer_port);
-        tap_timer_port = NULL;
-    }
+    tap_timer_close();
 }

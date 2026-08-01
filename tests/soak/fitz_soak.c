@@ -84,6 +84,8 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 
+#include <stdlib.h>   /* atexit */
+
 #include "aminetxduo/netstatus.h"
 
 static const char version_tag[] __attribute__((used)) =
@@ -221,6 +223,7 @@ typedef struct SoakState
     UWORD           ss_FilerCount;
 
     /* the churner */
+    struct Process *ss_ChurnProc;       /* NULL until it is spawned          */
     volatile UWORD  ss_ChurnRun;
     volatile UWORD  ss_ChurnAlive;
     volatile UWORD  ss_ChurnDone;
@@ -1394,6 +1397,40 @@ static VOID s_summary(struct Library *base, ULONG ran)
 }
 
 
+/*
+ * Give SoakState back on the way out.
+ *
+ * AmigaOS does not reclaim AllocVec() memory when a process exits, and this
+ * command leaves main() from three places -- so atexit(), not a free before
+ * each return.  Every filer lives inside SS, so a filer still stuck in a DOS
+ * call keeps it: freeing here would pull the structure out from under a live
+ * Process.  Each filer's own f_Buf is allocated and freed by the filer.
+ */
+static VOID s_release(VOID)
+{
+    ULONG live = 0UL;
+    ULONG i;
+
+    if (SS == NULL)
+        return;
+
+    for (i = 0UL; i < (ULONG)SS->ss_FilerCount; i++)
+    {
+        if (SS->ss_F[i].f_Proc != NULL && SS->ss_F[i].f_Done == 0U)
+            live++;
+    }
+
+    if (SS->ss_ChurnProc != NULL && SS->ss_ChurnDone == 0U)
+        live++;
+
+    if (live == 0UL)
+    {
+        FreeVec(SS);
+        SS = NULL;
+    }
+}
+
+
 /* ------------------------------------------------------------------ main -- */
 
 int main(void)
@@ -1414,6 +1451,7 @@ int main(void)
         PutStr((CONST_STRPTR)"FitzSoak: out of memory\n");
         return RETURN_FAIL;
     }
+    (VOID)atexit(s_release);
 
     InitSemaphore(&s_out_sem);
     s_pat_init();
@@ -1518,7 +1556,8 @@ int main(void)
         }
     }
 
-    if (s_spawn((APTR)s_churn_entry, NULL, "fitzsoak churner") == NULL)
+    SS->ss_ChurnProc = s_spawn((APTR)s_churn_entry, NULL, "fitzsoak churner");
+    if (SS->ss_ChurnProc == NULL)
         s_note("churner-spawn-failed", 0);
 
     Delay(100UL);

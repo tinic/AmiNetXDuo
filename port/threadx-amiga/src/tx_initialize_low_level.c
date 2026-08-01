@@ -328,7 +328,17 @@ BYTE             sig;
         _tx_amiga_kernel_memory_size =  (ULONG) TX_AMIGA_MEMORY_SIZE;
         _tx_amiga_kernel_memory =  (VOID *) AllocMem(_tx_amiga_kernel_memory_size,
                                                      MEMF_PUBLIC | MEMF_CLEAR);
-        _tx_amiga_memory_owned =  TX_TRUE;
+        if (_tx_amiga_kernel_memory == (VOID *) 0)
+        {
+
+            /* Owning nothing.  The old code set the flag regardless, and the
+               teardown then called FreeMem(NULL, TX_AMIGA_MEMORY_SIZE).  */
+            _tx_amiga_kernel_memory_size =  0UL;
+        }
+        else
+        {
+            _tx_amiga_memory_owned =  TX_TRUE;
+        }
     }
 
     _tx_initialize_unused_memory =  _tx_amiga_kernel_memory;
@@ -1652,7 +1662,8 @@ UINT         status;
         _tx_amiga_timer_stack =  (APTR) 0;
     }
 
-    if (_tx_amiga_memory_owned != TX_FALSE)
+    if ((_tx_amiga_memory_owned != TX_FALSE) &&
+        (_tx_amiga_kernel_memory != (VOID *) 0))
     {
         FreeMem(_tx_amiga_kernel_memory, _tx_amiga_kernel_memory_size);
         _tx_amiga_kernel_memory      =  (VOID *) 0;

@@ -30,6 +30,7 @@
 #include <dos/dosextens.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <setjmp.h>
 
 extern int __real_main(int argc, char **argv);
 
@@ -56,6 +57,13 @@ static struct StackSwapStruct argv_sss;
 static int                    argv_argc;
 static int                    argv_result;
 static BOOL                   argv_on_swapped;   /* TRUE between the swaps */
+static APTR                   argv_stack;        /* the swapped stack, to free */
+
+/* The way back onto the caller's stack when the client exits rather than
+   returns; see the note above __wrap__exit(). */
+static jmp_buf                argv_exit_jmp;
+static struct Task           *argv_exit_task;    /* who set it, NULL when unset */
+static int                    argv_exit_status;
 
 /*
  * Run __real_main() on the swapped stack.  No locals, no arguments, and
@@ -91,6 +99,18 @@ static __attribute__((noinline)) VOID argv_run_on_stack(VOID)
  * through the wrong memory.  Restore the two bounds directly instead, from what
  * the first StackSwap() saved into argv_sss; the pointer itself is the crt0's
  * to restore.  -Wl,--wrap=exit,--wrap=_exit routes both here.
+ *
+ * The same path also loses the stack itself.  AmigaOS does not reclaim
+ * AllocMem() memory when a process exits, and the FreeMem() in __wrap_main()
+ * sits after argv_run_on_stack() returns -- which it never does on an exit().
+ * That is 256 KB per invocation of every client that ends this way, gone until
+ * reboot, on a machine whose supported floor is 1 MB.
+ *
+ * So __wrap__exit() longjmp()s back into __wrap_main(), which is still on the
+ * caller's stack, and the free happens there.  _exit rather than exit: by then
+ * newlib has run the atexit() handlers and flushed stdio, all of it on the big
+ * stack, which is the reason for bringing one.  Nothing is left to run but the
+ * crt0's return to DOS.
  */
 extern void __real_exit(int status);
 extern void __real__exit(int status);
@@ -116,6 +136,16 @@ void __wrap_exit(int status)
 void __wrap__exit(int status)
 {
     argv_restore_bounds();
+
+    /* Only the Task that ran setjmp() may jump back into its frame; the
+       console reader child in clients/dropbear has its own. */
+    if (argv_exit_task != NULL && argv_exit_task == FindTask(NULL))
+    {
+        argv_exit_task   = NULL;
+        argv_exit_status = status;
+        longjmp(argv_exit_jmp, 1);
+    }
+
     __real__exit(status);
 }
 
@@ -131,7 +161,7 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
     int             argc = 0;
     ULONG           w = 0;              /* write cursor into argv_buf   */
     ULONG           r;                  /* read cursor into args        */
-    APTR            stack;
+    int             exited;
 
     (void)argc_ignored;
     (void)argv_ignored;
@@ -209,16 +239,33 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
      * to spare 256 KB, fall back to the caller's stack rather than refuse: a
      * small program may still fit.
      */
-    stack = AllocMem(AMIGA_ARGV_STACK, MEMF_ANY);
-    if (stack != NULL)
+    argv_stack = AllocMem(AMIGA_ARGV_STACK, MEMF_ANY);
+    if (argv_stack != NULL)
     {
-        argv_sss.stk_Lower   = stack;
-        argv_sss.stk_Upper   = (ULONG)stack + AMIGA_ARGV_STACK;
-        argv_sss.stk_Pointer = (APTR)((ULONG)stack + AMIGA_ARGV_STACK);
+        argv_sss.stk_Lower   = argv_stack;
+        argv_sss.stk_Upper   = (ULONG)argv_stack + AMIGA_ARGV_STACK;
+        argv_sss.stk_Pointer = (APTR)((ULONG)argv_stack + AMIGA_ARGV_STACK);
 
-        argv_run_on_stack();
+        /* setjmp() here, so a client that exits instead of returning comes
+           back to this frame -- on the caller's stack -- and the FreeMem()
+           below runs either way.  argv_stack is static because a local
+           written before setjmp() is not guaranteed to survive the longjmp. */
+        exited = setjmp(argv_exit_jmp);
+        if (exited == 0)
+        {
+            argv_exit_task = FindTask(NULL);
+            argv_run_on_stack();
+        }
+        argv_exit_task = NULL;
 
-        FreeMem(stack, AMIGA_ARGV_STACK);
+        FreeMem(argv_stack, AMIGA_ARGV_STACK);
+        argv_stack = NULL;
+
+        /* Back from an exit(): everything newlib had left to do has been done
+           on the big stack, so finish the termination rather than return a
+           status the client did not ask for. */
+        if (exited != 0)
+            __real__exit(argv_exit_status);
     }
     else
     {

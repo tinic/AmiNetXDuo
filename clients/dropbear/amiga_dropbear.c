@@ -1045,13 +1045,27 @@ static void con_child(void)
     Signal(cr->cr_Parent, cr->cr_DoneSig);     /* last act; then touch nothing */
 }
 
+static void con_reader_stop(void);
+
 static void con_reader_start(BPTR handle)
 {
     ConReader     *cr;
     struct TagItem tags[5];
+    static int     con_registered;
 
     if (con_reader != NULL)
         return;
+
+    /*
+     * Dropbear ends by calling exit(), and a session torn down by an error
+     * never gets back to tcsetattr()'s cooked branch.  Without this the child
+     * Process is left running on a ConReader the exiting task will not free,
+     * signalling a Task that is gone -- and AmigaOS reclaims neither the
+     * structure nor the two signal bits.  con_reader_stop() returns at once
+     * when there is nothing running, so registering once covers every cycle.
+     */
+    if (!con_registered)
+        con_registered = (atexit(con_reader_stop) == 0);
 
     con_data_bit = AllocSignal(-1);
     con_done_bit = AllocSignal(-1);

@@ -94,6 +94,8 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 
+#include <stdlib.h>   /* atexit */
+
 #include "aminetxduo/netstatus.h"
 
 static const char version_tag[] __attribute__((used)) =
@@ -526,6 +528,7 @@ typedef struct EndWorker
 
     struct Library *w_Base;
     UBYTE          *w_Buf;
+    ULONG           w_BufSize;      /* FreeMem() needs it; the sizes differ   */
     ULONG           w_Seed;
     struct Process *w_Proc;
 } EndWorker;
@@ -2367,6 +2370,54 @@ static VOID end_summary(struct Library *base, ULONG ran, ULONG avail_end)
            (LONG)sys.e.nss_PoolTotal, (LONG)avail_end);
 }
 
+static VOID end_worker_buf(EndWorker *w, ULONG size)
+{
+    w->w_Buf     = (UBYTE *)AllocMem(size, MEMF_PUBLIC);
+    w->w_BufSize = (w->w_Buf != NULL) ? size : 0UL;
+}
+
+/*
+ * Give the memory back on the way out.
+ *
+ * AmigaOS does not reclaim AllocMem() memory when a process exits, and this
+ * command leaves main() from six places -- so atexit(), not a free before each
+ * return.  A worker that never set w_Done is still running on its buffer, and
+ * on ES, which is where every worker lives: those stay, and the leak is the
+ * price of not freeing a stack out from under a Process that would not stop.
+ */
+static VOID end_release(VOID)
+{
+    ULONG live = 0UL;
+    ULONG i;
+
+    if (ES == NULL)
+        return;
+
+    for (i = 0; i < (ULONG)ES->es_Workers; i++)
+    {
+        EndWorker *w = &ES->es_W[i];
+
+        if (w->w_Proc != NULL && !w->w_Done)
+        {
+            live++;
+            continue;
+        }
+
+        if (w->w_Buf != NULL)
+        {
+            FreeMem(w->w_Buf, w->w_BufSize);
+            w->w_Buf     = NULL;
+            w->w_BufSize = 0UL;
+        }
+    }
+
+    if (live == 0UL)
+    {
+        FreeMem(ES, (ULONG)sizeof(EndState));
+        ES = NULL;
+    }
+}
+
 int main(void)
 {
     struct Library *base;
@@ -2393,6 +2444,7 @@ int main(void)
         Printf((CONST_STRPTR)"endurance: out of memory\n");
         return RETURN_FAIL;
     }
+    (VOID)atexit(end_release);
 
     end_defaults();
     end_read_config();
@@ -2402,7 +2454,6 @@ int main(void)
     if (base == NULL)
     {
         Printf((CONST_STRPTR)"endurance: no bsdsocket.library\n");
-        FreeMem(ES, (ULONG)sizeof(EndState));
         return RETURN_FAIL;
     }
 
@@ -2412,7 +2463,6 @@ int main(void)
                              "older than %ld; no pool timeline is possible\n",
                (LONG)base->lib_Revision, (LONG)AMI_NETSTATUS_MIN_REVISION);
         CloseLibrary(base);
-        FreeMem(ES, (ULONG)sizeof(EndState));
         return RETURN_FAIL;
     }
 
@@ -2455,7 +2505,7 @@ int main(void)
             f->w_Role = ROLE_FILER;
             f->w_Conn = (UWORD)i;
             f->w_Seed = ES->es_Seed + 0x7A5B1CD3UL + i * 15485863UL;
-            f->w_Buf  = (UBYTE *)AllocMem(ES->es_MaxIo, MEMF_PUBLIC);
+            end_worker_buf(f, ES->es_MaxIo);
         }
     }
     else if (ES->es_Mode == MODE_LEAK)
@@ -2469,17 +2519,17 @@ int main(void)
         r->w_Role  = ROLE_RESPONDER;
         r->w_Conn  = 1;
         r->w_Seed  = ES->es_Seed + 11UL;
-        r->w_Buf   = (UBYTE *)AllocMem(ES->es_MaxIo, MEMF_PUBLIC);
+        end_worker_buf(r, ES->es_MaxIo);
 
         l0->w_Role = ROLE_LEAKER;
         l0->w_Conn = 0;
         l0->w_Seed = ES->es_Seed + 22UL;
-        l0->w_Buf  = (UBYTE *)AllocMem(4096UL, MEMF_PUBLIC);
+        end_worker_buf(l0, 4096UL);
 
         l1->w_Role = ROLE_LEAKER;
         l1->w_Conn = 1;
         l1->w_Seed = ES->es_Seed + 33UL;
-        l1->w_Buf  = (UBYTE *)AllocMem(4096UL, MEMF_PUBLIC);
+        end_worker_buf(l1, 4096UL);
     }
     else if (ES->es_Mode == MODE_LOOP || ES->es_Mode == MODE_WIRE)
     {
@@ -2492,7 +2542,7 @@ int main(void)
                 r->w_Role = ROLE_RESPONDER;
                 r->w_Conn = (UWORD)i;
                 r->w_Seed = ES->es_Seed + 0x51ED2701UL + i * 7919UL;
-                r->w_Buf  = (UBYTE *)AllocMem(ES->es_MaxIo, MEMF_PUBLIC);
+                end_worker_buf(r, ES->es_MaxIo);
             }
 
             {
@@ -2501,7 +2551,7 @@ int main(void)
                 d->w_Role = ROLE_DRIVER;
                 d->w_Conn = (UWORD)i;
                 d->w_Seed = ES->es_Seed + 0x2545F491UL + i * 104729UL;
-                d->w_Buf  = (UBYTE *)AllocMem(ES->es_MaxIo, MEMF_PUBLIC);
+                end_worker_buf(d, ES->es_MaxIo);
             }
         }
     }
@@ -2516,12 +2566,12 @@ int main(void)
             hr->w_Role = ROLE_HOGRX;
             hr->w_Conn = (UWORD)i;
             hr->w_Seed = 0x1000UL + i;
-            hr->w_Buf  = (UBYTE *)AllocMem(8192UL, MEMF_PUBLIC);
+            end_worker_buf(hr, 8192UL);
 
             ht->w_Role = ROLE_HOGTX;
             ht->w_Conn = (UWORD)i;
             ht->w_Seed = 0x2000UL + i;
-            ht->w_Buf  = (UBYTE *)AllocMem(8192UL, MEMF_PUBLIC);
+            end_worker_buf(ht, 8192UL);
         }
 
         {
@@ -2530,7 +2580,7 @@ int main(void)
             p->w_Role = ROLE_PROBE;
             p->w_Conn = 0;
             p->w_Seed = 0x3000UL;
-            p->w_Buf  = (UBYTE *)AllocMem(16384UL, MEMF_PUBLIC);
+            end_worker_buf(p, 16384UL);
         }
     }
 

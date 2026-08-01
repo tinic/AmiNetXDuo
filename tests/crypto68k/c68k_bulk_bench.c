@@ -327,6 +327,15 @@ static VOID b_bench_kernels(VOID)
     b_report_ic("    512 B body ", bk_ic512,  512uL);
     b_report_ic("   1024 B body ", bk_ic1024, 1024uL);
     b_report_ic("   2048 B body ", bk_ic2048, 2048uL);
+
+    /* AmigaOS does not reclaim AllocMem() memory when a process exits, so a
+       benchmark that leaves it costs 4 KB until reboot on every run.  Freed
+       here rather than at exit: nothing outside this function reads it. */
+    if (b_table != NULL)
+    {
+        FreeMem(b_table, 4096uL);
+        b_table = NULL;
+    }
 }
 
 
