@@ -11,7 +11,6 @@ User-visible changes, newest first. Internal work is in the git log.
 - `gethostbyname_r()` and `gethostbyaddr_r()` accept a buffer that does not start on a longword boundary. On a 68000 the first write into it was an address error
 - `bpf_ioctl()` answers `EINVAL` for a buffer at an odd address rather than taking an address error on a 68000
 - New `docs/ALIGNMENT.md`: every unaligned-access site and every thread and process stack in the tree, with the measurements
-
 - Two programs joining a multicast group at the same moment no longer take the same tracking row. The one that lost never left its group when it closed, and the one that won dropped a group it did not join
 - `TCP:` can be started again after `Status TCP: DIE`. Once it had been taken down, every program that opened the library afterwards got one with no `TCP:` device until the library was unloaded
 - Two programs asking for the time at the same moment no longer collide over one timer request, which could take the clock back to zero and make anything measuring elapsed time see about 49 days
@@ -27,7 +26,6 @@ User-visible changes, newest first. Internal work is in the git log.
 - `ping`, `ShowNetStatus` and `AddNetRoute` give back the memory they read `DEVS:Internet` into. Each run lost about 12 KB until the next reboot, which on a 1 MB machine is roughly seventy runs
 - `connect()` from a socket bound to one of the machine's addresses now leaves from that address instead of being refused
 - New `Developer` drawer in the archive: the headers and linkable glue for everything this stack offers that the NDK does not declare, so a program built against it can call `if_nametoindex()`, `if_indextoname()`, `if_nameindex()` and `if_freenameindex()`, and name the IPv6 constants, without writing the vector offsets out by hand
-
 - Expunging the library gives all its memory back. An open, close, expunge and reopen cycle used to lose 12,612 bytes of the machine's free memory every time, so repeatedly starting and stopping the network eventually ran it out
 - A browsed service whose address did not arrive with it is now asked for, so a row that said "no address" gives one. Only the rows that need it wait, and the whole listing spends at most two seconds on it
 - `ShowNetServices ALL` lists every instance of every type answering, rather than only the types. It costs one more listening window, not one per type
@@ -48,6 +46,7 @@ User-visible changes, newest first. Internal work is in the git log.
 - `sendmsg()` on a raw socket takes the same source address and interface a UDP one does
 - The loopback interface has a name and a number, `lo0`, from `if_nametoindex()`, `if_indextoname()` and `if_nameindex()`. A datagram over `::1` or `127.0.0.1` reports it like any other arrival instead of reporting nothing, and a send can name it
 - New header `aminetxduo/cmsg.h` with the structures and `CMSG_*` macros the above needs. The NDK's own `CMSG_NXTHDR` cannot be compiled -- it uses an `ALIGN()` no NDK header defines -- and its `CMSG_FIRSTHDR` returns a pointer where it should return `NULL`; both are replaced, and `CMSG_LEN` and `CMSG_SPACE` added
+- `ssh` gives back the 256 KB stack it runs on. Every invocation lost that much of the machine's free memory until the next reboot, because the program ends by calling `exit()` and the memory was given back after a call that never returns
 
 ## 0.15.1
 
