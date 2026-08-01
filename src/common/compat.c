@@ -235,6 +235,11 @@ static BOOL ami_timer_init(VOID)
         return FALSE;
     }
 
+    /* Before ReadEClock(), which is a proto/timer.h inline and calls through
+       this very base. Publishing it half-initialised is what the Forbid is
+       for -- no other task can observe the window. */
+    TimerBase = ami_timer_req.tr_node.io_Device;
+
     /*
      * Scale to ticks-per-millisecond up front: a 64-bit divide would pull
      * __udivdi3 out of libgcc, which a shared library should not need.
@@ -246,10 +251,6 @@ static BOOL ami_timer_init(VOID)
     ami_eclock_ms   = 0UL;
     ami_eclock_rem  = 0UL;
     ami_eclock_carry = 0UL;
-
-    /* Last, and the only thing anyone tests: a second task cannot see the
-       device open until the accumulator behind it is set up. */
-    TimerBase = ami_timer_req.tr_node.io_Device;
 
     Permit();
 

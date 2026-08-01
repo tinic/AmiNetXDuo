@@ -386,9 +386,11 @@ the first, which a caller computing `ami_millis() - start` sees as an unsigned
 wrap of about 49 days.
 
 Both re-test under `Forbid()` now. `timer.device`'s Open is a table lookup and
-does not `Wait()`, so the Forbid holds across it. `compat.c` publishes
-`TimerBase` **last**, so no task can see the device open before the accumulator
-behind it exists.
+does not `Wait()`, so the Forbid holds across it, and no other task can observe
+the half-built state inside it. `TimerBase` is still assigned immediately after
+`OpenDevice()` and before `ReadEClock()`, which is a `proto/timer.h` inline and
+calls through that base -- publishing it later looks tidier and hangs the first
+`OpenLibrary()`, which is what `run-cycledrill.sh` caught.
 
 `ami_millis()` is not a theoretical concurrent caller: it is reached from the
 SANA-II receive path through `ami_bpf_now()` (`bpf_channel.c:432`), from
