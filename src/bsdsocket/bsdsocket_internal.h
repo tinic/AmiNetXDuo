@@ -717,6 +717,7 @@ VOID       bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock);
 /* socket.c -- reclaim sockets whose orderly close has finished. Must be
    called inside a bsd_nx_enter() bracket; a no-op when the list is empty. */
 VOID       bsd_closing_sweep(VOID);
+VOID       bsd_closing_drain(VOID);
 
 /* socket.c -- TRUE when the socket parked on a listener holds a connection
    accept() can return, including one whose peer has already closed. Shared

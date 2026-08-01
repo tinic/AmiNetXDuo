@@ -740,6 +740,7 @@ static LONG ami_bpf_ioctl_setif(AmiBpfChan *ch, const char *name)
 {
     AmiBpfIf *ifp;
     UBYTE    *base;
+    UBYTE    *stale;
     ULONG     blen;
     UWORD     i;
 
@@ -762,17 +763,30 @@ static LONG ami_bpf_ioctl_setif(AmiBpfChan *ch, const char *name)
             return AMI_BPF_ENOBUFS;
     }
 
+    stale = NULL;
+
     ami_bpf_lock();
 
     if (base != NULL)
     {
-        ch->bufbase   = base;
-        ch->store     = base;
-        ch->hold      = base + blen;
-        ch->blen      = blen;
-        ch->store_len = 0;
-        ch->hold_len  = 0;
-        ch->hold_pos  = 0;
+        /* The bufbase test above was outside the lock -- ami_alloc() is not
+           something to call under Forbid(). A second BIOCSETIF on this channel
+           can have installed one since, and overwriting it here would drop the
+           only reference to that block. */
+        if (ch->bufbase != NULL)
+        {
+            stale = base;
+        }
+        else
+        {
+            ch->bufbase   = base;
+            ch->store     = base;
+            ch->hold      = base + blen;
+            ch->blen      = blen;
+            ch->store_len = 0;
+            ch->hold_len  = 0;
+            ch->hold_pos  = 0;
+        }
     }
 
     if (ch->iface == NULL)
@@ -785,6 +799,8 @@ static LONG ami_bpf_ioctl_setif(AmiBpfChan *ch, const char *name)
         ch->ifname[i] = ifp->name[i];
 
     ami_bpf_unlock();
+
+    ami_free(stale);
 
     return 0;
 }
