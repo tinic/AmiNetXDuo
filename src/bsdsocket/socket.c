@@ -2380,97 +2380,48 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
 }
 
 /*
- * Can TCP send from the source this socket asked for?
+ * Which source TCP is to connect from.
  *
- * It cannot be made to. There is no nxd_tcp_socket_source_send():
- * _nxd_tcp_client_socket_connect() runs its own route lookup with no hint,
- * writes the answer to nx_tcp_socket_connect_interface (and, for v6,
- * nx_tcp_socket_ipv6_addr) and every segment of the connection leaves by it,
- * SYN included. Nothing between bind() and connect() can steer that, and the
- * SYN is on the wire before the call returns, so checking afterwards would be
- * checking after the lie.
+ * NetX binds a socket to a port only, so the bound address reaches the stack
+ * as the index nxd_tcp_client_socket_source_connect() takes -- an
+ * nx_ip_interface[] index for IPv4, an nx_ipv6_address[] index for IPv6.
+ * Pinned or not is settled here, before the port is claimed and before the
+ * SYN, because the connect sends it before it returns.
  *
- * So the choice is to check first. The two lookups here are the ones connect()
- * is about to run, against the same IP state, so they give the same answer;
- * when it is the source that was asked for, connect() proceeds and the source
- * is right by construction. When it is not, the connect is refused and nothing
- * is sent. Refusing costs the multihomed case that BSD would allow -- source
- * on one interface, route out of the other -- and that case is exactly the one
- * we cannot implement.
+ * The route lookup bsd_source_select() runs for IPv4 is the one the connect is
+ * about to run under the same constraint, so a bound address with no route out
+ * of its own interface is ENETUNREACH here rather than a SYN into a dropped
+ * packet. A bound address that is not on any interface is EADDRNOTAVAIL.
  *
- * Two refusals, and which one fires says why: ENETUNREACH when the bound
- * address has no route to the destination at all, EADDRNOTAVAIL when it has
- * one and the stack would still leave by somewhere else.
- *
+ * *pinned is TRUE with *index set when the connect has to name the source.
  * Zero to go ahead, -1 with the errno filed.
  */
 static LONG bsd_tcp_source_check(struct AmiSocketBase *SocketBase,
-                                 AmiSocket *sock, const NXD_ADDRESS *addr)
+                                 AmiSocket *sock, const NXD_ADDRESS *addr,
+                                 UINT *index, BOOL *pinned)
 {
-    NX_IP        *ip    = netstack_ip();
-    NXD_ADDRESS   dest  = *addr;
-    UINT          src_index = 0;
+    *index  = 0;
+    *pinned = FALSE;
 
-    switch (bsd_source_select(sock, addr, sock->as_ScopeId, &src_index))
+    if (netstack_ip() == NULL)
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+    switch (bsd_source_select(sock, addr, sock->as_ScopeId, index))
     {
         case BSD_SOURCE_ROUTE:
+            return 0;
+
+        case BSD_SOURCE_INDEX:
+            *pinned = TRUE;
             return 0;
 
         case BSD_SOURCE_UNREACH:
             return bsd_fail(SocketBase, AMI_ENETUNREACH);
 
-        case BSD_SOURCE_INDEX:
-            break;
-
         case BSD_SOURCE_REFUSE:
         default:
             return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
     }
-
-    if (ip == NULL)
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
-
-#ifdef AMINETXDUO_IPV6
-    if (dest.nxd_ip_version == NX_IP_VERSION_V6)
-    {
-        NXD_IPV6_ADDRESS *chosen = NX_NULL;
-        UINT              status;
-
-        tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
-        status = _nxd_ipv6_interface_find(ip, dest.nxd_ip_address.v6, &chosen,
-                                          NX_NULL);
-        tx_mutex_put(&ip->nx_ip_protection);
-
-        if (status != NX_SUCCESS || chosen == NX_NULL)
-            return bsd_fail(SocketBase, AMI_ENETUNREACH);
-
-        /* Address, not interface: an interface carries several and the one
-           NetX prefers for this destination need not be the bound one. */
-        if (chosen != &ip->nx_ipv6_address[src_index])
-            return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
-
-        return 0;
-    }
-#endif
-
-    {
-        NX_INTERFACE *nxif     = NX_NULL;
-        ULONG         next_hop = 0;
-
-        tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
-        (VOID)_nx_ip_route_find(ip, dest.nxd_ip_address.v4, &nxif, &next_hop);
-        tx_mutex_put(&ip->nx_ip_protection);
-
-        if (nxif == NX_NULL || next_hop == 0)
-            return bsd_fail(SocketBase, AMI_ENETUNREACH);
-
-        /* One IPv4 address per interface, so agreeing on the interface is
-           agreeing on the source address. */
-        if (nxif != &ip->nx_ip_interface[src_index])
-            return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
-    }
-
-    return 0;
 }
 
 /* The body of connect(), run inside a ThreadX context bracket. */
@@ -2479,6 +2430,8 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
                                UINT port)
 {
     UINT status;
+    UINT src_index  = 0;
+    BOOL src_pinned = FALSE;
 
     if ((sock->as_Flags & ASF_RAW) != 0)
     {
@@ -2538,7 +2491,7 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
 
     /* Before the port is claimed and before the SYN: a connect that cannot
        leave from the bound address fails without touching the wire. */
-    if (bsd_tcp_source_check(SocketBase, sock, addr) != 0)
+    if (bsd_tcp_source_check(SocketBase, sock, addr, &src_index, &src_pinned) != 0)
         return -1;
 
     if ((sock->as_Flags & ASF_NXBOUND) == 0)
@@ -2582,8 +2535,18 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
      * bsd_wait_sliced(); the establish / disconnect-complete callbacks
      * (select.c) report the outcome, as for a non-blocking connect.
      */
-    status = nxd_tcp_client_socket_connect(
-        &sock->as_Nx.tcp, (NXD_ADDRESS *)addr, port, NX_NO_WAIT);
+    /*
+     * source_connect when bind() named a source: it constrains the route
+     * lookup the connect runs, so the SYN and every segment after it leave
+     * from the bound address. Plain connect when nothing was named, which
+     * leaves the choice to the route as before.
+     */
+    status = src_pinned
+                 ? nxd_tcp_client_socket_source_connect(
+                       &sock->as_Nx.tcp, (NXD_ADDRESS *)addr, port, src_index,
+                       NX_NO_WAIT)
+                 : nxd_tcp_client_socket_connect(
+                       &sock->as_Nx.tcp, (NXD_ADDRESS *)addr, port, NX_NO_WAIT);
 
     if (status == NX_SUCCESS)
     {

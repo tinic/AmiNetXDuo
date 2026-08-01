@@ -9,27 +9,24 @@
 #
 #   bind() names a local address and the send direction has to honour it.
 #   NetX Duo binds a socket to a port only, so the library maps the bound
-#   address to the index nxd_udp_socket_source_send() takes; TCP has no
-#   equivalent call, so connect() compares the route against the bind and
-#   refuses when they disagree rather than connecting from another address.
+#   address to the index nxd_udp_socket_source_send() takes for a datagram and
+#   nxd_tcp_client_socket_source_connect() takes for a connect.
 #
 #   The assertion is on the source address the RECEIVER saw, not on the send
 #   returning len -- the send returned len before any of this existed, with
-#   whatever source NetX picked.
+#   whatever source NetX picked.  The TCP arm asserts the address the
+#   ACCEPTING end reports, for the same reason.
 #
-#   It also holds the refusals.  A destination the bound address cannot reach
+#   It also holds the refusal.  A destination the bound address cannot reach
 #   is ENETUNREACH -- for a datagram, which used to be dropped inside
 #   _nx_ip_packet_send() with the send already reported successful, and for a
-#   connect(), before the SYN.  The other refusal, EADDRNOTAVAIL, is a bound
-#   address that CAN reach the destination while the stack would still leave
-#   by a different interface; that takes two interfaces on one subnet and is
-#   not reachable here.
+#   connect(), before the SYN.
 #
-# WHAT IT DOES NOT PROVE.  The interesting case is two interfaces -- source on
-# one, route out of the other -- and the guest here has one.  What is measured
-# is the single-interface half: that the bound address really is the source,
-# and that the refusals fire where the route and the bind disagree, which on
-# one interface means loopback against the interface address.
+# WHAT IT DOES NOT PROVE.  The case the source connect exists for is two
+# interfaces -- source on one, route out of the other -- and the guest here
+# has one.  What is measured is the single-interface half: that the bound
+# address really is the source on loopback and on the interface, and that the
+# refusal fires where the bound address has no route at all.
 #
 # The guest's own address is SLIRP's first lease, 10.0.2.15, and the peer is
 # its gateway.  On another backend set AMINETXDUO_SRC_SELF / _PEER.
@@ -170,6 +167,9 @@ for want in \
     "sending to loopback from the interface address is ENETUNREACH" \
     "connect to 127.0.0.1 from 127.0.0.1" \
     "connect to 127.0.0.1 from the interface address is ENETUNREACH" \
+    "connect to the interface address from the interface address" \
+    "the accepted peer address is the bound source" \
+    "an unbound connect still leaves by the route" \
     "bind to a foreign address is EADDRNOTAVAIL"
 do
     if grep -Fq "  ok   $want" "$REPORT"; then

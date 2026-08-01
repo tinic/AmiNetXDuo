@@ -3,10 +3,9 @@
  *
  * bind() names a local address; the send direction is meant to honour it.
  * NetX Duo has no bind-to-address, so the library maps the bound address to
- * the index nxd_udp_socket_source_send() takes, and TCP -- which has no such
- * call -- checks connect()'s route against the bound address and refuses when
- * they disagree.  None of that is reachable from a host build: it reads
- * NX_IP's live interface table.
+ * the index nxd_udp_socket_source_send() and, for TCP,
+ * nxd_tcp_client_socket_source_connect() take.  None of that is reachable
+ * from a host build: it reads NX_IP's live interface table.
  *
  * TWO INTERFACES ARE WHAT THIS WANTS AND THE LAB GUEST HAS ONE.  So what is
  * measured here is the single-interface half:
@@ -18,8 +17,9 @@
  *   * a destination the bound address cannot reach is refused, rather than
  *     sent from another address or dropped inside the stack with the send
  *     reported successful;
- *   * a TCP connect() whose route leaves by another interface than the bind
- *     is refused before the SYN;
+ *   * a TCP connect() leaves from the bound address, on the interface and on
+ *     loopback, and one whose bound address cannot reach the destination is
+ *     refused before the SYN;
  *   * an unbound socket still routes as it always did.
  *
  * argv[1] is the guest's own address (SLIRP's first lease, 10.0.2.15, by
@@ -61,6 +61,7 @@ typedef struct ProbeAddr
 #define PORT_UDP_LAN        7801
 #define PORT_UDP_LOOP       7802
 #define PORT_TCP_LOOP       7803
+#define PORT_TCP_LAN        7804
 
 /* ------------------------------------------------------------- vectors ---- */
 
@@ -192,6 +193,25 @@ static LONG p_getsockname(struct Library *base, LONG s, ProbeAddr *sa)
     register LONG _clob_a1 __asm("a1");
 
     __asm __volatile ("jsr a6@(-102:W)"     /* getsockname */
+                      : "=r" (res), "=r" (_clob_a0), "=r" (_clob_a1)
+                      : "r" (a6), "r" (d0), "r" (a0), "r" (a1)
+                      : "d1", "cc", "memory");
+    return res;
+}
+
+static LONG p_accept(struct Library *base, LONG s, ProbeAddr *from)
+{
+    LONG namelen = (LONG)sizeof(*from);
+
+    register struct Library *a6  __asm("a6") = base;
+    register LONG            d0  __asm("d0") = s;
+    register APTR            a0  __asm("a0") = (APTR)from;
+    register APTR            a1  __asm("a1") = (APTR)&namelen;
+    register LONG            res __asm("d0");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
+
+    __asm __volatile ("jsr a6@(-48:W)"      /* accept */
                       : "=r" (res), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (a1)
                       : "d1", "cc", "memory");
@@ -472,16 +492,15 @@ int main(int argc, char **argv)
             }
 
             /*
-             * They disagree here: the route to 127.0.0.1 leaves by loopback
-             * and the bind names the interface address.  TCP has no
-             * source-send, so this is refused rather than connected from the
-             * wrong address.
+             * No route from the bound address: 127.0.0.1 leaves by loopback
+             * and the bind names the interface address, so the source cannot
+             * be honoured and the connect is refused before the SYN.
              *
              * ENETUNREACH and not EADDRNOTAVAIL: the bound address exists, it
-             * just has no route to the destination.  EADDRNOTAVAIL is the
-             * other refusal -- the bound address can reach it and the stack
-             * would still leave by a different interface -- which takes two
-             * interfaces on one subnet to produce and cannot be reached here.
+             * just has no route to the destination.  EADDRNOTAVAIL is now
+             * only a bound address the machine does not have -- the case that
+             * used to be refused, source on one interface and route out of
+             * the other, is what source_connect() connects.
              */
             s = p_socket(base, P_AF_INET, P_SOCK_STREAM, 0);
             if (s >= 0)
@@ -498,6 +517,75 @@ int main(int argc, char **argv)
                                      p_errno(base) == P_ENETUNREACH),
                               "connect to 127.0.0.1 from the interface "
                               "address is ENETUNREACH",
+                              p_errno(base));
+                (VOID)p_close(base, s);
+            }
+        }
+        (VOID)p_close(base, listener);
+    }
+
+    /* ---- TCP: the interface address is the source it connects from ----- */
+
+    /*
+     * The pinned path on a physical interface rather than on loopback: the
+     * destination is the guest's own interface address, which _nx_ip_route_find()
+     * answers with that same interface, so the bind and the route agree and
+     * the connect goes through nxd_tcp_client_socket_source_connect().  What
+     * the peer end sees is asserted, not just that connect() returned 0.
+     */
+    listener = p_socket(base, P_AF_INET, P_SOCK_STREAM, 0);
+    if (listener >= 0)
+    {
+        p_addr(&sa, self, PORT_TCP_LAN);
+        rc = p_bind(base, listener, &sa);
+        if (p_check((BOOL)(rc == 0), "listener bind to the interface address",
+                    p_errno(base)))
+        {
+            rc = p_listen(base, listener, 1);
+            (VOID)p_check((BOOL)(rc == 0), "listen on the interface address",
+                          p_errno(base));
+
+            s = p_socket(base, P_AF_INET, P_SOCK_STREAM, 0);
+            if (s >= 0)
+            {
+                p_addr(&sa, self, 0);
+                rc = p_bind(base, s, &sa);
+                (VOID)p_check((BOOL)(rc == 0),
+                              "client bind to the interface address",
+                              p_errno(base));
+
+                p_addr(&sa, self, PORT_TCP_LAN);
+                rc = p_connect(base, s, &sa);
+                if (p_check((BOOL)(rc == 0),
+                            "connect to the interface address from the "
+                            "interface address",
+                            p_errno(base)))
+                {
+                    LONG conn;
+
+                    name.sin_addr = 0;
+                    conn = p_accept(base, listener, &name);
+                    if (p_check((BOOL)(conn >= 0), "the listener accepted it",
+                                p_errno(base)))
+                    {
+                        (VOID)p_check((BOOL)(name.sin_addr == self),
+                                      "the accepted peer address is the bound "
+                                      "source",
+                                      (LONG)name.sin_addr);
+                        (VOID)p_close(base, conn);
+                    }
+                }
+                (VOID)p_close(base, s);
+            }
+
+            /* Nothing bound: the route chooses, as it always did. */
+            s = p_socket(base, P_AF_INET, P_SOCK_STREAM, 0);
+            if (s >= 0)
+            {
+                p_addr(&sa, self, PORT_TCP_LAN);
+                rc = p_connect(base, s, &sa);
+                (VOID)p_check((BOOL)(rc == 0),
+                              "an unbound connect still leaves by the route",
                               p_errno(base));
                 (VOID)p_close(base, s);
             }
