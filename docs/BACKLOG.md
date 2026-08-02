@@ -18,6 +18,61 @@ empty results.
 
 ## Open — no decision taken
 
+- **Where a transfer's time actually goes, measured 2026-08-02 -- and it is not
+  where this document has been saying.** A sampling profiler now exists
+  (`tests/perf/prof/`, branch `prof`, off unless `-DAMINETXDUO_PROFILER=ON`,
+  no `src/` changes). 1 MB TCP transfer, A1200/68020, 1000 Hz, 4411 samples in
+  the transfer phase, 0.2% unattributed:
+
+  | category | wire | loopback |
+  |---|---|---|
+  | NetX Duo protocol | 25.6% | 16.7% |
+  | ThreadX + Amiga port | 23.3% | 16.2% |
+  | Kickstart (Exec) | 19.2% | 19.4% |
+  | copy (net68k asm) | 19.0% | 34.5% |
+  | checksum | 12.3% | 12.6% |
+
+  **The "roughly 78% is inside NetX Duo's protocol processing" claim, derived by
+  subtracting measured primitives from a measured transfer, is wrong.**
+  Copy and checksum are 31.3% rather than about 22%, and the remainder is not
+  mostly protocol code: **ThreadX and Exec together are 42.5%, larger than NetX
+  Duo's own 25.6%.** The largest non-copy cost is scheduling glue --
+  `_tx_thread_interrupt_restore` and `_tx_thread_interrupt_disable`, the
+  Forbid/Permit wrappers, at 6.9%, plus Exec's `Reschedule`, `Switch`,
+  `Dispatch` and `Supervisor` at 10.5%. That is the 214 us per-call bracket
+  showing up directly, and it says the bracket work is aimed at the right thing
+  and that there is more there than the bracket alone.
+
+  Top single entries, wire: `n68k_copy_bytes` 18.2%, `n68k_sum_longwords` 9.5%,
+  `_tx_thread_interrupt_restore` 4.2%, `Supervisor` 3.4%, `Reschedule` 2.8%.
+  Top 24 is 73.0%.
+
+  **A CIA timer cannot be used for this and fails silently.**
+  `AddICRVector()` arbitrates the ICR vector, not the hardware. CIA-B timer B
+  ran at a correct 1000 Hz and stopped at the first `ami_millis()`, because
+  timer.device's MICROHZ unit took it back; CIA-B timer A then ran 0.4-1.5 s and
+  stopped with `ciaicr=$85`, an interrupt raised and never acknowledged -- the
+  Exec EXTER race, where Exec clears `INTREQ` around the CIA ICR read and an
+  interrupt landing in that window leaves the line asserted with no further edge
+  possible. **Both failures still produced eight correctly-sampled PCs, which is
+  enough to rank functions convincingly and is pure noise.** The source is now
+  audio channel 3 at level 4 -- no latching chip in the acknowledge path, and
+  level 4 also sees inside the level 2/3 handlers where a SANA-II receive runs
+  -- and `prof_start()` measures each candidate over eight windows, rejecting
+  any that does not hold rate in every one.
+
+  Two attribution notes worth keeping. Exec keeps INLINE code in some jump-table
+  slots rather than a `JMP`, `Forbid` and `Permit` among them, which lost 7.2%
+  until a PC inside `[base-negsize, base)` was attributed to that slot. And
+  `Disable()` masks INTENA, so those sections are unsampled and their time lands
+  on whatever runs next; `Forbid()` does not mask interrupts and is sampled
+  normally, which is what matters here since that is where the bracket lives.
+
+  Not yet run on a 68000: fs-uae aborts host-side on this machine for the
+  A500/A500+/A600/A2000 profiles before the guest boots. Verified on 68020
+  (97/98/96% containment against assembly kernels with explicit end labels,
+  sample share within 0.1 points of wall clock) and 68030 (100%).
+
 - **A cycle-attribution profiler, to find where a transfer's time actually
   goes.** The copy and checksum together are about 20% of a wire transfer and
   roughly 78% is unaccounted for inside NetX Duo's protocol processing.
