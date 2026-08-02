@@ -15,6 +15,13 @@
 #   AmigaDOS with no network under it -- the control that says how much of the
 #   figure is ours.
 #
+#   READ IS THE FIGURE TO COMPARE ON.  tools/profiler/Profile over a real mount,
+#   2026-08-02: the read arm leaves the guest CPU 60% idle, the write arm 22%,
+#   which is what the write figure pricing buffer acceptance rather than
+#   throughput looks like from the CPU's side.  Of the busy CPU on a read,
+#   bsdsocket.library is 79%, Exec 9%, the driver 6% and Fitz itself 4%.
+#   docs/BACKLOG.md has the split and the read-ahead sweep that came out of it.
+#
 # WHY A BRIDGED EMULATOR AND NOT FS-UAE
 #
 #   Every throughput conclusion this project drew before this script came from

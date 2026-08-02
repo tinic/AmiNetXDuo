@@ -73,6 +73,60 @@ empty results.
   (97/98/96% containment against assembly kernels with explicit end labels,
   sample share within 0.1 points of wall clock) and 68030 (100%).
 
+- **A profiled `fitz` transfer says the read direction is not CPU-bound, and
+  that the profiler cannot see inside `bsdsocket.library`,** 2026-08-02.
+  `tools/profiler/Profile` wrapped around a real `fitz mount` of a LAN peer --
+  the shared library, not a statically linked test binary -- A3000 under
+  bridged Amiberry, 4 MB file in 32 KB chunks, three passes each way, 1000 Hz,
+  30978 samples over 30.87 s, 0 interrupts dropped and 0.0% unsampled. Split by
+  window, using FitzBench's own per-pass timings to place the boundaries:
+
+  | | read (12.7 s) | write (6.8 s) |
+  |---|---|---|
+  | Exec idle loop | 59.7% | 22.1% |
+  | `bsdsocket.library` | 31.7% | 63.9% |
+  | Exec, real work | 3.8% | 7.1% |
+  | `a2065.device` | 2.4% | 4.3% |
+  | Fitz itself | 1.5% | 0.3% |
+
+  **Reads leave the machine 60% idle**, so nothing done to our own code can
+  move the read figure on this rig; writes are the CPU-bound direction, which
+  is what `fitzbench`'s write figure measuring buffer acceptance looks like
+  from the other side. The idle is one address, `$00f81496`, Exec's own idle
+  loop. It is *reported* as `exec.library/Dispatch`, that being the nearest
+  preceding jump-table entry, and a 7 s window with the mount up and no traffic
+  is 99.0% that single address -- which is what identifies it as idle rather
+  than as scheduling, and is worth doing before reading any Exec share.
+  Exec's real work is 9.4% of the busy CPU on reads: `Signal` 1.9%, `Permit`
+  1.4%, `Switch` 1.0%, `PutMsg` 0.7%.
+
+  **Fitz itself is 0.76% of the run**, and 87% of that is its `memcpy`. Every
+  other function of its own is single-digit samples -- `send_all` 6, `get_u32`
+  4, `recv_all` 3, `do_rpc` 2 -- and the released vbcc binary measures 1.16%
+  with the same shape. There is nothing in Fitz's code worth optimising.
+
+  What is worth changing in Fitz is read-ahead depth rather than code:
+  `amiga-client.c` `h_read()` issues one synchronous `do_rpc()` per
+  `DEF_RA_SIZE` window, 32 KB, with nothing pipelined behind it, where the
+  write path has `drain_async_writes()`. Mounting `BUFS 131072` takes read from
+  869 to 993 KB/s and `BUFS 262144` to 1029, write unchanged. Idle stays above
+  54% throughout, so round trips are a real but not the binding constraint;
+  the rest looks like Amiberry's a2065 frame pacing, which this rig cannot
+  separate from the wire.
+
+  **The tool names `bsdsocket.library` by module and nothing else, and 93.8% of
+  its samples land in the unnamed body.** That is 78.7% of the busy CPU on a
+  read and 82.0% on a write reduced to one line. `prof.c` records a range per
+  library from the hull of its jump-table targets, which here is two hulls of
+  99 KB against a 474 KB code hunk, and everything between them resolves to
+  `(unattributed)`. They are the library and not something else: the span
+  between the lowest and highest hull is `$0782d462`-`$078a3c82`, 485408 bytes,
+  against 484964 bytes of hunks in the library file, and no other module's
+  range lies inside it. Teaching the profiler to walk a loaded library's
+  seglist -- `LibNode` back to the seglist, then the `prof_walk_seglist()` the
+  target already gets, plus the host side reading the library's own map -- is
+  worth more than any single finding a run like this can produce.
+
 - **A cycle-attribution profiler, to find where a transfer's time actually
   goes.** The copy and checksum together are about 20% of a wire transfer and
   roughly 78% is unaccounted for inside NetX Duo's protocol processing.
