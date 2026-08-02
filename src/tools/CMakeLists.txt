@@ -235,6 +235,18 @@ aminetxduo_add_tool(tool_traceroute traceroute SOURCES traceroute.c toolsock.c)
 aminetxduo_add_tool(tool_tftp    tftp     SOURCES tftp.c  toolsock.c)
 aminetxduo_add_tool(tool_whois   whois    SOURCES whois.c toolsock.c)
 
+# httpd is the first SERVER here, and config-only in the same sense as the
+# clients: bsdsocket.library through its published vectors, and no part of the
+# stack linked in.  It is the only thing in the tree that holds several
+# connections open at once -- `nc -l` takes one caller and exits -- so it is
+# also the only coverage of accept() being called twice on a live listener.
+#
+# httppath.c is a source of its own rather than part of httpd.c because it is
+# the part that must not be wrong, and splitting it is what lets the host test
+# below compile it: httpd.c includes tools.h, which reaches tx_api.h and
+# proto/dos.h, and neither builds on a host.
+aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c toolsock.c)
+
 # sntp is config-only in the same sense as fetch: it reaches bsdsocket.library
 # through its published vectors and sets the machine's clock through
 # timer.device and battclock.resource.  It does NOT link the vendored NetX Duo
@@ -310,9 +322,36 @@ add_dependencies(tools
     tool_getnetstatus tool_netshutdown
     tool_netsetup tool_online tool_offline tool_host
     tool_fetch tool_nc tool_telnet tool_nettrace tool_traceroute tool_nslookup tool_arp
-    tool_tftp tool_whois
+    tool_tftp tool_whois tool_httpd
     tool_sntp
     tool_shownetstatus tool_netstat tool_ping tool_smoke)
 if(CMAKE_CROSSCOMPILING)
     add_dependencies(tools tool_lvo_stub_check)
+endif()
+
+# ---------------------------------------------------------------- host test --
+#
+# Host only, and the only test in this directory: httppath.c is the one file
+# here free of AmigaDOS calls, and the one whose mistakes a reviewer cannot be
+# relied on to see.  See src/tools/test/test_httppath.c for what it covers.
+#
+#   cc -std=c11 -Wall -Wextra -Isrc/tools \
+#      src/tools/test/test_httppath.c src/tools/httppath.c -o test_httppath
+#
+# No target_link_libraries: every library target here reaches AmigaOS code
+# that does not build on a host, which is why the sources are named directly
+# (src/mbuf/CMakeLists.txt and tests/fuzz/CMakeLists.txt say the same).
+if(NOT CMAKE_CROSSCOMPILING)
+    add_executable(test_httppath
+        test/test_httppath.c
+        httppath.c)
+
+    target_include_directories(test_httppath PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    target_compile_options(test_httppath PRIVATE -Wall -Wextra)
+    set_target_properties(test_httppath PROPERTIES C_STANDARD 11)
+
+    include(CTest)
+    add_test(NAME httppath_escapes COMMAND test_httppath)
 endif()
