@@ -157,7 +157,7 @@ class Profile:
         for _pc, _sr, _fmt, _task, raw in self.samples:
             vpos = ((raw >> 16) & 1) << 8 | ((raw >> 8) & 0xFF)
             hpos = raw & 0xFF
-            pos = vpos * CCK_LINE + hpos * 2
+            pos = vpos * CCK_LINE + hpos        # hpos is already colour clocks
             if prev is not None and pos < prev:
                 base += self.framecck
             prev = pos
@@ -508,10 +508,12 @@ def gap_report(prof, times, res):
     # quietly under-reporting.
     seen_frames = (times[-1] - times[0]) // prof.framecck if prof.framecck else 0
     lost_frames = max(0, prof.frames - seen_frames - 2)
+    extra_frames = max(0, seen_frames - prof.frames - 2)
 
     return {
         "total": total, "missing": missing, "gaps": gaps[:5],
-        "lost_frames": lost_frames, "nominal": nominal,
+        "lost_frames": lost_frames, "extra_frames": extra_frames,
+        "seen_frames": seen_frames, "nominal": nominal,
     }
 
 
@@ -816,11 +818,22 @@ def main():
             b, _ = res.resolve(samples[i][0])
             print("             %8.2f ms between %s and %s"
                   % (prof.us(step) / 1000.0, a, b))
+        print("             %d video frames by the beam, %d by the vertical "
+              "blank" % (gaps["seen_frames"], prof.frames))
         if gaps["lost_frames"] > 0:
             print("!! the vertical blank counted %d frames the samples did "
                   "not go through -- at least one gap was longer than a whole "
                   "frame and the figure above is a floor, not a total"
                   % gaps["lost_frames"])
+        if gaps["extra_frames"] > 0:
+            # The two clocks are independent, so this cannot be a property of
+            # the run -- it means the beam position is being decoded wrongly
+            # and every duration here is inflated.  It is how the hpos scaling
+            # bug was found; leaving the check in is what stops it coming back.
+            print("!! the beam says %d frames and the vertical blank says %d "
+                  "-- the timestamps are being decoded wrongly and every "
+                  "duration above is inflated"
+                  % (gaps["seen_frames"], prof.frames))
         if pct > 25.0:
             print("!! more than a quarter of the run was never sampled -- "
                   "every share below is a share of the part that was visible")
