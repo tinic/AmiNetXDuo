@@ -8,10 +8,15 @@
 #   cmake --build <build> --parallel --target Profile profspin
 #
 # Prove it before believing it, on more than one CPU, because the exception
-# frame is what is in question:
+# frame is what is in question.  tools/profiler/selftest.sh is the whole loop
+# -- run, resolve, check containment and proportionality -- in one command:
 #
-#   ./tools/fsuae-run.sh -x -t 600 -m A500  <build>/tools/profiler/Profile ...
-#   ./tools/fsuae-run.sh -x -t 600 -m A1200 <build>/tools/profiler/Profile ...
+#   AMINETXDUO_KICKSTART=<a 3.1 ROM>   tools/profiler/selftest.sh -b build/p20
+#   AMINETXDUO_KICKSTART=<a 2.04 ROM>  tools/profiler/selftest.sh -b build/p00 -m A500
+#
+# The ROM has to be one the model can boot.  An A1200 ROM in an A500 profile
+# does not fail as a bad ROM: FS-UAE dies host-side before the guest runs, and
+# that looks exactly like the emulator being broken for that machine.
 #
 # SPDX-License-Identifier: MIT
 
