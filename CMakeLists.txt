@@ -145,6 +145,12 @@ endif()
 # does one `fetch` cost, and what fraction of the wall clock are they?" can
 # be answered by measurement rather than by arithmetic on a throughput delta --
 # see the census note in src/bsdsocket/netx_call.c.
+# Build tests/perf/prof: a timer-driven PC sampler and the two binaries that
+# use it.  OFF, and it stays OFF -- it is a tool for answering where the 78%
+# of a transfer that tests/perf/perf_test.c cannot account for actually goes,
+# not something the library ships.  It adds nothing to src/.
+option(AMINETXDUO_PROFILER "Build the PC sampling profiler in tests/perf/prof" OFF)
+
 option(AMINETXDUO_NXCENSUS "Count and time the ThreadX bracket" OFF)
 if(AMINETXDUO_NXCENSUS)
     add_compile_definitions(AMINETXDUO_NXCENSUS)
