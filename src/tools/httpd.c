@@ -183,6 +183,7 @@ enum
 {
     CONN_FREE = 0,
     CONN_REQUEST,       /* reading the request head                        */
+    CONN_CONTINUE,      /* pushing the interim 100 out before the body     */
     CONN_BODY,          /* reading the body through the sink               */
     CONN_SEND           /* pushing out[], refilled by the producer         */
 };
@@ -193,6 +194,18 @@ enum
     PROD_FILE,          /* the rest of an open file                        */
     PROD_INDEX,         /* a generated HTML directory listing              */
     PROD_PROPFIND       /* a generated 207 multistatus                     */
+};
+
+/* Reading a chunked request body.  The framing is a size line, that many
+   bytes, a CRLF, and a zero-sized chunk with optional trailers to end. */
+enum
+{
+    CHUNK_OFF = 0,      /* the body is a Content-Length one                */
+    CHUNK_SIZE,
+    CHUNK_DATA,
+    CHUNK_CRLF,
+    CHUNK_TRAILER,
+    CHUNK_DONE
 };
 
 /* The XML skimmer's position.  Not a parser: it finds element names and the
@@ -237,8 +250,13 @@ struct HttpConn
     UBYTE   has_range;
     ULONG   range_from;
     ULONG   range_to;               /* inclusive                           */
+    UBYTE   expect;                 /* the client is waiting for a 100     */
     UBYTE   overwrite;              /* COPY/MOVE: Overwrite was not F      */
     UBYTE   had_body;               /* a body arrived, whatever its length */
+    UBYTE   chunk_state;            /* CHUNK_OFF unless the body is chunked */
+    ULONG   chunk_left;
+    UBYTE   chunk_n;
+    char    chunk_line[24];         /* the size line, as it arrives        */
     char    dest[HTTP_URL_MAX];     /* Destination:, still as it arrived   */
 
     /* PUT: the temporary file the body goes to, until the rename */
@@ -971,8 +989,12 @@ static VOID httpd_reset(HttpConn *c)
     c->dir_stage = DIR_SELF;
     c->wrote     = 0;
 
+    c->expect      = 0;
     c->overwrite   = 1;             /* Overwrite defaults to T, RFC 4918 10.6 */
     c->had_body    = 0;
+    c->chunk_state = CHUNK_OFF;
+    c->chunk_left  = 0;
+    c->chunk_n     = 0;
     c->dest[0]     = '\0';
     c->put_err     = 0;
 
@@ -3284,15 +3306,18 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
         else if (hs_equal(name, "Transfer-Encoding"))
         {
-            /* A chunked request body is a second framing, and the transfer
-               path is the next thing to land.  Saying so is better than
-               mis-reading it. */
+            /* Finder does not know how long a file it is uploading is until
+               it has sent it, so it chunks -- which makes this the difference
+               between PUT working from macOS and not working at all. */
             if (hs_nicmp(httpd_value, "chunked", 7) == 0)
-            {
-                httpd_error(c, 501, "this server does not read a chunked "
-                                    "request body");
-                return FALSE;
-            }
+                c->chunk_state = CHUNK_SIZE;
+        }
+        else if (hs_equal(name, "Expect"))
+        {
+            /* curl sends this on every PUT over a certain size and waits a
+               second for the answer; the Windows redirector waits. */
+            if (hs_nicmp(httpd_value, "100-continue", 12) == 0)
+                c->expect = 1;
         }
         else if (hs_equal(name, "Destination"))
         {
@@ -3318,7 +3343,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
     }
 
     c->head_only = (c->method->id == HTTPD_M_HEAD) ? 1 : 0;
-    c->had_body  = (c->body_left > 0UL) ? 1 : 0;
+    c->had_body  = (c->body_left > 0UL || c->chunk_state != CHUNK_OFF) ? 1 : 0;
 
     /*
      * The ceiling is on a body this server HOLDS.  A PUT's goes to a file as
@@ -3392,6 +3417,113 @@ static VOID httpd_dispatch(HttpConn *c)
 }
 
 /*
+ * A chunked request body, decoded as it arrives.  Everything the decoder is in
+ * the middle of lives in the connection, because a chunk boundary falls
+ * wherever the network put it and not where the framing wanted it.
+ *
+ * There is no ceiling on what a chunked body may total.  The sinks are what
+ * bound it: PUT's writes to a file, and the ones that read XML have fixed
+ * buffers, so an endless body costs time -- which the connection timeout
+ * already bounds -- and not memory.
+ *
+ * Returns how much of `data` belonged to the body; anything after that is the
+ * next request.
+ */
+static LONG httpd_feed_chunked(HttpConn *c, const UBYTE *data, LONG len)
+{
+    LONG i = 0;
+
+    while (i < len && c->chunk_state != CHUNK_DONE)
+    {
+        switch (c->chunk_state)
+        {
+            case CHUNK_SIZE:
+            {
+                int ch = data[i++];
+
+                if (ch != '\n')
+                {
+                    if (ch != '\r' &&
+                        c->chunk_n + 1U < sizeof(c->chunk_line))
+                        c->chunk_line[c->chunk_n++] = (char)ch;
+                    break;
+                }
+
+                {
+                    const char *p = c->chunk_line;
+
+                    c->chunk_line[c->chunk_n] = '\0';
+                    c->chunk_n    = 0;
+                    c->chunk_left = 0;
+
+                    /* Hex, and it stops at the ';' of a chunk extension. */
+                    for (;;)
+                    {
+                        int d = *p;
+
+                        if (d >= '0' && d <= '9')      d -= '0';
+                        else if (d >= 'a' && d <= 'f') d -= 'a' - 10;
+                        else if (d >= 'A' && d <= 'F') d -= 'A' - 10;
+                        else                           break;
+
+                        c->chunk_left = (c->chunk_left << 4) | (ULONG)d;
+                        p++;
+                    }
+                }
+
+                c->chunk_state = (c->chunk_left > 0UL)
+                                     ? CHUNK_DATA : CHUNK_TRAILER;
+                break;
+            }
+
+            case CHUNK_DATA:
+            {
+                ULONG take = (ULONG)(len - i);
+
+                if (take > c->chunk_left)
+                    take = c->chunk_left;
+
+                if (c->method != NULL && c->method->sink != NULL)
+                    c->method->sink(c, &data[i], (LONG)take);
+
+                i += (LONG)take;
+                c->chunk_left -= take;
+
+                if (c->chunk_left == 0UL)
+                    c->chunk_state = CHUNK_CRLF;
+                break;
+            }
+
+            case CHUNK_CRLF:
+                if (data[i++] == '\n')
+                    c->chunk_state = CHUNK_SIZE;
+                break;
+
+            default:                    /* CHUNK_TRAILER                   */
+            {
+                int ch = data[i++];
+
+                /* Trailer lines, then a blank one.  Nothing here reads a
+                   trailer; they are counted so the blank line is found. */
+                if (ch == '\n')
+                {
+                    if (c->chunk_n == 0U)
+                        c->chunk_state = CHUNK_DONE;
+                    c->chunk_n = 0;
+                }
+                else if (ch != '\r')
+                {
+                    c->chunk_n = 1;
+                }
+                break;
+            }
+        }
+    }
+
+    return i;
+}
+
+/*
  * Feed the body to the method's sink.  A method with no sink throws the bytes
  * away, but they are still READ -- a request body left in the socket is the
  * next request as far as the parser is concerned, which is how a server that
@@ -3406,6 +3538,9 @@ static LONG httpd_consume_body(HttpConn *c, const UBYTE *data, LONG len)
 
     if (len <= 0)
         return 0;
+
+    if (c->chunk_state != CHUNK_OFF)
+        return httpd_feed_chunked(c, data, len);
 
     take = ((ULONG)len > c->body_left) ? (LONG)c->body_left : len;
 
@@ -3441,6 +3576,9 @@ static LONG httpd_consume_body(HttpConn *c, const UBYTE *data, LONG len)
 
 static BOOL httpd_body_done(const HttpConn *c)
 {
+    if (c->chunk_state != CHUNK_OFF)
+        return (c->chunk_state == CHUNK_DONE) ? TRUE : FALSE;
+
     return (c->body_left == 0UL) ? TRUE : FALSE;
 }
 
@@ -3488,7 +3626,26 @@ static VOID httpd_after_head(HttpConn *c, ULONG headlen)
 
     if (!httpd_body_done(c))
     {
-        c->state = CONN_BODY;
+        if (c->expect)
+        {
+            /* The client is waiting for this before it sends anything: curl
+               waits a second and then sends regardless, the Windows
+               redirector waits.  It goes out through the ordinary write path
+               rather than being pushed at the socket here, because a blocking
+               write is the one thing this loop may not do. */
+            static const char go[] = "HTTP/1.1 100 Continue\r\n\r\n";
+
+            hs_copy((char *)c->out, sizeof(c->out), go);
+            c->out_len  = hs_len(go);
+            c->out_sent = 0;
+            c->expect   = 0;
+            c->state    = CONN_CONTINUE;
+        }
+        else
+        {
+            c->state = CONN_BODY;
+        }
+
         return;
     }
 
@@ -3507,7 +3664,9 @@ static BOOL httpd_readable(HttpConn *c)
         LONG  want = (LONG)sizeof(scratch);
         LONG  took;
 
-        if ((ULONG)want > c->body_left)
+        /* A chunked body has no count to stop at, so the framing is what says
+           where it ends and the read is whatever the socket has. */
+        if (c->chunk_state == CHUNK_OFF && (ULONG)want > c->body_left)
             want = (LONG)c->body_left;
 
         got = tool_sock_recv(httpd_sb, c->sock, scratch, want);
@@ -3654,6 +3813,16 @@ static BOOL httpd_writable(HttpConn *c)
 
             if (c->out_sent < c->out_len)
                 return TRUE;            /* the socket is full for now      */
+        }
+
+        /* The interim 100 has gone out, so the client will send the body
+           now and this connection goes back to reading. */
+        if (c->state == CONN_CONTINUE)
+        {
+            c->state    = CONN_BODY;
+            c->out_len  = 0;
+            c->out_sent = 0;
+            return TRUE;
         }
 
         if (c->producer != PROD_NONE && !c->head_only)
@@ -3875,7 +4044,7 @@ static VOID httpd_serve(LONG lsock)
             if (ready > 0 && tool_fd_isset(&readfds, c->sock))
                 keep = httpd_readable(c);
 
-            if (keep && c->state == CONN_SEND &&
+            if (keep && (c->state == CONN_SEND || c->state == CONN_CONTINUE) &&
                 ready > 0 && tool_fd_isset(&writefds, c->sock))
                 keep = httpd_writable(c);
 
