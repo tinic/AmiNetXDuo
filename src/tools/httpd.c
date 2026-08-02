@@ -2012,6 +2012,15 @@ static BOOL httpd_writable(HttpConn *c)
             sent = tool_sock_send(httpd_sb, c->sock, &c->out[c->out_sent],
                                   want);
 
+            /*
+             * What send() says it took, totalled per answer.  It is one line
+             * under TRACE and it is here because it is the only way to tell
+             * this program's mistakes from the library's: on a 512 KB file
+             * this counter reads exactly Content-Length while the wire
+             * carries several thousand bytes more, which is a fault in
+             * send() and not in the loop below.  docs/BACKLOG.md has the
+             * measurement.
+             */
             if (sent > 0)
                 c->wrote += (ULONG)sent;
 
