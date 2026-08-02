@@ -7,9 +7,9 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
-## Unreleased
+## 0.16.5
 
-- A `send()` that takes only part of what it was offered now reports the part it took. It could put more on the wire than it reported, so a program that correctly resent the remainder sent some of it twice and the far end saved a corrupt file. It took a send larger than one MSS on a non-blocking socket, which is why a large download over SSH or from the WebDAV server could arrive damaged while everything smaller was fine
+- A `send()` that takes only part of what it was offered now reports the part it took. A program that resent the remainder was sending some of it twice, which showed on large transfers and not on small ones
 - The Developer drawer's `Profile` names functions inside `bsdsocket.library`, so a profile of an ordinary program shows where the stack spent its time rather than one bar for the whole library. A library it cannot read is still named, as before
 - `httpd` serves a drawer over HTTP and read-only WebDAV, so this machine can be mounted as a drive from Windows, macOS and Linux with nothing installed at the far end -- Finder's Connect to Server, Explorer's Map network drive and the Linux file manager all speak it. `httpd Work:Public 8080`. It answers several clients at once, and it refuses any address that leaves the drawer, including the AmigaOS form `/RAM:` that a check for `..` does not see
 
