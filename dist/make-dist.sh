@@ -325,6 +325,41 @@ cp "$INSTALL/Drawer.info"   "$TREE/Examples.info"
 cp "$INSTALL/Drawer.info"   "$TREE/Developer.info"
 cp "$INSTALL/Document.info" "$TREE/Developer/ReadMe.info"
 
+# --------------------------------------------------------------- Profile ---
+#
+# The sampling profiler, in Developer/ rather than in C:.
+#
+# It is not part of the stack and the installer does not copy it anywhere: it
+# profiles ANY AmigaOS program, it depends on nothing in this archive, and a
+# network stack has no business putting a developer tool in somebody's C:.
+# It is HERE because this is the only way it reaches a real machine, and a
+# real machine is the only place the answer can come from -- no emulator above
+# a 68020 has a usable cycle model, so what this stack costs on a 68060 with a
+# real card is not currently knowable any other way.
+#
+# The 68000 build, like the commands and for the same reason: the sampling
+# handler is assembly and identical on every 68k, and nothing else in the tool
+# is on a hot path.  One binary runs on every machine.
+#
+# profspin goes with it.  It is the self-test -- an ordinary program that
+# links nothing from the profiler and writes the exact byte ranges of its own
+# assembly kernels -- so that "is this profiler telling me the truth on MY
+# machine" has an answer that does not require taking our word for it.
+PROFILE_BUILD="$CMD_BUILD/tools/profiler"
+if [ -x "$PROFILE_BUILD/Profile" ]; then
+    mkdir -p "$TREE/Developer/Profile"
+    cp "$PROFILE_BUILD/Profile"  "$TREE/Developer/Profile/"
+    cp "$PROFILE_BUILD/profspin" "$TREE/Developer/Profile/"
+    chmod 755 "$TREE/Developer/Profile"/Profile "$TREE/Developer/Profile"/profspin
+    cp "$ROOT/tools/profiler/ReadMe"       "$TREE/Developer/Profile/ReadMe"
+    cp "$ROOT/tools/profiler/profreport.py" "$TREE/Developer/Profile/"
+    cp "$INSTALL/Drawer.info"   "$TREE/Developer/Profile.info"
+    cp "$INSTALL/Document.info" "$TREE/Developer/Profile/ReadMe.info"
+    echo "==> including Profile ($(cat "$PROFILE_BUILD/Profile" "$PROFILE_BUILD/profspin" | wc -c | tr -d " ") bytes of binaries)"
+else
+    echo "note: no Profile in $PROFILE_BUILD; the archive will not carry the profiler"
+fi
+
 # ---------------------------------------------------------------- the docs --
 #
 # docs/ belongs to whoever is writing the documentation; take whatever is

@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.20)
 # plain vX.Y.Z.
 #
 # 0.x on purpose: nothing has run on real hardware yet.
-project(AmiNetXDuo VERSION 0.16.2 LANGUAGES C ASM)
+project(AmiNetXDuo VERSION 0.16.4 LANGUAGES C ASM)
 
 # -Os, AFTER project(), because nothing earlier can make it stick.
 #
@@ -145,9 +145,24 @@ endif()
 # does one `fetch` cost, and what fraction of the wall clock are they?" can
 # be answered by measurement rather than by arithmetic on a throughput delta --
 # see the census note in src/bsdsocket/netx_call.c.
+# Build tests/perf/prof: a timer-driven PC sampler and the two binaries that
+# use it.  OFF, and it stays OFF -- it is a tool for answering where the 78%
+# of a transfer that tests/perf/perf_test.c cannot account for actually goes,
+# not something the library ships.  It adds nothing to src/.
+option(AMINETXDUO_PROFILER "Build the PC sampling profiler in tests/perf/prof" OFF)
+
 option(AMINETXDUO_NXCENSUS "Count and time the ThreadX bracket" OFF)
 if(AMINETXDUO_NXCENSUS)
     add_compile_definitions(AMINETXDUO_NXCENSUS)
+endif()
+
+# Count how often the scheduling primitives are entered.  The PC sampler says
+# where samples land; this says how many calls they landed in, and the two
+# together give a cost per call.  OFF, and free when off -- see the counter
+# block in port/threadx-amiga/inc/tx_port.h.
+option(AMINETXDUO_SCHEDCOUNT "Count the scheduling primitive calls" OFF)
+if(AMINETXDUO_SCHEDCOUNT)
+    add_compile_definitions(AMINETXDUO_SCHEDCOUNT)
 endif()
 
 # Keep the calling task's TX_THREAD between brackets instead of building and
@@ -400,6 +415,13 @@ if(AMINETXDUO_TLS)
     add_subdirectory(src/tlslib)
 endif()
 add_subdirectory(src/tools)
+
+# Profile, the sampling profiler.  Built for every cross configuration and
+# packed in the archive: it depends on nothing in this tree, it is useful to
+# anyone with an Amiga and a program that is slower than they expected, and it
+# is the only way to see what this stack costs on real hardware -- no emulator
+# above a 68020 has a usable cycle model.  tools/profiler/CMakeLists.txt.
+add_subdirectory(tools/profiler)
 
 if(AMINETXDUO_TESTS)
     add_subdirectory(tests)

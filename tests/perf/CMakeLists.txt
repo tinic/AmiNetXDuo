@@ -181,3 +181,10 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME net68k_checksum COMMAND test_net68k_checksum)
 
 endif()
+
+
+# ---------------------------------------------------------- the sampler ----
+#
+# -DAMINETXDUO_PROFILER=ON only.  See prof/CMakeLists.txt for what it is and
+# how it is verified before anything it prints is believed.
+add_subdirectory(prof)

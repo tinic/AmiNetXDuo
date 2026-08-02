@@ -50,16 +50,6 @@
 #define AMINETXDUO_VERSION_HASH     "@AMINETXDUO_VERSION_HASH@"
 
 /*
- * Which of the four CPU builds this is, or "host" off target.  The archive
- * ships 68000, 68020, 68040 and 68060 and they are not interchangeable in
- * speed: the 68000 one links the `.` multilib, where every 32-bit multiply and
- * divide becomes a subroutine call.  Running it on an 060 is a different
- * program from the 68060 build of the same release, so a throughput figure
- * that does not name the build cannot be compared with anything.
- */
-#define AMINETXDUO_VERSION_CPU      "@AMINETXDUO_VERSION_CPU@"
-
-/*
  * The $VER: string every command and the library carries.
  *
  * ONE version for the whole project, not one per command. AmigaOS's `Version`
@@ -73,11 +63,7 @@
  * pins a version but a build from a working tree does not:
  *
  *   Version full file C:ping
- *   ping 0.16.2 (1.8.2026) AmiNetXDuo 68020 f75f058
- *
- * The CPU build is in there because the archive ships four of them and they
- * differ in speed, not just in what they will run on. Without it, "AmiNetXDuo
- * 0.16.0 gets 699 KB/s" does not say which program was measured.
+ *   ping 0.16.1 (1.8.2026) AmiNetXDuo f75f058
  *
  * "AmiNetXDuo" is in there because Roadshow ships commands with these exact
  * names -- AddNetInterface, ping, arp, netstat -- and its own tags say only
@@ -94,6 +80,6 @@
  */
 #define TOOL_VERSTAG(name_) \
     "$VER: " name_ " " AMINETXDUO_VERSION " (" AMINETXDUO_VERSION_DATE ") " \
-    "AmiNetXDuo " AMINETXDUO_VERSION_CPU " " AMINETXDUO_VERSION_HASH
+    "AmiNetXDuo " AMINETXDUO_VERSION_HASH
 
 #endif /* AMINETXDUO_VERSION_H */

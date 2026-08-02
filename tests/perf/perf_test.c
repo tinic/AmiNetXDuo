@@ -468,20 +468,68 @@ ULONG   len = 1460UL;
         p_report("checksum chain, net68k", ticks_new, reps, clen);
     }
 
-    /* Every length from 0 to 40 and a few beyond, on the real packet. */
-    for (i = 0UL; i <= 40UL; i++)
+    /*
+     * Every length from 0 to 700 bytes, over three payload fills.
+     *
+     * The range is chosen from the assembly, not picked round:
+     * n68k_sum_longwords() runs a computed jump through 64 unrolled pairs up
+     * to 256 bytes and a 56-longword movem.l block above that, so a sweep
+     * that stops short of 224 bytes never reaches the second shape at all and
+     * one that stops short of 448 never runs its loop twice.  The host tier
+     * cannot check either -- it compiles the C fallback -- so this is the only
+     * place the assembly is checked against the vendored answer.
+     *
+     * The fills are the carry cases: all ones makes every add carry, and the
+     * alternating longwords land the accumulator on 0xFFFFFFFF with a carry
+     * pending, which is where the chain has to fold twice.
+     */
     {
-        a = n68k_checksum_reference(p_scratch_packet, NX_PROTOCOL_TCP, (UINT)i,
-                                    &src, &dst);
-        b = n68k_ip_checksum_compute(p_scratch_packet, NX_PROTOCOL_TCP, (UINT)i,
-                                     &src, &dst);
-        if (a != b)
+    ULONG   fill;
+    ULONG   bad = 0xFFFFFFFFUL;
+    UCHAR  *pay = p_scratch_packet -> nx_packet_prepend_ptr;
+
+
+        for (fill = 0UL; (fill < 3UL) && (bad == 0xFFFFFFFFUL); fill++)
         {
-            (VOID)p_check(0, "checksum agrees at a short length", i);
-            break;
+            for (i = 0UL; i < 704UL; i++)
+            {
+                if (fill == 0UL)
+                {
+                    pay[i] = (UCHAR)(i * 7UL + 13UL);
+                }
+                else if (fill == 1UL)
+                {
+                    pay[i] = 0xFFU;
+                }
+                else
+                {
+                    pay[i] = (((i >> 2) & 1UL) == 0UL) ? 0xFFU :
+                             (UCHAR)(((i & 3UL) == 3UL) ? 1U : 0U);
+                }
+            }
+
+            for (i = 0UL; i <= 700UL; i++)
+            {
+                a = n68k_checksum_reference(p_scratch_packet, NX_PROTOCOL_TCP,
+                                            (UINT)i, &src, &dst);
+                b = n68k_ip_checksum_compute(p_scratch_packet, NX_PROTOCOL_TCP,
+                                             (UINT)i, &src, &dst);
+                if (a != b)
+                {
+                    bad = (fill << 16) | i;
+                    break;
+                }
+            }
+        }
+
+        (VOID)p_check((UINT)(bad == 0xFFFFFFFFUL),
+                      "checksum agrees, 3 fills x lengths 0..700", bad);
+
+        for (i = 0UL; i < 704UL; i++)
+        {
+            pay[i] = (UCHAR)(i * 7UL + 13UL);
         }
     }
-    (VOID)p_check(1, "checksum agrees at lengths 0..40", 0UL);
 }
 
 static VOID p_bench_copies(VOID)
@@ -532,19 +580,23 @@ UINT    da, sa;
     /*
      * The movem.l candidate, checked before it is timed.  This routine is
      * memcpy() for the whole library when AMINETXDUO_NET68K_MEMCPY is on, so
-     * "fast" is worthless without "exact".  Every length from 0 to 96 and
+     * "fast" is worthless without "exact".  Every length from 0 to 288 and
      * every one of the sixteen source/destination alignment combinations,
      * verifying three things each time: the copied bytes match, the byte
      * before the destination is untouched, and the byte after it is
-     * untouched.  That is 1552 cases; a routine that mishandles the head
-     * alignment, the movem block, the longword tail or the byte tail fails at
-     * least one of them.
+     * untouched.  That is 4624 cases; a routine that mishandles the head
+     * alignment, either movem block, the longword tail or the byte tail fails
+     * at least one of them.
+     *
+     * The ceiling is 288 rather than 96 so that two whole 128-byte blocks
+     * plus a remainder run at every alignment pair -- at 96 the unrolled
+     * block never executes and the sweep silently covers nothing.
      */
     {
     ULONG   n, da, sa, k;
     UINT    ok = 1;
 
-        for (n = 0UL; n <= 96UL; n++)
+        for (n = 0UL; n <= 288UL; n++)
         {
             for (da = 0UL; da < 4UL; da++)
             {
@@ -573,7 +625,7 @@ UINT    da, sa;
                 }
             }
         }
-        (VOID)p_check(ok, "n68k_copy_bytes exact, 1552 length/alignment cases",
+        (VOID)p_check(ok, "n68k_copy_bytes exact, 4624 length/alignment cases",
                       0UL);
 
         /* And one long copy, where the movem block does the work. */
@@ -595,6 +647,29 @@ UINT    da, sa;
             ok = 0;
         }
         (VOID)p_check(ok, "n68k_copy_bytes exact, 8184 B misaligned", 0UL);
+
+        /* And the same length at 2 mod 4 with an aligned destination, which
+           is what eight of the nine real drivers hand the SANA-II shim.  The
+           case above is 1 mod 4 once the head bytes are gone, so without this
+           one no long copy ever reaches the 2 mod 4 path. */
+        for (k = 0UL; k < sizeof(p_dst_buf); k++)
+        {
+            p_dst_buf[k] = 0xA5;
+        }
+        n68k_copy_bytes(p_dst_buf, p_src_buf + 2UL, P_APP_CHUNK - 8UL);
+        ok = 1;
+        for (k = 0UL; k < P_APP_CHUNK - 8UL; k++)
+        {
+            if (p_dst_buf[k] != p_src_buf[2UL + k])
+            {
+                ok = 0;
+            }
+        }
+        if (p_dst_buf[P_APP_CHUNK - 8UL] != 0xA5)
+        {
+            ok = 0;
+        }
+        (VOID)p_check(ok, "n68k_copy_bytes exact, 8184 B at 2 mod 4", 0UL);
     }
 
     t0 = p_now();
@@ -605,44 +680,16 @@ UINT    da, sa;
     ticks = p_elapsed(t0, p_now());
     p_report("n68k_copy_bytes d0 s0", ticks, reps, len);
 
-    /*
-     * The melded copy-and-sum, against the two operations it replaces.  The
-     * host tier cannot reach the assembly (tests/perf/host/shim), so this is
-     * where it is checked: the sum has to equal n68k_sum_longwords() over the
-     * same source and the copied bytes have to be identical, because a right
-     * sum over a wrongly-copied payload is the silent-corruption case.
-     */
+    /* s2 is the one that matters: eight of the nine drivers in the census
+       hand over a buffer at 2 mod 4.  s1 and s3 are here because Roadshow
+       falls off a 5.4x cliff at odd offsets and this routine does not. */
+    t0 = p_now();
+    for (i = 0UL; i < reps; i++)
     {
-        ULONG   words = len / 4UL;
-        ULONG   want;
-        ULONG   got;
-        UINT    ok = 1U;
-
-        want = n68k_sum_longwords((const ULONG *)p_src_buf, words);
-        got  = n68k_copy_sum_longwords((ULONG *)p_dst_buf,
-                                       (const ULONG *)p_src_buf, words);
-
-        (VOID)p_check((UINT)(got == want), "copy_sum matches sum_longwords",
-                      got ^ want);
-
-        for (i = 0UL; i < words * 4UL; i++)
-        {
-            if (p_dst_buf[i] != p_src_buf[i])
-            {
-                ok = 0U;
-            }
-        }
-        (VOID)p_check(ok, "copy_sum copies exactly", 0UL);
-
-        t0 = p_now();
-        for (i = 0UL; i < reps; i++)
-        {
-            (VOID)n68k_copy_sum_longwords((ULONG *)p_dst_buf,
-                                          (const ULONG *)p_src_buf, words);
-        }
-        ticks = p_elapsed(t0, p_now());
-        p_report("n68k_copy_sum_longwords d0 s0", ticks, reps, words * 4UL);
+        n68k_copy_bytes(p_dst_buf, p_src_buf + 1, len);
     }
+    ticks = p_elapsed(t0, p_now());
+    p_report("n68k_copy_bytes d0 s1", ticks, reps, len);
 
     t0 = p_now();
     for (i = 0UL; i < reps; i++)
@@ -652,14 +699,13 @@ UINT    da, sa;
     ticks = p_elapsed(t0, p_now());
     p_report("n68k_copy_bytes d0 s2", ticks, reps, len);
 
-    /* Opposite parity -- the case with a genuine cliff in it, see below. */
     t0 = p_now();
     for (i = 0UL; i < reps; i++)
     {
-        n68k_copy_bytes(p_dst_buf, p_src_buf + 1, len);
+        n68k_copy_bytes(p_dst_buf, p_src_buf + 3, len);
     }
     ticks = p_elapsed(t0, p_now());
-    p_report("n68k_copy_bytes d0 s1", ticks, reps, len);
+    p_report("n68k_copy_bytes d0 s3", ticks, reps, len);
 
     /* The SANA-II shim's own loop, for comparison at the two alignments it
        actually sees. */

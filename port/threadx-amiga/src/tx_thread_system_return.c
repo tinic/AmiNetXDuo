@@ -172,6 +172,8 @@ struct _tx_amiga_ctrl   *ctrl;
     for (;;)
     {
 
+        TX_AMIGA_COUNT(TX_AMIGA_SC_PARK_WAIT);
+
         Wait(run_signal);
 
         Forbid();
@@ -209,6 +211,7 @@ struct _tx_amiga_ctrl   *ctrl;
 
         /* Spurious wake-up -- the scheduler changed its mind, or a stale
            signal latched.  Go back to sleep.  */
+        TX_AMIGA_COUNT(TX_AMIGA_SC_PARK_SPURIOUS);
         Permit();
     }
 }
@@ -219,11 +222,14 @@ VOID _tx_thread_system_return(VOID)
 
 TX_THREAD   *thread_ptr;
 struct Task *me;
+UINT         handed;
 
 
     me =  FindTask((STRPTR) 0);
 
     Forbid();
+
+    TX_AMIGA_COUNT(TX_AMIGA_SC_SYS_RETURN);
 
     thread_ptr =  _tx_thread_current_ptr;
 
@@ -269,12 +275,18 @@ struct Task *me;
                 (LONG) &_tx_thread_system_return);
     }
 
-    /* Release the baton.  */
+    /* Release the baton, and give it straight to whoever is next rather than
+       waking the scheduler Task to do it.  */
     _tx_thread_current_ptr =  TX_NULL;
+
+    handed =  _tx_amiga_dispatch_inline();
 
     Permit();
 
-    _tx_amiga_wake_scheduler();
+    if (handed == ((UINT) TX_FALSE))
+    {
+        _tx_amiga_wake_scheduler();
+    }
 
     /* Park.  A completed or terminated thread stays here until
        tx_thread_delete() reaps it, which keeps teardown on one path.  */

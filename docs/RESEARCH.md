@@ -2,6 +2,27 @@
 
 *An AmiTCP/Roadshow-compatible `bsdsocket.library` for AmigaOS built on Eclipse ThreadX NetX Duo.*
 
+> **CLOSED TO NEW SECTIONS, 2026-08-02.** This file is 22,000 lines and 89
+> sections. Nobody reads it; it is grepped for one citation at a time, which is
+> what it is now for. **Do not append a section 90.**
+>
+> A new finding goes in two places instead:
+>
+> * **the comment beside the code it explains** — `n68k_checksum.S`,
+>   `netx_call.c`, `nx_user.h` and `sana2_rx.c` all carry their measured
+>   rationale inline, and it gets read because you are already in the file when
+>   you need it;
+> * **one entry in `docs/BACKLOG.md`**, if a decision came out of it.
+>
+> Citing a section here is fine and expected. Two cautions when you do. A
+> conclusion may have been overturned later, and the tree is the authority over
+> anything written here. And a recorded conclusion is only as good as the
+> instrument behind it: §39.3 rejected an optimisation on a table whose two
+> arms were charged 525 µs and 214 µs per bracket, a comparison that was never
+> valid, and that stood until 2026-08-01 — when the thing it discouraged turned
+> out to be worth 21% of throughput. If a citation is load-bearing for what you
+> are about to decide, re-measure rather than inherit it.
+
 Status: no longer research only — this began as a feasibility study and the thing now
 builds, runs, passes 125/142 of an independent conformance suite and carries upstream
 curl. The early sections are kept as they were written, because how a conclusion was
@@ -21524,3 +21545,675 @@ lookups differ when an index is given. No IPv4-only
 `nx_tcp_client_socket_source_connect()` wrapper: the UDP pair exists because
 `_nx_udp_socket_source_send()` predates the duo API, and there is no such
 history here.
+
+
+## 86. The copy at 2 mod 4, and the thing that does not fix it (2026-08-02)
+
+§45 records why `n68k_copy_bytes()` aligns the destination and then reads
+longwords from wherever the source happens to be. The alignment census says
+that source is at 2 mod 4 on eight of the nine drivers surveyed -- ariadne,
+ariadne_ii, x-surf, x-surf-100 on Z2 and Z3, hydra, a2065, cnet -- so 2 mod 4
+is not a corner, it is the case.
+
+An instrumented SANA-II device priced `S2_CopyToBuff` per byte for both stacks
+on one machine in one run, two-point fit over 64 and 1024 bytes:
+
+| src align | Roadshow | ours |
+|---|---|---|
+| 0 mod 4 | 133 | 158 |
+| 1 mod 4 | 715 | 205 |
+| 2 mod 4 | 182 | 204 |
+| 3 mod 4 | 716 | 204 |
+
+The odd offsets are a rout in our favour -- Roadshow falls off a 5.4x cliff
+where this routine is flat -- and 2 mod 4 is the one alignment where it is
+ahead.
+
+### The idea that does not work
+
+A 2 mod 4 offset is exactly a word, so the split longword reads can be moved to
+the aligned side and put back with `swap` and `move.w` rather than paid for at
+the bus. That is cheap register work in place of split cycles, and it is the
+reason 2 mod 4 looks special when 1 and 3 do not.
+
+It loses, and so does every other word-granularity variant. All five assembled
+into one binary and measured in one run, A1200 profile, 1460 bytes, aligned
+destination, ns/B at a source offset of 2:
+
+| | s2 |
+|---|---|
+| `movem.l`, destination aligned (what ships) | 233 |
+| `movem.w`, both sides word aligned | 349 |
+| aligned `movem.l` + `swap`/`move.w` recombine | 359 |
+| `move.w a1@+,a0@+`, eight per iteration | 419 |
+
+The cost model says why, and it is not the one the idea assumes. On this
+profile memory is nearly free and instructions are not: the aligned `movem.l`
+block runs at 82 cycles per 32 bytes, which is about what the MC68020UM
+charges for the two instructions with no bus cost at all. A misaligned
+longword adds 22 cycles per 32 bytes -- 2.75 per longword. A `swap` plus a
+`move.w Dn,Dn` is 6 published cycles and measures nearer 7 with the
+instruction fetch. Seven to save 2.75, per longword, every longword. There is
+no arrangement of it that wins, and word-granularity loses harder still
+because it doubles the instruction count outright.
+
+Aligning the source instead of the destination -- keeping the split but moving
+it from the read to the write -- measured 232.8 against 229.8. Nothing in it.
+
+### The thing that does work
+
+If instructions are the currency, spend fewer of them. The block loop was one
+`movem.l` pair plus `lea`, `subq` and `bne` per 32 bytes; the three bookkeeping
+instructions are a third of the instruction count. Unrolling to four pairs per
+iteration amortises them over 128 bytes:
+
+| pairs per iteration | s0 | s1 | s2 | s3 |
+|---|---|---|---|---|
+| one (before) | 179.7 | 227.2 | 228.3 | 229.5 |
+| two | 167.8 | 216.5 | 218.0 | 215.6 |
+| four | 160.2 | 211.8 | 212.0 | 209.8 |
+| eight | 161.0 | 206.5 | 212.3 | 210.8 |
+
+Eight is not better than four and doubles the loop body, so four ships. `dbf`
+in place of `subq`/`bne` measured the same and would need a 65536-block guard,
+so it does not. The noise floor was measured rather than assumed: the same
+routine was assembled twice at two addresses in the same binary and the two
+copies differ by up to 1.2%, which is the band any claim above has to clear.
+
+Three runs each, not averaged, ns/B over 1460 bytes:
+
+| | s0 | s1 | s2 | s3 |
+|---|---|---|---|---|
+| before | 180.0 / 179.7 / 179.7 | 227.5 / 227.2 / 227.2 | 229.8 / 229.5 / 227.2 | 229.8 / 229.5 / 229.5 |
+| after | 159.4 / 162.8 / 159.4 | 211.7 / 211.7 / 211.7 | 209.4 / 209.4 / 209.4 | 212.1 / 209.0 / 212.1 |
+
+The "before" row is the unmodified routine measured from the variant harness,
+which is the only place it was ever timed at all four alignments -- the
+shipped harness had no s3 row until this change added one. In its own position
+in its own binary the unmodified routine read 183.6 / 180.9 / 183.5 at s0 and
+227.6 / 226.7 / 227.0 at s2, which is the same figure to within the noise band
+above.
+
+This does not close the 2 mod 4 gap by making 2 mod 4 special -- the split
+cycle is still paid. It closes it by making the whole routine cheaper, which
+is where Roadshow's lead actually was: it is ahead at 0 mod 4 by the same
+proportion it is ahead at 2. Everything downstream moved with it, in the same
+run: `nx_packet_data_extract_offset` 200.9 to 178.7 ns/B, `nx_packet_copy` of
+an 8 KB chain 266.2 to 246.7, an allocate/append-1460/release round trip 273.4
+to 244.3.
+
+### Coverage
+
+The exactness sweep in `tests/perf/perf_test.c` ran lengths 0 to 96 at all
+sixteen alignment pairs, which never once entered a 128-byte block -- a sweep
+that covers nothing is worse than no sweep, because it passes. It now runs to
+288, so two whole blocks and a remainder execute at every pair. The long
+8184-byte case was at 1 mod 4 once its head bytes were gone; a second one at
+2 mod 4 with an aligned destination joins it, so the alignment the drivers
+actually produce is checked at length as well as in the sweep.
+
+## 87. The checksum's carry, riding the X flag (2026-08-02)
+
+`n68k_sum_longwords()` was two instructions per longword and had been since it
+was written:
+
+```
+add.l   a0@+,d0         | 32-bit add, sets X on carry out
+addx.l  d2,d0           | d2 is zero, so this adds the carry back in
+```
+
+201.3 ns/B on the A1200 profile against the vendored loop's 722, unrolled eight
+ways, and by §86's cost model — memory nearly free, instructions the currency —
+the only thing left to take out was the `subq`/`bne`, two of every eighteen
+instructions. That is an 11% ceiling and the measurements agreed with it: 16,
+32 and 64 longwords per iteration bought 166-172 against 180 for eight, and 128
+gave it all back at 184.
+
+The 34% came from somewhere else. `addx.l Dn,Dx` adds the source **and** the X
+flag, and X is exactly the end-around carry the second instruction of the pair
+exists to fold in. Chain the addx instructions instead of resetting each one
+with a zero register and the carry rides X from one longword to the next:
+
+```
+movem.l a0@+,d1-d7
+addx.l  d1,d0
+addx.l  d2,d0
+...                     | seven of them
+```
+
+Eight instructions per seven longwords rather than sixteen per eight — 1.14
+against 2.25 — and no `add.l` anywhere to reload X and break the chain.
+
+This is not the experiment the backlog already records as worthless. That one
+loaded eight longwords with `movem.l` and then ran `add.l Dn,d0` / `addx.l
+d2,d0` on each, which is 19 instructions per 32 bytes against 18 and measured
+201.27 against 201.39. `movem.l` only pays when it feeds something that needs
+one instruction per longword, not two.
+
+### What the chain may not touch
+
+Nothing between two `addx` instructions may disturb X. `movem`, `cmpa`, `lea`,
+`movea`, `adda`, `suba`, `moveq` and every branch leave it alone; `add`, `sub`,
+the shifts and `addx` itself do not. That decides the shape of the loop:
+
+- the pointer arithmetic that sets up the end pointer runs **before** the chain
+  is armed, because `lsl.l` writes X;
+- the loop is counted by `cmpa.l` against a precomputed limit rather than by
+  `subq`/`dbf` on a data register, because `subq` writes X and because every
+  data register is a `movem` target anyway;
+- seven is the ceiling. `d0` is the accumulator, `addx` takes only data
+  registers, and folding an address register in with `add.l` would drop
+  whatever carry was pending.
+
+The chain leaves one carry in X at the end, and folding it can carry again:
+`d0 = 0xFFFFFFFF` with X set is reachable here, which it is not in the
+`add.l`/`addx.l` form, where a carry out of the add bounds the result at
+`0xFFFFFFFE`. So the fold is done twice, and twice is enough — the first fold
+can only carry by taking `d0` to zero, and `0 + 1` does not carry. That keeps
+the property `n68k_checksum.c` depends on: the answer is congruent to the
+16-bit sum modulo `0xFFFF`, and it is the zero spelling only when every
+longword was zero.
+
+### Then it lost 30% on the packets nobody was watching
+
+The chain needs `d2-d7/a2` saved and restored where the old loop saved two
+registers. Over 1460 bytes that vanishes. Over the 20-byte IP header, which
+this stack checksums on every packet in both directions, it was a **24-32%
+loss** — and the wire case runs 1284 checksum calls over 537 KB, a 418-byte
+mean over a distribution with a large spike at 20.
+
+So calls of 64 longwords or fewer take a second shape that saves nothing: a
+computed jump into 64 unrolled `move.l`/`addx.l` pairs, entered so exactly
+`count` of them run. Same two instructions per longword as the old loop, minus
+its loop control and minus the register saves. It is straight-line code run
+once, so its 256 bytes cost nothing in the instruction cache — a cache only
+charges for code that repeats.
+
+### Measured
+
+A1200 profile under FS-UAE, every candidate assembled into one binary under a
+different symbol and timed in a single run, so no cross-run drift can be read
+as a difference. Best of five passes, ns/B.
+
+The floor is the old loop assembled twice at two addresses. It is **1.3-3.3%**
+from 128 B up and **5% at 20-40 B**, where code placement alone moves the
+number — two byte-identical routines differed by 5% at 20 B, consistently, in
+every pass. Nothing below those bars was treated as a result.
+
+| bytes | 1460 | 1024 | 512 | 400 | 296 | 260 | 200 | 128 | 40 | 20 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| add/addx x8 (was) | 180.6 | 182.0 | 191.9 | 203.9 | 211.9 | 214.4 | 229.5 | 252.0 | 464.7 | 852.4 |
+| table + movem chain | 128.6 | 137.5 | 155.1 | 173.4 | 185.0 | 191.9 | 215.6 | 253.1 | 458.9 | 669.5 |
+| x | 1.40 | 1.32 | 1.24 | 1.18 | 1.15 | 1.12 | 1.06 | 1.00 | 1.01 | 1.27 |
+
+Between about 64 and 256 bytes the table and the old loop run the same two
+instructions per longword and the difference is placement noise. The table wins
+outright only where the loop control it drops is a large share of the work, at
+20-40 B.
+
+Through `n68k_ip_checksum_compute()` rather than the loop alone, which is what
+`perf_test` reports:
+
+| | was | now |
+|---|---|---|
+| checksum, net68k, 1460 B | 201.4 ns/B | 149.8 ns/B |
+| checksum chain, net68k, 8192 B | 190.5 ns/B | 136.5 ns/B |
+| ratio against the vendored loop | 3.58x | 4.82x |
+
+Both columns are the same tree with only this file changed. Rebased onto
+86's copy work the same row reads 153.05, and the vendored row it shares a
+binary with moves too, 722.21 to 718.80 -- whole-binary code placement, the
+same effect the 5% floor at 20 B is made of, and not something either change
+did.
+
+End to end, same binary, same run:
+
+| | was | now |
+|---|---|---|
+| loopback pipeline ceiling | 911 KB/s | 1004 KB/s |
+| TCP loopback, drain only | 693 KB/s | 721 KB/s |
+| TCP loopback, +extract | 600 KB/s | 624 KB/s |
+| TCP over the RAM driver | 230 KB/s | 234 KB/s |
+
+10% off the pipeline ceiling, 4% off a loopback transfer, 2% on the wire, where
+the driver dominates.
+
+### What lost
+
+Recorded so none of it is tried again.
+
+| candidate | at 1460 B | |
+|---|---|---|
+| add/addx unrolled 16 / 32 / 64 | 172-175 / 166 / 170 | the `subq`/`bne` is 11% of the instruction budget and that is all there is |
+| add/addx unrolled 128 | 184 | worse than eight; the loop body is 512 bytes |
+| `dbf` instead of `subq`/`bne` | 181 at x8, 167 at x32 | identical within the floor. One instruction of loop control rather than two is not measurable |
+| two accumulators | 164-170 at x32 | flat. The pairs cannot interleave anyway — the `addx` reads the X the `add` just set, so the flag serialises them whatever the data does |
+| movem chain 7x13, 7x16 | 127-130 | matches 7x8 at 1460 B and loses 5-11% at 260-512 B, where the deeper block no longer fits inside the packet |
+| movem chain 7x32 | 138-141 | 7% worse everywhere |
+| a middle loop level (7x8 + 7x4) | 130.0, and 189.5 at 296 B | no |
+
+### The instruction cache turn, which was not a cliff
+
+§86 expected the 68020's 256-byte instruction cache to punish a deep unroll,
+and it does, but softly and later than the arithmetic suggests. The movem
+chain's loop body is `18k + 6` bytes for `k` blocks: 150 bytes at 7x8, 294 at
+7x16, 582 at 7x32. 7x16 is already over the cache and is not measurably slower
+than 7x8; only 7x32 loses, and by 7%. The add/addx family turns in the same
+place — 64 longwords is 262 bytes of body and still beats eight, 128 longwords
+is 518 and does not.
+
+So the cache is not the reason to stop unrolling here; running out of packet
+is. A block of 91 longwords is 364 bytes and a 296-byte packet never enters it,
+which costs more than the instruction fetches ever did.
+
+### What cannot be measured here
+
+FS-UAE charges no cycles above a 68020, so every number here is the A1200
+profile and nothing else. Two of the results would plausibly differ on the
+machines this project's fastest users actually run:
+
+- **the two-accumulator result.** It is flat on a 68020 and that says nothing
+  about a 68040 or a superscalar 68060. The flag dependency argument above is
+  architectural and applies everywhere, but whether an 060 can overlap two
+  independent `add`/`addx` pairs is not something this lab can answer.
+- **`movem.l` itself.** The whole win rests on `movem.l` being cheap per
+  register, which is measured on the 68020 and inherited from §86's copy work.
+  It is not measured on an 040 or an 060.
+
+### Correctness
+
+The host tier (`tests/perf/host/test_checksum_host.c`, ~10250 cases against the
+vendored function) compiles the C fallback and cannot reach any of this. So the
+on-target sweep in `perf_test` is the only check the assembly gets, and it ran
+lengths 0..40 bytes — ten longwords, which under the new code never leaves the
+first ten entries of the jump table and never reaches the `movem` shape at all.
+Widened to every length from 0 to 700 bytes over three payload fills: the ramp,
+all ones (every add carries), and alternating `0xFFFFFFFF`/`0x00000001`, which
+is what lands the accumulator on `0xFFFFFFFF` with a carry pending and makes
+the second fold matter. 700 bytes is 175 longwords, so the deep block runs
+three times and every level of the tail is reached.
+## 88. The bracket a parked packet does not need (2026-08-01)
+
+§39.3 put four bracket policies in a table and declined the interesting one:
+
+> `on-miss` is in the table because it is the next idea and it is **not taken**:
+> it drops the bracket for a `recv()` that can be served out of the packet
+> already parked on the socket, which is arithmetic and a copy — but it also
+> moves `nx_packet_release()` outside the baton, and releasing a packet can
+> resume a thread suspended on the pool.
+
+The objection is right, and it is narrower than the idea it rejected. A read
+that is *strictly shorter* than what the parked packet still holds never
+releases anything. That read is the one this section takes the bracket off.
+
+### 86.1 The instrument was priced against the wrong bracket
+
+`tests/perf/bracket_test.c` set `b_cache_live` only for the `cached` arm. Every
+other arm therefore ran `tx_amiga_adopt_thread()`/`tx_amiga_orphan_thread()` --
+the pair §39.1 prices at 525 us -- while `cached` ran the dormant-TX_THREAD
+pair at 214 us. So `on-miss` was charged 2.5x per bracket for the privilege of
+taking fewer of them, and the two columns of §39.3's table were never
+comparable. Fixed: every arm but `per-call` now uses the cached bracket, and
+`per-call` stays uncached because that is what `-DAMINETXDUO_NXCACHE=OFF`
+restores.
+
+### 86.2 One bracket per call, not one per miss
+
+`on-miss` releases the bracket the instant `nx_tcp_socket_receive()` returns. A
+read large enough to span packets misses more than once, so it pays more
+brackets than `per-call` does: at 16 KB reads, 32 brackets over 16 calls. That
+is why it loses to `cached` at the top of the table, and it is not a property of
+the idea -- it is a property of releasing too eagerly. A `lazy` arm that takes
+the bracket on first need and holds it to the end of the call caps the bill at
+one per call, and is then never worse than `cached` and never worse than
+`on-miss`.
+
+256 KB over loopback, A1200 profile, five arms:
+
+| read | per-call | cached | on-miss | lazy | once |
+|---:|---:|---:|---:|---:|---:|
+| 512 | 750 ms | 598 | 484 | **482** | 440 |
+| 1,460 | 548 | 496 | 460 | **460** | 417 |
+| 4,096 | 475 | 455 | 447 | **450** | 406 |
+| 16,384 | 431 | 429 | 445 | **429** | 401 |
+
+| read | calls | reaching NetX Duo | brackets: cached / on-miss / lazy |
+|---:|---:|---:|---:|
+| 512 | 512 | 32 | 512 / 32 / 32 |
+| 1,460 | 180 | 32 | 180 / 32 / 32 |
+| 4,096 | 64 | 32 | 64 / 32 / 32 |
+| 16,384 | 16 | 32 | 16 / **32** / 16 |
+
+480 brackets removed buys 116 ms, which is 242 us each against a measured pair
+of 214 us. The arithmetic closes.
+
+### 86.3 What shipped, and why it is narrower than `lazy`
+
+`bsd_recv_parked()` (`src/bsdsocket/transfer.c`) skips the bracket when the
+socket is TCP, not read-shut, has a parked packet, and that packet holds
+strictly more than the caller asked for. Under that predicate `bsd_recv_tcp()`
+provably stays inside the pure region: `as_RxPending` is never emptied, so
+`nx_tcp_socket_receive()` is never called and `nx_packet_release()` is never
+called. What runs unbracketed is `nx_packet_length_get()` -- one field read --
+and `nx_packet_data_extract_offset()`, a read-only chain walk and a `memcpy` on
+a packet the IP thread no longer references. Neither has a caller check and
+neither takes a lock, because neither touches anything shared.
+
+"Strictly more", not "at least as much", is the safety argument: a read that
+drains the packet exactly would release it, and that is §39.3's objection,
+unanswered. It costs nothing to stay away from -- the call that would have hit
+it takes the bracket for its own receive anyway, so the bracket count is the
+same as `lazy`'s.
+
+The predicate is an optimisation, not a correctness dependency. `bsd_nx_need()`
+takes the bracket at the sites inside the loop that need one, so a predicate
+that were wrong -- or a future edit that added a site -- is slow rather than
+corrupting.
+
+### 86.4 What it is worth, and to whom
+
+Brackets removed = calls that never reach NetX Duo, so the saving is
+214 us x (calls - misses) and nothing else. It is worth most to exactly the
+client §29.3 caught this stack losing to Roadshow: one that reads small.
+
+The loopback figures flatter it. The RAM driver delivers the sender's 8 KB
+chunk whole, so a 512-byte read misses once in sixteen. Over a real link with a
+1,460-byte MSS a 512-byte read misses once in about three, and the saving is
+roughly a third of the calls rather than fifteen sixteenths. The per-bracket
+constant is the number to carry, not the percentage.
+
+### 86.5 Where the same shape is, and is not
+
+* **The send path has no equivalent.** Every `send()` reaches
+  `nx_tcp_socket_send()`; there is no parked state to satisfy it from. The
+  bracket there is not overhead, it is the call.
+* **`WaitSelect()`'s poll sweep has one, unmeasured.** `bsd_poll_sets()` takes
+  a bracket per pass, and of the three predicates it runs, `bsd_writable()` and
+  `bsd_exception()` read struct fields and make no NetX Duo call at all --
+  `bsd_readable()` is the only one that reaches
+  `nx_tcp_socket_bytes_available()`, and only after four early-outs, one of
+  which is the parked packet. A sweep over a socket that already has data
+  therefore needs no bracket. Not taken here: it is a second lock change with
+  no instrument behind it, and §39.7 already argued `select()` is not where the
+  money is. Note the shape is the opposite of the obvious guess -- a poll pass
+  that finds *nothing* ready is the one that must call
+  `nx_tcp_socket_bytes_available()`, so it is the pass that finds data parked
+  that could skip the bracket, not the empty one.
+## 89. The scheduling was 23% of a transfer, and it was frequency (2026-08-01)
+
+`tests/perf/prof` put the largest single cluster of a 1 MB TCP transfer in the
+scheduling glue rather than in the copy: `_tx_thread_interrupt_disable` and
+`_restore` together at 8.8%, Exec's `Reschedule`/`Switch`/`Dispatch`/
+`Supervisor` at 10.4%, the mutex pair at 4.5%, `_tx_amiga_thread_park` at 1.4%
+— against 17.6% for `n68k_copy_bytes`, which had been optimised twice.
+
+A sampled share does not say why. "This primitive is slow" and "this primitive
+is called constantly" want opposite fixes, and there is a third case that looks
+like both: a busy-wait, where the PC really is in the function and the fix is
+neither. So the counts were taken before anything was changed.
+
+`-DAMINETXDUO_SCHEDCOUNT=ON` adds a call counter to each of them, in the spirit
+of `AMINETXDUO_NXCENSUS` — off by default, free when off, and every increment
+inside the `Forbid()` it counts so none is lost to another Task. Exec's own
+`DispCount` and `IdleCount` come straight out of `SysBase`; nothing we could
+instrument would produce them.
+
+### 89.1 The table
+
+A1200/68020, `tcpprof` wire case, 1 MB, transfer phase only. Shares and
+samples from the clean build (4420 samples at 1 kHz over 4369 ms, so one sample
+is one millisecond); counts from the counting build. Two runs, because the
+increments are on the path being counted — the counts are reproducible to 0.13%
+across builds, which is what makes mixing them legitimate.
+
+| function | samples | share | calls | µs/call | progress or waiting |
+|---|---|---|---|---|---|
+| `_tx_thread_interrupt_disable` | 166 | 3.8% | 38,853 | 4.3 | progress |
+| `_tx_thread_interrupt_restore` | 219 | 5.0% | 38,853 | 5.6 | progress |
+| — the pair | 385 | 8.7% | 38,853 | 9.9 | progress |
+| `_tx_mutex_get` | 90 | 2.0% | 5,612 | 16.0 | progress |
+| `_tx_mutex_put` | 111 | 2.5% | 5,672 | 19.6 | progress |
+| `_tx_thread_schedule` | 82 | 1.9% | 2,634 | 31.1 | progress (middleman) |
+| `_tx_amiga_thread_park` | 64 | 1.4% | 2,634 | 24.3 | progress |
+| `_tx_thread_system_return` | 39 | 0.9% | 2,634 | 14.8 | progress |
+| `_tx_amiga_wake_scheduler` | 33 | 0.7% | 2,894 | 11.4 | progress |
+| `exec/Supervisor` | 168 | 3.8% | — | — | progress |
+| `exec/Reschedule` | 116 | 2.6% | 5,844 | 19.9 | progress |
+| `exec/Switch` | 96 | 2.2% | 5,844 | 16.4 | progress |
+| `exec/Dispatch` | 80 | 1.8% | 5,844 | 13.7 | progress |
+| `exec/Schedule` | 43 | 1.0% | 5,844 | 7.4 | progress |
+| `exec/Permit` | 76 | 1.7% | — | — | progress |
+| `exec/Signal` | 40 | 0.9% | ~5,500 | 7.2 | progress |
+| `exec/Wait` | 33 | 0.7% | 5,377 | 6.1 | progress |
+| `exec/Forbid` | 33 | 0.7% | — | — | progress |
+
+`Supervisor`, `Permit` and `Forbid` are reached from more than one of the rows
+above and from Exec itself, so there is no honest denominator for them; they are
+left without one rather than given a made-up one. The five Exec scheduling
+entries together are 503 samples, 11.4% of the transfer, over 5,844 Exec task
+dispatches: **86 µs per Exec context switch.**
+
+Per 1448-byte segment: 54 `TX_DISABLE` pairs, 7.8 mutex operations, 3.6 ThreadX
+handoffs.
+
+### 89.2 Nothing was spinning
+
+Worth establishing before optimising, because a spin would want a third fix
+again. Six things say there was none:
+
+- `park_spurious` was **0** of 2,634 parks. The park loop's "woke without the
+  baton, go back to sleep" branch was never taken.
+- the scheduler Task waited 2,743 times and dispatched 2,634 times, so 4% of
+  its wakeups found nothing to do.
+- `_tx_amiga_wake_scheduler()` ran 2,894 times for those 2,634 dispatches: 9%
+  redundant pokes, each one `Signal()` on a Task already signalled, not a loop.
+- `SysBase->IdleCount` did not move at all over the phase. The machine was never
+  in Exec's idle loop, so no time was being lost to a wait that nothing woke.
+- structurally, a Task blocked in Exec's `Wait()` is not executing and therefore
+  cannot be sampled — the PC sampler always records whoever is running. There is
+  no mechanism by which "time spent waiting" can appear as share in this
+  profile. Every sample in it is a Task executing instructions.
+- the per-Task cross-tab (every sample carries `SysBase->ThisTask`) puts the
+  scheduler Task's 370 samples across `_tx_thread_schedule` 89, `Supervisor` 78,
+  `Reschedule` 44, `Switch` 38, `Dispatch` 38, `Wait` 27 and `Permit` 20. That
+  is the cost of being woken 2,743 times, and it is real work. It is also
+  avoidable work, which is a different thing from a spin.
+
+So: **frequent, not slow.** Nothing in the list is expensive for what it does.
+Two things follow from that, and they are the two changes below.
+
+### 89.3 The scheduler Task was a middleman
+
+Every ThreadX handoff was three Exec context switches. The yielding Task
+released the baton, signalled the scheduler Task and blocked; Exec dispatched
+the scheduler; the scheduler picked `_tx_thread_execute_ptr`, signalled the
+target and blocked; Exec dispatched the target. The middle two exist only to run
+the ten lines of `_tx_thread_schedule()` that assign `_tx_thread_current_ptr`,
+bump the run count, set the time slice and `Signal()` — which the yielding Task
+can run itself, and which `tx_amiga_adopt_thread()` had already been running
+itself on its fast path since adoption was written.
+
+`_tx_amiga_dispatch_inline()` in `tx_amiga_internal.h` is those ten lines,
+behind the scheduler loop's own guard: a thread to run, the baton free, system
+state zero, the kernel not stopping. Both take `Forbid()` and both test
+`_tx_thread_current_ptr`, so the two can never both dispatch — only one of them
+can find it `TX_NULL`. A caller that is refused falls back to the poke, because
+the refusal may be a raised `_tx_thread_system_state` that clears later.
+
+Four sites release the baton and now hand it straight on:
+`_tx_thread_system_return()` (the hot one), `_tx_thread_context_restore()` when
+the tick made something ready on an idle system, and
+`tx_amiga_adopt_suspend()`/`tx_amiga_orphan_thread()`, which are the
+`bsdsocket.library` per-call bracket.
+
+The case where `_tx_thread_execute_ptr` is the yielding thread itself needs no
+special handling and is the best one: it signals itself, parks, and `Wait()`
+returns immediately on the signal that is already set.
+
+Measured on the same workload: `sched dispatch` 2,634 → **0**, `direct` 0 →
+2,656, `wake` 2,894 → 203, Exec dispatches 5,844 → 3,281 (−44%), and the
+scheduler Task's own share 8.1% → 0.4%. Wall clock 4369 → 3936 ms.
+
+### 89.4 `TX_DISABLE`/`TX_RESTORE` were out-of-line calls
+
+38,853 pairs at 9.9 µs each, for a body that is two instructions. §6.2 had
+already collapsed the inner layer — `_tx_amiga_forbid_inline()` is one
+`ADDQ.B`, not a jump through the Exec vector, and `permit-slow` counted **0**
+reaching the real `Permit()` in the whole transfer — so the remaining cost was
+the `jsr`/`rts` and a reload of `SysBase` on each side of it.
+
+They are macros in the standard ThreadX porting model for exactly this reason;
+out-of-line functions were the deviation here, taken so that `tx_port.h` could
+stay free of the AmigaOS headers. It still is. Exec is reached by offset:
+`TDNestCnt` at `$127` and `AttnResched` at `$12A`, both asserted against the
+NDK's `struct ExecBase` in `tx_thread_interrupt_control.c` with
+`_Static_assert`, so a header that ever moved a field fails the build rather
+than corrupting the nest count. `SysBase` is absolute location 4 by definition,
+which is where the C global is loaded from anyway.
+
+**What the inlined `Permit` checks, and why that is complete.** Exec
+reschedules on `Permit()` when all three of: the count went below zero (this was
+the outermost `Forbid`), no interrupt is in progress (`IDNestCnt < 0`), and the
+attention word is set. The inline tests only `AttnResched != 0`, because a clear
+word proves Exec's `Permit()` would not have rescheduled whatever the other two
+say — so returning there is precisely what the library call would have done. It
+is tested first because it is the cheapest of the three and the one that is
+nearly always zero. When it is set, `_tx_amiga_permit_finish()` applies the full
+three-way test out of line and calls the real `Permit()`, so the reschedule path
+is Exec's own and not a copy of it. This is the same logic §6.2 already had; it
+moved, it did not change.
+
+A word set in the instant after it is read costs a deferred switch. That is the
+race Exec's own `Permit()` has, closed by the next `Permit()`, `Enable()` or
+interrupt exit — and on this port that is never far off, because the threads
+block in `Wait()` constantly and `Wait()` always reschedules.
+
+One `moveal 4,a0` per side rather than two: GCC will not hold a volatile address
+across a volatile access, so the base is taken once into a local and both fields
+are read off it. `tx_mutex_put.c` compiles to `moveal 4,a0 / addq.b #1,a0@(295)`
+at entry and `moveal 4,a0 / subq.b #1,a0@(295) / movew a0@(298),d0 / beq` at
+exit, with no call on either. `tcpprof` text grew 100,840 → 103,368 bytes.
+
+### 89.5 Before and after
+
+Category shares of the transfer phase, A1200/68020, 1 MB over the wire case:
+
+| category | base | +direct handoff | +inline TX_DISABLE |
+|---|---|---|---|
+| ThreadX + Amiga port | 1090 (24.7%) | 980 (24.7%) | 733 (20.1%) |
+| NetX Duo protocol | 1086 (24.6%) | 1046 (26.3%) | 1090 (29.9%) |
+| Kickstart (Exec etc) | 833 (18.8%) | 505 (12.7%) | 418 (11.5%) |
+| copy (net68k asm) | 780 (17.6%) | 811 (20.4%) | 775 (21.3%) |
+| checksum | 573 (13.0%) | 565 (14.2%) | 564 (15.5%) |
+| app / profiler | 52 (1.2%) | 61 (1.5%) | 59 (1.6%) |
+| **total samples** | **4420** | **3973** | **3644** |
+| wall, ms | 4369 | 3936 | 3613 |
+| KB/s | 234 | 260 | 283 |
+
+The last column moves about 60 samples between the ThreadX port and Kickstart
+rows from run to run, and the total does not: 3646 and 3644 on two exclusive
+runs of the same binary. Read the total.
+
+Samples are milliseconds here, so the absolute column is the one to read. The
+work that did not change did not move: copy 780 → 799, checksum 573 → 537, NetX
+Duo 1086 → 1104. The overhead did: Exec 833 → 485, ThreadX port 1090 → 666.
+NetX Duo's count rising while everything got faster is the inlining — a
+`TX_RESTORE` inside `_nx_packet_allocate()` is now charged to
+`_nx_packet_allocate()`, which is where it always was.
+
+`_tx_thread_interrupt_disable` and `_restore` are gone from the ranking
+entirely, which is what inlining them means and not by itself a saving. The
+saving is the total: **4420 → 3646 samples for the same megabyte, −17.5%**.
+
+Loopback, the same two changes: 1676 → 1445 ms, 610 → 708 KB/s.
+
+Counts after, confirming the workload did not change: `disable`/`restore`
+38,853 → 38,850, `permit-slow` still 0, mutex 5,612/5,672 → 5,612/5,671,
+handoffs 2,634 → 2,654, `park_spurious` still 0.
+
+### 89.6 The floor, measured -- and the win does not grow there
+
+The A500 profile, 68000 at 7.09 MHz, Kickstart 3.1 r40.63, same `tcpprof` and
+same megabyte. Baseline is e2c03f6, the commit this branch sits on.
+
+| category | base | after | delta |
+|---|---|---|---|
+| Kickstart (Exec etc) | 6566 (25.6%) | 4614 (21.8%) | -1952 |
+| ThreadX + Amiga port | 6046 (23.6%) | 3826 (18.0%) | -2220 |
+| NetX Duo protocol | 5177 (20.2%) | 5201 (24.5%) | +24 |
+| copy (net68k asm) | 4000 (15.6%) | 3995 (18.8%) | -5 |
+| checksum | 2478 (9.7%) | 2441 (11.5%) | -37 |
+| app / profiler | 1162 (4.5%) | 983 (4.6%) | -179 |
+| unattributed | 189 (0.7%) | 145 (0.7%) | -44 |
+| **total samples** | **25,618** | **21,205** | **-17.2%** |
+| wall, ms | 25,465 | 21,104 | -17.1% |
+| KB/s | 40 | 48 | +20% |
+
+Loopback: 10,201 -> 8,733 ms, 100 -> 117 KB/s.
+
+The control holds on the floor as it did on the 68020: NetX Duo +24, copy -5,
+checksum -37, all flat, while Exec and the port give up 4,172 samples between
+them. The `app / profiler` row falls with the run length because it is the
+sampler's own cost.
+
+**The expectation was that this would be a bigger win on a 68000, and it is
+not.** -17.2% here against -17.6% on the A1200. The reasoning behind the
+expectation is sound as far as it goes -- a 68000 pays 34 cycles for the
+`jsr`/`rts` an inline removes, against a smaller number on a 68020 with a cache
+and a 32-bit bus -- but it prices only the numerator.
+
+The profile prices both ends:
+
+| | A1200 / 68020 | A500 / 68000 | ratio |
+|---|---|---|---|
+| `TX_DISABLE`+`TX_RESTORE`, baseline samples | 385 | 1,667 | 4.3x |
+| the same, as a share of the transfer | 8.7% | 6.5% | -- |
+| whole transfer | 4,420 ms | 25,618 ms | 5.8x |
+| `n68k_copy_bytes` | 780 | 4,000 | 5.1x |
+
+The critical-section pair got 4.3 times dearer on a machine that got 5.8 times
+slower overall, so as a **share** of the transfer it got cheaper, not dearer:
+8.7% on the 68020, 6.5% on the 68000. Everything the pair competes with -- the
+copy, the checksum, NetX Duo's own code -- is bus-bound on a 16-bit machine and
+suffers more from the move than a `jsr` does. The removed cost is a roughly
+constant fraction of the transfer across both machines, which is why the wall
+clock moves by the same 17% on both.
+
+Call counts do differ between the two machines, and by more than the noise:
+43,392 `TX_DISABLE` pairs on the 68000 against 38,853 on the 68020, 3,174
+handoffs against 2,654, and 1,106 scheduler pokes against 188. A slower machine
+spends longer in each tick period and takes more of them, so it does more work
+per megabyte. It is not a fixed workload across CPUs, and the per-call figures
+in 89.1 are the A1200's.
+
+Those counts are the after-build's, because the counters are part of this
+change and the baseline cannot be built with them. Using them as the baseline's
+denominator is justified by the A1200 control, where a 17% change in duration
+moved the count by 0.01% (38,853 to 38,850) -- the count tracks packets, not
+wall clock.
+
+### 89.7 The 68000 arm needed a ROM, not a fix
+
+An earlier revision of this section recorded the 68000 emulator arm as
+unrunnable: FS-UAE died of SIGSEGV on the host a second in, and an unmodified
+baseline binary did the same, which ruled out the code. The cause was that
+playhouse2 held only an A1200 Kickstart, so every profile that is not an A1200
+had nothing to boot and failed as a host-side crash rather than a legible "no
+ROM". With `$HOME/kick31-a500.rom` staged, both `-c 68000` on the A1200 model
+and `-m A500` boot and pass.
+
+Worth keeping because the failure mode is indistinguishable from a guest crash
+at a glance, and it cost a wrong conclusion once.
+
+### 89.8 What is left
+
+The `TX_DISABLE` pair is still 38,850 calls. That count is ThreadX's and NetX
+Duo's, not ours, and reducing it means changing vendored critical sections —
+which is a different and much less safe piece of work than making the primitive
+free. The mutex pair at 4.5% is the same shape: 5,612 acquisitions of one IP
+protection mutex, none of them contended enough to block (`permit-slow` 0 and
+`park_spurious` 0 both say so), and the cost is the uncontended path through
+ThreadX's core.
+
+3,239 Exec dispatches remain for 2,654 handoffs. The excess is the tick Task and
+the driver, not the baton.

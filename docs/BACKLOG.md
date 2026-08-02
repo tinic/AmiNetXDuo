@@ -18,6 +18,204 @@ empty results.
 
 ## Open — no decision taken
 
+- **Where a transfer's time actually goes, measured 2026-08-02 -- and it is not
+  where this document has been saying.** A sampling profiler now exists
+  (`tests/perf/prof/`, branch `prof`, off unless `-DAMINETXDUO_PROFILER=ON`,
+  no `src/` changes). 1 MB TCP transfer, A1200/68020, 1000 Hz, 4411 samples in
+  the transfer phase, 0.2% unattributed:
+
+  | category | wire | loopback |
+  |---|---|---|
+  | NetX Duo protocol | 25.6% | 16.7% |
+  | ThreadX + Amiga port | 23.3% | 16.2% |
+  | Kickstart (Exec) | 19.2% | 19.4% |
+  | copy (net68k asm) | 19.0% | 34.5% |
+  | checksum | 12.3% | 12.6% |
+
+  **The "roughly 78% is inside NetX Duo's protocol processing" claim, derived by
+  subtracting measured primitives from a measured transfer, is wrong.**
+  Copy and checksum are 31.3% rather than about 22%, and the remainder is not
+  mostly protocol code: **ThreadX and Exec together are 42.5%, larger than NetX
+  Duo's own 25.6%.** The largest non-copy cost is scheduling glue --
+  `_tx_thread_interrupt_restore` and `_tx_thread_interrupt_disable`, the
+  Forbid/Permit wrappers, at 6.9%, plus Exec's `Reschedule`, `Switch`,
+  `Dispatch` and `Supervisor` at 10.5%. That is the 214 us per-call bracket
+  showing up directly, and it says the bracket work is aimed at the right thing
+  and that there is more there than the bracket alone.
+
+  Top single entries, wire: `n68k_copy_bytes` 18.2%, `n68k_sum_longwords` 9.5%,
+  `_tx_thread_interrupt_restore` 4.2%, `Supervisor` 3.4%, `Reschedule` 2.8%.
+  Top 24 is 73.0%.
+
+  **A CIA timer cannot be used for this and fails silently.**
+  `AddICRVector()` arbitrates the ICR vector, not the hardware. CIA-B timer B
+  ran at a correct 1000 Hz and stopped at the first `ami_millis()`, because
+  timer.device's MICROHZ unit took it back; CIA-B timer A then ran 0.4-1.5 s and
+  stopped with `ciaicr=$85`, an interrupt raised and never acknowledged -- the
+  Exec EXTER race, where Exec clears `INTREQ` around the CIA ICR read and an
+  interrupt landing in that window leaves the line asserted with no further edge
+  possible. **Both failures still produced eight correctly-sampled PCs, which is
+  enough to rank functions convincingly and is pure noise.** The source is now
+  audio channel 3 at level 4 -- no latching chip in the acknowledge path, and
+  level 4 also sees inside the level 2/3 handlers where a SANA-II receive runs
+  -- and `prof_start()` measures each candidate over eight windows, rejecting
+  any that does not hold rate in every one.
+
+  Two attribution notes worth keeping. Exec keeps INLINE code in some jump-table
+  slots rather than a `JMP`, `Forbid` and `Permit` among them, which lost 7.2%
+  until a PC inside `[base-negsize, base)` was attributed to that slot. And
+  `Disable()` masks INTENA, so those sections are unsampled and their time lands
+  on whatever runs next; `Forbid()` does not mask interrupts and is sampled
+  normally, which is what matters here since that is where the bracket lives.
+
+  Not yet run on a 68000: fs-uae aborts host-side on this machine for the
+  A500/A500+/A600/A2000 profiles before the guest boots. Verified on 68020
+  (97/98/96% containment against assembly kernels with explicit end labels,
+  sample share within 0.1 points of wall clock) and 68030 (100%).
+
+- **A cycle-attribution profiler, to find where a transfer's time actually
+  goes.** The copy and checksum together are about 20% of a wire transfer and
+  roughly 78% is unaccounted for inside NetX Duo's protocol processing.
+  AmigaOS has no profiler, and `tests/perf/perf_test.c` can only say where the
+  time is NOT.
+
+  A working prototype exists on branch `agent/moira-eval`: `moiraprof.cpp`
+  produces callgrind-style flat and inclusive profiles with call edges and
+  **zero source changes**, at 22-25 M instructions/s, which is 17x a 14 MHz
+  68020 -- a 20-second Amiga run profiles in about a second. No instruction
+  hook is needed; Moira's `execute()` is public and runs exactly one
+  instruction, so the profiler is an outer loop rather than a callback and can
+  stop and inspect anywhere. Inclusive costs come from decoding `jsr`/`bsr`/
+  `rts` into a shadow stack, which avoids `-finstrument-functions` skewing the
+  small leaf functions that matter here.
+
+  Two traps already found and handled, which any reimplementation will hit:
+  statics are invisible in `HUNK_SYMBOL` and their cycles land silently on the
+  preceding global (recover via the link map plus per-object `nm`), and the
+  shadow stack has to unwind on stack-pointer regression because ThreadX swaps
+  stacks, so an rts-only stack drifts out of step at every context switch.
+
+  **The vehicle should be vAmiga headless, not a flat memory image.** A flat
+  image needs 41 distinct Exec and dos entry points for
+  `port/threadx-amiga/src/` and `src/netstack/` alone (54 tree-wide), before a
+  SANA-II device to originate packets and timer.device as the kernel's clock --
+  that is writing a small AmigaOS, and the resulting profile would EXCLUDE
+  Exec, when `Forbid`/`Signal`/`Wait` are part of the 78% being hunted. vAmiga
+  builds a real headless target (`VAHeadless`), its `Core/` tree is plain C++
+  with its own CMake, RetroShell scripts can insert a disk and boot Kickstart so
+  it batches in CI, and its `MoiraConfig.h` is byte-identical to upstream on the
+  one flag the profiler needs. Decisively, it HAS the memory system, so the
+  11-15% gap between bare Moira and real measurements closes.
+
+  Note this is worth doing for attribution only. Moira must not be used to tune
+  against -- see the entry below for why.
+
+- **The 68000 byte-loop fallback costs 6.1x, not the 4x the source says**,
+  measured 2026-08-01 on a cycle-exact A500: 5.4 us/B against 0.89 for the
+  `movem.l` path. `src/net68k/n68k_copy.S` takes it whenever `to` and `from`
+  disagree in bit 0, because on a 68000 a misaligned word access is an address
+  error rather than a slow path.
+
+  It should never fire on the receive path -- the alignment census says the
+  cases that occur are 0 mod 4 (application buffers, packet prepend pointers)
+  and 2 mod 4 (eight of nine real drivers), both of which match the
+  destination's parity. So this is only a cost if some path hands over an ODD
+  buffer, and nothing has been measured doing that. Worth finding out whether
+  any real driver does before deciding it is theoretical, because 6.1x is a
+  bigger number than anything else measured in the data path today.
+
+- **The 68000 numbers for both net68k primitives**, measured 2026-08-01 under
+  WinUAE 6.0.3 on a purpose-built cycle-exact A500 profile
+  (`C:\aminetxduo\run\m0ab\config.uae` on winbuilder; nothing like it existed,
+  every prior cycle-exact config there is a 68030). Harness on branch
+  `m68000-ab`: both predecessors assembled alongside the shipped versions in
+  ONE binary, plus a second assembly of each shipped sequence at a different
+  address as a floor check.
+
+  Both changes help MORE on a 68000 than on the 68020 they were tuned against.
+  Copy -13.1% at 0 mod 4 and 2 mod 4 (the only alignments that occur; 1 and 3
+  are flat because both implementations fall into the same byte loop and cannot
+  differ). Checksum -23.9% at 1460 B and **-29.4% at 20 bytes**, which is the IP
+  header this stack checksums on every packet both directions -- the short-call
+  path was the thing most likely not to transfer, given a 68000 has no
+  instruction cache, and it is the best row in the table. Pipeline ceiling
+  161 -> 175 KB/s. **One implementation for all four targets is right; no
+  per-CPU selection is warranted.**
+
+  Fidelity was checked rather than assumed: `cpucal` prints ADD.L at 8.00
+  cycles against a published 8 and MOVE.L at 4.00 against 4, and a model with a
+  flat per-instruction cost would print those equal. The same probe on the
+  existing A3000 profile charges MULU.L 3.88 cycles against a published 44, so
+  **numbers taken from that profile mean nothing** -- worth knowing before
+  anyone quotes one. `cpucal` needed its two multiply kernels gated out to
+  build for a 68000 at all, since MULU.L 32x32 does not exist on the part.
+
+  Two caveats recorded with the data: the implied clock is 6.69 MHz against a
+  PAL A500's 7.09, a uniform ~6% consistent across every kernel that looks like
+  OS interrupt service and applies equally to both arms of every A/B; and
+  per-sample spread reaches 15% in quantised ~1.5 ms steps, so single samples
+  are useless and everything above is best-of-nine.
+
+- **What Roadshow and AmiTCP_NG actually do in their SANA-II copy hooks**,
+  measured 2026-08-01 with `tests/tapprobe/` (an instrumented copy of
+  tcpdrill's device that installs itself, launches a foreign stack against it
+  and records an event ring). Three leads came out of it.
+
+  **Neither stack folds the checksum into the copy.** Roadshow was measured two
+  ways: scribbling `0xEE` over the source buffer the instant the hook returned
+  left every reply intact at all four alignments, so it reads the source
+  exactly once; and at its best alignment its hook costs 133 ns/B against 158
+  for a plain `movem.l` copy of the same data on the same machine, which leaves
+  no budget for per-longword arithmetic. AmiTCP_NG is settled from its GPL
+  source: `m_copy_to_mbuf` is a plain `bcopy`, `#define`d to `CopyMem`, and its
+  own comment says the MOVE16 fast path is deliberately not used on the SANA
+  path. So a melded copy-and-sum would be novel here, not catching up -- the
+  claim that the other stacks already do it does not survive contact.
+
+  **Roadshow asks for aligned buffers through an extension we do not have.**
+  Its buffer-management list has four entries: `S2_CopyToBuff`,
+  `S2_CopyFromBuff`, and `S2_DMACopyToBuff32` / `S2_DMACopyFromBuff32`
+  (`S2_Dummy+8` and `+9`, absent from `src/sana2/sana2_device.h`). Asking the
+  DMA hook for a buffer returned one at 0 mod 4 and a frame delivered through
+  it arrived intact. This is how a stack GETS the alignment we measured we do
+  not have, and for a DMA-capable card it removes the copy rather than
+  optimising it. Worth finding out how many real drivers use it before
+  building anything.
+
+  **Roadshow is faster than us at the alignment real drivers hand over.**
+  Per-byte `S2_CopyToBuff` cost, two-point fit over 64 and 1024-byte payloads
+  so no fixed per-call cost is in the number:
+
+  | src align | Roadshow | ours (`n68k_copy_bytes`) |
+  |---|---|---|
+  | 0 mod 4 | 133 | 158 |
+  | 1 mod 4 | 715 | 205 |
+  | 2 mod 4 | **182** | **204** |
+  | 3 mod 4 | 716 | 204 |
+
+  We are flat where it falls off a 5.4x cliff, but it beats us by 11% at the
+  2 mod 4 that 8 of 9 real drivers deliver. That is a target needing no new
+  protocol machinery.
+
+  Also measured: Roadshow keeps 36 reads outstanding (32 IPv4 + 4 ARP, matching
+  its documented `iprequests`/`arprequests` defaults) against our
+  `AMI_SANA2_RX_MAX_DEPTH` 32, and reposts before the answer goes out on the
+  same IORequest, 7.5-8.3 ms after the reply against our ~1 ms.
+
+  AmiTCP_NG could not be run against the synthetic device: it opens it, does
+  `S2_DEVICEQUERY` and `S2_GETSTATIONADDRESS`, then `AddNetInterface` fails
+  with errno 43 `EPROTONOSUPPORT` and it never posts a `CMD_READ`. That is
+  `socreate()` finding no `protosw`, inside its own startup, on both A1200 and
+  8 MB A3000 profiles. Not our bug and not worth debugging further.
+
+- **The tcpdrill device starts offline, which hangs any stack that does not
+  send `S2_ONLINE`**, found 2026-08-01. Roadshow stops after
+  `S2_ADDMULTICASTADDRESS`, arms an `S2_ONEVENT` and waits, so its interface
+  never comes up and it hangs silently at bring-up. Real Ethernet drivers are
+  live once configured; ours is not. Invisible to us because we send
+  `S2_ONLINE` ourselves, so this only bites when tcpdrill is pointed at another
+  stack -- which is exactly what makes it worth fixing before the next probe.
+
 - **Receive is the slow direction, on every machine measured**, 2026-08-01.
   bifat benchmarked four stacks on four machines, `timecmd copy` each way
   against a mounted fileserver. We are first or second on send in all four and
@@ -61,77 +259,137 @@ empty results.
   so the cross-stack *ranking* stands; what is less safe is the within-stack
   read-versus-write asymmetry. Worth asking how large `largefile` was.
 
+- **PARKED 2026-08-01: the melded copy-and-checksum.** Built, measured, wired
+  and proven correct, then parked because it does nothing on real hardware.
+  Branches `meld` (the primitive) and `wiring` (the receive path, commit
+  `bfa9937`) on origin; nothing is on `main` and the default build is unaffected.
+
+  What it is worth, where it fires: `n68k_copy_sum_longwords()` copies and sums
+  in one pass, 177.21 + 201.35 = 378.56 ns/B separate against 256.00 melded --
+  32.4% off the pair on a 68020.  Both halves have since moved and the melded
+  routine has not: the copy is 159 (RESEARCH.md 86) and the checksum 149.8
+  (RESEARCH.md 87), so the pair is ~309 against 256 and the margin is 17%, not
+  32%.  Reviving this means rewriting the melded loop around movem.l and the
+  chained addx first, or the comparison is against primitives that no longer
+  exist. Wired into the receive path behind
+  `AMINETXDUO_RX_COPY_SUM` (default OFF) the whole receive pair went 389.33 ->
+  312.92, about 20%; the stamp write, prefix subtraction and acceptance checks
+  eat roughly a third of the primitive's gain.
+
+  Why it is parked: **the device's buffer is misaligned on 8 of 9 real
+  drivers.** Measured under WinUAE against ariadne, ariadne_ii, x-surf,
+  x-surf-100 (Z2 and Z3), hydra, a2065 and cnet -- every one hands
+  `S2_CopyToBuff` a pointer at 2 mod 4, and the fast path declines. Under a 400
+  pkt/s flood the a2065 gave 1266 consecutive misses and zero stamps, so this is
+  structural rather than incidental. Only `eb920.device` (ASDG LAN Rover) is
+  aligned, and it could not complete a bulk transfer to benchmark. A read/write
+  A/B on a2065 duly showed nothing, because both arms were the same code at
+  runtime.
+
+  Two things are worth keeping from it regardless. The correctness work is
+  real: 16 tcpdrill cases including a damaged zero-padded tail byte, plus a
+  mutation test (injecting `+ 1` into the short-circuit fails all 16) proving
+  the path was live rather than decoration. And it found a genuine hazard --
+  **the stash survives into the transmit path**, where the same function runs to
+  INSERT a checksum, so a received frame whose transport checksum is never
+  computed returns to the pool with a live sentinel; case `s16` put three
+  segments on the wire with `BAD-TCP-CHECKSUM` before the fix. That is closed by
+  clearing the sentinel in a wrapper around `nx_packet_allocate`.
+
+  What would revive it: an opposite-parity path in the melded routine (2 mod 4
+  is word aligned, so 16-bit reads are legal even on a 68000), or drivers
+  adopting `S2_DMACopyToBuff32`. Note also that no other stack does this --
+  Roadshow reads the source exactly once and AmiTCP_NG's hook is a plain
+  `bcopy` -- so there is no precedent to borrow from, and the 68020 cost model
+  says instructions rather than bus cycles are the currency, which is what
+  killed the `swap`-based recombination idea for 2 mod 4 (see RESEARCH.md 86).
+
 ## Decided against — do not "fix"
 
-- **Feeding the checksum's adds from `movem.l` buys nothing**, 2026-08-01,
-  measured and reverted (82a188e, 941ee94). The reasoning that led there was
-  that `add.l a0@+,d0` pays a full operand fetch per longword while the copy
-  next door gets eight per `movem.l`, and that a read-and-write copy measuring
-  CHEAPER per byte than the read-only sum (183.65 vs 201.39 ns/B) meant the
-  loads were the difference. Rewritten to `movem.l a0@+,d4-d7/a2-a5` plus
-  register-to-register adds it measured 201.27 ns/B -- identical, and the
-  disassembly confirmed the new loop was what ran.
+- **Moira cannot be tuned against, and neither can Musashi**, evaluated
+  2026-08-01, branch `agent/moira-eval`. Both were considered for host-side
+  cycle counting so the data path could be optimised without booting an
+  emulator. The verdict is narrow and worth keeping precise.
 
-  In cycles at 14.19 MHz the two are not comparable the way that suggested:
-  the copy is 83.4 cycles per 32 B for 16 bus accesses, 5.2 each; the checksum
-  is 91.4 cycles for 8 reads (41.7) plus 16 `add.l`/`addx.l` (49.7, about 3.1
-  each, right for 68020 register ops). It is half bus and half ALU, both forms
-  issue the same eight reads, and no arrangement of instructions removes an
-  add and a carry-fold per longword. **The checksum is at its floor.**
+  **Moira's 68000 instruction timing is exact, in a configuration it does not
+  ship.** `MoiraConfig.h` defaults `MOIRA_PRECISE_TIMING` to false, which makes
+  `SYNC(x)` a no-op in `MoiraMacros.h`, so data-dependent costs are computed and
+  discarded -- MULS.W is charged its worst case 54 whatever the operand.
+  `MOIRA_MIMIC_MUSASHI` defaults true and its own comment says to turn it off
+  for accuracy. Both are unconditional `#define`s, not runtime options. Patched,
+  it matches published M68000PRM figures 30/30, including MOVEM.L (An)+ at
+  12+8n across six register counts. Unpatched, 29/30.
 
-  What this does establish is the price of melding the checksum INTO the copy,
-  which is the one thing that removes the second read. Predicted from the model
-  at 23.9% of the pair; built as `n68k_copy_sum_longwords()` and MEASURED at
-  32.4% -- 177.21 + 201.35 = 378.56 ns/B separate against 256.00 melded, on the
-  same run. The model under-predicted because it charged the melded loop full
-  price for its sixteen bus accesses, and the `movem.l` store in fact pairs
-  with the adds better than the two separate loops did.
+  **Its 68020 has no instruction cache at all**, measured rather than assumed:
+  the same loop body from 64 to 640 bytes costs exactly 8.000 cycles per pair at
+  every size, with the only decline being the fixed `dbf` amortising. There is
+  no turn at 256 bytes, soft or otherwise, and FS-UAE's 020 does show one. So it
+  cannot reproduce the I-cache behaviour that both of the 2026-08-01 data-path
+  optimisations were tuned against, and **must not be used to choose unroll
+  depth**.
 
-  122.56 ns/B of the 1073.90 pipeline is 11.4%, so the implied ceiling moves
-  909 -> about 1026 KB/s. That applies wherever a copy and a checksum cross the
-  same bytes, which on receive is `ami_sana2_copy_to_buff()` followed by the
-  TCP checksum.
+  Against real measurements it does not reconcile and the errors do not share a
+  sign: 68020 copy +23%, 68000 checksum at 20 B -41%, and the copy's alignment
+  penalty comes out +1.2% where the machine gives +31%. The reason is
+  structural -- **Moira is a CPU, not a machine.** A harness gives it flat
+  always-ready RAM, so there is no chip-RAM contention, no prefetch overlap, no
+  cache and no unaligned-access penalty, which is the very effect
+  `n68k_copy.S` aligns its destination to avoid. Supplying all that means
+  writing the Amiga.
 
-  WIRING IT IN IS WHAT REMAINS, and it is the delicate half: every hazard below
-  ends in silently accepting a corrupt packet, which is worse than being slow.
-  The plan is a 16-byte stash (magic, start, length, sum) in the packet's tail
-  slack -- `AMI_POOL_PAYLOAD` is 1568 against a 1514-byte frame, so there are
-  54 bytes past any real one -- read back by `n68k_ip_checksum_compute()` after
-  it has built the pseudo header and instead of its payload walk.
+  **Musashi is worse for this, not better.** Its 68020, 68030 and 68040 share
+  one cycle table, verified by dumping it, and that table is the 020 best case
+  -- i.e. a permanent 100% instruction-cache hit. `USE_ALL_CYCLES()` also
+  charges a whole timeslice to a spin loop, which would invent a hotspot on
+  exactly the busy-waits a network stack does.
 
-  NOT `NX_ENABLE_INTERFACE_CAPABILITY`, which is the obvious route and the
-  wrong one here. It changes behaviour in 41 vendored files, and its check is
-  PER-INTERFACE rather than per-packet: once the flag is set every packet on
-  that interface is trusted, so the glue owns verifying all of them, including
-  reassembled fragments arriving as chained packets whose per-fragment sums
-  would have to be combined. There is no per-packet way to decline.
-  Substituting `_nx_ip_checksum_compute()` -- which `n68k_checksum_hook.c`
-  already does, so the mechanism is in the tree -- gives exactly that: an
-  unrecognised stash falls through to computing normally, and every awkward
-  case takes the old path. There is also no way to hand a raw sum back for the
-  stack to finish; NetX Duo assumed MAC-level checksum offload, so it has no
-  CHECKSUM_COMPLETE-style field, which is why the capability machinery is
-  all-or-nothing in the first place.
+  **Nobody has a cycle model above the 68020.** WinUAE's own 020+ cores have
+  their cycle accumulation `#if 0`'d out in `gencpu.cpp`, the timing tables
+  surviving only as comments, and Toni Wilen writes "cycle-exact" in scare
+  quotes for 030/040/060 in his own source. His `cputester` validates TIMING
+  only on 68000/68010 at +/-2 cycles and is a functional oracle above that.
+  This is a field-wide gap rather than a Moira shortcoming, and it means the
+  68060 machines our fastest users run cannot be measured by anyone -- so
+  `movem.l`'s cheapness and the flat two-accumulator result stay 68020-only
+  evidence permanently.
 
-  What the fixup has to get right:
+  What Moira IS good for is attribution, and that stays open rather than
+  rejected: see the entry above.
 
-  - The stash covers `[dst, dst+len)` but the TCP checksum is asked for
-    `[prepend, prepend+data_length)` AFTER IP has stripped its header, so a
-    prefix (the IP header) and a suffix (Ethernet padding, zero on a full
-    frame) must come off. One's-complement subtraction is `+ (0xFFFF - fold)`.
-  - Parity only works out because the IP header is a multiple of 4 and the
-    Ethernet header is 14, both even, so the 16-bit word grids line up. An odd
-    prefix would need the sum byte-swapped.
-  - A frame whose length is not a multiple of 4 has a partial trailing
-    longword. The vendored code zero-writes the pad byte; the bytes past `len`
-    in our packet are the PREVIOUS frame, so summing whole longwords blind
-    folds garbage into the result.
-  - `n68k_ip_checksum_compute()` walks a chain. One stash describes one
-    buffer, so a chained packet has to fall through.
+- **The ThreadX tick rate stays at 50 and changing it does nothing**,
+  2026-08-01. Swept 20/40/50/60/80/100 Hz, 8 runs per arm, arms interleaved so
+  run-order drift could not settle on one; 48 runs, all PASS. The between-arm
+  span is not larger than the within-arm spread on any metric -- on write it is
+  smaller (2 against 4 KB/s), on read and on the read/write ratio it is the same
+  magnitude -- and the scatter is not monotone in rate, with 80 Hz reading
+  higher than 60.
 
-  Validation is not optional here: `tests/tcpdrill` feeding frames with
-  deliberately corrupted payloads, confirming they are still rejected, before
-  any of it is trusted.
+  The counters show the mechanism rather than just the null. **Wakeups stay at
+  ~850 whatever the rate**, because the source is `timer.device UNIT_VBLANK` and
+  the knob does not touch it. Below 50 Hz the extra wakeups are simply empty
+  (59% idle at 20 Hz); above it they deliver catch-up bursts (841 of 848
+  wakeups deliver more than one tick at 100 Hz). Delivery stays pinned at the
+  ~20 ms wakeup either way, so a faster tick buys more ticks and not more timely
+  ones. **Instantaneous skew was 0 in all 48 runs** and nothing was ever
+  clipped, lost, deferred or over budget: the timer was already keeping up, so
+  there was nothing to win.
+
+  Going slower does hand back real work -- 20 Hz delivers 339 ticks instead of
+  867 and skips 493 wheel walks -- and it bought 0 KB/s outside the noise.
+  Nothing broke at 20 Hz either. The argument against it is not throughput:
+  `src/bsdsocket/options.c:83` derives `SO_RCVTIMEO`/`SO_SNDTIMEO` granularity
+  from `1000000/NX_IP_PERIODIC_RATE`, so 20 Hz would coarsen socket timeout
+  resolution from 20 ms to 50 ms.
+
+  **Two traps for anyone who tries this anyway.** `-D` cannot set the knob:
+  `port/netxduo-amiga/inc/nx_user.h:34` hard-defines `NX_IP_PERIODIC_RATE 50`
+  unconditionally and is included before `nx_port.h`'s `#ifndef` fallback, so
+  overriding `TX_TIMER_TICKS_PER_SECOND` alone leaves the periodic rate behind
+  and silently rescales every TCP timer by the ratio -- a sweep that looks
+  plausible and measures nothing. Both headers have to move together. And there
+  is no delayed-ACK confound to isolate: `nx_tcp_enable.c:111` computes
+  `_nx_tcp_ack_timer_rate` as `ceil(NX_IP_PERIODIC_RATE / NX_TCP_ACK_TIMER_RATE)`,
+  so the ACK interval self-scales to a constant 200 ms at every rate.
 
 - **RFC 3542's extension headers stay unimplemented.** `IPV6_RTHDR`,
   `HOPOPTS`, `DSTOPTS`, `RTHDRDSTOPTS`, `PATHMTU`, `RECVPATHMTU`,

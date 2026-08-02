@@ -64,15 +64,11 @@ static char bsd_lib_name[]  = BSD_LIB_NAME;
 
 static const char bsd_lib_ver[] __attribute__((used)) =
     "$VER: bsdsocket.library " AMINETXDUO_VERSION
-    " (" AMINETXDUO_VERSION_DATE ") AmiNetXDuo " AMINETXDUO_VERSION_CPU
-    " " AMINETXDUO_VERSION_HASH;
+    " (" AMINETXDUO_VERSION_DATE ") AmiNetXDuo " AMINETXDUO_VERSION_HASH;
 
-/* The CPU build is in here too: ShowNetStatus and GetNetStatus VERSION read
-   lib_IdString, and which of the four builds is running is exactly what a
-   throughput report has to say. */
 static char bsd_lib_id[] =
-    "bsdsocket.library " AMINETXDUO_VERSION " (AmiNetXDuo "
-    AMINETXDUO_VERSION_CPU ", ABI " BSD_LIB_ABI_TEXT ")\r\n";
+    "bsdsocket.library " AMINETXDUO_VERSION " (AmiNetXDuo, ABI "
+    BSD_LIB_ABI_TEXT ")\r\n";
 
 static struct AmiSocketBase *bsd_lib_init(
     register struct AmiSocketBase *base    __asm("d0"),

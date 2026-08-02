@@ -227,12 +227,17 @@ ULONG            i, t0, t1, total;
 /* The largest read the receiver arms use. */
 #define B_MAX_READ          16384UL
 
-/* The bracket policies under test, and how many arms the sender must serve. */
+/* The bracket policies under test, and how many arms the sender must serve.
+   Only per-call runs the adopt/orphan pair; the rest use the cached
+   resume/suspend one, which is what bsd_nx_enter() has been since
+   ami_netstack_enter_cached() landed.  Measuring a candidate policy against
+   the old bracket would price the policy and the cache together. */
 #define B_ARM_PER_CALL      0
 #define B_ARM_ON_MISS       1
 #define B_ARM_ONCE          2
 #define B_ARM_CACHED        3       /* per-call, resume/suspend not adopt/orphan */
-#define B_ARM_COUNT         16UL
+#define B_ARM_LAZY          4       /* on-miss, but held to the end of the call */
+#define B_ARM_COUNT         20UL
 
 extern VOID _nx_ram_network_driver(NX_IP_DRIVER *driver_req_ptr);
 
@@ -274,6 +279,7 @@ static UINT             b_srv_up;
  * no SANA-II device.
  */
 static UINT     b_cache_live;           /* the cached TX_THREAD exists, dormant */
+static ULONG    b_brackets;             /* real ones, per b_drain() */
 
 static UINT b_enter(VOID)
 {
@@ -281,6 +287,8 @@ static UINT b_enter(VOID)
     {
         return(TX_SUCCESS);             /* nested: nothing to do */
     }
+
+    b_brackets++;
 
     if (b_cache_live != 0U &&
         tx_amiga_adopt_resume(&b_caller) == TX_SUCCESS)
@@ -577,6 +585,8 @@ ULONG       misses  = 0UL;
 ULONG       t0;
 UINT        status;
 
+    b_brackets = 0UL;
+
     t0 = b_now();
 
     if (arm == B_ARM_ONCE)
@@ -606,7 +616,7 @@ UINT        status;
             {
                 misses++;
 
-                if (arm == B_ARM_ON_MISS && held == 0U)
+                if ((arm == B_ARM_ON_MISS || arm == B_ARM_LAZY) && held == 0U)
                 {
                     (VOID)b_enter();
                     held = 1U;
@@ -636,6 +646,13 @@ UINT        status;
                  * holding it for the copy -- nx_packet_data_extract_offset()
                  * and nx_packet_release() are among the nx_packet_* helpers
                  * with no caller check at all.
+                 *
+                 * lazy keeps it to the end of the call instead.  A read big
+                 * enough to span packets misses more than once (16 KB reads
+                 * miss 32 times over 16 calls), and on-miss pays a bracket for
+                 * each of those, which is how it loses to cached at 16 KB.
+                 * Holding caps the bill at one bracket per call, so lazy is
+                 * never worse than cached and never worse than on-miss.
                  */
                 if (arm == B_ARM_ON_MISS)
                 {
@@ -723,8 +740,19 @@ static const char *b_arm_name(UINT arm)
     {
         return("cached  ");
     }
+    if (arm == B_ARM_LAZY)
+    {
+        return("lazy    ");
+    }
 
     return("once    ");
+}
+
+/* Every arm but per-call gets the cached TX_THREAD; per-call is the
+   adopt/orphan control that -DAMINETXDUO_NXCACHE=OFF restores. */
+static UINT b_arm_is_cached(UINT arm)
+{
+    return((UINT)(arm != B_ARM_PER_CALL));
 }
 
 static VOID b_run_arm(ULONG read_size, UINT arm)
@@ -732,7 +760,7 @@ static VOID b_run_arm(ULONG read_size, UINT arm)
 ULONG   ticks, calls = 0UL, misses = 0UL, ms, kbps;
 UINT    status;
 
-    if (arm == B_ARM_CACHED)
+    if (b_arm_is_cached(arm))
     {
         status = tx_amiga_adopt_thread(&b_caller, (CHAR *)"bracket caller", 16);
         if (!b_check((UINT)(status == TX_SUCCESS), "adopt for cached arm",
@@ -750,7 +778,7 @@ UINT    status;
 
     (VOID)tx_semaphore_get(&b_srv_done, 120UL * NX_IP_PERIODIC_RATE);
 
-    if (arm == B_ARM_CACHED)
+    if (b_arm_is_cached(arm))
     {
         b_cache_live = 0U;
         (VOID)tx_amiga_adopt_resume(&b_caller);
@@ -763,9 +791,10 @@ UINT    status;
     ms   = b_ms(ticks);
     kbps = (ms != 0UL) ? ((B_XFER_BYTES / 1024UL) * 1000UL / ms) : 0UL;
 
-    b_log("  read %5ld  %s  %5ld ms  %4ld KB/s  %5ld calls, %4ld to NetX Duo",
+    b_log("  read %5ld  %s  %5ld ms  %4ld KB/s  %5ld calls, %4ld to NetX Duo,"
+          " %5ld brackets",
           (LONG)read_size, (LONG)b_arm_name(arm), (LONG)ms, (LONG)kbps,
-          (LONG)calls, (LONG)misses);
+          (LONG)calls, (LONG)misses, (LONG)b_brackets);
 }
 
 static UINT b_connect(VOID)
@@ -920,6 +949,7 @@ ULONG   i;
                 b_run_arm(b_read_sizes[i], B_ARM_PER_CALL);
                 b_run_arm(b_read_sizes[i], B_ARM_CACHED);
                 b_run_arm(b_read_sizes[i], B_ARM_ON_MISS);
+                b_run_arm(b_read_sizes[i], B_ARM_LAZY);
                 b_run_arm(b_read_sizes[i], B_ARM_ONCE);
             }
 
