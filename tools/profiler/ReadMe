@@ -59,6 +59,11 @@ WHAT IT CANNOT PROFILE
     program in its own process with RunCommand(), so Exit() unwinds past it and
     the profile is not written.  It says so when it happens.
 
+  * A program that does not return at all.  A resident DOS handler -- `fitz
+    mount` -- is sampled correctly and forever, and nothing is written because
+    the run never ends.  Break it and it returns normally: the handler and the
+    profiler are the same process, so a CTRL-C to that task reaches both.
+
   * A program that wants all four audio channels.  See below.
 
 
