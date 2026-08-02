@@ -426,19 +426,25 @@ static const HttpMimeEntry http_mime_table[] =
 
 const char *http_content_type(const char *name)
 {
-    const char *dot = 0;
-    const char *p = name;
+    const char *dot;
+    unsigned long at = 0;               /* 0 means no '.' seen */
+    unsigned long n = 0;
     unsigned long i;
 
-    while (*p != '\0')
+    /* By index rather than by pointer: walking with one and remembering the
+       other makes the two alias after the increment, and -fanalyzer then reads
+       the later null check as a check after a dereference. */
+    while (name[n] != '\0')
     {
-        if (*p == '.')
-            dot = p + 1;
-        p++;
+        if (name[n] == '.')
+            at = n + 1;
+        n++;
     }
 
-    if (dot == 0 || *dot == '\0')
+    if (at == 0 || name[at] == '\0')
         return "application/octet-stream";
+
+    dot = name + at;
 
     for (i = 0; http_mime_table[i].suffix != 0; i++)
     {
