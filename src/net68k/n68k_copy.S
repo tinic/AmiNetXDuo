@@ -16,7 +16,8 @@
 |
 | This routine uses movem.l, which moves eight longwords per instruction pair
 | and is the only way on a 68020 to reduce the instruction count further --
-| there is no move16 until the 68040.
+| there is no move16 until the 68040.  Four of those pairs are unrolled into
+| one 128-byte block, which is where the rest of the win is; see .Lbig.
 |
 | Alignment: the 68020 will fetch a longword from any address, but an unaligned
 | one costs an extra bus cycle, measured at about 18% (218 ns/B aligned against
@@ -98,6 +99,52 @@ _n68k_copy_bytes:
         bne     .Lalign
 
 .Lbulk:
+        move.l  d0,d1
+        lsr.l   #7,d1                   | 128-byte blocks
+        beq     .Lblocks
+        andi.l  #127,d0
+
+| Four movem pairs per iteration.  The pointer arithmetic and the branch are
+| the whole reason: at one pair per iteration they are three instructions per
+| 32 bytes, and on this machine an instruction costs about what a longword
+| access does.  Measured on the A1200 profile over 1460 bytes, ns/B, source
+| offset relative to an aligned destination:
+|
+|                       s0      s1      s2      s3
+|   one pair          179.7   227.2   228.3   229.5
+|   two pairs         167.8   216.5   218.0   215.6
+|   four pairs        160.2   211.8   212.0   209.8
+|   eight pairs       161.0   206.5   212.3   210.8
+|
+| Eight is not better than four and doubles the loop, so four it is.  dbf in
+| place of subq/bne measured the same and needs a 65536-block guard.
+|
+| WHAT DOES NOT WORK, at a source offset of 2 mod 4.  That offset is exactly a
+| word, so the reads can be moved to the aligned side and put back with swap
+| and move.w instead of paying the split bus cycle.  It loses, badly, and so
+| does every other word-granularity idea -- same machine, same run, s2:
+|
+|   movem.l, dest aligned (this)       233     | the split read costs ~3 cycles
+|   movem.w, both sides word aligned   349     | per longword; swap + move.w
+|   aligned movem.l + swap recombine   359     | costs ~7.  No way to win.
+|   move.w a1@+,a0@+                   419
+|
+| Aligning the source instead of the destination -- moving the split from the
+| read to the write -- measured 232.8 against 229.8.  Nothing in it.
+.Lbig:
+        movem.l a1@+,d2-d7/a2-a3
+        movem.l d2-d7/a2-a3,a0@
+        movem.l a1@+,d2-d7/a2-a3
+        movem.l d2-d7/a2-a3,a0@(32)
+        movem.l a1@+,d2-d7/a2-a3
+        movem.l d2-d7/a2-a3,a0@(64)
+        movem.l a1@+,d2-d7/a2-a3
+        movem.l d2-d7/a2-a3,a0@(96)
+        lea     a0@(128),a0
+        subq.l  #1,d1
+        bne     .Lbig
+
+.Lblocks:
         move.l  d0,d1
         lsr.l   #5,d1                   | 32-byte blocks
         beq     .Llongs

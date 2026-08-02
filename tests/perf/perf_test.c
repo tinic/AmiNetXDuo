@@ -532,19 +532,23 @@ UINT    da, sa;
     /*
      * The movem.l candidate, checked before it is timed.  This routine is
      * memcpy() for the whole library when AMINETXDUO_NET68K_MEMCPY is on, so
-     * "fast" is worthless without "exact".  Every length from 0 to 96 and
+     * "fast" is worthless without "exact".  Every length from 0 to 288 and
      * every one of the sixteen source/destination alignment combinations,
      * verifying three things each time: the copied bytes match, the byte
      * before the destination is untouched, and the byte after it is
-     * untouched.  That is 1552 cases; a routine that mishandles the head
-     * alignment, the movem block, the longword tail or the byte tail fails at
-     * least one of them.
+     * untouched.  That is 4624 cases; a routine that mishandles the head
+     * alignment, either movem block, the longword tail or the byte tail fails
+     * at least one of them.
+     *
+     * The ceiling is 288 rather than 96 so that two whole 128-byte blocks
+     * plus a remainder run at every alignment pair -- at 96 the unrolled
+     * block never executes and the sweep silently covers nothing.
      */
     {
     ULONG   n, da, sa, k;
     UINT    ok = 1;
 
-        for (n = 0UL; n <= 96UL; n++)
+        for (n = 0UL; n <= 288UL; n++)
         {
             for (da = 0UL; da < 4UL; da++)
             {
@@ -573,7 +577,7 @@ UINT    da, sa;
                 }
             }
         }
-        (VOID)p_check(ok, "n68k_copy_bytes exact, 1552 length/alignment cases",
+        (VOID)p_check(ok, "n68k_copy_bytes exact, 4624 length/alignment cases",
                       0UL);
 
         /* And one long copy, where the movem block does the work. */
@@ -595,6 +599,29 @@ UINT    da, sa;
             ok = 0;
         }
         (VOID)p_check(ok, "n68k_copy_bytes exact, 8184 B misaligned", 0UL);
+
+        /* And the same length at 2 mod 4 with an aligned destination, which
+           is what eight of the nine real drivers hand the SANA-II shim.  The
+           case above is 1 mod 4 once the head bytes are gone, so without this
+           one no long copy ever reaches the 2 mod 4 path. */
+        for (k = 0UL; k < sizeof(p_dst_buf); k++)
+        {
+            p_dst_buf[k] = 0xA5;
+        }
+        n68k_copy_bytes(p_dst_buf, p_src_buf + 2UL, P_APP_CHUNK - 8UL);
+        ok = 1;
+        for (k = 0UL; k < P_APP_CHUNK - 8UL; k++)
+        {
+            if (p_dst_buf[k] != p_src_buf[2UL + k])
+            {
+                ok = 0;
+            }
+        }
+        if (p_dst_buf[P_APP_CHUNK - 8UL] != 0xA5)
+        {
+            ok = 0;
+        }
+        (VOID)p_check(ok, "n68k_copy_bytes exact, 8184 B at 2 mod 4", 0UL);
     }
 
     t0 = p_now();
@@ -605,6 +632,17 @@ UINT    da, sa;
     ticks = p_elapsed(t0, p_now());
     p_report("n68k_copy_bytes d0 s0", ticks, reps, len);
 
+    /* s2 is the one that matters: eight of the nine drivers in the census
+       hand over a buffer at 2 mod 4.  s1 and s3 are here because Roadshow
+       falls off a 5.4x cliff at odd offsets and this routine does not. */
+    t0 = p_now();
+    for (i = 0UL; i < reps; i++)
+    {
+        n68k_copy_bytes(p_dst_buf, p_src_buf + 1, len);
+    }
+    ticks = p_elapsed(t0, p_now());
+    p_report("n68k_copy_bytes d0 s1", ticks, reps, len);
+
     t0 = p_now();
     for (i = 0UL; i < reps; i++)
     {
@@ -613,14 +651,13 @@ UINT    da, sa;
     ticks = p_elapsed(t0, p_now());
     p_report("n68k_copy_bytes d0 s2", ticks, reps, len);
 
-    /* Opposite parity -- the case with a genuine cliff in it, see below. */
     t0 = p_now();
     for (i = 0UL; i < reps; i++)
     {
-        n68k_copy_bytes(p_dst_buf, p_src_buf + 1, len);
+        n68k_copy_bytes(p_dst_buf, p_src_buf + 3, len);
     }
     ticks = p_elapsed(t0, p_now());
-    p_report("n68k_copy_bytes d0 s1", ticks, reps, len);
+    p_report("n68k_copy_bytes d0 s3", ticks, reps, len);
 
     /* The SANA-II shim's own loop, for comparison at the two alignments it
        actually sees. */
