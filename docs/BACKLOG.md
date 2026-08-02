@@ -18,6 +18,32 @@ empty results.
 
 ## Open — no decision taken
 
+- **Once the WebDAV server works, two things follow**, noted 2026-08-02 so they
+  are designed for rather than retrofitted.
+
+  **An installer option.** The server should be something a novice install can
+  turn on, which means it has to start from `S:User-Startup` with no Shell
+  attached -- no stdout to print to, no console to take Ctrl-C from. A tool
+  written around `tool_error()` and `tool_break()` cannot be started at boot
+  without rework, so the daemon path has to exist from the beginning even if
+  the installer question comes later. The installer's own constraints are
+  already recorded: `askchoice` labels are capped at 22 characters and anything
+  level-dependent must run after `(welcome)`.
+
+  **Advertise `_webdav._tcp` over mDNS**, which is what makes the Amiga appear
+  in Finder's sidebar and in a Linux file manager without anyone typing an
+  address. That is the difference between a server you have to know about and
+  one that shows up.
+
+  **This needs new public API.** `include/aminetxduo/netstack.h` exposes browse
+  only -- `netstack_mdns_browse_start`/`stop`/`collect` and
+  `netstack_mdns_hostname`. There is no publish side. The vendored addon has
+  `_nx_mdns_service_add()` and `_nx_mdns_service_delete()`
+  (`third_party/netxduo/addons/mdns/nxd_mdns.h:1278`), so this is plumbing
+  rather than protocol work, but it is a new entry point and publishing one
+  fixes its shape -- see what publishing `NetStackQuery`/`NetStackControl` in
+  0.16.2 committed us to.
+
 - **Where a transfer's time actually goes, measured 2026-08-02 -- and it is not
   where this document has been saying.** A sampling profiler now exists
   (`tests/perf/prof/`, branch `prof`, off unless `-DAMINETXDUO_PROFILER=ON`,
