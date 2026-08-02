@@ -2,13 +2,20 @@
  * nc -- netcat.  Copy bytes between a socket and the Shell.
  *
  *     nc HOST,PORT,LISTEN=-l/S,UDP=-u/S,SCAN=-z/S,TIMEOUT=-w/N/K,
- *        LOCALPORT=-p/N/K,VERBOSE=-v/S,CRLF/S
+ *        LOCALPORT=-p/N/K,HALFCLOSE=-N/S,VERBOSE=-v/S,CRLF/S,
+ *        IPV4=-4/S,IPV6=-6/S,KEEP=-k/S
  *
  *   nc HOST PORT      connect, and copy standard input to it and it to
  *                     standard output until one end stops.
  *   nc -l PORT        listen instead, and do the same with the first caller.
+ *   nc -l -k PORT     the same, but come back for the next caller; Ctrl-C ends
+ *                     it.
  *   nc -z HOST PORT   connect, say whether it worked, and stop.  PORT may be
  *                     a range, "20-25", which is a port scan.
+ *   nc -4 / nc -6     pin the family a name resolves to.  Without either, the
+ *                     library answers AF_UNSPEC and prefers IPv6 where the
+ *                     machine has it and the name has an AAAA -- so on a dual
+ *                     stack there is otherwise no way to ask for the other one.
  *
  * Every other network command in this tree is a client: socket() and
  * connect().  `nc -l` is the only one calling bind(), listen() and accept(),
@@ -16,9 +23,9 @@
  * of the socket ABI.
  *
  * No proxy mode and no -e (running a program on the far end of a socket is a
- * remote shell).  Listen mode takes one caller and then exits.  UDP costs two
- * `if`s: connect() on a datagram socket is only a remembered destination,
- * which is all this needs.
+ * remote shell).  Listen mode takes one caller and then exits, unless -k says
+ * to come back.  UDP costs two `if`s: connect() on a datagram socket is only a
+ * remembered destination, which is all this needs.
  *
  * End of input does not close the connection unless -N says so, following
  * OpenBSD nc -- see the comment on -N in nc_shovel().
@@ -36,7 +43,8 @@ static const char version_tag[] __attribute__((used)) =
 
 #define TEMPLATE                                                        \
     "HOST,PORT,LISTEN=-l/S,UDP=-u/S,SCAN=-z/S,TIMEOUT=-w/N/K,"          \
-    "LOCALPORT=-p/N/K,HALFCLOSE=-N/S,VERBOSE=-v/S,CRLF/S"
+    "LOCALPORT=-p/N/K,HALFCLOSE=-N/S,VERBOSE=-v/S,CRLF/S,"              \
+    "IPV4=-4/S,IPV6=-6/S,KEEP=-k/S"
 
 enum
 {
@@ -50,6 +58,9 @@ enum
     ARG_HALFCLOSE,
     ARG_VERBOSE,
     ARG_CRLF,
+    ARG_IPV4,
+    ARG_IPV6,
+    ARG_KEEP,
     ARG_COUNT
 };
 
@@ -78,6 +89,8 @@ typedef struct NcOptions
     BOOL    halfclose;
     BOOL    verbose;
     BOOL    crlf;
+    BOOL    keep;                   /* -k: serve again after each client    */
+    LONG    family;                 /* -4/-6, else TOOL_AF_UNSPEC           */
     ULONG   timeout;                /* seconds; 0 means "no limit"          */
     UWORD   localport;
 } NcOptions;
@@ -721,7 +734,7 @@ int main(int argc, char **argv)
     if (rda == NULL)
     {
         tool_fault(IoErr());
-        tool_usage("<host> <port>  |  -l <port>  |  -z <host> <port>[-<port>]",
+        tool_usage("[-4|-6] <host> <port>  |  -l [-k] <port>  |  -z <host> <port>[-<port>]",
                    "Copies standard input to a socket and the socket to "
                    "standard output.");
         return RETURN_ERROR;
@@ -733,6 +746,21 @@ int main(int argc, char **argv)
     opt.halfclose = (args[ARG_HALFCLOSE] != 0) ? TRUE : FALSE;
     opt.verbose   = (args[ARG_VERBOSE] != 0) ? TRUE : FALSE;
     opt.crlf      = (args[ARG_CRLF]    != 0) ? TRUE : FALSE;
+    opt.keep      = (args[ARG_KEEP]    != 0) ? TRUE : FALSE;
+
+    /* -4 and -6 pin the family the name resolves to; without either, the
+       library's getaddrinfo() answers AF_UNSPEC and prefers IPv6 where the
+       machine has it and the name has an AAAA. */
+    if (args[ARG_IPV4] != 0 && args[ARG_IPV6] != 0)
+    {
+        tool_error("-4 and -6 cannot both be given");
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+    opt.family    = (args[ARG_IPV4] != 0) ? TOOL_AF_INET
+                  : (args[ARG_IPV6] != 0) ? TOOL_AF_INET6
+                                          : TOOL_AF_UNSPEC;
+
     opt.timeout   = (args[ARG_TIMEOUT] != 0)
                         ? (ULONG)(*(LONG *)args[ARG_TIMEOUT]) : 0UL;
     opt.localport = (args[ARG_LOCALPORT] != 0)
@@ -758,7 +786,7 @@ int main(int argc, char **argv)
     else if (portspec == NULL)
     {
         tool_error("which port?");
-        tool_usage("<host> <port>  |  -l <port>  |  -z <host> <port>[-<port>]",
+        tool_usage("[-4|-6] <host> <port>  |  -l [-k] <port>  |  -z <host> <port>[-<port>]",
                    "Copies standard input to a socket and the socket to "
                    "standard output.");
         FreeArgs(rda);
@@ -806,7 +834,7 @@ int main(int argc, char **argv)
         UWORD lo;
         UWORD hi;
 
-        if (!tool_sock_resolve(sb, host, &address) ||
+        if (!tool_sock_resolve_af(sb, host, opt.family, &address) ||
             !parse_range(portspec, &lo, &hi))
         {
             CloseLibrary(sb);
@@ -824,27 +852,41 @@ int main(int argc, char **argv)
     {
         /* A host in listen mode is the local address to bind to, so a machine
            with two interfaces can listen on just one. */
-        if (host != NULL && !tool_sock_resolve(sb, host, &address))
+        if (host != NULL && !tool_sock_resolve_af(sb, host, opt.family, &address))
         {
             CloseLibrary(sb);
             FreeArgs(rda);
             return RETURN_ERROR;
         }
 
-        if (nc_listen(sb, &opt, &address, port, &sock) != 0)
-        {
-            CloseLibrary(sb);
-            FreeArgs(rda);
-            return RETURN_ERROR;
-        }
+        /* -k serves one caller after another. Each pass rebinds rather than
+           holding the listener open across clients, which is what the plain
+           mode already does; the only difference is that it comes back.
+           Ctrl-C is how it ends, so nc_listen()'s SO_REUSEADDR matters here --
+           without it the rebind meets the previous socket's TIME_WAIT. */
+        if (opt.keep)
+            tool_break_arm();
 
-        rc = nc_shovel(sb, sock, &opt);
+        for (;;)
+        {
+            if (nc_listen(sb, &opt, &address, port, &sock) != 0)
+            {
+                CloseLibrary(sb);
+                FreeArgs(rda);
+                return RETURN_ERROR;
+            }
+
+            rc = nc_shovel(sb, sock, &opt);
+
+            if (!opt.keep || tool_break())
+                break;
+        }
     }
     else
     {
         LONG result;
 
-        if (!tool_sock_resolve(sb, host, &address))
+        if (!tool_sock_resolve_af(sb, host, opt.family, &address))
         {
             CloseLibrary(sb);
             FreeArgs(rda);
