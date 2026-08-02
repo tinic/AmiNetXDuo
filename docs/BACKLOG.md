@@ -18,6 +18,36 @@ empty results.
 
 ## Open — no decision taken
 
+- **`send()` puts more on the wire than it reports accepting, and a caller that
+  handles a short write correctly duplicates data.** Found 2026-08-02 by
+  `httpd`, which is the first program in this tree to use a non-blocking socket
+  at all -- every other tool sends blocking, and `nc` never handles a partial
+  send because it never gets one.
+
+  Measured on an A1200 under Amiberry, bridged, serving a 512 KB file:
+  `send()` was handed a buffer of 2048 and returned 1460, so the program
+  retried the remaining 588 as it must. The connection's own counter says
+  `send()` accepted **524,533 bytes** in total, which is exactly the 245-byte
+  header plus the 524,288-byte body. The packet capture of the same transfer
+  shows **528,421 bytes of distinct sequence space, contiguous, with no holes
+  and six ordinary retransmits** -- 3,888 bytes that the program never handed
+  over. The client therefore receives its Content-Length worth of bytes with a
+  few hundred of them repeated, and the file it saves is corrupt. Small files
+  never trigger it: it takes a send larger than one MSS.
+
+  So the library transmits the whole buffer and reports part of it. The obvious
+  place to look is `bsd_send_tcp()` in `src/bsdsocket/transfer.c`, which chops
+  the caller's buffer into MSS-sized packets and, on a failure part-way
+  through, does `nx_packet_release(packet)` and returns the count so far -- if
+  `nx_tcp_socket_send()` can fail having already queued the packet, the bytes
+  go out anyway and the count is a lie. Not confirmed; the loop reads
+  correctly, and it may equally be inside NetX Duo.
+
+  **`httpd` has not been changed to work around this**, deliberately. Every
+  workaround is either wrong against a correct stack (treat a short write as a
+  whole one) or a coincidence that hides the fault (never ask for more than one
+  MSS, so the library's inner loop runs once and cannot fail part-way). The
+  bug is in something that ships and that any third-party program can meet.
 - **Once the WebDAV server works, two things follow**, noted 2026-08-02 so they
   are designed for rather than retrofitted.
 

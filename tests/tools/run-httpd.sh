@@ -36,6 +36,41 @@
 #   DHCP server will not hand out; there is no reservation for the emulated
 #   MAC.
 #
+# WHAT THE THREE CLIENTS ACTUALLY DID, 2026-08-02
+#
+#   All three mounted, listed, read files including one called
+#   "My File [!].txt", and walked into a subdirectory.  None of them needed
+#   anything this server does not have.  From the guest's own TRACE log:
+#
+#     macOS      WebDAVFS/3.0.0 (Darwin 25.5.0).  OPTIONS, then PROPFIND
+#                Depth 0 on /, then Depth 1.  Mounts READ-ONLY off the Allow
+#                header alone -- it never attempted a write, so a `cp` to the
+#                volume fails locally without a request leaving the machine.
+#                Probes six Finder metadata names that do not exist
+#                (/._., /.hidden, /.metadata_never_index, /.Spotlight-V100 and
+#                two more); eleven of the run's 404s are these.
+#     Windows    Microsoft-WebDAV-MiniRedir/10.0.22621.  Needs the WebClient
+#                service, which is demand-start and comes up on the first
+#                `net use`.  27 PROPFINDs for the same work the others do in
+#                five, all Depth 0 -- it walks a path one segment at a time.
+#                Sends `translate: f` on everything.  Maps as a drive letter
+#                and reachable as \\<address>@<port>\DavWWWRoot.
+#     Linux      gvfs/1.57.2.  The fewest requests of the three, and the only
+#                one that reports the server's own words back to the user:
+#                "HTTP Error: Method Not Allowed" for a write.
+#
+#   NOT ONE OF THEM SENT LOCK.  Nor PROPPATCH, nor Depth: infinity -- 25
+#   Depth 0 and 7 Depth 1 across the whole run.  `DAV: 1` with no locking is
+#   enough to mount read-only on all three.
+#
+#   Windows and gvfs do attempt a write when asked (PUT, and MKCOL from
+#   `mkdir`), take the 405, and report it.  macOS does not get that far.
+#
+# THE HOST RUNNING THE EMULATOR CANNOT BE A CLIENT.  A frame the host sends to
+# the guest's MAC never comes back to that NIC's pcap, so playhouse3 gets "no
+# route to host" from its own guest while every other machine on the LAN
+# reaches it.  Run the Linux client from a different machine.
+#
 # The a2065.device driver is not ours to ship: AMINETXDUO_A2065=<path>, or
 # drop a copy in build/a2065.device.
 #
