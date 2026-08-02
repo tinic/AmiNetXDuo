@@ -63,6 +63,41 @@ empty results.
 
 ## Decided against — do not "fix"
 
+- **The ThreadX tick rate stays at 50 and changing it does nothing**,
+  2026-08-01. Swept 20/40/50/60/80/100 Hz, 8 runs per arm, arms interleaved so
+  run-order drift could not settle on one; 48 runs, all PASS. The between-arm
+  span is not larger than the within-arm spread on any metric -- on write it is
+  smaller (2 against 4 KB/s), on read and on the read/write ratio it is the same
+  magnitude -- and the scatter is not monotone in rate, with 80 Hz reading
+  higher than 60.
+
+  The counters show the mechanism rather than just the null. **Wakeups stay at
+  ~850 whatever the rate**, because the source is `timer.device UNIT_VBLANK` and
+  the knob does not touch it. Below 50 Hz the extra wakeups are simply empty
+  (59% idle at 20 Hz); above it they deliver catch-up bursts (841 of 848
+  wakeups deliver more than one tick at 100 Hz). Delivery stays pinned at the
+  ~20 ms wakeup either way, so a faster tick buys more ticks and not more timely
+  ones. **Instantaneous skew was 0 in all 48 runs** and nothing was ever
+  clipped, lost, deferred or over budget: the timer was already keeping up, so
+  there was nothing to win.
+
+  Going slower does hand back real work -- 20 Hz delivers 339 ticks instead of
+  867 and skips 493 wheel walks -- and it bought 0 KB/s outside the noise.
+  Nothing broke at 20 Hz either. The argument against it is not throughput:
+  `src/bsdsocket/options.c:83` derives `SO_RCVTIMEO`/`SO_SNDTIMEO` granularity
+  from `1000000/NX_IP_PERIODIC_RATE`, so 20 Hz would coarsen socket timeout
+  resolution from 20 ms to 50 ms.
+
+  **Two traps for anyone who tries this anyway.** `-D` cannot set the knob:
+  `port/netxduo-amiga/inc/nx_user.h:34` hard-defines `NX_IP_PERIODIC_RATE 50`
+  unconditionally and is included before `nx_port.h`'s `#ifndef` fallback, so
+  overriding `TX_TIMER_TICKS_PER_SECOND` alone leaves the periodic rate behind
+  and silently rescales every TCP timer by the ratio -- a sweep that looks
+  plausible and measures nothing. Both headers have to move together. And there
+  is no delayed-ACK confound to isolate: `nx_tcp_enable.c:111` computes
+  `_nx_tcp_ack_timer_rate` as `ceil(NX_IP_PERIODIC_RATE / NX_TCP_ACK_TIMER_RATE)`,
+  so the ACK interval self-scales to a constant 200 ms at every rate.
+
 - **RFC 3542's extension headers stay unimplemented.** `IPV6_RTHDR`,
   `HOPOPTS`, `DSTOPTS`, `RTHDRDSTOPTS`, `PATHMTU`, `RECVPATHMTU`,
   `USE_MIN_MTU`, `DONTFRAG` and `NEXTHOP` are extension-header and path-MTU
