@@ -1,0 +1,18 @@
+;
+; DEVS:NetInterfaces/tap0 -- the interface both stacks are pointed at.
+;
+; DEVICE names a device that is not on this disk: TapProbe creates it with
+; MakeLibrary()/AddDevice() before it starts the stack, so OpenDevice() finds
+; it in ExecBase's device list.
+;
+; No CONFIGURE line: an address with no configuration mode means static in
+; both Roadshow and our own parser, so one file serves both.  IPREQUESTS is
+; left alone on purpose -- the queue depth Roadshow picks by default is one of
+; the things being measured.
+;
+device=tcpdrill.device
+unit=0
+address=10.9.9.1
+netmask=255.255.255.0
+requiresinitdelay=no
+debug=yes

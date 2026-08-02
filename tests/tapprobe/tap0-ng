@@ -1,0 +1,12 @@
+;
+; DEVS:NetInterfaces/tap0 -- AmiTCP_NG variant.
+;
+; Same keywords as the Roadshow file next to it; kept separate only because NG
+; reads a gateway/nameserver it does not need here, and a stray one would send
+; it looking for a router that does not exist.
+;
+device=tcpdrill.device
+unit=0
+address=10.9.9.1
+netmask=255.255.255.0
+requiresinitdelay=no

@@ -8,6 +8,7 @@ add_subdirectory(crypto68k)
 add_subdirectory(perf)
 add_subdirectory(tools)
 add_subdirectory(tcpdrill)
+add_subdirectory(tapprobe)
 
 # Host-only, and it says so itself: the sanitizer fuzz drivers for the parsers
 # that read bytes we did not write. Nothing to build when cross-compiling.
