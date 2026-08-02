@@ -35,13 +35,20 @@ empty results.
   half, parsing a peer's blocks and retransmitting selectively, is separate and
   larger. All of it is inside vendored TCP: the substitution trick that gives
   us `_nx_ip_checksum_compute` works for one function and does not scale to a
-  receive path, so this means forking it.
+  receive path.
 
-  **Why it is held.** SACK improves loss RECOVERY. A capture comparing us
-  against Roadshow on a matched rig is in flight; if it shows near-zero
-  retransmits then SACK cannot account for a 2x read deficit and this would be
-  a fork of vendored TCP for something that never fires. If it shows loss and
-  go-back-N stalls, this goes to the top.
+  **That is a patch to NetX Duo and an upstream contribution, not a fork we
+  carry.** SACK is a real gap in an industrial TCP stack, and this project has
+  an established route upstream with a recipe recorded alongside the existing
+  work. Upstreamed, the diff goes away -- materially cheaper than the fork this
+  entry first described.
+
+  **Two justifications, and they are independent.** One: it may account for the
+  read deficit -- but SACK improves loss RECOVERY, and a capture comparing us
+  against Roadshow on a matched rig is in flight. If that shows near-zero
+  retransmits, SACK cannot explain a 2x gap and does not become urgent. Two: it
+  is worth contributing to NetX Duo whatever our own benchmark says, and that
+  does not wait on anything. Only the PRIORITY is held, not the case.
 
   Note the correlation is weaker than it looks: in the user benchmarks that
   prompted this, AmiTCP_NG reads at 906/422/376/111 KB/s -- between us and
