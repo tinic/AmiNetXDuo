@@ -2045,16 +2045,19 @@ static BOOL httpd_writable(HttpConn *c)
                 continue;
         }
 
-        /* Nothing left to say. */
+        /* Nothing left to say.  The counter is reported here, before the two
+           paths part: a client sending `Connection: close` is the one that
+           downloads a large file, and it used to be the one whose total was
+           never printed. */
+        if (httpd_trace)
+            httpd_log(c, "send() accepted %lu bytes for this answer",
+                      (LONG)c->wrote, 0);
+
         if (!c->keepalive)
             return FALSE;
 
         {
             ULONG pipelined = c->in_len;
-
-            if (httpd_trace)
-                httpd_log(c, "send() accepted %lu bytes for this answer",
-                          (LONG)c->wrote, 0);
 
             httpd_reset(c);
 
