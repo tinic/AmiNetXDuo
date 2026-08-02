@@ -205,6 +205,7 @@ struct HttpConn
     UBYTE   out[HTTPD_OUT_MAX];
     ULONG   out_len;
     ULONG   out_sent;
+    ULONG   wrote;                  /* what send() has ACCEPTED, in total   */
     UBYTE   overflow;               /* the head did not fit -- 500 instead */
     UBYTE   chunked;
     ULONG   status;
@@ -847,6 +848,7 @@ static VOID httpd_reset(HttpConn *c)
     c->body_left = 0;
     c->file_left = 0;
     c->dir_stage = DIR_SELF;
+    c->wrote     = 0;
 }
 
 /* ------------------------------------------------------------- the answer --- */
@@ -1056,8 +1058,6 @@ static BOOL httpd_produce(HttpConn *c)
 
             got = Read(c->file, (APTR)c->out, want);
 
-            if (httpd_trace)
-                httpd_log(c, "read %lu left %lu", (LONG)got, (LONG)c->file_left);
 
             if (got <= 0)
             {
@@ -2002,11 +2002,8 @@ static BOOL httpd_writable(HttpConn *c)
             sent = tool_sock_send(httpd_sb, c->sock, &c->out[c->out_sent],
                                   want);
 
-            if (httpd_trace)
-                httpd_log(c, "send at %lu of %lu", (LONG)c->out_sent,
-                          (LONG)c->out_len);
-            if (httpd_trace)
-                httpd_log(c, "  asked %lu got %lu", (LONG)want, (LONG)sent);
+            if (sent > 0)
+                c->wrote += (ULONG)sent;
 
             if (sent < 0)
             {
@@ -2035,6 +2032,10 @@ static BOOL httpd_writable(HttpConn *c)
 
         {
             ULONG pipelined = c->in_len;
+
+            if (httpd_trace)
+                httpd_log(c, "send() accepted %lu bytes for this answer",
+                          (LONG)c->wrote, 0);
 
             httpd_reset(c);
 
