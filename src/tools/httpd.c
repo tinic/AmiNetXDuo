@@ -94,11 +94,11 @@ enum
 
 /*
  * The connection ceiling is a memory decision before it is a concurrency one:
- * every slot is ~4.9 KB of static buffers whether it is in use or not, so
- * eight of them is 39 KB of the 1 MB machine's memory reserved at load time.
- * Eight is what the clients ask for -- Finder opens four to six and the
- * Windows redirector two to four -- and CONNECTIONS lowers it for a machine
- * where 39 KB is worth arguing about.
+ * a slot is 4.9 KB of buffers, so the default eight is 39 KB taken at startup
+ * and CONNECTIONS is what a machine where that matters lowers.  Eight is what
+ * the clients ask for: Finder opens four to six and the Windows redirector two
+ * to four, and a client that finds no free slot waits in the listen backlog
+ * rather than failing, so a lower number costs latency and not function.
  */
 #define HTTPD_CONN_MAX      16
 #define HTTPD_CONN_DEFAULT   8
@@ -217,7 +217,15 @@ struct HttpConn
     UBYTE   dir_stage;
 };
 
-static HttpConn httpd_conn[HTTPD_CONN_MAX];
+/*
+ * Taken from the heap and not declared as an array of HTTPD_CONN_MAX, because
+ * a static one is the whole ceiling whether it is used or not: at 4.9 KB a
+ * slot that was 78 KB of BSS in every copy of the command, which on a 1 MB
+ * machine is most of a percent of the machine reserved for connections nobody
+ * asked for.  Allocating it makes CONNECTIONS mean something -- `-m 2` is
+ * 10 KB -- and takes the command's own BSS down to the shared scratches.
+ */
+static HttpConn *httpd_conn;
 
 /*
  * Static, not automatic, and for the reason src/tools/nc.c gives at its own
@@ -2364,7 +2372,16 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    for (i = 0; i < (ULONG)HTTPD_CONN_MAX; i++)
+    httpd_conn = (HttpConn *)ami_alloc(httpd_conns * (ULONG)sizeof(HttpConn));
+    if (httpd_conn == NULL)
+    {
+        tool_error("not enough memory for %lu connections", httpd_conns);
+        CloseLibrary(httpd_sb);
+        FreeArgs(rda);
+        return RETURN_FAIL;
+    }
+
+    for (i = 0; i < httpd_conns; i++)
     {
         httpd_conn[i].sock  = -1;
         httpd_conn[i].state = CONN_FREE;
@@ -2387,6 +2404,7 @@ int main(int argc, char **argv)
             tool_error("not enough memory for %lu connections", httpd_conns);
             while (i-- > 0UL)
                 ami_free(httpd_conn[i].fib);
+            ami_free(httpd_conn);
             CloseLibrary(httpd_sb);
             FreeArgs(rda);
             return RETURN_FAIL;
@@ -2398,6 +2416,7 @@ int main(int argc, char **argv)
     {
         for (i = 0; i < httpd_conns; i++)
             ami_free(httpd_conn[i].fib);
+        ami_free(httpd_conn);
         CloseLibrary(httpd_sb);
         FreeArgs(rda);
         return RETURN_ERROR;
@@ -2416,6 +2435,7 @@ int main(int argc, char **argv)
             httpd_close(&httpd_conn[i]);
         ami_free(httpd_conn[i].fib);
     }
+    ami_free(httpd_conn);
 
     (VOID)tool_sock_close(httpd_sb, lsock);
     CloseLibrary(httpd_sb);
