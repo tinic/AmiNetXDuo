@@ -21739,6 +21739,12 @@ Through `n68k_ip_checksum_compute()` rather than the loop alone, which is what
 | checksum chain, net68k, 8192 B | 190.5 ns/B | 136.5 ns/B |
 | ratio against the vendored loop | 3.58x | 4.82x |
 
+Both columns are the same tree with only this file changed. Rebased onto
+86's copy work the same row reads 153.05, and the vendored row it shares a
+binary with moves too, 722.21 to 718.80 -- whole-binary code placement, the
+same effect the 5% floor at 20 B is made of, and not something either change
+did.
+
 End to end, same binary, same run:
 
 | | was | now |
