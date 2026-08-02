@@ -18,6 +18,26 @@ empty results.
 
 ## Open — no decision taken
 
+- **AmiTCP_NG needs arexx and the math libraries; that was the `errno 43`**,
+  found 2026-08-02. Two earlier attempts read its `AddNetInterface` failure --
+  `EPROTONOSUPPORT` out of `socreate()` with an empty `protosw`, and on the
+  second attempt no open of `a2065.device` at all -- as a protocol-domain
+  initialisation fault, and guessed the cause was its harness wanting AmigaOS
+  3.2 against our bare Kickstart 3.1 directory boot.
+
+  **That guess was wrong.** The startup needs `rexxsyslib.library` and the math
+  libraries in `LIBS:`, which a bare boot does not carry and a full Workbench
+  does. With them staged it comes up. The OS version was never the problem, so
+  do not go looking for a 3.2 image.
+
+  This makes the third arm of the stack comparison reachable. It was left
+  unmeasured only because playhouse3 was too contended to run it cleanly --
+  several Amiberry instances on `ens18` sharing an emulated MAC, which silently
+  spoils both guests. Give each guest a distinct MAC and check the lease.
+  `tests/perf/run-stackprof.sh` is the matched harness; the `ours` and
+  `roadshow` arms both leased 192.168.1.133, so a third arm has to be checked
+  against that rather than assumed.
+
 - **SACK, held pending evidence that there is loss to recover from**, assessed
   2026-08-02. AmiTCP_NG has it; we have none -- **zero mentions of SACK
   anywhere in the vendored NetX Duo**, headers or source.
