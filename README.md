@@ -110,6 +110,7 @@ Configuration follows Roadshow's layout — `DEVS:NetInterfaces/<name>`,
 | `arp` | which machines on this network have answered, and what they are |
 | `sntp` | set the clock from a time server |
 | `fetch` | retrieve an `http://` or `https://` URL |
+| `httpd` | share a drawer, so other machines can mount it as a drive |
 | `nc` | connect or listen, TCP and UDP, port ranges, timeouts |
 | `telnet` | with enough option negotiation not to confuse a real server |
 | `ssh` | Dropbear's dbclient, public-key auth; see the ReadMe for keys |
