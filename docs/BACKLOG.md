@@ -31,11 +31,11 @@ empty results.
   do not go looking for a 3.2 image.
 
   This makes the third arm of the stack comparison reachable. It was left
-  unmeasured only because playhouse3 was too contended to run it cleanly --
-  several Amiberry instances on `ens18` sharing an emulated MAC, which silently
+  unmeasured only because the emulator host was too contended to run it cleanly
+  -- several Amiberry instances on one bridge sharing an emulated MAC, which silently
   spoils both guests. Give each guest a distinct MAC and check the lease.
   `tests/perf/run-stackprof.sh` is the matched harness; the `ours` and
-  `roadshow` arms both leased 192.168.1.133, so a third arm has to be checked
+  `roadshow` arms took the same DHCP lease, so a third arm has to be checked
   against that rather than assumed.
 
 - **SACK, held pending evidence that there is loss to recover from**, assessed
@@ -248,9 +248,9 @@ empty results.
   the read gap is not CPU work,** 2026-08-02. `tests/perf/run-stackprof.sh`
   holds the rig fixed and makes the library the only variable: bridged
   Amiberry A3000, Kickstart 3.1 40.68, one `a2065.device`, the released `fitz`
-  binary, `FitzBench KB=4096 CHUNK=32768 REPS=3`, `fitz-serve` on playhouse4.
-  Both stacks came up behind the same MAC and took the **same DHCP lease**,
-  192.168.1.133 -- that check is in here because an earlier stack comparison
+  binary, `FitzBench KB=4096 CHUNK=32768 REPS=3`, a `fitz-serve` peer on another machine.
+  Both stacks came up behind the same MAC and took the **same DHCP lease**
+  -- that check is in here because an earlier stack comparison
   turned out to have run its two arms at different addresses. 1000 Hz, no
   samples dropped, 0.0% unsampled. Two profiled runs per stack:
 
@@ -334,7 +334,7 @@ empty results.
   should not be: it is somebody else's stack.** The likeliest reason is the
   environment rather than a defect -- their harness mounts a full **AmigaOS
   3.2** Workbench as `SYS:`, and this is a bare directory hard drive on
-  Kickstart 3.1 with only the assigns `envsetup` makes. `~/amiga-assets/wb`
+  Kickstart 3.1 with only the assigns `envsetup` makes. The local Workbench store
   has 2.04 through 3.1 and no 3.2, so that hypothesis cannot be tested here.
   Reproducing it would mean a 3.2 install, and then all three arms would have
   to move onto it for the comparison to still be matched.
@@ -392,8 +392,8 @@ empty results.
 
 - **The 68000 numbers for both net68k primitives**, measured 2026-08-01 under
   WinUAE 6.0.3 on a purpose-built cycle-exact A500 profile
-  (`C:\aminetxduo\run\m0ab\config.uae` on winbuilder; nothing like it existed,
-  every prior cycle-exact config there is a 68030). Harness on branch
+  (a purpose-built local config; nothing like it existed, every prior
+  cycle-exact config being a 68030). Harness on branch
   `m68000-ab`: both predecessors assembled alongside the shipped versions in
   ONE binary, plus a second assembly of each shipped sequence at a different
   address as a floor check.
@@ -791,14 +791,14 @@ empty results.
   of them will meet this; nothing in the tree does.
 
 - **`tests/clients/run-argvexit.sh` is gone, and what it was for is measured
-  elsewhere.** It never completed a run. Under Amiberry on playhouse3 the guest
+  elsewhere.** It never completed a run. Under Amiberry the guest
   boots, `ToolsSmoke` starts, and `DH0:tools.txt` gets as far as the
   `===== SYS:ArgvExit =====` header and then stops: no output, no return code,
   no `.done`, deadline. So the plumbing works and `ArgvExit` itself never comes
   back out of `SystemTagList()` -- making it run is a guest-side debug of the
   probe, not a fix to a shell script. The toolchain was ruled out separately:
   `tools/fix-toolchain-crt0.py --check` against the pinned toolchain on
-  playhouse2 and playhouse3 alike reports `11 ok, 1 skipped` for the frame skew
+  both emulator hosts report `11 ok, 1 skipped` for the frame skew
   and `2 call site(s) already push __argv by value` for the argv indirection,
   which is the immune case, not a missing patch site.
 
@@ -819,7 +819,7 @@ empty results.
   error)`. Not a memory limit -- the failing A600 run had 4.6 MB free. So a
   PCMCIA test has to run on the A1200 profile, and an A600 failure says nothing
   about the code. The Roadshow demo is the control that establishes this and
-  lives in `~/amiga-assets/stacks/` on playhouse3, reached by
+  lives in the local stack store, reached by
   `AMINETXDUO_CMP_ROADSHOW`. Found 2026-08-01.
 
   Not memory either, which was the other candidate: an A1200 given
@@ -831,7 +831,7 @@ empty results.
   rather than inferred; `run-oommsg.sh` only proves the other end, that 512 KB
   cannot start the stack.
 
-- **`/opt/amiga` on playhouse2 carries the argv bug in all eleven `crt0.o`.**
+- **A pinned toolchain install can carry the argv bug in all eleven `crt0.o`.**
   Locally built, GCC 16.1.1b, and `--check` reports `11 buggy` -- it has the
   compiler fix for the frame skew and not newlib's `120371e` for the argv
   declaration. Nothing releases through it, so this is a note about the box
@@ -876,7 +876,7 @@ empty results.
   can be made to fail on it. What is missing is a sighting, and only a driver
   that really ignores `AbortIO()` can provide one.
 
-- **`run-fitzbench.sh` refuses `playhouse2` outright** over the uncomputed TX
+- **`run-fitzbench.sh` refuses a same-host virtual peer outright** over the uncomputed TX
   checksums that `ethtool -K eth0 tx off` fixed there on 2026-07-31, and can be
   relaxed. Query the setting by full path -- `/usr/sbin` is not on a non-login
   ssh PATH.
@@ -889,5 +889,5 @@ empty results.
 - **cppcheck**: baseline is from 2.20.0, gate hosts have 2.17.1, so the stage
   skips itself. Install 2.20.0 or regenerate to make it gate again.
 
-- **FS-UAE cannot boot headless on playhouse3** (`FATAL: [GLAD] …`). Harnesses
+- **FS-UAE cannot boot headless without a display** (`FATAL: [GLAD] …`). Harnesses
   take `-A` to use Amiberry instead, and `-a ARGS` to pass arguments.
