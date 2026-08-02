@@ -7,6 +7,11 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
+## 0.16.6
+
+- Reading is about twice as fast. A 4 MB file off a file server on a 14 MHz 68020 went from 979 to 1953 KB/s. The receive window was exactly 32768 bytes, which cannot hold a 32 KB block of application data plus the header in front of it, so every block arrived in two instalments and each instalment cost a full round-trip wait. It is now 33 whole Ethernet segments. A program holding five or more sockets at once was never affected and does not change
+- Out-of-sequence data is acknowledged after it is queued rather than before, so a segment that closes a gap is no longer reported as though the gap were still open. The far end was retransmitting data that had already arrived
+
 ## 0.16.5
 
 - A `send()` that takes only part of what it was offered now reports the part it took. A program that resent the remainder was sending some of it twice, which showed on large transfers and not on small ones
