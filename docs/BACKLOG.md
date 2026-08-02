@@ -18,6 +18,36 @@ empty results.
 
 ## Open — no decision taken
 
+- **SACK, held pending evidence that there is loss to recover from**, assessed
+  2026-08-02. AmiTCP_NG has it; we have none -- **zero mentions of SACK
+  anywhere in the vendored NetX Duo**, headers or source.
+
+  The prerequisite is met, which is the part that could have blocked it
+  architecturally: NetX Duo does queue out-of-order segments, inserting in
+  sequence order through `nx_tcp_socket_receive_queue_head`
+  (`nx_tcp_socket_state_data_check.c`), so there are holes for SACK blocks to
+  describe.
+
+  Scope. The RECEIVER half is what would help our read deficit -- advertise
+  SACK-permitted in the SYN, generate blocks from the receive queue's holes,
+  fit them in the ACK option space -- so that a sending Linux retransmits only
+  what is missing rather than NewReno's one segment per round trip. The sender
+  half, parsing a peer's blocks and retransmitting selectively, is separate and
+  larger. All of it is inside vendored TCP: the substitution trick that gives
+  us `_nx_ip_checksum_compute` works for one function and does not scale to a
+  receive path, so this means forking it.
+
+  **Why it is held.** SACK improves loss RECOVERY. A capture comparing us
+  against Roadshow on a matched rig is in flight; if it shows near-zero
+  retransmits then SACK cannot account for a 2x read deficit and this would be
+  a fork of vendored TCP for something that never fires. If it shows loss and
+  go-back-N stalls, this goes to the top.
+
+  Note the correlation is weaker than it looks: in the user benchmarks that
+  prompted this, AmiTCP_NG reads at 906/422/376/111 KB/s -- between us and
+  AmiTCP 4.6, which is the read champion on three of four machines. Whether 4.6
+  has SACK is unknown, so SACK does not obviously separate the field.
+
 - **`send()` puts more on the wire than it reports accepting, and a caller that
   handles a short write correctly duplicates data.** Found 2026-08-02 by
   `httpd`, which is the first program in this tree to use a non-blocking socket
