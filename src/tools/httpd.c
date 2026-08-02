@@ -547,9 +547,10 @@ static ULONG httpd_stamp_secs(const struct DateStamp *ds)
     return secs;
 }
 
-/* Seconds of uptime-ish local time, for the progress deadlines only.  Wraps
-   at midnight, which the caller handles by treating any backwards step as
-   "just now" rather than as an expiry. */
+/* Seconds of local time since the Amiga epoch -- ds_Days is in the sum, so it
+   does not wrap at midnight.  It can still step backwards if the clock is set,
+   which the caller handles by treating any backwards step as "just now" rather
+   than as an expiry.  Progress deadlines and lock expiry both read it. */
 static ULONG httpd_now(VOID)
 {
     struct DateStamp ds;
