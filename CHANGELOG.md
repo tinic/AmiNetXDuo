@@ -10,6 +10,7 @@ version at the top when it merges.
 ## Unreleased
 
 - The Developer drawer's `Profile` names functions inside `bsdsocket.library`, so a profile of an ordinary program shows where the stack spent its time rather than one bar for the whole library. A library it cannot read is still named, as before
+- `httpd` serves a drawer over HTTP and read-only WebDAV, so this machine can be mounted as a drive from Windows, macOS and Linux with nothing installed at the far end -- Finder's Connect to Server, Explorer's Map network drive and the Linux file manager all speak it. `httpd Work:Public 8080`. It answers several clients at once, and it refuses any address that leaves the drawer, including the AmigaOS form `/RAM:` that a check for `..` does not see
 
 ## 0.16.4
 
