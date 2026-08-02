@@ -71,12 +71,16 @@ enum { OPT_RATE, OPT_SAMPLES, OPT_CHANNEL, OPT_STACK, OPT_OUT, OPT_FOLDED,
 /*
  * 1000 Hz on anything with a 68010 or better, 250 on a plain 68000.
  *
- * The handler is about 60 instructions including Exec's own level-4 dispatch.
- * On a 7 MHz 68000 that is roughly 50 us, so 1000 Hz would spend 5% of the
- * machine measuring it -- enough to change what is being measured on the very
- * machines least able to afford it.  250 Hz costs about 1.2% and still gives
- * a few thousand samples in a ten-second run, which ranks functions perfectly
- * well.  RATE= overrides both.
+ * Measured, by having profspin time itself with the profiler attached and
+ * without: 12.52 s against 13.00 s on a 14 MHz 68EC020 at 1000 Hz, and
+ * 16.66 s against 17.30 s on a 7 MHz 68000 at 250 Hz.  Both 3.8%, which is
+ * roughly 38 us an interrupt on the 020 and 150 us on the 68000 -- most of it
+ * Exec's own level-4 dispatch rather than the eleven instructions in the
+ * vector.  The 68000 is about four times slower and samples four times less
+ * often, so the two defaults cost the same fraction.
+ *
+ * 1000 Hz on the 68000 would be 15%, which is no longer measuring the program.
+ * RATE= overrides both.
  */
 #define RATE_68000      250UL
 #define RATE_68010UP    1000UL

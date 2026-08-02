@@ -85,9 +85,23 @@ THE RATE
 --------
 
 1000 Hz on a 68010 and up, 250 Hz on a plain 68000, and RATE= overrides both.
-The handler plus Exec's own level-4 dispatch is roughly 50 us on a 7 MHz 68000,
-so 1000 Hz there would spend 5% of the machine measuring it.  On anything
-faster the default costs well under 1%.
+
+WHAT THAT COSTS, measured rather than estimated -- profspin timing itself with
+and without the profiler attached, under FS-UAE:
+
+    68EC020, 14 MHz, 1000 Hz    12.52 s -> 13.00 s      3.8%
+    68000,    7 MHz,  250 Hz    16.66 s -> 17.30 s      3.8%
+
+which is about 38 us per interrupt on the 020 and 150 us on the 68000, most of
+it Exec's own level-4 dispatch rather than the eleven instructions in the
+vector.  The two defaults land on the same figure because the 68000 is roughly
+four times slower and samples four times less often.
+
+Four percent is worth knowing and is not worth much worrying about: the cost
+falls on whatever is running, so it is spread across the profile roughly in
+proportion to the shares being measured and moves the RANKING very little.  It
+does inflate absolute wall clock, so time a program with the profiler off.
+Halve RATE= to halve the cost.
 
 SAMPLES= caps the buffer.  By default Profile takes at most a third of free
 memory: 16 bytes a sample, so 1000 Hz fills 16 KB a second.
