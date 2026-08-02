@@ -22079,15 +22079,19 @@ Category shares of the transfer phase, A1200/68020, 1 MB over the wire case:
 
 | category | base | +direct handoff | +inline TX_DISABLE |
 |---|---|---|---|
-| ThreadX + Amiga port | 1090 (24.7%) | 980 (24.7%) | 666 (18.3%) |
-| NetX Duo protocol | 1086 (24.6%) | 1046 (26.3%) | 1104 (30.3%) |
-| Kickstart (Exec etc) | 833 (18.8%) | 505 (12.7%) | 485 (13.3%) |
-| copy (net68k asm) | 780 (17.6%) | 811 (20.4%) | 799 (21.9%) |
-| checksum | 573 (13.0%) | 565 (14.2%) | 537 (14.7%) |
-| app / profiler | 52 (1.2%) | 61 (1.5%) | 52 (1.4%) |
-| **total samples** | **4420** | **3973** | **3646** |
-| wall, ms | 4369 | 3936 | 3614 |
+| ThreadX + Amiga port | 1090 (24.7%) | 980 (24.7%) | 733 (20.1%) |
+| NetX Duo protocol | 1086 (24.6%) | 1046 (26.3%) | 1090 (29.9%) |
+| Kickstart (Exec etc) | 833 (18.8%) | 505 (12.7%) | 418 (11.5%) |
+| copy (net68k asm) | 780 (17.6%) | 811 (20.4%) | 775 (21.3%) |
+| checksum | 573 (13.0%) | 565 (14.2%) | 564 (15.5%) |
+| app / profiler | 52 (1.2%) | 61 (1.5%) | 59 (1.6%) |
+| **total samples** | **4420** | **3973** | **3644** |
+| wall, ms | 4369 | 3936 | 3613 |
 | KB/s | 234 | 260 | 283 |
+
+The last column moves about 60 samples between the ThreadX port and Kickstart
+rows from run to run, and the total does not: 3646 and 3644 on two exclusive
+runs of the same binary. Read the total.
 
 Samples are milliseconds here, so the absolute column is the one to read. The
 work that did not change did not move: copy 780 → 799, checksum 573 → 537, NetX
@@ -22106,7 +22110,17 @@ Counts after, confirming the workload did not change: `disable`/`restore`
 38,853 → 38,850, `permit-slow` still 0, mutex 5,612/5,672 → 5,612/5,671,
 handoffs 2,634 → 2,654, `park_spurious` still 0.
 
-### 86.6 What is left
+### 86.6 The 68000 emulator arm could not be run
+
+`tools/ci.sh host host32 cross conformance` is green, and the tier-2 emulator
+suite is green on the 68020 -- all eight, `bracket_invariants` included. The
+68000 arm cannot be run on playhouse2 at all: FS-UAE dies of SIGSEGV on the
+host one second in, before the guest has loaded anything, with the run script
+saying so. An unmodified baseline binary out of a checkout at 43b8172 does the
+same under the same command, which is what makes it the host and not this
+change.
+
+### 86.7 What is left
 
 The `TX_DISABLE` pair is still 38,850 calls. That count is ThreadX's and NetX
 Duo's, not ours, and reducing it means changing vendored critical sections —
