@@ -15,10 +15,13 @@
  * WHAT IT ANSWERS
  *
  *   OPTIONS, PROPFIND (Depth 0 and 1), GET, HEAD, PUT, DELETE, MKCOL, COPY,
- *   MOVE and PROPPATCH.  It advertises `DAV: 1`, which is the class that has
- *   no locking, and LOCK is the next thing to land: Finder mounts a class 1
- *   server READ-ONLY however many write methods it answers, so the lock table
- *   is what a writable mount on macOS is waiting for.
+ *   MOVE, PROPPATCH, LOCK and UNLOCK -- WebDAV class 2, which is the class
+ *   that has locking.
+ *
+ *   The class matters more than the verbs do.  Finder mounts a `DAV: 1`
+ *   server READ-ONLY however many write methods it answers, so a server that
+ *   writes and does not lock is a server macOS will not write to; class 2 and
+ *   a lock table is the price of a writable mount rather than an extra.
  *
  * WRITING, WITHOUT LOSING WHAT WAS THERE
  *
@@ -52,9 +55,11 @@
  *   connection may spend making no progress are all capped, and the caps are
  *   the reason a client can open the connection limit's worth of sockets and
  *   stay silent without the machine noticing.  Everything is static: the
- *   buffers are HTTPD_CONN_MAX * ~5 KB, allocated once, and a Shell command
+ *   buffers are HTTPD_CONN_MAX * ~6 KB, allocated once, and a Shell command
  *   gets 4 KB of stack on a stock Kickstart 3.1 (src/tools/nc.c says the same
- *   at its own buffers).
+ *   at its own buffers).  Writing added nothing to that: a tree walk carries
+ *   one path and one FileInfoBlock rather than a stack of them, and the lock
+ *   table is a fixed array.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -95,7 +100,7 @@ enum
 
 /*
  * The connection ceiling is a memory decision before it is a concurrency one:
- * a slot is 4.9 KB of buffers, so the default eight is 39 KB taken at startup
+ * a slot is 6.2 KB of buffers, so the default eight is 50 KB taken at startup
  * and CONNECTIONS is what a machine where that matters lowers.  Eight is what
  * the clients ask for: Finder opens four to six and the Windows redirector two
  * to four, and a client that finds no free slot waits in the listen backlog
@@ -117,6 +122,14 @@ enum
    a loop here would take.  A tree that needs more passes than this is refused
    half-done and said so in the multistatus. */
 #define HTTPD_WALK_MAX     20000UL
+
+/* Locks.  Fixed, like everything else: eight is more than the clients hold at
+   once -- Finder locks the file it is writing and nothing else -- and a ninth
+   asker is told the server is busy rather than costing memory. */
+#define HTTPD_LOCK_MAX         8
+#define HTTPD_LOCK_DEF      180UL   /* seconds granted when none was asked  */
+#define HTTPD_LOCK_CAP     3600UL   /* the longest this server will hold one */
+#define HTTPD_TOKEN_MAX       64    /* "opaquelocktoken:...", as text       */
 
 /* The XML the write methods send is skimmed, not parsed: element names and
    the text between them, both bounded, and no tree.  PROPPATCH names the
@@ -148,7 +161,9 @@ enum
     HTTPD_M_MKCOL,
     HTTPD_M_COPY,
     HTTPD_M_MOVE,
-    HTTPD_M_PROPPATCH
+    HTTPD_M_PROPPATCH,
+    HTTPD_M_LOCK,
+    HTTPD_M_UNLOCK
 };
 
 /* A method may carry a request body. */
@@ -257,7 +272,10 @@ struct HttpConn
     ULONG   chunk_left;
     UBYTE   chunk_n;
     char    chunk_line[24];         /* the size line, as it arrives        */
+    ULONG   lock_secs;              /* Timeout: seconds asked for, 0 if none */
     char    dest[HTTP_URL_MAX];     /* Destination:, still as it arrived   */
+    char    iftoken[2][HTTPD_TOKEN_MAX];    /* the tokens inside If:       */
+    char    unlock_token[HTTPD_TOKEN_MAX];  /* Lock-Token:                 */
 
     /* PUT: the temporary file the body goes to, until the rename */
     BPTR    put;
@@ -274,6 +292,7 @@ struct HttpConn
     UBYTE   xml_attr_n;
     char    xml_attr[HTTPD_QNAME_MAX + HTTPD_NSURI_MAX];
     UBYTE   in_prop;                /* inside <prop>: children are names   */
+    UBYTE   in_owner;               /* inside <owner>: text is the owner   */
     UBYTE   props;
     UBYTE   prop_ok[HTTPD_PROPS_MAX];
     char    prop_name[HTTPD_PROPS_MAX][HTTPD_QNAME_MAX];
@@ -281,6 +300,7 @@ struct HttpConn
     char    nsdecl[HTTPD_NS_MAX][HTTPD_QNAME_MAX + HTTPD_NSURI_MAX];
     UBYTE   have_date;
     struct DateStamp prop_date;
+    char    owner[HTTPD_TEXT_MAX];
 
     /* the answer */
     UBYTE   out[HTTPD_OUT_MAX];
@@ -301,11 +321,11 @@ struct HttpConn
 
 /*
  * Taken from the heap and not declared as an array of HTTPD_CONN_MAX, because
- * a static one is the whole ceiling whether it is used or not: at 4.9 KB a
- * slot that was 78 KB of BSS in every copy of the command, which on a 1 MB
- * machine is most of a percent of the machine reserved for connections nobody
- * asked for.  Allocating it makes CONNECTIONS mean something -- `-m 2` is
- * 10 KB -- and takes the command's own BSS down to the shared scratches.
+ * a static one is the whole ceiling whether it is used or not: at 6.2 KB a
+ * slot that is 99 KB of BSS in every copy of the command, which on a 1 MB
+ * machine is a tenth of the machine reserved for connections nobody asked for.
+ * Allocating it makes CONNECTIONS mean something -- `-m 2` is 12 KB -- and
+ * takes the command's own BSS down to the shared scratches and the locks.
  */
 static HttpConn *httpd_conn;
 
@@ -336,7 +356,27 @@ static char httpd_page[512];
  */
 static char     httpd_walk_src[HTTP_PATH_MAX];
 static char     httpd_walk_dst[HTTP_PATH_MAX];
+static char     httpd_child[HTTP_PATH_MAX];
 static HttpPath httpd_dest;
+
+/*
+ * The lock table.  Static rather than allocated with the connections: it is
+ * 3 KB whatever CONNECTIONS says, because a lock outlives the connection that
+ * took it -- that is the whole point of one.
+ */
+typedef struct HttpLock
+{
+    char  path[HTTP_PATH_MAX];      /* the AmigaOS path it covers          */
+    char  token[HTTPD_TOKEN_MAX];
+    char  owner[HTTPD_TEXT_MAX];
+    ULONG expires;                  /* httpd_now() seconds                 */
+    ULONG timeout;                  /* what was granted, for the reply     */
+    UBYTE depth;                    /* 1 when it covers everything below   */
+    UBYTE used;
+} HttpLock;
+
+static HttpLock httpd_locks[HTTPD_LOCK_MAX];
+static ULONG    httpd_token_seed;
 
 static const char *httpd_root = "";
 static ULONG  httpd_conns   = HTTPD_CONN_DEFAULT;
@@ -995,7 +1035,11 @@ static VOID httpd_reset(HttpConn *c)
     c->chunk_state = CHUNK_OFF;
     c->chunk_left  = 0;
     c->chunk_n     = 0;
+    c->lock_secs   = 0;
     c->dest[0]     = '\0';
+    c->iftoken[0][0] = '\0';
+    c->iftoken[1][0] = '\0';
+    c->unlock_token[0] = '\0';
     c->put_err     = 0;
 
     c->xml_state  = XML_TEXT;
@@ -1004,9 +1048,11 @@ static VOID httpd_reset(HttpConn *c)
     c->xml_text_n = 0;
     c->xml_attr_n = 0;
     c->in_prop    = 0;
+    c->in_owner   = 0;
     c->props      = 0;
     c->nsdecls    = 0;
     c->have_date  = 0;
+    c->owner[0]   = '\0';
 }
 
 /* ------------------------------------------------------------ the volume --- */
@@ -1598,7 +1644,169 @@ static BOOL httpd_parse_rfc1123(const char *text, struct DateStamp *ds)
     return TRUE;
 }
 
+/* --------------------------------------------------------------- locking --- */
 
+/*
+ * Class 2 is not an extra.  Finder asks for a lock before it writes and reads
+ * a `DAV: 1` answer as "this share cannot be written", so it mounts read-only
+ * however many write methods the server answers -- the lock table is what
+ * makes macOS write at all, and stopping two clients writing one file is the
+ * second thing it does rather than the first.
+ *
+ * Exclusive write locks only.  Nothing that mounts a drive asks for a shared
+ * one, and granting an exclusive lock to a client that did is the safe half.
+ */
+
+/* Expiry is lazy, on the next question anybody asks: there is no timer here
+   and a lock nobody asks about costs nothing to leave lying. */
+static VOID httpd_locks_expire(VOID)
+{
+    ULONG now = httpd_now();
+    ULONG i;
+
+    for (i = 0; i < (ULONG)HTTPD_LOCK_MAX; i++)
+    {
+        if (httpd_locks[i].used && now >= httpd_locks[i].expires)
+            httpd_locks[i].used = 0;
+    }
+}
+
+/* The lock covering `path`: its own, or a drawer's above it. */
+static HttpLock *httpd_lock_on(const char *path)
+{
+    ULONG i;
+
+    httpd_locks_expire();
+
+    for (i = 0; i < (ULONG)HTTPD_LOCK_MAX; i++)
+    {
+        HttpLock *l = &httpd_locks[i];
+
+        if (!l->used)
+            continue;
+
+        if (hs_equal(l->path, path))
+            return l;
+
+        if (l->depth != 0 && http_path_within(l->path, path))
+            return l;
+    }
+
+    return NULL;
+}
+
+static HttpLock *httpd_lock_by_token(const char *token)
+{
+    ULONG i;
+
+    if (token == NULL || token[0] == '\0')
+        return NULL;
+
+    httpd_locks_expire();
+
+    for (i = 0; i < (ULONG)HTTPD_LOCK_MAX; i++)
+    {
+        if (httpd_locks[i].used && hs_equal(httpd_locks[i].token, token))
+            return &httpd_locks[i];
+    }
+
+    return NULL;
+}
+
+/* Does this request carry the token for `l`?  No lock is everybody's. */
+static BOOL httpd_holds(const HttpConn *c, const HttpLock *l)
+{
+    if (l == NULL)
+        return TRUE;
+
+    return (hs_equal(c->iftoken[0], l->token) ||
+            hs_equal(c->iftoken[1], l->token)) ? TRUE : FALSE;
+}
+
+/*
+ * The check every write goes through.  FALSE when it has answered with the
+ * 423 that tells a client to take a lock rather than to keep retrying.
+ */
+static BOOL httpd_lock_allows(HttpConn *c, const char *path)
+{
+    if (httpd_holds(c, httpd_lock_on(path)))
+        return TRUE;
+
+    httpd_begin(c, 423);
+    httpd_body_text(c, "text/xml; charset=utf-8",
+                    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                    "<D:error xmlns:D=\"DAV:\">"
+                    "<D:lock-token-submitted/></D:error>\n");
+
+    return FALSE;
+}
+
+/*
+ * "opaquelocktoken:" and eight hex digits.  The seed is the clock at startup,
+ * so a token from a previous run of the server does not unlock a file in this
+ * one -- which is the only thing an easily-guessed token could do here.
+ */
+static VOID httpd_make_token(char *out, ULONG outlen)
+{
+    static const char hex[] = "0123456789abcdef";
+    ULONG used = 0;
+    ULONG value;
+    LONG  shift;
+
+    httpd_token_seed = (httpd_token_seed * 1103515245UL) + 12345UL;
+    value = httpd_token_seed ^ (httpd_now() << 8);
+
+    out[0] = '\0';
+    (VOID)hs_append(out, outlen, &used, "opaquelocktoken:");
+
+    for (shift = 28; shift >= 0; shift -= 4)
+    {
+        char one[2];
+
+        one[0] = hex[(value >> (ULONG)shift) & 0xfUL];
+        one[1] = '\0';
+        (VOID)hs_append(out, outlen, &used, one);
+    }
+}
+
+/*
+ * One <D:activelock>: what LOCK answers with and what PROPFIND reports about
+ * a resource somebody is holding.  Appended rather than returned, so the
+ * caller decides what element it goes inside.
+ */
+static BOOL httpd_activelock(const HttpLock *l, char *out, ULONG outlen,
+                             ULONG *used)
+{
+    BOOL ok;
+
+    ok = hs_append(out, outlen, used,
+                   "<D:activelock><D:locktype><D:write/></D:locktype>"
+                   "<D:lockscope><D:exclusive/></D:lockscope><D:depth>");
+    ok = ok && hs_append(out, outlen, used,
+                         (l->depth != 0) ? "infinity" : "0");
+    ok = ok && hs_append(out, outlen, used, "</D:depth>");
+
+    if (l->owner[0] != '\0')
+    {
+        (VOID)http_xml_escape(l->owner, httpd_text, sizeof(httpd_text));
+        ok = ok && hs_append(out, outlen, used, "<D:owner>");
+        ok = ok && hs_append(out, outlen, used, httpd_text);
+        ok = ok && hs_append(out, outlen, used, "</D:owner>");
+    }
+
+    ok = ok && hs_append(out, outlen, used, "<D:timeout>Second-");
+    ok = ok && hs_append_num(out, outlen, used, l->timeout);
+    ok = ok && hs_append(out, outlen, used,
+                         "</D:timeout><D:locktoken><D:href>");
+    ok = ok && hs_append(out, outlen, used, l->token);
+    ok = ok && hs_append(out, outlen, used,
+                         "</D:href></D:locktoken><D:lockroot><D:href>");
+    ok = ok && hs_append(out, outlen, used, httpd_url_of(l->path));
+    ok = ok && hs_append(out, outlen, used,
+                         "</D:href></D:lockroot></D:activelock>");
+
+    return ok;
+}
 
 /* -------------------------------------------------------------- skimming --- */
 
@@ -1695,6 +1903,11 @@ static VOID httpd_xml_tag(HttpConn *c, BOOL closing, BOOL selfclose)
         {
             c->in_prop = 1;
         }
+        else if (hs_equal(local, "owner"))
+        {
+            c->in_owner  = 1;
+            c->owner[0]  = '\0';
+        }
         else if (c->in_prop)
         {
             httpd_note_property(c);
@@ -1707,6 +1920,8 @@ static VOID httpd_xml_tag(HttpConn *c, BOOL closing, BOOL selfclose)
     {
         if (hs_equal(local, "prop"))
             c->in_prop = 0;
+        else if (hs_equal(local, "owner"))
+            c->in_owner = 0;
         else if (c->in_prop)
             httpd_set_property(c);
     }
@@ -1734,6 +1949,19 @@ static VOID httpd_xml_feed(HttpConn *c, const UBYTE *data, LONG len)
                     c->xml_name_n = 0;
                     c->xml_close  = 0;
                     c->xml_attr_n = 0;
+                }
+                else if (c->in_owner)
+                {
+                    ULONG n = hs_len(c->owner);
+
+                    /* Markup inside <owner> contributes nothing and its text
+                       does, which is what an <owner> holding an <href> needs:
+                       the address, and not the element around it. */
+                    if (n + 1UL < sizeof(c->owner) && ch >= 0x20 && ch < 0x7f)
+                    {
+                        c->owner[n]     = (char)ch;
+                        c->owner[n + 1] = '\0';
+                    }
                 }
                 else if (c->xml_text_n + 1U < sizeof(c->xml_text))
                 {
@@ -1881,11 +2109,19 @@ static const char *httpd_href(const HttpPath *p, const char *child, BOOL dir)
     return httpd_escape;
 }
 
-/* One <D:response> for a file or a collection, into the shared scratch. */
+/*
+ * One <D:response> for a file or a collection, into the shared scratch.
+ *
+ * `path` is the AmigaOS path, which is here only so the lock can be looked
+ * up: a client that has taken a lock reads lockdiscovery to check it is still
+ * held, and one that has not reads supportedlock to decide whether to ask.
+ */
 static ULONG httpd_propfind_entry(const char *href, const char *name,
+                                  const char *path,
                                   BOOL is_dir, ULONG size,
                                   const struct DateStamp *date)
 {
+    const HttpLock *l = (path != NULL) ? httpd_lock_on(path) : NULL;
     char  modified[40];
     char  created[32];
     ULONG used = 0;
@@ -1933,6 +2169,27 @@ static ULONG httpd_propfind_entry(const char *href, const char *name,
                              http_content_type(name));
         ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
                              "</D:getcontenttype>");
+    }
+
+    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                         "<D:supportedlock><D:lockentry>"
+                         "<D:lockscope><D:exclusive/></D:lockscope>"
+                         "<D:locktype><D:write/></D:locktype>"
+                         "</D:lockentry></D:supportedlock>");
+
+    if (l != NULL)
+    {
+        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                             "<D:lockdiscovery>");
+        ok = ok && httpd_activelock(l, httpd_scratch, sizeof(httpd_scratch),
+                                    &used);
+        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                             "</D:lockdiscovery>");
+    }
+    else
+    {
+        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                             "<D:lockdiscovery/>");
     }
 
     ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
@@ -2106,7 +2363,8 @@ static BOOL httpd_produce(HttpConn *c)
 
                             len = httpd_propfind_entry(
                                       httpd_href(&c->path, NULL, is_dir),
-                                      name, is_dir, size, &date);
+                                      name, c->path.path, is_dir, size,
+                                      &date);
                         }
                         else
                         {
@@ -2136,11 +2394,22 @@ static BOOL httpd_produce(HttpConn *c)
                         is_dir = (c->fib->fib_DirEntryType > 0) ? TRUE : FALSE;
 
                         if (propfind)
+                        {
+                            const char *full = NULL;
+
+                            hs_copy(httpd_child, sizeof(httpd_child),
+                                    c->path.path);
+
+                            if (http_path_join(httpd_child,
+                                                sizeof(httpd_child), name))
+                                full = httpd_child;
+
                             len = httpd_propfind_entry(
                                       httpd_href(&c->path, name, is_dir),
-                                      name, is_dir,
+                                      name, full, is_dir,
                                       (ULONG)c->fib->fib_Size,
                                       &c->fib->fib_Date);
+                        }
                         else
                             len = httpd_index_entry(
                                       httpd_href(&c->path, name, is_dir),
@@ -2199,11 +2468,15 @@ static VOID httpd_do_options(HttpConn *c)
     httpd_begin(c, 200);
 
     /*
-     * DAV: 1 and not 1,2.  Class 2 is locking, and this server has none yet;
-     * saying 2 without LOCK is what makes a client offer to write and then
-     * fail at the first attempt rather than mount read-only cleanly.
+     * DAV: 1,2.  Class 2 is locking, and the reason it is here rather than
+     * left out is macOS: Finder mounts a class 1 share READ-ONLY whatever
+     * else the server answers, because it asks for a lock before it writes
+     * and reads the absence of the class as "this share cannot be written".
+     * The 2 is therefore not a claim about how much of RFC 4918 is
+     * implemented -- it is the thing that decides whether the drive is
+     * writable, so LOCK has to exist for it to be true.
      */
-    httpd_header(c, "DAV", "1");
+    httpd_header(c, "DAV", "1,2");
     httpd_allow_header(c);
     /* The Windows redirector looks for this before it will treat an http://
        URL as a WebDAV share at all rather than as a web page. */
@@ -2279,7 +2552,7 @@ static VOID httpd_do_propfind(HttpConn *c)
         return;
 
     httpd_begin(c, 207);
-    httpd_header(c, "DAV", "1");
+    httpd_header(c, "DAV", "1,2");
     httpd_header(c, "Content-Type", "text/xml; charset=utf-8");
 
     if (c->head_only)
@@ -2460,8 +2733,8 @@ static VOID httpd_do_get(HttpConn *c)
 
 /*
  * What every write goes through first.  The document root itself is not a
- * resource a client may replace or remove; the lock check joins it here when
- * there is a lock table to ask.
+ * resource a client may replace or remove, and a lock somebody else holds
+ * stops the request here rather than half way through it.
  */
 static BOOL httpd_may_write(HttpConn *c)
 {
@@ -2471,7 +2744,7 @@ static BOOL httpd_may_write(HttpConn *c)
         return FALSE;
     }
 
-    return TRUE;
+    return httpd_lock_allows(c, c->path.path);
 }
 
 /*
@@ -2773,7 +3046,7 @@ static BOOL httpd_resolve_dest(HttpConn *c)
         return FALSE;
     }
 
-    return TRUE;
+    return httpd_lock_allows(c, httpd_dest.path);
 }
 
 static VOID httpd_copy_or_move(HttpConn *c, BOOL moving)
@@ -3027,6 +3300,152 @@ static VOID httpd_do_proppatch(HttpConn *c)
     httpd_body_text(c, "text/xml; charset=utf-8", httpd_scratch);
 }
 
+static VOID httpd_do_lock(HttpConn *c)
+{
+    HttpLock *exact = NULL;
+    HttpLock *held;
+    HttpLock *l;
+    ULONG     secs;
+    ULONG     used = 0;
+    ULONG     i;
+    BOOL      created;
+    BOOL      ok;
+
+    if (c->path.segments == 0)
+    {
+        httpd_error(c, 403, "the served drawer itself is not lockable");
+        return;
+    }
+
+    secs = (c->lock_secs > 0UL) ? c->lock_secs : HTTPD_LOCK_DEF;
+    if (secs > HTTPD_LOCK_CAP)
+        secs = HTTPD_LOCK_CAP;
+
+    /* A LOCK with no body is a refresh of the token in If:, RFC 4918 9.10.2 --
+       and it is what a client sends every few minutes to keep a long copy
+       alive, so answering it wrong ends the copy. */
+    if (!c->had_body)
+    {
+        l = httpd_lock_by_token(c->iftoken[0]);
+        if (l == NULL)
+            l = httpd_lock_by_token(c->iftoken[1]);
+
+        if (l == NULL)
+        {
+            httpd_error(c, 412, "that is not a lock this server is holding");
+            return;
+        }
+
+        l->timeout = secs;
+        l->expires = httpd_now() + secs;
+    }
+    else
+    {
+        held = httpd_lock_on(c->path.path);
+
+        if (held != NULL && !httpd_holds(c, held))
+        {
+            httpd_error(c, 423, "somebody else is holding that");
+            return;
+        }
+
+        /* Only a lock on this exact path is refreshed in place.  One
+           inherited from a drawer above belongs to that drawer, and writing
+           this path into it would move it. */
+        for (i = 0; i < (ULONG)HTTPD_LOCK_MAX; i++)
+        {
+            if (httpd_locks[i].used &&
+                hs_equal(httpd_locks[i].path, c->path.path))
+            {
+                exact = &httpd_locks[i];
+                break;
+            }
+        }
+
+        l = exact;
+
+        if (l == NULL)
+        {
+            for (i = 0; i < (ULONG)HTTPD_LOCK_MAX; i++)
+            {
+                if (!httpd_locks[i].used)
+                {
+                    l = &httpd_locks[i];
+                    break;
+                }
+            }
+
+            if (l == NULL)
+            {
+                httpd_error(c, 503,
+                            "this server is holding as many locks as it can");
+                return;
+            }
+
+            httpd_make_token(l->token, sizeof(l->token));
+        }
+
+        l->used    = 1;
+        l->depth   = (c->depth != 0) ? 1 : 0;
+        l->timeout = secs;
+        l->expires = httpd_now() + secs;
+        hs_copy(l->path, sizeof(l->path), c->path.path);
+        hs_copy(l->owner, sizeof(l->owner), c->owner);
+    }
+
+    /*
+     * A LOCK on a name that is not there yet is how Finder starts an upload,
+     * and RFC 4918 7.3 answers it 201 with a lock and no resource: the PUT
+     * that follows carries the token and creates the file.  Nothing is
+     * created here, so a lock the client abandons leaves no empty file.
+     */
+    created = (httpd_kind(c->path.path) < 0) ? TRUE : FALSE;
+
+    ok = hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                   "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                   "<D:prop xmlns:D=\"DAV:\"><D:lockdiscovery>");
+    ok = ok && httpd_activelock(l, httpd_scratch, sizeof(httpd_scratch),
+                                &used);
+    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                         "</D:lockdiscovery></D:prop>\n");
+
+    if (!ok)
+    {
+        httpd_error(c, 500, "that answer would not fit");
+        return;
+    }
+
+    httpd_begin(c, created ? 201 : 200);
+    httpd_out(c, "Lock-Token: <");
+    httpd_out(c, l->token);
+    httpd_out(c, ">\r\n");
+    httpd_body_text(c, "text/xml; charset=utf-8", httpd_scratch);
+}
+
+static VOID httpd_do_unlock(HttpConn *c)
+{
+    HttpLock *l = httpd_lock_by_token(c->unlock_token);
+
+    if (l == NULL)
+    {
+        httpd_error(c, 409, "that is not a lock this server is holding");
+        return;
+    }
+
+    /* RFC 4918 9.11.1: the token has to name a lock that covers the address
+       the request was made against, or one client can unlock another's. */
+    if (!hs_equal(l->path, c->path.path) &&
+        !(l->depth != 0 && http_path_within(l->path, c->path.path)))
+    {
+        httpd_error(c, 409, "that lock is not on that address");
+        return;
+    }
+
+    l->used = 0;
+
+    httpd_empty(c, 204);
+}
+
 /*
  * The table.  A ladder of strcmp would have been shorter and would have had
  * to be unpicked the moment PUT landed; this is the shape, and the Allow
@@ -3061,6 +3480,11 @@ static const HttpMethod httpd_methods[] =
     { "PROPPATCH", HTTPD_M_PROPPATCH, HTTPD_F_BODY | HTTPD_F_WRITE,
                                                    httpd_do_proppatch,
       httpd_sink_xml, NULL },
+    { "LOCK",     HTTPD_M_LOCK,     HTTPD_F_BODY | HTTPD_F_WRITE,
+                                                   httpd_do_lock,
+      httpd_sink_xml, NULL },
+    { "UNLOCK",   HTTPD_M_UNLOCK,   HTTPD_F_WRITE, httpd_do_unlock,  NULL,
+      NULL },
     { NULL,       HTTPD_M_UNKNOWN,  0,             NULL,             NULL,
       NULL }
 };
@@ -3152,6 +3576,77 @@ static BOOL httpd_parse_range(HttpConn *c, const char *value)
     c->range_to   = to;
 
     return TRUE;
+}
+
+/*
+ * The tokens inside an If:.  The header is a small language -- tagged lists,
+ * entity tags, Not -- and none of it applies here except the state tokens:
+ * this server has no ETags to compare and nothing to condition a write on but
+ * a lock.  Two tokens is as many as a request needs, which is a MOVE with
+ * both ends locked.
+ */
+static VOID httpd_parse_if(HttpConn *c, const char *value)
+{
+    ULONG n = 0;
+
+    while (*value != '\0' && n < 2UL)
+    {
+        if (*value == '<')
+        {
+            const char *start = ++value;
+            ULONG       len   = 0;
+
+            while (*value != '\0' && *value != '>')
+            {
+                value++;
+                len++;
+            }
+
+            /* A tagged list names a URL the same way, so only the ones that
+               look like a token are taken. */
+            if (hs_nicmp(start, "opaquelocktoken:", 16) == 0 &&
+                len + 1UL < (ULONG)HTTPD_TOKEN_MAX)
+            {
+                ULONG k;
+
+                for (k = 0; k < len; k++)
+                    c->iftoken[n][k] = start[k];
+                c->iftoken[n][len] = '\0';
+                n++;
+            }
+
+            if (*value == '>')
+                value++;
+        }
+        else
+        {
+            value++;
+        }
+    }
+}
+
+/* "Second-3600", or "Infinite".  What is granted is capped here whatever was
+   asked for, and the answer says what it was. */
+static ULONG httpd_parse_timeout(const char *value)
+{
+    while (*value == ' ')
+        value++;
+
+    if (hs_nicmp(value, "infinite", 8) == 0)
+        return HTTPD_LOCK_CAP;
+
+    if (hs_nicmp(value, "second-", 7) == 0)
+    {
+        ULONG secs = 0;
+
+        value += 7;
+        while (*value >= '0' && *value <= '9')
+            secs = (secs * 10UL) + (ULONG)(*value++ - '0');
+
+        return secs;
+    }
+
+    return 0;
 }
 
 /*
@@ -3327,6 +3822,34 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         {
             c->overwrite = (httpd_value[0] == 'F' || httpd_value[0] == 'f')
                                ? 0 : 1;
+        }
+        else if (hs_equal(name, "If"))
+        {
+            httpd_parse_if(c, httpd_value);
+        }
+        else if (hs_equal(name, "Lock-Token"))
+        {
+            const char *p = httpd_value;
+
+            while (*p != '\0' && *p != '<')
+                p++;
+            if (*p == '<')
+                p++;
+
+            hs_copy(c->unlock_token, sizeof(c->unlock_token), p);
+
+            {
+                ULONG n2 = hs_len(c->unlock_token);
+
+                while (n2 > 0UL && c->unlock_token[n2 - 1] != '>')
+                    n2--;
+                if (n2 > 0UL)
+                    c->unlock_token[n2 - 1] = '\0';
+            }
+        }
+        else if (hs_equal(name, "Timeout"))
+        {
+            c->lock_secs = httpd_parse_timeout(httpd_value);
         }
     }
 
@@ -4258,6 +4781,10 @@ int main(int argc, char **argv)
         FreeArgs(rda);
         return RETURN_FAIL;
     }
+
+    /* The lock tokens have to differ between runs of the server, or a token a
+       client kept from the last one unlocks a file in this one. */
+    httpd_token_seed = httpd_now();
 
     lsock = httpd_listen(&address, port);
     if (lsock < 0)
