@@ -1,0 +1,241 @@
+#!/usr/bin/env bash
+#
+# The other half of the performance gate: throughput on a link that loses
+# packets.
+#
+#   tests/perf/run-lossgate.sh -H user@host -A addr [-l PERCENT] [-r REPS]
+#                              [-b BUILDDIR] [-T TAG] [-B] [-f BASELINE] [-h]
+#
+# WHY
+#
+#   Our lab rig measures zero retransmissions in every run.  A change to
+#   acknowledgement or retransmission behaviour is therefore free on it, and
+#   0.16.6 shipped two of them: the read direction fell 18% on real hardware
+#   while every arm we ran said the opposite.  Loss is what makes that
+#   behaviour cost something, and netem on the peer is how it gets induced.
+#
+#   READ AND WRITE ARE REPORTED SEPARATELY AND MUST STAY THAT WAY.  Across
+#   that regression the write direction moved slightly UP while the read
+#   direction fell by a fifth; one combined figure would have shown nothing.
+#   Note also that FitzBench's write number is buffer acceptance rather than
+#   wire throughput -- it is here to show that a change did not move it, not
+#   as a rate.
+#
+# WHAT IT DOES TO THE PEER
+#
+#   A `prio' qdisc with netem on its third band, and a u32 filter that puts
+#   ONLY frames addressed to the guest into that band.  Everything else the
+#   peer sends is untouched.  It is still a change to the peer's root qdisc,
+#   so the peer must be idle -- the script refuses to start if anything else
+#   is serving on it.
+#
+#   `tc' needs CAP_NET_ADMIN.  Copy it and give the copy the capability rather
+#   than modifying anything packaged:
+#
+#       cp /usr/sbin/tc ~/tc-cap && sudo /usr/sbin/setcap cap_net_admin+ep ~/tc-cap
+#
+#   AMINETXDUO_PEER_TC names it; the default is ~/tc-cap.
+#
+# WHAT IT CANNOT TELL YOU
+#
+#   The emulated card is an A2065 and the guest is not the machine a user has.
+#   Absolute rates here are not a prediction of anything.  What carries is the
+#   direction and the proportion of a change between two builds measured back
+#   to back on this same rig.
+#
+# SPDX-License-Identifier: MIT
+
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+cd "$ROOT"
+
+PEER="${AMINETXDUO_FITZ_PEER:-}"
+PEER_ADDR="${AMINETXDUO_FITZ_PEER_ADDR:-}"
+PEER_IF="${AMINETXDUO_PEER_IFACE:-ens18}"
+PEER_TC="${AMINETXDUO_PEER_TC:-\$HOME/tc-cap}"
+LOSS=1
+REPS=3
+BUILD="${AMINETXDUO_BUILD:-build/cm}"
+TAG="${AMINETXDUO_RUN_TAG:-lossgate}"
+RECORD=0
+BASELINE="$ROOT/tests/perf/lossgate-baseline.txt"
+KB=512
+
+usage() {
+    cat <<'EOF'
+usage: tests/perf/run-lossgate.sh -H user@host -A addr [-l PERCENT] [-r REPS]
+                                  [-b BUILDDIR] [-k KB] [-T TAG] [-B] [-f FILE]
+
+  -H  the peer, over ssh.  A THIRD machine: not this one and not the host the
+      emulator runs on.
+  -A  the peer's address as the guest sees it
+  -l  packet loss percent applied to peer -> guest frames (default 1)
+  -r  repetitions; the median is compared (default 3)
+  -k  transfer size in KB (default 512)
+  -B  record the current run as the new baseline
+  -f  baseline file (default tests/perf/lossgate-baseline.txt)
+EOF
+}
+
+while getopts "H:A:l:r:b:k:T:Bf:h" opt; do
+    case "$opt" in
+        H) PEER="$OPTARG" ;;
+        A) PEER_ADDR="$OPTARG" ;;
+        l) LOSS="$OPTARG" ;;
+        r) REPS="$OPTARG" ;;
+        b) BUILD="$OPTARG" ;;
+        k) KB="$OPTARG" ;;
+        T) TAG="$OPTARG" ;;
+        B) RECORD=1 ;;
+        f) BASELINE="$OPTARG" ;;
+        h) usage; exit 0 ;;
+        *) usage >&2; exit 2 ;;
+    esac
+done
+
+[ -n "$PEER" ] && [ -n "$PEER_ADDR" ] || { usage >&2; exit 2; }
+
+# The peer's qdisc is machine-wide, so two of these running at once measure
+# each other.  Refuse rather than produce a number nobody can trust.
+BUSY=$(ssh "$PEER" "ps -eo args= | grep '[f]itz-serve' | wc -l" 2>/dev/null || echo 0)
+[ "$BUSY" = "0" ] || {
+    echo "the peer already has $BUSY fitz-serve process(es) running." >&2
+    echo "Something else is using it; this changes its root qdisc, so wait." >&2
+    exit 2
+}
+
+GUEST=""
+
+# ------------------------------------------------------------------ netem --
+
+peer_tc() { ssh "$PEER" "$PEER_TC $*"; }
+
+netem_off() {
+    peer_tc "qdisc del dev $PEER_IF root" >/dev/null 2>&1 || true
+}
+
+netem_on() {
+    local guest="$1"
+    netem_off
+    peer_tc "qdisc add dev $PEER_IF root handle 1: prio bands 3"
+    peer_tc "qdisc add dev $PEER_IF parent 1:3 handle 30: netem loss ${LOSS}%"
+    peer_tc "filter add dev $PEER_IF protocol ip parent 1: prio 1 u32 \
+             match ip dst $guest/32 flowid 1:3"
+    echo "==> peer $PEER_IF: ${LOSS}% loss towards $guest, everything else clean"
+    peer_tc "-s qdisc show dev $PEER_IF" | sed 's/^/    /'
+}
+
+trap netem_off EXIT INT TERM HUP
+
+# --------------------------------------------------------------------- run --
+
+OUT="$ROOT/build/lossgate-$TAG"
+rm -rf "$OUT"; mkdir -p "$OUT"
+
+# The guest's address is not knowable before it takes a DHCP lease, and the
+# filter needs it.  One warm-up arm with no loss gets it, and doubles as the
+# control: a rig that cannot move bytes cleanly is not going to say anything
+# useful about a lossy one.
+echo "==> warm-up arm, no loss, to learn the guest address"
+AMINETXDUO_FITZ_PEER="$PEER" AMINETXDUO_FITZ_PEER_ADDR="$PEER_ADDR" \
+AMINETXDUO_RUN_TAG="$TAG-warm" \
+    tests/perf/run-fitzbench.sh -H "$PEER" -A "$PEER_ADDR" -b "$BUILD" \
+        -k "$KB" -r 1 -T "$TAG-warm" > "$OUT/warm.txt" 2>&1 || true
+
+GUEST=$(sed -n 's/.*address \([0-9][0-9.]*\).*/\1/p' "$OUT/warm.txt" | head -1)
+[ -n "$GUEST" ] || GUEST=$(grep -oE '192\.168\.[0-9]+\.[0-9]+' "$OUT/warm.txt" \
+                           | grep -v "^$PEER_ADDR$" | head -1)
+[ -n "$GUEST" ] || {
+    echo "could not learn the guest's address from $OUT/warm.txt" >&2
+    echo "the warm-up arm probably never got a DHCP lease -- read it" >&2
+    exit 1; }
+echo "==> guest is $GUEST"
+
+netem_on "$GUEST"
+
+: > "$OUT/samples.txt"
+for rep in $(seq 1 "$REPS"); do
+    echo "==> lossy arm $rep/$REPS"
+    AMINETXDUO_FITZ_PEER="$PEER" AMINETXDUO_FITZ_PEER_ADDR="$PEER_ADDR" \
+    AMINETXDUO_RUN_TAG="$TAG-$rep" \
+        tests/perf/run-fitzbench.sh -H "$PEER" -A "$PEER_ADDR" -b "$BUILD" \
+            -k "$KB" -r 1 -T "$TAG-$rep" > "$OUT/arm-$rep.txt" 2>&1 || true
+
+    # Only the FITZ: arm, not the RAM: control that follows it in the same
+    # boot -- and the read figure first, because the write one is buffer
+    # acceptance.
+    awk -v rep="$rep" '
+        /FitzBench FITZ:/ { infitz = 1 }
+        /FitzBench RAM:/  { infitz = 0 }
+        infitz && /RESULT read kbs_mean=/  { sub(/.*kbs_mean=/, ""); print rep, "read_kbs",  $1 }
+        infitz && /RESULT write kbs_mean=/ { sub(/.*kbs_mean=/, ""); print rep, "write_kbs", $1 }
+        /retransmit/ { for (i = 1; i <= NF; i++)
+                           if ($i ~ /^retransmit/) print rep, "retransmits", $(i+1) }
+    ' "$OUT/arm-$rep.txt" >> "$OUT/samples.txt"
+done
+
+netem_off
+
+[ -s "$OUT/samples.txt" ] || { echo "FAIL: no arm produced a RESULT line" >&2; exit 1; }
+
+awk '{ v[$2] = v[$2] " " $3 }
+     END {
+        for (k in v) {
+            n = split(v[k], a, " ")
+            for (i = 1; i <= n; i++) for (j = i + 1; j <= n; j++)
+                if (a[j] + 0 < a[i] + 0) { t = a[i]; a[i] = a[j]; a[j] = t }
+            med = (n % 2) ? a[(n + 1) / 2] : (a[n / 2] + a[n / 2 + 1]) / 2
+            spread = (med + 0 > 0) ? (a[n] - a[1]) * 100.0 / med : 0
+            printf "%s %.1f %.1f %d\n", k, med, spread, n
+        }
+     }' "$OUT/samples.txt" | sort > "$OUT/median.txt"
+
+if [ "$RECORD" = "1" ]; then
+    {
+        echo "# tests/perf/run-lossgate.sh baseline."
+        echo "# NAME  DIRECTION  VALUE  TOLERANCE_PERCENT"
+        echo "# Recorded with ${LOSS}% peer-to-guest loss, $KB KB, $REPS reps."
+        echo "# Read and write are separate on purpose: the 0.16.6 regression"
+        echo "# moved them in opposite directions."
+        while read -r name med spread _n; do
+            tol=$(awk -v s="$spread" 'BEGIN { t = s * 2; if (t < 5) t = 5; printf "%.1f", t }')
+            dir=higher
+            [ "$name" != "retransmits" ] || dir=lower
+            printf '%-14s %-7s %10s %6s\n' "$name" "$dir" "$med" "$tol"
+        done < "$OUT/median.txt"
+    } > "$BASELINE"
+    echo "==> baseline written to $BASELINE"
+    cat "$BASELINE"
+    exit 0
+fi
+
+[ -f "$BASELINE" ] || { echo "no baseline at $BASELINE -- record one with -B" >&2; exit 2; }
+
+echo
+printf '%-14s %10s %10s %9s %8s\n' METRIC BASELINE NOW CHANGE VERDICT
+RC=0
+while read -r name dir base tol; do
+    case "$name" in '#'*|'') continue ;; esac
+    now=$(awk -v n="$name" '$1 == n { print $2 }' "$OUT/median.txt")
+    [ -n "$now" ] || { printf '%-14s %10s %10s %9s %8s\n' "$name" "$base" - - MISSING
+                       RC=1; continue; }
+    read -r pct verdict <<EOF
+$(awk -v b="$base" -v n="$now" -v d="$dir" -v t="$tol" 'BEGIN {
+        if (b + 0 == 0) { print "0.0 SKIP"; exit }
+        p = (n - b) * 100.0 / b
+        bad = (d == "higher") ? (p < -t) : (p > t)
+        printf "%+.1f %s\n", p, bad ? "FAIL" : "ok"
+     }')
+EOF
+    [ "$verdict" != "FAIL" ] || RC=1
+    printf '%-14s %10s %10s %8s%% %8s\n' "$name" "$base" "$now" "$pct" "$verdict"
+done < "$BASELINE"
+
+echo
+awk '{ printf "    %-14s median %8s  spread %s%% over %s rep(s)\n", $1, $2, $3, $4 }' \
+    "$OUT/median.txt"
+
+echo
+[ "$RC" = "0" ] && echo "==> PASS" || echo "==> FAIL"
+exit "$RC"
