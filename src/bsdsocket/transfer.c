@@ -257,6 +257,36 @@ UINT bsd_send_once(VOID *arg, ULONG wait)
     return nx_tcp_socket_send(a->tcp, a->packet, wait);
 }
 
+/*
+ * How much of the packet nx_tcp_socket_send() took before it failed.
+ *
+ * It is not all-or-nothing. _nx_tcp_socket_send_internal() segments the packet
+ * itself, to min(peer window, congestion window, MSS), in a loop: each pass
+ * copies that many bytes into a segment, queues it on the socket's transmit
+ * list and hands it to _nx_ip_packet_send() -- it is on the wire -- and then
+ * TRIMS those bytes off the caller's packet before looking at the window
+ * again. When a later pass finds no room and may not wait, it returns
+ * NX_WINDOW_OVERFLOW or NX_TX_QUEUE_DEPTH with the earlier segments long gone.
+ *
+ * So the packet that comes back holds only what did not go, and `filled` less
+ * that is what the peer has already seen. Releasing the packet and reporting
+ * only the chunks that completed tells the caller to send those bytes a second
+ * time, which is a duplicate in the middle of the stream -- and a stream is
+ * exactly the thing that cannot show it.
+ *
+ * Safe on every error return in that function: none of them releases the
+ * caller's packet.
+ */
+static LONG bsd_send_consumed(NX_PACKET *packet, LONG filled)
+{
+    LONG left = (LONG)bsd_packet_len(packet);
+
+    if (left < 0 || left >= filled)
+        return 0;
+
+    return filled - left;
+}
+
 static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags)
 {
@@ -341,6 +371,8 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                                      &aborted);
             if (aborted)
             {
+                /* A slice before the break may have sent part of it. */
+                sent += bsd_send_consumed(packet, filled);
                 nx_packet_release(packet);
                 if (sent > 0)
                     return sent;        /* short write, as BSD allows */
@@ -349,6 +381,7 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
         }
         if (status != NX_SUCCESS)
         {
+            sent += bsd_send_consumed(packet, filled);
             nx_packet_release(packet);
 
             if (sent > 0)

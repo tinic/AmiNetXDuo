@@ -22,8 +22,11 @@
  *   connect                connect(); EINPROGRESS is the expected answer
  *   listen                 bind localport, listen(4)
  *   accept                 accept(); the accepted socket becomes the subject
- *   send N [= AGAIN]       send N bytes of a known pattern; AGAIN requires
- *                          the send to be refused, as a closed window must
+ *   send N [= WHAT]        send N bytes of a known pattern.  AGAIN requires
+ *                          the send to be refused, as a closed window must;
+ *                          SHORT allows any part of it to be taken
+ *   wirebytes              the distinct sequence space the stack has sent must
+ *                          equal what every send() in the case reported taking
  *   oob N                  send one byte, value N, with MSG_OOB
  *   recv MAX = WHAT        recv(); WHAT is a byte count, EOF, or AGAIN
  *   readable 0|1           WaitSelect() with a zero timeout, read set
@@ -666,6 +669,12 @@ typedef struct Case
     ULONG   t_last;             /* E-Clock of the previous event */
     ULONG   fails;
     ULONG   line;
+
+    /* What `wirebytes` compares: what send() said it took, against how far
+       into our own sequence space anything ever reached. */
+    ULONG   accepted;
+    ULONG   wire_end;           /* highest seq + len seen, absolute */
+    BOOL    wire_seen;
 } Case;
 
 static Case cs;
@@ -708,6 +717,32 @@ static VOID arp_reply(const UBYTE *req)
  * any script and happens whenever the stack has to resolve the peer.
  */
 static ULONG n_background;      /* frames dropped by the filter in pump() */
+
+/*
+ * Note a data segment against the case's sequence space.
+ *
+ * A HIGH-WATER MARK, not a sum: a retransmission carries bytes the peer has
+ * already been sent, and counting it twice would make every case with one in
+ * it look like the fault this measures.  What is left is the distinct sequence
+ * space the stack has committed to -- the number a capture is summed for.
+ *
+ * Called from pump(), so it sees every frame including the ones a `tx`
+ * directive is about to consume and the ones nothing ever asks for.
+ */
+static VOID wire_note(const Seg *s)
+{
+    ULONG end;
+
+    if (!s->is_tcp || s->dlen == 0 || s->dst_ip != PEER_IP)
+        return;
+
+    end = s->seq + s->dlen;
+    if (!cs.wire_seen || (LONG)(end - cs.wire_end) > 0)
+    {
+        cs.wire_end  = end;
+        cs.wire_seen = TRUE;
+    }
+}
 
 static VOID pump(VOID)
 {
@@ -760,6 +795,7 @@ static VOID pump(VOID)
         }
 
         (VOID)decode(&pend[pend_head], scratch, len, stamp);
+        wire_note(&pend[pend_head]);
         pend_head = (UWORD)((pend_head + 1) % PEND_MAX);
         pend_count++;
     }
@@ -1400,20 +1436,28 @@ static VOID do_send(const char *args, const char *raw)
     LONG  want;
     LONG  rc;
     ULONG i;
-    BOOL  want_again = FALSE;
+    BOOL  want_again  = FALSE;
+    BOOL  allow_short = FALSE;
 
     args = token(args, tok, sizeof(tok));
     want = to_num(tok);
     if (want > (LONG)sizeof(payload))
         want = (LONG)sizeof(payload);
 
-    /* `send N = AGAIN` -- the send is expected to be refused, which is what a
-       non-blocking socket must do against a closed window. */
+    /*
+     * `send N = AGAIN` -- the send is expected to be refused, which is what a
+     * non-blocking socket must do against a closed window.
+     *
+     * `send N = SHORT` -- the send may take any part of it, including none.
+     * How much is not the assertion; `wirebytes` is, and it needs a directive
+     * that does not decide the answer in advance.
+     */
     args = token(args, tok, sizeof(tok));
     if (tok[0] == '=')
     {
         (VOID)token(args, tok, sizeof(tok));
-        want_again = streq(tok, "AGAIN");
+        want_again  = streq(tok, "AGAIN");
+        allow_short = streq(tok, "SHORT");
     }
 
     for (i = 0; i < (ULONG)want; i++)
@@ -1421,6 +1465,29 @@ static VOID do_send(const char *args, const char *raw)
 
     cs.t_last = tap_eclock_now();
     rc = s_send(cs.sock, payload, want, 0);
+
+    if (rc > 0)
+        cs.accepted += (ULONG)rc;
+
+    if (allow_short)
+    {
+        if (rc < 0 && s_errno() != E_WOULDBLOCK)
+        {
+            char  why[64];
+            char *w = why;
+            const char *t = "send() failed, errno ";
+
+            while (*t) *w++ = *t++;
+            fmt_num(&w, (ULONG)s_errno(), 10, 0, TRUE);
+            *w = '\0';
+            fail(raw, why);
+            return;
+        }
+
+        n_pass++;
+        say("  ok   %s   [accepted %u]", raw, (rc > 0) ? (ULONG)rc : 0UL);
+        return;
+    }
 
     if (want_again)
     {
@@ -1471,6 +1538,7 @@ static VOID do_oob(const char *args, const char *raw)
         fail(raw, "send(MSG_OOB) did not send one byte");
         return;
     }
+    cs.accepted += 1;
     pass(raw);
 }
 
@@ -1740,6 +1808,52 @@ static VOID do_txcount(const char *args, const char *raw)
     say("  ok   %s   [%u frame(s)]", raw, n);
 }
 
+/*
+ * `wirebytes` -- what left must equal what send() said it took.
+ *
+ * The one invariant a stream cannot state any other way.  A transfer that
+ * merely completes proves nothing: duplicated bytes inside a stream still
+ * arrive as a plausible file, and the 512 KB the fault was found on differed
+ * from its source by 3888 bytes without ever failing to transfer.  So the
+ * assertion is arithmetic on both sides -- the sum of the send() return values
+ * against the distinct sequence space the stack committed to -- which is the
+ * same sum a capture is put through, done here with no capture at all.
+ */
+static VOID do_wirebytes(const char *raw)
+{
+    ULONG wire;
+    char  why[110];
+    char *w = why;
+    const char *t;
+
+    pump();
+
+    if (!cs.u_isn_known)
+    {
+        fail(raw, "no initial sequence number learned yet");
+        return;
+    }
+
+    /* Data starts one past the SYN. */
+    wire = cs.wire_seen ? (cs.wire_end - cs.u_isn - 1UL) : 0UL;
+
+    if (wire != cs.accepted)
+    {
+        t = "wire bytes "; while (*t) *w++ = *t++;
+        fmt_num(&w, wire, 10, 0, FALSE);
+        t = ", send() accepted "; while (*t) *w++ = *t++;
+        fmt_num(&w, cs.accepted, 10, 0, FALSE);
+        t = " -- difference "; while (*t) *w++ = *t++;
+        fmt_num(&w, (ULONG)((LONG)wire - (LONG)cs.accepted), 10, 0, TRUE);
+        *w = '\0';
+        fail(raw, why);
+        return;
+    }
+
+    n_pass++;
+    say("  ok   %s   [%u byte(s), both sides]", raw, wire);
+}
+
 static VOID do_idle(const char *args, const char *raw)
 {
     char  tok[24];
@@ -1901,6 +2015,7 @@ static VOID run_line(char *line)
     else if (streq(verb, "tx"))       do_tx(args, raw);
     else if (streq(verb, "notx"))     do_notx(args, raw);
     else if (streq(verb, "txcount")) do_txcount(args, raw);
+    else if (streq(verb, "wirebytes")) do_wirebytes(raw);
     else if (streq(verb, "rx"))       do_rx(args, raw);
     else
         say("!! unknown directive: %s", raw);

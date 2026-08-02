@@ -186,6 +186,44 @@ send 100 = AGAIN
 notx 300
 tx A seq=101 ack=1 len=1 within=6000
 
+# BYTES ON THE WIRE MUST EQUAL BYTES send() ACCEPTED.
+#
+# nx_tcp_socket_send() is not all-or-nothing.  It segments to the peer's window
+# inside its own loop, queues each segment as it goes, and keeps the ones it
+# already sent when a later one will not fit -- so a window that ends part-way
+# through a segment is the one shape where what left and what send() admits to
+# can differ.  They did: the sliver went out and only the whole segments before
+# it were reported, and a caller doing the correct thing with a short send()
+# put the sliver on the wire a second time.  A 512 KB file arrived 3888 bytes
+# longer than it was.
+#
+# 1700 is deliberately not a multiple of the 1460-byte MSS: the first segment
+# fills, the second is cut off at 240 bytes with 348 left over.
+case z02_short_send_credits_what_left
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=1700 mss=1460
+tx A seq=1 ack=1
+send 2048 = SHORT
+tx PA seq=1 ack=1 len=1460
+tx PA seq=1461 ack=1 len=240
+wirebytes
+
+# The same fault with nothing in front of it to hide it.  The window is
+# narrower than one segment, so every byte that leaves is part of a cut segment
+# and there is no completed chunk to report -- this is the send() that used to
+# answer EWOULDBLOCK having already put 1000 bytes on the wire.
+case z03_send_below_one_segment_is_credited
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=1000 mss=1460
+tx A seq=1 ack=1
+send 2048 = SHORT
+tx PA seq=1 ack=1 len=1000
+wirebytes
+
 # The mechanism behind x02, stated as the thing that must NOT be true.
 #
 # It used to take a later transmit on the same interface to release the earlier
