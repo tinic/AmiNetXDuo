@@ -55,11 +55,11 @@
  *   connection may spend making no progress are all capped, and the caps are
  *   the reason a client can open the connection limit's worth of sockets and
  *   stay silent without the machine noticing.  Everything is static: the
- *   buffers are HTTPD_CONN_MAX * ~6 KB, allocated once, and a Shell command
+ *   buffers are HTTPD_CONN_MAX * ~7.5 KB, allocated once, and a Shell command
  *   gets 4 KB of stack on a stock Kickstart 3.1 (src/tools/nc.c says the same
  *   at its own buffers).  Writing added nothing to that: a tree walk carries
- *   one path and one FileInfoBlock rather than a stack of them, and the lock
- *   table is a fixed array.
+ *   two paths, one FileInfoBlock and two bytes a level rather than a stack of
+ *   blocks, and the lock table is a fixed array.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -100,7 +100,7 @@ enum
 
 /*
  * The connection ceiling is a memory decision before it is a concurrency one:
- * a slot is 6.2 KB of buffers, so the default eight is 50 KB taken at startup
+ * a slot is 7.5 KB of buffers, so the default eight is 60 KB taken at startup
  * and CONNECTIONS is what a machine where that matters lowers.  Eight is what
  * the clients ask for: Finder opens four to six and the Windows redirector two
  * to four, and a client that finds no free slot waits in the listen backlog
@@ -410,10 +410,10 @@ struct HttpConn
 
 /*
  * Taken from the heap and not declared as an array of HTTPD_CONN_MAX, because
- * a static one is the whole ceiling whether it is used or not: at 6.2 KB a
- * slot that is 99 KB of BSS in every copy of the command, which on a 1 MB
- * machine is a tenth of the machine reserved for connections nobody asked for.
- * Allocating it makes CONNECTIONS mean something -- `-m 2` is 12 KB -- and
+ * a static one is the whole ceiling whether it is used or not: at 7.5 KB a
+ * slot that is 120 KB of BSS in every copy of the command, which on a 1 MB
+ * machine is an eighth of it reserved for connections nobody asked for.
+ * Allocating it makes CONNECTIONS mean something -- `-m 2` is 15 KB -- and
  * takes the command's own BSS down to the shared scratches and the locks.
  */
 static HttpConn *httpd_conn;
@@ -1224,6 +1224,39 @@ static BOOL httpd_parent(const char *path, char *out, ULONG outlen)
     out[cut] = '\0';
 
     return TRUE;
+}
+
+/*
+ * TRUE when something is at `path` under a DIFFERENT name to the one asked
+ * for -- which means the filesystem did not refuse a name it cannot hold, it
+ * TRUNCATED it, and the request is about to land on somebody else's file.
+ *
+ * Measured, not assumed: an OFS floppy took a 40-character name, cut it to 30
+ * and answered success.  So a name that cannot be represented cannot be
+ * caught by trusting the create; it has to be caught by asking what is really
+ * there.  Two long names that differ only after the cut are the same file to
+ * the filesystem, and without this a PUT of the second silently replaces the
+ * first.
+ */
+static BOOL httpd_name_cut(const char *path, const char *name)
+{
+    BPTR lock;
+    BOOL cut = FALSE;
+
+    if (httpd_fib2 == NULL || name[0] == '\0')
+        return FALSE;
+
+    lock = Lock((CONST_STRPTR)path, ACCESS_READ);
+    if (lock == (BPTR)0)
+        return FALSE;               /* nothing there: nothing to collide   */
+
+    if (Examine(lock, httpd_fib2))
+        cut = hs_equal((const char *)httpd_fib2->fib_FileName, name)
+                  ? FALSE : TRUE;
+
+    UnLock(lock);
+
+    return cut;
 }
 
 /* 1 a drawer, 0 a file, -1 nothing there. */
@@ -3303,6 +3336,16 @@ static VOID httpd_do_put(HttpConn *c)
         return;
     }
 
+    /* The name the client asked for has to be the name that would be used,
+       or the rename below lands on a file somebody else put there. */
+    if (httpd_name_cut(c->path.path, c->path.name))
+    {
+        httpd_put_abandon(c);
+        httpd_error(c, 400,
+                    "that name is longer than this filesystem keeps");
+        return;
+    }
+
     /* A client is free to PUT a file called ".httpd-put-0", and then the
        temporary IS the target and the rename below would delete it. */
     if (hs_equal(c->put_temp, c->path.path))
@@ -3391,7 +3434,8 @@ static VOID httpd_do_mkcol(HttpConn *c)
 
     if (httpd_kind(c->path.path) >= 0)
     {
-        httpd_error(c, 405, "something of that name is there already");
+        httpd_error(c, httpd_name_cut(c->path.path, c->path.name) ? 400 : 405,
+                    "something of that name is there already");
         return;
     }
 
@@ -3491,6 +3535,13 @@ static VOID httpd_copy_or_move(HttpConn *c, BOOL moving)
         httpd_kind(httpd_probe) <= 0)
     {
         httpd_error(c, 409, "there is no drawer to put that in");
+        return;
+    }
+
+    if (httpd_name_cut(httpd_dest.path, httpd_dest.name))
+    {
+        httpd_error(c, 400,
+                    "that name is longer than this filesystem keeps");
         return;
     }
 
@@ -3645,11 +3696,10 @@ static VOID httpd_do_lock(HttpConn *c)
     BOOL      created;
     BOOL      ok;
 
-    if (c->path.segments == 0)
-    {
-        httpd_error(c, 403, "the served drawer itself is not lockable");
-        return;
-    }
+    /* The served drawer itself IS lockable, unlike everything else about it:
+       a client may not replace or remove the root, but taking an exclusive
+       lock on it is how one says "nobody else write in here while I work",
+       and refusing that is refusing the thing locking is for. */
 
     secs = (c->lock_secs > 0UL) ? c->lock_secs : HTTPD_LOCK_DEF;
     if (secs > HTTPD_LOCK_CAP)
