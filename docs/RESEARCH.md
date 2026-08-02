@@ -2,6 +2,27 @@
 
 *An AmiTCP/Roadshow-compatible `bsdsocket.library` for AmigaOS built on Eclipse ThreadX NetX Duo.*
 
+> **CLOSED TO NEW SECTIONS, 2026-08-02.** This file is 22,000 lines and 89
+> sections. Nobody reads it; it is grepped for one citation at a time, which is
+> what it is now for. **Do not append a section 90.**
+>
+> A new finding goes in two places instead:
+>
+> * **the comment beside the code it explains** — `n68k_checksum.S`,
+>   `netx_call.c`, `nx_user.h` and `sana2_rx.c` all carry their measured
+>   rationale inline, and it gets read because you are already in the file when
+>   you need it;
+> * **one entry in `docs/BACKLOG.md`**, if a decision came out of it.
+>
+> Citing a section here is fine and expected. Two cautions when you do. A
+> conclusion may have been overturned later, and the tree is the authority over
+> anything written here. And a recorded conclusion is only as good as the
+> instrument behind it: §39.3 rejected an optimisation on a table whose two
+> arms were charged 525 µs and 214 µs per bracket, a comparison that was never
+> valid, and that stood until 2026-08-01 — when the thing it discouraged turned
+> out to be worth 21% of throughput. If a citation is load-bearing for what you
+> are about to decide, re-measure rather than inherit it.
+
 Status: no longer research only — this began as a feasibility study and the thing now
 builds, runs, passes 125/142 of an independent conformance suite and carries upstream
 curl. The early sections are kept as they were written, because how a conclusion was

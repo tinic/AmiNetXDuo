@@ -2,6 +2,13 @@
 
 User-visible changes, newest first. Internal work is in the git log.
 
+New entries go under `Unreleased` and nowhere else. A version heading below it
+has shipped and is history; three entries landed in one during 2026-08-01 and
+had to be moved out, because a branch started before a release still shows that
+version at the top when it merges.
+
+## Unreleased
+
 ## 0.16.4
 
 - TCP transfers are faster. A megabyte over the wire on a 14 MHz 68020 went from 234 to 283 KB/s and over loopback from 610 to 708 KB/s, by taking two costs out of the scheduling underneath the stack rather than out of the protocol: a thread handing work to another thread no longer wakes a third one to do it, and the lock taken around every critical section is no longer a function call. The same work is removed on every processor, but 68020 is where it has been measured. Neither change alters what the stack sends
