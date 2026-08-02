@@ -1349,6 +1349,28 @@ ULONG   saved = p_window;
 }
 
 
+/* ------------------------------------------------------------ tick stats -- */
+
+/* Tick sweep instrumentation: how far the timer wheel is behind the E-Clock. */
+static VOID p_tick_report(const char *when)
+{
+TX_AMIGA_TICK_STATS s;
+
+    tx_amiga_tick_stats(&s);
+    p_log("  tick %s: rate %ld Hz, %ld delivered in %ld ms, %ld wakeups,"
+          " %ld empty, %ld catchups",
+          when, (LONG)TX_TIMER_TICKS_PER_SECOND,
+          (LONG)s.tx_amiga_tick_delivered, (LONG)s.tx_amiga_tick_uptime_ms,
+          (LONG)s.tx_amiga_tick_wakeups, (LONG)s.tx_amiga_tick_empty,
+          (LONG)s.tx_amiga_tick_catchups);
+    p_log("  tick %s: skew %ld ticks, peak %ld, clipped %ld, lost %ld,"
+          " over budget %ld, deferred %ld",
+          when, (LONG)s.tx_amiga_tick_skew, (LONG)s.tx_amiga_tick_skew_peak,
+          (LONG)s.tx_amiga_tick_clipped, (LONG)s.tx_amiga_tick_lost,
+          (LONG)s.tx_amiga_tick_over_budget, (LONG)s.tx_amiga_tick_deferred);
+}
+
+
 /* ------------------------------------------------------ ThreadX startup --- */
 
 VOID tx_application_define(VOID *first_unused_memory)
@@ -1482,10 +1504,16 @@ ULONG   actual;
                P_PORT_WIRE, 1, P_CK_NET68K);
 
     p_log("");
+    p_tick_report("after wire");
+
+    p_log("");
     p_log("-- receive window sweep, %ld KB per run -----------------------",
           (LONG)(P_SWEEP_BYTES / 1024UL));
     p_window_sweep("loopback", &p_ip0, &p_ip0, P_LOOPBACK, P_PORT_LOOP);
     p_window_sweep("wire",     &p_ip0, &p_ip1, P_IP1_ADDRESS, P_PORT_WIRE);
+
+    p_log("");
+    p_tick_report("final");
 
     p_log("");
     p_log("%ld checks, %ld failures -- %s",
