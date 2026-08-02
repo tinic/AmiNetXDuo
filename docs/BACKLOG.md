@@ -18,6 +18,66 @@ empty results.
 
 ## Open — no decision taken
 
+- **What Roadshow and AmiTCP_NG actually do in their SANA-II copy hooks**,
+  measured 2026-08-01 with `tests/tapprobe/` (an instrumented copy of
+  tcpdrill's device that installs itself, launches a foreign stack against it
+  and records an event ring). Three leads came out of it.
+
+  **Neither stack folds the checksum into the copy.** Roadshow was measured two
+  ways: scribbling `0xEE` over the source buffer the instant the hook returned
+  left every reply intact at all four alignments, so it reads the source
+  exactly once; and at its best alignment its hook costs 133 ns/B against 158
+  for a plain `movem.l` copy of the same data on the same machine, which leaves
+  no budget for per-longword arithmetic. AmiTCP_NG is settled from its GPL
+  source: `m_copy_to_mbuf` is a plain `bcopy`, `#define`d to `CopyMem`, and its
+  own comment says the MOVE16 fast path is deliberately not used on the SANA
+  path. So a melded copy-and-sum would be novel here, not catching up -- the
+  claim that the other stacks already do it does not survive contact.
+
+  **Roadshow asks for aligned buffers through an extension we do not have.**
+  Its buffer-management list has four entries: `S2_CopyToBuff`,
+  `S2_CopyFromBuff`, and `S2_DMACopyToBuff32` / `S2_DMACopyFromBuff32`
+  (`S2_Dummy+8` and `+9`, absent from `src/sana2/sana2_device.h`). Asking the
+  DMA hook for a buffer returned one at 0 mod 4 and a frame delivered through
+  it arrived intact. This is how a stack GETS the alignment we measured we do
+  not have, and for a DMA-capable card it removes the copy rather than
+  optimising it. Worth finding out how many real drivers use it before
+  building anything.
+
+  **Roadshow is faster than us at the alignment real drivers hand over.**
+  Per-byte `S2_CopyToBuff` cost, two-point fit over 64 and 1024-byte payloads
+  so no fixed per-call cost is in the number:
+
+  | src align | Roadshow | ours (`n68k_copy_bytes`) |
+  |---|---|---|
+  | 0 mod 4 | 133 | 158 |
+  | 1 mod 4 | 715 | 205 |
+  | 2 mod 4 | **182** | **204** |
+  | 3 mod 4 | 716 | 204 |
+
+  We are flat where it falls off a 5.4x cliff, but it beats us by 11% at the
+  2 mod 4 that 8 of 9 real drivers deliver. That is a target needing no new
+  protocol machinery.
+
+  Also measured: Roadshow keeps 36 reads outstanding (32 IPv4 + 4 ARP, matching
+  its documented `iprequests`/`arprequests` defaults) against our
+  `AMI_SANA2_RX_MAX_DEPTH` 32, and reposts before the answer goes out on the
+  same IORequest, 7.5-8.3 ms after the reply against our ~1 ms.
+
+  AmiTCP_NG could not be run against the synthetic device: it opens it, does
+  `S2_DEVICEQUERY` and `S2_GETSTATIONADDRESS`, then `AddNetInterface` fails
+  with errno 43 `EPROTONOSUPPORT` and it never posts a `CMD_READ`. That is
+  `socreate()` finding no `protosw`, inside its own startup, on both A1200 and
+  8 MB A3000 profiles. Not our bug and not worth debugging further.
+
+- **The tcpdrill device starts offline, which hangs any stack that does not
+  send `S2_ONLINE`**, found 2026-08-01. Roadshow stops after
+  `S2_ADDMULTICASTADDRESS`, arms an `S2_ONEVENT` and waits, so its interface
+  never comes up and it hangs silently at bring-up. Real Ethernet drivers are
+  live once configured; ours is not. Invisible to us because we send
+  `S2_ONLINE` ourselves, so this only bites when tcpdrill is pointed at another
+  stack -- which is exactly what makes it worth fixing before the next probe.
+
 - **Receive is the slow direction, on every machine measured**, 2026-08-01.
   bifat benchmarked four stacks on four machines, `timecmd copy` each way
   against a mounted fileserver. We are first or second on send in all four and
