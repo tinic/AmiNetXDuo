@@ -2,6 +2,11 @@
 
 User-visible changes, newest first. Internal work is in the git log.
 
+## Unreleased
+
+- TCP transfers are faster on every machine. A megabyte over the wire on a 68020 went from 234 to 283 KB/s, and over loopback from 610 to 708 KB/s, by taking two costs out of the scheduling underneath the stack rather than out of the protocol: a thread handing work to another thread no longer wakes a third one to do it, and the lock taken around every critical section is no longer a function call. Neither changes what the stack sends
+- A stream read that the already-received data covers no longer takes the lock the stack uses to enter the network kernel. It reached no network state to need it, and a program that reads in small pieces paid for one on every call
+
 ## 0.16.3
 
 - DHCP asks for an address under the same client identifier Roadshow uses, so a machine keeps the address and the router reservation it had before the stack was changed. Without it the router treated the same card as a different machine and handed out a different address, which broke every reservation and every note of "the Amiga is at". The request also asks for the domain name and the static route list on a DHCP interface configured in `DEVS:NetInterfaces`, which only an interface configured by hand used to get

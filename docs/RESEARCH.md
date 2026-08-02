@@ -21918,3 +21918,203 @@ constant is the number to carry, not the percentage.
   that finds *nothing* ready is the one that must call
   `nx_tcp_socket_bytes_available()`, so it is the pass that finds data parked
   that could skip the bracket, not the empty one.
+## 89. The scheduling was 23% of a transfer, and it was frequency (2026-08-01)
+
+`tests/perf/prof` put the largest single cluster of a 1 MB TCP transfer in the
+scheduling glue rather than in the copy: `_tx_thread_interrupt_disable` and
+`_restore` together at 8.8%, Exec's `Reschedule`/`Switch`/`Dispatch`/
+`Supervisor` at 10.4%, the mutex pair at 4.5%, `_tx_amiga_thread_park` at 1.4%
+— against 17.6% for `n68k_copy_bytes`, which had been optimised twice.
+
+A sampled share does not say why. "This primitive is slow" and "this primitive
+is called constantly" want opposite fixes, and there is a third case that looks
+like both: a busy-wait, where the PC really is in the function and the fix is
+neither. So the counts were taken before anything was changed.
+
+`-DAMINETXDUO_SCHEDCOUNT=ON` adds a call counter to each of them, in the spirit
+of `AMINETXDUO_NXCENSUS` — off by default, free when off, and every increment
+inside the `Forbid()` it counts so none is lost to another Task. Exec's own
+`DispCount` and `IdleCount` come straight out of `SysBase`; nothing we could
+instrument would produce them.
+
+### 86.1 The table
+
+A1200/68020, `tcpprof` wire case, 1 MB, transfer phase only. Shares and
+samples from the clean build (4420 samples at 1 kHz over 4369 ms, so one sample
+is one millisecond); counts from the counting build. Two runs, because the
+increments are on the path being counted — the counts are reproducible to 0.13%
+across builds, which is what makes mixing them legitimate.
+
+| function | samples | share | calls | µs/call | progress or waiting |
+|---|---|---|---|---|---|
+| `_tx_thread_interrupt_disable` | 166 | 3.8% | 38,853 | 4.3 | progress |
+| `_tx_thread_interrupt_restore` | 219 | 5.0% | 38,853 | 5.6 | progress |
+| — the pair | 385 | 8.7% | 38,853 | 9.9 | progress |
+| `_tx_mutex_get` | 90 | 2.0% | 5,612 | 16.0 | progress |
+| `_tx_mutex_put` | 111 | 2.5% | 5,672 | 19.6 | progress |
+| `_tx_thread_schedule` | 82 | 1.9% | 2,634 | 31.1 | progress (middleman) |
+| `_tx_amiga_thread_park` | 64 | 1.4% | 2,634 | 24.3 | progress |
+| `_tx_thread_system_return` | 39 | 0.9% | 2,634 | 14.8 | progress |
+| `_tx_amiga_wake_scheduler` | 33 | 0.7% | 2,894 | 11.4 | progress |
+| `exec/Supervisor` | 168 | 3.8% | — | — | progress |
+| `exec/Reschedule` | 116 | 2.6% | 5,844 | 19.9 | progress |
+| `exec/Switch` | 96 | 2.2% | 5,844 | 16.4 | progress |
+| `exec/Dispatch` | 80 | 1.8% | 5,844 | 13.7 | progress |
+| `exec/Schedule` | 43 | 1.0% | 5,844 | 7.4 | progress |
+| `exec/Permit` | 76 | 1.7% | — | — | progress |
+| `exec/Signal` | 40 | 0.9% | ~5,500 | 7.2 | progress |
+| `exec/Wait` | 33 | 0.7% | 5,377 | 6.1 | progress |
+| `exec/Forbid` | 33 | 0.7% | — | — | progress |
+
+`Supervisor`, `Permit` and `Forbid` are reached from more than one of the rows
+above and from Exec itself, so there is no honest denominator for them; they are
+left without one rather than given a made-up one. The five Exec scheduling
+entries together are 503 samples, 11.4% of the transfer, over 5,844 Exec task
+dispatches: **86 µs per Exec context switch.**
+
+Per 1448-byte segment: 54 `TX_DISABLE` pairs, 7.8 mutex operations, 3.6 ThreadX
+handoffs.
+
+### 86.2 Nothing was spinning
+
+Worth establishing before optimising, because a spin would want a third fix
+again. Six things say there was none:
+
+- `park_spurious` was **0** of 2,634 parks. The park loop's "woke without the
+  baton, go back to sleep" branch was never taken.
+- the scheduler Task waited 2,743 times and dispatched 2,634 times, so 4% of
+  its wakeups found nothing to do.
+- `_tx_amiga_wake_scheduler()` ran 2,894 times for those 2,634 dispatches: 9%
+  redundant pokes, each one `Signal()` on a Task already signalled, not a loop.
+- `SysBase->IdleCount` did not move at all over the phase. The machine was never
+  in Exec's idle loop, so no time was being lost to a wait that nothing woke.
+- structurally, a Task blocked in Exec's `Wait()` is not executing and therefore
+  cannot be sampled — the PC sampler always records whoever is running. There is
+  no mechanism by which "time spent waiting" can appear as share in this
+  profile. Every sample in it is a Task executing instructions.
+- the per-Task cross-tab (every sample carries `SysBase->ThisTask`) puts the
+  scheduler Task's 370 samples across `_tx_thread_schedule` 89, `Supervisor` 78,
+  `Reschedule` 44, `Switch` 38, `Dispatch` 38, `Wait` 27 and `Permit` 20. That
+  is the cost of being woken 2,743 times, and it is real work. It is also
+  avoidable work, which is a different thing from a spin.
+
+So: **frequent, not slow.** Nothing in the list is expensive for what it does.
+Two things follow from that, and they are the two changes below.
+
+### 86.3 The scheduler Task was a middleman
+
+Every ThreadX handoff was three Exec context switches. The yielding Task
+released the baton, signalled the scheduler Task and blocked; Exec dispatched
+the scheduler; the scheduler picked `_tx_thread_execute_ptr`, signalled the
+target and blocked; Exec dispatched the target. The middle two exist only to run
+the ten lines of `_tx_thread_schedule()` that assign `_tx_thread_current_ptr`,
+bump the run count, set the time slice and `Signal()` — which the yielding Task
+can run itself, and which `tx_amiga_adopt_thread()` had already been running
+itself on its fast path since adoption was written.
+
+`_tx_amiga_dispatch_inline()` in `tx_amiga_internal.h` is those ten lines,
+behind the scheduler loop's own guard: a thread to run, the baton free, system
+state zero, the kernel not stopping. Both take `Forbid()` and both test
+`_tx_thread_current_ptr`, so the two can never both dispatch — only one of them
+can find it `TX_NULL`. A caller that is refused falls back to the poke, because
+the refusal may be a raised `_tx_thread_system_state` that clears later.
+
+Four sites release the baton and now hand it straight on:
+`_tx_thread_system_return()` (the hot one), `_tx_thread_context_restore()` when
+the tick made something ready on an idle system, and
+`tx_amiga_adopt_suspend()`/`tx_amiga_orphan_thread()`, which are the
+`bsdsocket.library` per-call bracket.
+
+The case where `_tx_thread_execute_ptr` is the yielding thread itself needs no
+special handling and is the best one: it signals itself, parks, and `Wait()`
+returns immediately on the signal that is already set.
+
+Measured on the same workload: `sched dispatch` 2,634 → **0**, `direct` 0 →
+2,656, `wake` 2,894 → 203, Exec dispatches 5,844 → 3,281 (−44%), and the
+scheduler Task's own share 8.1% → 0.4%. Wall clock 4369 → 3936 ms.
+
+### 86.4 `TX_DISABLE`/`TX_RESTORE` were out-of-line calls
+
+38,853 pairs at 9.9 µs each, for a body that is two instructions. §6.2 had
+already collapsed the inner layer — `_tx_amiga_forbid_inline()` is one
+`ADDQ.B`, not a jump through the Exec vector, and `permit-slow` counted **0**
+reaching the real `Permit()` in the whole transfer — so the remaining cost was
+the `jsr`/`rts` and a reload of `SysBase` on each side of it.
+
+They are macros in the standard ThreadX porting model for exactly this reason;
+out-of-line functions were the deviation here, taken so that `tx_port.h` could
+stay free of the AmigaOS headers. It still is. Exec is reached by offset:
+`TDNestCnt` at `$127` and `AttnResched` at `$12A`, both asserted against the
+NDK's `struct ExecBase` in `tx_thread_interrupt_control.c` with
+`_Static_assert`, so a header that ever moved a field fails the build rather
+than corrupting the nest count. `SysBase` is absolute location 4 by definition,
+which is where the C global is loaded from anyway.
+
+**What the inlined `Permit` checks, and why that is complete.** Exec
+reschedules on `Permit()` when all three of: the count went below zero (this was
+the outermost `Forbid`), no interrupt is in progress (`IDNestCnt < 0`), and the
+attention word is set. The inline tests only `AttnResched != 0`, because a clear
+word proves Exec's `Permit()` would not have rescheduled whatever the other two
+say — so returning there is precisely what the library call would have done. It
+is tested first because it is the cheapest of the three and the one that is
+nearly always zero. When it is set, `_tx_amiga_permit_finish()` applies the full
+three-way test out of line and calls the real `Permit()`, so the reschedule path
+is Exec's own and not a copy of it. This is the same logic §6.2 already had; it
+moved, it did not change.
+
+A word set in the instant after it is read costs a deferred switch. That is the
+race Exec's own `Permit()` has, closed by the next `Permit()`, `Enable()` or
+interrupt exit — and on this port that is never far off, because the threads
+block in `Wait()` constantly and `Wait()` always reschedules.
+
+One `moveal 4,a0` per side rather than two: GCC will not hold a volatile address
+across a volatile access, so the base is taken once into a local and both fields
+are read off it. `tx_mutex_put.c` compiles to `moveal 4,a0 / addq.b #1,a0@(295)`
+at entry and `moveal 4,a0 / subq.b #1,a0@(295) / movew a0@(298),d0 / beq` at
+exit, with no call on either. `tcpprof` text grew 100,840 → 103,368 bytes.
+
+### 86.5 Before and after
+
+Category shares of the transfer phase, A1200/68020, 1 MB over the wire case:
+
+| category | base | +direct handoff | +inline TX_DISABLE |
+|---|---|---|---|
+| ThreadX + Amiga port | 1090 (24.7%) | 980 (24.7%) | 666 (18.3%) |
+| NetX Duo protocol | 1086 (24.6%) | 1046 (26.3%) | 1104 (30.3%) |
+| Kickstart (Exec etc) | 833 (18.8%) | 505 (12.7%) | 485 (13.3%) |
+| copy (net68k asm) | 780 (17.6%) | 811 (20.4%) | 799 (21.9%) |
+| checksum | 573 (13.0%) | 565 (14.2%) | 537 (14.7%) |
+| app / profiler | 52 (1.2%) | 61 (1.5%) | 52 (1.4%) |
+| **total samples** | **4420** | **3973** | **3646** |
+| wall, ms | 4369 | 3936 | 3614 |
+| KB/s | 234 | 260 | 283 |
+
+Samples are milliseconds here, so the absolute column is the one to read. The
+work that did not change did not move: copy 780 → 799, checksum 573 → 537, NetX
+Duo 1086 → 1104. The overhead did: Exec 833 → 485, ThreadX port 1090 → 666.
+NetX Duo's count rising while everything got faster is the inlining — a
+`TX_RESTORE` inside `_nx_packet_allocate()` is now charged to
+`_nx_packet_allocate()`, which is where it always was.
+
+`_tx_thread_interrupt_disable` and `_restore` are gone from the ranking
+entirely, which is what inlining them means and not by itself a saving. The
+saving is the total: **4420 → 3646 samples for the same megabyte, −17.5%**.
+
+Loopback, the same two changes: 1676 → 1445 ms, 610 → 708 KB/s.
+
+Counts after, confirming the workload did not change: `disable`/`restore`
+38,853 → 38,850, `permit-slow` still 0, mutex 5,612/5,672 → 5,612/5,671,
+handoffs 2,634 → 2,654, `park_spurious` still 0.
+
+### 86.6 What is left
+
+The `TX_DISABLE` pair is still 38,850 calls. That count is ThreadX's and NetX
+Duo's, not ours, and reducing it means changing vendored critical sections —
+which is a different and much less safe piece of work than making the primitive
+free. The mutex pair at 4.5% is the same shape: 5,612 acquisitions of one IP
+protection mutex, none of them contended enough to block (`permit-slow` 0 and
+`park_spurious` 0 both say so), and the cost is the uncontended path through
+ThreadX's core.
+
+3,239 Exec dispatches remain for 2,654 handoffs. The excess is the tick Task and
+the driver, not the baton.
