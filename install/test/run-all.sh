@@ -19,6 +19,8 @@
 #   SHARE     "yes" to the file server, so S:User-Startup gets its line too
 #   SHARERERUN  the same twice over, where a block that grew instead of being
 #             replaced would show up as two of everything
+#   REMOVE    takes both lines, then installs again and declines both; what
+#             the installer added it has to be able to take away
 #
 # It starts with ICONS, which hands the generated .info files to the real
 # icon.library rather than trusting the generator to grade its own homework.
@@ -37,7 +39,8 @@ set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ARGS=("$@")
 
-SCENARIOS=(NOVICE AVERAGE EXPERT STATIC RERUN SHARE SHARERERUN)
+SCENARIOS=(NOVICE AVERAGE EXPERT STATIC RERUN SHARE SHAREONLY SHARERERUN
+           REMOVE)
 declare -a RESULTS
 
 ROOT=$(cd "$HERE/../.." && pwd)

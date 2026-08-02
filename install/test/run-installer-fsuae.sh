@@ -44,15 +44,18 @@ while getopts "b:t:c:l:k" opt; do
         l) LEVEL="$OPTARG" ;;
         k) KEEP=1 ;;
         *) echo "usage: $0 [-b builddir] [-t seconds] [-c cpu]" \
-                "[-l NOVICE|AVERAGE|EXPERT|STATIC|RERUN|SHARE|SHARERERUN]" \
+                "[-l NOVICE|AVERAGE|EXPERT|STATIC|RERUN|SHARE|SHAREONLY" \
+                "|SHARERERUN|REMOVE]" \
                 "[-k]" >&2
            exit 2 ;;
     esac
 done
 
-# Does this scenario answer yes to the file-server question?  Every scenario
-# asserts on S:User-Startup afterwards, and this is what it expects to find
-# there -- so declining is checked as explicitly as accepting is.
+# What S:User-Startup should hold when this scenario is done.  Every scenario
+# asserts on it afterwards, so declining is checked as explicitly as
+# accepting is, and so is taking both lines away again.
+WANT_BLOCK=1
+WANT_IF=1
 WANT_SHARE=0
 SKIP_BOOT=0
 case "$LEVEL" in
@@ -81,10 +84,23 @@ case "$LEVEL" in
     # written is the thing under test.
     SHARE)  DRIVE_FLAGS=(-DDRIVE_LEVEL='"AVERAGE"')
             WANT_SHARE=1 SKIP_BOOT=1 ;;
+    # Share but leave the network alone -- bit 1 is the network-at-boot
+    # question.  The only arrangement where the file server is the first line
+    # in the block rather than the second.
+    SHAREONLY) DRIVE_FLAGS=(-DDRIVE_LEVEL='"AVERAGE"' -DDRIVE_NO_ON_YESNO=2)
+            WANT_IF=0 WANT_SHARE=1 SKIP_BOOT=1 ;;
     # The same, twice over -- the case where a block that is appended to
     # rather than replaced ends up with two of everything.
     SHARERERUN) DRIVE_FLAGS=(-DDRIVE_LEVEL='"AVERAGE"' -DDRIVE_RUNS=2)
             WANT_SHARE=1 SKIP_BOOT=1 ;;
+    # The uninstall path: the first run takes both lines, the second declines
+    # both, and nothing of ours may be left in S:User-Startup.  The yes/no
+    # pages are numbered across both runs, and the second run puts up four --
+    # keep-or-replace, replace-the-library, network-at-boot, share-at-boot --
+    # so bits 5 and 6 are the last two of them.
+    REMOVE) DRIVE_FLAGS=(-DDRIVE_LEVEL='"AVERAGE"' -DDRIVE_RUNS=2
+                         -DDRIVE_NO_ON_YESNO=96)
+            WANT_BLOCK=0 WANT_IF=0 SKIP_BOOT=1 ;;
     *) echo "unknown user level: $LEVEL" >&2; exit 2 ;;
 esac
 
@@ -198,9 +214,18 @@ echo "============================================================"
 echo "  what the installer put on the disk"
 echo "============================================================"
 
+# A file lands on the host under whatever case the Amiga side used, and
+# Installer 43.3 writes "s:user-startup" in lower case.  AmigaDOS does not
+# care and macOS does not either; a case-sensitive host filesystem does, and
+# on one of those every name here has to be resolved rather than assumed.
+on_disk() {
+    [ -e "$HD/$1" ] && { printf '%s\n' "$HD/$1"; return 0; }
+    find "$HD" -maxdepth 4 -ipath "$HD/$1" -print -quit
+}
+
 fail=0
 check_file() {
-    if [ -f "$HD/$1" ]; then
+    if [ -f "$(on_disk "$1")" ]; then
         printf '  ok      %s\n' "$1"
     else
         printf '  MISSING %s\n' "$1"
@@ -220,14 +245,17 @@ check_file devs/Internet/hosts
 check_file devs/Internet/protocols
 check_file devs/Internet/services
 check_file devs/Internet/networks
-check_file s/User-Startup
+# Not when the scenario is the uninstall one: with nothing left to say, the
+# Installer is entitled to take the file away rather than leave an empty one.
+[ "$WANT_BLOCK" = "0" ] || check_file s/User-Startup
 
 for f in devs/NetInterfaces/eth0 devs/Internet/routes \
          devs/Internet/name_resolution s/User-Startup; do
-    [ -f "$HD/$f" ] || continue
+    p=$(on_disk "$f")
+    [ -f "$p" ] || continue
     echo
     echo "---- $f ----"
-    cat "$HD/$f"
+    cat "$p"
 done
 
 if [ "$INSTALL_STATUS" != "0" ] || [ "$fail" != "0" ]; then
@@ -240,7 +268,7 @@ fi
 
 bad=0
 want() {
-    if grep -qx "$2" "$HD/$1"; then
+    if grep -qx "$2" "$(on_disk "$1")"; then
         printf '  ok      %-34s %s\n' "$1" "$2"
     else
         printf '  WRONG   %-34s expected %s\n' "$1" "$2"
@@ -261,7 +289,12 @@ echo "============================================================"
 echo "  S:User-Startup"
 echo "============================================================"
 
-count() { grep -c "$1" "$HD/s/User-Startup" 2>/dev/null || true; }
+USER_STARTUP=$(on_disk s/User-Startup)
+
+count() {
+    [ -f "$USER_STARTUP" ] || { echo 0; return; }
+    grep -c "$1" "$USER_STARTUP" || true
+}
 
 exactly() {
     n=$(count "$1")
@@ -273,14 +306,13 @@ exactly() {
     fi
 }
 
-exactly '^;BEGIN AmiNetXDuo'                    1
-exactly '^;END AmiNetXDuo'                      1
-exactly 'C:AddNetInterface DEVS:NetInterfaces/' 1
+exactly '^;BEGIN AmiNetXDuo'                    "$WANT_BLOCK"
+exactly '^;END AmiNetXDuo'                      "$WANT_BLOCK"
+exactly 'C:AddNetInterface DEVS:NetInterfaces/' "$WANT_IF"
 exactly 'C:httpd'                               "$WANT_SHARE"
 
 if [ "$WANT_SHARE" = "1" ]; then
-    if grep -Eq '^C:Run >NIL: <NIL: C:httpd ".+" 80$' "$HD/s/User-Startup"
-    then
+    if grep -Eq '^C:Run >NIL: <NIL: C:httpd ".+" 80$' "$USER_STARTUP"; then
         printf '  ok      %s\n' 'the file server line is detached and quoted'
     else
         printf '  WRONG   %s\n' 'the file server line is not what it should be'
