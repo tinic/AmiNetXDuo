@@ -52,6 +52,10 @@
 #   -m MODEL    emulator profile (default A3000)
 #   -t SECS     timeout (default 500)
 #   -L DIR      extra files staged into LIBS:
+#   -M "ARGS"   extra arguments to `fitz mount` -- `-M "BUFS 262144"`.  This
+#               is NOT part of a matched stack comparison: it changes the
+#               client, so a run using it is a diagnostic arm of its own and
+#               has to be labelled as one.
 #
 # SPDX-License-Identifier: MIT
 
@@ -78,10 +82,11 @@ IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
 MODEL=A3000
 TIMEOUT=500
 EXTRALIBS=""
+MOUNTARGS=""
 DIAG=0
 IFCONFIG=""
 
-while getopts "s:T:pdi:A:P:k:C:r:b:R:G:B:m:t:L:" opt; do
+while getopts "s:T:pdi:A:P:k:C:r:b:R:G:B:m:t:L:M:" opt; do
     case "$opt" in
         s) STACK="$OPTARG" ;;
         T) TAG="$OPTARG" ;;
@@ -100,6 +105,7 @@ while getopts "s:T:pdi:A:P:k:C:r:b:R:G:B:m:t:L:" opt; do
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         L) EXTRALIBS="$OPTARG" ;;
+        M) MOUNTARGS="$OPTARG" ;;
         *) sed -n '3,50p' "$0" >&2; exit 2 ;;
     esac
 done
@@ -236,7 +242,7 @@ fi
     if [ "$DIAG" = 1 ]; then
         [ ! -f "$STAGE/NetStat" ] || echo "SYS:NetStat $STATARGS"
     else
-        echo "&SYS:fitz mount $PEER_ADDR:$PORT FITZ:"
+        echo "&SYS:fitz mount $PEER_ADDR:$PORT FITZ:${MOUNTARGS:+ $MOUNTARGS}"
         echo "wait 10"
         [ ! -f "$STAGE/NetStat" ] || echo "SYS:NetStat $STATARGS"
         if [ "$PROFILE" = 1 ]; then
