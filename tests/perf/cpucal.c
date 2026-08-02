@@ -153,12 +153,25 @@ ULONG            i, t0, t1, total;
 
 /* ------------------------------------------------------------- kernels --- */
 
+/*
+ * The 68000 has no MULU.L, so that build has no multiply kernel and no row for
+ * one.  Everything else here -- ADD.L, MOVE.L, ADDX.L and the four memory
+ * sweeps -- is original 68000 and has published 68000 costs, which is enough
+ * to answer the question the file exists for.
+ */
+#if !defined(__mc68020__) && !defined(__mc68030__) && \
+    !defined(__mc68040__) && !defined(__mc68060__)
+#define CAL_68000       1
+#endif
+
 extern VOID cal_empty (ULONG reps);
 extern VOID cal_add   (ULONG reps);
 extern VOID cal_move  (ULONG reps);
 extern VOID cal_addx  (ULONG reps);
+#ifndef CAL_68000
 extern VOID cal_mulu  (ULONG reps);
 extern VOID cal_mulu64(ULONG reps);
+#endif
 extern VOID cal_read  (APTR buf, ULONG longs, ULONG reps);
 extern VOID cal_write (APTR buf, ULONG longs, ULONG reps);
 extern VOID cal_m2m   (APTR dst, APTR src, ULONG longs, ULONG reps);
@@ -187,8 +200,10 @@ static VOID c_run(ULONG kind, ULONG reps)
     case K_ADD:    cal_add(reps);                                    break;
     case K_MOVE:   cal_move(reps);                                   break;
     case K_ADDX:   cal_addx(reps);                                   break;
+#ifndef CAL_68000
     case K_MULU:   cal_mulu(reps);                                   break;
     case K_MULU64: cal_mulu64(reps);                                 break;
+#endif
     case K_READ:   cal_read(c_buf_a, c_window, reps);                break;
     case K_WRITE:  cal_write(c_buf_a, c_window, reps);               break;
     case K_M2M:    cal_m2m(c_buf_a, c_buf_b, c_window, reps);        break;
@@ -285,8 +300,21 @@ ULONG   units;
 static ULONG    c_empty_ps;
 static ULONG    c_add_ps;               /* one ADD.L, ps -- the yardstick */
 
-static VOID c_print_reg(const char *what, ULONG kind, ULONG real_020,
-                        ULONG real_030)
+/*
+ * ADD.L Dn,Dm is the yardstick, and its published cost differs by part: two
+ * cycles on a 68020/68030, eight on a 68000, where every longword ALU operand
+ * crosses the 16-bit bus twice and there is no cache to hide it.  Everything
+ * derived from the yardstick -- the implied cycle counts and the implied clock
+ * -- scales with it.
+ */
+#ifdef CAL_68000
+#define CAL_YARD        8UL
+#else
+#define CAL_YARD        2UL
+#endif
+
+static VOID c_print_reg(const char *what, ULONG kind, ULONG real_000,
+                        ULONG real_020, ULONG real_030)
 {
 ULONG   reps = 0UL;
 ULONG   raw  = c_measure_ps(kind, 16UL, &reps);
@@ -301,17 +329,30 @@ ULONG   ratio_x100;
     ratio_x100 = (c_add_ps != 0UL) ? ((ps * 100UL) / c_add_ps) : 0UL;
 
     /*
-     * "implied cycles" is the ratio to ADD.L times ADD.L's published two --
+     * "implied cycles" is the ratio to ADD.L times ADD.L's published cost --
      * i.e. what the model charges for this instruction, expressed in the only
      * unit that survives not knowing the clock.
      */
+#ifdef CAL_68000
+    (VOID)real_020;
+    (VOID)real_030;
+    c_log("  %-22s %6ld.%03ld ns  implied %4ld.%02ld cycles   "
+          "real 68000 %2ld",
+          (LONG)what,
+          (LONG)(ps / 1000UL), (LONG)(ps % 1000UL),
+          (LONG)((ratio_x100 * CAL_YARD) / 100UL),
+          (LONG)((ratio_x100 * CAL_YARD) % 100UL),
+          (LONG)real_000);
+#else
+    (VOID)real_000;
     c_log("  %-22s %6ld.%03ld ns  implied %4ld.%02ld cycles   "
           "real 68020 %2ld, 68030 %2ld",
           (LONG)what,
           (LONG)(ps / 1000UL), (LONG)(ps % 1000UL),
-          (LONG)((ratio_x100 * 2UL) / 100UL),
-          (LONG)((ratio_x100 * 2UL) % 100UL),
+          (LONG)((ratio_x100 * CAL_YARD) / 100UL),
+          (LONG)((ratio_x100 * CAL_YARD) % 100UL),
           (LONG)real_020, (LONG)real_030);
+#endif
 }
 
 /*
@@ -438,24 +479,30 @@ ULONG   reps;
     c_log("");
 
     c_add_ps = 0UL;
-    c_print_reg("ADD.L  Dn,Dm",   K_ADD,     2UL,  2UL);
-    c_print_reg("MOVE.L Dn,Dm",   K_MOVE,    2UL,  2UL);
-    c_print_reg("ADDX.L Dn,Dm",   K_ADDX,    2UL,  2UL);
-    c_print_reg("MULU.L Dn,Dm",   K_MULU,   43UL, 44UL);
-    c_print_reg("MULU.L Dn,Dh:Dl",K_MULU64, 45UL, 44UL);
+    c_print_reg("ADD.L  Dn,Dm",   K_ADD,     8UL,  2UL,  2UL);
+    c_print_reg("MOVE.L Dn,Dm",   K_MOVE,    4UL,  2UL,  2UL);
+    c_print_reg("ADDX.L Dn,Dm",   K_ADDX,    8UL,  2UL,  2UL);
+#ifndef CAL_68000
+    c_print_reg("MULU.L Dn,Dm",   K_MULU,    0UL, 43UL, 44UL);
+    c_print_reg("MULU.L Dn,Dh:Dl",K_MULU64,  0UL, 45UL, 44UL);
+#endif
 
     /*
      * The implied clock, the one figure here that assumes something: that the
-     * model charges ADD.L its published two cycles.  If MULU.L above did not
-     * come out near 22x, it does not, and this number is decoration.
+     * model charges ADD.L its published cost.  On a 68020 profile, if MULU.L
+     * above did not come out near 22x the model is not charging and this
+     * number is decoration.  On a 68000 the discriminator is MOVE.L Dn,Dm at
+     * half of ADD.L: a model with a flat per-instruction cost prints 1.00x for
+     * both, a cycle-exact one prints 4 against 8.
      */
     if (c_add_ps != 0UL)
     {
         c_log("");
-        c_log("  implied clock, if ADD.L costs its published 2 cycles: "
+        c_log("  implied clock, if ADD.L costs its published %ld cycles: "
               "%ld.%02ld MHz",
-              (LONG)((2000000UL / c_add_ps) ),
-              (LONG)((2000000UL * 100UL / c_add_ps) % 100UL));
+              (LONG)CAL_YARD,
+              (LONG)((CAL_YARD * 1000000UL / c_add_ps) ),
+              (LONG)((CAL_YARD * 1000000UL * 100UL / c_add_ps) % 100UL));
     }
 
     /* --------------------------------------------------- memory kernels -- */

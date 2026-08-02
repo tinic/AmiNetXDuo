@@ -27,7 +27,28 @@
 # collide, and the A/B it exists to run would be meaningless anyway.
 if(CMAKE_CROSSCOMPILING AND AMINETXDUO_NET68K_CHECKSUM)
 
-add_executable(perf_test perf_test.c)
+add_executable(perf_test perf_test.c ab_prims.S)
+
+# The A/B subjects.  ab_prims.S carries both previous implementations and a
+# second assembly of each shipped one, so old, new and "new at another address"
+# are timed in one process; tests/perf/ab_prims.S says which commit each came
+# from.  The checksum's caller is compiled a second time here rather than
+# duplicated, so the only difference between the two paths is which summing
+# routine they reach.
+set_source_files_properties(ab_prims.S PROPERTIES
+    COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
+
+add_library(perf_checksum_old STATIC
+    "${CMAKE_SOURCE_DIR}/src/net68k/n68k_checksum.c")
+target_include_directories(perf_checksum_old PRIVATE
+    ${AMINETXDUO_CORE_INCLUDES} "${CMAKE_SOURCE_DIR}/src/net68k")
+target_compile_definitions(perf_checksum_old PRIVATE
+    AMINETXDUO_NET68K_ASM
+    n68k_ip_checksum_compute=n68k_ip_checksum_compute_old
+    n68k_sum_longwords=ab_sum_old)
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(perf_checksum_old PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
 
 # aminetxduo_net68k for the algorithm, and NOT its hook: perf_test.c defines
 # _nx_ip_checksum_compute() itself so it can dispatch between the vendored
@@ -44,8 +65,13 @@ target_compile_definitions(perf_checksum_ref PRIVATE
 # ami_sana2_copy_bytes() is the copy loop the RX interrupt runs.  Archive
 # semantics pull that member and nothing else.
 target_link_libraries(perf_test PRIVATE
-    perf_checksum_ref aminetxduo_net68k netxduo_port
+    perf_checksum_ref perf_checksum_old aminetxduo_net68k netxduo_port
     aminetxduo_sana2 aminetxduo_common)
+
+# Stop before the end-to-end TCP cases, which at 7 MHz are the whole run.
+if(AMINETXDUO_PERF_AB_ONLY)
+    target_compile_definitions(perf_test PRIVATE P_AB_ONLY)
+endif()
 
 if(AMIGA_NDK_INCLUDE)
     target_include_directories(perf_test PRIVATE "${AMIGA_NDK_INCLUDE}")
@@ -129,11 +155,12 @@ endif()
 #
 # Read the header of cpucal.c before quoting anything it prints.
 
-# 68020 AND UP ONLY, and not for the usual "we did not get round to it"
-# reason: cpucal exists to time MULU.L against the MC68020UM's published
-# figures, so on a 68000 -- which has no MULU.L -- there is no measurement for
-# it to make.  Excluded rather than made portable.  docs/RESEARCH.md §45.
-if(CMAKE_CROSSCOMPILING AND NOT AMINETXDUO_CPU STREQUAL "68000")
+# The 68000 build drops the two MULU.L kernels -- that instruction does not
+# exist on the part -- and keeps the rest, whose 68000 costs the MC68000UM
+# publishes just as plainly.  On that profile the discriminator is MOVE.L Dn,Dm
+# at 4 cycles against ADD.L at 8, which a model with a flat per-instruction
+# cost cannot reproduce.
+if(CMAKE_CROSSCOMPILING)
 
     add_executable(cpucal cpucal.c cpucal.S)
     target_link_libraries(cpucal PRIVATE aminetxduo_common)

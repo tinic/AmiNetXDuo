@@ -261,6 +261,13 @@ USHORT n68k_checksum_reference(NX_PACKET *packet_ptr, ULONG protocol,
 
 #define P_CK_NET68K     0
 #define P_CK_VENDORED   1
+#define P_CK_NET68K_OLD 2
+
+/* The checksum as it stood at b342ba7~1: the same n68k_checksum.c compiled a
+   second time against the add.l/addx.l loop rather than the movem chain. */
+USHORT n68k_ip_checksum_compute_old(NX_PACKET *packet_ptr, ULONG protocol,
+                                    UINT data_length, ULONG *src_ip_addr,
+                                    ULONG *dest_ip_addr);
 
 static volatile ULONG   p_ck_mode = P_CK_NET68K;
 
@@ -283,6 +290,12 @@ USHORT _nx_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
     {
         return(n68k_checksum_reference(packet_ptr, protocol, data_length,
                                        src_ip_addr, dest_ip_addr));
+    }
+
+    if (p_ck_mode == P_CK_NET68K_OLD)
+    {
+        return(n68k_ip_checksum_compute_old(packet_ptr, protocol, data_length,
+                                            src_ip_addr, dest_ip_addr));
     }
 
     return(n68k_ip_checksum_compute(packet_ptr, protocol, data_length,
@@ -381,6 +394,278 @@ extern VOID ami_sana2_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len);
 static NX_PACKET *p_scratch_packet;
 static NX_PACKET *p_scratch_chain;
 
+
+/* ------------------------------------------------- the 68000 A/B ---------- */
+
+/*
+ * Both versions of both primitives, in one binary, timed in one run.  The
+ * _new2 routines are the shipped instruction sequences assembled a second time
+ * at a different address; timed against the library's own copy they measure
+ * code placement and nothing else, which is the noise floor every other row
+ * here has to clear.  tests/perf/ab_prims.S.
+ */
+extern VOID  ab_copy_old (UCHAR *to, const UCHAR *from, ULONG len);
+extern VOID  ab_copy_new2(UCHAR *to, const UCHAR *from, ULONG len);
+extern ULONG ab_sum_old  (const ULONG *p, ULONG count);
+extern ULONG ab_sum_new2 (const ULONG *p, ULONG count);
+
+static const ULONG p_ab_lens[] = { 1460UL, 1024UL, 512UL, 400UL, 296UL,
+                                   260UL, 128UL, 40UL, 20UL };
+#define P_AB_NLENS  (sizeof(p_ab_lens) / sizeof(p_ab_lens[0]))
+
+/* p_report() takes a string, and RawDoFmt is not available to build one; these
+   two are the whole of the formatting the A/B rows need. */
+static VOID p_strcpy3(char *out, const char *a, const char *b)
+{
+ULONG   i = 0UL;
+
+    while (*a != '\0')
+    {
+        out[i++] = *a++;
+    }
+    while (*b != '\0')
+    {
+        out[i++] = *b++;
+    }
+    out[i] = '\0';
+}
+
+static VOID p_strcpy_num(char *out, const char *a, ULONG v)
+{
+ULONG   i = 0UL;
+ULONG   d = 1000UL;
+ULONG   lead = 0UL;
+
+    while (*a != '\0')
+    {
+        out[i++] = *a++;
+    }
+    while (d != 0UL)
+    {
+        ULONG   digit = (v / d) % 10UL;
+
+        if ((digit != 0UL) || (lead != 0UL) || (d == 1UL))
+        {
+            out[i++] = (char)('0' + digit);
+            lead = 1UL;
+        }
+        d /= 10UL;
+    }
+    out[i++] = ' ';
+    out[i++] = 'B';
+    out[i] = '\0';
+}
+
+static VOID p_ab_copies(VOID)
+{
+ULONG   t0, ticks, reps, i, a;
+ULONG   len = 1460UL;
+char    row[40];
+static const char *tag[4] = { "s0", "s1", "s2", "s3" };
+
+    reps = 40UL;
+
+    for (a = 0UL; a < 4UL; a++)
+    {
+        t0 = p_now();
+        for (i = 0UL; i < reps; i++)
+        {
+            ab_copy_old(p_dst_buf, p_src_buf + a, len);
+        }
+        ticks = p_elapsed(t0, p_now());
+        p_strcpy3(row, "copy OLD  d0 ", tag[a]);
+        p_report(row, ticks, reps, len);
+
+        t0 = p_now();
+        for (i = 0UL; i < reps; i++)
+        {
+            n68k_copy_bytes(p_dst_buf, p_src_buf + a, len);
+        }
+        ticks = p_elapsed(t0, p_now());
+        p_strcpy3(row, "copy NEW  d0 ", tag[a]);
+        p_report(row, ticks, reps, len);
+
+        t0 = p_now();
+        for (i = 0UL; i < reps; i++)
+        {
+            ab_copy_new2(p_dst_buf, p_src_buf + a, len);
+        }
+        ticks = p_elapsed(t0, p_now());
+        p_strcpy3(row, "copy NEW' d0 ", tag[a]);
+        p_report(row, ticks, reps, len);
+    }
+}
+
+static VOID p_ab_sums(VOID)
+{
+ULONG   t0, ticks, reps, i, n, count, bytes;
+char    row[40];
+const ULONG *p = (const ULONG *)(const VOID *)p_src_buf;
+
+    for (n = 0UL; n < P_AB_NLENS; n++)
+    {
+        bytes = p_ab_lens[n];
+        count = bytes / 4UL;
+        reps  = (16000UL / count) + 24UL;
+
+        t0 = p_now();
+        for (i = 0UL; i < reps; i++)
+        {
+            (VOID)ab_sum_old(p, count);
+        }
+        ticks = p_elapsed(t0, p_now());
+        p_strcpy_num(row, "sum OLD  ", bytes);
+        p_report(row, ticks, reps, bytes);
+
+        t0 = p_now();
+        for (i = 0UL; i < reps; i++)
+        {
+            (VOID)n68k_sum_longwords(p, count);
+        }
+        ticks = p_elapsed(t0, p_now());
+        p_strcpy_num(row, "sum NEW  ", bytes);
+        p_report(row, ticks, reps, bytes);
+
+        t0 = p_now();
+        for (i = 0UL; i < reps; i++)
+        {
+            (VOID)ab_sum_new2(p, count);
+        }
+        ticks = p_elapsed(t0, p_now());
+        p_strcpy_num(row, "sum NEW' ", bytes);
+        p_report(row, ticks, reps, bytes);
+    }
+}
+
+static VOID p_ab_checksum_path(VOID)
+{
+ULONG   t0, ticks, reps, i, n, bytes;
+ULONG   src = P_IP0_ADDRESS;
+ULONG   dst = P_IP1_ADDRESS;
+char    row[40];
+
+    if (p_scratch_packet == NX_NULL)
+    {
+        return;
+    }
+
+    for (n = 0UL; n < P_AB_NLENS; n++)
+    {
+        bytes = p_ab_lens[n];
+        reps  = (16000UL / (bytes / 4UL)) + 24UL;
+
+        t0 = p_now();
+        for (i = 0UL; i < reps; i++)
+        {
+            (VOID)n68k_ip_checksum_compute_old(p_scratch_packet,
+                                               NX_PROTOCOL_TCP, (UINT)bytes,
+                                               &src, &dst);
+        }
+        ticks = p_elapsed(t0, p_now());
+        p_strcpy_num(row, "ck path OLD ", bytes);
+        p_report(row, ticks, reps, bytes);
+
+        t0 = p_now();
+        for (i = 0UL; i < reps; i++)
+        {
+            (VOID)n68k_ip_checksum_compute(p_scratch_packet, NX_PROTOCOL_TCP,
+                                           (UINT)bytes, &src, &dst);
+        }
+        ticks = p_elapsed(t0, p_now());
+        p_strcpy_num(row, "ck path NEW ", bytes);
+        p_report(row, ticks, reps, bytes);
+    }
+}
+
+static VOID p_bench_ab(ULONG round)
+{
+    p_log("");
+    p_log("-- A/B round %ld: copy ------------------------------------------",
+          (LONG)round);
+    p_ab_copies();
+
+    p_log("");
+    p_log("-- A/B round %ld: n68k_sum_longwords ----------------------------",
+          (LONG)round);
+    p_ab_sums();
+
+    p_log("");
+    p_log("-- A/B round %ld: through n68k_ip_checksum_compute --------------",
+          (LONG)round);
+    p_ab_checksum_path();
+}
+
+/* Agreement, so the A/B is not comparing a wrong answer against a right one. */
+static VOID p_ab_verify(VOID)
+{
+ULONG   i, n, bad = 0xFFFFFFFFUL;
+ULONG   src = P_IP0_ADDRESS;
+ULONG   dst = P_IP1_ADDRESS;
+USHORT  a, b;
+const ULONG *p = (const ULONG *)(const VOID *)p_src_buf;
+
+    for (n = 0UL; (n <= 400UL) && (bad == 0xFFFFFFFFUL); n++)
+    {
+        if (ab_sum_old(p, n) != n68k_sum_longwords(p, n))
+        {
+            bad = n;
+        }
+        if (ab_sum_new2(p, n) != n68k_sum_longwords(p, n))
+        {
+            bad = n | 0x10000UL;
+        }
+    }
+    (VOID)p_check((UINT)(bad == 0xFFFFFFFFUL),
+                  "A/B sums agree, 0..400 longwords", bad);
+
+    bad = 0xFFFFFFFFUL;
+    for (n = 0UL; (n <= 300UL) && (bad == 0xFFFFFFFFUL); n++)
+    {
+        for (i = 0UL; i < 4UL; i++)
+        {
+            ULONG   k;
+
+            for (k = 0UL; k < 320UL; k++)
+            {
+                p_dst_buf[k] = 0xA5U;
+            }
+            ab_copy_old(p_dst_buf + 4UL, p_src_buf + i, n);
+            for (k = 0UL; k < n; k++)
+            {
+                if (p_dst_buf[4UL + k] != p_src_buf[i + k])
+                {
+                    bad = (i << 16) | n;
+                }
+            }
+
+            for (k = 0UL; k < 320UL; k++)
+            {
+                p_dst_buf[k] = 0xA5U;
+            }
+            ab_copy_new2(p_dst_buf + 4UL, p_src_buf + i, n);
+            for (k = 0UL; k < n; k++)
+            {
+                if (p_dst_buf[4UL + k] != p_src_buf[i + k])
+                {
+                    bad = 0x1000000UL | (i << 16) | n;
+                }
+            }
+        }
+    }
+    (VOID)p_check((UINT)(bad == 0xFFFFFFFFUL),
+                  "A/B copies exact, 0..300 B x 4 alignments", bad);
+
+    if (p_scratch_packet != NX_NULL)
+    {
+        a = n68k_ip_checksum_compute_old(p_scratch_packet, NX_PROTOCOL_TCP,
+                                         1460U, &src, &dst);
+        b = n68k_ip_checksum_compute(p_scratch_packet, NX_PROTOCOL_TCP,
+                                     1460U, &src, &dst);
+        (VOID)p_check((UINT)(a == b), "A/B checksum paths agree at 1460 B",
+                      ((ULONG)a << 16) | (ULONG)b);
+    }
+}
+
 static VOID p_bench_checksum(VOID)
 {
 ULONG   t0, reps, i;
@@ -466,6 +751,16 @@ ULONG   len = 1460UL;
 
         p_report("checksum chain, vendored", ticks_ref, reps, clen);
         p_report("checksum chain, net68k", ticks_new, reps, clen);
+
+        t0 = p_now();
+        for (i = 0UL; i < reps; i++)
+        {
+            (VOID)n68k_ip_checksum_compute_old(p_scratch_chain,
+                                               NX_PROTOCOL_TCP, (UINT)clen,
+                                               &src, &dst);
+        }
+        ticks_ref = p_elapsed(t0, p_now());
+        p_report("checksum chain, net68k OLD", ticks_ref, reps, clen);
     }
 
     /*
@@ -1513,6 +1808,18 @@ ULONG   actual;
 
     p_scratch_build();
 
+    /*
+     * The 68000 A/B goes first and repeats three times, so a run that is cut
+     * short still carries the result it was launched for, and so the three
+     * rounds bracket whatever drift the rest of the run would introduce.
+     */
+    p_log("");
+    p_log("-- A/B agreement ----------------------------------------------");
+    p_ab_verify();
+    p_bench_ab(1UL);
+    p_bench_ab(2UL);
+    p_bench_ab(3UL);
+
     p_log("");
     p_log("-- alignment census -------------------------------------------");
     p_census_alignment();
@@ -1533,8 +1840,20 @@ ULONG   actual;
 
     p_log("");
     p_log("-- pipeline ceiling (no protocol) -----------------------------");
-    p_bench_pipeline(P_CK_VENDORED, "loopback pipeline, vendored ck");
-    p_bench_pipeline(P_CK_NET68K,   "loopback pipeline, net68k ck");
+    p_bench_pipeline(P_CK_VENDORED,   "loopback pipeline, vendored ck");
+    p_bench_pipeline(P_CK_NET68K_OLD, "loopback pipeline, net68k OLD ck");
+    p_bench_pipeline(P_CK_NET68K,     "loopback pipeline, net68k ck");
+    p_bench_pipeline(P_CK_NET68K_OLD, "loopback pipeline, net68k OLD ck");
+    p_bench_pipeline(P_CK_NET68K,     "loopback pipeline, net68k ck");
+
+#ifdef P_AB_ONLY
+    p_log("");
+    p_log("%ld checks, %ld failures -- %s",
+          p_checks, p_failures, (p_failures == 0UL) ? "PASS" : "FAIL");
+    (VOID)tx_amiga_orphan_thread(&p_main_thread);
+    p_flush();
+    return((p_failures == 0UL) ? 0 : 20);
+#else
 
     p_log("");
     p_log("-- end to end, %ld KB per run ---------------------------------",
@@ -1581,4 +1900,5 @@ ULONG   actual;
     p_flush();
 
     return((p_failures == 0UL) ? 0 : 20);
+#endif /* P_AB_ONLY */
 }

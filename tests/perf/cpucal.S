@@ -113,6 +113,16 @@ _cal_addx:
         movem.l sp@+,d2-d3
         rts
 
+| The 68000 has no MULU.L at all -- the assembler rejects it and the machine
+| would trap -- so the two multiply kernels are absent from that build and
+| cpucal.c prints no row for them.
+#if !defined(__mc68020__) && !defined(__mc68030__) && \
+    !defined(__mc68040__) && !defined(__mc68060__)
+#define CAL_NO_MULU_L 1
+#endif
+
+#ifndef CAL_NO_MULU_L
+
 | MULU.L 32x32->32.  44 cycles on a real 68030, i.e. 22x the cost of ADD.L.
 | A model that reports anything near 1x is not charging for it -- which is
 | exactly what the P-256 work found and why it refused to quote 68030 ratios.
@@ -153,6 +163,8 @@ _cal_mulu64:
 .Lmulu64_done:
         movem.l sp@+,d2-d4
         rts
+
+#endif /* CAL_NO_MULU_L */
 
 
 | ---------------------------------------------------------------------------
