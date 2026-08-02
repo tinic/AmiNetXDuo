@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The Developer drawer's `Profile` names functions inside `bsdsocket.library`, so a profile of an ordinary program shows where the stack spent its time rather than one bar for the whole library. A library it cannot read is still named, as before
+
 ## 0.16.4
 
 - TCP transfers are faster. A megabyte over the wire on a 14 MHz 68020 went from 234 to 283 KB/s and over loopback from 610 to 708 KB/s, by taking two costs out of the scheduling underneath the stack rather than out of the protocol: a thread handing work to another thread no longer wakes a third one to do it, and the lock taken around every critical section is no longer a function call. The same work is removed on every processor, but 68020 is where it has been measured. Neither change alters what the stack sends

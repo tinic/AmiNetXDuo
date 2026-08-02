@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Profile -- turn sampled PCs back into a ranked list of functions.
 
-Three things stand between a sampled address and a name, and getting any of
+Four things stand between a sampled address and a name, and getting any of
 them wrong produces a ranking that looks entirely reasonable and is not.
 
 1. RELOCATION.  LoadSeg() puts each hunk wherever it likes.  The Amiga side
@@ -17,12 +17,20 @@ them wrong produces a ranking that looks entirely reasonable and is not.
    so this walks the link map for the address each object's .text was placed at
    and runs `nm` per object to recover the rest.
 
-3. EVERYTHING ELSE.  A sample can land in Kickstart, in a shared library, in a
-   device driver.  Every AmigaOS library is a jump table, so the Amiga side
-   resolved every LVO of every library, device and resource to its address; a
-   sample there is named by the nearest preceding one, and one that is in a
-   module's code but near no entry point is named by the MODULE, which is the
-   honest answer.  The NDK's lvo/*.i files turn the offset back into a name.
+3. SHARED LIBRARIES.  A library's code is hunks LoadSeg() put wherever it
+   liked, exactly like the program's, so it needs exactly the same treatment --
+   and it is where a profile of a real application spends its time.  A library
+   that tells the profiler where its seglist is (prof.h) gets its hunk bases
+   recorded, and --lib then does 1 and 2 over again against the library's own
+   file.  Without that a sample in a library can only be named by module.
+
+4. EVERYTHING ELSE.  A sample can land in Kickstart, in a device driver, in a
+   library that does not cooperate -- most of them, since 3 is this tool's
+   convention and not Exec's.  Every AmigaOS library is a jump table, so the
+   Amiga side resolved every LVO of every library, device and resource to its
+   address; a sample there is named by the nearest preceding one, and one that
+   is in a module's code but near no entry point is named by the MODULE, which
+   is the honest answer.  The NDK's lvo/*.i files turn the offset into a name.
 
 Usage:
     tools/profiler/profreport.py spin.prof \\
@@ -30,6 +38,11 @@ Usage:
         --map build/p20/tools/profiler/profspin.map \\
         --objdir build/p20/tools/profiler \\
         --folded spin.folded --trace spin.json
+
+    tools/profiler/profreport.py fitz.prof --ndk "$AMIGA_NDK" \\
+        --lib exe=build/cm/src/bsdsocket/bsdsocket.library,\\
+map=build/cm/src/bsdsocket/bsdsocket.library.map,\\
+objdir=build/cm/src/bsdsocket
 
 SPDX-License-Identifier: MIT
 """
@@ -53,11 +66,12 @@ RANGE = struct.Struct(">2L2H32s")
 TASK = struct.Struct(">L28s")
 WINDOW = struct.Struct(">3L")
 SAMPLE = struct.Struct(">L2H2L")
+LIBSEG = struct.Struct(">2L2H")
 
 PROF_MAGIC = 0x41505232          # 'APR2'
 FMTVALID, OVERFLOW, ODDFORMAT, NTSC, LOSTAUDIO, RATEDIP = 1, 2, 4, 8, 16, 32
 
-PRK_TARGET, PRK_PROFILER, PRK_LIB, PRK_MEMORY = 0, 1, 2, 3
+PRK_TARGET, PRK_PROFILER, PRK_LIB, PRK_MEMORY, PRK_LIBSEG = 0, 1, 2, 3, 4
 
 CCK_LINE = 227
 
@@ -92,6 +106,11 @@ class Profile:
          self.colorclock, self.frames, self.channel,
          self.winframes) = f[:23]
 
+        # Version 2 files have no library segment table and a zero here, that
+        # longword having been reserved and written as zero.  So this needs no
+        # version test: the count is the count.
+        self.nlibsegs = f[23]
+
         if self.magic != PROF_MAGIC:
             die("%s: bad magic $%08x -- tests/perf/prof writes a different, "
                 "older format ('APRF'); use tools/prof-report.py for those"
@@ -119,6 +138,9 @@ class Profile:
                       for t, nm in take(TASK, self.ntasks)}
         self.windows = take(WINDOW, self.nwindows)
         self.samples = take(SAMPLE, self.stored)
+        # After the samples, so a version-3 file read by a version-2 reader is
+        # a version-2 file with bytes after the end rather than a misparse.
+        self.libsegs = take(LIBSEG, self.nlibsegs)
 
         # The one integrity check that costs nothing: every section is a fixed
         # record size times a count in the header, so the file has exactly one
@@ -317,10 +339,86 @@ def build_symbol_table(nm, mapfile, objdir):
     return table
 
 
+# ------------------------------------------------------ a library's file --
+
+def parse_lib_spec(spec):
+    """--lib exe=...,map=...,objdir=...[,name=...] -> dict.
+
+    `name` is what the library calls itself on Exec's list, which is what the
+    profile records.  It defaults to the basename of the file, because a
+    library is normally called what it is stored as.
+    """
+    out = {}
+    for field in spec.split(","):
+        if "=" not in field:
+            die("--lib %r: every field is key=value; got %r" % (spec, field))
+        k, v = field.split("=", 1)
+        k = k.strip()
+        if k not in ("name", "exe", "map", "objdir"):
+            die("--lib %r: no such field %r (name, exe, map, objdir)" % (spec, k))
+        out[k] = v.strip()
+    if "exe" not in out:
+        die("--lib %r: needs exe=<the library file>" % spec)
+    out.setdefault("name", os.path.basename(out["exe"]))
+    out.setdefault("objdir", os.path.dirname(out["map"]) if out.get("map") else ".")
+    return out
+
+
+class LibSymbols:
+    """One shared library's hunks and symbols, cross-checked against the run.
+
+    The same two things the target executable gets, for the same reasons: the
+    hunk sizes in the file must match the ones the run recorded or the symbols
+    belong to a different build, and the statics are only reachable through
+    the map plus nm per object.
+    """
+
+    def __init__(self, name, spec, run_sizes, nm):
+        self.name = name
+        self.ok = False
+        self.nsyms = 0
+
+        sizes = hunk_sizes(spec["exe"])
+        if len(sizes) != len(run_sizes):
+            self.note = ("%s: the file has %d hunks, the run had %d"
+                         % (spec["exe"], len(sizes), len(run_sizes)))
+            return
+        if any(a != b for a, b in zip(sizes, run_sizes)):
+            self.note = ("%s: hunk sizes differ -- file %s, run %s"
+                         % (spec["exe"], sizes, list(run_sizes)))
+            return
+
+        self.symtab = (build_symbol_table(nm, spec["map"], spec["objdir"])
+                       if spec.get("map") else {})
+        self.nsyms = sum(len(v) for v in self.symtab.values())
+        self.sections = [".text", ".data", ".bss"][:len(sizes)]
+        self.sorted_syms = {}
+        for sec, rows in self.symtab.items():
+            self.sorted_syms[sec] = ([r[0] for r in rows], rows)
+
+        self.ok = True
+        self.note = ("%d hunks, sizes %s, %d symbols from %s"
+                     % (len(sizes), sizes, self.nsyms,
+                        spec.get("map") or "(no map -- globals only)"))
+
+    def lookup(self, hunk, off):
+        """(function, object) for an offset into one hunk, or None."""
+        if hunk >= len(self.sections):
+            return None
+        sec = self.sections[hunk]
+        addrs, rows = self.sorted_syms.get(sec, ([], []))
+        if not addrs:
+            return None
+        i = bisect.bisect_right(addrs, off) - 1
+        if i < 0:
+            return None
+        return rows[i][1], rows[i][2]
+
+
 # ----------------------------------------------------------- attribution --
 
 class Resolver:
-    def __init__(self, prof, exe, symtab):
+    def __init__(self, prof, exe, symtab, libspecs=None, nm=None):
         self.prof = prof
         self.symtab = symtab
 
@@ -367,6 +465,65 @@ class Resolver:
         self.ranges = sorted(prof.ranges)
         self.range_lo = [r[0] for r in self.ranges]
 
+        self._init_libs(libspecs or [], nm)
+
+    # -- shared libraries ---------------------------------------------------
+
+    def _init_libs(self, libspecs, nm):
+        """Where each cooperating library's hunks landed, and its symbols.
+
+        A library that told the Amiga side where its seglist is has an entry
+        here and its samples get an offset into a named hunk.  One that did
+        not is absent, and falls through to the hull-and-module path below --
+        which is what every third-party library gets, and is the reason that
+        path is still here.
+        """
+        self.libsegs = defaultdict(list)          # libidx -> [(base, size)]
+        for base, size, libidx, hunk in self.prof.libsegs:
+            self.libsegs[libidx].append((hunk, base, size))
+        for libidx in self.libsegs:
+            self.libsegs[libidx].sort()
+
+        # Flat and sorted, so a PC costs one bisect rather than a scan over
+        # every hunk of every library.
+        self._lib_lo, self._lib_rows = [], []
+        for libidx, hunks in self.libsegs.items():
+            for hunk, base, size in hunks:
+                self._lib_rows.append((base, size, libidx, hunk))
+        self._lib_rows.sort()
+        self._lib_lo = [r[0] for r in self._lib_rows]
+
+        byname = {}
+        for spec in libspecs:
+            byname[spec["name"]] = spec
+
+        self.libsyms = {}                          # libidx -> LibSymbols
+        self.libnotes = []                         # what to print about them
+        for libidx, hunks in sorted(self.libsegs.items()):
+            name = (self.prof.libs[libidx][3]
+                    if libidx < len(self.prof.libs) else "?")
+            sizes = [size for _h, _b, size in hunks]
+            spec = byname.get(name)
+            if spec is None:
+                self.libnotes.append(
+                    "%s: %d hunks from its seglist, no --lib for it -- named "
+                    "by hunk and offset" % (name, len(hunks)))
+                continue
+            syms = LibSymbols(name, spec, sizes, nm)
+            self.libnotes.append("%s: %s" % (name, syms.note))
+            if syms.ok:
+                self.libsyms[libidx] = syms
+
+    def lib_link_time(self, pc):
+        """(library index, hunk, offset) for a PC inside a library's hunks."""
+        i = bisect.bisect_right(self._lib_lo, pc) - 1
+        if i < 0:
+            return None
+        base, size, libidx, hunk = self._lib_rows[i]
+        if pc >= base + size:
+            return None
+        return libidx, hunk, pc - base
+
     def module_of(self, pc):
         i = bisect.bisect_right(self.range_lo, pc)
         best = None
@@ -395,6 +552,24 @@ class Resolver:
                 if i >= 0:
                     return (rows[i][1], rows[i][2])
             return ("%s+$%x" % (sec, off), "the program")
+
+        # Inside a shared library that said where its seglist is.  This is the
+        # same mapping the target gets and is checked the same way, so it
+        # comes before the hull: a hull is a bracket, this is an extent.
+        hit = self.lib_link_time(pc)
+        if hit is not None:
+            libidx, hunk, off = hit
+            name = (self.prof.libs[libidx][3]
+                    if libidx < len(self.prof.libs) else "?")
+            syms = self.libsyms.get(libidx)
+            if syms is not None:
+                found = syms.lookup(hunk, off)
+                if found is not None:
+                    # The library's name in front of the object's, because the
+                    # target's objects are in this same column and two builds'
+                    # worth of file names would otherwise be indistinguishable.
+                    return (found[0], "%s/%s" % (name.split(".")[0], found[1]))
+            return ("%s:%d+$%x" % (name, hunk, off), name)
 
         rng = self.module_of(pc)
 
@@ -723,6 +898,12 @@ def main():
     ap.add_argument("--trace", help="write Chrome Trace Event JSON here "
                                     "(Perfetto, speedscope)")
     ap.add_argument("--contain", help="verify against a profspin ranges file")
+    ap.add_argument("--lib", action="append", default=[], metavar="SPEC",
+                    help="a shared library to name functions in, as "
+                         "exe=<file>,map=<file>,objdir=<dir>[,name=<what it "
+                         "calls itself>].  Repeatable.  Only works for a "
+                         "library that told the profiler where its seglist "
+                         "is; any other is still named by module.")
     args = ap.parse_args()
 
     _NDK[0] = args.ndk
@@ -730,7 +911,15 @@ def main():
     prof = Profile(args.profile)
     symtab = (build_symbol_table(args.nm, args.mapfile, args.objdir)
               if args.mapfile else {})
-    res = Resolver(prof, args.exe, symtab)
+    libspecs = [parse_lib_spec(spec) for spec in args.lib]
+    res = Resolver(prof, args.exe, symtab, libspecs, args.nm)
+
+    # A --lib for a library that never appeared, or appeared without a
+    # seglist, silently does nothing -- so say so rather than printing a
+    # report that is missing exactly what was asked for.
+    named = {res.prof.libs[i][3] for i in res.libsegs
+             if i < len(res.prof.libs)}
+    unmatched = [spec["name"] for spec in libspecs if spec["name"] not in named]
 
     samples = prof.phase(args.phase)
     all_times = prof.unwrap()
@@ -779,6 +968,11 @@ def main():
     print("symbols      %d from %s" % (nsym, args.mapfile or "(none)"))
     print("modules      %d libraries, %d resolved jump-table entries, "
           "%d named ranges" % (prof.nlibs, prof.nlvos, prof.nranges))
+    for note in res.libnotes:
+        print("library      %s" % note)
+    for name in unmatched:
+        print("!! --lib %s: no library of that name gave the run a seglist; "
+              "its samples stay named by module" % name)
     print()
 
     if not samples:

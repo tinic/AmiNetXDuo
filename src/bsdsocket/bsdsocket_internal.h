@@ -316,6 +316,42 @@ typedef struct
 struct AmiSocket;
 
 /*
+ * Where our seglist is, for a profiler.
+ *
+ * A sampled PC inside this library is an address in a hunk LoadSeg() put
+ * wherever it liked, and nothing outside can turn it back into a function
+ * without knowing where the hunks landed -- which is what the seglist says.
+ * Exec publishes struct Library and nothing after it, so sb_SegList sits at an
+ * offset only this file knows, and a profiler reading it from a hard-coded
+ * number would break silently the first time a field moved: it would still
+ * find eight bytes that look like a segment header and still resolve every
+ * address to a wrong, plausible name.
+ *
+ * So this says where it is, in a record that identifies itself. The profiler
+ * scans our positive half for the magic, checks that bst_LibBase is the base
+ * it was found in and that the five longwords sum to zero, and then checks the
+ * seglist it gets against the hull of our own jump table. It costs five
+ * longwords and one assignment; a library that does not carry it is named by
+ * module, which is where every library started.
+ *
+ * The convention is the profiler's and is written down in
+ * tools/profiler/prof.h -- deliberately not included from here, because it
+ * belongs to a tool that is meant to be liftable out of this tree whole and
+ * this library must not acquire a dependency on it. Five longwords is the
+ * whole of it.
+ */
+#define BSD_PROF_SEGTAG_MAGIC   0x50534731UL    /* 'PSG1' */
+
+struct BsdProfSegTag
+{
+    ULONG   bst_Magic;
+    ULONG   bst_Size;
+    ULONG   bst_LibBase;
+    ULONG   bst_SegList;
+    ULONG   bst_Sum;
+};
+
+/*
  * One of these per OpenLibrary(). The master base (sb_Master == NULL) owns
  * the segment list and the child list; every opener gets a byte-for-byte
  * clone of it (jump table included) with its own descriptor table, errno
@@ -443,6 +479,10 @@ struct AmiSocketBase
     char                   *sb_HostAliases[1];
     ULONG                   sb_HostAddr;
     char                    sb_HostName[256];
+
+    /* Last, so nothing above it moves. Anywhere in the positive half will do:
+       the profiler scans for it rather than being told an offset. */
+    struct BsdProfSegTag    sb_ProfSegTag;
 };
 
 /* ---------------------------------------------------------------- socket -- */

@@ -47,6 +47,26 @@ empty results.
   `_tx_thread_interrupt_restore` 4.2%, `Supervisor` 3.4%, `Reschedule` 2.8%.
   Top 24 is 73.0%.
 
+  **It holds in a real application, but only just, 2026-08-02.** A `fitz`
+  transfer through the shared library, now that the profiler can name functions
+  inside it, renormalised over the same four categories and with Exec's idle
+  loop excluded:
+
+  | | NetX Duo | copy+checksum | Exec | ThreadX | ThreadX+Exec |
+  |---|---|---|---|---|---|
+  | this bracket test, wire | 25.6% | 31.3% | 19.2% | 23.3% | **42.5%** |
+  | fitz, whole run | 33.2% | 32.3% | 20.7% | 13.8% | **34.5%** |
+  | fitz, read arm | 33.2% | 34.8% | 20.3% | 11.7% | **32.0%** |
+  | fitz, write arm | 33.1% | 30.0% | 21.0% | 15.8% | **36.8%** |
+
+  So the ordering survives on a write and over the run as a whole, and the
+  margin collapses from 16.9 points to 1.3 -- and on a read it reverses. What
+  moves is ThreadX's own share, 23.3% down to 13.8%: this bracket test drives
+  one socket from one task as fast as it can, where a real client spends much
+  of a read waiting, so the per-call bracket is amortised over more bytes.
+  **Quote the 42.5% as what a tight single-socket loop costs, not as what an
+  application sees.**
+
   **A CIA timer cannot be used for this and fails silently.**
   `AddICRVector()` arbitrates the ICR vector, not the hardware. CIA-B timer B
   ran at a correct 1000 Hz and stopped at the first `ami_millis()`, because
@@ -114,18 +134,22 @@ empty results.
   the rest looks like Amiberry's a2065 frame pacing, which this rig cannot
   separate from the wire.
 
-  **The tool names `bsdsocket.library` by module and nothing else, and 93.8% of
-  its samples land in the unnamed body.** That is 78.7% of the busy CPU on a
-  read and 82.0% on a write reduced to one line. `prof.c` records a range per
-  library from the hull of its jump-table targets, which here is two hulls of
-  99 KB against a 474 KB code hunk, and everything between them resolves to
-  `(unattributed)`. They are the library and not something else: the span
-  between the lowest and highest hull is `$0782d462`-`$078a3c82`, 485408 bytes,
-  against 484964 bytes of hunks in the library file, and no other module's
-  range lies inside it. Teaching the profiler to walk a loaded library's
-  seglist -- `LibNode` back to the seglist, then the `prof_walk_seglist()` the
-  target already gets, plus the host side reading the library's own map -- is
-  worth more than any single finding a run like this can produce.
+  **The tool named `bsdsocket.library` by module and nothing else, and 93.8% of
+  its samples landed in the unnamed body.** That was 78.7% of the busy CPU on a
+  read and 82.0% on a write reduced to one line. `prof.c` recorded a range per
+  library from the hull of its jump-table targets, which here was two hulls of
+  99 KB against a 474 KB code hunk, and everything between them resolved to
+  `(unattributed)`.
+
+  **DONE, 2026-08-02.** The library carries five self-identifying longwords
+  saying where its seglist is, `prof.c` scans for them and checks the answer
+  against the jump-table hull it already had, and `profreport.py --lib` reads
+  the library's own map and objects. On the re-run the previously unnamed
+  samples are 100.0% named with no residue, and `(unattributed)` over the whole
+  profile falls from 34.0% to 2.5% -- that remainder being the `fitz` handler,
+  which is a different program the run never loaded, and a few Kickstart
+  addresses far from any entry point. `tools/profiler/ReadMe` has the
+  convention and why it is a scanned record rather than an offset.
 
 - **A cycle-attribution profiler, to find where a transfer's time actually
   goes.** The copy and checksum together are about 20% of a wire transfer and

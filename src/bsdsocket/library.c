@@ -137,6 +137,23 @@ VOID bsd_bcopy(const APTR src, APTR dst, ULONG size)
         CopyMem((APTR)src, dst, size);
 }
 
+/*
+ * Fill in the segment tag for a base -- see struct BsdProfSegTag. The sum is
+ * what stops the magic appearing by accident in somebody else's data from
+ * being taken for one of these, so it is computed rather than written out.
+ */
+static VOID bsd_prof_segtag(struct AmiSocketBase *base, APTR seglist)
+{
+    struct BsdProfSegTag *t = &base->sb_ProfSegTag;
+
+    t->bst_Magic   = BSD_PROF_SEGTAG_MAGIC;
+    t->bst_Size    = sizeof(*t);
+    t->bst_LibBase = (ULONG)base;
+    t->bst_SegList = (ULONG)seglist;
+    t->bst_Sum     = 0UL - (t->bst_Magic + t->bst_Size +
+                            t->bst_LibBase + t->bst_SegList);
+}
+
 /* Open-coded NewList(); amiga.lib is not available to a shared library. */
 static VOID bsd_new_list(struct MinList *list)
 {
@@ -162,6 +179,7 @@ static struct AmiSocketBase *bsd_lib_init(
     base->sb_SegList = seglist;
     base->sb_SysBase = sysbase;
     base->sb_Master  = NULL;
+    bsd_prof_segtag(base, seglist);
 
     base->sb_Lib.lib_Node.ln_Type = NT_LIBRARY;
     base->sb_Lib.lib_Node.ln_Name = bsd_lib_name;
@@ -212,6 +230,10 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     child->sb_Lib.lib_Flags   = LIBF_CHANGED;
     child->sb_Master          = master;
     child->sb_Task            = FindTask(NULL);
+
+    /* The copy names the master as the base it sits in, which is the check
+       that stops a moved record being believed. Same seglist, new base. */
+    bsd_prof_segtag(child, master->sb_SegList);
 
     /*
      * The clone carries copies of the master-only fields, and a copied
