@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 #
-# Run the tcpdrill scripts under FS-UAE.
+# Run the tcpdrill scripts under an emulator.
 #
 #   tests/tcpdrill/run-tcpdrill.sh [-m MODEL] [-t SECS] [-b BUILD] [-T TAG]
-#                                  [-s SCRIPT]
+#                                  [-s SCRIPT] [-A]
+#
+# -A PICKS AMIBERRY.  FS-UAE needs an X server and dies in GLAD without one,
+# so on a headless box -- which the Amiga lab machine is -- the run ends with
+# "fs-uae exited early after 1s" and no results at all.  Amiberry runs
+# genuinely headless.  Same block tests/ipv6/run-socket-fsuae.sh carries, and
+# the same flag.
 #
 # ONE BOOT PER SCRIPT FILE.  Every case in the file runs inside a single
 # emulator run, because build/.fsuae.lock serialises runs and the queue is
@@ -27,15 +33,17 @@ TIMEOUT=300
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 TAG="tcpdrill"
 SCRIPT="$ROOT/tests/tcpdrill/scripts/tcp.drill"
+RUNNER="${AMINETXDUO_RUNNER:-fsuae}"
 
-while getopts "m:t:b:T:s:" opt; do
+while getopts "m:t:b:T:s:A" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
         T) TAG="$OPTARG" ;;
         s) SCRIPT="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t secs] [-b build] [-T tag] [-s script]" >&2
+        A) RUNNER=amiberry ;;
+        *) echo "usage: $0 [-m model] [-t secs] [-b build] [-T tag] [-s script] [-A]" >&2
            exit 2 ;;
     esac
 done
@@ -60,14 +68,20 @@ echo "==> script: $SCRIPT ($(grep -c '^case ' "$SCRIPT") cases)"
 
 export AMINETXDUO_RUN_TAG="$TAG"
 
+if [ "$RUNNER" = "amiberry" ]; then
+    RUN=("$ROOT/tools/amiberry-run.sh")
+    HD="$ROOT/build/amiberry-testhd-$TAG"
+else
+    RUN=("$ROOT/tools/fsuae-run.sh")
+    HD="$ROOT/build/testhd-$TAG"
+fi
+
 set +e
-"$ROOT/tools/fsuae-run.sh" -m "$MODEL" -t "$TIMEOUT" \
+"${RUN[@]}" -m "$MODEL" -t "$TIMEOUT" \
     "$DRILL" "$STAGE/devs" "$STAGE/libs" "$STAGE/drill.txt" \
     > "$ROOT/build/tcpdrill-$TAG.log" 2>&1
 RC=$?
 set -e
-
-HD="$ROOT/build/testhd-$TAG"
 
 echo
 echo "================ tcpdrill ================"
@@ -80,7 +94,11 @@ fi
 
 echo
 echo "emulator log: build/tcpdrill-$TAG.log"
-echo "serial log:   build/serial-$TAG.log"
+if [ "$RUNNER" = "amiberry" ]; then
+    echo "serial log:   build/amiberry-serial-$TAG.log"
+else
+    echo "serial log:   build/serial-$TAG.log"
+fi
 echo "guest files:  $HD"
 
 exit "$RC"
