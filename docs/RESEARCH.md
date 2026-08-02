@@ -21524,3 +21524,109 @@ lookups differ when an index is given. No IPv4-only
 `nx_tcp_client_socket_source_connect()` wrapper: the UDP pair exists because
 `_nx_udp_socket_source_send()` predates the duo API, and there is no such
 history here.
+
+
+## 86. The copy at 2 mod 4, and the thing that does not fix it (2026-08-02)
+
+§45 records why `n68k_copy_bytes()` aligns the destination and then reads
+longwords from wherever the source happens to be. The alignment census says
+that source is at 2 mod 4 on eight of the nine drivers surveyed -- ariadne,
+ariadne_ii, x-surf, x-surf-100 on Z2 and Z3, hydra, a2065, cnet -- so 2 mod 4
+is not a corner, it is the case.
+
+An instrumented SANA-II device priced `S2_CopyToBuff` per byte for both stacks
+on one machine in one run, two-point fit over 64 and 1024 bytes:
+
+| src align | Roadshow | ours |
+|---|---|---|
+| 0 mod 4 | 133 | 158 |
+| 1 mod 4 | 715 | 205 |
+| 2 mod 4 | 182 | 204 |
+| 3 mod 4 | 716 | 204 |
+
+The odd offsets are a rout in our favour -- Roadshow falls off a 5.4x cliff
+where this routine is flat -- and 2 mod 4 is the one alignment where it is
+ahead.
+
+### The idea that does not work
+
+A 2 mod 4 offset is exactly a word, so the split longword reads can be moved to
+the aligned side and put back with `swap` and `move.w` rather than paid for at
+the bus. That is cheap register work in place of split cycles, and it is the
+reason 2 mod 4 looks special when 1 and 3 do not.
+
+It loses, and so does every other word-granularity variant. All five assembled
+into one binary and measured in one run, A1200 profile, 1460 bytes, aligned
+destination, ns/B at a source offset of 2:
+
+| | s2 |
+|---|---|
+| `movem.l`, destination aligned (what ships) | 233 |
+| `movem.w`, both sides word aligned | 349 |
+| aligned `movem.l` + `swap`/`move.w` recombine | 359 |
+| `move.w a1@+,a0@+`, eight per iteration | 419 |
+
+The cost model says why, and it is not the one the idea assumes. On this
+profile memory is nearly free and instructions are not: the aligned `movem.l`
+block runs at 82 cycles per 32 bytes, which is about what the MC68020UM
+charges for the two instructions with no bus cost at all. A misaligned
+longword adds 22 cycles per 32 bytes -- 2.75 per longword. A `swap` plus a
+`move.w Dn,Dn` is 6 published cycles and measures nearer 7 with the
+instruction fetch. Seven to save 2.75, per longword, every longword. There is
+no arrangement of it that wins, and word-granularity loses harder still
+because it doubles the instruction count outright.
+
+Aligning the source instead of the destination -- keeping the split but moving
+it from the read to the write -- measured 232.8 against 229.8. Nothing in it.
+
+### The thing that does work
+
+If instructions are the currency, spend fewer of them. The block loop was one
+`movem.l` pair plus `lea`, `subq` and `bne` per 32 bytes; the three bookkeeping
+instructions are a third of the instruction count. Unrolling to four pairs per
+iteration amortises them over 128 bytes:
+
+| pairs per iteration | s0 | s1 | s2 | s3 |
+|---|---|---|---|---|
+| one (before) | 179.7 | 227.2 | 228.3 | 229.5 |
+| two | 167.8 | 216.5 | 218.0 | 215.6 |
+| four | 160.2 | 211.8 | 212.0 | 209.8 |
+| eight | 161.0 | 206.5 | 212.3 | 210.8 |
+
+Eight is not better than four and doubles the loop body, so four ships. `dbf`
+in place of `subq`/`bne` measured the same and would need a 65536-block guard,
+so it does not. The noise floor was measured rather than assumed: the same
+routine was assembled twice at two addresses in the same binary and the two
+copies differ by up to 1.2%, which is the band any claim above has to clear.
+
+Three runs each, not averaged, ns/B over 1460 bytes:
+
+| | s0 | s1 | s2 | s3 |
+|---|---|---|---|---|
+| before | 180.0 / 179.7 / 179.7 | 227.5 / 227.2 / 227.2 | 229.8 / 229.5 / 227.2 | 229.8 / 229.5 / 229.5 |
+| after | 159.4 / 162.8 / 159.4 | 211.7 / 211.7 / 211.7 | 209.4 / 209.4 / 209.4 | 212.1 / 209.0 / 212.1 |
+
+The "before" row is the unmodified routine measured from the variant harness,
+which is the only place it was ever timed at all four alignments -- the
+shipped harness had no s3 row until this change added one. In its own position
+in its own binary the unmodified routine read 183.6 / 180.9 / 183.5 at s0 and
+227.6 / 226.7 / 227.0 at s2, which is the same figure to within the noise band
+above.
+
+This does not close the 2 mod 4 gap by making 2 mod 4 special -- the split
+cycle is still paid. It closes it by making the whole routine cheaper, which
+is where Roadshow's lead actually was: it is ahead at 0 mod 4 by the same
+proportion it is ahead at 2. Everything downstream moved with it, in the same
+run: `nx_packet_data_extract_offset` 200.9 to 178.7 ns/B, `nx_packet_copy` of
+an 8 KB chain 266.2 to 246.7, an allocate/append-1460/release round trip 273.4
+to 244.3.
+
+### Coverage
+
+The exactness sweep in `tests/perf/perf_test.c` ran lengths 0 to 96 at all
+sixteen alignment pairs, which never once entered a 128-byte block -- a sweep
+that covers nothing is worse than no sweep, because it passes. It now runs to
+288, so two whole blocks and a remainder execute at every pair. The long
+8184-byte case was at 1 mod 4 once its head bytes were gone; a second one at
+2 mod 4 with an aligned destination joins it, so the alignment the drivers
+actually produce is checked at length as well as in the sweep.
