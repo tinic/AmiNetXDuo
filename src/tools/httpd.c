@@ -119,9 +119,44 @@ enum
 
 /* A walk that a client can ask for -- DELETE and COPY of a drawer -- has to
    stop somewhere, and a filesystem that keeps saying "not empty" is the shape
-   a loop here would take.  A tree that needs more passes than this is refused
+   a loop here would take.  A tree that needs more steps than this is refused
    half-done and said so in the multistatus. */
 #define HTTPD_WALK_MAX     20000UL
+
+/*
+ * How much of a walk one pass of the event loop does.  This is the whole
+ * reason the walks are a state machine: a DELETE of a thousand files is a
+ * thousand-ish passes and every other connection is served between them, where
+ * doing it in one go would stop the server for as long as the tree took.
+ *
+ * ONE entry, because a single AmigaDOS operation cannot be interrupted and is
+ * already longer than a network round trip: DeleteFile() measured 150 ms on a
+ * directory filesystem under emulation, so a slice of eight was 1.2 seconds
+ * during which nothing else was answered.  What a slice costs on top is one
+ * WaitSelect(), which is nothing beside the packet it is wrapped around.
+ *
+ * A file being copied is different -- Read() and Write() of a scratch-full are
+ * fast -- so those go eight at a time.
+ */
+#define HTTPD_WALK_SLICE       1    /* directory entries acted on          */
+#define HTTPD_COPY_SLICE       8    /* scratch-fulls of a file copied      */
+
+/* How deep a walk may go below the request path.  24 levels is deeper than a
+   path 256 bytes long can usefully reach. */
+#define HTTPD_WALK_DEPTH      24
+
+/*
+ * What a partial DELETE may name.  RFC 4918 9.6.1 wants every failure in the
+ * multistatus, and a drawer of a thousand delete-protected files would then be
+ * a thousand-element answer on a machine with a megabyte.
+ *
+ * So the answer names the first eight, and at most 768 bytes of them --
+ * whichever runs out first, which for a long name is the bytes.  Everything
+ * past the bound is deleted or not deleted exactly the same way; it is only
+ * unnamed, and a client that wants the rest asks again.
+ */
+#define HTTPD_FAILS_MAX        8
+#define HTTPD_FAIL_MAX       768
 
 /* Locks.  Fixed, like everything else: eight is more than the clients hold at
    once -- Finder locks the file it is writing and nothing else -- and a ninth
@@ -143,6 +178,11 @@ enum
 /* How long WaitSelect() may sleep with nothing happening.  It is what makes
    Ctrl-C and the connection timeout noticed, and nothing else depends on it. */
 #define HTTPD_TICK_MICROS  250000
+
+/* And how long it may sleep with a tree walk outstanding.  Short, because the
+   walk wants the processor -- but NOT zero, which WaitSelect() reads as a poll
+   and answers without yielding at all. */
+#define HTTPD_WALK_MICROS    2000
 
 /* 1978-01-01 to 1970-01-01, the same constant src/tlslib/tls_time.c uses. */
 #define HTTPD_AMIGA_EPOCH  252460800UL
@@ -200,7 +240,36 @@ enum
     CONN_REQUEST,       /* reading the request head                        */
     CONN_CONTINUE,      /* pushing the interim 100 out before the body     */
     CONN_BODY,          /* reading the body through the sink               */
+    CONN_WALK,          /* a slice of a tree walk per pass; no socket work */
     CONN_SEND           /* pushing out[], refilled by the producer         */
+};
+
+/*
+ * Where a tree walk has got to.  DELETE and COPY of a drawer are the only
+ * unbounded work this server does, so they are the only things that carry a
+ * position between passes of the loop rather than running to completion.
+ */
+enum
+{
+    WALK_NONE = 0,
+    WALK_ENTER,         /* lock and examine what the path names            */
+    WALK_SCAN,          /* one entry of the drawer being walked            */
+    WALK_RMDIR,         /* the drawer itself, once it should be empty      */
+    WALK_MKDIR,         /* the copy's matching drawer                      */
+    WALK_OPEN,          /* a file copy: both ends                          */
+    WALK_FILE,          /* a file copy: one slice of it                    */
+    WALK_SHUT,          /* a file copy: close, and carry the date over     */
+    WALK_UP,            /* out of this drawer, on with the one above       */
+    WALK_DONE
+};
+
+/* What the walk was for, and so what happens when it ends. */
+enum
+{
+    WALK_FOR_DELETE = 0,    /* the DELETE method's own walk                */
+    WALK_FOR_CLEAR,         /* the destination of a COPY or MOVE           */
+    WALK_FOR_COPY,          /* the copy itself                             */
+    WALK_FOR_MOVED          /* a moved source, once the copy is in place   */
 };
 
 enum
@@ -302,6 +371,26 @@ struct HttpConn
     struct DateStamp prop_date;
     char    owner[HTTPD_TEXT_MAX];
 
+    /* a tree walk, carried between passes of the loop */
+    UBYTE   walk;
+    UBYTE   walk_for;
+    UBYTE   walk_copy;              /* copying rather than deleting        */
+    UBYTE   walk_one;               /* a single file, not a drawer         */
+    UBYTE   walk_depth;
+    UBYTE   walk_new;               /* the destination was not there before */
+    UBYTE   walk_move;              /* the copy is half of a MOVE          */
+    UBYTE   fails;                  /* <D:response> elements recorded      */
+    ULONG   walk_steps;
+    ULONG   walk_dirty;             /* bit d: something under depth d stayed */
+    ULONG   walk_status;            /* what stopped a copy                 */
+    ULONG   fails_len;
+    BPTR    walk_lock;              /* the drawer being scanned right now  */
+    UWORD   walk_seen;              /* subdrawers counted in this scan     */
+    UWORD   walk_skip[HTTPD_WALK_DEPTH];    /* and walked, per level       */
+    char    walk_src[HTTP_PATH_MAX];
+    char    walk_dst[HTTP_PATH_MAX];
+    char    fail_xml[HTTPD_FAIL_MAX];
+
     /* the answer */
     UBYTE   out[HTTPD_OUT_MAX];
     ULONG   out_len;
@@ -348,15 +437,15 @@ static char httpd_value[HTTP_URL_MAX];
 static char httpd_page[512];
 
 /*
- * The two paths a tree walk carries, and the destination a COPY or a MOVE
- * resolved to.  Shared for the reason the scratches above are: a walk runs to
- * completion inside one dispatch, so no second request can be inside one at
- * the same time -- the connections interleave between passes of the loop and
- * never inside a handler.
+ * A path to ask a question about, and the destination a COPY or a MOVE
+ * resolved to.  Shared for the reason the scratches above are: both are used
+ * and finished with inside one handler, and the connections interleave between
+ * passes of the loop and never inside one.
+ *
+ * The paths a WALK carries are NOT here.  A walk outlives the handler that
+ * started it, so its two paths are in the connection.
  */
-static char     httpd_walk_src[HTTP_PATH_MAX];
-static char     httpd_walk_dst[HTTP_PATH_MAX];
-static char     httpd_child[HTTP_PATH_MAX];
+static char     httpd_probe[HTTP_PATH_MAX];
 static HttpPath httpd_dest;
 
 /*
@@ -940,6 +1029,11 @@ static VOID httpd_error(HttpConn *c, ULONG status, const char *detail)
 
 /* ---------------------------------------------------------------- clients --- */
 
+/* Declared here because the walk is defined below and the connection has to
+   be able to end one, the same way the Allow header is declared above the
+   table it is generated from. */
+static VOID httpd_walk_release(HttpConn *c);
+
 /*
  * A PUT that never finished.  The temporary is deleted rather than left, so an
  * abandoned upload costs nothing and does not appear in a listing -- which is
@@ -975,6 +1069,7 @@ static VOID httpd_close(HttpConn *c)
         c->dirlock = (BPTR)0;
     }
 
+    httpd_walk_release(c);
     httpd_put_abandon(c);
 
     if (c->sock >= 0)
@@ -1007,6 +1102,7 @@ static VOID httpd_reset(HttpConn *c)
         c->dirlock = (BPTR)0;
     }
 
+    httpd_walk_release(c);
     httpd_put_abandon(c);
 
     c->state     = CONN_REQUEST;
@@ -1048,6 +1144,13 @@ static VOID httpd_reset(HttpConn *c)
     c->xml_close  = 0;
     c->xml_text_n = 0;
     c->xml_attr_n = 0;
+    c->walk       = WALK_NONE;
+    c->walk_move  = 0;
+    c->walk_new   = 0;
+    c->fails      = 0;
+    c->fails_len  = 0;
+    c->walk_status = 0;
+
     c->in_prop    = 0;
     c->in_owner   = 0;
     c->props      = 0;
@@ -1219,287 +1322,636 @@ static const char *httpd_url_of(const char *path)
     return httpd_escape;
 }
 
+/* --------------------------------------------------------------- walking --- */
+
 /*
- * One file to another, through the shared scratch.  The date and the
- * protection bits follow it: a copy that loses them is a copy every client
- * shows as a different file.
+ * DELETE and COPY of a drawer are the only unbounded work this server does.
+ * Everything else here is already incremental -- a directory listing is
+ * produced entry by entry across passes of the loop -- and a walk that ran to
+ * completion inside one dispatch would stop every other connection for as long
+ * as the tree took, which is exactly the workload a file server sees.
+ *
+ * So a walk is a state machine that advances by a slice per pass.  Everything
+ * it is in the middle of lives in the connection: the two paths, the depth,
+ * and one open lock per level.
+ *
+ * KEEPING A PLACE IN A DRAWER WITHOUT KEEPING A FileInfoBlock
+ *
+ *   ExNext() carries its position in the FileInfoBlock, and there is one of
+ *   those per connection -- so descending into a subdrawer and examining THAT
+ *   overwrites the position in the drawer above.  One block per level would be
+ *   260 bytes a level, which is not a thing to spend on a machine with a
+ *   megabyte; holding a lock per level does not help either, because it is the
+ *   block and not the lock that remembers.
+ *
+ *   So a level remembers by ORDINAL: how many subdrawers of it have already
+ *   been walked.  Coming back up re-reads the drawer from the start and takes
+ *   the next one, which costs a rescan per subdrawer -- ExNext() and no more,
+ *   the files having already gone -- and needs two bytes a level.
+ *
+ *   This is not a refinement.  Without it a walk descends once, comes back to
+ *   a scan that reports the drawer as empty, and stops: the first version of
+ *   this created every drawer of a tree and copied almost none of the files.
+ *
+ * WHAT ExNext() IS NOT TRUSTED FOR
+ *
+ *   No filesystem promises the scan survives the deletions it is making, so
+ *   "is this drawer empty now" is asked of DeleteFile() and not of the scan.
+ *   A drawer is finished when deleting it succeeds; ERROR_DIRECTORY_NOT_EMPTY
+ *   with nothing having failed inside means the scan missed something, and
+ *   sends it round again.  With something having failed inside it means what
+ *   it says, and the walk goes up instead -- which is what `walk_dirty` is
+ *   for, one bit per level.
  */
-static ULONG httpd_copy_file(const char *src, const char *dst)
+
+/* Everything below this level failed with it, so no drawer above can go and
+   none of them may be retried. */
+static VOID httpd_walk_mark(HttpConn *c)
 {
-    BPTR  in;
-    BPTR  out;
-    ULONG status = 0;
-
-    in = Open((CONST_STRPTR)src, MODE_OLDFILE);
-    if (in == (BPTR)0)
-        return httpd_dos_status(IoErr());
-
-    out = Open((CONST_STRPTR)dst, MODE_NEWFILE);
-    if (out == (BPTR)0)
-    {
-        status = httpd_dos_status(IoErr());
-        (VOID)Close(in);
-        return status;
-    }
-
-    for (;;)
-    {
-        LONG got = Read(in, (APTR)httpd_scratch, (LONG)sizeof(httpd_scratch));
-
-        if (got < 0)
-        {
-            status = 500;
-            break;
-        }
-
-        if (got == 0)
-            break;
-
-        if (Write(out, (APTR)httpd_scratch, got) != got)
-        {
-            status = httpd_dos_status(IoErr());
-            break;
-        }
-    }
-
-    (VOID)Close(out);
-    (VOID)Close(in);
-
-    if (status != 0)
-    {
-        (VOID)DeleteFile((CONST_STRPTR)dst);
-        return status;
-    }
-
-    if (httpd_fib2 != NULL)
-    {
-        BPTR lock = Lock((CONST_STRPTR)src, ACCESS_READ);
-
-        if (lock != (BPTR)0)
-        {
-            if (Examine(lock, httpd_fib2))
-            {
-                (VOID)SetFileDate((CONST_STRPTR)dst, &httpd_fib2->fib_Date);
-                (VOID)SetProtection((CONST_STRPTR)dst,
-                                    (LONG)httpd_fib2->fib_Protection);
-            }
-            UnLock(lock);
-        }
-    }
-
-    return 0;
+    c->walk_dirty |= (1UL << (ULONG)(c->walk_depth + 1)) - 1UL;
 }
 
 /*
- * Everything under `path`, then `path` itself.  DELETE on a collection is
- * Depth infinity and nothing else, so this is what the method is.
- *
- * Iterative and by name rather than by lock: a Shell command has 4 KB of
- * stack and a FileInfoBlock is 260 bytes of it, so a walk that recursed would
- * run out at a depth a real drawer reaches.  One drawer is scanned at a time,
- * a subdrawer is descended into by appending to the path, and coming back up
- * is a truncation.
- *
- * ExNext() is not trusted across a deletion -- no filesystem promises it -- so
- * "is this drawer empty now" is asked of DeleteFile() and not of the scan: a
- * drawer is finished when deleting it succeeds, and ERROR_DIRECTORY_NOT_EMPTY
- * sends it round again.
- *
- * 0, or the status of the first failure with the path that failed left in
- * `path` for the multistatus to name.
+ * One <D:response> for something that would not go.  Bounded twice over --
+ * HTTPD_FAILS_MAX of them and HTTPD_FAIL_MAX bytes of them -- because a drawer
+ * of a thousand delete-protected files must not become a thousand-element
+ * answer on a machine with a megabyte.
  */
-static ULONG httpd_delete_tree(char *path, ULONG pathlen,
-                               struct FileInfoBlock *fib)
+static VOID httpd_walk_failed(HttpConn *c, const char *path, ULONG status)
 {
-    ULONG depth = 0;
-    ULONG steps = 0;
+    ULONG used = c->fails_len;
+    BOOL  ok;
 
-    for (;;)
+    if (c->fails >= (UBYTE)HTTPD_FAILS_MAX)
+        return;
+
+    ok = hs_append(c->fail_xml, sizeof(c->fail_xml), &used,
+                   "<D:response><D:href>");
+    ok = ok && hs_append(c->fail_xml, sizeof(c->fail_xml), &used,
+                         httpd_url_of(path));
+    ok = ok && hs_append(c->fail_xml, sizeof(c->fail_xml), &used,
+                         "</D:href><D:status>HTTP/1.1 ");
+    ok = ok && hs_append_num(c->fail_xml, sizeof(c->fail_xml), &used, status);
+    ok = ok && hs_append(c->fail_xml, sizeof(c->fail_xml), &used, " ");
+    ok = ok && hs_append(c->fail_xml, sizeof(c->fail_xml), &used,
+                         httpd_reason(status));
+    ok = ok && hs_append(c->fail_xml, sizeof(c->fail_xml), &used,
+                         "</D:status></D:response>\n");
+
+    if (!ok)
     {
-        BPTR lock;
-        BOOL descend = FALSE;
-
-        if (++steps > HTTPD_WALK_MAX)
-            return 500;
-
-        lock = Lock((CONST_STRPTR)path, ACCESS_READ);
-        if (lock == (BPTR)0)
-            return (depth == 0UL) ? 404 : httpd_dos_status(IoErr());
-
-        if (!Examine(lock, fib))
-        {
-            UnLock(lock);
-            return 500;
-        }
-
-        if (fib->fib_DirEntryType <= 0)
-        {
-            UnLock(lock);
-
-            if (!DeleteFile((CONST_STRPTR)path))
-                return httpd_dos_status(IoErr());
-        }
-        else
-        {
-            /* Every file in this drawer, and then the first subdrawer. */
-            while (ExNext(lock, fib))
-            {
-                if (fib->fib_DirEntryType > 0)
-                {
-                    descend = TRUE;
-                    break;
-                }
-
-                if (!http_path_join(path, pathlen,
-                                     (const char *)fib->fib_FileName))
-                {
-                    UnLock(lock);
-                    return 414;
-                }
-
-                if (!DeleteFile((CONST_STRPTR)path))
-                {
-                    ULONG why = httpd_dos_status(IoErr());
-
-                    UnLock(lock);
-                    return why;
-                }
-
-                http_path_up(path);
-            }
-
-            if (descend)
-            {
-                BOOL ok = http_path_join(path, pathlen,
-                                          (const char *)fib->fib_FileName);
-
-                UnLock(lock);
-
-                if (!ok)
-                    return 414;
-
-                depth++;
-                continue;
-            }
-
-            UnLock(lock);
-
-            if (!DeleteFile((CONST_STRPTR)path))
-            {
-                LONG err = IoErr();
-
-                /* The scan stopped early, or something appeared while it ran.
-                   Round again rather than call it a failure. */
-                if (err == ERROR_DIRECTORY_NOT_EMPTY)
-                    continue;
-
-                return httpd_dos_status(err);
-            }
-        }
-
-        if (depth == 0UL)
-            return 0;
-
-        http_path_up(path);
-        depth--;
+        /* It did not fit, so the one before it is the last.  The count goes
+           to the ceiling so nothing tries to add another. */
+        c->fail_xml[c->fails_len] = '\0';
+        c->fails = (UBYTE)HTTPD_FAILS_MAX;
+        return;
     }
+
+    c->fails_len = used;
+    c->fails++;
+}
+
+/* Every lock a walk is holding.  Called when it ends, and when the connection
+   goes away under it. */
+static VOID httpd_walk_release(HttpConn *c)
+{
+    if (c->walk_lock != (BPTR)0)
+    {
+        UnLock(c->walk_lock);
+        c->walk_lock = (BPTR)0;
+    }
+
+    c->walk = WALK_NONE;
+}
+
+static VOID httpd_walk_begin(HttpConn *c, UBYTE what, BOOL copy, UBYTE first)
+{
+    httpd_walk_release(c);
+
+    c->walk_skip[0] = 0;
+    c->walk_seen    = 0;
+    c->walk_for   = what;
+    c->walk_copy  = copy ? 1 : 0;
+    c->walk_one   = 0;
+    c->walk_depth = 0;
+    c->walk_dirty = 0;
+    c->walk_steps = 0;
+    c->walk       = first;
+    c->state      = CONN_WALK;
+}
+
+/* The 204 or the 207, once a walk that was asked for by name has finished. */
+static VOID httpd_walk_answer(HttpConn *c, ULONG plain)
+{
+    ULONG used = 0;
+    BOOL  ok;
+
+    if (c->fails == 0)
+    {
+        httpd_empty(c, plain);
+        return;
+    }
+
+    ok = hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                   "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                   "<D:multistatus xmlns:D=\"DAV:\">\n");
+    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                         c->fail_xml);
+    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                         "</D:multistatus>\n");
+
+    if (!ok)
+    {
+        httpd_error(c, 500, "that answer would not fit");
+        return;
+    }
+
+    httpd_begin(c, 207);
+    httpd_body_text(c, "text/xml; charset=utf-8", httpd_scratch);
 }
 
 /*
- * `src` to `dst`, everything below it.  The delete walk's shape with the
- * destination doing the remembering: an entry that is already in the
- * destination has been copied, so a drawer can be picked up again on a later
- * pass without a stack of positions.  Nothing here modifies the source, so
- * the files all go in one scan and only a subdrawer costs a rescan.
+ * The copy half of a COPY or a MOVE, once the destination is out of the way.
+ * A MOVE tries the rename first: within a volume nothing is copied, which is
+ * what makes moving a 50 MB drawer instant.  Between volumes it cannot be, and
+ * AmigaDOS says which it was rather than leaving it to be guessed from the
+ * device names -- an assign makes that guess wrong, and guessing wrong means
+ * either copying a whole tree for a rename or renaming across a boundary.
  */
-static ULONG httpd_copy_tree(char *src, ULONG srclen, char *dst, ULONG dstlen,
-                             struct FileInfoBlock *fib)
+static VOID httpd_walk_copy_stage(HttpConn *c)
 {
-    ULONG depth = 0;
-    ULONG steps = 0;
-    BPTR  made;
+    LONG kind;
 
-    made = CreateDir((CONST_STRPTR)dst);
-    if (made == (BPTR)0)
-        return httpd_dos_status(IoErr());
-    UnLock(made);
-
-    for (;;)
+    if (c->walk_move)
     {
-        BPTR lock;
-        BOOL descend = FALSE;
+        LONG err;
 
-        if (++steps > HTTPD_WALK_MAX)
-            return 500;
-
-        lock = Lock((CONST_STRPTR)src, ACCESS_READ);
-        if (lock == (BPTR)0)
-            return httpd_dos_status(IoErr());
-
-        if (!Examine(lock, fib))
+        if (Rename((CONST_STRPTR)c->path.path, (CONST_STRPTR)httpd_dest.path))
         {
-            UnLock(lock);
-            return 500;
+            httpd_empty(c, c->walk_new ? 201 : 204);
+            return;
         }
 
-        while (ExNext(lock, fib))
+        err = IoErr();
+
+        if (err != ERROR_RENAME_ACROSS_DEVICES)
         {
-            ULONG why;
+            httpd_error(c, httpd_dos_status(err), "that could not be moved");
+            return;
+        }
+    }
 
-            if (!http_path_join(src, srclen,
-                                 (const char *)fib->fib_FileName) ||
-                !http_path_join(dst, dstlen,
-                                 (const char *)fib->fib_FileName))
+    kind = httpd_kind(c->path.path);
+    if (kind < 0)
+    {
+        httpd_error(c, 404, "there is nothing there to copy");
+        return;
+    }
+
+    hs_copy(c->walk_src, sizeof(c->walk_src), c->path.path);
+    hs_copy(c->walk_dst, sizeof(c->walk_dst), httpd_dest.path);
+
+    c->fails     = 0;
+    c->fails_len = 0;
+    c->fail_xml[0] = '\0';
+    c->walk_status = 0;
+
+    if (kind == 0)
+    {
+        httpd_walk_begin(c, WALK_FOR_COPY, TRUE, WALK_OPEN);
+        c->walk_one = 1;
+        return;
+    }
+
+    /* Depth: 0 on a collection copies the collection and not what is in it,
+       RFC 4918 9.8.3.  A MOVE is always infinity. */
+    if (!c->walk_move && c->depth == 0)
+    {
+        BPTR made = CreateDir((CONST_STRPTR)httpd_dest.path);
+
+        if (made == (BPTR)0)
+        {
+            httpd_error(c, httpd_dos_status(IoErr()),
+                        "that drawer could not be made");
+            return;
+        }
+        UnLock(made);
+
+        httpd_empty(c, c->walk_new ? 201 : 204);
+        return;
+    }
+
+    httpd_walk_begin(c, WALK_FOR_COPY, TRUE, WALK_MKDIR);
+}
+
+static VOID httpd_log_status(HttpConn *c);
+
+/* A walk has reached WALK_DONE.  What happens next is what it was for. */
+static VOID httpd_walk_end(HttpConn *c)
+{
+    httpd_walk_release(c);
+
+    switch (c->walk_for)
+    {
+        case WALK_FOR_DELETE:
+            httpd_walk_answer(c, 204);
+            break;
+
+        case WALK_FOR_CLEAR:
+            if (c->fails != 0 || c->walk_status != 0)
             {
-                UnLock(lock);
-                return 414;
+                httpd_error(c, (c->walk_status != 0) ? c->walk_status : 409,
+                            "what was there already would not go");
+                break;
             }
+            httpd_walk_copy_stage(c);
+            break;
 
-            if (httpd_kind(dst) >= 0)       /* done on an earlier pass     */
+        case WALK_FOR_COPY:
+            if (c->walk_status != 0)
             {
-                http_path_up(src);
-                http_path_up(dst);
-                continue;
-            }
-
-            if (fib->fib_DirEntryType > 0)
-            {
-                descend = TRUE;             /* both paths stay pushed      */
+                httpd_walk_answer(c, 500);
                 break;
             }
 
-            why = httpd_copy_file(src, dst);
-
-            http_path_up(src);
-            http_path_up(dst);
-
-            if (why != 0UL)
+            if (!c->walk_move)
             {
-                UnLock(lock);
-                return why;
+                httpd_walk_answer(c, c->walk_new ? 201 : 204);
+                break;
             }
-        }
 
-        UnLock(lock);
+            /* The copy is in place, so the original goes -- and only now, so
+               that a copy that failed has cost the client nothing. */
+            hs_copy(c->walk_src, sizeof(c->walk_src), c->path.path);
+            httpd_walk_begin(c, WALK_FOR_MOVED, FALSE, WALK_ENTER);
+            break;
 
-        if (descend)
-        {
-            made = CreateDir((CONST_STRPTR)dst);
-            if (made == (BPTR)0)
-                return httpd_dos_status(IoErr());
-            UnLock(made);
-
-            depth++;
-            continue;
-        }
-
-        if (depth == 0UL)
-            return 0;
-
-        http_path_up(src);
-        http_path_up(dst);
-        depth--;
+        default:                        /* WALK_FOR_MOVED                  */
+            httpd_walk_answer(c, c->walk_new ? 201 : 204);
+            break;
     }
+
+    /* A walk that has started another one has not answered yet. */
+    if (c->state != CONN_WALK)
+        httpd_log_status(c);
+}
+
+/*
+ * One slice.  Called once per pass of the event loop for every connection that
+ * is walking, and it does a bounded amount of AmigaDOS and returns.
+ */
+static VOID httpd_walk_slice(HttpConn *c)
+{
+    ULONG n;
+
+    for (n = 0; n < (ULONG)HTTPD_WALK_SLICE && c->walk != WALK_DONE; n++)
+    {
+        if (++c->walk_steps > HTTPD_WALK_MAX)
+        {
+            httpd_walk_failed(c, c->walk_src, 500);
+            c->walk_status = 500;
+            c->walk = WALK_DONE;
+            break;
+        }
+
+        switch (c->walk)
+        {
+            case WALK_ENTER:
+            {
+                BPTR lock = Lock((CONST_STRPTR)c->walk_src, ACCESS_READ);
+
+                if (lock == (BPTR)0)
+                {
+                    httpd_walk_failed(c, c->walk_src,
+                                      httpd_dos_status(IoErr()));
+                    httpd_walk_mark(c);
+                    c->walk = WALK_UP;
+                    break;
+                }
+
+                if (!Examine(lock, c->fib))
+                {
+                    UnLock(lock);
+                    httpd_walk_failed(c, c->walk_src, 500);
+                    httpd_walk_mark(c);
+                    c->walk = WALK_UP;
+                    break;
+                }
+
+                /* A file only reaches here as the whole of a DELETE: one
+                   inside a drawer goes in the scan, and a file copy starts at
+                   WALK_OPEN. */
+                if (c->fib->fib_DirEntryType <= 0)
+                {
+                    UnLock(lock);
+
+                    if (!DeleteFile((CONST_STRPTR)c->walk_src))
+                    {
+                        httpd_walk_failed(c, c->walk_src,
+                                          httpd_dos_status(IoErr()));
+                        httpd_walk_mark(c);
+                    }
+
+                    c->walk = WALK_UP;
+                    break;
+                }
+
+                c->walk_lock = lock;
+                c->walk_seen = 0;
+                c->walk = WALK_SCAN;
+                break;
+            }
+
+            case WALK_MKDIR:
+            {
+                BPTR made = CreateDir((CONST_STRPTR)c->walk_dst);
+
+                if (made == (BPTR)0)
+                {
+                    /* Nothing below a drawer that cannot be made is going to
+                       land either, so the copy stops rather than failing once
+                       per file underneath it. */
+                    c->walk_status = httpd_dos_status(IoErr());
+                    httpd_walk_failed(c, c->walk_dst, c->walk_status);
+                    c->walk = WALK_DONE;
+                    break;
+                }
+
+                UnLock(made);
+
+                /* A level of a copy is the drawer first and the source lock
+                   second, so WALK_ENTER is the same step for both walks. */
+                c->walk = WALK_ENTER;
+                break;
+            }
+
+            case WALK_SCAN:
+            {
+                if (c->walk_lock == (BPTR)0 || !ExNext(c->walk_lock, c->fib))
+                {
+                    /* Nothing left, and no subdrawer this pass was going to
+                       take -- so this level is finished with. */
+                    UnLock(c->walk_lock);
+                    c->walk_lock = (BPTR)0;
+                    c->walk = c->walk_copy ? WALK_UP : WALK_RMDIR;
+                    break;
+                }
+
+                if (c->fib->fib_DirEntryType > 0)
+                {
+                    /* The (skip + 1)th subdrawer of this level is the one
+                       that has not been walked yet.  Everything before it
+                       has, and is either gone or was named as a failure. */
+                    c->walk_seen++;
+
+                    if (c->walk_seen <= c->walk_skip[c->walk_depth])
+                        break;
+
+                    if (c->walk_depth + 1 >= (UWORD)HTTPD_WALK_DEPTH)
+                    {
+                        httpd_walk_failed(c, c->walk_src, 409);
+                        httpd_walk_mark(c);
+                        c->walk_skip[c->walk_depth]++;
+                        break;
+                    }
+
+                    if (!http_path_join(c->walk_src, sizeof(c->walk_src),
+                                        (const char *)c->fib->fib_FileName) ||
+                        (c->walk_copy &&
+                         !http_path_join(c->walk_dst, sizeof(c->walk_dst),
+                                         (const char *)c->fib->fib_FileName)))
+                    {
+                        httpd_walk_failed(c, c->walk_src, 414);
+                        httpd_walk_mark(c);
+                        c->walk_skip[c->walk_depth]++;
+                        break;
+                    }
+
+                    /* The scan of this level is abandoned rather than kept:
+                       the FileInfoBlock is about to be the subdrawer's, and
+                       the ordinal is what brings this level back. */
+                    UnLock(c->walk_lock);
+                    c->walk_lock = (BPTR)0;
+
+                    c->walk_skip[c->walk_depth]++;
+                    c->walk_depth++;
+                    c->walk_skip[c->walk_depth] = 0;
+                    c->walk = c->walk_copy ? WALK_MKDIR : WALK_ENTER;
+                    break;
+                }
+
+                if (!http_path_join(c->walk_src, sizeof(c->walk_src),
+                                    (const char *)c->fib->fib_FileName))
+                {
+                    httpd_walk_failed(c, c->walk_src, 414);
+                    httpd_walk_mark(c);
+                    break;
+                }
+
+                if (c->walk_copy)
+                {
+                    if (!http_path_join(c->walk_dst, sizeof(c->walk_dst),
+                                        (const char *)c->fib->fib_FileName))
+                    {
+                        http_path_up(c->walk_src);
+                        c->walk_status = 414;
+                        httpd_walk_failed(c, c->walk_src, 414);
+                        c->walk = WALK_DONE;
+                        break;
+                    }
+
+                    /* A drawer is read again once per subdrawer, so a file
+                       that is already at the far end was copied on an earlier
+                       pass over this level. */
+                    if (httpd_kind(c->walk_dst) >= 0)
+                    {
+                        http_path_up(c->walk_src);
+                        http_path_up(c->walk_dst);
+                        break;
+                    }
+
+                    c->walk = WALK_OPEN;
+                    break;
+                }
+
+                if (!DeleteFile((CONST_STRPTR)c->walk_src))
+                {
+                    httpd_walk_failed(c, c->walk_src,
+                                      httpd_dos_status(IoErr()));
+                    httpd_walk_mark(c);
+                }
+
+                http_path_up(c->walk_src);
+                break;
+            }
+
+            case WALK_RMDIR:
+            {
+                LONG err;
+
+                if (DeleteFile((CONST_STRPTR)c->walk_src))
+                {
+                    c->walk = WALK_UP;
+                    break;
+                }
+
+                err = IoErr();
+
+                if (err == ERROR_DIRECTORY_NOT_EMPTY &&
+                    (c->walk_dirty & (1UL << (ULONG)c->walk_depth)) == 0UL)
+                {
+                    /* The scan said empty and the filesystem says otherwise,
+                       so the scan is what is wrong -- ExNext() is not promised
+                       across the deletions it just made.  Nothing here failed,
+                       so going round again terminates. */
+                    c->walk_skip[c->walk_depth] = 0;
+                    c->walk = WALK_ENTER;
+                    break;
+                }
+
+                /* A drawer that is only still full has already had whatever
+                   is in it named, and naming the drawer as well is noise the
+                   client cannot act on. */
+                if (err != ERROR_DIRECTORY_NOT_EMPTY)
+                    httpd_walk_failed(c, c->walk_src, httpd_dos_status(err));
+
+                httpd_walk_mark(c);
+                c->walk = WALK_UP;
+                break;
+            }
+
+            case WALK_OPEN:
+                c->file = Open((CONST_STRPTR)c->walk_src, MODE_OLDFILE);
+                if (c->file == (BPTR)0)
+                {
+                    c->walk_status = httpd_dos_status(IoErr());
+                    httpd_walk_failed(c, c->walk_src, c->walk_status);
+                    c->walk = WALK_DONE;
+                    break;
+                }
+
+                c->put = Open((CONST_STRPTR)c->walk_dst, MODE_NEWFILE);
+                if (c->put == (BPTR)0)
+                {
+                    c->walk_status = httpd_dos_status(IoErr());
+                    httpd_walk_failed(c, c->walk_dst, c->walk_status);
+                    (VOID)Close(c->file);
+                    c->file = (BPTR)0;
+                    c->walk = WALK_DONE;
+                    break;
+                }
+
+                /* The half-written destination IS the temporary as far as
+                   httpd_put_abandon() is concerned, so a client that hangs up
+                   in the middle of a copy leaves no part-file behind. */
+                hs_copy(c->put_temp, sizeof(c->put_temp), c->walk_dst);
+
+                c->walk = WALK_FILE;
+                break;
+
+            case WALK_FILE:
+            {
+                ULONG k;
+
+                for (k = 0; k < (ULONG)HTTPD_COPY_SLICE; k++)
+                {
+                    LONG got = Read(c->file, (APTR)httpd_scratch,
+                                    (LONG)sizeof(httpd_scratch));
+
+                    if (got < 0)
+                    {
+                        c->walk_status = 500;
+                        httpd_walk_failed(c, c->walk_src, 500);
+                        c->walk = WALK_DONE;
+                        break;
+                    }
+
+                    if (got == 0)
+                    {
+                        c->walk = WALK_SHUT;
+                        break;
+                    }
+
+                    if (Write(c->put, (APTR)httpd_scratch, got) != got)
+                    {
+                        c->walk_status = httpd_dos_status(IoErr());
+                        httpd_walk_failed(c, c->walk_dst, c->walk_status);
+                        c->walk = WALK_DONE;
+                        break;
+                    }
+                }
+                break;
+            }
+
+            case WALK_SHUT:
+            {
+                BPTR lock;
+
+                (VOID)Close(c->put);
+                c->put = (BPTR)0;
+                (VOID)Close(c->file);
+                c->file = (BPTR)0;
+                c->put_temp[0] = '\0';
+
+                /* The date and the protection bits follow the file: a copy
+                   that loses them is a copy every client shows as changed.
+                   httpd_fib2 and not c->fib, which is holding the place in
+                   the drawer this file came out of. */
+                lock = Lock((CONST_STRPTR)c->walk_src, ACCESS_READ);
+                if (lock != (BPTR)0)
+                {
+                    if (httpd_fib2 != NULL && Examine(lock, httpd_fib2))
+                    {
+                        (VOID)SetFileDate((CONST_STRPTR)c->walk_dst,
+                                          &httpd_fib2->fib_Date);
+                        (VOID)SetProtection(
+                            (CONST_STRPTR)c->walk_dst,
+                            (LONG)httpd_fib2->fib_Protection);
+                    }
+                    UnLock(lock);
+                }
+
+                if (c->walk_one)
+                {
+                    c->walk = WALK_DONE;
+                    break;
+                }
+
+                http_path_up(c->walk_src);
+                http_path_up(c->walk_dst);
+                c->walk = WALK_SCAN;
+                break;
+            }
+
+            default:                    /* WALK_UP                         */
+                if (c->walk_lock != (BPTR)0)
+                {
+                    UnLock(c->walk_lock);
+                    c->walk_lock = (BPTR)0;
+                }
+
+                if (c->walk_depth == 0)
+                {
+                    c->walk = WALK_DONE;
+                    break;
+                }
+
+                http_path_up(c->walk_src);
+                if (c->walk_copy)
+                    http_path_up(c->walk_dst);
+
+                c->walk_depth--;
+                c->walk = WALK_ENTER;   /* the ordinal takes it on from here */
+                break;
+        }
+    }
+
+    /* A walk that is getting somewhere is a connection that is getting
+       somewhere, or the no-progress timeout would close it under itself. */
+    c->progress = httpd_now();
+
+    if (c->walk == WALK_DONE)
+        httpd_walk_end(c);
 }
 
 /* ------------------------------------------------------------------ dates --- */
@@ -2398,12 +2850,12 @@ static BOOL httpd_produce(HttpConn *c)
                         {
                             const char *full = NULL;
 
-                            hs_copy(httpd_child, sizeof(httpd_child),
+                            hs_copy(httpd_probe, sizeof(httpd_probe),
                                     c->path.path);
 
-                            if (http_path_join(httpd_child,
-                                                sizeof(httpd_child), name))
-                                full = httpd_child;
+                            if (http_path_join(httpd_probe,
+                                                sizeof(httpd_probe), name))
+                                full = httpd_probe;
 
                             len = httpd_propfind_entry(
                                       httpd_href(&c->path, name, is_dir),
@@ -2893,35 +3345,15 @@ static VOID httpd_do_put(HttpConn *c)
     httpd_empty(c, existed ? 204 : 201);
 }
 
-/* One <D:response> saying that one path failed, for the walks that stop part
-   way through.  Built whole, because it is short and the alternative is a
-   producer for four elements. */
-static BOOL httpd_one_status(const char *href, ULONG status)
-{
-    ULONG used = 0;
-    BOOL  ok;
-
-    ok = hs_append(httpd_page, sizeof(httpd_page), &used,
-                   "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                   "<D:multistatus xmlns:D=\"DAV:\">\n"
-                   "<D:response><D:href>");
-    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, href);
-    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used,
-                         "</D:href><D:status>HTTP/1.1 ");
-    ok = ok && hs_append_num(httpd_page, sizeof(httpd_page), &used, status);
-    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, " ");
-    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used,
-                         httpd_reason(status));
-    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used,
-                         "</D:status></D:response>\n</D:multistatus>\n");
-
-    return ok;
-}
-
+/*
+ * DELETE on a collection is Depth infinity and nothing else.  The walk starts
+ * here and finishes some passes of the loop later, in httpd_walk_end(), which
+ * is what answers -- 204 when the whole tree went, and the multistatus RFC
+ * 4918 9.6.1 asks for when part of it did not: the client's picture of the
+ * tree is then wrong in a place it has no other way to find.
+ */
 static VOID httpd_do_delete(HttpConn *c)
 {
-    ULONG why;
-
     if (!httpd_may_write(c))
         return;
 
@@ -2931,31 +3363,15 @@ static VOID httpd_do_delete(HttpConn *c)
         return;
     }
 
-    hs_copy(httpd_walk_src, sizeof(httpd_walk_src), c->path.path);
+    hs_copy(c->walk_src, sizeof(c->walk_src), c->path.path);
 
-    why = httpd_delete_tree(httpd_walk_src, sizeof(httpd_walk_src), c->fib);
+    c->fails       = 0;
+    c->fails_len   = 0;
+    c->fail_xml[0] = '\0';
+    c->walk_status = 0;
+    c->walk_move   = 0;
 
-    if (why == 0UL)
-    {
-        httpd_empty(c, 204);
-        return;
-    }
-
-    /*
-     * Something under it would not go, so some of it did.  RFC 4918 9.6.1
-     * wants that said as a multistatus naming what is left rather than as a
-     * bare status: the client's picture of the tree is now wrong in one
-     * place and it has no other way to find out which.
-     */
-    if (!hs_equal(httpd_walk_src, c->path.path) &&
-        httpd_one_status(httpd_url_of(httpd_walk_src), why))
-    {
-        httpd_begin(c, 207);
-        httpd_body_text(c, "text/xml; charset=utf-8", httpd_page);
-        return;
-    }
-
-    httpd_error(c, why, "that could not be removed");
+    httpd_walk_begin(c, WALK_FOR_DELETE, FALSE, WALK_ENTER);
 }
 
 static VOID httpd_do_mkcol(HttpConn *c)
@@ -2979,9 +3395,8 @@ static VOID httpd_do_mkcol(HttpConn *c)
         return;
     }
 
-    if (!httpd_parent(c->path.path, httpd_walk_src,
-                      sizeof(httpd_walk_src)) ||
-        httpd_kind(httpd_walk_src) <= 0)
+    if (!httpd_parent(c->path.path, httpd_probe, sizeof(httpd_probe)) ||
+        httpd_kind(httpd_probe) <= 0)
     {
         httpd_error(c, 409, "there is no drawer to make that in");
         return;
@@ -3050,17 +3465,20 @@ static BOOL httpd_resolve_dest(HttpConn *c)
     return httpd_lock_allows(c, httpd_dest.path);
 }
 
+/*
+ * COPY and MOVE do at most three things, and each of them is a walk that runs
+ * across passes of the loop: clear the destination, put the source there, and
+ * for a MOVE remove the original.  httpd_walk_end() is what strings them
+ * together, so this only has to decide which of them are needed.
+ */
 static VOID httpd_copy_or_move(HttpConn *c, BOOL moving)
 {
-    LONG  src_kind;
-    LONG  dst_kind;
-    ULONG why;
+    LONG dst_kind;
 
     if (!httpd_may_write(c))
         return;
 
-    src_kind = httpd_kind(c->path.path);
-    if (src_kind < 0)
+    if (httpd_kind(c->path.path) < 0)
     {
         httpd_error(c, 404, "there is nothing there to copy");
         return;
@@ -3069,15 +3487,22 @@ static VOID httpd_copy_or_move(HttpConn *c, BOOL moving)
     if (!httpd_resolve_dest(c))
         return;
 
-    if (!httpd_parent(httpd_dest.path, httpd_walk_dst,
-                      sizeof(httpd_walk_dst)) ||
-        httpd_kind(httpd_walk_dst) <= 0)
+    if (!httpd_parent(httpd_dest.path, httpd_probe, sizeof(httpd_probe)) ||
+        httpd_kind(httpd_probe) <= 0)
     {
         httpd_error(c, 409, "there is no drawer to put that in");
         return;
     }
 
     dst_kind = httpd_kind(httpd_dest.path);
+
+    c->walk_move = moving ? 1 : 0;
+    c->walk_new  = (dst_kind < 0) ? 1 : 0;
+
+    c->fails       = 0;
+    c->fails_len   = 0;
+    c->fail_xml[0] = '\0';
+    c->walk_status = 0;
 
     if (dst_kind >= 0)
     {
@@ -3088,104 +3513,12 @@ static VOID httpd_copy_or_move(HttpConn *c, BOOL moving)
             return;
         }
 
-        hs_copy(httpd_walk_dst, sizeof(httpd_walk_dst), httpd_dest.path);
-
-        why = httpd_delete_tree(httpd_walk_dst, sizeof(httpd_walk_dst),
-                                c->fib);
-        if (why != 0UL)
-        {
-            httpd_error(c, why, "what was there already would not go");
-            return;
-        }
-    }
-
-    if (moving)
-    {
-        /*
-         * Within a volume this is a rename and nothing is copied, which is
-         * what makes moving a 50 MB drawer instant.  Between volumes it
-         * cannot be, and AmigaDOS says which it was rather than leaving it to
-         * be guessed from the device names -- an assign makes that guess
-         * wrong, and guessing wrong here means copying a whole tree for a
-         * rename or renaming across a boundary and losing it.
-         */
-        LONG err;
-
-        if (Rename((CONST_STRPTR)c->path.path, (CONST_STRPTR)httpd_dest.path))
-        {
-            httpd_empty(c, (dst_kind >= 0) ? 204 : 201);
-            return;
-        }
-
-        err = IoErr();
-
-        if (err != ERROR_RENAME_ACROSS_DEVICES)
-        {
-            httpd_error(c, httpd_dos_status(err), "that could not be moved");
-            return;
-        }
-    }
-
-    hs_copy(httpd_walk_src, sizeof(httpd_walk_src), c->path.path);
-    hs_copy(httpd_walk_dst, sizeof(httpd_walk_dst), httpd_dest.path);
-
-    if (src_kind > 0)
-    {
-        /* Depth: 0 on a collection copies the collection and not what is in
-           it, RFC 4918 9.8.3.  A MOVE is always infinity. */
-        if (!moving && c->depth == 0)
-        {
-            BPTR made = CreateDir((CONST_STRPTR)httpd_dest.path);
-
-            if (made == (BPTR)0)
-            {
-                httpd_error(c, httpd_dos_status(IoErr()),
-                            "that drawer could not be made");
-                return;
-            }
-            UnLock(made);
-            why = 0;
-        }
-        else
-        {
-            why = httpd_copy_tree(httpd_walk_src, sizeof(httpd_walk_src),
-                                  httpd_walk_dst, sizeof(httpd_walk_dst),
-                                  c->fib);
-        }
-    }
-    else
-    {
-        why = httpd_copy_file(httpd_walk_src, httpd_walk_dst);
-    }
-
-    if (why != 0UL)
-    {
-        if (httpd_one_status(httpd_url_of(httpd_walk_src), why))
-        {
-            httpd_begin(c, 207);
-            httpd_body_text(c, "text/xml; charset=utf-8", httpd_page);
-            return;
-        }
-
-        httpd_error(c, why, "that could not be copied");
+        hs_copy(c->walk_src, sizeof(c->walk_src), httpd_dest.path);
+        httpd_walk_begin(c, WALK_FOR_CLEAR, FALSE, WALK_ENTER);
         return;
     }
 
-    if (moving)
-    {
-        hs_copy(httpd_walk_src, sizeof(httpd_walk_src), c->path.path);
-
-        why = httpd_delete_tree(httpd_walk_src, sizeof(httpd_walk_src),
-                                c->fib);
-        if (why != 0UL)
-        {
-            httpd_error(c, why,
-                        "the copy is in place and the original would not go");
-            return;
-        }
-    }
-
-    httpd_empty(c, (dst_kind >= 0) ? 204 : 201);
+    httpd_walk_copy_stage(c);
 }
 
 static VOID httpd_do_copy(HttpConn *c)
@@ -3937,7 +4270,10 @@ static VOID httpd_dispatch(HttpConn *c)
 
     c->method->handle(c);
 
-    httpd_log_status(c);
+    /* A walk answers some passes of the loop later, and logs its own status
+       when it does. */
+    if (c->state != CONN_WALK)
+        httpd_log_status(c);
 }
 
 /*
@@ -4468,6 +4804,8 @@ static VOID httpd_accept(LONG lsock)
     httpd_conn[i].dirlock   = (BPTR)0;
     httpd_conn[i].put       = (BPTR)0;
     httpd_conn[i].put_temp[0] = '\0';
+    httpd_conn[i].walk      = WALK_NONE;
+    httpd_conn[i].walk_lock = (BPTR)0;
     httpd_conn[i].keepalive = 0;
     httpd_conn[i].progress  = httpd_now();
     httpd_conn[i].requests  = 0;
@@ -4496,6 +4834,7 @@ static VOID httpd_serve(LONG lsock)
         LONG        ready;
         ULONG       i;
         ULONG       live = 0;
+        ULONG       walking = 0;
         ULONG       now;
 
         if (tool_break())
@@ -4516,7 +4855,12 @@ static VOID httpd_serve(LONG lsock)
 
             live++;
 
-            if (c->state == CONN_REQUEST || c->state == CONN_BODY)
+            /* A walking connection wants neither half of the socket: it is
+               busy with the filesystem, and the answer is not built until the
+               walk ends. */
+            if (c->state == CONN_WALK)
+                walking++;
+            else if (c->state == CONN_REQUEST || c->state == CONN_BODY)
                 tool_fd_add(&readfds, c->sock);
             else
                 tool_fd_add(&writefds, c->sock);
@@ -4536,7 +4880,19 @@ static VOID httpd_serve(LONG lsock)
             tool_fd_add(&readfds, lsock);
 
         tv.tv_secs  = 0;
-        tv.tv_micro = HTTPD_TICK_MICROS;
+        /*
+         * A pending walk shortens the wait to the smallest one there is
+         * rather than removing it.  A zero timeout is a poll, and
+         * WaitSelect() answers a poll without ever reaching Wait() -- so the
+         * loop then never yields, and measured on a real machine the other
+         * connections went from being answered in 20 ms to being answered in
+         * 1.7 SECONDS while a tree was walked.  The work was interleaved; the
+         * stack simply never got the processor to notice what had arrived.
+         *
+         * So the walk gets a slice per pass and the pass still blocks, for
+         * the shortest time the timer will carry.
+         */
+        tv.tv_micro = (walking > 0UL) ? HTTPD_WALK_MICROS : HTTPD_TICK_MICROS;
 
         ready = tool_sock_select(httpd_sb, nfds, &readfds, &writefds, &tv);
 
@@ -4564,6 +4920,12 @@ static VOID httpd_serve(LONG lsock)
 
             if (c->state == CONN_FREE)
                 continue;
+
+            if (c->state == CONN_WALK)
+            {
+                httpd_walk_slice(c);
+                continue;
+            }
 
             if (ready > 0 && tool_fd_isset(&readfds, c->sock))
                 keep = httpd_readable(c);
@@ -4735,6 +5097,8 @@ int main(int argc, char **argv)
         httpd_conn[i].fib         = NULL;
         httpd_conn[i].put         = (BPTR)0;
         httpd_conn[i].put_temp[0] = '\0';
+        httpd_conn[i].walk        = WALK_NONE;
+        httpd_conn[i].walk_lock   = (BPTR)0;
     }
 
     /*
