@@ -3,8 +3,8 @@
 # Run an AmigaOS executable under WinUAE on a remote Windows host and capture
 # its output.  The WinUAE counterpart of tools/fsuae-run.sh.
 #
-#   tools/winuae-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-a ARGS] [-n] [-x]
-#                       [-K] <executable> [extra files...]
+#   tools/winuae-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-k MHZ] [-a ARGS]
+#                       [-n] [-x] [-K] <executable> [extra files...]
 #
 # -a passes arguments to the executable under test -- `-a 'eth0 QUIET'`.  Same
 # string as AMINETXDUO_GUEST_ARGS; the flag wins when both are set.
@@ -12,7 +12,14 @@
 # -m selects the machine.  A3000 is the default and the one that matters: a
 # real 68030 with 32-bit motherboard RAM, which is the machine the project is
 # actually aimed at.  A1200 (68EC020) and A4000 (68040) are also here.
+# A500 is a 68000 with 8 MB of Fast RAM, and it is the profile timing work
+# should use: WinUAE's 68000 is the only CPU model in either emulator whose
+# accounting has been checked against the manufacturer's published cycle
+# counts and found exact.  tests/perf/run-cpucal.sh is that check.
 # -c overrides the CPU on any model (68020/68030/68040/68060).
+# -k moves the CPU clock on a cycle-exact profile (-x) without disturbing the
+# cycle accounting, as tools/fsuae-run.sh's -k does.  See the block below the
+# model table.
 # -n attaches an emulated Commodore A2065 on WinUAE's SLIRP user-mode NAT
 # (10.0.2.0/24, gateway and DHCP/DNS 10.0.2.2) -- the same network the FS-UAE
 # harness gives you, so tests/netstack expectations carry over unchanged.
@@ -88,6 +95,7 @@ SESSION="${AMINETXDUO_WINUAE_SESSION:-1}"
 TIMEOUT=180
 MODEL=A3000
 CPU=""
+CLOCK=""
 NETWORK=0
 ACCURATE=0
 SETUP=0
@@ -107,16 +115,17 @@ fi
 BOARD=a2065
 GUEST_ARGS="${AMINETXDUO_GUEST_ARGS:-}"
 
-while getopts "t:m:c:nN:xa:" opt; do
+while getopts "t:m:c:k:nN:xa:" opt; do
     case "$opt" in
         t) TIMEOUT="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
+        k) CLOCK="$OPTARG" ;;
         n) NETWORK=1 ;;
         N) NETWORK=1; BOARD="$OPTARG" ;;
         a) GUEST_ARGS="$OPTARG" ;;
         x) ACCURATE=1 ;;
-        *) echo "usage: $0 [-t seconds] [-m A3000|A1200|A4000] [-c cpu] [-n] [-N board] [-a args] [-x] [-K] <executable> [files...]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-t seconds] [-m A3000|A1200|A4000|A600|A500] [-c cpu] [-k MHz] [-n] [-N board] [-a args] [-x] [-K] <executable> [files...]" >&2; exit 2 ;;
     esac
 done
 shift $((OPTIND - 1))
@@ -272,10 +281,49 @@ case "$MODEL" in
                    "Kickstart v2.05 rev 37.350 (1992)(Commodore)(A600HD)[!].rom"
                    "Kickstart v3.1 r40.63 (1993)(Commodore)(A500-A600-A2000)[!].rom")
         ;;
+    A500)
+        # The timing profile.  A 68000 with Fast RAM on it, which is what an
+        # accelerated A500 is, and OCS at the stock chipset clock.
+        #
+        # Kickstart 3.1 r40.63 -- the A500/A600/A2000 ROM -- rather than 1.3:
+        # everything else in the harness assumes a 2.x/3.x dos.library.
+        CPU_MODEL=68000; FPU_MODEL=0; CHIPSET=ocs; COMPAT=A500
+        CHIPMEM=4; MBMEM=0; FASTMEM=8
+        ROM_NAMES=("Kickstart v3.1 r40.63 (1993)(Commodore)(A500-A600-A2000)[!].rom"
+                   "Kickstart v3.1 rev 40.63 (1993)(Commodore)(A500-A600-A2000)[!].rom"
+                   "kick31-a500.rom")
+        ;;
     *)
-        echo "unknown model $MODEL (want A3000, A4000, A1200 or A600)" >&2; exit 2 ;;
+        echo "unknown model $MODEL (want A3000, A4000, A1200, A600 or A500)" >&2; exit 2 ;;
 esac
 [ -z "$CPU" ] || CPU_MODEL="$CPU"
+
+# ---------------------------------------------------------- -k CLOCK MHz --
+#
+# cpu_multiplier's unit is the 3.546 MHz bus clock, NOT the 7.09 MHz CPU one,
+# and only cycle-exact mode reads it.  Measured rather than assumed, because
+# WinUAE documents neither: the value lands in the emulator log as
+# `CPU cycleunit: 512/N', a plain 68000 profile with no multiplier at all logs
+# 256, and cpu_multiplier=4 logs 128 and doubles every kernel in
+# tests/perf/cpucal.  So 2 is the stock 7.09 MHz and 4 is 14.19 -- what an
+# accelerated 68000 sold as "14 MHz" actually runs at.
+#
+# What scales and what does not is the point of the option.  The CPU speeds up
+# and so does Fast RAM; Chip RAM, the custom chips and the DMA slots do not,
+# and a card on the expansion bus is still clocked by the bus.  A model that
+# let all of it scale together would be no use for asking where time goes.
+CLOCK_LINE=""
+if [ -n "$CLOCK" ]; then
+    if [ "$ACCURATE" != "1" ]; then
+        echo "!! -k $CLOCK ignored without -x: nothing is counting cycles" >&2
+    else
+        CPU_MULT=$(( (CLOCK * 100 + 177) / 355 ))
+        [ "$CPU_MULT" -ge 1 ] || CPU_MULT=1
+        CLOCK_LINE="cpu_multiplier=$CPU_MULT"
+        echo "==> CPU clock: multiplier $CPU_MULT, nominally" \
+             "$((CPU_MULT * 355 / 100)).$((CPU_MULT * 355 % 100)) MHz"
+    fi
+fi
 
 # The A1200's PCMCIA credit-card window starts at $600000, and 8 MB of Zorro II
 # Fast RAM at $200000 runs straight over it.  Kickstart's card.resource then
@@ -363,6 +411,8 @@ if [ "$WANT_ENFORCER" = "1" ]; then
 
     # Enforcer is a resident tool started with `run`; without a wait after it
     # the program under test starts before it has installed.
+    # -m68020 is safe here: the block above moves any run with Enforcer to a
+    # CPU with an MMU, so this is never a 68000.
     WAITSECS="$ROOT/build/waitsecs"
     if [ ! -x "$WAITSECS" ] || [ "$ROOT/tools/enforcer/waitsecs.c" -nt "$WAITSECS" ]; then
         AMIGA_TOOLCHAIN_QUIET=1 . "$ROOT/tools/amiga-toolchain.sh"
@@ -390,10 +440,23 @@ fi
 # Same reasoning as the FS-UAE harness: a bare directory hard drive has none of
 # the assigns a Workbench boot makes, and anything calling GetVar()/SetVar()
 # fails without them.  envsetup builds them through dos.library.
-ENVSETUP="$ROOT/build/envsetup"
+#
+# The arch has to follow the machine, as it does in tools/fsuae-run.sh: a
+# -m68020 envsetup on a 68000 profile stops the run with
+# `Illegal instruction: 49c1` before anything under test executes, and the
+# failure reads as the program's, because none of it has run yet.  Cached per
+# arch so switching machines cannot reuse the wrong binary.
+case "${CPU:-}${MODEL:-}" in
+    *68000*|*A500*|*A600*|*A2000*) ENVSETUP_ARCH="-m68000" ;;
+    *)                             ENVSETUP_ARCH="-m68020" ;;
+esac
+ENVSETUP_ARCH="${AMINETXDUO_ENVSETUP_ARCH:-$ENVSETUP_ARCH}"
+
+ENVSETUP="$ROOT/build/envsetup${ENVSETUP_ARCH}"
 if [ ! -x "$ENVSETUP" ] || [ "$ROOT/tools/envsetup/envsetup.c" -nt "$ENVSETUP" ]; then
     AMIGA_TOOLCHAIN_QUIET=1 . "$ROOT/tools/amiga-toolchain.sh"
-    "$AMIGA_GCC" -O2 -m68020 -I"$AMIGA_NDK" -o "$ENVSETUP" "$ROOT/tools/envsetup/envsetup.c" \
+    "$AMIGA_GCC" -O2 $ENVSETUP_ARCH -I"$AMIGA_NDK" -o "$ENVSETUP" \
+        "$ROOT/tools/envsetup/envsetup.c" \
         || { echo "failed to build envsetup" >&2; exit 2; }
 fi
 cp "$ENVSETUP" "$HD/c/envsetup"
@@ -455,7 +518,7 @@ cpu_type=$CPU_MODEL
 cpu_model=$CPU_MODEL
 fpu_model=$FPU_MODEL
 ${ENFORCER_MMU:-}
-cpu_24bit_addressing=false
+cpu_24bit_addressing=$([ "$CPU_MODEL" = 68000 ] && echo true || echo false)
 chipset=$CHIPSET
 chipset_compatible=$COMPAT
 chipmem_size=$CHIPMEM
@@ -492,6 +555,7 @@ cpu_memory_cycle_exact=true
 blitter_cycle_exact=true
 cpu_data_cache=true
 warp=false
+${CLOCK_LINE:-}
 EOF
 else
 # Warp for correctness runs.  It takes an A3000 Kickstart boot from about 30
