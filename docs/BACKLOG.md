@@ -151,6 +151,101 @@ empty results.
   addresses far from any entry point. `tools/profiler/ReadMe` has the
   convention and why it is a scanned record rather than an offset.
 
+- **Roadshow reads twice as fast as we do while spending MORE CPU per byte, so
+  the read gap is not CPU work,** 2026-08-02. `tests/perf/run-stackprof.sh`
+  holds the rig fixed and makes the library the only variable: bridged
+  Amiberry A3000, Kickstart 3.1 40.68, one `a2065.device`, the released `fitz`
+  binary, `FitzBench KB=4096 CHUNK=32768 REPS=3`, `fitz-serve` on playhouse4.
+  Both stacks came up behind the same MAC and took the **same DHCP lease**,
+  192.168.1.133 -- that check is in here because an earlier stack comparison
+  turned out to have run its two arms at different addresses. 1000 Hz, no
+  samples dropped, 0.0% unsampled. Two profiled runs per stack:
+
+  | | AmiNetXDuo read | Roadshow read | AmiNetXDuo write | Roadshow write |
+  |---|---|---|---|---|
+  | throughput | 980, 982 KB/s | **1259, 1909 KB/s** | **1929, 2058 KB/s** | 1254, 1301 KB/s |
+  | Exec idle loop | **65.1, 65.3%** | 23.9, 50.7% | 19.0, 20.2% | 10.9, 12.7% |
+  | busy CPU | 34.7% | 76.1% | 79.8% | 89.1% |
+  | **CPU per MB moved** | **363, 366 ms** | 409, 417 ms | **399, 432 ms** | 704, 716 ms |
+
+  **The read arm is the one a user notices and it is not ours to fix in code.**
+  We move half Roadshow's bytes with the machine two-thirds idle, and we do it
+  for FEWER milliseconds of CPU per megabyte than Roadshow spends. Something
+  that is 12% cheaper per byte and 2x slower is not losing on CPU work. The
+  clinching number is Roadshow's own spread: its two runs read at 1259 and
+  1909 KB/s for 5001 and 4912 ms of busy CPU -- **the busy CPU per byte is
+  constant and only the waiting changes.** Both stacks are limited by
+  something that is not the processor.
+
+  The module split, at module granularity for both because only our library
+  carries the `ProfSegTag` (`sp-ours2` and `sp-rs2`):
+
+  | | AmiNetXDuo read | Roadshow read | AmiNetXDuo write | Roadshow write |
+  |---|---|---|---|---|
+  | Exec idle loop | 65.3% | 23.9% | 20.2% | 10.9% |
+  | the stack's own library | 23.8% | 51.8% | 60.7% | 60.8% |
+  | unnamed, beside that library | 0.0% | 4.6% | 0.0% | 9.0% |
+  | Exec, real work | 4.5% | 3.5% | 11.0% | 5.2% |
+  | `a2065.device` | 2.5% | 4.2% | 6.4% | 4.9% |
+  | `timer.device` | 0.3% | **5.1%** | 0.4% | **7.7%** |
+  | the `fitz` handler | 2.9% | 5.7% | 0.0% | 0.0% |
+
+  Two things in that table are not artefacts. **Roadshow runs its timers
+  through `timer.device` and we do not** -- 5.1% and 7.7% of its arms against
+  0.3% and 0.4% of ours, which is most of why its write direction costs 704 ms
+  a megabyte against our 399. And the "unnamed, beside that library" row is
+  Roadshow's own code: a library with no seglist tag is bracketed by the hull
+  of its jump-table targets, which brackets the ENTRY POINTS and not the body,
+  so its named share is a floor rather than a figure. `profsplit.py` counts
+  those samples on their own line instead of naming them out of somebody
+  else's build.
+
+  **It is not `fitz`'s read-ahead either.** `h_read()` issues one synchronous
+  `do_rpc()` per window with nothing pipelined behind it, so a deeper window
+  was the obvious candidate. Mounting `BUFS 262144` -- four times the default
+  -- takes read from 982 to 1026 KB/s and leaves **idle at 65.9%, unmoved**.
+  Quadrupling the client's read-ahead changes neither the waiting nor the
+  throughput, so the constraint is below it: our receive path, or the
+  emulator's a2065 frame pacing, which this rig cannot separate from the wire.
+  A capture on the host is what would separate them, and that is the next
+  measurement rather than a code change.
+
+  **The profiler needs nothing of ours to do this.** It ran with no
+  `bsdsocket.library` on the disk at all (the `profspin` proof), and against
+  Roadshow's library with ours absent from the staged volume -- md5-verified,
+  not assumed -- resolving Kickstart, `a2065.device`, `timer.device` and the
+  foreign library by module throughout. Sampling was proved on this rig before
+  any of it was believed: `profspin` under Amiberry/A3000, containment and
+  proportionality both within 0.2 points of the program's own clock, 0
+  failures. The sampler also does not move what it measures: unprofiled
+  control runs read 940 (ours) and 1834 (Roadshow) against profiled 980 and
+  1909.
+
+- **AmiTCP_NG 4.1.4-beta will not come up on a Kickstart 3.1 directory boot,
+  on a REAL `a2065.device`,** 2026-08-02. It was to be the third arm above.
+  `AddNetInterface` fails with `errno 43` `EPROTONOSUPPORT` and the run stops
+  there; `GetNetStatus` then hangs. This is the same failure a previous
+  investigation hit against a synthetic SANA-II device, so the device is not
+  what causes it: the emulator log records **no open of `a2065.device` at
+  all**, and it fails identically with AmiTCP_NG's own
+  `Storage/NetInterfaces/A2065` configuration file rather than ours. The
+  staging is not short of anything either -- its `db/` is at `SYS:AmiTCP`,
+  which is one of the two fallbacks its library assigns for itself when no
+  `AmiTCP:` exists, and its own `ng_readconfig_noargs()` returns TRUE with no
+  config file rather than refusing to start.
+
+  `EPROTONOSUPPORT` out of `socreate()` means the protocol switch is empty,
+  which means `domaininit()` never ran or was undone. In `src/kern/
+  amiga_main.c` the self-starting path reaches it through half a dozen
+  `goto fail` points, and one of them fires. **Which one was not chased, and
+  should not be: it is somebody else's stack.** The likeliest reason is the
+  environment rather than a defect -- their harness mounts a full **AmigaOS
+  3.2** Workbench as `SYS:`, and this is a bare directory hard drive on
+  Kickstart 3.1 with only the assigns `envsetup` makes. `~/amiga-assets/wb`
+  has 2.04 through 3.1 and no 3.2, so that hypothesis cannot be tested here.
+  Reproducing it would mean a 3.2 install, and then all three arms would have
+  to move onto it for the comparison to still be matched.
+
 - **A cycle-attribution profiler, to find where a transfer's time actually
   goes.** The copy and checksum together are about 20% of a wire transfer and
   roughly 78% is unaccounted for inside NetX Duo's protocol processing.
