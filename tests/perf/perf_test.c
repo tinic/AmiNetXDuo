@@ -151,6 +151,8 @@ static UINT p_check(UINT ok, const char *what, ULONG detail)
  * repeat count rather than a single call.
  */
 
+#define P_SLEEP_REPS    16UL    /* sleep-latency samples per duration */
+
 extern struct Device *TimerBase;        /* src/common/compat.c owns it */
 
 static ULONG    p_rate;                 /* E-Clock ticks per second     */
@@ -1349,6 +1351,54 @@ ULONG   saved = p_window;
 }
 
 
+/* ------------------------------------------------------- sleep latency -- */
+
+/*
+ * How late a tx_thread_sleep() of a known length actually completes.  A
+ * sleeping thread is released by the timer wheel, which only runs when the
+ * tick task wakes, so this measures the wakeup granularity directly: the
+ * overshoot should approach one wakeup period however fine the tick is.
+ */
+static VOID p_bench_sleep_latency(VOID)
+{
+static const ULONG p_sleep_ticks[] = { 1UL, 2UL, 5UL, 10UL };
+ULONG   i, r, t0, act_us, req_us, sum, worst, best;
+
+    for (i = 0UL; i < 4UL; i++)
+    {
+        sum   = 0UL;
+        worst = 0UL;
+        best  = 0xFFFFFFFFUL;
+        req_us = p_sleep_ticks[i] * (1000000UL / (ULONG)TX_TIMER_TICKS_PER_SECOND);
+
+        for (r = 0UL; r < P_SLEEP_REPS; r++)
+        {
+            t0 = p_now();
+            tx_thread_sleep(p_sleep_ticks[i]);
+            act_us = p_us(p_elapsed(t0, p_now()));
+
+            sum += act_us;
+            if (act_us > worst)
+            {
+                worst = act_us;
+            }
+            if (act_us < best)
+            {
+                best = act_us;
+            }
+        }
+
+        /* Spread, not overshoot: a sleep completes at whichever wakeup next
+           runs the wheel, so max-min is one wakeup period however the mean
+           lands.  That is the number the wakeup rate controls. */
+        p_log("  sleep %2ld ticks, asked %6ld us: got mean %6ld, min %6ld,"
+              " max %6ld, spread %6ld",
+              (LONG)p_sleep_ticks[i], (LONG)req_us, (LONG)(sum / P_SLEEP_REPS),
+              (LONG)best, (LONG)worst, (LONG)(worst - best));
+    }
+}
+
+
 /* ------------------------------------------------------------ tick stats -- */
 
 /* Tick sweep instrumentation: how far the timer wheel is behind the E-Clock. */
@@ -1357,12 +1407,23 @@ static VOID p_tick_report(const char *when)
 TX_AMIGA_TICK_STATS s;
 
     tx_amiga_tick_stats(&s);
+    p_log("  tick %s: unit %ld%s, wakeup source %ld.%02ld Hz, E-Clock %ld Hz",
+          when, (LONG)s.tx_amiga_tick_unit,
+          s.tx_amiga_tick_fallback ? " (FALLBACK)" : "",
+          (LONG)(s.tx_amiga_tick_source_chz / 100UL),
+          (LONG)(s.tx_amiga_tick_source_chz % 100UL),
+          (LONG)s.tx_amiga_tick_eclock_hz);
     p_log("  tick %s: rate %ld Hz, %ld delivered in %ld ms, %ld wakeups,"
           " %ld empty, %ld catchups",
           when, (LONG)TX_TIMER_TICKS_PER_SECOND,
           (LONG)s.tx_amiga_tick_delivered, (LONG)s.tx_amiga_tick_uptime_ms,
           (LONG)s.tx_amiga_tick_wakeups, (LONG)s.tx_amiga_tick_empty,
           (LONG)s.tx_amiga_tick_catchups);
+    p_log("  tick %s: %ld us in-task over %ld wakeups, worst stall %ld ms,"
+          " worst service %ld us",
+          when, (LONG)s.tx_amiga_tick_service_us, (LONG)s.tx_amiga_tick_wakeups,
+          (LONG)s.tx_amiga_tick_worst_stall_ms,
+          (LONG)s.tx_amiga_tick_worst_service_us);
     p_log("  tick %s: skew %ld ticks, peak %ld, clipped %ld, lost %ld,"
           " over budget %ld, deferred %ld",
           when, (LONG)s.tx_amiga_tick_skew, (LONG)s.tx_amiga_tick_skew_peak,
@@ -1472,6 +1533,11 @@ ULONG   actual;
     p_log("-- pipeline ceiling (no protocol) -----------------------------");
     p_bench_pipeline(P_CK_VENDORED, "loopback pipeline, vendored ck");
     p_bench_pipeline(P_CK_NET68K,   "loopback pipeline, net68k ck");
+
+    p_log("");
+    p_log("-- sleep latency ----------------------------------------------");
+    p_bench_sleep_latency();
+    p_tick_report("after sleep");
 
     p_log("");
     p_log("-- end to end, %ld KB per run ---------------------------------",

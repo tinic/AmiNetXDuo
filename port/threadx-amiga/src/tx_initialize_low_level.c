@@ -654,7 +654,7 @@ UINT                 armed;
     port_sig =  1UL << ((ULONG) port -> mp_SigBit);
 
     /* MICROHZ interval for the fallback, and for the startup guard.  */
-    interval_micro =  1000000UL / (ULONG) TX_TIMER_TICKS_PER_SECOND;
+    interval_micro =  1000000UL / (ULONG) TX_AMIGA_TIMER_WAKEUP_HZ;
     interval_secs  =  interval_micro / 1000000UL;
     interval_micro =  interval_micro % 1000000UL;
 
@@ -835,7 +835,7 @@ UINT                 armed;
         /* One request per tick period; the E-Clock still decides how many
            ticks that wakeup is worth.  */
         _tx_amiga_tick.tx_amiga_tick_source_chz =
-            (ULONG) TX_TIMER_TICKS_PER_SECOND * 100UL;
+            (ULONG) TX_AMIGA_TIMER_WAKEUP_HZ * 100UL;
     }
     else
     {

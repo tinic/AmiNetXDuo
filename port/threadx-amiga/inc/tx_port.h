@@ -366,6 +366,17 @@ void    _tx_amiga_start_interrupts(void);
 #define TX_AMIGA_TIMER_UNIT                     1
 #endif
 
+/* Wakeup rate of a UNIT_MICROHZ source, in Hz.  Only the tick rate by default,
+   which is one request per tick period.  Raising it above the tick rate wakes
+   more often than there are ticks to deliver, so a tick lands nearer its true
+   time instead of at the next frame; the extra wakeups measure zero elapsed
+   periods and count in tx_amiga_tick_empty.  No effect on UNIT_VBLANK, which
+   takes the frame it is given.  */
+
+#ifndef TX_AMIGA_TIMER_WAKEUP_HZ
+#define TX_AMIGA_TIMER_WAKEUP_HZ                TX_TIMER_TICKS_PER_SECOND
+#endif
+
 /* Ceiling on the wheel's backlog, in ticks, and the only place a tick is thrown
    away.  A Forbid()-heavy section, a disk access or an emulator host hiccup can
    stall the tick task for a long time; without a cap the catch-up would fire
