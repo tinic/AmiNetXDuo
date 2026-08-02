@@ -468,20 +468,68 @@ ULONG   len = 1460UL;
         p_report("checksum chain, net68k", ticks_new, reps, clen);
     }
 
-    /* Every length from 0 to 40 and a few beyond, on the real packet. */
-    for (i = 0UL; i <= 40UL; i++)
+    /*
+     * Every length from 0 to 700 bytes, over three payload fills.
+     *
+     * The range is chosen from the assembly, not picked round:
+     * n68k_sum_longwords() runs a computed jump through 64 unrolled pairs up
+     * to 256 bytes and a 56-longword movem.l block above that, so a sweep
+     * that stops short of 224 bytes never reaches the second shape at all and
+     * one that stops short of 448 never runs its loop twice.  The host tier
+     * cannot check either -- it compiles the C fallback -- so this is the only
+     * place the assembly is checked against the vendored answer.
+     *
+     * The fills are the carry cases: all ones makes every add carry, and the
+     * alternating longwords land the accumulator on 0xFFFFFFFF with a carry
+     * pending, which is where the chain has to fold twice.
+     */
     {
-        a = n68k_checksum_reference(p_scratch_packet, NX_PROTOCOL_TCP, (UINT)i,
-                                    &src, &dst);
-        b = n68k_ip_checksum_compute(p_scratch_packet, NX_PROTOCOL_TCP, (UINT)i,
-                                     &src, &dst);
-        if (a != b)
+    ULONG   fill;
+    ULONG   bad = 0xFFFFFFFFUL;
+    UCHAR  *pay = p_scratch_packet -> nx_packet_prepend_ptr;
+
+
+        for (fill = 0UL; (fill < 3UL) && (bad == 0xFFFFFFFFUL); fill++)
         {
-            (VOID)p_check(0, "checksum agrees at a short length", i);
-            break;
+            for (i = 0UL; i < 704UL; i++)
+            {
+                if (fill == 0UL)
+                {
+                    pay[i] = (UCHAR)(i * 7UL + 13UL);
+                }
+                else if (fill == 1UL)
+                {
+                    pay[i] = 0xFFU;
+                }
+                else
+                {
+                    pay[i] = (((i >> 2) & 1UL) == 0UL) ? 0xFFU :
+                             (UCHAR)(((i & 3UL) == 3UL) ? 1U : 0U);
+                }
+            }
+
+            for (i = 0UL; i <= 700UL; i++)
+            {
+                a = n68k_checksum_reference(p_scratch_packet, NX_PROTOCOL_TCP,
+                                            (UINT)i, &src, &dst);
+                b = n68k_ip_checksum_compute(p_scratch_packet, NX_PROTOCOL_TCP,
+                                             (UINT)i, &src, &dst);
+                if (a != b)
+                {
+                    bad = (fill << 16) | i;
+                    break;
+                }
+            }
+        }
+
+        (VOID)p_check((UINT)(bad == 0xFFFFFFFFUL),
+                      "checksum agrees, 3 fills x lengths 0..700", bad);
+
+        for (i = 0UL; i < 704UL; i++)
+        {
+            pay[i] = (UCHAR)(i * 7UL + 13UL);
         }
     }
-    (VOID)p_check(1, "checksum agrees at lengths 0..40", 0UL);
 }
 
 static VOID p_bench_copies(VOID)

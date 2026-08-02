@@ -21630,3 +21630,177 @@ that covers nothing is worse than no sweep, because it passes. It now runs to
 8184-byte case was at 1 mod 4 once its head bytes were gone; a second one at
 2 mod 4 with an aligned destination joins it, so the alignment the drivers
 actually produce is checked at length as well as in the sweep.
+## 87. The checksum's carry, riding the X flag (2026-08-02)
+
+`n68k_sum_longwords()` was two instructions per longword and had been since it
+was written:
+
+```
+add.l   a0@+,d0         | 32-bit add, sets X on carry out
+addx.l  d2,d0           | d2 is zero, so this adds the carry back in
+```
+
+201.3 ns/B on the A1200 profile against the vendored loop's 722, unrolled eight
+ways, and by §86's cost model — memory nearly free, instructions the currency —
+the only thing left to take out was the `subq`/`bne`, two of every eighteen
+instructions. That is an 11% ceiling and the measurements agreed with it: 16,
+32 and 64 longwords per iteration bought 166-172 against 180 for eight, and 128
+gave it all back at 184.
+
+The 34% came from somewhere else. `addx.l Dn,Dx` adds the source **and** the X
+flag, and X is exactly the end-around carry the second instruction of the pair
+exists to fold in. Chain the addx instructions instead of resetting each one
+with a zero register and the carry rides X from one longword to the next:
+
+```
+movem.l a0@+,d1-d7
+addx.l  d1,d0
+addx.l  d2,d0
+...                     | seven of them
+```
+
+Eight instructions per seven longwords rather than sixteen per eight — 1.14
+against 2.25 — and no `add.l` anywhere to reload X and break the chain.
+
+This is not the experiment the backlog already records as worthless. That one
+loaded eight longwords with `movem.l` and then ran `add.l Dn,d0` / `addx.l
+d2,d0` on each, which is 19 instructions per 32 bytes against 18 and measured
+201.27 against 201.39. `movem.l` only pays when it feeds something that needs
+one instruction per longword, not two.
+
+### What the chain may not touch
+
+Nothing between two `addx` instructions may disturb X. `movem`, `cmpa`, `lea`,
+`movea`, `adda`, `suba`, `moveq` and every branch leave it alone; `add`, `sub`,
+the shifts and `addx` itself do not. That decides the shape of the loop:
+
+- the pointer arithmetic that sets up the end pointer runs **before** the chain
+  is armed, because `lsl.l` writes X;
+- the loop is counted by `cmpa.l` against a precomputed limit rather than by
+  `subq`/`dbf` on a data register, because `subq` writes X and because every
+  data register is a `movem` target anyway;
+- seven is the ceiling. `d0` is the accumulator, `addx` takes only data
+  registers, and folding an address register in with `add.l` would drop
+  whatever carry was pending.
+
+The chain leaves one carry in X at the end, and folding it can carry again:
+`d0 = 0xFFFFFFFF` with X set is reachable here, which it is not in the
+`add.l`/`addx.l` form, where a carry out of the add bounds the result at
+`0xFFFFFFFE`. So the fold is done twice, and twice is enough — the first fold
+can only carry by taking `d0` to zero, and `0 + 1` does not carry. That keeps
+the property `n68k_checksum.c` depends on: the answer is congruent to the
+16-bit sum modulo `0xFFFF`, and it is the zero spelling only when every
+longword was zero.
+
+### Then it lost 30% on the packets nobody was watching
+
+The chain needs `d2-d7/a2` saved and restored where the old loop saved two
+registers. Over 1460 bytes that vanishes. Over the 20-byte IP header, which
+this stack checksums on every packet in both directions, it was a **24-32%
+loss** — and the wire case runs 1284 checksum calls over 537 KB, a 418-byte
+mean over a distribution with a large spike at 20.
+
+So calls of 64 longwords or fewer take a second shape that saves nothing: a
+computed jump into 64 unrolled `move.l`/`addx.l` pairs, entered so exactly
+`count` of them run. Same two instructions per longword as the old loop, minus
+its loop control and minus the register saves. It is straight-line code run
+once, so its 256 bytes cost nothing in the instruction cache — a cache only
+charges for code that repeats.
+
+### Measured
+
+A1200 profile under FS-UAE, every candidate assembled into one binary under a
+different symbol and timed in a single run, so no cross-run drift can be read
+as a difference. Best of five passes, ns/B.
+
+The floor is the old loop assembled twice at two addresses. It is **1.3-3.3%**
+from 128 B up and **5% at 20-40 B**, where code placement alone moves the
+number — two byte-identical routines differed by 5% at 20 B, consistently, in
+every pass. Nothing below those bars was treated as a result.
+
+| bytes | 1460 | 1024 | 512 | 400 | 296 | 260 | 200 | 128 | 40 | 20 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| add/addx x8 (was) | 180.6 | 182.0 | 191.9 | 203.9 | 211.9 | 214.4 | 229.5 | 252.0 | 464.7 | 852.4 |
+| table + movem chain | 128.6 | 137.5 | 155.1 | 173.4 | 185.0 | 191.9 | 215.6 | 253.1 | 458.9 | 669.5 |
+| x | 1.40 | 1.32 | 1.24 | 1.18 | 1.15 | 1.12 | 1.06 | 1.00 | 1.01 | 1.27 |
+
+Between about 64 and 256 bytes the table and the old loop run the same two
+instructions per longword and the difference is placement noise. The table wins
+outright only where the loop control it drops is a large share of the work, at
+20-40 B.
+
+Through `n68k_ip_checksum_compute()` rather than the loop alone, which is what
+`perf_test` reports:
+
+| | was | now |
+|---|---|---|
+| checksum, net68k, 1460 B | 201.4 ns/B | 149.8 ns/B |
+| checksum chain, net68k, 8192 B | 190.5 ns/B | 136.5 ns/B |
+| ratio against the vendored loop | 3.58x | 4.82x |
+
+End to end, same binary, same run:
+
+| | was | now |
+|---|---|---|
+| loopback pipeline ceiling | 911 KB/s | 1004 KB/s |
+| TCP loopback, drain only | 693 KB/s | 721 KB/s |
+| TCP loopback, +extract | 600 KB/s | 624 KB/s |
+| TCP over the RAM driver | 230 KB/s | 234 KB/s |
+
+10% off the pipeline ceiling, 4% off a loopback transfer, 2% on the wire, where
+the driver dominates.
+
+### What lost
+
+Recorded so none of it is tried again.
+
+| candidate | at 1460 B | |
+|---|---|---|
+| add/addx unrolled 16 / 32 / 64 | 172-175 / 166 / 170 | the `subq`/`bne` is 11% of the instruction budget and that is all there is |
+| add/addx unrolled 128 | 184 | worse than eight; the loop body is 512 bytes |
+| `dbf` instead of `subq`/`bne` | 181 at x8, 167 at x32 | identical within the floor. One instruction of loop control rather than two is not measurable |
+| two accumulators | 164-170 at x32 | flat. The pairs cannot interleave anyway — the `addx` reads the X the `add` just set, so the flag serialises them whatever the data does |
+| movem chain 7x13, 7x16 | 127-130 | matches 7x8 at 1460 B and loses 5-11% at 260-512 B, where the deeper block no longer fits inside the packet |
+| movem chain 7x32 | 138-141 | 7% worse everywhere |
+| a middle loop level (7x8 + 7x4) | 130.0, and 189.5 at 296 B | no |
+
+### The instruction cache turn, which was not a cliff
+
+§86 expected the 68020's 256-byte instruction cache to punish a deep unroll,
+and it does, but softly and later than the arithmetic suggests. The movem
+chain's loop body is `18k + 6` bytes for `k` blocks: 150 bytes at 7x8, 294 at
+7x16, 582 at 7x32. 7x16 is already over the cache and is not measurably slower
+than 7x8; only 7x32 loses, and by 7%. The add/addx family turns in the same
+place — 64 longwords is 262 bytes of body and still beats eight, 128 longwords
+is 518 and does not.
+
+So the cache is not the reason to stop unrolling here; running out of packet
+is. A block of 91 longwords is 364 bytes and a 296-byte packet never enters it,
+which costs more than the instruction fetches ever did.
+
+### What cannot be measured here
+
+FS-UAE charges no cycles above a 68020, so every number here is the A1200
+profile and nothing else. Two of the results would plausibly differ on the
+machines this project's fastest users actually run:
+
+- **the two-accumulator result.** It is flat on a 68020 and that says nothing
+  about a 68040 or a superscalar 68060. The flag dependency argument above is
+  architectural and applies everywhere, but whether an 060 can overlap two
+  independent `add`/`addx` pairs is not something this lab can answer.
+- **`movem.l` itself.** The whole win rests on `movem.l` being cheap per
+  register, which is measured on the 68020 and inherited from §86's copy work.
+  It is not measured on an 040 or an 060.
+
+### Correctness
+
+The host tier (`tests/perf/host/test_checksum_host.c`, ~10250 cases against the
+vendored function) compiles the C fallback and cannot reach any of this. So the
+on-target sweep in `perf_test` is the only check the assembly gets, and it ran
+lengths 0..40 bytes — ten longwords, which under the new code never leaves the
+first ten entries of the jump table and never reaches the `movem` shape at all.
+Widened to every length from 0 to 700 bytes over three payload fills: the ramp,
+all ones (every add carries), and alternating `0xFFFFFFFF`/`0x00000001`, which
+is what lands the accumulator on `0xFFFFFFFF` with a carry pending and makes
+the second fold matter. 700 bytes is 175 longwords, so the deep block runs
+three times and every level of the tail is reached.

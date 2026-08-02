@@ -1,41 +1,76 @@
-| AmiNetXDuo -- one's-complement longword sum, 68020.
+| AmiNetXDuo -- one's-complement longword sum, 68k.
 |
 | ULONG n68k_sum_longwords(const ULONG *p, ULONG count);
 |
-| Two instructions per longword:
+| This was two instructions per longword -- add.l a0@+,d0 to sum and set X,
+| addx.l d2,d0 with d2 zero to fold the carry back in.  C reaches neither: it
+| has no carry flag and cannot fold the load into the add's addressing mode.
 |
-|       add.l   (a0)+,d0        | 32-bit add, sets X on carry out
-|       addx.l  d2,d0           | d2 is zero, so this adds the carry back in
+| addx.l Dn,d0 adds the source AND the X flag, and X is the end-around carry
+| that second instruction existed to fold.  So chain the addx instructions and
+| let the carry ride X from one longword to the next:
 |
-| add.l reloads X every time, so the chain cannot leak a carry from the addx
-| into the following add.  The result is the one's-complement 32-bit sum, which
-| is congruent to the plain 16-bit sum modulo 0xFFFF and is zero only when
-| every longword was zero -- the interchangeability the C caller relies on (see
-| n68k_checksum.c).
+|       movem.l a0@+,d1-d7      | seven longwords in one instruction
+|       addx.l  d1,d0           | and one instruction each to fold them in
+|       ...
 |
-| Hand written, measured against what the compiler emits.  Three spellings of
-| the same loop were compiled with GCC 15.2 -O2 -m68020 and disassembled before
-| this was written:
+| Eight instructions per seven longwords rather than sixteen per eight.  Not
+| the movem experiment docs/BACKLOG.md records as worthless -- that one still
+| ran add.l/addx.l on each loaded register, 19 instructions per 32 bytes
+| against 18, and measured the same.  movem.l pays only when what it feeds
+| needs one instruction per longword.
 |
-|   64-bit accumulator   movea.l (a2)+,a1 / suba.l a0,a0 / move.l a0,d1 /
-|                        add.l a1,d5 / addx.l d1,d4 / dbf   -- 5 + dbf, and it
-|                        rebuilds the zero register on every iteration
-|   explicit carry test  movea.l (a1)+,a0 / add.l a0,d0 / cmp.l a0,d0 /
-|                        bcc.s / addq.l #1,d0 / dbf         -- 4-5 + dbf
-|   the vendored form    move.l (a1)+,d1 / move.l d1,d0 / andi.l #65535,d0 /
-|                        clr.w d1 / swap d1 / add.l d0,d1 /
-|                        adda.l d1,a0 / dbf                 -- 7 + dbf
+| Nothing between two addx may disturb X.  movem, cmpa, lea, movea, adda, suba,
+| moveq and the branches leave it alone; add, sub, the shifts and addx do not.
+| Hence the setup shifts before the chain is armed, and cmpa against a
+| precomputed limit for loop control rather than subq or dbf -- which would
+| write X, and would want a data register this loop has not got.  Seven is the
+| ceiling: d0 is the accumulator, addx takes only data registers, and folding an
+| address register in with add.l would drop the pending carry.
 |
-| None of them reaches two, because C cannot name the carry flag and cannot
-| fold the load into the add's addressing mode once the value has to become a
-| variable.  The fallback in n68k_checksum.c is the middle spelling and is
-| within ~2x, so this file is worth about that much.
+| The chain leaves one carry in X.  Folding it can carry again -- d0 =
+| 0xFFFFFFFF with X set is reachable here, unlike in the add/addx form where a
+| carry out of the add bounds the result at 0xFFFFFFFE -- so the fold runs
+| twice.  Twice is enough: the first can only carry by taking d0 to zero, and
+| 0 + 1 does not.  That keeps what n68k_checksum.c relies on: congruent to the
+| 16-bit sum modulo 0xFFFF, and the zero spelling only when every longword was
+| zero.
 |
-| 68060: nothing here is 68060-hostile -- add.l/addx.l are implemented on every
-| 68k -- but the file is built under the same AMINETXDUO_NET68K_ASM guard
-| src/crypto68k/ uses for its own assembly, and that guard must never be
-| enabled for a 68060 target, because crypto68k's MULU.L 32x32 traps to vector
-| 61 there.  One switch covers all the hand-written 68020 code.
+| The chain costs seven registers saved and restored.  Over 1460 bytes that
+| vanishes; over the 20-byte IP header this stack checksums on every packet in
+| both directions it was a 24-32% loss, measured.  So 64 longwords and under
+| take a second shape that saves nothing: a computed jump into 64 unrolled
+| move.l/addx.l pairs, entered so exactly `count` of them run.  Straight-line
+| code run once, so its 256 bytes cost nothing in the instruction cache -- a
+| cache charges only for code that repeats.
+|
+| A1200 profile, ns/B, best of five, every candidate in one binary so no
+| cross-run drift reads as a difference.  Floor -- this loop assembled twice at
+| two addresses -- is 1.3-3.3% at 128 B and up, 5% at 20-40 B, where placement
+| alone moves the number.
+|
+|   bytes    1460   1024    512    400    296    260    200    128     40     20
+|   was     180.6  182.0  191.9  203.9  211.9  214.4  229.5  252.0  464.7  852.4
+|   now     128.6  137.5  155.1  173.4  185.0  191.9  215.6  253.1  458.9  669.5
+|
+| Between 128 and 256 B the table runs the same two instructions per longword
+| the old loop did and the difference is placement noise.
+|
+| Losers, so they are not tried again.  add/addx unrolled 16/32/64 longwords:
+| 166-175 at 1460 B, the subq/bne being 11% of the budget and all there was;
+| unrolled 128: 184, worse than eight.  dbf for loop control: identical within
+| the floor.  Two accumulators: flat -- the addx reads the X the add just set,
+| so the flag serialises the pairs whatever the data does.  Movem chain 7x13
+| and 7x16: match 7x8 at 1460 B, lose 5-11% at 260-512 B where the deeper block
+| no longer fits the packet.  7x32: 7% worse everywhere.  A middle loop level:
+| 189.5 at 296 B against 185.0 without.  docs/RESEARCH.md 87 has the rest,
+| including what FS-UAE cannot say about a 68040 or 68060.
+|
+| 68000 and 68060: this file runs on both.  movem.l, addx.l, the computed jump
+| and everything else here are original 68000 instructions and none was dropped
+| from the 68060, so AMINETXDUO_NET68K_ASM stays on for every target -- unlike
+| AMINETXDUO_CRYPTO68K_ASM, which is 68020-only because its MULU.L 32x32 traps
+| to vector 61 on an 060.
 |
 | SPDX-License-Identifier: MIT
 
@@ -45,52 +80,104 @@
         .even
         .globl  _n68k_sum_longwords
 
-| a0 = p, d1 = count, d0 = accumulator, d2 = zero, d3 = scratch
+        .macro  N68K_SUM7
+        movem.l a0@+,d1-d7
+        addx.l  d1,d0
+        addx.l  d2,d0
+        addx.l  d3,d0
+        addx.l  d4,d0
+        addx.l  d5,d0
+        addx.l  d6,d0
+        addx.l  d7,d0
+        .endm
+
+| The table has to reach at least as far as the deep block, or the do-while
+| below would read past the end of a buffer that never entered it.
+#define N68K_TABLE      64
+#define N68K_BLOCKS     8
+
 _n68k_sum_longwords:
-        movem.l d2-d3,sp@-
-        movea.l sp@(12),a0
-        move.l  sp@(16),d1
+        movea.l sp@(4),a0
+        move.l  sp@(8),d1
 
+        cmpi.l  #N68K_TABLE,d1
+        bhi     .Lbulk
+
+| 0..64 longwords: nothing saved, no loop, one computed jump.
+        lsl.l   #2,d1                   | four bytes per pair
+        lea     .Lsdone(pc),a1
+        suba.l  d1,a1                   | count pairs back from the end
         moveq   #0,d0
-        moveq   #0,d2
+        add.l   d0,d0                   | d0 = 0 and X = 0
+        jmp     a1@
 
-        move.l  d1,d3
-        andi.l  #7,d3                   | the 0..7 longword tail
-        lsr.l   #3,d1                   | groups of eight
-        beq     .Ltail
+        .rept   N68K_TABLE
+        move.l  a0@+,d1
+        addx.l  d1,d0
+        .endr
 
-.Loop8:
-        add.l   a0@+,d0
-        addx.l  d2,d0
-        add.l   a0@+,d0
-        addx.l  d2,d0
-        add.l   a0@+,d0
-        addx.l  d2,d0
-        add.l   a0@+,d0
-        addx.l  d2,d0
-        add.l   a0@+,d0
-        addx.l  d2,d0
-        add.l   a0@+,d0
-        addx.l  d2,d0
-        add.l   a0@+,d0
-        addx.l  d2,d0
-        add.l   a0@+,d0
-        addx.l  d2,d0
-        subq.l  #1,d1
-        bne     .Loop8
+.Lsdone:
+        moveq   #0,d1
+        addx.l  d1,d0                   | the carry still pending in X
+        addx.l  d1,d0                   | and the one folding it can make
+        rts
 
-.Ltail:
-        tst.l   d3
+| More than 64: movem.l feeding the chain.
+.Lbulk:
+        movem.l d2-d7/a2,sp@-
+        move.l  d1,d2
+        lsl.l   #2,d2
+        movea.l a0,a1
+        adda.l  d2,a1                   | one past the last longword
+        moveq   #0,d0
+        add.l   d0,d0                   | from here to .Lfold nothing may
+        |                                 touch X
+
+        lea     a1@(-N68K_BLOCKS*28),a2
+.Lblock:
+        .rept   N68K_BLOCKS
+        N68K_SUM7
+        .endr
+        cmpa.l  a2,a0
+        bls     .Lblock                 | count > 64 >= 56, so this needs no
+        |                                 entry test
+
+        lea     a1@(-28),a2             | 0..55 left, seven at a time
+        cmpa.l  a2,a0
+        bhi     .Lfold
+.Lseven:
+        N68K_SUM7
+        cmpa.l  a2,a0
+        bls     .Lseven
+
+.Lfold:
+        moveq   #0,d1
+        addx.l  d1,d0
+        addx.l  d1,d0
+
+        move.l  a1,d1                   | 0..6 longwords left, same jump again
+        sub.l   a0,d1
+        lsr.l   #2,d1
         beq     .Ldone
+        lsl.l   #2,d1
+        lea     .Ltdone(pc),a2
+        suba.l  d1,a2
+        moveq   #0,d2
+        add.l   d2,d2                   | X = 0 again, the shifts cleared it
+        jmp     a2@
 
-.Loop1:
-        add.l   a0@+,d0
-        addx.l  d2,d0
-        subq.l  #1,d3
-        bne     .Loop1
+        .rept   6
+        move.l  a0@+,d1
+        addx.l  d1,d0
+        .endr
+
+.Ltdone:
+        moveq   #0,d1
+        addx.l  d1,d0
+        addx.l  d1,d0
 
 .Ldone:
-        movem.l sp@+,d2-d3
+        movem.l sp@+,d2-d7/a2
         rts
 
 #endif /* AMINETXDUO_NET68K_ASM */
