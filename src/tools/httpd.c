@@ -1056,9 +1056,8 @@ static BOOL httpd_produce(HttpConn *c)
 
             got = Read(c->file, (APTR)c->out, want);
 
-            if (httpd_trace && got > 0 && got < want)
-                httpd_log(c, "short read: asked %lu, got %lu",
-                          (LONG)want, (LONG)got);
+            if (httpd_trace)
+                httpd_log(c, "read %lu left %lu", (LONG)got, (LONG)c->file_left);
 
             if (got <= 0)
             {
@@ -2003,11 +2002,11 @@ static BOOL httpd_writable(HttpConn *c)
             sent = tool_sock_send(httpd_sb, c->sock, &c->out[c->out_sent],
                                   want);
 
-            if (httpd_trace && sent >= 0 && sent < want)
-                httpd_log(c, "short send: at %lu asked %lu",
-                          (LONG)c->out_sent, (LONG)want);
-            if (httpd_trace && sent >= 0 && sent < want)
-                httpd_log(c, "  sent %lu of %lu", (LONG)sent, (LONG)c->out_len);
+            if (httpd_trace)
+                httpd_log(c, "send at %lu of %lu", (LONG)c->out_sent,
+                          (LONG)c->out_len);
+            if (httpd_trace)
+                httpd_log(c, "  asked %lu got %lu", (LONG)want, (LONG)sent);
 
             if (sent < 0)
             {
