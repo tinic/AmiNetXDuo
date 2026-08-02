@@ -121,6 +121,46 @@ empty results.
   so the cross-stack *ranking* stands; what is less safe is the within-stack
   read-versus-write asymmetry. Worth asking how large `largefile` was.
 
+- **PARKED 2026-08-01: the melded copy-and-checksum.** Built, measured, wired
+  and proven correct, then parked because it does nothing on real hardware.
+  Branches `meld` (the primitive) and `wiring` (the receive path, commit
+  `bfa9937`) on origin; nothing is on `main` and the default build is unaffected.
+
+  What it is worth, where it fires: `n68k_copy_sum_longwords()` copies and sums
+  in one pass, 177.21 + 201.35 = 378.56 ns/B separate against 256.00 melded --
+  32.4% off the pair on a 68020. Wired into the receive path behind
+  `AMINETXDUO_RX_COPY_SUM` (default OFF) the whole receive pair went 389.33 ->
+  312.92, about 20%; the stamp write, prefix subtraction and acceptance checks
+  eat roughly a third of the primitive's gain.
+
+  Why it is parked: **the device's buffer is misaligned on 8 of 9 real
+  drivers.** Measured under WinUAE against ariadne, ariadne_ii, x-surf,
+  x-surf-100 (Z2 and Z3), hydra, a2065 and cnet -- every one hands
+  `S2_CopyToBuff` a pointer at 2 mod 4, and the fast path declines. Under a 400
+  pkt/s flood the a2065 gave 1266 consecutive misses and zero stamps, so this is
+  structural rather than incidental. Only `eb920.device` (ASDG LAN Rover) is
+  aligned, and it could not complete a bulk transfer to benchmark. A read/write
+  A/B on a2065 duly showed nothing, because both arms were the same code at
+  runtime.
+
+  Two things are worth keeping from it regardless. The correctness work is
+  real: 16 tcpdrill cases including a damaged zero-padded tail byte, plus a
+  mutation test (injecting `+ 1` into the short-circuit fails all 16) proving
+  the path was live rather than decoration. And it found a genuine hazard --
+  **the stash survives into the transmit path**, where the same function runs to
+  INSERT a checksum, so a received frame whose transport checksum is never
+  computed returns to the pool with a live sentinel; case `s16` put three
+  segments on the wire with `BAD-TCP-CHECKSUM` before the fix. That is closed by
+  clearing the sentinel in a wrapper around `nx_packet_allocate`.
+
+  What would revive it: an opposite-parity path in the melded routine (2 mod 4
+  is word aligned, so 16-bit reads are legal even on a 68000), or drivers
+  adopting `S2_DMACopyToBuff32`. Note also that no other stack does this --
+  Roadshow reads the source exactly once and AmiTCP_NG's hook is a plain
+  `bcopy` -- so there is no precedent to borrow from, and the 68020 cost model
+  says instructions rather than bus cycles are the currency, which is what
+  killed the `swap`-based recombination idea for 2 mod 4 (see RESEARCH.md 86).
+
 ## Decided against — do not "fix"
 
 - **The ThreadX tick rate stays at 50 and changing it does nothing**,
