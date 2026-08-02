@@ -18,6 +18,52 @@ empty results.
 
 ## Open — no decision taken
 
+- **The 68000 byte-loop fallback costs 6.1x, not the 4x the source says**,
+  measured 2026-08-01 on a cycle-exact A500: 5.4 us/B against 0.89 for the
+  `movem.l` path. `src/net68k/n68k_copy.S` takes it whenever `to` and `from`
+  disagree in bit 0, because on a 68000 a misaligned word access is an address
+  error rather than a slow path.
+
+  It should never fire on the receive path -- the alignment census says the
+  cases that occur are 0 mod 4 (application buffers, packet prepend pointers)
+  and 2 mod 4 (eight of nine real drivers), both of which match the
+  destination's parity. So this is only a cost if some path hands over an ODD
+  buffer, and nothing has been measured doing that. Worth finding out whether
+  any real driver does before deciding it is theoretical, because 6.1x is a
+  bigger number than anything else measured in the data path today.
+
+- **The 68000 numbers for both net68k primitives**, measured 2026-08-01 under
+  WinUAE 6.0.3 on a purpose-built cycle-exact A500 profile
+  (`C:\aminetxduo\run\m0ab\config.uae` on winbuilder; nothing like it existed,
+  every prior cycle-exact config there is a 68030). Harness on branch
+  `m68000-ab`: both predecessors assembled alongside the shipped versions in
+  ONE binary, plus a second assembly of each shipped sequence at a different
+  address as a floor check.
+
+  Both changes help MORE on a 68000 than on the 68020 they were tuned against.
+  Copy -13.1% at 0 mod 4 and 2 mod 4 (the only alignments that occur; 1 and 3
+  are flat because both implementations fall into the same byte loop and cannot
+  differ). Checksum -23.9% at 1460 B and **-29.4% at 20 bytes**, which is the IP
+  header this stack checksums on every packet both directions -- the short-call
+  path was the thing most likely not to transfer, given a 68000 has no
+  instruction cache, and it is the best row in the table. Pipeline ceiling
+  161 -> 175 KB/s. **One implementation for all four targets is right; no
+  per-CPU selection is warranted.**
+
+  Fidelity was checked rather than assumed: `cpucal` prints ADD.L at 8.00
+  cycles against a published 8 and MOVE.L at 4.00 against 4, and a model with a
+  flat per-instruction cost would print those equal. The same probe on the
+  existing A3000 profile charges MULU.L 3.88 cycles against a published 44, so
+  **numbers taken from that profile mean nothing** -- worth knowing before
+  anyone quotes one. `cpucal` needed its two multiply kernels gated out to
+  build for a 68000 at all, since MULU.L 32x32 does not exist on the part.
+
+  Two caveats recorded with the data: the implied clock is 6.69 MHz against a
+  PAL A500's 7.09, a uniform ~6% consistent across every kernel that looks like
+  OS interrupt service and applies equally to both arms of every A/B; and
+  per-sample spread reaches 15% in quantised ~1.5 ms steps, so single samples
+  are useless and everything above is best-of-nine.
+
 - **What Roadshow and AmiTCP_NG actually do in their SANA-II copy hooks**,
   measured 2026-08-01 with `tests/tapprobe/` (an instrumented copy of
   tcpdrill's device that installs itself, launches a foreign stack against it
