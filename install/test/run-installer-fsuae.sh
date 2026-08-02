@@ -4,7 +4,7 @@
 # comes up from nothing but what the installer wrote.
 #
 #   install/test/run-installer-fsuae.sh [-b BUILDDIR] [-t SECONDS] [-c CPU]
-#                                       [-l NOVICE|AVERAGE|EXPERT|RERUN]
+#                                       [-l SCENARIO]
 #
 # Two FS-UAE runs against the same staging directory:
 #
@@ -44,14 +44,27 @@ while getopts "b:t:c:l:k" opt; do
         l) LEVEL="$OPTARG" ;;
         k) KEEP=1 ;;
         *) echo "usage: $0 [-b builddir] [-t seconds] [-c cpu]" \
-                "[-l NOVICE|AVERAGE|EXPERT|RERUN] [-k]" >&2
+                "[-l NOVICE|AVERAGE|EXPERT|STATIC|RERUN|SHARE|SHARERERUN]" \
+                "[-k]" >&2
            exit 2 ;;
     esac
 done
 
+# Does this scenario answer yes to the file-server question?  Every scenario
+# asserts on S:User-Startup afterwards, and this is what it expects to find
+# there -- so declining is checked as explicitly as accepting is.
+WANT_SHARE=0
 SKIP_BOOT=0
 case "$LEVEL" in
-    NOVICE|AVERAGE|EXPERT) DRIVE_FLAGS=(-DDRIVE_LEVEL="\"$LEVEL\"") ;;
+    # The file server is declined, which is what its (default 0) gives at
+    # NOVICE and what bit 2 asks for on the pages a fuller run puts up.  It
+    # has to be declined for the boot run below: bootcheck executes the
+    # startup block on a machine staged with no C:Run, so a detached line
+    # would fail there for want of the Shell rather than for anything the
+    # installer did.
+    NOVICE) DRIVE_FLAGS=(-DDRIVE_LEVEL='"NOVICE"') ;;
+    AVERAGE|EXPERT) DRIVE_FLAGS=(-DDRIVE_LEVEL="\"$LEVEL\""
+                                 -DDRIVE_NO_ON_YESNO=4) ;;
     # RERUN installs twice over itself: the second pass is the one that has
     # to notice an existing configuration and leave it alone.
     RERUN)  DRIVE_FLAGS=(-DDRIVE_LEVEL='"NOVICE"' -DDRIVE_RUNS=2) ;;
@@ -60,8 +73,18 @@ case "$LEVEL" in
     # The address it then writes is 192.168.1.10, which is not on the
     # emulator's 10.0.2.0/24 SLIRP network -- so this one checks the files
     # and stops there rather than pretending a ping should work.
-    STATIC) DRIVE_FLAGS=(-DDRIVE_LEVEL='"AVERAGE"' -DDRIVE_NO_ON_YESNO=1)
+    STATIC) DRIVE_FLAGS=(-DDRIVE_LEVEL='"AVERAGE"' -DDRIVE_NO_ON_YESNO=5)
             SKIP_BOOT=1 ;;
+    # SHARE takes the first answer on every page, so the file-server question
+    # is answered yes and the drawer question with its default.  No boot run:
+    # the staged machine has no C:Run to detach the server with, and the line
+    # written is the thing under test.
+    SHARE)  DRIVE_FLAGS=(-DDRIVE_LEVEL='"AVERAGE"')
+            WANT_SHARE=1 SKIP_BOOT=1 ;;
+    # The same, twice over -- the case where a block that is appended to
+    # rather than replaced ends up with two of everything.
+    SHARERERUN) DRIVE_FLAGS=(-DDRIVE_LEVEL='"AVERAGE"' -DDRIVE_RUNS=2)
+            WANT_SHARE=1 SKIP_BOOT=1 ;;
     *) echo "unknown user level: $LEVEL" >&2; exit 2 ;;
 esac
 
@@ -215,34 +238,79 @@ if [ "$INSTALL_STATUS" != "0" ] || [ "$fail" != "0" ]; then
     exit 1
 fi
 
-if [ "$SKIP_BOOT" = "1" ]; then
+bad=0
+want() {
+    if grep -qx "$2" "$HD/$1"; then
+        printf '  ok      %-34s %s\n' "$1" "$2"
+    else
+        printf '  WRONG   %-34s expected %s\n' "$1" "$2"
+        bad=1
+    fi
+}
+
+# ------------------------------------------------------ the startup block ---
+#
+# Counted, not just looked for.  A (startup) that appended instead of
+# replacing would leave a second block, or a second copy of a line inside the
+# one block, and either reads as a working install until the day the machine
+# is booted -- which is why every scenario checks this and not only the ones
+# that install twice.
+
+echo
+echo "============================================================"
+echo "  S:User-Startup"
+echo "============================================================"
+
+count() { grep -c "$1" "$HD/s/User-Startup" 2>/dev/null || true; }
+
+exactly() {
+    n=$(count "$1")
+    if [ "$n" = "$2" ]; then
+        printf '  ok      %-44s %s\n' "$1" "$n"
+    else
+        printf '  WRONG   %-44s %s, expected %s\n' "$1" "$n" "$2"
+        bad=1
+    fi
+}
+
+exactly '^;BEGIN AmiNetXDuo'                    1
+exactly '^;END AmiNetXDuo'                      1
+exactly 'C:AddNetInterface DEVS:NetInterfaces/' 1
+exactly 'C:httpd'                               "$WANT_SHARE"
+
+if [ "$WANT_SHARE" = "1" ]; then
+    if grep -Eq '^C:Run >NIL: <NIL: C:httpd ".+" 80$' "$HD/s/User-Startup"
+    then
+        printf '  ok      %s\n' 'the file server line is detached and quoted'
+    else
+        printf '  WRONG   %s\n' 'the file server line is not what it should be'
+        bad=1
+    fi
+fi
+
+if [ "$LEVEL" = "STATIC" ]; then
     echo
     echo "============================================================"
     echo "  static configuration check"
     echo "============================================================"
-    bad=0
-    want() {
-        if grep -qx "$2" "$HD/$1"; then
-            printf '  ok      %-34s %s\n' "$1" "$2"
-        else
-            printf '  WRONG   %-34s expected %s\n' "$1" "$2"
-            bad=1
-        fi
-    }
     want devs/NetInterfaces/eth0      "CONFIGURE=STATIC"
     want devs/NetInterfaces/eth0      "ADDRESS=192.168.1.10"
     want devs/NetInterfaces/eth0      "NETMASK=255.255.255.0"
     want devs/Internet/routes         "DEFAULT=192.168.1.1"
     want devs/Internet/name_resolution "nameserver 192.168.1.1"
     want devs/Internet/name_resolution "hostname amiga"
-    if [ "$bad" = "0" ]; then
-        echo
-        echo "==> PASS: the static configuration is what was asked for"
-        exit 0
-    fi
+fi
+
+if [ "$bad" != "0" ]; then
     echo
-    echo "==> FAIL: the static configuration is not what was asked for"
+    echo "==> FAIL: what was written is not what was asked for"
     exit 1
+fi
+
+if [ "$SKIP_BOOT" = "1" ]; then
+    echo
+    echo "==> PASS: what was written is what was asked for"
+    exit 0
 fi
 
 # --------------------------------------------------------------- run two ---

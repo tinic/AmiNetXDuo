@@ -191,9 +191,30 @@
        "type that command yourself, or just run any networking program, "
        "because bsdsocket.library starts the stack the first time a program "
        "opens it.\n\n"
+       "The file server, if it was asked for, goes in beside that line.\n\n"
        "Only AmiNetXDuo's own lines are touched.  Everything else in "
        "S:User-Startup is left alone, so it is safe to run this installer "
        "again."))
+
+(set H_HTTPD
+  (cat "httpd offers one drawer over the network.  Another computer opens it "
+       "as a disk -- Connect to Server on a Mac, Map network drive on "
+       "Windows, Connect to Server in a Linux file manager -- with nothing "
+       "installed at that end.\n\n"
+       "There is no password.  Everything in the chosen drawer is reachable "
+       "by anyone who can reach this Amiga, and nothing outside it is "
+       "reachable at all.\n\n"
+       "Answering no still installs the command, so it can be started by "
+       "hand whenever it is wanted:\n\n\thttpd Work:Public\n\n"
+       "Only AmiNetXDuo's own lines in S:User-Startup are touched."))
+
+(set H_HTTPDDIR
+  (cat "Everything in this drawer, and in every drawer inside it, is offered "
+       "over the network.  Nothing above it is.\n\n"
+       "A drawer made for the purpose -- Work:Public, say -- is a better "
+       "answer than the whole of a volume.\n\n"
+       "The drawer is named on one line in S:User-Startup, which is where it "
+       "and the port are changed later."))
 
 (set H_REPLACELIB
   (cat "There is already a bsdsocket.library on this machine.  It belongs to "
@@ -829,6 +850,33 @@
     (choices "Yes, at boot" "No, I will do it")
     (default 1)))
 
+; --- share a drawer at boot? ---------------------------------------------
+;
+; Off by default, and the drawer is only asked for once the answer is yes.
+; Most machines are not meant to be servers, and at NOVICE level the default
+; is the whole answer -- so a novice install starts no server and is never
+; asked about one.
+
+(set DO_HTTPD 0)
+(set HTTPD_DIR "")
+
+(set DO_HTTPD
+  (askbool
+    (prompt "Share a drawer over the network when this Amiga boots?\n\n"
+            "Other computers can then open it as a disk.")
+    (help    H_HTTPD)
+    (choices "Yes, share a drawer" "No, share nothing")
+    (default 0)))
+
+; askdir rather than askstring: the drawer has to exist for httpd to serve
+; it, and picking one is easier to get right than typing a path.
+(if DO_HTTPD
+    (set HTTPD_DIR
+      (askdir
+        (prompt "Which drawer should be shared?")
+        (help    H_HTTPDDIR)
+        (default @default-dest))))
+
 (complete 10)
 
 ; ==========================================================================
@@ -970,7 +1018,9 @@
           "SRV -- from a named server, and arp lists which "
           "machines on this network have answered.  "
           "fetch retrieves an http:// or https:// URL; nc, telnet and "
-          "tftp are netcat and the usual clients; sntp sets the clock from "
+          "tftp are netcat and the usual clients; httpd goes the other way "
+          "and offers a drawer to other computers as a disk; "
+          "sntp sets the clock from "
           "a time server and whois asks who owns a name.  NetTrace captures "
           "packets to a .pcap file, and CheckNetConfig reads the "
           "configuration back and says what is wrong with it.  ssh connects "
@@ -1208,15 +1258,35 @@
 
 (set START_IF (if KEEP_OLD OLD_IF IFNAME))
 
+; The block holds up to two lines, and is built up here rather than written
+; from three separate (startup) statements: one block, replaced whole every
+; time, is what keeps a re-run from stacking a second copy of either line on
+; top of the first.  With neither line wanted the block goes away entirely,
+; which is also how the two are removed again.
+(set START_CMD "")
+
 (if DO_STARTUP
+    (set START_CMD
+      ("C:AddNetInterface DEVS:NetInterfaces/%s QUIET\n" START_IF)))
+
+; Run, because httpd serves until it is stopped and never returns on its own:
+; without it the boot stops here.  The port is spelled out even though 80 is
+; what httpd uses anyway -- this line is where it is changed, and a number
+; that is already there is easier to change than one that has to be added.
+(if DO_HTTPD
+    (set START_CMD
+      (cat START_CMD
+           "C:Run >NIL: <NIL: C:httpd \"" HTTPD_DIR "\" 80\n")))
+
+(if (> (strlen START_CMD) 0)
     (startup APPNAME
-      (prompt "Adding AmiNetXDuo to S:User-Startup, so that the network "
-              "starts when the Amiga boots.")
+      (prompt "Adding AmiNetXDuo to S:User-Startup, so that it starts when "
+              "the Amiga boots.")
       (help   H_STARTUP)
-      (command ("C:AddNetInterface DEVS:NetInterfaces/%s QUIET\n" START_IF)))
+      (command START_CMD))
     (startup APPNAME
-      (prompt "Removing AmiNetXDuo's lines from S:User-Startup, so that the "
-              "network does not start by itself.")
+      (prompt "Removing AmiNetXDuo's lines from S:User-Startup, so that "
+              "nothing starts by itself.")
       (help   H_STARTUP)))
 
 (complete 100)

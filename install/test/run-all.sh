@@ -16,11 +16,15 @@
 #             validated address prompts; checks the files, not the network
 #   RERUN     installs twice over itself; the second pass has to notice the
 #             existing configuration and keep it
+#   SHARE     "yes" to the file server, so S:User-Startup gets its line too
+#   SHARERERUN  the same twice over, where a block that grew instead of being
+#             replaced would show up as two of everything
 #
 # It starts with ICONS, which hands the generated .info files to the real
 # icon.library rather than trusting the generator to grade its own homework.
 #
-# All but STATIC then boot the installed machine with an A2065 on SLIRP and
+# Every scenario checks S:User-Startup line by line.  All but the three that
+# stop there then boot the installed machine with an A2065 on SLIRP and
 # require the network to come up from S:User-Startup alone.
 #
 # Runs are serialised by tools/fsuae-run.sh's lock, so this takes a while --
@@ -33,7 +37,7 @@ set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ARGS=("$@")
 
-SCENARIOS=(NOVICE AVERAGE EXPERT STATIC RERUN)
+SCENARIOS=(NOVICE AVERAGE EXPERT STATIC RERUN SHARE SHARERERUN)
 declare -a RESULTS
 
 ROOT=$(cd "$HERE/../.." && pwd)
