@@ -7,7 +7,15 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
-## 0.16.6
+## 0.16.7
+
+- Reading is back to the speed it was at 0.16.4. A change in 0.16.6 stopped the stack sending the duplicate acknowledgment that tells the far end a segment is missing, so every lost segment waited for a timeout instead of being resent immediately. Reads on a 68020 with a real card fell from 395 to 242 KB/s and on a 68000 from 125 to 102; writes were unaffected. The receive window that release also widened went back to what it was, having been measured as worth nothing once the acknowledgments work
+- `httpd` serves a drawer over read-write WebDAV, so a drawer on this machine can be written to as well as read from Windows, macOS and Linux -- files and drawers can be created, renamed, copied and deleted from the far end's own file manager. Deleting or copying a large tree no longer stops the server answering anyone else while it runs
+- A file whose name is longer than the filesystem accepts is refused instead of being silently shortened. On a floppy that cuts at 30 characters, two names differing only after the thirtieth were the same file, and writing the second replaced the first
+
+## 0.16.6 -- withdrawn
+
+This release was taken down. The read speed below was measured on a test rig that reorders packets, where the change responsible was rewarding the loss recovery it had switched off; on real hardware reads got slower, not faster. 0.16.7 puts it back. The entries are kept as a record of what was claimed.
 
 - Reading is about twice as fast. A 4 MB file off a file server on a 14 MHz 68020 went from 979 to 1953 KB/s. The receive window was exactly 32768 bytes, which cannot hold a 32 KB block of application data plus the header in front of it, so every block arrived in two instalments and each instalment cost a full round-trip wait. It is now 33 whole Ethernet segments. A program holding five or more sockets at once was never affected and does not change
 - Out-of-sequence data is acknowledged after it is queued rather than before, so a segment that closes a gap is no longer reported as though the gap were still open. The far end was retransmitting data that had already arrived
