@@ -55,6 +55,23 @@ address — `ping`, `traceroute`, `nc`, `telnet`, `tftp`, `whois`, `fetch`,
 `netstat -r` shows the IPv6 routes, `AddNetRoute` and `DeleteNetRoute` change
 them, and `arp` lists the neighbours an IPv6 network is reached through.
 
+## Existing software and IPv6
+
+Software that resolves a name with `getaddrinfo()` and connects to whatever it
+returns works over IPv6 without being changed. The call reports whichever kind
+of address the network has, and a program that passes it straight to
+`connect()` never has to name a family at all.
+
+Software written for IPv4 keeps working over IPv4, which covers most of what is
+already on an Amiga. A program is IPv4-only when it resolves with
+`gethostbyname()` — that call has no way to return an IPv6 address — or when it
+keeps an address in 32 bits, or reads a dotted quad out of a configuration
+file.
+
+Reaching an IPv6 host from one of those is a small change rather than a
+rewrite: resolve with `getaddrinfo()`, and hand what it returns to `connect()`
+without looking inside it. The rest of the program stays as it is.
+
 ## Requirements
 
 Any 68000 or better, AmigaOS 2.04 or newer, and 1 MB of RAM. A SANA-II network
