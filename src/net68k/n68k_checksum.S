@@ -23,8 +23,10 @@
 | Nothing between two addx may disturb X.  movem, cmpa, lea, movea, adda, suba,
 | moveq and the branches leave it alone; add, sub, the shifts and addx do not.
 | Hence the setup shifts before the chain is armed, and cmpa against a
-| precomputed limit for loop control rather than subq or dbf -- which would
-| write X, and would want a data register this loop has not got.  Seven is the
+| precomputed limit for loop control rather than subq, which writes X.  dbf
+| does NOT write X -- DBcc leaves the condition codes alone -- so it is barred
+| for the other reason instead: it counts in a data register, and all eight are
+| spoken for, d0 the accumulator and d1-d7 the movem payload.  Seven is the
 | ceiling: d0 is the accumulator, addx takes only data registers, and folding an
 | address register in with add.l would drop the pending carry.
 |
