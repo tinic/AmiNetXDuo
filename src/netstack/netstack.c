@@ -1042,6 +1042,101 @@ static VOID ami_ns_dhcp_discover_now(NX_DHCP *dhcp)
     (VOID)tx_timer_activate(&dhcp->nx_dhcp_timer);
 }
 
+/*
+ * Two DHCP options NetX Duo does not name. It retrieves any option code the
+ * server sent, so a number suffices: RFC 2132 3.17 for the domain name and
+ * 3.12 for the classful static route list that the published API's
+ * aam_StaticRouteTable carries.
+ */
+#define AMI_DHCP_OPTION_DOMAIN          15
+#define AMI_DHCP_OPTION_STATIC_ROUTE    33
+
+/*
+ * DHCP option 61, the client identifier.
+ *
+ * NetX Duo names the option and its size (nxd_dhcp_client.h) and then never
+ * sends it; the user-option callback is the only way in. Roadshow sends it on
+ * every DISCOVER and REQUEST, and a router that keys its lease table on the
+ * identifier rather than on chaddr therefore treats the two stacks as two
+ * different clients: measured against a UniFi gateway on 2026-08-01, one A1200
+ * with a2065 MAC 00:80:10:49:00:07 was handed 192.168.1.137 under Roadshow and
+ * 192.168.1.118 under ours, in back-to-back boots. So a machine changes address
+ * when it changes stack, and any reservation the user made stops applying.
+ *
+ * The form is RFC 2132 section 9.14's hardware type plus hardware address: 0x01
+ * for Ethernet then the six MAC bytes, which is what identifies the same
+ * machine to a server that also saw Roadshow, AmigaOS 4, or a PC on that NIC.
+ *
+ * Returning anything but NX_TRUE makes NetX Duo drop the whole message
+ * (nxd_dhcp_client.c, _nx_dhcp_send_request_internal), so a short buffer costs
+ * the option, never the DHCP exchange.
+ */
+static UINT ami_ns_dhcp_client_id(NX_DHCP *dhcp_ptr, UINT iface_index,
+                                  UINT message_type, UCHAR *option_ptr,
+                                  UINT *option_length)
+{
+    NX_INTERFACE *nxif;
+    ULONG         msw, lsw;
+
+    (VOID)message_type;
+
+    if (*option_length < (NX_DHCP_OPTION_CLIENT_ID_SIZE + 2) ||
+        dhcp_ptr->nx_dhcp_ip_ptr == NX_NULL ||
+        iface_index >= NX_MAX_PHYSICAL_INTERFACES)
+    {
+        *option_length = 0;
+        return NX_TRUE;
+    }
+
+    nxif = &dhcp_ptr->nx_dhcp_ip_ptr->nx_ip_interface[iface_index];
+    msw  = nxif->nx_interface_physical_address_msw;
+    lsw  = nxif->nx_interface_physical_address_lsw;
+
+    option_ptr[0] = NX_DHCP_OPTION_CLIENT_ID;
+    option_ptr[1] = NX_DHCP_OPTION_CLIENT_ID_SIZE;
+    option_ptr[2] = 0x01;                       /* RFC 1700 hardware type */
+    option_ptr[3] = (UCHAR)(msw >> 8);
+    option_ptr[4] = (UCHAR)(msw);
+    option_ptr[5] = (UCHAR)(lsw >> 24);
+    option_ptr[6] = (UCHAR)(lsw >> 16);
+    option_ptr[7] = (UCHAR)(lsw >> 8);
+    option_ptr[8] = (UCHAR)(lsw);
+
+    *option_length = NX_DHCP_OPTION_CLIENT_ID_SIZE + 2;
+
+    return NX_TRUE;
+}
+
+/*
+ * Everything a fresh NX_DHCP needs, wherever it was created.
+ *
+ * Start-up and netstack_interface_dhcp_start() both create the one client there
+ * can be, and the start-up one used to get only the state-change callback: the
+ * parameter request list stayed at NetX Duo's default of mask/gateway/DNS, so a
+ * machine configured for DHCP in DEVS:NetInterfaces came up with no domain name
+ * and no static routes while the same machine configured by hand did. A
+ * conforming server sends what the list asks for and nothing else.
+ */
+static VOID ami_ns_dhcp_configure(AmiNetStack *ns)
+{
+    (VOID)nx_dhcp_interface_state_change_notify(&ns->ns_Dhcp,
+                                                ami_ns_dhcp_state_changed);
+
+    (VOID)nx_dhcp_user_option_add_callback_set(&ns->ns_Dhcp,
+                                               ami_ns_dhcp_client_id);
+
+    /*
+     * Ask the server for the options an application can be given back. Without
+     * this they are not in the parameter request list and a conforming server
+     * has no reason to send any, so the tables come back empty.
+     */
+    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, NX_DHCP_OPTION_GATEWAYS);
+    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, NX_DHCP_OPTION_DNS_SVR);
+    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, NX_DHCP_OPTION_HOST_NAME);
+    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, AMI_DHCP_OPTION_DOMAIN);
+    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, AMI_DHCP_OPTION_STATIC_ROUTE);
+}
+
 static LONG ami_ns_configure_addresses(AmiNetStack *ns)
 {
     UINT  status;
@@ -1104,10 +1199,10 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
         {
             ns->ns_DhcpCreated = TRUE;
 
-            /* Registered before the client starts, so the first BOUND is
-               reported as well as everything after it. */
-            (VOID)nx_dhcp_interface_state_change_notify(
-                      &ns->ns_Dhcp, ami_ns_dhcp_state_changed);
+            /* Before the client starts, so the first BOUND is reported as well
+               as everything after it, and so the first DISCOVER already carries
+               the client identifier and the full parameter request list. */
+            ami_ns_dhcp_configure(ns);
 
             for (i = 0; i < ns->ns_IfaceCount; i++)
             {
@@ -1831,15 +1926,6 @@ LONG netstack_interface_remove(UWORD index, BOOL force)
 
 /* ---------------------------------------------- DHCP on one interface ---- */
 
-/*
- * Two DHCP options NetX Duo does not name. It retrieves any option code the
- * server sent, so a number suffices: RFC 2132 3.17 for the domain name and
- * 3.12 for the classful static route list that the published API's
- * aam_StaticRouteTable carries.
- */
-#define AMI_DHCP_OPTION_DOMAIN          15
-#define AMI_DHCP_OPTION_STATIC_ROUTE    33
-
 static VOID ami_ns_zero(APTR p, ULONG size)
 {
     UBYTE *b = (UBYTE *)p;
@@ -1881,19 +1967,7 @@ static LONG ami_ns_dhcp_ensure(AmiNetStack *ns)
 
     ns->ns_DhcpCreated = TRUE;
 
-    (VOID)nx_dhcp_interface_state_change_notify(&ns->ns_Dhcp,
-                                                ami_ns_dhcp_state_changed);
-
-    /*
-     * Ask the server for the options an application can be given back. Without
-     * this they are not in the parameter request list and a conforming server
-     * has no reason to send any, so the tables come back empty.
-     */
-    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, NX_DHCP_OPTION_GATEWAYS);
-    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, NX_DHCP_OPTION_DNS_SVR);
-    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, NX_DHCP_OPTION_HOST_NAME);
-    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, AMI_DHCP_OPTION_DOMAIN);
-    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, AMI_DHCP_OPTION_STATIC_ROUTE);
+    ami_ns_dhcp_configure(ns);
 
     return AMI_NET_OK;
 }
