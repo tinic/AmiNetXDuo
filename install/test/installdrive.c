@@ -93,12 +93,16 @@
 #endif
 
 /*
- * Which yes/no page to answer with the SECOND choice instead of the first.
- * 0 means "always take the first", which is the default in every askbool
- * this script has.  Set to 1 to answer "No, I will type them" to the
- * "does your network hand out addresses automatically?" question, which is
- * the only way to reach the static-address branch and its four validated
- * address prompts.
+ * Which yes/no pages to answer with the SECOND choice instead of the first.
+ *
+ * A bitmask over the pages in the order they come up: bit 0 is the first
+ * yes/no page, bit 1 the second, and so on.  0 is "always take the first",
+ * which is what an ordinary run wants.
+ *
+ * 1 answers "No, I will type them" to the addressing question, the only way
+ * to reach the static-address branch and its four validated prompts.  4
+ * answers "No, share nothing" to the file-server question on a fresh
+ * install, where the order is addressing, network-at-boot, share-at-boot.
  */
 #ifndef DRIVE_NO_ON_YESNO
 #define DRIVE_NO_ON_YESNO 0
@@ -197,9 +201,12 @@ static struct Window *find_installer_window(struct Gadget **click_out)
             if (choice == NULL && yes != NULL)
             {
                 /* a yes/no page: ID 2 is the first (choices) string */
+                LONG second = 0;
+
                 yesno_pages++;
-                choice = (yesno_pages == DRIVE_NO_ON_YESNO && no != NULL)
-                             ? no : yes;
+                if (yesno_pages <= 31)
+                    second = (DRIVE_NO_ON_YESNO >> (yesno_pages - 1)) & 1;
+                choice = (second != 0 && no != NULL) ? no : yes;
             }
             if (choice == NULL)
                 choice = single;
