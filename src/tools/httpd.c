@@ -1055,6 +1055,11 @@ static BOOL httpd_produce(HttpConn *c)
                 want = (LONG)c->file_left;
 
             got = Read(c->file, (APTR)c->out, want);
+
+            if (httpd_trace && got > 0 && got < want)
+                httpd_log(c, "short read: asked %lu, got %lu",
+                          (LONG)want, (LONG)got);
+
             if (got <= 0)
             {
                 /* Short of what Examine() said, which means the file changed
@@ -1993,8 +1998,16 @@ static BOOL httpd_writable(HttpConn *c)
 
         if (c->out_sent < c->out_len)
         {
+            LONG want = (LONG)(c->out_len - c->out_sent);
+
             sent = tool_sock_send(httpd_sb, c->sock, &c->out[c->out_sent],
-                                  (LONG)(c->out_len - c->out_sent));
+                                  want);
+
+            if (httpd_trace && sent >= 0 && sent < want)
+                httpd_log(c, "short send: at %lu asked %lu",
+                          (LONG)c->out_sent, (LONG)want);
+            if (httpd_trace && sent >= 0 && sent < want)
+                httpd_log(c, "  sent %lu of %lu", (LONG)sent, (LONG)c->out_len);
 
             if (sent < 0)
             {
