@@ -4,13 +4,19 @@
  *
  * WHY THIS IS A TEST AND NOT A REVIEW
  *
- *   The server is read-only today and is meant to write later.  A path check
- *   that is merely "looked right" leaks a file now and destroys one when
- *   DELETE lands, and the mistakes are all the same shape: a thing that does
- *   not look like an escape until something else has decoded it.  So the
- *   escapes are written down here, one case each, and the file is built for
- *   the host so they run in `tools/ci.sh host` on every change rather than
- *   only when somebody boots an Amiga.
+ *   The server writes.  A path check that is merely "looked right" leaked a
+ *   file when it only read and destroys one now that DELETE, MOVE and PUT are
+ *   here, and the mistakes are all the same shape: a thing that does not look
+ *   like an escape until something else has decoded it.  So the escapes are
+ *   written down here, one case each, and the file is built for the host so
+ *   they run in `tools/ci.sh host` on every change rather than only when
+ *   somebody boots an Amiga.
+ *
+ *   Three of the destructive primitives live in that file for the same
+ *   reason -- joining a child onto a walked path, backing up one level, and
+ *   asking whether one path is inside another.  A walk that appends the
+ *   wrong separator deletes the parent, and the containment test is what
+ *   both a lock and a COPY-into-itself check are made of.
  *
  *   The AmigaOS case is the one no ported Unix server has: a colon makes
  *   everything before it a device or an assign, so "/RAM:foo" is the RAM disk
@@ -278,6 +284,335 @@ static void test_fields(void)
     CHECK_STR(p.name, "My File.txt");
 }
 
+/* ------------------------------------------------- what a write relies on */
+
+/*
+ * The document root itself is the one resource a client may not replace or
+ * remove, and `segments == 0` is the ONLY thing that says a path is it.  Every
+ * spelling of a root has to agree, because a root written with a trailing
+ * slash that came back with one segment would make the drawer deletable.
+ */
+static void test_root_is_identifiable(void)
+{
+    HttpPath p;
+
+    printf("the document root, under every spelling\n");
+
+    CHECK(http_path_resolve("Work:Public", "/", &p) == HTTP_PATH_OK);
+    CHECK(p.segments == 0);
+    CHECK(http_path_resolve("Work:Public/", "/", &p) == HTTP_PATH_OK);
+    CHECK(p.segments == 0);
+    CHECK(http_path_resolve("RAM:", "/", &p) == HTTP_PATH_OK);
+    CHECK(p.segments == 0);
+    CHECK(http_path_resolve("RAM:", "", &p) != HTTP_PATH_OK);
+
+    /* And the ways a client might try to say "the root" with something in it
+       that collapses to nothing. */
+    CHECK(http_path_resolve("Work:Public", "//", &p) == HTTP_PATH_OK);
+    CHECK(p.segments == 0);
+    CHECK(http_path_resolve("Work:Public", "/./", &p) == HTTP_PATH_OK);
+    CHECK(p.segments == 0);
+    CHECK(http_path_resolve("Work:Public", "/./././", &p) == HTTP_PATH_OK);
+    CHECK(p.segments == 0);
+    CHECK(http_path_resolve("Work:Public", "http://amiga.local/", &p) ==
+          HTTP_PATH_OK);
+    CHECK(p.segments == 0);
+
+    /* One real segment is one segment, however much noise is around it. */
+    CHECK(http_path_resolve("Work:Public", "/.//x//./", &p) == HTTP_PATH_OK);
+    CHECK(p.segments == 1);
+    CHECK_STR(p.path, "Work:Public/x");
+}
+
+/*
+ * COPY and MOVE take the other end of the operation in a header rather than
+ * on the request line, and it is an absolute URI.  It goes through this same
+ * function, and these are the shapes clients send -- a Destination given its
+ * own decoder is exactly the mistake this file exists to make impossible, so
+ * every escape is asserted here too and not only on the request line.
+ */
+static void test_destination_forms(void)
+{
+    HttpPath p;
+
+    printf("the Destination a COPY or a MOVE carries\n");
+
+    CHECK_STR(resolved("Work:Public", "http://amiga.local/Docs/new.txt"),
+              "Work:Public/Docs/new.txt");
+    CHECK_STR(resolved("Work:Public", "http://amiga.local:8080/new.txt"),
+              "Work:Public/new.txt");
+    CHECK_STR(resolved("Work:Public", "http://192.168.0.9:8080/a/b"),
+              "Work:Public/a/b");
+    CHECK_STR(resolved("Work:Public", "/plain/relative"),
+              "Work:Public/plain/relative");
+    CHECK_STR(resolved("Work:Public", "http://amiga.local/My%20File.txt"),
+              "Work:Public/My File.txt");
+
+    /* A collection destination is written with a trailing slash and must
+       resolve to the same place as one without: they are one drawer, and a
+       MOVE that made two of them would lose the contents of one. */
+    CHECK_STR(resolved("Work:Public", "http://amiga.local/Docs/"),
+              "Work:Public/Docs");
+    CHECK(http_path_resolve("Work:Public", "http://amiga.local/Docs/", &p) ==
+          HTTP_PATH_OK);
+    CHECK(p.trailing_slash == 1);
+    CHECK_STR(p.name, "Docs");
+    CHECK(http_path_resolve("Work:Public", "http://amiga.local/Docs", &p) ==
+          HTTP_PATH_OK);
+    CHECK(p.trailing_slash == 0);
+    CHECK_STR(p.path, "Work:Public/Docs");
+
+    /* Every escape, in the header rather than on the request line. */
+    CHECK(refused("http://amiga.local/../secret") == HTTP_PATH_PARENT);
+    CHECK(refused("http://amiga.local/%2e%2e/secret") == HTTP_PATH_PARENT);
+    CHECK(refused("http://amiga.local/RAM:junk") == HTTP_PATH_DEVICE);
+    CHECK(refused("http://amiga.local/RAM%3Ajunk") == HTTP_PATH_DEVICE);
+    CHECK(refused("http://amiga.local/S:startup-sequence") ==
+          HTTP_PATH_DEVICE);
+    CHECK(refused("http://amiga.local/a%5Cb") == HTTP_PATH_BACKSLASH);
+    CHECK(refused("http://amiga.local/x%00") == HTTP_PATH_CONTROL);
+    CHECK(refused("http://amiga.local/%zz") == HTTP_PATH_BAD_ESCAPE);
+
+    /* A Destination that is only an authority is the root, which the server
+       refuses to overwrite -- but it must resolve rather than fall through as
+       a relative path. */
+    CHECK(http_path_resolve("Work:Public", "http://amiga.local", &p) ==
+          HTTP_PATH_OK);
+    CHECK(p.segments == 0);
+}
+
+/*
+ * What every walk and every join downstream assumes about a resolved path.
+ * These are cheap to assert and expensive to discover: a path that ended in a
+ * separator would make the join produce "a//b", which is a's PARENT's b.
+ */
+static void test_resolved_shape(void)
+{
+    static const char *const targets[] =
+    {
+        "/", "/a", "/a/", "/a/b", "//a//b//", "/a/./b/",
+        "/My%20File.txt", "/Docs/Kickstart%20%5B!%5D.rom", "/x/y/z",
+        NULL
+    };
+    static const char *const roots[] =
+    {
+        "Work:Public", "Work:Public/", "RAM:", "DH0:", NULL
+    };
+
+    int r;
+    int t;
+
+    printf("the shape of every path a walk is handed\n");
+
+    for (r = 0; roots[r] != NULL; r++)
+    {
+        for (t = 0; targets[t] != NULL; t++)
+        {
+            HttpPath p;
+            size_t   n;
+            size_t   i;
+            int      doubled = 0;
+
+            CHECK(http_path_resolve(roots[r], targets[t], &p) ==
+                  HTTP_PATH_OK);
+
+            n = strlen(p.path);
+            CHECK(n > 0);
+
+            /* No doubled separator anywhere: on AmigaOS that means the
+               parent, so one here walks UP out of the document root. */
+            for (i = 1; i < n; i++)
+            {
+                if (p.path[i] == '/' && p.path[i - 1] == '/')
+                    doubled = 1;
+            }
+            CHECK(doubled == 0);
+
+            /* Nothing ends in a separator except a device root, which is
+               what httpd_parent() and the join both key off. */
+            if (p.segments > 0)
+            {
+                CHECK(p.path[n - 1] != '/');
+                CHECK(p.path[n - 1] != ':');
+            }
+
+            /* The name is one component and never a path. */
+            CHECK(strchr(p.name, '/') == NULL);
+            CHECK(strchr(p.name, ':') == NULL);
+
+            /* A child's path always begins with its parent's, which is what
+               a lock on a drawer and the copy-into-itself check both rest
+               on. */
+            CHECK(strncmp(p.path, roots[r], strlen(roots[r])) == 0);
+        }
+    }
+}
+
+/*
+ * A name longer than a FileInfoBlock carries is refused rather than cut down.
+ * Truncating would be worse than refusing: two different long names would
+ * become one, and a PUT of the second would silently overwrite the first.
+ */
+static void test_long_name_refused(void)
+{
+    char   target[HTTP_URL_MAX];
+    size_t n = 0;
+
+    printf("a name longer than the machine carries\n");
+
+    target[n++] = '/';
+    while (n < (size_t)HTTP_NAME_MAX + 8)
+        target[n++] = 'n';
+    target[n] = '\0';
+
+    CHECK(refused(target) == HTTP_PATH_TOO_LONG);
+
+    /* And one that just fits still resolves, so the limit is the limit and
+       not an off-by-one that costs a legal name. */
+    target[HTTP_NAME_MAX - 1] = '\0';
+    CHECK(refused(target) == HTTP_PATH_OK);
+}
+
+/* ------------------------------------------------------------- the walk --- */
+
+static void test_join(void)
+{
+    char path[64];
+
+    printf("joining a child onto a walked path\n");
+
+    strcpy(path, "Work:Public");
+    CHECK(http_path_join(path, sizeof(path), "Docs") == 1);
+    CHECK_STR(path, "Work:Public/Docs");
+    CHECK(http_path_join(path, sizeof(path), "readme.txt") == 1);
+    CHECK_STR(path, "Work:Public/Docs/readme.txt");
+
+    /* A device root already carries its separator.  "RAM:/foo" is the root
+       DIRECTORY of the volume and not the drawer, which is a different
+       place -- and "RAM://foo" is somewhere else again. */
+    strcpy(path, "RAM:");
+    CHECK(http_path_join(path, sizeof(path), "foo") == 1);
+    CHECK_STR(path, "RAM:foo");
+
+    strcpy(path, "Work:Public/");
+    CHECK(http_path_join(path, sizeof(path), "x") == 1);
+    CHECK_STR(path, "Work:Public/x");
+
+    /* Names AmigaOS filenames really contain. */
+    strcpy(path, "RAM:");
+    CHECK(http_path_join(path, sizeof(path), "My File.txt") == 1);
+    CHECK_STR(path, "RAM:My File.txt");
+    strcpy(path, "RAM:");
+    CHECK(http_path_join(path, sizeof(path), ".DS_Store") == 1);
+    CHECK_STR(path, "RAM:.DS_Store");
+    strcpy(path, "RAM:");
+    CHECK(http_path_join(path, sizeof(path), "._resource") == 1);
+    CHECK_STR(path, "RAM:._resource");
+
+    /* A name that carries a separator did not come out of a FileInfoBlock,
+       and joining it would step somewhere else entirely. */
+    strcpy(path, "RAM:Docs");
+    CHECK(http_path_join(path, sizeof(path), "a/b") == 0);
+    CHECK_STR(path, "RAM:Docs");
+    CHECK(http_path_join(path, sizeof(path), "DH0:x") == 0);
+    CHECK_STR(path, "RAM:Docs");
+    CHECK(http_path_join(path, sizeof(path), "a\\b") == 0);
+    CHECK_STR(path, "RAM:Docs");
+    CHECK(http_path_join(path, sizeof(path), "") == 0);
+    CHECK_STR(path, "RAM:Docs");
+
+    /* It does not fit, so it does not happen -- and the path is still the
+       path it was, because the walk carries on using it. */
+    {
+        char tiny[16];
+
+        strcpy(tiny, "RAM:Docs");
+        CHECK(http_path_join(tiny, sizeof(tiny), "0123456789abcdef") == 0);
+        CHECK_STR(tiny, "RAM:Docs");
+    }
+}
+
+static void test_up(void)
+{
+    char path[64];
+
+    printf("backing up one level\n");
+
+    strcpy(path, "Work:Public/Docs/readme.txt");
+    http_path_up(path);
+    CHECK_STR(path, "Work:Public/Docs");
+    http_path_up(path);
+    CHECK_STR(path, "Work:Public");
+    http_path_up(path);
+    CHECK_STR(path, "Work:");
+
+    /* A device reference has nothing above it, and going up from it for ever
+       must not empty the string -- a walk that did would then delete
+       whatever the current directory happens to be. */
+    http_path_up(path);
+    CHECK_STR(path, "Work:");
+    http_path_up(path);
+    CHECK_STR(path, "Work:");
+
+    strcpy(path, "RAM:foo");
+    http_path_up(path);
+    CHECK_STR(path, "RAM:");
+    http_path_up(path);
+    CHECK_STR(path, "RAM:");
+
+    /* Every join is undone by exactly one up, which is the property the tree
+       walks are built on. */
+    {
+        int i;
+
+        strcpy(path, "Work:Public");
+        for (i = 0; i < 5; i++)
+            CHECK(http_path_join(path, sizeof(path), "d") == 1);
+        CHECK_STR(path, "Work:Public/d/d/d/d/d");
+        for (i = 0; i < 5; i++)
+            http_path_up(path);
+        CHECK_STR(path, "Work:Public");
+    }
+}
+
+static void test_within(void)
+{
+    printf("whether one path is inside another\n");
+
+    CHECK(http_path_within("Work:Public", "Work:Public") == 1);
+    CHECK(http_path_within("Work:Public", "Work:Public/a") == 1);
+    CHECK(http_path_within("Work:Public", "Work:Public/a/b/c") == 1);
+    CHECK(http_path_within("RAM:", "RAM:anything") == 1);
+    CHECK(http_path_within("RAM:", "RAM:") == 1);
+
+    /* AmigaDOS is case-insensitive, so a lock taken on one spelling has to
+       cover a write made with another.  This is the check that decides
+       whether a lock protects anything at all. */
+    CHECK(http_path_within("Work:Public", "WORK:public/a") == 1);
+    CHECK(http_path_within("Work:Docs/Notes", "work:docs/notes/x") == 1);
+
+    /* A prefix is not a parent.  "Work:Public" must not cover
+       "Work:PublicSecrets", or a lock on one drawer locks the other. */
+    CHECK(http_path_within("Work:Public", "Work:PublicSecrets") == 0);
+    CHECK(http_path_within("Work:Public", "Work:PublicSecrets/a") == 0);
+    CHECK(http_path_within("Work:Public/a", "Work:Public/ab") == 0);
+
+    /* Not inside at all, and the other way round. */
+    CHECK(http_path_within("Work:Public/a", "Work:Public") == 0);
+    CHECK(http_path_within("Work:Public", "DH0:Public/a") == 0);
+    CHECK(http_path_within("Work:Public", "") == 0);
+    CHECK(http_path_within("", "Work:Public") == 0);
+
+    /* Both of the shapes a root can be written in. */
+    CHECK(http_path_within("Work:Public/", "Work:Public/a") == 1);
+    CHECK(http_path_within("Work:Public/", "Work:PublicSecrets") == 0);
+
+    /* A COPY into itself is the walk that would not stop, and this is the
+       test that catches it. */
+    CHECK(http_path_within("Work:Public/Docs", "Work:Public/Docs/copy") == 1);
+    CHECK(http_path_within("Work:Public/Docs", "Work:Public/Docs2") == 0);
+}
+
 /* ------------------------------------------------------------- escaping --- */
 
 static void test_escaping(void)
@@ -351,6 +686,13 @@ int main(void)
     test_parent_escape();
     test_malformed();
     test_fields();
+    test_root_is_identifiable();
+    test_destination_forms();
+    test_resolved_shape();
+    test_long_name_refused();
+    test_join();
+    test_up();
+    test_within();
     test_escaping();
     test_content_type();
 

@@ -292,6 +292,86 @@ const char *http_path_error(HttpPathResult why)
     return "refused";
 }
 
+/* ---------------------------------------------------------------- walking --- */
+
+int http_path_join(char *path, unsigned long pathlen, const char *name)
+{
+    unsigned long n = hp_len(path);
+    unsigned long namelen;
+    unsigned long need;
+    unsigned long i;
+    int           separate;
+
+    if (name == 0 || name[0] == '\0')
+        return 0;
+
+    for (namelen = 0; name[namelen] != '\0'; namelen++)
+    {
+        if (name[namelen] == '/' || name[namelen] == ':' ||
+            name[namelen] == '\\')
+            return 0;
+    }
+
+    separate = (n > 0UL && path[n - 1] != ':' && path[n - 1] != '/') ? 1 : 0;
+    need     = namelen + (unsigned long)separate;
+
+    /* Everything is measured before anything is written.  A join that ran out
+       of room half way would leave the walk holding a path with a trailing
+       separator, which is the parent directory on this machine. */
+    if (n + need + 1UL > pathlen)
+        return 0;
+
+    if (separate)
+        path[n++] = '/';
+
+    for (i = 0; i < namelen; i++)
+        path[n++] = name[i];
+
+    path[n] = '\0';
+
+    return 1;
+}
+
+void http_path_up(char *path)
+{
+    unsigned long n = hp_len(path);
+
+    while (n > 0UL && path[n - 1] != '/' && path[n - 1] != ':')
+        n--;
+
+    /* A trailing ':' is the device and stays; a trailing '/' was the
+       separator this level was joined with and goes. */
+    if (n > 0UL && path[n - 1] == '/')
+        n--;
+
+    path[n] = '\0';
+}
+
+int http_path_within(const char *prefix, const char *path)
+{
+    unsigned long n = hp_len(prefix);
+    unsigned long i;
+
+    if (n == 0UL)
+        return 0;
+
+    for (i = 0; i < n; i++)
+    {
+        if (path[i] == '\0' ||
+            hp_lower((unsigned char)path[i]) !=
+            hp_lower((unsigned char)prefix[i]))
+            return 0;
+    }
+
+    if (path[n] == '\0')
+        return 1;
+
+    /* "Work:Public" must not match "Work:PublicSecrets", so what follows the
+       prefix has to be a separator -- unless the prefix ended in one. */
+    return (path[n] == '/' || prefix[n - 1] == ':' || prefix[n - 1] == '/')
+               ? 1 : 0;
+}
+
 /* -------------------------------------------------------------- escaping --- */
 
 unsigned long http_url_escape(const char *path, char *out, unsigned long outlen)

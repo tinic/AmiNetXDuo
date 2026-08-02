@@ -1,5 +1,5 @@
 /*
- * httpd -- an HTTP server with read-only WebDAV, so that a drawer on this
+ * httpd -- an HTTP server with read-write WebDAV, so that a drawer on this
  * machine appears as a drive on Windows, macOS and Linux with nothing
  * installed at the far end.  Finder's Connect to Server, Explorer's Map
  * network drive and gvfs all speak WebDAV natively; none of them speaks
@@ -12,19 +12,20 @@
  *   httpd DH0:Docs 8080 -v       another port, one log line per request
  *   httpd RAM: 8080 TRACE        every header, in the order it arrived
  *
- * WHAT IT ANSWERS, AND WHAT IT DOES NOT
+ * WHAT IT ANSWERS
  *
- *   OPTIONS, PROPFIND (Depth 0 and 1), GET, HEAD.  It advertises `DAV: 1`,
- *   which is the class that has no locking, and nothing here writes: there is
- *   no PUT, DELETE, MKCOL, COPY, MOVE or LOCK, and an attempt at one is a 405
- *   naming the methods there are.
+ *   OPTIONS, PROPFIND (Depth 0 and 1), GET, HEAD, PUT, DELETE, MKCOL, COPY,
+ *   MOVE and PROPPATCH.  It advertises `DAV: 1`, which is the class that has
+ *   no locking, and LOCK is the next thing to land: Finder mounts a class 1
+ *   server READ-ONLY however many write methods it answers, so the lock table
+ *   is what a writable mount on macOS is waiting for.
  *
- *   Read-only first is a sequencing decision and not the destination.  The
- *   parts that a writing server cannot be retrofitted with safely are built to
- *   that standard now: the method table below takes new verbs by gaining rows,
- *   the request body is read through a per-method sink rather than skipped,
- *   and src/tools/httppath.c is written and tested as if DELETE already
- *   existed -- a path mistake leaks a file today and destroys one later.
+ * WRITING, WITHOUT LOSING WHAT WAS THERE
+ *
+ *   A PUT goes to a temporary name in the destination drawer and is renamed
+ *   over the target once the last byte has arrived, so a transfer that stops
+ *   half way leaves the old file untouched.  Nothing else here writes into a
+ *   file a client can already see.
  *
  * NOT PORTED FROM ANYTHING
  *
@@ -107,9 +108,24 @@ enum
 #define HTTPD_OUT_MAX       2048    /* one send() worth of answer           */
 #define HTTPD_CHUNK_MAX     1400    /* one generated piece, framed into out */
 #define HTTPD_HEADERS_MAX     48    /* header lines in one request          */
-#define HTTPD_BODY_MAX     65536UL  /* a request body we will read at all   */
+#define HTTPD_BODY_MAX     65536UL  /* a BUFFERED request body: the XML     */
 #define HTTPD_TIMEOUT_DEF     30UL  /* seconds of no progress               */
 #define HTTPD_BACKLOG          8
+
+/* A walk that a client can ask for -- DELETE and COPY of a drawer -- has to
+   stop somewhere, and a filesystem that keeps saying "not empty" is the shape
+   a loop here would take.  A tree that needs more passes than this is refused
+   half-done and said so in the multistatus. */
+#define HTTPD_WALK_MAX     20000UL
+
+/* The XML the write methods send is skimmed, not parsed: element names and
+   the text between them, both bounded, and no tree.  PROPPATCH names the
+   properties it wants and LOCK names an owner; nothing here needs more. */
+#define HTTPD_PROPS_MAX        8    /* properties reported on in one 207    */
+#define HTTPD_QNAME_MAX       32    /* "Z:Win32LastModifiedTime" is 23      */
+#define HTTPD_NS_MAX           3    /* xmlns: bindings carried to the reply */
+#define HTTPD_NSURI_MAX       48
+#define HTTPD_TEXT_MAX        48    /* an element's character data          */
 
 /* How long WaitSelect() may sleep with nothing happening.  It is what makes
    Ctrl-C and the connection timeout noticed, and nothing else depends on it. */
@@ -126,16 +142,23 @@ enum
     HTTPD_M_GET,
     HTTPD_M_HEAD,
     HTTPD_M_OPTIONS,
-    HTTPD_M_PROPFIND
+    HTTPD_M_PROPFIND,
+    HTTPD_M_PUT,
+    HTTPD_M_DELETE,
+    HTTPD_M_MKCOL,
+    HTTPD_M_COPY,
+    HTTPD_M_MOVE,
+    HTTPD_M_PROPPATCH
 };
 
-/* A method may carry a request body.  Read-only never has to read one, but
-   the frame that reads it is here so PUT is a row and a sink and not a
-   restructuring of the loop. */
+/* A method may carry a request body. */
 #define HTTPD_F_BODY    0x01
-/* Changes the tree.  Nothing sets it yet; it is where an authorisation check
-   will hang when there is one to make. */
+/* Changes the tree: the lock check and the Destination check hang off this,
+   so a verb added to the table gets both by saying what it is. */
 #define HTTPD_F_WRITE   0x02
+/* The body is written out as it arrives rather than held, so its length is
+   the client's business and not HTTPD_BODY_MAX's.  PUT, and nothing else. */
+#define HTTPD_F_UPLOAD  0x04
 
 typedef struct HttpConn HttpConn;
 
@@ -145,9 +168,13 @@ typedef struct HttpMethod
     UBYTE       id;
     UBYTE       flags;
     VOID      (*handle)(HttpConn *c);
-    /* Where the request body goes.  NULL discards it, which is what every
-       read-only method wants and what PUT will replace with a file write. */
+    /* Where the request body goes.  NULL discards it, which is what a method
+       with nothing to read from one wants. */
     VOID      (*sink)(HttpConn *c, const UBYTE *data, LONG len);
+    /* Run once the head has been read and before a byte reaches the sink, so
+       a PUT that cannot be started is refused before the client uploads
+       anything.  FALSE when it has already answered. */
+    BOOL      (*begin)(HttpConn *c);
 } HttpMethod;
 
 /* ----------------------------------------------------------- connections --- */
@@ -156,7 +183,7 @@ enum
 {
     CONN_FREE = 0,
     CONN_REQUEST,       /* reading the request head                        */
-    CONN_BODY,          /* reading Content-Length bytes through the sink   */
+    CONN_BODY,          /* reading the body through the sink               */
     CONN_SEND           /* pushing out[], refilled by the producer         */
 };
 
@@ -166,6 +193,16 @@ enum
     PROD_FILE,          /* the rest of an open file                        */
     PROD_INDEX,         /* a generated HTML directory listing              */
     PROD_PROPFIND       /* a generated 207 multistatus                     */
+};
+
+/* The XML skimmer's position.  Not a parser: it finds element names and the
+   text between them and has no opinion about anything else. */
+enum
+{
+    XML_TEXT = 0,       /* between elements                                */
+    XML_NAME,           /* inside a tag, reading its name                  */
+    XML_ATTRS,          /* inside a tag, past the name                     */
+    XML_QUOTE           /* inside an attribute value                       */
 };
 
 enum
@@ -200,6 +237,32 @@ struct HttpConn
     UBYTE   has_range;
     ULONG   range_from;
     ULONG   range_to;               /* inclusive                           */
+    UBYTE   overwrite;              /* COPY/MOVE: Overwrite was not F      */
+    UBYTE   had_body;               /* a body arrived, whatever its length */
+    char    dest[HTTP_URL_MAX];     /* Destination:, still as it arrived   */
+
+    /* PUT: the temporary file the body goes to, until the rename */
+    BPTR    put;
+    char    put_temp[HTTP_PATH_MAX];
+    LONG    put_err;                /* the DOS error that stopped it       */
+
+    /* what the skimmer found in the body */
+    UBYTE   xml_state;
+    UBYTE   xml_name_n;
+    char    xml_name[HTTPD_QNAME_MAX];
+    UBYTE   xml_close;              /* the tag being read is a </close>    */
+    UBYTE   xml_text_n;
+    char    xml_text[HTTPD_TEXT_MAX];
+    UBYTE   xml_attr_n;
+    char    xml_attr[HTTPD_QNAME_MAX + HTTPD_NSURI_MAX];
+    UBYTE   in_prop;                /* inside <prop>: children are names   */
+    UBYTE   props;
+    UBYTE   prop_ok[HTTPD_PROPS_MAX];
+    char    prop_name[HTTPD_PROPS_MAX][HTTPD_QNAME_MAX];
+    UBYTE   nsdecls;
+    char    nsdecl[HTTPD_NS_MAX][HTTPD_QNAME_MAX + HTTPD_NSURI_MAX];
+    UBYTE   have_date;
+    struct DateStamp prop_date;
 
     /* the answer */
     UBYTE   out[HTTPD_OUT_MAX];
@@ -244,7 +307,18 @@ static char httpd_text[HTTP_URL_MAX * 6];
 static char httpd_href_buf[HTTP_URL_MAX + HTTP_NAME_MAX + 2];
 static char httpd_target[HTTP_URL_MAX];
 static char httpd_value[HTTP_URL_MAX];
-static char httpd_page[256];
+static char httpd_page[512];
+
+/*
+ * The two paths a tree walk carries, and the destination a COPY or a MOVE
+ * resolved to.  Shared for the reason the scratches above are: a walk runs to
+ * completion inside one dispatch, so no second request can be inside one at
+ * the same time -- the connections interleave between passes of the loop and
+ * never inside a handler.
+ */
+static char     httpd_walk_src[HTTP_PATH_MAX];
+static char     httpd_walk_dst[HTTP_PATH_MAX];
+static HttpPath httpd_dest;
 
 static const char *httpd_root = "";
 static ULONG  httpd_conns   = HTTPD_CONN_DEFAULT;
@@ -596,7 +670,10 @@ static const char *httpd_reason(ULONG status)
 {
     switch (status)
     {
+        case 100: return "Continue";
         case 200: return "OK";
+        case 201: return "Created";
+        case 204: return "No Content";
         case 206: return "Partial Content";
         case 207: return "Multi-Status";
         case 301: return "Moved Permanently";
@@ -605,14 +682,19 @@ static const char *httpd_reason(ULONG status)
         case 404: return "Not Found";
         case 405: return "Method Not Allowed";
         case 408: return "Request Timeout";
+        case 409: return "Conflict";
         case 411: return "Length Required";
+        case 412: return "Precondition Failed";
         case 413: return "Payload Too Large";
         case 414: return "URI Too Long";
+        case 415: return "Unsupported Media Type";
         case 416: return "Range Not Satisfiable";
+        case 423: return "Locked";
         case 431: return "Request Header Fields Too Large";
         case 500: return "Internal Server Error";
         case 501: return "Not Implemented";
         case 503: return "Service Unavailable";
+        case 507: return "Insufficient Storage";
         default:  return "Unknown";
     }
 }
@@ -729,6 +811,20 @@ static VOID httpd_begin_stream(HttpConn *c)
     httpd_finish_head(c);
 }
 
+/* An answer that is a status line and nothing else.  204 carries no
+   Content-Length at all -- RFC 7230 8.1.2 -- and 201 after a PUT is the one
+   answer a client reads before it will believe the file is there. */
+static VOID httpd_empty(HttpConn *c, ULONG status)
+{
+    httpd_begin(c, status);
+
+    if (status != 204)
+        httpd_header_num(c, "Content-Length", 0);
+
+    httpd_finish_head(c);
+    c->producer = PROD_NONE;
+}
+
 /* A body that is already known in full: the errors, and the small answers. */
 static VOID httpd_body_text(HttpConn *c, const char *type, const char *body)
 {
@@ -785,6 +881,27 @@ static VOID httpd_error(HttpConn *c, ULONG status, const char *detail)
 
 /* ---------------------------------------------------------------- clients --- */
 
+/*
+ * A PUT that never finished.  The temporary is deleted rather than left, so an
+ * abandoned upload costs nothing and does not appear in a listing -- which is
+ * the other half of writing to a temporary name: the client sees the old file
+ * or the new one, and never a third thing.
+ */
+static VOID httpd_put_abandon(HttpConn *c)
+{
+    if (c->put != (BPTR)0)
+    {
+        (VOID)Close(c->put);
+        c->put = (BPTR)0;
+    }
+
+    if (c->put_temp[0] != '\0')
+    {
+        (VOID)DeleteFile((CONST_STRPTR)c->put_temp);
+        c->put_temp[0] = '\0';
+    }
+}
+
 static VOID httpd_close(HttpConn *c)
 {
     if (c->file != (BPTR)0)
@@ -798,6 +915,8 @@ static VOID httpd_close(HttpConn *c)
         UnLock(c->dirlock);
         c->dirlock = (BPTR)0;
     }
+
+    httpd_put_abandon(c);
 
     if (c->sock >= 0)
     {
@@ -829,6 +948,8 @@ static VOID httpd_reset(HttpConn *c)
         c->dirlock = (BPTR)0;
     }
 
+    httpd_put_abandon(c);
+
     c->state     = CONN_REQUEST;
     c->producer  = PROD_NONE;
     c->method    = NULL;
@@ -849,6 +970,853 @@ static VOID httpd_reset(HttpConn *c)
     c->file_left = 0;
     c->dir_stage = DIR_SELF;
     c->wrote     = 0;
+
+    c->overwrite   = 1;             /* Overwrite defaults to T, RFC 4918 10.6 */
+    c->had_body    = 0;
+    c->dest[0]     = '\0';
+    c->put_err     = 0;
+
+    c->xml_state  = XML_TEXT;
+    c->xml_name_n = 0;
+    c->xml_close  = 0;
+    c->xml_text_n = 0;
+    c->xml_attr_n = 0;
+    c->in_prop    = 0;
+    c->props      = 0;
+    c->nsdecls    = 0;
+    c->have_date  = 0;
+}
+
+/* ------------------------------------------------------------ the volume --- */
+
+/* One extra FileInfoBlock and one InfoData, taken once at startup for the same
+   reason the per-connection ones are: a Shell command has 4 KB of stack and
+   these are 260 and 224 bytes of it.  Both are only ever used inside a
+   handler, which runs to completion in one pass of the loop. */
+static struct FileInfoBlock *httpd_fib2;
+static struct InfoData      *httpd_info;
+
+/*
+ * An AmigaDOS error as an HTTP status.  One table, because every write method
+ * wants the same answer to the same failure -- and it is the difference
+ * between a client saying "the disk is full" and saying "forbidden".
+ */
+static ULONG httpd_dos_status(LONG err)
+{
+    switch (err)
+    {
+        case ERROR_OBJECT_NOT_FOUND:
+        case ERROR_DIR_NOT_FOUND:           return 409;
+        case ERROR_OBJECT_EXISTS:           return 405;
+        case ERROR_DIRECTORY_NOT_EMPTY:
+        case ERROR_OBJECT_IN_USE:           return 409;
+        case ERROR_DISK_FULL:               return 507;
+        /* A name the filesystem will not carry -- too long for OFS, or a
+           character it reserves.  Refused, and not truncated into a name that
+           would collide with a file that is already there. */
+        case ERROR_INVALID_COMPONENT_NAME:
+        case ERROR_BAD_STREAM_NAME:         return 400;
+        default:                            return 403;
+    }
+}
+
+/* The drawer a path lives in: "Work:Public/a/b" is "Work:Public/a" and
+   "RAM:foo" is "RAM:".  FALSE when there is no separator at all, which is a
+   path that names a device and has no parent here. */
+static BOOL httpd_parent(const char *path, char *out, ULONG outlen)
+{
+    ULONG n = hs_len(path);
+    ULONG cut = 0;
+    ULONG i;
+    BOOL  found = FALSE;
+
+    for (i = 0; i < n; i++)
+    {
+        if (path[i] == '/')
+        {
+            cut   = i;              /* the separator is dropped            */
+            found = TRUE;
+        }
+        else if (path[i] == ':')
+        {
+            cut   = i + 1UL;        /* the colon belongs to the device     */
+            found = TRUE;
+        }
+    }
+
+    if (!found || cut + 1UL >= outlen)
+        return FALSE;
+
+    for (i = 0; i < cut; i++)
+        out[i] = path[i];
+    out[cut] = '\0';
+
+    return TRUE;
+}
+
+/* 1 a drawer, 0 a file, -1 nothing there. */
+static LONG httpd_kind(const char *path)
+{
+    BPTR lock = Lock((CONST_STRPTR)path, ACCESS_READ);
+    LONG kind = 0;
+
+    if (lock == (BPTR)0)
+        return -1;
+
+    if (httpd_fib2 != NULL && Examine(lock, httpd_fib2) &&
+        httpd_fib2->fib_DirEntryType > 0)
+        kind = 1;
+
+    UnLock(lock);
+
+    return kind;
+}
+
+/*
+ * Free bytes on the volume `path` is on, or 0 when it cannot be told.  A PUT
+ * that will not fit is refused before the upload rather than after it, which
+ * is the difference between a 507 and a floppy full of a temporary file.
+ */
+static ULONG httpd_free_bytes(const char *path)
+{
+    BPTR  lock;
+    ULONG blocks;
+    ULONG per;
+
+    if (httpd_info == NULL)
+        return 0;
+
+    lock = Lock((CONST_STRPTR)path, ACCESS_READ);
+    if (lock == (BPTR)0)
+        return 0;
+
+    if (!Info(lock, httpd_info))
+    {
+        UnLock(lock);
+        return 0;
+    }
+    UnLock(lock);
+
+    if (httpd_info->id_NumBlocks <= httpd_info->id_NumBlocksUsed ||
+        httpd_info->id_BytesPerBlock <= 0)
+        return 0;
+
+    blocks = (ULONG)(httpd_info->id_NumBlocks - httpd_info->id_NumBlocksUsed);
+    per    = (ULONG)httpd_info->id_BytesPerBlock;
+
+    /* Saturate rather than wrap: "more than anybody is about to ask for" is
+       the only answer a big volume needs to give. */
+    if (blocks > 0xffffffffUL / per)
+        return 0xffffffffUL;
+
+    return blocks * per;
+}
+
+/*
+ * The walk's three primitives -- http_path_join(), http_path_up() and
+ * http_path_within() -- are in src/tools/httppath.c and not here, for the
+ * reason the resolver is: between them they decide which file a DELETE
+ * removes, and there they are compiled for the host and driven by
+ * src/tools/test/test_httppath.c.
+ */
+
+/*
+ * The URL a walked path corresponds to, escaped for an href.  Every path a
+ * walk produces was built by pushing onto the resolved one, so it begins with
+ * the document root and the rest of it is the URL.
+ */
+static const char *httpd_url_of(const char *path)
+{
+    ULONG rootlen = hs_len(httpd_root);
+    ULONG used = 0;
+
+    if (hs_nicmp(path, httpd_root, rootlen) != 0)
+        return "/";
+
+    path += rootlen;
+
+    httpd_href_buf[0] = '\0';
+
+    if (*path != '/')
+        (VOID)hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, "/");
+
+    if (!hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, path))
+        return "/";
+
+    if (http_url_escape(httpd_href_buf, httpd_escape,
+                        sizeof(httpd_escape)) == 0UL)
+        return "/";
+
+    return httpd_escape;
+}
+
+/*
+ * One file to another, through the shared scratch.  The date and the
+ * protection bits follow it: a copy that loses them is a copy every client
+ * shows as a different file.
+ */
+static ULONG httpd_copy_file(const char *src, const char *dst)
+{
+    BPTR  in;
+    BPTR  out;
+    ULONG status = 0;
+
+    in = Open((CONST_STRPTR)src, MODE_OLDFILE);
+    if (in == (BPTR)0)
+        return httpd_dos_status(IoErr());
+
+    out = Open((CONST_STRPTR)dst, MODE_NEWFILE);
+    if (out == (BPTR)0)
+    {
+        status = httpd_dos_status(IoErr());
+        (VOID)Close(in);
+        return status;
+    }
+
+    for (;;)
+    {
+        LONG got = Read(in, (APTR)httpd_scratch, (LONG)sizeof(httpd_scratch));
+
+        if (got < 0)
+        {
+            status = 500;
+            break;
+        }
+
+        if (got == 0)
+            break;
+
+        if (Write(out, (APTR)httpd_scratch, got) != got)
+        {
+            status = httpd_dos_status(IoErr());
+            break;
+        }
+    }
+
+    (VOID)Close(out);
+    (VOID)Close(in);
+
+    if (status != 0)
+    {
+        (VOID)DeleteFile((CONST_STRPTR)dst);
+        return status;
+    }
+
+    if (httpd_fib2 != NULL)
+    {
+        BPTR lock = Lock((CONST_STRPTR)src, ACCESS_READ);
+
+        if (lock != (BPTR)0)
+        {
+            if (Examine(lock, httpd_fib2))
+            {
+                (VOID)SetFileDate((CONST_STRPTR)dst, &httpd_fib2->fib_Date);
+                (VOID)SetProtection((CONST_STRPTR)dst,
+                                    (LONG)httpd_fib2->fib_Protection);
+            }
+            UnLock(lock);
+        }
+    }
+
+    return 0;
+}
+
+/*
+ * Everything under `path`, then `path` itself.  DELETE on a collection is
+ * Depth infinity and nothing else, so this is what the method is.
+ *
+ * Iterative and by name rather than by lock: a Shell command has 4 KB of
+ * stack and a FileInfoBlock is 260 bytes of it, so a walk that recursed would
+ * run out at a depth a real drawer reaches.  One drawer is scanned at a time,
+ * a subdrawer is descended into by appending to the path, and coming back up
+ * is a truncation.
+ *
+ * ExNext() is not trusted across a deletion -- no filesystem promises it -- so
+ * "is this drawer empty now" is asked of DeleteFile() and not of the scan: a
+ * drawer is finished when deleting it succeeds, and ERROR_DIRECTORY_NOT_EMPTY
+ * sends it round again.
+ *
+ * 0, or the status of the first failure with the path that failed left in
+ * `path` for the multistatus to name.
+ */
+static ULONG httpd_delete_tree(char *path, ULONG pathlen,
+                               struct FileInfoBlock *fib)
+{
+    ULONG depth = 0;
+    ULONG steps = 0;
+
+    for (;;)
+    {
+        BPTR lock;
+        BOOL descend = FALSE;
+
+        if (++steps > HTTPD_WALK_MAX)
+            return 500;
+
+        lock = Lock((CONST_STRPTR)path, ACCESS_READ);
+        if (lock == (BPTR)0)
+            return (depth == 0UL) ? 404 : httpd_dos_status(IoErr());
+
+        if (!Examine(lock, fib))
+        {
+            UnLock(lock);
+            return 500;
+        }
+
+        if (fib->fib_DirEntryType <= 0)
+        {
+            UnLock(lock);
+
+            if (!DeleteFile((CONST_STRPTR)path))
+                return httpd_dos_status(IoErr());
+        }
+        else
+        {
+            /* Every file in this drawer, and then the first subdrawer. */
+            while (ExNext(lock, fib))
+            {
+                if (fib->fib_DirEntryType > 0)
+                {
+                    descend = TRUE;
+                    break;
+                }
+
+                if (!http_path_join(path, pathlen,
+                                     (const char *)fib->fib_FileName))
+                {
+                    UnLock(lock);
+                    return 414;
+                }
+
+                if (!DeleteFile((CONST_STRPTR)path))
+                {
+                    ULONG why = httpd_dos_status(IoErr());
+
+                    UnLock(lock);
+                    return why;
+                }
+
+                http_path_up(path);
+            }
+
+            if (descend)
+            {
+                BOOL ok = http_path_join(path, pathlen,
+                                          (const char *)fib->fib_FileName);
+
+                UnLock(lock);
+
+                if (!ok)
+                    return 414;
+
+                depth++;
+                continue;
+            }
+
+            UnLock(lock);
+
+            if (!DeleteFile((CONST_STRPTR)path))
+            {
+                LONG err = IoErr();
+
+                /* The scan stopped early, or something appeared while it ran.
+                   Round again rather than call it a failure. */
+                if (err == ERROR_DIRECTORY_NOT_EMPTY)
+                    continue;
+
+                return httpd_dos_status(err);
+            }
+        }
+
+        if (depth == 0UL)
+            return 0;
+
+        http_path_up(path);
+        depth--;
+    }
+}
+
+/*
+ * `src` to `dst`, everything below it.  The delete walk's shape with the
+ * destination doing the remembering: an entry that is already in the
+ * destination has been copied, so a drawer can be picked up again on a later
+ * pass without a stack of positions.  Nothing here modifies the source, so
+ * the files all go in one scan and only a subdrawer costs a rescan.
+ */
+static ULONG httpd_copy_tree(char *src, ULONG srclen, char *dst, ULONG dstlen,
+                             struct FileInfoBlock *fib)
+{
+    ULONG depth = 0;
+    ULONG steps = 0;
+    BPTR  made;
+
+    made = CreateDir((CONST_STRPTR)dst);
+    if (made == (BPTR)0)
+        return httpd_dos_status(IoErr());
+    UnLock(made);
+
+    for (;;)
+    {
+        BPTR lock;
+        BOOL descend = FALSE;
+
+        if (++steps > HTTPD_WALK_MAX)
+            return 500;
+
+        lock = Lock((CONST_STRPTR)src, ACCESS_READ);
+        if (lock == (BPTR)0)
+            return httpd_dos_status(IoErr());
+
+        if (!Examine(lock, fib))
+        {
+            UnLock(lock);
+            return 500;
+        }
+
+        while (ExNext(lock, fib))
+        {
+            ULONG why;
+
+            if (!http_path_join(src, srclen,
+                                 (const char *)fib->fib_FileName) ||
+                !http_path_join(dst, dstlen,
+                                 (const char *)fib->fib_FileName))
+            {
+                UnLock(lock);
+                return 414;
+            }
+
+            if (httpd_kind(dst) >= 0)       /* done on an earlier pass     */
+            {
+                http_path_up(src);
+                http_path_up(dst);
+                continue;
+            }
+
+            if (fib->fib_DirEntryType > 0)
+            {
+                descend = TRUE;             /* both paths stay pushed      */
+                break;
+            }
+
+            why = httpd_copy_file(src, dst);
+
+            http_path_up(src);
+            http_path_up(dst);
+
+            if (why != 0UL)
+            {
+                UnLock(lock);
+                return why;
+            }
+        }
+
+        UnLock(lock);
+
+        if (descend)
+        {
+            made = CreateDir((CONST_STRPTR)dst);
+            if (made == (BPTR)0)
+                return httpd_dos_status(IoErr());
+            UnLock(made);
+
+            depth++;
+            continue;
+        }
+
+        if (depth == 0UL)
+            return 0;
+
+        http_path_up(src);
+        http_path_up(dst);
+        depth--;
+    }
+}
+
+/* ------------------------------------------------------------------ dates --- */
+
+static BOOL httpd_leap(LONG year)
+{
+    return ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0)
+               ? TRUE : FALSE;
+}
+
+/* The inverse of httpd_civil(), for the timestamps a client sends back. */
+static ULONG httpd_days_from_civil(LONG y, LONG mo, LONG d)
+{
+    static const ULONG cum[12] =
+        { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
+
+    ULONG days = 0;
+    LONG  year;
+
+    for (year = 1970; year < y; year++)
+        days += httpd_leap(year) ? 366UL : 365UL;
+
+    days += cum[mo - 1];
+
+    if (mo > 2 && httpd_leap(y))
+        days++;
+
+    return days + (ULONG)(d - 1);
+}
+
+static LONG httpd_month(const char *name)
+{
+    static const char *const months[12] =
+        { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+    LONG i;
+
+    for (i = 0; i < 12; i++)
+    {
+        if (hs_nicmp(name, months[i], 3) == 0)
+            return i + 1;
+    }
+
+    return 0;
+}
+
+static ULONG httpd_digits(const char **p, ULONG count)
+{
+    const char *s = *p;
+    ULONG value = 0;
+    ULONG i;
+
+    for (i = 0; i < count && s[i] >= '0' && s[i] <= '9'; i++)
+        value = (value * 10UL) + (ULONG)(s[i] - '0');
+
+    *p = s + i;
+
+    return value;
+}
+
+/*
+ * "Tue, 05 Aug 2025 12:00:00 GMT" back to a DateStamp in local time -- which
+ * is what SetFileDate() takes, and the reason httpd_read_gmt_offset() is read
+ * at startup rather than only on the way out.
+ */
+static BOOL httpd_parse_rfc1123(const char *text, struct DateStamp *ds)
+{
+    LONG  day;
+    LONG  month;
+    LONG  year;
+    ULONG h;
+    ULONG mi;
+    ULONG s;
+    ULONG secs;
+
+    while (*text == ' ')
+        text++;
+
+    /* The day name is optional here: "05 Aug 2025 ..." is what some clients
+       send and nothing downstream reads the name anyway. */
+    if (text[0] != '\0' && text[1] != '\0' && text[2] != '\0' &&
+        text[3] == ',')
+        text += 4;
+
+    while (*text == ' ')
+        text++;
+
+    day = (LONG)httpd_digits(&text, 2);
+    while (*text == ' ' || *text == '-')
+        text++;
+
+    month = httpd_month(text);
+    if (month == 0 || day < 1 || day > 31)
+        return FALSE;
+
+    text += 3;
+    while (*text == ' ' || *text == '-')
+        text++;
+
+    year = (LONG)httpd_digits(&text, 4);
+    if (year < 1978 || year > 2100)
+        return FALSE;
+
+    while (*text == ' ')
+        text++;
+
+    h = httpd_digits(&text, 2);
+    if (*text == ':') text++;
+    mi = httpd_digits(&text, 2);
+    if (*text == ':') text++;
+    s = httpd_digits(&text, 2);
+
+    if (h > 23UL || mi > 59UL || s > 60UL)
+        return FALSE;
+
+    secs = httpd_days_from_civil(year, month, day) * 86400UL;
+    secs += (h * 3600UL) + (mi * 60UL) + s;
+
+    /* The stamp is GMT and a DateStamp is local, so this undoes exactly what
+       httpd_stamp_secs() does on the way out. */
+    if (httpd_gmt_west > 0)
+    {
+        ULONG west = (ULONG)httpd_gmt_west * 60UL;
+
+        if (secs < west)
+            return FALSE;
+        secs -= west;
+    }
+    else if (httpd_gmt_west < 0)
+    {
+        secs += (ULONG)(-httpd_gmt_west) * 60UL;
+    }
+
+    if (secs < HTTPD_AMIGA_EPOCH)
+        return FALSE;
+
+    secs -= HTTPD_AMIGA_EPOCH;
+
+    ds->ds_Days   = (LONG)(secs / 86400UL);
+    ds->ds_Minute = (LONG)((secs % 86400UL) / 60UL);
+    ds->ds_Tick   = (LONG)((secs % 60UL) * (ULONG)TICKS_PER_SECOND);
+
+    return TRUE;
+}
+
+
+
+/* -------------------------------------------------------------- skimming --- */
+
+/*
+ * What the write methods need out of a request body, without an XML parser.
+ * PROPPATCH names the properties it wants and LOCK names an owner: both are
+ * element names and the text between them, both are bounded, and a tree is
+ * the right answer on a machine with room for one.
+ *
+ * The namespace declarations are carried through as they arrived rather than
+ * resolved, because the 207 has to name the properties back and a prefix
+ * rebound to the wrong URI is a property the client does not recognise as
+ * the one it asked about.
+ */
+
+static const char *httpd_local(const char *qname)
+{
+    ULONG i;
+
+    for (i = 0; qname[i] != '\0'; i++)
+    {
+        if (qname[i] == ':')
+            return &qname[i + 1];
+    }
+
+    return qname;
+}
+
+static VOID httpd_note_property(HttpConn *c)
+{
+    if (c->props >= (UBYTE)HTTPD_PROPS_MAX)
+        return;
+
+    hs_copy(c->prop_name[c->props], (ULONG)HTTPD_QNAME_MAX, c->xml_name);
+    c->prop_ok[c->props] = 0;
+    c->props++;
+}
+
+/* The property just closed, with whatever text it held.  AmigaOS keeps one
+   date per file, so the modification time is the only thing here that maps to
+   a call; everything else is answered 403 in the 207. */
+static VOID httpd_set_property(HttpConn *c)
+{
+    const char *local = httpd_local(c->xml_name);
+    UBYTE       i;
+
+    if (!hs_equal(local, "Win32LastModifiedTime") &&
+        !hs_equal(local, "getlastmodified"))
+        return;
+
+    c->xml_text[c->xml_text_n] = '\0';
+
+    if (!httpd_parse_rfc1123(c->xml_text, &c->prop_date))
+        return;
+
+    c->have_date = 1;
+
+    for (i = 0; i < c->props; i++)
+    {
+        if (hs_equal(c->prop_name[i], c->xml_name))
+            c->prop_ok[i] = 1;
+    }
+}
+
+static VOID httpd_note_nsdecl(HttpConn *c)
+{
+    UBYTE i;
+
+    if (hs_nicmp(c->xml_attr, "xmlns", 5) != 0)
+        return;
+
+    if (c->nsdecls >= (UBYTE)HTTPD_NS_MAX)
+        return;
+
+    for (i = 0; i < c->nsdecls; i++)
+    {
+        if (hs_equal(c->nsdecl[i], c->xml_attr))
+            return;
+    }
+
+    hs_copy(c->nsdecl[c->nsdecls],
+            (ULONG)(HTTPD_QNAME_MAX + HTTPD_NSURI_MAX), c->xml_attr);
+    c->nsdecls++;
+}
+
+/* A complete start or end tag.  `selfclose` means both at once. */
+static VOID httpd_xml_tag(HttpConn *c, BOOL closing, BOOL selfclose)
+{
+    const char *local = httpd_local(c->xml_name);
+
+    if (!closing)
+    {
+        if (hs_equal(local, "prop"))
+        {
+            c->in_prop = 1;
+        }
+        else if (c->in_prop)
+        {
+            httpd_note_property(c);
+        }
+
+        c->xml_text_n = 0;
+    }
+
+    if (closing || selfclose)
+    {
+        if (hs_equal(local, "prop"))
+            c->in_prop = 0;
+        else if (c->in_prop)
+            httpd_set_property(c);
+    }
+}
+
+/*
+ * Feed the body through.  Called from the sinks, so it must survive being
+ * handed one byte at a time: everything it is in the middle of is in the
+ * connection and not on the stack.
+ */
+static VOID httpd_xml_feed(HttpConn *c, const UBYTE *data, LONG len)
+{
+    LONG i;
+
+    for (i = 0; i < len; i++)
+    {
+        int ch = data[i];
+
+        switch (c->xml_state)
+        {
+            case XML_TEXT:
+                if (ch == '<')
+                {
+                    c->xml_state  = XML_NAME;
+                    c->xml_name_n = 0;
+                    c->xml_close  = 0;
+                    c->xml_attr_n = 0;
+                }
+                else if (c->xml_text_n + 1U < sizeof(c->xml_text))
+                {
+                    c->xml_text[c->xml_text_n++] = (char)ch;
+                }
+                break;
+
+            case XML_NAME:
+                if (ch == '/' && c->xml_name_n == 0U)
+                {
+                    c->xml_close = 1;
+                }
+                else if (ch == '>' || ch == ' ' || ch == '\t' ||
+                         ch == '\r' || ch == '\n' || ch == '/')
+                {
+                    c->xml_name[c->xml_name_n] = '\0';
+
+                    if (ch == '>')
+                    {
+                        httpd_xml_tag(c, c->xml_close ? TRUE : FALSE, FALSE);
+                        c->xml_state = XML_TEXT;
+                        if (!c->xml_close)
+                            c->xml_text_n = 0;
+                    }
+                    else if (ch == '/')
+                    {
+                        httpd_xml_tag(c, FALSE, TRUE);
+                        c->xml_state = XML_ATTRS;
+                        c->xml_close = 1;   /* the '>' has nothing left to do */
+                    }
+                    else
+                    {
+                        c->xml_state  = XML_ATTRS;
+                        c->xml_attr_n = 0;
+                    }
+                }
+                else if (c->xml_name_n + 1U < sizeof(c->xml_name))
+                {
+                    c->xml_name[c->xml_name_n++] = (char)ch;
+                }
+                break;
+
+            case XML_ATTRS:
+                if (ch == '"' || ch == '\'')
+                {
+                    if (c->xml_attr_n + 1U <
+                        sizeof(c->xml_attr))
+                        c->xml_attr[c->xml_attr_n++] = '"';
+                    c->xml_state = XML_QUOTE;
+                }
+                else if (ch == '>')
+                {
+                    if (c->xml_close)
+                        c->xml_state = XML_TEXT;
+                    else
+                    {
+                        httpd_xml_tag(c, FALSE, FALSE);
+                        c->xml_state  = XML_TEXT;
+                        c->xml_text_n = 0;
+                    }
+                }
+                else if (ch == '/')
+                {
+                    /* "<x a=1/>": a start and an end with nothing between. */
+                    if (!c->xml_close)
+                    {
+                        httpd_xml_tag(c, FALSE, TRUE);
+                        c->xml_close = 1;
+                    }
+                }
+                else if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n')
+                {
+                    c->xml_attr[c->xml_attr_n] = '\0';
+                    httpd_note_nsdecl(c);
+                    c->xml_attr_n = 0;
+                }
+                else if (c->xml_attr_n + 1U < sizeof(c->xml_attr))
+                {
+                    c->xml_attr[c->xml_attr_n++] = (char)ch;
+                }
+                break;
+
+            default:                        /* XML_QUOTE                   */
+                if (ch == '"' || ch == '\'')
+                {
+                    if (c->xml_attr_n + 1U < sizeof(c->xml_attr))
+                        c->xml_attr[c->xml_attr_n++] = '"';
+                    c->xml_attr[c->xml_attr_n] = '\0';
+                    httpd_note_nsdecl(c);
+                    c->xml_attr_n = 0;
+                    c->xml_state  = XML_ATTRS;
+                }
+                else if (c->xml_attr_n + 1U < sizeof(c->xml_attr))
+                {
+                    c->xml_attr[c->xml_attr_n++] = (char)ch;
+                }
+                break;
+        }
+    }
+}
+
+/* Every method that reads XML reads it the same way. */
+static VOID httpd_sink_xml(HttpConn *c, const UBYTE *data, LONG len)
+{
+    httpd_xml_feed(c, data, len);
 }
 
 /* ------------------------------------------------------------- the answer --- */
@@ -1209,7 +2177,7 @@ static VOID httpd_do_options(HttpConn *c)
     httpd_begin(c, 200);
 
     /*
-     * DAV: 1 and not 1,2.  Class 2 is locking, and this server has none;
+     * DAV: 1 and not 1,2.  Class 2 is locking, and this server has none yet;
      * saying 2 without LOCK is what makes a client offer to write and then
      * fail at the first attempt rather than mount read-only cleanly.
      */
@@ -1466,22 +2434,613 @@ static VOID httpd_do_get(HttpConn *c)
     c->producer  = PROD_FILE;
 }
 
+/* --------------------------------------------------------------- writing --- */
+
 /*
- * The table.  A ladder of strcmp would have been shorter today and would have
- * to be unpicked the moment PUT lands; this is the shape the destination
- * needs, and the Allow header is generated from it so the two cannot disagree.
+ * What every write goes through first.  The document root itself is not a
+ * resource a client may replace or remove; the lock check joins it here when
+ * there is a lock table to ask.
+ */
+static BOOL httpd_may_write(HttpConn *c)
+{
+    if (c->path.segments == 0)
+    {
+        httpd_error(c, 403, "the served drawer itself is not writable");
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+/*
+ * The temporary a PUT is written to.  It goes in the DESTINATION drawer and
+ * not in T:, because a rename between volumes is a copy -- and the point of
+ * the temporary is that the last step is a rename and nothing else.
+ *
+ * Everything that can refuse the transfer refuses it HERE, before the client
+ * has sent a byte: a 507 now stops the upload, and a 507 at the end means the
+ * file crossed the network for nothing.
+ */
+static BOOL httpd_begin_put(HttpConn *c)
+{
+    ULONG used;
+
+    if (!httpd_may_write(c))
+        return FALSE;
+
+    if (httpd_kind(c->path.path) > 0 || c->path.trailing_slash)
+    {
+        httpd_error(c, 405, "that address is a drawer");
+        return FALSE;
+    }
+
+    if (!httpd_parent(c->path.path, c->put_temp, sizeof(c->put_temp)) ||
+        httpd_kind(c->put_temp) <= 0)
+    {
+        c->put_temp[0] = '\0';
+        httpd_error(c, 409, "there is no drawer to put that in");
+        return FALSE;
+    }
+
+    if (c->body_left > 0UL)
+    {
+        ULONG room = httpd_free_bytes(c->put_temp);
+
+        if (room > 0UL && c->body_left > room)
+        {
+            c->put_temp[0] = '\0';
+            httpd_error(c, 507, "there is not enough room on that volume");
+            return FALSE;
+        }
+    }
+
+    /* One name per connection slot, so two uploads into one drawer cannot
+       collide, and short enough for a filesystem that stops at 30
+       characters. */
+    used = hs_len(c->put_temp);
+
+    if (used > 0UL && c->put_temp[used - 1] != ':' &&
+        c->put_temp[used - 1] != '/')
+        (VOID)hs_append(c->put_temp, sizeof(c->put_temp), &used, "/");
+
+    (VOID)hs_append(c->put_temp, sizeof(c->put_temp), &used, ".httpd-put-");
+    (VOID)hs_append_num(c->put_temp, sizeof(c->put_temp), &used,
+                        (ULONG)(c - httpd_conn));
+
+    c->put = Open((CONST_STRPTR)c->put_temp, MODE_NEWFILE);
+    if (c->put == (BPTR)0)
+    {
+        ULONG why = httpd_dos_status(IoErr());
+
+        c->put_temp[0] = '\0';
+        httpd_error(c, why, "that file cannot be written here");
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+static VOID httpd_sink_put(HttpConn *c, const UBYTE *data, LONG len)
+{
+    if (c->put == (BPTR)0 || c->put_err != 0)
+        return;
+
+    if (Write(c->put, (APTR)data, len) != len)
+    {
+        c->put_err = IoErr();
+
+        /* A short write with nothing in IoErr() is still a full disk as far
+           as the client needs to know. */
+        if (c->put_err == 0)
+            c->put_err = ERROR_DISK_FULL;
+    }
+}
+
+static VOID httpd_do_put(HttpConn *c)
+{
+    BOOL existed;
+
+    if (c->put == (BPTR)0)
+        return;                     /* begin() answered already            */
+
+    (VOID)Close(c->put);
+    c->put = (BPTR)0;
+
+    if (c->put_err != 0)
+    {
+        ULONG why = httpd_dos_status(c->put_err);
+
+        httpd_put_abandon(c);
+        httpd_error(c, why, "that file could not be written");
+        return;
+    }
+
+    /* A client is free to PUT a file called ".httpd-put-0", and then the
+       temporary IS the target and the rename below would delete it. */
+    if (hs_equal(c->put_temp, c->path.path))
+    {
+        c->put_temp[0] = '\0';
+        httpd_empty(c, 201);
+        return;
+    }
+
+    existed = (httpd_kind(c->path.path) >= 0) ? TRUE : FALSE;
+
+    /*
+     * The rename is the transfer, as far as everything else on this machine
+     * is concerned: until it happens the old file is untouched, and after it
+     * the new one is whole.  AmigaDOS will not rename onto a name that
+     * exists, so an overwrite is a delete and a rename -- and the delete
+     * happens after the last byte has landed, so an upload that failed has
+     * cost nothing.
+     */
+    if (existed && !DeleteFile((CONST_STRPTR)c->path.path))
+    {
+        ULONG why = httpd_dos_status(IoErr());
+
+        httpd_put_abandon(c);
+        httpd_error(c, why, "the file already there will not go");
+        return;
+    }
+
+    if (!Rename((CONST_STRPTR)c->put_temp, (CONST_STRPTR)c->path.path))
+    {
+        ULONG why = httpd_dos_status(IoErr());
+
+        httpd_put_abandon(c);
+        httpd_error(c, why, "that file could not be put in place");
+        return;
+    }
+
+    c->put_temp[0] = '\0';
+
+    httpd_empty(c, existed ? 204 : 201);
+}
+
+/* One <D:response> saying that one path failed, for the walks that stop part
+   way through.  Built whole, because it is short and the alternative is a
+   producer for four elements. */
+static BOOL httpd_one_status(const char *href, ULONG status)
+{
+    ULONG used = 0;
+    BOOL  ok;
+
+    ok = hs_append(httpd_page, sizeof(httpd_page), &used,
+                   "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                   "<D:multistatus xmlns:D=\"DAV:\">\n"
+                   "<D:response><D:href>");
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, href);
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used,
+                         "</D:href><D:status>HTTP/1.1 ");
+    ok = ok && hs_append_num(httpd_page, sizeof(httpd_page), &used, status);
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, " ");
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used,
+                         httpd_reason(status));
+    ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used,
+                         "</D:status></D:response>\n</D:multistatus>\n");
+
+    return ok;
+}
+
+static VOID httpd_do_delete(HttpConn *c)
+{
+    ULONG why;
+
+    if (!httpd_may_write(c))
+        return;
+
+    if (httpd_kind(c->path.path) < 0)
+    {
+        httpd_error(c, 404, "there is no such file to remove");
+        return;
+    }
+
+    hs_copy(httpd_walk_src, sizeof(httpd_walk_src), c->path.path);
+
+    why = httpd_delete_tree(httpd_walk_src, sizeof(httpd_walk_src), c->fib);
+
+    if (why == 0UL)
+    {
+        httpd_empty(c, 204);
+        return;
+    }
+
+    /*
+     * Something under it would not go, so some of it did.  RFC 4918 9.6.1
+     * wants that said as a multistatus naming what is left rather than as a
+     * bare status: the client's picture of the tree is now wrong in one
+     * place and it has no other way to find out which.
+     */
+    if (!hs_equal(httpd_walk_src, c->path.path) &&
+        httpd_one_status(httpd_url_of(httpd_walk_src), why))
+    {
+        httpd_begin(c, 207);
+        httpd_body_text(c, "text/xml; charset=utf-8", httpd_page);
+        return;
+    }
+
+    httpd_error(c, why, "that could not be removed");
+}
+
+static VOID httpd_do_mkcol(HttpConn *c)
+{
+    BPTR made;
+
+    if (!httpd_may_write(c))
+        return;
+
+    /* RFC 4918 9.3: a body the server does not understand is a 415, and this
+       server understands none. */
+    if (c->had_body)
+    {
+        httpd_error(c, 415, "this server takes no body on MKCOL");
+        return;
+    }
+
+    if (httpd_kind(c->path.path) >= 0)
+    {
+        httpd_error(c, 405, "something of that name is there already");
+        return;
+    }
+
+    if (!httpd_parent(c->path.path, httpd_walk_src,
+                      sizeof(httpd_walk_src)) ||
+        httpd_kind(httpd_walk_src) <= 0)
+    {
+        httpd_error(c, 409, "there is no drawer to make that in");
+        return;
+    }
+
+    made = CreateDir((CONST_STRPTR)c->path.path);
+    if (made == (BPTR)0)
+    {
+        httpd_error(c, httpd_dos_status(IoErr()),
+                    "that drawer could not be made");
+        return;
+    }
+    UnLock(made);
+
+    httpd_empty(c, 201);
+}
+
+/*
+ * COPY and MOVE carry the other end of the operation in a header, so the
+ * Destination goes through http_path_resolve() exactly as the request target
+ * did -- same decode, same colon check, same root.  A destination trusted any
+ * less than the target is a way out of the document root that only writes.
+ */
+static BOOL httpd_resolve_dest(HttpConn *c)
+{
+    HttpPathResult why;
+
+    if (c->dest[0] == '\0')
+    {
+        httpd_error(c, 400, "that method needs a Destination");
+        return FALSE;
+    }
+
+    why = http_path_resolve(httpd_root, c->dest, &httpd_dest);
+    if (why != HTTP_PATH_OK)
+    {
+        if (httpd_verbose || httpd_trace)
+            httpd_log(c, "refused destination \"%s\": %s", (LONG)c->dest,
+                      (LONG)http_path_error(why));
+
+        httpd_error(c, 403,
+                    "that destination is not one this server will open");
+        return FALSE;
+    }
+
+    if (httpd_dest.segments == 0)
+    {
+        httpd_error(c, 403, "the served drawer itself is not a destination");
+        return FALSE;
+    }
+
+    if (hs_equal(httpd_dest.path, c->path.path))
+    {
+        httpd_error(c, 403, "the source and the destination are the same");
+        return FALSE;
+    }
+
+    /* Into itself is the one that would not stop: "a" to "a/b" is a walk that
+       keeps finding what it has just copied. */
+    if (http_path_within(c->path.path, httpd_dest.path))
+    {
+        httpd_error(c, 409, "that destination is inside the source");
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+static VOID httpd_copy_or_move(HttpConn *c, BOOL moving)
+{
+    LONG  src_kind;
+    LONG  dst_kind;
+    ULONG why;
+
+    if (!httpd_may_write(c))
+        return;
+
+    src_kind = httpd_kind(c->path.path);
+    if (src_kind < 0)
+    {
+        httpd_error(c, 404, "there is nothing there to copy");
+        return;
+    }
+
+    if (!httpd_resolve_dest(c))
+        return;
+
+    if (!httpd_parent(httpd_dest.path, httpd_walk_dst,
+                      sizeof(httpd_walk_dst)) ||
+        httpd_kind(httpd_walk_dst) <= 0)
+    {
+        httpd_error(c, 409, "there is no drawer to put that in");
+        return;
+    }
+
+    dst_kind = httpd_kind(httpd_dest.path);
+
+    if (dst_kind >= 0)
+    {
+        if (!c->overwrite)
+        {
+            httpd_error(c, 412,
+                        "something is there already and Overwrite said no");
+            return;
+        }
+
+        hs_copy(httpd_walk_dst, sizeof(httpd_walk_dst), httpd_dest.path);
+
+        why = httpd_delete_tree(httpd_walk_dst, sizeof(httpd_walk_dst),
+                                c->fib);
+        if (why != 0UL)
+        {
+            httpd_error(c, why, "what was there already would not go");
+            return;
+        }
+    }
+
+    if (moving)
+    {
+        /*
+         * Within a volume this is a rename and nothing is copied, which is
+         * what makes moving a 50 MB drawer instant.  Between volumes it
+         * cannot be, and AmigaDOS says which it was rather than leaving it to
+         * be guessed from the device names -- an assign makes that guess
+         * wrong, and guessing wrong here means copying a whole tree for a
+         * rename or renaming across a boundary and losing it.
+         */
+        LONG err;
+
+        if (Rename((CONST_STRPTR)c->path.path, (CONST_STRPTR)httpd_dest.path))
+        {
+            httpd_empty(c, (dst_kind >= 0) ? 204 : 201);
+            return;
+        }
+
+        err = IoErr();
+
+        if (err != ERROR_RENAME_ACROSS_DEVICES)
+        {
+            httpd_error(c, httpd_dos_status(err), "that could not be moved");
+            return;
+        }
+    }
+
+    hs_copy(httpd_walk_src, sizeof(httpd_walk_src), c->path.path);
+    hs_copy(httpd_walk_dst, sizeof(httpd_walk_dst), httpd_dest.path);
+
+    if (src_kind > 0)
+    {
+        /* Depth: 0 on a collection copies the collection and not what is in
+           it, RFC 4918 9.8.3.  A MOVE is always infinity. */
+        if (!moving && c->depth == 0)
+        {
+            BPTR made = CreateDir((CONST_STRPTR)httpd_dest.path);
+
+            if (made == (BPTR)0)
+            {
+                httpd_error(c, httpd_dos_status(IoErr()),
+                            "that drawer could not be made");
+                return;
+            }
+            UnLock(made);
+            why = 0;
+        }
+        else
+        {
+            why = httpd_copy_tree(httpd_walk_src, sizeof(httpd_walk_src),
+                                  httpd_walk_dst, sizeof(httpd_walk_dst),
+                                  c->fib);
+        }
+    }
+    else
+    {
+        why = httpd_copy_file(httpd_walk_src, httpd_walk_dst);
+    }
+
+    if (why != 0UL)
+    {
+        if (httpd_one_status(httpd_url_of(httpd_walk_src), why))
+        {
+            httpd_begin(c, 207);
+            httpd_body_text(c, "text/xml; charset=utf-8", httpd_page);
+            return;
+        }
+
+        httpd_error(c, why, "that could not be copied");
+        return;
+    }
+
+    if (moving)
+    {
+        hs_copy(httpd_walk_src, sizeof(httpd_walk_src), c->path.path);
+
+        why = httpd_delete_tree(httpd_walk_src, sizeof(httpd_walk_src),
+                                c->fib);
+        if (why != 0UL)
+        {
+            httpd_error(c, why,
+                        "the copy is in place and the original would not go");
+            return;
+        }
+    }
+
+    httpd_empty(c, (dst_kind >= 0) ? 204 : 201);
+}
+
+static VOID httpd_do_copy(HttpConn *c)
+{
+    httpd_copy_or_move(c, FALSE);
+}
+
+static VOID httpd_do_move(HttpConn *c)
+{
+    httpd_copy_or_move(c, TRUE);
+}
+
+/*
+ * A file on this machine has one date and no other property anybody can set,
+ * so the modification time is honoured and everything else is answered 403 in
+ * a propstat of its own -- which is what RFC 4918 9.2.1 asks for and what
+ * stops Explorer treating a timestamp it could not set as a failed copy.
+ *
+ * The namespace declarations come back out as they arrived, so the prefixes
+ * in the answer mean what they meant in the question.
+ */
+static VOID httpd_do_proppatch(HttpConn *c)
+{
+    ULONG used = 0;
+    ULONG pass;
+    UBYTE i;
+    BOOL  ok;
+
+    if (!httpd_may_write(c))
+        return;
+
+    if (httpd_kind(c->path.path) < 0)
+    {
+        httpd_error(c, 404, "there is no such file");
+        return;
+    }
+
+    if (c->have_date &&
+        !SetFileDate((CONST_STRPTR)c->path.path, &c->prop_date))
+    {
+        for (i = 0; i < c->props; i++)
+            c->prop_ok[i] = 0;
+    }
+
+    ok = hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                   "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                   "<D:multistatus xmlns:D=\"DAV:\"");
+
+    for (i = 0; i < c->nsdecls; i++)
+    {
+        /* xmlns:D is ours already; declaring it twice is not well formed. */
+        if (hs_nicmp(c->nsdecl[i], "xmlns:D=", 8) == 0)
+            continue;
+
+        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, " ");
+        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                             c->nsdecl[i]);
+    }
+
+    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                         ">\n<D:response><D:href>");
+    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                         httpd_href(&c->path, NULL, FALSE));
+    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                         "</D:href>");
+
+    /* One propstat for what was set and one for what was not, rather than one
+       each: the client reads the status off the group. */
+    for (pass = 0; pass < 2UL; pass++)
+    {
+        UBYTE wanted = (pass == 0UL) ? 1 : 0;
+        BOOL  any = FALSE;
+
+        for (i = 0; i < c->props; i++)
+        {
+            if (c->prop_ok[i] != wanted)
+                continue;
+
+            if (!any)
+            {
+                ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch),
+                                     &used, "<D:propstat><D:prop>");
+                any = TRUE;
+            }
+
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                                 "<");
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                                 c->prop_name[i]);
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                                 "/>");
+        }
+
+        if (any)
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                                 (wanted != 0)
+                                     ? "</D:prop><D:status>HTTP/1.1 200 OK"
+                                       "</D:status></D:propstat>"
+                                     : "</D:prop><D:status>HTTP/1.1 403 "
+                                       "Forbidden</D:status></D:propstat>");
+    }
+
+    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                         "</D:response>\n</D:multistatus>\n");
+
+    if (!ok)
+    {
+        httpd_error(c, 500, "that answer would not fit");
+        return;
+    }
+
+    httpd_begin(c, 207);
+    httpd_body_text(c, "text/xml; charset=utf-8", httpd_scratch);
+}
+
+/*
+ * The table.  A ladder of strcmp would have been shorter and would have had
+ * to be unpicked the moment PUT landed; this is the shape, and the Allow
+ * header is generated from it so the two cannot disagree.
  */
 static const HttpMethod httpd_methods[] =
 {
-    { "GET",      HTTPD_M_GET,      0,            httpd_do_get,      NULL },
-    { "HEAD",     HTTPD_M_HEAD,     0,            httpd_do_get,      NULL },
-    { "OPTIONS",  HTTPD_M_OPTIONS,  0,            httpd_do_options,  NULL },
+    { "GET",      HTTPD_M_GET,      0,            httpd_do_get,      NULL,
+      NULL },
+    { "HEAD",     HTTPD_M_HEAD,     0,            httpd_do_get,      NULL,
+      NULL },
+    { "OPTIONS",  HTTPD_M_OPTIONS,  0,            httpd_do_options,  NULL,
+      NULL },
     /* PROPFIND's body is read and thrown away: an empty body and <allprop/>
        mean the same thing, and a body asking for named properties gets the
-       ones there are, which RFC 4918 permits and every client tolerates.  No
-       XML parser is worth the size on this machine. */
-    { "PROPFIND", HTTPD_M_PROPFIND, HTTPD_F_BODY, httpd_do_propfind, NULL },
-    { NULL,       HTTPD_M_UNKNOWN,  0,            NULL,              NULL }
+       ones there are, which RFC 4918 permits and every client tolerates. */
+    { "PROPFIND", HTTPD_M_PROPFIND, HTTPD_F_BODY, httpd_do_propfind, NULL,
+      NULL },
+    { "PUT",      HTTPD_M_PUT,      HTTPD_F_BODY | HTTPD_F_WRITE |
+                                    HTTPD_F_UPLOAD,
+                                                  httpd_do_put,
+      httpd_sink_put, httpd_begin_put },
+    { "DELETE",   HTTPD_M_DELETE,   HTTPD_F_WRITE, httpd_do_delete,  NULL,
+      NULL },
+    { "MKCOL",    HTTPD_M_MKCOL,    HTTPD_F_BODY | HTTPD_F_WRITE,
+                                                   httpd_do_mkcol,   NULL,
+      NULL },
+    { "COPY",     HTTPD_M_COPY,     HTTPD_F_WRITE, httpd_do_copy,    NULL,
+      NULL },
+    { "MOVE",     HTTPD_M_MOVE,     HTTPD_F_WRITE, httpd_do_move,    NULL,
+      NULL },
+    { "PROPPATCH", HTTPD_M_PROPPATCH, HTTPD_F_BODY | HTTPD_F_WRITE,
+                                                   httpd_do_proppatch,
+      httpd_sink_xml, NULL },
+    { NULL,       HTTPD_M_UNKNOWN,  0,             NULL,             NULL,
+      NULL }
 };
 
 static VOID httpd_allow_header(HttpConn *c)
@@ -1725,15 +3284,24 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
         else if (hs_equal(name, "Transfer-Encoding"))
         {
-            /* A chunked request body is a second framing to implement and
-               nothing read-only can receive one; PUT is where it earns its
-               keep, and until then saying so is better than mis-reading it. */
+            /* A chunked request body is a second framing, and the transfer
+               path is the next thing to land.  Saying so is better than
+               mis-reading it. */
             if (hs_nicmp(httpd_value, "chunked", 7) == 0)
             {
                 httpd_error(c, 501, "this server does not read a chunked "
                                     "request body");
                 return FALSE;
             }
+        }
+        else if (hs_equal(name, "Destination"))
+        {
+            hs_copy(c->dest, sizeof(c->dest), httpd_value);
+        }
+        else if (hs_equal(name, "Overwrite"))
+        {
+            c->overwrite = (httpd_value[0] == 'F' || httpd_value[0] == 'f')
+                               ? 0 : 1;
         }
     }
 
@@ -1744,23 +3312,28 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
     if (c->method == NULL)
     {
         /* 405 and not 501: the address is fine, the verb is not, and the
-           Allow header is what tells a client to mount read-only rather than
-           to keep trying.  This is the answer Finder and Explorer get for
-           LOCK and PUT. */
-        httpd_error(c, 405, "this server is read-only");
+           Allow header names what there is instead. */
+        httpd_error(c, 405, "that is not a method this server has");
         return FALSE;
     }
 
     c->head_only = (c->method->id == HTTPD_M_HEAD) ? 1 : 0;
+    c->had_body  = (c->body_left > 0UL) ? 1 : 0;
 
-    if (c->body_left > HTTPD_BODY_MAX)
+    /*
+     * The ceiling is on a body this server HOLDS.  A PUT's goes to a file as
+     * it arrives and is the client's business, so an upload is not measured
+     * against a buffer it never occupies.
+     */
+    if (c->body_left > HTTPD_BODY_MAX &&
+        (c->method->flags & HTTPD_F_UPLOAD) == 0)
     {
         httpd_error(c, 413, "that request body is larger than this server "
                             "will read");
         return FALSE;
     }
 
-    if (c->body_left > 0UL && (c->method->flags & HTTPD_F_BODY) == 0)
+    if (c->had_body && (c->method->flags & HTTPD_F_BODY) == 0)
     {
         httpd_error(c, 400, "that method takes no request body");
         return FALSE;
@@ -1819,24 +3392,36 @@ static VOID httpd_dispatch(HttpConn *c)
 }
 
 /*
- * Feed the body to the method's sink.  Read-only has no sink and the bytes go
- * nowhere, but they are still READ -- a request body left in the socket is the
+ * Feed the body to the method's sink.  A method with no sink throws the bytes
+ * away, but they are still READ -- a request body left in the socket is the
  * next request as far as the parser is concerned, which is how a server that
  * ignores bodies answers the wrong question on a kept-alive connection.
+ *
+ * Returns how much was taken, which is not `len` when the body ended inside
+ * it and the rest is another request.
  */
-static VOID httpd_consume_body(HttpConn *c, const UBYTE *data, LONG len)
+static LONG httpd_consume_body(HttpConn *c, const UBYTE *data, LONG len)
 {
+    LONG take;
+
     if (len <= 0)
-        return;
+        return 0;
+
+    take = ((ULONG)len > c->body_left) ? (LONG)c->body_left : len;
+
+    if (take <= 0)
+        return 0;
 
     if (c->method != NULL && c->method->sink != NULL)
-        c->method->sink(c, data, len);
+    {
+        c->method->sink(c, data, take);
+    }
     else if (httpd_trace)
     {
         char  text[200];
         ULONG n = 0;
 
-        while (n + 1UL < sizeof(text) && (LONG)n < len)
+        while (n + 1UL < sizeof(text) && (LONG)n < take)
         {
             UBYTE ch = data[n];
 
@@ -1849,7 +3434,14 @@ static VOID httpd_consume_body(HttpConn *c, const UBYTE *data, LONG len)
         (VOID)Flush(Output());
     }
 
-    c->body_left -= (ULONG)len;
+    c->body_left -= (ULONG)take;
+
+    return take;
+}
+
+static BOOL httpd_body_done(const HttpConn *c)
+{
+    return (c->body_left == 0UL) ? TRUE : FALSE;
 }
 
 /* Anything the client pipelined after the head is the start of the body, or
@@ -1864,25 +3456,44 @@ static VOID httpd_after_head(HttpConn *c, ULONG headlen)
 
     c->in_len = left;
 
-    if (c->body_left > 0UL)
+    /*
+     * Nothing reaches the sink until the method has said it can take it.  A
+     * PUT that cannot be started -- no drawer, no room, somebody else's lock
+     * -- is refused here, which is before the client has sent the file rather
+     * than after.
+     */
+    if (c->method->begin != NULL && !c->method->begin(c))
     {
-        ULONG take = (left < c->body_left) ? left : c->body_left;
+        /* What the client is about to send belongs to a request that will not
+           be read, so this answer ends the connection. */
+        c->keepalive = 0;
+        c->in_len    = 0;
+        c->state     = CONN_SEND;
+        httpd_log_status(c);
+        return;
+    }
 
-        if (take > 0UL)
+    if (left > 0UL && !httpd_body_done(c))
+    {
+        LONG took = httpd_consume_body(c, c->in, (LONG)left);
+
+        if (took > 0)
         {
-            httpd_consume_body(c, c->in, (LONG)take);
+            for (i = 0; i + (ULONG)took < c->in_len; i++)
+                c->in[i] = c->in[i + (ULONG)took];
 
-            for (i = 0; i + take < c->in_len; i++)
-                c->in[i] = c->in[i + take];
-
-            c->in_len -= take;
+            c->in_len -= (ULONG)took;
         }
     }
 
-    c->state = (c->body_left > 0UL) ? CONN_BODY : CONN_SEND;
+    if (!httpd_body_done(c))
+    {
+        c->state = CONN_BODY;
+        return;
+    }
 
-    if (c->state == CONN_SEND)
-        httpd_dispatch(c);
+    c->state = CONN_SEND;
+    httpd_dispatch(c);
 }
 
 /* One readable connection.  FALSE when it is finished with. */
@@ -1894,6 +3505,7 @@ static BOOL httpd_readable(HttpConn *c)
     {
         UBYTE scratch[512];
         LONG  want = (LONG)sizeof(scratch);
+        LONG  took;
 
         if ((ULONG)want > c->body_left)
             want = (LONG)c->body_left;
@@ -1910,10 +3522,15 @@ static BOOL httpd_readable(HttpConn *c)
             return (err == TOOL_EWOULDBLOCK || err == TOOL_EINTR) ? TRUE : FALSE;
         }
 
-        httpd_consume_body(c, scratch, got);
+        took = httpd_consume_body(c, scratch, got);
         c->progress = httpd_now();
 
-        if (c->body_left == 0UL)
+        /* Anything past the end of the body is the next request, and it has
+           already been taken out of the socket. */
+        while (took < got && c->in_len < sizeof(c->in))
+            c->in[c->in_len++] = scratch[took++];
+
+        if (httpd_body_done(c))
         {
             c->state = CONN_SEND;
             httpd_dispatch(c);
@@ -2156,6 +3773,8 @@ static VOID httpd_accept(LONG lsock)
     httpd_conn[i].sock      = sock;
     httpd_conn[i].file      = (BPTR)0;
     httpd_conn[i].dirlock   = (BPTR)0;
+    httpd_conn[i].put       = (BPTR)0;
+    httpd_conn[i].put_temp[0] = '\0';
     httpd_conn[i].keepalive = 0;
     httpd_conn[i].progress  = httpd_now();
     httpd_conn[i].requests  = 0;
@@ -2321,8 +3940,8 @@ int main(int argc, char **argv)
     {
         tool_fault(IoErr());
         tool_usage("<drawer> [<port>] [-v] [TRACE]",
-                   "Serves a drawer over HTTP and read-only WebDAV, so this "
-                   "machine can be mounted as a drive.");
+                   "Serves a drawer over HTTP and WebDAV, so this machine can "
+                   "be mounted as a writable drive.");
         return RETURN_ERROR;
     }
 
@@ -2418,9 +4037,11 @@ int main(int argc, char **argv)
 
     for (i = 0; i < httpd_conns; i++)
     {
-        httpd_conn[i].sock  = -1;
-        httpd_conn[i].state = CONN_FREE;
-        httpd_conn[i].fib   = NULL;
+        httpd_conn[i].sock        = -1;
+        httpd_conn[i].state       = CONN_FREE;
+        httpd_conn[i].fib         = NULL;
+        httpd_conn[i].put         = (BPTR)0;
+        httpd_conn[i].put_temp[0] = '\0';
     }
 
     /*
@@ -2446,9 +4067,34 @@ int main(int argc, char **argv)
         }
     }
 
+    /*
+     * The two the write methods share.  A walk asks about one path while a
+     * handler is holding what it learned about another -- a COPY examines the
+     * source and then asks what is at the destination -- so there is one of
+     * each here rather than one borrowed from the connection.
+     */
+    httpd_fib2 = (struct FileInfoBlock *)
+        ami_alloc((ULONG)sizeof(struct FileInfoBlock));
+    httpd_info = (struct InfoData *)ami_alloc((ULONG)sizeof(struct InfoData));
+
+    if (httpd_fib2 == NULL || httpd_info == NULL)
+    {
+        tool_error("not enough memory to start");
+        ami_free(httpd_info);
+        ami_free(httpd_fib2);
+        for (i = 0; i < httpd_conns; i++)
+            ami_free(httpd_conn[i].fib);
+        ami_free(httpd_conn);
+        CloseLibrary(httpd_sb);
+        FreeArgs(rda);
+        return RETURN_FAIL;
+    }
+
     lsock = httpd_listen(&address, port);
     if (lsock < 0)
     {
+        ami_free(httpd_info);
+        ami_free(httpd_fib2);
         for (i = 0; i < httpd_conns; i++)
             ami_free(httpd_conn[i].fib);
         ami_free(httpd_conn);
@@ -2458,7 +4104,7 @@ int main(int argc, char **argv)
     }
 
     tool_addr_text(httpd_sb, &address, dotted, sizeof(dotted));
-    tool_printf("Serving %s on http://%s:%ld/  (Ctrl-C to stop)\n",
+    tool_printf("Serving %s read-write on http://%s:%ld/  (Ctrl-C to stop)\n",
                 (LONG)httpd_root, (LONG)dotted, (LONG)port);
     (VOID)Flush(Output());
 
@@ -2471,6 +4117,8 @@ int main(int argc, char **argv)
         ami_free(httpd_conn[i].fib);
     }
     ami_free(httpd_conn);
+    ami_free(httpd_info);
+    ami_free(httpd_fib2);
 
     (VOID)tool_sock_close(httpd_sb, lsock);
     CloseLibrary(httpd_sb);

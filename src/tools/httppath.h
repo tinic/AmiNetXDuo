@@ -87,6 +87,35 @@ HttpPathResult http_path_resolve(const char *root, const char *target,
 const char *http_path_error(HttpPathResult why);
 
 /*
+ * The three a writing server walks a tree with.  They are here rather than in
+ * the server for the reason everything else in this file is here: between them
+ * they decide which file gets deleted, and a walk that appends the wrong
+ * separator or backs up one level too far deletes something nobody asked
+ * about.  src/tools/test/test_httppath.c drives all three.
+ */
+
+/*
+ * Append `name` to `path` as a child of it, in place.  The separator AmigaOS
+ * wants is added and never doubled -- "a//b" is a's PARENT's b here.
+ *
+ * 0 when it would not fit, or when `name` is empty or carries a separator of
+ * its own: a name out of a FileInfoBlock cannot contain one, so a name that
+ * does did not come from the filesystem.
+ */
+int http_path_join(char *path, unsigned long pathlen, const char *name);
+
+/* Back up one level, in place.  Only ever undoes a join; a path that is a
+   device reference is left alone, because "RAM:" has nothing above it. */
+void http_path_up(char *path);
+
+/*
+ * Non-zero when `path` IS `prefix` or is something below it.  Case-insensitive
+ * because AmigaDOS is: a lock taken on "Foo" has to cover a write to "foo",
+ * and a copy into "a/b" has to be recognised as a copy into "A".
+ */
+int http_path_within(const char *prefix, const char *path);
+
+/*
  * Percent-encode a decoded path for an href.  '/' is kept as a separator;
  * everything outside the unreserved set is escaped, which on this machine
  * matters mostly for the spaces AmigaOS filenames are full of.
