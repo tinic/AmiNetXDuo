@@ -2013,13 +2013,13 @@ static BOOL httpd_writable(HttpConn *c)
                                   want);
 
             /*
-             * What send() says it took, totalled per answer.  It is one line
-             * under TRACE and it is here because it is the only way to tell
-             * this program's mistakes from the library's: on a 512 KB file
-             * this counter reads exactly Content-Length while the wire
-             * carries several thousand bytes more, which is a fault in
-             * send() and not in the loop below.  docs/BACKLOG.md has the
-             * measurement.
+             * What send() says it took, totalled per answer.  One line under
+             * TRACE, and the only way to tell this program's mistakes from
+             * the library's: put it next to the distinct sequence space in a
+             * capture and the two must agree.  They did not, and the fault
+             * was in send() rather than in the loop below --
+             * bsd_send_consumed() in src/bsdsocket/transfer.c is what that
+             * cost and why the counter stays.
              */
             if (sent > 0)
                 c->wrote += (ULONG)sent;
