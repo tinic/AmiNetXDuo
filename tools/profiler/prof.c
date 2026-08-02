@@ -1020,7 +1020,7 @@ ULONG nominal;
     ULONG raw  = prof_buf[i].ps_Time;
     ULONG vpos = (((raw >> 16) & 1UL) << 8) | ((raw >> 8) & 0xFFUL);
     ULONG hpos = raw & 0xFFUL;
-    ULONG now  = vpos * PROF_CCK_LINE + hpos * 2UL;
+    ULONG now  = vpos * PROF_CCK_LINE + hpos;   /* hpos is colour clocks */
 
         if (i == 0UL)
         {

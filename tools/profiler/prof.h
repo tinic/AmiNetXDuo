@@ -72,12 +72,22 @@
  * the CIA in the first place.  The beam position is the only free-running
  * counter on a plain OCS 68000 machine that can be read that cheaply.
  *
- * The host decodes it: vpos = (V8 << 8) | V7..V0, hpos = H8..H1, and the time
- * within a frame is vpos * 227 + hpos * 2 colour clocks.  It wraps once a
- * frame, i.e. every ~20 ms PAL / ~17 ms NTSC, and consecutive samples at any
- * rate this tool will run at are far closer together than that, so unwrapping
- * is unambiguous.  A gap that swallowed a WHOLE frame would alias -- the
- * window table exists to catch exactly that, see struct ProfWindow.
+ * The host decodes it: vpos = (V8 << 8) | V7..V0, hpos = the low byte, and the
+ * time within a frame is vpos * 227 + hpos colour clocks.
+ *
+ * hpos IS ALREADY IN COLOUR CLOCKS.  The hardware reference names the field
+ * H8..H1 because the internal counter runs at half a colour clock, so the
+ * eight bits exposed are the colour clock number 0..226 and scaling them is
+ * wrong.  It is worth stating because the wrong version is not obviously
+ * wrong: it inflates a line to 452 clocks, so the position goes BACKWARDS at
+ * every line boundary, every close pair of samples that straddles one reads as
+ * a frame wrap, and the run appears to contain hundreds of milliseconds that
+ * were never in it.  Caught by disagreeing with the vertical-blank count.
+ *
+ * It wraps once a frame, i.e. every ~20 ms PAL / ~17 ms NTSC, and consecutive
+ * samples at any rate this tool will run at are far closer together than that,
+ * so unwrapping is unambiguous.  A gap that swallowed a WHOLE frame would
+ * alias -- ph_Frames is the independent count that catches that.
  *
  * prof_vector.S knows these offsets.
  */
