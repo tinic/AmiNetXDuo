@@ -21958,7 +21958,7 @@ inside the `Forbid()` it counts so none is lost to another Task. Exec's own
 `DispCount` and `IdleCount` come straight out of `SysBase`; nothing we could
 instrument would produce them.
 
-### 86.1 The table
+### 89.1 The table
 
 A1200/68020, `tcpprof` wire case, 1 MB, transfer phase only. Shares and
 samples from the clean build (4420 samples at 1 kHz over 4369 ms, so one sample
@@ -21996,7 +21996,7 @@ dispatches: **86 µs per Exec context switch.**
 Per 1448-byte segment: 54 `TX_DISABLE` pairs, 7.8 mutex operations, 3.6 ThreadX
 handoffs.
 
-### 86.2 Nothing was spinning
+### 89.2 Nothing was spinning
 
 Worth establishing before optimising, because a spin would want a third fix
 again. Six things say there was none:
@@ -22022,7 +22022,7 @@ again. Six things say there was none:
 So: **frequent, not slow.** Nothing in the list is expensive for what it does.
 Two things follow from that, and they are the two changes below.
 
-### 86.3 The scheduler Task was a middleman
+### 89.3 The scheduler Task was a middleman
 
 Every ThreadX handoff was three Exec context switches. The yielding Task
 released the baton, signalled the scheduler Task and blocked; Exec dispatched
@@ -22054,7 +22054,7 @@ Measured on the same workload: `sched dispatch` 2,634 → **0**, `direct` 0 →
 2,656, `wake` 2,894 → 203, Exec dispatches 5,844 → 3,281 (−44%), and the
 scheduler Task's own share 8.1% → 0.4%. Wall clock 4369 → 3936 ms.
 
-### 86.4 `TX_DISABLE`/`TX_RESTORE` were out-of-line calls
+### 89.4 `TX_DISABLE`/`TX_RESTORE` were out-of-line calls
 
 38,853 pairs at 9.9 µs each, for a body that is two instructions. §6.2 had
 already collapsed the inner layer — `_tx_amiga_forbid_inline()` is one
@@ -22094,7 +22094,7 @@ are read off it. `tx_mutex_put.c` compiles to `moveal 4,a0 / addq.b #1,a0@(295)`
 at entry and `moveal 4,a0 / subq.b #1,a0@(295) / movew a0@(298),d0 / beq` at
 exit, with no call on either. `tcpprof` text grew 100,840 → 103,368 bytes.
 
-### 86.5 Before and after
+### 89.5 Before and after
 
 Category shares of the transfer phase, A1200/68020, 1 MB over the wire case:
 
@@ -22131,17 +22131,81 @@ Counts after, confirming the workload did not change: `disable`/`restore`
 38,853 → 38,850, `permit-slow` still 0, mutex 5,612/5,672 → 5,612/5,671,
 handoffs 2,634 → 2,654, `park_spurious` still 0.
 
-### 86.6 The 68000 emulator arm could not be run
+### 89.6 The floor, measured -- and the win does not grow there
 
-`tools/ci.sh host host32 cross conformance` is green, and the tier-2 emulator
-suite is green on the 68020 -- all eight, `bracket_invariants` included. The
-68000 arm cannot be run on playhouse2 at all: FS-UAE dies of SIGSEGV on the
-host one second in, before the guest has loaded anything, with the run script
-saying so. An unmodified baseline binary out of a checkout at 43b8172 does the
-same under the same command, which is what makes it the host and not this
-change.
+The A500 profile, 68000 at 7.09 MHz, Kickstart 3.1 r40.63, same `tcpprof` and
+same megabyte. Baseline is e2c03f6, the commit this branch sits on.
 
-### 86.7 What is left
+| category | base | after | delta |
+|---|---|---|---|
+| Kickstart (Exec etc) | 6566 (25.6%) | 4614 (21.8%) | -1952 |
+| ThreadX + Amiga port | 6046 (23.6%) | 3826 (18.0%) | -2220 |
+| NetX Duo protocol | 5177 (20.2%) | 5201 (24.5%) | +24 |
+| copy (net68k asm) | 4000 (15.6%) | 3995 (18.8%) | -5 |
+| checksum | 2478 (9.7%) | 2441 (11.5%) | -37 |
+| app / profiler | 1162 (4.5%) | 983 (4.6%) | -179 |
+| unattributed | 189 (0.7%) | 145 (0.7%) | -44 |
+| **total samples** | **25,618** | **21,205** | **-17.2%** |
+| wall, ms | 25,465 | 21,104 | -17.1% |
+| KB/s | 40 | 48 | +20% |
+
+Loopback: 10,201 -> 8,733 ms, 100 -> 117 KB/s.
+
+The control holds on the floor as it did on the 68020: NetX Duo +24, copy -5,
+checksum -37, all flat, while Exec and the port give up 4,172 samples between
+them. The `app / profiler` row falls with the run length because it is the
+sampler's own cost.
+
+**The expectation was that this would be a bigger win on a 68000, and it is
+not.** -17.2% here against -17.6% on the A1200. The reasoning behind the
+expectation is sound as far as it goes -- a 68000 pays 34 cycles for the
+`jsr`/`rts` an inline removes, against a smaller number on a 68020 with a cache
+and a 32-bit bus -- but it prices only the numerator.
+
+The profile prices both ends:
+
+| | A1200 / 68020 | A500 / 68000 | ratio |
+|---|---|---|---|
+| `TX_DISABLE`+`TX_RESTORE`, baseline samples | 385 | 1,667 | 4.3x |
+| the same, as a share of the transfer | 8.7% | 6.5% | -- |
+| whole transfer | 4,420 ms | 25,618 ms | 5.8x |
+| `n68k_copy_bytes` | 780 | 4,000 | 5.1x |
+
+The critical-section pair got 4.3 times dearer on a machine that got 5.8 times
+slower overall, so as a **share** of the transfer it got cheaper, not dearer:
+8.7% on the 68020, 6.5% on the 68000. Everything the pair competes with -- the
+copy, the checksum, NetX Duo's own code -- is bus-bound on a 16-bit machine and
+suffers more from the move than a `jsr` does. The removed cost is a roughly
+constant fraction of the transfer across both machines, which is why the wall
+clock moves by the same 17% on both.
+
+Call counts do differ between the two machines, and by more than the noise:
+43,392 `TX_DISABLE` pairs on the 68000 against 38,853 on the 68020, 3,174
+handoffs against 2,654, and 1,106 scheduler pokes against 188. A slower machine
+spends longer in each tick period and takes more of them, so it does more work
+per megabyte. It is not a fixed workload across CPUs, and the per-call figures
+in 89.1 are the A1200's.
+
+Those counts are the after-build's, because the counters are part of this
+change and the baseline cannot be built with them. Using them as the baseline's
+denominator is justified by the A1200 control, where a 17% change in duration
+moved the count by 0.01% (38,853 to 38,850) -- the count tracks packets, not
+wall clock.
+
+### 89.7 The 68000 arm needed a ROM, not a fix
+
+An earlier revision of this section recorded the 68000 emulator arm as
+unrunnable: FS-UAE died of SIGSEGV on the host a second in, and an unmodified
+baseline binary did the same, which ruled out the code. The cause was that
+playhouse2 held only an A1200 Kickstart, so every profile that is not an A1200
+had nothing to boot and failed as a host-side crash rather than a legible "no
+ROM". With `$HOME/kick31-a500.rom` staged, both `-c 68000` on the A1200 model
+and `-m A500` boot and pass.
+
+Worth keeping because the failure mode is indistinguishable from a guest crash
+at a glance, and it cost a wrong conclusion once.
+
+### 89.8 What is left
 
 The `TX_DISABLE` pair is still 38,850 calls. That count is ThreadX's and NetX
 Duo's, not ours, and reducing it means changing vendored critical sections —

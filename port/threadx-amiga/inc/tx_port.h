@@ -217,7 +217,7 @@ VOID   _tx_thread_interrupt_restore(UINT previous_posture);
  * 38,853 of these pairs; the profiler charged them 8.8% of it, 8.8 us a pair
  * on a 14 MHz 68020, for a body that is two instructions.  Nearly all of the
  * difference is the jsr/rts and the reload of SysBase on each side
- * (docs/RESEARCH.md 86).
+ * (docs/RESEARCH.md 89).
  *
  * Exec is reached by offset rather than by including <exec/execbase.h>, which
  * would drag exec/types.h in ahead of the typedefs above and collide with
