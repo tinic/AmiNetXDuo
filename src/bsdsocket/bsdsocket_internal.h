@@ -297,21 +297,18 @@ typedef struct
  * full go-back-N, and every byte of window is a byte of packet pool somebody
  * else cannot have. The pool budget above bounds it in practice.
  *
- * Whole segments, and deliberately not a round binary number. A receive costs a
- * fixed per-round wakeup rather than a per-byte one, so a response arrives in
- * ceil(response / window) instalments and each costs a full round whatever it
- * carries. The window's only job on a bulk read is to keep that count at one,
- * and a window of exactly 2^n cannot hold a 2^n application block plus its
- * header. Measured against such a peer -- 32 KB blocks behind a 12-byte header,
- * 4 MB file: 16384 -> 645 KB/s (three instalments), 24576 -> 988 and
- * 32768 -> 979 (two), 33024 -> 1947 and 49152 -> 1946 (one). Twelve bytes were
- * worth a factor of two; 16 KB beyond them were worth nothing.
- *
- * 33 * 1460, the shape the other stacks advertise: Roadshow 33580 (23), Linux
- * 64240 (44). None can land on a power of two by construction.
+ * 32768 is the largest value with field evidence behind it. A sweep once read
+ * a factor of two between 32768 and 33024 and attributed it to a peer's 32 KB
+ * block not fitting a 2^n window, but that sweep ran against a receive path
+ * that was suppressing duplicate acknowledgments, which left the transfer
+ * bounded by the window rather than by the congestion window and made every
+ * byte of window show up as throughput. Re-measured with that fixed, 32768,
+ * 33580 and 48180 read 901, 894 and 866 KB/s on a clean link and 570, 520 and
+ * 556 under 1% loss -- flat, inside a run-to-run spread of about a tenth.
+ * Nothing above this is worth the go-back-N it widens.
  */
 #ifndef BSD_TCP_WINDOW_CEILING
-#define BSD_TCP_WINDOW_CEILING  48180
+#define BSD_TCP_WINDOW_CEILING  32768
 #endif
 
 /*
