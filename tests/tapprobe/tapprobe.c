@@ -49,6 +49,7 @@
 #include <exec/types.h>
 #include <exec/memory.h>
 #include <dos/dos.h>
+#include <dos/dostags.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 
@@ -732,6 +733,18 @@ int main(int argc, char **argv)
         ", E-Clock %u Hz, ReadEClock %u ticks, arena %08x",
         probe_eclock_rate(), ecl_overhead, (ULONG)arena);
 
+    /*
+     * AmiTCP_NG looks its databases up under AmiTCP:, which a bare boot has no
+     * assign for.  Made here rather than in the Startup-Sequence because
+     * fsuae-run.sh writes that file and there is no Assign command staged.
+     */
+    {
+        BPTR lock = Lock((STRPTR)"DH0:", SHARED_LOCK);
+
+        if (lock != (BPTR)0 && AssignLock((STRPTR)"AmiTCP", lock) == 0)
+            UnLock(lock);
+    }
+
     /* ------------------------------------------------ bring the stack up -- */
 
     if (streq(mode, "anxd"))
@@ -751,9 +764,20 @@ int main(int argc, char **argv)
 
         if (up == NULL)
             up = "DH0:rs/AddNetInterface DEVS:NetInterfaces/tap0";
-        say("executing: %s", up);
-        rc = Execute((STRPTR)up, (BPTR)0, Output());
-        say("Execute() returned %d", rc);
+        say("starting: %s", up);
+        /*
+         * Asynchronous on purpose.  Execute() does not return until the
+         * command does, and a stack that stalls bringing the interface up
+         * stalls this program with it -- which loses the event ring, the one
+         * thing that would say where it stalled.
+         */
+        rc = SystemTags((STRPTR)up,
+                        SYS_Input,  (ULONG)Open((STRPTR)"NIL:", MODE_OLDFILE),
+                        SYS_Output, (ULONG)Open((STRPTR)"DH0:up.txt",
+                                                MODE_NEWFILE),
+                        SYS_Asynch, TRUE,
+                        TAG_DONE);
+        say("SystemTags() returned %d", rc);
     }
 
     for (i = 0; i < 200 && !probe_is_online(); i++)
@@ -768,11 +792,17 @@ int main(int argc, char **argv)
     {
         say("not online after the bring-up command; trying Online");
         say("Online returned %d",
-            Execute((STRPTR)"DH0:rs/Online tap0", (BPTR)0, Output()));
+            SystemTags((STRPTR)"DH0:rs/Online tap0",
+                       SYS_Input,  (ULONG)Open((STRPTR)"NIL:", MODE_OLDFILE),
+                       SYS_Output, (ULONG)Open((STRPTR)"NIL:", MODE_NEWFILE),
+                       SYS_Asynch, TRUE, TAG_DONE));
         for (i = 0; i < 250 && !probe_is_online(); i++)
             Delay(2);
-        (VOID)Execute((STRPTR)"DH0:rs/ShowNetStatus INTERFACES", (BPTR)0,
-                      Output());
+        (VOID)SystemTags((STRPTR)"DH0:rs/ShowNetStatus INTERFACES",
+                         SYS_Input,  (ULONG)Open((STRPTR)"NIL:", MODE_OLDFILE),
+                         SYS_Output, (ULONG)Open((STRPTR)"NIL:", MODE_NEWFILE),
+                         SYS_Asynch, TRUE, TAG_DONE);
+        Delay(100);
     }
 
     if (!probe_is_online())

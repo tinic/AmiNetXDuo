@@ -18,15 +18,17 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 STACK=anxd
 TIMEOUT=300
+MODEL=A1200
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 RSDIR="${ROADSHOW_DIR:-$HOME/roadshow-wb}"
 
-while getopts "s:t:b:r:" opt; do
+while getopts "s:t:b:r:m:" opt; do
     case "$opt" in
         s) STACK="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
         r) RSDIR="$OPTARG" ;;
+        m) MODEL="$OPTARG" ;;
         *) echo "usage: $0 [-s anxd|roadshow] [-t secs] [-b build] [-r dir]" >&2
            exit 2 ;;
     esac
@@ -36,6 +38,7 @@ PROBE="$ROOT/$BUILD/tests/tapprobe/TapProbe"
 [ -f "$PROBE" ] || { echo "missing $PROBE -- build it first" >&2; exit 2; }
 
 TAG="tapprobe-$STACK"
+[ "$MODEL" = "A1200" ] || TAG="$TAG-$MODEL"
 STAGE="$ROOT/build/$TAG-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/devs/NetInterfaces" "$STAGE/libs" "$STAGE/rs"
@@ -91,7 +94,7 @@ echo "==> stack: $STACK"
 export AMINETXDUO_RUN_TAG="$TAG"
 
 set +e
-xvfb-run -a "$ROOT/tools/fsuae-run.sh" -x -t "$TIMEOUT" \
+xvfb-run -a "$ROOT/tools/fsuae-run.sh" -x -m "$MODEL" -t "$TIMEOUT" \
     "$PROBE" "$STAGE/devs" "$STAGE/libs" "$STAGE/rs" "$STAGE/mode.txt" \
     $( [ -d "$STAGE/db" ] && echo "$STAGE/db" ) \
     > "$ROOT/build/$TAG.log" 2>&1
