@@ -1797,6 +1797,17 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
 
 /* --------------------------------------------------------------- driving --- */
 
+/* What was answered, whatever answered it.  Refusals go through here too:
+   they used to be the one thing the log did not record, so a transcript
+   showed a client's PUT and then nothing, and the 405 that made it give up
+   had to be inferred from the byte count. */
+static VOID httpd_log_status(HttpConn *c)
+{
+    if (httpd_verbose || httpd_trace)
+        httpd_log(c, "> %lu %s", (LONG)c->status,
+                  (LONG)httpd_reason(c->status));
+}
+
 static VOID httpd_dispatch(HttpConn *c)
 {
     if (httpd_verbose && !httpd_trace)
@@ -1804,9 +1815,7 @@ static VOID httpd_dispatch(HttpConn *c)
 
     c->method->handle(c);
 
-    if (httpd_verbose || httpd_trace)
-        httpd_log(c, "> %lu %s", (LONG)c->status,
-                  (LONG)httpd_reason(c->status));
+    httpd_log_status(c);
 }
 
 /*
@@ -1968,6 +1977,7 @@ static BOOL httpd_readable(HttpConn *c)
                 /* Answered already.  What is left in the buffer belongs to a
                    request that will not be read, so the connection ends after
                    the answer goes out. */
+                httpd_log_status(c);
                 c->in_len = 0;
                 c->state  = CONN_SEND;
                 return TRUE;
