@@ -21811,3 +21811,110 @@ all ones (every add carries), and alternating `0xFFFFFFFF`/`0x00000001`, which
 is what lands the accumulator on `0xFFFFFFFF` with a carry pending and makes
 the second fold matter. 700 bytes is 175 longwords, so the deep block runs
 three times and every level of the tail is reached.
+## 88. The bracket a parked packet does not need (2026-08-01)
+
+§39.3 put four bracket policies in a table and declined the interesting one:
+
+> `on-miss` is in the table because it is the next idea and it is **not taken**:
+> it drops the bracket for a `recv()` that can be served out of the packet
+> already parked on the socket, which is arithmetic and a copy — but it also
+> moves `nx_packet_release()` outside the baton, and releasing a packet can
+> resume a thread suspended on the pool.
+
+The objection is right, and it is narrower than the idea it rejected. A read
+that is *strictly shorter* than what the parked packet still holds never
+releases anything. That read is the one this section takes the bracket off.
+
+### 86.1 The instrument was priced against the wrong bracket
+
+`tests/perf/bracket_test.c` set `b_cache_live` only for the `cached` arm. Every
+other arm therefore ran `tx_amiga_adopt_thread()`/`tx_amiga_orphan_thread()` --
+the pair §39.1 prices at 525 us -- while `cached` ran the dormant-TX_THREAD
+pair at 214 us. So `on-miss` was charged 2.5x per bracket for the privilege of
+taking fewer of them, and the two columns of §39.3's table were never
+comparable. Fixed: every arm but `per-call` now uses the cached bracket, and
+`per-call` stays uncached because that is what `-DAMINETXDUO_NXCACHE=OFF`
+restores.
+
+### 86.2 One bracket per call, not one per miss
+
+`on-miss` releases the bracket the instant `nx_tcp_socket_receive()` returns. A
+read large enough to span packets misses more than once, so it pays more
+brackets than `per-call` does: at 16 KB reads, 32 brackets over 16 calls. That
+is why it loses to `cached` at the top of the table, and it is not a property of
+the idea -- it is a property of releasing too eagerly. A `lazy` arm that takes
+the bracket on first need and holds it to the end of the call caps the bill at
+one per call, and is then never worse than `cached` and never worse than
+`on-miss`.
+
+256 KB over loopback, A1200 profile, five arms:
+
+| read | per-call | cached | on-miss | lazy | once |
+|---:|---:|---:|---:|---:|---:|
+| 512 | 750 ms | 598 | 484 | **482** | 440 |
+| 1,460 | 548 | 496 | 460 | **460** | 417 |
+| 4,096 | 475 | 455 | 447 | **450** | 406 |
+| 16,384 | 431 | 429 | 445 | **429** | 401 |
+
+| read | calls | reaching NetX Duo | brackets: cached / on-miss / lazy |
+|---:|---:|---:|---:|
+| 512 | 512 | 32 | 512 / 32 / 32 |
+| 1,460 | 180 | 32 | 180 / 32 / 32 |
+| 4,096 | 64 | 32 | 64 / 32 / 32 |
+| 16,384 | 16 | 32 | 16 / **32** / 16 |
+
+480 brackets removed buys 116 ms, which is 242 us each against a measured pair
+of 214 us. The arithmetic closes.
+
+### 86.3 What shipped, and why it is narrower than `lazy`
+
+`bsd_recv_parked()` (`src/bsdsocket/transfer.c`) skips the bracket when the
+socket is TCP, not read-shut, has a parked packet, and that packet holds
+strictly more than the caller asked for. Under that predicate `bsd_recv_tcp()`
+provably stays inside the pure region: `as_RxPending` is never emptied, so
+`nx_tcp_socket_receive()` is never called and `nx_packet_release()` is never
+called. What runs unbracketed is `nx_packet_length_get()` -- one field read --
+and `nx_packet_data_extract_offset()`, a read-only chain walk and a `memcpy` on
+a packet the IP thread no longer references. Neither has a caller check and
+neither takes a lock, because neither touches anything shared.
+
+"Strictly more", not "at least as much", is the safety argument: a read that
+drains the packet exactly would release it, and that is §39.3's objection,
+unanswered. It costs nothing to stay away from -- the call that would have hit
+it takes the bracket for its own receive anyway, so the bracket count is the
+same as `lazy`'s.
+
+The predicate is an optimisation, not a correctness dependency. `bsd_nx_need()`
+takes the bracket at the sites inside the loop that need one, so a predicate
+that were wrong -- or a future edit that added a site -- is slow rather than
+corrupting.
+
+### 86.4 What it is worth, and to whom
+
+Brackets removed = calls that never reach NetX Duo, so the saving is
+214 us x (calls - misses) and nothing else. It is worth most to exactly the
+client §29.3 caught this stack losing to Roadshow: one that reads small.
+
+The loopback figures flatter it. The RAM driver delivers the sender's 8 KB
+chunk whole, so a 512-byte read misses once in sixteen. Over a real link with a
+1,460-byte MSS a 512-byte read misses once in about three, and the saving is
+roughly a third of the calls rather than fifteen sixteenths. The per-bracket
+constant is the number to carry, not the percentage.
+
+### 86.5 Where the same shape is, and is not
+
+* **The send path has no equivalent.** Every `send()` reaches
+  `nx_tcp_socket_send()`; there is no parked state to satisfy it from. The
+  bracket there is not overhead, it is the call.
+* **`WaitSelect()`'s poll sweep has one, unmeasured.** `bsd_poll_sets()` takes
+  a bracket per pass, and of the three predicates it runs, `bsd_writable()` and
+  `bsd_exception()` read struct fields and make no NetX Duo call at all --
+  `bsd_readable()` is the only one that reaches
+  `nx_tcp_socket_bytes_available()`, and only after four early-outs, one of
+  which is the parked packet. A sweep over a socket that already has data
+  therefore needs no bracket. Not taken here: it is a second lock change with
+  no instrument behind it, and §39.7 already argued `select()` is not where the
+  money is. Note the shape is the opposite of the obvious guess -- a poll pass
+  that finds *nothing* ready is the one that must call
+  `nx_tcp_socket_bytes_available()`, so it is the pass that finds data parked
+  that could skip the bracket, not the empty one.

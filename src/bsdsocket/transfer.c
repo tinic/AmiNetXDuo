@@ -765,8 +765,72 @@ UINT bsd_recv_raw_once(VOID *arg, ULONG wait)
 }
 
 
+/*
+ * Take the bracket unless this call already holds it, so a path that reaches
+ * NetX Duo after bsd_recv_parked() said it would not is slow rather than
+ * wrong. The predicate below is an optimisation; this is what makes it safe
+ * to be one. Returns FALSE only if the bracket cannot be had at all.
+ */
+static BOOL bsd_nx_need(struct AmiSocketBase *base, BOOL *held)
+{
+    if (*held)
+        return TRUE;
+
+    if (bsd_nx_enter(base) != 0)
+        return FALSE;
+
+    *held = TRUE;
+
+    return TRUE;
+}
+
+/*
+ * Can this stream read be answered out of the parked packet alone?
+ *
+ * bsd_recv_tcp() reaches a THREADS_ONLY entry point in exactly one place --
+ * bsd_wait_sliced() -> nx_tcp_socket_receive() -- and only when as_RxPending
+ * is empty. A read strictly shorter than what the parked packet still holds
+ * never empties it, so it never receives and never releases: it reads a length
+ * out of the packet header and memcpys out of the chain, on a packet
+ * nx_tcp_socket_receive() has already handed over and that the IP thread no
+ * longer references. None of that needs the baton.
+ *
+ * Strictly shorter, not "at least as long as": a read that drains the packet
+ * exactly calls nx_packet_release(), which puts it back in the shared pool.
+ * That is the one nx_packet_* helper here that touches state the IP thread
+ * also touches, and it is cheap to stay away from -- the case is one read
+ * length in a packet's worth, and the call that would have hit it takes the
+ * bracket for its receive anyway.
+ *
+ * Worth a predicate because netx_call.c prices the bracket at 214 us on a
+ * 14 MHz 68020, more than copying and checksumming a whole MTU packet.
+ * tests/perf/bracket_test.c's lazy arm measures the ceiling over 256 KB:
+ * 512-byte reads 598 -> 482 ms, 1460-byte reads 496 -> 460 ms.
+ */
+static BOOL bsd_recv_parked(AmiSocket *sock, LONG len)
+{
+    ULONG length;
+
+    if ((sock->as_Flags & (ASF_TCP | ASF_RAW)) != ASF_TCP)
+        return FALSE;
+
+    /* Returns 0 before looking at the packet, but say so plainly rather than
+       rely on a caller ordering. */
+    if ((sock->as_Flags & ASF_RDSHUT) != 0)
+        return FALSE;
+
+    if (sock->as_RxPending == NULL)
+        return FALSE;
+
+    length = bsd_packet_len(sock->as_RxPending);
+    if (length <= sock->as_RxOffset)
+        return FALSE;               /* drained; the next call releases it */
+
+    return (BOOL)((length - sock->as_RxOffset) > (ULONG)len);
+}
+
 static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
-                         BsdIovCursor *cur, LONG len, LONG flags)
+                         BsdIovCursor *cur, LONG len, LONG flags, BOOL *held)
 {
     LONG  copied = 0;
     ULONG wait   = bsd_wait_option(sock, sock->as_RcvTimeout);
@@ -798,6 +862,14 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
             {
                 BsdRecvArgs args;
                 BOOL        aborted;
+
+                /* nx_tcp_socket_receive() is THREADS_ONLY. */
+                if (!bsd_nx_need(base, held))
+                {
+                    if (copied > 0)
+                        break;
+                    return bsd_fail(base, AMI_ENETDOWN);
+                }
 
                 args.tcp    = &sock->as_Nx.tcp;
                 args.packet = &packet;
@@ -849,6 +921,10 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
         length = bsd_packet_len(sock->as_RxPending);
         if (length <= sock->as_RxOffset)
         {
+            /* nx_packet_release() hands the packet back to the shared pool and
+               can resume a thread suspended on it, so it stays inside. */
+            if (!bsd_nx_need(base, held))
+                break;
             bsd_drop_pending(sock);
             continue;
         }
@@ -882,8 +958,9 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
             break;                      /* leave the packet where it is */
 
         sock->as_RxOffset += moved;
-        if (sock->as_RxOffset >= length)
-            bsd_drop_pending(sock);
+        if (sock->as_RxOffset >= length && bsd_nx_need(base, held))
+            bsd_drop_pending(sock);     /* else leave it parked and drained;
+                                           the next call releases it */
 
         first = FALSE;
     }
@@ -1135,11 +1212,20 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
 {
     BsdIovCursor cur;
     LONG         result;
+    BOOL         held = FALSE;
 
     bsd_iov_init(&cur, iov, iovcnt);
 
-    if (bsd_nx_enter(base) != 0)
-        return bsd_fail(base, AMI_ENETDOWN);
+    /* A stream read the parked packet already covers touches nothing
+       THREADS_ONLY, so it skips the bracket; bsd_nx_need() takes it if that
+       turns out to be wrong. A nested call inside one that took it stays
+       covered either way -- sb_NxNest is still up. */
+    if (!bsd_recv_parked(sock, len))
+    {
+        if (bsd_nx_enter(base) != 0)
+            return bsd_fail(base, AMI_ENETDOWN);
+        held = TRUE;
+    }
 
     if ((sock->as_Flags & ASF_RAW) != 0)
     {
@@ -1148,7 +1234,7 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
     }
     else if ((sock->as_Flags & ASF_TCP) != 0)
     {
-        result = bsd_recv_tcp(base, sock, &cur, len, flags);
+        result = bsd_recv_tcp(base, sock, &cur, len, flags, &held);
         if (result >= 0 && from != NULL && fromlen != NULL)
             bsd_sockaddr_put(sock, from, fromlen, &sock->as_PeerAddr,
                              sock->as_PeerPort);
@@ -1165,7 +1251,8 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
                               truncated, msg);
     }
 
-    bsd_nx_leave(base);
+    if (held)
+        bsd_nx_leave(base);
 
     return result;
 }
