@@ -205,6 +205,7 @@ struct HttpConn
     UBYTE   out[HTTPD_OUT_MAX];
     ULONG   out_len;
     ULONG   out_sent;
+    ULONG   wrote;                  /* what send() has ACCEPTED, in total   */
     UBYTE   overflow;               /* the head did not fit -- 500 instead */
     UBYTE   chunked;
     ULONG   status;
@@ -847,6 +848,7 @@ static VOID httpd_reset(HttpConn *c)
     c->body_left = 0;
     c->file_left = 0;
     c->dir_stage = DIR_SELF;
+    c->wrote     = 0;
 }
 
 /* ------------------------------------------------------------- the answer --- */
@@ -1055,6 +1057,8 @@ static BOOL httpd_produce(HttpConn *c)
                 want = (LONG)c->file_left;
 
             got = Read(c->file, (APTR)c->out, want);
+
+
             if (got <= 0)
             {
                 /* Short of what Examine() said, which means the file changed
@@ -1793,6 +1797,17 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
 
 /* --------------------------------------------------------------- driving --- */
 
+/* What was answered, whatever answered it.  Refusals go through here too:
+   they used to be the one thing the log did not record, so a transcript
+   showed a client's PUT and then nothing, and the 405 that made it give up
+   had to be inferred from the byte count. */
+static VOID httpd_log_status(HttpConn *c)
+{
+    if (httpd_verbose || httpd_trace)
+        httpd_log(c, "> %lu %s", (LONG)c->status,
+                  (LONG)httpd_reason(c->status));
+}
+
 static VOID httpd_dispatch(HttpConn *c)
 {
     if (httpd_verbose && !httpd_trace)
@@ -1800,9 +1815,7 @@ static VOID httpd_dispatch(HttpConn *c)
 
     c->method->handle(c);
 
-    if (httpd_verbose || httpd_trace)
-        httpd_log(c, "> %lu %s", (LONG)c->status,
-                  (LONG)httpd_reason(c->status));
+    httpd_log_status(c);
 }
 
 /*
@@ -1964,6 +1977,7 @@ static BOOL httpd_readable(HttpConn *c)
                 /* Answered already.  What is left in the buffer belongs to a
                    request that will not be read, so the connection ends after
                    the answer goes out. */
+                httpd_log_status(c);
                 c->in_len = 0;
                 c->state  = CONN_SEND;
                 return TRUE;
@@ -1993,8 +2007,22 @@ static BOOL httpd_writable(HttpConn *c)
 
         if (c->out_sent < c->out_len)
         {
+            LONG want = (LONG)(c->out_len - c->out_sent);
+
             sent = tool_sock_send(httpd_sb, c->sock, &c->out[c->out_sent],
-                                  (LONG)(c->out_len - c->out_sent));
+                                  want);
+
+            /*
+             * What send() says it took, totalled per answer.  It is one line
+             * under TRACE and it is here because it is the only way to tell
+             * this program's mistakes from the library's: on a 512 KB file
+             * this counter reads exactly Content-Length while the wire
+             * carries several thousand bytes more, which is a fault in
+             * send() and not in the loop below.  docs/BACKLOG.md has the
+             * measurement.
+             */
+            if (sent > 0)
+                c->wrote += (ULONG)sent;
 
             if (sent < 0)
             {
@@ -2023,6 +2051,10 @@ static BOOL httpd_writable(HttpConn *c)
 
         {
             ULONG pipelined = c->in_len;
+
+            if (httpd_trace)
+                httpd_log(c, "send() accepted %lu bytes for this answer",
+                          (LONG)c->wrote, 0);
 
             httpd_reset(c);
 
