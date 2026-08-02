@@ -4,6 +4,7 @@ User-visible changes, newest first. Internal work is in the git log.
 
 ## 0.16.2
 
+- DHCP asks for an address under the same client identifier Roadshow uses, so a machine keeps the address and the router reservation it had before the stack was changed. Without it the router treated the same card as a different machine and handed out a different address, which broke every reservation and every note of "the Amiga is at". The request also asks for the domain name and the static route list on a DHCP interface configured in `DEVS:NetInterfaces`, which only an interface configured by hand used to get
 - The installer's "no network card driver" message no longer appears before the page it tells the reader to use. It came up first, ended the installation, and advised choosing "Intermediate User" -- on a page that had not been shown yet and could not be reached
 - Keeping an existing interface configuration says that it is being kept as-is and not checked, so a card or driver that has changed since it was written is not silently assumed to still be there
 - The installer asks which build to install instead of only detecting one. The processor it finds is still the default and a novice install is unchanged, but a disk being prepared on one machine for another can now be given the right library. The choice names what the smallest build leaves out
