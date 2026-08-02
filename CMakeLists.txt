@@ -416,6 +416,13 @@ if(AMINETXDUO_TLS)
 endif()
 add_subdirectory(src/tools)
 
+# Profile, the sampling profiler.  Built for every cross configuration and
+# packed in the archive: it depends on nothing in this tree, it is useful to
+# anyone with an Amiga and a program that is slower than they expected, and it
+# is the only way to see what this stack costs on real hardware -- no emulator
+# above a 68020 has a usable cycle model.  tools/profiler/CMakeLists.txt.
+add_subdirectory(tools/profiler)
+
 if(AMINETXDUO_TESTS)
     add_subdirectory(tests)
     # Diagnostic probes -- built, never auto-run.  Two of them crash on

@@ -1,0 +1,151 @@
+Profile -- a sampling profiler for AmigaOS/m68k
+===============================================
+
+    Profile [RATE=n] [SAMPLES=n] [CHANNEL=n] [STACK=n] [OUT=file]
+            [FOLDED=file] [TOP=n] [QUIET] <program> [arguments]
+
+Profile loads a program, records where each of its hunks landed, runs it, and
+samples the program counter a thousand times a second while it runs.  The
+program needs no recompilation, no instrumentation and no cooperation, and it
+does not know it is being profiled.
+
+    Profile MyProgram somefile.dat
+    Profile OUT=RAM:p.prof RATE=2000 MyProgram somefile.dat
+
+The ranked list of modules is printed on the machine.  OUT= writes the raw
+profile for profreport.py on a cross-development host, which adds function
+names from the executable's symbols.
+
+
+WHAT IT CAN PROFILE
+-------------------
+
+Anything the CPU executes while the program runs, wherever it is:
+
+  * The program's own code, by hunk, relocated back to link-time addresses.
+  * Kickstart.  Every AmigaOS library is a jump table, so exec.library/Forbid
+    is named as exec.library/Forbid rather than as an address in ROM.
+  * Shared libraries and devices, including ones loaded from disk while the
+    program runs and ones with no symbols at all -- those are named by module.
+  * Interrupt handlers, including the SANA-II driver's receive path: sampling
+    is at level 4, which can interrupt a level-2 or level-3 handler.
+  * Any number of tasks and processes at once.  Each sample records which task
+    was running, so the profile splits by thread.
+
+There is no list of things it cannot look inside.  It does not instrument
+anything, so there is nothing for it to fail to instrument.
+
+
+WHAT IT CANNOT PROFILE
+----------------------
+
+  * Code inside Exec's Disable().  Disable() turns interrupts off, so nothing
+    is sampled there and that time is charged to whatever runs next.  This is
+    MEASURED rather than assumed: every sample carries a timestamp, so the
+    report says what fraction of the run was never sampled and where the
+    longest gaps were.  Forbid()/Permit() does not mask interrupts and is
+    sampled normally.
+
+  * Code inside a level-5 or level-6 interrupt handler -- disk sync, serial
+    receive, CIA-B.  A level-4 interrupt cannot preempt those.  It shows up as
+    a gap, and the gap is reported.
+
+  * Call stacks.  This is a flat PC sampler: it records where the CPU was, not
+    how it got there.  The exports below make a hierarchy out of what a sample
+    does carry (task, context, module, function) rather than pretending to a
+    call graph.
+
+  * A program that calls Exit() rather than returning.  Profile runs the
+    program in its own process with RunCommand(), so Exit() unwinds past it and
+    the profile is not written.  It says so when it happens.
+
+  * A program that wants all four audio channels.  See below.
+
+
+THE AUDIO CHANNEL
+-----------------
+
+The sampling interrupt comes from an audio channel: two bytes of silence on
+repeat at volume zero, and the DMA raises an interrupt each time it reloads.
+Channel 3 by preference, then 2, 1, 0, and the channel is allocated through
+audio.device so a program that wants it can have it.  CHANNEL=n demands one.
+
+If every channel is taken, Profile refuses to sample rather than fighting for
+the hardware and reporting whatever comes out.  If a program takes the channel
+back mid-run -- audio.device gives it to a higher-precedence claimant without
+asking -- a vertical-blank watchdog notices the rate collapse and the report
+says so.  A profile of half a program that looks like a profile of all of it is
+the failure this tool exists to avoid.
+
+A CIA timer is not an alternative.  Two were tried and both stopped mid-run,
+having produced enough correct samples to rank functions convincingly.
+
+
+THE RATE
+--------
+
+1000 Hz on a 68010 and up, 250 Hz on a plain 68000, and RATE= overrides both.
+The handler plus Exec's own level-4 dispatch is roughly 50 us on a 7 MHz 68000,
+so 1000 Hz there would spend 5% of the machine measuring it.  On anything
+faster the default costs well under 1%.
+
+SAMPLES= caps the buffer.  By default Profile takes at most a third of free
+memory: 16 bytes a sample, so 1000 Hz fills 16 KB a second.
+
+
+THE HOST SIDE
+-------------
+
+    profreport.py profile.prof --exe MyProgram --map MyProgram.map \
+        --objdir <where the .obj files are> --ndk <NDK include dir>
+
+Function names need the executable's symbols, which is why this half runs on
+the machine that built the program.  It recovers file-static functions too, by
+walking the linker map for where each object landed and running nm on that
+object -- without that, every sample in a static lands silently on the
+preceding global.
+
+Two exports, for viewers that already exist:
+
+    --folded out.txt     one line per unique stack, "a;b;c <count>".
+                         speedscope.app reads it directly and gives icicle,
+                         left-heavy and sandwich views; so do flamegraph.pl and
+                         inferno.
+
+    --trace out.json     Chrome Trace Event JSON.  ui.perfetto.dev and
+                         speedscope.app both read it, and it is a real
+                         timeline rather than an aggregate -- if two threads
+                         alternate per packet, this shows the switch rate on
+                         its face.
+
+Profile itself can write the folded file with FOLDED=, at module rather than
+function granularity, so a machine with no cross-development host attached can
+still produce something a browser will draw.
+
+The folded stacks are "task;context;module;function".  THAT IS NOT A CALL
+STACK.  A PC sampler records one address, so a literal folded stack would be
+one frame deep and an icicle graph of it would be a bar chart.  Every level of
+this hierarchy is measured; none of it is inferred.
+
+
+PROVING IT
+----------
+
+A sampling profiler is the one measurement tool that can be comprehensively
+wrong and still look right: read the exception frame two bytes off and every
+recorded value is half an SR concatenated with half a PC -- a number that lands
+somewhere, resolves to some function, and ranks it convincingly.
+
+profspin is the answer to that.  It is an ordinary program that links nothing
+from the profiler, and it writes the exact byte range of each of its assembly
+kernels from the linker's own labels:
+
+    Profile OUT=RAM:spin.prof profspin RANGES=RAM:spin.ranges
+    profreport.py RAM:spin.prof --contain RAM:spin.ranges ...
+
+which checks that the samples landed inside the kernels that were running, and
+that each kernel's share of the samples matches its share of the wall clock the
+program measured for itself.  A wrong frame offset scores approximately zero
+rather than a bit less.
+
+SPDX-License-Identifier: MIT
