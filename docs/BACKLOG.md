@@ -18,6 +18,43 @@ empty results.
 
 ## Open — no decision taken
 
+- **A cycle-attribution profiler, to find where a transfer's time actually
+  goes.** The copy and checksum together are about 20% of a wire transfer and
+  roughly 78% is unaccounted for inside NetX Duo's protocol processing.
+  AmigaOS has no profiler, and `tests/perf/perf_test.c` can only say where the
+  time is NOT.
+
+  A working prototype exists on branch `agent/moira-eval`: `moiraprof.cpp`
+  produces callgrind-style flat and inclusive profiles with call edges and
+  **zero source changes**, at 22-25 M instructions/s, which is 17x a 14 MHz
+  68020 -- a 20-second Amiga run profiles in about a second. No instruction
+  hook is needed; Moira's `execute()` is public and runs exactly one
+  instruction, so the profiler is an outer loop rather than a callback and can
+  stop and inspect anywhere. Inclusive costs come from decoding `jsr`/`bsr`/
+  `rts` into a shadow stack, which avoids `-finstrument-functions` skewing the
+  small leaf functions that matter here.
+
+  Two traps already found and handled, which any reimplementation will hit:
+  statics are invisible in `HUNK_SYMBOL` and their cycles land silently on the
+  preceding global (recover via the link map plus per-object `nm`), and the
+  shadow stack has to unwind on stack-pointer regression because ThreadX swaps
+  stacks, so an rts-only stack drifts out of step at every context switch.
+
+  **The vehicle should be vAmiga headless, not a flat memory image.** A flat
+  image needs 41 distinct Exec and dos entry points for
+  `port/threadx-amiga/src/` and `src/netstack/` alone (54 tree-wide), before a
+  SANA-II device to originate packets and timer.device as the kernel's clock --
+  that is writing a small AmigaOS, and the resulting profile would EXCLUDE
+  Exec, when `Forbid`/`Signal`/`Wait` are part of the 78% being hunted. vAmiga
+  builds a real headless target (`VAHeadless`), its `Core/` tree is plain C++
+  with its own CMake, RetroShell scripts can insert a disk and boot Kickstart so
+  it batches in CI, and its `MoiraConfig.h` is byte-identical to upstream on the
+  one flag the profiler needs. Decisively, it HAS the memory system, so the
+  11-15% gap between bare Moira and real measurements closes.
+
+  Note this is worth doing for attribution only. Moira must not be used to tune
+  against -- see the entry below for why.
+
 - **The 68000 byte-loop fallback costs 6.1x, not the 4x the source says**,
   measured 2026-08-01 on a cycle-exact A500: 5.4 us/B against 0.89 for the
   `movem.l` path. `src/net68k/n68k_copy.S` takes it whenever `to` and `from`
@@ -213,6 +250,56 @@ empty results.
   killed the `swap`-based recombination idea for 2 mod 4 (see RESEARCH.md 86).
 
 ## Decided against — do not "fix"
+
+- **Moira cannot be tuned against, and neither can Musashi**, evaluated
+  2026-08-01, branch `agent/moira-eval`. Both were considered for host-side
+  cycle counting so the data path could be optimised without booting an
+  emulator. The verdict is narrow and worth keeping precise.
+
+  **Moira's 68000 instruction timing is exact, in a configuration it does not
+  ship.** `MoiraConfig.h` defaults `MOIRA_PRECISE_TIMING` to false, which makes
+  `SYNC(x)` a no-op in `MoiraMacros.h`, so data-dependent costs are computed and
+  discarded -- MULS.W is charged its worst case 54 whatever the operand.
+  `MOIRA_MIMIC_MUSASHI` defaults true and its own comment says to turn it off
+  for accuracy. Both are unconditional `#define`s, not runtime options. Patched,
+  it matches published M68000PRM figures 30/30, including MOVEM.L (An)+ at
+  12+8n across six register counts. Unpatched, 29/30.
+
+  **Its 68020 has no instruction cache at all**, measured rather than assumed:
+  the same loop body from 64 to 640 bytes costs exactly 8.000 cycles per pair at
+  every size, with the only decline being the fixed `dbf` amortising. There is
+  no turn at 256 bytes, soft or otherwise, and FS-UAE's 020 does show one. So it
+  cannot reproduce the I-cache behaviour that both of the 2026-08-01 data-path
+  optimisations were tuned against, and **must not be used to choose unroll
+  depth**.
+
+  Against real measurements it does not reconcile and the errors do not share a
+  sign: 68020 copy +23%, 68000 checksum at 20 B -41%, and the copy's alignment
+  penalty comes out +1.2% where the machine gives +31%. The reason is
+  structural -- **Moira is a CPU, not a machine.** A harness gives it flat
+  always-ready RAM, so there is no chip-RAM contention, no prefetch overlap, no
+  cache and no unaligned-access penalty, which is the very effect
+  `n68k_copy.S` aligns its destination to avoid. Supplying all that means
+  writing the Amiga.
+
+  **Musashi is worse for this, not better.** Its 68020, 68030 and 68040 share
+  one cycle table, verified by dumping it, and that table is the 020 best case
+  -- i.e. a permanent 100% instruction-cache hit. `USE_ALL_CYCLES()` also
+  charges a whole timeslice to a spin loop, which would invent a hotspot on
+  exactly the busy-waits a network stack does.
+
+  **Nobody has a cycle model above the 68020.** WinUAE's own 020+ cores have
+  their cycle accumulation `#if 0`'d out in `gencpu.cpp`, the timing tables
+  surviving only as comments, and Toni Wilen writes "cycle-exact" in scare
+  quotes for 030/040/060 in his own source. His `cputester` validates TIMING
+  only on 68000/68010 at +/-2 cycles and is a functional oracle above that.
+  This is a field-wide gap rather than a Moira shortcoming, and it means the
+  68060 machines our fastest users run cannot be measured by anyone -- so
+  `movem.l`'s cheapness and the flat two-accumulator result stay 68020-only
+  evidence permanently.
+
+  What Moira IS good for is attribution, and that stays open rather than
+  rejected: see the entry above.
 
 - **The ThreadX tick rate stays at 50 and changing it does nothing**,
   2026-08-01. Swept 20/40/50/60/80/100 Hz, 8 runs per arm, arms interleaved so
