@@ -17,10 +17,11 @@
 #
 # WHAT TO EXPECT, measured rather than assumed:
 #
-#   WinUAE, -m A500 (68000, cycle-exact)   exact.  ADD.L 8.00 against a
-#       published 8, MOVE.L 4.00 against 4, ADDX.L 8.00 against 8.  -k 14
-#       doubles the CPU and leaves the chipset alone, and Chip RAM duly stops
-#       matching Fast RAM.  This is the profile to take timings on.
+#   -m A500 (68000), EITHER EMULATOR   exact, and they agree with each other
+#       to a tenth of a percent.  ADD.L 8.00 against a published 8, MOVE.L
+#       4.00 against 4, ADDX.L 8.00 against 8.  -k 14 doubles the CPU and
+#       leaves the chipset alone, and Chip RAM duly goes to 1.6x the cost of
+#       Fast RAM.  This is the profile to take timings on.
 #
 #   FS-UAE, -m A1200 (68020)  exact on two-cycle integer work and 26% light on
 #       the multiply: MULU.L charged 32 against a published 43.
@@ -91,7 +92,7 @@ ARGS=(-x -m "$MODEL" -t 300)
 case "$EMU" in
     winuae) export AMINETXDUO_WINUAE_EXE="${AMINETXDUO_WINUAE_EXE:-C:\\winuae-patched\\winuae64.exe}"
             AMINETXDUO_RUN_TAG="$TAG" tools/winuae-run.sh "${ARGS[@]}" "$CPUCAL" > "$OUT" 2>&1 || true ;;
-    fsuae)  AMINETXDUO_RUN_TAG="$TAG" tools/fsuae-run.sh "${ARGS[@]}" "$CPUCAL" > "$OUT" 2>&1 || true ;;
+    fsuae)  AMINETXDUO_RUN_TAG="$TAG" xvfb-run -a tools/fsuae-run.sh "${ARGS[@]}" "$CPUCAL" > "$OUT" 2>&1 || true ;;
     *)      echo "unknown emulator $EMU" >&2; exit 2 ;;
 esac
 

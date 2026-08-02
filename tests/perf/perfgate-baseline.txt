@@ -1,0 +1,24 @@
+# tests/perf/run-perfgate.sh baseline.
+# NAME  DIRECTION  VALUE  TOLERANCE_PERCENT
+# Recorded on the cycle-exact 68000 profile at 14 MHz, FROM v0.16.4 --
+# the last release whose numbers this harness reproduces as good.  Running
+# the gate on 0.16.6 fails it on three lines, which is the state of the
+# tree and not a fault in the gate.
+# Tolerances are the measured spread over the recording run,
+# doubled, floored at 3% and capped at 15%.  The floor keeps
+# ordinary run-to-run movement from failing the gate; the cap
+# is there because a metric with a wider band than that cannot
+# resolve anything worth gating on, and a number that never
+# fails reads as coverage it is not providing.
+append_1460_nspb         lower        598.080    3.6
+checksum_net68k_nspb     lower        434.200    3.1
+copy_n68k_nspb           lower        424.950    3.0
+copy_sana2_nspb          lower        425.070    3.0
+extract_1460_nspb        lower        473.270    5.7
+loopback_extract_kbs     higher       310.000    3.0
+loopback_w65535_kbs      higher       319.000    3.0
+perf_failures            lower          0.000    3.0
+pipeline_net68k_nspb     lower       2416.240    3.0
+sweep_retransmits        lower          1.000    3.0
+wire_extract_kbs         higher       123.000    3.0
+wire_w65535_kbs          higher       122.000    3.0
