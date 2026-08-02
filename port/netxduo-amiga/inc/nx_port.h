@@ -191,6 +191,27 @@ extern  UINT    tx_amiga_caller_is_thread(void);
                                             return(NX_CALLER_ERROR);
 
 
+/*
+ * Count the mutex traffic, for -DAMINETXDUO_SCHEDCOUNT=ON.
+ *
+ * _tx_mutex_get()/_tx_mutex_put() are ThreadX core and the vendored tree is not
+ * patched, so the count is taken at the call site instead.  nx_port.h reaches
+ * every NetX Duo translation unit and every file of ours that includes
+ * nx_api.h, which between them are all of the mutex traffic in the data path --
+ * the IP protection mutex and nothing else.  ThreadX's own internal uses are
+ * not counted, and there are none on this path.
+ */
+#ifdef AMINETXDUO_SCHEDCOUNT
+extern ULONG    _tx_amiga_sched_count[];
+#undef  tx_mutex_get
+#undef  tx_mutex_put
+#define tx_mutex_get(m, w)          (_tx_amiga_sched_count[TX_AMIGA_SC_MUTEX_GET]++, \
+                                     _tx_mutex_get((m), (w)))
+#define tx_mutex_put(m)             (_tx_amiga_sched_count[TX_AMIGA_SC_MUTEX_PUT]++, \
+                                     _tx_mutex_put(m))
+#endif
+
+
 /* Define the version ID of NetX.  */
 
 #ifdef NX_SYSTEM_INIT

@@ -305,6 +305,44 @@ TX_THREAD *tx_amiga_adopted_thread(VOID);
  */
 UINT    tx_amiga_caller_is_thread(VOID);
 
+
+/* ------------------------------------------------------------------------ */
+/* Scheduling call counts                                                    */
+/* ------------------------------------------------------------------------ */
+
+#ifdef AMINETXDUO_SCHEDCOUNT
+
+/*
+ * How often the scheduling primitives were entered, so that a sampled share
+ * can be turned into a cost per call.  Built only under
+ * -DAMINETXDUO_SCHEDCOUNT=ON; see tx_port.h for what each one counts.
+ *
+ * sc_exec_dispatch and sc_exec_idle are Exec's own, read straight out of
+ * SysBase: they are what Reschedule/Switch/Dispatch cost is charged against,
+ * and no instrumentation of ours could produce them.
+ */
+typedef struct TX_AMIGA_SCHED_STATS_STRUCT
+{
+    ULONG   sc_disable;
+    ULONG   sc_restore;
+    ULONG   sc_permit_slow;
+    ULONG   sc_mutex_get;
+    ULONG   sc_mutex_put;
+    ULONG   sc_sys_return;
+    ULONG   sc_wake;
+    ULONG   sc_sched_dispatch;
+    ULONG   sc_sched_wait;
+    ULONG   sc_park_wait;
+    ULONG   sc_park_spurious;
+    ULONG   sc_direct;
+    ULONG   sc_exec_dispatch;               /* SysBase -> DispCount          */
+    ULONG   sc_exec_idle;                   /* SysBase -> IdleCount          */
+} TX_AMIGA_SCHED_STATS;
+
+VOID    tx_amiga_sched_stats(TX_AMIGA_SCHED_STATS *stats);
+
+#endif /* AMINETXDUO_SCHEDCOUNT */
+
 #ifdef __cplusplus
 }
 #endif

@@ -372,7 +372,9 @@ UINT         wake;
      * (_tx_thread_system_return).  Read under the core lock so the answer cannot
      * be stale by the time it is used.
      */
-    wake =  (_tx_thread_execute_ptr != TX_NULL) ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
+    wake =  (_tx_amiga_dispatch_inline() == ((UINT) TX_FALSE)) &&
+            (_tx_thread_execute_ptr != TX_NULL)
+            ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
 
     Permit();
 
@@ -623,12 +625,15 @@ UINT         wake;
     thread_ptr -> tx_thread_amiga_signal_owner =  (VOID *) 0;
     thread_ptr -> tx_thread_amiga_run_signal   =  0UL;
 
-    wake =  (_tx_thread_execute_ptr != TX_NULL) ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
+    wake =  (_tx_amiga_dispatch_inline() == ((UINT) TX_FALSE)) &&
+            (_tx_thread_execute_ptr != TX_NULL)
+            ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
     Permit();
 
-    /* Whoever is next may run now, if there is anybody.  See the note in
-       tx_amiga_adopt_suspend() for why an empty execute pointer means the
-       poke can be skipped, and what makes that safe.  */
+    /* Whoever is next may run now, if there is anybody.  Handed on directly
+       when the baton was free; the poke is the fallback.  See the note in
+       tx_amiga_adopt_suspend() for why an empty execute pointer means it can
+       be skipped altogether, and what makes that safe.  */
     if (wake == (UINT) TX_TRUE)
     {
         _tx_amiga_wake_scheduler();

@@ -91,6 +91,34 @@ static ULONG    t_arp1_cache[1024 / sizeof(ULONG)];
 static UCHAR    t_src_buf[T_APP_CHUNK] __attribute__((aligned(4)));
 static UCHAR    t_dst_buf[T_APP_CHUNK] __attribute__((aligned(4)));
 
+#ifdef AMINETXDUO_SCHEDCOUNT
+static TX_AMIGA_SCHED_STATS t_sc0;
+static TX_AMIGA_SCHED_STATS t_sc1;
+
+/* Calls, and microseconds per call at the profile's sampled share.  The share
+   comes from the clean build; this run only supplies the denominator, because
+   the increments themselves are on the path being counted. */
+static VOID t_sched_report(ULONG ms)
+{
+#define D(field)    ((long)(t_sc1.field - t_sc0.field))
+
+    prof_log("  sched: disable %ld restore %ld (permit-slow %ld)"
+             " mutex get %ld put %ld",
+             D(sc_disable), D(sc_restore), D(sc_permit_slow),
+             D(sc_mutex_get), D(sc_mutex_put));
+    prof_log("  sched: sys_return %ld wake %ld direct %ld"
+             " | sched dispatch %ld wait %ld | park wait %ld spurious %ld",
+             D(sc_sys_return), D(sc_wake), D(sc_direct),
+             D(sc_sched_dispatch), D(sc_sched_wait),
+             D(sc_park_wait), D(sc_park_spurious));
+    prof_log("  sched: Exec dispatches %ld, idle loops %ld, over %ld ms",
+             D(sc_exec_dispatch), D(sc_exec_idle), (long)ms);
+
+#undef D
+}
+#endif
+
+
 static NX_IP           *t_run_ip;
 static UINT             t_run_port;
 static ULONG            t_run_target;
@@ -230,6 +258,9 @@ ULONG       t0, ms;
     }
 
     prof_mark("transfer");
+#ifdef AMINETXDUO_SCHEDCOUNT
+    tx_amiga_sched_stats(&t_sc0);
+#endif
     t0 = ami_millis();
 
     while (sent < bytes)
@@ -268,6 +299,10 @@ ULONG       t0, ms;
 
     (VOID)tx_semaphore_get(&t_srv_gotall, 120UL * NX_IP_PERIODIC_RATE);
     ms = ami_millis() - t0;
+#ifdef AMINETXDUO_SCHEDCOUNT
+    tx_amiga_sched_stats(&t_sc1);
+    t_sched_report(ms);
+#endif
 
     prof_mark("teardown");
 

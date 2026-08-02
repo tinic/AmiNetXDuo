@@ -157,20 +157,177 @@ typedef uint64_t                                ULONG64;
 
 
 /* ------------------------------------------------------------------------ */
+/* Scheduling call counters.                                                 */
+/* ------------------------------------------------------------------------ */
+
+/*
+ * A sampling profile says where the PC lands, not how often a function was
+ * entered, and the two want opposite fixes: a slow primitive wants to be made
+ * cheaper, a frequent one wants to be called less.  These counters give the
+ * second axis, so a share can be divided by a count.
+ *
+ *   cmake -B build/sc -DAMINETXDUO_SCHEDCOUNT=ON ...
+ *
+ * Off by default, and free when off.  An array with an index enum rather than
+ * a struct, because this header must stay includable before <exec/types.h>;
+ * tx_amiga_sched_stats() copies it into the named struct in tx_amiga.h.
+ *
+ * Every increment below is inside a Forbid(), so none is lost -- a plain ULONG
+ * ++ from two Exec Tasks otherwise would be.
+ */
+
+#define TX_AMIGA_SC_DISABLE         0       /* _tx_thread_interrupt_disable  */
+#define TX_AMIGA_SC_RESTORE         1       /* _tx_thread_interrupt_restore  */
+#define TX_AMIGA_SC_PERMIT_SLOW     2       /* restores that reached Permit()*/
+#define TX_AMIGA_SC_MUTEX_GET       3       /* tx_mutex_get(), via nx_port.h */
+#define TX_AMIGA_SC_MUTEX_PUT       4
+#define TX_AMIGA_SC_SYS_RETURN      5       /* _tx_thread_system_return()    */
+#define TX_AMIGA_SC_WAKE            6       /* _tx_amiga_wake_scheduler()    */
+#define TX_AMIGA_SC_SCHED_DISPATCH  7       /* batons handed out by the task */
+#define TX_AMIGA_SC_SCHED_WAIT      8       /* Wait()s in _tx_thread_schedule*/
+#define TX_AMIGA_SC_PARK_WAIT       9       /* Wait()s in the park loop      */
+#define TX_AMIGA_SC_PARK_SPURIOUS   10      /* wakes that had no baton       */
+#define TX_AMIGA_SC_DIRECT          11      /* batons passed peer to peer    */
+#define TX_AMIGA_SC_MAX             12
+
+#ifdef AMINETXDUO_SCHEDCOUNT
+extern ULONG    _tx_amiga_sched_count[TX_AMIGA_SC_MAX];
+#define TX_AMIGA_COUNT(which)                   (_tx_amiga_sched_count[(which)]++)
+#else
+#define TX_AMIGA_COUNT(which)                   ((VOID) 0)
+#endif
+
+
+/* ------------------------------------------------------------------------ */
 /* Interrupt (critical section) control.                                     */
 /* ------------------------------------------------------------------------ */
 
 /* TX_DISABLE/TX_RESTORE are strictly balanced throughout the ThreadX core,
    so they map onto the Forbid()/Permit() nest counter directly and the saved
-   posture is informational only.  These are out-of-line calls rather than
-   macros so that this header stays free of AmigaOS includes.  */
+   posture is informational only.  */
 
 UINT   _tx_thread_interrupt_disable(void);
 VOID   _tx_thread_interrupt_restore(UINT previous_posture);
 
+/*
+ * Expanded at the call site, which is what the ThreadX porting model expects
+ * of TX_DISABLE/TX_RESTORE and what every other port does.  They were
+ * out-of-line calls here so that this header could stay free of the AmigaOS
+ * includes -- and that cost more than the work.  A 1 MB TCP transfer takes
+ * 38,853 of these pairs; the profiler charged them 8.8% of it, 8.8 us a pair
+ * on a 14 MHz 68020, for a body that is two instructions.  Nearly all of the
+ * difference is the jsr/rts and the reload of SysBase on each side
+ * (docs/RESEARCH.md 86).
+ *
+ * Exec is reached by offset rather than by including <exec/execbase.h>, which
+ * would drag exec/types.h in ahead of the typedefs above and collide with
+ * them.  The offsets are asserted against the NDK's struct ExecBase in
+ * tx_thread_interrupt_control.c, so a header that ever moved a field fails the
+ * build rather than corrupting the nest count.  SysBase is absolute location 4
+ * by definition, which is where the C global is loaded from anyway.
+ */
+
+#define TX_AMIGA_OFF_TDNESTCNT      0x0127                  /* BYTE  */
+#define TX_AMIGA_OFF_ATTNRESCHED    0x012A                  /* UWORD */
+
+/*
+ * SysBase.  Loaded with asm rather than by dereferencing the constant, because
+ * -Warray-bounds rejects a deref of absolute location 4 -- reasonably, since it
+ * cannot know this target puts a pointer there.  One instruction either way.
+ * Not volatile: the value never changes, so GCC may hoist it out of a loop.
+ */
+static __inline__ __attribute__((always_inline)) char *_tx_amiga_execbase(void)
+{
+
+char   *base;
+
+
+    __asm__ ("move.l 4,%0" : "=a" (base));
+
+    return(base);
+}
+
+/* Both fields off one base register.  Written this way rather than as two
+   independent volatile derefs because GCC will not hold a volatile address
+   across a volatile access, and reloads location 4 for each -- which restore
+   touches twice.  */
+#define TX_AMIGA_TDNESTCNT_AT(b)    (*((volatile signed char *) \
+                                       ((b) + TX_AMIGA_OFF_TDNESTCNT)))
+#define TX_AMIGA_ATTNRESCHED_AT(b)  (*((volatile unsigned short *) \
+                                       ((b) + TX_AMIGA_OFF_ATTNRESCHED)))
+
+/* The rare tail of Permit(): defined in tx_thread_interrupt_control.c, which
+   can see Exec.  Reached only when a reschedule may be owed.  */
+VOID   _tx_amiga_permit_finish(void);
+
+/*
+ * Forbid() is ADDQ.B #1,TDNestCnt.  The asm is there to keep it ONE
+ * instruction: a read-modify-write the compiler split into three could lose a
+ * nesting level against an interrupt, and a 68k takes interrupts only between
+ * instructions.
+ */
+static __inline__ __attribute__((always_inline)) UINT _tx_amiga_int_disable(void)
+{
+
+UINT    previous_posture;
+char   *execbase;
+
+
+    execbase =  _tx_amiga_execbase();
+
+    previous_posture =  (TX_AMIGA_TDNESTCNT_AT(execbase) >= 0)
+                        ? ((UINT) TX_INT_DISABLE) : ((UINT) TX_INT_ENABLE);
+
+    __asm__ __volatile__ ("addq.b #1,%0"
+                          : "+m" (TX_AMIGA_TDNESTCNT_AT(execbase)) : : "cc");
+
+    TX_AMIGA_COUNT(TX_AMIGA_SC_DISABLE);
+
+    return(previous_posture);
+}
+
+/*
+ * Permit() is the decrement plus a decision.  Exec reschedules only when all
+ * three of these hold: the count went below zero (this was the outermost
+ * Forbid), no interrupt is in progress (IDNestCnt < 0), and the attention word
+ * has something in it.  AttnResched is tested first because it is the cheapest
+ * of the three and the one that is nearly always zero -- a clear word proves
+ * Exec's Permit would not have rescheduled, whatever the other two say, so
+ * returning here is exactly what the library call would have done.  When it is
+ * set, _tx_amiga_permit_finish() applies the full test and calls the real
+ * Permit(), so the reschedule path is Exec's own and not a copy of it.
+ *
+ * A word that gets set in the instant after it is read costs a deferred
+ * switch, which is the same race Exec's own Permit has and which the next
+ * Permit(), Enable() or interrupt exit closes.  On this port that is never far
+ * off: the threads block in Wait() constantly, and Wait() always reschedules.
+ *
+ * The 1 MB transfer above took this branch 0 times in 38,853 restores.
+ */
+static __inline__ __attribute__((always_inline)) void _tx_amiga_int_restore(UINT previous_posture)
+{
+
+char   *execbase;
+
+
+    (void) previous_posture;
+
+    TX_AMIGA_COUNT(TX_AMIGA_SC_RESTORE);
+
+    execbase =  _tx_amiga_execbase();
+
+    __asm__ __volatile__ ("subq.b #1,%0"
+                          : "+m" (TX_AMIGA_TDNESTCNT_AT(execbase)) : : "cc");
+
+    if (TX_AMIGA_ATTNRESCHED_AT(execbase) != 0)
+    {
+        _tx_amiga_permit_finish();
+    }
+}
+
 #define TX_INTERRUPT_SAVE_AREA                  UINT tx_saved_posture;
-#define TX_DISABLE                              tx_saved_posture = _tx_thread_interrupt_disable();
-#define TX_RESTORE                              _tx_thread_interrupt_restore(tx_saved_posture);
+#define TX_DISABLE                              tx_saved_posture = _tx_amiga_int_disable();
+#define TX_RESTORE                              _tx_amiga_int_restore(tx_saved_posture);
 
 
 /* Per-object lockout macros.  */

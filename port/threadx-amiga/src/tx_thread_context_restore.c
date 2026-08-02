@@ -54,8 +54,13 @@ VOID _tx_thread_context_restore(VOID)
         if ((_tx_thread_current_ptr == TX_NULL) && (_tx_thread_execute_ptr != TX_NULL))
         {
 
-            /* Idle system, and the tick made something runnable.  */
-            _tx_amiga_wake_scheduler();
+            /* Idle system, and the tick made something runnable.  Dispatch it
+               here; the scheduler Task would only run the same ten lines one
+               Exec context switch later.  */
+            if (_tx_amiga_dispatch_inline() == ((UINT) TX_FALSE))
+            {
+                _tx_amiga_wake_scheduler();
+            }
         }
     }
 

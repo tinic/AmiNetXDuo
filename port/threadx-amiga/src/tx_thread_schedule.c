@@ -68,6 +68,7 @@ TX_THREAD   *thread_ptr;
         {
 
             Permit();
+            TX_AMIGA_COUNT(TX_AMIGA_SC_SCHED_WAIT);
             Wait(_tx_amiga_scheduler_signal);
             Forbid();
         }
@@ -84,6 +85,7 @@ TX_THREAD   *thread_ptr;
         thread_ptr =  _tx_thread_execute_ptr;
 
         /* Pass the baton on.  */
+        TX_AMIGA_COUNT(TX_AMIGA_SC_SCHED_DISPATCH);
         _tx_thread_current_ptr =  thread_ptr;
         thread_ptr -> tx_thread_run_count++;
         _tx_timer_time_slice =  thread_ptr -> tx_thread_time_slice;
@@ -96,6 +98,7 @@ TX_THREAD   *thread_ptr;
         Permit();
 
         /* Sleep until the thread (or the tick) says something changed.  */
+        TX_AMIGA_COUNT(TX_AMIGA_SC_SCHED_WAIT);
         Wait(_tx_amiga_scheduler_signal);
     }
 }

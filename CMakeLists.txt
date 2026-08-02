@@ -156,6 +156,15 @@ if(AMINETXDUO_NXCENSUS)
     add_compile_definitions(AMINETXDUO_NXCENSUS)
 endif()
 
+# Count how often the scheduling primitives are entered.  The PC sampler says
+# where samples land; this says how many calls they landed in, and the two
+# together give a cost per call.  OFF, and free when off -- see the counter
+# block in port/threadx-amiga/inc/tx_port.h.
+option(AMINETXDUO_SCHEDCOUNT "Count the scheduling primitive calls" OFF)
+if(AMINETXDUO_SCHEDCOUNT)
+    add_compile_definitions(AMINETXDUO_SCHEDCOUNT)
+endif()
+
 # Keep the calling task's TX_THREAD between brackets instead of building and
 # deleting one per call.  ON, and the OFF arm is the control: two libraries out
 # of one tree differing in this one decision, which is how the before and after

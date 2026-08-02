@@ -125,6 +125,65 @@ static __inline UINT _tx_amiga_forbidden(VOID)
 
 
 /*
+ * Set by tx_amiga_kernel_stop() once its preconditions are met, and cleared
+ * only when the kernel is fully down again.
+ *
+ *   - _tx_thread_schedule() returns instead of dispatching, which is the only
+ *     way the master Task ever leaves tx_kernel_enter();
+ *   - tx_amiga_adopt_thread() refuses, so nothing new joins a kernel that is
+ *     on its way out.
+ */
+extern volatile UINT    _tx_amiga_kernel_stopping;
+
+/*
+ * Hand the baton straight to the next thread, instead of poking the scheduler
+ * Task and letting it do it.  Must be called with the core lock held and with
+ * the baton already released.  TX_TRUE if a thread was dispatched.
+ *
+ * Every ThreadX handoff used to be three Exec context switches: the yielding
+ * Task signalled the scheduler and blocked, Exec dispatched the scheduler, the
+ * scheduler signalled the target and blocked, Exec dispatched the target.  The
+ * middle two exist only to run the ten lines below, which the yielding Task can
+ * run itself.  A 1 MB transfer took 2634 handoffs and cost 5844 Exec dispatches
+ * (docs/RESEARCH.md 86), and the scheduler Task was 8.1% of it.
+ *
+ * The guard is the scheduler loop's own, so the two cannot both dispatch: both
+ * test _tx_thread_current_ptr under Forbid(), and only one can find it TX_NULL.
+ * A caller that gets TX_FALSE must fall back to _tx_amiga_wake_scheduler(),
+ * because the reason may be a raised _tx_thread_system_state that will clear
+ * later.
+ */
+static __inline UINT _tx_amiga_dispatch_inline(VOID)
+{
+TX_THREAD   *thread_ptr;
+
+
+    thread_ptr =  _tx_thread_execute_ptr;
+
+    if ((thread_ptr == TX_NULL) ||
+        (_tx_thread_current_ptr != TX_NULL) ||
+        (_tx_thread_system_state != ((ULONG) 0)) ||
+        (_tx_amiga_kernel_stopping != TX_FALSE))
+    {
+        return((UINT) TX_FALSE);
+    }
+
+    _tx_thread_current_ptr =  thread_ptr;
+    thread_ptr -> tx_thread_run_count++;
+    _tx_timer_time_slice =  thread_ptr -> tx_thread_time_slice;
+
+    thread_ptr -> tx_thread_amiga_suspension_type =  ((UINT) 0);
+
+    _tx_amiga_signal(thread_ptr -> tx_thread_amiga_task,
+                     thread_ptr -> tx_thread_amiga_run_signal);
+
+    TX_AMIGA_COUNT(TX_AMIGA_SC_DIRECT);
+
+    return((UINT) TX_TRUE);
+}
+
+
+/*
  * Park the calling Exec Task until it holds the ThreadX baton (defined in
  * tx_thread_system_return.c).
  *
@@ -165,17 +224,6 @@ VOID _tx_amiga_timer_clock_advance(ULONG ticks);
 extern volatile UINT    _tx_amiga_kernel_up;
 extern volatile UINT    _tx_amiga_timer_stop;
 extern volatile ULONG   _tx_amiga_zombies;
-
-/*
- * Set by tx_amiga_kernel_stop() once its preconditions are met, and cleared
- * only when the kernel is fully down again.
- *
- *   - _tx_thread_schedule() returns instead of dispatching, which is the only
- *     way the master Task ever leaves tx_kernel_enter();
- *   - tx_amiga_adopt_thread() refuses, so nothing new joins a kernel that is
- *     on its way out.
- */
-extern volatile UINT    _tx_amiga_kernel_stopping;
 
 /*
  * Zombies that have not yet unblocked and destroyed themselves.

@@ -250,6 +250,7 @@ VOID _tx_amiga_wake_scheduler(VOID)
        and Signal have to be one atom, or a poke that arrives in that window
        writes signal bits into freed memory.  */
     Forbid();
+    TX_AMIGA_COUNT(TX_AMIGA_SC_WAKE);
     if (_tx_amiga_scheduler_task != (VOID *) 0)
     {
         Signal((struct Task *) _tx_amiga_scheduler_task, _tx_amiga_scheduler_signal);
@@ -295,6 +296,44 @@ ULONG tx_amiga_zombie_tasks_live(VOID)
 
     return(_tx_amiga_zombies_live);
 }
+
+
+#ifdef AMINETXDUO_SCHEDCOUNT
+
+ULONG   _tx_amiga_sched_count[TX_AMIGA_SC_MAX];
+
+VOID tx_amiga_sched_stats(TX_AMIGA_SCHED_STATS *stats)
+{
+
+    if (stats == (TX_AMIGA_SCHED_STATS *) 0)
+    {
+        return;
+    }
+
+    Forbid();
+
+    stats -> sc_disable        =  _tx_amiga_sched_count[TX_AMIGA_SC_DISABLE];
+    stats -> sc_restore        =  _tx_amiga_sched_count[TX_AMIGA_SC_RESTORE];
+    stats -> sc_permit_slow    =  _tx_amiga_sched_count[TX_AMIGA_SC_PERMIT_SLOW];
+    stats -> sc_mutex_get      =  _tx_amiga_sched_count[TX_AMIGA_SC_MUTEX_GET];
+    stats -> sc_mutex_put      =  _tx_amiga_sched_count[TX_AMIGA_SC_MUTEX_PUT];
+    stats -> sc_sys_return     =  _tx_amiga_sched_count[TX_AMIGA_SC_SYS_RETURN];
+    stats -> sc_wake           =  _tx_amiga_sched_count[TX_AMIGA_SC_WAKE];
+    stats -> sc_sched_dispatch =  _tx_amiga_sched_count[TX_AMIGA_SC_SCHED_DISPATCH];
+    stats -> sc_sched_wait     =  _tx_amiga_sched_count[TX_AMIGA_SC_SCHED_WAIT];
+    stats -> sc_park_wait      =  _tx_amiga_sched_count[TX_AMIGA_SC_PARK_WAIT];
+    stats -> sc_park_spurious  =  _tx_amiga_sched_count[TX_AMIGA_SC_PARK_SPURIOUS];
+    stats -> sc_direct         =  _tx_amiga_sched_count[TX_AMIGA_SC_DIRECT];
+
+    /* Exec's own.  DispCount is what Reschedule/Switch/Dispatch time is
+       charged against, and nothing we could instrument would produce it.  */
+    stats -> sc_exec_dispatch  =  SysBase -> DispCount;
+    stats -> sc_exec_idle      =  SysBase -> IdleCount;
+
+    Permit();
+}
+
+#endif /* AMINETXDUO_SCHEDCOUNT */
 
 
 VOID _tx_initialize_low_level(VOID)
