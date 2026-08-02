@@ -2,9 +2,9 @@
 
 User-visible changes, newest first. Internal work is in the git log.
 
-## Unreleased
+## 0.16.4
 
-- TCP transfers are faster on every machine. A megabyte over the wire on a 68020 went from 234 to 283 KB/s, and over loopback from 610 to 708 KB/s, by taking two costs out of the scheduling underneath the stack rather than out of the protocol: a thread handing work to another thread no longer wakes a third one to do it, and the lock taken around every critical section is no longer a function call. Neither changes what the stack sends
+- TCP transfers are faster. A megabyte over the wire on a 14 MHz 68020 went from 234 to 283 KB/s and over loopback from 610 to 708 KB/s, by taking two costs out of the scheduling underneath the stack rather than out of the protocol: a thread handing work to another thread no longer wakes a third one to do it, and the lock taken around every critical section is no longer a function call. The same work is removed on every processor, but 68020 is where it has been measured. Neither change alters what the stack sends
 - A stream read that the already-received data covers no longer takes the lock the stack uses to enter the network kernel. It reached no network state to need it, and a program that reads in small pieces paid for one on every call
 
 ## 0.16.3
