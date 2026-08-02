@@ -7,9 +7,18 @@
 #   tests/moira/build.sh [<moira checkout>]
 #
 # Produces, in build/moira/:
-#   m68000.bin/.sym, m68020.bin/.sym   the code under test, from the real
-#                                      cross toolchain
-#   moiracal                           the host harness
+#   m68000.exe, m68020.exe             the code under test: src/net68k/'s two
+#   m68000.locals, m68020.locals       primitives plus workload.c, from the real
+#                                      cross toolchain, and the statics the
+#                                      load file's symbol table leaves out
+#   moiracal-musashi                   audit against upstream Moira defaults
+#   moiracal-accurate                  audit with MOIRA_MIMIC_MUSASHI off
+#   moiracal-precise                   audit with precise timing as well
+#   moiraprof                          the cycle-attribution prototype
+#
+# Four Moira variants because the accuracy-relevant settings in MoiraConfig.h
+# are unconditional #defines, so the only way to change one is to patch a copy.
+# What each is for is at the stage() calls below.
 #
 # SPDX-License-Identifier: MIT
 
@@ -26,8 +35,6 @@ moira=${1:-$root/../anxd-moira-lib}
     exit 1
 }
 
-# The cross toolchain, same search order as cmake/toolchain-m68k-amigaos.cmake
-# cares about: whatever is on PATH first, then the local install.
 if ! command -v m68k-amigaos-gcc >/dev/null 2>&1; then
     PATH="$HOME/amigaos/tools/m68k-amigaos-gcc/bin:$PATH"
     export PATH
@@ -53,24 +60,101 @@ for cpu in 68000 68020; do
             "$f" -o "$out/$(basename "$f" .S).$cpu.o"
     done
 
-    m68k-amigaos-ld "$out/kernels.$cpu.o" \
+    m68k-amigaos-gcc -c "-m$cpu" -O2 -g -fomit-frame-pointer \
+        "$here/workload.c" -o "$out/workload.$cpu.o"
+
+    # An AmigaOS load file, which is what the toolchain can actually emit --
+    # there is no ELF target in this binutils (`objdump -i` lists amiga,
+    # a.out-amiga, srec, binary and nothing else).  The harness reads the hunk
+    # stream directly; see hunkload.h.
+    m68k-amigaos-ld -M "$out/kernels.$cpu.o" \
+                    "$out/workload.$cpu.o" \
                     "$out/n68k_copy.$cpu.o" \
                     "$out/n68k_checksum.$cpu.o" \
-                    -o "$out/m$cpu.elf"
+                    -o "$out/m$cpu.exe" > "$out/m$cpu.map"
 
-    m68k-amigaos-objcopy -O binary "$out/m$cpu.elf" "$out/m$cpu.bin"
-    m68k-amigaos-nm "$out/m$cpu.elf" > "$out/m$cpu.sym"
+    # HUNK_SYMBOL carries globals only, and carries no sizes, so a static
+    # function is invisible and its cycles land silently on whichever global
+    # precedes it -- which for a profiler is worse than a gap.  The link map
+    # places each object and nm lists that object's locals; together they
+    # recover the rest.
+    python3 - "$out/m$cpu.map" "$out/m$cpu.locals" <<'PY'
+import re, subprocess, sys
+
+mapfile, outfile = sys.argv[1], sys.argv[2]
+base, rows = {}, []
+
+for line in open(mapfile):
+    m = re.match(r'\s+\.text\s+0x([0-9a-f]+)\s+0x[0-9a-f]+\s+(\S+\.o)\s*$', line)
+    if m:
+        base[m.group(2)] = int(m.group(1), 16)
+
+for obj, off in base.items():
+    nm = subprocess.run(['m68k-amigaos-nm', obj], capture_output=True, text=True).stdout
+    for line in nm.splitlines():
+        f = line.split()
+        if len(f) == 3 and f[1] in 'tdbr':          # lowercase: file-local
+            rows.append((int(f[0], 16) + off, f[2]))
+
+with open(outfile, 'w') as f:
+    for a, n in sorted(rows):
+        f.write('%08x %s\n' % (a, n))
+PY
 done
+
+# --------------------------------------------------------- the Moira variants
+
+stage()                                 # stage <variant> [<sed script>...]
+{
+    d="$out/moira-$1"; shift
+    rm -rf "$d"; mkdir -p "$d"
+    cp "$moira"/Moira/* "$d/"
+
+    for s in "$@"; do
+        sed -i.bak "$s" "$d/MoiraConfig.h"
+    done
+    rm -f "$d/MoiraConfig.h.bak"
+}
+
+# Upstream, untouched.
+stage musashi
+
+# What MoiraConfig.h's own comment recommends: "Set to false for improved
+# accuracy".  On its own this is not enough -- see below.
+stage accurate 's/^#define MOIRA_MIMIC_MUSASHI.*/#define MOIRA_MIMIC_MUSASHI false/'
+
+# The configuration that is actually cycle exact.  With MOIRA_PRECISE_TIMING
+# false, MoiraMacros.h defines SYNC(x) to nothing and every instruction is
+# charged the flat number in its CYCLES_ table -- so the data-dependent cost of
+# MULU, MULS, DIVU and DIVS is computed and then discarded, and a 68000 MULS.W
+# is charged its worst case whatever the operand.  Turning it on restores that
+# and costs nothing here.  It has no effect on a 68020: MoiraConfig.h says so,
+# and the CYCLES_68020 macro is the same in both branches.
+stage precise 's/^#define MOIRA_MIMIC_MUSASHI.*/#define MOIRA_MIMIC_MUSASHI false/' \
+              's/^#define MOIRA_PRECISE_TIMING.*/#define MOIRA_PRECISE_TIMING true/'
+
+# The same, plus the instruction hook.  Upstream restricts willExecute() to
+# STOP, TAS and BKPT; a profiler needs it on every instruction, and that is a
+# recompile of the core, not a runtime switch.
+stage profile 's/^#define MOIRA_MIMIC_MUSASHI.*/#define MOIRA_MIMIC_MUSASHI false/' \
+              's/^#define MOIRA_PRECISE_TIMING.*/#define MOIRA_PRECISE_TIMING true/' \
+              's/^#define MOIRA_WILL_EXECUTE.*/#define MOIRA_WILL_EXECUTE    true/'
 
 # ------------------------------------------------------------------ the harness
 
 : "${CXX:=c++}"
 
-"$CXX" -std=c++20 -O2 -g -o "$out/moiracal" \
-    "$here/moiracal.cpp" \
-    "$moira/Moira/Moira.cpp" \
-    "$moira/Moira/MoiraDebugger.cpp" \
-    -I"$moira/Moira" -I"$moira" -I"$here" \
-    -Wno-unused-parameter -Wno-unused-but-set-variable
+build()                                 # build <exe> <source> <variant>
+{
+    "$CXX" -std=c++20 -O2 -g -o "$out/$1" "$here/$2" \
+        "$out/moira-$3/Moira.cpp" "$out/moira-$3/MoiraDebugger.cpp" \
+        -I"$out/moira-$3" -I"$here" \
+        -Wno-unused-parameter -Wno-unused-but-set-variable
+}
 
-echo "built $out/moiracal"
+build moiracal-musashi  moiracal.cpp  musashi
+build moiracal-accurate moiracal.cpp  accurate
+build moiracal-precise  moiracal.cpp  precise
+build moiraprof         moiraprof.cpp profile
+
+echo "built $out/moiracal-{musashi,accurate,precise} $out/moiraprof"

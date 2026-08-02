@@ -18,13 +18,14 @@
  *
  * Question 3 is answered by construction: the image this loads is
  * src/net68k/n68k_copy.S and n68k_checksum.S assembled by the same
- * m68k-amigaos-gcc the Amiga build uses, linked, and flattened with objcopy.
+ * m68k-amigaos-gcc the Amiga build uses, linked, and loaded through the hunk reader in hunkload.h.
  * See build.sh.
  *
  * SPDX-License-Identifier: MIT
  */
 
 #include "Moira.h"
+#include "hunkload.h"
 
 #include <cstdio>
 #include <cstring>
@@ -84,15 +85,10 @@ public:
     int64_t cycles() const { return clock; }
 };
 
-static Sim               cpu;
-static std::map<std::string, uint32_t> sym;   /* name -> absolute address */
+static Sim         cpu;
+static hunk::Image img;
 
-static uint32_t S(const char *name)
-{
-    auto it = sym.find(name);
-    if (it == sym.end()) { fprintf(stderr, "missing symbol %s\n", name); exit(1); }
-    return it->second;
-}
+static uint32_t S(const char *name) { return img[name]; }
 
 /* --------------------------------------------------------------- measuring -- */
 
@@ -107,6 +103,25 @@ static void seed_default(void)
     for (int i = 0; i < 8; i++) cpu.setD(i, 0x12345678u + uint32_t(i));
     for (int i = 0; i < 6; i++) cpu.setA(i, SCRATCH + uint32_t(i) * 0x400u);
     cpu.setA(6, SCRATCH + 0x4000u);
+}
+
+/* MULU/MULS on a 68000 are data dependent, so the multiplier has to be pinned
+   before the published formula can be checked.  0x00FF is eight one-bits,
+   which makes MULU 38+2*8 = 54; the same word Booth-encodes to two 0-1
+   transitions, which makes MULS 38+2*2 = 42. */
+#define MUL_SRC   0x000000FFu
+
+static void seed_mul(void)
+{
+    seed_default();
+    cpu.setD(1, MUL_SRC);
+}
+
+/* Z set, so a Bcc that tests it is taken. */
+static void seed_zset(void)
+{
+    seed_default();
+    cpu.setCCR(uint8_t(cpu.getCCR() | 0x04));
 }
 
 /*
@@ -220,14 +235,16 @@ static void suite_registers(bool is020)
     row("MOVE.W Dn,Dm",  S("_k_move_w"),  is020 ?  2 :  4);
     row("ADDX.L Dn,Dm",  S("_k_addx_l"),  is020 ?  2 :  8);
     row("MOVEQ  #0,Dn",  S("_k_moveq"),   is020 ?  2 :  4);
-    row("LSL.L  #2,Dn",  S("_k_lsl_l"),   is020 ?  4 : 10);
+    /* LSL.L #n,Dm is 8+2n on a 68000; n is 2 here.  The 68020 charges a flat
+       4 for a shift by an immediate count. */
+    row("LSL.L  #2,Dn",  S("_k_lsl_l"),   is020 ?  4 : 12);
     row("NOP",           S("_k_nop"),     is020 ?  2 :  4);
 
     /* MULU.W is data dependent on a 68000 (38 + 2n, n = ones in the source);
-       the 68020 is a flat 27.  Seed a known multiplier so the 68000 figure is
-       checkable rather than whatever the default seed happened to be. */
-    row("MULU.W Dn,Dm",  S("_k_mulu_w"),  is020 ? 27 : -1);
-    row("MULS.W Dn,Dm",  S("_k_muls_w"),  is020 ? 27 : -1);
+       MULS.W is 38 + 2n over the Booth-encoded source.  The 68020 is a flat
+       27 for both.  seed_mul pins the multiplier so both are checkable. */
+    row("MULU.W Dn,Dm",  S("_k_mulu_w"),  is020 ? 27 : 54, seed_mul);
+    row("MULS.W Dn,Dm",  S("_k_muls_w"),  is020 ? 27 : 42, seed_mul);
 }
 
 static void suite_memory(bool is020)
@@ -271,9 +288,16 @@ static void suite_branches(bool is020)
 {
     printf("\n-- control flow -------------------------------------------------\n");
 
-    row("BRA (taken, short)",  S("_k_bra"),       is020 ?  6 : 10);
-    row("Bcc (taken, short)",  S("_k_bcc_taken"), is020 ?  6 : 10);
-    row("JSR (xxx).L",         S("_k_jsr_abs"),   is020 ?  7 : 20);
+    /*
+     * The assembler emitted the word-displacement forms of BRA and Bcc (the
+     * targets are the following instruction, so the byte displacement would be
+     * zero, which is the escape to the word form), and a PC-relative JSR.  The
+     * published figures below are for those encodings, not the absolute ones.
+     */
+    row("BRA.W (taken)",       S("_k_bra"),       is020 ?  6 : 10);
+    row("Bcc.W (taken)",       S("_k_bcc_taken"), is020 ?  6 : 10, seed_zset);
+    row("Bcc.W (not taken)",   S("_k_bcc_taken"), is020 ?  6 : 12);
+    row("JSR (d16,PC)",        S("_k_jsr_abs"),   is020 ?  7 : 18);
     row("RTS",                 S("_k_rts"),       is020 ?  9 : 16);
 
     /* DBcc with the counter non-zero: 68000 charges 10, 68020 charges 6. */
@@ -413,27 +437,17 @@ static void suite_determinism(void)
 
 /* --------------------------------------------------------------------- main -- */
 
-static void load_image(const std::string &bin, const std::string &symfile)
+static void load_image(const std::string &path)
 {
-    std::ifstream f(bin, std::ios::binary);
-    if (!f) { fprintf(stderr, "cannot open %s\n", bin.c_str()); exit(1); }
+    img = hunk::load(path, CODE_BASE,
+                     [](uint32_t a, uint8_t v) { cpu.write8(a, v); },
+                     [](uint32_t a) { return cpu.read8(a); });
 
-    std::string data((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-    memcpy(cpu.ram + CODE_BASE, data.data(), data.size());
+    for (size_t i = 0; i < img.seg.size(); i++)
+        printf("  segment %zu: %u bytes at %08x%s\n", i, img.seg[i].size,
+               img.seg[i].base, img.seg[i].code ? " (code)" : "");
+    printf("  %zu symbols\n", img.sym.size());
 
-    printf("  image %s: %zu bytes at %08x\n", bin.c_str(), data.size(), CODE_BASE);
-
-    std::ifstream s(symfile);
-    if (!s) { fprintf(stderr, "cannot open %s\n", symfile.c_str()); exit(1); }
-
-    std::string line;
-    while (std::getline(s, line)) {
-
-        std::istringstream is(line);
-        std::string addr, type, name;
-        if (!(is >> addr >> type >> name)) continue;
-        sym[name] = CODE_BASE + uint32_t(strtoul(addr.c_str(), nullptr, 16));
-    }
 
     /* Fill the scratch area with something that is not all zeroes, so a
        checksum that reads past its buffer would show up as a wrong answer. */
@@ -442,19 +456,19 @@ static void load_image(const std::string &bin, const std::string &symfile)
 
 int main(int argc, char **argv)
 {
-    if (argc < 4) {
-        fprintf(stderr, "usage: %s <image.bin> <image.sym> <68000|68020>\n", argv[0]);
+    if (argc < 3) {
+        fprintf(stderr, "usage: %s <image.exe> <68000|68020>\n", argv[0]);
         return 2;
     }
 
-    bool is020 = (std::string(argv[3]) == "68020");
+    bool is020 = (std::string(argv[2]) == "68020");
 
     printf("AmiNetXDuo -- Moira cycle-timing audit\n");
     printf("=====================================\n\n");
     printf("  model: %s\n", is020 ? "M68020" : "M68000");
 
     cpu.setModel(is020 ? Model::M68020 : Model::M68000);
-    load_image(argv[1], argv[2]);
+    load_image(argv[1]);
 
     suite_registers(is020);
     suite_memory(is020);
