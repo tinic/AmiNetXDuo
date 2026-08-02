@@ -15,10 +15,10 @@
 |       ...
 |
 | Eight instructions per seven longwords rather than sixteen per eight.  Not
-| the movem experiment docs/BACKLOG.md records as worthless -- that one still
-| ran add.l/addx.l on each loaded register, 19 instructions per 32 bytes
-| against 18, and measured the same.  movem.l pays only when what it feeds
-| needs one instruction per longword.
+| the earlier movem experiment that bought nothing -- that one still ran
+| add.l/addx.l on each loaded register, 19 instructions per 32 bytes against
+| 18, and measured 201.27 against 201.39.  movem.l pays only when what it feeds
+| needs one instruction per longword, not two.
 |
 | Nothing between two addx may disturb X.  movem, cmpa, lea, movea, adda, suba,
 | moveq and the branches leave it alone; add, sub, the shifts and addx do not.

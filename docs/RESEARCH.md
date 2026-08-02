@@ -21630,6 +21630,7 @@ that covers nothing is worse than no sweep, because it passes. It now runs to
 8184-byte case was at 1 mod 4 once its head bytes were gone; a second one at
 2 mod 4 with an aligned destination joins it, so the alignment the drivers
 actually produce is checked at length as well as in the sweep.
+
 ## 87. The checksum's carry, riding the X flag (2026-08-02)
 
 `n68k_sum_longwords()` was two instructions per longword and had been since it

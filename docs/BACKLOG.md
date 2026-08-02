@@ -128,7 +128,12 @@ empty results.
 
   What it is worth, where it fires: `n68k_copy_sum_longwords()` copies and sums
   in one pass, 177.21 + 201.35 = 378.56 ns/B separate against 256.00 melded --
-  32.4% off the pair on a 68020. Wired into the receive path behind
+  32.4% off the pair on a 68020.  Both halves have since moved and the melded
+  routine has not: the copy is 159 (RESEARCH.md 86) and the checksum 149.8
+  (RESEARCH.md 87), so the pair is ~309 against 256 and the margin is 17%, not
+  32%.  Reviving this means rewriting the melded loop around movem.l and the
+  chained addx first, or the comparison is against primitives that no longer
+  exist. Wired into the receive path behind
   `AMINETXDUO_RX_COPY_SUM` (default OFF) the whole receive pair went 389.33 ->
   312.92, about 20%; the stamp write, prefix subtraction and acceptance checks
   eat roughly a third of the primitive's gain.
