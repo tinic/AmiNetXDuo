@@ -10,7 +10,7 @@
 #   0.16.6 shipped a read-throughput regression that our own lab rig measured
 #   as an improvement.  Two things let that through: nothing timed the CPU path
 #   on the slowest machine we support, and nothing tested a link that loses
-#   packets.  This is the first of those; -a loss is the second.
+#   packets.  This is the first of those; run-lossgate.sh is the second.
 #
 # WHAT IT MEASURES, AND ON WHAT
 #
@@ -32,10 +32,13 @@
 #
 # WHAT IT IS NOT
 #
-#   There is no network here and no packet loss, so this axis cannot see a
-#   change in retransmission or acknowledgement behaviour -- which is what
-#   0.16.6 actually got wrong.  It sees work added to the copy, checksum and
-#   packet-plumbing paths.  The loss axis is a separate arm and needs a peer.
+#   There is no wire here and no induced loss.  It turns out that is not the
+#   limitation it looks like: perf_test's receive-window sweep runs the real
+#   TCP over a simulated driver, and 0.16.6's change to acknowledgement
+#   behaviour shows up there as 6 KB/s and 29 retransmissions where 0.16.4
+#   had 319 and one.  What it still cannot see is anything that only appears
+#   with a real driver, a real peer and a real loss rate; run-lossgate.sh is
+#   for that, and it needs a machine to serve.
 #
 #   It is also not the user's machine.  14 MHz is an accelerator
 #   configuration, the Fast RAM path is not that card's, and the SANA-II
@@ -55,14 +58,14 @@
 #
 # COST
 #
-#   One rep is about 100 seconds of wall clock: 18 s for the calibration guard
-#   and 85 s for perf_test, both at emulated speed with warp off, because a
+#   79 seconds of wall clock for -r 1 on FS-UAE, measured: the calibration
+#   guard and one perf_test, both at emulated speed with warp off, because a
 #   cycle count is only worth having when nothing is skipping cycles.
 #
 #   Two boots of the same binary on this profile agree to within 0.01% on
 #   every cycle-level row, so one rep is enough per commit.  Use -r 3 when
 #   recording a baseline, so the tolerances come from a spread rather than
-#   from a single number.
+#   from a single number; that costs about four minutes.
 #
 # SPDX-License-Identifier: MIT
 
