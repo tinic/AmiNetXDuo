@@ -175,6 +175,15 @@ VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
 VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count);
 
 /*
+ * The part of the host-name chain that runs on files already read: an
+ * interface file's ID=, then the first line of ENV:HOSTNAME (which may be
+ * NULL, and is modified in place). DEVS:Internet/name_resolution has already
+ * had its turn and DHCP option 12 gets one later; both go through
+ * ami_config_hostname_offer(), which enforces the ranking.
+ */
+VOID ami_cfg_hostname_from_files(AmiConfig *cfg, char *env_text);
+
+/*
  * Parse DEVS:Internet/default_gateway (DEVICE/UNIT/GATEWAY) or
  * DEVS:Internet/routes (DEFAULT=/DEFAULTGATEWAY=, plus DST/VIA lines we skip).
  * Sets *out only when a default gateway is found.

@@ -8,6 +8,7 @@ add_library(aminetxduo_config STATIC
     config_text.c
     config_text6.c
     config_parse.c
+    config_hostname.c
     netdb.c
     config_file.c)
 
@@ -50,7 +51,7 @@ target_compile_options(aminetxduo_config PRIVATE -fno-optimize-sibling-calls)
 #   cc -std=c99 -Wall -Wextra -Iinclude -Isrc/config/test/shim \
 #      src/config/test/test_config.c src/config/config_text.c \
 #      src/config/config_text6.c src/config/config_parse.c \
-#      src/config/netdb.c -o test_config
+#      src/config/config_hostname.c src/config/netdb.c -o test_config
 
 if(NOT CMAKE_CROSSCOMPILING)
     add_executable(test_config
@@ -58,6 +59,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         config_text.c
         config_text6.c
         config_parse.c
+        config_hostname.c
         netdb.c)
 
     target_include_directories(test_config PRIVATE

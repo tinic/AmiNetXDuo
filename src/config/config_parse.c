@@ -39,6 +39,7 @@ typedef enum
     IF_KEY_UNKNOWN = 0,
     IF_KEY_IGNORED,          /* real Roadshow keyword with no AmiIfConfig field */
     IF_KEY_DEVICE,
+    IF_KEY_ID,
     IF_KEY_UNIT,
     IF_KEY_ADDRESS,
     IF_KEY_NETMASK,
@@ -61,6 +62,7 @@ ami_if_keywords[] =
 {
     /* Keywords that map onto AmiIfConfig. */
     { "device",             IF_KEY_DEVICE    },
+    { "id",                 IF_KEY_ID        },
     { "unit",               IF_KEY_UNIT      },
     { "address",            IF_KEY_ADDRESS   },
     { "ipaddress",          IF_KEY_ADDRESS   },   /* AmiTCP spelling */
@@ -120,7 +122,6 @@ ami_if_keywords[] =
     { "destinationaddr",    IF_KEY_IGNORED   },
     { "metric",             IF_KEY_IGNORED   },
     { "lease",              IF_KEY_IGNORED   },
-    { "id",                 IF_KEY_IGNORED   },
     { "dhcpunicast",        IF_KEY_IGNORED   },
     { "linkstatuscommand",  IF_KEY_IGNORED   },
     { "priority",           IF_KEY_IGNORED   },
@@ -504,6 +505,17 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 }
                 ami_cfg_copy_string(out->device, sizeof(out->device), value);
                 have_device = TRUE;
+                break;
+
+            /*
+             * Roadshow's ID= is a free-text label for the interface and has no
+             * IP meaning, which is why it was ignored. It is kept now because
+             * ami_config_load() will name the machine after it when nothing
+             * more deliberate did -- see AmiHostnameSource. Stored verbatim;
+             * whether it is usable as a host name is decided there.
+             */
+            case IF_KEY_ID:
+                ami_cfg_copy_string(out->id, sizeof(out->id), value);
                 break;
 
             case IF_KEY_UNIT:
