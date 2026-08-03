@@ -212,11 +212,17 @@ static VOID ns_writer_finish(NsWriter *w)
 
 static VOID ns_fill_system(NX_IP *ip, NetStatusSystem *out)
 {
-    NX_PACKET_POOL *pool;
-    ULONG           gateway = 0;
+    NX_PACKET_POOL  *pool;
+    const AmiConfig *cfg     = netstack_config();
+    ULONG            gateway = 0;
 
     out->nss_Flags          = NETSTATUS_SYS_UP;
     out->nss_InterfaceCount = (ULONG)NX_MAX_PHYSICAL_INTERFACES;
+
+    /* The running stack's, not the disk's: DHCP may have renamed the machine
+       since the files were read. */
+    if (cfg != NULL)
+        out->nss_HostSource = (ULONG)cfg->hostname_source;
 
 #ifdef AMINETXDUO_IPV6
     out->nss_Flags |= NETSTATUS_SYS_IPV6;
