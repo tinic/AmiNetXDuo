@@ -241,6 +241,26 @@ Recorded here because an audit that only adds findings is not calibrated.
   classic Lucky13.
 - RFC 6582 NewReno **is** implemented.
 
+## Citations this document got wrong
+
+Corrected on 2026-08-02 by the work that implemented them, which is the only
+review that reliably catches a misattributed section number.
+
+- `getnameinfo` is RFC 3493 **§6.2**, not §6.4 — §6.4 is the address-testing
+  macros. Both quoted sentences were verbatim correct; only the number was not.
+- URI reference resolution is RFC 3986 **§5.2.2** (Transform References).
+  §5.3 is Component Recomposition. §5.2.4 was right.
+- "the fragment is not sent" is RFC 9110 **§7.1** — "The target URI excludes the
+  reference's fragment component". RFC 3986 §3.5 is descriptive, not a MUST NOT.
+- The Host-with-port obligation is RFC 9112 **§3.2**. RFC 9110 §7.2 gives the
+  ABNF but its MUST covers only generating the field.
+
+And one framing correction: `fetch` sends `HTTP/1.0`, and RFC 9110 §15.2 says a
+server **MUST NOT** send a 1xx to an HTTP/1.0 client — so a conforming CDN will
+not send `103` to it. The client-side obligation to parse and discard interim
+responses is unconditional, so the fix stands, but the exposure was smaller than
+"live on major CDNs" implied.
+
 ## Traps for whoever works on this next
 
 - **Adding a DNS bailiwick check without CNAME chain following will break every
