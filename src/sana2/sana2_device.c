@@ -615,6 +615,25 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         return NULL;
     }
 
+    /*
+     * MTU= from the interface configuration, applied where the tag list path
+     * applies IFC_LimitMTU: after the driver has been asked, and downwards
+     * only.  What S2_DEVICEQUERY reports is what the hardware can carry, so a
+     * larger number in the file is a mistake rather than a request.
+     */
+    if (cfg->mtu != 0)
+    {
+        if (cfg->mtu < iface->mtu)
+        {
+            iface->mtu = cfg->mtu;
+        }
+        else if (cfg->mtu > iface->mtu)
+        {
+            AMI_WARN("sana2: MTU %ld exceeds what %s reported (%ld), ignored",
+                     (long)cfg->mtu, iface->device, (long)iface->mtu);
+        }
+    }
+
     if (ami_sana2_configure(iface) != 0)
     {
         ami_sana2_close(iface);
