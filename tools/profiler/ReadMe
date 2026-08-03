@@ -27,6 +27,8 @@ Anything the CPU executes while the program runs, wherever it is:
     is named as exec.library/Forbid rather than as an address in ROM.
   * Shared libraries and devices, including ones loaded from disk while the
     program runs and ones with no symbols at all -- those are named by module.
+  * Inside a shared library, by function, if the library cooperates.  See
+    SEEING INSIDE A SHARED LIBRARY below; without it a library is one bar.
   * Interrupt handlers, including the SANA-II driver's receive path: sampling
     is at level 4, which can interrupt a level-2 or level-3 handler.
   * Any number of tasks and processes at once.  Each sample records which task
@@ -123,6 +125,55 @@ the machine that built the program.  It recovers file-static functions too, by
 walking the linker map for where each object landed and running nm on that
 object -- without that, every sample in a static lands silently on the
 preceding global.
+
+    profreport.py fitz.prof --ndk <NDK include dir> \
+        --lib exe=<the library file>,map=<its map>,objdir=<its objects>
+
+names functions inside a shared library as well, for a library that
+cooperates.  --lib is repeatable and each one is checked the same way the
+executable is: if the file's hunk sizes are not the ones the run recorded, it
+says so and that library stays named by module rather than resolving every
+address in it to a wrong name out of somebody else's build.
+
+
+SEEING INSIDE A SHARED LIBRARY
+------------------------------
+
+A profile of a real application spends most of its time in libraries, and
+naming that time needs the same two things the program itself needs: where the
+hunks landed, and the symbols.
+
+The symbols are the library's own file, which is what --lib takes.  Where the
+hunks landed is the problem.  A library base is a private struct -- Exec
+publishes struct Library at the front and nothing after it -- so the seglist,
+which every library has because Expunge must return it, sits at an offset only
+that library's own source knows.  Reading it from a hard-coded number would be
+this tool asserting a layout it cannot check, and the first field anybody
+inserted would move it silently: the walk would still find eight bytes shaped
+like a segment header, still produce hunk bases, and still resolve every
+address in the library to a wrong and entirely plausible name.
+
+So the library says where it is, in a record that identifies itself.  Five
+longwords anywhere in its own positive half, at any word boundary -- a magic,
+its own size, the base it is embedded in, the seglist, and a sum that makes the
+five add to zero.  (Any WORD boundary: a longword on m68k is aligned to two
+bytes, so a record of longwords is four-aligned only by luck, and scanning in
+steps of four finds nothing and looks exactly like a library carrying no tag.)
+Profile scans for it, refuses one whose base is not the base it was found in
+(which is what rejects a copy that has been moved, such as a cloned library
+base), and then checks the seglist it was given against something it already
+knew: the hull of that library's own jump-table targets must lie inside the
+hunks the walk produced.  A seglist that fails that is discarded.
+
+struct ProfSegTag in prof.h is the whole convention.  A library adopting it
+needs no header from here: declare five longwords, fill them in at init, and
+if the base is ever cloned fix up the base field and the sum in the clone.
+
+A LIBRARY THAT DOES NOT CARRY ONE IS STILL NAMED, by module, from the hull of
+its jump-table targets -- which is what it has always been and what every
+third-party library will be.  The difference is a bar labelled with the
+library's name against a list of its functions.
+
 
 Two exports, for viewers that already exist:
 
