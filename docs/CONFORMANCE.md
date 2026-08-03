@@ -1,280 +1,179 @@
 # Standards conformance
 
-What this stack is measured against, where it stands, and what has been
-declined on purpose. Five parallel surveys, 2026-08-02, one per layer, each
-reading the source against the RFC text rather than against our own comments.
+Status against the RFCs that apply. Work items are in `BACKLOG.md`.
 
-The work list lives in `BACKLOG.md`. This file is the map: what applies, what
-the status is, and — the part a defect-driven process never produces — **what
-was looked at and found fine**, so the next person knows where not to look.
+Surveyed 2026-08-02 against current documents: TCP against 9293, HTTP against
+9110-9112, MLD against 9777, temporary addresses against 8981.
 
-## How to read it
+Obligation levels are quoted from the cited text, not paraphrased. "Absent"
+means a search was run. Upstream = vendored NetX Duo (fixes go to the fork);
+ours = `src/`, `port/`, `include/`.
 
-**Status** is one of implemented, partial, absent, or N/A. Every "absent" here
-came from a search that was actually run, not from an inference. **Obligation**
-is the level in the cited text, and it is quoted rather than paraphrased,
-because MUST and SHOULD carry different arguments and summaries blur them.
+## Violations
 
-**N/A is stated with a reason**, never by omission. A survey that silently drops
-what does not apply is indistinguishable from one that missed it.
+| RFC | Requirement | Cite | Effect |
+|---|---|---|---|
+| 8201 §1 | Node not implementing PMTUD must cap sends at 1280 | `nx_user.h:651-661`; PTB not dispatched, `nx_icmpv6_packet_process.c:210-216`; MTU set from device, `sana2_device.c:183-201` | PMTUD off **and** no 1280 cap. Any IPv6 path narrower than the link is a black hole. Enable PMTUD or cap at 1280 |
+| 1122 §3.3.2 / 8504 §5.1 | MUST reassemble; EMTU_R ≥ 576 | `nx_ip_fragment_enable()` never called; drops at `nx_ipv4_packet_receive.c:640`, `nx_ipv6_process_fragment_option.c:95-99` | Inbound fragments dropped, both families |
+| 1122 §3.2.2.1, §4.1.3.3 | ICMP errors MUST reach transport / application | `nx_icmpv4_packet_process.c:143-171` handles echo only | Connected UDP to a closed port blocks to timeout instead of `ECONNREFUSED`. No IPv4 PMTUD input |
+| 9777 §6 | MLD reports MUST be sent for scope ≥ 2 | `nx_mld.h` is a 48-line stub; joins set a MAC filter only, `nx_ipv6_multicast_join.c:79-95` | Solicited-node groups are scope 2. Behind a snooping switch with an active querier, ND fails |
+| 1122 §4.2.3.5 (MUST-23) | R2 for SYN ≥ 3 minutes | `nx_user.h:201,204` → ladder 1+2+4+…+64 = 127 s | 127 s < 180 s. Fix is `NX_TCP_MAXIMUM_RETRIES 7` → 255 s, at the cost of `connect()` blocking that long |
+| 5961 §3, §4 | Challenge ACK required for in-window RST and SYN | `nx_tcp_socket_packet_process.c:234-248`, `:257-271`; RST at any sequence accepted when `RCV.WND==0` at `:165-167` | One in-window guess resets an established connection |
+| 1122 §4.2.3.10 (MUST-57) | SYN to broadcast/multicast MUST be discarded | `nx_ipv4_packet_receive.c:529-550` → `nx_ip_dispatch_process.c:459-476`; only source is checked, `nx_tcp_packet_process.c:517-542` | Broadcast SYN answered. Composes with one half-open slot per listener (`socket.c:1729-1730`), pinning a port for 127 s |
+| 1122 §4.2.3.4 (MUST-38) | Sender SWS avoidance | `nx_tcp_socket_send_internal.c:455-470`, no minimum-usable-window gate | Tinygrams to a peer dribbling its window open. Nagle also absent |
+| 1122 §4.1.3.5 | UDP demux MUST match the 4-tuple | `nx_udp_packet_receive.c:247` compares port only; no local-address field in `NX_UDP_SOCKET` | A `connect()`ed UDP socket accepts datagrams from any peer |
+| 5452 §9.1 | Response MUST match 6 attributes | ID `nxd_dns.c:4306`; source never checked; question check gated on `QDCOUNT==1` at `:4497` | QDCOUNT=0 skips name, type and class. No source validation |
+| 2181 §5.4.1 | AUTHORITY data must not be returned as answers | `nxd_dns.c:4803-4805`, cached under the RR's own owner at `:4866` | One response inserts an A record for a name never queried |
+| 2181 §8 | TTL with the top bit set treated as zero | `nxd_dns.c:8102` stores raw 32-bit | ~68-year cache entry. Second route: tick-division at `:9117`, `:9137` |
+| 2131 §4.4.1 / 5227 §2.1 | ARP probe before use; DHCPDECLINE on conflict | `NX_DHCP_CLIENT_SEND_ARP_PROBE` defined nowhere; test phase `#ifdef`'d out | Duplicate address taken silently. Upstream code exists behind one define |
+| 6762 §3 | `.local` MUST go to 224.0.0.251 | guard at `netstack_dns.c:244-258` is IPv4 only; `netstack_resolve6()` at `:401-446` has none, and `addrinfo.c:476` calls it first | `.local` leaks to the unicast resolver in the default build |
+| 6762 §4 | `254.169.in-addr.arpa.` MUST go to mDNS | `netstack_dns.c:367-398` sends all reverse to unicast | Link-local reverse lookups leak. Fix is an immediate negative; vendored mDNS has no address→name API |
+| 8504 §6.6 / 6724 §5 | RFC 6724 source selection MUST be implemented | `nxd_ipv6_interface_find.c:73-300` is a first-match walk | No candidate set, no policy table, none of Rules 1/2/3/6/7/8 |
+| 4862 §5.5.3 | A-bit governs address formation | `nx_icmpv6_process_ra.c:310` opens on the L-bit; A-test at `:332` is nested inside | Prefix advertised A=1 L=0 forms no address |
+| 7559 / 8504 §5.4 | RS retransmission MUST use exponential backoff | fixed 4 s, stop after 3: `nxd_ipv6_router_solicitation_check.c:86-107` | Boot before the router → no global address until the next unsolicited RA |
+| 5280 §4.2 | Unrecognized critical extension MUST be rejected | flag written `nx_secure_x509_extension_find.c:191`, read nowhere; lookup is by OID, never an enumeration | nameConstraints and any other critical extension silently ignored |
+| 6125 §6.4.4 | MUST NOT match CN when a DNS-ID is present | `nx_secure_x509_common_name_dns_check.c:92-97` compares CN first and returns | Cert whose CN matches and SAN does not is accepted |
+| 5280 §6.1.3 | Revocation | no call to the CRL code that exists | Stolen key usable indefinitely |
+| 8017 §8.2.2 | PKCS#1 v1.5 verify re-encodes and compares the whole EM | `nx_secure_x509_pkcs7_decode.c:104` checks byte 1 only; `:113-121` accepts any nonzero padding; `:187-197` ignores trailing data; OID discarded by the caller | Bleichenbacher'06 shape. No small-exponent root in the shipped bundle (79 of 80 RSA roots use e=65537), so no target on the public web |
+| 5246 §6.2.3.2 | CBC IV MUST be unpredictable | `nx_secure_tls_record_payload_encrypt.c:186-188`, `:626-629`; our copy `src/tls/rfc7905/…:301-304`, `:691` | Previous ciphertext block reused. BEAST precondition |
+| 9325 §4.5 | SHA-1/MD5 MUST NOT be used for signatures | `src/tls/ami_tls_crypto.c:1538-1540`, walked onto the wire at `nx_secure_tls_send_clienthello_extensions.c:341-345` | `0x0201/0x0203/0x0101` advertised; MD5-signed cert accepted. Ours, three lines |
+| 7627 / 9325 §3.5 | Extended master secret MUST be supported | absent | Sharper here because we resume: `tls_resume.c` restores a secret never bound to a transcript |
+| 5280 §6.1 | Path termination | `nx_secure_x509_certificate_chain_verify.c:86-160`, no counter, no visited set | Two cross-signed certs → unbounded loop, one signature verification per pass. Reasoned from code, not executed |
+| 3542 §3.1 | `IPV6_CHECKSUM` on a non-raw socket must fail | fixed 2026-08-02, `4d073c4` | was: collided with `IPV6_V6ONLY_LINUX` at 26 |
+| 3493 §5.2 | `0 ≤ x ≤ 255` uses x | fixed 2026-08-02, `4d073c4` | was: `IPV6_MULTICAST_HOPS 0` coerced to 1 and sent |
+| 9110 §15.2 | Client must parse and discard 1xx | fixed 2026-08-02, `4d073c4` | was: interim response taken as final. Note `fetch` sends HTTP/1.0, which a conforming server must not send 1xx to |
+| 3986 §5.2.2 | Relative reference resolution | fixed 2026-08-02, `4d073c4` | was: relative `Location` parsed as absolute |
 
-**Upstream vs ours** is tracked throughout. Vendored NetX Duo behaviour is an
-upstream contribution; ours is local work. Seven fork branches exist, so the
-split is directly actionable rather than academic.
+## Accepted and ignored
 
-Use the current document. Where an RFC has been obsoleted the survey went
-against the replacement — TCP against **9293** not 793, HTTP against
-**9110-9112** not 723x, MLD against **9777** not 3810, temporary addresses
-against **8981** not 4941.
+A caller cannot detect these. Ranked above plain absences for that reason.
 
-## Where the stack stands, by layer
+| Interface | Behaviour | Cite |
+|---|---|---|
+| `SBTC_FDCALLBACK` | stored, never invoked | `errno.c:386`, `library.c:281` |
+| `SBTC_SIG_ADDRESS_CHANGE_MASK` | stored, never signalled | `bsdsocket_internal.h:441-444` |
+| `SBTC_CAN_SHARE_LIBRARY_BASES` | never written, never read | `library.c:270` |
+| `SO_REUSEADDR/REUSEPORT/BROADCAST/OOBINLINE/SNDBUF` | success, no effect | `options.c:105-122`, `:148-189` |
+| `SO_RCVBUF` on TCP | calls a function compiled out without `NX_ENABLE_LOW_WATERMARK`; status discarded | `options.c:171-178` |
+| `TCP_NODELAY` | success before checking `optval`/`optlen`/type; succeeds on UDP | `options.c:221-223` |
+| `IPV6_UNICAST_HOPS`, `IPV6_TCLASS`, `IP_TOS` on TCP and UDP | stored, echoed, applied on raw only | `in6.c:279-308`, `raw.c:559`, `socket.c:1354`, `:1366` |
+| `IP_TTL` = 256 | succeeds, reads back 256, puts 0 on the wire | `options.c:139-145`; IPv6 siblings are range-checked |
+| `SO_ERROR` | zeroed before a copy-out that can fail | `options.c:161-162` |
+| multicast `optlen` 2 | not handled; big-endian reads the high byte | `mcast.c:313-338` |
+| `SO_LINGER` negative | infinite tick count, `CloseSocket()` blocks forever | `options.c:254-276` |
+| `IPV6_DSTOPTS` (BSD 50) | taken as `IPV6_PKTINFO`; reads `struct in6_pktinfo` from the caller's buffer | `cmsg.c` Linux aliases 49/50/51 collide with `IPV6_HOPOPTS`/`DSTOPTS`/`RTHDR`. Unfixed |
+| `DAV: 1,2` | class claim; §18.1 needs all Class 1 MUSTs (PROPFIND body gap) and §18.2 needs §6-§10 (LOCK on unmapped URL, Depth-0 collection) | `httpd.c:3132`, `:3219`. Advertising `DAV: 1` is honest but Finder reads it as read-only |
 
-### Link and IPv4
+Refused rather than ignored, which is correct: unknown ancillary types
+(`cmsg.c:545-550`), RFC 3542 extension-header options (`in6.c:310`), out-of-mask
+`ai_flags` (`addrinfo.c:319`), sticky `IPV6_HOPLIMIT` (`cmsg.c:885-887`),
+`ICMP6_FILTER` on a non-ICMPv6 socket (`cmsg.c:805-807`).
 
-Solid: ARP including the RFC 5227 §2.4 defence, martian-source filtering,
-RFC 894 encapsulation, the ICMP echo server with broadcast echo correctly
-discarded, IGMPv2 in full — Router Alert, TTL 1, report suppression, Leave.
+## Claims in our own text that the code does not meet
 
-Missing and it matters: **no fragment reassembly** (RFC 1122 §3.3.2 MUST,
-EMTU_R ≥ 576), and **inbound ICMP errors reach nothing** — the dispatcher
-handles echo request and echo reply and releases the rest, so RFC 1122 §3.2.2.1
-and §4.1.3.3 are both plainly violated. A connected UDP socket to a closed port
-blocks for its full timeout where BSD returns `ECONNREFUSED` at once.
+| Location | Claim | Reality |
+|---|---|---|
+| `netstack_ipv6.c:565-568`, `raw.c:455-456`, `options.c:613-614` | "RFC 6724 selection routine" | first-match walk, one on-link test, `break` |
+| `nx_user.h:636-645` | MLD unnecessary because link-local groups are "never forwarded" | snooping *filters*; RFC 9777 §6 requires reports for scope ≥ 2 |
+| `nx_user.h:176-183` | ladder satisfies R2 | quotes the 100 s data rule, notes SYN uses the same counter, stops. MUST-23 is 180 s |
+| `include/aminetxduo/in6.h:90-92` | "there are no raw IPv6 sockets here" | corrected `4d073c4` |
+| `README.md:157-158` | certificates "properly checked" | no revocation, no critical-extension rejection, no EKU, no nameConstraints, RSA-MD5 in the table |
+| `ami_random.c:566-590` | clock credit conditional on the seconds field being wall time | guard tests non-zero; on a no-RTC machine uptime is non-zero a second after boot, so 8 bits are credited in the case the comment excludes |
+| `netstack_dns.c:228` | RFC 6762 §6.7 | §6.7 is Legacy Unicast Responses; the rule is §3 |
+| `nx_user.h:307` | "no SACK in the vendored tree" | receive side landed 2026-08-02 |
+| `nx_user.h:503-505` | honours the server's TTL | not under repeated lookup; no sign-bit rule |
+| `sntp.c:59` | all RFC 4330 §5 checks present | §5 check 5 (root delay/dispersion) absent |
+| `tls_conn.c:717-721` | declines to defend against truncation | the `CLOSE_NOTIFY_RECEIVED` arm is unreachable in a non-DTLS build, so the cases cannot be told apart |
 
-Declined with reasons: IP source routing (RFC 7126/BCP 186 makes dropping it
-the current recommendation), ICMP Redirect (a classic MITM vector; ignoring it
-is the modern default), RFC 1042/802.3 receive (senders are extinct), IGMPv3.
+## Declined, with cost
 
-### IPv6
+| Item | Reason |
+|---|---|
+| TLS 1.3 | nx_secure's 1.3 defines only AES-GCM. GHASH on 68k is bit-serial GF(2^128): **344.6 ms/KB vs CBC 21.9** (~2.9 KB/s). Precondition: add a ChaCha20 suite to the vendored 1.3 tables |
+| AES-GCM in TLS 1.2 | same cost; no server takes GCM but neither ChaCha20-Poly1305 nor CBC |
+| Certificate date checking when the clock is implausible | `tls_time.c:103-104`, window 2026+50y. Alternative on a dead battery is reaching no HTTPS site. Reported via `TLSInfo()`. Cost: no bound on how long a leaked key stays useful |
+| Parsed root set | 120 roots ≈ 30 KB parsed + 125 KB DER and 120 ASN.1 walks per page. Lazy store keyed on FNV-1a of the full issuer DER — four Mozilla roots share the CN "GlobalSign" |
+| Session resumption in cleartext | against 7 s (RSA) / 23 s (ECDSA) full handshakes. Outs: `TLSA_NoResume`, `TLSA_SessionFile ""`. Uncosted: no `SetProtection` (`tls_resume.c:718`), 24 h cap never fires without an RTC (`:439`) |
+| IDNA | no Unicode path to a hostname on AmigaOS; `xn--` form passes through unchanged |
+| RFC 4361 client identifier | our option 61 exists to land on the same lease as Roadshow on the same NIC. A DUID defeats it |
+| RFC 8985 RACK-TLP | retransmit re-headers packets in place, so no per-segment send times exist |
+| RFC 6928 IW10 | 14 KB against a pool that tops out at 256 packets |
+| IP source routing | RFC 7126/BCP 186 makes dropping it the recommendation |
+| ICMP Redirect | MITM vector; ignoring is the modern default |
+| RFC 1042/802.3 receive | senders extinct |
+| IGMPv3, RFC 4191, RFC 7371, DHCPv6, RFC 3396 | see `BACKLOG.md` |
 
-Solid: SLAAC with DAD at three probes, the full five-state NUD machine, hop
-limit 255 enforced on every ND message, RH0 refused per RFC 5095, the required
-address set of RFC 4291 §2.8, Parameter Problem on an unrecognised Next Header.
+## Verified conformant
 
-**The sharpest finding in the whole survey**: RFC 8201 §1 says a node not
-implementing Path MTU Discovery *must use the IPv6 minimum link MTU as the
-maximum packet size*. **We do neither** — PMTUD is off by decision, ICMPv6
-Packet Too Big is not even dispatched, and we send up to the full 1500. Any
-path narrower than the local link is a black hole presenting as a hang. The RA
-MTU option, which is free, is discarded on the same `#ifdef`.
+Recorded so it is not re-surveyed.
 
-Also open: no MLD (see the false-claims register), no fragment reassembly, no
-RFC 7559 Router Solicitation backoff, no RFC 8106 RDNSS, and an A-bit test
-nested inside the L-bit test so a prefix advertised A=1 L=0 forms no address at
-all.
+**TCP** — 9293 §3.10.7 acceptability (all four cases, wraparound-safe),
+simultaneous open, RST generation §3.10.7.1, 2MSL 240 s, 5681 slow start and
+congestion avoidance, fast retransmit and recovery, **6582 NewReno in full**
+(`nx_tcp_socket_state_ack_check.c:472-509`), 6056 port randomisation
+(Algorithm 1 over the IANA dynamic range off a SHA-256 DRBG), delayed ACK
+200 ms, zero-window probe with backoff, 1122 §4.2.2.4 urgent-data receive,
+MSS option handling. Landed 2026-08-02: 2018 SACK receive side, 6298 RTO with
+Karn.
 
-Declined: privacy addresses (RFC 8981) and opaque IIDs (RFC 7217), DHCPv6,
-RFC 4191 route preferences, RFC 7371 multicast flags.
+**UDP** — 768 both directions including the IPv4 zero-checksum rule.
 
-### TCP
+**IPv4/link** — 826 ARP with the 5227 §2.4 defence, martian-source filtering,
+894 encapsulation, ICMP echo server with broadcast echo discarded,
+**IGMPv2 in full** (Router Alert, TTL 1, report suppression, Leave).
 
-Better than expected. RFC 9293 §3.10.7's four-case acceptability test is
-correct and wraparound-safe; simultaneous open works; RST generation follows
-§3.10.7.1; 2MSL is a conformant 240 s. RFC 5681 slow start and congestion
-avoidance are faithful, fast retransmit and fast recovery are complete, and
-**RFC 6582 NewReno is fully implemented** — which had been assumed absent.
-RFC 6056 port randomisation is Algorithm 1 over the IANA dynamic range off a
-SHA-256 DRBG. Delayed ACK is 200 ms, inside §4.2.3.2's half-second.
+**IPv6** — 4291 §2.8 required address set, SLAAC with DAD at three probes,
+NUD five-state machine, hop limit 255 on all ND, 5095 RH0 refusal, Parameter
+Problem on unrecognised Next Header, 6980 and 8021 satisfied (we never
+fragment).
 
-Landed 2026-08-02: RFC 2018 SACK (receive side), RFC 6298 RTO estimation with
-Karn, and the duplicate-acknowledgment correctness fix.
+**DNS/mDNS/DHCP/SNTP** — 2131 T1/T2 renewal, 5452 §9.2 (16-bit ID + 14-bit port
+= 30 bits, off the DRBG), compression-pointer handling with bounds checks and a
+pointer cap, 6762 §11 source checks and §8/§9/§10.1 probe-conflict-goodbye,
+6763 DNS-SD publication, 5905 §14 SNTP including the originate-timestamp echo.
 
-Open and ranked in `BACKLOG.md`: the SACK **send** side (we advertise
-SACK-Permitted and discard every block the peer sends), broadcast SYN
-acceptance composing with a single half-open slot, the whole of RFC 5961, sender
-silly-window avoidance, and restart-after-idle.
+**TLS** — 7905 ChaCha20-Poly1305, mandatory hostname verification, trust store
+failing closed, 5746 secure renegotiation, `null` compression only (CRIME
+closed), 8422 §5.11 peer key validation (invalid-curve closed), 8996/6176/7465
+(1.0/1.1, SSLv2, RC4 all absent), 8017 §7.2.1 nonzero PS.
 
-Declined: ECN, RFC 7413 Fast Open, RFC 8985 RACK-TLP (structurally
-unsupported — retransmit re-headers packets in place, so there are no
-per-segment send times), RFC 6928 IW10.
+**Sockets** — 3493 v4-mapped handling, `if_nametoindex` family, `IPV6_V6ONLY`
+enforced on `accept()`, `CMSG_*` with the NDK's broken `CMSG_NXTHDR` replaced,
+`IPV6_PKTINFO` sticky and ancillary, `ICMP6_FILTER` applied on receive.
 
-### UDP
+**Tools** — `telnet` 854/855 (reactive only, no BINARY, no Synch); `tftp` 1350
+octet mode, Sorcerer's Apprentice avoided; `whois` 3912 complete; `ssh`
+vendored dropbear unpatched, 4250-4254; `traceroute` names no RFC and
+implements none by choice.
 
-RFC 768 is correct in both directions including the IPv4 zero-checksum rule.
-RFC 8085's congestion guidance is N/A in practice — our UDP is DNS, DHCP and
-mDNS, all small and low rate.
+## Corrections made during the survey
 
-Open: **demultiplexing ignores the 4-tuple** (RFC 1122 §4.1.3.5), so a
-`connect()`ed UDP socket accepts datagrams from any peer — which is a live
-concern for the resolver. Checksums are verified at dequeue rather than
-enqueue, so a corrupt datagram can evict a good one before it is ever checked.
+- `AI_CANONNAME` is honoured; pointing it at nodename is 3493 §6.1's fallback.
+- One address per family is a quality gap; 3493 requires "one or more results".
+- `getnameinfo` numeric fallback is permitted by §6.2.
+- `gethostbyname` IPv4-only is what 3493 asks for.
+- Oversize UDP returns `EMSGSIZE` (`transfer.c:570-572`); only raw drops silently.
+- Prefix expiry invalidates SLAAC addresses (`nx_ipv6_prefix_list_delete_entry.c:105-140`). Missing is the preferred lifetime and DEPRECATED state.
+- 5227 DHCPDECLINE is **not** present.
+- 424 in DELETE/COPY multistatus is wrong; §9.6.1 and §9.8.3 say SHOULD NOT. It belongs in PROPPATCH only.
+- Nothing in 4918 requires 422.
+- Absent `Depth` on LOCK means infinity; storing infinity is correct.
+- CBC padding is not checked before the MAC; the MAC runs unconditionally. Timing signal is inverted relative to classic Lucky13 — valid padding is *faster*, by up to a record of SHA-256.
+- 6582 NewReno is implemented.
 
-### DHCP, DNS, mDNS, SNTP
+Section numbers corrected 2026-08-02: `getnameinfo` is 3493 **§6.2**; reference
+resolution is 3986 **§5.2.2**; the fragment rule is 9110 **§7.1**; the Host-port
+MUST is 9112 **§3.2**.
 
-Good: the RFC 2131 T1/T2 renewal state machine, an extended parameter request
-list that is ours, mDNS source-address checking and the probe/conflict/goodbye
-sequence, DNS-SD publication, transaction IDs and source ports giving the full
-30 bits RFC 5452 asks of a blind attacker, and an SNTP client that exceeds
-RFC 5905 §14 including the originate-timestamp echo check.
+## Notes
 
-Open, and the security ones compose: no source-address validation on DNS
-responses, a QDCOUNT-0 bypass that skips four of RFC 5452 §9.1's six MUST
-checks, AUTHORITY records accepted as answers and cached under their own owner
-name, and two independent routes to a permanent cache entry. **The cache is
-ours** — enabling it is what turns upstream's ignored TC bit into an RFC 1123
-§6.1.3.2 caching violation.
-
-Also: no RFC 5227 probe on the DHCP path (the code is upstream and waiting
-behind one define), and `.local` leaking to the unicast resolver on the IPv6
-path, which is the one gap here a user meets by accident.
-
-Declined with reasons: IDNA (AmigaOS has no Unicode path to a hostname —
-a user types the `xn--` form and it passes through unchanged, which is the right
-answer), DHCPv6, RFC 3396 long options, RFC 4361 client identifiers — that last
-one **actively wrong for us**, since the whole point of our option 61 is to land
-on the same lease as Roadshow on the same NIC, and a DUID would defeat it.
-
-### TLS, PKIX, crypto
-
-Good: RFC 7905 ChaCha20-Poly1305 correct; hostname verification mandatory and
-refusing to verify without a hostname; the trust store failing closed and keying
-on a hash of the full issuer DER rather than the CN; RFC 5746 secure
-renegotiation; compression offered as `null` only, closing CRIME; peer public
-key validation against the curve equation, closing invalid-curve attacks;
-TLS 1.0/1.1 and SSLv2 and RC4 all correctly absent.
-
-Landed 2026-08-02: the record-buffer fix that had been shadowed by our own
-copies of the two files, unbiased DRBG bytes for the huge-number RBG, and
-`basicConstraints` CA:TRUE with `pathLenConstraint` — **which had been sitting
-on a branch outside the build**, along with three fuzz-found bounds fixes.
-
-Open and ranked in `BACKLOG.md`: hostname verification checking CN before SAN,
-an unbounded certificate chain walk, fatal alerts and bare TCP FINs both
-reported to the application as a clean end of stream, no revocation of any kind,
-and a permissive PKCS#1 v1.5 parser — measured as having no target in the
-shipped CA bundle, since 79 of its 80 RSA roots use e=65537.
-
-Declined with the cost stated: TLS 1.3, because nx_secure's 1.3 defines only
-AES-GCM suites and GHASH on a 68k is a bit-serial GF(2^128) multiply at
-**344.6 ms/KB against CBC's 21.9** — roughly 2.9 KB/s, which is not "expensive"
-but "a download nobody waits for". Adding a ChaCha20 suite to the vendored 1.3
-tables is the concrete precondition. Certificate date checking is skipped when
-the clock is implausible, because the alternative on a dead battery is a machine
-that reaches no HTTPS site at all; it is reported through `TLSInfo()`.
-
-### HTTP, WebDAV, sockets API, tools
-
-The sockets API is in good shape against RFC 3493 and 3542: v4-mapped handling,
-the interface-index functions, `IPV6_V6ONLY` enforced on `accept()`, `CMSG_*`
-macros with the NDK's broken `CMSG_NXTHDR` replaced, `IPV6_PKTINFO` sticky and
-ancillary, `ICMP6_FILTER` genuinely applied on receive. Unknown ancillary types
-and the unimplemented RFC 3542 extension-header options are **refused rather
-than ignored**, which is the right failure mode.
-
-WebDAV is Class 2 read-write and all three desktop clients mount writable.
-
-Open: the accepted-and-ignored cluster — `SBTC_FDCALLBACK`, several socket
-options, `IPV6_UNICAST_HOPS` and `IPV6_TCLASS` on TCP — plus an `IPV6_CHECKSUM`
-option-number collision, `fetch` treating a 1xx interim response as final, and
-`fetch` resolving a relative `Location` as absolute.
-
-Per tool: `telnet` implements RFC 854/855 largely correctly and is purely
-reactive; `tftp` is honest RFC 1350 scoped to octet mode with Sorcerer's
-Apprentice explicitly avoided; `ping` is RFC 792 in shape but never verifies the
-reply checksum; `traceroute` names no RFC and implements none, using
-hop-limited ICMP Echo by deliberate choice; `whois` is RFC 3912 in full; `nc`
-claims nothing and owes nothing; `ssh` is vendored dropbear, unpatched, and
-conformant to RFC 4250-4254.
-
-## The false-claims register
-
-A gap you know about is a backlog item. **A claim that is wrong is a trap for
-whoever reads the code next**, so these rank above plain absences.
-
-- **Three separate comments call `_nxd_ipv6_interface_find()` an RFC 6724
-  selection routine.** It is a first-match walk with one on-link test and a
-  `break` — no candidate set, no policy table, none of Rules 1, 2, 3, 6, 7 or 8.
-  RFC 8504 §6.6 makes implementing RFC 6724 a MUST. Note the existing backlog
-  note that "6724 does not apply here" is sound but scoped to **§6 destination
-  ordering**; these comments are about **§5 source selection**. Do not conflate
-  them.
-- **The recorded rationale for omitting MLD rests on a false premise.** It
-  argues that link-local groups are "never forwarded by anything". Forwarding is
-  not the mechanism — MLD snooping *filters* scope-2 groups on the local
-  segment, and RFC 9777 §6 requires reports for every group of scope ≥ 2 except
-  ff02::1, which includes the solicited-node addresses neighbour discovery
-  depends on. The decision may still be right; the reason is not.
-- **The retransmit ladder is argued against the wrong clause.** The comment
-  states it satisfies RFC 1122 §4.2.3.5's R2 of "at least 100 seconds" for data,
-  notes that the same counter bounds SYN retransmission, and stops. MUST-23
-  requires **180 seconds** for a SYN. 127 is not 180.
-- **A published Developer header asserts a safety property the tree
-  contradicts** — that there are no raw IPv6 sockets, which `raw.c` disproves,
-  and on which an option-number aliasing decision rests.
-- **`tlslib.h` claimed an impostor is refused** while `basicConstraints` was on
-  an unmerged branch. True as of `05d41ee`; it was not before.
-- **`README.md` says certificates are "properly" checked.** With no revocation,
-  no critical-extension rejection, no EKU and no nameConstraints, "properly"
-  carries more than the code does. The root-set half is accurate.
-- **The randomness pool credits 8 bits of clock entropy in exactly the case its
-  own comment says it should not** — the guard tests that the seconds field is
-  non-zero, which on a machine with no RTC is uptime, and is non-zero a second
-  after boot.
-- **A `.local` guard cites RFC 6762 §6.7.** §6.7 is "Legacy Unicast Responses";
-  the requirement is §3. The behaviour is right and the wrong citation has
-  already propagated.
-
-## What the surveys corrected
-
-Recorded here because an audit that only adds findings is not calibrated.
-
-- `AI_CANONNAME` **is** honoured, and pointing it at nodename is exactly
-  RFC 3493 §6.1's stated fallback.
-- Returning one address per family is a **quality** gap; 3493 requires only that
-  "one or more results shall be returned".
-- `getnameinfo` returning the numeric form is **explicitly permitted** by §6.4.
-- `gethostbyname` being IPv4-only is **what 3493 asks for**.
-- Oversize **UDP** sends now return `EMSGSIZE` before allocating; only raw keeps
-  the silent-drop-after-success.
-- A renumbering network does **not** leave a stale address forever — prefix
-  expiry invalidates every SLAAC address under it. What is missing is the
-  graceful half: no preferred lifetime, no DEPRECATED state.
-- RFC 5227 DHCPDECLINE was recorded as present. **It is not** — the code is
-  upstream behind a define set nowhere.
-- Missing 424 in DELETE and COPY multistatus is **correct**; RFC 4918 §9.6.1 and
-  §9.8.3 say it SHOULD NOT appear there. It belongs only in PROPPATCH.
-- Nothing in RFC 4918 requires 422 at all.
-- An absent `Depth` header on LOCK **means infinity**, so storing infinity is
-  right.
-- CBC padding is **not** checked before the MAC — the MAC is computed
-  unconditionally. The timing signal is real but has the opposite shape to
-  classic Lucky13.
-- RFC 6582 NewReno **is** implemented.
-
-## Citations this document got wrong
-
-Corrected on 2026-08-02 by the work that implemented them, which is the only
-review that reliably catches a misattributed section number.
-
-- `getnameinfo` is RFC 3493 **§6.2**, not §6.4 — §6.4 is the address-testing
-  macros. Both quoted sentences were verbatim correct; only the number was not.
-- URI reference resolution is RFC 3986 **§5.2.2** (Transform References).
-  §5.3 is Component Recomposition. §5.2.4 was right.
-- "the fragment is not sent" is RFC 9110 **§7.1** — "The target URI excludes the
-  reference's fragment component". RFC 3986 §3.5 is descriptive, not a MUST NOT.
-- The Host-with-port obligation is RFC 9112 **§3.2**. RFC 9110 §7.2 gives the
-  ABNF but its MUST covers only generating the field.
-
-And one framing correction: `fetch` sends `HTTP/1.0`, and RFC 9110 §15.2 says a
-server **MUST NOT** send a 1xx to an HTTP/1.0 client — so a conforming CDN will
-not send `103` to it. The client-side obligation to parse and discard interim
-responses is unconditional, so the fix stands, but the exposure was smaller than
-"live on major CDNs" implied.
-
-## Traps for whoever works on this next
-
-- **Adding a DNS bailiwick check without CNAME chain following will break every
-  CDN-hosted name.** CNAME processing is compiled out, and the A record that
-  follows is accepted *precisely because* no owner-name check exists. One piece
-  of work, not two.
-- **RFC 4086 contains no RFC 2119 keywords.** "Are we conformant" is not a
-  well-formed question about it. The normative obligation is RFC 5246 §D.1, and
-  it is the seeding half that fails, not the construction.
-- **RFC 8659 forbids using CAA in validation** — §1.1, "Relying Parties MUST NOT
-  use CAA records as part of certificate validation". Having no CAA code is
-  correct, not a gap.
-- **RFC 4193 ULAs need no special handling at the internet layer.** The ULA
-  problem is a 6724 policy-table problem.
-- **`ndk-include` is Latin-1.** A plain `grep -r` reads those files as binary and
-  silently finds nothing. Use `LC_ALL=C grep -a`. A whole RFC 3542 assessment
-  was once written on one of those empty results.
+- A DNS bailiwick check without CNAME chain following breaks every CDN-hosted
+  name: CNAME processing is compiled out and the following A record is accepted
+  because no owner-name check exists. One piece of work.
+- RFC 4086 has no 2119 keywords. The normative obligation is 5246 §D.1; the
+  construction is sound, the seeding is not.
+- RFC 8659 §1.1 forbids using CAA in validation. Having no CAA code is correct.
+- RFC 4193 ULAs need no internet-layer handling. The ULA problem is 6724's
+  policy table.
+- `ndk-include` is Latin-1. `grep -r` reads it as binary and finds nothing. Use
+  `LC_ALL=C grep -a`.
