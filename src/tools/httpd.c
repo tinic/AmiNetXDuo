@@ -3581,6 +3581,24 @@ static VOID httpd_do_put(HttpConn *c)
 
     c->put_temp[0] = '\0';
 
+    /*
+     * What landed may not carry the name that was asked for.  The check above
+     * catches a COLLISION -- something already there under the cut name --
+     * and this catches the first one, where nothing was there and the create
+     * succeeded under a name the filesystem shortened.
+     *
+     * It has to be undone rather than reported: the file is now reachable
+     * under two different addresses, and every read of it is refused, so
+     * leaving it would be a 201 for a file nobody can GET.
+     */
+    if (httpd_name_cut(c->path.path, c->path.name))
+    {
+        (VOID)DeleteFile((CONST_STRPTR)c->path.path);
+        httpd_error(c, 400,
+                    "that name is longer than this filesystem keeps");
+        return;
+    }
+
     httpd_empty(c, existed ? 204 : 201);
 }
 
@@ -3656,6 +3674,16 @@ static VOID httpd_do_mkcol(HttpConn *c)
         return;
     }
     UnLock(made);
+
+    /* Made under a name the filesystem shortened, so it answers to two
+       addresses and reads under both are refused.  Undone, as PUT's is. */
+    if (httpd_name_cut(c->path.path, c->path.name))
+    {
+        (VOID)DeleteFile((CONST_STRPTR)c->path.path);
+        httpd_error(c, 400,
+                    "that name is longer than this filesystem keeps");
+        return;
+    }
 
     httpd_empty(c, 201);
 }
