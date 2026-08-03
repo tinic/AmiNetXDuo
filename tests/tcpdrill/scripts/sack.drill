@@ -1,0 +1,205 @@
+# tcpdrill -- RFC 2018 selective acknowledgment, receive side.
+#
+# The stack generates SACK; it does not process the blocks a peer sends it.
+# So every case here is about what leaves: the option on the SYN, the option
+# on an acknowledgement that leaves a hole, and the data offset that says
+# where each of them ends.
+#
+# hdrlen IS ASSERTED ON EVERY CASE THAT CHANGES IT.  The data offset field is
+# what tells the peer where the payload starts, and it is the one thing a
+# capture is worst at catching: a segment with a wrong offset still has a
+# valid checksum, still arrives, and is simply read from the wrong byte.  A
+# case can state it exactly, and each option layout below has its own number:
+#
+#   20   no options
+#   28   the SYN, whose option area is a fixed eight bytes
+#   32   NOP NOP, kind, length, one block
+#   40   two blocks
+#   48   three
+#   56   four, the most that fits in the 40 bytes an option area has
+#
+# Sequence numbers in `sack=` are offsets from the ISN this harness chose,
+# the same space `ack=` counts in, because the blocks describe data the peer
+# sent.  `sack=-` requires no SACK option at all.
+#
+# ---------------------------------------------------------------------------
+
+# RFC 2018 section 2: SACK-Permitted (kind 4, length 2) goes on the SYN.  It
+# replaces padding, so the SYN is the same size it was.
+case s01_syn_offers_sack_permitted
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 hdrlen=28
+
+# RFC 2018 section 2: a SYN+ACK repeats the offer only when the peer's SYN
+# made one.  This is the half that must be conditional.
+case s02_syn_ack_repeats_the_peers_offer
+localport 4714
+listen
+rx S seq=0 win=8192 mss=1460 sackok=1
+tx SA seq=0 ack=1 mss=1460 sackok=1 hdrlen=28
+rx A seq=1 ack=1
+accept
+
+# The same, from a peer that said nothing.  A SYN+ACK offering SACK to a peer
+# that did not ask for it would have both ends believing different things
+# about the option, which RFC 2018 section 2 forbids.
+case s03_syn_ack_silent_when_the_peer_was
+localport 4715
+listen
+rx S seq=0 win=8192 mss=1460
+tx SA seq=0 ack=1 mss=1460 sackok=0 hdrlen=28
+rx A seq=1 ack=1
+accept
+
+# THE OPTION COSTS NOTHING WHEN THERE IS NOTHING TO SAY.  An acknowledgement
+# covering everything the socket holds carries no blocks and no option, so an
+# in-order stream sends exactly the headers it sent before.
+case s04_in_order_acknowledgement_has_no_options
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
+tx A seq=1 ack=1 hdrlen=20
+rx PA seq=1 ack=1 len=1460
+tx A seq=1 ack=1461 sack=- hdrlen=20 within=400
+recv 2000 = 1460
+
+# RFC 2018 section 3, the whole point: one hole, one block.  The
+# acknowledgement stays at the left edge of the hole -- that part is o01 --
+# and the block says what is being held above it, so the peer retransmits
+# 100 bytes rather than everything it has sent.
+case s05_one_hole_is_one_block
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
+tx A seq=1 ack=1
+rx PA seq=101 ack=1 len=100
+tx A seq=1 ack=1 sack=101:201 hdrlen=32 within=400
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=201 sack=- hdrlen=20 within=400
+recv 400 = 200
+
+# NO PERMISSION, NO BLOCKS.  The same shape as s05 against a peer whose
+# SYN+ACK said nothing: the hole is still held and still acknowledged, but
+# describing it in an option the peer never agreed to would be a segment it
+# is entitled to discard.
+case s06_no_blocks_without_permission
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=101 ack=1 len=100
+tx A seq=1 ack=1 sack=- hdrlen=20 within=400
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=201 within=400
+recv 400 = 200
+
+# Segments that touch are one block, not two.  The receive queue holds them
+# separately; the option describes the sequence space, which is contiguous.
+case s07_adjacent_segments_are_one_block
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
+tx A seq=1 ack=1
+rx PA seq=101 ack=1 len=100
+tx A seq=1 ack=1 sack=101:201 hdrlen=32 within=400
+rx PA seq=201 ack=1 len=100
+tx A seq=1 ack=1 sack=101:301 hdrlen=32 within=400
+
+# RFC 2018 section 4: THE FIRST BLOCK IS THE ONE HOLDING THE SEGMENT THAT
+# TRIGGERED THIS ACKNOWLEDGEMENT.  Two holes, the second one higher, so the
+# most recent block is also the highest and any ordering that happens to sort
+# by sequence number passes this.  s09 is the one that does not.
+case s08_two_holes_most_recent_first
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
+tx A seq=1 ack=1
+rx PA seq=101 ack=1 len=100
+tx A seq=1 ack=1 sack=101:201 within=400
+rx PA seq=301 ack=1 len=100
+tx A seq=1 ack=1 sack=301:401,101:201 hdrlen=40 within=400
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=201 sack=301:401 hdrlen=32 within=400
+rx PA seq=201 ack=1 len=100
+tx A seq=1 ack=401 sack=- hdrlen=20 within=400
+recv 500 = 400
+
+# THE SAME RULE WHERE SORTING BY SEQUENCE NUMBER GETS IT WRONG.  The higher
+# hole is opened first, then a segment lands in the lower one.  The most
+# recent block is now the LOWER of the two and must still come first: a
+# sender reads the first block as the news, and telling it about the block it
+# was told about last time is not news.
+case s09_recent_block_first_even_when_lower
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
+tx A seq=1 ack=1
+rx PA seq=401 ack=1 len=100
+tx A seq=1 ack=1 sack=401:501 within=400
+rx PA seq=101 ack=1 len=100
+tx A seq=1 ack=1 sack=101:201,401:501 hdrlen=40 within=400
+
+# THE BOUND.  Four blocks is 36 of the 40 bytes an option area has, so a
+# fifth hole cannot be reported and something has to go.  The most recent
+# block leads, and the block dropped is the LOWEST: it is the one nearest the
+# cumulative acknowledgement, which is about to move over it anyway.
+case s10_four_blocks_is_the_bound
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
+tx A seq=1 ack=1
+rx PA seq=101 ack=1 len=100
+tx A seq=1 ack=1 sack=101:201 hdrlen=32 within=400
+rx PA seq=301 ack=1 len=100
+tx A seq=1 ack=1 sack=301:401,101:201 hdrlen=40 within=400
+rx PA seq=501 ack=1 len=100
+tx A seq=1 ack=1 sack=501:601,301:401,101:201 hdrlen=48 within=400
+rx PA seq=701 ack=1 len=100
+tx A seq=1 ack=1 sack=701:801,501:601,301:401,101:201 hdrlen=56 within=400
+rx PA seq=901 ack=1 len=100
+tx A seq=1 ack=1 sack=901:1001,701:801,501:601,301:401 hdrlen=56 within=400
+
+# A BLOCK CLOSED BY ARRIVING DATA STOPS BEING A BLOCK.  Filling the hole from
+# the left leaves the block whose data is now in sequence out of the option
+# entirely, rather than reporting sequence space the cumulative
+# acknowledgement already covers -- which RFC 2018 section 4 says a block
+# must never do.
+case s11_filled_hole_leaves_the_option
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
+tx A seq=1 ack=1
+rx PA seq=201 ack=1 len=100
+tx A seq=1 ack=1 sack=201:301 hdrlen=32 within=400
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=101 sack=201:301 hdrlen=32 within=400
+rx PA seq=101 ack=1 len=100
+tx A seq=1 ack=301 sack=- hdrlen=20 within=400
+recv 400 = 300
+
+# A DUPLICATE SEGMENT ARRIVING BEHIND A HOLE IS STILL ACKNOWLEDGED, AND THE
+# ACKNOWLEDGEMENT STILL DESCRIBES THE HOLE.  This is the acknowledgement RFC
+# 5681 section 3.2 counts towards fast retransmit, so it is the one that must
+# not come out bare.
+case s12_duplicate_behind_a_hole_still_reports_it
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
+tx A seq=1 ack=1
+rx PA seq=101 ack=1 len=100
+tx A seq=1 ack=1 sack=101:201 hdrlen=32 within=400
+rx PA seq=101 ack=1 len=100
+tx A seq=1 ack=1 sack=101:201 hdrlen=32 within=400
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=201 sack=- within=400
+recv 400 = 200

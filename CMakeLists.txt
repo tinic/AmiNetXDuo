@@ -225,6 +225,14 @@ if(AMINETXDUO_TCP_WINDOW_SCALING)
     add_compile_definitions(AMINETXDUO_TCP_WINDOW_SCALING)
 endif()
 
+# RFC 2018 selective acknowledgment on the receive side.  Also a layout change
+# to NX_TCP_SOCKET, so also whole-tree.  Both arms of a with/without
+# measurement come out of one tree the same way as the option above.
+option(AMINETXDUO_TCP_SACK "Report out-of-order data in RFC 2018 SACK blocks" ON)
+if(NOT AMINETXDUO_TCP_SACK)
+    add_compile_definitions(AMINETXDUO_TCP_SACK_OFF)
+endif()
+
 # ami_log() verbosity: 0 = errors only ... 4 = trace. Empty keeps compat.c's
 # own default (WARN in release, DEBUG when AMINETXDUO_DEBUG is set).
 set(AMINETXDUO_LOG_LEVEL "" CACHE STRING "Override ami_log() verbosity (0..4)")

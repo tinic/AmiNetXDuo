@@ -55,6 +55,19 @@
  *   urg=N   urgent pointer.
  *   mss=N   the MSS option must be present with this value (tx) or is sent
  *           with it (rx).
+ *   sackok=0|1
+ *           the SACK-Permitted option (RFC 2018 kind 4) must be present or
+ *           absent (tx); on rx, sackok=1 puts it in the injected SYN.
+ *   sack=L:R[,L:R...]
+ *           the SACK option (kind 5) must carry exactly these blocks, in this
+ *           order.  Sequence numbers are offsets from the ISN this harness
+ *           chose, the same space `ack=` counts in, because the blocks
+ *           describe data the peer sent.  `sack=-` requires no SACK option.
+ *   hdrlen=N
+ *           the TCP data offset, in bytes.  20 is a header with no options.
+ *           A wrong data offset is a silently corrupt segment: the payload
+ *           starts where it says and nowhere else, so it is worth asserting
+ *           next to the options that moved it.
  *   within=MS / after=MS
  *           bounds on the gap between this frame and the previous event,
  *           measured from the E-Clock reading taken inside the device's
@@ -525,6 +538,11 @@ typedef struct Seg
     UWORD   urg;
     ULONG   dlen;
     LONG    mss;                /* -1 when the option is absent */
+    BOOL    sackok;             /* SACK-Permitted option present */
+    UWORD   sack_n;             /* SACK blocks carried, 0 for none */
+    ULONG   sack_l[4];
+    ULONG   sack_r[4];
+    UWORD   thl;                /* TCP header length in bytes    */
     BOOL    ip_ok;              /* IP header checksum verified  */
     BOOL    tcp_ok;             /* TCP checksum verified        */
 
@@ -587,6 +605,7 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
     s->win      = rd16(&tcp[14]);
     s->urg      = rd16(&tcp[18]);
     s->dlen     = iplen - ihl - thl;
+    s->thl      = thl;
 
     /* The TCP checksum is verified on every frame the stack sends: it costs
        nothing here and no script would think to assert on it. */
@@ -604,7 +623,9 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
         s->tcp_ok = ((UWORD)(~sum) == 0) ? TRUE : FALSE;
     }
 
-    /* Options: MSS is the only one this stack emits, but walk properly. */
+    /* Options.  MSS on the SYN, SACK-Permitted on the SYN, SACK blocks on an
+       acknowledgement that leaves a hole.  Walk properly regardless: a wrong
+       data offset is exactly the fault an option-length walk catches. */
     {
         const UBYTE *o   = tcp + 20;
         const UBYTE *end = tcp + thl;
@@ -618,6 +639,22 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
                 break;
             if (*o == 2 && o[1] == 4 && o + 4 <= end)
                 s->mss = (LONG)rd16(&o[2]);
+            if (*o == 4 && o[1] == 2)
+                s->sackok = TRUE;
+            if (*o == 5 && o[1] >= 10 && ((o[1] - 2) % 8) == 0 && o + o[1] <= end)
+            {
+                UWORD n = (UWORD)((o[1] - 2) / 8);
+                UWORD i;
+
+                if (n > 4)
+                    n = 4;
+                for (i = 0; i < n; i++)
+                {
+                    s->sack_l[i] = rd32(&o[2 + i * 8]);
+                    s->sack_r[i] = rd32(&o[6 + i * 8]);
+                }
+                s->sack_n = n;
+            }
             o += o[1];
         }
     }
@@ -777,7 +814,18 @@ static VOID pump(VOID)
          * dropped.  A malformed TCP segment, or one aimed at the peer, still
          * reaches the queue -- those are results.
          */
-        if (ether == ETYPE_IP && len >= ETH_HDR + 20 &&
+        if (ether != ETYPE_IP)
+        {
+            /* Anything that is not IPv4 is not part of any case either, and
+               the test above used to be written as one the wrong way round:
+               it only ever reached IPv4 frames, so an IPv6 router
+               solicitation or multicast-listener report went into the queue
+               and put every later assertion in the case one frame out. */
+            n_background++;
+            continue;
+        }
+
+        if (len >= ETH_HDR + 20 &&
             (scratch[ETH_HDR + 9] != 6 || rd32(&scratch[ETH_HDR + 16]) != PEER_IP))
         {
             n_background++;
@@ -840,6 +888,7 @@ typedef struct Inject
     UWORD   urg;
     ULONG   dlen;
     LONG    mss;
+    BOOL    sackok;
 } Inject;
 
 static VOID build_and_inject(const Inject *in)
@@ -847,10 +896,14 @@ static VOID build_and_inject(const Inject *in)
     static UBYTE f[TAP_FRAME_MAX];
     UBYTE *ip  = &f[ETH_HDR];
     UBYTE *tcp;
-    UWORD  opt = (in->mss >= 0) ? 4 : 0;
-    UWORD  thl = (UWORD)(20 + opt);
+    UWORD  opt = (UWORD)((in->mss >= 0) ? 4 : 0);
+    UWORD  thl;
     ULONG  i;
     ULONG  iplen;
+
+    if (in->sackok)
+        opt = (UWORD)(opt + 4);
+    thl = (UWORD)(20 + opt);
 
     zero(f, (ULONG)sizeof(f));
 
@@ -881,11 +934,22 @@ static VOID build_and_inject(const Inject *in)
     wr16(&tcp[14], in->win);
     wr16(&tcp[18], in->urg);
 
-    if (opt != 0)
+    if (in->mss >= 0)
     {
         tcp[20] = 2;
         tcp[21] = 4;
         wr16(&tcp[22], (UWORD)in->mss);
+    }
+    if (in->sackok)
+    {
+        /* NOP, NOP, kind 4, length 2 -- a whole option word, so the data
+           offset stays a whole number of words with or without the MSS. */
+        UWORD at = (UWORD)(20 + (in->mss >= 0 ? 4 : 0));
+
+        tcp[at]     = 1;
+        tcp[at + 1] = 1;
+        tcp[at + 2] = 4;
+        tcp[at + 3] = 2;
     }
 
     for (i = 0; i < in->dlen; i++)
@@ -966,6 +1030,9 @@ typedef struct Expect
     BOOL    have_len;   LONG len;
     BOOL    have_urg;   LONG urg;
     BOOL    have_mss;   LONG mss;
+    BOOL    have_sackok; LONG sackok;
+    BOOL    have_sack;  UWORD sack_n; ULONG sack_l[4]; ULONG sack_r[4];
+    BOOL    have_hdrlen; LONG hdrlen;
     BOOL    have_within; LONG within;
     BOOL    have_after;  LONG after;
 } Expect;
@@ -1031,6 +1098,29 @@ static const char *parse_keys(const char *p, Expect *e)
             else if (streq(key, "len"))   { e->have_len = TRUE;    e->len = to_num(eq + 1); }
             else if (streq(key, "urg"))   { e->have_urg = TRUE;    e->urg = to_num(eq + 1); }
             else if (streq(key, "mss"))   { e->have_mss = TRUE;    e->mss = to_num(eq + 1); }
+            else if (streq(key, "sackok")){ e->have_sackok = TRUE; e->sackok = to_num(eq + 1); }
+            else if (streq(key, "hdrlen")){ e->have_hdrlen = TRUE; e->hdrlen = to_num(eq + 1); }
+            else if (streq(key, "sack"))
+            {
+                /* L:R,L:R... in the peer's sequence space, or `-` for none. */
+                const char *v = eq + 1;
+
+                e->have_sack = TRUE;
+                e->sack_n    = 0;
+                while (*v != '\0' && *v != '-' && e->sack_n < 4)
+                {
+                    ULONG l = 0, r = 0;
+
+                    while (*v >= '0' && *v <= '9') l = l * 10 + (ULONG)(*v++ - '0');
+                    if (*v == ':') v++;
+                    while (*v >= '0' && *v <= '9') r = r * 10 + (ULONG)(*v++ - '0');
+                    e->sack_l[e->sack_n] = l;
+                    e->sack_r[e->sack_n] = r;
+                    e->sack_n++;
+                    if (*v == ',') v++;
+                    else break;
+                }
+            }
             else if (streq(key, "within")){ e->have_within = TRUE; e->within = to_num(eq + 1); }
             else if (streq(key, "after")) { e->have_after = TRUE;  e->after = to_num(eq + 1); }
         }
@@ -1093,10 +1183,29 @@ static VOID describe(const Seg *s, char *out, ULONG max)
     fmt_num(&o, s->win, 10, 0, FALSE);
     { const char *t = " len="; while (*t != '\0') *o++ = *t++; }
     fmt_num(&o, s->dlen, 10, 0, FALSE);
+    { const char *t = " hdrlen="; while (*t != '\0') *o++ = *t++; }
+    fmt_num(&o, s->thl, 10, 0, FALSE);
     if (s->mss >= 0)
     {
         const char *t = " mss="; while (*t != '\0') *o++ = *t++;
         fmt_num(&o, (ULONG)s->mss, 10, 0, FALSE);
+    }
+    if (s->sackok)
+    {
+        const char *t = " sackok"; while (*t != '\0') *o++ = *t++;
+    }
+    if (s->sack_n != 0)
+    {
+        const char *t = " sack="; UWORD i;
+
+        while (*t != '\0') *o++ = *t++;
+        for (i = 0; i < s->sack_n; i++)
+        {
+            if (i != 0) *o++ = ',';
+            fmt_num(&o, s->sack_l[i] - cs.p_isn, 10, 0, FALSE);
+            *o++ = ':';
+            fmt_num(&o, s->sack_r[i] - cs.p_isn, 10, 0, FALSE);
+        }
     }
     if ((s->flags & TF_URG) != 0)
     {
@@ -1136,7 +1245,7 @@ static VOID do_tx(const char *args, const char *raw)
     Expect  e;
     Seg     got;
     ULONG   limit;
-    char    desc[280];
+    char    desc[360];
     char    why[280];
     char   *w;
 
@@ -1226,6 +1335,25 @@ static VOID do_tx(const char *args, const char *raw)
         CHECK((LONG)got.urg == e.urg, "urgent pointer", e.urg, got.urg);
     if (e.have_mss)
         CHECK(got.mss == e.mss, "mss option", e.mss, got.mss);
+    if (e.have_sackok)
+        CHECK((got.sackok ? 1 : 0) == e.sackok, "SACK-Permitted option",
+              e.sackok, got.sackok ? 1 : 0);
+    if (e.have_hdrlen)
+        CHECK((LONG)got.thl == e.hdrlen, "TCP header length", e.hdrlen, got.thl);
+    if (e.have_sack)
+    {
+        UWORD i;
+
+        CHECK((LONG)got.sack_n == (LONG)e.sack_n, "SACK block count",
+              e.sack_n, got.sack_n);
+        for (i = 0; i < e.sack_n; i++)
+        {
+            CHECK(got.sack_l[i] == cs.p_isn + e.sack_l[i], "SACK block left edge",
+                  e.sack_l[i], (LONG)(got.sack_l[i] - cs.p_isn));
+            CHECK(got.sack_r[i] == cs.p_isn + e.sack_r[i], "SACK block right edge",
+                  e.sack_r[i], (LONG)(got.sack_r[i] - cs.p_isn));
+        }
+    }
 
     CHECK(got.tcp_ok, "TCP checksum (0 = valid)", 0, 1);
     CHECK(got.ip_ok,  "IP checksum (0 = valid)", 0, 1);
@@ -1255,7 +1383,7 @@ static VOID do_notx(const char *args, const char *raw)
     char  tok[24];
     ULONG ms;
     Seg   got;
-    char  desc[280];
+    char  desc[360];
 
     (VOID)token(args, tok, sizeof(tok));
     ms = (ULONG)to_num(tok);
@@ -1288,6 +1416,7 @@ static VOID do_rx(const char *args, const char *raw)
     in.urg   = (UWORD)(e.have_urg ? e.urg : 0);
     in.dlen  = (ULONG)(e.have_len ? e.len : 0);
     in.mss   = e.have_mss ? e.mss : -1;
+    in.sackok = (e.have_sackok && e.sackok) ? TRUE : FALSE;
 
     /* Give the stack a moment to post its reads before the very first
        injection of a case; after that they are always outstanding. */

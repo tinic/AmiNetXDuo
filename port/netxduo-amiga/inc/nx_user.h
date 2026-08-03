@@ -290,6 +290,31 @@
 #endif
 
 
+/* ----------------------------------------------------------------- SACK -- */
+
+/*
+ * RFC 2018 selective acknowledgment, receive side.
+ *
+ * The SYN offers SACK-Permitted and a SYN-ACK repeats it only when the peer's
+ * SYN carried it.  An acknowledgment that leaves a hole then carries the blocks
+ * describing what is held above it, so the peer retransmits the hole rather
+ * than everything after it.  Without this a single loss inside a window costs a
+ * go-back-N, which is what keeps the receive window ceiling where it is.
+ *
+ * Sender-side processing of blocks the peer sends us is not implemented, so
+ * writes recover exactly as they did.
+ *
+ * Costs one byte plus three of padding and one ULONG per NX_TCP_SOCKET, and on
+ * an in-order stream one comparison per acknowledgment: the builder reads the
+ * queue tail, sees nothing above the receive sequence, and returns.
+ *
+ * Build with -DAMINETXDUO_TCP_SACK=OFF to take it out.
+ */
+#ifndef AMINETXDUO_TCP_SACK_OFF
+#define NX_ENABLE_TCP_SACK
+#endif
+
+
 /* ------------------------------------------------------------- SOCK_RAW -- */
 
 /*
