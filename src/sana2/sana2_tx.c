@@ -35,27 +35,22 @@
  * driver still has it. docs/RESEARCH.md 27.4 measured eleven seconds of
  * silence after one unacknowledged segment.
  *
- * Completions are therefore reaped when they complete, in two hops:
+ * Completions are therefore reaped when they complete. The reply port raises a
+ * signal on one of the SANA-II reader threads (ami_sana2_tx_reap_bind), the
+ * only thread in this shim that blocks in exec Wait() and can therefore be
+ * woken by a device, and that reader reaps.
  *
- *   1. The reply port raises a signal on one of the SANA-II reader threads
- *      (ami_sana2_tx_reap_bind), the only thread in this shim that blocks in
- *      exec Wait() and can therefore be woken by a device.
- *   2. That thread does not touch the packet. It calls
- *      nx_ip_driver_deferred_processing(), NetX Duo's mechanism for a driver
- *      to request a callback on the IP thread, which comes back into
- *      ami_sana2_driver_entry() with NX_LINK_DEFERRED_PROCESSING and reaps.
+ * Releasing a packet mutates NetX Duo's transmit queue and the packet's own
+ * prepend pointer (transmit_release strips the IP header back off), so the reap
+ * runs under nx_ip_protection, where every other send runs. When the mutex is
+ * held elsewhere the reader asks for the reap on the IP thread instead, through
+ * nx_ip_driver_deferred_processing(); ami_sana2_tx_defer() has the measurement
+ * that says why the second shape is the fallback and not the rule.
  *
- * The second hop matters because releasing a packet mutates NetX Duo's
- * transmit queue and the packet's own prepend pointer (transmit_release strips
- * the IP header back off). From a reader thread that would interleave with
- * whatever the IP thread was doing; on the IP thread it runs where every other
- * send runs, under nx_ip_protection.
- *
- * The transmit path pays almost nothing: the reader only asks for deferred
- * processing when the reply port is non-empty, and during a bulk transfer the
- * next ami_sana2_tx_send() has already drained it, so the common case is one
- * pointer compare in a thread that was going to wake anyway. The hop only
- * happens when the link goes quiet.
+ * The transmit path pays almost nothing when there is traffic: the reader only
+ * looks when the reply port is non-empty, and during a bulk send the next
+ * ami_sana2_tx_send() has already drained it, so the common case is one pointer
+ * compare in a thread that was going to wake anyway.
  *
  * The GetMsg() at the top of ami_sana2_tx_send() keeps the shim correct with
  * no reader bound at all: open-time probing, an interface not yet enabled, or
@@ -177,7 +172,6 @@ VOID ami_sana2_tx_defer(AmiSana2If *iface)
     if (list->lh_TailPred == (struct Node *)list)
         return;
 
-#if AMI_SANA2_RX_INLINE_REAP
     /*
      * Reap here rather than waking the IP thread to do it.
      *
@@ -200,7 +194,6 @@ VOID ami_sana2_tx_defer(AmiSana2If *iface)
         tx_mutex_put(&iface->ip->nx_ip_protection);
         return;
     }
-#endif
 
     _nx_ip_driver_deferred_processing(iface->ip);
 }

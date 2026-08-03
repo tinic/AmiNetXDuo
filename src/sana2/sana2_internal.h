@@ -79,36 +79,6 @@
 #endif
 
 /*
- * Three independent shapes of the receive path, each buildable on its own so
- * a measurement can attribute a change to one of them.
- *
- *   BATCH         chain a drain's IP packets and splice them onto the IP
- *                 thread's queue once, rather than once per packet
- *   EARLY_REPOST  put a slot back on the device before its packet goes up
- *   INLINE_IP     run IP and TCP on the reader instead of the IP thread
- */
-#ifndef AMI_SANA2_RX_BATCH
-#define AMI_SANA2_RX_BATCH          1
-#endif
-#ifndef AMI_SANA2_RX_EARLY_REPOST
-#define AMI_SANA2_RX_EARLY_REPOST   1
-#endif
-#ifndef AMI_SANA2_RX_INLINE_IP
-#define AMI_SANA2_RX_INLINE_IP      1
-#endif
-/*
- *   INLINE_REAP   reap transmit completions on the reader instead of asking
- *                 the IP thread to (ami_sana2_tx_defer)
- */
-#ifndef AMI_SANA2_RX_INLINE_REAP
-#define AMI_SANA2_RX_INLINE_REAP    1
-#endif
-
-#if AMI_SANA2_RX_INLINE_IP && !AMI_SANA2_RX_BATCH
-#error "inline IP receive needs the batched drain"
-#endif
-
-/*
  * Receive-path probe. Counts how many completions each return from the
  * reader's Wait() collects, which separates "woken late, the ring absorbed a
  * burst" from "woken promptly, then slow": the first shows a backlog, the
@@ -119,8 +89,8 @@
 #define AMI_SANA2_RX_HIST           5   /* 0, 1, 2-3, 4-7, 8+ */
 #define AMI_RXPROBE_COUNT(c)        ((c)++)
 /* TX_DISABLE_STACK_FILLING is set for the port, so the reader fills its own
-   stack and the probe scans it. This is how the inline path's stack cost is
-   priced rather than guessed. */
+   stack and the probe scans it. The receive path's stack cost is then measured
+   rather than guessed. */
 #define AMI_RXPROBE_STACK_FILL      0xA5A5A5A5UL
 #else
 #define AMI_RXPROBE_COUNT(c)        ((VOID)0)
@@ -234,7 +204,6 @@ typedef struct AmiSana2Rx
     ULONG               probe_msgs;
     ULONG               probe_peak;
     ULONG               probe_hist[AMI_SANA2_RX_HIST];
-    ULONG               probe_inline;    /* batches processed on the reader  */
     ULONG               probe_deferred;  /* batches handed to the IP thread  */
     ULONG               probe_stack;     /* high-water bytes, filled at start */
 #endif

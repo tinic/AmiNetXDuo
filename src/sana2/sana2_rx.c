@@ -21,10 +21,9 @@
  * threads in the shim that block in exec Wait() rather than on a ThreadX
  * object, so they are the only ones a device's ReplyMsg can wake, and without
  * a thread that wakes on a completion TCP never learns that the driver has
- * finished with a segment and never retransmits it. The reader does not touch
- * the packet: it asks NetX Duo for deferred processing and the IP thread does
- * the work. See sana2_tx.c; the mechanism here is one extra signal bit in a
- * Wait() the reader was making anyway.
+ * finished with a segment and never retransmits it. See sana2_tx.c; the
+ * mechanism here is one extra signal bit in a Wait() the reader was making
+ * anyway.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -66,8 +65,6 @@ typedef struct AmiRxBatch
     NX_PACKET *tail;
 } AmiRxBatch;
 
-#if AMI_SANA2_RX_BATCH
-
 /*
  * Hand the whole chain to the IP thread: one critical section, and the event
  * flag only when the queue was empty, which is the same condition NetX Duo
@@ -102,61 +99,6 @@ static VOID ami_sana2_rx_batch_defer(AmiSana2If *iface, AmiRxBatch *batch)
         tx_event_flags_set(&ip->nx_ip_events, NX_IP_RECEIVE_EVENT, TX_OR);
 }
 
-/*
- * Run the receive path here instead of waking the IP thread with it.
- *
- * The hop this removes is not a function call. The reader blocks in exec
- * Wait(), so it releases and reacquires the ThreadX baton around every wait,
- * and the IP thread is a second Exec Task the scheduler Task has to be woken
- * to dispatch: wire to ACK costs four Exec context switches, of which two are
- * only there to move the packet between two of our own threads.
- *
- * _nx_ip_packet_receive() is what the IP thread's own dequeue loop calls, with
- * nx_ip_protection held across the call. TX_NO_WAIT rather than a wait: that
- * mutex is TX_NO_INHERIT (nx_ip_create.c), so blocking on it would let an
- * application thread inside nx_tcp_socket_send() hold off the highest-priority
- * thread in the system, and a reader that is not reposting reads is a reader
- * losing frames. Contention hands the batch to the IP thread instead, which is
- * exactly what it did before.
- *
- * Segments do not come back from _nx_ip_packet_receive() processed:
- * _nx_tcp_packet_receive() only runs TCP inline for the IP thread and queues
- * for everyone else. Running that queue here is what the IP thread would have
- * done with it, under the same mutex. It leaves NX_IP_TCP_EVENT set behind us,
- * so the IP thread still wakes once per burst and finds nothing -- after the
- * ACK is already on the wire, which is the point.
- */
-#if AMI_SANA2_RX_INLINE_IP
-static BOOL ami_sana2_rx_batch_inline(AmiSana2If *iface, AmiRxBatch *batch)
-{
-    NX_IP     *ip = iface->ip;
-    NX_PACKET *packet;
-
-    if (tx_mutex_get(&ip->nx_ip_protection, TX_NO_WAIT) != TX_SUCCESS)
-        return FALSE;
-
-    packet = batch->head;
-
-    while (packet != NX_NULL)
-    {
-        NX_PACKET *next = packet->nx_packet_queue_next;
-
-        packet->nx_packet_queue_next = NX_NULL;
-        _nx_ip_packet_receive(ip, packet);
-        packet = next;
-    }
-
-    if (ip->nx_ip_tcp_queue_process != NX_NULL &&
-        ip->nx_ip_tcp_queue_head != NX_NULL)
-    {
-        (ip->nx_ip_tcp_queue_process)(ip);
-    }
-
-    tx_mutex_put(&ip->nx_ip_protection);
-    return TRUE;
-}
-#endif /* AMI_SANA2_RX_INLINE_IP */
-
 static VOID ami_sana2_rx_batch_flush(AmiSana2Rx *rx, AmiRxBatch *batch)
 {
     AmiSana2If *iface = rx->iface;
@@ -164,32 +106,12 @@ static VOID ami_sana2_rx_batch_flush(AmiSana2Rx *rx, AmiRxBatch *batch)
     if (batch->head == NX_NULL)
         return;
 
-#if AMI_SANA2_RX_INLINE_IP
-    if (ami_sana2_rx_batch_inline(iface, batch))
-    {
-        AMI_RXPROBE_COUNT(rx->probe_inline);
-    }
-    else
-#endif
-    {
-        ami_sana2_rx_batch_defer(iface, batch);
-        AMI_RXPROBE_COUNT(rx->probe_deferred);
-    }
+    ami_sana2_rx_batch_defer(iface, batch);
+    AMI_RXPROBE_COUNT(rx->probe_deferred);
 
     batch->head = NX_NULL;
     batch->tail = NX_NULL;
 }
-
-#else /* !AMI_SANA2_RX_BATCH */
-
-/* Nothing accumulates, so there is nothing to flush. */
-static VOID ami_sana2_rx_batch_flush(AmiSana2Rx *rx, AmiRxBatch *batch)
-{
-    (VOID)rx;
-    (VOID)batch;
-}
-
-#endif /* AMI_SANA2_RX_BATCH */
 
 /*
  * Hand one Ethernet-shaped packet to NetX Duo. Both the cooked path (header
@@ -238,17 +160,12 @@ static VOID ami_sana2_rx_deliver(AmiSana2If *iface, AmiRxBatch *batch,
     case AMI_ETHERTYPE_IPV4:
     case AMI_ETHERTYPE_IPV6:
         iface->stats.packets_received++;
-#if AMI_SANA2_RX_BATCH
         packet->nx_packet_queue_next = NX_NULL;
         if (batch->head == NX_NULL)
             batch->head = packet;
         else
             batch->tail->nx_packet_queue_next = packet;
         batch->tail = packet;
-#else
-        (VOID)batch;
-        _nx_ip_packet_deferred_receive(iface->ip, packet);
-#endif
         break;
 
 #ifndef NX_DISABLE_IPV4
@@ -472,9 +389,7 @@ static ULONG ami_sana2_rx_drain(AmiSana2Rx *rx, AmiRxBatch *batch)
         {
             NX_PACKET *packet = ami_sana2_rx_complete(rx, slot);
 
-#if AMI_SANA2_RX_EARLY_REPOST
             (VOID)ami_sana2_rx_post_slot(rx, slot);
-#endif
 
             if (packet != NX_NULL)
                 ami_sana2_rx_deliver(rx->iface, batch, packet);

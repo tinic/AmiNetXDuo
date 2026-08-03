@@ -472,11 +472,11 @@ VOID ami_sana2_refresh_stats(AmiSana2If *iface)
 
             AMI_WARN("rxprobe %ld: wakes %lu msgs %lu peak %lu "
                      "hist 0:%lu 1:%lu 2-3:%lu 4-7:%lu 8+:%lu "
-                     "inline %lu deferred %lu stack %lu/%lu",
+                     "batches %lu stack %lu/%lu",
                      (long)i, rx->probe_wakes, rx->probe_msgs, rx->probe_peak,
                      rx->probe_hist[0], rx->probe_hist[1], rx->probe_hist[2],
                      rx->probe_hist[3], rx->probe_hist[4],
-                     rx->probe_inline, rx->probe_deferred,
+                     rx->probe_deferred,
                      rx->probe_stack, (ULONG)AMI_SANA2_RX_STACK_SIZE);
         }
     }
