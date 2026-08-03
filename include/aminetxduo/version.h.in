@@ -43,4 +43,43 @@
  */
 #define AMINETXDUO_VERSION_BUILD    "@AMINETXDUO_VERSION_BUILD@"
 
+/* d.m.yyyy, for the $VER: strings AmigaOS Version reads. */
+#define AMINETXDUO_VERSION_DATE     "@AMINETXDUO_VERSION_DATE@"
+
+/* Short commit, so two builds of the same release can be told apart. */
+#define AMINETXDUO_VERSION_HASH     "@AMINETXDUO_VERSION_HASH@"
+
+/*
+ * The $VER: string every command and the library carries.
+ *
+ * ONE version for the whole project, not one per command. AmigaOS's `Version`
+ * reads $VER: out of the file, so this is all `version full file C:ping` has
+ * to go on -- and what it used to find was "ping 3.0 (26.7.2026)", a number
+ * private to ping and a date typed by whoever last edited it. Nothing said
+ * which AmiNetXDuo release the file came from, which made keeping track of an
+ * installation error-prone. A user reported exactly that.
+ *
+ * So every file says the release, and the short commit after it, because a tag
+ * pins a version but a build from a working tree does not:
+ *
+ *   Version full file C:ping
+ *   ping 0.16.1 (1.8.2026) AmiNetXDuo f75f058
+ *
+ * "AmiNetXDuo" is in there because Roadshow ships commands with these exact
+ * names -- AddNetInterface, ping, arp, netstat -- and its own tags say only
+ * "AddNetInterface 4.62 (27.8.2023)". On a machine that has had both, the
+ * product name is the only thing that tells the two apart. Same placement
+ * Roadshow uses for its library: after the date, where `Version` prints it.
+ *
+ * Length is not a problem at this size. Roadshow's library ships a 67-byte
+ * string; nothing in the NDK documents a limit, and under ~80 keeps it on one
+ * Shell line.
+ *
+ * The date is the last commit's, not the clock's, so two builds of the same
+ * source say the same thing.
+ */
+#define TOOL_VERSTAG(name_) \
+    "$VER: " name_ " " AMINETXDUO_VERSION " (" AMINETXDUO_VERSION_DATE ") " \
+    "AmiNetXDuo " AMINETXDUO_VERSION_HASH
+
 #endif /* AMINETXDUO_VERSION_H */

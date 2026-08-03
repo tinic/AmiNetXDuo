@@ -132,8 +132,18 @@ const char *tool_device_where(const char *device);
  * Open and immediately close a SANA-II device, to find out whether it really
  * works. 0 means it opened; anything else is the OpenDevice() error.
  */
+/* TOOL_VERSTAG, which every command uses for its $VER: string. */
+#include "aminetxduo/version.h"
+
 #define TOOL_PROBE_NO_NAME      (-100)
 #define TOOL_PROBE_NO_MEMORY    (-101)
+
+/* The device opened and then refused S2_DEVICEQUERY -- the driver is there and
+   the card answered the open, so neither the unit number nor a missing file is
+   what to look at. Same distinction the library draws as AMI_NET_ERR_DEVBAD;
+   the probe has to derive it because a failed OpenLibrary() carries no status
+   back to a command. */
+#define TOOL_PROBE_REFUSED      (-102)
 LONG tool_device_probe(const char *device, ULONG unit);
 
 /* Indented advice under an error line, and a blank separator. */
@@ -184,6 +194,7 @@ struct Library *tool_stack_start(VOID);
  * stack will hand out somebody else's.
  */
 BOOL tool_stack_is_ours(struct Library *base);
+BOOL tool_stack_version(char *buf, ULONG len);
 VOID tool_explain_foreign_stack(struct Library *base);
 
 /*

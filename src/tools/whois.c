@@ -22,11 +22,12 @@
  */
 
 #include "toolsock.h"
+#include "aminetxduo/version.h"
 
 const char *const tool_name = "whois";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: whois 1.0 (26.7.2026)";
+    TOOL_VERSTAG("whois");
 
 #define TEMPLATE    "QUERY/A,SERVER/K,PORT/N/K,FOLLOW/S"
 

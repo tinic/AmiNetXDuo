@@ -37,18 +37,20 @@
  */
 
 #include "tools_nx.h"
+#include "aminetxduo/version.h"
 
 const char *const tool_name = "GetNetStatus";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: GetNetStatus 1.0 (26.7.2026)";
+    TOOL_VERSTAG("GetNetStatus");
 
-#define TEMPLATE    "CHECK/K,QUIET/S"
+#define TEMPLATE    "CHECK/K,QUIET/S,VERSION/S"
 
 enum
 {
     ARG_CHECK = 0,
     ARG_QUIET,
+    ARG_VERSION,
     ARG_COUNT
 };
 
@@ -244,8 +246,9 @@ int main(int argc, char **argv)
 
     tool_break_arm();
 
-    args[ARG_CHECK] = 0;
-    args[ARG_QUIET] = 0;
+    args[ARG_CHECK]   = 0;
+    args[ARG_QUIET]   = 0;
+    args[ARG_VERSION] = 0;
 
     rda = ReadArgs((CONST_STRPTR)TEMPLATE, args, NULL);
     if (rda == NULL)
@@ -258,6 +261,35 @@ int main(int argc, char **argv)
 
     gns_quiet = (args[ARG_QUIET] != 0) ? TRUE : FALSE;
     check     = (const char *)args[ARG_CHECK];
+
+    /*
+     * VERSION reports the LIBRARY's version, not this command's -- C: and
+     * LIBS: are updated separately and the copy in memory is the one a script
+     * wants to know about. `Version C:GetNetStatus` answers the other
+     * question. Asked for by a user with no way to tell installed versions
+     * apart.
+     *
+     * It does not open the library: a script asking what is running must not
+     * start the network by asking.
+     */
+    if (args[ARG_VERSION] != 0)
+    {
+        char id[64];
+
+        if (tool_stack_version(id, sizeof(id)))
+        {
+            tool_printf("%s\n", (LONG)id);
+            FreeArgs(rda);
+            return RETURN_OK;
+        }
+
+        if (!gns_quiet)
+            tool_error("the network library is not loaded, so it has no "
+                       "version to report");
+
+        FreeArgs(rda);
+        return RETURN_WARN;
+    }
 
     if (check != NULL)
     {

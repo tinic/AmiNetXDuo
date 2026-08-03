@@ -35,7 +35,7 @@
 const char *const tool_name = "NetSetup";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: NetSetup 1.0 (25.7.2026)";
+    TOOL_VERSTAG("NetSetup");
 
 #define TEMPLATE \
     "NAME,DEVICE/K,UNIT/K/N,DHCP/S,ADDRESS/K,NETMASK/K,GATEWAY/K,DNS/K," \

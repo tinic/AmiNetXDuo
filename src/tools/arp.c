@@ -57,7 +57,7 @@
 const char *const tool_name = "arp";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: arp 1.0 (28.7.2026)";
+    TOOL_VERSTAG("arp");
 
 #define TEMPLATE    "ADDRESS,DELETE/S,SET/K,UNIT/K/N,STATS/S,QUIET/S"
 

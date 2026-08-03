@@ -56,11 +56,12 @@
 
 #include <proto/exec.h>
 #include <devices/timer.h>
+#include "aminetxduo/version.h"
 
 const char *const tool_name = "ping";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: ping 3.0 (26.7.2026)";
+    TOOL_VERSTAG("ping");
 
 #define TEMPLATE    "-c=COUNT/K/N,-i=INTERVAL/K/N,-l=LOAD/K/N," \
                     "-n=NUMERICONLY=NUMERIC/S,-o=ONEREPLY/S,-q=QUIET/S," \

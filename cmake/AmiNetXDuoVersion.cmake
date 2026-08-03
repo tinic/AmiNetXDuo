@@ -123,6 +123,38 @@ set(AMINETXDUO_VERSION_COMPOUND
 set(AMINETXDUO_VERSION_LONG
     "AmiNetXDuo ${AMINETXDUO_VERSION} (NetX Duo ${AMINETXDUO_NETXDUO_VERSION}, ThreadX ${AMINETXDUO_THREADX_VERSION})")
 
+# The short commit, for the $VER: strings. A release tag pins the version, but
+# a build from a working tree does not -- and "which 0.16.1 is this" is exactly
+# the question a user tracking an installation asks. Empty outside a checkout.
+set(AMINETXDUO_VERSION_HASH "")
+find_package(Git QUIET)
+if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" rev-parse --short=7 HEAD
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        OUTPUT_VARIABLE AMINETXDUO_VERSION_HASH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+endif()
+
+# AmigaOS $VER: wants a d.m.yyyy date after the version, and `Version` prints
+# it. Taken from the last commit rather than the clock so two builds of the
+# same source say the same thing; falls back to the configure date outside a
+# checkout, which is what an unpacked source tarball is.
+set(AMINETXDUO_VERSION_DATE "")
+find_package(Git QUIET)
+if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" log -1 --format=%cd --date=format:%-d.%-m.%Y
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        OUTPUT_VARIABLE AMINETXDUO_VERSION_DATE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+endif()
+if(AMINETXDUO_VERSION_DATE STREQUAL "")
+    string(TIMESTAMP AMINETXDUO_VERSION_DATE "%d.%m.%Y")
+endif()
+
 # The commit count, by the project's convention, appears in a binary's version
 # output and nowhere else -- not in the tag, not in the release name, not in
 # the archive filename.  Snapshot at configure time; empty outside a checkout,

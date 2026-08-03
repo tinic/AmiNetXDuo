@@ -31,11 +31,12 @@
  */
 
 #include "toolsock.h"
+#include "aminetxduo/version.h"
 
 const char *const tool_name = "tftp";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: tftp 1.0 (26.7.2026)";
+    TOOL_VERSTAG("tftp");
 
 #define TEMPLATE    "HOST/A,GET/K,PUT/K,AS/K,PORT/N/K,TIMEOUT/N/K,QUIET/S"
 

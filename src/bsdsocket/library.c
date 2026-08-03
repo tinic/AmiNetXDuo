@@ -17,6 +17,7 @@
 #include "netmonitor.h"
 
 #include "aminetxduo/config.h"
+#include "aminetxduo/version.h"
 
 #include <dos/dostags.h>
 #include <proto/exec.h>
@@ -36,7 +37,38 @@ asm("    .text                       \n"
     "    rts                         \n");
 
 static char bsd_lib_name[]  = BSD_LIB_NAME;
-static char bsd_lib_id[]    = "bsdsocket.library 4.0 (AmiNetXDuo)\r\n";
+/*
+ * What `Version` and `lib_IdString` say.
+ *
+ * The library had NO $VER: string at all, so `version full file
+ * LIBS:bsdsocket.library` had nothing to read -- reported by a user trying to
+ * tell which release was installed. It carries the project's, like every
+ * command (src/tools/tools.h, TOOL_VERSTAG).
+ *
+ * lib_Version and lib_Revision are a different thing and are not ours to
+ * choose: 4 is what AmiTCP-era software opens us by, and the revision is the
+ * vector-table revision a caller checks before reaching the RFC 3493 slots.
+ * They stay where the ABI needs them, and lib_IdString says both so that
+ * neither question needs the other answered first.
+ *
+ *   Version full file LIBS:bsdsocket.library
+ *   bsdsocket.library 0.16.1 (1.8.2026) AmiNetXDuo f75f058
+ *
+ * The name is in there because Roadshow's library is also bsdsocket.library
+ * and says "Roadshow 1.15 DEMO version" in the same place. Two stacks, one
+ * filename; the product name is what tells them apart.
+ */
+#define BSD_STR2(x)         #x
+#define BSD_STR(x)          BSD_STR2(x)
+#define BSD_LIB_ABI_TEXT    BSD_STR(BSD_LIB_VERSION) "." BSD_STR(BSD_LIB_REVISION)
+
+static const char bsd_lib_ver[] __attribute__((used)) =
+    "$VER: bsdsocket.library " AMINETXDUO_VERSION
+    " (" AMINETXDUO_VERSION_DATE ") AmiNetXDuo " AMINETXDUO_VERSION_HASH;
+
+static char bsd_lib_id[] =
+    "bsdsocket.library " AMINETXDUO_VERSION " (AmiNetXDuo, ABI "
+    BSD_LIB_ABI_TEXT ")\r\n";
 
 static struct AmiSocketBase *bsd_lib_init(
     register struct AmiSocketBase *base    __asm("d0"),
@@ -345,6 +377,35 @@ static VOID bsd_netstack_boot_main(VOID)
        after it returns -- the parent Wait()s the whole time and `boot` lives
        on its stack until then. */
     b->nb_Result = netstack_startup();
+
+    /*
+     * A failed startup can still leave a stack standing: netstack_startup()
+     * sets ns_Refs to 1 when ami_ns_bring_up() fails with the NX_IP already
+     * made, on the grounds that a live stack has an owner. Here it has none --
+     * bsd_lib_open() is about to return NULL, so no base will ever be closed
+     * to give that reference back.
+     *
+     * Left alone it is permanent. sb_StackRefs was never incremented, so the
+     * next successful open takes ns_Refs to 2 and the last close only ever
+     * returns it to 1: the stack can never be freed and never be shut down
+     * again.
+     *
+     * The cost is not only the packet pool. A live stack has ThreadX threads
+     * running out of this segment, so the library can never be expunged
+     * either -- measured at about 400 KB kept on a 1 MB machine, which is the
+     * segment plus the pool at its AMI_POOL_MIN_PACKETS floor plus the NX_IP
+     * and the thread stacks. On the supported 1 MB floor that is most of the
+     * machine, held by a command that printed an error and exited.
+     *
+     * Given back here rather than in bsd_lib_open() because nx_ip_delete()
+     * waits for the IP thread, and this Process has 64 KB where the opener may
+     * be a Shell command with 4 KB. netstack_shutdown() returns at once when
+     * there is no stack, so the case where bring-up failed before allocating
+     * anything costs nothing.
+     */
+    if (b->nb_Result != AMI_NET_OK)
+        netstack_shutdown();
+
     Signal(b->nb_Parent, b->nb_SigMask);
 }
 

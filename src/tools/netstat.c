@@ -29,11 +29,12 @@
 #include "tools_nx.h"
 
 #include <stdlib.h>   /* atexit */
+#include "aminetxduo/version.h"
 
 const char *const tool_name = "netstat";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: netstat 1.1 (26.7.2026)";
+    TOOL_VERSTAG("netstat");
 
 #define TEMPLATE    "INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S,HEALTH=-h/S"
 

@@ -26,11 +26,12 @@
 #include "toolsock.h"
 
 #include <stdarg.h>
+#include "aminetxduo/version.h"
 
 const char *const tool_name = "NetTrace";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: NetTrace 1.0 (26.7.2026)";
+    TOOL_VERSTAG("NetTrace");
 
 #define TEMPLATE \
     "LOOPBACK/S,WIRE/S,HOST/K,PORT/N/K,PATH/K,BYTES/N/K,OUT/K,SNAP/N/K," \

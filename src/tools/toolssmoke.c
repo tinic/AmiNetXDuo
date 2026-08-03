@@ -24,11 +24,13 @@
 #include <dos/dos.h>
 #include <dos/dostags.h>
 #include <dos/dosextens.h>
+#include <exec/memory.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include "aminetxduo/version.h"
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: ToolsSmoke 1.0 (24.7.2026)";
+    TOOL_VERSTAG("ToolsSmoke");
 
 #define REPORT      "DH0:tools.txt"
 /*
@@ -319,7 +321,17 @@ int main(int argc, char **argv)
         }
         else
         {
-            report((const char *)"----- rc %ld -----\n", rc, 0);
+            /*
+             * Free memory after every command, the same accounting
+             * clients/dropbear/clientrun.c does for ported clients.  AmigaOS
+             * reclaims nothing when a process exits, so anything a command
+             * allocated and did not give back is gone until the next reboot,
+             * and a leak reads here as the same step down run after run.
+             * SystemTagList() above passes no NP_StackSize, so these run on
+             * the Shell's own stack -- which is what a 1 MB machine has.
+             */
+            report((const char *)"----- rc %ld, free %ld -----\n", rc,
+                   (LONG)AvailMem(MEMF_ANY));
         }
 
         if (SetSignal(0L, 0L) & SIGBREAKF_CTRL_C)

@@ -40,7 +40,7 @@
 const char *const tool_name = "AddNetInterface";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: AddNetInterface 2.0 (26.7.2026)";
+    TOOL_VERSTAG("AddNetInterface");
 
 #define TEMPLATE    "INTERFACE/M,QUIET/S,TIMEOUT/K/N"
 
@@ -480,6 +480,17 @@ int main(int argc, char **argv)
                 tool_error("another TCP/IP stack is installed on this machine");
                 tool_explain_foreign_stack(base);
             }
+
+            /*
+             * Closed, unlike the success path below.
+             *
+             * tool_stack_start() leaks its reference on purpose, because that
+             * is what keeps OUR network up after this command exits. None of
+             * that applies to somebody else's stack: nothing here is going to
+             * use it, and holding a reference to a library we are about to
+             * complain about only stops its owner unloading it.
+             */
+            CloseLibrary(base);
             FreeArgs(rda);
             return RETURN_WARN;
         }
@@ -510,11 +521,30 @@ int main(int argc, char **argv)
                 }
                 else
                 {
-                    tool_printf("%s: the network is running, but this machine "
-                                "has no address yet\n", (LONG)name);
+                    if (!ifc.up)
+                    {
+                        /*
+                         * The file says STATE=down, so there is no address
+                         * because none was asked for. Sending someone to check
+                         * a cable they deliberately left unplugged is the same
+                         * mistake as blaming a driver for a card that opened.
+                         */
+                        tool_printf("%s: the network is running, and %s is "
+                                    "configured down\n", (LONG)name, (LONG)name);
+                        tool_advise_blank();
+                        tool_advise("STATE=down in the interface file is why. The stack");
+                        tool_printf("  is up and every command works; run  Online %s  to\n",
+                                    (LONG)name);
+                        tool_advise("bring the card up and ask for an address.");
+                    }
+                    else
+                    {
+                        tool_printf("%s: the network is running, but this machine "
+                                    "has no address yet\n", (LONG)name);
 
-                    if (ifc.iptype == AMI_IPTYPE_DHCP)
-                        tool_explain_dhcp(name);
+                        if (ifc.iptype == AMI_IPTYPE_DHCP)
+                            tool_explain_dhcp(name);
+                    }
                 }
 
                 for (n = 1; n < count; n++)

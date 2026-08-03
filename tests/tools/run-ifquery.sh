@@ -64,7 +64,12 @@ RUNNER="${AMINETXDUO_RUNNER:-fsuae}"
 BOARD=a2065
 IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
 
-while getopts "m:t:b:AN:B:" opt; do
+# -D stages the interface configured down, which is the only way to test that
+# STATE=down is honoured: it is read once at startup and there is no way to ask
+# for it afterwards.  The assertion is at the bottom.
+STATE_DOWN=0
+
+while getopts "m:t:b:AN:B:D" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
@@ -72,7 +77,8 @@ while getopts "m:t:b:AN:B:" opt; do
         A) RUNNER=amiberry ;;
         N) BOARD="$OPTARG" ;;
         B) IFACE="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-A [-N board] [-B backend]]" >&2; exit 2 ;;
+        D) STATE_DOWN=1 ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-A [-N board] [-B backend]] [-D]" >&2; exit 2 ;;
     esac
 done
 
@@ -109,6 +115,15 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
+
+if [ "$STATE_DOWN" = "1" ]; then
+    # Roadshow's default is up, so the line has to be added rather than changed.
+    for cfg in "$STAGE"/devs/NetInterfaces/*; do
+        [ -f "$cfg" ] || continue
+        printf 'STATE=down\n' >> "$cfg"
+        echo "==> staged $(basename "$cfg") with STATE=down"
+    done
+fi
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
 cp "$TOOLS/netstat" "$STAGE/netstat"
@@ -196,7 +211,23 @@ if [ "$STARTS" -eq 2 ]; then
 elif [ "$STARTS" -gt 2 ]; then
     fail "THE MACHINE REBOOTED: the command list restarted"
 else
-    fail "the run did not reach both IfProbe invocations"
+    # INCONCLUSIVE, not failed, and it stops here.
+    #
+    # Every assertion below reads $REPORT, so a guest that stopped early fails
+    # all of them at once and the output reads as sixty defects in the code
+    # under test. It is not: it is one run that did not happen. That has cost a
+    # four-run bisect of a change that turned out to be innocent -- the same
+    # binary passed on the next attempt and three times after it.
+    #
+    # Seen once in about nine runs of this harness, cause unknown, so it is
+    # worth telling apart rather than explaining away.
+    echo
+    echo "INCONCLUSIVE: the guest ran $STARTS of 2 IfProbe invocations." >&2
+    echo "  It stopped early. Nothing below was tested, so nothing below is" >&2
+    echo "  reported. Run it again; if it repeats, the guest is the subject." >&2
+    echo
+    echo "ifquery: INCONCLUSIVE" >&2
+    exit 2
 fi
 
 # ---- the list ------------------------------------------------------------
@@ -241,30 +272,38 @@ else
     fail "IFQ_HardwareAddress wrote past the six bytes of an Ethernet address"
 fi
 
-if grep -Eq "IFQ_Address +10\.0\.2\.[0-9]+ \(len 16 family 2\)" "$REPORT"; then
-    pass "IFQ_Address is a well-formed sockaddr_in holding the leased address"
-else
-    fail "IFQ_Address is not a well-formed sockaddr_in"
+if live_only; then
+    if grep -Eq "IFQ_Address +10\.0\.2\.[0-9]+ \(len 16 family 2\)" "$REPORT"; then
+        pass "IFQ_Address is a well-formed sockaddr_in holding the leased address"
+    else
+        fail "IFQ_Address is not a well-formed sockaddr_in"
+    fi
 fi
 
-if grep -Eq "IFQ_NetMask +255\." "$REPORT"; then
-    pass "IFQ_NetMask is the interface's mask"
-else
-    fail "IFQ_NetMask did not come back"
+if live_only; then
+    if grep -Eq "IFQ_NetMask +255\." "$REPORT"; then
+        pass "IFQ_NetMask is the interface's mask"
+    else
+        fail "IFQ_NetMask did not come back"
+    fi
 fi
 
 # SM_Up is 3 and SM_Down is 2; the autodoc restricts this tag to those two.
-if grep -Eq "IFQ_State +3$" "$REPORT"; then
-    pass "IFQ_State is SM_Up on a live interface"
-else
-    fail "IFQ_State is not SM_Up"
+if live_only; then
+    if grep -Eq "IFQ_State +3$" "$REPORT"; then
+        pass "IFQ_State is SM_Up on a live interface"
+    else
+        fail "IFQ_State is not SM_Up"
+    fi
 fi
 
 # The lease came from SLIRP's DHCP server, so the bind type is IFABT_Dynamic.
-if grep -Eq "IFQ_AddressBindType +2$" "$REPORT"; then
-    pass "IFQ_AddressBindType is IFABT_Dynamic for a DHCP lease"
-else
-    fail "IFQ_AddressBindType is not IFABT_Dynamic"
+if live_only; then
+    if grep -Eq "IFQ_AddressBindType +2$" "$REPORT"; then
+        pass "IFQ_AddressBindType is IFABT_Dynamic for a DHCP lease"
+    else
+        fail "IFQ_AddressBindType is not IFABT_Dynamic"
+    fi
 fi
 
 if grep -Eq "IFQ_MTU +1500$" "$REPORT"; then
@@ -321,10 +360,12 @@ else
     fail "IFC_Metric was accepted, or the call did not run"
 fi
 
-if grep -q "config: mask after the refusal: .* -- unchanged, correctly" "$REPORT"; then
-    pass "and nothing in that list was applied: validate first, then act"
-else
-    fail "the refused list changed the netmask -- the call is not atomic"
+if live_only; then
+    if grep -q "config: mask after the refusal: .* -- unchanged, correctly" "$REPORT"; then
+        pass "and nothing in that list was applied: validate first, then act"
+    else
+        fail "the refused list changed the netmask -- the call is not atomic"
+    fi
 fi
 
 # What made IFC_Metric unsupported is that IFQ_Metric would answer something
@@ -370,16 +411,20 @@ else
     fail "IFC_LimitMTU 9000 was not clamped to the driver's 1500"
 fi
 
-if grep -Eq "config: address -> 10\.0\.2\.200: rc 0, IFQ_Address now 10\.0\.2\.200" "$REPORT"; then
-    pass "IFC_Address moved the interface address"
-else
-    fail "IFC_Address did not move the interface address"
+if live_only; then
+    if grep -Eq "config: address -> 10\.0\.2\.200: rc 0, IFQ_Address now 10\.0\.2\.200" "$REPORT"; then
+        pass "IFC_Address moved the interface address"
+    else
+        fail "IFC_Address did not move the interface address"
+    fi
 fi
 
-if grep -Eq "config: address restored: rc 0, IFQ_Address now 10\.0\.2\.[0-9]+" "$REPORT"; then
-    pass "and IFC_Address with IFC_NetMask put it back in one call"
-else
-    fail "the address was not restored"
+if live_only; then
+    if grep -Eq "config: address restored: rc 0, IFQ_Address now 10\.0\.2\.[0-9]+" "$REPORT"; then
+        pass "and IFC_Address with IFC_NetMask put it back in one call"
+    else
+        fail "the address was not restored"
+    fi
 fi
 
 if grep -q "config: SM_Down: .* -- down, correctly" "$REPORT"; then
@@ -515,16 +560,20 @@ fi
 # that is really counting cannot report zero for either of these.  A stub
 # returning a zeroed struct of the right size passes every structural check
 # and fails here.
-if grep -Eq "^NETSTATUS_ip: rc 96 total [1-9][0-9]* localout [1-9][0-9]* " "$REPORT"; then
-    pass "ipstat carries the running stack's packet counts"
-else
-    fail "ipstat came back zeroed or the wrong size"
+if live_only; then
+    if grep -Eq "^NETSTATUS_ip: rc 96 total [1-9][0-9]* localout [1-9][0-9]* " "$REPORT"; then
+        pass "ipstat carries the running stack's packet counts"
+    else
+        fail "ipstat came back zeroed or the wrong size"
+    fi
 fi
 
-if grep -Eq "^NETSTATUS_udp: rc 36 ipackets [1-9][0-9]* opackets [1-9][0-9]* " "$REPORT"; then
-    pass "udpstat carries the DHCP exchange this machine actually had"
-else
-    fail "udpstat came back zeroed or the wrong size"
+if live_only; then
+    if grep -Eq "^NETSTATUS_udp: rc 36 ipackets [1-9][0-9]* opackets [1-9][0-9]* " "$REPORT"; then
+        pass "udpstat carries the DHCP exchange this machine actually had"
+    else
+        fail "udpstat came back zeroed or the wrong size"
+    fi
 fi
 
 # Every copy is bounded.  The guard bytes past the end are the assertion that
@@ -710,6 +759,42 @@ if grep -q "^slow: still running after a second: yes -- correctly" "$REPORT"; th
     pass "an allocation with no server to answer is still running a second in"
 else
     fail "the allocation did not stay in flight"
+fi
+
+# ---- and only one of them at a time --------------------------------------
+#
+# "AAMR_Busy -- Address allocation is already in progress for this interface."
+# bsd_aam_launch() claims bsd_aam_jobs[index] under Forbid() and refuses a
+# launch that finds it taken.  Nothing one process does can reach that guard:
+# BeginInterfaceConfig() is asynchronous, but the caller holding the job is the
+# one that would ask again, so the second request has to come from an unrelated
+# program with a base of its own.  The probe forks one, during the window above
+# in which a worker is certainly running.
+#
+# THE RESULT CODE ALONE WOULD NOT CATCH IT.  AAMR_Busy is answered twice over:
+# at the door by that guard, and -- if the guard is gone and the worker starts
+# anyway -- by netstack_interface_dhcp_start() refusing a second DHCP client on
+# one interface, which bsd_aam_worker() also reports as AAMR_Busy.  Measured:
+# with the guard deleted the second caller is STILL told 11.  What changes is
+# when.  A refusal comes back inside BeginInterfaceConfig(); the other answer
+# costs a CreateNewProc() and a worker's first DHCP call, and arrived ~10 ticks
+# later.  So the probe reports whether the message beat the call's return, and
+# that is what is asserted here.
+#
+# NEGATIVE CONTROL, measured: delete the `if (bsd_aam_jobs[index] != NULL)`
+# branch from src/bsdsocket/addralloc.c and this line reads "REPLIED LATE, so a
+# worker was started".  The collateral is worth knowing too -- the second
+# launch overwrites bsd_aam_jobs[index], so the FIRST caller's
+# AbortInterfaceConfig() can no longer find its own job and the three `slow:`
+# assertions below fail with it.
+if live_only; then
+    if grep -q "^busy: .* -- refused at the door with AAMR_Busy, correctly" "$REPORT"; then
+        pass "a second process asking for an interface already being configured is refused AAMR_Busy"
+    elif grep -q "^busy: .* -- NOT TESTED" "$REPORT"; then
+        fail "the second process never got as far as asking -- AAMR_Busy is UNTESTED"
+    else
+        fail "the second request got a worker of its own -- bsd_aam_jobs[] did not refuse it at the door, and the first caller's job is no longer the one in the table"
+    fi
 fi
 
 if grep -q "^slow: abort replied after .* -- AAMR_Aborted, correctly" "$REPORT"; then
@@ -921,6 +1006,25 @@ if grep -q "^RemoveNetMonitorHook(NULL) and twice: returned" "$REPORT"; then
     pass "RemoveNetMonitorHook is safe with NULL and with a hook already out"
 else
     fail "RemoveNetMonitorHook did not survive NULL or a double removal"
+fi
+
+# STATE=down, when it was staged.  SM_Down is 2 and SM_Up is 3
+# (libraries/bsdsocket.h).  The first IfProbe runs before anything has called
+# Online, so the state it reports is the one the config asked for -- and with
+# the default config that same reading is SM_Up, which is what makes this an
+# assertion rather than a restatement of the file.
+if [ "$STATE_DOWN" = "1" ]; then
+    if grep -q "^  IFQ_State *2$" "$REPORT"; then
+        pass "STATE=down was honoured: the interface came up configured down"
+    else
+        fail "STATE=down was ignored: $(grep -m1 '^  IFQ_State' "$REPORT")"
+    fi
+else
+    if grep -q "^  IFQ_State *3$" "$REPORT"; then
+        pass "the default config leaves the interface up"
+    else
+        fail "the default config did not leave the interface up"
+    fi
 fi
 
 echo

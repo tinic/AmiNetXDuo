@@ -70,6 +70,7 @@
 #include <libraries/locale.h>
 #include <proto/battclock.h>
 #include <proto/locale.h>
+#include "aminetxduo/version.h"
 
 const char *const tool_name = "sntp";
 
@@ -81,7 +82,7 @@ struct Library    *BattClockBase;
 struct LocaleBase *LocaleBase;
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: sntp 1.0 (26.7.2026)";
+    TOOL_VERSTAG("sntp");
 
 #define TEMPLATE    "SERVER/A,TIMEOUT/N/K,SHOW/S,QUIET/S"
 

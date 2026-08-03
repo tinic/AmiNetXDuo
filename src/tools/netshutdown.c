@@ -30,7 +30,7 @@
 const char *const tool_name = "NetShutdown";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: NetShutdown 1.0 (26.7.2026)";
+    TOOL_VERSTAG("NetShutdown");
 
 #define TEMPLATE    "TIMEOUT/N,QUIET/S"
 

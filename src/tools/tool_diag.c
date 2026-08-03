@@ -305,8 +305,30 @@ LONG tool_device_probe(const char *device, ULONG unit)
     req->ios2_BufferManagement               = tags;
 
     status = ami_sana2_open_device(device, unit, (struct IORequest *)req);
+
     if (status == 0)
+    {
+        /*
+         * Opening proves the driver and the unit; it does not prove the card.
+         * src/sana2/sana2_device.c calls S2_DEVICEQUERY straight after its own
+         * open and reports a refusal as AMI_NET_ERR_DEVBAD, so ask the same
+         * question here -- otherwise a card that opens and then answers
+         * nothing is reported as "opens perfectly well", which is true and
+         * useless.
+         */
+        struct Sana2DeviceQuery query;
+
+        query.SizeAvailable = (ULONG)sizeof(query);
+        query.SizeSupplied  = 0UL;
+
+        req->ios2_Req.io_Command = S2_DEVICEQUERY;
+        req->ios2_StatData       = &query;
+
+        if (DoIO((struct IORequest *)req) != 0 || query.SizeSupplied == 0UL)
+            status = TOOL_PROBE_REFUSED;
+
         CloseDevice((struct IORequest *)req);
+    }
 
     ami_free(req);
     DeleteMsgPort(port);
@@ -612,6 +634,56 @@ BOOL tool_stack_library_running(VOID)
     Permit();
 
     return running;
+}
+
+/*
+ * What the LOADED library says it is, copied out without opening it.
+ *
+ * The version that matters to someone asking "what am I running" is the
+ * library's, not the command's: C: and LIBS: are updated separately, and a
+ * machine with new commands over an old library is exactly the case worth
+ * reporting. Reading lib_IdString answers for the copy actually in memory.
+ *
+ * Looking, not opening, for the reason tool_stack_library_running() gives --
+ * a status command must not start the network as a side effect of being asked
+ * a question. Copied rather than returned by pointer, because the library can
+ * expunge the moment Forbid() ends and the string goes with it.
+ *
+ * FALSE when no library is loaded, which is not an error: nothing has opened
+ * it yet, and the caller says so in its own words.
+ */
+BOOL tool_stack_version(char *buf, ULONG len)
+{
+    struct Library *lib;
+    BOOL            got = FALSE;
+
+    if (buf == NULL || len == 0UL)
+        return FALSE;
+
+    buf[0] = '\0';
+
+    Forbid();
+
+    lib = (struct Library *)FindName(&SysBase->LibList,
+                                     (CONST_STRPTR)"bsdsocket.library");
+    if (lib != NULL && lib->lib_IdString != NULL)
+    {
+        const char *id = (const char *)lib->lib_IdString;
+        ULONG       i;
+
+        /* lib_IdString ends "\r\n" by convention; neither belongs in a line
+           this command is composing itself. */
+        for (i = 0; i + 1UL < len && id[i] != '\0' &&
+                    id[i] != '\r' && id[i] != '\n'; i++)
+            buf[i] = id[i];
+
+        buf[i] = '\0';
+        got    = (BOOL)(i > 0UL);
+    }
+
+    Permit();
+
+    return got;
 }
 
 BOOL tool_stack_installed(VOID)

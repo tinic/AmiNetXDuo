@@ -27,11 +27,12 @@
  */
 
 #include "toolsock.h"
+#include "aminetxduo/version.h"
 
 const char *const tool_name = "telnet";
 
 static const char version_tag[] __attribute__((used)) =
-    "$VER: telnet 1.0 (25.7.2026)";
+    TOOL_VERSTAG("telnet");
 
 #define TEMPLATE    "HOST/A,PORT,DEBUG=-d/S,QUIET/S"
 
