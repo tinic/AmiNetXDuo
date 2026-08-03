@@ -156,6 +156,8 @@ VOID ami_sana2_rxprobe_deliver(AmiSana2If *iface, const UCHAR *frame,
         return;
     }
 
+    sp->data_frames++;
+
     if (!sp->armed)
     {
         if (payload < 512)
@@ -190,6 +192,7 @@ VOID ami_sana2_rxprobe_deliver(AmiSana2If *iface, const UCHAR *frame,
             sp->gap_want[sp->gaps]  = sp->next;
             sp->gap_got[sp->gaps]   = seq;
             sp->gap_avail[sp->gaps] = sp->avail;
+            sp->gap_open[sp->gaps]  = ami_rxprobe_clock();
         }
         sp->gaps++;
         sp->ahead++;
@@ -198,7 +201,23 @@ VOID ami_sana2_rxprobe_deliver(AmiSana2If *iface, const UCHAR *frame,
     }
     else
     {
+        UWORD g;
+
         sp->behind++;
+
+        /* A hole closing sub-millisecond is a frame that came late; one
+           closing an RTT later is one the peer sent again. */
+        for (g = 0; g < sp->gaps && g < AMI_RXPROBE_GAPS; g++)
+        {
+            if (sp->gap_want[g] == seq && sp->gap_fill[g] == 0)
+            {
+                ULONG dt = ami_rxprobe_clock() - sp->gap_open[g];
+
+                sp->gap_fill[g] = (dt != 0) ? dt : 1;
+                break;
+            }
+        }
+
         if ((LONG)(seq + payload - sp->next) > 0)
             sp->next = seq + payload;
     }
@@ -281,17 +300,19 @@ VOID ami_sana2_rxprobe_report(const AmiSana2If *iface)
     }
 
     AMI_ERROR("rxprobe seq: peer %08lx %ld->%ld inorder %ld ahead %ld "
-              "(%ld bytes) behind %ld ack %ld other %ld",
+              "(%ld bytes) behind %ld ack %ld other %ld data %ld",
               (long)sp->peer, (long)sp->sport, (long)sp->dport,
               (long)sp->inorder, (long)sp->ahead, (long)sp->ahead_bytes,
-              (long)sp->behind, (long)sp->pure_ack, (long)sp->other);
+              (long)sp->behind, (long)sp->pure_ack, (long)sp->other,
+              (long)sp->data_frames);
 
     for (i = 0; i < sp->gaps && i < AMI_RXPROBE_GAPS; i++)
     {
-        AMI_ERROR("rxprobe gap %ld: want %08lx got %08lx (%ld bytes) avail %ld",
+        AMI_ERROR("rxprobe gap %ld: want %08lx got %08lx (%ld bytes) avail %ld "
+                  "filled after %ld ticks",
                   (long)i, (long)sp->gap_want[i], (long)sp->gap_got[i],
                   (long)(sp->gap_got[i] - sp->gap_want[i]),
-                  (long)sp->gap_avail[i]);
+                  (long)sp->gap_avail[i], (long)sp->gap_fill[i]);
     }
 }
 

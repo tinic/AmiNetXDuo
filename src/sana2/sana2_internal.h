@@ -197,8 +197,14 @@ typedef struct AmiRxSeqProbe
 
     ULONG   gap_want[AMI_RXPROBE_GAPS];
     ULONG   gap_got[AMI_RXPROBE_GAPS];
+    ULONG   gap_open[AMI_RXPROBE_GAPS];   /* E-Clock when the hole opened  */
+    ULONG   gap_fill[AMI_RXPROBE_GAPS];   /* ticks until `want` turned up  */
     UWORD   gap_avail[AMI_RXPROBE_GAPS];
     UWORD   gaps;
+
+    /* Every TCP segment with a payload, whatever the flow, so the total can
+       be compared with a capture without assuming what `other` counted. */
+    ULONG   data_frames;
 
     UWORD   avail;              /* reads outstanding during this drain     */
 } AmiRxSeqProbe;
