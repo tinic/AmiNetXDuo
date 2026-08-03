@@ -32,7 +32,8 @@ tree, `nx_ip_checksum_compute.c`, for the same reason.
 `nx_secure_tls_record_payload_encrypt.c` and
 `nx_secure_tls_record_payload_decrypt.c` here are copies of the files of the
 same name in `third_party/netxduo/nx_secure/src/`, with one branch added to
-each.  `src/tls/CMakeLists.txt` drops the vendored pair from the glob so that
+each and nothing else of substance -- "The whole of the diff" below is the
+list.  `src/tls/CMakeLists.txt` drops the vendored pair from the glob so that
 these are the ones every internal caller resolves to -- the same mechanism the
 top level uses for `_nx_ip_checksum_compute()`, and for the same reason: a
 NetX Duo inner loop can be replaced without editing `third_party/`.
