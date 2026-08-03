@@ -202,14 +202,24 @@ permanently at a cost of one byte every 29 seconds each. The same root cause
 makes a chunked PUT skip the free-space precheck, which is gated on a nonzero
 `body_left`.
 
-**httpd — locks are checked only on the request path, never on descendants.**
-The lock lookup walks upward: the path itself, or a depth-infinity lock above
-it. Nothing looks down, so a lock on `/a/b/c` does not stop `DELETE /a`, nor a
-COPY or MOVE whose clear walk sweeps the destination tree. RFC 4918 §9.6.1
-requires that DELETE to fail. Separately, `httpd_reset()` defaults depth to 1,
-so a LOCK carrying no `Depth` header is stored as an infinite-depth lock — a
-LOCK on `/` with no header covers the whole tree for up to an hour. Making the
-root lockable is correct; the default is the bug.
+**httpd — a COPY or MOVE whose destination name is too long for the
+filesystem, with nothing already in the way.** The name-truncation check
+catches a *collision*, not the first create, so a deep copy to a name the
+filesystem would shorten still lands. Undoing a completed deep copy is a second
+walk, which is why it was left. PUT and MKCOL do undo such a create and answer
+400; COPY and MOVE do not.
+
+~~httpd — locks are checked only on the request path, never on descendants.~~
+**Fixed**: `httpd_lock_allows_tree()` now covers DELETE and the MOVE source, so
+a lock on `/a/b/c` refuses `DELETE /a` with 423 as RFC 4918 §9.6.1 requires. A
+COPY/MOVE *destination* clear deliberately keeps its locks — §7 keeps them, and
+it is the token the client submitted to authorise the move.
+
+**Correction to an earlier entry in this section: the LOCK depth default is not
+a defect.** It was listed here as one. RFC 4918 §10.2 and §9.10.3 both make an
+absent `Depth` header on LOCK mean infinity, so storing infinity is exactly
+right. `httpd_reset()`'s `depth = 1` only *reads* oddly, because 1 is the
+internal spelling of infinity in that table.
 
 **httpd — two issues to confirm on hardware.** A document root given with a
 trailing slash may resolve to its parent: `httpd_root` is taken raw from
