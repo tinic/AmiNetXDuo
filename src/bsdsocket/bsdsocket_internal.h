@@ -294,6 +294,13 @@ typedef struct
 #define BSD_TCP_WINDOW        8192
 #endif
 
+/* The UDP receive queue, in datagrams. bsd_udp_queue_max() in socket.c derives
+   the per-socket default from the pool between these two; options.c bounds a
+   SO_RCVBUF request by the ceiling. */
+#define BSD_UDP_QUEUE_MIN       8
+#define BSD_UDP_QUEUE_CEILING   64
+#define BSD_UDP_POOL_SHARE      4       /* 1/N of the pool per socket       */
+
 /*
  * Ceiling. 65535 is the architectural cap: NX_ENABLE_TCP_WINDOW_SCALING is not
  * defined here, so the window is whatever fits in the 16-bit header field and
@@ -538,7 +545,6 @@ struct AmiSocketBase
 #define ASF_REUSEADDR   (1UL << 12)
 #define ASF_BROADCAST   (1UL << 13)
 #define ASF_KEEPALIVE   (1UL << 14)
-#define ASF_OOBINLINE   (1UL << 15)
 #define ASF_DELETED     (1UL << 16)   /* NX socket already torn down        */
 #define ASF_NXBOUND     (1UL << 17)   /* NetX Duo holds the port            */
 #define ASF_SERVER      (1UL << 18)   /* came off a listen port: unaccept   */
@@ -550,18 +556,12 @@ struct AmiSocketBase
 #define ASF_CLOSING     (1UL << 24)   /* FIN sent, parked for a late reap   */
 
 /*
- * as_CmsgWant -- which RFC 3542 ancillary objects this socket asked for, and
- * in whose numbering. Its own word rather than more ASF_ bits: the numbering
- * has to be remembered alongside each option, which doubles the bit count,
- * and as_Flags is a hot field every path tests.
- *
- * The _LINUX bits are what a caller enabled the option with, and decide the
- * cmsg_type it gets back -- see the note in aminetxduo/cmsg.h.
+ * as_CmsgWant -- which RFC 3542 ancillary objects this socket asked for. Its
+ * own word rather than more ASF_ bits: as_Flags is a hot field every path
+ * tests, and these are read once per datagram.
  */
 #define ACW_RECVPKTINFO6    (1UL << 0)  /* IPV6_RECVPKTINFO                  */
 #define ACW_RECVHOPLIMIT    (1UL << 1)  /* IPV6_RECVHOPLIMIT                 */
-#define ACW_PKTINFO6_LINUX  (1UL << 2)
-#define ACW_HOPLIMIT_LINUX  (1UL << 3)
 #define ACW_PKTINFO4        (1UL << 4)  /* IP_PKTINFO                        */
 #define ACW_RECVDSTADDR4    (1UL << 5)  /* IP_RECVDSTADDR                    */
 #define ACW_STICKY6         (1UL << 6)  /* setsockopt IPV6_PKTINFO named one */
@@ -843,6 +843,10 @@ VOID  bsd_sockaddr_put(const AmiSocket *sock, struct sockaddr *sa,
    nothing but a ULONG (nx_udp_source_extract, the peer of an accepted v4
    connection, ...). */
 VOID  bsd_addr_from_v4(NXD_ADDRESS *addr, ULONG v4);
+
+/* options.c -- as_Ttl and as_Tos onto the live NetX socket, which is what puts
+   IP_TTL and IP_TOS on the wire. Caller holds the bsd_nx_enter() bracket. */
+VOID  bsd_opt_apply_ip(AmiSocket *sock);
 
 #ifdef AMINETXDUO_IPV6
 /* in6.c -- everything that only exists in the dual-stack build. */
