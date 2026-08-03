@@ -354,6 +354,23 @@ static VOID load_gateway(AmiConfig *cfg)
     }
 }
 
+static VOID load_tcp_handler(AmiConfig *cfg)
+{
+    char *buf = (char *)ami_cfg_read_file(AMI_CFG_FILE_TCPHANDLER, NULL);
+
+    if (buf == NULL)
+        return;                     /* no file: the device stays published */
+
+    ami_cfg_problem_file(AMI_CFG_FILE_TCPHANDLER);
+    ami_cfg_parse_tcp_handler(buf, &cfg->tcp_handler);
+    ami_cfg_problem_file(NULL);
+
+    ami_free(buf);
+
+    if (!cfg->tcp_handler)
+        AMI_INFO("config: TCP: switched off in " AMI_CFG_FILE_TCPHANDLER);
+}
+
 #ifdef AMINETXDUO_MDNS
 /*
  * Only in an mDNS build. The AmiSdService fields exist in both, so nothing
@@ -413,10 +430,12 @@ LONG ami_config_load(AmiConfig *cfg)
         return AMI_CFG_ERR_SYNTAX;
 
     ami_cfg_zero(cfg, sizeof(*cfg));
+    cfg->tcp_handler = TRUE;
 
     load_interfaces(cfg);
     load_resolver(cfg);
     load_gateway(cfg);
+    load_tcp_handler(cfg);
 #ifdef AMINETXDUO_MDNS
     load_dnssd(cfg);
 #endif

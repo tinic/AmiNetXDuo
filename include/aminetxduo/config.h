@@ -184,6 +184,15 @@ typedef struct AmiConfig {
     ULONG               default_gateway;     /* 0 = none / from DHCP             */
 
     /*
+     * Publish the TCP: device. TRUE unless DEVS:Internet/tcp_handler turns it
+     * off, because a machine that used `Type TCP:host/daytime` yesterday must
+     * still do so after an upgrade. ami_config_load() sets it; anything that
+     * merely zeroes an AmiConfig and reads this gets "off", which is why the
+     * one caller that acts on it treats a missing config as "on".
+     */
+    BOOL                tcp_handler;
+
+    /*
      * Present in every build, like the IPv6 interface fields above: one
      * AmiConfig serves a build with AMINETXDUO_MDNS and one without, and only
      * the loader and the netstack act on these.

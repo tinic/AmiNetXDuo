@@ -77,6 +77,9 @@
 #include "bsdsocket_vectors.h"
 #include "tcp_handler.h"
 
+#include "aminetxduo/config.h"
+#include "aminetxduo/netstack.h"
+
 #include <proto/dos.h>
 #include <proto/exec.h>
 
@@ -1108,9 +1111,7 @@ static VOID tcp_ctrl_main(VOID)
                  * Lock("TCP:...") does get sent: `Copy` locks its source to
                  * compare it against C: before deciding what kind of copy this
                  * is (v40 copy.c). Refusing is enough; Copy carries on and
-                 * opens the stream instead. Handled here rather than in the
-                 * default arm so the log only names packets nobody has
-                 * considered.
+                 * opens the stream instead.
                  *
                  * The error code is load-bearing and is not the accurate one.
                  * ERROR_OBJECT_WRONG_TYPE describes TCP: better -- a stream is
@@ -1212,6 +1213,23 @@ VOID bsd_tcp_handler_start(struct AmiSocketBase *master)
      */
     if (me == NULL || me->tc_Node.ln_Type != NT_PROCESS)
         return;
+
+    /*
+     * DEVS:Internet/tcp_handler can turn the device off. Checked before the
+     * latch, so nothing is started and nothing published -- a handler that
+     * came up and was then removed would still have taken the name for as
+     * long as it took to remove it. A machine with no config at all keeps the
+     * device, which is the Roadshow-compatible default.
+     */
+    {
+        const AmiConfig *cfg = netstack_config();
+
+        if (cfg != NULL && !cfg->tcp_handler)
+        {
+            AMI_INFO("TCP: not published -- switched off in the configuration");
+            return;
+        }
+    }
 
     ObtainSemaphore(&master->sb_Lock);
     if (tcp_started)
