@@ -133,5 +133,13 @@ if(AMINETXDUO_BSDSOCKET_LINK)
     # ThreadX and NetX Duo do want memset/memcpy/memcmp and gcc wants its
     # integer-divide helpers, and the linker only pulls the archive members that
     # are actually referenced -- no stdio comes along for the ride.
-    target_link_options(bsdsocket_library PRIVATE -nostartfiles)
+    #
+    # The map is for tools/profiler/profreport.py --lib.  A profile of a real
+    # application samples this library as a shared library, and the linker
+    # leaves file statics out of HUNK_SYMBOL entirely -- their samples land
+    # silently on the preceding global.  The map's placement of each object,
+    # plus nm on that object, is the only route to them, and it is roughly half
+    # the symbols here.  It does not change the binary.
+    target_link_options(bsdsocket_library PRIVATE -nostartfiles
+        "-Wl,-Map=$<TARGET_FILE_DIR:bsdsocket_library>/bsdsocket.library.map")
 endif()

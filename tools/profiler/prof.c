@@ -224,6 +224,8 @@ static struct ProfLVO      *prof_lvos;
 static ULONG                prof_nlvos, prof_maxlvos;
 static struct ProfRange    *prof_ranges;
 static ULONG                prof_nranges, prof_maxranges;
+static struct ProfLibSeg   *prof_libsegs;
+static ULONG                prof_nlibsegs, prof_maxlibsegs;
 static struct ProfTask     *prof_tasks;
 static ULONG                prof_ntasks, prof_maxtasks;
 static struct ProfWindow   *prof_wins;
@@ -374,6 +376,144 @@ VOID prof_target_is_self(VOID)
 /* --------------------------------------------- where Kickstart's code is --- */
 
 /*
+ * Find a library's ProfSegTag, if it has one.  prof.h states the convention
+ * and why it is a scanned self-identifying record rather than an offset.
+ *
+ * Only the positive half is searched.  That is where a library's data is; the
+ * negative half is the jump table, and instruction bytes that happened to
+ * spell the magic would be a false positive to reject rather than an extra
+ * place worth looking.
+ *
+ * THE STEP IS TWO BYTES, NOT FOUR.  A longword on m68k is aligned to two, so
+ * a record of longwords sits at a four-byte offset only by luck -- and it does
+ * not: put this at the end of a struct with an odd number of words before it
+ * and it lands two mod four.  A four-byte scan walks straight past it and the
+ * library reports no tag at all, which looks exactly like a library that
+ * carries none.  Cost of getting it right: twice around a loop over a
+ * kilobyte or two.
+ */
+static const struct ProfSegTag *prof_find_segtag(const struct Library *lib)
+{
+const UWORD *p, *end;
+ULONG        span;
+
+    span = (ULONG)lib->lib_PosSize;
+    if (span < (ULONG)sizeof(struct ProfSegTag))
+    {
+        return(NULL);
+    }
+
+    p   = (const UWORD *)lib;
+    end = (const UWORD *)((const UBYTE *)lib + span
+                          - (ULONG)sizeof(struct ProfSegTag));
+
+    for (; p <= end; p++)
+    {
+    const struct ProfSegTag *t = (const struct ProfSegTag *)p;
+
+        if (t->pst_Magic != PROF_SEGTAG_MAGIC)          { continue; }
+        if (t->pst_Size  != (ULONG)sizeof(*t))          { continue; }
+        if (t->pst_LibBase != (ULONG)lib)               { continue; }
+        if (t->pst_SegList == 0UL)                      { continue; }
+        if ((t->pst_Magic + t->pst_Size + t->pst_LibBase +
+             t->pst_SegList + t->pst_Sum) != 0UL)       { continue; }
+
+        return(t);
+    }
+    return(NULL);
+}
+
+/*
+ * Walk a library's seglist and record its hunks, having first been told where
+ * the seglist is by the library itself.
+ *
+ * THE ANSWER IS CHECKED AGAINST SOMETHING ALREADY KNOWN.  The jump-table
+ * targets were resolved a moment ago from Exec's own structures, and every one
+ * of them is code in this library, so the hull of them must lie inside the
+ * hunks this walk produced.  A tag that points at some other program's
+ * seglist, or at a freed one, or at eight bytes that merely look like a
+ * segment header, fails that and the whole walk is discarded -- the library
+ * keeps its hull and stays named by module, which is where it started.
+ *
+ * The hunks go in only after the check passes, so a rejected library leaves
+ * nothing behind.
+ */
+static VOID prof_scan_lib_seglist(struct Library *lib, UWORD idx,
+                                  ULONG hull_lo, ULONG hull_hi)
+{
+const struct ProfSegTag *tag;
+BPTR                     seg;
+ULONG                    first = prof_nlibsegs;
+ULONG                    n, count = 0UL;
+BOOL                     lo_in = FALSE, hi_in = FALSE;
+
+    if (prof_libsegs == NULL)
+    {
+        return;
+    }
+
+    tag = prof_find_segtag(lib);
+    if (tag == NULL)
+    {
+        return;
+    }
+
+    for (seg = (BPTR)tag->pst_SegList; seg != (BPTR)0;
+         seg = (BPTR)(((ULONG *)BADDR(seg))[0]))
+    {
+    ULONG *hdr  = (ULONG *)BADDR(seg);
+    ULONG  base = (ULONG)&hdr[1];
+    ULONG  size;
+
+        /* An eight-byte header plus something, and not so much that the list
+           is being read out of somebody else's memory. */
+        if (hdr[-1] < 8UL || hdr[-1] > 16UL * 1024UL * 1024UL)
+        {
+            prof_nlibsegs = first;
+            return;
+        }
+        size = hdr[-1] - 8UL;
+
+        if (prof_nlibsegs >= prof_maxlibsegs)
+        {
+            prof_nlibsegs = first;
+            return;
+        }
+
+        prof_libsegs[prof_nlibsegs].pls_Base   = base;
+        prof_libsegs[prof_nlibsegs].pls_Size   = size;
+        prof_libsegs[prof_nlibsegs].pls_LibIdx = idx;
+        prof_libsegs[prof_nlibsegs].pls_Hunk   = (UWORD)count;
+        prof_nlibsegs++;
+
+        if (hull_lo >= base && hull_lo <  base + size) { lo_in = TRUE; }
+        if (hull_hi >= base && hull_hi <  base + size) { hi_in = TRUE; }
+
+        count++;
+        if (count >= 64UL)              /* a runaway list, not a library */
+        {
+            prof_nlibsegs = first;
+            return;
+        }
+    }
+
+    /* No hull to check against means nothing checked it, which is not a
+       standard this walk gets to skip. */
+    if (count == 0UL || hull_hi <= hull_lo || !lo_in || !hi_in)
+    {
+        prof_nlibsegs = first;
+        return;
+    }
+
+    for (n = first; n < prof_nlibsegs; n++)
+    {
+        prof_add_range(prof_libsegs[n].pls_Base,
+                       prof_libsegs[n].pls_Base + prof_libsegs[n].pls_Size,
+                       PRK_LIBSEG, idx, prof_libs[idx].pl_Name);
+    }
+}
+
+/*
  * Resolve one jump table.  Entry n of a library sits at base - 6*n and is
  * normally `JMP abs.l`; a few are `JMP d16(PC)`.  Anything else is left out
  * rather than guessed at -- a wrong target here would pull unrelated samples
@@ -462,6 +602,10 @@ UWORD   idx;
        the table resolves to no target at all and would otherwise go missing. */
     prof_add_range((ULONG)lib - lib->lib_NegSize, (ULONG)lib + lib->lib_PosSize,
                    PRK_LIB, idx, prof_libs[idx].pl_Name);
+
+    /* The measured extent, if the library will say where its seglist is.
+       Tried before the hull is added so it can use the hull to check. */
+    prof_scan_lib_seglist(lib, idx, lo, hi);
 
     /*
      * Past the last entry point there is still code.  Two kilobytes is enough
@@ -1069,6 +1213,11 @@ static VOID prof_free_tables(VOID)
         FreeMem(prof_ranges, prof_maxranges * (ULONG)sizeof(struct ProfRange));
         prof_ranges = NULL;
     }
+    if (prof_libsegs != NULL)
+    {
+        FreeMem(prof_libsegs, prof_maxlibsegs * (ULONG)sizeof(struct ProfLibSeg));
+        prof_libsegs = NULL;
+    }
     if (prof_tasks != NULL)
     {
         FreeMem(prof_tasks, prof_maxtasks * (ULONG)sizeof(struct ProfTask));
@@ -1125,16 +1274,21 @@ int              pass;
     prof_maxlibs   = nlib;
     prof_maxlvos   = nlvo;
     prof_maxtasks  = ntask;
-    prof_maxranges = nlib * 2UL + 128UL;
+    /* Hunks of libraries that cooperate.  Nothing sizes this from the machine
+       the way the tables above are sized: almost no library carries the tag,
+       and the ones that do have a handful of hunks each.  1.5 KB. */
+    prof_maxlibsegs = 128UL;
+    prof_maxranges  = nlib * 2UL + prof_maxlibsegs + 128UL;
 
     prof_libs   = (struct ProfLib *)AllocMem(prof_maxlibs * (ULONG)sizeof(struct ProfLib), MEMF_ANY | MEMF_CLEAR);
     prof_lvos   = (struct ProfLVO *)AllocMem(prof_maxlvos * (ULONG)sizeof(struct ProfLVO), MEMF_ANY | MEMF_CLEAR);
     prof_ranges = (struct ProfRange *)AllocMem(prof_maxranges * (ULONG)sizeof(struct ProfRange), MEMF_ANY | MEMF_CLEAR);
+    prof_libsegs = (struct ProfLibSeg *)AllocMem(prof_maxlibsegs * (ULONG)sizeof(struct ProfLibSeg), MEMF_ANY | MEMF_CLEAR);
     prof_tasks  = (struct ProfTask *)AllocMem(prof_maxtasks * (ULONG)sizeof(struct ProfTask), MEMF_ANY | MEMF_CLEAR);
     prof_wins   = (struct ProfWindow *)AllocMem(PROF_MAX_WINS * (ULONG)sizeof(struct ProfWindow), MEMF_ANY | MEMF_CLEAR);
 
     if (prof_libs == NULL || prof_lvos == NULL || prof_ranges == NULL ||
-        prof_tasks == NULL || prof_wins == NULL)
+        prof_libsegs == NULL || prof_tasks == NULL || prof_wins == NULL)
     {
         prof_free_tables();
         prof_err = "no memory for the symbol tables";
@@ -1164,6 +1318,7 @@ BOOL             claimed = FALSE;
     prof_nlibs   = 0UL;
     prof_nlvos   = 0UL;
     prof_nranges = 0UL;
+    prof_nlibsegs = 0UL;
     prof_ntasks  = 0UL;
 
     /* PAL or NTSC, from Exec rather than from graphics.library. */
@@ -1417,6 +1572,7 @@ BOOL              ok;
     hdr.ph_Frames      = prof_vblcount;
     hdr.ph_Channel     = prof_ch;
     hdr.ph_WinFrames   = PROF_WIN_FRAMES;
+    hdr.ph_NumLibSegs  = prof_nlibsegs;
 
     if ((eb->AttnFlags & AFF_68010) != 0) { hdr.ph_Flags |= PROFF_FMTVALID; }
     if (prof_dropped != 0UL)              { hdr.ph_Flags |= PROFF_OVERFLOW; }
@@ -1455,6 +1611,9 @@ BOOL              ok;
     ok &= prof_put(fh, prof_tasks, prof_ntasks * (ULONG)sizeof(struct ProfTask));
     ok &= prof_put(fh, prof_wins,  prof_nwins  * (ULONG)sizeof(struct ProfWindow));
     ok &= prof_put(fh, prof_buf,   stored      * (ULONG)sizeof(struct ProfSample));
+    /* Last, after the samples: see the version note in prof.h.  A version-2
+       reader stops at the end of the sample array and never sees these. */
+    ok &= prof_put(fh, prof_libsegs, prof_nlibsegs * (ULONG)sizeof(struct ProfLibSeg));
 
     Close(fh);
 

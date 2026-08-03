@@ -104,9 +104,16 @@ struct ProfSample
    record grew a field, so an old reader fed a new file would report addresses
    that are half a PC and half a timestamp.  That is precisely the class of
    silently-plausible wrongness this tool exists to avoid, so the two formats
-   do not share a magic number. */
+   do not share a magic number.
+
+   Version 3 adds the library segment table and nothing else: the sample record
+   is unchanged, which is why the magic is unchanged.  The new table is written
+   AFTER the samples and counted by a header field that was reserved and zero
+   in version 2, so a version-2 file read by this reader has none and a
+   version-3 file read by an older one is exactly a version-2 file with bytes
+   after the end.  Neither can misread the other's records. */
 #define PROF_MAGIC      0x41505232UL
-#define PROF_VERSION    2UL
+#define PROF_VERSION    3UL
 
 #define PROFF_FMTVALID  0x00000001UL    /* CPU is 68010+, ps_Format means it  */
 #define PROFF_OVERFLOW  0x00000002UL    /* buffer filled; samples were lost   */
@@ -142,7 +149,8 @@ struct ProfHeader
     ULONG   ph_Frames;      /* video frames the vertical-blank server saw   */
     ULONG   ph_Channel;     /* audio channel used, or ~0 for a CIA source   */
     ULONG   ph_WinFrames;   /* frames per window in the table below         */
-    ULONG   ph_Reserved[5];
+    ULONG   ph_NumLibSegs;  /* version 3; zero in a version-2 file          */
+    ULONG   ph_Reserved[4];
 };
 
 /* The profiled program's hunks, in load order, which is the order they appear
@@ -162,6 +170,67 @@ struct ProfLib
    actually lands.  A sample in ROM is named by the nearest preceding one. */
 struct ProfLVO  { ULONG pv_Target; UWORD pv_LibIdx; UWORD pv_LVO; };
 
+/*
+ * One hunk of a library that let its seglist be found -- the same pair as
+ * ProfSeg, plus which library and which hunk of it.  This is what turns a
+ * sample inside a shared library from a module into a function: subtract
+ * pls_Base and the remainder is a link-time offset into that hunk, which the
+ * host looks up in the library's own symbols exactly as it does the target's.
+ */
+struct ProfLibSeg
+{
+    ULONG   pls_Base;
+    ULONG   pls_Size;
+    UWORD   pls_LibIdx;     /* index into the ProfLib table */
+    UWORD   pls_Hunk;       /* load order, so 0 is .text    */
+};
+
+/*
+ * HOW A LIBRARY LETS ITS SEGLIST BE FOUND.
+ *
+ * A library base is a private struct.  Exec publishes the two dozen bytes of
+ * struct Library at the front of it and nothing after, so the seglist -- which
+ * every library keeps, because Expunge has to return it -- sits at an offset
+ * only that library's own source knows.  Reading it from a hard-coded offset
+ * would be a profiler asserting a layout it cannot check, and the first field
+ * anybody inserted would move it silently: the walk would still find eight
+ * bytes that look like a segment header, still produce hunk bases, and still
+ * resolve every address in the library to a wrong and entirely plausible name.
+ *
+ * So the library says where it is instead, in a record that identifies itself:
+ *
+ *   * Anywhere in the library's own positive half, at any word boundary -- a
+ *     longword on m68k is aligned to two bytes, so a record of longwords lands
+ *     four-aligned only by luck.  The profiler scans [base, base + PosSize)
+ *     for the magic; no offset is agreed in advance and none can go stale.
+ *   * pst_LibBase must equal the base it was found in, so a copy of the record
+ *     that has been moved -- a cloned library base, a stale image in freed
+ *     memory -- is refused rather than believed.
+ *   * pst_Sum makes the five longwords add to zero, so the magic appearing by
+ *     accident in somebody's data is not enough.
+ *
+ * The profiler then checks the answer against something it already knows: the
+ * hull of the library's own jump-table targets must lie inside the hunks the
+ * seglist walk produced.  A seglist that fails that is discarded and the
+ * library falls back to being named by module.  Which is also what a library
+ * that carries no tag at all gets -- most of them, since this is our
+ * convention and not Exec's.  See prof_find_segtag() in prof.c.
+ *
+ * A library adopting this needs no header from here.  It is five longwords:
+ * declare them, fill them in at init, and if the base is ever cloned fix up
+ * pst_LibBase and pst_Sum in the clone.
+ */
+#define PROF_SEGTAG_MAGIC   0x50534731UL    /* 'PSG1' */
+
+struct ProfSegTag
+{
+    ULONG   pst_Magic;      /* PROF_SEGTAG_MAGIC                            */
+    ULONG   pst_Size;       /* sizeof(struct ProfSegTag), so it can grow    */
+    ULONG   pst_LibBase;    /* the library base this record is embedded in  */
+    ULONG   pst_SegList;    /* BPTR, as LoadSeg() returned it               */
+    ULONG   pst_Sum;        /* chosen so the five longwords sum to zero     */
+};
+
 struct ProfMark { ULONG pm_Index; char pm_Label[28]; };
 
 /*
@@ -174,11 +243,16 @@ struct ProfMark { ULONG pm_Index; char pm_Label[28]; };
  * a ROM library's bracket a region of Kickstart.  Where a sample falls in a
  * hull but near no entry point the host says the module and not the function,
  * which is the honest answer.
+ *
+ * PRK_LIBSEG is the other thing entirely: a hunk of a library that let its
+ * seglist be found, which is a MEASURED extent rather than a bracket, and
+ * carries an offset the host can look up in that library's symbols.
  */
 #define PRK_TARGET      0       /* a hunk of the program being profiled     */
 #define PRK_PROFILER    1       /* a hunk of Profile itself                 */
 #define PRK_LIB         2       /* the code hull of a library/device        */
 #define PRK_MEMORY      3       /* a MemHeader, for anything left over      */
+#define PRK_LIBSEG      4       /* a hunk of a library, from its seglist    */
 
 struct ProfRange
 {
