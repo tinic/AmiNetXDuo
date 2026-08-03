@@ -707,6 +707,21 @@ def main():
             for name in ("under 1 ms", "1 to 5 ms", "5 to 15 ms",
                          "15 ms or more"):
                 print("    %-14s %5d" % (name, buckets[name]))
+            # A hole that closed inside a round trip was filled by something
+            # already in flight, which is the same statement the spurious
+            # test makes about a retransmission.  The two count different
+            # populations -- one hole can attract several retransmissions,
+            # and a hole the sender never reacted to attracts none -- so
+            # these are not equal, but they should move together, and a
+            # reading where one says reordering and the other says loss is a
+            # reading not to quote.
+            short = sum(1 for l in lives if l < a.rtt_floor)
+            print("  closed inside the %.2f ms round-trip floor  %d of %d "
+                  "holes (%.0f %%)," % (a.rtt_floor * 1e3, short, len(lives),
+                                        pct(short, len(lives))))
+            print("                    against %d of %d retransmissions "
+                  "spurious (%.0f %%)"
+                  % (a.spurious, a.retrans, pct(a.spurious, a.retrans)))
         print("wire-order gaps     %d  (peer data sent ahead of its own "
               "highest sequence;" % a.wire_gaps)
         print("                     this is an egress capture, so reordering "
