@@ -204,16 +204,16 @@ VOID ami_sana2_rxprobe_deliver(AmiSana2If *iface, const UCHAR *frame,
     }
 }
 
-VOID ami_sana2_rxprobe_report(AmiSana2If *iface)
+VOID ami_sana2_rxprobe_report(const AmiSana2If *iface)
 {
-    AmiRxSeqProbe *sp = &iface->seq;
+    const AmiRxSeqProbe *sp = &iface->seq;
     UWORD          i;
     UWORD          j;
 
     for (i = 0; i < AMI_SANA2_RX_READERS; i++)
     {
-        AmiSana2Rx *rx = &iface->rx[i];
-        AmiRxProbe *pr = &rx->probe;
+        const AmiSana2Rx *rx = &iface->rx[i];
+        const AmiRxProbe *pr = &rx->probe;
 
         if (pr->drains == 0 && pr->posts == 0)
             continue;
@@ -897,6 +897,13 @@ static VOID ami_sana2_rx_thread(ULONG argument)
 #endif
 
         ami_sana2_rx_drain(rx);
+
+#ifdef AMINETXDUO_RXPROBE
+        /* Keep probe_dev_rx within a few hundred frames of the truth: the
+           report runs from NetStat, which cannot issue a device command. */
+        if (rx->reap_tx && (rx->probe.drains & 511UL) == 0UL)
+            ami_sana2_refresh_stats(iface);
+#endif
     }
 
     /*
