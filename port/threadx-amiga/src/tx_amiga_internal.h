@@ -145,7 +145,7 @@ extern volatile UINT    _tx_amiga_kernel_stopping;
  * scheduler signalled the target and blocked, Exec dispatched the target.  The
  * middle two exist only to run the ten lines below, which the yielding Task can
  * run itself.  A 1 MB transfer took 2634 handoffs and cost 5844 Exec dispatches
- * (docs/RESEARCH.md 86), and the scheduler Task was 8.1% of it.
+ * (docs/RESEARCH.md 89), and the scheduler Task was 8.1% of it.
  *
  * The guard is the scheduler loop's own, so the two cannot both dispatch: both
  * test _tx_thread_current_ptr under Forbid(), and only one can find it TX_NULL.
