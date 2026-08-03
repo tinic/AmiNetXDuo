@@ -241,11 +241,13 @@ aminetxduo_add_tool(tool_whois   whois    SOURCES whois.c toolsock.c)
 # connections open at once -- `nc -l` takes one caller and exits -- so it is
 # also the only coverage of accept() being called twice on a live listener.
 #
-# httppath.c is a source of its own rather than part of httpd.c because it is
-# the part that must not be wrong, and splitting it is what lets the host test
-# below compile it: httpd.c includes tools.h, which reaches tx_api.h and
-# proto/dos.h, and neither builds on a host.
-aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c toolsock.c)
+# httppath.c and httpif.c are sources of their own rather than part of httpd.c
+# because they are the parts that must not be wrong, and splitting them is what
+# lets the host tests below compile them: httpd.c includes tools.h, which
+# reaches tx_api.h and proto/dos.h, and neither builds on a host.  One decides
+# which file a request reaches; the other decides whether it may write to it.
+aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c httpif.c
+                                          toolsock.c)
 
 # sntp is config-only in the same sense as fetch: it reaches bsdsocket.library
 # through its published vectors and sets the machine's clock through
@@ -329,14 +331,18 @@ if(CMAKE_CROSSCOMPILING)
     add_dependencies(tools tool_lvo_stub_check)
 endif()
 
-# ---------------------------------------------------------------- host test --
+# --------------------------------------------------------------- host tests --
 #
-# Host only, and the only test in this directory: httppath.c is the one file
-# here free of AmigaDOS calls, and the one whose mistakes a reviewer cannot be
-# relied on to see.  See src/tools/test/test_httppath.c for what it covers.
+# Host only, and the only tests in this directory: httppath.c and httpif.c are
+# the files here free of AmigaDOS calls, and the ones whose mistakes a reviewer
+# cannot be relied on to see.  One decides which file a request reaches, the
+# other whether the request may have it -- and an If: evaluator that always
+# says yes reads exactly like one that works.
 #
 #   cc -std=c11 -Wall -Wextra -Isrc/tools \
 #      src/tools/test/test_httppath.c src/tools/httppath.c -o test_httppath
+#   cc -std=c11 -Wall -Wextra -Isrc/tools \
+#      src/tools/test/test_httpif.c src/tools/httpif.c -o test_httpif
 #
 # No target_link_libraries: every library target here reaches AmigaOS code
 # that does not build on a host, which is why the sources are named directly
@@ -352,6 +358,17 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_httppath PRIVATE -Wall -Wextra)
     set_target_properties(test_httppath PROPERTIES C_STANDARD 11)
 
+    add_executable(test_httpif
+        test/test_httpif.c
+        httpif.c)
+
+    target_include_directories(test_httpif PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    target_compile_options(test_httpif PRIVATE -Wall -Wextra)
+    set_target_properties(test_httpif PROPERTIES C_STANDARD 11)
+
     include(CTest)
     add_test(NAME httppath_escapes COMMAND test_httppath)
+    add_test(NAME httpif_conditions COMMAND test_httpif)
 endif()

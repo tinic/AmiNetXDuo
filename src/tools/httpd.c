@@ -66,6 +66,7 @@
 
 #include "toolsock.h"
 #include "httppath.h"
+#include "httpif.h"
 #include "aminetxduo/version.h"
 
 #include <libraries/locale.h>
@@ -166,6 +167,11 @@ enum
 #define HTTPD_LOCK_CAP     3600UL   /* the longest this server will hold one */
 #define HTTPD_TOKEN_MAX       64    /* "opaquelocktoken:...", as text       */
 
+/* An entity tag is four decimal numbers and three separators inside quotes. */
+#define HTTPD_ETAG_MAX        48
+/* The If: header, kept whole so it can be evaluated rather than skimmed. */
+#define HTTPD_IF_MAX         256
+
 /* The XML the write methods send is skimmed, not parsed: element names and
    the text between them, both bounded, and no tree.  PROPPATCH names the
    properties it wants and LOCK names an owner; nothing here needs more. */
@@ -241,7 +247,8 @@ enum
     CONN_CONTINUE,      /* pushing the interim 100 out before the body     */
     CONN_BODY,          /* reading the body through the sink               */
     CONN_WALK,          /* a slice of a tree walk per pass; no socket work */
-    CONN_SEND           /* pushing out[], refilled by the producer         */
+    CONN_SEND,          /* pushing out[], refilled by the producer         */
+    CONN_DRAIN          /* reading away a refused request's body           */
 };
 
 /*
@@ -337,13 +344,18 @@ struct HttpConn
     UBYTE   expect;                 /* the client is waiting for a 100     */
     UBYTE   overwrite;              /* COPY/MOVE: Overwrite was not F      */
     UBYTE   had_body;               /* a body arrived, whatever its length */
+    UBYTE   framed;                 /* the whole head was read, so the     */
+                                    /* body's length is known              */
+    UBYTE   drain;                  /* a refused body still to be read away */
     UBYTE   chunk_state;            /* CHUNK_OFF unless the body is chunked */
     ULONG   chunk_left;
     UBYTE   chunk_n;
     char    chunk_line[24];         /* the size line, as it arrives        */
     ULONG   lock_secs;              /* Timeout: seconds asked for, 0 if none */
-    char    dest[HTTP_URL_MAX];     /* Destination:, still as it arrived   */
+    char    dest_url[HTTP_URL_MAX]; /* Destination:, still as it arrived   */
+    HttpPath dest;                  /* and what it resolved to             */
     char    iftoken[2][HTTPD_TOKEN_MAX];    /* the tokens inside If:       */
+    char    ifhdr[HTTPD_IF_MAX];            /* and the whole of it         */
     char    unlock_token[HTTPD_TOKEN_MAX];  /* Lock-Token:                 */
 
     /* PUT: the temporary file the body goes to, until the rename */
@@ -437,16 +449,18 @@ static char httpd_value[HTTP_URL_MAX];
 static char httpd_page[512];
 
 /*
- * A path to ask a question about, and the destination a COPY or a MOVE
- * resolved to.  Shared for the reason the scratches above are: both are used
- * and finished with inside one handler, and the connections interleave between
- * passes of the loop and never inside one.
+ * A path to ask a question about, and the one a Resource-Tag in an If: names.
+ * Shared for the reason the scratches above are: both are filled and finished
+ * with inside one dispatch, and the connections interleave between passes of
+ * the loop and never inside one.
  *
- * The paths a WALK carries are NOT here.  A walk outlives the handler that
- * started it, so its two paths are in the connection.
+ * A path that OUTLIVES its handler may not be here.  A walk spans passes, so
+ * its two paths are in the connection -- and so is a COPY or MOVE's resolved
+ * destination, which the walk reads back after the handler has returned.  It
+ * was here once, and two overlapping moves then wrote over each other's.
  */
 static char     httpd_probe[HTTP_PATH_MAX];
-static HttpPath httpd_dest;
+static HttpPath httpd_ifpath;
 
 /*
  * The lock table.  Static rather than allocated with the connections: it is
@@ -838,6 +852,7 @@ static const char *httpd_reason(ULONG status)
         case 415: return "Unsupported Media Type";
         case 416: return "Range Not Satisfiable";
         case 423: return "Locked";
+        case 424: return "Failed Dependency";
         case 431: return "Request Header Fields Too Large";
         case 500: return "Internal Server Error";
         case 501: return "Not Implemented";
@@ -1129,13 +1144,17 @@ static VOID httpd_reset(HttpConn *c)
     c->expect      = 0;
     c->overwrite   = 1;             /* Overwrite defaults to T, RFC 4918 10.6 */
     c->had_body    = 0;
+    c->framed      = 0;
+    c->drain       = 0;
     c->chunk_state = CHUNK_OFF;
     c->chunk_left  = 0;
     c->chunk_n     = 0;
     c->lock_secs   = 0;
-    c->dest[0]     = '\0';
+    c->dest_url[0] = '\0';
+    c->dest.path[0] = '\0';
     c->iftoken[0][0] = '\0';
     c->iftoken[1][0] = '\0';
+    c->ifhdr[0]    = '\0';
     c->unlock_token[0] = '\0';
     c->put_err     = 0;
 
@@ -1238,6 +1257,15 @@ static BOOL httpd_parent(const char *path, char *out, ULONG outlen)
  * the filesystem, and without this a PUT of the second silently replaces the
  * first.
  */
+static BOOL httpd_name_differs(const struct FileInfoBlock *fib,
+                               const char *name)
+{
+    if (name[0] == '\0')
+        return FALSE;               /* the root: no name was asked for     */
+
+    return hs_equal((const char *)fib->fib_FileName, name) ? FALSE : TRUE;
+}
+
 static BOOL httpd_name_cut(const char *path, const char *name)
 {
     BPTR lock;
@@ -1251,12 +1279,64 @@ static BOOL httpd_name_cut(const char *path, const char *name)
         return FALSE;               /* nothing there: nothing to collide   */
 
     if (Examine(lock, httpd_fib2))
-        cut = hs_equal((const char *)httpd_fib2->fib_FileName, name)
-                  ? FALSE : TRUE;
+        cut = httpd_name_differs(httpd_fib2, name);
 
     UnLock(lock);
 
     return cut;
+}
+
+/*
+ * The entity tag for something the filesystem has already been asked about:
+ * its size and the three fields of its DateStamp, which between them are
+ * everything a FileInfoBlock knows that changes when the bytes do.  No I/O
+ * and no state -- the caller has the block in hand.
+ *
+ * Collections have none.  A listing's bytes change when a file inside it is
+ * written, and the drawer's own date does not say so.
+ */
+static VOID httpd_etag(ULONG size, const struct DateStamp *ds,
+                       char *out, ULONG outlen)
+{
+    ULONG used = 0;
+    BOOL  ok;
+
+    out[0] = '\0';
+
+    ok = hs_append(out, outlen, &used, "\"");
+    ok = ok && hs_append_num(out, outlen, &used, size);
+    ok = ok && hs_append(out, outlen, &used, "-");
+    ok = ok && hs_append_num(out, outlen, &used, (ULONG)ds->ds_Days);
+    ok = ok && hs_append(out, outlen, &used, "-");
+    ok = ok && hs_append_num(out, outlen, &used, (ULONG)ds->ds_Minute);
+    ok = ok && hs_append(out, outlen, &used, "-");
+    ok = ok && hs_append_num(out, outlen, &used, (ULONG)ds->ds_Tick);
+    ok = ok && hs_append(out, outlen, &used, "\"");
+
+    if (!ok)
+        out[0] = '\0';
+}
+
+/* The same, for a path nothing has looked at yet.  "" when there is nothing
+   there, or when it is a drawer. */
+static VOID httpd_etag_of(const char *path, char *out, ULONG outlen)
+{
+    BPTR lock;
+
+    out[0] = '\0';
+
+    if (httpd_fib2 == NULL)
+        return;
+
+    lock = Lock((CONST_STRPTR)path, ACCESS_READ);
+    if (lock == (BPTR)0)
+        return;
+
+    if (Examine(lock, httpd_fib2) && httpd_fib2->fib_DirEntryType <= 0)
+        httpd_etag((ULONG)httpd_fib2->fib_Size, &httpd_fib2->fib_Date,
+                   out, outlen);
+
+    UnLock(lock);
 }
 
 /* 1 a drawer, 0 a file, -1 nothing there. */
@@ -1519,8 +1599,10 @@ static VOID httpd_walk_copy_stage(HttpConn *c)
     {
         LONG err;
 
-        if (Rename((CONST_STRPTR)c->path.path, (CONST_STRPTR)httpd_dest.path))
+        if (Rename((CONST_STRPTR)c->path.path, (CONST_STRPTR)c->dest.path))
         {
+            /* The source name is gone, so nothing is holding it any more. */
+            httpd_locks_drop(c->path.path);
             httpd_empty(c, c->walk_new ? 201 : 204);
             return;
         }
@@ -1542,7 +1624,7 @@ static VOID httpd_walk_copy_stage(HttpConn *c)
     }
 
     hs_copy(c->walk_src, sizeof(c->walk_src), c->path.path);
-    hs_copy(c->walk_dst, sizeof(c->walk_dst), httpd_dest.path);
+    hs_copy(c->walk_dst, sizeof(c->walk_dst), c->dest.path);
 
     c->fails     = 0;
     c->fails_len = 0;
@@ -1560,7 +1642,7 @@ static VOID httpd_walk_copy_stage(HttpConn *c)
        RFC 4918 9.8.3.  A MOVE is always infinity. */
     if (!c->walk_move && c->depth == 0)
     {
-        BPTR made = CreateDir((CONST_STRPTR)httpd_dest.path);
+        BPTR made = CreateDir((CONST_STRPTR)c->dest.path);
 
         if (made == (BPTR)0)
         {
@@ -1587,6 +1669,10 @@ static VOID httpd_walk_end(HttpConn *c)
     switch (c->walk_for)
     {
         case WALK_FOR_DELETE:
+            /* RFC 4918 9.6.  Only when the whole tree went: a name that is
+               still there is still the resource its lock was taken on. */
+            if (c->fails == 0)
+                httpd_locks_drop(c->path.path);
             httpd_walk_answer(c, 204);
             break;
 
@@ -1620,6 +1706,8 @@ static VOID httpd_walk_end(HttpConn *c)
             break;
 
         default:                        /* WALK_FOR_MOVED                  */
+            if (c->fails == 0)
+                httpd_locks_drop(c->path.path);
             httpd_walk_answer(c, c->walk_new ? 201 : 204);
             break;
     }
@@ -2181,6 +2269,27 @@ static HttpLock *httpd_lock_on(const char *path)
     return NULL;
 }
 
+/*
+ * Every lock rooted at `path` or below it, gone.  RFC 4918 9.6: a DELETE that
+ * succeeded MUST destroy them, and a MOVE's source is a DELETE of that name.
+ *
+ * Without this the name is unusable by anybody until the lock expires --
+ * including the client that just deleted it, whose next PUT of the same name
+ * is answered 423 for a lock on a resource that no longer exists.
+ */
+static VOID httpd_locks_drop(const char *path)
+{
+    ULONG i;
+
+    for (i = 0; i < (ULONG)HTTPD_LOCK_MAX; i++)
+    {
+        HttpLock *l = &httpd_locks[i];
+
+        if (l->used && http_path_within(path, l->path))
+            l->used = 0;
+    }
+}
+
 static HttpLock *httpd_lock_by_token(const char *token)
 {
     ULONG i;
@@ -2213,18 +2322,56 @@ static BOOL httpd_holds(const HttpConn *c, const HttpLock *l)
  * The check every write goes through.  FALSE when it has answered with the
  * 423 that tells a client to take a lock rather than to keep retrying.
  */
-static BOOL httpd_lock_allows(HttpConn *c, const char *path)
+static VOID httpd_locked(HttpConn *c)
 {
-    if (httpd_holds(c, httpd_lock_on(path)))
-        return TRUE;
-
     httpd_begin(c, 423);
     httpd_body_text(c, "text/xml; charset=utf-8",
                     "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                     "<D:error xmlns:D=\"DAV:\">"
                     "<D:lock-token-submitted/></D:error>\n");
+}
+
+static BOOL httpd_lock_allows(HttpConn *c, const char *path)
+{
+    if (httpd_holds(c, httpd_lock_on(path)))
+        return TRUE;
+
+    httpd_locked(c);
 
     return FALSE;
+}
+
+/*
+ * The same question asked DOWNWARDS as well.  DELETE and MOVE take everything
+ * below the address with them, so a lock on something inside stops them --
+ * RFC 4918 9.6.1 -- where a write to the address itself does not care what is
+ * locked underneath it.
+ */
+static BOOL httpd_lock_allows_tree(HttpConn *c, const char *path)
+{
+    ULONG i;
+
+    if (!httpd_lock_allows(c, path))
+        return FALSE;
+
+    httpd_locks_expire();
+
+    for (i = 0; i < (ULONG)HTTPD_LOCK_MAX; i++)
+    {
+        HttpLock *l = &httpd_locks[i];
+
+        if (!l->used || !http_path_within(path, l->path))
+            continue;
+
+        if (httpd_holds(c, l))
+            continue;
+
+        httpd_locked(c);
+
+        return FALSE;
+    }
+
+    return TRUE;
 }
 
 /*
@@ -2645,6 +2792,8 @@ static ULONG httpd_propfind_entry(const char *href, const char *name,
 
     if (!is_dir)
     {
+        char etag[HTTPD_ETAG_MAX];
+
         ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
                              "<D:getcontentlength>");
         ok = ok && hs_append_num(httpd_scratch, sizeof(httpd_scratch), &used,
@@ -2655,6 +2804,20 @@ static ULONG httpd_propfind_entry(const char *href, const char *name,
                              http_content_type(name));
         ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
                              "</D:getcontenttype>");
+
+        /* The same tag GET answers with, so a client can condition a write on
+           what it last read without fetching the file again. */
+        httpd_etag(size, date, etag, sizeof(etag));
+
+        if (etag[0] != '\0')
+        {
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                                 "<D:getetag>");
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                                 etag);
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                                 "</D:getetag>");
+        }
     }
 
     ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
@@ -3004,6 +3167,17 @@ static BOOL httpd_examine(HttpConn *c, BOOL *is_dir, BOOL keep_lock)
         return FALSE;
     }
 
+    /* What the filesystem holds is not what was asked for, so the address
+       truncated onto somebody else's file.  Reading it would serve that file
+       under this name.  The block is already in hand, so this costs nothing. */
+    if (httpd_name_differs(c->fib, c->path.name))
+    {
+        UnLock(lock);
+        httpd_error(c, 400,
+                    "that name is longer than this filesystem keeps");
+        return FALSE;
+    }
+
     *is_dir = (c->fib->fib_DirEntryType > 0) ? TRUE : FALSE;
 
     if (keep_lock && *is_dir)
@@ -3185,9 +3359,14 @@ static VOID httpd_do_get(HttpConn *c)
 
     {
         char modified[40];
+        char etag[HTTPD_ETAG_MAX];
 
         httpd_rfc1123(httpd_stamp_secs(&c->fib->fib_Date), modified);
         httpd_header(c, "Last-Modified", modified);
+
+        httpd_etag(size, &c->fib->fib_Date, etag, sizeof(etag));
+        if (etag[0] != '\0')
+            httpd_header(c, "ETag", etag);
     }
 
     if (c->has_range)
@@ -3227,6 +3406,19 @@ static BOOL httpd_may_write(HttpConn *c)
     if (c->path.segments == 0)
     {
         httpd_error(c, 403, "the served drawer itself is not writable");
+        return FALSE;
+    }
+
+    /*
+     * On a filesystem that truncates, the address resolves to a file with a
+     * different name -- so a DELETE of one long name removes another, and the
+     * loss is not recoverable.  Refused for every write rather than only for
+     * the ones that create a name.
+     */
+    if (httpd_name_cut(c->path.path, c->path.name))
+    {
+        httpd_error(c, 400,
+                    "that name is longer than this filesystem keeps");
         return FALSE;
     }
 
@@ -3400,6 +3592,11 @@ static VOID httpd_do_delete(HttpConn *c)
     if (!httpd_may_write(c))
         return;
 
+    /* Everything under the address goes too, so a lock on anything inside it
+       stops this -- RFC 4918 9.6.1. */
+    if (!httpd_lock_allows_tree(c, c->path.path))
+        return;
+
     if (httpd_kind(c->path.path) < 0)
     {
         httpd_error(c, 404, "there is no such file to remove");
@@ -3432,10 +3629,11 @@ static VOID httpd_do_mkcol(HttpConn *c)
         return;
     }
 
+    /* A name the filesystem would truncate onto something else has already
+       been refused by httpd_may_write(), so what is here is a real clash. */
     if (httpd_kind(c->path.path) >= 0)
     {
-        httpd_error(c, httpd_name_cut(c->path.path, c->path.name) ? 400 : 405,
-                    "something of that name is there already");
+        httpd_error(c, 405, "something of that name is there already");
         return;
     }
 
@@ -3468,17 +3666,17 @@ static BOOL httpd_resolve_dest(HttpConn *c)
 {
     HttpPathResult why;
 
-    if (c->dest[0] == '\0')
+    if (c->dest_url[0] == '\0')
     {
         httpd_error(c, 400, "that method needs a Destination");
         return FALSE;
     }
 
-    why = http_path_resolve(httpd_root, c->dest, &httpd_dest);
+    why = http_path_resolve(httpd_root, c->dest_url, &c->dest);
     if (why != HTTP_PATH_OK)
     {
         if (httpd_verbose || httpd_trace)
-            httpd_log(c, "refused destination \"%s\": %s", (LONG)c->dest,
+            httpd_log(c, "refused destination \"%s\": %s", (LONG)c->dest_url,
                       (LONG)http_path_error(why));
 
         httpd_error(c, 403,
@@ -3486,13 +3684,13 @@ static BOOL httpd_resolve_dest(HttpConn *c)
         return FALSE;
     }
 
-    if (httpd_dest.segments == 0)
+    if (c->dest.segments == 0)
     {
         httpd_error(c, 403, "the served drawer itself is not a destination");
         return FALSE;
     }
 
-    if (hs_equal(httpd_dest.path, c->path.path))
+    if (hs_equal(c->dest.path, c->path.path))
     {
         httpd_error(c, 403, "the source and the destination are the same");
         return FALSE;
@@ -3500,13 +3698,13 @@ static BOOL httpd_resolve_dest(HttpConn *c)
 
     /* Into itself is the one that would not stop: "a" to "a/b" is a walk that
        keeps finding what it has just copied. */
-    if (http_path_within(c->path.path, httpd_dest.path))
+    if (http_path_within(c->path.path, c->dest.path))
     {
         httpd_error(c, 409, "that destination is inside the source");
         return FALSE;
     }
 
-    return httpd_lock_allows(c, httpd_dest.path);
+    return httpd_lock_allows(c, c->dest.path);
 }
 
 /*
@@ -3522,6 +3720,11 @@ static VOID httpd_copy_or_move(HttpConn *c, BOOL moving)
     if (!httpd_may_write(c))
         return;
 
+    /* A MOVE removes the source, so what is locked below it stops the move
+       the way it stops a DELETE.  A COPY leaves the source where it is. */
+    if (moving && !httpd_lock_allows_tree(c, c->path.path))
+        return;
+
     if (httpd_kind(c->path.path) < 0)
     {
         httpd_error(c, 404, "there is nothing there to copy");
@@ -3531,21 +3734,21 @@ static VOID httpd_copy_or_move(HttpConn *c, BOOL moving)
     if (!httpd_resolve_dest(c))
         return;
 
-    if (!httpd_parent(httpd_dest.path, httpd_probe, sizeof(httpd_probe)) ||
+    if (!httpd_parent(c->dest.path, httpd_probe, sizeof(httpd_probe)) ||
         httpd_kind(httpd_probe) <= 0)
     {
         httpd_error(c, 409, "there is no drawer to put that in");
         return;
     }
 
-    if (httpd_name_cut(httpd_dest.path, httpd_dest.name))
+    if (httpd_name_cut(c->dest.path, c->dest.name))
     {
         httpd_error(c, 400,
                     "that name is longer than this filesystem keeps");
         return;
     }
 
-    dst_kind = httpd_kind(httpd_dest.path);
+    dst_kind = httpd_kind(c->dest.path);
 
     c->walk_move = moving ? 1 : 0;
     c->walk_new  = (dst_kind < 0) ? 1 : 0;
@@ -3564,7 +3767,7 @@ static VOID httpd_copy_or_move(HttpConn *c, BOOL moving)
             return;
         }
 
-        hs_copy(c->walk_src, sizeof(c->walk_src), httpd_dest.path);
+        hs_copy(c->walk_src, sizeof(c->walk_src), c->dest.path);
         httpd_walk_begin(c, WALK_FOR_CLEAR, FALSE, WALK_ENTER);
         return;
     }
@@ -3583,10 +3786,20 @@ static VOID httpd_do_move(HttpConn *c)
 }
 
 /*
- * A file on this machine has one date and no other property anybody can set,
- * so the modification time is honoured and everything else is answered 403 in
- * a propstat of its own -- which is what RFC 4918 9.2.1 asks for and what
- * stops Explorer treating a timestamp it could not set as a failed copy.
+ * A file on this machine has one date and no other property anybody can set.
+ *
+ * ALL OR NONE, WHICH IS RFC 4918 9.2 AND WAS NOT WHAT THIS DID
+ *
+ *   "Instructions MUST either all be executed or none executed."  The date
+ *   used to be set before the answer was built, so a request naming
+ *   getlastmodified and one other property applied the timestamp AND refused
+ *   its sibling, in one 207.  So the settable ones are counted first and the
+ *   call is only made when every name in the request is one of them.
+ *
+ *   When one is not, the unsettable names get the 403 and the rest get 424:
+ *   they would have gone through, and did not, because of another one.  This
+ *   is the one place in 4918 where 424 belongs -- 9.6.1 and 9.8.3 say it
+ *   SHOULD NOT appear in a DELETE's or a COPY's multistatus.
  *
  * The namespace declarations come back out as they arrived, so the prefixes
  * in the answer mean what they meant in the question.
@@ -3596,6 +3809,7 @@ static VOID httpd_do_proppatch(HttpConn *c)
     ULONG used = 0;
     ULONG pass;
     UBYTE i;
+    BOOL  all = TRUE;
     BOOL  ok;
 
     if (!httpd_may_write(c))
@@ -3607,11 +3821,21 @@ static VOID httpd_do_proppatch(HttpConn *c)
         return;
     }
 
-    if (c->have_date &&
+    for (i = 0; i < c->props; i++)
+    {
+        if (c->prop_ok[i] == 0)
+            all = FALSE;
+    }
+
+    if (all && c->have_date &&
         !SetFileDate((CONST_STRPTR)c->path.path, &c->prop_date))
     {
+        /* The one call there was did not go, so nothing was executed and
+           every name is refused rather than blamed on another. */
         for (i = 0; i < c->props; i++)
             c->prop_ok[i] = 0;
+
+        all = FALSE;
     }
 
     ok = hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
@@ -3664,12 +3888,23 @@ static VOID httpd_do_proppatch(HttpConn *c)
         }
 
         if (any)
+        {
+            const char *status;
+
+            if (wanted == 0)
+                status = "HTTP/1.1 403 Forbidden";
+            else if (all)
+                status = "HTTP/1.1 200 OK";
+            else
+                status = "HTTP/1.1 424 Failed Dependency";
+
             ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                                 (wanted != 0)
-                                     ? "</D:prop><D:status>HTTP/1.1 200 OK"
-                                       "</D:status></D:propstat>"
-                                     : "</D:prop><D:status>HTTP/1.1 403 "
-                                       "Forbidden</D:status></D:propstat>");
+                                 "</D:prop><D:status>");
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                                 status);
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                                 "</D:status></D:propstat>");
+        }
     }
 
     ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
@@ -3699,7 +3934,16 @@ static VOID httpd_do_lock(HttpConn *c)
     /* The served drawer itself IS lockable, unlike everything else about it:
        a client may not replace or remove the root, but taking an exclusive
        lock on it is how one says "nobody else write in here while I work",
-       and refusing that is refusing the thing locking is for. */
+       and refusing that is refusing the thing locking is for.  LOCK therefore
+       does not go through httpd_may_write(), so the truncation check that
+       every other method gets from there is made here instead: a lock taken
+       on a name the filesystem cut is a lock on a different file. */
+    if (httpd_name_cut(c->path.path, c->path.name))
+    {
+        httpd_error(c, 400,
+                    "that name is longer than this filesystem keeps");
+        return;
+    }
 
     secs = (c->lock_secs > 0UL) ? c->lock_secs : HTTPD_LOCK_DEF;
     if (secs > HTTPD_LOCK_CAP)
@@ -3963,11 +4207,11 @@ static BOOL httpd_parse_range(HttpConn *c, const char *value)
 }
 
 /*
- * The tokens inside an If:.  The header is a small language -- tagged lists,
- * entity tags, Not -- and none of it applies here except the state tokens:
- * this server has no ETags to compare and nothing to condition a write on but
- * a lock.  Two tokens is as many as a request needs, which is a MOVE with
- * both ends locked.
+ * The tokens inside an If:, which is a different question from whether the
+ * header HOLDS -- RFC 4918 10.4.1 asks both.  These are the tokens the
+ * request submits, and a lock whose token is among them is one this client
+ * may write through; src/tools/httpif.c evaluates the conditions.  Two tokens
+ * is as many as a request needs, which is a MOVE with both ends locked.
  */
 static VOID httpd_parse_if(HttpConn *c, const char *value)
 {
@@ -4200,7 +4444,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
         else if (hs_equal(name, "Destination"))
         {
-            hs_copy(c->dest, sizeof(c->dest), httpd_value);
+            hs_copy(c->dest_url, sizeof(c->dest_url), httpd_value);
         }
         else if (hs_equal(name, "Overwrite"))
         {
@@ -4209,6 +4453,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
         else if (hs_equal(name, "If"))
         {
+            hs_copy(c->ifhdr, sizeof(c->ifhdr), httpd_value);
             httpd_parse_if(c, httpd_value);
         }
         else if (hs_equal(name, "Lock-Token"))
@@ -4238,6 +4483,11 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
     }
 
     /* ---- what to do with it ------------------------------------------ */
+
+    /* Past this point Content-Length and Transfer-Encoding have been read, so
+       a refusal knows whether there is a body and how long it is.  A refusal
+       BEFORE it does not, and must close rather than guess. */
+    c->framed = 1;
 
     c->method = httpd_lookup(method);
 
@@ -4313,10 +4563,53 @@ static VOID httpd_log_status(HttpConn *c)
                   (LONG)httpd_reason(c->status));
 }
 
+/*
+ * The state a condition in an If: is asking about: the lock this server is
+ * holding on the resource and the tag its bytes have.  `tag` is a
+ * Resource-Tag out of the header, or "" for the request target.
+ *
+ * A tag naming something outside this document root leaves both fields empty,
+ * which is a list that cannot hold -- the same answer as a resource with no
+ * lock and no tag, and the right one: this server cannot speak for it.
+ */
+static VOID httpd_if_lookup(void *ctx, const char *tag, HttpIfState *out)
+{
+    HttpConn       *c = (HttpConn *)ctx;
+    const char     *path = c->path.path;
+    const HttpLock *l;
+
+    if (tag[0] != '\0')
+    {
+        if (http_path_resolve(httpd_root, tag, &httpd_ifpath) != HTTP_PATH_OK)
+            return;
+
+        path = httpd_ifpath.path;
+    }
+
+    l = httpd_lock_on(path);
+    if (l != NULL)
+        hs_copy(out->token, sizeof(out->token), l->token);
+
+    httpd_etag_of(path, out->etag, sizeof(out->etag));
+}
+
 static VOID httpd_dispatch(HttpConn *c)
 {
     if (httpd_verbose && !httpd_trace)
         httpd_log(c, "%s %s", (LONG)c->method->name, (LONG)c->path.url);
+
+    /*
+     * RFC 4918 10.4.  The header used to be skimmed for tokens and never
+     * evaluated, so `If: (<opaquelocktoken:deadbeef>)` on a file nobody had
+     * locked was answered 201 -- the client's condition was not a condition
+     * at all, and neither was `Not`.
+     */
+    if (c->ifhdr[0] != '\0' && !http_if_eval(c->ifhdr, httpd_if_lookup, c))
+    {
+        httpd_error(c, 412, "the If header's condition did not hold");
+        httpd_log_status(c);
+        return;
+    }
 
     c->method->handle(c);
 
@@ -4492,9 +4785,9 @@ static BOOL httpd_body_done(const HttpConn *c)
     return (c->body_left == 0UL) ? TRUE : FALSE;
 }
 
-/* Anything the client pipelined after the head is the start of the body, or
-   of the next request.  Either way it is already here and must not be lost. */
-static VOID httpd_after_head(HttpConn *c, ULONG headlen)
+/* The head, out of the buffer, leaving whatever the client pipelined behind
+   it -- the start of the body, or of the next request. */
+static VOID httpd_drop_head(HttpConn *c, ULONG headlen)
 {
     ULONG left = c->in_len - headlen;
     ULONG i;
@@ -4503,6 +4796,87 @@ static VOID httpd_after_head(HttpConn *c, ULONG headlen)
         c->in[i] = c->in[headlen + i];
 
     c->in_len = left;
+}
+
+/*
+ * A request refused before its body was read.
+ *
+ * WHY THIS IS NOT JUST "CLOSE"
+ *
+ *   A body left in the socket is the next request as far as the parser is
+ *   concerned.  Three refusals -- 405 for a verb this server has not, 501 for
+ *   one too long to be one, and 403 for an address it will not open -- used
+ *   to answer with keep-alive still on and the body still there, so a POST
+ *   refused 405 whose body held a `DELETE /file HTTP/1.1` line had that
+ *   DELETE executed as the next request.  No attacker needed: a client that
+ *   POSTs to a WebDAV share does this to itself.
+ *
+ *   Clearing keep-alive everywhere would have fixed it and cost a reconnect
+ *   per 405, which is a request a client is meant to recover from.  So a body
+ *   this server can bound is read away and the connection survives, and one
+ *   it cannot bound closes:
+ *
+ *     no body            nothing to do, and anything pipelined behind it is
+ *                        a real request that must NOT be thrown away.
+ *     Content-Length     drained, up to the ceiling a held body would have
+ *                        been measured against.
+ *     larger than that   closed.  It is the same length the 413 refuses.
+ *     chunked            closed.  The length is not knowable in advance, so
+ *                        there is no bound on what draining would cost.
+ *     Expect: 100        closed.  The client is waiting for a 100 that is not
+ *                        coming and will not send the body, so a drain would
+ *                        wait for bytes nobody is going to send.
+ *     head not framed    closed.  A refusal before the headers were read does
+ *                        not know whether there is a body at all -- which is
+ *                        what made the 501 path the worst of the three.
+ */
+static VOID httpd_refuse_drain(HttpConn *c)
+{
+    ULONG i;
+
+    if (!c->keepalive || !c->framed || c->expect ||
+        c->chunk_state != CHUNK_OFF || c->body_left > HTTPD_BODY_MAX)
+    {
+        c->keepalive = 0;
+        c->in_len    = 0;
+        c->state     = CONN_SEND;
+        return;
+    }
+
+    /* Whatever of the body already arrived is drained here rather than in the
+       loop, so a body that fitted the head's buffer needs no drain at all. */
+    if (c->body_left > 0UL)
+    {
+        ULONG take = (c->in_len < c->body_left) ? c->in_len : c->body_left;
+
+        c->body_left -= take;
+
+        for (i = 0; i + take < c->in_len; i++)
+            c->in[i] = c->in[i + take];
+
+        c->in_len -= take;
+    }
+
+    c->drain = (c->body_left > 0UL) ? 1 : 0;
+    c->state = CONN_SEND;
+}
+
+/* The same, for a refusal made while the head is still in the buffer. */
+static VOID httpd_refuse_body(HttpConn *c, ULONG headlen)
+{
+    httpd_drop_head(c, headlen);
+    httpd_refuse_drain(c);
+}
+
+/* Anything the client pipelined after the head is the start of the body, or
+   of the next request.  Either way it is already here and must not be lost. */
+static VOID httpd_after_head(HttpConn *c, ULONG headlen)
+{
+    ULONG i;
+    ULONG left;
+
+    httpd_drop_head(c, headlen);
+    left = c->in_len;
 
     /*
      * Nothing reaches the sink until the method has said it can take it.  A
@@ -4513,10 +4887,10 @@ static VOID httpd_after_head(HttpConn *c, ULONG headlen)
     if (c->method->begin != NULL && !c->method->begin(c))
     {
         /* What the client is about to send belongs to a request that will not
-           be read, so this answer ends the connection. */
-        c->keepalive = 0;
-        c->in_len    = 0;
-        c->state     = CONN_SEND;
+           be read.  A PUT is the only method with a begin(), so the body is
+           usually a file and the connection ends; a small one is read away
+           instead and the client keeps its socket. */
+        httpd_refuse_drain(c);
         httpd_log_status(c);
         return;
     }
@@ -4567,6 +4941,38 @@ static VOID httpd_after_head(HttpConn *c, ULONG headlen)
 static BOOL httpd_readable(HttpConn *c)
 {
     LONG got;
+
+    /* The body of a request that was refused, on its way to nowhere.  The
+       read is clamped to what is left of it, so nothing past the body is
+       taken out of the socket and the next request is parsed normally. */
+    if (c->state == CONN_DRAIN)
+    {
+        UBYTE scratch[512];
+        LONG  want = (LONG)sizeof(scratch);
+
+        if ((ULONG)want > c->body_left)
+            want = (LONG)c->body_left;
+
+        got = tool_sock_recv(httpd_sb, c->sock, scratch, want);
+
+        if (got == 0)
+            return FALSE;
+
+        if (got < 0)
+        {
+            LONG err = tool_sock_errno(httpd_sb);
+
+            return (err == TOOL_EWOULDBLOCK || err == TOOL_EINTR) ? TRUE : FALSE;
+        }
+
+        c->body_left -= (ULONG)got;
+        c->progress   = httpd_now();
+
+        if (c->body_left == 0UL)
+            httpd_reset(c);
+
+        return TRUE;
+    }
 
     if (c->state == CONN_BODY)
     {
@@ -4660,12 +5066,11 @@ static BOOL httpd_readable(HttpConn *c)
 
             if (!httpd_parse(c, headlen))
             {
-                /* Answered already.  What is left in the buffer belongs to a
-                   request that will not be read, so the connection ends after
-                   the answer goes out. */
+                /* Answered already.  What the client sent as this request's
+                   body must not be left in the socket for the parser to read
+                   as the next one. */
                 httpd_log_status(c);
-                c->in_len = 0;
-                c->state  = CONN_SEND;
+                httpd_refuse_body(c, headlen);
                 return TRUE;
             }
 
@@ -4751,6 +5156,17 @@ static BOOL httpd_writable(HttpConn *c)
 
         if (!c->keepalive)
             return FALSE;
+
+        /* The answer has gone; the refused body has not.  Reading it away is
+           what keeps this connection usable, so it happens before the reset
+           that would forget how much of it there is. */
+        if (c->drain)
+        {
+            c->state    = CONN_DRAIN;
+            c->out_len  = 0;
+            c->out_sent = 0;
+            return TRUE;
+        }
 
         {
             ULONG pipelined = c->in_len;
@@ -4910,7 +5326,8 @@ static VOID httpd_serve(LONG lsock)
                walk ends. */
             if (c->state == CONN_WALK)
                 walking++;
-            else if (c->state == CONN_REQUEST || c->state == CONN_BODY)
+            else if (c->state == CONN_REQUEST || c->state == CONN_BODY ||
+                     c->state == CONN_DRAIN)
                 tool_fd_add(&readfds, c->sock);
             else
                 tool_fd_add(&writefds, c->sock);
