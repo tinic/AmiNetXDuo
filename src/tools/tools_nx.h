@@ -128,6 +128,9 @@ typedef struct ToolSnapshot
        Empty when the build has no responder or it has not claimed one yet. */
     BOOL            have_mdns;
     char            mdns_name[NETSTATUS_NAME_LEN];
+    /* AmiHostnameSource: which place named this machine. AMI_HOSTNAME_NONE
+       when nothing did, or when the library is too old to say. */
+    UWORD           host_source;
 } ToolSnapshot;
 
 /*

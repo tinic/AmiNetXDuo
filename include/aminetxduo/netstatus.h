@@ -210,7 +210,20 @@ typedef struct NetStatusSystem
      * reports it.  Empty unless NETSTATUS_SYS_MDNS.
      */
     char    nss_MdnsName[NETSTATUS_NAME_LEN];
-    ULONG   nss_Reserved[3];
+    /*
+     * Which of the places that can name a machine named this one:
+     * AmiHostnameSource (aminetxduo/config.h). A name is not self-explaining
+     * -- a remnant ENV:HOSTNAME kept a renamed machine answering to its old
+     * name and nothing said so -- and this is the only field that says.
+     *
+     * Zero is AMI_HOSTNAME_NONE and means either that nothing named the
+     * machine or that the library predates the field, so a reader reports
+     * "not stated" rather than guessing. It is taken out of nss_Reserved,
+     * which every library has always zeroed, so no version and no minimum
+     * revision move for it.
+     */
+    ULONG   nss_HostSource;
+    ULONG   nss_Reserved[2];
 } NetStatusSystem;
 
 /* ----------------------------------------------- NETSTATUS_INTERFACES --- */

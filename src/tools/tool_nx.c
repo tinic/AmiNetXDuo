@@ -105,6 +105,7 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
     out->have_gateway   = FALSE;
     out->have_mdns      = FALSE;
     out->mdns_name[0]   = '\0';
+    out->host_source    = (UWORD)AMI_HOSTNAME_NONE;
 
     base = nx_open();
     if (base == NULL)
@@ -176,6 +177,8 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
             tool_copy_string(out->mdns_name, sizeof(out->mdns_name),
                              nx_answer.system.e.nss_MdnsName);
         }
+
+        out->host_source = (UWORD)nx_answer.system.e.nss_HostSource;
     }
 
     /*
