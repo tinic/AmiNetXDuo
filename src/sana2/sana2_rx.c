@@ -249,6 +249,21 @@ VOID ami_sana2_rxprobe_report(AmiSana2If *iface)
         }
     }
 
+    /*
+     * The device's own receive count against ours. iface->stats.packets_received
+     * is incremented in ami_sana2_rx_deliver(); the device's is what a2065.device
+     * saw on the wire, so the difference is what never reached a CMD_READ.
+     */
+    AMI_ERROR("rxprobe dev: rx %ld tx %ld -- shim rx %ld tx %ld, "
+              "bad %ld ovr %ld unk %ld alloc %ld err %ld",
+              (long)iface->probe_dev_rx, (long)iface->probe_dev_tx,
+              (long)iface->stats.packets_received,
+              (long)iface->stats.packets_sent,
+              (long)iface->stats.bad_data, (long)iface->stats.overruns,
+              (long)iface->stats.unknown_types,
+              (long)iface->stats.alloc_failures,
+              (long)iface->stats.rx_errors);
+
     if (!sp->armed)
     {
         AMI_ERROR("rxprobe seq: no bulk flow seen");

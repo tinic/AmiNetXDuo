@@ -443,6 +443,19 @@ VOID ami_sana2_refresh_stats(AmiSana2If *iface)
     iface->stats.overruns         = stats.Overruns;
     iface->stats.unknown_types    = stats.UnknownTypesReceived;
     iface->stats.reconfigurations = stats.Reconfigurations;
+
+#ifdef AMINETXDUO_RXPROBE
+    iface->probe_dev_rx = stats.PacketsReceived;
+    iface->probe_dev_tx = stats.PacketsSent;
+
+    /*
+     * NetStat brackets the transfer, so reporting here gives a pair to
+     * subtract. Nothing calls this often enough for the serial cost to matter,
+     * and the shutdown path is not reached when a handler holds the library
+     * open.
+     */
+    ami_sana2_rxprobe_report(iface);
+#endif
 }
 
 VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out)
