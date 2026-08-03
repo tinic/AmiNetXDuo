@@ -30,7 +30,8 @@ concurrency:
 jobs:
 
   # ------------------------------------------------------------------------
-  # Host tests + all four cross configurations + the conformance suite build.
+  # Host tests + every cross configuration in tools/ci.sh's CROSS_CONFIGS +
+  # the conformance suite build.  The count lives there, not here.
   # ------------------------------------------------------------------------
   tier1:
     name: build + host tests
