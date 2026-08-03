@@ -154,23 +154,27 @@ extern "C" {
 
 /* ----------------------------------------------------------- the options --
  *
- * Two numberings exist for the IPv6 options and this NDK picks neither, so
- * both are accepted -- the same decision IPV6_V6ONLY needed, for the same
- * reason.  The unsuffixed name is the 4.4BSD/KAME number, which is the
- * lineage the rest of this header set belongs to; the _LINUX alternates are
- * here because the library answers to them, not because a caller should
- * spell them.
+ * Two numberings exist for the IPv6 options and this NDK picks neither.  The
+ * numbers below are 4.4BSD/KAME's, which is the lineage the rest of this
+ * header set belongs to, and they are the only ones the library answers to at
+ * this level.
  *
- * Which numbering a caller enables an option with decides which numbering it
- * gets back as cmsg_type.  Enable with IPV6_RECVPKTINFO (36) and the arriving
- * cmsg_type is IPV6_PKTINFO (46); enable with 49 and it is 50.  Mixing the
- * two on one socket is a caller error and reads as "whichever was set last".
+ * The Linux alternates 49, 50, 51 and 52 are NOT accepted, and they used to
+ * be.  In the BSD numbering those four are IPV6_HOPOPTS, IPV6_DSTOPTS,
+ * IPV6_RTHDR and IPV6_PKTOPTIONS -- three of them the extension-header options
+ * this library refuses by name.  So a caller spelling IPV6_DSTOPTS (50) out of
+ * in6.h and handing over its own option buffer had it taken for
+ * IPV6_PKTINFO, read as a struct in6_pktinfo, and the socket's sticky source
+ * address set from whatever those twenty bytes held.  Unlike the IPV6_V6ONLY /
+ * IPV6_CHECKSUM collision, which is only on a raw socket, this one is on every
+ * socket, so the aliases go rather than being withdrawn for one kind.
+ *
+ * Nothing is lost: the numbers below reach every ancillary option this library
+ * offers.
  */
 
 #define IPV6_RECVPKTINFO            36
-#define IPV6_RECVPKTINFO_LINUX      49
 #define IPV6_PKTINFO                46
-#define IPV6_PKTINFO_LINUX          50
 
 /*
  * IPV6_HOPLIMIT is ancillary only, in both directions: a LONG in a cmsg, never
@@ -179,9 +183,7 @@ extern "C" {
  * other value is EINVAL.
  */
 #define IPV6_RECVHOPLIMIT           37
-#define IPV6_RECVHOPLIMIT_LINUX     51
 #define IPV6_HOPLIMIT               47
-#define IPV6_HOPLIMIT_LINUX         52
 
 /* Level IPPROTO_ICMPV6.  1 in every lineage. */
 #define ICMP6_FILTER                1
