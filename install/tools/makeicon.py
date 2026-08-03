@@ -432,6 +432,14 @@ def main(argv):
             default_tool="SYS:Utilities/More",
             tooltypes=[],
             stack=4096),
+        # The same sheet of paper, pointed at MultiView: an AmigaGuide opened
+        # in More is its own markup, which is not what "double-click it" in
+        # the ReadMe means.
+        "Guide.info": diskobject(
+            document_icon(), WBPROJECT,
+            default_tool="SYS:Utilities/MultiView",
+            tooltypes=[],
+            stack=8192),
     }
 
     for name, blob in icons.items():
