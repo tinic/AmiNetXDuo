@@ -1,0 +1,72 @@
+# tcpdrill -- a SYN whose IP destination is not this machine.
+#
+# RFC 1122 4.2.3.10, MUST-57: a TCP segment addressed to a broadcast or a
+# multicast destination MUST be silently discarded.  "Silently" is the whole
+# assertion -- neither a SYN-ACK nor a RST may leave, because either one
+# answers a frame every machine on the wire received, and every machine that
+# answers it sends the same reply to whatever address the SYN claimed to come
+# from.
+#
+# THE CONTROL CASE COMES FIRST.  b01 is an ordinary passive open on the same
+# port with the same segment, so a later case that sees nothing on the wire is
+# a discard and not a listener that was never there.
+#
+# `dst=` is the only new thing these need: it sets the IP destination of the
+# injected frame and the Ethernet destination that has to accompany it, so the
+# stack sees a real broadcast frame rather than a unicast one carrying a
+# broadcast address.
+#
+# THE MULTICAST CASE asserts the outcome, not the layer.  224.0.0.1 is not a
+# group this stack has joined, so IP may well drop it before TCP is reached;
+# the requirement is that nothing is sent, and that holds either way.
+#
+# SPDX-License-Identifier: MIT
+
+# The control.  Same port, same segment, unicast destination.
+case b01_unicast_syn_is_answered
+localport 4721
+listen
+rx S seq=0 win=8192 mss=1460
+tx SA seq=0 ack=1 mss=1460
+rx A seq=1 ack=1
+accept
+
+# RFC 1122 4.2.3.10.  255.255.255.255 to a port that IS listening.
+case b02_limited_broadcast_syn_ignored
+localport 4722
+listen
+rx S seq=0 win=8192 mss=1460 dst=bcast
+notx 500
+
+# The same, directed at the subnet rather than the wire.
+case b03_subnet_broadcast_syn_ignored
+localport 4723
+listen
+rx S seq=0 win=8192 mss=1460 dst=subnet
+notx 500
+
+# And multicast.
+case b04_multicast_syn_ignored
+localport 4724
+listen
+rx S seq=0 win=8192 mss=1460 dst=mcast
+notx 500
+
+# A broadcast SYN to a port nothing is listening on.  r01 in tcp.drill asserts
+# the RST that a unicast SYN to a closed port earns; this asserts that the
+# broadcast does not, which is the case that turns one frame into a reset from
+# every machine on the segment.
+case b05_broadcast_syn_to_closed_port_gets_no_reset
+localport 4725
+rx S seq=0 win=8192 mss=1460 dst=bcast
+notx 500
+
+# What the defect costs in practice.  The broadcast SYN must not consume the
+# listener's pending slot: the unicast connection behind it has to complete.
+case b06_broadcast_syn_does_not_block_the_listener
+localport 4726
+listen
+rx S seq=0 win=8192 mss=1460 dst=bcast
+notx 300
+rx S seq=1000 win=8192 mss=1460
+tx SA seq=0 ack=1001 mss=1460
