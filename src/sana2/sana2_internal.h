@@ -206,6 +206,7 @@ typedef struct AmiSana2Rx
     ULONG               probe_hist[AMI_SANA2_RX_HIST];
     ULONG               probe_deferred;  /* batches handed to the IP thread  */
     ULONG               probe_stack;     /* high-water bytes, filled at start */
+    ULONG               probe_starved;   /* loops that slept for want of a slot */
 #endif
 
     AmiRxSlot           slot[AMI_SANA2_RX_MAX_DEPTH];

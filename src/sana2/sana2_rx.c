@@ -701,6 +701,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         {
             /* Either the pool is empty or the interface is down. Back off
                rather than spin; ami_sana2_rx_stop() signals out of this. */
+            AMI_RXPROBE_COUNT(rx->probe_starved);
             tx_thread_sleep(2);
             continue;
         }
