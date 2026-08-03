@@ -112,7 +112,10 @@ congestion avoidance, fast retransmit and recovery, **6582 NewReno in full**
 (Algorithm 1 over the IANA dynamic range off a SHA-256 DRBG), delayed ACK
 200 ms, zero-window probe with backoff, 1122 §4.2.2.4 urgent-data receive,
 MSS option handling. Landed 2026-08-02: 2018 SACK receive side, 6298 RTO with
-Karn.
+Karn. Landed 2026-08-03: **2883 D-SACK receive side** — read 794 -> 985 KB/s
+at 4 MB, wire retransmissions 234 -> 42, peer `TCPDSACKUndo` 0 -> 7. RFC 3708
+(sender side, consuming D-SACK to undo a spurious retransmission) is absent and
+applies to the write direction only.
 
 **UDP** — 768 both directions including the IPv4 zero-checksum rule.
 

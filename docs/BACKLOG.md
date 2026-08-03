@@ -90,6 +90,7 @@ name always misses, and a CNAME-only response yields `NX_DNS_QUERY_FAILED`.
 | Item | Cite |
 |---|---|
 | SACK send side: we advertise SACK-Permitted and never parse incoming blocks. `NX_TCP_SACK_KIND` defined and written, never read | `nx_tcp.h:93`, `nx_tcp_sack_option_build.c:212` |
+| RFC 3708 (sender-side spurious-retransmission detection from received D-SACK) absent. Applies to the write direction only. The `sack-transmit` branch discards ranges at or below `SND.UNA` as "D-SACK or stale" — correct for RFC 2018, but it drops the information RFC 3708 needs | unlanded branch |
 | Broadcast SYN answered (destination unchecked) + one half-open slot per listener → port dead 127 s | `nx_tcp_packet_process.c:517-542`, `socket.c:1729-1730` |
 | RFC 5961 absent: in-window RST resets, in-window SYN resets and tears down, RST at any sequence when `RCV.WND==0` | `nx_tcp_socket_packet_process.c:234-271`, `:165-167` |
 | ICMP errors never reach TCP or UDP | `nx_icmpv4_packet_process.c:143-171` |
