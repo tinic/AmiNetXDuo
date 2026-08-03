@@ -98,6 +98,20 @@ BOOL ami_random_is_seeded(VOID);
 int  ami_random_rand(void);
 void ami_random_srand(unsigned int seed);
 
+/*
+ * NX_CRYPTO_RBG binding.  nx_crypto's own is _nx_crypto_huge_number_rbg(),
+ * which builds the number one NX_CRYPTO_RAND() per 32 bits -- and
+ * NX_CRYPTO_RAND is ami_random_rand(), whose contract is rand()'s 0..0x7FFFFFFF.
+ * The top bit of every word it packs is therefore always zero, in the ECDHE
+ * private key among other things.  This fills the buffer from the generator
+ * directly instead, which is where the bytes were coming from anyway.
+ *
+ * Writes ceil(bits/8) bytes, like the function it replaces, and always
+ * succeeds: 0 is NX_CRYPTO_SUCCESS.  Plain C types because nx_port.h has to
+ * repeat this declaration by hand -- they are UINT and UCHAR on both ports.
+ */
+unsigned int ami_crypto_rbg(unsigned int bits, unsigned char *result);
+
 #ifdef __cplusplus
 }
 #endif
