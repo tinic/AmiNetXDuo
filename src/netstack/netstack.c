@@ -84,6 +84,8 @@ AmiNetStack *ami_netstack_raw(VOID)
  * turns their clean "host environment not found" into a hang, so netstack_rexx.c
  * runs a process that answers, and the port lives and dies with it.
  */
+#ifdef AMINETXDUO_AREXX
+
 static VOID ami_ns_port_create(VOID)
 {
     ami_netstack_rexx_start();
@@ -93,6 +95,73 @@ static VOID ami_ns_port_delete(VOID)
 {
     ami_netstack_rexx_stop();
 }
+
+#else /* !AMINETXDUO_AREXX */
+
+/*
+ * The floor tier keeps the port and drops the host.  WaitForPort and a Shell
+ * command looking for the stack want a public port of that name to exist;
+ * neither sends it anything.  A script that does gets no reply, which
+ * CMakeLists.txt records as the cost of the option.
+ *
+ * The FindPort() under Forbid() is netstack_rexx.c's: another stack owning the
+ * name means ours must not be added, and the check and the AddPort() are one
+ * atomic step or two stacks coming up together both pass it.
+ */
+static char            ami_ns_port_name[] = "AMITCP";
+static struct MsgPort *ami_ns_bare_port;
+
+static VOID ami_ns_port_create(VOID)
+{
+    struct MsgPort *port;
+
+    if (ami_ns_bare_port != NULL)
+        return;
+
+    port = CreateMsgPort();
+    if (port == NULL)
+    {
+        AMI_WARN("AMITCP: no public port; WaitForPort will not return");
+        return;
+    }
+
+    port->mp_Node.ln_Name = ami_ns_port_name;
+    port->mp_Node.ln_Pri  = 0;
+
+    Forbid();
+    if (FindPort((CONST_STRPTR)ami_ns_port_name) != NULL)
+    {
+        Permit();
+        DeleteMsgPort(port);
+        AMI_WARN("AMITCP: a port of that name already exists; not adding ours");
+        return;
+    }
+    AddPort(port);
+    ami_ns_bare_port = port;
+    Permit();
+}
+
+static VOID ami_ns_port_delete(VOID)
+{
+    struct Message *msg;
+
+    if (ami_ns_bare_port == NULL)
+        return;
+
+    RemPort(ami_ns_bare_port);
+
+    /* Anything that arrived is replied to rather than freed: the sender owns
+       it and is waiting on its own reply port.  A RexxMsg gets its rm_Result1
+       left at zero, which is the same "nothing happened" a script sees from a
+       host that never ran a command. */
+    while ((msg = GetMsg(ami_ns_bare_port)) != NULL)
+        ReplyMsg(msg);
+
+    DeleteMsgPort(ami_ns_bare_port);
+    ami_ns_bare_port = NULL;
+}
+
+#endif /* AMINETXDUO_AREXX */
 
 /* ----------------------------------------------------------- adoption glue */
 
@@ -1488,8 +1557,10 @@ static LONG ami_ns_bring_up(VOID)
        rather than from whenever the stack is next used. */
     netstack_pool_sample();
     ami_netstack_health_publish();
+#ifdef AMINETXDUO_AREXX
     ami_sana2_set_open_hooks(ami_netstack_rexx_suspend,
                              ami_netstack_rexx_resume);
+#endif
 
     if (status != AMI_NET_OK)
     {

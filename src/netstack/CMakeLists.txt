@@ -9,9 +9,13 @@ set(NETSTACK_SOURCES
     netstack_baton.c
     netstack_dns.c
     netstack_dns_status.c
-    netstack_retry.c
-    netstack_rexx.c
-    netstack_rexx_vars.c)
+    netstack_retry.c)
+
+# The ARexx host.  Without it netstack.c opens the AMITCP port itself, so the
+# floor build pays for neither the variable table nor the process behind it.
+if(AMINETXDUO_AREXX)
+    list(APPEND NETSTACK_SOURCES netstack_rexx.c netstack_rexx_vars.c)
+endif()
 
 # The floor build never compiles this file, so IPv6 costs it nothing at all --
 # not even a branch on a "is IPv6 on" flag.

@@ -116,6 +116,23 @@ if(AMINETXDUO_MDNS)
     add_compile_definitions(AMINETXDUO_MDNS)
 endif()
 
+# The ARexx host on the AMITCP port: the QUERY/SET variable space and the
+# process that services it.  Off, netstack.c creates the port as a bare public
+# MsgPort instead, so `WaitForPort AMITCP` in S:User-Startup still returns and
+# a Shell command can still see that a stack is running -- that part is the
+# convention every stack since AmiTCP has followed and is not optional.
+#
+# What goes with it is the 8 KB process stack, which is the part that matters
+# on a 1 MB machine, and the answer to a script that sends commands: with no
+# host servicing the port, `ADDRESS AMITCP` waits for a reply that never
+# comes.  31 of the 2,149 archives in docs/RESEARCH.md 75 do that -- AmiTCP's
+# own stopnet and netstat among them -- so this is off only in the floor tier,
+# where those are not installed.
+option(AMINETXDUO_AREXX "Build the ARexx host on the AMITCP port" ON)
+if(AMINETXDUO_AREXX)
+    add_compile_definitions(AMINETXDUO_AREXX)
+endif()
+
 # Multicast group membership, both families: nx_igmp_enable() and the five
 # IPPROTO_IP socket options, plus NX_ENABLE_IPV6_MULTICAST and the five
 # IPPROTO_IPV6 ones in an AMINETXDUO_IPV6 build.  On by default, because the
@@ -478,3 +495,4 @@ message(STATUS "  BPF ........... ${AMINETXDUO_BPF}")
 message(STATUS "  RX probe ...... ${AMINETXDUO_RXPROBE}")
 message(STATUS "  mDNS .......... ${AMINETXDUO_MDNS}")
 message(STATUS "  multicast ..... ${AMINETXDUO_MULTICAST}")
+message(STATUS "  ARexx host .... ${AMINETXDUO_AREXX}")
