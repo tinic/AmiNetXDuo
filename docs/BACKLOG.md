@@ -212,6 +212,18 @@ defined outside the priority ladder's `#error` assertions
 sample record · a `cross`-stage build failure whose log has neither `error:` nor
 `Error` dies on the diagnostic grep before anything is recorded.
 
+**Profiler gaps, against Profyler (OS4, deterministic).** Ours is a sampler and
+the differences are mostly inherent, not omissions — no recompilation, and it
+reaches shared libraries, multiple threads and interrupt context, all of which
+Profyler lists as limitations. Two worth having:
+
+| Item | Note |
+|---|---|
+| **Source file and line attribution** | We resolve to a function via hunk offsets, not to a line. Needs debug-info parsing. The uProf work on another project showed per-line attribution is worth a lot |
+| Call counts, inclusive/exclusive split | Sampling cannot produce counts. Would be an instrumenting mode sharing the report format — a second tool, not an extension. No use case yet |
+
+CSV export is trivial if anyone asks. Demangling is N/A (the tree is C).
+
 **Tests**
 
 Socket-option surface entirely untested — nothing exercises `SO_RCVBUF`,

@@ -218,3 +218,18 @@ if(AMIGA_NDK_INCLUDE)
 endif()
 target_compile_options(test_cycledrill PRIVATE -Wall -Wextra)
 set_target_properties(test_cycledrill PROPERTIES OUTPUT_NAME "CycleDrill")
+
+# ResolveBreak times a name lookup against a name server on a network nothing
+# routes (RFC 5737 TEST-NET-1), with and without the break signal arriving in
+# the middle.  A build cannot show either half and neither can a lookup against
+# a server that works: the two numbers are how long the lookup blocks and how
+# long after Ctrl-C it comes back.  Published LVOs only, so the same binary
+# measures any bsdsocket.library -- which is how a before and an after are
+# comparable.
+add_executable(test_resolvebreak resolvebreak.c)
+target_include_directories(test_resolvebreak PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_resolvebreak PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_resolvebreak PRIVATE -Wall -Wextra)
+set_target_properties(test_resolvebreak PROPERTIES OUTPUT_NAME "ResolveBreak")

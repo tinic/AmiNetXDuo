@@ -1040,6 +1040,13 @@ UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
 ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks);
 
 /*
+ * The break-signal test the resolver's retransmission ladder asks between
+ * queries (resolver.c). `arg` is the struct AmiSocketBase whose sb_BreakMask
+ * applies; the signature is netstack's AmiNetGiveUpFn.
+ */
+BOOL  bsd_resolve_break(VOID *arg);
+
+/*
  * NextTagItem(), open-coded (errno.c). utility.library may not be open when
  * this library is called, and the four control tags are three lines of
  * arithmetic. Shared by interfaces.c, routing.c and addralloc.c.

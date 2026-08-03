@@ -156,6 +156,7 @@ static LONG bsd_herrno_of(LONG status)
         case AMI_NET_ERR_TIMEOUT:                   /* nobody answered      */
         case AMI_NET_ERR_NOSERVER:                  /* nobody to ask, yet   */
         case AMI_NET_ERR_STATE:                     /* stack not up, yet    */
+        case AMI_NET_ERR_ABORTED:                   /* Ctrl-C; nothing learnt */
             return TRY_AGAIN;
 
         case AMI_NET_ERR_CONFIG:
@@ -165,6 +166,33 @@ static LONG bsd_herrno_of(LONG status)
 
         default:                    return HOST_NOT_FOUND;
     }
+}
+
+/*
+ * What lets Ctrl-C out of a lookup.
+ *
+ * SetSocketSignals() says SIGINT "is the signal to send to the process which
+ * owns the socket in order to abort a blocking operation", and every other
+ * blocking path here slices on it (bsd_wait_sliced(), select.c). The resolver
+ * did not, so a name server that answers nothing held the calling program for
+ * as long as the retransmission ladder ran and no key would take it back.
+ *
+ * netstack_resolve_until() asks this between queries, outside the ThreadX
+ * bracket. Read, not consumed: the program's own Ctrl-C handling has to see the
+ * signal too.
+ *
+ * The unit is one query per configured name server rather than the 200 ms
+ * bsd_wait_sliced() manages, because a DNS query cannot be resumed -- see the
+ * note on netstack_resolve_until().
+ */
+BOOL bsd_resolve_break(VOID *arg)
+{
+    struct AmiSocketBase *base = (struct AmiSocketBase *)arg;
+
+    if (base == NULL || base->sb_BreakMask == 0)
+        return FALSE;
+
+    return (BOOL)((SetSignal(0UL, 0UL) & base->sb_BreakMask) != 0);
 }
 
 /*
@@ -197,9 +225,13 @@ static LONG bsd_resolve_name(struct AmiSocketBase *base, const char *name,
         return 0;
     }
 
-    status = netstack_resolve(name, addr, BSD_RESOLVE_TIMEOUT);
+    status = netstack_resolve_until(name, addr, BSD_RESOLVE_TIMEOUT,
+                                    bsd_resolve_break, base);
     if (status != AMI_NET_OK)
     {
+        if (status == AMI_NET_ERR_ABORTED)
+            bsd_set_errno(base, AMI_EINTR);
+
         *he_out = bsd_herrno_of(status);
         return -1;
     }
@@ -291,10 +323,14 @@ static LONG bsd_resolve_addr(struct AmiSocketBase *base, STRPTR addr_bytes,
             ((ULONG)(UBYTE)addr_bytes[2] <<  8) |
              (ULONG)(UBYTE)addr_bytes[3];
 
-    status = netstack_resolve_reverse(*addr, name, name_len,
-                                      BSD_RESOLVE_TIMEOUT);
+    status = netstack_resolve_reverse_until(*addr, name, name_len,
+                                            BSD_RESOLVE_TIMEOUT,
+                                            bsd_resolve_break, base);
     if (status != AMI_NET_OK)
     {
+        if (status == AMI_NET_ERR_ABORTED)
+            bsd_set_errno(base, AMI_EINTR);
+
         *he_out = bsd_herrno_of(status);
         return -1;
     }

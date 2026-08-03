@@ -619,40 +619,6 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
     if (status != NX_SUCCESS)
         AMI_WARN("netstack: nx_udp_enable failed (%ld)", (long)status);
 
-#ifdef AMINETXDUO_MULTICAST
-    /*
-     * RFC 1112 group membership. Without this call every _nxe_igmp_multicast_
-     * *_join() returns NX_NOT_ENABLED, so setsockopt(IP_ADD_MEMBERSHIP) has
-     * nothing to do -- the option surface in src/bsdsocket/mcast.c is useless
-     * on its own.
-     *
-     * It also starts the periodic that answers a router's membership query;
-     * without an answer a querying switch stops forwarding the group after
-     * its own timeout, so joining and never reporting works only until the
-     * first query.
-     */
-    status = nx_igmp_enable(&ns->ns_Ip);
-    if (status != NX_SUCCESS)
-        AMI_WARN("netstack: nx_igmp_enable failed (%ld)", (long)status);
-#endif
-
-#ifdef AMINETXDUO_IPV6
-    /*
-     * nxd_icmp_enable() covers ICMPv4 as well, so it replaces the
-     * nx_icmp_enable() below rather than adding to it.
-     *
-     * This must happen before the interfaces are attached below: address
-     * configuration in ami_netstack_ipv6_configure() joins solicited-node
-     * multicast groups, and those joins reach a driver that has to be there.
-     */
-    if (ami_netstack_ipv6_enable(ns) != AMI_NET_OK)
-        AMI_WARN("netstack: continuing with IPv4 only");
-#else
-    status = nx_icmp_enable(&ns->ns_Ip);
-    if (status != NX_SUCCESS)
-        AMI_WARN("netstack: nx_icmp_enable failed (%ld)", (long)status);
-#endif
-
     /* Secondary interfaces. nx_ip_interface_attach() drives the driver from
        this context, so the binding must exist first here too. */
     for (i = 1; i < ns->ns_IfaceCount; i++)
@@ -676,6 +642,53 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
             AMI_WARN("netstack: interface '%s' attach failed (%ld)",
                      cfg->name, (long)status);
     }
+
+    /*
+     * Both protocol enables below run after every interface is attached,
+     * because each walks the interface table once and does nothing for a slot
+     * that is not valid yet.
+     */
+
+#ifdef AMINETXDUO_MULTICAST
+    /*
+     * RFC 1112 group membership. Without this call every _nxe_igmp_multicast_
+     * *_join() returns NX_NOT_ENABLED, so setsockopt(IP_ADD_MEMBERSHIP) has
+     * nothing to do -- the option surface in src/bsdsocket/mcast.c is useless
+     * on its own.
+     *
+     * It also starts the periodic that answers a router's membership query;
+     * without an answer a querying switch stops forwarding the group after
+     * its own timeout, so joining and never reporting works only until the
+     * first query.
+     *
+     * Called from here rather than before the loop because it does not do the
+     * work itself: it sets NX_IP_IGMP_ENABLE_EVENT and the IP thread registers
+     * the all-hosts MAC filter for whichever interfaces are valid by the time
+     * it wakes. Ahead of the loop that is a race the second interface loses
+     * whenever the IP thread runs first.
+     */
+    status = nx_igmp_enable(&ns->ns_Ip);
+    if (status != NX_SUCCESS)
+        AMI_WARN("netstack: nx_igmp_enable failed (%ld)", (long)status);
+#endif
+
+#ifdef AMINETXDUO_IPV6
+    /*
+     * nxd_icmp_enable() covers ICMPv4 as well, so it replaces the
+     * nx_icmp_enable() below rather than adding to it.
+     *
+     * nxd_ipv6_enable() seeds the router solicitation counter and interval
+     * and joins ff02::1 for every interface that is valid when it runs, and
+     * nx_ip_interface_attach() joins ff02::1 but seeds nothing. Before the
+     * loop, only interface 0 ever solicited a router.
+     */
+    if (ami_netstack_ipv6_enable(ns) != AMI_NET_OK)
+        AMI_WARN("netstack: continuing with IPv4 only");
+#else
+    status = nx_icmp_enable(&ns->ns_Ip);
+    if (status != NX_SUCCESS)
+        AMI_WARN("netstack: nx_icmp_enable failed (%ld)", (long)status);
+#endif
 
     if (ns->ns_Config.default_gateway != 0UL)
     {

@@ -517,6 +517,23 @@
  */
 #define NX_DNS_CACHE_ENABLE
 
+/*
+ * One pass over the server list per call, instead of three.
+ *
+ * _nx_dns_host_resource_data_by_name_get() takes the wait_option it is given as
+ * a PER-QUERY timeout, then spends it NX_DNS_MAX_RETRIES times over every
+ * configured server, doubling between rounds.  With the default 3 and the
+ * thirty seconds bsdsocket.library asks for, one gethostbyname() against five
+ * unreachable servers is 5 * (30 + 60 + 64) seconds -- and the DNS mutex is
+ * held for all of it, so every other task's lookup queues behind it.
+ *
+ * With 1 the call is one round, bounded by wait_option * servers, and the
+ * retransmission ladder moves to src/netstack/netstack_retry.c where the break
+ * signal can be sampled between rounds.  The wire behaviour is the same query
+ * sequence; what changes is who is driving it.
+ */
+#define NX_DNS_MAX_RETRIES                      1
+
 
 /* ------------------------------------------------------------------ DHCP -- */
 

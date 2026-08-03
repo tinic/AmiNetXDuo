@@ -10,6 +10,8 @@
  */
 
 #include "netstack_internal.h"
+#include "netstack_dns_status.h"
+#include "netstack_retry.h"
 
 #include <proto/exec.h>
 
@@ -214,53 +216,129 @@ VOID ami_netstack_dns_stop(AmiNetStack *ns)
     ns->ns_DnsCreated = FALSE;
 }
 
-/*
- * Map a NetX Duo DNS status onto an actionable error. The distinction is
- * between "no resolver configured or reachable" and "that name does not
- * exist"; reporting the second as a device failure sends the reader to check
- * cables over a mistyped host name.
+/* --------------------------------------------------------------- one query
+ *
+ * Each of these is one attempt for the ladder in netstack_retry.c, which
+ * decides whether there is another. They take the ThreadX bracket themselves
+ * rather than sharing one across the ladder, so the caller's give_up() -- an
+ * exec SetSignal(), for bsdsocket.library -- is asked outside it.
+ *
+ * "Nobody answered" and "answered, but not with an address" are different
+ * outcomes and only the first is worth repeating. On the unicast path that
+ * distinction is thin: a blocking query in addons/dns folds every per-server
+ * failure into NX_DNS_QUERY_FAILED before returning, so a name server saying
+ * NXDOMAIN and a name server saying nothing arrive here identically. The
+ * ladder separates them by how long the attempt took instead.
  */
-static LONG ami_ns_dns_error(UINT status)
+
+typedef struct
 {
-    switch (status)
+    AmiNetStack *ns;
+    const char  *name;
+    ULONG        address;
+    UINT         status;
+    BOOL         nocaller;      /* the ThreadX bracket could not be taken */
+} AmiNsNameAsk;
+
+typedef struct
+{
+    AmiNetStack *ns;
+    ULONG        address;
+    char        *name_out;
+    ULONG        name_len;
+    UINT         status;
+    BOOL         nocaller;
+} AmiNsAddrAsk;
+
+static AmiNetAskResult ami_ns_ask_name(VOID *arg, ULONG wait)
+{
+    AmiNsNameAsk *ask = (AmiNsNameAsk *)arg;
+    AmiNetCaller *caller;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
     {
-        case NX_DNS_NO_SERVER:
-        case NX_DNS_EMPTY_DNS_SERVER_LIST:
-        case NX_DNS_SERVER_NOT_FOUND:
-            return AMI_NET_ERR_NOSERVER;
-
-        case NX_DNS_TIMEOUT:
-            return AMI_NET_ERR_TIMEOUT;
-
-        case NX_DNS_QUERY_FAILED:
-        case NX_DNS_MISMATCHED_RESPONSE:
-        case NX_DNS_BAD_ID_ERROR:
-        case NX_DNS_SERVER_AUTH_ERROR:
-            /* The servers were asked and none has the name; a mistyped name
-               is the likeliest cause. */
-            return AMI_NET_ERR_NONAME;
-
-        case NX_DNS_PARAM_ERROR:
-        case NX_DNS_BAD_ADDRESS_ERROR:
-        case NX_DNS_SIZE_ERROR:
-            return AMI_NET_ERR_CONFIG;
-
-        default:
-            return AMI_NET_ERR_NONAME;
+        ask->nocaller = TRUE;
+        return AMI_NET_ASK_REFUSED;
     }
+
+    ask->status = nx_dns_host_by_name_get(&ask->ns->ns_Dns,
+                                          (UCHAR *)ask->name, &ask->address,
+                                          wait);
+
+    ami_netstack_leave_free(caller);
+
+    if (ask->status == NX_SUCCESS)
+        return AMI_NET_ASK_ANSWERED;
+
+    return ami_ns_dns_again(ask->status) ? AMI_NET_ASK_SILENT
+                                         : AMI_NET_ASK_REFUSED;
 }
+
+static AmiNetAskResult ami_ns_ask_addr(VOID *arg, ULONG wait)
+{
+    AmiNsAddrAsk *ask = (AmiNsAddrAsk *)arg;
+    AmiNetCaller *caller;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+    {
+        ask->nocaller = TRUE;
+        return AMI_NET_ASK_REFUSED;
+    }
+
+    ask->status = nx_dns_host_by_address_get(&ask->ns->ns_Dns, ask->address,
+                                             (UCHAR *)ask->name_out,
+                                             (UINT)ask->name_len, wait);
+
+    ami_netstack_leave_free(caller);
+
+    if (ask->status == NX_SUCCESS)
+        return AMI_NET_ASK_ANSWERED;
+
+    return ami_ns_dns_again(ask->status) ? AMI_NET_ASK_SILENT
+                                         : AMI_NET_ASK_REFUSED;
+}
+
+#ifdef AMINETXDUO_MDNS
+static AmiNetAskResult ami_ns_ask_mdns(VOID *arg, ULONG wait)
+{
+    AmiNsNameAsk *ask = (AmiNsNameAsk *)arg;
+    AmiNetCaller *caller;
+    LONG          err;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+    {
+        ask->nocaller = TRUE;
+        return AMI_NET_ASK_REFUSED;
+    }
+
+    err = ami_netstack_mdns_resolve(ask->name, &ask->address, wait);
+
+    ami_netstack_leave_free(caller);
+
+    if (err == AMI_NET_OK)
+        return AMI_NET_ASK_ANSWERED;
+
+    /* Multicast has no server to refuse, so silence is the only failure the
+       wire can produce and re-asking is right. A responder that is not running
+       at all fails immediately, which the ladder reads as an answer. */
+    return AMI_NET_ASK_SILENT;
+}
+#endif
 
 /* -------------------------------------------------------------- public API */
 
-/* One lookup of exactly the name given. */
+/* One lookup of exactly the name given, with as many queries as it takes. */
 static LONG ami_ns_resolve_once(const char *name, ULONG *addr_out,
-                                ULONG timeout_ticks)
+                                ULONG timeout_ticks, AmiNetGiveUpFn give_up,
+                                VOID *give_up_arg)
 {
     AmiNetStack         *ns = ami_netstack_raw();
     const AmiNetdbEntry *entry;
-    AmiNetCaller         *caller;
-    ULONG                address = 0;
-    UINT                 status;
+    AmiNsNameAsk         ask;
+    AmiNetLadderResult   done;
 
     /* DEVS:Internet/hosts first -- it must work with the network down. */
     entry = ami_netdb_host_by_name(name);
@@ -273,9 +351,11 @@ static LONG ami_ns_resolve_once(const char *name, ULONG *addr_out,
     if (ns == NULL || !ns->ns_DnsCreated)
         return AMI_NET_ERR_STATE;
 
-    caller = ami_netstack_enter_alloc();
-    if (caller == NULL)
-        return AMI_NET_ERR_KERNEL;
+    ask.ns       = ns;
+    ask.name     = name;
+    ask.address  = 0;
+    ask.status   = NX_DNS_QUERY_FAILED;
+    ask.nocaller = FALSE;
 
 #ifdef AMINETXDUO_MDNS
     /*
@@ -296,36 +376,50 @@ static LONG ami_ns_resolve_once(const char *name, ULONG *addr_out,
      */
     if (ami_netstack_mdns_is_local(name))
     {
-        LONG err = ami_netstack_mdns_resolve(name, &address, timeout_ticks);
+        done = ami_net_ask_until(ami_ns_ask_mdns, &ask, timeout_ticks, give_up,
+                                 give_up_arg);
 
-        ami_netstack_leave_free(caller);
-
-        if (err != AMI_NET_OK)
+        if (done == AMI_NET_LADDER_ANSWERED)
         {
-            AMI_INFO("netstack: nothing on this network answers to '%s'", name);
-            return AMI_NET_ERR_NONAME;
+            *addr_out = ask.address;
+            return AMI_NET_OK;
         }
 
-        *addr_out = address;
-        return AMI_NET_OK;
+        if (done == AMI_NET_LADDER_ABORTED)
+            return AMI_NET_ERR_ABORTED;
+        if (ask.nocaller)
+            return AMI_NET_ERR_KERNEL;
+
+        AMI_INFO("netstack: nothing on this network answers to '%s'", name);
+
+        return AMI_NET_ERR_NONAME;
     }
 #endif
 
-    status = nx_dns_host_by_name_get(&ns->ns_Dns, (UCHAR *)name, &address,
-                                     timeout_ticks);
+    done = ami_net_ask_until(ami_ns_ask_name, &ask, timeout_ticks, give_up,
+                             give_up_arg);
 
-    ami_netstack_leave_free(caller);
-
-    if (status != NX_SUCCESS)
+    if (done == AMI_NET_LADDER_ANSWERED)
     {
-        AMI_INFO("netstack: '%s' not resolved (DNS status %ld)", name,
-                 (long)status);
-        return ami_ns_dns_error(status);
+        *addr_out = ask.address;
+        return AMI_NET_OK;
     }
 
-    *addr_out = address;
+    if (done == AMI_NET_LADDER_ABORTED)
+        return AMI_NET_ERR_ABORTED;
+    if (ask.nocaller)
+        return AMI_NET_ERR_KERNEL;
 
-    return AMI_NET_OK;
+    if (done == AMI_NET_LADDER_SILENT)
+    {
+        AMI_INFO("netstack: no name server answered about '%s'", name);
+        return AMI_NET_ERR_TIMEOUT;
+    }
+
+    AMI_INFO("netstack: '%s' not resolved (DNS status %ld)", name,
+             (long)ask.status);
+
+    return ami_ns_dns_error(ask.status);
 }
 
 /* A name with no dot in it carries no domain, so the default domain applies. */
@@ -375,7 +469,9 @@ static BOOL ami_ns_join_domain(char *dst, ULONG size, const char *name,
     return TRUE;
 }
 
-LONG netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks)
+LONG netstack_resolve_until(const char *name, ULONG *addr_out,
+                            ULONG timeout_ticks, AmiNetGiveUpFn give_up,
+                            VOID *give_up_arg)
 {
     AmiNetStack *ns = ami_netstack_raw();
     char         qualified[AMI_DNS_NAME_MAX];
@@ -384,7 +480,8 @@ LONG netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks)
     if (name == NULL || *name == '\0' || addr_out == NULL)
         return AMI_NET_ERR_CONFIG;
 
-    err = ami_ns_resolve_once(name, addr_out, timeout_ticks);
+    err = ami_ns_resolve_once(name, addr_out, timeout_ticks, give_up,
+                              give_up_arg);
     if (err == AMI_NET_OK)
         return err;
 
@@ -397,6 +494,7 @@ LONG netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks)
      * name, and a second query would just double the wait. ERR_STATE is worth
      * a retry even so, because with the stack down the retry never reaches the
      * network -- it can only hit DEVS:Internet/hosts, which costs nothing.
+     * ABORTED is the caller leaving, and must not start another lookup.
      */
     if (err != AMI_NET_ERR_NONAME && err != AMI_NET_ERR_STATE)
         return err;
@@ -409,7 +507,8 @@ LONG netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks)
                             ns->ns_Config.resolver.domain))
         return err;
 
-    if (ami_ns_resolve_once(qualified, addr_out, timeout_ticks) == AMI_NET_OK)
+    if (ami_ns_resolve_once(qualified, addr_out, timeout_ticks, give_up,
+                            give_up_arg) == AMI_NET_OK)
         return AMI_NET_OK;
 
     /* The caller asked about the bare name. Whatever the speculative retry ran
@@ -417,13 +516,19 @@ LONG netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks)
     return err;
 }
 
-LONG netstack_resolve_reverse(ULONG addr, char *name_out, ULONG name_len,
-                              ULONG timeout_ticks)
+LONG netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks)
+{
+    return netstack_resolve_until(name, addr_out, timeout_ticks, NULL, NULL);
+}
+
+LONG netstack_resolve_reverse_until(ULONG addr, char *name_out, ULONG name_len,
+                                    ULONG timeout_ticks,
+                                    AmiNetGiveUpFn give_up, VOID *give_up_arg)
 {
     AmiNetStack         *ns = ami_netstack_raw();
     const AmiNetdbEntry *entry;
-    AmiNetCaller         *caller;
-    UINT                 status;
+    AmiNsAddrAsk         ask;
+    AmiNetLadderResult   done;
 
     if (name_out == NULL || name_len == 0)
         return AMI_NET_ERR_CONFIG;
@@ -438,26 +543,81 @@ LONG netstack_resolve_reverse(ULONG addr, char *name_out, ULONG name_len,
     if (ns == NULL || !ns->ns_DnsCreated)
         return AMI_NET_ERR_STATE;
 
-    caller = ami_netstack_enter_alloc();
-    if (caller == NULL)
+    ask.ns       = ns;
+    ask.address  = addr;
+    ask.name_out = name_out;
+    ask.name_len = name_len;
+    ask.status   = NX_DNS_QUERY_FAILED;
+    ask.nocaller = FALSE;
+
+    done = ami_net_ask_until(ami_ns_ask_addr, &ask, timeout_ticks, give_up,
+                             give_up_arg);
+
+    if (done == AMI_NET_LADDER_ANSWERED)
+        return AMI_NET_OK;
+    if (done == AMI_NET_LADDER_ABORTED)
+        return AMI_NET_ERR_ABORTED;
+    if (ask.nocaller)
         return AMI_NET_ERR_KERNEL;
+    if (done == AMI_NET_LADDER_SILENT)
+        return AMI_NET_ERR_TIMEOUT;
 
-    status = nx_dns_host_by_address_get(&ns->ns_Dns, addr, (UCHAR *)name_out,
-                                        (UINT)name_len, timeout_ticks);
+    return ami_ns_dns_error(ask.status);
+}
 
-    ami_netstack_leave_free(caller);
-
-    return (status == NX_SUCCESS) ? AMI_NET_OK : ami_ns_dns_error(status);
+LONG netstack_resolve_reverse(ULONG addr, char *name_out, ULONG name_len,
+                              ULONG timeout_ticks)
+{
+    return netstack_resolve_reverse_until(addr, name_out, name_len,
+                                          timeout_ticks, NULL, NULL);
 }
 
 #ifdef AMINETXDUO_IPV6
-LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)
+typedef struct
 {
-    AmiNetStack        *ns = ami_netstack_raw();
-    AmiNetCaller        *caller;
+    AmiNetStack        *ns;
+    const char         *name;
     NX_DNS_IPV6_ADDRESS answer[1];
-    UINT                count = 0;
+    UINT                count;
     UINT                status;
+    BOOL                nocaller;
+} AmiNsName6Ask;
+
+static AmiNetAskResult ami_ns_ask_name6(VOID *arg, ULONG wait)
+{
+    AmiNsName6Ask *ask = (AmiNsName6Ask *)arg;
+    AmiNetCaller  *caller;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+    {
+        ask->nocaller = TRUE;
+        return AMI_NET_ASK_REFUSED;
+    }
+
+    ask->count  = 0;
+    ask->status = nxd_dns_ipv6_address_by_name_get(&ask->ns->ns_Dns,
+                                                   (UCHAR *)ask->name,
+                                                   ask->answer,
+                                                   (UINT)sizeof(ask->answer),
+                                                   &ask->count, wait);
+
+    ami_netstack_leave_free(caller);
+
+    if (ask->status == NX_SUCCESS)
+        return (ask->count != 0) ? AMI_NET_ASK_ANSWERED : AMI_NET_ASK_REFUSED;
+
+    return ami_ns_dns_again(ask->status) ? AMI_NET_ASK_SILENT
+                                         : AMI_NET_ASK_REFUSED;
+}
+
+LONG netstack_resolve6_until(const char *name, ULONG addr_out[4],
+                             ULONG timeout_ticks, AmiNetGiveUpFn give_up,
+                             VOID *give_up_arg)
+{
+    AmiNetStack       *ns = ami_netstack_raw();
+    AmiNsName6Ask      ask;
+    AmiNetLadderResult done;
 
     if (name == NULL || *name == '\0' || addr_out == NULL)
         return AMI_NET_ERR_CONFIG;
@@ -474,27 +634,36 @@ LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)
     if (ns == NULL || !ns->ns_DnsCreated)
         return AMI_NET_ERR_STATE;
 
-    caller = ami_netstack_enter_alloc();
-    if (caller == NULL)
+    ask.ns       = ns;
+    ask.name     = name;
+    ask.count    = 0;
+    ask.status   = NX_DNS_QUERY_FAILED;
+    ask.nocaller = FALSE;
+
+    done = ami_net_ask_until(ami_ns_ask_name6, &ask, timeout_ticks, give_up,
+                             give_up_arg);
+
+    if (done == AMI_NET_LADDER_ABORTED)
+        return AMI_NET_ERR_ABORTED;
+    if (ask.nocaller)
         return AMI_NET_ERR_KERNEL;
+    if (done == AMI_NET_LADDER_SILENT)
+        return AMI_NET_ERR_TIMEOUT;
+    if (done != AMI_NET_LADDER_ANSWERED)
+        return (ask.status == NX_SUCCESS) ? AMI_NET_ERR_NONAME
+                                          : ami_ns_dns_error(ask.status);
 
-    status = nxd_dns_ipv6_address_by_name_get(&ns->ns_Dns, (UCHAR *)name,
-                                              answer, (UINT)sizeof(answer),
-                                              &count, timeout_ticks);
-
-    ami_netstack_leave_free(caller);
-
-    if (status != NX_SUCCESS)
-        return ami_ns_dns_error(status);
-    if (count == 0)
-        return AMI_NET_ERR_NONAME;
-
-    addr_out[0] = answer[0].ipv6_address[0];
-    addr_out[1] = answer[0].ipv6_address[1];
-    addr_out[2] = answer[0].ipv6_address[2];
-    addr_out[3] = answer[0].ipv6_address[3];
+    addr_out[0] = ask.answer[0].ipv6_address[0];
+    addr_out[1] = ask.answer[0].ipv6_address[1];
+    addr_out[2] = ask.answer[0].ipv6_address[2];
+    addr_out[3] = ask.answer[0].ipv6_address[3];
 
     return AMI_NET_OK;
+}
+
+LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)
+{
+    return netstack_resolve6_until(name, addr_out, timeout_ticks, NULL, NULL);
 }
 #endif /* AMINETXDUO_IPV6 */
 
