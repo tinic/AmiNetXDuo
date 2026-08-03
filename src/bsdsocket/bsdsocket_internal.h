@@ -178,8 +178,14 @@
  * 27 in KAME and the BSDs (netinet6/in6.h), 26 in Linux. This header set is
  * 4.4BSD everywhere except the pasted-in sockaddr_in6, which is Linux, so
  * there is no lineage to defer to. Both are accepted, and getsockopt answers
- * to both. No collision risk: 26 is IPV6_CHECKSUM in BSD (raw sockets, which
- * this library does not offer) and 27 is IPV6_JOIN_ANYCAST in Linux (likewise).
+ * to both.
+ *
+ * 26 IS a collision, on one socket. It is IPV6_CHECKSUM in BSD, and this
+ * library DOES offer raw IPv6 sockets -- socket(AF_INET6, SOCK_RAW, ...) is
+ * what traceroute and ping open, and raw.c carries them. So the Linux
+ * numbering is withdrawn on a raw socket; bsd_v6_linux_numbering() in in6.c
+ * has the whole argument. (27 is IPV6_JOIN_ANYCAST in Linux, which this
+ * library does not offer, so the BSD number needs no such guard.)
  */
 #define AMI_IPV6_V6ONLY_BSD         IPV6_V6ONLY
 #define AMI_IPV6_V6ONLY_LINUX       26
@@ -847,6 +853,11 @@ LONG  bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
 LONG  bsd_getsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
                           LONG level, LONG optname, APTR optval,
                           socklen_t *optlen);
+
+/* Whether the Linux option numbering may be read on this socket. FALSE on a
+   raw one, where RFC 3542 claims 26 for IPV6_CHECKSUM; the whole rationale is
+   at the definition in in6.c. */
+BOOL  bsd_v6_linux_numbering(const AmiSocket *sock);
 #endif /* AMINETXDUO_IPV6 */
 
 /* cmsg.c -- RFC 3542 ancillary data.
@@ -950,12 +961,18 @@ LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr);
  * -- what nxd_udp_socket_source_send() wants -- or -1, and stores the NX_IP
  * hop limit it overwrote in *saved. bsd_mcast6_finish_send() puts it back;
  * the pair must bracket the send, and 0 in *saved means nothing changed.
+ *
+ * BSD_MCAST6_NO_LINK is the third answer: IPV6_MULTICAST_HOPS is 0, "this
+ * host only" (RFC 3493 5.2), so the datagram is consumed and nothing goes on
+ * the link. The caller still reports the write as accepted.
  */
+#define BSD_MCAST6_NO_LINK      (-2L)
+
 LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
                        LONG optname, APTR optval, socklen_t optlen);
 LONG bsd_mcast6_getopt(struct AmiSocketBase *base, AmiSocket *sock,
                        LONG optname, APTR optval, socklen_t *optlen);
-BOOL bsd_mcast6_is_option(LONG optname);
+BOOL bsd_mcast6_is_option(const AmiSocket *sock, LONG optname);
 LONG bsd_mcast6_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr,
                              ULONG *saved);
 VOID bsd_mcast6_finish_send(ULONG saved);

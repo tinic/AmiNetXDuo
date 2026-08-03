@@ -184,9 +184,10 @@ BOOL bsd_addr_normalise(const AmiSocket *sock, NXD_ADDRESS *addr)
  *
  * The option numbers are not in the NDK and differ between BSD and Linux, so
  * both numberings are accepted -- see the note in bsdsocket_internal.h for why
- * that is safe.  An option that cannot be implemented correctly is refused
- * with ENOPROTOOPT rather than accepted and ignored, the same rule MSG_OOB is
- * held to in transfer.c.
+ * that is safe, and bsd_v6_linux_numbering() below for the one socket where it
+ * is not.  An option that cannot be implemented correctly is refused with
+ * ENOPROTOOPT rather than accepted and ignored, the same rule MSG_OOB is held
+ * to in transfer.c.
  *
  * IPV6_MULTICAST_HOPS/_IF/_LOOP, IPV6_JOIN_GROUP and IPV6_LEAVE_GROUP are
  * mcast.c's, dispatched from here in an AMINETXDUO_MULTICAST build and
@@ -206,22 +207,52 @@ BOOL bsd_addr_normalise(const AmiSocket *sock, NXD_ADDRESS *addr)
  *          compute it; nothing else raw.c carries has one to place.
  */
 
-static LONG bsd_v6only_option(LONG optname)
+/*
+ * Whether the Linux numbering may be read on this socket.
+ *
+ * It is a convenience for a caller who took the numbers from that lineage
+ * rather than from in6.h, and it is only safe where nothing else claims them.
+ * On a RAW IPv6 socket RFC 3542 3.1 claims 26 for IPV6_CHECKSUM -- an offset
+ * into the payload where the kernel is to compute and verify a checksum -- and
+ * 26 is also Linux's IPV6_V6ONLY.  Reading it as the latter answers an
+ * application that asked for a checksum with success, computes none, verifies
+ * none, and switches V6ONLY on as a side effect of a call that never mentioned
+ * it.  ENOPROTOOPT is the honest answer: this library computes a checksum for
+ * ICMPv6 only (raw.c), because RFC 4443 makes that one mandatory.
+ *
+ * The whole alias set goes rather than the one number.  The published BSD
+ * numbering in in6.h reaches every option this library offers, so nothing is
+ * lost, and "the aliases are off on a raw socket" is a rule that can be
+ * remembered where "all but 26" is not.
+ *
+ * RFC 3542 also says an attempt to set or get IPV6_CHECKSUM on a NON-raw
+ * socket will fail; there 26 is only ever Linux's IPV6_V6ONLY, which is what
+ * a caller spelling it that way meant, so that arm is unchanged.
+ */
+BOOL bsd_v6_linux_numbering(const AmiSocket *sock)
+{
+    return (BOOL)((sock->as_Flags & ASF_RAW) == 0);
+}
+
+static LONG bsd_v6only_option(const AmiSocket *sock, LONG optname)
 {
     return (optname == AMI_IPV6_V6ONLY_BSD ||
-            optname == AMI_IPV6_V6ONLY_LINUX);
+            (optname == AMI_IPV6_V6ONLY_LINUX &&
+             bsd_v6_linux_numbering(sock)));
 }
 
-static LONG bsd_hops_option(LONG optname)
+static LONG bsd_hops_option(const AmiSocket *sock, LONG optname)
 {
     return (optname == AMI_IPV6_UNICAST_HOPS_BSD ||
-            optname == AMI_IPV6_UNICAST_HOPS_LINUX);
+            (optname == AMI_IPV6_UNICAST_HOPS_LINUX &&
+             bsd_v6_linux_numbering(sock)));
 }
 
-static LONG bsd_tclass_option(LONG optname)
+static LONG bsd_tclass_option(const AmiSocket *sock, LONG optname)
 {
     return (optname == AMI_IPV6_TCLASS_BSD ||
-            optname == AMI_IPV6_TCLASS_LINUX);
+            (optname == AMI_IPV6_TCLASS_LINUX &&
+             bsd_v6_linux_numbering(sock)));
 }
 
 LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
@@ -243,7 +274,7 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
 #ifdef AMINETXDUO_MULTICAST
     /* RFC 3493 section 5.2 belongs to mcast.c, which takes its own bracket
        and reads a struct rather than an int. */
-    if (level == IPPROTO_IPV6 && bsd_mcast6_is_option(optname))
+    if (level == IPPROTO_IPV6 && bsd_mcast6_is_option(sock, optname))
         return bsd_mcast6_setopt(base, sock, optname, optval, optlen);
 #endif
 
@@ -257,7 +288,7 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
     else
         return bsd_fail(base, AMI_EINVAL);
 
-    if (bsd_v6only_option(optname))
+    if (bsd_v6only_option(sock, optname))
     {
         /*
          * BSD requires this to be set before bind(); after that the socket's
@@ -276,7 +307,7 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
         return 0;
     }
 
-    if (bsd_hops_option(optname))
+    if (bsd_hops_option(sock, optname))
     {
         /*
          * The IPv6 hop limit is the IPv4 TTL under another name, and NetX Duo
@@ -291,7 +322,7 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
         return 0;
     }
 
-    if (bsd_tclass_option(optname))
+    if (bsd_tclass_option(sock, optname))
     {
         /*
          * RFC 2474 renamed the IPv4 TOS octet and the IPv6 traffic class
@@ -325,18 +356,18 @@ LONG bsd_getsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
         return owned;
 
 #ifdef AMINETXDUO_MULTICAST
-    if (level == IPPROTO_IPV6 && bsd_mcast6_is_option(optname))
+    if (level == IPPROTO_IPV6 && bsd_mcast6_is_option(sock, optname))
         return bsd_mcast6_getopt(base, sock, optname, optval, optlen);
 #endif
 
     if (optval == NULL || optlen == NULL)
         return bsd_fail(base, AMI_EFAULT);
 
-    if (bsd_v6only_option(optname))
+    if (bsd_v6only_option(sock, optname))
         value = ((sock->as_Flags & ASF_V6ONLY) != 0) ? 1 : 0;
-    else if (bsd_hops_option(optname))
+    else if (bsd_hops_option(sock, optname))
         value = sock->as_Ttl;
-    else if (bsd_tclass_option(optname))
+    else if (bsd_tclass_option(sock, optname))
         value = sock->as_Tos;
     else
         return bsd_fail(base, AMI_ENOPROTOOPT);
