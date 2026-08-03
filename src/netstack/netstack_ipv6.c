@@ -36,6 +36,7 @@
 #include "netstack_internal.h"
 
 #include "nx_ipv6.h"
+#include "nx_icmpv6.h"
 
 #include <proto/exec.h>
 
@@ -135,6 +136,39 @@ static BOOL ami_ns6_wait_ready(AmiNetStack *ns, UINT index)
     }
 }
 
+#ifndef NX_DISABLE_ICMPV6_ROUTER_SOLICITATION
+/*
+ * Start this interface soliciting a router.
+ *
+ * nxd_ipv6_enable() seeds these four fields, but only for the interfaces that
+ * exist when it runs; nx_ip_interface_attach() joins ff02::1 and seeds none of
+ * them, so an interface arriving through AddInterfaceTagList() has a solicit
+ * count of zero and never asks. And nxd_ipv6_stateless_address_autoconfig_
+ * enable() cannot cover it: NetX Duo's autoconfiguration status field means
+ * "enabled" when zeroed, so the first call returns NX_ALREADY_ENABLED and
+ * returns before it would have reset the counter.
+ *
+ * Without a solicitation the interface still autoconfigures, off the router's
+ * next unsolicited advertisement -- which RFC 4861 permits to be half an hour
+ * away, and which a router answering solicitations only never sends at all.
+ */
+static VOID ami_ns6_arm_solicitation(AmiNetStack *ns, UWORD i)
+{
+    NX_INTERFACE *ifp = &ns->ns_Ip.nx_ip_interface[i];
+
+    tx_mutex_get(&ns->ns_Ip.nx_ip_protection, TX_WAIT_FOREVER);
+
+    ifp->nx_ipv6_rtr_solicitation_max      = NX_ICMPV6_MAX_RTR_SOLICITATIONS;
+    ifp->nx_ipv6_rtr_solicitation_count    = NX_ICMPV6_MAX_RTR_SOLICITATIONS;
+    ifp->nx_ipv6_rtr_solicitation_interval = NX_ICMPV6_RTR_SOLICITATION_INTERVAL;
+    ifp->nx_ipv6_rtr_solicitation_timer    = NX_ICMPV6_RTR_SOLICITATION_DELAY;
+
+    tx_mutex_put(&ns->ns_Ip.nx_ip_protection);
+}
+#else
+#define ami_ns6_arm_solicitation(ns, i)  ((VOID)(ns), (VOID)(i))
+#endif /* NX_DISABLE_ICMPV6_ROUTER_SOLICITATION */
+
 static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
 {
     const AmiIfConfig *cfg = &ns->ns_Config.interfaces[i];
@@ -224,9 +258,7 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
          * NX_ALREADY_ENABLED is the normal answer: NetX Duo's per-interface
          * status field is zero-initialised and zero means enabled, so
          * autoconfiguration is on before anyone asks for it. Calling enable()
-         * anyway keeps the intent visible here and resets the
-         * router-solicitation counter, which matters if the link came up
-         * before IPv6 did.
+         * anyway keeps the intent visible here.
          */
         status = nxd_ipv6_stateless_address_autoconfig_enable(&ns->ns_Ip,
                                                               (UINT)i);
@@ -235,6 +267,8 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
                      cfg->name, (long)status);
         else
             AMI_INFO("netstack: %s: awaiting router advertisements", cfg->name);
+
+        ami_ns6_arm_solicitation(ns, i);
     }
     else
     {
