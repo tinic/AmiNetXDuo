@@ -105,9 +105,25 @@ VOID ami_log(int level, const char *fmt, ...);
 #  define AMI_DEBUG(...)  ((void)0)
 #  define AMI_TRACE(...)  ((void)0)
 #endif
-#define AMI_ERROR(...)    ami_log(AMI_LOG_ERROR, __VA_ARGS__)
-#define AMI_WARN(...)     ami_log(AMI_LOG_WARN,  __VA_ARGS__)
-#define AMI_INFO(...)     ami_log(AMI_LOG_INFO,  __VA_ARGS__)
+/*
+ * AMINETXDUO_LOG off compiles the three out.  AMINETXDUO_LOG_LEVEL does not:
+ * it is tested inside ami_log(), so the format strings are still linked and
+ * still passed -- silencing the port costs nothing and saves nothing.
+ *
+ * `if (0)` rather than `((void)0)` so the arguments are still type-checked and
+ * a variable used only in a log call is still used.  The optimiser drops the
+ * branch and the strings with it; a build with them out is 12,820 bytes
+ * smaller on the 68000 floor tier, which is the whole point.
+ */
+#ifdef AMINETXDUO_LOG
+#  define AMI_ERROR(...)  ami_log(AMI_LOG_ERROR, __VA_ARGS__)
+#  define AMI_WARN(...)   ami_log(AMI_LOG_WARN,  __VA_ARGS__)
+#  define AMI_INFO(...)   ami_log(AMI_LOG_INFO,  __VA_ARGS__)
+#else
+#  define AMI_ERROR(...)  do { if (0) ami_log(AMI_LOG_ERROR, __VA_ARGS__); } while (0)
+#  define AMI_WARN(...)   do { if (0) ami_log(AMI_LOG_WARN,  __VA_ARGS__); } while (0)
+#  define AMI_INFO(...)   do { if (0) ami_log(AMI_LOG_INFO,  __VA_ARGS__); } while (0)
+#endif
 
 /* --------------------------------------------------------------- utilities */
 

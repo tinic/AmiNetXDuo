@@ -133,6 +133,24 @@ if(AMINETXDUO_AREXX)
     add_compile_definitions(AMINETXDUO_AREXX)
 endif()
 
+# The serial diagnostic log: 136 format strings reaching RawPutChar().
+#
+# OFF in every shipping build, this one included.  Nothing on a normal machine
+# captures the serial port, so the strings are written and never read, and
+# they are the largest single thing a build can drop -- 12,820 bytes on the
+# 68000 floor tier, more than the ARexx host.  Off,
+# include/aminetxduo/compat.h compiles AMI_ERROR/WARN/INFO to a branch the
+# optimiser removes, arguments still type-checked.
+#
+# -DAMINETXDUO_LOG=ON is how a build for a bug report is made: a serial
+# capture is the only record of what the stack did before it stopped, so
+# reproducing on a logging build is the first step of any investigation that
+# needs one.
+option(AMINETXDUO_LOG "Build the serial diagnostic log" OFF)
+if(AMINETXDUO_LOG)
+    add_compile_definitions(AMINETXDUO_LOG)
+endif()
+
 # Multicast group membership, both families: nx_igmp_enable() and the five
 # IPPROTO_IP socket options, plus NX_ENABLE_IPV6_MULTICAST and the five
 # IPPROTO_IPV6 ones in an AMINETXDUO_IPV6 build.  On by default, because the
@@ -496,3 +514,4 @@ message(STATUS "  RX probe ...... ${AMINETXDUO_RXPROBE}")
 message(STATUS "  mDNS .......... ${AMINETXDUO_MDNS}")
 message(STATUS "  multicast ..... ${AMINETXDUO_MULTICAST}")
 message(STATUS "  ARexx host .... ${AMINETXDUO_AREXX}")
+message(STATUS "  serial log .... ${AMINETXDUO_LOG}")
