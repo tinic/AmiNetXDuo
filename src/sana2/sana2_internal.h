@@ -287,7 +287,6 @@ VOID ami_sana2_unbind(AmiSana2If *iface);
 /* sana2_rx.c */
 LONG ami_sana2_rx_start(AmiSana2If *iface);
 VOID ami_sana2_rx_stop(AmiSana2If *iface);
-VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet);
 
 /* sana2_tx.c */
 VOID ami_sana2_tx_init(AmiSana2If *iface);
