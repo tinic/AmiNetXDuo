@@ -32,6 +32,7 @@
     @{"The commands              " link COMMANDS}
     @{"Configuration files       " link CONFIG}
     @{"Running network software  " link SOFTWARE}
+    @{"TCP: a connection as a file" link TCPDEVICE}
     @{"Where everything lives    " link FILES}
 
   @{b}When it goes wrong@{ub}
@@ -809,18 +810,54 @@
 
                            @{b}The commands@{ub}
 
-  Seven Shell commands are installed in C:. All of them are ordinary
-  AmigaDOS commands: they take arguments the AmigaDOS way, they answer
-  a "?" with their argument template, and they can be stopped with
-  Ctrl-C.
+  The commands are installed in C:. All of them are ordinary AmigaDOS
+  commands: they take arguments the AmigaDOS way, they answer a "?"
+  with their argument template, and they can be stopped with Ctrl-C.
+
+  @{b}Setting up and controlling the stack@{ub}
 
     @{"AddNetInterface " link ADDNETINTERFACE}  start the stack and bring an interface up
     @{"Online          " link ONLINE}  put an interface back on the network
     @{"Offline         " link OFFLINE}  take an interface off the network
+    NetSetup          write the configuration files for you
+    CheckNetConfig    read them back and say what is wrong
+    NetShutdown       stop the stack
+    AddNetRoute       add a route by hand
+    DeleteNetRoute    take one away
+
+  @{b}Looking at what is happening@{ub}
+
     @{"ShowNetStatus   " link SHOWNETSTATUS}  what the stack thinks the network looks like
     @{"netstat         " link NETSTAT}  interfaces, routes and connections
+    GetNetStatus      the same, for a script to read
+    ShowNetServices   what this machine is announcing
+    NetTrace          watch packets go past
+    arp               who is on this network
+
+  @{b}Asking other machines things@{ub}
+
     @{"ping            " link PING}  is that machine there?
     @{"host            " link HOST}  look a name up, or an address back
+    nslookup          the same, the way other systems spell it
+    traceroute        which way does traffic go
+    whois             who owns a domain
+    sntp              set the clock from a time server
+
+  @{b}Moving data@{ub}
+
+    fetch             download an http: or https: address
+    nc                open a connection and pipe it about
+    telnet            log in to another machine
+    ssh               the same, encrypted
+    tftp              the small file transfer protocol
+    httpd             serve a drawer, over HTTP and WebDAV
+
+  Only the linked commands have a page here. The rest answer "?" with
+  their template, which is usually enough, and behave the way the same
+  command does on other systems.
+
+  There is also @{"TCP:" link TCPDEVICE}, which is not a command: it lets any
+  AmigaDOS command open a network connection as if it were a file.
 
   @{b}Return codes@{ub}
 
@@ -2087,6 +2124,73 @@
 
 @endnode
 
+
+@node TCPDEVICE "TCP: -- a connection as a file"
+@toc MAIN
+@prev SOFTWARE
+@next FILES
+
+                    @{b}TCP: -- a connection as a file@{ub}
+
+  The stack publishes a device called TCP:. Opening a file on it makes
+  a network connection, so ordinary AmigaDOS commands can talk to the
+  network without knowing anything about it.
+
+      Type TCP:time.example.com/daytime
+      Copy TCP:fileserver/1234 TO RAM:incoming
+      Echo >TCP:printer/9100 "hello"
+
+  Nothing there is network software. Type, Copy and Echo are the
+  Commodore commands, unchanged.
+
+  @{b}What you can write after TCP:@{ub}
+
+      TCP:<host>/<service>        connect to <service> on <host>
+      TCP:<service>               wait for one connection on <service>
+      TCP:HOST=<h>/PORT=<n>       the same, spelled out
+      TCP:OBTAIN=<id>             pick up a connection another program
+                                  handed over
+
+  <service> is a name from DEVS:Internet/services, or a number.
+
+  @{b}It is not a disk@{ub}
+
+  TCP: is a handler, not a filesystem, so there is nothing to list:
+
+      1> List TCP:
+      "tcp:" cannot be listed: not a FileSystem service
+
+  That message is correct. There are no files on it to see, only
+  connections to open.
+
+  For the same reason Info shows it with a size that is not real:
+
+      TCP:      512M       0 1048576   0%   0  Read/Write TCP
+
+  The free space is invented on purpose. Commands ask how much room a
+  destination has before they write to it, and a device answering
+  "nothing free" would look like a full disk and be refused.
+
+  @{b}Turning it off@{ub}
+
+  If you do not want TCP: at all, put a file called tcp_handler in
+  DEVS:Internet containing:
+
+      TCPHANDLER OFF
+
+  The stack then never publishes it. Delete the file, or write ON, to
+  get it back. The setting is read when the stack starts, so it takes
+  effect at the next AddNetInterface.
+
+  If you need to stop it right now and cannot edit the file -- because
+  something is opening TCP: at boot, say -- assign the name to
+  something else before the stack starts:
+
+      Assign TCP: RAM:
+
+  The stack leaves the name alone if it is already taken.
+
+@endnode
 
 @node FILES "Where everything lives"
 @toc MAIN
