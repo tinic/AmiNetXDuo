@@ -1174,14 +1174,16 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
          * their local DNS. It comes from the configured HOSTNAME so that two
          * AmiNetXDuo machines on one network are distinguishable.
          *
-         * NetX Duo keeps the pointer rather than a copy, so the storage must
-         * outlive the NX_DHCP: ns_Config is inside the same AmiNetStack and is
-         * not written again after ami_config_load().
+         * Into ns_DhcpName, whose comment says why the client gets a copy
+         * rather than a pointer into ns_Config.
          */
+        ami_ns_copy_name(ns->ns_DhcpName,
+                         (ns->ns_Config.hostname[0] != '\0')
+                             ? ns->ns_Config.hostname : "amiga",
+                         sizeof(ns->ns_DhcpName));
+
         status = nx_dhcp_create(&ns->ns_Dhcp, &ns->ns_Ip,
-                                (ns->ns_Config.hostname[0] != '\0')
-                                    ? (CHAR *)ns->ns_Config.hostname
-                                    : (CHAR *)"amiga");
+                                (CHAR *)ns->ns_DhcpName);
         if (status != NX_SUCCESS)
         {
             AMI_ERROR("netstack: nx_dhcp_create failed (%ld)", (long)status);

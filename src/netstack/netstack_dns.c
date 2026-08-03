@@ -16,7 +16,7 @@
 /* RFC 1035 2.3.4: 255 octets of domain name, plus the NUL. */
 #define AMI_DNS_NAME_MAX    256
 
-static VOID ami_ns_copy_name(char *dst, const char *src, ULONG size)
+VOID ami_ns_copy_name(char *dst, const char *src, ULONG size)
 {
     ULONG i = 0;
 
