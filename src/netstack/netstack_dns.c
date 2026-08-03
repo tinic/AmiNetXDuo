@@ -31,6 +31,55 @@ static VOID ami_ns_copy_name(char *dst, const char *src, ULONG size)
     dst[i] = '\0';
 }
 
+/*
+ * What the lease said about naming, which nothing acted on until now: option
+ * 12 was requested and reported per interface but never became the machine's
+ * name, and option 15 never became its domain, so a DHCP machine had no
+ * default domain at all and netstack_resolve()'s qualifying step never ran.
+ *
+ * The name is offered rather than assigned: a HOSTNAME in name_resolution
+ * outranks it, and an option 12 that is not a host name is refused (see
+ * AmiHostnameSource). The domain only fills a gap -- a DOMAIN= somebody wrote
+ * is the one they meant.
+ *
+ * From the first interface holding a lease, not always interface 0: a machine
+ * with a static interface 0 and a DHCP interface 1 has its lease on the one
+ * that asked for it.
+ */
+static VOID ami_ns_dhcp_naming(AmiNetStack *ns)
+{
+    char  text[AMI_CFG_NAME_LEN];
+    UWORD index;
+
+    for (index = 0; index < ns->ns_IfaceCount; index++)
+    {
+        if (ns->ns_DhcpState[index] != (UBYTE)NX_DHCP_STATE_BOUND)
+            continue;
+
+        ami_ns_dhcp_text(ns, index, NX_DHCP_OPTION_HOST_NAME, text,
+                         sizeof(text));
+        if (ami_config_hostname_offer(&ns->ns_Config, (UWORD)AMI_HOSTNAME_DHCP,
+                                      text))
+            AMI_INFO("netstack: DHCP names this machine '%s'",
+                     ns->ns_Config.hostname);
+
+        if (ns->ns_Config.resolver.domain[0] == '\0')
+        {
+            ami_ns_dhcp_text(ns, index, AMI_DHCP_OPTION_DOMAIN, text,
+                             sizeof(text));
+            if (text[0] != '\0')
+            {
+                ami_ns_copy_name(ns->ns_Config.resolver.domain, text,
+                                 sizeof(ns->ns_Config.resolver.domain));
+                AMI_INFO("netstack: DHCP domain '%s'",
+                         ns->ns_Config.resolver.domain);
+            }
+        }
+
+        break;
+    }
+}
+
 LONG ami_netstack_dns_start(AmiNetStack *ns)
 {
     UINT  status;
@@ -41,6 +90,10 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
 
     if (ns->ns_DnsCreated)
         return AMI_NET_OK;
+
+    /* Before nx_dns_create(), which is handed the domain. */
+    if (ns->ns_DhcpStarted)
+        ami_ns_dhcp_naming(ns);
 
     status = nx_dns_create(&ns->ns_Dns, &ns->ns_Ip,
                            (UCHAR *)ns->ns_Config.resolver.domain);
