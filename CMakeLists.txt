@@ -88,6 +88,15 @@ else()
 endif()
 option(AMINETXDUO_TLS  "Build tls.library and its trust store"        ${_aminetxduo_tls_default})
 option(AMINETXDUO_BPF  "Build the bpf_* raw path and filter VM"       ON)
+
+# The SANA-II receive probe: how many CMD_READs the device still held at each
+# wake, and whether the TCP sequence space is already holed where the frame is
+# handed to NetX Duo. Off, and a measurement build only -- it costs two
+# ReadEClock() calls per drain and reports through the serial log.
+option(AMINETXDUO_RXPROBE "Instrument the SANA-II receive path"       OFF)
+if(AMINETXDUO_RXPROBE)
+    add_compile_definitions(AMINETXDUO_RXPROBE)
+endif()
 if(AMINETXDUO_BPF)
     # Global, because the two SANA-II taps and the netstack's capture
     # attachment are compiled out without it and the bsdsocket LVOs answer
@@ -466,5 +475,6 @@ message(STATUS "  CPU ........... ${AMINETXDUO_CPU} (${_amiga_arch_shown})")
 message(STATUS "  IPv6 .......... ${AMINETXDUO_IPV6}")
 message(STATUS "  TLS ........... ${AMINETXDUO_TLS}")
 message(STATUS "  BPF ........... ${AMINETXDUO_BPF}")
+message(STATUS "  RX probe ...... ${AMINETXDUO_RXPROBE}")
 message(STATUS "  mDNS .......... ${AMINETXDUO_MDNS}")
 message(STATUS "  multicast ..... ${AMINETXDUO_MULTICAST}")
