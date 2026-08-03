@@ -311,6 +311,11 @@ def test_if_header():
                      body="no"))
         check(a is not None and a[0] == 412, "somebody else's tag is 412")
 
+        # The PUT above moved the tag, so read it again rather than asserting
+        # about the one the file no longer has.
+        a = once(req("HEAD", BASE + "/cond.txt"))
+        etag = a[1].get("etag", "") if a else ""
+
         a = once(req("PUT", BASE + "/cond.txt",
                      {"If": "(Not [%s])" % etag}, body="no"))
         check(a is not None and a[0] == 412, "Not its own tag is 412")
@@ -401,9 +406,13 @@ def test_lock_below_stops_delete():
               "DELETE of the drawer above is 423, not %s"
               % (a[0] if a else "?"))
 
-        a = once(req("DELETE", BASE + "/tree", {"If": "(<%s>)" % token}))
+        # Tagged, because an untagged list is about the request target and
+        # the drawer itself is not what is locked -- RFC 4918 10.4.1.
+        a = once(req("DELETE", BASE + "/tree",
+                     {"If": "<http://%s:%d%s/tree/inside.txt> (<%s>)"
+                            % (ADDR, PORT, BASE, token)}))
         check(a is not None and a[0] in (204, 207),
-              "and goes through with the token")
+              "and goes through with the token, tagged at what holds it")
     else:
         check(False, "the file inside locks")
 
