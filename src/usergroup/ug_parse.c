@@ -1,14 +1,11 @@
 /*
  * AmiNetXDuo -- usergroup.library: parsing the passwd and group files.
  *
- * Split out of ug_db.c so it can be compiled for the host: nothing here calls
- * dos.library or exec.library, so the same source that runs on the Amiga is
- * what tests/fuzz drives under ASan. src/config/ is arranged the same way and
- * for the same reason -- an arena sizing pass that disagrees with the parse
- * pass is a heap overrun on a machine with no MMU, and the netdb alias pool
- * had exactly that bug.
- *
- * ug_db.c keeps the file reading and the library vectors.
+ * Split out of ug_db.c, which keeps the file reading and the library vectors.
+ * Nothing here calls dos.library or exec.library, so the source that runs on
+ * the Amiga is the source tests/fuzz drives under ASan -- the arrangement
+ * src/config has, and for the same reason: a sizing pass that disagrees with
+ * the parse pass is a heap overrun on a machine with no MMU.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -90,11 +87,9 @@ static char *ug_field(char **cursor, char sep)
 }
 
 /*
- * Saturating, and accumulating in ULONG: a uid field is a name for a number,
- * not arithmetic, so a run of digits longer than a LONG holds should clamp
- * rather than wrap. It used to multiply a signed LONG, which is undefined
- * once it passes 2^31 -- reachable from a file in DEVS:, and found by
- * tests/fuzz/fuzz_usergroup.c under UBSan.
+ * Accumulates unsigned and saturates. Multiplying a signed LONG is undefined
+ * past 2^31 and a uid field in DEVS: can hold any number of digits; UBSan
+ * found it through tests/fuzz/fuzz_usergroup.c.
  */
 static LONG ug_atol(const char *s)
 {
@@ -210,9 +205,8 @@ void ug_db_parse_group(struct UgDatabase *db, char *text, ULONG len)
     ULONG  i;
 
     /*
-     * ug_next_line() ends a line on '\n' OR '\r', so both count here. A file
-     * saved by a classic Mac editor has no '\n' at all and used to size the
-     * arena for one line while the parse walked every one of them.
+     * ug_next_line() ends a line on '\n' or '\r', so both count. A file with
+     * no '\n' in it used to size the arena for one line and parse dozens.
      * Counting a CRLF twice only over-allocates.
      */
     for (i = 0; i < len; i++)
@@ -267,10 +261,9 @@ void ug_db_parse_group(struct UgDatabase *db, char *text, ULONG len)
         }
 
         /*
-         * The terminator is bounds-checked independently of the count above,
-         * not because the count is suspect but so that it cannot be made
-         * suspect again: gr_mem is walked to a NULL, so a group is only
-         * counted once one has been written.
+         * Checked independently of the sizing above, so a future change there
+         * cannot reach past the arena. gr_mem is walked to its NULL, so the
+         * group is counted only once one has been written.
          */
         if (slot >= slots)
         {

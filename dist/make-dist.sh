@@ -365,11 +365,10 @@ fi
 # docs/user/ is the manual and nothing else: docs/ itself is developer notes
 # and RESEARCH.md, none of which belongs in an archive a user unpacks.
 #
-# THIS DIRECTORY IS NOT docs/.  The glob used to read docs/*.guide, docs/ holds
-# only Markdown, so it matched nothing, the empty-Docs fallback below fired,
-# and every release since the manual was written shipped a Docs drawer with a
-# copy of the ReadMe in it and no manual.  Nobody noticed for a month because
-# the fallback printed a note and carried on.  It is now fatal.
+# The glob used to read docs/*.guide.  docs/ holds only Markdown, so it matched
+# nothing, the empty-Docs fallback fired, and every release shipped a Docs
+# drawer holding a second copy of the ReadMe and no manual -- for a month,
+# because the fallback printed a note and carried on.  It is fatal now.
 
 DOCSRC="$ROOT/docs/user"
 
