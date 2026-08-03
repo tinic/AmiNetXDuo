@@ -1983,20 +1983,36 @@ static VOID do_wirebytes(const char *raw)
     say("  ok   %s   [%u byte(s), both sides]", raw, wire);
 }
 
+/*
+ * `idle MS` is REAL time, off the E-Clock, not a count of Delay(1) calls.
+ *
+ * It used to add 20 per iteration on the grounds that Delay(1) is one 50 Hz
+ * tick.  pump() between them is not free, though: measured under an emulator
+ * an `idle 700` took about 1,520 ms, and a case that used it to hold an
+ * acknowledgment back for less than the one second retransmission timeout
+ * instead held it back for longer than one, so the segment was retransmitted
+ * in the middle of the wait.  That reads as the stack sending a frame it
+ * should not have, which is the opposite of what happened.
+ *
+ * Cases that assert on an interval are unaffected either way -- `after` and
+ * `within` are measured from the tap device's own E-Clock stamps -- so this
+ * changes only how long `idle` actually idles for.
+ */
 static VOID do_idle(const char *args, const char *raw)
 {
     char  tok[24];
     ULONG ms;
-    ULONG spent = 0;
+    ULONG start;
 
     (VOID)token(args, tok, sizeof(tok));
     ms = (ULONG)to_num(tok);
 
-    while (spent < ms)
+    start = tap_eclock_now();
+
+    while (ticks_to_ms(start, tap_eclock_now()) < ms)
     {
         pump();
         Delay(1);
-        spent += 20;
     }
     pump();
     pass(raw);
