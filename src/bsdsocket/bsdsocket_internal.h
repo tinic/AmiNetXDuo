@@ -1070,6 +1070,14 @@ VOID  bsd_bcopy(const APTR src, APTR dst, ULONG size);
 BOOL bsd_bind_wants_interface(const AmiSocket *sock, const NX_INTERFACE *nxif);
 
 /*
+ * Is this the peer a connected UDP socket named? TRUE for a socket that never
+ * connected. transfer.c owns it and filters received datagrams with it;
+ * select.c asks it of an ICMP error's peer.
+ */
+BOOL bsd_udp_from_peer(const AmiSocket *sock, const NXD_ADDRESS *src,
+                       UINT src_port);
+
+/*
  * The send direction of the same question: which source must a datagram from
  * this socket leave with? socket.c owns it; transfer.c and raw.c use it to
  * pick the nxd_*_source_send() index, connect() to decide whether TCP can

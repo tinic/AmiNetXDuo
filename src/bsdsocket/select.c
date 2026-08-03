@@ -148,9 +148,14 @@ static VOID bsd_tcp_disconnect_complete_notify(NX_TCP_SOCKET *socket_ptr)
     if ((sock->as_Flags & ASF_CONNECTING) != 0)
     {
         /* The connect attempt died. Leave the reason for SO_ERROR, which is
-           how a non-blocking caller finds out what went wrong. */
+           how a non-blocking caller finds out what went wrong. An ICMP message
+           that named the SYN says more than "refused" -- a router's host
+           unreachable is not the peer's RST -- so it wins when there is one. */
         sock->as_Flags &= ~ASF_CONNECTING;
-        sock->as_SoError = AMI_ECONNREFUSED;
+        sock->as_SoError =
+            (sock->as_Nx.tcp.nx_tcp_socket_icmp_error != NX_SUCCESS)
+                ? bsd_errno_from_nx(sock->as_Nx.tcp.nx_tcp_socket_icmp_error)
+                : AMI_ECONNREFUSED;
         bsd_event_post(sock, FD_CONNECT | FD_ERROR | FD_WRITE);
         return;
     }
@@ -167,6 +172,37 @@ static VOID bsd_tcp_window_notify(NX_TCP_SOCKET *socket_ptr)
 static VOID bsd_udp_receive_notify(NX_UDP_SOCKET *socket_ptr)
 {
     bsd_event_post((AmiSocket *)socket_ptr->nx_udp_socket_reserved_ptr, FD_READ);
+}
+
+/*
+ * An ICMP error named a datagram this socket's port sent. Whether it is ours
+ * to take is the same question a received datagram asks -- NetX Duo binds a
+ * UDP socket to a port and knows no peer, so it hands the decision here.
+ *
+ * RFC 1122 4.1.3.3 wants the error passed to the application; only a connected
+ * socket can be told which peer it belongs to, so an unconnected one declines.
+ * bsd_udp_from_peer() answers TRUE for a socket that never connected, which is
+ * the wrong answer here, hence the explicit ASF_CONNECTED test.
+ *
+ * Runs on the IP thread. as_SoError is what getsockopt(SO_ERROR) and
+ * WaitSelect()'s FD_ERROR read; the receive that was blocked gets the status
+ * back from nx_udp_socket_receive() directly and clears as_SoError there.
+ */
+static UINT bsd_udp_icmp_error_notify(NX_UDP_SOCKET *socket_ptr, UINT error_code,
+                                      NXD_ADDRESS *peer_address, UINT peer_port)
+{
+    AmiSocket *sock = (AmiSocket *)socket_ptr->nx_udp_socket_reserved_ptr;
+
+    if (sock == NULL || (sock->as_Flags & ASF_CONNECTED) == 0)
+        return NX_FALSE;
+
+    if (!bsd_udp_from_peer(sock, peer_address, peer_port))
+        return NX_FALSE;
+
+    sock->as_SoError = bsd_errno_from_nx(error_code);
+    bsd_event_post(sock, FD_ERROR | FD_READ);
+
+    return NX_TRUE;
 }
 
 /*
@@ -261,6 +297,8 @@ VOID bsd_events_attach(AmiSocket *sock)
     {
         sock->as_Nx.udp.nx_udp_socket_reserved_ptr = sock;
         nx_udp_socket_receive_notify(&sock->as_Nx.udp, bsd_udp_receive_notify);
+        nx_udp_socket_icmp_error_notify(&sock->as_Nx.udp,
+                                        bsd_udp_icmp_error_notify);
     }
 }
 
