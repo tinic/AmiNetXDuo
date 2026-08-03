@@ -512,9 +512,12 @@ static const NX_INTERFACE *bsd_packet_interface(const NX_PACKET *packet)
  *
  * TRUE for a socket that never connected: an unbound peer takes datagrams from
  * anybody, which is what recvfrom() is for.
+ *
+ * Not static: select.c asks the same question of an ICMP error's peer, which
+ * is the only unambiguous way to attribute one to a UDP socket.
  */
-static BOOL bsd_udp_from_peer(const AmiSocket *sock, const NXD_ADDRESS *src,
-                              UINT src_port)
+BOOL bsd_udp_from_peer(const AmiSocket *sock, const NXD_ADDRESS *src,
+                       UINT src_port)
 {
     if ((sock->as_Flags & ASF_CONNECTED) == 0)
         return TRUE;
@@ -1114,7 +1117,18 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
             if (aborted)
                 return bsd_fail(base, AMI_EINTR);
             if (status != NX_SUCCESS)
+            {
+                /* An ICMP error the stack held for this socket comes back as
+                   the status. Reporting it here consumes it, so SO_ERROR must
+                   not answer with it a second time. */
+                if (status == NX_NET_UNREACHABLE ||
+                    status == NX_HOST_UNREACHABLE ||
+                    status == NX_PROTOCOL_UNREACHABLE ||
+                    status == NX_PORT_UNREACHABLE)
+                    sock->as_SoError = 0;
+
                 return bsd_fail(base, bsd_wait_errno(wait, status));
+            }
 
             nxd_udp_source_extract(packet, &from_ip, &from_port);
 
