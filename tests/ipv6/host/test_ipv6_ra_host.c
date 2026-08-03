@@ -212,6 +212,38 @@ VOID _nx_icmpv6_send_queued_packets(NX_IP *ip_ptr, ND_CACHE_ENTRY *nd_entry)
     NX_PARAMETER_NOT_USED(nd_entry);
 }
 
+/*
+ * The destination table, which the advertisement path reaches only with Path
+ * MTU Discovery enabled.  What it is asked for is recorded rather than stored:
+ * the point is that the MTU option and Path MTU Discovery work from the same
+ * clamped number, and this is where that can be seen.
+ */
+static NX_IPV6_DESTINATION_ENTRY h_dest_entry;
+static UINT                      h_dest_adds;
+static ULONG                     h_dest_added_mtu;
+static ULONG                     h_dest_added_timeout;
+
+UINT _nx_icmpv6_dest_table_add(NX_IP *ip_ptr, ULONG *destination_address,
+                               NX_IPV6_DESTINATION_ENTRY **dest_entry_ptr, ULONG *next_hop,
+                               ULONG path_mtu, ULONG mtu_timeout, NXD_IPV6_ADDRESS *ipv6_address)
+{
+    NX_PARAMETER_NOT_USED(ip_ptr);
+    NX_PARAMETER_NOT_USED(destination_address);
+    NX_PARAMETER_NOT_USED(next_hop);
+    NX_PARAMETER_NOT_USED(ipv6_address);
+
+    h_dest_adds++;
+    h_dest_added_mtu     = path_mtu;
+    h_dest_added_timeout = mtu_timeout;
+
+    if (dest_entry_ptr)
+    {
+        *dest_entry_ptr = &h_dest_entry;
+    }
+
+    return NX_SUCCESS;
+}
+
 UINT _nx_packet_release(NX_PACKET *packet_ptr)
 {
     NX_PARAMETER_NOT_USED(packet_ptr);
@@ -284,6 +316,10 @@ static VOID h_reset(VOID)
     h_send_count = 0;
     h_send_fails = 0;
     h_now = 0;
+    h_dest_adds = 0;
+    h_dest_added_mtu = 0;
+    h_dest_added_timeout = 0;
+    memset(&h_dest_entry, 0, sizeof(h_dest_entry));
 
     if_ptr = &h_ip.nx_ip_interface[0];
 
@@ -626,6 +662,21 @@ char  what[128];
     mtu = h_mtu_case(NX_MINIMUM_IPV6_PATH_MTU);
     h_check(mtu == (ULONG)NX_MINIMUM_IPV6_PATH_MTU,
             "MTU option at the IPv6 minimum is taken");
+
+    /*
+     * And with Path MTU Discovery on, the router's own destination entry is
+     * written from that same clamped number rather than from what was
+     * advertised.  9000 became the link MTU above; the table has to agree, or
+     * the stack would send 9000-byte packets at a router it had just decided
+     * was 1500.
+     */
+    h_reset();
+    (VOID)h_mtu_case(9000);
+    h_check(h_dest_adds == 1, "the MTU option writes one destination entry");
+    h_check(h_dest_added_mtu == H_LINK_MTU,
+            "the destination entry takes the clamped MTU, not the advertised one");
+    h_check(h_dest_added_timeout == NX_WAIT_FOREVER,
+            "an MTU from a router advertisement is not aged out");
 
     /* ---------------------- (3) router solicitation ---------------------- */
 

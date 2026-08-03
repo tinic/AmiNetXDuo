@@ -672,13 +672,50 @@
 #endif
 
 /*
+ * Path MTU Discovery.
+ *
+ * A SANA-II Ethernet device reports 1500 and the stack believes it.  When the
+ * path is narrower than that -- a tunnel, a bridge with a smaller segment in
+ * it, a router that has been configured down -- IPv6 gives the sender no way
+ * to find out except this: routers do not fragment, they return an ICMPv6
+ * Packet Too Big and drop the packet.  Without this define the message is not
+ * even dispatched (nx_icmpv6_packet_process.c), so the stack retransmits the
+ * same oversized packet forever.  What the application sees is a connection
+ * that establishes, exchanges small packets, and then stalls dead on the first
+ * full-size segment.
+ *
+ * The alternative was to cap every IPv6 send at the 1280 that RFC 8200
+ * guarantees, which needs no code at all and cannot stall.  It was measured
+ * against the same rig: 5.4% slower at the median, 9.2% at the mean, and 13%
+ * more packets for the same bytes -- on every IPv6 path, permanently,
+ * including the ordinary one where 1500 works and nothing was ever wrong.
+ *
+ * WHAT IT COSTS.
+ *
+ * 1,104 bytes of code and 36 bytes of RAM per NX_IP: two ULONGs added to each
+ * NX_IPV6_DESTINATION_ENTRY (path MTU and its ageing timer, 8 bytes across the
+ * four entries configured above) plus the periodic-update hook in NX_IP.  The
+ * sweep it installs runs once a second over four table entries and does
+ * nothing at all until an entry sits below the link MTU.  The floor drawer
+ * pays none of it: AMINETXDUO_IPV6 is off there.
+ *
+ * The receive path is only safe to enable with the RFC 8201 4 checks in
+ * nx_icmpv6_process_packet_too_big.c -- the minimum-MTU floor above all, since
+ * without it one forged Packet Too Big carrying an MTU of 68 pins a
+ * destination there for as long as the entry lives.  That was a defect the
+ * vendored stack shipped with, harmless only because the message was never
+ * dispatched.  Do not turn this on in a tree that does not have the fix.
+ *
+ * Reassembly is a separate matter and is still missing: an inbound fragment is
+ * dropped unless nx_ip_fragment_enable() has been called.  Path MTU Discovery
+ * makes that less likely to be reached, since a peer told the correct MTU has
+ * less reason to fragment, but it does not fix it.
+ */
+#define NX_ENABLE_IPV6_PATH_MTU_DISCOVERY
+
+/*
  * Not set, and why:
  *
- *   NX_ENABLE_IPV6_PATH_MTU_DISCOVERY -- adds a periodic sweep of the
- *                                   destination table for a benefit that only
- *                                   appears on paths with a smaller MTU than
- *                                   the 1500 a SANA-II Ethernet device
- *                                   reports.
  *   NX_IPSEC_ENABLE              -- out of scope; §9 decision 4 lists the four
  *                                   optional subsystems and this is not one.
  */
