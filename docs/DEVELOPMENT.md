@@ -137,6 +137,19 @@ defect. Two things about them are worth knowing before reading a result:
   memory-safety audit found defects in. The limit is raised until three units
   are left, and those three are named on every run.
 
+`ami_log()` output needs `-DAMINETXDUO_LOG=ON`. It is off in every shipping
+build, including `default`: the strings cost 16,160 bytes of `bsdsocket.library`
+and nothing on an ordinary machine captures the serial port. `AMINETXDUO_LOG`
+off compiles `AMI_ERROR`/`AMI_WARN`/`AMI_INFO` to a branch `-Os` removes, so a
+run against a shipped library produces nothing on the port and a capture from
+one is not evidence of silence. Reproduce on a logging build first.
+
+| build | serial log | stripped |
+|---|---|---|
+| `default` | off | 278,524 |
+| `default` | on | 294,684 |
+| `minimal68000` | off | 197,444 |
+
 `tools/fsuae-run.sh` runs an AmigaOS executable under FS-UAE on an emulated
 A1200 with a real Kickstart 3.1, captures `ami_log()` serial output, and returns
 the program's exit status to the host:
