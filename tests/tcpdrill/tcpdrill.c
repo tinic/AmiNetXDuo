@@ -59,10 +59,21 @@
  *           the SACK-Permitted option (RFC 2018 kind 4) must be present or
  *           absent (tx); on rx, sackok=1 puts it in the injected SYN.
  *   sack=L:R[,L:R...]
- *           the SACK option (kind 5) must carry exactly these blocks, in this
- *           order.  Sequence numbers are offsets from the ISN this harness
- *           chose, the same space `ack=` counts in, because the blocks
+ *           on tx, the SACK option (kind 5) must carry exactly these blocks,
+ *           in this order.  Sequence numbers are offsets from the ISN this
+ *           harness chose, the same space `ack=` counts in, because the blocks
  *           describe data the peer sent.  `sack=-` requires no SACK option.
+ *
+ *           ON RX THE SPACE IS THE OTHER ONE.  An injected block describes
+ *           data the STACK sent, so it is an offset from the stack's initial
+ *           sequence number -- the space `seq=` counts in on tx.  The two
+ *           directions of this key cannot share a base, and a block written in
+ *           the wrong one lands outside the send window and is discarded,
+ *           which looks exactly like the stack ignoring it.
+ *   sacklen=N
+ *           rx only: write N as the SACK option's length byte instead of the
+ *           one the blocks imply.  For handing the stack an option whose
+ *           length is illegal, which is not otherwise expressible.
  *   hdrlen=N
  *           the TCP data offset, in bytes.  20 is a header with no options.
  *           A wrong data offset is a silently corrupt segment: the payload
@@ -889,6 +900,10 @@ typedef struct Inject
     ULONG   dlen;
     LONG    mss;
     BOOL    sackok;
+    UWORD   sack_n;             /* SACK blocks to carry, 0 for none */
+    ULONG   sack_l[4];
+    ULONG   sack_r[4];
+    LONG    sack_len;           /* length byte to write, -1 for the true one */
 } Inject;
 
 static VOID build_and_inject(const Inject *in)
@@ -903,6 +918,8 @@ static VOID build_and_inject(const Inject *in)
 
     if (in->sackok)
         opt = (UWORD)(opt + 4);
+    if (in->sack_n != 0)
+        opt = (UWORD)(opt + 4 + in->sack_n * 8);
     thl = (UWORD)(20 + opt);
 
     zero(f, (ULONG)sizeof(f));
@@ -950,6 +967,25 @@ static VOID build_and_inject(const Inject *in)
         tcp[at + 1] = 1;
         tcp[at + 2] = 4;
         tcp[at + 3] = 2;
+    }
+    if (in->sack_n != 0)
+    {
+        /* NOP, NOP, kind 5, length, then eight bytes a block -- the layout
+           RFC 2018 section 3 illustrates, and the one the stack itself
+           builds. */
+        UWORD at = (UWORD)(20 + (in->mss >= 0 ? 4 : 0) + (in->sackok ? 4 : 0));
+        UWORD b;
+
+        tcp[at]     = 1;
+        tcp[at + 1] = 1;
+        tcp[at + 2] = 5;
+        tcp[at + 3] = (UBYTE)((in->sack_len >= 0) ? in->sack_len : (2 + in->sack_n * 8));
+
+        for (b = 0; b < in->sack_n; b++)
+        {
+            wr32(&tcp[at + 4 + b * 8], in->sack_l[b]);
+            wr32(&tcp[at + 8 + b * 8], in->sack_r[b]);
+        }
     }
 
     for (i = 0; i < in->dlen; i++)
@@ -1032,6 +1068,7 @@ typedef struct Expect
     BOOL    have_mss;   LONG mss;
     BOOL    have_sackok; LONG sackok;
     BOOL    have_sack;  UWORD sack_n; ULONG sack_l[4]; ULONG sack_r[4];
+    BOOL    have_sacklen; LONG sacklen;
     BOOL    have_hdrlen; LONG hdrlen;
     BOOL    have_within; LONG within;
     BOOL    have_after;  LONG after;
@@ -1121,6 +1158,7 @@ static const char *parse_keys(const char *p, Expect *e)
                     else break;
                 }
             }
+            else if (streq(key, "sacklen")){ e->have_sacklen = TRUE; e->sacklen = to_num(eq + 1); }
             else if (streq(key, "within")){ e->have_within = TRUE; e->within = to_num(eq + 1); }
             else if (streq(key, "after")) { e->have_after = TRUE;  e->after = to_num(eq + 1); }
         }
@@ -1417,6 +1455,23 @@ static VOID do_rx(const char *args, const char *raw)
     in.dlen  = (ULONG)(e.have_len ? e.len : 0);
     in.mss   = e.have_mss ? e.mss : -1;
     in.sackok = (e.have_sackok && e.sackok) ? TRUE : FALSE;
+
+    /* On an injected frame the blocks describe data the STACK sent, so they
+       are offsets from its initial sequence number -- the space `ack=` counts
+       in, and the opposite of the space the same key means on `tx`. */
+    in.sack_len = e.have_sacklen ? e.sacklen : -1;
+
+    if (e.have_sack)
+    {
+        UWORD b;
+
+        in.sack_n = e.sack_n;
+        for (b = 0; b < e.sack_n; b++)
+        {
+            in.sack_l[b] = cs.u_isn + e.sack_l[b];
+            in.sack_r[b] = cs.u_isn + e.sack_r[b];
+        }
+    }
 
     /* Give the stack a moment to post its reads before the very first
        injection of a case; after that they are always outstanding. */
