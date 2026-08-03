@@ -96,6 +96,13 @@
 #ifndef AMI_SANA2_RX_INLINE_IP
 #define AMI_SANA2_RX_INLINE_IP      1
 #endif
+/*
+ *   INLINE_REAP   reap transmit completions on the reader instead of asking
+ *                 the IP thread to (ami_sana2_tx_defer)
+ */
+#ifndef AMI_SANA2_RX_INLINE_REAP
+#define AMI_SANA2_RX_INLINE_REAP    1
+#endif
 
 #if AMI_SANA2_RX_INLINE_IP && !AMI_SANA2_RX_BATCH
 #error "inline IP receive needs the batched drain"
@@ -111,6 +118,10 @@
 #ifdef AMINETXDUO_RXPROBE
 #define AMI_SANA2_RX_HIST           5   /* 0, 1, 2-3, 4-7, 8+ */
 #define AMI_RXPROBE_COUNT(c)        ((c)++)
+/* TX_DISABLE_STACK_FILLING is set for the port, so the reader fills its own
+   stack and the probe scans it. This is how the inline path's stack cost is
+   priced rather than guessed. */
+#define AMI_RXPROBE_STACK_FILL      0xA5A5A5A5UL
 #else
 #define AMI_RXPROBE_COUNT(c)        ((VOID)0)
 #endif
@@ -225,6 +236,7 @@ typedef struct AmiSana2Rx
     ULONG               probe_hist[AMI_SANA2_RX_HIST];
     ULONG               probe_inline;    /* batches processed on the reader  */
     ULONG               probe_deferred;  /* batches handed to the IP thread  */
+    ULONG               probe_stack;     /* high-water bytes, filled at start */
 #endif
 
     AmiRxSlot           slot[AMI_SANA2_RX_MAX_DEPTH];

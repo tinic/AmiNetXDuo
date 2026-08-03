@@ -177,6 +177,31 @@ VOID ami_sana2_tx_defer(AmiSana2If *iface)
     if (list->lh_TailPred == (struct Node *)list)
         return;
 
+#if AMI_SANA2_RX_INLINE_REAP
+    /*
+     * Reap here rather than waking the IP thread to do it.
+     *
+     * A bulk receive sends an ACK every second segment, and every one of those
+     * CMD_WRITEs completes with a Signal() on this reader. Measured on a 4 MB
+     * read: 10,384 reader wakes, 6,600 of which collected no completed CMD_READ
+     * at all -- they were transmit completions. Each of those cost a baton
+     * release and reacquire on the reader AND a full IP thread activation to
+     * run the driver's deferred case, for work that is a GetMsg() loop.
+     *
+     * ami_sana2_tx_reap() is callable from any thread by construction (see its
+     * header). The mutex is taken anyway so the reap runs where every other
+     * send runs, and TX_NO_WAIT because nx_ip_protection is TX_NO_INHERIT:
+     * blocking on it would stall the highest-priority thread in the system
+     * behind an application one. Contention falls back to the IP thread.
+     */
+    if (tx_mutex_get(&iface->ip->nx_ip_protection, TX_NO_WAIT) == TX_SUCCESS)
+    {
+        ami_sana2_tx_reap(iface);
+        tx_mutex_put(&iface->ip->nx_ip_protection);
+        return;
+    }
+#endif
+
     _nx_ip_driver_deferred_processing(iface->ip);
 }
 
