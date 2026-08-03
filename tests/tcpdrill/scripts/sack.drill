@@ -1,9 +1,14 @@
-# tcpdrill -- RFC 2018 selective acknowledgment, receive side.
+# tcpdrill -- RFC 2018 selective acknowledgment, both halves.
 #
-# The stack generates SACK; it does not process the blocks a peer sends it.
-# So every case here is about what leaves: the option on the SYN, the option
-# on an acknowledgement that leaves a hole, and the data offset that says
-# where each of them ends.
+# s01-s12 are the receive side: what leaves this stack.  The option on the
+# SYN, the option on an acknowledgement that leaves a hole, and the data
+# offset that says where each of them ends.
+#
+# r01-r09 are the send side: what the stack does with the blocks a PEER sends
+# it.  That half went unwritten while the option was only being generated, and
+# for as long as it was unwritten the stack advertised SACK-Permitted and then
+# ignored every block it was sent.  A case here therefore asserts on the
+# RETRANSMISSIONS, not on an option -- the blocks are input.
 #
 # hdrlen IS ASSERTED ON EVERY CASE THAT CHANGES IT.  The data offset field is
 # what tells the peer where the payload starts, and it is the one thing a
@@ -18,9 +23,15 @@
 #   48   three
 #   56   four, the most that fits in the 40 bytes an option area has
 #
-# Sequence numbers in `sack=` are offsets from the ISN this harness chose,
-# the same space `ack=` counts in, because the blocks describe data the peer
-# sent.  `sack=-` requires no SACK option at all.
+# Sequence numbers in `sack=` on a `tx` are offsets from the ISN this harness
+# chose, the same space `ack=` counts in, because the blocks describe data the
+# peer sent.  `sack=-` requires no SACK option at all.
+#
+# ON AN `rx` THE BASE IS THE OTHER ONE -- the stack's own initial sequence
+# number, the space `seq=` counts in on a `tx` -- because an injected block
+# describes what the stack sent.  A block written in the wrong base lands
+# outside the send window, is discarded, and looks exactly like the stack
+# ignoring it.
 #
 # ---------------------------------------------------------------------------
 
@@ -203,3 +214,351 @@ tx A seq=1 ack=1 sack=101:201 hdrlen=32 within=400
 rx PA seq=1 ack=1 len=100
 tx A seq=1 ack=201 sack=- within=400
 recv 400 = 200
+
+# ---------------------------------------------------------------------------
+# THE SEND SIDE: what the blocks a peer sends are used for.
+#
+# Every case below builds the same picture.  The peer offers MSS 200, so a
+# segment is a round number, and the congestion window is opened one step at a
+# time until four segments can be in flight at once:
+#
+#   send 200  ack 201    window 400
+#   send 400  ack 601    window 600
+#   send 600  ack 1201   window 800
+#   send 800             1201 1401 1601 1801, four segments, none acknowledged
+#
+# Three duplicate acknowledgements at 1201 then set off the fast retransmit,
+# and what they carry is the variable.  `sack=` on an INJECTED frame counts
+# from the stack's own initial sequence number, because the blocks describe
+# what the stack sent -- the opposite of the same key on `tx`.
+#
+# Each case ends with a reset.  A socket left in fast recovery retransmits on
+# a backoff for over a minute, and retransmit.drill records what that does to
+# the case after it.
+# ---------------------------------------------------------------------------
+
+# TWO HOLES, TWO RETRANSMISSIONS, IN ONE ROUND.  The peer holds the second and
+# fourth segments and says so.  Without the blocks NewReno can only infer that
+# something before 1401 was lost and sends one segment per round trip, so 1601
+# waits a whole round for a partial acknowledgement to reveal it.  With them
+# both holes leave together, and neither segment the peer already holds is
+# sent again.
+case r01_two_holes_leave_together
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=200 sackok=1
+tx A seq=1 ack=1
+send 200
+tx PA seq=1 ack=1 len=200
+rx A seq=1 ack=201
+send 400
+tx PA seq=201 ack=1 len=200
+tx PA seq=401 ack=1 len=200
+rx A seq=1 ack=601
+send 600
+tx PA seq=601 ack=1 len=200
+tx PA seq=801 ack=1 len=200
+tx PA seq=1001 ack=1 len=200
+rx A seq=1 ack=1201
+send 800
+tx PA seq=1201 ack=1 len=200
+tx PA seq=1401 ack=1 len=200
+tx PA seq=1601 ack=1 len=200
+tx PA seq=1801 ack=1 len=200
+rx A seq=1 ack=1201 sack=1801:2001,1401:1601
+rx A seq=1 ack=1201 sack=1801:2001,1401:1601
+rx A seq=1 ack=1201 sack=1801:2001,1401:1601
+tx PA seq=1201 ack=1 len=200 hdrlen=20 within=400
+tx PA seq=1601 ack=1 len=200 hdrlen=20 within=400
+notx 400
+rx R seq=1
+
+# ONE HOLE IS STILL ONE RETRANSMISSION.  The peer holds everything above the
+# acknowledgement, so there is one thing to send and the walk over the queue
+# must not turn into a second copy of data the blocks just said arrived.
+case r02_one_hole_sends_one_segment
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=200 sackok=1
+tx A seq=1 ack=1
+send 200
+tx PA seq=1 ack=1 len=200
+rx A seq=1 ack=201
+send 400
+tx PA seq=201 ack=1 len=200
+tx PA seq=401 ack=1 len=200
+rx A seq=1 ack=601
+send 600
+tx PA seq=601 ack=1 len=200
+tx PA seq=801 ack=1 len=200
+tx PA seq=1001 ack=1 len=200
+rx A seq=1 ack=1201
+send 800
+tx PA seq=1201 ack=1 len=200
+tx PA seq=1401 ack=1 len=200
+tx PA seq=1601 ack=1 len=200
+tx PA seq=1801 ack=1 len=200
+rx A seq=1 ack=1201 sack=1401:2001
+rx A seq=1 ack=1201 sack=1401:2001
+rx A seq=1 ack=1201 sack=1401:2001
+tx PA seq=1201 ack=1 len=200 within=400
+notx 400
+rx R seq=1
+
+# NOTHING ABOVE THE HIGHEST BLOCK IS PRESUMED LOST.  The peer holds the middle
+# two segments; the first and the last are both missing, but only the first is
+# BELOW something the peer reported.  The last one is simply unreported -- it
+# may be in the network still -- and sending it on that evidence would be a
+# guess.  RFC 6675 section 4 draws the same line from a count of SACKed
+# segments above rather than from one.
+case r03_nothing_above_the_highest_block
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=200 sackok=1
+tx A seq=1 ack=1
+send 200
+tx PA seq=1 ack=1 len=200
+rx A seq=1 ack=201
+send 400
+tx PA seq=201 ack=1 len=200
+tx PA seq=401 ack=1 len=200
+rx A seq=1 ack=601
+send 600
+tx PA seq=601 ack=1 len=200
+tx PA seq=801 ack=1 len=200
+tx PA seq=1001 ack=1 len=200
+rx A seq=1 ack=1201
+send 800
+tx PA seq=1201 ack=1 len=200
+tx PA seq=1401 ack=1 len=200
+tx PA seq=1601 ack=1 len=200
+tx PA seq=1801 ack=1 len=200
+rx A seq=1 ack=1201 sack=1401:1801
+rx A seq=1 ack=1201 sack=1401:1801
+rx A seq=1 ack=1201 sack=1401:1801
+tx PA seq=1201 ack=1 len=200 within=400
+notx 400
+rx R seq=1
+
+# NO BLOCKS, NO CHANGE.  The same loss, acknowledged the way a peer without
+# SACK acknowledges it.  One segment per round trip is all that can be
+# inferred, and that is what must still happen.
+case r04_bare_duplicates_are_newreno
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=200 sackok=1
+tx A seq=1 ack=1
+send 200
+tx PA seq=1 ack=1 len=200
+rx A seq=1 ack=201
+send 400
+tx PA seq=201 ack=1 len=200
+tx PA seq=401 ack=1 len=200
+rx A seq=1 ack=601
+send 600
+tx PA seq=601 ack=1 len=200
+tx PA seq=801 ack=1 len=200
+tx PA seq=1001 ack=1 len=200
+rx A seq=1 ack=1201
+send 800
+tx PA seq=1201 ack=1 len=200
+tx PA seq=1401 ack=1 len=200
+tx PA seq=1601 ack=1 len=200
+tx PA seq=1801 ack=1 len=200
+rx A seq=1 ack=1201
+rx A seq=1 ack=1201
+rx A seq=1 ack=1201
+tx PA seq=1201 ack=1 len=200 within=400
+notx 400
+rx R seq=1
+
+# NO PERMISSION, NO BLOCKS READ.  Byte for byte the frames of r01, on a
+# connection whose SYN+ACK never offered SACK-Permitted.  RFC 2018 section 2
+# needs the option on both SYNs; without it the blocks describe an agreement
+# that was not made, and the recovery is the one r04 gets.  This is the case
+# that says the difference in r01 comes from the negotiation and not from the
+# bytes.
+case r05_blocks_ignored_without_permission
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=200
+tx A seq=1 ack=1
+send 200
+tx PA seq=1 ack=1 len=200
+rx A seq=1 ack=201
+send 400
+tx PA seq=201 ack=1 len=200
+tx PA seq=401 ack=1 len=200
+rx A seq=1 ack=601
+send 600
+tx PA seq=601 ack=1 len=200
+tx PA seq=801 ack=1 len=200
+tx PA seq=1001 ack=1 len=200
+rx A seq=1 ack=1201
+send 800
+tx PA seq=1201 ack=1 len=200
+tx PA seq=1401 ack=1 len=200
+tx PA seq=1601 ack=1 len=200
+tx PA seq=1801 ack=1 len=200
+rx A seq=1 ack=1201 sack=1801:2001,1401:1601
+rx A seq=1 ack=1201 sack=1801:2001,1401:1601
+rx A seq=1 ack=1201 sack=1801:2001,1401:1601
+tx PA seq=1201 ack=1 len=200 within=400
+notx 400
+rx R seq=1
+
+# EDGES THAT CANNOT BE TRUE.  A block whose right edge is below its left, one
+# entirely beyond anything this side has sent, and one reaching past the
+# transmit sequence.  Each is dropped, so what is left is r04's recovery and a
+# connection that is still there afterwards.
+case r06_impossible_edges_are_dropped
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=200 sackok=1
+tx A seq=1 ack=1
+send 200
+tx PA seq=1 ack=1 len=200
+rx A seq=1 ack=201
+send 400
+tx PA seq=201 ack=1 len=200
+tx PA seq=401 ack=1 len=200
+rx A seq=1 ack=601
+send 600
+tx PA seq=601 ack=1 len=200
+tx PA seq=801 ack=1 len=200
+tx PA seq=1001 ack=1 len=200
+rx A seq=1 ack=1201
+send 800
+tx PA seq=1201 ack=1 len=200
+tx PA seq=1401 ack=1 len=200
+tx PA seq=1601 ack=1 len=200
+tx PA seq=1801 ack=1 len=200
+rx A seq=1 ack=1201 sack=1601:1401,90000:90200,1801:5000
+rx A seq=1 ack=1201 sack=1601:1401,90000:90200,1801:5000
+rx A seq=1 ack=1201 sack=1601:1401,90000:90200,1801:5000
+tx PA seq=1201 ack=1 len=200 within=400
+notx 400
+rx PA seq=1 ack=1201 len=10
+tx A seq=2001 ack=11 within=400
+rx R seq=11
+
+# AN OPTION LENGTH THAT IS NOT 2 PLUS A MULTIPLE OF EIGHT.  RFC 2018 section 3
+# fixes the length; anything else means the edges cannot be where they are
+# claimed to be, so the whole option goes.  The length still has to be one the
+# option area survives being walked with, because the stack resets a
+# connection over an unwalkable option area (RFC 1122 section 4.2.2.5) and
+# that would hide this.
+case r07_illegal_option_length_is_dropped
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=200 sackok=1
+tx A seq=1 ack=1
+send 200
+tx PA seq=1 ack=1 len=200
+rx A seq=1 ack=201
+send 400
+tx PA seq=201 ack=1 len=200
+tx PA seq=401 ack=1 len=200
+rx A seq=1 ack=601
+send 600
+tx PA seq=601 ack=1 len=200
+tx PA seq=801 ack=1 len=200
+tx PA seq=1001 ack=1 len=200
+rx A seq=1 ack=1201
+send 800
+tx PA seq=1201 ack=1 len=200
+tx PA seq=1401 ack=1 len=200
+tx PA seq=1601 ack=1 len=200
+tx PA seq=1801 ack=1 len=200
+rx A seq=1 ack=1201 sack=1401:1601 sacklen=9
+rx A seq=1 ack=1201 sack=1401:1601 sacklen=9
+rx A seq=1 ack=1201 sack=1401:1601 sacklen=9
+tx PA seq=1201 ack=1 len=200 within=400
+notx 400
+rx PA seq=1 ack=1201 len=10
+tx A seq=2001 ack=11 within=400
+rx R seq=11
+
+# ONE BAD BLOCK DOES NOT COST THE GOOD ONES.  The option carries a block below
+# the cumulative acknowledgement -- RFC 2883 duplicate reporting, or simply
+# stale -- and a second block overlapping one already read.  Both are dropped
+# on their own, the two real blocks stand, and the recovery is r01's.
+case r08_stale_and_overlapping_blocks_are_dropped_alone
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=200 sackok=1
+tx A seq=1 ack=1
+send 200
+tx PA seq=1 ack=1 len=200
+rx A seq=1 ack=201
+send 400
+tx PA seq=201 ack=1 len=200
+tx PA seq=401 ack=1 len=200
+rx A seq=1 ack=601
+send 600
+tx PA seq=601 ack=1 len=200
+tx PA seq=801 ack=1 len=200
+tx PA seq=1001 ack=1 len=200
+rx A seq=1 ack=1201
+send 800
+tx PA seq=1201 ack=1 len=200
+tx PA seq=1401 ack=1 len=200
+tx PA seq=1601 ack=1 len=200
+tx PA seq=1801 ack=1 len=200
+rx A seq=1 ack=1201 sack=1:201,1401:1601,1401:1701,1801:2001
+rx A seq=1 ack=1201 sack=1:201,1401:1601,1401:1701,1801:2001
+rx A seq=1 ack=1201 sack=1:201,1401:1601,1401:1701,1801:2001
+tx PA seq=1201 ack=1 len=200 within=400
+tx PA seq=1601 ack=1 len=200 within=400
+notx 400
+rx R seq=1
+
+# A TIMEOUT DROPS WHAT THE BLOCKS SAID.  RFC 6675 section 5.1: once the timer
+# has fired the connection no longer knows what the peer holds, because a
+# receiver is entitled to discard data it reported (RFC 2018 section 4).
+#
+# Seeing that needs the blocks to arrive, the timer to fire, and a fast
+# retransmit to happen afterwards on acknowledgements carrying no blocks of
+# their own -- an acknowledgement without the option is not a statement that
+# the holes closed, so nothing else would clear them.  Two duplicates are one
+# short of the threshold; the timeout arrives first, and the third duplicate
+# then sets off a recovery that must send the one segment r04 sends and not
+# r01's two.
+case r09_a_timeout_drops_the_blocks
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=200 sackok=1
+tx A seq=1 ack=1
+send 200
+tx PA seq=1 ack=1 len=200
+rx A seq=1 ack=201
+send 400
+tx PA seq=201 ack=1 len=200
+tx PA seq=401 ack=1 len=200
+rx A seq=1 ack=601
+send 600
+tx PA seq=601 ack=1 len=200
+tx PA seq=801 ack=1 len=200
+tx PA seq=1001 ack=1 len=200
+rx A seq=1 ack=1201
+send 800
+tx PA seq=1201 ack=1 len=200
+tx PA seq=1401 ack=1 len=200
+tx PA seq=1601 ack=1 len=200
+tx PA seq=1801 ack=1 len=200
+rx A seq=1 ack=1201 sack=1801:2001,1401:1601
+rx A seq=1 ack=1201 sack=1801:2001,1401:1601
+tx PA seq=1201 ack=1 len=200 after=700 within=2000
+rx A seq=1 ack=1201
+tx PA seq=1201 ack=1 len=200 within=400
+notx 400
+rx R seq=1
