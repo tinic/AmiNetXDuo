@@ -106,6 +106,7 @@ CROSS_CONFIGS=(
 # happen when `ctest` reported "No tests were found" and nobody noticed.
 HOST_TEST_TARGETS=(test_config test_usergroup test_mbuf test_bpf test_httppath test_httpif test_fetchurl test_crypto68k test_crypto68k_25519 test_net68k_checksum
                    test_tcp_retries test_bcast_loopback test_tcp_source_connect test_tcp_rtt
+                   test_sockopt_numbers
                    fuzz_config fuzz_bpf fuzz_dns fuzz_usergroup
                    fuzz_dhcp fuzz_tls_record fuzz_tls_x509)
 
