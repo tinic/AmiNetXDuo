@@ -51,7 +51,7 @@
  * this driver models. So the seeds are SIGNED, at startup, with the private
  * key of the sample leaf in tests/tls/tls_test_certs.h: the same key, the same
  * PKCS#1 v1.5 construction and the same RSA operation
- * nx_secure_tls_send_certificate_verify.c uses. Six parameter shapes are
+ * nx_secure_tls_send_certificate_verify.c uses. Five parameter shapes are
  * signed once and reused, which is cheap; re-signing every mutation would be
  * an RSA private operation per case, so mutations of the signed region stop at
  * the verify by design. -r reports both counts, so "clean" says which.
@@ -92,11 +92,6 @@
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #include "tls_test_certs.h"
 #pragma GCC diagnostic pop
-
-/* The vendored parsers take the TLS protection mutex around anything that can
-   suspend. Nothing suspends here -- no thread runs -- so the object only has
-   to exist. */
-TX_MUTEX _nx_secure_tls_protection;
 
 /*
  * ami_tls_crypto.c times every operation through timer.device. There is no
@@ -258,7 +253,10 @@ static UINT fc_session_open(NX_SECURE_TLS_SESSION *s, UINT suite)
 
     status = _nx_secure_tls_ciphersuite_lookup(s, suite, &info, &priority);
     if (status != NX_SUCCESS)
+    {
+        (void)_nx_secure_tls_session_delete(s);
         return status;
+    }
     s->nx_secure_tls_session_ciphersuite = info;
 
     memcpy(s->nx_secure_tls_key_material.nx_secure_tls_client_random,
@@ -272,18 +270,28 @@ static UINT fc_session_open(NX_SECURE_TLS_SESSION *s, UINT suite)
            sizeof(s->nx_secure_tls_key_material.nx_secure_tls_master_secret));
 
     status = _nx_secure_tls_handshake_hash_init(s);
-    if (status != NX_SUCCESS)
-        return status;
+    if (status == NX_SUCCESS)
+        status = fc_install_certificate(s);
 
-    status = fc_install_certificate(s);
     if (status != NX_SUCCESS)
+    {
+        (void)_nx_secure_tls_session_delete(s);
         return status;
+    }
 
     /* Where the client is when the ServerKeyExchange arrives; the ECDHE arm
        rejects any other state. */
     s->nx_secure_tls_client_state = NX_SECURE_TLS_CLIENT_STATE_SERVER_CERTIFICATE;
 
     return NX_SUCCESS;
+}
+
+/* nx_secure keeps every created session on a global ring, so a driver that
+   builds one per case has to take each one off again -- the next
+   session_create() walks the ring and follows whatever the last one left. */
+static void fc_session_close(NX_SECURE_TLS_SESSION *s)
+{
+    (void)_nx_secure_tls_session_delete(s);
 }
 
 /* -------------------------------------------------------------- signing ---- */
@@ -314,36 +322,61 @@ static const NX_CRYPTO_METHOD *fc_suite_auth(UINT suite)
     return NX_NULL;
 }
 
+/* The hash method the verifier will use, taken from the same X.509 table it
+   looks it up in rather than named directly. */
+static const NX_CRYPTO_METHOD *fc_x509_hash(USHORT identifier)
+{
+    NX_SECURE_X509_CRYPTO *table =
+        ami_crypto_tls_ciphers_ecc.nx_secure_tls_x509_cipher_table;
+    USHORT n = ami_crypto_tls_ciphers_ecc.nx_secure_tls_x509_cipher_table_size;
+    USHORT i;
+
+    for (i = 0; i < n; i++)
+    {
+        if (table[i].nx_secure_x509_crypto_identifier == identifier)
+            return table[i].nx_secure_x509_hash_method;
+    }
+
+    return NX_NULL;
+}
+
 /* SHA-256 over the three pieces the verifier hashes: both randoms, then the
    key-exchange parameters. */
 static UINT fc_params_hash(const unsigned char *params, unsigned params_len,
                            UCHAR out[32])
 {
-    NX_CRYPTO_METHOD *m = &crypto_method_sha256;
-    static UCHAR      metadata[sizeof(NX_CRYPTO_SHA256)];
+    NX_CRYPTO_METHOD *m = (NX_CRYPTO_METHOD *)
+                          fc_x509_hash(NX_SECURE_TLS_X509_TYPE_RSA_SHA_256);
+    /* Whichever SHA-256 the table holds -- ami_tls_crypto.c's or nx_crypto's
+       -- states its own metadata size, so the buffer is checked against it
+       rather than sized from one of the two structures. */
+    static ULONG      metadata[256];
     VOID             *handler = NX_NULL;
     UINT              status;
 
-    status = m->nx_crypto_init(m, NX_NULL, 0, &handler, metadata,
+    if (m == NX_NULL || m->nx_crypto_metadata_area_size > sizeof(metadata))
+        return NX_CRYPTO_NOT_SUCCESSFUL;
+
+    status = m->nx_crypto_init(m, NX_NULL, 0, &handler, (UCHAR *)metadata,
                                sizeof(metadata));
     if (status != NX_CRYPTO_SUCCESS)
         return status;
 
     status = m->nx_crypto_operation(NX_CRYPTO_HASH_INITIALIZE, handler, m,
                                     NX_NULL, 0, NX_NULL, 0, NX_NULL, NX_NULL, 0,
-                                    metadata, sizeof(metadata), NX_NULL, NX_NULL);
+                                    (UCHAR *)metadata, sizeof(metadata), NX_NULL, NX_NULL);
     if (status != NX_CRYPTO_SUCCESS)
         return status;
 
     status = m->nx_crypto_operation(NX_CRYPTO_HASH_UPDATE, handler, m, NX_NULL,
                                     0, fc_client_random, 32, NX_NULL, NX_NULL, 0,
-                                    metadata, sizeof(metadata), NX_NULL, NX_NULL);
+                                    (UCHAR *)metadata, sizeof(metadata), NX_NULL, NX_NULL);
     if (status != NX_CRYPTO_SUCCESS)
         return status;
 
     status = m->nx_crypto_operation(NX_CRYPTO_HASH_UPDATE, handler, m, NX_NULL,
                                     0, fc_server_random, 32, NX_NULL, NX_NULL, 0,
-                                    metadata, sizeof(metadata), NX_NULL, NX_NULL);
+                                    (UCHAR *)metadata, sizeof(metadata), NX_NULL, NX_NULL);
     if (status != NX_CRYPTO_SUCCESS)
         return status;
 
@@ -414,6 +447,25 @@ static UINT fc_sign(const unsigned char *params, unsigned params_len,
 /* ------------------------------------------------------------- the seeds --- */
 
 /*
+ * secp256r1's generator, uncompressed: 0x04 || Gx || Gy. A point off the curve
+ * is rejected by the ECDH import before it does any arithmetic, so a seed that
+ * carries one stops a step short of the shared-secret calculation. This is a
+ * point the curve actually has.
+ */
+static const unsigned char fc_p256_g[FC_POINT_BYTES] =
+{
+    0x04,
+    0x6b, 0x17, 0xd1, 0xf2, 0xe1, 0x2c, 0x42, 0x47,
+    0xf8, 0xbc, 0xe6, 0xe5, 0x63, 0xa4, 0x40, 0xf2,
+    0x77, 0x03, 0x7d, 0x81, 0x2d, 0xeb, 0x33, 0xa0,
+    0xf4, 0xa1, 0x39, 0x45, 0xd8, 0x98, 0xc2, 0x96,
+    0x4f, 0xe3, 0x42, 0xe2, 0xfe, 0x1a, 0x7f, 0x9b,
+    0x8e, 0xe7, 0xeb, 0x4a, 0x7c, 0x0f, 0x9e, 0x16,
+    0x2b, 0xce, 0x33, 0x57, 0x6b, 0x31, 0x5e, 0xce,
+    0xcb, 0xb6, 0x40, 0x68, 0x37, 0xbf, 0x51, 0xf5
+};
+
+/*
  * A ServerKeyExchange, signed. `key_len` bytes of ECDHE point are written
  * starting at offset 4, and the signature covers exactly the range the
  * verifier hashes -- packet_buffer[0 .. 4 + key_len).
@@ -428,9 +480,10 @@ static void fcs_ske(FcBuf *w, unsigned curve, unsigned key_len, int sign_it)
     fc_u16(w, curve);
     fc_u8(w, key_len);
 
-    /* An uncompressed point, or as much of one as key_len allows. */
+    /* The generator, or as much of it as key_len allows; past its end, a
+       pattern, because a longer point is one of the shapes worth sending. */
     for (i = 0; i < key_len; i++)
-        fc_u8(w, (i == 0) ? 0x04 : (0x10 + (i & 0x7F)));
+        fc_u8(w, (i < FC_POINT_BYTES) ? fc_p256_g[i] : (0x10 + (i & 0x7F)));
 
     if (sign_it && fc_sign(w->b, w->len, sig) != NX_CRYPTO_SUCCESS)
         sign_it = 0;
@@ -702,7 +755,10 @@ static void fc_run(int message, const unsigned char *msg, unsigned len)
        worth driving, so it gets one byte it is not allowed to read. */
     payload = (UCHAR *)malloc(len == 0 ? 1u : len);
     if (payload == NX_NULL)
+    {
+        fc_session_close(&s);
         return;
+    }
     if (len > 0)
         memcpy(payload, msg, len);
 
@@ -745,6 +801,7 @@ static void fc_run(int message, const unsigned char *msg, unsigned len)
     }
 
     free(payload);
+    fc_session_close(&s);
 }
 
 /* ---------------------------------------------------------- the selftest --- */
@@ -812,6 +869,8 @@ static void fc_selftest(void)
             NX_SECURE_TLS_CLIENT_STATE_SERVER_KEY_EXCHANGE)
         fc_fail("client_state not advanced to SERVER_KEY_EXCHANGE");
 
+    fc_session_close(&s);
+
     /* ---- CertificateVerify ---- */
 
     fcs_cv_full(&w);
@@ -830,6 +889,8 @@ static void fc_selftest(void)
 
     if (fc_crypto_ops() == before)
         fc_fail("CertificateVerify ran no public-key operation");
+
+    fc_session_close(&s);
 
     /* ---- Finished ---- */
 
@@ -867,6 +928,8 @@ static void fc_selftest(void)
     if (status != NX_SECURE_TLS_INCORRECT_MESSAGE_LENGTH)
         fc_fail("11-byte Finished was not refused for length");
 
+    fc_session_close(&s);
+
     /* The counts above are the selftest's, not the sweep's. */
     fc_n_ske = fc_n_ske_crypto = fc_n_ske_dh = 0;
     fc_n_cv  = fc_n_cv_crypto  = 0;
@@ -886,6 +949,12 @@ static void fc_env_init(void)
         fc_client_random[i] = (UCHAR)(0x10 + i);
         fc_server_random[i] = (UCHAR)(0xA0 + i);
     }
+
+    /* nx_secure owns _nx_secure_tls_protection here rather than the driver
+       declaring one, because linking the whole archive means
+       nx_secure_tls_initialize.c is in it. The mutex it creates is uncontended
+       by construction -- one thread, nothing suspends. */
+    _nx_secure_tls_initialize();
 
     status = ami_tls_crypto_initialize();
     if (status != NX_SUCCESS)
@@ -969,7 +1038,7 @@ static void fc_mutate(FcBuf *w)
         if (w->len == 0)
             return;
 
-        switch (fc_below(8))
+        switch (fc_below(9))
         {
         case 0:     /* any byte */
             w->b[fc_below(w->len)] = (unsigned char)fc_rand();
@@ -992,15 +1061,56 @@ static void fc_mutate(FcBuf *w)
                 w->b[at + 1] = (unsigned char)fc_rand();
             }
             break;
-        case 5:     /* the head, where the curve and the format live */
-            if (w->len > 2)
+        case 5:
+            /*
+             * A ServerKeyExchange head the ECDHE arm will accept, most of the
+             * time. A uniformly random one is rejected on the first byte
+             * roughly 255 times in 256, and a sweep that never gets past the
+             * first byte is a sweep of the first byte.
+             */
+            if (w->len > 3)
             {
-                w->b[0] = (unsigned char)(fc_below(5));
-                w->b[1] = (unsigned char)fc_below(2);
-                w->b[2] = (unsigned char)fc_rand();
+                static const unsigned short curves[] =
+                    { FC_CURVE_SECP256R1, 24, 25, 29, 0, 0xFFFF };
+
+                unsigned c = curves[fc_below((unsigned)(sizeof(curves) /
+                                                        sizeof(curves[0])))];
+
+                w->b[0] = (unsigned char)((fc_below(4) == 0) ? fc_rand() : 3);
+                w->b[1] = (unsigned char)(c >> 8);
+                w->b[2] = (unsigned char)c;
             }
             break;
-        case 6:     /* truncate */
+        case 6:
+            /*
+             * A CertificateVerify head, likewise: the algorithm pair has to be
+             * (SHA-256, RSA) and the length has to equal the certificate's
+             * modulus before a signature byte is read at all. The lengths
+             * offered are the ones the bounds arithmetic turns on -- the
+             * modulus, its neighbours, and the message's own size.
+             */
+            if (w->len > 3)
+            {
+                unsigned pick = fc_below(6);
+                unsigned n;
+
+                switch (pick)
+                {
+                case 0:  n = FC_SIG_BYTES;          break;
+                case 1:  n = FC_SIG_BYTES - 1;      break;
+                case 2:  n = FC_SIG_BYTES + 1;      break;
+                case 3:  n = w->len;                break;
+                case 4:  n = w->len - 4;            break;
+                default: n = 0xFFFF;                break;
+                }
+
+                w->b[0] = NX_SECURE_TLS_HASH_ALGORITHM_SHA256;
+                w->b[1] = NX_SECURE_TLS_SIGNATURE_ALGORITHM_RSA;
+                w->b[2] = (unsigned char)(n >> 8);
+                w->b[3] = (unsigned char)n;
+            }
+            break;
+        case 7:     /* truncate */
             w->len = fc_below(w->len) + 1u;
             break;
         default:    /* extend, with whatever the buffer already held */
