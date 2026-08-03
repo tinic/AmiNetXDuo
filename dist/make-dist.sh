@@ -34,7 +34,7 @@
 #       Libs/68020-40/               the one this machine can run
 #       Libs/68060/
 #       Devs/Internet/               protocols, services, networks
-#       Docs/  Docs.info             whatever docs/ holds
+#       Docs/  Docs.info             the manual, from docs/user/
 #       Examples/  Examples.info     commented configuration files
 #       Developer/  Developer.info   headers and glue for the vectors past
 #                                    the end of the NDK's SFD
@@ -362,14 +362,22 @@ fi
 
 # ---------------------------------------------------------------- the docs --
 #
-# docs/ belongs to whoever is writing the documentation; take whatever is
-# there and do not fail if it is not there yet.
+# docs/user/ is the manual and nothing else: docs/ itself is developer notes
+# and RESEARCH.md, none of which belongs in an archive a user unpacks.
+#
+# THIS DIRECTORY IS NOT docs/.  The glob used to read docs/*.guide, docs/ holds
+# only Markdown, so it matched nothing, the empty-Docs fallback below fired,
+# and every release since the manual was written shipped a Docs drawer with a
+# copy of the ReadMe in it and no manual.  Nobody noticed for a month because
+# the fallback printed a note and carried on.  It is now fatal.
+
+DOCSRC="$ROOT/docs/user"
 
 shopt -s nullglob
-for doc in "$ROOT"/docs/*.guide "$ROOT"/docs/*.txt "$ROOT"/docs/*.doc; do
+for doc in "$DOCSRC"/*.guide "$DOCSRC"/*.txt "$DOCSRC"/*.doc; do
     cp "$doc" "$TREE/Docs/"
 done
-for doc in "$ROOT"/docs/*.guide.info "$ROOT"/docs/*.txt.info; do
+for doc in "$DOCSRC"/*.info; do
     cp "$doc" "$TREE/Docs/"
 done
 shopt -u nullglob
@@ -382,11 +390,20 @@ for doc in "$TREE"/Docs/*; do
     [ -f "$doc.info" ] || cp "$INSTALL/Document.info" "$doc.info"
 done
 
-if [ -z "$(ls -A "$TREE/Docs" 2>/dev/null)" ]; then
-    echo "note: docs/ had nothing to ship; Docs/ will contain only the ReadMe"
-    cp "$ROOT/dist/ReadMe" "$TREE/Docs/ReadMe"
-    cp "$INSTALL/Document.info" "$TREE/Docs/ReadMe.info"
+# The manual is not optional.  An archive without it is the defect above, and
+# the only way to be sure it never recurs is to refuse to build one.
+shopt -s nullglob
+packed_guides=("$TREE"/Docs/*.guide)
+shopt -u nullglob
+
+if [ ${#packed_guides[@]} -eq 0 ]; then
+    echo "ERROR: no .guide reached $TREE/Docs" >&2
+    echo "  looked in: $DOCSRC" >&2
+    echo "  the manual ships in every archive; there is no build without it" >&2
+    exit 2
 fi
+
+echo "==> including $(basename "$DOCSRC")/: $(cd "$TREE/Docs" && echo *)"
 
 # ------------------------------------------------------------ the archive --
 
