@@ -304,13 +304,17 @@
  * that makes the scale non-zero, and the arm that shows the mechanism works,
  * `wscale 1` in the SYN -- took the wire from 172 KB/s to 32 KB/s, with 15
  * retransmitted segments and a nine-deep duplicate-ACK run where the shipped
- * configuration has neither.  There is no SACK in the vendored tree (16.7), so
- * a burst loss inside a big window costs a full go-back-N, and 24.3's pool
- * budget is what stops that happening.  With scaling off, that
- * misconfiguration fails at socket() instead of running five times slower.
+ * configuration has neither.  That arm was measured when the sender could not
+ * use SACK at all -- the option was offered and the blocks a peer sent were
+ * never read -- so a burst loss inside a big window cost a full go-back-N, and
+ * 24.3's pool budget was what stopped that happening.  The blocks are read now
+ * (see the SACK section below) and the measurement has not been retaken, so
+ * the figure above says what that misconfiguration cost then, not what it
+ * would cost now.  With scaling off it fails at socket() either way.
  *
- * This stays off until SACK exists, or a pool budget can offer one socket more
- * than 64 KB.
+ * This stays off until a pool budget can offer one socket more than 64 KB.
+ * Below that the scale factor NetX Duo computes is always zero, so the option
+ * buys nothing whatever the loss recovery does.
  */
 #ifdef AMINETXDUO_TCP_WINDOW_SCALING
 #define NX_ENABLE_TCP_WINDOW_SCALING
@@ -320,7 +324,7 @@
 /* ----------------------------------------------------------------- SACK -- */
 
 /*
- * RFC 2018 selective acknowledgment, receive side.
+ * RFC 2018 selective acknowledgment, both directions.
  *
  * The SYN offers SACK-Permitted and a SYN-ACK repeats it only when the peer's
  * SYN carried it.  An acknowledgment that leaves a hole then carries the blocks
@@ -328,12 +332,18 @@
  * than everything after it.  Without this a single loss inside a window costs a
  * go-back-N, which is what keeps the receive window ceiling where it is.
  *
- * Sender-side processing of blocks the peer sends us is not implemented, so
- * writes recover exactly as they did.
+ * The blocks a peer sends are read too, and drive what goes out again: a
+ * segment a block covers is not retransmitted, and while blocks are held every
+ * hole the peer described leaves in one round rather than one per round trip.
+ * They are advisory, so nothing is released on their word -- the cumulative
+ * acknowledgment is still the only thing that frees a packet -- and a
+ * retransmission timeout drops them.
  *
- * Costs one byte plus three of padding and one ULONG per NX_TCP_SOCKET, and on
- * an in-order stream one comparison per acknowledgment: the builder reads the
- * queue tail, sees nothing above the receive sequence, and returns.
+ * Costs 40 bytes per NX_TCP_SOCKET, 32 of them the reader's copy of what a peer
+ * reported.  On an in-order stream the send side pays one comparison per
+ * acknowledgment -- the builder reads the queue tail, sees nothing above the
+ * receive sequence, and returns -- and the read side pays nothing at all on a
+ * segment carrying no options.
  *
  * Build with -DAMINETXDUO_TCP_SACK=OFF to take it out.
  */
