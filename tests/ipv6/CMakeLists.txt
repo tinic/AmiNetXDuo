@@ -82,3 +82,42 @@ set_target_properties(ipv6_socket_test PROPERTIES OUTPUT_NAME "ipv6_socket_test"
 if(AMINETXDUO_BSDSOCKET_LINK)
     add_dependencies(ipv6_socket_test bsdsocket_library)
 endif()
+
+# ---------------------------------------------------------------- host tier --
+#
+# Router advertisement processing and router solicitation retransmission,
+# compiled into a host binary and driven directly.  Same shim as
+# tests/netstack/host: the linux port's nx_port.h first, then
+# port/netxduo-amiga/inc so nx_user.h is the one that ships.  AMINETXDUO_IPV6
+# is a global definition (the top-level CMakeLists), so nx_user.h enables IPv6
+# here without anything further.
+#
+# It answers what a capture cannot: an advertisement with a chosen combination
+# of prefix flags, and a day of solicitation retransmission in a few
+# microseconds.
+
+if(NOT CMAKE_CROSSCOMPILING)
+
+    add_executable(test_ipv6_ra
+        host/test_ipv6_ra_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv6_process_ra.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv6_validate_ra.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv6_validate_options.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxd_ipv6_router_solicitation_check.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ipv6_util.c")
+
+    target_include_directories(test_ipv6_ra PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_ipv6_ra PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    include(CTest)
+    add_test(NAME ipv6_ra COMMAND test_ipv6_ra)
+
+endif()
