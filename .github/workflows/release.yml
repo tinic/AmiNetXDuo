@@ -163,13 +163,17 @@ jobs:
 
       # A release that silently lost ssh or the bundled Installer would look
       # fine -- until someone tried to install with nothing to run the script.
-      - name: ssh and the Installer really are in the archive
+      # The manual is here for the same reason and a worse history: it was
+      # missing from every archive for a month, because make-dist.sh globbed
+      # the wrong directory and said so in a note nobody read.
+      - name: ssh, the Installer and the manual really are in the archive
         run: |
-          for f in C/ssh Installer; do
+          for f in C/ssh Installer Docs/AmiNetXDuo.guide Docs/AmiNetXDuo.guide.info; do
               [ -f "build/dist/AmiNetXDuo/$f" ] || {
                   echo "::error::$f is missing from the archive"; exit 1; }
           done
           ls -l build/dist/AmiNetXDuo/C/ssh build/dist/AmiNetXDuo/Installer
+          ls -l build/dist/AmiNetXDuo/Docs/
 
       # And so would a release that lost a CPU drawer -- right up until
       # somebody with that machine ran the installer and it aborted.  The
