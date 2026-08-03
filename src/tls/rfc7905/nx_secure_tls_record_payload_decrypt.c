@@ -34,10 +34,6 @@
 
 #include "nx_secure_tls.h"
 
-#if (NX_SECURE_TLS_TLS_1_0_ENABLED)
-static UCHAR save_iv[20]; /* Must be large enough to hold the block size for session ciphers! */
-#endif
-
 static UINT _nx_secure_tls_record_chained_packet_decrypt(NX_SECURE_TLS_SESSION *tls_session,
                                                          NX_PACKET *encrypted_packet, UINT offset,
                                                          UINT message_length, NX_PACKET **decrypted_packet,
@@ -52,7 +48,6 @@ static UINT _nx_secure_tls_data_decrypt(NX_SECURE_TLS_SESSION *tls_session,
                                         UCHAR *input, UCHAR *output, UINT length);
 
 /* Defined in nx_secure_tls_record_payload_encrypt.c */
-extern UCHAR _nx_secure_tls_record_block_buffer[NX_SECURE_TLS_MAX_CIPHER_BLOCK_SIZE];
 
 /**************************************************************************/
 /*                                                                        */
@@ -110,6 +105,13 @@ UINT _nx_secure_tls_record_payload_decrypt(NX_SECURE_TLS_SESSION *tls_session, N
 UINT                                  status;
 UCHAR                                *iv;
 UCHAR                                 padding_length;
+UCHAR                                 block_buffer[NX_SECURE_TLS_MAX_CIPHER_BLOCK_SIZE];
+#if (NX_SECURE_TLS_TLS_1_0_ENABLED)
+/* Only its size is ever read: the bound on iv_size before the session IV is
+   filled.  It was a file-scope static, which is the shape the block buffer
+   above had to be fixed out of, so it does not get to keep it. */
+UCHAR                                 save_iv[20];
+#endif
 UCHAR                                 copy_size;
 const NX_CRYPTO_METHOD               *session_cipher_method;
 USHORT                                iv_size;
@@ -483,12 +485,12 @@ UCHAR                                 nonce[13];
             while (offset < (message_length - 1))
             {
                 copy_size = (UCHAR)(((message_length - 1) - offset) & 0xFF);
-                if (copy_size > sizeof(_nx_secure_tls_record_block_buffer))
+                if (copy_size > sizeof(block_buffer))
                 {
-                    copy_size = sizeof(_nx_secure_tls_record_block_buffer);
+                    copy_size = sizeof(block_buffer);
                 }
                 status = nx_packet_data_extract_offset(*decrypted_packet,
-                                                       offset, _nx_secure_tls_record_block_buffer,
+                                                       offset, block_buffer,
                                                        copy_size, &bytes_copied);
                 NX_ASSERT(status == NX_SUCCESS);
 
@@ -496,7 +498,7 @@ UCHAR                                 nonce[13];
 
                 for(i = 0; i < bytes_copied; i++)
                 {
-                    if(_nx_secure_tls_record_block_buffer[i] != padding_length)
+                    if(block_buffer[i] != padding_length)
                     {
 
                         /* Padding byte is incorrect! */
@@ -583,6 +585,7 @@ static UINT _nx_secure_tls_record_chained_packet_decrypt(NX_SECURE_TLS_SESSION *
 {
 UINT status;
 UCHAR *icv_ptr;
+UCHAR block_buffer[NX_SECURE_TLS_MAX_CIPHER_BLOCK_SIZE];
 UINT icv_size;
 UINT bytes_processed;
 ULONG bytes_copied;
@@ -595,7 +598,7 @@ const NX_CRYPTO_METHOD *session_cipher_method;
     /* Get ICV size. It is zero for CBC mode and non zero for AEAD mode. */
     session_cipher_method = tls_session -> nx_secure_tls_session_ciphersuite -> nx_secure_tls_session_cipher;
     icv_size = session_cipher_method -> nx_crypto_ICV_size_in_bits >> 3;
-    if ((icv_size > message_length) || (icv_size > sizeof(_nx_secure_tls_record_block_buffer)))
+    if ((icv_size > message_length) || (icv_size > sizeof(block_buffer)))
     {
 
         /* Invalid packet. */
@@ -676,7 +679,7 @@ const NX_CRYPTO_METHOD *session_cipher_method;
     }
 
     /* Extract ICV. */
-    icv_ptr = _nx_secure_tls_record_block_buffer;
+    icv_ptr = block_buffer;
     if (icv_size > 0)
     {
         status = nx_packet_data_extract_offset(encrypted_packet, icv_offset,
@@ -772,6 +775,7 @@ static UINT _nx_secure_tls_record_packet_decrypt(NX_SECURE_TLS_SESSION *tls_sess
 {
 UINT status;
 UCHAR *input;
+UCHAR block_buffer[NX_SECURE_TLS_MAX_CIPHER_BLOCK_SIZE];
 UCHAR *output;
 NX_PACKET *original_encrypted_packet = encrypted_packet;
 NX_PACKET *packet_ptr;
@@ -788,7 +792,7 @@ UINT original_offset = offset;
 
     /* block_size must be no larger than NX_SECURE_TLS_MAX_CIPHER_BLOCK_SIZE. */
     block_size = session_cipher_method -> nx_crypto_block_size_in_bytes;
-    NX_ASSERT(block_size <= sizeof(_nx_secure_tls_record_block_buffer));
+    NX_ASSERT(block_size <= sizeof(block_buffer));
 
     /* Locate input data. */
     while (offset)
@@ -812,14 +816,14 @@ UINT original_offset = offset;
     if (encrypted_length < block_size)
     {
 
-        /* Use _nx_secure_tls_record_block_buffer for decryption. */
+        /* Use block_buffer for decryption. */
         status = nx_packet_data_extract_offset(original_encrypted_packet, original_offset,
-                                               _nx_secure_tls_record_block_buffer, block_size, &bytes_copied);
+                                               block_buffer, block_size, &bytes_copied);
         if (status)
         {
             return(status);
         }
-        input = _nx_secure_tls_record_block_buffer;
+        input = block_buffer;
         length = bytes_copied;
     }
     else
@@ -872,8 +876,8 @@ UINT original_offset = offset;
     if ((decrypted_length < block_size) && (decrypted_length < length))
     {
 
-        /* Use _nx_secure_tls_record_block_buffer for decryption output. */
-        output = _nx_secure_tls_record_block_buffer;
+        /* Use block_buffer for decryption output. */
+        output = block_buffer;
         decrypted_length = block_size;
     }
     else
@@ -915,7 +919,7 @@ UINT original_offset = offset;
         }
     }
 
-    if (output == _nx_secure_tls_record_block_buffer)
+    if (output == block_buffer)
     {
 
         /* Append decrypted data. */

@@ -368,6 +368,16 @@ if(NOT CMAKE_CROSSCOMPILING)
         add_test(NAME version_scheme
                  COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tools/version.sh"
                          --check "${CMAKE_BINARY_DIR}/include/aminetxduo/version.h")
+
+        # Three vendored files are dropped from their glob so that ours are
+        # what the linker resolves to. Nothing about that is visible from
+        # third_party/, so an upstream fix to one of them can sit in the tree
+        # with no effect on the binary -- which is how the shared TLS record
+        # block buffer stayed in the shipped record path after the submodule
+        # was fixed. This is the alarm for the next one.
+        add_test(NAME shadowed_sources
+                 COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tools/check-shadowed-sources.sh"
+                         "${CMAKE_CURRENT_SOURCE_DIR}")
     endif()
 endif()
 
