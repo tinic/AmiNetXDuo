@@ -943,6 +943,16 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
             rx->depth = AMI_SANA2_RX_MAX_DEPTH;
 
         rx->stack = ami_alloc_flags(AMI_SANA2_RX_STACK_SIZE, MEMF_PUBLIC);
+#ifdef AMINETXDUO_RXPROBE
+        if (rx->stack != NULL)
+        {
+            ULONG *fill = (ULONG *)rx->stack;
+            ULONG  n     = (ULONG)AMI_SANA2_RX_STACK_SIZE / sizeof(ULONG);
+
+            while (n-- != 0)
+                *fill++ = AMI_RXPROBE_STACK_FILL;
+        }
+#endif
         if (rx->stack == NULL)
         {
             AMI_ERROR("sana2: no memory for reader stack");
