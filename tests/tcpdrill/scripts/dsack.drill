@@ -1,0 +1,119 @@
+# tcpdrill -- RFC 2883 duplicate selective acknowledgment, receive side.
+#
+# A D-SACK block reports data that arrived twice.  It differs from an ordinary
+# RFC 2018 block in two ways a capture can check: it is FIRST in the option,
+# and its range may lie at or below the cumulative acknowledgement, which no
+# ordinary block ever does.  Both are asserted on every case here.
+#
+# The `sack=` and `hdrlen=` conventions are sack.drill's, and the block
+# ordering rules it pins down still hold behind the D-SACK block.
+#
+# ---------------------------------------------------------------------------
+
+# RFC 2883 section 4, first example: the whole segment is below the cumulative
+# acknowledgement.  Nothing is held above it, so the option exists ONLY to
+# carry the D-SACK block -- 101:201 sits below ack=201 and is the sole block.
+case d01_duplicate_below_the_cumulative_ack
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=101 sack=- hdrlen=20 within=400
+rx PA seq=101 ack=1 len=100
+tx A seq=1 ack=201 sack=- hdrlen=20 within=400
+rx PA seq=101 ack=1 len=100
+tx A seq=1 ack=201 sack=101:201 hdrlen=32 within=400
+recv 400 = 200
+
+# REPORTED ONCE.  A sender that saw the same D-SACK twice would count the
+# second as a fresh duplicate and undo its congestion window again, so the
+# block must not survive into the next acknowledgement.
+case d02_reported_on_one_acknowledgement_only
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=101 sack=- hdrlen=20 within=400
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=101 sack=1:101 hdrlen=32 within=400
+rx PA seq=101 ack=1 len=100
+tx A seq=1 ack=201 sack=- hdrlen=20 within=400
+recv 400 = 200
+
+# RFC 2883 section 4, second example: the duplicate is a subset of a range
+# already reported in an ordinary block.  BOTH blocks appear -- the D-SACK
+# first, then the ordinary block that still covers the same bytes -- because
+# it is their coexistence that tells the sender the arrival was a duplicate
+# rather than new data closing the hole.
+case d03_duplicate_of_an_already_sacked_range
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
+tx A seq=1 ack=1
+rx PA seq=101 ack=1 len=100
+tx A seq=1 ack=1 sack=101:201 hdrlen=32 within=400
+rx PA seq=101 ack=1 len=100
+tx A seq=1 ack=1 sack=101:201,101:201 hdrlen=40 within=400
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=201 sack=- hdrlen=20 within=400
+recv 400 = 200
+
+# A D-SACK AND A REAL HOLE AT ONCE, AND THE ORDER IS D-SACK FIRST.  The hole
+# at 101:201 is genuine and would be the only block by RFC 2018; the duplicate
+# of 1:101 is below the cumulative acknowledgement and takes the first slot
+# ahead of it.  Sorting by sequence number produces the same two blocks in the
+# other order, which is the mistake this case exists to catch.
+case d04_dsack_precedes_the_ordinary_blocks
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=101 sack=- hdrlen=20 within=400
+rx PA seq=201 ack=1 len=100
+tx A seq=1 ack=101 sack=201:301 hdrlen=32 within=400
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=101 sack=1:101,201:301 hdrlen=40 within=400
+rx PA seq=101 ack=1 len=100
+tx A seq=1 ack=301 sack=- hdrlen=20 within=400
+recv 400 = 300
+
+# PARTIAL OVERLAP REPORTS ONLY THE PART THAT REPEATED.  The segment carries
+# 1:201 where 1:101 was already acknowledged, so the D-SACK block ends at the
+# cumulative acknowledgement and the new half is delivered normally.  A block
+# spanning the whole segment would tell the sender it wasted twice what it did.
+case d05_partial_duplicate_reports_only_the_overlap
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=101 sack=- hdrlen=20 within=400
+rx PA seq=1 ack=1 len=200
+tx A seq=1 ack=201 sack=1:101 hdrlen=32 within=400
+recv 400 = 200
+
+# NO PERMISSION, NO D-SACK, AND NO ACKNOWLEDGEMENT EITHER.  RFC 2883 rides on
+# RFC 2018, so a peer that never sent SACK-Permitted gets nothing back for a
+# repeat: the sequence number and window are the ones the last acknowledgement
+# already carried, so repeating it would add no information and the peer would
+# read it as a duplicate ACK.  With permission, d01 shows the same repeat now
+# draws an acknowledgement, because there IS something new to say.
+case d06_no_dsack_without_permission
+socket
+connect
+tx S seq=0 mss=1460 sackok=1
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=101 sack=- hdrlen=20 within=400
+rx PA seq=1 ack=1 len=100
+notx 400
+recv 400 = 100

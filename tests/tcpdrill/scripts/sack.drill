@@ -199,7 +199,12 @@ tx A seq=1 ack=1
 rx PA seq=101 ack=1 len=100
 tx A seq=1 ack=1 sack=101:201 hdrlen=32 within=400
 rx PA seq=101 ack=1 len=100
-tx A seq=1 ack=1 sack=101:201 hdrlen=32 within=400
+# The second arrival of 101:201 is a duplicate of a range already reported,
+# which RFC 2883 section 4 says to lead with as a D-SACK block -- so the hole
+# is reported twice over, once as the duplicate and once as the block still
+# covering it.  dsack.drill d03 is where that pairing is pinned down; what
+# this case still asserts is that the ordinary block does not go missing.
+tx A seq=1 ack=1 sack=101:201,101:201 hdrlen=40 within=400
 rx PA seq=1 ack=1 len=100
 tx A seq=1 ack=201 sack=- within=400
 recv 400 = 200
