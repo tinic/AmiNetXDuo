@@ -77,6 +77,19 @@ endif()
 target_compile_options(test_aamprobe PRIVATE -Wall -Wextra)
 set_target_properties(test_aamprobe PROPERTIES OUTPUT_NAME "AamProbe")
 
+# McastRace runs two Processes with a base each against bsd_mcast_table[16].
+# The row is claimed inside the bsd_nx_enter() bracket and a claim made after
+# it would let a second base take the same row; the assertion is the only thing
+# the loser can see, which is its own IP_DROP_MEMBERSHIP refused on a group it
+# holds.  The window is aimed at rather than waited for -- see the file.
+add_executable(test_mcastrace mcastrace.c)
+target_include_directories(test_mcastrace PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_mcastrace PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_mcastrace PRIVATE -Wall -Wextra)
+set_target_properties(test_mcastrace PROPERTIES OUTPUT_NAME "McastRace")
+
 # MonProbe drives AddNetMonitorHookTagList/RemoveNetMonitorHook and the two
 # call-site hook types.  The hook register convention (Hook in A0, NULL in A2,
 # message in A1) is not the pair a reader would guess, and a wrong guess hands
