@@ -9,13 +9,13 @@
 # acknowledgment being injected is the round trip the stack sees -- it is the
 # only delay in the loop, because the peer is inside the guest.  The delay has
 # to stay under the timeout currently armed or the segment is retransmitted
-# first, which is a different case (rto02), so the first one here is 700 ms
+# first, which is a different case (rto02), so the delay here is 600 ms
 # against the one second the socket starts with.
 #
 # WHAT THE NUMBERS COME OUT AT.  A first sample of R gives SRTT = R and
-# RTTVAR = R/2, so RTO = R + 4(R/2) = 3R.  700 ms of idle plus the tens of
-# milliseconds either side of it is about 36 ticks of the 50 Hz IP timer, so
-# the first timeout is about 2.2 seconds where the old fixed base was 1.0 --
+# RTTVAR = R/2, so RTO = R + 4(R/2) = 3R.  600 ms of idle plus the milliseconds
+# either side of it is about 31 ticks of the 50 Hz IP timer, so
+# the first timeout is about 1.9 seconds where the old fixed base was 1.0 --
 # a separation wide enough that the bounds below never have to be tight.
 #
 # ALL TIMINGS ARE RELATIVE TO THE PREVIOUS MATCHED FRAME, from the E-Clock
@@ -39,11 +39,11 @@ rx SA seq=0 ack=1 win=8192 mss=1460
 tx A seq=1 ack=1
 send 100
 tx PA seq=1 ack=1 len=100 within=300
-idle 700
+idle 600
 rx A seq=1 ack=101 win=8192
 send 100
 tx PA seq=101 ack=1 len=100 within=300
-tx PA seq=101 ack=1 len=100 after=1600 within=3000
+tx PA seq=101 ack=1 len=100 after=1400 within=2600
 rx R seq=101
 
 # RFC 6298 3, Karn's algorithm.  The segment is retransmitted before it is
@@ -84,7 +84,7 @@ tx PA seq=101 ack=1 len=100 after=700 within=1400
 rx R seq=101
 
 # RFC 6298 5.5 on top of section 2: the ladder is unchanged, it merely starts
-# somewhere else.  Two intervals, both about 2.2 s and 4.4 s rather than 1 s
+# somewhere else.  Two intervals, about 1.9 s and 3.8 s rather than 1 s
 # and 2 s.
 case rto04_backoff_doubles_the_measured_base
 socket
@@ -94,20 +94,26 @@ rx SA seq=0 ack=1 win=8192 mss=1460
 tx A seq=1 ack=1
 send 100
 tx PA seq=1 ack=1 len=100 within=300
-idle 700
+idle 600
 rx A seq=1 ack=101 win=8192
 send 100
 tx PA seq=101 ack=1 len=100 within=300
-tx PA seq=101 ack=1 len=100 after=1600 within=3000
-tx PA seq=101 ack=1 len=100 after=3200 within=6000
+tx PA seq=101 ack=1 len=100 after=1400 within=2600
+tx PA seq=101 ack=1 len=100 after=2800 within=5200
 rx R seq=101
 
 # RFC 6298 2.3.  The first sample is deliberately pessimistic -- RTTVAR is set
 # to half of R with nothing to average against -- and later samples of the same
-# path narrow it by a quarter each time.  Six exchanges over the same 700 ms
-# path therefore end up near the floor rather than at rto01's 2.2 s, which is
+# path narrow it by a quarter each time.  Six exchanges over the same 600 ms
+# path therefore end up near the floor rather than at rto01's 1.9 s, which is
 # the difference between the section 2.2 initialisation and the section 2.3
 # update showing up on the wire.
+#
+# This case does NOT discriminate on its own: the estimate narrows to the floor,
+# and the floor is the second a build without the estimator uses, so the bound
+# below passes either way.  What it asserts is the CONTRAST with rto01 -- same
+# script, same path, 1.9 s there and 1.0 s here -- and it is the one case in
+# this file that would catch an estimate that never narrowed.
 case rto05_the_estimate_narrows_on_a_steady_path
 socket
 connect
@@ -116,27 +122,27 @@ rx SA seq=0 ack=1 win=8192 mss=1460
 tx A seq=1 ack=1
 send 100
 tx PA seq=1 ack=1 len=100 within=300
-idle 700
+idle 600
 rx A seq=1 ack=101 win=8192
 send 100
 tx PA seq=101 ack=1 len=100 within=300
-idle 700
+idle 600
 rx A seq=1 ack=201 win=8192
 send 100
 tx PA seq=201 ack=1 len=100 within=300
-idle 700
+idle 600
 rx A seq=1 ack=301 win=8192
 send 100
 tx PA seq=301 ack=1 len=100 within=300
-idle 700
+idle 600
 rx A seq=1 ack=401 win=8192
 send 100
 tx PA seq=401 ack=1 len=100 within=300
-idle 700
+idle 600
 rx A seq=1 ack=501 win=8192
 send 100
 tx PA seq=501 ack=1 len=100 within=300
-idle 700
+idle 600
 rx A seq=1 ack=601 win=8192
 send 100
 tx PA seq=601 ack=1 len=100 within=300
