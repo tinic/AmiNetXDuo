@@ -16,6 +16,29 @@
 #include <proto/exec.h>
 #include <netinet/tcp.h>
 
+/* NX_TCP_MAXIMUM_RX_QUEUE, SO_RCVBUF's ceiling in a low-watermark build. */
+#include "nx_tcp.h"
+
+/*
+ * SO_RCVBUF and SO_SNDBUF arrive in bytes and NetX Duo counts both queues in
+ * packets, so one has to be turned into the other. A full-MTU segment is what
+ * either queue actually holds, and rounding up means a caller asking for one
+ * byte still gets one packet rather than none.
+ */
+#define BSD_OPT_SEGMENT     1460
+
+static UINT bsd_opt_packets(LONG bytes, UINT ceiling)
+{
+    ULONG packets = ((ULONG)bytes + (BSD_OPT_SEGMENT - 1UL)) / BSD_OPT_SEGMENT;
+
+    if (packets == 0UL)
+        packets = 1UL;
+    if (packets > (ULONG)ceiling)
+        packets = (ULONG)ceiling;
+
+    return (UINT)packets;
+}
+
 static LONG bsd_opt_get_long(struct AmiSocketBase *base, APTR optval,
                              socklen_t *optlen, LONG value)
 {
@@ -57,6 +80,45 @@ static LONG bsd_opt_set_long(struct AmiSocketBase *base, APTR optval,
         return bsd_fail(base, AMI_EINVAL);
 
     return 0;
+}
+
+/*
+ * IP_TTL and IP_TOS onto the live NetX socket.
+ *
+ * Both are arguments _nx_ip_packet_send() takes from the socket on every send,
+ * so writing them here is what puts them on the wire; without it the caller's
+ * value was stored, echoed back by getsockopt, and never used. raw.c reads
+ * as_Ttl and as_Tos directly and needs nothing from here.
+ *
+ * NetX Duo carries the TOS octet in bits 16..23 of a ULONG -- that is where
+ * NX_IP_NORMAL and NX_IP_MIN_DELAY sit, and NX_IP_TOS_MASK is 0x00FF0000.
+ *
+ * The IPv6 halves are not covered: _nx_ipv6_packet_send() takes the traffic
+ * class as a literal 0 from both the TCP and the UDP send paths, and takes the
+ * TCP hop limit from nx_ipv6_hop_limit on the NX_IP rather than from the
+ * socket. The UDP hop limit IS nx_udp_socket_time_to_live, so
+ * IPV6_UNICAST_HOPS reaches the wire on a UDP socket through the line below.
+ *
+ * Must be called inside a bsd_nx_enter() bracket: this is live NX state.
+ */
+VOID bsd_opt_apply_ip(AmiSocket *sock)
+{
+    UINT  ttl = (UINT)(sock->as_Ttl & 0xFF);
+    ULONG tos = ((ULONG)sock->as_Tos & 0xFFUL) << 16;
+
+    if ((sock->as_Flags & (ASF_RAW | ASF_DELETED)) != 0)
+        return;
+
+    if ((sock->as_Flags & ASF_TCP) != 0)
+    {
+        sock->as_Nx.tcp.nx_tcp_socket_time_to_live    = ttl;
+        sock->as_Nx.tcp.nx_tcp_socket_type_of_service = tos;
+    }
+    else if ((sock->as_Flags & ASF_UDP) != 0)
+    {
+        sock->as_Nx.udp.nx_udp_socket_time_to_live    = ttl;
+        sock->as_Nx.udp.nx_udp_socket_type_of_service = tos;
+    }
 }
 
 /* struct timeval -> ThreadX ticks, rounded up so a tiny timeout still waits. */
@@ -102,6 +164,14 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
     {
         switch (optname)
         {
+            /*
+             * Remembered and answered, not honoured. bind() hands the port to
+             * NetX Duo's own table (socket.c), which is exclusive and has no
+             * override: a socket in TIMED_WAIT keeps its port whatever this
+             * says. Nothing here can change that, and refusing the call would
+             * break every ported daemon that sets it and does not look at the
+             * result. The round-trip is pinned by tests/sockopt.
+             */
             case SO_REUSEADDR:
             case SO_REUSEPORT:
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
@@ -112,6 +182,12 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                     sock->as_Flags &= ~ASF_REUSEADDR;
                 return 0;
 
+            /*
+             * Likewise. BSD uses this as permission -- sendto() to a broadcast
+             * address is EACCES without it -- and this stack has never asked,
+             * so enforcing it now would start failing sends that work today.
+             * The flag is kept so getsockopt answers what was set.
+             */
             case SO_BROADCAST:
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
                     return -1;
@@ -139,53 +215,125 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
 #ifdef NX_ENABLE_TCP_KEEPALIVE
                 if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) == ASF_TCP)
                 {
+                    /* Live NX socket state, so it needs the bracket every
+                       neighbouring option takes; the IP thread reads this
+                       field in nx_tcp_periodic_processing(). */
+                    if (bsd_nx_enter(SocketBase) != 0)
+                        return bsd_fail(SocketBase, AMI_ENETDOWN);
                     sock->as_Nx.tcp.nx_tcp_socket_keepalive_enabled =
                         (value != 0) ? NX_TRUE : NX_FALSE;
+                    bsd_nx_leave(SocketBase);
                 }
 #endif
                 return 0;
 
+            /*
+             * Accepted, stored nowhere, and getsockopt always answers 1: the
+             * urgent byte is delivered in the stream whatever this says, which
+             * is oob.c's first documented divergence. Answering back a 0 the
+             * caller had set would be the one thing it cannot find out.
+             */
             case SO_OOBINLINE:
-                if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
-                    return -1;
-                if (value != 0)
-                    sock->as_Flags |= ASF_OOBINLINE;
-                else
-                    sock->as_Flags &= ~ASF_OOBINLINE;
-                return 0;
+                return (bsd_opt_set_long(SocketBase, optval, optlen,
+                                         &value) != 0) ? -1 : 0;
 
             case SO_LINGER:
+            {
+                struct linger lin;
+
                 if (optval == NULL ||
                     optlen < (socklen_t)sizeof(struct linger))
                     return bsd_fail(SocketBase, AMI_EINVAL);
-                sock->as_LingerOn   = ((struct linger *)optval)->l_onoff;
-                sock->as_LingerTime = ((struct linger *)optval)->l_linger;
-                return 0;
 
+                /* Copied out: the caller's buffer need not be aligned for the
+                   loads below, the same reason mcast.c copies its mreq. */
+                bsd_bcopy(optval, &lin, sizeof lin);
+
+                /*
+                 * bsd_socket_close() turns l_linger into a tick count, so a
+                 * negative one becomes about 497 days and CloseSocket() never
+                 * comes back. 4.4BSD's sosetopt() bounds it the same way, at
+                 * SHRT_MAX/hz seconds.
+                 */
+                if (lin.l_linger < 0 ||
+                    lin.l_linger > (LONG)(32767L / NX_IP_PERIODIC_RATE))
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+
+                sock->as_LingerOn   = lin.l_onoff;
+                sock->as_LingerTime = lin.l_linger;
+                return 0;
+            }
+
+            /*
+             * SO_RCVBUF and SO_SNDBUF are answered in bytes because that is
+             * what a caller sets, and applied in packets because that is the
+             * only unit NetX Duo counts either queue in.
+             *
+             * On TCP nothing is applied. The receive queue depth is the only
+             * knob NetX Duo offers and the whole body of
+             * nx_tcp_socket_receive_queue_max_set() is inside
+             * NX_ENABLE_LOW_WATERMARK, which this port does not define -- the
+             * note at the end of nx_user.h says why, and it is a piece of work
+             * with its own measurement rather than a define. The advertised
+             * window is sized from the packet pool at socket-create time
+             * (ami_bsd_tcp_window()) and is not settable afterwards. The call
+             * used to be made unconditionally with its NX_NOT_SUPPORTED
+             * discarded, which read as an option that worked.
+             */
             case SO_RCVBUF:
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
                     return -1;
                 if (value < 0)
                     return bsd_fail(SocketBase, AMI_EINVAL);
                 sock->as_RcvBuf = value;
-                if ((sock->as_Flags & ASF_TCP) != 0 && value > 0)
+#ifdef NX_ENABLE_LOW_WATERMARK
+                if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) == ASF_TCP &&
+                    value > 0)
                 {
                     if (bsd_nx_enter(SocketBase) != 0)
                         return bsd_fail(SocketBase, AMI_ENETDOWN);
-                    nx_tcp_socket_receive_queue_max_set(&sock->as_Nx.tcp,
-                                                        (UINT)(value / 1024 + 1));
+                    (VOID)nx_tcp_socket_receive_queue_max_set(
+                        &sock->as_Nx.tcp,
+                        bsd_opt_packets(value, NX_TCP_MAXIMUM_RX_QUEUE));
+                    bsd_nx_leave(SocketBase);
+                }
+#endif
+                if ((sock->as_Flags & (ASF_UDP | ASF_DELETED)) == ASF_UDP &&
+                    value > 0)
+                {
+                    /* The UDP receive queue IS caller-tunable: it is a
+                       datagram count on the socket, which nx_udp_socket_create
+                       took from bsd_udp_queue_max(). Lowered or raised, never
+                       past what the pool can hold. */
+                    if (bsd_nx_enter(SocketBase) != 0)
+                        return bsd_fail(SocketBase, AMI_ENETDOWN);
+                    sock->as_Nx.udp.nx_udp_socket_queue_maximum =
+                        bsd_opt_packets(value, BSD_UDP_QUEUE_CEILING);
                     bsd_nx_leave(SocketBase);
                 }
                 return 0;
 
             case SO_SNDBUF:
-                /* Remembered and reported back; the wire-side limit is NetX
-                   Duo's own transmit queue, which is not caller-tunable. */
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
                     return -1;
                 if (value < 0)
                     return bsd_fail(SocketBase, AMI_EINVAL);
                 sock->as_SndBuf = value;
+                if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) == ASF_TCP &&
+                    value > 0)
+                {
+                    /* nx_tcp_socket_transmit_configure() would do this, but it
+                       rewrites the retransmit timer and retry count too, and
+                       sets nx_tcp_socket_rtt_configured, which stops the RTT
+                       estimator for the life of the socket. */
+                    if (bsd_nx_enter(SocketBase) != 0)
+                        return bsd_fail(SocketBase, AMI_ENETDOWN);
+                    sock->as_Nx.tcp.nx_tcp_socket_transmit_queue_maximum =
+                        bsd_opt_packets(value, NX_TCP_MAXIMUM_TX_QUEUE);
+                    sock->as_Nx.tcp.nx_tcp_socket_transmit_queue_maximum_default =
+                        bsd_opt_packets(value, NX_TCP_MAXIMUM_TX_QUEUE);
+                    bsd_nx_leave(SocketBase);
+                }
                 return 0;
 
             case SO_RCVTIMEO:
@@ -218,20 +366,55 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
     {
         switch (optname)
         {
+            /*
+             * NetX Duo does not implement Nagle, so a segment is sent as soon
+             * as there is one to send and getsockopt answers 1 whatever was
+             * asked for. The arguments are still checked, and the socket type
+             * still has to be TCP: accepting this on a UDP socket -- which it
+             * did, by returning before looking at anything -- told a caller
+             * that a level it does not have was configured.
+             */
             case TCP_NODELAY:
-                /* NetX Duo does not implement Nagle, so this is always on. */
-                return 0;
-
-            case TCP_MAXSEG:
-                if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
-                    return -1;
                 if ((sock->as_Flags & ASF_TCP) == 0)
                     return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+                return (bsd_opt_set_long(SocketBase, optval, optlen,
+                                         &value) != 0) ? -1 : 0;
+
+            case TCP_MAXSEG:
+            {
+                UINT status;
+
+                if ((sock->as_Flags & ASF_TCP) == 0)
+                    return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+                if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
+                    return -1;
+
+                /*
+                 * The floor is RFC 791's 68-byte minimum datagram less the two
+                 * 20-byte headers; the ceiling is what is left of a maximum
+                 * datagram. A negative went in as a four-billion MSS, which
+                 * NetX Duo stored without complaint.
+                 */
+                if (value < 28 || value > 65495)
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+
+                if ((sock->as_Flags & ASF_DELETED) != 0)
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+
                 if (bsd_nx_enter(SocketBase) != 0)
                     return bsd_fail(SocketBase, AMI_ENETDOWN);
-                nx_tcp_socket_mss_set(&sock->as_Nx.tcp, (ULONG)value);
+                status = nx_tcp_socket_mss_set(&sock->as_Nx.tcp, (ULONG)value);
                 bsd_nx_leave(SocketBase);
+
+                /* NetX Duo refuses once the socket has left SYN_SENT, which is
+                   BSD's rule as well: the MSS is negotiated, not changed. */
+                if (status != NX_SUCCESS)
+                    return bsd_fail(SocketBase,
+                                    (status == NX_NOT_SUCCESSFUL)
+                                        ? AMI_EISCONN
+                                        : AMI_EINVAL);
                 return 0;
+            }
 
             default:
                 return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
@@ -251,10 +434,22 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
 
         switch (optname)
         {
+            /*
+             * -1 is "the default", as it is for IPV6_UNICAST_HOPS. The range
+             * is checked rather than masked: 256 read back as 256 and went on
+             * the wire as 0, so every packet was dropped by the first router,
+             * and the IPv6 sibling in in6.c has always refused it.
+             */
             case IP_TTL:
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
                     return -1;
-                sock->as_Ttl = value;
+                if (value < -1 || value > 255)
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                sock->as_Ttl = (value < 0) ? (LONG)NX_IP_TIME_TO_LIVE : value;
+                if (bsd_nx_enter(SocketBase) != 0)
+                    return bsd_fail(SocketBase, AMI_ENETDOWN);
+                bsd_opt_apply_ip(sock);
+                bsd_nx_leave(SocketBase);
                 return 0;
 
             /*
@@ -269,10 +464,17 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 sock->as_HdrIncl = (value != 0);
                 return 0;
 
+            /* Same range and same -1, matching IPV6_TCLASS in in6.c. */
             case IP_TOS:
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
                     return -1;
-                sock->as_Tos = value;
+                if (value < -1 || value > 255)
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                sock->as_Tos = (value < 0) ? 0 : value;
+                if (bsd_nx_enter(SocketBase) != 0)
+                    return bsd_fail(SocketBase, AMI_ENETDOWN);
+                bsd_opt_apply_ip(sock);
+                bsd_nx_leave(SocketBase);
                 return 0;
 
 #ifdef AMINETXDUO_MULTICAST
@@ -317,13 +519,18 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
     {
         switch (optname)
         {
+            /*
+             * SO_ERROR clears on read -- but only on a read that happened.
+             * Clearing first meant a bad optval returned EFAULT and destroyed
+             * the pending error on the way out, and a non-blocking connect()
+             * has no other way to find out why it failed.
+             */
             case SO_ERROR:
-            {
-                LONG err = sock->as_SoError;
-
-                sock->as_SoError = 0;       /* SO_ERROR clears on read */
-                return bsd_opt_get_long(SocketBase, optval, optlen, err);
-            }
+                if (bsd_opt_get_long(SocketBase, optval, optlen,
+                                     sock->as_SoError) != 0)
+                    return -1;
+                sock->as_SoError = 0;
+                return 0;
 
             case SO_TYPE:
                 return bsd_opt_get_long(SocketBase, optval, optlen,
@@ -346,9 +553,9 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
                 return bsd_opt_get_long(SocketBase, optval, optlen,
                     ((sock->as_Flags & ASF_KEEPALIVE) != 0) ? 1 : 0);
 
+            /* Always in force; see the set side. */
             case SO_OOBINLINE:
-                return bsd_opt_get_long(SocketBase, optval, optlen,
-                    ((sock->as_Flags & ASF_OOBINLINE) != 0) ? 1 : 0);
+                return bsd_opt_get_long(SocketBase, optval, optlen, 1);
 
             case SO_EVENTMASK:
                 return bsd_opt_get_long(SocketBase, optval, optlen,
@@ -413,16 +620,21 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
 
         switch (optname)
         {
+            /* Both refuse a socket that has no TCP under it, as the set side
+               does; answering 1 and 0 there described a level the socket does
+               not have. */
             case TCP_NODELAY:
+                if ((sock->as_Flags & ASF_TCP) == 0)
+                    return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
                 return bsd_opt_get_long(SocketBase, optval, optlen, 1);
 
             case TCP_MAXSEG:
-                if ((sock->as_Flags & ASF_TCP) != 0 &&
-                    bsd_nx_enter(SocketBase) == 0)
-                {
-                    nx_tcp_socket_mss_get(&sock->as_Nx.tcp, &mss);
-                    bsd_nx_leave(SocketBase);
-                }
+                if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) != ASF_TCP)
+                    return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+                if (bsd_nx_enter(SocketBase) != 0)
+                    return bsd_fail(SocketBase, AMI_ENETDOWN);
+                nx_tcp_socket_mss_get(&sock->as_Nx.tcp, &mss);
+                bsd_nx_leave(SocketBase);
                 return bsd_opt_get_long(SocketBase, optval, optlen, (LONG)mss);
 
             default:
@@ -443,7 +655,10 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
             case IP_TTL:
                 return bsd_opt_get_long(SocketBase, optval, optlen, sock->as_Ttl);
 
+            /* Raw only, as on the set side. */
             case IP_HDRINCL:
+                if (sock->as_Type != SOCK_RAW)
+                    return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
                 return bsd_opt_get_long(SocketBase, optval, optlen,
                                         sock->as_HdrIncl);
 

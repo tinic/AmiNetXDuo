@@ -313,11 +313,21 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
          * The IPv6 hop limit is the IPv4 TTL under another name, and NetX Duo
          * stores one per socket, so IP_TTL and IPV6_UNICAST_HOPS are the same
          * setting here.  -1 means "use the default", per RFC 3493.
+         *
+         * Where it reaches the wire: raw (raw.c), UDP over either family, and
+         * TCP over IPv4.  Not TCP over IPv6 -- _nx_tcp_socket_send_internal()
+         * passes nx_ipv6_hop_limit off the NX_IP there, not the socket's, and
+         * moving that would be a change inside NetX Duo.
          */
         if (value < -1 || value > 255)
             return bsd_fail(base, AMI_EINVAL);
 
         sock->as_Ttl = (value < 0) ? (LONG)NX_IP_TIME_TO_LIVE : value;
+
+        if (bsd_nx_enter(base) != 0)
+            return bsd_fail(base, AMI_ENETDOWN);
+        bsd_opt_apply_ip(sock);
+        bsd_nx_leave(base);
 
         return 0;
     }
@@ -329,11 +339,21 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
          * octet to the same DS field, and NetX Duo's raw send takes one tos
          * argument for both, so IP_TOS and IPV6_TCLASS are the same setting
          * here.  -1 means "use the default", per RFC 3542.
+         *
+         * Where it reaches the wire: raw, and TCP or UDP to an IPv4 or
+         * v4-mapped destination.  _nx_ipv6_packet_send() is given a literal 0
+         * for the traffic class from both the TCP and the UDP send paths, so
+         * a real IPv6 destination on either carries none.
          */
         if (value < -1 || value > 255)
             return bsd_fail(base, AMI_EINVAL);
 
         sock->as_Tos = (value < 0) ? 0 : value;
+
+        if (bsd_nx_enter(base) != 0)
+            return bsd_fail(base, AMI_ENETDOWN);
+        bsd_opt_apply_ip(sock);
+        bsd_nx_leave(base);
 
         return 0;
     }

@@ -251,8 +251,6 @@ static VOID bsd_cmsg_build_v6(AmiSocket *sock, NX_IP *ip, NX_PACKET *packet,
     if ((sock->as_CmsgWant & ACW_RECVPKTINFO6) != 0)
     {
         struct in6_pktinfo info;
-        LONG               type = ((sock->as_CmsgWant & ACW_PKTINFO6_LINUX) != 0)
-                                      ? IPV6_PKTINFO_LINUX : IPV6_PKTINFO;
         UINT               i;
 
         /* The header's destination, which for a multicast datagram is the
@@ -262,16 +260,16 @@ static VOID bsd_cmsg_build_v6(AmiSocket *sock, NX_IP *ip, NX_PACKET *packet,
 
         info.ipi6_ifindex = bsd_cmsg_ifindex(ip, packet);
 
-        bsd_cmsg_put(out, IPPROTO_IPV6, type, &info, (socklen_t)sizeof(info));
+        bsd_cmsg_put(out, IPPROTO_IPV6, IPV6_PKTINFO, &info,
+                     (socklen_t)sizeof(info));
     }
 
     if ((sock->as_CmsgWant & ACW_RECVHOPLIMIT) != 0)
     {
         LONG hops = (LONG)hdr[7];
-        LONG type = ((sock->as_CmsgWant & ACW_HOPLIMIT_LINUX) != 0)
-                        ? IPV6_HOPLIMIT_LINUX : IPV6_HOPLIMIT;
 
-        bsd_cmsg_put(out, IPPROTO_IPV6, type, &hops, (socklen_t)sizeof(hops));
+        bsd_cmsg_put(out, IPPROTO_IPV6, IPV6_HOPLIMIT, &hops,
+                     (socklen_t)sizeof(hops));
     }
 }
 #endif
@@ -525,8 +523,7 @@ LONG bsd_cmsg_parse(struct AmiSocketBase *base, AmiSocket *sock,
         }
 #ifdef AMINETXDUO_IPV6
         else if (hdr->cmsg_level == IPPROTO_IPV6 &&
-                 (hdr->cmsg_type == IPV6_PKTINFO ||
-                  hdr->cmsg_type == IPV6_PKTINFO_LINUX))
+                 hdr->cmsg_type == IPV6_PKTINFO)
         {
             if ((sock->as_Flags & ASF_INET6) == 0)
                 return bsd_fail(base, AMI_EINVAL);
@@ -534,8 +531,7 @@ LONG bsd_cmsg_parse(struct AmiSocketBase *base, AmiSocket *sock,
                 return -1;
         }
         else if (hdr->cmsg_level == IPPROTO_IPV6 &&
-                 (hdr->cmsg_type == IPV6_HOPLIMIT ||
-                  hdr->cmsg_type == IPV6_HOPLIMIT_LINUX))
+                 hdr->cmsg_type == IPV6_HOPLIMIT)
         {
             if ((sock->as_Flags & ASF_INET6) == 0)
                 return bsd_fail(base, AMI_EINVAL);
@@ -673,8 +669,7 @@ LONG bsd_cmsg_source_index(NX_IP *ip, const BsdCmsgSource *src, BOOL v6)
  */
 
 static LONG bsd_cmsg_flag(struct AmiSocketBase *base, AmiSocket *sock,
-                          APTR optval, socklen_t *optlen, BOOL set,
-                          ULONG bit, ULONG lineage, BOOL linux_numbering)
+                          APTR optval, socklen_t *optlen, BOOL set, ULONG bit)
 {
     LONG value;
 
@@ -691,21 +686,9 @@ static LONG bsd_cmsg_flag(struct AmiSocketBase *base, AmiSocket *sock,
             return bsd_fail(base, AMI_EINVAL);
 
         if (value != 0)
-        {
             sock->as_CmsgWant |= bit;
-
-            if (lineage != 0UL)
-            {
-                if (linux_numbering)
-                    sock->as_CmsgWant |= lineage;
-                else
-                    sock->as_CmsgWant &= ~lineage;
-            }
-        }
         else
-        {
             sock->as_CmsgWant &= ~bit;
-        }
 
         return 0;
     }
@@ -852,11 +835,11 @@ LONG bsd_cmsg_option(struct AmiSocketBase *base, AmiSocket *sock, LONG level,
     {
         if (optname == IP_PKTINFO)
             return bsd_cmsg_flag(base, sock, optval, optlen, set,
-                                 ACW_PKTINFO4, 0UL, FALSE);
+                                 ACW_PKTINFO4);
 
         if (optname == IP_RECVDSTADDR)
             return bsd_cmsg_flag(base, sock, optval, optlen, set,
-                                 ACW_RECVDSTADDR4, 0UL, FALSE);
+                                 ACW_RECVDSTADDR4);
 
         return 1;
     }
@@ -864,17 +847,15 @@ LONG bsd_cmsg_option(struct AmiSocketBase *base, AmiSocket *sock, LONG level,
 #ifdef AMINETXDUO_IPV6
     if (level == IPPROTO_IPV6)
     {
-        if (optname == IPV6_RECVPKTINFO || optname == IPV6_RECVPKTINFO_LINUX)
+        if (optname == IPV6_RECVPKTINFO)
             return bsd_cmsg_flag(base, sock, optval, optlen, set,
-                                 ACW_RECVPKTINFO6, ACW_PKTINFO6_LINUX,
-                                 (BOOL)(optname == IPV6_RECVPKTINFO_LINUX));
+                                 ACW_RECVPKTINFO6);
 
-        if (optname == IPV6_RECVHOPLIMIT || optname == IPV6_RECVHOPLIMIT_LINUX)
+        if (optname == IPV6_RECVHOPLIMIT)
             return bsd_cmsg_flag(base, sock, optval, optlen, set,
-                                 ACW_RECVHOPLIMIT, ACW_HOPLIMIT_LINUX,
-                                 (BOOL)(optname == IPV6_RECVHOPLIMIT_LINUX));
+                                 ACW_RECVHOPLIMIT);
 
-        if (optname == IPV6_PKTINFO || optname == IPV6_PKTINFO_LINUX)
+        if (optname == IPV6_PKTINFO)
             return bsd_cmsg_sticky(base, sock, optval, optlen, set);
 
         /*
@@ -882,7 +863,7 @@ LONG bsd_cmsg_option(struct AmiSocketBase *base, AmiSocket *sock, LONG level,
          * sendmsg(), never a sticky option -- IPV6_UNICAST_HOPS is the sticky
          * one, and in6.c answers it.
          */
-        if (optname == IPV6_HOPLIMIT || optname == IPV6_HOPLIMIT_LINUX)
+        if (optname == IPV6_HOPLIMIT)
             return bsd_fail(base, AMI_EINVAL);
 
         return 1;

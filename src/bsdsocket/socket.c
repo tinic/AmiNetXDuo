@@ -51,10 +51,6 @@
  * is 64. Three sockets asleep on full queues still leave a quarter of the
  * pool for the stack.
  */
-#define BSD_UDP_QUEUE_MIN       8
-#define BSD_UDP_QUEUE_CEILING   64
-#define BSD_UDP_POOL_SHARE      4       /* 1/N of the pool per socket       */
-
 static char bsd_tcp_name[] = "AmiNetXDuo TCP";
 static char bsd_udp_name[] = "AmiNetXDuo UDP";
 

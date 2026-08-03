@@ -190,6 +190,7 @@ struct t_addrinfo
 #define T_IPV6_V6ONLY_BSD   27
 #define T_IPV6_V6ONLY_LINUX 26
 
+#define T_ENOPROTOOPT       42
 #define T_EAFNOSUPPORT      47
 
 #define T_AI_PASSIVE        1
@@ -1073,18 +1074,44 @@ struct icmp6_filter filt;
     (VOID)t_check((BOOL)(value == 1), "IPV6_RECVPKTINFO reads back as 1",
                   value);
 
-    /* The Linux numbering answers too, and is a separate option word. */
     value = 1;
-    rc = bsd_setsockopt(fd, IPPROTO_IPV6, IPV6_RECVHOPLIMIT_LINUX, &value,
+    rc = bsd_setsockopt(fd, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &value,
                         sizeof(value));
-    (VOID)t_check((BOOL)(rc == 0), "setsockopt IPV6_RECVHOPLIMIT (Linux 51)",
-                  bsd_Errno());
+    (VOID)t_check((BOOL)(rc == 0), "setsockopt IPV6_RECVHOPLIMIT", bsd_Errno());
 
     value = 0;
     len   = sizeof(value);
     (VOID)bsd_getsockopt(fd, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &value, &len);
-    (VOID)t_check((BOOL)(value == 1),
-                  "and the BSD number reads the same option back", value);
+    (VOID)t_check((BOOL)(value == 1), "IPV6_RECVHOPLIMIT reads back as 1",
+                  value);
+
+    /*
+     * 49, 50, 51 and 52 are IPV6_HOPOPTS, IPV6_DSTOPTS, IPV6_RTHDR and
+     * IPV6_PKTOPTIONS in the BSD numbering this header set follows, and this
+     * library implements none of them.  They used to be taken as the Linux
+     * spellings of the four options above -- so a caller passing an option
+     * buffer to IPV6_DSTOPTS had it read as a struct in6_pktinfo and the
+     * socket's sticky source set from it.
+     */
+    {
+        LONG optnum;
+
+        for (optnum = 49; optnum <= 52; optnum++)
+        {
+            value = 1;
+            rc = bsd_setsockopt(fd, IPPROTO_IPV6, optnum, &value,
+                                sizeof(value));
+            (VOID)t_check((BOOL)(rc < 0 && bsd_Errno() == T_ENOPROTOOPT),
+                          "the Linux cmsg alias is refused", optnum);
+        }
+
+        t_bzero(&info, sizeof(info));
+        len = sizeof(info);
+        rc  = bsd_getsockopt(fd, IPPROTO_IPV6, 50, &info, &len);
+        (VOID)t_check((BOOL)(rc < 0 && bsd_Errno() == T_ENOPROTOOPT),
+                      "and reading 50 does not answer with a pktinfo",
+                      bsd_Errno());
+    }
 
     /* Sticky IPV6_PKTINFO: what goes in comes out. */
     t_bzero(&info, sizeof(info));
