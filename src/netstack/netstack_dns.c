@@ -232,6 +232,16 @@ static LONG ami_ns_dns_error(UINT status)
         case NX_DNS_TIMEOUT:
             return AMI_NET_ERR_TIMEOUT;
 
+        /*
+         * Not a DNS status at all: every entry point in addons/dns takes the
+         * client's mutex with the caller's wait_option and hands this back when
+         * another task still holds it. Two programs resolving at once is the
+         * ordinary case, and the second of them was being told the name does
+         * not exist -- the default below -- rather than to try again.
+         */
+        case TX_NOT_AVAILABLE:
+            return AMI_NET_ERR_TIMEOUT;
+
         case NX_DNS_QUERY_FAILED:
         case NX_DNS_MISMATCHED_RESPONSE:
         case NX_DNS_BAD_ID_ERROR:
