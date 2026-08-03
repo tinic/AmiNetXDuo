@@ -241,6 +241,55 @@ static BsdAddrInfoNode *bsd_gai_node(LONG family, LONG socktype, LONG protocol,
     return node;
 }
 
+/*
+ * netstack error -> EAI_*, the getaddrinfo() half of bsd_herrno_of()
+ * (resolver.c).
+ *
+ * RFC 3493 6.1 requires EAI_AGAIN -- "temporary failure in name resolution" --
+ * and every failure here used to be reported as EAI_NONAME, so a caller that
+ * retries on EAI_AGAIN never retried and a name server that was merely slow
+ * looked like a name that does not exist. The backend has always told the two
+ * apart; nothing was reading it.
+ *
+ * EAI_NODATA is not used. It means "the name exists but has no address of the
+ * family asked for", which needs an empty answer section to be told from
+ * NXDOMAIN, and the resolver underneath reports both as no answer.
+ */
+static LONG bsd_gai_error(LONG status)
+{
+    switch (status)
+    {
+        case AMI_NET_ERR_TIMEOUT:       /* nobody answered           */
+        case AMI_NET_ERR_NOSERVER:      /* nobody to ask, yet        */
+        case AMI_NET_ERR_STATE:         /* stack not up, yet         */
+            return EAI_AGAIN;
+
+        case AMI_NET_ERR_NOMEM:
+            return EAI_MEMORY;
+
+        case AMI_NET_ERR_CONFIG:
+        case AMI_NET_ERR_KERNEL:
+            return EAI_FAIL;
+
+        default:
+            return EAI_NONAME;
+    }
+}
+
+/*
+ * With AF_UNSPEC two lookups run and each has a verdict. "Try again" outranks
+ * "no such name", because only the first is worth a retry: a machine with an
+ * AAAA record and a name server that dropped the A query has not been shown to
+ * be absent from IPv4.
+ */
+static LONG bsd_gai_merge(LONG so_far, LONG now)
+{
+    if (so_far == EAI_AGAIN || now == EAI_AGAIN)
+        return EAI_AGAIN;
+
+    return (so_far != EAI_NONAME) ? so_far : now;
+}
+
 /* Append to the list, remembering the tail. */
 static VOID bsd_gai_append(struct addrinfo **head, struct addrinfo **tail,
                            BsdAddrInfoNode *node)
@@ -286,6 +335,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     LONG             socktype = 0;
     LONG             protocol = 0;
     LONG             flags    = 0;
+    LONG             verdict  = EAI_NONAME;
     LONG             status;
     UINT             port = 0;
     char            *canon = NULL;
@@ -473,8 +523,9 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     {
         ULONG words[4];
 
-        if (netstack_resolve6((const char *)nodename, words,
-                              BSD_GAI_TIMEOUT) == AMI_NET_OK)
+        status = netstack_resolve6((const char *)nodename, words,
+                                   BSD_GAI_TIMEOUT);
+        if (status == AMI_NET_OK)
         {
             addr.nxd_ip_version       = NX_IP_VERSION_V6;
             addr.nxd_ip_address.v6[0] = words[0];
@@ -491,6 +542,10 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
 
             bsd_gai_append(&head, &tail, node);
         }
+        else
+        {
+            verdict = bsd_gai_merge(verdict, bsd_gai_error(status));
+        }
     }
 #endif
 
@@ -498,8 +553,9 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     {
         ULONG v4 = 0;
 
-        if (netstack_resolve((const char *)nodename, &v4,
-                             BSD_GAI_TIMEOUT) == AMI_NET_OK)
+        status = netstack_resolve((const char *)nodename, &v4,
+                                  BSD_GAI_TIMEOUT);
+        if (status == AMI_NET_OK)
         {
             bsd_addr_from_v4(&addr, v4);
 
@@ -510,10 +566,14 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
 
             bsd_gai_append(&head, &tail, node);
         }
+        else
+        {
+            verdict = bsd_gai_merge(verdict, bsd_gai_error(status));
+        }
     }
 
     if (head == NULL)
-        return EAI_NONAME;
+        return verdict;
 
     *res = head;
 
@@ -606,6 +666,7 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
     {
         char  name[256];
         BOOL  resolved = FALSE;
+        LONG  status   = AMI_NET_OK;
         ULONG v4       = 0;
         BOOL  have_v4  = (BOOL)(addr.nxd_ip_version == NX_IP_VERSION_V4);
 
@@ -652,9 +713,9 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
         {
             if (have_v4)
             {
-                resolved = (netstack_resolve_reverse(v4, name, sizeof(name),
-                                                     BSD_GAI_TIMEOUT)
-                            == AMI_NET_OK);
+                status   = netstack_resolve_reverse(v4, name, sizeof(name),
+                                                    BSD_GAI_TIMEOUT);
+                resolved = (BOOL)(status == AMI_NET_OK);
             }
             /*
              * No reverse lookup for a real IPv6 address. It would be an
@@ -669,8 +730,14 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
 
         if (!resolved)
         {
+            /*
+             * NI_NAMEREQD is the only path where the reason matters: without
+             * it the numeric form is a correct answer whatever went wrong, and
+             * with it the caller is told nothing else. A name server that did
+             * not answer is not evidence that the address has no name.
+             */
             if ((flags & (ULONG)NI_NAMEREQD) != 0)
-                return EAI_NONAME;
+                return bsd_gai_error(status);
 
 #ifdef AMINETXDUO_IPV6
             if (addr.nxd_ip_version == NX_IP_VERSION_V6)
