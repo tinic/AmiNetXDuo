@@ -84,6 +84,9 @@ VOID ami_log(int level, const char *fmt, ...)
 
 /* ------------------------------------------------------------- the drives */
 
+/* Every string the parser produced is read into this, so nothing is elided. */
+static volatile size_t fz_sink;
+
 /*
  * Walking every gr_mem vector is the assertion, not decoration: the arena
  * overrun this driver exists for corrupts memory during the parse but leaves
@@ -118,8 +121,7 @@ static void fz_run_group(const char *data, size_t len)
 
         while (mem[n] != NULL)
         {
-            if (strlen(mem[n]) == (size_t)-1)   /* never true; reads the string */
-                abort();
+            fz_sink += strlen(mem[n]);
             n++;
         }
     }
@@ -150,11 +152,11 @@ static void fz_run_passwd(const char *data, size_t len)
 
     for (i = 0; i < db->pw_count; i++)
     {
-        (void)strlen(db->pw[i].pw_name);
-        (void)strlen(db->pw[i].pw_passwd);
-        (void)strlen(db->pw[i].pw_gecos);
-        (void)strlen(db->pw[i].pw_dir);
-        (void)strlen(db->pw[i].pw_shell);
+        fz_sink += strlen(db->pw[i].pw_name);
+        fz_sink += strlen(db->pw[i].pw_passwd);
+        fz_sink += strlen(db->pw[i].pw_gecos);
+        fz_sink += strlen(db->pw[i].pw_dir);
+        fz_sink += strlen(db->pw[i].pw_shell);
     }
 
     free(text);
