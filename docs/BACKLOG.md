@@ -62,6 +62,56 @@ descriptor allocation and its bookkeeping silently diverges. This is the one
 place the otherwise-honest capability tagging has a silent accept.
 `src/bsdsocket/errno.c:386`, `library.c:280`.
 
+**Corrections to the resolver entry below, from the RFC 3493 survey.** Four
+things listed there as defects are not. `AI_CANONNAME` **is** honoured —
+`addrinfo.c:486-490` sets `ai_canonname` to a copy of nodename, which is
+exactly §6.1's stated fallback when the canonical name is unavailable.
+"At most one address per family" is a **quality** gap, not a conformance one:
+RFC 3493 nowhere requires the full RRset, only that "in absence of errors, one
+or more results shall be returned". `getnameinfo` returning the numeric form
+when no name is found is **explicitly permitted** by §6.4, and `NI_NAMEREQD`
+correctly errors. And `gethostbyname`/`gethostbyaddr` being IPv4-only is what
+§6 says they should be — 3493 leaves them "as-is" and removed `gethostbyname2`.
+Also: `IP_TOS`/`IPV6_TCLASS` reach the wire on **raw only**; the entry below
+says UDP applies it, and it does not (`raw.c:559` is the sole consumer).
+
+**Two real §3542 defects the earlier audit missed.** `getnameinfo()` on a
+v4-mapped address never extracts the embedded IPv4 address, so the PTR lookup
+§6.4 requires is never attempted (`socket.c:1167-1181` leaves the version as
+V6, `addrinfo.c:612` then tests for V4 and fails). And `getnameinfo(::)`
+returns success where §6.4 requires `EAI_NONAME`.
+
+**`IPV6_CHECKSUM` collides with our Linux-numbered `IPV6_V6ONLY` alias.** Both
+are 26; `bsdsocket_internal.h:185` is matched at `in6.c:211-213` before the
+refusal at `:202-206` is reached. RFC 3542 §3.1 says an attempt to set it on a
+non-raw socket "will fail" — instead a raw IPv6 socket setting a checksum
+offset gets success, no checksum computed or verified, and `IPV6_V6ONLY`
+switched on as a side effect. **And the published header asserts this cannot
+happen**: `include/aminetxduo/in6.h:90-92` says "there are no raw IPv6 sockets
+here", which `raw.c` and `socket.c:463,:481` contradict. That header ships in
+the Developer drawer, so the false claim is in third parties' hands.
+
+**`IPV6_MULTICAST_HOPS = 0` is coerced to 1 and the datagram leaves the
+machine.** `mcast.c:936`. RFC 3493 §5.2's table says `0 <= x <= 255` uses x, and
+a hop limit of 0 is the application saying "do not put this on the link". Two
+characters of code, and the wrong answer is a leak rather than a failure.
+
+**More accepted-and-ignored interfaces**, the class a caller cannot detect:
+`IPV6_UNICAST_HOPS` and `IPV6_TCLASS` on TCP (stored, echoed, never applied —
+`socket.c:1354` creates the socket with the defaults and nothing updates them);
+`SBTC_SIG_ADDRESS_CHANGE_MASK` stored and never signalled, which the code
+itself admits at `bsdsocket_internal.h:441-444`; and
+`SBTC_CAN_SHARE_LIBRARY_BASES` initialised FALSE, never written and never read,
+so a caller is told sharing is unsupported while the adjacent comment says it
+works. That one is wrong in the safe direction.
+
+**`DAV: 1,2` is itself a compliance claim we do not meet.** §18.1 requires all
+Class 1 MUSTs, which the PROPFIND request-body gap breaks; §18.2 requires the
+whole of §6-§10, which the LOCK-on-unmapped-URL and Depth-0-collection gaps
+break. Advertising `DAV: 1` would be honest except that Finder reads it as
+read-only, which is why it says `1,2` (`httpd.c:21`, `:2229`). **That tension
+needs deciding explicitly rather than sitting implicit.**
+
 **Resolver semantics diverge in ways callers cannot detect.** `EAI_AGAIN` is
 never returned — timeout, no-server, stack-down and NXDOMAIN all collapse to
 `EAI_NONAME`, so callers that retry on `EAI_AGAIN` never retry, even though the
