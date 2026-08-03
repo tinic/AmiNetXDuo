@@ -803,6 +803,17 @@ int ami_random_rand(void)
     return (int)(ami_random_ulong() & 0x7FFFFFFFUL);
 }
 
+unsigned int ami_crypto_rbg(unsigned int bits, unsigned char *result)
+{
+    /*
+     * One call, not one per 32 bits: the mask above is a rand() obligation and
+     * has no business in a key.  Bytes, not words, so there is no endianness
+     * to agree on either.  Zero is NX_CRYPTO_SUCCESS.
+     */
+    ami_random_bytes(result, (ULONG)((bits + 7u) >> 3));
+    return 0u;
+}
+
 void ami_random_srand(unsigned int seed)
 {
     ULONG value = (ULONG)seed;

@@ -75,6 +75,23 @@ extern void ami_random_srand(unsigned int seed);
 #define NX_SRAND                    ami_random_srand
 #endif
 
+/*
+ * NX_CRYPTO_RBG is the huge-number source: the ECDHE private key comes out of
+ * it, through _nx_crypto_ec_key_pair_generation_extra().  nx_crypto.h defaults
+ * it to _nx_crypto_huge_number_rbg(), which assembles the number one
+ * NX_CRYPTO_RAND() per 32 bits -- and NX_CRYPTO_RAND is NX_RAND is
+ * ami_random_rand(), which owes rand()'s caller a value in 0..0x7FFFFFFF and
+ * masks bit 31 off to provide it.  So every 32-bit word of the number is one
+ * bit short, at a known position.
+ *
+ * nx_crypto.h guards its own definition with #ifndef and is reached through
+ * nx_api.h, which includes this header first, so defining it here wins.
+ */
+#ifndef NX_CRYPTO_RBG
+extern unsigned int ami_crypto_rbg(unsigned int bits, unsigned char *result);
+#define NX_CRYPTO_RBG               ami_crypto_rbg
+#endif
+
 
 /* Define various constants for the port.  */
 
