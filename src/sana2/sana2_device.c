@@ -447,14 +447,6 @@ VOID ami_sana2_refresh_stats(AmiSana2If *iface)
 #ifdef AMINETXDUO_RXPROBE
     iface->probe_dev_rx = stats.PacketsReceived;
     iface->probe_dev_tx = stats.PacketsSent;
-
-    /*
-     * NetStat brackets the transfer, so reporting here gives a pair to
-     * subtract. Nothing calls this often enough for the serial cost to matter,
-     * and the shutdown path is not reached when a handler holds the library
-     * open.
-     */
-    ami_sana2_rxprobe_report(iface);
 #endif
 }
 
@@ -474,6 +466,13 @@ VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out)
        issuing S2_GETGLOBALSTATS here would need a reply port on whichever
        random task called GetNetworkStatistics(). */
     *out = iface->stats;
+
+#ifdef AMINETXDUO_RXPROBE
+    /* NetStat is what reaches this, and it brackets the transfer, so the pair
+       of reports subtracts. The shutdown path is never reached while a DOS
+       handler holds the library open. */
+    ami_sana2_rxprobe_report(iface);
+#endif
 }
 
 /*
