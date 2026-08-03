@@ -134,7 +134,11 @@ def once(request, body=b""):
     return a
 
 
-def req(method, path, headers=None, body=b"", keepalive=True):
+def parts(method, path, headers=None, body=b"", keepalive=True):
+    """The head and the body separately, so a test can put a segment boundary
+    between them.  That boundary is what the desync needs: a body that arrives
+    WITH the head is already in the server's buffer and gets discarded with
+    it, and only a body still in the socket is read as the next request."""
     if isinstance(body, str):
         body = body.encode("latin-1")
     lines = ["%s %s HTTP/1.1" % (method, path),
@@ -145,7 +149,12 @@ def req(method, path, headers=None, body=b"", keepalive=True):
         lines.append("%s: %s" % (k, v))
     if body:
         lines.append("Content-Length: %d" % len(body))
-    return "\r\n".join(lines).encode("latin-1") + b"\r\n\r\n" + body
+    return "\r\n".join(lines).encode("latin-1") + b"\r\n\r\n", body
+
+
+def req(method, path, headers=None, body=b"", keepalive=True):
+    head, tail = parts(method, path, headers, body, keepalive)
+    return head + tail
 
 
 # --------------------------------------------------------------- the ground --
@@ -182,7 +191,10 @@ def test_desync():
     for method, why in (("POST", "a verb this server has not"),
                         ("GET", "a body on a method that takes none")):
         c = Conn()
-        c.send(req(method, BASE + "/keepme.txt", body=poison))
+        head, tail = parts(method, BASE + "/keepme.txt", body=poison)
+        c.send(head)
+        time.sleep(1.5)             # the body is its own segment
+        c.send(tail)
         a = c.answer()
         check(a is not None, "%s with a body was answered" % method)
         if a is not None:
@@ -191,7 +203,12 @@ def test_desync():
                   % (method, a[0] if a else "?", why))
 
         # Whatever the server does with the connection, the DELETE in the
-        # body must not have run.
+        # body must not have been answered on it.
+        second = c.answer()
+        check(second is None,
+              "%s: nothing after the refusal on that connection (got %s)"
+              % (method, second[0] if second else "nothing"))
+
         c.close()
         time.sleep(0.2)
         a = once(req("HEAD", BASE + "/keepme.txt"))
@@ -205,10 +222,16 @@ def test_desync():
     # An address the server will not open is the third refusal that used to
     # keep the connection: a colon is an AmigaOS device reference.
     c = Conn()
-    c.send(req("PUT", "/RAM:drill", body=poison))
+    head, tail = parts("PUT", "/RAM:drill", body=poison)
+    c.send(head)
+    time.sleep(1.5)
+    c.send(tail)
     a = c.answer()
     check(a is not None and a[0] in (400, 403),
           "a refused address answers 403")
+    second = c.answer()
+    check(second is None,
+          "and nothing after it (got %s)" % (second[0] if second else "nothing"))
     c.close()
     time.sleep(0.2)
     a = once(req("HEAD", BASE + "/keepme.txt"))
@@ -221,7 +244,10 @@ def test_refusal_keeps_the_connection():
     print("a drainable refusal keeps the connection")
 
     c = Conn()
-    c.send(req("POST", BASE + "/keepme.txt", body="a" * 64))
+    head, tail = parts("POST", BASE + "/keepme.txt", body="a" * 64)
+    c.send(head)
+    time.sleep(1.5)                 # so the body has to be drained from the
+    c.send(tail)                    # socket rather than from the buffer
     a = c.answer()
     check(a is not None and a[0] == 405, "POST is 405")
     if a is not None:
@@ -244,7 +270,9 @@ def test_unframed_refusal_closes():
 
     c = Conn()
     c.send(b"THISMETHODNAMEISFARTOOLONGTOBEONE / HTTP/1.1\r\n"
-           b"Host: x\r\nContent-Length: 4\r\n\r\nabcd")
+           b"Host: x\r\nContent-Length: 4\r\n\r\n")
+    time.sleep(1.5)
+    c.send(b"abcd")
     a = c.answer()
     check(a is not None and a[0] == 501, "a long method is 501")
     if a is not None:
@@ -478,14 +506,23 @@ def test_proppatch_atomic():
 # ------------------------------------------------------- overlapping moves --
 
 def test_overlapping_moves():
-    """Two MOVEs in flight at once used to share one resolved destination."""
+    """Two MOVEs in flight at once used to share one resolved destination.
+
+    The destinations are made to EXIST first, on purpose.  A MOVE onto a name
+    nothing is using is one Rename inside the handler and never spans a pass
+    of the event loop; one that has to clear the destination first walks, and
+    the walk reads the destination back after the handler has returned -- so
+    that is the shape where a shared destination is two clients' at once."""
     print("two MOVEs at once keep their own destinations")
 
     for n in (1, 2):
         once(req("MKCOL", "%s/src%d" % (BASE, n)))
+        once(req("MKCOL", "%s/dst%d" % (BASE, n)))
         for k in range(6):
             once(req("PUT", "%s/src%d/f%d.txt" % (BASE, n, k),
                      body="x" * 200))
+            once(req("PUT", "%s/dst%d/old%d.txt" % (BASE, n, k),
+                     body="y" * 200))
 
     a = Conn()
     b = Conn()
@@ -499,8 +536,10 @@ def test_overlapping_moves():
     a.close()
     b.close()
 
-    check(ra is not None and ra[0] in (201, 204), "the first MOVE answered")
-    check(rb is not None and rb[0] in (201, 204), "the second MOVE answered")
+    check(ra is not None and ra[0] in (201, 204),
+          "the first MOVE answered %s" % (ra[0] if ra else "nothing"))
+    check(rb is not None and rb[0] in (201, 204),
+          "the second MOVE answered %s" % (rb[0] if rb else "nothing"))
 
     for n in (1, 2):
         got = once(req("PROPFIND", "%s/dst%d" % (BASE, n), {"Depth": "1"}))
@@ -508,8 +547,12 @@ def test_overlapping_moves():
               "dst%d is there" % n)
         if got is not None:
             check(got[2].count(b"<D:response>") == 7,
-                  "dst%d has its own six files, not %s"
+                  "dst%d has its own six files, not %d"
                   % (n, got[2].count(b"<D:response>") - 1))
+            check(b"old0.txt" not in got[2],
+                  "and what was at dst%d is gone" % n)
+            check(("f0.txt" in got[2].decode("latin-1")),
+                  "and src%d's files are the ones in it" % n)
         gone = once(req("HEAD", "%s/src%d" % (BASE, n)))
         check(gone is not None and gone[0] == 404,
               "src%d is gone" % n)
