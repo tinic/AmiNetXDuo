@@ -298,23 +298,29 @@ typedef struct
  * Ceiling. 65535 is the architectural cap: NX_ENABLE_TCP_WINDOW_SCALING is not
  * defined here, so the window is whatever fits in the 16-bit header field and
  * nothing negotiates past it in either direction -- not offering the option
- * also stops the peer scaling. Two reasons not to go to the cap: there is no
- * SACK in the vendored tree, so a burst loss inside a larger window costs a
- * full go-back-N, and every byte of window is a byte of packet pool somebody
- * else cannot have. The pool budget above bounds it in practice.
+ * also stops the peer scaling. Every byte of window is a byte of packet pool
+ * somebody else cannot have, and the pool budget above bounds it in practice.
  *
- * 32768 is the largest value with field evidence behind it. A sweep once read
- * a factor of two between 32768 and 33024 and attributed it to a peer's 32 KB
- * block not fitting a 2^n window, but that sweep ran against a receive path
- * that was suppressing duplicate acknowledgments, which left the transfer
- * bounded by the window rather than by the congestion window and made every
- * byte of window show up as throughput. Re-measured with that fixed, 32768,
- * 33580 and 48180 read 901, 894 and 866 KB/s on a clean link and 570, 520 and
- * 556 under 1% loss -- flat, inside a run-to-run spread of about a tenth.
- * Nothing above this is worth the go-back-N it widens.
+ * 33580 is 23 whole segments at the Ethernet MSS, and it is what a 32 KB
+ * payload behind a header needs to arrive in one round trip. 32768 is twelve
+ * bytes short of that, so a 32,780-byte response could not complete in one
+ * whatever else was true.
+ *
+ * An earlier sweep read 32768, 33580 and 48180 as flat and kept 32768. That
+ * sweep ran with a congestion window of 12 segments, which bound the transfer
+ * before the receive window did. SACK and D-SACK take it to 24 on a clean
+ * link, which puts the receive window back in charge: over 512 exchanges of a
+ * 32,780-byte response, 32768 -> 33580 moved round trips a chunk from 2.05 to
+ * 1.18 and the read from 985 to 1714 KB/s clean, and from 2.32 to 1.94 and 835
+ * to 963 KB/s under 1% injected loss. The wider window is more data exposed to
+ * a single loss, which is why the loss arm is measured and not assumed; it
+ * gains there too, on a receiver that recovers selectively.
+ *
+ * Nothing above this. 48180 measured no better and widens that exposure for
+ * nothing.
  */
 #ifndef BSD_TCP_WINDOW_CEILING
-#define BSD_TCP_WINDOW_CEILING  32768
+#define BSD_TCP_WINDOW_CEILING  33580
 #endif
 
 /*
