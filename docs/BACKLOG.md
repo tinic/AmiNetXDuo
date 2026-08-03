@@ -108,18 +108,14 @@ name always misses, and a CNAME-only response yields `NX_DNS_QUERY_FAILED`.
 
 | Item | Cite |
 |---|---|
-| PMTUD off and no 1280 cap; RFC 8201 §1 permits omitting PMTUD only with the cap. PTB not dispatched. RA MTU option discarded on the same `#ifdef` | `nx_user.h:651-661`, `nx_icmpv6_packet_process.c:210-216` |
-| No fragment reassembly, either family | `nx_ip_fragment_enable()` uncalled |
+| No fragment reassembly, either family. PMTUD reduces the inbound case but does not remove it: a path narrow in the reverse direction still fragments towards us and `_nx_ipv6_process_fragment_option()` drops every fragment | `nx_ip_fragment_enable()` uncalled |
 | No MLD; recorded rationale is wrong (snooping filters, it does not forward) | `nx_mld.h` stub, `nx_user.h:636-645` |
-| A-bit test nested inside L-bit: prefix A=1 L=0 forms no address | `nx_icmpv6_process_ra.c:310`, `:332` |
-| No RFC 7559 RS backoff: fixed 4 s, stop after 3 | `nxd_ipv6_router_solicitation_check.c:86-107` |
-| No interface but 0 ever sends an RS — `ipv6_enable()` runs before the attach loop | `netstack.c:648` vs `:658-678` |
 | IGMP all-hosts filter for interface 1 is a race with the IP thread; unresolved statically | `nx_ip_thread_entry.c:526-545` |
 | No preferred lifetime, `NX_IPV6_ADDR_STATE_DEPRECATED` assigned nowhere — no graceful window before an address vanishes | `nx_api.h:959` |
 | No privacy addresses (8981) or opaque IIDs (7217); MAC in every global address | |
 | No RDNSS (8106) — IPv6-only link yields addresses but no DNS | `nx_icmpv6.h:68-74` |
 | No ICMPv6 error rate limiting; §2.4(e.3) enforced at one call site only | `nx_icmpv6_send_error_message.c` |
-| No 1280 MTU floor on a SANA-II device reporting less | `sana2_device.c:183-201` |
+| No 1280 MTU floor on the IPv6 path: a SANA-II device reporting less is taken at its word (`sana2_device.c:183-201`), and `MTU=` is now applied downwards without a bound (`:624-634`), so `MTU=576` with IPv6 enabled violates RFC 8200 §5 | `sana2_device.c` |
 | Raw oversize send still drops after success | `transfer.c:722-741` |
 
 **TLS**

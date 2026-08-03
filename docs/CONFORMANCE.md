@@ -13,7 +13,7 @@ ours = `src/`, `port/`, `include/`.
 
 | RFC | Requirement | Cite | Effect |
 |---|---|---|---|
-| 8201 §1 | Node not implementing PMTUD must cap sends at 1280 | `nx_user.h:651-661`; PTB not dispatched, `nx_icmpv6_packet_process.c:210-216`; MTU set from device, `sana2_device.c:183-201` | PMTUD off and no 1280 cap. Any IPv6 path narrower than the local link fails without an error indication. Remedy: enable PMTUD or cap IPv6 sends at 1280 |
+| 8200 §5 | IPv6 requires a link MTU of at least 1280 | `sana2_device.c:183-201` takes the device figure; `:624-634` applies `MTU=` downwards with no bound | `MTU=576` on an IPv6-enabled interface is accepted |
 | 1122 §3.3.2 / 8504 §5.1 | MUST reassemble; EMTU_R ≥ 576 | `nx_ip_fragment_enable()` never called; drops at `nx_ipv4_packet_receive.c:640`, `nx_ipv6_process_fragment_option.c:95-99` | Inbound fragments dropped, both families |
 | 1122 §3.2.2.1, §4.1.3.3 | ICMP errors MUST reach transport / application | `nx_icmpv4_packet_process.c:143-171` handles echo only | Connected UDP to a closed port blocks to timeout instead of `ECONNREFUSED`. No IPv4 PMTUD input |
 | 9777 §6 | MLD reports MUST be sent for scope ≥ 2 | `nx_mld.h` is a 48-line stub; joins set a MAC filter only, `nx_ipv6_multicast_join.c:79-95` | Solicited-node groups are scope 2. Behind a snooping switch with an active querier, ND fails |
@@ -126,7 +126,13 @@ applies to the write direction only.
 **IPv6** — 4291 §2.8 required address set, SLAAC with DAD at three probes,
 NUD five-state machine, hop limit 255 on all ND, 5095 RH0 refusal, Parameter
 Problem on unrecognised Next Header, 6980 and 8021 satisfied (we never
-fragment).
+fragment). Landed 2026-08-03: **8201 Path MTU Discovery**, with §4's three
+receive-side obligations — a report below 1280 is discarded rather than clamped
+(`nx_icmpv6_process_packet_too_big.c`), the embedded source must be the address
+the error arrived on per 4443 §2.4, and the estimate never increases in response
+to a Packet Too Big (`nx_icmpv6_dest_table_find.c`). Retry interval 600 s
+against a 5-minute minimum. Cost: +1,112 B of library, +36 B per `NX_IP`;
+read throughput 368.0 -> 365.0 KB/s, inside a 2.4-3.0% within-arm spread.
 
 **DNS/mDNS/DHCP/SNTP** — 2131 T1/T2 renewal, 5452 §9.2 (16-bit ID + 14-bit port
 = 30 bits, off the DRBG), compression-pointer handling with bounds checks and a

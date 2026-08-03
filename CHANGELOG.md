@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+- An IPv6 connection through a router with a narrower link than the local one now works. The stack listens to the router's report of how much it can carry and sizes its packets to it, having previously ignored the report and sent packets that could not get through. A report claiming an implausibly small size is refused rather than believed, and a report is only accepted from a machine actually being addressed, so a stranger cannot slow a connection down
+- `MTU=` in `DEVS:NetInterfaces` had no effect and now does, downwards from whatever the driver reports
 - Ctrl-C stops a name lookup, and a lookup that cannot be answered gives up when its timeout says to. A 30 second timeout was being applied to each attempt in turn rather than to the whole call, so a name server that never replies held the program for over two minutes with one server configured and closer to thirteen with five, and nothing could interrupt it
 - Looking up a name while another program is looking one up no longer reports the name as not existing
 - A lookup that failed because no server could be reached is now distinguishable from one that failed because the name does not exist
