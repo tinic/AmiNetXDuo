@@ -83,9 +83,9 @@ extern "C" {
  * Bump the high half whenever this header changes.
  */
 #ifdef AMINETXDUO_IPV6
-#define AMI_NXD_CONTEXT_VERSION     0x00010001UL
+#define AMI_NXD_CONTEXT_VERSION     0x00020001UL
 #else
-#define AMI_NXD_CONTEXT_VERSION     0x00010000UL
+#define AMI_NXD_CONTEXT_VERSION     0x00020000UL
 #endif
 
 /*
@@ -189,6 +189,15 @@ typedef struct AmiNetXDuoContext
     /* ---- the machine's entropy pool ------------------------------------ */
 
     int                 (*nxc_random_rand)(VOID);
+
+    /*
+     * Raw bytes, not nxc_random_rand() in a loop.  That one owes rand()'s
+     * caller 0..0x7FFFFFFF and clears bit 31 to provide it, so a key built out
+     * of it is short a bit in every 32.  nx_crypto's huge-number RBG draws the
+     * ECDHE private key exactly that way; ami_crypto_rbg() uses this instead.
+     */
+    VOID                (*nxc_random_bytes)(APTR buffer, ULONG length);
+
     VOID                (*nxc_random_add_entropy)(const VOID *data, ULONG len,
                                                   ULONG credit_bits);
     ULONG               (*nxc_random_entropy_bits)(VOID);

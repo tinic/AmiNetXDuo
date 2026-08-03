@@ -257,6 +257,23 @@ int ami_random_rand(void)
     return tls_ctx->nxc_random_rand();
 }
 
+/*
+ * NX_CRYPTO_RBG, which is where the ECDHE private key comes from.  Not
+ * ami_random_rand() in a loop: that one clears bit 31 to keep rand()'s
+ * contract, and nx_crypto's own huge-number RBG would put the gap in every
+ * 32-bit word of the key.  Zero is NX_CRYPTO_SUCCESS; a missing context leaves
+ * the buffer alone and the handshake fails on the key exchange rather than on
+ * a silently weak one.
+ */
+unsigned int ami_crypto_rbg(unsigned int bits, unsigned char *result)
+{
+    if (tls_ctx == NULL)
+        return NX_PTR_ERROR;
+
+    tls_ctx->nxc_random_bytes(result, (ULONG)((bits + 7u) >> 3));
+    return 0u;
+}
+
 VOID ami_random_add_entropy(const void *data, ULONG length, ULONG credit_bits)
 {
     if (tls_ctx == NULL)

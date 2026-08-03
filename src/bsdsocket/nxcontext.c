@@ -87,6 +87,7 @@ static const AmiNetXDuoContext bsd_nxd_context =
     _tx_thread_sleep,
 
     ami_random_rand,
+    ami_random_bytes,
     ami_random_add_entropy,
     ami_random_entropy_bits
 };
