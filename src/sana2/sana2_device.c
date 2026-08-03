@@ -448,6 +448,10 @@ VOID ami_sana2_refresh_stats(AmiSana2If *iface)
     {
         UWORD i;
 
+        AMI_WARN("rxprobe tx: sends %lu ring-full sleeps %lu slots %lu",
+                 iface->probe_txsends, iface->probe_txspin,
+                 (ULONG)AMI_SANA2_TX_SLOTS);
+
         for (i = 0; i < AMI_SANA2_RX_READERS; i++)
         {
             AmiSana2Rx *rx = &iface->rx[i];

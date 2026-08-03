@@ -390,8 +390,10 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
     }
 
     slot = ami_sana2_tx_claim(iface);
+    AMI_RXPROBE_COUNT(iface->probe_txsends);
     for (spins = 0; slot == NULL && spins < AMI_SANA2_TX_WAIT_TICKS; spins++)
     {
+        AMI_RXPROBE_COUNT(iface->probe_txspin);
         tx_thread_sleep(1);
         ami_sana2_tx_reap(iface);
         slot = ami_sana2_tx_claim(iface);

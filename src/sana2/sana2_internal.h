@@ -283,6 +283,12 @@ struct AmiSana2If
     BOOL                tx_orphaned;
 
     AmiSana2Stats       stats;
+
+#ifdef AMINETXDUO_RXPROBE
+    /* Sends that found the transmit ring full and slept a tick for a slot. */
+    ULONG               probe_txspin;
+    ULONG               probe_txsends;
+#endif
 };
 
 /* ------------------------------------------------------------- internals */
