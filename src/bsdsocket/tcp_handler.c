@@ -877,6 +877,14 @@ static VOID tcp_session_main(VOID)
                     tcp_reply(pkt, -1, ERROR_SEEK_ERROR, s.ts_Port);
                     break;
 
+                case ACTION_EXAMINE_FH:
+                    /* ExamineFH() wants a size, a date and a name. A socket
+                       has none of the three, and inventing them would be
+                       worse than saying so. */
+                    tcp_reply(pkt, DOSFALSE, ERROR_OBJECT_WRONG_TYPE,
+                              s.ts_Port);
+                    break;
+
                 default:
                     AMI_INFO("TCP: unhandled packet %ld on a file handle",
                              (long)pkt->dp_Type);
@@ -1103,9 +1111,29 @@ static VOID tcp_ctrl_main(VOID)
                  * opens the stream instead. Handled here rather than in the
                  * default arm so the log only names packets nobody has
                  * considered.
+                 *
+                 * The error code is load-bearing and is not the accurate one.
+                 * ERROR_OBJECT_WRONG_TYPE describes TCP: better -- a stream is
+                 * not a thing that can be locked -- and Copy stops on it:
+                 * "Can't open TCP:10.0.2.2/amitest for input - object is not
+                 * of required type". On ERROR_ACTION_NOT_KNOWN it carries on
+                 * and opens the stream, which is the whole point.
                  */
                 case ACTION_LOCATE_OBJECT:
                     tcp_reply(pkt, DOSFALSE, ERROR_ACTION_NOT_KNOWN,
+                              tcp_ctrl_port);
+                    break;
+
+                /*
+                 * Reachable only from a program holding a lock on TCP:, and
+                 * nothing hands one out. Here so that the refusal names the
+                 * reason -- TCP: is not a directory -- rather than arriving in
+                 * the log as a packet nobody considered.
+                 */
+                case ACTION_EXAMINE_OBJECT:
+                case ACTION_EXAMINE_NEXT:
+                case ACTION_PARENT:
+                    tcp_reply(pkt, DOSFALSE, ERROR_OBJECT_WRONG_TYPE,
                               tcp_ctrl_port);
                     break;
 
