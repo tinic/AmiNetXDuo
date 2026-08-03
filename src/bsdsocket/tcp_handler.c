@@ -965,6 +965,23 @@ static VOID tcp_ctrl_disk_info(struct DosPacket *pkt, struct InfoData *info)
     info->id_BytesPerBlock = 512;
     info->id_DiskType      = ID_DOS_DISK;
 
+    /*
+     * `Info` takes the name it prints from id_VolumeNode's dol_Name. A zero
+     * BPTR is not "no name": BADDR(0) is address 0, so it reads a length byte
+     * and that many characters out of the 68k exception vector table, prints
+     * them, and whatever control characters they contain then eat the rest of
+     * the listing.
+     *
+     * There is no volume -- a connection is not a disk -- so this points at
+     * the device node, which is on the DOS list already, lives as long as
+     * TCP: does, and holds "TCP" in dn_Name. DeviceNode's dn_Name and
+     * DosList's dol_Name are the same offset, which is what makes that legal.
+     *
+     * id_UnitNumber stays 0: the node has no dn_Startup and there is one TCP:,
+     * not a unit of one.
+     */
+    info->id_VolumeNode = MKBADDR(tcp_node);
+
     tcp_reply(pkt, DOSTRUE, 0, tcp_ctrl_port);
 }
 
