@@ -194,7 +194,7 @@ typedef struct AmiRxSeqProbe
 
 VOID ami_sana2_rxprobe_deliver(AmiSana2If *iface, const UCHAR *frame,
                                ULONG length);
-VOID ami_sana2_rxprobe_report(AmiSana2If *iface);
+VOID ami_sana2_rxprobe_report(const AmiSana2If *iface);
 
 #endif /* AMINETXDUO_RXPROBE */
 
