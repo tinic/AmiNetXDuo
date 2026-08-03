@@ -151,6 +151,21 @@ if(AMINETXDUO_LOG)
     add_compile_definitions(AMINETXDUO_LOG)
 endif()
 
+# The TCP: AmigaDOS handler -- a socket opened as a file handle, so a program
+# that speaks DOS files speaks the network without knowing this library
+# exists, and `Type TCP:host/port` works from the Shell.  AmiTCP and Roadshow
+# both shipped one.
+#
+# Off, bsdsocket.library loses the handler process and its file-handle
+# machinery: 4,976 bytes of text, and one fewer Process holding no OpenCnt
+# reference for bsd_lib_expunge() to decline over.  Off in the floor tier,
+# where the programs that reach for a device rather than a socket are not
+# installed.
+option(AMINETXDUO_TCPDEVICE "Build the TCP: AmigaDOS handler" ON)
+if(AMINETXDUO_TCPDEVICE)
+    add_compile_definitions(AMINETXDUO_TCPDEVICE)
+endif()
+
 # Multicast group membership, both families: nx_igmp_enable() and the five
 # IPPROTO_IP socket options, plus NX_ENABLE_IPV6_MULTICAST and the five
 # IPPROTO_IPV6 ones in an AMINETXDUO_IPV6 build.  On by default, because the
@@ -515,3 +530,4 @@ message(STATUS "  mDNS .......... ${AMINETXDUO_MDNS}")
 message(STATUS "  multicast ..... ${AMINETXDUO_MULTICAST}")
 message(STATUS "  ARexx host .... ${AMINETXDUO_AREXX}")
 message(STATUS "  serial log .... ${AMINETXDUO_LOG}")
+message(STATUS "  TCP: device ... ${AMINETXDUO_TCPDEVICE}")

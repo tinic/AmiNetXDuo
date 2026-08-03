@@ -12,7 +12,9 @@
  */
 
 #include "bsdsocket_vectors.h"
+#ifdef AMINETXDUO_TCPDEVICE
 #include "tcp_handler.h"
+#endif
 #include "interfaces.h"
 #include "netmonitor.h"
 
@@ -552,7 +554,11 @@ struct AmiSocketBase *bsd_lib_open(
      * so it runs once; the handler's own OpenLibrary() lands here and finds it
      * done.
      */
+#ifdef AMINETXDUO_TCPDEVICE
     bsd_tcp_handler_start(master);
+#else
+    (VOID)master;
+#endif
 
     return child;
 }
@@ -625,11 +631,13 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
      * idle, not gone. There is no way to prove it is not executing, so decline
      * the expunge. ACTION_DIE takes TCP: down; after that this succeeds.
      */
+#ifdef AMINETXDUO_TCPDEVICE
     if (bsd_tcp_handler_alive())
     {
         base->sb_Lib.lib_Flags |= LIBF_DELEXP;
         return NULL;
     }
+#endif
 
     /*
      * Same for an address allocation still running: those workers are

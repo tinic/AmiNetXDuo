@@ -24,7 +24,6 @@ set(BSDSOCKET_SOURCES
     netdb.c                 # get{serv,proto,net}by* over src/config/netdb.c
     addrinfo.c              # getaddrinfo/getnameinfo/freeaddrinfo/gai_strerror
     handoff.c               # ObtainSocket/ReleaseSocket cross-base transfer
-    tcp_handler.c           # the TCP: DOS handler: a socket as a file handle
     bpf.c                   # the eight bpf_* LVOs over src/bpf/
     netstatus.c             # NetStackQuery/NetStackControl: the live stack,
                             # readable and steerable from a Shell command
@@ -45,6 +44,14 @@ set(BSDSOCKET_SOURCES
 # all, so the floor build simply does not compile it.
 if(AMINETXDUO_IPV6)
     list(APPEND BSDSOCKET_SOURCES in6.c)
+endif()
+
+# tcp_handler.c is the TCP: DOS handler: a socket reachable as a file handle,
+# so `Type TCP:host/port` works and a program that speaks DOS files can speak
+# the network. Nothing in the library depends on it -- library.c starts it and
+# asks whether it is alive, and both are compiled out with it.
+if(AMINETXDUO_TCPDEVICE)
+    list(APPEND BSDSOCKET_SOURCES tcp_handler.c)
 endif()
 
 # nxcontext.c is the ONE private LVO tls.library needs (see
