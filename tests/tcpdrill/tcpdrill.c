@@ -68,6 +68,11 @@
  *           A wrong data offset is a silently corrupt segment: the payload
  *           starts where it says and nowhere else, so it is worth asserting
  *           next to the options that moved it.
+ *   dst=WHERE
+ *           rx only: the IP destination of the injected frame, and the
+ *           Ethernet destination that has to go with it.  `bcast` is
+ *           255.255.255.255, `subnet` is the interface's directed broadcast,
+ *           `mcast` is 224.0.0.1; the default is the interface address.
  *   within=MS / after=MS
  *           bounds on the gap between this frame and the previous event,
  *           measured from the E-Clock reading taken inside the device's
@@ -96,6 +101,9 @@
 
 #define LOCAL_IP        0x0A090901UL            /* 10.9.9.1, DEVS:NetInterfaces */
 #define PEER_IP         0x0A090902UL            /* 10.9.9.2, this harness       */
+#define SUBNET_BCAST_IP 0x0A0909FFUL            /* 10.9.9.255, NETMASK is /24   */
+#define LIMITED_BCAST_IP 0xFFFFFFFFUL
+#define MCAST_IP        0xE0000001UL            /* 224.0.0.1, all hosts         */
 #define DEFAULT_PEER_PORT   9000
 
 static const UBYTE local_mac[6] = { 0x02, 0x00, 0x44, 0x52, 0x4C, 0x01 };
@@ -889,6 +897,7 @@ typedef struct Inject
     ULONG   dlen;
     LONG    mss;
     BOOL    sackok;
+    ULONG   dst_ip;             /* IP destination; LOCAL_IP unless dst= said */
 } Inject;
 
 static VOID build_and_inject(const Inject *in)
@@ -907,7 +916,25 @@ static VOID build_and_inject(const Inject *in)
 
     zero(f, (ULONG)sizeof(f));
 
-    cp(&f[0], local_mac, 6);
+    /* The Ethernet destination has to agree with the IP one, or tap_rx_put()
+       hands the frame up without SANA2IOF_BCAST and the stack sees a unicast
+       frame carrying a broadcast address -- which is a different case. */
+    if (in->dst_ip == LIMITED_BCAST_IP || in->dst_ip == SUBNET_BCAST_IP)
+    {
+        for (i = 0; i < 6; i++)
+            f[i] = 0xFF;
+    }
+    else if ((in->dst_ip & 0xF0000000UL) == 0xE0000000UL)
+    {
+        f[0] = 0x01; f[1] = 0x00; f[2] = 0x5E;
+        f[3] = (UBYTE)((in->dst_ip >> 16) & 0x7F);
+        f[4] = (UBYTE)((in->dst_ip >> 8) & 0xFF);
+        f[5] = (UBYTE)(in->dst_ip & 0xFF);
+    }
+    else
+    {
+        cp(&f[0], local_mac, 6);
+    }
     cp(&f[6], peer_mac, 6);
     wr16(&f[12], ETYPE_IP);
 
@@ -922,7 +949,7 @@ static VOID build_and_inject(const Inject *in)
     ip[8] = 64;
     ip[9] = 6;
     wr32(&ip[12], PEER_IP);
-    wr32(&ip[16], LOCAL_IP);
+    wr32(&ip[16], in->dst_ip);
     wr16(&ip[10], ones_sum(ip, 20, 0));
 
     wr16(&tcp[0], cs.peer_port);
@@ -1035,6 +1062,7 @@ typedef struct Expect
     BOOL    have_hdrlen; LONG hdrlen;
     BOOL    have_within; LONG within;
     BOOL    have_after;  LONG after;
+    BOOL    have_dst;   ULONG dst;
 } Expect;
 
 static UWORD parse_flags(const char *s)
@@ -1123,6 +1151,16 @@ static const char *parse_keys(const char *p, Expect *e)
             }
             else if (streq(key, "within")){ e->have_within = TRUE; e->within = to_num(eq + 1); }
             else if (streq(key, "after")) { e->have_after = TRUE;  e->after = to_num(eq + 1); }
+            else if (streq(key, "dst"))
+            {
+                const char *v = eq + 1;
+
+                e->have_dst = TRUE;
+                if (streq(v, "bcast"))       e->dst = LIMITED_BCAST_IP;
+                else if (streq(v, "subnet")) e->dst = SUBNET_BCAST_IP;
+                else if (streq(v, "mcast"))  e->dst = MCAST_IP;
+                else                         e->dst = LOCAL_IP;
+            }
         }
         p = next;
     }
@@ -1417,6 +1455,7 @@ static VOID do_rx(const char *args, const char *raw)
     in.dlen  = (ULONG)(e.have_len ? e.len : 0);
     in.mss   = e.have_mss ? e.mss : -1;
     in.sackok = (e.have_sackok && e.sackok) ? TRUE : FALSE;
+    in.dst_ip = e.have_dst ? e.dst : LOCAL_IP;
 
     /* Give the stack a moment to post its reads before the very first
        injection of a case; after that they are always outstanding. */
@@ -2137,6 +2176,12 @@ static VOID run_line(char *line)
         char tok[16];
         (VOID)token(args, tok, sizeof(tok));
         cs.peer_port = (UWORD)to_num(tok);
+
+        /* A new source port is a new connection with an initial sequence
+           number of its own, so the one learned from the previous SYN no
+           longer describes it. Forgetting it here is what lets a case drive
+           two connections to the same listening port. */
+        cs.u_isn_known = FALSE;
     }
     else if (streq(verb, "localport"))
     {

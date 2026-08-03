@@ -496,6 +496,53 @@ static const NX_INTERFACE *bsd_packet_interface(const NX_PACKET *packet)
     return packet->nx_packet_ip_interface;
 }
 
+/*
+ * Is this datagram from the peer a connected socket named?
+ *
+ * RFC 1122 4.1.3.5: once connect() has named a peer, the socket is identified
+ * by the whole four-tuple, and a datagram from anywhere else is not for it.
+ * NetX Duo cannot enforce that: _nx_udp_packet_receive() demultiplexes on the
+ * local port alone, and NX_UDP_SOCKET has neither a local address nor a peer to
+ * compare against -- "connected" is a notion of this layer, so the test is
+ * this layer's to make.
+ *
+ * It is the resolver that pays for it being absent. netstack_dns sends a query
+ * from a connected socket and waits; without this, the first host on the wire
+ * to answer is believed, whoever it is.
+ *
+ * TRUE for a socket that never connected: an unbound peer takes datagrams from
+ * anybody, which is what recvfrom() is for.
+ */
+static BOOL bsd_udp_from_peer(const AmiSocket *sock, const NXD_ADDRESS *src,
+                              UINT src_port)
+{
+    if ((sock->as_Flags & ASF_CONNECTED) == 0)
+        return TRUE;
+
+    if (src_port != sock->as_PeerPort)
+        return FALSE;
+
+    if (src->nxd_ip_version != sock->as_PeerAddr.nxd_ip_version)
+        return FALSE;
+
+#ifdef AMINETXDUO_IPV6
+    if (src->nxd_ip_version == NX_IP_VERSION_V6)
+    {
+        return (BOOL)(src->nxd_ip_address.v6[0] ==
+                          sock->as_PeerAddr.nxd_ip_address.v6[0] &&
+                      src->nxd_ip_address.v6[1] ==
+                          sock->as_PeerAddr.nxd_ip_address.v6[1] &&
+                      src->nxd_ip_address.v6[2] ==
+                          sock->as_PeerAddr.nxd_ip_address.v6[2] &&
+                      src->nxd_ip_address.v6[3] ==
+                          sock->as_PeerAddr.nxd_ip_address.v6[3]);
+    }
+#endif
+
+    return (BOOL)(src->nxd_ip_address.v4 ==
+                  sock->as_PeerAddr.nxd_ip_address.v4);
+}
+
 static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags,
                          const NXD_ADDRESS *addr, UINT port, ULONG scope,
@@ -1048,16 +1095,20 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
 
         /*
          * A socket bound to one local address must not be handed datagrams
-         * that arrived for another. NetX binds a UDP socket to a port only, so
-         * the filter is here: a datagram that does not match the bind is
-         * released and the wait resumed, which is what the caller would have
-         * seen if it had never arrived.
+         * that arrived for another, and a connected one must not be handed
+         * datagrams from anybody but its peer. NetX binds a UDP socket to a
+         * port only, so both filters are here: a datagram that matches neither
+         * the bind nor the peer is released and the wait resumed, which is
+         * what the caller would have seen if it had never arrived.
          *
          * Looping rather than failing: a mismatch is not an error for this
          * caller, it is someone else's traffic.
          */
         for (;;)
         {
+            NXD_ADDRESS from_ip;
+            UINT        from_port = 0;
+
             status = bsd_wait_sliced(base, wait, bsd_recv_udp_once, &args,
                                      &aborted);
             if (aborted)
@@ -1065,8 +1116,11 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
             if (status != NX_SUCCESS)
                 return bsd_fail(base, bsd_wait_errno(wait, status));
 
+            nxd_udp_source_extract(packet, &from_ip, &from_port);
+
             if (bsd_bind_wants_interface(sock,
-                                         bsd_packet_interface(packet)))
+                                         bsd_packet_interface(packet)) &&
+                bsd_udp_from_peer(sock, &from_ip, from_port))
                 break;
 
             nx_packet_release(packet);
