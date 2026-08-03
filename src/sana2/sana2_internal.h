@@ -343,6 +343,8 @@ struct AmiSana2If
 
 #ifdef AMINETXDUO_RXPROBE
     AmiRxSeqProbe       seq;
+    ULONG               probe_dev_rx;   /* S2_GETGLOBALSTATS PacketsReceived */
+    ULONG               probe_dev_tx;
 #endif
 };
 
