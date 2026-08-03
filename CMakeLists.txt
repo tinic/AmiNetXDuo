@@ -241,6 +241,15 @@ if(NOT AMINETXDUO_TCP_RTT)
     add_compile_definitions(AMINETXDUO_TCP_RTT_OFF)
 endif()
 
+# RFC 7323 timestamps, PAWS and the round-trip measurement that lifts Karn's
+# restriction from the estimator above.  Another NX_TCP_SOCKET layout change,
+# and it also changes what every segment looks like on the wire, so whole-tree
+# for the same reason as the three above.
+option(AMINETXDUO_TCP_TIMESTAMPS "Carry the RFC 7323 timestamps option" ON)
+if(NOT AMINETXDUO_TCP_TIMESTAMPS)
+    add_compile_definitions(AMINETXDUO_TCP_TIMESTAMPS_OFF)
+endif()
+
 # ami_log() verbosity: 0 = errors only ... 4 = trace. Empty keeps compat.c's
 # own default (WARN in release, DEBUG when AMINETXDUO_DEBUG is set).
 set(AMINETXDUO_LOG_LEVEL "" CACHE STRING "Override ami_log() verbosity (0..4)")

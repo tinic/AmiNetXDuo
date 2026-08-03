@@ -67,7 +67,10 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_retransmit.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_fast_periodic_processing.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_connection_reset.c"
-        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_block_cleanup.c")
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_block_cleanup.c"
+        # The output and retransmit paths write the RFC 7323 option, so they
+        # need the builder even in a test that is about neither.
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_timestamp_option_build.c")
 
     # Built without IPv6 whatever the tree default is.  This links six TCP
     # sources to test retransmit timing; the IPv6 send path in those same files
@@ -206,7 +209,8 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_ack_check.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_retransmit.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_transmit_configure.c"
-        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_block_cleanup.c")
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_block_cleanup.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_timestamp_option_build.c")
 
     target_compile_options(test_tcp_rtt PRIVATE -UAMINETXDUO_IPV6)
 
@@ -222,5 +226,31 @@ if(NOT CMAKE_CROSSCOMPILING)
         AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
 
     add_test(NAME tcp_rtt COMMAND test_tcp_rtt)
+
+    # RFC 7323's two modular comparisons -- PAWS, and which arriving segment may
+    # move TS.Recent.  Both wrap after 994 days of ticks or 4 GB of sequence
+    # space, so no network test reaches them and a host test that sets the
+    # counters directly is the only way they are ever exercised.  Same shim and
+    # the same -UAMINETXDUO_IPV6 as above.
+    add_executable(test_tcp_timestamps
+        host/test_tcp_timestamps_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_timestamp_option_get.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_timestamp_option_build.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_timestamp_check.c")
+
+    target_compile_options(test_tcp_timestamps PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_tcp_timestamps PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_tcp_timestamps PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME tcp_timestamps COMMAND test_tcp_timestamps)
 
 endif()

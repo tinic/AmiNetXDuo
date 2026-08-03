@@ -342,6 +342,31 @@
 #endif
 
 
+/* ----------------------------------------------------------- timestamps -- */
+
+/*
+ * RFC 7323 timestamps.
+ *
+ * PAWS (section 5) rejects a segment whose timestamp says it has been in the
+ * network longer than the sequence space takes to wrap.
+ *
+ * Section 4.1's round-trip measurement is valid for a retransmitted segment,
+ * which Karn's algorithm forbids without it.  That is what the RFC 6298
+ * estimator above could not do: on a path slower than the timeout in force
+ * every segment is retransmitted before its acknowledgment arrives, every
+ * sample is discarded, and the estimate never leaves the default.  Measured on
+ * a 700 ms path: first RTO 2258 ms with this, 975 ms without.
+ *
+ * Costs 12 bytes on every non-reset segment -- 1460 negotiated sends 1448 --
+ * 1592 bytes of text and 20 bytes per NX_TCP_SOCKET.
+ *
+ * Build with -DAMINETXDUO_TCP_TIMESTAMPS=OFF to take it out.
+ */
+#ifndef AMINETXDUO_TCP_TIMESTAMPS_OFF
+#define NX_ENABLE_TCP_TIMESTAMPS
+#endif
+
+
 /* ------------------------------------------------------------- SOCK_RAW -- */
 
 /*

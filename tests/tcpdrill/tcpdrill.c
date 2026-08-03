@@ -58,6 +58,16 @@
  *   sackok=0|1
  *           the SACK-Permitted option (RFC 2018 kind 4) must be present or
  *           absent (tx); on rx, sackok=1 puts it in the injected SYN.
+ *   ts=0|1  the RFC 7323 timestamps option (kind 8) must be present or absent
+ *           (tx); on rx, ts=1 puts one in the injected segment.
+ *   tsval=N the TSval to inject (rx).  Naming it also puts the option in the
+ *           segment.  Carries forward until another line names one.
+ *   tsecr=N on rx, the TSecr to echo; the default is the TSval of the last
+ *           frame the stack sent, which is what a peer would echo.  On tx, the
+ *           value the stack echoed must equal this -- section 4.3's rule about
+ *           which arriving segment may move TS.Recent.
+ *   tsnew   the TSval must be strictly newer than the previous frame's, which
+ *           a retransmission must be and a copy of the original would not.
  *   sack=L:R[,L:R...]
  *           the SACK option (kind 5) must carry exactly these blocks, in this
  *           order.  Sequence numbers are offsets from the ISN this harness
@@ -539,6 +549,9 @@ typedef struct Seg
     ULONG   dlen;
     LONG    mss;                /* -1 when the option is absent */
     BOOL    sackok;             /* SACK-Permitted option present */
+    BOOL    ts;                 /* RFC 7323 timestamps option present */
+    ULONG   tsval;
+    ULONG   tsecr;
     UWORD   sack_n;             /* SACK blocks carried, 0 for none */
     ULONG   sack_l[4];
     ULONG   sack_r[4];
@@ -641,6 +654,12 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
                 s->mss = (LONG)rd16(&o[2]);
             if (*o == 4 && o[1] == 2)
                 s->sackok = TRUE;
+            if (*o == 8 && o[1] == 10 && o + 10 <= end)
+            {
+                s->ts    = TRUE;
+                s->tsval = rd32(&o[2]);
+                s->tsecr = rd32(&o[6]);
+            }
             if (*o == 5 && o[1] >= 10 && ((o[1] - 2) % 8) == 0 && o + o[1] <= end)
             {
                 UWORD n = (UWORD)((o[1] - 2) / 8);
@@ -704,6 +723,11 @@ typedef struct Case
     BOOL    u_isn_known;
     ULONG   p_isn;
     ULONG   t_last;             /* E-Clock of the previous event */
+
+    /* p_tsval is what this harness injects; u_tsval is the last TSval the
+       stack sent, which is what a peer echoes back. */
+    ULONG   p_tsval;
+    ULONG   u_tsval;
     ULONG   fails;
     ULONG   line;
 
@@ -889,6 +913,9 @@ typedef struct Inject
     ULONG   dlen;
     LONG    mss;
     BOOL    sackok;
+    BOOL    ts;
+    ULONG   tsval;
+    ULONG   tsecr;
 } Inject;
 
 static VOID build_and_inject(const Inject *in)
@@ -903,6 +930,8 @@ static VOID build_and_inject(const Inject *in)
 
     if (in->sackok)
         opt = (UWORD)(opt + 4);
+    if (in->ts)
+        opt = (UWORD)(opt + 12);
     thl = (UWORD)(20 + opt);
 
     zero(f, (ULONG)sizeof(f));
@@ -950,6 +979,19 @@ static VOID build_and_inject(const Inject *in)
         tcp[at + 1] = 1;
         tcp[at + 2] = 4;
         tcp[at + 3] = 2;
+    }
+
+    if (in->ts)
+    {
+        /* NOP, NOP, kind 8, length 10, TSval, TSecr: twelve bytes. */
+        UWORD at = (UWORD)(20 + (in->mss >= 0 ? 4 : 0) + (in->sackok ? 4 : 0));
+
+        tcp[at]     = 1;
+        tcp[at + 1] = 1;
+        tcp[at + 2] = 8;
+        tcp[at + 3] = 10;
+        wr32(&tcp[at + 4], in->tsval);
+        wr32(&tcp[at + 8], in->tsecr);
     }
 
     for (i = 0; i < in->dlen; i++)
@@ -1006,6 +1048,16 @@ static BOOL streq(const char *a, const char *b)
     return (*a == '\0' && *b == '\0') ? TRUE : FALSE;
 }
 
+/* Unsigned: half the timestamps a PAWS case names are above LONG_MAX. */
+static ULONG to_unum(const char *s)
+{
+    ULONG v = 0;
+
+    while (*s >= '0' && *s <= '9')
+        v = v * 10 + (ULONG)(*s++ - '0');
+    return v;
+}
+
 static LONG to_num(const char *s)
 {
     LONG v    = 0;
@@ -1031,6 +1083,10 @@ typedef struct Expect
     BOOL    have_urg;   LONG urg;
     BOOL    have_mss;   LONG mss;
     BOOL    have_sackok; LONG sackok;
+    BOOL    have_ts;    LONG ts;
+    BOOL    have_tsnew;
+    BOOL    have_tsval; ULONG tsval;
+    BOOL    have_tsecr; ULONG tsecr;
     BOOL    have_sack;  UWORD sack_n; ULONG sack_l[4]; ULONG sack_r[4];
     BOOL    have_hdrlen; LONG hdrlen;
     BOOL    have_within; LONG within;
@@ -1099,6 +1155,10 @@ static const char *parse_keys(const char *p, Expect *e)
             else if (streq(key, "urg"))   { e->have_urg = TRUE;    e->urg = to_num(eq + 1); }
             else if (streq(key, "mss"))   { e->have_mss = TRUE;    e->mss = to_num(eq + 1); }
             else if (streq(key, "sackok")){ e->have_sackok = TRUE; e->sackok = to_num(eq + 1); }
+            else if (streq(key, "ts"))    { e->have_ts = TRUE;     e->ts = to_num(eq + 1); }
+            else if (streq(key, "tsnew"))  { e->have_tsnew = TRUE; }
+            else if (streq(key, "tsval")) { e->have_tsval = TRUE;  e->tsval = to_unum(eq + 1); }
+            else if (streq(key, "tsecr")) { e->have_tsecr = TRUE;  e->tsecr = to_unum(eq + 1); }
             else if (streq(key, "hdrlen")){ e->have_hdrlen = TRUE; e->hdrlen = to_num(eq + 1); }
             else if (streq(key, "sack"))
             {
@@ -1194,6 +1254,13 @@ static VOID describe(const Seg *s, char *out, ULONG max)
     {
         const char *t = " sackok"; while (*t != '\0') *o++ = *t++;
     }
+    if (s->ts)
+    {
+        const char *t = " ts="; while (*t != '\0') *o++ = *t++;
+        fmt_num(&o, s->tsval, 10, 0, FALSE);
+        *o++ = ':';
+        fmt_num(&o, s->tsecr, 10, 0, FALSE);
+    }
     if (s->sack_n != 0)
     {
         const char *t = " sack="; UWORD i;
@@ -1279,6 +1346,9 @@ static VOID do_tx(const char *args, const char *raw)
     if (cs.local_port == 0)
         cs.local_port = got.src_port;
 
+    if (got.ts)
+        cs.u_tsval = got.tsval;
+
     describe(&got, desc, sizeof(desc));
     w = why;
 
@@ -1338,6 +1408,14 @@ static VOID do_tx(const char *args, const char *raw)
     if (e.have_sackok)
         CHECK((got.sackok ? 1 : 0) == e.sackok, "SACK-Permitted option",
               e.sackok, got.sackok ? 1 : 0);
+    if (e.have_ts)
+        CHECK((got.ts ? 1 : 0) == e.ts, "timestamps option", e.ts, got.ts ? 1 : 0);
+    if (e.have_tsecr)
+        CHECK(got.tsecr == e.tsecr, "TSecr", (LONG)e.tsecr, (LONG)got.tsecr);
+    if (e.have_tsnew)
+        CHECK(got.ts && ((LONG)(got.tsval - cs.u_tsval) > 0),
+              "TSval no newer than the previous frame's",
+              (LONG)cs.u_tsval, (LONG)got.tsval);
     if (e.have_hdrlen)
         CHECK((LONG)got.thl == e.hdrlen, "TCP header length", e.hdrlen, got.thl);
     if (e.have_sack)
@@ -1417,6 +1495,16 @@ static VOID do_rx(const char *args, const char *raw)
     in.dlen  = (ULONG)(e.have_len ? e.len : 0);
     in.mss   = e.have_mss ? e.mss : -1;
     in.sackok = (e.have_sackok && e.sackok) ? TRUE : FALSE;
+    /* `tsval=` or `tsecr=` alone mean the segment carries the option. */
+    in.ts     = (e.have_ts ? (e.ts ? TRUE : FALSE)
+                           : ((e.have_tsval || e.have_tsecr) ? TRUE : FALSE));
+
+    if (e.have_tsval)
+        cs.p_tsval = e.tsval;
+    in.tsval = cs.p_tsval;
+
+    /* A peer echoes the timestamp of the last segment it accepted. */
+    in.tsecr = e.have_tsecr ? e.tsecr : cs.u_tsval;
 
     /* Give the stack a moment to post its reads before the very first
        injection of a case; after that they are always outstanding. */
@@ -2091,6 +2179,9 @@ static VOID case_begin(const char *name)
     /* A different ISN per case, so a stale segment from the previous one
        cannot be mistaken for a live one. */
     cs.p_isn      = 0x50000000UL + (n_cases * 0x00010000UL);
+    /* And a different timestamp clock per case, for the same reason. */
+    cs.p_tsval    = 0x00100000UL + (n_cases * 0x00001000UL);
+    cs.u_tsval    = 0;
     cs.t_last     = tap_eclock_now();
 
     n_cases++;

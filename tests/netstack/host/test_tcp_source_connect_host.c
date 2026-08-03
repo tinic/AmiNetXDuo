@@ -105,6 +105,13 @@ UINT _tx_thread_interrupt_disable(void)
     return 0;
 }
 
+/* The SYN carries an RFC 7323 timestamp, and the timestamp is the tick.  This
+   test asserts on addresses rather than on time, so the clock stands still. */
+ULONG _tx_time_get(VOID)
+{
+    return 0;
+}
+
 VOID _tx_thread_interrupt_restore(UINT previous_posture)
 {
     (void)previous_posture;

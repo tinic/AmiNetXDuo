@@ -1,0 +1,299 @@
+# tcpdrill -- RFC 7323 timestamps, PAWS, and their effect on the other options.
+#
+# Header lengths, asserted on every case that changes one:
+#
+#   20   no options
+#   28   SYN with MSS and SACK-Permitted (a peer that offered no timestamps)
+#   32   NOP NOP, kind, length, TSval, TSecr
+#   40   SYN with MSS, SACK-Permitted and timestamps; also the maximum
+#   44   timestamps and one SACK block
+#   52   timestamps and two
+#   56   four SACK blocks, no timestamps
+#   60   timestamps and three -- 40 bytes of options, which is why three is the
+#        bound
+#
+# `tsval=` sets what this harness injects and carries forward until another line
+# names one.  `tsecr=` on a `tx` line is what the stack must have echoed.
+#
+# ---------------------------------------------------------------------------
+
+# RFC 7323 section 3.2: the option goes on a SYN of our own.  20 bytes of
+# options -- MSS, SACK-Permitted, timestamps -- which is the maximum.
+case t01_syn_offers_timestamps
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 ts=1 hdrlen=40
+
+# RFC 7323 section 3.2 and 4.3 R3: a SYN+ACK repeats the offer only when the
+# peer's SYN made one, and echoes that SYN's timestamp.
+case t02_syn_ack_echoes_the_peers_syn
+localport 4720
+listen
+rx S seq=0 win=8192 mss=1460 sackok=1 ts=1 tsval=700000
+tx SA seq=0 ack=1 mss=1460 sackok=1 ts=1 tsecr=700000 hdrlen=40
+rx A seq=1 ack=1
+accept
+
+# A peer that said nothing gets the SYN+ACK it got before: MSS and
+# SACK-Permitted, 28 bytes.
+case t03_syn_ack_silent_when_the_peer_was
+localport 4721
+listen
+rx S seq=0 win=8192 mss=1460 sackok=1
+tx SA seq=0 ack=1 mss=1460 sackok=1 ts=0 hdrlen=28
+rx A seq=1 ack=1
+accept
+
+# The acknowledgement completing the handshake carries the option and echoes the
+# SYN+ACK's timestamp.
+case t04_third_handshake_segment_carries_it
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1 ts=1 tsval=710000
+tx A seq=1 ack=1 ts=1 tsecr=710000 hdrlen=32
+
+# TS.Recent moves with each in-sequence segment, so each acknowledgement echoes
+# the segment it answers.
+case t05_every_acknowledgement_echoes_the_last_segment
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1 ts=1 tsval=720000
+tx A seq=1 ack=1 ts=1 tsecr=720000
+rx PA seq=1 ack=1 len=100 tsval=720010
+tx A seq=1 ack=101 ts=1 tsecr=720010 hdrlen=32 within=400
+rx PA seq=101 ack=1 len=100 tsval=720020
+tx A seq=1 ack=201 ts=1 tsecr=720020 hdrlen=32 within=400
+recv 400 = 200
+
+# RFC 6691: the advertised MSS is payload, so a negotiated 1460 sends 1448.
+# Segmenting at 1460 and then writing the option puts 1512 bytes on the wire,
+# over the path MTU.
+case t06_the_effective_mss_is_twelve_bytes_short
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1 ts=1 tsval=730000
+tx A seq=1 ack=1 ts=1 tsecr=730000
+send 3000
+tx PA seq=1 ack=1 len=1448 ts=1 hdrlen=32 within=400
+tx PA seq=1449 ack=1 len=1448 ts=1 hdrlen=32 within=400
+tx PA seq=2897 ack=1 len=104 ts=1 hdrlen=32 within=400
+rx A seq=1 ack=3001 win=8192 tsval=730010
+
+# Section 4.3: a segment queued above a hole does not contain the byte this side
+# is waiting for, so it must not move TS.Recent.  Echoing 740020 here would have
+# the peer measure its round trip as though the retransmission it has not sent
+# yet had already been answered.
+case t07_out_of_order_data_does_not_move_ts_recent
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1 ts=1 tsval=740000
+tx A seq=1 ack=1 ts=1 tsecr=740000
+rx PA seq=101 ack=1 len=100 tsval=740020
+tx A seq=1 ack=1 ts=1 tsecr=740000 sack=101:201 hdrlen=44 within=400
+rx PA seq=201 ack=1 len=100 tsval=740030
+tx A seq=1 ack=1 ts=1 tsecr=740000 sack=101:301 hdrlen=44 within=400
+rx PA seq=1 ack=1 len=100 tsval=740040
+tx A seq=1 ack=301 ts=1 tsecr=740040 hdrlen=32 within=400
+recv 400 = 300
+
+# The same rule the other way: a segment reaching the left window edge moves
+# TS.Recent even though it arrives out of order relative to the highest sequence
+# received.  Section 4.3 asks about the left edge, not the highest.
+case t08_filling_the_hole_moves_it
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1 ts=1 tsval=750000
+tx A seq=1 ack=1 ts=1 tsecr=750000
+rx PA seq=201 ack=1 len=100 tsval=750020
+tx A seq=1 ack=1 ts=1 tsecr=750000 sack=201:301 hdrlen=44 within=400
+rx PA seq=1 ack=1 len=100 tsval=750030
+tx A seq=1 ack=101 ts=1 tsecr=750030 sack=201:301 hdrlen=44 within=400
+
+# RFC 2018 section 3: with timestamps in the same option area only three SACK
+# blocks fit -- 12 of TSopt, 4 of kind, length and alignment, 8 a block is 40 at
+# three and 48 at four.  The block dropped on the fourth hole is the lowest, as
+# in the four-block case.
+case t09_three_sack_blocks_with_timestamps
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1 ts=1 tsval=760000
+tx A seq=1 ack=1 ts=1 tsecr=760000
+rx PA seq=101 ack=1 len=100 tsval=760010
+tx A seq=1 ack=1 sack=101:201 ts=1 hdrlen=44 within=400
+rx PA seq=301 ack=1 len=100 tsval=760020
+tx A seq=1 ack=1 sack=301:401,101:201 ts=1 hdrlen=52 within=400
+rx PA seq=501 ack=1 len=100 tsval=760030
+tx A seq=1 ack=1 sack=501:601,301:401,101:201 ts=1 hdrlen=60 within=400
+rx PA seq=701 ack=1 len=100 tsval=760040
+tx A seq=1 ack=1 sack=701:801,501:601,301:401 ts=1 hdrlen=60 within=400
+
+# Four blocks against a peer whose SYN+ACK stayed quiet: same script, same
+# holes.  The block count is a property of the connection, not the build.
+case t10_four_sack_blocks_without_them
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
+tx A seq=1 ack=1 ts=0 hdrlen=20
+rx PA seq=101 ack=1 len=100
+tx A seq=1 ack=1 sack=101:201 ts=0 hdrlen=32 within=400
+rx PA seq=301 ack=1 len=100
+tx A seq=1 ack=1 sack=301:401,101:201 hdrlen=40 within=400
+rx PA seq=501 ack=1 len=100
+tx A seq=1 ack=1 sack=501:601,301:401,101:201 hdrlen=48 within=400
+rx PA seq=701 ack=1 len=100
+tx A seq=1 ack=1 sack=701:801,501:601,301:401,101:201 hdrlen=56 within=400
+
+# PAWS, RFC 7323 section 5.3 R1.  This segment's sequence number is in window;
+# its timestamp is older than TS.Recent.  Section 5.3 has it acknowledged rather
+# than dropped in silence, so the acknowledgement must not advance and the data
+# must not reach the application.
+case t11_paws_rejects_an_old_timestamp
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1 ts=1 tsval=770000
+tx A seq=1 ack=1 ts=1 tsecr=770000
+rx PA seq=1 ack=1 len=100 tsval=770100
+tx A seq=1 ack=101 ts=1 tsecr=770100 hdrlen=32 within=400
+rx PA seq=101 ack=1 len=100 tsval=770050
+tx A seq=1 ack=101 ts=1 tsecr=770100 hdrlen=32 within=400
+recv 400 = 100
+readable 0
+
+# R1 is strictly older, not older-or-equal: a peer whose clock has not ticked
+# between two segments sends both with the same TSval.
+case t12_paws_accepts_an_equal_timestamp
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1 ts=1 tsval=780000
+tx A seq=1 ack=1 ts=1 tsecr=780000
+rx PA seq=1 ack=1 len=100 tsval=780100
+tx A seq=1 ack=101 ts=1 tsecr=780100 within=400
+rx PA seq=101 ack=1 len=100 tsval=780100
+tx A seq=1 ack=201 ts=1 tsecr=780100 within=400
+recv 400 = 200
+
+# The comparison is modular.  After the peer's 32-bit clock wraps, every value
+# it sends is numerically smaller than TS.Recent while being newer.  Comparing
+# as unsigned rejects every segment for the rest of the connection.
+case t13_paws_across_the_wrap
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1 ts=1 tsval=4294967200
+tx A seq=1 ack=1 ts=1 tsecr=4294967200
+rx PA seq=1 ack=1 len=100 tsval=4294967290
+tx A seq=1 ack=101 ts=1 tsecr=4294967290 within=400
+rx PA seq=101 ack=1 len=100 tsval=200
+tx A seq=1 ack=201 ts=1 tsecr=200 within=400
+recv 400 = 200
+
+# The mirror of t13: numerically larger than TS.Recent but modularly behind it,
+# which is the old duplicate PAWS exists for.
+case t14_paws_rejects_across_the_wrap
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1 ts=1 tsval=4294967200
+tx A seq=1 ack=1 ts=1 tsecr=4294967200
+rx PA seq=1 ack=1 len=100 tsval=200
+tx A seq=1 ack=101 ts=1 tsecr=200 within=400
+rx PA seq=101 ack=1 len=100 tsval=4294967290
+tx A seq=1 ack=101 ts=1 tsecr=200 hdrlen=32 within=400
+recv 400 = 100
+
+# A segment carrying no option is processed normally.  Section 3.2 SHOULDs a
+# silent drop; that stalls the connection wherever something in the path strips
+# options, and the same section forbids aborting over the same fault.  A stated
+# departure.
+case t15_a_segment_without_the_option_is_still_taken
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1 ts=1 tsval=790000
+tx A seq=1 ack=1 ts=1 tsecr=790000
+rx PA seq=1 ack=1 len=100
+tx A seq=1 ack=101 ts=1 tsecr=790000 hdrlen=32 within=400
+recv 400 = 100
+
+# RFC 7323 section 3.2 exempts the reset: it goes out bare, header 20.
+case t16_a_reset_carries_no_timestamp
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1 ts=1 tsval=800000
+tx A seq=1 ack=1 ts=1 tsecr=800000
+rx PA seq=1 ack=1 len=50 tsval=800010
+tx A seq=1 ack=51 ts=1 tsecr=800010 within=400
+close within=200
+tx R seq=1 ts=0 hdrlen=20
+
+# The FIN carries it.  Every non-reset segment does, and the FIN goes out of a
+# different function.
+case t17_the_fin_carries_it
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1 ts=1 tsval=810000
+tx A seq=1 ack=1 ts=1 tsecr=810000
+shutdown wr
+tx FA seq=1 ack=1 ts=1 tsecr=810000 hdrlen=32 within=400
+rx A seq=1 ack=2 win=8192 tsval=810010
+
+# A peer that never offered the option: no option sent, headers unchanged,
+# payload back at the full 1460.
+case t18_a_peer_without_timestamps_sees_no_change
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1
+tx A seq=1 ack=1 ts=0 hdrlen=20
+send 3000
+tx PA seq=1 ack=1 len=1460 ts=0 hdrlen=20 within=400
+tx PA seq=1461 ack=1 len=1460 ts=0 hdrlen=20 within=400
+tx PA seq=2921 ack=1 len=80 ts=0 hdrlen=20 within=400
+rx A seq=1 ack=3001 win=8192
+
+# RFC 7323 section 4.1: the retransmission carries a fresh TSval.  Repeating the
+# original's would have the peer echo it and the round trip measured from that
+# would include the timeout that produced the retransmission.  hdrlen is
+# asserted because the retransmit path rebuilds the fourth header word; a bare
+# five-word header would leave the option bytes to be read as payload.
+case t19_a_retransmission_is_timed_from_now
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 ts=1
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1 ts=1 tsval=820000
+tx A seq=1 ack=1 ts=1 tsecr=820000
+send 100
+tx PA seq=1 ack=1 len=100 ts=1 hdrlen=32 within=300
+tx PA seq=1 ack=1 len=100 ts=1 tsnew hdrlen=32 after=700 within=1400
+rx R seq=1
+
+# RFC 7323 section 4.1 against RFC 6298 section 3.  Without timestamps no round
+# trip can be measured until data is acknowledged, and on a path slower than the
+# timeout in force every segment is retransmitted first, so Karn's algorithm
+# discards every sample (rto.drill rto02).  The SYN+ACK echoes the SYN's
+# timestamp, so the handshake is a measurement.
+#
+# 700 ms gives SRTT 700 and RTTVAR 350, so the first timeout is 700 + 4(350) =
+# 2.1 s against 1.0 s without.  `idle` stays under the second a SYN retry takes.
+case t20_the_handshake_is_a_measurement_on_a_slow_path
+socket
+connect
+tx S seq=0 mss=1460 sackok=1 ts=1
+idle 700
+rx SA seq=0 ack=1 win=8192 mss=1460 sackok=1 ts=1 tsval=830000
+tx A seq=1 ack=1 ts=1 tsecr=830000
+send 100
+tx PA seq=1 ack=1 len=100 ts=1 within=300
+tx PA seq=1 ack=1 len=100 ts=1 tsnew after=1400 within=3600
+rx R seq=1
