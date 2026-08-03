@@ -127,6 +127,48 @@ is a worst case in the minutes for one blocking call, with no break-signal
 handling, unlike every other blocking path, and the DNS mutex held throughout.
 `src/bsdsocket/addrinfo.c:476-516`, `resolver.c:18, :53-54, :150-168`.
 
+**Correction: RFC 5227 DHCPDECLINE is NOT present.** An earlier entry said it
+was. `NX_DHCP_CLIENT_SEND_ARP_PROBE` is commented out in the vendored header and
+defined nowhere in our tree, so the guards around the probe, the conflict
+handler and the DECLINE never compile — and our own coverage for it is
+`#ifdef`'d out in `tests/netstack/dhcp3927_test.c`. RFC 2131 §4.4.1 makes the
+DECLINE a conditional MUST and RFC 5227 §2.1 makes the probe one. **The code is
+already written upstream and waiting behind one define.** The AutoIP path does
+probe, so link-local is compliant and DHCP is not — on a LAN with a static-address
+NAS inside the DHCP pool this is the difference between taking a duplicate
+address silently and asking for another.
+
+**The QDCOUNT bypass — not previously recorded.** `nxd_dns.c:4497` gates the
+entire question check on `QDCOUNT == 1`. With **QDCOUNT = 0** the name, type and
+class comparisons are all skipped and the RR loop parses from offset 12 anyway,
+so four of RFC 5452 §9.1's six MUST attributes vanish on a flag the attacker
+sets. §9.1: "A mismatch and the response MUST be considered invalid."
+
+**Before fixing the bailiwick gap, read this.** `NX_DNS_ENABLE_EXTENDED_RR_TYPES`
+is undefined in our build, so CNAME processing is compiled out and a CNAME RR is
+skipped. The A record that follows — whose owner is the CNAME *target*, not the
+queried name — is accepted **precisely because no owner-name check exists**.
+**Adding a bailiwick check without also following CNAME chains will break every
+CDN-hosted name on the machine.** They belong in one piece of work. Two side
+effects worth knowing meanwhile: those A records cache under the CNAME target so
+the original name always misses, and a CNAME-only response yields
+`NX_DNS_QUERY_FAILED`.
+
+**A second, independent route to a permanent cache entry.** Separate from the
+tick-division bug: `nxd_dns.c:8102` stores the raw 32-bit TTL with no RFC 2181 §8
+sign-bit rule and no ceiling, so a TTL with the top bit set caches for ~68 years.
+
+**`254.169.in-addr.arpa.` reverse lookups leak to the unicast resolver.** RFC
+6762 §4 MUST. This stack assigns link-local addresses via AutoIP, so link-local
+peers are a normal state rather than a corner case, and every reverse lookup of
+one goes to the ISP resolver and times out. The vendored mDNS has no
+address-to-name API, so the right fix is an immediate negative, not a re-route.
+
+**Citation error in our own code:** `src/netstack/netstack_dns.c:228` cites RFC
+6762 §6.7 for the `.local` rule. §6.7 is "Legacy Unicast Responses"; the
+requirement is **§3**. The behaviour is right and the citation has already
+propagated into notes elsewhere.
+
 **DNS response validation.** Responses are accepted without checking who sent
 them — only the 16-bit transaction ID is validated and `nx_udp_source_extract`
 appears nowhere in the addon, so an on-link attacker who can observe the query
