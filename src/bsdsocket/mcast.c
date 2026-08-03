@@ -784,6 +784,16 @@ LONG bsd_mcast6_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr,
         !bsd_mcast6_is_group(addr->nxd_ip_address.v6))
         return -1;
 
+    /*
+     * RFC 3493 5.2: a hop limit of 0 is "this host only". Nothing here
+     * delivers a multicast datagram back to its sender -- IPV6_MULTICAST_LOOP
+     * is accepted and reads back 0 -- so it goes nowhere at all, which is
+     * still not the same as going one hop onto the link. Coercing 0 to 1 is
+     * what this used to do and it leaked every such datagram.
+     */
+    if (sock->as_Mcast6Hops == 0)
+        return BSD_MCAST6_NO_LINK;
+
     *saved = ip->nx_ipv6_hop_limit;
     ip->nx_ipv6_hop_limit = (ULONG)sock->as_Mcast6Hops;
 
@@ -804,8 +814,25 @@ VOID bsd_mcast6_finish_send(ULONG saved)
 
 /* ----------------------------------------------------------- the options -- */
 
-BOOL bsd_mcast6_is_option(LONG optname)
+BOOL bsd_mcast6_is_option(const AmiSocket *sock, LONG optname)
 {
+    /* The Linux numbering is withdrawn on a raw socket; see
+       bsd_v6_linux_numbering() in in6.c. */
+    if (!bsd_v6_linux_numbering(sock))
+    {
+        switch (optname)
+        {
+            case AMI_IPV6_JOIN_GROUP_LINUX:
+            case AMI_IPV6_LEAVE_GROUP_LINUX:
+            case AMI_IPV6_MULTICAST_IF_LINUX:
+            case AMI_IPV6_MULTICAST_HOPS_LINUX:
+            case AMI_IPV6_MULTICAST_LOOP_LINUX:
+                return FALSE;
+            default:
+                break;
+        }
+    }
+
     switch (optname)
     {
         case AMI_IPV6_JOIN_GROUP_BSD:
@@ -930,10 +957,14 @@ LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
                 return -1;
             if (value < -1 || value > 255)
                 return bsd_fail(base, AMI_EINVAL);
-            /* -1 is "the default", per RFC 3493, which is one hop. 0 would be
-               "this host only" and there is no loopback to deliver it to, so
-               it is taken as one hop too rather than sent nowhere. */
-            sock->as_Mcast6Hops = (value < 1) ? 1 : value;
+            /*
+             * RFC 3493 5.2's table, exactly: x < -1 is EINVAL, -1 is "the
+             * default", which that section puts at one hop, and 0 <= x <= 255
+             * uses x. 0 is "this host only", and bsd_mcast6_prepare_send()
+             * keeps the datagram off the link for it -- it used to be rounded
+             * up to one hop, which put it on the link.
+             */
+            sock->as_Mcast6Hops = (value < 0) ? 1 : value;
             return 0;
 
         case AMI_IPV6_MULTICAST_LOOP_BSD:

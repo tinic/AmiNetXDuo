@@ -87,9 +87,15 @@ extern "C" {
  * setsockopt() and getsockopt(), because a caller who spelled the numbers out
  * may have taken them from either lineage and neither is wrong here.
  *
- * Neither alternative collides with something else this library offers: 26 is
- * IPV6_CHECKSUM in BSD and 27 is IPV6_JOIN_ANYCAST in Linux, both raw-socket
- * options, and there are no raw IPv6 sockets here.
+ * One alternative DOES collide, on one kind of socket.  26 is IPV6_CHECKSUM in
+ * BSD, a raw-socket option, and raw IPv6 sockets exist here --
+ * socket(AF_INET6, SOCK_RAW, ...) is what a traceroute or a ping opens.  So on
+ * a RAW socket the Linux numbering is not accepted: 26 there would otherwise
+ * answer an application asking for a checksum offset with success, compute no
+ * checksum, verify none, and switch IPV6_V6ONLY on into the bargain.  Use the
+ * numbers published here -- they are the BSD ones, and they reach every option
+ * this library offers on every socket.  (27 is IPV6_JOIN_ANYCAST in Linux,
+ * which is not offered here, so the published number needs no such guard.)
  */
 
 /* BSD 27, Linux 26.  Both accepted. */
