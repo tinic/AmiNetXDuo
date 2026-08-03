@@ -730,6 +730,7 @@ BOOL tool_stack_is_ours(struct Library *base)
 #define LVO_gethostbyaddr   (-216)
 #define LVO_gethostname     (-282)
 #define LVO_gethostid       (-288)
+#define LVO_GetDefaultDomainName (-702)
 
 /*
  * struct hostent, exactly as the NDK's <netdb.h> declares it (h_name,
@@ -806,6 +807,21 @@ static LONG tool_call_gethostname(struct Library *base, char *name, ULONG len)
                       : "r" (a6), "r" (a0), "r" (d0)
                       : "d1", "a1", "cc", "memory");
     return res;
+}
+
+static BOOL tool_call_default_domain(struct Library *base, char *buf, LONG len)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register char           *a0  __asm("a0") = buf;
+    register LONG            d0  __asm("d0") = len;
+    register LONG            res __asm("d0");
+    register LONG _clob_a0 __asm("a0");
+
+    __asm __volatile ("jsr a6@(-702:W)"
+                      : "=r" (res), "=r" (_clob_a0)
+                      : "r" (a6), "r" (a0), "r" (d0)
+                      : "d1", "a1", "cc", "memory");
+    return (BOOL)(res != 0);
 }
 
 struct Library *tool_stack_start(VOID)
@@ -1024,6 +1040,31 @@ BOOL tool_stack_query(ULONG *addr_out, char *host, ULONG hostlen)
     CloseLibrary(base);
 
     return TRUE;
+}
+
+BOOL tool_stack_domain(char *domain, ULONG domainlen)
+{
+    struct Library *base;
+    BOOL            got;
+
+    if (domain == NULL || domainlen == 0)
+        return FALSE;
+
+    domain[0] = '\0';
+
+    if (!tool_stack_library_running())
+        return FALSE;
+
+    base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    if (base == NULL)
+        return FALSE;
+
+    got = tool_call_default_domain(base, domain, (LONG)domainlen);
+    domain[domainlen - 1] = '\0';
+
+    CloseLibrary(base);
+
+    return (BOOL)(got && domain[0] != '\0');
 }
 
 /* ----------------------------------------------------------------- usage -- */

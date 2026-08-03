@@ -204,6 +204,14 @@ VOID tool_explain_foreign_stack(struct Library *base);
 BOOL tool_stack_query(ULONG *addr_out, char *host, ULONG hostlen);
 
 /*
+ * The running stack's default domain, through GetDefaultDomainName(). This is
+ * where a DHCP option 15 ends up, so it can be set on a machine whose
+ * DEVS:Internet says nothing. FALSE when nothing is running or no domain is
+ * known; never starts the stack.
+ */
+BOOL tool_stack_domain(char *domain, ULONG domainlen);
+
+/*
  * Look a name up through the running stack's own gethostbyname() /
  * gethostbyaddr() vectors. Works when netstack_resolve() cannot be reached --
  * the normal case, with the stack inside bsdsocket.library -- and uses the

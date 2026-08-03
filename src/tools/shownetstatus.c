@@ -1005,6 +1005,95 @@ static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
     }
 }
 
+/* --------------------------------------------------------- the host name --
+ *
+ * The reported fault: a machine renamed to a1200 by an interface file went on
+ * calling itself a3000.local. Two things were wrong with the report itself.
+ *
+ * The domain. ".local" is the mDNS suffix, and RFC 6762 3 makes a .local name
+ * link-local in scope and explicitly not globally unique, so it is never this
+ * machine's name -- it is the name it answers to on this wire, which is a
+ * different thing and is reported on its own line. When a domain is known, it
+ * goes after the host name instead.
+ *
+ * Composing host + domain into a fully-qualified name is convention rather
+ * than conformance: RFC 2132 3.17 calls option 15 the domain to use "when
+ * resolving host names via the Domain Name System", a resolver search domain
+ * and not an instruction to name yourself with it. dhclient and its kind do it
+ * anyway, and it is what somebody who set DOMAIN= expects to see. (RFC 4702's
+ * option 81 is the mechanism that really does specify a client's FQDN; we do
+ * not implement it.)
+ *
+ * The source. A name says nothing about where it came from, and here it came
+ * from a leftover ENV:HOSTNAME, which is the one source a reader would never
+ * think to check. So it is named.
+ */
+
+/* The domain to show after the host name, or FALSE for none. */
+static BOOL host_domain(const AmiConfig *cfg, const ToolDhcp *dhcp,
+                        BOOL have_lease, char *out, ULONG outlen)
+{
+    UWORD i;
+
+    /* The running stack first: a DHCP option 15 lands there and not on disk. */
+    if (tool_stack_domain(out, outlen))
+        return TRUE;
+
+    if (cfg->resolver.domain[0] != '\0')
+    {
+        tool_copy_string(out, outlen, cfg->resolver.domain);
+        return TRUE;
+    }
+
+    /* A lease whose domain the stack has not adopted -- an older library. */
+    for (i = 0; have_lease && i < (UWORD)dhcp->count; i++)
+    {
+        if (dhcp->iface[i].domain_name[0] != '\0')
+        {
+            tool_copy_string(out, outlen, dhcp->iface[i].domain_name);
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+static BOOL has_dot(const char *s)
+{
+    ULONG i;
+
+    for (i = 0; s[i] != '\0'; i++)
+    {
+        if (s[i] == '.')
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+static VOID show_host_name(const char *host, UWORD source,
+                           const AmiConfig *cfg, const ToolDhcp *dhcp,
+                           BOOL have_lease)
+{
+    const char *from = ami_config_hostname_source_text(source);
+    char        domain[AMI_CFG_NAME_LEN];
+
+    tool_printf("Host name:      %s", (LONG)host);
+
+    /* Not when the name is already qualified, and never ".local". */
+    if (!has_dot(host) &&
+        host_domain(cfg, dhcp, have_lease, domain, sizeof(domain)) &&
+        tool_stricmp(domain, "local") != 0)
+        tool_printf(".%s", (LONG)domain);
+
+    /* No source means nothing configured one, so gethostname() worked the name
+       out from the address (bsdsocket.doc NOTES) or fell back to "localhost". */
+    if (from != NULL)
+        tool_printf(" (from %s)\n", (LONG)from);
+    else
+        tool_printf(" (derived)\n");
+}
+
 /* -------------------------------------------------------------- the run --- */
 
 /* TRUE when `name` was given to INTERFACE. With no list, every interface
@@ -1117,10 +1206,21 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
                 tool_printf("Stack version:  %s\n", (LONG)id);
         }
 
+        /*
+         * The running stack's name, and the running stack's account of where
+         * it came from: DHCP may have renamed the machine since the files on
+         * disk were read, and a library too old to answer leaves the source at
+         * AMI_HOSTNAME_NONE, which reads as "derived" rather than as a guess.
+         */
         if (ext_host[0] != '\0')
-            tool_printf("Host name:      %s\n", (LONG)ext_host);
+            show_host_name(ext_host,
+                           (have_live &&
+                            snap.host_source != (UWORD)AMI_HOSTNAME_NONE)
+                               ? snap.host_source : cfg->hostname_source,
+                           cfg, &dhcp, have_lease);
         else if (cfg->hostname[0] != '\0')
-            tool_printf("Host name:      %s\n", (LONG)cfg->hostname);
+            show_host_name(cfg->hostname, cfg->hostname_source, cfg, &dhcp,
+                           have_lease);
 
         /*
          * The name other machines can use, which differs from the host name
