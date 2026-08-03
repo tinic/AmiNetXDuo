@@ -54,7 +54,8 @@ set(SMOKE_PROBES
     gurutest    gurutest.c
     lifecycle   lifecycle.c
     KernelStop  kernelstop.c
-    randtest    randtest.c)
+    randtest    randtest.c
+    tickclock   tickclock.c)
 
 add_custom_target(smoke_probes)
 

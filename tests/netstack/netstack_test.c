@@ -425,6 +425,26 @@ UWORD            i;
 }
 
 
+static VOID t_tick_stats(VOID)
+{
+TX_AMIGA_TICK_STATS  s;
+
+    tx_amiga_tick_stats(&s);
+
+    t_log("");
+    t_log("tick: %lu delivered in %lu ms, %lu wakeups, %lu empty, %lu caught up",
+          s.tx_amiga_tick_delivered, s.tx_amiga_tick_uptime_ms,
+          s.tx_amiga_tick_wakeups, s.tx_amiga_tick_empty,
+          s.tx_amiga_tick_catchups);
+    t_log("tick: %lu us in-task, worst stall %lu ms with %lu us service",
+          s.tx_amiga_tick_service_us, s.tx_amiga_tick_worst_stall_ms,
+          s.tx_amiga_tick_worst_service_us);
+    t_log("tick: %lu clipped, %lu lost, %lu over budget",
+          s.tx_amiga_tick_clipped, s.tx_amiga_tick_lost,
+          s.tx_amiga_tick_over_budget);
+}
+
+
 /* ------------------------------------------------------------------ main -- */
 
 int main(void)
@@ -464,6 +484,8 @@ LONG    status;
     }
 
     t_run();
+
+    t_tick_stats();
 
     t_log("");
     t_log("%ld checks, %ld failures -- %s",
