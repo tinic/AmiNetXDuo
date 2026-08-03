@@ -177,6 +177,17 @@ struct AmiNetStack
     BOOL                ns_DhcpStarted;
 
     /*
+     * The name the client announces as option 12. nx_dhcp_create() keeps the
+     * pointer rather than a copy, so it needs storage that outlives the
+     * NX_DHCP -- and storage of its own, because ns_Config.hostname is now
+     * written after startup: an option 12 coming back from the server can
+     * rename the machine, and feeding that straight back into what the next
+     * REQUEST announces would let a server rewrite the name from under a
+     * client that is still transmitting it.
+     */
+    char                ns_DhcpName[AMI_CFG_NAME_LEN];
+
+    /*
      * Last DHCP state and last address seen per interface. NetX Duo's
      * callbacks report only the new value, so the previous one is kept here to
      * let the notifications report transitions such as a lost lease.
@@ -293,6 +304,9 @@ VOID ami_netstack_capture_detach_one(AmiNetStack *ns, UWORD index);
 
 LONG ami_netstack_dns_start(AmiNetStack *ns);
 VOID ami_netstack_dns_stop(AmiNetStack *ns);
+
+/* Bounded string copy, always NUL-terminating. netstack_dns.c. */
+VOID ami_ns_copy_name(char *dst, const char *src, ULONG size);
 
 /* One DHCP option that is text, from one interface's lease. Not
    NUL-terminated on the wire; `out` always is. netstack.c. */
