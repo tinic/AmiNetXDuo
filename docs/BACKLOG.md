@@ -66,12 +66,12 @@ Items fixed the same day are omitted.
 | `.local` leaks on the IPv6 path; `addrinfo.c:476` calls it first | `netstack_dns.c:401-446` |
 | `254.169.in-addr.arpa.` reverse leaks; fix is an immediate negative | `netstack_dns.c:367-398` |
 
-**A bailiwick check without CNAME chain following breaks every CDN-hosted name.**
+**A bailiwick check must be implemented together with CNAME chain following.**
 CNAME processing is compiled out (`NX_DNS_ENABLE_EXTENDED_RR_TYPES` undefined),
-so the following A record — owner = CNAME target — is accepted *because* no
-owner-name check exists. One piece of work. Meanwhile those records cache under
-the target, so the queried name always misses, and a CNAME-only response yields
-`NX_DNS_QUERY_FAILED`.
+so the following A record — owner = CNAME target — is accepted only because no
+owner-name check exists. Adding the check alone would fail every CNAME-hosted
+name. Present behaviour: those records cache under the target, so the queried
+name always misses, and a CNAME-only response yields `NX_DNS_QUERY_FAILED`.
 
 **DHCP**
 
@@ -109,7 +109,7 @@ the target, so the queried name always misses, and a CNAME-only response yields
 
 | Item | Cite |
 |---|---|
-| PMTUD off **and** no 1280 cap — the one combination RFC 8201 §1 rules out. PTB not dispatched. RA MTU option discarded on the same `#ifdef` | `nx_user.h:651-661`, `nx_icmpv6_packet_process.c:210-216` |
+| PMTUD off and no 1280 cap; RFC 8201 §1 permits omitting PMTUD only with the cap. PTB not dispatched. RA MTU option discarded on the same `#ifdef` | `nx_user.h:651-661`, `nx_icmpv6_packet_process.c:210-216` |
 | No fragment reassembly, either family | `nx_ip_fragment_enable()` uncalled |
 | No MLD; recorded rationale is wrong (snooping filters, it does not forward) | `nx_mld.h` stub, `nx_user.h:636-645` |
 | A-bit test nested inside L-bit: prefix A=1 L=0 forms no address | `nx_icmpv6_process_ra.c:310`, `:332` |
@@ -129,7 +129,7 @@ the target, so the queried name always misses, and a CNAME-only response yields
 |---|---|
 | Hostname check compares CN before SAN and returns | `nx_secure_x509_common_name_dns_check.c:92-97` |
 | Chain walk has no depth counter and no visited set — two cross-signed certs loop | `nx_secure_x509_certificate_chain_verify.c:86-160` |
-| Fatal alerts and bare FIN both reported as clean EOF; the `CLOSE_NOTIFY_RECEIVED` arm is unreachable in a non-DTLS build | `tls_conn.c:713-723` |
+| Fatal alerts and a bare FIN are both reported to the application as end of stream; the `CLOSE_NOTIFY_RECEIVED` arm is unreachable in a non-DTLS build | `tls_conn.c:713-723` |
 | No revocation of any kind | |
 | PKCS#1 v1.5 parser: byte 0 unchecked, any nonzero padding accepted, trailing data ignored, OID discarded | `nx_secure_x509_pkcs7_decode.c:104`, `:113-121`, `:187-197` |
 | `&&` where PKCS#1 wants `\|\|` in the strict verifier | `nx_secure_tls_process_certificate_verify.c:681` |
@@ -159,7 +159,7 @@ the target, so the queried name always misses, and a CNAME-only response yields
 | TE + CL both accepted (precedence correct); should be 400. TE matched by 7-char prefix, so `gzip, chunked` is missed and `chunkedX` matches | |
 | Chunk size shifts unbounded; 9+ hex digits wrap and `100000000` reads as terminator, rest parsed as a pipelined request | |
 | Header values over 255 bytes truncated silently; for `Destination:` a truncated path becomes a valid target and `Overwrite` defaults true | |
-| Chunked bodies bypass the size and time bounds: `body_left` never set, every read refreshes the progress timestamp. 8 connections at 1 byte/29 s exhaust the table. Also skips the free-space precheck | `httpd.c:4342-4434` |
+| Chunked bodies bypass the size and time bounds: `body_left` never set, every read refreshes the progress timestamp. eight connections sending one byte every 29 s exhaust the connection table. Also skips the free-space precheck | `httpd.c:4342-4434` |
 | COPY/MOVE to a name the filesystem would shorten, with nothing in the way — the check catches a collision, not the first create | |
 | Document root with a trailing slash may resolve to its parent; `httpd_root` never normalised | unverified on hardware |
 | Hard-linked directories walked through — `ST_LINKDIR` tests as a directory and `Lock()` follows it; no `O_NOFOLLOW` on AmigaOS | unverified on hardware |
@@ -215,10 +215,8 @@ sample record · a `cross`-stage build failure whose log has neither `error:` no
 
 Socket-option surface entirely untested — nothing exercises `SO_RCVBUF`,
 `SO_SNDBUF`, `SO_LINGER`, `TCP_MAXSEG`, `TCP_NODELAY`, `IP_TTL`, `IP_TOS`,
-`SIOCATMARK`, `FIOASYNC`, any `SIOCGIF*`, or the multicast width paths — which
-is where the API findings cluster · `sana2` has no dedicated suite · **httpd has
-no fuzzer**, and is the newest network-facing parser (chunked state machine
-first) · `usergroup` functional tests were added 2026-08-02.
+`SIOCATMARK`, `FIOASYNC`, any `SIOCGIF*`, or the multicast width paths — which is where the API findings are concentrated · `sana2` has no dedicated suite · **httpd has no fuzzer** and is the newest network-facing parser; the chunked
+state machine is the first target · `usergroup` functional tests were added 2026-08-02.
 
 **Docs**
 

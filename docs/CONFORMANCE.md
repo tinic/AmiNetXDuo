@@ -13,14 +13,14 @@ ours = `src/`, `port/`, `include/`.
 
 | RFC | Requirement | Cite | Effect |
 |---|---|---|---|
-| 8201 §1 | Node not implementing PMTUD must cap sends at 1280 | `nx_user.h:651-661`; PTB not dispatched, `nx_icmpv6_packet_process.c:210-216`; MTU set from device, `sana2_device.c:183-201` | PMTUD off **and** no 1280 cap. Any IPv6 path narrower than the link is a black hole. Enable PMTUD or cap at 1280 |
+| 8201 §1 | Node not implementing PMTUD must cap sends at 1280 | `nx_user.h:651-661`; PTB not dispatched, `nx_icmpv6_packet_process.c:210-216`; MTU set from device, `sana2_device.c:183-201` | PMTUD off and no 1280 cap. Any IPv6 path narrower than the local link fails without an error indication. Remedy: enable PMTUD or cap IPv6 sends at 1280 |
 | 1122 §3.3.2 / 8504 §5.1 | MUST reassemble; EMTU_R ≥ 576 | `nx_ip_fragment_enable()` never called; drops at `nx_ipv4_packet_receive.c:640`, `nx_ipv6_process_fragment_option.c:95-99` | Inbound fragments dropped, both families |
 | 1122 §3.2.2.1, §4.1.3.3 | ICMP errors MUST reach transport / application | `nx_icmpv4_packet_process.c:143-171` handles echo only | Connected UDP to a closed port blocks to timeout instead of `ECONNREFUSED`. No IPv4 PMTUD input |
 | 9777 §6 | MLD reports MUST be sent for scope ≥ 2 | `nx_mld.h` is a 48-line stub; joins set a MAC filter only, `nx_ipv6_multicast_join.c:79-95` | Solicited-node groups are scope 2. Behind a snooping switch with an active querier, ND fails |
 | 1122 §4.2.3.5 (MUST-23) | R2 for SYN ≥ 3 minutes | `nx_user.h:201,204` → ladder 1+2+4+…+64 = 127 s | 127 s < 180 s. Fix is `NX_TCP_MAXIMUM_RETRIES 7` → 255 s, at the cost of `connect()` blocking that long |
 | 5961 §3, §4 | Challenge ACK required for in-window RST and SYN | `nx_tcp_socket_packet_process.c:234-248`, `:257-271`; RST at any sequence accepted when `RCV.WND==0` at `:165-167` | One in-window guess resets an established connection |
 | 1122 §4.2.3.10 (MUST-57) | SYN to broadcast/multicast MUST be discarded | `nx_ipv4_packet_receive.c:529-550` → `nx_ip_dispatch_process.c:459-476`; only source is checked, `nx_tcp_packet_process.c:517-542` | Broadcast SYN answered. Composes with one half-open slot per listener (`socket.c:1729-1730`), pinning a port for 127 s |
-| 1122 §4.2.3.4 (MUST-38) | Sender SWS avoidance | `nx_tcp_socket_send_internal.c:455-470`, no minimum-usable-window gate | Tinygrams to a peer dribbling its window open. Nagle also absent |
+| 1122 §4.2.3.4 (MUST-38) | Sender SWS avoidance | `nx_tcp_socket_send_internal.c:455-470`, no minimum-usable-window gate | Undersized segments are sent when the peer advertises small window increments. Nagle also absent |
 | 1122 §4.1.3.5 | UDP demux MUST match the 4-tuple | `nx_udp_packet_receive.c:247` compares port only; no local-address field in `NX_UDP_SOCKET` | A `connect()`ed UDP socket accepts datagrams from any peer |
 | 5452 §9.1 | Response MUST match 6 attributes | ID `nxd_dns.c:4306`; source never checked; question check gated on `QDCOUNT==1` at `:4497` | QDCOUNT=0 skips name, type and class. No source validation |
 | 2181 §5.4.1 | AUTHORITY data must not be returned as answers | `nxd_dns.c:4803-4805`, cached under the RR's own owner at `:4866` | One response inserts an A record for a name never queried |
@@ -34,10 +34,10 @@ ours = `src/`, `port/`, `include/`.
 | 5280 §4.2 | Unrecognized critical extension MUST be rejected | flag written `nx_secure_x509_extension_find.c:191`, read nowhere; lookup is by OID, never an enumeration | nameConstraints and any other critical extension silently ignored |
 | 6125 §6.4.4 | MUST NOT match CN when a DNS-ID is present | `nx_secure_x509_common_name_dns_check.c:92-97` compares CN first and returns | Cert whose CN matches and SAN does not is accepted |
 | 5280 §6.1.3 | Revocation | no call to the CRL code that exists | Stolen key usable indefinitely |
-| 8017 §8.2.2 | PKCS#1 v1.5 verify re-encodes and compares the whole EM | `nx_secure_x509_pkcs7_decode.c:104` checks byte 1 only; `:113-121` accepts any nonzero padding; `:187-197` ignores trailing data; OID discarded by the caller | Bleichenbacher'06 shape. No small-exponent root in the shipped bundle (79 of 80 RSA roots use e=65537), so no target on the public web |
+| 8017 §8.2.2 | PKCS#1 v1.5 verify re-encodes and compares the whole EM | `nx_secure_x509_pkcs7_decode.c:104` checks byte 1 only; `:113-121` accepts any nonzero padding; `:187-197` ignores trailing data; OID discarded by the caller | Signature forgery per Bleichenbacher 2006. The shipped CA bundle contains no small-exponent root (79 of 80 RSA roots use e=65537), so the attack has no target there; a privately added root is exposed |
 | 5246 §6.2.3.2 | CBC IV MUST be unpredictable | `nx_secure_tls_record_payload_encrypt.c:186-188`, `:626-629`; our copy `src/tls/rfc7905/…:301-304`, `:691` | Previous ciphertext block reused. BEAST precondition |
 | 9325 §4.5 | SHA-1/MD5 MUST NOT be used for signatures | `src/tls/ami_tls_crypto.c:1538-1540`, walked onto the wire at `nx_secure_tls_send_clienthello_extensions.c:341-345` | `0x0201/0x0203/0x0101` advertised; MD5-signed cert accepted. Ours, three lines |
-| 7627 / 9325 §3.5 | Extended master secret MUST be supported | absent | Sharper here because we resume: `tls_resume.c` restores a secret never bound to a transcript |
+| 7627 / 9325 §3.5 | Extended master secret MUST be supported | absent | Session resumption restores a master secret that was never bound to a handshake transcript |
 | 5280 §6.1 | Path termination | `nx_secure_x509_certificate_chain_verify.c:86-160`, no counter, no visited set | Two cross-signed certs → unbounded loop, one signature verification per pass. Reasoned from code, not executed |
 | 3542 §3.1 | `IPV6_CHECKSUM` on a non-raw socket must fail | fixed 2026-08-02, `4d073c4` | was: collided with `IPV6_V6ONLY_LINUX` at 26 |
 | 3493 §5.2 | `0 ≤ x ≤ 255` uses x | fixed 2026-08-02, `4d073c4` | was: `IPV6_MULTICAST_HOPS 0` coerced to 1 and sent |
@@ -89,18 +89,18 @@ Refused rather than ignored, which is correct: unknown ancillary types
 
 | Item | Reason |
 |---|---|
-| TLS 1.3 | nx_secure's 1.3 defines only AES-GCM. GHASH on 68k is bit-serial GF(2^128): **344.6 ms/KB vs CBC 21.9** (~2.9 KB/s). Precondition: add a ChaCha20 suite to the vendored 1.3 tables |
+| TLS 1.3 | nx_secure's 1.3 defines only AES-GCM suites. GHASH on 68k is a bit-serial GF(2^128) multiply: 344.6 ms/KB against CBC's 21.9, approximately 2.9 KB/s. Precondition for reconsidering: a ChaCha20 suite in the vendored 1.3 tables |
 | AES-GCM in TLS 1.2 | same cost; no server takes GCM but neither ChaCha20-Poly1305 nor CBC |
-| Certificate date checking when the clock is implausible | `tls_time.c:103-104`, window 2026+50y. Alternative on a dead battery is reaching no HTTPS site. Reported via `TLSInfo()`. Cost: no bound on how long a leaked key stays useful |
-| Parsed root set | 120 roots ≈ 30 KB parsed + 125 KB DER and 120 ASN.1 walks per page. Lazy store keyed on FNV-1a of the full issuer DER — four Mozilla roots share the CN "GlobalSign" |
-| Session resumption in cleartext | against 7 s (RSA) / 23 s (ECDSA) full handshakes. Outs: `TLSA_NoResume`, `TLSA_SessionFile ""`. Uncosted: no `SetProtection` (`tls_resume.c:718`), 24 h cap never fires without an RTC (`:439`) |
-| IDNA | no Unicode path to a hostname on AmigaOS; `xn--` form passes through unchanged |
-| RFC 4361 client identifier | our option 61 exists to land on the same lease as Roadshow on the same NIC. A DUID defeats it |
-| RFC 8985 RACK-TLP | retransmit re-headers packets in place, so no per-segment send times exist |
-| RFC 6928 IW10 | 14 KB against a pool that tops out at 256 packets |
+| Certificate date checking when the clock is implausible | `tls_time.c:103-104`, window 2026+50y. Without it, a machine with a discharged clock battery reaches no HTTPS site. Reported via `TLSInfo()`. Cost: no bound on the useful lifetime of a leaked key |
+| Parsed root set | 120 roots require approximately 30 KB parsed plus 125 KB DER and 120 ASN.1 walks per page load. The lazy store is keyed on FNV-1a of the full issuer DER because four Mozilla roots share the CN "GlobalSign" |
+| Session resumption in cleartext | against 7 s (RSA) / 23 s (ECDSA) full handshakes. Disabled with `TLSA_NoResume` or `TLSA_SessionFile ""`. Not accounted for in that trade: no `SetProtection` (`tls_resume.c:718`), 24 h cap never fires without an RTC (`:439`) |
+| IDNA | AmigaOS provides no Unicode input path to a hostname; the `xn--` form passes through unchanged |
+| RFC 4361 client identifier | option 61 exists to obtain the same DHCP lease as Roadshow on the same NIC; a DUID would prevent that |
+| RFC 8985 RACK-TLP | retransmission re-headers packets in place, so per-segment send times do not exist |
+| RFC 6928 IW10 | 14 KB initial window against a packet pool bounded at 256 packets |
 | IP source routing | RFC 7126/BCP 186 makes dropping it the recommendation |
-| ICMP Redirect | MITM vector; ignoring is the modern default |
-| RFC 1042/802.3 receive | senders extinct |
+| ICMP Redirect | Established man-in-the-middle vector; ignoring it is current practice |
+| RFC 1042/802.3 receive | no remaining senders on Ethernet |
 | IGMPv3, RFC 4191, RFC 7371, DHCPv6, RFC 3396 | see `BACKLOG.md` |
 
 ## Verified conformant
@@ -165,13 +165,15 @@ MUST is 9112 **§3.2**.
 
 ## Constraints on future work
 
-- A DNS bailiwick check without CNAME chain following breaks every CDN-hosted
-  name: CNAME processing is compiled out and the following A record is accepted
-  because no owner-name check exists. One piece of work.
-- RFC 4086 has no 2119 keywords. The normative obligation is 5246 §D.1; the
-  construction is sound, the seeding is not.
+- A DNS bailiwick check must be implemented together with CNAME chain following.
+  CNAME processing is compiled out, and the following A record is currently
+  accepted only because no owner-name check exists; adding the check alone would
+  fail every CNAME-hosted name.
+- RFC 4086 contains no RFC 2119 keywords. The normative obligation is RFC 5246
+  §D.1. The DRBG construction meets it; the seeding does not.
 - RFC 8659 §1.1 forbids using CAA in validation. Having no CAA code is correct.
 - RFC 4193 ULAs need no internet-layer handling. The ULA problem is 6724's
   policy table.
-- `ndk-include` is Latin-1. `grep -r` reads it as binary and finds nothing. Use
-  `LC_ALL=C grep -a`.
+- `ndk-include` is Latin-1. `grep -r` reads those files as binary and returns no
+  matches. Use `LC_ALL=C grep -a`; an empty result is otherwise indistinguishable
+  from absence.
