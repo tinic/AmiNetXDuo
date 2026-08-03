@@ -7,6 +7,21 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
+## 0.16.8
+
+- Reading is faster on a 68030, and how much depends on the machine. On an emulated A3000 a 4 MB transfer went from 796 to 1714 KB/s; a 68020 is unchanged and a 68000 is a couple of percent slower, because on those the machine itself is the limit and not the network. Three changes together: the stack now tells the far end which segments arrived after a gap, tells it when a segment arrived twice so it can undo a needless retransmission, and measures the retransmission timeout instead of assuming one second
+- A certificate chain is refused unless every issuer in it is marked as a certificate authority. Without that check, anyone holding an ordinary certificate from a trusted root could sign one for any name and it would be accepted
+- Three faults found by fuzzing, each reading one byte past the end of a message: an ASN.1 tag, a ServerHello, and a CertificateRequest. All three were fixed on 31 July and had not reached a released build until now
+- A second TLS connection opened while the first is busy no longer risks reading the first one's data. Two files this project keeps its own copy of had missed the fix
+- `ping fileserver` now tries `fileserver.your.domain` when the short name is not found. The domain a DHCP server supplies was asked for and then discarded, so a machine addressed by DHCP had no default domain at all
+- `ShowNetStatus` says where the host name came from -- the interface file, DHCP, `ENV:HOSTNAME` or nowhere. A stale `ENV:HOSTNAME` that outranks a newer setting is now visible instead of puzzling
+- An interface's `ID=` is used as the host name when nothing else sets one
+- `fetch` no longer writes the server's real response into the file as though it were the body when the server sends an interim reply first, and follows a redirect to a relative address instead of trying to resolve it as a host name. It also sends the port in the `Host:` line, so a server on a non-standard port gets the right site
+- A `group` file with Mac line endings no longer corrupts memory as it is read
+- `IPV6_MULTICAST_HOPS` of 0 keeps the datagram on this machine instead of putting it on the wire, and a raw IPv6 socket can no longer set the checksum offset and get the V6ONLY flag instead
+- The user guide is in the archive. `Docs/` has been shipping with nothing in it but the ReadMe since the guide moved in July, and the installer's own final page tells the reader to look there
+- The smallest 68000 build is compiled on every CI run. It ships, and until now it was first compiled during the release job
+
 ## 0.16.7
 
 - Reading is back to the speed it was at 0.16.4. A change in 0.16.6 stopped the stack sending the duplicate acknowledgment that tells the far end a segment is missing, so every lost segment waited for a timeout instead of being resent immediately. Reads on a 68020 with a real card fell from 395 to 242 KB/s and on a 68000 from 125 to 102; writes were unaffected. The receive window that release also widened went back to what it was, having been measured as worth nothing once the acknowledgments work
