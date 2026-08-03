@@ -1274,6 +1274,24 @@ ULONG   trace_from;
     (VOID) t_check((UINT) (t_address() != probe_addr),
                    "the disputed address was not put on the interface",
                    t_address());
+
+    /*
+     * D needs a lease to expire, and the DECLINE left the client at INIT with
+     * the interface unaddressed.  The synthetic peer answered once, so the
+     * next probe goes unanswered and the same address is taken.
+     */
+    if (!t_wait_state(NX_DHCP_STATE_BOUND, 60UL))
+    {
+        (VOID) nx_dhcp_stop(&t_ns->ns_Dhcp);
+        (VOID) nx_dhcp_reinitialize(&t_ns->ns_Dhcp);
+        (VOID) nx_ip_interface_address_set(t_ip, 0, 0UL, 0UL);
+        (VOID) nx_dhcp_start(&t_ns->ns_Dhcp);
+    }
+
+    (VOID) t_check((UINT) t_wait_state(NX_DHCP_STATE_BOUND, 60UL),
+                   "the client leased an address again after the DECLINE",
+                   (ULONG) t_dhcp_state_last);
+    t_log_ip("address after the DECLINE", t_address());
 }
 #endif /* NX_DHCP_CLIENT_SEND_ARP_PROBE */
 
