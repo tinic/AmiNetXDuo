@@ -615,6 +615,10 @@ def main():
     ap.add_argument("--max-effective-loss", type=float,
                     help="the same, against the rate with spurious "
                          "retransmissions removed")
+    ap.add_argument("--max-rt-per-chunk", type=float,
+                    help="fail if the read costs more round trips a chunk "
+                         "than this; the tightest of these numbers, and the "
+                         "one that predicts the rate")
     ap.add_argument("--per-phase", action="store_true",
                     help="also break the loss rate down by read phase and by "
                          "megabyte into each phase, which is what says "
@@ -751,6 +755,13 @@ def main():
                 print(line)
 
     rc = 0
+    if args.max_rt_per_chunk is not None:
+        nb, nc, _g = bursts(segs, port, reads, args.burst_gap)
+        rtc = (float(nb) / nc) if nc else 0.0
+        if rtc > args.max_rt_per_chunk:
+            print("FAIL: %.2f round trips a chunk is above the %.2f gate"
+                  % (rtc, args.max_rt_per_chunk), file=sys.stderr)
+            rc = 1
     if args.max_loss is not None and loss > args.max_loss:
         print("FAIL: loss %.3f %% is above the %.3f %% gate"
               % (loss, args.max_loss), file=sys.stderr)

@@ -35,6 +35,8 @@
 #   AMINETXDUO_PEER_SS        ss on the peer               (default ss)
 #   AMINETXDUO_PEER_IFACE     interface to capture         (default any)
 #   AMINETXDUO_PEER_TMP       scratch directory on the peer (default /tmp)
+#   AMINETXDUO_LOSSRATE_ARGS  extra arguments for lossrate.py, so a gate it
+#                             grows later needs no new letter here
 #
 # SPDX-License-Identifier: MIT
 
@@ -96,6 +98,8 @@ peercap_report() {
     [ -f "$pcap" ] || { echo "peercap: no $pcap to read" >&2; return 0; }
     local args=("$pcap")
     [ -f "$outdir/$tag.ss" ] && args+=(--ss "$outdir/$tag.ss")
+    # shellcheck disable=SC2206
+    [ -z "${AMINETXDUO_LOSSRATE_ARGS:-}" ] || args+=(${AMINETXDUO_LOSSRATE_ARGS})
     echo
     echo "==> inbound loss (tests/perf/lossrate.py, peer-side capture)"
     python3 "$(dirname "${BASH_SOURCE[0]}")/lossrate.py" "${args[@]}" "$@" \
