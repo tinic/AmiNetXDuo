@@ -620,16 +620,21 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
 
         switch (optname)
         {
+            /* Both refuse a socket that has no TCP under it, as the set side
+               does; answering 1 and 0 there described a level the socket does
+               not have. */
             case TCP_NODELAY:
+                if ((sock->as_Flags & ASF_TCP) == 0)
+                    return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
                 return bsd_opt_get_long(SocketBase, optval, optlen, 1);
 
             case TCP_MAXSEG:
-                if ((sock->as_Flags & ASF_TCP) != 0 &&
-                    bsd_nx_enter(SocketBase) == 0)
-                {
-                    nx_tcp_socket_mss_get(&sock->as_Nx.tcp, &mss);
-                    bsd_nx_leave(SocketBase);
-                }
+                if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) != ASF_TCP)
+                    return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+                if (bsd_nx_enter(SocketBase) != 0)
+                    return bsd_fail(SocketBase, AMI_ENETDOWN);
+                nx_tcp_socket_mss_get(&sock->as_Nx.tcp, &mss);
+                bsd_nx_leave(SocketBase);
                 return bsd_opt_get_long(SocketBase, optval, optlen, (LONG)mss);
 
             default:
@@ -650,7 +655,10 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
             case IP_TTL:
                 return bsd_opt_get_long(SocketBase, optval, optlen, sock->as_Ttl);
 
+            /* Raw only, as on the set side. */
             case IP_HDRINCL:
+                if (sock->as_Type != SOCK_RAW)
+                    return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
                 return bsd_opt_get_long(SocketBase, optval, optlen,
                                         sock->as_HdrIncl);
 

@@ -705,6 +705,24 @@ LONG value;
                               T_ENOPROTOOPT),
                   "TCP_MAXSEG on a UDP socket is ENOPROTOOPT", bsd_Errno());
 
+    /* And reading them there, which used to answer 1 and 0 with success. */
+    (VOID)t_check((BOOL)(t_get_int(fd, IPPROTO_TCP, TCP_NODELAY, &value) < 0 &&
+                         bsd_Errno() == T_ENOPROTOOPT),
+                  "getsockopt TCP_NODELAY on a UDP socket is ENOPROTOOPT",
+                  bsd_Errno());
+    (VOID)t_check((BOOL)(t_get_int(fd, IPPROTO_TCP, TCP_MAXSEG, &value) < 0 &&
+                         bsd_Errno() == T_ENOPROTOOPT),
+                  "getsockopt TCP_MAXSEG on a UDP socket is ENOPROTOOPT",
+                  bsd_Errno());
+
+    /* IP_HDRINCL is a raw-socket option and is refused in both directions. */
+    (VOID)t_check(t_set_fails(fd, IPPROTO_IP, IP_HDRINCL, 1, T_ENOPROTOOPT),
+                  "setsockopt IP_HDRINCL off a raw socket is ENOPROTOOPT",
+                  bsd_Errno());
+    (VOID)t_check((BOOL)(t_get_int(fd, IPPROTO_IP, IP_HDRINCL, &value) < 0 &&
+                         bsd_Errno() == T_ENOPROTOOPT),
+                  "and so is reading it", bsd_Errno());
+
     (VOID)bsd_CloseSocket(fd);
 }
 
