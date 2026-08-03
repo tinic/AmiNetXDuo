@@ -311,7 +311,7 @@ typedef struct
  * 64240 (44). None can land on a power of two by construction.
  */
 #ifndef BSD_TCP_WINDOW_CEILING
-#define BSD_TCP_WINDOW_CEILING  48180
+#define BSD_TCP_WINDOW_CEILING  32768
 #endif
 
 /*
