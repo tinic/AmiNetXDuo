@@ -11,10 +11,14 @@
  *
  * One host name and its A record: <HOSTNAME>.local, with whatever address the
  * interface currently has. HOSTNAME is the same string DHCP option 12 sends
- * (docs/RESEARCH.md 27); src/config/config_file.c resolves it from the config
- * and then ENV:HOSTNAME. That is the single source of truth for the name, not
+ * (docs/RESEARCH.md 27), resolved from the ranked sources in
+ * aminetxduo/config.h. That is the single source of truth for the name, not
  * this file. It can be empty -- nothing named the machine -- and a label is
  * still needed, so "amiga" is the fallback here, as it is for option 12.
+ *
+ * <label>.local is not this machine's fully-qualified name and must never be
+ * shown as one: RFC 6762 3 scopes it to the link and says it is not globally
+ * unique. ShowNetStatus reports it on a line of its own for that reason.
  *
  * Services are advertised only when the user declares them, in
  * DEVS:Internet/service_discovery. AmiNetXDuo ships clients -- fetch, ftp,

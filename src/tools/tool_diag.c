@@ -1059,6 +1059,18 @@ BOOL tool_stack_domain(char *domain, ULONG domainlen)
     if (base == NULL)
         return FALSE;
 
+    /*
+     * Only our own library. GetDefaultDomainName() is a Roadshow extension, so
+     * on an AmiTCP-era bsdsocket.library -0x2be can be past the end of the
+     * vector table -- a guru rather than an answer, the same hazard
+     * aminetxduo/netstatus.h describes for its own two slots.
+     */
+    if (!tool_stack_is_ours(base))
+    {
+        CloseLibrary(base);
+        return FALSE;
+    }
+
     got = tool_call_default_domain(base, domain, (LONG)domainlen);
     domain[domainlen - 1] = '\0';
 
