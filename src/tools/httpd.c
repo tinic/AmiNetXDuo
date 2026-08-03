@@ -1477,6 +1477,10 @@ static const char *httpd_url_of(const char *path)
  *   for, one bit per level.
  */
 
+/* The lock table is below, and a walk that removed something has to be able
+   to say so -- the same reason httpd_walk_release() is declared above. */
+static VOID httpd_locks_drop(const char *path);
+
 /* Everything below this level failed with it, so no drawer above can go and
    none of them may be retried. */
 static VOID httpd_walk_mark(HttpConn *c)
