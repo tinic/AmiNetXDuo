@@ -307,6 +307,14 @@ static VOID load_resolver(AmiConfig *cfg)
             ami_free(buf);
         }
     }
+
+    /*
+     * A HOSTNAME or HOST line went straight into cfg->hostname, so the rank is
+     * recorded here rather than through ami_config_hostname_offer(). This is
+     * the strongest source; nothing later can displace it.
+     */
+    if (cfg->hostname[0] != '\0')
+        cfg->hostname_source = (UWORD)AMI_HOSTNAME_NAMERES;
 }
 
 static VOID load_gateway(AmiConfig *cfg)
@@ -375,33 +383,26 @@ static VOID load_dnssd(AmiConfig *cfg)
 /*
  * The name an administrator gave this machine, or nothing.
  *
- * load_resolver() has already taken a HOSTNAME or HOST line from
- * DEVS:Internet/name_resolution; ENV:HOSTNAME is the last place a name is
- * configured. Nothing is invented after that: gethostname() derives one from
- * the interface address instead (bsdsocket.doc NOTES), and the two consumers
- * that need a network label whatever happens -- DHCP option 12 and the mDNS
- * host label -- carry their own default.
+ * load_resolver() has already taken any HOSTNAME or HOST line from
+ * DEVS:Internet/name_resolution, which outranks both of these. The rest of the
+ * chain, offered weakest first, is an interface file's ID= and then
+ * ENV:HOSTNAME; AmiHostnameSource in aminetxduo/config.h says why in that
+ * order. DHCP option 12 outranks both and arrives later, once there is a
+ * lease.
+ *
+ * Nothing is invented after that: gethostname() derives a name from the
+ * interface address instead (bsdsocket.doc NOTES), and the two consumers that
+ * need a network label whatever happens -- DHCP option 12 and the mDNS host
+ * label -- carry their own default.
  */
 static VOID load_hostname(AmiConfig *cfg)
 {
-    if (cfg->hostname[0] == '\0')
-    {
-        char *buf = (char *)ami_cfg_read_file("ENV:HOSTNAME", NULL);
+    char *buf = (char *)ami_cfg_read_file("ENV:HOSTNAME", NULL);
 
-        if (buf != NULL)
-        {
-            char *cursor = buf;
-            char *line   = ami_cfg_next_line(&cursor);
+    ami_cfg_hostname_from_files(cfg, buf);
 
-            if (line != NULL)
-            {
-                line = ami_cfg_trim(line);
-                if (*line != '\0')
-                    ami_cfg_copy_string(cfg->hostname, sizeof(cfg->hostname), line);
-            }
-            ami_free(buf);
-        }
-    }
+    if (buf != NULL)
+        ami_free(buf);
 }
 
 /* -------------------------------------------------------------------- API */
@@ -423,10 +424,15 @@ LONG ami_config_load(AmiConfig *cfg)
     ami_netdb_load();
     load_hostname(cfg);
 
-    AMI_INFO("config: %lu interface(s), %lu name server(s), host '%s'",
-             (unsigned long)cfg->interface_count,
-             (unsigned long)cfg->resolver.nameserver_count,
-             (cfg->hostname[0] != '\0') ? cfg->hostname : "(unnamed)");
+    {
+        const char *source = ami_config_hostname_source_text(cfg->hostname_source);
+
+        AMI_INFO("config: %lu interface(s), %lu name server(s), host '%s' (%s)",
+                 (unsigned long)cfg->interface_count,
+                 (unsigned long)cfg->resolver.nameserver_count,
+                 (cfg->hostname[0] != '\0') ? cfg->hostname : "(unnamed)",
+                 (source != NULL) ? source : "nothing named it");
+    }
 
     return AMI_CFG_OK;
 }

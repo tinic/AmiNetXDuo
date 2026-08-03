@@ -633,6 +633,7 @@ static void test_interface_static(void)
         "mtu=1500\r\n"
         "iptype=2048\r\n"
         "hardwareaddress=00:60:30:00:11:22\r\n"
+        "id = a1200\r\n"
         "state=down\r\n"
         "# end\r\n");
 
@@ -640,6 +641,7 @@ static void test_interface_static(void)
 
     CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
     CHECK_STR(iface.name, "eth0");
+    CHECK_STR(iface.id, "a1200");
     CHECK_STR(iface.device, "ariadne.device");
     CHECK(iface.unit == 0);
     CHECK(iface.iptype == AMI_IPTYPE_STATIC);
@@ -823,6 +825,214 @@ static void test_problem_reporter(void)
     CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
     free(buf);
     CHECK(seen_count == 0);
+}
+
+/*
+ * The host-name chain: name_resolution, then DHCP option 12, then
+ * ENV:HOSTNAME, then an interface file's ID=. Reported from real hardware: an
+ * interface with ID=a1200 was written and the machine kept answering to
+ * "a3000", because ID= was parsed and thrown away.
+ *
+ * ENV:HOSTNAME still wins, deliberately -- see AmiHostnameSource. What was
+ * actually missing is that nothing said so, which is why the reporter could
+ * not see the remnant. ID= now works once the remnant is removed.
+ */
+static void test_hostname_syntax(void)
+{
+    printf("host name: RFC 1123 syntax\n");
+
+    CHECK(ami_config_hostname_valid("a1200"));
+    CHECK(ami_config_hostname_valid("a1200.intra.example.de"));
+    CHECK(ami_config_hostname_valid("3com"));          /* RFC 1123 leading digit */
+    CHECK(ami_config_hostname_valid("my-amiga"));
+
+    CHECK(!ami_config_hostname_valid(NULL));
+    CHECK(!ami_config_hostname_valid(""));
+    CHECK(!ami_config_hostname_valid("my amiga"));     /* space   */
+    CHECK(!ami_config_hostname_valid("my_amiga"));     /* underscore */
+    CHECK(!ami_config_hostname_valid("-amiga"));
+    CHECK(!ami_config_hostname_valid("amiga-"));
+    CHECK(!ami_config_hostname_valid(".amiga"));       /* empty first label */
+    CHECK(!ami_config_hostname_valid("amiga."));       /* empty last label  */
+    CHECK(!ami_config_hostname_valid("a..b"));
+
+    /* Longer than the store, so there would be nothing to keep it in. */
+    {
+        char big[AMI_CFG_NAME_LEN + 8];
+
+        memset(big, 'a', sizeof(big) - 1);
+        big[sizeof(big) - 1] = '\0';
+        CHECK(!ami_config_hostname_valid(big));
+    }
+}
+
+static void test_hostname_precedence(void)
+{
+    AmiConfig cfg;
+
+    printf("host name: which source wins\n");
+
+    /* The reported machine once the remnant ENV:HOSTNAME is gone: ID=a1200 is
+       the only source, and it now names the machine. */
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.interface_count = 1;
+    strcpy(cfg.interfaces[0].id, "a1200");
+    ami_cfg_hostname_from_files(&cfg, NULL);
+    CHECK_STR(cfg.hostname, "a1200");
+    CHECK(cfg.hostname_source == AMI_HOSTNAME_INTERFACE);
+
+    /* The same machine with the remnant still in place. ENV:HOSTNAME wins and
+       the report says which, so the remnant is visible and removable. */
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.interface_count = 1;
+    strcpy(cfg.interfaces[0].id, "a1200");
+    {
+        char *env = dup_text("a3000\n");
+
+        ami_cfg_hostname_from_files(&cfg, env);
+        free(env);
+    }
+    CHECK_STR(cfg.hostname, "a3000");
+    CHECK(cfg.hostname_source == AMI_HOSTNAME_ENV);
+
+    /*
+     * The regression the ranking exists to prevent. ID= is free text and
+     * "Ethernet" is valid RFC 1123 syntax, so an ID ranked above ENV:HOSTNAME
+     * would silently rename this machine from myamiga to Ethernet.
+     */
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.interface_count = 1;
+    strcpy(cfg.interfaces[0].id, "Ethernet");
+    {
+        char *env = dup_text("myamiga\n");
+
+        ami_cfg_hostname_from_files(&cfg, env);
+        free(env);
+    }
+    CHECK_STR(cfg.hostname, "myamiga");
+    CHECK(cfg.hostname_source == AMI_HOSTNAME_ENV);
+
+    /* No ID=: the environment still answers, as it always did. */
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.interface_count = 1;
+    {
+        char *env = dup_text("a3000\r\nignored second line\n");
+
+        ami_cfg_hostname_from_files(&cfg, env);
+        free(env);
+    }
+    CHECK_STR(cfg.hostname, "a3000");
+    CHECK(cfg.hostname_source == AMI_HOSTNAME_ENV);
+
+    /* An ID that is not a host name falls through rather than being adopted. */
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.interface_count = 1;
+    strcpy(cfg.interfaces[0].id, "Ariadne in the study");
+    {
+        char *env = dup_text("a3000\n");
+
+        ami_cfg_hostname_from_files(&cfg, env);
+        free(env);
+    }
+    CHECK_STR(cfg.hostname, "a3000");
+    CHECK(cfg.hostname_source == AMI_HOSTNAME_ENV);
+
+    /* Two interfaces, the first with an unusable ID: the second answers. */
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.interface_count = 2;
+    strcpy(cfg.interfaces[0].id, "the *good* one");
+    strcpy(cfg.interfaces[1].id, "a4000");
+    ami_cfg_hostname_from_files(&cfg, NULL);
+    CHECK_STR(cfg.hostname, "a4000");
+    CHECK(cfg.hostname_source == AMI_HOSTNAME_INTERFACE);
+
+    /* name_resolution has already run and outranks everything below it. */
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.interface_count = 1;
+    strcpy(cfg.interfaces[0].id, "a1200");
+    strcpy(cfg.hostname, "workshop");
+    cfg.hostname_source = AMI_HOSTNAME_NAMERES;
+    {
+        char *env = dup_text("a3000\n");
+
+        ami_cfg_hostname_from_files(&cfg, env);
+        free(env);
+    }
+    CHECK_STR(cfg.hostname, "workshop");
+    CHECK(cfg.hostname_source == AMI_HOSTNAME_NAMERES);
+
+    /* Nothing named it at all. */
+    memset(&cfg, 0, sizeof(cfg));
+    ami_cfg_hostname_from_files(&cfg, NULL);
+    CHECK_STR(cfg.hostname, "");
+    CHECK(cfg.hostname_source == AMI_HOSTNAME_NONE);
+}
+
+static void test_hostname_offer(void)
+{
+    AmiConfig cfg;
+
+    printf("host name: offers and ranks\n");
+
+    /* The documented ranking as numbers. Reordering the enum reorders the
+       chain, so it is asserted rather than left implied by the cases below. */
+    CHECK(AMI_HOSTNAME_NONE      < AMI_HOSTNAME_INTERFACE);
+    CHECK(AMI_HOSTNAME_INTERFACE < AMI_HOSTNAME_ENV);
+    CHECK(AMI_HOSTNAME_ENV       < AMI_HOSTNAME_DHCP);
+    CHECK(AMI_HOSTNAME_DHCP      < AMI_HOSTNAME_NAMERES);
+
+    /* The whole ladder, weakest first, then every rejection back down it.
+       DHCP arrives after the files and displaces an ID or an environment
+       variable, but never name_resolution. */
+    memset(&cfg, 0, sizeof(cfg));
+    CHECK(ami_config_hostname_offer(&cfg, AMI_HOSTNAME_INTERFACE, "a1200"));
+    CHECK(ami_config_hostname_offer(&cfg, AMI_HOSTNAME_ENV, "a3000"));
+    CHECK(ami_config_hostname_offer(&cfg, AMI_HOSTNAME_DHCP, "leased"));
+    CHECK_STR(cfg.hostname, "leased");
+    CHECK(!ami_config_hostname_offer(&cfg, AMI_HOSTNAME_ENV, "a3000"));
+    CHECK(!ami_config_hostname_offer(&cfg, AMI_HOSTNAME_INTERFACE, "a1200"));
+    CHECK_STR(cfg.hostname, "leased");
+
+    /* A renewal from the same source replaces the name it set. */
+    CHECK(ami_config_hostname_offer(&cfg, AMI_HOSTNAME_DHCP, "released"));
+    CHECK_STR(cfg.hostname, "released");
+
+    CHECK(ami_config_hostname_offer(&cfg, AMI_HOSTNAME_NAMERES, "workshop"));
+    CHECK(!ami_config_hostname_offer(&cfg, AMI_HOSTNAME_DHCP, "leased"));
+    CHECK_STR(cfg.hostname, "workshop");
+
+    /* Off the network, so it is held to the syntax and the old name stands. */
+    memset(&cfg, 0, sizeof(cfg));
+    CHECK(ami_config_hostname_offer(&cfg, AMI_HOSTNAME_ENV, "a3000"));
+    CHECK(!ami_config_hostname_offer(&cfg, AMI_HOSTNAME_DHCP, "not a name"));
+    CHECK_STR(cfg.hostname, "a3000");
+    CHECK(cfg.hostname_source == AMI_HOSTNAME_ENV);
+
+    /* name_resolution and ENV:HOSTNAME are taken as written: a machine whose
+       name has always had an underscore in it keeps working. */
+    memset(&cfg, 0, sizeof(cfg));
+    CHECK(ami_config_hostname_offer(&cfg, AMI_HOSTNAME_ENV, "my_amiga"));
+    CHECK_STR(cfg.hostname, "my_amiga");
+    CHECK(ami_config_hostname_offer(&cfg, AMI_HOSTNAME_NAMERES, "my_amiga"));
+
+    /* Refusals that must not change anything. */
+    memset(&cfg, 0, sizeof(cfg));
+    CHECK(!ami_config_hostname_offer(NULL, AMI_HOSTNAME_ENV, "a1200"));
+    CHECK(!ami_config_hostname_offer(&cfg, AMI_HOSTNAME_ENV, NULL));
+    CHECK(!ami_config_hostname_offer(&cfg, AMI_HOSTNAME_ENV, ""));
+    CHECK(!ami_config_hostname_offer(&cfg, AMI_HOSTNAME_NONE, "a1200"));
+    CHECK_STR(cfg.hostname, "");
+    CHECK(cfg.hostname_source == AMI_HOSTNAME_NONE);
+
+    /* Every source names itself; AMI_HOSTNAME_NONE is not a source. */
+    CHECK_STR(ami_config_hostname_source_text(AMI_HOSTNAME_NAMERES),
+              "name_resolution");
+    CHECK_STR(ami_config_hostname_source_text(AMI_HOSTNAME_DHCP), "DHCP");
+    CHECK_STR(ami_config_hostname_source_text(AMI_HOSTNAME_INTERFACE),
+              "interface ID");
+    CHECK_STR(ami_config_hostname_source_text(AMI_HOSTNAME_ENV),
+              "ENV:HOSTNAME");
+    CHECK(ami_config_hostname_source_text(AMI_HOSTNAME_NONE) == NULL);
 }
 
 static void test_resolver(void)
@@ -1267,6 +1477,9 @@ int main(int argc, char **argv)
     test_interface_amitcp_flavour();
     test_interface_errors();
     test_problem_reporter();
+    test_hostname_syntax();
+    test_hostname_precedence();
+    test_hostname_offer();
     test_resolver();
     test_gateway();
     test_netdb();

@@ -93,6 +93,7 @@ typedef enum {
 
 typedef struct AmiIfConfig {
     char        name[AMI_CFG_NAME_LEN];      /* interface name, e.g. "eth0"      */
+    char        id[AMI_CFG_NAME_LEN];        /* Roadshow ID=; free text          */
     char        device[AMI_CFG_PATH_LEN];    /* SANA-II device, e.g. "a2065.device" */
     ULONG       unit;
     AmiIpType   iptype;
@@ -151,11 +152,35 @@ typedef struct AmiSdService {
     UWORD   port;
 } AmiSdService;
 
+/*
+ * Where hostname came from. The value is a rank: a source with a higher number
+ * outranks every lower one and replaces the name it set.
+ *
+ * No RFC settles this order; it is an OS convention. name_resolution is the
+ * file whose only job is naming this machine, so it wins. DHCP option 12 comes
+ * next: it is current, and somebody configured the server on purpose.
+ *
+ * Interface ID= is last, below even an ambient ENV:HOSTNAME. Roadshow's ID= is
+ * free text and is often descriptive; RFC 1123 2.1 refuses "Ariadne in the
+ * study" but not "Ethernet", so ranking it higher would silently rename any
+ * machine whose owner used the field as documented. The reported fault was
+ * never that ENV:HOSTNAME wins -- it was that it won without saying so, and
+ * that is answered by reporting the source rather than by reordering.
+ */
+typedef enum {
+    AMI_HOSTNAME_NONE = 0,      /* nothing named this machine                */
+    AMI_HOSTNAME_INTERFACE,     /* an interface file's ID=                   */
+    AMI_HOSTNAME_ENV,           /* ENV:HOSTNAME                              */
+    AMI_HOSTNAME_DHCP,          /* DHCP option 12, RFC 2132 3.14             */
+    AMI_HOSTNAME_NAMERES        /* DEVS:Internet/name_resolution             */
+} AmiHostnameSource;
+
 typedef struct AmiConfig {
     AmiIfConfig         interfaces[AMI_CFG_MAX_INTERFACES];
     UWORD               interface_count;
     AmiResolverConfig   resolver;
     char                hostname[AMI_CFG_NAME_LEN];
+    UWORD               hostname_source;     /* AmiHostnameSource                */
     ULONG               default_gateway;     /* 0 = none / from DHCP             */
 
     /*
@@ -181,6 +206,29 @@ LONG ami_config_load(AmiConfig *cfg);
 
 /* Parse one interface file by name (DEVS:NetInterfaces/<name>). */
 LONG ami_config_load_interface(const char *name, AmiIfConfig *out);
+
+/*
+ * Offer `name` as this machine's host name on behalf of `source`. It is taken,
+ * and TRUE returned, when `source` ranks at or above whatever set the current
+ * name -- so a fresh arrival from the same source (a DHCP renewal) replaces it
+ * and a weaker one never does.
+ *
+ * A source whose text is not a host name by construction is checked against
+ * RFC 1123 2.1 first and refused if it fails, which leaves the next source in
+ * the chain to answer rather than naming the machine something invalid. An
+ * interface ID is free text and DHCP option 12 arrives off the network, so
+ * both are checked; a name an administrator wrote in name_resolution or
+ * ENV:HOSTNAME is taken as given.
+ */
+BOOL ami_config_hostname_offer(AmiConfig *cfg, UWORD source, const char *name);
+
+/* RFC 1123 2.1 syntax: dot-separated labels of letters, digits and hyphens,
+   no label empty or beginning or ending with one. */
+BOOL ami_config_hostname_valid(const char *name);
+
+/* Short name for a source, for a report that says where the name came from.
+   NULL for AMI_HOSTNAME_NONE, which is not a source. */
+const char *ami_config_hostname_source_text(UWORD source);
 
 /* ------------------------------------------------------------- diagnostics
  *
