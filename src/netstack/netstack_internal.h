@@ -122,6 +122,15 @@
 #define AMI_MDNS_PEER_CACHE_BYTES   32768
 #endif
 
+/*
+ * Two DHCP options NetX Duo does not name. It retrieves any option code the
+ * server sent, so a number suffices: RFC 2132 3.17 for the domain name and
+ * 3.12 for the classful static route list that the published API's
+ * aam_StaticRouteTable carries.
+ */
+#define AMI_DHCP_OPTION_DOMAIN          15
+#define AMI_DHCP_OPTION_STATIC_ROUTE    33
+
 /* How long netstack_startup() blocks waiting for the first address. */
 #define AMI_DHCP_TIMEOUT_TICKS      (30UL * (ULONG)NX_IP_PERIODIC_RATE)
 #define AMI_LINK_TIMEOUT_TICKS      (10UL * (ULONG)NX_IP_PERIODIC_RATE)
@@ -284,6 +293,11 @@ VOID ami_netstack_capture_detach_one(AmiNetStack *ns, UWORD index);
 
 LONG ami_netstack_dns_start(AmiNetStack *ns);
 VOID ami_netstack_dns_stop(AmiNetStack *ns);
+
+/* One DHCP option that is text, from one interface's lease. Not
+   NUL-terminated on the wire; `out` always is. netstack.c. */
+VOID ami_ns_dhcp_text(AmiNetStack *ns, UWORD index, UINT option,
+                      char *out, ULONG outlen);
 
 #ifdef AMINETXDUO_MDNS
 /* netstack_mdns.c -- the RFC 6762 responder, and the ".local" branch

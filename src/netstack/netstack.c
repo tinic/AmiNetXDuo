@@ -1043,15 +1043,6 @@ static VOID ami_ns_dhcp_discover_now(NX_DHCP *dhcp)
 }
 
 /*
- * Two DHCP options NetX Duo does not name. It retrieves any option code the
- * server sent, so a number suffices: RFC 2132 3.17 for the domain name and
- * 3.12 for the classful static route list that the published API's
- * aam_StaticRouteTable carries.
- */
-#define AMI_DHCP_OPTION_DOMAIN          15
-#define AMI_DHCP_OPTION_STATIC_ROUTE    33
-
-/*
  * DHCP option 61, the client identifier.
  *
  * NetX Duo names the option and its size (nxd_dhcp_client.h) and then never
@@ -2116,8 +2107,8 @@ static UWORD ami_ns_dhcp_addr_list(AmiNetStack *ns, UWORD index, UINT option,
 }
 
 /* One DHCP option that is text. Not NUL-terminated on the wire. */
-static VOID ami_ns_dhcp_text(AmiNetStack *ns, UWORD index, UINT option,
-                             char *out, ULONG outlen)
+VOID ami_ns_dhcp_text(AmiNetStack *ns, UWORD index, UINT option,
+                      char *out, ULONG outlen)
 {
     UCHAR buffer[128];
     UINT  size = (UINT)sizeof(buffer);
