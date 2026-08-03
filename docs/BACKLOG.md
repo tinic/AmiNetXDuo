@@ -192,6 +192,48 @@ The resulting ladder does satisfy the RFC 6298 and RFC 1122 minimums, so this
 is a quality-of-recovery gap rather than a conformance one. Upstream, not
 introduced here. Timestamps and PAWS are likewise absent.
 
+**Two corrections from the IPv6 survey, and a sharper reading of the PMTUD
+entry below.** Oversize **UDP** sends now return `EMSGSIZE` before allocating
+(`transfer.c:570-572`); only **raw** keeps the silent-drop-after-success
+(`transfer.c:722-741`). And a renumbering network does **not** leave a stale
+address forever — `nx_ipv6_prefix_list_delete_entry.c:105-140`, driven from the
+prefix timer, invalidates every SLAAC address when the prefix's valid lifetime
+expires, so `NX_IPV6_ADDR_STATE_VALID` is enforced. What is genuinely missing is
+the **graceful** half: no preferred lifetime and `NX_IPV6_ADDR_STATE_DEPRECATED`
+assigned nowhere, so an address is fully usable right up to the moment it
+disappears.
+
+**The PMTUD entry understates it: omitting PMTUD is only legal if you then cap
+at 1280.** RFC 8201 §1 — "Nodes not implementing Path MTU Discovery must use the
+IPv6 minimum link MTU defined in [RFC8200] as the maximum packet size." We do
+neither: PMTUD is off, ICMPv6 Packet Too Big is **not dispatched at all**
+(`nx_icmpv6_packet_process.c:210-216` gates the case on the disabled define), and
+we send up to the full link MTU. Either enable PMTUD or cap IPv6 sends at 1280 —
+the status quo is the one combination the RFC rules out. The RA MTU option is
+discarded on the same `#ifdef` and is free.
+
+**No interface other than 0 ever sends a Router Solicitation.** Ours, and it is
+call ordering: `ami_netstack_ipv6_enable()` runs at `netstack.c:648`, before the
+secondary-interface attach loop at `:658-678`, and `nxd_ipv6_enable.c:146-153`
+initialises `nx_ipv6_rtr_solicitation_max` only for interfaces valid at that
+instant. `nx_ip_interface_attach.c` joins ff02::1 but does not set those fields.
+SLAAC still eventually works there through unsolicited RAs. The same ordering
+makes the IGMP all-hosts MAC filter for interface 1 a race, which could not be
+settled statically.
+
+**RFC 4862 §5.5.3: the A-bit test is nested inside the L-bit test.**
+`nx_icmpv6_process_ra.c:310` opens on the on-link flag and the autonomous-flag
+test at `:332` sits inside it, so a prefix advertised **A=1, L=0** forms no
+address at all. That combination is what several CPE firmwares and 3GPP
+advertise; on such a link the machine gets a link-local and nothing else,
+silently. One nested `if`.
+
+**RFC 7559 Router Solicitation backoff is absent.** Fixed 4-second interval,
+hard stop after three (`nxd_ipv6_router_solicitation_check.c:86-107`). RFC 8504
+§5.4 restates it as a MUST. An Amiga is switched on by hand, often before the
+router — exactly the case this exists to cover — and the recovery path is the
+router's next unsolicited RA, which may be ten minutes away.
+
 **IPv6: no path MTU discovery and no fragment reassembly.** PMTUD is
 deliberately unset, so both the RA MTU option and ICMPv6 Packet Too Big are
 ignored. Separately, `nx_ip_fragment_enable()` is never called anywhere in the
