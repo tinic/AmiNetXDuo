@@ -1017,6 +1017,77 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
     }
 }
 
+/* --------------------------------------------------------- tcp_handler */
+
+/*
+ * DEVS:Internet/tcp_handler. One setting, so the file is allowed to be one
+ * word: "OFF" on a line by itself means the same as "TCPHANDLER=OFF". Anything
+ * else is a warning and leaves the default alone, because the default is the
+ * behaviour a machine already has and a typo must not remove it.
+ */
+VOID ami_cfg_parse_tcp_handler(char *buf, BOOL *out)
+{
+    char *cursor = buf;
+    char *line;
+    ULONG lineno = 0;
+
+    if (buf == NULL || out == NULL)
+        return;
+
+    while ((line = ami_cfg_next_line(&cursor)) != NULL)
+    {
+        char *pos;
+        char *key;
+        char *value;
+
+        lineno++;
+
+        ami_cfg_strip_comment(line, "#;");
+        line = ami_cfg_trim(line);
+        if (*line == '\0')
+            continue;
+
+        pos = line;
+        while (ami_cfg_next_pair(&pos, &key, &value))
+        {
+            BOOL on;
+
+            if (*value == '\0' && ami_cfg_parse_bool(key, &on))
+            {
+                *out = on;
+                continue;
+            }
+
+            if (ami_cfg_stricmp(key, "tcphandler") != 0 &&
+                ami_cfg_stricmp(key, "tcp") != 0)
+            {
+                char text[96];
+
+                AMI_WARN("config: tcp_handler: unknown keyword '%s'", key);
+                ami_cfg_join3(text, sizeof(text), "unknown keyword '", key, "'");
+                ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN, text,
+                                "This file switches the TCP: device on or off "
+                                "and understands nothing else.  Write "
+                                "TCPHANDLER=OFF, or OFF on its own.");
+                continue;
+            }
+
+            if (ami_cfg_parse_bool(value, &on))
+            {
+                *out = on;
+            }
+            else
+            {
+                AMI_WARN("config: tcp_handler: bad value '%s'", value);
+                report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "TCPHANDLER",
+                                 value,
+                                 "Write ON or OFF.  The TCP: device was left "
+                                 "switched on.");
+            }
+        }
+    }
+}
+
 /* ---------------------------------------------------- service_discovery */
 
 /*

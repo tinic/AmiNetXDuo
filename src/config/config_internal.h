@@ -33,6 +33,14 @@ extern "C" {
 #define AMI_CFG_FILE_SERVICES       AMI_CFG_DIR_INTERNET "/services"
 
 /*
+ * The TCP: device's own switch. Its own file for the same reason
+ * default_gateway has one: this layer keeps a global setting in a file named
+ * after it, and the alternative was a keyword in name_resolution, which is
+ * about DNS and would hide it.
+ */
+#define AMI_CFG_FILE_TCPHANDLER     AMI_CFG_DIR_INTERNET "/tcp_handler"
+
+/*
  * DNS-SD advertisements, and NOT "/services": that name is the netdb file
  * above, the /etc/services equivalent that maps a name to a port number for
  * getservbyname(). The two would be confused by every reader and by anyone
@@ -189,6 +197,13 @@ VOID ami_cfg_hostname_from_files(AmiConfig *cfg, char *env_text);
  * Sets *out only when a default gateway is found.
  */
 VOID ami_cfg_parse_gateway(char *buf, ULONG *out);
+
+/*
+ * Parse DEVS:Internet/tcp_handler. TCPHANDLER=ON/OFF, or the bare word on a
+ * line of its own. *out is written only when the file says something; an empty
+ * or unreadable file leaves the caller's default alone.
+ */
+VOID ami_cfg_parse_tcp_handler(char *buf, BOOL *out);
 
 #ifdef __cplusplus
 }

@@ -77,6 +77,9 @@
 #include "bsdsocket_vectors.h"
 #include "tcp_handler.h"
 
+#include "aminetxduo/config.h"
+#include "aminetxduo/netstack.h"
+
 #include <proto/dos.h>
 #include <proto/exec.h>
 
@@ -877,6 +880,14 @@ static VOID tcp_session_main(VOID)
                     tcp_reply(pkt, -1, ERROR_SEEK_ERROR, s.ts_Port);
                     break;
 
+                case ACTION_EXAMINE_FH:
+                    /* ExamineFH() wants a size, a date and a name. A socket
+                       has none of the three, and inventing them would be
+                       worse than saying so. */
+                    tcp_reply(pkt, DOSFALSE, ERROR_OBJECT_WRONG_TYPE,
+                              s.ts_Port);
+                    break;
+
                 default:
                     AMI_INFO("TCP: unhandled packet %ld on a file handle",
                              (long)pkt->dp_Type);
@@ -964,6 +975,23 @@ static VOID tcp_ctrl_disk_info(struct DosPacket *pkt, struct InfoData *info)
     info->id_NumBlocksUsed = 0;
     info->id_BytesPerBlock = 512;
     info->id_DiskType      = ID_DOS_DISK;
+
+    /*
+     * `Info` takes the name it prints from id_VolumeNode's dol_Name. A zero
+     * BPTR is not "no name": BADDR(0) is address 0, so it reads a length byte
+     * and that many characters out of the 68k exception vector table, prints
+     * them, and whatever control characters they contain then eat the rest of
+     * the listing.
+     *
+     * There is no volume -- a connection is not a disk -- so this points at
+     * the device node, which is on the DOS list already, lives as long as
+     * TCP: does, and holds "TCP" in dn_Name. DeviceNode's dn_Name and
+     * DosList's dol_Name are the same offset, which is what makes that legal.
+     *
+     * id_UnitNumber stays 0: the node has no dn_Startup and there is one TCP:,
+     * not a unit of one.
+     */
+    info->id_VolumeNode = MKBADDR(tcp_node);
 
     tcp_reply(pkt, DOSTRUE, 0, tcp_ctrl_port);
 }
@@ -1083,12 +1111,30 @@ static VOID tcp_ctrl_main(VOID)
                  * Lock("TCP:...") does get sent: `Copy` locks its source to
                  * compare it against C: before deciding what kind of copy this
                  * is (v40 copy.c). Refusing is enough; Copy carries on and
-                 * opens the stream instead. Handled here rather than in the
-                 * default arm so the log only names packets nobody has
-                 * considered.
+                 * opens the stream instead.
+                 *
+                 * The error code is load-bearing and is not the accurate one.
+                 * ERROR_OBJECT_WRONG_TYPE describes TCP: better -- a stream is
+                 * not a thing that can be locked -- and Copy stops on it:
+                 * "Can't open TCP:10.0.2.2/amitest for input - object is not
+                 * of required type". On ERROR_ACTION_NOT_KNOWN it carries on
+                 * and opens the stream, which is the whole point.
                  */
                 case ACTION_LOCATE_OBJECT:
                     tcp_reply(pkt, DOSFALSE, ERROR_ACTION_NOT_KNOWN,
+                              tcp_ctrl_port);
+                    break;
+
+                /*
+                 * Reachable only from a program holding a lock on TCP:, and
+                 * nothing hands one out. Here so that the refusal names the
+                 * reason -- TCP: is not a directory -- rather than arriving in
+                 * the log as a packet nobody considered.
+                 */
+                case ACTION_EXAMINE_OBJECT:
+                case ACTION_EXAMINE_NEXT:
+                case ACTION_PARENT:
+                    tcp_reply(pkt, DOSFALSE, ERROR_OBJECT_WRONG_TYPE,
                               tcp_ctrl_port);
                     break;
 
@@ -1167,6 +1213,23 @@ VOID bsd_tcp_handler_start(struct AmiSocketBase *master)
      */
     if (me == NULL || me->tc_Node.ln_Type != NT_PROCESS)
         return;
+
+    /*
+     * DEVS:Internet/tcp_handler can turn the device off. Checked before the
+     * latch, so nothing is started and nothing published -- a handler that
+     * came up and was then removed would still have taken the name for as
+     * long as it took to remove it. A machine with no config at all keeps the
+     * device, which is the Roadshow-compatible default.
+     */
+    {
+        const AmiConfig *cfg = netstack_config();
+
+        if (cfg != NULL && !cfg->tcp_handler)
+        {
+            AMI_INFO("TCP: not published -- switched off in the configuration");
+            return;
+        }
+    }
 
     ObtainSemaphore(&master->sb_Lock);
     if (tcp_started)

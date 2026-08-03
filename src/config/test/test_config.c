@@ -1158,6 +1158,69 @@ static void test_gateway(void)
     CHECK(gw == 0);
 }
 
+static void test_tcp_handler(void)
+{
+    BOOL  on;
+    char *buf;
+
+    printf("tcp_handler\n");
+
+    on  = TRUE;
+    buf = dup_text("; DEVS:Internet/tcp_handler\nTCPHANDLER=OFF\n");
+    ami_cfg_parse_tcp_handler(buf, &on);
+    free(buf);
+    CHECK(on == FALSE);
+
+    /* One setting, so the file may be one word. */
+    on  = TRUE;
+    buf = dup_text("off\n");
+    ami_cfg_parse_tcp_handler(buf, &on);
+    free(buf);
+    CHECK(on == FALSE);
+
+    /* Back on again, spelled the other three ways. */
+    on  = FALSE;
+    buf = dup_text("TCP YES\n");
+    ami_cfg_parse_tcp_handler(buf, &on);
+    free(buf);
+    CHECK(on == TRUE);
+
+    on  = FALSE;
+    buf = dup_text("tcphandler = on\n");
+    ami_cfg_parse_tcp_handler(buf, &on);
+    free(buf);
+    CHECK(on == TRUE);
+
+    on  = FALSE;
+    buf = dup_text("1\n");
+    ami_cfg_parse_tcp_handler(buf, &on);
+    free(buf);
+    CHECK(on == TRUE);
+
+    /* Nothing the file can say by accident may switch the device off: a
+       comment, a typo and an empty file all leave the caller's default. */
+    on  = TRUE;
+    buf = dup_text("# TCPHANDLER=OFF\n\n");
+    ami_cfg_parse_tcp_handler(buf, &on);
+    free(buf);
+    CHECK(on == TRUE);
+
+    on  = TRUE;
+    buf = dup_text("TCPHANDLER=maybe\n");
+    ami_cfg_parse_tcp_handler(buf, &on);
+    free(buf);
+    CHECK(on == TRUE);
+
+    on  = TRUE;
+    buf = dup_text("NAMESERVER=192.168.1.1\n");
+    ami_cfg_parse_tcp_handler(buf, &on);
+    free(buf);
+    CHECK(on == TRUE);
+
+    ami_cfg_parse_tcp_handler(NULL, &on);
+    CHECK(on == TRUE);
+}
+
 static void test_netdb(void)
 {
     const AmiNetdbEntry *e;
@@ -1482,6 +1545,7 @@ int main(int argc, char **argv)
     test_hostname_offer();
     test_resolver();
     test_gateway();
+    test_tcp_handler();
     test_netdb();
     test_netdb_missing_files();
     test_netdb_garbage();
