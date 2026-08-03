@@ -300,9 +300,15 @@ LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr)
 
 /*
  * 4.4BSD types IP_MULTICAST_TTL and IP_MULTICAST_LOOP as u_char and everything
- * written since passes an int, so both widths are taken here and getsockopt
+ * written since passes an int, so every width is taken here and getsockopt
  * answers in whichever width the caller offered room for.  A program that
  * hands one byte and is given four writes over three bytes it does not own.
+ *
+ * Two bytes matters as much as one and four.  m68k is big-endian, so a caller
+ * passing a `short` of 5 hands over 0x00,0x05: read as a UBYTE that is the
+ * high byte, 0, and IP_MULTICAST_TTL 0 keeps the datagram off the link
+ * entirely.  The reply had the mirror-image fault -- one byte written into a
+ * two-byte buffer left the low half untouched and the caller read 5 as 1280.
  */
 static LONG bsd_mcast_get_byte_or_long(struct AmiSocketBase *base, APTR optval,
                                        socklen_t optlen, LONG *value)
@@ -312,6 +318,8 @@ static LONG bsd_mcast_get_byte_or_long(struct AmiSocketBase *base, APTR optval,
 
     if (optlen >= (socklen_t)sizeof(LONG))
         *value = *(LONG *)optval;
+    else if (optlen >= (socklen_t)sizeof(WORD))
+        *value = (LONG)*(WORD *)optval;
     else if (optlen >= (socklen_t)sizeof(UBYTE))
         *value = (LONG)*(UBYTE *)optval;
     else
@@ -330,6 +338,11 @@ static LONG bsd_mcast_put_byte_or_long(struct AmiSocketBase *base, APTR optval,
     {
         *(LONG *)optval = value;
         *optlen = (socklen_t)sizeof(LONG);
+    }
+    else if (*optlen >= (socklen_t)sizeof(WORD))
+    {
+        *(WORD *)optval = (WORD)value;
+        *optlen = (socklen_t)sizeof(WORD);
     }
     else if (*optlen >= (socklen_t)sizeof(UBYTE))
     {
