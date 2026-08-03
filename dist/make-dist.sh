@@ -381,12 +381,17 @@ for doc in "$DOCSRC"/*.info; do
 done
 shopt -u nullglob
 
-# Give every doc that has no icon of its own the generic document icon, so a
-# Workbench user can see and open all of them.
+# Give every doc that has no icon of its own an icon, so a Workbench user can
+# see and open all of them.  A .guide gets the one whose default tool is
+# MultiView; More would show it its own markup.
 for doc in "$TREE"/Docs/*; do
     [ -f "$doc" ] || continue
     case "$doc" in *.info) continue ;; esac
-    [ -f "$doc.info" ] || cp "$INSTALL/Document.info" "$doc.info"
+    [ -f "$doc.info" ] && continue
+    case "$doc" in
+        *.guide) cp "$INSTALL/Guide.info"    "$doc.info" ;;
+        *)       cp "$INSTALL/Document.info" "$doc.info" ;;
+    esac
 done
 
 # The manual is not optional.  An archive without it is the defect above, and
