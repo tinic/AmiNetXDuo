@@ -155,6 +155,16 @@ VOID ami_log(int level, const char *fmt, ...)
     RawPutChar('\n');
 }
 
+#ifdef AMINETXDUO_RXDROP_TRACE
+/* Temporary instrumentation counters for the TCP receive-drop investigation.
+   Defined here because aminetxduo_common is what the netxduo target links. */
+unsigned long ami_rxdrop_n;
+unsigned long ami_rxdrop_p[8];
+unsigned long ami_rxtrim_n[2];
+unsigned long ami_rxwin_low = 0xffffffffUL;
+unsigned long ami_rxarr_n;
+#endif
+
 /* --------------------------------------------------------------- utilities */
 
 BYTE ami_signal_alloc(VOID)
