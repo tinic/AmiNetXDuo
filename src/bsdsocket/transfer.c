@@ -598,6 +598,18 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
      * between the two may return.
      */
     mcast6_src = bsd_mcast6_prepare_send(sock, addr, &mcast6_hops);
+
+    /*
+     * IPV6_MULTICAST_HOPS is 0 for this group: RFC 3493 5.2 makes that "this
+     * host only", and there is nothing here to deliver it to. So it is
+     * consumed rather than put on the link, and the caller is told the whole
+     * write was accepted -- which it was; it simply had nowhere to go.
+     */
+    if (mcast6_src == BSD_MCAST6_NO_LINK)
+    {
+        bsd_mcast6_finish_send(mcast6_hops);
+        return len;
+    }
 #endif
 #else
     /* What bsd_mcast_prepare_send() does for a unicast destination when
