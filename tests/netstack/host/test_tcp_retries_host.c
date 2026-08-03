@@ -54,6 +54,14 @@ static ULONG h_now;
 
 #define H_SECONDS(ticks)    ((ticks) / NX_IP_PERIODIC_RATE)
 
+/* The output path reads the clock to stamp the segment it is timing for the
+   RFC 6298 estimator.  Nothing here is ever acknowledged, so no sample is ever
+   taken; the stub exists so the same simulated time drives both. */
+ULONG _tx_time_get(VOID)
+{
+    return h_now;
+}
+
 
 /* ------------------------------------------------------------- harness ---- */
 
