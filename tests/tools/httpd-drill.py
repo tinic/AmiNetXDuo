@@ -561,6 +561,66 @@ def test_overlapping_moves():
         once(req("DELETE", "%s/dst%d" % (BASE, n)))
 
 
+# ------------------------------------------------------ names that collide --
+
+def test_name_truncation():
+    """Two addresses that reach one file, which is what a filesystem storing
+    30 characters of a name does with 44 of them.
+
+    Only an OFS volume shows this; a directory filesystem keeps both names
+    apart and the case reports itself as not applicable.  It is here because
+    the failure it guards against is unrecoverable and invisible everywhere
+    else: a DELETE of one long name removing the file behind the other."""
+    print("names the filesystem cannot tell apart")
+
+    shared = "abcdefghijklmnopqrstuvwxyz0123"        # exactly 30
+    a = "%s/%sAAAAAAAAAA.txt" % (BASE, shared)
+    b = "%s/%sBBBBBBBBBB.txt" % (BASE, shared)
+
+    once(req("DELETE", a))
+    once(req("DELETE", b))
+
+    made = once(req("PUT", a, body="this is A and must survive\n"))
+
+    if made is not None and made[0] == 400:
+        # The volume truncates and the server refused to make a name it could
+        # not then serve.  Nothing was created, so nothing can be reached.
+        for path, what in ((a, "the name that was asked for"),
+                           (b, "the one that would collide with it")):
+            got = once(req("GET", path))
+            check(got is not None and got[0] == 404,
+                  "nothing was left behind under %s" % what)
+        return
+
+    check(made is not None and made[0] in (200, 201, 204),
+          "the first long name was written")
+
+    got = once(req("GET", b))
+
+    if got is not None and got[0] == 404:
+        print("  (this filesystem keeps both names apart; nothing to test)")
+        once(req("DELETE", a))
+        return
+
+    # Two addresses, one file.  Every one of these used to act on A.
+    check(got is not None and got[0] == 400,
+          "GET of the colliding name is refused, not %s"
+          % (got[0] if got else "?"))
+    check(once(req("PROPFIND", b, {"Depth": "0"}))[0] == 400,
+          "PROPFIND of it is refused")
+    check(once(req("PUT", b, body="this is B\n"))[0] == 400,
+          "PUT to it is refused")
+    check(once(req("DELETE", b))[0] == 400,
+          "DELETE of it is refused")
+
+    survived = once(req("GET", a))
+    check(survived is not None and survived[0] == 200 and
+          b"this is A" in survived[2],
+          "and the file behind both names is untouched")
+
+    once(req("DELETE", a))
+
+
 def main():
     print("httpd-drill against http://%s:%d/\n" % (ADDR, PORT))
 
@@ -575,6 +635,7 @@ def main():
         test_lock_below_stops_delete()
         test_proppatch_atomic()
         test_overlapping_moves()
+        test_name_truncation()
     finally:
         teardown()
 
