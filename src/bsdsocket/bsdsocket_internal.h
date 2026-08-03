@@ -318,6 +318,21 @@ typedef struct
  *
  * Nothing above this. 48180 measured no better and widens that exposure for
  * nothing.
+ *
+ * It pays only where the guest is fast enough for the round trip to have been
+ * the cost. Verified across profiles afterwards, 2 boots an arm: 68020 moved
+ * round trips a chunk 2.00 -> 1.02 -- the cleanest instance of the mechanism
+ * measured -- and the read did not move at all, because time per chunk stayed
+ * ~77 ms in both arms and the remaining gap widened to absorb what was saved.
+ * The peer went from 3-4% app-limited to 93-94%: at a 40 ms round trip the
+ * 68020 was never waiting on the network. Same signature on 68000, app-limited
+ * 2-4% -> 66-83%.
+ *
+ * On 68000 it costs a little: clean reads 179.2 -> 174.1 KB/s and 181.4 ->
+ * 178.7 for the minimal build, reproducible across boots whose own spread is
+ * under 1 KB/s. Under loss that profile is indifferent. A couple of percent on
+ * a CPU-bound machine against +74% on an 030 is the trade being made, and it
+ * is deliberate.
  */
 #ifndef BSD_TCP_WINDOW_CEILING
 #define BSD_TCP_WINDOW_CEILING  33580
