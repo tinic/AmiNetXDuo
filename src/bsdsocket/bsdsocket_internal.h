@@ -292,14 +292,29 @@ typedef struct
  * Ceiling. 65535 is the architectural cap: NX_ENABLE_TCP_WINDOW_SCALING is not
  * defined here, so the window is whatever fits in the 16-bit header field and
  * nothing negotiates past it in either direction -- not offering the option
- * also stops the peer scaling. 32768 is the largest value that has been
- * measured (docs/RESEARCH.md S16.5, S24). Two reasons not to go to the cap
- * untested: there is no SACK in the vendored tree, so a burst loss inside a
- * larger window costs a full go-back-N, and every byte of window is a byte of
- * packet pool somebody else cannot have.
+ * also stops the peer scaling. Two reasons not to go to the cap: there is no
+ * SACK in the vendored tree, so a burst loss inside a larger window costs a
+ * full go-back-N, and every byte of window is a byte of packet pool somebody
+ * else cannot have. The pool budget above bounds it in practice.
+ *
+ * Whole segments, and deliberately not a round binary number. What a receive
+ * costs here is a fixed per-round wakeup, not a per-byte one: a peer's response
+ * arrives in ceil(response / window) instalments and each instalment costs one
+ * full wake-and-drain round whatever it carries. So the window's only job on a
+ * bulk read is to keep that count at one, and a window of exactly 2^n cannot
+ * hold a 2^n application block plus its protocol header -- the commonest shape
+ * there is. Measured against one such peer, 32 KB blocks behind a 12-byte
+ * header, reading a 4 MB file: 16384 -> 645 KB/s (three instalments),
+ * 24576 -> 988 and 32768 -> 979 (two), 33024 -> 1947 and 49152 -> 1946 (one).
+ * Twelve bytes of window were worth a factor of two, and 16 KB more on top of
+ * them were worth nothing.
+ *
+ * 33 * 1460: an integral number of Ethernet segments, which is also what the
+ * other stacks advertise -- Roadshow 33580 (23), Linux 64240 (44) -- and none
+ * of them can land on a power of two by construction.
  */
 #ifndef BSD_TCP_WINDOW_CEILING
-#define BSD_TCP_WINDOW_CEILING  32768
+#define BSD_TCP_WINDOW_CEILING  48180
 #endif
 
 /*
