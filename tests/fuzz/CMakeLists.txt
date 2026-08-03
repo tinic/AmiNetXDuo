@@ -82,6 +82,22 @@ target_compile_definitions(fuzz_bpf PRIVATE AMI_BPF_REPLICA)
 target_compile_options(fuzz_bpf PRIVATE -Wall -Wextra ${_fuzz_san})
 target_link_options(fuzz_bpf PRIVATE ${_fuzz_san})
 
+# DEVS:Internet/passwd and .../group. Same shape as the netdb pool above: the
+# group parser sizes an arena in one pass and fills it in another, and the two
+# passes disagreed on what ends a line -- a CR-terminated file sized for one
+# line and parsed all of them.
+add_executable(fuzz_usergroup
+    fuzz_usergroup.c
+    "${CMAKE_SOURCE_DIR}/src/usergroup/ug_parse.c")
+
+target_include_directories(fuzz_usergroup PRIVATE
+    "${CMAKE_SOURCE_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/src/usergroup"
+    "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+target_compile_options(fuzz_usergroup PRIVATE -Wall -Wextra ${_fuzz_san})
+target_link_options(fuzz_usergroup PRIVATE ${_fuzz_san})
+
 
 # ---------------------------------------------------------------------------
 # The two parsers that read bytes off the network from whoever sent them.
@@ -455,6 +471,13 @@ add_test(NAME fuzz_dns_sweep
 add_test(NAME fuzz_bpf_sweep
          COMMAND fuzz_bpf -r 1 ${AMINETXDUO_FUZZ_CASES})
 
+# The seed set carries the CR-terminated group file that overran the arena, so
+# that case runs on every ctest whatever the sweep happens to generate.
+add_test(NAME fuzz_usergroup_seeds
+         COMMAND fuzz_usergroup -s)
+add_test(NAME fuzz_usergroup_sweep
+         COMMAND fuzz_usergroup -r 1 ${AMINETXDUO_FUZZ_CASES})
+
 add_test(NAME fuzz_dhcp_seeds
          COMMAND fuzz_dhcp -s)
 add_test(NAME fuzz_dhcp_sweep
@@ -497,6 +520,6 @@ endif()
 
 # A soak set by AMINETXDUO_FUZZ_CASES needs longer than ctest's default.
 set_tests_properties(fuzz_config_sweep fuzz_dnssd_sweep fuzz_dns_sweep
-                     fuzz_bpf_sweep fuzz_dhcp_sweep
+                     fuzz_bpf_sweep fuzz_dhcp_sweep fuzz_usergroup_sweep
                      fuzz_tls_record_sweep fuzz_tls_x509_sweep
                      PROPERTIES TIMEOUT 1800)
