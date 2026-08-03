@@ -12,6 +12,7 @@ set(USERGROUP_SOURCES
     ug_context.c
     ug_ids.c
     ug_db.c
+    ug_parse.c
     ug_misc.c)
 
 add_library(aminetxduo_usergroup STATIC ${USERGROUP_SOURCES})
@@ -55,4 +56,31 @@ if(AMINETXDUO_USERGROUP_LINK)
             COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:usergroup_library>"
             COMMENT "usergroup.library size")
     endif()
+endif()
+
+# ---------------------------------------------------------------- host test --
+#
+# ug_parse.c is the half of the database with no dos.library in it, split out
+# of ug_db.c so it can be built and run here. The files it reads live in DEVS:
+# and are not written by us, so the line-ending and arena cases are worth a
+# test that runs on every build rather than only on an Amiga.
+#
+#   cc -std=c99 -Wall -Wextra -Iinclude -Isrc/usergroup \
+#      -Isrc/config/test/shim src/usergroup/test/test_usergroup.c \
+#      src/usergroup/ug_parse.c -o test_usergroup
+
+if(NOT CMAKE_CROSSCOMPILING)
+    add_executable(test_usergroup
+        test/test_usergroup.c
+        ug_parse.c)
+
+    target_include_directories(test_usergroup PRIVATE
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_usergroup PRIVATE -Wall -Wextra)
+
+    include(CTest)
+    add_test(NAME usergroup_parsers COMMAND test_usergroup)
 endif()
