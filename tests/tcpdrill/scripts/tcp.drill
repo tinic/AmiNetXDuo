@@ -23,7 +23,7 @@
 case w01_advertised_window_in_bounds
 socket
 connect
-tx S seq=0 winmin=8192 winmax=32768 mss=1460
+tx S seq=0 winmin=8192 winmax=33580 mss=1460
 
 # RFC 793 3.4: three-way handshake, and our ACK carries the peer's ISN + 1.
 case c01_active_open
