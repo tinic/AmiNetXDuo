@@ -46,10 +46,8 @@ Items fixed the same day are omitted.
 
 | Item | Cite |
 |---|---|
-| `EAI_AGAIN` never returned; the backend distinguishes the cases and `h_errno` gets it right | `addrinfo.c:476-516`, `resolver.c:150-168` |
-| DNS mutex contention reported as `HOST_NOT_FOUND` (`TX_NOT_AVAILABLE` unmapped) | `netstack_dns.c:170-198` |
-| Resolver calls uninterruptible: 3 retries × 5 servers, doubling, no break-signal, mutex held throughout | `resolver.c:18`, `:53-54` |
-| No negative caching; every miss re-queries every server | `nxd_dns.c:4464` |
+| Break is sampled per retry rung, 2–4 s worst case, not the 200 ms `bsd_wait_sliced()` reaches; the DNS mutex covers one UDP socket, one transmit ID and a file-scope decode buffer, so it cannot be dropped mid-query | `netstack_retry.c`, `netstack.h` |
+| RFC 2308 §5 negative cache entry absent; needs the SOA MINIMUM held against a name with no record to attach it to. NXDOMAIN recognition is fork branch `amiga-dns-name-error` (`NX_DNS_ERROR_MASK` 0x8002 matches RCODE 3 as it does RCODE 2, so both surfaced as `NX_DNS_SERVER_AUTH_ERROR`); unconsumable until the submodule pin moves, and `ami_ns_dns_error()` then needs an `NX_DNS_NAME_ERROR` case | `nxd_dns.c:4464` |
 
 **DNS security** — these compose; see the CNAME note below before starting
 

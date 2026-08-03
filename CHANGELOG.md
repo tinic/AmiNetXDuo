@@ -7,6 +7,12 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
+## Unreleased
+
+- Ctrl-C stops a name lookup, and a lookup that cannot be answered gives up when its timeout says to. A 30 second timeout was being applied to each attempt in turn rather than to the whole call, so a name server that never replies held the program for over two minutes with one server configured and closer to thirteen with five, and nothing could interrupt it
+- Looking up a name while another program is looking one up no longer reports the name as not existing
+- A lookup that failed because no server could be reached is now distinguishable from one that failed because the name does not exist
+
 ## 0.16.8
 
 - Reading is faster on a 68030, and how much depends on the machine. On an emulated A3000 a 4 MB transfer went from 796 to 1714 KB/s; a 68020 is unchanged and a 68000 is a couple of percent slower, because on those the machine itself is the limit and not the network. Three changes together: the stack now tells the far end which segments arrived after a gap, tells it when a segment arrived twice so it can undo a needless retransmission, and measures the retransmission timeout instead of assuming one second
