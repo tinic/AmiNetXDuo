@@ -46,7 +46,7 @@ ours = `src/`, `port/`, `include/`.
 
 ## Accepted and ignored
 
-A caller cannot detect these. Ranked above plain absences for that reason.
+Not detectable by the caller.
 
 | Interface | Behaviour | Cite |
 |---|---|---|
@@ -69,7 +69,7 @@ Refused rather than ignored, which is correct: unknown ancillary types
 `ai_flags` (`addrinfo.c:319`), sticky `IPV6_HOPLIMIT` (`cmsg.c:885-887`),
 `ICMP6_FILTER` on a non-ICMPv6 socket (`cmsg.c:805-807`).
 
-## Claims in our own text that the code does not meet
+## Incorrect in-tree claims
 
 | Location | Claim | Reality |
 |---|---|---|
@@ -104,8 +104,6 @@ Refused rather than ignored, which is correct: unknown ancillary types
 | IGMPv3, RFC 4191, RFC 7371, DHCPv6, RFC 3396 | see `BACKLOG.md` |
 
 ## Verified conformant
-
-Recorded so it is not re-surveyed.
 
 **TCP** — 9293 §3.10.7 acceptability (all four cases, wraparound-safe),
 simultaneous open, RST generation §3.10.7.1, 2MSL 240 s, 5681 slow start and
@@ -146,7 +144,7 @@ octet mode, Sorcerer's Apprentice avoided; `whois` 3912 complete; `ssh`
 vendored dropbear unpatched, 4250-4254; `traceroute` names no RFC and
 implements none by choice.
 
-## Corrections made during the survey
+## Updates post survey
 
 - `AI_CANONNAME` is honoured; pointing it at nodename is 3493 §6.1's fallback.
 - One address per family is a quality gap; 3493 requires "one or more results".
@@ -165,7 +163,7 @@ Section numbers corrected 2026-08-02: `getnameinfo` is 3493 **§6.2**; reference
 resolution is 3986 **§5.2.2**; the fragment rule is 9110 **§7.1**; the Host-port
 MUST is 9112 **§3.2**.
 
-## Notes
+## Constraints on future work
 
 - A DNS bailiwick check without CNAME chain following breaks every CDN-hosted
   name: CNAME processing is compiled out and the following A record is accepted

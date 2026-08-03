@@ -18,424 +18,224 @@ empty results.
 
 ## Open — no decision taken
 
-### From the 0.16.7 code audit (2026-08-02)
+### From the 0.16.7 audit and RFC survey (2026-08-02)
 
-Four parallel audits over ~113k lines, findings re-verified independently.
-Items already fixed are not listed here. Two audit claims were withdrawn on
-re-check and are recorded at the end of this section so nobody re-raises them.
+Conformance status and citations are in `CONFORMANCE.md`. This is the work list.
+Items fixed the same day are omitted.
 
-**`bsdsocket` — options that report success and do nothing.**
-`SO_REUSEADDR`, `SO_REUSEPORT`, `SO_BROADCAST`, `SO_OOBINLINE` and `SO_SNDBUF`
-each accept a value, read it back unchanged, and have no effect. So a restarted
-server can still hit `EADDRINUSE` after `SO_REUSEADDR` succeeded, and a
-broadcast send succeeds *without* `SO_BROADCAST` where BSD returns `EACCES`.
-`SO_RCVBUF` on TCP is the sharpest case: it calls
-`nx_tcp_socket_receive_queue_max_set()`, whose entire body is compiled out
-without `NX_ENABLE_LOW_WATERMARK`, which this build does not define. The status
-is discarded and `getsockopt` echoes the stored value, so it looks effective
-from both sides. `TCP_NODELAY` returns success before examining `optval`,
-`optlen` or the socket type, so it succeeds on a UDP socket. `IP_TTL` and
-`IP_TOS` are stored but applied only on UDP and raw, never on TCP.
-`src/bsdsocket/options.c:105-122, :148-189, :221-223, :254-276, :363-376`.
+**bsdsocket API**
 
-**`bsdsocket` — option values accepted that fail silently on the wire.**
-`IP_TTL` accepts any `LONG` and consumers mask with `0xFF`, so `IP_TTL = 256`
-succeeds, reads back 256, and puts **0** on the wire — every packet dropped at
-the first hop. The IPv6 siblings *are* range-checked, so this is an
-inconsistency rather than a policy. `SO_ERROR` zeroes `as_SoError` *before* the
-copy-out that can fail, so a bad `optval` returns `EFAULT` and destroys the
-pending error — the one piece of state a non-blocking `connect()` caller cannot
-recover any other way. The multicast helpers handle `optlen` of 4 and 1 but not
-2, so on big-endian m68k a caller passing a `short` TTL of 5 has only the high
-byte read and gets 0. `SO_LINGER` accepts a negative `l_linger`, which becomes
-an effectively infinite tick count and blocks `CloseSocket()` forever.
-`TCP_MAXSEG` discards the NetX status and accepts negatives as a 4-billion MSS.
-`SO_KEEPALIVE` writes live NetX socket state with no ThreadX bracket where
-every neighbouring option brackets first.
-`src/bsdsocket/options.c:139-145, :161-162, :232, :322-325`, `mcast.c:313-338`.
+| Item | Cite |
+|---|---|
+| `SBTC_FDCALLBACK` stored, never invoked | `errno.c:386`, `library.c:281` |
+| `SBTC_SIG_ADDRESS_CHANGE_MASK` stored, never signalled | `bsdsocket_internal.h:441-444` |
+| `SO_REUSEADDR/REUSEPORT/BROADCAST/OOBINLINE/SNDBUF` succeed, no effect | `options.c:105-122`, `:148-189` |
+| `SO_RCVBUF` on TCP calls a function compiled out without `NX_ENABLE_LOW_WATERMARK`; status discarded | `options.c:171-178` |
+| `TCP_NODELAY` returns success before checking `optval`/`optlen`/type | `options.c:221-223` |
+| `IP_TTL`/`IP_TOS`/`IPV6_TCLASS` applied on raw only | `raw.c:559`, `socket.c:1354`, `:1366` |
+| `IP_TTL` = 256 succeeds, puts 0 on the wire; IPv6 siblings range-check | `options.c:139-145` |
+| `SO_ERROR` zeroed before a copy-out that can fail | `options.c:161-162` |
+| multicast `optlen` 2 unhandled; big-endian reads the high byte | `mcast.c:313-338` |
+| `SO_LINGER` negative → infinite tick count, `CloseSocket()` never returns | `options.c:254-276` |
+| `TCP_MAXSEG` discards NetX status, accepts negatives as 4-billion MSS | `options.c:254-276` |
+| `SO_KEEPALIVE` writes live NetX state with no ThreadX bracket | `options.c:322-325` |
+| `bsd_no_aliases[1]` is one writable static returned to every opener, non-const | `netdb.c:47-57` |
+| `cmsg.c` Linux aliases 49/50/51 collide with BSD `IPV6_HOPOPTS`/`DSTOPTS`/`RTHDR` — a BSD `IPV6_DSTOPTS` reads `struct in6_pktinfo` from the caller's buffer | `cmsg.c` |
 
-**`SBTC_FDCALLBACK` is accepted and never invoked.** The tag is stored;
-`sb_FDCallback` is otherwise referenced only where it is initialised to NULL.
-Roadshow's FD callback is how clib2 and newlib unify the file and socket
-descriptor namespaces, so a runtime that installs one is never told about
-descriptor allocation and its bookkeeping silently diverges. This is the one
-place the otherwise-honest capability tagging has a silent accept.
-`src/bsdsocket/errno.c:386`, `library.c:280`.
+**Resolver**
 
-**Corrections to the resolver entry below, from the RFC 3493 survey.** Four
-things listed there as defects are not. `AI_CANONNAME` **is** honoured —
-`addrinfo.c:486-490` sets `ai_canonname` to a copy of nodename, which is
-exactly §6.1's stated fallback when the canonical name is unavailable.
-"At most one address per family" is a **quality** gap, not a conformance one:
-RFC 3493 nowhere requires the full RRset, only that "in absence of errors, one
-or more results shall be returned". `getnameinfo` returning the numeric form
-when no name is found is **explicitly permitted** by §6.4, and `NI_NAMEREQD`
-correctly errors. And `gethostbyname`/`gethostbyaddr` being IPv4-only is what
-§6 says they should be — 3493 leaves them "as-is" and removed `gethostbyname2`.
-Also: `IP_TOS`/`IPV6_TCLASS` reach the wire on **raw only**; the entry below
-says UDP applies it, and it does not (`raw.c:559` is the sole consumer).
+| Item | Cite |
+|---|---|
+| `EAI_AGAIN` never returned; the backend distinguishes the cases and `h_errno` gets it right | `addrinfo.c:476-516`, `resolver.c:150-168` |
+| DNS mutex contention reported as `HOST_NOT_FOUND` (`TX_NOT_AVAILABLE` unmapped) | `netstack_dns.c:170-198` |
+| Resolver calls uninterruptible: 3 retries × 5 servers, doubling, no break-signal, mutex held throughout | `resolver.c:18`, `:53-54` |
+| No negative caching; every miss re-queries every server | `nxd_dns.c:4464` |
 
-**Two real §3542 defects the earlier audit missed.** `getnameinfo()` on a
-v4-mapped address never extracts the embedded IPv4 address, so the PTR lookup
-§6.4 requires is never attempted (`socket.c:1167-1181` leaves the version as
-V6, `addrinfo.c:612` then tests for V4 and fails). And `getnameinfo(::)`
-returns success where §6.4 requires `EAI_NONAME`.
+**DNS security** — these compose; see the CNAME note below before starting
 
-**`IPV6_CHECKSUM` collides with our Linux-numbered `IPV6_V6ONLY` alias.** Both
-are 26; `bsdsocket_internal.h:185` is matched at `in6.c:211-213` before the
-refusal at `:202-206` is reached. RFC 3542 §3.1 says an attempt to set it on a
-non-raw socket "will fail" — instead a raw IPv6 socket setting a checksum
-offset gets success, no checksum computed or verified, and `IPV6_V6ONLY`
-switched on as a side effect. **And the published header asserts this cannot
-happen**: `include/aminetxduo/in6.h:90-92` says "there are no raw IPv6 sockets
-here", which `raw.c` and `socket.c:463,:481` contradict. That header ships in
-the Developer drawer, so the false claim is in third parties' hands.
+| Item | Cite |
+|---|---|
+| No source-address validation; `nx_udp_source_extract` unused by `addons/dns` though `tftp`/`snmp`/`BSD` use it | `nxd_dns.c:4279-4360` |
+| QDCOUNT=0 skips name, type and class checks | `:4497` |
+| AUTHORITY records accepted as answers, cached under their own owner | `:4803-4805`, `:4866` |
+| TTL sign bit unmasked → ~68-year entry | `:8102` |
+| Elapsed TTL by integer tick division; `last_used` reset on hit | `:9117`, `:9137` |
+| TC ignored, no TCP fallback, no EDNS0. `NX_DNS_TC_FLAG` defined, never read | `nxd_dns.h:124` |
+| Reverse path validates only the ID | `:3800-3858` |
+| Question comparison case-sensitive; cache path is not — breaks DNS-0x20 | `:4515` vs `:9933` |
+| `.local` leaks on the IPv6 path; `addrinfo.c:476` calls it first | `netstack_dns.c:401-446` |
+| `254.169.in-addr.arpa.` reverse leaks; fix is an immediate negative | `netstack_dns.c:367-398` |
 
-**`IPV6_MULTICAST_HOPS = 0` is coerced to 1 and the datagram leaves the
-machine.** `mcast.c:936`. RFC 3493 §5.2's table says `0 <= x <= 255` uses x, and
-a hop limit of 0 is the application saying "do not put this on the link". Two
-characters of code, and the wrong answer is a leak rather than a failure.
-
-**More accepted-and-ignored interfaces**, the class a caller cannot detect:
-`IPV6_UNICAST_HOPS` and `IPV6_TCLASS` on TCP (stored, echoed, never applied —
-`socket.c:1354` creates the socket with the defaults and nothing updates them);
-`SBTC_SIG_ADDRESS_CHANGE_MASK` stored and never signalled, which the code
-itself admits at `bsdsocket_internal.h:441-444`; and
-`SBTC_CAN_SHARE_LIBRARY_BASES` initialised FALSE, never written and never read,
-so a caller is told sharing is unsupported while the adjacent comment says it
-works. That one is wrong in the safe direction.
-
-**`DAV: 1,2` is itself a compliance claim we do not meet.** §18.1 requires all
-Class 1 MUSTs, which the PROPFIND request-body gap breaks; §18.2 requires the
-whole of §6-§10, which the LOCK-on-unmapped-URL and Depth-0-collection gaps
-break. Advertising `DAV: 1` would be honest except that Finder reads it as
-read-only, which is why it says `1,2` (`httpd.c:21`, `:2229`). **That tension
-needs deciding explicitly rather than sitting implicit.**
-
-**Resolver semantics diverge in ways callers cannot detect.** `EAI_AGAIN` is
-never returned — timeout, no-server, stack-down and NXDOMAIN all collapse to
-`EAI_NONAME`, so callers that retry on `EAI_AGAIN` never retry, even though the
-backend distinguishes them and `gethostbyname`'s `h_errno` mapping gets it
-right. `getaddrinfo` returns at most one address per family in a hardcoded
-IPv6-then-IPv4 order, with no RFC 6724 and no canonical name;
-`gethostbyname`/`gethostbyaddr` are IPv4-only and `getnameinfo` has no IPv6
-reverse lookup. DNS mutex contention is reported as `HOST_NOT_FOUND` —
-`TX_NOT_AVAILABLE` has no case in the error map — so the second of two
-concurrent resolvers is told the host does not exist. And resolver calls are
-uninterruptible: three retries across up to five servers with doubling timeouts
-is a worst case in the minutes for one blocking call, with no break-signal
-handling, unlike every other blocking path, and the DNS mutex held throughout.
-`src/bsdsocket/addrinfo.c:476-516`, `resolver.c:18, :53-54, :150-168`.
-
-**Correction: RFC 5227 DHCPDECLINE is NOT present.** An earlier entry said it
-was. `NX_DHCP_CLIENT_SEND_ARP_PROBE` is commented out in the vendored header and
-defined nowhere in our tree, so the guards around the probe, the conflict
-handler and the DECLINE never compile — and our own coverage for it is
-`#ifdef`'d out in `tests/netstack/dhcp3927_test.c`. RFC 2131 §4.4.1 makes the
-DECLINE a conditional MUST and RFC 5227 §2.1 makes the probe one. **The code is
-already written upstream and waiting behind one define.** The AutoIP path does
-probe, so link-local is compliant and DHCP is not — on a LAN with a static-address
-NAS inside the DHCP pool this is the difference between taking a duplicate
-address silently and asking for another.
-
-**The QDCOUNT bypass — not previously recorded.** `nxd_dns.c:4497` gates the
-entire question check on `QDCOUNT == 1`. With **QDCOUNT = 0** the name, type and
-class comparisons are all skipped and the RR loop parses from offset 12 anyway,
-so four of RFC 5452 §9.1's six MUST attributes vanish on a flag the attacker
-sets. §9.1: "A mismatch and the response MUST be considered invalid."
-
-**Before fixing the bailiwick gap, read this.** `NX_DNS_ENABLE_EXTENDED_RR_TYPES`
-is undefined in our build, so CNAME processing is compiled out and a CNAME RR is
-skipped. The A record that follows — whose owner is the CNAME *target*, not the
-queried name — is accepted **precisely because no owner-name check exists**.
-**Adding a bailiwick check without also following CNAME chains will break every
-CDN-hosted name on the machine.** They belong in one piece of work. Two side
-effects worth knowing meanwhile: those A records cache under the CNAME target so
-the original name always misses, and a CNAME-only response yields
+**A bailiwick check without CNAME chain following breaks every CDN-hosted name.**
+CNAME processing is compiled out (`NX_DNS_ENABLE_EXTENDED_RR_TYPES` undefined),
+so the following A record — owner = CNAME target — is accepted *because* no
+owner-name check exists. One piece of work. Meanwhile those records cache under
+the target, so the queried name always misses, and a CNAME-only response yields
 `NX_DNS_QUERY_FAILED`.
 
-**A second, independent route to a permanent cache entry.** Separate from the
-tick-division bug: `nxd_dns.c:8102` stores the raw 32-bit TTL with no RFC 2181 §8
-sign-bit rule and no ceiling, so a TTL with the top bit set caches for ~68 years.
+**DHCP**
 
-**`254.169.in-addr.arpa.` reverse lookups leak to the unicast resolver.** RFC
-6762 §4 MUST. This stack assigns link-local addresses via AutoIP, so link-local
-peers are a normal state rather than a corner case, and every reverse lookup of
-one goes to the ISP resolver and times out. The vendored mDNS has no
-address-to-name API, so the right fix is an immediate negative, not a re-route.
+| Item | Cite |
+|---|---|
+| No ARP probe, no DHCPDECLINE. Upstream code exists behind `NX_DHCP_CLIENT_SEND_ARP_PROBE`, defined nowhere; our test phase `#ifdef`'d out. Cost +3.9 s/boot | `docs/DEVELOPMENT.md:606-614` |
+| No gratuitous ARP after a DHCP address is set | `nx_arp_gratuitous_send()` uncalled |
+| ARP conflict defended but never reported; `nx_interface_ip_conflict_notify_handler` registered nowhere | |
+| Option 121 (classless static routes) never requested; we ask for 33 only | `netstack.c:1052`, `:1137` |
+| No RFC 3396 long-option concatenation; first fragment wins | `nxd_dhcp_client.c:7526` |
+| Option 52 (overload) unhandled | |
+| `nxd_dhcp_client.c:6939`, `:6974` compare seconds against ticks | |
 
-**Citation error in our own code:** `src/netstack/netstack_dns.c:228` cites RFC
-6762 §6.7 for the `.local` rule. §6.7 is "Legacy Unicast Responses"; the
-requirement is **§3**. The behaviour is right and the citation has already
-propagated into notes elsewhere.
+**TCP**
 
-**DNS response validation.** Responses are accepted without checking who sent
-them — only the 16-bit transaction ID is validated and `nx_udp_source_extract`
-appears nowhere in the addon, so an on-link attacker who can observe the query
-needs no spoofing at all. There is no bailiwick check and AUTHORITY-section
-records are accepted as answers, so with the cache enabled one accepted
-response can insert an A record for a name never asked about. Cached entries
-never expire under repeated lookup: elapsed TTL is computed by integer division
-by the tick rate, so a name looked up more than once a second always computes
-zero elapsed while its last-used time is reset. Together those two make an
-injected record permanent. The TC bit is ignored with no TCP fallback and no
-EDNS0, so a truncated answer reaches the application as `HOST_NOT_FOUND`. The
-reverse path validates nothing but the ID. Question-name comparison is
-case-sensitive, so any forwarder doing DNS-0x20 randomisation makes every
-lookup fail. Source validation and the reverse path are small local changes;
-bailiwick and TTL belong upstream, per our own policy of not patching
-`addons/dns`.
+| Item | Cite |
+|---|---|
+| SACK send side: we advertise SACK-Permitted and never parse incoming blocks. `NX_TCP_SACK_KIND` defined and written, never read | `nx_tcp.h:93`, `nx_tcp_sack_option_build.c:212` |
+| Broadcast SYN answered (destination unchecked) + one half-open slot per listener → port dead 127 s | `nx_tcp_packet_process.c:517-542`, `socket.c:1729-1730` |
+| RFC 5961 absent: in-window RST resets, in-window SYN resets and tears down, RST at any sequence when `RCV.WND==0` | `nx_tcp_socket_packet_process.c:234-271`, `:165-167` |
+| ICMP errors never reach TCP or UDP | `nx_icmpv4_packet_process.c:143-171` |
+| MUST-23: R2 for SYN is 127 s, needs 180. `NX_TCP_MAXIMUM_RETRIES 7` → 255 s, `connect()` blocks that long | `nx_user.h:201`, `:204` |
+| Sender SWS avoidance absent; Nagle absent | `nx_tcp_socket_send_internal.c:455-470` |
+| Receiver SWS has no `min(MSS, RCV.BUFF/2)` floor | `nx_tcp_socket_receive.c:210-218` |
+| Restart-after-idle absent; no per-socket last-send time | |
+| TIME-WAIT 2MSL not restarted on a retransmitted FIN | `nx_tcp_socket_packet_process.c:456-459` |
+| In-window RST destroys TIME-WAIT (RFC 1337) | `:234-248` |
+| Listen path sets IW = 1 MSS where the other three paths do RFC 3390 | `nx_tcp_packet_process.c:734-735` |
+| RST-in-response-to-RST hole on the malformed-option path | `nx_tcp_socket_packet_process.c:298-332` |
+| UDP demux ignores the 4-tuple | `nx_udp_packet_receive.c:247` |
+| UDP checksum verified at dequeue, not enqueue | `nx_udp_socket_receive.c` |
+| `o02_duplicate_segment` fails: a duplicate of acknowledged data is not re-acked when the receive queue is non-empty | `tests/tcpdrill` |
 
-**No RTT estimator at all.** The retransmit timer is a fixed rate, so RFC 6298
-§2 is not implemented — the port compensates in configuration rather than code.
-The resulting ladder does satisfy the RFC 6298 and RFC 1122 minimums, so this
-is a quality-of-recovery gap rather than a conformance one. Upstream, not
-introduced here. Timestamps and PAWS are likewise absent.
+**IPv6**
 
-**Two corrections from the IPv6 survey, and a sharper reading of the PMTUD
-entry below.** Oversize **UDP** sends now return `EMSGSIZE` before allocating
-(`transfer.c:570-572`); only **raw** keeps the silent-drop-after-success
-(`transfer.c:722-741`). And a renumbering network does **not** leave a stale
-address forever — `nx_ipv6_prefix_list_delete_entry.c:105-140`, driven from the
-prefix timer, invalidates every SLAAC address when the prefix's valid lifetime
-expires, so `NX_IPV6_ADDR_STATE_VALID` is enforced. What is genuinely missing is
-the **graceful** half: no preferred lifetime and `NX_IPV6_ADDR_STATE_DEPRECATED`
-assigned nowhere, so an address is fully usable right up to the moment it
-disappears.
+| Item | Cite |
+|---|---|
+| PMTUD off **and** no 1280 cap — the one combination RFC 8201 §1 rules out. PTB not dispatched. RA MTU option discarded on the same `#ifdef` | `nx_user.h:651-661`, `nx_icmpv6_packet_process.c:210-216` |
+| No fragment reassembly, either family | `nx_ip_fragment_enable()` uncalled |
+| No MLD; recorded rationale is wrong (snooping filters, it does not forward) | `nx_mld.h` stub, `nx_user.h:636-645` |
+| A-bit test nested inside L-bit: prefix A=1 L=0 forms no address | `nx_icmpv6_process_ra.c:310`, `:332` |
+| No RFC 7559 RS backoff: fixed 4 s, stop after 3 | `nxd_ipv6_router_solicitation_check.c:86-107` |
+| No interface but 0 ever sends an RS — `ipv6_enable()` runs before the attach loop | `netstack.c:648` vs `:658-678` |
+| IGMP all-hosts filter for interface 1 is a race with the IP thread; unresolved statically | `nx_ip_thread_entry.c:526-545` |
+| No preferred lifetime, `NX_IPV6_ADDR_STATE_DEPRECATED` assigned nowhere — no graceful window before an address vanishes | `nx_api.h:959` |
+| No privacy addresses (8981) or opaque IIDs (7217); MAC in every global address | |
+| No RDNSS (8106) — IPv6-only link yields addresses but no DNS | `nx_icmpv6.h:68-74` |
+| No ICMPv6 error rate limiting; §2.4(e.3) enforced at one call site only | `nx_icmpv6_send_error_message.c` |
+| No 1280 MTU floor on a SANA-II device reporting less | `sana2_device.c:183-201` |
+| Raw oversize send still drops after success | `transfer.c:722-741` |
 
-**The PMTUD entry understates it: omitting PMTUD is only legal if you then cap
-at 1280.** RFC 8201 §1 — "Nodes not implementing Path MTU Discovery must use the
-IPv6 minimum link MTU defined in [RFC8200] as the maximum packet size." We do
-neither: PMTUD is off, ICMPv6 Packet Too Big is **not dispatched at all**
-(`nx_icmpv6_packet_process.c:210-216` gates the case on the disabled define), and
-we send up to the full link MTU. Either enable PMTUD or cap IPv6 sends at 1280 —
-the status quo is the one combination the RFC rules out. The RA MTU option is
-discarded on the same `#ifdef` and is free.
+**TLS**
 
-**No interface other than 0 ever sends a Router Solicitation.** Ours, and it is
-call ordering: `ami_netstack_ipv6_enable()` runs at `netstack.c:648`, before the
-secondary-interface attach loop at `:658-678`, and `nxd_ipv6_enable.c:146-153`
-initialises `nx_ipv6_rtr_solicitation_max` only for interfaces valid at that
-instant. `nx_ip_interface_attach.c` joins ff02::1 but does not set those fields.
-SLAAC still eventually works there through unsolicited RAs. The same ordering
-makes the IGMP all-hosts MAC filter for interface 1 a race, which could not be
-settled statically.
+| Item | Cite |
+|---|---|
+| Hostname check compares CN before SAN and returns | `nx_secure_x509_common_name_dns_check.c:92-97` |
+| Chain walk has no depth counter and no visited set — two cross-signed certs loop | `nx_secure_x509_certificate_chain_verify.c:86-160` |
+| Fatal alerts and bare FIN both reported as clean EOF; the `CLOSE_NOTIFY_RECEIVED` arm is unreachable in a non-DTLS build | `tls_conn.c:713-723` |
+| No revocation of any kind | |
+| PKCS#1 v1.5 parser: byte 0 unchecked, any nonzero padding accepted, trailing data ignored, OID discarded | `nx_secure_x509_pkcs7_decode.c:104`, `:113-121`, `:187-197` |
+| `&&` where PKCS#1 wants `\|\|` in the strict verifier | `nx_secure_tls_process_certificate_verify.c:681` |
+| CBC explicit IV is the previous ciphertext block | `nx_secure_tls_record_payload_encrypt.c:186-188` |
+| Padding-validity timing: valid is *faster* by up to a record of SHA-256 | `nx_secure_tls_process_record.c:317-346` |
+| No encrypt-then-MAC (7366) | |
+| RSA-MD5/RSA-SHA1/ECDSA-SHA1 in the X.509 table and advertised | `ami_tls_crypto.c:1538-1540` |
+| Static-RSA suites still offered | `:1580-1581` |
+| No extended master secret, while we do resume | |
+| `REQUIRE_RENEGOTIATION_EXT` not defined — handshake completes with an un-upgraded server | `nx_secure_tls_process_serverhello.c:292-304` |
+| keyUsage fails open when the extension is absent | `nx_secure_x509_certificate_verify.c:102-115` |
+| No EKU check (parser exists, no call site), no nameConstraints, no critical-extension rejection | |
+| Outer `signatureAlgorithm` overwrites the inner one; verification uses the unauthenticated value | `nx_secure_x509.c:195`, `:518`, `:868` |
+| No minimum RSA modulus | |
+| `NX_SECURE_KEY_CLEAR` undefined — session keys left in freed heap | |
+| Resumption stores master secrets cleartext, no `SetProtection`, 24 h cap never fires without an RTC | `tls_resume.c:568`, `:718`, `:439` |
+| X25519/Ed25519 implemented in `crypto68k` and not wired into TLS | |
+| `TLSRandom()` packs all four bytes of a masked draw — every fourth byte has bit 7 clear | `tls_conn.c:986-993` |
+| ECDSA DER: only the `0x30` tag checked, no INTEGER tags, no minimal-encoding check | `nx_crypto_ecdsa.c:324` |
+| Entropy: ~18 credited bits on a no-RTC machine (clock guard credits 8 for uptime), no reseeding, no persisted seed, no health tests. `is_seeded` is not on the private context vector, so `tls.library` cannot check it | `ami_random.c:590`, `nxcontext.h:191-203` |
 
-**RFC 4862 §5.5.3: the A-bit test is nested inside the L-bit test.**
-`nx_icmpv6_process_ra.c:310` opens on the on-link flag and the autonomous-flag
-test at `:332` sits inside it, so a prefix advertised **A=1, L=0** forms no
-address at all. That combination is what several CPE firmwares and 3GPP
-advertise; on such a link the machine gets a link-local and nothing else,
-silently. One nested `if`.
+**httpd**
 
-**RFC 7559 Router Solicitation backoff is absent.** Fixed 4-second interval,
-hard stop after three (`nxd_ipv6_router_solicitation_check.c:86-107`). RFC 8504
-§5.4 restates it as a MUST. An Amiga is switched on by hand, often before the
-router — exactly the case this exists to cover — and the recovery path is the
-router's next unsolicited RA, which may be ten minutes away.
+| Item | Cite |
+|---|---|
+| `Content-Length` accumulates with no overflow check; `4294967306` wraps to 10, `5abc` parses as 5; duplicates take the last | |
+| TE + CL both accepted (precedence correct); should be 400. TE matched by 7-char prefix, so `gzip, chunked` is missed and `chunkedX` matches | |
+| Chunk size shifts unbounded; 9+ hex digits wrap and `100000000` reads as terminator, rest parsed as a pipelined request | |
+| Header values over 255 bytes truncated silently; for `Destination:` a truncated path becomes a valid target and `Overwrite` defaults true | |
+| Chunked bodies bypass the size and time bounds: `body_left` never set, every read refreshes the progress timestamp. 8 connections at 1 byte/29 s exhaust the table. Also skips the free-space precheck | `httpd.c:4342-4434` |
+| COPY/MOVE to a name the filesystem would shorten, with nothing in the way — the check catches a collision, not the first create | |
+| Document root with a trailing slash may resolve to its parent; `httpd_root` never normalised | unverified on hardware |
+| Hard-linked directories walked through — `ST_LINKDIR` tests as a directory and `Lock()` follows it; no `O_NOFOLLOW` on AmigaOS | unverified on hardware |
 
-**IPv6: no path MTU discovery and no fragment reassembly.** PMTUD is
-deliberately unset, so both the RA MTU option and ICMPv6 Packet Too Big are
-ignored. Separately, `nx_ip_fragment_enable()` is never called anywhere in the
-tree. So oversized sends are dropped **silently, after `send()` returned
-success**, and inbound fragmented datagrams cannot be reassembled, which RFC
-8200 requires hosts to do up to 1500 bytes. TCP's MSS only protects against the
-peer's link MTU, not a narrower path in the middle. Affects both address
-families and is the gap most likely to produce user-visible hangs on tunnelled
-paths. `port/netxduo-amiga/inc/nx_user.h:599-606`.
+**WebDAV** — remaining RFC 4918 gaps
 
-**IPv6: the remaining conformance gaps.** No privacy addresses (RFC 4941/8981)
-and no stable-opaque IIDs (RFC 7217), so the MAC is embedded in every global
-address where every modern OS defaults to temporary ones. No MLD — a join
-registers the multicast MAC filter and announces nothing, so on a switch with
-snooping and an active querier the group traffic may never arrive. No address
-lifetimes: only the prefix entry ages, `NX_IPV6_ADDR_STATE_DEPRECATED` exists
-and is never set, and RFC 4862 §5.5.3(e) is absent, so a renumbering network
-leaves a stale address forever. No ICMPv6 error rate limiting, which RFC 4443
-§2.4(f) makes a MUST. And `netstack_ipv6.c:565-568` describes
-`_nxd_ipv6_interface_find()` as "the same RFC 6724 selection routine" — it is a
-first-match heuristic with no candidate-set comparison, no policy table, no
-scope ordering and no destination ordering. **The comment is a conformance
-claim the code does not meet and should be corrected even if the behaviour is
-accepted.**
+PROPFIND ignores the request body (no `propname`, no named `prop`, no 404
+propstat) · cross-host `Destination:` treated as local, answered 201 · LOCK on
+an unmapped URL creates nothing (§7.3 wants a locked empty resource that then
+survives its lock — conflicts with "nothing visible until whole") · Depth-0
+collection lock does not protect members · `<D:owner>` truncated to 47 bytes and
+stripped of non-ASCII · lock refresh accepted from outside the lock's scope ·
+32-bit LCG lock tokens · 412/423 bodies carry HTML not `<D:error>` · UNLOCK with
+no `Lock-Token` returns 409 not 400 · `Depth: 2` silently becomes 0 ·
+`If-None-Match: *` unimplemented · XML skimmer has no nesting, entity decoding,
+CDATA or comment handling · UTF-16 bodies not understood · PROPPATCH naming no
+settable property emits a `<D:response>` with no propstat and no status
+(invalid per §14.24, ~5 lines).
 
-**TLS hardening beyond the chain-verification fix.** No revocation checking of
-any kind, so a stolen key is usable indefinitely. The CBC explicit IV is the
-previous record's last ciphertext block rather than random, which is the BEAST
-precondition. CBC padding is checked with an early return before the MAC is
-computed, which on a 14 MHz 68020 makes the Lucky13 timing delta trivially
-measurable. PKCS#1 v1.5 unpadding never checks the leading zero byte or that
-padding bytes are `0xFF`. The X.509 signature table still accepts RSA-MD5,
-RSA-SHA1 and ECDSA-SHA1, which are free to remove. Session resumption stores
-master secrets in cleartext, losing forward secrecy for resumed sessions —
-disclosed and defensible against a 23-second alternative, but the file is as
-sensitive as the sessions it represents. `NX_SECURE_KEY_CLEAR` is undefined, so
-session keys are left in freed heap.
+**Decided**
 
-**TLS entropy is thinner than the warning suggests.** The seed inventory totals
-a ceiling of 26 bits and measures around 21. There is no reseeding after init,
-no persisted seed and no input timing. Against an attacker who can reproduce
-the configuration — the same emulator image being the realistic case — that is
-offline-brute-forcible, with TCP ISNs and DNS IDs in the clear as a
-confirmation oracle. The research notes already warn against enabling TLS for
-adversarial use without supplying a seed; the gap is between that sentence and
-a library that never checks, warns or reports. `ami_random_is_seeded()` is
-called from exactly one place in the tree, a benchmark.
+- **Dead properties: declined.** §9.2 SHOULD. AmigaOS offers a 79-byte filenote
+  or a sidecar; a sidecar costs `Lock`+`Examine`+`Open`+`Read` per entry per
+  PROPFIND, doubling listing cost on a 68000 and the file count of every drawer,
+  and a `.props-<name>` scheme collides on OFS's 30-character truncation.
+  Measured client cost of having none: Explorer's creation/access times and
+  attribute bits, nothing else.
+- **Bounded multistatus is deliberate.** 8 entries / 768 bytes, 8 properties.
+  Honouring §9.8.3 unbounded needs a spill file or a streamed 207, and a
+  streamed 207 cannot be retracted once the head is out.
 
-**Concurrency defects already documented and still open.**
-`ami_bpf_close_owner()`, reached from library close, releases every channel the
-owner holds with none of the `ch->reading` check that makes `ami_bpf_close()`
-return `EBUSY` — so two tasks sharing a base give a use-after-free on close.
-Every write to `ami_ns` holds `ami_ns_lock` and none of the ~18 reads do, so
-`netstack_ip()` and `netstack_pool()` callers can touch freed memory during
-teardown; the bounded-exposure argument is sound but the invariant is held by
-convention rather than by code. The baton slot table has sixteen slots keyed by
-`struct Task *` with nothing sweeping them, so a task dying mid-bracket holds
-its slot permanently and — because Exec recycles Task addresses — a later task
-can inherit a stale `TX_THREAD` and a nonzero nesting count.
+**Concurrency** (all three already in `REENTRANCY.md`/`ALLOCATIONS.md`)
 
-**Structural fragilities worth a guard rail.** `src/mbuf` will leak wholesale
-the day it goes live: every `mbuf_*` LVO is an `enosys` stub and
-`ami_mbuf_cleanup()` has no production caller, so implementing any single
-vector without adding that call leaks every slab for the library's life.
-`ami_sana2_lookup()`'s lock-free read is correct only because attach writes
-`iface` last and unbind clears it first — reordering three lines breaks it
-silently. `AMI_MDNS_PRIORITY` is defined locally in `netstack_mdns.c:48`,
-outside the priority ladder's `#error` assertions, which is exactly the drift
-the ladder abolishes after it once cost 6.6% throughput. The post-link pcrel
-check is attached in four `CMakeLists` and absent from roughly twenty-two
-others that link m68k executables, including the smoke, bracket and soak
-targets the emulator tier boots. And `tests/perf/prof/` is a dead fork of
-`tools/profiler/` with an incompatible sample record, still built and still
-pointing users at a stale report script.
+| Item | Cite |
+|---|---|
+| `ami_bpf_close_owner()` releases channels with no `ch->reading` check that `ami_bpf_close()` has | `bpf_channel.c:233-243`, `:586-593` |
+| ~18 reads of `ami_ns` take no lock; every write does | `netstack.c:51`, `:1428` |
+| Baton slot table: 16 slots keyed by `struct Task *`, nothing sweeps them; Exec recycles Task addresses | `netstack_baton.c:68` |
 
-**httpd — request framing accepts values it should reject.** `Content-Length`
-accumulates with no overflow or validity check, so `4294967306` wraps to 10 and
-`5abc` parses as 5, and duplicate headers silently take the last value.
-`Transfer-Encoding` and `Content-Length` are both accepted with TE silently
-winning — correct precedence per RFC 7230 §3.3.3, but the combination should be
-a 400 — and TE is matched by a seven-character prefix, so the legal
-`gzip, chunked` is not recognised while `chunkedX` is. The chunk size shifts
-without a bound, so nine or more hex digits wrap 32 bits and `100000000` reads
-as the terminating chunk, after which everything following is parsed as a
-pipelined request. Header values over 255 bytes are silently truncated where
-the request target correctly returns 414 — and for `Destination:` that is
-destructive, because a long destination truncated to a shorter existing path
-becomes a valid target, and with `Overwrite` defaulting to true the clear walk
-deletes a collection the client never named. For a standalone origin server
-most of these are self-inflicted; behind any reverse proxy they are
-request-smuggling primitives.
+**Structural**
 
-**httpd — chunked bodies bypass the documented size and time bounds.** The body
-ceiling is applied only to `Content-Length`; `body_left` is never set for a
-chunked request and the chunked feeder keeps no running total, while every read
-refreshes the progress timestamp — so a client dribbling an endless chunked
-body never trips the timeout, defeating the file's own claim that body size and
-idle time are both capped. Eight such connections exhaust the default table
-permanently at a cost of one byte every 29 seconds each. The same root cause
-makes a chunked PUT skip the free-space precheck, which is gated on a nonzero
-`body_left`.
+`src/mbuf` leaks every slab the day any `mbuf_*` LVO is implemented —
+`ami_mbuf_cleanup()` has no production caller · `ami_sana2_lookup()`'s lock-free
+read is correct only because attach writes `iface` last · `AMI_MDNS_PRIORITY`
+defined outside the priority ladder's `#error` assertions
+(`netstack_mdns.c:48`) · post-link pcrel check in 4 `CMakeLists`, absent from
+~22 that link m68k executables including smoke/bracket/soak ·
+`tests/perf/prof/` is a dead fork of `tools/profiler/` with an incompatible
+sample record · a `cross`-stage build failure whose log has neither `error:` nor
+`Error` dies on the diagnostic grep before anything is recorded.
 
-**httpd — a COPY or MOVE whose destination name is too long for the
-filesystem, with nothing already in the way.** The name-truncation check
-catches a *collision*, not the first create, so a deep copy to a name the
-filesystem would shorten still lands. Undoing a completed deep copy is a second
-walk, which is why it was left. PUT and MKCOL do undo such a create and answer
-400; COPY and MOVE do not.
+**Tests**
 
-~~httpd — locks are checked only on the request path, never on descendants.~~
-**Fixed**: `httpd_lock_allows_tree()` now covers DELETE and the MOVE source, so
-a lock on `/a/b/c` refuses `DELETE /a` with 423 as RFC 4918 §9.6.1 requires. A
-COPY/MOVE *destination* clear deliberately keeps its locks — §7 keeps them, and
-it is the token the client submitted to authorise the move.
+Socket-option surface entirely untested — nothing exercises `SO_RCVBUF`,
+`SO_SNDBUF`, `SO_LINGER`, `TCP_MAXSEG`, `TCP_NODELAY`, `IP_TTL`, `IP_TOS`,
+`SIOCATMARK`, `FIOASYNC`, any `SIOCGIF*`, or the multicast width paths — which
+is where the API findings cluster · `sana2` has no dedicated suite · **httpd has
+no fuzzer**, and is the newest network-facing parser (chunked state machine
+first) · `usergroup` functional tests were added 2026-08-02.
 
-**Correction to an earlier entry in this section: the LOCK depth default is not
-a defect.** It was listed here as one. RFC 4918 §10.2 and §9.10.3 both make an
-absent `Depth` header on LOCK mean infinity, so storing infinity is exactly
-right. `httpd_reset()`'s `depth = 1` only *reads* oddly, because 1 is the
-internal spelling of infinity in that table.
+**Docs**
 
-**httpd — two issues to confirm on hardware.** A document root given with a
-trailing slash may resolve to its parent: `httpd_root` is taken raw from
-`ReadArgs` and never normalised, and the resolver appends a separator only when
-a segment follows, so with zero segments it returns the root string unchanged.
-Since a trailing separator is a parent reference on AmigaOS, `httpd Work:Public/`
-serving `GET /` would lock `Work:` and enumerate the whole volume. Writes are
-unaffected, and the path test asserts no path ends in a separator but only when
-`segments > 0`. Separately, hard-linked directories are walked through:
-everything keys off `fib_DirEntryType > 0`, and `ST_LINKDIR` tests as a
-directory with `Lock()` following it transparently, so a link inside the served
-tree lets DELETE recurse outside the document root. Path-string validation
-cannot see this and there is no AmigaOS `O_NOFOLLOW`; it needs a pre-existing
-link, so it is residual risk, but it is the one traversal the path library
-cannot defend and deserves at least a comment.
+User guide COMMANDS node says seven Shell commands; the build produces 25 and
+the installer copies all of them · `httpd` missing from `dist/ReadMe`'s C: list
+and uninstall list · `SECURITY.md` trust-boundary table omits `httpd` · README
+says seven build configurations, `ci.sh` has ten (twelve with host tiers) ·
+`install/README.md` needs a line for `Guide.info` · `clients/dropbear/build.sh`
+and `dist/make-dist.sh` are release-only steps CI never runs.
 
-**Remaining WebDAV conformance gaps (RFC 4918).** PROPFIND ignores the request
-body entirely — no `propname` support, no honouring of a named `prop` set, and
-no 404 propstat for a property that does not exist, all of which §9.1 makes
-MUSTs. A `Destination:` naming another host is silently treated as local and
-answered 201 Created, where §10.3 requires the request to fail; the path still
-resolves inside the document root, so this is a wrong answer rather than an
-escape, and the real work is that the `Host:` header is parsed nowhere. LOCK on
-an unmapped URL creates nothing, where §7.3 requires a locked empty resource
-that then appears in PROPFIND and answers GET — note this conflicts with the
-"nothing this server writes is visible until it is whole" rule, because an
-abandoned lock would leave a permanent 0-byte file. A Depth-0 lock on a
-collection does not protect its members (§7.4). `<D:owner>` is truncated to 47
-bytes, flattened and stripped of non-ASCII where §9.10.1 requires it preserved.
-A lock refresh is accepted from a URL outside the lock's scope, where UNLOCK
-correctly checks. Lock tokens are 32 bits from an LCG seeded off a coarse
-clock, where §6.5 wants uniqueness "for all time" and §6.4 says token obscurity
-must not be what protects a lock. 412/423 bodies carry HTML rather than
-`<D:error>` precondition elements. UNLOCK with no `Lock-Token` returns 409
-where the guidance says 400. `Depth: 2` silently becomes `Depth: 0`.
-`If-None-Match: *` is unimplemented, so an atomic create-only-if-absent PUT
-silently overwrites. The XML skimmer is not a parser — no nesting, no entity
-decoding, no CDATA, no comment handling — so a `<!-- <prop> -->` is read as a
-tag, and 2518 §14's "ignore unknown elements and all their children" cannot be
-honoured; a depth counter is ~15 bytes and closes that. UTF-16 request bodies
-are not understood, which §19 requires and essentially nobody implements.
+**Withdrawn** — do not re-raise
 
-**Dead properties: declined, and the reasoning.** §9.2 SHOULDs arbitrary dead
-property storage. AmigaOS offers a 79-byte filenote or a sidecar file; a
-sidecar costs a `Lock`+`Examine`+`Open`+`Read` per entry on every PROPFIND,
-which on a 68000 roughly doubles the cost of a directory listing and doubles
-the file count of every drawer served — and on an 880 KB OFS floppy, where
-names truncate at 30 characters, a `.props-<name>` scheme collides. A per-drawer
-index avoids the file count but serialises writes. The measured client cost of
-having none is losing Explorer's creation and access times and its file
-attribute bits, and nothing else. **Decision: decline.** Recorded here so it is
-not re-proposed.
-
-**Bounded multistatus is a deliberate departure.** §9.8.3's "the URL of the
-resource causing the failure MUST appear" has no ceiling; our partial-failure
-responses cap at 8 entries or 768 bytes, and PROPPATCH at 8 properties.
-Honouring it needs either a spill file or a streamed 207, and a streamed 207
-cannot be retracted once the head is out. Also: a PROPPATCH that names no
-settable property emits a `<D:response>` with no propstat and no status, which
-is invalid per §14.24 and is ~5 lines to fix.
-
-**Test coverage gaps, in the order they matter.** The socket-option surface is
-entirely untested — nothing exercises `SO_RCVBUF`, `SO_SNDBUF`, `SO_LINGER`,
-`TCP_MAXSEG`, `TCP_NODELAY`, `IP_TTL`, `IP_TOS`, `SIOCATMARK`, `FIOASYNC`, any
-`SIOCGIF*`, or the multicast width paths — and that is precisely where the
-audit's API findings cluster, which is not a coincidence. `sana2` has no
-dedicated suite and is exercised only indirectly. **httpd has no fuzzer**: it
-is the newest network-facing request parser and the natural next target,
-particularly the chunked state machine. `usergroup` has effectively no
-functional tests.
-
-**Documentation drift.** The user guide's COMMANDS node says "Seven Shell
-commands" and documents seven; the build produces 25 and the installer copies
-all of them, so 19 are undocumented including `fetch`, `nc`, `telnet`, `ssh`,
-`traceroute`, `tftp` and `httpd`. `httpd` is missing from `dist/ReadMe`'s
-"puts into C:" list and from its uninstall list, so the documented uninstall
-leaves it behind. `SECURITY.md`'s trust-boundary table omits `httpd`, which has
-been parsing untrusted requests since 0.16.5. And this file carries one
-superseded entry whose hypothesis a later entry explicitly retracts — worth
-folding together.
-
-**Housekeeping.** Untracked strays in a working tree: `src/library.c` and
+- The CI analyze stage does **not** skip cppcheck. `stage_analyze` is invoked as
+  `stage_analyze || true`, and bash suppresses `set -e` inside a function called
+  as part of an `||` list. Reproduced both directions.
+- `ugl_crypt()` returning `"*"` is a hazard for third-party callers, not a live
+  bypass: it also sets `UG_ENOSYS`, and nothing in the tree calls it.
 `src/tools.h` are pre-refactor copies of the real files, each missing changes
 the tracked versions have; `stage-developer.sh` and `aminetxduo_lib.sfd` at the
 root are byte-identical to their tracked counterparts; `tmp_x/` holds a third,
