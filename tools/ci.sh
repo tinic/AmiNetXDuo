@@ -54,10 +54,10 @@ JOBS="${AMINETXDUO_CI_JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl 
 # entries here are the OFF ones -- the configurations a user gets by asking for
 # a smaller stack, and the ones that would otherwise stop being compiled at all.
 #
-# The last three are the CPU targets.  They are not "the same build with a
-# different -m flag": each one changes what the compiler may emit and what the
-# tree may contain, and each broke something the others did not while it was
-# being brought up (docs/RESEARCH.md §45).
+# Then the three CPU targets.  They are not "the same build with a different
+# -m flag": each one changes what the compiler may emit and what the tree may
+# contain, and each broke something the others did not while it was being
+# brought up (docs/RESEARCH.md §45).
 #
 #   m68000  no 32-bit multiply or divide at all, so the compiler runtime in
 #           src/common carries five more routines and the crypto assembly
@@ -68,8 +68,10 @@ JOBS="${AMINETXDUO_CI_JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl 
 #   m68060  the 64-bit-result MULU.L and DIVU.L are gone, so GCC calls
 #           __muldi3 -- the symbol whose absence blocked this target.
 #
-# Together with `default` these are the three libraries the archive ships, so
-# a break here is a break in something a user downloads.
+# `default`, m68000, m68060 and minimal68000 are the four libraries the archive
+# ships, in the options the release workflow gives them, so a break in any of
+# them is a break in something a user downloads.  Nothing may ship in a shape
+# that is not built here.
 CROSS_CONFIGS=(
     "default:"
     "noipv6:-DAMINETXDUO_IPV6=OFF"
@@ -88,6 +90,14 @@ CROSS_CONFIGS=(
     "m68000:-DAMINETXDUO_CPU=68000"
     "m68040:-DAMINETXDUO_CPU=68040"
     "m68060:-DAMINETXDUO_CPU=68060"
+    # The fourth drawer in the archive, and the only arm here that turns more
+    # than one thing off at once.  Every option above is a separate arm because
+    # each has its own compile-time surface; this one exists because the
+    # combination is what a user downloads, and the arms above do not cover it
+    # -- BPF=OFF appears nowhere else at all, and the interactions between five
+    # of them appear nowhere else at all.  It must stay byte-for-byte the
+    # options .github/workflows/release.yml gives build/release-68000-minimal.
+    "minimal68000:-DAMINETXDUO_CPU=68000 -DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF"
 )
 
 # Host-side test executables.  ctest fails loudly ("Unable to find executable")
