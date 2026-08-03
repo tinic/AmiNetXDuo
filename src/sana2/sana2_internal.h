@@ -145,6 +145,9 @@
 /* Baton-wait buckets, log2 in E-Clock ticks: 0, 1, 2-3, 4-7 ... */
 #define AMI_RXPROBE_BUCKETS         16
 
+/* Deepest backlogs kept, smallest first. */
+#define AMI_RXPROBE_WORST           12
+
 typedef struct AmiRxProbe
 {
     ULONG   posts;              /* SendIO(CMD_READ) issued                 */
@@ -162,6 +165,14 @@ typedef struct AmiRxProbe
     ULONG   baton_max;
     ULONG   baton_sum;
     ULONG   baton_hist[AMI_RXPROBE_BUCKETS];
+
+    /* The worst wakes by backlog: was the reader held, or was that a burst? */
+    ULONG   worst_when[AMI_RXPROBE_WORST];   /* ticks since the last wake  */
+    ULONG   worst_baton[AMI_RXPROBE_WORST];
+    UWORD   worst_backlog[AMI_RXPROBE_WORST];
+    UWORD   worst_avail[AMI_RXPROBE_WORST];
+    ULONG   last_wake;
+    ULONG   baton_last;
 } AmiRxProbe;
 
 /*

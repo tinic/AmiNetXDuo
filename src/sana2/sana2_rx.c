@@ -247,6 +247,16 @@ VOID ami_sana2_rxprobe_report(const AmiSana2If *iface)
                 AMI_ERROR("rxprobe %ld: backlog %ld -> %ld drains",
                           (long)i, (long)j, (long)pr->backlog_hist[j]);
         }
+
+        for (j = 0; j < AMI_RXPROBE_WORST; j++)
+        {
+            if (pr->worst_backlog[j] != 0)
+                AMI_ERROR("rxprobe %ld: worst backlog %ld avail %ld "
+                          "since last wake %ld baton %ld ticks",
+                          (long)i, (long)pr->worst_backlog[j],
+                          (long)pr->worst_avail[j], (long)pr->worst_when[j],
+                          (long)pr->worst_baton[j]);
+        }
     }
 
     /*
@@ -552,11 +562,36 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
 
         if (backlog != 0)
         {
+            ULONG now  = ami_rxprobe_clock();
+            ULONG span = now - pr->last_wake;
+
+            pr->last_wake = now;
             pr->drains++;
             pr->backlog_hist[backlog]++;
             pr->avail_hist[avail]++;
             if (avail == 0)
                 pr->dry++;
+
+            /* Keep the deepest, smallest first, so one pass is enough. */
+            if (backlog > pr->worst_backlog[0])
+            {
+                UWORD k = 0;
+
+                while (k + 1 < AMI_RXPROBE_WORST &&
+                       backlog > pr->worst_backlog[k + 1])
+                {
+                    pr->worst_backlog[k] = pr->worst_backlog[k + 1];
+                    pr->worst_avail[k]   = pr->worst_avail[k + 1];
+                    pr->worst_when[k]    = pr->worst_when[k + 1];
+                    pr->worst_baton[k]   = pr->worst_baton[k + 1];
+                    k++;
+                }
+
+                pr->worst_backlog[k] = backlog;
+                pr->worst_avail[k]   = avail;
+                pr->worst_when[k]    = span;
+                pr->worst_baton[k]   = pr->baton_last;
+            }
         }
 
         rx->iface->seq.avail = avail;
@@ -888,6 +923,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
 
             dt = ami_rxprobe_clock() - t0;
             pr->baton_sum += dt;
+            pr->baton_last = dt;
             if (dt > pr->baton_max)
                 pr->baton_max = dt;
             pr->baton_hist[ami_rxprobe_bucket(dt)]++;
@@ -901,7 +937,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
 #ifdef AMINETXDUO_RXPROBE
         /* Keep probe_dev_rx within a few hundred frames of the truth: the
            report runs from NetStat, which cannot issue a device command. */
-        if (rx->reap_tx && (rx->probe.drains & 511UL) == 0UL)
+        if (rx->reap_tx && (rx->probe.drains & 31UL) == 0UL)
             ami_sana2_refresh_stats(iface);
 #endif
     }
