@@ -78,6 +78,24 @@
 #define AMI_SANA2_TX_SLOTS          8
 #endif
 
+/*
+ * Receive-path probe. Counts how many completions each return from the
+ * reader's Wait() collects, which separates "woken late, the ring absorbed a
+ * burst" from "woken promptly, then slow": the first shows a backlog, the
+ * second does not. Off by default and free when off; -DAMINETXDUO_RXPROBE
+ * turns it on and ami_sana2_refresh_stats() prints the histogram.
+ */
+#ifdef AMINETXDUO_RXPROBE
+#define AMI_SANA2_RX_HIST           5   /* 0, 1, 2-3, 4-7, 8+ */
+#define AMI_RXPROBE_COUNT(c)        ((c)++)
+/* TX_DISABLE_STACK_FILLING is set for the port, so the reader fills its own
+   stack and the probe scans it. The receive path's stack cost is then measured
+   rather than guessed. */
+#define AMI_RXPROBE_STACK_FILL      0xA5A5A5A5UL
+#else
+#define AMI_RXPROBE_COUNT(c)        ((VOID)0)
+#endif
+
 #include "../thread_priorities.h"
 #ifndef AMI_SANA2_RX_STACK_SIZE
 #define AMI_SANA2_RX_STACK_SIZE     4096
@@ -181,6 +199,16 @@ typedef struct AmiSana2Rx
        device, so none may be freed -- see ami_sana2_rx_teardown(). */
     volatile UWORD      orphans;
 
+#ifdef AMINETXDUO_RXPROBE
+    ULONG               probe_wakes;
+    ULONG               probe_msgs;
+    ULONG               probe_peak;
+    ULONG               probe_hist[AMI_SANA2_RX_HIST];
+    ULONG               probe_deferred;  /* batches handed to the IP thread  */
+    ULONG               probe_stack;     /* high-water bytes, filled at start */
+    ULONG               probe_starved;   /* loops that slept for want of a slot */
+#endif
+
     AmiRxSlot           slot[AMI_SANA2_RX_MAX_DEPTH];
 } AmiSana2Rx;
 
@@ -256,6 +284,12 @@ struct AmiSana2If
     BOOL                tx_orphaned;
 
     AmiSana2Stats       stats;
+
+#ifdef AMINETXDUO_RXPROBE
+    /* Sends that found the transmit ring full and slept a tick for a slot. */
+    ULONG               probe_txspin;
+    ULONG               probe_txsends;
+#endif
 };
 
 /* ------------------------------------------------------------- internals */
@@ -287,7 +321,6 @@ VOID ami_sana2_unbind(AmiSana2If *iface);
 /* sana2_rx.c */
 LONG ami_sana2_rx_start(AmiSana2If *iface);
 VOID ami_sana2_rx_stop(AmiSana2If *iface);
-VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet);
 
 /* sana2_tx.c */
 VOID ami_sana2_tx_init(AmiSana2If *iface);

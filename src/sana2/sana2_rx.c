@@ -21,10 +21,9 @@
  * threads in the shim that block in exec Wait() rather than on a ThreadX
  * object, so they are the only ones a device's ReplyMsg can wake, and without
  * a thread that wakes on a completion TCP never learns that the driver has
- * finished with a segment and never retransmits it. The reader does not touch
- * the packet: it asks NetX Duo for deferred processing and the IP thread does
- * the work. See sana2_tx.c; the mechanism here is one extra signal bit in a
- * Wait() the reader was making anyway.
+ * finished with a segment and never retransmits it. See sana2_tx.c; the
+ * mechanism here is one extra signal bit in a Wait() the reader was making
+ * anyway.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -49,16 +48,83 @@ VOID ami_sana2_block_leave(VOID);
 /* ------------------------------------------------------------- delivery */
 
 /*
+ * One drain's worth of IP packets, chained through nx_packet_queue_next.
+ *
+ * _nx_ip_packet_deferred_receive() takes TX_DISABLE -- a Forbid() in this port
+ * -- once per packet to splice one packet onto a queue the reader is the only
+ * writer of. A burst therefore pays a Forbid()/Permit() pair per frame for a
+ * list the reader could have built privately and handed over once.
+ *
+ * It does NOT pay tx_event_flags_set() per frame: that call sits behind the
+ * queue's empty test, and the reader outranks the IP thread, so during a burst
+ * the queue only goes empty->non-empty on the first packet.
+ */
+typedef struct AmiRxBatch
+{
+    NX_PACKET *head;
+    NX_PACKET *tail;
+} AmiRxBatch;
+
+/*
+ * Hand the whole chain to the IP thread: one critical section, and the event
+ * flag only when the queue was empty, which is the same condition NetX Duo
+ * tests per packet.
+ */
+static VOID ami_sana2_rx_batch_defer(AmiSana2If *iface, AmiRxBatch *batch)
+{
+    NX_IP *ip = iface->ip;
+    UINT   wake;
+
+    TX_INTERRUPT_SAVE_AREA
+
+    TX_DISABLE
+
+    if (ip->nx_ip_deferred_received_packet_head != NX_NULL)
+    {
+        ip->nx_ip_deferred_received_packet_tail->nx_packet_queue_next =
+            batch->head;
+        wake = 0;
+    }
+    else
+    {
+        ip->nx_ip_deferred_received_packet_head = batch->head;
+        wake = 1;
+    }
+
+    ip->nx_ip_deferred_received_packet_tail = batch->tail;
+
+    TX_RESTORE
+
+    if (wake != 0)
+        tx_event_flags_set(&ip->nx_ip_events, NX_IP_RECEIVE_EVENT, TX_OR);
+}
+
+static VOID ami_sana2_rx_batch_flush(AmiSana2Rx *rx, AmiRxBatch *batch)
+{
+    AmiSana2If *iface = rx->iface;
+
+    if (batch->head == NX_NULL)
+        return;
+
+    ami_sana2_rx_batch_defer(iface, batch);
+    AMI_RXPROBE_COUNT(rx->probe_deferred);
+
+    batch->head = NX_NULL;
+    batch->tail = NX_NULL;
+}
+
+/*
  * Hand one Ethernet-shaped packet to NetX Duo. Both the cooked path (header
  * synthesised above) and the raw path (header came off the wire) end here, so
  * the two modes are required to produce the same thing.
  *
- * The deferred entry points are used rather than _nx_ip_packet_receive: the
- * reader is not the IP thread, and the deferred variants are the supported way
- * to queue work onto it (see nx_api.h and nx_ram_network_driver.c, which
- * dispatches by EtherType the same way).
+ * IP goes on the batch; ARP and RARP are low-rate and take the per-packet
+ * deferred entry points unchanged. The reader is not the IP thread, and those
+ * are the supported way to queue work onto it (see nx_api.h and
+ * nx_ram_network_driver.c, which dispatches by EtherType the same way).
  */
-VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet)
+static VOID ami_sana2_rx_deliver(AmiSana2If *iface, AmiRxBatch *batch,
+                                 NX_PACKET *packet)
 {
     UINT type;
 
@@ -94,7 +160,12 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet)
     case AMI_ETHERTYPE_IPV4:
     case AMI_ETHERTYPE_IPV6:
         iface->stats.packets_received++;
-        _nx_ip_packet_deferred_receive(iface->ip, packet);
+        packet->nx_packet_queue_next = NX_NULL;
+        if (batch->head == NX_NULL)
+            batch->head = packet;
+        else
+            batch->tail->nx_packet_queue_next = packet;
+        batch->tail = packet;
         break;
 
 #ifndef NX_DISABLE_IPV4
@@ -153,53 +224,56 @@ static VOID ami_sana2_rx_arm(AmiSana2If *iface, AmiRxSlot *slot)
     slot->copied   = 0;
 }
 
+/* Give one idle slot a packet and put it back on the device. */
+static BOOL ami_sana2_rx_post_slot(AmiSana2Rx *rx, AmiRxSlot *slot)
+{
+    AmiSana2If *iface = rx->iface;
+
+    if (slot->posted)
+        return TRUE;
+
+    if (rx->stop || !iface->online)
+        return FALSE;
+
+    if (slot->packet == NULL)
+    {
+        if (nx_packet_allocate(iface->pool, &slot->packet,
+                               NX_RECEIVE_PACKET, NX_NO_WAIT) != NX_SUCCESS)
+        {
+            slot->packet = NULL;
+            iface->stats.alloc_failures++;
+            return FALSE;
+        }
+    }
+
+    ami_sana2_rx_arm(iface, slot);
+
+    slot->req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+    slot->req.ios2_Req.io_Message.mn_ReplyPort    = rx->port;
+    slot->req.ios2_Req.io_Command = CMD_READ;
+    slot->req.ios2_Req.io_Flags   = iface->raw_mode ? SANA2IOF_RAW : 0;
+    slot->req.ios2_Req.io_Error   = 0;
+    slot->req.ios2_WireError      = 0;
+    slot->req.ios2_PacketType     = rx->packet_type;
+    slot->req.ios2_DataLength     = 0;
+    slot->req.ios2_Data           = slot;
+    slot->posted                  = TRUE;
+
+    SendIO((struct IORequest *)&slot->req);
+    return TRUE;
+}
+
 /* Post every idle slot that has, or can get, a packet. Returns how many reads
    are in flight afterwards. */
 static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
 {
-    AmiSana2If *iface = rx->iface;
-    UWORD       i;
-    UWORD       live = 0;
+    UWORD i;
+    UWORD live = 0;
 
     for (i = 0; i < rx->depth; i++)
     {
-        AmiRxSlot *slot = &rx->slot[i];
-
-        if (slot->posted)
-        {
+        if (ami_sana2_rx_post_slot(rx, &rx->slot[i]))
             live++;
-            continue;
-        }
-
-        if (rx->stop || !iface->online)
-            continue;
-
-        if (slot->packet == NULL)
-        {
-            if (nx_packet_allocate(iface->pool, &slot->packet,
-                                   NX_RECEIVE_PACKET, NX_NO_WAIT) != NX_SUCCESS)
-            {
-                slot->packet = NULL;
-                iface->stats.alloc_failures++;
-                continue;
-            }
-        }
-
-        ami_sana2_rx_arm(iface, slot);
-
-        slot->req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-        slot->req.ios2_Req.io_Message.mn_ReplyPort    = rx->port;
-        slot->req.ios2_Req.io_Command = CMD_READ;
-        slot->req.ios2_Req.io_Flags   = iface->raw_mode ? SANA2IOF_RAW : 0;
-        slot->req.ios2_Req.io_Error   = 0;
-        slot->req.ios2_WireError      = 0;
-        slot->req.ios2_PacketType     = rx->packet_type;
-        slot->req.ios2_DataLength     = 0;
-        slot->req.ios2_Data           = slot;
-        slot->posted                  = TRUE;
-
-        SendIO((struct IORequest *)&slot->req);
-        live++;
     }
 
     return live;
@@ -207,7 +281,14 @@ static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
 
 /* ------------------------------------------------------------ completion */
 
-static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
+/*
+ * Turn a completed read into an Ethernet-shaped packet and hand it back. The
+ * caller re-arms the slot before it delivers, so returning the packet rather
+ * than delivering here is what lets the two be ordered that way.
+ *
+ * NULL means the slot keeps its packet: nothing to deliver, re-arm as is.
+ */
+static NX_PACKET *ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
 {
     AmiSana2If *iface  = rx->iface;
     NX_PACKET  *packet = slot->packet;
@@ -215,7 +296,7 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
     UCHAR      *eth;
 
     if (packet == NULL)
-        return;
+        return NX_NULL;
 
     /* ios2_DataLength is the documented answer; fall back to what the copy
        hook took, for devices that fill only one of the two. */
@@ -226,7 +307,7 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
     {
         /* Keep the packet: rearming is cheaper than a pool round trip. */
         iface->stats.rx_errors++;
-        return;
+        return NX_NULL;
     }
 
     if (!iface->raw_mode)
@@ -272,12 +353,24 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
     packet->nx_packet_append_ptr = packet->nx_packet_prepend_ptr + length;
 
     slot->packet = NULL;     /* ownership passes to NetX Duo */
-    ami_sana2_rx_deliver(iface, packet);
+    return packet;
 }
 
-static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
+/*
+ * Collect every completion the device has returned.
+ *
+ * The slot goes back on the wire before its packet goes up the stack. The
+ * device has no buffers of its own, so the interval between a read completing
+ * and the next one being posted is an interval in which a frame arriving for
+ * this packet type is dropped; delivery is the longest thing in this loop and
+ * does not need the slot. The file header has claimed this ordering since the
+ * shim was written -- until now the reposts all happened after the drain, at
+ * the top of the reader's next pass.
+ */
+static ULONG ami_sana2_rx_drain(AmiSana2Rx *rx, AmiRxBatch *batch)
 {
     struct Message *msg;
+    ULONG           collected = 0;
 
     while ((msg = GetMsg(rx->port)) != NULL)
     {
@@ -286,6 +379,7 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
         AmiRxSlot *slot = (AmiRxSlot *)msg;
         LONG       err  = (LONG)(BYTE)slot->req.ios2_Req.io_Error;
 
+        collected++;
         slot->posted = FALSE;
 
         if (rx->stop)
@@ -293,7 +387,12 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
 
         if (err == 0)
         {
-            ami_sana2_rx_complete(rx, slot);
+            NX_PACKET *packet = ami_sana2_rx_complete(rx, slot);
+
+            (VOID)ami_sana2_rx_post_slot(rx, slot);
+
+            if (packet != NX_NULL)
+                ami_sana2_rx_deliver(rx->iface, batch, packet);
         }
         else if (err == (LONG)IOERR_ABORTED)
         {
@@ -333,7 +432,34 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
             rx->iface->stats.rx_errors++;
         }
     }
+
+    return collected;
 }
+
+#ifdef AMINETXDUO_RXPROBE
+static VOID ami_sana2_rx_probe(AmiSana2Rx *rx, ULONG collected)
+{
+    UWORD bucket;
+
+    if (collected == 0)
+        bucket = 0;
+    else if (collected == 1)
+        bucket = 1;
+    else if (collected < 4)
+        bucket = 2;
+    else if (collected < 8)
+        bucket = 3;
+    else
+        bucket = 4;
+
+    rx->probe_wakes++;
+    rx->probe_msgs += collected;
+    rx->probe_hist[bucket]++;
+
+    if (collected > rx->probe_peak)
+        rx->probe_peak = collected;
+}
+#endif
 
 /* --------------------------------------------------------------- shutdown */
 
@@ -557,6 +683,9 @@ static VOID ami_sana2_rx_thread(ULONG argument)
 
     while (!rx->stop)
     {
+        AmiRxBatch batch;
+        ULONG      collected;
+
         /*
          * At the top of the loop rather than after the Wait(), because the
          * pool-empty path below continues without reaching a drain, and
@@ -572,6 +701,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         {
             /* Either the pool is empty or the interface is down. Back off
                rather than spin; ami_sana2_rx_stop() signals out of this. */
+            AMI_RXPROBE_COUNT(rx->probe_starved);
             tx_thread_sleep(2);
             continue;
         }
@@ -580,7 +710,17 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         Wait(rx->wake_mask | rx->reap_mask);
         ami_sana2_block_leave();
 
-        ami_sana2_rx_drain(rx);
+        batch.head = NX_NULL;
+        batch.tail = NX_NULL;
+
+        collected = ami_sana2_rx_drain(rx, &batch);
+        ami_sana2_rx_batch_flush(rx, &batch);
+
+#ifdef AMINETXDUO_RXPROBE
+        ami_sana2_rx_probe(rx, collected);
+#else
+        (VOID)collected;
+#endif
     }
 
     /*
@@ -719,6 +859,16 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
             rx->depth = AMI_SANA2_RX_MAX_DEPTH;
 
         rx->stack = ami_alloc_flags(AMI_SANA2_RX_STACK_SIZE, MEMF_PUBLIC);
+#ifdef AMINETXDUO_RXPROBE
+        if (rx->stack != NULL)
+        {
+            ULONG *fill = (ULONG *)rx->stack;
+            ULONG  n     = (ULONG)AMI_SANA2_RX_STACK_SIZE / sizeof(ULONG);
+
+            while (n-- != 0)
+                *fill++ = AMI_RXPROBE_STACK_FILL;
+        }
+#endif
         if (rx->stack == NULL)
         {
             AMI_ERROR("sana2: no memory for reader stack");

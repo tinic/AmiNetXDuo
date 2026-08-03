@@ -35,27 +35,22 @@
  * driver still has it. docs/RESEARCH.md 27.4 measured eleven seconds of
  * silence after one unacknowledged segment.
  *
- * Completions are therefore reaped when they complete, in two hops:
+ * Completions are therefore reaped when they complete. The reply port raises a
+ * signal on one of the SANA-II reader threads (ami_sana2_tx_reap_bind), the
+ * only thread in this shim that blocks in exec Wait() and can therefore be
+ * woken by a device, and that reader reaps.
  *
- *   1. The reply port raises a signal on one of the SANA-II reader threads
- *      (ami_sana2_tx_reap_bind), the only thread in this shim that blocks in
- *      exec Wait() and can therefore be woken by a device.
- *   2. That thread does not touch the packet. It calls
- *      nx_ip_driver_deferred_processing(), NetX Duo's mechanism for a driver
- *      to request a callback on the IP thread, which comes back into
- *      ami_sana2_driver_entry() with NX_LINK_DEFERRED_PROCESSING and reaps.
+ * Releasing a packet mutates NetX Duo's transmit queue and the packet's own
+ * prepend pointer (transmit_release strips the IP header back off), so the reap
+ * runs under nx_ip_protection, where every other send runs. When the mutex is
+ * held elsewhere the reader asks for the reap on the IP thread instead, through
+ * nx_ip_driver_deferred_processing(); ami_sana2_tx_defer() has the measurement
+ * that says why the second shape is the fallback and not the rule.
  *
- * The second hop matters because releasing a packet mutates NetX Duo's
- * transmit queue and the packet's own prepend pointer (transmit_release strips
- * the IP header back off). From a reader thread that would interleave with
- * whatever the IP thread was doing; on the IP thread it runs where every other
- * send runs, under nx_ip_protection.
- *
- * The transmit path pays almost nothing: the reader only asks for deferred
- * processing when the reply port is non-empty, and during a bulk transfer the
- * next ami_sana2_tx_send() has already drained it, so the common case is one
- * pointer compare in a thread that was going to wake anyway. The hop only
- * happens when the link goes quiet.
+ * The transmit path pays almost nothing when there is traffic: the reader only
+ * looks when the reply port is non-empty, and during a bulk send the next
+ * ami_sana2_tx_send() has already drained it, so the common case is one pointer
+ * compare in a thread that was going to wake anyway.
  *
  * The GetMsg() at the top of ami_sana2_tx_send() keeps the shim correct with
  * no reader bound at all: open-time probing, an interface not yet enabled, or
@@ -176,6 +171,29 @@ VOID ami_sana2_tx_defer(AmiSana2If *iface)
     list = &iface->tx_port.mp_MsgList;
     if (list->lh_TailPred == (struct Node *)list)
         return;
+
+    /*
+     * Reap here rather than waking the IP thread to do it.
+     *
+     * A bulk receive sends an ACK every second segment, and every one of those
+     * CMD_WRITEs completes with a Signal() on this reader. Measured on a 4 MB
+     * read: 10,384 reader wakes, 6,600 of which collected no completed CMD_READ
+     * at all -- they were transmit completions. Each of those cost a baton
+     * release and reacquire on the reader AND a full IP thread activation to
+     * run the driver's deferred case, for work that is a GetMsg() loop.
+     *
+     * ami_sana2_tx_reap() is callable from any thread by construction (see its
+     * header). The mutex is taken anyway so the reap runs where every other
+     * send runs, and TX_NO_WAIT because nx_ip_protection is TX_NO_INHERIT:
+     * blocking on it would stall the highest-priority thread in the system
+     * behind an application one. Contention falls back to the IP thread.
+     */
+    if (tx_mutex_get(&iface->ip->nx_ip_protection, TX_NO_WAIT) == TX_SUCCESS)
+    {
+        ami_sana2_tx_reap(iface);
+        tx_mutex_put(&iface->ip->nx_ip_protection);
+        return;
+    }
 
     _nx_ip_driver_deferred_processing(iface->ip);
 }
@@ -372,8 +390,10 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
     }
 
     slot = ami_sana2_tx_claim(iface);
+    AMI_RXPROBE_COUNT(iface->probe_txsends);
     for (spins = 0; slot == NULL && spins < AMI_SANA2_TX_WAIT_TICKS; spins++)
     {
+        AMI_RXPROBE_COUNT(iface->probe_txspin);
         tx_thread_sleep(1);
         ami_sana2_tx_reap(iface);
         slot = ami_sana2_tx_claim(iface);

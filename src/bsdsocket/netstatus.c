@@ -738,6 +738,28 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
 
             out->nsi_Speed = ami_sana2_get_bps(sana);
 
+#ifdef AMINETXDUO_RXPROBE
+            /*
+             * The device-derived counters -- Overruns above all -- are a
+             * snapshot taken at NX_LINK_ENABLE and never refreshed on this
+             * path, because refreshing means S2_GETGLOBALSTATS on whichever
+             * task called GetNetworkStatistics(), which is the trade
+             * ami_sana2_get_stats() declines to make.
+             *
+             * A receive-path measurement needs the live number, so the probe
+             * build takes it: the direct command runs the driver entry under
+             * nx_ip_protection, and NX_LINK_GET_ERROR_COUNT is the case that
+             * calls ami_sana2_refresh_stats(). Nothing outside the probe build
+             * pays for it.
+             */
+            {
+                ULONG discard = 0;
+
+                (VOID)nx_ip_driver_interface_direct_command(
+                          ip, NX_LINK_GET_ERROR_COUNT, i, &discard);
+            }
+#endif
+
             ami_sana2_get_stats(sana, &stats);
             out->nsi_PacketsIn        = stats.packets_received;
             out->nsi_PacketsOut       = stats.packets_sent;

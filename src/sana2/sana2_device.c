@@ -443,6 +443,48 @@ VOID ami_sana2_refresh_stats(AmiSana2If *iface)
     iface->stats.overruns         = stats.Overruns;
     iface->stats.unknown_types    = stats.UnknownTypesReceived;
     iface->stats.reconfigurations = stats.Reconfigurations;
+
+#ifdef AMINETXDUO_RXPROBE
+    {
+        UWORD i;
+
+        AMI_WARN("rxprobe tx: sends %lu ring-full sleeps %lu slots %lu",
+                 iface->probe_txsends, iface->probe_txspin,
+                 (ULONG)AMI_SANA2_TX_SLOTS);
+
+        for (i = 0; i < AMI_SANA2_RX_READERS; i++)
+        {
+            AmiSana2Rx *rx = &iface->rx[i];
+
+            if (rx->probe_wakes == 0)
+                continue;
+
+            if (rx->stack != NULL)
+            {
+                const ULONG *scan = (const ULONG *)rx->stack;
+                ULONG        n    = 0;
+
+                while (n < (ULONG)AMI_SANA2_RX_STACK_SIZE / sizeof(ULONG) &&
+                       scan[n] == AMI_RXPROBE_STACK_FILL)
+                {
+                    n++;
+                }
+
+                rx->probe_stack = (ULONG)AMI_SANA2_RX_STACK_SIZE -
+                                  n * (ULONG)sizeof(ULONG);
+            }
+
+            AMI_WARN("rxprobe %ld: wakes %lu msgs %lu peak %lu "
+                     "hist 0:%lu 1:%lu 2-3:%lu 4-7:%lu 8+:%lu "
+                     "batches %lu starved %lu stack %lu/%lu",
+                     (long)i, rx->probe_wakes, rx->probe_msgs, rx->probe_peak,
+                     rx->probe_hist[0], rx->probe_hist[1], rx->probe_hist[2],
+                     rx->probe_hist[3], rx->probe_hist[4],
+                     rx->probe_deferred, rx->probe_starved,
+                     rx->probe_stack, (ULONG)AMI_SANA2_RX_STACK_SIZE);
+        }
+    }
+#endif
 }
 
 VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out)
