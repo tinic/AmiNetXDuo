@@ -336,13 +336,12 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     LONG             protocol = 0;
     LONG             flags    = 0;
     LONG             verdict  = EAI_NONAME;
+    BOOL             aborted  = FALSE;
     LONG             status;
     UINT             port = 0;
     char            *canon = NULL;
     BsdAddrInfoNode *node;
     NXD_ADDRESS      addr;
-
-    (VOID)SocketBase;
 
     if (res == NULL)
         return EAI_FAIL;
@@ -518,13 +517,22 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
 
     /* ---- the resolver --------------------------------------------------- */
 
+    /*
+     * Both lookups are given the caller's break signal, so Ctrl-C reaches a
+     * getaddrinfo() the way it reaches a recv(); see bsd_resolve_break() in
+     * resolver.c. A break during the second lookup does not throw away what the
+     * first one found -- an answer already in hand is still an answer.
+     */
+    verdict = EAI_NONAME;
+
 #ifdef AMINETXDUO_IPV6
     if ((family == AF_UNSPEC || family == AF_INET6) && netstack_ipv6_enabled())
     {
         ULONG words[4];
 
-        status = netstack_resolve6((const char *)nodename, words,
-                                   BSD_GAI_TIMEOUT);
+        status = netstack_resolve6_until((const char *)nodename, words,
+                                         BSD_GAI_TIMEOUT, bsd_resolve_break,
+                                         SocketBase);
         if (status == AMI_NET_OK)
         {
             addr.nxd_ip_version       = NX_IP_VERSION_V6;
@@ -545,16 +553,20 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
         else
         {
             verdict = bsd_gai_merge(verdict, bsd_gai_error(status));
+
+            if (status == AMI_NET_ERR_ABORTED)
+                aborted = TRUE;
         }
     }
 #endif
 
-    if (family == AF_UNSPEC || family == AF_INET)
+    if ((family == AF_UNSPEC || family == AF_INET) && !aborted)
     {
         ULONG v4 = 0;
 
-        status = netstack_resolve((const char *)nodename, &v4,
-                                  BSD_GAI_TIMEOUT);
+        status = netstack_resolve_until((const char *)nodename, &v4,
+                                        BSD_GAI_TIMEOUT, bsd_resolve_break,
+                                        SocketBase);
         if (status == AMI_NET_OK)
         {
             bsd_addr_from_v4(&addr, v4);
@@ -569,15 +581,30 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
         else
         {
             verdict = bsd_gai_merge(verdict, bsd_gai_error(status));
+
+            if (status == AMI_NET_ERR_ABORTED)
+                aborted = TRUE;
         }
     }
 
-    if (head == NULL)
-        return verdict;
+    if (head != NULL)
+    {
+        *res = head;
+        return 0;
+    }
 
-    *res = head;
+    /*
+     * POSIX has no EAI code for an interrupted lookup; EAI_SYSTEM with errno
+     * set is the documented way to hand one back, and gai_strerror() already
+     * names it.
+     */
+    if (aborted)
+    {
+        bsd_set_errno(SocketBase, AMI_EINTR);
+        return EAI_SYSTEM;
+    }
 
-    return 0;
+    return verdict;
 }
 
 VOID bsd_freeaddrinfo(register struct addrinfo *ai __asm("a0"),
@@ -713,8 +740,11 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
         {
             if (have_v4)
             {
-                status   = netstack_resolve_reverse(v4, name, sizeof(name),
-                                                    BSD_GAI_TIMEOUT);
+                status   = netstack_resolve_reverse_until(v4, name,
+                                                          sizeof(name),
+                                                          BSD_GAI_TIMEOUT,
+                                                          bsd_resolve_break,
+                                                          SocketBase);
                 resolved = (BOOL)(status == AMI_NET_OK);
             }
             /*
@@ -737,7 +767,15 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
              * not answer is not evidence that the address has no name.
              */
             if ((flags & (ULONG)NI_NAMEREQD) != 0)
+            {
+                if (status == AMI_NET_ERR_ABORTED)
+                {
+                    bsd_set_errno(SocketBase, AMI_EINTR);
+                    return EAI_SYSTEM;
+                }
+
                 return bsd_gai_error(status);
+            }
 
 #ifdef AMINETXDUO_IPV6
             if (addr.nxd_ip_version == NX_IP_VERSION_V6)

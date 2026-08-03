@@ -8,6 +8,8 @@ set(NETSTACK_SOURCES
     netstack.c
     netstack_baton.c
     netstack_dns.c
+    netstack_dns_status.c
+    netstack_retry.c
     netstack_rexx.c
     netstack_rexx_vars.c)
 

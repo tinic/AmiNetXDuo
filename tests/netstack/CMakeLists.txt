@@ -223,4 +223,58 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME tcp_rtt COMMAND test_tcp_rtt)
 
+    # Whether a name lookup stops when it is told to -- the retransmission
+    # ladder on its own, with the DNS client replaced by scripted answers and
+    # the clock by a variable.  A black hole, a Ctrl-C and a mistyped name are
+    # the three shapes, and none of them can be produced on demand against a
+    # real name server.  Same shim as above; no NetX Duo source is linked,
+    # because the ladder deliberately knows nothing about DNS.
+    add_executable(test_dns_retry
+        host/test_dns_retry_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_retry.c")
+
+    target_compile_options(test_dns_retry PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_dns_retry PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"      # exec/types.h
+        "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_dns_retry PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME dns_retry COMMAND test_dns_retry)
+
+    # What a failed lookup is reported as.  TX_NOT_AVAILABLE is the case worth
+    # having: it is the DNS client's mutex, not a DNS status, and it used to
+    # fall through to "no such host".
+    add_executable(test_dns_status
+        host/test_dns_status_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_dns_status.c")
+
+    target_compile_options(test_dns_status PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_dns_status PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"      # exec/types.h
+        "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/addons/dns"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_dns_status PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME dns_status COMMAND test_dns_status)
+
 endif()

@@ -57,6 +57,13 @@ typedef struct AmiNetStack AmiNetStack;
 #define AMI_NET_ERR_DEVBAD    (-10)
 
 /*
+ * The caller asked to be let go before the call finished -- see
+ * netstack_resolve_until(). Nothing failed and nothing was learnt; the caller
+ * decides what to report.
+ */
+#define AMI_NET_ERR_ABORTED   (-11)
+
+/*
  * Bring the stack up (idempotent, reference-counted). Reads the config, starts
  * ThreadX, creates the packet pool and NX_IP, attaches interfaces, runs DHCP
  * where configured. Blocks until the first interface has an address or the
@@ -385,6 +392,9 @@ LONG netstack_set_domain_name(const char *name);
  * Resolver. Implemented over NetX Duo addons/dns; used by gethostbyname and
  * friends in bsdsocket.library. Blocking, with the timeout in ticks.
  *
+ * timeout_ticks is the whole lookup, not one query: the retransmission ladder
+ * runs inside and stops when the budget is gone.
+ *
  * In an AMINETXDUO_MDNS build a name ending in ".local" is sent to the RFC
  * 6762 responder instead of to the unicast name servers, and never to both.
  * Callers do not need to know: the branch is inside netstack_resolve().
@@ -392,6 +402,38 @@ LONG netstack_set_domain_name(const char *name);
 LONG    netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks);
 LONG    netstack_resolve_reverse(ULONG addr, char *name_out, ULONG name_len,
                                  ULONG timeout_ticks);
+
+/*
+ * The same three, told how to give up early.
+ *
+ * `give_up` is asked between queries -- never during one -- whether to stop,
+ * and a TRUE answer ends the lookup with AMI_NET_ERR_ABORTED. It runs outside
+ * the ThreadX bracket, so it may call exec, which is what bsdsocket.library
+ * needs: it answers from SetSignal() against SBTC_BREAKMASK, so Ctrl-C reaches
+ * a lookup the way it reaches a recv().
+ *
+ * Between queries and not during one, because the DNS client's mutex covers a
+ * single UDP socket, one transmit id and a file-scope decode buffer; a lookup
+ * that walked away mid-query would leave all three to the next caller. The
+ * granularity is therefore one query per configured name server -- a few
+ * seconds -- rather than the sub-second slice a socket read can offer.
+ *
+ * A NULL `give_up` is the plain call above.
+ */
+typedef BOOL (*AmiNetGiveUpFn)(VOID *arg);
+
+LONG    netstack_resolve_until(const char *name, ULONG *addr_out,
+                               ULONG timeout_ticks,
+                               AmiNetGiveUpFn give_up, VOID *give_up_arg);
+LONG    netstack_resolve_reverse_until(ULONG addr, char *name_out,
+                                       ULONG name_len, ULONG timeout_ticks,
+                                       AmiNetGiveUpFn give_up,
+                                       VOID *give_up_arg);
+#ifdef AMINETXDUO_IPV6
+LONG    netstack_resolve6_until(const char *name, ULONG addr_out[4],
+                                ULONG timeout_ticks,
+                                AmiNetGiveUpFn give_up, VOID *give_up_arg);
+#endif
 
 #ifdef AMINETXDUO_MDNS
 /*
