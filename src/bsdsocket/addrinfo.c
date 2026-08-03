@@ -604,25 +604,66 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
 
     if (host != NULL && hostlen > 0)
     {
-        char name[256];
-        BOOL resolved = FALSE;
+        char  name[256];
+        BOOL  resolved = FALSE;
+        ULONG v4       = 0;
+        BOOL  have_v4  = (BOOL)(addr.nxd_ip_version == NX_IP_VERSION_V4);
+
+        if (have_v4)
+            v4 = addr.nxd_ip_address.v4;
+
+#ifdef AMINETXDUO_IPV6
+        /*
+         * RFC 3493 6.2: "If the socket address structure contains an
+         * IPv4-mapped IPv6 address ... the implementation shall extract the
+         * embedded IPv4 address and lookup the node name for that IPv4
+         * address." A ::ffff:a.b.c.d out of accept() on a dual-stack socket
+         * arrives here still tagged V6, so without this the version test
+         * below misses it and no query is ever made.
+         *
+         * bsd_sockaddr_get() is deliberately not the place for it: that one
+         * feeds connect(), bind() and sendto() as well, where the mapped form
+         * has to survive as far as bsd_addr_normalise() and its V6ONLY check.
+         *
+         * The IPv4-COMPATIBLE form (::a.b.c.d) that sentence also names is
+         * not handled: RFC 4291 2.5.5.1 deprecated it, and a naive prefix
+         * test for it swallows :: and ::1.
+         */
+        if (!have_v4 && bsd_addr_is_v4mapped(&addr, &v4))
+            have_v4 = TRUE;
+
+        /*
+         * RFC 3493 6.2: "If the address is the IPv6 unspecified address
+         * ("::"), a lookup is not performed, and the EAI_NONAME error is
+         * returned." It names no node, so the numeric string this used to
+         * hand back was an answer to a question with none.
+         */
+        if (addr.nxd_ip_version == NX_IP_VERSION_V6 &&
+            addr.nxd_ip_address.v6[0] == 0UL &&
+            addr.nxd_ip_address.v6[1] == 0UL &&
+            addr.nxd_ip_address.v6[2] == 0UL &&
+            addr.nxd_ip_address.v6[3] == 0UL)
+        {
+            return EAI_NONAME;
+        }
+#endif
 
         if ((flags & (ULONG)NI_NUMERICHOST) == 0)
         {
-            if (addr.nxd_ip_version == NX_IP_VERSION_V4)
+            if (have_v4)
             {
-                resolved = (netstack_resolve_reverse(addr.nxd_ip_address.v4,
-                                                     name, sizeof(name),
+                resolved = (netstack_resolve_reverse(v4, name, sizeof(name),
                                                      BSD_GAI_TIMEOUT)
                             == AMI_NET_OK);
             }
             /*
-             * No reverse lookup for IPv6. It would be an ip6.arpa PTR query,
-             * available through NetX Duo's nxd_dns_host_by_address_get() on an
-             * NXD_ADDRESS, but the nibble-reversed name it builds has never
-             * been exercised here. NI_NAMEREQD callers get EAI_NONAME and
-             * everyone else gets the numeric form, which is also what a host
-             * with no PTR record produces.
+             * No reverse lookup for a real IPv6 address. It would be an
+             * ip6.arpa PTR query, available through NetX Duo's
+             * nxd_dns_host_by_address_get() on an NXD_ADDRESS, but the
+             * nibble-reversed name it builds has never been exercised here.
+             * NI_NAMEREQD callers get EAI_NONAME and everyone else gets the
+             * numeric form, which is also what a host with no PTR record
+             * produces.
              */
         }
 
