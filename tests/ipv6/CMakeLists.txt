@@ -120,4 +120,29 @@ if(NOT CMAKE_CROSSCOMPILING)
     include(CTest)
     add_test(NAME ipv6_ra COMMAND test_ipv6_ra)
 
+    # The ICMPv6 Packet Too Big receive path and the destination table under
+    # it.  Same shim.  It answers what a lab network cannot be made to answer:
+    # a path that is genuinely narrower, and a forged error message.
+
+    add_executable(test_ipv6_ptb
+        host/test_ipv6_ptb_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv6_process_packet_too_big.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv6_dest_table_add.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv6_dest_table_find.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv6_destination_table_periodic_update.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ipv6_util.c")
+
+    target_include_directories(test_ipv6_ptb PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h -- ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_ipv6_ptb PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME ipv6_ptb COMMAND test_ipv6_ptb)
+
 endif()
