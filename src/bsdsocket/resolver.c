@@ -412,9 +412,14 @@ static ULONG bsd_first_online_address(VOID)
  * divergence; and the two address-driven steps need an interface that is up
  * with an address, which is not true at the point most programs ask. The
  * configured name covers the autodoc's HOSTNAME step as well -- ENV:HOSTNAME
- * is read into it at config load -- so what follows is the autodoc's order
- * exactly. netstack_resolve_reverse() consults DEVS:Internet/hosts before it
- * asks a name server, which is the first two steps in one call.
+ * is one of the ranked sources cfg->hostname is resolved from -- so what
+ * follows is the autodoc's order exactly. netstack_resolve_reverse() consults
+ * DEVS:Internet/hosts before it asks a name server, which is the first two
+ * steps in one call.
+ *
+ * The short name, never a fully-qualified one: it is what option 12 announces
+ * and what the mDNS label is cut from, and BSD gethostname() returns whatever
+ * was set. ShowNetStatus does the qualifying, for display.
  */
 int bsd_gethostname(register char *name     __asm("a0"),
                     register size_t namelen __asm("d0"),
