@@ -208,7 +208,7 @@ aminetxduo_add_tool(tool_arp     arp      NX SOURCES arp.c)
 # at run time, so ONE binary serves both -DAMINETXDUO_TLS=ON and OFF builds --
 # the https: path opens LIBS:tls.library and says something legible when there
 # is none.  Nothing here is conditional on the build option, deliberately.
-aminetxduo_add_tool(tool_fetch   fetch    SOURCES fetch.c toolsock.c)
+aminetxduo_add_tool(tool_fetch   fetch    SOURCES fetch.c fetchurl.c toolsock.c)
 
 # nc and telnet are config-only in the same sense as fetch, and share
 # toolsock.c: bsdsocket.library through its published vectors, including the
@@ -333,16 +333,19 @@ endif()
 
 # --------------------------------------------------------------- host tests --
 #
-# Host only, and the only tests in this directory: httppath.c and httpif.c are
-# the files here free of AmigaDOS calls, and the ones whose mistakes a reviewer
-# cannot be relied on to see.  One decides which file a request reaches, the
-# other whether the request may have it -- and an If: evaluator that always
-# says yes reads exactly like one that works.
+# Host only: httppath.c, httpif.c and fetchurl.c are the files here free of
+# AmigaDOS calls, and the ones whose mistakes a reviewer cannot be relied on to
+# see.  One decides which file a request reaches, the second whether the
+# request may have it, the third where a redirect goes -- and an If: evaluator
+# that always says yes reads exactly like one that works, as does a resolver
+# that turns "about.html" into a host name.
 #
 #   cc -std=c11 -Wall -Wextra -Isrc/tools \
 #      src/tools/test/test_httppath.c src/tools/httppath.c -o test_httppath
 #   cc -std=c11 -Wall -Wextra -Isrc/tools \
 #      src/tools/test/test_httpif.c src/tools/httpif.c -o test_httpif
+#   cc -std=c11 -Wall -Wextra -Isrc/tools \
+#      src/tools/test/test_fetchurl.c src/tools/fetchurl.c -o test_fetchurl
 #
 # No target_link_libraries: every library target here reaches AmigaOS code
 # that does not build on a host, which is why the sources are named directly
@@ -368,7 +371,18 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_httpif PRIVATE -Wall -Wextra)
     set_target_properties(test_httpif PROPERTIES C_STANDARD 11)
 
+    add_executable(test_fetchurl
+        test/test_fetchurl.c
+        fetchurl.c)
+
+    target_include_directories(test_fetchurl PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    target_compile_options(test_fetchurl PRIVATE -Wall -Wextra)
+    set_target_properties(test_fetchurl PROPERTIES C_STANDARD 11)
+
     include(CTest)
     add_test(NAME httppath_escapes COMMAND test_httppath)
     add_test(NAME httpif_conditions COMMAND test_httpif)
+    add_test(NAME fetchurl_rfc3986 COMMAND test_fetchurl)
 endif()

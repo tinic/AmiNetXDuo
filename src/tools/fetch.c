@@ -20,6 +20,15 @@
  * up.  No POST, authentication, cookies or resume.  Follows up to five
  * redirects, and refuses one that steps down from https: to http:.
  *
+ * The URL, the Location: resolved against it and the framing of a response's
+ * header block are in fetchurl.c, which includes nothing and is driven
+ * directly by src/tools/test/test_fetchurl.c.  A 1xx interim response is
+ * discarded there rather than taken for a final one -- note that a server is
+ * not supposed to send one to an HTTP/1.0 request at all (RFC 9110 15.2), but
+ * the same section makes parsing one a client's obligation regardless, and
+ * the failure it used to cause was the real response landing in the user's
+ * file as body with a return code of OK.
+ *
  * Known limit: on a certificate chain of three or more, a 14 MHz 68020 takes
  * longer to verify than a busy front end will wait for a ClientKeyExchange, and
  * the peer closes.  This command reports "the connection is closed" and returns
@@ -37,6 +46,8 @@
 
 #include "aminetxduo/tlslib.h"
 #include "aminetxduo/version.h"
+
+#include "fetchurl.h"
 
 const char *const tool_name = "fetch";
 
@@ -59,16 +70,15 @@ enum
 #define FETCH_DEFAULT_TIMEOUT   120UL       /* seconds */
 #define FETCH_MAX_HOPS          5
 
-#define FETCH_HOST_MAX          128
-#define FETCH_PATH_MAX          512
-#define FETCH_URL_MAX           640
-/*
- * 3072 was too small: www.github.com answers a plain GET with more than that in
- * headers alone, so `fetch` completed the handshake, got a good 301 and refused
- * it.  Running out is no longer fatal either, see head_trunc below.
- */
-#define FETCH_HEAD_MAX          16384       /* status line + headers        */
 #define FETCH_CHUNK             4096
+
+/*
+ * A server that answered every request with a 1xx would keep this loop going
+ * for as long as it kept sending, which is no worse than one that streams a
+ * body forever -- but a bound costs nothing and makes the diagnostic say what
+ * happened.
+ */
+#define FETCH_MAX_INTERIM       8
 
 /*
  * Static, not automatic: a Shell command gets whatever stack the Shell has --
@@ -77,7 +87,7 @@ enum
  */
 static UBYTE fetch_chunk[FETCH_CHUNK];
 static char  fetch_head[FETCH_HEAD_MAX];
-static char  fetch_request[FETCH_PATH_MAX + FETCH_HOST_MAX + 160];
+static char  fetch_request[FETCH_PATH_MAX + FETCH_AUTHORITY_MAX + 160];
 static char  fetch_next[FETCH_URL_MAX];
 
 /* fd_set, open-coded: <sys/types.h> is the socket world's and tools.h has
@@ -250,152 +260,33 @@ static BOOL str_append(char *dst, ULONG dstlen, ULONG *used, const char *src)
 
 /* ------------------------------------------------------------------- URL --- */
 
-typedef struct FetchUrl
-{
-    BOOL    secure;
-    UWORD   port;
-    char    host[FETCH_HOST_MAX];
-    char    path[FETCH_PATH_MAX];
-} FetchUrl;
-
 /*
- * scheme://host[:port][/path][#fragment], and a bare "host/path" is taken as
- * http.  The fragment is dropped -- it is never sent to the server.
+ * fetchurl.c holds the parsing, the RFC 3986 section 5.2.2 resolution a
+ * Location: needs and the Host: field value.  These two put its answers in
+ * front of the user.
  */
 static BOOL url_parse(const char *url, FetchUrl *out)
 {
-    const char *p = url;
-    const char *sep;
-    ULONG       i;
+    FetchUrlResult why = fetch_url_parse(url, out);
 
-    out->secure = FALSE;
-    out->port   = 80;
+    if (why == FETCH_URL_OK)
+        return TRUE;
 
-    for (sep = p; sep[0] != '\0'; sep++)
-    {
-        if (sep[0] == '/' && sep[1] == '/' && sep > p && sep[-1] == ':')
-            break;
-        if (sep[0] == '/')          /* a path before any "://": no scheme */
-        {
-            sep = NULL;
-            break;
-        }
-    }
+    tool_error("\"%s\": %s", (LONG)url, (LONG)fetch_url_error(why));
 
-    if (sep != NULL && sep[0] != '\0')
-    {
-        ULONG scheme_len = (ULONG)(sep - p) - 1;
+    return FALSE;
+}
 
-        if (scheme_len == 5 && tool_stricmp_n(p, "https", 5) == 0)
-        {
-            out->secure = TRUE;
-            out->port   = 443;
-        }
-        else if (scheme_len == 4 && tool_stricmp_n(p, "http", 4) == 0)
-        {
-            out->secure = FALSE;
-            out->port   = 80;
-        }
-        else
-        {
-            tool_error("\"%s\" is not an http: or https: URL", (LONG)url);
-            return FALSE;
-        }
+static BOOL url_resolve(const FetchUrl *base, const char *ref, FetchUrl *out)
+{
+    FetchUrlResult why = fetch_url_resolve(base, ref, out);
 
-        p = sep + 2;
-    }
+    if (why == FETCH_URL_OK)
+        return TRUE;
 
-    /*
-     * host[:port].  An IPv6 literal is written in brackets, RFC 3986 style,
-     * because its own colons would otherwise be read as the port separator.
-     * The brackets are kept: tool_sock_resolve() strips them, and the Host:
-     * header carries them.
-     */
-    i = 0;
-    if (p[0] == '[')
-    {
-        while (p[0] != '\0' && p[0] != ']')
-        {
-            if (i + 2 >= (ULONG)FETCH_HOST_MAX)
-            {
-                tool_error("the host name in that URL is too long");
-                return FALSE;
-            }
-            out->host[i++] = p[0];
-            p++;
-        }
+    tool_error("\"%s\": %s", (LONG)ref, (LONG)fetch_url_error(why));
 
-        if (p[0] != ']')
-        {
-            tool_error("the address in that URL has no closing bracket");
-            return FALSE;
-        }
-
-        out->host[i++] = *p++;
-    }
-    else
-    {
-        while (p[0] != '\0' && p[0] != '/' && p[0] != ':' &&
-               p[0] != '?' && p[0] != '#')
-        {
-            if (i + 1 >= (ULONG)FETCH_HOST_MAX)
-            {
-                tool_error("the host name in that URL is too long");
-                return FALSE;
-            }
-            out->host[i++] = p[0];
-            p++;
-        }
-    }
-    out->host[i] = '\0';
-
-    if (out->host[0] == '\0')
-    {
-        tool_error("\"%s\" has no host name in it", (LONG)url);
-        return FALSE;
-    }
-
-    if (p[0] == ':')
-    {
-        ULONG port = 0;
-
-        p++;
-        if (p[0] < '0' || p[0] > '9')
-        {
-            tool_error("the port number in that URL is not a number");
-            return FALSE;
-        }
-        while (p[0] >= '0' && p[0] <= '9')
-        {
-            port = (port * 10UL) + (ULONG)(p[0] - '0');
-            if (port > 65535UL)
-            {
-                tool_error("the port number in that URL is out of range");
-                return FALSE;
-            }
-            p++;
-        }
-        out->port = (UWORD)port;
-    }
-
-    /* path */
-    i = 0;
-    if (p[0] != '/')
-        out->path[i++] = '/';
-
-    while (p[0] != '\0' && p[0] != '#')
-    {
-        if (i + 1 >= (ULONG)FETCH_PATH_MAX)
-        {
-            tool_error("the path in that URL is too long");
-            return FALSE;
-        }
-        out->path[i++] = p[0];
-        p++;
-    }
-    out->path[i] = '\0';
-
-    return TRUE;
+    return FALSE;
 }
 
 
@@ -455,89 +346,6 @@ static LONG io_read(FetchIO *io, UBYTE *buf, LONG len)
     }
 
     return sock_recv(io->sbase, io->sock, (APTR)buf, len);
-}
-
-
-/* ------------------------------------------------------------- responses --- */
-
-/* The numeric status out of "HTTP/1.1 301 Moved Permanently", or 0. */
-static ULONG head_status(const char *head)
-{
-    const char *p = head;
-    ULONG       code = 0;
-    ULONG       i;
-
-    while (p[0] != '\0' && p[0] != ' ')
-        p++;
-    while (p[0] == ' ')
-        p++;
-
-    for (i = 0; i < 3UL; i++)
-    {
-        if (p[i] < '0' || p[i] > '9')
-            return 0;
-        code = (code * 10UL) + (ULONG)(p[i] - '0');
-    }
-
-    return code;
-}
-
-/* The value of a header, case-insensitively, or NULL.  `name` includes the
-   colon: "location:". */
-static const char *head_field(const char *head, const char *name)
-{
-    ULONG namelen = str_len(name);
-    ULONG i;
-
-    /* Skip the status line -- a header never appears on it. */
-    for (i = 0; head[i] != '\0'; i++)
-    {
-        if (head[i] != '\n')
-            continue;
-
-        i++;
-        if (tool_stricmp_n(&head[i], name, namelen) != 0)
-            continue;
-
-        i += namelen;
-        while (head[i] == ' ' || head[i] == '\t')
-            i++;
-        return &head[i];
-    }
-
-    return NULL;
-}
-
-/* Copy one header value, stopping at the end of its line. */
-static BOOL head_value(const char *value, char *dst, ULONG dstlen)
-{
-    ULONG i = 0;
-
-    while (value[i] != '\0' && value[i] != '\r' && value[i] != '\n')
-    {
-        if (i + 1 >= dstlen)
-            return FALSE;
-        dst[i] = value[i];
-        i++;
-    }
-
-    dst[i] = '\0';
-    return (BOOL)(i > 0);
-}
-
-/* The status line on its own, for the summary. */
-static VOID head_first_line(const char *head, char *dst, ULONG dstlen)
-{
-    ULONG i = 0;
-
-    while (head[i] != '\0' && head[i] != '\r' && head[i] != '\n' &&
-           i + 1 < dstlen)
-    {
-        dst[i] = head[i];
-        i++;
-    }
-
-    dst[i] = '\0';
 }
 
 
@@ -612,7 +420,10 @@ static LONG fetch_run(VOID)
     ULONG                 hop;
     LONG                  rc = RETURN_OK;
     LONG                  status = 0;
+    FetchHead             head;
     char                  line[128];
+
+    fetch_head_start(&head, fetch_head, (ULONG)sizeof(fetch_head));
 
     /* ---- the network ---------------------------------------------------- */
 
@@ -637,12 +448,11 @@ static LONG fetch_run(VOID)
         ToolSockAddrAny sa;
         ToolAddr        address;
         LONG            salen;
-        ULONG       head_len = 0;
-        BOOL        in_head = TRUE;
-        BOOL        head_trunc = FALSE;
-        char        head_tail[4] = { 0, 0, 0, 0 };
+        ULONG       interim = 0;
         LONG        n;
         LONG        why = TLS_OK;
+
+        fetch_head_start(&head, fetch_head, (ULONG)sizeof(fetch_head));
 
         io.sbase   = sbase;
         io.tbase   = NULL;
@@ -834,6 +644,21 @@ static LONG fetch_run(VOID)
         {
             ULONG used = 0;
             BOOL  ok = TRUE;
+            char  authority[FETCH_AUTHORITY_MAX];
+
+            /*
+             * RFC 9112 section 3.2: "a client MUST send a field value for Host
+             * that is identical to that authority component" of the target
+             * URI.  So a non-default port belongs in it -- without one,
+             * "fetch http://host:8080/" reaches whichever virtual host the
+             * server answers for port 80.
+             */
+            if (!fetch_url_authority(&u, authority, sizeof(authority)))
+            {
+                tool_error("that URL does not fit in a request");
+                rc = RETURN_ERROR;
+                goto hop_done;
+            }
 
             fetch_request[0] = '\0';
             ok = ok && str_append(fetch_request, sizeof(fetch_request), &used,
@@ -843,7 +668,7 @@ static LONG fetch_run(VOID)
             ok = ok && str_append(fetch_request, sizeof(fetch_request), &used,
                                   " HTTP/1.0\r\nHost: ");
             ok = ok && str_append(fetch_request, sizeof(fetch_request), &used,
-                                  u.host);
+                                  authority);
             ok = ok && str_append(fetch_request, sizeof(fetch_request), &used,
                                   "\r\nUser-Agent: AmiNetXDuo-fetch/1.0 (m68k)"
                                   "\r\nConnection: close\r\n\r\n");
@@ -879,103 +704,118 @@ static LONG fetch_run(VOID)
             }
 
             /*
-             * Running past the buffer stops us keeping headers, not reading
-             * them: the end of the block is found from the last four bytes
-             * seen, not the last four stored, so a chatty server costs the
-             * tail of its headers instead of the whole transfer.  The status
-             * line and Location: are at the front; the two places that care
-             * check head_trunc before complaining.
+             * The header block first, then whatever of this read is left is
+             * body.  The loop repeats because one read can carry a whole
+             * interim response AND the final one behind it.
              */
-            while (in_head && at < (ULONG)n)
+            for (;;)
             {
-                char c = (char)fetch_chunk[at++];
-
-                if (head_len + 1 < (ULONG)FETCH_HEAD_MAX)
-                    fetch_head[head_len++] = c;
-                else
-                    head_trunc = TRUE;
-
-                head_tail[0] = head_tail[1];
-                head_tail[1] = head_tail[2];
-                head_tail[2] = head_tail[3];
-                head_tail[3] = c;
-
-                if ((head_tail[0] == '\r' && head_tail[1] == '\n' &&
-                     head_tail[2] == '\r' && head_tail[3] == '\n') ||
-                    (head_tail[2] == '\n' && head_tail[3] == '\n'))
+                if (!head.complete)
                 {
-                    in_head = FALSE;
+                    if (at >= (ULONG)n)
+                        break;              /* more of it is still on the wire */
+
+                    at += fetch_head_feed(&head, &fetch_chunk[at],
+                                          (ULONG)n - at);
+                    if (!head.complete)
+                        break;
                 }
-            }
-
-            if (in_head)
-                continue;
-
-            if (status == 0)
-            {
-                const char *loc;
-
-                fetch_head[head_len] = '\0';
-                status = (LONG)head_status(fetch_head);
 
                 if (status == 0)
                 {
-                    tool_error("%s did not answer with HTTP", (LONG)u.host);
-                    rc = RETURN_ERROR;
-                    goto hop_done;
-                }
+                    const char *loc;
 
-                /*
-                 * Decided before any body byte is written, so the user's file
-                 * is never opened for an answer we are not going to keep.
-                 */
-                if (status >= 300 && status < 400)
-                {
-                    loc = head_field(fetch_head, "location:");
-                    if (loc != NULL &&
-                        head_value(loc, fetch_next, sizeof(fetch_next)))
+                    status = (LONG)fetch_head_status(&head);
+
+                    if (status == 0)
                     {
+                        tool_error("%s did not answer with HTTP", (LONG)u.host);
+                        rc = RETURN_ERROR;
                         goto hop_done;
                     }
 
                     /*
-                     * The one case where losing the tail of the headers costs
-                     * something; report it as truncation rather than as a
-                     * redirect the server never sent.
+                     * RFC 9110 15.2: a 1xx is an interim response, terminated
+                     * by the end of its header section and carrying no
+                     * content.  Discard it and read the next block -- taking
+                     * it for the final answer wrote the real response into the
+                     * user's file as body and reported success.
                      */
-                    if (head_trunc)
+                    if (fetch_head_interim((ULONG)status))
                     {
-                        tool_error("the %ld redirect gave no Location: in the "
-                                   "first %ld bytes of headers",
-                                   (LONG)status, (LONG)FETCH_HEAD_MAX);
-                        rc = RETURN_ERROR;
-                        goto hop_done;
+                        if (++interim > (ULONG)FETCH_MAX_INTERIM)
+                        {
+                            tool_error("%s sent more than %ld interim "
+                                       "responses and no answer",
+                                       (LONG)u.host, (LONG)FETCH_MAX_INTERIM);
+                            rc = RETURN_ERROR;
+                            goto hop_done;
+                        }
+
+                        fetch_head_start(&head, fetch_head,
+                                         (ULONG)sizeof(fetch_head));
+                        status = 0;
+                        continue;
+                    }
+
+                    /*
+                     * Decided before any body byte is written, so the user's
+                     * file is never opened for an answer we are not going to
+                     * keep.
+                     */
+                    if (status >= 300 && status < 400)
+                    {
+                        loc = fetch_head_field(&head, "location:");
+                        if (loc != NULL &&
+                            fetch_head_value(loc, fetch_next,
+                                             sizeof(fetch_next)))
+                        {
+                            goto hop_done;
+                        }
+
+                        /*
+                         * The one case where losing the tail of the headers
+                         * costs something; report it as truncation rather than
+                         * as a redirect the server never sent.
+                         */
+                        if (head.truncated)
+                        {
+                            tool_error("the %ld redirect gave no Location: in "
+                                       "the first %ld bytes of headers",
+                                       (LONG)status, (LONG)FETCH_HEAD_MAX);
+                            rc = RETURN_ERROR;
+                            goto hop_done;
+                        }
+                    }
+
+                    if (st.headers)
+                    {
+                        if (!emit(&st, (const UBYTE *)head.buf,
+                                  (LONG)head.len))
+                        {
+                            rc = RETURN_FAIL;
+                            goto hop_done;
+                        }
+
+                        /* Asked to show the headers, and they did not fit. */
+                        if (head.truncated)
+                            tool_error("showing the first %ld bytes of headers "
+                                       "only", (LONG)FETCH_HEAD_MAX);
                     }
                 }
 
-                if (st.headers)
+                if (at < (ULONG)n)
                 {
-                    if (!emit(&st, (const UBYTE *)fetch_head, (LONG)head_len))
+                    if (!emit(&st, &fetch_chunk[at], (LONG)((ULONG)n - at)))
                     {
                         rc = RETURN_FAIL;
                         goto hop_done;
                     }
-
-                    /* Asked to show the headers, and they did not all fit. */
-                    if (head_trunc)
-                        tool_error("showing the first %ld bytes of headers "
-                                   "only", (LONG)FETCH_HEAD_MAX);
+                    st.total += (ULONG)n - at;
+                    at = (ULONG)n;
                 }
-            }
 
-            if (at < (ULONG)n)
-            {
-                if (!emit(&st, &fetch_chunk[at], (LONG)((ULONG)n - at)))
-                {
-                    rc = RETURN_FAIL;
-                    goto hop_done;
-                }
-                st.total += (ULONG)n - at;
+                break;
             }
         }
 
@@ -999,7 +839,7 @@ static LONG fetch_run(VOID)
             goto hop_done;
         }
 
-        if (in_head)
+        if (!head.complete)
         {
             tool_error("%s closed the connection without answering",
                        (LONG)u.host);
@@ -1021,22 +861,14 @@ static LONG fetch_run(VOID)
             FetchUrl next;
             BOOL     was_secure = u.secure;
 
-            if (fetch_next[0] == '/' && fetch_next[1] == '/')
-            {
-                /* Scheme-relative.  RFC 7231 asks for an absolute URI here, so
-                   report it rather than guess a scheme. */
-                tool_error("%s redirects to \"%s\", which this command does "
-                           "not follow", (LONG)u.host, (LONG)fetch_next);
-                rc = RETURN_ERROR;
-                break;
-            }
-            else if (fetch_next[0] == '/')
-            {
-                /* Same host and scheme, new path. */
-                next = u;
-                tool_copy_string(next.path, sizeof(next.path), fetch_next);
-            }
-            else if (!url_parse(fetch_next, &next))
+            /*
+             * RFC 9110 10.2.2: the Location value is a URI reference, and the
+             * target is it resolved against the URI this request was made to.
+             * Most of them are relative -- "about.html" and "docs/x.html" both
+             * used to be handed to the absolute parser, which made them a host
+             * called about.html and a host called docs.
+             */
+            if (!url_resolve(&u, fetch_next, &next))
             {
                 rc = RETURN_ERROR;
                 break;
@@ -1064,7 +896,7 @@ static LONG fetch_run(VOID)
 
     if (rc == RETURN_OK && !st.failed && status != 0)
     {
-        head_first_line(fetch_head, line, sizeof(line));
+        fetch_head_first_line(&head, line, sizeof(line));
 
         if (!st.quiet)
         {
