@@ -6,6 +6,7 @@
 #                               [-b BUILDDIR] [-k KB] [-C CHUNK] [-r REPS]
 #                               [-T TAG] [-t SECONDS] [-p PORT] [-s] [-x]
 #                               [-a] [-B IFACE] [-N BOARD]
+#                               [-w] [-l PCT] [-L PCT]
 #
 # WHAT IT MEASURES
 #
@@ -61,12 +62,25 @@
 # libraries rather than quoting an absolute rate: warp mode is on, so the
 # emulated CPU has no defined speed and only ratios between runs mean anything.
 #
+# -w ALSO MEASURES THE INBOUND LOSS RATE, which is what to gate on rather than
+# the rate.  The peer captures its own egress and tests/perf/lossrate.py turns
+# it into retransmissions over data segments sent, over the read phases: one
+# number, taken where the counters are exact, and upstream of the throughput
+# rather than downstream of everything.  -l fails the run above a raw loss
+# percentage and -L above the percentage with spurious retransmissions
+# removed; both imply -w.  What to set them to is a property of the rig and
+# has to be measured on it -- across 29 runs of 13 libraries on one rig the
+# raw rate's within-library spread was 13% of its own mean and the worst pair
+# differed by 58%, so a single run cannot carry a tight threshold and the
+# useful gate is the median of three.
+#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
+. "$ROOT/tests/perf/peercap.sh"
 
 # NOT playhouse2, whatever its convenience: it is an LXC container on a veth,
 # so its SYN-ACK carries an uncomputed TX-offload checksum that no NIC ever
@@ -106,8 +120,11 @@ ROADSHOW=""
 AMIBERRY=0
 IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
 BOARD=a2065
+LOSSCAP=0
+MAXLOSS=""
+MAXEFF=""
 
-while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:" opt; do
+while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:wl:L:" opt; do
     case "$opt" in
         H) PEER="$OPTARG" ;;
         A) PEER_ADDR="$OPTARG" ;;
@@ -126,9 +143,13 @@ while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:" opt; do
         a) AMIBERRY=1 ;;
         B) AMIBERRY=1; IFACE="$OPTARG" ;;
         N) BOARD="$OPTARG" ;;
+        w) LOSSCAP=1 ;;
+        l) LOSSCAP=1; MAXLOSS="$OPTARG" ;;
+        L) LOSSCAP=1; MAXEFF="$OPTARG" ;;
         *) echo "usage: $0 [-H user@host] [-A addr] [-m model] [-c cpu]" \
                 "[-b build] [-k KB] [-C chunk] [-r reps] [-T tag] [-t secs]" \
-                "[-p port] [-s] [-x] [-R roadshowdir] [-a] [-B iface] [-N board]" >&2
+                "[-p port] [-s] [-x] [-R roadshowdir] [-a] [-B iface]" \
+                "[-N board] [-w] [-l pct] [-L pct]" >&2
            exit 2 ;;
     esac
 done
@@ -258,6 +279,16 @@ CPUARG=()
 # speed costs wall clock and buys repeatability.
 [ "$ACCURATE" = "0" ] || CPUARG+=(-x)
 
+CAPDIR="$ROOT/build/losscap-$TAG"
+CAPTURING=0
+if [ "$LOSSCAP" = "1" ]; then
+    if [ -z "$PEER" ]; then
+        echo "-w needs an ssh-able peer (-H): the capture is taken there" >&2
+        exit 2
+    fi
+    peercap_start "$PEER" "$PORT" "$CAPDIR" "$TAG" && CAPTURING=1
+fi
+
 set +e
 if [ "$SLIRP" = "1" ]; then
     HD="$ROOT/build/testhd-$TAG"
@@ -283,6 +314,8 @@ else
 fi
 RUN_RC=$?
 set -e
+
+[ "$CAPTURING" = "1" ] && { peercap_stop "$PEER" "$CAPDIR" "$TAG" || CAPTURING=0; }
 
 REPORT="$HD/tools.txt"
 [ -f "$REPORT" ] || { echo "FAIL: the guest wrote no $REPORT (run rc=$RUN_RC)" >&2; exit 1; }
@@ -371,4 +404,15 @@ if grep -q "^scheduler:" "$REPORT"; then
          END           { printf "%s", (g ? s : last) }' "$REPORT" | sed 's/^/  /'
 fi
 
-exit 0
+LOSS_RC=0
+if [ "$CAPTURING" = "1" ]; then
+    LOSSARGS=(--per-phase)
+    [ -z "$MAXLOSS" ] || LOSSARGS+=(--max-loss "$MAXLOSS")
+    [ -z "$MAXEFF" ]  || LOSSARGS+=(--max-effective-loss "$MAXEFF")
+    set +e
+    peercap_report "$CAPDIR" "$TAG" "${LOSSARGS[@]}"
+    LOSS_RC=$?
+    set -e
+fi
+
+exit "$LOSS_RC"

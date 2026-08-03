@@ -52,6 +52,17 @@
 #   -m MODEL    emulator profile (default A3000)
 #   -t SECS     timeout (default 500)
 #   -L DIR      extra files staged into LIBS:
+#   -w          capture the peer's own egress and report the inbound loss
+#               rate from it with tests/perf/lossrate.py.  This is the
+#               comparison that survives a rig: throughput is downstream of
+#               everything and moves on its own, while retransmissions over
+#               data segments sent is one number taken where the counts are
+#               exact.  It also separates a segment that was LOST from one
+#               that merely arrived late -- a distinction that decides which
+#               of two stacks is actually doing better and that a rate cannot
+#               make.
+#   -W PCT      -w, and fail above PCT raw loss
+#   -E PCT      -w, and fail above PCT with spurious retransmissions removed
 #   -M "ARGS"   extra arguments to `fitz mount` -- `-M "BUFS 262144"`.  This
 #               is NOT part of a matched stack comparison: it changes the
 #               client, so a run using it is a diagnostic arm of its own and
@@ -63,6 +74,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
+. "$ROOT/tests/perf/peercap.sh"
 
 STACK=""
 TAG=""
@@ -85,8 +97,11 @@ EXTRALIBS=""
 MOUNTARGS=""
 DIAG=0
 IFCONFIG=""
+LOSSCAP=0
+MAXLOSS=""
+MAXEFF=""
 
-while getopts "s:T:pdi:A:P:k:C:r:b:R:G:B:m:t:L:M:" opt; do
+while getopts "s:T:pdi:A:P:k:C:r:b:R:G:B:m:t:L:M:wW:E:" opt; do
     case "$opt" in
         s) STACK="$OPTARG" ;;
         T) TAG="$OPTARG" ;;
@@ -106,7 +121,10 @@ while getopts "s:T:pdi:A:P:k:C:r:b:R:G:B:m:t:L:M:" opt; do
         t) TIMEOUT="$OPTARG" ;;
         L) EXTRALIBS="$OPTARG" ;;
         M) MOUNTARGS="$OPTARG" ;;
-        *) sed -n '3,50p' "$0" >&2; exit 2 ;;
+        w) LOSSCAP=1 ;;
+        W) LOSSCAP=1; MAXLOSS="$OPTARG" ;;
+        E) LOSSCAP=1; MAXEFF="$OPTARG" ;;
+        *) sed -n '3,60p' "$0" >&2; exit 2 ;;
     esac
 done
 
@@ -268,11 +286,24 @@ STAGED=("$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs"
 [ "$PROFILE" = 0 ] || STAGED+=("$STAGE/Profile")
 [ -d "$STAGE/AmiTCP" ] && STAGED+=("$STAGE/AmiTCP")
 
+CAPDIR="$ROOT/build/losscap-$TAG"
+CAPTURING=0
+if [ "$LOSSCAP" = "1" ] && [ "$DIAG" = "0" ]; then
+    if [ -z "$PEER" ]; then
+        echo "-w needs an ssh-able peer: the capture is taken there, so set" \
+             "AMINETXDUO_FITZ_PEER" >&2
+        exit 2
+    fi
+    peercap_start "$PEER" "$PORT" "$CAPDIR" "$TAG" && CAPTURING=1
+fi
+
 set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" \
     "$SMOKE" "${STAGED[@]}"
 RUN_RC=$?
 set -e
+
+[ "$CAPTURING" = "1" ] && { peercap_stop "$PEER" "$CAPDIR" "$TAG" || CAPTURING=0; }
 
 HD="$ROOT/build/amiberry-testhd-$TAG"
 REPORT="$HD/tools.txt"
@@ -286,4 +317,16 @@ echo
 echo "==> results ($STACK, $MODEL, $KB KB, chunk $CHUNK, $REPS reps)"
 grep "fitzbench: RESULT\|fitzbench: file=" "$REPORT" | sed 's/^/    /' || true
 [ ! -f "$HD/fitz.prof" ] || echo "==> profile: $HD/fitz.prof"
-exit 0
+
+LOSS_RC=0
+if [ "$CAPTURING" = "1" ]; then
+    LOSSARGS=(--per-phase)
+    [ -z "$MAXLOSS" ] || LOSSARGS+=(--max-loss "$MAXLOSS")
+    [ -z "$MAXEFF" ]  || LOSSARGS+=(--max-effective-loss "$MAXEFF")
+    set +e
+    peercap_report "$CAPDIR" "$TAG" "${LOSSARGS[@]}"
+    LOSS_RC=$?
+    set -e
+fi
+
+exit "$LOSS_RC"
