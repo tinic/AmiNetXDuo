@@ -205,6 +205,33 @@
 #endif
 
 /*
+ * The round-trip time estimator of RFC 6298 2 and 3, which the ladder above
+ * previously had to do without: nx_tcp_socket_timeout_rate was assigned
+ * _nx_tcp_transmit_timer_rate once at socket create and never moved again, so
+ * every socket on every path waited the same second before deciding a segment
+ * was lost.
+ *
+ * With this, one segment per window is timed, the acknowledgment covering it
+ * gives R, and SRTT/RTTVAR produce the base the ladder shifts.  Karn's
+ * algorithm discards the sample when the segment was retransmitted, so an
+ * ambiguous acknowledgment never moves the estimate.
+ *
+ * On this lab's links the estimate is under 2.4's one-second floor and the
+ * result is the second we already had; what it buys is the long path, where a
+ * fixed second retransmits data that was never lost.
+ *
+ * Costs 20 bytes per NX_TCP_SOCKET and one comparison per acknowledgment.
+ *
+ * NX_TCP_RTO_MINIMUM_MS is 2.4's floor and stays at the conformant 1000.
+ * NX_TCP_RTO_MAXIMUM_MS is 2.5's ceiling, which the ladder then shifts above.
+ *
+ * Build with -DAMINETXDUO_TCP_RTT=OFF to take it out.
+ */
+#ifndef AMINETXDUO_TCP_RTT_OFF
+#define NX_ENABLE_TCP_RTT_ESTIMATOR
+#endif
+
+/*
  * TCP keepalive, because setsockopt(SO_KEEPALIVE) was already accepting it.
  * src/bsdsocket/options.c stored the flag and reported it back through
  * getsockopt(), but NX_TCP_ENABLE_KEEPALIVE (the old spelling) was not defined,

@@ -233,6 +233,14 @@ if(NOT AMINETXDUO_TCP_SACK)
     add_compile_definitions(AMINETXDUO_TCP_SACK_OFF)
 endif()
 
+# RFC 6298 round-trip time estimation, so the retransmission timer starts from
+# a measured base rather than a fixed second.  Another NX_TCP_SOCKET layout
+# change, so whole-tree for the same reason as the two above.
+option(AMINETXDUO_TCP_RTT "Estimate the retransmission timeout per RFC 6298" ON)
+if(NOT AMINETXDUO_TCP_RTT)
+    add_compile_definitions(AMINETXDUO_TCP_RTT_OFF)
+endif()
+
 # ami_log() verbosity: 0 = errors only ... 4 = trace. Empty keeps compat.c's
 # own default (WARN in release, DEBUG when AMINETXDUO_DEBUG is set).
 set(AMINETXDUO_LOG_LEVEL "" CACHE STRING "Override ami_log() verbosity (0..4)")

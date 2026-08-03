@@ -1,0 +1,144 @@
+# tcpdrill -- the retransmission timeout, now that it is measured.
+#
+# retransmit.drill asserts that the interval DOUBLES.  This file asserts what
+# it doubles FROM: NX_ENABLE_TCP_RTT_ESTIMATOR makes nx_tcp_socket_timeout_rate
+# the RFC 6298 section 2 estimate rather than the fixed one second every socket
+# used to get, so the same ladder now starts from whatever the path measured.
+#
+# HOW A ROUND TRIP IS INDUCED.  `idle MS` between a segment leaving and the
+# acknowledgment being injected is the round trip the stack sees -- it is the
+# only delay in the loop, because the peer is inside the guest.  The delay has
+# to stay under the timeout currently armed or the segment is retransmitted
+# first, which is a different case (rto02), so the first one here is 700 ms
+# against the one second the socket starts with.
+#
+# WHAT THE NUMBERS COME OUT AT.  A first sample of R gives SRTT = R and
+# RTTVAR = R/2, so RTO = R + 4(R/2) = 3R.  700 ms of idle plus the tens of
+# milliseconds either side of it is about 36 ticks of the 50 Hz IP timer, so
+# the first timeout is about 2.2 seconds where the old fixed base was 1.0 --
+# a separation wide enough that the bounds below never have to be tight.
+#
+# ALL TIMINGS ARE RELATIVE TO THE PREVIOUS MATCHED FRAME, from the E-Clock
+# stamp the tap device takes inside BeginIO.  Bounds are wide for the same
+# reason retransmit.drill's are: what is asserted is which of two intervals
+# the stack chose, not a stopwatch reading.
+#
+# EVERY CASE ENDS WITH A RESET from the peer, so a socket left retransmitting
+# cannot leak into the next case.  retransmit.drill explains why at length.
+#
+# SPDX-License-Identifier: MIT
+
+# RFC 6298 2.2.  One acknowledged segment is one measurement, and the timeout
+# armed for the next segment is three times it.  Without the estimator this
+# second interval is 1.0 s and this case fails on "nothing was sent at all".
+case rto01_first_sample_sets_the_timeout
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+send 100
+tx PA seq=1 ack=1 len=100 within=300
+idle 700
+rx A seq=1 ack=101 win=8192
+send 100
+tx PA seq=101 ack=1 len=100 within=300
+tx PA seq=101 ack=1 len=100 after=1600 within=3000
+rx R seq=101
+
+# RFC 6298 3, Karn's algorithm.  The segment is retransmitted before it is
+# acknowledged, so the acknowledgment could be answering either copy and is
+# not a measurement.  If it were taken, it would read as roughly 1.2 s and the
+# next timeout would be three times that; it must still be the one second base.
+case rto02_a_retransmitted_segment_is_not_measured
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+send 100
+tx PA seq=1 ack=1 len=100 within=300
+tx PA seq=1 ack=1 len=100 after=700 within=1400
+rx A seq=1 ack=101 win=8192
+send 100
+tx PA seq=101 ack=1 len=100 within=300
+tx PA seq=101 ack=1 len=100 after=700 within=1400
+rx R seq=101
+
+# RFC 6298 2.4.  The peer answers at once, so the measurement is a tick or two
+# and three times it is under a tenth of a second.  The floor keeps the timeout
+# at one second -- which is what this lab's own links produce, and why the
+# estimator is not expected to change anything measurable here.
+case rto03_the_one_second_floor_holds
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+send 100
+tx PA seq=1 ack=1 len=100 within=300
+rx A seq=1 ack=101 win=8192
+send 100
+tx PA seq=101 ack=1 len=100 within=300
+tx PA seq=101 ack=1 len=100 after=700 within=1400
+rx R seq=101
+
+# RFC 6298 5.5 on top of section 2: the ladder is unchanged, it merely starts
+# somewhere else.  Two intervals, both about 2.2 s and 4.4 s rather than 1 s
+# and 2 s.
+case rto04_backoff_doubles_the_measured_base
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+send 100
+tx PA seq=1 ack=1 len=100 within=300
+idle 700
+rx A seq=1 ack=101 win=8192
+send 100
+tx PA seq=101 ack=1 len=100 within=300
+tx PA seq=101 ack=1 len=100 after=1600 within=3000
+tx PA seq=101 ack=1 len=100 after=3200 within=6000
+rx R seq=101
+
+# RFC 6298 2.3.  The first sample is deliberately pessimistic -- RTTVAR is set
+# to half of R with nothing to average against -- and later samples of the same
+# path narrow it by a quarter each time.  Six exchanges over the same 700 ms
+# path therefore end up near the floor rather than at rto01's 2.2 s, which is
+# the difference between the section 2.2 initialisation and the section 2.3
+# update showing up on the wire.
+case rto05_the_estimate_narrows_on_a_steady_path
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=1460
+tx A seq=1 ack=1
+send 100
+tx PA seq=1 ack=1 len=100 within=300
+idle 700
+rx A seq=1 ack=101 win=8192
+send 100
+tx PA seq=101 ack=1 len=100 within=300
+idle 700
+rx A seq=1 ack=201 win=8192
+send 100
+tx PA seq=201 ack=1 len=100 within=300
+idle 700
+rx A seq=1 ack=301 win=8192
+send 100
+tx PA seq=301 ack=1 len=100 within=300
+idle 700
+rx A seq=1 ack=401 win=8192
+send 100
+tx PA seq=401 ack=1 len=100 within=300
+idle 700
+rx A seq=1 ack=501 win=8192
+send 100
+tx PA seq=501 ack=1 len=100 within=300
+idle 700
+rx A seq=1 ack=601 win=8192
+send 100
+tx PA seq=601 ack=1 len=100 within=300
+tx PA seq=601 ack=1 len=100 after=800 within=1600
+rx R seq=601
