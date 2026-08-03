@@ -554,6 +554,7 @@ struct AmiSocketBase
 #define ASF_RAW         (1UL << 22)   /* SOCK_RAW; see raw.c                */
 #define ASF_OOBHAVE     (1UL << 23)   /* an urgent byte is waiting; oob.c   */
 #define ASF_CLOSING     (1UL << 24)   /* FIN sent, parked for a late reap   */
+#define ASF_RELISTENING (1UL << 25)   /* inside the listen callback's relisten */
 
 /*
  * as_CmsgWant -- which RFC 3542 ancillary objects this socket asked for. Its
@@ -706,13 +707,22 @@ typedef struct AmiSocket
 
     /*
      * Listening state. NetX Duo hands an incoming connection to a specific
-     * socket, so a listening descriptor keeps a spare socket parked on the
-     * port; accept() takes it and relistens a fresh one. docs/RESEARCH.md S6.4.
+     * socket, so a listening descriptor keeps spare sockets parked on the
+     * port; accept() takes a finished one and parks a fresh one in its place.
+     * docs/RESEARCH.md S6.4.
+     *
+     * as_Incoming is the head of that list, as_IncomingNext the link, and
+     * as_IncomingCount its length -- up to as_Backlog, which is what
+     * listen()'s second argument promises. One entry only was the whole
+     * backlog until a half-open connection was found to hold the single slot
+     * for the entire SYN/ACK retransmit ladder.
      */
     struct AmiSocket       *as_Incoming;
+    struct AmiSocket       *as_IncomingNext;
     struct AmiSocket       *as_Parent;
     UINT                    as_ListenPort;
     UINT                    as_Backlog;
+    UINT                    as_IncomingCount;
 
     /*
      * SOCK_RAW state (raw.c). A raw socket has no NX_TCP_SOCKET and no
@@ -799,6 +809,7 @@ VOID       bsd_closing_drain(VOID);
    accept() can return, including one whose peer has already closed. Shared
    with select.c, which uses it for listener readability. */
 BOOL       bsd_incoming_ready(const AmiSocket *incoming);
+AmiSocket *bsd_incoming_first_ready(const AmiSocket *listener);
 
 LONG       bsd_table_resize(struct AmiSocketBase *base, LONG size);
 

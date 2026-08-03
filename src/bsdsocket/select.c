@@ -169,9 +169,54 @@ static VOID bsd_udp_receive_notify(NX_UDP_SOCKET *socket_ptr)
     bsd_event_post((AmiSocket *)socket_ptr->nx_udp_socket_reserved_ptr, FD_READ);
 }
 
+/*
+ * A SYN has taken the socket that was on the port, so the listen request's
+ * slot is free and the next reserve can go on it. Runs on the NetX Duo IP
+ * thread: no Exec allocation, which is why bsd_listen() creates the reserves
+ * and this only moves one.
+ *
+ * Without it the port answers nothing until the application next calls
+ * accept(), which is what listen()'s backlog exists to prevent -- and a
+ * connection whose handshake never completes then holds the port for the
+ * whole SYN/ACK retransmit ladder.
+ *
+ * ASF_RELISTENING is the recursion guard: relisten() with a connection
+ * already queued hands it over and calls this function again from inside
+ * itself.
+ */
+static VOID bsd_listen_refill(AmiSocket *listener)
+{
+    NX_IP     *ip = netstack_ip();
+    AmiSocket *p;
+
+    if (ip == NULL || (listener->as_Flags & ASF_RELISTENING) != 0)
+        return;
+
+    listener->as_Flags |= ASF_RELISTENING;
+
+    for (p = listener->as_Incoming; p != NULL; p = p->as_IncomingNext)
+    {
+        UINT status;
+
+        if (p->as_Nx.tcp.nx_tcp_socket_state != NX_TCP_CLOSED)
+            continue;
+
+        status = nx_tcp_server_socket_relisten(ip, listener->as_ListenPort,
+                                               &p->as_Nx.tcp);
+        if (status != NX_SUCCESS && status != NX_CONNECTION_PENDING)
+            continue;
+
+        (VOID)nx_tcp_server_socket_accept(&p->as_Nx.tcp, NX_NO_WAIT);
+        break;
+    }
+
+    listener->as_Flags &= ~ASF_RELISTENING;
+}
+
 VOID bsd_listen_callback(NX_TCP_SOCKET *socket_ptr, UINT port)
 {
     AmiSocket *sock = (AmiSocket *)socket_ptr->nx_tcp_socket_reserved_ptr;
+    AmiSocket *listener;
 
     (VOID)port;
 
@@ -180,16 +225,12 @@ VOID bsd_listen_callback(NX_TCP_SOCKET *socket_ptr, UINT port)
 
     /* The connection lands on the parked socket; the listener is what the
      * application selects on, so the event belongs to the parent. */
-    if (sock->as_Parent != NULL)
-    {
-        sock->as_Parent->as_Flags |= ASF_ACCEPTPEND;
-        bsd_event_post(sock->as_Parent, FD_ACCEPT | FD_READ);
-    }
-    else
-    {
-        sock->as_Flags |= ASF_ACCEPTPEND;
-        bsd_event_post(sock, FD_ACCEPT | FD_READ);
-    }
+    listener = (sock->as_Parent != NULL) ? sock->as_Parent : sock;
+
+    listener->as_Flags |= ASF_ACCEPTPEND;
+    bsd_event_post(listener, FD_ACCEPT | FD_READ);
+
+    bsd_listen_refill(listener);
 }
 
 VOID bsd_events_attach(AmiSocket *sock)
@@ -374,7 +415,7 @@ BOOL bsd_readable(AmiSocket *sock)
              * has already closed, because accept() hands that connection over
              * as well.
              */
-            return bsd_incoming_ready(sock->as_Incoming);
+            return (bsd_incoming_first_ready(sock) != NULL) ? TRUE : FALSE;
         }
 
         /* A closed or half-closed connection returns end-of-file. */

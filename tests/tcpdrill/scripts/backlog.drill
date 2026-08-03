@@ -1,0 +1,63 @@
+# tcpdrill -- what a listening port does while it is already busy.
+#
+# listen(fd, backlog) promises that `backlog` connections may be in flight
+# before the application has accepted any of them.  These are the two ways a
+# second client arrives while the first is still in the way: the first
+# handshake never finished, and the first handshake finished but nobody has
+# called accept() yet.  Both must leave the second client with a SYN-ACK.
+#
+# TWO PEERS OUT OF ONE.  `peerport` changes the source port mid-case, so the
+# two SYNs are two different connections to the same listening port -- which
+# is what a second client is.  The second SYN carries a sequence number a
+# thousand on so the two are never confused in the log.
+#
+# NO `seq=` ON THE SECOND SYN-ACK.  Sequence numbers a script may assert are
+# offsets from the one initial sequence number the harness learned, and the
+# second connection is a different socket with a different one.  `ack=` is in
+# the peer's space, which is the harness's own, so that is asserted instead.
+#
+# SPDX-License-Identifier: MIT
+
+# The first handshake never completes -- the client's ACK is lost, or it went
+# away between the SYN and the ACK.  The half-open connection then sits in
+# SYN_RECEIVED for the whole retransmit ladder, and a second client must not
+# have to wait for it.
+case q01_second_connection_behind_a_half_open_one
+localport 4731
+listen
+peerport 9001
+rx S seq=0 win=8192 mss=1460
+tx SA ack=1 mss=1460
+peerport 9002
+rx S seq=2000 win=8192 mss=1460
+tx SA ack=2001 mss=1460
+
+# The first handshake DID complete, and the application has not called
+# accept() yet -- the ordinary case for any server doing work between
+# accepts.  The finished connection belongs in the accept queue; it must not
+# stop the port answering.
+case q02_second_connection_behind_an_unaccepted_one
+localport 4732
+listen
+peerport 9001
+rx S seq=0 win=8192 mss=1460
+tx SA ack=1 mss=1460
+rx A seq=1 ack=1
+peerport 9002
+rx S seq=2000 win=8192 mss=1460
+tx SA ack=2001 mss=1460
+
+# And both of them are still there to be accepted afterwards.
+case q03_both_connections_can_be_accepted
+localport 4733
+listen
+peerport 9001
+rx S seq=0 win=8192 mss=1460
+tx SA ack=1 mss=1460
+rx A seq=1 ack=1
+peerport 9002
+rx S seq=2000 win=8192 mss=1460
+tx SA ack=2001 mss=1460
+rx A seq=2001 ack=1
+accept
+accept
