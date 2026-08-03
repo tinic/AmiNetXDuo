@@ -354,6 +354,17 @@ static NX_PACKET *ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
     return packet;
 }
 
+/*
+ * Collect every completion the device has returned.
+ *
+ * The slot goes back on the wire before its packet goes up the stack. The
+ * device has no buffers of its own, so the interval between a read completing
+ * and the next one being posted is an interval in which a frame arriving for
+ * this packet type is dropped; delivery is the longest thing in this loop and
+ * does not need the slot. The file header has claimed this ordering since the
+ * shim was written -- until now the reposts all happened after the drain, at
+ * the top of the reader's next pass.
+ */
 static VOID ami_sana2_rx_drain(AmiSana2Rx *rx, AmiRxBatch *batch)
 {
     struct Message *msg;
@@ -373,6 +384,8 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx, AmiRxBatch *batch)
         if (err == 0)
         {
             NX_PACKET *packet = ami_sana2_rx_complete(rx, slot);
+
+            (VOID)ami_sana2_rx_post_slot(rx, slot);
 
             if (packet != NX_NULL)
                 ami_sana2_rx_deliver(rx->iface, batch, packet);
