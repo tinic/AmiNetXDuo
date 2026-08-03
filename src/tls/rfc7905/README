@@ -1,6 +1,34 @@
 Two nx_secure record files, copied and edited for RFC 7905
 ==========================================================
 
+READ THIS BEFORE ANYTHING ELSE
+------------------------------
+
+**These two files SHADOW the vendored ones.  A security fix that lands in
+`third_party/netxduo/nx_secure/src/nx_secure_tls_record_payload_*.c` does NOT
+reach the binary until it is ported here by hand.**  The build excludes the
+vendored pair from the glob, so the submodule can be bumped, the fix can be
+sitting in the tree, `git log` in the submodule can show it, and the compiled
+record path is still the old code.  Nothing warns.
+
+It has already happened once.  Submodule commit `1b9fb637`, "nx_secure: give
+each record path its own block buffer", replaced a file-scope `UCHAR[128]`
+shared by five functions across both record paths.  Three uses held data in it
+across `nx_packet_data_append(..., NX_WAIT_FOREVER)`, which suspends when the
+packet pool is empty -- which is exactly when a second session is running, so
+one session resumed into another's bytes: plaintext copied into the wrong
+connection's packet on the decrypt side, corrupted CBC padding on the encrypt
+side.  The submodule was fixed and the shipped binary was not, because these
+copies still had the shared buffer and nothing here said they had to track it.
+
+So, after ANY NetX Duo bump, run the `diff -u` under "The whole of the diff"
+below and account for every line it prints.  The expected output is fixed and
+short; anything beyond it is an upstream change that has to be ported or
+consciously rejected, and a security fix is not something to reject quietly.
+`tools/check-shadowed-sources.sh` -- the `shadowed_sources` ctest -- is the
+automated form of the same check, and it covers the other shadowed file in the
+tree, `nx_ip_checksum_compute.c`, for the same reason.
+
 `nx_secure_tls_record_payload_encrypt.c` and
 `nx_secure_tls_record_payload_decrypt.c` here are copies of the files of the
 same name in `third_party/netxduo/nx_secure/src/`, with one branch added to
@@ -37,7 +65,7 @@ default of `NX_FALSE` is what keeps it there.
 The whole of the diff
 ---------------------
 
-Both files, one hunk each, in the same place: the `#ifdef
+Both files carry the RFC 7905 change in the same place: the `#ifdef
 NX_SECURE_ENABLE_AEAD_CIPHER` block that decides the nonce and the additional
 data.
 
@@ -51,6 +79,16 @@ data.
    eight bytes and subtracts them; in the decrypt file it leaves `offset`
    alone, where the GCM path extracts eight bytes and advances past them.
 
+The decrypt file has one further difference, and it is not an RFC 7905 one:
+
+3. `save_iv` moved from file scope into `_nx_secure_tls_record_payload_decrypt`.
+   Upstream still has it as a `static UCHAR[20]`.  Only its size is ever read --
+   it is the bound on `iv_size` before the session IV is filled, and no byte is
+   ever stored in it -- so unlike the block buffer it never leaked anything.
+   It is the same shape though, mutable state at file scope in a path two
+   sessions run at once, and the shape is what went wrong once already.  A local
+   costs nothing and is correct the day somebody adds a write.
+
 Nothing else is touched.  `diff -u` against the submodule shows only those
 hunks and the file header comment, and that is the check to run after a NetX
 Duo bump:
@@ -59,6 +97,12 @@ Duo bump:
              nx_secure_tls_record_payload_decrypt.c; do
         diff -u third_party/netxduo/nx_secure/src/$f src/tls/rfc7905/$f
     done
+
+`tools/check-shadowed-sources.sh` is the automated half: it pins the hash of
+each vendored file its shadow was reconciled against and fails when upstream
+moves, so a bump cannot quietly leave the diff above out of date.  It runs as
+the `shadowed_sources` ctest in every host build.  Update the hash in the same
+commit that ports the upstream change.
 
 `tests/tls/tls_https` and the curl suite are what say the merge was done right;
 the RFC 8439 vectors in `tests/crypto68k` only say the arithmetic is.

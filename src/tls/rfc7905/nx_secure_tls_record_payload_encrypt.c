@@ -39,7 +39,6 @@ static UINT _nx_secure_tls_record_data_encrypt_init(NX_SECURE_TLS_SESSION *tls_s
                                                     UCHAR record_type, UINT *data_offset,
                                                     const NX_CRYPTO_METHOD *session_cipher_method);
 
-UCHAR _nx_secure_tls_record_block_buffer[NX_SECURE_TLS_MAX_CIPHER_BLOCK_SIZE];
 
 /**************************************************************************/
 /*                                                                        */
@@ -84,6 +83,7 @@ UINT _nx_secure_tls_record_payload_encrypt(NX_SECURE_TLS_SESSION *tls_session, N
 {
 UINT                                  status;
 UCHAR                                *iv;
+UCHAR                                 block_buffer[NX_SECURE_TLS_MAX_CIPHER_BLOCK_SIZE];
 const NX_CRYPTO_METHOD               *session_cipher_method;
 UINT                                  block_size;
 USHORT                                iv_size;
@@ -234,7 +234,7 @@ UCHAR                                *icv_ptr = NX_NULL;
                 if (status != NX_SUCCESS)
                 {
 #ifdef NX_SECURE_KEY_CLEAR
-                    NX_SECURE_MEMSET(_nx_secure_tls_record_block_buffer, 0, block_size);
+                    NX_SECURE_MEMSET(block_buffer, 0, block_size);
 #endif /* NX_SECURE_KEY_CLEAR  */
                     return(status);
                 }
@@ -251,7 +251,7 @@ UCHAR                                *icv_ptr = NX_NULL;
                  */
 
                 /* Offset for remainder bytes is rounded_length + data_offset. */
-                NX_SECURE_MEMCPY(&_nx_secure_tls_record_block_buffer[0], /*  lgtm[cpp/banned-api-usage-required-any] */
+                NX_SECURE_MEMCPY(&block_buffer[0], /*  lgtm[cpp/banned-api-usage-required-any] */
                                  &current_packet -> nx_packet_prepend_ptr[rounded_length + data_offset],
                                  remainder_length); /* Use case of memcpy is verified. */
                 copy_length = (ULONG)(current_packet -> nx_packet_next -> nx_packet_append_ptr -
@@ -260,7 +260,7 @@ UCHAR                                *icv_ptr = NX_NULL;
                 {
                     copy_length = (ULONG)(block_size - remainder_length);
                 }
-                NX_SECURE_MEMCPY(&_nx_secure_tls_record_block_buffer[remainder_length], /* lgtm[cpp/banned-api-usage-required-any] */
+                NX_SECURE_MEMCPY(&block_buffer[remainder_length], /* lgtm[cpp/banned-api-usage-required-any] */
                                  current_packet -> nx_packet_next -> nx_packet_prepend_ptr,
                                  copy_length); /* Use case of memcpy is verified. */
 
@@ -270,10 +270,10 @@ UCHAR                                *icv_ptr = NX_NULL;
                                                                       (NX_CRYPTO_METHOD *)session_cipher_method,
                                                                       NX_NULL,
                                                                       0,
-                                                                      _nx_secure_tls_record_block_buffer,
+                                                                      block_buffer,
                                                                       (remainder_length + copy_length),
                                                                       NX_NULL,
-                                                                      _nx_secure_tls_record_block_buffer,
+                                                                      block_buffer,
                                                                       (remainder_length + copy_length),
                                                                       crypto_method_metadata,
                                                                       tls_session -> nx_secure_session_cipher_metadata_size,
@@ -282,7 +282,7 @@ UCHAR                                *icv_ptr = NX_NULL;
                 if (status != NX_SUCCESS)
                 {
 #ifdef NX_SECURE_KEY_CLEAR
-                    NX_SECURE_MEMSET(_nx_secure_tls_record_block_buffer, 0, block_size);
+                    NX_SECURE_MEMSET(block_buffer, 0, block_size);
 #endif /* NX_SECURE_KEY_CLEAR  */
 
                     return(status);
@@ -290,9 +290,9 @@ UCHAR                                *icv_ptr = NX_NULL;
 
                 /* Copy data from temporary buffer back into packets. */
                 NX_SECURE_MEMCPY(&current_packet -> nx_packet_prepend_ptr[rounded_length + data_offset], /*  lgtm[cpp/banned-api-usage-required-any] */
-                                 &_nx_secure_tls_record_block_buffer[0], remainder_length); /* Use case of memcpy is verified. */
+                                 &block_buffer[0], remainder_length); /* Use case of memcpy is verified. */
                 NX_SECURE_MEMCPY(current_packet -> nx_packet_next -> nx_packet_prepend_ptr, /* lgtm[cpp/banned-api-usage-required-any] */
-                                 &_nx_secure_tls_record_block_buffer[remainder_length],
+                                 &block_buffer[remainder_length],
                                  copy_length); /* Use case of memcpy is verified. */
 
                 /* CBC-mode ciphers need to have their IV's updated after encryption. */
@@ -300,11 +300,11 @@ UCHAR                                *icv_ptr = NX_NULL;
                 {
 
                     /* New IV is the last encrypted block of the output. */
-                    NX_SECURE_MEMCPY(iv, &_nx_secure_tls_record_block_buffer, iv_size); /* Use case of memcpy is verified.  lgtm[cpp/banned-api-usage-required-any] */
+                    NX_SECURE_MEMCPY(iv, &block_buffer, iv_size); /* Use case of memcpy is verified.  lgtm[cpp/banned-api-usage-required-any] */
                 }
 
 #ifdef NX_SECURE_KEY_CLEAR
-                NX_SECURE_MEMSET(_nx_secure_tls_record_block_buffer, 0, block_size);
+                NX_SECURE_MEMSET(block_buffer, 0, block_size);
 #endif /* NX_SECURE_KEY_CLEAR  */
 
                 /* Finally, our new offset for the next round is the number of bytes we already
@@ -326,13 +326,13 @@ UCHAR                                *icv_ptr = NX_NULL;
 
         /* Get icv_size and icv_ptr for AEAD cipher */
         if ((session_cipher_method -> nx_crypto_ICV_size_in_bits >> 3) >
-            sizeof(_nx_secure_tls_record_block_buffer))
+            sizeof(block_buffer))
         {
             return(NX_SIZE_ERROR);
         }
 
         icv_size = session_cipher_method -> nx_crypto_ICV_size_in_bits >> 3;
-        icv_ptr = _nx_secure_tls_record_block_buffer;
+        icv_ptr = block_buffer;
     }
 
     /* Call NX_CRYPTO_ENCRYPT_CALCULATE to finalize the encryption of this record. */
@@ -416,6 +416,7 @@ VOID                                 *crypto_method_metadata;
 UINT                                  block_size;
 USHORT                                iv_size;
 UCHAR                                 padding_length;
+UCHAR                                 block_buffer[NX_SECURE_TLS_MAX_CIPHER_BLOCK_SIZE];
 #ifdef NX_SECURE_ENABLE_AEAD_CIPHER
 UCHAR                                 additional_data[13];
 UINT                                  additional_data_size = 0;
@@ -728,12 +729,12 @@ UINT                                  message_length;
     {
         padding_length = (UCHAR)(block_size -
                                  (send_packet -> nx_packet_length % block_size));
-        NX_SECURE_MEMSET(_nx_secure_tls_record_block_buffer, padding_length - 1, padding_length);
-        status = nx_packet_data_append(send_packet, _nx_secure_tls_record_block_buffer,
+        NX_SECURE_MEMSET(block_buffer, padding_length - 1, padding_length);
+        status = nx_packet_data_append(send_packet, block_buffer,
                                        padding_length, tls_session -> nx_secure_tls_packet_pool,
                                        NX_WAIT_FOREVER);
 #ifdef NX_SECURE_KEY_CLEAR
-        NX_SECURE_MEMSET(_nx_secure_tls_record_block_buffer, 0, block_size);
+        NX_SECURE_MEMSET(block_buffer, 0, block_size);
 #endif /* NX_SECURE_KEY_CLEAR  */
 
         return(status);
