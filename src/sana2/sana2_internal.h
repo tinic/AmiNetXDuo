@@ -118,6 +118,86 @@
 #define AMI_SANA2_RX_READERS        2
 #endif
 
+/* ---------------------------------------------------------- receive probe */
+
+/*
+ * Off by default, in the shape AMINETXDUO_NXCENSUS uses: two ReadEClock()
+ * calls per drain, and the totals land in the serial log when the readers
+ * stop.
+ *
+ *   cmake -B build/rxprobe -DAMINETXDUO_RXPROBE=ON ...
+ *
+ * It answers two questions the existing counters cannot. How many CMD_READs
+ * the device still held each time the reader woke -- the receive window in
+ * frames, live rather than configured, since a frame arriving with none
+ * outstanding is dropped by the device and counted nowhere. And whether the
+ * TCP sequence space is already holed at the moment the frame is handed to
+ * NetX Duo, which separates a frame lost below this line from one NetX Duo
+ * dropped after it.
+ */
+#ifdef AMINETXDUO_RXPROBE
+
+/* Gap records kept for the bulk flow. */
+#ifndef AMI_RXPROBE_GAPS
+#define AMI_RXPROBE_GAPS            48
+#endif
+
+/* Baton-wait buckets, log2 in E-Clock ticks: 0, 1, 2-3, 4-7 ... */
+#define AMI_RXPROBE_BUCKETS         16
+
+typedef struct AmiRxProbe
+{
+    ULONG   posts;              /* SendIO(CMD_READ) issued                 */
+    ULONG   drains;             /* wakes that found at least one reply     */
+    ULONG   live;               /* posted and not yet dequeued             */
+
+    /* Per drain: reads the device still held, and replies already waiting. */
+    ULONG   avail_hist[AMI_SANA2_RX_MAX_DEPTH + 1];
+    ULONG   backlog_hist[AMI_SANA2_RX_MAX_DEPTH + 1];
+    ULONG   dry;                /* drains that found the device holding 0  */
+    ULONG   post_zero;          /* nothing could be posted                 */
+    ULONG   post_partial;       /* posted fewer than depth                 */
+
+    /* E-Clock ticks spent reacquiring the ThreadX baton after the Wait(). */
+    ULONG   baton_max;
+    ULONG   baton_sum;
+    ULONG   baton_hist[AMI_RXPROBE_BUCKETS];
+} AmiRxProbe;
+
+/*
+ * One bulk TCP flow, latched on the first segment carrying 512 bytes or more.
+ * `next` is the sequence the wire order would produce, so a segment starting
+ * beyond it is a hole that already existed when the frame reached this line.
+ */
+typedef struct AmiRxSeqProbe
+{
+    ULONG   peer;
+    UWORD   sport;
+    UWORD   dport;
+    ULONG   next;
+    BOOL    armed;
+
+    ULONG   inorder;
+    ULONG   ahead;              /* hole: the frame before it never arrived */
+    ULONG   ahead_bytes;
+    ULONG   behind;             /* retransmission or reorder               */
+    ULONG   pure_ack;
+    ULONG   other;
+
+    ULONG   gap_want[AMI_RXPROBE_GAPS];
+    ULONG   gap_got[AMI_RXPROBE_GAPS];
+    UWORD   gap_avail[AMI_RXPROBE_GAPS];
+    UWORD   gaps;
+
+    UWORD   avail;              /* reads outstanding during this drain     */
+} AmiRxSeqProbe;
+
+VOID ami_sana2_rxprobe_deliver(AmiSana2If *iface, const UCHAR *frame,
+                               ULONG length);
+VOID ami_sana2_rxprobe_report(AmiSana2If *iface);
+
+#endif /* AMINETXDUO_RXPROBE */
+
 /*
  * Two bytes of slack in front of the synthesised Ethernet header so the IP
  * header lands on a 4-byte boundary. NetX Duo's NX_PHYSICAL_HEADER is 16 for
@@ -180,6 +260,10 @@ typedef struct AmiSana2Rx
        reader's slots, pinned packets and reply port are still reachable by the
        device, so none may be freed -- see ami_sana2_rx_teardown(). */
     volatile UWORD      orphans;
+
+#ifdef AMINETXDUO_RXPROBE
+    AmiRxProbe          probe;
+#endif
 
     AmiRxSlot           slot[AMI_SANA2_RX_MAX_DEPTH];
 } AmiSana2Rx;
@@ -256,6 +340,10 @@ struct AmiSana2If
     BOOL                tx_orphaned;
 
     AmiSana2Stats       stats;
+
+#ifdef AMINETXDUO_RXPROBE
+    AmiRxSeqProbe       seq;
+#endif
 };
 
 /* ------------------------------------------------------------- internals */

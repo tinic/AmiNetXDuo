@@ -46,6 +46,232 @@
 VOID ami_sana2_block_enter(VOID);
 VOID ami_sana2_block_leave(VOID);
 
+/* --------------------------------------------------------- receive probe */
+
+#ifdef AMINETXDUO_RXPROBE
+
+#include <proto/timer.h>
+#include <devices/timer.h>
+
+extern struct Device *TimerBase;
+
+static ULONG ami_rxprobe_clock(VOID)
+{
+    struct EClockVal ev;
+
+    if (TimerBase == NULL)
+        return 0;
+
+    (VOID)ReadEClock(&ev);
+
+    return ev.ev_lo;
+}
+
+static UWORD ami_rxprobe_bucket(ULONG ticks)
+{
+    UWORD b = 0;
+
+    while (ticks != 0 && b < (AMI_RXPROBE_BUCKETS - 1))
+    {
+        ticks >>= 1;
+        b++;
+    }
+
+    return b;
+}
+
+/* Replies already sitting on the port. depth - this is what the device holds. */
+static UWORD ami_rxprobe_backlog(struct MsgPort *port)
+{
+    struct Node *node;
+    UWORD        n = 0;
+
+    Disable();
+    for (node = port->mp_MsgList.lh_Head;
+         node->ln_Succ != NULL && n <= AMI_SANA2_RX_MAX_DEPTH;
+         node = node->ln_Succ)
+        n++;
+    Enable();
+
+    return n;
+}
+
+static ULONG ami_rxprobe_be32(const UCHAR *p)
+{
+    return (((ULONG)p[0]) << 24) | (((ULONG)p[1]) << 16) |
+           (((ULONG)p[2]) <<  8) |  ((ULONG)p[3]);
+}
+
+static UWORD ami_rxprobe_be16(const UCHAR *p)
+{
+    return (UWORD)((((UWORD)p[0]) << 8) | (UWORD)p[1]);
+}
+
+/*
+ * The sequence continuity of the bulk flow, read where the frame is handed
+ * over. A segment starting past `next` means the frame before it is not here
+ * and never was: the loss is below this line, not in NetX Duo.
+ */
+VOID ami_sana2_rxprobe_deliver(AmiSana2If *iface, const UCHAR *frame,
+                               ULONG length)
+{
+    AmiRxSeqProbe *sp = &iface->seq;
+    const UCHAR   *ip;
+    const UCHAR   *tcp;
+    ULONG          seq;
+    ULONG          total;
+    UWORD          ihl;
+    UWORD          doff;
+    UWORD          payload;
+
+    if (length < AMI_ETH_HEADER_SIZE + 40)
+        return;
+    if (ami_rxprobe_be16(&frame[12]) != AMI_ETHERTYPE_IPV4)
+        return;
+
+    ip = frame + AMI_ETH_HEADER_SIZE;
+
+    if ((ip[0] >> 4) != 4 || ip[9] != 6)
+        return;
+
+    ihl   = (UWORD)((ip[0] & 0x0F) * 4);
+    total = (ULONG)ami_rxprobe_be16(&ip[2]);
+
+    if (ihl < 20 || total < ihl + 20 ||
+        total > length - AMI_ETH_HEADER_SIZE)
+        return;
+
+    tcp     = ip + ihl;
+    doff    = (UWORD)((tcp[12] >> 4) * 4);
+
+    if (doff < 20 || (ULONG)ihl + doff > total)
+        return;
+
+    payload = (UWORD)(total - ihl - doff);
+    seq     = ami_rxprobe_be32(&tcp[4]);
+
+    if (payload == 0)
+    {
+        sp->pure_ack++;
+        return;
+    }
+
+    if (!sp->armed)
+    {
+        if (payload < 512)
+        {
+            sp->other++;
+            return;
+        }
+
+        sp->peer  = ami_rxprobe_be32(&ip[12]);
+        sp->sport = ami_rxprobe_be16(&tcp[0]);
+        sp->dport = ami_rxprobe_be16(&tcp[2]);
+        sp->next  = seq;
+        sp->armed = TRUE;
+    }
+    else if (sp->peer  != ami_rxprobe_be32(&ip[12]) ||
+             sp->sport != ami_rxprobe_be16(&tcp[0]) ||
+             sp->dport != ami_rxprobe_be16(&tcp[2]))
+    {
+        sp->other++;
+        return;
+    }
+
+    if (seq == sp->next)
+    {
+        sp->inorder++;
+        sp->next = seq + payload;
+    }
+    else if ((LONG)(seq - sp->next) > 0)
+    {
+        if (sp->gaps < AMI_RXPROBE_GAPS)
+        {
+            sp->gap_want[sp->gaps]  = sp->next;
+            sp->gap_got[sp->gaps]   = seq;
+            sp->gap_avail[sp->gaps] = sp->avail;
+        }
+        sp->gaps++;
+        sp->ahead++;
+        sp->ahead_bytes += seq - sp->next;
+        sp->next = seq + payload;
+    }
+    else
+    {
+        sp->behind++;
+        if ((LONG)(seq + payload - sp->next) > 0)
+            sp->next = seq + payload;
+    }
+}
+
+VOID ami_sana2_rxprobe_report(AmiSana2If *iface)
+{
+    AmiRxSeqProbe *sp = &iface->seq;
+    UWORD          i;
+    UWORD          j;
+
+    for (i = 0; i < AMI_SANA2_RX_READERS; i++)
+    {
+        AmiSana2Rx *rx = &iface->rx[i];
+        AmiRxProbe *pr = &rx->probe;
+
+        if (pr->drains == 0 && pr->posts == 0)
+            continue;
+
+        AMI_ERROR("rxprobe %ld: type %04lx depth %ld posts %ld drains %ld "
+                  "dry %ld postzero %ld postpartial %ld",
+                  (long)i, (long)rx->packet_type, (long)rx->depth,
+                  (long)pr->posts, (long)pr->drains, (long)pr->dry,
+                  (long)pr->post_zero, (long)pr->post_partial);
+
+        AMI_ERROR("rxprobe %ld: baton max %ld sum %ld ticks",
+                  (long)i, (long)pr->baton_max, (long)pr->baton_sum);
+
+        for (j = 0; j < AMI_RXPROBE_BUCKETS; j++)
+        {
+            if (pr->baton_hist[j] != 0)
+                AMI_ERROR("rxprobe %ld: baton < 2^%ld ticks %ld",
+                          (long)i, (long)j, (long)pr->baton_hist[j]);
+        }
+
+        for (j = 0; j <= AMI_SANA2_RX_MAX_DEPTH; j++)
+        {
+            if (pr->avail_hist[j] != 0)
+                AMI_ERROR("rxprobe %ld: avail %ld -> %ld drains",
+                          (long)i, (long)j, (long)pr->avail_hist[j]);
+        }
+
+        for (j = 0; j <= AMI_SANA2_RX_MAX_DEPTH; j++)
+        {
+            if (pr->backlog_hist[j] != 0)
+                AMI_ERROR("rxprobe %ld: backlog %ld -> %ld drains",
+                          (long)i, (long)j, (long)pr->backlog_hist[j]);
+        }
+    }
+
+    if (!sp->armed)
+    {
+        AMI_ERROR("rxprobe seq: no bulk flow seen");
+        return;
+    }
+
+    AMI_ERROR("rxprobe seq: peer %08lx %ld->%ld inorder %ld ahead %ld "
+              "(%ld bytes) behind %ld ack %ld other %ld",
+              (long)sp->peer, (long)sp->sport, (long)sp->dport,
+              (long)sp->inorder, (long)sp->ahead, (long)sp->ahead_bytes,
+              (long)sp->behind, (long)sp->pure_ack, (long)sp->other);
+
+    for (i = 0; i < sp->gaps && i < AMI_RXPROBE_GAPS; i++)
+    {
+        AMI_ERROR("rxprobe gap %ld: want %08lx got %08lx (%ld bytes) avail %ld",
+                  (long)i, (long)sp->gap_want[i], (long)sp->gap_got[i],
+                  (long)(sp->gap_got[i] - sp->gap_want[i]),
+                  (long)sp->gap_avail[i]);
+    }
+}
+
+#endif /* AMINETXDUO_RXPROBE */
+
 /* ------------------------------------------------------------- delivery */
 
 /*
@@ -71,6 +297,11 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet)
      */
     ami_bpf_tap_rx(iface, packet->nx_packet_prepend_ptr,
                    packet->nx_packet_length);
+#endif
+
+#ifdef AMINETXDUO_RXPROBE
+    ami_sana2_rxprobe_deliver(iface, packet->nx_packet_prepend_ptr,
+                              packet->nx_packet_length);
 #endif
 
     if (packet->nx_packet_length < AMI_ETH_HEADER_SIZE)
@@ -199,8 +430,19 @@ static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
         slot->posted                  = TRUE;
 
         SendIO((struct IORequest *)&slot->req);
+#ifdef AMINETXDUO_RXPROBE
+        rx->probe.posts++;
+        rx->probe.live++;
+#endif
         live++;
     }
+
+#ifdef AMINETXDUO_RXPROBE
+    if (live == 0)
+        rx->probe.post_zero++;
+    else if (live < rx->depth)
+        rx->probe.post_partial++;
+#endif
 
     return live;
 }
@@ -279,8 +521,39 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
 {
     struct Message *msg;
 
+#ifdef AMINETXDUO_RXPROBE
+    {
+        AmiRxProbe *pr      = &rx->probe;
+        UWORD       backlog = ami_rxprobe_backlog(rx->port);
+        UWORD       avail;
+
+        if (backlog > AMI_SANA2_RX_MAX_DEPTH)
+            backlog = AMI_SANA2_RX_MAX_DEPTH;
+
+        avail = (UWORD)((pr->live > (ULONG)backlog)
+                            ? (pr->live - (ULONG)backlog) : 0UL);
+        if (avail > AMI_SANA2_RX_MAX_DEPTH)
+            avail = AMI_SANA2_RX_MAX_DEPTH;
+
+        if (backlog != 0)
+        {
+            pr->drains++;
+            pr->backlog_hist[backlog]++;
+            pr->avail_hist[avail]++;
+            if (avail == 0)
+                pr->dry++;
+        }
+
+        rx->iface->seq.avail = avail;
+    }
+#endif
+
     while ((msg = GetMsg(rx->port)) != NULL)
     {
+#ifdef AMINETXDUO_RXPROBE
+        if (rx->probe.live != 0)
+            rx->probe.live--;
+#endif
         /* The reply message is the slot: ios2_Req.io_Message is its first
            member's first member. */
         AmiRxSlot *slot = (AmiRxSlot *)msg;
@@ -399,7 +672,13 @@ static UWORD ami_sana2_rx_reap(AmiSana2Rx *rx, UWORD tries)
         struct Message *msg;
 
         while ((msg = GetMsg(rx->port)) != NULL)
+        {
             ((AmiRxSlot *)msg)->posted = FALSE;
+#ifdef AMINETXDUO_RXPROBE
+            if (rx->probe.live != 0)
+                rx->probe.live--;
+#endif
+        }
 
         outstanding = 0;
         for (i = 0; i < rx->depth; i++)
@@ -552,6 +831,12 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             (UWORD)sizeof(struct IOSana2Req);
     }
 
+#ifdef AMINETXDUO_RXPROBE
+    /* TimerBase is opened lazily; the probe's clock needs it before the first
+       drain, not after. */
+    (VOID)ami_millis();
+#endif
+
     rx->running = TRUE;
     tx_semaphore_put(&rx->ready);
 
@@ -578,7 +863,23 @@ static VOID ami_sana2_rx_thread(ULONG argument)
 
         ami_sana2_block_enter();
         Wait(rx->wake_mask | rx->reap_mask);
+#ifdef AMINETXDUO_RXPROBE
+        {
+            AmiRxProbe *pr = &rx->probe;
+            ULONG       t0 = ami_rxprobe_clock();
+            ULONG       dt;
+
+            ami_sana2_block_leave();
+
+            dt = ami_rxprobe_clock() - t0;
+            pr->baton_sum += dt;
+            if (dt > pr->baton_max)
+                pr->baton_max = dt;
+            pr->baton_hist[ami_rxprobe_bucket(dt)]++;
+        }
+#else
         ami_sana2_block_leave();
+#endif
 
         ami_sana2_rx_drain(rx);
     }
@@ -779,6 +1080,10 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
 VOID ami_sana2_rx_stop(AmiSana2If *iface)
 {
     UWORD i;
+
+#ifdef AMINETXDUO_RXPROBE
+    ami_sana2_rxprobe_report(iface);
+#endif
 
     /*
      * The order of these three phases matters.
