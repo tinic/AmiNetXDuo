@@ -671,6 +671,68 @@ int main(void)
     h_check(h_r.sent >= 9,
             "the persist timer stopped probing a live peer");
 
+    /* ---- 8. R2 for a connection request ------------------------------- */
+    /*
+     * RFC 1122 4.2.3.5 MUST-23: a SYN is retransmitted for at least 3 minutes.
+     * The data budget of six gives 127 s, which meets the same section's R2 for
+     * data and not MUST-23, so NX_TCP_SYN_MAXIMUM_RETRIES is its own number and
+     * NX_TCP_SYN_RETRY_SHIFT_MAX caps the interval so the extra retry is spent
+     * at the ceiling rather than doubling past it.
+     *
+     * Seven retries with the shift capped at 6 is 1, 2, 4, 8, 16, 32, 64 and 64
+     * seconds of waiting -- seven datagrams at +1, +3, +7, +15, +31, +63 and
+     * +127 -- and the expiry of that last 64 s interval, at 191 s, is the reset.
+     * Without the cap the seventh interval is 128 seconds and the reset lands on
+     * 255.
+     */
+    h_fixture();
+
+    h_sock.nx_tcp_socket_state = NX_TCP_SYN_SENT;
+
+    /* Nothing has been sent but the SYN, so no transmit queue and no
+       outstanding bytes: the SYN branch is the only one that can fire. */
+    h_sock.nx_tcp_socket_transmit_sent_head  = NX_NULL;
+    h_sock.nx_tcp_socket_transmit_sent_tail  = NX_NULL;
+    h_sock.nx_tcp_socket_transmit_sent_count = 0;
+    h_sock.nx_tcp_socket_tx_outstanding_bytes = 0;
+
+    h_run_timer(600, 0);
+    h_print_ladder("connection request, no answer");
+
+    printf("  nx_user.h says      NX_TCP_SYN_MAXIMUM_RETRIES=%d"
+           " NX_TCP_SYN_RETRY_SHIFT_MAX=%d\n",
+           NX_TCP_SYN_MAXIMUM_RETRIES, NX_TCP_SYN_RETRY_SHIFT_MAX);
+
+    h_check(h_r.sent == NX_TCP_SYN_MAXIMUM_RETRIES,
+            "wrong number of SYN retransmissions before giving up");
+    h_check(h_r.reset == 1, "the connection request never gave up");
+    h_check(h_r.reset_at >= 180,
+            "R2 for a SYN is under RFC 1122 4.2.3.5 MUST-23's three minutes");
+    h_check(h_r.reset_at == 191,
+            "the SYN ladder did not abandon at 191 s");
+
+    /* The cap, stated on its own: no interval between two SYNs may exceed
+       2^NX_TCP_SYN_RETRY_SHIFT_MAX seconds. */
+    {
+        UINT  i;
+        ULONG widest = 0;
+
+        for (i = 1; i < h_r.sent && i < H_MAX_EVENTS; i++)
+        {
+            ULONG gap = h_r.sent_at[i] - h_r.sent_at[i - 1];
+
+            if (gap > widest)
+            {
+                widest = gap;
+            }
+        }
+
+        printf("  widest SYN gap      %lus\n", (unsigned long)widest);
+
+        h_check(widest <= (1UL << NX_TCP_SYN_RETRY_SHIFT_MAX),
+                "a SYN retransmission interval ran past the shift cap");
+    }
+
     printf("%lu checks, %lu failures -- %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");
 
