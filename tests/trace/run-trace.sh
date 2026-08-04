@@ -139,7 +139,7 @@ echo "==> peer on 127.0.0.1:$BASE_PORT, guest reaches it as 10.0.2.2"
 echo "==> $BYTES bytes per workload, snaplen $SNAP, capture=$CAPTURE"
 
 set +e
-"$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+"$ROOT/tools/emu-net-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
     "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/NetTrace" \
     "$STAGE/AddNetInterface" "$STAGE/commands.txt" \
     > "$ROOT/build/trace-$TAG.log" 2>&1

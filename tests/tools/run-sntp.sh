@@ -222,7 +222,7 @@ CPUARG=()
 [ -z "$CPU" ] || CPUARG=(-c "$CPU")
 
 set +e
-"$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+"$ROOT/tools/emu-net-run.sh" -n -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
     "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/AddNetInterface" \
     "$STAGE/sntp" "$STAGE/fetch" "$STAGE/netstat" "$STAGE/ClockSet" \
     "$STAGE/commands.txt"

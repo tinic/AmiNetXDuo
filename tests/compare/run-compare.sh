@@ -415,7 +415,7 @@ echo "==> plan:"
 sed 's/^/      /' "$PLAN"
 
 set +e
-"$ROOT/tools/fsuae-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
+"$ROOT/tools/emu-net-run.sh" -n -m "$MODEL" -t "$TIMEOUT" \
     "$DRIVER" "${STAGED[@]}" > "$ROOT/build/cmp-$TAG.log" 2>&1
 RC=$?
 set -e
