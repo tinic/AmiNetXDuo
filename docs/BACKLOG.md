@@ -29,17 +29,6 @@ git log; what it declined is under *Decided against*; what it disproved is under
 | RFC 2308 §5 negative cache. Needs the SOA MINIMUM held against a name with no record to attach it to | `NX_DNS_NAME_ERROR` does not exist until the pin moves past fork branch `amiga-dns-name-error`; `ami_ns_dns_error()` cannot gain the case before then. Sequence immediately after it lands | `nxd_dns.c:3587` |
 | Bailiwick check on cached records | Must land with CNAME chain following. `NX_DNS_ENABLE_EXTENDED_RR_TYPES` is undefined, so the A record after a CNAME, owner = CNAME target, is accepted only because no owner-name check exists; adding the check alone fails every CNAME-hosted name | `nxd_dns.c` |
 
-### Deferred, needs a machine that can build and run `httpd`
-
-Both are RFC 4918 violations, both are affordable, and both land in the server's
-highest-traffic paths, where an error refuses writes or breaks every listing.
-Nothing else in the 2026-08-04 httpd batch was shipped without a host compile.
-
-| Item | §  | Cite |
-|---|---|---|
-| Depth-0 collection lock does not protect members | 9.10.4 | `httpd.c:2253` |
-| PROPFIND ignores the request body, no `propname`, no named `prop`, no 404 propstat | 9.1 | `httpd.c:4136` |
-
 ### Recommended, not scheduled
 
 | Item | Why it is here rather than under *Decided against* | Cite |
@@ -56,6 +45,7 @@ Nothing else in the 2026-08-04 httpd batch was shipped without a host compile.
 | Item | Measured | Cite |
 |---|---|---|
 | **A command is mostly C runtime.** `ping` is 24,116 bytes stripped, of which its own code is **2,050**. libnix's startup pulls in a C++ AVL allocator behind `malloc` (2,952), stdio (2,916) and string/format (1,856): 7,724 bytes, 35% of the binary, none of it referenced by anything we wrote. `tool_printf` already goes through dos.library `VPrintf` and `ami_alloc` through `AllocVec`, so the references come from `__stdiowin.o`, `__initcpp.o` and `atexit.o` in the crt0 chain | link map of `tool_ping` | `src/tools/CMakeLists.txt:62-76` records why the link line was deliberately left alone once before |
+| **The httpd drill cannot be driven from the machine hosting the guest.** Amiberry bridges over pcap on `ens18`, and a GET from that host to the guest's address never answers; the same GET from another machine on the LAN answers 200. `run-httpd.sh` reports "the guest never answered from this host", which reads as a stack fault and is not one. The 2026-08-04 WebDAV run was driven from a third machine | run 2026-08-04 | `tests/tools/run-httpd.sh:183-198` |
 | **`run-tcphandler.sh` cannot leave fs-uae without being parameterised.** Every connection in it names 10.0.2.2, fs-uae's SLIRP gateway. Amiberry bridges over pcap, so the address does not exist there and the guest waits for a peer that never answers. It is the last network test still calling `fsuae-run.sh` directly | run 2026-08-04 | `tests/tools/run-tcphandler.sh:137-159` |
 | **The `HOST_TEST_TARGETS` count guard does not catch an unbuilt target.** It compares the number of *registered* tests against the number of targets, and registration happens whether or not the target was built, so five new tests went to `main` reporting Not Run | CI run 30894986338 | `tools/ci.sh:207-211` |
 
