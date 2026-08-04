@@ -297,6 +297,7 @@ set(_fuzz_tls_def
     ${_fuzz_nx_def}
     NX_DISABLE_ERROR_CHECKING
     TX_DISABLE_ERROR_CHECKING
+    NX_SECURE_KEY_CLEAR
     NX_SECURE_ENABLE_AEAD_CIPHER)
 
 set(_fuzz_secure_src "${AMINETXDUO_NETXDUO}/nx_secure/src")
