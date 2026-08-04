@@ -25,22 +25,16 @@ Items fixed the same day are omitted.
 
 **bsdsocket API**
 
+Audited against the tree 2026-08-04: the 0.16.9 socket-option work closed
+eleven of the fourteen rows this table used to carry, and they are removed
+rather than left to be re-surveyed. `bsd_no_aliases[1]` is also gone -- the
+shared static is never written and `netdb.c:45` records that as the reason.
+
 | Item | Cite |
 |---|---|
-| `SBTC_FDCALLBACK` stored, never invoked | `errno.c:386`, `library.c:281` |
-| `SBTC_SIG_ADDRESS_CHANGE_MASK` stored, never signalled | `bsdsocket_internal.h:441-444` |
-| `SO_REUSEADDR/REUSEPORT/BROADCAST/OOBINLINE/SNDBUF` succeed, no effect | `options.c:105-122`, `:148-189` |
-| `SO_RCVBUF` on TCP calls a function compiled out without `NX_ENABLE_LOW_WATERMARK`; status discarded | `options.c:171-178` |
-| `TCP_NODELAY` returns success before checking `optval`/`optlen`/type | `options.c:221-223` |
-| `IP_TTL`/`IP_TOS`/`IPV6_TCLASS` applied on raw only | `raw.c:559`, `socket.c:1354`, `:1366` |
-| `IP_TTL` = 256 succeeds, puts 0 on the wire; IPv6 siblings range-check | `options.c:139-145` |
-| `SO_ERROR` zeroed before a copy-out that can fail | `options.c:161-162` |
-| multicast `optlen` 2 unhandled; big-endian reads the high byte | `mcast.c:313-338` |
-| `SO_LINGER` negative → infinite tick count, `CloseSocket()` never returns | `options.c:254-276` |
-| `TCP_MAXSEG` discards NetX status, accepts negatives as 4-billion MSS | `options.c:254-276` |
-| `SO_KEEPALIVE` writes live NetX state with no ThreadX bracket | `options.c:322-325` |
-| `bsd_no_aliases[1]` is one writable static returned to every opener, non-const | `netdb.c:47-57` |
-| `cmsg.c` Linux aliases 49/50/51 collide with BSD `IPV6_HOPOPTS`/`DSTOPTS`/`RTHDR` — a BSD `IPV6_DSTOPTS` reads `struct in6_pktinfo` from the caller's buffer | `cmsg.c` |
+| `SBTC_FDCALLBACK` stored and never invoked, so a program cannot learn that a socket was created or closed | `errno.c:398`, `library.c:282` |
+| `SBTC_SIG_ADDRESS_CHANGE_MASK` stored and never signalled; the address-change callbacks it would ride on already exist (`netstack.c`, the DHCP and AutoIP hooks) | `errno.c:406`, `library.c:271` |
+| `SO_REUSEADDR`, `SO_REUSEPORT`, `SO_BROADCAST` and `SO_OOBINLINE` set a flag that nothing reads: `ASF_REUSEADDR`, `ASF_BROADCAST` and `ASF_OOBINLINE` appear in `options.c` only | `options.c:175-205` |
 
 **Resolver**
 
@@ -75,7 +69,6 @@ name always misses, and a CNAME-only response yields `NX_DNS_QUERY_FAILED`.
 
 | Item | Cite |
 |---|---|
-| No ARP probe, no DHCPDECLINE. Upstream code exists behind `NX_DHCP_CLIENT_SEND_ARP_PROBE`, defined nowhere; our test phase `#ifdef`'d out. Cost +3.9 s/boot | `docs/DEVELOPMENT.md:606-614` |
 | No gratuitous ARP after a DHCP address is set | `nx_arp_gratuitous_send()` uncalled |
 | ARP conflict defended but never reported; `nx_interface_ip_conflict_notify_handler` registered nowhere | |
 | Option 121 (classless static routes) never requested; we ask for 33 only | `netstack.c:1052`, `:1137` |

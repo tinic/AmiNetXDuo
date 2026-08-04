@@ -388,6 +388,25 @@ VOID ami_sana2_set_open_hooks(VOID (*quiesce)(VOID), VOID (*restore)(VOID))
     ami_sana2_restore = restore;
 }
 
+/* Same arrangement, for the address-change signal: see compat.h. */
+static VOID (*ami_address_change_hook)(VOID);
+
+VOID ami_set_address_change_hook(VOID (*hook)(VOID))
+{
+    ami_address_change_hook = hook;
+}
+
+VOID ami_address_change_notify(VOID)
+{
+    VOID (*hook)(VOID) = ami_address_change_hook;
+
+    /* Read once: the library can deregister from another task while the IP
+       thread is here, and a NULL test on the global followed by a call through
+       it would be two reads of something that changed between them. */
+    if (hook != NULL)
+        hook();
+}
+
 static LONG ami_sana2_open_once(const char *name, ULONG unit,
                                 struct IORequest *req)
 {

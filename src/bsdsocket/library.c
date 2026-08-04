@@ -21,6 +21,8 @@
 #include "aminetxduo/config.h"
 #include "aminetxduo/version.h"
 
+#include <stddef.h>
+
 #include <dos/dostags.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -166,6 +168,46 @@ static VOID bsd_new_list(struct MinList *list)
 
 /* ------------------------------------------------------------------- init -- */
 
+/*
+ * SBTC_SIG_ADDRESS_CHANGE_MASK: the openers that asked to hear about an
+ * interface address arriving, changing or going away.
+ *
+ * Registered with src/common so the netstack can reach it -- the dependency
+ * runs the other way and there is no direct call.  It is deregistered in
+ * bsd_lib_expunge(), because this function lives in the segment expunge hands
+ * to UnLoadSeg() and a stale hook would be called into freed memory.
+ *
+ * Runs on the IP thread.  Signal() is Exec, does not block and is legal from
+ * any Task; sb_Lock is held for the two list operations bsd_child_create() and
+ * bsd_child_free() take it for, so blocking the IP thread on it is bounded.
+ * Nothing here calls into NetX Duo: this is a notification NetX Duo is already
+ * inside.
+ */
+static struct AmiSocketBase *bsd_master_base;
+
+static VOID bsd_address_changed(VOID)
+{
+    struct AmiSocketBase *master = bsd_master_base;
+    struct MinNode       *node;
+
+    if (master == NULL)
+        return;
+
+    ObtainSemaphore(&master->sb_Lock);
+    for (node = master->sb_Children.mlh_Head;
+         node->mln_Succ != NULL;
+         node = node->mln_Succ)
+    {
+        struct AmiSocketBase *child =
+            (struct AmiSocketBase *)((UBYTE *)node -
+                                     offsetof(struct AmiSocketBase, sb_Node));
+
+        if (child->sb_SigAddressChangeMask != 0UL && child->sb_Task != NULL)
+            Signal(child->sb_Task, child->sb_SigAddressChangeMask);
+    }
+    ReleaseSemaphore(&master->sb_Lock);
+}
+
 static struct AmiSocketBase *bsd_lib_init(
     register struct AmiSocketBase *base    __asm("d0"),
     register APTR                  seglist __asm("a0"),
@@ -194,6 +236,9 @@ static struct AmiSocketBase *bsd_lib_init(
     bsd_new_list(&base->sb_Children);
     base->sb_StackRefs = 0;
     bsd_handoff_init(base);
+
+    bsd_master_base = base;
+    ami_set_address_change_hook(bsd_address_changed);
 
     return base;
 }
@@ -664,6 +709,15 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
         base->sb_Lib.lib_Flags |= LIBF_DELEXP;
         return NULL;
     }
+
+    /*
+     * Deregister before anything is freed.  bsd_address_changed() lives in the
+     * segment about to be handed to UnLoadSeg(), and the netstack calls it
+     * through a pointer src/common holds; leaving it registered is a call into
+     * unloaded memory the moment an address changes afterwards.
+     */
+    ami_set_address_change_hook(NULL);
+    bsd_master_base = NULL;
 
     seglist = base->sb_SegList;
     neg     = base->sb_Lib.lib_NegSize;

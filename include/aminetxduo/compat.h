@@ -154,6 +154,22 @@ LONG ami_sana2_open_device(const char *name, ULONG unit, struct IORequest *req);
    registers nothing and the open is unchanged. */
 VOID ami_sana2_set_open_hooks(VOID (*quiesce)(VOID), VOID (*restore)(VOID));
 
+/*
+ * An interface address changed -- a DHCP lease arriving or being lost, an
+ * AutoIP fallback, or a static address configured.
+ *
+ * bsdsocket.library registers the hook so it can signal the openers that asked
+ * for SBTC_SIG_ADDRESS_CHANGE_MASK; the netstack calls the notify from its own
+ * nx_ip_address_change_notify() handler.  Registered rather than called
+ * directly because the dependency runs the other way: bsdsocket links the
+ * netstack, and a command that has neither registers nothing.
+ *
+ * The notify runs on the IP thread.  A hook must not block for long and must
+ * not call into NetX Duo.
+ */
+VOID ami_set_address_change_hook(VOID (*hook)(VOID));
+VOID ami_address_change_notify(VOID);
+
 #ifdef __cplusplus
 }
 #endif

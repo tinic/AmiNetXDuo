@@ -915,7 +915,8 @@ static VOID ami_ns_log_address(const char *what, UWORD index, ULONG addr)
  */
 static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
 {
-    AmiNetStack *ns = ami_ns;
+    AmiNetStack *ns      = ami_ns;
+    BOOL         changed = FALSE;
     UWORD        i;
 
     (VOID)info;
@@ -936,6 +937,7 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
             continue;
 
         ns->ns_LastAddress[i] = addr;
+        changed               = TRUE;
 
         /* Wake anyone waiting for an address. tx_semaphore_put() does not
            block, which matters because this runs on the IP thread. */
@@ -969,6 +971,16 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
                      "%ld has a routable address now", (long)i);
         }
     }
+
+    /*
+     * Last, and once for the whole sweep rather than once per interface: a
+     * program asked whether the machine's addressing changed, not which slot
+     * moved.  The hook signals tasks and takes a semaphore held for two list
+     * operations; it must not come back into NetX Duo, because this is the IP
+     * thread and it is inside a notification NetX Duo made.
+     */
+    if (changed)
+        ami_address_change_notify();
 }
 
 /*
