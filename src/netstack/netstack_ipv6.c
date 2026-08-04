@@ -182,6 +182,23 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
     }
 
     /*
+     * RFC 8200 section 5 puts a floor of 1280 octets under every link IPv6
+     * runs over, and there is no fragmentation below it to fall back on. The
+     * MTU here comes from S2_DEVICEQUERY and may then have been taken further
+     * down by MTU= in DEVS:NetInterfaces, so a driver reporting less, or a
+     * configuration asking for less, would otherwise have left IPv6 nominally
+     * up on a link that cannot carry a conformant packet. IPv4 has no such
+     * floor and stays on the interface.
+     */
+    if (ns->ns_Ip.nx_ip_interface[i].nx_interface_ip_mtu_size < 1280)
+    {
+        AMI_WARN("netstack: %s: MTU %lu is below IPv6's 1280, IPv6 not started",
+                 cfg->name,
+                 (unsigned long)ns->ns_Ip.nx_ip_interface[i].nx_interface_ip_mtu_size);
+        return;
+    }
+
+    /*
      * Link-local first, always. A NULL address with prefix length 10 tells
      * NetX Duo to derive fe80::/64 from this interface's MAC
      * (nxd_ipv6_address_set.c); the 10 is the fe80::/10 prefix the address is

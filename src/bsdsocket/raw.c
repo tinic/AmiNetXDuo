@@ -672,6 +672,26 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
                                   : AMI_EADDRNOTAVAIL);
     }
 
+    /*
+     * The same test bsd_send_udp() makes, one header shorter, and made here
+     * because IP_HDRINCL has by now taken the caller's header off and settled
+     * the destination. Nothing calls nx_ip_fragment_enable(), so a datagram
+     * longer than the egress MTU is dropped in _nx_ip_driver_packet_send()
+     * after the send call has already answered NX_SUCCESS: the caller was told
+     * its ping or its traceroute probe went out when nothing left the machine.
+     * IP options are not carried on this path, so 20 and 40 are exact.
+     */
+    {
+        LONG  mtu      = bsd_route_mtu(ip, &dest);
+        ULONG overhead = (dest.nxd_ip_version == NX_IP_VERSION_V6) ? 40UL : 20UL;
+
+        if (mtu >= 0 && handed->nx_packet_length + overhead > (ULONG)mtu)
+        {
+            nx_packet_release(handed);
+            return bsd_fail(base, AMI_EMSGSIZE);
+        }
+    }
+
     if (source == BSD_SOURCE_INDEX)
         status = nxd_ip_raw_packet_source_send(ip, handed, &dest, src_index,
                                                protocol, ttl, tos);
