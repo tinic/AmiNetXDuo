@@ -4654,11 +4654,12 @@ static const HttpMethod httpd_methods[] =
       NULL },
     { "OPTIONS",  HTTPD_M_OPTIONS,  0,            httpd_do_options,  NULL,
       NULL },
-    /* PROPFIND's body is read and thrown away: an empty body and <allprop/>
-       mean the same thing, and a body asking for named properties gets the
-       ones there are, which RFC 4918 permits and every client tolerates. */
-    { "PROPFIND", HTTPD_M_PROPFIND, HTTPD_F_BODY, httpd_do_propfind, NULL,
-      NULL },
+    /* The body goes through the skimmer, which is where <allprop/>,
+       <propname/> and a named <prop> list are told apart.  It used to be
+       discarded, and every PROPFIND was answered as though it said
+       <allprop/>. */
+    { "PROPFIND", HTTPD_M_PROPFIND, HTTPD_F_BODY, httpd_do_propfind,
+      httpd_sink_xml, NULL },
     { "PUT",      HTTPD_M_PUT,      HTTPD_F_BODY | HTTPD_F_WRITE |
                                     HTTPD_F_UPLOAD,
                                                   httpd_do_put,

@@ -704,7 +704,8 @@ def test_depth0_collection_lock():
         a = once(req("PUT", BASE + "/locked/mine.txt",
                      {"If": "(<%s>)" % token}, body="x"))
         check(a is not None and a[0] in (201, 204),
-              "the token holder may add one")
+              "the token holder may add one (got %s)"
+              % (a[0] if a else "nothing"))
 
         once(req("DELETE", BASE + "/locked/mine.txt",
                  {"If": "(<%s>)" % token}))
