@@ -48,7 +48,11 @@ if(AMINETXDUO_USERGROUP_LINK)
     target_include_directories(usergroup_library PRIVATE
         ${AMINETXDUO_CORE_INCLUDES} "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(usergroup_library PRIVATE aminetxduo_common)
-    target_link_options(usergroup_library PRIVATE -nostartfiles)
+    # --gc-sections: 2,088 bytes off an 11,352-byte library, 18.4%, the largest
+    # proportional saving of the three.  This library is small and links
+    # aminetxduo_common, which is compiled -ffunction-sections for exactly this
+    # and until now had nothing here to collect it.
+    target_link_options(usergroup_library PRIVATE -nostartfiles -Wl,--gc-sections)
 
     if(AMIGA_SIZE)
         add_custom_command(TARGET usergroup_library POST_BUILD

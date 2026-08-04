@@ -146,7 +146,14 @@ if(AMINETXDUO_BSDSOCKET_LINK)
     # silently on the preceding global.  The map's placement of each object,
     # plus nm on that object, is the only route to them, and it is roughly half
     # the symbols here.  It does not change the binary.
+    # --gc-sections, which src/tools/ has had all along and the three shared
+    # libraries never did.  9,804 bytes off bsdsocket.library, and it is what
+    # makes the -ffunction-sections src/config/ already pays for do something
+    # here rather than only in the commands: that comment said "the library
+    # link does not collect, so all it pays is per-section padding, 1,848
+    # bytes", and this is the other half of that sentence arriving.
     target_link_options(bsdsocket_library PRIVATE -nostartfiles
+        -Wl,--gc-sections
         "-Wl,-Map=$<TARGET_FILE_DIR:bsdsocket_library>/bsdsocket.library.map")
 endif()
 
