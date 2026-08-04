@@ -935,8 +935,8 @@ static int checknetconfig_main(int argc, char **argv)
      * ami_config_load() loads the netdb (src/config/config_file.c) and
      * ami_alloc() is AllocVec(), which AmigaOS does not reclaim when a process
      * exits, 12,616 bytes per run on a stock DEVS:Internet, gone until
-     * reboot. atexit() rather than a free before each return: this command
-     * leaves main() from several places.
+     * reboot.  main() frees it on the way out, which is one place however
+     * many ways this command leaves its body.
      */
 
     if (cnc_verbose)
