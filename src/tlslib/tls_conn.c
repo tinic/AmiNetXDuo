@@ -192,6 +192,7 @@ CONST_STRPTR tls_TLSErrorString(register LONG               code    __asm("d0"),
     case TLS_ERR_CLOSED:    return (CONST_STRPTR)"the connection is closed";
     case TLS_ERR_IO:        return (CONST_STRPTR)"the network connection failed";
     case TLS_ERR_NOHOSTNAME:return (CONST_STRPTR)"no host name was given to check the certificate against";
+    case TLS_ERR_ALERT:     return (CONST_STRPTR)"the server broke off the connection; the data is incomplete";
     default:                return (CONST_STRPTR)"internal error";
     }
 }
@@ -727,14 +728,43 @@ LONG tls_TLSRead(register struct TLSConnection *conn    __asm("a0"),
                   (LONG)status, (LONG)packet,
                   (LONG)conn->tc_Session.nx_secure_tls_client_state);
 
-        if (status == NX_SECURE_TLS_CLOSE_NOTIFY_RECEIVED ||
-            status == NX_NOT_CONNECTED ||
-            status == NX_SECURE_TLS_ALERT_RECEIVED)
+        if (status == NX_SECURE_TLS_ALERT_RECEIVED)
         {
-            /* An orderly close_notify, or the peer going away.  Both are
-               end-of-stream to a reader; the distinction only matters when
-               auditing for truncation attacks, which this stack does not
-               defend against. */
+            /*
+             * Every alert arrives as this one status; the alert itself is left
+             * on the session.  A close_notify is a warning and means the peer
+             * finished, so it is end of stream.  Anything fatal means the peer
+             * tore the connection down mid-transfer -- a decrypt_error, a
+             * bad_record_mac, an internal_error -- and reporting that as end
+             * of stream hands the caller a truncated file it has no way to
+             * tell from a complete one.
+             *
+             * NX_SECURE_TLS_CLOSE_NOTIFY_RECEIVED is not tested for: only the
+             * DTLS half of nx_secure ever returns it, and DTLS is not built.
+             */
+            if (conn->tc_Session.nx_secure_tls_received_alert_level ==
+                    NX_SECURE_TLS_ALERT_LEVEL_WARNING &&
+                conn->tc_Session.nx_secure_tls_received_alert_value ==
+                    NX_SECURE_TLS_ALERT_CLOSE_NOTIFY)
+            {
+                conn->tc_Flags |= TLSF_EOF;
+                return 0;
+            }
+
+            conn->tc_Flags |= TLSF_EOF;
+            conn->tc_Error  = TLS_ERR_ALERT;
+            return -1;
+        }
+
+        if (status == NX_NOT_CONNECTED)
+        {
+            /*
+             * A bare FIN with no close_notify.  RFC 5246 7.2.1 calls that a
+             * truncation and says to treat it as an error, and this does not:
+             * plenty of servers still close the socket the moment they have
+             * finished writing, and turning those into failures would break
+             * downloads that work today.
+             */
             conn->tc_Flags |= TLSF_EOF;
             return 0;
         }

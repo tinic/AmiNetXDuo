@@ -273,6 +273,7 @@ struct TLSConnection;
 #define TLS_ERR_IO          11  /* the socket failed underneath us            */
 #define TLS_ERR_NOHOSTNAME  12  /* verification asked for, no TLSA_HostName   */
 #define TLS_ERR_INTERNAL    13  /* a bug on our side                          */
+#define TLS_ERR_ALERT       14  /* the peer sent a fatal alert; data is short */
 
 /* ----------------------------------------------------------------- info --- */
 
