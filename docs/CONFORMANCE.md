@@ -20,7 +20,6 @@ ours = `src/`, `port/`, `include/`.
 | 5961 §3, §4 | Challenge ACK required for in-window RST and SYN | `nx_tcp_socket_packet_process.c:234-248`, `:257-271`; RST at any sequence accepted when `RCV.WND==0` at `:165-167` | One in-window guess resets an established connection |
 | 1122 §4.2.3.10 (MUST-57) | SYN to broadcast/multicast MUST be discarded | `nx_ipv4_packet_receive.c:529-550` → `nx_ip_dispatch_process.c:459-476`; only source is checked, `nx_tcp_packet_process.c:517-542` | Broadcast SYN answered. Composes with one half-open slot per listener (`socket.c:1729-1730`), pinning a port for 127 s |
 | 1122 §4.2.3.4 (MUST-38) | Sender SWS avoidance | `nx_tcp_socket_send_internal.c:455-470`, no minimum-usable-window gate | Undersized segments are sent when the peer advertises small window increments. Nagle also absent |
-| 1122 §4.1.3.5 | UDP demux MUST match the 4-tuple | `nx_udp_packet_receive.c:247` compares port only; no local-address field in `NX_UDP_SOCKET` | A `connect()`ed UDP socket accepts datagrams from any peer |
 | 2181 §5.4.1 | AUTHORITY data must not be returned as answers | `nxd_dns.c:4803-4805`, cached under the RR's own owner at `:4866` | One response inserts an A record for a name never queried |
 | 8504 §6.6 / 6724 §5 | RFC 6724 source selection MUST be implemented | `nxd_ipv6_interface_find.c:73-300` is a first-match walk | No candidate set, no policy table, none of Rules 1/2/3/6/7/8 |
 | 5280 §4.2 | Unrecognized critical extension MUST be rejected | flag written `nx_secure_x509_extension_find.c:191`, read nowhere; lookup is by OID, never an enumeration | nameConstraints and any other critical extension silently ignored |
@@ -111,7 +110,10 @@ genuinely adds is the 2MSL restart, for a FIN still inside the window.
 
 **UDP** — 768 both directions including the IPv4 zero-checksum rule.
 
-**IPv4/link** — 826 ARP with the 5227 §2.4 defence, martian-source filtering,
+**IPv4/link** — 826 ARP with the 5227 §2.4 defence, martian-source filtering
+(1122 §3.2.1.3; the check existed but its define was set nowhere, so it was
+dead code in every shipped build until 2026-08-04 — the claim on this line was
+false for as long as it has been here),
 894 encapsulation, ICMP echo server with broadcast echo discarded,
 **IGMPv2 in full** (Router Alert, TTL 1, report suppression, Leave).
 

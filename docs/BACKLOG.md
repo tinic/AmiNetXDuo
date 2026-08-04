@@ -59,6 +59,12 @@ owner-name check exists. Adding the check alone would fail every CNAME-hosted
 name. Present behaviour: those records cache under the target, so the queried
 name always misses, and a CNAME-only response yields `NX_DNS_QUERY_FAILED`.
 
+**IPv4**
+
+| Item | Cite |
+|---|---|
+| The IPv4 ID is reused verbatim on a TCP retransmission. `nx_tcp_socket_retransmit.c:374` sets `nx_packet_identical_copy`, and `nx_ip_header_add.c:119-125` then returns before writing `word_1`, so the copy carries the original ID. NetX Duo cites RFC 1122 §3.2.1.5, which allowed it; RFC 6864 §4.2 supersedes that and forbids reuse for a *non-atomic* datagram. §4.1 exempts DF=1, but all four socket-create sites pass `NX_FRAGMENT_OKAY` (= 0), so DF is clear and the exemption does not apply. The early return also precedes the `NX_ENABLE_IP_ID_RANDOMIZATION` branch, so that option does not fix it | `nx_ip_header_add.c:119-125` |
+
 **DHCP**
 
 | Item | Cite |

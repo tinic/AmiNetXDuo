@@ -257,6 +257,25 @@
 #define NX_ENABLE_TCP_KEEPALIVE
 
 /*
+ * Refuse a datagram whose SOURCE address cannot be one.
+ *
+ * RFC 1122 3.2.1.3: a source of the subnet broadcast, of the network address,
+ * or in class D is invalid, and nx_ipv4_packet_receive.c:344-371 tests exactly
+ * those three -- behind this define, which nothing in this port set. The check
+ * was dead code in every build we have ever shipped, while
+ * docs/CONFORMANCE.md listed martian-source filtering as verified conformant.
+ * The claim is now true.
+ *
+ * It is guarded on nx_interface_address_mapping_needed, so it applies to the
+ * Ethernet interfaces and not to loopback, which is where a source of our own
+ * address legitimately arrives.
+ *
+ * Cost: three compares on the receive path, only for a source that is not an
+ * ordinary host address.
+ */
+#define NX_ENABLE_SOURCE_ADDRESS_CHECK
+
+/*
  * Reject a SYN that advertises an absurd MSS.
  *
  * Without this, nx_tcp_packet_process.c takes whatever MSS a peer's SYN
