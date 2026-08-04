@@ -383,6 +383,13 @@ stage_analyze() {
 
 # -------------------------------------------------------------- emulator ----
 
+# Which emulator runs the guests.  fs-uae is the historical one and is
+# unusable on the lab machine: 3.1.66 there has no SLIRP and needs an X
+# server, so every guest boots, runs nothing and times out with no DH0:.done,
+# which reads exactly like a crash in the code under test.  All eight tier-2
+# tests fail that way and all eight pass under Amiberry.
+EMU_RUNNER="${AMINETXDUO_EMU_RUNNER:-tools/amiberry-run.sh}"
+
 stage_emulator() {
     hr "emulator tests (tier 2)"
 
@@ -444,7 +451,7 @@ stage_emulator() {
             fi
             local log
             log="$BUILD/emu-$tag-$(basename "$exe").log"
-            if AMINETXDUO_RUN_TAG="ci-$tag" tools/fsuae-run.sh $cpuopt \
+            if AMINETXDUO_RUN_TAG="ci-$tag" "$EMU_RUNNER" $cpuopt \
                    -t "$timeout" "$BUILD/$dir/$exe" > "$log" 2>&1; then
                 note "PASS  $(grep -E '[0-9]+ checks' "$log" | tail -1)"
             else
