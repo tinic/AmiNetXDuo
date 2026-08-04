@@ -22,11 +22,20 @@
  * therefore recorded here first and folded into additional_link_info the first
  * time the driver is called for that interface.
  */
+/*
+ * `iface` is the publication flag: attach writes it last, unbind clears it
+ * first, and ami_sana2_lookup() below tests it first and reads the other two
+ * only after. The reader takes no lock, so that ordering is the whole of what
+ * makes it safe -- volatile is here to stop the compiler sinking the `ip` and
+ * `index` stores past the `iface` one, which it is otherwise free to do: the
+ * three are independent stores to distinct members of a plain static that it
+ * can prove nothing about. Three extra stores once per interface attach.
+ */
 typedef struct AmiSana2Binding
 {
-    NX_IP      *ip;
-    UINT        index;
-    AmiSana2If *iface;
+    NX_IP      * volatile ip;
+    volatile UINT         index;
+    AmiSana2If * volatile iface;
 } AmiSana2Binding;
 
 static AmiSana2Binding ami_sana2_bindings[AMI_CFG_MAX_INTERFACES];

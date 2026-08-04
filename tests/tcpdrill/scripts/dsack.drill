@@ -100,12 +100,19 @@ rx PA seq=1 ack=1 len=200
 tx A seq=1 ack=201 sack=1:101 hdrlen=32 within=400
 recv 400 = 200
 
-# NO PERMISSION, NO D-SACK, AND NO ACKNOWLEDGEMENT EITHER.  RFC 2883 rides on
-# RFC 2018, so a peer that never sent SACK-Permitted gets nothing back for a
-# repeat: the sequence number and window are the ones the last acknowledgement
-# already carried, so repeating it would add no information and the peer would
-# read it as a duplicate ACK.  With permission, d01 shows the same repeat now
-# draws an acknowledgement, because there IS something new to say.
+# NO PERMISSION, NO D-SACK -- BUT STILL AN ACKNOWLEDGEMENT.  RFC 2883 rides on
+# RFC 2018, so a peer that never sent SACK-Permitted gets no SACK block back
+# for a repeat: hdrlen stays 20 and sack=- asserts the option is absent.  What
+# it does get is the plain acknowledgement RFC 9293 3.10.7.4 requires for any
+# segment outside the window, which a repeat of already-acknowledged data is.
+#
+# This case asserted `notx 400` until 2026-08-04, on the reasoning that the
+# acknowledgement would carry nothing new and would be read as a duplicate ACK.
+# Both halves were wrong.  It is how the peer learns its ACK was lost rather
+# than its data, and the duplicate-ACK count it was feared to feed is only
+# incremented for an ACK arriving with a segment still on the transmit queue
+# (nx_tcp_socket_state_ack_check.c) -- which is never the case here.  Held the
+# opposite position to o02_duplicate_segment in tcp.drill, and lost.
 case d06_no_dsack_without_permission
 socket
 connect
@@ -115,5 +122,5 @@ tx A seq=1 ack=1
 rx PA seq=1 ack=1 len=100
 tx A seq=1 ack=101 sack=- hdrlen=20 within=400
 rx PA seq=1 ack=1 len=100
-notx 400
+tx A seq=1 ack=101 sack=- hdrlen=20 within=400
 recv 400 = 100

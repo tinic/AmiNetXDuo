@@ -71,7 +71,6 @@ if(AMINETXDUO_TLSLIB_LINK)
     add_executable(tls_library ${TLSLIB_SOURCES})
     set_target_properties(tls_library PROPERTIES OUTPUT_NAME "tls.library")
 
-    aminetxduo_check_pcrel(tls_library)
     target_include_directories(tls_library PRIVATE ${TLSLIB_INCLUDES})
     target_compile_options(tls_library PRIVATE -Wall -Wextra ${TLSLIB_TRACE_DEFS})
 

@@ -385,6 +385,14 @@ TLSConnection *tls_conn_for_session(const NX_SECURE_TLS_SESSION *session);
 ULONG tls_time_now(VOID);
 BOOL  tls_time_is_known(VOID);
 
+/*
+ * DateStamp() with nothing applied to it: wall time on a machine with a clock,
+ * seconds since boot on one without.  Elapsed time either way, which is what
+ * ageing a cached session needs.  TLS_CLOCK_FLOOR tells the two apart.
+ */
+ULONG tls_time_monotonic(VOID);
+#define TLS_CLOCK_FLOOR         1767225600UL    /* 2026-01-01 00:00:00 UTC */
+
 /* -------------------------------------------------------- tls_runtime.c -- */
 
 BOOL  tls_runtime_open(VOID);

@@ -107,7 +107,7 @@ CROSS_CONFIGS=(
 HOST_TEST_TARGETS=(test_config test_usergroup test_mbuf test_bpf test_httppath test_httpif test_fetchurl test_crypto68k test_crypto68k_25519 test_net68k_checksum
                    test_tcp_retries test_bcast_loopback test_tcp_source_connect test_tcp_rtt
                    test_dns_retry test_dns_status
-                   test_sockopt_numbers test_ipv6_ra test_ipv6_ptb
+                   test_sockopt_numbers test_sana2_copy test_ipv6_ra test_ipv6_ptb
                    fuzz_config fuzz_bpf fuzz_dns fuzz_usergroup
                    fuzz_dhcp fuzz_tls_record fuzz_tls_x509)
 
@@ -305,7 +305,15 @@ stage_cross() {
         if cmake --build "$BUILD/$name" --parallel "$JOBS" > "$BUILD/$name-build.log" 2>&1; then
             note "built clean"
         else
-            grep -E "error:|Error" "$BUILD/$name-build.log" | head -20
+            # `|| tail`, not a bare pipeline.  Under `set -euo pipefail` the
+            # grep exits 1 when nothing matches and 141 when head -20 closes
+            # the pipe on a broad break, and either one killed the shell here
+            # -- before `fail` recorded anything, before the remaining configs
+            # were attempted and before the summary printed.  The fallback also
+            # gives this path the log tail the configure path above already has,
+            # so a failure is never reported with no output at all.
+            grep -E "error:|Error" "$BUILD/$name-build.log" | head -20 \
+                || tail -30 "$BUILD/$name-build.log"
             fail "build $name"
         fi
     done
@@ -479,7 +487,10 @@ for s in "${WANT[@]}"; do
         toolchain)   [ -n "${AMIGA_TOOLCHAIN_ROOT:-}" ] || stage_toolchain ;;
         host)        stage_host || true ;;
         host32)      stage_host32 || true ;;
-        cross)       stage_cross ;;
+        # `|| true` on every stage, cross included: bash suppresses `set -e`
+        # inside a function called that way, which is what keeps one unguarded
+        # command in a stage from taking the summary down with it.
+        cross)       stage_cross || true ;;
         analyze)     stage_analyze || true ;;
         conformance) stage_conformance || true ;;
         emulator)    stage_emulator || true ;;

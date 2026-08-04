@@ -51,6 +51,11 @@
 /* Fraction of AvailMem() the packet pool may claim (1/AMI_POOL_MEM_DIVISOR). */
 #define AMI_POOL_MEM_DIVISOR        16
 
+#ifdef AMINETXDUO_IPV6
+/* Recursive DNS servers held from router advertisements; see ns_Rdnss. */
+#define AMI_RDNSS_MAX               4
+#endif
+
 /*
  * DNS answer cache size.
  *
@@ -218,6 +223,23 @@ struct AmiNetStack
 
     NX_DNS              ns_Dns;
     BOOL                ns_DnsCreated;
+
+#ifdef AMINETXDUO_IPV6
+    /*
+     * Recursive DNS servers a router advertised, RFC 8106.  ami_ns6_rdnss()
+     * runs on the IP thread and may not call into the DNS client -- that
+     * client holds its mutex across a query, and a query needs the IP thread
+     * -- so it only writes here, and the next lookup takes what it finds.
+     *
+     * Four is what RFC 8106 section 5.1 expects a router to advertise (it
+     * recommends no more than three) and is the same order as
+     * NX_DNS_MAX_SERVERS.  A fifth is dropped rather than replacing one that
+     * is answering.
+     */
+    NXD_ADDRESS         ns_Rdnss[AMI_RDNSS_MAX];
+    UWORD               ns_RdnssCount;
+    volatile BOOL       ns_RdnssPending;    /* written by the IP thread */
+#endif
 #ifdef NX_DNS_CACHE_ENABLE
     /* Inline rather than separately allocated: small, same lifetime as the
        NX_DNS it belongs to, and an allocation that can fail would need a "no
@@ -291,6 +313,10 @@ VOID ami_netstack_health_unpublish(VOID);
  */
 VOID ami_netstack_baton_set_sampler(VOID (*fn)(VOID));
 
+/* Wipe the slot table. Only valid once ThreadX has stopped; netstack_baton.c
+   says what it is for. */
+VOID ami_netstack_baton_reset(VOID);
+
 /* ---------------------------------------------------------- adoption glue --
  *
  * AmiNetCaller / ami_netstack_enter() / ami_netstack_leave() are public; they
@@ -316,6 +342,12 @@ VOID ami_netstack_dns_stop(AmiNetStack *ns);
 
 /* Bounded string copy, always NUL-terminating. netstack_dns.c. */
 VOID ami_ns_copy_name(char *dst, const char *src, ULONG size);
+
+#ifdef AMINETXDUO_IPV6
+/* nx_ipv6_rdnss_notify, on the IP thread. netstack_dns.c. */
+VOID ami_ns6_rdnss(NX_IP *ip_ptr, UINT interface_index, ULONG *dns_address,
+                   ULONG lifetime);
+#endif
 
 /* One DHCP option that is text, from one interface's lease. Not
    NUL-terminated on the wire; `out` always is. netstack.c. */

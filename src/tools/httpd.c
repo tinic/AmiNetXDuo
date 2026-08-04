@@ -67,6 +67,7 @@
 #include "toolsock.h"
 #include "httppath.h"
 #include "httpif.h"
+#include "httpframe.h"
 #include "aminetxduo/version.h"
 
 #include <libraries/locale.h>
@@ -165,6 +166,7 @@ enum
 #define HTTPD_LOCK_MAX         8
 #define HTTPD_LOCK_DEF      180UL   /* seconds granted when none was asked  */
 #define HTTPD_LOCK_CAP     3600UL   /* the longest this server will hold one */
+#define HTTPD_HOST_MAX        80    /* Host:, which decides a Destination   */
 #define HTTPD_TOKEN_MAX       64    /* "opaquelocktoken:...", as text       */
 
 /* An entity tag is four decimal numbers and three separators inside quotes. */
@@ -180,6 +182,18 @@ enum
 #define HTTPD_NS_MAX           3    /* xmlns: bindings carried to the reply */
 #define HTTPD_NSURI_MAX       48
 #define HTTPD_TEXT_MAX        48    /* an element's character data          */
+
+/*
+ * The lock owner is its own size because it is the one piece of client text
+ * this server stores and hands back, and 47 characters did not hold the
+ * "<D:owner><D:href>mailto:...</D:href></D:owner>" that clients actually
+ * send -- the address alone is longer than that.
+ *
+ * The cost is (128 - 48) bytes on each of HTTPD_LOCK_MAX locks and
+ * HTTPD_CONN_MAX connections: about 2.5 KB, taken once, on a machine that may
+ * have a megabyte.
+ */
+#define HTTPD_OWNER_MAX      128
 
 /* How long WaitSelect() may sleep with nothing happening.  It is what makes
    Ctrl-C and the connection timeout noticed, and nothing else depends on it. */
@@ -287,18 +301,6 @@ enum
     PROD_PROPFIND       /* a generated 207 multistatus                     */
 };
 
-/* Reading a chunked request body.  The framing is a size line, that many
-   bytes, a CRLF, and a zero-sized chunk with optional trailers to end. */
-enum
-{
-    CHUNK_OFF = 0,      /* the body is a Content-Length one                */
-    CHUNK_SIZE,
-    CHUNK_DATA,
-    CHUNK_CRLF,
-    CHUNK_TRAILER,
-    CHUNK_DONE
-};
-
 /* The XML skimmer's position.  Not a parser: it finds element names and the
    text between them and has no opinion about anything else. */
 enum
@@ -347,11 +349,13 @@ struct HttpConn
     UBYTE   framed;                 /* the whole head was read, so the     */
                                     /* body's length is known              */
     UBYTE   drain;                  /* a refused body still to be read away */
-    UBYTE   chunk_state;            /* CHUNK_OFF unless the body is chunked */
-    ULONG   chunk_left;
-    UBYTE   chunk_n;
-    char    chunk_line[24];         /* the size line, as it arrives        */
+    HttpChunk chunk;                /* HTTP_CHUNK_OFF unless it is chunked  */
+    ULONG   body_start;             /* seconds, when the body began         */
+    ULONG   body_got;               /* bytes of it that have arrived        */
     ULONG   lock_secs;              /* Timeout: seconds asked for, 0 if none */
+    char    host[HTTPD_HOST_MAX];   /* Host:, to tell a local Destination  */
+    char    ifmatch[HTTPD_ETAG_MAX];        /* If-Match:                   */
+    char    ifnone[HTTPD_ETAG_MAX];         /* If-None-Match:              */
     char    dest_url[HTTP_URL_MAX]; /* Destination:, still as it arrived   */
     HttpPath dest;                  /* and what it resolved to             */
     char    iftoken[2][HTTPD_TOKEN_MAX];    /* the tokens inside If:       */
@@ -375,13 +379,14 @@ struct HttpConn
     UBYTE   in_prop;                /* inside <prop>: children are names   */
     UBYTE   in_owner;               /* inside <owner>: text is the owner   */
     UBYTE   props;
+    UBYTE   props_cut;              /* more named than there was room for  */
     UBYTE   prop_ok[HTTPD_PROPS_MAX];
     char    prop_name[HTTPD_PROPS_MAX][HTTPD_QNAME_MAX];
     UBYTE   nsdecls;
     char    nsdecl[HTTPD_NS_MAX][HTTPD_QNAME_MAX + HTTPD_NSURI_MAX];
     UBYTE   have_date;
     struct DateStamp prop_date;
-    char    owner[HTTPD_TEXT_MAX];
+    char    owner[HTTPD_OWNER_MAX];
 
     /* a tree walk, carried between passes of the loop */
     UBYTE   walk;
@@ -471,7 +476,7 @@ typedef struct HttpLock
 {
     char  path[HTTP_PATH_MAX];      /* the AmigaOS path it covers          */
     char  token[HTTPD_TOKEN_MAX];
-    char  owner[HTTPD_TEXT_MAX];
+    char  owner[HTTPD_OWNER_MAX];
     ULONG expires;                  /* httpd_now() seconds                 */
     ULONG timeout;                  /* what was granted, for the reply     */
     UBYTE depth;                    /* 1 when it covers everything below   */
@@ -480,7 +485,9 @@ typedef struct HttpLock
 
 static HttpLock httpd_locks[HTTPD_LOCK_MAX];
 static ULONG    httpd_token_seed;
+static ULONG    httpd_token_start;      /* the clock when the server started   */
 
+static char        httpd_root_buf[HTTP_PATH_MAX];
 static const char *httpd_root = "";
 static ULONG  httpd_conns   = HTTPD_CONN_DEFAULT;
 static ULONG  httpd_timeout = HTTPD_TIMEOUT_DEF;
@@ -1146,10 +1153,13 @@ static VOID httpd_reset(HttpConn *c)
     c->had_body    = 0;
     c->framed      = 0;
     c->drain       = 0;
-    c->chunk_state = CHUNK_OFF;
-    c->chunk_left  = 0;
-    c->chunk_n     = 0;
+    http_chunk_off(&c->chunk);
+    c->body_start  = 0;
+    c->body_got    = 0;
     c->lock_secs   = 0;
+    c->host[0]     = '\0';
+    c->ifmatch[0]  = '\0';
+    c->ifnone[0]   = '\0';
     c->dest_url[0] = '\0';
     c->dest.path[0] = '\0';
     c->iftoken[0][0] = '\0';
@@ -1173,6 +1183,7 @@ static VOID httpd_reset(HttpConn *c)
     c->in_prop    = 0;
     c->in_owner   = 0;
     c->props      = 0;
+    c->props_cut  = 0;
     c->nsdecls    = 0;
     c->have_date  = 0;
     c->owner[0]   = '\0';
@@ -1284,6 +1295,58 @@ static BOOL httpd_name_cut(const char *path, const char *name)
     UnLock(lock);
 
     return cut;
+}
+
+/*
+ * TRUE when creating something called `name` at `path` would leave it under a
+ * different name -- asked by doing it, because there is no call that says how
+ * long a name a filesystem will carry and the answer differs per filesystem.
+ *
+ * httpd_name_cut() above catches a COLLISION: something already there under
+ * the cut name.  It cannot catch the FIRST one, where nothing is there and the
+ * create succeeds shortened, because it starts by locking a name that does not
+ * exist yet and reads that as "nothing to collide with".
+ *
+ * PUT and MKCOL catch that afterwards and undo it -- one file, one create.
+ * COPY and MOVE cannot: by the time the destination exists the walk has copied
+ * a tree into it, and undoing that is a second walk.  So they ask first.
+ *
+ * Only ever called with nothing at `path`; MODE_NEWFILE would truncate a file
+ * that was.
+ */
+static BOOL httpd_name_survives(const char *path, const char *name)
+{
+    BPTR probe;
+    BOOL cut;
+
+    if (name[0] == '\0')
+        return TRUE;
+
+    probe = Open((CONST_STRPTR)path, MODE_NEWFILE);
+    if (probe == (BPTR)0)
+        return TRUE;                /* the operation itself will say why   */
+
+    (VOID)Close(probe);
+
+    cut = httpd_name_cut(path, name);
+
+    (VOID)DeleteFile((CONST_STRPTR)path);
+
+    return cut ? FALSE : TRUE;
+}
+
+/*
+ * A directory entry that stands for something somewhere else.  ExNext() is the
+ * only place one is visible: Lock() follows a link, so Examine() of the result
+ * reports what it points AT and never that it was reached through one.
+ *
+ * ST_LINKFILE is deliberately not here.  A hard link to a file is one file,
+ * the machine's owner put it in the served drawer on purpose, and copying it
+ * copies bytes rather than walking anywhere.
+ */
+static BOOL httpd_entry_is_link(LONG type)
+{
+    return (type == ST_SOFTLINK || type == ST_LINKDIR) ? TRUE : FALSE;
 }
 
 /*
@@ -1822,6 +1885,46 @@ static VOID httpd_walk_slice(HttpConn *c)
                     break;
                 }
 
+                /*
+                 * A link is not walked through, whatever it points at.  This
+                 * is the only place one can be recognised, and it is the
+                 * place that matters: a hard-linked drawer inside the served
+                 * tree used to be descended into, so a DELETE of the tree
+                 * deleted what was on the far side of it -- outside the
+                 * document root, which nothing else here can reach.
+                 *
+                 * The entry itself still goes on a DELETE.  Removing a link
+                 * removes the link.
+                 */
+                if (httpd_entry_is_link((LONG)c->fib->fib_DirEntryType))
+                {
+                    if (!http_path_join(c->walk_src, sizeof(c->walk_src),
+                                        (const char *)c->fib->fib_FileName))
+                    {
+                        httpd_walk_failed(c, c->walk_src, 414);
+                        httpd_walk_mark(c);
+                        break;
+                    }
+
+                    if (c->walk_copy)
+                    {
+                        /* Copying it would copy what it points at, which is
+                           not what was asked for and may not be in the tree
+                           at all. */
+                        httpd_walk_failed(c, c->walk_src, 403);
+                        httpd_walk_mark(c);
+                    }
+                    else if (!DeleteFile((CONST_STRPTR)c->walk_src))
+                    {
+                        httpd_walk_failed(c, c->walk_src,
+                                          httpd_dos_status(IoErr()));
+                        httpd_walk_mark(c);
+                    }
+
+                    http_path_up(c->walk_src);
+                    break;
+                }
+
                 if (c->fib->fib_DirEntryType > 0)
                 {
                     /* The (skip + 1)th subdrawer of this level is the one
@@ -2294,6 +2397,25 @@ static VOID httpd_locks_drop(const char *path)
     }
 }
 
+/*
+ * Does `l` cover `path`?  Its own resource, or -- when it was taken with
+ * Depth: infinity -- anything below it.
+ *
+ * Both UNLOCK and a LOCK refresh have to ask this.  Holding a token is not
+ * enough on its own: the table is global, so a token alone lets any client
+ * operate on any lock in it through any address.
+ */
+static BOOL httpd_lock_covers(const HttpLock *l, const char *path)
+{
+    if (l == NULL)
+        return FALSE;
+
+    if (hs_equal(l->path, path))
+        return TRUE;
+
+    return (l->depth != 0 && http_path_within(l->path, path)) ? TRUE : FALSE;
+}
+
 static HttpLock *httpd_lock_by_token(const char *token)
 {
     ULONG i;
@@ -2379,30 +2501,65 @@ static BOOL httpd_lock_allows_tree(HttpConn *c, const char *path)
 }
 
 /*
- * "opaquelocktoken:" and eight hex digits.  The seed is the clock at startup,
- * so a token from a previous run of the server does not unlock a file in this
- * one -- which is the only thing an easily-guessed token could do here.
+ * "opaquelocktoken:" and 32 hex digits.
+ *
+ * WHAT A TOKEN IS AND IS NOT HERE
+ *
+ *   There is no authentication in this server, so anybody who can reach it can
+ *   already write to anything that is not locked.  A lock is coordination
+ *   between clients that are cooperating, not a boundary, and a guessed token
+ *   buys an attacker nothing they did not already have.  RFC 4918 6.5 asks for
+ *   unguessable anyway, and on a machine with no RTC, no entropy pool and no
+ *   randomness in its timings there is nothing here to make one out of.
+ *
+ *   So the two properties that CAN be had are the two that are aimed at: a
+ *   token is never issued twice in a run -- the counter guarantees it, where
+ *   eight hex digits out of one LCG word did not -- and a token from a
+ *   previous run does not name a lock in this one.
+ *
+ *   Eight digits was also short enough to collide by accident at 2^-32 per
+ *   pair, which on a table of 16 is not a risk worth carrying for 24 bytes.
  */
 static VOID httpd_make_token(char *out, ULONG outlen)
 {
     static const char hex[] = "0123456789abcdef";
+    static ULONG      count;
+
     ULONG used = 0;
-    ULONG value;
+    ULONG word[4];
+    ULONG w;
     LONG  shift;
 
-    httpd_token_seed = (httpd_token_seed * 1103515245UL) + 12345UL;
-    value = httpd_token_seed ^ (httpd_now() << 8);
+    count++;
+
+    /* Four words, each stepped from the last, so the whole 128 bits move
+       rather than the low ones repeating a pattern the high ones set. */
+    word[0] = httpd_token_start ^ count;
+    word[1] = httpd_now();
+    word[2] = httpd_token_seed;
+    word[3] = count;
+
+    for (w = 0; w < 4UL; w++)
+    {
+        httpd_token_seed = (httpd_token_seed * 1103515245UL) + 12345UL;
+        word[w] ^= httpd_token_seed;
+        word[w] ^= word[w] >> 13;
+        word[w]  = (word[w] * 2654435761UL) + w;
+    }
 
     out[0] = '\0';
     (VOID)hs_append(out, outlen, &used, "opaquelocktoken:");
 
-    for (shift = 28; shift >= 0; shift -= 4)
+    for (w = 0; w < 4UL; w++)
     {
-        char one[2];
+        for (shift = 28; shift >= 0; shift -= 4)
+        {
+            char one[2];
 
-        one[0] = hex[(value >> (ULONG)shift) & 0xfUL];
-        one[1] = '\0';
-        (VOID)hs_append(out, outlen, &used, one);
+            one[0] = hex[(word[w] >> (ULONG)shift) & 0xfUL];
+            one[1] = '\0';
+            (VOID)hs_append(out, outlen, &used, one);
+        }
     }
 }
 
@@ -2475,7 +2632,12 @@ static const char *httpd_local(const char *qname)
 static VOID httpd_note_property(HttpConn *c)
 {
     if (c->props >= (UBYTE)HTTPD_PROPS_MAX)
+    {
+        /* Dropped silently, the answer reported on the ones that fitted, and
+           the client read that as an answer about all of them. */
+        c->props_cut = 1;
         return;
+    }
 
     hs_copy(c->prop_name[c->props], (ULONG)HTTPD_QNAME_MAX, c->xml_name);
     c->prop_ok[c->props] = 0;
@@ -2558,7 +2720,12 @@ static VOID httpd_xml_tag(HttpConn *c, BOOL closing, BOOL selfclose)
         if (hs_equal(local, "prop"))
             c->in_prop = 0;
         else if (hs_equal(local, "owner"))
+        {
+            /* The collection stopped where the buffer did, which is not where
+               a character ends. */
+            http_utf8_trim(c->owner);
             c->in_owner = 0;
+        }
         else if (c->in_prop)
             httpd_set_property(c);
     }
@@ -2591,10 +2758,18 @@ static VOID httpd_xml_feed(HttpConn *c, const UBYTE *data, LONG len)
                 {
                     ULONG n = hs_len(c->owner);
 
-                    /* Markup inside <owner> contributes nothing and its text
-                       does, which is what an <owner> holding an <href> needs:
-                       the address, and not the element around it. */
-                    if (n + 1UL < sizeof(c->owner) && ch >= 0x20 && ch < 0x7f)
+                    /*
+                     * Markup inside <owner> contributes nothing and its text
+                     * does, which is what an <owner> holding an <href> needs:
+                     * the address, and not the element around it.
+                     *
+                     * Everything from 0x20 up but DEL, so a UTF-8 owner keeps
+                     * its bytes.  This used to stop at 0x7f, which turned
+                     * every non-English name into the ASCII that was left of
+                     * it -- "Björn" became "Bjrn" -- and the body IS declared
+                     * UTF-8 on the way back out.
+                     */
+                    if (n + 1UL < sizeof(c->owner) && ch >= 0x20 && ch != 0x7f)
                     {
                         c->owner[n]     = (char)ch;
                         c->owner[n + 1] = '\0';
@@ -3459,6 +3634,15 @@ static BOOL httpd_begin_put(HttpConn *c)
         return FALSE;
     }
 
+    /*
+     * Measured before the client sends a byte, which is the difference
+     * between a 507 and a floppy full of a temporary file.
+     *
+     * A chunked upload cannot be measured here: it does not say how long it
+     * is until it has finished, which is why a client chunks in the first
+     * place.  It is bounded on the way in instead -- httpd_sink_put() turns a
+     * short write into a 507 -- and that is the whole of what can be done.
+     */
     if (c->body_left > 0UL)
     {
         ULONG room = httpd_free_bytes(c->put_temp);
@@ -3694,6 +3878,89 @@ static VOID httpd_do_mkcol(HttpConn *c)
  * did -- same decode, same colon check, same root.  A destination trusted any
  * less than the target is a way out of the document root that only writes.
  */
+/*
+ * The authority of an absolute-form URL -- the "host:port" between "//" and
+ * the path -- or NULL when there is none, which is the ordinary case of a
+ * Destination written as a bare path.
+ */
+static const char *httpd_authority(const char *url, ULONG *len)
+{
+    ULONG i;
+
+    *len = 0;
+
+    for (i = 0; i < 8UL && url[i] != '\0'; i++)
+    {
+        if (url[i] == ':')
+            break;
+
+        if (!((url[i] >= 'a' && url[i] <= 'z') ||
+              (url[i] >= 'A' && url[i] <= 'Z')))
+            return NULL;
+    }
+
+    if (i == 0UL || url[i] != ':' || url[i + 1] != '/' || url[i + 2] != '/')
+        return NULL;
+
+    url += i + 3;
+
+    while (url[*len] != '\0' && url[*len] != '/')
+        (*len)++;
+
+    return url;
+}
+
+/*
+ * Does the Destination name this server?
+ *
+ * The host is compared and the port is not.  A client reaching a machine on a
+ * LAN writes the Host: and the Destination: with whatever name it resolved --
+ * an mDNS name, a NetBIOS name, a dotted address -- and the two agreeing is
+ * the whole of what can be checked; whether they agree about ":80" says
+ * nothing about whether they mean this machine.
+ *
+ * TRUE when there is no authority to compare, and TRUE when the client sent no
+ * Host: -- an HTTP/1.0 client need not, and refusing it would be refusing on
+ * no evidence.
+ */
+static ULONG httpd_hostlen(const char *s, ULONG len)
+{
+    ULONG i = 0;
+
+    /* An IPv6 literal is bracketed and full of colons; the one that ends the
+       host is the one after the ']'. */
+    if (len > 0UL && s[0] == '[')
+    {
+        while (i < len && s[i] != ']')
+            i++;
+
+        return (i < len) ? i + 1UL : len;
+    }
+
+    while (i < len && s[i] != ':')
+        i++;
+
+    return i;
+}
+
+static BOOL httpd_dest_is_local(const HttpConn *c)
+{
+    ULONG       dlen;
+    ULONG       hlen;
+    const char *dest = httpd_authority(c->dest_url, &dlen);
+
+    if (dest == NULL || c->host[0] == '\0')
+        return TRUE;
+
+    dlen = httpd_hostlen(dest, dlen);
+    hlen = httpd_hostlen(c->host, hs_len(c->host));
+
+    if (dlen != hlen || dlen == 0UL)
+        return FALSE;
+
+    return (hs_nicmp(dest, c->host, dlen) == 0) ? TRUE : FALSE;
+}
+
 static BOOL httpd_resolve_dest(HttpConn *c)
 {
     HttpPathResult why;
@@ -3701,6 +3968,21 @@ static BOOL httpd_resolve_dest(HttpConn *c)
     if (c->dest_url[0] == '\0')
     {
         httpd_error(c, 400, "that method needs a Destination");
+        return FALSE;
+    }
+
+    /*
+     * A Destination naming another machine.  http_path_resolve() throws the
+     * authority away -- which is right for the request target, where the only
+     * host it can name is this one -- so a COPY to
+     * "http://elsewhere/x" used to be answered 201 for a file written HERE,
+     * and the client was told a copy it never asked for had succeeded.
+     *
+     * RFC 4918 9.8.4: this server does not copy between hosts, so it says so.
+     */
+    if (!httpd_dest_is_local(c))
+    {
+        httpd_error(c, 502, "that destination is on another server");
         return FALSE;
     }
 
@@ -3782,6 +4064,21 @@ static VOID httpd_copy_or_move(HttpConn *c, BOOL moving)
 
     dst_kind = httpd_kind(c->dest.path);
 
+    /*
+     * The check above catches a name the filesystem would shorten onto
+     * something that is already there.  With nothing there it says nothing --
+     * it locks a name that does not exist yet -- and the destination is
+     * created shortened, answering to two addresses with reads refused under
+     * both.  PUT and MKCOL undo that afterwards; a copied tree is too much to
+     * undo, so it is asked before the walk starts.
+     */
+    if (dst_kind < 0 && !httpd_name_survives(c->dest.path, c->dest.name))
+    {
+        httpd_error(c, 400,
+                    "that name is longer than this filesystem keeps");
+        return;
+    }
+
     c->walk_move = moving ? 1 : 0;
     c->walk_new  = (dst_kind < 0) ? 1 : 0;
 
@@ -3850,6 +4147,34 @@ static VOID httpd_do_proppatch(HttpConn *c)
     if (httpd_kind(c->path.path) < 0)
     {
         httpd_error(c, 404, "there is no such file");
+        return;
+    }
+
+    /*
+     * No property named at all.  The answer used to be a 207 holding a
+     * <D:response> with an href and nothing else, which RFC 4918 14.24 does
+     * not allow -- a response carries either a status or at least one
+     * propstat, and a client that validates the multistatus rejects it.
+     *
+     * There is nothing to report on, so this is a request that did not say
+     * what to do: an empty body, a <propertyupdate> with no <prop>, or a body
+     * the skimmer could not follow.  All three are 400.
+     */
+    if (c->props == 0)
+    {
+        httpd_error(c, 400, "that PROPPATCH names no property");
+        return;
+    }
+
+    /*
+     * More names than there is room to report on.  RFC 4918 9.2 wants all of
+     * them executed or none, and a partial answer that does not mention the
+     * ones it dropped reads as a complete one.
+     */
+    if (c->props_cut)
+    {
+        httpd_error(c, 400, "that PROPPATCH names more properties than this "
+                            "server answers about");
         return;
     }
 
@@ -3996,6 +4321,20 @@ static VOID httpd_do_lock(HttpConn *c)
             return;
         }
 
+        /*
+         * And it has to be a lock on the resource this request is about.  The
+         * token was the whole of the check, so any client holding any token
+         * could keep any lock in the table alive by refreshing it through a
+         * URL it had nothing to do with -- including one whose owner had
+         * stopped and left it to expire.  UNLOCK has asked this since it was
+         * written; LOCK did not.
+         */
+        if (!httpd_lock_covers(l, c->path.path))
+        {
+            httpd_error(c, 412, "that lock is not on that resource");
+            return;
+        }
+
         l->timeout = secs;
         l->expires = httpd_now() + secs;
     }
@@ -4005,7 +4344,14 @@ static VOID httpd_do_lock(HttpConn *c)
 
         if (held != NULL && !httpd_holds(c, held))
         {
-            httpd_error(c, 423, "somebody else is holding that");
+            /* RFC 4918 9.10.6 names the precondition: a lock is already there
+               and this one would conflict with it.  It used to be an HTML
+               page, which a WebDAV client parses as nothing. */
+            httpd_begin(c, 423);
+            httpd_body_text(c, "text/xml; charset=utf-8",
+                            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                            "<D:error xmlns:D=\"DAV:\">"
+                            "<D:no-conflicting-lock/></D:error>\n");
             return;
         }
 
@@ -4084,7 +4430,19 @@ static VOID httpd_do_lock(HttpConn *c)
 
 static VOID httpd_do_unlock(HttpConn *c)
 {
-    HttpLock *l = httpd_lock_by_token(c->unlock_token);
+    HttpLock *l;
+
+    /* No header at all is a malformed request, RFC 4918 9.11: the Lock-Token
+       is what an UNLOCK consists of.  It used to be indistinguishable from a
+       token this server has never heard of, and both were 409 -- so a client
+       whose header this server failed to parse was told the lock was gone. */
+    if (c->unlock_token[0] == '\0')
+    {
+        httpd_error(c, 400, "UNLOCK needs a Lock-Token");
+        return;
+    }
+
+    l = httpd_lock_by_token(c->unlock_token);
 
     if (l == NULL)
     {
@@ -4094,8 +4452,7 @@ static VOID httpd_do_unlock(HttpConn *c)
 
     /* RFC 4918 9.11.1: the token has to name a lock that covers the address
        the request was made against, or one client can unlock another's. */
-    if (!hs_equal(l->path, c->path.path) &&
-        !(l->depth != 0 && http_path_within(l->path, c->path.path)))
+    if (!httpd_lock_covers(l, c->path.path))
     {
         httpd_error(c, 409, "that lock is not on that address");
         return;
@@ -4323,6 +4680,8 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
     ULONG  i = 0;
     ULONG  n = 0;
     ULONG  headers = 0;
+    BOOL   seen_len = FALSE;
+    BOOL   seen_te  = FALSE;
     HttpPathResult why;
 
     /* ---- the request line ------------------------------------------- */
@@ -4383,6 +4742,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
     {
         char  name[40];
         ULONG start = i;
+        BOOL  cut   = FALSE;        /* the value did not fit in httpd_value */
 
         while (i < headlen && c->in[i] != '\n')
             i++;
@@ -4422,6 +4782,8 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
             {
                 if (n + 1UL < sizeof(httpd_value))
                     httpd_value[n++] = (char)c->in[j];
+                else
+                    cut = TRUE;
                 j++;
             }
             httpd_value[n] = '\0';
@@ -4431,22 +4793,52 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
 
         if (hs_equal(name, "Content-Length"))
         {
-            ULONG len = 0;
-            const char *p = httpd_value;
+            ULONG           len;
+            HttpFrameResult bad = http_frame_length(httpd_value, &len);
 
-            while (*p >= '0' && *p <= '9')
-                len = (len * 10UL) + (ULONG)(*p++ - '0');
+            /* A length this server cannot read is not a length it may guess
+               at: whatever it gets wrong stays in the socket and is parsed as
+               the next request. */
+            if (cut || bad != HTTP_FRAME_OK)
+            {
+                const char *said = cut ? "longer than this server reads"
+                                       : http_frame_error(bad);
+
+                if (httpd_verbose || httpd_trace)
+                    httpd_log(c, "refused Content-Length: %s", (LONG)said, 0);
+
+                httpd_error(c, 400, "that is not a Content-Length");
+                return FALSE;
+            }
+
+            /* RFC 7230 3.3.3: two of them that disagree is the same hazard as
+               one that overflowed, and for the same reason. */
+            if (seen_len && len != c->body_left)
+            {
+                httpd_error(c, 400, "two Content-Lengths that disagree");
+                return FALSE;
+            }
 
             c->body_left = len;
+            seen_len     = TRUE;
         }
         else if (hs_equal(name, "Depth"))
         {
-            if (hs_nicmp(httpd_value, "infinity", 8) == 0)
+            /* RFC 4918 10.2 has three values and no others.  "2" used to be
+               read as 0, so a client asking for two levels got one and no
+               indication that it had not been understood. */
+            if (hs_nicmp(httpd_value, "infinity", 8) == 0 &&
+                httpd_value[8] == '\0')
                 c->depth = -1;
-            else if (httpd_value[0] == '1')
+            else if (httpd_value[0] == '1' && httpd_value[1] == '\0')
                 c->depth = 1;
-            else
+            else if (httpd_value[0] == '0' && httpd_value[1] == '\0')
                 c->depth = 0;
+            else
+            {
+                httpd_error(c, 400, "that is not a Depth this server has");
+                return FALSE;
+            }
         }
         else if (hs_equal(name, "Connection"))
         {
@@ -4464,8 +4856,29 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
             /* Finder does not know how long a file it is uploading is until
                it has sent it, so it chunks -- which makes this the difference
                between PUT working from macOS and not working at all. */
-            if (hs_nicmp(httpd_value, "chunked", 7) == 0)
-                c->chunk_state = CHUNK_SIZE;
+            HttpFrameCoding te = http_frame_coding(httpd_value);
+
+            /* Two of these is the same list written on two lines, and this
+               server can apply one coding or none. */
+            if (seen_te)
+            {
+                httpd_error(c, 400, "two Transfer-Encodings");
+                return FALSE;
+            }
+
+            if (cut || te == HTTP_TE_UNSUPPORTED)
+            {
+                httpd_error(c, 501, "that is not a transfer encoding this "
+                                    "server can undo");
+                return FALSE;
+            }
+
+            if (te == HTTP_TE_CHUNKED)
+                http_chunk_start(&c->chunk);
+            else
+                http_chunk_off(&c->chunk);
+
+            seen_te = TRUE;
         }
         else if (hs_equal(name, "Expect"))
         {
@@ -4474,8 +4887,36 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
             if (hs_nicmp(httpd_value, "100-continue", 12) == 0)
                 c->expect = 1;
         }
+        else if (hs_equal(name, "If-None-Match"))
+        {
+            hs_copy(c->ifnone, sizeof(c->ifnone), httpd_value);
+        }
+        else if (hs_equal(name, "If-Match"))
+        {
+            hs_copy(c->ifmatch, sizeof(c->ifmatch), httpd_value);
+        }
+        else if (hs_equal(name, "Host"))
+        {
+            /* Read for one thing only: telling a Destination that names this
+               server from one that names another.  Nothing here is
+               virtual-hosted -- there is one document root. */
+            hs_copy(c->host, sizeof(c->host), httpd_value);
+        }
         else if (hs_equal(name, "Destination"))
         {
+            /*
+             * A Destination that did not fit used to be truncated into a
+             * shorter path that still resolved -- and Overwrite defaults to
+             * T, so a COPY of a deep tree landed on, and replaced, whatever
+             * happened to be at the cut.  Nothing is guessed here.
+             */
+            if (cut || hs_len(httpd_value) + 1UL >= sizeof(c->dest_url))
+            {
+                httpd_error(c, 414, "that destination is longer than this "
+                                    "server will read");
+                return FALSE;
+            }
+
             hs_copy(c->dest_url, sizeof(c->dest_url), httpd_value);
         }
         else if (hs_equal(name, "Overwrite"))
@@ -4485,12 +4926,28 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
         else if (hs_equal(name, "If"))
         {
+            /* Half an If: is not a weaker condition, it is a different one --
+               and the half that survives the cut can be the one that says
+               yes. */
+            if (cut || hs_len(httpd_value) + 1UL >= sizeof(c->ifhdr))
+            {
+                httpd_error(c, 431, "that If: is longer than this server "
+                                    "will read");
+                return FALSE;
+            }
+
             hs_copy(c->ifhdr, sizeof(c->ifhdr), httpd_value);
             httpd_parse_if(c, httpd_value);
         }
         else if (hs_equal(name, "Lock-Token"))
         {
             const char *p = httpd_value;
+
+            if (cut)
+            {
+                httpd_error(c, 400, "that is not a lock token");
+                return FALSE;
+            }
 
             while (*p != '\0' && *p != '<')
                 p++;
@@ -4516,6 +4973,20 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
 
     /* ---- what to do with it ------------------------------------------ */
 
+    /*
+     * RFC 7230 3.3.3: both together is a request whose length two ends of a
+     * connection can read differently, which is the whole of request
+     * smuggling.  The precedence rule -- Transfer-Encoding wins -- is what a
+     * proxy in front of this server may not agree with, so the request is
+     * refused rather than resolved.
+     */
+    if (seen_te && seen_len)
+    {
+        httpd_error(c, 400, "a body cannot have both a length and an "
+                            "encoding");
+        return FALSE;
+    }
+
     /* Past this point Content-Length and Transfer-Encoding have been read, so
        a refusal knows whether there is a body and how long it is.  A refusal
        BEFORE it does not, and must close rather than guess. */
@@ -4532,7 +5003,8 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
     }
 
     c->head_only = (c->method->id == HTTPD_M_HEAD) ? 1 : 0;
-    c->had_body  = (c->body_left > 0UL || c->chunk_state != CHUNK_OFF) ? 1 : 0;
+    c->had_body  = (c->body_left > 0UL ||
+                    c->chunk.state != HTTP_CHUNK_OFF) ? 1 : 0;
 
     /*
      * The ceiling is on a body this server HOLDS.  A PUT's goes to a file as
@@ -4625,6 +5097,108 @@ static VOID httpd_if_lookup(void *ctx, const char *tag, HttpIfState *out)
     httpd_etag_of(path, out->etag, sizeof(out->etag));
 }
 
+/*
+ * If-Match and If-None-Match, RFC 7232 3.1 and 3.2.
+ *
+ * WRITES ONLY, deliberately.  "If-None-Match: *" is how a client asks for a
+ * PUT that creates and does not replace -- an atomic create, and the reason
+ * the header is on the list at all -- and on a server with no authentication
+ * it is the only way two clients can avoid overwriting each other without
+ * taking a lock first.
+ *
+ * On a GET the same header means something else: it asks for a 304 and a
+ * saved transfer, which this server does not do and which no client is harmed
+ * by not getting.  Answering a read request 412 because a cache validator
+ * matched would break every browser, so a read is left alone.
+ *
+ * FALSE when it has answered.
+ */
+static BOOL httpd_etag_listed(const char *list, const char *etag)
+{
+    ULONG n = hs_len(etag);
+
+    if (n == 0UL)
+        return FALSE;
+
+    while (*list != '\0')
+    {
+        while (*list == ' ' || *list == '\t' || *list == ',')
+            list++;
+
+        /* A weak validator compares equal to a strong one for everything
+           except a byte-range request, which this never is. */
+        if (list[0] == 'W' && list[1] == '/')
+            list += 2;
+
+        if (*list == '\0')
+            break;
+
+        if (hs_nicmp(list, etag, n) == 0)
+            return TRUE;
+
+        while (*list != '\0' && *list != ',')
+            list++;
+    }
+
+    return FALSE;
+}
+
+static BOOL httpd_preconditions(HttpConn *c)
+{
+    char  etag[HTTPD_ETAG_MAX];
+    BOOL  exists;
+
+    if (c->ifmatch[0] == '\0' && c->ifnone[0] == '\0')
+        return TRUE;
+
+    if ((c->method->flags & HTTPD_F_WRITE) == 0)
+        return TRUE;
+
+    exists = (httpd_kind(c->path.path) >= 0) ? TRUE : FALSE;
+
+    if (c->ifnone[0] != '\0')
+    {
+        if (c->ifnone[0] == '*' && exists)
+        {
+            httpd_error(c, 412, "something of that name is there already");
+            return FALSE;
+        }
+
+        if (c->ifnone[0] != '*' && exists)
+        {
+            httpd_etag_of(c->path.path, etag, sizeof(etag));
+
+            if (httpd_etag_listed(c->ifnone, etag))
+            {
+                httpd_error(c, 412, "that is the version already there");
+                return FALSE;
+            }
+        }
+    }
+
+    if (c->ifmatch[0] != '\0')
+    {
+        if (!exists)
+        {
+            httpd_error(c, 412, "there is nothing of that name here");
+            return FALSE;
+        }
+
+        if (c->ifmatch[0] != '*')
+        {
+            httpd_etag_of(c->path.path, etag, sizeof(etag));
+
+            if (!httpd_etag_listed(c->ifmatch, etag))
+            {
+                httpd_error(c, 412, "that is not the version that is there");
+                return FALSE;
+            }
+        }
+    }
+
+    return TRUE;
+}
+
 static VOID httpd_dispatch(HttpConn *c)
 {
     if (httpd_verbose && !httpd_trace)
@@ -4643,6 +5217,12 @@ static VOID httpd_dispatch(HttpConn *c)
         return;
     }
 
+    if (!httpd_preconditions(c))
+    {
+        httpd_log_status(c);
+        return;
+    }
+
     c->method->handle(c);
 
     /* A walk answers some passes of the loop later, and logs its own status
@@ -4651,111 +5231,58 @@ static VOID httpd_dispatch(HttpConn *c)
         httpd_log_status(c);
 }
 
+/* http_chunk_feed() hands the decoded bytes here, and here is where they meet
+   the method that asked for them. */
+static VOID httpd_chunk_sink(void *ctx, const UBYTE *data, LONG len)
+{
+    HttpConn *c = (HttpConn *)ctx;
+
+    if (c->method != NULL && c->method->sink != NULL)
+        c->method->sink(c, data, len);
+}
+
 /*
- * A chunked request body, decoded as it arrives.  Everything the decoder is in
- * the middle of lives in the connection, because a chunk boundary falls
- * wherever the network put it and not where the framing wanted it.
+ * A chunked request body, decoded as it arrives by httpframe.c.  Everything
+ * the decoder is in the middle of lives in the connection, because a chunk
+ * boundary falls wherever the network put it and not where the framing wanted
+ * it.
  *
- * There is no ceiling on what a chunked body may total.  The sinks are what
- * bound it: PUT's writes to a file, and the ones that read XML have fixed
- * buffers, so an endless body costs time -- which the connection timeout
- * already bounds -- and not memory.
+ * A ceiling applies to a body this server HOLDS, exactly as Content-Length's
+ * does: the methods that read XML have fixed buffers, and a chunked body used
+ * to reach them without being measured at all -- Content-Length's 413 was on
+ * `body_left`, which a chunked request never sets.  An upload is still the
+ * client's business and is not measured.
  *
  * Returns how much of `data` belonged to the body; anything after that is the
- * next request.
+ * next request.  A body that failed has answered by the time this returns, and
+ * says so through HTTP_CHUNK_ERROR: the caller must stop reading rather than
+ * ask whether the body is finished, because a failed one never will be.
  */
 static LONG httpd_feed_chunked(HttpConn *c, const UBYTE *data, LONG len)
 {
-    LONG i = 0;
+    LONG took = http_chunk_feed(&c->chunk, data, len, httpd_chunk_sink, c);
 
-    while (i < len && c->chunk_state != CHUNK_DONE)
+    if (c->chunk.state == HTTP_CHUNK_ERROR)
     {
-        switch (c->chunk_state)
-        {
-            case CHUNK_SIZE:
-            {
-                int ch = data[i++];
-
-                if (ch != '\n')
-                {
-                    if (ch != '\r' &&
-                        c->chunk_n + 1U < sizeof(c->chunk_line))
-                        c->chunk_line[c->chunk_n++] = (char)ch;
-                    break;
-                }
-
-                {
-                    const char *p = c->chunk_line;
-
-                    c->chunk_line[c->chunk_n] = '\0';
-                    c->chunk_n    = 0;
-                    c->chunk_left = 0;
-
-                    /* Hex, and it stops at the ';' of a chunk extension. */
-                    for (;;)
-                    {
-                        int d = *p;
-
-                        if (d >= '0' && d <= '9')      d -= '0';
-                        else if (d >= 'a' && d <= 'f') d -= 'a' - 10;
-                        else if (d >= 'A' && d <= 'F') d -= 'A' - 10;
-                        else                           break;
-
-                        c->chunk_left = (c->chunk_left << 4) | (ULONG)d;
-                        p++;
-                    }
-                }
-
-                c->chunk_state = (c->chunk_left > 0UL)
-                                     ? CHUNK_DATA : CHUNK_TRAILER;
-                break;
-            }
-
-            case CHUNK_DATA:
-            {
-                ULONG take = (ULONG)(len - i);
-
-                if (take > c->chunk_left)
-                    take = c->chunk_left;
-
-                if (c->method != NULL && c->method->sink != NULL)
-                    c->method->sink(c, &data[i], (LONG)take);
-
-                i += (LONG)take;
-                c->chunk_left -= take;
-
-                if (c->chunk_left == 0UL)
-                    c->chunk_state = CHUNK_CRLF;
-                break;
-            }
-
-            case CHUNK_CRLF:
-                if (data[i++] == '\n')
-                    c->chunk_state = CHUNK_SIZE;
-                break;
-
-            default:                    /* CHUNK_TRAILER                   */
-            {
-                int ch = data[i++];
-
-                /* Trailer lines, then a blank one.  Nothing here reads a
-                   trailer; they are counted so the blank line is found. */
-                if (ch == '\n')
-                {
-                    if (c->chunk_n == 0U)
-                        c->chunk_state = CHUNK_DONE;
-                    c->chunk_n = 0;
-                }
-                else if (ch != '\r')
-                {
-                    c->chunk_n = 1;
-                }
-                break;
-            }
-        }
+        /* Nothing after a framing failure is known to be a request, so this
+           answers and closes rather than resynchronising on the body's own
+           bytes. */
+        httpd_error(c, 400, "that is not a chunked body this server can read");
+        c->keepalive = 0;
+        return len;
     }
 
-    return i;
+    if (c->method != NULL && (c->method->flags & HTTPD_F_UPLOAD) == 0 &&
+        c->chunk.total > HTTPD_BODY_MAX)
+    {
+        httpd_error(c, 413, "that request body is larger than this server "
+                            "will read");
+        c->keepalive     = 0;
+        c->chunk.state   = HTTP_CHUNK_ERROR;
+        return len;
+    }
+
+    return took;
 }
 
 /*
@@ -4774,7 +5301,7 @@ static LONG httpd_consume_body(HttpConn *c, const UBYTE *data, LONG len)
     if (len <= 0)
         return 0;
 
-    if (c->chunk_state != CHUNK_OFF)
+    if (c->chunk.state != HTTP_CHUNK_OFF)
         return httpd_feed_chunked(c, data, len);
 
     take = ((ULONG)len > c->body_left) ? (LONG)c->body_left : len;
@@ -4811,10 +5338,50 @@ static LONG httpd_consume_body(HttpConn *c, const UBYTE *data, LONG len)
 
 static BOOL httpd_body_done(const HttpConn *c)
 {
-    if (c->chunk_state != CHUNK_OFF)
-        return (c->chunk_state == CHUNK_DONE) ? TRUE : FALSE;
+    if (c->chunk.state != HTTP_CHUNK_OFF)
+        return (c->chunk.state == HTTP_CHUNK_DONE) ? TRUE : FALSE;
 
     return (c->body_left == 0UL) ? TRUE : FALSE;
+}
+
+/* A body that will never finish, because its framing did not hold.  It has
+   been answered already; what is left is to stop reading. */
+static BOOL httpd_body_failed(const HttpConn *c)
+{
+    return (c->chunk.state == HTTP_CHUNK_ERROR) ? TRUE : FALSE;
+}
+
+/*
+ * A body still arriving, and whether it is arriving at all.
+ *
+ * The no-progress timeout asks whether ANYTHING came, and one byte answers it
+ * -- so a client sending a byte every 29 seconds held its slot for as long as
+ * it liked, and HTTPD_CONN_MAX of them held the whole table.  This asks the
+ * other question: at what rate.
+ *
+ * The floor is far below any real transfer.  A 7 MHz machine writing to a
+ * floppy manages some tens of kilobytes a second; the attack above is a
+ * thirtieth of a byte.  The grace period is there so that a client which
+ * pauses to think -- Expect: 100-continue, or a Finder that opens the
+ * connection before the user has chosen a file -- is not counted against it.
+ */
+#define HTTPD_BODY_RATE     32UL    /* bytes a second, averaged             */
+#define HTTPD_BODY_GRACE    60UL    /* seconds before the average is asked  */
+
+static BOOL httpd_body_rate_ok(const HttpConn *c, ULONG now)
+{
+    ULONG elapsed;
+
+    if (c->state != CONN_BODY || c->body_start == 0UL || now < c->body_start)
+        return TRUE;
+
+    elapsed = now - c->body_start;
+
+    if (elapsed <= HTTPD_BODY_GRACE)
+        return TRUE;
+
+    return (c->body_got >= (elapsed - HTTPD_BODY_GRACE) * HTTPD_BODY_RATE)
+               ? TRUE : FALSE;
 }
 
 /* The head, out of the buffer, leaving whatever the client pipelined behind
@@ -4867,7 +5434,7 @@ static VOID httpd_refuse_drain(HttpConn *c)
     ULONG i;
 
     if (!c->keepalive || !c->framed || c->expect ||
-        c->chunk_state != CHUNK_OFF || c->body_left > HTTPD_BODY_MAX)
+        c->chunk.state != HTTP_CHUNK_OFF || c->body_left > HTTPD_BODY_MAX)
     {
         c->keepalive = 0;
         c->in_len    = 0;
@@ -4940,8 +5507,23 @@ static VOID httpd_after_head(HttpConn *c, ULONG headlen)
         }
     }
 
+    /* The framing failed inside what had already arrived.  It is answered;
+       what is in the buffer behind it is not a request. */
+    if (httpd_body_failed(c))
+    {
+        c->in_len = 0;
+        c->state  = CONN_SEND;
+        httpd_log_status(c);
+        return;
+    }
+
     if (!httpd_body_done(c))
     {
+        /* The clock the arrival rate is measured against starts here, and not
+           when the connection opened: what came before was the head. */
+        c->body_start = httpd_now();
+        c->body_got   = 0;
+
         if (c->expect)
         {
             /* The client is waiting for this before it sends anything: curl
@@ -5014,7 +5596,7 @@ static BOOL httpd_readable(HttpConn *c)
 
         /* A chunked body has no count to stop at, so the framing is what says
            where it ends and the read is whatever the socket has. */
-        if (c->chunk_state == CHUNK_OFF && (ULONG)want > c->body_left)
+        if (c->chunk.state == HTTP_CHUNK_OFF && (ULONG)want > c->body_left)
             want = (LONG)c->body_left;
 
         got = tool_sock_recv(httpd_sb, c->sock, scratch, want);
@@ -5030,7 +5612,16 @@ static BOOL httpd_readable(HttpConn *c)
         }
 
         took = httpd_consume_body(c, scratch, got);
-        c->progress = httpd_now();
+        c->progress  = httpd_now();
+        c->body_got += (ULONG)got;
+
+        if (httpd_body_failed(c))
+        {
+            c->in_len = 0;
+            c->state  = CONN_SEND;
+            httpd_log_status(c);
+            return TRUE;
+        }
 
         /* Anything past the end of the body is the next request, and it has
            already been taken out of the socket. */
@@ -5463,6 +6054,14 @@ static VOID httpd_serve(LONG lsock)
             {
                 c->progress = now;
             }
+            else if (!httpd_body_rate_ok(c, now))
+            {
+                if (httpd_verbose || httpd_trace)
+                    httpd_log(c, "body arriving slower than %lu bytes a "
+                                 "second; closing",
+                              (LONG)HTTPD_BODY_RATE, 0);
+                httpd_close(c);
+            }
         }
     }
 }
@@ -5499,7 +6098,12 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    httpd_root    = (const char *)args[ARG_ROOT];
+    /* Trimmed before anything is resolved under it: the root is the one path
+       here that does not go through http_path_resolve(), which is where every
+       other doubled slash is prevented. */
+    http_path_root((const char *)args[ARG_ROOT], httpd_root_buf,
+                   sizeof(httpd_root_buf));
+    httpd_root    = httpd_root_buf;
     httpd_verbose = (args[ARG_VERBOSE] != 0) ? TRUE : FALSE;
     httpd_trace   = (args[ARG_TRACE]   != 0) ? TRUE : FALSE;
 
@@ -5648,7 +6252,8 @@ int main(int argc, char **argv)
 
     /* The lock tokens have to differ between runs of the server, or a token a
        client kept from the last one unlocks a file in this one. */
-    httpd_token_seed = httpd_now();
+    httpd_token_seed  = httpd_now();
+    httpd_token_start = httpd_token_seed;
 
     lsock = httpd_listen(&address, port);
     if (lsock < 0)

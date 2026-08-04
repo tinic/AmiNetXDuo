@@ -52,6 +52,14 @@
  *                              layout callers compile against -- next/len/
  *                              data chains NetX Duo has no use for, as it
  *                              allocates fixed-size NX_PACKETs from one pool.
+ *
+ *                              src/mbuf is that allocator, already written and
+ *                              tested and linked into nothing. Wiring any one
+ *                              of these eleven to it also means linking
+ *                              aminetxduo_mbuf and calling ami_mbuf_cleanup()
+ *                              from ami_ns_destroy(); see aminetxduo/mbuf.h.
+ *                              Without both, every slab is resident until
+ *                              reboot.
  *   ChangeRouteTagList()       the NDK assigns it an offset and neither the
  *                              autodoc nor clib/bsdsocket_protos.h says what
  *                              it takes.

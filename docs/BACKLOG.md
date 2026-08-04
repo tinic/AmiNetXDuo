@@ -18,209 +18,48 @@ empty results.
 
 ## Open — no decision taken
 
-### From the 0.16.7 audit and RFC survey (2026-08-02)
+Everything below survived the 2026-08-04 sweep. What that sweep fixed is in the
+git log; what it declined is under *Decided against*; what it disproved is under
+*Withdrawn*. Conformance status and citations are in `CONFORMANCE.md`.
 
-Conformance status and citations are in `CONFORMANCE.md`. This is the work list.
-Items fixed the same day are omitted.
+### Blocked
 
-**bsdsocket API** — nothing open. The 0.16.9 socket-option work closed eleven of
-the fourteen rows this table used to carry; the remaining two were decisions
-rather than omissions all along and have moved to *Decided against* below.
-`bsd_no_aliases[1]` is also gone -- the shared static is never written and
-`netdb.c:45` records that as the reason.
+| Item | Blocked on | Cite |
+|---|---|---|
+| RFC 2308 §5 negative cache. Needs the SOA MINIMUM held against a name with no record to attach it to | `NX_DNS_NAME_ERROR` does not exist until the pin moves past fork branch `amiga-dns-name-error`; `ami_ns_dns_error()` cannot gain the case before then. Sequence immediately after it lands | `nxd_dns.c:3587` |
+| Bailiwick check on cached records | Must land with CNAME chain following. `NX_DNS_ENABLE_EXTENDED_RR_TYPES` is undefined, so the A record after a CNAME — owner = CNAME target — is accepted only because no owner-name check exists; adding the check alone fails every CNAME-hosted name | `nxd_dns.c` |
 
-**Resolver**
+### Deferred — needs a machine that can build and run `httpd`
 
-| Item | Cite |
-|---|---|
-| Break is sampled per retry rung, 2–4 s worst case, not the 200 ms `bsd_wait_sliced()` reaches; the DNS mutex covers one UDP socket, one transmit ID and a file-scope decode buffer, so it cannot be dropped mid-query | `netstack_retry.c`, `netstack.h` |
-| RFC 2308 §5 negative cache entry absent; needs the SOA MINIMUM held against a name with no record to attach it to. NXDOMAIN recognition is fork branch `amiga-dns-name-error` (`NX_DNS_ERROR_MASK` 0x8002 matches RCODE 3 as it does RCODE 2, so both surfaced as `NX_DNS_SERVER_AUTH_ERROR`); unconsumable until the submodule pin moves, and `ami_ns_dns_error()` then needs an `NX_DNS_NAME_ERROR` case | `nxd_dns.c:4464` |
+Both are RFC 4918 violations, both are affordable, and both land in the server's
+highest-traffic paths, where an error refuses writes or breaks every listing.
+Nothing else in the 2026-08-04 httpd batch was shipped without a host compile.
 
-**DNS security** — these compose; see the CNAME note below before starting
+| Item | §  | Cite |
+|---|---|---|
+| Depth-0 collection lock does not protect members | 9.10.4 | `httpd.c:2253` |
+| PROPFIND ignores the request body — no `propname`, no named `prop`, no 404 propstat | 9.1 | `httpd.c:4136` |
 
-| Item | Cite |
-|---|---|
-| AUTHORITY records accepted as answers, cached under their own owner | `:4803-4805`, `:4866` |
-| Elapsed TTL by integer tick division; `last_used` reset on hit | `:9117`, `:9137` |
-| TC ignored, no TCP fallback, no EDNS0. `NX_DNS_TC_FLAG` defined, never read | `nxd_dns.h:124` |
-| Reverse path validates only the ID | `:3800-3858` |
-| Question comparison case-sensitive; cache path is not — breaks DNS-0x20 | `:4515` vs `:9933` |
+### Recommended, not scheduled
 
-**A bailiwick check must be implemented together with CNAME chain following.**
-CNAME processing is compiled out (`NX_DNS_ENABLE_EXTENDED_RR_TYPES` undefined),
-so the following A record — owner = CNAME target — is accepted only because no
-owner-name check exists. Adding the check alone would fail every CNAME-hosted
-name. Present behaviour: those records cache under the target, so the queried
-name always misses, and a CNAME-only response yields `NX_DNS_QUERY_FAILED`.
+| Item | Why it is here rather than under *Decided against* | Cite |
+|---|---|---|
+| **Entropy: ~18 credited bits on a machine with no RTC.** No reseeding, no persisted seed, no health tests | An attacker who knows roughly when the machine booted can enumerate the DRBG state and recover session keys. Two designs, both outside `src/tlslib/`: mix the E-clock low bits of packet arrival into the pool at one credited bit per packet, capped — DNS and the TCP handshake spend enough packets to cross 64 bits before a TLS handshake starts; and persist a seed in `DEVS:Internet/`, written at close and mixed at open, so only a machine's first boot is weak | `ami_random.c:590`, `random.h:39-44` |
+| **Encrypt-then-MAC, RFC 7366** | The answer to the CBC padding-timing row, which is declined on its own terms below. EtM fails the MAC before padding is examined, at no per-record cost; constant-time padding costs ~10 ms per record at 7 MHz | — |
+| **Extended master secret, RFC 7627** | Without it, resumption is exposed to the triple-handshake attack. A change to nx_secure's key schedule, not a table entry; every cached session becomes non-resumable | — |
+| **SACK send side** | Already written and verified on fork branch `amiga-tcp-sack-transmit` (`d8af79c5`), never landed. Adds `nx_tcp_sack_option_get.c` and the retransmit skip | `nx_tcp.h:93` |
+| **An RA with A=1 and L=0 forms an address nothing can remove.** The address is formed at `:344`, `:396-422`, but a prefix-list entry is added only when L is set (`:317`), so nothing ages it out | Found 2026-08-04 while adjudicating the IPv6 address-lifetime rows. A legitimate and not-rare router configuration, and a worse defect than the row that led to it | `nx_icmpv6_process_ra.c` |
+| **EKU, nameConstraints and critical-extension rejection — together** | Accepting a certificate that marks nameConstraints critical while not enforcing it is exactly the failure the critical bit exists to prevent, so doing one without the others is worse than doing none. The known-critical set must be `{basicConstraints, keyUsage, subjectAltName, extendedKeyUsage}` — Let's Encrypt intermediates mark EKU critical. Untestable without hardware | `nx_secure_x509_extension_find.c:191` |
 
-**IPv4**
+### Carried caveats
 
-| Item | Cite |
-|---|---|
-| The IPv4 ID is reused verbatim on a TCP retransmission. `nx_tcp_socket_retransmit.c:374` sets `nx_packet_identical_copy`, and `nx_ip_header_add.c:119-125` then returns before writing `word_1`, so the copy carries the original ID. NetX Duo cites RFC 1122 §3.2.1.5, which allowed it; RFC 6864 §4.2 supersedes that and forbids reuse for a *non-atomic* datagram. §4.1 exempts DF=1, but all four socket-create sites pass `NX_FRAGMENT_OKAY` (= 0), so DF is clear and the exemption does not apply. The early return also precedes the `NX_ENABLE_IP_ID_RANDOMIZATION` branch, so that option does not fix it | `nx_ip_header_add.c:119-125` |
+Two verdicts from the sweep rest on comments rather than observation, and are
+recorded so they can be re-checked rather than re-derived.
 
-**DHCP**
-
-| Item | Cite |
-|---|---|
-| Option 121 (classless static routes) never requested; we ask for 33 only | `netstack.c:1052`, `:1137` |
-| No RFC 3396 long-option concatenation; first fragment wins | `nxd_dhcp_client.c:7526` |
-| Option 52 (overload) unhandled | |
-| `nxd_dhcp_client.c:6939`, `:6974` compare seconds against ticks | |
-
-**TCP**
-
-| Item | Cite |
-|---|---|
-| SACK send side: we advertise SACK-Permitted and never parse incoming blocks. `NX_TCP_SACK_KIND` defined and written, never read | `nx_tcp.h:93`, `nx_tcp_sack_option_build.c:212` |
-| RFC 3708 (sender-side spurious-retransmission detection from received D-SACK) absent. Applies to the write direction only. The `sack-transmit` branch discards ranges at or below `SND.UNA` as "D-SACK or stale" — correct for RFC 2018, but it drops the information RFC 3708 needs | unlanded branch |
-| Broadcast SYN answered (destination unchecked) + one half-open slot per listener → port dead 127 s | `nx_tcp_packet_process.c:517-542`, `socket.c:1729-1730` |
-| RFC 5961 absent: in-window RST resets, in-window SYN resets and tears down, RST at any sequence when `RCV.WND==0` | `nx_tcp_socket_packet_process.c:234-271`, `:165-167` |
-| MUST-23: R2 for SYN is 127 s, needs 180. `NX_TCP_MAXIMUM_RETRIES 7` → 255 s, `connect()` blocks that long | `nx_user.h:201`, `:204` |
-| Sender SWS avoidance absent; Nagle absent | `nx_tcp_socket_send_internal.c:455-470` |
-| Receiver SWS has no `min(MSS, RCV.BUFF/2)` floor | `nx_tcp_socket_receive.c:210-218` |
-| Restart-after-idle absent; no per-socket last-send time | |
-| RST-in-response-to-RST hole on the malformed-option path | `nx_tcp_socket_packet_process.c:298-332` |
-| UDP demux ignores the 4-tuple | `nx_udp_packet_receive.c:247` |
-| UDP checksum verified at dequeue, not enqueue | `nx_udp_socket_receive.c` |
-| `o02_duplicate_segment` fails: a duplicate of acknowledged data is not re-acked when the receive queue is non-empty | `tests/tcpdrill` |
-| `keepalive.drill` k02 and k03 fail and k04 passes vacuously. All three assert against a probe within 8 s of connect; `NX_TCP_KEEPALIVE_INITIAL` is BSD's 7200 s and nothing overrides it, so no probe is due for two hours and "no probe was sent" is the only outcome any of the three can have. The cases were written with the feature and never run. Keepalive itself is therefore untested, not broken. Testing it needs a per-socket idle interval — `TCP_KEEPIDLE`, which BSD and Linux both carry and this stack does not — since the constant is compile-time and `TcpDrill` is a separate binary | `nx_tcp.h:129`, `tests/tcpdrill/scripts/keepalive.drill` |
-| No FIN-WAIT-2 timeout. `nx_tcp_fast_periodic_processing.c:142-193` ages SYN_SENT, SYN_RECEIVED, FIN_WAIT_1, CLOSING, LAST_ACK and TIMED_WAIT — not FIN_WAIT_2 — so a socket the application has `shutdown(SHUT_WR)` and not closed sits there indefinitely. Orphans are bounded by `bsd_closing_sweep`'s 60 s deadline; sockets the caller still holds are not | `nx_tcp_fast_periodic_processing.c` |
-| `bsd_tcp_close_start()` discards every `nx_tcp_socket_disconnect()` status and returns TRUE regardless (`socket.c:823`, `:830`, `:837`). In FIN_WAIT_1 that call returns `NX_NOT_CONNECTED` and sends nothing, so the `SO_LINGER{1,0}` abortive close is a no-op; the RST that does appear comes from the `bsd_tcp_abort()` fallback after `nx_tcp_socket_delete()` answers `NX_STILL_BOUND`. Right answer, wrong route, and the caller is told it worked either way | `src/bsdsocket/socket.c:823-845` |
-
-**IPv6**
-
-| Item | Cite |
-|---|---|
-| No fragment reassembly, either family. PMTUD reduces the inbound case but does not remove it: a path narrow in the reverse direction still fragments towards us and `_nx_ipv6_process_fragment_option()` drops every fragment | `nx_ip_fragment_enable()` uncalled |
-| No MLD; recorded rationale is wrong (snooping filters, it does not forward) | `nx_mld.h` stub, `nx_user.h:636-645` |
-| IGMP all-hosts filter for interface 1 is a race with the IP thread; unresolved statically | `nx_ip_thread_entry.c:526-545` |
-| No preferred lifetime, `NX_IPV6_ADDR_STATE_DEPRECATED` assigned nowhere — no graceful window before an address vanishes | `nx_api.h:959` |
-| No privacy addresses (8981) or opaque IIDs (7217); MAC in every global address | |
-| No RDNSS (8106) — IPv6-only link yields addresses but no DNS | `nx_icmpv6.h:68-74` |
-| No 1280 MTU floor on the IPv6 path: a SANA-II device reporting less is taken at its word (`sana2_device.c:183-201`), and `MTU=` is now applied downwards without a bound (`:624-634`), so `MTU=576` with IPv6 enabled violates RFC 8200 §5 | `sana2_device.c` |
-| Raw oversize send still drops after success | `transfer.c:722-741` |
-
-**TLS**
-
-| Item | Cite |
-|---|---|
-| Hostname check compares CN before SAN and returns | `nx_secure_x509_common_name_dns_check.c:92-97` |
-| Chain walk has no depth counter and no visited set — two cross-signed certs loop | `nx_secure_x509_certificate_chain_verify.c:86-160` |
-| Fatal alerts and a bare FIN are both reported to the application as end of stream; the `CLOSE_NOTIFY_RECEIVED` arm is unreachable in a non-DTLS build | `tls_conn.c:713-723` |
-| No revocation of any kind | |
-| PKCS#1 v1.5 parser: byte 0 unchecked, any nonzero padding accepted, trailing data ignored, OID discarded | `nx_secure_x509_pkcs7_decode.c:104`, `:113-121`, `:187-197` |
-| `&&` where PKCS#1 wants `\|\|` in the strict verifier | `nx_secure_tls_process_certificate_verify.c:681` |
-| CBC explicit IV is the previous ciphertext block | `nx_secure_tls_record_payload_encrypt.c:186-188` |
-| Padding-validity timing: valid is *faster* by up to a record of SHA-256 | `nx_secure_tls_process_record.c:317-346` |
-| No encrypt-then-MAC (7366) | |
-| RSA-MD5/RSA-SHA1/ECDSA-SHA1 in the X.509 table and advertised | `ami_tls_crypto.c:1538-1540` |
-| Static-RSA suites still offered | `:1580-1581` |
-| No extended master secret, while we do resume | |
-| `REQUIRE_RENEGOTIATION_EXT` not defined — handshake completes with an un-upgraded server | `nx_secure_tls_process_serverhello.c:292-304` |
-| keyUsage fails open when the extension is absent | `nx_secure_x509_certificate_verify.c:102-115` |
-| No EKU check (parser exists, no call site), no nameConstraints, no critical-extension rejection | |
-| Outer `signatureAlgorithm` overwrites the inner one; verification uses the unauthenticated value | `nx_secure_x509.c:195`, `:518`, `:868` |
-| No minimum RSA modulus | |
-| `NX_SECURE_KEY_CLEAR` undefined — session keys left in freed heap | |
-| Resumption stores master secrets cleartext, no `SetProtection`, 24 h cap never fires without an RTC | `tls_resume.c:568`, `:718`, `:439` |
-| X25519/Ed25519 implemented in `crypto68k` and not wired into TLS | |
-| `TLSRandom()` packs all four bytes of a masked draw — every fourth byte has bit 7 clear | `tls_conn.c:986-993` |
-| ECDSA DER: only the `0x30` tag checked, no INTEGER tags, no minimal-encoding check | `nx_crypto_ecdsa.c:324` |
-| Entropy: ~18 credited bits on a no-RTC machine (clock guard credits 8 for uptime), no reseeding, no persisted seed, no health tests. `is_seeded` is not on the private context vector, so `tls.library` cannot check it | `ami_random.c:590`, `nxcontext.h:191-203` |
-
-**httpd**
-
-| Item | Cite |
-|---|---|
-| `Content-Length` accumulates with no overflow check; `4294967306` wraps to 10, `5abc` parses as 5; duplicates take the last | |
-| TE + CL both accepted (precedence correct); should be 400. TE matched by 7-char prefix, so `gzip, chunked` is missed and `chunkedX` matches | |
-| Chunk size shifts unbounded; 9+ hex digits wrap and `100000000` reads as terminator, rest parsed as a pipelined request | |
-| Header values over 255 bytes truncated silently; for `Destination:` a truncated path becomes a valid target and `Overwrite` defaults true | |
-| Chunked bodies bypass the size and time bounds: `body_left` never set, every read refreshes the progress timestamp. eight connections sending one byte every 29 s exhaust the connection table. Also skips the free-space precheck | `httpd.c:4342-4434` |
-| COPY/MOVE to a name the filesystem would shorten, with nothing in the way — the check catches a collision, not the first create | |
-| Document root with a trailing slash may resolve to its parent; `httpd_root` never normalised | unverified on hardware |
-| Hard-linked directories walked through — `ST_LINKDIR` tests as a directory and `Lock()` follows it; no `O_NOFOLLOW` on AmigaOS | unverified on hardware |
-
-**WebDAV** — remaining RFC 4918 gaps
-
-PROPFIND ignores the request body (no `propname`, no named `prop`, no 404
-propstat) · cross-host `Destination:` treated as local, answered 201 · LOCK on
-an unmapped URL creates nothing (§7.3 wants a locked empty resource that then
-survives its lock — conflicts with "nothing visible until whole") · Depth-0
-collection lock does not protect members · `<D:owner>` truncated to 47 bytes and
-stripped of non-ASCII · lock refresh accepted from outside the lock's scope ·
-32-bit LCG lock tokens · 412/423 bodies carry HTML not `<D:error>` · UNLOCK with
-no `Lock-Token` returns 409 not 400 · `Depth: 2` silently becomes 0 ·
-`If-None-Match: *` unimplemented · XML skimmer has no nesting, entity decoding,
-CDATA or comment handling · UTF-16 bodies not understood · PROPPATCH naming no
-settable property emits a `<D:response>` with no propstat and no status
-(invalid per §14.24, ~5 lines).
-
-**Decided**
-
-- **Dead properties: declined.** §9.2 SHOULD. AmigaOS offers a 79-byte filenote
-  or a sidecar; a sidecar costs `Lock`+`Examine`+`Open`+`Read` per entry per
-  PROPFIND, doubling listing cost on a 68000 and the file count of every drawer,
-  and a `.props-<name>` scheme collides on OFS's 30-character truncation.
-  Measured client cost of having none: Explorer's creation/access times and
-  attribute bits, nothing else.
-- **Bounded multistatus is deliberate.** 8 entries / 768 bytes, 8 properties.
-  Honouring §9.8.3 unbounded needs a spill file or a streamed 207, and a
-  streamed 207 cannot be retracted once the head is out.
-
-**Concurrency** (all three already in `REENTRANCY.md`/`ALLOCATIONS.md`)
-
-| Item | Cite |
-|---|---|
-| `ami_bpf_close_owner()` releases channels with no `ch->reading` check that `ami_bpf_close()` has | `bpf_channel.c:233-243`, `:586-593` |
-| ~18 reads of `ami_ns` take no lock; every write does | `netstack.c:51`, `:1428` |
-| Baton slot table: 16 slots keyed by `struct Task *`, nothing sweeps them; Exec recycles Task addresses | `netstack_baton.c:68` |
-
-**Structural**
-
-`src/mbuf` leaks every slab the day any `mbuf_*` LVO is implemented —
-`ami_mbuf_cleanup()` has no production caller · `ami_sana2_lookup()`'s lock-free
-read is correct only because attach writes `iface` last · `AMI_MDNS_PRIORITY`
-defined outside the priority ladder's `#error` assertions
-(`netstack_mdns.c:48`) · post-link pcrel check in 4 `CMakeLists`, absent from
-~22 that link m68k executables including smoke/bracket/soak ·
-`tests/perf/prof/` is a dead fork of `tools/profiler/` with an incompatible
-sample record · a `cross`-stage build failure whose log has neither `error:` nor
-`Error` dies on the diagnostic grep before anything is recorded.
-
-**Profiler gaps, against Profyler (OS4, deterministic).** Ours is a sampler and
-the differences are mostly inherent, not omissions — no recompilation, and it
-reaches shared libraries, multiple threads and interrupt context, all of which
-Profyler lists as limitations. Two worth having:
-
-| Item | Note |
-|---|---|
-| **Source file and line attribution** | We resolve to a function via hunk offsets, not to a line. Needs debug-info parsing. The uProf work on another project showed per-line attribution is worth a lot |
-| Call counts, inclusive/exclusive split | Sampling cannot produce counts. Would be an instrumenting mode sharing the report format — a second tool, not an extension. No use case yet |
-
-CSV export is trivial if anyone asks. Demangling is N/A (the tree is C).
-
-**Tests**
-
-Socket-option surface entirely untested — nothing exercises `SO_RCVBUF`,
-`SO_SNDBUF`, `SO_LINGER`, `TCP_MAXSEG`, `TCP_NODELAY`, `IP_TTL`, `IP_TOS`,
-`SIOCATMARK`, `FIOASYNC`, any `SIOCGIF*`, or the multicast width paths — which is where the API findings are concentrated · `sana2` has no dedicated suite · **httpd has no fuzzer** and is the newest network-facing parser; the chunked
-state machine is the first target · `usergroup` functional tests were added 2026-08-02.
-
-**Withdrawn** — do not re-raise
-
-- The CI analyze stage does **not** skip cppcheck. `stage_analyze` is invoked as
-  `stage_analyze || true`, and bash suppresses `set -e` inside a function called
-  as part of an `||` list. Reproduced both directions.
-- `ugl_crypt()` returning `"*"` is a hazard for third-party callers, not a live
-  bypass: it also sets `UG_ENOSYS`, and nothing in the tree calls it.
-- `clients/dropbear/build.sh` and `dist/make-dist.sh` are **not** unrun. Both are
-  invoked by `.github/workflows/release.yml` (`:155`, `:162`). They run on a
-  release tag rather than on every push, which is a narrower statement than the
-  row made and not by itself a defect.
-- Stale root-level duplicates (`src/tools.h`, `stage-developer.sh`,
-  `aminetxduo_lib.sfd`, `tmp_x/`) are gone. None is in the tree.
+| Verdict | Rests on | If it is wrong |
+|---|---|---|
+| Unlocked `ami_ns` reads are safe because internal threads are drained before the free | The comment at `netstack.c:1722-1725`, not observation, that `nx_ip_delete()` waits for the IP thread | The row is live; the fix is a reference count taken by every `netstack_ip()` and `netstack_pool()` caller |
+| The baton slot wipe is safe where it is placed, after `tx_amiga_kernel_stop()` returns `TX_SUCCESS` | The comment at `netstack.c:1740-1751` that no bracket can be open at that point | The wipe moves; the conservative arm (leave the table alone on any other status) already holds |
 
 ### Performance — measured positions
 
@@ -344,7 +183,70 @@ math libraries are in `LIBS:`. The earlier `errno 43` `EPROTONOSUPPORT` from
 `AddNetInterface` was not a protocol-domain fault and not an OS-version
 requirement. Measured 2026-08-02 as the third arm: read 1108 KB/s against our
 983 and Roadshow's 1824.
+
 ## Decided against — do not "fix"
+
+### From the 2026-08-04 sweep
+
+**TCP**
+
+| Item | Cost of doing it |
+|---|---|
+| Nagle | Nowhere to live: `nx_tcp_socket_send()` transmits the caller's packet directly and there is no output coalescing buffer, so it means a new buffer, a new timer, and a `TCP_NODELAY` that currently only stores a flag. Nagle plus this stack's 200 ms delayed ACK is the classic interactive stall |
+| Sender SWS avoidance | Cheaper than Nagle (`nx_tcp_socket_send_internal.c:533-544` takes any non-zero window) but bites only against a peer advertising tiny windows, which no modern peer does, and changes what leaves the machine on every connection with no way to measure the result here |
+| Restart-after-idle, RFC 5681 §4.1 | The burst it guards against is already capped at 8 segments (~12 KB) by `NX_TCP_MAXIMUM_TX_QUEUE`; the restart window would make that 3. Against that: 4 bytes and a clock read per socket per send, and changed congestion behaviour on every connection |
+| RFC 3708 spurious-retransmission detection | Needs the SACK send side landed first, a per-segment record of what was retransmitted and when, and an undo of the congestion state. In-flight data is capped at 8 segments, so the undo is worth at most 8 segments |
+| UDP checksum at enqueue rather than dequeue | `nx_udp_socket_receive.c:282-408`. Moving it makes the IP thread pay for every datagram including ones no application reads; at dequeue the cost falls on the reader and only for datagrams read. On a 7 MHz 68000 the checksum is the expensive part of the UDP path. Residual: a corrupt datagram briefly holds a queue slot and can make `select()` report readable |
+| FIN-WAIT-2 timeout | The state is correctly absent: the FIN has been acknowledged, there is nothing to retransmit. Timing out a socket the application still holds breaks `shutdown(SHUT_WR)` then read-to-EOF, which is what a half-close is for. BSD and Linux time out only *orphaned* ones, and `bsd_closing_sweep()` already resets those at 60 s (`socket.c:605`, `:740-768`). Residual: that sweep is driven by `socket()`/`CloseSocket()`/library close rather than a timer, so an idle machine holds one `AmiSocket` until the next program does something |
+
+**TLS**
+
+| Item | Cost of doing it |
+|---|---|
+| Revocation, any kind | OCSP needs an HTTP client inside `tls.library` and a second TCP connection per handshake, on a machine where the handshake already takes 7–23 s. CRL fetch needs an unbounded download and DER walk in 1 MB. Stapling is the only affordable shape and needs `status_request` plus a CRL-signature path in nx_secure, for a web where most servers still do not staple |
+| Constant-time CBC padding | ~290 extra bytes of HMAC-SHA256 per received record, ~10 ms per record at 7 MHz — a permanent ~20% record-layer tax. ChaCha20-Poly1305 is first in the preference list and is AEAD with no padding, and Lucky13 needs ~2²³ connections against a machine taking seconds per handshake. Encrypt-then-MAC is the better answer and is listed under *Recommended* |
+| Static-RSA suites | Last in the preference list, so reached only when the server offers nothing better; on this hardware the alternative for those servers is plaintext HTTP rather than ECDHE. Cost of keeping: no forward secrecy for exactly those connections |
+| keyUsage failing open when the extension is absent | RFC 5280 §4.2.1.3 makes an absent keyUsage unrestricted, and OpenSSL's `ku_reject()` behaves the same way. Requiring keyCertSign would break legacy CAs to enforce something the RFC does not say. The check that matters — basicConstraints `cA TRUE` — is enforced |
+| X25519 and Ed25519 wiring | Not a table row: nx_secure's ECDHE is built on `NX_CRYPTO_EC` point encoding and X25519 is 32 opaque bytes with no point format, so it is a new key-exchange path (~300 lines plus an `NX_CRYPTO_METHOD`). Measure first — our P-256 has a precomputed base table, so the win may only be on the shared secret. Ed25519 certificates are effectively nonexistent on the public web; that half is declined outright |
+| Resumption secrets at rest | There is no key on an Amiga to protect them with; a machine-derived key is obfuscation. The trade-off is disclosed at `tlslib.h:57-64` with two opt-outs, `TLSA_NoResume` and `TLSA_SessionFile ""` |
+
+**Resolver and DHCP**
+
+| Item | Cost of doing it |
+|---|---|
+| Ctrl-C sampled per retry rung rather than per 200 ms | Deliberate, documented at `netstack_retry.h:52-58`. Doing better means slicing the wait inside `_nx_dns_response_receive()` and threading an abort callback through every return path in the DNS client, for 2–4 s of latency with the one or two servers a lease hands out. Dropping `AMI_NET_ASK_CEILING` to 1 s is the cheap alternative and the wrong trade: it doubles query traffic on exactly the slow links where the ceiling matters |
+| TC handling, TCP fallback, EDNS0 | Smaller than it reads: an A, AAAA or PTR answer always fits in 512 bytes, and the retry ladder already stops on a truncated response (`netstack_retry.c:51` treats an attempt returning before its wait as answered), so the cost today is an error message rather than a failed lookup. EDNS0 without a fallback ladder risks names not resolving behind middleboxes that drop EDNS0 queries; with one it is substantial. TCP fallback needs a socket, two-byte length framing and a second parse path |
+| DHCP option 121, classless static routes | A feature, not a fix. Requesting it without parsing and installing it adds bytes to every DISCOVER for no behaviour. Doing it properly requires RFC 3442's precedence rule — when 121 is present the client **must** ignore options 3 and 33 — and getting that wrong removes the default gateway. There is also no route-installation path to extend: option 33 is retrieved and reported (`netstack.c:2350`) and never passed to `nx_ip_static_route_add()`. Build and test the option-33 install path first |
+| RFC 3396 long-option concatenation, and option 52 overload | Both claims are true and both are near-unreachable here: we request six options (1, 3, 6, 12, 15, 33) whose combined payload is far below the 312-byte options area, so a server has no reason to split an option or overload `file`/`sname`. Concatenation also changes `_nx_dhcp_search_buffer()`'s contract from "pointer into the packet" to "assembled into a scratch buffer", touching both callers. Revisit if option 121 is ever adopted — that is the option that makes servers do both |
+
+**IPv6**
+
+| Item | Cost of doing it |
+|---|---|
+| Preferred lifetime and `NX_IPV6_ADDR_STATE_DEPRECATED` | `NXD_IPV6_ADDRESS` carries no lifetime field at all (`nx_api.h:2329-2359`); the lifetime lives on the prefix (`:1119`) and is aged at `nxd_ipv6_prefix_router_timer_tick.c:165`. The RA's preferred lifetime is read and discarded at `nx_icmpv6_process_ra.c:291-306`. Adding this means per-address lifetimes and an ager in the fork, plus RFC 6724 rule 3 in source selection, which `_nxd_ipv6_interface_find` has no hook for |
+| Privacy addresses (RFC 8981) and opaque IIDs (RFC 7217) | 8981 needs the lifetime infrastructure above plus regeneration timers and DAD-collision retry, and `NX_MAX_IPV6_ADDRESSES` is 6 across two interfaces — no spare slots for rotating temporaries. 7217 is the cheap alternative (a hash replacing the EUI-64 at `nx_icmpv6_process_ra.c:388-394` and `nxd_ipv6_address_set.c:152-162`) and gets most of the tracking benefit, but needs a per-installation secret surviving reboot and would change every existing machine's address on upgrade — which matters for anyone with firewall rules or AAAA records keyed on the current one |
+| MLD | The recorded rationale was wrong and is corrected in place; the feature remains unimplemented. A snooping switch filters multicast rather than forwarding it, so "the switch forwards anyway" was never a reason. What makes it declinable is narrower: every group this stack joins is either link-local scope, which snooping does not filter, or joined through IGMP on the IPv4 side |
+
+**httpd and WebDAV**
+
+| Item | Cost of doing it |
+|---|---|
+| Free-space precheck on a chunked PUT | A chunked body cannot be size-checked before it arrives — that is why a client chunks. `httpd_sink_put` already turns a short write into 507 |
+| 412 bodies carrying HTML rather than `<D:error>` | RFC 4918 defines no precondition element for the cases that produce a 412 here; §16 covers `no-conflicting-lock`, which is the 423 and is fixed. Clients key off the status |
+| LOCK on an unmapped URL creating a locked empty resource, §7.3 | Conflicts with a design choice already recorded in the code: creating the resource means an abandoned lock leaves an empty file behind |
+| A real XML parser — nesting, entities, CDATA, comments — and UTF-16 request bodies | Days of work for a machine with 1 MB. UTF-16 bodies have never been observed from Finder or the Windows redirector |
+| Dead properties, RFC 4918 §9.2 SHOULD | AmigaOS offers a 79-byte filenote or a sidecar; a sidecar costs `Lock`+`Examine`+`Open`+`Read` per entry per PROPFIND, doubling listing cost on a 68000 and the file count of every drawer, and a `.props-<name>` scheme collides on OFS's 30-character truncation. Measured client cost of having none: Explorer's creation/access times and attribute bits, nothing else |
+| Unbounded multistatus, §9.8.3 | The 8-entry / 768-byte / 8-property bound is deliberate. Honouring it needs a spill file or a streamed 207, and a streamed 207 cannot be retracted once the head is out |
+| Top-level DELETE aimed straight at a hard link | `Lock()` follows the link and `Examine()` reports the target's type, so catching this needs a parent-directory scan. The entry has to be placed by the machine's owner — `httpd` creates no links — which makes it a footgun rather than a remote attack. The `ExNext()` recursion, which was the reachable half, is fixed |
+
+**Infrastructure**
+
+| Item | Cost of doing it |
+|---|---|
+| Profiler source-file and line attribution | **Declined on measurement, 2026-08-04.** The writer side is all present — the gcc driver's link spec carries `%{g:-amiga-debug-hunk}`, `ld`'s amiga script references `.debug_line`, and `m68k-amigaos-addr2line` ships with `-j --section=`. The reader side does not work: `profspin` built at `-Os` with `-g` on both compile and link, and again with `-Wl,--amiga-debug-hunk` forced, yields `.text`, `.data`, `.bss` and no debug section under `objdump -h`. Implementing it would mean hand-parsing the debug hunk or patching BFD, not the ~200 lines of Python the existing `(hunk, offset)` machinery would otherwise need |
+| Profiler call counts, inclusive/exclusive split | Sampling cannot produce counts. An instrumenting mode sharing the report format is a second tool, not an extension. No use case yet |
+| `src/mbuf` slab cleanup | Cannot leak today: no `mbuf_*` LVO is wired (`src/bsdsocket/CMakeLists.txt:126-129`, `bsdsocket_vectors.c:132-141`), so `ami_mbuf_cleanup()` having no production caller costs nothing until one is. A note now sits at the call-less definition |
+| A real baton-slot sweep | Needs a `struct Task *` liveness test; the obvious one is wrong in exactly the window that matters. The wipe at stack shutdown is landed and is the half that can be done correctly |
 
 **`SO_BROADCAST` is accepted and not enforced**, recorded at `options.c:185-190`.
 BSD makes it a permission -- `sendto()` to a broadcast address is `EACCES`
@@ -528,6 +430,36 @@ self-scales to a constant 200 ms at every rate.
   tools are the volume (`ReadArgs` 27 sites, `FreeArgs` 191, `VPrintf` 12).
   Never established whether any SANA-II driver runs under V34 at all, which was
   the gating question.
+
+## Withdrawn — do not re-raise
+
+Rows that did not survive re-checking. Kept because each was raised from a
+plausible reading of a real symptom, and the same reading will recur.
+
+| Claim | What is actually the case |
+|---|---|
+| The CI analyze stage silently skips cppcheck | It does not. `stage_analyze` is only ever invoked as `stage_analyze \|\| true`, and bash suppresses `set -e` inside a function called as part of an `\|\|` list. Reproduced both directions |
+| `ugl_crypt()` returning `"*"` is a live lockout bypass | A hazard for third-party callers, not a live bypass: it also sets `UG_ENOSYS`, and nothing in the tree calls it |
+| `clients/dropbear/build.sh` and `dist/make-dist.sh` are release-only steps CI never runs | Both are invoked by `.github/workflows/release.yml:155` and `:162`. They run on a release tag rather than on every push, which is a narrower statement than the row made and not by itself a defect |
+| Stale root-level duplicates — `src/tools.h`, `stage-developer.sh`, `aminetxduo_lib.sfd`, `tmp_x/` | All gone. None is in the tree |
+| **Keepalive is untested and needs `TCP_KEEPIDLE`** | Neither. `CMakeLists.txt:265-270` exposes `-DAMINETXDUO_TCP_KEEPALIVE_INITIAL=` and `keepalive.drill`'s own header names the arm it needs. Built with `=5` on hardware: 4 cases, 0 failed, 34 checks. The row came from running the script against a default build, where every case fails correctly because two hours have not passed |
+| UDP demux ignores the 4-tuple | The filter exists: `bsd_udp_from_peer()` (`transfer.c:516-542`) applied at `:1123` with a local-address filter, and the recv loop drops and re-waits rather than failing. `_nx_udp_socket_bind` refuses a second socket on a bound port (`nx_udp_socket_bind.c:281-283`), so the `:240` port compare has one candidate. Residual, not the row: a wrong-peer datagram is still enqueued and counts against queue depth |
+| Socket-option surface entirely untested | Stale. `tests/sockopt/sockopt_test.c:405-967` covers it; commit `e9274c7` records that it was run and found 24 defects |
+| `tests/perf/prof/` is a dead fork of `tools/profiler/` | Wrong in three ways. Not dead — `tests/perf/CMakeLists.txt:190` adds it behind `AMINETXDUO_PROFILER`. The incompatible sample record is deliberate: `tools/profiler/prof.h:103-107` split the magics so an old reader cannot misread a new file. And the lineage is inverted — `profreport.py:114-117` calls the `tests/perf/prof` format "a different, older format", so `tools/profiler/` is the descendant |
+| Broadcast SYN answered, destination unchecked | Fixed as `1e0e80f0` (`nx_tcp_packet_process.c:151-177`). The half-open slot half is also bounded: `bsd_listen_rearm()` tops the parked list up to `as_Backlog` (`socket.c:1889-1900`) from `listen()` and `accept()`. `tests/tcpdrill/scripts/bcast.drill` asserts both |
+| `REQUIRE_RENEGOTIATION_EXT` undefined lets a handshake complete with an un-upgraded server | Impact is nil. `nx_secure_tls_client_handshake.c:248` renegotiates only when `renegotation_enabled && secure_renegotiation`, and the latter is set only by a valid RFC 5746 extension; otherwise a HelloRequest returns `NX_SECURE_TLS_NO_RENEGOTIATION_ERROR`. Defining the macro would refuse *initial* handshakes with unpatched servers, breaking connections without closing an attack |
+| Resumption needs `SetProtection` | Nothing behind it. AmigaOS `FIBF_GRP_*`/`FIBF_OTR_*` are active-high and default to 0 on a new file, so group and other already have no access. The call would be a no-op |
+| `is_seeded` is not on the private context vector, so `tls.library` cannot check it | `nxc_random_entropy_bits()` is on the vector at `nxcontext.h:203` and `tls_netx.c:285` already forwards to it. `tls.library` can answer today with no new slot and no ABI break. The entropy *quantity* problem in the same row is real and is under *Recommended* |
+| `o02_duplicate_segment` fails | Fixed 2026-08-04 (`nx_tcp_socket_packet_process.c`, `packet_data_length > 0` on the RFC 793 §3.9 reply). Its counterpart `d06_no_dsack_without_permission` asserted the opposite — `notx 400` where a plain ACK belongs — and was the one that was wrong |
+| MUST-23: `NX_TCP_MAXIMUM_RETRIES 7` → 255 s | The numbers were stale: the tree had 6 retries → 127 s. R2 for SYN now has its own budget and is 191 s, verified on the host |
+| The IPv4 ID row's three particulars | The retransmitted header's length, TTL and checksum are **not** stale — a retransmission rewrites every one to the same value. `NX_ENABLE_IP_ID_RANDOMIZATION` **is** defined, at `port/netxduo-amiga/inc/nx_user.h:458-460`, gated off by default. There are three TCP socket-create sites, not four; the fourth is UDP. The real defect the row missed: `nx_packet_identical_copy` was never cleared, only set, so a packet that went out identical once reused the original ID on every later retransmission, where the ACK and window had moved. Fixed |
+| Question comparison being case-sensitive breaks DNS-0x20 | Backwards. 0x20 *requires* an exact comparison, and nothing here randomises the case it sends, so the exact compare bought no entropy and cost real resolutions: a caller spelling a name with any capital got `NX_DNS_MISMATCHED_RESPONSE` from every server that normalises. The cache half already folded case, so the two halves of the client disagreed about what a name is. Fixed |
+| `nxd_dhcp_client.c:6974` compares seconds against ticks | Only `:6939` does. The rebind arm at `:6974` converts to ticks at `:6971` and then compares ticks to ticks — correct code thirty lines below the broken code |
+| Document root with a trailing slash may resolve to its parent | Not true as written: `http_path_resolve` already guards the join (`httppath.c:223`) so `root + "/"` never doubles a slash. The only unguarded case was the root used by itself, which is now normalised unconditionally so the question does not arise |
+| Hard-linked directories walked through because `ST_LINKDIR` tests as a directory | The mechanism is wrong: `Lock()` follows the link and `Examine()` reports the *target's* type, so the top-level check can never see a link. The only place `ST_LINKDIR` is visible is the `ExNext()` scan, which is where the recursion was, and where it is fixed. The top-level case remains and is under *Decided against* |
+| PROPPATCH naming no settable property emits an invalid `<D:response>` | Partly wrong: properties named but none settable already emitted a valid 403 propstat (`httpd.c:3952`). Only `props == 0` produced the invalid response. An unlisted bug next to it was worse — the 9th and later properties were dropped silently, so a large PROPPATCH reported on eight and the client read that as an answer about all of them. Both are 400 now |
+| `AMI_MDNS_PRIORITY` is defined at `netstack_mdns.c:48` | `:45`. The row's line was wrong; the finding was not |
+| PKCS#1 "OID discarded" is exploitable | Not once the padding is exact. The hash algorithm comes from the certificate's own `signatureAlgorithm`, which is inside the signed body and is now pinned to the inner copy, and the digest length and bytes are both compared. A digest-OID table would need new OID constants for no gain |
 
 ## Environment and tooling
 

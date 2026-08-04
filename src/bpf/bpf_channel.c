@@ -203,19 +203,42 @@ LONG ami_bpf_init(VOID)
     return 0;
 }
 
-/* Free the buffers and the filter. Called with the lock not held. */
-static VOID ami_bpf_chan_release(AmiBpfChan *ch)
+/*
+ * Free the buffers and the filter. Called with the lock not held.
+ *
+ * `force` says what to do when a copy-out is in flight. ami_bpf_read() drops
+ * the lock for the copy and reads `hold` from a pointer it captured before
+ * dropping it, so freeing the buffer here would hand the reader freed memory --
+ * and there is no MMU to catch it. Unforced, the channel is taken away from its
+ * owner immediately and only the two frees are deferred: `release_pending` says
+ * the buffers are the reader's to release when it is done with them.
+ */
+static VOID ami_bpf_chan_release(AmiBpfChan *ch, BOOL force)
 {
     APTR bufbase;
     APTR filter;
 
     ami_bpf_lock();
 
-    bufbase = ch->bufbase;
-    filter  = ch->filter;
-
     if (ch->iface != NULL && ami_bpf_bound_channels > 0)
         ami_bpf_bound_channels--;
+
+    if (ch->reading && !force)
+    {
+        /* Closed for every purpose the owner can see: ami_bpf_chan_get()
+           matches on `owner`, and no base is NULL. `open` stays set so
+           ami_bpf_open(-1) does not hand the slot out while the buffer it
+           still points at is being read. */
+        ch->owner           = NULL;
+        ch->iface           = NULL;
+        ch->release_pending = TRUE;
+
+        ami_bpf_unlock();
+        return;
+    }
+
+    bufbase = ch->bufbase;
+    filter  = ch->filter;
 
     ami_bpf_zero_bytes(ch, (ULONG)sizeof(AmiBpfChan));
 
@@ -239,14 +262,15 @@ VOID ami_bpf_close_owner(APTR owner)
         AmiBpfChan *ch = &ami_bpf_chan[i];
 
         if (ch->open && ch->owner == owner)
-            ami_bpf_chan_release(ch);
+            ami_bpf_chan_release(ch, FALSE);
     }
 }
 
 /*
  * Last resort, at netstack teardown. Anything still open belongs to a base that
  * never closed, so ownership does not enter into it and a copy-out in flight is
- * no reason to leave a channel behind.
+ * no reason to leave a channel behind: deferring the free here would leave it
+ * to a reader that the teardown is about to outlive.
  */
 VOID ami_bpf_cleanup(VOID)
 {
@@ -255,7 +279,7 @@ VOID ami_bpf_cleanup(VOID)
     for (i = 0; i < AMI_BPF_MAX_CHANNELS; i++)
     {
         if (ami_bpf_chan[i].open)
-            ami_bpf_chan_release(&ami_bpf_chan[i]);
+            ami_bpf_chan_release(&ami_bpf_chan[i], TRUE);
     }
 }
 
@@ -329,7 +353,7 @@ LONG ami_bpf_close(APTR owner, LONG channel)
     if (ch->reading)
         return AMI_BPF_EBUSY;   /* a read is copying out of the buffer */
 
-    ami_bpf_chan_release(ch);
+    ami_bpf_chan_release(ch, FALSE);
 
     return 0;
 }
@@ -368,7 +392,11 @@ VOID ami_bpf_chan_rebind(AmiBpfIf *ifp)
     {
         AmiBpfChan *ch = &ami_bpf_chan[i];
 
-        if (!ch->open || ch->iface != NULL || ch->store == NULL)
+        /* release_pending: the channel has no owner left and its buffers go
+           the moment the reader is done, so rebinding it would resurrect a
+           dead channel and lose the bound count with it. */
+        if (!ch->open || ch->release_pending || ch->iface != NULL ||
+            ch->store == NULL)
             continue;
 
         for (n = 0; n < AMI_BPF_IFNAMSIZ; n++)
@@ -517,6 +545,7 @@ LONG ami_bpf_read(APTR owner, LONG channel, APTR buffer, LONG len)
     ULONG        nbytes;
     ULONG        budget;
     ULONG        waited = 0;
+    BOOL         pending;
 
     if (ch == NULL)
         return status;
@@ -614,8 +643,15 @@ LONG ami_bpf_read(APTR owner, LONG channel, APTR buffer, LONG len)
         ch->hold_pos = 0;
     }
     ch->reading = FALSE;
+    pending     = ch->release_pending;
 
     ami_bpf_unlock();
+
+    /* The owner closed the library while the copy above was running, so the
+       buffers were left for this task to free. The caller still gets the bytes
+       it asked for -- they were copied out of memory that was still ours. */
+    if (pending)
+        ami_bpf_chan_release(ch, FALSE);
 
     return (LONG)nbytes;
 }

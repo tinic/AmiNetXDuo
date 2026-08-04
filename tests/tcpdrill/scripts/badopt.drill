@@ -1,0 +1,49 @@
+# tcpdrill -- a segment carrying both a RESET and an illegal option length.
+#
+# RFC 793 3.4 page 36: a RESET is never answered with a RESET.  Two machines
+# that both answer would otherwise reset each other for as long as the frames
+# keep arriving, and either machine's answer is addressed to whatever source the
+# segment claimed.
+#
+# RFC 1122 4.2.2.5 says an illegal option length may be answered with a reset,
+# and the stack does that.  The two rules meet on a segment that carries both,
+# and the option rule was winning.
+#
+# `badopt=1` puts an MSS option whose length byte says 3 into the injected
+# segment.  Four bytes, so the data offset stays a whole number of words, and
+# _nx_tcp_mss_option_get() rejects it on the length before reading anything.
+#
+# WHERE THIS CAN BE REACHED FROM.  Above SYN-RECEIVED the RST bit is dealt with
+# by the RFC 793 3.9 step 2 check, which returns before the option area is
+# looked at, so ESTABLISHED cannot get here.  What is left is SYN-SENT, which
+# m01 uses, and no connection at all, which m02 and m03 use.
+#
+# NONE OF THESE CASES HAS EVER BEEN RUN.
+#
+# SPDX-License-Identifier: MIT
+
+# SYN-SENT.  The RESET is discarded and the connection request carries on, so
+# the next thing on the wire is the SYN retransmission and not a RESET.  If a
+# RESET does go out this fails on the flags rather than on the timing.
+case m01_reset_with_bad_option_in_syn_sent_is_not_answered
+socket
+connect
+tx S seq=0 within=200
+rx RA seq=0 ack=1 badopt=1
+tx S seq=0 after=700 within=1600
+
+# No connection at all.  r01 and r02 in tcp.drill are the segments that DO earn
+# a reset from a port nobody is on; a RESET earns nothing, whatever its options
+# say.
+case m02_reset_with_bad_option_to_a_dead_port_is_not_answered
+localport 4731
+rx RA seq=0 ack=1 badopt=1
+notx 500
+
+# The control, so m02 is a discard and not a port that was never reached.  Same
+# port state, same bad option, no RST bit: this is r02 with the option added and
+# it must still answer.
+case m03_bad_option_without_a_reset_still_earns_one
+localport 4732
+rx PA seq=1 ack=1 len=10 badopt=1
+tx R seq=1

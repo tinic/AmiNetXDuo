@@ -473,6 +473,126 @@ static void test_long_name_refused(void)
     CHECK(refused(target) == HTTP_PATH_OK);
 }
 
+/*
+ * The document root is the one path a server does not resolve, so the
+ * doubled-slash rule has to be applied to it separately -- and "Work:Public/"
+ * is what a person types when the drawer requester put a separator on the end.
+ */
+static void test_root_trimmed(void)
+{
+    char out[64];
+
+    printf("the document root, trimmed\n");
+
+    http_path_root("Work:Public/", out, sizeof(out));
+    CHECK(strcmp(out, "Work:Public") == 0);
+
+    http_path_root("Work:Public//", out, sizeof(out));
+    CHECK(strcmp(out, "Work:Public") == 0);
+
+    /* Already right, and left alone. */
+    http_path_root("Work:Public", out, sizeof(out));
+    CHECK(strcmp(out, "Work:Public") == 0);
+
+    /* A device or assign keeps its colon; "RAM" is not "RAM:". */
+    http_path_root("RAM:", out, sizeof(out));
+    CHECK(strcmp(out, "RAM:") == 0);
+
+    http_path_root("RAM:/", out, sizeof(out));
+    CHECK(strcmp(out, "RAM:") == 0);
+
+    /* Nothing to trim to, so nothing is trimmed. */
+    http_path_root("/", out, sizeof(out));
+    CHECK(strcmp(out, "/") == 0);
+
+    http_path_root("", out, sizeof(out));
+    CHECK(strcmp(out, "") == 0);
+
+    /* And a trimmed root joins the way the resolver expects. */
+    {
+        HttpPath p;
+
+        http_path_root("Work:Public/", out, sizeof(out));
+        CHECK(http_path_resolve(out, "/a/b", &p) == HTTP_PATH_OK);
+        CHECK(strcmp(p.path, "Work:Public/a/b") == 0);
+
+        /* The root itself, which is the case a trailing slash reached. */
+        CHECK(http_path_resolve(out, "/", &p) == HTTP_PATH_OK);
+        CHECK(strcmp(p.path, "Work:Public") == 0);
+    }
+
+    /* It never writes past what it was given. */
+    {
+        char small[6];
+
+        http_path_root("Work:Public/", small, sizeof(small));
+        CHECK(strlen(small) < sizeof(small));
+    }
+}
+
+/*
+ * A lock owner is collected into a fixed buffer and handed back inside a
+ * <D:owner> in a document declared UTF-8.  Half a character in it is not a
+ * character, and a client that validates rejects the whole answer over it.
+ */
+static void test_utf8_trim(void)
+{
+    char text[16];
+
+    printf("a UTF-8 sequence cut off by the buffer\n");
+
+    /* Nothing to do. */
+    strcpy(text, "plain");
+    http_utf8_trim(text);
+    CHECK_STR(text, "plain");
+
+    strcpy(text, "");
+    http_utf8_trim(text);
+    CHECK_STR(text, "");
+
+    /* Complete sequences are left alone: two, three and four bytes. */
+    strcpy(text, "Bj\xc3\xb6rn");
+    http_utf8_trim(text);
+    CHECK_STR(text, "Bj\xc3\xb6rn");
+
+    strcpy(text, "a\xe2\x82\xac");             /* a euro sign               */
+    http_utf8_trim(text);
+    CHECK_STR(text, "a\xe2\x82\xac");
+
+    strcpy(text, "a\xf0\x9f\x98\x80");         /* four bytes                */
+    http_utf8_trim(text);
+    CHECK_STR(text, "a\xf0\x9f\x98\x80");
+
+    /* And the cut ones go, at every length and every point in the sequence. */
+    strcpy(text, "Bj\xc3");                    /* half of two              */
+    http_utf8_trim(text);
+    CHECK_STR(text, "Bj");
+
+    strcpy(text, "a\xe2");                     /* one of three             */
+    http_utf8_trim(text);
+    CHECK_STR(text, "a");
+
+    strcpy(text, "a\xe2\x82");                 /* two of three             */
+    http_utf8_trim(text);
+    CHECK_STR(text, "a");
+
+    strcpy(text, "a\xf0\x9f\x98");             /* three of four            */
+    http_utf8_trim(text);
+    CHECK_STR(text, "a");
+
+    /* A continuation byte with no lead is not a character either. */
+    strcpy(text, "a\x82");
+    http_utf8_trim(text);
+    CHECK_STR(text, "a");
+
+    /* It never runs off the front of a string that is all continuations. */
+    strcpy(text, "\x82\x82\x82\x82\x82");
+    http_utf8_trim(text);
+    CHECK(strlen(text) < 5);
+
+    http_utf8_trim(NULL);
+}
+
 /* ------------------------------------------------------------- the walk --- */
 
 static void test_join(void)
@@ -690,6 +810,8 @@ int main(void)
     test_destination_forms();
     test_resolved_shape();
     test_long_name_refused();
+    test_root_trimmed();
+    test_utf8_trim();
     test_join();
     test_up();
     test_within();

@@ -413,10 +413,12 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
  * The largest UDP payload that can leave here in one datagram, from the three
  * things that fix it:
  *
- *   1. Nothing calls nx_ip_fragment_enable(), so nx_ip_fragment_processing is
- *      NULL and _nx_ip_driver_packet_send() drops -- silently, after
- *      nxd_udp_socket_send() has already returned NX_SUCCESS -- any packet
- *      longer than the egress interface's nx_interface_ip_mtu_size.
+ *   1. Transmit fragmentation is available -- src/netstack/ calls
+ *      nx_ip_fragment_enable() for the receive side -- and is not used here.
+ *      A UDP datagram larger than the path is a datagram that will be
+ *      reassembled by whatever receives it, out of a pool as small as ours,
+ *      and BSD returning EMSGSIZE for it is an answer the caller can act on.
+ *      The cap is the egress interface's nx_interface_ip_mtu_size.
  *   2. That field is the IP-layer MTU, link header excluded: sana2_device.c
  *      sets it from the SANA-II S2_GetGlobalStats MTU, defined the same way.
  *   3. The IP and UDP headers in front of the payload are what NetX Duo's own

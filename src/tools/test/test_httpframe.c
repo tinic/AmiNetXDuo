@@ -1,0 +1,296 @@
+/*
+ * The tests for src/tools/httpframe.c -- how long a request body is, and where
+ * it ends.
+ *
+ * WHY THIS IS A TEST AND NOT A REVIEW
+ *
+ *   Every failure here is silent on the wire.  A Content-Length that
+ *   overflowed leaves the tail of a body in the socket, and the server reads
+ *   it as the next request -- so a PUT whose body happens to contain a
+ *   "DELETE /x HTTP/1.1" line has that DELETE executed, and the transcript
+ *   shows two requests where the client sent one.  A chunk size that wrapped
+ *   to zero does the same thing and reads as a well-formed end of body.
+ *   Neither produces an error, a log line, or a wrong answer to the request
+ *   that carried it.
+ *
+ *   So the cases are written down: what each parser accepts, what it refuses,
+ *   and -- for the decoder -- how much of the buffer it says belonged to the
+ *   body, because that number is where the next request starts.
+ *
+ *   cc -std=c11 -Wall -Wextra -Isrc/tools \
+ *      src/tools/test/test_httpframe.c src/tools/httpframe.c -o test_httpframe
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "httpframe.h"
+
+#include <stdio.h>
+#include <string.h>
+
+static int failures;
+static int checks;
+
+#define CHECK(cond)                                                          \
+    do {                                                                     \
+        checks++;                                                            \
+        if (!(cond)) {                                                       \
+            failures++;                                                      \
+            printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);         \
+        }                                                                    \
+    } while (0)
+
+/* ------------------------------------------------------------ the length --- */
+
+static void test_length(void)
+{
+    unsigned long n;
+
+    printf("Content-Length\n");
+
+    CHECK(http_frame_length("0", &n) == HTTP_FRAME_OK && n == 0UL);
+    CHECK(http_frame_length("1", &n) == HTTP_FRAME_OK && n == 1UL);
+    CHECK(http_frame_length("65536", &n) == HTTP_FRAME_OK && n == 65536UL);
+    CHECK(http_frame_length("0000012", &n) == HTTP_FRAME_OK && n == 12UL);
+
+    /* The whole of a 32-bit count, and the first value past it. */
+    CHECK(http_frame_length("4294967295", &n) == HTTP_FRAME_OK &&
+          n == 4294967295UL);
+    CHECK(http_frame_length("4294967296", &n) == HTTP_FRAME_OVERFLOW);
+
+    /* The one from the backlog: this used to wrap to 10, and the ten bytes
+       the server then read left the rest of the body to be parsed as
+       methods. */
+    CHECK(http_frame_length("4294967306", &n) == HTTP_FRAME_OVERFLOW);
+    CHECK(http_frame_length("99999999999999999999", &n) ==
+          HTTP_FRAME_OVERFLOW);
+
+    /* And the other one: this used to parse as 5. */
+    CHECK(http_frame_length("5abc", &n) == HTTP_FRAME_JUNK);
+    CHECK(http_frame_length("5 6", &n) == HTTP_FRAME_JUNK);
+    CHECK(http_frame_length("+5", &n) == HTTP_FRAME_EMPTY);
+    CHECK(http_frame_length("-5", &n) == HTTP_FRAME_EMPTY);
+    CHECK(http_frame_length("", &n) == HTTP_FRAME_EMPTY);
+    CHECK(http_frame_length(" ", &n) == HTTP_FRAME_EMPTY);
+    CHECK(http_frame_length("0x10", &n) == HTTP_FRAME_JUNK);
+
+    /* Trailing whitespace is what a header value may carry after it. */
+    CHECK(http_frame_length("42 ", &n) == HTTP_FRAME_OK && n == 42UL);
+    CHECK(http_frame_length("42\t", &n) == HTTP_FRAME_OK && n == 42UL);
+
+    /* Nothing is written when it is refused. */
+    n = 0xdeadUL;
+    CHECK(http_frame_length("5abc", &n) != HTTP_FRAME_OK && n == 0UL);
+
+    CHECK(http_frame_error(HTTP_FRAME_OVERFLOW) != NULL);
+}
+
+/* ---------------------------------------------------------- the encoding --- */
+
+static void test_coding(void)
+{
+    printf("Transfer-Encoding\n");
+
+    CHECK(http_frame_coding("chunked") == HTTP_TE_CHUNKED);
+    CHECK(http_frame_coding("Chunked") == HTTP_TE_CHUNKED);
+    CHECK(http_frame_coding("CHUNKED") == HTTP_TE_CHUNKED);
+    CHECK(http_frame_coding(" chunked ") == HTTP_TE_CHUNKED);
+    CHECK(http_frame_coding("\tchunked") == HTTP_TE_CHUNKED);
+
+    CHECK(http_frame_coding("") == HTTP_TE_IDENTITY);
+    CHECK(http_frame_coding("identity") == HTTP_TE_IDENTITY);
+
+    /* The two halves of the seven-character prefix test.  "chunkedX" used to
+       match and "gzip, chunked" used to be missed entirely -- so a body that
+       WAS chunked was read as a Content-Length one, and one that was not was
+       read as chunked. */
+    CHECK(http_frame_coding("chunkedX") == HTTP_TE_UNSUPPORTED);
+    CHECK(http_frame_coding("chunked-ish") == HTTP_TE_UNSUPPORTED);
+    CHECK(http_frame_coding("gzip, chunked") == HTTP_TE_UNSUPPORTED);
+    CHECK(http_frame_coding("chunked, gzip") == HTTP_TE_UNSUPPORTED);
+    CHECK(http_frame_coding("gzip") == HTTP_TE_UNSUPPORTED);
+    CHECK(http_frame_coding("deflate") == HTTP_TE_UNSUPPORTED);
+
+    /* Two of them is a list this server cannot apply, whichever they are. */
+    CHECK(http_frame_coding("chunked, chunked") == HTTP_TE_UNSUPPORTED);
+    CHECK(http_frame_coding("identity, chunked") == HTTP_TE_UNSUPPORTED);
+
+    /* A parameter makes it a different coding. */
+    CHECK(http_frame_coding("chunked;q=1") == HTTP_TE_UNSUPPORTED);
+}
+
+/* ------------------------------------------------------------- the chunks --- */
+
+static char  sunk[512];
+static long  sunk_n;
+
+static void collect(void *ctx, const unsigned char *data, long len)
+{
+    long i;
+
+    (void)ctx;
+
+    for (i = 0; i < len; i++)
+    {
+        if (sunk_n + 1 < (long)sizeof(sunk))
+            sunk[sunk_n++] = (char)data[i];
+    }
+
+    sunk[sunk_n] = '\0';
+}
+
+/* Feed a whole body in one call. */
+static long feed(HttpChunk *ch, const char *text)
+{
+    sunk_n  = 0;
+    sunk[0] = '\0';
+
+    http_chunk_start(ch);
+
+    return http_chunk_feed(ch, (const unsigned char *)text,
+                           (long)strlen(text), collect, NULL);
+}
+
+/* The same, one byte per call: a chunk boundary falls where the network put
+   it, so every state has to survive being entered with nothing in hand. */
+static long feed_dribbled(HttpChunk *ch, const char *text)
+{
+    long len = (long)strlen(text);
+    long i;
+
+    sunk_n  = 0;
+    sunk[0] = '\0';
+
+    http_chunk_start(ch);
+
+    for (i = 0; i < len; i++)
+    {
+        long took = http_chunk_feed(ch, (const unsigned char *)&text[i], 1,
+                                    collect, NULL);
+
+        if (took == 0)
+            break;                      /* DONE or ERROR: it stopped here  */
+    }
+
+    return i;
+}
+
+static void test_chunks(void)
+{
+    HttpChunk ch;
+    long      took;
+
+    printf("chunked bodies\n");
+
+    /* The ordinary one. */
+    took = feed(&ch, "5\r\nhello\r\n0\r\n\r\n");
+    CHECK(ch.state == HTTP_CHUNK_DONE);
+    CHECK(strcmp(sunk, "hello") == 0);
+    CHECK(took == 15);
+    CHECK(ch.total == 5UL);
+
+    /* Two chunks, and a hex size that is not a decimal one. */
+    took = feed(&ch, "a\r\n0123456789\r\n1\r\nx\r\n0\r\n\r\n");
+    CHECK(ch.state == HTTP_CHUNK_DONE);
+    CHECK(strcmp(sunk, "0123456789x") == 0);
+    CHECK(ch.total == 11UL);
+
+    /* One byte at a time reaches the same place. */
+    (void)feed_dribbled(&ch, "5\r\nhello\r\n0\r\n\r\n");
+    CHECK(ch.state == HTTP_CHUNK_DONE);
+    CHECK(strcmp(sunk, "hello") == 0);
+
+    /* A trailer before the blank line. */
+    took = feed(&ch, "1\r\nx\r\n0\r\nX-Thing: 1\r\n\r\n");
+    CHECK(ch.state == HTTP_CHUNK_DONE);
+    CHECK(strcmp(sunk, "x") == 0);
+
+    /* What the body ended before is the next request, and the count says
+       where.  This is the number the server slides its buffer by. */
+    took = feed(&ch, "1\r\nx\r\n0\r\n\r\nGET / HTTP/1.1\r\n\r\n");
+    CHECK(ch.state == HTTP_CHUNK_DONE);
+    CHECK(took == 11);
+
+    /* A chunk extension is not part of the size. */
+    took = feed(&ch, "5;a=b\r\nhello\r\n0\r\n\r\n");
+    CHECK(ch.state == HTTP_CHUNK_DONE);
+    CHECK(strcmp(sunk, "hello") == 0);
+
+    printf("chunked bodies that are refused\n");
+
+    /*
+     * The one from the backlog.  Nine hex digits used to shift the first one
+     * out: 0x100000000 became 0, which reads as the terminating chunk, and
+     * everything after it was parsed as a pipelined request.
+     */
+    (void)feed(&ch, "100000000\r\n");
+    CHECK(ch.state == HTTP_CHUNK_ERROR);
+
+    (void)feed(&ch, "ffffffff\r\n");     /* eight is the whole of a ULONG   */
+    CHECK(ch.state == HTTP_CHUNK_DATA);
+    CHECK(ch.left == 4294967295UL);
+
+    (void)feed(&ch, "00000000ff\r\n");   /* leading zeros do not count      */
+    CHECK(ch.state == HTTP_CHUNK_DATA);
+    CHECK(ch.left == 255UL);
+
+    /* A size with something after it is not a size. */
+    (void)feed(&ch, "5X\r\nhello\r\n0\r\n\r\n");
+    CHECK(ch.state == HTTP_CHUNK_ERROR);
+
+    /* A line where a size should have been.  This used to read as zero and
+       end the body. */
+    (void)feed(&ch, "\r\n");
+    CHECK(ch.state == HTTP_CHUNK_ERROR);
+
+    (void)feed(&ch, ";a=b\r\n");
+    CHECK(ch.state == HTTP_CHUNK_ERROR);
+
+    /* A size line longer than the buffer is refused rather than truncated
+       into one that parses. */
+    (void)feed(&ch, "000000000000000000000000000000000000000000005\r\nhello");
+    CHECK(ch.state == HTTP_CHUNK_ERROR);
+
+    /* A chunk whose data is not followed by CRLF.  This used to skip forward
+       to the next '\n' and carry on, which resynchronises the framing onto
+       the body's own bytes. */
+    (void)feed(&ch, "5\r\nhelloXX\r\n0\r\n\r\n");
+    CHECK(ch.state == HTTP_CHUNK_ERROR);
+
+    /* Refusals survive the dribble too. */
+    (void)feed_dribbled(&ch, "100000000\r\n");
+    CHECK(ch.state == HTTP_CHUNK_ERROR);
+
+    (void)feed_dribbled(&ch, "5X\r\n");
+    CHECK(ch.state == HTTP_CHUNK_ERROR);
+
+    printf("a body that has not finished\n");
+
+    /* An incomplete body is not an error: more of it is coming. */
+    (void)feed(&ch, "5\r\nhel");
+    CHECK(ch.state == HTTP_CHUNK_DATA);
+    CHECK(ch.left == 2UL);
+    CHECK(strcmp(sunk, "hel") == 0);
+
+    (void)feed(&ch, "5\r\nhello\r\n");
+    CHECK(ch.state == HTTP_CHUNK_SIZE);
+
+    (void)feed(&ch, "0\r\n");
+    CHECK(ch.state == HTTP_CHUNK_TRAILER);
+
+    /* And off is off. */
+    http_chunk_off(&ch);
+    CHECK(ch.state == HTTP_CHUNK_OFF);
+    CHECK(ch.total == 0UL);
+}
+
+int main(void)
+{
+    test_length();
+    test_coding();
+    test_chunks();
+
+    printf("%d checks, %d failures\n", checks, failures);
+
+    return (failures == 0) ? 0 : 1;
+}

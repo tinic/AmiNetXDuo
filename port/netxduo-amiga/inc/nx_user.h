@@ -205,6 +205,29 @@
 #endif
 
 /*
+ * R2 for a connection request, RFC 1122 4.2.3.5 MUST-23: at least 3 minutes.
+ * The six above give 127 s, which satisfies the same section's R2 for data --
+ * "at least 100 seconds" -- and not MUST-23.
+ *
+ * Seven with the shift capped at 6 gives 1 2 4 8 16 32 64 64 seconds of waiting
+ * -- seven retransmissions, the last at 127 s -- and abandons at 191 s.  The cap
+ * is what keeps this off 255: without it the seventh interval alone is 128
+ * seconds.  Data keeps the six and its 127 s, because a transfer that has
+ * stopped should report sooner than a connection that has not started.
+ *
+ * WHAT A USER SEES.  connect() to a host that is not answering now blocks for
+ * 191 s rather than 127.  It is interruptible throughout -- bsd_wait_sliced()
+ * samples the break signal every 200 ms -- and SO_SNDTIMEO bounds it for a
+ * program that would rather not wait.  Linux's tcp_syn_retries default is 6,
+ * which is the 127 s this replaces; FreeBSD gives up sooner still.
+ *
+ * -DNX_TCP_SYN_MAXIMUM_RETRIES=6 puts it back where it was.
+ */
+#ifndef NX_TCP_SYN_MAXIMUM_RETRIES
+#define NX_TCP_SYN_MAXIMUM_RETRIES              7
+#endif
+
+/*
  * The round-trip time estimator of RFC 6298 2 and 3, which the ladder above
  * previously had to do without: nx_tcp_socket_timeout_rate was assigned
  * _nx_tcp_transmit_timer_rate once at socket create and never moved again, so
@@ -696,12 +719,28 @@
  * receive path drops every non-solicited-node IPv6 multicast datagram outright
  * (nx_ipv6_packet_receive.c, the NX_ENABLE_IPV6_MULTICAST arm around the join
  * list).  There is no partial capability to preserve: it is 172 bytes for
- * group reception, or no group reception.  MLD would add reachability through
- * a snooping switch with an active querier and through a router, neither of
- * which applies to a link-local group -- ff02::fb, ff02::c, ff02::1:3 are what
- * an Amiga program joins, and those are never forwarded by anything.  MLD is a
- * protocol and belongs in the NetX fork if it is ever wanted; it is not a
- * prerequisite for this.
+ * group reception, or no group reception.
+ *
+ * What silence on the wire costs is a question of scope, not of switches.
+ * RFC 4541 section 3 requires an MLD snooping switch to forward FF02::/16 on
+ * every port whatever its membership table says, precisely so that a node
+ * which has not reported still receives neighbour discovery and the
+ * link-scope service protocols; ff02::fb, ff02::c and ff02::1:3 are what an
+ * Amiga program joins and all three are inside it.  A querying switch
+ * therefore prunes none of them, and a router forwards none of them either,
+ * so a report would change nothing for the groups that are used.
+ *
+ * Above link-local scope it would change everything: ff05:: and ff0e:: are
+ * forwarded on membership and nothing here reports any, so a join of one of
+ * those receives only what is already on the link.  IPV6_JOIN_GROUP does not
+ * refuse them -- refusing would break the on-link half, which works.
+ *
+ * MLD is a protocol, not a define: nx_mld.h is a 48-line stub that declares
+ * nothing and there is no nx_mld_*.c to enable, so wanting it means writing
+ * MLDv1 -- query reception, per-group report timers with the RFC 2710 random
+ * delay, and a done message on leave -- into the NetX fork.  That is a piece
+ * of work for a scope no Amiga program asks for, and it is not a prerequisite
+ * for this.
  */
 #ifdef AMINETXDUO_MULTICAST
 #define NX_ENABLE_IPV6_MULTICAST
@@ -748,6 +787,24 @@
  * less reason to fragment, but it does not fix it.
  */
 #define NX_ENABLE_IPV6_PATH_MTU_DISCOVERY
+
+/*
+ * Recursive DNS servers out of a router advertisement, RFC 8106.
+ *
+ * The one thing standing between an IPv6-only link and a usable machine.  A
+ * link with no IPv4 on it configures addresses and a default route from the
+ * advertisement and stops there: there is no DHCPv6 in this build
+ * (src/netstack/netstack_ipv6.c says why), and DEVS:Internet/name_resolution
+ * parses a nameserver as a dotted quad, so an IPv6 resolver cannot even be
+ * written down.  The machine comes up routable and cannot resolve a name.
+ *
+ * The option costs one else-if in nx_icmpv6_process_ra.c's option walk, which
+ * skipped type 25 with everything else it does not know, and a callback field
+ * on NX_IP.  src/netstack/netstack_dns.c takes it from there; what it does not
+ * do is call the DNS client from the IP thread, which would deadlock against
+ * a query already holding that client's mutex.
+ */
+#define NX_ENABLE_IPV6_RDNSS
 
 /*
  * Not set, and why:
@@ -845,8 +902,12 @@
  *                                  and now cost nothing measurable.
  *   NX_DISABLE_PACKET_CHAIN     -- would break TCP receives larger than one
  *                                  payload.
- *   NX_DISABLE_FRAGMENTATION    -- fragmentation is already off unless
- *                                  nx_ip_fragment_enable() is called.
+ *   NX_DISABLE_FRAGMENTATION    -- src/netstack/ calls
+ *                                  nx_ip_fragment_enable(), so inbound
+ *                                  reassembly is wanted and this would
+ *                                  compile it out.  What it holds is bounded
+ *                                  by NX_IP_FRAGMENT_POOL_RESERVE in the
+ *                                  fork rather than by the pool alone.
  *   NX_TCP_ACK_TIMER_RATE 25    -- a 40 ms delayed ACK rather than 200 ms,
  *                                  which is what AmiTCP_NG 4.1.4 did.  It
  *                                  needs NX_TCP_FAST_TIMER_RATE raised with

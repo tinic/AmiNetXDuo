@@ -201,6 +201,14 @@ static void fzs_aaaa_answer(FzwBuf *w, const char *qname)
         fzw_u8(w, (unsigned)i);
 }
 
+/*
+ * The question a reverse lookup of 10.0.0.9 asks.  addons/dns builds it from
+ * the octets in reverse followed by lookup_end[], which is spelled in capitals
+ * -- so this is the exact string on the wire, and a server that answers in
+ * lower case is answering the same question in the other case.
+ */
+#define FZW_INADDR_QNAME    "9.0.0.10.IN-ADDR.ARPA"
+
 /* A PTR answer, which is what a reverse lookup parses. */
 static void fzs_ptr_answer(FzwBuf *w, const char *qname)
 {
@@ -634,6 +642,114 @@ static void fzs_wrong_question(FzwBuf *w, const char *qname)
     fzw_u32(w, 0x0A000009UL);
 }
 
+/*
+ * An A record for somebody else, in the authority section, with nothing in the
+ * answer section.  The authority section names the servers to ask next; it is
+ * not where an answer lives, and the owner name of a record there is never
+ * compared with the question.  Taking one as an answer meant a server asked
+ * about one name could return -- and get cached -- an address for another.
+ */
+static void fzs_a_in_authority(FzwBuf *w, const char *qname)
+{
+    fzw_hdr(w, 0, FZW_QR | FZW_AA, 1, 0, 1, 0);
+    fzw_question(w, qname, FZW_TYPE_A, FZW_CLASS_IN);
+    fzw_name(w, "bank.example.com");
+    fzw_u16(w, FZW_TYPE_A);
+    fzw_u16(w, FZW_CLASS_IN);
+    fzw_u32(w, 300);
+    fzw_u16(w, 4);
+    fzw_u8(w, 10); fzw_u8(w, 0); fzw_u8(w, 0); fzw_u8(w, 66);
+}
+
+/* The same, with a real answer as well: the answer must still be the one
+   taken, and the authority record must not displace it. */
+static void fzs_a_answer_plus_authority(FzwBuf *w, const char *qname)
+{
+    fzw_hdr(w, 0, FZW_QR | FZW_AA, 1, 1, 1, 0);
+    fzw_question(w, qname, FZW_TYPE_A, FZW_CLASS_IN);
+
+    fzw_ptr(w, 12);
+    fzw_u16(w, FZW_TYPE_A);
+    fzw_u16(w, FZW_CLASS_IN);
+    fzw_u32(w, 300);
+    fzw_u16(w, 4);
+    fzw_u8(w, 10); fzw_u8(w, 0); fzw_u8(w, 0); fzw_u8(w, 9);
+
+    fzw_name(w, "bank.example.com");
+    fzw_u16(w, FZW_TYPE_A);
+    fzw_u16(w, FZW_CLASS_IN);
+    fzw_u32(w, 300);
+    fzw_u16(w, 4);
+    fzw_u8(w, 10); fzw_u8(w, 0); fzw_u8(w, 66);
+}
+
+/* The question echoed in the other case.  RFC 4343 makes that the same name,
+   and several resolvers normalise before echoing. */
+static void fzs_question_upper(FzwBuf *w, const char *qname)
+{
+    char  upper[256];
+    size_t i;
+
+    for (i = 0; i + 1 < sizeof(upper) && qname[i] != '\0'; i++)
+        upper[i] = (char)((qname[i] >= 'a' && qname[i] <= 'z')
+                          ? (qname[i] - 'a' + 'A') : qname[i]);
+    upper[i] = '\0';
+
+    fzw_hdr(w, 0, FZW_QR | FZW_AA, 1, 1, 0, 0);
+    fzw_question(w, upper, FZW_TYPE_A, FZW_CLASS_IN);
+    fzw_ptr(w, 12);
+    fzw_u16(w, FZW_TYPE_A);
+    fzw_u16(w, FZW_CLASS_IN);
+    fzw_u32(w, 300);
+    fzw_u16(w, 4);
+    fzw_u8(w, 10); fzw_u8(w, 0); fzw_u8(w, 0); fzw_u8(w, 9);
+}
+
+/*
+ * A PTR answer carrying the question a reverse lookup actually asks.  Without
+ * this the reverse parser stops at the question comparison for every seed in
+ * the table and its record walk is never reached.
+ */
+static void fzs_ptr_answer_inaddr(FzwBuf *w, const char *qname)
+{
+    size_t rdlen_at;
+    size_t rdata_at;
+
+    (void)qname;
+    fzw_hdr(w, 0, FZW_QR | FZW_AA, 1, 1, 0, 0);
+    fzw_question(w, FZW_INADDR_QNAME, FZW_TYPE_PTR, FZW_CLASS_IN);
+    fzw_ptr(w, 12);
+    fzw_u16(w, FZW_TYPE_PTR);
+    fzw_u16(w, FZW_CLASS_IN);
+    fzw_u32(w, 300);
+    rdlen_at = w->len;
+    fzw_u16(w, 0);
+    rdata_at = w->len;
+    fzw_name(w, "amiga.example.com");
+    fzw_patch16(w, rdlen_at, (unsigned)(w->len - rdata_at));
+}
+
+/* The same shape, asking about a different address.  The reverse path used to
+   skip the question, so this answered the query it was not the answer to. */
+static void fzs_ptr_wrong_question(FzwBuf *w, const char *qname)
+{
+    size_t rdlen_at;
+    size_t rdata_at;
+
+    (void)qname;
+    fzw_hdr(w, 0, FZW_QR | FZW_AA, 1, 1, 0, 0);
+    fzw_question(w, "4.3.2.1.IN-ADDR.ARPA", FZW_TYPE_PTR, FZW_CLASS_IN);
+    fzw_ptr(w, 12);
+    fzw_u16(w, FZW_TYPE_PTR);
+    fzw_u16(w, FZW_CLASS_IN);
+    fzw_u32(w, 300);
+    rdlen_at = w->len;
+    fzw_u16(w, 0);
+    rdata_at = w->len;
+    fzw_name(w, "evil.example.net");
+    fzw_patch16(w, rdlen_at, (unsigned)(w->len - rdata_at));
+}
+
 typedef struct
 {
     const char *name;
@@ -673,7 +789,12 @@ static const FzwSeed fzw_seeds[] =
     { "pointer_storm",           fzs_pointer_storm           },
     { "rcode_error",             fzs_rcode_error             },
     { "truncated_flag",          fzs_truncated_flag          },
-    { "wrong_question",          fzs_wrong_question          }
+    { "wrong_question",          fzs_wrong_question          },
+    { "a_in_authority",          fzs_a_in_authority          },
+    { "a_answer_plus_authority", fzs_a_answer_plus_authority },
+    { "question_upper",          fzs_question_upper          },
+    { "ptr_answer_inaddr",       fzs_ptr_answer_inaddr       },
+    { "ptr_wrong_question",      fzs_ptr_wrong_question      }
 };
 
 #define FZW_SEED_COUNT  (int)(sizeof(fzw_seeds) / sizeof(fzw_seeds[0]))

@@ -18,6 +18,21 @@ version at the top when it merges.
 - Closing a connection is quicker when the last acknowledgement is lost: the far end's repeated goodbye is now answered instead of ignored, where before it retransmitted until its own timer ran out
 - A machine that is sent a stream of packets it must refuse no longer answers every one of them, which was a way to make it flood a third party, and answers none at all to a packet sent to a group address
 - A transfer no longer stops for good when the far end runs out of room and the message saying it has room again is lost. The stack is meant to keep asking until an answer comes, and in the common case it was not asking at all
+- A secure connection is no longer accepted for the wrong machine. The name in a certificate was being read from the wrong field, so a certificate issued for one set of addresses was accepted for another it happened to name
+- Certificates signed with MD5 or SHA-1 are refused, as are RSA keys shorter than 1024 bits. This can stop a connection that works today, typically to an old device on the local network; certificates you have placed in DEVS:Internet/certificates yourself are unaffected
+- Two certificate authorities that vouch for each other used to make the library loop without end while checking a chain. It now gives up and reports the chain as untrusted
+- A server that breaks off a secure connection mid-transfer is reported as an error rather than a normal end of file, so a truncated download no longer looks like a complete one
+- Session keys are wiped from memory when a connection closes, and remembered sessions expire after a day on machines with no working clock, where they previously never expired
+- A large reply that arrives split into pieces is now put back together instead of vanishing. A machine that could not do this saw big replies simply never arrive, and the program waiting for one timed out with nothing to show for it
+- On a network that only speaks IPv6, the machine can now look up names. It previously got an address and could reach numbered addresses but could not resolve a single name
+- Names spelled with capital letters resolve. Some name servers answer in lower case and the reply was being rejected as if it were for a different name
+- A name server answering about one name can no longer slip in an address for a different one, and a reverse lookup checks that the reply is about the address that was asked about
+- A name whose address has changed is no longer remembered past the time the server asked for it, even while a program keeps looking it up
+- Sharing a folder over the network refuses a request that describes its own length in two contradictory ways, which is how a machine in the middle is made to see a different request than the server does. Some older programs send both and will now be refused
+- A file uploaded to the shared folder in pieces is now subject to the same size and time limits as any other, so a handful of very slow uploads can no longer occupy every connection
+- Closing a program that was capturing network traffic no longer frees the capture buffer while it is still being read
+- A connection request from a network the machine cannot reach, and a stream of packets it must refuse, are both answered at a bounded rate rather than one for one
+- Asking to send more than fits in one packet on a raw socket now reports an error instead of reporting success and sending nothing
 
 ## 0.16.9
 

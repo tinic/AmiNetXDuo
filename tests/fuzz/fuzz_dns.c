@@ -452,8 +452,62 @@ static void fz_selftest(void)
     if (address != IP_ADDRESS(10, 0, 0, 9))
         fz_fail("a well-formed A answer resolved to the wrong address");
 
+    /*
+     * The question echoed in the other case is the same question (RFC 4343),
+     * and resolvers do normalise before echoing.  A case-sensitive comparison
+     * here was a name that would not resolve at all for anyone who spelled it
+     * with a capital.
+     */
     fzw_reset(&w);
-    fzs_ptr_answer(&w, FZ_QNAME);
+    fzs_question_upper(&w, FZ_QNAME);
+    memcpy(fz_case.b, w.b, w.len);
+    fz_case.len   = w.len;
+    fz_delivered  = 0;
+    address       = 0;
+
+    if (nx_dns_host_by_name_get(&fz_dns, (UCHAR *)FZ_QNAME, &address, 4) !=
+        NX_SUCCESS)
+        fz_fail("an answer echoing the question in capitals did not resolve");
+    if (address != IP_ADDRESS(10, 0, 0, 9))
+        fz_fail("an answer echoing the question in capitals gave the wrong "
+                "address");
+
+    /*
+     * An A record in the authority section is not an answer.  Nothing here
+     * ties its owner name to the question, so accepting one let a server
+     * answering about one name hand back -- and cache -- an address for
+     * another.
+     */
+    fzw_reset(&w);
+    fzs_a_in_authority(&w, FZ_QNAME);
+    memcpy(fz_case.b, w.b, w.len);
+    fz_case.len   = w.len;
+    fz_delivered  = 0;
+    address       = 0;
+
+    if (nx_dns_host_by_name_get(&fz_dns, (UCHAR *)FZ_QNAME, &address, 4) ==
+        NX_SUCCESS)
+        fz_fail("an A record in the authority section was taken as an answer");
+    if (address != 0)
+        fz_fail("an A record in the authority section wrote an address");
+
+    /* And the same response with a real answer in front of it still resolves,
+       to the answer and not to the authority record. */
+    fzw_reset(&w);
+    fzs_a_answer_plus_authority(&w, FZ_QNAME);
+    memcpy(fz_case.b, w.b, w.len);
+    fz_case.len   = w.len;
+    fz_delivered  = 0;
+    address       = 0;
+
+    if (nx_dns_host_by_name_get(&fz_dns, (UCHAR *)FZ_QNAME, &address, 4) !=
+        NX_SUCCESS)
+        fz_fail("an answer followed by an authority record did not resolve");
+    if (address != IP_ADDRESS(10, 0, 0, 9))
+        fz_fail("an authority record displaced the answer");
+
+    fzw_reset(&w);
+    fzs_ptr_answer_inaddr(&w, FZ_QNAME);
     memcpy(fz_case.b, w.b, w.len);
     fz_case.len  = w.len;
     fz_delivered = 0;
@@ -464,6 +518,21 @@ static void fz_selftest(void)
         fz_fail("a well-formed PTR answer did not resolve");
     if (strcmp((const char *)name, "amiga.example.com") != 0)
         fz_fail("a well-formed PTR answer gave the wrong name");
+
+    /* A PTR answer to a question about a different address.  The reverse path
+       skipped the question section, so this used to answer the query. */
+    fzw_reset(&w);
+    fzs_ptr_wrong_question(&w, FZ_QNAME);
+    memcpy(fz_case.b, w.b, w.len);
+    fz_case.len  = w.len;
+    fz_delivered = 0;
+    memset(name, 0, sizeof(name));
+
+    if (nx_dns_host_by_address_get(&fz_dns, IP_ADDRESS(10, 0, 0, 9), name,
+                                   (UINT)sizeof(name), 4) == NX_SUCCESS)
+        fz_fail("a PTR answer to another address's question was accepted");
+    if (name[0] != 0)
+        fz_fail("a rejected PTR answer left a name behind");
 
 #ifdef FEATURE_NX_IPV6
     {
@@ -485,6 +554,89 @@ static void fz_selftest(void)
             fz_fail("a well-formed AAAA answer gave the wrong address");
     }
 #endif
+
+    fz_pool_check();
+    (VOID)nx_dns_delete(&fz_dns);
+}
+
+/*
+ * A cached record has to expire even when it is asked for constantly.
+ *
+ * _nx_dns_cache_find_answer() charges elapsed lifetime in whole seconds and
+ * used to move the record's clock to the current tick afterwards, throwing the
+ * part-second away.  A name looked up more often than once a second therefore
+ * charged nothing, every time, and the record stayed at its full TTL for as
+ * long as anything kept asking -- which is exactly what a transfer that keeps
+ * reconnecting does.
+ *
+ * So: cache an answer with a two-second TTL, then ask for it repeatedly with
+ * the clock stepping less than a second each time and no further answer
+ * available from the wire.  A lookup that fails is a lookup that went past the
+ * cache, which is only possible once the record has expired.
+ */
+static void fz_cache_expiry_test(void)
+{
+    FzwBuf w;
+    ULONG  address = 0;
+    int    step;
+    int    expired = 0;
+
+    fz_case_name = "cache_expiry";
+    fz_patch_id  = 1;
+
+    memset(fz_cache, 0, sizeof(fz_cache));
+
+    if (nx_dns_create(&fz_dns, &fz_ip, (UCHAR *)"example.com") != NX_SUCCESS ||
+        nx_dns_cache_initialize(&fz_dns, fz_cache,
+                                (UINT)sizeof(fz_cache)) != NX_SUCCESS ||
+        nx_dns_server_add(&fz_dns, FZ_SERVER) != NX_SUCCESS)
+        fz_fail("the DNS client would not start");
+
+    fz_dns.nx_dns_retries = 1;
+
+    /* One answer off the wire, TTL two seconds, and then the wire goes quiet. */
+    fzw_reset(&w);
+    fzs_a_answer(&w, FZ_QNAME);
+    /* The record's tail is TTL(4) RDLENGTH(2) RDATA(4), so the TTL starts ten
+       bytes from the end. */
+    fzw_patch16(&w, w.len - 10, 0);
+    fzw_patch16(&w, w.len - 8, 2);
+    memcpy(fz_case.b, w.b, w.len);
+    fz_case.len  = w.len;
+    fz_delivered = 0;
+
+    if (nx_dns_host_by_name_get(&fz_dns, (UCHAR *)FZ_QNAME, &address, 4) !=
+        NX_SUCCESS)
+        fz_fail("the answer that seeds the cache did not resolve");
+
+    /* Nothing more arrives, so from here a success is a cache hit. */
+    fz_delivered = 1;
+
+    address = 0;
+    if (nx_dns_host_by_name_get(&fz_dns, (UCHAR *)FZ_QNAME, &address, 4) !=
+        NX_SUCCESS)
+        fz_fail("the record was not cached at all, so this proves nothing");
+    if (address != IP_ADDRESS(10, 0, 0, 9))
+        fz_fail("the cache returned the wrong address");
+
+    /* NX_IP_PERIODIC_RATE is 50 here, so 20 ticks a step is well under the
+       one second the old arithmetic needed before it charged anything. */
+    for (step = 0; step < 60; step++)
+    {
+        fz_ticks += 20;
+
+        address = 0;
+        if (nx_dns_host_by_name_get(&fz_dns, (UCHAR *)FZ_QNAME, &address, 4) !=
+            NX_SUCCESS)
+        {
+            expired = 1;
+            break;
+        }
+    }
+
+    if (!expired)
+        fz_fail("a record with a two-second TTL never expired while it was "
+                "being looked up");
 
     fz_pool_check();
     (VOID)nx_dns_delete(&fz_dns);
@@ -538,6 +690,7 @@ int main(int argc, char **argv)
 
     fz_setup();
     fz_selftest();
+    fz_cache_expiry_test();
 
     for (i = 1; i < argc; i++)
     {

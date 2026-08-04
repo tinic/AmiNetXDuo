@@ -971,9 +971,9 @@ BOOL  bsd_oob_take(AmiSocket *sock, UBYTE *out);
  */
 /*
  * The IP-layer MTU of the interface a datagram to `addr` would leave by, or -1
- * if the route does not resolve. Both send paths measure against it because
- * nothing calls nx_ip_fragment_enable(): oversize is dropped in the driver
- * send after NX_SUCCESS has already been returned.
+ * if the route does not resolve. Both send paths measure against it and refuse
+ * an oversize datagram with EMSGSIZE rather than let transmit fragmentation
+ * have it; bsd_udp_maxdgram() in transfer.c says why.
  */
 LONG       bsd_route_mtu(NX_IP *ip, const NXD_ADDRESS *addr);
 
