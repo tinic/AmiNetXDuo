@@ -1524,6 +1524,22 @@ extern NX_CRYPTO_METHOD crypto_method_hmac;
  * _nx_crypto_x509_cipher_lookup_table_ecc with crypto_method_rsa swapped; the
  * ECDSA rows need no change because crypto_method_ecdsa reaches P-256 through
  * the curve method, which is the one above.
+ *
+ * MD5 and SHA-1 are gone from it, and the table is two things at once: it is
+ * what a certificate signature is verified with, and
+ * _nx_secure_tls_send_clienthello_extensions() walks it to build the
+ * signature_algorithms extension, so a row here is also a row on the wire.
+ * MD5 collisions produced a working rogue CA certificate in 2008 and SHA-1
+ * chosen-prefix collisions cost a few tens of thousands of dollars since 2020;
+ * a signature made with either is not evidence of anything, so verifying one
+ * and telling servers we would accept one both had to stop.
+ *
+ * What it costs: a chain whose leaf or intermediate is signed with SHA-1 no
+ * longer verifies.  No public CA has issued one since 2016, but a device on
+ * somebody's own network might still present one, and that connection now
+ * fails where it used to work.  A self-signed root in the trust store is
+ * unaffected whatever it is signed with -- the walk stops when it reaches the
+ * trusted store and never checks a root's signature on itself.
  */
 static NX_SECURE_X509_CRYPTO ami_x509_cipher_table[] =
 {
@@ -1535,9 +1551,6 @@ static NX_SECURE_X509_CRYPTO ami_x509_cipher_table[] =
     {NX_SECURE_TLS_X509_TYPE_RSA_SHA_384,    &ami_crypto_method_rsa,    &crypto_method_sha384},
     {NX_SECURE_TLS_X509_TYPE_RSA_SHA_512,    &ami_crypto_method_rsa,    &crypto_method_sha512},
     {NX_SECURE_TLS_X509_TYPE_ECDSA_SHA_224,  &crypto_method_ecdsa,      &crypto_method_sha224},
-    {NX_SECURE_TLS_X509_TYPE_ECDSA_SHA_1,    &crypto_method_ecdsa,      &crypto_method_sha1},
-    {NX_SECURE_TLS_X509_TYPE_RSA_SHA_1,      &ami_crypto_method_rsa,    &crypto_method_sha1},
-    {NX_SECURE_TLS_X509_TYPE_RSA_MD5,        &ami_crypto_method_rsa,    &crypto_method_md5},
 };
 
 /*
