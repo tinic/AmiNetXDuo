@@ -969,6 +969,14 @@ BOOL  bsd_oob_take(AmiSocket *sock, UBYTE *out);
  * bsd_raw_receive() dequeues one whole IP datagram, header included, or NULL.
  * The caller owns it and must nx_packet_release() it.
  */
+/*
+ * The IP-layer MTU of the interface a datagram to `addr` would leave by, or -1
+ * if the route does not resolve. Both send paths measure against it because
+ * nothing calls nx_ip_fragment_enable(): oversize is dropped in the driver
+ * send after NX_SUCCESS has already been returned.
+ */
+LONG       bsd_route_mtu(NX_IP *ip, const NXD_ADDRESS *addr);
+
 LONG       bsd_raw_open(struct AmiSocketBase *base, AmiSocket *sock);
 VOID       bsd_raw_close(AmiSocket *sock);
 LONG       bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,

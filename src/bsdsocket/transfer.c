@@ -429,10 +429,9 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
  * the MTU measured is the one the datagram will meet; -1 means no interface
  * was found, and the send then reports the routing error itself.
  */
-static LONG bsd_udp_maxdgram(NX_IP *ip, const NXD_ADDRESS *addr)
+LONG bsd_route_mtu(NX_IP *ip, const NXD_ADDRESS *addr)
 {
     NX_INTERFACE *iface = NX_NULL;
-    ULONG         overhead;
 
     if (ip == NULL || addr == NULL)
         return -1;
@@ -441,8 +440,6 @@ static LONG bsd_udp_maxdgram(NX_IP *ip, const NXD_ADDRESS *addr)
     if (addr->nxd_ip_version == NX_IP_VERSION_V6)
     {
         NXD_IPV6_ADDRESS *source = NX_NULL;
-
-        overhead = (ULONG)NX_IPv6_UDP_PACKET - (ULONG)NX_PHYSICAL_HEADER;
 
         tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
         if (_nxd_ipv6_interface_find(ip, (ULONG *)addr->nxd_ip_address.v6,
@@ -458,17 +455,33 @@ static LONG bsd_udp_maxdgram(NX_IP *ip, const NXD_ADDRESS *addr)
     {
         ULONG next_hop = 0;
 
-        overhead = (ULONG)NX_IPv4_UDP_PACKET - (ULONG)NX_PHYSICAL_HEADER;
-
         tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
         (VOID)_nx_ip_route_find(ip, addr->nxd_ip_address.v4, &iface, &next_hop);
         tx_mutex_put(&ip->nx_ip_protection);
     }
 
-    if (iface == NX_NULL || iface->nx_interface_ip_mtu_size <= overhead)
+    if (iface == NX_NULL)
         return -1;
 
-    return (LONG)(iface->nx_interface_ip_mtu_size - overhead);
+    return (LONG)iface->nx_interface_ip_mtu_size;
+}
+
+static LONG bsd_udp_maxdgram(NX_IP *ip, const NXD_ADDRESS *addr)
+{
+    LONG  mtu = bsd_route_mtu(ip, addr);
+    ULONG overhead;
+
+#ifdef AMINETXDUO_IPV6
+    if (addr != NULL && addr->nxd_ip_version == NX_IP_VERSION_V6)
+        overhead = (ULONG)NX_IPv6_UDP_PACKET - (ULONG)NX_PHYSICAL_HEADER;
+    else
+#endif
+        overhead = (ULONG)NX_IPv4_UDP_PACKET - (ULONG)NX_PHYSICAL_HEADER;
+
+    if (mtu < 0 || (ULONG)mtu <= overhead)
+        return -1;
+
+    return (LONG)((ULONG)mtu - overhead);
 }
 
 /*
