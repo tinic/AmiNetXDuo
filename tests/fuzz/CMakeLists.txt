@@ -98,6 +98,25 @@ target_include_directories(fuzz_usergroup PRIVATE
 target_compile_options(fuzz_usergroup PRIVATE -Wall -Wextra ${_fuzz_san})
 target_link_options(fuzz_usergroup PRIVATE ${_fuzz_san})
 
+# httpd's request framing: Content-Length, Transfer-Encoding and the chunked
+# decoder. The only one of these drivers whose input is chosen by whoever
+# connected to the machine rather than by a file in DEVS:, and the only parser
+# whose mistakes are silent in both directions -- a length read wrong is
+# answered correctly and leaves the rest of the body in the socket, where it is
+# parsed as the next request.
+#
+# httpframe.c is a source of its own for this reason; httpd.c reaches
+# proto/dos.h and does not build on a host.
+add_executable(fuzz_httpframe
+    fuzz_httpframe.c
+    "${CMAKE_SOURCE_DIR}/src/tools/httpframe.c")
+
+target_include_directories(fuzz_httpframe PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/tools")
+
+target_compile_options(fuzz_httpframe PRIVATE -Wall -Wextra ${_fuzz_san})
+target_link_options(fuzz_httpframe PRIVATE ${_fuzz_san})
+
 
 # ---------------------------------------------------------------------------
 # The two parsers that read bytes off the network from whoever sent them.
@@ -485,6 +504,14 @@ add_test(NAME fuzz_dhcp_seeds
 add_test(NAME fuzz_dhcp_sweep
          COMMAND fuzz_dhcp -r 1 ${AMINETXDUO_FUZZ_CASES})
 
+# The seed set carries the backlog's chunk sizes -- the nine-hex-digit one that
+# wrapped to zero and read as a terminator, and the size line long enough to be
+# truncated into one that parsed -- so those run on every ctest.
+add_test(NAME fuzz_httpframe_seeds
+         COMMAND fuzz_httpframe -s)
+add_test(NAME fuzz_httpframe_sweep
+         COMMAND fuzz_httpframe -r 1 ${AMINETXDUO_FUZZ_CASES})
+
 add_test(NAME fuzz_tls_record_seeds
          COMMAND fuzz_tls_record -s)
 add_test(NAME fuzz_tls_record_sweep
@@ -523,5 +550,6 @@ endif()
 # A soak set by AMINETXDUO_FUZZ_CASES needs longer than ctest's default.
 set_tests_properties(fuzz_config_sweep fuzz_dnssd_sweep fuzz_dns_sweep
                      fuzz_bpf_sweep fuzz_dhcp_sweep fuzz_usergroup_sweep
+                     fuzz_httpframe_sweep
                      fuzz_tls_record_sweep fuzz_tls_x509_sweep
                      PROPERTIES TIMEOUT 1800)
