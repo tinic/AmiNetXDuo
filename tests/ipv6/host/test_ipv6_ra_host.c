@@ -109,6 +109,12 @@ static UINT  h_router_adds;
 static UINT  h_packets_released;
 static UINT  h_prefix_add_full;       /* make the next add fail */
 
+/* What the RFC 8106 callback was handed, in order. */
+#define H_RDNSS_MAX   8
+static UINT  h_rdnss_count;
+static ULONG h_rdnss_address[H_RDNSS_MAX][4];
+static ULONG h_rdnss_lifetime[H_RDNSS_MAX];
+
 UINT _nx_ipv6_prefix_list_add_entry(NX_IP *ip_ptr, ULONG *prefix,
                                     ULONG prefix_length, ULONG valid_lifetime)
 {
@@ -313,6 +319,9 @@ static VOID h_reset(VOID)
     h_router_adds = 0;
     h_packets_released = 0;
     h_prefix_add_full = 0;
+    h_rdnss_count = 0;
+    memset(h_rdnss_address, 0, sizeof(h_rdnss_address));
+    memset(h_rdnss_lifetime, 0, sizeof(h_rdnss_lifetime));
     h_send_count = 0;
     h_send_fails = 0;
     h_now = 0;
@@ -418,6 +427,66 @@ NX_ICMPV6_OPTION_MTU *option = (NX_ICMPV6_OPTION_MTU *)(message + *length);
     NX_CHANGE_ULONG_ENDIAN(option -> nx_icmpv6_option_mtu_path_mtu);
 
     *length += (UINT)sizeof(NX_ICMPV6_OPTION_MTU);
+}
+
+/*
+ * The RFC 8106 option: the header, then `count` addresses of 2001:db8::53:<n>.
+ * The option length is in 8-byte units and covers both, so 1 + 2 * count.
+ */
+static VOID h_add_rdnss_option(UCHAR *message, UINT *length, UINT count,
+                               ULONG lifetime, UCHAR option_length_override)
+{
+NX_ICMPV6_OPTION_RDNSS *option = (NX_ICMPV6_OPTION_RDNSS *)(message + *length);
+ULONG                  *address;
+UINT                    i;
+
+    option -> nx_icmpv6_option_rdnss_type     = ICMPV6_OPTION_TYPE_RDNSS;
+    option -> nx_icmpv6_option_rdnss_length   = option_length_override
+                                                    ? option_length_override
+                                                    : (UCHAR)(1 + (count << 1));
+    option -> nx_icmpv6_option_rdnss_reserved = 0;
+
+    option -> nx_icmpv6_option_rdnss_lifetime = lifetime;
+    NX_CHANGE_ULONG_ENDIAN(option -> nx_icmpv6_option_rdnss_lifetime);
+
+    address = (ULONG *)(message + *length + sizeof(NX_ICMPV6_OPTION_RDNSS));
+
+    for (i = 0; i < count; i++)
+    {
+        address[0] = 0x20010DB8UL;
+        address[1] = 0UL;
+        address[2] = 0x00530000UL;
+        address[3] = i + 1;
+        NX_IPV6_ADDRESS_CHANGE_ENDIAN(address);
+        address += 4;
+    }
+
+    *length += (UINT)(option -> nx_icmpv6_option_rdnss_length << 3);
+}
+
+/* Was the n-th server handed over 2001:db8::53:<n+1>? */
+static int h_rdnss_is(UINT n, ULONG last)
+{
+    return (n < h_rdnss_count) &&
+           (h_rdnss_address[n][0] == 0x20010DB8UL) &&
+           (h_rdnss_address[n][1] == 0UL) &&
+           (h_rdnss_address[n][2] == 0x00530000UL) &&
+           (h_rdnss_address[n][3] == last);
+}
+
+static VOID h_rdnss_notify(NX_IP *ip_ptr, UINT interface_index,
+                           ULONG *dns_address, ULONG lifetime)
+{
+    (VOID)ip_ptr;
+    (VOID)interface_index;
+
+    if (h_rdnss_count < H_RDNSS_MAX)
+    {
+        COPY_IPV6_ADDRESS(dns_address, h_rdnss_address[h_rdnss_count]);
+        h_rdnss_lifetime[h_rdnss_count] = lifetime;
+    }
+
+    h_rdnss_count++;
 }
 
 static VOID h_deliver(UCHAR *message, UINT length)
@@ -764,6 +833,85 @@ char  what[128];
             h_check(h_send_count == before,
                     "and nothing is sent after it");
         }
+    }
+
+    /* --- (4) the recursive DNS server option, RFC 8106 --- */
+
+    /*
+     * On an IPv6-only link this is the resolver's only route in: no DHCPv6 is
+     * built and the name_resolution file takes a dotted quad.  Before this the
+     * option fell through the walk's if/else-if chain with everything else the
+     * stack does not parse.
+     */
+    {
+    UINT length;
+
+        /* Two servers alongside a prefix, which is what a router sends. */
+        h_reset();
+        h_ip.nx_ipv6_rdnss_notify = h_rdnss_notify;
+        h_build_ra(h_message, &length, 1800);
+        h_add_prefix_option(h_message, &length, H_ONLINK | H_AUTONOMOUS,
+                            3600, 3600, 64);
+        h_add_rdnss_option(h_message, &length, 2, 600, 0);
+        h_deliver(h_message, length);
+
+        h_check(h_rdnss_count == 2, "both advertised name servers are reported");
+        h_check(h_rdnss_is(0, 1) && h_rdnss_is(1, 2),
+                "in the order the option carried them, in host order");
+        h_check(h_rdnss_lifetime[0] == 600 && h_rdnss_lifetime[1] == 600,
+                "each with the option's lifetime");
+        h_check(h_is_expected_address(h_formed_address()),
+                "and the prefix in the same advertisement still forms an address");
+
+        /* A lifetime of zero is a withdrawal and is still reported as one. */
+        h_reset();
+        h_ip.nx_ipv6_rdnss_notify = h_rdnss_notify;
+        h_build_ra(h_message, &length, 1800);
+        h_add_rdnss_option(h_message, &length, 1, 0, 0);
+        h_deliver(h_message, length);
+
+        h_check(h_rdnss_count == 1, "a zero lifetime is reported, not skipped");
+        h_check(h_rdnss_lifetime[0] == 0, "with the lifetime it carried");
+
+        /* An option carrying no address at all: the header is the whole thing. */
+        h_reset();
+        h_ip.nx_ipv6_rdnss_notify = h_rdnss_notify;
+        h_build_ra(h_message, &length, 1800);
+        h_add_rdnss_option(h_message, &length, 0, 600, 0);
+        h_add_prefix_option(h_message, &length, H_ONLINK | H_AUTONOMOUS,
+                            3600, 3600, 64);
+        h_deliver(h_message, length);
+
+        h_check(h_rdnss_count == 0, "an option with no server reports none");
+        h_check(h_is_expected_address(h_formed_address()),
+                "and does not stop the option after it being processed");
+
+        /*
+         * A length that claims more addresses than the option holds.  The walk
+         * is bounded by the length field either way, so what matters is that
+         * the count taken from it never reads past the option: 5 units is one
+         * header and two addresses, and two is what may be reported.
+         */
+        h_reset();
+        h_ip.nx_ipv6_rdnss_notify = h_rdnss_notify;
+        h_build_ra(h_message, &length, 1800);
+        h_add_rdnss_option(h_message, &length, 2, 600, 5);
+        h_deliver(h_message, length);
+
+        h_check(h_rdnss_count == 2,
+                "the server count comes from the option length");
+
+        /* No callback installed: the option is skipped and nothing crashes. */
+        h_reset();
+        h_build_ra(h_message, &length, 1800);
+        h_add_rdnss_option(h_message, &length, 2, 600, 0);
+        h_add_prefix_option(h_message, &length, H_ONLINK | H_AUTONOMOUS,
+                            3600, 3600, 64);
+        h_deliver(h_message, length);
+
+        h_check(h_rdnss_count == 0, "with no callback nothing is reported");
+        h_check(h_is_expected_address(h_formed_address()),
+                "and the rest of the advertisement is processed anyway");
     }
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);

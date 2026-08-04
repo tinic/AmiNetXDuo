@@ -84,6 +84,13 @@ LONG ami_netstack_ipv6_enable(AmiNetStack *ns)
         return AMI_NET_ERR_KERNEL;
     }
 
+    /*
+     * The resolver's only route in on an IPv6-only link.  Set directly, as
+     * nx_ip_packet_id is: there is no setter for it and the field is only read
+     * from the IP thread's own advertisement processing.
+     */
+    ns->ns_Ip.nx_ipv6_rdnss_notify = ami_ns6_rdnss;
+
     ns->ns_Ipv6Enabled = TRUE;
 
     AMI_INFO("netstack: IPv6 enabled (ICMPv6, neighbour discovery, ::1)");
