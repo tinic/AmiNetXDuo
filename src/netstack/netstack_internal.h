@@ -196,6 +196,15 @@ struct AmiNetStack
     ULONG               ns_LastAddress[AMI_CFG_MAX_INTERFACES];
 
     /*
+     * Somebody else answered an ARP for one of our addresses.  Counted rather
+     * than only logged, because the log is off in a shipping build and this is
+     * the one fault where the machine is working and the network is not: two
+     * hosts on one address, and whichever answers first wins each exchange.
+     */
+    ULONG               ns_AddrConflicts;
+    ULONG               ns_LastConflictAddr;
+
+    /*
      * Posted by ami_ns_address_changed() when an interface gains or loses an
      * address, so ami_ns_wait_for_address() can block instead of polling.
      */

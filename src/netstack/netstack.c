@@ -913,6 +913,42 @@ static VOID ami_ns_log_address(const char *what, UWORD index, ULONG addr)
  * the DHCP thread on a lease, from the AutoIP thread on a link-local claim,
  * and from ami_ns_configure_addresses() for a static one.
  */
+/*
+ * Somebody else answered an ARP for an address of ours.
+ *
+ * NetX Duo already defends the address; what it did not do is tell anyone,
+ * because nx_interface_ip_conflict_notify_handler was registered nowhere.  A
+ * duplicate address is the fault where every counter looks healthy and the
+ * network still does not work -- both hosts answer, and whichever is first
+ * wins each exchange -- so it is counted as well as logged: the log is off in
+ * a shipping build and the count outlives it.
+ *
+ * Runs from _nx_arp_packet_receive() on the IP thread.  Nothing here allocates
+ * or calls back into NetX Duo.
+ */
+static VOID ami_ns_ip_conflict(NX_IP *ip_ptr, UINT interface_index,
+                               ULONG probe_address,
+                               ULONG sender_mac_msw, ULONG sender_mac_lsw)
+{
+    AmiNetStack *ns = ami_ns;
+
+    (VOID)interface_index;
+
+    if (ns == NULL || ip_ptr != &ns->ns_Ip)
+        return;
+
+    ns->ns_AddrConflicts++;
+    ns->ns_LastConflictAddr = probe_address;
+
+    AMI_ERROR("netstack: %lu.%lu.%lu.%lu is in use by %lx:%lx -- two machines "
+              "on one address",
+              (unsigned long)((probe_address >> 24) & 0xFFUL),
+              (unsigned long)((probe_address >> 16) & 0xFFUL),
+              (unsigned long)((probe_address >> 8) & 0xFFUL),
+              (unsigned long)(probe_address & 0xFFUL),
+              (unsigned long)sender_mac_msw, (unsigned long)sender_mac_lsw);
+}
+
 static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
 {
     AmiNetStack *ns      = ami_ns;
@@ -938,6 +974,22 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
 
         ns->ns_LastAddress[i] = addr;
         changed               = TRUE;
+
+        /*
+         * Announce it.  RFC 5227 2.3: a host that has just configured an
+         * address broadcasts an ARP for it, so every neighbour's cache is
+         * corrected at once rather than after its own entry ages out -- which
+         * is what made a DHCP address that moved between machines take
+         * minutes to become reachable.
+         *
+         * Safe here: _nx_ip_interface_address_set() releases the protection
+         * mutex before calling this notify, so re-taking it inside
+         * nx_arp_gratuitous_send() is not a recursion.  Failure is not worth a
+         * branch -- the address works either way, the neighbours are just
+         * slower to learn it.
+         */
+        if (addr != 0UL)
+            (VOID)nx_arp_gratuitous_send(&ns->ns_Ip, NX_NULL);
 
         /* Wake anyone waiting for an address. tx_semaphore_put() does not
            block, which matters because this runs on the IP thread. */
@@ -1244,6 +1296,16 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
 
     (VOID)nx_ip_address_change_notify(&ns->ns_Ip, ami_ns_address_changed,
                                       NX_NULL);
+
+    /*
+     * The conflict handler is per interface and there is no API that sets it,
+     * so it is assigned the way NetX Duo's own AutoIP module assigns it: into
+     * the NX_INTERFACE.  Every interface, because a duplicate address on the
+     * second card is as invisible as one on the first.
+     */
+    for (i = 0; i < ns->ns_IfaceCount; i++)
+        ns->ns_Ip.nx_ip_interface[i].nx_interface_ip_conflict_notify_handler =
+            ami_ns_ip_conflict;
 
     /* Static interfaces are already addressed by nx_ip_create()/attach; make
        sure a static interface 0 really has what the config asked for. */
