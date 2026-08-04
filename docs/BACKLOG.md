@@ -80,7 +80,6 @@ name always misses, and a CNAME-only response yields `NX_DNS_QUERY_FAILED`.
 | Sender SWS avoidance absent; Nagle absent | `nx_tcp_socket_send_internal.c:455-470` |
 | Receiver SWS has no `min(MSS, RCV.BUFF/2)` floor | `nx_tcp_socket_receive.c:210-218` |
 | Restart-after-idle absent; no per-socket last-send time | |
-| Listen path sets IW = 1 MSS (RFC 2581 §3.1). The claim that three other paths do RFC 3390 was wrong -- nothing in the tree implements it, and raising the initial window is an on-wire change this project has regressed on before, so it wants measurement rather than a patch | `nx_tcp_packet_process.c:734-735` |
 | RST-in-response-to-RST hole on the malformed-option path | `nx_tcp_socket_packet_process.c:298-332` |
 | UDP demux ignores the 4-tuple | `nx_udp_packet_receive.c:247` |
 | UDP checksum verified at dequeue, not enqueue | `nx_udp_socket_receive.c` |

@@ -114,6 +114,15 @@ transport that drew it), 4443 §2.4(e.3) (no error for a packet sent to a
 multicast group) and §2.4(f) (a token bucket bounds the rate errors are
 originated at). Landed 2026-08-04.
 
+**TCP initial window** — 5681 §3.1 (the RFC 3390 formula) is implemented on
+both paths to ESTABLISHED: `nx_tcp_socket_state_syn_sent.c:157-165` and
+`nx_tcp_socket_state_syn_received.c:119-133`. The `= mss` at
+`nx_tcp_packet_process.c:762` is set when the SYN arrives and overwritten by
+the second of those when the final ACK does, before the transition to
+ESTABLISHED; the only segment sent in between is the SYN-ACK, which the
+congestion window does not govern. Checked 2026-08-04 after a backlog row
+claimed the listen path was out of step.
+
 **IPv6** — 4291 §2.8 required address set, SLAAC with DAD at three probes,
 NUD five-state machine, hop limit 255 on all ND, 5095 RH0 refusal, Parameter
 Problem on unrecognised Next Header, 6980 and 8021 satisfied (we never
