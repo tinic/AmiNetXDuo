@@ -31,7 +31,7 @@ git log; what it declined is under *Decided against*; what it disproved is under
 | **SACK send side** | Already written and verified on fork branch `amiga-tcp-sack-transmit` (`d8af79c5`), never landed. Adds `nx_tcp_sack_option_get.c` and the retransmit skip | `nx_tcp.h:93` |
 | **RFC 2308 §5 negative cache.** A name that does not exist is looked up again on every call | The SOA MINIMUM has to be held against a name with no record to attach it to, which means a synthetic entry type and storage for a name with no data. `NX_DNS_NAME_ERROR` now exists and reaches `ami_ns_dns_error()`, so nothing outside this row is in the way | `nxd_dns.c:3587`, `netstack_dns_status.c` |
 | **Bailiwick check on cached records, with CNAME chain following** | One item, not two: `NX_DNS_ENABLE_EXTENDED_RR_TYPES` is undefined, so the A record after a CNAME has the CNAME target as its owner and is accepted only because no owner-name check exists. Adding the check alone fails every CNAME-hosted name | `nxd_dns.c` |
-| **`src/bsdsocket` has no host test at all.** 24,827 lines, the socket layer itself, referenced by no `tests/*/CMakeLists.txt` | Covered only by on-Amiga suites that run by hand: `bsdsocktest`, `tests/sockopt`. Nothing in `tools/ci.sh host` compiles a line of it, so a change there is unverified until somebody boots a machine. The parts that would port to the host are the ones with the defects: `bsd_route_mtu()`, the cmsg parse, `bsd_udp_from_peer()`, the If-header and lock evaluation | `src/bsdsocket/` |
+| **`src/bsdsocket` has one host test**, `test_inet`, reaching 7 of 29 files | The other 22 are blocked on 253 Amiga constants and on structures the host cannot shape, and their ABI is already held by 80 `_Static_assert`s on the cross build. What is left un-held is behaviour needing the real ABI: `bsd_route_mtu()`, `bsd_udp_from_peer()`, the 4-tuple filter. That is guest-suite work, so this row is about `bsdsocktest` coverage, not host coverage | `src/bsdsocket/`, measured under *Host-testing* below |
 | **`src/tools` is 32,412 lines behind four host tests.** `httppath`, `httpif`, `fetchurl`, `httpframe`, all of them httpd's | The other twenty-five commands have none. The 2026-08-04 diagnostics rewrite changed every one of them and nothing on the host could have caught a mistake; the cross build was the only gate, and it only proves they compile | `src/tools/` |
 | **`src/tlslib` is 4,628 lines behind two.** No test of the handshake, of resumption, or of the record layer beyond the fuzzers | `tls_conn.c`'s alert handling and `tls_resume.c`'s expiry were both changed on 2026-08-04 and neither is exercised except by `run-https.sh` on hardware | `src/tlslib/` |
 | **`src/sana2` has one test, added 2026-08-04**, covering `sana2_copy.c` alone out of 3,704 lines | The driver-facing code runs at interrupt time, which is where a mistake takes the machine down rather than failing a check | `src/sana2/` |
@@ -49,70 +49,59 @@ eight incomplete types, all public and stable: `Library`, `List`, `MinList`,
 `MinNode`, `Node`, `SignalSemaphore`, `timerequest`, `Task`. `in_pktinfo` and
 `in6_pktinfo` collide with the host's `netinet/in.h` and need excluding.
 
-So the cost is one shim of a few hundred lines, after which any file in
-`src/bsdsocket` compiles natively. `tests/sana2/host/shim` (179 lines) and
-`src/config/test/shim` are the precedents, and their own comments say the
-difference between them is deliberate, so this is a third rather than a merge.
+The spike put the cost at one shim of a few hundred lines, after which any file
+in `src/bsdsocket` would compile natively. The first half held and the second
+did not; the measurement below is what the shim actually reaches.
+`tests/sana2/host/shim` (179 lines) and `src/config/test/shim` are the
+precedents, and their own comments say the difference between them is
+deliberate, so this is a third rather than a merge.
 
-**Measured 2026-08-04, after building it.** The shim reaches six of the
-twenty-nine files: `bpf`, `bsdsocket_vectors`, `inet`, `library_runtime`,
-`netx_call`, `nxcontext`. The rest fail in two ways, and the second is a wall
-rather than more work:
+**The Amiga `struct timeval` was the blocking dependency and is cleared.**
+`{ULONG tv_secs; ULONG tv_micro;}` against POSIX's `{time_t tv_sec;
+suseconds_t tv_usec;}`: same tag, different members. Fixed in `e25e274` by
+renaming the tag in `tests/bsdsocket/host/shim/host_prelude.h` after the libc
+headers, so libc keeps `struct timeval` for what it declared and the tree sees
+`struct ami_timeval`. Sound because nothing in `src/bsdsocket` hands a timeval
+to libc; the only calls taking one are timer.device's.
 
-| Class | Files | What it takes |
+**Measured on `e25e274`, with the generated and `port/threadx-amiga/inc`
+include paths.** Seven of twenty-nine compile: `bpf`, `bsdsocket_vectors`,
+`inet`, `library_runtime`, `netstatus`, `netx_call`, `nxcontext`. What remains:
+
+| Class | Extent | What it takes |
 |---|---|---|
-| Missing declarations | `routing` (`RTA_*`), `socket` (`FDCB_*`), `errno` | Grow `libraries/bsdsocket.h` in the shim |
-| The host's structures are not the Amiga's | `transfer` (`iovec is not 8 bytes`), `addrinfo` (`sin_len`), `options` and `select` (`tv_secs`), `cmsg` (`cmsghdr is not 12 bytes`) | Nothing, on a 64-bit host: an Amiga `iovec` is a 4-byte pointer plus a ULONG, and no header choice makes a pointer four bytes |
+| Missing Amiga/Roadshow constants | 253 distinct identifiers: `SBTC_*`, `IFQ_*`/`IFC_*`/`IFA_*`, `ACTION_*`/`ERROR_*`, `RTA_*`/`RTM_*`, `AAM*`/`CAAM*`, `FD_*`/`FDCB_*` | Restate them in the shim, where they would agree only with themselves |
+| The host's structures are not the Amiga's | 20 `_Static_assert` failures; `cmsg.c` is the only file whose errors are all of this class | Amiga-shaped `sockaddr_in`, `msghdr`, `cmsghdr`, `iovec` in the shim, plus `-m32` for the 4-byte pointer |
 
-The second class needs `-m32`, which puts these in the `host32` tier rather
-than `host`. `-m32` works on the Linux build host; the arm64 Mac cannot do it
-at all.
+**The ABI these files carry is already pinned, and better than a host test
+would pin it.** 80 `_Static_assert`s across `cmsg.c:66`, `in6.c:51`,
+`transfer.c`, `netstatus.c` and `netmonitor.c` fix struct sizes, member offsets
+and member widths, `AF_INET6 == 23`, and the `CMSG_ALIGN`/`CMSG_LEN`/
+`CMSG_SPACE` arithmetic. They are evaluated on every cross build against the
+real NDK headers. Compiling the same files on the host would evaluate them
+against the shim, so the assertion would hold by construction and prove
+nothing. This is why a test census showed these files as uncovered: the
+coverage is a compile-time property, not a test.
 
-**The Amiga `struct timeval` blocker is solved**, 2026-08-04, by renaming the
-tag in `host_prelude.h` after the C library's headers are in: glibc keeps
-`struct timeval` for everything it declared, and the tree's code from that
-point down sees `struct ami_timeval` with `tv_secs` and `tv_micro`. It works
-because nothing in `src/bsdsocket` hands a timeval to libc; the only calls that
-take one are timer.device's. `options.c` went 14 errors to 8, `select.c` to 26
-and `tcp_handler.c` to 1, all of them now missing ABI constants rather than a
-type. The original diagnosis is kept below because the reasoning is what makes
-the rename safe.
+**Using the NDK's own headers instead of the shim was tried three times and is
+worse**: `-I`, `-idirafter` and `#include_next`, each failing on the
+`struct timeval` member `lhm_Date` in `libraries/bsdsocket.h`. Do not repeat
+it.
 
-**The Amiga `struct timeval` was the single blocking dependency.** It is
-`{ULONG tv_secs; ULONG tv_micro;}` and POSIX's is `{time_t tv_sec;
-suseconds_t tv_usec;}`: same tag, different members, different types. glibc
-brings its own in through `<sys/select.h>`, `<netinet/in.h>` needs that, and
-`aminetxduo/in6.h` needs `<netinet/in.h>` to see its own guards. Reached from
-three directions on 2026-08-04 and it is the same wall each time: `options.c`,
-`select.c` and `tcp_handler.c` read `tv_secs` directly, and the NDK's own
-`libraries/bsdsocket.h` has a `struct timeval` member (`lhm_Date`), so even
-pulling that one header in through `#include_next` with `-idirafter` fails on
-it. Anything that clears this clears most of the twenty-three, and the rename
-above does.
-
-What now stands in the way is `libraries/bsdsocket.h`: `FD_READ`,
-`SO_EVENTMASK`, `RTA_*`, `FDCB_*` and the AmigaDOS `ACTION_*` numbers. The shim
-deliberately does not restate them, because a second copy of a number the NDK
-owns can disagree with it and a test asserting the wrong one passes while the
-library fails. Reaching the NDK's own header with `#include_next` and
-`-idirafter` was tried three times and fails on `lhm_Date` every time. The
-remaining options are to restate the constants with a test that checks them
-against the NDK on a cross build, the way `test_sockopt_numbers` already does
-for the socket options, or to leave these files to the guest suites.
-
-**Using the NDK's own headers instead of the shim was tried and is worse**:
-`-I $TOOLCHAIN/m68k-amigaos/ndk-include` with `__asm`, `__stdargs`, `__saveds`
-and `__regargs` neutered brings `bsdsocket_internal.h` to one error, but zero
-of the twenty-nine files compile, against the shim's six. The NDK also defines
-`struct timeval` a second time against ThreadX's linux port. Do not repeat it.
-
-| Phase | What | Why in this order |
+| Phase | What | State |
 |---|---|---|
-| 0 | The shim, under `tests/bsdsocket/host/shim` | Everything below is blocked on it and nothing else is |
-| 1 | `inet.c` (474), `cmsg.c` (882), `errno.c` (917) | Pure conversion, buffer walking and a mapping table. `cmsg.c` holds the known `IPV6_DSTOPTS`/`IPV6_PKTINFO` collision, which no test would currently catch |
-| 2 | `bsd_route_mtu()`, `bsd_udp_maxdgram()`, `bsd_udp_from_peer()`, `routing.c`, `addrinfo.c` | Where the 2026-08-04 defects were. The EMSGSIZE arithmetic and the 4-tuple filter are both pure functions over structures |
-| 3 | Extract httpd's `If` header and lock evaluation as `httppath.c`, `httpif.c` and `httpframe.c` were extracted | That is where the WebDAV work landed, and where a drill case asserted the wrong thing about `If` scoping |
-| 4 | `tls_resume.c` expiry, `tls_conn.c` alert-versus-FIN | Both changed 2026-08-04, neither host-tested |
+| 0 | The shim, under `tests/bsdsocket/host/shim` | Done. 14 header stubs plus `host_prelude.h` |
+| 1 | `inet.c` | Done. `tests/bsdsocket/host/test_inet_host.c`, 49 checks against the BSD manual page: short forms, octal and hex radix, `inet_aton` against `inet_addr` on broadcast, `inet_pton` strictness |
+| 2 | `cmsg.c`, `errno.c`, `routing.c`, `addrinfo.c` | Not worth the shim's cost. `cmsg.c`'s only host errors are its own ABI assertions; the other three need a share of the 253 constants |
+| 3 | Extract httpd's `If` header and lock evaluation as `httppath.c`, `httpif.c` and `httpframe.c` were extracted | Open. `src/tools`, no shim needed, and where the WebDAV work landed |
+| 4 | `tls_resume.c` expiry, `tls_conn.c` alert-versus-FIN | Open. Both changed 2026-08-04, neither host-tested |
+
+Phases 3 and 4 are in `src/tools` and do not touch the shim, so they are the
+remaining host-test work. Phase 2 belongs to the guest suites: `bsdsocktest`
+and `tests/sockopt` reach the real ABI, which is the property those files turn
+on. `tests/sockopt/host/test_optnum_host.c:14` is the pattern where a host test
+does pay for itself against Amiga numbering, by parsing the tree's headers
+rather than including them.
 
 Not started: the twenty-five commands other than httpd. Their `ReadArgs`
 templates are the testable part and are worth a pass of their own.
