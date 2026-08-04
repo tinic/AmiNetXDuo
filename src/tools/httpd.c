@@ -181,6 +181,18 @@ enum
 #define HTTPD_NSURI_MAX       48
 #define HTTPD_TEXT_MAX        48    /* an element's character data          */
 
+/*
+ * The lock owner is its own size because it is the one piece of client text
+ * this server stores and hands back, and 47 characters did not hold the
+ * "<D:owner><D:href>mailto:...</D:href></D:owner>" that clients actually
+ * send -- the address alone is longer than that.
+ *
+ * The cost is (128 - 48) bytes on each of HTTPD_LOCK_MAX locks and
+ * HTTPD_CONN_MAX connections: about 2.5 KB, taken once, on a machine that may
+ * have a megabyte.
+ */
+#define HTTPD_OWNER_MAX      128
+
 /* How long WaitSelect() may sleep with nothing happening.  It is what makes
    Ctrl-C and the connection timeout noticed, and nothing else depends on it. */
 #define HTTPD_TICK_MICROS  250000
@@ -381,7 +393,7 @@ struct HttpConn
     char    nsdecl[HTTPD_NS_MAX][HTTPD_QNAME_MAX + HTTPD_NSURI_MAX];
     UBYTE   have_date;
     struct DateStamp prop_date;
-    char    owner[HTTPD_TEXT_MAX];
+    char    owner[HTTPD_OWNER_MAX];
 
     /* a tree walk, carried between passes of the loop */
     UBYTE   walk;
@@ -471,7 +483,7 @@ typedef struct HttpLock
 {
     char  path[HTTP_PATH_MAX];      /* the AmigaOS path it covers          */
     char  token[HTTPD_TOKEN_MAX];
-    char  owner[HTTPD_TEXT_MAX];
+    char  owner[HTTPD_OWNER_MAX];
     ULONG expires;                  /* httpd_now() seconds                 */
     ULONG timeout;                  /* what was granted, for the reply     */
     UBYTE depth;                    /* 1 when it covers everything below   */
@@ -2558,7 +2570,12 @@ static VOID httpd_xml_tag(HttpConn *c, BOOL closing, BOOL selfclose)
         if (hs_equal(local, "prop"))
             c->in_prop = 0;
         else if (hs_equal(local, "owner"))
+        {
+            /* The collection stopped where the buffer did, which is not where
+               a character ends. */
+            http_utf8_trim(c->owner);
             c->in_owner = 0;
+        }
         else if (c->in_prop)
             httpd_set_property(c);
     }
@@ -2591,10 +2608,18 @@ static VOID httpd_xml_feed(HttpConn *c, const UBYTE *data, LONG len)
                 {
                     ULONG n = hs_len(c->owner);
 
-                    /* Markup inside <owner> contributes nothing and its text
-                       does, which is what an <owner> holding an <href> needs:
-                       the address, and not the element around it. */
-                    if (n + 1UL < sizeof(c->owner) && ch >= 0x20 && ch < 0x7f)
+                    /*
+                     * Markup inside <owner> contributes nothing and its text
+                     * does, which is what an <owner> holding an <href> needs:
+                     * the address, and not the element around it.
+                     *
+                     * Everything from 0x20 up but DEL, so a UTF-8 owner keeps
+                     * its bytes.  This used to stop at 0x7f, which turned
+                     * every non-English name into the ASCII that was left of
+                     * it -- "Björn" became "Bjrn" -- and the body IS declared
+                     * UTF-8 on the way back out.
+                     */
+                    if (n + 1UL < sizeof(c->owner) && ch >= 0x20 && ch != 0x7f)
                     {
                         c->owner[n]     = (char)ch;
                         c->owner[n + 1] = '\0';
