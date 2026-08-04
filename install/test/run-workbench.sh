@@ -91,6 +91,13 @@ case "$LEVEL" in
     NOVICE|AVERAGE|EXPERT) ;;
     *) echo "unknown user level: $LEVEL" >&2; exit 2 ;;
 esac
+
+# The unpack below runs from inside DH0:Unpacked, so a relative -a would be
+# resolved against the wrong directory and read as a missing archive.
+case "$ARCHIVE" in
+    ""|/*) ;;
+    *)     ARCHIVE="$PWD/$ARCHIVE" ;;
+esac
 case "$BUILD" in /*) ;; *) BUILD="$ROOT/$BUILD" ;; esac
 
 GCC="${AMIGA_GCC:-$HOME/amigaos/tools/m68k-amigaos-gcc/bin/m68k-amigaos-gcc}"
@@ -717,6 +724,24 @@ report "ShowNetStatus"                 network
 report "fetch http://example.com/"     fetch-http
 report "fetch https://...badssl.com/"  fetch-https
 report "arp"                           arp
+
+# The one that shipped.  0.17.0 and 0.17.1 deadlocked in bsd_address_changed()
+# the moment a DHCP lease arrived, so AddNetInterface never returned from its
+# OpenLibrary(), S:User-Startup never finished, and the machine stopped part
+# way through its Startup-Sequence.  BOOT_STATUS 124 is that exact shape: the
+# guest wrote no DH0:.done because it never got to the end of the boot.
+#
+# Said separately from the four above because "the machine did not finish
+# booting" and "a command returned nonzero" are different failures, and the
+# table alone reads as four things that merely did not run.
+if [ "$BOOT_STATUS" = "124" ]; then
+    echo
+    echo "  !! the machine did not finish booting: no DH0:.done after ${BOOT_TIMEOUT}s."
+    echo "     S:User-Startup runs AddNetInterface, which opens bsdsocket.library,"
+    echo "     which brings the stack up and waits for DHCP.  A hang here is that"
+    echo "     path.  CONFIGURE=STATIC in DEVS:NetInterfaces/eth0 tells the lease"
+    echo "     apart from the driver and the library open."
+fi
 
 echo
 if [ "$bad" = "0" ] && [ "$BOOT_STATUS" != "124" ]; then
