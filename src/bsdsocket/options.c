@@ -172,6 +172,26 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
              * break every ported daemon that sets it and does not look at the
              * result. The round-trip is pinned by tests/sockopt.
              */
+            /*
+             * SO_REUSEADDR lets a bind take a port whose only holders are in
+             * TIME-WAIT, which is what a server restarting after its last
+             * client disconnected runs into: the port is unavailable for up
+             * to 2MSL and the program looks broken.
+             *
+             * It cannot displace a live listener or an established
+             * connection -- nx_tcp_socket_reuse_address_set() says so and the
+             * bind enforces it -- which is the BSD rule.
+             *
+             * SO_REUSEPORT is the same flag here.  BSD's REUSEPORT also
+             * allows several live sockets on one port and shares arrivals
+             * between them; NetX Duo demultiplexes to one socket, so that
+             * half has nowhere to go and pretending otherwise would deliver
+             * every connection to whichever socket bound first.
+             *
+             * Set on the NX socket as well as recorded, and only while the
+             * socket is unbound: after bind() the flag has already been read
+             * and the call would silently do nothing.
+             */
             case SO_REUSEADDR:
             case SO_REUSEPORT:
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
@@ -180,6 +200,16 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                     sock->as_Flags |= ASF_REUSEADDR;
                 else
                     sock->as_Flags &= ~ASF_REUSEADDR;
+
+                if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) == ASF_TCP)
+                {
+                    if (bsd_nx_enter(SocketBase) != 0)
+                        return bsd_fail(SocketBase, AMI_ENETDOWN);
+                    (VOID)nx_tcp_socket_reuse_address_set(&sock->as_Nx.tcp,
+                                                          (value != 0) ? NX_TRUE
+                                                                       : NX_FALSE);
+                    bsd_nx_leave(SocketBase);
+                }
                 return 0;
 
             /*
