@@ -229,12 +229,17 @@ struct in6_pktinfo
  * datagram was addressed to; ipi_addr is the header's destination, which for
  * a broadcast or multicast datagram is not the same thing.
  */
+#ifndef AMINETXDUO_HAVE_IN_PKTINFO
+#define AMINETXDUO_HAVE_IN_PKTINFO
+
 struct in_pktinfo
 {
     ULONG           ipi_ifindex;
     struct in_addr  ipi_spec_dst;
     struct in_addr  ipi_addr;
 };
+
+#endif
 
 /*
  * RFC 3542 section 3.2.  Opaque to a caller: allocate one, hand it to
