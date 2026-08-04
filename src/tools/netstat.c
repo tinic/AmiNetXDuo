@@ -171,7 +171,7 @@ static VOID show_memory(const ToolStats *st)
  * late; lost ones never reach it.
  *
  * Memory first, then the scheduler.  The one function both routes print
- * through -- -h off the published mark and -s -h through the library, so the
+ * through, -h off the published mark and -s -h through the library, so the
  * two cannot disagree about what they found.
  */
 static VOID show_health(const ToolStats *st)

@@ -1,5 +1,5 @@
 /*
- * installdrive -- run Commodore's Installer on the AmiNetXDuo script under
+ * installdrive, run Commodore's Installer on the AmiNetXDuo script under
  * FS-UAE, without a human at the mouse.
  *
  * The Installer has no batch mode.  Every page it puts up waits for a click
@@ -14,7 +14,7 @@
  * and its event loop reads plain IntuiMessages off window->UserPort and
  * dispatches on Class and IAddress.  So this program walks Intuition's
  * window list looking for a window that has both of those gadgets, and posts
- * that window a GADGETUP naming the Proceed one -- the same message
+ * that window a GADGETUP naming the Proceed one, the same message
  * Intuition would have sent had the user clicked it.  No geometry and no
  * guessing where a button landed, so it works whatever font or screen size
  * the emulated machine came up with.
@@ -49,7 +49,7 @@
 
 /*
  * Gadget IDs, from the Installer's own window.h and the GadgetDef tables in
- * window.c.  Most pages carry a Proceed button with ID 90 -- but not all:
+ * window.c.  Most pages carry a Proceed button with ID 90, but not all:
  * yesno_page() (which is what askbool draws) has no Proceed at all.  Its two
  * answer buttons are IDs 2 and 1, in that order, and yesno_page returns
  * "gadget id minus one", so ID 2 is the FIRST of the two (choices) strings.
@@ -76,7 +76,7 @@
 
 /*
  * Set at compile time so that the same program can drive a novice, average
- * or expert run -- the harness starts it with no arguments.
+ * or expert run, the harness starts it with no arguments.
  */
 #ifndef DRIVE_LEVEL
 #define DRIVE_LEVEL     "NOVICE"
@@ -216,7 +216,7 @@ static struct Window *find_installer_window(struct Gadget **click_out)
 /*
  * Say which page we are looking at.  The Installer's buttons are
  * struct Button { struct Gadget Gadget; char *Text; ... } (window.h), so the
- * label is one pointer past the end of the Gadget -- which makes it possible
+ * label is one pointer past the end of the Gadget, which makes it possible
  * to log what a page actually offers rather than guessing from the order
  * things happen in.
  */
@@ -257,7 +257,7 @@ static VOID drain_replies(VOID)
 /*
  * Post the message Intuition would have posted had the user let go of the
  * mouse over the gadget.  The Installer replies to it, so the memory comes
- * back here and is freed rather than leaked -- and getting it back is also
+ * back here and is freed rather than leaked, and getting it back is also
  * the proof that the Installer really consumed it.
  */
 static BOOL click(struct Window *window, struct Gadget *gadget)
@@ -313,7 +313,7 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
 
     /*
      * SYS_Asynch hands the file handles to the new process, which closes
-     * them -- which is why they are not this program's own.  The output one
+     * them, which is why they are not this program's own.  The output one
      * is a file rather than NIL: so that anything the Installer complains
      * about on the way up is readable from the host afterwards.
      *
@@ -439,7 +439,7 @@ int main(void)
 
     /*
      * The Installer draws on the default public screen, which is the
-     * Workbench screen -- and on a machine booted to a bare Shell there is
+     * Workbench screen, and on a machine booted to a bare Shell there is
      * not one.  LockPubScreen(NULL) is documented to open it, but relying on
      * that in theory is not the same as having seen it work, so ask for it
      * up front and say so if it does not arrive.

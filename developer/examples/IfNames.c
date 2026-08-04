@@ -1,5 +1,5 @@
 /*
- * IfNames -- list the interfaces by RFC 3493 index, and check the round trip.
+ * IfNames, list the interfaces by RFC 3493 index, and check the round trip.
  *
  * This is the Developer drawer's demonstration and its test at once.  It is
  * compiled against the STAGED DRAWER ALONE: the build stages Developer/ into

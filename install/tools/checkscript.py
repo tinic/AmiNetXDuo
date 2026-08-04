@@ -46,7 +46,7 @@ MAX_STRING = 512
 # characters or less ("Ariadne II", "X-Surf 100") and lays out; it did not
 # when the same page used names like "Commodore A2065" and "Not in this
 # list".  Both numbers are about ROOM, and the count alone was never the
-# whole story -- which is why the length limit below matters more than this
+# whole story, which is why the length limit below matters more than this
 # one.  Raised only after install/test/run-installer-fsuae.sh -l AVERAGE
 # drove the page under Installer 2.17 and completed; if a future page dies on
 # "askchoice: No choices selected", it has too many or they are too wide, and

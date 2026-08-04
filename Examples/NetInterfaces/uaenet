@@ -1,0 +1,25 @@
+;
+; DEVS:NetInterfaces/eth0 -- uaenet, the UAE host-bridge SANA-II driver
+;
+; Copy this into DEVS:NetInterfaces and call the copy "eth0", then
+; either reboot or type
+;
+;     C:AddNetInterface DEVS:NetInterfaces/eth0
+;
+; The file name is the interface name; there is no NAME= keyword.
+; See the file "eth0" in this drawer for every keyword there is.
+;
+; Only useful under an emulator.  a2065.device with FS-UAE's SLIRP
+; networking is the better tested path -- see the "a2065" example.
+;
+
+DEVICE=uaenet.device
+UNIT=0
+
+; Ask the network for an address.  Change to STATIC and fill in
+; ADDRESS/NETMASK below if nothing on your network hands out
+; addresses -- and see "eth0-static" for a worked example.
+CONFIGURE=DHCP
+
+;ADDRESS=192.168.1.10
+;NETMASK=255.255.255.0

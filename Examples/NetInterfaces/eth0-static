@@ -1,0 +1,44 @@
+;
+; DEVS:NetInterfaces/eth0 -- a fixed address, worked through
+;
+; Use this shape when nothing on the network hands out addresses, or when
+; somebody has given you an address to use and told you not to change it.
+;
+; Copy this into DEVS:NetInterfaces as "eth0", change the four numbers, and
+; look at "routes" and "name_resolution" in the Internet drawer next door --
+; with a fixed address you have to supply the router and the name server
+; yourself, because there is no DHCP lease to carry them.
+;
+
+DEVICE=a2065.device
+UNIT=0
+
+CONFIGURE=STATIC
+
+; ADDRESS -- this machine.  It must not be in use by anything else, and it
+; must be on the same network as the router.  The three "private" ranges,
+; which is what a home network uses, are
+;
+;     10.x.x.x            192.168.x.x            172.16.x.x - 172.31.x.x
+;
+; If your router is 192.168.1.1 then 192.168.1.<something> is the answer, and
+; something between 2 and 254 that no other machine already has.
+;
+ADDRESS=192.168.1.10
+
+; NETMASK -- which part of the address is the network.  255.255.255.0 says
+; "the first three numbers are the network, the last one is the machine",
+; which is right for essentially every home network.
+;
+NETMASK=255.255.255.0
+
+; The router does NOT go here.  It goes in DEVS:Internet/routes, as
+;
+;     DEFAULT=192.168.1.1
+;
+; and the name server goes in DEVS:Internet/name_resolution, as
+;
+;     nameserver 192.168.1.1
+;
+; A GATEWAY= line here is accepted as a fallback, but the routes file is
+; where the default route belongs.

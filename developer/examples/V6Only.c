@@ -1,5 +1,5 @@
 /*
- * V6Only -- the AF_INET6 names the NDK does not define, used.
+ * V6Only, the AF_INET6 names the NDK does not define, used.
  *
  * Makes an IPv6 socket, reads and sets IPV6_V6ONLY, prints the address it is
  * bound to, and classifies it.  None of IPPROTO_IPV6, IPV6_V6ONLY,
@@ -50,8 +50,8 @@ int main(void)
     }
 
     /*
-     * Whether this build has IPv6 is not a revision question -- nothing was
-     * added to the vector table for it -- so the socket call is the test.
+     * Whether this build has IPv6 is not a revision question, nothing was
+     * added to the vector table for it, so the socket call is the test.
      */
     sock = socket(PF_INET6, SOCK_DGRAM, 0);
     if (sock < 0) {

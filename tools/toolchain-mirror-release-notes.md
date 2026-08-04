@@ -32,7 +32,7 @@ falls back to the upstream registry if this release is unreachable.
 ## Why it exists
 
 CI needs one specific m68k cross compiler and there is no upstream tarball of
-it — it is published only inside a Docker image. Fetching it meant depending on
+it, it is published only inside a Docker image. Fetching it meant depending on
 a third-party registry continuing to serve one particular blob digest forever.
 This mirror is a copy we control; the registry remains the fallback, not the
 only path.
@@ -90,8 +90,8 @@ upstream AmigaPorts tree that produced the image above:
 | newlib | https://github.com/AmigaPorts/newlib-cygwin | `amiga` | `4c8cbd88df31` (2025-11-01) |
 | build driver | https://github.com/AmigaPorts/m68k-amigaos-gcc | `gcc10` | see `default-repos` for every other component |
 
-The full component list — libnix, clib2, ixemul, fd2sfd, fd2pragma, sfdc, vasm,
-vbcc, vlink, ira, lha, libdebug, aros-stuff, amiga-netinclude — with each
+The full component list, libnix, clib2, ixemul, fd2sfd, fd2pragma, sfdc, vasm,
+vbcc, vlink, ira, lha, libdebug, aros-stuff, amiga-netinclude, with each
 repository URL and branch, is the `default-repos` file on the `gcc10` branch of
 `AmigaPorts/m68k-amigaos-gcc`. `make` in that repository clones those
 repositories and reproduces this toolchain.

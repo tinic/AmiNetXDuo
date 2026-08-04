@@ -508,7 +508,7 @@ note "stages: ${STAGES_RUN[*]}"
 
 case " ${STAGES_RUN[*]} " in
     *" analyze "*) ;;
-    *) note "analyze NOT RUN -- AMINETXDUO_ANALYZE=1 tools/ci.sh analyze" ;;
+    *) note "analyze NOT RUN, AMINETXDUO_ANALYZE=1 tools/ci.sh analyze" ;;
 esac
 if [ ${#FAILED[@]} -eq 0 ]; then
     printf '\033[32mall green\033[0m\n'

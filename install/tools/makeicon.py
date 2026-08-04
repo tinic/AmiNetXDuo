@@ -201,7 +201,7 @@ def text_s(canvas, x, y, s, colour):
 
 
 # Three nodes and the links between them.  A plug or a cable end is not
-# legible at this size -- it comes out as a grey smudge -- but dots joined by
+# legible at this size, it comes out as a grey smudge, but dots joined by
 # lines reads as "network" even at eight pixels tall.
 NET = [
     "WW     WW",

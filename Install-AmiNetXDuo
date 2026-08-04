@@ -1,0 +1,1140 @@
+; ==========================================================================
+;
+;  AmiNetXDuo -- Commodore Installer script
+;
+;  Installs the AmiNetXDuo TCP/IP stack: bsdsocket.library and
+;  usergroup.library into LIBS:, the seven Roadshow-compatible commands into
+;  C:, and a working DEVS:NetInterfaces / DEVS:Internet configuration written
+;  from the answers the user gives here.
+;
+;  Language reference: "Documentation for 2.16 Installer" (Commodore, 9 Feb
+;  1993) plus the Installer 2.17 sources -- compile.c's symbol tables are the
+;  authority for which keywords and parameters exist, and which statements
+;  each parameter is legal in.
+;
+;  Two properties of the Installer shape everything below:
+;
+;    * At NOVICE level every ask... function returns its (default) WITHOUT
+;      showing anything, and (message ...) prints nothing.  So novice mode
+;      only works if every default is independently correct -- which is why
+;      the card is auto-detected from DEVS: and the address mode defaults to
+;      DHCP.  It is also why no validation loop may depend on a (message):
+;      each one is unconditionally satisfied at user level 0, or it would
+;      spin forever with no window on screen.
+;
+;    * (startup) replaces the ";BEGIN AmiNetXDuo" .. ";END AmiNetXDuo" block
+;      in S:User-Startup and leaves every other application's lines alone.
+;      That is what makes re-running this script safe.
+;
+;  SPDX-License-Identifier: MIT
+;
+; ==========================================================================
+
+(set APPNAME     "AmiNetXDuo")
+
+; dist/make-dist.sh rewrites this line as it copies the script into the
+; archive, from tools/version.sh -- so what the installer tells the user and
+; what the .lha is called cannot disagree.  The value here is only what you
+; see running the script straight out of the source tree.
+(set VERSION_STR "0.16.0")
+
+; --------------------------------------------------------------------------
+; Where we are reading from.
+;
+; @icon is the full path of the icon the user double-clicked, so its
+; directory is the archive root.  Started from the Shell @icon is empty and
+; the relative names below resolve against the current directory, which is
+; the same drawer in practice.
+; --------------------------------------------------------------------------
+
+(set SRCDIR (pathonly @icon))
+
+(set S_LIBS  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Libs")     "Libs"))
+(set S_C     (if (> (strlen SRCDIR) 0) (tackon SRCDIR "C")        "C"))
+(set S_DEVS  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Devs")     "Devs"))
+(set S_DOCS  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Docs")     "Docs"))
+(set S_EXAM  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Examples") "Examples"))
+
+; --------------------------------------------------------------------------
+; Help texts.  Every ask.../copy... statement is required by the Installer to
+; carry both a (prompt) and a (help); a missing one is a script error at the
+; moment the statement runs, not at compile time, so they are all spelled out.
+; --------------------------------------------------------------------------
+
+(set H_CARD
+  (cat "AmiNetXDuo reaches the network card through its SANA-II driver, "
+       "which is a file whose name ends in \".device\".\n\n"
+       "The choices, in full, and the driver each one needs:\n\n"
+       "  A2065        a2065.device\n"
+       "  Ariadne      ariadne.device\n"
+       "  Ariadne II   ariadne2.device\n"
+       "  AmigaNet     amiganet.device\n"
+       "  X-Surf       xsurf.device\n"
+       "  X-Surf 100   xsurf100.device\n"
+       "  PCMCIA       asked next\n"
+       "  UAE          uaenet.device\n\n"
+       "UAE's driver is in the emulator rather than on disk, so it is not "
+       "detected like the others and must be selected explicitly.\n\n"
+       "Select the card this machine has.  If a driver was found in "
+       "DEVS: the matching entry is already selected, and that is almost "
+       "always correct.\n\n"
+       "A card that is not listed goes under the last entry, where the "
+       "driver's file name is typed in -- for example \"myCard.device\".  "
+       "The driver comes with the card; this installer does not supply it."
+       "\n\nThe wrong choice is harmless: nothing is damaged, the network "
+       "does not come up, and the installer can be run again."))
+
+(set H_PCMCIA
+  (cat "PCMCIA (credit-card sized) network cards for the A600 and A1200 use "
+       "several different drivers.\n\n"
+       "  NE2000 or CNet    cnet.device\n"
+       "  3Com 3C589        etherlink3.device\n"
+       "  Prism2 wireless   prism2.device\n\n"
+       "Most NE2000-compatible Ethernet cards -- which is most of the cheap "
+       "ones -- use cnet.device.  3Com's EtherLink III / 3C589 has its own "
+       "driver.  Prism2 is the usual driver for wireless cards.\n\n"
+       "When in doubt, cnet.device is the one to try first."))
+
+(set H_OTHERDEV
+  (cat "Type the file name of the card's SANA-II driver, including the "
+       "\".device\" part -- for example \"ariadne.device\".\n\n"
+       "The installer looks for it in DEVS: and in DEVS:Networks.  If it is "
+       "somewhere else, type the whole path, for example "
+       "\"Work:drivers/mycard.device\"."))
+
+(set H_UNIT
+  (cat "A driver can drive more than one card.  The unit number says which "
+       "one.\n\n"
+       "With a single network card, which is the usual case, this stays "
+       "at 0."))
+
+(set H_IFNAME
+  (cat "Each network interface is described by one file in "
+       "DEVS:NetInterfaces, and the file's name is the interface's name.  It "
+       "is the name the network commands take, as in\n\n"
+       "\tOnline eth0\n\tShowNetStatus INTERFACE eth0\n\n"
+       "\"eth0\" is a good name and is what the documentation uses.  The name "
+       "may be at most 15 characters long."))
+
+(set H_DHCP
+  (cat "Almost every home network has a router that hands out addresses "
+       "automatically, using DHCP.  Where other machines on the network "
+       "simply work when plugged in, it does.  The first option then needs "
+       "no numbers entered at all.\n\n"
+       "The second option is for a fixed address supplied by whoever runs "
+       "the network, or for a network with no router.\n\n"
+       "This choice is easy to change later: it is one line, CONFIGURE=, in "
+       "the file DEVS:NetInterfaces that this installer writes."))
+
+(set H_ADDR
+  (cat "The Internet address for this Amiga, written as four numbers from 0 "
+       "to 255 separated by full stops -- for example 192.168.1.10.\n\n"
+       "It must be unused by anything else on the network, and on the same "
+       "network as the router.  With a router at 192.168.1.1, that means "
+       "192.168.1.something.\n\n"
+       "An address already in use leaves both machines misbehaving until one "
+       "of them is changed."))
+
+(set H_MASK
+  (cat "The netmask says which part of the address is the network and which "
+       "part is this machine.\n\n"
+       "255.255.255.0 is right for essentially every home and small office "
+       "network, and stays as it is unless the network requires "
+       "otherwise."))
+
+(set H_GW
+  (cat "The gateway -- the router -- is the machine that forwards traffic "
+       "to the rest of the world.  Anything not on the local network is "
+       "handed to it.\n\n"
+       "It is usually the address ending in .1 or .254.\n\n"
+       "Without a correct gateway the Amiga can still talk to other machines "
+       "in the same house, but nothing beyond them.\n\n"
+       "This is written to DEVS:Internet/routes as DEFAULT=."))
+
+(set H_DNS
+  (cat "A name server turns names like \"aminet.net\" into addresses.  On a "
+       "home network this is nearly always the router itself, so the address "
+       "offered here is usually correct.\n\n"
+       "A public server also works: 9.9.9.9 and 1.1.1.1 both do.\n\n"
+       "Without a name server, addresses typed as numbers still work but "
+       "names do not.\n\n"
+       "This is written to DEVS:Internet/name_resolution."))
+
+(set H_HOSTNAME
+  (cat "The name this Amiga calls itself.  It is what programs report as the "
+       "local host name, and what appears in some log messages.\n\n"
+       "Letters, digits and hyphens; no spaces.  \"amiga\" is a perfectly "
+       "good answer."))
+
+(set H_KEEPOLD
+  (cat "This machine already has an AmiNetXDuo or Roadshow style network "
+       "configuration in DEVS:NetInterfaces.\n\n"
+       "Answer \"Keep them\" to update the software and leave the existing "
+       "settings alone -- the usual choice when installing a newer "
+       "version.\n\n"
+       "Answer \"Set them up again\" to be asked all the network questions "
+       "afresh.  That rewrites the interface file, DEVS:Internet/routes and "
+       "DEVS:Internet/name_resolution, and any hand-made changes in them are "
+       "lost."))
+
+(set H_STARTUP
+  (cat "S:User-Startup is the file the Amiga runs every time it boots.  "
+       "Adding the line\n\n\tC:AddNetInterface DEVS:NetInterfaces/"
+       "<interface> QUIET\n\nto it makes the network come up by itself.\n\n"
+       "Answering no leaves the network not starting on its own; it would "
+       "type that command yourself, or just run any networking program, "
+       "because bsdsocket.library starts the stack the first time a program "
+       "opens it.\n\n"
+       "Only AmiNetXDuo's own lines are touched.  Everything else in "
+       "S:User-Startup is left alone, so it is safe to run this installer "
+       "again."))
+
+(set H_REPLACELIB
+  (cat "There is already a bsdsocket.library on this machine.  It belongs to "
+       "whichever TCP/IP stack was installed before -- AmiTCP, Miami, "
+       "Roadshow, or an earlier AmiNetXDuo.\n\n"
+       "Two stacks cannot share the machine: there is one LIBS:bsdsocket."
+       "library and whoever owns it owns the network.\n\n"
+       "Answering yes renames the old file to bsdsocket.library.old rather "
+       "than deleting it, so it can be put back by hand later if the "
+       "mind.  Answering no leaves the other stack in place and installs "
+       "nothing but the commands -- which will then not work."))
+
+; --------------------------------------------------------------------------
+; Format strings.
+;
+; ("fmt" arg ...) takes the FIRST element as the format and everything after
+; it as an argument -- adjacent string literals are NOT concatenated the way
+; they are in C.  A format spelled as several literals therefore formats the
+; second literal's address through the first one's %s and throws the rest
+; away.  So any format that will not fit on one line is assembled with cat
+; and used through a variable, which the language allows in exactly the same
+; position.
+; --------------------------------------------------------------------------
+
+(set F_KEEPOLD
+  (cat "This machine already has a network interface called \"%s\".\n\n"
+       "Keep those settings, or set the network up again from scratch?"))
+
+(set F_NODEV
+  (cat "The installer cannot find \"%s\" in DEVS: or in DEVS:Networks.\n\n"
+       "The configuration will be written anyway, but the network will not "
+       "come up until that driver is in place.  It comes with the card, "
+       "usually on a floppy or in the card's own archive; copy it into DEVS: "
+       "and the network will work from the next reboot."))
+
+(set F_BADIP
+  (cat "\"%s\" is not an Internet address.\n\n"
+       "An address is four numbers, each from 0 to 255, separated by full "
+       "stops -- like 192.168.1.10.  Please try again."))
+
+(set F_OLDLIB
+  (cat "LIBS:bsdsocket.library already exists (version %ld).\n\n"
+       "AmiNetXDuo has to replace it.  The old one will be renamed to "
+       "bsdsocket.library.old, not deleted."))
+
+; The final page does not scroll: anything past the bottom of the requester is
+; simply lost, so it is kept short enough to fit rather than complete.  The
+; command list and the troubleshooting notes that used to be here are in the
+; guide, which is where someone will look for them a second time anyway.
+
+(set F_START_YES
+  (cat "It starts by itself at the next reboot.  To start it now:\n\n"
+       "    C:AddNetInterface DEVS:NetInterfaces/%s\n"))
+
+(set F_START_NO
+  (cat "It will not start by itself.  To start it:\n\n"
+       "    C:AddNetInterface DEVS:NetInterfaces/%s\n"))
+
+(set H_DOCDIR
+  (cat "The documentation, the example configuration files and the "
+       "installation log go into a drawer called AmiNetXDuo.\n\n"
+       "Choose where that drawer should be created.  Nothing here is needed "
+       "for the network to work -- the parts that matter go to LIBS:, C: and "
+       "DEVS: -- so any drawer will do."))
+
+; ==========================================================================
+;  Small helpers
+; ==========================================================================
+
+; --- one digit ------------------------------------------------------------
+;
+; AmigaDOS pattern alternation.  (patmatch <pattern> <string>) is case
+; insensitive, which does not matter for digits, and returns FALSE for an
+; empty string, which is why nothing below ever tests one.
+
+(set P_DIGIT "(0|1|2|3|4|5|6|7|8|9)")
+
+; --- P_ip_store -----------------------------------------------------------
+;
+; Installer procedures take no arguments and return no value; everything goes
+; through globals.  Stores ip_val into the ip_field'th octet.
+
+(procedure P_ip_store
+  (if (= ip_field 1) (set ip_o1 ip_val)
+    (if (= ip_field 2) (set ip_o2 ip_val)
+      (if (= ip_field 3) (set ip_o3 ip_val)
+        (if (= ip_field 4) (set ip_o4 ip_val)))))
+)
+
+; --- P_ip_parse -----------------------------------------------------------
+;
+;   in  : ip_in                 a string
+;   out : ip_ok                 1 if it is a dotted quad, else 0
+;         ip_o1 .. ip_o4        its four octets, when ip_ok
+;
+; Written character by character rather than with one big pattern so that the
+; octets fall out of the same pass and so that 999.1.1.1 is rejected: a
+; pattern can check the shape but not the range.
+
+(procedure P_ip_parse
+  (set ip_len    (strlen ip_in))
+  (set ip_i      0)
+  (set ip_field  1)
+  (set ip_val    0)
+  (set ip_digits 0)
+  (set ip_o1 0) (set ip_o2 0) (set ip_o3 0) (set ip_o4 0)
+  (set ip_ok (if (> ip_len 0) 1 0))
+
+  (while (< ip_i ip_len)
+    (set ip_c (substr ip_in ip_i 1))
+    (if (patmatch "." ip_c)
+        (
+          (if (= ip_digits 0)   (set ip_ok 0))
+          (if (> ip_val 255)    (set ip_ok 0))
+          (P_ip_store)
+          (set ip_field  (+ ip_field 1))
+          (set ip_val    0)
+          (set ip_digits 0)
+        )
+        (if (patmatch P_DIGIT ip_c)
+            (
+              (set ip_val    (+ (* ip_val 10) (+ ip_c 0)))
+              (set ip_digits (+ ip_digits 1))
+              (if (> ip_digits 3) (set ip_ok 0))
+            )
+            (set ip_ok 0)))
+    (set ip_i (+ ip_i 1)))
+
+  (if (= ip_digits 0) (set ip_ok 0))
+  (if (> ip_val 255)  (set ip_ok 0))
+  (P_ip_store)
+  (if (<> ip_field 4) (set ip_ok 0))
+)
+
+; --- P_ask_ip -------------------------------------------------------------
+;
+;   in  : ask_prompt ask_help ask_default
+;   out : ask_result            a valid dotted quad
+;
+; The (= @user-level 0) term is load bearing.  At novice level askstring
+; returns the default without drawing anything and message prints nothing, so
+; without it a novice-mode run with a bad default would loop forever behind a
+; blank screen.  Every default this script supplies is valid, so accepting it
+; unconditionally at level 0 costs nothing.
+
+(procedure P_ask_ip
+  (set ask_ok 0)
+  (until ask_ok
+    (set ask_result (askstring (prompt ask_prompt)
+                               (help   ask_help)
+                               (default ask_default)))
+    (set ip_in ask_result)
+    (P_ip_parse)
+    (set ask_ok (if (= @user-level 0) 1 ip_ok))
+    (if (= ask_ok 0)
+        (message (F_BADIP ask_result)
+                 (help ask_help))))
+)
+
+; --- P_dev_path -----------------------------------------------------------
+;
+;   in  : dev_name              e.g. "ariadne.device"
+;   out : dev_write             what to put in the DEVICE= line
+;         dev_present           1 if the driver was found, else 0
+;
+; Drivers live either straight in DEVS: (Commodore's habit) or in
+; DEVS:Networks (AmiTCP's, and what most modern cards ship with).  exec's
+; OpenDevice takes either a bare name, which it looks up in DEVS:, or a full
+; path, so writing the path when the driver is in DEVS:Networks is both
+; correct and unambiguous.
+
+(procedure P_dev_path
+  (set dev_write   dev_name)
+  (set dev_present 0)
+  (if (exists (cat "DEVS:" dev_name) (noreq))
+      (set dev_present 1)
+      (if (exists (cat "DEVS:Networks/" dev_name) (noreq))
+          (
+            (set dev_write   (cat "DEVS:Networks/" dev_name))
+            (set dev_present 1)
+          )))
+)
+
+; ==========================================================================
+;  1.  Is this machine capable of running it at all?
+; ==========================================================================
+
+(set OSVER (/ (getversion) 65536))
+
+(if (< OSVER 37)
+    (abort "AmiNetXDuo needs AmigaOS 2.04 (Kickstart 37) or newer.\n\n"
+           "This machine is running Kickstart " OSVER ".\n\n"
+           "Nothing has been changed."))
+
+; --- which library this machine can run ----------------------------------
+;
+; The archive carries three builds of bsdsocket.library in Libs/68000,
+; Libs/68020-40 and Libs/68060, and this is where one of them is chosen.  It
+; used to be where the installer gave up on anything below a 68020.
+;
+;   68000, 68010   the 68000 build.  A 68010 is a 68000 plus supervisor
+;                  instructions nothing here uses.
+;   68020..68040   the 68020-40 build.  A 68040 runs every 68020 instruction,
+;                  so this build is complete for it, which is why there is no
+;                  fourth drawer.
+;   68060          its own build: the 68060 dropped the 64-bit-result MULU.L
+;                  and DIVU.L, and the 68020-40 build uses both.  That build
+;                  WOULD run here -- 68060.library emulates them -- but at an
+;                  exception per multiply, which is the whole reason not to.
+;
+; The fallback is the 68020-40 build rather than an abort, because
+; `database "cpu"` on an older Installer does not know every processor and
+; guessing low is the answer that runs everywhere above a 68020.  A 68060
+; reported as something else therefore gets a library that works and is
+; slower, never one that does not load.
+(set CPU (database "cpu"))
+
+(set CPUDIR "68020-40")
+
+(if (patmatch "(68000|68010)" CPU) (set CPUDIR "68000"))
+(if (patmatch "68060"         CPU) (set CPUDIR "68060"))
+
+(set S_LIBS (tackon S_LIBS CPUDIR))
+
+; A 68000 GETS NO ENCRYPTION, AND HAS TO BE TOLD SO -- ON THE LAST PAGE.
+;
+; tls.library is built for 68020 and above only: on a 7 MHz 68000 the
+; public-key arithmetic takes longer than the far end will wait, so the archive
+; carries no 68000 build of it.  The check below only ever looked for
+; bsdsocket.library, so such a machine installed cleanly, said nothing, and
+; then answered `fetch https://...` with "needs LIBS:tls.library, and there is
+; none" -- which reads as a broken download rather than as a decision.
+;
+; NOT a (message): at NOVICE level -- the default, and an A500 or A600 owner is
+; exactly who has a 68000 -- (message) prints NOTHING, so the people who most
+; need this would never see it.  See the header of this file.  The final page
+; is shown at every level, so the fact is recorded here and said there.
+
+(if (NOT (exists (tackon S_LIBS "bsdsocket.library") (noreq)))
+    (abort "This archive has no library for a " CPU ".\n\n"
+           "It should contain Libs/" CPUDIR ", and that drawer is missing or "
+           "empty.  The download is incomplete or was unpacked with a tool "
+           "that dropped the subdrawers.\n\n"
+           "Nothing has been changed."))
+
+; ==========================================================================
+;  2.  What is already here?
+; ==========================================================================
+
+; --- an existing interface configuration ---------------------------------
+
+(set OLD_IF "")
+
+(if (= (exists "DEVS:NetInterfaces" (noreq)) 2)
+    (foreach "DEVS:NetInterfaces" "~(#?.info)"
+      (if (= (strlen OLD_IF) 0)
+          (if (< @each-type 0)
+              (set OLD_IF @each-name)))))
+
+(set HAVE_OLD (if (> (strlen OLD_IF) 0) 1 0))
+
+; --- an existing bsdsocket.library ---------------------------------------
+
+(set OLD_BSD (if (exists "LIBS:bsdsocket.library" (noreq)) 1 0))
+(set OLD_UG  (if (exists "LIBS:usergroup.library"  (noreq)) 1 0))
+(set OLD_TLS (if (exists "LIBS:tls.library"        (noreq)) 1 0))
+
+(set OLD_BSD_VER 0)
+(if OLD_BSD (set OLD_BSD_VER (/ (getversion "LIBS:bsdsocket.library") 65536)))
+
+; --- which driver is on this machine already? ----------------------------
+;
+; This is what makes NOVICE mode work: with no questions asked, the card is
+; whichever known driver is actually installed.  The list is in the same
+; order as the menu below, so its index is the menu's default.
+
+(set DET_INDEX -1)
+(set DET_N     0)
+
+(while (set DET_TRY (select DET_N
+          "a2065.device"
+          "ariadne.device"
+          "ariadne2.device"
+          "amiganet.device"
+          "xsurf.device"
+          "xsurf100.device"
+          "cnet.device"
+          "uaenet.device"
+          ""))
+  (
+    (if (< DET_INDEX 0)
+        (if (OR (exists (cat "DEVS:" DET_TRY) (noreq))
+                (exists (cat "DEVS:Networks/" DET_TRY) (noreq)))
+            (set DET_INDEX DET_N)))
+    (set DET_N (+ DET_N 1))
+  ))
+
+(set CARD_DEFAULT (if (>= DET_INDEX 0) DET_INDEX 0))
+
+; A novice run makes no decisions of its own, so if there is nothing to
+; detect and no existing configuration to keep, there is no honest default to
+; fall back on.  Say so instead of writing a guess.
+
+(if (AND (= @user-level 0) (AND (< DET_INDEX 0) (= HAVE_OLD 0)))
+    (abort "The installer could not find a network card driver in DEVS: or "
+           "DEVS:Networks, and in Novice mode it cannot ask which card is "
+           "installed.\n\n"
+           "Either copy the card's .device driver into DEVS: first, or "
+           "start this installer again and choose \"Intermediate User\" so "
+           "so that the card can be picked from a list.\n\n"
+           "Nothing has been changed."))
+
+; ==========================================================================
+;  3.  Welcome
+; ==========================================================================
+
+(welcome
+  "AmiNetXDuo " VERSION_STR " -- a TCP/IP stack for AmigaOS.\n\n")
+
+(complete 0)
+
+; ==========================================================================
+;  4.  Questions.  All of them, before anything is written.
+; ==========================================================================
+
+; --- where the drawer of documentation goes ------------------------------
+
+(set DOCPARENT
+  (askdir
+    (prompt "Where should the \"AmiNetXDuo\" drawer go?\n\n"
+            "It holds the documentation and the examples.")
+    (help H_DOCDIR)
+    (default @default-dest)))
+
+(set DOCDIR (tackon DOCPARENT "AmiNetXDuo"))
+
+; --- keep or replace an existing configuration ---------------------------
+
+(set KEEP_OLD 0)
+
+(if HAVE_OLD
+    (set KEEP_OLD
+      (askbool
+        (prompt (F_KEEPOLD OLD_IF))
+        (help H_KEEPOLD)
+        (choices "Keep them" "Set them up again")
+        (default 1))))
+
+; --- the card ------------------------------------------------------------
+
+(set IFNAME  "eth0")
+(set DEVUNIT 0)
+(set USEDHCP 1)
+
+(if (= KEEP_OLD 0)
+  (
+    (set CARD
+      (askchoice
+        (prompt "Which network card does this Amiga have?")
+        (help   H_CARD)
+        ; Short labels are not a style choice.  The Installer lays a radio
+        ; page out into whatever room is left after the prompt and the
+        ; buttons, and when the choices do not fit it silently creates
+        ; fewer gadgets than there are choices -- after which
+        ; default_radio() marks a gadget that is not there, final_radio()
+        ; finds nothing selected, and the whole installation dies on
+        ; "askchoice: No choices selected".  Two columns of four fit; the
+        ; full product names do not.  Keep every label under about 20
+        ; characters and put the detail in the help text.
+        (choices
+          "A2065"
+          "Ariadne"
+          "Ariadne II"
+          "AmigaNet"
+          "X-Surf"
+          "X-Surf 100"
+          "PCMCIA"
+          "UAE"
+          "Other")
+        (default CARD_DEFAULT)))
+
+    (set DEV_NAME
+      (select CARD
+        "a2065.device"
+        "ariadne.device"
+        "ariadne2.device"
+        "amiganet.device"
+        "xsurf.device"
+        "xsurf100.device"
+        "cnet.device"
+        "uaenet.device"
+        ""))
+
+    ; PCMCIA: one more question, because the slot takes several kinds of card
+    (if (= CARD 6)
+      (
+        (set PCM
+          (askchoice
+            (prompt "Which PCMCIA card is it?")
+            (help   H_PCMCIA)
+            (choices
+              "NE2000 or CNet"
+              "3Com 3C589"
+              "Prism2 wireless"
+              "Something else")
+            (default 0)))
+
+        (set DEV_NAME
+          (select PCM
+            "cnet.device"
+            "etherlink3.device"
+            "prism2.device"
+            ""))
+      ))
+
+    ; "not in this list", or "something else" above: ask for the name
+    (if (= (strlen DEV_NAME) 0)
+      (
+        (set DEV_OK 0)
+        (until DEV_OK
+          (set DEV_NAME (askstring
+            (prompt "Type the file name of the card's driver, ending "
+                    "in \".device\".")
+            (help   H_OTHERDEV)
+            (default "mycard.device")))
+          (set DEV_OK (if (= @user-level 0) 1
+                        (if (> (strlen DEV_NAME) 0) 1 0))))
+      ))
+
+    (set dev_name DEV_NAME)
+    (P_dev_path)
+    (set DEV_WRITE dev_write)
+
+    (if (= dev_present 0)
+        (message (F_NODEV DEV_NAME)
+                 (help H_CARD)))
+
+    ; --- unit and interface name: only an expert is asked ---------------
+
+    (if (= @user-level 2)
+      (
+        (set DEVUNIT
+          (asknumber
+            (prompt ("Which unit of %s?" DEV_NAME))
+            (help   H_UNIT)
+            (range 0 15)
+            (default 0)))
+
+        (set IF_OK 0)
+        (until IF_OK
+          (set IFNAME (askstring
+            (prompt "What should this interface be called?")
+            (help   H_IFNAME)
+            (default "eth0")))
+          (set IF_OK (if (AND (> (strlen IFNAME) 0)
+                              (<= (strlen IFNAME) 15)) 1 0))
+          (if (= IF_OK 0)
+              (message "An interface name must be between 1 and 15 "
+                       "characters long."
+                       (help H_IFNAME))))
+      ))
+
+    ; --- automatic or manual addressing --------------------------------
+
+    (set USEDHCP
+      (askbool
+        (prompt "Does the network hand out addresses automatically?\n\n"
+                "If other computers just plug in and work, it does.")
+        (help    H_DHCP)
+        (choices "Yes, use DHCP" "No, I will type them")
+        (default 1)))
+  ))
+
+; --- the manual addresses ------------------------------------------------
+
+(set IPADDR "192.168.1.10")
+(set IPMASK "255.255.255.0")
+(set IPGW   "192.168.1.1")
+(set IPDNS  "192.168.1.1")
+
+(if (AND (= KEEP_OLD 0) (= USEDHCP 0))
+  (
+    (set ask_prompt "What Internet address should this Amiga use?")
+    (set ask_help   H_ADDR)
+    (set ask_default IPADDR)
+    (P_ask_ip)
+    (set IPADDR ask_result)
+
+    (set ask_prompt "What is the netmask for this network?")
+    (set ask_help   H_MASK)
+    (set ask_default IPMASK)
+    (P_ask_ip)
+    (set IPMASK ask_result)
+
+    ; the router is nearly always <this network>.1, so offer that
+    (set ip_in IPADDR)
+    (P_ip_parse)
+    (set IPGW ("%ld.%ld.%ld.1" ip_o1 ip_o2 ip_o3))
+
+    (set ask_prompt "What is the address of the router (the gateway)?")
+    (set ask_help   H_GW)
+    (set ask_default IPGW)
+    (P_ask_ip)
+    (set IPGW ask_result)
+
+    (set ask_prompt "Which name server should this Amiga use?")
+    (set ask_help   H_DNS)
+    (set ask_default IPGW)
+    (P_ask_ip)
+    (set IPDNS ask_result)
+  ))
+
+; --- the host name -------------------------------------------------------
+
+(set HOSTNAME "amiga")
+
+(if (= KEEP_OLD 0)
+    (set HOSTNAME
+      (askstring
+        (prompt "What should this Amiga be called on the network?")
+        (help   H_HOSTNAME)
+        (default "amiga"))))
+
+; --- replacing another stack's library -----------------------------------
+
+(set REPLACE_LIB 1)
+
+(if OLD_BSD
+    (set REPLACE_LIB
+      (askbool
+        (prompt (F_OLDLIB OLD_BSD_VER))
+        (help    H_REPLACELIB)
+        (choices "Replace it" "Leave it alone")
+        (default 1))))
+
+(if (= REPLACE_LIB 0)
+    (abort "Left LIBS:bsdsocket.library alone, so AmiNetXDuo has not been "
+           "installed.\n\n"
+           "Nothing has been changed."))
+
+; --- start the network at boot? ------------------------------------------
+
+(set DO_STARTUP
+  (askbool
+    (prompt "Start the network automatically when this Amiga boots?")
+    (help    H_STARTUP)
+    (choices "Yes, at boot" "No, I will do it")
+    (default 1)))
+
+(complete 10)
+
+; ==========================================================================
+;  5.  Copy the software
+; ==========================================================================
+
+(set @default-dest DOCDIR)
+
+; --- the libraries -------------------------------------------------------
+;
+; A running stack holds LIBS:bsdsocket.library open and the copy then fails
+; with a DOS error that means nothing to a novice.  @special-msg puts the
+; explanation in front of it.
+
+(set @special-msg
+  (cat "If this failed because the file is in use, the network is already "
+       "running.  Reboot and run this installer again before doing anything "
+       "else.\n"))
+
+(if OLD_BSD
+  (
+    (if (exists "LIBS:bsdsocket.library.old" (noreq))
+        (delete "LIBS:bsdsocket.library.old"
+                (prompt "Removing the previous LIBS:bsdsocket.library.old")
+                (help @copyfiles-help)
+                (optional "force" "nofail")))
+    (rename "LIBS:bsdsocket.library" "LIBS:bsdsocket.library.old"
+            (prompt "Renaming the old LIBS:bsdsocket.library out of the way")
+            (help H_REPLACELIB))
+  ))
+
+(if OLD_UG
+  (
+    (if (exists "LIBS:usergroup.library.old" (noreq))
+        (delete "LIBS:usergroup.library.old"
+                (prompt "Removing the previous LIBS:usergroup.library.old")
+                (help @copyfiles-help)
+                (optional "force" "nofail")))
+    (rename "LIBS:usergroup.library" "LIBS:usergroup.library.old"
+            (prompt "Renaming the old LIBS:usergroup.library out of the way")
+            (help H_REPLACELIB))
+  ))
+
+(working "Installing the libraries")
+
+(copylib
+  (prompt (cat "Installing bsdsocket.library into LIBS:\n\n"
+               "This is the build for a " CPU "."))
+  (help   @copylib-help)
+  (source (tackon S_LIBS "bsdsocket.library"))
+  (dest   "LIBS:")
+  (confirm)
+  (optional "force"))
+
+(copylib
+  (prompt "Installing usergroup.library into LIBS:")
+  (help   @copylib-help)
+  (source (tackon S_LIBS "usergroup.library"))
+  (dest   "LIBS:")
+  (confirm)
+  (optional "force"))
+
+; --- tls.library, if this archive has one --------------------------------
+;
+; Only a build made with -DAMINETXDUO_TLS=ON carries it, so its absence is
+; normal rather than an error.  It ships as a PAIR with the bsdsocket.library
+; beside it: the two share a private interface, so installing one without the
+; other, or mixing versions from different archives, is not supported.
+
+(if (exists (tackon S_LIBS "tls.library") (noreq))
+  (
+    ; Replace tls.library the same way bsdsocket.library is -- rename the old
+    ; one aside first -- rather than leaving it to copylib's version check.
+    ; copylib copies only when the source romtag is NEWER, so an old
+    ; tls.library whose version never moved would be left in place beside a
+    ; freshly installed bsdsocket.library: exactly the mismatched pair the note
+    ; above rules out, and how a stale CBC-only TLS survived a stack upgrade.
+    ; Renaming aside also lets the copy succeed when the library is held open.
+    (if OLD_TLS
+      (
+        (if (exists "LIBS:tls.library.old" (noreq))
+            (delete "LIBS:tls.library.old"
+                    (prompt "Removing the previous LIBS:tls.library.old")
+                    (help @copyfiles-help)
+                    (optional "force" "nofail")))
+        (rename "LIBS:tls.library" "LIBS:tls.library.old"
+                (prompt "Renaming the old LIBS:tls.library out of the way")
+                (help H_REPLACELIB))
+      ))
+    (copylib
+      (prompt (cat "Installing tls.library into LIBS:\n\n"
+                   "This lets programs make encrypted (https:) connections.  "
+                   "It is used only by programs that ask for it, so it costs "
+                   "nothing until something opens it."))
+      (help   @copylib-help)
+      (source (tackon S_LIBS "tls.library"))
+      (dest   "LIBS:")
+      (confirm)
+      (optional "force"))
+  ))
+
+; A 68000 gets no tls.library, and saying nothing would leave the one machine
+; that cannot have it wondering why https: does not work.  Not an error, and
+; not a question -- the rest of the installation is unaffected.
+(if (AND (= CPUDIR "68000")
+         (NOT (exists (tackon S_LIBS "tls.library") (noreq))))
+    (message
+      "Encrypted (https:) connections are not installed on this machine.\n\n"
+      "The cryptography a secure connection needs takes minutes on a 68000, "
+      "which is long enough that the far end gives up first.  Everything "
+      "else -- the stack, the commands, ordinary http: -- works normally.\n\n"
+      "A machine with a 68020 or better gets it."))
+
+(set @special-msg "")
+
+(complete 35)
+
+; --- the commands --------------------------------------------------------
+
+(working "Installing the network commands")
+
+(copyfiles
+  (prompt "Installing the network commands into C:")
+  (help   "AddNetInterface, Online and Offline bring an interface up and "
+          "take it down, and NetSetup writes or edits the interface file "
+          "instead.  ShowNetStatus and netstat report what it is "
+          "doing, and ShowNetServices lists what else on the local network "
+          "is offering something.  ping, host and traceroute are the usual diagnostics, and "
+          "nslookup asks the DNS for one kind of record -- an MX, a TXT, an "
+          "SRV -- from a named server, and arp lists which "
+          "machines on this network have answered.  "
+          "fetch retrieves an http:// or https:// URL; nc, telnet and "
+          "tftp are netcat and the usual clients; sntp sets the clock from "
+          "a time server and whois asks who owns a name.  NetTrace captures "
+          "packets to a .pcap file, and CheckNetConfig reads the "
+          "configuration back and says what is wrong with it.  ssh connects "
+          "to an SSH server -- it is Dropbear's dbclient, and brings its own "
+          "stack and arguments, but wants mathieeedoubbas.library in LIBS:, "
+          "which every Workbench installation has.\n\nAll of "
+          "them are installed: they are small, and missing the one command "
+          "that turns out to be wanted is worse than a few extra files "
+          "in C:.")
+  (source S_C)
+  (dest   "C:")
+  (all)
+  (optional "force"))
+
+(complete 55)
+
+; ==========================================================================
+;  6.  Configuration
+; ==========================================================================
+
+(makedir "DEVS:NetInterfaces"
+  (prompt "Creating DEVS:NetInterfaces, the drawer that describes the "
+          "network cards")
+  (help   @makedir-help))
+
+(makedir "DEVS:Internet"
+  (prompt "Creating DEVS:Internet, the drawer that holds the name server "
+          "and routing settings")
+  (help   @makedir-help))
+
+; --- the interface file --------------------------------------------------
+
+(if (= KEEP_OLD 0)
+  (
+    (working "Writing the network configuration")
+
+    (textfile
+      (prompt ("Writing DEVS:NetInterfaces/%s" IFNAME))
+      (help   "This file describes one network card: which driver to open, "
+              "and how the card gets its Internet address.  Its name is the "
+              "interface's name.")
+      (dest   (tackon "DEVS:NetInterfaces" IFNAME))
+      (append "; DEVS:NetInterfaces/" IFNAME " -- written by the AmiNetXDuo "
+              "installer.\n")
+      (append ";\n")
+      (append "; The name of this file is the name of the interface.  Use it\n")
+      (append "; with the network commands:\n")
+      (append ";\n")
+      (append ";     Online " IFNAME "\n")
+      (append ";     Offline " IFNAME "\n")
+      (append ";     ShowNetStatus INTERFACE " IFNAME "\n")
+      (append ";\n")
+      (append "; DEVICE     the SANA-II driver for the card.  A bare name is\n")
+      (append ";            looked up in DEVS:; a path is used as given.\n")
+      (append "; UNIT       which card, when one driver has several.\n")
+      (append "; CONFIGURE  how the address is obtained:\n")
+      (append ";              DHCP   -- ask the network (what most want)\n")
+      (append ";              AUTO   -- self-assign 169.254.x.x if no DHCP\n")
+      (append ";              STATIC -- use the ADDRESS/NETMASK below\n")
+      (append ";            Note this keyword is CONFIGURE, not IPTYPE.  In\n")
+      (append ";            Roadshow IPTYPE is the SANA-II packet type, a\n")
+      (append ";            number, and defaults to 2048.\n")
+      (append ";\n")
+      (append "; An IPv6 build also understands CONFIGURE6 (OFF, LINKLOCAL,\n")
+      (append "; AUTO or STATIC), ADDRESS6 and GATEWAY6.  A build without\n")
+      (append "; IPv6 ignores them, so they are safe to leave in place.\n")
+      (append ";\n")
+      (append "DEVICE=" DEV_WRITE "\n")
+      (append ("UNIT=%ld\n" DEVUNIT))
+      (append (if USEDHCP "CONFIGURE=DHCP\n" "CONFIGURE=STATIC\n"))
+      (append (if USEDHCP
+                  (cat ";ADDRESS=192.168.1.10\n;NETMASK=255.255.255.0\n")
+                  (cat "ADDRESS=" IPADDR "\n" "NETMASK=" IPMASK "\n")))
+      (append ";CONFIGURE6=AUTO\n")
+      (safe))
+
+    ; --- the default route ---------------------------------------------
+
+    (textfile
+      (prompt "Writing DEVS:Internet/routes")
+      (help   "This file holds the default route -- the address of the "
+              "router that everything not on the local network is sent to.")
+      (dest   "DEVS:Internet/routes")
+      (append "; DEVS:Internet/routes -- written by the AmiNetXDuo installer.\n")
+      (append ";\n")
+      (append "; DEFAULT=<address>   the router everything else goes through.\n")
+      (append "; DST=<net> VIA=<gw>  a route to one particular network.\n")
+      (append ";\n")
+      (append "; With CONFIGURE=DHCP the router's address arrives with the\n")
+      (append "; lease, so no DEFAULT line is needed here.\n")
+      (append ";\n")
+      (append (if USEDHCP
+                  ";DEFAULT=192.168.1.1\n"
+                  (cat "DEFAULT=" IPGW "\n")))
+      (safe))
+
+    ; --- name resolution ------------------------------------------------
+
+    (textfile
+      (prompt "Writing DEVS:Internet/name_resolution")
+      (help   "This file says which name servers to ask when a program looks "
+              "up a name like \"aminet.net\".")
+      (dest   "DEVS:Internet/name_resolution")
+      (append "; DEVS:Internet/name_resolution -- written by the AmiNetXDuo\n")
+      (append "; installer.\n")
+      (append ";\n")
+      (append "; nameserver <address>   ask this server; repeat for more.\n")
+      (append "; domain     <name>      added to names with no dots in them.\n")
+      (append "; search     <a> <b> ..  several domains to try, in order.\n")
+      (append "; hostname   <name>      what this machine calls itself.\n")
+      (append ";\n")
+      (append "; With CONFIGURE=DHCP the name servers arrive with the lease,\n")
+      (append "; so no nameserver line is needed here.\n")
+      (append ";\n")
+      (append (if USEDHCP
+                  ";nameserver 192.168.1.1\n"
+                  (cat "nameserver " IPDNS "\n")))
+      (append "hostname " HOSTNAME "\n")
+      (safe))
+  ))
+
+; --- the netdb files, only where there is nothing already ----------------
+;
+; A machine that has had Roadshow or AmiTCP on it already has these, very
+; likely edited.  The stack has sane built-in defaults for all four, so
+; overwriting somebody's services file to gain nothing would be rude.
+
+(if (exists "DEVS:Internet/hosts" (noreq))
+    ""
+    (textfile
+      (prompt "Writing DEVS:Internet/hosts")
+      (help   "Names the Amiga should know without asking a name "
+              "server.  One address, then the name, then any nicknames.")
+      (dest   "DEVS:Internet/hosts")
+      (append "# DEVS:Internet/hosts -- names this machine knows by itself.\n")
+      (append "#\n")
+      (append "#   <address>  <name>  [nickname ...]\n")
+      (append "#\n")
+      (append "127.0.0.1\tlocalhost loopback\n")
+      (safe)))
+
+(set NDB_N 0)
+(while (set NDB_F (select NDB_N "protocols" "services" "networks" ""))
+  (
+    (if (exists (tackon "DEVS:Internet" NDB_F) (noreq))
+        ""
+        (copyfiles
+          (prompt ("Installing DEVS:Internet/%s" NDB_F))
+          (help   @copyfiles-help)
+          (source (tackon (tackon S_DEVS "Internet") NDB_F))
+          (dest   "DEVS:Internet")
+          (optional "nofail")))
+    (set NDB_N (+ NDB_N 1))
+  ))
+
+; --- the certificate store, if this archive has one ----------------------
+;
+; tls.library verifies a server's certificate chain against this file, and
+; refuses to connect without it.  It is ALWAYS overwritten, unlike the netdb
+; files above: this is not a file anybody edits by hand, and an old one means
+; sites signed by newer certificate authorities stop working.  Replacing it is
+; also the whole of the update story -- the library re-reads it when its
+; datestamp changes, so no reboot is needed.
+
+(if (exists (tackon (tackon S_DEVS "Internet") "certificates") (noreq))
+    (copyfiles
+      (prompt (cat "Installing DEVS:Internet/certificates\n\n"
+                   "The list of certificate authorities tls.library trusts.  "
+                   "Replace this file with a newer one to "
+                   "update them; nothing else has to change."))
+      (help   @copyfiles-help)
+      (source (tackon (tackon S_DEVS "Internet") "certificates"))
+      (dest   "DEVS:Internet")
+      (optional "nofail")))
+
+(complete 75)
+
+; ==========================================================================
+;  7.  Documentation and examples
+; ==========================================================================
+
+; makedir's (infos) parameter deletes the drawer it just made if it cannot
+; produce an icon for it, and takes the installation down with it.  Copying a
+; real icon of our own is both safer and better looking.
+
+(makedir DOCDIR
+  (prompt ("Creating %s" DOCDIR))
+  (help   H_DOCDIR))
+
+(if (exists (if (> (strlen SRCDIR) 0)
+                (tackon SRCDIR "AmiNetXDuo.info")
+                "AmiNetXDuo.info") (noreq))
+    (copyfiles
+      (prompt "Giving the AmiNetXDuo drawer its icon")
+      (help   @copyfiles-help)
+      (source (if (> (strlen SRCDIR) 0)
+                  (tackon SRCDIR "AmiNetXDuo.info")
+                  "AmiNetXDuo.info"))
+      (dest    DOCPARENT)
+      (newname "AmiNetXDuo.info")
+      (optional "nofail")))
+
+(if (exists S_DOCS (noreq))
+    (copyfiles
+      (prompt "Installing the documentation")
+      (help   @copyfiles-help)
+      (source S_DOCS)
+      (dest   DOCDIR)
+      (all)
+      (infos)
+      (optional "nofail")))
+
+(if (exists S_EXAM (noreq))
+    (copyfiles
+      (prompt "Installing the example configuration files")
+      (help   "These are commented copies of the files this installer just "
+              "wrote, one for each kind of card.  Nothing reads them where "
+              "they are -- they are there to be read, and copied into DEVS: "
+              "by hand where that is the preferred way to configure it.")
+      (source S_EXAM)
+      (dest   (tackon DOCDIR "Examples"))
+      (all)
+      (optional "nofail")))
+
+; ssh (Dropbear's dbclient) rides into C: with the other network commands
+; above -- the argv/stack shim gives it a real argv[] and its own 256 KB
+; stack, so it no longer needs the separate drawer and the `stack 200000`
+; ritual the ported clients once did.
+
+(complete 90)
+
+; ==========================================================================
+;  8.  S:User-Startup
+; ==========================================================================
+
+(set START_IF (if KEEP_OLD OLD_IF IFNAME))
+
+(if DO_STARTUP
+    (startup APPNAME
+      (prompt "Adding AmiNetXDuo to S:User-Startup, so that the network "
+              "starts when the Amiga boots.")
+      (help   H_STARTUP)
+      (command ("C:AddNetInterface DEVS:NetInterfaces/%s QUIET\n" START_IF)))
+    (startup APPNAME
+      (prompt "Removing AmiNetXDuo's lines from S:User-Startup, so that the "
+              "network does not start by itself.")
+      (help   H_STARTUP)))
+
+(complete 100)
+
+; ==========================================================================
+;  9.  Done
+; ==========================================================================
+
+(if DO_STARTUP
+    (set FINAL_START (F_START_YES START_IF))
+    (set FINAL_START (F_START_NO  START_IF)))
+
+; The 68000 https:// notice used to be here, and it is not any more.  A user
+; who never types an https: URL was being warned about something that would
+; never affect them, on the one page they read once; and the user who DOES
+; type one is told by `fetch' itself, at the moment it matters, in words that
+; fit their machine.  fetch tests AttnFlags for exactly this.
+(exit
+  "AmiNetXDuo is installed.\n\n"
+  FINAL_START
+  "\nShowNetStatus reports whether it came up.  The ReadMe in the "
+  "AmiNetXDuo drawer covers the rest.\n")

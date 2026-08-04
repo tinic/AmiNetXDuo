@@ -578,7 +578,7 @@ fi
 # that mishandled an already-large Shell stack would fail nowhere else.
 cat > "$HD/S/AmiNetXDuo-Check" <<EOF
 ; Written by install/test/run-workbench-fsuae.sh.  Nothing here is installed
-; by AmiNetXDuo -- it is what a user would type.
+; by AmiNetXDuo, it is what a user would type.
 FailAt 9999
 Stack 200000
 

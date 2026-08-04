@@ -1,10 +1,10 @@
 /*
- * icontest -- hand the generated .info files to the real icon.library and
+ * icontest, hand the generated .info files to the real icon.library and
  * see whether it agrees they are icons.
  *
  * install/tools/makeicon.py writes the DiskObject structure by hand, and
  * install/tools/showicon.py reads it back with an independently written
- * parser -- but two programs by the same author agreeing proves only that
+ * parser, but two programs by the same author agreeing proves only that
  * they agree.  This asks Kickstart.
  *
  * For each icon it does GetDiskObject(), reports what came back, then

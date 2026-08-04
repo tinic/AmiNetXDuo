@@ -1,5 +1,5 @@
 /*
- * bootcheck -- start the network the way a boot would, using nothing but
+ * bootcheck, start the network the way a boot would, using nothing but
  * what the installer left behind, and see whether it comes up.
  *
  * This is the half of the installer test that matters.  installdrive runs
@@ -10,7 +10,7 @@
  *      C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET
  *      ;END AmiNetXDuo
  *
- * -- and executes exactly those command lines, exactly as the Shell would on
+ * and executes exactly those command lines, exactly as the Shell would on
  * the next boot.  Nothing here knows the interface's name, the device, or
  * the address; if the installer wrote the wrong thing, this fails.
  *
@@ -47,7 +47,7 @@
 
 /*
  * FS-UAE's SLIRP network is 10.0.2.0/24 with the gateway, the DHCP server
- * and the DNS forwarder all at 10.0.2.2 -- see tools/fsuae-run.sh.
+ * and the DNS forwarder all at 10.0.2.2, see tools/fsuae-run.sh.
  */
 #define GATEWAY         "10.0.2.2"
 
@@ -106,14 +106,14 @@ static LONG run(const char *command)
  *
  *      address     10.0.2.15       netmask 255.255.255.0 (/24)
  *
- * and this used to look for "This machine:" instead -- which ShowNetStatus
+ * and this used to look for "This machine:" instead, which ShowNetStatus
  * prints ONLY when it cannot read the running stack and has to fall back on
  * asking the library for an address.  So the test asserted on the output of
  * the failure path: it could not pass on a machine where everything worked,
  * which is the machine it exists to check.
  *
- * Both are accepted now.  The fallback line is still a real answer -- the
- * stack is up, in somebody else's library -- and refusing it would trade one
+ * Both are accepted now.  The fallback line is still a real answer, the
+ * stack is up, in somebody else's library, and refusing it would trade one
  * wrong assertion for another.
  */
 static BOOL has_address(void)

@@ -319,7 +319,7 @@ Shape of the interface:
 | 14/15 | `S2_ONLINE` / `S2_OFFLINE` | link up/down |
 | 16/17 | `S2_ADDMULTICASTADDRESS` / `S2_DELMULTICASTADDRESS` | multicast |
 | 21/22 | `S2_GETGLOBALSTATS` / `S2_GETSPECIALSTATS` | counters |
-|, | `SANA2IOF_RAW` in `io_Flags` | full frames including link header (optional, not universally reliable) |
+| | `SANA2IOF_RAW` in `io_Flags` | full frames including link header (optional, not universally reliable) |
 
 > **Corrected 2026-07-24.** Raw mode is a **flag on `CMD_READ`/`CMD_WRITE`**, not a pair of
 > `S2_RAWREAD`/`S2_RAWWRITE` commands, those names appear in no version of the spec or any
@@ -449,8 +449,8 @@ addons/dhcp           :   4/4   compiled,   0 failures   59,584 bytes (client al
 addons/dns            :   1/1   compiled,   0 failures    9,492 bytes
 addons/ppp            :   1/1   compiled,   0 failures   22,168 bytes
 addons/sntp           :   1/1   compiled,   0 failures   14,468 bytes
-addons/BSD            :   0/1 — one clash: nxd_bsd.h redefines struct timeval vs toolchain headers
-addons/tftp           :   1/2 — server needs FileX (fx_api.h); client fine
+addons/BSD            :   0/1, one clash: nxd_bsd.h redefines struct timeval vs toolchain headers
+addons/tftp           :   1/2, server needs FileX (fx_api.h); client fine
 ```
 
 Per-subsystem `.text` (whole-object; the linker pulls only what's referenced, so a real
@@ -1817,7 +1817,7 @@ NetX Duo's TCP state machine has already completed the handshake.
 #### `getaddrinfo(AF_UNSPEC)`: what it returns and why
 
 `netdb.h:176` defines `AI_MASK` as only `AI_PASSIVE|AI_CANONNAME|AI_NUMERICHOST|
-AI_NUMERICSERV` — there is **no `AI_V4MAPPED` and no `AI_ADDRCONFIG`**, so a caller
+AI_NUMERICSERV`, there is **no `AI_V4MAPPED` and no `AI_ADDRCONFIG`**, so a caller
 compiled against this header cannot express either hint. The behaviour is therefore fixed
 and documented rather than selectable:
 
@@ -2059,7 +2059,7 @@ checksum += (*long_ptr >> NX_SHIFT_BY_16);
 
 GCC 15.2 `-O2 -m68020` compiles that to **seven instructions per longword**,
 `move.l (a1)+,d1 / move.l d1,d0 / andi.l #65535,d0 / clr.w d1 / swap d1 / add.l d0,d1 /
-adda.l d1,a0` — plus the `dbf`. It is the price of expressing a carry in a language that
+adda.l d1,a0`, plus the `dbf`. It is the price of expressing a carry in a language that
 has none.
 
 `src/net68k/n68k_checksum.S` does it in **two**: `add.l (a0)+,d0` then `addx.l d2,d0`
@@ -3031,7 +3031,7 @@ so if it cannot find one. curl cannot avoid doubles, the progress meter,
 `$AMIGA_TOOLCHAIN_ROOT/m68k-amigaos/lib/crt0.o` calls `main()` like this:
 
 ```
-    pea      ___argv          ; 4879 xxxxxxxx  -- pushes &__argv
+    pea      ___argv          ; 4879 xxxxxxxx , pushes &__argv
     move.l   ___argc,-(sp)    ; 2f39 xxxxxxxx
     jsr      _main            ; 4eb9 xxxxxxxx
 ```
@@ -4019,7 +4019,7 @@ The disassembly:
 62a:  jsr    a6@(-48)         ; TLSWrite
 630:  bnew   ...
 634:  lea    1e0,a1           ; a1 = the read buffer
-640:  jsr    a6@(-42)         ; TLSRead -- and a0 was never reloaded
+640:  jsr    a6@(-42)         ; TLSRead, and a0 was never reloaded
 ```
 
 **`d0`, `d1`, `a0` and `a1` are SCRATCH registers in the AmigaOS ABI.** The inline stubs
@@ -5515,7 +5515,7 @@ Stated plainly, because it decides what an independent view can be:
   TCP conversation. And `/dev/bpf` on this machine needs a password.
 - **What does exist, and is better:** the emulated A2065 writes every frame it
   handles, both directions, complete, as hex into `<base_dir>/Cache/Logs/
-  fs-uae.log.txt` — **unconditionally** whenever `network_card = a2065`, with no
+  fs-uae.log.txt`, **unconditionally** whenever `network_card = a2065`, with no
   option to request it and none to suppress it. `tests/trace/a2065pcap.py` converts
   it. That output is produced inside the emulated hardware, below every line of our
   code, so it is independent by construction: a frame that appears there and not in
@@ -6420,7 +6420,7 @@ fetches at depths 2, 3 and 4 in RSA and ECDSA with every body hashed against
 the server's copy, the half-megabyte transfer, TLS reuse across processes, and
 the five negative cases (wrong CA, wrong host, expired, self-signed, TLS on a
 plain port) all refused for the right reason. The seven that did not pass are
-all `no result line -- the run did not reach this case`: three emulators were
+all `no result line, the run did not reach this case`: three emulators were
 contending for `build/.fsuae.lock` and the run spent most of its budget
 queueing. Nothing failed; the tail was not reached.
 
@@ -8633,7 +8633,7 @@ longer had. Fixed in 27.4.
    another `AMI_DHCP_TIMEOUT_TICKS` for AutoIP after the DHCP wait had already failed. The
    whole probe/announce sequence is eight seconds; `AMI_AUTOIP_TIMEOUT_TICKS` is fifteen,
    and failing it now says why:
-   `link-local configuration did not settle either -- is the cable in?`
+   `link-local configuration did not settle either, is the cable in?`
 
 6. **AutoIP was left running once DHCP won.** Its thread waits indefinitely for a conflict
    and never re-reads the address, so it sat defending one the interface no longer had.
@@ -8773,7 +8773,7 @@ with evidence because it is the first thing anyone will try:
   stack would answer the reply with a RESET to itself.
 
 **So the peer goes below the stack instead of beside it.** `tests/tcpdrill/
-tapdev.c` is an AmigaOS Exec device — `MakeLibrary()` plus `AddDevice()`, six
+tapdev.c` is an AmigaOS Exec device, `MakeLibrary()` plus `AddDevice()`, six
 vectors, no segment list, that implements enough of SANA-II for `src/sana2/`
 to open it, query it, configure it, take it online and run its reader threads
 against it. `DEVS:NetInterfaces/tap0` names it, so the stack brings it up
@@ -9173,7 +9173,7 @@ routing table was consulted.
   ok: deleting a route that is not in a non-empty table failed
   ok: NETCTRL_ROUTE_DELETE removed the route
   ok: netstat -r printed the table from NETSTATUS_ROUTES
-  ok: the wire shows 1 ARP request(s) for 10.0.2.99 -- the route was used
+  ok: the wire shows 1 ARP request(s) for 10.0.2.99, the route was used
   ok: nothing for 192.168.77.5 went out via the default gateway
 ```
 
@@ -10848,7 +10848,7 @@ somebody will hit it again. All 23 of its checks pass, the lease, the gateway,
 the live counters, `ping`, `CheckNetConfig`, the three route commands and
 `NetShutdown`, and the run then fails on
 
-    FAIL: no serial log at build/serial-livetools.log -- cannot tell a reboot from a hang
+    FAIL: no serial log at build/serial-livetools.log, cannot tell a reboot from a hang
 
 with the serial log present and **zero bytes long**. Other runs in the same
 sweep produced empty serial logs too (`serial-cfh3.log`) and others did not, so
@@ -13761,7 +13761,7 @@ bd2:  movel d1,sp@(44)            ; *** spill d1, believing it still holds FIONB
 bd8:  jsr   a6@(-30)              ; socket()
 be6:  movel sp@(44),d1            ; reload... whatever the library left in d1
 bee:  jsr   a6@(-114)             ; IoctlSocket(c[0], <garbage>, &on)
-c1e:  jsr   a6@(-54)              ; connect(c[0]) -- blocking, because the ioctl failed
+c1e:  jsr   a6@(-54)              ; connect(c[0]), blocking, because the ioctl failed
 ```
 
 The stub is the ordinary hand-vectored one this tree uses in twenty files:
@@ -13810,11 +13810,11 @@ unfixed source *with* the `Delay(1)` in place gives:
 bba:  movel #0x8004667E,d1
 bc4:  jsr   a6@(-114)      ; listener
 bd8:  jsr   a6@(-30)       ; socket()
-be8:  jsr   a6@(-114)      ; ioctl -- still no reload
+be8:  jsr   a6@(-114)      ; ioctl, still no reload
 c18:  jsr   a6@(-54)       ; connect
 c24:  jsr   a6@(-198)      ; Delay(1)
 c30:  jsr   a6@(-30)       ; socket()
-c40:  jsr   a6@(-114)      ; ioctl -- still no reload
+c40:  jsr   a6@(-114)      ; ioctl, still no reload
 ```
 
 `Delay()` *is* an honest inline, the LP macros declare `d1` written, so GCC
@@ -14337,7 +14337,7 @@ runs the same test that passes 14/14 on the A2065. It fails in four lines:
 [INFO] config: interface eth0: ariadne.device unit 0
 [ERR ] sana2: cannot open ariadne.device unit 0 (-1)
 [ERR ] netstack: interface 'eth0' would not open: ariadne.device unit 0 did not
-       answer -- is the driver in DEVS:Networks/ and is the card fitted?
+       answer, is the driver in DEVS:Networks/ and is the card fitted?
 ```
 
 That is the correct behaviour and it is as far as this can go. The hardware is
@@ -15044,7 +15044,7 @@ query eth0: rc 0 (errno 0)
   IFQ_NumReadRequests      34
   IFQ_GetBytesIn           unanswered
   IFQ_LastStart            unanswered
-query nosuchif: rc -1 (errno 6) -- refused, correctly
+query nosuchif: rc -1 (errno 6), refused, correctly
 ```
 
 `(7th byte A5)` is the assertion that matters most in that block: *"a maximum
@@ -15215,7 +15215,7 @@ together.
 enumeration is **not** NetX Duo's. They agree up to `CLOSE_WAIT` and then
 diverge: NetX Duo has `FIN_WAIT_2 = 8, CLOSING = 9, TIMED_WAIT = 10,
 LAST_ACK = 11`; `tcp_fsm.h` has `CLOSING = 7, LAST_ACK = 8, FIN_WAIT_2 = 9,
-TIME_WAIT = 10`. The first four states invite a subtract-one — `NX_TCP_CLOSED`
+TIME_WAIT = 10`. The first four states invite a subtract-one, `NX_TCP_CLOSED`
 is 1 and `TCPS_CLOSED` is 0, and a subtract-one reports a connection in
 `LAST_ACK` as being in `FIN_WAIT_2`. It is a table.
 
@@ -15441,12 +15441,12 @@ new path exercised the old one from an angle nothing else did.
 ```
 live: remove eth0: rc 1
 live: add eth0: rc 0
-live: begin returned with the message still out -- asynchronous, correctly
-live: replied after ~20 ticks, result 0 -- AAMR_Success, correctly
+live: begin returned with the message still out, asynchronous, correctly
+live: replied after ~20 ticks, result 0, AAMR_Success, correctly
 live: address 10.0.2.15 mask 255.255.255.0 server 10.0.2.2
-live: router[0] 10.0.2.2 -- the server offered one
+live: router[0] 10.0.2.2, the server offered one
 live: lease expires day 17740 minute 398
-begin a second time: result 4, replied -- correctly
+begin a second time: result 4, replied, correctly
 ```
 
 Every line is an assertion. **"still out"** is the one that says the call is
@@ -15470,10 +15470,10 @@ exercises releasing a lease that was never granted.
 
 ```
 slow: take eth0 down: rc 0
-slow: still running after a second: yes -- correctly
-slow: abort replied after ~5 ticks, result 1 -- AAMR_Aborted, correctly
-slow: timeout replied after ~550 ticks, result 7 -- AAMR_Timeout, correctly
-slow: waited at least -- correctly the 10-second floor
+slow: still running after a second: yes, correctly
+slow: abort replied after ~5 ticks, result 1, AAMR_Aborted, correctly
+slow: timeout replied after ~550 ticks, result 7, AAMR_Timeout, correctly
+slow: waited at least, correctly the 10-second floor
 ```
 
 Five ticks from `AbortInterfaceConfig()` to the reply is the worker noticing
@@ -15673,18 +15673,18 @@ which is presumably why the field exists.
 ### 49.4 What ran
 
 ```
-add a NULL hook: rc -1 (errno 14) -- EFAULT, correctly
-add type 99: rc -1 (errno 22) -- EINVAL, correctly
-add MHT_Packet: rc -1 (errno 22) -- refused rather than silently ignored
-add the same hook twice: rc -1 -- refused, correctly
-bind with an allowing hook: rc 0, called 1 -- allowed and seen, correctly
+add a NULL hook: rc -1 (errno 14), EFAULT, correctly
+add type 99: rc -1 (errno 22), EINVAL, correctly
+add MHT_Packet: rc -1 (errno 22), refused rather than silently ignored
+add the same hook twice: rc -1, refused, correctly
+bind with an allowing hook: rc 0, called 1, allowed and seen, correctly
 message: size 20 (want 20), socket 0 (want 0), name ours
-reserved was NULL -- correctly, hook was ours -- correctly
-bind with a denying hook: rc -1 (errno 13) -- denied with the hook's errno
+reserved was NULL, correctly, hook was ours, correctly
+bind with a denying hook: rc -1 (errno 13), denied with the hook's errno
 first allows, second denies: rc -1 (errno 13), calls 1/1
-first denies: rc -1, calls 1/0 -- the walk stopped, correctly
+first denies: rc -1, calls 1/0, the walk stopped, correctly
 connect with a denying hook: rc -1 (errno 13), called 1
-after removal: bind rc 0, called 0 -- no longer consulted, correctly
+after removal: bind rc 0, called 0, no longer consulted, correctly
 ```
 
 `calls 1/0` is the one worth keeping. Both hooks are installed and only the
@@ -15694,11 +15694,11 @@ a dispatcher that collected every answer before deciding would fail.
 And the send shapes:
 
 ```
-send denied: rc -1 (errno 13), called 1 -- denied before the send, correctly
+send denied: rc -1 (errno 13), called 1, denied before the send, correctly
 send shape: size 36 (want 36) buffer ours len 8 to NULL msg NULL
 sendto shape: to ours msg NULL
 sendmsg shape: to NULL msg ours len 8
-send allowed: rc 8, called 1 -- sent in full, correctly
+send allowed: rc 8, called 1, sent in full, correctly
 ```
 
 **Three of those assertions failed on the first run, and the bug was in the
@@ -17665,7 +17665,7 @@ one message because it is one function:
     ping: cannot resolve "::1"
       The name servers were asked and none of them knows "::1".
       Check the spelling. If it is right, the name may simply not
-      exist -- nothing is wrong with this machine's network.
+      exist, nothing is wrong with this machine's network.
 
 `::1` is a literal, not a name, so asking a name server about it was never
 going to work; and the advice sends the reader to check their spelling and
@@ -18374,14 +18374,14 @@ caller read that as "not an address", which is a different statement from
       "::1".
 
       Check the spelling. If it is right, the name may
-      simply not exist -- nothing is wrong with this
+      simply not exist, nothing is wrong with this
       machine's network.
       nslookup will say whether the name servers answer.
 
     nslookup: ::1: there is no such name
 
     arp: "::1" is not an address
-      It has a colon in it, so it was read as an IPv6 address -- fe80::1, or fd00::10.
+      It has a colon in it, so it was read as an IPv6 address, fe80::1, or fd00::10.
 
 `host` is 66's exact defect, surviving in the one build 66 never ran. `arp`
 contradicts itself in consecutive lines. `nslookup` had an assertion for this
@@ -18438,7 +18438,7 @@ on a dual-stack machine, and hands the question to the command that can ask it:
       resolver does that for IPv4 addresses only. It has no
       call that reverses an IPv6 address.
 
-      nslookup builds that question itself -- give it the
+      nslookup builds that question itself, give it the
       same address and it asks the DNS for the ip6.arpa
       record.
 
@@ -19546,7 +19546,7 @@ The file:
 
 ```
 _ftp._tcp     21
-_nope 21                                    # no transport -- must be skipped
+_nope 21                                    # no transport, must be skipped
 _http._tcp    80    Amiga web server    txt=path=/
 _telnet._udp  23
 ```
@@ -19621,7 +19621,7 @@ existing `config_parsers`, which went from 242 to 271 checks. `-fanalyzer` 13
 known findings and no new ones. `tests/tools/run-mdns.sh` PASSED, 27 checks
 against 16 before this work. Conformance `LOOPBACK` 130 passed, 0 failed, 12
 skipped. `tests/tools/run-livetools.sh` PASSED. `tests/ipv6/run-tools-fsuae.sh
--s` PASS on `build/cm` and on `build/v6` — the first `build/v6` attempt hung
+-s` PASS on `build/cm` and on `build/v6`, the first `build/v6` attempt hung
 inside `telnet ::1 7097` and hit the 540-second timeout, which the same test
 has done before this work (`FAILED: 3 assertion(s)` in an earlier session's
 log, `PASS` in the two either side of it); it is the emulator, not this
@@ -20122,7 +20122,7 @@ are the harness.
 7990: 'ens18' 00:80:10:49:00:01
   address 192.168.1.134   netmask 255.255.255.0   gateway 192.168.1.1
   hostname 'amiga', 1 interface(s), 2 name server(s)
-13 checks, 0 failures -- PASS
+13 checks, 0 failures, PASS
 ```
 
 From a `tcpdump` on the host, filtered to the emulated card's MAC:
@@ -20985,7 +20985,7 @@ because the probe writes its answers on the host.
 
 **The termios block arrives and is applied.** `pty-req` carries VINTR ^C,
 VERASE ^H and VEOF ^D. The remote's `stty -a` reports `intr = ^C`, `erase =
-^H`, `eof = ^D` -- and a host's own default erase is `^?`, so `^H` is proof the
+^H`, `eof = ^D`, and a host's own default erase is `^?`, so `^H` is proof the
 block was parsed rather than ignored. That is the Ctrl-C question answered at
 the protocol level. Delivering a live Ctrl-C *keystroke* is not tested: it
 needs somebody at the console, and injecting one into a `CON:` under a headless
@@ -21963,7 +21963,7 @@ across builds, which is what makes mixing them legitimate.
 |---|---|---|---|---|---|
 | `_tx_thread_interrupt_disable` | 166 | 3.8% | 38,853 | 4.3 | progress |
 | `_tx_thread_interrupt_restore` | 219 | 5.0% | 38,853 | 5.6 | progress |
-|, the pair | 385 | 8.7% | 38,853 | 9.9 | progress |
+| the pair | 385 | 8.7% | 38,853 | 9.9 | progress |
 | `_tx_mutex_get` | 90 | 2.0% | 5,612 | 16.0 | progress |
 | `_tx_mutex_put` | 111 | 2.5% | 5,672 | 19.6 | progress |
 | `_tx_thread_schedule` | 82 | 1.9% | 2,634 | 31.1 | progress (middleman) |

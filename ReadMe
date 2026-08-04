@@ -1,0 +1,245 @@
+
+                            A m i N e t X D u o
+
+              A TCP/IP stack for AmigaOS, on Eclipse ThreadX NetX Duo
+
+
+WHAT IT IS
+----------
+
+AmiNetXDuo gives AmigaOS the bsdsocket.library that every Amiga networking
+program already speaks, over the SANA-II driver that every Amiga network card
+already has.  It is a complete stack, not a shim: DHCP, ARP, ICMP, TCP, UDP,
+DNS, and -- in the IPv6 build -- neighbour discovery, duplicate address
+detection and stateless autoconfiguration.
+
+It is MIT licensed throughout, with no 4.4BSD or GPL lineage anywhere in it.
+
+
+BEFORE YOU START
+----------------
+
+You need:
+
+  *  AmigaOS 2.04 or newer.
+  *  Any 68000 or better.  Encrypted (https:) connections need a 68020; on a
+     68000 they are left out and everything else works as normal.
+  *  1 MB of memory.  The stack takes about 520 KB of that once it is up and
+     sizes its packet buffers from what is left, so more memory means more of
+     them.  Encryption adds about 210 KB the first time it is used.
+  *  A network card, and that card's SANA-II driver -- a file whose name ends
+     in ".device", which came with the card.  Put it in DEVS: before you
+     install, and the installer will find it and pre-select your card for
+     you.
+
+Cards known to work this way, and the driver each one uses:
+
+     Commodore A2065 . . . . . . . . . a2065.device
+     Village Tronic Ariadne  . . . . . ariadne.device
+     Village Tronic Ariadne II . . . . ariadne2.device
+     Hydra Systems AmigaNet  . . . . . amiganet.device
+     Individual Computers X-Surf . . . xsurf.device
+     Individual Computers X-Surf 100 . xsurf100.device
+     PCMCIA Ethernet (A600/A1200)  . . cnet.device
+     3Com EtherLink III / 3C589  . . . etherlink3.device
+     Prism2 wireless PCMCIA  . . . . . prism2.device
+
+Any other SANA-II driver works too; the installer's last menu entry lets you
+type its name.
+
+
+INSTALLING
+----------
+
+Double-click "Install-AmiNetXDuo".
+
+Its icon's default tool is "Installer", so Commodore's Installer must be
+somewhere in your command path -- on a standard Workbench 3.1 it is, on the
+Install disk and usually copied to C: or SYS:Utilities.  If Workbench says it
+cannot find "Installer", set the icon's Default Tool (Workbench menu:
+Icons/Information) to wherever your copy actually is.
+
+From a Shell, the equivalent is:
+
+     Stack 10000
+     CD <the drawer this file is in>
+     Installer SCRIPT Install-AmiNetXDuo APPNAME AmiNetXDuo
+
+(Keyword and value separated by a space, not by "=".  Installer 2.17, the
+one on the Workbench 3.1 Install disk, parses its command line by hand and
+does not recognise "SCRIPT=name".  The CD matters too: started from a Shell
+the script finds its files relative to the current directory.)
+
+The installer asks which network card you have and whether your network hands
+out addresses automatically.  If you do not know the answer to the second
+one, say yes: nearly every home network does, and it is one line in one file
+to change afterwards.
+
+It puts
+
+     bsdsocket.library, usergroup.library      into LIBS:
+     NetSetup, AddNetInterface, Online, Offline,
+     ShowNetStatus, ShowNetServices,
+     ping, netstat, host,
+     nslookup, arp, fetch, nc, telnet,
+     NetTrace, sntp, traceroute, tftp, whois,
+     CheckNetConfig, GetNetStatus, NetShutdown,
+     AddNetRoute, DeleteNetRoute, ssh          into C:
+     the interface description                 into DEVS:NetInterfaces
+     the routing and name server settings      into DEVS:Internet
+     this file, the documentation, examples    into a drawer you choose
+
+and, if you let it, one line into S:User-Startup so the network comes up when
+the machine boots.
+
+Running the installer again over a working installation is safe.  It notices
+the existing configuration and offers to leave it exactly as it is, and it
+only ever replaces its own block in S:User-Startup.
+
+If there is already a bsdsocket.library on the machine -- from AmiTCP, Miami,
+Genesis or Roadshow -- the installer renames it to bsdsocket.library.old
+rather than deleting it, and tells you it has done so.  Two TCP/IP stacks
+cannot share one machine.
+
+
+DID IT WORK?
+------------
+
+     ShowNetStatus              is it up, and what address did it get
+     ping 192.168.1.1           can it reach your router
+     host aminet.net            can it look a name up
+     netstat -r                 what does it think the routes are
+
+If ShowNetStatus says nothing is running, the usual reason is that the card's
+driver is not in DEVS:.  The second most usual reason is the wrong card
+chosen in the installer; run it again and pick another.
+
+
+DOING IT BY HAND
+----------------
+
+Everything the installer writes is a plain text file you can write yourself.
+There is a commented example of each of them in the Examples drawer:
+
+     Examples/NetInterfaces/eth0        every keyword there is, explained
+     Examples/NetInterfaces/a2065       the short version, one per card
+     Examples/NetInterfaces/eth0-static a fixed address, worked through
+     Examples/Internet/routes           the default route
+     Examples/Internet/name_resolution  name servers and the host name
+     Examples/Internet/hosts            names known without a name server
+
+The minimum that works is three lines in DEVS:NetInterfaces/eth0:
+
+     DEVICE=a2065.device
+     UNIT=0
+     CONFIGURE=DHCP
+
+Note CONFIGURE, not IPTYPE.  Documentation elsewhere on the net that tells
+you to write IPTYPE=DHCP is repeating an AmiTCP-era mistake: in Roadshow
+IPTYPE is a number, the SANA-II packet type.  AmiNetXDuo accepts both, so
+such a file still works here, but it will not work on Roadshow.
+
+
+USING SSH
+---------
+
+`ssh' is Dropbear's dbclient.  It wants mathieeedoubbas.library in LIBS:,
+which every Workbench install has, and nothing else -- it brings its own
+stack, so there is no `stack 200000' to type first.
+
+     ssh me@192.168.1.10                    log in
+     ssh me@192.168.1.10 "uname -a"         run one command
+
+A password works if the far end allows one.  A key is better, and on a
+machine this slow it also saves the typing.
+
+THE KEY MUST BE IN DROPBEAR'S FORMAT, not OpenSSH's.  An OpenSSH key copied
+straight over will not be read.  On the PC, with Dropbear's own tools:
+
+     dropbearkey -t ed25519 -f id_amiga     make one
+     dropbearconvert openssh dropbear ~/.ssh/id_ed25519 id_amiga
+                                            or convert one you already have
+     dropbearkey -y -f id_amiga             print the line for the server's
+                                            authorized_keys
+
+MAKE THE KEY ON THE PC, not on the Amiga.  This machine has very little
+entropy to make one from, and ed25519 keygen on a 14 MHz 68020 takes about a
+minute.  Copy the private key over afterwards.
+
+NAME THE KEY WITH -i, every time:
+
+     ssh -i DH0:keys/id_amiga me@192.168.1.10
+
+There is a default path -- dbclient reads ENV:HOME, appends /.ssh/id_dropbear,
+and falls back to SYS: when ENV:HOME is unset -- but putting a key there and
+leaving -i off was tried and does NOT work; the connection is refused with
+"No auth methods could be used".  Use -i and it works every time.
+
+ENV:USER is the name sent when the command line has no user@ in front of the
+host; with none set it is "amiga".
+
+     SetEnv SAVE USER me
+
+
+WRITING PROGRAMS AGAINST IT
+---------------------------
+
+The Developer drawer holds the headers for what bsdsocket.library has that the
+NDK does not declare: the RFC 3493 interface calls -- if_nametoindex() and its
+three companions -- and the AF_INET6 names, from IPPROTO_IPV6 and IPV6_V6ONLY
+to the IN6_IS_ADDR_* macros.  The installer does not copy it, because where
+headers go is a property of the compiler rather than of the machine; put it
+wherever the NDK is.  Developer/ReadMe explains the rest, and
+Developer/examples holds two programs that work.
+
+Nothing else needs it.  Everything the NDK already declares is reached the way
+it always was.
+
+
+UNINSTALLING
+------------
+
+     Delete LIBS:bsdsocket.library LIBS:usergroup.library
+     Delete C:NetSetup C:AddNetInterface C:Online C:Offline
+     Delete C:ShowNetStatus C:ShowNetServices
+     Delete C:ping C:netstat C:host C:nslookup C:arp C:fetch
+     Delete C:nc C:telnet C:NetTrace
+     Delete C:sntp C:traceroute C:tftp C:whois
+     Delete C:CheckNetConfig C:GetNetStatus C:NetShutdown
+     Delete C:AddNetRoute C:DeleteNetRoute C:ssh
+     Delete DEVS:NetInterfaces/eth0
+
+and take the ";BEGIN AmiNetXDuo" .. ";END AmiNetXDuo" block out of
+S:User-Startup.  If you had another stack before, rename
+LIBS:bsdsocket.library.old back over LIBS:bsdsocket.library.
+
+
+STATUS
+------
+
+It gets a DHCP lease, answers ARP, pings its gateway, resolves DNS, moves TCP
+in both directions and listens for incoming connections.  bsdsocket.library
+scores 141 of 142 on the bsdsocktest conformance suite.
+
+Everything above was measured on an emulated 68000, 68020 and 68030 under
+Kickstart 2.04 and 3.1.  It has not run on real hardware.
+
+
+LICENCE
+-------
+
+MIT.  ThreadX and NetX Duo are MIT as well (Microsoft / Eclipse ThreadX
+contributors) and are used unmodified.
+
+One file is not MIT.  DEVS:Internet/certificates -- present only in an archive
+that also carries tls.library -- is the Mozilla root certificate set, which is
+covered by the Mozilla Public License 2.0.  It is built, unmodified in
+substance, from the dated snapshot at third_party/cacert/cacert.pem in the
+source tree, itself a verbatim copy of https://curl.se/ca/cacert.pem; the
+converter is tools/mkcertstore.py.  MPL 2.0 is file-scoped, so nothing else
+here is affected, and third_party/cacert/README.md sets the reasoning out in
+full.
+
+No AmiTCP, AROSTCP, Miami or Roadshow code is used, copied or disassembled.
+Olaf Barthel's freely distributable Roadshow SDK headers and autodocs were
+used as an ABI reference only.

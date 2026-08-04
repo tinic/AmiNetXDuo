@@ -21,22 +21,22 @@ extern "C" {
 #endif /* __cplusplus */
 
 
-/* "bsdsocket.library" -- what AmiNetXDuo adds past the end of the NDK's SFD. */
+/* "bsdsocket.library", what AmiNetXDuo adds past the end of the NDK's SFD. */
 /* Not a fork of bsdsocket_lib.sfd: same base variable, separate file, so the */
 /* two generated header sets mix and neither has to be re-merged. */
 /* Bias 870 puts the first entry at -0x366.  Entry n is at -(870 + 6n). */
 /* src/bsdsocket/bsdsocket_vectors.c is the authority for the whole table; */
 /* docs/NDK-ADDENDUM.md has the reasoning.  Generated headers come from */
-/* tools/gen-developer.sh -- do not edit them. */
+/* tools/gen-developer.sh, do not edit them. */
 /* The stack's own status and control, from bsdsocket.library revision 2.  What */
 /* a third-party netstat or ifconfig needs: ShowNetStatus, netstat and arp are */
-/* built on nothing else.  Published means frozen -- NetStatusHeader and every */
+/* built on nothing else.  Published means frozen, NetStatusHeader and every */
 /* NETCTRL_* request structure in netstatus.h are part of the ABI from here on, */
 /* and a caller checks lib_Revision against AMI_NETSTATUS_MIN_REVISION first. */
 LONG NetStackQuery(ULONG magic, ULONG what, APTR buffer, ULONG size);
 LONG NetStackControl(ULONG magic, ULONG op, APTR arg, ULONG size);
 
-/* RFC 3493 section 4 -- interface identification.  bsdsocket.library revision */
+/* RFC 3493 section 4, interface identification.  bsdsocket.library revision */
 /* 3 and up.  These four LVOs are fixed forever. */
 ULONG if_nametoindex(const char * ifname);
 char * if_indextoname(ULONG ifindex, char * ifname);
