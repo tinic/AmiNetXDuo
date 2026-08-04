@@ -174,7 +174,7 @@ block() {
         inb                   { print }
     ' "$REPORT"
 }
-have() { block "$1" | grep -qiF, "$2"; }
+have() { block "$1" | grep -qiF -- "$2"; }
 want() { if have "$1" "$2"; then ok "$3"; else bad "$3"; fi; }
 
 # Hops that answered, one address per line, from a traceroute block.  A hop

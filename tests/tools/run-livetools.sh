@@ -251,9 +251,9 @@ fi
 # nothing.
 while IFS= read -r phrase; do
     [ -n "$phrase" ] || continue
-    if grep -qiF, "$phrase" "$REPORT"; then
+    if grep -qiF -- "$phrase" "$REPORT"; then
         fail "a command printed \"$phrase\" while the network was up"
-        grep -niF, "$phrase" "$REPORT" | sed 's/^/       /' >&2
+        grep -niF -- "$phrase" "$REPORT" | sed 's/^/       /' >&2
     else
         pass "nothing printed \"$phrase\""
     fi

@@ -30,7 +30,7 @@ fi
 
 check_pair() {
     local what="$1" got="$2" want="$3"
-    grep -q, "$(basename "$got")" "$REPORT" || return 0
+    grep -q -- "$(basename "$got")" "$REPORT" || return 0
     NCHECK=$((NCHECK + 1))
     if [ ! -f "$got" ]; then
         printf '  %-28s MISSING\n' "$what"; FAIL=1; return

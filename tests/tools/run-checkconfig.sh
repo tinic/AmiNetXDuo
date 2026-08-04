@@ -154,7 +154,7 @@ rc_of() {
 
 expect() {
     local what="$1"; shift
-    if grep -qiF, "$*" "$REPORT"; then
+    if grep -qiF -- "$*" "$REPORT"; then
         pass "$what"
     else
         fail "$what, nothing printed \"$*\""
@@ -163,9 +163,9 @@ expect() {
 
 reject() {
     local what="$1"; shift
-    if grep -qiF, "$*" "$REPORT"; then
+    if grep -qiF -- "$*" "$REPORT"; then
         fail "$what, \"$*\" was printed and should not have been"
-        grep -niF, "$*" "$REPORT" | sed 's/^/       /' >&2
+        grep -niF -- "$*" "$REPORT" | sed 's/^/       /' >&2
     else
         pass "$what"
     fi

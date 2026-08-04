@@ -24,7 +24,7 @@
 
 set -eu
 
-ROOT=${1:-$(CDPATH= cd, "$(dirname, "$0")/.." && pwd)}
+ROOT=${1:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}
 
 # vendored path : sha256 it was reconciled at : what shadows it
 MANIFEST='

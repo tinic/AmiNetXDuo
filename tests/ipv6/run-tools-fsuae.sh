@@ -298,8 +298,8 @@ code() {
     ' "$REPORT"
 }
 
-have()    { block "$1" | grep -qiF, "$2"; }
-have_re() { block "$1" | grep -qE , "$2"; }
+have()    { block "$1" | grep -qiF -- "$2"; }
+have_re() { block "$1" | grep -qE -- "$2"; }
 
 # want CASE PHRASE WHY / deny CASE PHRASE WHY, and the _soon pair for the
 # work that is not in yet.

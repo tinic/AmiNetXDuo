@@ -15,7 +15,7 @@ WHY THIS EXISTS
     So the only way to find out whether a multicast datagram from the guest
     reaches the host's real network is to sit on the host's real network and
     wait.  That is all this is: a socket bound to UDP 5353, joined to
-    224.0.0.251 on every interface it can find, writing down what arrives.
+    224.0.0.251 on every interface it can find -- writing down what arrives.
 
     A NEGATIVE RESULT IS THE POINT.  If nothing arrives, that is the measured
     answer to "does SLIRP pass multicast", and it is worth just as much as a
