@@ -68,6 +68,17 @@ The second class needs `-m32`, which puts these in the `host32` tier rather
 than `host`. `-m32` works on the Linux build host; the arm64 Mac cannot do it
 at all.
 
+**The Amiga `struct timeval` is the single blocking dependency.** It is
+`{ULONG tv_secs; ULONG tv_micro;}` and POSIX's is `{time_t tv_sec;
+suseconds_t tv_usec;}`: same tag, different members, different types. glibc
+brings its own in through `<sys/select.h>`, `<netinet/in.h>` needs that, and
+`aminetxduo/in6.h` needs `<netinet/in.h>` to see its own guards. Reached from
+three directions on 2026-08-04 and it is the same wall each time: `options.c`,
+`select.c` and `tcp_handler.c` read `tv_secs` directly, and the NDK's own
+`libraries/bsdsocket.h` has a `struct timeval` member (`lhm_Date`), so even
+pulling that one header in through `#include_next` with `-idirafter` fails on
+it. Anything that clears this clears most of the twenty-three.
+
 **Using the NDK's own headers instead of the shim was tried and is worse**:
 `-I $TOOLCHAIN/m68k-amigaos/ndk-include` with `__asm`, `__stdargs`, `__saveds`
 and `__regargs` neutered brings `bsdsocket_internal.h` to one error, but zero
