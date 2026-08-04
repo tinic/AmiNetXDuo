@@ -108,9 +108,18 @@ HOST_TEST_TARGETS=(test_config test_usergroup test_mbuf test_bpf test_httppath t
                    test_tcp_retries test_bcast_loopback test_tcp_source_connect test_tcp_rtt
                    test_dns_retry test_dns_status
                    test_sockopt_numbers test_sana2_copy test_ipv6_ra test_ipv6_ptb
-                   test_httpframe test_tls_x509 test_ipv6_frag test_inet
+                   test_httpframe test_tls_x509 test_ipv6_frag
                    fuzz_config fuzz_bpf fuzz_dns fuzz_usergroup
                    fuzz_dhcp fuzz_tls_record fuzz_tls_x509 fuzz_httpframe)
+
+# test_inet exists only where tests/bsdsocket/CMakeLists.txt defines it, which
+# is x86_64: ThreadX's linux tx_port.h types LONG as int there and as long
+# everywhere else, and the shim cannot agree with both.  Asked for
+# unconditionally, make answers "No rule to make target" on the arm64 runner
+# and the whole host stage fails.
+case "$(uname -m)" in
+    x86_64|amd64) HOST_TEST_TARGETS+=(test_inet) ;;
+esac
 
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against
 # Kickstart 3.1, identical check counts on both.  Deliberately NOT here:
