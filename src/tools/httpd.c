@@ -178,6 +178,16 @@ enum
    the text between them, both bounded, and no tree.  PROPPATCH names the
    properties it wants and LOCK names an owner; nothing here needs more. */
 #define HTTPD_PROPS_MAX        8    /* properties reported on in one 207    */
+
+/*
+ * What a PROPFIND body asked for, RFC 4918 9.1.  The body used to be read and
+ * thrown away, so every request was answered as <allprop/>: a client asking
+ * for two properties got all of them, one asking for <propname/> got values it
+ * had said it did not want, and a property we do not have drew no 404 at all.
+ */
+#define HTTPD_PF_ALLPROP       0
+#define HTTPD_PF_PROPNAME      1
+#define HTTPD_PF_NAMED         2
 #define HTTPD_QNAME_MAX       32    /* "Z:Win32LastModifiedTime" is 23      */
 #define HTTPD_NS_MAX           3    /* xmlns: bindings carried to the reply */
 #define HTTPD_NSURI_MAX       48
@@ -380,6 +390,7 @@ struct HttpConn
     UBYTE   in_owner;               /* inside <owner>: text is the owner   */
     UBYTE   props;
     UBYTE   props_cut;              /* more named than there was room for  */
+    UBYTE   pf_mode;
     UBYTE   prop_ok[HTTPD_PROPS_MAX];
     char    prop_name[HTTPD_PROPS_MAX][HTTPD_QNAME_MAX];
     UBYTE   nsdecls;
@@ -1169,6 +1180,7 @@ static VOID httpd_reset(HttpConn *c)
     c->put_err     = 0;
 
     c->xml_state  = XML_TEXT;
+    c->pf_mode    = (UBYTE)HTTPD_PF_ALLPROP;
     c->xml_name_n = 0;
     c->xml_close  = 0;
     c->xml_text_n = 0;
@@ -2501,6 +2513,40 @@ static BOOL httpd_lock_allows_tree(HttpConn *c, const char *path)
 }
 
 /*
+ * The lock on the drawer this address is IN.
+ *
+ * RFC 4918 7.1: a lock on a collection, at any depth including 0, locks that
+ * collection's internal member namespace, so adding a member or taking one
+ * away needs the token even when the member itself is not locked.  Changing an
+ * existing member's content does not, which is why this is asked only by the
+ * methods that create or remove a name.
+ *
+ * httpd_lock_on() answers about the address itself and about anything under a
+ * deep lock; neither of those covers a Depth: 0 lock one level up, and without
+ * this a client that locked a shared drawer to add a file to it watched
+ * somebody else add one anyway.
+ */
+static BOOL httpd_lock_allows_parent(HttpConn *c, const char *path)
+{
+    char parent[HTTP_PATH_MAX];
+
+    hs_copy(parent, (ULONG)sizeof(parent), path);
+    http_path_up(parent);
+
+    /* Unchanged means there is nothing above it: a device reference is the
+       top and has no drawer to be a member of. */
+    if (hs_equal(parent, path) || parent[0] == '\0')
+        return TRUE;
+
+    if (httpd_holds(c, httpd_lock_on(parent)))
+        return TRUE;
+
+    httpd_locked(c);
+
+    return FALSE;
+}
+
+/*
  * "opaquelocktoken:" and 32 hex digits.
  *
  * WHAT A TOKEN IS AND IS NOT HERE
@@ -2701,6 +2747,19 @@ static VOID httpd_xml_tag(HttpConn *c, BOOL closing, BOOL selfclose)
         if (hs_equal(local, "prop"))
         {
             c->in_prop = 1;
+
+            /* PROPPATCH's <prop> is a set of values and PROPFIND's is a list
+               of names; only the second changes what the 207 reports on. */
+            if (c->method == HTTPD_M_PROPFIND)
+                c->pf_mode = (UBYTE)HTTPD_PF_NAMED;
+        }
+        else if (hs_equal(local, "allprop"))
+        {
+            c->pf_mode = (UBYTE)HTTPD_PF_ALLPROP;
+        }
+        else if (hs_equal(local, "propname"))
+        {
+            c->pf_mode = (UBYTE)HTTPD_PF_PROPNAME;
         }
         else if (hs_equal(local, "owner"))
         {
@@ -2928,11 +2987,40 @@ static const char *httpd_href(const HttpPath *p, const char *child, BOOL dir)
  * up: a client that has taken a lock reads lockdiscovery to check it is still
  * held, and one that has not reads supportedlock to decide whether to ask.
  */
-static ULONG httpd_propfind_entry(const char *href, const char *name,
+/*
+ * Whether this property belongs in the 207, and a note that it was asked for.
+ *
+ * <allprop/> and an empty body take everything.  <propname/> takes everything
+ * too, because the names are the answer; the emitter leaves the values out.
+ * A named list takes what it named, and marking each one here is what lets the
+ * caller put the rest in a 404 propstat, which RFC 4918 9.1.1 requires and
+ * which a client uses to learn what this server does not keep.
+ */
+static BOOL httpd_pf_want(HttpConn *c, const char *name)
+{
+    UBYTE i;
+
+    if (c->pf_mode != (UBYTE)HTTPD_PF_NAMED)
+        return TRUE;
+
+    for (i = 0; i < c->props; i++)
+    {
+        if (hs_equal(httpd_local(c->prop_name[i]), name))
+        {
+            c->prop_ok[i] = 1;
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+static ULONG httpd_propfind_entry(HttpConn *c, const char *href, const char *name,
                                   const char *path,
                                   BOOL is_dir, ULONG size,
                                   const struct DateStamp *date)
 {
+    BOOL names_only = (c->pf_mode == (UBYTE)HTTPD_PF_PROPNAME) ? TRUE : FALSE;
     const HttpLock *l = (path != NULL) ? httpd_lock_on(path) : NULL;
     char  modified[40];
     char  created[32];
@@ -2949,80 +3037,140 @@ static ULONG httpd_propfind_entry(const char *href, const char *name,
                    "<D:response><D:href>");
     ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, href);
     ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                         "</D:href><D:propstat><D:prop>"
-                         "<D:displayname>");
-    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                         httpd_text);
-    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                         "</D:displayname><D:creationdate>");
-    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, created);
-    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                         "</D:creationdate><D:getlastmodified>");
-    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, modified);
-    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                         "</D:getlastmodified><D:resourcetype>");
+                         "</D:href><D:propstat><D:prop>");
 
-    if (is_dir)
-        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                             "<D:collection/>");
+    if (httpd_pf_want(c, "displayname"))
+    {
+        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "<D:displayname>");
+        if (!names_only)
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, httpd_text);
+        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "</D:displayname>");
+    }
 
-    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                         "</D:resourcetype>");
+    if (httpd_pf_want(c, "creationdate"))
+    {
+        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "<D:creationdate>");
+        if (!names_only)
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, created);
+        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "</D:creationdate>");
+    }
+
+    if (httpd_pf_want(c, "getlastmodified"))
+    {
+        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "<D:getlastmodified>");
+        if (!names_only)
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, modified);
+        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "</D:getlastmodified>");
+    }
+
+    if (httpd_pf_want(c, "resourcetype"))
+    {
+        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "<D:resourcetype>");
+        if (is_dir && !names_only)
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "<D:collection/>");
+        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "</D:resourcetype>");
+    }
 
     if (!is_dir)
     {
         char etag[HTTPD_ETAG_MAX];
 
-        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                             "<D:getcontentlength>");
-        ok = ok && hs_append_num(httpd_scratch, sizeof(httpd_scratch), &used,
-                                 size);
-        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                             "</D:getcontentlength><D:getcontenttype>");
-        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                             http_content_type(name));
-        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                             "</D:getcontenttype>");
+        if (httpd_pf_want(c, "getcontentlength"))
+        {
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "<D:getcontentlength>");
+            if (!names_only)
+                ok = ok && hs_append_num(httpd_scratch, sizeof(httpd_scratch), &used, size);
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "</D:getcontentlength>");
+        }
+
+        if (httpd_pf_want(c, "getcontenttype"))
+        {
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "<D:getcontenttype>");
+            if (!names_only)
+                ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, http_content_type(name));
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "</D:getcontenttype>");
+        }
 
         /* The same tag GET answers with, so a client can condition a write on
            what it last read without fetching the file again. */
         httpd_etag(size, date, etag, sizeof(etag));
 
-        if (etag[0] != '\0')
+        if (etag[0] != '\0' && httpd_pf_want(c, "getetag"))
         {
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "<D:getetag>");
+            if (!names_only)
+                ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, etag);
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "</D:getetag>");
+        }
+    }
+
+    if (httpd_pf_want(c, "supportedlock"))
+    {
+        if (names_only)
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "<D:supportedlock/>");
+        else
             ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                                 "<D:getetag>");
-            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                                 etag);
-            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                                 "</D:getetag>");
+                                 "<D:supportedlock><D:lockentry>"
+                                 "<D:lockscope><D:exclusive/></D:lockscope>"
+                                 "<D:locktype><D:write/></D:locktype>"
+                                 "</D:lockentry></D:supportedlock>");
+    }
+
+    if (httpd_pf_want(c, "lockdiscovery"))
+    {
+        if (l != NULL && !names_only)
+        {
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "<D:lockdiscovery>");
+            ok = ok && httpd_activelock(l, httpd_scratch,
+                                        sizeof(httpd_scratch), &used);
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "</D:lockdiscovery>");
+        }
+        else
+        {
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "<D:lockdiscovery/>");
         }
     }
 
     ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                         "<D:supportedlock><D:lockentry>"
-                         "<D:lockscope><D:exclusive/></D:lockscope>"
-                         "<D:locktype><D:write/></D:locktype>"
-                         "</D:lockentry></D:supportedlock>");
-
-    if (l != NULL)
-    {
-        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                             "<D:lockdiscovery>");
-        ok = ok && httpd_activelock(l, httpd_scratch, sizeof(httpd_scratch),
-                                    &used);
-        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                             "</D:lockdiscovery>");
-    }
-    else
-    {
-        ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                             "<D:lockdiscovery/>");
-    }
-
-    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
                          "</D:prop><D:status>HTTP/1.1 200 OK</D:status>"
-                         "</D:propstat></D:response>\n");
+                         "</D:propstat>");
+
+    /*
+     * RFC 4918 9.1.1: a named property this server does not keep is reported
+     * in its own propstat with 404, not left out.  Leaving it out tells the
+     * client the property is absent from the resource; saying 404 tells it the
+     * property is absent from the server, which is the difference between
+     * "this file has no author" and "ask somebody else".
+     */
+    if (c->pf_mode == (UBYTE)HTTPD_PF_NAMED)
+    {
+        UBYTE i;
+        BOOL  any = FALSE;
+
+        for (i = 0; i < c->props; i++)
+        {
+            if (c->prop_ok[i])
+                continue;
+
+            if (!any)
+            {
+                ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "<D:propstat><D:prop>");
+                any = TRUE;
+            }
+
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "<");
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, c->prop_name[i]);
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "/>");
+        }
+
+        if (any)
+            ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                                 "</D:prop>"
+                                 "<D:status>HTTP/1.1 404 Not Found</D:status>"
+                                 "</D:propstat>");
+    }
+
+    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "</D:response>\n");
 
     return ok ? used : 0UL;
 }
@@ -3189,7 +3337,7 @@ static BOOL httpd_produce(HttpConn *c)
                             const char *name = (c->path.name[0] != '\0')
                                                    ? c->path.name : "/";
 
-                            len = httpd_propfind_entry(
+                            len = httpd_propfind_entry(c,
                                       httpd_href(&c->path, NULL, is_dir),
                                       name, c->path.path, is_dir, size,
                                       &date);
@@ -3232,7 +3380,7 @@ static BOOL httpd_produce(HttpConn *c)
                                                 sizeof(httpd_probe), name))
                                 full = httpd_probe;
 
-                            len = httpd_propfind_entry(
+                            len = httpd_propfind_entry(c,
                                       httpd_href(&c->path, name, is_dir),
                                       name, full, is_dir,
                                       (ULONG)c->fib->fib_Size,
@@ -3626,6 +3774,15 @@ static BOOL httpd_begin_put(HttpConn *c)
         return FALSE;
     }
 
+    /*
+     * A PUT that creates the file adds a name to the drawer above and needs
+     * that drawer's token; a PUT over a file that is already there does not,
+     * because it changes content rather than membership.  RFC 4918 7.1.
+     */
+    if (httpd_kind(c->path.path) < 0 &&
+        !httpd_lock_allows_parent(c, c->path.path))
+        return FALSE;
+
     if (!httpd_parent(c->path.path, c->put_temp, sizeof(c->put_temp)) ||
         httpd_kind(c->put_temp) <= 0)
     {
@@ -3803,6 +3960,11 @@ static VOID httpd_do_delete(HttpConn *c)
     if (!httpd_lock_allows_tree(c, c->path.path))
         return;
 
+    /* And it takes a name out of the drawer above, which a lock on that
+       drawer protects however deep it is, RFC 4918 7.1. */
+    if (!httpd_lock_allows_parent(c, c->path.path))
+        return;
+
     if (httpd_kind(c->path.path) < 0)
     {
         httpd_error(c, 404, "there is no such file to remove");
@@ -3825,6 +3987,11 @@ static VOID httpd_do_mkcol(HttpConn *c)
     BPTR made;
 
     if (!httpd_may_write(c))
+        return;
+
+    /* A new name in the drawer above, which a lock on that drawer protects
+       whatever its depth, RFC 4918 7.1. */
+    if (!httpd_lock_allows_parent(c, c->path.path))
         return;
 
     /* RFC 4918 9.3: a body the server does not understand is a 415, and this
@@ -4039,6 +4206,10 @@ static VOID httpd_copy_or_move(HttpConn *c, BOOL moving)
     if (moving && !httpd_lock_allows_tree(c, c->path.path))
         return;
 
+    /* A MOVE also takes the source's name out of the drawer above it. */
+    if (moving && !httpd_lock_allows_parent(c, c->path.path))
+        return;
+
     if (httpd_kind(c->path.path) < 0)
     {
         httpd_error(c, 404, "there is nothing there to copy");
@@ -4063,6 +4234,12 @@ static VOID httpd_copy_or_move(HttpConn *c, BOOL moving)
     }
 
     dst_kind = httpd_kind(c->dest.path);
+
+    /* The destination is a name in ITS drawer, so that drawer's lock has to
+       allow it whether or not the destination itself is locked.  Asked after
+       the destination resolves, because the drawer is not known before. */
+    if (dst_kind < 0 && !httpd_lock_allows_parent(c, c->dest.path))
+        return;
 
     /*
      * The check above catches a name the filesystem would shorten onto
