@@ -120,7 +120,6 @@ if(AMINETXDUO_BSDSOCKET_LINK)
     set_target_properties(bsdsocket_library PROPERTIES
         OUTPUT_NAME "bsdsocket.library")
 
-    aminetxduo_check_pcrel(bsdsocket_library)
     target_include_directories(bsdsocket_library PRIVATE
         ${AMINETXDUO_CORE_INCLUDES} "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(bsdsocket_library PRIVATE

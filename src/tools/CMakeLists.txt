@@ -141,8 +141,6 @@ function(aminetxduo_add_tool target output)
                 -P "${CMAKE_SOURCE_DIR}/cmake/check-version-tag.cmake"
         VERBATIM)
 
-    aminetxduo_check_pcrel(${target})
-
     if(AMIGA_SIZE)
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:${target}>"
