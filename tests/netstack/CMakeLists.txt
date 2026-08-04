@@ -139,6 +139,8 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_enable.c"
         "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_socket_create.c"
         "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_socket_bind.c"
+    # The DNS client checks that an answer came from the server it asked.
+    "${AMINETXDUO_NETXDUO}/common/src/nxd_udp_source_extract.c"
         "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_socket_send.c"
         "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_socket_receive.c")
 
