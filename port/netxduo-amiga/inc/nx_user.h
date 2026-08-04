@@ -205,6 +205,29 @@
 #endif
 
 /*
+ * R2 for a connection request, RFC 1122 4.2.3.5 MUST-23: at least 3 minutes.
+ * The six above give 127 s, which satisfies the same section's R2 for data --
+ * "at least 100 seconds" -- and not MUST-23.
+ *
+ * Seven with the shift capped at 6 gives 1 2 4 8 16 32 64 64 seconds of waiting
+ * -- seven retransmissions, the last at 127 s -- and abandons at 191 s.  The cap
+ * is what keeps this off 255: without it the seventh interval alone is 128
+ * seconds.  Data keeps the six and its 127 s, because a transfer that has
+ * stopped should report sooner than a connection that has not started.
+ *
+ * WHAT A USER SEES.  connect() to a host that is not answering now blocks for
+ * 191 s rather than 127.  It is interruptible throughout -- bsd_wait_sliced()
+ * samples the break signal every 200 ms -- and SO_SNDTIMEO bounds it for a
+ * program that would rather not wait.  Linux's tcp_syn_retries default is 6,
+ * which is the 127 s this replaces; FreeBSD gives up sooner still.
+ *
+ * -DNX_TCP_SYN_MAXIMUM_RETRIES=6 puts it back where it was.
+ */
+#ifndef NX_TCP_SYN_MAXIMUM_RETRIES
+#define NX_TCP_SYN_MAXIMUM_RETRIES              7
+#endif
+
+/*
  * The round-trip time estimator of RFC 6298 2 and 3, which the ladder above
  * previously had to do without: nx_tcp_socket_timeout_rate was assigned
  * _nx_tcp_transmit_timer_rate once at socket create and never moved again, so
